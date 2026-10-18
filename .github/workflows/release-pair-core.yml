@@ -1,0 +1,22 @@
+name: Exact CLI runtime pair core
+on:
+  pull_request:
+    paths:
+      - 'agent-network/package*.json'
+      - 'agent-node/package*.json'
+      - 'agent-network/src/opencode-agent-node-pair*'
+      - 'tests/test906-provider-create/Dockerfile.pair'
+      - '.github/workflows/release-pair-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build exact-source TEST-ONLY metadata fixture
+        run: sg docker -c 'docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f tests/test906-provider-create/Dockerfile.pair -t release-pair-core .'
+      - name: Exact pair and package lock consistency
+        run: sg docker -c 'docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" release-pair-core'

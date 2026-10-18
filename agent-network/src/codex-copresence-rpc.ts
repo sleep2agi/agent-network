@@ -3,7 +3,7 @@ import { resumeAndVerifyCodexThread, type CodexRecoveryVerification } from "./co
 import { formatCopresenceRolloutSize, resolveCopresenceMaxPayloadBytes } from "./codex-copresence-resume-timeout";
 
 export const SAFE_CODEX_THREAD_ID = /^[A-Za-z0-9_-]+$/;
-async function defaultWebSocketCtor(maxPayload: number): Promise<any> {
+export async function defaultWebSocketCtor(maxPayload: number): Promise<any> {
   // Node's built-in WebSocket inherits undici's fixed receive ceiling. Codex
   // 0.133 cannot suppress turns on thread/resume, so a legitimate persisted
   // thread can exceed that ceiling by hundreds of MiB. `ws` lets this

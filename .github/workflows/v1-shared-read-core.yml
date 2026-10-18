@@ -1,0 +1,36 @@
+name: V1 shared read core
+on:
+  pull_request:
+    paths:
+      - 'agent-node/src/runtime/opencode-copresence/http.ts'
+      - 'agent-node/src/runtime/opencode-copresence/runtime.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-shared-read*'
+      - 'agent-node/src/runtime/opencode-versions.ts'
+      - 'tests/test1207-v1-shared-read/**'
+      - 'tests/test1194-v1-shared-feasibility/package-integrity.json'
+      - '.github/workflows/v1-shared-read-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shared-read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.18.1', '1.18.34']
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build pinned native and exact source fixture
+        run: docker build --build-arg OPENCODE_VERSION=${{ matrix.version }} --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1207-v1-shared-read/Dockerfile -t v1-shared-read-test .
+      - name: Directory binding rejection, native foreign-read witness and owned regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --init --network none -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} v1-shared-read-test 2>&1 | tee report-test1207-${{ matrix.version }}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-v1-shared-read-${{ matrix.version }}-${{ github.sha }}
+          path: report-test1207-${{ matrix.version }}.txt

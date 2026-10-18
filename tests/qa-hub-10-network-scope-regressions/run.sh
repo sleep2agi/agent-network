@@ -4,7 +4,8 @@ set -euo pipefail
 # 绑了还要看得见（#1092）：报告里没有这一行，就没法把这次运行钉到某个提交上。
 printf 'source_commit=%s\n' "${SOURCE_COMMIT:-unknown}"
 
-export HOME=/tmp/anethome
+scope_state_dir=/tmp/qa-hub10-state
+export COMMHUB_DB="$scope_state_dir/hub.db"
 HUB_PORT=9210
 HUB_BASE="http://127.0.0.1:$HUB_PORT"
 
@@ -80,7 +81,8 @@ assert_no_log() {
 }
 
 echo "[0] start local hub from repository source"
-safe_rm_rf "$HOME/.commhub" "$HOME/.anet/server"
+safe_rm_rf "$scope_state_dir"
+mkdir -p "$scope_state_dir"
 cd /app/server
 HOST=127.0.0.1 PORT="$HUB_PORT" bun run src/index.ts >/tmp/hub.log 2>&1 &
 HUB_PID=$!
@@ -121,7 +123,14 @@ echo "$RS_B" | jq -e '.ok == true' >/dev/null || { echo "FAIL: report_status B: 
 # 所以断言跟着改成新的正确行为(参照 #804 / test682:产品有意改掉的东西,
 # 该改的是断言而不是把行为改回去)。
 echo "[3] single-network utok send_task auto-resolves the network (#517)"
-NO_NET_ARGS=$(jq -nc '{alias:"shared-agent",task:"missing-network-id",from_session:"alice-dashboard"}')
+BEFORE=$(curl -fsS -H "Authorization: Bearer $UTOK_A" "$HUB_BASE/api/tasks?network_id=$NET_A" | jq '.tasks|length')
+SPOOF_ARGS=$(jq -nc '{alias:"shared-agent",task:"human-spoof-must-not-write",from_session:"alice-dashboard"}')
+SPOOF=$(mcp_call "$UTOK_A" "send_task" "$SPOOF_ARGS")
+echo "$SPOOF" | jq -e '.ok == false and .error == "from_session_identity_mismatch"' >/dev/null || { echo "FAIL: forged human sender accepted"; exit 1; }
+AFTER=$(curl -fsS -H "Authorization: Bearer $UTOK_A" "$HUB_BASE/api/tasks?network_id=$NET_A" | jq '.tasks|length')
+[[ "$BEFORE" == "$AFTER" ]] || { echo "FAIL: forged human sender wrote a task"; exit 1; }
+echo "PASS forged human sender refused without writes"
+NO_NET_ARGS=$(jq -nc '{alias:"shared-agent",task:"missing-network-id"}')
 NO_NET=$(mcp_call "$UTOK_A" "send_task" "$NO_NET_ARGS")
 echo "$NO_NET" | jq -e '.ok == true and (.message_id | type == "string")' >/dev/null || {
   echo "FAIL: single-network utok should auto-resolve and deliver, got: $NO_NET"
@@ -132,6 +141,12 @@ if echo "$NO_NET" | jq -r '.message // ""' | grep -q "Viewer role"; then
   echo "$NO_NET"
   exit 1
 fi
+
+SENT_ID=$(echo "$NO_NET" | jq -r '.task_id // .message_id')
+DETAIL=$(mcp_call "$UTOK_A" "get_task" "$(jq -nc --arg id "$SENT_ID" '{task_id:$id}')")
+A_NAME=$(echo "$A_RESP" | jq -r '.user.username')
+echo "$DETAIL" | jq -e --arg name "$A_NAME" '.ok == true and .task.from_name == $name' >/dev/null || { echo "FAIL: sender was not canonical user"; exit 1; }
+echo "PASS authenticated canonical user sender"
 
 echo "[4] connect two SSE subscribers for same alias in different networks"
 : >/tmp/sse-a.log
@@ -152,6 +167,14 @@ echo "[5] task push in network A must not leak to network B"
 # 用 network token 发送时,from_session 必须等于该 token 绑定的 alias。
 # 所以发送方也要有属于自己的 node token —— 这样断言里的 "from":"alpha-sender" 原样成立。
 SENDER_TOK_A=$(node_token "$UTOK_A" "$NET_A" "alpha-sender")
+BEFORE=$(curl -fsS -H "Authorization: Bearer $UTOK_A" "$HUB_BASE/api/tasks?network_id=$NET_A" | jq '.tasks|length')
+NODE_SPOOF=$(mcp_call "$SENDER_TOK_A" "send_task" '{"alias":"shared-agent","task":"node-spoof-must-not-write","from_session":"foreign-sender"}')
+echo "$NODE_SPOOF" | jq -e '.ok == false and .error == "from_session_identity_mismatch"' >/dev/null || { echo "FAIL: forged node sender accepted"; exit 1; }
+AFTER=$(curl -fsS -H "Authorization: Bearer $UTOK_A" "$HUB_BASE/api/tasks?network_id=$NET_A" | jq '.tasks|length')
+[[ "$BEFORE" == "$AFTER" ]] || { echo "FAIL: forged node sender wrote a task"; exit 1; }
+assert_no_log '"type":"new_task"' /tmp/sse-a.log "forged node sender pushed to A"
+assert_no_log '"type":"new_task"' /tmp/sse-b.log "forged node sender pushed to B"
+echo "PASS forged node sender refused without task/SSE writes"
 TASK_A=$(jq -nc '{alias:"shared-agent",task:"alpha-only",from_session:"alpha-sender"}')
 SEND_A=$(mcp_call "$SENDER_TOK_A" "send_task" "$TASK_A")
 echo "$SEND_A" | jq -e '.ok == true' >/dev/null || { echo "FAIL: send_task A: $SEND_A"; exit 1; }

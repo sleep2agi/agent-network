@@ -14,7 +14,8 @@
 // stays flat. `export {}` keeps this a module: as a global script the `const`
 // would declare `Bun` for every file and hide their real TS2868 errors.
 export {};
-import { appendFileSync } from "fs";
+import { appendFileSync, existsSync, readFileSync } from "fs";
+import { join } from "path";
 const Bun: any = (globalThis as any).Bun;
 
 const args = process.argv.slice(2);
@@ -28,7 +29,7 @@ const password = process.env.OPENCODE_SERVER_PASSWORD ?? process.env.OPENCODE_PA
 const expectedAuth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
 
 type Entry = Record<string, any>;
-const sessions = new Map<string, { entries: Entry[]; inbox: Entry[]; running: boolean; steer: string[] }>();
+const sessions = new Map<string, { entries: Entry[]; inbox: Entry[]; running: boolean; steer: string[]; location?: unknown; model?: any }>();
 let counter = 0;
 const id = (prefix: string) => `${prefix}_${Date.now().toString(16)}${(++counter).toString().padStart(6, "0")}Fk`;
 
@@ -89,15 +90,39 @@ Bun.serve({
     const url = new URL(request.url);
     const path = url.pathname;
     if (process.env.TEST832_TRACE) appendFileSync(process.env.TEST832_TRACE, `${process.pid} ${path}\n`);
-    if (path === "/api/info") return json({ version: "2.0.22", pid: process.pid, urls: [`http://${hostname}:${port}`] });
-    if (path === "/api/mcp") return json({ data: [{ name: "commhub", status: { status: "connected" } }] });
+    if (path === "/api/info") return json({ version: process.env.TEST_INFO_VERSION ?? "2.0.22", pid: process.pid, urls: [`http://${hostname}:${port}`] });
+    const directory = request.headers.get("x-opencode-directory");
+    const projectConfig = directory && existsSync(join(directory, "opencode.json"))
+      ? JSON.parse(readFileSync(join(directory, "opencode.json"), "utf8")) : {};
+    if (path === "/api/config") return json(directory
+      ? [{ type: "document", path: join(directory, "opencode.json"), info: projectConfig }] : []);
+    if (path === "/api/mcp") return json({ data: [{ name: "commhub", status: { status: "connected" } }],
+      ...(directory ? { location: { directory } } : {}) });
     if (path === "/api/rpc/anet.commhub-readiness/ready") {
+      if (process.env.TEST_REQUIRE_PROJECT_PLUGIN === "1"
+        && !projectConfig.plugins?.some((entry: any) => existsSync(join(entry.package, "index.js")))) {
+        return json({ _tag: "RpcError", type: "rpc.unavailable" }, 400);
+      }
       return json({ output: { ready: process.env.TEST832_MISSING !== "1" } });
     }
     if (path === "/api/session" && request.method === "POST") {
+      const body: any = await request.json();
       const sid = `ses_${Date.now().toString(16)}Fake${++counter}`;
-      sessions.set(sid, { entries: [], inbox: [], running: false, steer: [] });
-      return json({ data: { id: sid } });
+      sessions.set(sid, { entries: [], inbox: [], running: false, steer: [], location: body.location, model: body.model });
+      return json({ data: { id: sid, location: process.env.TEST_WRONG_LOCATION === "1" ? { directory: "/wrong-workspace" } : body.location, model: body.model } });
+    }
+    const sessionLookup = /^\/api\/session\/(ses_[A-Za-z0-9]+)$/.exec(path);
+    if (sessionLookup && request.method === "GET") {
+      const existing = sessions.get(sessionLookup[1]);
+      return existing ? json({ data: { id: sessionLookup[1], location: existing.location, model: existing.model } }) : json({ error: "session not found" }, 404);
+    }
+    const modelSwitch = /^\/api\/session\/(ses_[A-Za-z0-9]+)\/model$/.exec(path);
+    if (modelSwitch && request.method === "POST") {
+      const existing = sessions.get(modelSwitch[1]);
+      if (!existing) return json({ error: "session not found" }, 404);
+      const body: any = await request.json();
+      existing.model = body.model;
+      return new Response(null, { status: 204 });
     }
     if (path === "/test/state") return json(Object.fromEntries(sessions));
     let m = /^\/api\/session\/(ses_[A-Za-z0-9]+)\/(prompt|message|inbox)(?:\/(msg_[A-Za-z0-9]+))?$/.exec(path)

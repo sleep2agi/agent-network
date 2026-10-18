@@ -241,6 +241,12 @@ describe("buildAnetArgs (§4.2.2 F2 — fully validated argv)", () => {
     expect(() => validateOpenCodeV2ProviderModel("claude-agent-sdk", undefined, { opencodeGeneration: "v2", opencodeUnsafeTools: true })).not.toThrow();
     expect(buildAnetArgs({ name: "x", runtime: "opencode-cli" })).toEqual(["node", "create", "x", "--runtime", "opencode-cli"]);
   });
+  test("OpenCode V2 can opt out of the host shared Server", () => {
+    const args = buildAnetArgs({ name: "v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } });
+    expect(args).toContain("--opencode-new-server");
+    expect(() => buildAnetArgs({ name: "v1", runtime: "opencode-cli", flags: { opencodeNewServer: true } })).toThrow();
+  });
   test("omitted model is allowed and does not emit --model", () => {
     const args = buildAnetArgs({
       name: "x", runtime: "codex-sdk",

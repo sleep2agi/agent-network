@@ -1,0 +1,59 @@
+name: OpenCode V2 shared candidate
+
+on:
+  pull_request:
+    paths:
+      - 'agent-node/**'
+      - 'agent-network/**'
+      - 'server/src/create-node-tool-schema.test.ts'
+      - 'server/src/create-node-validate*'
+      - 'server/src/tools.ts'
+      - 'tests/test543-opencode-v2-copresence/**'
+      - 'tests/Dockerfile'
+      - 'tests/test-all.sh'
+      - 'tests/lib/**'
+      - '.github/workflows/opencode-v2-shared-candidate.yml'
+  push:
+    branches:
+      - feat/opencode-v2-server-reuse
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shared-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated V2 fixture
+        run: docker build -f tests/test543-opencode-v2-copresence/Dockerfile -t anet-v2-shared-candidate .
+      - name: Run existing V2 copresence fixture
+        run: docker run --rm --network none anet-v2-shared-candidate
+      - name: Run shared Server unit and native registry checks
+        run: |
+          docker run --rm --network none anet-v2-shared-candidate \
+            bash -lc 'cd /agent-node-src && ANET_OPENCODE_V2_BIN="$(command -v opencode)" bun test \
+              src/runtime/opencode-shared-server-registry.test.ts \
+              src/runtime/opencode-copresence/shared-v2-mcp.test.ts \
+              src/runtime/opencode-copresence/v2-shared-native.test.ts'
+
+  full-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker E2E image
+        run: docker build -t anet-e2e -f tests/Dockerfile .
+      - name: Verify hard-gate contract
+        run: |
+          docker run --rm -e ROOT=/repo -v "$PWD:/repo:ro" anet-e2e \
+            bash /repo/tests/test292-e2e-hard-gate/run.sh
+      - name: Run full regression
+        run: |
+          bash tests/lib/run-piped-command.sh \
+            /tmp/e2e-output.log /tmp/e2e-exit-code \
+            docker run --rm anet-e2e /app/test-all.sh
+          bash tests/lib/e2e-hard-gate.sh \
+            /tmp/e2e-output.log "$(cat /tmp/e2e-exit-code)"

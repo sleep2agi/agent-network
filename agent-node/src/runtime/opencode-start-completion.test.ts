@@ -41,6 +41,41 @@ test("V2 waits for launcher completion, shares replay, and records real bridge n
   expect(f.acks.at(-1)).toMatchObject({ status: "started", child_pid: 4343 });
   expect(getChildrenSnapshot()[0].pid).toBe(4343);
 });
+test("shared V2 restart uses its host-registered client directory", async () => {
+  const f = fixture();
+  const childDir = join(root, "child");
+  const passwordFile = join(root, "password");
+  const clientBinDir = join(root, "v2-bin");
+  writeFileSync(passwordFile, "test-only", { mode: 0o600 });
+  mkdirSync(clientBinDir, { mode: 0o700 });
+  mkdirSync(join(root, ".anet"), { mode: 0o700 });
+  writeFileSync(join(root, ".anet", "opencode-shared-server.json"), JSON.stringify({
+    url: "http://127.0.0.1:4097", passwordFile, clientBinDir,
+  }), { mode: 0o600 });
+  const configPath = join(childDir, "config.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  config.opencodeSharedServerUrl = "http://127.0.0.1:4097";
+  config.opencodeSharedServerPasswordFile = passwordFile;
+  writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  let launchPath: string | undefined;
+  f.deps.spawnChild = (_bin: string, _args: string[], opts: any) => {
+    launchPath = opts.env.PATH;
+    return f.child;
+  };
+  try {
+    const run = handleStartDoorbell({ request_id: "str_shared_client" }, f.deps);
+    await tick();
+    f.child.emit("exit", 0, null);
+    await run;
+    expect(launchPath?.split(":")[0]).toBe(clientBinDir);
+    expect(f.acks.at(-1).status).toBe("started");
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME;
+    else process.env.HOME = oldHome;
+  }
+});
 test.each([[1, null], [null, "SIGTERM"]])("launcher exit %s / %s rejects without health success", async (code, signal) => {
   const f = fixture(); const run = handleStartDoorbell({ request_id: "str_failure" }, f.deps);
   await tick(); f.child.emit("exit", code, signal); await run;
@@ -113,4 +148,25 @@ test("real child delayed nonzero exit is never started", async () => {
   await handleStartDoorbell({ request_id: "str_real" }, f.deps);
   expect(f.acks.map(a => a.status)).toEqual(["starting", "start_failed"]);
   expect(f.acks.at(-1).error).toBe("opencode_launcher_exit:7");
+});
+
+for (const capable of [true,false]) test(`borrowed V1 uses completion gate; Hub capable=${capable}`,async () => {
+  const f=fixture();
+  writeFileSync(join(root,"child","config.json"),JSON.stringify({node_id:"node_child",node_name:"child",runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence",opencodeBorrowedV1:{schema:1}}),{mode:0o600});
+  const call=f.deps.callCommHub;
+  f.deps.callCommHub=async(tool:string,args:any)=>{const r=await call(tool,args);if(tool==="get_start_request")r.start_completion_capable=capable;return r;};
+  const run=handleStartDoorbell({request_id:`str_borrowed_${capable}`},f.deps);await tick();
+  if(capable){expect(f.acks.map(a=>a.status)).toEqual(["starting"]);f.child.emit("exit",0,null);}
+  await run;
+  expect(f.spawns()).toBe(capable?1:0);
+  expect(f.acks.at(-1).status).toBe(capable?"started":"start_failed");
+  if(capable)expect(f.acks.at(-1).child_pid).toBe(4343);
+  else expect(f.acks.at(-1).error).toBe("opencode_start_completion_unsupported");
+});
+
+test("invalid borrowed mode cannot fall back to spawn-only daemon success",async()=>{
+  const f=fixture();writeFileSync(join(root,"child","config.json"),JSON.stringify({node_id:"node_child",node_name:"child",runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"headless",opencodeBorrowedV1:{schema:1}}),{mode:0o600});
+  f.deps.inspectOpenCodeStartHealth=()=>({ok:false,reason:"borrowed V1 launch evidence unavailable or mismatched"});
+  const run=handleStartDoorbell({request_id:"str_borrowed_wrong_mode"},f.deps);await tick();expect(f.acks.map(a=>a.status)).toEqual(["starting"]);f.child.emit("exit",0,null);await run;
+  expect(f.acks.at(-1).status).toBe("start_failed");expect(getChildrenSnapshot()).toEqual([]);
 });

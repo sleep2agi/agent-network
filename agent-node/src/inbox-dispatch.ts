@@ -76,12 +76,19 @@ export interface DetachedInboxDispatcher<T> {
 /**
  * Keep detached inbox work bounded and deduplicated across later SSE snapshots.
  * The key is claimed before invoking the async handler, so two kicks in the
- * same tick cannot double-submit one Hub row. N+1 work waits in the local FIFO
+ * same tick cannot double-submit one Hub row. N+1 work waits in the local queue
+ * (FIFO unless the caller opts into stable priority for authenticated rows)
  * and is started automatically when any active handler settles.
  */
 export function createDetachedInboxDispatcher<T>(opts: {
   maxConcurrent: number;
+  /** Opt-in slots for trusted priority work; ordinary handlers cannot occupy them. */
+  reservedPrioritySlots?: number;
   key: (message: T) => string;
+  /** Opt-in trusted admission policy; active handlers retain their slots. */
+  prioritize?: (message: T) => boolean;
+  /** Separate internal recovery policy; never an input metadata authority flag. */
+  prioritizeRecovery?: (message: T) => boolean;
   onError: (error: unknown) => void;
   onSettled?: () => void;
 }): DetachedInboxDispatcher<T> {
@@ -89,11 +96,15 @@ export function createDetachedInboxDispatcher<T>(opts: {
     throw new Error("maxConcurrent must be a positive integer");
   }
   const activeKeys = new Set<string>();
+  const activeOrdinaryKeys = new Set<string>();
+  const reserved = opts.reservedPrioritySlots ?? 0;
+  if (!Number.isInteger(reserved) || reserved < 0 || reserved >= opts.maxConcurrent) throw new Error("reservedPrioritySlots out of range");
   const queuedKeys = new Set<string>();
-  const queue: Array<{ message: T; handler: (message: T) => Promise<void> }> = [];
+  const queue: Array<{ message: T; handler: (message: T) => Promise<void>; priority: boolean }> = [];
 
   const pump = () => {
     while (activeKeys.size < opts.maxConcurrent && queue.length > 0) {
+      if (!queue[0].priority && activeOrdinaryKeys.size >= opts.maxConcurrent - reserved) break;
       const item = queue.shift()!;
       const key = opts.key(item.message);
       queuedKeys.delete(key);
@@ -101,6 +112,7 @@ export function createDetachedInboxDispatcher<T>(opts: {
       // until its first await, but the dispatcher does not depend on that
       // language detail for cross-snapshot deduplication.
       activeKeys.add(key);
+      if (!item.priority) activeOrdinaryKeys.add(key);
       let running: Promise<void>;
       try {
         running = item.handler(item.message);
@@ -111,6 +123,7 @@ export function createDetachedInboxDispatcher<T>(opts: {
         .catch(opts.onError)
         .finally(() => {
           activeKeys.delete(key);
+          activeOrdinaryKeys.delete(key);
           try {
             opts.onSettled?.();
           } catch (error) {
@@ -135,7 +148,11 @@ export function createDetachedInboxDispatcher<T>(opts: {
           continue;
         }
         queuedKeys.add(key);
-        queue.push({ message, handler });
+        const priority = opts.prioritize?.(message) === true || opts.prioritizeRecovery?.(message) === true;
+        const firstOrdinary = priority ? queue.findIndex(item => !item.priority) : -1;
+        const item = { message, handler, priority };
+        if (firstOrdinary < 0) queue.push(item);
+        else queue.splice(firstOrdinary, 0, item);
         accepted++;
       }
       pump();

@@ -1199,6 +1199,20 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
+.download-page .download-recommendation {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px;
+  margin: 16px 0;
+  border: 1px solid var(--vp-c-brand-1);
+  border-radius: 16px;
+  background: var(--vp-c-bg-soft);
+  overflow-wrap: anywhere;
+}
+.download-page .download-recommendation small { color: var(--vp-c-text-2); }
+.download-page .download-cli { border-top: 1px solid var(--vp-c-divider); padding-top: 20px; }
 .download-page .download-release-fallback {
   color: var(--vp-c-text-2);
   font-size: 0.82rem;

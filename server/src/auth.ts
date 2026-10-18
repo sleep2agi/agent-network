@@ -2,7 +2,7 @@
  * V3 Auth module — user registration, login, token management
  */
 import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork, groupTx, removeMemberFromChatGroups } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
-import { WEAK_PASSWORDS } from "./password-dict.js";
+import { WEAK_PASSWORDS } from "./password-dict.js"; import { passwordNetworkTokens, type KeptNetworkToken } from "./password-network-tokens.js";
 import { checkNodeTokenClaim, legacyNodeHolder } from "./node-token-ownership.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
 import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, newMemberTaskAccess, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
@@ -330,7 +330,7 @@ export type SessionClientInfo = { label?: unknown; userAgent?: unknown; kind?: u
 // 种类由客户端自报(client_kind / client_label),**只用于展示和「显式保留」那条路**:
 // 改密码默认仍撤销全部不绑网络的令牌(当前这条除外),调用方显式 keep_cli_tokens=true 才保留 'cli'。
 // 所以一个自称 cli 的令牌永远不能靠自报在默认改密码里活下来。
-// 节点 / 网络令牌(network_id 非空)不分类,改密码永远不碰。
+// 节点 / 网络令牌(network_id 非空)不按cli分类;具名网络令牌另有显式撤销选项。
 export type UserTokenKind = "login" | "cli";
 
 /** 登录 / 注册请求签发的令牌算哪一类:客户端显式报 kind='cli',或 client_label 是 anet 自报的「anet <版本> · …」。 */
@@ -642,14 +642,14 @@ export function revokeOtherSessions(userId: string, currentTokenId: string): num
   return db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND token_id != ?2`, [userId, currentTokenId]).changes;
 }
 
-export type ChangePasswordResult = { ok: boolean; error?: string; revoked?: number; revoked_login?: number; revoked_cli?: number; kept_cli_tokens?: KeptCliToken[] };
+export type ChangePasswordResult = { ok: boolean; error?: string; revoked?: number; revoked_login?: number; revoked_cli?: number; kept_cli_tokens?: KeptCliToken[]; revoked_network?: number; kept_network_tokens?: KeptNetworkToken[] };
 
 /**
  * 改密码。默认撤销该用户全部不绑网络的令牌(改密码前的行为,旧 app 依赖它)。#711:opts.keepCliTokens=true
  * 时保留 kind='cli' 的(anet 命令行登录、具名脚本令牌),并在 kept_cli_tokens 里列出。当前会话和节点令牌永远保留。
- * revoked = 两类合计(旧字段,兼容旧客户端)。
+ * revokeNetworkTokens=true显式撤销具名网络令牌;默认列出保留清单。revoked含三类合计。
  */
-export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null, opts: { keepCliTokens?: boolean } = {}): ChangePasswordResult {
+export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null, opts: { keepCliTokens?: boolean; revokeNetworkTokens?: boolean } = {}): ChangePasswordResult {
   const passwordError = validatePasswordStrength(newPassword, "new password");
   if (passwordError) return { ok: false, error: passwordError };
   const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
@@ -663,10 +663,14 @@ export function changePassword(userId: string, oldPassword: string, newPassword:
   // password change. If the user changes via `anet passwd`, the bootstrap
   // nudge goes away on next login. SET to 0 explicitly (rather than skip)
   // so a future flag flip can't drift the state.
-  db.run("UPDATE users SET password_hash = ?1, must_change_password = 0, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
-  const keep = opts.keepCliTokens === true;
-  const r = revokeTokensAfterPasswordChange(userId, currentTokenId, keep);
-  return { ok: true, revoked: r.login + r.cli, revoked_login: r.login, revoked_cli: r.cli, ...(keep ? { kept_cli_tokens: r.kept } : {}) };
+  const nextHash = hashPassword(newPassword);
+  return db.transaction(() => {
+    db.run("UPDATE users SET password_hash = ?1, must_change_password = 0, updated_at = datetime('now') WHERE user_id = ?2", [nextHash, userId]);
+    const keep = opts.keepCliTokens === true;
+    const r = revokeTokensAfterPasswordChange(userId, currentTokenId, keep);
+    const network = passwordNetworkTokens(userId, currentTokenId, opts.revokeNetworkTokens === true);
+    return { ok: true, revoked: r.login + r.cli + network.revoked, revoked_login: r.login, revoked_cli: r.cli, ...(keep ? { kept_cli_tokens: r.kept } : {}), revoked_network: network.revoked, kept_network_tokens: network.kept };
+  });
 }
 
 /**

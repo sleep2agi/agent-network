@@ -1,0 +1,139 @@
+# report-test1313 — Linux host-shared OpenCode server OBSERVATION PROVIDER (#1313, parent #1302)
+
+Runtime: Docker, `--network none` (no network, no credentials, no daemon, no lifecycle).
+Date: 2026-10-16 (Asia/Shanghai)
+Code under test: `agent-node/src/runtime/opencode-host-shared-observer.ts`
+Base: **`main`** — this slice is deliberately independent of the reuse-decision
+work (#2777) and defines its own process-evidence type.
+Suite: `tests/test1313-host-shared-observer/` (`run.sh` + `cross-uid.ts`)
+
+Commands
+  docker build -f tests/test1313-host-shared-observer/Dockerfile -t anet-test1313 .
+  docker run --rm --network none -e SOURCE_COMMIT=<head> \
+      -v "$PWD/docs/tests:/artifacts" anet-test1313
+
+Image inputs (pinned, the digests the neighbouring OpenCode suites use)
+  oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+  node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+
+Local: `bun test src/runtime/opencode-host-shared-observer.test.ts` →
+**21 pass / 0 fail, 100 expect() calls, ~0.4 s** (four of them drive real
+listening processes); `tsc --noEmit` clean for both new files.
+
+## Scope: PROCESS EVIDENCE, and nothing more
+
+Agreed split with 通信牛 (2026-10-16):
+
+- **this module** answers only "what process is really behind this loopback URL",
+  read-only, from `/proc`;
+- **#1302** owns generation/evidence **binding** and the reuse decision; a
+  consumer that cannot prove a generation must refuse reuse — that call is not
+  made here.
+
+Consequently the provider returns **`processEvidence`** and never fills a proven
+generation field. An exact argv match is still not proof of a process's OpenCode
+generation, so the argv shape is reported under `diagnostics` together with a
+note saying so:
+
+```ts
+processEvidence = {
+  url, host: "127.0.0.1", port,
+  listenInode,           // LISTEN socket inode (same in both reads)
+  pid, uid, startTicks,  // the pid we actually bound through, and its identity
+  diagnostics: {
+    executable,          // /proc/<pid>/exe, else the labelled argv[0] fallback, else null
+    executableSource,    // "proc_exe" | "argv0" | null — argv[0] is mutable, never an attestation
+    argvTail,            // argv from its `serve` token onward
+    argvContract,        // "v1" | "v2" | "none" | "ambiguous"  — DIAGNOSTIC ONLY
+    argvContractNote,    // says why the shape proves nothing by itself
+  },
+}
+```
+
+The suite asserts the boundary mechanically: the module must contain
+`processEvidence` and `argvContractNote`, must **not** declare a `generation`
+field, and must **not** import or lean on the reuse-decision module
+(`opencode-server-reuse` / `decideHostSharedServerAdmission`). The test file
+additionally asserts `Object.keys(evidence)` has no `generation`.
+
+## The chain (one process, then re-verified)
+
+```
+/proc/net/tcp LISTEN inode for 127.0.0.1:<port>
+  -> /proc/<pid>/fd "socket:[inode]"   (EVERY process is a candidate)
+  -> /proc/<pid> uid (the HOLDER's uid, read from its own process) | start ticks
+  -> /proc/<pid>/cmdline (diagnostic, never an attestation)
+then inode/pid/uid/startTicks are read AGAIN and must be identical
+```
+
+**Why the candidate set is NOT filtered by the socket's uid** (#2784 review,
+通信牛, with a reproduction): a process can create the listening socket as root
+(so `/proc/net/tcp` reports uid 0) and then drop privileges to 65534, and a child
+can inherit the fd or receive it over `SCM_RIGHTS`. The socket's uid is therefore
+the *creator's*, not the holder's, and filtering by it silently misses the real
+holder — it would answer `socket_owner_not_found` while a holder exists. So every
+process is scanned, the reported `uid` is the holder's own, and the socket uid is
+kept only as the diagnostic `diagnostics.socketUid`.
+
+PID 1 is scanned like any other process (通信牛, #2784 review): in a container PID 1
+can hold a listening fd, and the earlier `pid <= 1` skip would have reported a
+wrong "unique holder". Only pid 0 (not a real process) is out of scope. PID 1's
+liveness/admission policy is deliberately unchanged (`makeHostSharedAliveProbe`
+still refuses pid 1, as the review scoped it) — the holder scan is what includes it.
+
+**Uniqueness is still required**: if ANY process's fd table could not be read,
+"unique holder" is unproven and the answer is `permission_denied` — in a mixed-uid
+process table an unprivileged reader (or root without `CAP_SYS_PTRACE`) therefore
+gets a refusal rather than a guess, which the suite asserts as a first-class
+outcome. The suite reproduces the counterexample for real: a bun process that
+serves, then `setuid(65534)`, yields **socket uid 0 / holder uid 65534**, and the
+provider refuses instead of claiming there is no holder.
+
+`makeHostSharedAliveProbe()` is exported for consumers that need a real
+pid+startTicks re-check, so PID reuse cannot pass.
+
+## 负控（不删、不放宽）
+
+| 场景 | 期望 |
+|---|---|
+| 非 Linux | `unsupported_platform` |
+| `localhost` / `[::1]` / 其它地址 / https / 带凭据 / 非法 URL | `url_not_supported` |
+| 端口无 LISTEN | `no_listener` |
+| 同端口多个 LISTEN inode / 多个持有进程 | `ambiguous_listener` |
+| inode 无人持有 | `socket_owner_not_found` |
+| `/proc` 读写 EACCES/EPERM（含跨 uid 无 CAP_SYS_PTRACE） | `permission_denied` |
+| **任一进程的 fd 不可读（含跨 uid、无 CAP_SYS_PTRACE）** | `permission_denied` —— 唯一持有者不可证 ⇒ 拒绝（哪怕已找到 owner） |
+| **PID 1 持有 fd** | 与其它进程一视同仁：唯一时如实报 pid 1；PID 1 与别人同时持有 ⇒ `ambiguous_listener` |
+| 候选集内某 pid 的 /proc/<pid> 不可读（非 ENOENT） | `permission_denied` |
+| 持有 inode 的进程 uid ≠ 内核 socket uid（继承/SCM_RIGHTS） | **正常找到并如实报该 uid**；socket uid 只进 `diagnostics.socketUid` |
+| 同端口两个 LISTEN socket | `ambiguous_listener` |
+| 两次读取之间 startTicks / pid / uid / inode 变化、进程消失 | `identity_mismatch` |
+| argv 读不到 / exe 读不到 | **仍然成功**（argv 只是诊断）：`argvContract: "none"`，exe 回退 argv[0] |
+| argv 形状未知或两条都匹配 | `argvContract: "none"` / `"ambiguous"`，**不是失败、更不是代际** |
+| 任何意外异常 | 返回 reason，**从不抛** |
+
+## 本次运行（real processes，隔离 Docker）
+
+```
+21 pass / 0 fail — 真实监听进程 4 条 + 注入 /proc 的 17 条（含继承/SCM_RIGHTS 反例与权限拒绝两类）：
+  真实 listener -> pid/uid/startTicks/inode 均来自 /proc，probeAlive 真复核为 true
+  --pure 形状 -> argvContract=v1（仅诊断；evidence 上无 generation 字段）
+  未知 flag  -> 仍可观测，argvContract=none
+  kill 后     -> no_listener/permission_denied（无陈旧成功）
+  候选集内有未读进程 -> permission_denied（不声称唯一持有者）
+setup: socket uid=0, holder process uid=65534（进程 setuid(65534)，socket 仍是 root 创建）
+cross-uid ok: refused with permission_denied —— 唯一性不可证时拒绝，绝不报 socket_owner_not_found（那会假装没有持有者）
+non-Linux -> unsupported_platform
+PASS: host-shared OpenCode observation provider suite
+```
+
+## Limits（诚实声明）
+
+- Covers **process observation** only. It does not bind a generation, does not
+  decide reuse, does not wire `create-node-daemon`, does not read credentials, does
+  not create a registry and does not touch node `close` — all out of scope per the card.
+- Cross-uid observation needs the *reader* to share the uid or hold
+  `CAP_SYS_PTRACE`; without it the provider refuses (`permission_denied`), which
+  the suite asserts as a first-class outcome rather than papering over. Both paths
+  are exercised in this run.
+- Not a release; no npm publication, no production change.

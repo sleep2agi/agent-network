@@ -81,8 +81,8 @@ expect_mutation_red \
 expect_mutation_red \
   reporter-context-forwarding \
   src/task-runtime-evidence.ts \
-  'void opts.report(level, opts.taskId, context).catch' \
-  'void opts.report(level, opts.taskId).catch' \
+  'const pending = opts.report(level, opts.taskId, context).catch' \
+  'const pending = opts.report(level, opts.taskId).catch' \
   src/task-runtime-evidence.test.ts \
   'forwards one exact runtime context'
 

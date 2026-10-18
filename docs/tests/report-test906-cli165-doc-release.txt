@@ -1,0 +1,41 @@
+#906 CLI .165 getting-started release-claim correction
+OBSERVED_AT=2026-10-11T09:45Z (17:45+08)
+
+Original formal source: main 347a450c6233c940fd8e457aadbeceb68efa18fe.
+Run38128894984: install-path smoke, pinned audit and release notes passed.
+Doc-claim gate failed because both bilingual pages still stamped and described
+preview .164. Publication SKIPPED. That artifact remains TEST-ONLY, not a release.
+
+Only change: preview stamp and corresponding body .164 -> .165 in both pages.
+latest .76 and historical .37/.38 claims are unchanged. No product, auth,
+release workflow or guard change.
+
+Actual TEST-ONLY formal CLI artifact:
+sleep2agi-agent-network-2.3.0-preview.165.tgz; 2117012 bytes;
+SHA256 241b0f6d4feb188a657e83a1824944aab70f65b7af62b00c5793edb93628e0a1.
+Docker tests/test906-cli165-doc-release/Dockerfile, image
+anet-provider:cli165-doc-claim, --rm --network none with artifact read-only:
+3/3 PASS: actual package version; random anet- plus 22 hex characters printed
+and sent to registration; second start reuses saved fixture token without
+registering or printing the password. The HTTP/auth response is a synthetic
+local fixture. No real Hub account login or model entitlements are claimed.
+Shared base rebuild instructions are in the suite Dockerfile; no credentials.
+
+Docker Python checker: selftest19/19 PASS; release-mode check .165 scans four
+stamps in two pages, PASS. Local structural check is offline and does not claim
+fresh npm latest verification; formal gate performs --verify-latest-from-npm.
+
+Initial harness-only diagnostics: Python image inherited launcher instead of
+shell (no test started); stopped only this turn's container599ef5511b82, leaving
+the unrelated long-running image container alone. Explicit entrypoint used for
+actual checks. One public-download invocation selected an image without node in
+PATH (test not started); rerun with /usr/local/bin/node in the CLI image passed.
+No product failures were hidden as environment successes.
+
+Fresh main merge and all four formal gates must run again before publishing
+CLI .165. Old failed-gate artifact cannot be reused as a public package.
+Software-only doc update: no service startup, ports, secrets, data or rollback
+layout changes. Existing deploy/ and deployment docs remain authoritative.
+Cleanup: probe/check containers --rm; fixture home/data existed only in the
+container. No production configuration, OAuth, global npm or business Agent
+process changed. No native Mac/Windows/Android package acceptance claimed here.

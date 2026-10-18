@@ -16,7 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { addNetworkMember, createNetworkTokenForNode, register } from "./auth.js";
 import { db } from "./db.js";
 import { dispatchScheduledOccurrence, handleScheduledTaskRequest } from "./scheduled-tasks.js";
-import { SCHEDULE_STUCK_NOTICE_KIND, stuckTimeoutMs } from "./scheduled-stuck.js";
+import { blockerTimedOut, SCHEDULE_STUCK_NOTICE_KIND, stuckTimeoutMs } from "./scheduled-stuck.js";
 import { registerTools } from "./tools.js";
 
 const activeDbPath = process.env.COMMHUB_DB ?? (process.env.COMMHUB_TEST_PG_URL ? "postgres" : undefined);
@@ -235,4 +235,78 @@ describe("#464 history clarity", () => {
     expect(skipped.blocked_by_task_id).toBe(first.taskId);
     expect(skipped.blocked_by_state).toBe("not_received");
   });
+});
+
+
+describe("#1112 execution clock", () => {
+  const ts = (now: Date, minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
+  test("queue budget: creation over one hour but consumption under one hour keeps the exact run open", () => {
+    const s = seedSchedule();
+    const first = fire(s);
+    const now = new Date();
+    db.run("UPDATE tasks SET status = 'running', created_at = ?1, consumed_at = ?2 WHERE task_id = ?3", [ts(now, 61), ts(now, 49), first.taskId]);
+    expect(fire(s, now).status).toBe("skipped");
+    expect(taskRow(first.taskId!).status).toBe("running");
+    expect(runRow(first.runId).status).toBe("delivered");
+    expect(db.get<any>("SELECT COUNT(*) AS n FROM task_events WHERE task_id = ?1 AND to_status = 'expired'", first.taskId).n).toBe(0);
+    db.run("UPDATE tasks SET created_at = ?1, consumed_at = ?2 WHERE task_id = ?3", [ts(now, 73), ts(now, 61), first.taskId]);
+    const later = fire(s, now);
+    expect(later.status).toBe("delivered");
+    expect(taskRow(first.taskId!).status).toBe("expired");
+    expect(runRow(first.runId).error_message).toContain("since consumed_at");
+  });
+  test("queue budget: legacy execution start protects the queued task, consumption takes precedence", () => {
+    const s = seedSchedule(); const first = fire(s); const now = new Date();
+    db.run("UPDATE tasks SET status = 'running', created_at = ?1, started_at = ?2 WHERE task_id = ?3", [ts(now, 75), ts(now, 40), first.taskId]);
+    expect(fire(s, now).status).toBe("skipped");
+    db.run("UPDATE tasks SET started_at = ?1, consumed_at = ?2 WHERE task_id = ?3", [ts(now, 70), ts(now, 40), first.taskId]);
+    expect(fire(s, now).status).toBe("skipped");
+  });
+  test("submission and ACK alone do not renew queue time", () => {
+    const s = seedSchedule(); const first = fire(s); const now = new Date();
+    db.run("UPDATE tasks SET status = 'acked', created_at = ?1, runtime_submitted_at = ?2 WHERE task_id = ?3", [ts(now, 61), ts(now, 1), first.taskId]);
+    expect(fire(s, now).status).toBe("delivered");
+    expect(runRow(first.runId).error_message).toContain("since created_at");
+  });
+  test("total cap: a very late consumption cannot keep an occurrence open beyond 24 hours", () => {
+    const s = seedSchedule(); const first = fire(s); const now = new Date();
+    db.run("UPDATE tasks SET status = 'running', created_at = ?1, consumed_at = ?2 WHERE task_id = ?3", [ts(now, 1441), ts(now, 1), first.taskId]);
+    expect(fire(s, now).status).toBe("delivered");
+    expect(runRow(first.runId).status).toBe("expired");
+    expect(runRow(first.runId).error_message).toContain("created_at (total cap)");
+    expect(runRow(first.runId).error_message).toContain("limit 1440 min");
+  });
+  test("invalid, future and pre-creation evidence falls back; UTC and exact execution boundary remain stable", () => {
+    const now = new Date("2026-10-13T03:00:00Z");
+    const schedule = JSON.stringify({ type: "interval", every_seconds: 60 });
+    for (const consumed_at of [null, "invalid", "2026-10-14T00:00:00Z", "2026-10-12T00:00:00Z"]) {
+      expect(blockerTimedOut({ created_at: "2026-10-13 01:00:00", consumed_at }, schedule, now)).toBe(true);
+    }
+    expect(blockerTimedOut({ created_at: "2026-10-13 01:00:00", consumed_at: "2026-10-13 02:00:01" }, schedule, now)).toBe(false);
+    expect(blockerTimedOut({ created_at: "2026-10-13 01:00:00", consumed_at: "2026-10-13 02:00:00" }, schedule, now)).toBe(true);
+  });
+});
+
+
+describe("#1113 activity idle clock",()=>{
+ test("fresh exact-task activity protects a long consumed turn, silent activity still expires",()=>{
+  const s=seedSchedule(),first=fire(s),now=new Date(),at=(m:number)=>new Date(now.getTime()-m*60_000).toISOString();
+  db.run("UPDATE tasks SET status='running',created_at=?1,consumed_at=?2,last_activity_at=?3 WHERE task_id=?4",[at(180),at(120),at(1),first.taskId]);
+  expect(fire(s,now).status).toBe("skipped");expect(taskRow(first.taskId!).status).toBe("running");
+  db.run("UPDATE tasks SET last_activity_at=?1 WHERE task_id=?2",[at(61),first.taskId]);expect(fire(s,now).status).toBe("delivered");
+  expect(runRow(first.runId).error_message).toContain("since last_activity_at");
+ });
+ test("fresh activity cannot evade the absolute total cap",()=>{
+  const s=seedSchedule(),first=fire(s),now=new Date(),at=(m:number)=>new Date(now.getTime()-m*60_000).toISOString();
+  db.run("UPDATE tasks SET status='running',created_at=?1,consumed_at=?2,last_activity_at=?3 WHERE task_id=?4",[at(1441),at(1440),at(1),first.taskId]);
+  expect(fire(s,now).status).toBe("delivered");expect(runRow(first.runId).error_message).toContain("total cap");
+ });
+ test("activity without consumption, before consumption or in the future never renews",()=>{
+  const now=new Date("2026-10-13T04:00:00Z"),schedule=JSON.stringify({type:"interval",every_seconds:60});
+  for(const row of [
+   {created_at:"2026-10-13 01:00:00",last_activity_at:"2026-10-13 03:59:00"},
+   {created_at:"2026-10-13 01:00:00",consumed_at:"2026-10-13 02:00:00",last_activity_at:"2026-10-13 01:59:00"},
+   {created_at:"2026-10-13 01:00:00",consumed_at:"2026-10-13 02:00:00",last_activity_at:"2026-10-13 04:01:00"},
+  ])expect(blockerTimedOut(row,schedule,now)).toBe(true);
+ });
 });

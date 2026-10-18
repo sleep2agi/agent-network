@@ -1,0 +1,88 @@
+Requirement906: two Daemon software-only upgrade receipt
+Observed2026-10-12 00:32 Asia/Shanghai / 2026-10-11T16:32Z.
+No new implementation ticket, no global npm install, no business-node upgrade.
+
+VDEV ORIGINAL OWNER RECEIPT
+TMHR task40231b1b-c9a1-4cb2-8383-7ddf0edc690c replied16:27:23Z.
+daemon-vdev/node_daemon_397063b35831: CLI166/runtime132,
+actual PID1721854/1721964; same identity/workdir/configuration, SSE connected,
+Provider redacted readback normal, old private pair/0600 backup retained.
+Independently fresh Hub read confirms132/idle/inflight0/queue0.
+TMHR did not touch daemon-dev because its SSH route was unavailable.
+TMAI owner's already completed identity/outbound recovery was reused; no repeat
+restart, no account/session changes. This is not an external OAuth re-test.
+
+DEV LOCAL SAFE ALTERNATIVE
+Current host matches daemon-dev's Hub hostname iZrj93pr2rcf5r2y9uo1oyZ;
+therefore no SSH or routing change was necessary. Existing role host_supervisor,
+node_id=node_daemon_39bd1eeae3ee, runtime claude-agent-sdk, original user-root cwd.
+Old CLI2843800/runtime2843964 were verified against exact private164/130 paths.
+Fresh Hub idle/inflight0/queue0 before switch. No .env/auth.json read or copy.
+
+PUBLISHED INPUTS
+CLI2.3.0-preview.166 source main b7cf295ebe12188d0129e73d4a10dc66781c56eb.
+https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.166/sleep2agi-agent-network-2.3.0-preview.166.tgz
+sha256:bce57f5f8abfd2a5b97ac8148045df0f93483fb2ca97ef8aa5bd03d414ad9993.
+Runtime2.5.0-preview.132 source main ad381202cbba00c80efc30522801dedd810fbbea.
+https://registry.npmjs.org/@sleep2agi/agent-node/-/agent-node-2.5.0-preview.132.tgz
+sha256:f3445ad33bcabacf4e7ede286168bc5fcac5ff895d8be845b492348cc77ec77f.
+Both source commits are ancestors of main; downloaded bytes match these hashes.
+
+INSTALL / PREREQUISITE CHECK / SWITCH
+New private pair: ${USER_ROOT}/.anet-bin/provider906-cli166-runtime132 (0700).
+Inactive installation via sg docker, cached Node22 image
+anet-app:test1020-provider-ref-core-next, UID1000, read-only root/tmpfs,
+explicit private install mount; npm install --save-exact --ignore-scripts
+--no-audit --no-fund from the two validated tarballs,250 packages installed.
+Generated package.json/package-lock remain in that private installation.
+Offline Docker under owning UID verifies CLI166 and runtime132 help load.
+First Docker attempt used the wrong UID with cap-drop ALL: EACCES surfaced as
+MODULE_NOT_FOUND for the0700 root; not a product failure and not a PASS.
+Correcting the Docker UID passed without relaxing filesystem permissions.
+Backup: ${USER_ROOT}/.anet/nodes/daemon-dev/config.json.pre-cli166-runtime132-20261012,
+0600, identical SHA before and after switch:
+4cf8ee102c780bb75d992b1c6b6c32d56f49015fe62cf933c54afd733d4564bc.
+Only verified old daemon-dev runtime2843964 received SIGTERM; both old pair
+processes exited normally, then one original-name tmux session was launched.
+New launch uses the same Node24 binary, original PATH and cwd, plus explicit
+ANET_AGENT_NODE_BIN pointing at private132. No broad kill/session sweep.
+
+ACTUAL EFFECTIVE STATE
+New CLI PID3242730, runtime PID3242860, both from the new private pair.
+Startup16:31:06Z: create capability ready (anet bin pin verified), SSE connected.
+Hub new heartbeat16:31:07Z: same node_id, runtime132, idle/inflight0/queue0.
+Read-only anet daemon provider list daemon-dev:
+ok=true, daemon_node_id=node_daemon_39bd1eeae3ee, revision=0,
+source=daemon, providers=[]. This proves read capability, not provider/model use.
+Sample business/AppServer/TUI PIDs2792940/2793542/515201/3199979 unchanged.
+No inference, production task fixture, credential rotation or Hub restart.
+
+RECOVERY SIX-FACT BOUNDARY
+1. Startup authority is published main CLI daemon start <alias>, from
+agent-network/bin/cli.ts; runtime lifecycle in agent-node/src/cli.ts. Launch
+with chosen exact private pair, ANET_AGENT_NODE_BIN and original cwd/PATH;
+no new unversioned custom production launcher was created.
+2. Hub/ports/proxy/tunnel unchanged; existing Git deploy/hub and deploy/fleet
+runbooks remain authority. No additional inbound port was opened.
+3. Existing secret-bearing node profile/.env remain in their owner-only store;
+restore identities from approved encrypted backup or original administrator
+registration, never copy another node's auth.json. Secrets are not in Git.
+4. Upgrade uses the validated public packages above; effective PID/cmdline,
+fresh same-identity Hub heartbeat, SSE and redacted Provider readback are the
+actual-state checks. Package metadata alone is insufficient.
+5. Keep old ${USER_ROOT}/.anet-bin/provider906-cli164-runtime130 and protected
+config backup; at idle stop only current exact daemon pair, launch old pair
+with original PATH/cwd, then repeat actual-state checks. Rollback not executed.
+6. Configuration/identity/session/database data are not supplied by clone.
+This receipt does not prove a complete empty-machine recovery: off-host
+encrypted-backup location and installed transitive-lock archival are separate
+inventory gaps. Existing fleet boot discovers CLI on PATH; this narrow change
+does not claim its reboot path has been pinned to166/132. Record/review those
+gaps rather than modifying systemd/global npm/boot topology as a side action.
+
+CLEANUP
+All prerequisite-test/install containers --rm. Old pair, new pair and0600
+backup retained intentionally. Validated download staging remains in transient
+/dev/shm for this receipt; package authority is the immutable public URLs.
+Full #906/#907 runtime adapters, real OAuth entitlements and #1027 child-token
+regression are not declared complete by this software-only upgrade.

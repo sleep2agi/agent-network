@@ -770,7 +770,7 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
 // list_summary:GET 认 view=summary(不带描述正文与子任务条目,见 toSummary);changes:GET 认 changes=1 + updated_since
 // (改过的卡含归档的,加上 deleted 墓碑与 server_time,见 listChanges)。
 // events:GET /api/requirements/events —— 字段级的改动流水(谁、何时、旧值 → 新值,requirement-events.ts)。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes", "events", "last_event", "column_abandoned"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_status_snapshot", "tag_ops", "list_summary", "changes", "events", "last_event", "column_abandoned"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -1584,7 +1584,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if ("error" in sq) return jsonError(sq.error, 400);
     const statsParams: unknown[] = [networkId];
     const statsSql = addTaskVisibilityScope(
-      "SELECT requirement_id, seq, title, project_id, column_name, archived, created_at, completed_at, completed_at_approx, completed_by_json FROM requirements WHERE network_id = ?1",
+      "SELECT requirement_id, seq, title, project_id, column_name, archived, created_at, completed_at, completed_at_approx, completed_by_json, tags_json FROM requirements WHERE network_id = ?1",
       statsParams, taskCaller(ctx),
     );
     const rows = db.all<StatsRow>(statsSql, ...statsParams);

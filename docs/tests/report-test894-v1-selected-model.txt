@@ -1,0 +1,96 @@
+TEST ONLY — #894 V1 explicit ACP model binding (original PR2559)
+Observed: 2026-10-10 09:40 Asia/Shanghai
+
+Problem and change
+------------------
+Prior installed App7ec7 package experiment selected openai/not-in-fixture in
+the real UI and persisted node configuration, but the main task used gpt-4.1.
+That prior failure is recorded in App PR795 issuecomment-6092176512; not rerun
+or counted as a new success here.
+
+CLI now forwards resolved MODEL to openOpencodeRuntime. After session/new or
+session/load, runtime awaits session/set_model before onSession/publication.
+Selection errors are outside the load fallback catch and use the existing
+child/launch cleanup boundary. No model keeps legacy behavior. No Provider
+whitelist, permission, secret isolation or package-identity guard was relaxed.
+
+Pinned upstream implementation inspected:
+https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/acp/service.ts
+https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/acp/error.ts
+Its setSessionModel validates the directory snapshot; unavailable models return
+model-not-found, while prompt uses the selected session model.
+
+Inputs / provenance
+-------------------
+Parent HEAD: c10c83a0a5dde3038f42e93576fb18ba68d2c547
+Tested local worktree patch, not the unchanged remote head's green checks.
+Pre-report `git diff --binary` SHA256:
+1b78805d752344287aa19f64c50738ee2c12770720a68682b7b62dd46f655d08
+SOURCE_COMMIT/EXPECTED_SOURCE_COMMIT label:
+c10c83a0a5dde3038f42e93576fb18ba68d2c547+worktree.1b78805d
+Runtime SHA256: 89adb71c0181c7b13d1056a8e0adf28883dcd2514af7f2f03a67eae0b48f20e8
+Model probe SHA256: c7291e87dd36125cb4210f73e229ea5eaed477a9ffdb596e139632d828717dc3
+Provider fixture SHA256: fa6a889fc12be5a8aeb83209876af2c1ca052a84dd878d9c8b76e32d22b444ac
+Dependency image: sha256:fb9cc67ce06dd7569f8f9f1d278f1e54248634070dbd6ed0eb08b6830dfdc98f
+Test image: sha256:f604a376b77acb0fd1b46888de2d1c214a60996597d25f99791d7254a354b6f3
+Base rebuilt using tests/test894-v1-runtime/Dockerfile: pinned Bun digest,
+real opencode-ai@1.18.34, agent-node package-lock npm ci. Apt transitive inputs
+are not snapshot-pinned; this is not a bit-reproducible release claim.
+Overlay uses tests/test894-v1-acp-session/Dockerfile with --network none,
+compares dependency lockfile and copies current runtime source/probes.
+
+Layered execution (all Docker; no host tests)
+-------------------------------------------
+All runs: sg docker -c 'docker run ...', non-root bun, --network none,
+--cap-drop ALL --security-opt no-new-privileges; no host mounts/credentials.
+
+1. bun test src/runtime/opencode-acp
+   100 PASS, 0 FAIL, 841 assertions, 8 files, 7.50 seconds.
+   Includes 9 new selected-model/CLI-wiring cases: new, load, lost-load,
+   omitted model, rejected model, unsupported method, loaded-model refusal,
+   empty/padded selection and CLI forwarding. Ack precedes publication;
+   rejected selection sends no prompt/new-session fallback and cleans roots.
+   Container anet894-model-bind-unit exit0 at 01:38:58.123353602Z.
+
+2. /fixture-acp/run.sh (only after layer1 passed)
+   Real1.18.34 initialize/new, safe wildcard-deny/isolation configuration,
+   persisted session identity and cleanup PASS. Independent wrong-session
+   observer exits1 at exact identity assertion after successful initialization;
+   wrapper validates that expected negative, exits0 at01:39:17.608466377Z.
+
+3. /fixture-acp/run-model.sh (only after layer2 passed)
+   Verified ephemeral TLS + unauthenticated401 before each ACP process.
+   A: persistent default openai/gpt-4.1; explicit selection
+      openai/gpt-4.1-selected. Exactly one main-turn request identified by
+      pinned upstream main-agent system message plus unique user prompt;
+      exact selected model and Responses host/path PASS, fixture reply consumed.
+      OpenCode title generation is separate and not substituted for main task.
+   B: explicit openai/not-in-fixture rejected by actual upstream with exact
+      model-not-found error; no onSession, no authenticated generation, dead
+      ACP child and removed launch roots PASS (product refusal, not oracle).
+   C: independent wrong expected model after actual successful response
+      exits1 at exact model mismatch; wrapper accepts only this negative.
+   Whole wrapper exit0 at01:39:41.952840479Z; all three process cleanups PASS.
+
+Saved raw log SHA256 (local diagnostic copies, not authoritative release assets):
+/tmp/anet894-model-bind-unit.log
+  0ec039578346f1c57204936c05279f172ab6edcbebfaf0c726345b8e447f68bd
+/tmp/anet894-model-bind-session.log
+  76a2b1c4f51110d7d0a0f3eab07b5333bf9812bd883f5bdf9b260e7903fefc08
+/tmp/anet894-model-bind-real.log
+  3936a36dcf94e461e01029f249ca218364669dbf89da869610143707ebde5086
+CI workflow now gates real ACP on the same unit suite and archives its report;
+new remote-head results must be checked independently after submission.
+
+Limits / cleanup / next gate
+---------------------------
+Only Provider responses/catalog are offline fixtures; real OpenCode runtime,
+session protocol and production opener are used. No live vendor, tool execution,
+native UI, fresh native package, V1 lifecycle or V2 lifecycle acceptance here.
+The existing App7ec7 deb is NOT repaired by these source results. Build a new
+test-only package paired with the new backend SHA before native regression.
+No main merge, npm release, installed global package or production change.
+Three named containers inspected exited0, then removed; images/logs retained.
+Runtime-owned temp credentials/certificates/proxy/ACP/launch roots cleaned by
+the probes. No new persistent service or production data; deploy/rollback and
+secret/backup sources unchanged, see suite README for boundary/rebuild commands.

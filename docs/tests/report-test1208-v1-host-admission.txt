@@ -1,0 +1,57 @@
+#1208 — V1 host registry/private input admission (parent #1195)
+
+Scope: read-only versioned registry/template and private filesystem admission.
+Host/instance/cohort/version are compared with independent expected values;
+generation/package/path and the existing credential-free executable attestation
+are rechecked before returning any password. Private canonical roots require
+same UID/0700; registry/password require single-link regular same UID/0600,
+no-follow checked inode read and unchanged metadata. The private password is
+64 lowercase hex characters, optional newline. URLs are loopback origins only.
+The resulting immutable descriptor supplies #1207's exact Server binding.
+
+This input snapshot does not prove a live Server's identity or policy/credential
+isolation. Future supervisor owns fresh instance IDs, startup publication and
+consumer revalidation. No live shared host launcher, proxy, borrowed lifecycle,
+ready/turn integration or existing-node adoption is enabled; parent #1195 remains
+Doing and #1196 shared recovery remains pending.
+
+Verified before ordinary main merge: PR2729 final head
+b750878e9dd52323ff4a239fb92328ad932a0287 -> main
+c01fe26d3df4a69326636929dde95f99c0b0cc9c (2026-10-14T05:03:19Z); fresh main
+ancestor verified. Ten required guards and four selected Docker jobs passed.
+CI tested merge 47446182019e6cc7a22b286a5a139de7b79d65b0.
+
+Admission38514296933 SUCCESS: V1 1.18.1 job115689517663/artifact11870209632;
+V1 1.18.34 job115689517450/artifact11870499336. Both artifacts independently
+downloaded/read: valid private inputs/immutable descriptor PASS, 27 filesystem,
+record and executable-attestation refusal cases PASS, registry descriptor ->
+real native exact session PASS; two stale-instance checks give 29 refusals per
+version. The replacement record in this fixture is input/binding validation,
+not evidence of a second real Server incarnation or process identity attestation.
+Synthetic password/files only, non-root Linux and network-none runtime; Windows
+ACL admission is explicitly refused, macOS/native production adoption untested.
+
+Checkpoint38514296967 SUCCESS, jobs115689517880/115689517615: independently
+downloaded reports each show 6 unit tests/0fail plus 7 native owned checkpoints
+PASS. Owned capture/import/resume regression is not shared migration completion.
+
+Preserved first failure: head228abadeabde69a35507d19ac4797196262e847e,
+run38514042581, both admission jobs FAIL before assertions because fixture
+realpathSync imported from node:path instead of node:fs (SyntaxError). Only the
+fixture import changed for the final head; production guards were not relaxed.
+This initial failure is not a guard mutation witness or a production failure.
+
+Obsolete own broad QA38514042600 ended Cancelled. Own final source38514296981
+and main duplicate38514597292 were cancelled after affected Docker/required
+checks passed; no whole-matrix PASS is claimed, no other owner's run stopped.
+No real node
+credentials/config/database/registry, account, model or process is read/changed.
+
+Reconstruction: .github/workflows/v1-host-admission-core.yml and test1208
+Dockerfile; exact Bun digest/source SHA/package integrity, temporary private
+roots/password/registry. deploy/node/opencode-v1-host/registry.template.json
+and README define persistent input layout and six recovery boundaries. No
+resident production service/proxy/tunnel mapping changes. Production secrets
+and histories remain Owner's encrypted backup/registration sources. Pin an
+exact main source to validate a version; revert this slice for software rollback.
+Full shared startup and data backup/final-checkpoint recovery are not claimed.

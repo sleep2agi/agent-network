@@ -1,0 +1,34 @@
+#906 configured Provider collection core — TEST ONLY
+Observed2026-10-11T10:09Z. Branch feat/906-existing-provider-reuse,
+base main080de32f642032cf02145ce9197b9b603b0b4788. Not merged or published.
+
+Docker: sg docker -c 'sh tests/test906-provider-collect/run.sh'
+Independent suite Dockerfile, exact Bun1.3.14 / Node22.22.2 base digests,
+agent-network package-lock npm ci. No global packages or production touched.
+Strict TypeScript changed modules PASS; actual CLI bundle built PASS.
+Image sha256:f395478bd8d4d56c8a4c03ae343b4d4d4aa3e8abc16ce3203d804df2d533ffe6
+(first implementation run, before generic-unit skip annotation/CI docs).
+Nonroot Docker, --rm --network none:5 PASS /0 FAIL,24 assertions.
+
+Coverage: collect configured source key via private envRef into daemon store;
+redacted readback; source TOML and auth bytes unchanged; lost-ACK replay returns
+same revision; existing sibling key/profile and disabled state retained;
+stale source/foreign network refused; official login not cloned; missing local
+key never falls back to caller's env. Final test invokes built CLI collect then
+list, not a mirror implementation. Synthetic credentials only; no OAuth,
+production inference, costs, remote Hub queue or client button verification.
+
+Runtime/Hub transport, binding authorization and client collect/create selector
+remain absent. This is NOT full#906 completion, NOT client239 inclusion, NOT
+evidence publicCLI165 supports collection. No node restarted; disposable
+container exited; worktree and test image retained. Source/node credential data
+remain outside Git; recovery scope documented in docs/daemon-provider-collection.md.
+
+18:25+08 CI increment: PR2598 collection job at exact f7e24405f SUCCESS.
+The native-application suite failed before applying Provider: its offline npx
+fixture still accepted onlyruntime130 while source CLI now requires131. The
+fixture now derives the one permitted exact package version from the bundled
+source-built package.json; no arbitrary-version or real-registry fallback.
+Narrow --rm/--network none Docker fixture check: exact131 resolves, old130
+refused. Full native suite remains to be checked on the corrected head.
+This is a test-input correction, not a native/real-account success claim.

@@ -1,0 +1,41 @@
+name: Original human sender fixtures
+on:
+  pull_request:
+    paths:
+      - 'tests/test8-runtime/**'
+      - 'tests/qa-hub-10-network-scope-regressions/**'
+      - 'tests/test1287-sender-fixtures/**'
+      - 'tests/lib/safe-rm.sh'
+      - 'server/src/tools.ts'
+      - 'server/src/rest-identity.ts'
+      - 'server/src/server.ts'
+      - 'server/src/auth.ts'
+      - 'server/src/db.ts'
+      - 'server/package*.json'
+      - 'agent-node/**'
+      - 'agent-network/**'
+      - '.github/workflows/human-sender-fixtures.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sender-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build locked source with pinned Node and Bun
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1287-sender-fixtures/Dockerfile -t human-sender-fixture-test .
+      - name: Original runtime SSE and two-network baselines with witnessed-red senders
+        shell: bash
+        run: |
+          set -euo pipefail
+          for fixture_case in baseline mutant-runtime mutant-scope; do
+            docker run --rm --init --network none -e FIXTURE_CASE="$fixture_case" -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} human-sender-fixture-test 2>&1 | tee -a report-test1287.txt
+          done
+          echo 'RESULT: PASS; both original baselines and both exact witnessed-red sender regressions' | tee -a report-test1287.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-human-sender-fixtures-${{ github.sha }}
+          path: report-test1287.txt

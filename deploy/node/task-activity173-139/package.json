@@ -1,0 +1,9 @@
+{
+  "name": "anet-task-activity-private-pair",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@sleep2agi/agent-network": "2.3.0-preview.173",
+    "@sleep2agi/agent-node": "2.5.0-preview.139"
+  }
+}

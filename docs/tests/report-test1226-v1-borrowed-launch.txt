@@ -1,0 +1,99 @@
+TEST-ONLY #1226 — borrowed V1 normal launcher readiness first slice
+Observed 2026-10-14. Linux isolated Docker; no production adoption or package release.
+
+Source PR: https://github.com/sleep2agi/agent-network/pull/2746
+Base: 778a6ca5d5a6b8232ace5408ef9ef4815afa6170
+Final source head: 41db16766abdf14b3a8de63ffa54e7c8f1c634d1
+CI checkout: da40599a59c138d5e01268c04e2bbf55e5ec00c1
+CI/main tree: d4e4e0573a38be4d9cac1d8b9a677286f8436940
+Ordinary head-locked merge: 97fc2e3b61e148824b75c46d260cb77715dd0846
+Merged: 2026-10-14T10:53:15Z. Fresh main ancestry and identical tree verified.
+Source final rollup: 101 SUCCESS /91 CANCELLED /1 SKIPPED; no pending/red.
+The broader QA run 38551210893 was cancelled after focused qualification and
+anet unit success; cancellation is not an all-QA pass.
+
+Actual native launcher run: 38551210694
+1.18.1 job115809333038 SUCCESS; artifact11886483437
+  zip SHA256 a5116b2280ab49e338271c758edf86de62b03a5d14e65a9c10911cdaebdf760e
+1.18.34 job115809332420 SUCCESS; artifact11886408533
+  zip SHA256 044ae37d4610b66cabe4cf33ff218f24bb971026cca9a3d0ea25bf36676a76eb
+Both exact reports were downloaded and independently read, including JSON
+source/version/result and nonzero test counts. Each: 6 actual launcher gates,
+66 runtime tests +26 launch/completion tests =92 PASS/0FAIL. The two versions
+repeat those same tests, not 184 unique cases. Native versions use the prior
+pinned wrapper/native package integrity, pinned Bun and Node22 Docker images,
+non-root user, --init/--network none and explicit private tmux socket; no default
+server/kill-server. agent-node is actually built and installed in the exact
+node_modules/@sleep2agi/agent-node package layout. anet is actually bundled
+from this source; neither production nor global local packages are adopted.
+
+Six actual gates:
+1. Wrong network/directory/incarnation/headless/secret-field/new-session/V2
+   selections refuse before native config or implicit owned startup. Secret
+   input sentinel is absent from errors; original config/Host remain intact.
+2. Two real built anet launchers return success only after node admission;
+   original synthetic inbox tasks go through native model/scoped MCP and reply
+   to original task IDs. A FIFO/parent IDs, sender provenance, exact status node
+   IDs and byte-preserved private config are verified.
+3. Fresh nonce/process-birth/config evidence passes; wrong nonce, stale time
+   and altered PID birth refuse with no owned-health fallback.
+4. Actual normal anet stop A closes only its bridge/MCP/config. Shared Host,
+   B's further native task and three private tmux Owner lifecycle sentinels
+   survive; intent persists and own launch receipt is removed. The terminals
+   are lifecycle sentinels, not a qualified native interactive TUI.
+5. Removing explicit selection with retained intent refuses owned fallback.
+   Real handleStartDoorbell spawns the normal built launcher, acknowledges
+   starting then started with the actual verified bridge PID, and resumes the
+   same existing native session/history. Fixture supplies its private synthetic
+   binary/HOME environment; this is not original-device daemon adoption.
+6. In-flight config identity drift retains unknown recovery/lease, removes
+   startup evidence and prevents automatic reopen/replay after config restore.
+   Own process stop leaves shared Host alive; no unknown cleanup is claimed.
+
+Layering: environment/integrity and admission refusals precede native original
+reply flow, then receipt/lifecycle/restart/unknown branches, then direct units.
+Additional startup units cover old-Hub refusal before spawn, wrong-mode intent
+not entering spawn-only success, replay and exact successful bridge ownership.
+Mirrored receipt modules are byte-compared inside the Docker gate.
+
+Final typecheck run38551210762/job115809332991 SUCCESS: ratchet selftest PASS,
+81 existing diagnostics /81 baseline, not zero TypeScript diagnostics.
+Full E2E run38551210704/job115809332915 SUCCESS; rename job115809332527 SUCCESS.
+Artifact11887750609 e2e-suite-logs-1
+zip SHA256 c486b4d74df5d5f504d084d4808dfd403326b487b8a6934e262fb5c1124da169
+All 8 logs were downloaded/read. Seven actual nonzero groups: Base139/Auth25/
+Networks28/Config16/LoopRuntime22/LoopPack12/LoopSelf47 =289 PASS/0FAIL.
+The full job's agent-network typecheck also passed. Existing runner diagnostics
+are retained in raw logs and do not override the actual per-group verdicts.
+Anet unit job115810532055 SUCCESS: 2133 PASS/11 SKIP/0FAIL across214 files,
+plus private tmux gates and24 PASS/0FAIL listing units; 6 runner groups/0fail.
+The tmux mutant's4 witnessed failures are expected mutation evidence, not a
+positive baseline failure. No all-QA claim is made.
+
+Preserved RED history (not erased or counted as production failures):
+- Initial head94f7acf3c4eaa4151c612dad33401248ea6d89ae:
+  run38549643099/jobs115804181911+115804182254 RED after7 refusal types passed;
+  launcher could not prove startup, original fixture omitted bridge diagnostics.
+  doc-symbol-pins38549643098/job115804182463 and mutation-pins38549642795/
+  job115804180799 RED from shifted doc lines/changed mutation anchor. The pins
+  were repaired without weakening stop assertions.
+- d98ecf31fd876907d6caf14504512aef33eda3e1 run38550078972/
+  jobs115805611259+115805611558 RED: isolated bridge logs actually show the
+  exact-pair gate refusing a raw source entrypoint outside node_modules.
+  Fixed fixture installation layout; preflight moved before detached spawn.
+- 7b0a6a4d68be273aecea712b2b8a7130006951fd run38550565238/
+  jobs115807218985+115807219438 RED after the first4 native gates passed.
+  Daemon returned start_failed before starting; fixture used n_0-style ID and
+  an unrelated directory instead of its canonical created-child layout. Source
+  inspection identifies the node_ ID predicate; that precise reason was not
+  printed by the old fixture. Corrected fixture IDs/directories and added actual
+  daemon receipt diagnostics. The final exact-head reports qualify all6 gates.
+
+Boundary: one-shot Linux admission/start evidence, not ongoing Host health,
+interactive native TUI readiness, hostile same-UID isolation, task completion,
+Win/macOS adoption, migration/checkpoint rollback or original-human feedback.
+#1226 retains its native TUI gate; parent1195 and migration1196 remain open.
+The same-change versioned design answers startup, ports, secret sources, upgrade,
+downgrade/migration and private data backup boundaries. No Host/TUI restart,
+latest/fork/new session, shared credential/config/provider change, production
+node adoption or package/installer publication was performed.

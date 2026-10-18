@@ -1,7 +1,8 @@
 // Finite V2 launcher: spawn is progress, never evidence that the runtime is ready.
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
+import { getAnetBinAbs, minimalEnv, resolveChildHome } from "./create-node-daemon.js";
+import { readHostSharedOpenCodeServer, withHostOpenCodeV2ClientPath } from "./opencode-shared-server-registry.js";
 import { forgetSpawnedChildIfPid, recordSpawnedChild } from "./stop-daemon.js";
 import { waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import type { StartDoorbellDeps } from "./start-daemon.js";
@@ -36,8 +37,11 @@ export async function completeOpenCodeStart(
       const admitted = await deps.callCommHub("ack_start_request", { request_id: requestId, status: "starting" });
       if (!admitted?.ok || admitted.status !== "starting") return { status: "start_failed", error: "opencode_start_progress_not_available" };
       const launchedAt = Date.now();
+      const registered = readHostSharedOpenCodeServer(join(
+        resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"));
       const child = (deps.spawnChild ?? spawn)(bin, ["node", "start", dirName], {
-        cwd, env: minimalEnv(), stdio: ["ignore", "ignore", "ignore"], detached: true,
+        cwd, env: withHostOpenCodeV2ClientPath(minimalEnv(), registered),
+        stdio: ["ignore", "ignore", "ignore"], detached: true,
       });
       return await new Promise<Result>(resolve => {
         const pid = child.pid;

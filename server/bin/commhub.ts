@@ -119,6 +119,13 @@ for (let i = 0; i < args.length; i++) {
     console.log(HELP);
     process.exit(0);
   } else if (arg === "--version" || arg === "-v") {
+    // Set by bin/anet-bin.ts before this file is imported. A compiled binary
+    // has no package.json beside import.meta.url (/$bunfs). npm leaves it unset.
+    const embedded = process.env.ANET_EMBEDDED_COMMHUB_VERSION?.trim() ?? "";
+    if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embedded)) {
+      console.log(embedded);
+      process.exit(0);
+    }
     const pkg = (await import("../package.json", { with: { type: "json" } })).default as { version: string };
     console.log(pkg.version);
     process.exit(0);

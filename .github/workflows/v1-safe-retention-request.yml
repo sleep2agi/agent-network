@@ -1,0 +1,42 @@
+name: V1 SAFE retention request observation
+on:
+  pull_request:
+    paths:
+      - 'agent-node/src/runtime/opencode-acp/child-env.ts'
+      - 'agent-node/src/runtime/opencode-copresence/runtime.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-checkpoint*.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-owned-safe-topology.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-safe-retention-request.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-host-registry.ts'
+      - 'agent-node/src/runtime/opencode-acp/binary.ts'
+      - 'agent-node/src/runtime/opencode-backend.ts'
+      - 'agent-node/src/runtime/opencode-versions.ts'
+      - 'agent-node/src/shared/opencode-preset.ts'
+      - 'tests/test1271-v1-safe-retention-request/**'
+      - 'tests/test1194-v1-shared-feasibility/package-integrity.json'
+      - '.github/workflows/v1-safe-retention-request.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  topology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.18.1', '1.18.34']
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build exact pinned default-wrapper fixture
+        run: docker build --build-arg OPENCODE_VERSION=${{ matrix.version }} --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1271-v1-safe-retention-request/Dockerfile -t v1-safe-retention-request-test .
+      - name: Observe and revalidate an actual default native allocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --init --network none -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} v1-safe-retention-request-test 2>&1 | tee report-test1271-${{ matrix.version }}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-v1-safe-retention-request-${{ matrix.version }}-${{ github.sha }}
+          path: report-test1271-${{ matrix.version }}.txt

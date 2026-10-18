@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { classifyTuiArgv, inspectLaunchHealth, LAUNCH_HEALTH_FILE, publishLaunchHealth, readLiveProcess, successfulLauncherExit, validateLaunchHealth, waitForLaunchHealth, type LaunchHealth } from "./launcher-health";
+import { classifyTuiArgv, inspectLaunchHealth, LAUNCH_HEALTH_FILE, publishLaunchHealth, publishSharedLaunchHealth, readLiveProcess, successfulLauncherExit, validateLaunchHealth, waitForLaunchHealth, type LaunchHealth } from "./launcher-health";
 
 function fixture() {
   const bridge = { pid: 200, ticks: "10", parent: 100, state: "S" };
@@ -36,6 +36,16 @@ describe("daemon OpenCode live launch generation", () => {
     const g = fixture(); g.args.set(200, ["agent-node", "--config", "/other/config.json"]); expect(g.check().ok).toBe(false);
     const h = fixture(); h.args.set(202, ["opencode", "--session", "ses_other"]); expect(h.check().ok).toBe(false);
   });
+  test("shared server is live but not a child of the bridge", () => {
+    const f = fixture();
+    f.record.serveOwnership = "shared";
+    f.live.get(201)!.parent = 300;
+    expect(f.check()).toEqual({ ok: true, bridgePid: 200 });
+    f.live.get(201)!.ticks = "999";
+    expect(f.check().ok).toBe(false);
+    f.record.serveOwnership = "unexpected" as any;
+    expect(f.check().ok).toBe(false);
+  });
   test("exit zero required independently of health", () => {
     expect(successfulLauncherExit({ code: 0, signal: null })).toBe(true);
     for (const e of [null, { code: 1, signal: null }, { code: 0, signal: "SIGTERM" }, { code: null, signal: null }]) expect(successfulLauncherExit(e)).toBe(false);
@@ -57,6 +67,18 @@ describe("daemon OpenCode live launch generation", () => {
       cleanup(); expect(JSON.parse(readFileSync(path, "utf8")).generation).toBe("ses_second");
       cleanupNew(); expect(() => statSync(path)).toThrow();
     } finally { child.kill(); await new Promise(r => child.once("exit", r)); rmSync(dir, { recursive: true, force: true }); }
+  });
+  test("shared health records the external server PID without taking ownership", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "test829-shared-health-"));
+    const server = spawn("sleep", ["30"]);
+    try {
+      const cleanup = publishSharedLaunchHealth(dir, "ses_shared", server.pid!);
+      const record = JSON.parse(readFileSync(join(dir, LAUNCH_HEALTH_FILE), "utf8"));
+      expect(record.serveOwnership).toBe("shared");
+      expect(record.serve.pid).toBe(server.pid);
+      cleanup();
+      expect(server.exitCode).toBeNull();
+    } finally { server.kill(); await new Promise(r => server.once("exit", r)); rmSync(dir, { recursive: true, force: true }); }
   });
   test("daemon removes only the exited PID and records verified bridge", () => {
     const source = readFileSync(join(import.meta.dir, "../create-node-daemon.ts"), "utf8");

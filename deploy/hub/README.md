@@ -164,19 +164,284 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### `.137` 部署（2026-10-13 已激活）
+
+#1109 MCP/REST Daemon 列表按权威 node_id 核有效凭据与心跳；旧兼容验证保留，
+旋转去重、三次 scope 批量读取，不修改 schema/节点生命周期。
+源码PR2696/main `36ed82249f661eb593375e72e375e59472bd41c7` 与实际 Docker 测试完整树一致；
+38368490408 SQLite123/PG123正常与6次断言反证、10required通过。
+正式main运行38368892713全部四门/上传/registry成功；16:29:45+08匿名NPM整包
+1253469B/SHA256 `6349cc906aa7d8c5ef603beea69117073d769703d2ec29fa4d9354c57720219a`
+及SHA1/SRI与原gated相同，preview137/latest30已核。
+部署PR2697/main `62edb5e34b9958ff5443b728202cb456aca4cb96` 的profile/lock已合，
+Docker profile38369437748、身份38369437789和10required通过；350安装文件匹配公开包。
+私有一致性备份integrity ok、network-none离线预检保留快照行数后，16:34:49+08
+仅 `commhub-hub` secured137生效，PID828760/restart95；实际入口 `runtime-v120-preview137`。
+profile等于deployment main，hub.env元数据/base不变，不带 `--update-env`。
+MCP现役列表7唯一daemon（4online/3offline），原task绑定未变；16:36:28+08
+113自然心跳/128SSE、2真实回复/2投递，新增关键错误0、PID/restart不变。
+这些是有界观察，非全节点/长期健康证明。
+回退保留 `runtime-v119-preview136` 和main `1a5b1a69e07902eef489342ca573fd7851889a55`
+的136 profile/lock；数据库/原密钥依既有私有来源，完整恢复仍NOT_COVERED。
+完整坐标/备份/预检/范围见 `report-test1109-hub137-publication.txt`；
+Node139自然活动与OpenCode原账号正常重启验收仍分别保持未结。
+
+### `.136` 部署（2026-10-13 已激活）
+
+源码PR2687/main `8c2dcb3a16cbd78581d783e7ae1b2e87b9d82e3b` 与实际测试树一致；SQLite24/PG24
+HTTP回归、8次断言反证、会话令牌兼容和10required通过。
+改密码可显式撤销本人具名网络令牌，默认列出脱敏保留清单，节点令牌和其他用户保留。
+正式main运行38351821700构建、四门、publish与registry元数据回读全部成功；
+npm tarball独立GET曾404；2026-10-13 14:03:47+08晚回读已可下载且完整byte/SRI一致，
+#1123分发差额已具备结案证据。继续使用经核验的同字节GitHub原包lock，无需再次切换现役：
+精确main tag `commhub-server-v0.9.0-preview.136`，匿名完整byte/SRI与gated一致。
+公开包SHA256 `47449d1e6163e4ec7595d3124676ad655845ead7e22d0184777c2dade3dd7e81`，348安装文件一致。
+
+准备profile PR2688/main `b51ae1574be397ca618fe2e32eacec164774cf94`；同字节下载源PR2690/main
+`1a5b1a69e07902eef489342ca573fd7851889a55` 均通过专用Docker/10required。
+lock只替换包resolved到GitHub原包，SRI/version/transitive保持。
+私有一致DB备份完整性ok，Bun1.4.0隔离离线schema预检保留快照行数后，
+于 `2026-10-13T05:52:53.308633+00:00` 仅选定Hub升级为secured136，PID712535/restart94。
+实际入口 `runtime-v119-preview136`；profile与deployment main一致，base/env文件元数据不变。
+保留 `runtime-v118-preview135` 回退；恢复该历史版本时使用deployment main
+`6109c69773069eb0adc8035326ebc887a6d3b7cb` 的135 profile/lock。
+生产数据与原值密钥来自既有私有来源，完整密钥恢复仍NOT_COVERED。
+CLI173的正式main-gated GitHub下载和14:03:48+08 npm完整包均已核验；
+原npm运行超时仍保留FAILURE，真实原客户端139活动验收仍独立未结。
+来源/SRI、backup/预检、自然流量及剩余CLI173/Node139差额见
+`report-test717-hub136-publication.txt`；公开包/Hub激活不代签原客户端139实际活动。
+
+### `.135` 部署（2026-10-13 已激活）
+
+#1113 按精确任务/node/network/原thread/turn上报活动，续租空闲预算，保留
+派发总cap；重复消费、ACK及节点heartbeat不续租，terminal不复活。
+源码 PR2683/main `47816a61095f196cf726f194f482739bc09f6a82`；SQLite130/PG121/runtime+pair52及
+11次断言反证、既有caller/sender/pair及10个必需门通过。
+Hub135/Node139正式运行 `38345772164` / `38345774136` 的四门与
+preview发布/registry回读成功。Node139可用且字节验证后才派CLI173。
+CLI首跑38346683979因文档preview172版本断言失败，未发布；文档PR2685/main
+`064ed34c9eba20f852a32dbe42b98389c3c2ce63` 修戳后以该精确main重新构建CLI173，正式运行
+`38347806170` 四门成功及npm publish成功，但registry900秒回读失败；CLI173仍未核实公开，preview仍172。保留该失败，不重发173，出现后只读核byte/SRI。各包源码目录保持相同，完整来源SHA
+分别记录，不把文档修正后的CLI仓库SHA称作既有Hub/Node的发布SHA。
+
+部署 PR2684/main `6109c69773069eb0adc8035326ebc887a6d3b7cb`，profile/lock选择
+`runtime-v118-preview135`，保留 `runtime-v117-preview134` 回退，传递依赖不变。
+公开Hub与main gated字节一致，SHA256 `4bf1d5bb25065cf7dbd52b6834a0b1563c7a6575c20b0a1346d92674ad20c29a`；347安装文件一致。
+私有一致备份及离线schema预检通过后于 `2026-10-13T04:29:38.150364+00:00` 确认
+secured135、真实v118入口、PID650734/restart93。
+原base/env保持，端口/代理/环境来源沿用下方runbook。
+
+具体三包制品、快照、自然流量和恢复边界见
+`docs/tests/report-test1113-hub135-activation.txt`。原通信牛仍控制器153/Node121，
+未中断本原turn，也没有以Hub135冒充已采用Node139。#1113/#1105保持2/3，
+待正常升级入口、原vendor thread保持及真实139活动pulse验收。私有数据仍靠
+备份，完整key DR仍NOT_COVERED；短观察不代签全舰模型链路。
+
+### `.134` 部署（2026-10-13 已激活）
+
+#1112 修复排队占用调度执行预算：消费时间优先，旧节点回落开始时间，未执行
+回落派发时间；执行预算及派发总上限仍有界。持续精确任务活动续租留在 #1113，
+母卡 #1105 不提前结案。源码 PR2680/main `c641a82626d16c1ad627fb977011f14835ec9b2c`；
+专用 Docker CI38341909946 和10个必需门通过，SQLite38/PG29及4次断言反证通过。
+正式 main 发布 `38342053049` 构建、四道门、preview发布及registry回读成功。
+公开包与该 main gated 制品逐字节一致，SHA256 `14cd606f422f098b97d4003f51d53803231b90bf83c693d67323aa966fc1d61f`。
+
+部署 PR2681/main `875137cbe333fd83da97a8f008d1c84186ad8c26`；profile 与 managed lock 选择
+`runtime-v117-preview134`，保留 `runtime-v116-preview133` 回滚，全部传递依赖
+保持原 lock。专用 launcher Docker 和10个必需门通过；346安装文件与公开包一致。
+原私有一致备份及离线schema迁移预检成功后，于 `2026-10-13T03:36:09.412881+00:00` 确认现役
+secured134、真实v117入口、PID607441/restart92。
+原base及环境文件保持，业务节点不切runtime/thread/model/provider/login。
+
+有界自然观察、快照计数和备份证据见
+`docs/tests/report-test1112-hub134-activation.txt`。常驻启动/PM2、端口/反代、
+环境来源、升级验证、回滚及数据恢复边界沿用下方runbook。私有数据仍须独立
+备份，密钥来源仍为 NOT_COVERED；短观察不等于全舰执行或完整灾难恢复。
+
+### `.133` 部署（2026-10-13 已激活）
+
+源码 PR2677 已正常合入 main `65923509c55f54e14082ac3804ae883d37723f44`。
+Daemon 就绪的凭据和心跳、删除请求的凭据冻结/旧请求兜底、改名凭据标签
+均按权威节点身份处理，保留合法旧 unbound 及唯一 null-ID 心跳兼容；
+改名遇到多条同名节点记录时拒绝。真实 HTTP108、34次断言变异、103项
+ACK/权限/收编/stop-delete 回归、发送方核心与旧 .110/.121 兼容均通过。
+正式 main 发布运行 `38338523163` 的构建、四道门、preview 发布及 registry
+回读全部成功。公开包与该 main gated 制品逐字节一致，SHA256
+`70b0b96fb95ec68ddfb55eafb6f2715a948fac0b9b7b36e026a82f3bfdd93ad6`。
+
+`provider906/package*.json` 钉 `.133` 和该 main 制品 SRI，全部传递依赖
+保持原 lock；profile 选择 `runtime-v116-preview133`，回滚保留
+`runtime-v115-preview132`。部署 main `446fa719a0e6542396ca5f66079d03c7028f5ec2`
+于2026-10-13 11:04:28+08确认生效，证据：
+`docs/tests/report-test690-hub133-activation.txt`。
+
+权威 base launcher、PM2、Bun1.4.0、数据库、端口/反代及 owner-only 密钥
+来源沿用本 runbook。先取私有 VACUUM INTO 一致性备份，运行
+`tests/test906-hub-upgrade-preflight` 的隔离离线预检；仅在公开全包验证及
+预检成功后安装本目录 profile，重启选定 `commhub-hub`，保留 base、环境
+文件、旧 runtime 与业务节点身份。验证真实进程入口、secured health、
+稳定重启计数及自然心跳/任务事件；失败恢复旧 profile，私有数据和原值密钥
+仍从独立备份/安全来源恢复，短观察不代签全舰执行或灾难恢复。
+
+### `.132` 部署（2026-10-13 已激活）
+
+源码 PR2674 已正常合入 main `c49e9316826a064f1db715319fcc7adbde12527a`，MCP/REST 任务发送方
+使用凭据解析出的节点 ID；改名同时核对节点与会话注册表。核心 HTTP、断言
+变异、ACK/权限回归及旧 agent-node .110/.121 兼容均通过。
+正式 main 发布运行 `38335516515` 的构建、四道门、preview 发布及 registry
+回读全部成功。公开包与该 main gated 包逐字节一致，
+SHA256 `c2e3503a7819032c2e89ef73cfdf6235f0e48573ef5e4a268dc00775f9edf145`。
+
+`provider906/package*.json` 钉 `.132` 及该 main 制品 SRI，传递依赖保持
+原 lock；profile 选择 `runtime-v115-preview132`，回滚保留
+`runtime-v114-preview131`。部署权威 main `53e23e7421138967e0f6534aa6e1ad1fb8d66c42`
+于2026-10-13 10:17:29+08激活；证据见
+`docs/tests/report-test691-hub132-activation.txt`。
+
+权威启动脚本、PM2、Bun1.4.0、数据库路径、端口/反代和 owner-only 密钥
+来源沿用本 runbook。先以私有 `VACUUM INTO` 备份运行
+`tests/test906-hub-upgrade-preflight` 离线预检；原子安装本目录 profile 后仅
+重启 `commhub-hub`，保留原 base launcher、环境文件和旧 runtime。
+核新进程真实入口、secured health、重启计数与自然心跳/任务事件；失败恢复
+原 profile，不把短观察当全舰收发或数据灾难恢复验收。私有数据及密钥不入 Git。
+
+### `.131` 部署（2026-10-13 已激活）
+
+软件实现 main `9fc79fab1d697f665bf3e95d7c420a27e284a4dd`（PR2671），
+HTTP/MCP 任务署名按认证身份记录，人类署名与节点回填、隐式父任务保持
+分离；SQLite/PostgreSQL 核心和既有传输回归已通过。正式公开/部署
+main `e81debac14db091da41ea02272dd2184b3b1744f`（PR2672），运行
+`38331511688` 的构建、四道门、preview 发布与 registry 回读全部成功。
+`provider906/package*.json` 钉 `.131`，公开包与正式 gated 包
+逐字节一致，SHA256
+`5384ecb96e40954d2a6d749ab05c5ca2e38827b70e079542cda6e308b26e4dba`。
+传递依赖保持精确原 lock，不重新解析。
+
+profile 选择 `runtime-v114-preview131`，回滚保留 `runtime-v113-preview130`。
+启动权威仍为本目录 base launcher/profile/ecosystem；Bun1.4.0、PM2
+`commhub-hub`、9200 及既有反代/隧道保持。密钥仍由管理员从原
+owner-only `~/.commhub/hub.env` 安全供给，不改值或生成新 vault key。
+
+先做 owner-only 一致性 SQLite 备份和完整性核对，在现有 Docker 离线
+预检中用实际 Bun1.4 与公开包确认行数/Provider 状态保留。精确 lock
+复制到 inactive sibling，用 `npm ci --ignore-scripts --no-audit --no-fund`
+安装并核包文件。profile 必须通过 Actions Docker 目录/显式回滚检查，
+正常合入 main 后才原子安装为 PM2 入口；只重启 `commhub-hub`，不加
+`--update-env`。核真实 PID/入口、health `.131`、自然心跳和追加错误日志。
+失败则恢复 `.130` profile，仅重启 Hub；保留两个 runtime 和原 DB。
+账号、业务数据、vault key 依赖私有备份/原认证来源，Git 不提供这些
+业务状态。灾难恢复、全网 ACK、长期稳定性及真实模型未由此验收。
+
+2026-10-13 09:32:15（东八区）已按上述步骤激活；完整证据见
+`docs/tests/report-test696-hub131-activation.txt`。345 个安装包文件
+与匿名公开/gated 包相同；一致性备份完整性为 ok，实际 Bun1.4 离线
+预检保留 331 sessions / 81384 tasks / 302 nodes 等全部所检表行数。
+真实 PID515557、入口 v114-preview131、health131/secured，PM2 restart
+88→89；env 元数据及 base launcher 保持，profile 与精确 main 相同。
+短窗已见自然心跳、投递和回复，追加日志没有新 vault key 缺失或崩溃
+标记。少量投递 stale warning 和既有调度 stuck timeout 另按元数据记账，
+不把服务恢复说明成全网任务已经完成。
+
+### #689 `.130` 部署（2026-10-13 已激活）
+
+精确软件 main `7f12230b7eb064aa56131bbc17fc21c944f9a6d0`（PR2668），
+正式发布运行 `38326074270` 的构建、四道门、preview 发布与 registry
+回读均 SUCCESS；验收见 `report-test689-hub130-activation.txt`。本轮 source
+核心 Docker CI SQLite/PostgreSQL 各 36 项通过。
+
+当前目录的 `provider906/package*.json` 将 sibling 输入钉为 `.130`，
+包 SHA256 `91fde58a1c8411a1e4d242faa55fea19fb7a9fa844aaa070c3075bdc98976f80`；
+部署前必须确认公开下载与正式 main gated 包完全一致。传递依赖没有重新解析。
+profile 选择 `runtime-v113-preview130`，回滚保留 `runtime-v112-preview129`。
+启动权威仍为本目录 base launcher/profile/ecosystem；Bun1.4.0、PM2
+`commhub-hub`、9200 与既有反代/隧道、DB 路径保持。密钥仍由管理员从
+原 owner-only `~/.commhub/hub.env` 供给，不改值或新生成 vault key。
+
+先做 owner-only `VACUUM INTO` 一致性备份、完整性核对与现有 Docker
+离线迁移预检，再复制精确 lock，以 `npm ci --ignore-scripts --no-audit
+--no-fund` 安装 inactive sibling 并逐字节核对公开包。profile 必须通过
+Actions Docker 目录/显式回滚验证并正常合入 main，之后才原子安装为
+现有 PM2 入口。仅 `pm2 restart commhub-hub`，不加 `--update-env`。
+切换后核对真实 PID/入口、health `.130`、心跳与错误日志；失败则恢复
+备份的 `.129` profile 并仅重启 Hub。软件无 schema/adapter/dependency
+变化；数据、账号与 vault key 仍依赖私有备份/原认证来源，Git 不提供
+这些业务状态。本轮不宣称灾难恢复、真实模型或全网 ACK 已验收。
+
+2026-10-13 08:21:23（东八区）已按上述步骤激活，部署源 main
+`d8537c633dc3573419c1bd1d8b28ea5c394212c1`（PR2669），软件源仍为
+`7f12230b7eb064aa56131bbc17fc21c944f9a6d0`。installed 344 个包文件
+与公开/gated 包逐字节相同；生产 Bun1.4.0 的 offline preflight 保留
+331 sessions / 81264 tasks / 302 nodes 等全部表计数与 provider 行。
+真实 PID459109、parent1613、入口 v113-preview130，health130/secured。
+PM2 restart87→88，仅本次手动重启；环境文件元数据与 base launcher
+保持。切换后已见自然心跳、投递和回复终态，自有 inbox 读取正常；
+日志追加窗 vault_master_key_missing/panic/segfault 为0。未以短观察
+替代全网 ACK、长期稳定性、真实账号/模型或节点密钥 metadata 验收。
+
+### #688 / #1075 `.129` 配置（2026-10-13 已激活）
+
+本轮精确软件 main 为 `45a7cff26b389bc9e09301bf1729922d9a6ae052`，
+正式发布运行 `38322287810` 的构建、四道门、preview 发布及 registry
+回读全部 SUCCESS。匿名完整 tarball 与该 main 的 gated 包逐字节相同：
+1,234,902 字节，SHA256
+`0dc85276a093caf33f55431969d3cc680c0519a8624cdf34c23447d919fa558c`。
+该轮 PR2666 的 `provider906/package*.json` 锁定实际 npm URL、SHA512 integrity；
+传递依赖未重新解析或变更。npm latest 渠道保持原值。
+
+profile 选择新 sibling `runtime-v112-preview129`，保留当前
+`runtime-v111-preview128` 与旧入口用于回滚。软件包含收件/ACK 调用者
+校验和节点密钥能力的心跳 schema 修复；没有 DB/adapter/schema 变化。
+常驻启动、Bun、PM2、9200、反代/隧道和原 owner-only `hub.env` 来源保持。
+复制精确 lock 后以 `npm ci --ignore-scripts --no-audit --no-fund` 固化安装。
+当前一致性 SQLite 备份留在主机 owner-only backups，不能上传至 CI；
+现有 Docker 离线 preflight 可通过 `HUB_PREFLIGHT_VERSION` 与
+`HUB_PREFLIGHT_INTEGRITY` 指定本次公开包的独立预期值，旧 `.126` 默认仍可用。
+
+profile 必须先通过 Actions Docker 目录选择/显式回滚检查并正常合入
+main，才可原子安装为现有 PM2 入口；逐字节核对 Git 与安装副本。
+仅 `pm2 restart commhub-hub`，不加 `--update-env`；随后核对真实
+监听 PID/包目录、health `.129`、自然节点心跳/ACK 和新增错误日志。
+若失败则恢复备份的 `.128` profile 并仅重启 Hub，保留两个 runtime、
+DB 和旧状态。内存中未确认的密钥请求会过期/丢失，不能盲重放。
+
+软件发布和 profile 检查不代表已激活或密钥实际读写已验。原 vault
+密钥、账号和 DB 内容仍依赖管理员的加密备份或重新认证；Git 只重建
+软件和过程，不提供这些数据，也不宣称本轮完成灾难恢复演练。
+
+2026-10-13 07:42:03（东八区）已按上述流程窄切换。部署源 main
+`b7993870774ee3477812f16bea74400549f412a2`（PR2666）；软件源仍为
+`45a7cff26b389bc9e09301bf1729922d9a6ae052`，入口不是分支构建。
+切换前一致性备份完整性通过，旧 `.128` 入口/runtime 保留；公开包和
+新安装全部 343 文件字节相同。安装 Git profile 后只重启既有 Hub，
+没有 `--update-env`。实际 PID `427293`、父 PM2 `1613`，入口为
+`runtime-v112-preview129`；health `.129`/secured/330 会话，SSE 恢复120，
+切换后自然心跳115。本人MCP收件可用，不存在验证别名的读取/ACK均被
+身份检查拒绝，没有访问其他节点收件或修改真实任务。
+截至07:44:38，PM2重启计数86→87只有这次操作；新增日志采集区间内
+vault缺失/panic为0。完整证据见 `report-test688-hub129-activation.txt`。
+节点密钥已有两个新心跳能力字段落库，合法用户的真实目标元数据回读
+仍待原#1075收口；本次不外推密钥实写或所有 runtime 完成。
+
 ### #906 的精确版本部署配置
 
 `hub-daemon.sh` 默认值仍对应 CLI 的兼容基线，不是线上最新版本。
-`hub-provider906.sh` 是 `.121` 的无密钥部署配置：选择
-`~/.commhub/runtime-v105-preview121`，保留目标 Hub 原本开启的 side-thread
+以下 `.122` / `.124` / `.125` 段落是已部署历史；`.126` 已激活，
+`.127` 的待激活精确配置与回滚见本节末尾。
+`hub-provider906.sh` 的历史 `.122` 无密钥部署配置选择
+`~/.commhub/runtime-v106-preview122`，保留目标 Hub 原本开启的 side-thread
 功能（显式设置 `COMMHUB_ENABLE_SIDE_THREADS=0` 仍有效）。不能只覆盖启动器
 而未安装这个精确 runtime。发布源是 main
-`b4413131b73c52c286beec46509773716698d89f`，包是
-`@sleep2agi/commhub-server@0.9.0-preview.121`；来源和离线迁移结果见
-`docs/tests/report-test906-hub121-preflight.txt`。预检通过不代表已部署。
+`231bf8c9711aacd9b2f78afce7c58a1873f3d280`，包是
+`@sleep2agi/commhub-server@0.9.0-preview.122`；正式运行 `38121256184`
+已完成 npm 发布与 registry 回读。锁文件使用同字节 GitHub 原包：
+`commhub-server-v0.9.0-preview.122/sleep2agi-commhub-server-0.9.0-preview.122.tgz`，
+SHA256 `a47a12d03db41fbf5bd2a95a0c0f4a2107d771c17aa3487c58c490fb000c553a`。
+来源和新增表/字段的离线迁移结果见
+`docs/tests/report-test906-hub122-preflight.txt`。预检通过不代表已部署。
+此前 `.121` 的历史证据保存在 `report-test906-hub121-preflight.txt`，不能当作 `.122` 验收。
 
 该部署的完整 npm 输入锁在 `deploy/hub/provider906/package*.json`，包括发布包
-的 registry URL 与 integrity。空目录安装时复制这两个文件到上述 sibling
+的 GitHub URL 与 integrity。空目录安装时复制这两个文件到上述 sibling
 runtime，然后在该目录执行 `npm ci --ignore-scripts --no-audit --no-fund`。
 不要只按版本重新解析浮动的传递依赖；保留旧 runtime 和密钥来源不变。
 
@@ -187,11 +452,245 @@ runtime，然后在该目录执行 `npm ci --ignore-scripts --no-audit --no-fund
 PM2 定义、端口、反代、数据库路径与 `hub.env` 密钥来源不变，不使用
 `--update-env`。按上文五条核对真实运行版本、心跳和 ack，再记录实际切换。
 
-本次回滚目标是已保留的 `runtime-v104-preview115`。切换前备份原启动脚本；
+本次回滚目标是已保留的 `runtime-v105-preview121`。切换前备份原启动脚本；
 需要回滚时恢复该备份并仅重启 `commhub-hub`，不删除 runtime 或数据库表。
 软件回滚不撤销已应用的 Provider 配置；数据库内容和 vault 原始密钥仍需要
 独立加密备份，Git 不含这些材料。此配置不改变 CLI `PINNED_SERVER_VERSION`，
 也不升级任何 Daemon 或节点。
+
+`.122` 比 `.121` 新增 `daemon_provider_logins` 意图表和
+`node_create_requests.clone_json` 字段；OAuth token 仍只留在 Daemon，
+不写 Hub 数据库。切换前将当前 SQLite 做一致性 `VACUUM INTO` 备份，
+只向隔离 Docker 挂载离线备份副本，保留原库、vault 密钥及旧 runtime。
+服务启动入口和共享启动器如上；继续使用既有 PM2 `commhub-hub` 定义、
+9200 端口与原反代/隧道（不修改拓扑），原 `~/.commhub/hub.env` 是
+由该主机管理员安全保管的密钥源，不得提交 Git 或拷贝其他节点身份。
+实际切换只重启该 Hub；随后以 `/health` 的 `.122`、监听进程命令行、
+近期节点心跳/任务 ack 校验真实生效。回滚恢复原启动器并只重启 Hub，
+保留新增状态；存在未终结登录意图时先确认 Daemon 侧结果，不直接重放。
+生产数据、vault 密钥和账号不由 clone 仓库恢复，必须从管理员的加密备份
+或重新认证获取。备份策略和路径沿用本 runbook 前述生产备份步骤。
+
+### #906 / #907 上一轮 `.124` 配置（2026-10-11 已切换）
+
+上一轮已部署的入口 `hub-provider906.sh` 选择 `runtime-v107-preview124`；原
+`runtime-v106-preview122` 保留为回滚目标。包从精确 main
+`ad381202cbba00c80efc30522801dedd810fbbea` 的正式运行 `38142238557`
+构建，四道门及发布/registry 核实全部通过。匿名下载与正式构建 tarball
+SHA256 相同：`e4391276facfcd5908c9e773ee6e0898ce14402247458ca068e8ce4e6b1d9748`。
+`deploy/hub/provider906/package*.json` 记录实际 npm URL、完整 integrity 和
+传递依赖锁；复制到空 sibling 目录再 `npm ci --ignore-scripts --no-audit
+--no-fund`，不覆盖旧安装或使用浮动依赖。
+
+本版本新增 `hub_provider_configs` / `hub_provider_bindings`，保留既有登录
+意图及 Provider 状态。切换前按上文生成一致性离线备份，在独立 Docker
+中用正式包验证迁移、旧行数及启动/认证读；不将活库或 `hub.env` 挂入测试。
+上述预检通过、且部署入口已合入 main 后，才安装 Git 的共享启动器和版本
+配置（0700），逐一核对字节，保留原入口备份；只重启 `commhub-hub`，不加
+`--update-env`。按实际监听进程、`/health` `.124`、新心跳/ack 和错误日志
+核对，而不是只看 PM2 online。端口9200、反代/隧道、DB 路径和权限不变。
+
+密钥仍来自主机管理员的 owner-only `~/.commhub/hub.env`；Hub Provider
+vault 要求原 `ANET_HUB_SECRET_VAULT_KEY` 为32字节的64位十六进制值。
+仅检查是否符合格式，不输出值、不换身份或新造密钥替换旧密文来源。
+DB 和该原始密钥必须通过独立加密备份恢复，具体保险库记录名仍未覆盖，
+Git clone 不含数据或登录账号。回滚恢复原入口选择保留的 `.122` 并仅
+重启 Hub；保留新增表和待处理状态，软件回滚不撤销已完成的绑定。
+2026-10-11 21:40:50（东八区）已按上述流程切换：部署入口来自合入 main 的
+`fb2e5c81ac361d5554530af1925dae41542b5039`（PR2604），运行的 npm 包仍是上述
+`ad381202` 正式构建。监听9200的实际 Bun PID3094572，父进程为既有 PM2
+PID1613；`/health` 返回`.124`、320会话、secured。41秒内SSE恢复113连接，
+随后两台Daemon及云盘牛、TMAI狗、客户端牛、TMHR均有新心跳；TMAI负责人
+保留升级前的认证故障离线状态，不冒称恢复。自然业务已有两次任务投递和
+启动事件，最初观察窗尚无新`task.ack`，这一项需继续观察而不是派生产测试。
+启动器备份位于 owner-only `~/.commhub/backups/provider906-p124-s7X783/`。
+具体预检与切换边界见 `docs/tests/report-test906-hub124-preflight.txt`；不宣称
+真实 vault/模型权益验证、客户端241已发布或空机恢复演练完成。
+
+### #1020 `.125` 配置（2026-10-11 已切换）
+
+本次 `hub-provider906.sh` 默认目录改为
+`runtime-v108-preview125`；保留上述已运行 `.124` 的
+`runtime-v107-preview124` 作为回滚目标。软件源码已合入精确 main
+`519af0236985957bb0ff70685052673bdd0b2373`，正式发布运行是
+`38151056880`，构建、四道门及发布/registry 核实均成功。
+2026-10-11 23:48（东八区）Docker 匿名下载的正式 npm tarball 与
+CI 制品字节摘要匹配：1229363字节、SHA256
+`f289b40562f5f2a87f38cb6cf9dc8a439efb23c7b56930375bcb688dc9fac555`。
+
+2026-10-11 23:59（东八区）已按上述流程窄切换。部署配置来自正常合入
+main 的 `30f803318a8bcfc3b3737c2b577d9fe5faee1b40`（PR2609），与软件
+包源 `519af023` 分别记录；Git 启动器与安装副本逐一 `cmp` 相同，0700。
+仅 `pm2 restart commhub-hub`，没有 `--update-env`，未重启 Daemon 或业务节点。
+监听9200的实际 Bun PID3216148，父PM2 PID1613，命令行选择上述 `.125`
+固化安装；Bun1.4.0 实际二进制摘要与 Docker 预检相同。健康接口返回 `.125`、
+321会话及 `security=secured`，28秒自然恢复113条SSE连接；到次日00:00，
+两Daemon及云盘牛、TMAI狗、客户端牛、TMHR均有切换后的新心跳。
+TMAI负责人保留升级前的认证故障离线状态，不冒称修复。初始观察窗新增日志
+中 vault 缺失和 panic 均0，尚无新 `task.ack`，继续观察自然回执，不派生产测试。
+PM2 restart计数仅本次人为操作81→82，观察窗没有额外重启。
+次日00:04只读回看本网络自然 `task_events`：切换后15次投递、17次启动、
+19次回复，最新回复00:04:27；独立 `task.ack` 仍0。前面的日志观察不等于
+持久任务事件查询；本次未制造任务、读消息内容或改变任何事件。
+一致性DB备份及旧入口位于 owner-only
+`~/.commhub/backups/provider1020-p125-SrAkL8/`；旧 `.124` 安装保留。
+具体字节、隔离预检和激活证据见
+`docs/tests/report-test1020-hub125-preflight.txt`。此升级不宣称解决 #1027
+子节点token401，也不代表客户端 `.243` 已发布或生产模型权益验证。
+精确 URL、SHA512 integrity 和未变的传递依赖锁已记录在
+`provider906/package*.json`；本节不能作为“已经部署”的证据。
+
+`.125` 增加 Provider 对已存 vault 名称的显式引用；不新增本次数据库
+迁移，也不自动轮换已分发的密钥副本。第一条已验证适配链是
+Codex Responses/API key，不代表所有 runtime 或真实供应商权益。
+客户端引用入口要求 Hub `.125`、CLI `.166`、runtime `.132`；
+客户端 `.242` 的密钥库入口不等同后合入的引用 UI。
+
+正式切换仍按前述流程：先核对公开 tarball 与发布制品的精确摘要，
+更新 `provider906/package*.json` 的实际 URL、integrity 和依赖锁；
+生成当前数据库一致性备份，在 Docker 中用离线副本检查包、schema、
+启动与认证。只有这些输入落位、部署入口合入 main 后，才可从 Git
+安装共享启动器和配置，安装到新的 sibling 目录并窄重启
+`commhub-hub`（不加 `--update-env`、不重启业务节点）。随后核对
+监听进程实际目录、`/health` `.125`、自然节点心跳/ack 和错误日志。
+
+服务仍用既有 PM2 定义、Bun、9200 端口及前述反代/隧道；DB 路径和
+权限不变。密钥继续由主机管理员从原 owner-only `hub.env` 提供，
+不能生成替代 vault 密钥。回滚恢复已保留 `.124` 的入口并仅重启
+Hub，保留数据库与已分发状态。生产数据库、原 vault 密钥和登录账号
+只能从管理员的加密备份或重新认证恢复，不包含在 Git；保险库记录名
+未覆盖这一缺口继续保留，不宣称已完成空机恢复演练。
+
+### #1027 `.126` 部署（2026-10-12 已激活）
+
+本次配置选择 `runtime-v109-preview126`，原 `.125` 的
+`runtime-v108-preview125` 与原入口保留为回滚目标。正式软件来自 main
+`42fcf114a77b7862c55ec32328923eced9b43f22`；发布运行 `38165547126`
+的四道门、npm 发布与 registry 核实均 SUCCESS。匿名 Docker 下载的
+正式 tarball 与该运行的 gated-tarball 内层包字节相同：1230017 字节，
+SHA256 `9ab55f1ff33c1802749ee647998d7d016fc04e81fe0112df282c595436cb3817`。
+精确 URL / SHA512 integrity 在 `provider906/package*.json`，传递依赖锁未变。
+
+`.126` 在创建请求回读中补齐 `network_id`，配套 Daemon 要使用 CLI
+`2.3.0-preview.167` / runtime `2.5.0-preview.133`；客户端 `.244` 本身
+不会升级这些服务。软件发布不代表生产激活或三 runtime 建节点验收。
+原 `.125` 的离线一致性备份已完成 `.126` schema/启动/认证核心预检，
+见 `docs/tests/report-test1027-hub126-preflight.txt`；旧备份不是当前生产快照。
+
+激活前仍按上文流程重新保存原启动器并生成当前 DB 一致性备份；把本节
+精确锁复制到新的 sibling 目录，执行 `npm ci --ignore-scripts --no-audit
+--no-fund`。部署配置正常合入 main 后，安装 Git 共享启动器和此 profile，
+逐一核对部署副本字节。服务继续使用既有 PM2 `commhub-hub` 定义、Bun、
+9200 端口、原反代/隧道、原 DB 路径与 owner-only `hub.env`；不复制或
+替换密钥。只重启 Hub，不使用 `--update-env`，不重启业务节点。
+随后核对真实监听进程入口、`/health` `.126`、自然心跳/任务回执与错误日志。
+
+失败时恢复原 `.125` 入口并只重启 Hub，保留两个安装目录、DB 与配置备份。
+软件回滚不回退节点会话或已分发 Provider 状态。生产 DB、vault 原密钥和
+账号仍来自管理员加密备份或重新认证，不包含在 Git；密钥备份保险库记录名
+未覆盖的旧缺口保留，未宣称完整空机恢复或现实 OAuth / 模型权益验证。
+
+2026-10-12 03:12:33（东八区）按上述流程窄切换：部署源 main
+`b63b844e5766c2fc012757689b62863a83a89977`（PR2627），正式包软件源
+仍为 `42fcf114a77b7862c55ec32328923eced9b43f22`。切换前新一致性备份
+位于 owner-only `~/.commhub/backups/create1027-p126-YGAMoP/`，旧入口和
+共享启动器均保留；新备份的 schema、真实安装包启动与隔离认证读在 Docker
+通过后才安装 Git 的两个启动器（0700、逐一 cmp 相同）。仅执行
+`pm2 restart commhub-hub`，没有 `--update-env` 或业务节点重启。
+实际 Bun PID3381400、父 PM2 PID1613，入口为 `runtime-v109-preview126`；
+03:13:44 健康接口为 `.126`、323 会话、114 SSE，新增日志 vault 缺失/panic
+均0，PM2 计数83→84仅本次人为操作。Daemon 和业务节点有切换后自然心跳；
+初始日志观察未见独立 `task.ack`，不将此项算已验或制造生产测试。
+详细证据见 `docs/tests/report-test1027-hub126-activation.txt`。两台 Daemon
+的升级及三 runtime 子节点创建验收独立记录，不由本次 Hub 激活外推。
+
+### #1053 / #1045 `.127` 配置（待激活，不是生产已升级）
+
+此 profile 选择新的 sibling `runtime-v110-preview127`，保留已运行
+`.126` 的 `runtime-v109-preview126` 与旧入口回滚。正式软件来自 main
+`31b0dbdae3192f471c8812574c118795658120f0`，发布运行 `38193173842`
+构建、四门及 npm/匿名核实均 SUCCESS。完整公共 tarball 与原 main 制品
+逐字节相同：1232566 字节、SHA256
+`ef9ed47cff0a1d6b65ef100dbf684f4e2c430e802ee75809bdb4db3c62fc6e54`。
+本目录 `provider906/package*.json` 记录精确 npm URL / SHA512 integrity；
+传递依赖与 `.126` 完全相同，不重新解析浮动依赖。
+
+`.127` 提供 Daemon/节点环境密钥短期授权请求以及明确配置 HTTP 的
+Provider 兼容；配套 CLI `.170` / runtime `.136`，客户端 `.249` 不会
+自动升级远程服务或重启节点。从 `.126` 软件 main 到本次 `.127` main
+的 `server/src/db.ts`、数据库 adapter 与 schema/migration 没有变化；
+新的密钥请求是内存 TTL 状态，Hub 重启会令未确认请求丢失，不能盲重放。
+本段及 profile CI 不是实际生产激活、真实密钥消费或数据恢复验收。
+
+安装、原一致性备份、入口字节校验和窄切换沿上面的原操作流程；profile
+必须先通过现有 GitHub Actions Docker 启动目录/显式回滚检查并正常合入
+main。复制精确 package/lock 到新 sibling 后 `npm ci --ignore-scripts
+--no-audit --no-fund`；旧目录、当前 DB 和 owner-only 配置不被覆盖。
+新的生产备份应做 integrity/行数核对，不把旧快照冒充当前数据。
+软件发行已有独立 Docker 真实启动/认证核心证据；生产数据与 `hub.env`
+绝不上传 CI，用户要求测试由 Actions 执行时不另起本地测试容器。
+若发现真实 schema/adapter 差异则停在 inactive，另行安排隔离迁移验证。
+
+正常激活仍只重启既有 PM2 `commhub-hub`，不加 `--update-env`；原 Bun、
+9200、反代/隧道、DB 路径及主机管理员保管的 `hub.env` 密钥来源不变。
+先确认原 vault key 可加载且不换值，再按监听 PID 的真实入口、health
+`.127`、错误日志和自然节点心跳/回执核验，不能只看 PM2 online。
+失败恢复备份的 `.126` 入口并仅重启 Hub，不回退用户会话或删除 DB。
+Git 负责软件、配置结构与过程；生产 DB、vault 原密钥、账号仍需独立
+加密备份或重新认证。原保险库记录名 NOT COVERED 的缺口保留，未做新
+空机演练，不能声称 clone 就能恢复数据或本次已完成全链恢复。
+
+### #1075 `.128` 配置（2026-10-12 已激活）
+
+`.127` 的实际激活记录在 `docs/tests/report-test1053-hub127-profile.txt`；
+16:54+08 实读生产 `/health` 仍为 `.127`、secured、330 会话。
+本次 profile 选择新 sibling `runtime-v111-preview128`，保留已运行的
+`runtime-v110-preview127` 和原入口作回滚。软件来自完整 main
+`e83cfc7d3b949a8751c43ee2f1c0614a2315dcf4`，正式发布运行
+`38225130040` 的构建、四门、npm 发布与 registry 回读均 SUCCESS。
+匿名完整 tarball 与该 main 制品相同：1233005 字节，SHA256
+`b75ebaa668249148dfa26c4fc8c93d87bc8bfb34ee2fd163fe497b1dd8a096c1`。
+`provider906/package*.json` 锁定真实公开 URL 和 SHA512 integrity，
+传递依赖不变。不要从分支安装启动器或用浮动依赖重建此版本。
+
+`.128` 增加无 Daemon 节点的环境密钥授权请求；节点以自身身份 pull/ack，
+需节点 runtime `2.5.0-preview.137` 上报明确能力，客户端 `.251` 提供入口。
+现有 Daemon 请求通道、旧身份令牌、账号和会话保持不变。从已部署 `.127`
+的软件 source 到 `.128`，DB/schema/migration 文件没有变化。新请求是
+Hub 内存 TTL 状态；重启会丢失未确认请求，不盲重放。节点私有密钥文件不在
+Hub 数据库中；仅升级 Hub 不等于旧节点已获得新能力或真实模型权益已验证。
+
+常驻入口继续由现有 PM2 `commhub-hub` 使用本目录 Git 权威 launcher；
+启动、固化安装、当前一致性 `VACUUM INTO` 备份与安装字节检查按上文执行。
+本 profile 的 Actions Docker 检查验证目录、显式回滚和 feature flag，
+是假执行器，不冒实际数据迁移测试；另复用本版本的正式安装门和 #1075
+注册工具→节点私有持久存储→实际 runtime 子进程使用的 Actions Docker 核心。
+先通过检查并正常合入 main，再复制 package/lock 安装新 sibling，部署 Git
+launcher（0700、逐一 cmp），只重启 Hub，不带 `--update-env` 或重启业务节点。
+用监听进程、`.128` 健康读数、自然心跳/任务事件和错误日志核真实生效。
+
+反代、隧道、9200 端口、PM2 定义和数据库路径不变。密钥从原 owner-only
+`hub.env` 安全加载；不读取/传播值、不新生成 vault 主密钥。回滚恢复保留的
+`.127` 入口，只重启 Hub，保留 live DB、私有安装和节点会话，不回退用户数据。
+Hub DB、vault 原密钥及节点私有密钥须由管理员的独立加密备份恢复；Git clone
+不含这些数据或账号。主密钥保险库记录名仍 NOT COVERED，不宣称空机恢复
+演练完成。软件公开、本 profile 入库与生产激活三个门分别记录。
+
+17:02:34（东八区）已按本流程激活。部署配置来自正常 main 合入
+`1224c5e194cd7c9acf91c6a592655d034462b5bb`（PR2649，10 required 和
+Hub deployment profile Docker SUCCESS），软件 source 仍为上面的
+`e83cfc7d`。私有 sibling 安装100包、未运行安装脚本；旧 profile/base
+及一致性 `VACUUM INTO` 备份保存在 owner-only
+`~/.commhub/backups/node-secrets1075-p128.uXNwN6/`。备份756965376字节、
+0600，integrity ok、330sessions/79568tasks；不是离机灾备恢复演练。
+Git profile 与部署副本 cmp 相同，base 未变。仅重启 `commhub-hub`，
+无 `--update-env`、Daemon/业务节点或账号变更。实际 Bun PID4014410
+（旧3775153），入口为 v111/128；健康 `.128`、secured、330会话，
+SSE自然恢复126且抽查八节点都有切换后新心跳。初始新增日志区段中
+vault主密钥缺失/panic/segfault匹配0，PM2人为85→86；未执行专门
+SSE协议/模型/生产密钥测试，独立 `task.ack` 未计PASS。负责人原身份
+认证HOLD独立保留，心跳不是其登录验收。目标无绑定节点仍需升级
+runtime137，客户端251构建独立记录，不由Hub激活外推。
 
 ## 混版风险(必读)
 

@@ -43,9 +43,14 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 | 下一发（2026-06 快照，含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 0.6.3-preview.4 | 🔜 待切（见 §6，dashboard 本发不动） |
 | **已发布 preview 头（snapshot 2026-08-17）** | **2.3.0-preview.39** | **2.5.0-preview.31** | **0.9.0-preview.29** | 0.6.3-preview（浮动） | ⚠️ `npm view @preview` 实测；`preview.39` 二进制内嵌 `.d.ts` pair 仍指 `agent-node@2.5.0-preview.28`（main-源码 vs binary 差） |
 | v2.3.0 GA 目标 | 2.3.0 | 2.5.0 | 0.9.0 | 0.7.0（含 #260） | 🎯 整行测绿才升 |
+| #1027 发布候选（2026-10-12，未发布） | 2.3.0-preview.167 | 2.5.0-preview.133 | 0.9.0-preview.126 | 不变 | 待精确 main 发布门及三 runtime 验收；不是已知良好生产组合 |
 | latest（稳定线） | 2.2.21 | 2.4.13 | 0.8.8 | 0.6.x | ✅ 旧稳定，无 opencode/无 #383 |
 
 ## 5. Bump-together 规则
+
+2026-10-14 #1175 已公开软件 CLI179/Node145 与既有 Hub139 配套；两份 npm/GitHub 完整包已比对同一 main 四门制品，保留 CLI 流程首次 registry 后验超时 FAIL，随后独立全包核验成功。Windows 私有 windows-tui-health.json 保存本代 node/marker/remote/PID/birth，不含凭据；仅匹配原启动身份后探测。健康字段仍用既有 running/pane-dead/session-missing，无 Hub schema 或派活绕过。未知清除旧证据，真实退出/换代及连接缺失沿用降级拒收门。回滚178/144时保留原私有状态；旧 Node 忽略新增回执，持续原生健康退回 unknown。公开门禁与原机验收分别记。
+
+2026-10-14 #1168 健康修复软件alpha：CLI2.3.0-preview.178 / Node2.5.0-preview.144 / 已公开Hub0.9.0-preview.139。仅Windows共存的tmux探针选择与精确runtime配套更新，无Hub协议/结构变更；原深层入口及V2回执兼容范围沿用177/143/139。两包exact-main四门PASS且官方GH完整archive均已验证，两包完整npm均匹配，CLI首传播timeout失败保留并完成后验；现役采用及真实模型验收另记。Windows持续原生TUI健康仍unknown，不等同healthy；App Server和登录降级仍拒收任务。旧177/143可回滚软件，但需保留兼容的V2私有回执，且恢复旧误判缺口。
 
 - 改 **C1**（runtime/config）→ agent-network + agent-node 同一次一起发 preview，矩阵加新行。
 - 改 **C2**（hub 协议）→ 先升 hub（向后兼容旧 node）再升 node；`protocolVersion` 记进矩阵注。
@@ -136,3 +141,27 @@ curl -s "$HUB/api/nodes" -H "Authorization: Bearer $UTOK" \
 对 GA 意义：**picker 代码路径本身正确**，GA 阻断只在特定 prod 状态下会重现；短线的运维恢复 = 定位 & 清那行 dirty row（`DELETE FROM nodes WHERE alias=… AND config_snapshot IS NULL` 或 `anet daemon down` + 换新 alias）。长线是 §7.1 的升级顺序 + P3 clobber backlog 是否升级为 GA-blocker 的独立评估。
 
 **Repro artifacts**（docker + shell）留在 branch `docs/ga-compat-matrix` 下 `docs/tests/p-ga2-compat-repro/`（Dockerfile.aligned / Dockerfile.mixed / repro.sh），未来再遇到类似疑似 compat 事件复用。
+
+
+## 2026-10-14 owned follow-up / full-depth inbox pair
+
+Released software pair: CLI 2.3.0-preview.177 + Node 2.5.0-preview.143 + Hub
+0.9.0-preview.139. Source/core evidence is in
+[report-test1163](../tests/report-test1163-human-inbox.txt); exact main publication
+and real adoption are separate gates, not implied by this prepared version row.
+Node asks `get_inbox(human_first:true)` and verifies `human_inbox.version=1`.
+Older Hub responses remain usable but their first-page limitation is warned.
+The scalar metadata keyset is tested on both SQLite and real PostgreSQL. Auth
+and recipient/network checks are unchanged. Controller V2 answer-intent state
+requires the new compatible Node; do not downgrade pending V2 to a V1 reader.
+
+Public checkpoint: Node143/Hub139 npm and official CLI177 GitHub full archives
+match the four-gated main artifacts; CLI npm visibility remains a separate
+verification checkpoint. Exact main SHAs and retained workflow failures:
+[public report](../tests/report-test1163-public.txt). Original-device adoption
+remains separate; this row does not certify full QA or production-state restore.
+
+Later checkpoint: CLI177 npm preview/version/SHA1/SHA512 and complete tarball
+now match the official GH and gated archive. All three npm archives verified;
+first visibility timeout workflows remain FAIL in the historical record, and
+native/original-device adoption remains unverified.

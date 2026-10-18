@@ -19,6 +19,7 @@ import { canSeeAgent, isAgentRestricted } from "./agent-access";
 import { pushEvent } from "./push";
 import { eventBus } from "./event_bus";
 import { aliasControlCharacter, describeAliasControlCharacter } from "./node-alias-control";
+import { activeNodeTokenIds } from "./node-token-identity.js";
 
 export interface RenameResult {
   ok: boolean;
@@ -109,7 +110,7 @@ export function cleanupCommittedRenameSessions(networkIds: string[] | null = nul
 
 // PHASE 1 P3 — create a prepared rename_txn row reserving new_alias.
 // CAS guard (RFC §4 risk #3 TOCTOU): new_alias must be free both in the
-// sessions registry AND among in-flight prepared rename_txn rows.
+// sessions/nodes registries AND among in-flight prepared rename_txn rows.
 export function prepareRename(
   userId: string, networkId: string, oldAlias: string, newAlias: string,
 ): RenameResult {
@@ -127,6 +128,9 @@ export function prepareRename(
     };
   }
   if (oldAlias === newAlias) return { ok: false, error: "old and new alias are identical" };
+  if (db.all("SELECT node_id FROM nodes WHERE network_id=?1 AND alias=?2", networkId, oldAlias).length > 1) {
+    return { ok: false, error: "node_alias_ambiguous" };
+  }
 
   // old-alias must exist as a session in this network
   const oldSession = db.get<any>(
@@ -140,9 +144,9 @@ export function prepareRename(
     };
   }
 
-  // new-alias must not be taken — in sessions OR reserved by another prepared txn
+  // A node can reserve its alias before it has ever reported a session.
   const newInSessions = db.get<any>(
-    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2", networkId, newAlias);
+    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2 UNION ALL SELECT 1 FROM nodes WHERE network_id = ?1 AND alias = ?2", networkId, newAlias);
   if (newInSessions) return { ok: false, error: `alias "${newAlias}" already in use` };
   const newPrepared = db.get<any>(
     "SELECT txn_id FROM rename_txn WHERE network_id = ?1 AND new_alias = ?2 AND status = 'prepared'",
@@ -167,11 +171,15 @@ export function commitRename(userId: string, txnId: string): RenameResult {
   if (txn.status === "committed") return { ok: true, txn_id: txnId }; // idempotent
   if (txn.status === "aborted") return { ok: false, error: "rename transaction was aborted" };
   if (!hasWriteAccess(userId, txn.network_id)) return { ok: false, error: "no write access to this network" };
+  const nodes = db.all<{ node_id: string }>("SELECT node_id FROM nodes WHERE network_id=?1 AND alias=?2", txn.network_id, txn.old_alias);
+  if (nodes.length > 1) return { ok: false, error: "node_alias_ambiguous" };
+  // Resolve labels before changing the node alias, so legacy unbound ownership remains verifiable.
+  const tokenIds = nodes[0] ? activeNodeTokenIds(nodes[0].node_id, txn.network_id) : [];
 
-  // Defense-in-depth: new-alias still free in sessions (prepare already CAS'd,
+  // Defense-in-depth: new-alias still free in both registries (prepare already CAS'd,
   // but a parallel direct registration could have raced in).
   const conflict = db.get<any>(
-    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2", txn.network_id, txn.new_alias);
+    "SELECT 1 FROM sessions WHERE network_id = ?1 AND alias = ?2 UNION ALL SELECT 1 FROM nodes WHERE network_id = ?1 AND alias = ?2", txn.network_id, txn.new_alias);
   if (conflict) return { ok: false, error: `alias "${txn.new_alias}" was taken since prepare` };
 
   const renamedNode = db.transaction(() => {
@@ -182,9 +190,9 @@ export function commitRename(userId: string, txnId: string): RenameResult {
     db.run(
       "UPDATE nodes SET alias = ?1, updated_at = datetime('now') WHERE network_id = ?2 AND alias = ?3",
       [txn.new_alias, txn.network_id, txn.old_alias]);
-    db.run(
-      "UPDATE api_tokens SET name = ?1 WHERE network_id = ?2 AND name = ?3",
-      [`node:${txn.new_alias}`, txn.network_id, `node:${txn.old_alias}`]);
+    for (const tokenId of tokenIds) db.run(
+      "UPDATE api_tokens SET name = ?1 WHERE token_id = ?2 AND network_id = ?3",
+      [`node:${txn.new_alias}`, tokenId, txn.network_id]);
     db.run(
       "UPDATE rename_txn SET status = 'committed', committed_at = datetime('now') WHERE txn_id = ?1",
       [txnId]);

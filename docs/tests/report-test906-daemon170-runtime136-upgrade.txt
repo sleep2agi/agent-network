@@ -1,0 +1,73 @@
+#906 software-only Daemon170/runtime136 activation receipt
+OBSERVED_AT=2026-10-12 12:13+08; deployment observations, no new local tests.
+
+Inputs / authority
+- Formal source mainf86012a30c75f59abeeed3221647f5d2847bd969, still on main.
+- CLI2.3.0-preview.170 GitHub gated public tarball2113589B:
+  SHA256e1cef7f5b295ac27968782f07fda5b0e22b176b9b650d4fe9177b976f1121d60.
+- Runtime2.5.0-preview.136 npm public tarball591168B:
+  SHA256038bf75e2ade28d4b79efb5ee4d278862b0b1f2a4d34fd677f4475672aee2524.
+- Both inner archives matched preceding main publication proof. Existing
+  Actions native install20/20 per platform and scoped core reused; no rerun.
+  CLI npm publication visibility timeout remains a separate failed run;
+  immutable170 was not republished. No global npm installation.
+
+Vdev reused original receipt
+- TMHR read-only20529e90 replied03:48:03Z: actual170/136, original identity/
+  workdir/config hash, old private pair/0600 backup, Provider readback retained.
+  Original1110d499 stays deadline-FAILED; no repeated upgrade or real inference.
+  SSE evidence is established connection plus heartbeat, not an independent
+  protocol suite. Original1053/1045 delivery items closed on original criteria.
+
+Local dev explicit handover / preconditions
+- Communication-ou confirmed9ff31b1d: it restored bare runtime3420628 during
+ 1027, no concurrent maintenance, safe to hand over. No assumption from alias
+  or host alone. Original node_daemon_39bd1eeae3ee/host_supervisor/network same.
+- Fresh idle/inflight0/queue0. Old process matches private167/133 entry, exact
+  original config and start_ticks482729717, PPID1/cwdcomm-ou, directory warning.
+- Current config differs from historical4cf8ee...; preserve current SHA256
+ 7207b7cb129919513b5641cc9718dca7fa4fda178666ea3d57558f9d0a42a84b.
+  New config.json.pre-cli170-runtime136-20261012 backup600 matches current.
+- Inactive private provider906-cli170-runtime136700 installed --ignore-scripts,
+ 250 packages; generated package/lock600, old167/133 retained.
+
+Actual narrow cutover / readback
+- SIGTERM only verified3420628; confirmed exited before any new start.
+  Official main CLI started in original config root (not prior bare cwd),
+  original-name daemon-dev tmux. No custom server-only launcher created.
+- CLI PID3813277/start_ticks485668591; runtime3813433/485669242; actual private
+ 170/136 paths, both cwd=USER_ROOT. Restored correct configured workspace;
+  previous project_dircomm-ou was the bare-runtime mislaunch, not retained.
+- Startup04:11:32Z (12:11:32+08): create capability ready/anet bin pin verified,
+  SSE connected; independent Hub04:11:33Z same node_id/runtime136/idle0, no
+  directory warning. Initial log6975B/mode600, vault_missing0/panic0 at read.
+- Read-only provider list: oktrue, same daemon_node_id, revision0/sourcedaemon,
+  providersCount0. Empty catalog proves read capability, NOT Provider inference.
+- Config hash before/after/backup identical7207b7... . Business PID/start_ticks
+ 2792940/478333024,2793430/478334982,2793542/478335053,515201/438001492,
+ 3199979/481150555 unchanged and alive. No business AppServer/TUI/Bridge restart,
+  account/token/session/model/Hub or production credential mutation.
+
+Six recovery facts / retained state
+1. Startup authority: agent-network/bin/cli.ts daemonStartCommand/startCommand,
+   docs-site/docs/deploy/daemon.md private-pair-upgrade; chosen private pair,
+   explicit ANET_AGENT_NODE_BIN and original config root. No bare-runtime retry.
+2. Existing Hub127/port/proxy/tunnel unchanged; deploy/hub and fleet runbooks
+   remain authoritative. No extra listener or firewall/SSH routing change.
+3. Original protected node config and key sources remain local. Restore from
+   approved encrypted backup/original registration; never copy another auth.
+4. Versions bound to formal source/bytes above; actual process paths/new same-
+   identity heartbeat/SSE/redacted management readback distinguish activation.
+5. Keep old167/133 and config backup. At idle, verify exact current pair before
+   stopping only this Daemon; start old official CLI/private runtime from the
+   configured root, repeat actual-state reads. Do not rewind business data.
+6. Node identity/local secret stores/child-workdir registration/Hub DB are data,
+   not supplied by clone. Private transitive-lock/off-host key backup inventory
+   and boot scanner private-bin pin remain gaps; no empty-machine restore PASS.
+
+Cleanup
+- No local Docker/tests executed, no broad kill/tmux kill-server, no user data
+  removed. Private old/new installs, protected configuration/backup/log and
+  verified tarball staging retained intentionally. Only exact old Daemon stopped.
+- OpenCode PR795 focused CI is independent, not a new feature acceptance
+  inferred from this software upgrade. Parent906/907 complete scope stays open.

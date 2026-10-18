@@ -12,6 +12,26 @@ on:
 permissions:
   contents: read
 jobs:
+  existing-discovery:
+    name: daemon-existing-codex-discovery (Docker, read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Private legacy layout and HTTP daemon discovery core
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.discovery -t anet-provider-management:test906-discovery .'
+          sg docker -c 'docker run --init --rm --network none anet-provider-management:test906-discovery'
+  managed-login:
+    name: daemon-managed-login (Docker, no account sign-in)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login lifecycle and native empty-account protocol (offline)
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.login -t anet-provider-management:test906-login .'
+          sg docker -c 'docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1 anet-provider-management:test906-login'
   store:
     name: daemon-provider-store (Docker)
     runs-on: ubuntu-latest
@@ -41,4 +61,4 @@ jobs:
         run: |
           sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.native -t anet-provider-management:test906-native .'
           # A real init reaps the detached tmux grandchildren; Bun PID 1 does not.
-          sg docker -c 'docker run --init --rm --network none anet-provider-management:test906-native'
+          sg docker -c 'docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1 anet-provider-management:test906-native'

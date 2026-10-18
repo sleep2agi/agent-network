@@ -1,3 +1,4 @@
+import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { buildServeErrorResponse } from "./serve-error.js";
 import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
 import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip";
@@ -134,7 +135,11 @@ if (AUTH_TOKEN) {
 const MCP_LABEL_MAX_BYTES = 1024 * 1024;
 
 // Read version from package.json so banners and /health stay in sync.
+// ANET_EMBEDDED_COMMHUB_VERSION is set only by the standalone anet binary
+// (bin/anet-bin.ts). npm/bunx leaves it unset and keeps the disk read.
 const SERVER_VERSION = (() => {
+  const embedded = process.env.ANET_EMBEDDED_COMMHUB_VERSION?.trim() ?? "";
+  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embedded)) return embedded;
   try {
     const url = new URL("../package.json", import.meta.url);
     return JSON.parse(require("fs").readFileSync(url, "utf8")).version || "?";
@@ -1516,7 +1521,7 @@ return Bun.serve({
         // #711 不带 keep_cli_tokens 的请求(旧 app、dashboard 代理)= 改密码前的行为:撤销全部不绑网络的令牌。
         // keep_cli_tokens 必须是布尔 true 才保留命令行 / 脚本令牌。
         const meta = resolved.tokenId ? getUserTokenMeta(resolved.user.user_id, resolved.tokenId) : null;
-        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password, resolved.tokenId, { keepCliTokens: body.keep_cli_tokens === true });
+        const result = changePassword(resolved.user.user_id, body.old_password, body.new_password, resolved.tokenId, { keepCliTokens: body.keep_cli_tokens === true, revokeNetworkTokens: body.revoke_network_tokens === true });
         if (result.ok) {
           // 换发的新令牌沿用当前这条的种类和设备标识:anet passwd 换完仍是命令行令牌。
           const issued = issueUserToken(resolved.user.user_id, "password-change", { kind: meta?.kind, clientLabel: meta?.client_label, userAgent: meta?.user_agent });
@@ -3668,9 +3673,7 @@ return Bun.serve({
       // TUI*) as that node. Same table, same token, one transport hardened and
       // its sibling not.
       //
-      // User tokens keep the previous behaviour: the Dashboard legitimately
-      // posts as its logged-in user, and tightening that is a separate change
-      // with its own compatibility surface.
+      // Human dispatches use the authenticated username on both transports.
       // The decision itself lives in rest-identity.ts as a pure function so the
       // shipped path and the tested path are the same code.
       const identity = resolveRestFromSession({
@@ -3691,7 +3694,11 @@ return Bun.serve({
       }
       const fromSession = identity.fromSession;
       const ttlSeconds = (body as any).ttl_seconds || 3600;
-      const fromNodeId = resolveRestNodeIdForAlias(fromSession, taskNetId);
+      const fromNodeId = restAuth && !requestToken(req).startsWith("ntok_")
+        ? null
+        : requestToken(req).startsWith("ntok_")
+          ? (identity.nodeId ?? null)
+          : resolveRestNodeIdForAlias(fromSession, taskNetId);
       const targetNodeId = target.session?.node_id ?? null;
       const actualTo = restActualTo(target, taskNetId);
       // #221 — fold top-level `attachments` into `meta.attachments` so
@@ -4568,31 +4575,10 @@ return Bun.serve({
         isPrivileged = true;
       }
 
-      // EXISTS subquery handles BOTH revoked_at SET and DELETEd token
-      // rows (revokeToken DELETEs the row in production — PR2 v1
-      // SHOULD-FIX per 通信龙 audit). EXISTS naturally dedupes daemons
-      // with rotated tokens.
-      const sqlRows = db.all<Record<string, any>>(`
-        SELECT
-          n.node_id, n.alias, n.hostname, n.network_id,
+      const sqlRows = hostSupervisorIdentityRows(`SELECT n.node_id, n.alias, n.hostname, n.network_id, n.owner_user_id,
           n.runtimes_supported, n.allowed_secret_keys,
-          n.created_at, n.updated_at,
-          s.last_seen_at AS session_last_seen,
-          s.cpu_cores AS session_cpu_cores,
-          s.mem_total_gb AS session_mem_total_gb,
-          s.ip AS session_ip,
-          n.config_snapshot
-        FROM nodes n
-        LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
-        WHERE n.network_id = ?1
-          AND EXISTS (
-            SELECT 1 FROM api_tokens t
-            WHERE t.network_id = n.network_id
-              AND t.name = 'node:' || n.alias
-              AND t.revoked_at IS NULL
-          )
-        ORDER BY n.updated_at DESC
-      `, effectiveNetId);
+          n.created_at, n.updated_at, n.config_snapshot
+        FROM nodes n WHERE n.network_id = ?1 ORDER BY n.updated_at DESC`, [effectiveNetId]);
 
       const nowMs = Date.now();
       // 心跳周期是 3 分钟（agent-node/src/cli.ts 的 report_status 定时器），

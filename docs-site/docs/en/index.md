@@ -60,7 +60,7 @@ features:
   <div class="product-path-heading"><span class="eyebrow">TWO WAYS TO START</span><h2>Desktop simplicity, full CLI power</h2></div>
   <div class="product-path-grid">
     <article class="product-path-card"><span class="path-number">01</span><h3>Desktop app</h3><p>For everyday work: manage agents, conversations, files, schedules, and servers visually.</p><a href="/en/download">Get the latest release →</a></article>
-    <article class="product-path-card"><span class="path-number">02</span><h3>anet CLI</h3><p>For developers and servers: control Hubs, nodes, runtimes, and automation precisely.</p><div class="cli-command"><code>curl -fsSL https://anet.sh/install.sh | sh</code></div><a href="/en/guide/getting-started">Read the install guide →</a></article>
+    <article class="product-path-card"><span class="path-number">02</span><h3>anet CLI</h3><p>For developers and servers: control Hubs, nodes, runtimes, and automation precisely.</p><div class="cli-command"><code>curl -fsSL https://anet.sh/install.sh | sh</code></div><a href="/en/guide/getting-started">Read the install guide →</a><a href="/en/guide/opencode">OpenCode V2 guide (preview; the create path exists) →</a></article>
   </div>
 </section>
 

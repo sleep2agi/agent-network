@@ -77,6 +77,14 @@ Options:
   --base-url <url>       Provider base URL (required for custom-openai-compat)
   --api-key-env <NAME>   Env var that holds the key (required for custom).
                          Export NAME in the shell; do not pass --api-key.
+  --opencode-shared-server-url <url>  OpenCode V2 existing loopback server URL
+  --opencode-shared-server-password-file <path>  Absolute private password file
+                         Use both with --opencode-generation v2, or register
+                         {url,passwordFile} in ~/.anet/opencode-shared-server.json
+                         to reuse that Server by default. Each node keeps
+                         its own Bridge, workdir, Hub identity and session.
+  --opencode-new-server  Create a node-owned V2 Server instead of reusing the
+                         registered shared Server.
   --channel <spec>       Attach a channel (repeatable)
   --resume <id>          Bind an existing Claude session
   --resume-latest        Bind the latest Claude session
@@ -429,6 +437,11 @@ init + start in one step (default name: "daemon").`,
        anet daemon ls
 
 List locally configured daemon nodes (configuration only, not liveness).`,
+  "daemon provider": `Usage: anet daemon provider <list|scan|put|apply> <daemon> [--revision N] [--request dps_UUID]
+
+list reads the daemon-scoped Provider configuration (no secrets).
+scan, put, and apply read private JSON from stdin. No key is accepted in argv.
+put saves that JSON; it does not apply it to a runtime.`,
 
   // ── network ──
   "network ls": `Usage: anet network ls
@@ -535,6 +548,10 @@ Attach this terminal to a grok co-presence node (Ctrl-] detaches).`,
 Switch a grok node's model; works while attached.`,
 
   // ── opencode ──
+  "opencode attach": `Usage: anet opencode attach <node>
+
+Attach the existing ready borrowed V1 session from its original directory in
+this terminal. Closing this TUI leaves its node bridge and shared Host running.`,
   "opencode upgrade-pin": `Usage: anet opencode upgrade-pin <version>
 
 Reinstall and smoke-test the exact pinned opencode-ai release.`,

@@ -51,6 +51,15 @@ before opening firewall ports. The headline items:
 The full 20-item audit and remediation matrix lives at
 [`docs/open-source-security-risk-report.md`](./docs/open-source-security-risk-report.md).
 
+## Public-repo privacy hygiene
+
+This repository is public. Other teams' node aliases, hostnames and intranet addresses must never appear in
+anything we publish — source tree (comments included), published npm artifacts (including `.d.ts`), issues
+or comments. What **is** allowed (our own identifiers, and the false-positive shapes the scan regex has to
+tolerate) is enumerated in [`docs/PRIVACY-ALLOWLIST.md`](./docs/PRIVACY-ALLOWLIST.md) together with the
+scan criteria and the three carriers that ship. The acceptance check is the tree unpacked from `npm pack`,
+not the working tree — a clean `grep` over the repo is not sufficient.
+
 ## Threat Model — Out of Scope
 
 - An attacker who already has filesystem access to `~/.commhub/commhub.db` or `~/.anet/` — there is no further at-rest encryption

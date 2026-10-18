@@ -1,0 +1,36 @@
+#1163 authenticated full-depth human inbox
+Baseline main: 55f41628c5956436493d07a63077221478ac9f65 (includes #1162 controller).
+Source: human_inbox version 1, metadata-only 256-row scalar keyset; bounded body return;
+existing caller/network gates, server-stamped source contract, exact Node recheck;
+old Hub compatible ordinary-page fallback with visible once-only capability warning.
+Paired planned versions: Hub 0.9.0-preview.139 / Node 2.5.0-preview.143 /
+CLI 2.3.0-preview.177. This report is source/core preparation, not publication proof.
+Independent pinned Docker suite test1163-human-inbox; frozen package locks.
+SQLite final: 7 PASS / 65 assertions (1.51s).
+PostgreSQL final: 7 PASS / 65 assertions (2.50s).
+PostgreSQL uses the reviewed COMMHUB_TEST_PG_URL loopback test database gate,
+no inherited production DATABASE_URL, isolated network namespace and pinned PG image.
+Core: real registered Hub handlers + production CLI getInbox, 20/21/1000 blocked rows;
+malformed/legacy/scheduler/node forgery, cross recipient/network (bound network wins
+an attempted argument override), ordinary ordering, max20/19+1 reserve, snapshot dedup.
+First test command ran before image export completed: image absent, no assertions.
+First core: 5/6, one fixture missing explicit schema-default priority; repaired fixture.
+Second SQLite/PG: 6/7, fixture incorrectly expected network override to fail instead
+of the existing bound-network gate ignoring it. Corrected to assert no foreign
+message and the exact authorized examined count; no production authorization weakened.
+CI final-head required checks, publication hashes, native adoption and original-device
+model behavior are separate later gates. Broad QA not claimed green by core success.
+New-suite auth/depth/request production mutations each ASSERTION RED on SQLite and PG.
+Original real-Hub/WS follow-up suite: 3 PASS / 56 assertions; companion Node core
+40 PASS / 255 assertions, four original production mutations ASSERTION RED.
+Local tests use readonly input mounts plus private writable container copies.
+An attempted old-queue invocation used its nonexistent /repo/tests path and ran
+no assertions; the actual cached fixture entry is /fixture/run.sh.
+Original human queue: 138 PASS / 505 assertions (21.41s), four production mutations ASSERTION RED.
+Local assertion runs total under two minutes; builds are separate.
+First PR CI doc-symbol-pins failed because two tools.ts source links moved by 10 lines; corrected targets and labels to actual send_reply/send_ack registrations. The guard and baseline remain unchanged.
+First PR also hit the existing tools/list byte ceiling (85623 > 85500) in Provider/Inbox-recipient suites and dynamic mutation-anchor ratchet. Compact only this inbox schema description/default (same falsy behavior), retain all ceilings; rewrite new mutations with literal anchors/targets, without raising ratchet baseline.
+Compacted final schema core: 7 PASS/65 plus three mutation reds; existing per-role tools/list byte test PASS (all=85487 <=85500, node=63364, user=59561). No ceiling change.
+Manual review found second-precision timestamp ties must use insertion order rather than random message IDs. Add inbox to the existing PG BIGSERIAL rowid migration; SQLite uses its native rowid. New inverse-ID/same-second >20-human-page test verifies both optimized and legacy reads. Historical PG tie arrival order is unknowable; migrated ordering is stable, not reconstructed timing.
+FIFO final: SQLite 8 PASS/67 (1.86s); real PG 8 PASS/67, auth/depth/request mutations red on both. Prior final-head Windows751 failed pre-dispatch with real Hub409 node_degraded/session-missing; server aggregate also reported unchanged legacy sessions.network_id/null, observer dispatch and due-fixture failures. First logs/artifact retained. These broad results are not full-matrix PASS; the entry/controller/required gates are separately verified on the final head.
+Formal release checkpoint: Hub139 all four gates/workflow SUCCESS, registry1256148B SHA256 bcfc3e60747d29bf61a9d2d97501d044b4733d14f9c10ccf6496194fad9732e5 equals its gated archive. Node143 four gates/publish command SUCCESS, registry visibility pending. CLI177 first formal38447125714 FAILED gate4: getting-started ZH/EN still stamped candidate176; install/pin/notes passed, publish skipped. Repair both stamps and behavior paragraphs. CLI default bootstrap and bootstrap-password-db source are byte-identical to the already checked CLI176 main83cd8fc; no new default-password execution claimed. CLI retry must use the later merged docs-only main SHA, with executable sources identical to fddca21f. Never rebuild/republish immutable Hub139/Node143 merely to align doc commit IDs.

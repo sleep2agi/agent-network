@@ -1,0 +1,33 @@
+name: REST task API core
+on:
+  pull_request:
+    paths:
+      - 'server/src/auth.ts'
+      - 'server/src/server.ts'
+      - 'server/src/rest-identity.ts'
+      - 'server/src/tools.ts'
+      - 'tests/qa-hub-16-rest-task-api/**'
+      - '.github/workflows/rest-task-api-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rest-task-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build isolated REST closure fixture
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t rest-task-api-test -f tests/qa-hub-16-rest-task-api/Dockerfile .
+      - name: Verify identity rejection, REST dispatch and bound node reply
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p rest-task-results
+          chmod 777 rest-task-results
+          docker run --rm --init --network none -v "$PWD/rest-task-results:/app/docs/tests" rest-task-api-test | tee rest-task-results/output.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rest-task-api-results
+          path: rest-task-results

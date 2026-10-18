@@ -80,6 +80,9 @@ L1_TESTS=(
   # 这道闸门自己的回归。放在最前:它跑的是本脚本,若闸门坏了应当最先暴露。
   # (注册这一步不是可选的 —— 一个没被任何东西调用的套件等于不存在。)
   "test823-l1-concurrency-cap"
+  # #812: tmux target 语义。命令从 docs/node-liveness-criterion.md 抽出来实跑,
+  # 容器里现造 session。只依赖 alpine 的 tmux,不碰机群、不碰凭据。
+  "test812-tmux-target-semantics"
   # RFC-036 PR1: credential-free SideThread state machine + Codex adapter
   # contract. Exact-version fail-closed has a witnessed-red mutation.
   "test1193-side-thread-contract"
@@ -358,6 +361,10 @@ L1_TESTS=(
   # sendCount:2；CommHub reply 只发一次；orphan reply 明确日志+ack，不回落默认会话。
   "test1241-feishu-commhub-routing"
   "test1362-create-node-pending"
+  # #1627/#1309 —— 单条测试余量仪表自己的回归:钉死的 bun 1.3.14 上**实测**
+  # 隐式默认(5000ms)、显式 500ms 声明、钩子撞满它声明的超时,以及 qa.sh
+  # 启动清日志。跑的是 `scripts/check-test-margin.py` 本体,含其内嵌夹具。
+  "test1627-test-margin"
   # 2026-08-13 扫出三个从没进 CI 的完整 Docker 门(test224 / test597 / test679),
   # 一度想加在这里,但 L1 是「~16s 并行」的快层、job 预算 5 分钟,实测在 CI 上
   # 已经用掉 141–148s;而 qa.sh 的 build 是**串行**的(只有 docker run 并行),
@@ -399,6 +406,13 @@ fi
 
 START=$(date +%s)
 FAILED=0
+
+# 🔴 启动时清掉**上一轮**的日志。复用的 runner 上,`/tmp/qa-l0-*.log` 与
+#    `/tmp/qa-l1-*-run.log` 会留在原地,而 `check-test-margin.py` 的 hook 按
+#    glob 读它们 ⇒ 报告里的 `tests=`/`near=`/`slowest=` 会描述**本次没跑**的
+#    套件(比如 `QA_L1_ONLY` 只跑 docs-only 子集时),跨 run 对照就没意义了。
+#    在这里清一次,那行 glob 就是本轮的(顺序:必须早于下面的 hook)。
+rm -f /tmp/qa-l0-*.log /tmp/qa-l1-*-run.log
 
 if [[ $RUN_L0 -eq 1 ]]; then
   sec "L0 — bun test (代码视角，单测)"
@@ -727,6 +741,26 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       | awk -F'\t' 'NR<=5{printf "%s%s=%ds", (NR>1?",":""), $2, $1}')
     echo "L1-TIMING v1 total=$(( $(date +%s) - START ))s suites=$(wc -l < /tmp/qa-l1-timing.tsv | tr -d ' ') slowest=${_slowest}"
   fi
+fi
+
+# 🔴 #1627 / #1309 —— **per-test** 余量。`L1-TIMING v1` 只到**套件**粒度,而这个失效
+#    模式发生在**单条测试**上:bun 默认 20000ms **不写在任何测试源码里**,所以套件级
+#    仪表看不见它。(2026-08-31 一天三批红,其中一批来自一个只改两个 `.md` 的纯文档 PR。)
+#    这里补上那一格:解析 L0/L1 日志里 bun 打的逐条耗时,比**该条自己声明的超时**
+#    (没有就它所在 describe 的,再没有才用默认值),报出贴上限的条目。
+#    🔴 分母必须是**有效**超时,不能是默认值 —— 按默认值算会把一条自己声明了
+#       `}, 60_000)` 的测试报成 90% 高危(实测差点因此误判一条测试"未修")。
+#    report-only:只说话,不改退出码 —— 与下面 `L1_SOFT_BUDGET_S` 同一套教义。
+#    阈值用 `TEST_MARGIN_PCT` 覆盖(默认 50%);升成 ratchet 是后续独立一步。
+#
+# 🔴 `command -v python3` 不是可选的礼节:`test823-l1-concurrency-cap` 在
+#    `node:22-bookworm-slim`(**没有 python3**)里跑的是**真的 qa.sh --l1**,
+#    而且它会创建 `/tmp/qa-l1-*.log` ⇒ 少了这个守卫就会在那个容器里喷
+#    `python3: command not found`。这里静默退化,套件行为不变。
+if command -v python3 >/dev/null 2>&1 \
+   && { ls /tmp/qa-l0-*.log >/dev/null 2>&1 || ls /tmp/qa-l1-*-run.log >/dev/null 2>&1; }; then
+  python3 "$REPO_ROOT/scripts/check-test-margin.py" \
+    --logs '/tmp/qa-l0-*.log' '/tmp/qa-l1-*-run.log' || true
 fi
 
 ELAPSED=$(( $(date +%s) - START ))

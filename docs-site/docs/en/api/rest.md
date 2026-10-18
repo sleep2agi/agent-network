@@ -359,20 +359,22 @@ curl -X POST http://localhost:9200/api/auth/password \
   "revoked": 5,
   "revoked_login": 2,
   "revoked_cli": 3,
+  "revoked_network": 0,
+  "kept_network_tokens": [],
   "token": "utok_xxxxxxxxxxxxxxxx",
   "token_id": "tok_new_session_id"
 }
 ```
 
-Optional request field `keep_cli_tokens` (boolean, default `false`): when `true`, CLI / script tokens are kept and listed in `kept_cli_tokens`. Without it (older apps, the dashboard) every other token is revoked.
+Optional request field `keep_cli_tokens` (boolean, default `false`): when `true`, CLI / script tokens are kept and listed in `kept_cli_tokens`. Without it (older apps, the dashboard) every other network-less token is revoked.
 
-`revoked` is the total number of **other** tokens revoked (it does **not** include the caller's own token — that one is revoked separately by `revokeToken(resolved.user.user_id, resolved.tokenId)` in the password-change handler in `server.ts`); `revoked_login` / `revoked_cli` split it by kind (`revoked = revoked_login + revoked_cli`).
+`revoked` is the total number of **other** tokens revoked (it does **not** include the caller's own token — that one is revoked separately by `revokeToken(resolved.user.user_id, resolved.tokenId)` in the password-change handler in `server.ts`); `revoked_login` / `revoked_cli` split it by kind (`revoked = revoked_login + revoked_cli + revoked_network`).
 
 **Key side effects** (verify [`auth.ts` `changePassword` + `revokeTokensAfterPasswordChange`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **The caller's `utok_`** (`resolved.tokenId`) is revoked immediately ([`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` explicit delete)
 2. **Other browser / app login sessions** (`api_tokens.kind='login'`) are revoked; counted in `revoked_login`
 3. **CLI / script tokens** (`kind='cli'`: issued to `anet login` and other anet commands, and network-less named tokens from `POST /api/auth/tokens`) are **revoked by default too**, counted in `revoked_cli`; only `keep_cli_tokens: true` keeps them, listed one by one in `kept_cli_tokens` (`token_id` / `name` / `client_label` / `created_at` / `last_used_at`, **never token values**) so they can be revoked individually with `DELETE /api/auth/tokens/:token_id`. The kind is client-declared and only affects display and this explicit keep path. `anet passwd` sends `keep_cli_tokens: true` by default; `--revoke-cli-tokens` omits it
-4. **`ntok_` / network tokens are unaffected** (only `network_id IS NULL` tokens are touched, so agent nodes using `ntok_` keep running through a password change)
+4. **Node credentials remain unchanged.** Named network tokens created with `POST /api/auth/tokens` are kept by default and listed in `kept_network_tokens` (`token_id`, `name`, `network_id`, `created_at`, `last_used_at`; no credential values). Explicit boolean `revoke_network_tokens: true` revokes the caller’s active named network tokens across their networks and reports `revoked_network`. Only `scope=full`, network-bound tokens without a node binding qualify. The option is independent of `keep_cli_tokens`; other users and node credentials are preserved. Password update and these revocations commit together.
 5. **A fresh `utok_`** (`issued.token`) of the same kind as the caller's is minted and returned in this response — the caller must overwrite local storage with the new token right away
 6. Writes audit log: `action='password_changed'`
 

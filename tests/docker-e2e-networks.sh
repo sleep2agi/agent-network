@@ -118,18 +118,24 @@ register_agent() {
 
 register_agent agent-a "$NET_A_ID" "$TOKEN_A" net-agent-a-resume
 register_agent agent-b "$NET_B_ID" "$TOKEN_B" net-agent-b-resume
+# #1221: positive calls derive the sender from the user token. Keep an explicit
+# wrong sender negative so removing the production guard cannot look green.
+SPOOF=$(mcp_call "send_task" "{\"alias\":\"agent-a\",\"task\":\"must not impersonate\",\"from_session\":\"agent-a\",\"network_id\":\"$NET_A_ID\"}" "$TOKEN_A" | mcp_text_json)
+printf '%s' "$SPOOF" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") is False and d.get("error") == "from_session_identity_mismatch"' \
+  && pass "owner token cannot impersonate target node" || fail "spoofed sender was not rejected"
+
 pass "network-scoped target aliases registered"
 
 # Send tasks to different networks — each authenticated as the network owner.
-SEND_A=$(mcp_call "send_task" "{\"alias\":\"agent-a\",\"task\":\"alpha only\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}" "$TOKEN_A" | mcp_text_json)
-SEND_B=$(mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"beta only\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_B" | mcp_text_json)
+SEND_A=$(mcp_call "send_task" "{\"alias\":\"agent-a\",\"task\":\"alpha only\",\"network_id\":\"$NET_A_ID\"}" "$TOKEN_A" | mcp_text_json)
+SEND_B=$(mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"beta only\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_B" | mcp_text_json)
 printf '%s' "$SEND_A" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("ok") is True' \
   && pass "send_task accepted in alpha" || fail "send_task alpha rejected"
 printf '%s' "$SEND_B" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("ok") is True' \
   && pass "send_task accepted in beta" || fail "send_task beta rejected"
 
 # A valid alias in another network must not make a cross-network write valid.
-CROSS_SEND=$(mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"must not cross\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_A" | mcp_text_json)
+CROSS_SEND=$(mcp_call "send_task" "{\"alias\":\"agent-b\",\"task\":\"must not cross\",\"network_id\":\"$NET_B_ID\"}" "$TOKEN_A" | mcp_text_json)
 echo "  cross-network response: $CROSS_SEND"
 if printf '%s' "$CROSS_SEND" | python3 -c 'import json,sys
 d=json.load(sys.stdin); assert d.get("ok") is False and d.get("error") == "access_denied" and "network" in str(d.get("message","")).lower()'; then

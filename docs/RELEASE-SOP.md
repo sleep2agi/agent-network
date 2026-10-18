@@ -87,9 +87,9 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(**43 行**,其中 42 个首格是纯路径,门只认这 42 个 ——
+> 逐次发版必须重新核对的位置(**51 行**,其中 50 个首格是纯路径,门只认这 50 个 ——
 > 不要把 zh/en 合成一行数,分母数错会漏核。
-> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42 → 39 → 43。**加新的信道断言时,同时把它加进这张表**,
+> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42 → 39 → 43 → 49。**加新的信道断言时,同时把它加进这张表**,
 > 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
 >
 > | 文件 | 行 | 断言 |
@@ -104,6 +104,12 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/troubleshooting/is-this-node-alive.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/grok.md` | 见门输出 | Grok 节点页(原 grok-tui + grok-copresence 合并)：共存随 npm 发布包提供(latest 与 preview)、agent-node 版本下界断言——发版时核对仍真 |
 > | `docs-site/docs/en/guide/grok.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/opencode.md` | 见门输出 | OpenCode V2 指南：当日 npm `preview` / `latest` 具体版本，以及创建标志进入 preview 线的下界；模型目录读取器不在已发布 preview 包里。dist-tag 一动，版本句变假，发版时重核 |
+> | `docs-site/docs/en/guide/opencode.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/cli.md` | 见门输出 | V1 旧 CLI .171 / runtime .137 不恢复；新 .172/.138 候选需私有快照及首次旧桥导出，发布前不可下载，不把新版本号或心跳当作原会话恢复证明 |
+> | `docs-site/docs/guide/agent-node.md` | 见门输出 | 队列策略下界：CLI .175 / runtime .141 起认证 Dashboard 默认有界 4h、其他仍 30m；CLI .176 / runtime .142 起两层待办中认证人类优先、同级 FIFO，不抢已取出的工作；公开不等于采用 |
+> | `docs-site/docs/en/guide/agent-node.md` | 见门输出 | 同上（英文）；显式配置与 Hub 到期/取消仍优先，饱和并发需等槽位，不新增 active-owned-turn 注入或位置 UI |
+> | `docs-site/docs/en/guide/cli.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/upgrade.md` | 见门输出 | 初始管理员密码一节写「现在的 `latest` 与 `preview` 都在 `≥ 2.2.22-preview.4` 范围」（原 versioning 页并入）——是下界断言，发新版不会变假 |
 > | `docs-site/docs/en/guide/upgrade.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/install.md` | 见门输出 | 安装页(原 windows / deploy/npm / one-shot-install 并入)：Bun preflight「`2.3.0-preview.47` 及以后」与 Windows 跨盘修复「`2.3.0-preview.29` 及以后」都是下界断言，发新版不会变假 |
@@ -213,8 +219,6 @@ fail-closed，不拿空串去 grep——空串 grep 恒真会把断言变成永�
 - `docs-site/docs/v0.8.0/**`（整套历史归档版本的 docs）
 - `docs/archive/**`
 - `docs/evolution-log.md`
-- `docs/upgrade-v2.md`
-- `docs/sdk-upgrade-*.md`（baseline 报告）
 - `tests/test-npm-security/`、`tests/test28-demo-debate-v2.1.2/`、
   `agent-network/tests/docker-e2e/run-e2e.sh`（测试 fixture 钉死版本）
 
@@ -366,6 +370,37 @@ gh workflow run release.yml \
 > **那条指令现在是违规的**，已删除 —— 它正是上面那起事故的动作形状。
 
 ### Step 7：等待窗口 ≥ 30 分钟 + owner explicit ACK
+
+#### npm registry 尚不可下载时：复用正式 gated CLI tarball
+
+`npm publish` 被接受不等于匿名下载可用。不得重发同一版本，也不得把 PR artifact
+当正式包上传。CLI 可用 `.github/workflows/cli-gated-download.yml` 从 **GitHub Actions**
+发布原 `release.yml` 已验证的精确 main tarball；不在本机发包，不更改 npm dist-tag。
+
+输入必须是完整40位 main 源 SHA、该源的 main workflow_dispatch release run ID、
+CLI 精确版本及 **inner tarball** SHA256（不是 artifact ZIP digest）。工作流核查
+原 build 和四道门全部 SUCCESS、包名/版本/字节；下载前和公开前再次核查当前 main
+祖先关系。只创建新的不可变 `cli-v<version>` tag，不覆盖已有 tag/asset。
+
+workflow_dispatch 的工作流 head 可因 main 后续报告提交而不同于实际 checkout 源。
+此时下载门还必须从原 build job 的认证日志核对唯一 checkout SHA，以及已成功的
+main source guard 的 PUBLISH/RELEASE_COMMIT 输入；缺失、歧义或不匹配一律拒绝。
+不能仅凭工作流 head、用户填写的 SHA 或相同包版本替代实际构建来源。
+
+```bash
+gh workflow run cli-gated-download.yml --ref main \
+  -f commit=FULL_40_CHARACTER_MAIN_SOURCE_SHA \
+  -f run_id=ORIGINAL_RELEASE_RUN_ID \
+  -f version=EXACT_CLI_PREVIEW_VERSION \
+  -f sha256=INNER_TARBALL_SHA256 \
+  -F publish=true
+```
+
+公开后匿名下载整个 tarball，与原 SHA256 比对，才交接升级。该下载只是 CLI npm
+tarball，不是已签名的原生客户端。Daemon 使用版本源中的精确 runtime 配对，启动、
+验证与回滚仍按 `docs-site/docs/deploy/daemon.md`；保留旧私有安装和受保护配置，
+不自动改业务节点、登录账号、生产数据或服务拓扑。账号/会话仍来自原有安全来源和
+备份；此路径不增加端口、代理、密钥源或数据备份方案。
 
 两阶段发版规则（release-preview-first，见 [CONTRIBUTING.md §Release process](../CONTRIBUTING.md)）：
 

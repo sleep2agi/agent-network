@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { collectOsUser } from "./os-user";
 /**
  * @sleep2agi/agent-node CLI
  *
@@ -44,6 +45,10 @@ import {
   recoverTurnReceipts,
   TurnReceiptLedger,
 } from "./runtime/codex-app-server/receipt-ledger";
+import { decideFollowUpHubState } from "./runtime/codex-app-server/followup-hub-check";
+import type { OwnedFollowUpReceiptEntry } from "./runtime/codex-app-server/receipt-ledger";
+import { followUpInputHash, followUpAnswerPrompt, type OwnedFollowUpAdapter } from "./runtime/codex-app-server/owned-followup-controller";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
 import { hostname as osHostname, homedir } from "os";
@@ -94,6 +99,7 @@ import {
 } from "./runtime/readable-attachment-prompt";
 import {
   createTaskRuntimeEvidenceReporter,
+  taskActivityPayload,
   logicalTaskIdFromInbox,
   type TaskRuntimeEvidenceReporter,
 } from "./task-runtime-evidence";
@@ -220,6 +226,8 @@ import {
   readOpencodeConfig,
   writeOpencodeConfig,
   writebackOpencodeSession,
+  writebackOpencodeConfiguredModel,
+  shouldReconcileOpencodeSessionModel,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN, isAcceptedOpencodeVersion, opencodeTransitionNote } from "./runtime/opencode-acp/binary";
 import {
@@ -340,16 +348,23 @@ if (argv.length === 1 && argv[0] === "--print-entrypoint") {
 }
 
 let PKG_VERSION = "2.1.0";
-try {
-  // Try relative to the script location (works for both dev and npm install)
-  const scriptDir = new URL(".", import.meta.url).pathname;
-  for (const rel of ["../package.json", "../../package.json"]) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
-      if (pkg.version) { PKG_VERSION = pkg.version; break; }
-    } catch {}
-  }
-} catch {}
+// Set only by the standalone `anet` binary before it imports this entry.
+// npm/node leaves it unset and keeps the package.json walk below.
+const embeddedAgentNodeVersion = process.env.ANET_EMBEDDED_AGENT_NODE_VERSION?.trim() ?? "";
+if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embeddedAgentNodeVersion)) {
+  PKG_VERSION = embeddedAgentNodeVersion;
+} else {
+  try {
+    // Try relative to the script location (works for both dev and npm install)
+    const scriptDir = new URL(".", import.meta.url).pathname;
+    for (const rel of ["../package.json", "../../package.json"]) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
+        if (pkg.version) { PKG_VERSION = pkg.version; break; }
+      } catch {}
+    }
+  } catch {}
+}
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -365,6 +380,7 @@ for (let i = 0; i < argv.length; i++) {
 
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
+  --opencode-borrowed-attach <config>  Attach the exact existing borrowed V1 TUI
   --alias <name>      Agent 别名 / CommHub alias (必需)
   --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
                       (claude-code-cli is NOT here: it runs via \`anet node start\`, not by passing --runtime to agent-node — see the Runtime section)
@@ -389,7 +405,7 @@ Runtime:
   grok-build-cli    Grok Build CLI — headless 或 grokCopresence 共存 TUI 模式
   opencode-cli      opencode CLI — Anthropic/OpenAI vendor preset via ACP
 
-Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2
+Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2 ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1
 `);
     process.exit(0);
   }
@@ -405,6 +421,22 @@ Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2
 
 function expandHome(path: string): string {
   return path.replace(/^~(?=\/|$)/, home);
+}
+
+if (argv.includes("--opencode-borrowed-attach")) {
+  if (argv.length!==2 || argv[0]!=="--opencode-borrowed-attach" || !isAbsolute(argv[1])) {
+    console.error("OpenCode V1 borrowed TUI refused: only the original absolute private config is accepted");
+    process.exit(1);
+  }
+  let failure: ((error: unknown)=>string) | undefined;
+  try {
+    const {runBorrowedV1Tui,borrowedTuiFailure}=await import("./runtime/opencode-copresence/v1-borrowed-tui");
+    failure=borrowedTuiFailure;
+    process.exit(await runBorrowedV1Tui(argv[1]));
+  } catch (error) {
+    console.error(failure?.(error) ?? "OpenCode V1 borrowed TUI refused: selected runtime unavailable; no fallback");
+    process.exit(1);
+  }
 }
 
 function parseChannelSpec(spec: string): { type: string; path?: string; raw: string } {
@@ -561,6 +593,11 @@ try {
     explicitConfigKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
     log: (line) => console.log(line),
   });
+  const { readScopedNodeEnv } = await import('./shared/scoped-secret-env.js');
+  const scopedEnv = nodeSecretsDir ? readScopedNodeEnv(nodeSecretsDir) : {};
+  for (const [key, value] of Object.entries(scopedEnv)) {
+    if (!Object.hasOwn(process.env, key) && typeof fileConfig.env?.[key] !== 'string') process.env[key] = value;
+  }
 } catch (e: any) {
   console.error(`[agent-node] ${e?.message || e}`);
   process.exit(1);
@@ -1321,7 +1358,8 @@ import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
 import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runtime/codex-reasoning-effort.js";
 import { installTeamSkills } from "./runtime/node-skills";
-import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows-tui-health";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
@@ -1685,11 +1723,15 @@ const register = async () => {
   const alias = await liveAlias();
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
-    : SESSION_ID || undefined;
+    : RUNTIME === "opencode"
+      ? opencodeSessionId
+      : SESSION_ID || undefined;
   const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
+    // #1198 — the OS account this node process actually runs as.
+    os_user: collectOsUser() ?? undefined,
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
@@ -1835,6 +1877,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
+      ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
+      ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
       ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
         buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
@@ -1854,9 +1898,15 @@ function markClaudeLoginDead(): void {
   claudeLoginDead = true;
   void reportStatus("error").catch(() => {});
 }
+let warnedLegacyHumanInbox = false;
 const getInbox = async () => {
   const alias = await liveAlias();
-  return (await callCommHub("get_inbox", { alias, limit: 20 }))?.messages || [];
+  const result = await callCommHub("get_inbox", { alias, limit: 20, human_first: true });
+  if (result?.human_inbox?.version !== 1 && !warnedLegacyHumanInbox) {
+    warnedLegacyHumanInbox = true;
+    warn("Hub lacks full-depth human inbox capability; using its legacy first-page ordering. Upgrade the Hub in its normal maintenance window.");
+  }
+  return result?.messages || [];
 };
 const ackMessage = async (id: string) => {
   const alias = await liveAlias();
@@ -2017,9 +2067,15 @@ const informationalInboxDrain = createInboxDrainLane((cause) => {
 // active; later unique rows wait in this dispatcher and enter bridge
 // arbitration as slots settle. The bridge independently guarantees at most
 // one turn/start per thread and FIFO-queues ordinary network tasks.
+// Authenticated Dashboard requests lead waiting work in both lanes; existing
+// active handlers retain their slots and already claimed turns are not preempted.
 const CODEX_INBOX_MAX_CONCURRENT = 20;
+const CODEX_FOLLOWUP_RECOVERY = Symbol("durable-owned-followup-recovery");
 const codexInboxDispatcher = createDetachedInboxDispatcher<any>({
   maxConcurrent: CODEX_INBOX_MAX_CONCURRENT,
+  reservedPrioritySlots: Math.min(1, CODEX_INBOX_MAX_CONCURRENT - 1),
+  prioritize: isInteractiveDashboardTask,
+  prioritizeRecovery: message => message[CODEX_FOLLOWUP_RECOVERY] === true,
   key: (message) => String(message.id),
   onError: (cause) => {
     const detachedError = cause as any;
@@ -2432,6 +2488,7 @@ let grokModelSource: "readback" | "argv" | "default" | undefined;
 // subprocess exits (crash-restart path handled by resetting the
 // holder — the next turn spawns fresh).
 let opencodeSessionId: string | undefined = RUNTIME === "opencode" ? (SESSION_ID || undefined) : undefined;
+let clearBorrowedLaunchHealth: (() => void) | undefined;
 let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRuntimeSession | null = null;
 // Set synchronously immediately after spawn, before initialize or session/new
 // resolves. shutdown() uses this handle during the handshake window.
@@ -2441,6 +2498,20 @@ const opencodeMode = RUNTIME === "opencode"
   : "headless";
 if (RUNTIME === "opencode" && opencodeMode !== "headless" && opencodeMode !== "copresence") {
   console.error(`[${ALIAS}] invalid opencodeMode=${JSON.stringify(opencodeMode)}; expected headless or copresence`);
+  process.exit(1);
+}
+// #1224 — explicit private selection; default owned startup is unchanged.
+const { selectV1BorrowedCli } = await import("./runtime/opencode-copresence/v1-borrowed-cli");
+let opencodeBorrowedCli: ReturnType<typeof selectV1BorrowedCli> = null;
+try {
+  opencodeBorrowedCli = selectV1BorrowedCli(fileConfig.opencodeBorrowedV1, {
+    runtime: RUNTIME, generation: OPENCODE_GENERATION, mode: opencodeMode, configFile: configFilePath,
+    networkId: NETWORK_ID, nodeId: NODE_ID || "", alias: ALIAS, cwd: process.cwd(), stateRoot: NODE_DIR,
+    model: MODEL, sessionId: opencodeSessionId, newSession: NEW_SESSION,
+    unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+  });
+} catch (error: any) {
+  console.error(`[${ALIAS}] ${error?.message ?? "borrowed V1 selection refused"}`);
   process.exit(1);
 }
 // #543 — OpenCode V2 is a co-presence-only preview that runs only with
@@ -2542,6 +2613,7 @@ async function ensureCodexAppServerSession(): Promise<
       commhubToken: AUTH_TOKEN || undefined,
       codexHome: NODE_CODEX_HOME,
       shouldStartQueued: (task) => queuedRowStillPendingOnHub(task.taskId),
+      ownedFollowUpAdapter: turnReceiptLedger ? codexOwnedFollowUpAdapter() : undefined,
       onThread: (threadId) => writebackCodexThread(threadId),
       onExit: (info) => {
         warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
@@ -2567,6 +2639,30 @@ async function ensureCodexAppServerSession(): Promise<
   return session;
 }
 let codexReceiptRecoveryInFlight: Promise<void> | null = null;
+async function codexFollowUpHubState(entry: OwnedFollowUpReceiptEntry) {
+  try {
+    return decideFollowUpHubState(entry, parseToolJson(await callCommHub("get_task", { task_id: entry.taskId }, 0)), NODE_ID || "");
+  } catch { return "unknown" as const; }
+}
+function codexOwnedFollowUpAdapter(): OwnedFollowUpAdapter {
+  const ledger = turnReceiptLedger!;
+  const read = (taskId: string) => ledger.load().find(row => row.taskId === taskId && row.version === 2) as OwnedFollowUpReceiptEntry;
+  return {
+    prepare: input => {
+      const inboxId = queuedInboxRowByTask.get(input.taskId);
+      if (!inboxId || !input.from) return undefined;
+      ledger.prepareFollowUp({ taskId: input.taskId, inboxId, replyTo: input.from, threadId: input.threadId,
+        ownerTaskId: input.ownerTaskId, ownerTurnId: input.ownerTurnId, startedAt: Date.now(),
+        nonce: randomBytes(16).toString("hex"), inputSha256: followUpInputHash(input.text) });
+      return read(input.taskId);
+    },
+    accept: entry => { ledger.acceptFollowUp(entry.taskId, { ownerTurnId: entry.ownerTurnId, nonce: entry.nonce }); return read(entry.taskId); },
+    prepareAnswer: entry => { ledger.prepareFollowUpAnswer(entry.taskId); return read(entry.taskId); },
+    bindAnswer: (entry, turnId) => { ledger.bindFollowUpAnswer(entry.taskId, { threadId: entry.threadId, turnId, clientUserMessageId: `anet:${entry.taskId}`, identityConfirmed: true }); return read(entry.taskId); },
+    status: codexFollowUpHubState,
+    terminal: entry => { clearPendingReply(entry.replyTo, entry.taskId); ledger.remove(entry.taskId); },
+  };
+}
 async function recoverCodexTurnReceipts(): Promise<void> {
   if (!turnReceiptLedger || codexReceiptRecoveryInFlight) return codexReceiptRecoveryInFlight ?? undefined;
   codexReceiptRecoveryInFlight = (async () => {
@@ -2583,12 +2679,29 @@ async function recoverCodexTurnReceipts(): Promise<void> {
     // inspect Codex history for ledger rows that remain afterwards.
     await drainPendingReplies();
     const queuedTaskIds = new Set((pendingReplies?.load() ?? []).map((row) => row.taskId).filter(Boolean));
-    const rows = turnReceiptLedger.load().filter((row) => !queuedTaskIds.has(row.taskId));
+    const candidates = turnReceiptLedger.load().filter((row) => !queuedTaskIds.has(row.taskId));
+    const rows: typeof candidates = [];
+    for (const row of candidates) {
+      if (row.version === 2) {
+        const state = await codexFollowUpHubState(row);
+        if (state === "terminal") {
+          clearPendingReply(row.replyTo, row.taskId);
+          turnReceiptLedger.remove(row.taskId);
+          log(`[codex-receipt] follow-up task=${row.taskId.slice(0, 8)} already terminal on Hub; no second reply`);
+          continue;
+        }
+        // Failed/unknown reads do not authorize a model turn or a receipt.
+        if (state === "unknown") continue;
+      }
+      rows.push(row);
+    }
     if (!rows.length) return;
     const session = await ensureCodexAppServerSession();
     const recovery = await recoverTurnReceipts({
       rows,
-      inspect: (threadId, turnId) => session.bridge.inspectPersistedTurn(threadId, turnId),
+      inspect: (threadId, turnId, clientId) => clientId
+        ? session.bridge.inspectPersistedTurn(threadId, turnId, clientId)
+        : session.bridge.inspectPersistedTurn(threadId, turnId),
     });
     for (const expired of recovery.expiredQueued) {
       clearPendingReply(expired.replyTo, expired.taskId);
@@ -4003,6 +4116,9 @@ async function processWithOpencode(
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
       onCapacityRetry: reportCapacityRetry,
+    }).catch(error => {
+      if (opencodeBorrowedCli && !runtime.isRunning) clearBorrowedLaunchHealth?.();
+      throw error;
     });
     log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
     return outcome.replyText || "（无回复）";
@@ -4026,6 +4142,7 @@ async function processWithOpencode(
       // only for trusted coding tasks.
       workDir: NODE_DIR,
       unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+      model: MODEL,
       sessionId: opencodeSessionId,
       onClient: (client) => {
         opencodeRuntimeClient = client;
@@ -4085,8 +4202,14 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
 > {
   if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+  if (opencodeBorrowedCli && opencodeCopresenceSession) {
+    throw new Error("Borrowed V1 runtime unavailable; retain original binding/recovery, no automatic reopen");
+  }
   return opencodeCopresenceOpening.run(async () => {
     if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+    if (opencodeBorrowedCli && opencodeCopresenceSession) {
+      throw new Error("Borrowed V1 runtime unavailable; retain original binding/recovery, no automatic reopen");
+    }
     if (opencodeCopresenceSession) {
       await opencodeCopresenceSession.close().catch((error: any) => {
         warn(`[opencode-copresence] stale runtime cleanup failed: ${error?.message ?? error}`);
@@ -4096,6 +4219,24 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
     const { openOpenCodeCopresenceRuntime } =
       await import("./runtime/opencode-copresence/runtime");
     const { opencodeBackendFor } = await import("./runtime/opencode-backend");
+    const sharedServerUrl = fileConfig.opencodeSharedServerUrl;
+    const sharedServerPasswordFile = fileConfig.opencodeSharedServerPasswordFile;
+    let sharedServer: { url: string; password: string; passwordFile: string } | undefined;
+    if (sharedServerUrl !== undefined || sharedServerPasswordFile !== undefined) {
+      if (typeof sharedServerUrl !== "string" || typeof sharedServerPasswordFile !== "string") {
+        throw new Error("Shared OpenCode Server requires URL and password file");
+      }
+      const passwordStat = statSync(sharedServerPasswordFile);
+      if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
+        throw new Error("Shared OpenCode Server password file must be a private regular file");
+      }
+      sharedServer = { url: sharedServerUrl, password: readFileSync(sharedServerPasswordFile, "utf8").trim(), passwordFile: sharedServerPasswordFile };
+    }
+    const borrowed = opencodeBorrowedCli
+      ? (await import("./runtime/opencode-copresence/v1-borrowed-cli")).borrowedV1CliAdmission(opencodeBorrowedCli, {
+          hubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, hubToken: AUTH_TOKEN,
+          binary: INITIAL_OPENCODE_BIN, binarySearchPath: INITIAL_LAUNCH_PATH, expectedVersion: INITIAL_OPENCODE_VERSION,
+        }) : undefined;
     const opened = await openOpenCodeCopresenceRuntime({
       // #543 — V1 nodes pass the V1 backend, i.e. exactly the pre-#543 default.
       backend: opencodeBackendFor(OPENCODE_GENERATION ?? "v1"),
@@ -4107,13 +4248,27 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       expectedVersion: INITIAL_OPENCODE_VERSION,
       binarySearchPath: INITIAL_LAUNCH_PATH,
       title: `${ALIAS} · Agent Network shared TUI`,
-      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
-      commhubToken: AUTH_TOKEN,
-      commhubAlias: ALIAS,
-      providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
+      checkpoint: !borrowed && (OPENCODE_GENERATION ?? "v1") === "v1" && NODE_ID && NETWORK_ID
+        ? { nodeId: NODE_ID, networkId: NETWORK_ID } : undefined,
+      sessionId: opencodeSessionId,
+      newSession: NEW_SESSION,
+      ...(borrowed ? { borrowedV1: borrowed } : {
+        commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, commhubToken: AUTH_TOKEN, commhubAlias: ALIAS,
+        providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
+        sharedServer,
+        resumeSessionId: opencodeSessionId,
+        reconcileResumedModel: OPENCODE_GENERATION === "v2" &&
+          shouldReconcileOpencodeSessionModel(fileConfig, MODEL),
+      }),
       onSession: async (id) => {
         opencodeSessionId = id;
-        writebackSession(id);
+        if (!borrowed) writebackSession(id);
+        if (!borrowed && OPENCODE_GENERATION === "v2" && configFilePath && MODEL) {
+          writebackOpencodeConfiguredModel(configFilePath, MODEL);
+        }
+        if (!borrowed && id !== SESSION_ID) {
+          await register().catch((e: any) => warn(`[opencode-copresence] session registration retry needed: ${e?.message || e}`));
+        }
       },
       log,
       warn,
@@ -4123,12 +4278,17 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       throw new Error("OpenCode copresence server exited while opening");
     }
     opencodeCopresenceSession = opened;
-    log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
+    if (borrowed && process.env.ANET_BORROWED_V1_LAUNCH_ID) {
+      const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
+      clearBorrowedLaunchHealth = publishBorrowedLaunchHealth(configFilePath, process.env.ANET_BORROWED_V1_LAUNCH_ID);
+    }
+    log(borrowed ? "[opencode-copresence] borrowed existing V1 session; Host/TUI lifecycle remains with its Owner" : `[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
     return opened;
   });
 }
 
 async function closeOpencodeRuntime(reason: string): Promise<void> {
+  clearBorrowedLaunchHealth?.();
   // An inbox recovery drain can race startup. Wait for that one shared open
   // attempt before closing so shutdown cannot orphan a just-created server.
   const opening = opencodeCopresenceOpening.pending();
@@ -4138,7 +4298,7 @@ async function closeOpencodeRuntime(reason: string): Promise<void> {
     });
   }
   if (opencodeCopresenceSession) {
-    log(`[opencode-copresence] stopping shared server (${reason})`);
+    log(opencodeBorrowedCli ? `[opencode-copresence] closing only borrowed node (${reason})` : `[opencode-copresence] stopping shared server (${reason})`);
     // #1957 — a config restart keeps the human's tmux pane alive (placeholder)
     // so the re-spawned generation can put the new launcher back into it.
     const restart = reason.startsWith("config restart");
@@ -4174,6 +4334,61 @@ async function closeOpencodeRuntime(reason: string): Promise<void> {
 // exactly like every other runtime — the bridge only wraps "run one turn".
 // A second concurrent task queues FIFO inside the bridge and is drained when
 // the in-flight turn (ours OR a human TUI's) completes.
+async function processWithOwnedFollowUpReplyOnly(entry: OwnedFollowUpReceiptEntry, evidence?: TaskRuntimeEvidenceReporter): Promise<string> {
+  const { codexAppServerThink, codexAppServerReplyOrThrow } = await import("./runtime/codex-app-server/runtime");
+  const session = await ensureCodexAppServerSession();
+  if (session.bridge.getThreadId() !== entry.threadId) throw new Error("接续回执属于原线程，不能切线程或重放行动。");
+  const replyEvidence = evidence ?? createTaskRuntimeEvidenceReporter({ taskId: entry.taskId, debug,
+    reportActivity: (id, context) => callCommHub("mark_tasks_consumed", taskActivityPayload(id, context), 0),
+    report: (level, id, context) => {
+      commhubCompensation?.recordLifecycle(id, level);
+      return callCommHub(level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed", {
+        task_ids: [id], ...(context ? { task_contexts: [{ task_id: id, thread_id: context.threadId, turn_id: context.turnId }] } : {}),
+      }, 0);
+    },
+  });
+  const outcome = await codexAppServerThink(session, { taskId: entry.taskId, text: followUpAnswerPrompt(entry), from: entry.replyTo,
+    resumeOwnedFollowUp: entry, interactiveDashboardTask: true, log,
+    onSubmitted: replyEvidence.submitted,
+    onConsumed: () => replyEvidence.consumed({ threadId: entry.threadId, turnId: entry.ownerTurnId }),
+    onActivity: event => { if (event.turnId === entry.ownerTurnId) replyEvidence.activity({ taskId: entry.taskId, threadId: entry.threadId, turnId: event.turnId }); },
+  });
+  if (outcome.failed) codexModelAuth.noteError(outcome.replyText);
+  else if (!outcome.skipped && !outcome.queued) codexModelAuth.noteSuccess();
+  codexHealthMonitor?.noteModelAuthMaybeChanged();
+  const replyText = codexAppServerReplyOrThrow(outcome);
+  return replyText;
+}
+
+let codexFollowUpRecoveryPump: Promise<void> | null = null;
+/** Separate reply controller, not the readonly history/receipt recovery pass. */
+async function resumePersistedOwnedFollowUps(): Promise<void> {
+  if (!turnReceiptLedger || codexFollowUpRecoveryPump) return codexFollowUpRecoveryPump ?? undefined;
+  codexFollowUpRecoveryPump = (async () => {
+    const rows = turnReceiptLedger.load().filter((row): row is OwnedFollowUpReceiptEntry => row.version === 2 && row.state === "watching");
+    if (!rows.length) return;
+    const session = await ensureCodexAppServerSession();
+    const recoverable = rows.filter(row => row.threadId === session.bridge.getThreadId() && !session.bridge.hasOwnedFollowUp(row.taskId))
+      .map(entry => ({ id: entry.inboxId, entry, [CODEX_FOLLOWUP_RECOVERY]: true }));
+    codexInboxDispatcher.submit(recoverable, async row => {
+      if (session.bridge.hasOwnedFollowUp(row.entry.taskId)) return;
+      let body: string, failed = false;
+      try { body = await processWithOwnedFollowUpReplyOnly(row.entry); }
+      catch (error: any) { if (error?.code === "codex_task_skipped") return; failed = true; body = error instanceof Error ? error.message : String(error); }
+      await deliverReplyReliably(row.entry.replyTo, `[${ALIAS}] ${body.slice(0, 2000)}`, row.entry.taskId, failed);
+      // Local reply completion suppresses redelivery; it is not Hub runtime
+      // consumption/activity evidence. Transport ACK still uses inbox.id.
+      commhubCompensation?.recordLifecycle(row.entry.taskId, "completed");
+      try {
+        await ackMessage(row.entry.inboxId);
+        commhubCompensation?.recordConsumed({ id: row.entry.inboxId, task_id: row.entry.taskId, type: "task" });
+      } catch (error) { warn(`[codex-followup] reply settled; transport ACK deferred: ${error instanceof Error ? error.message : String(error)}`); }
+    });
+  })().catch(cause => warn(`[codex-followup] reply recovery deferred: ${cause instanceof Error ? cause.message : String(cause)}`))
+    .finally(() => { codexFollowUpRecoveryPump = null; });
+  return codexFollowUpRecoveryPump;
+}
+
 async function processWithCodexAppServer(
   task: string,
   _from: string,
@@ -4182,18 +4397,35 @@ async function processWithCodexAppServer(
   evidence?: TaskRuntimeEvidenceReporter,
   trackReceipt = true,
 ): Promise<string> {
+  // This compatibility slice can recover an identity-proven V2 answer, but
+  // it does not yet admit/replay an injected action through the old adapter.
+  if (taskId && turnReceiptLedger?.load().some(row => row.taskId === taskId && row.version === 2)) {
+    const entry = turnReceiptLedger.load().find(row => row.taskId === taskId && row.version === 2) as OwnedFollowUpReceiptEntry;
+    if (await codexFollowUpHubState(entry) === "terminal") {
+      clearPendingReply(entry.replyTo, taskId);
+      turnReceiptLedger.remove(taskId);
+      throw Object.assign(new Error("接续任务已在 Hub 终态，跳过行动与重复回复。"), { code: "codex_task_skipped" });
+    }
+    return processWithOwnedFollowUpReplyOnly(entry, evidence);
+  }
   const { codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
   const session = await ensureCodexAppServerSession();
 
   let lastActivityHeartbeatAt = Date.now();
+  let followUpOwnerTurnId: string | undefined;
   const outcome = await codexAppServerThink(session, {
     taskId: taskId || `local-${Date.now()}`,
     text: task,
     from: _from,
     steerIfExternalTurn,
+    // This flag comes from isInteractiveDashboardTask at inbox admission.
+    // Keep queue audience explicit: generic bridge steering is not proof of a human request.
+    interactiveDashboardTask: steerIfExternalTurn,
     log,
     onActivity: (event) => {
+      if (!followUpOwnerTurnId || event.turnId === followUpOwnerTurnId)
+        evidence?.activity({ taskId: event.taskId, threadId: session.bridge.getThreadId(), turnId: event.turnId });
       const now = Date.now();
       if (now - lastActivityHeartbeatAt < 30_000) return;
       lastActivityHeartbeatAt = now;
@@ -4212,7 +4444,11 @@ async function processWithCodexAppServer(
       const inboxId = taskId ? queuedInboxRowByTask.get(taskId) : undefined;
       if (trackReceipt && taskId && inboxId && turnReceiptLedger) {
         try {
-          turnReceiptLedger.watch({
+          const followUp = turnReceiptLedger.load().find(row => row.taskId === taskId && row.version === 2);
+          if (followUp?.version === 2) {
+            followUpOwnerTurnId = followUp.ownerTurnId;
+            if (followUp.threadId !== threadId || followUp.ownerTurnId !== event.turnId) throw new Error("follow-up consumed context mismatch");
+          } else turnReceiptLedger.watch({
             taskId,
             inboxId,
             replyTo: _from,
@@ -5714,6 +5950,7 @@ async function processTask(
   let grokFailureSubcode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
     taskId,
+    reportActivity: (exactTaskId, context) => callCommHub("mark_tasks_consumed", taskActivityPayload(exactTaskId, context), 0),
     report: (level, exactTaskId, context) => {
       commhubCompensation?.recordLifecycle(exactTaskId, level);
       return callCommHub(
@@ -7129,7 +7366,15 @@ async function connectSSE() {
               // 仍 pending,门铃却没人听);连上后补拉一次,没有就是一次空拉。
               processRulesFileRequests(rulesFileDeps())
                 .catch((e: any) => warn(`[rules-file] connect catch-up failed: ${e?.message || e}`));
+              if (nodeSecretsDir && fileConfig.node_id && fileConfig.network_id) {
+                import('./runtime/node-secrets.js').then(({reconcileNodeSecrets})=>reconcileNodeSecrets({
+                  callCommHub,nodeDir:nodeSecretsDir,nodeId:NODE_ID,networkId:NETWORK_ID,warn,
+                })).catch(()=>warn('[node-secrets] module unavailable'));
+              }
               if (fileConfig.role === "host_supervisor") {
+                import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({
+                  callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, warn,
+                })).catch(()=>warn('[daemon-secrets] module unavailable'));
                 import("./runtime/daemon-provider-snapshot.js").then(({ reconcileProviderSnapshots }) => reconcileProviderSnapshots({
                   callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, serverUrl: COMMHUB_URL,
                   warn: (m: string) => warn(m),
@@ -7140,12 +7385,23 @@ async function connectSSE() {
                     recentlyHandledRequestIds: recentlyHandledCreateRequestIds,
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
+                    handleCloneNodeDoorbell: (event: { request_id: string }) => import("./runtime/clone-node.js").then(({ handleCloneNodeDoorbell }) => handleCloneNodeDoorbell(event, {
+                      callCommHub,
+                      workDir: process.cwd(),
+                      hubUrl: COMMHUB_URL,
+                      log: (m: string) => log(m),
+                      warn: (m: string) => warn(m),
+                      serializeEnvLocal: serializeEnvLocalDaemon,
+                      allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                        ? fileConfig.allowed_runtimes : null,
+                    })),
                     handleCreateNodeDoorbell: (event: { request_id: string }) => handleCreateNodeDoorbell(
                       event,
                       {
                         callCommHub,
                         workDir: process.cwd(),
                         hubUrl: COMMHUB_URL,
+                        providerScope: { alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID },
                         log: (m: string) => log(m),
                         warn: (m: string) => warn(m),
                         serializeEnvLocal: serializeEnvLocalDaemon,
@@ -7268,6 +7524,7 @@ async function connectSSE() {
                     callCommHub,
                     workDir: process.cwd(),
                     hubUrl: COMMHUB_URL,
+                    providerScope: { alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID },
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
                     serializeEnvLocal: serializeEnvLocalDaemon,
@@ -7284,6 +7541,35 @@ async function connectSSE() {
               }).catch((e: any) => {
                 recentlyHandledCreateRequestIds.delete(requestId);
                 warn(`create-node-daemon import failed: ${e?.message || e}`);
+              });
+            }
+            // Hub #938 — same daemon, new node. Shares the create dedupe set
+            // so a reconnect reconcile does not spawn the clone twice.
+            if (ev.type === "clone_node" && fileConfig.role === "host_supervisor") {
+              const requestId = typeof ev.request_id === "string" ? ev.request_id : "";
+              if (!requestId || recentlyHandledCreateRequestIds.has(requestId)) continue;
+              recentlyHandledCreateRequestIds.add(requestId);
+              log(`← SSE clone_node ${requestId}`);
+              Promise.all([
+                import("./runtime/clone-node.js"),
+                import("./runtime/create-node-daemon.js"),
+              ]).then(([{ handleCloneNodeDoorbell }, { serializeEnvLocalDaemon }]) => {
+                return handleCloneNodeDoorbell(
+                  { request_id: requestId },
+                  {
+                    callCommHub,
+                    workDir: process.cwd(),
+                    hubUrl: COMMHUB_URL,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                    serializeEnvLocal: serializeEnvLocalDaemon,
+                    allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                      ? fileConfig.allowed_runtimes : null,
+                  },
+                );
+              }).catch((e: any) => {
+                recentlyHandledCreateRequestIds.delete(requestId);
+                warn(`clone-node failed: ${e?.message || e}`);
               });
             }
             // RFC-027 §2.4 — stop/delete doorbell. host_supervisor daemons
@@ -7342,6 +7628,16 @@ async function connectSSE() {
                 warn: (m: string) => warn(m),
               })).catch(() => warn("[daemon-provider] readback module unavailable"));
             }
+            if (ev.type === 'node_secrets' && nodeSecretsDir && fileConfig.node_id && fileConfig.network_id) {
+              import('./runtime/node-secrets.js').then(({reconcileNodeSecrets})=>reconcileNodeSecrets({
+                callCommHub,nodeDir:nodeSecretsDir,nodeId:NODE_ID,networkId:NETWORK_ID,warn,
+              })).catch(()=>warn('[node-secrets] module unavailable'));
+            }
+            if (ev.type === 'scoped_secrets' && fileConfig.role === 'host_supervisor') {
+              import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({
+                callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, warn,
+              })).catch(()=>warn('[daemon-secrets] module unavailable'));
+            }
             if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {
               log(`← SSE probe_provider ${ev.probe_id || ""}`);
               import("./runtime/probe-daemon.js").then(({ handleProbeDoorbell }) => {
@@ -7354,6 +7650,20 @@ async function connectSSE() {
                   },
                 ).catch((e: any) => warn(`probe-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`probe-daemon import failed: ${e?.message || e}`));
+            }
+            if (ev.type === "opencode_catalog" && fileConfig.role === "host_supervisor") {
+              log(`← SSE opencode_catalog ${ev.request_id || ""}`);
+              import("./runtime/opencode-catalog-dispatch.js").then(({ handleOpenCodeCatalogDoorbell }) => {
+                handleOpenCodeCatalogDoorbell(
+                  { request_id: ev.request_id },
+                  {
+                    callCommHub,
+                    daemonWorkDir: process.cwd(),
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                  },
+                ).catch((e: any) => warn(`opencode-catalog failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`opencode-catalog import failed: ${e?.message || e}`));
             }
           } catch {}
         }
@@ -7566,18 +7876,18 @@ if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
 // already consumed an inbox row. Recovery is read-only against Codex and only
 // creates the missing outbound receipt; it never starts a model turn.
 if (turnReceiptLedger?.load().length) void recoverCodexTurnReceipts();
+if (turnReceiptLedger?.load().some(row => row.version === 2)) void resumePersistedOwnedFollowUps();
 if (turnReceiptLedger) {
   setInterval(() => {
     if (turnReceiptLedger.load().length) void recoverCodexTurnReceipts();
+    if (turnReceiptLedger.load().some(row => row.version === 2)) void resumePersistedOwnedFollowUps();
   }, 30_000).unref?.();
 }
 
 // #448 —— 分层健康探针:每 30s 一次 ws 握手 + (共存节点)TUI pane 检查。任一层翻转时立即补报一次
 // 当前状态,不等 3 分钟心跳。纯报告:不改调度,不拒任务。
 if (RUNTIME === "codex-app-server") {
-  const tuiSession = process.env.ANET_COPRESENCE_BRIDGE === "1"
-    ? (process.env.ANET_CODEX_TUI_SESSION || ALIAS)
-    : undefined;
+  const tuiSession = copresenceTmuxSession(process.platform, process.env, ALIAS);
   // #461 —— app-server 看门狗:探针连续失败 / 已知退出 → 按原会话重启(共存:按启动快照在原 tmux 会话里
   // 重新拉起 + 桥重接原 thread;自有:重新 spawn + resume 原 thread),窗口内次数有上限,放弃后保持降级。
   const copresenceAppServer = process.env.ANET_COPRESENCE_BRIDGE === "1" && !!codexAppServerUrl;
@@ -7650,6 +7960,16 @@ if (RUNTIME === "codex-app-server") {
       return codexAppServerWatchdog ? codexAppServerWatchdog.observe(h) : h;
     },
     tuiSession,
+    probeNativeTui: process.platform === "win32" && process.env.ANET_COPRESENCE_BRIDGE === "1" && nodeMarker && NODE_ID
+      ? async () => {
+        const remote = codexAppServerUrl || codexAppServerSessionManager.current()?.url || lastCodexAppServerUrl;
+        if (!remote) return undefined;
+        const identity = readWindowsTuiIdentity(join(NODE_DIR, "windows-tui-health.json"), {
+          nodeId: NODE_ID!, marker: nodeMarker, remote,
+        });
+        return identity ? probeWindowsTuiHealth(identity) : undefined;
+      }
+      : undefined,
     modelAuth: codexModelAuth,
     probeAppServer: async (url) => {
       const { resolveWebSocketCtor } = await import("./runtime/codex-app-server-client");
@@ -7921,6 +8241,7 @@ const shutdown = async () => {
   sideThreadOwnedSession?.client.close();
   sideThreadOwnedSession?.proc?.kill("SIGTERM");
   log("shutting down...");
+  await import('./runtime/daemon-provider-login.js').then(m => m.closeProviderLogins()).catch(() => {});
   await closeOpencodeRuntime("signal shutdown");
   await grokCopresenceRuntimeSession?.close().catch((e: any) => {
     warn(`[grok-copresence] close failed: ${e?.message || e}`);

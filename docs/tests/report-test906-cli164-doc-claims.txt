@@ -1,0 +1,24 @@
+2026-10-11 16:13 +08 — targeted documentation release fix only
+
+Original release run38123039322/job114422924655 at main source231bf8c9:
+FAILURE because both getting-started guides still stamped/prosed preview.163
+while gated candidate is 2.3.0-preview.164. No product assertion failed here.
+Change only those two candidate stamps and two candidate prose references.
+Keep checked latest .76 and historical version references unchanged.
+
+Docker, --rm --network none, readonly worktree:
+image anet-app:daemon-pair164130 (includes Python3), exact unchanged checker
+run(repo=/source, package=agent-network, version=2.3.0-preview.164): PASS,
+four stamps across the two full guides. No network latest claim revalidation
+locally; the original release gate verified latest .76 from npm, and formal
+publication runs that network check again. No selftest/product E2E rerun.
+
+Initial attempts were environment failures: earlier Bun image lacks Python3;
+the checker CLI's git-root discovery cannot resolve an external worktree .git
+path inside a readonly single-path Docker mount. Therefore invoked its exact
+run() function with the explicit mounted repository, not a replacement check.
+The checker, workflow, assertions and test thresholds are unchanged.
+
+After merge, CLI .164 must be built/published from the NEW exact main SHA.
+Old source231's gate failure cannot be turned green by retrying old inputs.
+Old CLI tarball remains internal and is not a public release.

@@ -1,0 +1,80 @@
+Hub #961 / agent-network#2587 — download page core slice
+OBSERVED_AT: 2026-10-11T20:16Z (2026-10-12 04:16+08)
+Base main: ba492094ee837281e0a9092ef1b2f5df668ee3e3
+Initial status at 04:16+08: TEST-ONLY candidate; deployment receipt follows below.
+
+Scope
+- Current-platform recommendation without automatic download; explicit architecture.
+- macOS, Windows, Android first; Linux and iOS without invented package buttons.
+- Desktop release date/version, independent Android version/checksum/notes.
+- Client download routes separated from CLI/Daemon installation.
+- Android reads its own public VERSION + exact filename checksum + APK HEAD.
+  A failed channel probe leaves the existing desktop catalog usable.
+
+Docker environment
+- tests/test961-download-platforms/Dockerfile, official Playwright 1.58.2 base
+  sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d
+- Locked docs-site npm dependencies. No host accounts or production data.
+- Build: sg docker -c 'docker build -f tests/test961-download-platforms/Dockerfile
+  -t anet-docs:test961-platforms .'
+- Catalog tests PASS; VitePress build PASS (43.11s, default fatal dead-link gate).
+- Final API timeout/parallel HEAD edit and driver were read-only overlays on the
+  built image; catalog tests rerun against the final source, PASS. Vue/CSS built
+  inputs were unchanged after that image build. CI builds the final full tree.
+- Browser run: --rm --init --network none; local fixture HTTP only.
+- 6/6: macOS + Windows at 1280px, Android at 390px, each Chinese + English.
+  Each checks recommendation link/architecture, absent Linux download,
+  no fake GitHub Android link, CLI link, date, and no horizontal page overflow.
+- Containers exited and were removed. Test-only image retained as local cache.
+
+Anonymous live metadata (separate Docker container, public network enabled)
+- resolveDesktopDownloads() returned desktop-v0.2.245, published 19:59:10Z.
+- macOS: ANet_0.2.245_aarch64.dmg, ARM64, 38939185 bytes.
+- Windows: ANet_0.2.245_x64-setup.exe + x64_en-US.msi.
+- Android: agent-network-0.2.245.apk, independent android-channel, universal;
+  matching version/filename checksum and HTTP HEAD succeeded.
+- Linux/iOS assets empty. No credentials, install, or model call.
+- This probe is metadata/HEAD evidence, not a fresh full-byte package download.
+  Existing formal 0.2.245 publication hashes remain independent release evidence.
+
+Recovery / deployment
+- Existing deploy/docs-site/README.md and deploy-anet-sh workflow remain authority.
+- No service topology, port, secrets, backup or production config change.
+- Merge first, deploy the merged main commit with the existing prebuilt workflow;
+  inspect actual deploy steps (a missing VERCEL_TOKEN can skip deployment).
+- Verify new Chinese/English page content and Android catalog on anet.sh.
+- Rollback uses the previous Vercel production deployment per the existing SOP.
+- The page has no persistent data; packages/channels remain release-managed.
+- No claim of native window acceptance, account/OAuth proof or disaster rehearsal.
+
+Formal main deployment and live acceptance — 2026-10-12 04:26+08
+- PR2629 head: 3beea8657d11222f8e4c7adcedccf32491dd7b6c.
+- CI actually tested merge: 63237854c002b497e7f3091b5c719980395403e1.
+- download-platforms-docker job114564900519 / run38171506933 SUCCESS:
+  catalog checks, full VitePress build and 6/6 browser cases.
+- docs-site-build job114564900427 SUCCESS; all 10 actual required checks PASS.
+- Normal SHA-locked merge (no admin bypass) at 2026-10-11T20:22:39Z:
+  main d9b218fb498510fec24dc34576e7baa56d42170a.
+- Existing deploy-anet-sh run38171952174 / job114566214382 SUCCESS.
+  Actual checkout full SHA = d9b218fb498510fec24dc34576e7baa56d42170a.
+  20:24:56Z: actual "Using prebuilt build artifacts from .vercel/output".
+  20:25:03Z: actual content drift sampling PASS; token guard did not skip deploy.
+  Source was rechecked as an ancestor of current origin/main before acceptance.
+  No PR build artifact reused as a formal website build.
+- Anonymous Docker live audit at 20:25:41Z, network enabled only for public reads:
+  https://www.anet.sh/api/desktop-downloads HTTP200, desktop=0.2.245,
+  Android=0.2.245 from android-channel; ARM64/x64/universal architectures.
+  Chromium actual public /download (zh, Android UA, 390px) and /en/download
+  (en, Windows UA, 1280px): 2/2 PASS, no response fixtures or authentication.
+  Checks: actual recommendation, Android checksum link, no invented GitHub APK,
+  separate CLI installation, no horizontal overflow. No installation or login.
+- Both actual page screenshots personally inspected. Local ephemeral evidence:
+  zh.png SHA256 3b7df4440fe3558e35b16ccbd3432cd3b1745e62885a3870bfe15a83b97820d2
+  en.png SHA256 df8b83e9bae2940ffb0311f01d67416a222ee282ac503dff363c9a44ffdad4e9
+  Screenshots are supporting layout evidence, not deployment/recovery authority.
+- Live audit container exited0 and removed (--rm --init); no host secrets mounted.
+- Original Hub #961 marked done3/3 at 20:26:26Z, ahead of the 04:45+08 target.
+- Broad optional PR QA remained non-terminal, zero observed failures at acceptance;
+  it is not called fully green. Main CI evidence is independent of the PR results.
+- No new client version/npm publish, account action, business-node restart or data
+  migration. Existing native/account/entitlement acceptance remains separate.

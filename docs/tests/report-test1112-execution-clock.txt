@@ -1,0 +1,10 @@
+#1112 — Scheduled execution clock (first slice of #1105)
+
+Base: main bd546174e6feb48629f354f6678ea3eb683f85bf.
+Scope: consumed_at > legacy started_at > created_at, with valid UTC evidence and a total creation-based cap. No migration or new runtime protocol. Node heartbeat, inbox ACK and runtime submission do not reset execution age. Existing timeout configuration, exact-task expiry and terminal/late-reply rules remain.
+
+Docker validation: SQLite38/PostgreSQL29 real dispatch/history/API cases PASS; creation-clock and missing-total-cap assertion witnesses RED on each backend (4 total). Local tests ran in an isolated cached Docker image with current source copied into the container; dependencies are unchanged. CI builds the dedicated Dockerfile from the exact PR tree before merge.
+
+First validation corrected a fixture that advanced the dispatch clock without advancing node online evidence; the existing offline-node guard correctly skipped it. A broadened PostgreSQL registration hit an existing SQLite-specific trigger fixture in scheduled-run-terminal.test.ts. That suite retains its original SQLite backend; scheduled-stuck and scheduled-tasks run on both backends, including exact expiry/run and late-reply assertions. No assertion or production guard was disabled.
+
+Continuous task-activity renewal is not implemented in this slice. Runtime consumption is write-once; periodic node working status is not an exact-task lease. The parent #1105 remains open for an authenticated task/thread/turn activity contract and bounded idle/total limits. Public package, live activation and full parent completion are distinct phases.

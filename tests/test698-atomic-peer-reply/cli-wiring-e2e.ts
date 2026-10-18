@@ -7,6 +7,7 @@ const dbPath = `${work}/hub.db`;
 const port = 9698;
 const hub = `http://127.0.0.1:${port}`;
 const adminToken = "test698-admin-token";
+const ownerAlias = "test698-owner";
 rmSync(work, { recursive: true, force: true });
 mkdirSync(`${work}/home/.anet/nodes/receiver`, { recursive: true });
 
@@ -83,7 +84,7 @@ try {
   const registered = await json("/api/auth/register", {
     method: "POST",
     headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ username: "test698-owner", password: "pass123456" }),
+    body: JSON.stringify({ username: ownerAlias, password: "pass123456" }),
   });
   const userToken = registered.token;
   const auth = { authorization: `Bearer ${userToken}`, "content-type": "application/json" };
@@ -269,7 +270,7 @@ try {
   const dashboardDispatch = await mcp(userToken, "send_task", {
     alias: "receiver",
     task: "dashboard request requiring a terminal reply",
-    from_session: "admin",
+    from_session: ownerAlias,
     network_id: networkId,
   });
   const dashboardTask = dashboardDispatch.task_id || dashboardDispatch.message_id;
@@ -282,9 +283,9 @@ try {
   await waitFor(() => direct.query<{ status: string }, [string]>(
     "SELECT status FROM tasks WHERE task_id=?1",
   ).get(dashboardTask)?.status === "replied", "Dashboard task terminalization", 300);
-  const dashboardReplies = direct.query<{ n: number }, [string]>(
-    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='admin'",
-  ).get(dashboardTask)?.n;
+  const dashboardReplies = direct.query<{ n: number }, [string, string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name=?2",
+  ).get(dashboardTask, ownerAlias)?.n;
   const dashboardChildren = direct.query<{ n: number }, [string]>(
     "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
   ).get(dashboardTask)?.n;
@@ -300,16 +301,16 @@ try {
   const unboundDashboardDispatch = await mcp(userToken, "send_task", {
     alias: "receiver",
     task: "Dashboard request answered by a legacy unbound receiver token",
-    from_session: "admin",
+    from_session: ownerAlias,
     network_id: networkId,
   });
   const unboundDashboardTask = unboundDashboardDispatch.task_id || unboundDashboardDispatch.message_id;
   await waitFor(() => direct.query<{ status: string }, [string]>(
     "SELECT status FROM tasks WHERE task_id=?1",
   ).get(unboundDashboardTask)?.status === "replied", "unbound Dashboard task terminalization", 300);
-  const unboundDashboardReplies = direct.query<{ n: number }, [string]>(
-    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='admin'",
-  ).get(unboundDashboardTask)?.n;
+  const unboundDashboardReplies = direct.query<{ n: number }, [string, string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name=?2",
+  ).get(unboundDashboardTask, ownerAlias)?.n;
   const unboundDashboardChildren = direct.query<{ n: number }, [string]>(
     "SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id=?1",
   ).get(unboundDashboardTask)?.n;
@@ -342,16 +343,16 @@ try {
   const failedDashboardDispatch = await mcp(userToken, "send_task", {
     alias: "receiver",
     task: "FORCE_FAILED_STATUS_698",
-    from_session: "admin",
+    from_session: ownerAlias,
     network_id: networkId,
   });
   const failedDashboardTask = failedDashboardDispatch.task_id || failedDashboardDispatch.message_id;
   await waitFor(() => direct.query<{ status: string }, [string]>(
     "SELECT status FROM tasks WHERE task_id=?1",
   ).get(failedDashboardTask)?.status === "failed", "Dashboard failed status propagation", 300);
-  const failedDashboardReplies = direct.query<{ n: number }, [string]>(
-    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name='admin'",
-  ).get(failedDashboardTask)?.n;
+  const failedDashboardReplies = direct.query<{ n: number }, [string, string]>(
+    "SELECT COUNT(*) AS n FROM inbox WHERE in_reply_to=?1 AND type='reply' AND session_name=?2",
+  ).get(failedDashboardTask, ownerAlias)?.n;
   if (failedDashboardReplies !== 1) {
     throw new Error(`failed Dashboard reply missing count=${failedDashboardReplies}`);
   }

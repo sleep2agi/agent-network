@@ -1,0 +1,35 @@
+#1084 / PR #2645 OpenCode V2 shared-server persistence — CANDIDATE ONLY
+Observed: 2026-10-13 Asia/Shanghai
+Exact PR head: da9972ccb687bc1432e58e26053f1ee52cc3b272
+Fork CI: https://github.com/ai-tianma/agent-network/actions/runs/38363402917
+
+Shared-core: SUCCESS. The native test in
+agent-node/src/runtime/opencode-copresence/v2-shared-native.test.ts uses a
+real pinned OpenCode V2 Server and an isolated OPENCODE_DB. It creates a
+session without a model turn, stops the Server, restarts against the same
+database, and reads back the exact session ID and project directory. It then
+stops the Server again, copies the stopped XDG data directory to another
+location, removes the original, starts against the restored copy, and reads
+back the same session ID and project directory.
+
+Full-regression: SUCCESS. Docker E2E: 284 passed, 0 failed.
+No production Server, account, model, node identity, workspace, or database
+was changed. This test does not exercise paid inference.
+
+Evidence boundary:
+- This demonstrates isolated stopped-data restore using the pinned test
+  runtime; it does not establish a production backup destination, schedule,
+  retention policy, owner, encrypted secret source, or recovery time.
+- It does not test a live SQLite copy, cross-host restore, or an actual
+  production launcher and rollback. Do not copy an active database.
+- A new session ID would not satisfy history preservation. Shared attach
+  fails closed when an explicitly requested historical session is missing.
+- Fork CI success does not replace required upstream exact-head checks;
+  those remain action_required pending maintainer approval.
+- PR is not merged or released. No formal CLI/runtime pair or two-node
+  production canary is claimed by this report.
+
+Next owner deliverables on this PR: Git-authoritative persistent Server
+startup and private password source, stopped SQLite data backup/restore and
+rollback runbook with a rehearsal record, upstream CI approval and merge,
+formal package pair, then an authorized two-node canary.

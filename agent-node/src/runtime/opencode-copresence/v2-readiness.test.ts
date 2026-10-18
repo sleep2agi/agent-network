@@ -23,6 +23,15 @@ function transport(fn: (path: string, init: RequestInit) => any) {
 const wait = (ms = 1000, running?: () => boolean) => waitForOpenCodeV2Commhub("http://127.0.0.1:1", "pw", ms, running);
 
 describe("#832 final registry readiness", () => {
+  test("shared readiness is bound to the requested workspace", async () => {
+    transport((path, init) => {
+      expect(init.headers).toHaveProperty("x-opencode-directory", "/node-one");
+      return path === V2_REGISTRY_RPC ? { output: { ready: true } }
+        : { ...mcp(), location: { directory: "/node-two" } };
+    });
+    await expect(waitForOpenCodeV2Commhub("http://127.0.0.1:1", "pw", 1000, () => true, "/node-one"))
+      .rejects.toThrow("different workspace");
+  });
   test("connected alone cannot pass; waits for actual registry flag", async () => {
     let polls = 0;
     transport(path => path === V2_REGISTRY_RPC ? { output: { ready: ++polls >= 3 } } : mcp());

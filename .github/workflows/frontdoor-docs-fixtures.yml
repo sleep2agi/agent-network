@@ -1,0 +1,34 @@
+name: Original frontdoor docs fixtures
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'README.en.md'
+      - 'docs/archive/upgrade-v2.md'
+      - 'docs-site/**'
+      - 'tests/qa-frontdoor-docs/**'
+      - '.github/workflows/frontdoor-docs-fixtures.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frontdoor-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build original suite with pinned Node and npm lock
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/qa-frontdoor-docs/Dockerfile -t frontdoor-fixture-test .
+      - name: Complete original render baseline and witnessed-red inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for fixture_case in baseline old-path missing-note; do
+            docker run --rm --init --network none -e FIXTURE_CASE="$fixture_case" -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} --entrypoint node frontdoor-fixture-test tests/qa-frontdoor-docs/controls.mjs 2>&1 | tee -a report-test1289.txt
+          done
+          echo 'RESULT: PASS; original complete baseline and two exact witnessed-red inputs' | tee -a report-test1289.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-frontdoor-docs-${{ github.sha }}
+          path: report-test1289.txt

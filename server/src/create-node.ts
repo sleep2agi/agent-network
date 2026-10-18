@@ -237,7 +237,8 @@ export type NodeCallerResolution =
   | { ok: true; kind: "unregistered"; alias: string; networkId: string }
   | { ok: false; reason: "not_a_node_token" | "bound_node_missing" | "ambiguous" | "not_owner" };
 
-type NodeCallerRow = { node_id: string; alias: string; network_id: string; owner_user_id: string | null };
+export type NodeCallerRow = { node_id: string; alias: string; network_id: string; owner_user_id: string | null };
+export type NodeCallerToken = { name: string; network_id: string | null; user_id: string | null; bound_node_id: string | null; node_identity_epoch: number };
 
 // nodes has no unique (network, alias). An unbound token that hits several
 // rows is not rejected outright: the row owned by the token's issuer wins;
@@ -246,18 +247,12 @@ type NodeCallerRow = { node_id: string; alias: string; network_id: string; owner
 function disambiguateUnboundAlias(
   rows: NodeCallerRow[],
   userId: string | null,
-  alias: string,
-  networkId: string,
+  recentNodeId: string | null,
 ): NodeCallerRow | undefined {
   const owned = userId ? rows.filter((row) => row.owner_user_id === userId) : [];
   if (owned.length === 1) return owned[0]; // board679-unbound-dup
   const pool = owned.length > 1 ? owned : rows;
-  const recent = db.get<{ node_id: string | null }>(
-    `SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND node_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1`,
-    alias,
-    networkId,
-  );
-  const hit = recent?.node_id ? pool.filter((row) => row.node_id === recent.node_id) : [];
+  const hit = recentNodeId ? pool.filter((row) => row.node_id === recentNodeId) : [];
   return hit.length === 1 ? hit[0] : undefined;
 }
 
@@ -268,7 +263,7 @@ function disambiguateUnboundAlias(
 // do not get a second exception.
 export function resolveNodeCaller(tokenId: string | null | undefined): NodeCallerResolution {
   if (!tokenId) return { ok: false, reason: "not_a_node_token" };
-  const tokRow = db.get<{ name: string; network_id: string | null; user_id: string | null; bound_node_id: string | null; node_identity_epoch: number }>(
+  const tokRow = db.get<NodeCallerToken>(
     `SELECT name, network_id, user_id, bound_node_id, node_identity_epoch FROM api_tokens WHERE token_id = ?1 AND revoked_at IS NULL`,
     tokenId,
   );
@@ -280,10 +275,26 @@ export function resolveNodeCaller(tokenId: string | null | undefined): NodeCalle
   const rows = tokRow.bound_node_id
     ? db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE node_id = ?1 AND network_id = ?2`, tokRow.bound_node_id, tokRow.network_id)
     : db.all<DaemonRow>(`SELECT node_id, alias, network_id, owner_user_id FROM nodes WHERE alias = ?1 AND network_id = ?2`, tokenAlias, tokRow.network_id);
+  const recent = !tokRow.bound_node_id && rows.length > 1
+    ? db.get<{ node_id: string | null }>(
+      `SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2 AND node_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1`,
+      tokenAlias, tokRow.network_id,
+    ) : null;
+  return resolveNodeCallerFromRows(tokRow, rows, recent?.node_id ?? null);
+}
+
+/** Shared identity contract for individual callers and scoped, batched list reads. */
+export function resolveNodeCallerFromRows(
+  tokRow: NodeCallerToken, rows: NodeCallerRow[], recentNodeId: string | null,
+): NodeCallerResolution {
+  if (!tokRow.name?.startsWith("node:") || !tokRow.network_id) {
+    return { ok: false, reason: "not_a_node_token" };
+  }
+  const tokenAlias = tokRow.name.slice(5);
   const nodeRow = rows.length === 1
     ? rows[0]
     : (!tokRow.bound_node_id && rows.length > 1
-      ? disambiguateUnboundAlias(rows, tokRow.user_id, tokenAlias, tokRow.network_id)
+      ? disambiguateUnboundAlias(rows, tokRow.user_id, recentNodeId)
       : undefined);
   // board679-bound-row-missing: a bound token with no row is refused. Do not look up by name.
   if (tokRow.bound_node_id && !nodeRow) return { ok: false, reason: "bound_node_missing" };

@@ -1,0 +1,17 @@
+name: Owned follow-up receipt compatibility
+on:
+  pull_request:
+    paths: ['agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'agent-node/src/cli.ts', 'tests/test1155-followup-receipts/**', 'tests/test703-codex-turn-receipts/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1155*', '.github/workflows/followup-receipts.yml']
+  push:
+    branches: [main]
+    paths: ['agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'agent-node/src/cli.ts', 'tests/test1155-followup-receipts/**', 'tests/test703-codex-turn-receipts/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1155*', '.github/workflows/followup-receipts.yml']
+permissions:
+  contents: read
+jobs:
+  followup-receipts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1155-followup-receipts/Dockerfile -t followup-receipts .
+      - run: docker run --rm --network none followup-receipts

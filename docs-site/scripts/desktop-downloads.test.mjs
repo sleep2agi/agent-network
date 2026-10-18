@@ -7,6 +7,8 @@ import {
   modelscopeMirrorUrl,
   publicGithubDownloadUrl,
   resolveDesktopDownloads,
+  resolveAndroidDownload,
+  assetArchitecture,
 } from '../api/desktop-downloads.mjs';
 
 assert.equal(classifyInstallAsset('Agent.Network_0.2.228_aarch64.app.tar.gz'), null);
@@ -93,7 +95,7 @@ assert.equal(dynamic.source, 'desktop-v0.2.226');
 assert.equal(dynamic.version, '0.2.226');
 assert.equal(dynamic.platforms.find((platform) => platform.id === 'linux').assets.length, 0);
 assert.equal(dynamic.platforms.find((platform) => platform.id === 'macos').assets[0].name, 'Agent.Network_0.2.226_aarch64.dmg');
-assert.equal(calls.length, 1);
+assert.equal(calls.length, 2); // desktop release + independent Android channel
 
 const fallbackManifest = {
   version: '0.2.33-3',
@@ -124,3 +126,23 @@ assert.match(handlerSource, /setHeader\('Cache-Control', 'public, max-age=60, st
 assert.match(handlerSource, /desktop_downloads_unavailable/);
 
 console.log('desktop downloads catalog: checks passed');
+
+assert.equal(assetArchitecture('ANet_0.2.245_aarch64.dmg'), 'arm64');
+assert.equal(assetArchitecture('ANet_0.2.245_x64-setup.exe'), 'x64');
+assert.equal(assetArchitecture('unknown.dmg'), null);
+const androidFetch = async (url, options) => {
+  if (url.endsWith('/VERSION')) return { ok: true, text: async () => '0.2.245\n' };
+  if (url.endsWith('.sha256')) return { ok: true, text: async () => `${'a'.repeat(64)}  agent-network-0.2.245.apk\n` };
+  assert.equal(options.method, 'HEAD');
+  return { ok: true };
+};
+const android = await resolveAndroidDownload(androidFetch);
+assert.equal(android.version, '0.2.245');
+assert.equal(android.url, null);
+assert.match(android.mirrorUrl, /android\/agent-network-0\.2\.245\.apk$/);
+assert.equal(await resolveAndroidDownload(async () => ({ ok: false })), null);
+assert.equal(await resolveAndroidDownload(async (url) => ({ ok: true, text: async () => url.endsWith('/VERSION') ? '0.2.245' : `${'a'.repeat(64)}  wrong.apk` })), null);
+const independent = await resolveDesktopDownloads(async (url, options) => String(url).includes('/releases?')
+  ? { ok: true, json: async () => [published] } : androidFetch(url, options));
+assert.equal(independent.platforms.find((platform) => platform.id === 'android').assets[0].version, '0.2.245');
+console.log('independent Android channel + architecture: checks passed');

@@ -67,12 +67,16 @@ interface TrackedLaunchRoot {
   workDir: string;
   workDirDev: number | bigint;
   workDirIno: number | bigint;
+  requestedCwd: string;
+  requestedIdentity?: { dev: number | bigint; ino: number | bigint };
+  dataIdentity?: { dev: number | bigint; ino: number | bigint };
   effectiveCwd: string;
   safeWorkspace: boolean;
   enforceManagedPreflight: boolean;
   managedConfigDir?: string;
   ancestorSnapshot: AncestorIdentity[];
   active: boolean;
+  authPersistence?: { path: string; original: string | undefined; rendered: string; saved: boolean };
 }
 
 interface AncestorIdentity {
@@ -556,7 +560,7 @@ function assertPrivateRegularFile(path: string, label: string): ReturnType<typeo
   }
 }
 
-function readPrivateRegularFile(path: string, label: string): string | undefined {
+function readPrivateRegularFile(path: string, label: string, maxBytes = Infinity): string | undefined {
   if (!assertPrivateRegularFile(path, label)) return undefined;
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
   try {
@@ -566,6 +570,7 @@ function readPrivateRegularFile(path: string, label: string): string | undefined
       || (opened.mode & 0o777) !== 0o600) {
       throw new Error(`opencode refuses ${label} at ${path}: file changed before read`);
     }
+    if (opened.size > maxBytes) throw new Error(`opencode refuses ${label}: file exceeds size limit`);
     return readFileSync(fd, "utf8");
   } finally {
     closeSync(fd);
@@ -636,11 +641,63 @@ function renderSafeRuntimeAuth(source: string | undefined): string | undefined {
   return JSON.stringify(auth, null, 2) + "\n";
 }
 
-function atomicWritePrivateFile(path: string, body: string, label: string): void {
+/** V1 human co-presence login data, following upstream Auth.Info (v1.18.1).
+ * Keep executable config/unknown fields out; ACP retains its existing API-only renderer. */
+function renderCopresenceAuth(source: string | undefined): string {
+  let candidate: unknown;
+  try { candidate = JSON.parse(source ?? "{}"); }
+  catch { throw new Error("opencode refuses co-presence auth: invalid JSON"); }
+  if (!isPlainRecord(candidate) || Object.keys(candidate).length > 1000) {
+    throw new Error("opencode refuses co-presence auth: expected a bounded object");
+  }
+  const auth = Object.create(null) as Record<string, unknown>;
+  const text = (value: unknown): value is string => typeof value === "string" && value.length <= 65536;
+  for (const [id, entry] of Object.entries(candidate)) {
+    if (!id || id.length > 256 || ["__proto__", "constructor", "prototype"].includes(id)
+      || !isPlainRecord(entry)) throw new Error("opencode refuses co-presence auth: invalid provider entry");
+    if (entry.type === "api" && text(entry.key)) {
+      const api: Record<string, unknown> = { type: "api", key: entry.key };
+      if (entry.metadata !== undefined) {
+        if (!isPlainRecord(entry.metadata) || Object.keys(entry.metadata).length > 64
+          || !Object.values(entry.metadata).every(text)) {
+          throw new Error("opencode refuses co-presence auth: invalid API metadata");
+        }
+        api.metadata = entry.metadata;
+      }
+      auth[id] = api;
+    } else if (entry.type === "oauth" && text(entry.refresh) && text(entry.access)
+      && Number.isSafeInteger(entry.expires) && (entry.expires as number) >= 0) {
+      const oauth: Record<string, unknown> = {
+        type: "oauth", refresh: entry.refresh, access: entry.access, expires: entry.expires,
+      };
+      for (const key of ["accountId", "enterpriseUrl"] as const) {
+        if (entry[key] !== undefined) {
+          if (!text(entry[key])) throw new Error("opencode refuses co-presence auth: invalid OAuth metadata");
+          oauth[key] = entry[key];
+        }
+      }
+      auth[id] = oauth;
+    } else if (entry.type === "wellknown" && text(entry.key) && text(entry.token)) {
+      auth[id] = { type: "wellknown", key: entry.key, token: entry.token };
+    } else throw new Error("opencode refuses co-presence auth: unsupported credential shape");
+  }
+  const rendered = JSON.stringify(auth, null, 2) + "\n";
+  if (Buffer.byteLength(rendered) > 1024 * 1024) {
+    throw new Error("opencode refuses co-presence auth: rendered data exceeds size limit");
+  }
+  return rendered;
+}
+
+function atomicWritePrivateFile(path: string, body: string, label: string,
+  replace?: { original: string | undefined }): void {
   const parent = dirname(path);
   assertPrivateDirectory(parent, `${label} parent`);
-  if (lstatIfPresent(path)) {
+  const before = assertPrivateRegularFile(path, label);
+  if (!replace && before) {
     throw new Error(`opencode refuses ${label} at ${path}: fresh runtime target already exists`);
+  }
+  if (replace && readPrivateRegularFile(path, label, 1024 * 1024) !== replace.original) {
+    throw new Error(`opencode refuses ${label}: credentials changed since launch`);
   }
   const temp = join(parent, `.${basename(path)}.${randomBytes(12).toString("hex")}.tmp`);
   let fd: number | undefined;
@@ -661,8 +718,14 @@ function atomicWritePrivateFile(path: string, body: string, label: string): void
     closeSync(fd);
     fd = undefined;
     assertPrivateDirectory(parent, `${label} parent`);
-    if (lstatIfPresent(path)) {
+    const current = assertPrivateRegularFile(path, label);
+    if (!replace && current) {
       throw new Error(`opencode refuses ${label}: target appeared before atomic rename`);
+    }
+    if (replace && ((before === undefined) !== (current === undefined)
+      || (before && current && !sameIdentity(before, current))
+      || readPrivateRegularFile(path, label, 1024 * 1024) !== replace.original)) {
+      throw new Error(`opencode refuses ${label}: credentials changed before atomic save`);
     }
     renameSync(temp, path);
     assertPrivateRegularFile(path, label);
@@ -1088,6 +1151,27 @@ function releaseTrackedLaunchRoot(
   }
   const base = lstatIfPresent(tracked.basePath);
   if (!base || !sameIdentity(base, { dev: tracked.baseDev, ino: tracked.baseIno })) return false;
+  if (!unspawned && tracked.authPersistence && !tracked.authPersistence.saved) {
+    const now = lstatSync(tracked.workDir);
+    assertPrivateDirectory(tracked.workDir, "co-presence auth node root");
+    if (!sameIdentity(now, { dev: tracked.workDirDev, ino: tracked.workDirIno })) {
+      throw new Error("opencode refuses co-presence auth save: node identity changed");
+    }
+    assertPrivateDirectory(launchRoot, "co-presence auth launch root");
+    if (!sameIdentity(lstatSync(launchRoot), tracked)) {
+      throw new Error("opencode refuses co-presence auth save: launch identity changed");
+    }
+    const state = tracked.authPersistence;
+    const updated = readPrivateRegularFile(join(launchRoot, "data", "opencode", "auth.json"),
+      "co-presence runtime auth", 1024 * 1024);
+    if (updated !== undefined) {
+      const body = renderCopresenceAuth(updated);
+      if (body !== state.rendered) {
+        atomicWritePrivateFile(state.path, body, "co-presence persistent auth", { original: state.original });
+      }
+    }
+    state.saved = true;
+  }
   if (quarantineAndRemoveLaunchRoot(tracked.basePath, launchRoot, tracked)) {
     trackedLaunchRoots.delete(launchRoot);
     return true;
@@ -1250,9 +1334,38 @@ export interface BuildOpencodeChildEnvOptions {
   /** Internal two-phase launch mode. A version probe must never receive the
    * selected vendor credential; runtime mode is the default for callers. */
   credentialMode?: "runtime" | "probe";
+  /** V1 human co-presence only; probes and headless ACP never save login state. */
+  persistAuth?: boolean;
   /** Internal probe mode: isolate system managed config via the fresh exact-
    * pin redirect without rejecting an eventual trusted unsafe runtime. */
   managedPolicyMode?: "enforce" | "redirect-only";
+}
+
+/** Read-only observation of this module instance's own SAFE allocation.
+ * It grants no retention/transfer lease, process liveness or writer exclusion.
+ * A marker from another process is deliberately insufficient. */
+export function inspectOpencodeOwnedSafeLaunch(
+  workDir: string, requestedDirectory: string, nativeDirectory: string,
+) {
+  function fail(): never { throw new Error("OpenCode owned SAFE topology unavailable"); }
+  const canonical = (path: string) => typeof path === "string" && isAbsolute(path)
+    && !path.includes("\0") && resolve(path) === path && realpathSync(path) === path;
+  if (!canonical(workDir) || !canonical(requestedDirectory) || !canonical(nativeDirectory)) fail();
+  const launchRoot = dirname(nativeDirectory), tracked = trackedLaunchRoots.get(launchRoot);
+  if (!tracked || !tracked.active || !tracked.safeWorkspace || tracked.workDir !== workDir
+    || tracked.requestedCwd !== requestedDirectory || tracked.effectiveCwd !== nativeDirectory
+    || !tracked.requestedIdentity || !tracked.dataIdentity) fail();
+  revalidateOpencodeChildLaunch(workDir, { PWD: nativeDirectory,
+    XDG_DATA_HOME: join(launchRoot, "data"), OPENCODE_TEST_MANAGED_CONFIG_DIR: tracked.managedConfigDir });
+  const project = lstatSync(requestedDirectory), dataPath = join(launchRoot, "data"), data = lstatSync(dataPath);
+  if (!project.isDirectory() || project.isSymbolicLink() || !sameIdentity(project, tracked.requestedIdentity)
+    || !sameIdentity(data, tracked.dataIdentity)) fail();
+  assertPrivateDirectory(dataPath, "observed native data root");
+  const identity = (path: string) => { const st = lstatSync(path);
+    return Object.freeze({ path, dev: String(st.dev), ino: String(st.ino) }); };
+  return Object.freeze({ ownerInstanceId: PROCESS_INSTANCE_ID, ownerPid: process.pid,
+    workDir: identity(workDir), requested: identity(requestedDirectory),
+    native: identity(nativeDirectory), launch: identity(launchRoot), data: identity(dataPath) });
 }
 
 /**
@@ -1280,6 +1393,14 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
 
   assertPrivateDirectory(workDir, "node workDir");
   const workDirStat = lstatSync(workDir);
+  // Missing/noncanonical projects retain existing launch behavior. A later
+  // topology review refuses them instead of inventing their original identity.
+  let requestedIdentity: { dev: number | bigint; ino: number | bigint } | undefined;
+  try {
+    const st = lstatSync(requestedCwd);
+    if (st.isDirectory() && !st.isSymbolicLink() && realpathSync(requestedCwd) === requestedCwd)
+      requestedIdentity = { dev: st.dev, ino: st.ino };
+  } catch { /* Observation only; no new launch admission. */ }
 
   const config = ensurePrivateChildDirectory(workDir, workDir, ".config", "config root");
   const configOpencode = ensurePrivateChildDirectory(workDir, config, "opencode", "OpenCode config directory");
@@ -1296,7 +1417,7 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
   const persistentConfig = readPrivateRegularFile(persistentConfigPath, "persistent OpenCode config");
   const persistentAuth = opts.credentialMode === "probe"
     ? undefined
-    : readPrivateRegularFile(authPath, "OpenCode auth file");
+    : readPrivateRegularFile(authPath, "OpenCode auth file", 1024 * 1024);
 
   const launchBase = resolveTrustedLaunchBase(opts.launchBase);
   cleanupStaleLaunchRoots(launchBase.path);
@@ -1320,6 +1441,8 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
     workDir,
     workDirDev: workDirStat.dev,
     workDirIno: workDirStat.ino,
+    requestedCwd,
+    requestedIdentity,
     effectiveCwd: requestedCwd,
     safeWorkspace: opts.unsafeTools !== true,
     enforceManagedPreflight: opts.unsafeTools !== true
@@ -1361,6 +1484,8 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
       "data",
       "fresh OpenCode data root",
     );
+    const dataStat = lstatSync(effectiveData);
+    trackedLaunchRoots.get(launchRoot)!.dataIdentity = { dev: dataStat.dev, ino: dataStat.ino };
     const effectiveDataOpencode = ensurePrivateChildDirectory(
       launchRoot,
       effectiveData,
@@ -1391,7 +1516,13 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
       "tmp",
       "fresh OpenCode temporary root",
     );
-    const renderedAuth = renderSafeRuntimeAuth(persistentAuth);
+    const persistAuth = opts.persistAuth === true && opts.credentialMode !== "probe";
+    const renderedAuth = persistAuth
+      ? renderCopresenceAuth(persistentAuth)
+      : renderSafeRuntimeAuth(persistentAuth);
+    if (persistAuth) trackedLaunchRoots.get(launchRoot)!.authPersistence = {
+      path: authPath, original: persistentAuth, rendered: renderedAuth!, saved: false,
+    };
     if (renderedAuth !== undefined) {
       atomicWritePrivateFile(
         join(effectiveDataOpencode, "auth.json"),

@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased: standalone anet executable (build only, not published) (2026-10-11)
+
+- New unified entry `agent-network/bin/anet-bin.ts`. `bun build --compile` produces one executable: the default path is the CLI, `__hub` is the embedded Hub, and `__node` is the embedded agent-node. The npm `bin` is still `dist/bin/anet.cjs`. npm publishing in `release.yml` is unchanged.
+- The compile stamps the agent-network, agent-node, and commhub-server versions. `anet --version` prints those three and a separate bundle version for that build. Under npm / node, versions still come from package.json on disk, and self-spawn arguments stay as they were.
+- Inside the compiled binary the Hub starts as `anet __hub` instead of `bunx`, and agent-node starts as `anet __node`. claude-agent-sdk, the Codex SDK, and node-pty are not inside the file.
+- GitHub Actions workflow `cli-binary.yml` can build linux-x64 and darwin-arm64 on demand. `publish` defaults to off. A GitHub release `cli-bin-v<version>` is uploaded only when publish is explicitly enabled. This change does not publish. The macOS artifact is unsigned and is not an installable download.
+
+## Unreleased: Hub can queue a catalog read for an owned OpenCode V2 node (2026-10-11)
+
+- A network member can call `read_opencode_catalog` so the host_supervisor daemon reads the OpenCode V2 loopback it is already running. `ok` with `status: pending` means the Hub authorized the read and stored it in memory. The doorbell is best-effort: with no subscriber it is not delivered. Only `get_opencode_catalog` with `status: ready` is a snapshot, and completeness stays unknown and invocationVerified stays false.
+- This path does not start OpenCode, prompt, or follow redirects. Identity and generation come only from the Hub's existing create record. The request cannot carry url, authorization, directory, settings, headers, or body.
+- There is no client picker, and this is not an npm release. Adopted nodes are not in this slice. When the create record has no workdir, the daemon binds the read to the project directory it already owns. The Hub does not see that machine's filesystem.
+- A snapshot directory is absolute in its own format. A POSIX Hub does not reject a daemon's `C:\project` as a relative path. `C:/project` and `C:\project` are the same directory. The daemon expands a stored `~/…` workdir before comparing it with the loopback directory. The Hub does not expand another machine's home. A symlink workdir is reported as the absolute path stored on the create record.
+
+## Unreleased: daemon-mediated delete also drops the node's session (2026-10-11)
+
+- When a node was deleted through its daemon, the Hub finalize removed the `nodes` row but left the `sessions` row as `offline`, so `/api/status` and client lists built on it kept showing the deleted node (desktop: stuck under "删除请求已提交"). Finalize now deletes that node's session by `node_id`, matching REST `DELETE /api/nodes/:id`. Matching on `node_id` rather than alias leaves a same-alias node rebuilt before the finalize untouched. Offline sessions already left behind are not cleaned up automatically.
+
+## Unreleased: daemon-created children keep USER and proxy variables (2026-10-11)
+
+- When the daemon spawns a child, it now copies `USER`, `LOGNAME`, and `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` (both spellings) from its own environment, in addition to `PATH`, `HOME`, and `LANG`. Unset or empty values are not copied.
+- Before, on macOS every daemon-created `claude-agent-sdk` node answered each task with "Not logged in · Please run /login": Claude Code reads its Keychain login by `$USER`. On machines that need a proxy to reach the internet, the child connected directly and Anthropic refused it (`403 Request not allowed`), while runtime readiness, which runs with the daemon's environment, still reported reachable.
+- Still an allowlist: tokens, API keys, `NODE_OPTIONS` and similar never reach the child. `USER` / `LOGNAME` remain reserved, so Hub-supplied env cannot set them.
+
+## Unreleased: clone a child node on the same daemon (2026-10-11)
+
+- New Hub tool `clone_node`: turn a child that this daemon already created into a new node on that same daemon. New alias, new `ntok_`. The source token, `secrets.env`, and `auth.json` are not copied. Non-commhub channels (they often carry bot credentials) are not copied.
+- `workdir_policy` defaults to `new_empty`: a new empty directory under the same parent as the source workdir. Source contents are not copied. If the source has no project workdir and lives in the daemon's cwd, the clone is placed at `<daemon cwd>/clone-work/<folder>`. `share_source` is explicit: both nodes use the source workdir, and the token is still new.
+- `copy_session` defaults to true. Claude, Codex, and Grok copy the session id only together with the on-disk transcript; if that file is missing, the id is not written. OpenCode sessions live in the OpenCode server, so only the id is copied and both nodes address the same server transcript. That is not a private copy. Local `anet node clone` still does not copy sessions.
+- Naming a different daemon is refused (`cross_daemon_refused`). `ok: true` means the request was queued and a doorbell was attempted. It does not mean the child has registered, and it does not mean a session file was copied. This is not an npm release. Hub request #938.
+
+## Unreleased: OpenCode V2 user guide (2026-10-11)
+
+- anet.sh gains an [OpenCode V2](/en/guide/opencode) guide in Chinese and English. The sidebar entry sits next to Grok. It covers V2 create on `opencode-cli`, co-presence start, Hub dialogue, and the daemon constraints.
+- The create path is described as it exists on the published preview channel. The catalog reader (#2574) is documented as main-only: not wired to the daemon, Hub, or client, and not a user command. npm `latest` still has no `--opencode-generation`.
+
 ## Unreleased: OpenCode V2 co-presence create matches the machine provider (2026-10-10)
 
 - Creating an OpenCode V2 co-presence node takes the model and provider from OpenCode's own `opencode.json` on this machine (`model` and `providers`). A requested model or `--provider` that differs is refused, and the refusal names both sides. Create does not substitute a preset default model or the anthropic preset.

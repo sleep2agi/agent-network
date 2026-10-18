@@ -1,0 +1,57 @@
+Hub #906 .122 — targeted offline pre-cutover checks
+Observed 2026-10-11 16:19 +08. PASS, not production activation.
+
+Published source main ancestor231bf8c9711aacd9b2f78afce7c58a1873f3d280,
+formal run38121256184 SUCCESS including npm registry post-publication readback.
+GitHub and CI tarball bytes match; SHA256
+a47a12d03db41fbf5bd2a95a0c0f4a2107d771c17aa3487c58c490fb000c553a.
+Exact SRI and complete transitive lock are in deploy/hub/provider906/.
+Inactive staged sibling runtime-v106-preview122 was installed with npm ci
+--ignore-scripts inside Docker as uid1000, not global npm. Lock SHA256
+1cd304d24062d654554d7730c7e29e21d4545bccde71e00575b686e793e4e66b.
+No launcher swap, PM2 restart, daemon or business-node upgrade occurred.
+Current live health still .121, listener PID2543400; .121 runtime retained.
+
+Fresh VACUUM INTO backup of the live .121 DB created owner-only (0600),
+710946816 bytes, SHA256d1dcc1657548f64c70efcea0ffb6ef4f008ebaefbc43d3c57565869b43fa4c56.
+Operator-only location: ~/.commhub/backups/provider906-p122-l8LFfu/before.db.
+DB contents are private operator data, not in Git or CI artifacts. Git supplies
+software/structure, not this DB, vault key or OAuth accounts.
+
+Difference from .121: new daemon_provider_logins intent table and
+node_create_requests.clone_json. Existing migration suite adapted to exact
+.122 source/hash and to preserve existing Provider rows, not assume empty.
+Docker schema import only, --rm --network none --read-only, no live DB mount:
+before/after PRAGMA integrity_check=ok; row counts unchanged:
+sessions318, tasks75686, nodes288, networks7, requirements966,
+api_tokens3266, user_inbox2238; Provider snapshots5/writes0/applications0.
+New login-intent table empty; clone_json column exists. No HTTP/scheduler
+in schema-only phase. Bun1.4.0 SHA256
+33d56b070be6a9e3da0ab013038b43d1645d0534ca811ecdba4472599117eb4b.
+
+Existing isolated HTTP suite on the exact staged .122 package, --rm --init
+--network none --read-only, offline DB copied to tmpfs, no vault key or live
+credentials: health .122, anonymous401, fixture-authenticated200 returning
+all318 expected network session rows PASS. Only the disposable DB gets a
+random short-lived legacy atok fixture; no response identities or token logged.
+Initial HTTP build used wrong context (http.mjs COPY missing); corrected to
+suite directory, unchanged assertions, one actual HTTP run passed.
+Original backup hash remains unchanged. Child/container removed by --rm.
+
+Versioned launcher profile Docker check PASS: .122 selects v106 sibling;
+explicit rollback selects .121 v105; side-thread default1/override0 preserved.
+Fake executor only, no live service started. No unchanged Provider UI/model
+samples, full regression or business-node tests rerun.
+
+Reproduce schema check with a fresh offline before.db and exact inputs:
+sg docker -c 'bash tests/test906-hub-upgrade-preflight/run.sh <backup>/before.db <packages>/hub122.tgz <packages>/zod-4.6.5.tgz <runtime>/bun'
+HTTP Dockerfile context is tests/test906-hub-upgrade-preflight; mount only
+inactive runtime, offline before.db and Bun read-only, network disabled.
+
+Remaining cutover: merge authoritative deployment files to main; back up old
+launcher, install exact Git copies, restart only commhub-hub per README;
+verify actual .122 executable plus fleet fresh heartbeats/task ack. Rollback
+restores launcher selecting retained .121; preserve DB, pending login intent
+and administrator-held hub.env/vault backups. This preflight does not prove
+vault decryption, real OAuth entitlement, fleet recovery, Provider execution,
+client signed package installation, or production activation.

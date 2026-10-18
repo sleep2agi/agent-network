@@ -6,6 +6,8 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import { readOpenCodeCatalog } from "../../agent-node/src/runtime/opencode-v2-catalog";
+import { readOwnedOpenCodeV2Catalog } from "../../agent-node/src/runtime/opencode-v2-catalog-daemon";
+import { readOpenCodeV2CatalogEndpoint, writeOpenCodeV2CatalogEndpoint } from "../../agent-node/src/runtime/opencode-v2-catalog-endpoint";
 const root = mkdtempSync(join(tmpdir(), "catalog906-"));
 const workspace = join(root, "project");
 mkdirSync(workspace);
@@ -44,6 +46,28 @@ try {
   assert.equal(snapshot.completeness, "unknown");
   assert(!JSON.stringify(snapshot).includes("sk-FAKE"), "native provider headers/settings never leave adapter");
   console.log(`PASS L2 real V2 snapshot: providers=${snapshot.providers.length} models=${snapshot.models.length}; NOT invocation verified`);
+  const nodeDir = join(root, "node");
+  mkdirSync(nodeDir);
+  writeOpenCodeV2CatalogEndpoint(nodeDir, { url: opts.url, authorization: opts.authorization, directory: workspace });
+  const owned = await readOwnedOpenCodeV2Catalog({
+    networkId: scope.networkId, daemonId: scope.daemonId,
+    authorizedDirectory: workspace, ownedProjectDirectory: workspace,
+    endpoint: readOpenCodeV2CatalogEndpoint(nodeDir),
+  });
+  assert.equal(owned.ok, true);
+  if (owned.ok) {
+    assert.equal(owned.snapshot.invocationVerified, false);
+    assert.equal(owned.snapshot.completeness, "unknown");
+    assert(owned.snapshot.models.some(m => m.providerId === "fixture" && m.id === "fixture-model"));
+    assert(!JSON.stringify(owned.snapshot).includes("sk-FAKE"));
+  }
+  console.log("PASS L3 daemon owned reader against the same native server");
+  const missing = await readOwnedOpenCodeV2Catalog({
+    networkId: scope.networkId, daemonId: scope.daemonId,
+    authorizedDirectory: workspace, ownedProjectDirectory: workspace, endpoint: null,
+  });
+  assert.deepEqual(missing, { ok: false, error: "unavailable" });
+  console.log("PASS L4 missing endpoint is unavailable and does not start another server");
 } finally {
   child.kill("SIGTERM");
   const timer = setTimeout(() => child.kill("SIGKILL"), 2000);

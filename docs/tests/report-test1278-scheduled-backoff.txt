@@ -1,0 +1,337 @@
+TEST-ONLY — CommHub P0 #1278, bounded source slice under #1276 / #756
+
+Normal main merge: PR https://github.com/sleep2agi/agent-network/pull/2764
+source head 7607f76ac533cc1d05ace87b7f9ff05a87d3ca08
+source main 530820e3a761fbc8ede8b5a60f5e8a88029cdfd0, merged 2026-10-14T19:16:50Z
+actual CI checkout aeace07910d4a29238bee4b8e77271b976eb6312
+head / main / CI tree 9777a883f07dbea2209b8300adc387ef73bcd3bc
+Source head is a verified fresh-main ancestor; virtual CI merge is not claimed
+as a main ancestor. Test-only reports are not public executables/installers.
+
+Independent pinned Docker real HTTP/MCP E2E:
+run 38621076586 / job 116048435450 SUCCESS on the exact final head.
+14 backoff + 13 outcome + 6 response projections + 19 creator/permission
++ 15 scheduler + 9 lifecycle terminal + 1 tools/list byte floor = 77 PASS / 0 FAIL.
+All 95 tools 85460 B <= unchanged 85500 B; node 63337 B; user 59561 B.
+Artifact 11922222270; ZIP SHA256
+dd5ef91d18acc027c0dc79ee8a0997b66319e05b0def197907770922290c3ce4
+Complete raw report 25264 bytes, SHA256
+59769be5d64deaf69cfffa4b4ecf311c62ee40b8d91a89568afe672908f63143
+read in full and copied unchanged below for durable evidence.
+
+Before ordinary merge: all 10 protected checks and scoped real Docker E2E,
+clock/activity, provider/inbox, doc claim freshness and server unit passed.
+Clock run38621076804/job116048439086 SUCCESS: SQLite41/0, inherited PG32/0.
+Activity run38621076576/job116048435570 SUCCESS: SQLite130/0, PG121/0,
+runtime52/0. Legacy PG receipts do not qualify the new policy on PG.
+Server unit run38621076694/job116049375486 SUCCESS: 227 executed files /
+227 discovered / 0 failed, one disposable DB per file; password-floor mutation red.
+CLI network unit job116049375829 SUCCESS: 2133 PASS / 11 SKIP / 0 FAIL,
+214 files, tests-dir19/19/0; stale-help mutation red.
+Separate agent-node unit job116049376006 SUCCESS: 2917 PASS / 2 SKIP / 0 FAIL,
+231 files, 211.73s; runtime-disconnect mutation red; auxiliary66/0.
+Doc claim job116049375945 SUCCESS: 8 claims, 3 witnessed-red probes,
+restored green. The exact-head local independent Docker doc fixture also passed.
+Full repository E2E run38621076401 and broad L0/L1 remained in progress at
+source merge. They are not counted as passed in this cutoff report.
+
+First local Docker run exposed a two-worker claim regression: revalidation
+preceded the unique claim. Fixed by keeping the real unique INSERT first.
+Restored local functional suite67/0 before final added cases, not a final-head
+certificate. First head a99ae51ca5867ca2910910ad0b8f5799897d1d9a and second
+4dd74388f5d087aed2fe086c4bc26ee4e839ccfb each had76/0 core passes but schema
+byte-floor failures85565 / 85525. Existing terse descriptions reduced size;
+ceilings/auth/assertions were retained, CI paths registered. Third head
+6d7d5fcd859c8d80d11f339e771b8ad7b30d17a8 had77/0; broad doc claim caught
+DB import line450→451 drift. Prose/manifest and mutation fixture fixed together.
+The final source head above has fresh77/0 and doc qualification. Repeated
+historical suites are not added to the final77 denominator.
+
+Default-off interval/skip-only owner-authorized policy; 3 exact consecutive
+successful no_changes → max(base,600s), 6 → max(base,1800s), cap6. Configured
+base remains intact. Changed/unknown/failure/skip interruption and manual/edit
+reset; stale generations/targets, duplicates and retries cannot increase it.
+Paused/cancelled schedules stay so; cadence write faults roll back reply,
+inbox, annotation and run together. New policy uses SQLite-qualified fixtures.
+One additional process durable read/duplicate consumption and original real
+occurrence race are covered, not every simultaneous opted-in writer/crash stage.
+Broader cadence qualification, named domain-event wake (#1279), UI controls,
+producer correctness and actual installed/Owner adoption remain parent gates.
+No live policy/frequency, original node/model/thread/login or public package
+release was performed. Recovery/software-vs-data answers:
+docs/design/scheduled-backoff.md and docs/design/scheduled-work-outcome.md.
+Git reconstructs software/fixtures, not production DB/auth/history/backups.
+
+Post-cutoff mature receipt (after source merge, before facts PR):
+Full Docker E2E run38621076401 / e2e job116048438748 and rename-ghost
+job116048439155 both SUCCESS. Complete artifact11921674573, ZIP SHA256
+c4eaae37dba06b380c7b3cf006f585984f5b472a6e6b08d97c4bd4eb65ff45af,
+8 logs read in full. Seven suite results139+25+28+16+22+12+47=289 PASS / 0 FAIL;
+test-all.log repeats the aggregate, not an eighth independent denominator.
+Broad L0/L1 job116049376242 still running at this post-cutoff; prior known
+#1268 reds remain tracked, not proof of zero impact on this source change.
+Windows native smoke job116049170447 SUCCESS, no claim that old #1262 stop
+root cause was fixed. Actual source rollup160SUCCESS /26pending /0FAIL at read,
+not a whole-repository all-green statement.
+
+----- COMPLETE ORIGINAL INDEPENDENT CI REPORT (25264 bytes) -----
+TEST-ONLY source=aeace07910d4a29238bee4b8e77271b976eb6312 scope=opt-in SQLite interval-backoff
+Bundled 366 modules in 66ms
+
+  commhub-test1278.js  2.73 MB  (entry point)
+
+bun test v1.3.14 (0d9b296a)
+
+server/src/scheduled-backoff-http.test.ts:
+[commhub] database: /tmp/test1278-backoff.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > 3 and 6 exact empty successes change effective cadence, preserving base and revision [383.71ms]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > changed restores base and nearer next occurrence; no natural-language inference [51.58ms]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:01] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (failed) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > unknown success and ordinary failure break the sequence [526.95ms]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > legacy disabled schedules preserve exact cadence and wire shape [12.88ms]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > a slower base interval is never accelerated [296.14ms]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > duplicate callbacks and another DB process cannot increment twice [135.57ms]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > old generation completion after edit cannot rearm [132.41ms]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > manual wake resets durable state and fences an in-flight old generation [217.39ms]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:02] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > pause/cancel never resurrect cadence; resumed policy starts a new generation [77.74ms]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (failed) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work_owner_1792004939704 → retry_task → 66432306
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > retry success is excluded from empty streaks and failure breaks prior successes [221.31ms]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > overlap skip breaks the sequence and an older completion cannot bypass the skip [49.48ms]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-b-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > current reporter target mismatch cannot count as empty [342.80ms]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+[19:09:03] work-a-1792004939704 → send_reply (replied) → work_owner_1792004939704: 本轮无新增 [scheduled task → creator]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > injected cadence-write fault rolls back task, inbox, outcome, and state together [30.52ms]
+(pass) #1278 opt-in durable no-change backoff through real HTTP/MCP > REST rejects malformed and non-interval policy; MCP respects creator ownership [56.87ms]
+
+ 14 pass
+ 0 fail
+ 189 expect() calls
+Ran 14 tests across 1 file. [4.90s]
+bun test v1.3.14 (0d9b296a)
+
+server/src/scheduled-work-outcome-http.test.ts:
+[commhub] database: /tmp/test1278-outcome.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > explicit no_changes persists with the same successful run and is readable; cadence stays unchanged [74.68ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > changed is explicit even when the reply's natural-language text says no changes [20.33ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > legacy success and empty-looking text remain unknown with unchanged response shape [18.80ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work-a-1792004944019 → send_reply (failed) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work-a-1792004944019 → send_reply (cancelled) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > malformed, failed and cancelled signals do not write; ordinary terminal failures stay unknown [117.89ms]
+[19:09:04] work-b-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work_owner_1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > sibling node and a human token cannot classify the assigned node's run [20.79ms]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > a foreign network token cannot classify or terminalize the run [44.85ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > a legacy unbound node token can still reply normally but cannot report a work signal [20.07ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > forged schedule metadata on an ordinary task cannot become an authoritative occurrence [16.19ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > multiple authoritative bindings refuse instead of fanning one outcome into two runs [12.75ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > expired/late receipts never classify a run or rewrite its original terminal state [18.77ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work_owner_1792004944019 → retry_task → 3ad31f29
+[19:09:04] work_owner_1792004944019 → retry_task → 3ad31f29
+[19:09:04] work-a-1792004944019 → send_reply (failed) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > success cannot retry; an expired fixture task clears stale outcome on retry and later failure [37.67ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > injected outcome write failure rolls back task, inbox and run atomically [23.76ms]
+[19:09:04] work-a-1792004944019 → send_reply (replied) → work_owner_1792004944019: 本轮无新增 [scheduled task → creator]
+(pass) #1274 exact successful scheduler work outcomes over real HTTP/MCP > a later schedule edit cannot relabel the dispatch revision; history alone grants no backoff [16.22ms]
+
+ 13 pass
+ 0 fail
+ 105 expect() calls
+Ran 13 tests across 1 file. [878.00ms]
+bun test v1.3.14 (0d9b296a)
+
+server/src/rest-explicit-columns-http.test.ts:
+[commhub] database: /tmp/test1278-shape.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) #311 REST response projections are stable across future ALTER TABLE > network list and detail preserve their existing public keys [23.76ms]
+(pass) #311 REST response projections are stable across future ALTER TABLE > auth/me networks come from an explicit column list, not SELECT * [0.78ms]
+(pass) #311 REST response projections are stable across future ALTER TABLE > full status preserves telemetry compatibility without storage drift [3.62ms]
+(pass) #311 REST response projections are stable across future ALTER TABLE > task list and task detail expose the same explicit contract [1.98ms]
+(pass) #311 REST response projections are stable across future ALTER TABLE > audit, task-event, and completion rows are explicit [1.77ms]
+(pass) #311 REST response projections are stable across future ALTER TABLE > scheduled-task decoding keeps storage-only identity and JSON private [0.96ms]
+
+ 6 pass
+ 0 fail
+ 34 expect() calls
+Ran 6 tests across 1 file. [697.00ms]
+bun test v1.3.14 (0d9b296a)
+
+server/src/schedule-agent-mcp-http.test.ts:
+[commhub] database: /tmp/test1278-agent.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) happy path from a node > create (default target = self) → list / get / update / pause / run_now / runs / cancel [240.74ms]
+(pass) happy path from a node > base_revision prevents a stale Agent update; omitting it keeps legacy last-write behavior [44.59ms]
+(pass) happy path from a node > a schedule for another node the caller can send_task to; the target can read it but not change it [169.72ms]
+(pass) happy path from a node > a person's schedule that targets the node is read-only for it (even when paused) [94.69ms]
+(pass) batch interval updates (#816) > two updates, deduplicated IDs, paused stays paused, unselected stays untouched [64.41ms]
+(pass) batch interval updates (#816) > partial results preserve human, foreign-network, daily and cancelled schedules [125.42ms]
+(pass) batch interval updates (#816) > invalid interval or batch shape performs no writes; node-only and readonly gates remain [78.20ms]
+(pass) batch interval updates (#816) > creator still needs permission to reach the current target [27.08ms]
+(pass) denials > another network: cannot target, see or touch it [82.89ms]
+(pass) denials > another node's schedule (neither target nor creator) reads as not found [56.35ms]
+[19:09:07] sa-c-1792004945830 → send_task → sa-a-1792004945830: probe
+(pass) denials > unreachable target: refused like send_task (even under the default log flag); self is fine [66.62ms]
+(pass) denials > read-only node: every mutation refused, reads work [12.71ms]
+(pass) denials > over quota: the (N+1)th active schedule is refused until one is cancelled [42.70ms]
+(pass) denials > too-short interval and other invalid input use the shared REST validation [37.69ms]
+(pass) old clients unaffected > REST: node tokens still 403; people's API shape unchanged and creator columns stay server-side [16.06ms]
+(pass) old clients unaffected > user tokens get network_token_required from the MCP tools [6.22ms]
+(pass) scheduler re-checks the creating node as it is now > owner changes to a user not granted the target: send_task denied, and so is every scheduled run [39.14ms]
+(pass) scheduler re-checks the creating node as it is now > creator turned read-only or gone: runs fail with a named error_code [13.34ms]
+[19:09:07] sa-b-1792004945830 → send_reply (replied) → scheduler: done
+[19:09:07] sa-b-1792004945830 → send_reply (replied) → sa_boss_1792004945830: ok [scheduled task → creator]
+(pass) provenance: an Agent's schedule never passes as a person's > server-set prefix + meta on Agent-created runs; none on people's; reply routing unchanged [36.30ms]
+
+ 19 pass
+ 0 fail
+ 134 expect() calls
+Ran 19 tests across 1 file. [2.22s]
+bun test v1.3.14 (0d9b296a)
+
+server/src/scheduled-tasks-http.test.ts:
+[commhub] database: /tmp/test1278-edit.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) Hub scheduled task API and dispatcher > schedule math supports timezone-aware daily and weekly forms [351.97ms]
+(pass) Hub scheduled task API and dispatcher > scheduler startup rejects a backend without real transactions [0.65ms]
+(pass) Hub scheduled task API and dispatcher > owner creates; viewer and node token cannot mutate [55.03ms]
+(pass) Hub scheduled task API and dispatcher > network scope hides schedules from foreign users and viewers may read [42.28ms]
+(pass) Hub scheduled task API and dispatcher > due occurrence creates ordinary inbox/task/run atomically and is idempotent [12.43ms]
+(pass) Hub scheduled task API and dispatcher > misfire policy catches up once by default or skips an overdue occurrence [16.84ms]
+[scheduled-tasks] occurrence failed schedule=sched_8b3fc992-8ca3-4b08-a602-daea3af198fb: test601_injected_task_failure
+(pass) Hub scheduled task API and dispatcher > dispatch failure rolls back occurrence, inbox, task, and schedule advance as one unit [5.75ms]
+(pass) Hub scheduled task API and dispatcher > two real Hub processes claim one occurrence exactly once [164.41ms]
+(pass) Hub scheduled task API and dispatcher > non-overlap skips while prior task is open; rename follows stable node_id [7.30ms]
+(pass) Hub scheduled task API and dispatcher > full edit validates target and policy, preserves cadence, and recomputes through DST-safe schedule math [133.53ms]
+(pass) Hub scheduled task API and dispatcher > two editors with one revision produce one winner and one refreshable conflict [4.75ms]
+(pass) Hub scheduled task API and dispatcher > a scheduler run between GET and PATCH does not conflict with the edit [6.97ms]
+(pass) Hub scheduled task API and dispatcher > a run that lands while the PATCH body is in flight keeps the advanced next_run_at [112.30ms]
+(pass) Hub scheduled task API and dispatcher > one-shot auto-complete is a user-visible status change and still bumps revision [5.16ms]
+(pass) Hub scheduled task API and dispatcher > optimistic revision, pause/resume, run-now and cancel preserve history [17.00ms]
+
+ 15 pass
+ 0 fail
+ 143 expect() calls
+Ran 15 tests across 1 file. [1292.00ms]
+bun test v1.3.14 (0d9b296a)
+
+server/src/scheduled-run-terminal.test.ts:
+[commhub] database: /tmp/test1278-terminal.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) #690 scheduled run follows the real task lifecycle > dispatch is open until the task reaches a terminal state [12.54ms]
+[19:09:09] u_690_owner → send_reply (replied) → A站GrokTUI-690: verified [+1 attachments]
+(pass) #690 scheduled run follows the real task lifecycle > send_reply terminalizes the exact bound run [66.05ms]
+[19:09:09] u_690_owner → send_reply (replied) → A站GrokTUI-690: must roll back
+(pass) #690 scheduled run follows the real task lifecycle > task and run terminal transition roll back together on an injected run-write failure [17.27ms]
+[19:09:09] u_690_owner → cancel_task → task_26a
+[19:09:09] u_690_owner → retry_task → task_26a
+[19:09:09] u_690_owner → send_reply (failed) → A站GrokTUI-690: runtime failed
+(pass) #690 scheduled run follows the real task lifecycle > cancel terminalizes, retry reopens, and the retry result closes the same run [16.70ms]
+[19:09:09] A站GrokTUI-690 → report_completion: task_a041f4df-daba-4e76-9180-465f2e21f281 [net]
+(pass) #690 scheduled run follows the real task lifecycle > report_completion terminalizes a scheduler run [174.70ms]
+[patrol] expired 1 stale task(s)
+(pass) #690 scheduled run follows the real task lifecycle > expiration patrol closes the exact run in the same lifecycle pass [103.48ms]
+(pass) #690 scheduled run follows the real task lifecycle > child auto-chain terminalizes a scheduled parent [7.48ms]
+[19:09:09] u_690_owner → send_reply (replied) → A站GrokTUI-690: forged close
+(pass) #690 scheduled run follows the real task lifecycle > forged metadata cannot cross-bind another task or network run [13.95ms]
+[19:09:10] u_690_owner → send_reply (replied) → A站GrokTUI-690: must not cross network
+(pass) #690 scheduled run follows the real task lifecycle > a task cannot close a run whose persisted network binding differs [309.52ms]
+
+ 9 pass
+ 0 fail
+ 28 expect() calls
+Ran 9 tests across 1 file. [1156.00ms]
+bun test v1.3.14 (0d9b296a)
+
+server/src/tool-audience-http.test.ts:
+[commhub] database: /tmp/test1278-audience.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) bytes per role (#476 ceilings stay meaningful per role) > node / user / all [47.04ms]
+tools/list bytes — all 95 tools 85460 B; node 62 tools 63337 B (−26%); user 62 tools 59561 B (−30%)
+
+ 1 pass
+ 11 filtered out
+ 0 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [1282.00ms]
+RESULT: PASS; source-only, no live frequency adoption or domain-event watcher

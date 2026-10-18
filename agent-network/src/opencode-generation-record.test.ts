@@ -42,6 +42,15 @@ describe("stampOpencodeGeneration (create / saveProfile)", () => {
     expect("opencodeGeneration" in serializeProfileForConfigJson(LEGACY, LEGACY)).toBe(false);
     const v2 = { ...LEGACY, opencodeGeneration: "v2" };
     expect(serializeProfileForConfigJson(v2, v2).opencodeGeneration).toBe("v2");
+    const shared = {
+      ...v2,
+      opencodeSharedServerUrl: "http://127.0.0.1:4097",
+      opencodeSharedServerPasswordFile: "/home/user/.anet/opencode/password",
+    };
+    expect(serializeProfileForConfigJson(shared, shared)).toMatchObject({
+      opencodeSharedServerUrl: shared.opencodeSharedServerUrl,
+      opencodeSharedServerPasswordFile: shared.opencodeSharedServerPasswordFile,
+    });
   });
 });
 

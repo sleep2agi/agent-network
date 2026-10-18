@@ -80,13 +80,13 @@ flowchart LR
 | `codex-app-server` | Codex TUI 共存（向导里显示为 `codex-cli`） | 复用 `codex login` | ✅ |
 | `grok-build-acp` | xAI Grok Build | 复用 `grok login` | — |
 | `grok-build-cli` | Grok Build TUI 共存（实验性预览，仅可信任务） | 复用 `grok login` | ✅ |
-| `opencode-cli` | OpenCode（Anthropic / OpenAI preset，预览） | 提供方 API Key | ✅（Linux / macOS） |
+| `opencode-cli` | OpenCode。默认 V1（`opencode-ai`，Anthropic / OpenAI preset，预览）。V2 是同一 runtime 的共存预览：`@opencode/cli@2.0.22`，`anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools`，本机工具全开，只用于可信任务。npm `latest` 还没有这条标志。见 [OpenCode V2](https://anet.sh/guide/opencode) | V1：提供方 API Key。V2：复制本机 OpenCode 已有的 `provider/model` | V1 ✅（Linux / macOS）。V2 共存的现有验收在 Linux |
 
 各运行时的能力与平台支持矩阵见 [Runtime 对比](https://anet.sh/guide/runtimes) 和 [支持矩阵](https://anet.sh/guide/support-matrix)。
 
 ## 文档
 
-[上手指南](https://anet.sh/guide/getting-started) · [桌面应用](https://anet.sh/guide/desktop-app) · [任务 API](https://anet.sh/api/mcp-tools) · [架构](https://anet.sh/guide/architecture) · [CLI](https://anet.sh/guide/cli) · [生产部署](https://anet.sh/deploy/production) · [升级通道](https://anet.sh/guide/upgrade) · [更新日志](https://anet.sh/changelog)
+[上手指南](https://anet.sh/guide/getting-started) · [OpenCode V2](https://anet.sh/guide/opencode) · [桌面应用](https://anet.sh/guide/desktop-app) · [任务 API](https://anet.sh/api/mcp-tools) · [架构](https://anet.sh/guide/architecture) · [CLI](https://anet.sh/guide/cli) · [生产部署](https://anet.sh/deploy/production) · [升级通道](https://anet.sh/guide/upgrade) · [更新日志](https://anet.sh/changelog)
 
 ## 参与与社区
 

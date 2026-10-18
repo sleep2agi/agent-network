@@ -78,6 +78,12 @@ export function serializeProfileForConfigJson(
     ...((normalized.opencodeGeneration ?? profile.opencodeGeneration)
       ? { opencodeGeneration: normalized.opencodeGeneration ?? profile.opencodeGeneration }
       : {}),
+    ...((normalized.opencodeSharedServerUrl ?? profile.opencodeSharedServerUrl)
+      ? { opencodeSharedServerUrl: normalized.opencodeSharedServerUrl ?? profile.opencodeSharedServerUrl }
+      : {}),
+    ...((normalized.opencodeSharedServerPasswordFile ?? profile.opencodeSharedServerPasswordFile)
+      ? { opencodeSharedServerPasswordFile: normalized.opencodeSharedServerPasswordFile ?? profile.opencodeSharedServerPasswordFile }
+      : {}),
     ...(normalized.grokSession ? { grokSession: normalized.grokSession } : {}),
     ...(normalized.grokCliSession ? { grokCliSession: normalized.grokCliSession } : {}),
     ...(typeof normalized.grokCopresence === "boolean"

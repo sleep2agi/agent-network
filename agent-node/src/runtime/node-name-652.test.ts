@@ -30,6 +30,8 @@ import { _resetChildrenMapForTest, handleStopDoorbell } from "./stop-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
 import { NODE_NAME_CASES, nodeFolderSlug } from "../shared/node-name.js";
 import { readOpencodeRuntimeBinding } from "../shared/opencode-runtime-binding.js";
+import { readScopedNodeEnv } from "../shared/scoped-secret-env.js";
+import type { CreateNodeDeps } from "./create-node-daemon.js";
 
 const CN = "测试";
 const CN_DIR = nodeFolderSlug(CN);   // node-<6 hex>
@@ -159,27 +161,28 @@ function writeFakeAnet(root: string): string {
   return realpathSync(abs);
 }
 
-interface Spawned { bin: string; args: string[]; cwd: string }
+interface Spawned { bin: string; args: string[]; cwd: string; path?: string }
 
-async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>) {
+async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>, providerScope?: CreateNodeDeps['providerScope']) {
   const acks: Record<string, any>[] = [];
   const spawned: Spawned[] = [];
   await handleCreateNodeDoorbell({ request_id: requestId }, {
     callCommHub: async (tool: string, args: Record<string, unknown>) => {
       if (tool === "get_create_request") {
-        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652", ...(envBlob ? { env_blob: envBlob } : {}) };
+        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652", ...(envBlob ? { env_blob: envBlob } : {}), ...(providerScope ? {network_id:'net_legacy_1053'} : {}) };
       }
       if (tool === "ack_create_request") { acks.push(args); return { ok: true }; }
       throw new Error(`unexpected tool ${tool}`);
     },
     workDir,
     hubUrl: "http://127.0.0.1:9",
+    ...(providerScope ? {providerScope} : {}),
     log: () => {},
     warn: () => {},
     serializeEnvLocal: serializeEnvLocalDaemon,
     capabilityCheckMs: 100,
     spawnChild: (bin, args, opts) => {
-      spawned.push({ bin, args, cwd: opts.cwd });
+      spawned.push({ bin, args, cwd: opts.cwd, path: opts.env.PATH });
       const child = spawn("sleep", ["30"], { stdio: "ignore", detached: true });
       if (child.pid) killPids.push(child.pid);
       return child;
@@ -204,6 +207,18 @@ function walk(root: string): string[] {
 const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
+  test("#1053 legacy Daemon source marker uses the Hub-bound request network", async () => {
+    const {acks, spawned} = await runCreate({name:'legacy-secret-child',runtime:'claude-agent-sdk'},
+      'cr_legacysecret1053', undefined, {alias:'legacy-daemon',networkId:'',daemonId:'node_legacy_daemon'});
+    expect(acks.map(a=>a.status)).toEqual(['started']);
+    expect(spawned).toHaveLength(1);
+    const dir=join(workDir,'.anet','nodes','legacy-secret-child');
+    expect(JSON.parse(readFileSync(join(dir,'secrets-source.json'),'utf8')).network_id).toBe('net_legacy_1053');
+    // No private store means no inherited values; do not require migration of
+    // the legacy parent's config to start the otherwise unchanged child.
+    expect(readScopedNodeEnv(dir)).toEqual({});
+  });
+
   function plantMachineModel(body: Record<string, unknown>): void {
     const dir = join(home, ".config", "opencode");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -234,6 +249,71 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(readOpencodeRuntimeBinding(join(workDir, ".anet", "nodes", "v2-child"), home))
       .toEqual({ schemaVersion: 1, runtime: "opencode-cli", projectRoot: workDir, nodeId: "v2-child" });
     expect(flags.opencodeGeneration).toBe("v2");
+  });
+
+  test("V2 create keeps the host client PATH but falls back without a live shared listener", async () => {
+    plantOpencode("opencode v1.18.34");
+    plantMachineModel({ model: "stub/model" });
+    const clientBinDir = join(home, "v2-bin");
+    mkdirSync(clientBinDir, { mode: 0o700 });
+    writeFileSync(join(clientBinDir, "opencode"), "#!/bin/sh\necho 'opencode v2.0.22'\n", { mode: 0o755 });
+    const passwordFile = join(home, "shared-password");
+    writeFileSync(passwordFile, "test-only", { mode: 0o600 });
+    mkdirSync(join(home, ".anet"), { mode: 0o700 });
+    writeFileSync(join(home, ".anet", "opencode-shared-server.json"), JSON.stringify({
+      url: "http://127.0.0.1:4097", passwordFile, clientBinDir,
+    }), { mode: 0o600 });
+    const { acks, spawned } = await runCreate({ name: "shared-v2", runtime: "opencode-cli",
+      model: "stub/model", flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } }, "cr_sharedv2client");
+    expect(acks[0].status).toBe("runtime_capability_check_failed");
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].path?.split(":")[0]).toBe(clientBinDir);
+    expect(computeChildPath().split(":")[0]).not.toBe(clientBinDir);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "shared-v2", "config.json"), "utf8"));
+    // This fixture supplies a version-only shell stub and a disk record, not a
+    // real listener. test1326 supplies the independent real-V2 reuse positive.
+    expect(cfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(cfg.opencodeSharedServerPasswordFile).toBeUndefined();
+    expect(cfg.clientBinDir).toBeUndefined();
+    const owned = await runCreate({ name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } }, "cr_ownedv2client");
+    expect(owned.acks[0].status).toBe("runtime_capability_check_failed");
+    expect(owned.spawned[0].path?.split(":")[0]).toBe(clientBinDir);
+    const ownedCfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "owned-v2", "config.json"), "utf8"));
+    expect(ownedCfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(ownedCfg.opencodeSharedServerPasswordFile).toBeUndefined();
+  });
+
+  test.each(["malformed", "missing-password"])("explicit V2 new Server survives a %s shared registry", async (fault) => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({ model: "stub/model" });
+    mkdirSync(join(home, ".anet"), { mode: 0o700 });
+    writeFileSync(join(home, ".anet", "opencode-shared-server.json"), fault === "malformed"
+      ? "{broken"
+      : JSON.stringify({ url: "http://127.0.0.1:4097", passwordFile: join(home, "missing-password") }),
+    { mode: 0o600 });
+    const spec = { name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } };
+
+    // Default reuse must still reject the broken registration before writing
+    // a child or spawning anything. Explicit new-Server takes the owned path.
+    const shared = await runCreate(spec, "cr_brokenshared");
+    expect(shared.acks[0].status).toBe("rejected");
+    expect(shared.acks[0].error).toStartWith("shared_opencode_registry:");
+    expect(shared.spawned).toHaveLength(0);
+    const dir = join(workDir, ".anet", "nodes", "owned-v2");
+    expect(existsSync(dir)).toBe(false);
+
+    const owned = await runCreate({ ...spec, flags: { ...spec.flags, opencodeNewServer: true } }, "cr_ownedfallback");
+    // sleep proves config wiring only and must still fail native readiness.
+    expect(owned.acks[0].status).toBe("runtime_capability_check_failed");
+    expect(owned.spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBe("v2");
+    expect(cfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(cfg.opencodeSharedServerPasswordFile).toBeUndefined();
+    expect(cfg.flags.opencodeUnsafeTools).toBe(true);
+    expect(cfg.flags.opencodeNewServer).toBeUndefined();
   });
 
   test("#829 unsafe opt-in is required before write or spawn; existing config unchanged", async () => {
@@ -290,7 +370,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(String(acks[0].error ?? "")).not.toContain("opencode_generation_mismatch");
     expect(spawned).toHaveLength(1);
     const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "legacy-v1", "config.json"), "utf8"));
-    expect(cfg.opencodeGeneration).toBeUndefined();
+    expect(cfg.opencodeGeneration).toBe("v1");
     expect(cfg.runtime).toBe("opencode-cli");
   });
 

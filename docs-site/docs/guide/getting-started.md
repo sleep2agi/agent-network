@@ -6,8 +6,8 @@
      每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
      latest 标记已核对的通道版本，preview 标记已验证的发布候选，不代表 npm 已发布；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
-<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.76 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.163 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.180 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.181 -->
 
 从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。
 
@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.76`）与本次 `preview` 发布候选（`2.3.0-preview.163`）都打印随机密码，形如 `anet-` 加 22 位十六进制字符。候选版本须通过安装门后才发布。
+已核对的 `latest`（`2.3.0-preview.180`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.181`）相对 `.180` 只改两处产品代码：`notifyServerOffline` 的两处 `Accept` 协商（`#1344`/PR `#2800`，此前只声明 `application/json` 会被 Streamable HTTP 回 406）与 Windows 停止编排（`#1335`/`#1339`：按精确 `PID`+`CreationDate` 身份裁决 gone/alive/unknown，`taskkill` 非零不再直接 `exit(1)`）；**默认初始化/随机密码路径未改动**（`7b159c95..a54c6290` 的 `agent-network/src`+`bin` diff 仅上述两处）。本次安装门使用显式密码，未额外重跑默认密码路径。候选须通过全部发布门后才公开。
 **候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
@@ -90,6 +90,8 @@ anet node create my-bot
 向导**默认高亮 `claude-agent-sdk`**, 一路 Enter 会落到要填 vendor + API Key 的复杂路径。如果已经 `claude auth login`, **手动选 `claude-code-cli`** = 零配置最快路径。
 
 `anet node create` 的选单列出全部 7 个 runtime（4 个正式：`claude-agent-sdk` / `claude-code-cli` / `codex-sdk` / `grok-build-acp`；3 个预览：`codex-app-server`（选单里叫 `codex-cli`）/ `grok-build-cli` / `opencode-cli`）；完整对照见 [Runtime 对比](/guide/runtimes#runtime-对比-canonical-表)。
+
+OpenCode V2 不是第 8 个 runtime，向导也不会默认选它。它仍是 `opencode-cli`，要显式 `--opencode-generation v2 --opencode-unsafe-tools`，并且只做人机共存。成熟度仍是 preview（npm `latest` 上还没有这条创建标志）。步骤、Hub 对话和还没接上的模型目录见 [OpenCode V2](/guide/opencode)。
 :::
 
 启动节点：

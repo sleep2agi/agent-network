@@ -8,8 +8,12 @@ type Asset = {
   role: 'install' | 'audit'
   name: string
   bytes: number | null
-  url: string
+  url: string | null
   mirrorUrl: string | null
+  architecture?: string | null
+  version?: string
+  notesUrl?: string
+  checksumUrl?: string
 }
 
 type Platform = { id: string; assets: Asset[] }
@@ -27,6 +31,14 @@ const props = withDefaults(defineProps<{ lang?: 'zh' | 'en' }>(), { lang: 'zh' }
 const loading = ref(true)
 const error = ref(false)
 const catalog = ref<Catalog | null>(null)
+const currentPlatform = ref('')
+const recommendedAsset = computed(() => installAssets(currentPlatform.value)[0])
+const platformTitle = (id: string) => copy.value.platforms.find((platform) => platform.id === id)?.title ?? id
+const architectureLabel = (asset: Asset) => asset.architecture === 'arm64'
+  ? (asset.platform === 'macos' ? 'Apple Silicon · ARM64' : 'ARM64')
+  : asset.architecture === 'x64' ? (asset.platform === 'macos' ? 'Intel · x64' : 'x64')
+  : asset.architecture === 'universal' ? (props.lang === 'en' ? 'Universal' : '通用包')
+  : (props.lang === 'en' ? 'See filename for architecture' : '架构见文件名')
 
 const copy = computed(() => props.lang === 'en' ? {
   loading: 'Looking up the latest published release…',
@@ -38,6 +50,10 @@ const copy = computed(() => props.lang === 'en' ? {
   mirror: 'Mirror 1 (China · ModelScope)',
   github: 'Mirror 2 (GitHub)',
   recommended: 'Recommended',
+  downloadFor: 'Download for',
+  verifyArch: 'Check the architecture below before installing. No automatic download.',
+  checksum: 'SHA256 checksum',
+  cli: 'CLI / Daemon installation',
   audit: 'Audit package only. This file cannot be sideloaded.',
   kinds: {
     dmg: 'Disk image (.dmg)',
@@ -51,8 +67,8 @@ const copy = computed(() => props.lang === 'en' ? {
   platforms: [
     { id: 'macos', title: 'macOS', note: 'Apple silicon. Open the disk image and drag Agent Network into Applications.' },
     { id: 'windows', title: 'Windows', note: '64-bit Windows 10/11. The .exe is the usual installer; the .msi is for managed installs.' },
-    { id: 'linux', title: 'Linux', note: 'Install the .deb with your package manager. For an AppImage, allow it to run as a program, then open it.' },
     { id: 'android', title: 'Android', note: 'Test-signed package for Android 7.0 or newer. If the system blocks it, allow installs from this source.' },
+    { id: 'linux', title: 'Linux', note: 'Linux builds are not a priority in this release. Only published packages are listed.' },
     { id: 'ios', title: 'iOS', note: 'Distributed through TestFlight. There is no public testing link yet. An audit .ipa cannot be sideloaded.' },
   ],
 } : {
@@ -65,6 +81,10 @@ const copy = computed(() => props.lang === 'en' ? {
   mirror: '线路一（国内 · ModelScope）',
   github: '线路二（GitHub）',
   recommended: '推荐',
+  downloadFor: '下载',
+  verifyArch: '安装前请核对下面的架构；不会自动开始下载。',
+  checksum: 'SHA256 校验文件',
+  cli: 'CLI / Daemon 安装',
   audit: '仅供审计比对，这个文件不能侧载安装。',
   kinds: {
     dmg: '磁盘映像（.dmg）',
@@ -78,8 +98,8 @@ const copy = computed(() => props.lang === 'en' ? {
   platforms: [
     { id: 'macos', title: 'macOS', note: 'Apple 芯片。打开 dmg，把 Agent Network 拖进「应用程序」。' },
     { id: 'windows', title: 'Windows', note: '64 位 Windows 10/11。.exe 是常规安装包；.msi 适合集中部署。' },
-    { id: 'linux', title: 'Linux', note: '.deb 用系统的软件包安装器安装。AppImage 需要允许作为程序执行后再打开。' },
     { id: 'android', title: 'Android', note: '测试签名安装包，需 Android 7.0 及以上。系统若拦截，允许来自此来源的安装。' },
+    { id: 'linux', title: 'Linux', note: 'Linux 后续支持；这里只展示实际已发布的安装包。' },
     { id: 'ios', title: 'iOS', note: '只通过 TestFlight 分发，公开测试链接还没开。审计用 .ipa 不能侧载安装。' },
   ],
 })
@@ -99,6 +119,9 @@ const kindLabel = (kind: string) => {
 }
 
 onMounted(async () => {
+  const ua = navigator.userAgent
+  currentPlatform.value = /Android/i.test(ua) ? 'android' : /Windows/i.test(ua) ? 'windows'
+    : /Macintosh|Mac OS X/i.test(ua) && !/iPhone|iPad/i.test(ua) ? 'macos' : /Linux/i.test(ua) ? 'linux' : ''
   try {
     const response = await fetch(withBase('/api/desktop-downloads'), { cache: 'no-store' })
     if (!response.ok) throw new Error(`downloads HTTP ${response.status}`)
@@ -122,8 +145,16 @@ onMounted(async () => {
       <a href="https://github.com/sleep2agi/agent-network-app/releases">GitHub Releases</a>
     </p>
     <template v-else-if="catalog">
+      <div v-if="recommendedAsset" class="download-recommendation">
+        <span>{{ copy.recommended }} · {{ platformTitle(currentPlatform) }} · {{ architectureLabel(recommendedAsset) }} · v{{ recommendedAsset.version || catalog.version }}</span>
+        <a class="download-route download-route-primary" :href="recommendedAsset.mirrorUrl || recommendedAsset.url || undefined">
+          {{ copy.downloadFor }} {{ platformTitle(currentPlatform) }} ↓
+        </a>
+        <small>{{ copy.verifyArch }}</small>
+      </div>
       <p class="download-release">
         <strong class="download-release-tag">{{ catalog.tag }}</strong>
+        <time v-if="catalog.publishedAt" :datetime="catalog.publishedAt">{{ catalog.publishedAt.slice(0, 10) }}</time>
         <span v-if="catalog.source === 'fallback'" class="download-release-fallback">{{ copy.fallback }}</span>
       </p>
       <section
@@ -136,7 +167,7 @@ onMounted(async () => {
         <div class="desktop-download-copy">
           <div class="download-platform-head">
             <h2 :id="`${platform.id}-title`">{{ platform.title }}</h2>
-            <span class="download-platform-version">v{{ catalog.version }}</span>
+            <span class="download-platform-version" v-if="installAssets(platform.id).length">v{{ installAssets(platform.id)[0].version || catalog.version }}</span>
           </div>
           <p>{{ platform.note }}</p>
         </div>
@@ -146,7 +177,7 @@ onMounted(async () => {
             :key="asset.name"
             class="download-card download-card-routes download-card-primary"
           >
-            <span class="download-platform"><strong>{{ kindLabel(asset.kind) }}</strong></span>
+            <span class="download-platform"><strong>{{ architectureLabel(asset) }} · {{ kindLabel(asset.kind) }}</strong></span>
             <small>{{ asset.name }}<template v-if="sizeLabel(asset.bytes)"> · {{ sizeLabel(asset.bytes) }}</template></small>
             <div class="download-routes">
               <a
@@ -154,7 +185,9 @@ onMounted(async () => {
                 class="download-route download-route-primary"
                 :href="asset.mirrorUrl"
               >{{ copy.mirror }}<span class="download-route-tag">{{ copy.recommended }}</span></a>
-              <a class="download-route" :href="asset.url" rel="noopener">{{ copy.github }}</a>
+              <a v-if="asset.url" class="download-route" :href="asset.url" rel="noopener">{{ copy.github }}</a>
+              <a v-if="asset.notesUrl" class="download-route" :href="asset.notesUrl">{{ copy.notes }}</a>
+              <a v-if="asset.checksumUrl" class="download-route" :href="asset.checksumUrl">{{ copy.checksum }}</a>
             </div>
           </div>
         </div>
@@ -175,6 +208,7 @@ onMounted(async () => {
         ·
         <a href="https://github.com/sleep2agi/agent-network-app/releases" rel="noopener">{{ copy.all }}</a>
       </p>
+      <p class="download-cli"><a :href="withBase(lang === 'en' ? '/en/guide/install' : '/guide/install')">{{ copy.cli }} →</a></p>
     </template>
   </div>
 </template>

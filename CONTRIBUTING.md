@@ -73,7 +73,7 @@ Direct PRs without prior discussion are welcome but might be redirected if they 
 
 ## How changes get merged (lightweight pipeline)
 
-Substantive changes (`agent-network/` / `server/` / `agent-node/` / `agent-network-dashboard/` / root-level `*.md`) should go through a **Pull Request**:
+Substantive changes (`agent-network/` / `server/` / `agent-node/` / root-level `*.md`) should go through a **Pull Request**. Dashboard code and docs live in [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard) — PRs here cannot change them.
 
 1. Branch off `origin/main` (suggested name: `fix/issue-<N>-<slug>` or `feat/<short-name>`)
 2. Implement + commit + push the branch
@@ -82,9 +82,9 @@ Substantive changes (`agent-network/` / `server/` / `agent-node/` / `agent-netwo
 5. At least 1 maintainer reviews, squash-merges
 6. GitHub auto-deletes the head branch on merge
 
-Docs-only updates (`docs/**`, `docs-site/docs/**`) can be pushed directly to `main` for now — there is an automated docs-loop that maintains them with high frequency; gating them through PR review would block that.
+Docs-only updates (`docs/**`, `docs-site/docs/**`) go through the same PR flow — the "docs-loop" that used to push them straight to `main` no longer exists in this repo (no workflow, no script), and the doc gates catch mistakes either way: `lint (docs integrity)` on any PR touching `*.md`, `docs locale parity` on `docs-site/docs/**`, `doc-symbol-anchors` and `home-path-baseline` on every PR. A docs-only PR is cheap to land; a silent direct push is unreviewed and unguarded.
 
-For the longer-term design (CI checks, branch protection, CODEOWNERS, preview release automation, etc.), see [#15](https://github.com/sleep2agi/agent-network/issues/15) — being rolled out incrementally as the project grows.
+The PR pipeline (CI checks, branch protection, squash-merge) that issue [#15](https://github.com/sleep2agi/agent-network/issues/15) designed is now in force; that issue is closed.
 
 ## PR checklist
 
@@ -98,6 +98,39 @@ Every PR to `main` runs [`bash scripts/qa.sh`](./scripts/qa.sh) (L0 unit + L1 Do
 - **Bypass only if** the failure is unrelated to your change AND you've filed an issue. Document the bypass in the PR description.
 - The matrix + strategy live in [docs/qa/](./docs/qa/) — see [docs/qa/README.md](./docs/qa/README.md) for adding new tests (6-step flow).
 - v0 ship-readiness snapshot: [docs/qa/v0-summary.md](./docs/qa/v0-summary.md). Roadmap (which way the gate is going next): [docs/qa/v1-roadmap.md](./docs/qa/v1-roadmap.md).
+
+### Don't leave a test sitting near its own timeout (`TEST-MARGIN v1`, #1627/#1309)
+
+The timeout that actually applies to a test often appears **nowhere in its source**:
+bun's implicit per-test default, measured on the pinned 1.3.14 (`oven/bun:1.3.14`,
+no `bunfig.toml`, no `--timeout` in `qa.sh`), is **5000ms** — a test that never
+resolves fails with `[5000.01ms]` and `^ this test timed out after 5000ms.`, with
+or without `--coverage`. So grepping for `timeout` finds nothing, and when a slow
+runner pushes a near-limit test over, the failure reads exactly like a real defect
+(`[20832.89ms]`, with `^ this test timed out after …ms.` only on the next line).
+2026-08-31 produced three batches of red this way, one of them on a PR that
+changed two `.md` files. `L1-TIMING v1` records durations at **suite** granularity;
+this failure mode lives at the **single test**.
+
+- `python3 scripts/check-test-margin.py --logs '/tmp/qa-l0-*.log' '/tmp/qa-l1-*-run.log'`
+  prints `TEST-MARGIN v1 tests=… hooks=… threshold=50% near=… slowest=<slug>=<pct>%,…`
+  and lists offenders as `duration / effective timeout / pct / source:line`.
+  **Effective** timeout = the test's own declared `timeout`, else its `describe`'s,
+  else the implicit default above — **measured, not assumed**
+  (`bunfig.toml`'s `[test] timeout` and `TEST_MARGIN_DEFAULT_MS` override it).
+  Measuring everything against one constant instead would report a test that
+  already declares `}, 60_000)` as 90% dangerous (its real margin is 3.3x) *and*
+  hide the 2.5–5s unannotated tests this report exists to surface. A hook that
+  times out is counted against the timeout it actually hit, because the log names
+  the duration but not the hook's declaration.
+  It is **report-only** (exit 0; `--pct`/`TEST_MARGIN_PCT` sets the threshold,
+  `--fail` is opt-in) and `scripts/qa.sh` calls it next to `L1-TIMING`.
+- So: when a test is genuinely slow, **declare** a timeout with headroom over the
+  observed duration (own or `describe`-level) and say why in a comment. Do not
+  rely on the implicit default for anything slow, and do not leave a test within
+  ~2× of whichever timeout actually applies to it.
+- Promoting this to a ratchet gate (fail the job) is a separate decision with its
+  own threshold; it is deliberately not taken here.
 
 ### tmux in tests: always `-L`/`-S` and `env -u TMUX`; never `kill-server` (#505)
 

@@ -1,0 +1,24 @@
+name: Co-presence auth persistence core
+on:
+  pull_request:
+    paths:
+      - 'agent-node/src/runtime/opencode-acp/**'
+      - 'agent-node/src/runtime/opencode-copresence/runtime.ts'
+      - 'agent-node/src/runtime/opencode-v1-spawn-snapshot*'
+      - 'tests/test1120-copresence-auth/**'
+      - '.github/workflows/copresence-auth-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  auth:
+    name: Co-presence auth persistence (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - name: Login, fresh restart, logout, private path and ACP/probe boundaries
+        run: >-
+          sg docker -c 'docker build
+          -f tests/test1120-copresence-auth/Dockerfile -t copresence-auth-core .
+          && docker run --rm --network none copresence-auth-core'

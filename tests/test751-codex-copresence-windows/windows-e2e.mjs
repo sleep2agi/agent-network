@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import pty from "../../agent-network/node_modules/node-pty/lib/index.js";
+import { verifyResumeContinuity, formatVerdict } from "./resume-verdict.mjs";
 
 if (process.platform !== "win32") throw new Error("windows-e2e must run on Windows");
 const repo = resolve(import.meta.dirname, "../..");
@@ -168,6 +169,66 @@ if ((calls.match(/^rpc:thread\/read:thread_windows_e2e$/gm) || []).length !== 3)
 if ((calls.match(/^tui:thread_windows_e2e$/gm) || []).length !== 2) throw new Error(`TUI did not adopt same thread twice:\n${calls}`);
 console.log("PASS interactive create -> native start -> stop -> restart resumes same Codex thread");
 
+// #1462 — the positive above is a set of inline counts. Route the same
+// observations through the shared acceptance criterion so the *criterion* is
+// what passed, not a bespoke assertion, and then prove the criterion has
+// discrimination with negative controls derived from this run's real transcript.
+const finalConfig = JSON.parse(readFileSync(configPath, "utf8"));
+const realContinuity = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: calls,
+  tuiLines: calls,
+});
+if (realContinuity.verdict !== "pass") {
+  throw new Error(`continuity criterion rejected the real positive path: ${JSON.stringify(realContinuity)}`);
+}
+console.log(`PASS test1462 continuity verdict — ${formatVerdict("positive", realContinuity)}`);
+
+// Negative 1 — config still echoes the expected id, but the wire went fresh.
+const freshOnWire = `rpc:thread/start\n${calls}`;
+const freshVerdict = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: freshOnWire,
+  tuiLines: calls,
+});
+if (freshVerdict.verdict !== "fail" || !freshVerdict.reasons.some((r) => r.startsWith("fresh_thread_start"))) {
+  throw new Error(`fresh/fork path was not rejected: ${JSON.stringify(freshVerdict)}`);
+}
+console.log(`PASS test1462-NEG fresh-wire rejected — ${formatVerdict("negative-fresh", freshVerdict)}`);
+
+// Negative 2 — config still echoes the expected id, but resume/read addressed
+// another thread (same shape as the fixture's wire log, different identity).
+const otherThread = calls.split("thread_windows_e2e").join("thread_windows_other");
+const wrongVerdict = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: otherThread,
+  tuiLines: otherThread,
+});
+if (wrongVerdict.verdict !== "fail" || !wrongVerdict.reasons.some((r) => r.startsWith("resume_wrong_thread"))) {
+  throw new Error(`wrong-thread resume was not rejected: ${JSON.stringify(wrongVerdict)}`);
+}
+console.log(`PASS test1462-NEG wrong-thread rejected — ${formatVerdict("negative-wrong-thread", wrongVerdict)}`);
+
+// Negative 3 — resume happened but no history read / no identity evidence:
+// that is `unknown`, never a verified resume.
+const noHistory = calls
+  .split(/\r?\n/)
+  .filter((line) => !line.startsWith("rpc:thread/read") && !line.startsWith("tui:"))
+  .join("\n");
+const unknownVerdict = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: noHistory,
+  tuiLines: "",
+});
+if (unknownVerdict.verdict !== "unknown") {
+  throw new Error(`missing evidence was not kept unknown: ${JSON.stringify(unknownVerdict)}`);
+}
+console.log(`PASS test1462-NEG missing-evidence stays unknown — ${formatVerdict("negative-unknown", unknownVerdict)}`);
+
 const globalConfig = JSON.parse(readFileSync(join(userHome, ".anet", "config.json"), "utf8"));
 const userToken = globalConfig.token;
 const networkId = globalConfig.network_id;
@@ -203,13 +264,49 @@ async function postDashboardTask(priority, suffix) {
 }
 
 env.ANET_TEST751_LONG_TURN = "1";
+// Exercise health reporting during this turn, rather than winning the race
+// against the first monitor snapshot on a fast runner.
+env.ANET_CODEX_HEALTH_INTERVAL_MS = "1000";
+env.ANET_STATUS_HEARTBEAT_MS = "1000";
 let driven = false;
 let drivePromise;
 let turnStartCountBeforeDashboard = -1;
 const longTurnOutput = await terminal(["node", "start", "windows-picker", "--no-inherit-codex-home"], (_child, output) => {
-  if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")) return;
+  if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")
+    || !output.includes("client-health role=tui codex_home=exact remote=exact thread=exact connection=pid-attributed")) return;
   driven = true;
   drivePromise = (async () => {
+    let observedHealth;
+    let observedIdentity;
+    await waitUntil("Hub app-server health after native TUI PID attribution", async () => {
+      const receiptPath = join(project, ".anet", "nodes", "windows-picker", "windows-tui-health.json");
+      const recordPath = join(project, ".anet", "nodes", "windows-picker", "windows-copresence.json");
+      if (!existsSync(receiptPath) || !existsSync(recordPath)) return false;
+      const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+      const record = JSON.parse(readFileSync(recordPath, "utf8"));
+      const currentConfig = JSON.parse(readFileSync(configPath, "utf8"));
+      observedIdentity = { marker: receipt.marker === record.marker, node: receipt.nodeId === currentConfig.node_id, remote: receipt.remote === currentConfig.codexAppServerUrl };
+      // The directory alias is deliberately different from immutable config.node_id.
+      // Wait for this generation's atomic receipt; never accept the stopped one.
+      if (!observedIdentity.marker) return false;
+      if (!observedIdentity.node || !observedIdentity.remote) throw new Error(`native TUI receipt identity mismatch: ${JSON.stringify(observedIdentity)}`);
+      const res = await fetch(`http://127.0.0.1:19351/api/status?network_id=${encodeURIComponent(networkId)}&alias=windows-picker`, {
+        headers: { Authorization: `Bearer ${userToken}` },
+      });
+      if (!res.ok) throw new Error(`Hub status failed ${res.status}`);
+      const payload = await res.json();
+      const row = payload.sessions?.find((s) => s.alias === "windows-picker" && s.network_id === networkId);
+      observedHealth = row?.health;
+      if (!observedHealth) return false;
+      return observedHealth.bridge === "ok" && observedHealth.app_server?.ok === true
+        && observedHealth.tui?.ok === true && observedHealth.tui?.reason === "running"
+        && !["revoked", "expired"].includes(observedHealth.model_auth)
+        && Number.isFinite(row.health_observed_ms_ago) && row.health_observed_ms_ago < 5000;
+    }).catch((error) => {
+      console.error(`native-health evidence at failure: ${JSON.stringify({ observedIdentity, observedHealth })}`);
+      throw error;
+    });
+    console.log(`PASS Hub current health before Dashboard: app_server=ok; native TUI PID attributed; ongoing tui=running; model_auth=${observedHealth.model_auth}`);
     const beforeWire = readFileSync(rpcLog, "utf8");
     turnStartCountBeforeDashboard = (beforeWire.match(/^rpc:turn\/start(?::|$)/gm) || []).length;
     const normalTask = await postDashboardTask("normal", "a");
@@ -264,6 +361,13 @@ const managed = JSON.parse(readFileSync(join(project, ".anet", "nodes", "windows
 if (managed.processes.filter((process) => process.role === "bridge").length !== 1) throw new Error("duplicate Windows bridge");
 command(["node", "stop", "windows-picker"]);
 console.log("PASS Windows real bridge receives normal/high SSE during one human turn and steers the same remote/thread/HOME without duplication");
+// #1337 —— 真实 CLI 停止「失败副作用」隔离见证（**纯测试夹具**）：拆到独立模块以便审阅，
+// 且只有 run.ps1 编译出夹具（ANET_TEST1337_SHIM_DIR 存在）时才加载。
+if (process.env.ANET_TEST1337_SHIM_DIR) {
+  const { runStopEffectsScenarios } = await import("./windows-stop-effects.mjs");
+  await runStopEffectsScenarios({ cli, env, project, root, userHome, join, terminal });
+}
+
 // node-pty's Windows ConPTY helper can retain an internal pipe handle after
 // every child has exited. All assertions and both managed teardowns are done.
 process.exit(0);

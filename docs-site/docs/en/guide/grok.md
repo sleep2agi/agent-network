@@ -135,4 +135,5 @@ The co-presence runtime gives the grok child process a fixed environment allowli
 
 - [Node Runtimes](/en/guide/runtimes)
 - [Codex TUI Co-presence](/en/guide/codex-copresence)
+- [OpenCode V2](/en/guide/opencode)
 - [Full Grok Build runtime notes](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md) (implementation, security boundary and Docker verification)

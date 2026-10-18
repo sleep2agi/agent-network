@@ -5,6 +5,11 @@ RUN npm install -g @opencode/cli@2.0.22
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /workspace
 COPY agent-node/src/runtime/opencode-v2-catalog* agent-node/src/runtime/
+# Doorbell tests import child-workdir, which loads config-apply and the adopt
+# registry. cli.ts is read, not imported. The glob above stays narrow so this
+# image does not pull the rest of the runtime.
+COPY agent-node/src/runtime/opencode-catalog-dispatch.ts agent-node/src/runtime/opencode-catalog-dispatch.test.ts agent-node/src/runtime/child-workdir.ts agent-node/src/runtime/config-apply.ts agent-node/src/runtime/codex-config-flags.ts agent-node/src/runtime/adopt-registry.ts agent-node/src/runtime/
+COPY agent-node/src/cli.ts agent-node/src/cli.ts
 COPY tests/test906-daemon-catalog/ tests/test906-daemon-catalog/
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT

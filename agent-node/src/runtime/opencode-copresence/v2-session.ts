@@ -33,7 +33,7 @@
 
 import { spawn } from "child_process";
 import { randomBytes } from "crypto";
-import { publishLaunchHealth } from "./launcher-health";
+import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-health";
 import { rmSync } from "fs";
 import { join } from "path";
 import {
@@ -67,6 +67,7 @@ import { readLinuxProcessGroupIdentity } from "./process-group";
 import { relaunchPreviousAttach, stopRecordedAttach } from "./attach-tui";
 import { resolve } from "path";
 import { installV2RegistryPlugin, waitForOpenCodeV2Commhub } from "./v2-readiness";
+import { removeOpenCodeV2CatalogEndpoint, writeOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 
 const USERNAME = "opencode";
 const HISTORY_PAGE_LIMIT = 200;
@@ -224,24 +225,24 @@ export function wireOpenCodeV2CommhubMcp(
 }
 
 async function waitForV2Health(
-  child: ReturnType<typeof spawn>,
+  child: ReturnType<typeof spawn> | undefined,
   url: string,
   password: string,
   timeoutMs: number,
-): Promise<string> {
+): Promise<{ version: string; pid: number }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) {
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
       throw new Error("OpenCode v2 serve exited before readiness");
     }
     try {
       const info = await fetchOpenCodeJson(url, password, "/api/info", {}, 500);
-      if (typeof info?.version === "string") {
+      if (typeof info?.version === "string" && Number.isSafeInteger(info?.pid) && info.pid > 1) {
         const unauthenticated = await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(500) });
         if (unauthenticated.status !== 401) {
           throw new Error(`OpenCode v2 serve authentication gate returned HTTP ${unauthenticated.status}`);
         }
-        return info.version;
+        return { version: info.version, pid: info.pid };
       }
     } catch (error: any) {
       if (/authentication gate/.test(error?.message ?? "")) throw error;
@@ -289,57 +290,128 @@ export async function openVettedOpenCodeV2Copresence(
   const model = parseModelRef(requiredModel)!;
   const log = opts.log ?? (() => {});
   const warn = opts.warn ?? (() => {});
-  const port = await reserveLoopbackPort();
-  const url = `http://127.0.0.1:${port}`;
-  const password = randomBytes(32).toString("base64url");
+  const shared = opts.sharedServer;
+  if (shared && (!/^http:\/\/127\.0\.0\.1:\d+$/.test(shared.url) || !shared.password)) {
+    throw new Error("OpenCode v2 shared server requires a loopback URL and password");
+  }
+  const port = shared ? undefined : await reserveLoopbackPort();
+  const url = shared?.url ?? `http://127.0.0.1:${port}`;
+  const password = shared?.password ?? randomBytes(32).toString("base64url");
   const childEnv: NodeJS.ProcessEnv = {
     ...opts.env,
     OPENCODE_SERVER_USERNAME: USERNAME,
     OPENCODE_SERVER_PASSWORD: password,
   };
-  const child = spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port }), {
+  const child = shared ? undefined : spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port: port! }), {
     cwd: opts.cwd,
     env: childEnv,
     stdio: ["pipe", "pipe", "pipe"],
     detached: process.platform === "linux",
   });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
   let startupOutput = "";
-  child.stdout.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
-  child.stderr.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
-  if (!child.pid) throw new Error("OpenCode v2 serve spawn returned no pid");
-  const identity = readLinuxProcessGroupIdentity(child.pid);
-  if (process.platform === "linux" && (!identity || identity.pgrp !== child.pid)) {
+  child?.stdout.setEncoding("utf8");
+  child?.stderr.setEncoding("utf8");
+  child?.stdout.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
+  child?.stderr.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
+  if (child && !child.pid) throw new Error("OpenCode v2 serve spawn returned no pid");
+  const identity = child?.pid ? readLinuxProcessGroupIdentity(child.pid) : undefined;
+  if (child && process.platform === "linux" && (!identity || identity.pgrp !== child.pid)) {
     try { child.kill("SIGKILL"); } catch {}
     throw new Error("OpenCode v2 serve failed the detached process-group identity handshake");
   }
 
   let closed = false;
+  let sharedDisconnected = false;
   let queue = Promise.resolve();
   let notifyWarned = false;
   const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
+  let attachScriptWritten = false;
+  let catalogEndpointWritten = false;
   let clearLaunchHealth = () => {};
+  const clearCatalogEndpoint = () => {
+    try { removeOpenCodeV2CatalogEndpoint(opts.workDir); } catch { /* already gone */ }
+  };
   try {
-    const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
-    if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
-      await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000,
-        () => child.exitCode === null && child.signalCode === null);
+    const { version, pid: serverPid } = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
+    if (!backend.isSupportedVersion(version) || (opts.expectedVersion && version !== opts.expectedVersion)) {
+      throw new Error(`OpenCode v2 server version ${version} does not match the accepted version`);
     }
-    const created = await fetchOpenCodeJson(url, password, "/api/session", {
-      method: "POST",
-      body: JSON.stringify({
-        title: opts.title ?? "Agent Network shared TUI",
-        model: { providerID: model.providerID, id: model.modelID },
-      }),
-    });
+    if (shared && opts.sharedMcpUrl) {
+      const sources = await fetchOpenCodeJson(url, password, "/api/config", {
+        headers: { "x-opencode-directory": resolve(opts.cwd) },
+      });
+      const project = Array.isArray(sources) ? sources.find((source) =>
+        source?.type === "document" && source.path === join(resolve(opts.cwd), "opencode.json")) : undefined;
+      if (project?.info?.mcp?.servers?.commhub?.url !== opts.sharedMcpUrl) {
+        throw new Error("OpenCode v2 shared server did not load this workspace's CommHub MCP");
+      }
+    }
+    if (shared && opts.sharedMcpUrl) {
+      await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000, () => true, resolve(opts.cwd));
+    } else if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
+      await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000,
+        () => !child || (child.exitCode === null && child.signalCode === null));
+    }
+    let created: any;
+    if (shared && opts.resumeSessionId) {
+      if (!/^ses_[A-Za-z0-9]+$/.test(opts.resumeSessionId)) throw new Error("Invalid OpenCode v2 session id to resume");
+      try {
+        created = await fetchOpenCodeJson(url, password, `/api/session/${opts.resumeSessionId}`);
+      } catch (error: any) {
+        if (/returned HTTP 404$/.test(error?.message ?? "")) {
+          throw new Error("OpenCode v2 session to resume was not found on the shared server; refusing to create a new session", { cause: error });
+        }
+        throw error;
+      }
+    }
+    if (!created) {
+      created = await fetchOpenCodeJson(url, password, "/api/session", {
+        method: "POST",
+        body: JSON.stringify({
+          title: opts.title ?? "Agent Network shared TUI",
+          location: { directory: resolve(opts.cwd) },
+          model: { providerID: model.providerID, id: model.modelID },
+        }),
+      });
+    }
     const sessionId = created?.data?.id;
     if (typeof sessionId !== "string" || !/^ses_[A-Za-z0-9]+$/.test(sessionId)) {
       throw new Error("OpenCode v2 POST /api/session returned an invalid session id");
     }
-    clearLaunchHealth = publishLaunchHealth(opts.workDir, sessionId, child.pid);
-    writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir);
-    log(`[opencode-copresence] v2 preview ready version=${version} session=${sessionId.slice(0, 12)} attach=${attachScriptPath}`);
+    if (created?.data?.location?.directory !== resolve(opts.cwd)) {
+      throw new Error("OpenCode v2 session directory does not match the node workspace");
+    }
+    const resumedModelDiffers = shared && opts.resumeSessionId &&
+      (created?.data?.model?.providerID !== model.providerID || created?.data?.model?.id !== model.modelID);
+    if (resumedModelDiffers && opts.reconcileResumedModel) {
+      await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/model`, {
+        method: "POST",
+        body: JSON.stringify({ model: { providerID: model.providerID, id: model.modelID } }),
+      });
+      const updated = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`);
+      if (updated?.data?.model?.providerID !== model.providerID || updated?.data?.model?.id !== model.modelID) {
+        throw new Error("OpenCode v2 resumed session model did not match the node configuration");
+      }
+    } else if (resumedModelDiffers) {
+      warn("[opencode-copresence] keeping the resumed session's selected model; node config model differs");
+    }
+    clearLaunchHealth = shared
+      ? publishSharedLaunchHealth(opts.workDir, sessionId, serverPid)
+      : publishLaunchHealth(opts.workDir, sessionId, child!.pid!);
+    writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir,
+      opts.sharedServer?.passwordFile);
+    attachScriptWritten = true;
+    try {
+      writeOpenCodeV2CatalogEndpoint(opts.workDir, {
+        url,
+        authorization: `Basic ${Buffer.from(`${USERNAME}:${password}`).toString("base64")}`,
+        directory: resolve(opts.cwd),
+      });
+      catalogEndpointWritten = true;
+    } catch {
+      warn("[opencode-copresence] v2 catalog endpoint was not recorded");
+    }
+    log(`[opencode-copresence] v2 ${shared ? "shared" : "private"} ready version=${version} session=${sessionId.slice(0, 12)} attach=${attachScriptPath}`);
     relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
 
     const session: OpenCodeCopresenceSession = {
@@ -347,7 +419,7 @@ export async function openVettedOpenCodeV2Copresence(
       sessionId,
       attachScriptPath,
       get isRunning() {
-        return !closed && child.exitCode === null && child.signalCode === null;
+        return !closed && !sharedDisconnected && (!child || (child.exitCode === null && child.signalCode === null));
       },
       async notify(message: string, _timeoutMs?: number, sender?: string) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
@@ -473,29 +545,38 @@ export async function openVettedOpenCodeV2Copresence(
           throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
           }
         });
-        queue = operation.then(() => undefined, () => undefined);
-        return operation;
+        const observed = operation.catch((error: any) => {
+          if (shared && /ECONNREFUSED|ECONNRESET|UND_ERR_SOCKET|EPIPE/.test(error?.message ?? "")) {
+            sharedDisconnected = true;
+          }
+          throw error;
+        });
+        queue = observed.then(() => undefined, () => undefined);
+        return observed;
       },
       async close(mode?: { restart?: boolean }) {
         if (closed) return;
         closed = true;
         clearLaunchHealth();
+        clearCatalogEndpoint();
         stopRecordedAttach(opts.workDir, { restart: mode?.restart === true, log, warn, tmux: opts.tmuxRunner });
         rmSync(attachScriptPath, { force: true });
         if (identity) await stopProcessGroup(child as any, identity);
-        else try { child.kill("SIGKILL"); } catch {}
+        else if (child) try { child.kill("SIGKILL"); } catch {}
       },
     };
-    child.once("exit", (code, signal) => {
+    child?.once("exit", (code, signal) => {
       clearLaunchHealth();
+      clearCatalogEndpoint();
       if (!closed) warn(`[opencode-copresence] v2 serve exited code=${code} signal=${signal}; next task must reopen`);
     });
     return session;
   } catch (error) {
     clearLaunchHealth();
-    rmSync(attachScriptPath, { force: true });
+    if (catalogEndpointWritten) clearCatalogEndpoint();
+    if (attachScriptWritten) rmSync(attachScriptPath, { force: true });
     if (identity) await stopProcessGroup(child as any, identity).catch(() => {});
-    else try { child.kill("SIGKILL"); } catch {}
+    else if (child) try { child.kill("SIGKILL"); } catch {}
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
       startupOutput: startupOutput.slice(-1_000),
     });

@@ -1,0 +1,34 @@
+name: Scheduled successful work outcome
+on:
+  pull_request:
+    paths:
+      - 'server/src/scheduled-*.ts'
+      - 'server/src/db.ts'
+      - 'server/src/tools.ts'
+      - 'server/src/auth.ts'
+      - 'server/src/server.ts'
+      - 'server/package*.json'
+      - 'tests/test1274-scheduled-work-outcome/**'
+      - 'tests/test601-hub-scheduled-tasks/**'
+      - '.github/workflows/scheduled-work-outcome.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  work-outcome:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build independent pinned fixture
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1274-scheduled-work-outcome/Dockerfile -t scheduled-work-outcome-test .
+      - name: Real SQLite HTTP MCP and lifecycle regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --init --network none -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} scheduled-work-outcome-test 2>&1 | tee report-test1274.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-scheduled-work-outcome-${{ github.sha }}
+          path: report-test1274.txt

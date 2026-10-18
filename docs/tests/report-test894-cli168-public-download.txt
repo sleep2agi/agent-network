@@ -1,0 +1,63 @@
+#894 CLI168/runtime134 — public paired download receipt
+OBSERVED_AT=2026-10-12 06:55+08
+
+Official inputs and pipeline
+- Package source main103d02b7697bca2a62ed67bfc39c56a27d03096e, unchanged.
+- CLI original release.yml38181087362 build plus all four gates SUCCESS,
+  including Docker real-TTY install. npm publish accepted06:38:05+08.
+- Its registry verification failed06:53:13+08 after37 polls/908s: preview167,
+  CLI168 shasum still absent. This is not npm rejection, a lost credential or
+  install-smoke failure. Do not republish the same immutable npm version.
+  Expected eventual npm SHA1d3cec57013b30d5d5e15610e7032b088e8e2bf6f.
+- Download-workflow PR2633 head12ac65e1b9ddbcfd043fecdd79f1955e61932df1
+  normal merged06:52:53+08 to4f55d9d7182cf39e2b16244c72c3210b95149f9e.
+  Required10/10 and Docker contract passed;25 SUCCESS/1 SKIPPED/1 IN_PROGRESS
+  at merge, later26 SUCCESS/1 SKIPPED terminal. No all-green-at-merge claim.
+- CI download run38182158430 used workflow main4f55, original package main103d
+  and original gated artifact11717566117. Both contract and publisher SUCCESS.
+  Source main ancestry checked before reading artifact and before public upload.
+  This reused the exact original main-built bytes, not feature-branch packaging.
+
+Public download and byte verification
+- https://github.com/sleep2agi/agent-network/releases/tag/cli-v2.3.0-preview.168
+  Public prerelease, not draft, published2026-10-11T22:53:55Z (06:53:55+08).
+- Actual git tag object type=commit, SHA103d02b7697bca2a62ed67bfc39c56a27d03096e;
+  both tag object and targetCommitish independently read, not just title trusted.
+- Asset sleep2agi-agent-network-2.3.0-preview.168.tgz,2121077 bytes.
+  Full anonymous download06:54:31+08 and original gated inner tarball have same
+  SHA256049e69273d45e68a69fc3fe813a9a0440ae50965f0cc0bd94deac25d4abc87b4.
+- Exact URL:
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.168/sleep2agi-agent-network-2.3.0-preview.168.tgz
+- Paired runtime2.5.0-preview.134 was formally published by38180247434 SUCCESS.
+  Full public npm download and original gated inner tarball both589890 bytes,
+  SHA25651c15d785ee120db631ba1ea853c0b230e37cfdd6dfcb5f25bf2a527fdae1701.
+- Both packages now publicly downloadable using these two respective sources.
+  CLI npm168 visibility remains independent/unverified; no npm dist-tag changed
+  by the download workflow. GitHub package download is not a native client build.
+
+Core checks and scope
+- Docker actual validator positive and wrong-inner-SHA exit1 negative, four
+  Docker contract unittest methods and original install smoke reused; no duplicate
+  passing Provider/OAuth/native/model inference suite rerun.
+- Actual runtime model selection safe-session/isolated TLS fixture evidence stays
+  at original main implementation. No live OAuth/model entitlement claim.
+- App0.2.247 macOS/Windows/Android public release independent; Linux/nativeV1
+  registration failure in AppPR795 still a distinct pending layer, not passed here.
+- Original #894 stays doing1/3, not whole lifecycle complete. No duplicate Hub card.
+- Daemon-vdev at06:54 still runtime133, idle/inflight0/queue0 with fresh heartbeat.
+  TMHR task b72353aa-80a6-4591-84c1-9892edbbc85d dispatched queue_ahead0,
+  target_busy=false: only requested Daemon private168/134 pair switch, retain old
+  pair/0600 config, inspect identity/idle first. Dispatch is not execution or PASS.
+  No business node, account/session, Hub or daemon-dev modified in this iteration.
+
+Recovery and cleanup
+- Workflow, independent Dockerfile/guard and SOP all in Git. Release authority:
+  docs/RELEASE-SOP.md and .github/workflows/cli-gated-download.yml.
+- Startup/private-prefix upgrade/actual-version verification/rollback remains
+  docs-site/docs/deploy/daemon.md. Keep previous pair/config for rollback. No new
+  port, proxy/tunnel, service topology, schema, secret source or data-backup change.
+- GitHub Actions token is the existing repository-scoped ephemeral token; no
+  account credential read/copied here. Software source/downloads do not include
+  production databases, accounts or conversations; protected backups remain needed.
+- Docker containers/tmpfs probes --rm; owned CI/download metadata and original/public
+  tarballs retained for evidence. No host/global npm install or production test.

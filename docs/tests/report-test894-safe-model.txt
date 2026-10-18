@@ -1,0 +1,77 @@
+#894 / #829 — safe V1 ACP model transport, isolated TLS fixture only
+Finished: 2026-10-10 05:49:33 CST (2026-10-09T21:49:33Z), suite exit0.
+Runtime source: 6d1e2b4e55697cf2f4518fdc0c04f19b253e3ef5, unchanged.
+Changes are test fixture, workflow and documentation only, not product code.
+No production, real model/vendor request, real credentials, merge or release.
+
+Test image anet-v1-acp:model-894:
+sha256:a4da34588c129578154fe179c5888fe8578fb9b45a4806f39830f3c81a2625d2
+Offline dependency image anet894-v1:portable-home:
+sha256:1ac56124b582ee9d74a4760ec71f1819efe43b60436bd0bb6776a89901f33719
+Lockfile cmp passed; current runtime source copied; no fresh dependency fetch.
+probe-model.ts SHA256:
+b480023c7606e2ffe1be9e587a0271269d653998d0476a3464140c2fee1ae999
+provider-proxy.py SHA256:
+d6663b4d77b860cf442621be47946017e778d05d357e3daeef50461268c4d4d8
+run-model.sh SHA256:
+640cbc3188c8d89fef749ca699702ffcded4d77731c95b99f397e76c4ce552e6
+Collected log SHA256:
+213b6a349a6dda0caee88220d3724935511f20b393bdee634c785fe1004e3873
+Local evidence copy (not a recovery dependency):
+/tmp/anet894-safe-model.VNcJAj/report-test894-safe-model.txt
+
+Run: Docker --network none, non-root bun, no host source/home/key/socket mounts.
+Command: bash /fixture-acp/run-model.sh; EXPECTED_SOURCE_COMMIT matched image.
+TEST_DEBUG_RUNTIME was NOT enabled in the acceptance run.
+
+Layered results, positive then separate real-process wrong-model observer:
+PASS: ephemeral named TLS certificate verified; unauthenticated fixture POST401
+      required before ACP starts. Host trust stores were not changed.
+PASS: real pinned OpenCode1.18.34 production openOpencodeRuntime initialization;
+      safe-default OPENCODE_PURE=1 and permission wildcard deny in live child.
+PASS: synthetic node-local auth credential reached the built-in OpenAI provider
+      request; fixture validated Authorization without recording the key.
+PASS: exact api.openai.com Host, /v1/responses route and gpt-4.1 model, with a
+      deliberately tiny offline model catalog. Neither catalog nor model service
+      is live; CONNECT fixture never forwards and container has no external net.
+PASS: production opencodeThink consumed FIXTURE_ONLY_V1_ACP_RESPONSE. This marker
+      was absent from the user prompt and supplied only in fixture response.
+PASS: a new real-process run reaches a successful response then fails precisely
+      "AssertionError: safe ACP provider model mismatch" for a wrong expected
+      model. The driver requires this exact assertion and prior successful reply.
+PASS: ACP/fixture processes stopped; runtime launch roots, ephemeral certificate,
+      key and node credential removed. Exited container removed after log copy.
+
+Diagnostics before acceptance:
+- Initial fixture did not cover fresh model-catalog retrieval; debug log showed
+  models.opencode.ai/api.json403. Added an explicitly synthetic offline catalog.
+- session/new still returned service=directory internal failure. The fixture had
+  set NO_PROXY empty, routing ACP's own localhost HTTP through the TLS-only proxy.
+  Restoring loopback NO_PROXY made initialization and transport pass. This is a
+  fixture correction, NOT a production ACP fix or a permission-guard relaxation.
+- One intermediate route-positive run preceded the final explicit Host check;
+  final positive/negative evidence above comes from the hardened Host assertion.
+- Diagnostic runs never advanced to model-response/negative acceptance when the
+  session prerequisite failed. Earlier session-only samples were not rerun.
+
+CI integration: model step follows existing session gate with normal success
+dependency, and uploads TEST-ONLY model log. Docker YAML validation confirms the
+ordering/no failure bypass; trigger-coverage and suite-registration guards pass.
+Existing notes remain; no baselines/assertions were weakened.
+Rebuild and run instructions are in tests/test894-v1-acp-session/README.md;
+the dependency image is rebuildable via the existing pinned V1 Dockerfile.
+No services, ports, secrets sources, persistent data or upgrade/rollback behavior
+changed in production. Test certificates/credentials are generated inside Docker.
+
+CI checkpoint for prior exact6d1e2b4e at ~05:49 CST: 30SUCCESS/138FAILURE terminal.
+qa-trigger-coverage job114038335324/run37994904216 SUCCESS: prior path fix verified.
+safe-v1-acp job114038334535/run37994904220 failed before tests on fixed Bun digest
+pull HTTP429. Only this current failed job was newly classified this iteration;
+do not transplant old380a2bf7's 139-job error distribution onto this new head.
+
+Not covered: actual vendor authentication, model reasoning/availability, actual
+tool enforcement, Hub task delivery, native installed client or formal release.
+#894 remains1/3, #829 remains2/3; #539 remains in progress.
+Next checkpoint: 2026-10-10 06:10 CST for CI and native integration evidence.
+New native candidate ETA remains conditional on dependency-image fetch recovery;
+25–40 minutes after recovery is an estimate, not a formal release commitment.

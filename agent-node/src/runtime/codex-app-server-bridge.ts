@@ -25,7 +25,8 @@ import { EventEmitter } from "events";
 import { CodexAppServerClient } from "./codex-app-server-client";
 import { DEFAULT_RESUME_ATTEMPTS, DEFAULT_RESUME_TIMEOUT_MS } from "./codex-app-server/resume-timeout";
 import { isCodexSideEffectItem } from "./capacity-retry";
-import type { PersistedTurnResult } from "./codex-app-server/receipt-ledger";
+import type { PersistedTurnResult, OwnedFollowUpReceiptEntry } from "./codex-app-server/receipt-ledger";
+import { OwnedFollowUpController, provesFollowUpInput, type OwnedFollowUpAdapter } from "./codex-app-server/owned-followup-controller";
 
 /** Newest turns read when recovering or reconciling a turn from history. */
 const RECENT_TURNS_PAGE_SIZE = 10;
@@ -35,6 +36,7 @@ const RECENT_TURNS_PAGE_SIZE = 10;
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface CodexAppServerBridgeOptions {
+  ownedFollowUpAdapter?: OwnedFollowUpAdapter;
   client: CodexAppServerClient;
   /**
    * Persistent thread ID this bridge binds to (from node config). Leave
@@ -94,6 +96,7 @@ export type BridgeStatus =
   | "offline";
 
 export interface PendingTurn {
+  followUpAnswer?: boolean;
   taskId: string;
   clientUserMessageId: string;
   submittedAt: number;
@@ -121,6 +124,16 @@ interface SteeredTurn {
   finalText?: string;
   terminal?: { status?: string; error?: string };
   sideEffectObserved?: boolean;
+}
+
+interface QueuedCodexTask {
+  followUpAnswer?: boolean;
+  taskId: string;
+  text: string;
+  from?: string;
+  steerIfExternalTurn?: boolean;
+  /** Explicit Hub-authenticated Dashboard audience, never inferred from alias or steer permission. */
+  interactiveDashboardTask?: boolean;
 }
 
 export interface WaitingApproval {
@@ -206,6 +219,7 @@ export class CodexAppServerBridge extends EventEmitter {
   private readonly onDeferredCandidate?: (threadId: string) => void | Promise<void>;
   private readonly isDeferredThreadMaterialized?: (threadId: string) => boolean | Promise<boolean>;
   private readonly shouldStartQueued?: CodexAppServerBridgeOptions["shouldStartQueued"];
+  private readonly ownedFollowUps?: OwnedFollowUpController;
   /**
    * A turn started by the human TUI. Dashboard chat is allowed to steer this
    * turn so a message sent while the human is actively using the TUI does not
@@ -233,12 +247,14 @@ export class CodexAppServerBridge extends EventEmitter {
   /** Reverse-request ids we've observed but not resolved (bridge policy). */
   private waitingApprovals = new Map<number, WaitingApproval>();
   /**
-   * FIFO of tasks waiting for the thread to go idle (通信龙 review finding #2;
+   * Waiting tasks: authenticated Dashboard first, stable FIFO within each lane.
+   * The original single-lane queue (通信龙 review finding #2;
    * RFC §6.3 — Phase 0 gate requires the second concurrent task to queue
    * stably rather than error). Drained on turn completion/error.
    */
-  private taskQueue: Array<{ taskId: string; text: string; from?: string }> = [];
+  private taskQueue: QueuedCodexTask[] = [];
   private draining = false;
+  private followUpSettlement = false;
   /** Coalesce watchdog reads so concurrent callers never stampede app-server. */
   private reconciliationInFlight: Promise<ActiveTurnReconciliation> | null = null;
   private readonly fullHistoryReconciliationIntervalMs: number;
@@ -265,7 +281,85 @@ export class CodexAppServerBridge extends EventEmitter {
     this.onDeferredCandidate = opts.onDeferredCandidate;
     this.isDeferredThreadMaterialized = opts.isDeferredThreadMaterialized;
     this.shouldStartQueued = opts.shouldStartQueued;
+    if (opts.ownedFollowUpAdapter) this.ownedFollowUps = new OwnedFollowUpController(opts.ownedFollowUpAdapter, {
+      threadId: () => this.threadId,
+      steer: async (entry, text) => {
+        const steerInput = { threadId: entry.threadId, expectedTurnId: entry.ownerTurnId, input: [{ type: "text", text }] };
+        const request = this.client.request("turn/steer", steerInput);
+        this.emit("task_runtime_submitted", { taskId: entry.taskId, turnId: entry.ownerTurnId, steered: true, ownedFollowUp: true });
+        if (extractTurnId(await request) !== entry.ownerTurnId) throw new Error("owned steer did not confirm the expected turn");
+      },
+      acceptance: entry => this.findFollowUpAcceptance(entry),
+      findAnswer: entry => this.findFollowUpAnswer(entry),
+      inspect: (thread, turn, clientId) => this.inspectPersistedTurn(thread, turn, clientId),
+      enqueueAnswer: (entry, text) => { this.enqueueWaitingTask({ taskId: entry.taskId, text, from: entry.replyTo, interactiveDashboardTask: true, followUpAnswer: true }); void this.drainQueue(); },
+      adoptAnswer: entry => this.adoptFollowUpAnswer(entry),
+      emit: (name, event) => { if (name === "task_skipped" && typeof event.taskId === "string") this.cancelQueuedTask(event.taskId); this.emit(name, event); },
+    });
     this.attachClientListeners();
+  }
+
+  /** No action text is accepted here: resume only durable input/reply identities. */
+  async resumeOwnedFollowUp(entry: OwnedFollowUpReceiptEntry): Promise<void> {
+    if (!this.ownedFollowUps) throw new Error("owned follow-up adapter unavailable; preserve receipt");
+    await this.ownedFollowUps.resume(entry);
+  }
+  detachOwnedFollowUp(taskId: string): void { this.ownedFollowUps?.forget(taskId); }
+  hasOwnedFollowUp(taskId: string): boolean { return this.ownedFollowUps?.has(taskId) === true; }
+  async reconcileOwnedFollowUps(): Promise<void> {
+    if (!this.ownedFollowUps) return;
+    await this.ownedFollowUps.reconcile();
+    if (this.turnClaimed && !this.activeTurnId && [...this.pendingByClientUserMessageId.values()].some(p => p.followUpAnswer && !p.identityConfirmed)) {
+      const result = await this.client.request<{ thread?: { status?: unknown } }>("thread/read", { threadId: this.threadId, includeTurns: false });
+      if (extractThreadStatus(result.thread?.status) === "idle") {
+        for (const [id, pending] of this.pendingByClientUserMessageId) if (pending.followUpAnswer && !pending.identityConfirmed) this.pendingByClientUserMessageId.delete(id);
+        this.turnClaimed = false;
+      }
+    }
+    void this.drainQueue();
+  }
+
+  private async followUpHistory(threadId: string): Promise<Array<{ id?: string; items?: any[] }>> {
+    const turns: Array<{ id?: string; items?: any[] }> = [];
+    if (!this.historyPagingUnsupported.has("thread/turns/list")) {
+      try {
+        let cursor: string | undefined;
+        for (let pageNo = 0; pageNo < 100; pageNo++) {
+          const page = await this.client.request<{ data?: Array<{ id?: string; items?: any[] }>; nextCursor?: string | null }>("thread/turns/list", { threadId, limit: 100, sortDirection: "desc", itemsView: "full", ...(cursor ? { cursor } : {}) });
+          turns.push(...(page.data ?? []));
+          if (!page.nextCursor) return turns;
+          cursor = page.nextCursor;
+        }
+        throw new Error("follow-up history exceeded bounded pagination");
+      } catch (error) {
+        if (!isUnsupportedHistoryPaging(error, "thread/turns/list")) throw error;
+        this.historyPagingUnsupported.add("thread/turns/list");
+      }
+    }
+    const result = await this.client.request<{ thread?: { turns?: Array<{ id?: string; items?: any[] }> } }>("thread/read", { threadId, includeTurns: true });
+    return result.thread?.turns ?? [];
+  }
+  private async findFollowUpAcceptance(entry: OwnedFollowUpReceiptEntry): Promise<boolean> {
+    const turn = (await this.followUpHistory(entry.threadId)).find(turn => turn.id === entry.ownerTurnId);
+    return turn?.items?.some(item => provesFollowUpInput(entry, item)) === true;
+  }
+  private async findFollowUpAnswer(entry: OwnedFollowUpReceiptEntry): Promise<string | null> {
+    const matches = (await this.followUpHistory(entry.threadId)).filter(turn => turn.id !== entry.ownerTurnId && turn.items?.some(item => item.type === "userMessage" && item.clientId === `anet:${entry.taskId}`));
+    return matches.length === 1 && typeof matches[0].id === "string" ? matches[0].id : null;
+  }
+  private adoptFollowUpAnswer(entry: OwnedFollowUpReceiptEntry): void {
+    const existing = this.pendingByClientUserMessageId.get(`anet:${entry.taskId}`);
+    if (existing) {
+      if (existing.followUpAnswer && !existing.identityConfirmed && !this.activeTurnId) { this.bindPendingToTurn(existing, entry.turnId, true); this.announcePendingStart(existing); }
+      return;
+    }
+    if (this.turnClaimed || (this.activeTurnId && this.activeTurnId !== entry.turnId) || (this.externalActiveTurnId && this.externalActiveTurnId !== entry.turnId)) return;
+    const pending: PendingTurn = { taskId: entry.taskId, clientUserMessageId: `anet:${entry.taskId}`, submittedAt: Date.now(), turnId: entry.turnId, identityConfirmed: true, startAnnounced: true, followUpAnswer: true, agentTextChunks: [] };
+    this.pendingByClientUserMessageId.set(pending.clientUserMessageId, pending);
+    this.pendingTurns.set(entry.turnId, pending);
+    this.activeTurnId = entry.turnId; this.turnClaimed = true;
+    this.externalActiveTurnId = null; this.externalActiveTurnSteerable = false;
+    this.setStatus("working");
   }
 
   /** The thread this bridge is bound to (final id after bootstrap adoption). */
@@ -279,13 +373,13 @@ export class CodexAppServerBridge extends EventEmitter {
    * never start/re-run the model turn. Page until the id is found so a busy
    * thread cannot push an unfinished receipt outside the newest-ten window.
    */
-  async inspectPersistedTurn(threadId: string, turnId: string): Promise<PersistedTurnResult> {
+  async inspectPersistedTurn(threadId: string, turnId: string, expectedClientUserMessageId?: string): Promise<PersistedTurnResult> {
     type StoredTurn = {
       id?: string;
       status?: string;
       error?: { message?: string } | null;
       completedAt?: number | null;
-      items?: Array<{ type?: string; text?: string; phase?: string }>;
+      items?: Array<{ type?: string; text?: string; phase?: string; clientId?: string }>;
     };
     let turns: StoredTurn[] = [];
     if (!this.historyPagingUnsupported.has("thread/turns/list")) {
@@ -304,7 +398,7 @@ export class CodexAppServerBridge extends EventEmitter {
           );
           turns.push(...(page?.data ?? []));
           const found = turns.find((candidate) => candidate.id === turnId);
-          if (found) return classifyPersistedTurn(found);
+          if (found) return classifyPersistedTurn(found, expectedClientUserMessageId);
           if (!page?.nextCursor) return { state: "missing" };
           cursor = page.nextCursor;
         }
@@ -322,7 +416,7 @@ export class CodexAppServerBridge extends EventEmitter {
     );
     turns = result?.thread?.turns ?? [];
     const found = turns.find((candidate) => candidate.id === turnId);
-    return found ? classifyPersistedTurn(found) : { state: "missing" };
+    return found ? classifyPersistedTurn(found, expectedClientUserMessageId) : { state: "missing" };
   }
 
   /**
@@ -497,6 +591,7 @@ export class CodexAppServerBridge extends EventEmitter {
     taskId: string;
     text: string;
     from?: string;
+    followUpAnswer?: boolean;
   }): Promise<string> {
     if (!this.threadId) throw new CodexBridgeNotReadyError();
     // Bridge discipline: one active turn at a time. The claim is taken
@@ -508,6 +603,12 @@ export class CodexAppServerBridge extends EventEmitter {
         `${this.label}: refusing to start turn for task=${input.taskId} while turn=${this.activeTurnId ?? "(starting)"} active`,
       );
     }
+    if (input.followUpAnswer) {
+      if (!this.ownedFollowUps) throw new Error("follow-up answer controller unavailable");
+      this.turnClaimed = true;
+      try { await this.ownedFollowUps.beforeAnswer(input.taskId); this.ownedFollowUps.beginAnswer(input.taskId); }
+      catch (error) { this.turnClaimed = false; throw error; }
+    }
     this.turnClaimed = true;
     const clientUserMessageId = `anet:${input.taskId}`;
     const fromLabel = displaySender(input.from);
@@ -517,6 +618,7 @@ export class CodexAppServerBridge extends EventEmitter {
       clientUserMessageId,
       submittedAt: Date.now(),
       agentTextChunks: [],
+      followUpAnswer: input.followUpAnswer === true,
     };
     // Install the stable identity before the RPC. Notifications can race the
     // turn/start response, and Codex may replace the response turn id when an
@@ -546,6 +648,7 @@ export class CodexAppServerBridge extends EventEmitter {
         this.announcePendingStart(pending);
         return pending.turnId;
       }
+      if (input.followUpAnswer) throw e; // keep unknown submission identity/claim; history reconciliation only
       this.pendingByClientUserMessageId.delete(clientUserMessageId);
       this.turnClaimed = false;
       this.setStatus("idle");
@@ -587,6 +690,7 @@ export class CodexAppServerBridge extends EventEmitter {
     pending.turnId = turnId;
     if (this.sideEffectTurnIds.has(turnId)) pending.sideEffectObserved = true;
     if (identityConfirmed) pending.identityConfirmed = true;
+    if (identityConfirmed && pending.followUpAnswer) this.ownedFollowUps?.bindAnswer(pending.taskId, turnId);
     this.pendingTurns.set(turnId, pending);
     if (pending.identityConfirmed && pending.sideEffectObserved) {
       this.emit("task_side_effect", { taskId: pending.taskId, turnId });
@@ -624,25 +728,31 @@ export class CodexAppServerBridge extends EventEmitter {
   /**
    * Queueing entry point (Phase 0 gate: "两个 Agent 同时派 task，只创建一个
    * active turn，另一个稳定排队"). If the thread is free the task starts
-   * immediately; otherwise it joins a FIFO drained on turn completion/error.
+   * immediately; otherwise it joins stable human-first waiting lanes drained
+   * on turn completion/error. Already claimed work retains its ownership.
    *
    * Human-priority note (§6.1): the bridge only ever starts a turn when the
    * shared thread is idle from ITS point of view; if the human TUI wins the
    * idle race, `turn/start` fails with an active-turn error and the task is
-   * requeued at the FRONT (original order preserved) — the app-server is the
+   * requeued at the front of its CLASS (original same-class order preserved) — the app-server is the
    * authority (§6.3).
    */
-  async submitTask(input: {
-    taskId: string;
-    text: string;
-    from?: string;
-    steerIfExternalTurn?: boolean;
-  }): Promise<
+  async submitTask(input: QueuedCodexTask): Promise<
     { started: true; turnId: string; steered?: boolean } | { started: false; queuedAt: number }
   > {
     if (!this.threadId) { throw new CodexBridgeNotReadyError(); }
-    if (this.turnClaimed || this.activeTurnId) {
-      this.taskQueue.push(input);
+    if (input.interactiveDashboardTask === true && this.ownedFollowUps && !this.draining) {
+      const owner = this.activeTurnId ? this.pendingTurns.get(this.activeTurnId) : undefined;
+      if (owner?.identityConfirmed && !owner.followUpAnswer && owner.turnId && await this.ownedFollowUps.admit(input, { taskId: owner.taskId, turnId: owner.turnId }))
+        return { started: true, turnId: owner.turnId, steered: true };
+    }
+    if (this.followUpSettlement) {
+      this.enqueueWaitingTask(input);
+      this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
+      return { started: false, queuedAt: this.taskQueue.length };
+    }
+    if (this.turnClaimed || this.activeTurnId || this.draining) {
+      this.enqueueWaitingTask(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
     }
@@ -650,12 +760,12 @@ export class CodexAppServerBridge extends EventEmitter {
       if (input.steerIfExternalTurn && this.externalActiveTurnSteerable) {
         return this.steerExternalTurn(input, this.externalActiveTurnId);
       }
-      this.taskQueue.push(input);
+      this.enqueueWaitingTask(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
     }
     if (this.taskQueue.length > 0) {
-      this.taskQueue.push(input);
+      this.enqueueWaitingTask(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
     }
@@ -664,7 +774,7 @@ export class CodexAppServerBridge extends EventEmitter {
   }
 
   private async steerExternalTurn(
-    input: { taskId: string; text: string; from?: string; steerIfExternalTurn?: boolean },
+    input: QueuedCodexTask,
     expectedTurnId: string,
   ): Promise<{ started: true; turnId: string; steered: true } | { started: false; queuedAt: number }> {
     const state = this.steeredTurns.get(expectedTurnId) ?? {
@@ -732,7 +842,7 @@ export class CodexAppServerBridge extends EventEmitter {
       state.acceptedTaskIds.delete(input.taskId);
       if (state.tasks.size === 0) this.steeredTurns.delete(expectedTurnId);
       if (this.externalActiveTurnId === expectedTurnId) this.externalActiveTurnId = null;
-      this.taskQueue.push(input);
+      this.enqueueWaitingTask(input);
       const queuedAt = this.taskQueue.length;
       this.emit("steer_deferred", {
         taskId: input.taskId,
@@ -744,9 +854,18 @@ export class CodexAppServerBridge extends EventEmitter {
     }
   }
 
-  /** Drain the FIFO after a turn finishes. One task per idle transition. */
+  /** Stable human-first waiting lanes; a deferred task retains its place within its lane. */
+  private enqueueWaitingTask(input: QueuedCodexTask, retry = false): void {
+    const human = input.interactiveDashboardTask === true;
+    const firstOrdinary = this.taskQueue.findIndex(task => task.interactiveDashboardTask !== true);
+    const index = human && retry ? 0 : human || retry ? firstOrdinary : -1;
+    this.taskQueue.splice(index < 0 ? this.taskQueue.length : index, 0, input);
+  }
+
+  /** Drain waiting work after a turn finishes. Already claimed work is never preempted. */
   private async drainQueue(): Promise<void> {
     if (this.draining) return;
+    if (this.followUpSettlement) return;
     if (this.turnClaimed || this.activeTurnId || this.externalActiveTurnId) return;
     let next = this.taskQueue.shift();
     if (!next) return;
@@ -755,7 +874,7 @@ export class CodexAppServerBridge extends EventEmitter {
     // MCP call) while it sat here. Ask before spending a turn on it. Every
     // failure of the check counts as "start": the check may only ever remove
     // work it has positively seen to be gone.
-    while (next && this.shouldStartQueued) {
+    while (next && this.shouldStartQueued && !next.followUpAnswer) {
       let start = true;
       try {
         start = await this.shouldStartQueued(next);
@@ -773,9 +892,14 @@ export class CodexAppServerBridge extends EventEmitter {
     try {
       await this.startTaskTurn(next);
     } catch (e) {
+      if (next.followUpAnswer) {
+        if ((e as { code?: string })?.code !== "codex_task_skipped" && !this.ownedFollowUps?.answerSubmitted(next.taskId)) this.enqueueWaitingTask(next, true);
+        this.emit("owned_followup_uncertain", { taskId: next.taskId, error: e instanceof Error ? e.message : String(e) });
+        return;
+      }
       // Lost the idle race to the human TUI (or transport error). Requeue at
-      // the FRONT to preserve order; retry on the next idle transition.
-      this.taskQueue.unshift(next);
+      // the front of its class to preserve order; retry on the next idle transition.
+      this.enqueueWaitingTask(next, true);
       this.emit("drain_deferred", {
         taskId: next.taskId,
         error: e instanceof Error ? e.message : String(e),
@@ -1106,10 +1230,12 @@ export class CodexAppServerBridge extends EventEmitter {
       pending.sideEffectObserved = true;
       if (pending.identityConfirmed) {
         this.emit("task_side_effect", { taskId: pending.taskId, turnId });
+        for (const taskId of this.ownedFollowUps?.acceptedOn(turnId) ?? []) this.emit("task_side_effect", { taskId, turnId });
       }
       return;
     }
     const steered = this.steeredTurns.get(turnId);
+    for (const taskId of this.ownedFollowUps?.acceptedOn(turnId) ?? []) this.emit("task_side_effect", { taskId, turnId });
     if (!steered) return;
     steered.sideEffectObserved = true;
     for (const taskId of steered.acceptedTaskIds) {
@@ -1129,9 +1255,11 @@ export class CodexAppServerBridge extends EventEmitter {
     // alive indefinitely (#587 race family).
     if (pending?.identityConfirmed) {
       this.emit("task_activity", { taskId: pending.taskId, turnId, kind } satisfies CodexAppServerTaskActivity);
+      for (const taskId of this.ownedFollowUps?.acceptedOn(turnId) ?? []) this.emit("task_activity", { taskId, turnId, kind } satisfies CodexAppServerTaskActivity);
       return;
     }
     const steered = this.steeredTurns.get(turnId);
+    for (const taskId of this.ownedFollowUps?.acceptedOn(turnId) ?? []) this.emit("task_activity", { taskId, turnId, kind } satisfies CodexAppServerTaskActivity);
     if (!steered) return;
     for (const taskId of steered.acceptedTaskIds) {
       this.emit("task_activity", { taskId, turnId, kind } satisfies CodexAppServerTaskActivity);
@@ -1180,6 +1308,7 @@ export class CodexAppServerBridge extends EventEmitter {
     if (
       !pending.startAnnounced ||
       (!pending.identityConfirmed && (pending.competingTurnObserved || terminalNeedsIdentity))
+      || (pending.followUpAnswer && !pending.identityConfirmed)
     ) {
       // This cached terminal cannot wait forever: startOwnedTaskTurn announces
       // the response-id claim before returning, and codexAppServerThink arms
@@ -1318,6 +1447,11 @@ export class CodexAppServerBridge extends EventEmitter {
   ): boolean {
     const pending = this.pendingTurns.get(turnId);
     if (!pending) return false;
+    let followUpSettled: Promise<void> | undefined;
+    if (!pending.followUpAnswer && this.ownedFollowUps?.onOwner(turnId)) {
+      this.followUpSettlement = true;
+      followUpSettled = this.ownedFollowUps.ownerFinished(pending.taskId, turnId);
+    }
     if (terminal.finalText) pending.finalText = terminal.finalText;
     this.pendingTurns.delete(turnId);
     this.pendingByClientUserMessageId.delete(pending.clientUserMessageId);
@@ -1342,7 +1476,8 @@ export class CodexAppServerBridge extends EventEmitter {
       this.emit("task_reply", { taskId: pending.taskId, text });
     }
     // Either way the thread just went idle from our perspective → drain FIFO.
-    void this.drainQueue();
+    if (followUpSettled) void followUpSettled.finally(() => { this.followUpSettlement = false; void this.drainQueue(); });
+    else void this.drainQueue();
     return true;
   }
 
@@ -1440,17 +1575,19 @@ function classifyPersistedTurn(turn: {
   status?: string;
   error?: { message?: string } | null;
   completedAt?: number | null;
-  items?: Array<{ type?: string; text?: string; phase?: string }>;
-}): PersistedTurnResult {
+  items?: Array<{ type?: string; text?: string; phase?: string; clientId?: string }>;
+}, expectedClientUserMessageId?: string): PersistedTurnResult {
+  if (expectedClientUserMessageId && !turn.items?.some(item => item.type === "userMessage" && item.clientId === expectedClientUserMessageId)) return { state: "identity_unconfirmed" };
   if (!isTerminalTurnStatus(turn.status)) return { state: "running" };
   if (turn.status === "completed") {
     const text = [...(turn.items ?? [])].reverse().find((item) =>
       item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string"
     )?.text ?? "";
-    return { state: "completed", text };
+    return { state: "completed", text, ...(expectedClientUserMessageId ? { replyIdentityConfirmed: true as const } : {}) };
   }
   return {
     state: turn.status,
+    ...(expectedClientUserMessageId ? { replyIdentityConfirmed: true as const } : {}),
     ...(typeof turn.error?.message === "string" ? { error: turn.error.message } : {}),
     ...(typeof turn.completedAt === "number" && Number.isFinite(turn.completedAt)
       ? { completedAt: turn.completedAt }

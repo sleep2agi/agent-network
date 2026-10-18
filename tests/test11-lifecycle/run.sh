@@ -129,7 +129,14 @@ done
 echo ""
 
 echo "3. TTL boundary: ttl_seconds=5, wait 6s..."
-TTL_SEND=$(mcp_call "send_task" '{"alias":"ttl-agent","task":"ttl boundary case","from_session":"test11","ttl_seconds":5}')
+# 🔴 不再声明 from_session。这三处 send_task 用的是 admin 的 utok_，而
+# server/src/tools.ts 的 humanSender 分支会把「用户 token 冒用他人
+# from_session」按 from_session_identity_mismatch 拒掉（产品侧已有正式断言：
+# server/src/task-sender-http.test.ts:101-110，REST/MCP 双通道）。声明
+# "test11" 时创建必然失败 —— 之前 5 条 FAIL 全是从这一条级联出来的。省略
+# 后 from_session 就是已认证的用户名，断言（delivered→acked→running）不变，
+# 只是让发送方身份合法。
+TTL_SEND=$(mcp_call "send_task" '{"alias":"ttl-agent","task":"ttl boundary case","ttl_seconds":5}')
 TTL_TASK_ID=$(echo "$TTL_SEND" | extract_task_id)
 if [ -n "$TTL_TASK_ID" ]; then
   pass "TTL task created"
@@ -174,7 +181,7 @@ PATROL_STATUS=$(task_field "manual-expired-task" "status")
 echo ""
 
 echo "5. send_ack transitions task -> acked..."
-ACK_SEND=$(mcp_call "send_task" '{"alias":"ack-agent","task":"ack boundary case","from_session":"test11"}')
+ACK_SEND=$(mcp_call "send_task" '{"alias":"ack-agent","task":"ack boundary case"}')
 ACK_TASK_ID=$(echo "$ACK_SEND" | extract_task_id)
 ACK_RESP=$(mcp_call "send_ack" "{\"task_id\":\"${ACK_TASK_ID}\",\"from_session\":\"ack-agent\"}")
 [ "$(echo "$ACK_RESP" | mcp_ok)" = "true" ] && pass "send_ack accepted" || fail "send_ack rejected"
@@ -184,7 +191,7 @@ echo ""
 
 echo "6. report_status(working) transitions task -> running..."
 RUN_TASK_TEXT="run boundary case"
-RUN_SEND=$(mcp_call "send_task" "{\"alias\":\"run-agent\",\"task\":\"${RUN_TASK_TEXT}\",\"from_session\":\"test11\"}")
+RUN_SEND=$(mcp_call "send_task" "{\"alias\":\"run-agent\",\"task\":\"${RUN_TASK_TEXT}\"}")
 RUN_TASK_ID=$(echo "$RUN_SEND" | extract_task_id)
 # 🔴 report_status 需要 network token（utok 会被 network_token_required 拒），
 # 且按 #203 其 node_name 必须与别名一致 —— 用上面为 run-agent 铸的那个。

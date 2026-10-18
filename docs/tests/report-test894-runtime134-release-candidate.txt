@@ -1,0 +1,67 @@
+#894 CLI .168 / runtime .134 paired release preparation — NOT PUBLISHED
+OBSERVED_AT=2026-10-12 06:15+08
+
+Source / scope
+- Original PR2559 normal merged at 06:10:55+08 to main
+  d7236f6c8b58c03d0f23583a45a54137545ab7f0.
+- Required contexts10/10 and relevant Docker E2E succeeded at exact prior head
+  8497894420f686713b1b9bca1d81295215bed6c5. At merge174 SUCCESS/1 SKIPPED/3
+  IN_PROGRESS; not all-green and no admin bypass. Remaining results independent.
+- Safe ACP job114585105320/run38178246331: source build, protocol regression,
+  real safe session/wrong-session negative and isolated TLS model transport all
+  SUCCESS. This is not live OAuth/entitlement or a native client installer.
+- New clean worktree/branch from exact main: release/opencode-runtime134.
+- Tested candidate tree before adding this report:
+  e78da05f4eb56961c83b3226924fd94daf58b2c1.
+- Only paired version/lock metadata, pairing constants, bilingual candidate
+  stamps/behavior paragraph, and two release notes change. Runtime behavior
+  remains the reviewed main model-binding implementation; Hub .126 not bumped.
+- No published artifact, dist-tag, running Daemon or business node changed.
+
+Availability preflight
+- Anonymous npm registry version endpoints CLI2.3.0-preview.168 and
+  agent-node2.5.0-preview.134 both HTTP404 at 06:12+08.
+- This is an unspent candidate, not permission to overwrite an existing version.
+- Publish only from a normally merged full40 main ancestor, rebuilding via the
+  formal workflow. Runtime .134 first, CLI .168 after exact registry readback.
+
+Narrow Docker checks
+- Existing tests/test894-launch-window/Dockerfile image, manifest-list ID
+  c2f501786217b1ef04b09d9615a69a1eae581680db5f75b9fb7f621baa476887.
+- Candidate source mounted read-only at /candidate (the image's older copied
+  source is NOT used), --network none, non-root bun and container-only tmpfs:
+  --tmpfs /run/user:uid=1000,gid=1000,mode=0700,exec.
+- Existing package-version tests for CLI/runtime plus opencode-agent-node-pair:
+  10 PASS / 0 FAIL / 27 expectations, 121ms. Includes actual exact-version
+  resolver metadata, legacy capability refusal and package-identity controls.
+- Initial invocation without required private /run/user: 8 PASS/2 environment
+  EACCES failures before identity probes. Only Docker fixture setup corrected;
+  no assertion or product identity/permission policy weakened.
+- Independent package-specific release notes have Install/Upgrade sections,
+  exact install versions and NOT PUBLISHED distinction: 2/2 PASS.
+- In Docker node20-alpine config
+  fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293,
+  install disposable python3, run the unchanged check-doc-version-claims.py
+  run(Path('/candidate'), 'agent-network', '2.3.0-preview.168', True).
+  Four stamps/two docs PASS; actual npm latest2.3.0-preview.76 verified.
+- Initial script CLI environment lacked git; checker core was not reached.
+  Corrected harness supplies explicit candidate root to its unchanged run
+  function (read-only worktree metadata points outside the container); same
+  checks and npm readback retained, not a source/wording assertion bypass.
+
+Boundaries / next gate
+- This is metadata/doc preparation, NOT compiled-package installation proof.
+- No redundant passing V2, login/entitlement or full native suites rerun.
+- Required PR checks, full40 main merge, formal package build/install/notes/pin
+  gates and anonymous inner tarball-byte verification still required.
+- App PR795 native V1 registration failure remains a distinct pending layer;
+  preparing or publishing the runtime cannot retrospectively pass that package.
+
+Cleanup / recovery
+- Docker runs --rm; tmpfs/fixture/npm cache and python installs are disposable.
+- No host/global npm installation, credential, production probe or activation.
+- Release authority: docs/RELEASE-SOP.md and .github/workflows/release.yml.
+- Daemon startup/upgrade/rollback remains docs-site/docs/deploy/daemon.md;
+  retain exact prior private pair and config. No new port/proxy/tunnel,
+  secret source, schema or backup change. Git reproduces software, not accounts,
+  conversations or production data; protected backups/owner login remain needed.

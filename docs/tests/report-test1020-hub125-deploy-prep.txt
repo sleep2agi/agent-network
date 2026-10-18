@@ -1,0 +1,29 @@
+Hub125 deployment-input preparation; not production activation
+OBSERVED_AT=2026-10-11T15:28Z
+Base exact main519af0236985957bb0ff70685052673bdd0b2373.
+Formal package release38151056880 is queued; no published125 package claimed.
+
+Changed the deployment profile default to sibling runtime-v108-preview125,
+retaining runtime-v107-preview124 as rollback. Explicit runtime/side-thread
+override semantics remain unchanged. No production launcher copied or service
+restarted; existing health124, BunPID3094572, PM2restarts81, sessions320/SSE116.
+
+Independent existing Dockerfile.launcher built using pinned Node22.22.2
+base9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e.
+Result image IDsha256:87f4d816f7c9e2277d7e79280a0fb6e584f02090fd1b40297eafbc9377db4baf
+(manifest list492f3ab4c43c1a219548a186c80d3bcf7446a3ca923465f99e73048d2f6e0d03).
+network none, --rm, fake executor only: default125, explicit124 rollback,
+explicit side-thread0 PASS, exit0. No real Hub process or persistent fixture.
+
+NOT YET COMPLETED: exact published package/dependency lock, consistent data
+backup, offline package/schema/authenticated-start checks, main deployment
+authority merge, targeted activation and fresh natural fleet receipts.
+Do not install a branch tarball, infer all-runtime model availability, share
+personal OAuth, replace vault key or restart business nodes.
+
+Incremental 2026-10-11T15:37Z: README adds explicitly unactivated .125 profile
+with exact main/release coordinates, package-lock prerequisite, isolated
+backup preflight, startup/ports/secret source/verification/rollback/data-only
+recovery boundaries. No schema change or automatic copied-key rotation is
+claimed. git diff --check clean. Still no production write/restart and no
+deployment-authority PR submitted before actual package inputs are known.

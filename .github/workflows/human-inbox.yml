@@ -1,0 +1,34 @@
+name: Full-depth authenticated human inbox
+on:
+  pull_request:
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/db.ts', 'server/src/human-inbox.ts', 'server/src/task-activity.ts', 'tests/test1163-human-inbox/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1163*', '.github/workflows/human-inbox.yml']
+  push:
+    branches: [main]
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/db.ts', 'server/src/human-inbox.ts', 'server/src/task-activity.ts', 'tests/test1163-human-inbox/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1163*', '.github/workflows/human-inbox.yml']
+permissions:
+  contents: read
+jobs:
+  human-inbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1163-human-inbox/Dockerfile -t human-inbox .
+      - run: docker run --rm --network none human-inbox
+
+  human-inbox-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1163-human-inbox/Dockerfile -t human-inbox .
+      - name: Isolated PostgreSQL and the same Hub/CLI contracts
+        run: |
+          set -euo pipefail
+          docker run -d --name human-inbox-pg --network none -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=anet_inbox1163_test postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+          trap 'docker rm -f human-inbox-pg >/dev/null' EXIT
+          for i in $(seq 1 30); do
+            if docker exec human-inbox-pg pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker run --rm --network container:human-inbox-pg -e COMMHUB_TEST_PG_URL=postgres://postgres@127.0.0.1/anet_inbox1163_test -e COMMHUB_PG_EXPERIMENTAL=1 human-inbox

@@ -599,3 +599,4 @@ Only one turn can be active in a thread; later network tasks queue FIFO. The cur
 - [Node runtimes](/en/guide/runtimes)
 - [CLI: `anet node start`](/en/guide/cli#anet-node-start)
 - [Grok nodes](/en/guide/grok)
+- [OpenCode V2](/en/guide/opencode)

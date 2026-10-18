@@ -90,6 +90,11 @@ function rows(): Row[] {
   return db.all("SELECT resume_id, status, version, agent, hostname, cpu_cores, mem_total_gb, registered_at, task FROM sessions WHERE alias = ?1 AND network_id = ?2", [ALIAS, NET_ID]) as Row[];
 }
 
+type OsRow = { resume_id: string; os_user: string | null };
+function osRows(): OsRow[] {
+  return db.all("SELECT resume_id, os_user FROM sessions WHERE alias = ?1 AND network_id = ?2", [ALIAS, NET_ID]) as OsRow[];
+}
+
 describe("report_status: 同 alias 换 resume_id 时,描述性列从被替换的那行接手", () => {
   test("第二个上报者(grok-cli)不带 version/agent/遥测 → 这些列保留,status/task 以本次为准,仍只有一行", async () => {
     seed();
@@ -146,5 +151,34 @@ describe("report_status: 同 alias 换 resume_id 时,描述性列从被替换的
     expect(all.length).toBe(1);
     expect(all[0]!.version).toBeNull();
     expect(all[0]!.registered_at).not.toBe(OLD_REGISTERED_AT);
+  });
+
+  test("same resume_id stores os_user, and a later report that omits it keeps the value", async () => {
+    seed();
+    const tools = buildHandlers();
+    const set = await call(tools.report_status!, { resume_id: RESUME_SDK, alias: ALIAS, status: "working", os_user: "alice", network_id: NET_ID });
+    expect(set.ok, JSON.stringify(set)).toBe(true);
+    expect(osRows()).toEqual([{ resume_id: RESUME_SDK, os_user: "alice" }]);
+    const keep = await call(tools.report_status!, { resume_id: RESUME_SDK, alias: ALIAS, status: "idle", network_id: NET_ID });
+    expect(keep.ok, JSON.stringify(keep)).toBe(true);
+    expect(osRows()).toEqual([{ resume_id: RESUME_SDK, os_user: "alice" }]);
+  });
+
+  test("换 resume_id 且本次不带 os_user 时,从被替换的那行接手", async () => {
+    seed();
+    db.run("UPDATE sessions SET os_user = ?1 WHERE resume_id = ?2", ["alice", RESUME_SDK]);
+    const tools = buildHandlers();
+    const r = await call(tools.report_status!, { resume_id: RESUME_CLI, alias: ALIAS, status: "working", network_id: NET_ID });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(osRows()).toEqual([{ resume_id: RESUME_CLI, os_user: "alice" }]);
+  });
+
+  test("换 resume_id 且本次带了 os_user 时,以上报为准", async () => {
+    seed();
+    db.run("UPDATE sessions SET os_user = ?1 WHERE resume_id = ?2", ["alice", RESUME_SDK]);
+    const tools = buildHandlers();
+    const r = await call(tools.report_status!, { resume_id: RESUME_CLI, alias: ALIAS, status: "idle", os_user: "bob", network_id: NET_ID });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(osRows()).toEqual([{ resume_id: RESUME_CLI, os_user: "bob" }]);
   });
 });

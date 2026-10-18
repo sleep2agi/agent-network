@@ -125,7 +125,13 @@ try {
     const auth = { authorization: `Basic ${Buffer.from("opencode:pw").toString("base64")}`, "content-type": "application/json" };
     const base = `http://127.0.0.1:${port}`;
     await waitFor(() => spawnSync("curl", ["-sf", "-o", "/dev/null", "-u", "opencode:pw", `${base}/api/info`]).status === 0, 20_000);
-    const sid = (await (await fetch(`${base}/api/session`, { method: "POST", headers: auth, body: JSON.stringify({ title: "raw", model: { providerID: "stub", id: "stub-model" } }) })).json() as any).data.id;
+    const created = (await (await fetch(`${base}/api/session`, { method: "POST", headers: auth, body: JSON.stringify({ title: "raw", location: { directory: ws }, model: { providerID: "stub", id: "stub-model" } }) })).json() as any).data;
+    check("V2 session is bound to the requested workspace", created.location?.directory === ws);
+    const sid = created.id;
+    const secondWs = join(root, "raw-ws-2");
+    mkdirSync(secondWs, { recursive: true });
+    const second = (await (await fetch(`${base}/api/session`, { method: "POST", headers: auth, body: JSON.stringify({ title: "raw-2", location: { directory: secondWs }, model: { providerID: "stub", id: "stub-model" } }) })).json() as any).data;
+    check("one V2 server keeps distinct workspace sessions", second.id !== sid && second.location?.directory === secondWs);
     const before = stubLog().length;
     await fetch(`${base}/api/session/${sid}/prompt`, { method: "POST", headers: auth, body: JSON.stringify({ text: "Reply with exactly RAW543", delivery: "queue" }) });
     await waitFor(() => stubLog().length > before, 20_000);

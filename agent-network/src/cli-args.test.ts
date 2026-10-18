@@ -45,6 +45,7 @@ describe("CLI argument parsing", () => {
       "--no-auto-self",
       "--no-codex-login",
       "--no-yolo",
+      "--opencode-new-server",
       "--opencode-unsafe-tools",
       "--pick",
       "--resume-latest",

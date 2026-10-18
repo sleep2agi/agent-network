@@ -140,7 +140,7 @@ export function agentUpdateSchedule(id: NodeIdentity, canWrite: boolean, schedul
   const denied = targetDenied(id, route, target);
   if (denied) return denied;
   try {
-    const patched = patchSchedule(row, { ...body, revision: body.revision ?? row.revision });
+    const patched = patchSchedule(row, { ...body, revision: body.revision ?? row.revision }, id.ownerUserId);
     return { ok: true, schedule: decodeRowForAgent(patched) };
   } catch (e) { return inputError(e); }
 }

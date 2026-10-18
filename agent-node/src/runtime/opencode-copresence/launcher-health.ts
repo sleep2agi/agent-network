@@ -1,6 +1,7 @@
 // #829: a tmux launcher exits successfully while its runtime remains alive.
 // Linux-only evidence for daemon create, not a general readiness/security API.
 import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { hasBorrowedV1Intent, inspectBorrowedLaunchHealth } from "../../shared/opencode-borrowed-launch-health";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -18,6 +19,7 @@ export function readLiveProcess(pid: number): LiveProcess | undefined {
 export interface LaunchHealth {
   version: 1; generation: string; writtenAt: number;
   bridge: LiveProcess; serve: LiveProcess;
+  serveOwnership?: "shared";
 }
 function readRecord(path: string): any {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -31,10 +33,19 @@ function readRecord(path: string): any {
 
 /** No tokens/ports in this record. Stale records alone can never pass. */
 export function publishLaunchHealth(dir: string, generation: string, servePid: number): () => void {
+  return publishOpenCodeLaunchHealth(dir, generation, servePid, false);
+}
+
+export function publishSharedLaunchHealth(dir: string, generation: string, servePid: number): () => void {
+  return publishOpenCodeLaunchHealth(dir, generation, servePid, true);
+}
+
+function publishOpenCodeLaunchHealth(dir: string, generation: string, servePid: number, shared: boolean): () => void {
   if (process.platform !== "linux") return () => {};
   const bridge = readLiveProcess(process.pid), serve = readLiveProcess(servePid);
-  if (!bridge || !serve || serve.parent !== bridge.pid) throw new Error("OpenCode launch process identity unavailable");
-  const record: LaunchHealth = { version: 1, generation, writtenAt: Date.now(), bridge, serve };
+  if (!bridge || !serve || (!shared && serve.parent !== bridge.pid)) throw new Error("OpenCode launch process identity unavailable");
+  const record: LaunchHealth = { version: 1, generation, writtenAt: Date.now(), bridge, serve,
+    ...(shared ? { serveOwnership: "shared" as const } : {}) };
   const path = join(dir, LAUNCH_HEALTH_FILE), tmp = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(record), { flag: "wx", mode: 0o600 });
@@ -73,7 +84,8 @@ export function validateLaunchHealth(
       const live = probe.process(expected.pid);
       if (!live || !/^\d+$/.test(expected.ticks) || live.ticks !== expected.ticks) throw new Error("dead or reused process identity");
     }
-    if (probe.process(record.serve.pid)?.parent !== record.bridge.pid) throw new Error("serve parent mismatch");
+    if (record.serveOwnership !== undefined && record.serveOwnership !== "shared") throw new Error("unknown serve ownership");
+    if (record.serveOwnership !== "shared" && probe.process(record.serve.pid)?.parent !== record.bridge.pid) throw new Error("serve parent mismatch");
     const bridgeArgs = probe.argv(record.bridge.pid);
     if (!bridgeArgs.some((v, i) => v === "--config" && bridgeArgs[i + 1] === configPath)) throw new Error("bridge config mismatch");
     const tuiArgs = probe.argv(attach.pid);
@@ -100,6 +112,9 @@ export function classifyTuiArgv(args: string[], generation: string): "match" | "
 export function inspectLaunchHealth(dir: string, configPath: string, launchedAt: number) {
   if (process.platform !== "linux") return { ok: false as const, reason: "daemon V2 launch health requires Linux process identity" };
   try {
+    if (hasBorrowedV1Intent(dir,readRecord(configPath))) {
+      return inspectBorrowedLaunchHealth(configPath,launchedAt);
+    }
     return validateLaunchHealth(readRecord(join(dir, LAUNCH_HEALTH_FILE)),
       readRecord(join(dir, "opencode-attach.json")), configPath, launchedAt);
   } catch { return { ok: false as const, reason: "missing or unsafe launch/attach record" }; }

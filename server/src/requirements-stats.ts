@@ -2,6 +2,7 @@
 // 这里只按时间范围 / 时区分桶、按项目 / 完成者计数。放在 JS 里而不是 SQL:按 IANA 时区切「哪一天」在
 // SQLite 和 PostgreSQL 上写法不同,而一个网络的卡片数是几百到几千,整表轻量列读一次就够。
 import { isoInstant } from "./requirements-migrate.js";
+import { storedTags } from "./requirement-tags.js";
 
 export const STATS_DEFAULT_DAYS = 30;
 export const STATS_MAX_DAYS = 371; // 53 周:够画一整年的贡献热力图
@@ -21,9 +22,10 @@ export type StatsRow = {
   completed_at: string | null;
   completed_at_approx: number | null;
   completed_by_json: string | null;
+  tags_json?: string | null;
 };
 
-export type StatsQuery = { fromMs: number | null; toMs: number; tz: string; days: number; recent: number };
+export type StatsQuery = { fromMs: number | null; toMs: number; tz: string; days: number; recent: number; projectId?: string | null };
 type Ref = { kind: "user" | "node"; id: string };
 
 /** 解析 from / to / tz / days。不合法 → 错误码(400)。to 缺省 = 现在;from 缺省 = 不设下限(全部)。 */
@@ -48,7 +50,10 @@ export function parseStatsQuery(q: URLSearchParams, nowMs: number): StatsQuery |
   const recentRaw = q.get("recent");
   const recent = recentRaw === null || recentRaw === "" ? STATS_DEFAULT_RECENT : Number(recentRaw);
   if (!Number.isInteger(recent) || recent < 0 || recent > STATS_MAX_RECENT) return { error: "invalid_recent" };
-  return { fromMs: from, toMs, tz, days, recent };
+  const project = q.get("project_id");
+  if (project && (project.length > 200 || /[\u0000-\u001f\u007f]/u.test(project))) return { error: "invalid_project_id" };
+  return { fromMs: from, toMs, tz, days, recent,
+    ...(project ? { projectId: project === "none" ? null : project } : {}) };
 }
 
 function validTimeZone(tz: string): boolean {
@@ -86,6 +91,7 @@ const parseRef = (json: string | null): Ref | null => {
  * 但归到 unattributed,不出现在 by_completer 里 —— 不给他留「那个节点做了几张」的探测口。
  */
 export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId: string) => boolean) | null) {
+  if (q.projectId !== undefined) rows = rows.filter(row => row.project_id === q.projectId);
   const inRange = (ms: number | null) => ms !== null && ms <= q.toMs && (q.fromMs === null || ms >= q.fromMs);
   const days = dayRange(localDate(q.toMs, q.tz), q.days);
   const firstDay = days[0];
@@ -97,8 +103,21 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
   const byProject = new Map<string | null, number>();
   const byCompleter = new Map<string, { ref: Ref; n: number; spark: Map<string, number> }>();
   const recent: { row: StatsRow; ms: number; by: Ref | null }[] = [];
+  const byTag = new Map<string | null, { tag: string | null; pool: number; doing: number; done: number; abandoned: number; total: number }>();
+  let snapshotTotal = 0;
 
   for (const row of rows) {
+    if (!row.archived && ["pool", "doing", "done", "abandoned"].includes(row.column_name)) {
+      snapshotTotal++;
+      const tags: (string | null)[] = storedTags(row.tags_json ?? null);
+      if (!tags.length) tags.push(null);
+      for (const tag of tags) {
+        let bucket = byTag.get(tag);
+        if (!bucket) byTag.set(tag, bucket = { tag, pool: 0, doing: 0, done: 0, abandoned: 0, total: 0 });
+        bucket[row.column_name as "pool" | "doing" | "done" | "abandoned"]++;
+        bucket.total++;
+      }
+    }
     // 当前还开着的卡(不看时间范围;归档的不算「进行中」)。
     if (!row.archived && row.column_name === "doing") doing++;
     if (!row.archived && row.column_name === "pool") pool++;
@@ -133,6 +152,15 @@ export function aggregateStats(rows: StatsRow[], q: StatsQuery, hidden: ((nodeId
 
   const spark = days.slice(-STATS_SPARK_DAYS);
   return {
+    tag_status: {
+      basis: "current", complete: true, includes_archived: false,
+      project_filter: q.projectId === undefined ? null : q.projectId ?? "none",
+      total: snapshotTotal,
+      // Membership counts: a multi-tag card counts once in each distinct tag.
+      by_tag: [...byTag.values()].sort((a, b) =>
+        (b.pool + b.doing) - (a.pool + a.doing) || b.total - a.total ||
+        String(a.tag ?? "\uffff").localeCompare(String(b.tag ?? "\uffff"))),
+    },
     range: { from: q.fromMs === null ? null : new Date(q.fromMs).toISOString(), to: new Date(q.toMs).toISOString(), tz: q.tz },
     totals: {
       done,

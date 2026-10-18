@@ -9,7 +9,9 @@ async function runMutation(label: string, file: string, from: string, to: string
     const process_ = Bun.spawn(["bun", "test", "src/daemon-token-owner-http.test.ts", "-t", testName], { stdout: "pipe", stderr: "pipe" });
     const [out, err, rc] = await Promise.all([new Response(process_.stdout).text(), new Response(process_.stderr).text(), process_.exited]);
     if (!rc || !(out + err).includes(`(fail) ${testName}`) || !(out + err).includes("expect(received)")) throw Error(`NOT assertion-red ${label}\n${out}${err}`);
-    if (label === "resolver" && ((out + err).match(/\(fail\) daemon identity boundary:/g) || []).length !== 13) throw Error(`not all 13 identity boundaries witnessed red\n${out}${err}`);
+    // One failure per daemon-facing handler in daemon-token-owner-http.test.ts.
+    // get_opencode_catalog_request and ack_opencode_catalog share this resolver.
+    if (label === "resolver" && ((out + err).match(/\(fail\) daemon identity boundary:/g) || []).length !== 15) throw Error(`not all 15 identity boundaries witnessed red\n${out}${err}`);
     console.log(`WITNESSED_RED ${label} rc=${rc} assertion=${testName}`);
   } finally { writeFileSync(file, original); }
 }
@@ -25,6 +27,6 @@ await runMutation("boundlookup", "src/create-node.ts", 'const rows = tokRow.boun
 await runMutation("ambiguous", "src/create-node.ts", `  const nodeRow = rows.length === 1
     ? rows[0]
     : (!tokRow.bound_node_id && rows.length > 1
-      ? disambiguateUnboundAlias(rows, tokRow.user_id, tokenAlias, tokRow.network_id)
+      ? disambiguateUnboundAlias(rows, tokRow.user_id, recentNodeId)
       : undefined);`, 'const nodeRow = rows[0];', 'duplicate legacy aliases use bound IDs and an unbound token follows its owner');
 await runMutation("registration", "src/tools.ts", 'WHERE token_id=?2 AND node_identity_epoch=2 AND bound_node_id IS NULL', 'WHERE token_id=?2 AND node_identity_epoch=999 AND bound_node_id IS NULL', 'new name-only registration binds once and its holder can refresh with either shape');

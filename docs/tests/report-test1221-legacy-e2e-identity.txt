@@ -1,0 +1,82 @@
+TEST-ONLY #1221 — legacy E2E sender identity and channel loop
+2026-10-14; only four test fixtures changed, no production/runtime/credential change.
+
+SOURCE
+PR https://github.com/sleep2agi/agent-network/pull/2740
+Base 5d1001d4be72a3d2a13397c2b7b29380c941a577
+Final head a5a1a00db87c685a1ae15a9ce7d83a10c5866c37
+CI checkout/test-merge fd87f22ed2683c89f8bd6fa11f86b63bedf9c8ce
+Ordinary SHA-locked main 13cdb0bea7e1b338909c0095f799d7d21c3b509b
+Merged 2026-10-14T08:08:47Z; head confirmed fresh main ancestor.
+CI checkout and actual main tree equal.
+
+FINAL RESULT
+Run 38531527050, E2E job 115744296959: SUCCESS.
+Rename-ghost job 115744296640: SUCCESS.
+Final source PR checks: 26/26 SUCCESS, including all protected checks.
+Artifact 11877709483 / e2e-suite-logs-1 downloaded; all eight logs read.
+Actual seven-group total: 289 passed / 0 failed; runner exit code 0.
+No skipped/crashed or zero-execution group.
+  Base E2E: 139 / 0
+  V3 Auth: 25 / 0
+  V3 Networks: 28 / 0
+  Config Priority: 16 / 0
+  Loop runtime E2E: 22 / 0
+  Loop npm-pack install: 12 / 0
+  Loop self-management: 47 / 0
+The structured TOTAL and real exit status passed the unchanged hard gate.
+
+WHAT CHANGED / ACTUAL EVIDENCE
+Positive user-token requests no longer claim fictitious from/from_session.
+Hub derives the actual authenticated username; the fixture checks the exact
+original task's from_name matches /api/auth/me user.username.
+Node-token replies preserve their real node sender, with the original reply
+recipient derived from the exact in_reply_to task instead of a fictitious alias.
+The four scripts are docker-e2e.sh, docker-e2e-networks.sh,
+docker-e2e-loop-runtime.sh and docker-e2e-loop-self-mgmt.sh.
+
+New actual negative controls passed: owner/user token cannot impersonate its
+target node, exact from_session_identity_mismatch, and the rejected request
+writes no task. Cross-network access_denied and all original lifecycle,
+retry/cancel/reassign/expiry/result/timestamp assertions remain intact.
+The channel /loop now proves ok + nonempty task ID before confirming the
+persisted 1d goal. Claude structural loop acceptance/goal checks ran too.
+No production sender/ACL guard, helper argument rewriting, fallback or assertion
+baseline was weakened. No broader V1 native/CLI/TUI or real-person adoption gate
+is inferred from these legacy fixtures; #1219/#1195/#1196 remain separate.
+
+FAILURES RETAINED
+Previous source run 38525948785/job115726204725: 242 pass / 39 fail.
+Base 102/32, Networks 22/5, Loop runtime 20/1, Loop self 45/1.
+Known traces show netuser_a/tester and m4-tester/m4-harness identity mismatch,
+followed by missing task IDs and lifecycle assertions. Channel loop had no goal.
+This old FAIL was preserved in report-test1216-v1-borrowed-backend.txt.
+The new full run, not an inferred partial result, closes those differences.
+Counts increased because new controls and previously unreachable checks ran.
+
+First candidate 5036f239f77f09afc02ff62198c604c3ea8dfe4d:
+run 38530241706/job115740122128 actual FAIL, 150 pass / 1 fail.
+Six groups passed; Base crashed before Results (0 ran). The new sender check
+incorrectly read top-level username based on a stale auth.ts comment. Current
+server.ts /api/auth/me returns {ok, user, networks, credential}; correcting
+.user.username fixed the fixture. The Base FATAL authenticated identity missing
+was the cause, not the runner/Base duplicate-server EADDRINUSE diagnostic.
+The hard gate rejected 0 ran as intended. No baseline/fallback was loosened.
+Final exact candidate reran all seven groups and passed as recorded above.
+
+REBUILD / SCOPE
+Use the existing tests/Dockerfile and .github/workflows/e2e-docker.yml with this
+exact source. Bun image 1.3.14 digest
+e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4.
+The workflow verifies tests/test292-e2e-hard-gate, then tests/test-all.sh with
+run-piped-command/e2e-hard-gate preserving exit status; original 12-minute
+runtime budget and per-suite artifacts are unchanged.
+These legacy Docker fixtures use synthetic accounts/keys and private test
+ports/DBs/processes. Loop assertions prove scheduler/structural behavior,
+not successful live vendor model execution. The existing Dockerfile's Node20
+warning is retained; no new native Windows/macOS or original-device proof.
+Software/source is in Git; no production software/config/schema/history,
+ports, secrets, startup, data backup or rollback procedure changed. There is
+no new daemon/service or real data to migrate in this test-only change.
+No local test run, global host npm change, original node restart/upgrade,
+real credential access, external executable/package publication or task replay.

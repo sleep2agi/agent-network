@@ -80,7 +80,8 @@ test("name-only issuance checks existing ownership atomically", async () => {
 });
 
 // Every daemon-facing handler must fail at the shared identity boundary,
-// not incidentally at request lookup or argument validation.
+// not incidentally at request lookup or argument validation. The resolver
+// mutation expects all 15 of these cases to go red together.
 const endpoints: [string, Record<string, unknown>][] = [
   ["list_my_pending_create_requests", {}], ["list_my_pending_lifecycle_requests", {}],
   ["get_create_request", { request_id: "cr_fixture_absent" }],
@@ -92,6 +93,8 @@ const endpoints: [string, Record<string, unknown>][] = [
   ["list_my_children", {}], ["get_adopt_request", {}], ["ack_adopt_request", { status: "adopted" }],
   ["get_probe_request", { probe_id: "probe_fixture_absent" }],
   ["ack_probe_request", { probe_id: "probe_fixture_absent", status: "ok", latency_ms: 1 }],
+  ["get_opencode_catalog_request", { request_id: "cat_fixture_absent" }],
+  ["ack_opencode_catalog", { request_id: "cat_fixture_absent", error: "unavailable" }],
 ];
 for (const [name, arguments_] of endpoints) {
   test(`daemon identity boundary: ${name}`, async () => {
@@ -215,7 +218,9 @@ test("all production token issuers explicitly mark the rollout epoch", () => {
       expect(match[1]).toContain("node_identity_epoch"); count++;
     }
   }
-  expect(count).toBe(9);
+  // Hub #938: clone_node mints a child ntok_ with node_identity_epoch=2,
+  // the same column create_node already writes. 9 issuers → 10.
+  expect(count).toBe(10);
   expect(readFileSync(`${root}/agent-network/bin/cli.ts`, "utf8")).toContain("'admin-reset', 'user', 1)");
 });
 

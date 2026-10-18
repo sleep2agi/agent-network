@@ -1,0 +1,17 @@
+name: Owned follow-up Hub reply reconciliation
+on:
+  pull_request:
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/task-activity.ts', 'tests/test1156-owned-followup-hub/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1156*', '.github/workflows/owned-followup-hub.yml']
+  push:
+    branches: [main]
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/task-activity.ts', 'tests/test1156-owned-followup-hub/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1156*', '.github/workflows/owned-followup-hub.yml']
+permissions:
+  contents: read
+jobs:
+  owned-followup-hub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1156-owned-followup-hub/Dockerfile -t owned-followup-hub .
+      - run: docker run --rm --network none owned-followup-hub

@@ -18,6 +18,8 @@ import {
   readOpencodeConfig,
   writeOpencodeConfig,
   writebackOpencodeSession,
+  writebackOpencodeConfiguredModel,
+  shouldReconcileOpencodeSessionModel,
 } from "./profile-state";
 
 function fixture(label: string) {
@@ -46,9 +48,19 @@ describe("OpenCode private profile state", () => {
       expect(backupOpencodeConfig(f.config).backedUp).toBe(true);
       expect(writebackOpencodeSession(f.config, "new-session")).toBe(true);
       expect(readOpencodeConfig(f.config).session).toBe("new-session");
+      expect(writebackOpencodeConfiguredModel(f.config, next.model)).toBe(true);
+      expect(writebackOpencodeConfiguredModel(f.config, next.model)).toBe(false);
+      expect(readOpencodeConfig(f.config).opencodeConfiguredModelAtLastOpen).toBe(next.model);
+      expect(shouldReconcileOpencodeSessionModel(readOpencodeConfig(f.config), next.model)).toBe(false);
+      expect(shouldReconcileOpencodeSessionModel(readOpencodeConfig(f.config), "openai/new-model")).toBe(true);
     } finally {
       rmSync(f.root, { recursive: true, force: true });
     }
+  });
+
+  test("an existing session without a model baseline keeps the TUI selection", () => {
+    expect(shouldReconcileOpencodeSessionModel({ model: "opencode/free" }, "opencode/free")).toBe(false);
+    expect(shouldReconcileOpencodeSessionModel({ model: "opencode/free" }, "openai/new-model")).toBe(false);
   });
 
   test("a post-load config symlink cannot redirect session writeback", () => {

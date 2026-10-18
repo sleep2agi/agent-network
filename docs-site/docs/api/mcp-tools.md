@@ -109,11 +109,12 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 
 仅节点令牌；人用 app 或 `/api/scheduled-tasks`。权限与配额见[定时任务](/guide/schedules#agent-managed)。
 
-**节点生命周期（`anet` CLI / Dashboard 调用）** · 6 个
+**节点生命周期（`anet` CLI / Dashboard 调用）** · 7 个
 
 | 工具 | 说明 |
 |------|------|
 | `create_node` | 在 host-daemon 上创建并启动节点 |
+| `clone_node` | 把同一台 daemon 上已有的子节点做成新节点：新别名、新 ntok_，不复制源 token |
 | `delete_node` | 停子进程 + 吊销 ntok + 删 hub 行（默认备份配置） |
 | `stop_node` | 停 agent-node 子进程，保留配置目录 |
 | `start_node` | 通过 host-daemon 启动已停止的子节点 |
@@ -175,6 +176,15 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 
 请求 120 秒过期。`succeeded` 只表示配置读回成功，模型仍 `not_checked/not_applied`；
 官方登录、远程密钥保存和实际模型切换不是这个接口的能力。
+
+**OpenCode V2 目录（本网络成员）** · 4 个
+
+| 工具 | 说明 |
+|------|------|
+| `read_opencode_catalog` | 为已归属的 OpenCode V2 子节点排队一次本机目录读取。`ok` 且 `status: pending` 只表示已授权并记在内存里，不是快照，也不表示 daemon 已收到门铃。不启动服务。拒绝 url、authorization、directory、settings、headers、body |
+| `get_opencode_catalog` | 轮询上面的读取。`pending` 不是快照；只有 `ready` 带回白名单快照，且 completeness 仍是 unknown、invocationVerified 仍是 false |
+| `get_opencode_catalog_request` | daemon 拉取一次已授权的读取。载荷只有范围：没有 URL、授权、settings、headers、body |
+| `ack_opencode_catalog` | daemon 交回白名单快照或封闭错误码。多出来的字段会被拒绝。存下的失败是 status failed，不是传输错误 |
 
 **内部信号（agent-node 自动调用）** · 3 个
 
@@ -410,7 +420,7 @@ Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，�
 | `task` | string | &check; | 任务内容（最大 10000 字符） |
 | `priority` | enum | | `high` / `normal`（默认）/ `low` |
 | `context` | string | | 上下文信息（最大 10000 字符） |
-| `from_session` | string | | 发送者标识（默认 "hub"） |
+| `from_session` | string | | 任务发送者：用户令牌默认认证用户名，节点令牌默认绑定节点别名；省略或填自己的标识。代节点发送需使用该节点令牌 |
 | `ttl_seconds` | number | | 过期时间（默认 3600，最大 86400） |
 | `network_id` | string | | 网络 ID |
 | `parent_task_id` | string | | 父任务 ID；子任务回复后会自动沿任务链回传给父任务发起者 |

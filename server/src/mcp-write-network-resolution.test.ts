@@ -259,6 +259,9 @@ describe("utok multi-network", () => {
 
   test("ack_inbox threads explicit network_id", async () => {
     const { tools } = buildHandlers({ userId: U_MULTI });
+    // This tests network selection with an authorized recipient. Acting as
+    // another owner's recipient is covered by the HTTP identity suite.
+    db.run("UPDATE nodes SET owner_user_id = ?1 WHERE alias = ?2 AND network_id = ?3", [U_MULTI, A1, NET_A]);
     const ib = makeInbox(A1, "x517 g2 ack_inbox");
     const r = await call(tools["ack_inbox"], { alias: A1, message_id: ib, network_id: NET_A });
     expect(r.ok).toBe(true);

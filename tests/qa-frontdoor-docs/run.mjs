@@ -88,7 +88,8 @@ check(validateActiveDocs(documents).length === 0, `stale installer claim remains
 check(read("docs-site/docs/guide/install.md").includes("一键安装脚本已退役"), "Chinese retirement notice missing from install page");
 check(read("docs-site/docs/en/guide/install.md").includes("One-shot installer retired"), "English retirement notice missing from install page");
 check(read("docs-site/docs/public/setup-anet.sh").includes("已退役"), "public compatibility stub is not retired");
-check(read("docs/upgrade-v2.md").includes("本文中的旧版本号只描述当时迁移背景"), "historical upgrade note still presents a stale current version");
+// PR2613 moved this historical input into docs/archive; keep the original disclaimer assertion.
+check(read("docs/archive/upgrade-v2.md").includes("本文中的旧版本号只描述当时迁移背景"), "historical upgrade note still presents a stale current version");
 for (const path of ["docs-site/docs/public/upgrade.sh", "docs-site/docs/public/upgrade-preview.sh"]) {
   const script = read(path);
   check(script.includes('ANET_DASHBOARD_HOST:-${ANET_HUB_IP:-127.0.0.1}'), `${path} does not default the dashboard to loopback`);

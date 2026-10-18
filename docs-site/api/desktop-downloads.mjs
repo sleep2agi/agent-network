@@ -12,7 +12,15 @@ import {
 
 const MIRROR_ROOT = 'https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop';
 
-export const PLATFORM_ORDER = ['macos', 'windows', 'linux', 'android', 'ios'];
+export const PLATFORM_ORDER = ['macos', 'windows', 'android', 'linux', 'ios'];
+export const ANDROID_ROOT = 'https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/android';
+
+export const assetArchitecture = (name) => {
+  if (/android-universal|\.apk$/i.test(name)) return 'universal';
+  if (/(?:aarch64|arm64)/i.test(name)) return 'arm64';
+  if (/(?:x64|x86_64|amd64)/i.test(name)) return 'x64';
+  return null;
+};
 
 const VERSION_TEXT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
 const SAFE_FILENAME = /^[\w.+-]+$/;
@@ -63,6 +71,8 @@ const assetRecord = (releaseTag, version, asset) => {
     kind: classified.kind,
     role: classified.role,
     name: filename,
+    architecture: assetArchitecture(filename),
+    version,
     bytes: typeof asset.size === 'number' && asset.size >= 0 ? asset.size : null,
     url: direct,
     mirrorUrl: classified.role === 'install' ? modelscopeMirrorUrl(version, filename) : null,
@@ -105,12 +115,12 @@ export const groupPlatforms = (assets) => PLATFORM_ORDER.map((id) => ({
 }));
 
 const fetchJson = async (fetchImpl, url, headers = {}) => {
-  const response = await fetchImpl(url, { headers, redirect: 'follow' });
+  const response = await fetchImpl(url, { headers, redirect: 'follow', signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   return response.json();
 };
 
-export const resolveDesktopDownloads = async (fetchImpl = fetch) => {
+const resolveDesktopCatalog = async (fetchImpl = fetch) => {
   try {
     const releases = await fetchJson(fetchImpl, DESKTOP_RELEASES_URL, GITHUB_JSON_HEADERS);
     const selected = selectDesktopRelease(Array.isArray(releases) ? releases : []);
@@ -144,6 +154,48 @@ export const resolveDesktopDownloads = async (fetchImpl = fetch) => {
       platforms: groupPlatforms(assets),
     };
   }
+};
+
+// Android is published independently, not necessarily attached to desktop-v*.
+// Use the channel's own version and checksum; never invent a GitHub APK asset.
+export const resolveAndroidDownload = async (fetchImpl = fetch) => {
+  try {
+    const response = await fetchImpl(`${ANDROID_ROOT}/latest/VERSION`, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return null;
+    const version = (await response.text()).trim();
+    if (!/^\d+\.\d+\.\d+$/.test(version)) return null;
+    const name = `agent-network-${version}.apk`;
+    const url = `${ANDROID_ROOT}/${name}`;
+    const [sums, file] = await Promise.all([
+      fetchImpl(`${url}.sha256`, { signal: AbortSignal.timeout(5000) }),
+      fetchImpl(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) }),
+    ]);
+    if (!sums.ok) return null;
+    const match = /^([a-f0-9]{64})\s+(.+)$/i.exec((await sums.text()).trim());
+    if (!match || match[2] !== name) return null;
+    if (!file.ok) return null;
+    return { platform: 'android', kind: 'apk', role: 'install', name, version,
+      architecture: 'universal', bytes: null, url: null, mirrorUrl: url,
+      checksumUrl: `${url}.sha256`, notesUrl: `${ANDROID_ROOT}/${version}/notes.md`,
+      source: 'android-channel' };
+  } catch {
+    return null;
+  }
+};
+
+export const resolveDesktopDownloads = async (fetchImpl = fetch) => {
+  const [catalog, android] = await Promise.all([
+    resolveDesktopCatalog(fetchImpl), resolveAndroidDownload(fetchImpl),
+  ]);
+  if (android) {
+    const platform = catalog.platforms.find((entry) => entry.id === 'android');
+    // Do not replace an attached APK with an older independent channel.
+    const newer = android.version.split('.').map(Number);
+    const current = catalog.version.split('.').map(Number);
+    const delta = newer.map((part, index) => part - current[index]).find((part) => part !== 0) ?? 0;
+    if (!platform.assets.length || delta >= 0) platform.assets = [android];
+  }
+  return catalog;
 };
 
 export default async function handler(_request, response) {

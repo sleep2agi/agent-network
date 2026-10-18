@@ -7,6 +7,7 @@ import type { AddressInfo } from "node:net";
 import {
   classifyModelAuthError,
   classifyTuiPane,
+  copresenceTmuxSession,
   createCodexHealthMonitor,
   describeModelAuthBlock,
   gateStatusOnModelAuth,
@@ -141,6 +142,31 @@ describe("#448 tui pane classification", () => {
 });
 
 describe("#448 health monitor", () => {
+  test("Windows native bridge never publishes a tmux failure on later status snapshots; real degradation remains", async () => {
+    const env = { ANET_COPRESENCE_BRIDGE: "1", ANET_CODEX_TUI_SESSION: "inherited-linux-session" };
+    expect(copresenceTmuxSession("linux", env, "node")).toBe("inherited-linux-session");
+    expect(copresenceTmuxSession("darwin", { ANET_COPRESENCE_BRIDGE: "1" }, "node")).toBe("node");
+    expect(copresenceTmuxSession("linux", {}, "node")).toBeUndefined();
+    let up = true;
+    const modelAuth = new ModelAuthTracker();
+    const m = createCodexHealthMonitor({
+      appServerUrl: () => "ws://127.0.0.1:1",
+      tuiSession: copresenceTmuxSession("win32", env, "node"),
+      modelAuth,
+      probeAppServer: async () => ({ ok: up, rtt_ms: 1, last_error: up ? null : "refused" }),
+      probeTui: () => { throw new Error("Windows must not invoke tmux"); },
+    });
+    await m.tick();
+    expect(m.snapshot().tui).toBeUndefined();
+    expect(m.snapshot().app_server?.ok).toBe(true);
+    up = false;
+    modelAuth.noteError("refresh token was already used");
+    await m.tick();
+    expect(m.snapshot().tui).toBeUndefined();
+    expect(m.snapshot().app_server?.ok).toBe(false);
+    expect(m.snapshot().model_auth).toBe("revoked");
+  });
+
   test("snapshot shape; onChange fires on a flip, not on every tick", async () => {
     const modelAuth = new ModelAuthTracker();
     let up = true;
@@ -177,7 +203,7 @@ describe("#448 health monitor", () => {
       [false, true, true, 1, "app-server the bridge was attached to died before the first probe → reported now"],
       [false, true, false, 0, "start-up: the app-server has never been up → quiet (not degraded on the Hub)"],
       [false, true, undefined, 0, "no gate wired → quiet (old behaviour)"],
-      [true, false, true, 0, "TUI never seen (Windows: no tmux → session-missing) → quiet, tasks not refused"],
+      [true, false, true, 0, "first TUI failure → quiet callback; subsequent status snapshot still contains failure"],
       [true, true, true, 0, "healthy first tick → quiet"],
     ];
     for (const [appUp, tuiUp, wasUp, expected, why] of cases) {
@@ -191,7 +217,8 @@ describe("#448 health monitor", () => {
         ...(wasUp === undefined ? {} : { appServerWasUp: () => wasUp }),
         onChange: (r) => changes.push(r),
       });
-      await m.tick();
+      const firstReport = await m.tick();
+      expect(firstReport.tui?.ok).toBe(tuiUp);
       expect({ why, n: changes.length }).toEqual({ why, n: expected });
       await m.tick();
       expect({ why, n: changes.length }).toEqual({ why, n: expected }); // same state on the 2nd tick: no repeat

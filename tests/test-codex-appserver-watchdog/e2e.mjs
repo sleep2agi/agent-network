@@ -18,6 +18,7 @@ process.umask(0o022);
 const repo = "/workspace";
 const pairedVersion = JSON.parse(readFileSync(join(repo, "agent-node", "package.json"), "utf8")).version;
 const runId = process.env.ANET_TESTWD_RUN_ID || "baseline";
+const ownerAlias = `twd${runId}`;
 const port = Number(process.env.ANET_TESTWD_HUB_PORT);
 if (!port || port === 9200) throw new Error("need a throwaway hub port (never 9200)");
 const alias = `wd-${runId}`;
@@ -231,8 +232,8 @@ async function hungScenario({ statusRow, dispatch, appserverReason, appUrl, code
 }
 
 try {
-  command(["register", "--username", `twd${runId}`, "--password", "pass123456"]);
-  command(["login", "--username", `twd${runId}`, "--password", "pass123456"]);
+  command(["register", "--username", ownerAlias, "--password", "pass123456"]);
+  command(["login", "--username", ownerAlias, "--password", "pass123456"]);
   command(["node", "create", alias, "--runtime", "codex-cli", "--hub", hub]);
   const codexHome = join(project, ".anet", "nodes", alias, "codex-home");
   mkdirSync(codexHome, { recursive: true });
@@ -256,7 +257,7 @@ try {
   const dispatch = async (tag) => {
     const r = await fetch(`${hub}/api/task`, {
       method: "POST", headers: auth,
-      body: JSON.stringify({ alias, from: "twd", network_id: g.network_id, task: `twd-${tag}`, meta: { source: "dashboard-chat", client_request_id: `dreq_${tag.padEnd(32, "x").slice(0, 32)}` } }),
+      body: JSON.stringify({ alias, from: ownerAlias, network_id: g.network_id, task: `twd-${tag}`, meta: { source: "dashboard-chat", client_request_id: `dreq_${tag.padEnd(32, "x").slice(0, 32)}` } }),
     });
     return { status: r.status, body: await r.json().catch(() => ({})) };
   };

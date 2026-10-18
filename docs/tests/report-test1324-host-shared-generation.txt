@@ -1,0 +1,135 @@
+# report-test1324 — host-shared serve ↔ PROVEN generation binding (#1324, parent #1302)
+
+Runtime: Docker, run phase `--network none` (loopback still works). Build phase
+installs the REAL accepted V2 package and a REAL V1 one.
+Date: 2026-10-15 (Asia/Shanghai)
+Code under test: `agent-node/src/runtime/opencode-host-shared-generation.ts`
+Suite: `tests/test1324-host-shared-generation/` (`run.sh` + `integration.ts`)
+
+## What is bound, and by what evidence
+
+An EQUALITY between two independently obtained facts:
+
+1. the running process: `/proc/<pid>/exe` → resolved path + `{dev, ino, size}`
+   (from the #1313 observation: pid/uid/startTicks/listenInode);
+2. the attested package entrypoint:
+   `resolvePinnedOpencodeBinaryAttestation({ generation, requestedBinary })`
+   → `binaryFile {dev, ino, size, sha256}` + `{packageName, packageVersion}` from
+   the existing supported-versions table.
+
+Then, before returning: `revalidatePinnedOpencodeBinary(attestation)` re-counts
+the file, and the process identity (dev/ino/size **and** startTicks) is read a
+second time. A file swap or a PID reuse between the two reads is `unavailable`.
+
+`attest()` / `revalidate()` are REQUIRED caller inputs — the adapter never guesses
+a PATH or a version, and it never runs `--version` on an arbitrary `/proc`
+executable to impersonate a verified package.
+
+Path spelling, `clientBinDir`, a file named `opencode`, `argvContract`, an
+interpreter's name and the caller's expectation are **not** used as evidence; if
+`/proc/<pid>/exe` is an interpreter/wrapper (bun/node/env/sh/bash) the answer is
+`interpreter_or_wrapper_exe`.
+
+## Reasons (all fail-closed)
+
+`unsupported_platform | exe_unreadable | permission_denied | interpreter_or_wrapper_exe |
+attestation_unavailable | executable_identity_mismatch | file_changed_since_attestation |
+observation_drift`
+
+## 本次运行（real evidence, isolated Docker）
+
+```
+v2 attested binary=/usr/local/lib/node_modules/@opencode/cli/bin/opencode.exe version=2.0.22 sha256=32cf5aa0a69a…
+ok   real V2 serve is observable
+ok   real V2 serve binds to v2
+ok   proof carries the attested dev/ino/sha256
+ok   proof keeps the listener binding (pid/startTicks/inode)
+ok   proof names the attested package/version
+ok   a V2 serve asked as v1 is refused — executable_identity_mismatch
+ok   same-argv fake serve is observable
+ok   same-argv fake is refused — interpreter_or_wrapper_exe
+ok   a real V1 serve asked as v2 is refused — executable_identity_mismatch
+ok   revalidate refuses a file swapped after attestation
+ok   a gone listener cannot be bound — exe_unreadable
+PASS: host-shared generation binding
+```
+Unit layer: **10 pass / 0 fail** (every reason + the positive, injected deps) with
+the same file run inside the image.
+
+## Real findings recorded by this suite
+
+- **V1 and V2 share the default `~/.local/share/opencode/opencode.db`**, and V1
+  refuses to start on a V2-schema DB (`Database is not empty and has no session
+  table`). The V1 negative therefore gives V1 its own `XDG_DATA_HOME`; without
+  that isolation the "V1 serve" shape cannot even come up next to V2. This is
+  concrete support for the runbook's warning to pin the real data path per
+  process before any migration.
+- The accepted V2 install's entrypoint is literally `bin/opencode.exe` on Linux
+  for `@opencode/cli@2.0.22` — the binding is by file identity, so a name-based
+  rule would have been wrong in both directions.
+
+## Limits（诚实声明）
+
+- Covers the ADAPTER only. It does not wire `create-node-daemon`, does not decide
+  reuse, does not read credentials, does not touch `close`/lifecycle, and does not
+  start a second server for production. The CLI/Hub create acceptance belongs to
+  the follow-up wiring (#1302).
+- The V2 positive is a real supported install started for the test; it is not a
+  production shared server, and a passing adapter test is not "the create path is
+  wired".
+
+## Review additions (通信牛, 2026-10-15 19:18) — all three落地
+
+1. **Isolated version-probe env/cwd**: the suite now calls the existing resolver
+   with an EXPLICIT `probeEnv` (minimal PATH) and `probeCwd` (`/tmp/gen1324-probe`).
+   The adapter itself constructs no environment and never probes a version: the
+   attestation must arrive from the credential-isolated package path.
+2. **Exact file identity**: `/proc/<pid>/exe` is stat'ed with `{ bigint: true }`
+   and `dev/ino` are compared as **strings** (no float round-trip), matching the
+   attestation's own `dev`/`ino` strings.
+3. **exec behind the same pid/startTicks**: the second `/proc/<pid>/exe` read
+   (dev/ino/size) is what catches it; a dedicated unit case asserts
+   `observation_drift` for an exec that keeps pid and startTicks unchanged.
+
+## Review round 2 (通信牛, 2026-10-15 19:3x) — three P1 blockers, all fixed
+
+1. **The attestation's OWN generation is now checked** (`generation_contract_mismatch`):
+   `(attestation.generation ?? "v1") === generation` and
+   `isAcceptedOpencodeVersionFor(generation, attestation.expectedVersion)` must both
+   hold. Real negative: a REAL V1 attestation (real resolver output) asked as v2 is
+   refused — previously it produced `ok:true, generation:'v2'` with a mixed
+   package/version pair.
+2. **The listener binding is now re-observed before returning** (`observation_drift`):
+   the #1313 observer is called again (same strict rules, no second scanner) and
+   `pid/uid/startTicks/listenInode/host/port` must all match. Real negative: an
+   invented `listenInode: "0"` on the real V2 positive is refused.
+3. **The attested binary gets its own bigint identity** (`attestation_identity_imprecise`
+   / `executable_identity_mismatch`): `statSync(binary, {bigint:true})` must equal the
+   attestation's stored `dev/ino/size` strings (a numbers-based attestation that
+   rounded an inode above 2^53 is refused) **and** equal the running process's
+   identity. `size` is carried and compared as an exact decimal string — never
+   `Number()`. Unit controls cover the 2^53 collision and an exact >2^53 binding.
+
+Verified locally: unit 14 pass / 0 fail; the isolated Docker suite passes with two
+extra real negatives (`generation_contract_mismatch`, `observation_drift`).
+
+## Reviewer regression check (通信牛, 2026-10-16 Asia/Shanghai)
+
+The genuine V1-attestation negative now uses the REAL V1 listener, not a V2
+listener with a different file identity. It requires `generation_contract_mismatch`;
+the fabricated-inode negative requires `observation_drift`. Both use the real
+resolver/revalidator and the adapter's default /proc readers and observer.
+
+Independent Docker check: use `anet-test1324:latest` as the dependency base and
+mount the exact module/unit files from 38a04137 plus the corrected integration
+fixture, with `--network none`: unit **14 pass / 0 fail**, real V2 positive passes,
+both named negatives refuse with their expected reasons. No business-module
+change was made by this fixture correction. Earlier 10/11-pass counts above are
+historical runs, not evidence for the latest source.
+
+Witnessed red: mount the pre-fix module from 13c590c5 under the SAME corrected
+integration fixture. Exit 1, exactly two failed checks: fabricated listenInode
+was accepted; real V1 process + genuine V1 attestation was relabelled as V2.
+This demonstrates that file-identity mismatch cannot mask the generation bug.
+These are targeted exact-file checks, not exact-head Actions or CLI/Hub creation
+acceptance. Production wiring remains #1302, still incomplete.

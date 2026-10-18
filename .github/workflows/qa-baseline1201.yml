@@ -1,0 +1,30 @@
+name: HTTP baseline corrections (TEST-ONLY)
+on:
+  pull_request:
+    paths:
+      - 'server/src/host-supervisor-identity-http.test.ts'
+      - 'server/src/observer-avatar-http.test.ts'
+      - 'server/src/requirements-http.test.ts'
+      - 'tests/test1109-supervisor-identity/*1201*'
+      - '.github/workflows/qa-baseline1201.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  baseline-and-fixed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build exact-source fixture with verified selected baseline blobs
+        run: sg docker -c 'docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -f tests/test1109-supervisor-identity/Dockerfile.qa1201 -t http-baseline1201 .'
+      - name: Reproduce baseline assertions, then all three corrected HTTP files
+        run: |
+          set -euo pipefail
+          sg docker -c 'docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" http-baseline1201' 2>&1 | tee report-test1201-http-baseline.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-http-baseline1201-${{ github.sha }}
+          path: report-test1201-http-baseline.txt
+          if-no-files-found: warn

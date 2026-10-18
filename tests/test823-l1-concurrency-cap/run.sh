@@ -13,6 +13,12 @@
 #
 # 峰值用**事件流**算,不用采样:每次桩调用写下精确的 START / END 纳秒
 # 时间戳,事后排序求最大重叠。采样会漏掉峰值,事件流不会。
+#
+# ── #1333（Vincent 精简测试的下一片）────────────────────────────────────
+# 只缩小本套件对**真实 qa.sh** 的**输入规模**：用 QA_L1_ONLY 圈**固定 6 个已登记
+# 套件**，仍然走原调度器与 docker/npm 桩；**判据一条不改**（非法值回退 / 08 十进制 /
+# 默认值 / 0 逃生门 / 失败 rc / 成功-失败对照）。qa.sh 本身、并发默认值、超时与
+# 套件登记都不在本片范围内。
 set -uo pipefail
 
 ROOT=/workspace
@@ -34,6 +40,23 @@ if [[ "$actual" != "$EXPECT" ]]; then
   echo "      期望 blob $EXPECT,实际 $actual" >&2
   exit 1
 fi
+
+# ── #1333 固定输入规模（6 个已登记套件）─────────────────────────────────
+#
+# 🔴 数量必须**足够区分 cap=2 与 0(不限)**：桩的每条 run 睡 1.2s，6 条在 cap=2 下
+#    峰值 ≤ 2，而在 0(不限)下明显 > 2 —— 下面 `zero` 用例的「峰值 > 2」断言正是靠
+#    这个分辨力。所以不能把条数压到 3（那样两种配置都可能给出同一峰值）。
+# 🔴 选择一旦失效（名字不在 L1_TESTS、或空集合）**必须明确失败**：
+#    qa.sh 对未登记名字会 exit 2，而下面的 sel_check 会因「实际跑到的套件数」
+#    对不上而判红 —— 两条路都不会变成「空集合报绿」。
+T823_ONLY=${T823_ONLY:-"test1627-test-margin test823-l1-concurrency-cap test612-start-admission test674-binding-generation test703-codex-turn-receipts test710-late-task-replies"}
+T823_ONLY_COUNT=$(printf '%s\n' $T823_ONLY | wc -l | tr -d ' ')
+if [[ "$T823_ONLY_COUNT" -lt 4 ]]; then
+  echo "FAIL: T823_ONLY 至少 4 个套件（数量不足无法区分 cap=2 与「不限」）" >&2
+  exit 1
+fi
+T823_SEL=${T823_SEL:-/tmp/t823-selection.txt}
+: > "$T823_SEL"
 
 BIN=/tmp/t823-bin
 EV=/tmp/t823-events
@@ -95,7 +118,9 @@ say ""
 #
 #    起因:`L1-TIMING v1` 的第一份数据显示本套件是 L1 里最慢的一个
 #    (119–120s,占 total 的 13.3%)。而本套件跑的是**真的 qa.sh --l1**,
-#    也就是每次都遍历当前全部 68 个套件 —— `run_case` 被调 5 次,
+#    也就是每次都遍历当时的**全部**套件 —— `run_case` 被调 5 次,
+#    （#1333 起改为固定 6 个套件的 QA_L1_ONLY 子集：判据不变，规模不再随
+#      L1_TESTS 增长而线性放大）,原注释保留如下:
 #    所以 **L1 每加一个套件,这里要多跑它 5 遍**。
 #    那个「每套件约 +1.8s」的边际成本此前是**从总数反推的估计**,不是实测。
 #    这几行让它变成实测。
@@ -114,10 +139,13 @@ run_case() {                  # $1=用例名 $2=QA_L1_MAX_PAR 取值(空=不设)
   : > "$EV"
   local out=/tmp/t823-$name.log
   if [[ -n "${val:-}" || "${2+set}" == "set" ]]; then
-    QA_L1_MAX_PAR="$val" bash "$ROOT/scripts/qa.sh" --l1 > "$out" 2>&1 || true
+    QA_L1_ONLY="$T823_ONLY" QA_L1_MAX_PAR="$val" bash "$ROOT/scripts/qa.sh" --l1 > "$out" 2>&1 || true
   else
-    bash "$ROOT/scripts/qa.sh" --l1 > "$out" 2>&1 || true
+    QA_L1_ONLY="$T823_ONLY" bash "$ROOT/scripts/qa.sh" --l1 > "$out" 2>&1 || true
   fi
+  # #1333 —— 记下**本轮实际跑到几个套件**，供 sel_check 断「选择没失效」。
+  #   写文件而不是变量：run_case 是在命令替换的子 shell 里跑的（见上面 T823_TIMING 那段）。
+  printf '%s=%s\n' "$name" "$(grep -c '^· L1 done' "$out" 2>/dev/null || echo 0)" >> "$T823_SEL"
   local p; p=$(peak "$EV")
   # 只取 `= ` 之后那个数。原来用 grep -oE '[0-9]+' 会先命中 "L1" 里的 1 ——
   # 判据没在已知输入上校准过,于是四个用例全部报 1。
@@ -133,10 +161,24 @@ check() {                     # $1=用例 $2=实测 $3=期望 $4=说明
   else say "  FAIL $1: $4 —— 期望 $3,实测 $2"; fails=$((fails+1)); fi
 }
 
+# #1333 —— 「选择没失效」的守卫：本轮实际跑到的套件数必须等于固定子集大小。
+# 空集合、名字写错（qa.sh 对未登记名字 exit 2）、或 --l1 根本没跑到 L1，
+# 都会让计数对不上 ⇒ 明确红，而不是「0 个套件也 ALL PASS」。
+sel_check() {                 # $1=用例名
+  local got; got=$(sed -n "s/^$1=//p" "$T823_SEL" | tail -1)
+  if [[ "${got:-0}" -eq "$T823_ONLY_COUNT" ]]; then
+    say "  ok   $1: 本轮实际跑到 ${got}/${T823_ONLY_COUNT} 个套件（选择未失效）"
+  else
+    say "  FAIL $1: 选择失效 —— 实际只跑到 ${got:-0} 个套件（期望 ${T823_ONLY_COUNT}）；空集合/未登记名字都必须明确失败"
+    fails=$((fails+1))
+  fi
+}
+
 say "## 用例"
 
 IFS='|' read -r p eff warned <<< "$(run_case cap2 2)"
 say "- cap=2      峰值=$p 生效值=$eff 告警=$warned"
+sel_check cap2
 check cap2 "$eff" 2 "生效上限"
 [[ "$p" -le 2 && "$p" -ge 1 ]] && say "  ok   cap2: 峰值 $p ≤ 2" || { say "  FAIL cap2: 峰值 $p 超过上限 2"; fails=$((fails+1)); }
 
@@ -157,6 +199,7 @@ say ""
 say "## #1599 失败套件的 rc"
 
 T823_RUN_RC=7 run_case failrc 2 >/dev/null
+sel_check failrc
 _fail_out=/tmp/t823-failrc.log
 _rc_seen=$(sed -n 's/.*· L1 done .* rc=\([0-9][0-9]*\).*/\1/p' "$_fail_out" | sort -u | tr '\n' ',')
 say "- docker run 恒返回 7 时,打印出的 rc 集合 = ${_rc_seen:-（一个 L1 done 都没有）}"
@@ -169,15 +212,18 @@ check failrc_zero "$_rc_ok" "0," "成功套件仍然是 0(否则恒非零的实�
 
 IFS='|' read -r p eff warned <<< "$(run_case bad two)"
 say "- 非法值 two  峰值=$p 生效值=$eff 告警=$warned"
+sel_check bad
 check bad_warn "$warned" 1 "必须告警"
 check bad_eff  "$eff" "$nproc_val" "退回默认(不是静默不限)"
 
 IFS='|' read -r p eff warned <<< "$(run_case octal 08)"
 say "- 前导零 08   峰值=$p 生效值=$eff 告警=$warned"
+sel_check octal
 check octal_eff "$eff" 8 "按十进制解释,不是八进制报错/不限"
 
 IFS='|' read -r p eff warned <<< "$(run_case zero 0)"
 say "- 0(不限)   峰值=$p 生效值=$eff 告警=$warned"
+sel_check zero
 check zero_eff "$eff" 0 "0 保留为「不限」的逃生口"
 # 只断言"生效值是 0"不够 —— 那只证明它被这么解析,没证明它真的放开了并发。
 # 拿 cap=2 的峰值当对照:不限时必须明显更高。

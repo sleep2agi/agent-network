@@ -120,6 +120,99 @@ function happyStub(capturePath: string): string {
   `;
 }
 
+describe("openOpencodeRuntime — selected model", () => {
+  for (const scenario of ["new", "load", "lost-load", "no-model", "unavailable", "unsupported", "loaded-unavailable"] as const) {
+    test(`${scenario}: bind before publication, never fall back on model errors`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "opencode-model-"));
+      const launchBase = makeLaunchBase("model");
+      const workDir = join(root, "node");
+      const capture = join(root, "requests.jsonl");
+      const ack = join(root, "model-ack");
+      const failed = ["unavailable", "unsupported", "loaded-unavailable"].includes(scenario);
+      const resumed = ["load", "lost-load", "loaded-unavailable"].includes(scenario);
+      const binary = makeStubBinary(launchBase, `
+        import { appendFileSync, writeFileSync } from "fs";
+        let buf = "";
+        process.stdin.on("data", chunk => {
+          buf += chunk;
+          while (buf.includes("\\n")) {
+            const i = buf.indexOf("\\n");
+            const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+            appendFileSync(${JSON.stringify(capture)}, JSON.stringify(req) + "\\n");
+            const respond = payload => process.stdout.write(JSON.stringify({jsonrpc:"2.0", id:req.id, ...payload}) + "\\n");
+            if (req.method === "session/load" && ${JSON.stringify(scenario)} === "lost-load") {
+              respond({error:{code:-32602,message:"fixture session gone"}});
+            } else if (req.method === "session/new" || req.method === "session/load") {
+              respond({result:{sessionId:req.params.sessionId || "ses_selected"}});
+            } else if (req.method === "session/set_model") {
+              setTimeout(() => {
+                if (${failed}) respond({error:{code:${scenario === "unsupported" ? -32601 : -32602},message:"fixture selected model refused"}});
+                else { writeFileSync(${JSON.stringify(ack)}, "ack"); respond({result:{}}); }
+              }, 25);
+            } else respond({result:{}});
+          }
+        });
+      `);
+      let client: OpencodeAcpClient | undefined;
+      let published = false;
+      try {
+        mkdirSync(workDir, { mode: 0o700 });
+        const opening = openOpencodeRuntime({
+          cwd: root, workDir, binary, launchBase,
+          model: scenario === "no-model" ? undefined : "custom-provider/exact-model",
+          sessionId: resumed ? "ses_existing" : undefined,
+          onClient: value => { client = value; },
+          onSession: () => {
+            expect(scenario === "no-model" || existsSync(ack)).toBe(true);
+            published = true;
+          },
+        });
+        if (failed) {
+          await expect(opening).rejects.toThrow("refusing default-model fallback");
+          expect(published).toBe(false);
+          expect(client?.isRunning).toBe(false);
+          expect(runtimeLaunchArtifacts(launchBase)).toEqual([]);
+        } else {
+          const session = await opening;
+          expect(session.sessionId).toBe(resumed && scenario !== "lost-load" ? "ses_existing" : "ses_selected");
+          expect(published).toBe(true);
+        }
+        const requests = readFileSync(capture, "utf8").trim().split("\n").map(line => JSON.parse(line));
+        expect(requests.map(row => row.method)).toEqual([
+          "initialize", ...(resumed ? ["session/load"] : []),
+          ...(!resumed || scenario === "lost-load" ? ["session/new"] : []),
+          ...(scenario === "no-model" ? [] : ["session/set_model"]),
+        ]);
+        if (scenario !== "no-model") expect(requests.at(-1).params).toEqual({
+          sessionId: resumed && scenario !== "lost-load" ? "ses_existing" : "ses_selected",
+          modelId: "custom-provider/exact-model",
+        });
+      } finally {
+        await client?.stop("SIGKILL");
+        expect(runtimeLaunchArtifacts(launchBase)).toEqual([]);
+        rmSync(launchBase, { recursive: true, force: true });
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test("explicit empty or padded models fail before spawning", async () => {
+    for (const model of ["", " ", " openai/gpt-4.1", "openai/gpt-4.1 "]) {
+      let spawned = false;
+      await expect(openOpencodeRuntime({ cwd: "/tmp", workDir: "/tmp", model,
+        onClient: () => { spawned = true; },
+      })).rejects.toThrow("selected model must be non-empty");
+      expect(spawned).toBe(false);
+    }
+  });
+
+  test("headless CLI forwards the resolved node model into the ACP opener", () => {
+    const cli = readFileSync(new URL("../../cli.ts", import.meta.url), "utf8");
+    const opening = cli.slice(cli.indexOf("const opened = await openOpencodeRuntime({"));
+    expect(opening.slice(0, opening.indexOf("onClient:"))).toContain("model: MODEL,");
+  });
+});
+
 describe("openOpencodeRuntime — cwd and tool policy", () => {
   test("safe default keeps spawn + ACP session in one external launch workspace", async () => {
     const root = mkdtempSync(join(tmpdir(), "opencode-runtime-safe-"));

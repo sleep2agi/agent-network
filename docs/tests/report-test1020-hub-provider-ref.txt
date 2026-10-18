@@ -1,0 +1,49 @@
+Hub saved-key reference reuse — TEST ONLY
+OBSERVED_AT=2026-10-11T14:47Z (22:47 Asia/Shanghai)
+Base main b7cf295ebe12188d0129e73d4a10dc66781c56eb
+Scope #1020 / #907; no duplicate implementation ticket.
+
+Independent existing suite tests/test907-hub-provider/Dockerfile; public pinned
+Bun/Node bases, lockfiles installed only inside Docker. Image manifest
+sha256:13282e4df6859d2698b82dae12b7c7b18da2455b38a49d57f09a6ec0d2913f72.
+All runs sg docker, --rm --init --network none. No host npm/global package change.
+
+Registered real Hub handlers + encrypted SQLite vault + actual daemon queue +
+compiled source CLI private store: 6/6 PASS, 41 assertions. Existing tool-audience
+HTTP compatibility suite after core: 12/12 PASS, 320 assertions.
+Increment: mounted only updated test source readonly into the same image;
+6/6 PASS, 43 assertions, including DaemonProviderStore.withApiKey callback
+matching exact synthetic key and base URL. No vendor/model request.
+
+Covered named-key upsert then ref-only Provider save, metadata-only reads with
+opt-in references, unchanged old-reader shape, actual confirmed Daemon store
+receipt, missing/ambiguous refs, changed refs, and plaintext edit detachment
+without overwriting the reusable shared key. Existing role/network/CAS/protocol
+boundaries remain checked. No new DB schema, service or automatic node mutation.
+
+Cleanup: Docker containers removed; synthetic DB/private state removed by suite.
+No production config, token, identity, running node, model call or restart touched.
+Not a formal Hub125 package, deployment, native client install, universal runtime
+adapter, background credential rotation, or published release claim.
+
+Increment OBSERVED_AT=2026-10-11T14:58:36Z (22:58:36 Asia/Shanghai)
+Reused independent tests/test906-daemon-provider-management/Dockerfile.native;
+TEST1020_HUB_REFERENCE_CORE=1 selects only the reference-to-node core. The default
+full account lifecycle mode and its assertions remain unchanged. Native image:
+sha256:0db463cf7419991356bd3aa6308dd1d33c6ed499042b1c065075d2574b9073f2.
+Real Codex 0.159.2, source-built CLI/runtime and Hub; nonroot runner, --network
+none, synthetic HTTPS endpoints and credentials entirely inside Docker.
+
+PASS: named Hub vault key -> ref-only Provider -> explicit confirmed Daemon bind
+-> exact Provider selection/apply -> real CLI stop/start -> native Codex thread
+resume with the same thread ID. Two local synthetic Responses turns proved the
+old and new exact endpoint/model/key, with the new selection inherited from the
+applied config rather than overridden by the resume request. The API-key node
+did not gain auth.json. The application journal was removed after success.
+
+Environment, isolated registration and lifecycle prerequisites passed before
+the dependent apply check. Exit 0, --rm container cleanup; local Hub/TLS peers
+and private fixture state stopped/removed. No account rotation tests rerun in
+this mode, no vendor calls, real OAuth, production identity or host node changes.
+This native proof does not imply the feature PR was merged, Hub125 published,
+the frontend native package installed, or other runtime protocols supported.

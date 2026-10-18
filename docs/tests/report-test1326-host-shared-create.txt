@@ -1,0 +1,70 @@
+#1326 / parent #1302 — daemon creation consumes host-shared admission
+
+Local source validation, 2026-10-16 Asia/Shanghai.
+Dependency base: existing anet-test1324:latest (real @opencode/cli@2.0.22 and
+opencode-ai@1.18.34). Exact current agent-node/src and the new fixture mounted
+read-only; every run uses --network none. This is targeted source validation,
+not a newly built exact-head image or exact-head Actions result.
+
+Unit layer: create-node-daemon.test.ts, opencode-server-reuse.test.ts,
+opencode-host-shared-generation.test.ts — 153 pass / 0 fail, 356 expects.
+
+Real handler layer: 51 named assertions, PASS. Every request enters the real
+handleCreateNodeDoorbell, reads the real registry, runs the default observer,
+generation binder, credential-free package probe/revalidation and admission,
+then reads the product-written child config at spawnChild. The injected spawn
+throws before execution; the handler must ACK failed, never started. The
+get_create_request / ack transport is a fixture, not a real Hub.
+
+Witnesses:
+- Real V2 host A stays alive; new B and C both inherit A's connection, with
+  distinct node IDs/tokens. clientBinDir is not copied to either config.
+- Explicit new-server and legacy V1 do not inherit shared connection fields.
+- Dead registered listener, real V1 listener, interpreter/script listener, and
+  foreign-uid listener do not copy URL or password-file fields into the child.
+- Foreign process uses setpriv and an explicit /proc/<pid>/status assertion
+  proves uid 65534 before testing refusal. Incomplete cross-uid observation is
+  permission_denied; it is never mistaken for successful same-uid ownership.
+- Audit records decision/reason and observed pid/port, omits password/path;
+  each version-probe launch root is discarded after selection.
+- Creating nodes leaves the host listener and registry intact. No stop/close
+  implementation was modified; full shared-runtime close coverage is separate.
+
+Preflight in isolated space/py-noapp:t with read-only source: no-bare-rm-rf
+clean (443 shell files); hardcoded-from-session clean; mutation-pins GREEN
+(754 anchors, unchecked 4 at baseline); L1 trigger coverage green (82 suites).
+Local typecheck was not available: the cached runtime image has no TypeScript
+compiler. The existing Actions agent-node-typecheck ratchet must supply that
+result; no local typecheck pass is claimed.
+
+Limits: no actual child launch, CLI/Hub/TUI turn, npm publication, production
+restart/adoption, or full recovery claim. This slice wires daemon creation,
+not CLI direct creation/explicit shared connections. Broken-registry handling
+for explicit new-server is the independent PR2778, not changed here. The new
+Dockerfile and qa.yml matrix registration provide an exact-source suite for
+Actions; its future result must be recorded separately.
+
+CI correction after 8bddb085: the non-root unit job failed the older #652
+fixture because it expected a disk record plus a version-only shell stub to
+populate shared connection fields. That fixture has no listening server. Its
+PATH-prefix and unchanged-daemon-PATH assertions are retained; it now requires
+both shared fields absent, including the explicit-new case. The independent
+real-V2 positive above still requires admitted fields, so an always-fallback
+implementation cannot satisfy both layers. No timeout or admission rule changed.
+
+The #652 file is now included in this suite's unit command. Targeted Docker
+replay: 27 pass / 0 fail (172 expects); combined four-file replay: 180 pass /
+0 fail (528 expects, 2.14s). The original 153-pass run above is historical.
+The separate real-client failure at 8bddb085 was npm ci ECONNRESET during image
+build (job 116638379593); it did not execute client assertions. Record the
+rebased head's actual CI results separately; neither failure is erased.
+
+Main rebase validation (base ebc3fa5917ea73df3890bfdfbcbbf13bb9b16efa):
+PR2787 generation binding and PR2778 explicit-new registry escape are now
+in main. Four-file source replay: 182 pass / 0 fail, 550 expects (2.40s);
+the base added two unit cases. Real handler layer: 58 named checks, PASS.
+Added composition controls: malformed registry rejects default creation before
+config/spawn, while explicit new-server reaches launch without shared fields.
+Both non-blocking review clarifications are now source comments: preparation
+writes private node/probe directories; only bound generation enters the guard.
+This remains configuration evidence, not a full launched Hub/CLI/TUI result.

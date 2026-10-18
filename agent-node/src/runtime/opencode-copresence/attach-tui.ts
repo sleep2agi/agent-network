@@ -76,6 +76,7 @@ export function previousAttachRecordPath(workDir: string): string {
 export function renderAttachRecordShell(recordPath: string, gen: string): string[] {
   const q = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
   return [
+    "umask 077",
     `export ${ATTACH_GEN_ENV}=${q(gen)}`,
     `__anet_ticks=$( { cut -d')' -f2- /proc/$$/stat 2>/dev/null || true; } | awk '{print $20}' )`,
     `printf '{"pid":%d,"startTicks":%s,"pane":"%s","gen":"%s"}\\n' "$$" "\${__anet_ticks:-null}" "\${TMUX_PANE:-}" ${q(gen)} > ${q(recordPath)}.tmp-$$ && mv -f ${q(recordPath)}.tmp-$$ ${q(recordPath)}`,

@@ -362,7 +362,7 @@ curl https://hub.example/api/jobs/job_abc123/progress
 1. **SDK schema 漂移**：claude-agent-sdk 0.x 仍在迭代，新 SDKMessage 变体可能被加入。adapter 用 default branch 兼容未知 kind（emit `kind: 'unknown'`），避免 crash。
 2. **progress 推送 spam**：长任务一秒可产生几十个 SDKMessage，单 task 一万条 progress 撑爆 SQLite。**强制 2s throttle + 客户端可订阅特定 kind 子集**（`/api/jobs/:id/progress?kinds=tool_start,error`）。
 3. **多租户串频道**：commhub SSE 默认按 alias 隔离，但 SaaS 场景需按 network_id 进一步隔离 —— `report_progress` 必须校验 caller `ntok_` 的 network。
-4. **回滚**：P0 完全独立可关；P1a 起的 schema 变更需要标准 migration（参考 [docs/v3-postgresql-design.md](../v3-postgresql-design.md) 的迁移路径，但 SQLite-only 路径简单：新表加索引，旧版客户端忽略）。
+4. **回滚**：P0 完全独立可关；P1a 起的 schema 变更需要标准 migration（参考 [docs/archive/v3-postgresql-design.md](../archive/v3-postgresql-design.md) 的迁移路径，但 SQLite-only 路径简单：新表加索引，旧版客户端忽略）。
 
 ## 测试
 

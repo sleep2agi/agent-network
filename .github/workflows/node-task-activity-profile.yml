@@ -1,0 +1,27 @@
+name: Node task activity profile
+on:
+  pull_request:
+    paths:
+      - 'deploy/node/task-activity173-139/**'
+      - 'tests/test1113-node-profile/**'
+      - '.github/workflows/node-task-activity-profile.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/node/task-activity173-139/**'
+      - 'tests/test1113-node-profile/**'
+      - '.github/workflows/node-task-activity-profile.yml'
+permissions:
+  contents: read
+jobs:
+  profile:
+    name: Node task activity profile (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - name: Install locked public pair and probe isolated entrypoints
+        run: >-
+          sg docker -c 'docker build -f tests/test1113-node-profile/Dockerfile
+          -t node-task-activity-profile . && docker run --rm --network none
+          node-task-activity-profile'

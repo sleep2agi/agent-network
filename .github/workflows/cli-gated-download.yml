@@ -1,0 +1,96 @@
+name: official CLI gated download
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/cli-gated-download.yml'
+      - '.github/scripts/*gated-cli-download.py'
+      - '.github/tests/gated-cli-download/**'
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Full40 main source SHA of the original release.yml build'
+        required: true
+        type: string
+      run_id:
+        description: 'Original main release.yml run with all four gates SUCCESS'
+        required: true
+        type: string
+      version:
+        description: 'Exact CLI preview version'
+        required: true
+        type: string
+      sha256:
+        description: 'Expected inner gated tarball SHA256 (not artifact ZIP digest)'
+        required: true
+        type: string
+      publish:
+        description: 'Create immutable GitHub CLI tarball download; never publish npm'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: cli-gated-download Docker contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f .github/tests/gated-cli-download/Dockerfile -t cli-download-contract .
+      - run: docker run --rm --network none cli-download-contract
+
+  publish:
+    needs: contract
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: sleep2agi/agent-network
+      PUBLISH: 'true'
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      GATED_RUN: ${{ inputs.run_id }}
+      VERSION: ${{ inputs.version }}
+      EXPECTED_SHA256: ${{ inputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Retain reviewed download guard
+        run: cp .github/scripts/verify-gated-cli-download.py "$RUNNER_TEMP/verify-gated-cli-download.py"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - name: Verify exact main source before reading artifact
+        run: bash .github/scripts/verify-release-main.sh
+      - name: Read original release and download its gated artifact
+        run: |
+          [[ "$GATED_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$GATED_RUN" > release-run.json
+          gh api "repos/$GH_REPO/actions/runs/$GATED_RUN/jobs?per_page=100" > release-jobs.json
+          build_job=$(jq -r '.jobs[] | select(.name == "build tarball") | .id' release-jobs.json)
+          [[ "$build_job" =~ ^[0-9]+$ ]]
+          # Raw ANSI stays in a private job file, never rendered to a terminal.
+          gh api --allow-escape-sequences "repos/$GH_REPO/actions/jobs/$build_job/logs" > release-build.log
+          gh run download "$GATED_RUN" --name gated-tarball --dir download
+          python3 "$RUNNER_TEMP/verify-gated-cli-download.py" \
+            --commit "$RELEASE_COMMIT" --run-id "$GATED_RUN" --version "$VERSION" \
+            --sha256 "$EXPECTED_SHA256" --directory download \
+            --build-log release-build.log > download-notes.md
+      - name: Publish exact gated tarball without changing npm
+        run: |
+          bash .github/scripts/verify-release-main.sh
+          tag="cli-v$VERSION"
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo '::error::Immutable release tag already exists; no overwrite'
+            exit 1
+          fi
+          gh release create "$tag" --target "$RELEASE_COMMIT" --prerelease \
+            --title "ANet CLI $VERSION — official gated download" \
+            --notes-file download-notes.md download/*.tgz

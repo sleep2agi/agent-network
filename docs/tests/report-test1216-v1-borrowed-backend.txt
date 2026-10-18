@@ -1,0 +1,151 @@
+TEST-ONLY #1216 — actual V1 borrowed backend API and scoped transport
+Observed 2026-10-14; no production/installed runtime or live credential change.
+
+SOURCE
+PR https://github.com/sleep2agi/agent-network/pull/2737
+Base 0db346e64944229488c7b653de96656b2585824d
+Final head 362fd1745c63cd4622429da9f78256685927d86a
+CI test-merge 9afe8fb6a2951b58e806f80b3d43c56f9866a6e7
+Ordinary SHA-locked main merge 3bb3e5cb06ce9ea1dacb6bcb86db59d7cd572203
+Merged 2026-10-14T07:11:33Z; final head confirmed fresh main ancestor.
+CI test-merge and actual main tree match; no executable/package release.
+
+RESULT
+Both exact V1 versions 1.18.1 and 1.18.34: SUCCESS.
+Seven focused suites / fourteen Docker jobs; all artifacts downloaded/read.
+New actual-backend fixture per version: 8 native checks; 57 owned spawn,
+FIFO/reply-ownership/deadline regressions, 0 fail. Existing test651 positive
+controls: 6 + 9 pass; all 3 deliberate abort mutations were detected RED
+for the expected message/abort trace, then source restored; OVERALL PASS.
+Expected mutation failures are negative evidence, not baseline failures.
+Other suites per version: borrowed admission 10 native checks; scoped MCP 9;
+Host launcher 7; registry admission JSON reports 29 refusals (27 grouped);
+checkpoint 6 units + 7 native checks; shared-read 1 unit + 3 native checks,
+with another 37 owned regressions on 1.18.34. All positive controls pass.
+
+Eight actual backend checks:
+1. Production entry rejects V2/new/import/directory/model/owned-credential/
+   cohort/foreign native-200/missing-404 before fallback or config writes.
+2. Two existing exact native sessions open through the real production API,
+   without serve spawn, provider env or an attach launcher.
+3. Scoped original synthetic MCP auth and explicit model; same-bridge FIFO,
+   simultaneous sibling, and authenticated sender provenance retained.
+4. Saved-binding drift rejects POST even with timeout=0. Borrowed notify
+   refuses; no global toast broadcast fallback.
+5. Real external synthetic REST human turn stays running through admission
+   deadline: no network prompt or abort, sibling can continue.
+6. Closing/reopening A preserves complete exact history and original config;
+   disconnects only A leased native MCP, leaves B and Host alive.
+7. In-flight saved-identity drift makes completion unknown, blocks further
+   prompts, revokes own capability, preserves recovery; sibling/Host survive.
+8. Close during an external busy turn refuses native disconnect and retains
+   controls; that turn completes and sibling/Host remain alive.
+
+REPRODUCIBLE INPUTS
+Source-bound per-suite Dockerfiles, non-root runtime, --network none, --init.
+Bun 1.3.14 image digest e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4.
+Exact opencode-ai/native package SRI checked against
+ tests/test1194-v1-shared-feasibility/package-integrity.json.
+Agent-node npm dependencies use committed package-lock.json (npm ci).
+Only synthetic local model, MCP and auth fixtures; no vendor/real Hub traffic.
+Build/run and six recovery questions: deploy/node/opencode-v1-host/README.md.
+Each report source=CI test-merge above; native version asserted inside Docker.
+
+FINAL CI RUN/JOB/ARTIFACT RECEIPTS
+backend: run 38525948842 SUCCESS
+  job 115726204831 backend-lifecycle (1.18.34) success
+  job 115726205315 backend-lifecycle (1.18.1) success
+  artifact 11876012106 TEST-ONLY-v1-borrowed-backend-1.18.34-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:ced835deb4a185fc0b2e0b46007f99ab146bac1f16962c167bf52b4f072d023c
+  artifact 11875568858 TEST-ONLY-v1-borrowed-backend-1.18.1-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:b660eccfe6f9a9c0db4606a74833dedbbc48b403e716799204051497202a398e
+borrowed-admission: run 38525948818 SUCCESS
+  job 115726204608 admission-lifecycle (1.18.1) success
+  job 115726204844 admission-lifecycle (1.18.34) success
+  artifact 11876445595 TEST-ONLY-v1-borrowed-admission-1.18.1-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:822aeeaa1e690d4602303aac33cff995a4142dc082e0a143e22146ef5aa1300d
+  artifact 11875981990 TEST-ONLY-v1-borrowed-admission-1.18.34-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:8c9d7b948ba31dcecee19bd13f7ce1cca2b85cf7581feefdb4648ca312e7df10
+mcp: run 38525948770 SUCCESS
+  job 115726204314 scoped-mcp (1.18.1) success
+  job 115726204697 scoped-mcp (1.18.34) success
+  artifact 11876196192 TEST-ONLY-v1-scoped-mcp-1.18.34-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:ec7ee40925e05207547b8af7cc7a9790ccca480bc2aa153f63d2daff6f8c388a
+  artifact 11875841608 TEST-ONLY-v1-scoped-mcp-1.18.1-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:3e54c6252c1fcb6c4d319f646fbc98f0e0a34af67a332549b09a1fa441ce78be
+launcher: run 38525948659 SUCCESS
+  job 115726204222 launcher (1.18.1) success
+  job 115726204562 launcher (1.18.34) success
+  artifact 11876560150 TEST-ONLY-v1-host-launcher-1.18.34-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:5a38ce5cd34d7d5cd6192402bcd08bc4c5b2c5315dacba698ccfffe966e40796
+  artifact 11875613155 TEST-ONLY-v1-host-launcher-1.18.1-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:6724600bf5c886d925d12a18d347eeab740cbc521e463cf1cd4e42cea3bc6b9c
+host-admission: run 38525948757 SUCCESS
+  job 115726204922 admission (1.18.34) success
+  job 115726205228 admission (1.18.1) success
+  artifact 11876136571 TEST-ONLY-v1-host-admission-1.18.1-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:c210604de2f0e1108e1c21489ca027b5ce6f9a91b815716bb734dc799c0f072d
+  artifact 11875986380 TEST-ONLY-v1-host-admission-1.18.34-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:acccb921f678fef4311678414e556fb54a8b53ca20bb96fbb05fb1a6f7592ded
+checkpoint: run 38525948784 SUCCESS
+  job 115726204897 checkpoint (v1181) success
+  job 115726205167 checkpoint (v11834) success
+  artifact 11876330668 TEST-ONLY-v1-checkpoint-v1181-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:ca1525ae8ae3c41cf6cddf50b1dd773b03fdce8d4c25cfd4101428b7eede9fc5
+  artifact 11875588541 TEST-ONLY-v1-checkpoint-v11834-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:9f8858941f372c691b3ac2782f5668b924ddf3cf2f60fbd36c4ffdb525ab4463
+shared-read: run 38525948862 SUCCESS
+  job 115726204991 shared-read (1.18.34) success
+  job 115726205376 shared-read (1.18.1) success
+  artifact 11875832122 TEST-ONLY-v1-shared-read-1.18.1-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:f7efbaab127d46b2361cbff1b40606deaed20eff1b4fb5b906b252210e3a92ae
+  artifact 11875817095 TEST-ONLY-v1-shared-read-1.18.34-9afe8fb6a2951b58e806f80b3d43c56f9866a6e7 sha256:79adedfedc94f6728d4e6fa8d9d3590c6f3a2ee26d4518192b08d92fad066fae
+
+FAILURES / CORRECTIONS
+Initial backend head 1601a8d49992118ceade26f5678be70257c11eca had two
+native backend jobs SUCCESS with 7 checks + 57 regressions each; this did
+not qualify later reviewed changes. Review added external-busy close refusal
+(ca7dab1662c8323a4d51c79039c0e174b89e6299) and immediate scope refusal
+with timeout=0 (0ae5df3c40caf7a15515cac0a0a4f171b177e3d0).
+Actual mutation-pin FAILURE on head 0ae5df3c4: run 38525571296,
+job 115725005037. test651's old direct abortOpenCodeSession call anchor
+had count=0 after refactoring. Final commit repointed it to abortOwnTurn
+without weakening the assertion or baseline, and ran the three original
+mutations in a private writable Docker source copy. Final mutation-pin and
+all focused jobs SUCCESS. No source/native baseline failure was hidden.
+Own obsolete QA run 38525571371 and final broad duplicate 38525948907
+were cancelled after scoped verification; cancellation is not whole-QA PASS.
+Main-push broad QA, if cancelled, is also not claimed as PASS.
+
+SCOPE / REMAINING GATES
+This is the actual borrowedV1 API branch of openOpenCodeCopresenceRuntime,
+not another standalone admission helper. Default owned V1 remains on its
+old topology; exact-session status/history/prompt/abort goes through the
+binding/Host/config/MCP guard and encoded directory. Arbitrary creation,
+fork/latest, config/global mutation and directory disposal are unavailable.
+The original runtime has no event subscription lane.
+
+The FIFO/causal-parent/deadline core is reused; native human idle-to-POST race,
+landed/not-landed/unknown timeout and own-only abort/abort-failure qualification
+are next #1219. Owned fake-service abort/ownership tests do not close that
+borrowed-native gate. No shared-Host CLI flag/config or TUI launch/ownership
+is exposed: attachScriptPath is empty, notify explicitly refuses. No original
+person/model/Hub/native Windows/macOS canary or migration was run. Complete
+#1195 and #1196 final checkpoint/rollback/adoption gates remain open.
+
+Same-UID/shared-password trust is cooperative; directory selection is not
+upstream tenant authorization, native MCP names are not trusted remote-URL
+or initiating-turn attestation, and admission/close checks are not atomic
+exclusion against a human TUI racing the bridge. Real credential isolation
+and original Owner migration/window need their own authority and evidence.
+Unknown writes/leases retain recovery; no restart, takeover or replay follows.
+
+LATE FULL E2E RECEIPT — not a green global baseline
+Final source standalone checks: 49 SUCCESS, 1 FAILURE (e2e).
+Run 38525948785 / job 115726204725 ended 2026-10-14T07:16:09Z;
+root's final follow-up inspection observed this at 07:24:22Z, after the
+normal scheduler reply. Do not backdate or overwrite that original reply.
+Actual broad legacy E2E: 242 pass / 39 fail. Base 102/32, Networks 22/5,
+Loop runtime 20/1, Loop self-management 45/1; other three groups green.
+Known traces: user netuser_a versus requested sender tester, and m4-tester
+versus m4-harness, refused as from_session_identity_mismatch. Channel /loop
+also lacked goals.json; inspect full artifacts before attributing all 39
+failures to one cause. No exact baseline replay was run, and complete causal
+qualification remains open; this is not evidence of a green full product.
+Diff 0db346e64944229488c7b653de96656b2585824d..362fd1745c63cd4622429da9f78256685927d86a
+confirms no change to server/, agent-network/, the four legacy E2E harnesses,
+tests/Dockerfile or .github/workflows/e2e-docker.yml. These old sender fields
+remain in the fixtures; the known failures do not exercise the borrowed API.
+The 14 directly scoped V1 Docker results above remain SUCCESS, not a global
+E2E PASS claim. #1204 qualified only its separate narrow REST fixture.
+New CommHub #1221 tracks all legacy E2E differences, preserving production
+identity/ACL guards, spoofing rejection and original assertions. Next work
+prioritizes #1221, then resumes #1219. No production change, replay, real
+credential access or new package release followed this late observation.

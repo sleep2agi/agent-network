@@ -1,0 +1,37 @@
+name: Scheduled outcome producer guidance
+on:
+  pull_request:
+    paths:
+      - 'server/src/scheduled-*.ts'
+      - 'server/src/schedule-agent.ts'
+      - 'server/src/requirement*.ts'
+      - 'server/src/task-access.ts'
+      - 'server/src/db.ts'
+      - 'server/src/tools.ts'
+      - 'server/src/auth.ts'
+      - 'server/src/server.ts'
+      - 'server/package*.json'
+      - 'tests/test1284-outcome-guidance/**'
+      - 'tests/test601-hub-scheduled-tasks/**'
+      - '.github/workflows/scheduled-outcome-guidance.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  guidance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build independent pinned fixture
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1284-outcome-guidance/Dockerfile -t scheduled-outcome-guidance-test .
+      - name: Real SQLite HTTP MCP backoff and compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --init --network none -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} scheduled-outcome-guidance-test 2>&1 | tee report-test1284.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-scheduled-outcome-guidance-${{ github.sha }}
+          path: report-test1284.txt

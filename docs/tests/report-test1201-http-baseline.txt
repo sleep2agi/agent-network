@@ -1,0 +1,41 @@
+#1201 HTTP QA baseline corrections, 2026-10-14
+Original observed broad run: 38506584050, jobs115666011746/115666013312.
+Reviewed base main: 5cb8db3d4d2d907d43a7fd47d926cf323fa1df41.
+Legacy heartbeat test inserted NULL into a fresh NOT NULL table. Use a real
+temporary SQL table for historical nullable data and route only the production
+heartbeat SELECT to it, retaining real node/token queries and MCP/REST entry.
+No production schema, resolver, permissions or migration is changed.
+Observer used a human token with an Agent sender alias. Keep strict 403 and
+identity mismatch assertion; actual bound node token dispatches third-party
+traffic, with original observer summary/no-content assertions preserved.
+The due normalization test's failure was its exact capability list, missing
+the shipped tag_status_snapshot field. Date/time normalization and invalid
+inputs remain unchanged; capability list stays an exact full comparison.
+Earlier Hub shorthand 'date filtering extra row' is superseded by this diagnosis.
+TEST-ONLY Docker binds current source and hashes of three exact base Git blobs;
+requires expected baseline assertion failures before corrected full-file runs.
+No local runtime or production tests run. Static source/diff/shell review only.
+Final selected results: candidate070ace6af375273b27947eff1f490e23b2f93641
+normally merged PR2723/main3509b22ceb99cee17073337662f66a7250caec6b at
+2026-10-14T04:02:32Z; 10 required guards SUCCESS before ordinary merge.
+Dedicated run38509084263 SUCCESS / artifact11868777928; PR test-merge source
+b758b24d202d624a4b63446a92d9fc66fb265f4d, three selected baseline Git blobs
+verified before execution. Base5cb8 reproduced exactly two NULL-schema failures,
+one sender-identity failure and one capability-list failure, with no unexpected
+failed cases. Corrected full files: host supervisor19/19, observer/avatar18/18,
+requirements21/21, total58/58. Report artifact independently downloaded/read.
+SQLite/PostgreSQL supervisor core run38509084192 / job115673208962 SUCCESS;
+both RESULT markers and token/heartbeat mutation assertion RED verified.
+Production code/package locks unchanged. Full server-unit/desktop-push/broad QA
+remained queued/pending at this source merge; no aggregate or full-QA PASS claim.
+Subsequently source run38509084234 / server-unit job115673684312 completed
+SUCCESS: 225 discovered files, 225 executed, zero failed; registration-password
+floor mutation was assertion RED and the runner ended RESULT: PASS. Source was
+the same b758b24 test merge; log independently read. This completes the full
+server-unit domain, not the entire broad QA matrix or desktop-push build.
+Later the affected test1280-desktop-user-push job115673685542 also completed
+SUCCESS, including its HTTP tests and unchanged prototype production build.
+The remaining broad QA matrix is not included in this completion statement.
+Initial candidate7b49 source tests passed but the fixture cleanup guard failed;
+070 uses tests/lib/safe-rm.sh. The failed guard is retained, not counted PASS.
+No local Docker/runtime tests, production schema/token/data or deployment changes.

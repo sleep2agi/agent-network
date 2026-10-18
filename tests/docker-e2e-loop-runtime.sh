@@ -49,6 +49,7 @@ type safe_rm_rf > /dev/null 2>&1 || {
 }
 source /app/lib/e2e-agent-bootstrap.sh
 source /app/lib/wait-ready.sh
+source /app/lib/response-json.sh
 
 PASS=0
 FAIL=0
@@ -378,8 +379,13 @@ done
 CH_RESP=$(curl -s -X POST http://127.0.0.1:9210/api/task \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $USER_TOKEN" \
-  -d "{\"alias\":\"$ALIAS_CH\",\"task\":\"/loop 1d nightly cleanup\",\"priority\":\"normal\",\"from\":\"channel-test\",\"network_id\":\"$NET_ID\"}")
+  -d "{\"alias\":\"$ALIAS_CH\",\"task\":\"/loop 1d nightly cleanup\",\"priority\":\"normal\",\"network_id\":\"$NET_ID\"}")
 CH_TASK_ID=$(echo "$CH_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null)
+if response_json_ok "$CH_RESP" && [ -n "$CH_TASK_ID" ]; then
+  pass "channel /loop accepted with an actual task ID"
+else
+  fail "channel /loop dispatch rejected: $CH_RESP"
+fi
 sleep 3
 
 # Verify goals.json has it

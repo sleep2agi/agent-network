@@ -1,0 +1,70 @@
+#1027 Hub126: formal package and deployment-input preflight
+OBSERVED_AT=2026-10-11T19:02:43Z / 2026-10-12 03:02:43 Asia/Shanghai
+Status: package published, deployment inputs prepared; NOT ACTIVATED.
+
+FORMAL SOURCE AND PUBLIC BYTES
+Version PR2626 normally merged main42fcf114a77b7862c55ec32328923eced9b43f22.
+10 required checks and current Docker E2E/real-client passed before normal
+match-head merge. At merge163 checks succeeded/5 were still running; later
+all168 succeeded. No administrator bypass and no claim of early full-green.
+Release38165547126 checked out that full40 main ancestor; build, four gates,
+publish and registry verification all SUCCESS. Artifact11712275767's ZIP
+digest is not the inner package digest.
+https://registry.npmjs.org/@sleep2agi/commhub-server/-/commhub-server-0.9.0-preview.126.tgz
+1230017 bytes; SHA256
+9ab55f1ff33c1802749ee647998d7d016fc04e81fe0112df282c595436cb3817
+SHA1 d6bbede943ba829d465ca1cda1ce370b4a86cf82
+SRI sha512-YT1x3vnqaVdMaETIoN/5OebLZEcWiqPB0QOKk6LO6n48x8RHVDKr4M5f6EMtHdwn0M5EPlaotZ/fzRvWLBn3Tw==
+Anonymous networked Docker fetch compared metadata identity and the entire
+public tarball against the downloaded formal gated artifact: PASS/exit0.
+Image anet-app:test244-release-metadata,
+sha256:aea73fb9db4ac5fa7d5f8d442fa1f7f517d549bb6340774b0f00afa574b866d1;
+--rm/read-only/cap-drop ALL/no-new-privileges, only artifact mounted read-only.
+
+ISOLATED INSTALLATION AND INPUTS
+provider906 package/lock update only the Hub version/URL/integrity;
+transitive dependency versions remain unchanged. Inactive staging install
+used pinned Node22.22.2 image under UID1000, npm ci --ignore-scripts
+--no-audit --no-fund:100 packages/exit0. No global npm or live runtime touched.
+Base node:22.22.2-bookworm-slim@sha256:
+9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e.
+Actual Hub Bun1.4.0 executable mounted read-only, SHA256
+33d56b070be6a9e3da0ab013038b43d1645d0534ca811ecdba4472599117eb4b.
+Old consistent backup: ${USER_ROOT}/.commhub/backups/provider1020-p125-SrAkL8/before.db,
+690573312 bytes, SHA256
+607e329d5616a3993fae3757850ff3605df803f426cc65a78059592c12c5097b.
+This is the previous immutable backup, NOT a fresh production snapshot.
+
+LAYERED CORE CHECKS (new version, not a rerun of old runtime51)
+1. Dockerfile.launcher selects .126; explicit rollback selects .125;
+   explicit side-thread0 remains respected: PASS. Fake executor only.
+   Initial invocation mounted tmpfs without exec: launcher correctly rejected
+   the non-executable fake Bun and failed. Corrected isolated /tmp exec mount
+   passed without changing product code or weakening launcher guards.
+   Image sha256:dccdebf71585d17b3a4158dfd5b2bac82566b7cc2a6db834fcf35c86c6e790df.
+2. Only after launcher PASS, Dockerfile / run.sh loaded the exact126 tarball
+   plus pinned zod4.6.5 offline and imported schema against a tmpfs DB copy.
+   Integrity before/after PASS. Preserved sessions321/tasks76766/nodes291/
+   networks7/requirements1029/api_tokens605/user_inbox2328; six Provider
+   counts9/0/0/0/0/0 preserved, login rows and clone_json retained.
+   Image sha256:1aaad4cbd8f00a566e28cbccb04f6c098902c90c35f09b2fc850d8f4ef0c976c.
+3. Only after schema PASS, Dockerfile.http booted the actual installed126
+   package on container-only9291. Anonymous401; synthetic temporary atok200;
+   all321 selected backup-network session rows returned: PASS/exit0.
+   Image sha256:e93717364c2027c7877c857c742be2e9999262e358d5eabd14df8bdd2fff76a8.
+Both real-package checks used --network none/read-only/tmpfs/--rm, no exposed
+port and only offline backup/package/runtime inputs. No live DB, hub.env or
+production token mounted. Exact HTTP child terminated, containers removed.
+Test sources and independent Dockerfiles: tests/test906-hub-upgrade-preflight/.
+run.sh's stale hub124 mount/tag corrected to the actual pinned126 input.
+
+NEXT / RECOVERY BOUNDARY
+Normal merge of profile/lock/runbook must precede installing Git launchers.
+Then obtain a fresh consistent backup, install inactive runtime-v109-preview126,
+keep runtime-v108-preview125 and protected old launchers, narrowly restart
+commhub-hub without --update-env, verify real process/version/natural receipts.
+Existing PM2/ports/proxy/tunnels and protected secret sources remain unchanged.
+DB/vault-key/session data require approved backups, not Git; unresolved vault
+backup-record inventory remains a gap. No empty-machine recovery claim.
+No production activation, daemon/business-node restart, real vault decryption,
+OAuth/model call or three-runtime child-creation acceptance in this report.

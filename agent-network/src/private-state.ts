@@ -115,5 +115,7 @@ export function repairPrivateFilePermissions(path: string): void {
     return;
   }
   const fd = openOwned(path, constants.O_RDONLY, "file");
-  try { fchmodIfPosix(fd, 0o600); } finally { closeSync(fd); }
+  // Reading a correctly private profile must not change ctime and invalidate
+  // the live runtime's frozen config evidence. Wrong modes still get repaired.
+  try { if ((fstatSync(fd).mode & 0o7777) !== 0o600) fchmodIfPosix(fd, 0o600); } finally { closeSync(fd); }
 }

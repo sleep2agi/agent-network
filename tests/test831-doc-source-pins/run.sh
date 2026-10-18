@@ -280,7 +280,20 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #     docs-site/docs/.vitepress/theme/components/DownloadCatalog.vue
 #   三页都没有 #L 源码行号 pin。本地 checker:scanned_doc_files=126,
 #   unique_pins=2,pin_occurrences=10。CI 先红("预期扫 123 …,实际 126")才来抬。
-[[ "$files" -eq 126 ]] || fail "预期扫 126 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-10-11:126 → 128。新增 OpenCode V2 指南页(中英各一份):
+#     docs-site/docs/guide/opencode.md
+#     docs-site/docs/en/guide/opencode.md
+#   两页都没有 #L 源码行号 pin(grep -c '#L[0-9]' → 0 / 0)。
+#   git ls-tree 相对 origin/main 只多这两个被扫后缀文件,没有删除。
+#   本地 checker:scanned_doc_files=128,unique_pins=2,pin_occurrences=10。
+#   CI 先红("预期扫 126 …,实际 128")才来抬。
+# 2026-10-11:128 → 130。新增独立 anet 二进制说明页(中英各一份):
+#     docs-site/docs/guide/standalone-binary.md
+#     docs-site/docs/en/guide/standalone-binary.md
+#   两页都没有 #L 源码行号 pin(grep 计数 #L → 0 / 0)。
+#   本地 checker:scanned_doc_files=130,unique_pins=2,pin_occurrences=10。
+#   CI 先红("预期扫 128 …,实际 130")才来抬。
+[[ "$files" -eq 130 ]] || fail "预期扫 130 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
 # 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——

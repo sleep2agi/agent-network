@@ -84,6 +84,7 @@ export default withMermaid(defineConfig({
               { text: '什么是 Agent Network', link: '/guide/introduction' },
               { text: '基本概念', link: '/guide/basics' },
               { text: '安装', link: '/guide/install' },
+              { text: '单文件可执行文件', link: '/guide/standalone-binary' },
               { text: '10 分钟跑通第一个节点', link: '/guide/getting-started' },
             ]
           },
@@ -110,6 +111,7 @@ export default withMermaid(defineConfig({
               { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
               { text: 'Codex 节点速查', link: '/guide/codex-cheatsheet' },
               { text: 'Grok 节点', link: '/guide/grok' },
+              { text: 'OpenCode V2', link: '/guide/opencode' },
               { text: 'Goal 与 Loop', link: '/guide/goals-and-loops' },
               { text: 'Channel 接入', link: '/guide/channels' },
               { text: '飞书 Channel', link: '/guide/feishu' },
@@ -182,6 +184,7 @@ export default withMermaid(defineConfig({
               { text: 'What is Agent Network', link: '/en/guide/introduction' },
               { text: 'Basic Concepts', link: '/en/guide/basics' },
               { text: 'Install', link: '/en/guide/install' },
+              { text: 'Standalone executable', link: '/en/guide/standalone-binary' },
               { text: 'Your First Node in 10 Minutes', link: '/en/guide/getting-started' },
             ]
           },
@@ -208,6 +211,7 @@ export default withMermaid(defineConfig({
               { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
               { text: 'Codex node cheat sheet', link: '/en/guide/codex-cheatsheet' },
               { text: 'Grok Nodes', link: '/en/guide/grok' },
+              { text: 'OpenCode V2', link: '/en/guide/opencode' },
               { text: 'Goals and Loops', link: '/en/guide/goals-and-loops' },
               { text: 'Channels', link: '/en/guide/channels' },
               { text: 'Feishu Channel', link: '/en/guide/feishu' },

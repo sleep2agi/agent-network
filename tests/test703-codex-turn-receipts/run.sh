@@ -63,9 +63,9 @@ expect_red delivered-cleanup agent-node/src/runtime/codex-app-server/receipt-led
   'if (next.length !== rows.length) this.save(next);' 'if (false) this.save(next);'
 expect_red exact-turn agent-node/src/runtime/codex-app-server-bridge.ts \
   'const found = turns.find((candidate) => candidate.id === turnId);
-          if (found) return classifyPersistedTurn(found);' \
+          if (found) return classifyPersistedTurn(found, expectedClientUserMessageId);' \
   'const found = turns.find((candidate) => candidate.id !== turnId);
-          if (found) return classifyPersistedTurn(found);'
+          if (found) return classifyPersistedTurn(found, expectedClientUserMessageId);'
 expect_red rejected-cleanup agent-node/src/cli.ts \
   'turnReceiptLedger?.remove(taskId);
       return "rejected";' \

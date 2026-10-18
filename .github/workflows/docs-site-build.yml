@@ -43,6 +43,16 @@ on:
     branches: [main]
 
 jobs:
+  download-platforms:
+    name: download-platforms-docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core download page in Docker (no accounts or installation)
+        run: |
+          docker build -f tests/test961-download-platforms/Dockerfile -t test961-download-platforms .
+          docker run --rm --init --network none test961-download-platforms
   build:
     # 这个 name 是分支保护里 required check 唯一能写的标识符,必须全仓唯一。
     name: docs-site-build

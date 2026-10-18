@@ -1,0 +1,28 @@
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm curl ca-certificates python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /work/server
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY server/ ./
+COPY agent-node/src /work/agent-node/src
+COPY agent-network/src /work/agent-network/src
+COPY agent-network/bin /work/agent-network/bin
+COPY contracts/side-thread/v1 /work/contracts/side-thread/v1
+COPY tests/test1109-supervisor-identity/ /work/tests/test1109-supervisor-identity/
+COPY tests/lib/safe-rm.sh /work/tests/lib/safe-rm.sh
+ARG BASE_COMMIT=5cb8db3d4d2d907d43a7fd47d926cf323fa1df41
+RUN mkdir /baseline && for f in host-supervisor-identity-http.test.ts observer-avatar-http.test.ts requirements-http.test.ts; do curl --fail --silent --show-error --location --max-time 30 "https://raw.githubusercontent.com/sleep2agi/agent-network/$BASE_COMMIT/server/src/$f" -o "/baseline/$f"; done
+RUN python3 - <<'PY'
+import hashlib,json,pathlib
+expected=json.loads(pathlib.Path('/work/tests/test1109-supervisor-identity/qa1201-base-blobs.json').read_text())
+for name,digest in expected.items():
+ data=pathlib.Path('/baseline/'+name).read_bytes()
+ actual=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+ if actual!=digest:raise RuntimeError('baseline Git blob mismatch: '+name)
+PY
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=${SOURCE_COMMIT} BASE_COMMIT=${BASE_COMMIT}
+RUN chown -R bun:bun /work /baseline
+USER bun
+CMD ["bash", "/work/tests/test1109-supervisor-identity/qa1201-run.sh"]

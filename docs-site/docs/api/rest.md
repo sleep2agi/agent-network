@@ -349,20 +349,22 @@ curl -X POST http://localhost:9200/api/auth/password \
   "revoked": 5,
   "revoked_login": 2,
   "revoked_cli": 3,
+  "revoked_network": 0,
+  "kept_network_tokens": [],
   "token": "utok_xxxxxxxxxxxxxxxx",
   "token_id": "tok_new_session_id"
 }
 ```
 
-可选请求字段 `keep_cli_tokens`(布尔,默认 `false`):为 `true` 时保留命令行 / 脚本令牌,并在响应的 `kept_cli_tokens` 里列出。不带这个字段(旧 app、dashboard)= 撤销全部其他令牌。
+可选请求字段 `keep_cli_tokens`(布尔,默认 `false`):为 `true` 时保留命令行 / 脚本令牌,并在响应的 `kept_cli_tokens` 里列出。不带这个字段(旧 app、dashboard)= 撤销全部其他不绑网络的令牌。
 
-`revoked` 是**其他**令牌被撤销的总数(不含本次调用方自己的 token,那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销);`revoked_login` / `revoked_cli` 是按种类拆开的数(`revoked = revoked_login + revoked_cli`)。
+`revoked` 是**其他**令牌被撤销的总数(不含本次调用方自己的 token,那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销);`revoked_login` / `revoked_cli` 是按种类拆开的数(`revoked = revoked_login + revoked_cli + revoked_network`)。
 
 **关键副作用** (verify [`auth.ts` `changePassword` + `revokeTokensAfterPasswordChange`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
 2. **其他浏览器 / app 登录会话**(`api_tokens.kind='login'`)撤销,计数在 `revoked_login`
 3. **命令行 / 脚本令牌**(`kind='cli'`:`anet login` 等 anet 命令签的、`POST /api/auth/tokens` 建的不绑网络的具名令牌)**默认同样撤销**,计数在 `revoked_cli`;只有请求带 `keep_cli_tokens: true` 才保留,保留的逐条列在 `kept_cli_tokens`(`token_id` / `name` / `client_label` / `created_at` / `last_used_at`,**不含令牌值**),可用 `DELETE /api/auth/tokens/:token_id` 逐条撤销。种类由客户端自报,只影响展示和这条显式保留路径。`anet passwd` 默认带 `keep_cli_tokens: true`,`--revoke-cli-tokens` 不带
-4. **`ntok_` / 网络令牌不受影响**(只删 `network_id IS NULL` 的 token,agent node 用 `ntok_` 跑着的不会被改密打断)
+4. **节点令牌保持有效**。`POST /api/auth/tokens` 创建的具名网络令牌默认保留，响应 `kept_network_tokens` 列出 `token_id`、`name`、`network_id`、`created_at`、`last_used_at`，不含凭据值。显式布尔 `revoke_network_tokens: true` 撤销本人各网络的有效具名令牌，数量计入 `revoked_network`。仅命中 `scope=full`、绑定网络且无节点绑定的令牌；与 `keep_cli_tokens` 独立，其他用户与节点令牌不受影响。密码更新和这些撤销在同一事务提交。
 5. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回,种类沿用当前这条 —— 调用方应立即用新 token 覆盖本地存储
 6. 写 audit log: `action='password_changed'`
 

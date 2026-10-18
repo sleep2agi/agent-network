@@ -34,6 +34,9 @@ COPY agent-network ./agent-network
 COPY channel ./channel
 # #620 daemon-inherited-env.test.ts 逐名比对 hub-daemon.sh 的 _scrub_node_identity_env 名单。
 COPY deploy/hub/hub-daemon.sh ./deploy/hub/hub-daemon.sh
+# daemon-codex-inventory.test.ts 跨包 import server 的 codex-inventory。
+# 没有这行时容器里不存在 server/,模块解析红在「找不到文件」。
+COPY server/src/shared/codex-inventory.ts ./server/src/shared/codex-inventory.ts
 COPY tests/test745-agent-network-unit-ci/run.sh ./tests/test745-agent-network-unit-ci/run.sh
 
 ARG SOURCE_COMMIT

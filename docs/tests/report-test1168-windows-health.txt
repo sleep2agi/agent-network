@@ -1,0 +1,77 @@
+#1168 — Windows native co-presence health transport / Dashboard readiness
+Date: 2026-10-14 Asia/Shanghai
+Scope: runtime source and isolated Windows fake-Codex gate; no live node changes.
+
+Failure retained: PR2711 old head73fb5628f, QA38443138147/job115454675894,
+artifact11836996773. Dashboard POST409 node_degraded/tui session-missing,
+health_observed_ms_ago93; the new inbox/steering path was not reached.
+Final PR2711 headb868 later passed the unchanged suite. Timing-dependent
+passes do not establish correct health reporting or original-device acceptance.
+
+Causal source finding: cli configured tuiSession=alias for EVERY co-presence
+bridge, including Windows, so codex-health used probeTmuxTui on a platform
+whose launcher uses native processes. Suppressing the first onChange callback
+does not suppress snapshot(): a later reportStatus still sends session-missing.
+This explains the observed false tui layer; exact ordering of the old report
+cannot be reconstructed from the retained log. It is not just a delay to retry.
+
+Change: select tmux TUI health only for non-Windows co-presence. Windows
+ongoing tui health stays absent/unknown, never fabricated healthy. App-server
+failure and expired/revoked model authentication remain reported and refused.
+Linux/macOS session selection and the Hub health guard are unchanged.
+Native Windows fixture requires launcher PID/birth/socket attribution before
+reading fresh exact-network/alias Hub app-server health. It rejects ANY tmux
+TUI layer on Windows, then performs the original normal/high POST, same-turn
+steer, no-new-turn, receipt, shared-HOME and single-bridge assertions. No force.
+Isolated fixture health/status intervals1s expose the snapshot before POST;
+production defaults are unchanged. PowerShell now explicitly propagates the
+health-regression/native-E2E nonzero exit statuses.
+
+Docker local: Bun1.3.14, frozen dependencies from test1163 independent image,
+current source read-only mounted; codex-health33PASS83 assertions, ~86ms.
+Docker runtime+real Hub HTTP health dispatch50PASS156 assertions,1.284s.
+First combined local invocation omitted the required throwaway COMMHUB_DB;
+the production-DB guard correctly refused before Hub assertions. Corrected
+isolated invocation used /tmp/health1168.db. This was fixture setup, not PASS.
+Docker exact-pair6PASS23 (~54ms); old Windows-selection mutation32PASS/1FAIL,
+the named Windows bridge regression assertion fails (~83ms). An initial private
+mutation shell command had a quoting error before assertions; corrected isolated
+script reached the designated assertion. No product/main mutation was made.
+
+SOURCE/core completed: PR2715 final head
+4e2cfcfc09909f26d2a73c6c00da41ff6002528b, tested CI merge
+6aa47248804bb48e7924609fb220ef3a2457aacc, main
+d52418e614301143771f9ad40f7c40afd3777b1c (merged19:51:54Z).
+All three trees5e0e706b07e389c4950b8250bda6ce242403ecd6 match.
+Exact final head10required+7selected SUCCESS: Windows-native, Node typecheck,
+exact runtime pair, doc-symbol pins, docs build, test-file coverage, mutation
+integrity. Broad QA is separate:19/138 jobs completed without FAIL at snapshot;
+only remaining merged-PR broad run38457313634 was cancelled after preserving
+its status. Main broad QA continues; this is not a full-matrix PASS claim.
+
+Windows job115503898763 actually SUCCESS; artifact report-test751-windows
+downloaded and source_commit is the exact CI merge above. Native portable
+suite25PASS68, health33PASS88; native E2E PASS Hub current app_server=ok,
+startup TUI PID attributed, ongoing tui=unknown, model_auth=unknown. Then
+normal/high Dashboard tasks steer the same human turn, receive individual
+terminal receipts, preserve remote/thread/HOME, create no second turn and
+leave one bridge. This is native Windows with fake Codex, not an actual model.
+
+Formal Node144 run38458335261 and CLI178 run38458339458 dispatched against
+exact merged main d52418e6, checked still main ancestor. Both sets of four formal
+gates PASSED; full npm package verification is tracked in report-test1168-public.txt. Both
+same four-gated archives are public at the official GitHub prerelease; Node144
+and CLI178 npm are fully verified; the CLI workflow initial registry-timeout
+FAIL remains recorded, followed by a successful complete registry re-download.
+Hub139 is reused and not republished. Original-device adoption remains unknown.
+Local tests capped at2minutes; broad/native coverage runs on GitHub Actions.
+
+Recovery: no launch topology/ports/proxy/config/credentials/schema changes.
+Use repository deploy/ and existing node installation/runbooks. This is runtime
+source, not an adopted live version; software release requires exact merged
+main, paired formal gates and immutable artifacts. Roll back to prior main or
+previous paired version via the same runbook; Windows false-tmux gap returns.
+Git rebuilds software only. Original login/private task/receipt state comes from
+the existing private backups/credential authority, never copied from this gate.
+No restart, fork, reset, new authority, model or credential replacement occurred.
+Native ongoing TUI liveness beyond startup attribution remains a separate gap.

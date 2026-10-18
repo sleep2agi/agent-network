@@ -1,0 +1,17 @@
+name: Owned turn human follow-up contract
+on:
+  pull_request:
+    paths: ['agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'agent-node/src/inbox-dispatch*', 'tests/test1150-owned-steer-contract/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1150*', '.github/workflows/owned-steer-contract.yml']
+  push:
+    branches: [main]
+    paths: ['agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'agent-node/src/inbox-dispatch*', 'tests/test1150-owned-steer-contract/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1150*', '.github/workflows/owned-steer-contract.yml']
+permissions:
+  contents: read
+jobs:
+  owned-follow-up:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1150-owned-steer-contract/Dockerfile -t owned-follow-up .
+      - run: docker run --rm --network none owned-follow-up

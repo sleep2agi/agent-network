@@ -6,6 +6,10 @@ This page does one thing: get `anet` installed. Then continue with [Your first n
 The [desktop app](/en/guide/desktop-app) (macOS / Windows / Linux) bundles a local Hub, works right after installing, and can set up the local daemon in one click. Packages are on the [download page](/en/download).
 :::
 
+::: tip No Node on the machine
+A single-file `anet` executable is a separate install path. It does not replace the npm install above. How it is built, what it cannot do, and why there is no public download yet: [Standalone executable](/en/guide/standalone-binary).
+:::
+
 ## Prerequisites: Node.js and Bun {#prerequisites}
 
 | Dependency | Version | How to install |

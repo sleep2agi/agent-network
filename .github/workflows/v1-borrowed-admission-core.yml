@@ -1,0 +1,39 @@
+name: V1 borrowed admission core
+on:
+  pull_request:
+    paths:
+      - 'agent-node/src/runtime/opencode-copresence/v1-host-*.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-scoped-mcp.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-borrowed-admission.ts'
+      - 'agent-node/src/runtime/opencode-copresence/v1-shared-read.ts'
+      - 'agent-node/src/runtime/opencode-copresence/process-group.ts'
+      - 'agent-node/src/runtime/opencode-acp/binary.ts'
+      - 'deploy/node/opencode-v1-host/**'
+      - 'tests/test1214-v1-borrowed-admission/**'
+      - 'tests/test1194-v1-shared-feasibility/package-integrity.json'
+      - '.github/workflows/v1-borrowed-admission-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  admission-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.18.1', '1.18.34']
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build pinned exact native fixture
+        run: docker build --build-arg OPENCODE_VERSION=${{ matrix.version }} --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1214-v1-borrowed-admission/Dockerfile -t v1-borrowed-admission-test .
+      - name: Borrowed admission, exact native MCP disconnect and sibling survival
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --init --network none -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} v1-borrowed-admission-test 2>&1 | tee report-test1214-${{ matrix.version }}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-v1-borrowed-admission-${{ matrix.version }}-${{ github.sha }}
+          path: report-test1214-${{ matrix.version }}.txt

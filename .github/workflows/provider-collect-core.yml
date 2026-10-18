@@ -1,0 +1,19 @@
+name: Provider collection core
+on:
+  pull_request:
+    paths:
+      - 'agent-network/src/daemon-provider-collect*'
+      - 'agent-network/src/shared/provider-collection.ts'
+      - 'agent-network/src/daemon-provider-command.ts'
+      - 'agent-network/src/daemon-provider-application.ts'
+      - 'tests/test906-provider-collect/**'
+      - '.github/workflows/provider-collect-core.yml'
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configured source to daemon store and actual CLI readback (Docker)
+        run: sg docker -c 'sh tests/test906-provider-collect/run.sh'

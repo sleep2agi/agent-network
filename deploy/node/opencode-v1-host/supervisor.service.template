@@ -1,0 +1,17 @@
+[Unit]
+Description=Owner-managed OpenCode V1 shared host (opt-in)
+After=network.target
+
+[Service]
+Type=simple
+User=REPLACE_HOST_OWNER
+UMask=0077
+WorkingDirectory=REPLACE_EXACT_MAIN_CHECKOUT
+ExecStart=REPLACE_BUN_BINARY REPLACE_EXACT_MAIN_CHECKOUT/deploy/node/opencode-v1-host/start.ts --root REPLACE_PRIVATE_CANONICAL_HOST_ROOT --binary REPLACE_ATTESTED_OPENCODE_ENTRYPOINT --version 1.18.34 --host-id REPLACE_HOST_ID --cohort REPLACE_COHORT_ID --port REPLACE_PORT
+# Residual locks/inputs refuse. No automatic generation/data takeover.
+Restart=no
+KillMode=process
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

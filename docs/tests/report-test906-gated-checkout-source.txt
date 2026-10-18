@@ -1,0 +1,41 @@
+#906 gated CLI source checkout — CORE PASS / RAW-LOG TRANSPORT FIX PENDING
+
+PR2658 head9996bfc65245cdaf75aaf6a791d61d12850a7632 Docker contract
+run38256359636/job114835354470 SUCCESS:9 cases, 0.001s. Ten required contexts
+SUCCESS; normal head-locked squash merged13:35:11Z to main
+af0eff51c295af34ef6b81215520dc261adac66d. No package bytes rebuilt/republished.
+
+Follow-up official download run38256720733 FAILED before validator/publication:
+job114836737460 raw original build-log reader was refused by runner gh output
+protection: terminal escape sequences require --allow-escape-sequences. Guard
+code did not execute; no tag/assets created. Add that flag only for the fixed
+authenticated original-job endpoint redirected to release-build.log, not stdout.
+No ancestry/source/gates/digest/identity check changes. Existing Docker9-case
+contract in Actions remains; new transport candidate not yet passed/published.
+
+CLI original release run38255025281 overall FAILURE: npm publish step SUCCESS,
+then registry verification timed out after910s. Preserve that terminal failure;
+accepted version172 must not be republished. Official main build/four gates and
+inner bytes remain valid for the reviewed GitHub fallback. Runtime138 public
+full bytes independently matched its main tarball; no production activation.
+
+--- Original source-mismatch diagnosis, retained ---
+
+Original CLI172 official source b61c0e490659e94ad1e487cc8086cb73dfa8f6ad,
+release run38255025281 workflow main headffa0cc6d9b39a120978806ca18d10dd3b649d3f9.
+Actual build job114830755624 checkout/source guard binds b61c; all four gates
+SUCCESS. Inner tarball2118019B SHA2566f19a3b63ce70d5157cf2ea1f5b036662a4f47920f857e5eecb7f755d3ec759a.
+Gated download run38255441306 FAILED before publication: old guard incorrectly
+equated workflow head with source input. Original failure retained, no release
+tag/assets created and no npm republish. Registry visibility remains separate.
+
+Narrow correction: when head differs, require authenticated original build job
+run/head identity, successful source-guard step, unique checkout SHA and original
+PUBLISH=true/RELEASE_COMMIT matching the requested full40. Branch/run/workflow,
+five build/package gates, current-main ancestry (twice), inner SHA and CLI
+identity/version remain required. Missing/ambiguous/failed proof rejects.
+
+Actions uses the existing independent gated-cli-download Docker contract only.
+Nine focused cases; existing wrong-source, branch, event, gates and short-SHA
+negative cases retained. No local product test or repeat native/install matrix.
+Current candidate result PENDING. No production/account/model operation.

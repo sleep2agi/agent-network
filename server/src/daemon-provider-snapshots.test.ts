@@ -1,19 +1,25 @@
 import "./require-explicit-test-db";
 import { afterAll, beforeEach, expect, test } from "bun:test";
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { CodexManagedLogin } from '../../agent-node/src/runtime/codex-managed-login';
+import { DaemonCodexLogins } from '../../agent-node/src/runtime/daemon-codex-logins';
+import { executeProviderLogin, closeProviderLogins } from '../../agent-node/src/runtime/daemon-provider-login';
 import { db } from "./db";
 import { registerTools } from "./tools";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { reconcileProviderSnapshots, readLocalProviderSnapshot } from "../../agent-node/src/runtime/daemon-provider-snapshot";
 import { DaemonProviderStore } from "../../agent-network/src/daemon-provider-store";
+import { providerNodeRevision } from '../../agent-network/src/daemon-provider-application';
 import { register, createNetworkTokenForNode } from "./auth";
 
 const net = "net_dps906", user = "u_dps906", node = "node_dps906", token = "token_dps906", alias = "daemon906";
 const root = mkdtempSync(join(tmpdir(), "dps906-"));
 function cleanup() {
+  db.run('DELETE FROM daemon_provider_logins WHERE request_id IN (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1)', [net]);
   db.run('DELETE FROM daemon_provider_applications WHERE request_id IN (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1)', [net]);
   db.run('DELETE FROM daemon_provider_writes WHERE request_id IN (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1)', [net]);
   db.run('DELETE FROM node_daemon_bindings WHERE network_id=?1', [net]);
@@ -44,6 +50,90 @@ function client(kind = "human", network = net) {
 const snapshot = () => ({ network_id: net, daemon_node_id: node, revision: 0, source: "daemon", providers: [] });
 const request = () => client()("daemon_provider_snapshot", { action: "refresh", network_id: net, id: node });
 
+test('saved ChatGPT account binding traverses Hub and compiled daemon CLI without credentials', async () => {
+  process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
+  const work = mkdtempSync(join(root, 'bind-')), dir = join(work, '.anet/nodes', alias);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const prepared = new DaemonProviderStore(dir).prepareLoginDirectory();
+  const home = join(prepared.root, 'login-fixture'); mkdirSync(home, { mode: 0o700 });
+  const account = '11111111-1111-4111-8111-111111111111';
+  writeFileSync(join(home, 'anet-account.json'), JSON.stringify({ version: 1, network_id: net, daemon_node_id: node, account_id: account }), { mode: 0o600 });
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'TEST-ONLY-access', refresh_token: 'TEST-ONLY-refresh' } }), { mode: 0o600 });
+  const provider = { id: 'openai', label: 'OpenAI', enabled: true, runtimes: [{ runtime: 'codex-tui', auth: [
+    { id: 'work', kind: 'chatgpt', account_id: account, models: ['model-fixture'] },
+  ] }] };
+  const human = client(), daemon = client('daemon');
+  const r = await human('daemon_provider_snapshot', { action: 'put', id: node, network_id: net, revision: 0, provider });
+  expect(r.ok).toBe(true);
+  await reconcileProviderSnapshots({ workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {}, callCommHub: daemon });
+  const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
+  expect(read.status).toBe('succeeded');
+  expect(read.snapshot.providers[0].runtimes[0].auth[0]).toMatchObject({ account_id: account, credential_present: true, verification: 'not_checked', application: 'not_applied' });
+  expect(JSON.stringify(read)).not.toContain('TEST-ONLY-access');
+  expect(JSON.stringify(read)).not.toContain('TEST-ONLY-refresh');
+  expect(JSON.stringify(read)).not.toContain(home);
+});
+
+test('managed login: admin intent → capable target daemon → session manager → bounded public receipt', async () => {
+  const work = mkdtempSync(join(root, 'login-'));
+  const dir = join(work, '.anet/nodes', alias); mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const prepared = new DaemonProviderStore(dir).prepareLoginDirectory();
+  const session = 'b86c3ca5-5022-434d-bc9f-aa1c82ecf419';
+  class Rpc extends EventEmitter {
+    account: unknown = null;
+    async request<R>(method: string): Promise<R> {
+      return (method === 'account/read' ? { account: this.account } : { type: 'chatgptDeviceCode', loginId: session,
+        verificationUrl: 'https://auth.openai.com/codex/device', userCode: 'TEST-ONLY' }) as R;
+    }
+    async close() {}
+  }
+  const rpc = new Rpc(); let home = '';
+  const logins = new DaemonCodexLogins(prepared.root, { network_id: net, daemon_node_id: node }, async () => {
+    home = mkdtempSync(join(prepared.root, 'login-'));
+    const login = new CodexManagedLogin(rpc);
+    return { home, login, discard: async () => { await login.close(); rmSync(home, { recursive: true, force: true }); } };
+  });
+  const human = client(), daemon = client('daemon');
+  const deps = { workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {},
+    callCommHub: daemon, login: (intent: any) => executeProviderLogin(logins, intent) };
+  const command = (intent: any) => human('daemon_provider_snapshot', { action: 'login', id: node, network_id: net, provider: intent });
+  const read = (id: string) => human('daemon_provider_snapshot', { action: 'read', id, network_id: net });
+  try {
+    expect((await daemon('daemon_provider_snapshot', { action: 'login', id: node, provider: { action: 'start', session_id: session } })).ok).toBe(false);
+    expect((await command({ action: 'start', session_id: session, token: 'TEST-ONLY' })).ok).toBe(false);
+    const start = await command({ action: 'start', session_id: session });
+    expect(start.ok).toBe(true);
+    expect((await daemon('pull_daemon_provider_snapshots', { accept_writes: true, accept_applications: true })).requests).toEqual([]);
+    expect((await client('daemon', 'other')('pull_daemon_provider_snapshots', { accept_logins: true })).ok).toBe(false);
+    expect((await daemon('ack_daemon_provider_snapshot', { request_id: start.request_id, login: { request_id: session, status: 'authenticated', token: 'TEST-ONLY' } })).ok).toBe(false);
+    await reconcileProviderSnapshots(deps);
+    const challenge = await read(start.request_id);
+    expect(challenge.status).toBe('succeeded');
+    expect(challenge.login.status).toBe('awaiting_user');
+    expect(challenge.snapshot).toBeNull();
+    writeFileSync(join(home, 'auth.json'), '{"TEST_ONLY":"SECRET"}', { mode: 0o600 });
+    rpc.account = { type: 'chatgpt', email: 'PRIVATE', token: 'SECRET' };
+    rpc.emit('account/login/completed', { loginId: session, success: true });
+    await Promise.resolve();
+    const save = await command({ action: 'save', session_id: session, label: 'Work' });
+    await reconcileProviderSnapshots(deps);
+    expect((await read(save.request_id)).login.account_id).toBeString();
+    const list = await command({ action: 'accounts' });
+    // Listing uses the actual daemon handler and compiled pinned CLI bootstrap,
+    // not the injected OAuth fixture. It does not start a login or run inference.
+    await reconcileProviderSnapshots({ ...deps, login: undefined });
+    const result = await read(list.request_id);
+    expect(result.login.accounts).toHaveLength(1);
+    expect(result.login.accounts[0].auth_state).toBe('not_checked');
+    expect(JSON.stringify(result)).not.toMatch(/SECRET|PRIVATE|auth.json/);
+    db.run('UPDATE daemon_provider_snapshots SET expires_at=?1 WHERE request_id=?2', [Date.now() - 1, start.request_id]);
+    expect((await read(start.request_id)).login).toBeNull();
+    expect(db.get<any>('SELECT snapshot_json FROM daemon_provider_snapshots WHERE request_id=?1', start.request_id).snapshot_json).toBeNull();
+  } finally { await logins.close(); await closeProviderLogins(); }
+});
+
 test('application transport: scoped intent, capability gate, exact public receipt and changed binding refusal', async () => {
   const human = client(), daemon = client('daemon');
   const child = 'node_apply906';
@@ -71,6 +161,20 @@ test('application transport: scoped intent, capability gate, exact public receip
   const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
   expect(read.status).toBe('succeeded'); expect(read.application).toEqual(receipt); expect(read.snapshot).toBeNull();
   expect(db.get('SELECT * FROM daemon_provider_applications WHERE request_id=?1', r.request_id)).toBeNull();
+  const accountId = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const officialSelection = { ...selection, provider_id: 'openai', auth_id: 'work-login', account_id: accountId };
+  const official = await human('daemon_provider_snapshot', { ...args, provider: officialSelection });
+  expect(official.ok).toBe(true);
+  const officialDispatch = await daemon('pull_daemon_provider_snapshots', { accept_applications: true });
+  expect(officialDispatch.requests[0].selection).toEqual(officialSelection);
+  const officialReceipt = { ...receipt, request_id: official.request_id, provider_id: 'openai', auth_id: 'work-login',
+    account_id: accountId, runtime_provider: 'openai', applied_at: Date.now() };
+  for (const wrong of [{ ...officialReceipt, account_id: 'bbbbbbbb-1111-4111-8111-111111111111' },
+    { ...officialReceipt, account_id: undefined }, { ...officialReceipt, runtime_provider: receipt.runtime_provider }]) {
+    expect((await daemon('ack_daemon_provider_snapshot', { request_id: official.request_id, application: wrong })).error).toBe('invalid_application_receipt');
+  }
+  expect((await daemon('ack_daemon_provider_snapshot', { request_id: official.request_id, application: officialReceipt })).status).toBe('succeeded');
+  expect((await human('daemon_provider_snapshot', { action: 'read', id: official.request_id, network_id: net })).application).toEqual(officialReceipt);
   const stale = await human('daemon_provider_snapshot', args);
   db.run("UPDATE node_daemon_bindings SET daemon_node_id='other' WHERE request_id='binding_apply906'");
   expect((await daemon('pull_daemon_provider_snapshots', { accept_applications: true })).requests).toEqual([]);
@@ -113,6 +217,56 @@ test('write core chain: encrypted Hub request → target daemon CLI → durable 
   expect(new DaemonProviderStore(dir).list().providers[0].label).toBe('DeepSeek');
   db.run("UPDATE network_members SET role='member' WHERE user_id=?1 AND network_id=?2", [user, net]);
   expect((await human('daemon_provider_snapshot', { action: 'put', id: node, network_id: net, revision: 1, provider })).error).toBe('provider_admin_required');
+});
+
+test('collection core chain: bound source → capable daemon CLI → durable replay → redacted Provider', async () => {
+  process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
+  const work = mkdtempSync(join(root, 'collect-')), dir = join(work, '.anet/nodes', alias);
+  const childId = 'n_collect906', childAlias = 'source906', source = join(work, '.anet/nodes', childAlias);
+  mkdirSync(dir, { recursive: true, mode: 0o700 }); mkdirSync(join(source, 'codex-home'), { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const key = 'TEST-ONLY-collect-private-key';
+  writeFileSync(join(source, 'config.json'), JSON.stringify({ node_id: childId, alias: childAlias, network_id: net,
+    runtime: 'codex-app-server', codexHome: join(source, 'codex-home'), env: { TEST_PROVIDER_KEY: { _envRef: 'TEST_PROVIDER_KEY' } } }), { mode: 0o600 });
+  writeFileSync(join(source, '.env'), `TEST_PROVIDER_KEY=${key}\n`, { mode: 0o600 });
+  writeFileSync(join(source, 'codex-home/config.toml'), 'model_provider = "deepseek"\nmodel = "fixture-model"\n[model_providers.deepseek]\nbase_url = "https://api.example.test/v1"\nenv_key = "TEST_PROVIDER_KEY"\nwire_api = "responses"\n', { mode: 0o600 });
+  db.run("INSERT INTO nodes (node_id,node_name,alias,network_id,runtime) VALUES (?1,?2,?2,?3,'codex-app-server')", [childId, childAlias, net]);
+  db.run("INSERT INTO node_daemon_bindings (request_id,network_id,node_id,daemon_node_id,workdir,requested_by,status,created_at,updated_at) VALUES ('binding_collect906',?1,?2,?3,?4,?5,'active',1,1)", [net, childId, node, work, user]);
+  const selection = { node_id: childId, alias: childAlias, node_revision: providerNodeRevision(source), provider_id: 'deepseek', auth_id: 'imported', label: 'DeepSeek' };
+  const before = providerNodeRevision(source), human = client(), daemon = client('daemon');
+  const requestArgs = { action: 'collect', id: node, network_id: net, revision: 0, provider: selection };
+  expect((await daemon('daemon_provider_snapshot', requestArgs)).error).toBe('user_token_required');
+  expect((await human('daemon_provider_snapshot', { ...requestArgs, provider: { ...selection, alias: 'another' } })).error).toBe('collection_target_not_bound');
+  expect((await human('daemon_provider_snapshot', { ...requestArgs, provider: { ...selection, key } })).error).toBe('invalid_provider_collection');
+  const r = await human('daemon_provider_snapshot', requestArgs); expect(r.ok).toBe(true);
+  expect((await daemon('pull_daemon_provider_snapshots', { accept_writes: true })).requests).toEqual([]);
+  expect((await daemon('pull_daemon_provider_snapshots', { accept_collections: true })).requests[0]).toMatchObject({ operation: 'collect', selection });
+  let drop = true;
+  const deps = { workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {},
+    callCommHub: async (name: string, args: any) => {
+      expect(JSON.stringify(args)).not.toContain(key);
+      if (name === 'ack_daemon_provider_snapshot' && drop) { drop = false; throw Error('lost acknowledgement'); }
+      return daemon(name, args);
+    } };
+  await reconcileProviderSnapshots(deps);
+  expect(new DaemonProviderStore(dir).list().revision).toBe(1);
+  await reconcileProviderSnapshots(deps);
+  const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
+  expect(read.status).toBe('succeeded'); expect(read.snapshot.revision).toBe(1);
+  expect(read.snapshot.providers[0].runtimes[0].auth[0]).toMatchObject({ id: 'imported', kind: 'api_key', models: ['fixture-model'], credential_present: true, verification: 'not_checked', application: 'not_applied' });
+  expect(JSON.stringify(read)).not.toContain(key);
+  expect(db.get('SELECT * FROM daemon_provider_writes WHERE request_id=?1', r.request_id)).toBeNull();
+  expect(providerNodeRevision(source)).toBe(before); // source config/session/credential is never changed
+  const stale = await human('daemon_provider_snapshot', { ...requestArgs, revision: 1, provider: { ...selection, auth_id: 'second' } });
+  db.run("UPDATE node_daemon_bindings SET daemon_node_id='other' WHERE request_id='binding_collect906'");
+  expect((await daemon('pull_daemon_provider_snapshots', { accept_collections: true })).requests).toEqual([]);
+  expect((await human('daemon_provider_snapshot', { action: 'read', id: stale.request_id, network_id: net })).error).toBe('collection_target_not_bound');
+});
+
+test('collection intent contract mirrors CLI, daemon and Hub exactly', () => {
+  const hub = readFileSync(new URL('./shared/provider-collection.ts', import.meta.url), 'utf8');
+  expect(hub).toBe(readFileSync(new URL('../../agent-node/src/shared/provider-collection.ts', import.meta.url), 'utf8'));
+  expect(hub).toBe(readFileSync(new URL('../../agent-network/src/shared/provider-collection.ts', import.meta.url), 'utf8'));
 });
 
 test("human authorization precedes dispatch; unknown, nodes and non-admins cannot request", async () => {
@@ -217,15 +371,17 @@ test("real HTTP authentication -> daemon handler -> pinned CLI -> scoped public 
   db.run("UPDATE nodes SET config_snapshot=?1 WHERE node_id=?2", [JSON.stringify({ role: "host_supervisor" }), nodeId]);
   const dir = join(root, ".anet/nodes", daemonAlias); mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, "config.json"), JSON.stringify({ role: "host_supervisor", network_id: netId, node_id: nodeId }), { mode: 0o600 });
-  for (const child of ['bound', 'neighbour']) {
+  for (const child of ['bound', 'neighbour', 'manual']) {
     const childId = `n_scan_${child}`;
     db.run('INSERT INTO nodes (node_id,node_name,alias,network_id,runtime) VALUES (?1,?2,?2,?3,\'codex-app-server\')', [childId, child, netId]);
-    db.run('INSERT INTO node_daemon_bindings (request_id,network_id,node_id,daemon_node_id,workdir,requested_by,status,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,\'active\',1,1)',
+    if (child !== 'manual') db.run('INSERT INTO node_daemon_bindings (request_id,network_id,node_id,daemon_node_id,workdir,requested_by,status,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,\'active\',1,1)',
       [`binding_scan_${child}`, netId, childId, child === 'bound' ? nodeId : 'another-daemon', root, owner.user!.user_id]);
     const home = join(root, '.anet/nodes', child, 'codex-home'); mkdirSync(home, { recursive: true, mode: 0o700 });
     writeFileSync(join(home, '../config.json'), JSON.stringify({ node_id: childId, alias: child, runtime: 'codex-app-server', network_id: netId }), { mode: 0o600 });
     writeFileSync(join(home, 'config.toml'), 'model_provider = "deepseek"\nmodel = "fixture-model"\n[model_providers.deepseek]\nenv_key = "TEST_API_KEY"\n', { mode: 0o600 });
   }
+  chmodSync(join(root, '.anet'), 0o700);
+  chmodSync(join(root, '.anet/nodes'), 0o775);
   const hub = (await import("./server")).bootServer({ port: 0, hostname: "127.0.0.1" });
   const url = `http://127.0.0.1:${hub.port}/mcp`;
   const rpc = (credential: string) => async (name: string, args: any) => {
@@ -249,6 +405,15 @@ test("real HTTP authentication -> daemon handler -> pinned CLI -> scoped public 
     expect(read.status).toBe("succeeded"); expect(read.snapshot).toMatchObject({ network_id: netId, daemon_node_id: nodeId, revision: 0, source: "daemon", providers: [], codex_inventory: { scope: 'hub_bound_nodes' } });
     expect(read.snapshot.codex_inventory.rows).toHaveLength(1);
     expect(read.snapshot.codex_inventory.rows[0]).toMatchObject({ node_id: 'n_scan_bound', configured_provider: 'deepseek', configured_model: 'fixture-model', credential_status: 'unknown' });
+    expect(read.snapshot.codex_inventory.local_discovery).toBeUndefined(); // old client projection
+    const discovered = await human('daemon_provider_snapshot', { action: 'read', id: refresh.request_id, network_id: netId, include_discovery: true });
+    expect(discovered.snapshot.codex_inventory.local_discovery).toMatchObject({ status: 'observed', rows: [
+      { node_id: 'n_scan_manual', alias: 'manual', configured_model: 'fixture-model', config_revision: null },
+    ] });
+    expect(discovered.snapshot.codex_inventory.local_discovery.rows).toHaveLength(1); // other daemon filtered
+    const deniedApply = await human('daemon_provider_snapshot', { action: 'apply', id: nodeId, network_id: netId, revision: 0,
+      provider: { node_id: 'n_scan_manual', node_revision: 'a'.repeat(64), provider_id: 'deepseek', auth_id: 'key', model: 'fixture-model', confirm_restart: true } });
+    expect(deniedApply).toMatchObject({ ok: false, error: 'application_target_not_bound' });
     const foreign = await human('daemon_provider_snapshot', { action: 'refresh', id: nodeId, network_id: netId });
     const bad = structuredClone(read.snapshot); bad.codex_inventory.rows[0].node_id = 'n_scan_neighbour';
     expect((await daemon('ack_daemon_provider_snapshot', { request_id: foreign.request_id, snapshot: bad })).ok).toBe(false);

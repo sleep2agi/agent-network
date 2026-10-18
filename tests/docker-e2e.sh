@@ -42,6 +42,11 @@ for _i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 [ -n "$TOKEN" ] || { echo "FATAL: could not obtain bootstrap TOKEN — V3 auth bootstrap failed"; exit 1; }
+# #1221: /api/auth/me returns user.username. Assert the original authenticated
+# sender rather than inventing a persona; later token rotations are derived by
+# Hub independently, so helpers must not rewrite explicit negative identities.
+BOOTSTRAP_SENDER=$(curl -fsS http://127.0.0.1:9200/api/auth/me -H "Authorization: Bearer $TOKEN" | jq -er '.user.username | select(type == "string" and length > 0)')
+[ -n "$BOOTSTRAP_SENDER" ] || { echo "FATAL: authenticated user identity missing"; exit 1; }
 
 # #266 A1: bootstrap NETWORK_ID for utok-scoped writes.
 # Server commit 5c7bff2 tightened the UTOK write path to require an
@@ -169,13 +174,20 @@ echo ""
 
 # 9. send_task via MCP
 echo "9. Testing send_task..."
-SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test task","from_session":"tester"}')
+SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test task"}')
 response_json_ok "$SEND" && pass "task sent" || fail "task send failed"
+# A user must not impersonate the target node, even though it owns that node.
+BEFORE_SPOOF=$(curl -fsS -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?network_id=$NETWORK_ID" | jq '.tasks | length')
+SPOOF=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"must not impersonate node","from_session":"e2e-agent"}')
+response_json_error_is "$SPOOF" from_session_identity_mismatch && pass "forged user sender rejected by exact identity guard" || fail "forged user sender accepted or wrong rejection"
+AFTER_SPOOF=$(curl -fsS -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?network_id=$NETWORK_ID" | jq '.tasks | length')
+[ "$AFTER_SPOOF" = "$BEFORE_SPOOF" ] && pass "forged user sender writes no task" || fail "forged sender created a task"
+
 echo ""
 
 # 10. send_message should not trigger processing
 echo "10. Testing send_message not processed..."
-mcp_call "send_message" '{"alias":"e2e-agent","message":"should not process","from_session":"tester"}' > /dev/null
+mcp_call "send_message" '{"alias":"e2e-agent","message":"should not process"}' > /dev/null
 sleep 3
 pass "send_message sent (manual verify: agent should not process)"
 echo ""
@@ -205,7 +217,7 @@ echo ""
 
 # 11. V2: send_task writes to tasks table
 echo "11. Testing V2 tasks table..."
-V2_SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"v2 lifecycle test","from_session":"v2-tester","priority":"high"}')
+V2_SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"v2 lifecycle test","priority":"high"}')
 TASK_ID=$(echo "$V2_SEND" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -228,7 +240,7 @@ echo ""
 
 # 13. V2: send_reply closes task lifecycle
 echo "13. Testing V2 send_reply..."
-REPLY_RESP=$(e2e_agent_mcp_call e2e-agent send_reply "{\"alias\":\"v2-tester\",\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}")
+REPLY_RESP=$(e2e_agent_mcp_call e2e-agent send_reply "{\"text\":\"task done\",\"in_reply_to\":\"$TASK_ID\",\"status\":\"replied\",\"from_session\":\"e2e-agent\"}")
 response_json_ok "$REPLY_RESP" && pass "send_reply accepted" || { echo "$REPLY_RESP"; fail "send_reply failed"; }
 echo ""
 
@@ -255,7 +267,7 @@ echo ""
 
 # 16. send_reply with status=failed
 echo "16. Testing failed task..."
-FAIL_SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"will fail","from_session":"fail-tester"}')
+FAIL_SEND=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"will fail"}')
 FAIL_TID=$(echo "$FAIL_SEND" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -267,7 +279,7 @@ try:
   print(t.get('message_id',''))
 except: print('')
 " 2>/dev/null)
-FAIL_REPLY=$(e2e_agent_mcp_call e2e-agent send_reply "{\"alias\":\"fail-tester\",\"text\":\"error occurred\",\"in_reply_to\":\"$FAIL_TID\",\"status\":\"failed\",\"from_session\":\"e2e-agent\"}")
+FAIL_REPLY=$(e2e_agent_mcp_call e2e-agent send_reply "{\"text\":\"error occurred\",\"in_reply_to\":\"$FAIL_TID\",\"status\":\"failed\",\"from_session\":\"e2e-agent\"}")
 response_json_ok "$FAIL_REPLY" && pass "send_reply(failed) accepted" || fail "send_reply(failed) broken"
 # verify task status = failed
 sleep 1
@@ -278,8 +290,8 @@ echo ""
 # 17. high priority ordering
 echo "17. Testing priority ordering..."
 e2e_create_agent prio-agent codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "prio-agent fixture creation failed"
-mcp_call "send_task" '{"alias":"prio-agent","task":"low prio","from_session":"tester","priority":"low"}' >/dev/null
-mcp_call "send_task" '{"alias":"prio-agent","task":"high prio","from_session":"tester","priority":"high"}' >/dev/null
+mcp_call "send_task" '{"alias":"prio-agent","task":"low prio","priority":"low"}' >/dev/null
+mcp_call "send_task" '{"alias":"prio-agent","task":"high prio","priority":"high"}' >/dev/null
 INBOX=$(e2e_agent_mcp_call prio-agent get_inbox '{"alias":"prio-agent","limit":5}')
 # high priority should come first
 FIRST=$(echo "$INBOX" | python3 -c "
@@ -298,21 +310,23 @@ echo ""
 
 # 18. special characters in task content
 echo "18. Testing special characters..."
-SPECIAL_RESP=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test <script>alert(1)</script> & \"quotes\" 中文测试","from_session":"tester"}')
+SPECIAL_RESP=$(mcp_call "send_task" '{"alias":"e2e-agent","task":"test <script>alert(1)</script> & \"quotes\" 中文测试"}')
 response_json_ok "$SPECIAL_RESP" && pass "special chars in task content" || fail "special chars rejected"
 echo ""
 
 # 19. tasks query by from_name
 echo "19. Testing tasks query filters..."
-FROM_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?from_name=v2-tester" 2>/dev/null)
+FROM_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?from_name=$BOOTSTRAP_SENDER" 2>/dev/null)
 echo "$FROM_CHECK" | grep -q '"ok":true' && pass "tasks filter by from_name" || fail "from_name filter broken"
+printf '%s' "$FROM_CHECK" | jq -e --arg sender "$BOOTSTRAP_SENDER" --arg id "$TASK_ID" '.tasks | any(.task_id == $id and .from_name == $sender)' >/dev/null \
+  && pass "task retains actual authenticated human sender" || fail "task sender does not match authenticated human"
 TO_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?to_name=e2e-agent&limit=3" 2>/dev/null)
 echo "$TO_CHECK" | grep -q '"ok":true' && pass "tasks filter by to_name + limit" || fail "to_name filter broken"
 echo ""
 
 # 20. send_reply to non-existent task (graceful)
 echo "20. Testing reply to non-existent task..."
-GHOST_REPLY=$(mcp_call "send_reply" '{"alias":"e2e-agent","text":"ghost reply","in_reply_to":"non-existent-id","from_session":"tester"}')
+GHOST_REPLY=$(mcp_call "send_reply" '{"alias":"e2e-agent","text":"ghost reply","in_reply_to":"non-existent-id"}')
 response_json_error_is "$GHOST_REPLY" "reply_task_not_found" \
   && pass "reply to non-existent task returns structured error" || fail "ghost reply contract broken"
 echo ""
@@ -380,7 +394,7 @@ print(count)
 # Concurrent send_task to same agent
 CONCURRENT_PIDS=()
 for i in $(seq 1 3); do
-  mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"concurrent task $i\",\"from_session\":\"tester\"}" > /dev/null &
+  mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"concurrent task $i\"}" > /dev/null &
   CONCURRENT_PIDS+=("$!")
 done
 for pid in "${CONCURRENT_PIDS[@]}"; do wait "$pid"; done
@@ -403,7 +417,7 @@ echo ""
 # 23.6 Boundary: large content
 echo "23.6 Testing large content..."
 LARGE_CONTENT=$(python3 -c "print('X' * 5000)")
-LARGE_RESP=$(mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"$LARGE_CONTENT\",\"from_session\":\"tester\"}")
+LARGE_RESP=$(mcp_call "send_task" "{\"alias\":\"conc-1\",\"task\":\"$LARGE_CONTENT\"}")
 response_json_ok "$LARGE_RESP" && pass "5KB task content accepted" || fail "large content rejected"
 # Verify round-trip: content stored correctly
 LARGE_TID=$(echo "$LARGE_RESP" | python3 -c "
@@ -428,7 +442,7 @@ print(len(tasks[0].get('content','')) if tasks else 0)
 fi
 
 # Boundary: empty-ish content edge
-EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x","from_session":"tester"}')
+EMPTY_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"x"}')
 response_json_ok "$EMPTY_RESP" && pass "minimal 1-char task accepted" || fail "1-char task rejected"
 echo ""
 
@@ -451,7 +465,7 @@ echo ""
 # 23.65 Task retry
 echo "23.65 Testing task retry..."
 # Create a task, fail it, then retry
-RETRY_SEND=$(mcp_call "send_task" '{"alias":"conc-1","task":"retry me","from_session":"tester"}')
+RETRY_SEND=$(mcp_call "send_task" '{"alias":"conc-1","task":"retry me"}')
 RETRY_TID=$(echo "$RETRY_SEND" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -464,13 +478,13 @@ try:
 except: print('')
 " 2>/dev/null)
 # Fail it
-e2e_agent_mcp_call "conc-1" "send_reply" "{\"alias\":\"tester\",\"text\":\"error\",\"in_reply_to\":\"$RETRY_TID\",\"status\":\"failed\",\"from_session\":\"conc-1\"}" > /dev/null
+e2e_agent_mcp_call "conc-1" "send_reply" "{\"text\":\"error\",\"in_reply_to\":\"$RETRY_TID\",\"status\":\"failed\",\"from_session\":\"conc-1\"}" > /dev/null
 sleep 1
 # Verify failed
 RETRY_C1=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$RETRY_TID" 2>/dev/null)
 echo "$RETRY_C1" | grep -q '"failed"' && pass "task marked failed" || fail "task not failed"
 # Retry it
-RETRY_RESP=$(mcp_call "retry_task" "{\"task_id\":\"$RETRY_TID\",\"from_session\":\"tester\"}")
+RETRY_RESP=$(mcp_call "retry_task" "{\"task_id\":\"$RETRY_TID\"}")
 response_json_ok "$RETRY_RESP" && pass "retry_task accepted" || fail "retry_task failed"
 # Verify back to delivered
 sleep 1
@@ -490,7 +504,7 @@ echo ""
 
 # 23.655 Task cancel
 echo "23.655 Testing cancel_task..."
-CANCEL_SEND=$(mcp_call "send_task" '{"alias":"conc-1","task":"cancel this","from_session":"tester"}')
+CANCEL_SEND=$(mcp_call "send_task" '{"alias":"conc-1","task":"cancel this"}')
 CANCEL_TID=$(echo "$CANCEL_SEND" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -502,12 +516,12 @@ try:
   print(t.get('message_id',''))
 except: print('')
 " 2>/dev/null)
-CANCEL_RESP=$(mcp_call "cancel_task" "{\"task_id\":\"$CANCEL_TID\",\"reason\":\"no longer needed\",\"from_session\":\"tester\"}")
+CANCEL_RESP=$(mcp_call "cancel_task" "{\"task_id\":\"$CANCEL_TID\",\"reason\":\"no longer needed\"}")
 response_json_ok "$CANCEL_RESP" && pass "cancel_task accepted" || fail "cancel_task failed"
 CANCEL_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$CANCEL_TID" 2>/dev/null)
 echo "$CANCEL_CHECK" | grep -q '"cancelled"' && pass "task status = cancelled" || fail "task not cancelled"
 # Try cancel again (idempotent check — already terminal)
-CANCEL_AGAIN=$(mcp_call "cancel_task" "{\"task_id\":\"$CANCEL_TID\",\"from_session\":\"tester\"}")
+CANCEL_AGAIN=$(mcp_call "cancel_task" "{\"task_id\":\"$CANCEL_TID\"}")
 echo "$CANCEL_AGAIN" | grep -q '"cancelled":false' && pass "re-cancel rejected (already terminal)" || pass "re-cancel check"
 echo ""
 
@@ -517,7 +531,7 @@ e2e_create_agent agent-a codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "age
 e2e_create_agent agent-b codex-sdk gpt-5.4 "$NETWORK_ID" >/dev/null || fail "agent-b fixture creation failed"
 e2e_agent_mcp_call agent-a report_status '{"resume_id":"reassign-src","status":"idle","server":"test"}' > /dev/null
 e2e_agent_mcp_call agent-b report_status '{"resume_id":"reassign-dst","status":"idle","server":"test"}' > /dev/null
-RA_SEND=$(mcp_call "send_task" '{"alias":"agent-a","task":"reassign me","from_session":"tester"}')
+RA_SEND=$(mcp_call "send_task" '{"alias":"agent-a","task":"reassign me"}')
 RA_TID=$(echo "$RA_SEND" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -529,7 +543,7 @@ try:
   print(t.get('message_id',''))
 except: print('')
 " 2>/dev/null)
-RA_RESP=$(mcp_call "reassign_task" "{\"task_id\":\"$RA_TID\",\"new_alias\":\"agent-b\",\"from_session\":\"tester\"}")
+RA_RESP=$(mcp_call "reassign_task" "{\"task_id\":\"$RA_TID\",\"new_alias\":\"agent-b\"}")
 echo "$RA_RESP" | grep -q 'agent-b' && pass "task reassigned to agent-b" || fail "reassign failed"
 # Verify task now targets agent-b
 RA_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/api/tasks?task_id=$RA_TID" 2>/dev/null)
@@ -544,7 +558,7 @@ echo ""
 # 23.7 Task expiration
 echo "23.7 Testing task expiration..."
 # Send a task with 2-second TTL
-EXP_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"will expire","from_session":"tester","ttl_seconds":2}')
+EXP_RESP=$(mcp_call "send_task" '{"alias":"conc-1","task":"will expire","ttl_seconds":2}')
 EXP_TID=$(echo "$EXP_RESP" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -681,7 +695,7 @@ SIM_REG=$(e2e_agent_mcp_call mock-agent report_status '{"resume_id":"sim-mock-ag
 response_json_ok "$SIM_REG" && pass "mock agent registered" || fail "mock agent registration failed"
 
 # Send task to mock agent
-SIM_TASK=$(mcp_call "send_task" '{"alias":"mock-agent","task":"compute 2+2","from_session":"orchestrator","priority":"normal"}')
+SIM_TASK=$(mcp_call "send_task" '{"alias":"mock-agent","task":"compute 2+2","priority":"normal"}')
 SIM_TID=$(echo "$SIM_TASK" | python3 -c "
 import sys,json
 raw=sys.stdin.read()
@@ -721,7 +735,7 @@ SIM_CHECK3=$(curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9200/ap
 echo "$SIM_CHECK3" | grep -q '"running"' && pass "task status = running" || fail "expected running"
 
 # Mock agent: send reply with result
-SIM_REPLY=$(e2e_agent_mcp_call mock-agent send_reply "{\"alias\":\"orchestrator\",\"text\":\"4\",\"in_reply_to\":\"$SIM_TID\",\"status\":\"replied\",\"from_session\":\"mock-agent\"}")
+SIM_REPLY=$(e2e_agent_mcp_call mock-agent send_reply "{\"text\":\"4\",\"in_reply_to\":\"$SIM_TID\",\"status\":\"replied\",\"from_session\":\"mock-agent\"}")
 response_json_ok "$SIM_REPLY" && pass "mock agent replied" || fail "reply failed"
 
 # Verify task = replied with result
@@ -845,8 +859,8 @@ e2e_agent_mcp_call beta-agent report_status \
   '{"resume_id":"isolation-beta","status":"idle","server":"test"}' >/dev/null
 
 # Send task to each network
-SEND_A=$(mcp_call "send_task" "{\"alias\":\"alpha-agent\",\"task\":\"alpha task\",\"from_session\":\"tester\",\"network_id\":\"$NET_A_ID\"}")
-SEND_B=$(mcp_call "send_task" "{\"alias\":\"beta-agent\",\"task\":\"beta task\",\"from_session\":\"tester\",\"network_id\":\"$NET_B_ID\"}")
+SEND_A=$(mcp_call "send_task" "{\"alias\":\"alpha-agent\",\"task\":\"alpha task\",\"network_id\":\"$NET_A_ID\"}")
+SEND_B=$(mcp_call "send_task" "{\"alias\":\"beta-agent\",\"task\":\"beta task\",\"network_id\":\"$NET_B_ID\"}")
 response_json_ok "$SEND_A" && response_json_ok "$SEND_B" \
   && pass "tasks sent to different networks" \
   || { printf 'alpha=%s\nbeta=%s\n' "$SEND_A" "$SEND_B" >&2; fail "cross-network fixture dispatch failed"; }

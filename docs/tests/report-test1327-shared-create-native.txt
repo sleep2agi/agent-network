@@ -1,0 +1,63 @@
+#1327 / parent #1302 — full native shared daemon creation acceptance
+
+Status: FIRST RUN FAILED; correction pending. No passing native claim.
+Local Docker preflight passed: Bun harness compilation with product imports
+externalized, shell syntax, no-bare-rm-rf (444 scripts), hardcoded-from-session,
+mutation pins (754 anchors, unchecked 4 at baseline), L1 trigger coverage and
+action pins (218 references / 93 workflows). This does not execute the harness.
+The full locked image build and native chain run in Actions, not a >2-minute
+local test. Record the actual exact-head run/job/result here after it finishes.
+
+Intended chain:
+- Real isolated Hub registration/network/daemon token/capability report.
+- Real create_node → get_create_request → handleCreateNodeDoorbell → ACK.
+  The doorbell is invoked directly from the returned request ID (SSE delivery
+  latency/reconnect are not part of this gate).
+- Default production spawn executes a source-layout pin shim, which forwards
+  all original args to the real source CLI; only the built runtime path and
+  private tmux/launch roots are fixed by that shim. No fake successful launcher,
+  no spawnChild override, and no manual shared fields in child node_spec/config.
+- Authenticated real @opencode/cli@2.0.22 host A, new B/C actual shared serve
+  PID/startTicks and ownership receipts, distinct sessions/node IDs/tokens.
+- Deterministic loopback model, real Hub network tasks/replies with exact alias.
+- Stop B via real CLI; A survives and C still handles a network task.
+- Explicit new-server and dead-registry candidate actually start owned servers.
+
+Isolation: Docker --network none at runtime, private SQLite, synthetic bootstrap
+and node credentials, private tmux -S socket (never kill-server), no production
+credentials or paid inference. Source SHA is checked out explicitly from PR
+head (or main push SHA) and compared with the Docker build/run provenance.
+Logs redact test tokens and the shared password. This does not verify a
+published installer, production adoption, real vendor entitlement, human typing
+readiness or a complete disaster-recovery procedure.
+
+First Actions sample: 9f8377af, run 38800139650 / job 116646723674.
+The locked image built successfully. Real Hub/network/daemon registration and
+authenticated host A readiness/observation passed. B creation was rejected by
+the existing workdir policy: workdir_is_system_dir, because this new fixture
+put child projects below /run. No child startup/session/task/close ran.
+Correction: projects now live in /tmp/test1327-projects; private runtime state
+and tmux still live in /run/test1327. The product workdir rule is untouched.
+The redacted real ACK is also saved before its assertion for future diagnosis.
+The subsequent exact-head Actions result must be recorded separately.
+
+Second Actions sample: 22abdf0a, run38802397366 / job116654544919.
+The image built and B passed real host_shared_live admission plus the real
+started/launch_verified ACK. The fixture then read an incorrect config path:
+it used alias nodeB1327 literally, while #652 correctly writes nodeb1327.
+Correction: reuse product childDirNameForCreate for config/receipt/log paths.
+No product path rule or startup assertion is changed; subsequent session/task/
+close/fallback assertions remain unexecuted. The new head needs its own run.
+
+Native acceptance PASS on exact head86a85c7de22ce40f1bb85446c59cb3fc839fe113:
+Actions run38808221819 / job116674522963, completed21:24:11Z. The artifact
+source pin matches that head. All named runtime assertions passed: B/C really
+borrow A's pid/ticks, distinct session/Hub identities, exact network replies,
+CLI stop B preserves A and C still replies, explicit-new owns another listener,
+dead candidate starts an owned server and completes a network task.
+
+A separate required qa-trigger-coverage check failed: despite the dedicated
+workflow paths, repository policy also requires CI-run test directories in
+qa.yml's push/PR path lists. Added the test1327 path to both lists; the native
+workflow/harness are unchanged, and no gate is relaxed or duplicated in matrix.
+The next head must pass its own required checks and native run before merge.

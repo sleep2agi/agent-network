@@ -1,0 +1,43 @@
+#894 minimal official CLI download fallback — NOT PUBLISHED
+OBSERVED_AT=2026-10-12 06:50+08
+
+Problem/scope
+- release.yml38181087362 exact main103d02b7697bca2a62ed67bfc39c56a27d03096e:
+  build and all four gates SUCCESS; npm accepted06:38:05, anonymous168 metadata
+  and tarball still404 at06:50. Not a package-install failure or lost credential.
+- Add a manual CI-only immutable GitHub download using the original gated
+  tarball, no rebuild, npm publish, dist-tag, product/runtime or production change.
+- Original official source must be a current main ancestor, full40 checked out;
+  original run must be main workflow_dispatch release.yml with build/four gates
+  SUCCESS; exact package identity/version and inner SHA256 must match.
+- Publisher rechecks main immediately before upload. Existing tags refused.
+  PR/manual default publish=false never uploads. No local manual publishing.
+
+Docker core checks
+- Independent .github/tests/gated-cli-download/Dockerfile, pinned
+  node20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293;
+  python3 is installed only inside the disposable build. No host package change.
+- Image manifest-listf2ba29f0c5bdfa6f1e5b1a55d37c76a0b16550fc02bb1f73bab7f9ba28331c4a.
+- Offline --rm contract4 unittest cases PASS: official exact source positive;
+  wrong SHA/branch/event/workflow/run ID refused; each failed gate refused;
+  short SHA refused. These are four test methods, not live GitHub uploads.
+- Actual original CLI artifact11717566117, inner2121077 bytes:
+  SHA256049e69273d45e68a69fc3fe813a9a0440ae50965f0cc0bd94deac25d4abc87b4.
+- Actual run/jobs metadata read from GitHub06:49+08, not fabricated; mounted
+  read-only together with actual tarball/source in an offline disposable Docker.
+  Complete validator/notes positive exit0, packageCLI168/runtime134 confirmed.
+- Same actual tarball with expected SHA=64 zeroes: exact exit1
+  ValueError: inner tarball byte mismatch. Not counted as a failed product test.
+- No old successful Provider/auth/native suites rerun; no real model inference.
+
+Recovery and boundaries
+- Authority/workflow/contract Dockerfile and SOP are in Git; no unique server
+  launcher or personal remembered release command. Protected GitHub Actions
+  token performs same-repo download/upload; no token read/copied in this work.
+- No topology, proxy, port, database migration or production-data backup change.
+  Startup/upgrade/verification/rollback remains docs-site/docs/deploy/daemon.md;
+  existing private pair/config retained before any future activation. Software
+  artifacts do not recover account credentials, conversations or production DB.
+- --rm containers/tmp probes gone; read-only CI artifact copies and Docker image
+  retained for evidence. Main review/CI/merge and actual public download remain
+  required before claiming this new path has released CLI168.

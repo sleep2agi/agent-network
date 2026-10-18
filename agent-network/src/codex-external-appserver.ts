@@ -176,13 +176,26 @@ export function tokenInSessionSnippet(configPath: string, jsRuntime: string): st
     `if [ -z "$ANET_CODEX_COMMHUB_TOKEN" ]; then echo "[anet] warning: config.json has no token; the app-server's commhub MCP will not authenticate" >&2; fi`;
 }
 
-export function appserverShellCommand(plan: ExternalAppserverPlan, jsRuntime: string): string {
+/** Same token handoff, via the standalone binary's internal argv (it is not `node -e`). */
+export function standaloneBinTokenSnippet(configPath: string, anetBin: string): string {
+  return `ANET_CODEX_COMMHUB_TOKEN="$(ANET_EXTAPP_CONFIG=${q(configPath)} ${q(anetBin)} __print-config-token)"; export ANET_CODEX_COMMHUB_TOKEN; ` +
+    `if [ -z "$ANET_CODEX_COMMHUB_TOKEN" ]; then echo "[anet] warning: config.json has no token; the app-server's commhub MCP will not authenticate" >&2; fi`;
+}
+
+export function appserverShellCommand(
+  plan: ExternalAppserverPlan,
+  jsRuntime: string,
+  mode: "js-eval" | "standalone-bin" = "js-eval",
+): string {
   const tokenExport = tokenInSessionSnippet(plan.configPath, jsRuntime); // MUTATION-ANCHOR:token-in-session
+  const sessionToken = mode === "standalone-bin"
+    ? standaloneBinTokenSnippet(plan.configPath, jsRuntime)
+    : tokenExport;
   return [
     dotenvSnippet(plan.workspaceDir),
     NO_PROXY_SNIPPET,
     `export CODEX_HOME=${q(plan.codexHome)}`,
-    tokenExport,
+    sessionToken,
     `mkdir -p ${q(join(plan.nodeDir, "logs"))}`,
     `${q(plan.codexBin)} -C ${q(plan.projectDir)} app-server --listen ${q(plan.url)} 2>&1 | tee -a ${q(join(plan.nodeDir, "logs", "tmux-appserver.log"))}`,
   ].join("; ");

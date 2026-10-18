@@ -89,7 +89,7 @@ anet node create my-agent --runtime claude-code-cli
 | `codex-sdk` | Codex | `codex login` |
 | `grok-build-acp` | xAI Grok Build (ACP) | `grok login` |
 
-`@preview` additionally exposes `codex-app-server` and `opencode-cli`. The authoritative full runtime table (stable + preview) is at [anet.sh/guide/runtimes](https://anet.sh/guide/runtimes).
+`@preview` additionally exposes `codex-app-server` and `opencode-cli`. OpenCode V2 is not a separate runtime id: on a preview build that has the flag, `anet node create <name> --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools` creates a co-presence node (`@opencode/cli@2.0.22`, every local tool enabled, trusted tasks only). npm `latest` measured on 2026-10-11 (`2.3.0-preview.76`) does not have `--opencode-generation`; there `opencode-cli` is V1. The catalog reader merged in #2574 is not a user command and is not wired to the daemon, Hub, or client. User steps: [OpenCode V2](https://anet.sh/guide/opencode). Operator limits: [docs/runbooks/opencode-tui-copresence.md](runbooks/opencode-tui-copresence.md). The authoritative full runtime table (stable + preview) is at [anet.sh/guide/runtimes](https://anet.sh/guide/runtimes).
 
 For the full provider endpoint table (each provider's `ANTHROPIC_BASE_URL` etc.), see [docs-site/guide/multi-model](https://anet.sh/guide/multi-model).
 

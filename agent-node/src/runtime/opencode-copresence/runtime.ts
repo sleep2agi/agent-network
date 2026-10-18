@@ -39,7 +39,12 @@ import {
   stopRecordedAttach,
 } from "./attach-tui";
 import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
-import { Agent, type Dispatcher } from "undici";
+import { Agent } from "undici";
+import { fetchOpenCodeJson } from "./http";
+import { openV1BorrowedAdmission, type V1BorrowedAdmissionOptions } from "./v1-borrowed-admission";
+export { fetchOpenCodeJson } from "./http";
+import { importV1Checkpoint, readV1Checkpoint, verifyV1ImportedHistory, writeV1Checkpoint,
+  type V1CheckpointIdentity } from "./v1-checkpoint";
 
 export { OPENCODE_DEFAULT_TASK_TIMEOUT_MS };
 
@@ -157,6 +162,9 @@ export interface OpenCodeCopresenceSession {
 }
 
 export interface OpenVettedOpenCodeCopresenceOptions {
+  /** Explicit V1 borrowed Host; never inferred from a URL or saved session.
+   * API opt-in only: full CLI/TUI adoption remains a separate gate. */
+  borrowedV1?: V1BorrowedAdmissionOptions;
   /** #542 — upstream generation seam; defaults to OpenCode V1. */
   backend?: OpencodeBackend;
   binary: string;
@@ -164,8 +172,19 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   cwd: string;
   workDir: string;
   model?: string;
+  expectedVersion?: string;
   title?: string;
   startupTimeoutMs?: number;
+  /** V1 only: optional immutable identity enables private session checkpoints. */
+  checkpoint?: V1CheckpointIdentity;
+  sessionId?: string;
+  newSession?: boolean;
+  /** An independently owned V2 server. Closing this node must not stop it. */
+  sharedServer?: { url: string; password: string; passwordFile?: string };
+  sharedMcpUrl?: string;
+  resumeSessionId?: string;
+  /** Reconcile a resumed V2 session only after an explicit configured-model change. */
+  reconcileResumedModel?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -175,6 +194,9 @@ export interface OpenVettedOpenCodeCopresenceOptions {
 }
 
 export interface OpenOpenCodeCopresenceOptions {
+  /** Explicit V1 borrowed Host; never inferred from a URL or saved session.
+   * API opt-in only: full CLI/TUI adoption remains a separate gate. */
+  borrowedV1?: V1BorrowedAdmissionOptions;
   /** #542 — upstream generation seam; defaults to OpenCode V1. */
   backend?: OpencodeBackend;
   cwd: string;
@@ -190,6 +212,13 @@ export interface OpenOpenCodeCopresenceOptions {
   commhubToken?: string;
   commhubAlias?: string;
   startupTimeoutMs?: number;
+  checkpoint?: V1CheckpointIdentity;
+  sessionId?: string;
+  newSession?: boolean;
+  /** V2 only. The server must have workspace-scoped MCP configured separately. */
+  sharedServer?: { url: string; password: string; passwordFile?: string };
+  resumeSessionId?: string;
+  reconcileResumedModel?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -336,10 +365,6 @@ export function wireOpenCodeDefaultModel(childEnv: NodeJS.ProcessEnv, model: str
   childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(config);
 }
 
-function basicAuthorization(password: string): string {
-  return `Basic ${Buffer.from(`${USERNAME}:${password}`).toString("base64")}`;
-}
-
 export function appendBounded(current: string, chunk: string): string {
   return `${current}${chunk}`.slice(-OUTPUT_LIMIT);
 }
@@ -401,53 +426,6 @@ export function openCodeTurnDispatcher(timeoutMs: number): Agent {
   return new Agent({ headersTimeout: transportMs, bodyTimeout: transportMs });
 }
 
-// "fetch failed" alone hides the reason; the undici cause code names it
-// (UND_ERR_HEADERS_TIMEOUT, ECONNREFUSED, UND_ERR_SOCKET, ...). The bridge's
-// own deadline (TimeoutError/AbortError) is passed through untouched.
-function explainFetchFailure(error: any, method: string, path: string): unknown {
-  if (error?.name === "TimeoutError" || error?.name === "AbortError") return error;
-  const cause = error?.cause;
-  const code = cause?.code;
-  if (!code) return error;
-  const detail = cause?.message && cause.message !== code ? `: ${cause.message}` : "";
-  return new Error(`OpenCode ${method} ${path} ${error?.message ?? "fetch failed"} (${code}${detail})`, { cause: error });
-}
-
-export async function fetchOpenCodeJson(
-  url: string,
-  password: string,
-  path: string,
-  init: RequestInit = {},
-  timeoutMs = 5_000,
-  dispatcher?: Dispatcher,
-): Promise<any> {
-  const method = init.method ?? "GET";
-  let response: Response;
-  let text: string;
-  try {
-    response = await fetch(`${url}${path}`, {
-      ...init,
-      headers: {
-        authorization: basicAuthorization(password),
-        "content-type": "application/json",
-        ...(init.headers ?? {}),
-      },
-      // `timeoutMs <= 0` = no deadline here: the operator disabled it, or the
-      // caller passed its own `init.signal` (kept by the spread above).
-      ...(timeoutMs > 0 ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-      // Neither key is in the DOM RequestInit type. Node's fetch honours
-      // `dispatcher` and ignores `timeout`; Bun is the other way round.
-      ...(dispatcher ? { dispatcher, timeout: false } : {}),
-    } as RequestInit);
-    text = await response.text();
-  } catch (error) {
-    throw explainFetchFailure(error, method, path);
-  }
-  if (!response.ok) {
-    throw new Error(`OpenCode ${method} ${path} returned HTTP ${response.status}`);
-  }
-  return text ? JSON.parse(text) : null;
-}
 const fetchJson = fetchOpenCodeJson;
 
 /** Cancel a shared-session turn the bridge has already given up on.
@@ -508,12 +486,13 @@ async function waitUntilSessionIdle(
   password: string,
   sessionId: string,
   timeoutMs: number,
+  request = (path: string, init: RequestInit = {}, ms = 2_000) => fetchJson(url, password, path, init, ms),
 ): Promise<void> {
   // `timeoutMs <= 0` = wait without a deadline.
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY;
   while (Date.now() < deadline) {
     try {
-      const statuses = await fetchJson(url, password, "/session/status", {}, 2_000);
+      const statuses = await request("/session/status", {}, 2_000);
       if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
         const state = statuses[sessionId];
         if (state?.type === "idle") return;
@@ -524,14 +503,16 @@ async function waitUntilSessionIdle(
           // exact session still exists. A 404, malformed record, or unknown
           // status stays fail-closed and retries until the caller's timeout.
           try {
-            const session = await fetchJson(url, password, `/session/${sessionId}`, {}, 2_000);
+            const session = await request(`/session/${sessionId}`, {}, 2_000);
             if (session?.id === sessionId) return;
-          } catch {
+          } catch (error: any) {
+            if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
             // Keep waiting: missing session is not evidence of idle.
           }
         }
       }
-    } catch {
+    } catch (error: any) {
+      if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
       // A transient status failure is also not evidence of idle.
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -631,16 +612,19 @@ export function writeAttachScript(
   sessionId: string,
   cwd: string,
   recordDir: string,
+  passwordFile?: string,
 ): void {
   const exported = Object.entries({
     ...env,
     OPENCODE_SERVER_USERNAME: USERNAME,
-    OPENCODE_SERVER_PASSWORD: password,
-  }).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+    ...(passwordFile ? {} : { OPENCODE_SERVER_PASSWORD: password }),
+  }).filter((entry): entry is [string, string] => typeof entry[1] === "string"
+    && (!passwordFile || !/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/i.test(entry[0])));
   const lines = [
     "#!/usr/bin/env bash",
     "set -eu",
     ...exported.map(([key, value]) => `export ${key}=${shellQuote(value)}`),
+    ...(passwordFile ? [`export OPENCODE_SERVER_PASSWORD="$(<${shellQuote(passwordFile)})"`] : []),
     `cd ${shellQuote(cwd)}`,
     // #1957 — record this launcher's pid/ticks/pane so the runtime can stop
     // exactly this TUI on close and relaunch the next launcher in its pane.
@@ -669,53 +653,102 @@ export async function openVettedOpenCodeCopresence(
   // #543 — OpenCode V2 has a different server API (async prompt queue, idle
   // turn markers, no TUI toast); it gets its own core. V1 continues below,
   // unchanged.
+  if (opts.borrowedV1 && backend.generation !== "v1") throw new Error("Borrowed runtime is V1 only");
   if (backend.generation === "v2") {
     const { openVettedOpenCodeV2Copresence } = await import("./v2-session");
     return await openVettedOpenCodeV2Copresence({ ...opts, backend });
   }
   const log = opts.log ?? (() => {});
   const warn = opts.warn ?? (() => {});
-  const port = await reserveLoopbackPort();
-  const url = `http://127.0.0.1:${port}`;
-  const password = randomBytes(32).toString("base64url");
-  const childEnv: NodeJS.ProcessEnv = {
-    ...opts.env,
-    OPENCODE_SERVER_USERNAME: USERNAME,
-    OPENCODE_SERVER_PASSWORD: password,
-  };
-  const child = spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port }), {
-    cwd: opts.cwd,
-    env: childEnv,
-    stdio: ["pipe", "pipe", "pipe"],
-    detached: process.platform === "linux",
-  });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  let startupOutput = "";
-  child.stdout.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
-  child.stderr.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
-
-  if (!child.pid) throw new Error("OpenCode serve spawn returned no pid");
-  const identity = readLinuxProcessGroupIdentity(child.pid);
-  if (process.platform === "linux" && (!identity || identity.pgrp !== child.pid)) {
-    try { child.kill("SIGKILL"); } catch {}
-    throw new Error("OpenCode serve failed the detached process-group identity handshake");
+  const borrowedOptions = opts.borrowedV1;
+  if (borrowedOptions && (backend.generation !== "v1" || opts.cwd !== borrowedOptions.expectedBinding.directory
+    || opts.workDir !== borrowedOptions.stateRoot || opts.checkpoint || opts.newSession
+    || (opts.sessionId && opts.sessionId !== borrowedOptions.expectedBinding.sessionId)
+    || requiredModel !== `${borrowedOptions.model.providerID}/${borrowedOptions.model.modelID}`)) {
+    throw new Error("OpenCode borrowed runtime requires exact V1 directory/state/session/model and no import/new-session");
   }
+  let borrowed: Awaited<ReturnType<typeof openV1BorrowedAdmission>> | undefined;
+  let child: ChildProcessWithoutNullStreams | undefined;
+  let identity: LinuxProcessGroupIdentity | undefined;
+  let startupOutput = "", url: string, password: string;
+  let checkpoint: ReturnType<typeof readV1Checkpoint>;
+  if (borrowedOptions) {
+    borrowed = await openV1BorrowedAdmission(borrowedOptions);
+    // The transport reloads private credentials itself; never export Host or
+    // CommHub credentials into an attach script or child environment.
+    url = borrowed.url; password = "";
+  } else {
+    const port = await reserveLoopbackPort();
+    url = `http://127.0.0.1:${port}`;
+    password = randomBytes(32).toString("base64url");
+    const childEnv: NodeJS.ProcessEnv = {
+      ...opts.env,
+      OPENCODE_SERVER_USERNAME: USERNAME,
+      OPENCODE_SERVER_PASSWORD: password,
+    };
+    checkpoint = opts.checkpoint && !opts.newSession
+      ? readV1Checkpoint(opts.workDir, opts.checkpoint, opts.sessionId) : undefined;
+    if (checkpoint) {
+      importV1Checkpoint(opts.binary, childEnv, opts.cwd, checkpoint);
+      if (!checkpoint.cleanShutdown) warn("[opencode-copresence] restoring the last checkpoint after an unclean exit; later human turns may be absent");
+    } else if (opts.checkpoint && opts.sessionId && !opts.newSession) {
+      warn("[opencode-copresence] saved session has no V1 checkpoint (legacy launch); startup creates a new session, not a history recovery");
+    }
+    child = spawn(opts.binary, backend.serveArgs({ hostname: "127.0.0.1", port }), {
+      cwd: opts.cwd,
+      env: childEnv,
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform === "linux",
+    });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
+    child.stderr.on("data", (chunk: string) => { startupOutput = appendBounded(startupOutput, chunk); });
 
+    if (!child.pid) throw new Error("OpenCode serve spawn returned no pid");
+    identity = readLinuxProcessGroupIdentity(child.pid);
+    if (process.platform === "linux" && (!identity || identity.pgrp !== child.pid)) {
+      try { child.kill("SIGKILL"); } catch {}
+      throw new Error("OpenCode serve failed the detached process-group identity handshake");
+    }
+
+  }
   let closed = false;
   let queue = Promise.resolve();
-  const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
+  const attachScriptPath = borrowed ? "" : join(opts.workDir, "opencode-attach.sh");
+  let unknownWrite = false;
+  let borrowedClose: Promise<void> | undefined;
+  const request = (path: string, init: RequestInit = {}, ms = 5_000, dispatcher?: import("undici").Dispatcher) =>
+    borrowed ? borrowed.request(path, init, ms, dispatcher) : fetchJson(url, password, path, init, ms, dispatcher);
+  const abortOwnTurn = async (id: string) => {
+    if (!borrowed) return abortOpenCodeSession(url, password, id, warn);
+    try { await request(`/session/${id}/abort`, { method: "POST", body: "{}" }); return true; }
+    catch { warn("[opencode-copresence] exact borrowed turn abort failed"); return false; }
+  };
 
   try {
-    await waitForHealth(child, url, password, opts.startupTimeoutMs ?? 20_000);
-    const created = await fetchJson(url, password, "/session", {
+    if (child) await waitForHealth(child, url, password, opts.startupTimeoutMs ?? 20_000);
+    const created = borrowed ? await borrowed.readSession() : checkpoint
+      ? await request(`/session/${checkpoint.data.info.id}`)
+      : await request("/session", {
       method: "POST",
       body: JSON.stringify({ title: opts.title ?? "Agent Network shared TUI" }),
     });
     if (typeof created?.id !== "string" || !/^ses_[A-Za-z0-9]+$/.test(created.id)) {
       throw new Error("OpenCode POST /session returned an invalid session id");
     }
-    writeAttachScript(
+    if (checkpoint) verifyV1ImportedHistory(checkpoint, { info: created,
+      messages: await request(`/session/${created.id}/message`, {}, 30_000) });
+    const saveCheckpoint = async (cleanShutdown: boolean) => {
+      if (!opts.checkpoint) return;
+      const info = await request(`/session/${created.id}`);
+      const messages = await request(`/session/${created.id}/message`, {}, 30_000);
+      writeV1Checkpoint(opts.workDir, opts.checkpoint, { info, messages }, cleanShutdown);
+    };
+    // A successful startup checkpoint marks the now-live generation unclean.
+    // A normal close overwrites it after reading all current human/network turns.
+    await saveCheckpoint(false);
+    if (!borrowed) writeAttachScript(
       backend,
       attachScriptPath,
       opts.binary,
@@ -729,20 +762,21 @@ export async function openVettedOpenCodeCopresence(
     log(`[opencode-copresence] ready session=${created.id.slice(0, 12)} attach=${attachScriptPath}`);
     // #1957 — a previous generation's human TUI was stopped on close; put the
     // regenerated launcher back into its tmux pane, or say how to relaunch.
-    relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
+    if (!borrowed) relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
 
     const session: OpenCodeCopresenceSession = {
       url,
       sessionId: created.id,
       attachScriptPath,
       get isRunning() {
-        return !closed && child.exitCode === null && child.signalCode === null;
+        return !closed && !unknownWrite && (borrowed ? borrowed.isAdmitted : child!.exitCode === null && child!.signalCode === null);
       },
       notify(message: string, timeoutMs = 30_000, sender?: string) {
         return (async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
+          if (borrowed) throw new Error("Borrowed V1 TUI notifications are not enabled; no global toast fallback");
           const visibleSender = normalizeNoticeSender(sender);
-          await fetchJson(url, password, "/tui/show-toast", {
+          await request("/tui/show-toast", {
             method: "POST",
             // CommHub send_message is informational and does not request a
             // response. Use OpenCode's TUI notification channel instead of a
@@ -783,7 +817,7 @@ export async function openVettedOpenCodeCopresence(
           const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
           let deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
           let capacityRetries = 0;
-          await waitUntilSessionIdle(url, password, created.id, budgetMs);
+          await waitUntilSessionIdle(url, password, created.id, budgetMs, request);
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
@@ -827,7 +861,7 @@ export async function openVettedOpenCodeCopresence(
           // OpenCodeCopresenceTimeoutError (CI run 37127942901, test230).
           const turnSignal = turnTimeoutMs > 0 ? AbortSignal.timeout(turnTimeoutMs) : undefined;
           try {
-            message = await fetchJson(url, password, `/session/${created.id}/message`, {
+            message = await request(`/session/${created.id}/message`, {
               method: "POST",
               body: JSON.stringify({
                 messageID: messageId,
@@ -847,20 +881,23 @@ export async function openVettedOpenCodeCopresence(
               // an undecidable queue must not cancel whoever is using the
               // shared session. A readable history without our id means the
               // POST never landed.
-              const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, 5_000).catch(() => null);
+              const history = await request(`/session/${created.id}/message`, {}, 5_000).catch(() => null);
               const decision = timedOutTurnAbortDecision(history, messageId);
               if (decision === "not_submitted") {
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission did not land`);
                 throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
               }
               if (decision !== "abort") {
+                if (borrowed) unknownWrite = true;
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; leaving the session running (history unread or the live turn is not ours)`);
                 throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
               }
-              const aborted = await abortOpenCodeSession(url, password, created.id, warn);
+              const aborted = await abortOwnTurn(created.id);
+              if (borrowed && !aborted) unknownWrite = true;
               warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission landed — session ${aborted ? "aborted" : "abort failed"}`);
               throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed");
             }
+            if (borrowed) unknownWrite = true;
             throw error;
           } finally {
             // The body is fully read (or the request failed) by now; free the
@@ -869,6 +906,7 @@ export async function openVettedOpenCodeCopresence(
             (turnDispatcher as { destroy?: () => Promise<void> }).destroy?.()?.catch(() => {});
           }
           if (message?.info?.role !== "assistant") {
+            if (borrowed) unknownWrite = true;
             throw unverifiedOwnerError(parseMessageReply(message), message?.info?.parentID, messageId, "response is not an assistant message");
           }
           if (message.info.parentID !== messageId) {
@@ -877,9 +915,10 @@ export async function openVettedOpenCodeCopresence(
             // history back to our submission; only a human user message in
             // that chain means the reply is not ours. Whatever the verdict,
             // the answer text travels with the error instead of being lost.
-            const history = await fetchJson(url, password, `/session/${created.id}/message`, {}, 30_000).catch(() => null);
+            const history = await request(`/session/${created.id}/message`, {}, 30_000).catch(() => null);
             const verdict = ownershipChainVerdict(Array.isArray(history) ? history : null, messageId, message.info.parentID);
             if (!verdict.accepted) {
+              if (borrowed) unknownWrite = true;
               warn(`[opencode-copresence] reply ownership refused: ${verdict.reason}`);
               throw unverifiedOwnerError(parseMessageReply(message), message.info.parentID, messageId, verdict.reason);
             }
@@ -933,17 +972,47 @@ export async function openVettedOpenCodeCopresence(
           // turned any pure tool-call turn — a valid completed opencode
           // outcome — into a false failure report on CommHub. Removed.
           const replyText = parseMessageReply(message);
+          // A history-storage failure must not turn a completed tool/model
+          // operation into a failed task that callers might replay.
+          await saveCheckpoint(false).catch(() => warn("[opencode-copresence] checkpoint save failed; last saved history retained"));
           return {
             replyText,
             stdout: JSON.stringify(message),
           };
           }
+        }).catch(async (error) => {
+          if (borrowed && unknownWrite) await borrowed.retainRecovery();
+          throw error;
         });
         queue = operation.then(() => undefined, () => undefined);
         return operation;
       },
       async close(mode?: { restart?: boolean }) {
+        if (borrowed) {
+          return borrowedClose ??= (async () => {
+            closed = true;
+            // Drain this bridge's submitted work; queued tasks fail closed.
+            await queue;
+            if (unknownWrite) {
+              await borrowed.retainRecovery();
+              throw new Error("Borrowed V1 turn completion unknown; recovery retained, no automatic reopen");
+            }
+            const statuses = await borrowed.request("/session/status").catch(() => null);
+            const state = statuses && typeof statuses === "object" && !Array.isArray(statuses)
+              ? (Object.hasOwn(statuses, created.id) ? statuses[created.id] : { type: "idle" }) : null;
+            if (state?.type !== "idle") {
+              await borrowed.retainRecovery();
+              throw new Error("Borrowed V1 close requires a proven idle session; recovery retained");
+            }
+            await borrowed.close();
+          })();
+        }
         if (closed) return;
+        // Capture human turns too before normal teardown. An unavailable
+        // server/disk leaves the previous unclean checkpoint intact; a stop
+        // must still tear down owned processes rather than orphaning a server.
+        if (session.isRunning) await saveCheckpoint(true).catch(() =>
+          warn("[opencode-copresence] final checkpoint failed; recovery is limited to last saved history"));
         closed = true;
         // #1957 — stop the human TUI this launcher recorded (exact pid +
         // start ticks), before the serve it is attached to goes away. On a
@@ -951,18 +1020,19 @@ export async function openVettedOpenCodeCopresence(
         // generation can respawn the launcher into it.
         stopRecordedAttach(opts.workDir, { restart: mode?.restart === true, log, warn, tmux: opts.tmuxRunner });
         rmSync(attachScriptPath, { force: true });
-        if (identity) await stopProcessGroup(child, identity);
-        else try { child.kill("SIGKILL"); } catch {}
+        if (identity) await stopProcessGroup(child!, identity);
+        else try { child!.kill("SIGKILL"); } catch {}
       },
     };
-    child.once("exit", (code, signal) => {
+    child?.once("exit", (code, signal) => {
       if (!closed) warn(`[opencode-copresence] serve exited code=${code} signal=${signal}; next task must reopen`);
     });
     return session;
   } catch (error) {
+    if (borrowed) { await borrowed.close(); throw error; }
     rmSync(attachScriptPath, { force: true });
-    if (identity) await stopProcessGroup(child, identity).catch(() => {});
-    else try { child.kill("SIGKILL"); } catch {}
+    if (identity) await stopProcessGroup(child!, identity).catch(() => {});
+    else try { child!.kill("SIGKILL"); } catch {}
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
       startupOutput: startupOutput.slice(-1_000),
     });
@@ -979,6 +1049,19 @@ export async function openOpenCodeCopresenceRuntime(
 ): Promise<OpenCodeCopresenceSession> {
   const model = requireOpenCodeCopresenceModel(opts.model);
   const backend = opts.backend ?? OPENCODE_V1_BACKEND;
+  if (opts.sharedServer && backend.generation !== "v2") {
+    throw new Error("Shared OpenCode Server requires the V2 backend");
+  }
+  if (opts.borrowedV1) {
+    if (backend.generation !== "v1" || opts.unsafeTools || opts.commhubToken || opts.commhubMcpUrl || opts.providerEnvKeys?.length) {
+      throw new Error("Borrowed V1 uses its explicit scoped admission; owned credential/environment options are forbidden");
+    }
+    const { sharedServer: _shared, resumeSessionId: _resume, reconcileResumedModel: _reconcile, ...borrowedOpts } = opts;
+    const core = await openVettedOpenCodeCopresence({ ...borrowedOpts, model, backend,
+      binary: opts.borrowedV1.attestation.binary, env: {}, cwd: resolve(opts.cwd), workDir: resolve(opts.workDir) });
+    try { await opts.onSession?.(core.sessionId); return core; }
+    catch (error) { await core.close(); throw error; }
+  }
   const workDir = resolve(opts.workDir);
   const projectCwd = resolve(opts.cwd);
   const unsafeTools = opts.unsafeTools === true;
@@ -1019,10 +1102,12 @@ export async function openOpenCodeCopresenceRuntime(
     unsafeTools,
     launchBase: opts.launchBase,
     credentialMode: "runtime",
+    persistAuth: backend.generation === "v1",
   });
   let core: OpenCodeCopresenceSession | undefined;
   let cleaned = false;
   let instructions: OpenCodeCommhubInstructionsHandle | undefined;
+  let sharedMcp: import("./shared-v2-mcp").SharedV2McpHandle | undefined;
   const cleanup = () => {
     if (cleaned) return true;
     const removed = cleanupOpencodeChildEnv(workDir, childEnv);
@@ -1053,7 +1138,11 @@ export async function openOpenCodeCopresenceRuntime(
       if (!opts.commhubMcpUrl || !opts.commhubToken) {
         throw new Error("OpenCode copresence requires both CommHub MCP URL and token");
       }
-      instructions = backend.generation === "v2"
+      if (opts.sharedServer) {
+        const { openSharedV2CommhubMcp } = await import("./shared-v2-mcp");
+        instructions = writeOpenCodeCommhubInstructions(join(projectCwd, "ANET-COMMHUB.md"), opts.commhubAlias);
+        sharedMcp = await openSharedV2CommhubMcp(projectCwd, workDir, opts.commhubMcpUrl, opts.commhubToken, instructions.path);
+      } else instructions = backend.generation === "v2"
         ? (await import("./v2-session")).wireOpenCodeV2CommhubMcp(childEnv, {
           url: opts.commhubMcpUrl,
           token: opts.commhubToken,
@@ -1077,8 +1166,16 @@ export async function openOpenCodeCopresenceRuntime(
       cwd: effectiveCwd,
       workDir,
       model,
+      expectedVersion: opts.expectedVersion,
       title: opts.title,
       startupTimeoutMs: opts.startupTimeoutMs,
+      checkpoint: opts.checkpoint,
+      sessionId: opts.sessionId,
+      newSession: opts.newSession,
+      sharedServer: opts.sharedServer,
+      sharedMcpUrl: sharedMcp?.url,
+      resumeSessionId: opts.resumeSessionId,
+      reconcileResumedModel: opts.reconcileResumedModel,
       tmuxRespawn: opts.tmuxRespawn,
       tmuxRunner: opts.tmuxRunner,
       log: opts.log,
@@ -1095,6 +1192,7 @@ export async function openOpenCodeCopresenceRuntime(
         core!.submit(prompt, timeoutMs, sender, evidence),
       async close(mode?: { restart?: boolean }) {
         await core!.close(mode);
+        await sharedMcp?.close();
         removeInstructions();
         if (!await cleanupAfterExit(cleanup)) {
           opts.warn?.("[opencode-copresence] launch-root cleanup deferred; a live descendant still references it");
@@ -1104,6 +1202,7 @@ export async function openOpenCodeCopresenceRuntime(
     return wrapped;
   } catch (error) {
     await core?.close().catch(() => {});
+    await sharedMcp?.close().catch(() => {});
     removeInstructions();
     await cleanupAfterExit(cleanup);
     throw error;

@@ -1,0 +1,48 @@
+name: OpenCode shared create native
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/opencode-shared-create-native.yml'
+      - 'tests/test1327-shared-create-native/**'
+      - 'tests/test543-opencode-v2-copresence/stub-model.py'
+      - 'agent-node/**'
+      - 'agent-network/**'
+      - 'server/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/opencode-shared-create-native.yml'
+      - 'tests/test1327-shared-create-native/**'
+      - 'tests/test543-opencode-v2-copresence/stub-model.py'
+      - 'agent-node/**'
+      - 'agent-network/**'
+      - 'server/**'
+permissions:
+  contents: read
+concurrency:
+  group: opencode-shared-create-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-create:
+    name: shared create native (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Build exact source and run isolated native chain
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          mkdir -p artifacts/test1327
+          docker build --build-arg SOURCE_COMMIT="$source_sha" -t anet-test1327:${{ github.run_id }} -f tests/test1327-shared-create-native/Dockerfile .
+          docker run --rm --network none --name anet-test1327-${{ github.run_id }} -e EXPECTED_SOURCE_COMMIT="$source_sha" -v "$PWD/artifacts/test1327:/artifacts" anet-test1327:${{ github.run_id }}
+      - name: Remove this run's test container
+        if: always()
+        run: docker rm -f anet-test1327-${{ github.run_id }} 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test1327-${{ github.run_id }}
+          path: artifacts/test1327

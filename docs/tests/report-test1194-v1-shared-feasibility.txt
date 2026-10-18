@@ -1,0 +1,62 @@
+#1194 exact native V1 shared Server feasibility, 2026-10-14
+
+Source PR2721 head: 7770ebb9cb04106c6f0205c12082f748e35d28d1
+Normal main merge: c0e9a387d89f4ec2e47bf21326a6f5ab5f0ad38b, 03:35:01Z
+Fresh main ancestry verified. No runtime/default/dependency/release changes.
+Dedicated Actions run 38506584150: SUCCESS, both native Docker jobs SUCCESS.
+Fixture SOURCE_COMMIT (PR test merge): 1e86643ecbd767417cf61d08a1e9ba42bf8c7dd8
+1.18.1 job115665384158 / artifact11868630502
+1.18.34 job115665384478 / artifact11867354420
+10 required guards SUCCESS before ordinary exact-head merge.
+Broader QA jobs were still pending; this is not a full-QA PASS declaration.
+Subsequent broad run38506584050: server-unit job115666011746 failed in three
+unchanged files (legacy sessions.network_id NULL insert, observer task dispatch
+403 versus 200/202, due-date filtering extra row). Desktop-push job115666013312
+also failed on that observer assertion. Server/runtime source is unchanged from
+c103, but no separate exact-base run was performed, so these are pending triage,
+not proven stale tests or a proven product regression. Tracked separately in Hub.
+
+Per version, 11 checkpoints passed (22 across the two exact packages):
+1 exact binary/version and loopback model environment
+2 unauthenticated 401 and authenticated native health/version
+3 --pure Server directory header, separate flat MCP/config and vetted tool deny
+4 concurrent sessions: actual bound MCP identity A/B, alpha/beta model routing,
+  vetted disabled tool names absent from actual model requests
+5 missing session 404 and foreign-session read characterized
+6 two native full attach TUIs rendered against one Server
+7 toast measured from both directory event streams
+8 closing exact attach A leaves attach B and Server working
+9 persistent host restart retains both exact sessions and verified history
+10 offline scratch native import preserves both identities/parents/parts
+11 restored scratch session accepts a new synthetic turn
+
+Both versions: B directory GET of A session returns 200, same ID, directory A.
+Directory routing is not session authorization. The future bridge must validate
+network/node/Server identity/canonical directory/exact session before readiness
+and writes; no claim that upstream rejects foreign-session access.
+Both versions: the measured directory-scoped toast reached A's event stream,
+not B's. This is one synthetic two-directory observation, not universal native
+UI/platform notification acceptance. Existing native FIFO/owned-turn rules stay.
+
+TEST-ONLY: Docker non-root, --network none at execution, local synthetic model
+and MCP identities, private tmux socket and exact pane/session cleanup. Wrapper
+and Linux-x64 package versions/integrities are pinned in the fixture input.
+No Hub account, vendor model, real credential or original node/history accessed.
+Raw native feasibility does not implement an ANet shared-node bridge, persistent
+host launcher, original-node login, production migration or disaster recovery.
+The two projects share a synthetic provider credential and equivalent policies;
+different provider credentials/policies and same-directory multiple identities
+are not admitted by this first implementation contract.
+
+Retained failures: initial 934792f84 run38506238370 stopped at fixture model
+argument index; its QA trigger guard failed separately. a416d2a61 run38506378312
+passed first five native checkpoints, then the fixture used a session name as
+a pane target. 7770 uses exact returned pane IDs, retains dead-pane diagnostics,
+and both complete gates passed. No product failure inferred from fixture bugs.
+Three obsolete in-flight own-branch CI runs were cancelled, not counted PASS.
+No local Docker/native tests were run; static source/shell/Python/JSON and diff
+review only. Long native checks ran in Actions.
+
+Decision: proceed to #1195 only within the same trust cohort/unique-directory
+contract, with mandatory identity guard and independent host ownership.
+#1196 migration/recovery and actual Owner canary remain separate pending work.

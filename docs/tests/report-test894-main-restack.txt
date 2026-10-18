@@ -1,0 +1,66 @@
+#894 / PR2559: current-main restack, core evidence only
+OBSERVED_AT: 2026-10-12 05:53:31+08
+
+Source provenance
+- Original branch head: ded59ce7417ed8b0d22290d9c6fcb6e5c3fb324a.
+- Merged main input: 79ba7484fd877477a61ab3b3b2cdbce3e685e5b0.
+- Tested resolved source tree before adding this report:
+  b9ada5aa24409a0af05ca97158478cfaa1759daa.
+- This is an uncommitted merge candidate at testing time, NOT a released SHA.
+- The original PR remains the carrier; no duplicate product issue or release.
+
+Four conflict resolutions
+- qa.yml keeps test906-daemon-catalog AND both original test894 suites.
+- create-node-daemon.ts retains all current-main OpenCode V2 model/config
+  alignment imports and implementation; resulting file equals main exactly.
+- launcher-health.ts equals current main exactly, including bounded sleep and
+  the final full-identity inspection. No old wait-loop semantics substituted.
+- launcher-health.test.ts equals current main exactly, including real pre-exec
+  process identity coverage. Superseded overlapping branch assertions removed.
+- Net production delta against main is the existing ACP opener's explicit
+  selected-model binding and CLI model forwarding; no V2 launch regression.
+
+Build / isolation
+sg docker -c 'docker build -f tests/test894-launch-window/Dockerfile -t anet:test894-restack-core .'
+- Dockerfile pins Bun 1.3.14 digest; source copied into the image.
+- Manifest-list ID c2f501786217b1ef04b09d9615a69a1eae581680db5f75b9fb7f621baa476887.
+- Image config bda2d3f04d976e1c4dd32f7f25d52ae4c6d07aa140ea8fcb7cacd743a4fe029c.
+- All runs --rm, --network none, non-root bun; no host home, credentials,
+  sockets, production endpoints or project mounts.
+
+Core startup gate
+sg docker -c 'docker run --rm --network none anet:test894-restack-core'
+- Exit 0; launcher-health.test.ts 12 PASS / 0 FAIL / 50 expectations.
+- Actual disposable launcher/bridge/TUI fixture processes: pre-exec rejects,
+  same PID/start ticks/generation after exec accepts; foreign generation,
+  reused PID, foreign config and nonzero launcher stay rejected.
+- TEST_SKIP_HEALTH_WAIT negative returns exit 1 at the exact
+  "bounded full-identity wait did not observe exec" assertion, and suite accepts
+  only that expected negative. This is fixture process E2E, not native OpenCode.
+
+ACP protocol core gate (no vendor/model calls)
+sg docker -c 'docker run --rm --network none --tmpfs /run/user:uid=1000,gid=1000,mode=0700,exec anet:test894-restack-core bun test /source/agent-node/src/runtime/opencode-acp/runtime.test.ts'
+- Exit 0; 24 PASS / 0 FAIL / 357 expectations, 5.68 seconds.
+- New/resumed/lost-session model binding, legacy omission, unavailable and
+  unsupported selection, publish-after-ack, CLI forwarding and cleanup pass.
+- Uses protocol stub executables, NOT the real OpenCode native model transport.
+- Initial lightweight-image invocation without /run/user: 2 PASS / 22 FAIL,
+  mkdir EACCES before the runtime/model gate. A tmpfs without exec then gave
+  3 PASS / 21 FAIL, version-probe EACCES on fixture executable (Docker noexec).
+  Corrected only container fixture setup with private 0700 executable tmpfs;
+  no product assertion, permission policy or host setting changed.
+
+Limits / next layer
+- Original ded59ce7's 168 successful CI checks do NOT transfer to this tree.
+- New-head CI, actual V1 binary session/model transport and App PR795 native
+  registration/selected-model acceptance remain distinct pending layers.
+- No all-runtime, real OAuth/model entitlement, native package or release claim.
+- No npm publish, release artifact, updater activation or production mutation.
+
+Cleanup / recovery
+- Both successful runs exited; --rm removed containers and tmpfs data.
+- Locally owned image retained for reproducibility; no shared cache pruning.
+- No new resident service, port/tunnel, secret source, state/migration, deploy
+  or rollback change. Existing versioned CLI/runtime deployment applies only
+  after normal main merge and exact-main official build/release gates.
+- Production conversations/credentials are not included in the fixture or Git.

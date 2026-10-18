@@ -1,0 +1,17 @@
+name: Owned follow-up production controller
+on:
+  pull_request:
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/inbox-dispatch*', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'tests/test1162-owned-followup-controller/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1162*', '.github/workflows/owned-followup-controller.yml']
+  push:
+    branches: [main]
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/inbox-dispatch*', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'tests/test1162-owned-followup-controller/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1162*', '.github/workflows/owned-followup-controller.yml']
+permissions:
+  contents: read
+jobs:
+  owned-followup-controller:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1162-owned-followup-controller/Dockerfile -t owned-followup-controller .
+      - run: docker run --rm --network none owned-followup-controller

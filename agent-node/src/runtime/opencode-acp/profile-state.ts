@@ -306,3 +306,17 @@ export function writebackOpencodeSession(configPath: string, sessionId: string):
   return true;
 }
 
+export function writebackOpencodeConfiguredModel(configPath: string, model: string): boolean {
+  const current = readPrivateSnapshot(configPath, "config.json");
+  const config = JSON.parse(current.body);
+  if (config.opencodeConfiguredModelAtLastOpen === model) return false;
+  config.opencodeConfiguredModelAtLastOpen = model;
+  atomicWritePrivateFile(configPath, JSON.stringify(config, null, 2) + "\n", "config.json", current.stat);
+  return true;
+}
+
+export function shouldReconcileOpencodeSessionModel(config: Record<string, any>, model: string): boolean {
+  return typeof config.opencodeConfiguredModelAtLastOpen === "string" &&
+    config.opencodeConfiguredModelAtLastOpen !== model;
+}
+

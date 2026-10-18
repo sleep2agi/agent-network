@@ -108,7 +108,7 @@ anet node create gw --runtime codex-app-server --provider custom-openai-compat \
   --base-url https://llm.example.com/v1 --api-key-env GATEWAY_API_KEY --model my-model
 ```
 
-The Codex path speaks the Responses API (`wire_api = "responses"`). A gateway that only implements `/v1/chat/completions` will not serve Codex. Put that gateway in OpenCode's own `providers` first (a custom endpoint still uses `@opencode/ai/providers/openai-compatible`); V2 co-presence create then copies it, as above. OpenCode V1 safe mode still drops custom providers. Claude runtimes do not take these flags.
+The Codex path speaks the Responses API (`wire_api = "responses"`). A gateway that only implements `/v1/chat/completions` will not serve Codex. Put that gateway in OpenCode's own `providers` first (a custom endpoint still uses `@opencode/ai/providers/openai-compatible`); V2 co-presence create then copies it, as above. OpenCode V1 safe mode still drops custom providers. Claude runtimes do not take these flags. Install, Hub dialogue, the daemon, and the model catalog that is not wired through yet: [OpenCode V2](/en/guide/opencode).
 
 ### Built-in Anthropic-compatible providers {#built-in-anthropic-compatible}
 

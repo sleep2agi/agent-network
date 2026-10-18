@@ -396,6 +396,26 @@ daemon 没有自己的 stop / delete / status 子命令，直接用节点命令�
 `anet daemon list` 提示 daemon 缺少某些 runtime 时，执行 `anet daemon init <daemon-name> --force` 补齐。
 它保留 `node_id`，但会重新签发 token，之后要重启 daemon。
 
+### 私有软件配对的窄升级 {#private-pair-upgrade}
+
+只换 Daemon 软件时，不需要 `init --force`、复制账号或重新登记节点。
+先确认原维护线已交接、目标空闲无在途请求，保留当前配置（`0600`）和旧私有安装。
+从已合入 main 的正式制品安装同一发行要求的 CLI/runtime 配对；CLI npm 暂不可下载时，
+可用 [正式门控下载备选](https://github.com/sleep2agi/agent-network/blob/main/docs/RELEASE-SOP.md#step-7等待窗口--30-分钟--owner-explicit-ack)，核对完整 tarball SHA256，不重发同一版本。
+私有目录里的安装不等于已切换；实际启动仍使用仓库 CLI：
+
+```bash
+cd <原配置工作区根>
+ANET_AGENT_NODE_BIN=<私有prefix>/node_modules/@sleep2agi/agent-node/dist/cli.js \
+  node <私有prefix>/node_modules/@sleep2agi/agent-network/dist/bin/anet.cjs daemon start <原daemon名>
+```
+
+先确认旧目标进程退出，再起一个新实例；不要直接从另一个项目目录启动裸 `agent-node`。
+验收核对实际 CLI/runtime 路径、新的同身份 Hub 心跳、SSE 和脱敏管理回读，而非仅看版本文件。
+软件回滚使用保留的旧配对与当前配置，从同一工作区根启动；不回退活跃业务数据，不扫停子节点。
+端口、代理和密钥来源仍用原部署配置；身份与本地密钥状态来自原有受控备份，Git 不含这些数据。
+升级 Daemon 不等于业务 TUI 已重启或新密钥已注入，也不证明开机扫描已钉到新私有配对。
+
 ## 收编节点的停启 {#adopted-lifecycle}
 
 收编节点的停止 / 启动从 agent-node ≥ `2.5.0-preview.118`、agent-network（`anet`）≥ `2.3.0-preview.151` 起提供；

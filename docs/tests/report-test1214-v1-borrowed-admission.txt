@@ -1,0 +1,90 @@
+#1214 — Explicit V1 borrowed admission / native MCP lifecycle seam
+
+Completed scope: explicit borrowed-v1 admission API, independently selected
+Host/cohort/version/instance/private registry/binary attestation, full saved
+network/node/Host incarnation/canonical directory/exact session, actual native
+existence/directory/idle and selected model/provider/built-in policy checks.
+No latest/create/fork/owned fallback. Initial native config preparation precedes
+private proxy backup, including V1's automatic missing-$schema annotation.
+
+Each admission gets an unpredictable flat commhub_<32-hex> native name under
+the unchanged commhub_* policy plus exclusive directory/config lease. Native
+status names a registration, not a trusted remote URL; the name/lease identifies
+only this cooperative admission. Native directory POST /mcp plus exact name
+connected/binding/session/model/policy checks precede mcp-connected observation.
+Close checks current scope/name, disconnects only that own name, requires disabled
+confirmation, then revokes local proxy and restores only unchanged original bytes.
+Startup/cleanup unknown or edited config revokes capability, retains recovery
+records and reports incomplete cleanup; no retry, Host control or dispose follows.
+
+Source PR: https://github.com/sleep2agi/agent-network/pull/2735
+Exact final head: aae2eeb7aae0e355e2be8141de265e59c1fa6407
+Ordinary main merge: 100daa88eec0be9580ec76040cb0d1c540df6625
+Merged: 2026-10-14T06:27:48Z. Fresh main ancestry verified.
+10 protected required checks and all TEN focused Docker jobs SUCCESS before merge.
+CI checkout/test merge: c39d31a52b21b75283fa497822a7869ac5cebabf.
+Artifact source labels identify this checkout, not a released package.
+
+Ten artifacts downloaded and independently read, two exact accepted V1 versions
+1.18.1 / 1.18.34, non-root/network-none Docker, local synthetic model/MCP/auth:
+- Borrowed admission run 38521769630: jobs 115712870450 / 115712870654 SUCCESS,
+  artifacts 11874281984 / 11873284882. Each TEN native PASS checkpoints:
+  explicit mode/cohort/full binding/foreign 200/missing 404/model mismatch refusal
+  before file mutation or fallback; actual busy native turn refuses before proxy
+  installation and its existing turn finishes; two distinct native leased names
+  publish mcp-connected; exact sessions use original fixture node credentials and
+  retain full histories with built-ins absent; same-directory reentry refuses;
+  concurrent close A confirms own native disabled and exact restoration while B's
+  native synthetic tool turn/Host still work; reopen same saved session uses a
+  new name with complete original history; rejected MCP startup retains uncertain
+  controls without touching sibling/Host; edited config blocks native disconnect
+  and restore while retaining recovery; default deny-all Host refuses admission.
+- Scoped MCP regression run 38521769744: artifacts 11873224833 / 11874193185,
+  both SUCCESS, each nine native PASS points, including default commhub key,
+  full scope/foreign-read refusal, edited preservation and sibling survival.
+- Host launcher regression run 38521769530: artifacts 11873364507 / 11874183116,
+  both SUCCESS, each seven native lifecycle PASS points, startup SIGTERM,
+  duplicate/port refusal, real incarnation/password change and persistent histories.
+- Host input admission run 38521769914: artifacts 11873484407 / 11874053513,
+  both SUCCESS, each 29 refusals plus valid private descriptor/native exact session.
+- Owned checkpoint run 38521769618: artifacts 11873514326 / 11873993391,
+  both SUCCESS, each six unit tests/zero failures plus seven native PASS points.
+  This is owned-mode regression, not shared-aware migration/rollback.
+
+Initial head 2de07579c2f5c1df4f6e0f4b395636805cc91425 passed all ten focused jobs,
+including borrowed run 38521452772. Contract review then identified missing busy
+resume admission. Add the native active-status map gate plus a real three-second
+in-flight synthetic model turn; all ten jobs rerun/passed on final head above.
+Initial positives are baseline only, not final-head qualification. Idle sessions
+are omitted from these pinned native status maps, after exact session/directory
+existence is independently verified; explicit busy/retry/null/unknown entries
+are not treated as idle. This admission check is not atomic human-turn exclusion
+or dispatch FIFO ownership; those are still runtime integration work.
+Own broad QA 38521452597 was superseded/cancelled; final broad QA 38521769621
+cancellation requested after focused/required qualification. No whole broad QA
+pass is claimed. Facts-only follow-up records existing evidence and does not
+repeat healthy native suites.
+
+Rebuild: tests/test1214-v1-borrowed-admission/Dockerfile and
+.github/workflows/v1-borrowed-admission-core.yml pin Bun 1.3.14 image digest,
+source and exact wrapper/platform integrity from test1194. Packages install only
+inside disposable Docker. Local fixture model waits three seconds for the busy
+case; it never calls a real vendor. The API, proxy and startup/port/secret/upgrade/
+rollback/private backup/unknown recovery boundaries are versioned in
+agent-node/src/runtime/opencode-copresence/v1-borrowed-admission.ts,
+v1-scoped-mcp.ts and deploy/node/opencode-v1-host/README.md.
+
+Limits: these are lifecycle admission handles/native sessions, not complete
+Node CLI/TUI runtimes or two whole Node processes. MCP supplies no trustworthy
+initiating session/human-network turn identity; names/private files are cooperative
+lease authority, not security against a same-UID/Host-password peer. Cohort/model
+selection is explicit equivalent-policy/provider trust, not separate credential
+isolation or real Hub-token identity attestation. Caller must supply the original
+private node credential, and real Hub/vendor/login behavior is not tested here.
+Directory HTTP/events/Node backend wiring, FIFO/human-turn ownership, timeout
+unknown-write, exact owned-turn abort and TUI lifecycle remain #1195 (next #1216).
+Shared capture/atomic binding/final-checkpoint rollback and original Owner canary
+remain #1196. Clone restores software/structure, not actual private history/auth;
+encrypted backup location/retention/restore authority is original Owner work.
+No production service adoption, actual running node/thread/model/login/credentials
+or history changes, global package change or public package release executed.

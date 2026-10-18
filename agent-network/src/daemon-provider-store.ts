@@ -2,18 +2,21 @@
 // This is the private persistence boundary, not a Hub registry or an inference
 // health check. Public projections are constructed field by field: never spread
 // a secret-bearing object onto a response. Runtime application is a separate gate.
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { atomicWritePrivateJson, ensurePrivateDirectory } from "./private-state";
 
 export type ProviderAuthKind = "chatgpt" | "api_key";
-type Auth = { id: string; kind: ProviderAuthKind; models: string[]; baseUrl?: string; key?: string };
+type Auth = { id: string; kind: ProviderAuthKind; models: string[]; baseUrl?: string; key?: string; account_id?: string };
+const accountId = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
 type Runtime = { runtime: "codex-tui"; auth: Auth[] };
 type Provider = { id: string; label: string; enabled: boolean; runtimes: Runtime[] };
 type Scope = { network_id: string; daemon_node_id: string };
 type State = Scope & { schema: 1; revision: number; providers: Provider[];
   last_write?: { request_id: string; input_hash: string; revision: number } };
+export type ApplicationProfile = { providerId: string; authId: string; model: string } & (
+  { kind: 'api_key'; baseUrl: string; key: string } | { kind: 'chatgpt'; accountId: string });
 
 export class DaemonProviderError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -43,7 +46,7 @@ function endpoint(value: unknown): string {
   try { url = new URL(value); } catch { fail("invalid_endpoint"); }
   // A saved endpoint is NOT permission to probe it: network requests must retain
   // the Hub/runtime's SSRF/redirect guard. No credentials in URLs or query strings.
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) fail("invalid_endpoint");
+  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) fail("invalid_endpoint");
   return url.toString().replace(/\/$/, "");
 }
 function parseProvider(value: unknown, previous?: Provider): Provider {
@@ -58,7 +61,7 @@ function parseProvider(value: unknown, previous?: Provider): Provider {
     // both authentication modes because the UI hierarchy has those dimensions.
     if (r.runtime !== "codex-tui") fail("unsupported_runtime");
     const auth = list(r.auth, 32).map(rawAuth => {
-      const a = object(rawAuth); keys(a, ["id", "kind", "models", "baseUrl", "key"]);
+      const a = object(rawAuth); keys(a, ["id", "kind", "models", "baseUrl", "key", "account_id"]);
       const authId = id(a.id);
       if (a.kind !== "chatgpt" && a.kind !== "api_key") fail("unsupported_auth");
       const models = list(a.models, 200).map(model => {
@@ -68,8 +71,10 @@ function parseProvider(value: unknown, previous?: Provider): Provider {
       unique(models);
       if (a.kind === "chatgpt") {
         if (providerId !== "openai" || a.key !== undefined || a.baseUrl !== undefined) fail("unsupported_auth_combination");
-        return { id: authId, kind: "chatgpt" as const, models };
+        if (a.account_id !== undefined && !accountId(a.account_id)) fail('invalid_account_id');
+        return { id: authId, kind: "chatgpt" as const, models, ...(a.account_id ? { account_id: a.account_id as string } : {}) };
       }
+      if (a.account_id !== undefined) fail('unsupported_auth_combination');
       const prior = previous?.runtimes.find(x => x.runtime === r.runtime)?.auth.find(x => x.id === authId && x.kind === "api_key");
       const baseUrl = endpoint(a.baseUrl);
       if (a.key === undefined && prior && baseUrl !== prior.baseUrl) fail("endpoint_change_requires_key");
@@ -86,7 +91,7 @@ function parseProvider(value: unknown, previous?: Provider): Provider {
 
 // Read through a no-follow fd and enforce owner-only, single-link files. Never
 // repair a foreign/linked file as a side effect of a read operation.
-function readPrivateJson(path: string): unknown {
+export function readPrivateJson(path: string): unknown {
   const before = lstatSync(path);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) fail("unsafe_private_file");
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
@@ -147,14 +152,64 @@ export class DaemonProviderStore {
         runtimes: p.runtimes.map(r => ({ runtime: r.runtime, auth: r.auth.map(a => ({
           id: a.id, kind: a.kind, models: [...a.models],
           ...(a.baseUrl ? { baseUrl: a.baseUrl } : {}),
-          credential_present: a.kind === "api_key", verification: "not_checked" as const,
+          ...(a.account_id ? { account_id: a.account_id } : {}),
+          credential_present: a.kind === "api_key" || !!(a.account_id && this.savedAccountPresent(a.account_id)), verification: "not_checked" as const,
           application: "not_applied" as const,
         })) })) })) };
   }
   list() { return this.publicState(this.read()); }
+  /** Presence only, never entitlement. Resolve an opaque saved-login ID solely
+   * inside this daemon's owned directory; callers cannot supply a credential path. */
+  private savedAccountPresent(id: string): boolean {
+    return this.savedAccountHome(id) !== null;
+  }
+  /** Local-only resolver. Never serialize this credential directory into a receipt. */
+  savedAccountHome(id: string): string | null {
+    if (!accountId(id)) return null;
+    const root = join(this.root, 'codex-logins');
+    try {
+      const stat = lstatSync(root);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(root) !== resolve(root)
+        || (process.getuid && stat.uid !== process.getuid()) || (process.platform !== 'win32' && (stat.mode & 0o077))) return null;
+      for (const child of readdirSync(root, { withFileTypes: true })) {
+        if (!child.isDirectory() || !/^login-[A-Za-z0-9]+$/.test(child.name)) continue;
+        const home = join(root, child.name), dir = lstatSync(home);
+        if (realpathSync(home) !== resolve(home) || (process.getuid && dir.uid !== process.getuid())
+          || (process.platform !== 'win32' && (dir.mode & 0o077))) continue;
+        try {
+          const record = readPrivateJson(join(home, 'anet-account.json')) as any;
+          if (record.version !== 1 || record.account_id !== id || record.network_id !== this.scope.network_id
+            || record.daemon_node_id !== this.scope.daemon_node_id) continue;
+          const auth = readPrivateJson(join(home, 'auth.json')) as any;
+          if (auth && auth.auth_mode === 'chatgpt' && auth.tokens && typeof auth.tokens.access_token === 'string'
+            && auth.tokens.access_token && typeof auth.tokens.refresh_token === 'string' && auth.tokens.refresh_token) return home;
+        } catch { /* incomplete or unsafe account is not bindable */ }
+      }
+    } catch { /* absent/unsafe login root is not a credential */ }
+    return null;
+  }
+  /** Internal daemon bootstrap; this private path must never enter Hub replies. */
+  prepareLoginDirectory() {
+    ensurePrivateDirectory(this.root);
+    this.checkRoot();
+    const root = join(this.root, 'codex-logins');
+    if (existsSync(root)) {
+      const stat = lstatSync(root);
+      if (stat.isSymbolicLink() || !stat.isDirectory() || realpathSync(root) !== resolve(root)) fail('unsafe_login_directory');
+    }
+    ensurePrivateDirectory(root);
+    return { ...this.scope, root };
+  }
   /** Local application lease. Secrets stay inside the daemon callback, never in list/scan. */
   async withApiKey<T>(selection: { revision: number; providerId: string; authId: string; model: string },
     apply: (profile: { providerId: string; authId: string; model: string; baseUrl: string; key: string }) => Promise<T>): Promise<T> {
+    return this.withApplicationProfile(selection, async profile => {
+      if (profile.kind !== 'api_key') fail('api_key_profile_required');
+      return apply(profile);
+    });
+  }
+  async withApplicationProfile<T>(selection: { revision: number; providerId: string; authId: string; model: string },
+    apply: (profile: ApplicationProfile) => Promise<T>): Promise<T> {
     if (!Number.isSafeInteger(selection.revision) || selection.revision < 0) fail('invalid_revision');
     if (!existsSync(this.root)) fail('provider_not_found');
     this.checkRoot();
@@ -168,9 +223,15 @@ export class DaemonProviderStore {
       const provider = state.providers.find(p => p.id === selection.providerId);
       if (!provider?.enabled) fail('provider_not_enabled');
       const auth = provider.runtimes.find(r => r.runtime === 'codex-tui')?.auth.find(a => a.id === selection.authId);
-      if (!auth || auth.kind !== 'api_key' || !auth.key || !auth.baseUrl) fail('api_key_profile_required');
+      if (!auth) fail('authentication_profile_required');
       if (!auth.models.includes(selection.model)) fail('model_not_configured');
-      return await apply({ providerId: provider.id, authId: auth.id, model: selection.model, baseUrl: auth.baseUrl, key: auth.key });
+      const common = { providerId: provider.id, authId: auth.id, model: selection.model };
+      if (auth.kind === 'chatgpt') {
+        if (!auth.account_id || !this.savedAccountPresent(auth.account_id)) fail('saved_account_unavailable');
+        return await apply({ ...common, kind: 'chatgpt', accountId: auth.account_id });
+      }
+      if (!auth.key || !auth.baseUrl) fail('api_key_profile_required');
+      return await apply({ ...common, kind: 'api_key', baseUrl: auth.baseUrl, key: auth.key });
     } finally { closeSync(fd); unlinkSync(lock); }
   }
   upsert(value: unknown, expectedRevision: number, requestId?: string) {
@@ -193,6 +254,9 @@ export class DaemonProviderStore {
       if (state.revision !== expectedRevision) fail("revision_conflict");
       const providerId = id(object(value).id);
       const provider = parseProvider(value, state.providers.find(p => p.id === providerId));
+      for (const runtime of provider.runtimes) for (const auth of runtime.auth) {
+        if (auth.account_id && !this.savedAccountPresent(auth.account_id)) fail('saved_account_unavailable');
+      }
       const index = state.providers.findIndex(p => p.id === provider.id);
       if (index < 0) {
         if (state.providers.length >= 100) fail("provider_limit");

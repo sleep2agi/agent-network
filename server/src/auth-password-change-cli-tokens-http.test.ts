@@ -6,7 +6,7 @@
 //   · 默认(旧 app、dashboard 代理不带字段):撤销全部不绑网络的令牌 —— 客户端自报的 cli 也活不下来;
 //   · keep_cli_tokens=true(anet passwd 默认带):只撤其他 kind='login' 会话,保留的 cli 令牌列在响应里、不含令牌值;
 //   · 当前会话(换发后的新令牌)永远可用,而且沿用当前令牌的种类;
-//   · 节点 / 网络令牌永远不动;
+//   · 节点令牌不动;具名网络令牌默认保留,可显式revoke_network_tokens;
 //   · 启动迁移按 client_label / scope 回填存量令牌的 kind(夹具库,跑两遍幂等)。
 // SQLite 由 test798 自动收进;PostgreSQL 由 tests/test2123-hub-postgres-ladder 的 run_pg_tests_rc 跑同一个文件。
 
@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { spawnSync } from "child_process";
-import { register, createNetworkTokenForNode, createToken, changePassword } from "./auth.js";
+import { register, createNetworkTokenForNode, createToken, createNetwork, changePassword } from "./auth.js";
 import { db, hashToken } from "./db.js";
 
 const DIR = mkdtempSync(join(tmpdir(), "anet-pwchange-kind-"));
@@ -291,4 +291,133 @@ describe("startup migration backfills api_tokens.kind on a fixture DB", () => {
     expect(k("node")).toBe(null);
     expect(Number(db.get<any>("SELECT COUNT(*) AS n FROM api_tokens WHERE token_id = ?1", id("node")).n)).toBe(1);
   }, 120_000);
+});
+
+
+describe("network password opt-in", () => {
+  const id = (token: string) => db.get<any>("SELECT token_id FROM api_tokens WHERE token_hash=?1", hashToken(token)).token_id;
+
+  test("default lists only the caller's active named network tokens across networks, without credentials", async () => {
+    const f = await fleet();
+    const second = createNetwork(f.userId, `pwk-second-${seq}`);
+    expect(second.ok).toBe(true);
+    const extra = createToken(f.userId, "second-network-script", second.network_id);
+    const other = await fleet();
+    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2 });
+    expect(r.status).toBe(200);
+    expect(r.body.revoked_network).toBe(0);
+    expect(r.body.revoked).toBe(5);
+    expect(r.body.kept_network_tokens.map((x: any) => x.token_id).sort()).toEqual([id(f.netToken), id(extra.token!)].sort());
+    for (const row of r.body.kept_network_tokens) {
+      expect(Object.keys(row).sort()).toEqual(["created_at", "last_used_at", "name", "network_id", "token_id"]);
+    }
+    const body = JSON.stringify(r.body);
+    expect(body.includes("token_hash")).toBe(false);
+    for (const t of [f.netToken, extra.token!, f.nodeToken, other.netToken]) expect(body.includes(t)).toBe(false);
+    expect(await works(f.netToken)).toBe(true);
+    expect(await works(extra.token!)).toBe(true);
+    expect(await works(other.netToken)).toBe(true);
+    expect(await works(r.body.token)).toBe(true);
+  });
+
+  test("explicit boolean opt-in revokes only own named network tokens, independently of keep_cli_tokens", async () => {
+    const f = await fleet();
+    const other = await fleet();
+    const second = createNetwork(f.userId, `pwk-revoke-second-${seq}`);
+    const extra = createToken(f.userId, "second-network-script", second.network_id);
+    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, keep_cli_tokens: true, revoke_network_tokens: true });
+    expect(r.status).toBe(200);
+    expect(r.body.revoked_network).toBe(2);
+    expect(r.body.revoked_login).toBe(2);
+    expect(r.body.revoked_cli).toBe(0);
+    expect(r.body.revoked).toBe(4);
+    expect(r.body.kept_network_tokens).toEqual([]);
+    expect(await works(f.netToken)).toBe(false);
+    expect(await works(extra.token!)).toBe(false);
+    expect(await works(other.netToken)).toBe(true);
+    expect(await works(other.app)).toBe(true);
+    expect(await works(f.nodeToken)).toBe(true);
+    expect(await works(f.apiToken)).toBe(true);
+    expect(await works(r.body.token)).toBe(true);
+    expect(await works(f.app)).toBe(false);
+  });
+
+  for (const value of [false, "true", 1, null, {}]) {
+    test(`non-true option ${JSON.stringify(value)} cannot revoke network tokens`, async () => {
+      const f = await fleet();
+      const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, revoke_network_tokens: value });
+      expect(r.status).toBe(200);
+      expect(r.body.revoked_network).toBe(0);
+      expect(r.body.kept_network_tokens).toHaveLength(1);
+      expect(await works(f.netToken)).toBe(true);
+    });
+  }
+
+  test("scope and binding protect node credentials; inactive rows are neither listed nor counted", async () => {
+    const f = await fleet();
+    const legacy = createNetworkTokenForNode(f.userId, f.net, `legacy-pwk-${seq}`);
+    expect(legacy.ok).toBe(true);
+    const bound = createToken(f.userId, "mislabelled-bound-node", f.net);
+    db.run("UPDATE api_tokens SET bound_node_id=?1 WHERE token_id=?2", ["n-protected717", bound.token_id]);
+    const expired = createToken(f.userId, "expired-script", f.net);
+    db.run("UPDATE api_tokens SET expires_at=datetime('now','-1 day') WHERE token_id=?1", [expired.token_id]);
+    const revoked = createToken(f.userId, "revoked-script", f.net);
+    db.run("UPDATE api_tokens SET revoked_at=datetime('now') WHERE token_id=?1", [revoked.token_id]);
+    const r = await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, revoke_network_tokens: true });
+    expect(r.status).toBe(200);
+    expect(r.body.revoked_network).toBe(1);
+    expect(await works(f.nodeToken)).toBe(true);
+    expect(await works(bound.token!)).toBe(true);
+    for (const t of [bound, expired, revoked, legacy]) expect(db.get("SELECT token_id FROM api_tokens WHERE token_id=?1", t.token_id)).not.toBeNull();
+  });
+
+  test("bad old password or weak new password has no token side effects", async () => {
+    for (const body of [{ old_password: "wrong", new_password: PW2 }, { old_password: PW, new_password: "123" }]) {
+      const f = await fleet();
+      const r = await call(f.app, "POST", "/api/auth/password", { ...body, revoke_network_tokens: true });
+      expect(r.status).toBe(400);
+      for (const t of [f.app, f.netToken, f.apiToken, f.nodeToken]) expect(await works(t)).toBe(true);
+      expect((await call("", "POST", "/api/auth/login", { username: f.user, password: PW })).status).toBe(200);
+    }
+  });
+
+  test("network-scoped and unauthenticated credentials cannot invoke password change", async () => {
+    const f = await fleet();
+    for (const t of [f.netToken, f.nodeToken, ""]) {
+      expect((await call(t, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, revoke_network_tokens: true })).status).toBe(t ? 403 : 401);
+    }
+    expect(await works(f.netToken)).toBe(true);
+    expect(await works(f.app)).toBe(true);
+  });
+
+  test("a failed network revoke rolls back the password and earlier session deletions", async () => {
+    const f = await fleet();
+    const victim = id(f.netToken);
+    const fn = `pw717_failure_${seq}`;
+    const trigger = `pw717_trigger_${seq}`;
+    if (db.dialect === "postgres") db.exec(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.token_id='${victim}' THEN RAISE EXCEPTION 'fixture717_delete_failure'; END IF; RETURN OLD; END; $$; CREATE TRIGGER ${trigger} BEFORE DELETE ON api_tokens FOR EACH ROW EXECUTE FUNCTION ${fn}()`);
+    else db.exec(`CREATE TRIGGER ${trigger} BEFORE DELETE ON api_tokens WHEN OLD.token_id='${victim}' BEGIN SELECT RAISE(ABORT,'fixture717_delete_failure'); END`);
+    try {
+      expect((await call(f.app, "POST", "/api/auth/password", { old_password: PW, new_password: PW2, revoke_network_tokens: true })).status).toBe(400);
+      for (const t of [f.app, f.appB, f.apiToken, f.netToken, f.nodeToken]) expect(await works(t)).toBe(true);
+      expect((await call("", "POST", "/api/auth/login", { username: f.user, password: PW })).status).toBe(200);
+      expect((await call("", "POST", "/api/auth/login", { username: f.user, password: PW2 })).status).toBe(401);
+    } finally {
+      db.exec(db.dialect === "postgres" ? `DROP TRIGGER ${trigger} ON api_tokens; DROP FUNCTION ${fn}()` : `DROP TRIGGER ${trigger}`);
+    }
+  });
+
+  test("direct changePassword keeps its current row and defaults to listing network tokens", async () => {
+    const f = await fleet();
+    const cur = id(f.app);
+    const r = changePassword(f.userId, PW, PW2, cur);
+    expect(r.ok).toBe(true);
+    expect(r.kept_network_tokens).toHaveLength(1);
+    expect(await works(f.app)).toBe(true);
+    const r2 = changePassword(f.userId, PW2, PW, cur, { revokeNetworkTokens: true, keepCliTokens: true });
+    expect(r2.ok).toBe(true);
+    expect(r2.revoked_network).toBe(1);
+    expect(await works(f.app)).toBe(true);
+    expect(await works(f.nodeToken)).toBe(true);
+  });
 });

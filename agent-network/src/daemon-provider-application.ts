@@ -3,12 +3,13 @@
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { parse } from 'smol-toml';
+import { parse, stringify } from 'smol-toml';
 import { DaemonProviderError, DaemonProviderStore } from './daemon-provider-store';
 import { atomicWritePrivateFile, atomicWritePrivateJson } from './private-state';
 import { resolveNodeCodexHome } from './codex-home-enforce';
 import { mergeCodexProviderToml } from './provider-presets';
 import { planPlainSecretEnvRewrites } from './claude-vendor-env';
+import { ProviderAccountCustody, chatgptCredentialFingerprint } from './daemon-provider-account-custody';
 
 const fail = (code: string): never => { throw new DaemonProviderError(code); };
 function privateDir(path: string) {
@@ -55,10 +56,20 @@ export function readProviderNodeConfig(nodeDir: string): Record<string, any> {
 export function readProviderNodeToml(nodeDir: string) {
   return parse(privateText(join(nodeDir, 'codex-home/config.toml')) ?? '');
 }
+/** Private, local configured credentials only. Never inherit the caller's env. */
+export function readProviderNodeEnv(nodeDir: string): Record<string, string> {
+  const values: Record<string, string> = Object.create(null);
+  for (const line of (privateText(join(nodeDir, '.env')) ?? '').split(/\r?\n/)) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (match) values[match[1]] = match[2];
+  }
+  return values;
+}
 
 export type ProviderApplicationRequest = {
   requestId: string; networkId: string; daemonId: string; nodeId: string; alias: string;
   nodeRevision: string; revision: number; providerId: string; authId: string; model: string;
+  accountId?: string;
   confirmRestart: true;
 };
 export type ProviderActivation = { nodeId: string; model: string; runtimeProvider: string; nodeRevision: string };
@@ -69,6 +80,8 @@ export type ProviderApplicationLifecycle = {
   stopVerified: () => Promise<void>;
   // Must launch using the staged profile and check actual runtime evidence.
   activate: (expected: ProviderActivation) => Promise<ProviderActivation>;
+  // Read the actual app-server account after restart, never just a file-presence check.
+  verifyChatgpt?: () => Promise<void>;
   restore: () => Promise<void>;
 };
 
@@ -99,7 +112,7 @@ export async function applyDaemonProvider(nodeDir: string, store: DaemonProvider
       if (providerNodeRevision(nodeDir) !== priorReceipt.receipt.node_revision) fail('node_revision_conflict');
       return priorReceipt.receipt; // Lost ACK: historical receipt, no second restart.
     }
-    return await store.withApiKey(request, async selected => {
+    return await store.withApplicationProfile(request, async selected => {
       const before = currentFiles(nodeDir);
       if (filesRevision(before, nodeDir) !== request.nodeRevision) fail('node_revision_conflict');
       const config = JSON.parse(before['config.json'] ?? '{}');
@@ -113,22 +126,48 @@ export async function applyDaemonProvider(nodeDir: string, store: DaemonProvider
       const oldToml = before['codex-home/config.toml'] ?? '';
       const original = parse(oldToml); // invalid TOML fails before stopping or changing anything
       if (original.profile) fail('incompatible_profile_override');
-      const runtimeProvider = `anet_${digest([selected.providerId, selected.authId]).slice(0, 20)}`;
+      const official = selected.kind === 'chatgpt';
+      if (official ? request.accountId !== selected.accountId : request.accountId !== undefined) fail('account_selection_mismatch');
+      if (official && !lifecycle.verifyChatgpt) fail('account_verification_unavailable');
+      const authPath = join(nodeDir, 'codex-home/auth.json');
+      const custody = (official || config.daemonProviderAccountId) ? new ProviderAccountCustody(store,
+        request.nodeId, authPath, config.daemonProviderAccountId, official ? selected.accountId : undefined,
+        () => privateText(authPath)) : undefined;
+      const runtimeProvider = official ? 'openai' : `anet_${digest([selected.providerId, selected.authId]).slice(0, 20)}`;
       const envKey = 'DAEMON_PROVIDER_API_KEY';
-      const [secret] = planPlainSecretEnvRewrites({ env: { [envKey]: selected.key }, nodeId: request.nodeId });
-      const dotenv = (before['.env'] ?? '').split(/\r?\n/).filter(line => !new RegExp(`^\\s*(?:export\\s+)?${secret.refName}\\s*=`).test(line));
-      // Existing dotenv reader is line-oriented. Preserve unrelated entries.
-      const nextEnv = `${dotenv.join('\n').replace(/\n*$/, '')}\n${secret.refName}=${selected.key}\n`;
-      const nextConfig = { ...config, model: selected.model, codexModelProvider: runtimeProvider,
-        env: { ...config.env, [envKey]: { _envRef: secret.refName } } };
-      const nextToml = mergeCodexProviderToml(oldToml, { family: 'codex', presetId: 'custom-openai-compat',
-        providerId: runtimeProvider, label: selected.providerId, model: selected.model, profileModel: selected.model,
-        baseUrl: selected.baseUrl, baseUrlExplicit: true, envKey, wireApi: 'responses' });
-      const parsed = parse(nextToml) as any;
-      const provider = parsed.model_providers?.[runtimeProvider];
-      if (parsed.model !== selected.model || parsed.model_provider !== runtimeProvider || provider?.base_url !== selected.baseUrl
-        || provider.env_key !== envKey || provider.requires_openai_auth === true || provider.auth || provider.experimental_bearer_token
-        || provider.http_headers || provider.env_http_headers) fail('incompatible_provider_override');
+      let nextEnv = before['.env'] ?? '';
+      let nextConfig: Record<string, any> = { ...config, model: selected.model, codexModelProvider: runtimeProvider };
+      let nextToml: string;
+      if (selected.kind === 'api_key') {
+        const [secret] = planPlainSecretEnvRewrites({ env: { [envKey]: selected.key }, nodeId: request.nodeId });
+        const dotenv = (before['.env'] ?? '').split(/\r?\n/).filter(line => !new RegExp(`^\\s*(?:export\\s+)?${secret.refName}\\s*=`).test(line));
+        // Existing dotenv reader is line-oriented. Preserve unrelated entries.
+        nextEnv = `${dotenv.join('\n').replace(/\n*$/, '')}\n${secret.refName}=${selected.key}\n`;
+        nextConfig = { ...nextConfig,
+          env: { ...config.env, [envKey]: { _envRef: secret.refName } } };
+        delete nextConfig.daemonProviderAccountId;
+        const keyToml = { ...original } as any;
+        if (config.daemonProviderAccountId) delete keyToml.forced_login_method;
+        nextToml = mergeCodexProviderToml(config.daemonProviderAccountId ? stringify(keyToml) : oldToml, { family: 'codex', presetId: 'custom-openai-compat',
+          providerId: runtimeProvider, label: selected.providerId, model: selected.model, profileModel: selected.model,
+          baseUrl: selected.baseUrl, baseUrlExplicit: true, envKey, wireApi: 'responses' });
+        const parsed = parse(nextToml) as any;
+        const provider = parsed.model_providers?.[runtimeProvider];
+        if (parsed.model !== selected.model || parsed.model_provider !== runtimeProvider || provider?.base_url !== selected.baseUrl
+          || provider.env_key !== envKey || provider.requires_openai_auth === true || provider.auth || provider.experimental_bearer_token
+          || provider.http_headers || provider.env_http_headers) fail('incompatible_provider_override');
+      } else {
+        // Use Codex's built-in official provider, not a user-configured endpoint.
+        const parsed = { ...original, model: selected.model, model_provider: 'openai',
+          forced_login_method: 'chatgpt', cli_auth_credentials_store: 'file' } as any;
+        delete parsed.chatgpt_base_url;
+        if (parsed.model_providers) delete parsed.model_providers.openai;
+        nextToml = stringify(parsed);
+        const cleanEnv = { ...config.env };
+        for (const key of [envKey, 'OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL']) delete cleanEnv[key];
+        nextConfig = { ...nextConfig, env: cleanEnv, daemonProviderAccountId: selected.accountId };
+        nextEnv = nextEnv.split(/\r?\n/).filter(line => !/^\s*(?:export\s+)?(?:OPENAI_API_KEY|CODEX_API_KEY|OPENAI_BASE_URL|DAEMON_PROVIDER_API_KEY)\s*=/.test(line)).join('\n');
+      }
       const after: Files = { 'config.json': JSON.stringify(nextConfig, null, 2) + '\n', '.env': nextEnv, 'codex-home/config.toml': nextToml };
       const expected = { nodeId: request.nodeId, model: selected.model, runtimeProvider, nodeRevision: filesRevision(after, nodeDir) };
       await lifecycle.preflight?.();
@@ -140,16 +179,28 @@ export async function applyDaemonProvider(nodeDir: string, store: DaemonProvider
       try {
         await lifecycle.stopVerified(); stopped = true;
         if (providerNodeRevision(nodeDir) !== request.nodeRevision) fail('node_revision_conflict');
+        if (custody) {
+          const accountRecovery = custody.prepare();
+          atomicWritePrivateJson(journal, { schema: 1, request_id: request.requestId, node_id: request.nodeId,
+            network_id: request.networkId, daemon_node_id: request.daemonId, before,
+            after_revision: expected.nodeRevision, account_recovery: accountRecovery });
+          custody.install();
+        }
         for (const [name, body] of Object.entries(after)) atomicWritePrivateFile(join(nodeDir, name), body!);
         if (providerNodeRevision(nodeDir) !== expected.nodeRevision) fail('application_write_unconfirmed');
         const actual = await lifecycle.activate(expected);
         if (actual.nodeId !== expected.nodeId || actual.model !== expected.model || actual.runtimeProvider !== expected.runtimeProvider
           || actual.nodeRevision !== expected.nodeRevision) fail('runtime_application_unconfirmed');
         if (providerNodeRevision(nodeDir) !== expected.nodeRevision) fail('application_write_unconfirmed');
+        if (official) {
+          await lifecycle.verifyChatgpt!();
+          const currentAuth = privateText(authPath);
+          if (!currentAuth || chatgptCredentialFingerprint(currentAuth) !== custody!.fingerprint) fail('runtime_account_unconfirmed');
+        }
         const receipt = { status: 'applied' as const, request_id: request.requestId, node_id: request.nodeId,
           provider_id: selected.providerId, auth_id: selected.authId, model: selected.model, runtime_provider: runtimeProvider,
           node_revision: expected.nodeRevision, provider_revision: request.revision, verification: 'runtime_confirmed' as const,
-          applied_at: Date.now() };
+          applied_at: Date.now(), ...(official ? { account_id: selected.accountId } : {}) };
         atomicWritePrivateJson(receiptPath, { request_hash: requestHash, receipt });
         unlinkSync(journal);
         return receipt;
@@ -165,11 +216,18 @@ export async function applyDaemonProvider(nodeDir: string, store: DaemonProvider
             if (name === 'config.json' && [before[name], after[name]].some(raw => digest(configIntent(raw, nodeDir)) === digest(configIntent(current[name], nodeDir)))) continue;
             if (current[name] !== before[name] && current[name] !== after[name]) fail('rollback_conflict');
           }
+          custody?.rollback();
           for (const name of Object.keys(before) as (keyof Files)[]) {
             if (before[name] === null) { if (current[name] !== null) unlinkSync(join(nodeDir, name)); }
             else atomicWritePrivateFile(join(nodeDir, name), before[name]!);
           }
           await lifecycle.restore();
+          if (custody?.previousFingerprint) {
+            if (!lifecycle.verifyChatgpt) return fail('account_verification_unavailable');
+            await lifecycle.verifyChatgpt();
+            const restoredAuth = privateText(authPath);
+            if (!restoredAuth || chatgptCredentialFingerprint(restoredAuth) !== custody.previousFingerprint) fail('runtime_restore_unconfirmed');
+          }
           unlinkSync(journal);
         } catch { fail('application_recovery_required'); }
         fail('application_failed_rolled_back');

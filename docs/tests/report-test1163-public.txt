@@ -1,0 +1,87 @@
+#1163 / #1156 / #1151 software source + formal public pair
+
+Scope: authenticated full-depth inbox, same-second FIFO, production owned follow-up
+controller and independent answer receipts. This is software/core/public delivery;
+actual live-Hub/live-node adoption, original-device UI and native-model behavior
+remain separate. Parent #730 steer/UI acceptance gates are not closed here.
+
+Source: PR2711 head b86879a55a03affe1b736033cc5af065c0a50830;
+CI merge2688ae1b3bc0e64a990e038722f58f7ba91cba67;
+main fddca21f76a6e4d0a940725750332a58300771a7;
+whole trees d38106f5b2e37d81d78ab658abd40727292b9756 match.
+10 required +16 selected core checks SUCCESS. Local SQLite/PG entry suites each
+8 PASS/67 assertions +3 production mutation witnesses. Original queue138/505
++4 witnesses; real Hub/WS3/56 + Node40/255 +4 witnesses. Local test execution
+under two minutes; independent frozen-input Docker suites, broader QA on Actions.
+Source failures/fixes and recovery constraints: report-test1163-human-inbox.txt.
+
+CLI gate4 initially blocked publication: both getting-started pages still stamped
+candidate176. PR2712 updated stamps AND behavior paragraphs; byte comparison to
+checked CLI176 preserves the explicit-password-only validation limitation.
+PR2712 head981da6c0a452c4163c56ac153741dff15b5a6f0b -> exact main
+5bab2d836256c8c3ad2f2f26b2116a3a04b3313e; 10 required+4 docs SUCCESS.
+Executable source directories agent-network/agent-node/server and workflows are
+identical to fddca21f; documentation differs. Hub/Node are never rebuilt or
+republished merely to align documentation commit IDs.
+
+Hub 0.9.0-preview.139: source fddca21f; formal38445197841 all four gates/workflow
+SUCCESS; npm anonymous full archive 1256148B SHA256 bcfc3e60747d29bf61a9d2d97501d044b4733d14f9c10ccf6496194fad9732e5.
+Registry name/version/shasum/integrity/preview and exact gated artifact bytes matched.
+Node 2.5.0-preview.143: same source; formal38445194354 four gates and npm publish
+step SUCCESS, but workflow FAILED the 900-second visibility check (preview still
+142 at18:36:36Z). This failure is retained, not relabeled PASS. Later anonymous
+full npm read 600314B SHA256 0d7c32c8cdcb9c7b84fde92dc5e11714f27af0d80ae69e3df41baa36caafbd0d matched the gated bytes,
+registry name/version/shasum/integrity/preview; no immutable npm republish.
+CLI 2.3.0-preview.177: source main5bab2d836; first formal38447125714 gate4 FAIL /
+publish SKIPPED retained. Retry38448399593 all FOUR actual gates SUCCESS and npm
+publish step SUCCESS; registry verification pending at this report checkpoint.
+Official immutable GitHub archive 2127222B SHA256 cf0aac1030f494db5cf7834e655a554ffaf07a55f87b68057d7d1172fa487875 is the
+identical gated tarball, anonymously fully re-downloaded and matched:
+https://github.com/sleep2agi/agent-network/releases/tag/cli-v2.3.0-preview.177
+GitHub target/tag is exact merged main, prerelease=true/latest=false. Do not
+promote stable/latest or republish npm to fix propagation. All three npm latest
+tags remained their previous values when verified for the visible packages.
+
+Native/broad limits: final source head Windows751 smoke SUCCESS, previous head
+failed before Dashboard dispatch with409/node_degraded/session-missing; original
+Windows fixture unchanged. Candidate readiness race tracked separately #1168,
+not proven original-machine cause. Final broad QA also retained adoption
+late-foreign-child/adopt_pid_invalid and server-unit fixture failures. No claim
+that the full QA matrix passed; duplicate merged-PR broad runs were stopped
+with existing results retained, while main QA continued.
+
+Intake scan reads 256-row metadata keysets to end or requested human count;
+body return remains Node20 (APImax100), no ACK/model consumption/lease renewal
+on selection, exact recipient/network and stamped-user/dreq contract retained.
+Metadata examined/transfer is proportional to scoped pending rows when no human
+is present; database scan/sort cost is not certified constant-time by this core
+suite. Historical PG equal-timestamp original arrival order is unknowable;
+BIGSERIAL migration provides stable order, new insert FIFO, backward-compatible
+extra column. Old-Hub response remains partial and warns once.
+
+Recovery/startup/proxy/ports/secret sources: deploy/hub/README.md and
+ deploy/fleet/README.md, existing frozen locks and main-source release workflow.
+Git reconstructs software and schema; private Hub data, identity/login, receipt
+and outbound stores require authorized encrypted backups. Vault recovery record
+name remains NOT COVERED as already stated in the Hub runbook, so no full
+production-data restore drill is claimed. Adoption uses the original owner
+maintenance window; node/thread/cwd/model/provider/login are preserved. V2
+answer-intent receipts must not be downgraded to unsupported V1 readers. Rollback
+uses compatible immutable software and private-state snapshots, not context
+reset/fork/credential copies. No production restart or native adoption here.
+
+Later registry checkpoint (completed): 2026-10-13T19:20:25.319625+00:00
+CLI177 npm preview=177/latest=76; complete2127222B SHA256 cf0aac1030f494db5cf7834e655a554ffaf07a55f87b68057d7d1172fa487875,
+SHA1 5060e945195c249d023a7b0bb0734c3695bba26b, SHA512 sha512-VCCYYw+rrvOzlbVFospMR5H9FV8oU6Z3iEqgbecvnR+h1MZ90dxe7jYdC1XzIfXVF65bGEXlyUQYhfwWgYtiLQ== all matched the original main5bab
+four-gated archive and anonymous official GitHub bytes. All three npm packages
+are now fully verified and latest tags remain unchanged. #1171 completed; no
+immutable republish/rebuild/retag. The retry workflow still remains FAIL because
+its 900-second verification window ended before this successful later read;
+actual four-gate and npm-publish successes do not erase that timed failure.
+A private presence probe mistakenly searched the CLI entry shim for the pair
+constant; corrected to package-level metadata and artifact equality. Pair143 in
+the declaration file is not a claim of native runtime or original-device proof.
+Registry metadata for these tarball publications omits gitHead; it is recorded
+as absent, not invented as a matching SHA. Main provenance comes from the
+explicit checked source SHAs, main ancestry, formal artifacts and full public
+archive equality.

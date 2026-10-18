@@ -286,3 +286,72 @@ describe("GET /api/requirements/stats", () => {
     expect(r.body.requirement).toBeUndefined();
   });
 });
+
+describe("tag_status current snapshot #1091", () => {
+  let project = "";
+  test("current unarchived four states, distinct memberships and separate null bucket", async () => {
+    const p = await send(admin.token, "POST", "/api/requirements/projects", { network_id: NET, name: "tag-status" });
+    expect(p.status).toBe(201); project = p.body.project.id;
+    const seed = (name: string, extra: Record<string, unknown>) => card(admin.token, name, { project_id: project, ...extra });
+    await seed("tag-pool", { tags: ["a", "b", "a"] });
+    await seed("tag-done", { tags: ["a", "b"], column: "done" });
+    await seed("tag-doing", { tags: ["b"], column: "doing" });
+    await seed("tag-abandoned", { column: "abandoned" });
+    await seed("tag-literal", { tags: ["无标签"] });
+    const invalid = await seed("tag-invalid-legacy", { column: "done" });
+    db.run("UPDATE requirements SET tags_json='invalid legacy json' WHERE requirement_id=?1", [invalid.id]);
+    await seed("tag-visible", { tags: ["visible"], column: "doing", owner: { kind: "user", id: alice.id } });
+    await seed("tag-secret", { tags: ["secret"], column: "done" });
+    const archived = await seed("tag-archived", { tags: ["archived-only"], column: "doing" });
+    expect((await send(admin.token, "PATCH", `/api/requirements/${archived.id}?network_id=${NET}`, { archived: true })).status).toBe(200);
+    const r = await stats(admin.token, `&project_id=${project}`);
+    expect(r.status).toBe(200);
+    expect(r.body.tag_status).toMatchObject({ basis: "current", complete: true, includes_archived: false, project_filter: project, total: 8 });
+    const buckets = new Map(r.body.tag_status.by_tag.map((x: any) => [x.tag, x]));
+    expect(buckets.get("a")).toEqual({ tag: "a", pool: 1, doing: 0, done: 1, abandoned: 0, total: 2 });
+    expect(buckets.get("b")).toEqual({ tag: "b", pool: 1, doing: 1, done: 1, abandoned: 0, total: 3 });
+    expect(buckets.get(null)).toEqual({ tag: null, pool: 0, doing: 0, done: 1, abandoned: 1, total: 2 });
+    expect(buckets.get("无标签")).toMatchObject({ pool: 1, total: 1 });
+    expect(buckets.has("archived-only")).toBe(false);
+    expect(r.body.tag_status.by_tag[0].tag).toBe("b");
+    expect(r.body.tag_status.by_tag.reduce((sum: number, x: any) => sum + x.total, 0)).toBe(10);
+  });
+  test("snapshot ignores time range; completion totals still follow it", async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const r = await stats(admin.token, `&project_id=${project}&from=${encodeURIComponent(future)}&to=${encodeURIComponent(new Date(Date.now()+2*86_400_000).toISOString())}`);
+    expect(r.body.totals.done).toBe(0); expect(r.body.tag_status.total).toBe(8);
+    expect(r.body.tag_status.by_tag.find((x: any) => x.tag === "a").done).toBe(1);
+  });
+  test("same visibility scope hides inaccessible tags and project results", async () => {
+    const r = await stats(alice.token, `&project_id=${project}`);
+    expect(r.status).toBe(200); expect(r.body.tag_status.total).toBe(1);
+    expect(r.body.tag_status.by_tag).toEqual([{ tag: "visible", pool: 0, doing: 1, done: 0, abandoned: 0, total: 1 }]);
+    expect(r.text).not.toContain('"secret"'); expect(r.text).not.toContain('"archived-only"');
+    const empty = await stats(alice.token, `&project_id=${PROJ}`);
+    expect(empty.body.tag_status.total).toBe(0); expect(empty.body.tag_status.by_tag).toEqual([]);
+  });
+  test("project none, unknown project and invalid project query", async () => {
+    const r = await stats(admin.token, "&project_id=none");
+    expect(r.body.tag_status.project_filter).toBe("none");
+    expect(r.body.tag_status.by_tag.every((x: any) => x.tag === null)).toBe(true);
+    expect((await stats(admin.token, "&project_id=proj_missing")).body.tag_status).toMatchObject({ total: 0, by_tag: [] });
+    expect((await stats(admin.token, `&project_id=${"x".repeat(201)}`)).body.error).toBe("invalid_project_id");
+    const list = await send(admin.token, "GET", `/api/requirements?network_id=${NET}`);
+    expect(list.body.capabilities).toContain("tag_status_snapshot");
+  });
+  test("all visible rows counted beyond client 500 limit; another network excluded", async () => {
+    const p = await send(admin.token, "POST", "/api/requirements/projects", { network_id: NET, name: "large-tag-status" });
+    expect(p.status).toBe(201); const large = p.body.project.id;
+    const other = `net_tag_foreign_${Date.now()}`;
+    db.run("INSERT INTO networks(network_id,network_name,owner_id) VALUES(?1,'foreign',?2)", [other,admin.id]);
+    db.transaction(() => {
+      for (let i=0;i<502;i++) db.run(`INSERT INTO requirements(requirement_id,network_id,title,column_name,tags_json,project_id,archived,created_at,updated_at)
+        VALUES(?1,?2,'bulk','pool','["bulk"]',?3,0,datetime('now'),datetime('now'))`, [`req_tag_bulk_${large}_${i}`,i===501?other:NET,large]);
+    });
+    const r = await stats(admin.token, `&project_id=${large}&recent=0`);
+    expect(r.status).toBe(200); expect(r.body.tag_status.total).toBe(501);
+    expect(r.body.tag_status.by_tag).toEqual([{ tag: "bulk", pool: 501, doing: 0, done: 0, abandoned: 0, total: 501 }]);
+    const denied = await send(alice.token,"GET",`/api/requirements/stats?network_id=${other}`);
+    expect([403,404]).toContain(denied.status);
+  });
+});

@@ -1,0 +1,128 @@
+TEST-ONLY — CommHub #1289, original frontdoor archive input under #1268
+
+Source PR https://github.com/sleep2agi/agent-network/pull/2772
+Exact source head 0ebe82cf9ba839ed3b2ea465dec9844554b5f10b
+Ordinary source main c2783d251c7a645a6e90afef7d09ccef1f025a3d
+Merged2026-10-14T21:29:53Z
+Actual CI checkout d87f6c375ffc90fe046df5d93d6d9fffd12e024d
+Source head / CI / source-main tree123bad8d0afdaa102215ddd7b509903bcd448fab
+Source head freshly verified as main ancestor; the virtual CI merge is recorded
+by equal tree only, not claimed as a main ancestor. No package or installer release.
+
+PR2613 moved docs/upgrade-v2.md to docs/archive/upgrade-v2.md. Existing Docker
+already copies docs, but the original script read the deleted path. It now reads
+the authoritative archive with the same historical-disclaimer assertion.
+All original bilingual source, installer retirement, real VitePress production
+build, rendered homepage and download-route assertions remain in place.
+
+Independent run38640385626/job116114086468 SUCCESS on the final exact head.
+Pinned Node22 and npm lock execute the complete original run.mjs in Docker with
+no runtime stub or live service. Actual VitePress build took18.60s in CI and
+all original post-build rendered assertions passed. Fresh-container old-path
+control restores the exact original read and gets actual ENOENT for
+ docs/upgrade-v2.md. Fresh-container missing-note control deletes the actual
+historical disclaimer and gets FAIL(1) from the original disclaimer assertion.
+Both witnessed-red controls restore script/archive bytes. They are negative
+controls, not additional green baseline tests. No numeric assertion denominator
+is invented for this shell/node suite. No disclaimer or product guard is relaxed.
+
+Artifact11930086555 ZIP1340B SHA256
+ 2d4612bd6620fd2049e4f4b8fc651cd64e1b38b8af8316ac03d38b347895814e
+Complete original raw report2629B SHA256
+ 86c3ab01d63bdff4d50fadfcce1792d93f85bbb2689e574e2e454bd7c2ae347b
+Read in full and preserved unchanged below. Ten protected main checks, mutation
+pins and the independent original suite passed before ordinary source merge.
+Pre-merge broad rollup:29SUCCESS/15IN_PROGRESS/124QUEUED. Pending is not passing;
+no whole-repository green claim or independent old-base experiment is made.
+
+First candidate990b0f4ed: local/CI baseline failed because the new slim image
+omitted git required by VitePress; actual CI run38640195092/job116113436915 was
+FAILURE with spawn git ENOENT. Its mutation-pin job38640195389/116113439132 also
+failed because the new mutator shape was unrecognised, not because a product
+assertion failed. Added git/ca-certificates and statically readable literal
+mutation targets/anchors; did not raise the unchecked ratchet baseline.
+Final head0ebe82cf9 separately passed the original Docker suite and both controls
+locally within110s and in CI; local/CI repeats are not additional coverage.
+Earlier failed candidate receipts are not rewritten as passing.
+
+Only fixtures/workflow/README changed relative to parent296670901. Product
+server/agent-node/agent-network source, package/lock inputs, original docs-site
+and archive are unchanged. This is no independent full-base/zero-impact proof.
+Parent#1268 now has two sender fixes in#1287 and this archive fix; TTL/lifecycle
+and detached-admission-cap false-green remain unresolved. Existing#1282 separate
+hono integrity/@types-node unpack and#1285 Windows birth-query timeout also
+remain recorded; no shared cause, retry-green or checksum weakening is claimed.
+No current website/native runtime adoption, live catalog/installer availability,
+actual owner/model/session recovery or full production recovery is certified.
+
+No production Hub/Node, identities, login, credentials, model, original thread,
+plan or frequency changed. Recovery scope and six existing deployment/data
+boundaries are in tests/qa-frontdoor-docs/README.md. Git restores this fixture
+software/docs, not production DB, credentials, registrations or data backups.
+
+----- COMPLETE ORIGINAL INDEPENDENT CI REPORT (2629 bytes) -----
+TEST-ONLY source=d87f6c375ffc90fe046df5d93d6d9fffd12e024d case=baseline
+source_commit=d87f6c375ffc90fe046df5d93d6d9fffd12e024d
+PASS: front doors remain concise
+PASS: stale setup-anet promotions removed from active bilingual docs
+PASS: witnessed-red validator catches a reintroduced promotion
+PASS: retirement and replacement routes exist
+
+> docs-site@1.0.0 prebuild
+> npm run skillhub:build
+
+
+> docs-site@1.0.0 skillhub:build
+> node scripts/build-public-skillhub.mjs
+
+public-skillhub: wrote docs/public/skillhub/catalog.json (7 entries)
+
+> docs-site@1.0.0 build
+> vitepress build docs
+
+
+  vitepress v1.6.4
+
+build complete in 18.60s.
+PASS: VitePress production build
+PASS: rendered bilingual homepages contain only the concise front door
+- building client + server bundles...
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[32m✓[0m building client + server bundles...
+- rendering pages...
+[32m✓[0m rendering pages...
+PASS: complete original baseline and actual VitePress render
+RESTORED: original script and archive bytes
+TEST-ONLY source=d87f6c375ffc90fe046df5d93d6d9fffd12e024d case=old-path
+source_commit=d87f6c375ffc90fe046df5d93d6d9fffd12e024d
+node:fs:440
+    return binding.readFileUtf8(path, stringToFlags(options.flag));
+                   ^
+
+Error: ENOENT: no such file or directory, open 'docs/upgrade-v2.md'
+    at readFileSync (node:fs:440:20)
+    at read (file:///workspace/tests/qa-frontdoor-docs/run.mjs:13:24)
+    at file:///workspace/tests/qa-frontdoor-docs/run.mjs:92:7
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'docs/upgrade-v2.md'
+}
+
+Node.js v22.23.3
+WITNESSED_RED: restored exact old path produces original ENOENT
+RESTORED: original script and archive bytes
+TEST-ONLY source=d87f6c375ffc90fe046df5d93d6d9fffd12e024d case=missing-note
+source_commit=d87f6c375ffc90fe046df5d93d6d9fffd12e024d
+FAIL (1)
+- historical upgrade note still presents a stale current version
+WITNESSED_RED: original historical-disclaimer assertion rejects missing note
+RESTORED: original script and archive bytes
+RESULT: PASS; original complete baseline and two exact witnessed-red inputs

@@ -1,7 +1,8 @@
 // #832: /api/mcp connected precedes V2's debounced final tool registry.
 // Pinned @opencode/cli 2.0.22 promise-plugin contract; no model warmup.
-import { lstatSync, mkdtempSync, realpathSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
+import { createHash } from "node:crypto";
 
 export const V2_REGISTRY_RPC = "/api/rpc/anet.commhub-readiness/ready";
 
@@ -40,11 +41,34 @@ export function installV2RegistryPlugin(dataRoot: string | undefined): string {
   return directory;
 }
 
+export function installSharedV2RegistryPlugin(workDir: string): string {
+  const root = resolve(workDir);
+  const stat = lstatSync(root);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(root) !== root
+    || (stat.mode & 0o077) !== 0 || (process.getuid && stat.uid !== process.getuid())) {
+    throw new Error("OpenCode shared registry plugin requires an owned private node directory");
+  }
+  const digest = createHash("sha256").update(V2_REGISTRY_PLUGIN).digest("hex").slice(0, 16);
+  const directory = join(root, `anet-commhub-registry-${digest}`);
+  if (!existsSync(directory)) mkdirSync(directory, { mode: 0o700 });
+  const pluginStat = lstatSync(directory);
+  if (!pluginStat.isDirectory() || pluginStat.isSymbolicLink() || (pluginStat.mode & 0o077) !== 0
+    || (process.getuid && pluginStat.uid !== process.getuid())) throw new Error("OpenCode shared registry plugin directory is unsafe");
+  const file = join(directory, "index.js");
+  if (!existsSync(file)) writeFileSync(file, V2_REGISTRY_PLUGIN, { flag: "wx", mode: 0o600 });
+  const fileStat = lstatSync(file);
+  if (!fileStat.isFile() || fileStat.isSymbolicLink() || (fileStat.mode & 0o077) !== 0
+    || (process.getuid && fileStat.uid !== process.getuid()) || readFileSync(file, "utf8") !== V2_REGISTRY_PLUGIN) {
+    throw new Error("OpenCode shared registry plugin file is unsafe or changed");
+  }
+  return directory;
+}
+
 /** One hard deadline covers fetch AND body, including transports that ignore
  * AbortSignal. Process death interrupts a stuck request as well as a poll. */
 async function readObservation(
   url: string, password: string, path: string, deadline: number,
-  isRunning: () => boolean,
+  isRunning: () => boolean, directory?: string,
 ): Promise<any> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -63,6 +87,7 @@ async function readObservation(
             headers: {
               authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
               "content-type": "application/json",
+              ...(directory ? { "x-opencode-directory": directory } : {}),
             },
             ...(path === V2_REGISTRY_RPC ? { body: '{"input":{}}' } : {}),
             signal: controller.signal,
@@ -93,7 +118,8 @@ async function readObservation(
   }
 }
 
-function connected(body: any): boolean {
+function connected(body: any, directory?: string): boolean {
+  if (directory && body?.location?.directory !== directory) throw new Error("OpenCode v2 MCP observation returned a different workspace");
   if (!Array.isArray(body?.data)) throw new Error("OpenCode v2 CommHub MCP observation returned an invalid server list");
   const servers = body.data.filter((entry: any) => entry?.name === "commhub");
   if (servers.length > 1) throw new Error("OpenCode v2 CommHub MCP observation returned duplicate servers");
@@ -107,20 +133,21 @@ function connected(body: any): boolean {
 export async function waitForOpenCodeV2Commhub(
   url: string, password: string, timeoutMs: number,
   isRunning: () => boolean = () => true,
+  directory?: string,
 ): Promise<void> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error("OpenCode v2 CommHub MCP readiness requires a positive finite timeout");
   }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (connected(await readObservation(url, password, "/api/mcp", deadline, isRunning))) {
-      const body = await readObservation(url, password, V2_REGISTRY_RPC, deadline, isRunning);
+    if (connected(await readObservation(url, password, "/api/mcp", deadline, isRunning, directory), directory)) {
+      const body = await readObservation(url, password, V2_REGISTRY_RPC, deadline, isRunning, directory);
       if (typeof body?.output?.ready !== "boolean") {
         throw new Error("OpenCode v2 CommHub MCP registry observation returned an invalid ready flag");
       }
       // Recheck connection after registry observation: a disconnected MCP must
       // not pass simply because a previous registry still contains its tools.
-      if (body.output.ready && connected(await readObservation(url, password, "/api/mcp", deadline, isRunning))) return;
+      if (body.output.ready && connected(await readObservation(url, password, "/api/mcp", deadline, isRunning, directory), directory)) return;
     }
     await new Promise((r) => setTimeout(r, Math.min(50, Math.max(0, deadline - Date.now()))));
   }

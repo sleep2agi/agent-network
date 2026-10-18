@@ -51,12 +51,12 @@ export class CodexStdioClient extends EventEmitter {
    * only on spawn config errors; binary-missing surfaces via `error` event +
    * pending-request rejection.
    */
-  start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string } = {}): void {
+  start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string; replaceEnv?: boolean } = {}): void {
     if (this.child) throw new Error("CodexStdioClient already started");
     const bin = opts.binary ?? "codex";
     this.child = spawn(bin, ["app-server"], {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.env },
+      env: opts.replaceEnv ? { ...opts.env } : { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],
     });
 

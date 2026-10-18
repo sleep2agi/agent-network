@@ -1,3 +1,4 @@
+import { refreshScheduledBackoff } from "./scheduled-backoff.js";
 import { createAdapter, type DbAdapter } from "./db-adapter"; import { withStatementHook } from "./status-read-cache"; // #431 写 sessions 的语句让 /api/status 缓存失效
 
 export const db: DbAdapter = withStatementHook(createAdapter());
@@ -245,6 +246,7 @@ db.exec(`
     started_at        TEXT,
     runtime_submitted_at TEXT,
     consumed_at       TEXT,
+    last_activity_at  TEXT,
     thread_id         TEXT,
     turn_id           TEXT,
     completed_at      TEXT,
@@ -550,6 +552,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_applications (
   selection_json TEXT NOT NULL
 )`);
 
+// Login commands contain only intent. OAuth tokens never enter Hub storage.
+db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_logins (
+  request_id TEXT PRIMARY KEY, intent_json TEXT NOT NULL
+)`);
+
 // At most one row per node may be in a non-terminal state at a time
 // (single-flight enforced at the tool layer; this table just stores).
 //
@@ -810,6 +817,15 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// Hub #938 — clone_node reuses this table (same token mint, sweeper, and
+// register finalize) but must not be replayed as a blank create_node.
+// NULL/empty = ordinary create. Non-empty JSON = clone directives.
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN clone_json TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,
 // 叠在 send_desktop_message 的代码级三闸之上:canWrite / `!effectiveNetId` return /
 // getUserNetworkRole,tools.ts)。「不产生 network_id=NULL 孤儿」现是代码级保证 + #1492
@@ -921,6 +937,19 @@ db.exec(`
     UNIQUE(network_id, name)
   );
   CREATE INDEX IF NOT EXISTS idx_providers_network ON providers(network_id);
+`);
+// #907 network-owned Provider configuration. Keys remain in network_secrets.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS hub_provider_configs (
+    network_id TEXT NOT NULL, provider_id TEXT NOT NULL, revision INTEGER NOT NULL,
+    config_json TEXT NOT NULL, secret_key_ref TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(network_id, provider_id)
+  );
+  CREATE TABLE IF NOT EXISTS hub_provider_bindings (
+    request_id TEXT PRIMARY KEY, network_id TEXT NOT NULL, provider_id TEXT NOT NULL,
+    provider_revision INTEGER NOT NULL, daemon_node_id TEXT NOT NULL,
+    daemon_provider_id TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
 `);
 db.exec(`
   CREATE TABLE IF NOT EXISTS provider_models (
@@ -1244,7 +1273,7 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_from_node ON tasks(from_node
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_to_node ON tasks(to_node_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_node ON inbox(node_id)"); } catch {}
 
-function backfillMessageNodeIds() {
+export function backfillMessageNodeIds() {
   let inboxDirect = 0;
   let inboxRenamed = 0;
   let tasksToDirect = 0;
@@ -1364,6 +1393,7 @@ function backfillMessageNodeIds() {
         LIMIT 1
       )
       WHERE from_node_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
         AND EXISTS (
           SELECT 1 FROM sessions s
           WHERE s.node_id IS NOT NULL
@@ -1389,6 +1419,7 @@ function backfillMessageNodeIds() {
         LIMIT 1
       )
       WHERE from_node_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
         AND EXISTS (
           SELECT 1 FROM rename_txn r
           JOIN sessions s
@@ -1528,6 +1559,8 @@ try { db.exec("ALTER TABLE tasks ADD COLUMN meta_json TEXT"); } catch {}
 // started_at (legacy report_status/content matching). Old binaries ignore them.
 try { db.exec("ALTER TABLE tasks ADD COLUMN runtime_submitted_at TEXT"); } catch {}
 try { db.exec("ALTER TABLE tasks ADD COLUMN consumed_at TEXT"); } catch {}
+// #1113: exact original-turn activity. NULL keeps the old execution-clock fallback.
+try { db.exec("ALTER TABLE tasks ADD COLUMN last_activity_at TEXT"); } catch {}
 // Exact vendor-runtime boundary for SideThread-capable clients. These values
 // are written only by the token-bound target node after attributable runtime
 // evidence; the Hub never derives them from task text or caller input.
@@ -1678,6 +1711,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scheduled_runs_network
     ON scheduled_task_runs(network_id, created_at DESC);
 `);
+// #1278 — opt-in state. Existing schedules remain disabled.
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN no_change_backoff INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_streak INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_effective_seconds INTEGER"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_last_run_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN backoff_excluded INTEGER NOT NULL DEFAULT 0"); } catch {}
+// #1279 — opt-in requirement event policy/cursor; old plans stay disabled.
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN requirement_wake_json TEXT"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN requirement_wake_cursor INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN requirement_wake_last_event_id INTEGER"); } catch {}
+// #1274 — explicit successful-work signal and dispatch revision, separate
+// from lifecycle. NULL is unknown for legacy runs; rollback ignores columns.
+try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN work_outcome TEXT"); } catch {}
+try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN schedule_revision INTEGER"); } catch {}
+try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN work_outcome_node_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN misfire_policy TEXT NOT NULL DEFAULT 'catch_up_once'"); } catch {}
 // Skipped runs (overlap_policy=skip) name the open task that blocked them and
 // whether the node had ever picked it up: not_received | in_progress.
@@ -1995,6 +2043,72 @@ export function chainReplyToParent(
   maxDepth = 5,
   callerNetId?: string | null,
 ): ChainReplyResult {
+  // Node-TMAI#4 (E/F): bind the ORIGIN of the result once, up front.
+  //
+  // The walk below climbs from the child towards the root, so the loop
+  // variable is the CURRENT HOP's child and it changes on every iteration.
+  // That is hop identity, not result identity. Conflating the two was the
+  // defect this key used to carry: keying the de-dup index on the loop
+  // variable let a descendant's upward notice burn an intermediate task's
+  // key, so that task's own later completion looked like a "replay" and was
+  // silently dropped (grandparent <- parent <- leaf, then the parent
+  // finishes for real => 0 notices). Three notions are now kept apart:
+  //
+  //   * originChildId / originAlias / originReply — the ONE task whose
+  //     result this call carries; fixed for the whole walk.
+  //   * originStamp — the DELIVERY of that result (its terminal
+  //     transition), kept only as a human-readable audit value.
+  //   * attemptKey — the ATTEMPT that produced the result: the inbox
+  //     transport row that queued it. See the block below for why the
+  //     delivery stamp alone is not usable as the key.
+  //   * hopKind — "completion" (the origin's own result reaching its
+  //     direct parent) vs "descendant" (a forwarded notice at a higher
+  //     ancestor). The two can never share a de-dup slot.
+  const origin = db.get<{
+    to_name: string;
+    completed_at: string | null;
+    delivered_at: string | null;
+    started_at: string | null;
+  }>(
+    "SELECT to_name, completed_at, delivered_at, started_at FROM tasks WHERE task_id = ?1",
+    childTaskId
+  );
+  const originChildId = childTaskId;
+  const originAlias = origin?.to_name ?? childTaskId.slice(0, 8);
+  const originStamp = (origin?.completed_at ?? origin?.delivered_at ?? origin?.started_at ?? "n/a")
+    .replace(/[^0-9A-Za-z]/g, "-");
+  const originReply = replyText;
+
+  // Node-TMAI#4 (F, round 3): the de-dup key must identify the ATTEMPT, and
+  // no delivery timestamp can do that. `completed_at` / `delivered_at` are
+  // written with `datetime('now')` — second granularity — so two legitimate
+  // attempts of one task_id (the second one created by `retry_task`) can
+  // complete inside the same second and carry an identical stamp. The later
+  // result then looked like a replay of the earlier one and was swallowed.
+  //
+  // A retry or a reassign queues a fresh inbox transport row for the same
+  // task_id, inside the same transaction as the task reset: `retry_task`
+  // first runs `UPDATE tasks SET status='delivered', result=NULL,
+  // completed_at=NULL, ...` and only then `INSERT INTO inbox` with a new id;
+  // `reassign_task` acks the old row, updates the task, then inserts the new
+  // one. db.ts #520 keeps transport-row identity separate from logical task
+  // identity for precisely this reason ("runtime evidence/replies survive
+  // those redeliveries"). This candidate therefore takes the newest
+  // transport row of the task as its attempt identity: it changes on every
+  // retry/reassign and survives a re-delivery of the same attempt, and it
+  // needs no schema change.
+  //
+  // That is the identity source THIS CANDIDATE adopts; it is not a verified
+  // account of every asynchronous late-reply or retention path, and those
+  // are out of scope here. A row that was never dispatched (synthetic or
+  // imported) has no transport row and falls back to its delivery stamp,
+  // which preserves the old behaviour for those.
+  const dispatch = db.get<{ transport_id: string | null }>(
+    "SELECT id AS transport_id FROM inbox WHERE task_id = ?1 ORDER BY rowid DESC LIMIT 1",
+    childTaskId
+  );
+  const attemptKey = dispatch?.transport_id ?? `undispatched-${originStamp}`;
+
   let currentChildId: string | null = childTaskId;
   let currentReply = replyText;
   let depth = 0;
@@ -2008,6 +2122,9 @@ export function chainReplyToParent(
 
   while (currentChildId && depth < maxDepth) {
     depth++;
+    // Narrow the loop cursor once. It is the walk position for this hop and
+    // nothing else; the result's origin is pinned outside the loop above.
+    const hopChildId: string = currentChildId;
     type ChildRow = { parent_task_id: string | null; to_name: string; from_name: string; content: string };
     type ParentRow = { task_id: string; from_name: string; to_name: string; status: string; result: string | null; network_id: string | null; parent_task_id: string | null };
     const child: ChildRow | null = db.get<ChildRow>(
@@ -2033,28 +2150,63 @@ export function chainReplyToParent(
       }
     }
 
+    // The origin's own result reaching its direct parent is the "executor
+    // completion" notice; anything higher up is a "descendant notice"
+    // forwarded on the origin's behalf. They are different events and must
+    // never occupy the same de-dup slot.
+    const hopKind = depth === 1 ? "completion" : "descendant";
     const childAlias = child.to_name;
     const marker = `\n\n[via ${childAlias} 子任务结果]\n${currentReply}`;
     const newResult = parent.result ? parent.result + marker : `[via ${childAlias} 子任务结果]\n${currentReply}`;
 
+    // Node-TMAI#4 (E/F): one ATTEMPT of a child result may be recorded
+    // against a parent at most once. The key binds the ORIGIN of the result
+    // (not the loop variable), the attempt (its inbox transport row), the
+    // parent and the hop kind. A replayed reply therefore cannot fan out
+    // into a second audit row and a second notice, while a fresh attempt of
+    // the same task (a legal retry) still gets through.
+    const recordKey = `auto-chain:${hopKind}:${parent.task_id}:${originChildId}:${attemptKey}`;
+    let recorded = false;
+
     db.transaction(() => {
-      // Bump parent status to replied if still open. The task transition and
-      // its scheduler-run mirror share this transaction, so a crash cannot
-      // leave one terminal while the other remains delivered.
+      const already = db.get<{ c: number }>(
+        "SELECT COUNT(*) AS c FROM task_events WHERE task_id = ?1 AND event_key = ?2",
+        [parent.task_id, recordKey]
+      );
+      if ((already?.c ?? 0) > 0) return;
+
+      // An OPEN parent is completed by the chain: this is the #690 contract —
+      // a scheduled/dispatched parent whose executor answered through a child
+      // must reach a terminal state, and its scheduler-run mirror follows it
+      // in the same transaction.
       if (parent.status === "delivered" || parent.status === "acked" || parent.status === "running" || parent.status === "created") {
         db.run(
           "UPDATE tasks SET status = ?1, result = ?2, completed_at = datetime('now') WHERE task_id = ?3",
           [replyStatus, newResult.slice(0, 8000), parent.task_id]
         );
         syncScheduledRunForTask(parent.task_id, parent.network_id);
-        logTaskEvent(parent.task_id, parent.status, replyStatus, "auto-chain", `from ${childAlias}`);
-      } else {
-        db.run(
-          "UPDATE tasks SET result = ?1, completed_at = datetime('now') WHERE task_id = ?2",
-          [newResult.slice(0, 8000), parent.task_id]
+        logTaskEvent(
+          parent.task_id, parent.status, replyStatus, "auto-chain",
+          `from ${childAlias}; origin ${originChildId.slice(0, 8)}, attempt=${attemptKey}`,
+          recordKey,
         );
-        logTaskEvent(parent.task_id, parent.status, parent.status, "auto-chain-append", `from ${childAlias}`);
+      } else {
+        // A TERMINAL parent is never rewritten. It used to have its `result`
+        // appended and its `completed_at` moved forward long after it had
+        // finished (observed: 22 minutes later), so an answer given to the
+        // parent could silently become part of somebody else's result. The
+        // child result is still recorded — as an audit row plus a notice to
+        // the parent's author — but the parent row stays byte-identical.
+        logTaskEvent(
+          parent.task_id, parent.status, parent.status, "auto-chain-append",
+          `from ${childAlias}; origin ${originChildId.slice(0, 8)}, attempt=${attemptKey}; terminal parent left untouched`,
+          recordKey,
+        );
       }
+      // The audit row for this (parent, child) link now exists. Only a call
+      // that actually recorded one may unlock the caller's SSE push; a
+      // deduped replay returns early above and leaves this false.
+      recorded = true;
 
       if (parent.from_name && parent.from_name !== "hub" && parent.from_name !== "api") {
         try {
@@ -2066,20 +2218,22 @@ export function chainReplyToParent(
           db.run(
             `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, in_reply_to, requires_response, network_id)
              VALUES (?1, ?2, ?3, 'reply', 'normal', ?4, ?5, ?6, 'none', ?7)`,
-            [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} 子任务完成]\n${currentReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
+            [notifyId, parent.from_name, notifyNode?.node_id ?? null, `[${childAlias} ${hopKind === "descendant" ? "后代结果转呈" : "子任务完成"}]\n${originReply.slice(0, 4000)}`, parent.to_name, parent.task_id, parent.network_id ?? null]
           );
         } catch {}
       }
     });
 
-    // This iteration actually wrote a parent row (and possibly an
-    // inbox notification). Record that so the caller can gate its
-    // SSE push on a real chain.
-    chained = true;
+    // An audit row (and possibly an inbox notification) was recorded for
+    // this parent-child link. The caller gates its SSE push on this.
+    if (recorded) chained = true;
 
-    // Recurse up the chain.
-    currentChildId = parent.task_id;
+    // Recurse up the chain. Only the HOP cursor advances: the origin and
+    // its delivery stay pinned, so no hop can absorb another's identity
+    // and each notice carries the origin reply once instead of nesting
+    // every ancestor's copy of it.
     currentReply = newResult;
+    currentChildId = parent.task_id;
   }
   return { chained };
 }
@@ -2121,6 +2275,10 @@ type ScheduledTaskBinding = { run_id: string; schedule_id: string };
  * the history reflects the current retry rather than the first failed attempt.
  */
 export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: string | null): { matched: boolean; status?: string } {
+  return db.transaction(() => syncScheduledRunForTaskInTransaction(taskId, expectedNetworkId));
+}
+
+function syncScheduledRunForTaskInTransaction(taskId: string, expectedNetworkId?: string | null): { matched: boolean; status?: string } {
   const task = db.get<ScheduledTaskLifecycleRow>(
     `SELECT task_id, network_id, status, completed_at
        FROM tasks
@@ -2149,18 +2307,23 @@ export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: stri
           SET status = ?1,
               error_code = ?2,
               error_message = NULL,
+              work_outcome = CASE WHEN ?1 = 'replied' THEN work_outcome ELSE NULL END,
+              work_outcome_node_id = CASE WHEN ?1 = 'replied' THEN work_outcome_node_id ELSE NULL END,
               completed_at = COALESCE(?3, datetime('now'))
         WHERE run_id = ?4 AND task_id = ?5 AND network_id = ?6 AND schedule_id = ?7`,
       [task.status, errorCode, task.completed_at, binding.run_id, task.task_id, task.network_id, binding.schedule_id],
     );
-    if (updated.changes === 1) fireScheduledRunTerminalHook(binding.schedule_id, task.status);
+    if (updated.changes === 1) {
+      refreshScheduledBackoff(binding.schedule_id, task.network_id!);
+      fireScheduledRunTerminalHook(binding.schedule_id, task.status);
+    }
     return { matched: updated.changes === 1, status: task.status };
   }
 
   if (task.status === "delivered") {
     const updated = db.run(
       `UPDATE scheduled_task_runs
-          SET status = 'delivered', error_code = NULL, error_message = NULL, completed_at = NULL
+          SET status = 'delivered', error_code = NULL, error_message = NULL, completed_at = NULL, work_outcome = NULL, work_outcome_node_id = NULL, backoff_excluded = 1
         WHERE run_id = ?1 AND task_id = ?2 AND network_id = ?3 AND schedule_id = ?4`,
       [binding.run_id, task.task_id, task.network_id, binding.schedule_id],
     );
@@ -2183,12 +2346,12 @@ function taskEventTypeForStatus(toStatus: string): string {
   }
 }
 
-export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string) {
+export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus: string, actor: string, detail?: string, eventKey?: string) {
   try {
     db.run(
-      `INSERT INTO task_events (task_id, from_status, to_status, event_type, actor, detail, network_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
-      [taskId, fromStatus, toStatus, taskEventTypeForStatus(toStatus), actor, detail ?? null]
+      `INSERT INTO task_events (task_id, from_status, to_status, event_type, event_key, actor, detail, network_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT network_id FROM tasks WHERE task_id = ?1))`,
+      [taskId, fromStatus, toStatus, taskEventTypeForStatus(toStatus), eventKey ?? null, actor, detail ?? null]
     );
   } catch {}
 }
@@ -2196,7 +2359,7 @@ export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus
 // RFC-039 F3: queries break created_at ties with SQLite's implicit rowid
 // (insertion order). PostgreSQL has none, so give these tables a real one.
 if (db.dialect === "postgres") {
-  for (const table of ["nodes", "user_inbox"]) db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS rowid BIGSERIAL`);
+  for (const table of ["nodes", "user_inbox", "inbox"]) db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS rowid BIGSERIAL`);
 }
 
 // Board #625: common SQLite/PostgreSQL DDL. Adoption records authority, not processes.
@@ -2218,3 +2381,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ndb_daemon_network
     ON node_daemon_bindings(daemon_node_id,network_id,status);
 `);
+
+// #1198 — OS account the node process runs as. Appended at the end of this file
+// on purpose: docs/test846 pin line anchors in db.ts, and an in-place insertion
+// would drift every anchor below it.
+try { db.exec("ALTER TABLE sessions ADD COLUMN os_user TEXT"); } catch {}

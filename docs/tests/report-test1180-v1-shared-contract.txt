@@ -1,0 +1,17 @@
+#1180 contract review, 2026-10-14
+Main reviewed: 0c07c3a17eee7f87e07c523e25312608d0a0a66b
+A PR2693 MERGED: 299cd2273033c33026de397c206843440b7ba96c
+B PR2645 OPEN: 0c7af87a898e2420f30c3ade510d082ea2fc6ddb
+Reviewed runtime, backend/version gate, auth preparation, health/attach,
+V1 checkpoint/export and candidate V2 registry/proxy/session code.
+Observed V1 pin 1.18.34 with 1.18.1 transition support, owned process lifecycle,
+no directory selector in native HTTP helper, V2-only shared option in candidate,
+flat V1 MCP versus nested V2 MCP, per-launch env versus shared-process trust.
+Registry metadata read for exact opencode-ai versions (no gitHead provided).
+Rolling upstream docs/tag files are not exact binary behavior evidence.
+Delivered docs/design/opencode-v1-shared-server-contract.md with code gaps,
+ownership/isolation contract, migration/rollback, six recovery requirements,
+ordered slices and conditional estimates.
+Validation: source/document review and git diff --check only.
+No runtime changes; no Docker/native/model/production test run in this docs slice.
+No shared V1 feature, release, migration, credential change or canary claimed.

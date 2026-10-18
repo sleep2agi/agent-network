@@ -22,6 +22,7 @@ describe("create_node MCP schema", () => {
     const base = { name: "v2-node", runtime: "opencode-cli" };
     expect(nodeSpec.safeParse({ ...base, opencodeGeneration: "v2" }).success).toBe(false);
     expect(nodeSpec.safeParse({ ...base, opencodeUnsafeTools: true }).success).toBe(false);
+    expect(nodeSpec.safeParse({ ...base, opencodeNewServer: true }).success).toBe(false);
     const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
     expect(nodeSpec.parse({ ...base, flags }).flags).toEqual(flags);
     expect(nodeSpec.parse(base)).toEqual(base);

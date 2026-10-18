@@ -1,0 +1,22 @@
+name: Tag status snapshot core
+on:
+  pull_request:
+    paths:
+      - 'server/src/requirements.ts'
+      - 'server/src/requirements-stats*'
+      - 'tests/test1091-tag-status/**'
+      - 'docs/tests/report-test1091-tag-status.txt'
+      - 'docs/tests/release-v0.9.0-preview.138.md'
+      - 'docs/requirements-tag-status.md'
+      - '.github/workflows/tag-status-core.yml'
+
+permissions:
+  contents: read
+jobs:
+  tag-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t tag-status-test -f tests/test1091-tag-status/Dockerfile .
+      - run: docker run --rm --init --network none tag-status-test

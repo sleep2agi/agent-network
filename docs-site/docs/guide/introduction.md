@@ -33,10 +33,10 @@ Runtime 决定 `agent-node` 如何驱动 AI；供应商决定模型和计费。�
 | `codex-sdk` | 稳定 | 用 Codex 处理后台代码任务 |
 | `grok-build-acp` | 稳定 | 用 Grok Build 的 ACP 接口，无人值守接任务 |
 | `codex-app-server` | preview | Codex TUI 人机共存（选单里显示为 `codex-cli`）。见[共存指南](/guide/codex-copresence) |
-| `opencode-cli` | preview | 公版 OpenCode 多厂商前端。V1 与 V2 共用这个 id，见下 |
+| `opencode-cli` | preview | 公版 OpenCode 多厂商前端。V1 与 V2 共用这个 id，见下；V2 步骤见 [OpenCode V2](/guide/opencode) |
 | `grok-build-cli` | 实验 | Grok TUI 人机共存，只接收可信任务。见[Grok 节点](/guide/grok) |
 
-OpenCode 的 V1 和 V2 都是 runtime `opencode-cli`，不是两个 runtime id。V1 是默认代际（包 `opencode-ai`），headless 和人机共存都可以。V2（包 `@opencode/cli`）用 `--opencode-generation v2` 创建，目前只在 npm `preview` 通道：只做人机共存，还要 `--opencode-unsafe-tools`（本机工具全开，只用于可信任务）。npm `latest` 上的 `opencode-cli` 仍是 V1。
+OpenCode 的 V1 和 V2 都是 runtime `opencode-cli`，不是两个 runtime id。V1 是默认代际（包 `opencode-ai`），headless 和人机共存都可以。V2（包 `@opencode/cli`）用 `--opencode-generation v2` 创建，目前只在 npm `preview` 通道：只做人机共存，还要 `--opencode-unsafe-tools`（本机工具全开，只用于可信任务）。npm `latest` 上的 `opencode-cli` 仍是 V1。创建、Hub 对话、daemon 和尚未接线的模型目录见 [OpenCode V2](/guide/opencode)。
 
 `cursor-agent`（别名 `cursor-cli`）仍是未合并的源码预览，见 [PR #2561](https://github.com/sleep2agi/agent-network/pull/2561)（该 PR 写明不要合并、不要发布）。已发布的 `latest` 和 `preview` 选单都不含它。在它合入并发布之前，支持程度按「即将」理解：不是稳定，也不是已经随 preview 通道发布的 runtime。
 

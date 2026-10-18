@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { scanDaemonCodex } from './daemon-codex-inventory';
+import { scanDaemonCodex, resolveDaemonProviderTarget } from './daemon-codex-inventory';
 import { validCodexInventory } from '../../server/src/shared/codex-inventory';
 
 test('scan carries an opaque node intent revision; startup observations do not invalidate it', () => {
@@ -27,6 +27,42 @@ test('scan carries an opaque node intent revision; startup observations do not i
     expect(JSON.stringify(scan())).not.toContain('TEST-ONLY-new');
     save({ ...config, network_id: undefined });
     expect((scan().rows[0] as any).config_revision).toBeNull(); // legacy readable, mutation not proven safe
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('read-only local discovery finds manual Codex under private legacy layout, without granting mutation', () => {
+  const root = mkdtempSync(join(tmpdir(), 'codex-local906-'));
+  try {
+    const nodes = join(root, '.anet/nodes');
+    mkdirSync(nodes, { recursive: true, mode: 0o700 });
+    chmodSync(nodes, 0o775); // real legacy layout, protected by its private .anet parent
+    for (const [alias, network_id] of [['bound', 'net_local'], ['manual', 'net_local'], ['foreign', 'net_other']]) {
+      const dir = join(nodes, alias); mkdirSync(join(dir, 'codex-home'), { recursive: true, mode: 0o700 });
+      writeFileSync(join(dir, 'config.json'), JSON.stringify({ alias, node_id: `n_${alias}`, network_id, runtime: 'codex-app-server' }), { mode: 0o600 });
+      writeFileSync(join(dir, 'codex-home/config.toml'), 'model_provider="deepseek"\nmodel="local-model"\n', { mode: 0o600 });
+      writeFileSync(join(dir, 'codex-home/auth.json'), JSON.stringify({ OPENAI_API_KEY: 'TEST-ONLY-local-secret' }), { mode: 0o600 });
+    }
+    const targets = [{ alias: 'bound', node_id: 'n_bound' }];
+    const result = scanDaemonCodex(nodes, targets, 'net_local', root, true);
+    expect(validCodexInventory(result)).toBe(true);
+    expect(result.rows[0].status).toBe('observed');
+    expect('local_discovery' in result && result.local_discovery).toMatchObject({ status: 'observed', rows: [
+      { node_id: 'n_manual', configured_provider: 'deepseek', configured_model: 'local-model', config_revision: null },
+    ] });
+    const childRoot = join(root, 'child-workspace'), child = join(childRoot, '.anet/nodes/child-manual');
+    mkdirSync(join(child, 'codex-home'), { recursive: true, mode: 0o700 });
+    writeFileSync(join(child, 'config.json'), JSON.stringify({ alias: 'child-manual', node_id: 'n_child_manual', network_id: 'net_local', runtime: 'codex-app-server' }), { mode: 0o600 });
+    writeFileSync(join(root, '.anet/child-workdirs.json'), JSON.stringify({ 'child-manual': childRoot }), { mode: 0o600 });
+    const withChild = scanDaemonCodex(nodes, targets, 'net_local', root, true);
+    expect('local_discovery' in withChild && withChild.local_discovery.rows.map((r: any) => r.node_id).sort()).toEqual(['n_child_manual', 'n_manual']);
+    expect(JSON.stringify(result)).not.toContain('TEST-ONLY-local-secret');
+    expect(JSON.stringify(result)).not.toContain(root);
+    expect(() => resolveDaemonProviderTarget(nodes, targets[0], 'net_local')).toThrow();
+    expect(scanDaemonCodex(nodes, targets, 'net_local', root)).not.toHaveProperty('local_discovery');
+    chmodSync(join(root, '.anet'), 0o755);
+    chmodSync(root, 0o755);
+    expect(scanDaemonCodex(nodes, targets, 'net_local', root, true)).toMatchObject({ local_discovery: { status: 'unavailable', rows: [] } });
+    expect(readFileSync(join(nodes, 'manual/codex-home/auth.json'), 'utf8')).toContain('TEST-ONLY-local-secret');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

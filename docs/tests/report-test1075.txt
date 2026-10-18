@@ -1,0 +1,31 @@
+2026-10-12 16:10 Asia/Shanghai — source implementation, CI pending
+----------------------------------------------------------------
+Original Hub #1075 / Issue2646, admin idem_1d0769f1ea29f91f456946f55367c854337fa478.
+Base exact main0a0c1423a. Added node_secret_* human actions, nsk_ request/receipt
+and token-bound node pull/ack using the existing management transport. Daemon
+legacy lane and its binding guards remain unchanged. No new model-context tools.
+Runtime advertises its own durable-node capability, handles the node doorbell
+and reconnect catch-up, saves identity-bound node-secrets.json privately and
+loads it with the existing CLI/runtime startup environment reader.
+No Hub/node token rotation, automatic restart, provider switch or production call.
+Dedicated core tests registered in both qa trigger filters and own workflow;
+actual handler/writer/startup child, synthetic save/change/delete and exact
+target isolation. Docker inputs pinned and three package lockfiles retained.
+At authoring: NOT EXECUTED, no PASS. Product tests run in GitHub Actions Docker,
+not local. Client protocol/exported UI evidence remains independent of backend.
+Six recovery boundaries documented in docs/scoped-secrets.md. No npm/global
+package/install/production writes. New feature is NOT included in client0.2.250.
+
+16:16+08 exact head0ef0923c482351958cbda4fa1b6c532962278e59:
+Independent core run38222192804/job114720874764 SUCCESS; actual startup
+child save/change/delete + envRef and target isolation:1/1 test,28 assertions,
+core step16:13:39, image5a4ccd91f556ff60ebb1ef4bdf67d5961a2ce88b111e463365801eda048eecc0.
+Original Daemon core run38222192748/job114720876795 independently SUCCESS.
+Client25c5a048 companion run38222194270/job114720879291 core/typecheck and
+actual exported bound/Daemon/unbound UI steps all SUCCESS; synthetic Hub only,
+not one production/native/full-package end-to-end. No local product tests run.
+Two other jobs114720875294/114720874685 failed the same tool-audience ceiling:
+all95 tools85509B > existing85500B by9; node62/63325B and user62/59618B passed.
+No ceiling or assertion changed. Shorten only the existing management tool's
+description, keeping action schemas/authorization/behavior unchanged. New-head
+budget evidence pending; original core acceptance remains source-bound above.

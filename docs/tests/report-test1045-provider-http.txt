@@ -1,0 +1,60 @@
+#1045 / app#881 — HTTPS recommendation, explicit HTTP supported
+OBSERVED_AT=2026-10-12 07:43+08
+STATUS=TEST-ONLY source / core verified; NOT PUBLISHED
+
+Scope / product source
+- User attachment576690727c944efeb1bf3ca6fd87e98d inspected: Hub Provider
+  refused non-loopback HTTP because of an explicit client transport gate.
+- App base94074b3980cd94e56930d7857f2d44e3d565f644;
+  backend base42ab778e6337927e8327929975d783ede1eb05f3.
+- Allow explicitly configured HTTP/HTTPS at the client, Hub catalog, daemon
+  private store, public snapshot validators, reconciliation and apply preflight.
+  HTTPS remains recommended; HTTP advice explicitly warns of unencrypted keys.
+- API label no longer says HTTPS-only. HTTP Hub/endpoint advisories do not
+  disable saving or confirmed distribution; no implicit save/distribution.
+- Existing scope/role/CAS, key redaction, URL-credential/query restrictions on
+  managed endpoints and no redirects on secret writes remain. Official OAuth
+  HTTPS verification URL and vendor probe allow-list policy are unchanged.
+- Legacy creation still blocks unavailable Hub contracts as hub_not_ready;
+  accepting HTTP does not magically implement that older placeholder contract.
+
+Docker layers — only affected core chain, no production test
+- Pure client helpers4/4 + creation-options43/43 PASS; full TypeScript exit0.
+  Cached source/core image0e6c903d8c4b41dc91e5f34fcb62a12606e2fbeffc7a0f5ad3a1ae3bc548c66e;
+  candidate src/App mounted read-only; --network none; no host/global install.
+- Backend existing tests/test907-hub-provider/Dockerfile rebuilt with candidate
+  product sources and pinned Bun1.3.14/Node22.22.2. Image manifest-list
+  a4cdaba1b0b920a9b2f490336c5a14f40da74075f276c75baff7dc486a95e08d.
+- Store/apply21 tests /152 expectations PASS. New HTTP private-store callback
+  returns exact synthetic endpoint/key without public exposure. Apply's added
+  HTTP mode reaches a container-local HTTP Hub on127.0.0.2 (outside the previous
+  exact loopback whitelist); real dispatcher/filesystem, injected lifecycle
+  subprocesses, not native Codex/model acceptance.
+- Hub7 tests /57 expectations PASS. Actual registered tools -> encrypted vault
+  -> confirmed queue -> candidate compiled CLI private store -> redacted exact
+  receipt, including HTTP Hub URL and HTTP API endpoint. Hub callCommHub is
+  an in-process fixture; not a production remote Hub or external model request.
+  Existing role/foreign-daemon/CAS/reference/protocol assertions retained.
+- Client tests/hub-provider-management/Dockerfile rebuilt/exported1246 modules.
+  Browser image manifest-list
+  f6ed8c47dc03dd505612dc7ba9e720fbff6bf81479f140946cdea99ab2fc657a.
+- HTTP_ONLY=1, --network none, actual exported React page, synthetic native
+  HTTP/MCP:47 assertions PASS, desktop/light + phone/dark. HTTP advisory,
+  exact HTTP endpoint, save/key clearing, cancel/target-change zero writes,
+  explicit bind/receipt and no leaked synthetic key. Screenshot reviewed.
+  This is not a native device, actual network credential or vendor entitlement.
+
+Delivery / recovery / cleanup
+- No versions bumped or immutable artifacts overwritten. Public client0.2.248,
+  Hub126/CLI168/runtime134 releases predate this patch; do not claim HTTP fix
+  already available from those artifacts. Matching new main-built releases and
+  actual deployments are a separate remaining delivery step.
+- No startup, ports, reverse proxy/tunnel, env/key source or schema migration.
+  Authority remains deploy/hub/, deploy/daemon/ and release SOPs.
+  Existing vault master key/source credentials require controlled secret sources;
+  Git restores software, not production DB/provider state/auth/session data.
+- Retain prior binaries and encrypted, identity-matched data backups for rollback.
+  Old strict readers may reject HTTP endpoints; do not erase state to hide it.
+- No production writes, node restarts or inference probes. Core containers --rm;
+  named browser anet-http-provider1045 exited0, screenshots copied to isolated
+  temporary storage, then container removed. Test images/screenshots retained.

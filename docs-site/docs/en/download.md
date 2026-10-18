@@ -7,7 +7,7 @@ aside: false
 
 # Download Agent Network
 
-The desktop and phone clients are the same app and talk to the same Hub. This page reads the **latest published** `desktop-v*` release on [agent-network-app](https://github.com/sleep2agi/agent-network-app/releases) — the same choice the in-app updater makes — and matches each platform to that release's installer. When a platform has no file in that release, the section says so instead of linking an older build.
+Desktop and mobile clients connect to the same Hub. Choose macOS, Windows or Android first, and check the architecture before installing. Desktop packages come from the latest published `desktop-v*` release on [agent-network-app](https://github.com/sleep2agi/agent-network-app/releases). Android uses its independent release channel with its own version and checksum. Platforms without a published package have no download button.
 
 The `anet` command-line install is separate. See [Install](/en/guide/install).
 

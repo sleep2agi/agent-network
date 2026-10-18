@@ -1,0 +1,49 @@
+Requirement #691 — Hub132 activation evidence
+
+Source PR2674 head38b2283145e70250d599cbf1d6c748c2627f9198.
+Source/release main: c49e9316826a064f1db715319fcc7adbde12527a
+Tested PR merge45dba007fccef3a60064c899e5b4e11df119d306 has the same tree.
+Caller core38334852615:86 HTTP,20 assertion witness runs,44 ACK/write-scope
+regressions and1 tools-byte check PASS. Sender core38334853010:64 HTTP,
+10 witness runs and25 transport/origin regressions PASS. Ten required checks
+PASS. Existing agent-node .110/.121 compatibility also passed; related completed
+results were saved before redundant merged-PR matrices were cancelled.
+Main validation and formal gates were retained; do not call cancelled full
+matrices successful. Mutation ratchet baseline remains4, unchanged.
+
+Formal release38335516515:all7 jobs SUCCESS (build, four gates, aggregate,
+preview publication/registry verification). Public preview.132 package:
+bytes=1241050
+sha256=c2e3503a7819032c2e89ef73cfdf6235f0e48573ef5e4a268dc00775f9edf145
+SRI=sha512-r7/8cixYZtB3G6e5XsdFf+hpSjpMX/haBwriZIDuyvaeXgpV0L7qIwL8Jo2VCgqOaSs29wOpywgzzYSO4vl8fQ==
+Public whole tarball equals the exact-main gated tarball; all345 installed
+package files match. latest stays0.9.0-preview.30, preview is132.
+
+Deployment PR2675 head63ed8ac463a5a68325d9a49e40f2b69d825ea894.
+Deployment main:53e23e7421138967e0f6534aa6e1ad1fb8d66c42
+Entire server tree unchanged relative to source-main. Dedicated profile Docker
+38335758129 and ten required checks PASS. Exact managed manifest/lock pins132;
+every transitive lock entry remains unchanged. Profile selects runtime-v115-
+preview132 and retains runtime-v114-preview131 for software rollback.
+
+Private owner-only VACUUM INTO backup integrity=ok, bytes=742928384.
+Production data/credential values are not in this report or CI. Offline Bun1.4
+upgrade preflight PASS, preserving sessions331/tasks81432/nodes302/networks7/
+requirements1107/api_tokens640/user_inbox2679 and Provider table counts.
+
+Activation:2026-10-13T02:17:22.686637+00:00
+Only commhub-hub restarted; selected PID515557 -> 548351, restart89 ->90.
+Actual entrypoint:$HOME/.commhub/runtime-v115-preview132/node_modules/@sleep2agi/commhub-server/bin/commhub.ts
+Installed profile equals exact deployment-main authority. Existing base launcher
+SHA2564a16946c9e8687940110364e68fc8cc20e51fa3c7de0af2c047effb0b78993d8
+and owner-only hub.env inode/size/mtime/permissions are preserved. No environment
+values, provider/login/model changes, business-node restart or latest promotion.
+
+Observation:2026-10-13T02:18:16.178017+00:00
+PID548351/restart90 stable; secured health132, SSE125, fresh heartbeats
+106; natural task events:[{"event_type": "task.replied", "to_status": "replied", "n": 2}, {"event_type": "task.started", "to_status": "running", "n": 2}]
+Appended critical vault_master_key_missing/panic/segfault markers=0. This short
+observation confirms the selected runtime and natural traffic; it does not
+certify fleet-wide ACK/model execution, long-term stability or disaster recovery.
+Recovery follows deploy/hub/README.md; private data and original key sources
+remain required, with the named external key record still NOT COVERED.

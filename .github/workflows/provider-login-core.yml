@@ -1,0 +1,34 @@
+name: Provider managed login core
+on:
+  pull_request:
+    paths:
+      - 'agent-node/src/runtime/codex-managed-login*'
+      - 'agent-node/src/runtime/codex-stdio-client.ts'
+      - 'tests/test906-daemon-provider-management/Dockerfile.login'
+      - 'tests/test906-daemon-provider-management/login-native.ts'
+      - 'tests/test906-daemon-provider-management/native-account-fixture.ts'
+      - 'tests/test906-daemon-provider-management/native-routing-fixture.ts'
+      - '.github/workflows/provider-login-core.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'agent-node/src/runtime/codex-managed-login*'
+      - 'agent-node/src/runtime/codex-stdio-client.ts'
+      - 'tests/test906-daemon-provider-management/Dockerfile.login'
+      - 'tests/test906-daemon-provider-management/login-native.ts'
+      - 'tests/test906-daemon-provider-management/native-account-fixture.ts'
+      - 'tests/test906-daemon-provider-management/native-routing-fixture.ts'
+      - '.github/workflows/provider-login-core.yml'
+permissions:
+  contents: read
+jobs:
+  login:
+    name: Managed login core (Docker; no real sign-in)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - run: >-
+          sg docker -c 'docker build
+          -f tests/test906-daemon-provider-management/Dockerfile.login
+          -t provider-login-core . && docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1 provider-login-core'
