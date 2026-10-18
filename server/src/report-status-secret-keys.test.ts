@@ -111,3 +111,30 @@ describe("report_status — secret key names", () => {
     expect(stored()).toBeNull();
   });
 });
+
+// #1510 — the node reports how it reaches this hub; reporting only.
+describe("report_status — env_transport", () => {
+  test("stores the reported link kind", async () => {
+    const client = await connectClient();
+    const r = await call(client, report({ env_transport: "loopback" }));
+    expect(r.body.ok).toBe(true);
+    const row = db.get<{ env_transport: string | null }>("SELECT env_transport FROM sessions WHERE resume_id = ?1", RESUME);
+    expect(row?.env_transport).toBe("loopback");
+  });
+
+  test("an unknown value is rejected at the boundary", async () => {
+    const client = await connectClient();
+    const r = await call(client, report({ env_transport: "carrier-pigeon" }));
+    expect(r.ok).toBe(false);
+    const row = db.get<{ env_transport: string | null }>("SELECT env_transport FROM sessions WHERE resume_id = ?1", RESUME);
+    expect(row?.env_transport ?? null).toBeNull();
+  });
+
+  test("an absent field keeps the previous value", async () => {
+    const client = await connectClient();
+    await call(client, report({ env_transport: "https" }));
+    await call(client, report());
+    const row = db.get<{ env_transport: string | null }>("SELECT env_transport FROM sessions WHERE resume_id = ?1", RESUME);
+    expect(row?.env_transport).toBe("https");
+  });
+});

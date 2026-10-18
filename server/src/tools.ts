@@ -748,6 +748,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // node-side collector parses and drops them. Capped at 50 * 64 chars so a
       // pathological secrets.env cannot grow this row without bound.
       secret_keys: z.array(z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/)).max(50).optional().describe("Env key names only"),
+      // #1510 — how the node reaches this hub. Reported by the node because only
+      // it knows the last hop. Reporting only; no write path reads it yet.
+      env_transport: z.enum(["loopback", "https", "plain"]).optional().describe("Hub link kind"),
       version: z.string().max(100).optional().describe("Agent version"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
@@ -970,7 +973,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // instead of rejecting the whole report (see node-health-store.ts).
       health: nodeHealthSchema,
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth, secret_keys: secretKeys }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth, secret_keys: secretKeys, env_transport: envTransport }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -1177,6 +1180,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // UPSERT placeholder bytes stay untouched. An EMPTY array is a real
         // report ("this node has no secrets") and must overwrite the old list;
         // only `undefined` (field absent) keeps the previous value.
+        if (envTransport) {
+          db.run(
+            `UPDATE sessions SET env_transport = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,
+            [resume_id, envTransport],
+          );
+        }
         if (Array.isArray(secretKeys)) {
           db.run(
             `UPDATE sessions SET secret_keys = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,

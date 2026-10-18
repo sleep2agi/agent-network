@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { collectOsUser } from "./os-user";
 import { collectSecretKeys } from "./node-secret-keys.js";
+import { classifyHubTransport } from "./env-transport.js";
 /**
  * @sleep2agi/agent-node CLI
  *
@@ -1737,6 +1738,9 @@ const register = async () => {
     // leave collectSecretKeys; an empty array is a real report and the hub
     // overwrites its stored list with it.
     secret_keys: collectSecretKeys(NODE_DIR),
+    // #1510 — how this node reaches the Hub (loopback / https / plain). Reporting
+    // only: nothing refuses a write because of it yet.
+    env_transport: classifyHubTransport(COMMHUB_URL),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,

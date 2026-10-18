@@ -2391,3 +2391,8 @@ try { db.exec("ALTER TABLE sessions ADD COLUMN os_user TEXT"); } catch {}
 // values). Appended after os_user for the same reason: doc/test anchors pin
 // line numbers in this file, so new migrations go at EOF, never in the middle.
 try { db.exec("ALTER TABLE sessions ADD COLUMN secret_keys TEXT"); } catch {}
+
+// #1510 — how the node reaches the hub (loopback / https / plain), reported by
+// the node itself. Appended at EOF like the other post-1.0 columns so the doc
+// and test846 line anchors below it never drift.
+try { db.exec("ALTER TABLE sessions ADD COLUMN env_transport TEXT"); } catch {}
