@@ -92,6 +92,9 @@ L1_TESTS=(
   "test1195-side-thread-hub-security"
   "test1195-side-thread-hub-race"
   "test1200-side-thread-command-transport"
+  # #497/#175 cross-layer App fixture -> Hub HTTP -> dedicated node port ->
+  # terminal -> hydrate. Pins the App-vendored contract bytes by sha256.
+  "test1199-btw-cross-layer-contract"
   "test1203-btw-production-e2e"
   "test1181-codex-durable-poll"
   # #1027: deterministic reproduction of the historical test225 foreground
