@@ -2937,7 +2937,7 @@ import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCu
 import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
 import { describeHubRemoval, removeNodeFromHub } from "../src/node-delete-hub";
 import { COMMAND_HELP, NODE_DELETE_USAGE, lookupCommandHelp } from "../src/cli-help";
-import { nodeSecretFileModeWarning, nodeSecretFilePath, readNodeSecretKeys } from "../src/node-secret-file";
+import { nodeSecretFileModeWarning, nodeSecretFilePath, readNodeSecretKeys, removeNodeSecret, writeNodeSecret } from "../src/node-secret-file";
 import { errorText, formatTopLevelError, hubErrorText, nodeTokenReissueError, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
 import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
 export { normalizeRuntime, type RuntimeName };
@@ -2999,14 +2999,28 @@ function normalizeStoredProfile(id: string, project: Record<string, any>, global
 //   * list  — names only, one per line (or --json)
 //   * no secrets.env  — a normal state, exit 0
 //   * symlink / unreadable / non-regular — error, exit 1 (do not guess)
-async function nodeSecretCommand(argv: string[]) {
-  const usage = `Usage: anet node secret list <node> [--json]
+/** 读 stdin 到 EOF。值不回显、不进 argv、不进日志。 */
+async function readAllStdin(): Promise<string> {
+  if (process.stdin.isTTY) process.stdin.setRawMode?.(false);
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
 
-Show the environment key NAMES in <node>/secrets.env. Values are never printed:
-the CLI only lists names, and the node loader is what applies them.`;
+async function nodeSecretCommand(argv: string[]) {
+  const usage = `Usage: anet node secret list  <node> [--json]
+       anet node secret set   <node> <KEY> [--from-env VAR]     (value on stdin)
+       anet node secret unset <node> <KEY>
+
+Manage <node>/secrets.env — the file the node loads at startup (0600, one
+KEY=VALUE per line; reserved keys like PATH/LD_* are ignored).
+
+"list" prints key NAMES only; values are never printed by any verb.
+"set" reads the value from stdin (one line) or from an existing env var with
+--from-env, never from argv — the value must not land in shell history or ps.`;
   const verb = argv[0];
   if (!verb || verb === "--help" || verb === "-h") { console.log(usage); return; }
-  if (verb !== "list") {
+  if (verb !== "list" && verb !== "set" && verb !== "unset") {
     console.error(`Unknown: anet node secret ${verb}\n\n${usage}`);
     process.exit(2);
   }
@@ -3017,6 +3031,38 @@ the CLI only lists names, and the node loader is what applies them.`;
   if (!resolved) { console.error(nodeNotFound(ref)); process.exit(1); }
   const nodeDir = join(nodesDir(), resolved.id);
   const display = resolved.profile.node_name || resolved.profile.name || resolved.profile.alias || resolved.id;
+
+  if (verb === "set" || verb === "unset") {
+    const key = argv.slice(1).find(a => !a.startsWith("-") && a !== ref);
+    if (!key) { console.error(`缺少 KEY。\n\n${usage}`); process.exit(2); }
+    if (verb === "unset") {
+      const r = removeNodeSecret(nodeDir, key);
+      if (r.kind === "rejected") { console.error(`[anet] ${display}: ${r.reason}`); process.exit(1); }
+      console.log(r.changed ? `[anet] ${display}: 已删除 ${key}` : `[anet] ${display}: 没有 ${key}（未改动）`);
+      return;
+    }
+    // set：值只从 stdin 或既有 env 变量来，绝不从 argv。
+    const fromEnvIdx = argv.indexOf("--from-env");
+    let value: string;
+    if (fromEnvIdx >= 0) {
+      const name = argv[fromEnvIdx + 1];
+      if (!name) { console.error(`--from-env 需要变量名。\n\n${usage}`); process.exit(2); }
+      const v = process.env[name];
+      if (v === undefined) { console.error(`[anet] 环境变量 ${name} 不存在（未改动）`); process.exit(1); }
+      value = v;
+    } else {
+      if (process.stdin.isTTY) {
+        console.error(`[anet] 从 stdin 读取 ${key} 的值（不会回显，Ctrl-D 结束）。\n[anet] 也可以: ... set ${ref} ${key} --from-env VAR`);
+      }
+      value = (await readAllStdin()).replace(/\r?\n$/, "");
+      if (value === "") { console.error(`[anet] 没有从 stdin 读到值（未改动）`); process.exit(1); }
+    }
+    const r = writeNodeSecret(nodeDir, key, value);
+    if (r.kind === "rejected") { console.error(`[anet] ${display}: ${r.reason}`); process.exit(1); }
+    console.log(`[anet] ${display}: 已写入 ${key}（值不显示）。节点需要重启才会加载。`);
+    return;
+  }
+
   const r = readNodeSecretKeys(nodeDir);
   if (r.kind === "unsafe") {
     console.error(`[anet] ${display}: ${r.reason}\n[anet] path: ${nodeSecretFilePath(nodeDir)}`);

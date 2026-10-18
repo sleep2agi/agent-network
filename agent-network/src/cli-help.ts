@@ -128,17 +128,27 @@ Restart the node for the change to take effect.
 On another machine (#562): add --remote — the Hub asks that machine's daemon to do it.
   anet node <start|stop|restart> <alias> --remote [--network <id|name>] [--yes] [--wait <s>]
   anet node edit <alias> --model <id> --remote [--network <id|name>] [--yes] [--wait <s>]`,
-  "node secret": `Usage: anet node secret list <node> [--json]
+  "node secret": `Usage: anet node secret list  <node> [--json]
+       anet node secret set   <node> <KEY> [--from-env VAR]
+       anet node secret unset <node> <KEY>
 
-Show the environment key NAMES in <node>/secrets.env — the file the node loads at
-startup (0600, one KEY=VALUE per line; reserved keys like PATH/LD_* are ignored).
-Values are never printed: this command only lists names.
+Manage <node>/secrets.env — the file the node loads at startup (0600, one
+KEY=VALUE per line; reserved keys like PATH/LD_* are ignored). Values are never
+printed by any verb: list shows names, set/unset confirm only the key name.
 
   anet node secret list 指挥室
-  anet node secret list 指挥室 --json
+  anet node secret set 指挥室 OPENAI_API_KEY --from-env MY_KEY   # 从环境变量取
+  printf '%s' "$KEY" | anet node secret set 指挥室 OPENAI_API_KEY
+  anet node secret unset 指挥室 OPENAI_API_KEY
+
+The value is never taken from argv: it comes from stdin (one line, no echo) or
+from an existing environment variable via --from-env, so it cannot land in your
+shell history or in ps. The node must be restarted to load a change.
 
 No secrets.env is a normal state (exit 0). A symlink, a non-regular file or an
-unreadable file is an error (exit 1) rather than an empty list.`,
+unreadable file is an error (exit 1) rather than an empty list; set/unset
+refuse to write through a symlink.
+`,
   "node ls": `Usage: anet node ls [--verbose]
        anet node list
 
