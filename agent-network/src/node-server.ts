@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { collectOsUser } from "./os-user";
 /**
  * CommHub Channel Plugin for Claude Code
  *
@@ -652,6 +653,8 @@ async function reregister(): Promise<void> {
       // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
       host: getHostTelemetry(),
       process_telemetry: getProcessTelemetry(),
+      // #1198 — OS account this process runs as.
+      os_user: collectOsUser() ?? undefined,
       tmux_name: TMUX_NAME || undefined,
       // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
       rules_file_capable: true,
@@ -883,6 +886,8 @@ async function main() {
     // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
+    // #1198 — OS account this process runs as.
+    os_user: collectOsUser() ?? undefined,
     tmux_name: TMUX_NAME || undefined,
     // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
     rules_file_capable: true,
@@ -913,6 +918,8 @@ async function main() {
       // node-server 是这条路径上唯一长期存活的自有进程,顺带采一次(与 agent-node 同一采集器)。
       host: getHostTelemetry(),
       process_telemetry: getProcessTelemetry(),
+      // #1198 — OS account this process runs as.
+      os_user: collectOsUser() ?? undefined,
       tmux_name: TMUX_NAME || undefined,
       // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
       rules_file_capable: true,

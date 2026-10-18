@@ -2275,3 +2275,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ndb_daemon_network
     ON node_daemon_bindings(daemon_node_id,network_id,status);
 `);
+
+// #1198 — OS account the node process runs as. Appended at the end of this file
+// on purpose: docs/test846 pin line anchors in db.ts, and an in-place insertion
+// would drift every anchor below it.
+try { db.exec("ALTER TABLE sessions ADD COLUMN os_user TEXT"); } catch {}

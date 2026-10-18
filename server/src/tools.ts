@@ -742,6 +742,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       hostname: z.string().max(200).optional().describe("Agent hostname"),
       agent: z.string().max(100).optional().describe("Agent type (claude-code / codex / opencode)"),
       project_dir: z.string().max(1000).optional().describe("Agent working directory"),
+      // #1198 — OS account the process runs as (platform identity only; no env fallback).
+      os_user: z.string().min(1).max(256).optional().describe("OS user the node process runs as"),
       version: z.string().max(100).optional().describe("Agent version"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
@@ -964,7 +966,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // instead of rejecting the whole report (see node-health-store.ts).
       health: nodeHealthSchema,
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -1156,6 +1158,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
           [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, storedStatus, sessionTask, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
         );
+        // #1198 — os_user goes through its own narrow UPDATE so the long session
+        // INSERT/UPSERT keeps its exact placeholder shape (test698 pins those
+        // bytes). Falsy means "not reported this time": keep the stored value.
+        if (osUser) {
+          db.run(
+            `UPDATE sessions SET os_user = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,
+            resume_id, osUser,
+          );
+        }
         if (handover) {
           // 换 resume_id 那条路径上 ON CONFLICT 不会触发;INSERT 完再把没上报(仍为 NULL)的
           // 描述性列从被替换的那行接手。INSERT 语句与参数列表保持原样 —— test698 的变异

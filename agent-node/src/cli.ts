@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { collectOsUser } from "./os-user";
 /**
  * @sleep2agi/agent-node CLI
  *
@@ -1729,6 +1730,8 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
+    // #1198 — the OS account this node process actually runs as.
+    os_user: collectOsUser() ?? undefined,
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
