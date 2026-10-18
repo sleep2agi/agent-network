@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import pty from "../../agent-network/node_modules/node-pty/lib/index.js";
+import { verifyResumeContinuity, formatVerdict } from "./resume-verdict.mjs";
 
 if (process.platform !== "win32") throw new Error("windows-e2e must run on Windows");
 const repo = resolve(import.meta.dirname, "../..");
@@ -167,6 +168,66 @@ if ((calls.match(/^rpc:thread\/resume:thread_windows_e2e$/gm) || []).length !== 
 if ((calls.match(/^rpc:thread\/read:thread_windows_e2e$/gm) || []).length !== 3) throw new Error(`deferred promotion plus restart did not read exact history:\n${calls}`);
 if ((calls.match(/^tui:thread_windows_e2e$/gm) || []).length !== 2) throw new Error(`TUI did not adopt same thread twice:\n${calls}`);
 console.log("PASS interactive create -> native start -> stop -> restart resumes same Codex thread");
+
+// #1462 — the positive above is a set of inline counts. Route the same
+// observations through the shared acceptance criterion so the *criterion* is
+// what passed, not a bespoke assertion, and then prove the criterion has
+// discrimination with negative controls derived from this run's real transcript.
+const finalConfig = JSON.parse(readFileSync(configPath, "utf8"));
+const realContinuity = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: calls,
+  tuiLines: calls,
+});
+if (realContinuity.verdict !== "pass") {
+  throw new Error(`continuity criterion rejected the real positive path: ${JSON.stringify(realContinuity)}`);
+}
+console.log(`PASS test1462 continuity verdict — ${formatVerdict("positive", realContinuity)}`);
+
+// Negative 1 — config still echoes the expected id, but the wire went fresh.
+const freshOnWire = `rpc:thread/start\n${calls}`;
+const freshVerdict = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: freshOnWire,
+  tuiLines: calls,
+});
+if (freshVerdict.verdict !== "fail" || !freshVerdict.reasons.some((r) => r.startsWith("fresh_thread_start"))) {
+  throw new Error(`fresh/fork path was not rejected: ${JSON.stringify(freshVerdict)}`);
+}
+console.log(`PASS test1462-NEG fresh-wire rejected — ${formatVerdict("negative-fresh", freshVerdict)}`);
+
+// Negative 2 — config still echoes the expected id, but resume/read addressed
+// another thread (same shape as the fixture's wire log, different identity).
+const otherThread = calls.split("thread_windows_e2e").join("thread_windows_other");
+const wrongVerdict = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: otherThread,
+  tuiLines: otherThread,
+});
+if (wrongVerdict.verdict !== "fail" || !wrongVerdict.reasons.some((r) => r.startsWith("resume_wrong_thread"))) {
+  throw new Error(`wrong-thread resume was not rejected: ${JSON.stringify(wrongVerdict)}`);
+}
+console.log(`PASS test1462-NEG wrong-thread rejected — ${formatVerdict("negative-wrong-thread", wrongVerdict)}`);
+
+// Negative 3 — resume happened but no history read / no identity evidence:
+// that is `unknown`, never a verified resume.
+const noHistory = calls
+  .split(/\r?\n/)
+  .filter((line) => !line.startsWith("rpc:thread/read") && !line.startsWith("tui:"))
+  .join("\n");
+const unknownVerdict = verifyResumeContinuity({
+  expectedThreadId: "thread_windows_e2e",
+  config: finalConfig,
+  transcript: noHistory,
+  tuiLines: "",
+});
+if (unknownVerdict.verdict !== "unknown") {
+  throw new Error(`missing evidence was not kept unknown: ${JSON.stringify(unknownVerdict)}`);
+}
+console.log(`PASS test1462-NEG missing-evidence stays unknown — ${formatVerdict("negative-unknown", unknownVerdict)}`);
 
 const globalConfig = JSON.parse(readFileSync(join(userHome, ".anet", "config.json"), "utf8"));
 const userToken = globalConfig.token;
