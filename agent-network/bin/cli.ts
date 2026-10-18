@@ -2937,6 +2937,7 @@ import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCu
 import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
 import { describeHubRemoval, removeNodeFromHub } from "../src/node-delete-hub";
 import { COMMAND_HELP, NODE_DELETE_USAGE, lookupCommandHelp } from "../src/cli-help";
+import { nodeSecretFileModeWarning, nodeSecretFilePath, readNodeSecretKeys } from "../src/node-secret-file";
 import { errorText, formatTopLevelError, hubErrorText, nodeTokenReissueError, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
 import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
 export { normalizeRuntime, type RuntimeName };
@@ -2990,6 +2991,54 @@ function normalizeStoredProfile(id: string, project: Record<string, any>, global
     env: project.env && typeof project.env === "object" ? { ...project.env } : {},
     flags: project.flags && typeof project.flags === "object" ? { ...project.flags } : {},
   };
+}
+
+// #2056 (#909) — `anet node secret list <node>`: show the KEY NAMES the node's
+// own secrets.env will load. Values are never read out of that file, so there is
+// nothing here that could print one.
+//   * list  — names only, one per line (or --json)
+//   * no secrets.env  — a normal state, exit 0
+//   * symlink / unreadable / non-regular — error, exit 1 (do not guess)
+async function nodeSecretCommand(argv: string[]) {
+  const usage = `Usage: anet node secret list <node> [--json]
+
+Show the environment key NAMES in <node>/secrets.env. Values are never printed:
+the CLI only lists names, and the node loader is what applies them.`;
+  const verb = argv[0];
+  if (!verb || verb === "--help" || verb === "-h") { console.log(usage); return; }
+  if (verb !== "list") {
+    console.error(`Unknown: anet node secret ${verb}\n\n${usage}`);
+    process.exit(2);
+  }
+  const asJson = argv.includes("--json");
+  const ref = argv.slice(1).find(a => !a.startsWith("-"));
+  if (!ref) { console.error(usage); process.exit(2); }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) { console.error(nodeNotFound(ref)); process.exit(1); }
+  const nodeDir = join(nodesDir(), resolved.id);
+  const display = resolved.profile.node_name || resolved.profile.name || resolved.profile.alias || resolved.id;
+  const r = readNodeSecretKeys(nodeDir);
+  if (r.kind === "unsafe") {
+    console.error(`[anet] ${display}: ${r.reason}\n[anet] path: ${nodeSecretFilePath(nodeDir)}`);
+    process.exit(1);
+  }
+  if (r.kind === "missing") {
+    if (asJson) console.log(JSON.stringify({ ok: true, node: display, path: nodeSecretFilePath(nodeDir), keys: [], present: false }, null, 2));
+    else console.log(`[anet] ${display}: 没有 secrets.env（没有配置任何密钥）`);
+    return;
+  }
+  const warning = nodeSecretFileModeWarning(nodeDir);
+  if (warning) console.error(`[anet] ⚠ ${display}: ${warning}`);
+  if (asJson) {
+    console.log(JSON.stringify({ ok: true, node: display, path: nodeSecretFilePath(nodeDir), keys: r.keys, present: true }, null, 2));
+    return;
+  }
+  if (r.keys.length === 0) {
+    console.log(`[anet] ${display}: secrets.env 存在，但没有可加载的 key 名`);
+    return;
+  }
+  console.log(`[anet] ${display}: ${r.keys.length} 个 key（只有名字，值不显示）`);
+  for (const k of r.keys) console.log(`  ${k}`);
 }
 
 function resolveNodeRef(ref: string): { id: string; profile: Profile } | null {
@@ -19841,6 +19890,7 @@ switch (command) {
       case "clone": await nodeCloneCommand(args.slice(2), "clone"); break;
       case "edit": args.splice(0, 1); await nodeEditCommand(); break;
       case "loop": args.splice(0, 1); await nodeLoopCommand(); break;
+      case "secret": await nodeSecretCommand(args.slice(2)); break;
       case "ls": case "list": await lsCommand(); break;
       case "restart": {
         // #173 / F7-03 — node restart = stop + start, alias for symmetry

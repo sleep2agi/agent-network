@@ -128,6 +128,17 @@ Restart the node for the change to take effect.
 On another machine (#562): add --remote — the Hub asks that machine's daemon to do it.
   anet node <start|stop|restart> <alias> --remote [--network <id|name>] [--yes] [--wait <s>]
   anet node edit <alias> --model <id> --remote [--network <id|name>] [--yes] [--wait <s>]`,
+  "node secret": `Usage: anet node secret list <node> [--json]
+
+Show the environment key NAMES in <node>/secrets.env — the file the node loads at
+startup (0600, one KEY=VALUE per line; reserved keys like PATH/LD_* are ignored).
+Values are never printed: this command only lists names.
+
+  anet node secret list 指挥室
+  anet node secret list 指挥室 --json
+
+No secrets.env is a normal state (exit 0). A symlink, a non-regular file or an
+unreadable file is an error (exit 1) rather than an empty list.`,
   "node ls": `Usage: anet node ls [--verbose]
        anet node list
 
