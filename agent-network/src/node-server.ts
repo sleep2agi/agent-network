@@ -47,6 +47,7 @@ import { attachLocalLinks } from "./reply-local-links";
 import { drainRulesFileRequests, handleRulesFileEvent } from "./node-server-rules-file";
 import { installTeamSkills } from "./node-skills";
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
+import { notifyAndAckChannelDelivery, supportsChannelDeliveryEvidence } from "./channel-delivery";
 import { PEER_REPLY_TOOL_NAME, sendChannelPeerReply } from "./channel-peer-reply";
 
 // ── .env loader helper ────────────────────────────────
@@ -792,9 +793,14 @@ const drainChannelInbox = createSingleFlight(async () => {
   drainReason = "sse";
   // #1900 —— 之前每个事件只取一页(limit 5)就停,节点忙时攒下的第 6 条起要等下一个事件才投。
   //    现在取到短页/空页为止;hub 一直回同一批(ack 没生效)时停下不空转。
+  let evidenceSupported = false;
   const drained = await drainInbox<any>({
     pageSize: 5,
-    fetchPage: (limit) => callCommHub("get_inbox", { alias: ALIAS, limit }),
+    fetchPage: async (limit) => {
+      const page = await callCommHub("get_inbox", { alias: ALIAS, limit });
+      evidenceSupported = supportsChannelDeliveryEvidence(page);
+      return page;
+    },
     handle: async (msg) => {
     let channelContent = String(msg.content || "");
     try {
@@ -817,19 +823,18 @@ const drainChannelInbox = createSingleFlight(async () => {
     taskOriginators.set(msg.id, msg.from_session || "hub");
     if (typeof msg.task_id === "string" && msg.task_id) taskLogicalIds.set(msg.id, msg.task_id);
 
-    await mcp.notification({
-      method: "notifications/claude/channel",
-      params: {
-        content: channelContent,
-        meta,
-      },
+    const delivery = await notifyAndAckChannelDelivery({
+      messageId: msg.id,
+      task: msg.type === "task",
+      evidenceSupported,
+      notify: () => mcp.notification({
+        method: "notifications/claude/channel",
+        params: { content: channelContent, meta },
+      }),
+      ack: (args) => callCommHub("ack_inbox", { alias: ALIAS, ...args }),
     });
-
-    log(`→ injected task ${msg.id.slice(0, 8)} from ${msg.from_session}: ${(msg.content as string).slice(0, 60)}`);
-      await callCommHub("ack_inbox", {
-        alias: ALIAS,
-        message_id: msg.id,
-      });
+    // No body, prompt, sender text or exception payload in delivery diagnostics.
+    log(`→ channel notification written task=${msg.id.slice(0, 8)} hub_evidence=${delivery.evidenceRecorded ? "recorded" : "unavailable"}; CLI admission unknown`);
     },
   });
   if (drained.pages > 1 || drained.stoppedBy === "no-progress" || drained.stoppedBy === "fetch-error") {

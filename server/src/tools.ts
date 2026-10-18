@@ -1,3 +1,4 @@
+import { channelDeliverySupported, recordChannelDelivery, channelDeliveryAt, channelDeliveryStages } from "./channel-delivery-evidence";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { selectHumanInboxIds } from "./human-inbox.js";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
@@ -1508,7 +1509,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows, ...(human ? { human_inbox: { version: 1, mode: "metadata-keyset", examined: human.examined } } : {}) }) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows, ...(channelDeliverySupported(db) ? { delivery_evidence: { channel_notification_injected: 1 } } : {}), ...(human ? { human_inbox: { version: 1, mode: "metadata-keyset", examined: human.examined } } : {}) }) }],
       };
     }
   );
@@ -1520,9 +1521,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).describe("Alias"),
       message_id: z.string().min(1).max(200),
       response: z.string().max(10000).optional(),
+      channel_notification_injected: z.literal(true).optional().describe("Notification written; not CLI admitted/consumed"),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
-    async ({ alias, message_id, response, network_id: netId }) => {
+    async ({ alias, message_id, response, channel_notification_injected, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       const recipient = resolveInboxCaller(alias, { tokenId: callerTokenId, userId: enforceUserId, networkId: effectiveNetId, nodeToken: callerTokenIsNetwork, identityRejected: callerIdentityRejected });
@@ -1547,29 +1549,47 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or already acknowledged" }) }],
         };
       }
-      const ackParams: any[] = [inboxTask.id, alias];
-      let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2 AND acked = 0";
-      ackSql = addScope(ackSql, ackParams, effectiveNetId);
-      const result = db.run(ackSql, ackParams);
-      if (result.changes === 0) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or not yours" }) }],
-        };
+      if (channel_notification_injected && !channelDeliverySupported(db)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "channel_delivery_evidence_unavailable" }) }] };
       }
-      // V2: sync tasks table — ack_inbox means delivered→acked
-      try {
-        if (inboxTask?.type !== "task") {
-          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }] };
+      // An old caller's ACK retains its existing best-effort lifecycle sync.
+      // Only the negotiated transport receipt requires the stronger transaction.
+      if (!channel_notification_injected) {
+        const ackParams: any[] = [inboxTask.id, alias];
+        let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2 AND acked = 0";
+        ackSql = addScope(ackSql, ackParams, effectiveNetId);
+        if (db.run(ackSql, ackParams).changes === 0) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or not yours" }) }] };
         }
-        const taskParams: any[] = [inboxTask.task_id];
-        let taskSql = "UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status = 'delivered'";
-        taskSql = addScope(taskSql, taskParams, effectiveNetId);
-        const ackResult = db.run(taskSql, taskParams);
-        if (ackResult.changes > 0) logTaskEvent(inboxTask.task_id, "delivered", "acked", alias);
-      } catch {}
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }],
-      };
+        try {
+          if (inboxTask.type === "task") {
+            const params: any[] = [inboxTask.task_id];
+            let sql = "UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status = 'delivered'";
+            sql = addScope(sql, params, effectiveNetId);
+            if (db.run(sql, params).changes > 0) logTaskEvent(inboxTask.task_id, "delivered", "acked", alias);
+          }
+        } catch {}
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true }) }] };
+      }
+      // ACK and its optional transport observation are atomic. Technical
+      // failure must leave the row pending, not silently lose the evidence.
+      const outcome = db.transaction(() => {
+        const ackParams: any[] = [inboxTask.id, alias];
+        let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2 AND acked = 0";
+        ackSql = addScope(ackSql, ackParams, effectiveNetId);
+        const result = db.run(ackSql, ackParams);
+        if (result.changes === 0) return { ok: false, error: "message not found or not yours" };
+        if (inboxTask.type === "task") {
+          const taskParams: any[] = [inboxTask.task_id];
+          let taskSql = "UPDATE tasks SET status = 'acked' WHERE task_id = ?1 AND status = 'delivered'";
+          taskSql = addScope(taskSql, taskParams, effectiveNetId);
+          const ackResult = db.run(taskSql, taskParams);
+          if (ackResult.changes > 0) logTaskEvent(inboxTask.task_id, "delivered", "acked", alias);
+          if (channel_notification_injected) recordChannelDelivery(db, inboxTask.task_id, inboxTask.id, alias);
+        }
+        return { ok: true, ...(channel_notification_injected && inboxTask.type === "task" ? { channel_notification_injected: true } : {}) };
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(outcome) }] };
     }
   );
 
@@ -2830,6 +2850,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const task = db.get<any>(sql, ...params);
       if (task) {
         task.late_replies = listTaskLateReplies(db, task_id, typeof task.network_id === "string" ? task.network_id : null);
+        const injectedAt = channelDeliveryAt(db, task_id, typeof task.network_id === "string" ? task.network_id : null);
+        if (injectedAt) task.channel_delivery = channelDeliveryStages(task, injectedAt);
       }
       return {
         content: [{

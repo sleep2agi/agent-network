@@ -248,9 +248,12 @@ ok 'positive control: the pre-fix node cannot be targeted (target_node_not_found
 
 RUN=$(curl -sS -X POST "$BASE/api/scheduled-tasks/$SCHED_ID/run-now" -H "Authorization: Bearer $UTOK" -H 'Content-Type: application/json' -d '{}')
 jq -e '.ok != false' <<<"$RUN" >/dev/null || fail "run-now failed: $RUN"
+TASK_ID=$(jq -r '.taskId // .event.taskId // empty' <<<"$RUN")
+[[ -n "$TASK_ID" ]] || fail "run-now did not return a task id: $RUN"
+TASK_SHORT=${TASK_ID:0:8}
 delivered=0
 for _ in $(seq 1 80); do
-  if grep -q "injected task .* from scheduler: $MARK" "$WORK/node-$LEGACY_ALIAS.log"; then delivered=1; break; fi
+  if grep -Fq "channel notification written task=$TASK_SHORT" "$WORK/node-$LEGACY_ALIAS.log"; then delivered=1; break; fi
   sleep 0.25
 done
 [[ $delivered -eq 1 ]] || fail 'run-now task never reached the claude-code node-server'

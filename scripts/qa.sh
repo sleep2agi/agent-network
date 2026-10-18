@@ -73,6 +73,8 @@ L1_TESTS=(
   "test674-binding-generation"
   "test-agent-team-whoami"
   "test710-late-task-replies"
+  # Exact delivery evidence remains transport-only; it must not claim CLI admission.
+  "test1492-channel-evidence"
   "test658-codex-adopt-stop"
   # #1253 —— grok 换模型 hot→restart 回退路径。纯本地:跑 agent-node 源码的
   # bun 测试,不需要 grok 二进制、不需要网络、不碰任何凭据。
@@ -617,7 +619,7 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       if [[ "$t" == "test674-binding-generation" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       if [[ "$t" == "test-agent-team-whoami" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       if [[ "$t" == "test703-codex-turn-receipts" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
-      if [[ "$t" == "test710-late-task-replies" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
+      if [[ "$t" == "test710-late-task-replies" || "$t" == "test1492-channel-evidence" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       _run_cmd="docker run"
       for _f in "${_run_flags[@]}"; do _run_cmd+=" ${_f}"; done
       _run_cmd+=" ${_qa_run_flags} anet-$t"

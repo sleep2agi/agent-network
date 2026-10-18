@@ -1,3 +1,4 @@
+import { channelDeliveryAt, channelDeliveryStages } from "./channel-delivery-evidence";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { buildServeErrorResponse } from "./serve-error.js";
 import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
@@ -4951,7 +4952,10 @@ return Bun.serve({
       evidenceSql += " LIMIT 1";
       const targetEverReportedRuntimeEvidence =
         Boolean(db.get<{ seen: number }>(evidenceSql, ...evidenceParams));
+      const channelNotificationInjectedAt = channelDeliveryAt(db, taskId, taskNetworkId);
+      if (channelNotificationInjectedAt) task.channel_delivery = channelDeliveryStages(task, channelNotificationInjectedAt);
       const diagnostic = diagnoseTask({
+        channelNotificationInjectedAt,
         status: String(task.status ?? "unknown"),
         runtimeSubmittedAt: typeof task.runtime_submitted_at === "string" ? task.runtime_submitted_at : null,
         consumedAt: typeof task.consumed_at === "string" ? task.consumed_at : null,

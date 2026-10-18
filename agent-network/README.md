@@ -73,6 +73,7 @@ The default Hub is local-only. Before exposing it beyond localhost, change the i
 - [Runtime guide](https://anet.sh/guide/runtimes)
 - [Tokens and permissions](https://anet.sh/concepts/security)
 - [Troubleshooting](https://anet.sh/troubleshooting)
+- [Legacy Claude channel delivery evidence](../docs/diagnostics/legacy-channel-evidence.md)
 - [GitHub repository](https://github.com/sleep2agi/agent-network)
 
 Apache-2.0.

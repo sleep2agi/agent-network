@@ -1,0 +1,81 @@
+#1492 legacy channel delivery evidence — candidate validation
+Date: 2026-10-19 +08:00
+Source: https://github.com/sleep2agi/agent-network
+Base: 90ef856742fc0248cc0e5f8cdee7ac0d766ead8f
+Base tree: 0a89931dca2781147aacd97fff4455bc6e889074
+Branch: feat/1492-channel-delivery-evidence
+The candidate commit/tree is supplied by the PR; this report does not make a
+self-referential head hash or claim a published runtime.
+
+Inputs:
+  oven/bun:1.3.13@sha256:87416c977a612a204eb54ab9f3927023c2a3c971f4f345a01da08ea6262ae30e
+  node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
+  Existing server/package-lock.json; npm ci --ignore-scripts --no-audit --no-fund.
+  Reviewed test image built with the candidate's full Git SHA in SOURCE_COMMIT;
+  the second build stage redeclares that ARG before the final ENV/LABEL so the
+  value cannot silently fall back to `dev`.
+
+Commands (from source root):
+  sg docker -c 'docker build --build-arg SOURCE_COMMIT=<exact full lowercase Git SHA> -f tests/test1492-channel-evidence/Dockerfile -t anet-1492:review .'
+  sg docker -c 'docker run --rm --name anet-1492-review --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m --user 10001:10002 --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g --cpus 2 anet-1492:review'
+On this host both sg commands needed sudo -n; no socket mode/group changes.
+Final build rc=0; final container rc=0.
+
+Layered output (stop on earlier failure):
+  bridge receipt + stage truth tables + existing pure diagnostics: 23 pass, 0 fail
+  existing channel peer reply + inbound metadata: 21 pass, 0 fail
+  real MCP/HTTP, isolated SQLite: 6 pass, 0 fail
+  existing runtime consumption and ownership: 17 pass, 0 fail
+  existing REST diagnostics: 4 pass, 0 fail
+  Total: 72 pass, 0 fail.
+
+Behavioral mutants, disposable source copies, all killed:
+  receipt ignored: 6 pass, 2 fail
+  notification invents turn-start: 5 pass, 3 fail
+  ACK/event transaction removed: 5 pass, 1 fail
+  old delivery reused after retry: 5 pass, 1 fail
+  MUTANTS_KILLED=4/4
+  Syntax/setup errors do not qualify as kills; runner requires positive passed
+  and failed behavior assertion counts. All temporary copies were removed.
+
+Real local HTTP scenarios:
+  notified/ACKed task has consumed_at=null and runtime_submitted_at=null;
+  five-stage projection exposes unknown CLI admission/start, normal reply closes;
+  old caller ACK retains old behavior and emits no receipt;
+  other recipient / other network cannot write or inspect target receipt;
+  nonliteral stage input rejected before ACK;
+  event write fault rolls back ACK and task lifecycle; retry works;
+  same-second cancel/retry does not inherit stale delivery evidence; ACK via
+  logical task id resolves the current inbox row; after cancel/retry, an old
+  bridge's plain ACK cannot revive the prior `channel_notification_injected`
+  event as evidence for the new delivery.
+
+Earlier harness failure (resolved, not a product fix):
+  non-root image could not resolve installed zod/v4 because npm directories were
+  not traversable. Root import succeeded; uid10001 import failed. Dockerfile
+  fixes test-image dependency readability (umask 022 + a+rX), no product lock or
+  global package change. Successful run above includes real startup/HTTP.
+
+Non-secret local installed baseline, NOT the candidate/remote runtime:
+  @sleep2agi/agent-network 2.3.0-preview.181
+  anet.cjs SHA256 1fda83ab54dccc071ed4c5f1eea9b1423c6c35aa1464de9596a5150f8d06bbaa
+  node-server.js SHA256 8dec17fcfdfbdca60e360460a75ac5129038ec180732201649d970073a37f01b
+  No local Claude executable was found with command -v claude.
+  Remote host/bridge/CLI fingerprint: NOT READ. Package version alone is not a
+  runtime fingerprint. Existing local installation was not changed.
+
+Evidence retained locally (synthetic test output only, not committed):
+  .runs/1492-docker-build.log
+  .runs/1492-docker-test.log
+  final post-fix test log is retained separately with its SHA256 recorded in
+  the PR follow-up; the checked-in text is the durable reproducible summary.
+  This checked-in report contains the reproducible runner and output summary;
+  no real task body, argv, environment, prompt, credential or host log was read.
+
+Limits:
+  Real legacy Claude channel end-to-end: INCOMPLETE / NO-RUN.
+  CLI admitted/start hook: absent; never inferred or synthesized.
+  PostgreSQL adapter: NO-RUN; this suite qualifies isolated SQLite only.
+  Full repository suite / npm publication / production deployment: NO-RUN.
+  No merge, deployment, shared-daemon restart or remote node probe.
+  Containers used --rm, network none, no host mounts, no tmux.
