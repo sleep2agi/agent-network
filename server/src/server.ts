@@ -86,6 +86,7 @@ import { listTaskLateReplies } from "./task-late-replies.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
+import { readHubProviders } from "./hub-provider-config.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
@@ -2715,6 +2716,61 @@ return Bun.serve({
       }
       const nodes = [...byNode.values()].sort((a, b) => b.total - a.total || a.node_id.localeCompare(b.node_id));
       return withCors(req, Response.json({ ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(), total: nodes.reduce((n, e) => n + e.total, 0), nodes }));
+    }
+
+    // ── #1473 (#909): read-only Hub catalogs for the desktop client ──
+    //
+    // Skills / network secrets / Providers have existed on this Hub only as
+    // MCP tools (list_skills, list_network_secrets, list_providers). With no
+    // HTTP surface, the client shipped a fixture page instead
+    // (agent-network-app/src/hub-scope-demo.ts: "Hub 这些写接口还没接通 ... 不发请求").
+    // These three endpoints expose the SAME rows to a USER token and never a
+    // secret value: names and timestamps only, plus the review flag, so the
+    // client can stop inventing data.
+    const hubCatalog = url.pathname === "/api/skills" ? "skills"
+      : url.pathname === "/api/secrets" ? "secrets"
+      : url.pathname === "/api/providers" ? "providers" : null;
+    if (hubCatalog && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      // A node token is not a person: it may not enumerate the network's
+      // catalogs (same rule as the node-permission report above).
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      if (!isAdmin && !role) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
+      }
+      const reviewer = isAdmin || role === "owner" || role === "admin";
+      if (hubCatalog === "skills") {
+        // Pending submissions stay invisible to plain members even when they
+        // ask: `include_pending` is a reviewer switch, not a client wish.
+        const includePending = url.searchParams.get("include_pending") === "1" && reviewer;
+        const rawLimit = Number(url.searchParams.get("limit") ?? 100);
+        const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 200) : 100;
+        let sql = `SELECT skill_id, slug, name, description, version, status, source_type, source_alias,
+                          created_at, updated_at, reviewed_at, review_note
+                     FROM skillhub_skills WHERE network_id = ?1`;
+        if (!includePending) sql += ` AND status = 'published'`;
+        sql += ` ORDER BY updated_at DESC LIMIT ${limit}`;
+        return withCors(req, Response.json({ ok: true, network_id: networkId, reviewer, skills: db.all(sql, networkId) }));
+      }
+      if (hubCatalog === "secrets") {
+        // Keys and timestamps only. The ciphertext columns are not selected at
+        // all, so a future "just add the value for convenience" edit has to
+        // change this query on purpose instead of leaking by accident.
+        const rows = db.all<{ key: string; updated_at: number | string | null }>(
+          "SELECT key, updated_at FROM network_secrets WHERE network_id = ?1 ORDER BY key", networkId);
+        return withCors(req, Response.json({
+          ok: true, network_id: networkId,
+          keys: rows.map(r => ({ key: r.key, updated_at: r.updated_at ?? null })),
+        }));
+      }
+      const providers = readHubProviders({ userId: restAuth.userId ?? null, isNode: false, networkId });
+      if (!providers.ok) {
+        return withCors(req, Response.json(providers, { status: 403 }));
+      }
+      return withCors(req, Response.json({ ...providers, network_id: networkId }));
     }
 
     if (url.pathname === "/api/dm" || url.pathname === "/api/dm/threads") {
