@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { collectOsUser } from "./os-user";
+import { collectSecretKeys } from "./node-secret-keys.js";
 /**
  * @sleep2agi/agent-node CLI
  *
@@ -1732,6 +1733,10 @@ const register = async () => {
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
     // #1198 — the OS account this node process actually runs as.
     os_user: collectOsUser() ?? undefined,
+    // #1474 — NAMES of the env keys this node has (secrets.env). Values never
+    // leave collectSecretKeys; an empty array is a real report and the hub
+    // overwrites its stored list with it.
+    secret_keys: collectSecretKeys(NODE_DIR),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,

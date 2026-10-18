@@ -744,6 +744,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       project_dir: z.string().max(1000).optional().describe("Agent working directory"),
       // #1198 — OS account the process runs as (platform identity only; no env fallback).
       os_user: z.string().min(1).max(256).optional().describe("OS account"),
+      // #1474 — names of the env keys this node actually has. Never values; the
+      // node-side collector parses and drops them. Capped at 50 * 64 chars so a
+      // pathological secrets.env cannot grow this row without bound.
+      secret_keys: z.array(z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/)).max(50).optional().describe("Env key names only"),
       version: z.string().max(100).optional().describe("Agent version"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
@@ -966,7 +970,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // instead of rejecting the whole report (see node-health-store.ts).
       health: nodeHealthSchema,
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth, secret_keys: secretKeys }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -1113,7 +1117,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                   channels, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
                   disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct,
                   process_uptime_seconds, process_in_flight_count, external_schedules, registered_at,
-                  rules_file_capable, skills_capable, files_capable, logs_capable, os_user
+                  rules_file_capable, skills_capable, files_capable, logs_capable, os_user, secret_keys
              FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3
              ORDER BY updated_at DESC LIMIT 1`,
           effectiveAlias, resume_id, sessionNetId,
@@ -1167,6 +1171,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           db.run(
             `UPDATE sessions SET os_user = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,
             [resume_id, osUser],
+          );
+        }
+        // #1474 — its own UPDATE for the same reason as os_user: the INSERT /
+        // UPSERT placeholder bytes stay untouched. An EMPTY array is a real
+        // report ("this node has no secrets") and must overwrite the old list;
+        // only `undefined` (field absent) keeps the previous value.
+        if (Array.isArray(secretKeys)) {
+          db.run(
+            `UPDATE sessions SET secret_keys = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,
+            [resume_id, JSON.stringify(secretKeys)],
+          );
+        } else if (typeof handover?.secret_keys === "string" && handover.secret_keys) {
+          db.run(
+            `UPDATE sessions SET secret_keys = COALESCE(secret_keys, ?2) WHERE resume_id = ?1`,
+            [resume_id, handover.secret_keys],
           );
         } else if (typeof handover?.os_user === "string" && handover.os_user) {
           db.run(
@@ -6611,7 +6630,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     project_id: z.string().max(200).nullable().optional(),
     owner: reqPerson.nullable().optional().describe("负责人 (a person): {kind:'user', id | username} (ids / usernames from requirements_people; names resolve in the task's network); a node is rejected with owner_must_be_human — use agent_owner"),
     agent_owner: reqPerson.nullable().optional().describe("负责 Agent: {kind:'node', id | alias}"),
-    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the whole list (written like owner / agent_owner; omitted people are removed, [] clears). To add or remove a few, use participants_add / participants_remove on requirements_update."),
+    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the whole list (like owner/agent_owner; omitted people are removed, [] clears). For a few, use participants_add/participants_remove."),
     external_url: z.string().max(500).nullable().optional(),
     parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
   };
@@ -6646,13 +6665,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
     department_id: z.string().max(64).optional().describe("owner (or its Agent's owner) in this department or below"),
     top_level: z.boolean().optional(), q: z.string().max(200).optional(),
-    overdue: z.boolean().optional().describe("true = open tasks past their due (date-only due: before today, Asia/Shanghai); false = everything else"),
+    overdue: z.boolean().optional().describe("true = open tasks whose due is past (date-only: before today, Asia/Shanghai); false = rest"),
     due_within_days: z.number().int().min(0).max(365).optional().describe("open tasks not yet overdue, due by the end of today + N days (0 = later today)"),
     limit: z.number().int().min(1).max(1000).optional().describe(`page size, default ${REQ_LIST_MCP_DEFAULT_LIMIT}`),
     cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
-    view: z.enum(["full", "summary"]).optional().describe("default summary (no description / checklist bodies; has_description, checklist_count instead); full = everything"),
-    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (archived included; with include_last_event also ones with a newer event, e.g. a comment) + deleted ids + server_time"),
-    include_last_event: z.boolean().optional().describe("default false; true adds last_event per row (newest event incl. comments: type, field, actor, at, summary; null if none), ~150 B/row"),
+    view: z.enum(["full", "summary"]).optional().describe("default summary (no bodies; has_description/checklist_count instead); full = everything"),
+    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (incl. archived; +deleted ids +server_time; with include_last_event also newer events)"),
+    include_last_event: z.boolean().optional().describe("default false; true adds last_event per row (~150 B/row: type, field, actor, at, summary; null if none)"),
   };
   const reqListKeys = Object.keys(reqListShape);
   server.registerTool(

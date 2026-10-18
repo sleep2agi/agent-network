@@ -2386,3 +2386,8 @@ db.exec(`
 // on purpose: docs/test846 pin line anchors in db.ts, and an in-place insertion
 // would drift every anchor below it.
 try { db.exec("ALTER TABLE sessions ADD COLUMN os_user TEXT"); } catch {}
+
+// #1474 — env key NAMES the node reports having (JSON array of strings, never
+// values). Appended after os_user for the same reason: doc/test anchors pin
+// line numbers in this file, so new migrations go at EOF, never in the middle.
+try { db.exec("ALTER TABLE sessions ADD COLUMN secret_keys TEXT"); } catch {}
