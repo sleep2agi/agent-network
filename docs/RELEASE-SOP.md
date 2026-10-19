@@ -369,6 +369,41 @@ gh workflow run release.yml \
 > 本文档早先在这一步写的是 `cd agent-node && npm publish --tag preview`。
 > **那条指令现在是违规的**，已删除 —— 它正是上面那起事故的动作形状。
 
+#### 6.1 发布凭据的两种形态：`NPM_TOKEN`（旧）与 trusted publishing（OIDC，推荐）
+
+发布这一步有两种认证形态，`release.yml` 与 `promote-latest.yml` 都按同一个仓库变量切换：
+
+| 形态 | 开关 | 行为 |
+|---|---|---|
+| `secrets.NPM_TOKEN`（长期 token） | 默认 | `setup-node` 写 `.npmrc` 的 `_authToken`；token 泄露即等于发布权泄露 |
+| **trusted publishing（OIDC）** | 仓库变量 `NPM_TRUSTED_PUBLISHING=true` | **不写 `_authToken`**；npm 用本次运行的 OIDC 短时凭据发布，作用域只限这个仓库 + 这个 workflow |
+
+切换步骤（一次性）：
+
+1. npmjs.com → 该包 → **Settings → Trusted Publisher** → GitHub Actions，填
+   `org=sleep2agi`、`repo=agent-network`、`workflow=release.yml`（`environment` 留空）；
+2. 仓库 Settings → Variables → 新建 **`NPM_TRUSTED_PUBLISHING = true`**；
+3. 观察一次 `release.yml` 的 publish job 成功后再删 `secrets.NPM_TOKEN`。
+
+🔴 **为什么必须切**（2026-10-19/20 的实证）：npm 开始限制「免 2FA 的发布 token」，
+CLI 会打出 `npm tokens that bypass 2FA are being restricted for … direct publishing`。
+症状极具误导性 —— **`npm publish` 退出码 0、输出 “being processed”，但版本永远不出现在 registry**：
+
+- `agent-network@2.3.0-preview.186`：命令成功、registry 无；重发被拒
+  `E409 Cannot publish over previously staged version`；
+- 换成内容相同的 `.187`：同样成功、同样不出现（>1 小时）；
+- 同一账号同一 token、同一时段的 `agent-network-dashboard@…-59` 当时能正常转出，
+  之后 `.60` 也卡住 —— 说明是**账号级收紧**，不是某个包坏了；
+- `npm stage list` 只列出无关包，**看不到自己的 staged 条目**，所以「去批准一下」这条自助路走不通。
+
+判据（以后遇到同样的静默失败，先跑这三条，别急着重试）：
+
+```bash
+npm view <pkg>@<version> version      # 404 = 没上
+npm view <pkg> dist-tags              # 标签停在上一个版本
+npm stage list                        # 看不到自己的条目 = 没有可自助批准的 staged 版本
+```
+
 ### Step 7：等待窗口 ≥ 30 分钟 + owner explicit ACK
 
 #### npm registry 尚不可下载时：复用正式 gated CLI tarball

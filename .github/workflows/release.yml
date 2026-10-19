@@ -695,10 +695,23 @@ jobs:
           RELEASE_COMMIT: ${{ inputs.commit }}
         run: bash .github/scripts/verify-release-main.sh
 
-      - uses: actions/setup-node@v4
+      # 两种认证形态只能二选一:
+      #   · token(默认)—— setup-node 写 .npmrc,发布用 secrets.NPM_TOKEN;
+      #   · trusted publishing(OIDC)—— **不能**写 .npmrc 的 _authToken,
+      #     否则 npm 会拿空 token 去撞 401,永远不会走 OIDC 交换。
+      #     由仓库变量 NPM_TRUSTED_PUBLISHING=true 选中。
+      - name: setup-node (NPM_TOKEN)
+        if: vars.NPM_TRUSTED_PUBLISHING != 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: setup-node (trusted publishing / OIDC)
+        if: vars.NPM_TRUSTED_PUBLISHING == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - uses: actions/download-artifact@v4
         with:
@@ -734,12 +747,24 @@ jobs:
       - name: npm publish --tag preview
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TRUSTED_PUBLISHING: ${{ vars.NPM_TRUSTED_PUBLISHING }}
         run: |
           set -euo pipefail
+          if [ "${TRUSTED_PUBLISHING:-}" = "true" ]; then
+            echo "trusted publishing(OIDC):不注入 token;npm 用本次运行的 OIDC 短时凭据发布,"
+            echo "凭据作用域只限这次运行、这个仓库(this workflow)。"
+            echo "前置条件:npmjs.com → 该包 → Settings → Trusted Publisher 已配置"
+            echo "  org/repo=sleep2agi/agent-network  workflow=release.yml  environment=(空)"
+            npm publish "$TARBALL" --tag preview --provenance --access public
+            exit 0
+          fi
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::缺少 secrets.NPM_TOKEN。"
-            echo "更好的做法是 npm trusted publishing(OIDC):在 npmjs.com 上把这个仓库+workflow"
-            echo "配成该包的 trusted publisher,然后删掉 NPM_TOKEN —— 短时凭据,作用域只在这次运行。"
+            echo "::error::缺少 secrets.NPM_TOKEN,且未开启 trusted publishing。"
+            echo "两条路选一条:"
+            echo "  1) 设仓库变量 NPM_TRUSTED_PUBLISHING=true,并在 npmjs.com 把该包配成"
+            echo "     trusted publisher(org/repo=sleep2agi/agent-network, workflow=release.yml);"
+            echo "  2) 继续用 secrets.NPM_TOKEN(**长期 token**;npm 已开始限制免 2FA 的发布 token,"
+            echo "     2026-10-19 起我们的 preview 发布会静默停在 staged,不要再走这条)。"
             exit 1
           fi
           npm publish "$TARBALL" --tag preview --provenance --access public
