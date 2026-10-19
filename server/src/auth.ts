@@ -515,7 +515,7 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
     // single-network user to "ambiguous" or auto-resolve writes INTO the
     // deleted network. Remove memberships with the network.
     db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
-    deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); for (const t of AGENT_TEAM_TABLES) if (tableExists(t)) db.run(`DELETE FROM ${t} WHERE network_id = ?1`, [networkId]); // #2144, #419, #764 (one line: docs pin auth.ts line numbers)
+    deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); for (const t of AGENT_TEAM_TABLES) if (tableExists(t)) db.run(`DELETE FROM ${t} WHERE network_id = ?1`, [networkId]); if (tableExists("network_rules")) db.run("DELETE FROM network_rules WHERE network_id = ?1", [networkId]); // #2144, #419, #764, #1521 (one line: docs pin auth.ts line numbers)
   });
   return { ok: true };
 }
@@ -970,6 +970,8 @@ const NETWORK_CLEANUP_TABLES = [
   "network_departments",
   // Agent 团队(#764):Agent 自己的组织树,同样是网络元数据。
   ...AGENT_TEAM_TABLES,
+  // 全团队规则(#1521):网络级一份规则文本,网络没了它就悬空 —— 元数据,随网络清。
+  "network_rules",
 ];
 
 function tableExists(name: string): boolean {
