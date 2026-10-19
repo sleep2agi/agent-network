@@ -2410,3 +2410,12 @@ db.exec(`
     PRIMARY KEY (network_id, node_id, route, hour)
   );
 `);
+
+// 组织架构：Agent（节点）**显式**归属部门。
+//
+// 在这条之前，「某个部门有几个 Agent」只能由「负责人（人）在哪个部门」推出来
+// （`/api/networks/:net/departments/:dept/nodes`）。所以没有负责人、或者负责人不在部门树里的
+// Agent 只能落进「未归属」——2026-10-19 现网就是 328 个 Agent 全在未归属里，
+// 而部门 0 个 Agent。这一列让 Agent 可以被直接放进部门，和人的归属互不覆盖：
+// 显式值优先，没有显式值时仍按负责人的部门推断。
+try { db.exec("ALTER TABLE nodes ADD COLUMN department_id TEXT"); } catch {}

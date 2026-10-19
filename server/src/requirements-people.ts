@@ -17,7 +17,9 @@ type HiddenNode = ((nodeId: string) => boolean) | null;
 export const PEOPLE_DEFAULT_LIMIT = 50;
 export const PEOPLE_MAX_LIMIT = 200;
 
-export type DirectoryAgent = { node_id: string; alias: string };
+/** `department_id`: Agent 的**显式**部门归属(可空)。空 = 仍按「负责人在哪个部门」推断,
+ *  客户端据此把 Agent 放对格子 —— 2026-10-19 前没有这一列,328 个 Agent 只能全算「未归属」。 */
+export type DirectoryAgent = { node_id: string; alias: string; department_id?: string | null };
 export type DirectoryPerson = {
   user_id: string;
   username: string;
@@ -62,15 +64,17 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
       ORDER BY u.username, u.user_id`,
     networkId,
   );
-  const nodes = db.all<{ node_id: string; alias: string | null; node_name: string; owner_user_id: string | null }>(
-    "SELECT node_id, alias, node_name, owner_user_id FROM nodes WHERE network_id = ?1 ORDER BY COALESCE(alias, node_name), node_id",
+  const nodes = db.all<{ node_id: string; alias: string | null; node_name: string; owner_user_id: string | null; department_id: string | null }>(
+    "SELECT node_id, alias, node_name, owner_user_id, department_id FROM nodes WHERE network_id = ?1 ORDER BY COALESCE(alias, node_name), node_id",
     networkId,
   ).filter(n => !hidden?.(n.node_id));
   const memberIds = new Set(members.map(m => m.user_id));
   const byOwner = new Map<string, DirectoryAgent[]>();
   const unowned: DirectoryAgent[] = [];
   for (const n of nodes) {
-    const agent = { node_id: n.node_id, alias: n.alias || n.node_name };
+    // 只在**显式**归属时带这一格:没设 = 沿用「按负责人的部门推断」的老口径,
+    // 也保证旧客户端拿到的行形状不变(多一个键会让严格要求形状的测试/客户端意外)。
+    const agent = { node_id: n.node_id, alias: n.alias || n.node_name, ...(n.department_id ? { department_id: n.department_id } : {}) };
     if (n.owner_user_id && memberIds.has(n.owner_user_id)) {
       const list = byOwner.get(n.owner_user_id) ?? [];
       list.push(agent);

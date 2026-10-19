@@ -248,6 +248,22 @@ export function setMemberDepartment(networkId: string, userId: string, departmen
   return { ok: true, user_id: userId, department_id: dept as string | null };
 }
 
+/** Agent(节点)显式归属部门。`null` / "" = 清掉,回到「按负责人的部门推断」。 */
+export function setAgentDepartment(
+  networkId: string,
+  nodeId: string,
+  departmentId: unknown,
+): Ok<{ node_id: string; department_id: string | null }> | Fail {
+  const node = db.get<{ node_id: string }>("SELECT node_id FROM nodes WHERE network_id = ?1 AND node_id = ?2", networkId, nodeId);
+  if (!node) return fail(404, "node_not_found");
+  const dept = departmentId === null || departmentId === "" ? null : departmentId;
+  if (dept !== null && (typeof dept !== "string" || !one(networkId, dept))) return fail(400, "department_not_found");
+  db.run("UPDATE nodes SET department_id = ?3, updated_at = datetime('now') WHERE network_id = ?1 AND node_id = ?2", [networkId, nodeId, dept]);
+  // 部门群(RFC-042)按成员归属同步:Agent 不是群成员,这里只保证不把群带歪。
+  syncDepartmentGroups(networkId);
+  return { ok: true, node_id: nodeId, department_id: dept as string | null };
+}
+
 /** 网络删掉时一起清(和项目授权同一时机调用)。 */
 export function deleteDepartmentsForNetwork(networkId: string): void {
   db.run("DELETE FROM network_departments WHERE network_id = ?1", [networkId]);

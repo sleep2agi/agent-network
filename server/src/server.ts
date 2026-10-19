@@ -11,7 +11,7 @@ import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
-import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setMemberDepartment, updateDepartment } from "./departments.js";
+import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
 import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupTx, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
@@ -1973,12 +1973,13 @@ return Bun.serve({
     // 在这棵子树里也能写;越出子树 → 403 department_scope_denied(固定一个错误)。不是负责人的成员与以前逐字节相同。 ──
     const deptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments(?:\/([^/]+))?$/);
     const memberDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members\/([^/]+)\/department$/);
+    const nodeDeptMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/nodes\/([^/]+)\/department$/);
     const deptSubMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/departments\/([^/]+)\/(project-grants|nodes|group)$/);
-    if (deptMatch || memberDeptMatch || deptSubMatch) {
+    if (deptMatch || memberDeptMatch || deptSubMatch || nodeDeptMatch) {
       const token = requestToken(req, { allowQueryToken: false });
       const resolved = token ? resolveToken(token) : null;
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
-      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch ?? deptSubMatch)![1]);
+      const netId = decodeURIComponent((deptMatch ?? memberDeptMatch ?? deptSubMatch ?? nodeDeptMatch)![1]);
       if (resolved.networkId && resolved.networkId !== netId) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       const hubAdmin = isHubAdminCredential(resolved);
       const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
@@ -2084,6 +2085,19 @@ return Bun.serve({
       // 组织架构变了,负责人们的「本部门」跟着变:断开他们(和被调动的人)的实时流,按新权限重连。
       const leadersBefore = departmentLeaders(netId);
       const kick = (extra: string[] = []) => { for (const uid of new Set([...leadersBefore, ...departmentLeaders(netId), ...extra])) closeUserStreamsInNetwork(netId, uid); };
+      // Agent(节点)显式归属部门:只有 owner / admin(以及 Hub 管理员)。
+      // 负责人对自己部门的 Agent 也可调动 —— 和「人」的调动同一条 scope 规则。
+      if (nodeDeptMatch) {
+        if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+        const targetNode = decodeURIComponent(nodeDeptMatch[2]);
+        if (!canManage) {
+          const current = db.get<{ department_id: string | null }>("SELECT department_id FROM nodes WHERE network_id = ?1 AND node_id = ?2", netId, targetNode);
+          if (current && (!inManaged(current.department_id) || (!inManaged(body.department_id) && (blank(body.department_id) || exists(body.department_id))))) return scopeDenied();
+        }
+        const r = setAgentDepartment(netId, targetNode, body.department_id);
+        if (r.ok) auditDepartment(resolved.user, "agent_department_set", netId, `${targetNode} → ${r.department_id ?? "(unassigned)"}${via === "leader" ? " via=leader" : ""}`);
+        return reply(r);
+      }
       if (memberDeptMatch) {
         if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
         const targetUid = decodeURIComponent(memberDeptMatch[2]);
