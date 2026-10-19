@@ -89,6 +89,8 @@ import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
+// #1475 — hub 侧密钥授权账本(申请 / 人工裁决 / 审计)。
+import { createSecretKeyRequest, decideSecretKeyRequest, listSecretKeyRequests } from "./daemon-secret-key-requests.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
@@ -2797,6 +2799,93 @@ return Bun.serve({
         ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(),
         total: rows.reduce((n, r) => n + r.hits, 0), rows,
       }));
+    }
+
+    // ── #1475: hub 侧密钥授权账本(申请 / 人工裁决 / 审计回读) ──
+    //
+    // 三个端点全是**人 token only**:网络绑定的节点 token 在第一行就被
+    // `userTokenRequired` 挡掉——「人批,不让 agent 自授」在 HTTP 层先立住,
+    // 业务层再要求 owner/admin,两道都要过。
+    //
+    // 账本不写 `nodes.allowed_secret_keys`(那列是 daemon 自述镜像,心跳会覆写),
+    // 详见 daemon-secret-key-requests.ts 文件头。
+    const dskrPath = url.pathname === "/api/daemon-secret-key-requests";
+    const dskrDecide = url.pathname.match(/^\/api\/daemon-secret-key-requests\/([^/]+)\/decide$/);
+    if ((dskrPath || dskrDecide) && !restAuth) {
+      return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+    }
+    const dskrStatus = (error: string) =>
+      error === "daemon_not_found" || error === "request_not_found" ? 404
+      : error === "request_already_pending" || error === "key_already_authorized"
+        || error === "key_not_authorized" || error === "request_already_decided"
+        || error === "state_changed" ? 409
+      : 400;
+    if (dskrPath && req.method === "POST") {
+      if (restAuth!.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      const networkId = (typeof body?.network_id === "string" && body.network_id) ? body.network_id : singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = getUserNetworkRole(restAuth!.userId, networkId);
+      // viewer 只读:申请会进审批队列、要占批准人的注意力,不给只读角色发这个权。
+      if (role !== "owner" && role !== "admin" && role !== "member") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
+      }
+      const created = createSecretKeyRequest({
+        networkId,
+        daemonNodeId: String(body?.daemon_node_id ?? ""),
+        keyName: String(body?.key_name ?? ""),
+        action: body?.action,
+        requestedBy: restAuth!.userId,
+        requestedByName: restAuth!.username,
+      });
+      if (!created.ok) return withCors(req, Response.json(created, { status: dskrStatus(created.error) }));
+      return withCors(req, Response.json(created, { status: 201 }));
+    }
+    if (dskrPath && req.method === "GET") {
+      if (restAuth!.networkId) return userTokenRequired(req);
+      const networkId = url.searchParams.get("network_id") || singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      if (!getUserNetworkRole(restAuth!.userId, networkId)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "not a member of this network" }, { status: 403 }));
+      }
+      const status = url.searchParams.get("status");
+      if (status && status !== "pending" && status !== "approved" && status !== "rejected") {
+        return withCors(req, Response.json({ ok: false, error: "invalid_status" }, { status: 400 }));
+      }
+      const listed = listSecretKeyRequests({
+        networkId,
+        daemonNodeId: url.searchParams.get("daemon_node_id")?.trim() || null,
+        keyName: url.searchParams.get("key_name")?.trim() || null,
+        status: (status as "pending" | "approved" | "rejected" | null) ?? null,
+        limit: Number(url.searchParams.get("limit")) || undefined,
+      });
+      if (!listed.ok) return withCors(req, Response.json(listed, { status: dskrStatus(listed.error) }));
+      return withCors(req, Response.json({
+        ok: true, network_id: networkId, count: listed.rows.length, requests: listed.rows,
+      }));
+    }
+    if (dskrDecide && req.method === "POST") {
+      // 🔴 人批闸:网络绑定 token(节点/agent)一律拒。自授的唯一路径就是走这里。
+      if (restAuth!.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      const networkId = (typeof body?.network_id === "string" && body.network_id) ? body.network_id : singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = getUserNetworkRole(restAuth!.userId, networkId);
+      if (!isAdmin && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const decided = decideSecretKeyRequest({
+        networkId,
+        requestId: decodeURIComponent(dskrDecide[1]),
+        decision: body?.decision,
+        decidedBy: restAuth!.userId,
+        decidedByName: restAuth!.username,
+        reason: typeof body?.reason === "string" ? body.reason.slice(0, 500) : null,
+      });
+      if (!decided.ok) return withCors(req, Response.json(decided, { status: dskrStatus(decided.error) }));
+      return withCors(req, Response.json(decided));
     }
 
     // ── #1491 E1: the node-secret write lane over REST ──

@@ -2410,3 +2410,36 @@ db.exec(`
     PRIMARY KEY (network_id, node_id, route, hour)
   );
 `);
+
+// #1475 — hub 侧的密钥授权账本:哪个 daemon 被批准接收哪个 secret key。
+//
+// 🔴 为什么**不**复用 `nodes.allowed_secret_keys`:那一列是
+//    `config_snapshot.daemon_capabilities.allowed_secret_keys` 的自述镜像,
+//    `report_status` 每次心跳都用 daemon 自报值覆写两者;且它只喂 create_node
+//    的子节点校验,密钥下发通道根本不读它。审批结果写进去 → 3 分钟内被冲掉,
+//    而且拦不住任何东西。详见 daemon-secret-key-requests.ts 文件头。
+//
+// 一行同时是审计:谁申请、谁批、何时、对哪个 daemon、哪个 key、批的那一刻
+// daemon 自述了什么(declared_at_decision 抄一份,因为原列会被心跳冲走)。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS daemon_secret_key_requests (
+    request_id           TEXT PRIMARY KEY,
+    network_id           TEXT NOT NULL,
+    daemon_node_id       TEXT NOT NULL,
+    key_name             TEXT NOT NULL,
+    action               TEXT NOT NULL CHECK (action IN ('grant', 'revoke')),
+    status               TEXT NOT NULL DEFAULT 'pending'
+                             CHECK (status IN ('pending', 'approved', 'rejected')),
+    requested_by         TEXT NOT NULL,
+    requested_by_name    TEXT NOT NULL,
+    decided_by           TEXT,
+    decided_by_name      TEXT,
+    decided_at           INTEGER,
+    decide_reason        TEXT,
+    created_at           INTEGER NOT NULL,
+    declared_at_decision TEXT
+  );
+`);
+// 验收第三条:审计行可按 daemon 与 key 名查回 —— 两个过滤维度各一个索引。
+db.exec(`CREATE INDEX IF NOT EXISTS idx_dska_daemon_key ON daemon_secret_key_requests(daemon_node_id, key_name)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_dska_network ON daemon_secret_key_requests(network_id, created_at)`);
