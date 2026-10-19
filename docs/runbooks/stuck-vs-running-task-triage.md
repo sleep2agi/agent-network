@@ -30,10 +30,27 @@ hub 的 `tail_node_logs`（MCP）/ 节点 `logs_capable` 门铃可以只读拿�
 | `→ processing [opencode]: …` | 任务真正交给 runtime |
 | `active turn heartbeat task=<id> kind=item_started/item_completed` | 这一轮在跑，**这是真进展** |
 | `task … queued (a turn is in flight)` | 同一时刻只跑一轮，这条在排队 |
-| `✗ OpenCode session remained busy for 1800000ms; task was not submitted` | **共享会话被占住 30 分钟，任务根本没发出去** |
+| `✗ OpenCode session remained busy for 1800000ms; task was not submitted` | **admission 超时**：共享会话被占住 30 分钟，任务根本没发出去 |
+| `⏳ opencode 任务仍在节点的 TUI 会话里运行，没有被中止…停止等待` | **reply 超时**：任务**真的提交了**，30 分钟没等到回复；bridge 不再等，**结果不会自动回传** |
 
 > 最后一条是「进程活着但任务没回复」最常见的形态。回执正文也写明：
 > 「opencode 任务未提交：共享会话在 30 分钟内一直处于忙碌状态（可能有人正在 TUI 里跑一轮）」。
+
+### 两个阶段别混：`admission` ≠ `reply`
+
+同一个 30 分钟上限，落在两个阶段，处置完全不同：
+
+| phase | 日志/回执 | 任务怎么样了 | 该做什么 |
+|---|---|---|---|
+| `admission` | `remained busy … task was not submitted` | **没有提交**，一轮都没跑 | 看 TUI 里谁占着会话；会话空出来后重发 |
+| `reply` | `仍在节点的 TUI 会话里运行，没有被中止；…停止等待` | **跑了**，只是超过 30 分钟 | **去 TUI 看结果**；结果不会自动回传，不要当失败重跑（会重复干活） |
+
+`reply` 这一支最容易被误判成「没回 = 没做」，于是重发一遍 —— 结果同一件事做了两次。
+现场：2026-10-19 一条「只是通知」的任务跑了 30 分钟才被判 `reply` 超时；同一台机器上另一些节点
+是 `admission` 超时（任务根本没开始）。两者都出现在同一天的日志里。
+
+> 上限本身可以调：`OPENCODE_TIMEOUT_MS` 或 `config.json` 的 `flags.timeout` / `flags.opencodeTimeoutMs`
+> （ms，`0` = 不设上限）。**不要为了等一条长任务就把整机设成不限** —— 真卡死时就没有出口了。
 
 ## 第 3 步：共享 OpenCode 会话争用（本仓最常见的原因）
 
