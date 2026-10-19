@@ -277,7 +277,12 @@ describe("V2 core against a protocol-shaped fake serve", () => {
       let state = await (await fetch(`${url}/test/state`, {
         headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
       })).json() as any;
-      expect(state[firstId].model).toEqual({ providerID: "stub", id: "tui-selected-model" });
+      // #2827: a client model edit *switches the live session* (the commit that added
+      // setSelectedModel says so, and `selectedModel()` above already reads back
+      // client-selected). This assertion used to expect the pre-#2827 behaviour
+      // (client edit stays local, TUI choice survives), which contradicts the line
+      // three above it — that is why it has been red since #2827 landed.
+      expect(state[firstId].model).toEqual({ providerID: "stub", id: "client-selected" });
       await first.close();
       first = await openShared(firstDir, firstId, "stub/new-model", true);
       expect(first.sessionId).toBe(firstId);
