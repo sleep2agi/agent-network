@@ -101,12 +101,27 @@ async function sharedState(session: string, project: string) {
   const info = await get(`/api/session/${session}`);
   check("recovery session ID and workspace match exactly", info.data?.id === session
     && info.data?.location?.directory === project);
-  const history = await get(`/api/session/${session}/message?order=desc&limit=200`);
-  check("recovery history is nonempty and fully contained in this fixture page", Array.isArray(history.data)
-    && history.data.length > 0 && !history.cursor?.next);
-  return JSON.stringify(history.data.map((entry: any) => ({
-    id: entry.id, type: entry.type, text: entry.text, content: entry.content,
-  })));
+  const entries: any[] = [], cursors = new Set<string>();
+  let path = `/api/session/${session}/message?order=desc&limit=200`;
+  for (let page = 0; page < 4; page++) {
+    const history = await get(path);
+    captured.push(`recovery history page=${page} entries=${Array.isArray(history.data) ? history.data.length : "invalid"} next=${typeof history.cursor?.next}`);
+    check("recovery history response has a message array", Array.isArray(history.data));
+    entries.push(...history.data);
+    const next = history.cursor?.next;
+    // A cursor may describe the final entry even when a subsequent page is
+    // empty. Follow it; do not infer truncation from the cursor's presence.
+    if (history.data.length === 0 || next === null || next === undefined) {
+      check("recovery history is nonempty", entries.length > 0);
+      return JSON.stringify(entries.map((entry: any) => ({
+        id: entry.id, type: entry.type, text: entry.text, content: entry.content,
+      })));
+    }
+    check("recovery history cursor is valid and advances", typeof next === "string" && next.length > 0 && !cursors.has(next));
+    cursors.add(next);
+    path = `/api/session/${session}/message?limit=200&cursor=${encodeURIComponent(next)}`;
+  }
+  throw new Error("recovery history exceeded the bounded fixture pagination budget");
 }
 let ownerToken = "", networkId = "", daemonToken = "";
 const daemonId = "n_test1327_daemon", daemonAlias = "daemon1327";

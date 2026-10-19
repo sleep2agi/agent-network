@@ -27,6 +27,17 @@ fixture budget still applies. Local preflight only compiles the harness in an
 isolated cached Docker image; it does not execute this chain or qualify native
 behavior. Exact head/run/job/source pin and result must be appended after CI.
 
+First native sample: head 8c3398861815c6e0e35283869b2e084637895856,
+run39187323624/job117852379834 FAILURE. Image build and every original
+test1327 creation/identity/task/stop/fallback assertion passed. Both shared
+nodes and the owned fixtures stopped, then the first history completeness
+assertion failed; Server stop/copy/restore were NOT executed. The combined
+assertion did not distinguish an empty history from a nonempty cursor.
+The next revision follows the real cursor with a bounded four-page read,
+records page count/shape diagnostics, and still fails on empty total history,
+invalid/repeated cursors or an exhausted pagination budget. It requires a new
+exact-head native run; the first failure is retained.
+
 This proves only the tested stopped-data copy and process restart. It does not
 prove host reboot, live SQLite backup, encrypted backup retention, real vendor
 entitlement, production rollback or an authorized two-node host canary. Those
