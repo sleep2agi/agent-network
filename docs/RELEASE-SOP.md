@@ -385,24 +385,44 @@ gh workflow run release.yml \
 2. 仓库 Settings → Variables → 新建 **`NPM_TRUSTED_PUBLISHING = true`**；
 3. 观察一次 `release.yml` 的 publish job 成功后再删 `secrets.NPM_TOKEN`。
 
-🔴 **为什么必须切**（2026-10-19/20 的实证）：npm 开始限制「免 2FA 的发布 token」，
-CLI 会打出 `npm tokens that bypass 2FA are being restricted for … direct publishing`。
-症状极具误导性 —— **`npm publish` 退出码 0、输出 “being processed”，但版本永远不出现在 registry**：
+### 6.2 🔴 「publish 成功但 registry 里没有」先等 45 分钟，别重发
 
-- `agent-network@2.3.0-preview.186`：命令成功、registry 无；重发被拒
-  `E409 Cannot publish over previously staged version`；
-- 换成内容相同的 `.187`：同样成功、同样不出现（>1 小时）；
-- 同一账号同一 token、同一时段的 `agent-network-dashboard@…-59` 当时能正常转出，
-  之后 `.60` 也卡住 —— 说明是**账号级收紧**，不是某个包坏了；
-- `npm stage list` 只列出无关包，**看不到自己的 staged 条目**，所以「去批准一下」这条自助路走不通。
+2026-10-19/20 我按「发布失败」处理了三个版本，结论错了。事实是**处理慢**：
 
-判据（以后遇到同样的静默失败，先跑这三条，别急着重试）：
+| 包 | `npm publish` 之后到 registry 可见 |
+|---|---|
+| `agent-network@2.3.0-preview.186` | 未见（那一版被后续 `.187` 取代） |
+| `agent-network@2.3.0-preview.187` | **约 40 分钟** |
+| `agent-network-dashboard@0.6.3-preview.60` | **约 40 分钟**（`.59` 当时 7 分钟，快慢没有稳定值） |
+
+- `npm publish` 打印 `Your package is being processed and may take a few minutes` 时，
+  **退出码 0 不等于已经可见**；`npm view` 404 也不等于失败。
+- 🔴 **不要重发**：同一个版本重发会被拒
+  `E409 Cannot publish over previously staged version` —— 这条错误会把「慢」误读成「staged 卡住」。
+- 判据（按顺序、每次间隔几分钟）：
 
 ```bash
-npm view <pkg>@<version> version      # 404 = 没上
-npm view <pkg> dist-tags              # 标签停在上一个版本
-npm stage list                        # 看不到自己的条目 = 没有可自助批准的 staged 版本
+npm view <pkg>@<version> version      # 404 = 还没转出
+npm view <pkg> dist-tags              # 标签是否已指过去
+npm stage list                        # 有 staged 条目才谈得上「去批准」
 ```
+
+- `release.yml` 的发后核实上限已按实测调到 **45 分钟**（`VERIFY_TIMEOUT_MIN`）：
+  超时只代表「尚未核实」，不代表「没生效」。发版人此时应该**等**，不是重发。
+
+### 6.3 npm 正在收紧「免 2FA 的发布 token」（与本条事故无关，但迟早要切）
+
+npm CLI 会打这类提示：
+
+```
+npm notice npm tokens that bypass 2FA are being restricted for account changes and direct publishing.
+```
+
+它**不是** 2026-10-19 那三个版本「看不见」的原因（那是 §6.2 的处理延迟，我一开始判断错了），
+但方向明确：长期 token 的发布通道会越来越受限。
+
+发布工作流已支持切到 **trusted publishing（OIDC）**，开关与步骤见 **§6.1**。
+切换是「迟早要做」的加固项，不是当前故障的解药 —— 不要把它当成发布失败的通用解释。
 
 ### Step 7：等待窗口 ≥ 30 分钟 + owner explicit ACK
 

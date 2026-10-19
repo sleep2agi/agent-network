@@ -773,8 +773,14 @@ jobs:
         env:
           # 轮询上限(分钟)。npm publish 成功后 registry 可能要几分钟才可见(#582),
           # provenance 发布历史上最长约 6 小时;超时只说明「尚未核实」,不是「没生效」。
-          VERIFY_TIMEOUT_MIN: '15'
-          VERIFY_INTERVAL_S: '25'
+          # 2026-10-20 实测：`npm publish` 打印 "being processed" 后，
+          # @sleep2agi/agent-network@2.3.0-preview.186/.187 与
+          # @sleep2agi/agent-network-dashboard@…-60 都是 **约 40 分钟后**才出现在 registry。
+          # 原来 15 分钟的上限会把「慢」判成「没生效」，人再去重发就会撞
+          # `E409 Cannot publish over previously staged version`。
+          # 45 分钟覆盖实测最坏值，超时仍然只是「尚未核实」，不是「没生效」。
+          VERIFY_TIMEOUT_MIN: '45'
+          VERIFY_INTERVAL_S: '30'
           EXPECTED: ${{ inputs.version }}
         run: |
           set -euo pipefail
