@@ -1009,6 +1009,19 @@ describe("restart_node — in-flight default-refuse (#1511)", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toBe("node_busy_in_flight");
   });
+
+  // 🔴 qa-rfc027-stop-delete A.4 收据：stopped 节点的 unacked 行是 force-stop
+  // 留下的尸体（进程已死，任务不可能"正在跑"）。restart_node 在 stopped 节点上
+  // 的契约是 PR1.2a 的 un-stop 唯一出口——用尸体行挡它=堵死停止→重启→恢复。
+  test("🔴 stopped node + live-row corpse → restart still dispatches (PR1.2a un-stop must not be blocked)", async () => {
+    setupAlphaNetwork();
+    db.run(`UPDATE nodes SET lifecycle_state = 'stopped' WHERE node_id = ?1`, [CHILD_A_ID]);
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_1511_corpse", status: "delivered" });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(true);
+    expect(r.apply_mode).toBe("restart_only");
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+  });
 });
 
 // ── #1286 stale-deleting 重派出口 ──────────────────────────────────

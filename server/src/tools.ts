@@ -4215,12 +4215,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 60 秒、超时会硬打断当前回合（agent-node cli.ts drainInFlightThink），
       // 所以 Hub 端在派发前就按 stop_node 同一条在途计数规则拒绝，客户端拿到
       // 明确二选一：等任务完成后重试，或到节点所在机器手动重启。
-      const busyCount = countInFlightTasks(node.alias, node.network_id);
-      if (busyCount > 0) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({
-          ok: false, error: "node_busy_in_flight", in_flight_count: busyCount,
-          hint: "节点正在执行任务，本次未安排重启；等它完成后再试，或到节点所在机器手动重启",
-        }) }] };
+      //
+      // 🔴 只对 active 节点生效（qa-rfc027 A.4 收据）。stopped 节点的进程已死、
+      // 任务不可能"正在跑"，其 unacked 行是 stop 留下的尸体（force-stop 的产物）；
+      // restart_node 在 stopped 节点上的契约恰是 PR1.2a 的 un-stop 唯一出口，
+      // 用尸体行挡它=把停止→重启→恢复这条路堵死。lifecycle_state 需单独取：
+      // resolveTargetNode 的 SELECT 不含该列。
+      const restartLifecycle = db.get<{ lifecycle_state: string | null }>(
+        "SELECT lifecycle_state FROM nodes WHERE node_id = ?1", nodeId,
+      )?.lifecycle_state ?? null;
+      if (restartLifecycle === "active") {
+        const busyCount = countInFlightTasks(node.alias, node.network_id);
+        if (busyCount > 0) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: false, error: "node_busy_in_flight", in_flight_count: busyCount,
+            hint: "节点正在执行任务，本次未安排重启；等它完成后再试，或到节点所在机器手动重启",
+          }) }] };
+        }
       }
       // F-B reaper: same stale-supersede semantics as update_node_config,
       // with same acked_at-anchored liveness clock (see update_node_config
