@@ -24,7 +24,7 @@ import {
   handleCreateNodeDoorbell,
   serializeEnvLocalDaemon,
 } from "./create-node-daemon.js";
-import { resolveOnPathReal } from "./runtime-readiness.js";
+import { cliCandidatesOnPath, resolveOnPathReal } from "./runtime-readiness.js";
 import { verifyStoppedChildConfig } from "./start-daemon.js";
 import { _resetChildrenMapForTest, handleStopDoorbell } from "./stop-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
@@ -88,15 +88,27 @@ beforeEach(() => {
   _resetAnetBinAbsForTest();
 });
 
-/** Fixture placed ahead of a vendor `opencode` already on the fixed child PATH. */
-let shadowedOpencode: { target: string; backup: string | null } | null = null;
+/**
+ * Fixture placed ahead of every vendor `opencode` on the fixed child PATH.
+ *
+ * #1611 makes the generation gate scan **all** candidates and take the first one the
+ * requested generation accepts. Shadowing only the first hit is therefore not enough:
+ * test829's image installs `@opencode/cli@2.0.22` into /usr/local/bin, so a scenario
+ * that means "this machine only has v1" still finds a real v2 further along PATH and
+ * legitimately passes the generation gate (then fails on the V2 model config, which
+ * is what made `#829 explicit generation must match an accepted install` red).
+ *
+ * So the fixture hides **every** candidate and restores them all afterwards.
+ */
+let shadowedOpencode: Array<{ target: string; backup: string | null }> = [];
 
 function restoreShadowedOpencode() {
   const shadowed = shadowedOpencode;
-  shadowedOpencode = null;
-  if (!shadowed) return;
-  rmSync(shadowed.target, { force: true });
-  if (shadowed.backup) renameSync(shadowed.backup, shadowed.target);
+  shadowedOpencode = [];
+  for (const one of shadowed) {
+    rmSync(one.target, { force: true });
+    if (one.backup) renameSync(one.backup, one.target);
+  }
 }
 
 afterEach(() => {
@@ -142,7 +154,16 @@ function plantOpencode(stdout: string) {
     const detail = e instanceof Error ? e.message : String(e);
     throw new Error(`plantOpencode: fixed PATH already has ${fixedHit}; cannot place the fixture at ${target}: ${detail}`);
   }
-  shadowedOpencode = { target, backup };
+  // Hide the remaining vendor candidates too: "only v1" has to mean only v1.
+  for (const other of (cliCandidatesOnPath("opencode", fixed) ?? [])) {
+    if (other === target) continue;
+    const otherBackup = `${other}.t652-bak`;
+    if (existsSync(otherBackup)) throw new Error(`plantOpencode: refusing to clobber ${otherBackup}`);
+    const hadFile = existsSync(other);
+    if (hadFile) renameSync(other, otherBackup);
+    shadowedOpencode.push({ target: other, backup: hadFile ? otherBackup : null });
+  }
+  shadowedOpencode.push({ target, backup });
   const hit = resolveOnPathReal("opencode", fixed);
   if (hit !== target) {
     restoreShadowedOpencode();
