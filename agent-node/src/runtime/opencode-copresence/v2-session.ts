@@ -252,6 +252,18 @@ async function waitForV2Health(
   throw new Error(`OpenCode v2 serve readiness timed out after ${timeoutMs}ms`);
 }
 
+/** Display form of a V2 session's selected model. Pure. */
+export function openCodeV2SessionModelRef(body: unknown): string | undefined {
+  const model = (body as { data?: { model?: { providerID?: unknown; id?: unknown } } } | null)?.data?.model;
+  const providerID = model?.providerID;
+  const id = model?.id;
+  if (typeof providerID !== "string" || typeof id !== "string") return undefined;
+  if (!providerID || !id || providerID !== providerID.trim() || id !== id.trim()) return undefined;
+  if (providerID.includes("/") || id.includes("/") || providerID.includes("\n") || id.includes("\n")) return undefined;
+  const ref = `${providerID}/${id}`;
+  return ref.length <= 200 ? ref : undefined;
+}
+
 /** Entries after `messageId` (oldest first), or null when `messageId` is not
  *  in the session history (yet). */
 async function readEntriesAfter(
@@ -420,6 +432,26 @@ export async function openVettedOpenCodeV2Copresence(
       attachScriptPath,
       get isRunning() {
         return !closed && !sharedDisconnected && (!child || (child.exitCode === null && child.signalCode === null));
+      },
+      async selectedModel() {
+        if (!session.isRunning) return undefined;
+        const body = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`, {}, 2_000);
+        return openCodeV2SessionModelRef(body);
+      },
+      async setSelectedModel(modelRef: string) {
+        if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
+        const parsed = parseModelRef(modelRef);
+        if (!parsed || modelRef !== `${parsed.providerID}/${parsed.modelID}`) {
+          throw new Error("OpenCode model must use provider/model form");
+        }
+        await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/model`, {
+          method: "POST",
+          body: JSON.stringify({ model: { providerID: parsed.providerID, id: parsed.modelID } }),
+        }, 10_000);
+        const updated = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`, {}, 2_000);
+        if (openCodeV2SessionModelRef(updated) !== modelRef) {
+          throw new Error("OpenCode v2 session model did not change");
+        }
       },
       async notify(message: string, _timeoutMs?: number, sender?: string) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");

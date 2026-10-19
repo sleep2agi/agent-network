@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-import { collectOsUser } from "./os-user";
-import { collectSecretKeys } from "./node-secret-keys.js";
-import { classifyHubTransport } from "./env-transport.js";
 /**
  * @sleep2agi/agent-node CLI
  *
@@ -1732,15 +1729,6 @@ const register = async () => {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
-    // #1198 — the OS account this node process actually runs as.
-    os_user: collectOsUser() ?? undefined,
-    // #1474 — NAMES of the env keys this node has (secrets.env). Values never
-    // leave collectSecretKeys; an empty array is a real report and the hub
-    // overwrites its stored list with it.
-    secret_keys: collectSecretKeys(NODE_DIR),
-    // #1510 — how this node reaches the Hub (loopback / https / plain). Reporting
-    // only: nothing refuses a write because of it yet.
-    env_transport: classifyHubTransport(COMMHUB_URL),
     version: AGENT_NODE_VERSION,
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
@@ -1756,7 +1744,8 @@ const register = async () => {
     // so the last description stays. A mismatch still sends the warning.
     task: projectDirTask("idle") ?? "",
     // #1958 — grok: prefer the agent's readback once a turn has run.
-    model: (RUNTIME === "grok" ? grokEffectiveModel : undefined) || MODEL || undefined,
+    // OpenCode V2: prefer the TUI-selected session model once polled.
+    model: (RUNTIME === "grok" ? grokEffectiveModel : RUNTIME === "opencode" ? opencodeEffectiveModel : undefined) || MODEL || undefined,
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
@@ -1881,7 +1870,11 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // timeout (NOT false ✓).
     // #1958 — grok: the model the session actually ran with. Hub's report_status
     // schema already accepts `model`; on a hub that ignores it nothing breaks.
-    ...(RUNTIME === "grok" && grokEffectiveModel ? { model: grokEffectiveModel } : {}),
+    // OpenCode V2 reports the TUI session model the same way. config_snapshot.model
+    // stays the configured value, so a dashboard model edit is not false-finalized.
+    ...((RUNTIME === "grok" && grokEffectiveModel) || (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeEffectiveModel)
+      ? { model: RUNTIME === "grok" ? grokEffectiveModel : opencodeEffectiveModel }
+      : {}),
     // #448 —— 分层健康(codex-app-server);旧 Hub 静默丢弃该键,不会拒整份上报。
     // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
@@ -2488,6 +2481,8 @@ let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || unde
 // dashboard shows the running model rather than the configured one.
 let grokEffectiveModel: string | undefined;
 let grokModelSource: "readback" | "argv" | "default" | undefined;
+// OpenCode V2 TUI selection. Display only: never written back into config.json.
+let opencodeEffectiveModel: string | undefined;
 // RFC-029 PR② — opencode-cli session state.
 // `opencodeSessionId` is persisted across turns; on a supervisor-driven
 // restart runtime.ts will try `session/load` with it before falling
@@ -2551,6 +2546,27 @@ if (RUNTIME === "opencode") {
 }
 let opencodeCopresenceSession:
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
+const OPENCODE_MODEL_POLL_MS = 30_000;
+let opencodeModelPollInFlight = false;
+async function pollOpencodeSessionModel(): Promise<void> {
+  if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || opencodeMode !== "copresence") return;
+  if (opencodeModelPollInFlight) return;
+  const session = opencodeCopresenceSession;
+  if (!session?.isRunning || !session.selectedModel) return;
+  opencodeModelPollInFlight = true;
+  try {
+    const next = await session.selectedModel();
+    if (!next || next === opencodeEffectiveModel) return;
+    const previous = opencodeEffectiveModel;
+    opencodeEffectiveModel = next;
+    log(`[opencode] session model=${next}${MODEL && next !== MODEL ? ` configured=${MODEL}` : ""}${previous ? ` was=${previous}` : ""}`);
+    void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
+  } catch (error: any) {
+    debug(`[opencode] session model poll failed: ${error?.message || error}`);
+  } finally {
+    opencodeModelPollInFlight = false;
+  }
+}
 const opencodeCopresenceOpening = createSingleFlight<
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
 >();
@@ -4287,6 +4303,7 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       throw new Error("OpenCode copresence server exited while opening");
     }
     opencodeCopresenceSession = opened;
+    if (OPENCODE_GENERATION === "v2") void pollOpencodeSessionModel();
     if (borrowed && process.env.ANET_BORROWED_V1_LAUNCH_ID) {
       const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
       clearBorrowedLaunchHealth = publishBorrowedLaunchHealth(configFilePath, process.env.ANET_BORROWED_V1_LAUNCH_ID);
@@ -7180,7 +7197,10 @@ async function processConfigUpdate(): Promise<void> {
       return;
     }
 
-    const localMode = computeConfigApplyMode(update.patch);
+    const localMode = computeConfigApplyMode(update.patch, {
+      runtime: fileConfig?.runtime,
+      opencodeGeneration: fileConfig?.opencodeGeneration,
+    });
     if (localMode !== update.apply_mode) {
       warn(`[config-apply] mode mismatch hub=${update.apply_mode} local=${localMode}; trusting local for safety`);
     }
@@ -7193,6 +7213,42 @@ async function processConfigUpdate(): Promise<void> {
         status: "rejected",
         error: "no config file path on this node — start with --config to enable remote apply",
       });
+      return;
+    }
+    if (mode === "hot" && update.patch.model && RUNTIME === "opencode" && OPENCODE_GENERATION === "v2") {
+      const session = opencodeCopresenceSession;
+      if (!session?.isRunning || !session.setSelectedModel) {
+        await callCommHub("ack_config_update", {
+          update_id: updateId,
+          status: "rejected",
+          error: "OpenCode V2 session is not running; model was not changed",
+        });
+        return;
+      }
+      try {
+        await session.setSelectedModel(update.patch.model);
+      } catch (switchErr: any) {
+        await callCommHub("ack_config_update", {
+          update_id: updateId,
+          status: "rejected",
+          error: `OpenCode session model switch failed: ${String(switchErr?.message || switchErr).slice(0, 400)}`,
+        });
+        return;
+      }
+      const backup = backupOpencodeConfig(configFilePath);
+      const merged = mergePatch(fileConfig, { model: update.patch.model });
+      writeOpencodeConfig(configFilePath, merged);
+      writebackOpencodeConfiguredModel(configFilePath, update.patch.model);
+      opencodeEffectiveModel = update.patch.model;
+      fileConfig = merged;
+      currentConfigRevision += 1;
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: "applied",
+        new_revision: currentConfigRevision,
+      });
+      log(`[config-apply] OpenCode V2 session model=${update.patch.model} (no restart, .prev backedUp=${backup.backedUp})`);
+      void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
       return;
     }
     const backup = RUNTIME === "opencode"
@@ -8105,6 +8161,9 @@ setInterval(() => {
   }
   reportStatus("idle").catch(() => {});
 }, STATUS_HEARTBEAT_MS);
+if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeMode === "copresence") {
+  setInterval(() => { void pollOpencodeSessionModel(); }, OPENCODE_MODEL_POLL_MS).unref();
+}
 
 // RFC-027 §2.5 / §4.4 D7 — 30d backup sweeper, host_supervisor only.
 // Runs once at boot (catches accumulated junk from long down-periods),

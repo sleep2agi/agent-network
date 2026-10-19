@@ -143,6 +143,10 @@ export interface OpenCodeCopresenceSession {
   readonly sessionId: string;
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
+  /** V2 only. The model the TUI session is running, `provider/id`. Read-only. */
+  selectedModel?(): Promise<string | undefined>;
+  /** V2 only. Switch the live session. The caller writes node config. */
+  setSelectedModel?(model: string): Promise<void>;
   notify(message: string, timeoutMs?: number, sender?: string): Promise<void>;
   submit(
     prompt: string,

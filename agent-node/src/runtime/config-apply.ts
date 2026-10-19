@@ -200,12 +200,16 @@ export function validateLocalPatch(
 /** Classify whether a patch needs restart vs hot apply. Empty patch
  * → "restart_only" (used by restart_node tool). Mirrors hub helper —
  * see config-apply-validate.ts. */
-export function computeApplyMode(patch: ConfigPatch): ApplyMode {
+export function computeApplyMode(patch: ConfigPatch, opts?: { runtime?: string | null; opencodeGeneration?: string | null }): ApplyMode {
   const hasModel = patch.model !== undefined;
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
   const hasChannels = patch.channels !== undefined;
   if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
+  // OpenCode V2 switches the live TUI session and writes config.model so the
+  // dashboard poll can finish. A restart would reopen the old session model.
+  if (hasModel && flagKeys.length === 0 && !hasChannels
+    && opts?.runtime === "opencode-cli" && opts?.opencodeGeneration === "v2") return "hot";
   if (hasModel) return "restart";
   if (hasChannels) return "restart";
   for (const key of flagKeys) {

@@ -116,6 +116,11 @@ describe("computeApplyMode — tier classifier", () => {
   test("model only → restart", () => {
     expect(computeApplyMode({ model: "claude-opus-4" })).toBe("restart");
   });
+  test("OpenCode V2 model only → hot (live session switch, no restart)", () => {
+    expect(computeApplyMode({ model: "deepseek/deepseek-flash" }, { runtime: "opencode-cli", opencodeGeneration: "v2" })).toBe("hot");
+    expect(computeApplyMode({ model: "deepseek/deepseek-flash" }, { runtime: "opencode-cli", opencodeGeneration: "v1" })).toBe("restart");
+    expect(computeApplyMode({ model: "deepseek/deepseek-flash", flags: { timeout: 60000 } }, { runtime: "opencode-cli", opencodeGeneration: "v2" })).toBe("restart");
+  });
   test("permissionMode → restart", () => {
     expect(computeApplyMode({ flags: { permissionMode: "auto" } })).toBe("restart");
   });
