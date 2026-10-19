@@ -19,7 +19,7 @@
 
 - [release/](release/README.md) — 版本号策略、tag 绑定 build sha、各版本记录
 - [release-main-sha.md](release-main-sha.md) — npm preview release 的 source 与 sha
-- [runbooks/](runbooks/) — 值班手册（Feishu 频道运维、OpenCode TUI 共存、registry readiness）
+- [runbooks/](runbooks/) — 值班手册（Feishu 频道运维、OpenCode TUI 共存、registry readiness、**任务「在跑」还是「卡住」的判断**）
 - [ops/](ops/) — 升级实操记录
 - [sop/](sop/README.md) — 协作 SOP（Dashboard 回帖、Codex jam 重启、方法论）
 - [troubleshooting/](troubleshooting/) — 连通性 / 事故复盘
