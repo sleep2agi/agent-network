@@ -5127,6 +5127,14 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: true, completions: rows }));
     }
 
+    // #1511 — an unknown /api/* path used to fall through to this HTML landing
+    // page with **200**, so every client that did `res.json()` reported a JSON
+    // parse error (the desktop app showed "The string did not match the expected
+    // pattern." on the SKILLS page). Answer JSON 404 instead: an API caller can
+    // then say "this hub is too old for that endpoint" instead of guessing.
+    if (url.pathname.startsWith("/api/")) {
+      return withCors(req, Response.json({ ok: false, error: "not_found", path: url.pathname }, { status: 404 }));
+    }
     return withCors(req, new Response(
       `CommHub MCP Server v${SERVER_VERSION} (Streamable HTTP + SSE Push)
 
