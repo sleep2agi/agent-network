@@ -961,6 +961,56 @@ describe("RFC-027 PR1.2a — restart_node resets lifecycle_state to 'active'", (
   });
 });
 
+// ── #1511 — restart_node 在途任务默认拒绝（只提示，不自动重启） ──────
+//
+// 节点侧 exit-75 的 drain 只等 60 秒，超时会硬打断当前回合；所以「正在跑
+// 任务」时 Hub 端在派发前就拒绝，计数规则与 stop_node 完全同一份
+// （#2022/#2029 修订版，实现在 countInFlightTasks）。客户端语义：保存密钥
+// 后若节点忙，不安排重启，只提示等任务完成或去节点机器上手动重启。
+describe("restart_node — in-flight default-refuse (#1511)", () => {
+  test("live task row → node_busy_in_flight, no dispatch row, state untouched", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_1511_live", status: "delivered" });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(1);
+    expect(typeof r.hint).toBe("string");
+    // 未派发：node_config_updates 无行，lifecycle 不动
+    const rows = db.all<{ update_id: string }>(`SELECT update_id FROM node_config_updates WHERE node_id = ?1`, [CHILD_A_ID]);
+    expect(rows.length).toBe(0);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+  });
+
+  test("unacked legacy inbox rows count too — same rule as stop", async () => {
+    setupAlphaNetwork();
+    seedInbox(NET_A, CHILD_A_ALIAS, 2);
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(2);
+  });
+
+  test("terminal-only rows → restart dispatches (parity with #2022 stop rule)", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_1511_replied", status: "replied" });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(true);
+    expect(r.apply_mode).toBe("restart_only");
+  });
+
+  test("🔴 2h-old live task is never aged out — status wins over age (same as stop)", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
+      task_id: "task_1511_running_120m", status: "running",
+      task_age: "-120 minutes", inbox_age: "-120 minutes", expires_in: "-60 minutes",
+    });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+  });
+});
+
 // ── #1286 stale-deleting 重派出口 ──────────────────────────────────
 //
 // 修复前 daemon 丢 ack 会让行永远停在 deleting：重发被挡、force 也一样。
