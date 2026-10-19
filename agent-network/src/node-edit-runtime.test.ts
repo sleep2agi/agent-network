@@ -24,7 +24,7 @@ describe("#1698 anet node edit —— 接线", () => {
     expect(cli).toContain('case "edit": args.splice(0, 1); await nodeEditCommand(); break;');
   });
   test("用法行和 node 的 --help 都列了 edit（漏一处就不一致）", () => {
-    const m = cli.match(/anet node <create\|clone\|start\|stop\|restart\|resume\|delete\|ls\|rename\|edit\|loop\|codex\|migrate-token-to-envref>/g);
+    const m = cli.match(/anet node <create\|clone\|start\|stop\|restart\|resume\|delete\|ls\|rename\|edit\|loop\|codex\|secret\|migrate-token-to-envref>/g);
     expect(m?.length).toBe(1);
     // #516:`anet node --help` 的第二份用法搬进了 src/cli-help.ts 的 COMMAND_HELP["node"]。
     const help = readFileSync(new URL("./cli-help.ts", import.meta.url), "utf8");

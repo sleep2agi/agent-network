@@ -10,7 +10,7 @@
 //      `no_live_generation`,而不是凭名字认领别人的会话。
 //
 // 这里只做只读探测,不提供任何 kill 能力:tmux 会话只经 `anet node stop` 收。
-import { execFileSync } from "node:child_process";
+import { execTmux } from "../tmux.js";
 
 export interface CodexSessionResidue {
   /** 保留字段,与 opencode 侧同形;codex 从不借用宿主 generation。 */
@@ -37,7 +37,9 @@ export type SessionProbe = (name: string) => boolean;
 
 export const defaultSessionProbe: SessionProbe = (name) => {
   try {
-    execFileSync("tmux", ["has-session", "-t", `=${name}`], { stdio: "ignore", timeout: 5_000 });
+    // #505: 走共享的 tmux 入口(它负责 socket 隔离与环境规整)。裸 execFileSync("tmux", …)
+    // 会探到默认 server 上,和本仓「只碰自己那台 server」的规矩相反 —— 棘轮测试就是这么抓到的。
+    execTmux(["has-session", "-t", `=${name}`], { stdio: "ignore", timeout: 5_000 });
     return true;
   } catch {
     // tmux 不在、会话不在、或探测超时 —— 都无法证明它活着,按不在处理。

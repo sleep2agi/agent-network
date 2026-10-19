@@ -4822,6 +4822,7 @@ Node Management:
   anet node stop <name> --remote Act on a node on another machine via its daemon (also start / restart) [--yes] [--wait <s>]
   anet node edit <n> --remote   Switch a node on another machine to --model <id>
   anet node codex <verb> <ref>  Codex TUI co-presence lifecycle: preflight|verify|canary|start|restart|resume|fork|account|rollback
+  anet node secret <verb> <ref> Daemon-issued node secret: list|set|unset (owner/admin; the value never leaves the hub)
   anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
@@ -19980,7 +19981,7 @@ switch (command) {
       case "codex": args.splice(0, 1); await codexLifecycleCommand(); break; // #1856 —— Codex TUI 共存节点生命周期控制器
       default: {
         const sub = args[1];
-        const nodeUsage = `Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`;
+        const nodeUsage = `Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|secret|migrate-token-to-envref> [name]`;
         // #561 — bare `anet node`: a menu for every runtime (TTY) / table + cheat sheet + usage (piped). src/node-menu.ts
         if (!sub) process.exit(await runNodeMenu(listProfileIds().map((id) => { const p = loadProfile(id); return { id, alias: nodeDisplayName(id, p), profile: p as Record<string, any> | null }; }), { nodesDir: nodesDir(), home, usageLine: nodeUsage }));
         if (sub) {
@@ -19988,7 +19989,7 @@ switch (command) {
           const redirect = nodeSubcommandRedirect(sub, args[2]);
           if (redirect) { for (const line of redirect) console.log(line); }
           else {
-            const suggestion = suggestSimilar(sub, ["create", "clone", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex"]);
+            const suggestion = suggestSimilar(sub, ["create", "clone", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex", "secret"]);
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }

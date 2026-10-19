@@ -53,6 +53,7 @@ Commands:
   loop <name> ...               Schedule a recurring goal on a node
   ls                            List nodes in this directory
   codex <verb> <ref>            Codex TUI co-presence lifecycle
+  secret <verb> <ref>          Manage <node>/secrets.env (list | set | unset)
   migrate-token-to-envref <n>   Move a node's token out of config.json into .env
 
 Run 'anet node <command> --help' for details.`,
