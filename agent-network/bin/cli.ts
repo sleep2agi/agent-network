@@ -11794,8 +11794,23 @@ async function fetchDaemonCapabilities(): Promise<CapabilityFetchResult> {
   const gc = loadGlobal();
   const hub = parseOpts().hub || gc.hub;
   if (!hub) return { ok: false, failure: { why: "no-hub" } };
+  // 🔴 hub 的 /api/host-supervisors 需要 network_id，缺了就是 400 missing_network_id，
+  // 而 400 会被下面归到「hub 那边出事了」——2026-10-20 实测：hub 好得很，是这条请求
+  // 自己少带了参数，`anet daemon list` 因此长期印「创建能力:查不到 —— hub 返回 HTTP 400」。
+  // 网络取自登录态（一次登录可能属于多个网络，但 daemon 只属于当前那个），
+  // 登录态里没有时才去 /api/networks 现取。
+  let netId = String((gc as any).network_id || "");
+  if (!netId) {
+    try {
+      const nets = await fetch(`${hub}/api/networks`, { headers: authHeaders() });
+      const nb = await nets.json() as any;
+      const list = Array.isArray(nb?.networks) ? nb.networks : [];
+      if (list.length === 1) netId = String(list[0]?.network_id || list[0]?.id || "");
+    } catch { /* 取不到就按无 network_id 发,让下面的错误分支说清楚 */ }
+  }
+  const netQ = netId ? `?network_id=${encodeURIComponent(netId)}` : "";
   try {
-    const res = await fetch(`${hub}/api/host-supervisors`, { headers: authHeaders() });
+    const res = await fetch(`${hub}/api/host-supervisors${netQ}`, { headers: authHeaders() });
     if (!res.ok) {
       // 🔴 401/403 单独成一类:它们说的是「凭据」,其余 HTTP 错说的是「hub 那边出事了」。
       const why = (res.status === 401 || res.status === 403) ? "unauthorized" : "http";
