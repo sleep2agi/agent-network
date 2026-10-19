@@ -1,6 +1,7 @@
 #1537 / parent #1084 — V2 shared Server stopped-data recovery
 
-Status: candidate, full native acceptance PENDING. No production/canary claim.
+Status: native recovery PASS on the exact third sample below. Main merge is
+blocked by the independent test1199 L1 SHA-binding gate. No canary claim.
 Base main: 0066eafc6b01b62224f6655dcdb83d63720f301b.
 
 This extends test1327 rather than adding a second runtime/Hub framework.
@@ -49,6 +50,22 @@ shim. The error was the exact-paired global runtime refusal, not evidence of
 lost history. Restart now reuses that same existing installer entrypoint,
 forwarding the original node-start args without config edits or version
 fallbacks. The new head still needs its own full native result.
+
+Third native sample: head b6d05fc0d05906c917135aedc62c1864728139ce,
+run39187747256/job117853652657 SUCCESS, completed 2026-10-19T02:00:51Z.
+The run.sh source pin matches this exact head. B and C histories respectively
+contain 3 and 6 entries, then an empty second page. All original test1327
+assertions and all new recovery assertions passed, ending with:
+PASS test1537: two original sessions, nonempty histories and Hub identities
+survive stopped-data restore; no host reboot/canary claim.
+
+All ten branch-required checks were SUCCESS on this head. The independent
+l1-sha-binding run39187747318/job117853652664 failed because the existing
+main test1199 Dockerfile has no SOURCE_COMMIT; it is not waived or added to
+the baseline. Its separate repair is PR2818. This test PR remains Draft until
+the shared-main problem is resolved and its resulting exact head is checked.
+This report-only evidence update does not change the tested harness. Its CI
+results must be reported separately rather than inheriting the third sample.
 
 This proves only the tested stopped-data copy and process restart. It does not
 prove host reboot, live SQLite backup, encrypted backup retention, real vendor
