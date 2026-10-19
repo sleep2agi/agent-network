@@ -66,8 +66,9 @@ async function rpc(token: string, name: string, args: unknown) {
   const result = JSON.parse(lines.length ? lines.at(-1)!.slice(5).trim() : raw);
   return JSON.parse(result.result.content[0].text);
 }
-async function cli(args: string[], cwd: string, required = true) {
-  const child = Bun.spawn(["bun", "/workspace/agent-network/bin/cli.ts", ...args], {
+async function cli(args: string[], cwd: string, required = true, launcher?: string) {
+  const command = launcher ? [launcher, ...args] : ["bun", "/workspace/agent-network/bin/cli.ts", ...args];
+  const child = Bun.spawn(command, {
     cwd, env: process.env, stdin: "ignore", stdout: "pipe", stderr: "pipe",
   });
   const [out, err, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
@@ -285,7 +286,9 @@ try {
   for (const { alias, original, history } of saved) {
     check(`${alias}: stopped-data restore preserves exact nonempty history`,
       await sharedState(original.attach.gen, projectFor(alias)) === history);
-    await cli(["node", "start", alias], projectFor(alias));
+    // Reuse the same source-layout installer entrypoint that created the node;
+    // a direct source CLI lacks its exact built-runtime path in this image.
+    await cli(["node", "start", alias], projectFor(alias), true, pinnedCli);
     check(`${alias}: restored node TUI renders`, await until(() => /ctrl\+p/.test(
       tmux("capture-pane", "-p", "-t", `=${alias}:`).stdout ?? "")));
     const config = json(join(nodeDir(alias), "config.json"));

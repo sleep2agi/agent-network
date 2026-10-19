@@ -38,6 +38,18 @@ records page count/shape diagnostics, and still fails on empty total history,
 invalid/repeated cursors or an exhausted pagination budget. It requires a new
 exact-head native run; the first failure is retained.
 
+Second native sample: head 0e34520879f42c5f3d0f62e47f7448b2172cb5a1,
+run39187534239/job117853004938 FAILURE. The native history cursor names the
+last entry even when the following page is empty (B: 3 entries, then 0).
+Bounded pagination read both histories; exact Server exit, stopped-data copy,
+new listener generation and B's exact restored history all passed. Restart B
+then failed before attach: this fixture invoked the source CLI directly,
+without the private built-runtime path supplied by its creation installer
+shim. The error was the exact-paired global runtime refusal, not evidence of
+lost history. Restart now reuses that same existing installer entrypoint,
+forwarding the original node-start args without config edits or version
+fallbacks. The new head still needs its own full native result.
+
 This proves only the tested stopped-data copy and process restart. It does not
 prove host reboot, live SQLite backup, encrypted backup retention, real vendor
 entitlement, production rollback or an authorized two-node host canary. Those
