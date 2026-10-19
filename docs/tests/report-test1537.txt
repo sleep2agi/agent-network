@@ -1,0 +1,34 @@
+#1537 / parent #1084 — V2 shared Server stopped-data recovery
+
+Status: candidate, full native acceptance PENDING. No production/canary claim.
+Base main: 0066eafc6b01b62224f6655dcdb83d63720f301b.
+
+This extends test1327 rather than adding a second runtime/Hub framework.
+The existing default-reuse, separate node identity, stop-one-node, explicit
+new-server and dead-candidate assertions remain in place. After those pass:
+
+- Stop every fixture node through the real CLI and confirm both private tmux
+  sessions are gone. Read both original ses_ IDs and their nonempty histories
+  containing the loopback model's response-only markers.
+- Re-observe the fixture listener PID/startTicks, signal only that generation,
+  and wait for both process exit and absence of its listener before copying.
+- Copy the entire stopped data directory to a new private directory, retaining
+  the original database. Start the same pinned V2 binary against the copy.
+- Verify exact session IDs, project directories and history entry IDs/content
+  before restarting either node. Restart through the real CLI without editing
+  node configuration; verify unchanged node ID/token identity (not their values),
+  original session, and adoption of the new shared listener generation.
+- Each node then completes a new exact Hub task with its own sender prefix.
+
+Execution is the existing opencode-shared-create-native workflow and locked
+test1327 Dockerfile, network disabled at runtime, synthetic Hub identities,
+private tmux socket and deterministic loopback model. The unchanged 300-second
+fixture budget still applies. Local preflight only compiles the harness in an
+isolated cached Docker image; it does not execute this chain or qualify native
+behavior. Exact head/run/job/source pin and result must be appended after CI.
+
+This proves only the tested stopped-data copy and process restart. It does not
+prove host reboot, live SQLite backup, encrypted backup retention, real vendor
+entitlement, production rollback or an authorized two-node host canary. Those
+inputs remain #1538; parent #1084 stays open. No product implementation changes,
+production nodes, global packages, real credentials or published artifacts.
