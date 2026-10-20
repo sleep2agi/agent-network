@@ -803,12 +803,6 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     sql = addNetworkScope(sql, params, ctx.scope);
     const status = url.searchParams.get("status");
     if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
-    const uid = ctx.auth?.userId ?? null;
-    const networkId = singleNetworkId(ctx.scope) ?? ctx.auth?.networkId ?? null;
-    if (uid && networkId && !writeAllowed(ctx, networkId)) {
-      sql += ` AND schedule_id IN (SELECT schedule_id FROM scheduled_task_watchers WHERE user_id = ?${params.length + 1})`;
-      params.push(uid);
-    }
     sql += " ORDER BY updated_at DESC LIMIT 500";
     return Response.json({ ok: true, schedules: db.all<ScheduledRow>(sql, ...params).map(row => decorateSchedule(row, ctx)) });
   }
