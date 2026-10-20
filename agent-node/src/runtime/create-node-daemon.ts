@@ -1,3 +1,4 @@
+import { hostCommandOnce, receiptCall } from "./host-execution-receipt.js";
 // RFC-026 v4 daemon-side — handles SSE doorbell `type: create_node`,
 // pulls the request from hub, validates again (defense in depth),
 // fork-exec `anet node create + start` with strict env, acks hub.
@@ -1049,12 +1050,18 @@ export function copresenceLauncherVerdict(
   return { started: false, how: markerOnDisk ? how : `${how}, no identity marker written` };
 }
 
-export async function handleCreateNodeDoorbell(
+async function handleCreateNodeDoorbellImpl(
   event: { request_id: string },
   deps: CreateNodeDeps,
 ): Promise<void> {
   const { request_id } = event;
   const req: GetCreateRequestResult = await deps.callCommHub("get_create_request", { request_id });
+  if ((req as any)?.execution_receipt) return;
+  if (req?.error === 'execution_outcome_unknown' && (req as any).execution_receipt_capable === 1) {
+    const call=receiptCall(deps.callCommHub,{requestId:request_id,nodeId:(req as any).child_node_id,alias:(req as any).child_alias,operation:'create'},true);
+    await call('ack_create_request',{request_id,status:'failed',error:'execution_outcome_unknown'});
+    return; // never ask for another credential blob or relaunch
+  }
   if (req?.error === "clone_request") {
     // A clone row must stay pending for handleCloneNodeDoorbell. Acking it
     // failed here would revoke the new token.
@@ -1069,6 +1076,13 @@ export async function handleCreateNodeDoorbell(
     return;
   }
 
+  const receiptContext = {requestId:request_id,nodeId:`node_${request_id.replace(/^cr_/, '')}`,alias:req.node_spec.name,operation:'create' as const,
+    wrapperPath:undefined as string|undefined,enabled:true};
+  deps={...deps,callCommHub:receiptCall(deps.callCommHub,receiptContext,(req as any).execution_receipt_capable === 1)};
+  if (req.node_spec.runtime === 'claude-code-cli' || req.node_spec.runtime === 'claude-code') {
+    await deps.callCommHub('ack_create_request',{request_id,status:'rejected',error:'legacy_execution_unsupported'});
+    return;
+  }
   // §4.2 daemon-side runtime allowlist fallback (belt-and-suspenders;
   // hub already enforces, this catches hub-bypass / compromised-hub).
   if (deps.allowedRuntimes && deps.allowedRuntimes.length > 0 &&
@@ -1154,7 +1168,7 @@ export async function handleCreateNodeDoorbell(
   // Resolve anet binary (install-time pin, never PATH lookup at runtime)
   let anetBin: string;
   try {
-    anetBin = getAnetBinAbs();
+    anetBin = getAnetBinAbs(); receiptContext.wrapperPath=anetBin;
   } catch (e: any) {
     deps.warn(`[create-node] anet_bin_unsafe_path: ${e?.message || e}`);
     await deps.callCommHub("ack_create_request", {
@@ -1286,6 +1300,7 @@ export async function handleCreateNodeDoorbell(
   // 「OpenCode runtime binding is missing」拒绝启动并在 5s 内退出 → daemon 记 ESRCH →
   // hub 撤 token → 之后所有调用 401。hub 的 get_create_request 现在也返回 network_id。
   const { flags: flagsObj, codexCopresence, codexCopresenceFullAccess, opencodeGeneration: rawGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  if (codexCopresence || req.node_spec.runtime === "opencode-cli") receiptContext.enabled=false;
   const opencodeGeneration = req.node_spec.runtime === "opencode-cli"
     ? (rawGeneration ?? "v1")
     : rawGeneration;
@@ -2006,4 +2021,8 @@ export function probeAnetBinReadiness(
       detail: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export async function handleCreateNodeDoorbell(event:{request_id:string},deps:CreateNodeDeps) {
+  return hostCommandOnce(event.request_id,deps.callCommHub,()=>handleCreateNodeDoorbellImpl(event,deps));
 }

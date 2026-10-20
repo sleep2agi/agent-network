@@ -77,3 +77,10 @@ This distinction prevents reply loops. See the [task lifecycle](https://anet.sh/
 - [Source repository](https://github.com/sleep2agi/agent-network)
 
 Apache-2.0.
+
+## Host command evidence
+
+Legacy Claude headless restart/create/start requires a verified execution contract;
+a daemon heartbeat or ACK does not prove a child is running or can consume work.
+See [legacy host execution diagnostics](../docs/diagnostics/legacy-host-execution.md)
+for refusal gates, structured receipts, compatibility and remaining real-host validation.

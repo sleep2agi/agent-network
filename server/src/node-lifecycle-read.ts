@@ -1,3 +1,4 @@
+import { executionProjection } from "./host-execution-receipt.js";
 import { db } from "./db.js";
 import { addAgentNetworkScope, type RestNetworkScope } from "./network-scope.js";
 import { forkRecoveryRequestSchema, publicForkResult } from "./codex-fork-contract.js";
@@ -33,6 +34,7 @@ const publicLifecycleErrors = new Set([
   "adopt_pane_process_mismatch", "adopt_socket_directory_unsafe", "adopt_socket_unsafe",
   "adopt_pid_changed", "adopt_pid_invalid", "adopt_pidfile_unsafe",
   "opencode_tui_session_mismatch",
+  "legacy_execution_unsupported", "main_process_not_started", "process_evidence_unavailable", "execution_outcome_unknown",
   "adopt_proc_invalid", "adopt_proc_unreadable", "adopt_platform_unsupported",
   "adopt_registry_conflict", "adopt_registry_entry_invalid", "adopt_registry_invalid",
   "adopt_registry_unsafe", "adopt_config_env_invalid", "adopt_env_file_invalid",
@@ -77,20 +79,21 @@ export function lifecycleProjections(scope: RestNetworkScope): Map<string, Lifec
 
 /** Read-only, selector-bound lookup. Join the live node in the SAME network,
  * then apply its current visibility (including restricted member grants).
- * Result fields exclude credentials, PID and config; error values separately
+ * Result fields exclude credentials and config. Negotiated receipts include only
+ * bounded process metadata (including PID); error values separately
  * use the exact public-code allowlist (daemon text may contain workdir paths). */
 export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Response {
   const kind = url.searchParams.get("kind");
   const requestId = url.searchParams.get("request_id"), nodeId = url.searchParams.get("node_id");
   const fail = (error: string, status: number) => Response.json({ ok: false, error }, { status });
-  if (!["adopt", "start", "stop"].includes(kind ?? "")
+  if (!["adopt", "start", "stop", "restart"].includes(kind ?? "")
       || url.searchParams.has("request_id") === url.searchParams.has("node_id")
       || !(requestId ?? nodeId ?? "").trim()
       || ["kind", "request_id", "node_id"].some(k => url.searchParams.getAll(k).length > 1)
       || (requestId ?? nodeId ?? "").length > 200) return fail("invalid_lifecycle_query", 400);
   // The table and column names below come only from this closed enum.
-  const table = kind === "adopt" ? "node_daemon_bindings" : kind === "start" ? "node_start_requests" : "node_stop_requests";
-  const nodeColumn = kind === "adopt" ? "node_id" : "child_node_id";
+  const table = kind === "adopt" ? "node_daemon_bindings" : kind === "start" ? "node_start_requests" : kind === "restart" ? "node_config_updates" : "node_stop_requests";
+  const nodeColumn = kind === "adopt" || kind === "restart" ? "node_id" : "child_node_id";
   // A node lookup with no request must distinguish 'no requests' from 'not visible'.
   if (nodeId) {
     const params: any[] = [nodeId];
@@ -98,12 +101,12 @@ export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Res
       return fail("node_not_found", 404);
   }
   const params: any[] = [requestId ?? nodeId];
-  const sql = scopeNodes(`SELECT r.request_id,r.${nodeColumn} AS node_id,r.network_id,r.daemon_node_id,
-      r.status,r.error,r.created_at,${kind === "adopt" ? "r.updated_at" : "r.acked_at,r.delivered_at"}
+  const sql = scopeNodes(`SELECT r.${kind === 'restart' ? 'update_id' : 'request_id'} AS request_id,r.${nodeColumn} AS node_id,r.network_id,${kind === 'restart' ? 'NULL' : 'r.daemon_node_id'} AS daemon_node_id,
+      r.status,r.error,r.created_at,${kind === 'adopt' ? 'r.updated_at' : kind === 'restart' ? 'r.acked_at,NULL AS delivered_at' : 'r.acked_at,r.delivered_at'}
       ${kind === "start" ? ",r.fork_recovery_json,r.fork_result_json" : ""}
     FROM ${table} r JOIN nodes n ON n.node_id=r.${nodeColumn} AND n.network_id=r.network_id
-    WHERE r.${requestId ? "request_id" : nodeColumn}=?1${kind === "stop" ? " AND r.action='stop'" : ""}`, params, scope);
-  const row = db.get<Record<string, unknown>>(sql + " ORDER BY r.created_at DESC,r.request_id DESC LIMIT 1", ...params);
+    WHERE r.${requestId ? kind === 'restart' ? 'update_id' : 'request_id' : nodeColumn}=?1${kind === 'stop' ? " AND r.action='stop'" : kind === 'restart' ? " AND r.apply_mode='restart_only'" : ''}`, params, scope);
+  const row = db.get<Record<string, unknown>>(sql + ` ORDER BY r.created_at DESC,r.${kind === 'restart' ? 'update_id' : 'request_id'} DESC LIMIT 1`, ...params);
   if (!row && requestId) return fail("request_not_found", 404);
   if (!row) return Response.json({ ok: true, request: null });
   const { fork_recovery_json, fork_result_json, ...publicRow } = row;
@@ -113,7 +116,7 @@ export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Res
       if (forkRecoveryRequestSchema.safeParse(JSON.parse(fork_recovery_json)).success) confirmed = true;
     } catch { /* damaged confirmation is unknown; keep any independently valid fork evidence */ }
   }
-  return Response.json({ ok: true, request: { kind, ...publicRow, error: publicLifecycleError(row.error),
+  return Response.json({ ok: true, request: { kind, ...publicRow, ...(kind !== 'adopt' ? {execution:executionProjection(db,String(row.request_id),String(row.network_id),String(row.status))}:{}), error: publicLifecycleError(row.error),
     ...(kind === "start" && fork_recovery_json != null ? { fork_recovery: {
       requested: confirmed, result: publicForkResult(fork_result_json),
     } } : {}),

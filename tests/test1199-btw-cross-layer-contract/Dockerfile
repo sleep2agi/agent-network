@@ -1,4 +1,6 @@
 FROM oven/bun:1.3.14-debian
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
 WORKDIR /app
 COPY server/src/db-adapter.ts ./server/src/db-adapter.ts
 COPY server/src/side-thread.ts ./server/src/side-thread.ts

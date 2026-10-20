@@ -1,0 +1,165 @@
+#1493 legacy host execution — isolated candidate report
+Date: 2026-10-19 +08:00
+Repository: https://github.com/sleep2agi/agent-network
+Implementation/test base: 201cf21d65d06877621fed9bc401956537971eb2
+Base tree: 2255cb9a4dfd8f2f44e080332024d95947e3566f
+Branch: feat/1493-legacy-execution-receipts
+Head/tree are supplied by the Draft PR (not self-referenced in this file).
+No dependency on #2813; no channel/admitted/consumed code changes.
+
+Runtime test inputs:
+  oven/bun:1.3.13@sha256:87416c977a612a204eb54ab9f3927023c2a3c971f4f345a01da08ea6262ae30e
+  node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
+  Existing server npm lockfile; npm ci --ignore-scripts, no host install.
+  Final local test image (NOT registry digest):
+    sha256:d142377fa7553a00161c22efd3fffb223fbc2ff3b111209f5347d67a43c4642d
+
+Commands, source root:
+  sg docker -c 'docker build -f tests/test1493-host-execution/Dockerfile -t anet-1493:review .'
+  sg docker -c 'docker run --rm --name anet-1493-review --network none --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=256m --user 10001:10002 --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g --cpus 2 anet-1493:review'
+On this host sg was invoked via sudo -n. No group/socket/service changes.
+Build rc0; complete layered runtime runner rc0.
+
+Actual results, stop at first red layer:
+  Real /proc observation + truth/fault/compatibility: 7 pass, 0 fail
+  Real loopback MCP/HTTP + isolated SQLite: 8 pass, 0 fail
+  Existing server start/fork lifecycle: 15 pass, 0 fail
+  Existing server stop/delete authority: 50 pass, 0 fail
+  Existing lifecycle REST read isolation: 14 pass, 0 fail
+  Existing runtime start behavior: 14 pass, 0 fail
+  Existing create/env/path/config helpers: 97 pass, 0 fail
+  Total: 205 pass, 0 fail.
+
+Behavioral mutants in disposable /tmp source copies, 6/6 killed:
+  delivered start claim automatically retried: 7 pass, 1 fail
+  legacy restart gate removed: 7 pass, 1 fail
+  exited launcher reported started: 6 pass, 1 fail
+  duplicate command replay removed: 6 pass, 1 fail
+  start/stop finalization transaction removed: 7 pass, 1 fail
+  create finalization transaction removed: 7 pass, 1 fail
+  Parse/setup crashes do not count as kills. Copies removed after running.
+
+Meaningful fixtures:
+  Owned real /bin/sleep PID generation/executable fingerprint; /bin/true exit
+  becomes absent. No host cmdline/environ/log/pane inspection.
+  Observer fault is an explicit injected fault, not real-host proof: it stays
+  unknown and cannot falsely mark a potentially live launch failed/stopped.
+  Unsafe legacy restart yields no cu write, even with claimed config capability;
+  scoped config read advertises false; cross-network caller refused.
+  cu accepted/daemon heartbeat never becomes process/consumer evidence.
+  Real start/create handlers reject unsafe legacy headless execution before
+  config provisioning/spawn, with exact request and child coordinates.
+  Same-recipient duplicate/lost ACK replays frozen receipt; peer/foreign writes,
+  wrong child, extra payload fields and changed receipts are rejected.
+  Start late state-write fault rolls back a previously inserted receipt.
+  Create late state-write fault rolls back receipt plus existing token revocation.
+  An old client's fallback ACK cannot overwrite a frozen newer create outcome.
+  Lost pull/cache-loss interleaving uses REAL HTTP claims and new handler call,
+  not a restarted real daemon: start/create/stop halt as execution_outcome_unknown,
+  spawn/signal counters remain 0. Delivered stale starts are not auto-reissued;
+  unknown outcomes cannot be hidden by clock-skewed/historical request rows.
+
+Harness failure resolved:
+  Initial container /tmp lacked exec; existing CLI executable fixtures returned
+  EACCES. With explicit exec on private tmpfs, the unchanged regression fixtures
+  pass. This was a harness capability failure, not evidence of a product defect.
+  Exec is restricted to the isolated test container, not a host permission change.
+
+Additional TypeScript measurement (NOT a full typecheck PASS):
+  TypeScript 5.9.3 + @types/node 20.19.0 installed only in a separate Docker image;
+  agent-node optional native/vendor packages omitted and scripts disabled.
+  Full tsc --noEmit --pretty false --listFiles exits 2 with 87 other-module diagnostics.
+  The final SOURCE TAR was streamed to an immutable compiler image in network-none
+  Docker, no host mounts. All 4 changed runtime files were explicitly listed:
+    runtime/host-execution-receipt.ts
+    runtime/start-daemon.ts
+    runtime/stop-daemon.ts
+    runtime/create-node-daemon.ts
+  Those 4 files emitted 0 type diagnostics; filtered measurement rc0.
+  This filter is NOT the repository's CI ratchet or a complete compile gate.
+  No base-vs-head full-typecheck error equivalence is claimed.
+
+  Builder recipe: tests/test1493-host-execution/Dockerfile.types
+  Final compiler tool image (old /app source was NOT used for final measurement):
+    sha256:15390ad72f46eb269f95657d0cc4feb962819d8cd1b2a2e67cbed982c03a5c86
+  To reproduce the bounded filter with current source:
+    sg docker -c 'docker build -f tests/test1493-host-execution/Dockerfile.types -t anet-1493:types .'
+    sg docker -c 'docker run --rm --network none --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=256m --user 10001:10002 --cap-drop ALL --security-opt no-new-privileges --memory 2g --cpus 2 anet-1493:types'
+  The additional final source-tar measurement used the same compiler; its input
+  matched all four final runtime files byte-for-byte. Archive construction:
+    tar -cf types-input.tar agent-node/src agent-node/tsconfig.json agent-network/src server/src
+    # docker run -i --network none --read-only, same private tmpfs/user/cap limits;
+    # extract stdin into /tmp/1493-current, symlink each package's node_modules
+    # to /app/<package>/node_modules from the compiler image, cd agent-node;
+    # run /app/agent-node/node_modules/.bin/tsc --noEmit --pretty false --listFiles.
+    # Require the four full source paths in --listFiles before checking diagnostics.
+  Final input tar SHA256:
+    72d226c2d0641cf4a9fa1446754afa02a88166f05dcfa81adec83ee776a0a266
+
+Non-secret local installed baseline, not the candidate/remote runtime:
+  @sleep2agi/agent-network 2.3.0-preview.181
+  anet.cjs SHA256 1fda83ab54dccc071ed4c5f1eea9b1423c6c35aa1464de9596a5150f8d06bbaa
+  node-server.js SHA256 8dec17fcfdfbdca60e360460a75ac5129038ec180732201649d970073a37f01b
+  Real remote wrapper/TUI/Claude fingerprint: NO-READ.
+
+Evidence (local synthetic outputs, not committed):
+  .runs/1493-docker-build.log
+  .runs/1493-docker-test.log
+    SHA256 5b305613136770d1b0d1c9557970860c90a369f7b6d52c01ba11e905ac096375
+  .runs/1493-docker-types-final.log
+    SHA256 26000b758dd259ba758bf05bb13aee48c04fdabb6ffd55c5e4b3a4fee4780ed9
+  .runs/1493-fingerprints.json
+
+Limits / INCOMPLETE:
+  No real Claude/TUI/session/wrapper or remote-host validation; NULL is unknown.
+  No actual host daemon crash/restore; claim-loss fixture is an isolated interleaving.
+  No unattended legacy PTY/supervisor implementation or unknown-outcome clear API.
+  Hub structured read surface only; old Dashboard fields do not gain verified UI.
+  PostgreSQL, non-Linux observer, full repository suite/full CI type gate NO-RUN.
+  No merge, deploy, registry write, shared daemon change/restart, production
+  connection/DDL/GRANT, credential read or target-node probe/task.
+  No work sent to 神明/小盐助手. Containers use --rm; no host mounts or tmux.
+
+CI registration follow-up (PR #2815): continuous gate, not a NOT-IN-CI exemption.
+  qa.sh L1_TESTS includes test1493-host-execution; qa.yml includes its path in
+  BOTH pull_request and push triggers. server/** and agent-node/** already trigger QA.
+  This gate runs the new receipt/HTTP assertions and six behavioral mutants,
+  which are not replaced by existing server-unit coverage.
+  No nested Docker, socket, host mounts, CLI credentials, or external services.
+  Build uses pinned Node/Bun images plus lockfile npm ci; runtime is offline,
+  read-only/non-root, bounded to 1 GiB/2 CPUs/256 PIDs and private executable /tmp.
+  Runtime-only suite; Dockerfile.types remains advisory, not a green full tsc gate.
+  SOURCE_COMMIT is supplied by qa.sh from HEAD, asserted and printed; RUNSH_BLOB
+  is supplied from HEAD:tests/test1493-host-execution/run.sh and checked against
+  the actual executed bytes. Missing/malformed/mismatched values fail closed.
+  Reproduce the real runner on only this suite:
+    QA_L1_ONLY=test1493-host-execution bash scripts/qa.sh --l1
+  Exact-head timings, four registration guards and witnessed-red results are
+  recorded in the PR follow-up evidence; no job timeout/baseline exemption changes.
+
+Review follow-up: update_node_config restart-tier bypass and test1199 binding
+  Legacy restart/restart_only config patches are refused after tier classification
+  and BEFORE the stale-update reaper as well as cu INSERT/push. Hot patches and
+  nonlegacy restart behavior retain their original contracts.
+  HTTP + SQLite + real SSE FIFO-barrier tests assert zero new cu, zero config
+  doorbells, unchanged target/config snapshot, and unchanged stale cu; cover
+  runtime claude-code/claude-code-cli and session-only legacy identification.
+  Cross-network requests remain denied before capability disclosure.
+  New mutation restores only this bypass and must fail those behavioral tests.
+  test1199 now has ARG/ENV SOURCE_COMMIT plus 40-lowercase-hex assertion and print;
+  no baseline exemption. Reproduce both via QA_L1_ONLY with their exact names.
+  This supersedes the previous test1199 baseline-failure status; follow-up PR
+  evidence reports actual final-head results, not inherited review conclusions.
+
+Full-QA regression follow-up: terminal ledger error compatibility
+  Preserve an existing args.error in receiptCall; bounded receipt.failure is
+  additional evidence, not a replacement for specific ledger errors.
+  Only absent/null error falls back to the generic failure category.
+  Directed assertions cover four create rejected workdir errors and stop_failed
+  not_my_child; the mutation restoring unconditional overwrite must turn red.
+  Re-run both original E2E suites, without changing their expected error codes:
+    tests/qa-create-node-workdir/Dockerfile + run.sh
+    tests/test571-lifecycle-safety/Dockerfile + run.sh
+  Exact-head results and output hashes are supplied in the follow-up evidence.
+  Earlier narrow PASS does not qualify full QA; known baseline secret/type gates
+  remain distinct from these two PR-introduced compatibility regressions.

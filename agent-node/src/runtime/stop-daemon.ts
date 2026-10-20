@@ -1,3 +1,4 @@
+import { hostCommandOnce, receiptCall } from "./host-execution-receipt.js";
 // RFC-027 §2.4 — daemon-side stop/delete handler.
 //
 // Receives an SSE `{type:'stop_node', request_id}` doorbell from hub
@@ -333,7 +334,7 @@ async function teardownCopresenceIfAny(
   return `copresence_teardown_failed: ${r.detail}`.slice(0, 1000);
 }
 
-export async function handleStopDoorbell(
+async function handleStopDoorbellImpl(
   event: { request_id: string },
   deps: StopDoorbellDeps,
 ): Promise<void> {
@@ -353,11 +354,22 @@ export async function handleStopDoorbell(
     deps.warn(`[stop-daemon] get_stop_request failed: ${e?.message || e}`);
     return; // hub will retry via sweeper
   }
+  if ((req as any)?.execution_receipt) return;
   if (!req?.ok || !req.child_node_id || !req.action) {
     deps.warn(`[stop-daemon] get_stop_request returned error: ${req?.error || "unknown"}`);
     return;
   }
   const { child_node_id, child_alias, action, delete_config = true, grace_seconds = 10 } = req;
+  if ((req as any).execution_receipt) return;
+  // Deletion retains its existing protocol; this receipt covers stop only.
+  if (action === 'stop' && child_alias && !adoptedChild(daemonWorkDir,child_alias)) deps={...deps,callCommHub:receiptCall(deps.callCommHub,
+    {requestId:request_id,nodeId:child_node_id,alias:child_alias,operation:'stop',pid:childrenMap.get(child_node_id)?.pid ?? null},
+    (req as any).execution_receipt_capable === 1)};
+
+  if ((req as any).execution_receipt_capable === 1 && (req as any).delivery_state_before_pull !== 'pending') {
+    await deps.callCommHub('ack_stop_request',{request_id,status:'stop_failed',error:'execution_outcome_unknown'});
+    return; // no duplicate signal/cleanup after an unconfirmed earlier attempt
+  }
   if (deps.adoption && child_alias && await handleAdoptedLifecycle({ request_id, child_node_id, child_alias, action }, deps.adoption)) return;
   // 建的时候带了工作目录的子节点,config 在 <workdir>/.anet/nodes 下;回收站也放在同一棵树里
   // (同一文件系统,rename 不会 EXDEV)。没登记 = 老布局 = daemon cwd,与改动前逐字相同。
@@ -991,3 +1003,7 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
 // Exported for unit tests so they can exercise cmdlineMatchesAlias
 // without spawning real processes.
 export const _internals = { cmdlineMatchesAlias, cmdlineMatchesChild };
+
+export async function handleStopDoorbell(event:{request_id:string},deps:StopDoorbellDeps) {
+  return hostCommandOnce(event.request_id,deps.callCommHub,()=>handleStopDoorbellImpl(event,deps));
+}

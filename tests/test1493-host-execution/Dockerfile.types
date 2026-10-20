@@ -1,0 +1,7 @@
+# Build after the isolated runtime test image; never installs on the host.
+FROM anet-1493:review
+USER root
+WORKDIR /app/agent-node
+COPY agent-node/package.json agent-node/package-lock.json agent-node/tsconfig.json ./
+RUN unlink node_modules && umask 022 && npm ci --ignore-scripts --omit=optional --no-audit --no-fund && npm install --no-save --ignore-scripts --package-lock=false --omit=optional --no-audit --no-fund typescript@5.9.3 @types/node@20.19.0 && chmod -R a+rX /app
+CMD ["sh", "-c", "./node_modules/.bin/tsc --noEmit --pretty false --listFiles > /tmp/1493-types.txt 2>&1; result=$?; cat /tmp/1493-types.txt; echo TSC_RC=$result; if test $result -ne 0 && test $result -ne 2; then exit $result; fi; for f in host-execution-receipt start-daemon stop-daemon create-node-daemon; do grep -Fx \"/app/agent-node/src/runtime/$f.ts\" /tmp/1493-types.txt >/dev/null || exit 2; done; if grep -E 'runtime/(host-execution-receipt|start-daemon|stop-daemon|create-node-daemon)\\.ts.*error TS' /tmp/1493-types.txt; then exit 1; fi; echo TARGETED_RUNTIME_FILES_TYPE_ERRORS=0; echo FULL_TYPECHECK_NOT_QUALIFIED_BY_THIS_FILTER"]

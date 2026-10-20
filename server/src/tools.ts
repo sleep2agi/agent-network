@@ -1,3 +1,4 @@
+import { executionReceiptSupported, readExecutionReceipt, validateExecutionReceipt, saveExecutionReceipt, legacyRestartUnsupported } from "./host-execution-receipt.js";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { selectHumanInboxIds } from "./human-inbox.js";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
@@ -3494,6 +3495,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
+      // Reject unsupported restart-tier changes before any config mutation,
+      // including the stale-update reaper, not only the new cu INSERT.
+      const applyMode = computeApplyMode(model, flags, channels);
+      if (applyMode !== "hot" && legacyRestartUnsupported(db, node)) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:false,error:'legacy_restart_unsupported',
+          restart_only_supported:false,command_accepted:false,request_id:null,child_node_id:nodeId,consumer_ready:'unknown'})}]};
+      }
+
       // F-B (CHANGE_REQ): single-flight with stale-update reaper.
       // Without TTL, a node that ack'd "restarting" then crashed (lost
       // power, OOM, killed) leaves a non-terminal row forever — every
@@ -3542,7 +3551,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Compute apply_mode + persist + push doorbell.
       const updateId = `cu_${uuidv4()}`;
-      const applyMode = computeApplyMode(model, flags, channels);
       const patchJson = JSON.stringify({
         ...(model !== undefined ? { model } : {}),
         flags,
@@ -4181,6 +4189,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!sec1Ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
       }
+      if (legacyRestartUnsupported(db,node)) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:false,error:'legacy_restart_unsupported',
+          restart_only_supported:false,command_accepted:false,request_id:null,child_node_id:nodeId,consumer_ready:'unknown'})}]};
+      }
       // board #627: a binding proves stop/start authority, not an exit-75
       // supervisor. No verified adopted-wrapper capability exists in this
       // protocol; a self-reported config_update_capable flag is not proof.
@@ -4668,6 +4680,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // `networkSecretsGet: () => undefined` line with the real DB
       // lookup; nothing else in this tool needs to change.
 
+      const latestCreate = db.get<{request_id:string}>(`SELECT r.request_id FROM node_create_requests r
+        WHERE r.daemon_node_id=?1 AND r.child_name=?2 AND r.network_id=?3 AND
+          ((r.delivered_at IS NOT NULL AND r.status IN ('expired','timeout')) OR EXISTS
+            (SELECT 1 FROM audit_log a WHERE a.target_id=r.request_id AND a.network_id=r.network_id
+              AND a.action='host_execution_receipt_v1' AND a.detail LIKE '%"failure":"execution_outcome_unknown"%'))
+        ORDER BY r.created_at DESC,r.request_id DESC LIMIT 1`,daemon_node_id,node_spec.name,effectiveNetId || 'default');
+      if (latestCreate) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:false,error:'execution_outcome_unknown',existing_request_id:latestCreate.request_id})}]};
+      }
       // Single-flight per (daemon, child_name): partial unique index
       // uniq_ncr_inflight already prevents racing INSERT, but we
       // surface a friendly error rather than letting the DB constraint
@@ -5037,7 +5058,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       const row = db.get<{ request_id: string; daemon_node_id: string; status: string; child_token_id: string | null; network_id: string; clone_json: string | null }>(
-        `SELECT request_id, daemon_node_id, status, child_token_id, network_id, clone_json FROM node_create_requests WHERE request_id = ?1`,
+        `SELECT request_id, daemon_node_id, status, child_token_id, network_id, clone_json, child_name, child_node_id FROM node_create_requests WHERE request_id = ?1`,
         request_id,
       );
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
@@ -5057,6 +5078,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // network_id MUST equal caller's network).
       if (row.network_id !== callerDaemon.networkId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      }
+      const storedEvidence = readExecutionReceipt(db,request_id,row.network_id);
+      if (storedEvidence) return {content:[{type:'text' as const,text:JSON.stringify({ok:true,request_id,execution_receipt:storedEvidence})}]};
+      if (!isClone && row.status === 'delivered' && executionReceiptSupported(db)) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:false,error:'execution_outcome_unknown',request_id,
+          child_node_id:(row as any).child_node_id ?? `node_${request_id.replace(/^cr_/, '')}`,
+          child_alias:(row as any).child_name,execution_receipt_capable:1})}]};
       }
       if (row.status !== "pending") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_pending", current_status: row.status }) }] };
@@ -5089,6 +5117,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           request_id,
           // #1027: daemon needs network_id to write into child config.
           network_id: row.network_id,
+          delivery_state_before_pull:row.status,
+          ...(executionReceiptSupported(db) ? {execution_receipt_capable:1}:{}),
           node_spec: {
             name: specRow.child_name,
             runtime: specRow.runtime,
@@ -5117,6 +5147,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Daemon acks a create-node request (called after fork). status='started' | 'failed' | 'rejected' | 'runtime_capability_check_failed'. RFC-026 §9.3 D2.",
     {
       request_id: z.string().min(1).max(200),
+      execution_receipt: z.unknown().optional(),
       // RFC-026 §9.3 D2 — runtime_capability_check_failed signals the
       // daemon spawned the child OK but it died within FAIL_FAST_MS
       // (5s in agent-node v2.5.0-preview.11+), indicating a
@@ -5130,13 +5161,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       runtime: z.string().max(64).optional(),   // populated by daemon when status=runtime_capability_check_failed
       launch_verified: z.boolean().optional(), // finite launcher exit + live generation proof, not mere registration/spawn
     },
-    async ({ request_id, status, error: ackError, child_pid: _pid, runtime: ackRuntime, launch_verified }) => {
+    async ({ request_id, status, error: ackError, child_pid: _pid, runtime: ackRuntime, launch_verified, execution_receipt }) => {
       const callerDaemon = resolveCallerDaemonTokenBound();
       if (!callerDaemon.ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
       }
-      const row = db.get<{ daemon_node_id: string; status: string; child_token_id: string | null; network_id: string }>(
-        `SELECT daemon_node_id, status, child_token_id, network_id FROM node_create_requests WHERE request_id = ?1`,
+      const row = db.get<{ daemon_node_id: string; status: string; child_token_id: string | null; network_id: string; child_name:string; child_node_id:string|null }>(
+        `SELECT daemon_node_id, status, child_token_id, network_id, child_name, child_node_id FROM node_create_requests WHERE request_id = ?1`,
         request_id,
       );
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
@@ -5146,54 +5177,66 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (row.network_id !== callerDaemon.networkId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
       }
-      const ackedAt = Date.now();
-      if (status === "started") {
-        if (launch_verified === true && (!Number.isInteger(_pid) || _pid! <= 0)) {
-          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "verified_child_pid_required" }) }] };
+      const evidence = validateExecutionReceipt(db,execution_receipt,{requestId:request_id,nodeId:row.child_node_id ?? `node_${request_id.replace(/^cr_/, '')}`,alias:row.child_name,networkId:row.network_id,operation:'create'},status,_pid);
+      if (!evidence.ok) return {content:[{type:'text' as const,text:JSON.stringify(evidence)}]};
+      if (readExecutionReceipt(db,request_id,row.network_id)) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:true,status:row.status,idempotent:true})}]};
+      }
+      if (status === 'started' && launch_verified === true && (!Number.isInteger(_pid) || _pid! <= 0)) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:false,error:'verified_child_pid_required'})}]};
+      }
+      const finalize = () => {
+        saveExecutionReceipt(db,evidence.receipt,row.network_id,callerDaemon.daemonNodeId);
+        const ackedAt = Date.now();
+        if (status === "started") {
+          if (launch_verified === true && (!Number.isInteger(_pid) || _pid! <= 0)) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "verified_child_pid_required" }) }] };
+          }
+          if (launch_verified === true) {
+            // A child can register before this acknowledgement arrives. Preserve
+            // both event orders, but a late success must never revive a failure.
+            db.run(`UPDATE node_create_requests SET launch_verified_at = COALESCE(launch_verified_at, ?1)
+                    WHERE request_id = ?2 AND status IN ('pending', 'delivered', 'succeeded')`, [ackedAt, request_id]);
+          }
+          // Don't flip to 'succeeded' here — that happens via content-
+          // match when the child actually registers. We just stamp ack.
+          db.run(
+            `UPDATE node_create_requests SET acked_at = ?1 WHERE request_id = ?2 AND status IN ('delivered', 'pending')`,
+            [ackedAt, request_id],
+          );
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "awaiting_register" }) }] };
         }
-        if (launch_verified === true) {
-          // A child can register before this acknowledgement arrives. Preserve
-          // both event orders, but a late success must never revive a failure.
-          db.run(`UPDATE node_create_requests SET launch_verified_at = COALESCE(launch_verified_at, ?1)
-                  WHERE request_id = ?2 AND status IN ('pending', 'delivered', 'succeeded')`, [ackedAt, request_id]);
+        // failed / rejected / runtime_capability_check_failed — revoke
+        // child-ntok + mark request terminal. Registration can precede the
+        // daemon's final capability verdict; don't leave succeeded visible
+        // while this same failure acknowledgement revokes its child token.
+        if (row.child_token_id) {
+          db.run(`UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = ?1 AND revoked_at IS NULL`, [row.child_token_id]);
         }
-        // Don't flip to 'succeeded' here — that happens via content-
-        // match when the child actually registers. We just stamp ack.
         db.run(
-          `UPDATE node_create_requests SET acked_at = ?1 WHERE request_id = ?2 AND status IN ('delivered', 'pending')`,
-          [ackedAt, request_id],
+          `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3, launch_verified_at = NULL WHERE request_id = ?4 AND status IN ('pending', 'delivered', 'succeeded')`,
+          [status, ackError || null, ackedAt, request_id],
         );
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: "awaiting_register" }) }] };
-      }
-      // failed / rejected / runtime_capability_check_failed — revoke
-      // child-ntok + mark request terminal. Registration can precede the
-      // daemon's final capability verdict; don't leave succeeded visible
-      // while this same failure acknowledgement revokes its child token.
-      if (row.child_token_id) {
-        db.run(`UPDATE api_tokens SET revoked_at = datetime('now') WHERE token_id = ?1 AND revoked_at IS NULL`, [row.child_token_id]);
-      }
-      db.run(
-        `UPDATE node_create_requests SET status = ?1, error = ?2, acked_at = ?3, launch_verified_at = NULL WHERE request_id = ?4 AND status IN ('pending', 'delivered', 'succeeded')`,
-        [status, ackError || null, ackedAt, request_id],
-      );
-      // RFC-026 §9.3 D2 — surface declaration↔reality gap on a
-      // distinct audit_log action so dashboards / operators can spot
-      // chronically-lying daemons separate from generic spawn-failed.
-      if (status === "runtime_capability_check_failed") {
-        auditCreateNode({
-          action: "daemon_capability_lied",
-          user_id: null,
-          network_id: row.network_id,
-          target_id: request_id,
-          detail: {
-            daemon_node_id: row.daemon_node_id,
-            runtime: ackRuntime || null,
-            error: ackError ? ackError.slice(0, 500) : null,
-            acked_at: ackedAt,
-          },
-        });
-      }
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+        // RFC-026 §9.3 D2 — surface declaration↔reality gap on a
+        // distinct audit_log action so dashboards / operators can spot
+        // chronically-lying daemons separate from generic spawn-failed.
+        if (status === "runtime_capability_check_failed") {
+          auditCreateNode({
+            action: "daemon_capability_lied",
+            user_id: null,
+            network_id: row.network_id,
+            target_id: request_id,
+            detail: {
+              daemon_node_id: row.daemon_node_id,
+              runtime: ackRuntime || null,
+              error: ackError ? ackError.slice(0, 500) : null,
+              acked_at: ackedAt,
+            },
+          });
+        }
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status }) }] };
+      };
+      return evidence.receipt ? db.transaction(finalize) : finalize();
     },
   );
 
@@ -5629,8 +5672,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (row.network_id !== callerDaemon.networkId) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
       }
+      const storedEvidence = readExecutionReceipt(db,request_id,row.network_id);
+      if (storedEvidence) return {content:[{type:'text' as const,text:JSON.stringify({ok:true,request_id,execution_receipt:storedEvidence})}]};
       // Stamp delivered_at on first pull (idempotent — only if still pending).
-      db.run(
+      const deliveryClaim = db.run(
         `UPDATE node_stop_requests SET status = 'delivered', delivered_at = ?1
            WHERE request_id = ?2 AND status = 'pending'`,
         [Date.now(), request_id],
@@ -5641,6 +5686,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         child_node_id: row.child_node_id,
         child_alias: row.child_alias,
         action: row.action,
+        delivery_state_before_pull:deliveryClaim.changes === 1 ? 'pending' : 'delivered',
+        ...(executionReceiptSupported(db) ? {execution_receipt_capable:1}:{}),
         delete_config: row.delete_config === 1,
         grace_seconds: row.grace_seconds,
         force: row.force === 1,
@@ -5653,12 +5700,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Daemon reports stop/delete completion (or per-status failure). On 'stopped' status finalizes the lifecycle: stop→stopped + keep config; delete→DB row gone + revoke ntok. RFC-027 §2.3 + §4.5.",
     {
       request_id: z.string().min(1).max(200),
+      execution_receipt: z.unknown().optional(),
       status: z.enum(["stopped", "stop_failed", "noop_not_my_child"]),
       exit_signal: z.string().max(16).optional(),
       backup_path: z.string().max(500).optional(),
       error: z.string().max(1000).optional(),
     },
-    async ({ request_id, status, exit_signal, backup_path, error: ackError }) => {
+    async ({ request_id, status, exit_signal, backup_path, error: ackError, execution_receipt }) => {
       // #1358 —— 🔴 在此之前,这个工具的**每一条出口都是静默的**:到达不记、
       // 三条拒绝不记、成功收尾也不记。而隔壁 create-node 的收尾**是记的**
       // (`✓ create-node finalize`)。这种不对称最坑人:读日志的人看到 create 有、
@@ -5688,6 +5736,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         console.warn(`[commhub] ✕ ack_stop_request rejected: cross_network_request request=${request_id} row_net=${row.network_id} caller_net=${callerDaemon.networkId}`);
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
       }
+      const evidence = validateExecutionReceipt(db,execution_receipt,{requestId:request_id,nodeId:row.child_node_id,alias:row.child_alias,networkId:row.network_id,operation:'stop'},status);
+      if (!evidence.ok) return {content:[{type:'text' as const,text:JSON.stringify(evidence)}]};
+      if (['stopped','stop_failed'].includes(row.status)) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:true,status:row.status,idempotent:true})}]};
+      }
       const now = Date.now();
 
       // §4.5 D8 — lifecycle UPDATE + request UPDATE + audit INSERT
@@ -5696,6 +5749,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // SQLite both get correct rollback semantics from one code path.
       try {
         db.transaction(() => {
+          saveExecutionReceipt(db,evidence.receipt,row.network_id,callerDaemon.daemonNodeId);
           db.run(
             `UPDATE node_stop_requests SET status = ?1, error = ?2, exit_signal = ?3,
                                             backup_path = ?4, acked_at = ?5
@@ -5803,6 +5857,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (daemon?.network_id !== child.network_id || snapshot?.role !== "host_supervisor"
             || capability?.protocol !== 1 || capability?.cli_supported !== true) return fail("codex_fork_recovery_unsupported");
       }
+      const latestStart = db.get<{request_id:string}>(`SELECT r.request_id FROM node_start_requests r
+        JOIN audit_log a ON a.target_id=r.request_id AND a.network_id=r.network_id
+        WHERE r.child_node_id=?1 AND r.network_id=?2 AND a.action='host_execution_receipt_v1'
+          AND a.detail LIKE '%"failure":"execution_outcome_unknown"%' ORDER BY a.id DESC LIMIT 1`,child.node_id,child.network_id);
+      if (latestStart) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:false,error:'execution_outcome_unknown',existing_request_id:latestStart.request_id})}]};
+      }
       // #1448 finding-2 — stale-starting reaper，对齐 update_node_config / restart_node
       // 的 60s single-flight stale-supersede。start 只受理 'stopped';一旦卡 'starting'
       // (门铃丢 / daemon 在 UPDATE 'starting' 后死),config/restart 有 reaper、delete 有
@@ -5837,6 +5898,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           if (inFlight.fork_recovery_json) return { content: [{ type: "text" as const, text: JSON.stringify({
             ok: false, error: "codex_fork_outcome_unknown", existing_request_id: inFlight.request_id,
           }) }] };
+          // A delivered claim can have executed even if no ACK survived. Never
+          // turn elapsed time into proof of zero execution or a second generation.
+          if (inFlight.delivered_at !== null) return {content:[{type:'text' as const,text:JSON.stringify({
+            ok:false,error:'execution_outcome_unknown',existing_request_id:inFlight.request_id,
+          })}]};
           // Stale — 标旧请求 timeout(autocommit,先于下面 tx 的新 INSERT,解除
           // node_start_requests 对 pending/delivered 的 child 唯一约束),放行重派。
           db.run(
@@ -5902,6 +5968,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
       if (row.daemon_node_id !== callerDaemon.daemonNodeId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
       if (row.network_id !== callerDaemon.networkId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      const storedEvidence = readExecutionReceipt(db,request_id,row.network_id);
+      if (storedEvidence) return {content:[{type:'text' as const,text:JSON.stringify({ok:true,request_id,execution_receipt:storedEvidence})}]};
       if (!['pending', 'delivered'].includes(row.status)) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_startable", status: row.status }) }] };
       let recovery: unknown;
       if (row.fork_recovery_json !== null) {
@@ -5910,8 +5978,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         try { recovery = forkRecoveryRequestSchema.parse(JSON.parse(row.fork_recovery_json)); }
         catch { return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "codex_fork_confirmation_invalid" }) }] }; }
       }
-      db.run(`UPDATE node_start_requests SET status='delivered', delivered_at=?1 WHERE request_id=?2 AND status='pending'`, [Date.now(), request_id]);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id, child_node_id: row.child_node_id, child_alias: row.child_alias, start_completion_capable: true,
+      const deliveryClaim = db.run(`UPDATE node_start_requests SET status='delivered', delivered_at=?1 WHERE request_id=?2 AND status='pending'`, [Date.now(), request_id]);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id, child_node_id: row.child_node_id, child_alias: row.child_alias, start_completion_capable: true, delivery_state_before_pull:deliveryClaim.changes === 1 ? 'pending' : 'delivered',
+        ...(executionReceiptSupported(db) ? {execution_receipt_capable:1}:{}),
         ...(recovery ? { managed: "created", fork_recovery: recovery } : {}) }) }] };
     },
   );
@@ -5921,12 +5990,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Host supervisor reports start completion or failure.",
     {
       request_id: z.string().min(1).max(200),
+      execution_receipt: z.unknown().optional(),
       status: z.enum(["starting", "started", "start_failed"]),
       child_pid: z.number().int().positive().optional(),
       error: z.string().max(1000).optional(),
       fork_recovery: forkRecoveryResultSchema.optional(),
     },
-    async ({ request_id, status, child_pid, error: ackError, fork_recovery }) => {
+    async ({ request_id, status, child_pid, error: ackError, fork_recovery, execution_receipt }) => {
       const callerDaemon = resolveCallerDaemonTokenBound();
       if (!callerDaemon.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
       const row = db.get<{ daemon_node_id: string; network_id: string; child_node_id: string; child_alias: string; status: string; fork_recovery_json: string | null }>(
@@ -5935,6 +6005,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
       if (row.daemon_node_id !== callerDaemon.daemonNodeId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
       if (row.network_id !== callerDaemon.networkId) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      const evidence = validateExecutionReceipt(db,execution_receipt,{requestId:request_id,nodeId:row.child_node_id,alias:row.child_alias,networkId:row.network_id,operation:'start'},status,child_pid);
+      if (!evidence.ok) return {content:[{type:'text' as const,text:JSON.stringify(evidence)}]};
       if (row.status === "started" || row.status === "start_failed") {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, status: row.status, idempotent: true }) }] };
       }
@@ -5957,6 +6029,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const now = Date.now();
       try {
         db.transaction(() => {
+          saveExecutionReceipt(db,evidence.receipt,row.network_id,callerDaemon.daemonNodeId);
           db.run(`UPDATE node_start_requests SET status=?1,error=?2,child_pid=?3,acked_at=?4,fork_result_json=?6 WHERE request_id=?5`,
             [status, ackError || null, child_pid || null, now, request_id,
               row.fork_recovery_json ? JSON.stringify(publicForkResult(fork_recovery)) : null]);

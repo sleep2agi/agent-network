@@ -1,3 +1,4 @@
+import { legacyRestartUnsupported, executionProjection } from "./host-execution-receipt.js";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { buildServeErrorResponse } from "./serve-error.js";
 import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
@@ -4473,7 +4474,7 @@ return Bun.serve({
     if (nodeConfigMatch && req.method === "GET") {
       const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
       const params: any[] = [nodeId];
-      let sql = "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
+      let sql = "SELECT node_id, alias, network_id, runtime, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
       sql = addNetworkScope(sql, params, restScope);
       sql += " LIMIT 1";
       const node = db.get<any>(sql, ...params);
@@ -4492,7 +4493,8 @@ return Bun.serve({
         config_revision: node.config_revision || 0,
         model: snapshot.model ?? null,
         flags: snapshot.flags ?? {},
-        config_update_capable: snapshot.config_update_capable ?? false,
+        config_update_capable: legacyRestartUnsupported(db,node) ? false : snapshot.config_update_capable ?? false,
+        ...(legacyRestartUnsupported(db,node) ? {restart_only_supported:false,restart_only_blocked_reason:"legacy_restart_unsupported"}:{}),
       }));
     }
 
@@ -4693,7 +4695,7 @@ return Bun.serve({
         // 不存在与不在你作用域内长一样:不泄漏别的网络里有没有这个 id。
         return withCors(req, Response.json({ ok: false, error: "request_not_found" }, { status: 404 }));
       }
-      return withCors(req, Response.json({ ok: true, request: row }));
+      return withCors(req, Response.json({ ok: true, request: {...row,...(restScope.agentRestriction?.networkIds.includes(String(row.network_id)) ? {} : {execution:executionProjection(db,String(row.request_id),String(row.network_id),String(row.status))})} }));
     }
 
     if (url.pathname === "/api/host-supervisors") {

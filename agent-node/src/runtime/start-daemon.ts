@@ -1,3 +1,4 @@
+import { hostCommandOnce, receiptCall } from "./host-execution-receipt.js";
 // Daemon-side start_node handler. The Hub doorbell is only a wake-up;
 // get_start_request is the authenticated envelope. Before spawning we bind
 // that envelope to the daemon-owned local config and the pinned anet binary.
@@ -95,7 +96,7 @@ export function verifyStoppedChildConfig(
   return configPath;
 }
 
-export async function handleStartDoorbell(
+async function handleStartDoorbellImpl(
   event: { request_id: string },
   deps: StartDoorbellDeps,
 ): Promise<void> {
@@ -107,9 +108,18 @@ export async function handleStartDoorbell(
     deps.warn(`[start-daemon] get_start_request failed: ${e?.message || e}`);
     return;
   }
+  if ((req as any)?.execution_receipt) return;
   if (!req?.ok || !req.child_node_id || !req.child_alias) {
     deps.warn(`[start-daemon] request rejected: ${req?.error || "invalid_envelope"}`);
     return;
+  }
+  if ((req as any).execution_receipt) return; // persisted terminal observation: never spawn again
+  const receiptContext = {requestId:event.request_id,nodeId:req.child_node_id,alias:req.child_alias,operation:'start' as const,
+    sessionId:null as string|null,wrapperPath:undefined as string|undefined,enabled:req.managed !== 'adopted'};
+  deps = {...deps,callCommHub:receiptCall(deps.callCommHub,receiptContext,(req as any).execution_receipt_capable === 1)};
+  if ((req as any).execution_receipt_capable === 1 && (req as any).delivery_state_before_pull !== 'pending') {
+    await deps.callCommHub('ack_start_request',{request_id:event.request_id,status:'start_failed',error:'execution_outcome_unknown'});
+    return; // no new side effect after a lost claim / process restart
   }
   // Only the authenticated envelope can authorize this per-request action.
   // Reject malformed/unconfirmed recovery before any adopted/legacy launcher.
@@ -127,6 +137,7 @@ export async function handleStartDoorbell(
       status: "start_failed", error: "codex_fork_recovery_unsupported" });
     return;
   }
+  if (adoptedChild(deps.workDir,req.child_alias)) receiptContext.enabled=false;
   if (!recovery && deps.adoption && await handleAdoptedLifecycle({ request_id: event.request_id, child_node_id: req.child_node_id,
     child_alias: req.child_alias, action: "start" }, deps.adoption)) return;
   // Missing adoption context is fail-closed; never use the created-child path.
@@ -154,6 +165,13 @@ export async function handleStartDoorbell(
     const config = JSON.parse(readFileSync(cfgPath, "utf8"));
     codexCopresence = config?.codexCopresence === true;
     runtime = config?.runtime;
+    receiptContext.sessionId = typeof config.session === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(config.session) ? config.session : null;
+    // No verified safe PTY/wrapper contract on this daemon path. Do not silently
+    // add auto-confirm, credentials or permission switches to make it launch.
+    if (runtime === 'claude-code-cli' || runtime === 'claude-code') {
+      await deps.callCommHub('ack_start_request',{request_id:event.request_id,status:'start_failed',error:'legacy_execution_unsupported'});
+      return;
+    }
     opencodeCopresence = hasBorrowedV1Intent(verifiedChildDir,config)
       || (runtime === "opencode-cli" && config?.opencodeMode === "copresence" && config?.opencodeGeneration === "v2");
   } catch (e: any) {
@@ -171,6 +189,7 @@ export async function handleStartDoorbell(
   }
 
   // V2 must never fall back to a spawn-only success on older Hubs.
+  if (codexCopresence || opencodeCopresence) receiptContext.enabled=false;
   if (opencodeCopresence) {
     if (req.start_completion_capable !== true) {
       await deps.callCommHub("ack_start_request", { request_id: event.request_id,
@@ -232,7 +251,7 @@ export async function handleStartDoorbell(
   }
 
   let anetBin: string;
-  try { anetBin = (deps.anetBin ?? getAnetBinAbs)(); }
+  try { anetBin = (deps.anetBin ?? getAnetBinAbs)(); receiptContext.wrapperPath=anetBin; }
   catch (e: any) {
     await deps.callCommHub("ack_start_request", {
       request_id: event.request_id, status: "start_failed", error: `bin: ${e?.message || e}`,
@@ -279,4 +298,8 @@ export async function handleStartDoorbell(
       request_id: event.request_id, status: "start_failed", error,
     }).catch(() => {});
   }
+}
+
+export async function handleStartDoorbell(event: {request_id:string}, deps:StartDoorbellDeps) {
+  return hostCommandOnce(event.request_id,deps.callCommHub,()=>handleStartDoorbellImpl(event,deps));
 }

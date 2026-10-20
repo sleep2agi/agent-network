@@ -64,6 +64,8 @@ L0_TESTS=(
   #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
 L1_TESTS=(
+  # #1493: local HTTP/SQLite + process receipts and rollback mutants; no host or nested Docker.
+  "test1493-host-execution"
   # board #703: a bridge/watchdog restart must recover the exact persisted
   # Codex turn and emit one durable receipt without re-running the model.
   "test703-codex-turn-receipts"
@@ -613,6 +615,9 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
         done < "tests/$t/docker-run.args"
       fi
       _qa_run_flags=""
+      if [[ "$t" == "test1493-host-execution" ]]; then
+        _qa_run_flags="--network none --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=256m --cap-drop ALL --security-opt no-new-privileges --pids-limit 256"
+      fi
       if [[ "$t" == "test658-codex-adopt-stop" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       if [[ "$t" == "test674-binding-generation" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
       if [[ "$t" == "test-agent-team-whoami" ]]; then _qa_run_flags="--init --cpus=2 --network none"; fi
