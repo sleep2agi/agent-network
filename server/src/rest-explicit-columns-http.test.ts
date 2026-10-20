@@ -76,7 +76,7 @@ const GOLDEN_RESPONSE_KEYS = {
     "schedule_id", "network_id", "name", "target_node_id", "target_alias",
     "task_content", "priority", "schedule_type", "timezone", "overlap_policy",
     "misfire_policy", "status", "next_run_at", "last_run_at", "revision",
-    "created_at", "updated_at", "schedule",
+    "created_at", "updated_at", "schedule", "watchers", "is_watcher", "can_edit", "can_manage_watchers",
   ],
 } as const;
 

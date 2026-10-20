@@ -735,6 +735,63 @@ function writeAllowed(ctx: ScheduledRequestContext, networkId: string | null): b
   return !ctx.isNodeToken && canRestWriteNetwork(ctx.auth, networkId, ctx.isAdmin);
 }
 
+
+type WatcherPublic = { user_id: string; username: string; display_name: string };
+
+function scheduleWatchers(scheduleId: string): WatcherPublic[] {
+  return db.all<{ user_id: string; username: string; display_name: string | null }>(
+    `SELECT w.user_id, u.username, u.display_name
+     FROM scheduled_task_watchers w JOIN users u ON u.user_id = w.user_id
+     WHERE w.schedule_id = ?1 ORDER BY u.username`,
+    [scheduleId],
+  ).map(row => ({ user_id: row.user_id, username: row.username, display_name: row.display_name ?? "" }));
+}
+
+function userInNetwork(userId: string, networkId: string): boolean {
+  if (db.get("SELECT 1 AS ok FROM network_members WHERE network_id = ?1 AND user_id = ?2", [networkId, userId])) return true;
+  return !!db.get("SELECT 1 AS ok FROM networks WHERE network_id = ?1 AND owner_id = ?2", [networkId, userId]);
+}
+
+function replaceScheduleWatchers(scheduleId: string, networkId: string, raw: unknown): void {
+  if (!Array.isArray(raw) || raw.length > 20) throw new ScheduleInputError("invalid_watchers", 400);
+  const ids: string[] = [];
+  for (const item of raw) {
+    const id = typeof item === "string" ? item : item && typeof item === "object" && typeof (item as { user_id?: unknown }).user_id === "string" ? (item as { user_id: string }).user_id : "";
+    if (!id || id.length > 200) throw new ScheduleInputError("invalid_watchers", 400);
+    if (!ids.includes(id)) ids.push(id);
+  }
+  for (const id of ids) {
+    if (!userInNetwork(id, networkId)) throw new ScheduleInputError("watcher_not_in_network", 400, { user_id: id });
+  }
+  db.run("DELETE FROM scheduled_task_watchers WHERE schedule_id = ?1", [scheduleId]);
+  for (const id of ids) db.run("INSERT INTO scheduled_task_watchers (schedule_id, user_id) VALUES (?1, ?2)", [scheduleId, id]);
+}
+
+function watchingSchedule(scheduleId: string, userId: string | null): boolean {
+  if (!userId) return false;
+  return !!db.get("SELECT 1 AS ok FROM scheduled_task_watchers WHERE schedule_id = ?1 AND user_id = ?2", [scheduleId, userId]);
+}
+
+function canManageWatchers(row: ScheduledRow, ctx: ScheduledRequestContext): boolean {
+  const uid = ctx.auth?.userId ?? null;
+  if (ctx.isAdmin) return true;
+  if (uid && row.created_by === uid) return true;
+  return !row.created_by && writeAllowed(ctx, row.network_id);
+}
+
+function decorateSchedule(row: ScheduledRow, ctx: ScheduledRequestContext): Record<string, unknown> {
+  const watchers = scheduleWatchers(row.schedule_id);
+  const uid = ctx.auth?.userId ?? null;
+  const isWatcher = !!uid && watchers.some(w => w.user_id === uid);
+  return {
+    ...decodeRow(row),
+    watchers,
+    is_watcher: isWatcher,
+    can_edit: writeAllowed(ctx, row.network_id) || isWatcher,
+    can_manage_watchers: canManageWatchers(row, ctx),
+  };
+}
+
 export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): Promise<Response | null> {
   const { req, url } = ctx;
   if (url.pathname !== "/api/scheduled-tasks" && !url.pathname.startsWith("/api/scheduled-tasks/")) return null;
@@ -746,8 +803,14 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     sql = addNetworkScope(sql, params, ctx.scope);
     const status = url.searchParams.get("status");
     if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
+    const uid = ctx.auth?.userId ?? null;
+    const networkId = singleNetworkId(ctx.scope) ?? ctx.auth?.networkId ?? null;
+    if (uid && networkId && !writeAllowed(ctx, networkId)) {
+      sql += ` AND schedule_id IN (SELECT schedule_id FROM scheduled_task_watchers WHERE user_id = ?${params.length + 1})`;
+      params.push(uid);
+    }
     sql += " ORDER BY updated_at DESC LIMIT 500";
-    return Response.json({ ok: true, schedules: db.all<ScheduledRow>(sql, ...params).map(decodeRow) });
+    return Response.json({ ok: true, schedules: db.all<ScheduledRow>(sql, ...params).map(row => decorateSchedule(row, ctx)) });
   }
 
   if (url.pathname === "/api/scheduled-tasks" && req.method === "POST") {
@@ -758,8 +821,10 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     if (!writeAllowed(ctx, networkId)) return jsonError("permission_denied", 403);
     try {
       const created = insertSchedule(networkId, ctx.auth?.userId ?? null, null, validateScheduleCreate(networkId, body));
-      return Response.json({ ok: true, schedule: decodeRow(created) }, { status: 201 });
+      if (body.watchers !== undefined) replaceScheduleWatchers(created.schedule_id, networkId, body.watchers);
+      return Response.json({ ok: true, schedule: decorateSchedule(getScheduleRow(created.schedule_id)!, ctx) }, { status: 201 });
     } catch (e: any) {
+      if (e instanceof ScheduleInputError) return jsonError(e.code, e.status, e.extra);
       const code = String(e?.message || "invalid_schedule");
       const status = code === "target_node_not_found" ? 404 : 400;
       return jsonError(code, status);
@@ -777,8 +842,11 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
     return Response.json({ ok: true, ...scheduleRuns(row, limit) });
   }
-  if (!sub && req.method === "GET") return Response.json({ ok: true, schedule: decodeRow(row) });
-  if (!writeAllowed(ctx, row.network_id)) return jsonError("permission_denied", 403);
+  if (!sub && req.method === "GET") return Response.json({ ok: true, schedule: decorateSchedule(row, ctx) });
+  const watcher = watchingSchedule(row.schedule_id, ctx.auth?.userId ?? null);
+  const writer = writeAllowed(ctx, row.network_id);
+  if (!writer && !watcher) return jsonError("permission_denied", 403);
+  if (!writer && (sub === "cancel" || (!sub && req.method === "DELETE"))) return jsonError("watcher_cannot_cancel", 403);
 
   if (sub === "run-now" && req.method === "POST") {
     if (row.status === "cancelled") return jsonError("schedule_cancelled", 409);
@@ -808,8 +876,11 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   if (!sub && req.method === "PATCH") {
     let body: Record<string, unknown>;
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
+    if (body.watchers !== undefined && !canManageWatchers(row, ctx)) return jsonError("watcher_cannot_manage_watchers", 403);
     try {
-      return Response.json({ ok: true, schedule: decodeRow(patchSchedule(row, body, ctx.auth?.userId ?? null)) });
+      const updated = patchSchedule(row, body, ctx.auth?.userId ?? null);
+      if (body.watchers !== undefined) replaceScheduleWatchers(updated.schedule_id, updated.network_id, body.watchers);
+      return Response.json({ ok: true, schedule: decorateSchedule(getScheduleRow(updated.schedule_id)!, ctx) });
     } catch (e: any) {
       if (e instanceof ScheduleInputError) return jsonError(e.code, e.status, e.extra);
       throw e;
