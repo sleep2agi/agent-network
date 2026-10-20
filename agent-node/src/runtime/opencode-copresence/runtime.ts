@@ -159,6 +159,8 @@ export interface OpenCodeCopresenceSession {
       onCapacityRetry?: (attempt: number) => void | Promise<void>;
       /** Test seam for the 30s / 60s / 120s capacity backoff. */
       capacityRetrySleep?: (ms: number) => Promise<void>;
+      /** Once, when admission sees a non-idle session. Does not shorten the wait. */
+      onAdmissionBusy?: () => void | Promise<void>;
     },
   ): Promise<OpenCodeCopresenceSubmitResult>;
   /** `restart: true` keeps the human TUI's tmux pane alive with a placeholder for the next generation (#1957). */
