@@ -4160,6 +4160,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   );
 
 
+  // #1511 — stop_node（§4.3 D4）与 restart_node 共用的「在途任务」计数。
+  // 计数规则见 stop_node 内的长注释（#2022/#2029 修订：能成为「本节点正在做的
+  // 工作」的行才算——tasks 行按状态判、终态不算且不设龄上限；无状态行按 60 分钟
+  // 龄判）。抽成一处后，两个闸门共享同一份 SQL，不再各自漂移。
+  const IN_FLIGHT_MAX_AGE_MINUTES = 60;
+  function countInFlightTasks(alias: string, networkId: string | null): number {
+    const row = db.get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM inbox i
+         LEFT JOIN tasks t
+           ON i.type = 'task'
+          AND t.task_id = COALESCE(i.task_id, i.id)
+        WHERE i.session_name = ?1 AND i.acked = 0
+          AND COALESCE(i.network_id, ?2) = ?2
+          AND ((t.task_id IS NOT NULL
+                AND t.status NOT IN ('replied', 'failed', 'cancelled', 'expired'))
+            OR (t.task_id IS NULL
+                AND i.created_at >= datetime('now', ?3)))`,
+      alias, networkId, `-${IN_FLIGHT_MAX_AGE_MINUTES} minutes`,
+    );
+    return row?.n ?? 0;
+  }
+
   server.tool(
     "restart_node",
     "Trigger a node restart without changing config. RFC-024 Vincent 2026-06-28 increment. Network-scoped (SEC-1); member+ role suffices (lifecycle ops are not privilege elevation).",
@@ -4188,6 +4210,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!createdDaemon(nodeId) && activeBinding(nodeId)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false,
           error: "adopted_restart_requires_daemon", message: "Use Stop, then Start for this adopted node." }) }] };
+      }
+      // #1511 — 正在跑任务时不自动重启，只提示。节点侧 exit-75 的 drain 只等
+      // 60 秒、超时会硬打断当前回合（agent-node cli.ts drainInFlightThink），
+      // 所以 Hub 端在派发前就按 stop_node 同一条在途计数规则拒绝，客户端拿到
+      // 明确二选一：等任务完成后重试，或到节点所在机器手动重启。
+      //
+      // 🔴 只对 active 节点生效（qa-rfc027 A.4 收据）。stopped 节点的进程已死、
+      // 任务不可能"正在跑"，其 unacked 行是 stop 留下的尸体（force-stop 的产物）；
+      // restart_node 在 stopped 节点上的契约恰是 PR1.2a 的 un-stop 唯一出口，
+      // 用尸体行挡它=把停止→重启→恢复这条路堵死。lifecycle_state 需单独取：
+      // resolveTargetNode 的 SELECT 不含该列。
+      const restartLifecycle = db.get<{ lifecycle_state: string | null }>(
+        "SELECT lifecycle_state FROM nodes WHERE node_id = ?1", nodeId,
+      )?.lifecycle_state ?? null;
+      if (restartLifecycle === "active") {
+        const busyCount = countInFlightTasks(node.alias, node.network_id);
+        if (busyCount > 0) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: false, error: "node_busy_in_flight", in_flight_count: busyCount,
+            hint: "节点正在执行任务，本次未安排重启；等它完成后再试，或到节点所在机器手动重启",
+          }) }] };
+        }
       }
       // F-B reaper: same stale-supersede semantics as update_node_config,
       // with same acked_at-anchored liveness clock (see update_node_config
@@ -5449,21 +5493,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     //      ever retire them, so they get the age ceiling
     //      IN_FLIGHT_MAX_AGE_MINUTES on inbox.created_at.
     // The count stays a per-alias inbox count: one PK join per row.
-    const IN_FLIGHT_MAX_AGE_MINUTES = 60;
-    const inFlightRow = db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM inbox i
-         LEFT JOIN tasks t
-           ON i.type = 'task'
-          AND t.task_id = COALESCE(i.task_id, i.id)
-        WHERE i.session_name = ?1 AND i.acked = 0
-          AND COALESCE(i.network_id, ?2) = ?2
-          AND ((t.task_id IS NOT NULL
-                AND t.status NOT IN ('replied', 'failed', 'cancelled', 'expired'))
-            OR (t.task_id IS NULL
-                AND i.created_at >= datetime('now', ?3)))`,
-      node.alias, node.network_id, `-${IN_FLIGHT_MAX_AGE_MINUTES} minutes`,
-    );
-    const inFlight = inFlightRow?.n ?? 0;
+    // （计数实现抽到上方 countInFlightTasks —— #1511 让 restart_node 共用同一份规则，
+    // 判据本身未变。）
+    const inFlight = countInFlightTasks(node.alias, node.network_id);
     if (inFlight > 0 && !args.force) {
       return { ok: false, error: "node_busy_in_flight", in_flight_count: inFlight, hint: "set force=true to override (audit logged)" };
     }
