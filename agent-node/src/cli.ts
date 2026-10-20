@@ -4141,6 +4141,7 @@ async function processWithOpencode(
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
       onCapacityRetry: reportCapacityRetry,
+      onAdmissionBusy: () => reportStatus("working", "共享会话忙，任务还没提交，正在等 TUI 这轮结束").catch(() => {}),
     }).catch(error => {
       if (opencodeBorrowedCli && !runtime.isRunning) clearBorrowedLaunchHealth?.();
       throw error;

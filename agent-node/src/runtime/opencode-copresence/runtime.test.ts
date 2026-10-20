@@ -923,7 +923,11 @@ describe("OpenCode copresence task deadline", () => {
     const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000", FAKE_LOG: log });
     try {
       let thrown: any;
-      try { await runtime.submit("queued", 300); } catch (error) { thrown = error; }
+      let busyNotes = 0;
+      try {
+        await runtime.submit("queued", 300, undefined, { onAdmissionBusy: () => { busyNotes += 1; } });
+      } catch (error) { thrown = error; }
+      expect(busyNotes).toBe(1);
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
       expect(thrown.phase).toBe("admission");
       expect(thrown.aborted).toBe(false);

@@ -501,15 +501,23 @@ async function waitUntilSessionIdle(
   sessionId: string,
   timeoutMs: number,
   request = (path: string, init: RequestInit = {}, ms = 2_000) => fetchJson(url, password, path, init, ms),
+  onBusy?: () => void | Promise<void>,
 ): Promise<void> {
   // `timeoutMs <= 0` = wait without a deadline.
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY;
+  let notedBusy = false;
   while (Date.now() < deadline) {
     try {
       const statuses = await request("/session/status", {}, 2_000);
       if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
         const state = statuses[sessionId];
         if (state?.type === "idle") return;
+        // A named non-idle state is a shared TUI turn, not a missing session.
+        // Say so once. Undefined still means "maybe idle" and must not alarm.
+        if (!notedBusy && state && typeof state === "object" && state.type && state.type !== "idle") {
+          notedBusy = true;
+          await onBusy?.();
+        }
         if (state === undefined) {
           // Pinned OpenCode 1.18.1 returns an empty status map for an idle
           // session, so absence alone cannot be rejected. Distinguish the
@@ -820,6 +828,8 @@ export async function openVettedOpenCodeCopresence(
           onConsumed?: () => void;
           onCapacityRetry?: (attempt: number) => void | Promise<void>;
           capacityRetrySleep?: (ms: number) => Promise<void>;
+          /** Once, when admission sees a non-idle session. Does not shorten the wait. */
+          onAdmissionBusy?: () => void | Promise<void>;
         },
       ) {
         const operation = queue.then(async () => {
@@ -831,7 +841,7 @@ export async function openVettedOpenCodeCopresence(
           const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
           let deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
           let capacityRetries = 0;
-          await waitUntilSessionIdle(url, password, created.id, budgetMs, request);
+          await waitUntilSessionIdle(url, password, created.id, budgetMs, request, evidence?.onAdmissionBusy);
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
