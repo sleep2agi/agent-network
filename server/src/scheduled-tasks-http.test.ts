@@ -670,6 +670,10 @@ describe("Hub scheduled task API and dispatcher", () => {
     const cancel = await api(viewerToken, `/api/scheduled-tasks/${schedule.schedule_id}/cancel?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
     expect(cancel.status).toBe(403);
     expect(cancel.body.error).toBe("watcher_cannot_cancel");
+
+    const runNow = await api(viewerToken, `/api/scheduled-tasks/${schedule.schedule_id}/run-now?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
+    expect(runNow.status).toBe(403);
+    expect(runNow.body.error).toBe("watcher_cannot_run");
   });
 
 });

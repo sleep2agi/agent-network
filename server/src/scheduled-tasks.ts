@@ -841,6 +841,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   const writer = writeAllowed(ctx, row.network_id);
   if (!writer && !watcher) return jsonError("permission_denied", 403);
   if (!writer && (sub === "cancel" || (!sub && req.method === "DELETE"))) return jsonError("watcher_cannot_cancel", 403);
+  if (!writer && sub === "run-now") return jsonError("watcher_cannot_run", 403);
 
   if (sub === "run-now" && req.method === "POST") {
     if (row.status === "cancelled") return jsonError("schedule_cancelled", 409);
