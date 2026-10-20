@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="docs/assets/readme/logo.png" width="96" height="96" alt="Agent Network logo">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/anet-mark-dark.svg">
+  <img src="docs/assets/readme/anet-mark-light.svg" width="96" height="96" alt="Agent Network logo">
+</picture>
 
 # Agent Network
 
