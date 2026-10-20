@@ -73,6 +73,16 @@ Project-local node state is under `.anet/nodes/<alias>/`:
 3. `secrets.env` in the node directory (what `anet node secret set` writes) — **fill-only**, never overriding the two above.
 
 `secrets.env` must be a regular 0600 file owned by the current user; a symlink, a non-regular file or a wrong mode makes the **whole file** inapplicable (never partially applied). Reserved keys (`PATH`, `LD_*`, `NODE_*`, …) are skipped. A missing file is a normal state.
+
+The Hub vault is **not** a fourth layer. `list_network_secrets` and `GET /api/secrets` return names only; `agent-node --config` does not ask the vault for a value at startup. `create_node` `env_refs` do not read the vault either, so a name on the token page is not a value in this process.
+
+A secret the Hub delivers has to land in a local file first, then fill empty slots on the **next full start** (it does not override process env, and it does not override `config.json` `env`):
+
+- the node-private lane writes `node-secrets.json`;
+- daemon-scoped secrets write `scoped-secrets.json`, and a node value of the same name wins;
+- a create-node `env_blob` is written to `secrets.env`.
+
+All three are read only on the next full start. Restarting the bridge alone does not update the TUI or server. Receipts and `list` show key names only. The same section in Chinese: [启动时的环境变量优先级](/guide/agent-node#启动时的环境变量优先级).
 User login and the active network are stored globally in `~/.anet/config.json`. Do not commit project `.anet`, tokens, or `.env`.
 
 envRef keeps only an environment-variable reference in `config.json`; the real value may still be stored in the node's mode-0600 `.env`. Inspect the backup and target variable before migration:

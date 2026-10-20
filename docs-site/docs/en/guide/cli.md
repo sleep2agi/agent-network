@@ -481,7 +481,8 @@ the default for every child, which is a permission decision, never an accident. 
 
 Both commands are entries into the existing `daemon_provider_snapshot` `secret_*` actions —
 no second read/write path. Values load on the node's next **full** start; restarting the
-bridge alone does not update the native TUI/server.
+bridge alone does not update the native TUI/server. A name on the Hub token page is not
+injected into this process. Precedence: [Environment precedence at startup](/en/guide/agent-node#environment-precedence-at-startup).
 
 ## Adopt manually started nodes (preview source, board #626)
 

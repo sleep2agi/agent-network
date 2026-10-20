@@ -488,6 +488,7 @@ anet daemon secret unset <daemon> <KEY> (--node <alias> | --all)
 底层仍是 `daemon_provider_snapshot` 的 `secret_*` 管理动作；CLI 只是同一套读写的入口，
 不新增第二条路径。Daemon 默认值由节点继承，节点同名值优先；已有显式进程/config/Provider 配置保持优先。
 值在节点下次**完整启动**时加载，单独重启 Bridge 不等于原生 TUI/server 已更新。
+Hub 令牌页上的金库名字不会自动进这个进程；启动优先级见 [节点文件](/guide/agent-node#启动时的环境变量优先级)。
 完整契约与恢复边界见仓库 `docs/scoped-secrets.md`；0.2.248 演示入口不能计为已支持。
 
 以下能力存在于当前 preview，不应写成 stable 已支持：

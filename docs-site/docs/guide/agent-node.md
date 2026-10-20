@@ -73,6 +73,16 @@ anet node start my-agent --tmux
 3. 节点目录下的 `secrets.env`（`anet node secret set` 写的那份）——**只填空位**，不会覆盖前两层。
 
 `secrets.env` 的约束：必须 0600 的普通文件且属于当前用户；符号链接、非普通文件、权限不对时**整份不生效**（不是部分生效）。保留键（`PATH`、`LD_*`、`NODE_*` 等）会被跳过。文件不存在是正常状态。
+
+Hub 金库**不是**上面的第四层。`list_network_secrets` 和 `GET /api/secrets` 只返回名字；`agent-node --config` 启动时不会向金库要明文。`create_node` 的 `env_refs` 目前也不读金库，所以「令牌页上有这个名字」不等于这个进程里有这个值。
+
+Hub 下发的密钥要先落成本地文件，再在**下次完整启动**时按第 3 层补空位（不会覆盖已经存在的进程环境，也不会覆盖 `config.json` 的 `env`）：
+
+- 节点私有通道写入 `node-secrets.json`；
+- Daemon 范围密钥写入 `scoped-secrets.json`，节点同名值优先；
+- 创建节点时的 `env_blob` 写成 `secrets.env`。
+
+这三份都只在下次完整启动时读入。单独重启 Bridge 不会让 TUI 或 server 看到新值。回执和 `list` 只出 key 名。英文同一节：[Environment precedence at startup](/en/guide/agent-node#environment-precedence-at-startup)。
 全局的用户登录与当前 network 位于 `~/.anet/config.json`。不要提交项目 `.anet`、token 或 `.env`。
 
 envRef 让 `config.json` 只保存环境变量引用；实际值仍可能存入节点的 mode-0600 `.env`。迁移前先检查备份和目标变量：
