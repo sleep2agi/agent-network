@@ -7,6 +7,24 @@ on:
       - 'agent-network/src/opencode-agent-node-pair*'
       - 'tests/test906-provider-create/Dockerfile.pair'
       - '.github/workflows/release-pair-core.yml'
+  # #1976 —— 成对校验也要在 main 上跑。
+  #
+  # 事故(2026-10-20/21):agent-node 发了 preview.151,而 agent-network 里的
+  # PAIRED_AGENT_NODE_VERSION 还钉在 .150。这个工作流只在 PR 与手动 dispatch 时跑,
+  # 于是 main 上**没有任何一个 job 叫「配对」** —— 版本漂移是从
+  # `hub semantics + guards` 那一族 15 个 job 的红里冒出来的(每个红都指向别的失败,
+  # 没有人一眼看出「是一个常量没跟上」)。#2861 那一行 .150→.151 就是实证。
+  #
+  # 有了这个 push 触发:同样的漂移会在**配对这一个 job** 上红,报错直接指向常量。
+  # 代价是每次 main push 多一个 5 分钟的 job。
+  push:
+    branches: [main]
+    paths:
+      - 'agent-network/package*.json'
+      - 'agent-node/package*.json'
+      - 'agent-network/src/opencode-agent-node-pair*'
+      - 'tests/test906-provider-create/Dockerfile.pair'
+      - '.github/workflows/release-pair-core.yml'
   workflow_dispatch:
 permissions:
   contents: read
