@@ -148,7 +148,9 @@ describe("agent-node inbox wiring", () => {
       "processWithGrokCopresence(task, from, taskId, images, evidence)",
       "processWithGrokCli(task, from, images, evidence)",
       "processWithGrok(task, from, images, evidence)",
-      "processWithOpencode(task, from, images, evidence)",
+      // #1879 ③ —— opencode 这条多带一个 taskId：排队项要绑定到具体的任务与
+      // 提交者（负责人离开时终止要能点名是谁的那条任务）。reporter 仍然照传。
+      "processWithOpencode(task, from, images, evidence, taskId)",
       "processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt)",
       "processWithClaude(task, from, images, evidence)",
     ]) {
