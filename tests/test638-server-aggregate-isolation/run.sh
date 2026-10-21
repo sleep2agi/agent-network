@@ -29,7 +29,64 @@ cleanup() {
   rm -f -- "${PROBES[@]}"
   rmdir server/src/test639 2>/dev/null || true
 }
-trap cleanup EXIT
+
+# 🔴 #1963 (board): 红的时候必须留下**哪条断言**失败。
+#
+# 之前只有 dump_agg_failure 会往 ARTIFACT_DIR 拷东西 —— 它只覆盖 L1/L2 的
+# 聚合退出码。L3 之后的断言（count drift / aggregate not green / DB map
+# one-to-one / fixture shape / 各阶段 .out 的 grep）一旦失败就是裸的
+# `exit 1`：整份聚合输出没有落到 artifact，CI 上只剩一句
+# 「L2 之后 exit1」，查的人拿不到失败断言原文（#1961 的归因就卡在这）。
+#
+# 这里补两件事，**不改任何断言**：
+#   1) STAGE：每个阶段开头更新，失败时写进 artifact 与 stdout；
+#   2) EXIT trap：任何非零退出都把三份聚合输出、strace 与各阶段 .out 落盘，
+#      并把每个输出文件的尾部打进 stdout（artifact 之外的第二份现场）。
+STAGE=bootstrap
+
+save_failure_artifacts() {
+  local rc="$1"
+  set +e
+  if [ -n "${ARTIFACT_DIR:-}" ]; then
+    mkdir -p "$ARTIFACT_DIR" 2>/dev/null || true
+    {
+      echo "stage=$STAGE"
+      echo "rc=$rc"
+      echo "out1=$OUT1"
+      echo "out2=$OUT2"
+      echo "out3=$OUT3"
+      echo "trace1=$TRACE1"
+    } > "$ARTIFACT_DIR/fail-context.txt" 2>/dev/null
+    local f
+    for f in "$OUT1" "$OUT2" "$OUT3" "$TRACE1" \
+      /tmp/test638-no-db-upload.out /tmp/test638-no-db-host.out \
+      /tmp/test638-nonzero.out /tmp/test638-timeout.out /tmp/test638-signal.out \
+      /tmp/test639-missing-summary.out /tmp/test639-spawn-fail.out \
+      /tmp/test639-slug-collision.out /tmp/test639-slug-mutation.out \
+      /tmp/test638-mutation.out; do
+      [ -f "$f" ] && cp -- "$f" "$ARTIFACT_DIR/$(basename "$f")" 2>/dev/null
+    done
+    echo "--- saved failure artifacts (stage=$STAGE) to \$ARTIFACT_DIR ---"
+  fi
+  # stdout 里再留一份：不看 artifact 的人也能从 CI 日志读到失败现场。
+  local g
+  for g in "$OUT1" "$OUT2" "$OUT3"; do
+    if [ -f "$g" ]; then
+      echo "--- tail -60 of $g (stage=$STAGE) ---"
+      tail -60 "$g"
+    fi
+  done
+  set -e
+}
+
+on_exit() {
+  local rc=$?
+  cleanup
+  save_failure_artifacts "$rc"
+  # 保留原始退出码：trap 里不显式 exit，bash 沿用进入 trap 时的状态。
+  return $rc
+}
+trap on_exit EXIT
 dump_agg_failure() {
   # #1274: aggregate 失败时把诊断吐给 CI —— 否则 set -e 无声死，红无任何指名信息
   local label="$1" output="$2" rc="$3"
@@ -84,6 +141,7 @@ run_one() {
     bun run --cwd server test "${args[@]}" >"$output" 2>&1
 }
 
+STAGE=L1
 echo "L1: normal order under strace"
 set +e
 NODE_ENV=test DATABASE_URL='postgres://must-not-be-inherited.invalid/prod' COMMHUB_DB="$SHARED_DB" \
@@ -93,6 +151,7 @@ rc1=$?
 set -e
 [[ $rc1 -eq 0 ]] || { dump_agg_failure "L1" "$OUT1" "$rc1"; exit 1; }
 
+STAGE=L2
 echo "L2: concurrent normal + reverse order"
 set +e
 run_one "$RUN2" "$OUT2" normal & p2=$!
@@ -124,6 +183,7 @@ for output in "$OUT1" "$OUT2" "$OUT3"; do
   [[ $maps -gt 0 && $maps -eq $unique_maps ]] || { echo "FAIL: DB map not one-to-one in $output ($maps/$unique_maps)"; exit 1; }
 done
 
+STAGE=L3
 echo "L3: syscall DB scope + cross-suite fixtures"
 [[ $(grep -F -c "$SHARED_DB" "$TRACE1" || true) -eq 0 ]] || { echo "FAIL: inherited shared DB was opened"; exit 1; }
 outside=$(grep -oE '/tmp/[^" ]*commhub\.db' "$TRACE1" | grep -v "^$RUN1/" || true)
@@ -138,6 +198,7 @@ host_shape=$(TEST638_DB="$host_db" bun -e 'import {Database} from "bun:sqlite";c
 [[ "$host_shape" =~ ^0:[1-9][0-9]*$ ]] || { echo "FAIL: host fixture/cross-leak shape=$host_shape"; exit 1; }
 [[ ! -e "$SHARED_DB" ]] || { echo "FAIL: shared DB exists"; exit 1; }
 
+STAGE=L4
 echo "L4: standalone real-server tests fail closed without explicit DB"
 set +e
 NODE_ENV=test DATABASE_URL= COMMHUB_DB= bun test server/src/uploads-http.test.ts >/tmp/test638-no-db-upload.out 2>&1; nodb1=$?
@@ -147,6 +208,7 @@ set -e
 grep -F 'explicit_test_database_required' /tmp/test638-no-db-upload.out >/dev/null
 grep -F 'explicit_test_database_required' /tmp/test638-no-db-host.out >/dev/null
 
+STAGE=L5
 echo "L5: nonzero, timeout, signal, missing summary, and spawn failure cannot greenwash"
 printf '%s\n' 'import {test} from "bun:test";' 'test("nonzero",()=>{throw new Error("test638_expected_nonzero")});' > server/src/test638-nonzero.test.ts
 set +e
@@ -194,6 +256,7 @@ set -e
 grep -F $'TEST_FILE_RESULT\tserver/src/db-adapter-guard.test.ts\tpass=0\tfail=0\tskip=0\texpects=0\texit=null' /tmp/test639-spawn-fail.out >/dev/null
 grep -F 'SERVER_AGGREGATE_RESULT' /tmp/test639-spawn-fail.out | grep -F '"bad":true' >/dev/null
 
+STAGE=L5b
 echo "L5b: slug collisions fail before --file filtering"
 printf '%s\n' 'import {test,expect} from "bun:test";' 'test("flat collision fixture",()=>expect(true).toBe(true));' > server/src/test639-collision.test.ts
 mkdir -p server/src/test639
@@ -217,6 +280,7 @@ grep -F $'TEST_FILE_RESULT\tserver/src/test639-collision.test.ts\tpass=1\tfail=0
 rm -f -- server/src/test639-collision.test.ts server/src/test639/collision.test.ts server/scripts/test-aggregate-mutation.ts
 rmdir server/src/test639
 
+STAGE=L6
 echo "L6: deletion of per-file DB split is witnessed-red"
 cp server/scripts/test-aggregate.ts server/scripts/test-aggregate-mutation.ts
 sed -i 's/const suiteRoot = join(runRoot, slugFor(file));/const suiteRoot = join(runRoot, "shared");/' server/scripts/test-aggregate-mutation.ts
