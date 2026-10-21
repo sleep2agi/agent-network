@@ -32,6 +32,7 @@ import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { flagOrphanTasks } from "./task-orphan.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { pickAliasNetwork } from "./rest-alias-network-fallback.js";
 import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
 import { listAdoptionCandidates, snapshotReportsAdoptionDiscovery } from "./adoption-candidates.js";
 import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./restricted-files.js";
@@ -3778,6 +3779,37 @@ return Bun.serve({
           error: "network_id_required",
           message: "network_id is required when the user token has zero or multiple network memberships",
         }, { status: 400 })));
+      }
+      // #1974 —— alias 不在请求的网络里、但在调用者**另一个**网络里(且唯一)⇒ 发到那儿去。
+      // 客户端的 Agent 列表是跨网络的(/api/status?light=1 不带 network_id),发送却带着
+      // 「登录时选的那一个网络」;多网络账号因此给别的网络里的 Agent 发消息一律 404
+      // (tang → tang02,2026-10-21)。旧客户端不改也能立刻受益。
+      // 找不到 / 多个网络同名 / 没权限 ⇒ 不动,保持原来的 404。
+      if (restAuth && taskNetId) {
+        const canonicalAlias = resolveCanonicalAlias(taskNetId, body.alias).alias;
+        const memberNets = getUserNetworkIds(restAuth.userId);
+        const netsWithAlias = memberNets.filter(n => !!db.get(
+          "SELECT 1 AS ok FROM sessions WHERE alias = ?1 AND network_id = ?2",
+          [canonicalAlias, n],
+        ));
+        const alt = pickAliasNetwork({
+          alias: canonicalAlias,
+          requestedNetworkId: taskNetId,
+          memberNetworkIds: memberNets,
+          networksWithAlias: netsWithAlias,
+          canWrite: (net) => canRestWriteNetwork(restAuth, net, isAdmin),
+          canMessage: (net) => {
+            if (isAgentRestricted(restAuth.userId, net)) {
+              const row = db.get<{ node_id: string | null }>(
+                "SELECT node_id FROM sessions WHERE alias = ?1 AND network_id = ?2",
+                [canonicalAlias, net],
+              );
+              return canMessageAgent(restAuth.userId, net, { alias: canonicalAlias, nodeId: row?.node_id ?? null });
+            }
+            return true;
+          },
+        });
+        if (alt) taskNetId = alt;
       }
       // 多用户 Agent 权限:受限成员只能给授权且 can_message 的 Agent 发;
       // 目标不存在 / 没授权 / 只读授权 → 同一个 403,不留 alias 探测差异。发件人固定为自己的用户名。
