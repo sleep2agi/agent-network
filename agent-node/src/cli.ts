@@ -1827,6 +1827,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     // #1510 —— 每次上报都重新报一次 transport(Hub 侧「每份 report 重新测一次」的要求)。
+    // 我是怎么连到 Hub 的(loopback / https / plain)：Hub 的传输闸门靠这一格判
+    // 「能不能把密钥转发给这个节点」；没它，闸门没有判据(现网 369 个会话全为空)。
+    //
+    // 🔴 这一格此前在同一个对象里出现了**两次**（#2871 与更早的一次各加了一行，
+    // 值相同）。TypeScript 的 TS1117 会把这件事指出来，但它长得像无害的重复 ——
+    // 而 typecheck 棘轮门（只许错误数减少）的基线就卡在这多出来的 1 个错误上。
     env_transport: envTransportFor(COMMHUB_URL),
     // #1809 —— 每次状态上报都带 version(此前只有 3 分钟心跳带)。hub 在同 alias 换
     // resume_id 时会整行 DELETE+INSERT,没带的列被清成 NULL;.49 之前的 hub 没有接手逻辑,
@@ -1835,9 +1841,6 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     node_id: NODE_ID || undefined,
     session_id: activeSessionId,
     config_path: configFilePath || undefined,
-    // #1510 —— 我是怎么连到 Hub 的(loopback / https / plain)。Hub 的传输闸门靠这一格判
-    // 「能不能把密钥转发给这个节点」;没有它,闸门没有判据(现网 369 个会话全为空)。
-    env_transport: envTransportFor(COMMHUB_URL),
     // #260 P5 — always emit the current channel spec list (even as
     // "[]" after disable-all), otherwise the hub's COALESCE on
     // sessions.channels silently preserves the pre-disable list and
