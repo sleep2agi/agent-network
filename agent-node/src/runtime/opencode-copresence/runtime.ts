@@ -90,7 +90,10 @@ export class OpenCodeCopresenceTimeoutError extends Error {
         : phase === "reply"
           ? `⏳ opencode 任务仍在节点的 TUI 会话里运行，没有被中止；bridge 等待回复已达 ${budget} 上限，停止等待。` +
             `这一轮的最终结果不会再自动回传到这里，请到节点 TUI 查看进度和结果。${knob}。`
-          : `opencode 任务未提交：共享会话在 ${budget} 内一直处于忙碌状态（可能有人正在 TUI 里跑一轮），本任务没有发出，可稍后重发。${knob}。`;
+          // #1879 —— 过期文案要点名「共享会话忙」和「等了多久」,不能让人读成「节点卡死」,
+          // 也不能让人以为是模型/网络问题。原来那句「共享会话在 30 分钟内一直处于忙碌状态」
+          // 已经点了名,但没说清是**共享会话被占**、等了**多久**、以及**这不是节点坏了**。
+          : `opencode 任务未提交：共享会话忙，${budget} 内未获提交 —— 这段时间共享会话一直被 TUI 里的一轮占着（不是节点卡死），本任务没有发出，可稍后重发。${knob}。`;
     super(stopped === "aborted"
       ? `OpenCode reply wait exceeded ${timeoutMs}ms; the shared session was aborted`
       : stopped === "abort_failed"
