@@ -8,7 +8,7 @@
      The latest stamp records the checked channel version; the preview stamp records the validated
      release candidate, not npm publication. Historical references (e.g. `<= 2.3.0-preview.37`) are not stamped. -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.181 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.188 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.189 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
 
@@ -60,7 +60,7 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-The checked `latest` (`2.3.0-preview.181`) prints a random password: `anet-` followed by 22 hex characters. Candidate `2.3.0-preview.188` differs from `.187` in one place only: `anet daemon list` now asks `/api/host-supervisors` with `network_id`, so the capability line no longer reports `HTTP 400` against a healthy Hub (`#2846`). **The default bootstrap / random-password path is unchanged.** Publication requires all release gates to pass.
+The checked `latest` (`2.3.0-preview.181`) prints a random password: `anet-` followed by 22 hex characters. Candidate `2.3.0-preview.189` differs from `.188` in one place only: the CLI pairing constant now points at the **published** agent-node `2.5.0-preview.152`, which carries five node-side fixes (the OpenCode V2 model switch is bounded to 45 s, a grok 402 quota exhaustion reads as a sentence, the node reports how it reaches the Hub, a busy shared session reports how long it has waited, and the timeout text names the shared session). **The default bootstrap / random-password path is unchanged.** Publication requires all release gates to pass.
 **Candidate validation does not mean publication.** Run `npm view @sleep2agi/agent-network dist-tags` for the currently installable channel versions; do not treat the candidate number as the current npm `preview`.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 

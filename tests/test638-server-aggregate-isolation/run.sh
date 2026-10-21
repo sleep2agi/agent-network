@@ -200,7 +200,17 @@ expect_file_result() {
 for output in "$OUT1" "$OUT2" "$OUT3"; do
   expect_file_result "server/src/api-host-supervisors-fallback.test.ts" "$output" 8
   expect_file_result "server/src/uploads-http.test.ts" "$output" 15
-  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 15
+  # 🔴 #1963 —— 钉数从 15 改成 16：#2854（watchers can see and edit a scheduled
+  # task，2026-10-20）给 server/src/scheduled-tasks-http.test.ts 加了第 16 个
+  # 用例。钉数没跟着改 ⇒ 断言对不上 ⇒ `set -e` 静默退出 ⇒ CI 上只剩一句
+  # 「L2 之后 exit1」，失败断言原文从来没被保存过。
+  #
+  # 实测（同一个 main 跑 Docker 复现）：三次聚合 fail=0、bad=false，
+  # 实际报的是 pass=16 fail=0 —— 业务测试一个都没挂，坏的只是这个钉数。
+  #
+  # 这一版只改**钉数**，不碰任何断言逻辑：期望值仍然是「这个文件跑完了、
+  # 一个都没挂、且用例数与当前代码一致」。
+  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 16
   ! grep -Eqi 'connection refused|ECONNREFUSED|database safety guard|FAIL_SUITE|timeout=true' "$output"
   # `grep -c` 在 0 匹配时退出码是 1 —— 在 set -e 下会静默退出（同一个坑）。
   maps=$(grep -c '^TEST_DB_MAP' "$output" || true)
