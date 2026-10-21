@@ -84,7 +84,6 @@ flowchart LR
 | `grok-build-acp` | xAI Grok Build | 复用 `grok login` | — |
 | `grok-build-cli` | Grok Build TUI 共存（实验性预览，仅可信任务） | 复用 `grok login` | ✅ |
 | `opencode-cli` | OpenCode。默认 V1（`opencode-ai`，Anthropic / OpenAI preset，预览）。V2 是同一 runtime 的共存预览：`@opencode/cli@2.0.22`，`anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools`，本机工具全开，只用于可信任务。npm `latest` 还没有这条标志。见 [OpenCode V2](https://anet.sh/guide/opencode) | V1：提供方 API Key。V2：复制本机 OpenCode 已有的 `provider/model` | V1 ✅（Linux / macOS）。V2 共存的现有验收在 Linux |
-
 各运行时的能力与平台支持矩阵见 [Runtime 对比](https://anet.sh/guide/runtimes) 和 [支持矩阵](https://anet.sh/guide/support-matrix)。
 
 ## 文档
@@ -96,7 +95,6 @@ flowchart LR
 欢迎贡献！开始之前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [行为准则](./CODE_OF_CONDUCT.md)；安全问题请按 [SECURITY.md](./SECURITY.md) 私下报告。提问和反馈：[Issues](https://github.com/sleep2agi/agent-network/issues) · [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [社群](https://anet.sh/community)。
 
 <a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
-
 ## 许可证
 
 [Apache License 2.0](./LICENSE)。桌面与移动客户端源码在 [sleep2agi/agent-network-app](https://github.com/sleep2agi/agent-network-app)（MIT）。
