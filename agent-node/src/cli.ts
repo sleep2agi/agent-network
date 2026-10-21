@@ -11,6 +11,7 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
+import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import {
   bundledCodexVersion,
   createCodex,
@@ -7226,14 +7227,26 @@ async function processConfigUpdate(): Promise<void> {
         });
         return;
       }
+      // #1976 —— 切换 + 写配置 + ack 一起有上限。超时的多半是「这台机器没有这个模型」。
       try {
-        await session.setSelectedModel(update.patch.model);
+        await withDeadlineMs(
+          session.setSelectedModel(update.patch.model),
+          MODEL_SWITCH_DEADLINE_MS,
+          `OpenCode session model switch timed out after ${MODEL_SWITCH_DEADLINE_MS}ms`,
+        );
       } catch (switchErr: any) {
-        await callCommHub("ack_config_update", {
-          update_id: updateId,
-          status: "rejected",
-          error: `OpenCode session model switch failed: ${String(switchErr?.message || switchErr).slice(0, 400)}`,
-        });
+        const reason = String(switchErr?.message || switchErr).slice(0, 400);
+        warn(`[config-apply] OpenCode V2 model switch failed: ${reason}`);
+        // 失败路径的 ack 也要有上限:一次就够,别在「拒绝」这件事上再等 4×30s。
+        try {
+          await callCommHub("ack_config_update", {
+            update_id: updateId,
+            status: "rejected",
+            error: `OpenCode session model switch failed: ${reason}`,
+          }, 0);
+        } catch (ackErr: any) {
+          warn(`[config-apply] ack rejected failed: ${ackErr?.message || ackErr}`);
+        }
         return;
       }
       const backup = backupOpencodeConfig(configFilePath);
