@@ -13,6 +13,7 @@ import {
 } from "./process-group";
 import {
   OPENCODE_COMMHUB_TOKEN_ENV,
+  OpenCodeCopresenceOwnerLeftError,
   OpenCodeCopresenceTimeoutError,
   openVettedOpenCodeCopresence,
   parseMessageReply,
@@ -945,6 +946,32 @@ describe("OpenCode copresence task deadline", () => {
       rmSync(log, { force: true });
     }
   }, 20_000);
+
+  // #1879 ③ —— 归属与终止：共享会话的负责人（TUI）离开后会话也没了时，
+  // 排队中的任务必须被**明确终止**（owner_left），而不是沉默地等满预算
+  // 再报一个泛泛的「会话忙」。终止理由要能点名是谁的那条任务。
+  test("the shared session owner left: the queued task is terminated with owner_left", async () => {
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "800", FAKE_SESSION_LOOKUP_MISSING: "1" });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("queued for the owner", 20_000, "通信龙", undefined, { taskId: "5844f347" });
+      } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceOwnerLeftError);
+      expect(thrown.phase).toBe("owner_left");
+      expect(thrown.code).toBe("opencode_copresence_owner_left");
+      // 归属：终止的是谁的那条任务。
+      expect(thrown.owner.taskId).toBe("5844f347");
+      expect(thrown.owner.sender).toBe("通信龙");
+      expect(thrown.userReplyText).toContain("owner_left");
+      expect(thrown.userReplyText).toContain("5844f347");
+      expect(thrown.userReplyText).toContain("通信龙");
+      expect(thrown.userReplyText).not.toContain("共享会话忙");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 40_000);
 
   test("0 disables the deadline: a turn longer than any fetch budget still returns its reply", async () => {
     const { f, runtime } = await open({ FAKE_TURN_MS: "1200", FAKE_INITIAL_BUSY_MS: "300" });

@@ -4149,10 +4149,14 @@ async function processWithOpencode(
   _from: string,
   _images?: string[],
   evidence?: TaskRuntimeEvidenceReporter,
+  /** #1879 ③ —— 排队项的归属：这条任务是谁的。 */
+  taskId?: string | null,
 ): Promise<string> {
   debug(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] dispatch`);
   if (opencodeMode === "copresence") {
     const runtime = await ensureOpencodeCopresenceRuntime();
+    // #1879 ③ —— 归属：这条排队项是谁的（task id + 提交者）。
+    const queueOwner = { taskId: taskId ?? null, sender: _from || null };
     const outcome = await runtime.submit(task, currentOpencodeTimeout().valueMs, _from, {
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
@@ -4166,13 +4170,17 @@ async function processWithOpencode(
           // 每 30 秒刷新一次「已等多久」，直到这一轮结束（提交成功/失败都会清掉）。
           busyTimer = setInterval(() => {
             if (busySince === 0) return;
-            reportStatus("working", busyNote(busySince)).catch(() => {});
+            reportStatus("working", busyNote(busySince, Date.now(), queueOwner)).catch(() => {});
           }, 30_000);
           (busyTimer as unknown as { unref?: () => void })?.unref?.();
         }
-        return reportStatus("working", busyNote(busySince)).catch(() => {});
+        return reportStatus("working", busyNote(busySince, Date.now(), queueOwner)).catch(() => {});
       },
-    }).catch(error => {
+    },
+    // #1879 ③ —— 归属：排队项绑定 task 与提交者。负责人离开时，终止理由
+    // 要能点名是谁的那条任务被终止，而不是一句泛泛的「会话忙」。
+    { taskId: taskId ?? null },
+    ).catch(error => {
       clearBusyNote();
       if (opencodeBorrowedCli && !runtime.isRunning) clearBorrowedLaunchHealth?.();
       throw error;
@@ -5845,7 +5853,8 @@ function think(
           : await processWithGrok(task, from, images, evidence);
       }
       if (RUNTIME === "opencode") {
-        return await processWithOpencode(task, from, images, evidence);
+        // #1879 ③ —— 把 taskId 带进去，排队项才有归属。
+        return await processWithOpencode(task, from, images, evidence, taskId);
       }
       if (RUNTIME === "codex-app-server") {
         return await processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt);

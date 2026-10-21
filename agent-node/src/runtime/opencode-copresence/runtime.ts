@@ -42,6 +42,13 @@ import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
 import { Agent } from "undici";
 import { fetchOpenCodeJson } from "./http";
 import { openV1BorrowedAdmission, type V1BorrowedAdmissionOptions } from "./v1-borrowed-admission";
+import {
+  bindQueueOwner,
+  isSessionGoneError,
+  ownerLeftDecision,
+  ownerLeftText,
+  type QueueOwnerBinding,
+} from "./queue-ownership";
 export { fetchOpenCodeJson } from "./http";
 import { importV1Checkpoint, readV1Checkpoint, verifyV1ImportedHistory, writeV1Checkpoint,
   type V1CheckpointIdentity } from "./v1-checkpoint";
@@ -108,6 +115,28 @@ export class OpenCodeCopresenceTimeoutError extends Error {
     this.userReplyText = userReplyText;
   }
 }
+
+/**
+ * #1879/#1566 ③ —— 共享会话的负责人（TUI）离开了。
+ *
+ * 与超时**不是一回事**：超时是「人还在占着，只是占太久」；这一条是「人已经走了，
+ * 会话也没了，排队中的任务没有可投递的目标」。所以它必须有自己的理由
+ * （owner_left）和自己的文案，而不是复用那个泛泛的 busy 超时。
+ *
+ * 归属信息（task id + 提交者）跟着错误走，回复里能点名是谁的那条任务被终止。
+ */
+export class OpenCodeCopresenceOwnerLeftError extends Error {
+  readonly code = "opencode_copresence_owner_left";
+  readonly phase = "owner_left";
+  readonly owner: QueueOwnerBinding;
+  readonly userReplyText: string;
+  constructor(owner: QueueOwnerBinding) {
+    super("OpenCode shared session owner left; the queued task was terminated (owner_left)");
+    this.name = "OpenCodeCopresenceOwnerLeftError";
+    this.owner = owner;
+    this.userReplyText = ownerLeftText(owner);
+  }
+}
 const OUTPUT_LIMIT = 64 * 1024;
 export const OPENCODE_COMMHUB_TOKEN_ENV = "ANET_OPENCODE_COMMHUB_TOKEN";
 const OPENCODE_COMMHUB_INSTRUCTIONS = "ANET-COMMHUB.md";
@@ -165,6 +194,11 @@ export interface OpenCodeCopresenceSession {
       /** Once, when admission sees a non-idle session. Does not shorten the wait. */
       onAdmissionBusy?: () => void | Promise<void>;
     },
+    /**
+     * #1879 ③ —— 排队项的归属：这条任务是谁的（task id + 提交者）。
+     * 负责人离开时，终止理由要能点名是谁的那条任务被终止。
+     */
+    owner?: { taskId?: string | null },
   ): Promise<OpenCodeCopresenceSubmitResult>;
   /** `restart: true` keeps the human TUI's tmux pane alive with a placeholder for the next generation (#1957). */
   close(mode?: { restart?: boolean }): Promise<void>;
@@ -507,10 +541,15 @@ async function waitUntilSessionIdle(
   timeoutMs: number,
   request = (path: string, init: RequestInit = {}, ms = 2_000) => fetchJson(url, password, path, init, ms),
   onBusy?: () => void | Promise<void>,
+  owner?: QueueOwnerBinding,
 ): Promise<void> {
   // `timeoutMs <= 0` = wait without a deadline.
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY;
   let notedBusy = false;
+  // #1879 ③ —— 「会话没了」的连续观测计数。负责人离开要连续确认，
+  // 一次 404 不足以判定（见 queue-ownership.ts 的两道门槛）。
+  let missingPolls = 0;
+  let missingSinceMs = 0;
   while (Date.now() < deadline) {
     try {
       const statuses = await request("/session/status", {}, 2_000);
@@ -532,13 +571,35 @@ async function waitUntilSessionIdle(
           try {
             const session = await request(`/session/${sessionId}`, {}, 2_000);
             if (session?.id === sessionId) return;
+            // 会话记录还在 ⇒ 负责人只是暂时不在，等它空闲后照常提交。
+            missingPolls = 0;
+            missingSinceMs = 0;
           } catch (error: any) {
             if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
+            // #1879 ③ —— 明确的 404：会话没了。连续确认够多次之后，
+            // 认定「负责人已经离开」，排队中的任务明确终止（owner_left），
+            // 而不是沉默地等满预算再报一个泛泛的 busy 超时。
+            //
+            // 其余错误（超时、5xx、连接问题）**不是**证据：重置计数，继续等。
+            if (isSessionGoneError(error)) {
+              if (missingPolls === 0) missingSinceMs = Date.now();
+              missingPolls += 1;
+              if (ownerLeftDecision({ missingPolls, missingSinceMs }) === "owner_left") {
+                throw new OpenCodeCopresenceOwnerLeftError(owner ?? bindQueueOwner({ sinceMs: Date.now() }));
+              }
+            } else {
+              missingPolls = 0;
+              missingSinceMs = 0;
+            }
             // Keep waiting: missing session is not evidence of idle.
           }
         }
       }
     } catch (error: any) {
+      // 🔴 owner_left 必须穿过这一层：下面那层 catch 抛出来的「负责人离开」
+      // 是在**外层** try 里面抛的，不在这里放行就会被当成「一次瞬时的状态
+      // 读取失败」吞掉，循环继续等 —— 判定永远不生效。
+      if (error?.code === "opencode_copresence_owner_left") throw error;
       if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
       // A transient status failure is also not evidence of idle.
     }
@@ -836,6 +897,11 @@ export async function openVettedOpenCodeCopresence(
           /** Once, when admission sees a non-idle session. Does not shorten the wait. */
           onAdmissionBusy?: () => void | Promise<void>;
         },
+        /**
+         * #1879 ③ —— 归属：排队项绑定 task 与提交者。
+         * 共享会话的负责人离开时，终止要能点名是谁的那条任务。
+         */
+        owner?: { taskId?: string | null },
       ) {
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
@@ -846,7 +912,10 @@ export async function openVettedOpenCodeCopresence(
           const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
           let deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
           let capacityRetries = 0;
-          await waitUntilSessionIdle(url, password, created.id, budgetMs, request, evidence?.onAdmissionBusy);
+          // #1879 ③ —— 排队项的归属在**开始等**的那一刻就定下来：
+          // 后面无论是超时还是「负责人离开」，都要能说清是谁的那条任务。
+          const queueOwner = bindQueueOwner({ taskId: owner?.taskId, sender, sinceMs: Date.now() });
+          await waitUntilSessionIdle(url, password, created.id, budgetMs, request, evidence?.onAdmissionBusy, queueOwner);
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
