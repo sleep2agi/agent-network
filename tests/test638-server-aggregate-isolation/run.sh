@@ -173,12 +173,37 @@ key3=$(summary_key "$OUT3")
 [[ "$key1" == "$key2" && "$key1" == "$key3" ]] || { echo "FAIL: count drift $key1 / $key2 / $key3"; exit 1; }
 [[ "$key1" =~ ^[0-9]+:[0-9]+:0:[0-9]+:[0-9]+:false$ ]] || { echo "FAIL: aggregate not green: $key1"; exit 1; }
 
+# 🔴 #1963 —— 上面这三个是**钉死的通过数**（pin）。钉死的意图是「这个文件
+# 真的跑完了，而且一个都没挂」。
+#
+# 之前它们是裸的 `grep -F ... >/dev/null`：一旦对不上，grep 退出码是 1，
+# 而 `set -e` 立刻把脚本带走 —— **一句 FAIL 都不会打印**，磁盘上也没有任何
+# 东西。这就是「L2 之后 exit1、拿不到失败断言原文」的真正成因。
+#
+# 现在对不上的时候：说要钉的是什么、实际报的是什么，一并打出来。
+expect_file_result() {
+  local file="$1" output="$2" expected="$3"
+  if grep -Fq "TEST_FILE_RESULT	${file}	pass=${expected}	fail=0" "$output"; then
+    return 0
+  fi
+  echo "FAIL: ${file} did not report pass=${expected} fail=0 in ${output}"
+  local actual
+  actual=$(grep -F "TEST_FILE_RESULT	${file}" "$output" | tail -1 || true)
+  if [ -n "$actual" ]; then
+    echo "  actual: ${actual}"
+  else
+    echo "  actual: (no TEST_FILE_RESULT line for ${file} — the file did not run)"
+  fi
+  return 1
+}
+
 for output in "$OUT1" "$OUT2" "$OUT3"; do
-  grep -F $'TEST_FILE_RESULT\tserver/src/api-host-supervisors-fallback.test.ts\tpass=8\tfail=0' "$output" >/dev/null
-  grep -F $'TEST_FILE_RESULT\tserver/src/uploads-http.test.ts\tpass=15\tfail=0' "$output" >/dev/null
-  grep -F $'TEST_FILE_RESULT\tserver/src/scheduled-tasks-http.test.ts\tpass=15\tfail=0' "$output" >/dev/null
+  expect_file_result "server/src/api-host-supervisors-fallback.test.ts" "$output" 8
+  expect_file_result "server/src/uploads-http.test.ts" "$output" 15
+  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 15
   ! grep -Eqi 'connection refused|ECONNREFUSED|database safety guard|FAIL_SUITE|timeout=true' "$output"
-  maps=$(grep -c '^TEST_DB_MAP' "$output")
+  # `grep -c` 在 0 匹配时退出码是 1 —— 在 set -e 下会静默退出（同一个坑）。
+  maps=$(grep -c '^TEST_DB_MAP' "$output" || true)
   unique_maps=$(grep '^TEST_DB_MAP' "$output" | cut -f3 | sort -u | wc -l)
   [[ $maps -gt 0 && $maps -eq $unique_maps ]] || { echo "FAIL: DB map not one-to-one in $output ($maps/$unique_maps)"; exit 1; }
 done
