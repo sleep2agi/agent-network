@@ -145,4 +145,20 @@ describe("Agent 显式归属部门", () => {
     const agents2 = [...(dir2.body.people ?? []).flatMap((p: any) => p.agents ?? []), ...(dir2.body.agents_without_owner ?? [])];
     expect(agents2.find((a: any) => a.node_id === NODE_A)?.department_id ?? null).toBeNull();
   });
+
+  // #1976 —— Agent 归属与人类部门是两个独立的结构。通讯录顶层要说明「这个 Hub 支持显式
+  // Agent 部门」,客户端据此把「行里没有 department_id」读成「没有显式归属」,
+  // 而不是从「负责人在哪个部门」推断出来。
+  test("通讯录声明支持显式 Agent 部门（与人类部门相互独立）", async () => {
+    const dir = await send(U.owner.token, "GET", `/api/requirements/people/directory?network_id=${NET}`);
+    expect(dir.status).toBe(200);
+    expect(dir.body.agent_department_supported).toBe(true);
+    // 行形状不变:没有显式归属的行**不带** department_id 这一格(旧客户端形状不变)。
+    const agents = [...(dir.body.people ?? []).flatMap((p: any) => p.agents ?? []), ...(dir.body.agents_without_owner ?? [])];
+    for (const a of agents) {
+      // 显式归属 ⇒ 带这一格且非空;没有显式归属 ⇒ **不带这一格**(旧客户端形状不变)。
+      if (a.department_id) expect(typeof a.department_id).toBe("string");
+      else expect(Object.prototype.hasOwnProperty.call(a, "department_id")).toBe(false);
+    }
+  });
 });

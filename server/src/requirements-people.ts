@@ -72,8 +72,9 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
   const byOwner = new Map<string, DirectoryAgent[]>();
   const unowned: DirectoryAgent[] = [];
   for (const n of nodes) {
-    // 只在**显式**归属时带这一格:没设 = 沿用「按负责人的部门推断」的老口径,
-    // 也保证旧客户端拿到的行形状不变(多一个键会让严格要求形状的测试/客户端意外)。
+    // 只在**显式**归属时带这一格:没设 = 没有显式归属(顶层 agent_department_supported 告诉
+    // 客户端这一点)。行形状保持不变 —— 旧客户端拿到的行还是老样子(多一个键会让严格要求
+    // 形状的测试/客户端意外),只是新客户端不再把「负责人在哪个部门」当成 Agent 的部门。
     const agent = { node_id: n.node_id, alias: n.alias || n.node_name, ...(n.department_id ? { department_id: n.department_id } : {}) };
     if (n.owner_user_id && memberIds.has(n.owner_user_id)) {
       const list = byOwner.get(n.owner_user_id) ?? [];
@@ -104,6 +105,12 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
     network_id: networkId,
     total: people.length,
     people: page,
+    // #1976 —— 「Agent 归属」与「人类部门」是两个独立的结构。
+    // Agent 放哪个部门,只由**显式**设置(nodes.department_id)决定;**不再**从「负责人在哪个部门」推断。
+    // 这一格告诉客户端「这个 Hub 支持显式 Agent 部门」:客户端据此把「没有 department_id 这一行」
+    // 读成「没有显式归属 ⇒ 未归属」,而不是「按负责人部门推断」。
+    // 老 Hub 没有这一格 ⇒ 客户端保留旧的推断口径,行为不变。
+    agent_department_supported: true,
     ...(query.offset === 0 ? { agents_without_owner: unowned.filter(a => hit(a.alias)) } : {}),
     has_more: hasMore,
     next_offset: hasMore ? query.offset + query.limit : null,
