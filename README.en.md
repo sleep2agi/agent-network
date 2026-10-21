@@ -96,5 +96,4 @@ Contributions are welcome! Read [CONTRIBUTING.md](./CONTRIBUTING.md) and the [Co
 
 <a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
 ## License
-
 [Apache License 2.0](./LICENSE). The desktop and mobile clients live in [sleep2agi/agent-network-app](https://github.com/sleep2agi/agent-network-app) (MIT).
