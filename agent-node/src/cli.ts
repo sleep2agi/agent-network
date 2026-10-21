@@ -75,6 +75,7 @@ import { claudeCommhubToolAliases } from "./claude-tool-aliases";
 import { buildClaudeSystemPrompt, claudeAiConnectorsOptIn, claudeSdkChildEnv } from "./claude-sdk-turn-options";
 import { getHostTelemetry } from "./host-telemetry";
 import { getProcessTelemetry, getInFlightCount, incrementInFlight, decrementInFlight } from "./process-telemetry";
+import { busyNote } from "./runtime/opencode-copresence/busy-note.js";
 import { readExternalSchedulesSnapshot } from "./external-schedules";
 import { TASK_CONTENT_MAX } from "./shared/task-content-limit";
 import { createOwnerScheduleConsumer, type OwnerScheduleConsumer } from "./owner-schedule-consumer";
@@ -4135,6 +4136,14 @@ function reportCapacityRetry(attempt: number): Promise<void> {
   return reportStatus("working", capacityRetryProgress(attempt)).catch(() => {});
 }
 
+/** #1879 —— 本轮等待共享会话的起点（0 = 没在等）。见 busy-note.ts。 */
+let busySince = 0;
+let busyTimer: ReturnType<typeof setInterval> | null = null;
+function clearBusyNote(): void {
+  busySince = 0;
+  if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
+}
+
 async function processWithOpencode(
   task: string,
   _from: string,
@@ -4148,11 +4157,27 @@ async function processWithOpencode(
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
       onCapacityRetry: reportCapacityRetry,
-      onAdmissionBusy: () => reportStatus("working", "共享会话忙，任务还没提交，正在等 TUI 这轮结束").catch(() => {}),
+      // #1879 —— 选「排队」的第一半：等待期间把「在等、等了多久」持续报出去。
+      // 节点会话行本来就带 task 文本，Hub/客户端的节点卡片直接显示它 ⇒ 不用翻日志，
+      // 也不会被误读成「节点卡死」。30 分钟硬预算不变（那是在兜住合法的长构建）。
+      onAdmissionBusy: () => {
+        if (busySince === 0) {
+          busySince = Date.now();
+          // 每 30 秒刷新一次「已等多久」，直到这一轮结束（提交成功/失败都会清掉）。
+          busyTimer = setInterval(() => {
+            if (busySince === 0) return;
+            reportStatus("working", busyNote(busySince)).catch(() => {});
+          }, 30_000);
+          (busyTimer as unknown as { unref?: () => void })?.unref?.();
+        }
+        return reportStatus("working", busyNote(busySince)).catch(() => {});
+      },
     }).catch(error => {
+      clearBusyNote();
       if (opencodeBorrowedCli && !runtime.isRunning) clearBorrowedLaunchHealth?.();
       throw error;
     });
+    clearBusyNote();
     log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
     return outcome.replyText || "（无回复）";
   }
