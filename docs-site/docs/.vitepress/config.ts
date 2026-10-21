@@ -68,6 +68,7 @@ export default withMermaid(defineConfig({
           { text: 'SkillHub', link: '/skillhub/' },
           { text: 'API', link: '/api/mcp-tools' },
           { text: '社区与生态', link: '/community' },
+          { text: '隐私政策', link: '/privacy' },
           {
             text: '更新日志',
             items: [
@@ -168,6 +169,7 @@ export default withMermaid(defineConfig({
           { text: 'SkillHub', link: '/en/skillhub/' },
           { text: 'API', link: '/en/api/mcp-tools' },
           { text: 'Community', link: '/en/community' },
+          { text: 'Privacy', link: '/en/privacy' },
           {
             text: 'Changelog',
             items: [
