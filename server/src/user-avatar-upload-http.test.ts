@@ -202,6 +202,33 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
   }
 });
 
+test("deleted network leaves only ghost membership: member loses read, owner keeps it", async () => {
+  const owner = register("avup_netowner", "AvatarUpload1!");
+  const member = register("avup_netmember", "AvatarUpload1!");
+  expect(owner.ok && member.ok).toBe(true);
+  expect(addNetworkMember(owner.network_id!, member.user!.user_id, "member").ok).toBe(true);
+  const { bootServer } = await import("./server.js");
+  const hub = bootServer({ port: 0, hostname: "127.0.0.1" });
+  const base = `http://127.0.0.1:${hub.port}`;
+  const read = async (token: string, path: string) => (await fetch(base + path, { headers: { Authorization: `Bearer ${token}` } })).status;
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(PNG_1X1)], { type: "image/png" }), "a.png");
+    const up = await fetch(`${base}/api/auth/me/avatar/upload`, { method: "POST", headers: { Authorization: `Bearer ${owner.token}` }, body: form });
+    expect(up.status).toBe(200);
+    const url = ((await up.json()) as any).avatar_url as string;
+    expect(await read(member.token!, url)).toBe(200);
+    // 只删网络行，故意留下 network_members 残行：live membership 必须据此拒绝。
+    db.run("DELETE FROM networks WHERE network_id = ?1", [owner.network_id!]);
+    expect(await read(member.token!, url)).toBe(404);
+    expect(await read(owner.token!, url)).toBe(200); // 本人不依赖成员关系
+  } finally {
+    db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [owner.user!.user_id]);
+    db.run("UPDATE users SET avatar_url = NULL WHERE user_id = ?1", [owner.user!.user_id]);
+    await hub.stop?.();
+  }
+});
+
 test("upload is rate limited before multipart parsing, and rejects keepalive leftovers", async () => {
   const u = register("avup_ratelimit", "AvatarUpload1!");
   expect(u.ok).toBe(true);
