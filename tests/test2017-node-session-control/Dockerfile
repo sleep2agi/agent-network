@@ -8,6 +8,7 @@ COPY agent-node/src ./agent-node/src
 COPY agent-network/src ./agent-network/src
 COPY contracts/side-thread/v1 ./contracts/side-thread/v1
 COPY tests/test2017-node-session-control/run.sh /work/run.sh
+COPY tests/lib/safe-rm.sh /work/tests/lib/safe-rm.sh
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 USER bun
