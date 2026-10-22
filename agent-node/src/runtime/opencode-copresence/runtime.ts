@@ -117,11 +117,10 @@ export class OpenCodeCopresenceTimeoutError extends Error {
 }
 
 /**
- * #1879/#1566 ③ —— 共享会话的负责人（TUI）离开了。
+ * #1879/#1566 ③ —— 提交前共享会话连续查询缺失。
  *
- * 与超时**不是一回事**：超时是「人还在占着，只是占太久」；这一条是「人已经走了，
- * 会话也没了，排队中的任务没有可投递的目标」。所以它必须有自己的理由
- * （owner_left）和自己的文案，而不是复用那个泛泛的 busy 超时。
+ * 与 busy 超时不同：会话查询的连续 404 达到终止门槛，但不能证明 TUI 负责人离开。
+ * 保留 owner_left 错误码与类型供既有客户端分类，不复用 busy 超时。
  *
  * 归属信息（task id + 提交者）跟着错误走，回复里能点名是谁的那条任务被终止。
  */
@@ -131,7 +130,7 @@ export class OpenCodeCopresenceOwnerLeftError extends Error {
   readonly owner: QueueOwnerBinding;
   readonly userReplyText: string;
   constructor(owner: QueueOwnerBinding) {
-    super("OpenCode shared session owner left; the queued task was terminated (owner_left)");
+    super("OpenCode shared session lookup remained missing; queued admission was terminated (owner_left)");
     this.name = "OpenCodeCopresenceOwnerLeftError";
     this.owner = owner;
     this.userReplyText = ownerLeftText(owner);

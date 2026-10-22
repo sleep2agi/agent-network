@@ -992,6 +992,8 @@ describe("OpenCode copresence task deadline", () => {
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceOwnerLeftError);
       expect(thrown.phase).toBe("owner_left");
       expect(thrown.code).toBe("opencode_copresence_owner_left");
+      expect(thrown.message).toContain("session lookup remained missing");
+      expect(thrown.message).not.toContain("owner left");
       // 归属：终止的是谁的那条任务。
       expect(thrown.owner.taskId).toBe("5844f347");
       expect(thrown.owner.sender).toBe("通信龙");

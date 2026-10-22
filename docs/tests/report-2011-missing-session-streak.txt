@@ -36,8 +36,26 @@ terminal owner_left and explicit V1 refusal exceptions.
 
 Unchanged: default 30-minute budget, timeout semantics, V2 dispatch, task
 ownership, unknown-write handling and replay behavior. No production action.
-The legacy error code/text remains owner_left; 404 does NOT prove TUI departure.
+The legacy error code remains owner_left; 404 does NOT prove TUI departure.
 This slice does not close the full parent task or establish fleet activation.
 
 Local raw logs: /tmp/opencode/1879-streak-red.log,
 /tmp/opencode/1879-streak-green.log, /tmp/opencode/1879-streak-full-node.log.
+
+Review follow-up, observed-evidence wording only:
+- queue-ownership.ts user reply and the Error.message now describe consecutive
+  missing session lookups, not a proven TUI departure or a ruled-out node fault.
+- Preserve error class/code/phase owner_left, task/sender and unsent admission.
+  No timer, counter, dispatch, retry, replay or lifecycle behavior changed.
+- Regression selection: ownerLeftText + the existing runtime owner_left case.
+  Old product + new assertions: 0 pass / 2 fail at the two wording assertions,
+  6 expects; real loopback HTTP fixture, 3.24s.
+- Container: existing anet-1879-streak-green, non-root uid1000, Bun1.3.14/Node,
+  network none, read-only source/rootfs, explicit executable private /tmp.
+  First harness launch used non-executable tmpfs and failed fixture spawn;
+  that environmental EACCES is NOT the product regression witness above.
+- Fixed product + same selected tests: 2 pass / 0 fail / 21 expects, 3.27s;
+  /tmp/opencode/2011-owner-copy-{red,green}.log. New exact head is recorded in
+  the PR and CommHub #2011.
+  Original 64-pass and 3110-pass results remain prior-source evidence, not a
+  claim that either complete suite was repeated for this wording-only follow-up.

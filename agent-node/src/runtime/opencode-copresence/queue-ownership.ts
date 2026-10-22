@@ -5,15 +5,13 @@
 //   ② 上限与过期：runtime.ts 的 OpenCodeCopresenceTimeoutError 点名「共享会话忙」，
 //      并说明「不是节点卡死」。
 //
-// 这一格是第三样：**排队项要绑定到具体的 task 与提交者；共享会话的负责人（TUI）
-// 离开时，要重新提交或明确终止（owner_left），而不是沉默地等满 30 分钟后报一个
-// 泛泛的「忙」。**
+// 这一格是第三样：排队项绑定 task 与提交者；提交前连续查询不到会话时明确终止。
+// owner_left 是保留的兼容理由，不是 TUI 负责人存活检测。
 //
 // 两条判定：
-//   • 会话**还在**（GET /session/:id 还能拿到记录）⇒ 负责人只是暂时不在，等它空闲
-//     后照常提交（这是「重新提交」那一半，行为不变）。
-//   • 会话**不在了**（GET /session/:id 明确 404）⇒ 负责人已经离开且会话没了，
-//     排队中的任务没有可投递的目标 ⇒ 明确终止，理由 owner_left。
+//   • 会话查询成功 ⇒ 继续检查是否空闲，不推断负责人是否在线。
+//   • 会话查询连续明确 404 达到门槛 ⇒ 结束本次 admission，理由 owner_left。
+//     404 本身不能证明负责人离开，也不能据此排除节点故障。
 //
 // 404 的形状来自 http.ts：`OpenCode GET /session/x returned HTTP 404`。
 // 这里用消息匹配而不是改 http.ts 的错误类型，是为了让这个纯函数模块不依赖网络层。
@@ -51,13 +49,13 @@ export function queueOwnerLabel(binding: QueueOwnerBinding): string {
 }
 
 /**
- * 判定「负责人是否已经离开」需要**连续**确认，不能靠一次 404。
+ * 判定提交前的会话查询缺失需要连续确认，不能靠一次 404。
  *
  * 两次门槛都要满足：
  *   • 连续观测次数 ≥ OWNER_LEFT_CONFIRM_POLLS（防单次抖动）；
  *   • 连续观测时长 ≥ OWNER_LEFT_CONFIRM_MS（防快速抖动）。
  *
- * 门槛不满足就继续等 —— 宁可多等，也不把一个还在的会话误判成「人走了」。
+ * 门槛不满足就继续等；返回值 owner_left 保留兼容，不诊断人的状态。
  */
 export const OWNER_LEFT_CONFIRM_POLLS = 3;
 export const OWNER_LEFT_CONFIRM_MS = 2_000;
@@ -86,11 +84,11 @@ export function isSessionGoneError(error: unknown): boolean {
  * 终止文案。
  *
  * 要点：
- *   • 说清是**负责人离开了**、会话也不在了（不是节点卡死、不是模型问题）；
+ *   • 只报告会话查询的 404 证据，不诊断负责人离开或排除节点故障；
  *   • 点名这条排队项归谁（归属）；
  *   • 带上 owner_left 这个稳定标记，客户端/看板/日志都能按它归类；
- *   • 说明这一轮没有发出，可以重发。
+ *   • 说明这一轮没有发出，确认原会话与节点状态后再决定是否重新提交。
  */
 export function ownerLeftText(binding: QueueOwnerBinding): string {
-  return `opencode 任务未提交：共享会话的负责人（TUI）已经离开，会话也不在了 —— 排队中的${queueOwnerLabel(binding)}已被明确终止（owner_left），不是节点卡死。这一轮没有发出，可稍后重发。`;
+  return `opencode 任务未提交：共享会话查询连续返回 404，已达到缺失判定门槛；不能据此确认 TUI 负责人是否离开。排队中的${queueOwnerLabel(binding)}已被明确终止（兼容理由 owner_left）。这一轮没有发出，请确认原会话与节点状态后再决定是否重新提交。`;
 }
