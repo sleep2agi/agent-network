@@ -20,7 +20,7 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 export type AvatarImageCheck =
   | { ok: true; width: number; height: number }
-  | { ok: false; reason: "empty" | "too_large" | "not_png" | "truncated" | "bad_dimensions" | "too_big" | "bad_crc" | "bad_image" };
+  | { ok: false; reason: "empty" | "too_large" | "not_png" | "truncated" | "bad_dimensions" | "too_big" | "bad_crc" | "bad_image" | "interlaced_unsupported" };
 
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 
@@ -95,7 +95,9 @@ export function inspectAvatarImage(input: Uint8Array): AvatarImageCheck {
       // 只接受规范的 IHDR 取值组合；非法组合的图多数解码器也会拒绝。
       const legalDepth: Record<number, number[]> = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
       if (!legalDepth[colorType]?.includes(bitDepth)) return { ok: false, reason: "not_png" };
-      if (compression !== 0 || filter !== 0 || interlace > 1) return { ok: false, reason: "not_png" };
+      if (compression !== 0 || filter !== 0) return { ok: false, reason: "not_png" };
+      // Adam7 隔行扫描的扫描行布局与逐行校验不同：本实现不支持，明确拒收而不是错算长度。
+      if (interlace === 1) return { ok: false, reason: "interlaced_unsupported" };
       if (width === 0 || height === 0) return { ok: false, reason: "bad_dimensions" };
       if (width > MAX_AVATAR_EDGE || height > MAX_AVATAR_EDGE) return { ok: false, reason: "too_big" };
       sawIHDR = true;

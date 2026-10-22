@@ -41,7 +41,7 @@ function realPng(width: number, height: number): Buffer {
 
 
 /** CRC 全对、但 IDAT 内容非法的 PNG：用来证明「结构通过 ≠ 图像有效」。 */
-function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number; width?: number; height?: number } = {}): Buffer {
+function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number; width?: number; height?: number; interlace?: 0 | 1 } = {}): Buffer {
   const crcTable = new Uint32Array(256).map((_, n) => {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -60,7 +60,7 @@ function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number
   };
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(opts.width ?? 1, 0); ihdr.writeUInt32BE(opts.height ?? 1, 4);
-  ihdr[8] = opts.bitDepth ?? 8; ihdr[9] = opts.colorType ?? 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  ihdr[8] = opts.bitDepth ?? 8; ihdr[9] = opts.colorType ?? 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = opts.interlace ?? 0;
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0)),
@@ -82,7 +82,7 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
 
   const upload = async (token: string | null, bytes: Buffer, fieldName = "file", extra?: [string, string]) => {
     const form = new FormData();
-    form.append(fieldName, new Blob([bytes], { type: "image/png" }), "a.png");
+    form.append(fieldName, new Blob([new Uint8Array(bytes)], { type: "image/png" }), "a.png");
     if (extra) form.append(extra[0], extra[1]);
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -155,16 +155,45 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
       "SELECT version, bytes FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id);
     expect(afterInvalid).toEqual(beforeInvalid);
 
+    // P2：清空后旧托管 URL 立即失效（本人与同网络成员都不能再读到）。
+    const putProfile = async (token: string, avatar_url: string | null) => {
+      const res = await fetch(`${base}/api/auth/me/avatar`, {
+        method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar_url }),
+      });
+      return { status: res.status, body: await res.json() as any };
+    };
+    // 重新造一张可读的：此刻 b 已被撤权，先用 outsider 之外的同网成员做读校验
+    expect(addNetworkMember(a.network_id!, b.user!.user_id, "member").ok).toBe(true);
+    expect((await getAvatar(b.token!, ok1.body.avatar_url)).status).toBe(200);
+    expect((await putProfile(a.token!, null)).status).toBe(200);
+    expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(404);
+    expect((await getAvatar(b.token!, ok1.body.avatar_url)).status).toBe(404);
+    const meCleared = await fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${a.token}` } });
+    expect(((await meCleared.json()) as any).user.avatar_url).toBeNull();
+    expect(db.get("SELECT 1 AS ok FROM user_avatar_uploads WHERE user_id=?1", [a.user!.user_id])).toBeNull();
+
+    // 换成池里的一张（非托管 URL）也必须撤销旧托管行。
+    const again = await upload(a.token!, PNG_1X1);
+    expect(again.status).toBe(200);
+    expect((await getAvatar(a.token!, again.body.avatar_url)).status).toBe(200);
+    expect((await putProfile(a.token!, "/avatars/avatar-03.webp")).status).toBe(200);
+    expect((await getAvatar(a.token!, again.body.avatar_url)).status).toBe(404);
+    expect(db.get("SELECT 1 AS ok FROM user_avatar_uploads WHERE user_id=?1", [a.user!.user_id])).toBeNull();
+
     // 原子替换：一次失败的上传不能把上一张弄丢；成功后旧 version 立刻 404。
-    const beforeBad = db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id);
+    const baseline = await upload(a.token!, PNG_1X1);
+    expect(baseline.status).toBe(200);
+    const beforeBad = db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", [a.user!.user_id]);
+    expect(beforeBad?.version).toBeTruthy();
     expect((await upload(a.token!, Buffer.from("broken"))).status).toBe(400);
     expect(db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id)!.version).toBe(beforeBad!.version);
-    expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(200);
+    expect((await getAvatar(a.token!, baseline.body.avatar_url)).status).toBe(200);
 
     const ok2 = await upload(a.token!, realPng(512, 512));
     expect(ok2.status).toBe(200);
-    expect(ok2.body.avatar_url).not.toBe(ok1.body.avatar_url);
-    expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(404);
+    expect(ok2.body.avatar_url).not.toBe(baseline.body.avatar_url);
+    expect((await getAvatar(a.token!, baseline.body.avatar_url)).status).toBe(404);
     expect((await getAvatar(a.token!, ok2.body.avatar_url)).status).toBe(200);
     expect(db.get<{ width: number }>("SELECT width FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id)!.width).toBe(512);
   } finally {
@@ -221,6 +250,9 @@ test("image inspector: signature, shape and size limits", () => {
   const corrupt = Buffer.from(truePng); corrupt[corrupt.length - 20] ^= 0xff;
   expect(inspectAvatarImage(corrupt).ok).toBe(false);
   expect(inspectAvatarImage(realPng(513, 16))).toEqual({ ok: false, reason: "too_big" });
+  // Adam7 隔行：明确拒收（不按非隔行长度错算）
+  const interlaced = pngWithIdat(deflateSync(Buffer.alloc(6)), { width: 1, height: 1, interlace: 1 });
+  expect(inspectAvatarImage(interlaced)).toEqual({ ok: false, reason: "interlaced_unsupported" });
   const zeroWide = realPng(0, 1); // 宽 0 + 正确 CRC：专证 bad_dimensions 而不是 bad_crc
   expect(inspectAvatarImage(zeroWide)).toEqual({ ok: false, reason: "bad_dimensions" });
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)]);

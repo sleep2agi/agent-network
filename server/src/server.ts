@@ -1486,7 +1486,12 @@ return Bun.serve({
       const avatar = validateAvatarUrl((body as { avatar_url: unknown }).avatar_url);
       if (!avatar.ok) return withCors(req, Response.json({ ok: false, error: "invalid_avatar_url", reason: avatar.reason }, { status: 400 }));
       // No supplied target ID/alias; user identity comes exclusively from auth.
-      db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [avatar.value, resolved.user.user_id]);
+      // 清空或换成另一张（池/外链）时，旧托管行必须同一事务撤销：否则「清空后旧 URL 仍可读」。
+      db.transaction(() => {
+        db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [avatar.value, resolved.user.user_id]);
+        const keepsUploaded = typeof avatar.value === "string" && /^\/api\/users\/[^/]+\/avatar\/[A-Za-z0-9_-]{1,128}\.png$/.test(avatar.value);
+        if (!keepsUploaded) db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [resolved.user.user_id]);
+      });
       return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: avatar.value }));
     }
 
@@ -1590,20 +1595,29 @@ return Bun.serve({
       if (isNodeCredential(resolved)) return userTokenRequired(req);
       const callerId = resolved.user.user_id;
       if (callerId !== targetUserId) {
+        // live membership：网络必须仍然存在（删除网络只留下 network_members 残行时不算共享）。
         const shared = db.get<{ ok: number }>(
           `SELECT 1 AS ok FROM network_members me
+             JOIN networks n ON n.network_id = me.network_id
              JOIN network_members them ON them.network_id = me.network_id
             WHERE me.user_id = ?1 AND them.user_id = ?2 LIMIT 1`,
           [callerId, targetUserId],
         );
         if (!shared) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
+      // 只服务「当前」头像：清空/替换后旧 version 立即失效，即使行还没被删。
+      const current = db.get<{ avatar_url: string | null }>(
+        "SELECT avatar_url FROM users WHERE user_id = ?1", [targetUserId],
+      );
+      if (!current || current.avatar_url !== avatarUrl(targetUserId, rawVersion)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
       const row = db.get<{ png: Uint8Array }>(
         "SELECT png FROM user_avatar_uploads WHERE user_id = ?1 AND version = ?2",
         [targetUserId, rawVersion],
       );
       if (!row) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
-      return withCors(req, new Response(row.png, {
+      return withCors(req, new Response(Buffer.from(row.png), {
         status: 200,
         headers: {
           "Content-Type": "image/png",

@@ -114,3 +114,22 @@ sg docker -c 'docker build -f tests/test798-server-unit-ci/Dockerfile --build-ar
 The previous-head test638 aggregate job 113824903080 also failed specifically
 on the old ACL/presence key sets. This local test798 pass is not a claim that
 the different test638/PG ladder or the complete new-head CI have already passed.
+
+#2055 / PR2898 — photo upload suite actually executed in Docker
+Observed: 2026-10-22 14:46 Asia/Shanghai
+Source: 718ee81a59bfd23f3ebf58763145f3d99d755dbc (PR2898 branch feat/avatar-postmain-hardening)
+Base main: d634f8cc51ef6aa6f4287f2a7a31ea8a55efe5d7
+Image: anet-test833-2055 (built from tests/test833-user-avatar/Dockerfile, oven/bun 1.3.14, --network none)
+Command: docker build -f tests/test833-user-avatar/Dockerfile -t anet-test833-2055 . && docker run --rm --network none anet-test833-2055
+Result: exit 0
+  avatar-validate.test.ts                 23 pass / 0 fail
+  user-avatar-migration.test.ts            1 pass / 0 fail
+  user-avatar-http.test.ts                 3 pass / 0 fail   (photo profile set/read/visibility)
+  user-avatar-upload-http.test.ts          3 pass / 0 fail   (photo-upload scenario: token/PNG/limits/visibility/clear/replace/rate-limit)
+  auth-sessions-http.test.ts              17 pass / 0 fail
+  agent-acl-http.test.ts                  60 pass / 0 fail
+  member-presence-http.test.ts             6 pass / 0 fail
+
+This is the Docker test833 suite on the PR head, not the full repository CI and not
+client acceptance. Local non-Docker run of the upload file was 3 pass / 0 fail,
+132 expect.
