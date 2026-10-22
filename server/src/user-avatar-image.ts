@@ -5,6 +5,9 @@
 // 不借用 /api/files 的附件 ACL（那是按网络/会话/DM 作用域判的，语义不同）。
 //
 // 这个模块只做纯校验，便于单测与复用；HTTP 与落库在 server.ts。
+import { inflateSync } from "node:zlib";
+
+// 校验强度：结构（签名/chunk/CRC）+ 真实解码（IDAT 解压且扫描行长度与 IHDR 相符）。
 
 export const MAX_AVATAR_BYTES = 8 * 1024 * 1024;
 /** 客户端会把图重编码到最长边 512；服务端独立复核这条上限。 */
@@ -17,7 +20,10 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 export type AvatarImageCheck =
   | { ok: true; width: number; height: number }
-  | { ok: false; reason: "empty" | "too_large" | "not_png" | "truncated" | "bad_dimensions" | "too_big" | "bad_crc" };
+  | { ok: false; reason: "empty" | "too_large" | "not_png" | "truncated" | "bad_dimensions" | "too_big" | "bad_crc" | "bad_image" };
+
+const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+
 
 /** 标准 CRC-32（PNG 每个 chunk 的尾部）。表只建一次。 */
 const CRC_TABLE = (() => {
@@ -61,6 +67,10 @@ export function inspectAvatarImage(input: Uint8Array): AvatarImageCheck {
   let sawIHDR = false;
   let idatChunks = 0;
   let sawIEND = false;
+  let sawPLTE = false;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idat: Uint8Array[] = [];
 
   while (pos + 12 <= input.byteLength) {
     const length = be32(input, pos);
@@ -77,8 +87,8 @@ export function inspectAvatarImage(input: Uint8Array): AvatarImageCheck {
       if (sawIHDR || length !== 13) return { ok: false, reason: "not_png" };
       width = be32(input, dataStart);
       height = be32(input, dataStart + 4);
-      const bitDepth = input[dataStart + 8];
-      const colorType = input[dataStart + 9];
+      bitDepth = input[dataStart + 8];
+      colorType = input[dataStart + 9];
       const compression = input[dataStart + 10];
       const filter = input[dataStart + 11];
       const interlace = input[dataStart + 12];
@@ -89,8 +99,12 @@ export function inspectAvatarImage(input: Uint8Array): AvatarImageCheck {
       if (width === 0 || height === 0) return { ok: false, reason: "bad_dimensions" };
       if (width > MAX_AVATAR_EDGE || height > MAX_AVATAR_EDGE) return { ok: false, reason: "too_big" };
       sawIHDR = true;
+    } else if (type === "PLTE") {
+      if (length === 0 || length % 3 !== 0) return { ok: false, reason: "not_png" };
+      sawPLTE = true;
     } else if (type === "IDAT") {
       idatChunks++;
+      idat.push(input.subarray(dataStart, dataEnd));
     } else if (type === "IEND") {
       if (length !== 0) return { ok: false, reason: "not_png" };
       if (crcEnd !== input.byteLength) return { ok: false, reason: "not_png" };
@@ -102,6 +116,23 @@ export function inspectAvatarImage(input: Uint8Array): AvatarImageCheck {
 
   if (!sawIHDR || !sawIEND) return { ok: false, reason: "truncated" };
   if (idatChunks === 0) return { ok: false, reason: "not_png" };
+  // 调色板图必须带 PLTE，否则解码器无从取色。
+  if (colorType === 3 && !sawPLTE) return { ok: false, reason: "not_png" };
+  // CRC 只证明「容器没坏」，不证明 IDAT 里是图像数据：真解一次 zlib，并核对
+  // 解压后长度正好等于 IHDR 声明的扫描行总长（每行 1 字节 filter + 像素字节）。
+  const bytesPerRow = Math.ceil((width * (CHANNELS[colorType] ?? 0) * bitDepth) / 8);
+  const expected = height * (1 + bytesPerRow);
+  let raw: Uint8Array;
+  try {
+    const merged = Buffer.concat(idat.map(part => Buffer.from(part)));
+    raw = new Uint8Array(inflateSync(merged, { maxOutputLength: expected + 1024 }));
+  } catch {
+    return { ok: false, reason: "bad_image" };
+  }
+  if (raw.byteLength !== expected) return { ok: false, reason: "bad_image" };
+  for (let row = 0; row < height; row++) {
+    if (raw[row * (1 + bytesPerRow)] > 4) return { ok: false, reason: "bad_image" }; // 过滤器 0..4
+  }
   return { ok: true, width, height };
 }
 

@@ -39,6 +39,34 @@ function realPng(width: number, height: number): Buffer {
   ]);
 }
 
+
+/** CRC 全对、但 IDAT 内容非法的 PNG：用来证明「结构通过 ≠ 图像有效」。 */
+function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number; width?: number; height?: number } = {}): Buffer {
+  const crcTable = new Uint32Array(256).map((_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf: Buffer) => {
+    let c = 0xffffffff;
+    for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(opts.width ?? 1, 0); ihdr.writeUInt32BE(opts.height ?? 1, 4);
+  ihdr[8] = opts.bitDepth ?? 8; ihdr[9] = opts.colorType ?? 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
 test("account avatar upload: user token only, PNG limits, visibility by shared network, revoke, atomic replace", async () => {
   const a = register("avup_alice", "AvatarUpload1!");
   const b = register("avup_bob", "AvatarUpload1!");
@@ -111,6 +139,17 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
     expect(db.run("DELETE FROM network_members WHERE user_id=?1 AND network_id=?2", [b.user!.user_id, a.network_id!]).changes).toBeGreaterThan(0);
     expect((await getAvatar(b.token!, ok1.body.avatar_url)).status).toBe(404);
 
+    // 「CRC 正确但图像数据非法」也必须 400：结构通过不等于可解码。
+    const beforeInvalid = db.get<{ version: string; bytes: number }>(
+      "SELECT version, bytes FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id);
+    expect((await upload(a.token!, pngWithIdat(Buffer.alloc(0)))).body.reason).toBe("bad_image");
+    expect((await upload(a.token!, pngWithIdat(Buffer.from("not-a-zlib-stream")))).body.reason).toBe("bad_image");
+    // 解压成功但扫描行长度不符（声明 2×2 RGBA，实际只给 1×1）
+    expect((await upload(a.token!, pngWithIdat(deflateSync(Buffer.alloc(5)), { width: 2, height: 2 }))).body.reason).toBe("bad_image");
+    const afterInvalid = db.get<{ version: string; bytes: number }>(
+      "SELECT version, bytes FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id);
+    expect(afterInvalid).toEqual(beforeInvalid);
+
     // 原子替换：一次失败的上传不能把上一张弄丢；成功后旧 version 立刻 404。
     const beforeBad = db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id);
     expect((await upload(a.token!, Buffer.from("broken"))).status).toBe(400);
@@ -139,8 +178,8 @@ test("image inspector: signature, shape and size limits", () => {
   const corrupt = Buffer.from(truePng); corrupt[corrupt.length - 20] ^= 0xff;
   expect(inspectAvatarImage(corrupt).ok).toBe(false);
   expect(inspectAvatarImage(realPng(513, 16))).toEqual({ ok: false, reason: "too_big" });
-  const zeroWide = realPng(1, 1); zeroWide.writeUInt32BE(0, 16);
-  expect(inspectAvatarImage(zeroWide).ok).toBe(false);
+  const zeroWide = realPng(0, 1); // 宽 0 + 正确 CRC：专证 bad_dimensions 而不是 bad_crc
+  expect(inspectAvatarImage(zeroWide)).toEqual({ ok: false, reason: "bad_dimensions" });
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)]);
   expect(inspectAvatarImage(jpeg)).toEqual({ ok: false, reason: "not_png" });
   expect(inspectAvatarImage(Buffer.alloc(MAX_AVATAR_BYTES + 1))).toEqual({ ok: false, reason: "too_large" });
