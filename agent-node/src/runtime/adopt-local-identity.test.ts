@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -62,6 +62,21 @@ test("process exact config/alias/home and reproducible environment", () => {
   expect(() => verifyAdoptionProcess(identity, { ...evidence, env: { ...env, TMUX: "/other/socket,12,0" } }, opts)).toThrow("adopt_tmux_socket_mismatch");
   expect(() => verifyAdoptionProcess(identity, evidence, { ...opts, reproducibleEnv: { HOME: env.HOME, PATH: env.PATH } })).toThrow("adopt_env_not_reproducible:API_KEY");
 });
+for (const generation of ["v1", "v2"]) {
+  test(`OpenCode ${generation} co-presence is not enabled by the Codex adoption exception`, () => {
+    const f = fixture();
+    f.save({ runtime: "opencode-cli", opencodeMode: "copresence", opencodeGeneration: generation });
+    const before = readFileSync(f.configPath, "utf8");
+    for (const allowCodexV2 of [false, true]) {
+      expect(() => verifyAdoptionLocalIdentity(f.req, { ...f.opts, allowCodexV2 })).toThrow("copresence_adopt_v2");
+    }
+    expect(readFileSync(f.configPath, "utf8")).toBe(before);
+    f.save({ runtime: "codex-app-server", codexCopresence: true });
+    expect(verifyAdoptionLocalIdentity(f.req, { ...f.opts, allowCodexV2: true }).nodeId).toBe(f.req.node_id);
+    f.save({ runtime: "codex-sdk", codexCopresence: true });
+    expect(() => verifyAdoptionLocalIdentity(f.req, { ...f.opts, allowCodexV2: true })).toThrow("copresence_adopt_v2");
+  });
+}
 // Bun 1.3 fs.chmodSync drops setgid/sticky bits, so use the real chmod(1).
 const chmodBits = (path: string, mode: number) => { if (spawnSync("chmod", [mode.toString(8), path]).status !== 0) throw new Error("chmod failed"); };
 test("#747 sticky group-writable workdir accepted only for the workdir itself", () => {

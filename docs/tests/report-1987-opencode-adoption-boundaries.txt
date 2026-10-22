@@ -1,0 +1,49 @@
+# CommHub #1987: unsupported existing OpenCode co-presence adoption
+Date: 2026-10-22
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+Scope: investigation, refusal-contract tests and a proposed acceptance ladder.
+No production adoption or new adoption implementation.
+
+Read-only observations:
+- Config projections for the three local OpenCode nodes are runtime=opencode-cli,
+  opencodeMode=copresence, opencodeGeneration=v2. No secrets printed or copied.
+- The current local Bridge bundle contains copresence_adopt_v2 and the
+  opencodeMode=copresence guard. Local launch health reports shared serve
+  ownership, but that record alone is not a complete adoption proof.
+- Supervisor inventory at 2026-10-22 00:52Z shows daemon-dev and daemon-vdev
+  online. vdev restoration belongs to the host owner's recovery, not this work.
+- Node-token /api/nodes omits managed/adoption fields. It independently reports
+  lifecycle_controllable=false on the four local communication nodes. Do not
+  infer none/null from omitted fields or call this a fresh owner/admin snapshot.
+
+Confirmed source boundaries:
+- adopt-local-identity.ts unconditionally refuses OpenCode co-presence.
+- allowCodexV2 is limited to codex-app-server; it is not OpenCode V2 support.
+- Discovery calls the same verifier, leaving the Codex exception off.
+- Registry and adopted lifecycle have no dedicated OpenCode session/server
+  custody contract. Host-shared creation probes are not read-only adoption.
+- default_workdir_root is not evidence that adopt_roots permits the node.
+
+Docker test evidence:
+tests/test725-agent-node-unit-ci/Dockerfile, node user, Bun 1.3.14.
+Final isolated build, three files:
+  adopt-local-identity.test.ts, adopt-daemon.test.ts, adopt-candidates.test.ts
+  27 pass / 0 fail, 96 expects, 289ms.
+New local identity and discovery cases cover explicit V1/V2 OpenCode configs,
+Codex exception scope, shared-server candidate exclusion and unchanged config.
+
+An earlier request/ack extension exposed TWO actual daemon test failures:
+copresence_adopt_v2 was normalized to adopt_local_verification_failed because
+the safe-message regex rejects its trailing digit. Those failing request/ack
+tests and their product fix were moved to the dedicated #2012 slice, not deleted
+as noise. Hub independently drops the same exact code from its public allowlist.
+The final #1987 suite does not pretend to fix or accept either loss.
+
+Raw logs: /tmp/opencode/1987-adoption-boundaries.log (27 pass / 2 named fails),
+/tmp/opencode/1987-adoption-boundaries-final.log (27 pass / 0 fail).
+Plan: docs/runbooks/opencode-shared-adoption-boundaries.md.
+
+Limits: no existing TUI/Bridge/server restarted, no signal, credential change,
+identity copy, session creation/move/model change, binding or registry write.
+This is not a full-node-suite result or a production package. Exact-head CI,
+future preflight and real two-node shared-server lifecycle proof remain required.
