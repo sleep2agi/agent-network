@@ -92,6 +92,7 @@ import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
+import { createNodeSessionControlRelay } from "./node-session-control.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
@@ -1027,6 +1028,7 @@ function patrolDeliveredStaleTasks(): void {
 // Note: `opts.port ?? PORT` uses nullish-coalescing on purpose — `||`
 // would swallow a legitimate `0`. Same for hostname.
 export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
+const nodeSessionControl = createNodeSessionControlRelay();
 return Bun.serve({
   port: opts?.port ?? PORT,
   hostname: opts?.hostname ?? HOST,
@@ -2654,6 +2656,9 @@ return Bun.serve({
       isNodeToken: requestCredential.startsWith("ntok_"),
     });
     if (externalScheduleEditResponse) return withCors(req, externalScheduleEditResponse);
+
+    const sessionControlResponse = await nodeSessionControl(req, url);
+    if (sessionControlResponse) return withCors(req, sessionControlResponse);
 
     // Hub-owned scheduled tasks. Dashboard and mobile are management
     // clients only; each occurrence is dispatched as an ordinary task by the
