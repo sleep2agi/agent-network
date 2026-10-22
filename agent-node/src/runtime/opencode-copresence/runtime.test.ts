@@ -36,6 +36,7 @@ if (command === "serve") {
   const port = Number(value("--port"));
   const statuses = {};
   const messages = {};
+  let statusPolls = 0;
   const aborted = {};
   let lastResponse = null;
   const trace = (line) => { if (env.FAKE_LOG) require("fs").appendFileSync(env.FAKE_LOG, line + "\\n"); };
@@ -45,7 +46,17 @@ if (command === "serve") {
     const body = await new Promise((resolve) => { let s=""; req.on("data", c => s+=c); req.on("end", () => resolve(s)); });
     const json = body ? JSON.parse(body) : {};
     if (req.url === "/global/health") return send(res, { healthy:true, version:"1.18.34" });
-    if (req.url === "/session/status") return send(res, statuses);
+    if (req.url === "/session/status") {
+      statusPolls += 1;
+      const slowAt = Number(env.FAKE_STATUS_SLOW_POLL || 0);
+      const slowMs = Number(env.FAKE_STATUS_SLOW_MS || 0);
+      const errorAt = Number(env.FAKE_STATUS_ERROR_POLL || 0);
+      const malformedAt = Number(env.FAKE_STATUS_MALFORMED_POLL || 0);
+      if (slowAt && statusPolls === slowAt && slowMs > 0) await new Promise((r) => setTimeout(r, slowMs));
+      if (errorAt && statusPolls === errorAt) { res.writeHead(500); return res.end("status exploded"); }
+      if (malformedAt && statusPolls === malformedAt) return send(res, ["not", "a", "map"]);
+      return send(res, statuses);
+    }
     if (req.url === "/session" && req.method === "POST") {
       const id = "ses_test123";
       messages[id] = [];
@@ -972,6 +983,53 @@ describe("OpenCode copresence task deadline", () => {
       f.close();
     }
   }, 40_000);
+
+  // #2011 —— 「连续 404」必须是**连续**：中间夹一次 status 读取失败（500）时，
+  // 旧证据必须被清掉。否则 404 → 500 → 404×2 会凑够 3 次 + 2 秒，被误判成
+  // owner_left（负责人的会话其实一直只是那一刻查不到）。
+  test("#2011 a status 500 between 404s resets the consecutive-owner-left evidence", async () => {
+    const { f, runtime } = await open({
+      FAKE_SESSION_LOOKUP_MISSING: "1",
+      FAKE_STATUS_ERROR_POLL: "2",
+      FAKE_STATUS_SLOW_POLL: "2",
+      FAKE_STATUS_SLOW_MS: "2200",
+    });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("interrupted by a status 500", 3_500, "通信龙", undefined, { taskId: "2011a" });
+      } catch (error) { thrown = error; }
+      // 修复后：这次中断重置了计数，剩余预算不够再凑满 3 次连续 404 → 只能是超时。
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      expect(thrown.code).not.toBe("opencode_copresence_owner_left");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 30_000);
+
+  // 畸形 status（数组而不是 map）同样是「不是 404」的观测，必须重置。
+  test("#2011 a malformed status map between 404s resets the consecutive-owner-left evidence", async () => {
+    const { f, runtime } = await open({
+      FAKE_SESSION_LOOKUP_MISSING: "1",
+      FAKE_STATUS_MALFORMED_POLL: "2",
+      FAKE_STATUS_SLOW_POLL: "2",
+      FAKE_STATUS_SLOW_MS: "2200",
+    });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("interrupted by a malformed status map", 3_500, "通信龙", undefined, { taskId: "2011b" });
+      } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      expect(thrown.code).not.toBe("opencode_copresence_owner_left");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 30_000);
 
   test("0 disables the deadline: a turn longer than any fetch budget still returns its reply", async () => {
     const { f, runtime } = await open({ FAKE_TURN_MS: "1200", FAKE_INITIAL_BUSY_MS: "300" });

@@ -553,14 +553,25 @@ async function waitUntilSessionIdle(
   while (Date.now() < deadline) {
     try {
       const statuses = await request("/session/status", {}, 2_000);
+      if (!statuses || typeof statuses !== "object" || Array.isArray(statuses)) {
+        // #2011 —— 畸形 status 不是「会话没了」的证据，同样中断连续性。
+        missingPolls = 0;
+        missingSinceMs = 0;
+      }
       if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
         const state = statuses[sessionId];
         if (state?.type === "idle") return;
         // A named non-idle state is a shared TUI turn, not a missing session.
         // Say so once. Undefined still means "maybe idle" and must not alarm.
-        if (!notedBusy && state && typeof state === "object" && state.type && state.type !== "idle") {
-          notedBusy = true;
-          await onBusy?.();
+        if (state && typeof state === "object" && state.type && state.type !== "idle") {
+          // #2011 —— 命名状态（busy/其它）是「这次不是 404」的正向观测：
+          // 必须清掉 owner_left 的连续缺失证据，否则 404 → busy → 404 也会凑成「连续」。
+          missingPolls = 0;
+          missingSinceMs = 0;
+          if (!notedBusy) {
+            notedBusy = true;
+            await onBusy?.();
+          }
         }
         if (state === undefined) {
           // Pinned OpenCode 1.18.1 returns an empty status map for an idle
@@ -602,6 +613,10 @@ async function waitUntilSessionIdle(
       if (error?.code === "opencode_copresence_owner_left") throw error;
       if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
       // A transient status failure is also not evidence of idle.
+      // #2011 —— 外层 `/session/status` 失败（超时/5xx/连接问题）同样不是「会话没了」，
+      // 必须重置连续缺失计数：404 → status 500 → 404 不等于连续两次 404。
+      missingPolls = 0;
+      missingSinceMs = 0;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
