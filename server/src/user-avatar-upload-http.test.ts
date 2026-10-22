@@ -121,6 +121,11 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
     expect(ok1.body.user_id).toBe(a.user!.user_id);
     expect(ok1.body.avatar_url).toMatch(new RegExp(`^/api/users/${a.user!.user_id}/avatar/[A-Za-z0-9_-]{1,128}\\.png$`));
 
+    // 资料读取面必须同步看到这张头像（同一事务写 users.avatar_url）。
+    const meAfter = await fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${a.token}` } });
+    const meBody = await meAfter.json() as any;
+    expect(meBody.user.avatar_url).toBe(ok1.body.avatar_url);
+
     const first = await getAvatar(a.token!, ok1.body.avatar_url);
     expect(first.status).toBe(200);
     expect(first.headers.get("content-type")).toBe("image/png");
@@ -164,6 +169,44 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
     expect(db.get<{ width: number }>("SELECT width FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id)!.width).toBe(512);
   } finally {
     db.run("DELETE FROM user_avatar_uploads WHERE user_id IN (?1, ?2, ?3)", [a.user!.user_id, b.user!.user_id, outsider.user!.user_id]);
+    await hub.stop?.();
+  }
+});
+
+test("upload is rate limited before multipart parsing, and rejects keepalive leftovers", async () => {
+  const u = register("avup_ratelimit", "AvatarUpload1!");
+  expect(u.ok).toBe(true);
+  const { bootServer } = await import("./server.js");
+  const hub = bootServer({ port: 0, hostname: "127.0.0.1" });
+  const base = `http://127.0.0.1:${hub.port}`;
+  const send = async (body: BodyInit | null, contentType?: string) => {
+    const headers: Record<string, string> = { Authorization: `Bearer ${u.token}` };
+    if (contentType) headers["Content-Type"] = contentType;
+    const res = await fetch(`${base}/api/auth/me/avatar/upload`, { method: "POST", headers, body });
+    return { status: res.status, connection: res.headers.get("connection"), body: await res.json().catch(() => null) as any };
+  };
+  const multipart = () => {
+    const form = new FormData();
+    form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "a.png");
+    return form;
+  };
+  try {
+    // 60 次成功用满这一小时的桶（每张 1×1，成本可忽略）。
+    for (let i = 0; i < 60; i++) {
+      const r = await send(multipart());
+      expect(r.status).toBe(200);
+    }
+    const limited = await send(multipart());
+    expect(limited.status).toBe(429);
+    expect(limited.body.error).toBe("rate_limited");
+    expect(limited.connection).toBe("close");
+    // 关键：限流在 multipart 解析之前——普通 JSON 也被先拒成 429，而不是 415。
+    const early = await send("{}", "application/json");
+    expect(early.status).toBe(429);
+    expect(early.connection).toBe("close");
+  } finally {
+    db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [u.user!.user_id]);
+    db.run("UPDATE users SET avatar_url = NULL WHERE user_id = ?1", [u.user!.user_id]);
     await hub.stop?.();
   }
 });

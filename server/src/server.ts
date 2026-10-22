@@ -1497,19 +1497,44 @@ return Bun.serve({
     // 读取走 GET /api/users/:id/avatar/:version.png，按**人类资料可见性**判读
     // （本人或共享网络的合法成员），不借用 /api/files 的附件 ACL。
     if (url.pathname === "/api/auth/me/avatar/upload" && req.method === "POST") {
+      // pre-drain 拒绝统一关闭连接：keepalive 上残留的 multipart 未读字节会把
+      // 下一个请求读成垃圾（与 /api/upload 的 earlyReject 同一理由）。
+      const earlyReject = (res: Response): Response => {
+        const wrapped = withCors(req, res);
+        wrapped.headers.set("Connection", "close");
+        return wrapped;
+      };
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
-      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      if (!token) return earlyReject(Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
-      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
+      if (!resolved) return earlyReject(Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       // 节点令牌代表机器，不是这个人：头像只能由本人用用户令牌写。
-      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      if (isNodeCredential(resolved)) return earlyReject(userTokenRequired(req));
+
+      // 解析 multipart **之前**先限流：否则一个被限流的调用方仍能让 Hub 读满 8 MiB。
+      const authCtx = resolveRequestAuth(req);
+      const rateKey = authCtx?.tokenId ?? `ip:${getClientIP(req, server)}`;
+      const rate = sharedUploadRateLimiter.check(rateKey);
+      if (!rate.allowed) {
+        const headers: Record<string, string> = {
+          "X-RateLimit-Limit": String(60),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
+        };
+        if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
+        return earlyReject(new Response(
+          JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
+          { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },
+        ));
+      }
+
       if (!isMultipart(req.headers.get("content-type"))) {
-        return withCors(req, Response.json({ ok: false, error: "multipart_required" }, { status: 415 }));
+        return earlyReject(Response.json({ ok: false, error: "multipart_required" }, { status: 415 }));
       }
       const declared = Number(req.headers.get("content-length") ?? NaN);
       // 多留 1 MiB 给 multipart 信封；真正的二进制上限在解析后按 MAX_AVATAR_BYTES 再判一次。
       if (Number.isFinite(declared) && declared > MAX_AVATAR_BYTES + 1024 * 1024) {
-        return withCors(req, Response.json({ ok: false, error: "too_large" }, { status: 413 }));
+        return earlyReject(Response.json({ ok: false, error: "too_large" }, { status: 413 }));
       }
       let form: FormData;
       try { form = await req.formData(); } catch {
@@ -1525,16 +1550,26 @@ return Bun.serve({
       const check = inspectAvatarImage(bytes);
       if (!check.ok) return withCors(req, Response.json({ ok: false, error: "invalid_image", reason: check.reason }, { status: 400 }));
       const version = crypto.randomUUID().replace(/-/g, "");
-      // 单条 UPSERT：要么整行换新，要么旧行原样保留（畸形图在上面已被拒，走不到这里）。
-      db.run(
-        `INSERT INTO user_avatar_uploads (user_id, version, png, bytes, width, height, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
-         ON CONFLICT(user_id) DO UPDATE SET
-           version = excluded.version, png = excluded.png, bytes = excluded.bytes,
-           width = excluded.width, height = excluded.height, updated_at = excluded.updated_at`,
-        [resolved.user.user_id, version, bytes, bytes.byteLength, check.width, check.height],
-      );
-      return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: avatarUrl(resolved.user.user_id, version) }));
+      const url = avatarUrl(resolved.user.user_id, version);
+      // 头像表与用户资料必须在同一事务里落地：否则会出现「上传成功但资料页还是旧头像」，
+      // 或反过来点了清空却仍能读到旧字节。
+      db.transaction(() => {
+        db.run(
+          `INSERT INTO user_avatar_uploads (user_id, version, png, bytes, width, height, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+           ON CONFLICT(user_id) DO UPDATE SET
+             version = excluded.version, png = excluded.png, bytes = excluded.bytes,
+             width = excluded.width, height = excluded.height, updated_at = excluded.updated_at`,
+          [resolved.user.user_id, version, bytes, bytes.byteLength, check.width, check.height],
+        );
+        db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [url, resolved.user.user_id]);
+      });
+      // 回读用户资料行，确认读取面能看到这张新头像（而不是只信内存里的变量）。
+      const persisted = db.get<{ avatar_url: string | null }>("SELECT avatar_url FROM users WHERE user_id = ?1", [resolved.user.user_id]);
+      if (persisted?.avatar_url !== url) {
+        return withCors(req, Response.json({ ok: false, error: "avatar_persist_failed" }, { status: 500 }));
+      }
+      return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: url }));
     }
 
     // GET /api/users/:user_id/avatar/:version.png —— Bearer 用户令牌鉴权。
