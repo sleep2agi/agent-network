@@ -133,3 +133,25 @@ Result: exit 0
 This is the Docker test833 suite on the PR head, not the full repository CI and not
 client acceptance. Local non-Docker run of the upload file was 3 pass / 0 fail,
 132 expect.
+
+#2055 / PR2898 — interlace 取值收紧后的 Docker test833 复跑
+Observed: 2026-10-23 00:12 Asia/Shanghai
+Source: ab89aa40d33f2bb5a22126f6a29ef082d76bd20e (PR2898 branch feat/avatar-postmain-hardening)
+Change under test: user-avatar-image.ts 现在拒收所有 interlace != 0（原先只拒 Adam7=1）；
+新增负控 interlace=2/3/128/255（扫描数据本身是非隔行合法布局，只有 interlace 字节非法）。
+Image: anet-test833-2055 (tests/test833-user-avatar/Dockerfile, oven/bun 1.3.14, --network none)
+Commands:
+  docker build -f tests/test833-user-avatar/Dockerfile -t anet-test833-2055 .
+  docker run --rm --network none anet-test833-2055
+Result: build exit 0, run exit 0
+  user-avatar-migration.test.ts            1 pass / 0 fail     (3 expect)
+  avatar-validate.test.ts                 23 pass / 0 fail    (55 expect)
+  user-avatar-http.test.ts                 1 pass / 0 fail    (56 expect)
+  user-avatar-upload-http.test.ts          4 pass / 0 fail   (142 expect)   <- 含新增 interlace 负控
+  auth-sessions-http.test.ts              17 pass / 0 fail    (89 expect)
+  agent-acl-http.test.ts                  60 pass / 0 fail   (219 expect)
+  member-presence-http.test.ts             6 pass / 0 fail    (41 expect)
+Log: /tmp/opencode/test833-run-ab89aa40.log (237 lines, md5 4e8f794dca8db8c39adb12180de15637)
+
+Local non-Docker run of the same file: 4 pass / 0 fail, 142 expect.
+This remains the Docker test833 suite on the PR head only: not full-repo CI, not client acceptance.
