@@ -10,6 +10,7 @@ COPY agent-network/src ./agent-network/src
 COPY contracts/side-thread/v1 ./contracts/side-thread/v1
 COPY --from=app-src src/node-session-control.ts src/app-fetch.ts src/deadline.ts ./client-src/
 COPY tests/test2014-session-background/integration/run.ts ./run.ts
+COPY tests/test2014-session-background/integration/identity-wire.ts ./identity-wire.ts
 USER bun
 ENV COMMHUB_DB=/tmp/control-integration.db COMMHUB_DEV_OPEN=1 COMMHUB_AUTH_TOKEN=fixture-legacy-not-used
 CMD ["bun", "/work/run.ts"]
