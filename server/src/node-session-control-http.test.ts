@@ -85,7 +85,7 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
     } finally { abort.abort(); await reader.cancel().catch(() => {}); }
   });
   test("node, peer, anonymous, legacy and member cannot impersonate human owner/admin", async () => {
-    for (const token of [ntok.token, peer.token, "", "legacy-invalid", member.token, outsider.token]) {
+    for (const token of [ntok.token, peer.token, "", "legacy-test-only", member.token, outsider.token]) {
       expect((await api(token, root, { network_id: net, node_id: nodeId, operation: "state" })).status).toBeGreaterThanOrEqual(400);
     }
     const adminMade = await api(admin.token!, root, { network_id: net, node_id: nodeId, operation: "state" });
@@ -103,8 +103,12 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
   });
   test("peer token and legacy unbound token never receive target requests", async () => {
     const { createNetworkTokenForNode } = await import("./auth.js");
-    const legacy = createNetworkTokenForNode(owner.user.user_id, net, "sc-target");
+    const legacy = createNetworkTokenForNode(owner.user.user_id, net, "sc-unbound");
     expect(legacy.ok).toBe(true);
+    // Same-holder refreshes now bind existing rows. Construct an actual old
+    // unbound credential whose name only hints at this target instead.
+    db.run("UPDATE api_tokens SET name='node:sc-target' WHERE token_id=?1", legacy.token_id);
+    expect(db.get<any>("SELECT bound_node_id FROM api_tokens WHERE token_id=?1", legacy.token_id).bound_node_id).toBeNull();
     expect((await registerBridge(binding, legacy.token!)).status).toBe(403);
     expect((await registerBridge(binding, owner.token!)).status).toBe(403);
     const made = await enqueue();
