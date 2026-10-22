@@ -101,6 +101,17 @@ test("symlink escape, outside root, claimed registry, and unsafe registry", () =
   chmodSync(join(registry, "child-workdirs.json"), 0o666);
   expect(discoverAdoptionCandidates(f.opts)).toBeUndefined();
 });
+for (const generation of ["v1", "v2"]) {
+  test(`OpenCode ${generation} shared-server co-presence is not silently discoverable for adoption`, () => {
+    const f = layout();
+    f.save({ runtime: "opencode-cli", opencodeMode: "copresence", opencodeGeneration: generation,
+      opencodeSharedServerUrl: "http://127.0.0.1:12345" });
+    const before = readFileSync(f.configPath, "utf8");
+    // A trustworthy local config/shared-server candidate is not custody proof.
+    expect(discoverAdoptionCandidates(f.opts)).toEqual([]);
+    expect(readFileSync(f.configPath, "utf8")).toBe(before);
+  });
+}
 
 test("launch hint reads only an owned pid file and never returns environ", () => {
   const f = layout();
