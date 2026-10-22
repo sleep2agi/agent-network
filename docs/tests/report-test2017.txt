@@ -36,3 +36,21 @@ Limits: one-process bounded memory queue, 15s request / 75s Bridge lease,
 restart => unavailable/unknown (no replay), no multi-worker durability claim.
 No runtime capability, real tool background execution, client UI, release,
 deployment, node restart or lifecycle authority is established by this suite.
+
+2026-10-22 #2016 P1 identity contract increment (authorized by 8a0381e7):
+Product/test source: 59f5a3bfc9c971622c45d1e4ec215608062fc1e2.
+Executed only the new HTTP identity witnesses, not the original 15 or the
+separate 13-layer integration. Non-root Docker, no network outside loopback:
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -t anet-session-identity -f tests/test2017-node-session-control/Dockerfile . && docker run --rm --init --cpus=2 --network none --entrypoint bash anet-session-identity /work/run.sh --test-name-pattern "2017 identity"'
+RESULT: 3 pass / 15 filtered out / 0 fail / 25 assertions, 1.52s.
+  - absent/malformed expected => 400 request_invalid, no compatibility fallback;
+  - A credential expected B (same network or wrong network) => 409 changed;
+    clock beyond request deadline exposes any premature sweep; restoring only
+    the clock proves the original request remains pending and binding remains
+    claimable/not retired; token/node identity columns remain unchanged;
+  - correct expected => identity {node_id,network_id,token_id} matches the real
+    authenticated credential row, with no bearer credential in the response.
+Only /bridge adds required expected and the successful identity receipt. The
+other endpoints keep their fields. The consumer PIN/epoch/write permit remains
+owned by runtime PR2889. The report-only successor to the tested source does not
+claim a new run of the original HTTP/integration suite or complete CI success.
