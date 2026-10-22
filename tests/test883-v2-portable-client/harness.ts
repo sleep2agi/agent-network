@@ -166,20 +166,33 @@ try {
       const snapshot = JSON.parse(node?.config_snapshot || '{}');
       const sessions = db.query('SELECT node_id,network_id,model,status FROM sessions WHERE node_id=? AND network_id=?')
         .all(row.child_node_id, networkId);
-      const updates = db.query('SELECT update_id,apply_mode,status,created_at,acked_at,new_revision FROM node_config_updates WHERE node_id=? ORDER BY created_at DESC LIMIT 3')
-        .all(row.child_node_id);
-      const local = JSON.parse(readFileSync(`${nodeDir}/config.json`, 'utf8'));
+      const updates = (db.query('SELECT update_id,apply_mode,status,created_at,acked_at,new_revision,error FROM node_config_updates WHERE node_id=? ORDER BY created_at DESC LIMIT 3')
+        .all(row.child_node_id) as Array<Record<string, unknown>>)
+        .map(u => ({ ...u, error: typeof u.error === 'string' ? redact(u.error).slice(0, 500) : null }));
+      // Literal fixture paths keep this read distinguishable from a dynamic
+      // source-mutation target in the repository's mutation-pin collector.
+      const localText = process.env.TEST829_CLIENT_DRIVER
+        ? readFileSync('/home/node/test883/home/oc829/.anet/nodes/oc829/config.json', 'utf8')
+        : readFileSync('/home/node/test883/project/.anet/nodes/oc829/config.json', 'utf8');
+      const local = JSON.parse(localText);
       let bridge: Record<string, unknown> = { observable: false };
       try {
         const health = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8'));
         const pid = health.bridge.pid;
         if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('invalid fixture pid');
-        const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
-        const entry = args[1];
+        const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+        const entry = /^[^\0]*\0([^\0]*)/.exec(cmdline)?.[1];
         // Only the fixed test runtime entry can be read/hash-logged here.
         bridge = { pid, expected_entry: entry === process.env.ANET_AGENT_NODE_BIN };
+        bridge.processes = ['bridge', 'serve'].map(kind => {
+          const expected = health[kind];
+          if (!Number.isSafeInteger(expected?.pid) || expected.pid <= 0) return { kind, observed: false };
+          const live = observeGeneration(expected.pid);
+          return live === 'absent' ? { kind, pid: expected.pid, observed: false }
+            : { kind, pid: expected.pid, state: live.state, identity_matches: live.ticks === expected.ticks };
+        });
         if (entry === '/opt/node_modules/@sleep2agi/agent-node/dist/cli.js') {
-          const bytes = readFileSync(entry);
+          const bytes = readFileSync('/opt/node_modules/@sleep2agi/agent-node/dist/cli.js');
           bridge.entry_sha256 = createHash('sha256').update(bytes).digest('hex');
           bridge.has_model_deadline = bytes.includes(Buffer.from('OpenCode session model switch timed out after'));
         }
