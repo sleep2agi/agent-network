@@ -98,6 +98,7 @@ import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 import { createProductionSideThreadTransport } from "./side-thread-production.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
+import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES } from "./user-avatar-image.js";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -1487,6 +1488,95 @@ return Bun.serve({
       // No supplied target ID/alias; user identity comes exclusively from auth.
       db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [avatar.value, resolved.user.user_id]);
       return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: avatar.value }));
+    }
+
+    // ── 账号头像上传（Hub 托管，非普通附件）──
+    //
+    // 契约（通信Mac马 交付单）：用户令牌 + multipart 仅一个 `file` 字段；PNG、
+    // 最长边 ≤512、≤8 MiB；服务端独立复核后原子覆盖本人头像；URL 由 Hub 发。
+    // 读取走 GET /api/users/:id/avatar/:version.png，按**人类资料可见性**判读
+    // （本人或共享网络的合法成员），不借用 /api/files 的附件 ACL。
+    if (url.pathname === "/api/auth/me/avatar/upload" && req.method === "POST") {
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
+      // 节点令牌代表机器，不是这个人：头像只能由本人用用户令牌写。
+      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      if (!isMultipart(req.headers.get("content-type"))) {
+        return withCors(req, Response.json({ ok: false, error: "multipart_required" }, { status: 415 }));
+      }
+      const declared = Number(req.headers.get("content-length") ?? NaN);
+      // 多留 1 MiB 给 multipart 信封；真正的二进制上限在解析后按 MAX_AVATAR_BYTES 再判一次。
+      if (Number.isFinite(declared) && declared > MAX_AVATAR_BYTES + 1024 * 1024) {
+        return withCors(req, Response.json({ ok: false, error: "too_large" }, { status: 413 }));
+      }
+      let form: FormData;
+      try { form = await req.formData(); } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid_multipart" }, { status: 400 }));
+      }
+      const fields = [...form.keys()];
+      const file = form.get(AVATAR_FIELD);
+      if (fields.length !== 1 || fields[0] !== AVATAR_FIELD || !(file instanceof File)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_avatar_body", reason: "expected exactly one `file` part" }, { status: 400 }));
+      }
+      if (file.size > MAX_AVATAR_BYTES) return withCors(req, Response.json({ ok: false, error: "too_large" }, { status: 413 }));
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const check = inspectAvatarImage(bytes);
+      if (!check.ok) return withCors(req, Response.json({ ok: false, error: "invalid_image", reason: check.reason }, { status: 400 }));
+      const version = crypto.randomUUID().replace(/-/g, "");
+      // 单条 UPSERT：要么整行换新，要么旧行原样保留（畸形图在上面已被拒，走不到这里）。
+      db.run(
+        `INSERT INTO user_avatar_uploads (user_id, version, png, bytes, width, height, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+         ON CONFLICT(user_id) DO UPDATE SET
+           version = excluded.version, png = excluded.png, bytes = excluded.bytes,
+           width = excluded.width, height = excluded.height, updated_at = excluded.updated_at`,
+        [resolved.user.user_id, version, bytes, bytes.byteLength, check.width, check.height],
+      );
+      return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: avatarUrl(resolved.user.user_id, version) }));
+    }
+
+    // GET /api/users/:user_id/avatar/:version.png —— Bearer 用户令牌鉴权。
+    // 可见性 = 本人，或与调用者共享至少一个网络的合法人类成员；节点令牌不是「人」。
+    // 不可见与不存在都回 404：不让人用状态码探测别人的账号是否存在。
+    const userAvatarMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/avatar\/([^/]+)\.png$/);
+    if (userAvatarMatch && req.method === "GET") {
+      const [, rawUserId, rawVersion] = userAvatarMatch;
+      let targetUserId: string;
+      try { targetUserId = decodeURIComponent(rawUserId); } catch {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      if (!isValidAvatarVersion(rawVersion)) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
+      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      const callerId = resolved.user.user_id;
+      if (callerId !== targetUserId) {
+        const shared = db.get<{ ok: number }>(
+          `SELECT 1 AS ok FROM network_members me
+             JOIN network_members them ON them.network_id = me.network_id
+            WHERE me.user_id = ?1 AND them.user_id = ?2 LIMIT 1`,
+          [callerId, targetUserId],
+        );
+        if (!shared) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      const row = db.get<{ png: Uint8Array }>(
+        "SELECT png FROM user_avatar_uploads WHERE user_id = ?1 AND version = ?2",
+        [targetUserId, rawVersion],
+      );
+      if (!row) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      return withCors(req, new Response(row.png, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/png",
+          // 头像随账号更新，不能让中间层缓存住旧的那张；也不做重定向。
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      }));
     }
 
     if (url.pathname === "/api/auth/me" && req.method === "PUT") {

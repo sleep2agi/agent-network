@@ -322,6 +322,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 `);
 
+// 账号头像上传（二进制 PNG，Hub 自己发 URL）。与 users.avatar_url 并存：
+// avatar_url 仍可指向内建池/外链；这张表只存「上传到 Hub 本人的那张」。
+// 单行/人：新版本覆盖旧版本，旧 URL 立刻 404（version 变了），不做历史留存。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_avatar_uploads (
+    user_id    TEXT PRIMARY KEY,
+    version    TEXT NOT NULL,
+    png        BLOB NOT NULL,
+    bytes      INTEGER NOT NULL,
+    width      INTEGER NOT NULL,
+    height     INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 // Human profile avatar. Additive for existing databases; old binaries ignore it.
 try {
   db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT");
