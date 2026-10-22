@@ -1,0 +1,54 @@
+CommHub #2028, independent first slice of #1566
+Date: 2026-10-22
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91 (main)
+Tested product source: 3818b1c523922726cf59d755961bd123cd523c1c
+
+Observed code-path defect, NOT a production-incident root-cause attribution:
+- processTask formatted errors with runtimeErrorReplyText, then gave only text
+  plus failed=true to isTransientVendorError. A genuine unverifiedOwnerError
+  carrying vendor-shaped reply bytes passed that gate. The generic outer think
+  loop could therefore resubmit despite unknown/foreign reply ownership.
+- Known OpenCode timeout/provider errors could also pass the text heuristic;
+  the latter had already gone through the runtime's capacity/side-effect policy.
+
+Minimal changes (no Hub/runtime API or state-store changes):
+- Keep the structured failure in BOTH initial and retry catch paths, and pass
+  it to the retry gate. Known OpenCode timeout/ownership/provider failures block
+  the generic vendor retry. Ordinary vendor, auth/rate and success gates retain
+  their old behavior. Existing reply formatting/sanitization is unchanged.
+- Log a fixed structured diagnostic at the captured runtime's submit catch:
+  source, generation, task/session/submitted/parent IDs, fixed reason/phase,
+  runtime_outcome=not_established and automatic_retry=false. Invalid/absent IDs
+  stay null, never truncated into another identity. No new prompt/reply/error
+  text, bearer, endpoint or ownershipReason bytes are added to this diagnostic.
+- This is only local wait/failed-task evidence. It does NOT mark the underlying
+  runtime turn stopped, synthesize message IDs, grant abort or replay authority,
+  resolve restart ownership, change the 30min budget or act on a real session.
+
+Necessary Docker checks only, Bun1.3.14, non-root uid1000, read-only source,
+network none, bounded /tmp tmpfs; existing anet-test2014-session-background image
+used only as the cached Bun executable/tooling environment:
+1. Red witness before the fix, actual formatter + actual retry gate:
+   1 pass / 3 fail / 8 expects, /tmp/opencode/1566-retry-red.log.
+   Unverified text, timeout and provider markers all incorrectly permitted retry.
+2. Final source, only the three affected failure/ownership/provider unit files:
+   37 pass / 0 fail / 78 expects / 58ms.
+   Includes seven new tests for the structured gate/diagnostic and CLI wiring.
+   The CLI source-wiring assertion is NOT a launched CLI/Hub/TUI acceptance.
+3. Existing standalone vendor-error-sanitize script: 79/79 pass.
+4. CLI bundle: PASS, 264 modules, 86ms.
+   Combined log: /tmp/opencode/1566-retry-final.log.
+5. Existing TS5.9.3 dependency container, same base main vs changed source:
+   83 -> 83 diagnostics, none added/removed after excluding line shifts.
+   Both exit2; NOT a passing baseline81/required CI gate. Logs:
+   /tmp/opencode/1566-retry-tsc-main.log, /tmp/opencode/1566-retry-tsc-final.log.
+   Initial check caught a new optional-generation type mismatch; fixed using
+   the same v1 default already used when opening the captured runtime.
+
+No all-suite, cross-platform or performance matrix, real node hot rotation,
+production replay, restart, DB clearing, identity copying, package release or
+activation. No new test suite: the new src/**/*.test.ts is auto-discovered by
+the existing test725 unit suite. Independent review, exact-head required CI and
+ordinary PR merge remain outstanding. Parent #1566 is NOT completed by this
+slice; persisted restart/terminal-state and true TUI owner-close acceptance are
+separate remaining work. The report-only successor does not claim a new run.

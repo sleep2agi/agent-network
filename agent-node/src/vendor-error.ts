@@ -1,3 +1,5 @@
+import { runtimeFailureBlocksAutomaticRetry } from "./runtime/unverified-reply-text";
+
 /**
  * Vendor-error sanitization (RFC-020 §14, Vincent 2026-06-29 UAT).
  *
@@ -112,6 +114,9 @@ export function isVendorErrorForUser(
  *     credentials / top up.
  *   - rate-limit (429, too many requests) — caller might decide to retry
  *     with longer backoff, but the default short backoff isn't enough.
+ *   - a supplied structured OpenCode timeout/ownership/provider failure —
+ *     text from an uncertain turn cannot authorize a new submission. The
+ *     caller retains the error object across each attempt, not just text.
  *
  * 通信龙 65e59373 lock: retry transient 1-2 times with short backoff
  * BEFORE sanitization, so Vincent's image+text replies don't sanitize on
@@ -120,7 +125,9 @@ export function isVendorErrorForUser(
 export function isTransientVendorError(
   text: string,
   failed: boolean,
+  runtimeFailure?: unknown,
 ): boolean {
+  if (runtimeFailureBlocksAutomaticRetry(runtimeFailure)) return false;
   if (!isVendorErrorForUser(text, failed)) return false;
   // Auth-class errors won't recover on retry — don't waste round-trips.
   if (/\b401\b|\b403\b|unauthorized|forbidden/i.test(text)) return false;
