@@ -21,6 +21,37 @@ import { join } from "node:path";
 import { envVarFromEnviron, hasLoneSurrogate, readProcNulBlock, verifyProcessTreeCodexHome, type ProcReader } from "../codex-home-enforce";
 import { parseTmuxPanes, TMUX_PANE_LIST_ARGS } from "./codex-health";
 import { parseTmuxRows, tmuxListArgs } from "../tmux-format";
+import { isReservedEnvKey } from "../shared/reserved-env";
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+// Keep this list aligned with the co-presence launcher. These values define
+// node/session identity or are supplied by the launcher, so config.env must
+// never be able to replace them during a watchdog recovery.
+export const CODEX_APPSERVER_LAUNCHER_ENV: ReadonlySet<string> = new Set([
+  "ANET_CODEX_COMMHUB_TOKEN",
+  "ANET_CODEX_PAIRED_AGENT_NODE",
+  "ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES",
+  "ANET_CODEX_RESUME_TIMEOUT_MS",
+  "ANET_CODEX_TUI_SESSION",
+  "ANET_COPRESENCE_BRIDGE",
+  "ANET_NODE_MARKER",
+  "CODEX_HOME",
+  "COMMHUB_ALIAS",
+  "COMMHUB_AUTH_TOKEN",
+  "COMMHUB_NODE_ID",
+  "COMMHUB_TOKEN",
+  "COMMHUB_URL",
+]);
+
+// A replacement app-server is started from the long-lived bridge/tmux
+// environment. Replay the network and CA variables explicitly so a watchdog
+// restart cannot silently lose the path to the model provider.
+const RELAUNCH_INHERITED_ENV_KEYS = [
+  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+  "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+  "SSL_CERT_FILE", "SSL_CERT_DIR", "CODEX_CA_CERTIFICATE",
+] as const;
 
 export interface AppServerLaunchSnapshot {
   session: string;
@@ -116,9 +147,58 @@ export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+function validateRelaunchEnvKey(key: string): boolean {
+  if (!ENV_NAME.test(key)) {
+    throw new Error(`invalid config.env key for Codex app-server relaunch: ${JSON.stringify(key)}`);
+  }
+  const canonical = key.toUpperCase();
+  if (isReservedEnvKey(canonical)) {
+    throw new Error(`config.env.${key} is reserved and cannot enter Codex app-server relaunch`);
+  }
+  return !CODEX_APPSERVER_LAUNCHER_ENV.has(canonical);
+}
+
+function validateRelaunchEnvValue(key: string, value: string): void {
+  if (value.includes("\0")) throw new Error(`config.env.${key} contains NUL`);
+}
+
+/** Resolve the env block of a node config against the bridge's already-resolved
+ * process environment. Values are returned only to the caller that writes the
+ * private source-then-delete file; they never enter logs or tmux argv. */
+export function appServerRelaunchEnv(configEnv: unknown, ambientEnv: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  const add = (key: string, value: string): void => {
+    if (!validateRelaunchEnvKey(key)) return;
+    validateRelaunchEnvValue(key, value);
+    out[key] = value;
+  };
+
+  if (configEnv && typeof configEnv === "object" && !Array.isArray(configEnv)) {
+    for (const [key, raw] of Object.entries(configEnv as Record<string, unknown>)) {
+      // Launcher-owned values are filtered before shape checks so a configured
+      // CODEX_HOME/ANET_NODE_MARKER can never win by accident.
+      if (!validateRelaunchEnvKey(key)) continue;
+      const supported = typeof raw === "string"
+        || (!!raw && typeof raw === "object" && typeof (raw as { _envRef?: unknown })._envRef === "string");
+      if (!supported) continue;
+      const value = ambientEnv[key];
+      if (typeof value !== "string") {
+        throw new Error(`config.env.${key} was not resolved in the bridge environment`);
+      }
+      add(key, value);
+    }
+  }
+  for (const key of RELAUNCH_INHERITED_ENV_KEYS) {
+    const value = ambientEnv[key];
+    if (typeof value === "string") add(key, value);
+  }
+  return out;
+}
+
 /** tmux 里 `bash -lc` 跑的那一行:和 launcher 同形(export CODEX_HOME → source 令牌文件 → 删掉 → exec)。 */
 export function buildRelaunchScript(snapshot: AppServerLaunchSnapshot, codexHome: string, envFile: string): string {
   return [
+    "set -e",
     `export CODEX_HOME=${shellQuote(codexHome)}`,
     `. ${shellQuote(envFile)}`,
     `rm -f ${shellQuote(envFile)}`,
@@ -126,13 +206,36 @@ export function buildRelaunchScript(snapshot: AppServerLaunchSnapshot, codexHome
   ].join(" ; ");
 }
 
-/** 和 launcher 的 writeCodexCopresenceEnvFile 同一套:先 unlink(防符号链接),再 0600 + wx 创建。 */
-export function writeAppServerTokenFile(codexHome: string, token: string): string {
+/** 和 launcher 的 writeCodexCopresenceEnvFile 同一套:先 unlink(防符号链接),再 0600 + wx 创建。
+ * 必需 launcher 值最后写入,所以即使调用方误传同名配置也不会覆盖身份/令牌。 */
+export function writeAppServerRelaunchEnvFile(
+  codexHome: string,
+  token: string,
+  stageEnv: Readonly<Record<string, string>> = {},
+): string {
+  validateRelaunchEnvValue("ANET_CODEX_COMMHUB_TOKEN", token);
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(stageEnv)) {
+    if (!validateRelaunchEnvKey(key)) continue;
+    validateRelaunchEnvValue(key, value);
+    env[key] = value;
+  }
+  env.ANET_CODEX_COMMHUB_TOKEN = token;
   const envPath = join(codexHome, ".anet-copresence.env");
   try { unlinkSync(envPath); } catch (err: any) { if (err?.code !== "ENOENT") throw err; }
-  writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`, { mode: 0o600, flag: "wx" });
+  const text = Object.entries(env)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
+    .join("\n") + "\n";
+  writeFileSync(envPath, text, { mode: 0o600, flag: "wx" });
   try { chmodSync(envPath, 0o600); } catch { /* best-effort */ }
   return envPath;
+}
+
+/** Backward-compatible token-only entry point for callers which do not have a
+ * node config (tests and old integrations). */
+export function writeAppServerTokenFile(codexHome: string, token: string): string {
+  return writeAppServerRelaunchEnvFile(codexHome, token);
 }
 
 export async function waitForPort(url: string, timeoutMs: number): Promise<boolean> {
@@ -342,7 +445,16 @@ export async function relaunchAppServer(snapshot: AppServerLaunchSnapshot, deps:
   return next.snapshot;
 }
 
-export function realRelaunchDeps(input: { codexHome: string; marker: string | undefined; token: string; procReader?: ProcReader; log?: (m: string) => void }): RelaunchDeps {
+export function realRelaunchDeps(input: {
+  codexHome: string;
+  marker: string | undefined;
+  token: string;
+  configEnv?: unknown;
+  ambientEnv?: NodeJS.ProcessEnv;
+  procReader?: ProcReader;
+  log?: (m: string) => void;
+}): RelaunchDeps {
+  const stageEnv = appServerRelaunchEnv(input.configEnv, input.ambientEnv ?? process.env);
   return {
     codexHome: input.codexHome,
     marker: input.marker,
@@ -352,7 +464,7 @@ export function realRelaunchDeps(input: { codexHome: string; marker: string | un
     tmux: (args) => { execTmux(args, { stdio: "pipe", timeout: 10_000 }); },
     sessionId: tmuxSessionId,
     waitPort: waitForPort,
-    writeTokenFile: writeAppServerTokenFile,
+    writeTokenFile: (codexHome, token) => writeAppServerRelaunchEnvFile(codexHome, token, stageEnv),
     verifyHome: (pid, expected) => verifyProcessTreeCodexHome({ rootPid: pid, expected, label: "relaunched app-server", reader: input.procReader }),
     log: input.log,
   };

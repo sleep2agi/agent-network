@@ -47,7 +47,7 @@ Do not flip publish to exercise this runbook. The `pull_request` path uses `publ
 
 Matrix (`fail-fast: false`): `ubuntu-24.04` + `bun-linux-x64`, `macos-14` + `bun-darwin-arm64`. Bun is pinned the same way as release.yml: `oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6`, version `1.3.14`.
 
-Each leg checks `anet --version` against the stamp, `--help`, `__node --help`, `__hub` `/health` 200 with `version` equal to the commhub-server package version, size ≤ 110MB, a SHA256 file, and `actions/attest-build-provenance@v2`.
+Each leg checks `anet --version` against the stamp, `--help`, `__node --help`, `__hub` `/health` 200 with `version` equal to the commhub-server package version, size ≤ 110MB, and a SHA256 file. `actions/attest-build-provenance@v2` runs only for `workflow_dispatch`; fork `pull_request` jobs do not receive the OIDC request environment, so PRs compile, smoke, and upload artifacts without claiming provenance.
 
 The publish job runs only for `workflow_dispatch` with `publish=true` after both legs succeed. It checks that every leg reports the same three package versions and bundle version, writes `SHA256SUMS` and `anet-bin-manifest.json`, then `gh release create cli-bin-v<version>`. An existing tag fails the job.
 
