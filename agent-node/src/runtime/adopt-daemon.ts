@@ -100,6 +100,8 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
     registered = true;
   } catch (e: any) {
     // Do not expose filesystem paths or secrets from parser/OS error messages.
+    // CommHub #2012: preserve this exact digit-bearing code; do not broaden
+    // the generic regex to admit arbitrary suffixes or secret-bearing text.
     const message = typeof e?.message === "string" && (e.message === "copresence_adopt_v2" || /^(adopt_|daemon_has_|copresence_|cannot_adopt_|workdir_)[a-z_]+(:[A-Z0-9_,]+)?$/.test(e.message))
       ? e.message : "adopt_local_verification_failed";
     await deps.callCommHub("ack_adopt_request", { request_id: requestId, status: "refused", error: message });
