@@ -4,6 +4,7 @@ import { forkRecoveryRequestSchema, publicForkResult } from "./codex-fork-contra
 
 // Exact public codes only; daemon exception text must never reach node viewers.
 const publicLifecycleErrors = new Set([
+  "copresence_adopt_v2",
   "codex_fork_confirmation_invalid", "codex_fork_recovery_unsupported", "codex_fork_cli_unsupported",
   "codex_fork_result_invalid", "codex_fork_outcome_unknown",
   "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleAdoptDoorbell, handleUnadoptDoorbell } from "./adopt-daemon.js";
@@ -43,6 +43,37 @@ test("Hub rejected ack rolls back only this request", async () => {
   f.deps.callCommHub = async tool => tool === "get_adopt_request" ? f.req : { ok: false };
   await expect(handleAdoptDoorbell(f.req, f.deps)).rejects.toThrow("adopt_ack_rejected");
   expect(Object.keys(readWorkdirRegistry(f.deps.workDir))).toHaveLength(0);
+});
+for (const generation of ["v1", "v2"]) {
+  test(`OpenCode ${generation} adoption refuses before process probing or registry persistence`, async () => {
+    const f = fixture();
+    const configPath = join(f.nodeDir, "config.json");
+    const cfg = JSON.parse(readFileSync(configPath, "utf8"));
+    writeFileSync(configPath, JSON.stringify({ ...cfg, runtime: "opencode-cli", opencodeMode: "copresence",
+      opencodeGeneration: generation, token: "fixture-node-token", opencodeSharedServerUrl: "http://127.0.0.1:12345" }), { mode: 0o600 });
+    const pidPath = join(f.nodeDir, ".pid");
+    writeFileSync(pidPath, "424242\n", { mode: 0o600 });
+    const before = readFileSync(configPath, "utf8");
+    await handleAdoptDoorbell(f.req, { ...f.deps, readProc: () => { throw Error("must not probe rejected OpenCode node"); } });
+    expect(f.calls).toEqual([
+      { tool: "get_adopt_request", args: { request_id: f.req.request_id } },
+      { tool: "ack_adopt_request", args: { request_id: f.req.request_id, status: "refused", error: "copresence_adopt_v2" } },
+    ]);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(readFileSync(pidPath, "utf8")).toBe("424242\n");
+    expect(existsSync(join(f.deps.workDir, ".anet", "child-workdirs.json"))).toBe(false);
+    expect(adoptedChild(f.deps.workDir, f.req.alias)).toBeNull();
+    expect(JSON.stringify(f.calls)).not.toContain("fixture-node-token");
+  });
+}
+test("unsupported co-presence refusal text still redacts suffixes and secret-bearing messages", async () => {
+  for (const message of ["copresence_adopt_v2:fixture-secret", "copresence_adopt_v2 /private/fixture", "copresence_adopt_v2_extra", "unknown_fixture-secret"]) {
+    const f = fixture();
+    writeFileSync(join(f.nodeDir, ".pid"), "424242\n", { mode: 0o600 });
+    await handleAdoptDoorbell(f.req, { ...f.deps, readProc: () => { throw Error(message); } });
+    expect(f.calls.at(-1).args).toEqual({ request_id: f.req.request_id, status: "refused", error: "adopt_local_verification_failed" });
+    expect(adoptedChild(f.deps.workDir, f.req.alias)).toBeNull();
+  }
 });
 test("revocation before registration then real app-level ack rejection rolls back", async () => {
   const f = fixture();
