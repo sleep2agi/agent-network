@@ -96,8 +96,9 @@ export function inspectAvatarImage(input: Uint8Array): AvatarImageCheck {
       const legalDepth: Record<number, number[]> = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
       if (!legalDepth[colorType]?.includes(bitDepth)) return { ok: false, reason: "not_png" };
       if (compression !== 0 || filter !== 0) return { ok: false, reason: "not_png" };
-      // Adam7 隔行扫描的扫描行布局与逐行校验不同：本实现不支持，明确拒收而不是错算长度。
-      if (interlace === 1) return { ok: false, reason: "interlaced_unsupported" };
+      // 本实现只校验逐行（interlace=0）扫描布局：Adam7(=1) 的布局不同，其余取值(2..255)
+      // 在 PNG 规范里根本不合法。一律明确拒收，而不是错算长度后放行。
+      if (interlace !== 0) return { ok: false, reason: "interlaced_unsupported" };
       if (width === 0 || height === 0) return { ok: false, reason: "bad_dimensions" };
       if (width > MAX_AVATAR_EDGE || height > MAX_AVATAR_EDGE) return { ok: false, reason: "too_big" };
       sawIHDR = true;

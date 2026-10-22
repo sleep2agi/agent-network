@@ -41,7 +41,7 @@ function realPng(width: number, height: number): Buffer {
 
 
 /** CRC 全对、但 IDAT 内容非法的 PNG：用来证明「结构通过 ≠ 图像有效」。 */
-function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number; width?: number; height?: number; interlace?: 0 | 1 } = {}): Buffer {
+function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number; width?: number; height?: number; interlace?: number } = {}): Buffer {
   const crcTable = new Uint32Array(256).map((_, n) => {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -280,6 +280,12 @@ test("image inspector: signature, shape and size limits", () => {
   // Adam7 隔行：明确拒收（不按非隔行长度错算）
   const interlaced = pngWithIdat(deflateSync(Buffer.alloc(6)), { width: 1, height: 1, interlace: 1 });
   expect(inspectAvatarImage(interlaced)).toEqual({ ok: false, reason: "interlaced_unsupported" });
+  // 规范外取值 2..255：同样拒收（负控：扫描数据本来是非隔行的合法布局，
+  // 只有 interlace 字节非法，证明拦截来自 interlace 判断而不是解码失败）
+  for (const bad of [2, 3, 128, 255]) {
+    const invalidInterlace = pngWithIdat(deflateSync(Buffer.alloc(6)), { width: 1, height: 1, interlace: bad });
+    expect(inspectAvatarImage(invalidInterlace)).toEqual({ ok: false, reason: "interlaced_unsupported" });
+  }
   const zeroWide = realPng(0, 1); // 宽 0 + 正确 CRC：专证 bad_dimensions 而不是 bad_crc
   expect(inspectAvatarImage(zeroWide)).toEqual({ ok: false, reason: "bad_dimensions" });
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)]);
