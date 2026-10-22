@@ -40,10 +40,46 @@ its 26 executions were 13 unique tests, not 26 distinct cases. Docker CMD now us
 three explicit ./src paths; the final denominator above is not doubled.
 
 Remaining delivery gates (not claimed complete)
-- Hub authorized relay is independent #2017; endpoint/ACK contract below must land.
-- Client status/button and human current-network authorization acceptance pending.
+- Hub authorized relay is independent #2017/PR2890; it must land normally.
+- Client status/button PR1016 must land normally; native authorization acceptance pending.
 - Real installed OpenCode/runtime versions and exact native session behavior have
   not been accepted on a production node; this suite uses HTTP/model-free fixtures.
 - Required CI, main merge, paired release and authorized node activation separate.
 - No full suite, performance, compatibility or unrelated Docker sweep was run.
 - No production config, credentials, identities, databases or live sessions changed.
+
+2026-10-22 composition verification (one minimal run, not a full suite)
+Inputs:
+  Runtime/Bridge PR2889: 2f3a7158d358c6a6fe52f83b0c5130eaf9c1df12
+  Hub relay PR2890: 2255e25f5213891706a23ea81c550298cfef013c
+  Client adapter PR1016: 9d9ac82d32116fc0971fb335d26d89bc960c1a73
+Local-only composed worktree: /tmp/opencode/anet-2014-control-integration
+  78cb70ffa (runtime plus four Hub commits cherry-picked, no main merge/push).
+  It was built with the integration files now tracked beside this report.
+
+Opt-in reproduction (compose the above source refs first, no production secrets):
+  sg docker -c 'docker build --build-context app-src=<client-checkout> \
+    -f tests/test2014-session-background/integration/Dockerfile \
+    -t anet-test2014-control-integration .'
+  sg docker -c 'timeout 90s docker run --rm --network none anet-test2014-control-integration'
+The composition Dockerfile deliberately requires server/src from the Hub relay
+source; the ordinary runtime-only Dockerfile/test remains independent. Build
+context app-src supplies the exact unmodified client adapter/app-fetch/deadline.
+
+RESULT PASS 13 assertions, Bun1.3.14, USER bun, --network none:
+  Actual client adapter -> real Hub HTTP, SQLite, human/node credentials and
+  scoped SSE -> actual Bridge pull/ACK -> actual runtime HTTP adapter -> Basic
+  authenticated synthetic OpenCode HTTP server. Exact wire compatibility proved.
+  Positive state; one original-session 204 write => request_processed; peer and
+  prompt/keys untouched; real Hub409 expected-binding refusal -> client changed;
+  idle no-op; missing actual API capability disables control; dropped ACK followed
+  by generation change -> client unknown; repeated pulls never replay; SSE only
+  doorbell fields. These are product adapters, not mocks between those layers.
+
+Image id: sha256:ebabd0066419315ce1d7bbe899999b07beb1aa01b896b548b439c2d7682da028
+Local log: /home/vansin/.anet/opencode-v2-shared/opencode/shell/f7bc75bb51c2adfbca61c8244e3ecddd01035f5f/sh_1614c97d4001HluQKaXbiQl1gk.out
+All credentials are generated in the disposable container; the legacy literal
+is a fixture and is not used to authorize control. No production DB/keys/session.
+This is NOT a real installed OpenCode/TUI/model, real native UI, release artifact,
+multi-worker Hub, original screenshot node or production activation acceptance.
+No full suite, compatibility or performance sweep was added.
