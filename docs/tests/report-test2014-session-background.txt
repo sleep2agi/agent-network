@@ -77,7 +77,33 @@ RESULT PASS 13 assertions, Bun1.3.14, USER bun, --network none:
   doorbell fields. These are product adapters, not mocks between those layers.
 
 Image id: sha256:ebabd0066419315ce1d7bbe899999b07beb1aa01b896b548b439c2d7682da028
-Local log: /home/vansin/.anet/opencode-v2-shared/opencode/shell/f7bc75bb51c2adfbca61c8244e3ecddd01035f5f/sh_1614c97d4001HluQKaXbiQl1gk.out
+Local-only composition log: see the submitting node's private shell artifact;
+the reproducible inputs and commands are recorded above, not a home path.
+
+2026-10-22 CI follow-up (four-file delta from 32dbdb3d):
+- Register the existing runtime-only Docker CMD suite in scripts/qa.sh L1_TESTS
+  and both qa.yml path filters. The opt-in cross-PR composition is not run by L1.
+- Replace the local home log path above; do not add a home-path baseline entry.
+- Explicitly return the existing never-returning fail() in two unknown-outcome
+  catches and the invalid-ID guard, so TypeScript proves return/narrowing.
+  No changed error, request order, retry, deadline, binding or deduplication rule.
+- CI old head: 84 diagnostics versus baseline81; three new diagnostics all in
+  session-background.ts (TS2366, TS18047, TS7053). Baseline remains unchanged.
+- Local non-root Docker TS5.9.3 reproduction using existing installed deps:
+  86 diagnostics before, 83 after; exactly those three removed, none added.
+  Existing container dependencies differ from CI (two extra create-node-daemon
+  diagnostics); tsc still exits2, so this is NOT a green CI-ratchet claim.
+- Changed-source regression only: session-background.test.ts and
+  session-background-http.test.ts, Bun1.3.14, uid1000, read-only source/rootfs,
+  --network none: 14 pass / 0 fail / 36 expects / 112ms. No Bridge or 13-case
+  composition rerun, no full suite.
+- Docker static checks: suite registration PASS (new0), home-path PASS,
+  path symmetry PASS (301/301), L1 path sync PASS, trigger coverage PASS154/154.
+  First static container lacked worktree git metadata and PyYAML; those two
+  checks refused to measure, then passed after read-only metadata/module mounts.
+- Logs: /tmp/opencode/2014-tsc-{red,fixed}.log,
+  /tmp/opencode/2014-ci-gates-{fixed,rest-fixed}.log,
+  /tmp/opencode/2014-narrowing-regression.log. New-head normal CI/review pending.
 All credentials are generated in the disposable container; the legacy literal
 is a fixture and is not used to authorize control. No production DB/keys/session.
 This is NOT a real installed OpenCode/TUI/model, real native UI, release artifact,

@@ -86,9 +86,9 @@ export function createSessionBackgroundControl(opts: {
     current();
     // ONE write, never retry. A timeout can occur after OpenCode applied it.
     try { await opts.request(`/api/session/${opts.sessionId}/background`, { method: "POST" }); }
-    catch { fail("session_background_outcome_unknown"); }
+    catch { return fail("session_background_outcome_unknown"); }
     try { return { outcome: "request_processed", state: await state() }; }
-    catch { fail("session_background_outcome_unknown"); }
+    catch { return fail("session_background_outcome_unknown"); }
   }
   return {
     state,
@@ -96,7 +96,7 @@ export function createSessionBackgroundControl(opts: {
       current();
       if (intent.session_id !== opts.sessionId || intent.binding_id !== bindingId) fail("session_control_changed");
       const key = typeof intent.request_id === "string" && /^bg_([0-9]{13})_[A-Za-z0-9_-]{8,64}$/.exec(intent.request_id);
-      if (!key) fail("session_control_request_invalid");
+      if (!key) return fail("session_control_request_invalid");
       const createdAt = Number(key[1]), time = now();
       // Hub-issued timestamped intent IDs let us discard old receipts without
       // reopening old writes. A repeated expired ID can never become fresh.
