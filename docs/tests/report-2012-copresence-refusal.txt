@@ -1,0 +1,46 @@
+# CommHub #2012 / parent #1987: preserve an exact unsupported-adoption refusal
+Date: 2026-10-22
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+Scope: daemon error normalization + Hub public projection. No adoption enablement.
+
+Two independent root causes:
+1. verifyAdoptionLocalIdentity throws copresence_adopt_v2. adopt-daemon's
+   safe-message regex only accepts letters/underscores in the suffix and
+   drops the trailing digit, returning adopt_local_verification_failed.
+2. Hub's exact publicLifecycleErrors does not include copresence_adopt_v2,
+   so a daemon sending it still gets lifecycle_error in user projections.
+
+Fix: explicitly accept this ONE fixed code in each filter. Do not generalize
+the regex, disable redaction, expose exception text, or change auth/support.
+
+Old-code witnesses:
+- Non-root Docker node fixture, V1 and V2 configurations: two tests fail at
+  the expected ack_adopt_request error, actual adopt_local_verification_failed
+  versus expected copresence_adopt_v2. Other local identity/discovery tests pass.
+  Log: /tmp/opencode/1987-adoption-boundaries.log (27 pass / 2 fail).
+- Docker real HTTP fixture: new unsupported-adoption test fails at the
+  response error, actual lifecycle_error versus expected copresence_adopt_v2.
+  Log: /tmp/opencode/2012-refusal-red.log (0 pass / 1 fail; exit 1).
+  Both failures occur after setup, not in environment or authentication.
+
+Fixed-code checks:
+- Daemon unit file: 12 pass / 0 fail, 45 expects, non-root Docker. Existing
+  rollback-on-definite-refusal and preserve-evidence-on-unknown-ack cases pass.
+  New V1/V2 cases require no process probing, config/PID change, registry
+  persistence or credential disclosure. Secret/path/suffix messages still redact.
+  This exploratory run read-only mounted the two changed daemon files over
+  the same-base node test image; it is not a fresh package/production artifact.
+- Full tests/test629-lifecycle-read Docker suite: PASS. 15 tests per green
+  run, 485 expects. Includes all three existing witnessed-red mutations:
+  remove read scope, remove public error redaction, ignore recorded child ID.
+  Exact code is preserved on request-ID lookup, node-ID lookup and granted
+  viewer roster; suffix/path/unknown strings remain lifecycle_error, refused
+  node remains managed=none and lifecycle_controllable=false.
+
+Logs: /tmp/opencode/2012-daemon-green.log and
+/tmp/opencode/2012-refusal-green.log. Required exact-head CI remains separate.
+
+Limits: no live adoption request, process signal, identity/config/credential
+rewrite, new public endpoint or shared-server operation. No claim of supported
+OpenCode adoption. Client localized copy/rendering is a separate owner slice.
+main-source package release and production activation have not happened here.
