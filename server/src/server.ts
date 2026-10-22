@@ -6,6 +6,7 @@ import { ifNoneMatchHits, memoStatusBody } from "./status-read-cache";
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { AGENT_TEAM_SCOPE_DENIED, clearNodeFromAgentTeams, createAgentTeam, deleteAgentTeam, listAgentTeams, ownedScope, setNodeAgentTeam, updateAgentTeam } from "./agent-teams.js";
+import { getNetworkRules, saveNetworkRules, NETWORK_RULES_WRITE_DENIED } from "./network-rules.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
@@ -2038,6 +2039,37 @@ return Bun.serve({
       if (!r.ok) { const { ok: _ok, status, ...rest } = r; return withCors(req, Response.json({ ok: false, ...rest }, { status })); }
       logAudit(resolved.user.user_id, resolved.user.username, `agent_team_${req.method.toLowerCase()}`, "network", netId, JSON.stringify({ team_id: teamId || undefined, node_id: nodeId, ...body }).slice(0, 2000), undefined, netId);
       return withCors(req, Response.json(r, { status: req.method === "POST" ? 201 : 200 }));
+    }
+
+    // ── 全团队规则(#1521):网络级一份规则文本 + revision(checklist 第 2 片「Hub:network_rules 存储」)。
+    // 读:网络成员 / 本网络节点令牌 / Hub 管理员;写:owner / admin / Hub 管理员,节点令牌 403。
+    // 内容一字不变 revision 不涨(幂等),后面受管块注入按 revision 决定要不要重写节点文件;
+    // 投递、开关、客户端页是后续片。规则与上限在 network-rules.ts。 ──
+    const networkRulesMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/network-rules$/);
+    if (networkRulesMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const netId = decodeURIComponent(networkRulesMatch[1]);
+      const notMember = () => withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      if (resolved.networkId && resolved.networkId !== netId) return notMember();
+      const hubAdmin = isHubAdminCredential(resolved);
+      const role = resolved.networkId ? null : getUserNetworkRole(resolved.user.user_id, netId);
+      if (!hubAdmin && !role && !resolved.networkId) return notMember();
+      if (!db.get("SELECT 1 AS x FROM networks WHERE network_id = ?1", netId)) return withCors(req, Response.json({ ok: false, error: "network_not_found" }, { status: 404 }));
+      if (req.method === "GET") return withCors(req, Response.json(getNetworkRules(netId)));
+      if (req.method !== "PUT") return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+      const canManage = hubAdmin || (!resolved.networkId && (role === "owner" || role === "admin"));
+      if (!canManage) return withCors(req, Response.json({ ok: false, error: NETWORK_RULES_WRITE_DENIED }, { status: 403 }));
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+      const saved = saveNetworkRules(netId, resolved.user.user_id, body.content);
+      if (!saved.ok) return withCors(req, Response.json({ ok: false, error: saved.error }, { status: saved.status }));
+      // 审计只记 revision / 字节数,不记正文(规则里可能带内部链接与约定)。
+      if (saved.changed) logAudit(resolved.user.user_id, resolved.user.username, "network_rules_put", "network", netId,
+        JSON.stringify({ revision: saved.revision, bytes: Buffer.byteLength(saved.content, "utf8") }), undefined, netId);
+      return withCors(req, Response.json(saved));
     }
 
     // ── 多用户:网络里的人类成员通讯录 —— 任何成员(含受限成员)都能看,只有身份字段 ──
