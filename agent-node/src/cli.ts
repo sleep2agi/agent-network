@@ -22,7 +22,7 @@ import {
 } from "./runtime/codex-bin";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
-import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
+import { runtimeErrorReplyText, opencodeTurnFailureDiagnostic } from "./runtime/unverified-reply-text";
 import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
 import { envTransportFor } from "./runtime/env-transport.js";
@@ -4185,6 +4185,8 @@ async function processWithOpencode(
     { taskId: taskId ?? null },
     ).catch(error => {
       clearBusyNote();
+      const diagnostic = opencodeTurnFailureDiagnostic(error, { taskId, sessionId: runtime.sessionId, generation: OPENCODE_GENERATION ?? "v1" });
+      if (diagnostic) warn(`[opencode-turn] ${JSON.stringify(diagnostic)}`);
       if (opencodeBorrowedCli && !runtime.isRunning) clearBorrowedLaunchHealth?.();
       throw error;
     });
@@ -6016,6 +6018,7 @@ async function processTask(
 
   let text: string;
   let failed = false;
+  let runtimeFailure: unknown;
   let skipped = false;
   let grokFailureCode: string | null = null;
   let grokFailureSubcode: string | null = null;
@@ -6047,6 +6050,7 @@ async function processTask(
     text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
       || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected);
   } catch (err: any) {
+    runtimeFailure = err;
     if (err?.code === "codex_task_skipped") {
       // #1930 — the queued row was dropped before its turn because the Hub no
       // longer listed it as pending. Nothing ran; there is nothing to reply.
@@ -6110,7 +6114,7 @@ async function processTask(
     let retryAttempt = 1;
     retryAttempt <= VENDOR_RETRY_PROFILE.maxRetries &&
     text &&
-    isTransientVendorError(text, failed);
+    isTransientVendorError(text, failed, runtimeFailure);
     retryAttempt++
   ) {
     const backoff =
@@ -6144,6 +6148,7 @@ async function processTask(
         }
       }
     } catch (err: any) {
+      runtimeFailure = err;
       text = runtimeErrorReplyText(RUNTIME, err);
       if (typeof err?.unverifiedReplyText === "string") {
         warn(`[unverified-owner] ${err?.ownershipReason ?? "ownership unverified"} | reply=${err.unverifiedReplyText.length}ch`);
