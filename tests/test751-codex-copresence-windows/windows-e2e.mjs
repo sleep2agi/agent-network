@@ -45,6 +45,8 @@ writeFileSync(join(exactNodeRoot, "package.json"), JSON.stringify({
 writeFileSync(exactNodeEntrypoint, `import { appendFileSync } from "node:fs";\nappendFileSync(process.env.ANET_TEST751_RPC_LOG, \`bridge-home:\${process.env.CODEX_HOME}\\n\`);\nawait import(${JSON.stringify(pathToFileURL(join(repo, "agent-node", "dist", "cli.js")).href)});\n`);
 const env = {
   ...process.env, HOME: userHome, USERPROFILE: userHome,
+  // Bounded evidence uses existing queries/kills, not extra probes or retries.
+  ANET_WINDOWS_STOP_DIAGNOSTICS: "1",
   PATH: `${bin};${process.env.PATH}`, ANET_TEST751_RPC_LOG: rpcLog,
   ANET_TEST751_CODEX_HOME: "",
   ANET_TEST751_COMPLETE_LONG_TURN: completeLongTurn,
@@ -54,6 +56,12 @@ const env = {
 function command(args, stdin = "") {
   console.log(`PHASE command: ${args.join(" ")}`);
   const result = spawnSync(bun, [cli, ...args], { cwd: project, env, input: stdin, encoding: "utf8", timeout: 30_000 });
+  // Keep successful first-stop evidence too, instead of discarding its stderr.
+  if (args[0] === "node" && args[1] === "stop" && result.status === 0) {
+    for (const line of (result.stderr || "").split(/\r?\n/)) {
+      if (line.startsWith("[anet-stop-evidence] ")) console.log(line);
+    }
+  }
   const output = (result.stdout || "") + (result.stderr || "");
   if (result.status !== 0) throw new Error(`command failed (${args.join(" ")}):\n${output}`);
   return output;

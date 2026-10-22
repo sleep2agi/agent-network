@@ -457,6 +457,21 @@ export function probeWindowsCimIdentity(
 export interface WindowsStopOrchestrationDeps {
   runPowerShell?: (script: string) => string;
   runTaskkill?: (pid: number) => TaskkillOutcome;
+  /** Opt-in evidence only. No extra queries/retries, no influence on the verdict. */
+  diagnostic?: (line: string) => void;
+}
+
+function windowsStopDiagnosticOutput(raw: string): string {
+  const out = String(raw ?? "").trim();
+  if (out.length > 1024) return "[omitted]";
+  if (/^IDSTATE:(?:TICKS=\d+|ABSENT|ERROR)$/.test(out)) return out;
+  if (out === "CIMSTATE:ABSENT" || out === "CIMSTATE:ERROR") return out;
+  if (out.startsWith("CIMSTATE:CREATED=") && isCompleteCimCreationDate(out.slice(17))) return out;
+  const capture = parseWindowsCapture(out);
+  if (capture && /^(?:\d+|ABSENT)$/.test(capture.rootBefore)
+    && /^(?:\d+|ABSENT|SKIP)$/.test(capture.rootAfter)) return out;
+  if (parseWindowsProcessSnapshot(out) !== null) return out;
+  return "[omitted]";
 }
 
 export interface WindowsStopOrchestration {
@@ -478,8 +493,53 @@ export function orchestrateWindowsManagedStop(
   roots: WindowsManagedIdentity[],
   deps: WindowsStopOrchestrationDeps = {},
 ): WindowsStopOrchestration {
-  const runPowerShell = deps.runPowerShell;
-  const runTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
+  let remaining = 65536;
+  const started = Date.now();
+  const emit = (event: Record<string, unknown>) => {
+    if (!deps.diagnostic || remaining <= 0) return;
+    // Never emit scripts, environment, arbitrary query errors or taskkill stderr.
+    let line = JSON.stringify({ at: Date.now(), elapsedMs: Date.now() - started, ...event });
+    if (line.length > 2048) line = JSON.stringify({ at: Date.now(), elapsedMs: Date.now() - started, phase: event.phase, output: "[omitted]" });
+    if (line.length + 257 > remaining) {
+      remaining = 0;
+      try { deps.diagnostic(JSON.stringify({ at: Date.now(), elapsedMs: Date.now() - started, phase: "truncated" })); } catch {}
+      return;
+    }
+    remaining -= line.length + 1;
+    try { deps.diagnostic(line); } catch { /* Evidence delivery cannot authorize or prevent a stop. */ }
+  };
+  const basePowerShell = deps.runPowerShell ?? defaultPowerShellRunner;
+  const runPowerShell = !deps.diagnostic ? deps.runPowerShell : (script: string): string => {
+    const pid = Number(/GetProcessById\((\d+)\)|ProcessId = (\d+)|\$rb=ReadBirthTicks (\d+)/.exec(script)?.slice(1).find(Boolean)) || undefined;
+    const query = script.includes("CAP:RB=") ? "capture" : script.includes("CIMSTATE:") ? "cim-identity"
+      : script.includes("SNAP:") ? "snapshot" : "ticks-identity";
+    const before = Date.now();
+    try {
+      const output = basePowerShell(script);
+      emit({ phase: "powershell", query, pid, durationMs: Date.now() - before, output: windowsStopDiagnosticOutput(output) });
+      return output;
+    } catch (error) {
+      emit({ phase: "powershell", query, pid, durationMs: Date.now() - before, output: "[query threw]" });
+      throw error;
+    }
+  };
+  const baseTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
+  const runTaskkill = !deps.diagnostic ? baseTaskkill : (pid: number): TaskkillOutcome => {
+    const before = Date.now();
+    let outcome: TaskkillOutcome;
+    try { outcome = baseTaskkill(pid); }
+    catch (error) {
+      emit({ phase: "taskkill", pid, durationMs: Date.now() - before, output: "[runner threw]" });
+      throw error;
+    }
+    emit({ phase: "taskkill", pid, durationMs: Date.now() - before, status: outcome.status,
+      signal: outcome.signal && /^[A-Z0-9]+$/.test(outcome.signal) ? outcome.signal : null,
+      runner: deps.runTaskkill ? "injected" : "default:taskkill.exe" });
+    return outcome;
+  };
+  if (deps.diagnostic) emit({ phase: "roots", roots: roots.map((root) => ({ pid: root.pid,
+    kind: root.kind === "creation" ? "creation" : "ticks",
+    birth: /^\d+$/.test(root.creationDate) || isCompleteCimCreationDate(root.creationDate) ? root.creationDate : "[omitted]" })) });
   const identities: WindowsManagedIdentity[] = [...roots];
   const gaps: string[] = [];
   const notes: string[] = [];
@@ -524,6 +584,7 @@ export function orchestrateWindowsManagedStop(
     captureUnknown: [...gaps, ...reconGaps],
     probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell, identity.kind),
   });
+  emit({ phase: "verdict", kind: verdict.kind, killedPids });
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
 
