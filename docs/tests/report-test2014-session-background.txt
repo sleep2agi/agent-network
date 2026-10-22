@@ -131,6 +131,17 @@ Identity P1 implementation, slice1 (process-local runtime permit only):
   Logs /tmp/opencode/2014-permit-{red,green}.log. No full suite rerun.
 - This slice alone is not a fix for mutable CLI identity; Bridge PIN/epoch and
   signal-composing HTTP transport are still required before closing that P1.
+
+Identity slice2 (control-only HTTP adapter):
+- New fetchOpenCodeSessionControlJson composes the local permit AbortSignal
+  with a five-second deadline, forbids redirect, then calls the unchanged
+  generic fetch helper with timeoutMs0 so that it cannot overwrite the signal.
+  V2 background control uses this adapter; other OpenCode calls are unchanged.
+- Real local HTTP handler is held pending until the test releases it. Aborting
+  the caller must reject before a 500ms test guard, not wait for the 5s deadline.
+- Same non-root/network-none/read-only Bun1.3.14 Docker, new cancellation case
+  only: 1pass/0fail/1expect/50ms, /tmp/opencode/2014-control-cancel-green.log.
+  No claim that transport cancellation recalls a request already delivered.
 All credentials are generated in the disposable container; the legacy literal
 is a fixture and is not used to authorize control. No production DB/keys/session.
 This is NOT a real installed OpenCode/TUI/model, real native UI, release artifact,

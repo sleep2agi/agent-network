@@ -54,6 +54,7 @@ import {
   type OpenVettedOpenCodeCopresenceOptions,
 } from "./runtime";
 import { unverifiedOwnerError } from "./reply-ownership";
+import { fetchOpenCodeSessionControlJson } from "./http";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
@@ -438,7 +439,7 @@ export async function openVettedOpenCodeV2Copresence(
         sessionId,
         directory: resolve(opts.cwd),
         isCurrent: () => session.isRunning,
-        request: (path, init) => fetchOpenCodeJson(url, password, path, init, 5_000),
+        request: (path, init) => fetchOpenCodeSessionControlJson(url, password, path, init),
       }),
       async selectedModel() {
         if (!session.isRunning) return undefined;
