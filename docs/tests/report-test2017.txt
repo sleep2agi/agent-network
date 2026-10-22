@@ -1,0 +1,38 @@
+CommHub #2017: original node-session control relay
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+Author-run isolated, non-root Docker; no production connection or runtime/client edits.
+
+Reproduction (repo root):
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -t anet-session-control -f tests/test2017-node-session-control/Dockerfile . && docker run --rm --init --cpus=2 --network none anet-session-control'
+
+Pre-report receipt at e589799717255113c4e9f65afb551b3e591be024:
+15 pass / 0 fail / 82 assertions, 1.84s.
+The dedicated Node session control relay workflow runs the final PR checkout;
+the earlier source receipt is not a substitute for that final-head CI result.
+
+Actual HTTP witnesses: state and background receipt, exact SSE doorbell, user
+owner/admin vs node/member/anonymous/master/dev-open denial, cross-network and
+wrong session/handle rejection, real unbound legacy credential denial, peer
+token denial, concurrent claim-once/no replay, request expiry and lost ACK,
+retired-generation registration denial, post-claim generation change, requester
+permission loss, target-token revocation, malformed reply/raw-error redaction,
+known runtime refusal, already_idle, Bridge lease expiry and fresh-Hub 404.
+
+Initial receipt e51c58fb26d664c40a4739006bd6e9d13e9cf00f: 14 pass/1 fail.
+The failing fixture used same-holder token refresh, which now creates an
+immutable binding. Fixed the fixture to construct and assert an actual unbound
+credential, retaining the production rejection. No guard was weakened.
+
+Docker TypeScript 5.9.3 whole-project tsc was also attempted. It is not green:
+there are errors in the wider imported graph (including missing cross-package
+fixture dependencies). One new test-file typing error (generic call on any)
+was corrected. Do not interpret selective file diagnostics as whole-project
+typecheck success or as attribution/waiver for unrelated CI failures.
+
+Source-pins: broken_pins=0; test-suite registration: new orphan=0;
+L1 paths sync: pass; mutation-pins: GREEN, unchecked 4 <= baseline 4.
+
+Limits: one-process bounded memory queue, 15s request / 75s Bridge lease,
+restart => unavailable/unknown (no replay), no multi-worker durability claim.
+No runtime capability, real tool background execution, client UI, release,
+deployment, node restart or lifecycle authority is established by this suite.

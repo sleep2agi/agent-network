@@ -108,7 +108,7 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
     // Same-holder refreshes now bind existing rows. Construct an actual old
     // unbound credential whose name only hints at this target instead.
     db.run("UPDATE api_tokens SET name='node:sc-target' WHERE token_id=?1", legacy.token_id);
-    expect(db.get<any>("SELECT bound_node_id FROM api_tokens WHERE token_id=?1", legacy.token_id).bound_node_id).toBeNull();
+    expect(db.get("SELECT bound_node_id FROM api_tokens WHERE token_id=?1", legacy.token_id).bound_node_id).toBeNull();
     expect((await registerBridge(binding, legacy.token!)).status).toBe(403);
     expect((await registerBridge(binding, owner.token!)).status).toBe(403);
     const made = await enqueue();

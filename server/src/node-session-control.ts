@@ -122,6 +122,7 @@ export function createNodeSessionControlRelay() {
   }
   return async function handle(req: Request, url: URL): Promise<Response | null> {
     if (url.pathname !== ROOT && !url.pathname.startsWith(`${ROOT}/`)) return null;
+    try {
     // Header-only, exact credential kinds; no legacy master/dev-open fallback.
     const raw = req.headers.get("authorization")?.match(/^Bearer (\S+)$/)?.[1] ?? "";
     const auth = /^(utok_|ntok_)/.test(raw) ? resolveToken(raw) : null;
@@ -129,7 +130,6 @@ export function createNodeSessionControlRelay() {
     const tokenId = auth.tokenId;
     const isHuman = raw.startsWith("utok_") && !auth.networkId;
     const suffix = url.pathname.slice(ROOT.length);
-    try {
       if (req.method === "GET" && /^\/(bg|sc)_\d{13}_[A-Za-z0-9_-]{8,64}$/.test(suffix)) {
         const e = entries.get(suffix.slice(1));
         // Unknown/restarted Hub and unauthorized reads reveal no request data.
