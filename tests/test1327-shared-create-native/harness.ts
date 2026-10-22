@@ -3,7 +3,7 @@
 // config is edited, no shared flag is added to node_spec, and spawnChild is not
 // overridden. Doorbells are invoked directly using the real Hub request ID.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { handleCreateNodeDoorbell } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/create-node-daemon.ts";
 import { observeHostSharedServe } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-host-shared-observer.ts";
@@ -66,8 +66,9 @@ async function rpc(token: string, name: string, args: unknown) {
   const result = JSON.parse(lines.length ? lines.at(-1)!.slice(5).trim() : raw);
   return JSON.parse(result.result.content[0].text);
 }
-async function cli(args: string[], cwd: string, required = true) {
-  const child = Bun.spawn(["bun", "/workspace/agent-network/bin/cli.ts", ...args], {
+async function cli(args: string[], cwd: string, required = true, launcher?: string) {
+  const command = launcher ? [launcher, ...args] : ["bun", "/workspace/agent-network/bin/cli.ts", ...args];
+  const child = Bun.spawn(command, {
     cwd, env: process.env, stdin: "ignore", stdout: "pipe", stderr: "pipe",
   });
   const [out, err, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
@@ -83,6 +84,45 @@ const nodeDir = (alias: string) => join(projectFor(alias), ".anet/nodes", childD
 const json = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 function register(url: string) {
   writeFileSync(registry, JSON.stringify({ url, passwordFile, clientBinDir: "/usr/local/bin" }), { mode: 0o600 });
+}
+function startSharedHost(data: string) {
+  return start("opencode", ["serve", "--hostname", "127.0.0.1", "--port", "13270"], join(root, "host-project"), {
+    PATH: process.env.PATH, HOME: home, XDG_DATA_HOME: data,
+    OPENCODE_DB: join(data, "opencode.db"), OPENCODE_SERVER_PASSWORD: password,
+  });
+}
+async function sharedState(session: string, project: string) {
+  const headers = { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
+    "x-opencode-directory": project };
+  const get = async (path: string) => {
+    const response = await fetch(sharedUrl + path, { headers, signal: AbortSignal.timeout(5000) });
+    check("recovery reads the explicitly requested session/history", response.status === 200);
+    return response.json() as Promise<any>;
+  };
+  const info = await get(`/api/session/${session}`);
+  check("recovery session ID and workspace match exactly", info.data?.id === session
+    && info.data?.location?.directory === project);
+  const entries: any[] = [], cursors = new Set<string>();
+  let path = `/api/session/${session}/message?order=desc&limit=200`;
+  for (let page = 0; page < 4; page++) {
+    const history = await get(path);
+    captured.push(`recovery history page=${page} entries=${Array.isArray(history.data) ? history.data.length : "invalid"} next=${typeof history.cursor?.next}`);
+    check("recovery history response has a message array", Array.isArray(history.data));
+    entries.push(...history.data);
+    const next = history.cursor?.next;
+    // A cursor may describe the final entry even when a subsequent page is
+    // empty. Follow it; do not infer truncation from the cursor's presence.
+    if (history.data.length === 0 || next === null || next === undefined) {
+      check("recovery history is nonempty", entries.length > 0);
+      return JSON.stringify(entries.map((entry: any) => ({
+        id: entry.id, type: entry.type, text: entry.text, content: entry.content,
+      })));
+    }
+    check("recovery history cursor is valid and advances", typeof next === "string" && next.length > 0 && !cursors.has(next));
+    cursors.add(next);
+    path = `/api/session/${session}/message?limit=200&cursor=${encodeURIComponent(next)}`;
+  }
+  throw new Error("recovery history exceeded the bounded fixture pagination budget");
 }
 let ownerToken = "", networkId = "", daemonToken = "";
 const daemonId = "n_test1327_daemon", daemonAlias = "daemon1327";
@@ -167,10 +207,7 @@ try {
   writeFileSync(pin, `ANET_BIN_ABS=${pinnedCli}\n`, { mode: 0o600 });
   process.env.ANET_DAEMON_PATH_CONF = pin;
   writeFileSync(passwordFile, password, { mode: 0o600 });
-  const host = start("opencode", ["serve", "--hostname", "127.0.0.1", "--port", "13270"], join(root, "host-project"), {
-    PATH: process.env.PATH, HOME: home, XDG_DATA_HOME: join(root, "host-data"),
-    OPENCODE_DB: join(root, "host-data/opencode.db"), OPENCODE_SERVER_PASSWORD: password,
-  });
+  const host = startSharedHost(join(root, "host-data"));
   const headers = { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` };
   check("real authenticated host A ready", await until(() => fetch(`${sharedUrl}/api/info`, { headers }).then(r => r.ok, () => false)));
   const observed = observeHostSharedServe(sharedUrl);
@@ -204,6 +241,71 @@ try {
   check("fallback network turn completes", await task(aliases[3], "Reply with exactly FALLBACK1327") === `[${aliases[3]}] ${responsePrefix}FALLBACK1327`);
   check("host A still lives after own/fallback creation", host.exitCode === null && host.signalCode === null);
   console.log("PASS: real shared daemon create/start/session/task/close; no production or publication claim");
+
+  // #1537: the previous assertions prove creation and node independence. The
+  // following gate separately proves stopped-data restore with nonempty turns.
+  // It is a process restart in an isolated container, never a host reboot or
+  // authorization to touch a production service, credential or database.
+  for (const alias of aliases.slice(1)) await cli(["node", "stop", alias], projectFor(alias));
+  for (const alias of aliases) {
+    check(`${alias}: TUI and bridge stopped before the shared database copy`, await until(() =>
+      [alias, `${alias}-桥`].every(name => tmux("has-session", "-t", `=${name}`).status !== 0)));
+  }
+  const saved = [];
+  for (const [alias, original, marker] of [[aliases[0], b, "B1327"], [aliases[1], c, "C1327"]] as const) {
+    const history = await sharedState(original.attach.gen, projectFor(alias));
+    check(`${alias}: pre-backup history contains its completed assistant response`, history.includes(responsePrefix + marker));
+    saved.push({ alias, original, history });
+  }
+  const beforeStop = observeHostSharedServe(sharedUrl);
+  check("only the exact fixture listener generation may be stopped", beforeStop.ok
+    && beforeStop.processEvidence.pid === hostPid
+    && beforeStop.processEvidence.startTicks === observed.processEvidence.startTicks);
+  process.kill(hostPid, "SIGTERM");
+  check("the exact Server process has exited before copying data", await until(() => {
+    if (host.exitCode === null && host.signalCode === null) return false;
+    try { process.kill(hostPid, 0); return false; }
+    catch (error: any) { if (error.code === "ESRCH") return true; throw error; }
+  }));
+  check("the shared listener is gone before copying data", await until(() => {
+    const value = observeHostSharedServe(sharedUrl);
+    return !value.ok && value.reason === "no_listener";
+  }));
+  const restoredData = join(root, "host-restored-data");
+  cpSync(join(root, "host-data"), restoredData, { recursive: true, errorOnExist: true, force: false });
+  check("old database remains available for rollback", existsSync(join(root, "host-data/opencode.db")));
+  const restoredHost = startSharedHost(restoredData);
+  check("restored shared Server is authenticated and ready", await until(() =>
+    fetch(`${sharedUrl}/api/info`, { headers, signal: AbortSignal.timeout(1000) }).then(r => r.ok, () => false)));
+  const restored = observeHostSharedServe(sharedUrl);
+  check("restored listener has a new observable generation", restored.ok
+    && (restored.processEvidence.pid !== hostPid
+      || restored.processEvidence.startTicks !== observed.processEvidence.startTicks));
+  if (!restored.ok) throw new Error(restored.reason);
+  register(sharedUrl);
+  for (const { alias, original, history } of saved) {
+    check(`${alias}: stopped-data restore preserves exact nonempty history`,
+      await sharedState(original.attach.gen, projectFor(alias)) === history);
+    // Reuse the same source-layout installer entrypoint that created the node;
+    // a direct source CLI lacks its exact built-runtime path in this image.
+    await cli(["node", "start", alias], projectFor(alias), true, pinnedCli);
+    check(`${alias}: restored node TUI renders`, await until(() => /ctrl\+p/.test(
+      tmux("capture-pane", "-p", "-t", `=${alias}:`).stdout ?? "")));
+    const config = json(join(nodeDir(alias), "config.json"));
+    const attach = json(join(nodeDir(alias), "opencode-attach.json"));
+    const health = json(join(nodeDir(alias), "opencode-launch-health.json"));
+    check(`${alias}: restart retains the original session and Hub identity`, attach.gen === original.attach.gen
+      && config.node_id === original.config.node_id && config.token === original.config.token);
+    check(`${alias}: restart borrows the restored shared listener`, health.serveOwnership === "shared"
+      && health.serve.pid === restored.processEvidence.pid
+      && health.serve.ticks === String(restored.processEvidence.startTicks));
+    check(`${alias}: startup did not replace existing history`,
+      await sharedState(original.attach.gen, projectFor(alias)) === history);
+    check(`${alias}: exact Hub identity still replies after restore`,
+      await task(alias, "Reply with exactly RESTORED1327") === `[${alias}] ${responsePrefix}RESTORED1327`);
+  }
+  check("restored shared Server survives both node restarts", restoredHost.exitCode === null && restoredHost.signalCode === null);
+  console.log("PASS test1537: two original sessions, nonempty histories and Hub identities survive stopped-data restore; no host reboot/canary claim");
 } finally {
   for (const alias of aliases) {
     if (existsSync(join(nodeDir(alias), "config.json"))) {
