@@ -19,7 +19,7 @@ Evidence
 - Result: 4 pass, 0 fail, 48 assertions
 
 Command
-sg docker -c 'docker build -f tests/test1199-btw-cross-layer-contract/Dockerfile -t anet-test1199 . && docker run --rm anet-test1199'
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -f tests/test1199-btw-cross-layer-contract/Dockerfile -t anet-test1199 . && docker run --rm anet-test1199'
 
 Important boundary
 This is an executable contract E2E using a dedicated fake execution port. It
