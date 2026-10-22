@@ -10,6 +10,13 @@ import { inflateSync } from "node:zlib";
 // 校验强度：结构（签名/chunk/CRC）+ 真实解码（IDAT 解压且扫描行长度与 IHDR 相符）。
 
 export const MAX_AVATAR_BYTES = 8 * 1024 * 1024;
+
+/**
+ * #2054 —— 单个 Hub 的头像总存储上界。公开注册可以持续创建账号，per-user 单条
+ * 上限（每人 1 条 × 8 MiB）挡不住轮换账号把主库撑大，所以再加一道总量边界。
+ * 超限时上传返回 503 `avatar_storage_full`；不回收/删除任何既有用户的头像。
+ */
+export const MAX_AVATAR_STORAGE_BYTES = 1024 * 1024 * 1024;
 /** 客户端会把图重编码到最长边 512；服务端独立复核这条上限。 */
 export const MAX_AVATAR_EDGE = 512;
 /** version 只允许 URL 安全字符，长度有界（避免拼路径时引入 `.`、`/`）。 */

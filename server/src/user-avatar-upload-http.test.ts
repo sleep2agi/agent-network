@@ -184,3 +184,52 @@ test("image inspector: signature, shape and size limits", () => {
   expect(inspectAvatarImage(jpeg)).toEqual({ ok: false, reason: "not_png" });
   expect(inspectAvatarImage(Buffer.alloc(MAX_AVATAR_BYTES + 1))).toEqual({ ok: false, reason: "too_large" });
 });
+
+// #2054 —— Hub-wide 头像总容量上界：公开注册可无限建账号，per-user 单条上限挡不住
+// 轮换账号把主库撑大。这里在库里塞一条接近上界的行，断言上传被 503 拒绝，
+// 且**不删除**任何既有用户的头像（别人的数据不动），随后清掉该行恢复。
+test("account avatar upload: a hub-wide storage cap rejects the write and keeps existing rows", async () => {
+  const { MAX_AVATAR_STORAGE_BYTES } = await import("./user-avatar-image.js");
+  const victim = register("avcap_alice", "AvatarCap1!");
+  const uploader = register("avcap_bob", "AvatarCap1!");
+  expect(victim.ok && uploader.ok).toBe(true);
+
+  const { bootServer } = await import("./server.js");
+  const hub = bootServer({ port: 0, hostname: "127.0.0.1" });
+  const base = `http://127.0.0.1:${hub.port}`;
+  const upload = async (token: string, bytes: Buffer) => {
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: "image/png" }), "a.png");
+    const res = await fetch(`${base}/api/auth/me/avatar/upload`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form,
+    });
+    return { status: res.status, body: (await res.json().catch(() => null)) as any };
+  };
+
+  const filler = Buffer.from("filler-avatar-bytes");
+  try {
+    // 先让 bob 正常上传一次，证明上界不是「谁都不能传」。
+    const ok = await upload(uploader.token!, PNG_1X1);
+    expect(ok.status).toBe(200);
+
+    // 塞一条「别人已经占满」的行：总量逼到上界之上。
+    db.run(
+      "INSERT INTO user_avatar_uploads (user_id, version, png, bytes, width, height, updated_at) VALUES (?1, ?2, ?3, ?4, 1, 1, datetime('now'))",
+      [victim.user!.user_id, "capver", filler, MAX_AVATAR_STORAGE_BYTES],
+    );
+    const before = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_avatar_uploads")!.n;
+
+    const blocked = await upload(uploader.token!, PNG_1X1);
+    expect(blocked.status).toBe(503);
+    expect(blocked.body.error).toBe("avatar_storage_full");
+
+    // 不回收别人的数据：行数与那条 filler 都还在。
+    const after = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_avatar_uploads")!.n;
+    expect(after).toBe(before);
+    expect(db.get<any>("SELECT bytes FROM user_avatar_uploads WHERE user_id = ?1", [victim.user!.user_id])?.bytes)
+      .toBe(MAX_AVATAR_STORAGE_BYTES);
+  } finally {
+    db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [victim.user!.user_id]);
+    hub.stop?.();
+  }
+});

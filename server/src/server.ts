@@ -98,7 +98,7 @@ import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 import { createProductionSideThreadTransport } from "./side-thread-production.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
-import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES } from "./user-avatar-image.js";
+import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -1521,6 +1521,14 @@ return Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "invalid_avatar_body", reason: "expected exactly one `file` part" }, { status: 400 }));
       }
       if (file.size > MAX_AVATAR_BYTES) return withCors(req, Response.json({ ok: false, error: "too_large" }, { status: 413 }));
+      // #2054 —— Hub-wide 总容量上界：公开注册可无限建账号，per-user 单条上限挡不住
+      // 「轮换账号把主库撑大」。这里在**写入前**用当前总量 + 本次大小判一次；
+      // 已存在的其他用户头像绝不删除（不回收别人的数据），只拒绝本次上传。
+      const storedBytes = db.get<{ total: number }>("SELECT COALESCE(SUM(bytes), 0) AS total FROM user_avatar_uploads")?.total ?? 0;
+      const ownBytes = db.get<{ bytes: number }>("SELECT bytes FROM user_avatar_uploads WHERE user_id = ?1", [resolved.user.user_id])?.bytes ?? 0;
+      if (storedBytes - ownBytes + file.size > MAX_AVATAR_STORAGE_BYTES) {
+        return withCors(req, Response.json({ ok: false, error: "avatar_storage_full" }, { status: 503 }));
+      }
       const bytes = new Uint8Array(await file.arrayBuffer());
       const check = inspectAvatarImage(bytes);
       if (!check.ok) return withCors(req, Response.json({ ok: false, error: "invalid_image", reason: check.reason }, { status: 400 }));
