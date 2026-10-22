@@ -88,3 +88,23 @@ describe("#2014 bound semantic Ctrl+B", () => {
     expect(writes).toBe(0);
   });
 });
+
+for (const revokeAt of ["preflight", "post"]) test(`#2014 local permit revoked at ${revokeAt} never returns success or replays`, async () => {
+  const abort = new AbortController();
+  let armed = false, writes = 0;
+  const checkpoint = () => { if (abort.signal.aborted) throw new SessionBackgroundError("session_control_changed"); };
+  const control = createSessionBackgroundControl({ sessionId: sid, directory: "/project", isCurrent: () => true,
+    request: async (path, init) => {
+      if (init?.method === "POST") { writes++; if (armed && revokeAt === "post") abort.abort(); return null; }
+      if (path === "/openapi.json") return schema;
+      if (path === `/api/session/${sid}`) return { data: { id: sid, location: { directory: "/project" } } };
+      if (armed && revokeAt === "preflight") abort.abort();
+      return { data: { [sid]: { type: "running" } } };
+    } });
+  const state = await control.state(); armed = true;
+  const request = { session_id: sid, binding_id: state.binding_id, request_id: `bg_${Date.now()}_permit${revokeAt}`, expires_at: Date.now() + 15_000 };
+  const permit = { checkpoint, signal: abort.signal };
+  const expected = revokeAt === "post" ? "session_background_outcome_unknown" : "session_control_changed";
+  for (let i = 0; i < 2; i++) await expect(control.background(request, permit)).rejects.toMatchObject({ code: expected });
+  expect(writes).toBe(revokeAt === "post" ? 1 : 0);
+});

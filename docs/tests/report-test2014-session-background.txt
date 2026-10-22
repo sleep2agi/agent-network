@@ -117,6 +117,20 @@ Independent review follow-up: redirect trust boundary (P1, separate from CI).
 - Logs: /tmp/opencode/2014-redirect-{red,green}.log. No full suite or integration
   rerun. Independent P1 about mutable Bridge token identity is NOT fixed here;
   the PR remains blocked from landing/release/activation pending that fix/review.
+
+Identity P1 implementation, slice1 (process-local runtime permit only):
+- Optional in-process permit/checkpoint + AbortSignal is a separate argument,
+  never part of Hub intent/wire. The Bridge will supply the pinned authority.
+- Recheck on both sides of every preflight read, after freshness, immediately
+  before POST without an intervening await, and before reporting processed.
+- Revocation during preflight yields changed and zero POSTs. Revocation after
+  send yields unknown, not a claim that the write was recalled; same intent
+  returns its cached rejection and never replays.
+- Non-root read-only/network-none Bun1.3.14 Docker, two added cases only:
+  old product 0pass/2fail; fixed 2pass/0fail/6expects/42ms.
+  Logs /tmp/opencode/2014-permit-{red,green}.log. No full suite rerun.
+- This slice alone is not a fix for mutable CLI identity; Bridge PIN/epoch and
+  signal-composing HTTP transport are still required before closing that P1.
 All credentials are generated in the disposable container; the legacy literal
 is a fixture and is not used to authorize control. No production DB/keys/session.
 This is NOT a real installed OpenCode/TUI/model, real native UI, release artifact,
