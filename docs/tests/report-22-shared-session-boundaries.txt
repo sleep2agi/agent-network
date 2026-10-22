@@ -51,4 +51,30 @@ Runtime counter fix and HTTP negative controls tracked separately in #2011.
   read-only/network-none Docker; log /tmp/opencode/22-doc-review-claims.log.
   Initial container lacked worktree Git metadata and refused to run; mounting
   the metadata read-only allowed the check. No claim of fresh latest-tag truth,
-  native install/bin smoke, or revalidation of the known sidebar failures.
+   native install/bin smoke, or revalidation of the known sidebar failures.
+
+2026-10-22 sidebar budget fix (source a26670bff213acbc30b4e3dd7711a319b797c610):
+- Both languages had 41 sidebar links against the existing <=30 assertion.
+  Remove duplicate download/changelog sidebar entries (top navigation retained)
+  and move nine detailed guides behind their existing sidebar topic pages.
+  Seven detail links already existed; add only bilingual DSH-plugin and Hub
+  migration links. No document/URL is removed; DSH is explicitly not another
+  built-in runtime, and fresh deployment does not claim data restoration.
+- Budget/checker/fixtures/package versions unchanged. This is a content/layout
+  fix for the two failures above, not a threshold increase or baseline waiver.
+- Non-root read-only/network-none python:3.12-slim Docker: both sidebars exactly
+  30 existing page targets; all nine detail pages reachable from sidebar parents
+  in their own language; download/changelog retained in top navigation. PASS.
+  Local log: /tmp/opencode/22-sidebar-discovery.log.
+- Existing qa-core-docs/Dockerfile rebuilt once with the source tree, original
+  CMD node tests/qa-core-docs/run.mjs, --init --cpus=2. PASS all original gates:
+  four concise bilingual pages, witnessed-red claims, install/version/loopback,
+  both sidebars <=30, five external destinations, and VitePress production build
+  (48.05s). Local log: /tmp/opencode/22-sidebar-qa.log.
+  Image config sha256:ba54d54d10e035363ff0385677abaa3d959763e7cc71649424d4965f387e8997.
+  VitePress still warns about chunks >500kB; no bundle-budget claim or change.
+- Unlike the earlier non-root read-only discovery probe, the original qa-core
+  suite runs as its Dockerfile default user and uses network for external URLs.
+- The report-only successor does not claim a new execution. No all-suite,
+  cross-platform or performance matrix. Exact-head required CI/independent
+  review and ordinary PR merge are still required; no deployment was performed.
