@@ -38,6 +38,10 @@ if (command === "serve") {
   const messages = {};
   const aborted = {};
   let lastResponse = null;
+  let admissionPolls = 0;
+  let admissionGapStarted = 0;
+  let admissionGapActive = false;
+  let admissionAfterGapSent = false;
   const trace = (line) => { if (env.FAKE_LOG) require("fs").appendFileSync(env.FAKE_LOG, line + "\\n"); };
   const server = http.createServer(async (req, res) => {
     trace(req.method + " " + req.url);
@@ -45,7 +49,29 @@ if (command === "serve") {
     const body = await new Promise((resolve) => { let s=""; req.on("data", c => s+=c); req.on("end", () => resolve(s)); });
     const json = body ? JSON.parse(body) : {};
     if (req.url === "/global/health") return send(res, { healthy:true, version:"1.18.34" });
-    if (req.url === "/session/status") return send(res, statuses);
+    if (req.url === "/session/status") {
+      if (env.FAKE_ADMISSION_INTERRUPTION) {
+        admissionPolls += 1;
+        // Two missing observations, an interruption longer than the missing
+        // confirmation window, then only one more 404 before idle. A counter
+        // retained through the interruption falsely declares owner_left.
+        if (admissionPolls <= 2) return send(res, {});
+        if (!admissionGapStarted) admissionGapStarted = Date.now();
+        admissionGapActive = Date.now() - admissionGapStarted < 2200;
+        if (admissionGapActive) {
+          if (env.FAKE_ADMISSION_INTERRUPTION === "status-error") {
+            res.writeHead(500); return res.end("status unavailable");
+          }
+          if (env.FAKE_ADMISSION_INTERRUPTION === "busy") return send(res, { ses_test123: { type: "busy" } });
+          if (env.FAKE_ADMISSION_INTERRUPTION === "malformed-status") return send(res, []);
+          if (env.FAKE_ADMISSION_INTERRUPTION === "null-state") return send(res, { ses_test123: null });
+          return send(res, {});
+        }
+        if (!admissionAfterGapSent) { admissionAfterGapSent = true; return send(res, {}); }
+        return send(res, { ses_test123: { type: "idle" } });
+      }
+      return send(res, statuses);
+    }
     if (req.url === "/session" && req.method === "POST") {
       const id = "ses_test123";
       messages[id] = [];
@@ -55,6 +81,12 @@ if (command === "serve") {
     }
     const sessionMatch = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)$/);
     if (sessionMatch && req.method === "GET") {
+      if (env.FAKE_ADMISSION_INTERRUPTION) {
+        if (admissionGapActive && env.FAKE_ADMISSION_INTERRUPTION === "session-error") {
+          res.writeHead(500); return res.end("session lookup unavailable");
+        }
+        res.writeHead(404); return res.end("session not found");
+      }
       if (env.FAKE_SESSION_LOOKUP_MISSING === "1" || !messages[sessionMatch[1]]) {
         res.writeHead(404); return res.end("session not found");
       }
@@ -960,6 +992,8 @@ describe("OpenCode copresence task deadline", () => {
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceOwnerLeftError);
       expect(thrown.phase).toBe("owner_left");
       expect(thrown.code).toBe("opencode_copresence_owner_left");
+      expect(thrown.message).toContain("session lookup remained missing");
+      expect(thrown.message).not.toContain("owner left");
       // 归属：终止的是谁的那条任务。
       expect(thrown.owner.taskId).toBe("5844f347");
       expect(thrown.owner.sender).toBe("通信龙");
@@ -972,6 +1006,24 @@ describe("OpenCode copresence task deadline", () => {
       f.close();
     }
   }, 40_000);
+
+  for (const interruption of ["status-error", "busy", "malformed-status", "null-state", "session-error"]) {
+    test(`missing-session admission resets across ${interruption} before submitting once`, async () => {
+      const log = join(tmpdir(), `opencode-admission-${interruption}-${process.pid}-${Date.now()}.log`);
+      const { f, runtime } = await open({ FAKE_ADMISSION_INTERRUPTION: interruption, FAKE_LOG: log });
+      try {
+        const result = await runtime.submit("after an interrupted missing streak", 10_000);
+        expect(result.replyText).toBe("FAKE_REPLY:after an interrupted missing streak");
+        const trace = readFileSync(log, "utf8");
+        expect(trace.match(/^POST \/session\/ses_test123\/message$/gm)).toHaveLength(1);
+        expect(trace).not.toContain("ABORT");
+      } finally {
+        await runtime.close();
+        f.close();
+        rmSync(log, { force: true });
+      }
+    }, 20_000);
+  }
 
   test("0 disables the deadline: a turn longer than any fetch budget still returns its reply", async () => {
     const { f, runtime } = await open({ FAKE_TURN_MS: "1200", FAKE_INITIAL_BUSY_MS: "300" });

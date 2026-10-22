@@ -51,7 +51,7 @@ describe("ownerLeftDecision", () => {
     })).toBe("keep_waiting");
   });
 
-  test("enough polls over the window means the owner left", () => {
+  test("enough missing polls over the window preserve the legacy owner_left result", () => {
     expect(ownerLeftDecision({
       missingPolls: OWNER_LEFT_CONFIRM_POLLS,
       missingSinceMs: now,
@@ -79,14 +79,17 @@ describe("isSessionGoneError", () => {
 });
 
 describe("ownerLeftText", () => {
-  test("says the owner left, names the owner of the queued item, and carries the reason", () => {
+  test("states the observed session lookup failure without diagnosing the TUI owner", () => {
     const text = ownerLeftText(bindQueueOwner({ taskId: "5844f347", sender: "通信龙", sinceMs: 0 }));
     expect(text).toContain("负责人");
-    expect(text).toContain("已经离开");
+    expect(text).toContain("连续返回 404");
+    expect(text).toContain("不能据此确认 TUI 负责人是否离开");
+    expect(text).not.toContain("已经离开");
     expect(text).toContain("owner_left");
     expect(text).toContain("任务 5844f347");
     expect(text).toContain("通信龙");
-    expect(text).toContain("不是节点卡死");
-    expect(text).toContain("可稍后重发");
+    expect(text).not.toContain("不是节点卡死");
+    expect(text).toContain("这一轮没有发出");
+    expect(text).toContain("确认原会话与节点状态后再决定是否重新提交");
   });
 });

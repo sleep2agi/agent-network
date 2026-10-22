@@ -1,0 +1,61 @@
+# CommHub #2011, parent #1879 / #1566: uninterrupted V1 missing-session evidence
+Date: 2026-10-22
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+
+Root cause: waitUntilSessionIdle retained missingPolls/missingSinceMs across
+outer status errors, named busy/null states and malformed status responses.
+Two earlier session-query 404s plus an interruption longer than 2 seconds and
+one later 404 could falsely terminate admission with owner_left.
+
+Deterministic HTTP fake added to the existing runtime fixture:
+two missing polls -> 2200ms interruption -> one missing poll -> idle.
+Each successful case requires one prompt POST, the exact reply and no ABORT.
+This exercises the runtime integration, not just the pure count predicate.
+
+Docker, node user (non-root), Bun 1.3.14, real Node available:
+1. Old runtime + new tests, image anet-1879-streak-red:
+   - status-error: FAIL with OpenCodeCopresenceOwnerLeftError
+   - busy: FAIL with the same named error
+   - malformed-status: FAIL with the same named error
+   - null-state: FAIL with the same named error
+   - session-error: PASS (existing inner reset)
+   1 pass / 4 fail, 5 tests; RED_REPRO_EXIT=1.
+   Runtime SHA256: a2f3e4c2d73bd65b07fec4ba07a05953eef69af96364d414d0c17e48af478750
+   Test SHA256: fc98071b4030f19e6a056a7c1a7b7987845e86afa4fbff2ac919f15b990deeb8
+2. Fixed runtime, image anet-1879-streak-green:
+   bun test runtime.test.ts queue-ownership.test.ts busy-note.test.ts
+     busy-timeout-wording.test.ts (all under src/runtime/opencode-copresence/)
+   64 pass / 0 fail, 251 expects, 4 files, 38.23s.
+   Includes continuous-missing termination and all five interruption cases.
+3. Complete agent-node unit image started separately; its result is not
+   represented by the targeted 64-pass result. Required CI still applies.
+
+Fix: reset the missing-evidence window on non-missing status observations,
+malformed status responses and transient outer status failures. Preserve the
+terminal owner_left and explicit V1 refusal exceptions.
+
+Unchanged: default 30-minute budget, timeout semantics, V2 dispatch, task
+ownership, unknown-write handling and replay behavior. No production action.
+The legacy error code remains owner_left; 404 does NOT prove TUI departure.
+This slice does not close the full parent task or establish fleet activation.
+
+Local raw logs: /tmp/opencode/1879-streak-red.log,
+/tmp/opencode/1879-streak-green.log, /tmp/opencode/1879-streak-full-node.log.
+
+Review follow-up, observed-evidence wording only:
+- queue-ownership.ts user reply and the Error.message now describe consecutive
+  missing session lookups, not a proven TUI departure or a ruled-out node fault.
+- Preserve error class/code/phase owner_left, task/sender and unsent admission.
+  No timer, counter, dispatch, retry, replay or lifecycle behavior changed.
+- Regression selection: ownerLeftText + the existing runtime owner_left case.
+  Old product + new assertions: 0 pass / 2 fail at the two wording assertions,
+  6 expects; real loopback HTTP fixture, 3.24s.
+- Container: existing anet-1879-streak-green, non-root uid1000, Bun1.3.14/Node,
+  network none, read-only source/rootfs, explicit executable private /tmp.
+  First harness launch used non-executable tmpfs and failed fixture spawn;
+  that environmental EACCES is NOT the product regression witness above.
+- Fixed product + same selected tests: 2 pass / 0 fail / 21 expects, 3.27s;
+  /tmp/opencode/2011-owner-copy-{red,green}.log. New exact head is recorded in
+  the PR and CommHub #2011.
+  Original 64-pass and 3110-pass results remain prior-source evidence, not a
+  claim that either complete suite was repeated for this wording-only follow-up.
