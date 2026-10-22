@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.190`）相对 `.189` 只有一处改动：CLI 的配对常量指向**已经发布**的 agent-node `2.5.0-preview.153`，节点侧因此拿到共享会话排队的两样新东西 —— 排队项绑定 task 与提交者（状态里看得出等的是谁的那条任务），以及共享会话的负责人离开、会话也没了时排队项被**明确终止**（理由 `owner_left`，不再沉默等满 30 分钟才报一句泛泛的「会话忙」）。**默认初始化 / 随机密码路径未改动。**候选须通过全部发布门后才公开。
+已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.190`）相对 `.189` 的配对变更指向**已经发布**的 agent-node `2.5.0-preview.153`。节点新增行为限于 V1 admission（提交前等待）路径：标记 task 与提交者，并在 session 查询的 404 计数达到门槛后以 `owner_left` 结束等待。**404 不证明 TUI 负责人离开**；部分 status 错误路径尚未重置计数，连续缺失的完整负控仍待补齐。这不代表 V2 等价支持、已提交 turn 的收尾或舰队升级已经验收；默认 30 分钟预算不变。**默认初始化 / 随机密码路径未改动。**候选须通过全部发布门，并核实 npm 精确版本可见后才算可安装。
 **候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 

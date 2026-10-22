@@ -1,0 +1,35 @@
+# CommHub #22 / #1879 / #1566 — shared-session documentation boundaries
+Date: 2026-10-22
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+Scope: documentation only; no runtime or production configuration changed.
+
+Corrected claims:
+- agent-node .153 additions are wired into the V1 admission path.
+- A session-query 404 is not evidence that the TUI owner left.
+- Missing-session counters are not reset on every outer status error/busy path.
+- V2, submitted-turn recovery and fleet activation are not established by this release.
+- CLI installability requires exact npm visibility, not just publish-step success.
+
+Docker checks:
+1. python:3.12-slim, read-only repository mount, network none:
+   scripts/check-doc-version-claims.py selftest + run(agent-network, .190)
+   PASS: 19 selftests; bilingual preview stamps/body match .190.
+2. tests/qa-core-docs/Dockerfile -> anet-docs-22-boundaries:
+   npm run build in /workspace/docs-site
+   PASS: VitePress production bundles and page rendering, 45.26s.
+   Warning: some minified chunks exceed 500 kB; not a build failure.
+3. qa-core-docs/run.mjs:
+   FAIL (2): Chinese sidebar >30 links; English sidebar >30 links.
+   Main control: same image with base docs tree mounted read-only gives the
+   identical two failures. No sidebar or checker files changed in this patch.
+   This is a baseline comparison, not permission to bypass required CI checks.
+
+Evidence logs (local; summarized here so results are preserved in Git):
+/tmp/opencode/docs-22-claims.log
+/tmp/opencode/docs-22-vitepress.log
+/tmp/opencode/docs-22-docker.log
+/tmp/opencode/docs-22-core-main.log
+
+Limits: no live owner-close experiment; no existing node restart/adoption;
+no V2 parity claim; no assertion that .190 is publicly installable yet.
+Runtime counter fix and HTTP negative controls tracked separately in #2011.
