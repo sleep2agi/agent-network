@@ -12,7 +12,7 @@
  */
 
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
-import { createNodeSessionControlBridge } from "./runtime/session-control-bridge.js";
+import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
 import {
   bundledCodexVersion,
   createCodex,
@@ -999,6 +999,10 @@ if (unsafeInitialGrokHubCredential) {
 // their shell — replies then landed in the wrong network and Dashboard
 // never saw them.
 let AUTH_TOKEN = fileConfig.token || globalConfig.token || process.env.COMMHUB_TOKEN || "";
+// #2014 control authority belongs to this startup identity, never a hot token.
+const SESSION_CONTROL_START_TOKEN = AUTH_TOKEN;
+let sessionControlCredentialEpoch = 0;
+const sessionControlCredentialAbort = new AbortController();
 // #507 — per-process instance id, sent as X-Anet-Instance-Id on the SSE connect so the
 // Hub can tell "this process reconnected" from "a second copy of this node connected".
 const INSTANCE_ID = generateInstanceId();
@@ -1037,6 +1041,9 @@ function reloadNodeToken(): boolean {
     : loadJson(configFilePath);
   const freshToken = typeof freshConfig?.token === "string" ? freshConfig.token : "";
   if (!freshToken || freshToken === AUTH_TOKEN) return false;
+  // Revoke before publishing the replacement. A -> B -> A cannot revive it.
+  sessionControlCredentialEpoch++;
+  sessionControlCredentialAbort.abort();
   AUTH_TOKEN = freshToken;
   fileConfig.token = freshToken;
   refreshPersistenceRedactor();
@@ -2558,19 +2565,17 @@ if (RUNTIME === "opencode") {
 }
 let opencodeCopresenceSession:
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
-const sessionControlBridge = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
-  && opencodeMode === "copresence" && AUTH_TOKEN.startsWith("ntok_")
+const sessionControlPin = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+  && opencodeMode === "copresence" && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID
+  ? createSessionControlPin({
+    hubUrl: COMMHUB_URL, token: SESSION_CONTROL_START_TOKEN, nodeId: NODE_ID, networkId: NETWORK_ID, epoch: 0,
+    currentToken: () => AUTH_TOKEN, currentEpoch: () => sessionControlCredentialEpoch, signal: sessionControlCredentialAbort.signal,
+  }) : null;
+const sessionControlBridge = sessionControlPin
   ? createNodeSessionControlBridge({
     session: () => opencodeCopresenceSession,
     warn: message => warn(message),
-    post: async (path, body) => {
-      const response = await fetch(`${COMMHUB_URL.replace(/\/+$/, "")}${path}`, {
-        method: "POST", headers: { Authorization: `Bearer ${AUTH_TOKEN}`, "content-type": "application/json" },
-        body: JSON.stringify(body), signal: AbortSignal.timeout(5_000),
-      });
-      if (!response.ok) throw new Error("session control transport unavailable");
-      return response.json();
-    },
+    identity: sessionControlPin,
   }) : null;
 const OPENCODE_MODEL_POLL_MS = 30_000;
 let opencodeModelPollInFlight = false;

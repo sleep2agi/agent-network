@@ -2,8 +2,8 @@
 // product runtime HTTP adapter -> synthetic OpenCode endpoint. No real model/TUI.
 import assert from 'node:assert/strict';
 import { createSessionBackgroundControl } from '/work/agent-node/src/runtime/opencode-copresence/session-background';
-import { fetchOpenCodeJson } from '/work/agent-node/src/runtime/opencode-copresence/http';
-import { createNodeSessionControlBridge } from '/work/agent-node/src/runtime/session-control-bridge';
+import { fetchOpenCodeSessionControlJson } from '/work/agent-node/src/runtime/opencode-copresence/http';
+import { createNodeSessionControlBridge, createSessionControlPin } from '/work/agent-node/src/runtime/session-control-bridge';
 import { runSessionControl } from '/work/client-src/node-session-control';
 
 let passed = 0;
@@ -38,16 +38,18 @@ const hub = bootServer({ hostname: '127.0.0.1', port: 0 });
 const base = `http://127.0.0.1:${hub.port}`;
 const makeSession = () => ({ isRunning: true, sessionId: sid, backgroundControl: createSessionBackgroundControl({
   sessionId: sid, directory: '/fixture', isCurrent: () => true,
-  request: (path, init) => fetchOpenCodeJson(`http://127.0.0.1:${oc.port}`, 'fixture-only', path, init),
+  request: (path, init) => fetchOpenCodeSessionControlJson(`http://127.0.0.1:${oc.port}`, 'fixture-only', path, init),
 }) });
 let session = makeSession();
 let unknownStarted: (() => void) | undefined;
 bridge = createNodeSessionControlBridge({ session: () => session, warn: () => {},
-  post: async (path, body) => {
-    if (loseAck && path.endsWith('/ack')) { loseAck = false; unknownStarted?.(); throw Error('fixture dropped ACK before delivery'); }
-    const res = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: `Bearer ${node.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    return await res.json();
-  },
+  identity: createSessionControlPin({ hubUrl: base, token: node.token!, nodeId, networkId: net, epoch: 0,
+    currentToken: () => node.token!, currentEpoch: () => 0, signal: new AbortController().signal,
+    fetch: (async (url, init) => {
+      if (loseAck && new URL(String(url)).pathname.endsWith('/ack')) { loseAck = false; unknownStarted?.(); throw Error('fixture dropped ACK before delivery'); }
+      return fetch(url, init);
+    }) as typeof fetch,
+  }),
 });
 const stop = new AbortController();
 let readEvents: Promise<void> | undefined;

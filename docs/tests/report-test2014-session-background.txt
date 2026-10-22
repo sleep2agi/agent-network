@@ -142,6 +142,35 @@ Identity slice2 (control-only HTTP adapter):
 - Same non-root/network-none/read-only Bun1.3.14 Docker, new cancellation case
   only: 1pass/0fail/1expect/50ms, /tmp/opencode/2014-control-cancel-green.log.
   No claim that transport cancellation recalls a request already delivered.
+
+Identity slice3 (startup PIN, sticky epoch and Bridge authority gate):
+- CLI captures its startup token before reloadNodeToken can publish replacements.
+  It increments the credential epoch and aborts the control lifetime BEFORE
+  assigning a different hot token. A->B->A never revives the lane; the model
+  session and ordinary token reload behavior are not restarted or replaced.
+- Control transport snapshots Hub URL/token/node/network, checks epoch/token
+  before fetch and after headers/body, forbids redirects and composes cancellation
+  with its deadline. It does not use the mutable ordinary HTTP transport.
+- Only /bridge adds expected:{node_id,network_id}; a successful reply must include
+  matching identity:{node_id,network_id,token_id}. Pin the first token_id and reject
+  missing/mismatched/changed identity permanently. No old-Hub fallback. Pull/ACK
+  and human request fields are unchanged. Trigger before registration does nothing.
+- Bridge supplies the in-process permit to background(), checks it after claim
+  and before ACK. Revocation cannot emit a successful ACK on a replacement token.
+  The old three-layer fixture is adapted to this protocol, NOT rerun or accepted
+  as evidence for the new head; matching Hub implementation remains separate.
+- Five new authority/claim cases against pre-fix product: 0pass/5fail, 5expects,
+  /tmp/opencode/2014-identity-bridge-red.log. New product three affected files only:
+  34pass/0fail/94expects/96ms in the same non-root/read-only/network-none Bun1.3.14
+  Docker. /tmp/opencode/2014-identity-targeted-final.log. Includes runtime permit,
+  real local HTTP redirect/cancellation, Bridge claims and CLI source wiring.
+  The CLI source assertion is NOT a launched real node/token-rotation acceptance.
+- V2+CLI Bun builds pass. Same existing TS5.9.3 dependency container remains exit2,
+  83 diagnostics ->83 with no added diagnostic after excluding line shifts versus
+  /tmp/opencode/2014-tsc-fixed.log. This is NOT the CI baseline81 gate passing.
+- No full/13-case integration rerun, no npm/release/deploy/restart/real session write.
+  Code still needs independent review, exact-head required CI and matching Hub
+  identity safety evidence; #2014 remains blocked-doing, not a delivered feature.
 All credentials are generated in the disposable container; the legacy literal
 is a fixture and is not used to authorize control. No production DB/keys/session.
 This is NOT a real installed OpenCode/TUI/model, real native UI, release artifact,
