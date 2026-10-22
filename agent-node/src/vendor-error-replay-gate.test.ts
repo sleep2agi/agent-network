@@ -5,6 +5,7 @@
 // 文本里带 vendor 特征（例如同时出现 "错误" 与 "API error"）就会被重放，
 // 等于绕过 runtime 的归属与副作用判断。这里锁定：结构化码命中时一律不重放。
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { isNonReplayableRuntimeFailure, isTransientVendorError } from "./vendor-error";
 
 // 同时命中 ≥2 个 vendor 特征、且不含 401/403/quota/429 的文本：
@@ -32,6 +33,24 @@ describe("isNonReplayableRuntimeFailure", () => {
     for (const code of [undefined, null, "", "codex_task_skipped", "some_unknown_code", 42]) {
       expect(isNonReplayableRuntimeFailure(code)).toBe(false);
     }
+  });
+});
+
+describe("cli.ts wiring (#2028)", () => {
+  const cli = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
+
+  test("processTask keeps the structured failure code from both catches", () => {
+    // 初始 catch 与 retry catch 都必须写 runtimeFailureCode（只存码，不存正文）。
+    const assignments = cli.match(/runtimeFailureCode = [^;]+;/g) ?? [];
+    expect(assignments.length).toBeGreaterThanOrEqual(3); // 声明 + 初始 catch + retry catch
+    expect(cli).toContain('runtimeFailureCode = typeof err?.code === "string" ? err.code : null;');
+    expect(cli).toContain('runtimeFailureCode = typeof err?.code === "string" ? err.code : runtimeFailureCode;');
+  });
+
+  test("the vendor retry asks the gate with the structured code", () => {
+    expect(cli).toContain("isTransientVendorError(text, failed, runtimeFailureCode)");
+    // 不再有只传两个实参的旧调用（防回退）。
+    expect(/isTransientVendorError\(text, failed\)\s*[;)]/.test(cli)).toBe(false);
   });
 });
 
