@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
 import { generationGone, observeGeneration } from './process-generation';
+import { createHash } from 'node:crypto';
 const root = '/home/node/test883';
 const project = `${root}/project`;
 const artifact = '/artifacts';
@@ -156,6 +157,45 @@ try {
   const beforeConfig = await api(`/api/nodes/${row.child_node_id}/config`);
   check('model update capability advertised', beforeConfig.config_update_capable === true);
   const oldHealth = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8'));
+  // #2050: preserve only model/revision/identity facts, never whole config,
+  // token rows, request headers, argv or the credential-bearing endpoint file.
+  function modelEvidence(stage: string) {
+    try {
+      const node = db.query('SELECT config_revision,config_snapshot FROM nodes WHERE node_id=? AND network_id=?')
+        .get(row.child_node_id, networkId) as any;
+      const snapshot = JSON.parse(node?.config_snapshot || '{}');
+      const sessions = db.query('SELECT node_id,network_id,model,status FROM sessions WHERE node_id=? AND network_id=?')
+        .all(row.child_node_id, networkId);
+      const updates = db.query('SELECT update_id,apply_mode,status,created_at,acked_at,new_revision FROM node_config_updates WHERE node_id=? ORDER BY created_at DESC LIMIT 3')
+        .all(row.child_node_id);
+      const local = JSON.parse(readFileSync(`${nodeDir}/config.json`, 'utf8'));
+      let bridge: Record<string, unknown> = { observable: false };
+      try {
+        const health = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8'));
+        const pid = health.bridge.pid;
+        if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('invalid fixture pid');
+        const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+        const entry = args[1];
+        // Only the fixed test runtime entry can be read/hash-logged here.
+        bridge = { pid, expected_entry: entry === process.env.ANET_AGENT_NODE_BIN };
+        if (entry === '/opt/node_modules/@sleep2agi/agent-node/dist/cli.js') {
+          const bytes = readFileSync(entry);
+          bridge.entry_sha256 = createHash('sha256').update(bytes).digest('hex');
+          bridge.has_model_deadline = bytes.includes(Buffer.from('OpenCode session model switch timed out after'));
+        }
+      } catch { /* a dead/inaccessible bridge is evidence, not test success */ }
+      const evidence = { stage, source_commit: process.env.SOURCE_COMMIT,
+        node_id: row.child_node_id, network_id: networkId,
+        hub: { model: snapshot.model ?? null, config_revision: node?.config_revision ?? null },
+        sessions, updates, local: { model: local.model ?? null }, bridge };
+      writeFileSync(`${artifact}/model-${stage}.json`, JSON.stringify(evidence, null, 2));
+      console.log('MODEL_EVIDENCE ' + JSON.stringify(evidence));
+    } catch {
+      // Do not replace the original model assertion with a diagnostic error.
+      console.log(`MODEL_EVIDENCE ${stage}: unavailable`);
+    }
+  }
+  modelEvidence('before');
   const providerFile = `${provider}/opencode.json`;
   const providerConfig = JSON.parse(readFileSync(providerFile, 'utf8'));
   providerConfig.provider.stub.models['stub-model-next'] = { name: 'Stub Next' };
@@ -169,6 +209,7 @@ try {
     try {
       const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       console.log(redact(out + err));
+      modelEvidence(code === 0 ? 'after' : 'failure');
       check('rendered client model change and revision confirmation', code === 0 && out.includes('MODEL_CLIENT_RESULT {"ok":true}'));
     } finally { clearTimeout(deadline); }
   } else {
