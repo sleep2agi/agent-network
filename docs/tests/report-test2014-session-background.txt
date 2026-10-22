@@ -104,6 +104,19 @@ the reproducible inputs and commands are recorded above, not a home path.
 - Logs: /tmp/opencode/2014-tsc-{red,fixed}.log,
   /tmp/opencode/2014-ci-gates-{fixed,rest-fixed}.log,
   /tmp/opencode/2014-narrowing-regression.log. New-head normal CI/review pending.
+
+Independent review follow-up: redirect trust boundary (P1, separate from CI).
+- Old source plus two new authenticated HTTP 307/308 peer-session redirect
+  regressions: 0 pass / 2 fail (expected unknown rejection, got resolved), 2 expects.
+- Control-only read requests and the semantic POST now set redirect:error.
+  The shared HTTP helper is unchanged. Transport rejection keeps unknown and
+  the same ID retains its rejected receipt, never retrying or following a peer.
+- Same non-root/Bun1.3.14/no-network/read-only container, HTTP adapter file only:
+  3 pass / 0 fail / 9 expects / 70ms. Both redirect cases assert that the only
+  POST is the original bound session's request, including after a duplicate ID.
+- Logs: /tmp/opencode/2014-redirect-{red,green}.log. No full suite or integration
+  rerun. Independent P1 about mutable Bridge token identity is NOT fixed here;
+  the PR remains blocked from landing/release/activation pending that fix/review.
 All credentials are generated in the disposable container; the legacy literal
 is a fixture and is not used to authorize control. No production DB/keys/session.
 This is NOT a real installed OpenCode/TUI/model, real native UI, release artifact,

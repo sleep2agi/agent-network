@@ -54,7 +54,7 @@ export function createSessionBackgroundControl(opts: {
   async function read(path: string) {
     current();
     try {
-      const value = await opts.request(path);
+      const value = await opts.request(path, { redirect: "error" });
       current();
       return value;
     } catch (e) {
@@ -85,7 +85,7 @@ export function createSessionBackgroundControl(opts: {
     if (!before.active) return { outcome: "already_idle", state: before };
     current();
     // ONE write, never retry. A timeout can occur after OpenCode applied it.
-    try { await opts.request(`/api/session/${opts.sessionId}/background`, { method: "POST" }); }
+    try { await opts.request(`/api/session/${opts.sessionId}/background`, { method: "POST", redirect: "error" }); }
     catch { return fail("session_background_outcome_unknown"); }
     try { return { outcome: "request_processed", state: await state() }; }
     catch { return fail("session_background_outcome_unknown"); }
