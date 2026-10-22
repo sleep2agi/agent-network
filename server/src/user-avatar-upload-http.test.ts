@@ -2,20 +2,41 @@ import { expect, test } from "bun:test";
 import { register, createNetworkTokenForNode, addNetworkMember } from "./auth.js";
 import { db } from "./db.js";
 import { inspectAvatarImage, MAX_AVATAR_BYTES } from "./user-avatar-image.js";
+import { deflateSync } from "node:zlib";
 
 // 1×1 PNG（透明）。只用来走真实 multipart → 真实文件头校验。
 const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
 );
-function fakePng(width: number, height: number, total = 64): Buffer {
-  const buf = Buffer.alloc(total);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buf, 0);
-  buf.writeUInt32BE(13, 8);
-  buf.write("IHDR", 12, "ascii");
-  buf.writeUInt32BE(width, 16);
-  buf.writeUInt32BE(height, 20);
-  return buf;
+/** 真的 8-bit RGBA PNG：IHDR + 一段 zlib 压缩的扫描行 + IEND，CRC 全对。 */
+function realPng(width: number, height: number): Buffer {
+  const crcTable = new Uint32Array(256).map((_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf: Buffer) => {
+    let c = 0xffffffff;
+    for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0; // 8-bit RGBA
+  const raw = Buffer.alloc((1 + width * 4) * height); // 每行前面一个 filter 字节 0
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 test("account avatar upload: user token only, PNG limits, visibility by shared network, revoke, atomic replace", async () => {
@@ -56,7 +77,7 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
 
     // 畸形输入：非 PNG、超边长、空、多字段、非 multipart。
     expect((await upload(a.token!, Buffer.from("not a png"))).body.error).toBe("invalid_image");
-    expect((await upload(a.token!, fakePng(600, 600))).body.reason).toBe("too_big");
+    expect((await upload(a.token!, realPng(600, 600))).body.reason).toBe("too_big");
     expect((await upload(a.token!, Buffer.alloc(0))).status).toBe(400);
     expect((await upload(a.token!, PNG_1X1, "other")).status).toBe(400);
     expect((await upload(a.token!, PNG_1X1, "file", ["avatar_url", "/etc/passwd"])).status).toBe(400);
@@ -96,7 +117,7 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
     expect(db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id)!.version).toBe(beforeBad!.version);
     expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(200);
 
-    const ok2 = await upload(a.token!, fakePng(512, 512));
+    const ok2 = await upload(a.token!, realPng(512, 512));
     expect(ok2.status).toBe(200);
     expect(ok2.body.avatar_url).not.toBe(ok1.body.avatar_url);
     expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(404);
@@ -111,10 +132,15 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
 test("image inspector: signature, shape and size limits", () => {
   expect(inspectAvatarImage(PNG_1X1)).toEqual({ ok: true, width: 1, height: 1 });
   expect(inspectAvatarImage(new Uint8Array(0))).toEqual({ ok: false, reason: "empty" });
-  expect(inspectAvatarImage(new Uint8Array(10))).toEqual({ ok: false, reason: "truncated" });
-  expect(inspectAvatarImage(Buffer.from(fakePng(16, 16).subarray(0, 40)))).toMatchObject({ ok: true });
-  expect(inspectAvatarImage(fakePng(513, 16))).toEqual({ ok: false, reason: "too_big" });
-  expect(inspectAvatarImage(fakePng(0, 16))).toEqual({ ok: false, reason: "bad_dimensions" });
+  expect(inspectAvatarImage(new Uint8Array(10))).toEqual({ ok: false, reason: "not_png" });
+  expect(inspectAvatarImage(Buffer.from(realPng(16, 16).subarray(0, 20)))).toEqual({ ok: false, reason: "truncated" });
+  expect(inspectAvatarImage(Buffer.from(realPng(16, 16).subarray(0, 40)))).toEqual({ ok: false, reason: "truncated" });
+  const truePng = realPng(16, 16);
+  const corrupt = Buffer.from(truePng); corrupt[corrupt.length - 20] ^= 0xff;
+  expect(inspectAvatarImage(corrupt).ok).toBe(false);
+  expect(inspectAvatarImage(realPng(513, 16))).toEqual({ ok: false, reason: "too_big" });
+  const zeroWide = realPng(1, 1); zeroWide.writeUInt32BE(0, 16);
+  expect(inspectAvatarImage(zeroWide).ok).toBe(false);
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)]);
   expect(inspectAvatarImage(jpeg)).toEqual({ ok: false, reason: "not_png" });
   expect(inspectAvatarImage(Buffer.alloc(MAX_AVATAR_BYTES + 1))).toEqual({ ok: false, reason: "too_large" });
