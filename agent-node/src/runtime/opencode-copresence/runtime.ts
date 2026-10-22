@@ -546,8 +546,8 @@ async function waitUntilSessionIdle(
   // `timeoutMs <= 0` = wait without a deadline.
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY;
   let notedBusy = false;
-  // #1879 ③ —— 「会话没了」的连续观测计数。负责人离开要连续确认，
-  // 一次 404 不足以判定（见 queue-ownership.ts 的两道门槛）。
+  // #1879: only uninterrupted session-query 404 observations count. This is
+  // evidence of a missing session, not proof that the TUI owner left.
   let missingPolls = 0;
   let missingSinceMs = 0;
   while (Date.now() < deadline) {
@@ -571,16 +571,13 @@ async function waitUntilSessionIdle(
           try {
             const session = await request(`/session/${sessionId}`, {}, 2_000);
             if (session?.id === sessionId) return;
-            // 会话记录还在 ⇒ 负责人只是暂时不在，等它空闲后照常提交。
+            // A malformed/mismatched record cannot confirm either idle or gone.
             missingPolls = 0;
             missingSinceMs = 0;
           } catch (error: any) {
             if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
-            // #1879 ③ —— 明确的 404：会话没了。连续确认够多次之后，
-            // 认定「负责人已经离开」，排队中的任务明确终止（owner_left），
-            // 而不是沉默地等满预算再报一个泛泛的 busy 超时。
-            //
-            // 其余错误（超时、5xx、连接问题）**不是**证据：重置计数，继续等。
+            // Keep the legacy owner_left code, but count only session-query
+            // 404s. Other errors interrupt the evidence window.
             if (isSessionGoneError(error)) {
               if (missingPolls === 0) missingSinceMs = Date.now();
               missingPolls += 1;
@@ -593,7 +590,14 @@ async function waitUntilSessionIdle(
             }
             // Keep waiting: missing session is not evidence of idle.
           }
+        } else {
+          // Busy/retry/null/unknown named states are not missing observations.
+          missingPolls = 0;
+          missingSinceMs = 0;
         }
+      } else {
+        missingPolls = 0;
+        missingSinceMs = 0;
       }
     } catch (error: any) {
       // 🔴 owner_left 必须穿过这一层：下面那层 catch 抛出来的「负责人离开」
@@ -602,6 +606,8 @@ async function waitUntilSessionIdle(
       if (error?.code === "opencode_copresence_owner_left") throw error;
       if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
       // A transient status failure is also not evidence of idle.
+      missingPolls = 0;
+      missingSinceMs = 0;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
