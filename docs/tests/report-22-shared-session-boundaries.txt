@@ -30,6 +30,25 @@ Evidence logs (local; summarized here so results are preserved in Git):
 /tmp/opencode/docs-22-docker.log
 /tmp/opencode/docs-22-core-main.log
 
-Limits: no live owner-close experiment; no existing node restart/adoption;
-no V2 parity claim; no assertion that .190 is publicly installable yet.
+Limits of the original checks: no live owner-close experiment; no existing node
+restart/adoption; no V2 parity claim; npm visibility was not asserted then.
 Runtime counter fix and HTTP negative controls tracked separately in #2011.
+
+2026-10-22 factual review follow-up (documentation only):
+- Correct CLI-vs-node ownership of the five inherited .152 fixes; installing
+  the CLI is not activation of an existing runtime.
+- Bilingual getting-started now records .190/.153 as published exact versions,
+  without claiming current dist-tags or fleet activation. Registry exact-version
+  GETs succeeded for both packages in this round; dist-tags requests timed out,
+  so the previous latest stamp is not presented as a fresh tag observation.
+- Point counter follow-up to #2011 / PR2886, retaining parent#1879. A later
+  source fix is explicitly not part of the published .153 package.
+- Sidebar budget failures above remain unresolved; this is NOT a landing gate
+  waiver. No sidebar, checker, runtime, package version or release script edits.
+- Only the changed bilingual version-claim check is rerun for this follow-up;
+  old VitePress/Docker outcomes remain original-snapshot evidence.
+  PASS: four stamps across two documents for agent-network .190, non-root
+  read-only/network-none Docker; log /tmp/opencode/22-doc-review-claims.log.
+  Initial container lacked worktree Git metadata and refused to run; mounting
+  the metadata read-only allowed the check. No claim of fresh latest-tag truth,
+  native install/bin smoke, or revalidation of the known sidebar failures.

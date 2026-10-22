@@ -4,7 +4,7 @@
      本页有多处**带版本号的行为断言**(某个版本上第一条命令会怎样),它们在发版那一刻
      同时变假。release gate 会拿正在发的版本和这两条戳比对,不一致就拦下发布并列出
      每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
-     latest 标记已核对的通道版本，preview 标记已验证的发布候选，不代表 npm 已发布；
+     latest 标记已核对的通道版本，preview 标记本页核对的版本；是否发布另核 npm 精确版本；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.181 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.190 -->
@@ -59,8 +59,8 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.190`）相对 `.189` 的配对变更指向**已经发布**的 agent-node `2.5.0-preview.153`。节点新增行为限于 V1 admission（提交前等待）路径：标记 task 与提交者，并在 session 查询的 404 计数达到门槛后以 `owner_left` 结束等待。**404 不证明 TUI 负责人离开**；部分 status 错误路径尚未重置计数，连续缺失的完整负控仍待补齐。这不代表 V2 等价支持、已提交 turn 的收尾或舰队升级已经验收；默认 30 分钟预算不变。**默认初始化 / 随机密码路径未改动。**候选须通过全部发布门，并核实 npm 精确版本可见后才算可安装。
-**候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
+已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。**已发布**的 CLI `2.3.0-preview.190` 相对 `.189` 的配对变更指向已发布的 agent-node `2.5.0-preview.153`；这两个精确版本已核实可从 npm 查询。节点新增行为限于 V1 admission（提交前等待）路径：标记 task 与提交者，并在 session 查询的 404 计数达到门槛后以 `owner_left` 结束等待。**404 不证明 TUI 负责人离开**；`.153` 的部分 status 错误路径尚未重置计数，该发布包不包含后续连续缺失修复。这不代表 V2 等价支持、已提交 turn 的收尾或舰队升级已经验收；默认 30 分钟预算不变。**默认初始化 / 随机密码路径未改动。**
+精确版本已发布不代表通道标记永远指向它，也不代表现役节点已升级。当前通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
 凭据也落在 `~/.anet/server/admin-utok.json`,里面只有
