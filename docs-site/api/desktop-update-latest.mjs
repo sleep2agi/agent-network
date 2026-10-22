@@ -56,12 +56,23 @@ const validManifest = (manifest, version) => manifest?.version === version
   && typeof manifest.platforms?.['darwin-aarch64']?.signature === 'string'
   && typeof manifest.platforms?.['windows-x86_64']?.signature === 'string';
 
+// Manifests used to carry `api.github.com/.../releases/assets/<id>` URLs, so this
+// function translated them through the release's asset list. Since #1034 the release
+// workflow normalizes `latest.json` to public `releases/download/<tag>/<file>` links
+// *before* publishing, so there is nothing to translate: without the pass-through
+// below every platform lookup threw and the endpoint silently served the stale
+// fallback (0.2.287 was published while /desktop/update/latest.json still said
+// 0.2.286, `x-anet-update-source: fallback`).
+const isPublicDownloadUrl = (url) => typeof url === 'string'
+  && /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//.test(url);
+
 const useBrowserDownloadUrls = (manifest, release) => {
   const downloads = new Map(release.assets.map((asset) => [asset.url, asset.browser_download_url]));
   const platforms = Object.fromEntries(Object.entries(manifest.platforms).map(([name, entry]) => {
     const direct = downloads.get(entry.url);
-    if (!direct) throw new Error(`no browser download URL for ${name}`);
-    return [name, { ...entry, url: direct }];
+    if (direct) return [name, { ...entry, url: direct }];
+    if (isPublicDownloadUrl(entry.url)) return [name, entry];
+    throw new Error(`no browser download URL for ${name}`);
   }));
   return { ...manifest, platforms };
 };
