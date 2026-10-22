@@ -200,7 +200,12 @@ export function validateLocalPatch(
 /** Classify whether a patch needs restart vs hot apply. Empty patch
  * → "restart_only" (used by restart_node tool). Mirrors hub helper —
  * see config-apply-validate.ts. */
-export function computeApplyMode(patch: ConfigPatch, opts?: { runtime?: string | null; opencodeGeneration?: string | null }): ApplyMode {
+export function computeApplyMode(patch: ConfigPatch, opts?: {
+  runtime?: string | null;
+  opencodeGeneration?: string | null;
+  requestedMode?: ApplyMode;
+  hotModelSwitchAvailable?: boolean;
+}): ApplyMode {
   const hasModel = patch.model !== undefined;
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
@@ -209,7 +214,13 @@ export function computeApplyMode(patch: ConfigPatch, opts?: { runtime?: string |
   // OpenCode V2 switches the live TUI session and writes config.model so the
   // dashboard poll can finish. A restart would reopen the old session model.
   if (hasModel && flagKeys.length === 0 && !hasChannels
-    && opts?.runtime === "opencode-cli" && opts?.opencodeGeneration === "v2") return "hot";
+    && opts?.runtime === "opencode-cli" && opts?.opencodeGeneration === "v2") {
+    // #2050: a missing hot capability must not veto a Hub-requested restart.
+    // This decision is made before any model API call; an attempted/failed
+    // hot switch must never be replayed as a restart here.
+    if (opts.hotModelSwitchAvailable === false && opts.requestedMode === "restart") return "restart";
+    return "hot";
+  }
   if (hasModel) return "restart";
   if (hasChannels) return "restart";
   for (const key of flagKeys) {
