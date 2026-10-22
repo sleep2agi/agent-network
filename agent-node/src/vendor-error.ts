@@ -117,10 +117,33 @@ export function isVendorErrorForUser(
  * BEFORE sanitization, so Vincent's image+text replies don't sanitize on
  * a single-shot 1000 when the retry would've worked.
  */
+/**
+ * #2028 — 结构化失败码优先：这些 runtime 失败**不是** vendor 抖动，
+ * 重放同一 prompt 只会重复一次同样的失败（还会绕过归属/副作用判断）。
+ * 判定只看错误码字符串（无正文、无凭据），未知码不拦（保持原 vendor 策略）。
+ */
+const NON_REPLAYABLE_RUNTIME_CODES = [
+  /^opencode_copresence_timeout$/,
+  /^opencode_copresence_owner_left$/,
+  /^opencode_provider_error$/,
+  /^opencode_v1_borrowed_(admission|cli)_refused$/,
+  /^opencode_v1_host_(admission|start)_refused$/,
+  /^opencode_v1_(migration_plan|owned_safe_topology)_refused$/,
+];
+
+export function isNonReplayableRuntimeFailure(code: unknown): boolean {
+  if (typeof code !== "string" || code.length === 0) return false;
+  return NON_REPLAYABLE_RUNTIME_CODES.some((pattern) => pattern.test(code));
+}
+
 export function isTransientVendorError(
   text: string,
   failed: boolean,
+  runtimeCode?: unknown,
 ): boolean {
+  // 结构化失败优先于文本特征：OpenCode timeout / ownership / provider /
+  // v1 拒绝都不是「重试就好」的抖动，禁止走通用 vendor 重放。
+  if (isNonReplayableRuntimeFailure(runtimeCode)) return false;
   if (!isVendorErrorForUser(text, failed)) return false;
   // Auth-class errors won't recover on retry — don't waste round-trips.
   if (/\b401\b|\b403\b|unauthorized|forbidden/i.test(text)) return false;
