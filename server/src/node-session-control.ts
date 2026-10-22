@@ -47,7 +47,7 @@ function human(tokenId: string, n: Node): boolean {
   const c = credential(tokenId);
   if (!c || c.network_id || !n.network_id) return false;
   const role = getUserNetworkRole(c.user_id, n.network_id);
-  return !!role && !isAgentRestricted(c.user_id, n.network_id)
+  return !!role && role !== "viewer" && !isAgentRestricted(c.user_id, n.network_id)
     && (c.user_id === n.owner_user_id || role === "owner" || role === "admin" || c.role === "admin");
 }
 function bound(tokenId: string, n?: Node | null): Node | null {
