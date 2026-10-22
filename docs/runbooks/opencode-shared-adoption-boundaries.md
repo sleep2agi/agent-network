@@ -90,7 +90,9 @@ ownership remain explicit refusals until separately implemented and tested.
 7. Freeze and revalidate all evidence immediately before persistence. A
    moving session, replaced credential/config/file or changed process
    generation invalidates the attempt. Live task/unknown-write ownership is
-   not cleared or replayed by adoption.
+   not cleared or replayed by adoption. Fresh re-observation is necessary but
+   does not close revocation or replacement races across an asynchronous wait;
+   the binding-epoch/CAS contract below must also hold.
 
 Existing launch-health and shared-server observation helpers can supply parts
 of this evidence, not the entire adoption proof. They require adaptation and
@@ -100,8 +102,10 @@ negative controls, not an `allowOpenCodeV2` boolean around the guard.
 
 - Persist a versioned OpenCode-specific evidence record only after successful
   preflight. No direct database or hand-written child-registry binding.
-- Keep the existing fresh Hub binding check before every lifecycle operation.
-  Discovery, a local record or `pending` is never authority to signal a process.
+- Keep the existing fresh Hub binding check before every lifecycle operation,
+  together with the binding-epoch/CAS contract below. A fresh read alone is not
+  authority after a later asynchronous wait. Discovery, a local record or
+  `pending` is never authority to signal a process.
 - Adoption itself must not stop/restart Bridge or TUI, change session data,
   rewrite runtime configuration, rotate credentials or restart the server.
 - A later explicitly authorized stop may affect only the proven node-owned
@@ -118,6 +122,71 @@ negative controls, not an `allowOpenCodeV2` boolean around the guard.
   resurrect evidence or transfer control to a replacement process.
 - Use redacted, stable refusal codes in the request result and client view.
   Test the actual client rendering separately from daemon unit tests.
+
+## Required review gates and independently deliverable slices
+
+Review source: CommHub #1987 comment 29940, against
+`98ea5b82058b5f9d49584399e9daa2a29ec9d186`. The following are **requirements,
+not implemented capabilities or passing acceptance evidence**. The existing
+27 refusal tests establish no adoption, stop or resume support.
+
+### Six non-substitutable safety gates
+
+1. **Actual credential identity.** An authenticated identity read using the
+   credential held by the running Bridge must prove immutable node/network
+   identity. An owner/admin credential can authorize the human request but
+   cannot substitute for that proof. Reading a token from disk does not prove
+   that it is the running Bridge's credential. Missing or ambiguous evidence
+   refuses without copying credentials, exposing values or issuing replacements.
+2. **Versioned evidence tuple.** Freeze a format-versioned tuple covering
+   node/network, Bridge and TUI process identities, listening server and its
+   custody, original session, real location, model, boot identity and relevant
+   config/executable/private-file generations. PID alone is not a generation;
+   the tuple must detect PID reuse and replacement during every asynchronous
+   verification step. Evidence hashes must not expose secrets or secret-derived
+   values. Omitted `managed`/`adoption` projections remain unknown, not none.
+3. **Borrowed shared-server custody.** Adoption acquires only a reference to
+   the existing shared server, never its ownership, custody or termination
+   right. This applies to indirect `close`, error handling, sweep, residue and
+   process-tree cleanup too. No failure or rollback may terminate the server or
+   signal a peer. This gate applies from slice B; it is not deferred to slice C.
+4. **Zero-restart and lifecycle are separate.** Prove adoption leaves the
+   Bridge, TUI, server and original session unchanged. That proof does not
+   grant stop/start/resume capability. Advertise lifecycle only after its own
+   implementation and acceptance; unsupported actions refuse and never fall
+   through ordinary-process or Codex lifecycle branches.
+5. **Hub/local CAS and revocation linearization.** Define the Hub/local
+   transition protocol, an exact binding epoch and its authoritative
+   compare-and-swap conditions before implementation. Specify where grant,
+   reconcile, revoke and any later lifecycle operation linearize; every
+   post-await continuation must reject a replaced/revoked epoch. A just-read
+   current binding is insufficient. Concurrent adoption of one node has exactly
+   one winner and one refusal; late ACK must not revive the loser or a revoked
+   binding. Audit records must be machine-checkable and contain request ID,
+   epoch, verdict, stable reason and a redacted evidence hash, not credentials.
+6. **Crash/unknown/rollback matrix.** Enumerate each boundary before/after
+   local evidence persistence, Hub CAS, ACK, reconciliation and revocation.
+   Exercise crashes and delayed replies at each applicable boundary, including
+   definite refusal, unknown outcome, duplicate delivery and late ACK after a
+   newer epoch. Roll back only this request's metadata through the normal
+   authority protocol; never overwrite a newer binding, restore guessed
+   identities, mutate original session data or replay an unknown model turn.
+
+### A → B → C → D delivery order
+
+| Slice | Deliverable | Explicit limits and minimum evidence |
+| --- | --- | --- |
+| A | Read-only evidence verifier | Existing adoption guard still refuses. No registry/binding/config/process/session writes. Cover identity, missing projections, mixed generations, replacement and ambiguous custody with focused negative controls. |
+| B | Zero-restart adoption with ACK/revoke/reconcile | Default flag off. All six gates above are prerequisites; lifecycle remains disabled. Use non-root isolated dual nodes on one real shared server, retain original Bridge/TUI/session and peer, and prove one-winner concurrent adoption plus crash/unknown/late-ACK behavior. |
+| C | Explicit target-only Bridge/TUI stop | Separate human authorization and exact epoch/generation checks. Shared server/peer remain unchanged through success, failure, revoke and indirect cleanup. No generic process-tree fallback. |
+| D | Original-session resume | Resume only the proven original session under approved in-flight/human-turn rules. Fail closed on changed server, credentials, location, model or generation; no new/forked session or unknown-turn replay. |
+
+Each slice requires its own ordinary review, exact-head required checks and
+only the focused evidence needed for that slice. A passing source or fixture
+test is not a released package or production activation. Slice B onward needs
+the real isolated dual-node/shared-server evidence above before any named
+owner/admin-approved activation window is proposed. No currently running
+communication node is a disposable acceptance target.
 
 ## Acceptance ladder before proposing a production window
 
