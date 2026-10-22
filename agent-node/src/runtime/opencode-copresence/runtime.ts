@@ -573,6 +573,12 @@ async function waitUntilSessionIdle(
             await onBusy?.();
           }
         }
+        if (state !== undefined && !(state && typeof state === "object" && state.type)) {
+          // #2011 —— 记录存在但形状畸形（`{}` / null / 非对象）：既不是 idle，
+          // 也不是命名状态；它同样「不是 404」，必须中断连续缺失证据。
+          missingPolls = 0;
+          missingSinceMs = 0;
+        }
         if (state === undefined) {
           // Pinned OpenCode 1.18.1 returns an empty status map for an idle
           // session, so absence alone cannot be rejected. Distinguish the

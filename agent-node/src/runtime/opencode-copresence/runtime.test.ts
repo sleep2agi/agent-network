@@ -37,6 +37,7 @@ if (command === "serve") {
   const statuses = {};
   const messages = {};
   let statusPolls = 0;
+  let sessionLookupPolls = 0;
   const aborted = {};
   let lastResponse = null;
   const trace = (line) => { if (env.FAKE_LOG) require("fs").appendFileSync(env.FAKE_LOG, line + "\\n"); };
@@ -52,9 +53,15 @@ if (command === "serve") {
       const slowMs = Number(env.FAKE_STATUS_SLOW_MS || 0);
       const errorAt = Number(env.FAKE_STATUS_ERROR_POLL || 0);
       const malformedAt = Number(env.FAKE_STATUS_MALFORMED_POLL || 0);
-      if (slowAt && statusPolls === slowAt && slowMs > 0) await new Promise((r) => setTimeout(r, slowMs));
+      const slowList = String(env.FAKE_STATUS_SLOW_POLLS || slowAt || "").split(",").filter(Boolean).map(Number);
+      if (slowList.includes(statusPolls) && slowMs > 0) await new Promise((r) => setTimeout(r, slowMs));
       if (errorAt && statusPolls === errorAt) { res.writeHead(500); return res.end("status exploded"); }
       if (malformedAt && statusPolls === malformedAt) return send(res, ["not", "a", "map"]);
+      const typelessAt = Number(env.FAKE_STATUS_TYPELESS_POLL || 0);
+      if (typelessAt && statusPolls === typelessAt) {
+        const onlyKey = Object.keys(statuses)[0] || "ses_test123";
+        return send(res, { [onlyKey]: {} });
+      }
       return send(res, statuses);
     }
     if (req.url === "/session" && req.method === "POST") {
@@ -67,6 +74,10 @@ if (command === "serve") {
     const sessionMatch = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)$/);
     if (sessionMatch && req.method === "GET") {
       if (env.FAKE_SESSION_LOOKUP_MISSING === "1" || !messages[sessionMatch[1]]) {
+        sessionLookupPolls += 1;
+        const slowAt = Number(env.FAKE_SESSION_LOOKUP_SLOW_POLL || 0);
+        const slowMs = Number(env.FAKE_SESSION_LOOKUP_SLOW_MS || 0);
+        if (slowAt && sessionLookupPolls === slowAt && slowMs > 0) await new Promise((r) => setTimeout(r, slowMs));
         res.writeHead(404); return res.end("session not found");
       }
       return send(res, { id:sessionMatch[1] });
@@ -990,14 +1001,14 @@ describe("OpenCode copresence task deadline", () => {
   test("#2011 a status 500 between 404s resets the consecutive-owner-left evidence", async () => {
     const { f, runtime } = await open({
       FAKE_SESSION_LOOKUP_MISSING: "1",
-      FAKE_STATUS_ERROR_POLL: "2",
-      FAKE_STATUS_SLOW_POLL: "2",
-      FAKE_STATUS_SLOW_MS: "2200",
+      FAKE_STATUS_ERROR_POLL: "3",
+      FAKE_STATUS_SLOW_POLLS: "2,5",
+      FAKE_STATUS_SLOW_MS: "1300",
     });
     try {
       let thrown: any;
       try {
-        await runtime.submit("interrupted by a status 500", 3_500, "通信龙", undefined, { taskId: "2011a" });
+        await runtime.submit("interrupted by a status 500", 3_200, "通信龙", undefined, { taskId: "2011a" });
       } catch (error) { thrown = error; }
       // 修复后：这次中断重置了计数，剩余预算不够再凑满 3 次连续 404 → 只能是超时。
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
@@ -1009,18 +1020,40 @@ describe("OpenCode copresence task deadline", () => {
     }
   }, 30_000);
 
-  // 畸形 status（数组而不是 map）同样是「不是 404」的观测，必须重置。
-  test("#2011 a malformed status map between 404s resets the consecutive-owner-left evidence", async () => {
+  // 记录存在但这台会话的值形状畸形（`{}`，没有 type）——既不是 idle 也不是 busy，
+  // 同样是「不是 404」的观测，必须重置（codex 4352468402）。
+  test("#2011 a typeless per-session state between 404s resets the consecutive-owner-left evidence", async () => {
     const { f, runtime } = await open({
       FAKE_SESSION_LOOKUP_MISSING: "1",
-      FAKE_STATUS_MALFORMED_POLL: "2",
-      FAKE_STATUS_SLOW_POLL: "2",
-      FAKE_STATUS_SLOW_MS: "2200",
+      FAKE_STATUS_TYPELESS_POLL: "3",
+      FAKE_STATUS_SLOW_POLLS: "2,5",
+      FAKE_STATUS_SLOW_MS: "1300",
     });
     try {
       let thrown: any;
       try {
-        await runtime.submit("interrupted by a malformed status map", 3_500, "通信龙", undefined, { taskId: "2011b" });
+        await runtime.submit("interrupted by a typeless record", 3_200, "通信龙", undefined, { taskId: "2011c" });
+      } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.code).not.toBe("opencode_copresence_owner_left");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 30_000);
+
+  // 畸形 status（数组而不是 map）同样是「不是 404」的观测，必须重置。
+  test("#2011 a malformed status map between 404s resets the consecutive-owner-left evidence", async () => {
+    const { f, runtime } = await open({
+      FAKE_SESSION_LOOKUP_MISSING: "1",
+      FAKE_STATUS_MALFORMED_POLL: "3",
+      FAKE_STATUS_SLOW_POLLS: "2,5",
+      FAKE_STATUS_SLOW_MS: "1300",
+    });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("interrupted by a malformed status map", 3_200, "通信龙", undefined, { taskId: "2011b" });
       } catch (error) { thrown = error; }
       expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
       expect(thrown.phase).toBe("admission");
