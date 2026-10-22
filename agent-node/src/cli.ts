@@ -7245,6 +7245,9 @@ async function processConfigUpdate(): Promise<void> {
     const localMode = computeConfigApplyMode(update.patch, {
       runtime: fileConfig?.runtime,
       opencodeGeneration: fileConfig?.opencodeGeneration,
+      requestedMode: update.apply_mode,
+      hotModelSwitchAvailable: opencodeCopresenceSession?.isRunning === true
+        && typeof opencodeCopresenceSession.setSelectedModel === "function",
     });
     if (localMode !== update.apply_mode) {
       warn(`[config-apply] mode mismatch hub=${update.apply_mode} local=${localMode}; trusting local for safety`);
