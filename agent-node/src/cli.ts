@@ -12,6 +12,7 @@
  */
 
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
+import { createNodeSessionControlBridge } from "./runtime/session-control-bridge.js";
 import {
   bundledCodexVersion,
   createCodex,
@@ -2557,6 +2558,20 @@ if (RUNTIME === "opencode") {
 }
 let opencodeCopresenceSession:
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
+const sessionControlBridge = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+  && opencodeMode === "copresence" && AUTH_TOKEN.startsWith("ntok_")
+  ? createNodeSessionControlBridge({
+    session: () => opencodeCopresenceSession,
+    warn: message => warn(message),
+    post: async (path, body) => {
+      const response = await fetch(`${COMMHUB_URL.replace(/\/+$/, "")}${path}`, {
+        method: "POST", headers: { Authorization: `Bearer ${AUTH_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(body), signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) throw new Error("session control transport unavailable");
+      return response.json();
+    },
+  }) : null;
 const OPENCODE_MODEL_POLL_MS = 30_000;
 let opencodeModelPollInFlight = false;
 async function pollOpencodeSessionModel(): Promise<void> {
@@ -4347,6 +4362,7 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       throw new Error("OpenCode copresence server exited while opening");
     }
     opencodeCopresenceSession = opened;
+    void sessionControlBridge?.register();
     if (OPENCODE_GENERATION === "v2") void pollOpencodeSessionModel();
     if (borrowed && process.env.ANET_BORROWED_V1_LAUNCH_ID) {
       const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
@@ -7595,6 +7611,9 @@ async function connectSSE() {
             // restart doorbell is the lifecycle ops shortcut (no config
             // write, just drain + exit 75). Errors logged but never
             // propagated up — supervisor stays connected.
+            if (ev.type === "session_control") {
+              void sessionControlBridge?.trigger();
+            }
             if (ev.type === "config_update") {
               log(`← SSE config_update ${ev.update_id || ""}`);
               processConfigUpdate().catch((e: any) =>
@@ -8220,6 +8239,11 @@ setInterval(() => {
 }, STATUS_HEARTBEAT_MS);
 if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeMode === "copresence") {
   setInterval(() => { void pollOpencodeSessionModel(); }, OPENCODE_MODEL_POLL_MS).unref();
+  if (sessionControlBridge) {
+    const refreshSessionControl = () => { void sessionControlBridge.register().then(ok => { if (ok) void sessionControlBridge.trigger(); }); };
+    refreshSessionControl();
+    setInterval(refreshSessionControl, 30_000).unref();
+  }
 }
 
 // RFC-027 §2.5 / §4.4 D7 — 30d backup sweeper, host_supervisor only.

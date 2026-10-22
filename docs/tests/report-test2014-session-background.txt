@@ -1,0 +1,49 @@
+#2014 / #2016 semantic Ctrl+B runtime and Bridge first slice
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+
+Delivered source
+- V2 copresence exposes backgroundControl on the existing session handle.
+- Read actual /openapi.json, exact session id and directory, and /api/session/active.
+- Only POST /api/session/<bound session>/background; never terminal keys, shell,
+  prompt replay, abort, session recreation, process restart or server ownership.
+- Per-handle binding_id plus timestamped intent IDs reject stale generations and
+  expired requests. Repeat/unknown receipt does not resend an upstream mutation.
+- Upstream 204 => request_processed, not proof any tool moved to the background.
+  Idle is already_idle, not a successful background transition.
+- CLI: bound ntok, V2 copresence only, independent session_control SSE lane,
+  authoritative REST pull/ACK, singleflight drain and 30s binding refresh.
+  This does not wait for a model turn or change its timeout budget.
+
+Necessary targeted verification
+Command (from repo root):
+  sg docker -c 'docker build -f tests/test2014-session-background/Dockerfile \
+    -t anet-test2014-session-background . && \
+    docker run --rm --network none anet-test2014-session-background'
+
+Final result, Bun1.3.14, non-root USER bun, network none:
+  20 pass / 0 fail / 49 expect() calls / 3 files
+  - session-background.test.ts: 13 tests (normal, no-op, unsupported, exact
+    session/directory/handle, malformed/closed, unknown ACK dedup, expired intent,
+    dispatch deadline expiring during the preflight reads without a write)
+  - session-background-http.test.ts: 1 real loopback HTTP fixture, Basic auth,
+    only bound-session write, active peer untouched, no replay on repeat.
+  - session-control-bridge.test.ts: 6 tests (independent singleflight lane,
+    stale/foreign/expired/invalid operations rejected, lost ACK not replayed).
+  V2 core syntax/dependency-graph bundle: PASS (packages external)
+  CLI syntax/dependency-graph bundle: PASS (packages external)
+  These bundles are not release packages or a TypeScript typecheck.
+
+Local final log: /tmp/opencode/2014-session-control-deadline.log
+Earlier runs were development increments on this same small slice, not a full
+matrix. One intermediate Bun bare-filename filter discovered both copied paths;
+its 26 executions were 13 unique tests, not 26 distinct cases. Docker CMD now uses
+three explicit ./src paths; the final denominator above is not doubled.
+
+Remaining delivery gates (not claimed complete)
+- Hub authorized relay is independent #2017; endpoint/ACK contract below must land.
+- Client status/button and human current-network authorization acceptance pending.
+- Real installed OpenCode/runtime versions and exact native session behavior have
+  not been accepted on a production node; this suite uses HTTP/model-free fixtures.
+- Required CI, main merge, paired release and authorized node activation separate.
+- No full suite, performance, compatibility or unrelated Docker sweep was run.
+- No production config, credentials, identities, databases or live sessions changed.
