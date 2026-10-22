@@ -11,4 +11,4 @@ trap 'safe_rm_rf "$fixture"' EXIT
 unset DATABASE_URL COMMHUB_TEST_PG_URL
 export HOME="$fixture" COMMHUB_DB="$fixture/hub.db" COMMHUB_DEV_OPEN=1 COMMHUB_AUTH_TOKEN=legacy-test-only
 cd /work/server
-bun test src/node-session-control-http.test.ts
+bun test "$@" src/node-session-control-http.test.ts

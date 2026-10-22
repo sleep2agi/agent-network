@@ -146,7 +146,39 @@ export function createNodeSessionControlRelay() {
       if (req.method !== "POST") return fail("session_control_request_invalid", 405);
       const v = await body(req);
       if (!v) return fail("session_control_request_invalid", 400);
-      const now = Date.now(); sweep(now);
+      const now = Date.now();
+      if (suffix === "/bridge") {
+        if (isHuman || !raw.startsWith("ntok_")) return fail("session_control_unavailable", 403);
+        if (!keys(v, ["session_id", "binding_id", "expected"]) || !id(v.session_id) || !id(v.binding_id)
+          || !object(v.expected) || !keys(v.expected, ["node_id", "network_id"])
+          || !id(v.expected.node_id) || !id(v.expected.network_id)) return fail("session_control_request_invalid", 400);
+        // Body reading is complete. This synchronous section rechecks authority
+        // and expected identity BEFORE sweep, retirement, or registration writes.
+        // expected is an assertion, never a source for binding or proof fields.
+        const c = credential(tokenId), n = bound(tokenId);
+        if (!c || !n) return fail("session_control_unavailable", 403);
+        if (c.bound_node_id !== n.node_id || c.network_id !== n.network_id
+          || v.expected.node_id !== c.bound_node_id || v.expected.network_id !== c.network_id) {
+          return fail("session_control_changed");
+        }
+        const registration = { session_id: v.session_id, binding_id: v.binding_id };
+        const k = key(n), b = bridges.get(k), g = generation(tokenId, registration);
+        if (b?.retired.has(g)) return fail("session_control_changed");
+        const replacing = b && (b.tokenId !== tokenId || !same(b, registration));
+        if ((replacing && b.retired.size >= HISTORY) || (!b && bridges.size >= CAP)) {
+          return fail("session_control_request_limit", 429);
+        }
+        sweep(now);
+        if (replacing) {
+          b.retired.add(generation(b.tokenId, b));
+          for (const e of entries.values()) if (e.nodeId === n.node_id && e.networkId === n.network_id
+            && (e.status === "pending" || e.status === "in_progress")) close(e, "session_control_changed");
+        }
+        bridges.set(k, { ...registration, tokenId, expires: now + LEASE, retired: b?.retired ?? new Set() });
+        return ok({ expires_at: now + LEASE,
+          identity: { node_id: c.bound_node_id, network_id: c.network_id, token_id: c.token_id } });
+      }
+      sweep(now);
       if (!suffix) {
         if (!isHuman) return fail("session_control_unavailable", 403);
         if (!keys(v, ["network_id", "node_id", "operation", "expected"]) || !id(v.network_id) || !id(v.node_id)
@@ -174,20 +206,6 @@ export function createNodeSessionControlRelay() {
       const n = bound(tokenId);
       if (!n) return fail("session_control_unavailable", 403);
       const k = key(n), b = bridges.get(k);
-      if (suffix === "/bridge") {
-        if (!identity(v)) return fail("session_control_request_invalid", 400);
-        const g = generation(tokenId, v);
-        if (b?.retired.has(g)) return fail("session_control_changed");
-        if (b && (b.tokenId !== tokenId || !same(b, v))) {
-          if (b.retired.size >= HISTORY) return fail("session_control_request_limit", 429);
-          b.retired.add(generation(b.tokenId, b));
-          for (const e of entries.values()) if (e.nodeId === n.node_id && e.networkId === n.network_id
-            && (e.status === "pending" || e.status === "in_progress")) close(e, "session_control_changed");
-        }
-        if (!b && bridges.size >= CAP) return fail("session_control_request_limit", 429);
-        bridges.set(k, { ...v, tokenId, expires: now + LEASE, retired: b?.retired ?? new Set() });
-        return ok({ expires_at: now + LEASE });
-      }
       if (!b || b.expires <= now || b.tokenId !== tokenId) return fail("session_control_changed");
       if (suffix === "/pull") {
         if (!identity(v)) return fail("session_control_request_invalid", 400);

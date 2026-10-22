@@ -16,7 +16,8 @@ async function api(token: string, path: string, value?: unknown, method?: string
     ...(value === undefined ? {} : { body: JSON.stringify(value) }) });
   return { status: res.status, body: await res.json() as any };
 }
-const registerBridge = (v = binding, token = ntok.token!) => api(token, `${root}/bridge`, v);
+const registerBridge = (v = binding, token = ntok.token!) => api(token, `${root}/bridge`,
+  { ...v, expected: { node_id: nodeId, network_id: net } });
 const enqueue = (operation = "background", extra = {}) => api(owner.token!, root,
   { network_id: net, node_id: nodeId, operation, expected: binding, ...extra });
 const pull = (token = ntok.token!, v = binding) => api(token, `${root}/pull`, v);
@@ -52,6 +53,43 @@ afterEach(() => setSystemTime());
 afterAll(() => { server?.stop(true); rmSync(dir, { recursive: true, force: true }); });
 
 describe("#2017 human-to-exact-Bridge HTTP relay", () => {
+  test("[2017 identity] missing or malformed expected is refused without fallback", async () => {
+    for (const expected of [undefined, {}, { node_id: nodeId }, { node_id: nodeId, network_id: net, token_id: ntok.token_id }]) {
+      const rejected = await api(ntok.token!, `${root}/bridge`, { ...binding, expected });
+      expect(rejected.status).toBe(400);
+      expect(rejected.body.error).toBe("session_control_request_invalid");
+    }
+    expect((await registerBridge()).status).toBe(200);
+  });
+  test("[2017 identity] A credential expected B cannot sweep, replace or retire the valid binding", async () => {
+    const made = await enqueue("state"), clock = Date.now();
+    const tokenBefore = db.get("SELECT token_id,bound_node_id,network_id FROM api_tokens WHERE token_id=?1", ntok.token_id);
+    const nodeBefore = db.get("SELECT node_id,network_id,owner_user_id FROM nodes WHERE node_id=?1", nodeId);
+    // Advancing beyond the request deadline exposes an accidental sweep before
+    // rejecting expected. Restore only the clock, never the authoritative queue.
+    setSystemTime(new Date(clock + 16_000));
+    for (const expected of [{ node_id: peerId, network_id: net }, { node_id: nodeId, network_id: otherNet }]) {
+      const rejected = await api(ntok.token!, `${root}/bridge`, {
+        session_id: "would_replace_session", binding_id: "would_retire_binding", expected,
+      });
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.error).toBe("session_control_changed");
+    }
+    setSystemTime(new Date(clock));
+    expect((await read(made.body.request_id)).body.status).toBe("pending");
+    expect((await registerBridge()).status).toBe(200); // Original generation was not retired.
+    expect((await pull()).body.request).toMatchObject({ request_id: made.body.request_id, ...binding });
+    expect(db.get("SELECT token_id,bound_node_id,network_id FROM api_tokens WHERE token_id=?1", ntok.token_id)).toEqual(tokenBefore);
+    expect(db.get("SELECT node_id,network_id,owner_user_id FROM nodes WHERE node_id=?1", nodeId)).toEqual(nodeBefore);
+  });
+  test("[2017 identity] success carries the authenticated token row identity, never credential material", async () => {
+    const response = await registerBridge();
+    const row = db.get("SELECT token_id,bound_node_id,network_id FROM api_tokens WHERE token_id=?1", ntok.token_id);
+    expect(response.status).toBe(200);
+    expect(response.body.identity).toEqual({ node_id: row.bound_node_id, network_id: row.network_id, token_id: row.token_id });
+    expect(Object.keys(response.body).sort()).toEqual(["expires_at", "identity", "ok"]);
+    expect(JSON.stringify(response.body)).not.toContain(ntok.token);
+  });
   test("normal state and background receipts are separate from actual tool completion", async () => {
     const s = await enqueue("state");
     expect(s.body).toMatchObject({ ok: true, status: "pending" });

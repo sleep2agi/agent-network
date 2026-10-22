@@ -14,7 +14,7 @@ cannot substitute for a human. Reads recheck the caller's current permission.
 | --- | --- |
 | Human `POST /api/node-session-control` | `{network_id,node_id,operation:"state"|"background",expected?:{session_id,binding_id}}`; background requires expected. Returns `{ok:true,request_id,status:"pending",expires_at}`. |
 | Human `GET /api/node-session-control/:request_id?network_id=…` | `{ok:true,request_id,status,result?,error?}`; status is pending/in_progress/done/failed/unknown/expired. |
-| Node `POST /api/node-session-control/bridge` | `{session_id,binding_id}`; returns `{ok:true,expires_at}`. Register at connection and every 30s. Lease is 75s. |
+| Node `POST /api/node-session-control/bridge` | `{session_id,binding_id,expected:{node_id,network_id}}`; returns `{ok:true,expires_at,identity:{node_id,network_id,token_id}}`. Register at connection and every 30s. Lease is 75s. |
 | Node `POST /api/node-session-control/pull` | `{session_id,binding_id}`; returns `{ok:true,request:null|{request_id,operation,session_id,binding_id,expires_at}}`. |
 | Node `POST /api/node-session-control/:request_id/ack` | `{session_id,binding_id,status:"done"|"failed",result?,error?}`; returns `{ok:true,request_id,status}`. |
 
@@ -31,6 +31,22 @@ are remembered for this Hub process and cannot register back over a newer one.
 Pending requests are failed on generation change; claimed requests become unknown.
 Valid credentials alone cannot prove the actual runtime handle: the consumer must
 also compare session/binding immediately before executing the fixed operation.
+
+Registration requires `expected` from the Bridge's frozen startup node/network.
+After reading the body, the Hub synchronously rechecks the actual credential row
+and compares both fields **before** sweep, retirement or registration. Mismatch
+is `409 session_control_changed`; absent/malformed expected is
+`400 session_control_request_invalid`. No token or node binding is created or
+changed. The successful identity triple comes from the authenticated token row,
+not a copy of expected. `token_id` is an identifier, never a bearer token or hash.
+
+An old Bridge omitting expected is refused. A new Bridge talking to an old Hub
+must refuse missing/mismatched identity proof; it must not retry without expected.
+The consumer pins startup node/network/Hub/credential and the returned token ID;
+token hot-swap disables only its control lane. Runtime/CLI implement the matching
+epoch/permit check after preflight and immediately before the semantic write in
+their separate PR. This Hub assertion is not a substitute for that local gate.
+Human create/read and node pull/ACK fields remain unchanged.
 
 `state` success carries exactly
 `{session_id,binding_id,supported,active,can_request_background,observed_at}`.
