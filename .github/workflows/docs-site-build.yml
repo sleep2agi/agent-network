@@ -57,7 +57,8 @@ jobs:
     # 这个 name 是分支保护里 required check 唯一能写的标识符,必须全仓唯一。
     name: docs-site-build
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # 12 分钟实测余量不足:#2053 的 job 在 769s 被取消,而同期成功耗时最长的已到 698s。
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
