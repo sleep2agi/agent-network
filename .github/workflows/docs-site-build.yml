@@ -41,6 +41,9 @@ on:
   pull_request:
   push:
     branches: [main]
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/docs-site-build.yml'
 
 jobs:
   download-platforms:

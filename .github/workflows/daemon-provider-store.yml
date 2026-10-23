@@ -9,6 +9,12 @@ on:
       - '.github/workflows/daemon-provider-store.yml'
   push:
     branches: [main]
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/src/**'
+      - 'server/**'
+      - 'tests/test906-daemon-provider-management/**'
+      - '.github/workflows/daemon-provider-store.yml'
 permissions:
   contents: read
 jobs:
