@@ -218,11 +218,14 @@ export function updateDepartment(networkId: string, id: string, body: Record<str
 }
 
 /** 只删空部门:有子部门 / 有成员 → 409(带数字,界面照着说)。 */
-export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: string }> | (Fail & { children?: number; members?: number }) {
+export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: string }> | (Fail & { children?: number; members?: number; agents?: number }) {
   if (!one(networkId, id)) return fail(404, "department_not_found");
   const children = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_departments WHERE network_id = ?1 AND parent_id = ?2", networkId, id)?.n ?? 0;
   const members = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_members WHERE network_id = ?1 AND department_id = ?2", networkId, id)?.n ?? 0;
-  if (children || members) return { ...fail(409, "department_not_empty"), children, members };
+  // #1894 —— Agent 的部门归属是 nodes.department_id（显式归属线）。以前只数人类成员，
+  // 于是「部门里还有 300 个 Agent」也能被删掉，留下指向不存在部门的悬空归属。
+  const agents = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM nodes WHERE network_id = ?1 AND department_id = ?2", networkId, id)?.n ?? 0;
+  if (children || members || agents) return { ...fail(409, "department_not_empty"), children, members, agents };
   // RFC-040:部门的项目授权(network_department_project_grants)和部门同一事务删掉。
   groupTx(() => {
     db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [networkId, id]);
