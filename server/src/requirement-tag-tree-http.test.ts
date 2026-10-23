@@ -171,10 +171,10 @@ describe("建根标签与子标签", () => {
     expect(before.map((r: any) => r.name)).not.toContain("有颜色的");
   });
 
-  test("父不存在 404 parent_not_found —— 不会静默建到根上", async () => {
+  test("父不存在 404 tag_parent_not_found —— 不会静默建到根上", async () => {
     const r = await create(admin.token, { name: "孤儿", parent_id: "不存在的父" });
     expect(r.status).toBe(404);
-    expect(r.body.error).toBe("parent_not_found");
+    expect(r.body.error).toBe("tag_parent_not_found");
     expect(nodeRows().some((row: any) => row.name === "孤儿")).toBe(false);
   });
 
@@ -194,7 +194,7 @@ describe("建根标签与子标签", () => {
     expect((await create(admin.token, { name: "换\n行" })).body.error).toBe("invalid_tag");
     const bad = await create(admin.token, { name: "正常", parent_id: 42 });
     expect(bad.status).toBe(400);
-    expect(bad.body.error).toBe("invalid_parent_id");
+    expect(bad.body.error).toBe("invalid_tag_parent_id");
     expect((await create(admin.token, {})).body.error).toBe("invalid_tag");
   });
 

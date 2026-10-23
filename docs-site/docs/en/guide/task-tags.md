@@ -81,7 +81,7 @@ Omit `parent_id` or send `null` to create at the root; a name must already exist
 - An existing tag (a registered node, used by any card, or carrying a color) returns 409 `tag_exists`; the existing tag is never silently reused.
 - A missing parent returns 404 `parent_not_found`; the child is **never** silently created at the root.
 - At most 4 levels including the root; deeper returns 400 `tag_depth_exceeded`.
-- Name rules are the same as above; an invalid name returns 400 `invalid_tag`, a non-string or invalid `parent_id` returns 400 `invalid_parent_id`.
+- Name rules are the same as above; an invalid name returns 400 `invalid_tag`, a non-string or invalid `parent_id` returns 400 `invalid_tag_parent_id`.
 - When the parent only existed on cards (legacy data with no node row) it is registered as a root node in the same transaction and the response has `parent_registered: true`; the child still hangs under it and is not demoted to the root.
 - Node rows and the audit entry are written in one transaction; a failure leaves nothing behind.
 

@@ -79,9 +79,9 @@ Hub 在 `capabilities` 里带 `tag_tree` 时，可以新建标签，并把标签
 
 - 成功返回 201 `{"ok":true,"tag":{"name","parent_id","depth"},"parent_registered":false}`，`depth` 从 1 开始。
 - 已经存在（登记过的节点、任何卡片在用的、或有颜色行的）返回 409 `tag_exists`，不会「复用」已有标签。
-- 父不存在返回 404 `parent_not_found`，**不会**把子标签静默建到根上。
+- 父不存在返回 404 `tag_parent_not_found`，**不会**把子标签静默建到根上。
 - 最多 4 层（含根），超了返回 400 `tag_depth_exceeded`。
-- 名字规则同上，不合法返回 400 `invalid_tag`；`parent_id` 不是字符串或不是合法标签名返回 400 `invalid_parent_id`。
+- 名字规则同上，不合法返回 400 `invalid_tag`；`parent_id` 不是字符串或不是合法标签名返回 400 `invalid_tag_parent_id`。
 - 父标签此前只出现在卡片上（老数据，没有节点行）时，会在同一事务里把它登记成顶层节点，响应里 `parent_registered: true`；子标签仍然挂在它下面，不是被降级到根。
 - 节点、审计在同一个事务里；失败一条都不留。
 

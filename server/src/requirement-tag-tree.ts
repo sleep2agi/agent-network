@@ -35,9 +35,9 @@ export function parseCreateTag(body: Record<string, unknown>): CreateTagInput | 
   if (!name) return { error: "invalid_tag" };
   const rawParent = body.parent_id;
   if (rawParent === undefined || rawParent === null) return { name, parent: null };
-  if (typeof rawParent !== "string") return { error: "invalid_parent_id" };
+  if (typeof rawParent !== "string") return { error: "invalid_tag_parent_id" };
   const parent = tagName(rawParent);
-  if (!parent) return { error: "invalid_parent_id" };
+  if (!parent) return { error: "invalid_tag_parent_id" };
   if (parent === name) return { error: "tag_parent_cycle" };
   return { name, parent };
 }

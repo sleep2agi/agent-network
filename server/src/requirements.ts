@@ -575,7 +575,7 @@ function networkTagNames(networkId: string): Set<string> {
 }
 
 type CreateTagOutcome =
-  | { error: "tag_exists" | "parent_not_found" | "tag_depth_exceeded" }
+  | { error: "tag_exists" | "tag_parent_not_found" | "tag_depth_exceeded" }
   | { name: string; parent: string | null; depth: number; parentRegistered: boolean };
 
 /** POST /api/requirements/tags/create —— 建标签(可带父)。原子、整网络判重、父不存在就报错。 */
@@ -601,7 +601,7 @@ async function handleTagCreate(ctx: RequirementsRequestContext): Promise<Respons
     let parentRegistered = false;
     if (input.parent) {
       // 父不存在 = 404。**不**把子标签建到根上:客户端预选了父,存成根会让回读的层级和表单不一致。
-      if (!exists(input.parent)) return { error: "parent_not_found" };
+      if (!exists(input.parent)) return { error: "tag_parent_not_found" };
       if (!parentOf.has(input.parent)) {
         // 父此前只在卡片上出现过(老数据):登记成顶层节点。父本来就没有父,这不是把子标签降级到根。
         db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, input.parent, now, actor]);
@@ -615,7 +615,7 @@ async function handleTagCreate(ctx: RequirementsRequestContext): Promise<Respons
     return { name: input.name, parent: input.parent, depth: tagDepth(input.name, parentOf), parentRegistered };
   });
   if ("error" in result) {
-    const status = result.error === "tag_exists" ? 409 : result.error === "parent_not_found" ? 404 : 400;
+    const status = result.error === "tag_exists" ? 409 : result.error === "tag_parent_not_found" ? 404 : 400;
     return jsonError(result.error, status);
   }
   if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_tag_create", "requirement_tag", result.name, JSON.stringify({ parent_id: result.parent, depth: result.depth }).slice(0, 1000), undefined, networkId);

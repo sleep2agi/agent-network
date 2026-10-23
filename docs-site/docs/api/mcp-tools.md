@@ -987,7 +987,7 @@ send_task({
 | GET | `/api/requirements/projects` | 项目列表（建 / 改 / 删项目只有人） |
 | GET | `/api/requirements/tags` | 当前网络里出现过的标签（去重、排序，含归档任务上的）。节点令牌可以读。有 `tag_ops` 能力的 Hub 另带 `counts` / `colors` / `can_manage`；有 `tag_tree` 能力的 Hub 另带 `nodes`（标签树，含 0 任务的标签，见 [任务标签](/guide/task-tags#创建标签与父子层级)） |
 | POST | `/api/requirements/tags/ops` | 标签整网改名 / 合并 / 删除 / 设颜色（只有人，scoped 成员 403），见 [任务标签](/guide/task-tags#管理标签) |
-| POST | `/api/requirements/tags/create` | 新建标签（可带 `parent_id`，最多 4 层）；重名 409 `tag_exists`、父不存在 404 `parent_not_found`（不静默建到根），见 [任务标签](/guide/task-tags#创建标签与父子层级) |
+| POST | `/api/requirements/tags/create` | 新建标签（可带 `parent_id`，最多 4 层）；重名 409 `tag_exists`、父不存在 404 `tag_parent_not_found`（不静默建到根），见 [任务标签](/guide/task-tags#创建标签与父子层级) |
 
 **同步示例（把 GitHub issue 同步成任务）**：对每个 issue 调一次 `requirements_upsert_by_external_ref`，`external_ref` 用 `github:<owner>/<repo>#<number>`、`external_url` 用 issue 链接；重复同步只会更新同一条，不会重复建。增量同步用 `requirements_list` 的 `updated_since`。
 
