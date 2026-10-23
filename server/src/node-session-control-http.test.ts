@@ -8,6 +8,7 @@ process.env.COMMHUB_DB ||= join(dir, "hub.db");
 const root = "/api/node-session-control";
 let server: any, base: string, db: any, net: string, otherNet: string;
 let owner: any, admin: any, member: any, outsider: any, ntok: any, peer: any;
+let legacyOwner: any, legacyAdmin: any, legacyMember: any, legacyOutsider: any, legacyFull: any, legacyNetwork: any;
 let binding = { session_id: "session_1", binding_id: "binding_1" }, serial = 0;
 const nodeId = "n_session_control", peerId = "n_session_control_peer";
 async function api(token: string, path: string, value?: unknown, method?: string) {
@@ -28,7 +29,7 @@ const ack = (request: string, result: unknown, extra = {}) => api(ntok.token!, `
 
 beforeAll(async () => {
   ({ db } = await import("./db.js"));
-  const { register, addNetworkMember, createNetworkTokenForNode } = await import("./auth.js");
+  const { register, addNetworkMember, createNetworkTokenForNode, createToken } = await import("./auth.js");
   const stamp = Date.now();
   admin = register(`sc_admin_${stamp}`, "SessionControl-Test-1!");
   owner = register(`sc_owner_${stamp}`, "SessionControl-Test-2!");
@@ -37,6 +38,20 @@ beforeAll(async () => {
   expect(admin.ok && owner.ok && member.ok && outsider.ok).toBe(true);
   net = admin.network_id!; otherNet = outsider.network_id!;
   for (const u of [owner, member]) expect(addNetworkMember(net, u.user.user_id, "member", admin.user.user_id, { agentAccess: "all" }).ok).toBe(true);
+  // Real atok hashes via the legacy issuer; only fixture rows are converted
+  // to the historical global scope=user shape. No prefix-based authority.
+  const legacyUser = (u: any) => {
+    const t = createToken(u.user.user_id, "sc-legacy-user");
+    expect(t.ok).toBe(true);
+    expect(t.token).toMatch(/^atok_/);
+    db.run("UPDATE api_tokens SET scope='user' WHERE token_id=?1", t.token_id);
+    return t;
+  };
+  legacyOwner = legacyUser(owner); legacyAdmin = legacyUser(admin);
+  legacyMember = legacyUser(member); legacyOutsider = legacyUser(outsider);
+  legacyFull = createToken(owner.user.user_id, "sc-legacy-global-full");
+  legacyNetwork = createToken(owner.user.user_id, "sc-legacy-network", net);
+  expect(legacyFull.ok && legacyNetwork.ok).toBe(true);
   ntok = createNetworkTokenForNode(owner.user.user_id, net, "sc-target", nodeId);
   peer = createNetworkTokenForNode(owner.user.user_id, net, "sc-peer", peerId);
   expect(ntok.ok && peer.ok).toBe(true);
@@ -105,6 +120,61 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
     const result = { outcome: "request_processed", state: state() };
     expect((await ack(b.body.request_id, result)).body.status).toBe("done");
     expect((await read(b.body.request_id)).body).toMatchObject({ ok: true, status: "done", result });
+  });
+  test("[2017 review] already_idle cannot confirm an active or background-capable state", async () => {
+    for (const flags of [
+      { active: true, can_request_background: true },
+      { active: true, can_request_background: false },
+      { active: false, can_request_background: true },
+    ]) {
+      const made = await enqueue(); await pull();
+      const reply = await ack(made.body.request_id, { outcome: "already_idle", state: { ...state(), ...flags } });
+      expect(reply.status).toBe(400);
+      expect(reply.body.error).toBe("session_control_invalid_response");
+      expect((await read(made.body.request_id)).body).toMatchObject({ status: "unknown", error: "session_control_invalid_response" });
+    }
+  });
+  test("[2017 review] legacy user atok owner/admin and global full can create and read control", async () => {
+    for (const t of [legacyOwner, legacyAdmin, legacyFull]) {
+      for (const operation of ["state", "background"]) {
+        const made = await api(t.token, root, { network_id: net, node_id: nodeId, operation, expected: binding });
+        expect(made.status).toBe(200);
+        expect((await read(made.body.request_id, t.token)).body.status).toBe("pending");
+        expect((await pull()).body.request.request_id).toBe(made.body.request_id);
+        const result = operation === "state" ? state() : { outcome: "request_processed", state: state() };
+        expect((await ack(made.body.request_id, result)).body.status).toBe("done");
+        expect((await read(made.body.request_id, t.token)).body.result).toEqual(result);
+      }
+    }
+  });
+  test("[2017 review] legacy atok still requires current target ownership and exact network", async () => {
+    for (const t of [legacyMember, legacyOutsider]) {
+      expect((await api(t.token, root, { network_id: net, node_id: nodeId, operation: "state" })).status).toBe(403);
+    }
+    expect((await api(legacyOwner.token, root, { network_id: otherNet, node_id: nodeId, operation: "state" })).status).toBe(403);
+    const made = await enqueue("state");
+    for (const t of [legacyMember, legacyOutsider]) expect((await read(made.body.request_id, t.token)).status).toBe(403);
+    expect((await read(made.body.request_id, legacyOwner.token, otherNet)).status).toBe(403);
+  });
+  test("[2017 review] legacy atok user and unbound network credentials cannot impersonate Bridge", async () => {
+    const made = await enqueue("state");
+    for (const t of [legacyOwner, legacyAdmin, legacyFull, legacyNetwork]) {
+      expect((await registerBridge(binding, t.token)).status).toBe(403);
+      expect((await pull(t.token)).status).toBe(403);
+      expect((await api(t.token, `${root}/${made.body.request_id}/ack`, { ...binding, status: "done", result: state() })).status).toBe(403);
+    }
+    expect((await read(made.body.request_id)).body.status).toBe("pending");
+    expect((await pull()).body.request.request_id).toBe(made.body.request_id);
+  });
+  test("[2017 review] unknown, revoked, expired or unsupported-scope credentials stay refused", async () => {
+    const request = () => api(legacyOwner.token, root, { network_id: net, node_id: nodeId, operation: "state" });
+    expect((await api("atok_00000000000000000000000000000000", root, {})).status).toBe(401);
+    for (const patch of ["revoked_at=datetime('now')", "expires_at=datetime('now','-1 day')", "scope='unsupported'"]) {
+      db.run(`UPDATE api_tokens SET ${patch} WHERE token_id=?1`, legacyOwner.token_id);
+      try { expect((await request()).status).toBeGreaterThanOrEqual(400); }
+      finally { db.run("UPDATE api_tokens SET revoked_at=NULL,expires_at=NULL,scope='user' WHERE token_id=?1", legacyOwner.token_id); }
+    }
+    expect((await request()).status).toBe(200);
   });
   test("SSE is a scoped doorbell only; the request lives in pull", async () => {
     const abort = new AbortController();
