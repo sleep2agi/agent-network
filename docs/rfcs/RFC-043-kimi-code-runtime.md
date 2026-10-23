@@ -281,9 +281,52 @@ M4 合并前必须逐条有证据（日志/截图/测试名）：
 
 ---
 
+## 12. 共享 Server 形态（与 OpenCode V2 对齐）— admin 2026-10-23 追加
+
+### 12.1 能不能
+
+**能。** `kimi web` 就是一个本地 server，session 是服务端对象；同一台机器上完全可以一个 server 承载多个 ANet 节点（每个节点一个 session），与 OpenCode V2 的「一台机器复用一个 server」一致。官方还明确：同一 home 下可以跑多个实例（端口不顺延到 `+1`），token 按 home 共享。
+
+### 12.2 共享 server 会把三样东西摊平
+
+| 资源 | 粒度 | 共享后的后果 | 是否有解 |
+|---|---|---|---|
+| `config.toml`（默认模型 / 权限模式 / telemetry） | 按 **home** | 所有节点共享默认值 | ✅ 有解：`session/new` 返回 `configOptions[]`，`set_config_option` / `set_model` 可按 session 覆盖 |
+| `server.token` | 按 **home** | 所有客户端共用一个 Bearer | ✅ 可接受：只绑 loopback，节点身份由 Hub 侧校验，不靠这个 token |
+| `mcp.json`（MCP server 列表与凭据） | 按 **home** | **所有节点共用同一套 MCP 配置与凭据** | ⚠️ 待验证（见 12.3） |
+
+第三行是唯一的硬点：我们给每个节点注入的 CommHub MCP 是**按节点 token** 的，如果 `mcp.json` 是 home 级共享，节点身份就被摊平了。
+
+### 12.3 M0 必须验证的第二件事
+
+REST `POST /api/v1/sessions` 是否接受 **per-session mcpServers**：
+
+- **ACP 明确支持**（`session/new` 的 `mcpServers`）；
+- **REST 文档只列了** `workspace_id` / `metadata` / `default_workspace` / `title` / `agent_config`，没有 `mcpServers` 字段；
+- 但 `metadata` 是自由对象，且存在 `/api/v2/mcp` 服务端管理面 —— 需要实测能不能在 `metadata` 里带、或有没有别的 per-session 通道。
+
+| 探针结果 | 共享 server 方案 | 代价 |
+|---|---|---|
+| REST 支持 per-session MCP | ✅ 直接共享 server，节点各自注入 MCP | 无 |
+| REST 不支持 | 两选一：<br>① 共享 server + 节点共用一套 MCP 身份（同机节点视为同一身份，审计粒度变粗）<br>② 退回 **每节点一个 server**（独立 home，MCP 各管各的） | ① 0 天但要 admin 认可身份摊平<br>② +2–3 天（生命周期、端口、血崩隔离） |
+
+### 12.4 共享 server 的工程要点（不论 MCP 结论如何都要做）
+
+1. **发现与复用**：先探本机是否已有可用的 `kimi web`（读 `~/.kimi-code/server/instances/`），命中则复用，不重复起；
+2. **版本一致性**：server 二进制版本必须与 runtime 适配器 pin 的版本一致，不一致时**拒绝复用**并给出明确报错（否则契约测试白做）；
+3. **健康检查与重连**：`GET /api/v1/healthz`；WS 断开后按 session id 重连并 `session/resume`，期间任务排队不丢失；
+4. **故障域**：共享 server 一挂，本机所有节点同时掉线 —— 需要 supervisor 自动重启 + 所有节点自动重连（这是共享形态的固有代价，OpenCode V2 也一样）；
+5. **禁用 `--dangerous-bypass-auth`**：那等于关掉全部鉴权，任何能连到端口的人都能拿到会话与 shell。
+
+### 12.5 工时影响
+
+共享 server **不增加**总工时（省掉每节点的进程生命周期，增加发现/复用/重连/监理），仍按 **17–23 人日** 计。唯一的分叉在 12.3：若必须保留 per-node MCP 身份且 REST 不支持，则要么接受身份摊平（0 天），要么退回每节点 server（+2–3 天）。
+
+---
+
 ## 11. 我建议的执行顺序
 
-1. **本周**：M0 两天探针（只要一个 key），产出实测结论 → 把本 RFC 的工时从「文档估算」升级成「实测估算」；
+1. **本周**：M0 两天探针（只要一个 key），产出实测结论（含 §7.3 的 TUI 形态与 §12.3 的 per-session MCP）→ 把本 RFC 的工时从「文档估算」升级成「实测估算」；
 2. 探针通过 → M1 起骨架（此时才动代码，且只新增文件，不碰现有 runtime）；**M1 就按「session 属于 daemon、人类是另一个客户端」设计**，避免共存阶段返工；
 3. 期间不阻塞任何在飞的 OpenCode V2 / 客户端工作。
 
