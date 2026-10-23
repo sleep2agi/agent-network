@@ -347,6 +347,30 @@ notes 写漏两节的 PR 会一路绿灯合进 main，直到你触发发版才�
 
 ⇒ 写 notes 时**照着上一版的文件抄形状**，别从空白开始。
 
+### Step 5.6：发完之后核**真实产物**，不是看 CI 文案
+
+`release-gate` 只证明"笔记形状 + 安装冒烟 + 版本钉"没问题，**不证明用户下载的字节里
+有你在 notes 里承诺的功能**。发布后跑这个（只读，不碰运行中的 hub 和数据库）：
+
+```bash
+scripts/verify-hub-release.sh                      # 用 preview dist-tag
+scripts/verify-hub-release.sh 0.9.0-preview.146    # 钉版本
+scripts/verify-hub-release.sh 0.9.0-preview.146 --tag latest
+```
+
+它做四件事：`dist-tags.<channel>` 是否等于该版本 → tarball 能否匿名下载并解压 →
+`package.json` 里的版本是否一致 → **按版本探测功能**（有 `since` 表，低版本自动 skip）。
+
+🔴 **两条 2026-10-23 踩出来的规矩**（脚本里都写死了）：
+
+1. **只钉行为，不钉实现位置**。那天我先断言"`assign_agent` 在 `departments.ts` 里"，
+   而分发其实在 `tools.ts` —— 包是好的，探针是错的；
+2. **不拿未发布的功能当验收条件**。同一天我把属于 PR2907 的 `avatar_storage_full`
+   当成了 `.145` 的必检项，而那一版本来就不含它 —— 于是"发布成功"被自己的脚本判成 FAIL。
+
+技能一句话：**探针错了和包坏了，输出长得一模一样**；所以探针要么盯"这个动作能不能
+被调到"，要么盯"这段行为在不在"，别盯文件名。
+
 ### Step 6：publish preview —— 走 GitHub Actions，**不在本机发**
 
 🔴 **本机不发包。** 这是 Vincent 2026-08-27 定的规则：发版一律走 GitHub Actions，
