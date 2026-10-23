@@ -49,3 +49,11 @@ export async function fetchOpenCodeJson(
   }
   return text ? JSON.parse(text) : null;
 }
+
+/** Control lane only: preserve caller cancellation alongside its own deadline. */
+export function fetchOpenCodeSessionControlJson(url: string, password: string, path: string, init: RequestInit = {}): Promise<any> {
+  const deadline = AbortSignal.timeout(5_000);
+  const signal = init.signal ? AbortSignal.any([deadline, init.signal]) : deadline;
+  // The generic helper deliberately owns its timeout unless timeoutMs <= 0.
+  return fetchOpenCodeJson(url, password, path, { ...init, redirect: "error", signal }, 0);
+}
