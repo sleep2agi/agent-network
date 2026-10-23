@@ -23,6 +23,11 @@ works against a Hub from this version on.
   multipart, so a flood of bodies cannot bypass the 60/hour gate.
 - **Lifecycle projection**: `copresence_adopt_v2` is now passed through as its
   own public code instead of degrading to `lifecycle_error` (#2902).
+- **Session control relay** (#2890 / #2017): `POST /api/node-session-control`
+  with `operation: state|background`, a short-TTL single enqueue, an `expected`
+  identity (`session_id` + `binding_id`) and a read-only receipt poll. This is
+  what the desktop client's 「读取状态 / 转到后台」 calls; it relays to the
+  original node through the Bridge token, never sends keys, commands or URLs.
 
 ## Verification
 
