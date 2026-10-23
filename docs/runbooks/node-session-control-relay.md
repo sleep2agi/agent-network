@@ -52,6 +52,28 @@ epoch/permit check after preflight and immediately before the semantic write in
 their separate PR. This Hub assertion is not a substitute for that local gate.
 Human create/read and node pull/ACK fields remain unchanged.
 
+## Refusals a client must tell apart
+
+Human requests can fail before any node work happens. Two 409s mean different
+things and need different copy:
+
+| Code | Meaning | What the user should do |
+| --- | --- | --- |
+| `session_control_bridge_missing` (409) | This node has **no live bridge**: never registered (runtime older than `agent-node 2.5.0-preview.155`, which is the first release that registers one), or its 75s lease expired (node stopped / restarted / lost the Hub) | upgrade the node runtime to ≥ `2.5.0-preview.155` and restart it, or check the node is running |
+| `session_control_unavailable` (409/401) | Not permitted, or no usable credential for this lane | fix the credential/permission; retrying the same call will not help |
+
+Also: `session_control_changed` means the node/session binding generation moved
+(re-read state; never replay), `session_control_request_expired` and
+`session_background_outcome_unknown` must not be retried, and
+`session_control_request_limit` (429) means another request for that node is still
+in flight. `GET /api/node-session-control/:id` keeps `unavailable` for an unknown
+or unauthorized request id, so a client cannot distinguish "never existed" from
+"not yours" — that is deliberate.
+
+`session_control_bridge_missing` was split out in `commhub-server 0.9.0-preview.149`
+(before that, "no bridge" reused `session_control_unavailable`, which made desktop
+clients say "refresh later" to a node that simply needed an upgrade).
+
 `state` success carries exactly
 `{session_id,binding_id,supported,active,can_request_background,observed_at}`.
 `background` success carries exactly
