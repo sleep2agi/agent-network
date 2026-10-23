@@ -198,7 +198,11 @@ export function createNodeSessionControlRelay() {
         const n = node(v.node_id);
         if (!n || n.network_id !== v.network_id || !human(tokenId, n)) return fail("session_control_unavailable", 403);
         const b = bridges.get(key(n));
-        if (!b || b.expires <= now || !bound(b.tokenId, n)) return fail("session_control_unavailable");
+        // A distinct code for "this node has no live bridge" (never registered, or
+        // its 75 s lease expired). #2014 needs it: the client can then say "upgrade
+        // the node / start it" instead of the generic "refresh later" it shows for
+        // `session_control_unavailable` (which also covers permission refusals).
+        if (!b || b.expires <= now || !bound(b.tokenId, n)) return fail("session_control_bridge_missing");
         if (v.expected && !same(v.expected as Identity, b)) return fail("session_control_changed");
         if (entries.size >= CAP || [...entries.values()].some(e => e.nodeId === n.node_id
           && e.networkId === n.network_id && (e.status === "pending" || e.status === "in_progress"))) {

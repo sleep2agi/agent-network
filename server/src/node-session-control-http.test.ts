@@ -297,7 +297,9 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
   test("lease expiry refuses new work and Hub restart loses IDs without replay", async () => {
     const made = await enqueue();
     setSystemTime(new Date(Date.now() + 76_000));
-    expect((await enqueue()).body.error).toBe("session_control_unavailable");
+    // #2014: no live bridge is its own code, so a client can tell "this node has no
+    // bridge (upgrade / start it)" from a permission refusal.
+    expect((await enqueue()).body.error).toBe("session_control_bridge_missing");
     setSystemTime();
     server.stop(true);
     const { bootServer } = await import("./server.js");
