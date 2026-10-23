@@ -703,6 +703,33 @@ grep -c '<你的串>' package/dist/src/daemon-capability-display.js
 两处，`sync-pinned-versions.sh` **都不覆盖**，必须手工改，且 `release-gate` 的 **gate 4**
 会检查机器戳。
 
+#### 2.6.1 但「戳」和「正文」必须在**发包前**改 —— 否则 gate 4 直接拦发布
+
+2026-10-23 实测（`agent-network@2.3.0-preview.191`）：bump PR 合入、门也 dispatch 了，
+`build / gate 1 / gate 2 / gate 3` 全绿，**gate 4 红**，`publish` 被 **skipped**：
+
+```
+::error 正在发 agent-network@2.3.0-preview.191(preview 通道),而文档仍然断言 preview=2.3.0-preview.190
+    docs-site/docs/guide/getting-started.md:9
+    docs-site/docs/en/guide/getting-started.md:10
+```
+
+原因不是「戳过期」这种小漂移，而是**正文本身会变假**：`.190` 那段写的是 agent-node
+`.153` 的节点行为，而 `.191` 配对的是 `.154`。只改戳会被第二判据再拦一次
+（戳标出的版本必须在正文里落地，且正文描述要与该版本一致）。
+
+⇒ 所以顺序是**三段**，不是两段：
+
+1. **bump PR 里一起改** `getting-started.md`（中英各一份）的戳 + 正文；
+2. 本地先跑 gate 4 的同一条判据，绿了再 dispatch：
+   ```bash
+   python3 scripts/check-doc-version-claims.py \
+     --package '<pkg>' --version '<版本>' --verify-latest-from-npm
+   ```
+   ⚠️ `channel=latest` 的戳**不要跟着改**：`--verify-latest-from-npm` 比的是 npm 的
+   `dist-tags.latest`，preview 版本发出去之前它还是旧值；只改 `channel=preview` 那条。
+3. 发包成功之后才做**站点部署**（下一段）—— 否则站点会告诉用户装一个 npm 上不存在的版本。
+
 **② 站点部署。** 改完文档要真的部署 anet.sh，否则 main 上是新的、线上还是旧的。
 用 prebuilt 流（见 `deploy/docs-site/README.md`），部署后跑
 `.github/scripts/check-docs-site-drift.py` **按内容**验收，不看状态码。
