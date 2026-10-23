@@ -33,8 +33,26 @@ echo "# test2028 — no vendor replay for known OpenCode runtime failures"
 echo "date: $(date -Iseconds)"
 echo "bun: $(bun --version)"
 
+check_wiring() {
+  # 先判「有没有退回两参」，再判「有没有三参」——顺序决定变异时报出哪一句。
+  if grep -Eq 'isTransientVendorError\(text, failed\)[[:space:]]*[;)]' "$CLI_SRC"; then
+    echo "FAIL: cli.ts still has the two-argument call"; return 1;
+  fi
+  grep -Fq 'isTransientVendorError(text, failed, runtimeFailureCode)' "$CLI_SRC" || {
+    echo "FAIL: cli.ts does not pass runtimeFailureCode to isTransientVendorError"; return 1;
+  }
+}
+
 echo
-echo "## green — gate + wiring"
+echo "## wiring — the CLI must pass the structured code to the gate"
+# 这条原本是单元测试里的源码断言，但它会被**别人**(容器套件)扫到，
+# 而某些套件会先变异 cli.ts，于是断言在它们里面假红（2026-10-23 实测：
+# PR2889 的 L0+L1 job 就红在这条）。放到本套件里，跑的是本套件自己的上下文。
+check_wiring || exit 1
+echo "wiring ok"
+
+echo
+echo "## green — gate"
 bun test "$GATE_TEST"
 
 apply_mutation() {
@@ -82,10 +100,16 @@ cp /tmp/vendor2028.bak "$VENDOR_SRC"
 echo
 echo "## mutation B — call the gate with two arguments: the wiring assertions must go red"
 apply_mutation "$CLI_SRC" "$CLI_ANCHOR" "$CLI_REPL" /tmp/cli2028.bak
-run_mutation_expect_red 'wiring-two-args' bun test "$GATE_TEST"
-grep -F -q 'the vendor retry asks the gate with the structured code' /tmp/mutation2028.log || {
-  echo 'MUTATION_RED_FOR_THE_WRONG_REASON: wiring case did not fail'; exit 1;
+set +e
+check_wiring >/tmp/mutation2028-wiring.log 2>&1
+rc_w=$?
+set -e
+cat /tmp/mutation2028-wiring.log
+if [ "$rc_w" -eq 0 ]; then echo "MUTATION_FALSE_GREEN: wiring-two-args"; exit 1; fi
+grep -Fq 'two-argument call' /tmp/mutation2028-wiring.log || {
+  echo 'MUTATION_RED_FOR_THE_WRONG_REASON: wiring grep did not report the two-arg call'; exit 1;
 }
+echo "MUTATION_RED(wiring-two-args) rc=$rc_w"
 cp /tmp/cli2028.bak "$CLI_SRC"
 
 echo

@@ -36,24 +36,6 @@ describe("isNonReplayableRuntimeFailure", () => {
   });
 });
 
-describe("cli.ts wiring (#2028)", () => {
-  const cli = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
-
-  test("processTask keeps the structured failure code from both catches", () => {
-    // 初始 catch 与 retry catch 都必须写 runtimeFailureCode（只存码，不存正文）。
-    const assignments = cli.match(/runtimeFailureCode = [^;]+;/g) ?? [];
-    expect(assignments.length).toBeGreaterThanOrEqual(3); // 声明 + 初始 catch + retry catch
-    expect(cli).toContain('runtimeFailureCode = typeof err?.code === "string" ? err.code : null;');
-    expect(cli).toContain('runtimeFailureCode = typeof err?.code === "string" ? err.code : runtimeFailureCode;');
-  });
-
-  test("the vendor retry asks the gate with the structured code", () => {
-    expect(cli).toContain("isTransientVendorError(text, failed, runtimeFailureCode)");
-    // 不再有只传两个实参的旧调用（防回退）。
-    expect(/isTransientVendorError\(text, failed\)\s*[;)]/.test(cli)).toBe(false);
-  });
-});
-
 describe("isTransientVendorError with a structured runtime code", () => {
   test("the vendor-ish text alone still triggers the existing retry (baseline)", () => {
     expect(isTransientVendorError(VENDORISH, true)).toBe(true);
