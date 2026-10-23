@@ -60,6 +60,27 @@ export function ensureNetworkTags(database: DbAdapter): void {
 }
 
 /**
+ * 标签树(父子标签)。标签名就是 id,parent_name 指向同网络的父标签名;没有 parent 行 = 顶层。
+ * 只存「登记过的节点」:卡片上出现但没登记过的标签(老数据)仍然是平标签,不改写任何 cards_json。
+ * 建标签、改名 / 合并 / 删除时维护这里(见 requirements.ts 的 handleTagCreate / handleTagOp)。
+ * IF NOT EXISTS:重复执行无副作用。
+ */
+export function ensureNetworkTagNodes(database: DbAdapter): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS network_tag_nodes (
+      network_id      TEXT NOT NULL,
+      name            TEXT NOT NULL,
+      parent_name     TEXT,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL,
+      created_by_json TEXT,
+      PRIMARY KEY (network_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_network_tag_nodes_parent ON network_tag_nodes(network_id, parent_name);
+  `);
+}
+
+/**
  * 删掉的卡留一条墓碑,给 GET /api/requirements?changes=1 报「这些 id 没了」(按 updated_since 增量同步的客户端
  * 否则永远不知道一张卡被删了)。连同判断可见性要用的列一起存:受限成员只收到他本来看得见的卡的删除。
  * 保留 30 天(requirements.ts TOMBSTONE_RETENTION_MS,写入时顺手清)。IF NOT EXISTS:重复执行无副作用。

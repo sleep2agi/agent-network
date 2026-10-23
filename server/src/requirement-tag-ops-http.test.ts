@@ -208,7 +208,7 @@ describe("改名 / 合并 / 删除 / 颜色", () => {
     const t0 = new Date().toISOString();
     const r = await op(admin.token, { op: "rename", from: "UI", to: "界面" });
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ ok: true, op: "rename", affected: 4 });
+    expect(r.body).toEqual({ ok: true, op: "rename", affected: 4, reparented: 0 });
     expect(cardTags("visible")).toEqual(["界面", "交互", "bug"]);
     expect(cardTags("hidden")).toEqual(["界面", "secret"]);
     expect(cardTags("archived")).toEqual(["界面", "旧"]);
@@ -237,7 +237,7 @@ describe("改名 / 合并 / 删除 / 颜色", () => {
   test("合并:多个来源进一个新标签;目标没颜色就继承来源的;来源颜色行删掉", async () => {
     expect((await op(admin.token, { op: "color", tag: "旧", color: "#16a34a" })).status).toBe(200);
     const r = await op(admin.token, { op: "merge", from: ["bug", "旧", "secret", "不存在"], to: "杂项" });
-    expect(r.body).toEqual({ ok: true, op: "merge", affected: 3 });
+    expect(r.body).toEqual({ ok: true, op: "merge", affected: 3, reparented: 0 });
     expect(cardTags("visible")).toEqual(["界面", "杂项"]);
     expect(cardTags("hidden")).toEqual(["界面", "杂项"]);
     expect(cardTags("archived")).toEqual(["界面", "杂项"]);
@@ -253,7 +253,7 @@ describe("改名 / 合并 / 删除 / 颜色", () => {
 
   test("删除:从每张卡上拿掉(卡保留),颜色行删掉,审计带 affected", async () => {
     const r = await op(admin.token, { op: "delete", tag: "界面" });
-    expect(r.body).toEqual({ ok: true, op: "delete", affected: 4 });
+    expect(r.body).toEqual({ ok: true, op: "delete", affected: 4, reparented: 0 });
     expect(cardTags("visible")).toEqual([]);
     expect(cardTags("both")).toEqual(["TMWork"]);
     expect(db.get("SELECT COUNT(*) AS n FROM requirements WHERE network_id = ?1", NET).n).toBe(5);

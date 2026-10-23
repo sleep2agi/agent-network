@@ -62,3 +62,37 @@ A scoped member is refused outright rather than allowed to change only the cards
 
 - [Tasks](/en/guide/tasks)
 - [Requirements / task board](/en/api/mcp-tools#requirements-task-board)
+
+## Creating tags and parent/child levels
+
+When `capabilities` includes `tag_tree`, the Hub can create tags and nest them under a parent. On an older Hub the client hides "new child tag" and never calls the endpoint below.
+
+Tag names are unique per network and **the name is the id** (there is no separate `tag_id`). `parent_id` is the parent's name.
+
+`POST /api/requirements/tags/create`:
+
+```json
+{ "name": "child tag", "parent_id": null }
+```
+
+Omit `parent_id` or send `null` to create at the root; a name must already exist in the network to be used as the parent.
+
+- Success is 201 `{"ok":true,"tag":{"name","parent_id","depth"},"parent_registered":false}`; `depth` starts at 1.
+- An existing tag (a registered node, used by any card, or carrying a color) returns 409 `tag_exists`; the existing tag is never silently reused.
+- A missing parent returns 404 `parent_not_found`; the child is **never** silently created at the root.
+- At most 4 levels including the root; deeper returns 400 `tag_depth_exceeded`.
+- Name rules are the same as above; an invalid name returns 400 `invalid_tag`, a non-string or invalid `parent_id` returns 400 `invalid_parent_id`.
+- When the parent only existed on cards (legacy data with no node row) it is registered as a root node in the same transaction and the response has `parent_registered: true`; the child still hangs under it and is not demoted to the root.
+- Node rows and the audit entry are written in one transaction; a failure leaves nothing behind.
+
+With the `tag_tree` capability `GET /api/requirements/tags` also returns `nodes` (`tags` / `counts` / `colors` / `can_manage` keep their meaning):
+
+```json
+{ "nodes": [ { "name": "frontend", "parent_id": "requirements", "depth": 2, "count": 0, "color": null, "registered": true } ] }
+```
+
+- `nodes` is "registered nodes ∪ in-use tags the caller can see". Tags with **zero tasks are included** (`count: 0`), so the sidebar can show an empty child tag.
+- Legacy tags that only appear on cards without a node row keep `parent_id: null`, `depth: 1`, `registered: false` and stay flat.
+- Scoped members (`task_access = scoped`) only receive tags they can see; a registered name with no visible card does not leak.
+
+Rename / merge / delete maintain the hierarchy: `rename` rewrites child `parent_id` too (an existing target is treated as a merge and never self-loops); `merge` hangs the sources' children under the target; `delete` reparents children to the deleted tag's parent (or to the root when it had none), so levels are never lost.
