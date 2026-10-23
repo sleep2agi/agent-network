@@ -41,6 +41,7 @@ import {
 import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
 import { Agent } from "undici";
 import { fetchOpenCodeJson } from "./http";
+import type { SessionBackgroundControl } from "./session-background";
 import { openV1BorrowedAdmission, type V1BorrowedAdmissionOptions } from "./v1-borrowed-admission";
 import {
   bindQueueOwner,
@@ -175,6 +176,8 @@ export interface OpenCodeCopresenceSession {
   readonly sessionId: string;
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
+  /** #2014, V2 only: semantic Ctrl+B, bound to this live handle generation. */
+  readonly backgroundControl?: SessionBackgroundControl;
   /** V2 only. The model the TUI session is running, `provider/id`. Read-only. */
   selectedModel?(): Promise<string | undefined>;
   /** V2 only. Switch the live session. The caller writes node config. */
@@ -1306,6 +1309,7 @@ export async function openOpenCodeCopresenceRuntime(
       get sessionId() { return core!.sessionId; },
       get attachScriptPath() { return core!.attachScriptPath; },
       get isRunning() { return core!.isRunning; },
+      get backgroundControl() { return core!.backgroundControl; },
       notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
       submit: (prompt, timeoutMs, sender, evidence) =>
         core!.submit(prompt, timeoutMs, sender, evidence),

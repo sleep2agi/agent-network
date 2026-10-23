@@ -64,6 +64,7 @@ L0_TESTS=(
   #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
 L1_TESTS=(
+  "test2014-session-background"
   # board #703: a bridge/watchdog restart must recover the exact persisted
   # Codex turn and emit one durable receipt without re-running the model.
   "test703-codex-turn-receipts"
