@@ -195,17 +195,31 @@ function socketUidFor(readProcFile: (p: string) => string, port: number): number
 }
 
 /**
- * Every pid whose fd table holds `socket:[inode]`.
+ * Every pid whose fd table holds `socket:[inode]`, plus how many fd tables we
+ * could not read at all.
  *
  * NO uid filter and NO pid floor (#2784 review, 通信牛): a child of another uid can
  * inherit a listening fd (or receive it via SCM_RIGHTS), and in a container PID 1
- * can hold one — so filtering silently misses the real holder. Uniqueness is still
- * required, so ANY unreadable candidate is a refusal.
+ * can hold one — so filtering by uid silently misses the real holder.
+ *
+ * #1676: unreadable fd tables are **not** a refusal by themselves. On every normal
+ * host there are processes whose `/proc/<pid>/fd` is EACCES — root/system daemons
+ * (other uid) *and* same-uid daemons that set `PR_SET_DUMPABLE=0` (user systemd
+ * units, agents). Treating any of them as "the holder might be hidden" made this
+ * observation fail 100% of the time (`reason=observe_permission_denied`), so every
+ * daemon-created node fell back to a private server without provider credentials.
+ *
+ * The ambiguity #2784 guarded against is kept where it actually matters: if **no**
+ * readable holder is found while some fd tables were unreadable, we still refuse
+ * (`permission_denied`) instead of guessing. Once exactly one readable holder is
+ * found, that process demonstrably holds the socket; an unreadable process could
+ * only hold the *same* socket (same server), and `locate()` still reads the
+ * holder's uid / start ticks / argv from its own `/proc` entry.
  */
 function socketOwnerPids(
   deps: Required<HostSharedObserverDeps>,
   inode: string,
-): number[] | "permission_denied" {
+): { owners: number[]; unreadable: number } | "permission_denied" {
   const target = `socket:[${inode}]`;
   let pids: string[];
   try {
@@ -213,8 +227,8 @@ function socketOwnerPids(
   } catch {
     return "permission_denied";
   }
-  let denied = false;
   const owners: number[] = [];
+  const unreadable = new Set<number>();
   for (const entry of pids) {
     if (!/^\d+$/.test(entry)) continue;
     const pid = Number(entry);
@@ -226,8 +240,8 @@ function socketOwnerPids(
     try {
       fds = deps.readDir(`/proc/${pid}/fd`);
     } catch (error) {
-      // Gone process => skip; a real denial must not be silently treated as gone.
-      if (errCode(error) !== "ENOENT") denied = true;
+      // The process is gone (its /proc entry vanished mid-scan) — nothing to read.
+      if (errCode(error) !== "ENOENT") unreadable.add(pid);
       continue;
     }
     for (const fd of fds) {
@@ -238,12 +252,11 @@ function socketOwnerPids(
           break;
         }
       } catch (error) {
-        if (errCode(error) !== "ENOENT") denied = true;
+        if (errCode(error) !== "ENOENT") unreadable.add(pid);
       }
     }
   }
-  if (denied) return "permission_denied";
-  return owners;
+  return { owners, unreadable: unreadable.size };
 }
 
 interface Snapshot {
@@ -264,11 +277,14 @@ function locate(
   // Two LISTEN inodes on one loopback port: guessing which is meant is not allowed.
   if (inodes.length > 1) return { ok: false, reason: "ambiguous_listener" };
   const inode = inodes[0];
-  const owners = socketOwnerPids(deps, inode);
-  if (owners === "permission_denied") return { ok: false, reason: "permission_denied" };
-  if (owners.length === 0) return { ok: false, reason: "socket_owner_not_found" };
-  if (owners.length > 1) return { ok: false, reason: "ambiguous_listener" };
-  const pid = owners[0];
+  const scan = socketOwnerPids(deps, inode);
+  if (scan === "permission_denied") return { ok: false, reason: "permission_denied" };
+  // No readable holder but fd tables we could not read: refuse instead of guessing.
+  if (scan.owners.length === 0) {
+    return { ok: false, reason: scan.unreadable > 0 ? "permission_denied" : "socket_owner_not_found" };
+  }
+  if (scan.owners.length > 1) return { ok: false, reason: "ambiguous_listener" };
+  const pid = scan.owners[0];
   // The holder's uid comes from its own process, never from the socket: an fd can
   // be inherited or passed, so the socket's creator uid is not the holder's.
   const uid = deps.procUid(pid);
