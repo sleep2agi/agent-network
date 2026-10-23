@@ -1,13 +1,10 @@
 <div align="center">
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/anet-mark-dark.svg">
   <img src="docs/assets/readme/anet-mark-light.svg" width="96" height="96" alt="Agent Network logo">
 </picture>
 
 # Agent Network
-
-
 [![npm](https://img.shields.io/npm/v/@sleep2agi/agent-network?label=npm&color=009e7e)](https://www.npmjs.com/package/@sleep2agi/agent-network)
 [![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?filter=desktop-v*&label=download&color=2f6feb)](https://github.com/sleep2agi/agent-network-app/releases/latest)
 [![QA](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main)](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml)
@@ -17,12 +14,9 @@
 
 [文档](https://anet.sh) · [下载桌面版](https://github.com/sleep2agi/agent-network-app/releases/latest) · [快速上手](https://anet.sh/guide/getting-started) · **中文** · [English](./README.en.md)
 
-
 <img width="2667" height="1400" alt="image" src="https://github.com/user-attachments/assets/0e4ead5a-fab5-4cb3-a92d-cd029549c2bf" />
 
 **把分布在多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团 —— 在一个桌面应用里指挥它们。**
-
-
 
 </div>
 
@@ -38,16 +32,12 @@
 <td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/files-dark.webp"><img src="docs/assets/readme/files-light.webp" alt="在桌面端浏览节点的项目文件夹"></picture></td>
 </tr></table>
 
-
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="桌面端任务页：左侧按项目筛选，右侧是需求池、进行中、完成三列看板"></picture>
-
-
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
   <img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network 桌面端：左侧是在线 Agent 列表，右侧是与一个节点的对话">
 </picture>
-
 
 ## 30 秒上手
 
