@@ -54,3 +54,27 @@ Only /bridge adds required expected and the successful identity receipt. The
 other endpoints keep their fields. The consumer PIN/epoch/write permit remains
 owned by runtime PR2889. The report-only successor to the tested source does not
 claim a new run of the original HTTP/integration suite or complete CI success.
+
+2026-10-23 fresh-main refresh (CommHub #2017):
+Merged current main 111be9430ca2cc469d05684388ec07e33563008b without conflicts.
+Tested product source: 803f28d61551bcacaabd872a0eaa6ad6ea5d20fb (the merge).
+Author-run existing anet-test2017-identity image, Bun 1.3.14, non-root Docker,
+network none, two CPUs / 1 GiB, current server/src + agent-node/src +
+agent-network/src mounted read-only at their /work paths; SOURCE_COMMIT set to
+that merge SHA. Container command: the image's existing /work/run.sh, no filter.
+Result: 18 pass / 0 fail / 107 assertions, 1.84s. This reuses cached dependencies;
+it is not a fresh image-build receipt. The following report-only commit is not
+represented as another execution of this suite.
+
+Old-head failure retained, not waived: real-client run 39711905520 /
+job 119604945788, artifact 12397769298, source 0aceb162632943a1398a93ce3a0b1bb78e5ffa6c.
+Its Bridge log records config_update mode=restart followed by local=hot mismatch;
+test883 model-client.mjs:88 then times out at the unchanged 95000ms assertion.
+That artifact lacks update.error, so it alone does not prove an exact reject path.
+The refreshed main includes 2882c4add318e01d9714caa0c5096dc27230f0bf (#2050/#2895),
+which restores Hub-requested V2 model restart when hot capability is missing.
+No extra product patch, timeout change, UI-string change or assertion weakening
+is added here. Final-head natural real-client and complete CI results must be
+recorded separately; neither older green runs nor the local HTTP receipt count
+as fresh-head real-client success. Runtime PR2889 / client integration remains a
+separate acceptance step and is not claimed by this refresh.
