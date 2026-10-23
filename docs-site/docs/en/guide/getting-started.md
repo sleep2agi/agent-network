@@ -7,7 +7,7 @@
      Change the prose, change the stamp — the gate also fails when the two disagree.
      The latest stamp records the checked channel version; the preview stamp records the version checked
      on this page. Verify npm publication separately. Historical references (e.g. `<= 2.3.0-preview.37`) are not stamped. -->
-<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.181 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.190 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.190 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
@@ -60,7 +60,7 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-The checked `latest` (`2.3.0-preview.181`) prints a random password: `anet-` followed by 22 hex characters. **Published** CLI `2.3.0-preview.190` changes the pairing from `.189` to published agent-node `2.5.0-preview.153`; both exact versions have been verified on npm. The new node behavior is limited to V1 admission (waiting before submission): it labels the task and submitter and ends admission with `owner_left` when session-query 404 counts reach the threshold. **A 404 does not prove that the TUI owner left.** Some status-error paths in `.153` do not reset the counter; that published package does not contain the subsequent consecutive-missing fix. This does not establish equivalent V2 support, submitted-turn recovery, or fleet activation; the default 30-minute budget is unchanged. **The default bootstrap / random-password path is unchanged.**
+The checked `latest` (`2.3.0-preview.190`) prints a random password (that path is unchanged since `.181`): `anet-` followed by 22 hex characters. **Published** CLI `2.3.0-preview.190` changes the pairing from `.189` to published agent-node `2.5.0-preview.153`; both exact versions have been verified on npm. The new node behavior is limited to V1 admission (waiting before submission): it labels the task and submitter and ends admission with `owner_left` when session-query 404 counts reach the threshold. **A 404 does not prove that the TUI owner left.** Some status-error paths in `.153` do not reset the counter; that published package does not contain the subsequent consecutive-missing fix. This does not establish equivalent V2 support, submitted-turn recovery, or fleet activation; the default 30-minute budget is unchanged. **The default bootstrap / random-password path is unchanged.**
 Publication of an exact version does not mean a channel tag will always point to it, or that existing nodes have upgraded. Run `npm view @sleep2agi/agent-network dist-tags` for the current channel versions.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 

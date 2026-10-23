@@ -269,6 +269,8 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   broadcast: "broadcast",
   // 任务看板:在 requirements.ts 里按卡判(REST 与 MCP 同一处)
   requirements_list: "requirements", requirements_people: "requirements", requirements_get: "requirements", requirements_create: "requirements",
+  // #1894 —— 组织架构：读是常规读，写由工具内部再判网络 owner/admin（普通成员/节点写会被拒并 audit）。
+  departments: "requirements",
   requirements_update: "requirements", requirements_checklist_toggle: "requirements", requirements_upsert_by_external_ref: "requirements",
   requirements_events: "requirements", requirements_comment: "requirements", projects_list: "requirements",
   // 定时任务(#733):在 schedule-agent.ts 里按排程判(范围 / 目标 = send_task 的 dispatchVerdict / 配额)

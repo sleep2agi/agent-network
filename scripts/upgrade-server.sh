@@ -31,10 +31,26 @@ cp ~/.commhub/commhub.db ~/.commhub/commhub.db.bak.$(date +%Y%m%d_%H%M%S)
 echo "  Backup: ~/.commhub/commhub.db.bak.$(date +%Y%m%d_%H%M%S)"
 
 # Step 3: Update npm package
-echo -e "${C_YELLOW}[3/5]${C_RESET} Updating @sleep2agi/commhub-server..."
-npm i -g @sleep2agi/commhub-server 2>&1 | tail -3
-NEW_PKG_VER=$(npm ls -g @sleep2agi/commhub-server 2>/dev/null | grep commhub-server | grep -o '[0-9].*' || echo "?")
+#
+# 🔴 #2141 —— 这里原来是不带 tag 的 `npm i -g @sleep2agi/commhub-server`,
+#    也就是装 `latest` dist-tag。2026-10-23 实测 `latest` 还停在 .139，而当时
+#    已经发布的 preview 是 .145 —— 这条命令会把**不含头像上传/会话控制的旧包**
+#    装到机器上，而输出只会说"installed"，看不出装的是哪一版。
+#
+#    改用显式 `@preview`：当前唯一在推进的通道就是 preview。**不去推 latest**
+#    (那等于替所有人做隐式升级)，而是把"装哪一版"写进命令里。
+HUB_SERVER_TAG="${HUB_SERVER_TAG:-preview}"
+echo -e "${C_YELLOW}[3/5]${C_RESET} Updating @sleep2agi/commhub-server@${HUB_SERVER_TAG}..."
+npm i -g "@sleep2agi/commhub-server@${HUB_SERVER_TAG}" 2>&1 | tail -3
+NEW_PKG_VER=$(npm ls -g @sleep2agi/commhub-server 2>/dev/null | grep commhub-server | grep -o '[0-9][^ ]*' || echo "?")
 echo "  Installed: $NEW_PKG_VER"
+# 版本回读：把"装到的"和"通道上的"并排打出来，别让"installed"一句糊过去。
+PUBLISHED_VER=$(npm view "@sleep2agi/commhub-server@${HUB_SERVER_TAG}" version 2>/dev/null || echo "?")
+echo "  Channel ${HUB_SERVER_TAG} on npm: $PUBLISHED_VER"
+if [ "$NEW_PKG_VER" != "$PUBLISHED_VER" ]; then
+  echo -e "  ${C_RED}⚠ installed ($NEW_PKG_VER) != channel ($PUBLISHED_VER)${C_RESET}"
+  echo "    npm 可能用了缓存；`npm cache verify` 或显式钉版本再试。"
+fi
 
 # Step 4: Restart server
 echo -e "${C_YELLOW}[4/5]${C_RESET} Restarting CommHub..."

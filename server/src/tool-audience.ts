@@ -59,6 +59,8 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   upsert_network_secret: "both", list_network_secrets: "both", upsert_provider: "both", update_provider: "both",
   list_providers: "both", probe_provider_model: "both", get_probe_results: "both",
   requirements_list: "both", requirements_people: "both", requirements_get: "both", requirements_create: "both",
+  // #1894 —— 组织架构：人和 Agent 都能用（Agent 用它归部门，人用它看树）。
+  departments: "both",
   requirements_update: "both", requirements_checklist_toggle: "both", requirements_upsert_by_external_ref: "both",
   requirements_events: "both", requirements_comment: "both", projects_list: "both",
 };

@@ -107,6 +107,7 @@ import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue
 import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
+import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, updateDepartment } from "./departments.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -424,6 +425,96 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const skillHubReply = (value: Record<string, unknown>) => ({
     content: [{ type: "text" as const, text: JSON.stringify(value) }],
   });
+
+  // ── #1894 组织架构：Agent 用 API 就能建部门、把 Agent 归进去（admin 2026-10-23：
+  // 不要靠人手动点）。写权限 = 网络 owner/admin（实测 `canWrite` 对普通成员也是 true，
+  // 口径太宽，所以这里显式判角色）；读权限 = 能读这个网络的人。
+  // 归属写的是 nodes.department_id，显式归属，绝不按负责人推断。
+  const deptReply = (value: Record<string, unknown>) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(value) }],
+  });
+  const canManageDepartments = (netId: string | null): boolean => {
+    if (!netId) return false;
+    if (!enforceUserId) return canWrite(netId); // legacy open mode
+    const role = getUserNetworkRole(enforceUserId, netId);
+    return role === "owner" || role === "admin";
+  };
+  const deptFail = (result: any) =>
+    deptReply({ ok: false, error: result?.error ?? "department_failed", status: result?.status ?? 400, ...(result?.children || result?.members || result?.agents ? { children: result.children, members: result.members, agents: result.agents } : {}) });
+
+  server.tool(
+    "departments",
+    "Agent org structure: list / create / update / delete / assign_agent. Writes need network owner or admin; assign_agent sets nodes.department_id.",
+    {
+      action: z.enum(["list", "create", "update", "delete", "assign_agent"]),
+      department_id: z.string().max(64).nullable().optional(),
+      name: z.string().min(1).max(80).optional(),
+      parent_id: z.string().max(64).nullable().optional(),
+      node_id: z.string().max(200).optional(),
+      alias: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ action, department_id, name, parent_id, node_id, alias, network_id: clientNetId }) => {
+      const netId = getNetworkId(clientNetId);
+      if (!netId) return deptReply({ ok: false, error: "network_required" });
+      if (action === "list") {
+        if (!canManageDepartments(netId) && !canWriteHuman(netId)) return writeDeniedReply(netId, "read") as any;
+        const listed = listDepartments(netId);
+        const agents = db.all<{ node_id: string; alias: string; department_id: string | null }>(
+          "SELECT node_id, alias, department_id FROM nodes WHERE network_id = ?1 ORDER BY alias", netId,
+        );
+        const counts = new Map<string, number>();
+        let unassigned = 0;
+        for (const a of agents) {
+          if (a.department_id) counts.set(a.department_id, (counts.get(a.department_id) ?? 0) + 1);
+          else unassigned += 1;
+        }
+        return deptReply({
+          ok: true, network_id: netId, unassigned_agents: unassigned, agents,
+          departments: listed.departments.map((d) => ({ ...d, agent_count: counts.get(d.id) ?? 0 })),
+        });
+      }
+      if (!canManageDepartments(netId)) return writeDeniedReply(netId, "write") as any;
+      const actor = { user_id: enforceUserId || "node", username: callerAlias || "agent" };
+      if (action === "create") {
+        if (!name) return deptReply({ ok: false, error: "invalid_department_name" });
+        const result = createDepartment(netId, enforceUserId || callerAlias || "mcp", {
+          name, ...(parent_id ? { parent_id } : {}), ...(department_id ? { id: department_id } : {}),
+        }) as any;
+        if (result?.ok === false) return deptFail(result);
+        auditDepartment(actor, "department_create", netId, String(result.department?.id ?? ""));
+        return deptReply({ ok: true, department: result.department });
+      }
+      if (action === "update") {
+        if (!department_id) return deptReply({ ok: false, error: "department_required" });
+        const body: Record<string, unknown> = {};
+        if (name !== undefined) body.name = name;
+        if (parent_id !== undefined) body.parent_id = parent_id;
+        const result = updateDepartment(netId, department_id, body) as any;
+        if (result?.ok === false) return deptFail(result);
+        auditDepartment(actor, "department_update", netId, `id=${department_id}`);
+        return deptReply({ ok: true, department: result.department });
+      }
+      if (action === "delete") {
+        if (!department_id) return deptReply({ ok: false, error: "department_required" });
+        const result = deleteDepartment(netId, department_id) as any;
+        if (result?.ok === false) return deptFail(result);
+        auditDepartment(actor, "department_delete", netId, `id=${department_id}`);
+        return deptReply({ ok: true, deleted: department_id });
+      }
+      let target = node_id ?? "";
+      if (!target && alias) {
+        const row = db.get<{ node_id: string }>("SELECT node_id FROM nodes WHERE network_id = ?1 AND alias = ?2", netId, resolveCanonicalAlias(netId, alias).alias);
+        if (!row) return deptReply({ ok: false, error: "agent_not_found" });
+        target = row.node_id;
+      }
+      if (!target) return deptReply({ ok: false, error: "agent_required" });
+      const result = setAgentDepartment(netId, target, department_id === undefined ? null : department_id) as any;
+      if (result?.ok === false) return deptFail(result);
+      auditDepartment(actor, "department_assign_agent", netId, `${target} -> ${department_id ?? "null"}`);
+      return deptReply({ ok: true, node_id: result.node_id, department_id: result.department_id });
+    },
+  );
 
   // SkillHub is a network registry, not a public filesystem. Content is an
   // immutable SKILL.md snapshot; identity comes only from the authenticated

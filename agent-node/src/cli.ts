@@ -12,6 +12,7 @@
  */
 
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
+import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
 import {
   bundledCodexVersion,
   createCodex,
@@ -998,6 +999,10 @@ if (unsafeInitialGrokHubCredential) {
 // their shell — replies then landed in the wrong network and Dashboard
 // never saw them.
 let AUTH_TOKEN = fileConfig.token || globalConfig.token || process.env.COMMHUB_TOKEN || "";
+// #2014 control authority belongs to this startup identity, never a hot token.
+const SESSION_CONTROL_START_TOKEN = AUTH_TOKEN;
+let sessionControlCredentialEpoch = 0;
+const sessionControlCredentialAbort = new AbortController();
 // #507 — per-process instance id, sent as X-Anet-Instance-Id on the SSE connect so the
 // Hub can tell "this process reconnected" from "a second copy of this node connected".
 const INSTANCE_ID = generateInstanceId();
@@ -1036,6 +1041,9 @@ function reloadNodeToken(): boolean {
     : loadJson(configFilePath);
   const freshToken = typeof freshConfig?.token === "string" ? freshConfig.token : "";
   if (!freshToken || freshToken === AUTH_TOKEN) return false;
+  // Revoke before publishing the replacement. A -> B -> A cannot revive it.
+  sessionControlCredentialEpoch++;
+  sessionControlCredentialAbort.abort();
   AUTH_TOKEN = freshToken;
   fileConfig.token = freshToken;
   refreshPersistenceRedactor();
@@ -2557,6 +2565,18 @@ if (RUNTIME === "opencode") {
 }
 let opencodeCopresenceSession:
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
+const sessionControlPin = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+  && opencodeMode === "copresence" && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID
+  ? createSessionControlPin({
+    hubUrl: COMMHUB_URL, token: SESSION_CONTROL_START_TOKEN, nodeId: NODE_ID, networkId: NETWORK_ID, epoch: 0,
+    currentToken: () => AUTH_TOKEN, currentEpoch: () => sessionControlCredentialEpoch, signal: sessionControlCredentialAbort.signal,
+  }) : null;
+const sessionControlBridge = sessionControlPin
+  ? createNodeSessionControlBridge({
+    session: () => opencodeCopresenceSession,
+    warn: message => warn(message),
+    identity: sessionControlPin,
+  }) : null;
 const OPENCODE_MODEL_POLL_MS = 30_000;
 let opencodeModelPollInFlight = false;
 async function pollOpencodeSessionModel(): Promise<void> {
@@ -4347,6 +4367,7 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       throw new Error("OpenCode copresence server exited while opening");
     }
     opencodeCopresenceSession = opened;
+    void sessionControlBridge?.register();
     if (OPENCODE_GENERATION === "v2") void pollOpencodeSessionModel();
     if (borrowed && process.env.ANET_BORROWED_V1_LAUNCH_ID) {
       const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
@@ -7604,6 +7625,9 @@ async function connectSSE() {
             // restart doorbell is the lifecycle ops shortcut (no config
             // write, just drain + exit 75). Errors logged but never
             // propagated up — supervisor stays connected.
+            if (ev.type === "session_control") {
+              void sessionControlBridge?.trigger();
+            }
             if (ev.type === "config_update") {
               log(`← SSE config_update ${ev.update_id || ""}`);
               processConfigUpdate().catch((e: any) =>
@@ -8229,6 +8253,11 @@ setInterval(() => {
 }, STATUS_HEARTBEAT_MS);
 if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeMode === "copresence") {
   setInterval(() => { void pollOpencodeSessionModel(); }, OPENCODE_MODEL_POLL_MS).unref();
+  if (sessionControlBridge) {
+    const refreshSessionControl = () => { void sessionControlBridge.register().then(ok => { if (ok) void sessionControlBridge.trigger(); }); };
+    refreshSessionControl();
+    setInterval(refreshSessionControl, 30_000).unref();
+  }
 }
 
 // RFC-027 §2.5 / §4.4 D7 — 30d backup sweeper, host_supervisor only.

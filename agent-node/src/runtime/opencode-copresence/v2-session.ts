@@ -54,6 +54,7 @@ import {
   type OpenVettedOpenCodeCopresenceOptions,
 } from "./runtime";
 import { unverifiedOwnerError } from "./reply-ownership";
+import { fetchOpenCodeSessionControlJson } from "./http";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
@@ -68,6 +69,7 @@ import { relaunchPreviousAttach, stopRecordedAttach } from "./attach-tui";
 import { resolve } from "path";
 import { installV2RegistryPlugin, waitForOpenCodeV2Commhub } from "./v2-readiness";
 import { removeOpenCodeV2CatalogEndpoint, writeOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
+import { createSessionBackgroundControl } from "./session-background";
 
 const USERNAME = "opencode";
 const HISTORY_PAGE_LIMIT = 200;
@@ -433,6 +435,12 @@ export async function openVettedOpenCodeV2Copresence(
       get isRunning() {
         return !closed && !sharedDisconnected && (!child || (child.exitCode === null && child.signalCode === null));
       },
+      backgroundControl: createSessionBackgroundControl({
+        sessionId,
+        directory: resolve(opts.cwd),
+        isCurrent: () => session.isRunning,
+        request: (path, init) => fetchOpenCodeSessionControlJson(url, password, path, init),
+      }),
       async selectedModel() {
         if (!session.isRunning) return undefined;
         const body = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`, {}, 2_000);

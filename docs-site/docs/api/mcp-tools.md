@@ -206,6 +206,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `requirements_update` | 修改任务，省略的字段保留；`status` 同 `column`（同上）。**`participants` 是整体替换**（没写进去的人会被删掉，`[]` 清空）；只想加 / 减几个人用 `participants_add` / `participants_remove`：在当前列表上增减、不动别人，加已有的 / 减不在的都是不变；和 `participants` 不能同时用（400 `participants_conflict`），同一个人既加又减 → 400 `participants_add_remove_overlap`；`archived: true` 归档（Agent 不能删除） |
 | `requirements_checklist_toggle` | 把一个子任务设为完成 / 未完成，只写这一项 |
 | `requirements_upsert_by_external_ref` | 按 `external_ref`（如 `github:owner/repo#123`）幂等同步：没有就建，有就改；也收 `status` 别名 |
+| `departments` | 组织架构（部门树）的读写：`action: "list"` 看树（每个部门带 Agent 数与下级）；`create` / `update` / `delete` 管部门（名字、上级、负责人、排序）；`assign_agent` 把某个 Agent 归到部门（`department_id: null` 移出）。**写操作只有网络 owner/admin 能做**（普通成员调用返回 `forbidden`），每次写都记 audit。部门是**网络共享**的，不按人隔离 |
 | `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档）。节点令牌（Agent）**只能读项目** |
 | `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；要人的令牌：节点令牌（Agent）只能读项目，调这个 → 403 `user_token_required`；仅相关任务的成员和 viewer 也 403 |
 | `projects_update` | 改项目的名字 / 颜色 / 排序，或 `archived: true / false` 归档 / 取消归档；只改传了的字段，权限同上 |

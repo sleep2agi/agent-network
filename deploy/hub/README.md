@@ -94,6 +94,30 @@ pm2 app  commhub-hub
 
 启动脚本自己维护一份变更历史,每次切换都追加「从哪到哪 + 回滚目标」。**照做,别省。**
 
+## 装 `commhub-server` 一律带 tag,并回读版本（#2141）
+
+2026-10-23 实测的两个坑,都不是"配置错",是**隐式默认值**:
+
+| 入口 | 实际行为 | 后果 |
+| --- | --- | --- |
+| `npm i -g @sleep2agi/commhub-server`（无 tag） | 装 `latest` dist-tag | 当时 `latest` 停在 `.139`,而 preview 已是 `.145` → **装到不含头像上传/会话控制的旧包**,输出只写 `installed` |
+| `anet hub start` | `bunx @sleep2agi/commhub-server@<PINNED_SERVER_VERSION>` | 钉的是 `0.9.0-preview.47` → **既不是 latest 也不是 preview** |
+
+所以:
+
+```bash
+# 装就写明 tag（当前唯一在推进的通道是 preview）
+npm i -g @sleep2agi/commhub-server@preview
+
+# 三处版本回读,任何一处对不上就别继续
+npm view @sleep2agi/commhub-server dist-tags         # 通道指向哪一版
+npm ls -g @sleep2agi/commhub-server                   # 这台机器装的是哪一版
+curl -s localhost:9200/health | grep -o '"version":"[^"]*"'   # 跑着的是哪一版
+```
+
+生产换版本仍然走上面「换版本」那套（`RUNTIME_DIR` 显式钉版本 + pm2 重载）,
+**不要**为了省事去改 `latest` dist-tag —— 那等于替所有用户做一次隐式升级。
+
 ## 为什么不用 `bunx`
 
 脚本注释里写了:`bunx --bun @sleep2agi/commhub-server@<版本>` 执行的二进制落在
