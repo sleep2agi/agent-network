@@ -4,11 +4,12 @@ CommHub #2017 is the Hub leg of #2014. It does not implement runtime background
 control, adoption, stop/start, terminal keys, or session creation. It never accepts
 a URL, filesystem path, shell command or arbitrary key sequence.
 
-All endpoints use header `Authorization: Bearer …`. Human endpoints require an
+All endpoints use header `Authorization: Bearer …`. Human endpoints require a
 persisted global human credential (`scope=user`, or legacy `scope=full`, with
-`network_id=null` and no node binding), membership in the requested network, and target node ownership or
-network owner/admin authority (a Hub admin must also be a member). Viewers and
-restricted Agent access are refused. Master/dev-open fallback and node credentials cannot substitute for a human.
+`network_id=null` and no node binding), membership in the requested network,
+and target node ownership or network owner/admin authority (a Hub admin must also be a member). Viewers and
+restricted Agent access are refused. Master/dev-open fallback and node credentials
+cannot substitute for a human.
 Valid legacy `atok_` user credentials are accepted; token spelling never grants
 identity or authority. Reads recheck the caller's current permission and token row.
 

@@ -78,3 +78,44 @@ is added here. Final-head natural real-client and complete CI results must be
 recorded separately; neither older green runs nor the local HTTP receipt count
 as fresh-head real-client success. Runtime PR2889 / client integration remains a
 separate acceptance step and is not claimed by this refresh.
+
+2026-10-23 review findings correction (CommHub task 810c32bd):
+Starting PR head was verified unchanged at c09c328a50dcc65303a354719faf2f495d6efc77.
+Only the two active findings are changed: discussion_r4343702878 and
+4343702883. The old report thread 4343702896 was verified outdated and this
+report already existed; no thread was resolved or represented as resolved.
+
+Red source: 8d7c5cb14120b91709e3e63353ff9aee5d198ffb (new tests, old product).
+Existing non-root Docker suite, --test-name-pattern '2017 review':
+0 pass / 5 fail / 18 filtered / 14 assertions, 1.54s. The decisive old behaviors
+were already_idle active=true returning 200 instead of 400 and a valid legacy
+user token returning 401 instead of 200. The other red cases also expose status
+classification differences; they are not five separate authorization bypasses.
+An initial Docker invocation omitted the explicit /work/run.sh entrypoint and
+failed before running tests ('Script not found'); it is not counted as a witness.
+
+Green product/test source: a6625ce3ec62029a9cddf42c7f08a00b366ea18f.
+Complete suite: 23 pass / 0 fail / 176 assertions, 2.00s, Bun 1.3.14.
+Reproduction of the author run (repository /home/vansin/comm-niu/.runs/2017-hub-relay):
+sg docker -c 'docker run --rm --init --cpus=2 --memory=1g --network none -v /home/vansin/comm-niu/.runs/2017-hub-relay/server/src:/work/server/src:ro -v /home/vansin/comm-niu/.runs/2017-hub-relay/agent-node/src:/work/agent-node/src:ro -v /home/vansin/comm-niu/.runs/2017-hub-relay/agent-network/src:/work/agent-network/src:ro -e SOURCE_COMMIT=$(git rev-parse HEAD) --entrypoint bash anet-test2017-identity:latest /work/run.sh'
+Cached image dependencies, current source mounted read-only, temporary isolated
+DB, no external network. Not a cold-image build or fresh-head Actions receipt.
+For a clean build use the suite Dockerfile command at the start of this report.
+The following report/wording-only commit does not claim another suite execution.
+
+New witnesses cover contradictory already_idle active/capability combinations;
+real atok hashes with historical global scope=user for owner/admin create+read;
+legacy issuer's actual global scope=full; wrong-network/non-owner rejection;
+user/unbound-network atok denial on Bridge/pull/ACK without changing the binding;
+unknown, revoked, expired and unsupported-scope credentials refused. Legacy user
+fixtures use the real createToken issuer and change scope only in the test DB.
+No bearer token is printed. Master/dev-open fallback stays refused.
+Credential classification comes from persisted scope/network/binding, never the
+raw prefix. All existing current-row membership, ownership, exact node identity,
+Bridge expected proof, one-shot claim, TTL, unknown/no replay and result field
+checks remain. request_processed may still return an active state; already_idle
+must have active=false and can_request_background=false.
+
+No runtime/client changes, main merge, deploy, release, restart, production DB,
+production configuration or credential changes. Fresh-head CI and review are
+separate gates; the previous c09c328a receipt is not inherited by this revision.
