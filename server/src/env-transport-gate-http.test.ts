@@ -19,6 +19,11 @@ let server: ReturnType<typeof Bun.serve>;
 let base = "";
 const PLAIN = "n_gate_plain";
 const TLS = "n_gate_tls";
+// #1510 acceptance names three transports: loopback passes, https passes, plain
+// public is refused. log/enforce only ever *special-case* `plain`, so loopback
+// could rot without anyone noticing it is still accepted — seed it as its own
+// node rather than folding it in with TLS, so a regression reads by name.
+const LOOPBACK = "n_gate_loopback";
 
 const post = async (path: string, token: string, body: unknown) => {
   const r = await fetch(`${base}${path}`, {
@@ -50,6 +55,7 @@ beforeAll(async () => {
   );
   seed(PLAIN, "plain");
   seed(TLS, "https");
+  seed(LOOPBACK, "loopback");
   // The transport is reported on the session row (that is where report_status
   // writes it).
   const session = (nodeId: string, transport: string) => db.run(
@@ -59,6 +65,7 @@ beforeAll(async () => {
   );
   session(PLAIN, "plain");
   session(TLS, "https");
+  session(LOOPBACK, "loopback");
 
   const mod = await import("./server.js");
   server = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
@@ -74,7 +81,7 @@ beforeEach(async () => {
   // The lane allows one pending request per node; drain whatever the previous
   // case left so the next one starts clean.
   const { pullNodeSecrets, ackNodeSecrets } = await import("./scoped-secrets.js");
-  for (const nodeId of [PLAIN, TLS]) {
+  for (const nodeId of [PLAIN, TLS, LOOPBACK]) {
     const daemon = { ok: true as const, networkId: net, daemonNodeId: nodeId, daemonAlias: nodeId };
     const pulled = pullNodeSecrets(daemon) as any;
     for (const r of (pulled?.requests ?? [])) ackNodeSecrets(daemon, r.request_id, null, true);
@@ -102,6 +109,19 @@ describe("log mode (default)", () => {
     expect(after).toBe(before);
   });
 
+  // #1510 acceptance leg 1: loopback is an allowed transport, so it must neither
+  // be refused nor pollute the would-refuse log (the log is the decision input
+  // for turning enforce on — a loopback hit in it would read as "something to
+  // block" when nothing is).
+  test("a put to a loopback node succeeds AND leaves no hit", async () => {
+    const before = (await get(`/api/networks/${net}/env-transport-log`, ownerToken)).body.total;
+    const r = await post(`/api/nodes/${LOOPBACK}/secrets?network_id=${net}`, ownerToken, { action: "put", key: "LB_KEY", value: "v", revision: 1 });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    const after = (await get(`/api/networks/${net}/env-transport-log`, ownerToken)).body.total;
+    expect(after).toBe(before);
+  });
+
   test("list is not observed (it carries no secret)", async () => {
     const before = (await get(`/api/networks/${net}/env-transport-log`, ownerToken)).body.total;
     await post(`/api/nodes/${PLAIN}/secrets?network_id=${net}`, ownerToken, { action: "list" });
@@ -122,6 +142,17 @@ describe("enforce mode", () => {
     process.env.ANET_SECRET_TRANSPORT_GATE = "enforce";
     const r = await post(`/api/nodes/${TLS}/secrets?network_id=${net}`, ownerToken, { action: "put", key: "D_KEY", value: "v", revision: 1 });
     expect(r.status).toBe(200);
+  });
+
+  // #1510 acceptance: "loopback 通过 / https 通过 / 明文公网被拒". enforce is
+  // defined as *refuse plain* — loopback is a local link and must keep working
+  // under enforce, otherwise turning the gate on would break the one transport
+  // it exists to protect.
+  test("a loopback node passes enforce too", async () => {
+    process.env.ANET_SECRET_TRANSPORT_GATE = "enforce";
+    const r = await post(`/api/nodes/${LOOPBACK}/secrets?network_id=${net}`, ownerToken, { action: "put", key: "LB2_KEY", value: "v", revision: 1 });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
   });
 });
 
