@@ -207,7 +207,11 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // tools. Measured on this combined tree: all 95 / 85,069 B; node 62 / 63,281 B
   // unchanged (protocol tools stay off the node list); user 62 / 59,409 B.
   // Ceilings keep about 400 B and nothing else.
-  const CEILINGS = { node: 63_700, user: 59_810, all: 85_500 } as const;
+  // #1894（2026-10-23）：新增一个 `departments` MCP 工具（list/create/update/delete/
+  // assign_agent 合并成一个，尽量小）。实测 node 64,112 B / user 60,117 B，比原上限
+  // 分别高 412 / 279 B —— 这是有意的功能增长（组织架构可由 Agent 直接调），不是文案偷偷变长。
+  // 留约 400 B 余量；再要加工具时请先合并动作或砍描述，别连续抬上限。
+  const CEILINGS = { node: 64_500, user: 60_500, all: 86_500 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);
