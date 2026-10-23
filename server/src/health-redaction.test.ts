@@ -640,3 +640,46 @@ describe("#506 cross-network isolation of /health sse_sessions (same alias, two 
     expect(keys.some((k) => k.startsWith(`${aNet}:`))).toBe(false);
   });
 });
+
+// #2149 —— 错误路径**不能回显凭据**。
+//
+// 背景：2026-10-23 TMA云鲸 对 CommHub MCP 做只读扫描时收到 502，代理生成的
+// 非 JSON 错误页把本次请求的鉴权相关头回显在正文里。那个 502 页很可能来自
+// 调用链上的代理（本仓没有 502 生成逻辑），但**这条防线必须在本仓也有**：
+// 任何 4xx/5xx 的响应体都不该把调用方递上来的 `Authorization` / `Cookie` /
+// query 里的 token 原样吐回去 —— 一旦有人写出这种错误文案，它就会进日志、
+// 进回执、进诊断归档。
+//
+// 做法是**注入一个形状像真凭据的 canary**，然后打一圈错误路径，断言响应正文
+// 里一次都不出现它。canary 用 `ntok_` 前缀，正是本仓 `redactTokens` 认得的形状。
+describe("#2149 error paths never echo credentials", () => {
+  const CANARY = "ntok_LEAKCANARY_0123456789abcdef";
+  const COOKIE = "session=COOKIELEAKCANARY0123456789";
+
+  const paths: Array<{ method: string; path: string; body?: string }> = [
+    { method: "GET", path: "/api/nope-not-a-route" },
+    { method: "GET", path: "/api/requirements" },
+    { method: "GET", path: "/api/nodes" },
+    { method: "POST", path: "/mcp", body: "{not json" },
+    { method: "POST", path: "/api/auth/login", body: JSON.stringify({ username: "nobody", password: "wrong-password-Aa1!" }) },
+    { method: "POST", path: "/api/auth/me/avatar/upload" },
+  ];
+
+  test("no 4xx/5xx body contains the presented token, cookie or query secret", async () => {
+    for (const c of paths) {
+      const res = await fetch(`${BASE}${c.path}${c.path.includes("?") ? "&" : "?"}access_token=${CANARY}`, {
+        method: c.method,
+        headers: {
+          authorization: `Bearer ${CANARY}`,
+          cookie: COOKIE,
+          "content-type": "application/json",
+        },
+        body: c.body,
+      });
+      const text = await res.text();
+      expect(text.includes(CANARY)).toBe(false);
+      expect(text.includes("LEAKCANARY")).toBe(false);
+      expect(text.includes("COOKIELEAKCANARY")).toBe(false);
+    }
+  });
+});
