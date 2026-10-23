@@ -192,7 +192,7 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
       expect((await pull()).body.request.request_id).toBe(made.body.request_id);
     } finally { abort.abort(); await reader.cancel().catch(() => {}); }
   });
-  test("node, peer, anonymous, legacy and member cannot impersonate human owner/admin", async () => {
+  test("node, peer, anonymous, master and member cannot impersonate human owner/admin", async () => {
     for (const token of [ntok.token, peer.token, "", "legacy-test-only", member.token, outsider.token]) {
       expect((await api(token, root, { network_id: net, node_id: nodeId, operation: "state" })).status).toBeGreaterThanOrEqual(400);
     }

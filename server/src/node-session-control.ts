@@ -43,9 +43,13 @@ function credential(tokenId: string): Credential | null {
 function node(nodeId: string): Node | null {
   return db.get<Node>("SELECT node_id,network_id,owner_user_id,alias FROM nodes WHERE node_id=?1", nodeId) ?? null;
 }
+function isHumanCredential(c: Credential | null): c is Credential {
+  return !!c && c.network_id === null && c.bound_node_id === null
+    && (c.scope === "user" || c.scope === "full");
+}
 function human(tokenId: string, n: Node): boolean {
   const c = credential(tokenId);
-  if (!c || c.network_id || !n.network_id) return false;
+  if (!isHumanCredential(c) || !n.network_id) return false;
   const role = getUserNetworkRole(c.user_id, n.network_id);
   return !!role && role !== "viewer" && !isAgentRestricted(c.user_id, n.network_id)
     && (c.user_id === n.owner_user_id || role === "owner" || role === "admin" || c.role === "admin");
@@ -85,7 +89,9 @@ function state(value: unknown, e: Entry): boolean {
 function validResult(v: unknown, e: Entry): boolean {
   if (e.operation === "state") return state(v, e);
   return object(v) && keys(v, ["outcome", "state"])
-    && (v.outcome === "request_processed" || v.outcome === "already_idle") && state(v.state, e);
+    && (v.outcome === "request_processed" || v.outcome === "already_idle") && state(v.state, e)
+    && (v.outcome !== "already_idle" || (object(v.state)
+      && v.state.active === false && v.state.can_request_background === false));
 }
 
 /** One finite, process-local relay per Hub boot. Restart loses requests (404),
@@ -123,12 +129,15 @@ export function createNodeSessionControlRelay() {
   return async function handle(req: Request, url: URL): Promise<Response | null> {
     if (url.pathname !== ROOT && !url.pathname.startsWith(`${ROOT}/`)) return null;
     try {
-    // Header-only, exact credential kinds; no legacy master/dev-open fallback.
+    // Header-only, persisted credential authority; no master/dev-open fallback.
     const raw = req.headers.get("authorization")?.match(/^Bearer (\S+)$/)?.[1] ?? "";
-    const auth = /^(utok_|ntok_)/.test(raw) ? resolveToken(raw) : null;
+    const auth = resolveToken(raw);
     if (!auth?.tokenId) return fail("session_control_unavailable", 401);
     const tokenId = auth.tokenId;
-    const isHuman = raw.startsWith("utok_") && !auth.networkId;
+    const c = credential(tokenId);
+    if (!c) return fail("session_control_unavailable", 401);
+    const isHuman = isHumanCredential(c);
+    const isNode = c.scope === "network" && !!c.network_id;
     const suffix = url.pathname.slice(ROOT.length);
       if (req.method === "GET" && /^\/(bg|sc)_\d{13}_[A-Za-z0-9_-]{8,64}$/.test(suffix)) {
         const e = entries.get(suffix.slice(1));
@@ -148,7 +157,7 @@ export function createNodeSessionControlRelay() {
       if (!v) return fail("session_control_request_invalid", 400);
       const now = Date.now();
       if (suffix === "/bridge") {
-        if (isHuman || !raw.startsWith("ntok_")) return fail("session_control_unavailable", 403);
+        if (!isNode) return fail("session_control_unavailable", 403);
         if (!keys(v, ["session_id", "binding_id", "expected"]) || !id(v.session_id) || !id(v.binding_id)
           || !object(v.expected) || !keys(v.expected, ["node_id", "network_id"])
           || !id(v.expected.node_id) || !id(v.expected.network_id)) return fail("session_control_request_invalid", 400);
@@ -202,7 +211,7 @@ export function createNodeSessionControlRelay() {
         pushEvent(n.alias, { type: "session_control", request_id }, n.network_id);
         return ok({ request_id, status: "pending", expires_at: now + TTL });
       }
-      if (isHuman || !raw.startsWith("ntok_")) return fail("session_control_unavailable", 403);
+      if (!isNode) return fail("session_control_unavailable", 403);
       const n = bound(tokenId);
       if (!n) return fail("session_control_unavailable", 403);
       const k = key(n), b = bridges.get(k);

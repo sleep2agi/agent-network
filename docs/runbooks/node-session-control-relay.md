@@ -5,10 +5,12 @@ control, adoption, stop/start, terminal keys, or session creation. It never acce
 a URL, filesystem path, shell command or arbitrary key sequence.
 
 All endpoints use header `Authorization: Bearer …`. Human endpoints require an
-actual `utok_`, membership in the requested network, and target node ownership or
+persisted global human credential (`scope=user`, or legacy `scope=full`, with
+`network_id=null` and no node binding), membership in the requested network, and target node ownership or
 network owner/admin authority (a Hub admin must also be a member). Viewers and
-restricted Agent access are refused. Legacy master, dev-open, and node credentials
-cannot substitute for a human. Reads recheck the caller's current permission.
+restricted Agent access are refused. Master/dev-open fallback and node credentials cannot substitute for a human.
+Valid legacy `atok_` user credentials are accepted; token spelling never grants
+identity or authority. Reads recheck the caller's current permission and token row.
 
 | Endpoint | JSON body / response |
 | --- | --- |
@@ -24,7 +26,8 @@ TTL is 15s. SSE on the existing node/network stream sends only
 `{type:"session_control",request_id}`. It is a doorbell, never an instruction;
 reconnect and doorbell handling should singleflight-pull independently of turns.
 
-Node endpoints require a valid `ntok_` with an immutable `bound_node_id`, matching
+Node endpoints require a valid persisted `scope=network` credential with an
+immutable `bound_node_id`, matching
 network and exact token ID. Alias-only legacy tokens are refused. On every handle
 or session replacement the Bridge must change `binding_id`. Replaced generations
 are remembered for this Hub process and cannot register back over a newer one.
@@ -51,8 +54,10 @@ Human create/read and node pull/ACK fields remain unchanged.
 `state` success carries exactly
 `{session_id,binding_id,supported,active,can_request_background,observed_at}`.
 `background` success carries exactly
-`{outcome:"request_processed"|"already_idle",state:State}`. `request_processed`
-means the request was handled, including a runtime HTTP 204; it does **not** claim
+`{outcome:"request_processed"|"already_idle",state:State}`.
+For `already_idle`, State must have both `active=false` and
+`can_request_background=false`; a contradictory receipt is invalid/unknown, not done.
+`request_processed` means the request was handled, including a runtime HTTP 204; it does **not** claim
 that a tool actually moved to background. A failed ACK accepts only the documented
 `session_control_{unavailable,changed,unsupported,invalid_response,request_invalid,request_expired,request_limit}`
 or `session_background_outcome_unknown` error code. Raw exceptions, addresses and
