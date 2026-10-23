@@ -15,8 +15,6 @@ name: lint (L1 trigger sync)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   scan:

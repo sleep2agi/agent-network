@@ -21,9 +21,6 @@ name: lint (from_session guard)
 
 on:
   pull_request:
-  push:
-    branches: [main]
-
 concurrency:
   group: lint-from-session-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

@@ -19,13 +19,6 @@ on:
       - 'docs-site/docs/**'
       - '.github/scripts/check-docs-locale-parity.py'
       - '.github/workflows/docs-locale-parity.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'docs-site/docs/**'
-      - '.github/scripts/check-docs-locale-parity.py'
-      - '.github/workflows/docs-locale-parity.yml'
-
 jobs:
   parity:
     name: docs-locale-parity

@@ -17,8 +17,6 @@ name: lint (copresence profile pin)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   pin:

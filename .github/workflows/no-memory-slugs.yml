@@ -29,9 +29,6 @@ on:
   #
   # 代价实测:main 上最近三次运行 11s / 10s / 14s。
   pull_request:
-  push:
-    branches: [main]
-
 jobs:
   no-memory-slugs:
     name: no internal [[feedback_*]] slug references

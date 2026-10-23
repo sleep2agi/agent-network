@@ -16,8 +16,6 @@ name: lint (query-token ratchet)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   ratchet:

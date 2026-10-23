@@ -15,8 +15,6 @@ name: lint (base image pin)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   scan:

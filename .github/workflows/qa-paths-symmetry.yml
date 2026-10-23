@@ -12,8 +12,6 @@ name: lint (qa paths symmetry)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   scan:

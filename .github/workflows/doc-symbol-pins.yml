@@ -22,9 +22,6 @@ name: lint (doc symbol pins)
 on:
   # 刻意不加 paths —— 这道门要防的就是「锚点漂了而改动落在过滤之外」。
   pull_request:
-  push:
-    branches: [main]
-
 jobs:
   doc-symbol-pins:
     # 全仓唯一的 job name —— 分支保护里的 required check 只能按这个名字写。

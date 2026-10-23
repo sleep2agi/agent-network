@@ -16,8 +16,6 @@ name: lint (home path baseline)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   scan:

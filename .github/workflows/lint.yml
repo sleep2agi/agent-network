@@ -26,13 +26,6 @@ on:
       - 'tests/**'
       - 'agent-network/tests/**'
       - '.github/workflows/lint.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'tests/**'
-      - 'agent-network/tests/**'
-      - '.github/workflows/lint.yml'
-
 concurrency:
   group: lint-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

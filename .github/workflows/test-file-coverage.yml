@@ -21,18 +21,6 @@ on:
       - '.github/workflows/qa.yml'
       - '.github/scripts/check-test-file-coverage.py'
       - '.github/workflows/test-file-coverage.yml'
-  push:
-    branches: [main]
-    paths:
-      - '**/*.test.ts'
-      - 'tests/test725-agent-node-unit-ci/**'
-      - 'tests/test745-agent-network-unit-ci/**'
-      - 'tests/test798-server-unit-ci/**'
-      # qa.yml 决定这三个门到底跑不跑 —— 它一改,本门的前提就可能塌(codex P1)
-      - '.github/workflows/qa.yml'
-      - '.github/scripts/check-test-file-coverage.py'
-      - '.github/workflows/test-file-coverage.yml'
-
 concurrency:
   group: lint-test-coverage-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

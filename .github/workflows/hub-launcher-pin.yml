@@ -24,8 +24,6 @@ name: lint (hub launcher pin)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   scan:

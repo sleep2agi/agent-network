@@ -14,8 +14,6 @@ name: lint (bun install pin)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   scan:

@@ -23,8 +23,6 @@ name: lint (qa trigger coverage)
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 jobs:
   scan:

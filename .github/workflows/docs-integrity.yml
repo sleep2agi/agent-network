@@ -31,15 +31,6 @@ on:
       - '.github/scripts/check-release-channel-assertions.py'
       - 'docs/RELEASE-SOP.md'
       - '.github/workflows/docs-integrity.yml'
-  push:
-    branches: [main]
-    paths:
-      - '**/*.md'
-      - '.github/scripts/check-docs-integrity.py'
-      - '.github/scripts/check-release-channel-assertions.py'
-      - 'docs/RELEASE-SOP.md'
-      - '.github/workflows/docs-integrity.yml'
-
 jobs:
   scan:
     # 这个 name 就是 GitHub 上那个 check 的名字，也是分支保护里 required check

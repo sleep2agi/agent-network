@@ -14,9 +14,6 @@ on:
   # 与本仓其它守卫一致：刻意不加 paths。带 paths 的 workflow 在不匹配的 PR 上
   # 不产生 check-run，永远做不了 required check。
   pull_request:
-  push:
-    branches: [main]
-
 jobs:
   l1-sha-binding:
     # 全仓唯一的 job name —— required check 只能按这个名字写。

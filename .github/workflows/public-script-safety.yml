@@ -20,9 +20,6 @@ on:
   #
   # 代价实测:main 上最近三次运行 11s / 13s / 9s。
   pull_request:
-  push:
-    branches: [main]
-
 jobs:
   scan:
     # 这个 name 就是 GitHub 上那个 check 的名字，也是分支保护里 required check
