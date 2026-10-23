@@ -312,13 +312,23 @@ describe("old clients unaffected", () => {
 });
 
 describe("scheduler re-checks the creating node as it is now", () => {
+  // #2115 —— `at` 原来是 `now - 5s - random(0..1000ms)`：两次调用只要「晚的毫秒差」正好等于两个
+  // 随机值之差，算出的 `at` 就完全相同，于是第二次按 `scheduled_for = at` 读到的是**上一轮那行**
+  // （于是 test638 L2 并发聚合偶发「期望 creator_node_gone、得到 creator_node_readonly」）。
+  // 注释里说「随机」的人以为碰撞概率是 1/1000，其实是「随机差 == 时间差」，慢机器上时间差几十毫秒
+  // 就落在这个窗口里。改成单调递推：每次减 1s，任何两次调用都不可能相等。
+  let dueSeq = 0;
   const dueAndRun = async (id: string) => {
-    const at = new Date(Date.now() - 5_000 - Math.floor(Math.random() * 1000)).toISOString();
+    dueSeq += 1;
+    const at = new Date(Date.now() - 5_000 - dueSeq * 1_000).toISOString();
     db.run("UPDATE scheduled_tasks SET next_run_at = ?1 WHERE schedule_id = ?2", [at, id]);
     const { runDueScheduledTasks } = await import("./scheduled-tasks.js");
     runDueScheduledTasks();
-    return db.get<{ status: string; error_code: string | null; task_id: string | null }>(
-      "SELECT status, error_code, task_id FROM scheduled_task_runs WHERE schedule_id = ?1 AND scheduled_for = ?2", id, at)!;
+    const row = db.get<{ status: string; error_code: string | null; task_id: string | null }>(
+      "SELECT status, error_code, task_id FROM scheduled_task_runs WHERE schedule_id = ?1 AND scheduled_for = ?2", id, at);
+    // 把「这一轮根本没跑出 run 行」和「跑出了但结论不对」分开报 —— 前者是夹具问题，后者才是行为问题。
+    expect(row).toBeTruthy();
+    return row!;
   };
   test("owner changes to a user not granted the target: send_task denied, and so is every scheduled run", async () => {
     const id = (await create("a", { target_node_id: node.b.id })).schedule.schedule_id;
