@@ -74,8 +74,28 @@ Run with the same env as the previous instance (at minimum `PORT` and
 (`network_tag_nodes`) with `CREATE TABLE IF NOT EXISTS`; the existing
 `network_tags` colour table is unchanged.
 
-## Rollback
+## Upgrade / rollback
 
-Keep the previous runtime directory (`runtime-v147-preview147`) and point
-`HUB_RUNTIME_DIR` back to it. The new table is additive and ignored by `.147`,
-so no data rollback is needed.
+A self-hosted Hub upgrades by **a new runtime directory**, never an in-place
+`npm update` — the old directory is the rollback:
+
+```bash
+# 1) what is running now
+curl -s localhost:9200/health | grep -o '"version":"[^"]*"'
+# 2) build the new runtime dir (explicit version, never a bare tag)
+DIR="$HOME/.commhub/runtime-v148-preview148"
+install -d -m 700 "$DIR" && umask 077
+printf '{"name":"commhub-runtime","private":true,"version":"1.0.0","dependencies":{"@sleep2agi/commhub-server":"0.9.0-preview.148"}}' > "$DIR/package.json"
+(cd "$DIR" && bun install --production)
+# 3) point HUB_RUNTIME_DIR at $DIR in ~/.local/bin/hub-daemon.sh, then reload
+pm2 reload commhub-hub --update-env
+# 4) read the version back — do not trust a 200 alone
+curl -s localhost:9200/health | grep -o '"version":"0.9.0-preview.148"'
+```
+
+`anet upgrade` upgrades the CLI package, not a self-hosted Hub runtime; it is not
+a substitute for step 2.
+
+**Rollback**: point `HUB_RUNTIME_DIR` back at `runtime-v147-preview147` and
+reload. The new table `network_tag_nodes` is additive and `.147` ignores it, so
+no data rollback is needed.
