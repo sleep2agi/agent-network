@@ -8,6 +8,8 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const expectedTools = [
+  // #1894 —— 组织架构（一个工具合并 list/create/update/delete/assign_agent）。tools.ts 里注册在最前面。
+  "departments",
   "submit_skill", "list_skills", "get_skill", "review_skill",
   "report_status", "report_completion", "get_inbox", "ack_inbox",
   "mark_tasks_runtime_submitted", "mark_tasks_consumed", "get_all_status", "get_session_status",
