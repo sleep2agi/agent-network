@@ -77,5 +77,11 @@ check_feature "strict PNG validation"           "interlaced_unsupported"   "0.9.
 check_feature "node session control relay"      "node-session-control"     "0.9.0-preview.145"
 check_feature "departments MCP tool"            '"departments"'            "0.9.0-preview.146"
 check_feature "departments assign_agent action" '"assign_agent"'           "0.9.0-preview.146"
+# .148 标签创建与父子层级:能力位、写接口、树表、读面的 nodes 一起断言 ——
+# 少任何一样,客户端按 tag_tree 显示「新建子标签」就会调到一个不存在的路由。
+check_feature "tag tree capability"             '"tag_tree"'               "0.9.0-preview.148"
+check_feature "tag create endpoint"             "requirements/tags/create" "0.9.0-preview.148"
+check_feature "tag node table"                  "network_tag_nodes"        "0.9.0-preview.148"
+check_feature "tag tree in the tags response"    "nodes"                    "0.9.0-preview.148"
 
 echo "== RESULT: PASS ($PKG@$VERSION)"

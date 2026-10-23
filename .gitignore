@@ -6,6 +6,9 @@ demos/codex-telegram-squad/.env
 
 # dependencies
 node_modules/
+# 上面那条带斜杠只匹配目录;本地为跑测试建的**软链** node_modules 不匹配,会被 git add 进来
+# (2026-10-23 #2935 就这样让一轮 Docker job 全红: cannot replace ... /server/node_modules with file)
+node_modules
 *.lock
 
 # build output
