@@ -7,7 +7,7 @@
      latest 标记已核对的通道版本，preview 标记本页核对的版本；是否发布另核 npm 精确版本；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.190 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.190 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.191 -->
 
 从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。
 
@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.190`）打印随机密码（该路径自 `.181` 起未改），形如 `anet-` 加 22 位十六进制字符。**已发布**的 CLI `2.3.0-preview.190` 相对 `.189` 的配对变更指向已发布的 agent-node `2.5.0-preview.153`；这两个精确版本已核实可从 npm 查询。节点新增行为限于 V1 admission（提交前等待）路径：标记 task 与提交者，并在 session 查询的 404 计数达到门槛后以 `owner_left` 结束等待。**404 不证明 TUI 负责人离开**；`.153` 的部分 status 错误路径尚未重置计数，该发布包不包含后续连续缺失修复。这不代表 V2 等价支持、已提交 turn 的收尾或舰队升级已经验收；默认 30 分钟预算不变。**默认初始化 / 随机密码路径未改动。**
+已核对的 `latest`（`2.3.0-preview.190`）打印随机密码（该路径自 `.181` 起未改），形如 `anet-` 加 22 位十六进制字符。**已发布**的 CLI `2.3.0-preview.191` 相对 `.190` 只改配对常量，指向已发布的 agent-node `2.5.0-preview.154`；这两个精确版本已核实可从 npm 查询。`.154` 相对 `.153` 带的是运行时能力与修复：OpenCode V2 **原会话**的 `state` / `background` 一次式中继（#2016，短 TTL、一次性 claim、unknown 不重放）、热能力缺失时恢复请求的 V2 模型重启（#2050）、已知运行时失败不再经 vendor 重放（#2903）、任何非 404 观测都重置 `owner_left` 证据（#2901）。**`state` / `background` 只在节点升级并重启后可用；旧节点会明确拒绝（`403 session_control_unavailable`）。404 不证明 TUI 负责人离开。** 这不代表 V2 等价支持、已提交 turn 的收尾或舰队升级已经验收；默认 30 分钟预算不变。**默认初始化 / 随机密码路径未改动。**
 精确版本已发布不代表通道标记永远指向它，也不代表现役节点已升级。当前通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
