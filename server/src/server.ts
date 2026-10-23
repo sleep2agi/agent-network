@@ -4918,9 +4918,18 @@ return Bun.serve({
         isPrivileged = true;
       }
 
+      // #973 — the daemon's self-reported runtime version. Nodes already send
+      // `version` in report_status (agent-node/src/cli.ts writes AGENT_NODE_VERSION)
+      // and the Hub stores it on the session row — that is why /api/status shows it.
+      // `nodes` has no version column, so read the daemon's newest session row.
+      // Absent stays absent: a daemon that never reported must read as "unknown",
+      // never as a made-up version.
       const sqlRows = hostSupervisorIdentityRows(`SELECT n.node_id, n.alias, n.hostname, n.network_id, n.owner_user_id,
           n.runtimes_supported, n.allowed_secret_keys,
-          n.created_at, n.updated_at, n.config_snapshot
+          n.created_at, n.updated_at, n.config_snapshot,
+          (SELECT s.version FROM sessions s
+             WHERE s.network_id = n.network_id AND s.node_id = n.node_id
+             ORDER BY s.updated_at DESC LIMIT 1) AS reported_version
         FROM nodes n WHERE n.network_id = ?1 ORDER BY n.updated_at DESC`, [effectiveNetId]);
 
       const nowMs = Date.now();
@@ -5025,6 +5034,9 @@ return Bun.serve({
             allowed_secret_keys: secrets,
             host_telemetry: telemetry,
           };
+          // #973 — only when the daemon actually reported one (see the SQL comment).
+          const reportedVersion = (r as unknown as { reported_version?: string | null }).reported_version;
+          if (typeof reportedVersion === "string" && reportedVersion) out.agent_node_version = reportedVersion;
           if (lifecycleUser && typeof adoptCapable === "boolean") {
             // Do not reveal even the new capability for a node the user cannot read.
             const visibleParams: any[] = [r.node_id];
