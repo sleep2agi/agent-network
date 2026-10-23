@@ -1,5 +1,7 @@
-ARG TEST2014_SOURCE_COMMIT=dev
 FROM oven/bun:1.3.14
+# ARG 在 FROM 之前只属于「全局作用域」，FROM 之后必须重新声明才能被 ENV/RUN 看到；
+# 少这一行会让 ENV 展开成空串，fail-closed 断言就会误伤每一次构建。
+ARG TEST2014_SOURCE_COMMIT=dev
 WORKDIR /app
 COPY agent-node/src ./src
 COPY agent-node/package.json ./package.json
