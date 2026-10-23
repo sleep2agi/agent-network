@@ -18,6 +18,8 @@
 
 **工时：17–23 人日（含缓冲 20–26）**，其中 **M0 摸底 2 天就能给出「能不能做、真实工时多少」的硬结论**，M1 结束（约第 7 天）能看到一个真实节点回消息。**人机共存是 v1 验收项**（见 §7）。
 
+**已做无 key 只读探针**（见 [`../research/kimi-code-runtime-probe.md`](../research/kimi-code-runtime-probe.md)）：共享 server、per-session 模型/权限/MCP、跨进程 session 锁、TUI 与 Web 的共存差异都已实测确认，§7 / §12.3 的待验证项已收敛。
+
 **共存成本低**：Kimi 的会话是**服务端共享**的，人用 TUI/web 和 Agent 走 API 是**同一个 session**；共存要解决的是「同一 session 的多写者仲裁」，而不是像 Codex 那样驱动 PTY 把网络 turn 塞进别人的进程（那条线写了 3200 行）。
 
 ---
@@ -62,7 +64,7 @@
 - 官方明确：**不会**自动读取 shell 的 `KIMI_API_KEY`，必须显式写在 `config.toml` 里或指向 `api_key_env`。
 - 权限模式一档到位：`default_permission_mode = "manual" | "auto" | "yolo"`，另有 `[[permission.rules]]` 细粒度规则和 `dangerous_command_guard` 总闸。
 - MCP 声明在 `~/.kimi-code/mcp.json`（或项目内 `.kimi-code/mcp.json`），支持 http/stdio/sse。
-- 安装：官方 `install.sh` / `install.ps1`（单文件二进制，不依赖 Node）；npm 上也有 `kimi-code@1.0.11`。Windows 需要 Git Bash，`KIMI_SHELL_PATH` 可覆盖。
+- 安装：**官方单文件二进制**，从 GitHub Releases 下载 `kimi-code-<platform>.tar.gz` + `.sha256` 校验（实测 2.3.0 linux-x64 = 184 MB）。⚠️ **npm 上的 `kimi-code` 是第三方 Groq proxy，不是官方 CLI，禁止使用**（见调研 §0.1）。官方 `install.sh` 域名在部分网络不可达，产品化一律走 Releases。Windows 需要 Git Bash，`KIMI_SHELL_PATH` 可覆盖。
 
 ### 2.3 与我们现有代码的同构度（决定工时）
 
@@ -223,10 +225,14 @@ node daemon ──拥有── kimi web（loopback + Bearer token，独立 KIMI_
 
 `kimi --session <id>` 到底是**连到运行中的 server**（共享同一引擎），还是**另起一个引擎直接读写同一份 session 数据**（双写）—— 官方文档没写死。这决定共存是「客户端仲裁」还是「必须加文件级互斥」：
 
-| 探针结果 | 对策 | 工时影响 |
+**探针已答（2026-10-23，v2.3.0 源码 + 实测）**：TUI 走 `harness.resumeSession` 起**自己的引擎**，不连 `kimi web`。但 Kimi 有**跨进程 session 排他锁**（`<home>/locks/sessions/<sid>`，记 pid/hostname/startedAt，持有者进程死亡会自动接管，不需要我们自己造文件互斥）：
+
+| 形态 | 共享引擎？ | 共存语义 |
 |---|---|---|
-| TUI 连 server（共享） | 直接做，冲突走 `40931/40932` | 按计划（M4 5–8 天） |
-| TUI 独立引擎（双写 session 文件） | 人类前台期间 daemon **完全不上报注入**（只排队）+ 文件级互斥 | +1–2 天 |
+| **Web UI**（`kimi web` 自带） | ✅ 同进程 | 真·同时共享：人和 Agent 是同一引擎的两个客户端 |
+| **TUI**（`kimi --session <S>`） | ❌ 独立引擎 | **排他交接**：谁持锁谁写，另一方 `40931`，人退出后 Agent 才能继续 |
+
+因此 v1 按「**TUI 交接**」实现（复用现有 tmux + #2014 语义），**不需要**文件级互斥（那 1–2 天风险已消除）；「同时看见」的需求只有浏览器前台能满足，见 §7.4。
 
 ### 7.4 浏览器前台：不在 v1
 
@@ -305,10 +311,11 @@ REST `POST /api/v1/sessions` 是否接受 **per-session mcpServers**：
 - **REST 文档只列了** `workspace_id` / `metadata` / `default_workspace` / `title` / `agent_config`，没有 `mcpServers` 字段；
 - 但 `metadata` 是自由对象，且存在 `/api/v2/mcp` 服务端管理面 —— 需要实测能不能在 `metadata` 里带、或有没有别的 per-session 通道。
 
-| 探针结果 | 共享 server 方案 | 代价 |
-|---|---|---|
-| REST 支持 per-session MCP | ✅ 直接共享 server，节点各自注入 MCP | 无 |
-| REST 不支持 | 两选一：<br>① 共享 server + 节点共用一套 MCP 身份（同机节点视为同一身份，审计粒度变粗）<br>② 退回 **每节点一个 server**（独立 home，MCP 各管各的） | ① 0 天但要 admin 认可身份摊平<br>② +2–3 天（生命周期、端口、血崩隔离） |
+**探针已答（2026-10-23）**：`POST /api/v1/sessions` 的 `agent_config.mcp_servers` 是**字符串数组**（按名选择），MCP 注册走 `/api/v2/mcp/servers`；http/sse 条目支持 **`headers`** 与 **`bearerTokenEnvVar`**。
+
+→ **共享 server + 每节点独立 MCP 凭据是可行的**，身份不摊平：一个 home 的 `mcp.json` 里放 N 个条目（node-a / node-b …，各自带自己的 Bearer），session 创建时按名选自己的那个。
+
+唯一约束：`bearerTokenEnvVar` 读的是 **server 进程的环境变量**，所以 **server 必须由 daemon 启动**（不能复用别人随手起的实例），启动时注入 N 个 `KIMI_MCP_TOKEN_*`。
 
 ### 12.4 共享 server 的工程要点（不论 MCP 结论如何都要做）
 
