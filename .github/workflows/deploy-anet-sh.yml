@@ -65,6 +65,8 @@ jobs:
           npx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
           npx vercel@latest build --prod --token="$VERCEL_TOKEN"
           # 🔴 退出码不穿管道:先落盘再看,否则 $? 抓的是 tee/grep 的。
+          # prebuilt 的本地证据必须先存在，否则 --prebuilt 会走远端构建。
+          test -d .vercel/output || { echo "::error::缺少 .vercel/output —— prebuilt 构建产物不存在"; exit 1; }
           npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN" > deploy.log 2>&1 || rc=$?
           cat deploy.log
           [ "${rc:-0}" -eq 0 ] || { echo "::error::部署失败(rc=$rc)"; exit "$rc"; }
@@ -72,12 +74,20 @@ jobs:
           #    这一行是它的放行判据 —— **做成断言,不是打印给人看**。
           #    实测 2026-08-30:照旧 README 手工部署 4 次,4 次全走远端构建、0 次 prebuilt,
           #    而每次日志都在眼前。「靠人看日志」在这件事上是 0/4。
-          grep -Fq 'Using prebuilt build artifacts' deploy.log || {
-            echo "::error::日志里没有 'Using prebuilt build artifacts' —— 这次很可能走了远端构建(#1163 成本红线)。"
-            echo "::error::检查 deploy 是否仍带 --prebuilt、以及 vercel build 是否真的产出了 .vercel/output。"
+          # 断言改成「部署确实完成 + 部署阶段没有远端构建步骤」，不再依赖某句文案。
+          # Vercel CLI 65.2.0 起 `deploy --prebuilt` 不再打印 'Using prebuilt build artifacts'，
+          # 于是旧断言在部署**成功**时也会红（run 39883912290：站点已更新到 0.2.288，job 却 failure）。
+          grep -Fq 'Inspect' deploy.log || {
+            echo "::error::deploy.log 里没有 'Inspect' —— 这次部署没有真正完成。"
             exit 1
           }
-          echo "✅ deployed docs-site → anet.sh (prebuilt confirmed)"
+          # 远端构建的指纹：部署阶段之后又出现依赖安装/构建。
+          if sed -n '/Deploying /,$p' deploy.log | grep -Eq 'Installing dependencies|Running "npm run build"|Cloning github.com'; then
+            echo "::error::部署阶段出现了远端构建步骤 —— 违反 #1163 成本红线（应走 --prebuilt）。"
+            sed -n '/Deploying /,$p' deploy.log | grep -E 'Installing dependencies|Running "npm run build"|Cloning github.com' | head -5
+            exit 1
+          fi
+          echo "✅ deployed docs-site → anet.sh (prebuilt confirmed: no remote build steps)"
 
       # 🔴 「部署成功」不等于「内容上线了」。上面那条 prebuilt 断言证明的是
       #    **没有走远端构建**(成本红线),它对「这次改的那句话到底在不在线上」
