@@ -690,6 +690,20 @@ jobs:
       - name: Plan
         id: plan
         run: python3 .github/scripts/ci-docs-only.py plan >> "$GITHUB_OUTPUT"
+      # #2136 第二步：**只报告**，不改变任何 job 的跑/不跑。
+      # 目的：先积累"如果按套件子树收窄，会跳过哪些套件"的真实数据（每个 PR 的 job summary 里），
+      # 人肉确认没漏跑之后，才谈把它接进 if:。判据在 scripts/qa-suite-scope-report.py 文件头。
+      - name: Suite scope report (observability only — never skips a suite)
+        run: |
+          set -euo pipefail
+          git diff --name-only --no-renames HEAD^1 HEAD > /tmp/changed.txt || true
+          {
+            echo '### qa suite scope (report only)'
+            echo '```'
+            python3 scripts/qa-suite-scope-report.py --stdin < /tmp/changed.txt
+            echo '```'
+            echo '> 这一段**不改变任何套件的执行**；它只是把"按子树收窄会跳多少"记录下来供复核（#2136）。'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release-sync-dry-run:
     name: release version sync dry-run (Docker)
