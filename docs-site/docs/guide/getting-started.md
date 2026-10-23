@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.190`）打印随机密码（该路径自 `.181` 起未改），形如 `anet-` 加 22 位十六进制字符。**已发布**的 CLI `2.3.0-preview.192` 相对 `.191` 只改配对常量，指向已发布的 agent-node `2.5.0-preview.155`；这两个精确版本已核实可从 npm 查询。`.155` 相对 `.154` 修的是「复用 host-shared OpenCode server」在正常主机上必然失败的问题（读不到别人/同 uid 但不可 dump 的 `/proc/<pid>/fd` 被当成权限拒绝，导致 daemon 建的节点退回无凭据的私有 server）；`.154` 相对 `.153` 带的是运行时能力与修复：OpenCode V2 **原会话**的 `state` / `background` 一次式中继（#2016，短 TTL、一次性 claim、unknown 不重放）、热能力缺失时恢复请求的 V2 模型重启（#2050）、已知运行时失败不再经 vendor 重放（#2903）、任何非 404 观测都重置 `owner_left` 证据（#2901）。**`state` / `background` 只在节点升级并重启后可用；旧节点会明确拒绝（`403 session_control_unavailable`）。404 不证明 TUI 负责人离开。** 这不代表 V2 等价支持、已提交 turn 的收尾或舰队升级已经验收；默认 30 分钟预算不变。**默认初始化 / 随机密码路径未改动。**
+已核对的 `latest`（`2.3.0-preview.190`）打印随机密码（该路径自 `.181` 起未改），形如 `anet-` 加 22 位十六进制字符。**已发布**的 CLI `2.3.0-preview.192` 相对 `.191` 只改配对常量，指向已发布的 agent-node `2.5.0-preview.155`；这两个精确版本已核实可从 npm 查询。`.155` 相对 `.154` 修的是「复用 host-shared OpenCode server」在正常主机上必然失败的问题（读不到别人/同 uid 但不可 dump 的 `/proc/<pid>/fd` 被当成权限拒绝，导致 daemon 建的节点退回无凭据的私有 server）；`.154` 相对 `.153` 带的是运行时能力与修复：OpenCode V2 **原会话**的 `state` / `background` 一次式中继（#2016，短 TTL、一次性 claim、unknown 不重放）、热能力缺失时恢复请求的 V2 模型重启（#2050）、已知运行时失败不再经 vendor 重放（#2903）、任何非 404 观测都重置 `owner_left` 证据（#2901）。**`state` / `background` 只在节点升级并重启后可用；旧节点（没有活跃 bridge）会明确拒绝（`409 session_control_bridge_missing`，与权限拒绝的 `session_control_unavailable` 区分开）。404 不证明 TUI 负责人离开。** 这不代表 V2 等价支持、已提交 turn 的收尾或舰队升级已经验收；默认 30 分钟预算不变。**默认初始化 / 随机密码路径未改动。**
 精确版本已发布不代表通道标记永远指向它，也不代表现役节点已升级。当前通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
