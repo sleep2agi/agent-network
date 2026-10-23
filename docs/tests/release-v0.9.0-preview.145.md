@@ -44,3 +44,38 @@ works against a Hub from this version on.
   "avatar didn't change" is diagnosable instead of silent.
 - No database migration is required beyond the tables this release already
   creates (`user_avatar_uploads`).
+
+## Install
+
+```bash
+set -e
+HUB_DIR="$HOME/.commhub/runtime-v145-preview145"
+test ! -e "$HUB_DIR"
+install -d -m 700 "$HUB_DIR"
+umask 077
+npm install --prefix "$HUB_DIR" --ignore-scripts --no-audit --no-fund \
+  @sleep2agi/commhub-server@0.9.0-preview.145
+```
+
+Run with the same env as the previous instance (at minimum `PORT` and `COMMHUB_DB`).
+The database file is shared. This release adds no table.
+
+## Upgrade / rollback
+
+`anet hub start` lazily fetches the `preview` dist-tag through bunx, so the running
+Hub keeps whatever version it started with until it is restarted:
+
+```bash
+# 1) confirm the published tag
+npm view @sleep2agi/commhub-server dist-tags
+# 2) restart so bunx picks .145 up
+anet hub stop && anet hub start
+# 3) check the version actually running
+bunx @sleep2agi/commhub-server@preview --version
+```
+
+If step 3 still prints `.144`, bunx cached the old tarball:
+`rm -rf ~/.bun/install/cache/@sleep2agi/commhub-server*` and restart again.
+
+Rollback = start the previous directory/version against the same `COMMHUB_DB`;
+this release adds no table, so no data migration to undo.
