@@ -7,7 +7,6 @@
 
 # Agent Network
 
-**把分布在多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团 —— 在一个桌面应用里指挥它们。**
 
 [![npm](https://img.shields.io/npm/v/@sleep2agi/agent-network?label=npm&color=009e7e)](https://www.npmjs.com/package/@sleep2agi/agent-network)
 [![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?filter=desktop-v*&label=download&color=2f6feb)](https://github.com/sleep2agi/agent-network-app/releases/latest)
@@ -21,6 +20,7 @@
 
 <img width="2667" height="1400" alt="image" src="https://github.com/user-attachments/assets/0e4ead5a-fab5-4cb3-a92d-cd029549c2bf" />
 
+**把分布在多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团 —— 在一个桌面应用里指挥它们。**
 
 
 
