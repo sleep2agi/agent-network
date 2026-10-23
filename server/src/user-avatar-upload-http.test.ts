@@ -228,6 +228,11 @@ test("account avatar upload: a hub-wide storage cap rejects the write and keeps 
     expect(after).toBe(before);
     expect(db.get<any>("SELECT bytes FROM user_avatar_uploads WHERE user_id = ?1", [victim.user!.user_id])?.bytes)
       .toBe(MAX_AVATAR_STORAGE_BYTES);
+    // 自己的额度要扣掉：上限全算在自己头上时，替换**自己**的头像不应被拒。
+    db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [victim.user!.user_id]);
+    db.run("UPDATE user_avatar_uploads SET bytes = ?1 WHERE user_id = ?2", [MAX_AVATAR_STORAGE_BYTES, uploader.user!.user_id]);
+    const replaced = await upload(uploader.token!, PNG_1X1);
+    expect(replaced.status).toBe(200);
   } finally {
     db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [victim.user!.user_id]);
     hub.stop?.();
