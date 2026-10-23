@@ -69,6 +69,28 @@ assert.deepEqual(dynamic.manifest.platforms['linux-x86_64-deb'], {
 });
 assert.equal(calls.length, 2);
 
+// 0.2.287 published normalized manifests: the platform URLs are already public
+// `releases/download/<tag>/<file>` links, so there is nothing to translate. Before the
+// pass-through, every platform threw "no browser download URL" and the endpoint fell
+// back to the static 0.2.286 manifest while 0.2.287 was live.
+const publicManifest = (version) => ({
+  version,
+  platforms: {
+    'darwin-aarch64': { signature: 'mac', url: `https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v${version}/mac.tar.gz` },
+    'windows-x86_64': { signature: 'win', url: `https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v${version}/win.exe` },
+  },
+});
+const publicFetch = async (url) => {
+  if (url.includes('/releases?')) return { ok: true, json: async () => [release('desktop-v0.2.33-3')] };
+  return { ok: true, json: async () => publicManifest('0.2.33-3') };
+};
+const publicResult = await resolveDesktopUpdate(publicFetch);
+assert.equal(publicResult.source, 'desktop-v0.2.33-3');
+assert.equal(publicResult.manifest.platforms['darwin-aarch64'].url,
+  'https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.33-3/mac.tar.gz');
+assert.equal(publicResult.manifest.platforms['windows-x86_64'].url,
+  'https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.33-3/win.exe');
+
 const fallbackFetch = async (url) => {
   if (url.includes('/releases?')) return { ok: false, status: 502 };
   assert.match(url, /fallback\.json$/);
@@ -88,4 +110,4 @@ const vercelConfig = JSON.parse(fs.readFileSync(new URL('../vercel.json', import
 assert.match(handlerSource, /setHeader\('Cache-Control', 'no-store, max-age=0'\)/);
 assert.equal(vercelConfig.headers[0].headers[0].value, 'no-store, max-age=0');
 
-console.log('desktop updater dynamic route: 14 checks passed');
+console.log('desktop updater dynamic route: 16 checks passed');

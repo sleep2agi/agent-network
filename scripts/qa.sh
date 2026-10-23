@@ -193,6 +193,12 @@ L1_TESTS=(
   # The OpenCode case checks the wait extends the #651 reply deadline
   # instead of aborting the shared session. Cheap: bun tests, no real binary.
   "test656-capacity-retry"
+  # Board #2028. Known OpenCode runtime failures (timeout / owner_left /
+  # provider / v1 refusals) must never be replayed by the generic vendor
+  # retry. Dropping the structured-code gate turns the suppression case red;
+  # calling the gate with two arguments turns the wiring assertions red.
+  # Cheap: one bun test file + cli building, no real runtime.
+  "test2028-vendor-replay-gate"
   # Board #667. cwd is still reported as project_dir. Starting in the node
   # directory must warn with both paths; starting at the workspace root must
   # not. Forcing the mismatch check to succeed turns the node-directory case

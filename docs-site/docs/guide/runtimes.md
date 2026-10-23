@@ -6,6 +6,8 @@
 
 ## Runtime 对比（canonical 表） {#runtime-对比-canonical-表}
 
+DSH 通过独立插件接入，不是下面的内置 runtime 选项，见 [DSH 节点](/guide/dsh)。
+
 > 本表是全站 runtime 信息的**单一权威来源**。其他页面（`cli` / `agent-node` / `getting-started` / `clean-server`）都引用这里，不在那些页面重复整表。
 
 ::: tip 哪些 runtime 在哪个通道可用

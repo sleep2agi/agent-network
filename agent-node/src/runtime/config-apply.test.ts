@@ -110,6 +110,30 @@ describe("validateLocalPatch — defense-in-depth", () => {
 });
 
 describe("computeApplyMode — tier classifier", () => {
+  test("V2 without a live hot-switch capability honors an explicit Hub restart", () => {
+    expect(computeApplyMode({ model: "stub/stub-model-next" }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "restart", hotModelSwitchAvailable: false,
+    })).toBe("restart");
+  });
+  test("V2 with a live hot-switch capability keeps the existing hot path", () => {
+    expect(computeApplyMode({ model: "stub/stub-model-next" }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "restart", hotModelSwitchAvailable: true,
+    })).toBe("hot");
+  });
+  test("missing capability does not invent restart authority from a hot request", () => {
+    expect(computeApplyMode({ model: "stub/stub-model-next" }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "hot", hotModelSwitchAvailable: false,
+    })).toBe("hot");
+  });
+  test("missing model-switch capability does not restart unrelated hot flags", () => {
+    expect(computeApplyMode({ flags: { maxTurns: 5 } }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "restart", hotModelSwitchAvailable: false,
+    })).toBe("hot");
+  });
   test("empty patch → restart_only (restart_node)", () => {
     expect(computeApplyMode({})).toBe("restart_only");
   });

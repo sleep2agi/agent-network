@@ -6019,6 +6019,7 @@ async function processTask(
   let skipped = false;
   let grokFailureCode: string | null = null;
   let grokFailureSubcode: string | null = null;
+  let runtimeFailureCode: string | null = null;
   const runtimeEvidence = createTaskRuntimeEvidenceReporter({
     taskId,
     reportActivity: (exactTaskId, context) => callCommHub("mark_tasks_consumed", taskActivityPayload(exactTaskId, context), 0),
@@ -6047,6 +6048,8 @@ async function processTask(
     text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
       || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected);
   } catch (err: any) {
+    // #2028 —— 保留结构化失败码：重放门按码判断，不靠被压平后的回复文本。
+    runtimeFailureCode = typeof err?.code === "string" ? err.code : null;
     if (err?.code === "codex_task_skipped") {
       // #1930 — the queued row was dropped before its turn because the Hub no
       // longer listed it as pending. Nothing ran; there is nothing to reply.
@@ -6110,7 +6113,7 @@ async function processTask(
     let retryAttempt = 1;
     retryAttempt <= VENDOR_RETRY_PROFILE.maxRetries &&
     text &&
-    isTransientVendorError(text, failed);
+    isTransientVendorError(text, failed, runtimeFailureCode);
     retryAttempt++
   ) {
     const backoff =
@@ -6124,6 +6127,7 @@ async function processTask(
     try {
       const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected);
       text = retried;
+      runtimeFailureCode = null;
       failed = false;
       if (GROK_COPRESENCE) {
         grokFailureCode = null;
@@ -6144,6 +6148,8 @@ async function processTask(
         }
       }
     } catch (err: any) {
+      // #2028 —— 重试也失败时同样保留结构化码，后续循环判定/诊断都用它。
+      runtimeFailureCode = typeof err?.code === "string" ? err.code : runtimeFailureCode;
       text = runtimeErrorReplyText(RUNTIME, err);
       if (typeof err?.unverifiedReplyText === "string") {
         warn(`[unverified-owner] ${err?.ownershipReason ?? "ownership unverified"} | reply=${err.unverifiedReplyText.length}ch`);
@@ -7245,6 +7251,9 @@ async function processConfigUpdate(): Promise<void> {
     const localMode = computeConfigApplyMode(update.patch, {
       runtime: fileConfig?.runtime,
       opencodeGeneration: fileConfig?.opencodeGeneration,
+      requestedMode: update.apply_mode,
+      hotModelSwitchAvailable: opencodeCopresenceSession?.isRunning === true
+        && typeof opencodeCopresenceSession.setSelectedModel === "function",
     });
     if (localMode !== update.apply_mode) {
       warn(`[config-apply] mode mismatch hub=${update.apply_mode} local=${localMode}; trusting local for safety`);

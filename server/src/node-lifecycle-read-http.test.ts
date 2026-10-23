@@ -66,8 +66,13 @@ test("public errors redact free text for granted viewers on every projection", a
       "adopt_codex_session_conflict", "adopt_codex_port_unavailable", "adopt_codex_stage_still_running",
       "adopt_codex_identity_unproven",
       "TUI session mismatch", "opencode_launch_health:TUI session mismatch", "opencode_tui_session_mismatch",
+      // #2012：daemon 明确拒绝的固定安全码，必须原样投影给用户，而不是退化成 lifecycle_error。
+      "copresence_adopt_v2",
+      // 负控：带后缀/路径/空白的形状仍必须清成 lifecycle_error（只精确放行这一串）。
+      "copresence_adopt_v2: /private/fixture", "copresence_adopt_v2x", " copresence_adopt_v2",
     ]) {
       const publicCodes = ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed", "opencode_tui_session_mismatch",
+        "copresence_adopt_v2",
         "adopt_codex_external_start_unproven", "adopt_codex_launch_failed", "adopt_codex_launch_timeout",
         "adopt_codex_port_unproven", "adopt_codex_start_superseded", "adopt_codex_binding_generation_unproven",
         "adopt_codex_start_evidence_missing", "adopt_codex_start_evidence_changed",
