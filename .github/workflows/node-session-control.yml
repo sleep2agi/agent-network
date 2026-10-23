@@ -1,0 +1,21 @@
+name: Node session control relay
+on:
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'tests/test2017-node-session-control/**'
+      - '.github/workflows/node-session-control.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  relay-http:
+    name: node session control HTTP (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build exact checkout
+        run: docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-session-control -f tests/test2017-node-session-control/Dockerfile .
+      - name: Run scoped relay witnesses
+        run: docker run --rm --init --cpus=2 --network none anet-session-control
