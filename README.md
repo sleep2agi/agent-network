@@ -18,12 +18,11 @@
 
 [文档](https://anet.sh) · [下载桌面版](https://github.com/sleep2agi/agent-network-app/releases/latest) · [快速上手](https://anet.sh/guide/getting-started) · **中文** · [English](./README.en.md)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
-  <img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network 桌面端：左侧是在线 Agent 列表，右侧是与一个节点的对话">
-</picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="桌面端任务页：左侧按项目筛选，右侧是需求池、进行中、完成三列看板"></picture>
+<img width="2667" height="1400" alt="image" src="https://github.com/user-attachments/assets/0e4ead5a-fab5-4cb3-a92d-cd029549c2bf" />
+
+
+
 
 </div>
 
@@ -38,6 +37,17 @@
 <td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/rules-dark.webp"><img src="docs/assets/readme/rules-light.webp" alt="在桌面端阅读节点的 CLAUDE.md 规则文件"></picture></td>
 <td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/files-dark.webp"><img src="docs/assets/readme/files-light.webp" alt="在桌面端浏览节点的项目文件夹"></picture></td>
 </tr></table>
+
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="桌面端任务页：左侧按项目筛选，右侧是需求池、进行中、完成三列看板"></picture>
+
+
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
+  <img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network 桌面端：左侧是在线 Agent 列表，右侧是与一个节点的对话">
+</picture>
+
 
 ## 30 秒上手
 
