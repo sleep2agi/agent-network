@@ -24,6 +24,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
+import { ensureNetworkRulesOnce, readNetworkRules, writeNetworkRules } from "./network-rules.js";
 import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
@@ -1889,6 +1890,46 @@ return Bun.serve({
 
     // ── Agent 分组(RFC-038 §8):owner/admin/Hub 管理员管理;组授权动态生效 ──
     // GET/POST /api/networks/:id/agent-groups · PATCH/DELETE …/:gid · PUT …/:gid/members {node_ids}
+    // #993 — network-scoped rules text (first slice: storage + CAS write + audit).
+    // Inheritance (Hub → Daemon → node) is deliberately NOT here: it needs its own
+    // precedence/conflict decision, and shipping storage first keeps that reviewable.
+    const networkRulesMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/rules$/);
+    if (networkRulesMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const netId = decodeURIComponent(networkRulesMatch[1]);
+      const hubAdmin = resolved.user.role === "admin";
+      const role = getUserNetworkRole(resolved.user.user_id, netId);
+      ensureNetworkRulesOnce(db);
+      if (req.method === "GET") {
+        // Reading is for anyone in the network: the rules are what the nodes obey.
+        if (!hubAdmin && !role) return withCors(req, Response.json({ ok: false, error: "not_a_member" }, { status: 403 }));
+        return withCors(req, Response.json({ ok: true, rules: readNetworkRules(db, netId) }));
+      }
+      if (req.method === "PUT") {
+        // Writing changes what every node in the network would inherit.
+        if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+        if (!hubAdmin && role !== "owner" && role !== "admin") {
+          return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+        }
+        let body: any = null;
+        try { body = await req.json(); } catch { body = null; }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+        }
+        const result = writeNetworkRules(db, netId, body.content, body.expected_revision, {
+          user_id: resolved.user.user_id,
+          username: resolved.user.username ?? null,
+        });
+        if (!result.ok) return withCors(req, Response.json({ ok: false, error: result.error }, { status: result.status }));
+        logAudit(resolved.user.user_id, resolved.user.username ?? null, "network_rules_updated", "network_rules", netId,
+          JSON.stringify({ revision: result.rules.revision, bytes: Buffer.byteLength(result.rules.content, "utf8") }), undefined, netId);
+        return withCors(req, Response.json({ ok: true, rules: result.rules }));
+      }
+      return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+    }
+
     const groupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/agent-groups(?:\/([^/]+)(\/members)?)?$/);
     if (groupsMatch) {
       const token = requestToken(req, { allowQueryToken: false });
