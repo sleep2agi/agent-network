@@ -252,12 +252,21 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
     // schema startup is not the race under qualification.
     for(let i=0;i<2;i++){
       const child=Bun.spawn([process.execPath,"-e",code],{cwd:process.cwd(),stdout:"pipe",stderr:"pipe",env:process.env});
+      // #1279: the child's stderr used to be piped and never read, so a worker that
+      // exited non-zero below left only "Received: 1" — no reason at all. Drain it in
+      // parallel and surface it when the exit code is not 0.
+      const errChunks:string[]=[];
+      const drain=(async()=>{const r=child.stderr.getReader();for(;;){const part=await r.read();if(part.done)break;errChunks.push(new TextDecoder().decode(part.value));}})();
       const reader=child.stdout.getReader();let start="";
       for(;;){const part=await reader.read();if(part.done)throw new Error('worker exited before ready');start+=new TextDecoder().decode(part.value);if(start.includes('READY'))break;}
-      workers.push({child,reader,start});
+      workers.push({child,reader,start,stderr:()=>errChunks.join(''),drain});
     }
     await Bun.write(gate,"go");const results=[];
-    for(const w of workers){let output=w.start;for(;;){const part=await w.reader.read();if(part.done)break;output+=new TextDecoder().decode(part.value);}expect(await w.child.exited).toBe(0);results.push(JSON.parse(output.trim().split("\n").at(-1)!).wake);}
+    for(const w of workers){let output=w.start;for(;;){const part=await w.reader.read();if(part.done)break;output+=new TextDecoder().decode(part.value);}
+      const code=await w.child.exited;await w.drain;
+      // Show the worker's own words on failure instead of a bare exit code.
+      expect({exit:code,stderr:w.stderr().trim().slice(0,800)}).toEqual({exit:0,stderr:""});
+      results.push(JSON.parse(output.trim().split("\n").at(-1)!).wake);}
     expect(results.sort()).toEqual([false,true]);expect(state(scheduleId).revision).toBe(before.revision+1);expect(poll(scheduleId)).toBe(false);
   });
 
