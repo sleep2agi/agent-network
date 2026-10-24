@@ -18,11 +18,11 @@
 
 [Docs](https://anet.sh/en/) · [Download the desktop app](https://github.com/sleep2agi/agent-network-app/releases/latest) · [Get started](https://anet.sh/en/guide/getting-started) · [中文](./README.md) · **English**
 
+<img src="docs/assets/readme/architecture.png" width="880" alt="Agent Network architecture: the human command layer, the client layer, the ANet Hub, deployment, and the node layer">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
   <img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network desktop app: online agents on the left, a conversation with one node on the right">
 </picture>
-
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="Desktop Tasks page: project filters on the left, and columns for Backlog, In progress and Done"></picture>
 
 </div>
