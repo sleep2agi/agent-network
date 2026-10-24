@@ -53,6 +53,7 @@ import { followUpInputHash, followUpAnswerPrompt, type OwnedFollowUpAdapter } fr
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
+import { currentTeamRulesOutcome } from "./runtime/team-rules-inject.js";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
