@@ -14,7 +14,7 @@
 
 [文档](https://anet.sh) · [下载桌面版](https://github.com/sleep2agi/agent-network-app/releases/latest) · [快速上手](https://anet.sh/guide/getting-started) · **中文** · [English](./README.en.md)
 
-<img width="2667" height="1400" alt="image" src="https://github.com/user-attachments/assets/0e4ead5a-fab5-4cb3-a92d-cd029549c2bf" />
+<img src="docs/assets/readme/architecture.png" width="880" alt="Agent Network 架构：人类指挥层 / 客户端层 / ANet Hub / 部署层 / 节点层">
 
 **把分布在多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团 —— 在一个桌面应用里指挥它们。**
 
