@@ -92,6 +92,39 @@ anet node migrate-token-to-envref my-agent
 ```
 
 See [tokens and permissions](/en/guide/account-system#tokens) and the [security model](/en/concepts/security) for the full boundary.
+### Secret files: which copy is authoritative, backup, rotation
+
+**Authority boundary** — these three local files are what the runtime reads. The Hub vault is a **delivery channel**, not a source:
+
+| File | Location | Scope |
+|---|---|---|
+| `secrets.env` | `<node dir>/secrets.env`, next to `config.json` (`agent-node/src/node-secrets.ts`) | That node's environment; fills **empty slots only** at startup |
+| `node-secrets.json` | Written by the node-private lane | Node-private secrets (win over daemon-scoped values of the same name) |
+| `scoped-secrets.json` | Daemon directory (`0600`, revision CAS) | Values shared by that daemon's child nodes |
+
+Loading is **all or nothing**: if `secrets.env` is a symlink, not a regular file, owned by someone else, or not `0600`, the **whole file is refused** (bad lines are not skipped). A missing file is a normal state.
+
+**Backup** (yours to do — the product does not back these up):
+- copy `secrets.env`, `node-secrets.json`, `scoped-secrets.json`, keeping `0600` and the running user as owner;
+- store them **somewhere other than the node directory** (a sibling copy dies with the disk) and never in git;
+- the backup holds **plaintext values**: treat it as a credential (no chat, no tickets).
+
+**Restore**:
+1. stop the node/daemon **completely** (not just a bridge restart);
+2. put the files back, `chmod 600`, confirm the owner;
+3. start once, fully — these files are read only on a full start;
+4. check the **key names** with `anet node secret list <node>` (values are never echoed).
+
+**Rotation order** (so nothing is invalid mid-flight):
+1. write the new value (`anet node secret set <node> <KEY>`, value via stdin or `--from-env`, never shell history);
+2. fully restart the node and confirm the new value is live;
+3. only then revoke the old value at the source;
+4. update the backup last.
+
+**Rollback**: if the node will not start after the write, or tasks start failing in bulk with errors pointing at that key, restore the previous backup and do a full restart. `scoped-secrets.json` has revision CAS — a conflicting write fails loudly; do not hand-edit the file.
+
+> Pending named confirmation: who the **restore source** is (local backup / external KMS / manual re-entry). That sentence is needed before this can be stated as a fixed procedure; the text above assumes local backup plus manual re-entry.
+
 
 ### Do not copy node identity
 
