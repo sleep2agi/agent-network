@@ -4104,7 +4104,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "tail_node_logs",
-    "Ask a node for the tail of its own agent-node run log (read-only, redacted on the node before it leaves). No path argument: the node reads only its own log directory. User logins only; the node's owner or a network owner/admin. Poll get_rules_file_result — content is JSON {files, lines:[{ts, level, text, key}], truncated, matched, now_ts}; it is handed out once and then purged.",
+    "Tail of a node's own agent-node run log (read-only, redacted on the node). No path argument: it reads only its own log directory. User logins only (node owner or network owner/admin). Poll get_rules_file_result; JSON {files, lines, truncated, matched}; handed out once, then purged.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting logs_capable)."),
@@ -6916,7 +6916,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_list",
-    "List requirement projects (id, name, color, sort, archived, parentId). Node (Agent) tokens can only read projects; creating / changing them (projects_create / projects_update) needs a person's token.",
+    "List requirement projects (id, name, color, sort, archived, parentId). node tokens can only read projects; node tokens can only read projects; creating / changing needs a person's token.",
     { network_id: z.string().max(200).optional() },
     async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
   );
@@ -6926,7 +6926,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // write access and is refused to 「仅相关任务」(task-scoped) members; events use the task list's visibility.
   server.tool(
     "projects_create",
-    "Create a requirement project (管理项目 → 新建). name 1–40, unique; color #RRGGBB (default: palette); sort int; parent_id optional (≤3 levels). Returns { project }. Needs a person's token: node tokens get 403 user_token_required; task-scoped / read-only members are refused.",
+    "Create a requirement project (管理项目 → 新建). name 1–40, unique; color #RRGGBB; sort int; parent_id optional (≤3 levels). Returns { project }. node tokens can only read projects (403 user_token_required); task-scoped / read-only members are refused.",
     {
       network_id: z.string().max(200).optional(),
       name: z.string().min(1).max(40),
@@ -6939,7 +6939,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_update",
-    "Rename, recolour, reorder, archive/unarchive, or move a project under another (parent_id; null = top level, cycles / depth>3 refused). Only the fields you pass change. archived=true hides it from pickers (its tasks keep project_id). Returns { project }. Needs a person's token (node tokens: 403 user_token_required); task-scoped / read-only members are refused.",
+    "Rename, recolour, reorder, archive/unarchive, or move a project under another (parent_id; null = top level, cycles / depth>3 refused). Only the fields you pass change; archived hides it from pickers. Returns { project }. node tokens can only read projects (403); task-scoped / read-only members refused.",
     {
       network_id: z.string().max(200).optional(),
       id: z.string().min(1).max(200).describe("project id (proj_…), from projects_list"),
