@@ -29,7 +29,7 @@ const expectedTools = [
   "read_opencode_catalog", "get_opencode_catalog", "get_opencode_catalog_request", "ack_opencode_catalog",
   "requirements_list", "requirements_people", "requirements_get", "requirements_create", "requirements_update",
   "requirements_checklist_toggle", "requirements_upsert_by_external_ref", "projects_list",
-  "projects_create", "projects_update", "requirements_events", "requirements_comment",
+  "projects_create", "projects_update", "requirement_tags", "requirements_events", "requirements_comment",
 ];
 
 const toolsSource = readFileSync("src/tools.ts", "utf8");

@@ -4930,7 +4930,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // the policy and the runtime's session capability (see clone-node.ts).
   server.tool(
     "clone_node",
-    "Clone a daemon child into a new node on the same daemon: new name + new token. copy_session defaults true; workdir_policy new_empty (default) or share_source. Hub #938.",
+    "Clone a daemon child into a new node on the same daemon: new name + token. copy_session defaults true; workdir_policy new_empty (default) or share_source. Hub #938.",
     {
       source_node_id: z.string().min(1).max(200),
       name: z.string().min(1).max(256),
@@ -6888,14 +6888,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_create",
-    "Create a task; name required. column (alias status) = pool/doing/done/abandoned. A duplicate external_ref returns 409 external_ref_exists with existing_id; use requirements_upsert_by_external_ref to sync.",
+    "Create a task; name required. column (alias status) = pool/doing/done/abandoned. Duplicate external_ref -> 409 external_ref_exists with existing_id; use requirements_upsert_by_external_ref to sync.",
     { network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, name: z.string().min(1).max(80), external_ref: z.string().max(200).optional() },
     async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
 
   server.tool(
     "requirements_update",
-    "Patch a task (id or \"#N\"); omitted fields keep their value. column (alias status) = pool/doing/done/abandoned. participants REPLACES the list (use participants_add / _remove to keep others). archived=true hides it; agents cannot delete.",
+    "Patch a task (id or \"#N\"); omitted fields keep their value. column (alias status) = pool/doing/done/abandoned. participants REPLACES the whole list (use participants_add / _remove to keep others). archived=true hides it; agents cannot delete.",
     { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, participants_add: reqPeopleDelta("add"), participants_remove: reqPeopleDelta("remove"), external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
     async (args) => withColumn(args, a => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(a, [...REQ_WRITE_KEYS, "participants_add", "participants_remove"]))),
   );
@@ -6926,7 +6926,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // write access and is refused to 「仅相关任务」(task-scoped) members; events use the task list's visibility.
   server.tool(
     "projects_create",
-    "Create a project (管理项目 → 新建). name 1-40, unique; color #RRGGBB; sort int; parent_id optional (<=3 levels). Returns { project }. Node tokens 403.",
+    "Create a project (管理项目 → 新建). name 1-40, unique; color #RRGGBB; sort int; parent_id optional (<=3 levels). Returns { project }; node tokens can only read projects.",
     {
       network_id: z.string().max(200).optional(),
       name: z.string().min(1).max(40),
@@ -6939,7 +6939,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_update",
-    "Rename, recolour, reorder, archive, or move a project under another (parent_id; null = top level; cycles / depth>3 refused). Only fields you pass change. Returns { project }. Node tokens 403; task-scoped / read-only members refused.",
+    "Rename, recolour, reorder, archive, or move a project under another (parent_id; null = top level; cycles / depth>3 refused). Only fields you pass change; node tokens can only read projects.",
     {
       network_id: z.string().max(200).optional(),
       id: z.string().min(1).max(200).describe("project id (proj_…), from projects_list"),
@@ -7022,7 +7022,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 两次调用,并发时覆盖别人刚写的描述。这条只追加,进「动态」(requirements_events kind=comment),不改任务本身。
   server.tool(
     "requirements_comment",
-    "Append a comment / progress note (never rewrites the description). Shows in requirements_events (kind=comment, text in new.text). text: markdown 1-4000. Anyone who can see the task and write in the network may comment. Returns { event }.",
+    "Append a comment / progress note to a task (**append-only**; never rewrites the description). Shows in requirements_events (kind=comment, text in new.text). text: markdown 1-4000. Anyone who can see the task and write in the network may comment. Returns { event }.",
     {
       id: z.string().min(1).max(200).describe(REQ_ID_DESC),
       text: z.string().min(1).max(4000).describe("the comment (markdown), 1–4000 characters"),
