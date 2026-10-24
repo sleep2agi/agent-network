@@ -1903,6 +1903,12 @@ return Bun.serve({
       const role = getUserNetworkRole(resolved.user.user_id, netId);
       ensureNetworkRulesOnce(db);
       if (req.method === "GET") {
+        // A node token resolves to the human who created it, which may be a hub
+        // admin — that must not turn a node into a reader of *every* network's
+        // rules. A node token is confined to its own network.
+        if (resolved.networkId && resolved.networkId !== netId) {
+          return withCors(req, Response.json({ ok: false, error: "not_a_member" }, { status: 403 }));
+        }
         // Reading is for anyone in the network: the rules are what the nodes obey.
         if (!hubAdmin && !role) return withCors(req, Response.json({ ok: false, error: "not_a_member" }, { status: 403 }));
         return withCors(req, Response.json({ ok: true, rules: readNetworkRules(db, netId) }));

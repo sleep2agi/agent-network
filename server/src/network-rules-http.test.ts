@@ -107,6 +107,16 @@ describe("#993 — network rules storage + CAS write", () => {
     expect(r.body.error).toBe("rules_too_large");
   });
 
+  test("a node token cannot read another network's rules", async () => {
+    // The node token belongs to a hub admin (that is how it was minted), so the
+    // hubAdmin branch alone would have allowed it. A node stays inside its network.
+    const other = register(`nr_net2_${Date.now()}`, "OtherPw123Aa!", undefined, "net2");
+    expect(other.ok).toBe(true);
+    const r = await send(nodeToken, "GET", `/api/networks/${other.network_id}/rules`);
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe("not_a_member");
+  });
+
   test("a non-member cannot read", async () => {
     const other = register(`nr_other_${Date.now()}`, "OtherPw123Aa!", undefined, "other");
     expect(other.ok).toBe(true);
