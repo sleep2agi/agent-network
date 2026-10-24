@@ -348,11 +348,13 @@ function storedChecklist(raw: string | null): ChecklistItem[] {
 // ── 项目 ──
 // 按网络隔离;名字 1–40 字,同一网络里未归档的项目不重名;颜色 #RRGGBB;sort 越小越靠前。
 // 删除 = 删项目行 + 把引用它的卡片 project_id 置空(卡片本身不动);归档 = 保留引用,只是不能再被选。
-type ProjectRow = { project_id: string; network_id: string; name: string; color: string; sort: number; archived: number; created_at: string };
+type ProjectRow = { project_id: string; network_id: string; name: string; color: string; sort: number; archived: number; created_at: string; parent_id: string | null };
 const PROJECT_COLOR = /^#[0-9a-fA-F]{6}$/;
 const PROJECT_PALETTE = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#4b5563"];
-const PROJECT_SELECT = "project_id, network_id, name, color, sort, archived, created_at";
-const projectPublic = (row: ProjectRow) => ({ id: row.project_id, name: row.name, color: row.color, sort: row.sort, archived: !!row.archived, createdAt: row.created_at });
+const PROJECT_SELECT = "project_id, network_id, name, color, sort, archived, created_at, parent_id";
+/** 子项目最多 3 层（顶层=1）。再深的话「项目」这个词就没有意义了，也没人能在选择器里点对。 */
+const PROJECT_MAX_DEPTH = 3;
+const projectPublic = (row: ProjectRow) => ({ id: row.project_id, name: row.name, color: row.color, sort: row.sort, archived: !!row.archived, createdAt: row.created_at, parentId: row.parent_id ?? null });
 const projectName = (raw: unknown): string | null => {
   if (typeof raw !== "string") return null;
   const name = raw.replace(/[\r\n\t]+/g, " ").trim();
@@ -361,6 +363,50 @@ const projectName = (raw: unknown): string | null => {
 function projectNameTaken(networkId: string, name: string, except?: string): boolean {
   return !!db.get("SELECT 1 FROM requirement_projects WHERE network_id = ?1 AND name = ?2 AND archived = 0 AND project_id != ?3", networkId, name, except ?? "");
 }
+/** 这个项目往上数有几层（自己算第一层）。用于深度上限与环路判断。 */
+function projectDepth(projectId: string): number {
+  let depth = 0;
+  let cur: string | null = projectId;
+  const seen = new Set<string>();
+  while (cur && depth < 64) {
+    if (seen.has(cur)) return Number.POSITIVE_INFINITY;  // 循环：当成超深，调用方会拒绝
+    seen.add(cur);
+    depth++;
+    const row: { parent_id: string | null } | null = db.get("SELECT parent_id FROM requirement_projects WHERE project_id = ?1", cur);
+    cur = row?.parent_id ?? null;
+  }
+  return depth;
+}
+
+/**
+ * 校验 parent_id（新项目或搬家时）。返回 { parent } 或错误码。
+ * 规则：同一网络、存在、未归档、不是自己或自己的后代、加进来后不超过 PROJECT_MAX_DEPTH。
+ */
+function validateProjectParent(
+  networkId: string, parentId: string, selfId: string | null,
+): { ok: true; parent: ProjectRow } | { ok: false; error: string } {
+  const parent = db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, parentId);
+  if (!parent || parent.network_id !== networkId) return { ok: false, error: "project_parent_not_found" };
+  if (parent.archived) return { ok: false, error: "project_parent_archived" };
+  if (selfId) {
+    if (parent.project_id === selfId) return { ok: false, error: "project_parent_cycle" };
+    // 把 A 挂到 A 的后代下面 = 环。沿 parent 链往上走，遇到自己就拒绝。
+    let cur: string | null = parent.parent_id ?? null;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (cur === selfId) return { ok: false, error: "project_parent_cycle" };
+      seen.add(cur);
+      cur = db.get<{ parent_id: string | null }>("SELECT parent_id FROM requirement_projects WHERE project_id = ?1", cur)?.parent_id ?? null;
+    }
+    if (projectDepth(selfId) + projectDepth(parent.project_id) > PROJECT_MAX_DEPTH) {
+      return { ok: false, error: "project_parent_too_deep" };
+    }
+  } else if (projectDepth(parent.project_id) + 1 > PROJECT_MAX_DEPTH) {
+    return { ok: false, error: "project_parent_too_deep" };
+  }
+  return { ok: true, parent };
+}
+
 /** 卡片上的 project_id:null 清空;字符串必须是同一网络、未归档的项目。 */
 function projectRef(value: unknown, networkId: string): string | null {
   if (value === null) return null;
@@ -405,13 +451,24 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     const sort = body.sort === undefined ? count : body.sort;
     if (!Number.isInteger(sort)) return jsonError("invalid_project_sort", 400);
     const id = `proj_${crypto.randomUUID()}`;
-    db.run(`INSERT INTO requirement_projects (${PROJECT_SELECT}) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)`, [id, networkId, name, color, sort, new Date().toISOString()]);
+    // 子项目：parent_id 可选；null/缺省 = 顶层。
+    let parentId: string | null = null;
+    if (body.parent_id !== undefined && body.parent_id !== null && body.parent_id !== "") {
+      if (typeof body.parent_id !== "string") return jsonError("invalid_project_parent", 400);
+      const check = validateProjectParent(networkId, body.parent_id, null);
+      if (!check.ok) return jsonError(check.error, check.error === "project_parent_not_found" ? 404 : 400);
+      parentId = check.parent.project_id;
+    }
+    db.run(`INSERT INTO requirement_projects (${PROJECT_SELECT}) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)`, [id, networkId, name, color, sort, new Date().toISOString(), parentId]);
     return Response.json({ ok: true, project: projectPublic(db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, id)!) }, { status: 201 });
   }
   if (!one) return jsonError("not_found", 404);
   const current = db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, decodeURIComponent(one[1]));
   if (!current || current.network_id !== networkId) return jsonError("project_not_found", 404);
   if (req.method === "DELETE") {
+    // 子项目不能凭空变孤儿：先搬走或删掉它们（明确拒绝，不偷偷改层级）。
+    const kids = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM requirement_projects WHERE parent_id = ?1", current.project_id)?.n ?? 0;
+    if (kids > 0) return jsonError("project_has_children", 409);
     // 先把卡片上的引用置空,再删项目:卡片一张不少。
     // updated_at 跟着动:按 updated_since 增量同步的客户端要看得见「项目被清空」这一改动。
     // 每张被清空项目的卡记一条「项目 X → 无」(与清空同一个事务)。
@@ -445,8 +502,20 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     if (typeof body.archived !== "boolean") return jsonError("invalid_project_archived", 400);
     archived = body.archived ? 1 : 0;
   }
+  let parentId: string | null = current.parent_id ?? null;
+  if ("parent_id" in body) {
+    if (body.parent_id === null || body.parent_id === "") {
+      parentId = null;                                    // 变成顶层
+    } else if (typeof body.parent_id !== "string") {
+      return jsonError("invalid_project_parent", 400);
+    } else {
+      const check = validateProjectParent(networkId, body.parent_id, current.project_id);
+      if (!check.ok) return jsonError(check.error, check.error === "project_parent_not_found" ? 404 : 400);
+      parentId = check.parent.project_id;
+    }
+  }
   if (!archived && projectNameTaken(networkId, name, current.project_id)) return jsonError("project_name_taken", 409);
-  db.run("UPDATE requirement_projects SET name = ?1, color = ?2, sort = ?3, archived = ?4 WHERE project_id = ?5", [name, color, sort, archived, current.project_id]);
+  db.run("UPDATE requirement_projects SET name = ?1, color = ?2, sort = ?3, archived = ?4, parent_id = ?6 WHERE project_id = ?5", [name, color, sort, archived, current.project_id, parentId]);
   return Response.json({ ok: true, project: projectPublic(db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, current.project_id)!) });
 }
 

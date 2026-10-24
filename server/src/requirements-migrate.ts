@@ -41,6 +41,9 @@ export function ensureRequirementProjects(database: DbAdapter): void {
     );
     CREATE INDEX IF NOT EXISTS idx_requirement_projects_network ON requirement_projects(network_id, sort);
   `);
+  // 子项目（admin 2026-10-24：管理项目里没有层级）。加法式列，老库用 ALTER 补；重复执行无副作用。
+  // NULL = 顶层项目，所以现有行不需要回填。
+  try { database.exec("ALTER TABLE requirement_projects ADD COLUMN parent_id TEXT"); } catch {}
 }
 
 /**

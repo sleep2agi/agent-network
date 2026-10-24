@@ -6916,7 +6916,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_list",
-    "List requirement projects in your network (id, name, color, sort, archived). Node (Agent) tokens can only read projects; creating / changing them (projects_create / projects_update) needs a person's token.",
+    "List requirement projects in your network (id, name, color, sort, archived, parentId — sub-projects nest up to 3 levels). Node (Agent) tokens can only read projects; creating / changing them (projects_create / projects_update) needs a person's token.",
     { network_id: z.string().max(200).optional() },
     async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
   );
@@ -6932,8 +6932,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       name: z.string().min(1).max(40),
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
       sort: z.number().int().optional(),
+      parent_id: z.string().max(200).nullable().optional().describe("parent project id (proj_…); omit or null for a top-level project. Max 3 levels."),
     },
-    async (args) => requirementsCall("POST", "/api/requirements/projects", args.network_id, pick(args, ["name", "color", "sort"])),
+    async (args) => requirementsCall("POST", "/api/requirements/projects", args.network_id, pick(args, ["name", "color", "sort", "parent_id"])),
   );
 
   server.tool(
@@ -6946,8 +6947,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
       sort: z.number().int().optional(),
       archived: z.boolean().optional(),
+      parent_id: z.string().max(200).nullable().optional().describe("move under this project id (proj_…), or null to make it top-level. Cycles and depth > 3 are refused."),
     },
-    async (args) => requirementsCall("PATCH", `/api/requirements/projects/${encodeURIComponent(args.id)}`, args.network_id, pick(args, ["name", "color", "sort", "archived"])),
+    async (args) => requirementsCall("PATCH", `/api/requirements/projects/${encodeURIComponent(args.id)}`, args.network_id, pick(args, ["name", "color", "sort", "archived", "parent_id"])),
   );
 
   // #476 —— 不带 requirement_id 的全网动态默认 50 条(REST 默认 200 不变,App 走 REST);严格参数同 #471。
