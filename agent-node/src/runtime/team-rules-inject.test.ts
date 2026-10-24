@@ -7,7 +7,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { injectTeamRules } from "./team-rules-inject";
+import { injectTeamRules, currentTeamRulesOutcome, recordTeamRulesOutcome, resetTeamRulesOutcome } from "./team-rules-inject";
 import { MANAGED_BLOCK_BEGIN, MANAGED_BLOCK_END } from "./managed-rules-block";
 
 let dir = "";
@@ -128,5 +128,29 @@ describe("injectTeamRules", () => {
     const out = await injectTeamRules({ enabled: true, hubUrl: HUB, token: "ntok_x", networkId: null, workDir: d, runtime: "codex", fetchImpl: f });
     expect(out).toMatchObject({ status: "skipped", reason: "no_network_scope" });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("#2211 — the node reports what it last did", () => {
+  test("nothing recorded before an attempt (the field is omitted, not sent as null)", () => {
+    resetTeamRulesOutcome();
+    expect(currentTeamRulesOutcome()).toBeNull();
+  });
+
+  test("an injected outcome carries the revision; a refusal carries the reason", () => {
+    resetTeamRulesOutcome();
+    recordTeamRulesOutcome({ status: "injected", revision: 7, action: "inserted" }, "2026-10-24T12:00:00Z");
+    expect(currentTeamRulesOutcome()).toEqual({ revision: 7, status: "injected", at: "2026-10-24T12:00:00Z" });
+
+    recordTeamRulesOutcome({ status: "error", reason: "expected exactly one BEGIN" }, "2026-10-24T12:01:00Z");
+    expect(currentTeamRulesOutcome()).toEqual({
+      revision: null, status: "error", reason: "expected exactly one BEGIN", at: "2026-10-24T12:01:00Z",
+    });
+  });
+
+  test("a skipped outcome reports why, with no revision", () => {
+    resetTeamRulesOutcome();
+    recordTeamRulesOutcome({ status: "skipped", reason: "hub_unreachable" }, "2026-10-24T12:02:00Z");
+    expect(currentTeamRulesOutcome()).toMatchObject({ revision: null, status: "skipped", reason: "hub_unreachable" });
   });
 });

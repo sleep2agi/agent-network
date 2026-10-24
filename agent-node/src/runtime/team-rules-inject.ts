@@ -22,6 +22,35 @@ export type InjectOutcome =
   | { status: "injected"; revision: number; action: "inserted" | "replaced" }
   | { status: "error"; reason: string };
 
+/**
+ * #2211 — remember the outcome of the last injection so the node can report it.
+ * The Hub then answers "which nodes are on the current rules revision" without
+ * pushing anything: v1 injects at full start, so a node that has not restarted is
+ * simply *outdated*, not *failed*.
+ *
+ * Kept in memory only: it describes this process, and a fresh process has not
+ * applied anything yet.
+ */
+export type TeamRulesReport = { revision: number | null; status: InjectOutcome["status"]; reason?: string; at: string };
+
+let lastReport: TeamRulesReport | null = null;
+
+export function recordTeamRulesOutcome(outcome: InjectOutcome, now = new Date().toISOString()): void {
+  const revision = "revision" in outcome ? outcome.revision : null;
+  const reason = "reason" in outcome ? outcome.reason : undefined;
+  lastReport = { revision, status: outcome.status, ...(reason ? { reason } : {}), at: now };
+}
+
+/** Undefined when this process never attempted an injection (the field is then omitted, not sent as null). */
+export function currentTeamRulesOutcome(): TeamRulesReport | null {
+  return lastReport;
+}
+
+/** Test seam: forget the recorded outcome. */
+export function resetTeamRulesOutcome(): void {
+  lastReport = null;
+}
+
 export type InjectOptions = {
   /** `ANET_TEAM_RULES=1` 时才为 true。 */
   enabled: boolean;

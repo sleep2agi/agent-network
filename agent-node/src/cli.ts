@@ -1589,7 +1589,7 @@ const NETWORK_ID = fileConfig.network_id || process.env.ANET_NETWORK_ID || globa
 // startup — a node without Hub connectivity still has to run.
 if (process.env.ANET_TEAM_RULES === "1" && NODE_ID) {
   try {
-    const { injectTeamRules } = await import("./runtime/team-rules-inject.js");
+    const { injectTeamRules, recordTeamRulesOutcome } = await import("./runtime/team-rules-inject.js");
     const out = await injectTeamRules({
       enabled: true,
       hubUrl: COMMHUB_URL,
@@ -1599,6 +1599,7 @@ if (process.env.ANET_TEAM_RULES === "1" && NODE_ID) {
       runtime: RUNTIME,
       warn: (m: string) => warn(m),
     });
+    recordTeamRulesOutcome(out);
     console.log(`[team-rules] ${out.status}${"reason" in out ? ` (${out.reason})` : ""}${"revision" in out ? ` revision=${out.revision}` : ""}`);
   } catch (e: any) {
     warn(`[team-rules] injection failed (${e?.message ?? e}); continuing without it`);
@@ -1868,6 +1869,11 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // resume_id 时会整行 DELETE+INSERT,没带的列被清成 NULL;.49 之前的 hub 没有接手逻辑,
     // 这里带上至少让 agent-node 自己的每次上报都把 version 写回去。
     version: AGENT_NODE_VERSION,
+    // #2211 — what this process last did with the network's team rules. An old Hub
+    // strips an unknown top-level key silently (it is not strict), so shipping the
+    // sender first is safe: no node dies, and nothing changes until the Hub reads it.
+    // Shape: { revision, status, reason?, at }.
+    ...(() => { const tr = currentTeamRulesOutcome(); return tr ? { team_rules: tr } : {}; })(),
     node_id: NODE_ID || undefined,
     session_id: activeSessionId,
     config_path: configFilePath || undefined,
