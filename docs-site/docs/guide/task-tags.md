@@ -46,11 +46,22 @@ Hub 在列表响应的 `capabilities` 里带 `tag_ops` 时，可以整网改名�
 | `merge` | `from`（1–50 个）、`to` | 每张带任一来源的卡，来源换成一个 `to` |
 | `delete` | `tag` | 从每张卡上拿掉这个标签，卡本身保留 |
 | `color` | `tag`、`color`（`#rrggbb` 或 `null` 清除） | 只改颜色，不动卡 |
+| `reparent` | `tag`、`parent`（父标签名，或 `null` 升为顶层） | **只改标签树的父子关系**，不动任何卡、也不改名 |
 
 - 网络里所有匹配的卡在一个事务里改写，含归档的。中途失败时一张都不改。
 - 改过的卡 `updated_at` 前移，`updated_by` 记调用者，`updated_since` 同步得到。
 - 改名、合并时，目标没有颜色就继承第一个有颜色的来源。来源的颜色和被删标签的颜色一起删掉。
 - 返回 `{ok, op, affected, reparented}`，`affected` 是改了几张卡，`reparented` 是几个子标签被改挂了父。
+- `reparent` 的四条规则（都**明确拒绝**，不静默纠正）：
+  - 父必须是本网络里存在的标签（卡片在用 / 有颜色 / 已是树节点），否则 `404 tag_parent_not_found`；
+  - 不能成环：父不能是自己，也不能是自己的子孙 → `400 tag_parent_cycle`；
+  - 搬完最深不超过 4 层（顶层算第 1 层）：检查的是「新父深度 + 自己这棵子树的高度」，
+    所以一个 3 层的分支不会因为父在浅层就被放行 → `400 tag_depth_exceeded`；
+  - **必须显式传 `parent`**：缺这个键是 `400 invalid_tag_parent_id`，空串或 `null` 才是升到顶层
+    （不接受「没传就把标签挪到根」，那会让 UI 显示的和实际存的不一致）。
+- 只在卡片上出现过、还没登记成节点的老标签也能 `reparent`：会先登记成顶层节点再挂到父下面。
+- `reparent` 不改卡片，所以 `affected` 恒为 0、`reparented` 为 1；它和改名/合并/删除走同一把权限锁
+  （网络 owner / 管理员 / `task_access='all'`），节点令牌与 scoped 成员一律 `403`。
 - 标签名规则同上。不合法返回 400 `invalid_tag`、`invalid_tag_color` 或 `invalid_tag_op`。来源和目标相同返回 400 `same_tag`。网络里没有这个标签返回 404 `tag_not_found`。
 - 每次成功都写审计 `requirement_tag_rename` / `_merge` / `_delete` / `_color`，详情里带 `affected`。
 

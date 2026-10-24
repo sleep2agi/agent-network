@@ -46,11 +46,27 @@ Older clients read `tags` only and ignore the rest.
 | `merge` | `from` (1–50), `to` | On every card with any source, the sources are replaced by a single `to` |
 | `delete` | `tag` | The tag is removed from every card. The cards stay |
 | `color` | `tag`, `color` (`#rrggbb`, or `null` to clear) | Only the color changes. No card is touched |
+| `reparent` | `tag`, `parent` (a parent tag name, or `null` to move it to the top level) | **Only the tree edge changes.** No card is touched and nothing is renamed |
 
 - All matching cards in the network, archived ones included, are rewritten in one transaction. If anything fails, no card changes.
 - Each rewritten card's `updated_at` moves forward and `updated_by` records the caller, so `updated_since` sync picks up the change.
 - On rename or merge, a target without a color inherits the first source that has one. Source colors are deleted, and so is the color of a deleted tag.
 - The response is `{ok, op, affected}`, where `affected` is the number of cards changed.
+- `reparent` has four rules, and each one refuses explicitly instead of adjusting silently:
+  - the parent must already exist in this network (used by a card, has a colour, or is a tree node),
+    otherwise `404 tag_parent_not_found`;
+  - no cycles: the parent cannot be the tag itself or one of its descendants → `400 tag_parent_cycle`;
+  - the deepest level after the move must stay within 4 (the root counts as level 1). The check is
+    "depth of the new parent + height of this tag's own subtree", so a 3-level branch is not waved
+    through just because the parent sits near the root → `400 tag_depth_exceeded`;
+  - `parent` must be passed explicitly: omitting the key is `400 invalid_tag_parent_id`, while an
+    empty string or `null` moves the tag to the top level (silently rooting a tag on a missing field
+    would make the UI show one thing and store another).
+- A legacy tag that only ever appeared on cards (never registered as a node) can be reparented too:
+  it is registered as a top-level node first, then attached under the parent.
+- `reparent` changes no cards, so `affected` is always 0 and `reparented` is 1. It uses the same
+  permission lock as rename / merge / delete (network owner, admin, or `task_access='all'`);
+  node tokens and scoped members get `403`.
 - Tag names follow the rules above. Invalid input returns 400 `invalid_tag`, `invalid_tag_color`, or `invalid_tag_op`. A source equal to the target returns 400 `same_tag`. A tag that is not in the network returns 404 `tag_not_found`.
 - Every successful call writes an audit entry: `requirement_tag_rename`, `_merge`, `_delete`, or `_color`. Its detail includes `affected`.
 

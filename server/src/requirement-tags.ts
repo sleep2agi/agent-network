@@ -23,7 +23,9 @@ export type TagOp =
   | { op: "rename"; from: string; to: string }
   | { op: "merge"; from: string[]; to: string }
   | { op: "delete"; tag: string }
-  | { op: "color"; tag: string; color: string | null };
+  | { op: "color"; tag: string; color: string | null }
+  // 改父级(标签树自己的层级,与卡片无关):parent=null = 升为顶层。
+  | { op: "reparent"; tag: string; parent: string | null };
 
 /** 单个标签名,规则同 normalizeTags。不合法 = null。 */
 export function tagName(value: unknown): string | null {
@@ -65,6 +67,17 @@ export function parseTagOp(body: Record<string, unknown>): TagOp | { error: stri
       if (!tag) return { error: "invalid_tag" };
       if (body.color !== null && (typeof body.color !== "string" || !TAG_COLOR.test(body.color))) return { error: "invalid_tag_color" };
       return { op: "color", tag, color: body.color === null ? null : (body.color as string).toLowerCase() };
+    }
+    case "reparent": {
+      const tag = tagName(body.tag);
+      if (!tag) return { error: "invalid_tag" };
+      // 与 create 同一套读法:缺省 key 算错(不能靠"没传"把标签静默升到根),显式 null = 根。
+      if (!("parent" in body)) return { error: "invalid_tag_parent_id" };
+      if (body.parent === null || body.parent === "") return { op: "reparent", tag, parent: null };
+      const parent = tagName(body.parent);
+      if (!parent) return { error: "invalid_tag_parent_id" };
+      if (parent === tag) return { error: "tag_parent_cycle" };
+      return { op: "reparent", tag, parent };
     }
     default:
       return { error: "invalid_tag_op" };

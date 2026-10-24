@@ -8,7 +8,7 @@ import { db, logAudit } from "./db.js";
 import { resolveNodeCaller } from "./create-node.js";
 import { markGzipReusable } from "./http-gzip.js";
 import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from "./requirement-tags.js";
-import { buildTagNodes, MAX_TAG_DEPTH, parseCreateTag, TAG_TREE_CAPABILITY, tagDepth, type TagNodeRow } from "./requirement-tag-tree.js";
+import { buildTagNodes, isDescendant, MAX_TAG_DEPTH, parseCreateTag, TAG_TREE_CAPABILITY, tagDepth, tagSubtreeHeight, type TagNodeRow } from "./requirement-tag-tree.js";
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
@@ -547,12 +547,37 @@ async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
     const sources = op.op === "rename" ? [op.from] : op.op === "merge" ? op.from : [op.tag];
     // 「存在」= 有卡片在用 / 有颜色行 / 是登记过的树节点。最后一种让 0 任务的标签也能改名、合并、删除、上色。
     const nodeExists = (name: string) => !!db.get<{ x: number }>("SELECT 1 AS x FROM network_tag_nodes WHERE network_id = ?1 AND name = ?2", networkId, name);
-    const known = cards.some(card => storedTags(card.tags_json).some(tag => sources.includes(tag))) || sources.some(tag => colorOf(tag) !== null || nodeExists(tag));
+    // 「存在」的三种形态(卡片在用 / 有颜色行 / 登记过的树节点),reparent 判父存在时用的是同一个口径。
+    const tagExists = (name: string) => cards.some(card => storedTags(card.tags_json).includes(name)) || colorOf(name) !== null || nodeExists(name);
+    const known = sources.some(tagExists);
     if (!known) return null;
     if (op.op === "color") {
       if (op.color === null) db.run("DELETE FROM network_tags WHERE network_id = ?1 AND name = ?2", [networkId, op.tag]);
       else db.run("INSERT INTO network_tags (network_id, name, color, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (network_id, name) DO UPDATE SET color = excluded.color, updated_at = excluded.updated_at", [networkId, op.tag, op.color, now]);
       return { affected: 0 };
+    }
+    // 改父级:只动标签树,不动任何卡片(标签仍然是卡片 tags_json 里的字符串)。
+    // 三条规则都明确拒绝而不是静默纠正:父必须存在、不许成环、搬完最深不超过 MAX_TAG_DEPTH。
+    if (op.op === "reparent") {
+      const nodes = db.all<TagNodeRow>("SELECT name, parent_name FROM network_tag_nodes WHERE network_id = ?1", networkId);
+      const parentOf = new Map(nodes.map(row => [row.name, row.parent_name ?? null]));
+      // 只在卡片上出现过的老标签没有行可改:先登记成顶层节点(这不是把它降级,它本来就没有父)。
+      if (!parentOf.has(op.tag)) {
+        db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.tag, now, actor]);
+        parentOf.set(op.tag, null);
+      }
+      if (op.parent) {
+        if (!tagExists(op.parent)) return { error: "tag_parent_not_found" };
+        if (!parentOf.has(op.parent)) {
+          db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.parent, now, actor]);
+          parentOf.set(op.parent, null);
+        }
+        // 环:父是自己(parse 已挡)或自己的子孙(这里挡)。深度:新父的深度 + 自己这棵子树的高度。
+        if (isDescendant(op.parent, op.tag, parentOf)) return { error: "tag_parent_cycle" };
+        if (tagDepth(op.parent, parentOf) + tagSubtreeHeight(op.tag, parentOf) > MAX_TAG_DEPTH) return { error: "tag_depth_exceeded" };
+      }
+      db.run("UPDATE network_tag_nodes SET parent_name = ?1, updated_at = ?2 WHERE network_id = ?3 AND name = ?4", [op.parent, now, networkId, op.tag]);
+      return { affected: 0, reparented: 1 };
     }
     let affected = 0;
     for (const card of cards) {
@@ -567,13 +592,14 @@ async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
     return { affected, reparented };
   });
   if (!result) return jsonError("tag_not_found", 404);
+  if ("error" in result) return jsonError(result.error, result.error === "tag_parent_not_found" ? 404 : 400);
   if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, `requirement_tag_${op.op}`, "requirement_tag", op.op === "rename" || op.op === "merge" ? op.to : op.tag, JSON.stringify({ ...op, affected: result.affected }).slice(0, 1000), undefined, networkId);
   return Response.json({ ok: true, op: op.op, affected: result.affected, reparented: result.reparented });
 }
 
 /** 改名 / 合并:目标没有颜色就继承第一个有颜色的来源;来源的颜色行删掉。删除:删颜色行。 */
 function moveTagColors(networkId: string, op: TagOp, colorOf: (name: string) => string | null, now: string): void {
-  if (op.op === "color") return;
+  if (op.op === "color" || op.op === "reparent") return;
   const sources = op.op === "rename" ? [op.from] : op.op === "merge" ? op.from : [op.tag];
   if (op.op !== "delete" && colorOf(op.to) === null) {
     const inherited = sources.map(colorOf).find(color => color !== null);
@@ -590,7 +616,7 @@ function moveTagColors(networkId: string, op: TagOp, colorOf: (name: string) => 
  * 返回被改挂的节点数(客户端能报「N 个子标签已上移」)。
  */
 function maintainTagTree(networkId: string, op: TagOp, now: string): number {
-  if (op.op === "color") return 0;
+  if (op.op === "color" || op.op === "reparent") return 0;
   const rows = db.all<TagNodeRow>("SELECT name, parent_name FROM network_tag_nodes WHERE network_id = ?1", networkId);
   if (!rows.length) return 0;
   const parentOf = new Map(rows.map(row => [row.name, row.parent_name ?? null]));

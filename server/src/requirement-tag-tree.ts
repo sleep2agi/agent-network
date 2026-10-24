@@ -95,3 +95,33 @@ export function buildTagNodes(registered: TagNodeRow[], inUse: string[]): TagNod
   }
   return nodes.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
+
+/**
+ * name 这棵子树有几层(叶子 = 1)。改父级时用它算「搬过去之后最深到几层」:
+ * 只检查新父的深度是不够的 —— 一个 3 层的子树挂到第 3 层下,最深会到 5 层。
+ * 历史脏数据里有环时用 visited 兜住,不要为脏数据死循环。
+ */
+export function tagSubtreeHeight(name: string, parentOf: Map<string, string | null>): number {
+  const childrenOf = new Map<string, string[]>();
+  for (const [child, parent] of parentOf) {
+    if (!parent) continue;
+    const list = childrenOf.get(parent);
+    if (list) list.push(child); else childrenOf.set(parent, [child]);
+  }
+  let height = 1;
+  let frontier = [name];
+  const seen = new Set<string>([name]);
+  for (;;) {
+    const next: string[] = [];
+    for (const node of frontier) {
+      for (const child of childrenOf.get(node) ?? []) {
+        if (seen.has(child)) continue;
+        seen.add(child);
+        next.push(child);
+      }
+    }
+    if (!next.length) return height;
+    height++;
+    frontier = next;
+  }
+}
