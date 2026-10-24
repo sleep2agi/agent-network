@@ -1929,9 +1929,13 @@ return Bun.serve({
           username: resolved.user.username ?? null,
         });
         if (!result.ok) return withCors(req, Response.json({ ok: false, error: result.error }, { status: result.status }));
-        logAudit(resolved.user.user_id, resolved.user.username ?? null, "network_rules_updated", "network_rules", netId,
-          JSON.stringify({ revision: result.rules.revision, bytes: Buffer.byteLength(result.rules.content, "utf8") }), undefined, netId);
-        return withCors(req, Response.json({ ok: true, rules: result.rules }));
+        // An idempotent save (same bytes) changes nothing, so it must not invent an
+        // audit entry that says the rules were updated.
+        if (result.changed) {
+          logAudit(resolved.user.user_id, resolved.user.username ?? null, "network_rules_updated", "network_rules", netId,
+            JSON.stringify({ revision: result.rules.revision, bytes: Buffer.byteLength(result.rules.content, "utf8") }), undefined, netId);
+        }
+        return withCors(req, Response.json({ ok: true, changed: result.changed, rules: result.rules }));
       }
       return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
     }

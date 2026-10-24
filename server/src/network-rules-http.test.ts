@@ -102,9 +102,51 @@ describe("#993 — network rules storage + CAS write", () => {
   });
 
   test("oversized content is refused (bytes, not UTF-16 units)", async () => {
-    const r = await send(adminToken, "PUT", `/api/networks/${netId}/rules`, { content: "a".repeat(200 * 1024 + 1), expected_revision: 1 });
+    const r = await send(adminToken, "PUT", `/api/networks/${netId}/rules`, { content: "a".repeat(256 * 1024 + 1), expected_revision: 1 });
     expect(r.status).toBe(413);
     expect(r.body.error).toBe("rules_too_large");
+  });
+
+  test("re-writing identical bytes is idempotent (revision does not move, changed=false)", async () => {
+    // The next slice injects a managed block keyed by revision; a no-op save that
+    // bumped the number would make every node rewrite its file for nothing.
+    const before = (await send(adminToken, "GET", `/api/networks/${netId}/rules`)).body.rules;
+    const w = await send(adminToken, "PUT", `/api/networks/${netId}/rules`, {
+      content: before.content, expected_revision: before.revision,
+    });
+    expect(w.status).toBe(200);
+    expect(w.body.changed).toBe(false);
+    expect(w.body.rules.revision).toBe(before.revision);
+    // …and a real edit still moves it.
+    const w2 = await send(adminToken, "PUT", `/api/networks/${netId}/rules`, {
+      content: before.content + "\n- one more line\n", expected_revision: before.revision,
+    });
+    expect(w2.status).toBe(200);
+    expect(w2.body.changed).toBe(true);
+    expect(w2.body.rules.revision).toBe(before.revision + 1);
+  });
+
+  test("the 256 KiB cap is the same ruler as write_node_rules_file", async () => {
+    // 200 KiB used to be the cap here while node rules allowed 256 KiB — the same text
+    // could fit in the Hub and then be refused at the node.
+    const atCap = "a".repeat(256 * 1024);
+    const rev = (await send(adminToken, "GET", `/api/networks/${netId}/rules`)).body.rules.revision;
+    const ok = await send(adminToken, "PUT", `/api/networks/${netId}/rules`, { content: atCap, expected_revision: rev });
+    expect(ok.status).toBe(200);
+    const rev2 = ok.body.rules.revision;
+    const over = await send(adminToken, "PUT", `/api/networks/${netId}/rules`, { content: atCap + "a", expected_revision: rev2 });
+    expect(over.status).toBe(413);
+  });
+
+  test("deleting the network deletes its rules row (no orphans)", async () => {
+    const own = register(`nr_del_${Date.now()}`, "DelPw123Aa!", undefined, "del");
+    expect(own.ok).toBe(true);
+    const put = await send(own.token!, "PUT", `/api/networks/${own.network_id}/rules`, { content: "team rules", expected_revision: 0 });
+    expect(put.status).toBe(200);
+    const del = await send(own.token!, "DELETE", `/api/networks/${own.network_id}`);
+    expect(del.status).toBe(200);
+    const left = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM network_rules WHERE network_id = ?1", own.network_id!);
+    expect(left!.cnt).toBe(0);
   });
 
   test("a node token cannot read another network's rules", async () => {

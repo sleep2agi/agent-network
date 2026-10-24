@@ -16,8 +16,12 @@
 //     content is a file the node will write to disk.
 import type { DbAdapter } from "./db-adapter.js";
 
-/** 200 KiB. A team rule file is small; anything near this is a mistake. */
-export const NETWORK_RULES_MAX_BYTES = 200 * 1024;
+/**
+ * 256 KiB — deliberately the same ruler as `write_node_rules_file` (tools.ts), because
+ * these two texts are meant to end up next to each other on a node. Two different caps
+ * for the same kind of document is how "it fit in the Hub but not on the node" happens.
+ */
+export const NETWORK_RULES_MAX_BYTES = 256 * 1024;
 
 export type NetworkRules = {
   network_id: string;
@@ -76,7 +80,7 @@ export function readNetworkRules(database: DbAdapter, networkId: string): Networ
 }
 
 export type WriteResult =
-  | { ok: true; rules: NetworkRules }
+  | { ok: true; rules: NetworkRules; changed: boolean }
   | { ok: false; status: number; error: "invalid_rules_content" | "rules_too_large" | "rules_revision_conflict" };
 
 /**
@@ -102,6 +106,12 @@ export function writeNetworkRules(
   const row = current(database, networkId);
   const revision = row ? Number(row.revision) || 0 : 0;
   if (revision !== expectedRevision) return { ok: false, status: 409, error: "rules_revision_conflict" };
+  // Idempotent revision: writing the same bytes must not mint a new revision.
+  // The next slice injects a managed block keyed by revision, so a no-op save that
+  // bumped the number would make every node rewrite its file for nothing.
+  if (row && row.content === content) {
+    return { ok: true, rules: readNetworkRules(database, networkId), changed: false };
+  }
   const next = revision + 1;
   const actorJson = JSON.stringify({ user_id: actor.user_id, username: actor.username });
   if (row) {
@@ -115,5 +125,5 @@ export function writeNetworkRules(
       [networkId, content, next, now, actorJson],
     );
   }
-  return { ok: true, rules: readNetworkRules(database, networkId) };
+  return { ok: true, rules: readNetworkRules(database, networkId), changed: true };
 }

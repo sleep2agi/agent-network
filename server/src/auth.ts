@@ -516,6 +516,9 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
     // deleted network. Remove memberships with the network.
     db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
     deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); for (const t of AGENT_TEAM_TABLES) if (tableExists(t)) db.run(`DELETE FROM ${t} WHERE network_id = ?1`, [networkId]); // #2144, #419, #764 (one line: docs pin auth.ts line numbers)
+    // #993: the rules text belongs to the network; leaving it behind would make a
+    // later network that reuses the id inherit somebody else's rules.
+    if (tableExists("network_rules")) db.run("DELETE FROM network_rules WHERE network_id = ?1", [networkId]);
   });
   return { ok: true };
 }
@@ -966,6 +969,8 @@ const NETWORK_CLEANUP_TABLES = [
   "task_events", "task_terminal_events", "task_late_replies", "scheduled_task_runs", "external_schedule_edits",
   // 标签颜色:网络本身的元数据(标签本体在 requirements 行里,那张表是阻断项)。
   "network_tags",
+  // #993/#1542 全团队规则:规则文本是网络元数据,网络删了它不该留成孤儿行。
+  "network_rules",
   // 组织架构(board #419):部门是网络本身的元数据。
   "network_departments",
   // Agent 团队(#764):Agent 自己的组织树,同样是网络元数据。
