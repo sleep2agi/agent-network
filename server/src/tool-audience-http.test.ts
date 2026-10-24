@@ -211,6 +211,12 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // assign_agent 合并成一个，尽量小）。实测 node 64,112 B / user 60,117 B，比原上限
   // 分别高 412 / 279 B —— 这是有意的功能增长（组织架构可由 Agent 直接调），不是文案偷偷变长。
   // 留约 400 B 余量；再要加工具时请先合并动作或砍描述，别连续抬上限。
+  // #2204（2026-10-25）：标签管理给 MCP。为了**不抬上限**，做了两件事：
+  //   ① 合并成一个工具 `requirement_tags`（action 分派 list/rename/merge/delete/color/reparent），
+  //      而不是 list + op 两个（照 #1894 `departments` 的先例）；
+  //   ② 砍掉一批冗长描述里重复的解释性从句（每条约 20–100 B，信息点全部保留）。
+  // 实测（含新工具）：all 97 / 86,020 B；node 64 / 64,464 B；user 64 / 59,680 B —— 三个上限**一个都没动**。
+  // 下次再加工具，请先合并动作或砍描述，不要直接改这三个数。
   const CEILINGS = { node: 64_500, user: 60_500, all: 86_500 } as const;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);

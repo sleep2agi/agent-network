@@ -1993,7 +1993,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "send_task",
-    "Dispatch a task to a session's inbox (by alias). The reply carries queue_ahead (open tasks already on the target), target_busy, est_wait_minutes (rough, null = no history) and, when the queue is long, a warning: queued, never refused — consider an idle node.",
+    "Dispatch a task to a session's inbox (by alias). The reply carries queue_ahead, target_busy, est_wait_minutes (null = no history) and, when the queue is long, a warning. Always queued, never refused.",
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
       task: z.string().min(1).max(TASK_CONTENT_MAX).describe("Task content"),
@@ -2844,7 +2844,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   );
   server.tool(
     "send_peer_reply",
-    "Atomically finalize one node-owned task and enqueue one no-response result when the exact recipient advertises peer_reply_inbox_capable. Stored capability survives transient SSE disconnects; legacy peers return peer_reply_unsupported with zero writes.",
+    "Atomically finalize one node-owned task and enqueue one no-response result when the recipient advertises peer_reply_inbox_capable. Stored capability mismatch -> refused, not silently degraded.",
     replyToolSchema,
     (args) => handleReply(args, true),
   );
@@ -3465,7 +3465,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "update_node_config",
-    "Set the desired per-node config (model + flags) and push a doorbell to the node. The node pulls + validates + applies (hot or restart per field tier). RFC-024.",
+    "Set the per-node config (model + flags) and push a doorbell; the node pulls, validates and applies (hot or restart per field). RFC-024.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       base_revision: z.number().int().min(0).describe("Current revision per the dashboard's last GET — 409 if hub's current revision differs."),
@@ -4034,7 +4034,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_rules_file",
-    "Ask a node to send back its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) from its working directory. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
+    "Ask a node to send back its rules file (CLAUDE.md for claude, else AGENTS.md) from its work dir. No path argument. Poll get_rules_file_result with the returned request_id. app#225.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting rules_file_capable)."),
@@ -4045,7 +4045,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "write_node_rules_file",
-    "Ask a node to overwrite its rules file (CLAUDE.md for claude nodes, AGENTS.md otherwise) in its working directory with `content`. No path argument by design. Poll get_rules_file_result with the returned request_id. app#225.",
+    "Ask a node to write a managed block into its rules file (CLAUDE.md / AGENTS.md). Poll get_rules_file_result. User logins only (node owner or network owner/admin).",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting rules_file_capable)."),
@@ -4057,7 +4057,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "list_node_skills",
-    "Ask a node to list the skills its runtime loads (name, scope project|user|system, display path, frontmatter description; team skills also include origin \"team\"). Read-only; no path argument. Poll get_rules_file_result — content is JSON {skills:[…], roots, warnings}.",
+    "Ask a node for the skills its runtime loads (name, scope project|user|system, display path, description; team skills add origin \"team\"). No path. Poll get_rules_file_result: {skills:[...], roots, warnings}.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),
@@ -4068,7 +4068,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_skill",
-    "Ask a node for one skill's SKILL.md by name. Read-only; the node resolves the name under its own runtime's skills roots — no path argument. Poll get_rules_file_result — content is JSON {name, scope, path_rel, description, content, origin?}. origin is \"team\" only for a team skill.",
+    "One skill's SKILL.md by name; the node resolves it under its own skills roots (no path). Poll get_rules_file_result: {name, scope, path_rel, description, content, origin?}; origin=\"team\" only for a team skill.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),
@@ -4080,7 +4080,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "list_node_files",
-    "Ask a node to list one directory level of its work dir (project folder view, read-only). `path` is relative to the work dir (default: the root); absolute paths and .. are refused. Poll get_rules_file_result — content is JSON {path, entries:[{name,type,size?,mtime?,hidden_reason?,no_descend?}], truncated, total}. User logins only.",
+    "List one level of the node's work dir (read-only). `path` relative (default root); absolute and .. refused. Poll get_rules_file_result: {path, entries:[{name,type,size?,mtime?,hidden_reason?,no_descend?}], truncated, total}. User logins only.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting files_capable)."),
@@ -4092,7 +4092,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_file",
-    "Ask a node for one text file under its work dir (project folder view, read-only, 256 KiB cap; binary / too large → size only; secret-looking files → name only). `path` is relative to the work dir. Poll get_rules_file_result — content is JSON {path, name, kind, size?, mtime?, content?, hidden_reason?}. User logins only.",
+    "One text file under the node's work dir (read-only, 256 KiB cap; binary / too large -> size only; secret-looking -> name only). `path` relative. Poll get_rules_file_result: {path, name, kind, size?, mtime?, content?, hidden_reason?}. User logins only.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting files_capable)."),
@@ -4104,7 +4104,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "tail_node_logs",
-    "Tail of a node's own agent-node run log (read-only, redacted on the node). No path argument: it reads only its own log directory. User logins only (node owner or network owner/admin). Poll get_rules_file_result; JSON {files, lines, truncated, matched}; handed out once, then purged.",
+    "Tail of the node's own run log (read-only, redacted on the node). No path argument. User logins only (node owner or network owner/admin). Poll get_rules_file_result: {files, lines, truncated, matched}; handed out once, then purged.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting logs_capable)."),
@@ -4217,7 +4217,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_rules_file_result",
-    "Poll the outcome of a read_node_rules_file / write_node_rules_file request. Returns status pending|in_progress|done|failed|timeout, the file name the node used, and (for reads) the content. app#225.",
+    "Poll a read_node_rules_file / write_node_rules_file / node-file / node-log request. Returns status pending|in_progress|done|failed|timeout plus the file name and (reads) content. app#225.",
     { request_id: z.string().min(1).max(200), network_id: z.string().max(200).optional() },
     async ({ request_id: requestId, network_id: clientNetId }) => {
       const effectiveNetId = getNetworkId(clientNetId);
@@ -4298,7 +4298,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "restart_node",
-    "Trigger a node restart without changing config. RFC-024 Vincent 2026-06-28 increment. Network-scoped (SEC-1); member+ role suffices (lifecycle ops are not privilege elevation).",
+    "Restart a node without changing config (RFC-024). Network-scoped (SEC-1); member+ suffices — not privilege elevation.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       network_id: z.string().max(200).optional(),
@@ -4930,7 +4930,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // the policy and the runtime's session capability (see clone-node.ts).
   server.tool(
     "clone_node",
-    "Clone a daemon child into a new node on the same daemon. New name and new token. copy_session defaults to true. workdir_policy new_empty (default) or share_source. Hub #938.",
+    "Clone a daemon child into a new node on the same daemon: new name + new token. copy_session defaults true; workdir_policy new_empty (default) or share_source. Hub #938.",
     {
       source_node_id: z.string().min(1).max(200),
       name: z.string().min(1).max(256),
@@ -5720,7 +5720,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "delete_node",
-    "Stop child + revoke ntok + delete hub row + (default) backup config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must equal the node's alias. daemon_node_id is auto-resolved when omitted. RFC-027 §2.2.",
+    "Stop child + revoke token + delete hub row + (default) back up config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must match. daemon_node_id auto-resolved. RFC-027 §2.2.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/).optional(),
@@ -6218,7 +6218,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // §2.3.4 — upsert_network_secret (OWNER-ONLY; vault write).
   server.tool(
     "upsert_network_secret",
-    "Write or replace a secret value in the network's vault (AES-GCM encrypted at rest). OWNER-only. RFC-028.",
+    "Create or replace one vault secret by key (value never read back). RFC-028.",
     {
       key: z.string().min(1).max(64).regex(/^[A-Z][A-Z0-9_]{0,63}$/),
       value: z.string().min(1).max(16 * 1024),
@@ -6888,14 +6888,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_create",
-    "Create a requirement task. name is required. column (or its alias status) = pool / doing / done / abandoned. A duplicate external_ref in the network returns 409 external_ref_exists with existing_id — use requirements_upsert_by_external_ref for syncing.",
+    "Create a task; name required. column (alias status) = pool/doing/done/abandoned. A duplicate external_ref returns 409 external_ref_exists with existing_id; use requirements_upsert_by_external_ref to sync.",
     { network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, name: z.string().min(1).max(80), external_ref: z.string().max(200).optional() },
     async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
 
   server.tool(
     "requirements_update",
-    "Patch a requirement task (id or \"#N\"); omitted fields keep their value. column (or its alias status) moves it between pool / doing / done / abandoned. participants REPLACES the whole list; to add or remove people without dropping the others use participants_add / participants_remove. archived=true hides it from the default list (agents cannot delete).",
+    "Patch a task (id or \"#N\"); omitted fields keep their value. column (alias status) = pool/doing/done/abandoned. participants REPLACES the list (use participants_add / _remove to keep others). archived=true hides it; agents cannot delete.",
     { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, participants_add: reqPeopleDelta("add"), participants_remove: reqPeopleDelta("remove"), external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
     async (args) => withColumn(args, a => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(a, [...REQ_WRITE_KEYS, "participants_add", "participants_remove"]))),
   );
@@ -6909,7 +6909,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_upsert_by_external_ref",
-    "Idempotent sync: create the task for external_ref (e.g. github:owner/repo#123) or, if it already exists in the network, patch it (omitted fields — including column / status — are kept). Returns { requirement, created }.",
+    "Idempotent sync: create the task for external_ref (e.g. github:owner/repo#123) or update the one already bound to it. Returns { requirement, created }.",
     { network_id: z.string().max(200).optional(), external_ref: z.string().min(1).max(200), ...reqFields, status: reqStatus, archived: z.boolean().optional() },
     async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements/upsert", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
@@ -6926,7 +6926,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // write access and is refused to 「仅相关任务」(task-scoped) members; events use the task list's visibility.
   server.tool(
     "projects_create",
-    "Create a requirement project (管理项目 → 新建). name 1–40, unique; color #RRGGBB; sort int; parent_id optional (≤3 levels). Returns { project }. node tokens can only read projects (403 user_token_required); task-scoped / read-only members are refused.",
+    "Create a project (管理项目 → 新建). name 1-40, unique; color #RRGGBB; sort int; parent_id optional (<=3 levels). Returns { project }. Node tokens 403.",
     {
       network_id: z.string().max(200).optional(),
       name: z.string().min(1).max(40),
@@ -6939,7 +6939,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_update",
-    "Rename, recolour, reorder, archive/unarchive, or move a project under another (parent_id; null = top level, cycles / depth>3 refused). Only the fields you pass change; archived hides it from pickers. Returns { project }. node tokens can only read projects (403); task-scoped / read-only members refused.",
+    "Rename, recolour, reorder, archive, or move a project under another (parent_id; null = top level; cycles / depth>3 refused). Only fields you pass change. Returns { project }. Node tokens 403; task-scoped / read-only members refused.",
     {
       network_id: z.string().max(200).optional(),
       id: z.string().min(1).max(200).describe("project id (proj_…), from projects_list"),
@@ -6950,6 +6950,33 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       parent_id: z.string().max(200).nullable().optional(),
     },
     async (args) => requirementsCall("PATCH", `/api/requirements/projects/${encodeURIComponent(args.id)}`, args.network_id, pick(args, ["name", "color", "sort", "archived", "parent_id"])),
+  );
+
+  // #2204 —— 标签管理给 MCP:REST 早就有 rename/merge/delete/color/reparent,但只有人用的 HTTP,
+  // MCP 侧既读不到标签树、也改不了父级。做成**一个**工具(action 分派)而不是 list + op 两个:
+  // tools/list 字节预算是硬约束(all 86,500 / node 64,500 / user 60,500),两个工具会撑破预算,
+  // 而"抬预算"是仓里明令禁止的做法(见 tool-audience-http.test.ts 注释与 #1894 先例)。
+  server.tool(
+    "requirement_tags",
+    "Tags of this network. action=list → name, parent_id (null=root), depth, colour, usage, can_manage. Writes (owner/admin; node tokens 403): rename|merge|delete|color|reparent. reparent moves only the tree edge (cycle / depth>4 refused).",
+    {
+      network_id: z.string().max(200).optional(),
+      action: z.enum(["list", "rename", "merge", "delete", "color", "reparent"]),
+      tag: z.string().min(1).max(20).optional(),
+      from: z.union([z.string().min(1).max(20), z.array(z.string().min(1).max(20)).min(1).max(50)]).optional(),
+      to: z.string().min(1).max(20).optional(),
+      parent: z.string().min(1).max(20).nullable().optional(),
+      color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+    },
+    async (args) => {
+      if (args.action === "list") return requirementsCall("GET", "/api/requirements/tags", args.network_id);
+      const body: Record<string, unknown> = { op: args.action };
+      if (args.action === "rename" || args.action === "merge") { body.from = args.from; body.to = args.to; }
+      else if (args.action === "delete") body.tag = args.tag;
+      else if (args.action === "color") { body.tag = args.tag; body.color = args.color === undefined ? null : args.color; }
+      else { body.tag = args.tag; if ("parent" in args) body.parent = args.parent; }
+      return requirementsCall("POST", "/api/requirements/tags/ops", args.network_id, body);
+    },
   );
 
   // #476 —— 不带 requirement_id 的全网动态默认 50 条(REST 默认 200 不变,App 走 REST);严格参数同 #471。
@@ -6995,7 +7022,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 两次调用,并发时覆盖别人刚写的描述。这条只追加,进「动态」(requirements_events kind=comment),不改任务本身。
   server.tool(
     "requirements_comment",
-    "Add a comment / progress note to a task (append-only; never rewrites the description). It shows in the task's activity timeline (the app's 动态, requirements_events kind=comment, text in new.text) under your name. text: markdown, 1–4000 characters. Anyone who can see the task and can write in the network (not read-only) may comment. Returns { event }.",
+    "Append a comment / progress note (never rewrites the description). Shows in requirements_events (kind=comment, text in new.text). text: markdown 1-4000. Anyone who can see the task and write in the network may comment. Returns { event }.",
     {
       id: z.string().min(1).max(200).describe(REQ_ID_DESC),
       text: z.string().min(1).max(4000).describe("the comment (markdown), 1–4000 characters"),

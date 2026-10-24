@@ -210,6 +210,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档）。节点令牌（Agent）**只能读项目** |
 | `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；要人的令牌：节点令牌（Agent）只能读项目，调这个 → 403 `user_token_required`；仅相关任务的成员和 viewer 也 403 |
 | `projects_update` | 改项目的名字 / 颜色 / 排序，或 `archived: true / false` 归档 / 取消归档；只改传了的字段，权限同上 |
+| `requirement_tags` | 标签（本网络）。`action: "list"` 看标签树：`name`、`parent_id`（`null` = 顶层）、`depth`、颜色、任务用量、`can_manage`；写操作用同一个工具（`rename` / `merge` / `delete` / `color` / `reparent`），**只有 owner/admin 能做**，节点令牌调写操作 → 403。`reparent` 只改标签树的父子关系（不动任何卡片、不改名）：父不存在 → 404 `tag_parent_not_found`；成环 → 400 `tag_parent_cycle`；搬完最深超 4 层（判据 = 新父深度 + 自己子树高度）→ 400 `tag_depth_exceeded`；**没传 `parent` 键 → 400**，`null` / `""` 才是升到顶层。被拒绝时库里什么都不变。Hub ≥ preview.156 |
 | `requirements_events` | 读任务的动态（字段级改动流水：谁、何时、旧值 → 新值；以及评论 `kind: "comment"`，正文在 `new.text`，从新到旧）；`requirement_id`（`req_…` 或 `"#N"`）只看一条（`limit` 默认 200）；**不带 `requirement_id` 是全网动态，MCP 默认每页 50 条**，`next_cursor` 传 `cursor` 翻更早的（`limit` ≤ 500；REST 的默认仍是 200）；`since` 只要之后的；可见范围同 `requirements_list`；参数严格（不认识的参数 → `-32602`） |
 | `requirements_comment` | 给任务发一条评论 / 进展（`{id, text}`，markdown 1–4000 字）：**只追加**，不改描述，出现在动态里（`kind: "comment"`），署名是调用者（人或 Agent）。看得见这张任务、且在这个网络里不是只读角色的都能发；看不见 → 404，viewer → 403。Hub ≥ preview.90 |
 

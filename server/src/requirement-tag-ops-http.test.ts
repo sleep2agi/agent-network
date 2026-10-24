@@ -381,3 +381,45 @@ describe("改父级 reparent —— 被拒绝时不留副作用", () => {
     expect(after?.registered ?? false).toBe(false);
   });
 });
+
+// ── MCP 面（#2204 缺口 2）──
+// 一个工具(action 分派)而不是 list + op 两个:tools/list 字节预算是硬约束,见 tools.ts 的注释。
+describe("requirement_tags (MCP)", () => {
+  async function mcp(token: string, name: string, args: Record<string, unknown>) {
+    const r = await fetch(`${BASE}/mcp`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
+    const raw = await r.text(), line = raw.split("\n").find(x => x.startsWith("data: "));
+    const envelope = JSON.parse(line ? line.slice(6) : raw);
+    try { return JSON.parse(envelope.result.content[0].text); } catch { return { mcpError: envelope.error ?? envelope.result }; }
+  }
+  const nodes = async (token: string) => (await send(token, "GET", `/api/requirements/tags?network_id=${NET}`)).body.nodes as Array<{ name: string; parent_id: string | null; depth: number; registered: boolean }>;
+
+  test("action=list 返回标签树(含 parent/depth/registered);action=reparent 走同一条 REST 语义", async () => {
+    expect((await send(admin.token, "POST", `/api/requirements/tags/create?network_id=${NET}`, { name: "MCP父", parent_id: null })).status).toBe(201);
+    expect((await send(admin.token, "POST", `/api/requirements/tags/create?network_id=${NET}`, { name: "MCP子", parent_id: null })).status).toBe(201);
+
+    const listed = await mcp(admin.token, "requirement_tags", { action: "list" });
+    const rows = listed.nodes as Array<{ name: string; parent_id: string | null; depth: number; registered: boolean }>;
+    expect(rows.find(node => node.name === "MCP父")).toMatchObject({ parent_id: null, depth: 1, registered: true });
+    expect(rows.find(node => node.name === "MCP子")).toMatchObject({ parent_id: null, depth: 1 });
+
+    const moved = await mcp(admin.token, "requirement_tags", { action: "reparent", tag: "MCP子", parent: "MCP父" });
+    expect(moved).toMatchObject({ ok: true, op: "reparent", affected: 0, reparented: 1 });
+    expect((await nodes(admin.token)).find(node => node.name === "MCP子")).toMatchObject({ parent_id: "MCP父", depth: 2 });
+
+    // 与 REST 同一套错误码:不传 parent 键 ≠ 升到顶层
+    const missing = await mcp(admin.token, "requirement_tags", { action: "reparent", tag: "MCP子" });
+    expect(missing.error).toBe("invalid_tag_parent_id");
+    expect((await nodes(admin.token)).find(node => node.name === "MCP子")).toMatchObject({ parent_id: "MCP父" });
+  });
+
+  test("节点令牌:能 list,但写操作被拒(403 permission_denied),树不变", async () => {
+    const listed = await mcp(nodeToken, "requirement_tags", { action: "list" });
+    expect(Array.isArray(listed.nodes)).toBe(true);
+    const write = await mcp(nodeToken, "requirement_tags", { action: "reparent", tag: "MCP子", parent: null });
+    expect(write.status).toBe(403);
+    // 写操作先过「要人的令牌」这道闸(tags_write),再到 owner/admin 判定;节点令牌停在前一道。
+    expect(["user_token_required", "permission_denied"]).toContain(write.error);
+    expect((await nodes(admin.token)).find(node => node.name === "MCP子")).toMatchObject({ parent_id: "MCP父" });
+  });
+});

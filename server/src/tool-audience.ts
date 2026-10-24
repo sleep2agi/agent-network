@@ -43,7 +43,7 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   get_probe_request: "protocol", ack_probe_request: "protocol",
   get_opencode_catalog_request: "protocol", ack_opencode_catalog: "protocol",
   // ── 人:节点令牌一律 user_token_required(项目管理)/ node_token_cannot_browse_files / node_token_cannot_read_logs ──
-  projects_create: "user", projects_update: "user",
+  projects_create: "user", projects_update: "user", requirement_tags: "both",
   read_opencode_catalog: "user", get_opencode_catalog: "user",
   list_node_files: "user", read_node_file: "user", tail_node_logs: "user",
   // ── 两边都能调 ──
