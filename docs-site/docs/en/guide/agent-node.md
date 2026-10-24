@@ -123,6 +123,47 @@ Loading is **all or nothing**: if `secrets.env` is a symlink, not a regular file
 
 **Rollback**: if the node will not start after the write, or tasks start failing in bulk with errors pointing at that key, restore the previous backup and do a full restart. `scoped-secrets.json` has revision CAS — a conflicting write fails loudly; do not hand-edit the file.
 
+### Team rules (opt-in): `ANET_TEAM_RULES`
+
+A network owner/admin can keep one **network-wide rules** text on the Hub (`GET/PUT /api/networks/:id/rules`). It is **not** written into nodes by default. To adopt it on a node, set `ANET_TEAM_RULES=1` in that node's environment and do a **full restart**:
+
+```bash
+# back up first — the block goes at the top of the file
+cp AGENTS.md AGENTS.md.bak-$(date +%Y%m%d-%H%M%S)      # CLAUDE.md on claude nodes
+ANET_TEAM_RULES=1 anet node start <alias>              # or your own launcher with this env var
+```
+
+Startup logs one line: `[team-rules] injected|unchanged|skipped|error …`. The top of the file then looks like:
+
+```markdown
+<!-- ANET:TEAM-RULES v3 BEGIN — 由 CommHub 自动维护，块外内容不会被修改 -->
+## 团队规则（CommHub 自动维护）
+### 来源：Hub / 网络 net_xxx（revision 3，更新于 …）
+…the text from the Hub…
+<!-- ANET:TEAM-RULES v3 END -->
+```
+
+Guarantees:
+
+| Case | Result |
+|---|---|
+| Anything outside the block | **preserved byte for byte**, never rewritten |
+| Same revision on a later start | `unchanged`; the file is **byte-identical** (no diff) |
+| Hub unreachable / non-2xx | file **left as-is** plus a warning; the block is **not** deleted; startup is not blocked |
+| A half-written marker (only BEGIN, or mismatched versions) | **write refused** with the reason; the file is untouched |
+| `ANET_TEAM_RULES` unset | zero difference: no request, no file touched |
+
+To turn it off, drop the environment variable and restart. **A block already written is not removed automatically** (removing it would silently withdraw the rules) — delete the marked section or restore the backup.
+
+Scope: this release injects the **Hub layer only**; daemon-scoped rules, cross-layer conflict arbitration and a combined size cap are not implemented. Rule edits take effect on the node's next **full** start — there is no runtime push and no client editor yet.
+
+To check whether a published version really has this behaviour:
+
+```bash
+bash scripts/verify-team-rules-artifact.sh 2.5.0-preview.156
+```
+
+
 > Pending named confirmation: who the **restore source** is (local backup / external KMS / manual re-entry). That sentence is needed before this can be stated as a fixed procedure; the text above assumes local backup plus manual re-entry.
 
 

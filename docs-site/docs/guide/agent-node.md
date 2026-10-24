@@ -123,6 +123,47 @@ anet node migrate-token-to-envref my-agent
 
 **回滚条件**：新值写入后节点无法启动、或任务开始成片失败且错误指向该密钥时，放回上一份备份并完整重启；`scoped-secrets.json` 有 revision CAS，两次写冲突以 CAS 报错为准，不要手改文件。
 
+### 团队规则（可选）：`ANET_TEAM_RULES`
+
+网络 owner/admin 可以在 Hub 上写一份**全网规则**（`GET/PUT /api/networks/:id/rules`）。默认**不会**自动写进节点；要让某个节点采用它，在该节点的环境里设 `ANET_TEAM_RULES=1`，然后**完整重启**：
+
+```bash
+# 先备份（块会加在文件最前面）
+cp AGENTS.md AGENTS.md.bak-$(date +%Y%m%d-%H%M%S)      # claude 节点是 CLAUDE.md
+ANET_TEAM_RULES=1 anet node start <alias>              # 或在你自己的启动器里带这个环境变量
+```
+
+启动日志会有一行 `[team-rules] injected|unchanged|skipped|error …`。文件顶部出现这样的块：
+
+```markdown
+<!-- ANET:TEAM-RULES v3 BEGIN — 由 CommHub 自动维护，块外内容不会被修改 -->
+## 团队规则（CommHub 自动维护）
+### 来源：Hub / 网络 net_xxx（revision 3，更新于 …）
+…Hub 上的正文…
+<!-- ANET:TEAM-RULES v3 END -->
+```
+
+行为约定：
+
+| 情况 | 结果 |
+|---|---|
+| 块外内容 | **逐字节保留**，任何情况下都不改写 |
+| 同一 revision 再次启动 | `unchanged`，文件**字节不变**（不产生 diff） |
+| Hub 不可达 / 非 2xx | 文件**原样** + 告警；**不会删块**，也不阻塞启动 |
+| 文件里标记残缺（只有 BEGIN 或版本不一致） | **拒绝写入**并报原因，文件不动 |
+| 没设 `ANET_TEAM_RULES` | 零行为差异：不发请求、不碰文件 |
+
+关掉它：去掉环境变量后重启即可；**已写入的块不会自动删除**（删块等于静默撤回团队规则），需要时手工删掉标记段或还原备份。
+
+边界：这一版只注入 **Hub 一层**；Daemon 级规则、层间冲突裁决、合并总长上限都还没有实现。规则改动**只在节点下次完整启动时生效**，不做运行中推送，也没有客户端编辑页。
+
+想知道某个已发布版本是否真的具备这个行为，可以跑：
+
+```bash
+bash scripts/verify-team-rules-artifact.sh 2.5.0-preview.156
+```
+
+
 > 待具名确认：**恢复来源**指谁（本机备份 / 外部 KMS / 人工重录）——这一条需要人给一句话才能写成确定流程，本文暂按"本机备份 + 人工重录"描述。
 
 
