@@ -6916,7 +6916,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_list",
-    "List requirement projects (id, name, color, sort, archived, parentId). node tokens can only read projects; node tokens can only read projects; creating / changing needs a person's token.",
+    "List requirement projects (id, name, color, sort, archived, parentId). node tokens can only read projects; creating / changing needs a person's token (projects_create / projects_update).",
     { network_id: z.string().max(200).optional() },
     async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
   );
