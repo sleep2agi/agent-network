@@ -6916,7 +6916,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_list",
-    "List requirement projects in your network (id, name, color, sort, archived, parentId — sub-projects nest up to 3 levels). Node (Agent) tokens can only read projects; creating / changing them (projects_create / projects_update) needs a person's token.",
+    "List requirement projects (id, name, color, sort, archived, parentId). Node (Agent) tokens can only read projects; creating / changing them (projects_create / projects_update) needs a person's token.",
     { network_id: z.string().max(200).optional() },
     async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
   );
@@ -6926,20 +6926,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // write access and is refused to 「仅相关任务」(task-scoped) members; events use the task list's visibility.
   server.tool(
     "projects_create",
-    "Create a requirement project in your network (same as 管理项目 → 新建 in the app). name 1–40 characters, unique in the network; color #RRGGBB (default: next palette colour); sort integer. Returns { project }. Needs a person's token: node (Agent) tokens can only read projects (403 user_token_required). Also refused (403) for task-scoped members and read-only roles.",
+    "Create a requirement project (管理项目 → 新建). name 1–40, unique; color #RRGGBB (default: palette); sort int; parent_id optional (≤3 levels). Returns { project }. Needs a person's token: node tokens get 403 user_token_required; task-scoped / read-only members are refused.",
     {
       network_id: z.string().max(200).optional(),
       name: z.string().min(1).max(40),
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
       sort: z.number().int().optional(),
-      parent_id: z.string().max(200).nullable().optional().describe("parent project id (proj_…); omit or null for a top-level project. Max 3 levels."),
+      parent_id: z.string().max(200).nullable().optional(),
     },
     async (args) => requirementsCall("POST", "/api/requirements/projects", args.network_id, pick(args, ["name", "color", "sort", "parent_id"])),
   );
 
   server.tool(
     "projects_update",
-    "Rename, recolour, reorder, archive or unarchive a requirement project (same as 管理项目 in the app). Only the fields you pass change. archived=true hides it from pickers (its tasks keep project_id); archived=false brings it back. Returns { project }. Needs a person's token: node (Agent) tokens can only read projects (403 user_token_required). Also refused (403) for task-scoped members and read-only roles.",
+    "Rename, recolour, reorder, archive/unarchive, or move a project under another (parent_id; null = top level, cycles / depth>3 refused). Only the fields you pass change. archived=true hides it from pickers (its tasks keep project_id). Returns { project }. Needs a person's token (node tokens: 403 user_token_required); task-scoped / read-only members are refused.",
     {
       network_id: z.string().max(200).optional(),
       id: z.string().min(1).max(200).describe("project id (proj_…), from projects_list"),
@@ -6947,7 +6947,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
       sort: z.number().int().optional(),
       archived: z.boolean().optional(),
-      parent_id: z.string().max(200).nullable().optional().describe("move under this project id (proj_…), or null to make it top-level. Cycles and depth > 3 are refused."),
+      parent_id: z.string().max(200).nullable().optional(),
     },
     async (args) => requirementsCall("PATCH", `/api/requirements/projects/${encodeURIComponent(args.id)}`, args.network_id, pick(args, ["name", "color", "sort", "archived", "parent_id"])),
   );
