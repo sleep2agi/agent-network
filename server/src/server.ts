@@ -25,6 +25,7 @@ import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
 import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
 import { ensureNetworkRulesOnce, readNetworkRules, writeNetworkRules } from "./network-rules.js";
+import { deriveTeamRulesView } from "./team-rules-status.js";
 import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
@@ -3224,6 +3225,20 @@ return Bun.serve({
       // #500 step 2 — full projection only: queue_depth = open tasks on that node (task-queue-ahead.ts), one query for
       // all rows. The light / alias-resolver projections keep their exact bytes and do not read tasks.
       const depth = isLight ? null : queueDepthByNode(rows.map((r: any) => r.alias));
+      // #2211 — the network's current team-rules revision, one query for all rows (not N+1).
+      // Language models must not be able to infer "current" from a missing row: absent = no rules.
+      // The table is created lazily on first use of the rules API, so a Hub that never
+      // had a rules write may not have it yet — treat "no table" as "no rules".
+      const rulesRevisionByNetwork = isLight ? null : (() => {
+        try {
+          return new Map<string, number>(
+            db.all<{ network_id: string; revision: number }>("SELECT network_id, revision FROM network_rules")
+              .map((r) => [r.network_id, Number(r.revision)]),
+          );
+        } catch {
+          return new Map<string, number>();
+        }
+      })();
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
@@ -3257,6 +3272,17 @@ return Bun.serve({
           ...publicSession,
           external_schedules: externalSchedules,
           // app#225 follow-up — sqlite INTEGER 0/1 → boolean on the wire.
+          // #2211 — one derived word per node: current / outdated / failed / never.
+          // Omitted entirely for a session that never reported (keeps old clients' bytes stable).
+          ...(() => {
+            const view = deriveTeamRulesView(
+              s.team_rules_revision == null && !s.team_rules_status
+                ? null
+                : { revision: s.team_rules_revision, status: s.team_rules_status, reason: s.team_rules_reason, at: s.team_rules_at },
+              rulesRevisionByNetwork ? (rulesRevisionByNetwork.get(s.network_id) ?? null) : null,
+            );
+            return view ? { team_rules: view } : {};
+          })(),
           rules_file_capable: s.rules_file_capable === 1,
           skills_capable: s.skills_capable === 1,
           files_capable: s.files_capable === 1,

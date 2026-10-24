@@ -137,6 +137,13 @@ for (const col of [
   // Node run-log view — the same session answers logs_tail on the rules-file
   // doorbell (node-logs.ts). Sticky, bound-token only, like above.
   { name: "logs_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // #2211 — what the node last did with the network's team rules (agent-node .156+
+  // reports it on every status). Not sticky: the newest report wins, and a node that
+  // later starts reporting `skipped` must be able to clear an older revision.
+  { name: "team_rules_revision", def: "INTEGER" },
+  { name: "team_rules_status", def: "TEXT" },
+  { name: "team_rules_at", def: "TEXT" },
+  { name: "team_rules_reason", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }

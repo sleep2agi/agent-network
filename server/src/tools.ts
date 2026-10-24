@@ -1053,6 +1053,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // no `nodes` row, and config_snapshot is persisted per node_id. Only a
       // node token bound to this same alias can set it; see the UPDATE below.
       rules_file_capable: z.literal(true).optional(),
+      // #2211 — what this process last did with the network's team rules.
+      // Every field is `.catch(...)`: a malformed value must not reject the whole
+      // status report (that would mark a healthy node offline — see the #1225 note
+      // above). Unknown extra keys are dropped, not rejected: this object is not strict.
+      team_rules: z.object({
+        revision: z.number().nullable().optional().catch(null),
+        status: z.string().max(40).optional().catch(undefined),
+        reason: z.string().max(500).optional().catch(undefined),
+        at: z.string().max(40).optional().catch(undefined),
+      }).optional(),
       // Node skills view — same doorbell, ops skills_list / skill_read.
       skills_capable: z.literal(true).optional(),
       // Project folder view — same doorbell, ops files_list / file_read.
@@ -1064,7 +1074,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // instead of rejecting the whole report (see node-health-store.ts).
       health: nodeHealthSchema,
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth, secret_keys: secretKeys, env_transport: envTransport }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, team_rules: teamRules, health: nodeHealth, secret_keys: secretKeys, env_transport: envTransport }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -1358,6 +1368,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
         if (logsCapable === true && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
           db.run("UPDATE sessions SET logs_capable = 1 WHERE resume_id = ?1", [resume_id]);
+        }
+        // #2211 — newest report wins (not sticky): a later `skipped` must be able to
+        // clear an older revision. Only this alias's own bound node token may write it.
+        if (teamRules && callerTokenIsNetwork && callerAlias && callerAlias === effectiveAlias) {
+          db.run(
+            `UPDATE sessions SET team_rules_revision = ?2, team_rules_status = ?3, team_rules_at = ?4, team_rules_reason = ?5
+             WHERE resume_id = ?1`,
+            [resume_id,
+             typeof teamRules.revision === "number" ? teamRules.revision : null,
+             typeof teamRules.status === "string" ? teamRules.status : null,
+             typeof teamRules.at === "string" ? teamRules.at : null,
+             typeof teamRules.reason === "string" ? teamRules.reason : null],
+          );
         }
         if (host || proc) {
           db.run(

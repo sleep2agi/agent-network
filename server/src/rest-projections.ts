@@ -21,6 +21,8 @@ export const SESSION_REST_COLUMNS = [
   "node_id", "session_id", "config_path", "channels", "last_seen_at", "model",
   "external_schedules", "rules_file_capable", "skills_capable", "files_capable",
   "logs_capable",
+  // #2211 — the node's last team-rules outcome (see team-rules-status.ts).
+  "team_rules_revision", "team_rules_status", "team_rules_at", "team_rules_reason",
 ] as const;
 
 export const AUDIT_LOG_REST_COLUMNS = [
