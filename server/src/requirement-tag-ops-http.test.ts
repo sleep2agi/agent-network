@@ -366,3 +366,18 @@ describe("改父级 reparent", () => {
     expect(await nodeOf(admin.token, "RP根")).toMatchObject({ parent_id: null });
   });
 });
+
+describe("改父级 reparent —— 被拒绝时不留副作用", () => {
+  const nodes = async () => (await send(admin.token, "GET", `/api/requirements/tags?network_id=${NET}`)).body.nodes as Array<{ name: string; parent_id: string | null; registered: boolean }>;
+  test("只在卡片上用过的标签,reparent 到不存在的父:404 且**不会**被登记进树", async () => {
+    const before = (await nodes()).filter(node => !node.registered).map(node => node.name);
+    if (!before.length) return;                 // 该网络里没有"未登记但在用"的标签时,这条不适用
+    const name = before[0];
+    const r = await op(admin.token, { op: "reparent", tag: name, parent: "根本没有这个父" });
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe("tag_parent_not_found");
+    // 关键:事务返回错误码是**提交**语义,若先 INSERT 登记再报错,这里就会看到 registered=true
+    const after = (await nodes()).find(node => node.name === name);
+    expect(after?.registered ?? false).toBe(false);
+  });
+});

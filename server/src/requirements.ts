@@ -561,21 +561,20 @@ async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
     if (op.op === "reparent") {
       const nodes = db.all<TagNodeRow>("SELECT name, parent_name FROM network_tag_nodes WHERE network_id = ?1", networkId);
       const parentOf = new Map(nodes.map(row => [row.name, row.parent_name ?? null]));
-      // 只在卡片上出现过的老标签没有行可改:先登记成顶层节点(这不是把它降级,它本来就没有父)。
-      if (!parentOf.has(op.tag)) {
-        db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.tag, now, actor]);
-        parentOf.set(op.tag, null);
-      }
+      // 只在卡片上出现过的老标签没有行可改,要登记成顶层节点(这不是把它降级,它本来就没有父)。
+      // ⚠ 先**在虚拟树上**判环与深度,判过了再写:事务返回 {error} 是提交而不是回滚,
+      //   如果先 INSERT 登记再返回错误,调用方看到的是"被拒绝了",库里却多了一行 —— 树被静默改过。
+      const virtual = new Map(parentOf);
+      if (!virtual.has(op.tag)) virtual.set(op.tag, null);
       if (op.parent) {
         if (!tagExists(op.parent)) return { error: "tag_parent_not_found" };
-        if (!parentOf.has(op.parent)) {
-          db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.parent, now, actor]);
-          parentOf.set(op.parent, null);
-        }
+        if (!virtual.has(op.parent)) virtual.set(op.parent, null);
         // 环:父是自己(parse 已挡)或自己的子孙(这里挡)。深度:新父的深度 + 自己这棵子树的高度。
-        if (isDescendant(op.parent, op.tag, parentOf)) return { error: "tag_parent_cycle" };
-        if (tagDepth(op.parent, parentOf) + tagSubtreeHeight(op.tag, parentOf) > MAX_TAG_DEPTH) return { error: "tag_depth_exceeded" };
+        if (isDescendant(op.parent, op.tag, virtual)) return { error: "tag_parent_cycle" };
+        if (tagDepth(op.parent, virtual) + tagSubtreeHeight(op.tag, virtual) > MAX_TAG_DEPTH) return { error: "tag_depth_exceeded" };
       }
+      if (!parentOf.has(op.tag)) db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.tag, now, actor]);
+      if (op.parent && !parentOf.has(op.parent)) db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.parent, now, actor]);
       db.run("UPDATE network_tag_nodes SET parent_name = ?1, updated_at = ?2 WHERE network_id = ?3 AND name = ?4", [op.parent, now, networkId, op.tag]);
       return { affected: 0, reparented: 1 };
     }
