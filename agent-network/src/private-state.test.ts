@@ -72,3 +72,42 @@ describe("#472 private state writer", () => {
     expect(mode(victim)).toBe(0o644);
   });
 });
+
+describe("#2222 Windows rename EPERM is retried, not swallowed", () => {
+  const eperm = () => Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+
+  test("win32: EPERM/EBUSY/EACCES are retried with bounded backoff, then the rename succeeds", async () => {
+    const { renamePrivateStateSync } = await import("./private-state");
+    const calls: string[] = [], sleeps: number[] = [];
+    let failures = 3;
+    renamePrivateStateSync("t.tmp", "t.json", (from, to) => {
+      calls.push(`${from}->${to}`);
+      if (failures-- > 0) throw eperm();
+    }, (ms) => sleeps.push(ms), "win32");
+    expect(calls.length).toBe(4);              // 3 次失败 + 1 次成功
+    expect(sleeps).toEqual([10, 25, 50]);      // 退避序列,不是死循环
+  });
+
+  test("win32: exhausting the backoff still throws（不吞错）", async () => {
+    const { renamePrivateStateSync } = await import("./private-state");
+    let calls = 0;
+    expect(() => renamePrivateStateSync("t.tmp", "t.json", () => { calls++; throw eperm(); }, () => {}, "win32")).toThrow("EPERM");
+    expect(calls).toBe(5);                     // 上限是 5 次,不会无限重试
+  });
+
+  test("posix: EPERM is NOT retried (Linux 上 rename 覆盖已打开文件本该成功,重试只会掩盖真问题)", async () => {
+    const { renamePrivateStateSync } = await import("./private-state");
+    let calls = 0;
+    expect(() => renamePrivateStateSync("t.tmp", "t.json", () => { calls++; throw eperm(); }, () => {}, "linux")).toThrow("EPERM");
+    expect(calls).toBe(1);
+  });
+
+  test("win32: a non-transient error is thrown immediately, without backoff", async () => {
+    const { renamePrivateStateSync } = await import("./private-state");
+    let calls = 0, sleeps = 0;
+    expect(() => renamePrivateStateSync("t.tmp", "t.json", () => {
+      calls++; throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    }, () => { sleeps++; }, "win32")).toThrow("ENOENT");
+    expect([calls, sleeps]).toEqual([1, 0]);
+  });
+});
