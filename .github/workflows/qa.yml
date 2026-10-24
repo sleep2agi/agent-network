@@ -2140,6 +2140,24 @@ jobs:
       fail-fast: false
       matrix:
         suite:
+          # ⏱ #2136（2026-10-25）：这三个套件要装两个 ~150 MB 的 codex 二进制、各自跑 15–20 分钟,
+          # 排到矩阵末尾时它们就是整条 PR 的**唯一长尾**（实测 #2994/#2998/#3000/#3002 都是最后一条）。
+          # 只改**顺序**、不改任何判据与命令:提前开始 = 提前结束,PR 墙钟时间少 15 分钟左右。
+          # 注意 GitHub 的矩阵是并发调度的,这里的顺序只是"先启动"的提示,不构成门。
+          # board #734: refuse codex < 0.145 on a paginated rollout (real 0.133.0 / 0.159.2 --version,
+          # agent-node owned app-server, real `anet node start` launcher), 300 MB bounded first-line
+          # read, diagnosis on the real 0.159.2 "missing an ordinal" failure; mutations M1-M4.
+          # Not L1: the image installs two ~150 MB codex binaries (same as test720).
+          - test734-codex-paginated-rollout-guard
+          # board #738: `anet node start --fork-on-resume-failure` — real 0.159.2 writes a thread,
+          # real 0.133.0 appends to it ("missing an ordinal"); the real launcher forks only on that
+          # error and only after y / --yes; original unchanged, r/o snapshot, mapping recorded.
+          # Mutations M1-M4. Not L1: the image installs two ~150 MB codex binaries (same as test734).
+          - test738-codex-fork-on-resume-failure
+          # board #739: per-node codex pin — config.json codexBin is what the launch and the #734
+          # probe run (0.133 first on PATH), codexVersion mismatch refuses before anything starts.
+          # Mutations M1-M4. Not L1: two ~150 MB codex binaries (same as test738).
+          - test739-codex-bin-pin
           - qa-hub-17-rename-canonicalization
           - test1210-actual-target-contract
           - qa-hub-19-login-guard
@@ -2253,20 +2271,6 @@ jobs:
           # MCP server to run tool」 prompt; control without the setting prompts/declines;
           # in-suite mutations M1-M5. Not L1: the image installs two ~150 MB codex binaries.
           - test720-codex-commhub-tool-approval
-          # board #734: refuse codex < 0.145 on a paginated rollout (real 0.133.0 / 0.159.2 --version,
-          # agent-node owned app-server, real `anet node start` launcher), 300 MB bounded first-line
-          # read, diagnosis on the real 0.159.2 "missing an ordinal" failure; mutations M1-M4.
-          # Not L1: the image installs two ~150 MB codex binaries (same as test720).
-          - test734-codex-paginated-rollout-guard
-          # board #738: `anet node start --fork-on-resume-failure` — real 0.159.2 writes a thread,
-          # real 0.133.0 appends to it ("missing an ordinal"); the real launcher forks only on that
-          # error and only after y / --yes; original unchanged, r/o snapshot, mapping recorded.
-          # Mutations M1-M4. Not L1: the image installs two ~150 MB codex binaries (same as test734).
-          - test738-codex-fork-on-resume-failure
-          # board #739: per-node codex pin — config.json codexBin is what the launch and the #734
-          # probe run (0.133 first on PATH), codexVersion mismatch refuses before anything starts.
-          # Mutations M1-M4. Not L1: two ~150 MB codex binaries (same as test738).
-          - test739-codex-bin-pin
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
