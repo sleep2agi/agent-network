@@ -83,5 +83,12 @@ check_feature "tag tree capability"             '"tag_tree"'               "0.9.
 check_feature "tag create endpoint"             "requirements/tags/create" "0.9.0-preview.148"
 check_feature "tag node table"                  "network_tag_nodes"        "0.9.0-preview.148"
 check_feature "tag tree in the tags response"    "nodes"                    "0.9.0-preview.148"
+# .152 网络规则（#993 首片）：表、读写路由、CAS 冲突码一起断言 ——
+# 只断言"字符串出现过"不够：.151 上线后我用真请求才发现节点令牌能读别人的网络，
+# 所以这里同时断言 CAS 的冲突码（语义的可见证据），而不只是路由名。
+check_feature "network rules table"              "network_rules"            "0.9.0-preview.152"
+check_feature "network rules route"              "networks"                 "0.9.0-preview.152"
+check_feature "network rules CAS conflict code"  "rules_revision_conflict"  "0.9.0-preview.152"
+check_feature "network rules node-token scope"   "user_token_required"      "0.9.0-preview.152"
 
 echo "== RESULT: PASS ($PKG@$VERSION)"
