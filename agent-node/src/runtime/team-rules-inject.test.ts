@@ -57,6 +57,21 @@ describe("injectTeamRules", () => {
     expect(warns.join("\n")).toContain("unreachable");
   });
 
+  test("a hung hub is cut off instead of blocking startup", async () => {
+    const d = workdirWith("timeout", "# mine\n");
+    // never resolves, never rejects — the half-open connection case
+    const f = ((_u: string, init?: any) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    })) as unknown as typeof fetch;
+    const warns: string[] = [];
+    const started = Date.now();
+    const out = await injectTeamRules({ enabled: true, hubUrl: HUB, token: "ntok_x", networkId: "net_1", workDir: d, runtime: "codex", fetchImpl: f, timeoutMs: 60, warn: (m) => warns.push(m) });
+    expect(out).toMatchObject({ status: "skipped", reason: "hub_timeout" });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(readFileSync(join(d, "AGENTS.md"), "utf8")).toBe("# mine\n");
+    expect(warns.join("\n")).toContain("did not answer");
+  });
+
   test("non-2xx also leaves the file alone", async () => {
     const d = workdirWith("http500", "# mine\n");
     const f = (async () => new Response("boom", { status: 500 })) as unknown as typeof fetch;

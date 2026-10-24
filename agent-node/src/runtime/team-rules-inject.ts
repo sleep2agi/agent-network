@@ -62,6 +62,8 @@ export type InjectOptions = {
   runtime: string | null | undefined;
   fetchImpl?: typeof fetch;
   warn?: (msg: string) => void;
+  /** Hard cap on the Hub fetch. Default 5 s: a node must not hang on a half-open connection. */
+  timeoutMs?: number;
 };
 
 type RulesResponse = { ok?: boolean; rules?: { content?: string; revision?: number; updated_at?: string | null } };
@@ -78,15 +80,24 @@ export async function injectTeamRules(opts: InjectOptions): Promise<InjectOutcom
   if (!opts.hubUrl || !opts.token) return { status: "skipped", reason: "no_hub_credentials" };
 
   const doFetch = opts.fetchImpl ?? fetch;
+  // A refused connection fails fast, but a half-open one does not: without a cap, "injection
+  // never blocks startup" (the promise in the startup comment and the runbook) would be false.
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await doFetch(`${opts.hubUrl.replace(/\/$/, "")}/api/networks/${encodeURIComponent(opts.networkId)}/rules`, {
       headers: { Authorization: `Bearer ${opts.token}` },
+      signal: controller.signal,
     });
   } catch (err: any) {
     // RFC §5: 不可达时保留旧块。**不写文件**，否则等于静默撤回规则。
-    warn(`[team-rules] hub unreachable (${err?.message ?? err}); keeping the file as-is`);
-    return { status: "skipped", reason: "hub_unreachable" };
+    const aborted = controller.signal.aborted;
+    warn(`[team-rules] hub ${aborted ? `did not answer within ${timeoutMs}ms` : "unreachable"} (${err?.message ?? err}); keeping the file as-is`);
+    return { status: "skipped", reason: aborted ? "hub_timeout" : "hub_unreachable" };
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) {
     warn(`[team-rules] hub returned ${res.status}; keeping the file as-is`);
