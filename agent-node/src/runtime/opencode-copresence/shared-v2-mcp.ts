@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { chmodSync, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { basename, dirname, join, resolve } from "node:path";
 import { installSharedV2RegistryPlugin } from "./v2-readiness";
 
@@ -111,7 +112,7 @@ export async function openSharedV2CommhubMcp(
     installed = Buffer.from(`${JSON.stringify(config, null, 2)}\n`);
     const temporary = `${configPath}.anet-${process.pid}-${randomBytes(6).toString("hex")}`;
     writeFileSync(temporary, installed, { flag: "wx", mode: 0o600 });
-    renameSync(temporary, configPath);
+    renameOverExistingSync(temporary, configPath);
     chmodSync(configPath, 0o600);
     writeFileSync(installedHashPath, createHash("sha256").update(installed).digest("hex"), { mode: 0o600 });
   } catch (error) {
@@ -129,7 +130,7 @@ export async function openSharedV2CommhubMcp(
       if (original) {
         const temporary = `${configPath}.anet-restore-${process.pid}`;
         writeFileSync(temporary, original, { flag: "wx", mode: 0o600 });
-        renameSync(temporary, configPath);
+        renameOverExistingSync(temporary, configPath);
         chmodSync(configPath, mode);
       } else {
         rmSync(configPath);
