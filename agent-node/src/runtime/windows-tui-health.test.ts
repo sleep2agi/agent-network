@@ -91,7 +91,16 @@ describe.skipIf(process.platform !== "win32")("native Windows generation and TCP
       const live = { ...identity, pid: child.pid!, creationDate, remote: `ws://127.0.0.1:${port}` };
       if (diag) console.error(`[diag-1321] ${describePreCheck(live)}`);
       const run = diag ? diagnosingRunPowerShell(runPowerShell) : undefined;
-      expect(await probeWindowsTuiHealth(live, run)).toEqual({ ok: true, reason: "running" });
+      // #1321 follow-up: the rich diagnostics above are opt-in (a repository
+      // Variable), so a CI failure used to leave only "+ Received + 1" — the
+      // received object truncated out of the diff. Print the probe result and the
+      // pre-check state **when it is not what we expect**, unconditionally. This
+      // adds output only on failure and changes no assertion.
+      const probed = await probeWindowsTuiHealth(live, run);
+      if (!(probed.ok === true && probed.reason === "running")) {
+        console.error(`[diag-1321] probe=${JSON.stringify(probed)} ${describePreCheck(live)}`);
+      }
+      expect(probed).toEqual({ ok: true, reason: "running" });
       let capturedSiblingBirth = "";
       const siblingQuery = () => {
         capturedSiblingBirth = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Diagnostics.Process]::GetProcessById(${sibling.pid}).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 10_000 }).trim();
