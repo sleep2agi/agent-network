@@ -60,7 +60,21 @@ echo "[0] start hub"
 safe_rm_rf "$HOME/.anet" "$HOME/.commhub"
 anet hub start --host 127.0.0.1 --port "$HUB_PORT" --username admin --password "$ADMIN_PW" >/tmp/hub.log 2>&1 &
 HUB_PID=$!
-for i in {1..60}; do curl -fsS "$HUB_BASE/health" >/dev/null 2>&1 && break; sleep 1; done
+# Readiness, not a fixed sleep: on a loaded runner the Hub can take longer than the
+# 60 s this loop used to allow, and the old loop simply fell through — the next request
+# then printed a bare `curl: (7) Failed to connect to 127.0.0.1 port 9200` and the real
+# cause (hub.log) was never shown. Wait up to 180 s, and if it still is not up, say so
+# and dump the tail of /tmp/hub.log instead of failing later with a misleading message.
+hub_up=0
+for i in {1..180}; do
+  if curl -fsS "$HUB_BASE/health" >/dev/null 2>&1; then hub_up=1; [ "$i" -gt 5 ] && echo "  (hub became ready after ${i}s)"; break; fi
+  sleep 1
+done
+if [[ "$hub_up" != 1 ]]; then
+  echo "FAIL: hub did not answer /health within 180s (pid ${HUB_PID:-?}); last 40 lines of /tmp/hub.log:" >&2
+  tail -40 /tmp/hub.log >&2 || true
+  exit 1
+fi
 sleep 1
 
 echo "[1] register alice + bob"
