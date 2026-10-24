@@ -3267,7 +3267,15 @@ return Bun.serve({
           if (typeof s.external_schedules !== "string") return null;
           try { return JSON.parse(s.external_schedules); } catch { return null; }
         })();
-        const { external_schedules: _externalSchedulesJson, ...publicSession } = s;
+        // #2211 — the four raw columns feed `team_rules` below; they must not leak into
+        // the session object itself (a `toEqual` on this shape is how the API contract is
+        // pinned in several suites).
+        const {
+          external_schedules: _externalSchedulesJson,
+          team_rules_revision: _trRev, team_rules_status: _trStatus,
+          team_rules_at: _trAt, team_rules_reason: _trReason,
+          ...publicSession
+        } = s;
         return {
           ...publicSession,
           external_schedules: externalSchedules,
