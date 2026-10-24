@@ -48,8 +48,12 @@ test(`signal boundary: ${scenario}`,async()=>{
           barrier(()=>hasAdoptionMarker(escaped!.pid,scope.marker));
         }else{
           writeFileSync(`${workdir}/trigger`,"go");
-          barrier(()=>existsSync(`${workdir}/child-pid`));
-          foreignPid=Number(readFileSync(`${workdir}/child-pid`,"utf8"));
+          // 屏障必须等到文件里**真有一个可用的 PID**,而不是"文件存在"。
+          // writeFileSync 先建空文件再写内容,只等 existsSync 会在两者之间读到 "":
+          // Number("") = 0 → processStamp(0) 抛 adopt_pid_invalid(实测 CI 红在这一行)。
+          const readChildPid=()=>{try{return readFileSync(`${workdir}/child-pid`,"utf8").trim();}catch{return "";}};
+          barrier(()=>/^\d+$/.test(readChildPid()) && Number(readChildPid())>1);
+          foreignPid=Number(readChildPid());
         }
       }
       return kill(pid,signal);
