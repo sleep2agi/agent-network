@@ -1582,6 +1582,28 @@ const { value: NODE_ID } = resolveNodeIdSource({
 });
 const NODE_NAME = fileConfig.node_name || "";
 const NETWORK_ID = fileConfig.network_id || process.env.ANET_NETWORK_ID || globalConfig.network_id || "";
+// #993 / RFC-043 §4 v1 — opt-in: on a full start, merge the network's team rules
+// into a managed block at the top of this node's CLAUDE.md / AGENTS.md.
+// Off unless ANET_TEAM_RULES=1: it edits a file in the user's working directory, and
+// that must not start happening merely because the code shipped. Failure never blocks
+// startup — a node without Hub connectivity still has to run.
+if (process.env.ANET_TEAM_RULES === "1" && NODE_ID) {
+  try {
+    const { injectTeamRules } = await import("./runtime/team-rules-inject.js");
+    const out = await injectTeamRules({
+      enabled: true,
+      hubUrl: COMMHUB_URL,
+      token: AUTH_TOKEN,
+      networkId: NETWORK_ID || null,
+      workDir: process.cwd(),
+      runtime: RUNTIME,
+      warn: (m: string) => warn(m),
+    });
+    console.log(`[team-rules] ${out.status}${"reason" in out ? ` (${out.reason})` : ""}${"revision" in out ? ` revision=${out.revision}` : ""}`);
+  } catch (e: any) {
+    warn(`[team-rules] injection failed (${e?.message ?? e}); continuing without it`);
+  }
+}
 function adoptionDeps() {
   return { callCommHub, workDir: process.cwd(), home: process.env.HOME || "", hubUrl: COMMHUB_URL,
     networkId: NETWORK_ID, uid: process.getuid?.() ?? -1, daemonEnv: process.env,
