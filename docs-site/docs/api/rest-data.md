@@ -1300,7 +1300,7 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 实际 payload 以上表为准。**自 #1439/#1441 起 `new_message` / `new_reply` / `broadcast` / `new_task`（含 retry/reassign）都带真实 `inbox_count`（收件人未读数），客户端可直接用它显示新消息数；`broadcast` 不再是硬编码 1。**另注：`new_task` / `new_message` 在目标 alias **刚被改名**时会额外带一个 `renamed_from` 字段（指向旧 alias，`tools.ts` 的 `canonical.renamed` 分支）。
 >
-> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L69) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
+> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L87) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
 
 **示例 SSE 数据流**：
 
