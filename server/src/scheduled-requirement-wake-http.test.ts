@@ -268,6 +268,12 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
       expect({exit:code,stderr:w.stderr().trim().slice(0,800)}).toEqual({exit:0,stderr:""});
       results.push(JSON.parse(output.trim().split("\n").at(-1)!).wake);}
     expect(results.sort()).toEqual([false,true]);expect(state(scheduleId).revision).toBe(before.revision+1);expect(poll(scheduleId)).toBe(false);
-  });
+  // #2198:显式预算。这条用例要起 2 个 Node 子进程、各自打开同一个磁盘 SQLite,
+  // 再用 /tmp 上的 gate 文件对齐起跑。默认 5s 在机器繁忙时会被打满,而**超时与断言
+  // 失败在报告里长得一样**(都只是一行 (fail)):实测 8 路并发 + 3× CPU 超订时,
+  // 11 轮里有 2 轮红,但每次红的都是 `timed out after 5000ms`,而 trues 恒为 1、
+  // revision 恒只 +1 —— 语义一直是对的,是预算不够。
+  // 这里只放宽**时间**,不放宽任何断言(仍然 [false,true]、仍然 revision+1、仍然 poll false)。
+  }, 30_000);
 
 });
