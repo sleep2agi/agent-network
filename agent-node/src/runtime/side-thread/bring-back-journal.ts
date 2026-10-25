@@ -3,6 +3,7 @@ import {
   readFileSync, renameSync, writeFileSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { join } from "node:path";
 import { SideThreadAmbiguousError, SideThreadConflictError } from "./domain";
 
@@ -43,7 +44,7 @@ export class JournaledBringBackExecutor {
     const path = this.path(entry.operationId), tmp = `${path}.tmp.${process.pid}.${randomUUID()}`;
     writeFileSync(tmp, `${JSON.stringify(entry)}\n`, { flag: "wx", mode: 0o600 });
     const fd = openSync(tmp, "r"); try { fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tmp, path); chmodSync(path, 0o600);
+    renameOverExistingSync(tmp, path); chmodSync(path, 0o600);
     const dir = openSync(this.root, "r"); try { fsyncSync(dir); } finally { closeSync(dir); }
   }
   private path(id: string): string { if (!safe(id)) throw new Error("invalid operationId"); return join(this.root, `${id}.json`); }

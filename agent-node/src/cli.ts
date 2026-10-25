@@ -12,6 +12,7 @@
  */
 
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
+import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
 import {
   bundledCodexVersion,
@@ -5128,7 +5129,7 @@ async function ensureGrokCopresenceRuntime(): Promise<GrokCopresenceSession> {
         // 原子替换：先写临时名再 rename，避免半份文件被下一道门读到。
         const tmp = `${to}.${process.pid}.tmp`;
         writeFileSync(tmp, readFileSync(from), { mode });
-        renameSync(tmp, to);
+        renameOverExistingSync(tmp, to);
       }
       log(`[grok-cli] ${grokCwd} 不能整体授信（$HOME 或文件系统根），改用节点自有目录 ${ownedCwd}`);
       grokCwd = ownedCwd;

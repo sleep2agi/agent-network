@@ -3,6 +3,7 @@ import {
   readFileSync, renameSync, writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { randomUUID } from "node:crypto";
 import type { SideThreadCommandReceipt, SideThreadCommandReceiptStore } from "./command-transport";
 
@@ -40,7 +41,7 @@ export class PrivateFileCommandReceiptStore implements SideThreadCommandReceiptS
     const tmp = `${path}.tmp.${process.pid}.${randomUUID()}`;
     writeFileSync(tmp, `${JSON.stringify(receipt)}\n`, { flag: "wx", mode: 0o600 });
     const fd = openSync(tmp, "r"); try { fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tmp, path); chmodSync(path, 0o600);
+    renameOverExistingSync(tmp, path); chmodSync(path, 0o600);
     const dir = openSync(dirname(path), "r"); try { fsyncSync(dir); } finally { closeSync(dir); }
   }
 

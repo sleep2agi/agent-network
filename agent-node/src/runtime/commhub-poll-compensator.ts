@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { authenticatedDashboardRequestId } from "../inbox-dispatch.js";
 
 export const DEFAULT_COMPENSATION_POLL_MS = 15_000;
@@ -238,7 +239,7 @@ class CursorStore {
       fsyncSync(fd);
       closeSync(fd);
       fd = null;
-      renameSync(tmp, this.path);
+      renameOverExistingSync(tmp, this.path);
       chmodSync(this.path, 0o600);
     } finally {
       if (fd !== null) closeSync(fd);

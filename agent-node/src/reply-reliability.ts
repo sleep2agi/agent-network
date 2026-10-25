@@ -36,6 +36,7 @@ import {
   writeFileSync,
 } from "fs";
 import { randomBytes } from "crypto";
+import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import {
   createCredentialRedactor,
   type CredentialRedactionOptions,
@@ -275,7 +276,7 @@ export class PendingReplyQueue {
       fsyncSync(fd);
       closeSync(fd);
       fd = undefined;
-      renameSync(tmp, this.filePath);
+      renameOverExistingSync(tmp, this.filePath);
       // The temp inode is already 0600; reinforce the postcondition for
       // platforms/filesystems with unusual rename mode behaviour.
       chmodSync(this.filePath, 0o600);

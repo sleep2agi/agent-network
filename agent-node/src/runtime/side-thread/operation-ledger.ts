@@ -1,4 +1,5 @@
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -40,7 +41,7 @@ export class PrivateFileOperationLedger implements OperationLedger {
     const tmp = `${path}.tmp.${process.pid}.${randomUUID()}`;
     writeFileSync(tmp, `${JSON.stringify(op)}\n`, { flag: "wx", mode: 0o600 });
     const fd = openSync(tmp, "r"); try { fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tmp, path); chmodSync(path, 0o600);
+    renameOverExistingSync(tmp, path); chmodSync(path, 0o600);
     const dir = openSync(dirname(path), "r"); try { fsyncSync(dir); } finally { closeSync(dir); }
   }
   get(nodeId: string, sideThreadId: string, opId: string): SideThreadOperation | undefined {

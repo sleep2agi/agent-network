@@ -17,6 +17,7 @@
 // the path without terminating the test runner.
 
 import type { RuntimeReadiness } from "./runtime-readiness.js";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { validateCodexConfigFlag } from "./codex-config-flags.js";
 import {
   closeSync,
@@ -258,7 +259,7 @@ export function atomicWritePrivateText(path: string, body: string): void {
     fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
-    renameSync(tmp, path);
+    renameOverExistingSync(tmp, path);
   } catch (e) {
     if (fd !== undefined) try { closeSync(fd); } catch {}
     rmSync(tmp, { force: true });

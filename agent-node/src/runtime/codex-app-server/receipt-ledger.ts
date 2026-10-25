@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "fs";
 import { randomBytes } from "crypto";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 
 export const TURN_RECEIPT_MAX_WATCH_MS = 48 * 60 * 60 * 1000;
 
@@ -131,7 +132,7 @@ export class TurnReceiptLedger {
       fsyncSync(fd);
       closeSync(fd);
       fd = undefined;
-      renameSync(tmp, this.filePath);
+      renameOverExistingSync(tmp, this.filePath);
       chmodSync(this.filePath, 0o600);
     } catch (error) {
       if (fd !== undefined) try { closeSync(fd); } catch { /* ignore */ }

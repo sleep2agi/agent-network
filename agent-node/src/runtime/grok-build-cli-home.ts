@@ -1,4 +1,5 @@
 import type { Stats } from "node:fs";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { createHash, randomBytes } from "crypto";
 import { spawn } from "child_process";
 import {
@@ -400,7 +401,7 @@ function writeGeneratedFile(path: string, content: string): void {
     writeFileSync(fd, content, "utf8");
     chmodIfPosix(() => fchmodSync(fd, 0o600));
     closeSync(fd);
-    renameSync(temp, path);
+    renameOverExistingSync(temp, path);
   } catch (error) {
     try { closeSync(fd); } catch {}
     rmSync(temp, { force: true });

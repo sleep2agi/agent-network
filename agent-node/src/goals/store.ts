@@ -25,6 +25,7 @@ import {
   writeFileSync,
 } from "fs";
 import { dirname } from "path";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { randomUUID } from "crypto";
 import type { AgentGoal, GoalStatus, GoalsFile } from "./types";
 import { GOALS_SCHEMA_VERSION } from "./types";
@@ -398,7 +399,7 @@ export class GoalStore {
     try {
       writeFileSync(tmp, JSON.stringify(payload, null, 2) + "\n", { mode: 0o600, flag: "wx" });
       chmodSync(tmp, 0o600);
-      renameSync(tmp, this.filePath);
+      renameOverExistingSync(tmp, this.filePath);
       chmodSync(this.filePath, 0o600);
     } catch (e) {
       try { unlinkSync(tmp); } catch { /* ignore — tmp may not exist if writeFileSync threw */ }
