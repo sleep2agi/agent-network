@@ -1,0 +1,93 @@
+# 第二批 lint 门合并（#2136 A-1）：10 个"几秒钟的 python 脚本"门 → 1 个 job。
+#
+# 与第一批（lint-consolidated.yml）同理，但这一批带 selftest 步骤，逐条照搬：
+#   每个门都是「先 --selftest（判据自检）+ 再跑真实仓」，两半都保留，
+#   因为"判据坏了但仓恰好绿"和"判据好、仓也绿"在只看后一半时同形。
+#
+# 🔴 为什么这 10 个能合、required 的那 10 个不能：
+#   分支保护钉的是 job 名。这 10 个（base-image-pin / bun-install-pin / docs-integrity /
+#   docs-locale-parity / doc-symbol-pins / hub-timestamp-ratchet / l1-sha-binding /
+#   qa-paths-symmetry / test-suite-registration / workflow-structure）都不在
+#   branches/main/protection 的 required contexts 里，所以改 job 名不会让任何 PR 卡死。
+#   required 的那 10 个（action-pins / copresence-profile-pin / doc-symbol-anchors /
+#   home-path-baseline / l1-paths-sync / qa-trigger-coverage / no hardcoded from_session /
+#   no internal [[feedback_*]] slug references / public-script-safety / query-token-ratchet）
+#   一律保持原样 —— 要动必须先由 admin 改分支保护。
+#
+# 🔴 失败必须点名：每步用 `::error::<门名> failed (<人话>)`，避免"10 个门共用一个 job，
+#    红了却不知道是哪条判据"。selftest 失败也算该门失败。
+#
+# 🔴 fetch-depth: 0 是为了 doc-symbol-pins（它按 git 历史取锚点）；其它门多拿点历史不影响。
+
+name: lint (consolidated II — pins, docs, ratchets, structure)
+
+on:
+  pull_request:
+
+jobs:
+  lint-consolidated-2:
+    # 不是 required check（见文件头）。
+    name: lint-consolidated-2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: pip requirements (workflow structure)
+        run: pip install --quiet --require-hashes -r .github/scripts/requirements-workflow-structure.txt
+
+      - name: base-image-pin · selftest
+        run: python3 .github/scripts/check-base-image-pin.py --selftest || { echo "::error::base-image-pin selftest failed (判据自己坏了)"; exit 1; }
+      - name: base-image-pin
+        run: python3 .github/scripts/check-base-image-pin.py || { echo "::error::base-image-pin failed (Dockerfile 基础镜像钉不一致)"; exit 1; }
+
+      - name: bun-install-pin · selftest
+        run: python3 .github/scripts/check-bun-install-pin.py --selftest || { echo "::error::bun-install-pin selftest failed"; exit 1; }
+      - name: bun-install-pin
+        run: python3 .github/scripts/check-bun-install-pin.py || { echo "::error::bun-install-pin failed (bun 安装版本钉不一致)"; exit 1; }
+
+      - name: docs-integrity · selftest
+        run: python3 .github/scripts/check-docs-integrity.py --selftest || { echo "::error::docs-integrity selftest failed"; exit 1; }
+      - name: docs-integrity
+        run: python3 .github/scripts/check-docs-integrity.py || { echo "::error::docs-integrity failed (文档链接/结构不完整)"; exit 1; }
+      - name: release-channel-assertions · selftest
+        run: python3 .github/scripts/check-release-channel-assertions.py --selftest || { echo "::error::release-channel-assertions selftest failed"; exit 1; }
+      - name: release-channel-assertions
+        run: python3 .github/scripts/check-release-channel-assertions.py || { echo "::error::release-channel-assertions failed (信道断言清单未登记)"; exit 1; }
+
+      - name: docs-locale-parity · selftest
+        run: python3 .github/scripts/check-docs-locale-parity.py --selftest || { echo "::error::docs-locale-parity selftest failed"; exit 1; }
+      - name: docs-locale-parity
+        run: python3 .github/scripts/check-docs-locale-parity.py || { echo "::error::docs-locale-parity failed (中英文档不同步)"; exit 1; }
+
+      - name: doc-symbol-pins (docs/)
+        run: python3 scripts/check-doc-symbol-pins.py . || { echo "::error::doc-symbol-pins failed (docs/ 里的符号锚点漂移)"; exit 1; }
+      - name: doc-symbol-pins (docs-site/)
+        run: python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site || { echo "::error::doc-symbol-pins failed (docs-site/ 里的符号锚点漂移)"; exit 1; }
+
+      - name: hub-timestamp-ratchet · selftest
+        run: python3 .github/scripts/check-hub-timestamp-ratchet.py --selftest || { echo "::error::hub-timestamp-ratchet selftest failed"; exit 1; }
+      - name: hub-timestamp-ratchet
+        run: python3 .github/scripts/check-hub-timestamp-ratchet.py || { echo "::error::hub-timestamp-ratchet failed (时间戳棘轮倒退)"; exit 1; }
+
+      - name: l1-sha-binding · selftest
+        run: python3 .github/scripts/check-l1-sha-binding.py --selftest || { echo "::error::l1-sha-binding selftest failed"; exit 1; }
+      - name: l1-sha-binding
+        run: python3 .github/scripts/check-l1-sha-binding.py || { echo "::error::l1-sha-binding failed (L1 结果没钉在被验提交上)"; exit 1; }
+
+      - name: qa-paths-symmetry · selftest
+        run: python3 .github/scripts/check-qa-paths-symmetry.py --selftest || { echo "::error::qa-paths-symmetry selftest failed"; exit 1; }
+      - name: qa-paths-symmetry
+        run: python3 .github/scripts/check-qa-paths-symmetry.py || { echo "::error::qa-paths-symmetry failed (pull_request 与 push 的 paths 不对称)"; exit 1; }
+
+      - name: test-suite-registration · selftest
+        run: python3 .github/scripts/check-test-suite-registration.py --selftest || { echo "::error::test-suite-registration selftest failed"; exit 1; }
+      - name: test-suite-registration
+        run: python3 .github/scripts/check-test-suite-registration.py || { echo "::error::test-suite-registration failed (有测试套件没登记进聚合门)"; exit 1; }
+
+      - name: workflow-structure
+        run: python3 .github/scripts/check-workflow-structure.py || { echo "::error::workflow-structure failed (某个 job 没有可执行内容 —— 空壳门)"; exit 1; }
