@@ -36,6 +36,8 @@ const ALLOWED: Record<string, string> = {
     "把过期的 lock 搬进 grave：这是**清理**动作，失败就当作“没清掉”返回 false，调用方会继续用新鲜 lock；重试没有意义。",
   "runtime/grok-build-cli-home.ts":
     "quarantine 目录搬运（唯一一处残留是 path → quarantine）：目录级、且之后有校验；与文件被占用不是同一类失败。",
+  "shared/opencode-borrowed-launch-health.ts":
+    "#1226 要求本文件与 agent-network 里那份**逐字节相同**(测试用 cmp 比对)，而两个包里 helper 的相对路径不同(agent-node 有 shared/，agent-network 只有 src/)。保持字节一致优先：此处保留裸 rename，交换代价是这两个包的目录布局，不在本卡范围。",
   "shared/windows-rename-retry.ts":
     "helper 自身（内部就是要调用一次裸 rename）。",
 };
