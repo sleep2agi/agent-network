@@ -63,6 +63,31 @@ Nothing the contract tests pin was reworded.
   `external-schedule-edits-http` 10 pass (neighbours of the `report_status` schema).
 - `agent-node`: build OK, typecheck ratchet **81 = baseline** (no new errors).
 
+## Install
+
+```bash
+set -e
+HUB_DIR="$HOME/.commhub/runtime-v158-preview158"
+test ! -e "$HUB_DIR"
+install -d -m 700 "$HUB_DIR"
+umask 077
+npm install --prefix "$HUB_DIR" --ignore-scripts --no-audit --no-fund \
+  @sleep2agi/commhub-server@0.9.0-preview.158
+```
+
+## Upgrade
+
+```bash
+curl -s localhost:9200/health | grep -o '"version":"[^"]*"'
+DIR="$HOME/.commhub/runtime-v158-preview158"
+install -d -m 700 "$DIR" && umask 077
+printf '{"name":"commhub-runtime","private":true,"version":"1.0.0","dependencies":{"@sleep2agi/commhub-server":"0.9.0-preview.158"}}' > "$DIR/package.json"
+(cd "$DIR" && bun install --production)
+# point HUB_RUNTIME_DIR at $DIR, then
+pm2 reload commhub-hub --update-env
+curl -s localhost:9200/health | grep -o '"version":"0.9.0-preview.158"'
+```
+
 ## Not in this release
 
 - No permission change: node tokens still cannot read `read_opencode_catalog` and cannot write
