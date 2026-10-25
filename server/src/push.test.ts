@@ -351,26 +351,36 @@ describe("real ReadableStream — byte-level backpressure (round-2 fix)", () => 
     await res.body!.cancel();
   });
 
-  test("non-reading consumer past MAX bytes triggers hard ceiling close", async () => {
+  test("non-reading consumer stops growing at COALESCE_AT and is reaped by the stuck timeout", async () => {
+    // #2363 —— 语义变更：落后超过 COALESCE_AT_BYTES 后**跳过非关键事件**，不再一路排队到
+    // 1 MB 硬顶。这样 150 条慢订阅者不会把内存放大到 连接数 × 1 MB（实测 2 GB 尖峰）。
+    // 兜底仍然存在：硬顶对这一帧的**关键帧**生效；长期不读的由 STUCK_CLOSE_MS 回收。
+    const coalesce = __SSE_INTERNALS_FOR_TEST.COALESCE_AT_BYTES;
     const ceiling = __SSE_INTERNALS_FOR_TEST.MAX_QUEUE_BACKPRESSURE_BYTES;
     const res = createSSEStream("byte-cap-probe", "net-bcp");
     const key = "net-bcp:byte-cap-probe";
     const c = __SSE_INTERNALS_FOR_TEST.clientsMap.get(key)![0];
 
-    // Push events whose total byte size exceeds the hard ceiling.
-    // With chunk-count strategy this would NOT close (each event is 1
-    // chunk; desiredSize would be at -N for N events, never -1M).
-    // With byte strategy this SHOULD close once accumulated bytes
-    // exceed ceiling.
-    const chunkSize = 100_000; // 100KB per push
-    const needed = Math.ceil(ceiling / chunkSize) + 2; // overshoot a bit
+    const chunkSize = 100_000; // 100KB per push, larger than COALESCE_AT
     const big = "x".repeat(chunkSize);
-    for (let i = 0; i < needed; i++) {
+    const before = __SSE_INTERNALS_FOR_TEST.degradedDropCount();
+    for (let i = 0; i < Math.ceil(ceiling / chunkSize) + 2; i++) {
       if (c.closed) break;
       pushEvent("byte-cap-probe", { type: "big", payload: big }, "net-bcp");
     }
+    // 关键断言 1：**没有被立刻关闭**（跳过的语义是“不排队”，不是“断开”）
+    expect(c.closed).toBe(false);
+    // 关键断言 2：队列没有一路涨到硬顶 —— 落后量被 COALESCE_AT 挡住
+    const desired = c.controller.desiredSize ?? 0;
+    expect(-desired).toBeLessThan(ceiling);
+    expect(-desired).toBeLessThanOrEqual(coalesce + chunkSize * 2);
+    // 关键断言 3：跳过被**计数**（不静默）
+    expect(__SSE_INTERNALS_FOR_TEST.degradedDropCount()).toBeGreaterThan(before);
+
+    // 关键断言 4：长期不读仍会被收回（沿用原有 stuck 回收）
+    c.stuckSince = Date.now() - (__SSE_INTERNALS_FOR_TEST.STUCK_CLOSE_MS + 1);
+    __SSE_INTERNALS_FOR_TEST.tryEnqueueBytes(c, new Uint8Array(1), { critical: true });
     expect(c.closed).toBe(true);
-    expect(__SSE_INTERNALS_FOR_TEST.clientsMap.has(key)).toBe(false);
 
     try { await res.body!.cancel(); } catch { /* already closed */ }
   });
