@@ -1,6 +1,7 @@
 // Byte-identical in both packages; accepted versions are independently pinned by runtime admission. Finite Linux start evidence, not ongoing
 // health, Host adoption, interactive TUI readiness or a hostile-UID boundary.
 import { constants, openSync, closeSync, fstatSync, lstatSync, readFileSync, realpathSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { renameOverExistingSync } from "./windows-rename-retry";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -63,7 +64,7 @@ export function publishBorrowedLaunchHealth(configPath: string, nonce: string) {
   const config = readBorrowedLaunchConfig(configPath,process.cwd()), bridge = live(process.pid);
   const record = { schema: 1, mode: "borrowed-v1", nonce, writtenAt: Date.now(), config, bridge };
   const path = join(dirname(configPath),BORROWED_LAUNCH_HEALTH), tmp = `${path}.${randomUUID()}.tmp`;
-  try { writeFileSync(tmp,JSON.stringify(record)+"\n",{flag:"wx",mode:0o600}); renameSync(tmp,path); }
+  try { writeFileSync(tmp,JSON.stringify(record)+"\n",{flag:"wx",mode:0o600}); renameOverExistingSync(tmp,path); }
   finally { rmSync(tmp,{force:true}); }
   return () => {
     try { const current = privateRead(path,16384).value;
