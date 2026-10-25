@@ -59,3 +59,24 @@ directory.
 - Real-machine proof (TMAI欧, after Hub `.158`): `GET /api/nodes` shows
   `opencode_catalog: ["deepseek/deepseek-flash", …]` and
   `opencode_server: "http://127.0.0.1:PORT"` while the node is running.
+
+## Install
+
+```bash
+set -e
+npm install -g @sleep2agi/agent-node@2.5.0-preview.159
+agent-node --version   # 2.5.0-preview.159
+```
+
+## Upgrade
+
+```bash
+agent-node --version                       # 2.5.0-preview.158 or older
+npm i -g @sleep2agi/agent-node@2.5.0-preview.159
+agent-node --version                       # 2.5.0-preview.159
+# restart the node process that is already running so it execs the new binary:
+anet node list
+# within one heartbeat (3 min) GET /api/nodes carries opencode_catalog / opencode_server
+# for opencode v2 nodes
+```
+
