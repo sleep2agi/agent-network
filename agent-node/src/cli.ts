@@ -1829,13 +1829,6 @@ const register = async () => {
 // #672 — sticky for this process. Idle reports publish the sentence.
 // In-flight reports must not: sessions.task is the running description.
 let claudeLoginDead = false;
-const reportStatus = async (rawStatus: string, rawTask?: string) => {
-  // #667 — idle with nothing running writes the warning, or omits task.
-  // Register, not this path, sends "" once to clear a leftover warning.
-  // In flight, omit task. Store the caller's raw task: the three replays
-  // below pass it back through here, and a stored warning must not skip
-  // the in-flight check. A login error from the gate below still replaces
-  // this text.
 /**
  * admin 2026-10-25(#2293)—— 这台机器上 OpenCode V2 服务器**现在能用的模型清单**,由节点自己上报。
  *
@@ -1862,6 +1855,13 @@ async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: s
     return models.length ? models : undefined;
   } catch { return undefined; }
 }
+const reportStatus = async (rawStatus: string, rawTask?: string) => {
+  // #667 — idle with nothing running writes the warning, or omits task.
+  // Register, not this path, sends "" once to clear a leftover warning.
+  // In flight, omit task. Store the caller's raw task: the three replays
+  // below pass it back through here, and a stored warning must not skip
+  // the in-flight check. A login error from the gate below still replaces
+  // this text.
   const hintedTask = projectDirTask(rawStatus, rawTask);
   lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();
