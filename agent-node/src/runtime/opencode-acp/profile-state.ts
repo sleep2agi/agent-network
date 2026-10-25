@@ -13,6 +13,7 @@ import {
   rmSync,
   writeFileSync,
 } from "fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import type { Stats } from "fs";
 import { basename, dirname, resolve } from "path";
 
@@ -188,7 +189,7 @@ function atomicWritePrivateFile(
         `OpenCode state refuses ${label} at ${path}: target changed before atomic rename`,
       );
     }
-    renameSync(temp, path);
+    renameOverExistingSync(temp, path);
     assertPrivateRegularFile(path, label);
     const parentFd = openSync(
       parent,

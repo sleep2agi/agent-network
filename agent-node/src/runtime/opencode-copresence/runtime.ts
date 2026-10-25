@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { randomBytes } from "crypto";
 import { cleanupAfterExit } from "./close-cleanup";
 import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { createServer } from "net";
 import { dirname, join } from "path";
 import { resolve } from "path";
@@ -405,7 +406,7 @@ export function wireOpenCodeCommhubMcp(
   const temporaryConfig = `${renderedConfigPath}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
   writeFileSync(temporaryConfig, `${JSON.stringify(renderedConfig, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   chmodSync(temporaryConfig, 0o600);
-  renameSync(temporaryConfig, renderedConfigPath);
+  renameOverExistingSync(temporaryConfig, renderedConfigPath);
   chmodSync(renderedConfigPath, 0o600);
 
   childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(config);
@@ -747,7 +748,7 @@ export function writeAttachScript(
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
   writeFileSync(temporary, lines.join("\n"), { mode: 0o700, flag: "wx" });
   chmodSync(temporary, 0o700);
-  renameSync(temporary, path);
+  renameOverExistingSync(temporary, path);
   chmodSync(path, 0o700);
 }
 

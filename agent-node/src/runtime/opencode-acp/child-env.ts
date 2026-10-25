@@ -18,6 +18,7 @@ import {
   statSync,
   writeFileSync,
 } from "fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { userInfo } from "os";
 import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from "path";
 
@@ -727,7 +728,7 @@ function atomicWritePrivateFile(path: string, body: string, label: string,
       || readPrivateRegularFile(path, label, 1024 * 1024) !== replace.original)) {
       throw new Error(`opencode refuses ${label}: credentials changed before atomic save`);
     }
-    renameSync(temp, path);
+    renameOverExistingSync(temp, path);
     assertPrivateRegularFile(path, label);
   } catch (error) {
     if (fd !== undefined) {

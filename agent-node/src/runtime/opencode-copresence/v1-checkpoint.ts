@@ -1,4 +1,5 @@
 import { constants, closeSync, fstatSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { randomBytes } from "crypto";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -99,7 +100,7 @@ export function writeV1Checkpoint(workDir: string, identity: V1CheckpointIdentit
     // First legacy capture must never replace an existing recovery point,
     // including one created concurrently after preflight.
     if (options.exclusive) linkSync(temp, path);
-    else renameSync(temp, path);
+    else renameOverExistingSync(temp, path);
   }
   finally { rmSync(temp, { force: true }); }
 }
