@@ -1529,7 +1529,9 @@ jobs:
       #    读者点进去连怀疑都不会产生。四处已在同一个 PR 里改对,这一步因此起点是绿的。
       #    它同时打印**跳过了多少** —— 一个只说「0 处漂移」不说「跳过 10 处」的门,
       #    读起来像「全都查过了」。
-      # 🔴 这一步已搬到 .github/workflows/doc-symbol-pins.yml（无 paths 过滤）。
+      # 🔴 这一步已搬到 .github/workflows/lint-consolidated-2.yml（#2136 A-1 第二批把
+      #    doc-symbol-pins / docs-integrity 等 10 个非 required 的 lint 门并成 1 个 job；
+      #    该 job 无 paths 过滤，所以它永远会跑）。
       #    留在这里跑不到该跑的时候：qa.yml 的 paths 里没有 docs/architecture.md，
       #    而那正是行号漂得最多的文件（#1001 一次抓到三处）。
       # test813 —— #825 加的 Grok CommHub MCP 就绪门。接进来的理由很直接：
