@@ -941,6 +941,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // （约定见 tool-audience-http.test.ts：加字段先砍描述或合并，别改那三个数）。
         // `.catch(undefined)`：形状不对只丢这一格，绝不拒掉整份心跳。
         opencode_catalog: z.array(z.string()).max(400).optional().catch(undefined),
+        // #2293 —— 这台机器上 OpenCode serve 的 loopback 端点（`http://127.0.0.1:PORT`）。
+        // 客户端「OpenCode Server」行此前只能写「端口未上报」。只收 loopback URL，不收密码。
+        opencode_server: z.string().max(200).optional().catch(undefined),
         config_update_capable: z.boolean().optional(),
         peer_reply_inbox_capable: z.literal(true).optional(),
         side_thread_capability: z.object({
@@ -2009,7 +2012,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional(),
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
       network_id: z.string().max(200).optional().describe("Network scope"),
-      parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends."),
+      parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. The child's reply is auto-chained to the parent's originator, so the user sees the result even if the intermediate session ends."),
       meta: z.any().optional().describe("Optional task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
@@ -6783,7 +6786,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     name: z.string().min(1).max(80).optional(),
     priority: z.enum(["high", "normal", "low", "lowest"]).optional().describe("high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低"),
     column: z.enum(["pool", "doing", "done", "abandoned"]).optional(),
-    due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears"),
+    due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 (stored as UTC seconds); \"\" clears"),
     start: z.string().max(40).optional().describe("start date (Gantt): same shapes as due; \"\" clears"),
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),

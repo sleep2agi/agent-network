@@ -5254,6 +5254,9 @@ return Bun.serve({
         // 客户端在**没有 daemon 绑定**时用它当建议列表。读法同 role：快照可能是文本或对象；
         // 解析失败/形状不对 = 这一格没有（null），不影响整行。
         let opencodeCatalog: string[] | null = null;
+        let opencodeGeneration: "v1" | "v2" | null = null;
+        let opencodeMode: string | null = null;
+        let opencodeServer: string | null = null;
         const snap = r.config_snapshot;
         if (snap) {
           let parsed: any = null;
@@ -5264,6 +5267,14 @@ return Bun.serve({
           if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
             opencodeCatalog = raw.slice(0, 400);
           }
+          // #2293 —— 客户端「Runtime · V2」和「OpenCode Server」两行要的正是快照里这三格标量。
+          // PR #1092 之前从 `node.config_snapshot` 读，但这个端点**刻意不带整个快照**
+          // （见上方 #312 注释）⇒ 真机上两行是空的/整行不出现。这里只放三个标量出来，
+          // 仍不暴露 flags 里的其它内容，更不暴露任何凭据。
+          const flags = parsed?.flags;
+          if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
+          if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
+          if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
         }
         const { config_snapshot, owner_user_id, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
@@ -5280,6 +5291,9 @@ return Bun.serve({
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
           opencode_catalog: opencodeCatalog,
+          opencode_generation: opencodeGeneration,
+          opencode_mode: opencodeMode,
+          opencode_server: opencodeServer,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),

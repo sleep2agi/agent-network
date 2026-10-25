@@ -1849,10 +1849,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
  *
  * 失败一律 undefined:心跳既不许被这件事拖住(3s 超时),也不许因为读列表失败被拒。
  */
-async function reportedOpenCodeCatalog(): Promise<string[] | undefined> {
-  if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2") return undefined;
-  const endpoint = readOpenCodeV2CatalogEndpoint(process.cwd());
-  if (!endpoint) return undefined;
+async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: string; directory: string } | null): Promise<string[] | undefined> {
+  if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || !endpoint) return undefined;
   try {
     const snapshot = await readOpenCodeCatalog({
       scope: { networkId: NETWORK_ID || "default", daemonId: NODE_ID || "n_self", directory: endpoint.directory },
@@ -1888,7 +1886,12 @@ async function reportedOpenCodeCatalog(): Promise<string[] | undefined> {
       : SESSION_ID || undefined;
   // #2293 —— 只在 opencode v2 且本进程记过 loopback 端点时才真的去读(见该函数注释)。
   // await 是有意的:读失败/超时返回 undefined,心跳照发。
-  const reportedCatalog = await reportedOpenCodeCatalog();
+  // 同一份端点文件也给出「这台机器的 OpenCode Server 在哪」——PR #1092 的
+  // 「OpenCode Server」行此前只能写「端口未上报」。
+  const catalogEndpoint = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+    ? readOpenCodeV2CatalogEndpoint(process.cwd())
+    : null;
+  const reportedCatalog = await reportedOpenCodeCatalog(catalogEndpoint);
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     // #1510 —— 每次上报都重新报一次 transport(Hub 侧「每份 report 重新测一次」的要求)。
@@ -1952,6 +1955,8 @@ async function reportedOpenCodeCatalog(): Promise<string[] | undefined> {
     // #2293 —— 节点自报的 OpenCode V2 模型清单(见 reportedOpenCodeCatalog)。
     // 旧 Hub 的 config_snapshot 是**非 strict** 对象,不认识的键会被静默丢掉,不会拒整份上报。
     ...(reportedCatalog ? { opencode_catalog: reportedCatalog } : {}),
+    // #2293 —— loopback 端点(127.0.0.1:port),不含密码/凭据;客户端「OpenCode Server」行用它。
+    ...(catalogEndpoint ? { opencode_server: catalogEndpoint.url } : {}),
     // #1958 — grok: the model the session actually ran with. Hub's report_status
     // schema already accepts `model`; on a hub that ignores it nothing breaks.
     // OpenCode V2 reports the TUI session model the same way. config_snapshot.model

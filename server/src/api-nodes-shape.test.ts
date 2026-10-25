@@ -38,6 +38,9 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
   let role: string | null = null;
   // #2293 —— 与 handler 同一套读法：快照可能是文本或对象；解析失败/形状不对 = 这一格没有。
   let opencodeCatalog: string[] | null = null;
+  let opencodeGeneration: "v1" | "v2" | null = null;
+  let opencodeMode: string | null = null;
+  let opencodeServer: string | null = null;
   const snap = r.config_snapshot;
   if (snap) {
     let parsed: any = null;
@@ -48,6 +51,10 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
       opencodeCatalog = raw.slice(0, 400);
     }
+    const flags = parsed?.flags;
+    if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
+    if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
+    if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
   }
   const { config_snapshot, ...rest } = r;
   return {
@@ -56,6 +63,9 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     attrs_revision: Number(r.attrs_revision ?? 0),
     role,
     opencode_catalog: opencodeCatalog,
+    opencode_generation: opencodeGeneration,
+    opencode_mode: opencodeMode,
+    opencode_server: opencodeServer,
   };
 }
 
@@ -109,8 +119,9 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     expect(Object.keys(row).sort()).toEqual([
       "alias", "attrs_revision", "channels", "config_path", "created_at",
       "display_name", "hostname", "model", "network_id", "node_id",
-      "node_name", "opencode_catalog", "role", "runtime", "server", "tags",
-      "team", "updated_at",
+      "node_name", "opencode_catalog", "opencode_generation", "opencode_mode",
+      "opencode_server", "role", "runtime", "server", "tags", "team",
+      "updated_at",
     ]);
   });
 
@@ -225,5 +236,44 @@ describe("#2293 opencode_catalog projection", () => {
     // 空列表是合法但无意义 → 照原样给出（客户端自己判断要不要建列表）
     insert({ opencode_catalog: [] });
     expect(read().opencode_catalog).toEqual([]);
+  });
+});
+
+// #2293（PR #1092 在真机上拿不到值的原因）—— /api/nodes 不带整个 config_snapshot，
+// 但「Runtime · V2」「OpenCode Server」两行只要三个标量：代际、模式、loopback 端点。
+describe("#2293 opencode_* scalars", () => {
+  test("generation / mode / server come from the snapshot, nothing else leaks", () => {
+    db.run(
+      `INSERT OR REPLACE INTO nodes (node_id, node_name, alias, network_id, config_snapshot)
+       VALUES (?1, ?2, ?3, ?4, ?5)`,
+      [TEST_NODE, "test-shape", "test-shape", TEST_NETWORK, JSON.stringify({
+        flags: { opencodeGeneration: "v2", opencodeMode: "copresence", secretOther: "must-not-leak" },
+        opencode_server: "http://127.0.0.1:4096",
+      })],
+    );
+    const row = mapRow(db.get<Record<string, unknown>>(
+      `SELECT node_id, node_name, alias, network_id, config_snapshot FROM nodes WHERE node_id = ?1`,
+      TEST_NODE,
+    )!);
+    expect(row.opencode_generation).toBe("v2");
+    expect(row.opencode_mode).toBe("copresence");
+    expect(row.opencode_server).toBe("http://127.0.0.1:4096");
+    expect(row).not.toHaveProperty("config_snapshot");
+    expect(JSON.stringify(row)).not.toContain("must-not-leak");
+  });
+
+  test("unknown generation / absent fields → null (old nodes keep rendering)", () => {
+    db.run(
+      `INSERT OR REPLACE INTO nodes (node_id, node_name, alias, network_id, config_snapshot)
+       VALUES (?1, ?2, ?3, ?4, ?5)`,
+      [TEST_NODE, "test-shape", "test-shape", TEST_NETWORK, JSON.stringify({ flags: { opencodeGeneration: "v9" } })],
+    );
+    const row = mapRow(db.get<Record<string, unknown>>(
+      `SELECT node_id, node_name, alias, network_id, config_snapshot FROM nodes WHERE node_id = ?1`,
+      TEST_NODE,
+    )!);
+    expect(row.opencode_generation).toBeNull();
+    expect(row.opencode_mode).toBeNull();
+    expect(row.opencode_server).toBeNull();
   });
 });
