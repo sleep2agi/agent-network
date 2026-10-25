@@ -89,7 +89,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -502,7 +501,7 @@ function writeRecord(path: string, record: CodexAuthFingerprintRecord): void {
   const tmp = `${path}.tmp-${process.pid}`;
   try {
     writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-    renameOverExistingSync(tmp, path);
+    renameSync(tmp, path);
   } catch (e) {
     try { unlinkSync(tmp); } catch { /* best effort */ }
     throw e;
