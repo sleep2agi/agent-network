@@ -160,7 +160,7 @@ Scope: this release injects the **Hub layer only**; daemon-scoped rules, cross-l
 To check whether a published version really has this behaviour:
 
 ```bash
-bash scripts/verify-team-rules-artifact.sh 2.5.0-preview.156
+bash scripts/verify-team-rules-artifact.sh 2.5.0-preview.157
 ```
 
 

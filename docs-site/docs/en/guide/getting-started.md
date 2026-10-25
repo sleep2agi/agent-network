@@ -8,7 +8,7 @@
      The latest stamp records the checked channel version; the preview stamp records the version checked
      on this page. Verify npm publication separately. Historical references (e.g. `<= 2.3.0-preview.37`) are not stamped. -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.190 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.193 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.194 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
 
@@ -60,7 +60,7 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-The checked `latest` (`2.3.0-preview.190`) prints a random password (that path is unchanged since `.181`): `anet-` followed by 22 hex characters. **Published** CLI `2.3.0-preview.193` changes nothing but the pair constant relative to `.192`, pointing at published agent-node `2.5.0-preview.156`; both exact versions have been verified on npm. `.156` adds one capability that is **off by default**: with `ANET_TEAM_RULES=1`, a node reads the network rules once on a full start and maintains a managed block at the top of its `CLAUDE.md` / `AGENTS.md` (everything outside the block untouched byte for byte; a half-written marker is refused; the same revision produces no diff; an unreachable Hub leaves the file alone and never blocks startup). It also carries three test-only fixes (explicit 60 s timeout for the native Windows tests, printing the probe result on failure, and measuring/retrying the fixture’s birth query). **Without that environment variable the behaviour is identical to `.155`; this release injects only the Hub layer — daemon-scoped rules and cross-layer conflict arbitration are still not implemented.** **The default bootstrap / random-password path is unchanged.**
+The checked `latest` (`2.3.0-preview.190`) prints a random password (that path is unchanged since `.181`): `anet-` followed by 22 hex characters. **Published** CLI `2.3.0-preview.194` changes nothing but the pair constant relative to `.192`, pointing at published agent-node `2.5.0-preview.157`; both exact versions have been verified on npm. `.156` adds one capability that is **off by default**: with `ANET_TEAM_RULES=1`, a node reads the network rules once on a full start and maintains a managed block at the top of its `CLAUDE.md` / `AGENTS.md` (everything outside the block untouched byte for byte; a half-written marker is refused; the same revision produces no diff; an unreachable Hub leaves the file alone and never blocks startup). It also carries three test-only fixes (explicit 60 s timeout for the native Windows tests, printing the probe result on failure, and measuring/retrying the fixture’s birth query). **Without that environment variable the behaviour is identical to `.155`; this release injects only the Hub layer — daemon-scoped rules and cross-layer conflict arbitration are still not implemented.** **The default bootstrap / random-password path is unchanged.**
 Publication of an exact version does not mean a channel tag will always point to it, or that existing nodes have upgraded. Run `npm view @sleep2agi/agent-network dist-tags` for the current channel versions.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 

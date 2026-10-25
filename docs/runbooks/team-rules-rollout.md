@@ -1,6 +1,6 @@
 # Runbook：给一个节点开启「团队规则」（`ANET_TEAM_RULES`）
 
-> 适用版本：`agent-node >= 2.5.0-preview.156`、`agent-network >= 2.3.0-preview.193`、Hub `commhub-server >= 0.9.0-preview.153`。
+> 适用版本：`agent-node >= 2.5.0-preview.157`、`agent-network >= 2.3.0-preview.194`、Hub `commhub-server >= 0.9.0-preview.153`。
 > 背景与语义：[RFC-043](../rfcs/RFC-043-team-rules-inheritance.md)。本 runbook 只讲**怎么开、怎么验、怎么退**。
 
 ## 0. 先确认这条链路是通的（不需要动节点）
@@ -12,7 +12,7 @@ NET=$(jq -r .network_id <节点目录>/config.json)
 curl -s "http://127.0.0.1:9200/api/networks/$NET/rules" -H "Authorization: Bearer $TOKEN"
 
 # 2) 发布产物真的有这个行为（四种情形全断言）
-bash scripts/verify-team-rules-artifact.sh 2.5.0-preview.156
+bash scripts/verify-team-rules-artifact.sh 2.5.0-preview.157
 ```
 
 第 2 步全 PASS 才继续；它证明的是 npm 上那串字节会做这件事。
