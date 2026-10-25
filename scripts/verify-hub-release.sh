@@ -91,4 +91,11 @@ check_feature "network rules route"              "networks"                 "0.9
 check_feature "network rules CAS conflict code"  "rules_revision_conflict"  "0.9.0-preview.152"
 check_feature "network rules node-token scope"   "user_token_required"      "0.9.0-preview.152"
 
+# .158 节点自报 OpenCode 模型清单 + loopback 端点（#2293）。客户端「模型可选列表」
+# 和「Runtime · V2 / OpenCode Server」两行读的就是这三格；断言的是**投影出的字段名**
+# （/api/nodes 上真的出现），不是某个实现文件里的字符串。
+check_feature "opencode catalog projection"  "opencode_catalog"    "0.9.0-preview.158"
+check_feature "opencode server projection"   "opencode_server"     "0.9.0-preview.158"
+check_feature "opencode generation scalar"   "opencode_generation" "0.9.0-preview.158"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
