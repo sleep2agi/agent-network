@@ -102,6 +102,31 @@ test("public errors redact free text for granted viewers on every projection", a
   }
 });
 
+test("unsupported co-presence adoption preserves only the exact public refusal code", async () => {
+  const nodeId = "n_read_refused", requestId = "adopt_read_refused";
+  db.run("INSERT INTO network_member_agent_grants(network_id,user_id,node_id,can_message) VALUES(?1,?2,?3,0)", [a.network_id, limited.user.user_id, nodeId]);
+  try {
+    for (const error of ["copresence_adopt_v2", "copresence_adopt_v2: /private/fixture", "copresence_adopt_v2_fixture-token", "unknown_copresence_error"]) {
+      db.run("UPDATE node_daemon_bindings SET error=?1 WHERE request_id=?2", [error, requestId]);
+      const expected = error === "copresence_adopt_v2" ? error : "lifecycle_error";
+      for (const selector of [`request_id=${requestId}`, `node_id=${nodeId}`]) {
+        const response = await get(query("adopt", selector), limited.token);
+        expect(response.status).toBe(200);
+        expect(response.body.request).toMatchObject({ node_id: nodeId, status: "refused", error: expected });
+        expect(JSON.stringify(response.body)).not.toContain("/private/fixture");
+        expect(JSON.stringify(response.body)).not.toContain("fixture-token");
+      }
+      const response = await get(`/api/nodes?network_id=${a.network_id}`, limited.token);
+      expect(response.status).toBe(200);
+      const node = response.body.nodes.find((row: any) => row.node_id === nodeId);
+      expect(node).toMatchObject({ managed: "none", adoption: { status: "refused", error: expected }, lifecycle_controllable: false });
+    }
+  } finally {
+    db.run("DELETE FROM network_member_agent_grants WHERE user_id=?1 AND node_id=?2", [limited.user.user_id, nodeId]);
+    db.run("UPDATE node_daemon_bindings SET error='adopt_start_evidence_missing' WHERE request_id=?1", requestId);
+  }
+});
+
 test("created projection prefers recorded child id and only falls back for legacy null", async () => {
   const read = async () => (await get(`/api/nodes?network_id=${a.network_id}`)).body.nodes;
   try {
