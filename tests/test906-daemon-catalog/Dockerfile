@@ -9,6 +9,10 @@ COPY agent-node/src/runtime/opencode-v2-catalog* agent-node/src/runtime/
 # registry. cli.ts is read, not imported. The glob above stays narrow so this
 # image does not pull the rest of the runtime.
 COPY agent-node/src/runtime/opencode-catalog-dispatch.ts agent-node/src/runtime/opencode-catalog-dispatch.test.ts agent-node/src/runtime/child-workdir.ts agent-node/src/runtime/config-apply.ts agent-node/src/runtime/codex-config-flags.ts agent-node/src/runtime/adopt-registry.ts agent-node/src/runtime/
+# #2224 —— 这几支文件现在把 rename 走 shared/windows-rename-retry（Windows 上的
+# EPERM/EBUSY 重试）。本 image 只复制窄文件集，缺这支会在加载时报
+# "Cannot find module '../shared/windows-rename-retry'"——那是**跑法造成的红**。
+COPY agent-node/src/shared/windows-rename-retry.ts agent-node/src/shared/
 COPY agent-node/src/cli.ts agent-node/src/cli.ts
 COPY tests/test906-daemon-catalog/ tests/test906-daemon-catalog/
 ARG SOURCE_COMMIT
