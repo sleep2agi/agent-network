@@ -1,0 +1,42 @@
+# 三个「几秒钟的 python 脚本」门的合体（#2136 A-1 第一批）。
+#
+# 为什么合并：每个 PR 会为这几道门各占一个 runner 并发位，而它们加起来跑不到
+# 三秒。合并成一个 job 顺序跑，**判据一条不减**，只是并发位从 3 个变 1 个。
+#
+# 为什么只合并这三个：分支保护（branches/main/protection）钉的是 **job 名**，
+# 仓里 24 个 lint workflow 中只有 10 个 job 名是 required。合并一个 required 的
+# 就等于让那个 context 永远等不到 —— 所有 PR 都合不了。这三个都不在 required
+# 列表里（hub-launcher-pin / no-escaped-comments / test-file-coverage），
+# 所以可以安全合并；required 的那些**保持原样**，要动必须先改分支保护。
+#
+# 🔴 失败必须点名是哪一道：三个脚本共用一个 job，只回一句 "exit 1" 会让人
+#    重新翻日志才知道哪条判据挂了。每一步都用 `::error::` 带上门的名字。
+#
+# 🔴 不加 paths 过滤：三道门里 test-file-coverage 原本带 paths，合并后不再带 ——
+#    代价是文档 PR 也会跑这个 job（三秒以内），换来的是「不会因为过滤写错而静默不跑」。
+
+name: lint (consolidated — launcher pin, comments, test coverage)
+
+on:
+  pull_request:
+
+jobs:
+  lint-consolidated:
+    # 不是 required check —— 改这个名字不影响任何人合并（见文件头）。
+    name: lint-consolidated
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 仓库里的 hub 启动器必须与仓库自己声明的 hub 版本对上（#735 的缺口）。
+      - name: hub launcher pin
+        run: python3 scripts/check-hub-launcher-pin.py || { echo "::error::hub-launcher-pin failed (仓库启动器与 PINNED_SERVER_VERSION 不一致)"; exit 1; }
+      # Python 注释里不许出现字面 \uXXXX（#996/#997 的教训）。
+      - name: no escaped comments
+        run: python3 .github/scripts/check-no-escaped-comments.py || { echo "::error::no-escaped-comments failed (注释里有字面 \\uXXXX)"; exit 1; }
+      # 元门：新增的 *.test.ts 不能落在所有聚合门的扫描范围之外。
+      - name: every test file is covered by a gate
+        run: python3 .github/scripts/check-test-file-coverage.py || { echo "::error::test-file-coverage failed (有测试文件没被任何聚合门覆盖)"; exit 1; }
