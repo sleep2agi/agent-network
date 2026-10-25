@@ -1849,7 +1849,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
  *
  * 失败一律 undefined:心跳既不许被这件事拖住(3s 超时),也不许因为读列表失败被拒。
  */
-async function reportedOpenCodeCatalog(): Promise<{ observed_at: string; providers: string[]; models: string[]; default_model: string | null } | undefined> {
+async function reportedOpenCodeCatalog(): Promise<string[] | undefined> {
   if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2") return undefined;
   const endpoint = readOpenCodeV2CatalogEndpoint(process.cwd());
   if (!endpoint) return undefined;
@@ -1861,16 +1861,9 @@ async function reportedOpenCodeCatalog(): Promise<{ observed_at: string; provide
       timeoutMs: 3_000,
     });
     const models = snapshot.models.map(m => `${m.providerId}/${m.id}`).slice(0, 400);
-    if (!models.length) return undefined;
-    return {
-      observed_at: snapshot.observedAt,
-      providers: snapshot.providers.map(p => p.id).slice(0, 200),
-      models,
-      default_model: snapshot.defaultModel ? `${snapshot.defaultModel.providerId}/${snapshot.defaultModel.id}` : null,
-    };
+    return models.length ? models : undefined;
   } catch { return undefined; }
 }
-
   const hintedTask = projectDirTask(rawStatus, rawTask);
   lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();

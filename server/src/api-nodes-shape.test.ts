@@ -37,7 +37,7 @@ afterAll(() => {
 function mapRow(r: Record<string, unknown>): Record<string, unknown> {
   let role: string | null = null;
   // #2293 —— 与 handler 同一套读法：快照可能是文本或对象；解析失败/形状不对 = 这一格没有。
-  let opencodeCatalog: unknown = null;
+  let opencodeCatalog: string[] | null = null;
   const snap = r.config_snapshot;
   if (snap) {
     let parsed: any = null;
@@ -45,13 +45,8 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     catch { parsed = null; }
     role = parsed?.role ?? null;
     const raw = parsed?.opencode_catalog;
-    if (raw && Array.isArray(raw.models) && raw.models.every((m: unknown) => typeof m === "string")) {
-      opencodeCatalog = {
-        models: raw.models.slice(0, 400),
-        ...(Array.isArray(raw.providers) ? { providers: raw.providers.filter((p: unknown) => typeof p === "string").slice(0, 200) } : {}),
-        observed_at: typeof raw.observed_at === "string" ? raw.observed_at : "",
-        ...(typeof raw.default_model === "string" ? { default_model: raw.default_model } : {}),
-      };
+    if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
+      opencodeCatalog = raw.slice(0, 400);
     }
   }
   const { config_snapshot, ...rest } = r;
@@ -214,14 +209,9 @@ describe("#2293 opencode_catalog projection", () => {
     TEST_NODE,
   )!);
 
-  test("valid list reaches the row (ids only)", () => {
-    insert({ role: null, opencode_catalog: { observed_at: "2026-10-25T09:00:00Z", providers: ["deepseek", "opencode"], models: ["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"], default_model: "deepseek/deepseek-flash" } });
-    expect(read().opencode_catalog).toEqual({
-      models: ["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"],
-      providers: ["deepseek", "opencode"],
-      observed_at: "2026-10-25T09:00:00Z",
-      default_model: "deepseek/deepseek-flash",
-    });
+  test("valid list reaches the row, order kept", () => {
+    insert({ opencode_catalog: ["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"] });
+    expect(read().opencode_catalog).toEqual(["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"]);
   });
 
   test("absent / malformed / wrong shape → null, row still served", () => {
@@ -229,11 +219,11 @@ describe("#2293 opencode_catalog projection", () => {
     expect(read().opencode_catalog).toBeNull();
     insert("not-json{");
     expect(read().opencode_catalog).toBeNull();
-    // models 里混了非字符串 → 整格作废（不猜、不部分展示）
-    insert({ opencode_catalog: { observed_at: "t", models: ["a/b", 7] } });
+    // 混了非字符串 → 整格作废（不猜、不部分展示）
+    insert({ opencode_catalog: ["a/b", 7] });
     expect(read().opencode_catalog).toBeNull();
-    // 空列表是合法但无意义 → 仍然照原样给出（客户端自己判断要不要建列表）
-    insert({ opencode_catalog: { observed_at: "t", models: [] } });
-    expect(read().opencode_catalog).toEqual({ models: [], observed_at: "t" });
+    // 空列表是合法但无意义 → 照原样给出（客户端自己判断要不要建列表）
+    insert({ opencode_catalog: [] });
+    expect(read().opencode_catalog).toEqual([]);
   });
 });

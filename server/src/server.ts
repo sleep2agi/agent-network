@@ -5250,10 +5250,10 @@ return Bun.serve({
       const management = lifecycleUser ? lifecycleProjections(restScope) : null;
       const rows = rawRows.map(r => {
         let role: string | null = null;
-        // #2293（admin 2026-10-25）—— 节点自报的 OpenCode V2 模型清单，单独一格透出。
-        // 客户端在**没有 daemon 绑定**时用它当建议列表（那条链读不到 catalog）。
-        // 与 role 同一套读法：快照可能是文本或对象；解析失败 = 这一格没有，不影响整行。
-        let opencodeCatalog: { models: string[]; providers?: string[]; observed_at: string; default_model?: string | null } | null = null;
+        // #2293（admin 2026-10-25）—— 节点自报的 OpenCode V2 模型 id 清单（`provider/model` 字符串数组）。
+        // 客户端在**没有 daemon 绑定**时用它当建议列表。读法同 role：快照可能是文本或对象；
+        // 解析失败/形状不对 = 这一格没有（null），不影响整行。
+        let opencodeCatalog: string[] | null = null;
         const snap = r.config_snapshot;
         if (snap) {
           let parsed: any = null;
@@ -5261,13 +5261,8 @@ return Bun.serve({
           catch { parsed = null; }
           role = parsed?.role ?? null;
           const raw = parsed?.opencode_catalog;
-          if (raw && Array.isArray(raw.models) && raw.models.every((m: unknown) => typeof m === "string")) {
-            opencodeCatalog = {
-              models: raw.models.slice(0, 400),
-              ...(Array.isArray(raw.providers) ? { providers: raw.providers.filter((p: unknown) => typeof p === "string").slice(0, 200) } : {}),
-              observed_at: typeof raw.observed_at === "string" ? raw.observed_at : "",
-              ...(typeof raw.default_model === "string" ? { default_model: raw.default_model } : {}),
-            };
+          if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
+            opencodeCatalog = raw.slice(0, 400);
           }
         }
         const { config_snapshot, owner_user_id, ...rest } = r;
