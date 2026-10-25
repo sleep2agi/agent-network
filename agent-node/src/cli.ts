@@ -1888,8 +1888,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
   // await 是有意的:读失败/超时返回 undefined,心跳照发。
   // 同一份端点文件也给出「这台机器的 OpenCode Server 在哪」——PR #1092 的
   // 「OpenCode Server」行此前只能写「端口未上报」。
+  // 🔴 端点文件写的是**节点的状态目录**(runtime 传的 workDir = NODE_DIR),
+  //    不是 process.cwd()。.159 首版查了 cwd ⇒ 在真机上永远读不到文件,
+  //    清单静默为空(2026-10-25 用一台独立验证节点 + 独立 Hub 跑出来的)。
+  //    仍保留 cwd 回退:早期某些布局把 workDir 设成项目目录。
   const catalogEndpoint = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
-    ? readOpenCodeV2CatalogEndpoint(process.cwd())
+    ? readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd())
     : null;
   const reportedCatalog = await reportedOpenCodeCatalog(catalogEndpoint);
   return callCommHub("report_status", {
@@ -1952,11 +1956,6 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // new child boots .prev → reports OLD snapshot → content-match
     // fails → update stays pending → reaper timeouts → dashboard sees
     // timeout (NOT false ✓).
-    // #2293 —— 节点自报的 OpenCode V2 模型清单(见 reportedOpenCodeCatalog)。
-    // 旧 Hub 的 config_snapshot 是**非 strict** 对象,不认识的键会被静默丢掉,不会拒整份上报。
-    ...(reportedCatalog ? { opencode_catalog: reportedCatalog } : {}),
-    // #2293 —— loopback 端点(127.0.0.1:port),不含密码/凭据;客户端「OpenCode Server」行用它。
-    ...(catalogEndpoint ? { opencode_server: catalogEndpoint.url } : {}),
     // #1958 — grok: the model the session actually ran with. Hub's report_status
     // schema already accepts `model`; on a hub that ignores it nothing breaks.
     // OpenCode V2 reports the TUI session model the same way. config_snapshot.model
@@ -1980,6 +1979,11 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       // snapshot.model (still the configured value) field-by-field, so extra
       // keys are safe and older hubs drop them (non-strict object).
       ...(RUNTIME === "grok" && grokEffectiveModel ? { model_effective: grokEffectiveModel, model_source: grokModelSource } : {}),
+      // #2293 —— 节点自报的 OpenCode V2 模型清单与 loopback 端点。
+      // 🔴 必须在 **config_snapshot 里面**：report_status 的顶层 schema 不认这两个键，
+      //    放在顶层会被**静默丢弃**（.159 首版就这样白跑过一次，2026-10-25 用独立验证节点发现）。
+      ...(reportedCatalog ? { opencode_catalog: reportedCatalog } : {}),
+      ...(catalogEndpoint ? { opencode_server: catalogEndpoint.url } : {}),
     },
   });
 };
