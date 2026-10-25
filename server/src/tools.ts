@@ -934,6 +934,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         model: z.string().max(200).optional().nullable(),
         flags: z.record(z.string(), z.unknown()).optional(),
         config_revision: z.number().int().min(0).optional(),
+        // #2293（admin 2026-10-25）—— 节点自己上报的 OpenCode V2 模型清单。
+        // 背景：客户端取模型列表走 read_opencode_catalog / get_opencode_catalog，
+        // 那条链的前提是节点有 lifecycle_daemon_node_id 或 active adoption；手工
+        // `anet node start` 起的 opencode 节点两样都是 null，于是列表恒空、admin
+        // 只能手填模型 id（原话：「是 不能选要自己填」）。
+        // 这里收下节点在**自己的 loopback serve** 上读到的 id 清单，`/api/nodes`
+        // 单独一格透出给客户端做建议列表。
+        // 只收 id：名字/设置/headers/endpoint 可能带凭据，一律不收。
+        // `.catch(undefined)`：这一格是诊断信息，任何形状都不许拒掉整份心跳。
+        opencode_catalog: z.object({
+          observed_at: z.string().max(64),
+          providers: z.array(z.string().max(200)).max(200).optional(),
+          models: z.array(z.string().max(400)).max(400),
+          default_model: z.string().max(400).nullable().optional(),
+        }).optional().catch(undefined),
         config_update_capable: z.boolean().optional(),
         peer_reply_inbox_capable: z.literal(true).optional(),
         side_thread_capability: z.object({

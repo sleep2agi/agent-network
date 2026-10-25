@@ -5250,10 +5250,25 @@ return Bun.serve({
       const management = lifecycleUser ? lifecycleProjections(restScope) : null;
       const rows = rawRows.map(r => {
         let role: string | null = null;
+        // #2293（admin 2026-10-25）—— 节点自报的 OpenCode V2 模型清单，单独一格透出。
+        // 客户端在**没有 daemon 绑定**时用它当建议列表（那条链读不到 catalog）。
+        // 与 role 同一套读法：快照可能是文本或对象；解析失败 = 这一格没有，不影响整行。
+        let opencodeCatalog: { models: string[]; providers?: string[]; observed_at: string; default_model?: string | null } | null = null;
         const snap = r.config_snapshot;
         if (snap) {
-          try { role = (typeof snap === "string" ? JSON.parse(snap) : snap)?.role ?? null; }
-          catch { /* malformed snapshot — leave role null */ }
+          let parsed: any = null;
+          try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
+          catch { parsed = null; }
+          role = parsed?.role ?? null;
+          const raw = parsed?.opencode_catalog;
+          if (raw && Array.isArray(raw.models) && raw.models.every((m: unknown) => typeof m === "string")) {
+            opencodeCatalog = {
+              models: raw.models.slice(0, 400),
+              ...(Array.isArray(raw.providers) ? { providers: raw.providers.filter((p: unknown) => typeof p === "string").slice(0, 200) } : {}),
+              observed_at: typeof raw.observed_at === "string" ? raw.observed_at : "",
+              ...(typeof raw.default_model === "string" ? { default_model: raw.default_model } : {}),
+            };
+          }
         }
         const { config_snapshot, owner_user_id, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
@@ -5269,6 +5284,7 @@ return Bun.serve({
           tags: parseStoredTags(r.tags),
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
+          opencode_catalog: opencodeCatalog,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),

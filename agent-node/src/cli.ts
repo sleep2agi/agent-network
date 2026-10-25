@@ -1371,6 +1371,8 @@ import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runti
 import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows-tui-health";
+import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
+import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
@@ -1834,6 +1836,41 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
   // below pass it back through here, and a stored warning must not skip
   // the in-flight check. A login error from the gate below still replaces
   // this text.
+/**
+ * admin 2026-10-25(#2293)—— 这台机器上 OpenCode V2 服务器**现在能用的模型清单**,由节点自己上报。
+ *
+ * 为什么不用现成的 daemon 中继链(server/src/opencode-v2-catalog.ts + dispatch):那条路的前提是
+ * 节点有 `lifecycle_daemon_node_id` 或 active adoption,而手工 `anet node start` 起的 opencode 节点
+ * 两样都是 null —— 于是客户端拿不到列表,admin 只能手填模型 id(原话:「是 不能选要自己填」)。
+ *
+ * 数据来源:本进程启动 serve 时写下的 loopback 端点文件(0600,只有 url / Basic authorization /
+ * directory),再用**同一个** readOpenCodeCatalog 归一化。只取 provider/model 的 id ——
+ * 名字、设置、headers、endpoint、body 一概不拷贝(那些可能带凭据)。
+ *
+ * 失败一律 undefined:心跳既不许被这件事拖住(3s 超时),也不许因为读列表失败被拒。
+ */
+async function reportedOpenCodeCatalog(): Promise<{ observed_at: string; providers: string[]; models: string[]; default_model: string | null } | undefined> {
+  if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2") return undefined;
+  const endpoint = readOpenCodeV2CatalogEndpoint(process.cwd());
+  if (!endpoint) return undefined;
+  try {
+    const snapshot = await readOpenCodeCatalog({
+      scope: { networkId: NETWORK_ID || "default", daemonId: NODE_ID || "n_self", directory: endpoint.directory },
+      url: endpoint.url,
+      authorization: endpoint.authorization,
+      timeoutMs: 3_000,
+    });
+    const models = snapshot.models.map(m => `${m.providerId}/${m.id}`).slice(0, 400);
+    if (!models.length) return undefined;
+    return {
+      observed_at: snapshot.observedAt,
+      providers: snapshot.providers.map(p => p.id).slice(0, 200),
+      models,
+      default_model: snapshot.defaultModel ? `${snapshot.defaultModel.providerId}/${snapshot.defaultModel.id}` : null,
+    };
+  } catch { return undefined; }
+}
+
   const hintedTask = projectDirTask(rawStatus, rawTask);
   lastReportedStatus = { status: rawStatus, task: rawTask };
   const alias = await liveAlias();
@@ -1856,6 +1893,9 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     : RUNTIME === "claude"
       ? claudeSessionId
       : SESSION_ID || undefined;
+  // #2293 —— 只在 opencode v2 且本进程记过 loopback 端点时才真的去读(见该函数注释)。
+  // await 是有意的:读失败/超时返回 undefined,心跳照发。
+  const reportedCatalog = await reportedOpenCodeCatalog();
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     // #1510 —— 每次上报都重新报一次 transport(Hub 侧「每份 report 重新测一次」的要求)。
@@ -1916,6 +1956,9 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // new child boots .prev → reports OLD snapshot → content-match
     // fails → update stays pending → reaper timeouts → dashboard sees
     // timeout (NOT false ✓).
+    // #2293 —— 节点自报的 OpenCode V2 模型清单(见 reportedOpenCodeCatalog)。
+    // 旧 Hub 的 config_snapshot 是**非 strict** 对象,不认识的键会被静默丢掉,不会拒整份上报。
+    ...(reportedCatalog ? { opencode_catalog: reportedCatalog } : {}),
     // #1958 — grok: the model the session actually ran with. Hub's report_status
     // schema already accepts `model`; on a hub that ignores it nothing breaks.
     // OpenCode V2 reports the TUI session model the same way. config_snapshot.model

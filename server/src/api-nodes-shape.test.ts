@@ -36,10 +36,23 @@ afterAll(() => {
 // the dashboard / external clients see.
 function mapRow(r: Record<string, unknown>): Record<string, unknown> {
   let role: string | null = null;
+  // #2293 —— 与 handler 同一套读法：快照可能是文本或对象；解析失败/形状不对 = 这一格没有。
+  let opencodeCatalog: unknown = null;
   const snap = r.config_snapshot;
   if (snap) {
-    try { role = (typeof snap === "string" ? JSON.parse(snap) : snap)?.role ?? null; }
-    catch { /* malformed */ }
+    let parsed: any = null;
+    try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
+    catch { parsed = null; }
+    role = parsed?.role ?? null;
+    const raw = parsed?.opencode_catalog;
+    if (raw && Array.isArray(raw.models) && raw.models.every((m: unknown) => typeof m === "string")) {
+      opencodeCatalog = {
+        models: raw.models.slice(0, 400),
+        ...(Array.isArray(raw.providers) ? { providers: raw.providers.filter((p: unknown) => typeof p === "string").slice(0, 200) } : {}),
+        observed_at: typeof raw.observed_at === "string" ? raw.observed_at : "",
+        ...(typeof raw.default_model === "string" ? { default_model: raw.default_model } : {}),
+      };
+    }
   }
   const { config_snapshot, ...rest } = r;
   return {
@@ -47,6 +60,7 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     tags: parseStoredTags(r.tags),
     attrs_revision: Number(r.attrs_revision ?? 0),
     role,
+    opencode_catalog: opencodeCatalog,
   };
 }
 
@@ -83,7 +97,7 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     // Expected fields present (13 = 12 contract + new role)
     for (const k of ["node_id", "node_name", "alias", "runtime", "model",
                      "config_path", "channels", "server", "hostname",
-                     "network_id", "created_at", "updated_at", "role"]) {
+                     "network_id", "created_at", "updated_at", "role", "opencode_catalog"]) {
       expect(row).toHaveProperty(k);
     }
     // Internal fields NOT present
@@ -100,8 +114,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     expect(Object.keys(row).sort()).toEqual([
       "alias", "attrs_revision", "channels", "config_path", "created_at",
       "display_name", "hostname", "model", "network_id", "node_id",
-      "node_name", "role", "runtime", "server", "tags", "team",
-      "updated_at",
+      "node_name", "opencode_catalog", "role", "runtime", "server", "tags",
+      "team", "updated_at",
     ]);
   });
 
@@ -184,5 +198,42 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     );
     expect(cfgRow?.config_revision).toBe(42);
     expect(cfgRow?.config_snapshot).toContain("claude-opus");
+  });
+});
+
+// #2293（admin 2026-10-25）—— 节点自报的模型清单必须能到 /api/nodes：
+// 「没有 daemon 绑定」的节点，客户端就是靠这一格给建议列表（否则只能手填）。
+describe("#2293 opencode_catalog projection", () => {
+  const insert = (snapshot: unknown) => db.run(
+    `INSERT OR REPLACE INTO nodes (node_id, node_name, alias, network_id, config_snapshot)
+     VALUES (?1, ?2, ?3, ?4, ?5)`,
+    [TEST_NODE, "test-shape", "test-shape", TEST_NETWORK, typeof snapshot === "string" ? snapshot : JSON.stringify(snapshot)],
+  );
+  const read = () => mapRow(db.get<Record<string, unknown>>(
+    `SELECT node_id, node_name, alias, network_id, config_snapshot FROM nodes WHERE node_id = ?1`,
+    TEST_NODE,
+  )!);
+
+  test("valid list reaches the row (ids only)", () => {
+    insert({ role: null, opencode_catalog: { observed_at: "2026-10-25T09:00:00Z", providers: ["deepseek", "opencode"], models: ["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"], default_model: "deepseek/deepseek-flash" } });
+    expect(read().opencode_catalog).toEqual({
+      models: ["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"],
+      providers: ["deepseek", "opencode"],
+      observed_at: "2026-10-25T09:00:00Z",
+      default_model: "deepseek/deepseek-flash",
+    });
+  });
+
+  test("absent / malformed / wrong shape → null, row still served", () => {
+    insert({ model: "x" });
+    expect(read().opencode_catalog).toBeNull();
+    insert("not-json{");
+    expect(read().opencode_catalog).toBeNull();
+    // models 里混了非字符串 → 整格作废（不猜、不部分展示）
+    insert({ opencode_catalog: { observed_at: "t", models: ["a/b", 7] } });
+    expect(read().opencode_catalog).toBeNull();
+    // 空列表是合法但无意义 → 仍然照原样给出（客户端自己判断要不要建列表）
+    insert({ opencode_catalog: { observed_at: "t", models: [] } });
+    expect(read().opencode_catalog).toEqual({ models: [], observed_at: "t" });
   });
 });
