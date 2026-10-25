@@ -98,4 +98,9 @@ check_feature "opencode catalog projection"  "opencode_catalog"    "0.9.0-previe
 check_feature "opencode server projection"   "opencode_server"     "0.9.0-preview.158"
 check_feature "opencode generation scalar"   "opencode_generation" "0.9.0-preview.158"
 
+# .159 SSE 背压收敛（#2363）：慢订阅者不再把队列堆到 1 MB/连接，广播也只编码一次。
+# 断言的是**可运维的开关名**——发布说明与灰度都靠它。
+check_feature "sse coalesce tunable"          "ANET_SSE_COALESCE_AT_BYTES"  "0.9.0-preview.159"
+check_feature "sse degraded drop counter"     "sseDegradedDropCount"        "0.9.0-preview.159"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
