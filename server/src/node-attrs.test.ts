@@ -215,3 +215,44 @@ describe("node display attrs — auth + scope", () => {
     expect(r.status).toBe(404);
   });
 });
+
+// #2293（admin 2026-10-25）—— 走**真正**的 HTTP，不镜像 handler：
+// 客户端「Runtime · V2」「OpenCode Server」和「模型可选列表」要的三样东西
+// （代际 / 模式 / loopback 端点）与「这台机器上报的模型 id 清单」都在 /api/nodes 上，
+// 而整个 config_snapshot 仍然不外泄（终端 #312 的约定）。
+describe("#2293 opencode bits on GET /api/nodes (real HTTP)", () => {
+  const OC_NODE = "node_attrs_opencode";
+  const OC_ALIAS = "attrs-opencode-node";
+
+  test("generation / mode / server / catalog are projected; config_snapshot is not", async () => {
+    db.run(`DELETE FROM nodes WHERE node_id = ?1`, [OC_NODE]);
+    db.run(
+      `INSERT INTO nodes (node_id, node_name, alias, runtime, model, network_id, config_snapshot)
+       VALUES (?1, 'attrs-oc', ?2, 'opencode-sdk', 'deepseek/deepseek-flash', ?3, ?4)`,
+      [OC_NODE, OC_ALIAS, NET, JSON.stringify({
+        model: "deepseek/deepseek-flash",
+        flags: { opencodeGeneration: "v2", opencodeMode: "copresence", daemonSideSecret: "must-not-leak" },
+        opencode_server: "http://127.0.0.1:4096",
+        opencode_catalog: ["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"],
+      })],
+    );
+    const row = (await listNodes()).find((r) => r.node_id === OC_NODE)!;
+    expect(row).toBeDefined();
+    expect(row.opencode_generation).toBe("v2");
+    expect(row.opencode_mode).toBe("copresence");
+    expect(row.opencode_server).toBe("http://127.0.0.1:4096");
+    expect(row.opencode_catalog).toEqual(["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"]);
+    // 整个快照仍然不出现，且 flags 里的其它键不外泄。
+    expect(row).not.toHaveProperty("config_snapshot");
+    expect(JSON.stringify(row)).not.toContain("must-not-leak");
+    db.run(`DELETE FROM nodes WHERE node_id = ?1`, [OC_NODE]);
+  });
+
+  test("a node that never reported them reads as null / [] (old node, no invented values)", async () => {
+    const row = (await listNodes()).find((r) => r.node_id === LEGACY_NODE)!;
+    expect(row.opencode_generation ?? null).toBeNull();
+    expect(row.opencode_mode ?? null).toBeNull();
+    expect(row.opencode_server ?? null).toBeNull();
+    expect(row.opencode_catalog ?? null).toBeNull();
+  });
+});
