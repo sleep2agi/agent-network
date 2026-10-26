@@ -86,14 +86,31 @@ p50 = 1 秒    p90 = 6 秒    p95 = 57 秒    p99 = 12 分钟
 Agent 行新增 `updated_at` 与 `lifecycle_state`，让客户端能按“最近活跃”过滤与去重
 （#2596 的 alias 重复问题需要这两个字段做客户端侧处理）。老客户端读不到即可，属新增字段。
 
-## 升级
+## Install
+
+New users running their own Hub:
+
+```bash
+set -e
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.162
+commhub-server --version   # 0.9.0-preview.162
+```
+
+## Upgrade
 
 ```bash
 npm i -g @sleep2agi/commhub-server@0.9.0-preview.162
-# 或按你现有的 pm2 运行时目录升级后重启
+commhub-server --version   # 0.9.0-preview.162
+curl -s http://127.0.0.1:9200/health | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["version"], d.get("event_loop"))'
 ```
 
 重启代价：一条 `CREATE INDEX`（数秒，一次性），期间不接新请求。
+
+如果你用**版本化运行时目录**（`HUB_RUNTIME_DIR` 指向某个 `runtime-v<ver>-preview<ver>/`），
+把 `package.json` 里的依赖版本改成 `0.9.0-preview.162` 后 `npm install`，再把
+`HUB_RUNTIME_DIR` 指到新目录并重启（旧目录保留作回滚）。
+
+升级后第一次整点 retention 就能看出差别（此前是 5–10 秒，之后应到亚秒级）。
 
 ## 验收（上线后 24h）
 
