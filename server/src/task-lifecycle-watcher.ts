@@ -1,4 +1,5 @@
 import { db } from "./db.js";
+import { ALIAS_BASELINE_TABLE, BASELINE_P99_FACTOR, ensureAliasBaselineTable } from "./alias-baseline.js";
 
 export const DELIVERED_STALE_THRESHOLDS = [600, 1800] as const;
 
@@ -44,7 +45,7 @@ function thresholdLabel(thresholdSeconds: 600 | 1800): string {
   return thresholdSeconds === 600 ? "10m" : "30m";
 }
 
-function recordStale(thresholdSeconds: 600 | 1800, cutoff: string): number {
+function recordStale(thresholdSeconds: 600 | 1800, cutoff: string, referenceIso: string): number {
   const busyType = `task.warning.queued_behind_busy_${thresholdSeconds}s`;
   const staleType = `task.warning.delivered_stale_${thresholdSeconds}s`;
   const label = thresholdLabel(thresholdSeconds);
@@ -68,11 +69,22 @@ function recordStale(thresholdSeconds: 600 | 1800, cutoff: string): number {
                  THEN ?6 ELSE ?7 END,
             network_id
      FROM tasks
+     -- 这个子查询把列名改成 b_* 前缀：SELECT 列表里的 network_id 必须继续是 tasks 的
+     -- （test683 的 L9 变异门用 network_id + FROM tasks 相邻两行当锚点，裸列名一改锚点就失效）。
+     LEFT JOIN (SELECT alias AS b_alias, network_id AS b_network, p99_seconds AS b_p99
+                  FROM alias_latency_baseline) b
+            ON b.b_alias = tasks.to_name AND b.b_network = tasks.network_id
      WHERE status = 'delivered'
        AND delivered_at IS NOT NULL
        AND delivered_at <= ?3
+       -- #2571 第三轮：目标自己的 p99 基线比全局下限更宽时，用它（全队变慢不炸屏，
+       -- 单节点卡住仍会显形）。没有基线行 ⇒ 与 .163 行为完全一致。
+       AND (
+         b.b_p99 IS NULL
+         OR delivered_at <= datetime(?8, '-' || CAST(b.b_p99 * 1.5 AS INTEGER) || ' seconds')
+       )
      ON CONFLICT(task_id, event_key) DO NOTHING`,
-    [staleType, staleDetail, cutoff, busyType, staleType, busyDetail, staleDetail],
+    [staleType, staleDetail, cutoff, busyType, staleType, busyDetail, staleDetail, referenceIso],
   );
   return result.changes;
 }
@@ -80,12 +92,13 @@ function recordStale(thresholdSeconds: 600 | 1800, cutoff: string): number {
 export function recordDeliveredStaleEvents(now = new Date()): DeliveredStalePatrolResult {
   if (!Number.isFinite(now.getTime())) throw new Error("invalid lifecycle patrol time");
 
+  ensureAliasBaselineTable();
   const byThreshold = { 600: 0, 1800: 0 };
   let inserted = 0;
 
   for (const thresholdSeconds of DELIVERED_STALE_THRESHOLDS) {
     const cutoff = sqliteUtcTimestamp(new Date(now.getTime() - thresholdSeconds * 1000));
-    const changes = recordStale(thresholdSeconds, cutoff);
+    const changes = recordStale(thresholdSeconds, cutoff, now.toISOString());
     byThreshold[thresholdSeconds] = changes;
     inserted += changes;
   }

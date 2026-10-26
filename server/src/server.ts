@@ -30,6 +30,7 @@ import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { enterMcpInflight, leaveMcpInflight, getMcpInflightStats } from "./mcp-inflight.js";
 import { eventLoopStats, startEventLoopLagMonitor } from "./event-loop-lag.js";
+import { refreshAliasBaseline } from "./alias-baseline.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
@@ -5643,6 +5644,20 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // “同一秒里 retention 跑了 10 秒 + 有两百个请求在排队”。
   const eventLoopLagTimer = startEventLoopLagMonitor();
 
+  // #2571（第三轮）—— 每个目标自己的投递延迟 p99 基线，供 delivered_stale 判据使用。
+  // 生产库上重算一次约 0.46s（116k tasks / 7 天窗口），所以只每小时一次、且与 retention 错开。
+  // 失败不影响任何请求路径：基线表只是缓存，读不到就退回全局阈值。
+  const refreshBaseline = () => {
+    try {
+      const r = refreshAliasBaseline();
+      if (r.rows > 0) console.log(`[commhub alias-baseline] refreshed ${r.rows} alias(es)`);
+    } catch (e: any) {
+      console.error(`[commhub alias-baseline] refresh failed: ${e?.message || e}`);
+    }
+  };
+  refreshBaseline();
+  const aliasBaselineTimer = setInterval(refreshBaseline, 60 * 60 * 1000);
+
   // Round-2/4 review ③ — stale session sweeper (coexists with the
   // retention sweeper above; different concerns + different cadences).
   // Replaces the per-request UPDATE in GET /api/status (+ /api/servers,
@@ -5677,6 +5692,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // server would still hang on live intervals it cannot reach.
   (retentionSweeperTimer as any)?.unref?.();
   (eventLoopLagTimer as any)?.unref?.();
+  (aliasBaselineTimer as any)?.unref?.();
   (staleSweeperTimer as any)?.unref?.();
   (rateLimitSweepTimer as any)?.unref?.();
   (taskPatrolTimer as any)?.unref?.();
@@ -5689,6 +5705,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     console.log("[commhub] shutting down...");
     clearInterval(retentionSweeperTimer);
     clearInterval(eventLoopLagTimer);
+    clearInterval(aliasBaselineTimer);
     clearInterval(staleSweeperTimer);
     clearInterval(rateLimitSweepTimer);
     clearInterval(taskPatrolTimer);
