@@ -34,8 +34,22 @@ jobs:
           set -euo pipefail
           docker run -d --name human-inbox-pg --network none -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=anet_inbox1163_test postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
           trap 'docker rm -f human-inbox-pg >/dev/null' EXIT
+          # #2620 —— postgres 初始化时会**先短暂监听、再重启一次**：第一次 `pg_isready`
+          # 通过不代表它稳定了。2026-10-26 实测：第一次通过后 1 秒内测试容器连上，
+          # 立刻被 postgres 自己的重启掐断，报 `PG: Connection closed`（发生在适配器构造阶段，
+          # 看起来像测试挂了，实际是基础设施竞态）。
+          # 判据改成「**连续两次**通过（中间 sleep 1）」。
+          ready=0
           for i in $(seq 1 30); do
-            if docker exec human-inbox-pg pg_isready -U postgres; then break; fi
+            if docker exec human-inbox-pg pg_isready -U postgres >/dev/null 2>&1; then
+              sleep 1
+              if docker exec human-inbox-pg pg_isready -U postgres >/dev/null 2>&1; then ready=1; break; fi
+            fi
             sleep 1
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::postgres did not stay ready within 60s (#2620)"
+            docker logs --tail 30 human-inbox-pg || true
+            exit 1
+          fi
           docker run --rm --network container:human-inbox-pg -e COMMHUB_TEST_PG_URL=postgres://postgres@127.0.0.1/anet_inbox1163_test -e COMMHUB_PG_EXPERIMENTAL=1 human-inbox
