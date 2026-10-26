@@ -28,6 +28,7 @@ import { ensureNetworkRulesOnce, readNetworkRules, writeNetworkRules } from "./n
 import { deriveTeamRulesView } from "./team-rules-status.js";
 import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
+import { enterMcpInflight, leaveMcpInflight, getMcpInflightStats } from "./mcp-inflight.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
@@ -1092,6 +1093,16 @@ return Bun.serve({
           callerIdentityRejected = true;
         }
       }
+      // #2363 —— 在飞计数：从进入 /mcp 到 MCP server 关闭。Hub 的内存与“同时在飞的
+      // 请求数”成正比（隔离实测 ≈1.2–1.4 MB/条；顺序 54 条/秒时 RSS 完全平稳），
+      // 所以这个数比 req/s 更能解释 RSS 尖峰。只观测，不拦请求。
+      enterMcpInflight();
+      let mcpInflightSettled = false;
+      const settleMcpInflight = (): void => {
+        if (mcpInflightSettled) return;
+        mcpInflightSettled = true;
+        leaveMcpInflight();
+      };
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
@@ -1110,10 +1121,16 @@ return Bun.serve({
       }
       // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
       const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url), callerIdentityRejected);
-      await mcpServer.connect(transport);
-      const response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
+      let response: Response;
+      try {
+        await mcpServer.connect(transport);
+        response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
+      } catch (e) {
+        settleMcpInflight();
+        throw e;
+      }
       // Disconnect after response to prevent McpServer leak
-      setImmediate(() => mcpServer.close().catch(() => {}));
+      setImmediate(() => { mcpServer.close().catch(() => {}).finally(settleMcpInflight); });
       // #426: the MCP SDK's WebStandardStreamableHTTPServerTransport builds
       // its own Response with `Content-Type: text/event-stream` (or
       // `application/json` for JSON-mode) but WITHOUT charset. Legacy
@@ -2765,6 +2782,10 @@ return Bun.serve({
         transport: "streamable-http",
         sessions_count: count?.cnt ?? 0,
         sse_connections: sse.total,
+        // #2363 —— MCP 在飞数（只观测）。RSS 与它成正比（≈1.2–1.4 MB/条），
+        // 而 `sse_connections` 只反映长连接，看不到“同秒打进来的一批请求”。
+        mcp_inflight: getMcpInflightStats().inflight,
+        mcp_inflight_peak: getMcpInflightStats().peak,
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
