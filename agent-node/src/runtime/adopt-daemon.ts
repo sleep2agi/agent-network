@@ -12,6 +12,21 @@ import { collectCodexPanes } from "./adopt-codex-tmux.js";
 import { configHash } from "./adopt-launch-evidence.js";
 import { optionalCodexStartInputs } from "./adopt-codex-start-inputs.js";
 
+/**
+ * 把内部拒绝原因折成**可以回给 Hub** 的短码（见 #1987）。
+ *
+ * 规则：只放行 `adopt_* / daemon_has_* / copresence_* / cannot_adopt_* / workdir_*`，
+ * 基段允许小写字母、数字与下划线（`copresence_adopt_v2` 属于这一类），
+ * 冒号后只允许大写字母、数字、下划线、逗号（用于 `adopt_env_not_reproducible:HOME,TMUX`）。
+ * 其它一律折叠成 `adopt_local_verification_failed` —— 绝不把路径或 OS 错误原文带出去。
+ */
+export function publicAdoptError(message: unknown): string {
+  return typeof message === "string"
+    && /^(adopt_|daemon_has_|copresence_|cannot_adopt_|workdir_)[a-z0-9_]+(:[A-Z0-9_,]+)?$/.test(message)
+    ? message
+    : "adopt_local_verification_failed";
+}
+
 export interface AdoptDaemonDeps extends AdoptionIdentityOptions {
   workDir: string;
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
@@ -100,8 +115,10 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
     registered = true;
   } catch (e: any) {
     // Do not expose filesystem paths or secrets from parser/OS error messages.
-    const message = typeof e?.message === "string" && /^(adopt_|daemon_has_|copresence_|cannot_adopt_|workdir_)[a-z_]+(:[A-Z0-9_,]+)?$/.test(e.message)
-      ? e.message : "adopt_local_verification_failed";
+    // #1987 —— 白名单的基段必须允许**数字**：`copresence_adopt_v2` 就是最常见的一条拒绝原因，
+    // 而旧正则 `[a-z_]+` 不匹配末尾的 `2` ⇒ 真实原因被吞掉、只剩通用码
+    // `adopt_local_verification_failed`，运维只能靠猜（2026-10-27 实测就是这样）。
+    const message = publicAdoptError(e?.message);
     await deps.callCommHub("ack_adopt_request", { request_id: requestId, status: "refused", error: message });
     return;
   }
