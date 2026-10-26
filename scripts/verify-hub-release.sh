@@ -135,4 +135,7 @@ check_feature "schedule failure backoff knob" "COMMHUB_SCHEDULE_FAILURE_BACKOFF_
 check_feature "alias p99 baseline table"   "alias_latency_baseline"                  "0.9.0-preview.164"
 check_feature "offline delivery ttl knob"  "COMMHUB_OFFLINE_DELIVERY_TTL_MINUTES"     "0.9.0-preview.164"
 
+# .165 —— 启动回填延迟执行（#2664）：开关名与汇总日志都是可验证的锚点。
+check_feature "deferred boot backfill knob"   "COMMHUB_BOOT_BACKFILL_DELAY_MS"        "0.9.0-preview.165"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
