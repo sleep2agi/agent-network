@@ -121,4 +121,12 @@ check_feature "stale copy distinguishes idle" "not working on another task" "0.9
 check_feature "event-loop stall gauge"       "event_loop"                  "0.9.0-preview.162"
 check_feature "event-loop max gap"           "max_gap_ms"                  "0.9.0-preview.162"
 
+# .163 —— 两处运维修复各自带一个可验证的锚点（#2614 / #2664 / #2622）：
+#   · requests_since_last_tick —— 区分「循环阻塞」与「timer 饥饿」的判据字段（否则 84 秒的假结论会重演）；
+#   · took= —— node_id 回填的耗时日志（以前只有条数，于是“0 行却花 10 秒”看不见）；
+#   · COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS —— 排程连续失败退避的开关名。
+check_feature "stall vs timer served count"   "requests_since_last_tick"     "0.9.0-preview.163"
+check_feature "backfill duration log"         "took="                        "0.9.0-preview.163"
+check_feature "schedule failure backoff knob" "COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS" "0.9.0-preview.163"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
