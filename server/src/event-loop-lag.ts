@@ -16,6 +16,7 @@
 // 停顿结束后第一次 tick 的 gap 就是停顿长度，不需要外部进程配合。
 
 export type EventLoopStall = {
+  /** 这个间隔里处理完的请求数：0 = 真的没推进；>0 = 循环在干活，只是 timer 被饿住。 */
   /** ISO 时间（停顿**结束**的时刻，即这次 tick 的时间）。 */
   at: string;
   /** 距上次 tick 的实际间隔（毫秒）。等于 interval + 停顿。 */
@@ -24,9 +25,27 @@ export type EventLoopStall = {
   stall_ms: number;
   /** 停顿结束时的进程 RSS（MB），用于和内存尖峰对齐。 */
   rss_mb: number;
+  requests_since_last_tick?: number;
 };
 
 const KEEP_STALLS = 20;
+
+/**
+ * #2614（第二轮）—— 2026-10-27 00:39 线上出现 gap 84887ms，但**同一时段日志在正常写**
+ * （00:38:52 / 00:38:58 / 00:39:08 …），而且 `/api/stats/routes` 里最慢的请求只有 2.4s。
+ * 也就是说：事件循环**没有被阻塞 84 秒**，是 **timer 回调被 I/O 队列饿住**了。
+ * 只看 tick 间隔会把这两种情况混成一条“卡了 84 秒”的假结论。
+ *
+ * 区分办法：数一下这个间隔里**服务了多少请求**。
+ *   requests_since_last_tick > 0 ⇒ 循环在干活 ⇒ 这是 timer 饥饿（高负载/大批回调）
+ *   requests_since_last_tick = 0 ⇒ 真的没有推进任何请求 ⇒ 才可能是同步阻塞
+ */
+let servedSinceTick = 0;
+
+/** 请求处理完成时调用（route-timing 里）。只计数，不参与任何决策。 */
+export function noteRequestServed(): void {
+  servedSinceTick++;
+}
 
 let maxGapMs = 0;
 let lastGapMs = 0;
@@ -38,7 +57,7 @@ const stalls: EventLoopStall[] = [];
 /** 记录一次 tick 间隔。返回这次 tick 的停顿量（毫秒，可为负→归零）。 */
 export function recordGap(
   gapMs: number,
-  opts: { intervalMs?: number; thresholdMs?: number; rssMb?: number; now?: number } = {},
+  opts: { intervalMs?: number; thresholdMs?: number; rssMb?: number; now?: number; served?: number } = {},
 ): number {
   const interval = opts.intervalMs ?? 250;
   const threshold = opts.thresholdMs ?? 2000;
@@ -50,7 +69,13 @@ export function recordGap(
   stallCount++;
   lastStallAt = at;
   lastStallMs = stallMs;
-  stalls.push({ at, gap_ms: Math.round(gapMs), stall_ms: Math.round(stallMs), rss_mb: opts.rssMb ?? 0 });
+  stalls.push({
+    at,
+    gap_ms: Math.round(gapMs),
+    stall_ms: Math.round(stallMs),
+    rss_mb: opts.rssMb ?? 0,
+    requests_since_last_tick: opts.served ?? 0,
+  });
   while (stalls.length > KEEP_STALLS) stalls.shift();
   return stallMs;
 }
@@ -109,10 +134,13 @@ export function startEventLoopLagMonitor(opts: {
     const gap = now - last;
     last = now;
     const rss = rssMb();
-    const stall = recordGap(gap, { intervalMs, thresholdMs, rssMb: rss });
+    const served = servedSinceTick;
+    servedSinceTick = 0;
+    const stall = recordGap(gap, { intervalMs, thresholdMs, rssMb: rss, served });
     if (thresholdMs > 0 && stall >= thresholdMs) {
       // 和 retention/slow-sql 的日志同一前缀，方便 grep。
-      log(`[commhub stall] loop blocked ~${Math.round(stall)}ms (tick gap ${Math.round(gap)}ms, rss ${rss} MB)`);
+      // `served` 是判据的关键：它非零就说明循环在干活，这段“gap”是 timer 被饿住，不是阻塞。
+      log(`[commhub stall] loop idle ~${Math.round(stall)}ms (tick gap ${Math.round(gap)}ms, rss ${rss} MB, served ${served} req)`);
     }
   }, intervalMs);
   // 监测不该拖住进程退出。

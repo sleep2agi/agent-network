@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   eventLoopStats,
+  noteRequestServed,
   recordGap,
   resetEventLoopLagForTests,
   startEventLoopLagMonitor,
@@ -48,6 +49,16 @@ describe("event-loop-lag: recordGap", () => {
     // 最新一条是 i=24
     expect(s.recent_stalls[0].gap_ms).toBe(5_024);
     expect(s.recent_stalls[19].gap_ms).toBe(5_005);
+  });
+
+  test("记录这段间隔里服务了多少请求（区分“阻塞”与“timer 饥饿”）", () => {
+    resetEventLoopLagForTests();
+    recordGap(85_000, { intervalMs: 250, thresholdMs: 2_000, rssMb: 2076, served: 137 });
+    const s = eventLoopStats();
+    expect(s.recent_stalls[0].requests_since_last_tick).toBe(137);
+    // 0 服务数 = 这段时间真的什么都没推进
+    recordGap(30_000, { intervalMs: 250, thresholdMs: 2_000, rssMb: 500, served: 0 });
+    expect(eventLoopStats().recent_stalls[0].requests_since_last_tick).toBe(0);
   });
 
   test("max_gap_ms 保留历史最大值（回落后不被覆盖）", () => {
@@ -93,8 +104,9 @@ describe("event-loop-lag: startEventLoopLagMonitor", () => {
     await Bun.sleep(60);
     clearInterval(timer);
     expect(logs.length).toBeGreaterThan(0);
-    expect(logs[0]).toStartWith("[commhub stall] loop blocked ~");
+    expect(logs[0]).toStartWith("[commhub stall] loop idle ~");
     expect(logs[0]).toContain("rss 4502 MB");
+    expect(logs[0]).toContain("served 0 req");
   });
 });
 
