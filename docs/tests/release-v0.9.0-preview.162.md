@@ -102,9 +102,9 @@ npm i -g @sleep2agi/commhub-server@0.9.0-preview.162
 curl -s localhost:9200/health | jq .event_loop
 
 # 2) retention 不再造成 8–11 秒阻塞
-grep "commhub retention" ~/.commhub/pm2-hub-out.log | tail -3
+grep "commhub retention" ~/.commhub/pm2-hub-out.log | tail -3   # 路径按你本机的 Hub 日志位置
 
 # 3) 告警收敛：delivered_stale_* ≤ 50/天，且被标任务最终成功比例 ≤ 20%
 ```
 
-回滚：`/home/vansin/.local/bin/hub-daemon.sh` 指回上一版运行时目录即可；数据层只多了索引与字段，不需要回滚数据。
+回滚：把 `$HOME/.local/bin/hub-daemon.sh` 里的 `HUB_RUNTIME_DIR` 指回上一版运行时目录即可；数据层只多了索引与字段，不需要回滚数据。
