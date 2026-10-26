@@ -19,7 +19,22 @@ export const PEOPLE_MAX_LIMIT = 200;
 
 /** `department_id`: Agent 的**显式**部门归属(可空)。空 = 仍按「负责人在哪个部门」推断,
  *  客户端据此把 Agent 放对格子 —— 2026-10-19 前没有这一列,328 个 Agent 只能全算「未归属」。 */
-export type DirectoryAgent = { node_id: string; alias: string; department_id?: string | null };
+export type DirectoryAgent = {
+  node_id: string;
+  alias: string;
+  department_id?: string | null;
+  /**
+   * #2596 —— 这一行“最后一次被 Hub 看到”的时间（`nodes.updated_at`），以及生命周期状态。
+   *
+   * 为什么加：组织架构页把 368 个 agent 全塞进「未归属」，其中 125 个是 5–8 月的历史残留
+   * （如 `海报设计师1–5号` 注册于 2026-05-17、早已 offline）。客户端要能“默认只显示近 7 天活跃”
+   * 与“同一 alias 只保留最新的那条”，就必须拿到时间轴——否则只能靠 node_id 猜。
+   *
+   * 只增不改：老客户端忽略未知键，形状断言已在同批测试里放宽。
+   */
+  updated_at?: string | null;
+  lifecycle_state?: string | null;
+};
 export type DirectoryPerson = {
   user_id: string;
   username: string;
@@ -64,8 +79,8 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
       ORDER BY u.username, u.user_id`,
     networkId,
   );
-  const nodes = db.all<{ node_id: string; alias: string | null; node_name: string; owner_user_id: string | null; department_id: string | null }>(
-    "SELECT node_id, alias, node_name, owner_user_id, department_id FROM nodes WHERE network_id = ?1 ORDER BY COALESCE(alias, node_name), node_id",
+  const nodes = db.all<{ node_id: string; alias: string | null; node_name: string; owner_user_id: string | null; department_id: string | null; updated_at: string | null; lifecycle_state: string | null }>(
+    "SELECT node_id, alias, node_name, owner_user_id, department_id, updated_at, lifecycle_state FROM nodes WHERE network_id = ?1 ORDER BY COALESCE(alias, node_name), node_id",
     networkId,
   ).filter(n => !hidden?.(n.node_id));
   const memberIds = new Set(members.map(m => m.user_id));
@@ -75,7 +90,14 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
     // 只在**显式**归属时带这一格:没设 = 没有显式归属(顶层 agent_department_supported 告诉
     // 客户端这一点)。行形状保持不变 —— 旧客户端拿到的行还是老样子(多一个键会让严格要求
     // 形状的测试/客户端意外),只是新客户端不再把「负责人在哪个部门」当成 Agent 的部门。
-    const agent = { node_id: n.node_id, alias: n.alias || n.node_name, ...(n.department_id ? { department_id: n.department_id } : {}) };
+    const agent = {
+      node_id: n.node_id,
+      alias: n.alias || n.node_name,
+      ...(n.department_id ? { department_id: n.department_id } : {}),
+      // #2596 —— 客户端据此做「按 alias 去重（保留最新）」与「默认只看近 7 天」。
+      updated_at: n.updated_at ?? null,
+      lifecycle_state: n.lifecycle_state ?? null,
+    };
     if (n.owner_user_id && memberIds.has(n.owner_user_id)) {
       const list = byOwner.get(n.owner_user_id) ?? [];
       list.push(agent);
