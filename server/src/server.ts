@@ -29,6 +29,7 @@ import { deriveTeamRulesView } from "./team-rules-status.js";
 import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { enterMcpInflight, leaveMcpInflight, getMcpInflightStats } from "./mcp-inflight.js";
+import { eventLoopStats, startEventLoopLagMonitor } from "./event-loop-lag.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
@@ -2788,6 +2789,11 @@ return Bun.serve({
         // 而 `sse_connections` 只反映长连接，看不到“同秒打进来的一批请求”。
         mcp_inflight: getMcpInflightStats().inflight,
         mcp_inflight_peak: getMcpInflightStats().peak,
+        // #2614 —— 事件循环停顿。`mcp_inflight` 只能说明“有多少请求在排队”，
+        // 说明不了“服务端为什么卡”。这里给出停顿本身：max_gap_ms 是进程内
+        // 单次 tick 的最大间隔（正常 ≈250ms），recent_stalls 保留最近 20 次
+        // 超过阈值的停顿（含当时 RSS），用于和内存曲线对齐。
+        event_loop: eventLoopStats(),
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
@@ -5631,6 +5637,12 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     : 60 * 60 * 1000;
   const retentionSweeperTimer = startRetentionSweeper(sweepIntervalMs);
 
+  // #2614 —— 事件循环停顿监测。放这里是因为 startHub() 才是“真的在跑一个 Hub”
+  // 的入口（测试用 bootServer() 不会背这个 timer）。停顿日志与
+  // `[commhub retention]` / `[commhub slow-sql]` 共用前缀族，便于一次 grep 出
+  // “同一秒里 retention 跑了 10 秒 + 有两百个请求在排队”。
+  const eventLoopLagTimer = startEventLoopLagMonitor();
+
   // Round-2/4 review ③ — stale session sweeper (coexists with the
   // retention sweeper above; different concerns + different cadences).
   // Replaces the per-request UPDATE in GET /api/status (+ /api/servers,
@@ -5664,6 +5676,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // jobs must not — otherwise a test (or a future caller) that stops the
   // server would still hang on live intervals it cannot reach.
   (retentionSweeperTimer as any)?.unref?.();
+  (eventLoopLagTimer as any)?.unref?.();
   (staleSweeperTimer as any)?.unref?.();
   (rateLimitSweepTimer as any)?.unref?.();
   (taskPatrolTimer as any)?.unref?.();
@@ -5675,6 +5688,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   function shutdown() {
     console.log("[commhub] shutting down...");
     clearInterval(retentionSweeperTimer);
+    clearInterval(eventLoopLagTimer);
     clearInterval(staleSweeperTimer);
     clearInterval(rateLimitSweepTimer);
     clearInterval(taskPatrolTimer);

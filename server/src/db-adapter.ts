@@ -61,6 +61,36 @@ export const PG_EXPERIMENTAL_ENV = "COMMHUB_PG_EXPERIMENTAL";
 //  SQLite Adapter (bun:sqlite, sync)
 // ════════════════════════════════════════════
 
+// #2614 —— 慢 SQL 观测。SQLite 是**同步**的：一条慢查询会直接卡住整个事件循环
+// （生产实测 2026-10-26 每小时一次的 8–11 秒停顿就是 retention 的全表扫描，
+// 症状是日志静默 + 在飞数暴涨 + RSS 冲到 4.5 GB）。之前没有任何一条日志能指出
+// “是这条 SQL 卡了 11 秒”，只能靠事后比对日志静默的时间窗手工推断。
+//
+// 这里只在**超过阈值**时打一行日志，不含参数值（避免把令牌/正文写进日志）。
+// `COMMHUB_SLOW_SQL_MS` 控制阈值（默认 1000 ms，设 0 关闭）。
+const DEFAULT_SLOW_SQL_MS = 1000;
+
+export function slowSqlThresholdMs(): number {
+  const raw = Number(process.env.COMMHUB_SLOW_SQL_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_SLOW_SQL_MS;
+}
+
+/** 截断 + 压平 SQL，只保留足够定位的头部（不包含绑定参数）。 */
+export function formatSlowSql(ms: number, sql: string): string {
+  const oneLine = sql.replace(/\s+/g, " ").trim().slice(0, 160);
+  return `[commhub slow-sql] ${ms.toFixed(0)}ms ${oneLine}`;
+}
+
+let sqlTimingDisabled: boolean | null = null;
+
+function logIfSlow(started: number, sql: string): void {
+  if (sqlTimingDisabled === null) sqlTimingDisabled = slowSqlThresholdMs() <= 0;
+  if (sqlTimingDisabled) return;
+  const ms = performance.now() - started;
+  if (ms < slowSqlThresholdMs()) return;
+  console.log(formatSlowSql(ms, sql));
+}
+
 export class SQLiteAdapter implements DbAdapter {
   readonly dialect = "sqlite" as const;
   readonly atomicTransactions = true;
@@ -70,19 +100,39 @@ export class SQLiteAdapter implements DbAdapter {
   constructor(private readonly rawDb: Database) {}
 
   run(sql: string, params?: any[]): QueryResult {
-    return params ? this.rawDb.run(sql, params as any) : this.rawDb.run(sql);
+    const t0 = performance.now();
+    try {
+      return params ? this.rawDb.run(sql, params as any) : this.rawDb.run(sql);
+    } finally {
+      logIfSlow(t0, sql);
+    }
   }
 
   get<T = any>(sql: string, ...params: any[]): T | null {
-    return this.rawDb.query<T, any[]>(sql).get(...params) ?? null;
+    const t0 = performance.now();
+    try {
+      return this.rawDb.query<T, any[]>(sql).get(...params) ?? null;
+    } finally {
+      logIfSlow(t0, sql);
+    }
   }
 
   all<T = any>(sql: string, ...params: any[]): T[] {
-    return this.rawDb.query<T, any[]>(sql).all(...params);
+    const t0 = performance.now();
+    try {
+      return this.rawDb.query<T, any[]>(sql).all(...params);
+    } finally {
+      logIfSlow(t0, sql);
+    }
   }
 
   exec(sql: string): void {
-    this.rawDb.exec(sql);
+    const t0 = performance.now();
+    try {
+      this.rawDb.exec(sql);
+    } finally {
+      logIfSlow(t0, sql);
+    }
   }
 
   transaction<T>(fn: () => T): T {
