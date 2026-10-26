@@ -4,7 +4,7 @@ import { db, logTaskEvent } from "./db.js";
 import { TASK_EVENT_REST_COLUMNS } from "./rest-projections.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 
-const NOW = new Date("2026-08-10T00:01:01.000Z");
+const NOW = new Date("2026-08-10T01:00:01.000Z");
 let server: ReturnType<typeof Bun.serve>;
 let base = "";
 let token = "";
@@ -34,9 +34,9 @@ beforeAll(async () => {
   token = auth.token!;
   networkId = auth.network_id!;
 
-  insertTask("stale-29", "delivered", "2026-08-10 00:00:32");
-  insertTask("stale-30", "delivered", "2026-08-10 00:00:31");
-  insertTask("stale-60", "delivered", "2026-08-10 00:00:01");
+  insertTask("stale-599", "delivered", "2026-08-10 00:50:02");
+  insertTask("stale-600", "delivered", "2026-08-10 00:50:01");
+  insertTask("stale-1800", "delivered", "2026-08-10 00:30:01");
   insertTask("stale-acked", "acked", "2026-08-10 00:00:00");
   insertTask("stale-no-delivery", "delivered", null);
 
@@ -70,21 +70,21 @@ async function waitUntil(ready: () => boolean, timeoutMs: number, what: string |
 }
 
 describe("#167 Hub delivered-stale lifecycle watcher", () => {
-  test("30s/60s thresholds are exact and non-delivered tasks stay silent", () => {
+  test("10m/30m thresholds are exact and non-delivered tasks stay silent", () => {
     const first = recordDeliveredStaleEvents(NOW);
     expect(first.inserted).toBe(3);
-    expect(first.by_threshold_seconds).toEqual({ 30: 2, 60: 1 });
+    expect(first.by_threshold_seconds).toEqual({ 600: 2, 1800: 1 });
 
-    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-29'")!.count).toBe(0);
-    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-30'")!.count).toBe(1);
-    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-60'")!.count).toBe(2);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-599'")!.count).toBe(0);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-600'")!.count).toBe(1);
+    expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-1800'")!.count).toBe(2);
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-acked'")!.count).toBe(0);
     expect(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM task_events WHERE task_id = 'stale-no-delivery'")!.count).toBe(0);
 
-    const sixty = db.all<any>("SELECT * FROM task_events WHERE task_id = 'stale-60' ORDER BY event_type");
+    const sixty = db.all<any>("SELECT * FROM task_events WHERE task_id = 'stale-1800' ORDER BY event_type");
     expect(sixty.map((row) => row.event_type)).toEqual([
-      "task.warning.delivered_stale_30s",
-      "task.warning.delivered_stale_60s",
+      "task.warning.delivered_stale_1800s",
+      "task.warning.delivered_stale_600s",
     ]);
     expect(sixty.map((row) => row.event_key)).toEqual(sixty.map((row) => row.event_type));
     expect(sixty.every((row) => row.from_status === "delivered" && row.to_status === "delivered")).toBe(true);
@@ -95,21 +95,21 @@ describe("#167 Hub delivered-stale lifecycle watcher", () => {
   test("a second patrol is write-once for each task and threshold", () => {
     const second = recordDeliveredStaleEvents(NOW);
     expect(second.inserted).toBe(0);
-    expect(second.by_threshold_seconds).toEqual({ 30: 0, 60: 0 });
+    expect(second.by_threshold_seconds).toEqual({ 600: 0, 1800: 0 });
     expect(db.get<{ count: number }>(
       "SELECT COUNT(*) AS count FROM task_events WHERE event_type LIKE 'task.warning.delivered_stale_%'",
     )!.count).toBe(3);
   });
 
   test("ordinary lifecycle events get standard event names without a dedupe key", () => {
-    logTaskEvent("stale-30", null, "delivered", "target");
-    logTaskEvent("stale-30", "delivered", "acked", "target");
-    logTaskEvent("stale-30", "acked", "running", "target");
-    logTaskEvent("stale-30", "running", "replied", "target");
-    logTaskEvent("stale-30", "running", "failed", "target");
-    logTaskEvent("stale-30", "delivered", "expired", "target");
+    logTaskEvent("stale-600", null, "delivered", "target");
+    logTaskEvent("stale-600", "delivered", "acked", "target");
+    logTaskEvent("stale-600", "acked", "running", "target");
+    logTaskEvent("stale-600", "running", "replied", "target");
+    logTaskEvent("stale-600", "running", "failed", "target");
+    logTaskEvent("stale-600", "delivered", "expired", "target");
     const rows = db.all<any>(
-      "SELECT event_type, event_key FROM task_events WHERE task_id = 'stale-30' AND actor = 'target' ORDER BY id",
+      "SELECT event_type, event_key FROM task_events WHERE task_id = 'stale-600' AND actor = 'target' ORDER BY id",
     );
     expect(rows).toEqual([
       { event_type: "task.send.delivered", event_key: null },
@@ -125,7 +125,7 @@ describe("#167 Hub delivered-stale lifecycle watcher", () => {
     expect(TASK_EVENT_REST_COLUMNS).toContain("event_type");
     expect(TASK_EVENT_REST_COLUMNS).not.toContain("event_key" as any);
     const response = await fetch(
-      `${base}/api/task_events?network_id=${encodeURIComponent(networkId)}&task_id=stale-60`,
+      `${base}/api/task_events?network_id=${encodeURIComponent(networkId)}&task_id=stale-1800`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(response.status).toBe(200);
@@ -177,7 +177,7 @@ describe("#167 Hub delivered-stale lifecycle watcher", () => {
         `INSERT INTO tasks
            (task_id, from_name, to_name, status, content, delivered_at, network_id)
          VALUES (?1, 'sender', 'target', 'delivered', 'live watcher fixture', ?2, ?3)`,
-        [taskId, sqliteUtcTimestamp(new Date(Date.now() - 28_000)), networkId],
+        [taskId, sqliteUtcTimestamp(new Date(Date.now() - 601_000)), networkId],
       );
       expect(childDb.query<{ count: number }, [string]>(
         "SELECT COUNT(*) AS count FROM task_events WHERE task_id = ?1",
@@ -188,10 +188,10 @@ describe("#167 Hub delivered-stale lifecycle watcher", () => {
       // 实测在 CI 上被这一条打红过(#798 让这个文件第一次进 CI 才暴露)。
       // 改成「轮询到目标状态,或到期报错」:常态下快 ~60 倍,慢的时候等得起。
       const countStale = () => childDb.query<{ count: number }, [string]>(
-        "SELECT COUNT(*) AS count FROM task_events WHERE task_id = ?1 AND event_type = 'task.warning.delivered_stale_30s'",
+        "SELECT COUNT(*) AS count FROM task_events WHERE task_id = ?1 AND event_type = 'task.warning.delivered_stale_600s'",
       ).get(taskId)!.count;
       await waitUntil(() => countStale() === 1, 20_000,
-        "watcher did not write the delivered_stale_30s event");
+        "watcher did not write the delivered_stale_600s event");
       expect(countStale()).toBe(1);
     } finally {
       childDb.close();

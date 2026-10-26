@@ -1,6 +1,6 @@
 import { db } from "./db.js";
 
-export const DELIVERED_STALE_THRESHOLDS = [30, 60] as const;
+export const DELIVERED_STALE_THRESHOLDS = [600, 1800] as const;
 
 export type DeliveredStalePatrolResult = {
   inserted: number;
@@ -11,6 +11,19 @@ function sqliteUtcTimestamp(date: Date): string {
   return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
+// #2571（第二轮）—— 阈值从 30s/60s 提到 10min/30min。
+//
+// 第一轮只做了“按目标忙/闲分流”，上线后（19:45–22:30）实测**告警量反而翻倍**
+// （33/h → 73/h，33/h → 104/h），因为同一个任务会先在忙时写 busy、目标转闲后
+// 再写一次 stale（46 个任务两类都出现）。而被标 stale 的任务里仍有 73.5%
+// 最终成功。真正的病因不是“忙 vs 闲”，是**阈值本身离真实分布太远**：
+// 7 天 11877 个成功任务，delivered → 首次活动 p50 = 1 秒、p90 = 6 秒、
+// p95 = 57 秒、p99 = 12 分钟。
+// ⇒ 30 秒的判据会命中 6.4% 的**正常**任务，60 秒命中 4.9%，等于把 p95–p99
+//   的长尾全报警。改成 10 分钟（p99 之下）才有意义：超过它的比例 1.2%，
+//   30 分钟是 0.2%，只留真异常。
+//
+// event_key 里带秒数 ⇒ 改阈值会产生新的 key，历史事件不受影响、可并存对比。
 /**
  * Persist Hub-authoritative warnings for tasks which are still delivered.
  *
@@ -27,13 +40,18 @@ function sqliteUtcTimestamp(date: Date): string {
  * 命中次数变成 0 或让 mutation 只命中一半 —— 那就把“可被变异测试覆盖”这条性质弄丢了。
  * 因此这里仍然只保留**一条** INSERT，用 CASE 选择事件名与文案。
  */
-function recordStale(thresholdSeconds: 30 | 60, cutoff: string): number {
+function thresholdLabel(thresholdSeconds: 600 | 1800): string {
+  return thresholdSeconds === 600 ? "10m" : "30m";
+}
+
+function recordStale(thresholdSeconds: 600 | 1800, cutoff: string): number {
   const busyType = `task.warning.queued_behind_busy_${thresholdSeconds}s`;
   const staleType = `task.warning.delivered_stale_${thresholdSeconds}s`;
-  const busyDetail = `queued after ${thresholdSeconds}s; target is working on another task`;
-  const staleDetail = thresholdSeconds === 30
-    ? "still delivered after 30s; target is not working on another task and has not started"
-    : "still delivered after 60s; target is idle or offline and not consuming";
+  const label = thresholdLabel(thresholdSeconds);
+  const busyDetail = `queued after ${label}; target is working on another task`;
+  const staleDetail = thresholdSeconds === 600
+    ? `still delivered after ${label}; target is not working on another task and has not started`
+    : `still delivered after ${label}; target is idle or offline and not consuming`;
   const result = db.run(
     `INSERT INTO task_events
        (task_id, from_status, to_status, event_type, event_key, actor, detail, network_id)
@@ -62,7 +80,7 @@ function recordStale(thresholdSeconds: 30 | 60, cutoff: string): number {
 export function recordDeliveredStaleEvents(now = new Date()): DeliveredStalePatrolResult {
   if (!Number.isFinite(now.getTime())) throw new Error("invalid lifecycle patrol time");
 
-  const byThreshold = { 30: 0, 60: 0 };
+  const byThreshold = { 600: 0, 1800: 0 };
   let inserted = 0;
 
   for (const thresholdSeconds of DELIVERED_STALE_THRESHOLDS) {
