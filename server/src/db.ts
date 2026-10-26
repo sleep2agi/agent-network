@@ -1467,7 +1467,10 @@ export function backfillMessageNodeIds() {
   console.log(`[commhub] node_id backfill: inbox=${inboxDirect + inboxRenamed}, tasks.to=${tasksToDirect + tasksToRenamed}, tasks.from=${tasksFromDirect + tasksFromRenamed}, total=${total}, took=${Math.round(performance.now() - t0)}ms`);
 }
 
-// #2664 —— 不在 import 时跑（见 runDeferredBootBackfills 的说明）。
+// #2664 —— 不在 import 时跑（见 runDeferredBootBackfills 的说明）。这里留一行**准确**的日志：
+//   · 有测试/运维会 grep `node_id backfill` 来确认迁移路径被走到过；
+//   · 真正的汇总行（带 took=）在 runDeferredBootBackfills() 里，启动后 15 秒出现。
+console.log("[commhub] node_id backfill: deferred until after start (#2664)");
 
 /**
  * #2664 —— 两个 boot 期的历史回填，挪到「服务已开始监听之后」再跑。

@@ -5668,7 +5668,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     } catch (e: any) {
       console.error(`[commhub] deferred boot backfills failed: ${e?.message || e}`);
     }
-  }, 15_000);
+  }, Number(process.env.COMMHUB_BOOT_BACKFILL_DELAY_MS) >= 0 ? Number(process.env.COMMHUB_BOOT_BACKFILL_DELAY_MS) : 15_000);
   (deferredBackfillTimer as any)?.unref?.();
 
   // #2571（第三轮）—— 每个目标自己的投递延迟 p99 基线，供 delivered_stale 判据使用。
@@ -5720,7 +5720,6 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   (retentionSweeperTimer as any)?.unref?.();
   (eventLoopLagTimer as any)?.unref?.();
   (aliasBaselineTimer as any)?.unref?.();
-  clearTimeout(deferredBackfillTimer);
   (staleSweeperTimer as any)?.unref?.();
   (rateLimitSweepTimer as any)?.unref?.();
   (taskPatrolTimer as any)?.unref?.();
@@ -5734,6 +5733,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     clearInterval(retentionSweeperTimer);
     clearInterval(eventLoopLagTimer);
     clearInterval(aliasBaselineTimer);
+    clearTimeout(deferredBackfillTimer);
     clearInterval(staleSweeperTimer);
     clearInterval(rateLimitSweepTimer);
     clearInterval(taskPatrolTimer);
