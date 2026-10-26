@@ -31,6 +31,7 @@ import { createSSEStream, createNetworkObserverStream, createUserEventStream, pu
 import { enterMcpInflight, leaveMcpInflight, getMcpInflightStats } from "./mcp-inflight.js";
 import { eventLoopStats, startEventLoopLagMonitor } from "./event-loop-lag.js";
 import { refreshAliasBaseline } from "./alias-baseline.js";
+import { enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
@@ -4372,29 +4373,12 @@ return Bun.serve({
       if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
       const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
-      const ids: string[] = [];
-      // #1440 ① — mirrors the MCP handler: push to the recipients that
-      // actually got an inbox row, not to every candidate target.
-      const delivered: Array<{ alias: string; netId: string | null }> = [];
-      for (const t of targets) {
-        // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site
-        // 2/2). Broadcast skips non-active recipients silently per its
-        // best-effort semantics — mirrors the MCP broadcast handler
-        // in tools.ts (PR1.1 site 6/6).
-        const lc = assertNodeActive(t.alias, t.network_id ?? null);
-        if (!lc.ok) continue;
-        const id = crypto.randomUUID();
-        db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
-           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'api', ?5)`,
-          [id, t.alias, t.node_id ?? null, body.message, t.network_id]
-        );
-        ids.push(id);
-        delivered.push({ alias: t.alias, netId: t.network_id });
-      }
-      for (const d of delivered) {
-        pushEvent(d.alias, { type: "broadcast", inbox_count: pendingInboxCount(d.alias, d.netId) }, d.netId);
-      }
+      // #2721 —— 与 MCP broadcast 同一条分批路径（reason 见 broadcast-fanout.ts 顶部）。
+      const { ids } = await enqueueBroadcast(targets, body.message, "api", null, {
+        // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site 2/2).
+        isActive: (alias, netId) => assertNodeActive(alias, netId).ok,
+        notify: (alias, netId) => pushEvent(alias, { type: "broadcast", inbox_count: pendingInboxCount(alias, netId) }, netId),
+      });
       return withCors(req, Response.json({ ok: true, recipients: ids.length, message_ids: ids }));
     }
 
