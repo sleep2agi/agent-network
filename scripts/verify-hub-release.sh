@@ -103,4 +103,9 @@ check_feature "opencode generation scalar"   "opencode_generation" "0.9.0-previe
 check_feature "sse coalesce tunable"          "ANET_SSE_COALESCE_AT_BYTES"  "0.9.0-preview.159"
 check_feature "sse degraded drop counter"     "sseDegradedDropCount"        "0.9.0-preview.159"
 
+# .160 —— MCP 在飞可观测（#2363）：/health 直接给出“此刻有多少请求在飞 + 历史高水位”。
+# RSS 与在飞数成正比（隔离实测 ≈1.2–1.4 MB/条），而 sse_connections 只看得到长连接。
+check_feature "mcp inflight gauge"           "mcp_inflight"                "0.9.0-preview.160"
+check_feature "mcp inflight high-water"      "mcp_inflight_peak"           "0.9.0-preview.160"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
