@@ -8314,7 +8314,17 @@ const STATUS_HEARTBEAT_MS = (() => {
   if (Number.isFinite(raw) && raw >= 200 && raw <= 3 * 60 * 1000) return raw;
   return 3 * 60 * 1000;
 })();
-setInterval(() => {
+// #2363 —— **心跳抖动**：Hub 的内存与“同时在飞的请求数”成正比（隔离实验：50/100/200 并发
+// → 249/446/689 MB，两种工具都一样 ⇒ 是 MCP 传输层的每请求成本）。367 个会话若在同一秒
+// 发心跳，Hub 就会周期性接到一批同时在飞的请求。这里给每次心跳加 0–20% 抖动（默认最多 30s），
+// 把同一秒的尖峰摊开；`ANET_STATUS_HEARTBEAT_JITTER_MS` 可覆盖（测试可设 0 关掉）。
+const STATUS_HEARTBEAT_JITTER_MS = (() => {
+  const raw = Number(process.env.ANET_STATUS_HEARTBEAT_JITTER_MS);
+  if (Number.isFinite(raw) && raw >= 0 && raw <= 60_000) return raw;
+  return Math.min(30_000, Math.round(STATUS_HEARTBEAT_MS * 0.2));
+})();
+
+const heartbeatTick = (): void => {
   const live = lastReportedStatus;
   if (live.status === "working" && typeof live.task === "string" && live.task.startsWith("模型满载，")) {
     void reportStatus("working", live.task).catch(() => {});
@@ -8325,13 +8335,26 @@ setInterval(() => {
     return;
   }
   reportStatus("idle").catch(() => {});
-}, STATUS_HEARTBEAT_MS);
+};
+
+// 用「一次 setTimeout 之后重新排期」实现抖动；unref 保证不阻塞进程退出。
+const scheduleHeartbeat = (): void => {
+  const jitter = STATUS_HEARTBEAT_JITTER_MS > 0 ? Math.floor(Math.random() * STATUS_HEARTBEAT_JITTER_MS) : 0;
+  const timer = setTimeout(() => { heartbeatTick(); scheduleHeartbeat(); }, STATUS_HEARTBEAT_MS + jitter);
+  (timer as any)?.unref?.();
+};
+scheduleHeartbeat();
 if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeMode === "copresence") {
   setInterval(() => { void pollOpencodeSessionModel(); }, OPENCODE_MODEL_POLL_MS).unref();
   if (sessionControlBridge) {
     const refreshSessionControl = () => { void sessionControlBridge.register().then(ok => { if (ok) void sessionControlBridge.trigger(); }); };
     refreshSessionControl();
-    setInterval(refreshSessionControl, 30_000).unref();
+    // #2363 —— 同理：30s 一次的会话控制刷新也是全网同步的，加 0–30% 抖动（默认最多 9s）。
+    const refreshWithJitter = (): void => {
+      const t = setTimeout(() => { refreshSessionControl(); refreshWithJitter(); }, 30_000 + Math.floor(Math.random() * 9_000));
+      (t as any)?.unref?.();
+    };
+    refreshWithJitter();
   }
 }
 
