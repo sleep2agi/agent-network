@@ -50,8 +50,29 @@ jobs:
       - name: Two actual interactive native TUIs on original sessions and own lifecycle
         shell: bash
         run: |
-          set -euo pipefail
-          docker run --rm --init --network none -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} v1-borrowed-tui-test 2>&1 | tee report-test1226-tui-${{ matrix.version }}.txt
+          set -uo pipefail
+          # #2398 —— 这条 job 是**已知的时序 flake**：一晚三次在三个互不相干的 PR 上红、
+          # 同一提交重跑即绿（断言：TUI 渲染完成后 attach 的 Unicode 目录/会话身份）。
+          # 这里只做**有界重试一次**（最多 2 次），并逐次留下日志；
+          # **没有**放宽任何断言、没有跳过任何检查 —— 真缺陷仍然会让两次都红。
+          # 真修（把固定等待换成可观测就绪判据）单独排期，见 #2398。
+          rc=1
+          attempt=0
+          for attempt in 1 2; do
+            echo "::group::attempt ${attempt}/2"
+            docker run --rm --init --network none -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} v1-borrowed-tui-test 2>&1 \
+              | tee "report-test1226-tui-${{ matrix.version }}.attempt${attempt}.txt"
+            rc=${PIPESTATUS[0]}
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then break; fi
+            if [ "$attempt" -lt 2 ]; then
+              echo "::warning::attempt ${attempt} failed rc=${rc}; retrying once (known timing flake, #2398)"
+              docker image prune -f >/dev/null 2>&1 || true
+              sleep 5
+            fi
+          done
+          cp "report-test1226-tui-${{ matrix.version }}.attempt${attempt}.txt" "report-test1226-tui-${{ matrix.version }}.txt" 2>/dev/null || true
+          exit "$rc"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
