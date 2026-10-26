@@ -1303,6 +1303,18 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_to_node ON tasks(to_node_id)
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_node ON inbox(node_id)"); } catch {}
 
 export function backfillMessageNodeIds() {
+  // #2664 —— 旧写法是 6 条 `UPDATE … SET x = (SELECT … WHERE alias = t.name …)`：
+  // 每条都对 **84k 行 tasks.from_node_id IS NULL / 36k 行 inbox.node_id IS NULL** 逐行
+  // 跑一次相关子查询，而子查询里的 `COALESCE(network_id,'default')` 让
+  // idx_sessions_network_alias_unique 用不上 ⇒ 每行扫一遍 369 行 sessions。
+  // 生产实测（`.162` 慢 SQL 日志，2026-10-27 00:21 重启）：5398ms / 2451ms / 1270ms，
+  // 而且当次命中 0 行 —— **结果是 0，代价不是 0**。
+  //
+  // 改成 `UPDATE … FROM (物化后的别名→node_id 表)`：sessions/rename_txn 只扫一遍，
+  // 每行只做一次自动索引探测。同一份生产库副本上 6.56s → 0.29s。
+  // 语义不变：同一 (alias, network) 取 `updated_at` / `committed_at` 最新的那一行；
+  // 仍然是「先按 session 别名直连，再补 rename_txn 的旧别名」；对 tasks 仍排除人是发送方的情况。
+  const t0 = performance.now();
   let inboxDirect = 0;
   let inboxRenamed = 0;
   let tasksToDirect = 0;
@@ -1313,157 +1325,146 @@ export function backfillMessageNodeIds() {
   try {
     inboxDirect = db.run(`
       UPDATE inbox
-      SET node_id = (
-        SELECT s.node_id FROM sessions s
-        WHERE s.node_id IS NOT NULL
-          AND s.alias = inbox.session_name
-          AND COALESCE(s.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        ORDER BY s.updated_at DESC
-        LIMIT 1
-      )
-      WHERE node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM sessions s
-          WHERE s.node_id IS NOT NULL
-            AND s.alias = inbox.session_name
-            AND COALESCE(s.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        )
+      SET node_id = pick.node_id
+      FROM (
+        SELECT alias, COALESCE(network_id, 'default') AS net, node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY alias, COALESCE(network_id, 'default')
+                 ORDER BY updated_at DESC
+               ) AS rn
+        FROM sessions
+        WHERE node_id IS NOT NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.alias = inbox.session_name
+        AND pick.net = COALESCE(inbox.network_id, 'default')
+        AND inbox.node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     inboxRenamed = db.run(`
       UPDATE inbox
-      SET node_id = (
-        SELECT s.node_id FROM rename_txn r
+      SET node_id = pick.node_id
+      FROM (
+        SELECT r.old_alias AS old_alias,
+               COALESCE(r.network_id, 'default') AS net,
+               s.node_id AS node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY r.old_alias, COALESCE(r.network_id, 'default')
+                 ORDER BY r.committed_at DESC
+               ) AS rn
+        FROM rename_txn r
         JOIN sessions s
           ON s.alias = r.new_alias
          AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
         WHERE s.node_id IS NOT NULL
           AND r.status = 'committed'
-          AND r.old_alias = inbox.session_name
-          AND COALESCE(r.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        ORDER BY r.committed_at DESC
-        LIMIT 1
-      )
-      WHERE node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM rename_txn r
-          JOIN sessions s
-            ON s.alias = r.new_alias
-           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
-          WHERE s.node_id IS NOT NULL
-            AND r.status = 'committed'
-            AND r.old_alias = inbox.session_name
-            AND COALESCE(r.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        )
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.old_alias = inbox.session_name
+        AND pick.net = COALESCE(inbox.network_id, 'default')
+        AND inbox.node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     tasksToDirect = db.run(`
       UPDATE tasks
-      SET to_node_id = (
-        SELECT s.node_id FROM sessions s
-        WHERE s.node_id IS NOT NULL
-          AND s.alias = tasks.to_name
-          AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY s.updated_at DESC
-        LIMIT 1
-      )
-      WHERE to_node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM sessions s
-          WHERE s.node_id IS NOT NULL
-            AND s.alias = tasks.to_name
-            AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
+      SET to_node_id = pick.node_id
+      FROM (
+        SELECT alias, COALESCE(network_id, 'default') AS net, node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY alias, COALESCE(network_id, 'default')
+                 ORDER BY updated_at DESC
+               ) AS rn
+        FROM sessions
+        WHERE node_id IS NOT NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.alias = tasks.to_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.to_node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     tasksToRenamed = db.run(`
       UPDATE tasks
-      SET to_node_id = (
-        SELECT s.node_id FROM rename_txn r
+      SET to_node_id = pick.node_id
+      FROM (
+        SELECT r.old_alias AS old_alias,
+               COALESCE(r.network_id, 'default') AS net,
+               s.node_id AS node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY r.old_alias, COALESCE(r.network_id, 'default')
+                 ORDER BY r.committed_at DESC
+               ) AS rn
+        FROM rename_txn r
         JOIN sessions s
           ON s.alias = r.new_alias
          AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
         WHERE s.node_id IS NOT NULL
           AND r.status = 'committed'
-          AND r.old_alias = tasks.to_name
-          AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY r.committed_at DESC
-        LIMIT 1
-      )
-      WHERE to_node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM rename_txn r
-          JOIN sessions s
-            ON s.alias = r.new_alias
-           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
-          WHERE s.node_id IS NOT NULL
-            AND r.status = 'committed'
-            AND r.old_alias = tasks.to_name
-            AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.old_alias = tasks.to_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.to_node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     tasksFromDirect = db.run(`
       UPDATE tasks
-      SET from_node_id = (
-        SELECT s.node_id FROM sessions s
-        WHERE s.node_id IS NOT NULL
-          AND s.alias = tasks.from_name
-          AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY s.updated_at DESC
-        LIMIT 1
-      )
-      WHERE from_node_id IS NULL
+      SET from_node_id = pick.node_id
+      FROM (
+        SELECT alias, COALESCE(network_id, 'default') AS net, node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY alias, COALESCE(network_id, 'default')
+                 ORDER BY updated_at DESC
+               ) AS rn
+        FROM sessions
+        WHERE node_id IS NOT NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.alias = tasks.from_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.from_node_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
-        AND EXISTS (
-          SELECT 1 FROM sessions s
-          WHERE s.node_id IS NOT NULL
-            AND s.alias = tasks.from_name
-            AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
     `).changes;
   } catch {}
 
   try {
     tasksFromRenamed = db.run(`
       UPDATE tasks
-      SET from_node_id = (
-        SELECT s.node_id FROM rename_txn r
+      SET from_node_id = pick.node_id
+      FROM (
+        SELECT r.old_alias AS old_alias,
+               COALESCE(r.network_id, 'default') AS net,
+               s.node_id AS node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY r.old_alias, COALESCE(r.network_id, 'default')
+                 ORDER BY r.committed_at DESC
+               ) AS rn
+        FROM rename_txn r
         JOIN sessions s
           ON s.alias = r.new_alias
          AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
         WHERE s.node_id IS NOT NULL
           AND r.status = 'committed'
-          AND r.old_alias = tasks.from_name
-          AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY r.committed_at DESC
-        LIMIT 1
-      )
-      WHERE from_node_id IS NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.old_alias = tasks.from_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.from_node_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
-        AND EXISTS (
-          SELECT 1 FROM rename_txn r
-          JOIN sessions s
-            ON s.alias = r.new_alias
-           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
-          WHERE s.node_id IS NOT NULL
-            AND r.status = 'committed'
-            AND r.old_alias = tasks.from_name
-            AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
     `).changes;
   } catch {}
 
   const total = inboxDirect + inboxRenamed + tasksToDirect + tasksToRenamed + tasksFromDirect + tasksFromRenamed;
-  console.log(`[commhub] node_id backfill: inbox=${inboxDirect + inboxRenamed}, tasks.to=${tasksToDirect + tasksToRenamed}, tasks.from=${tasksFromDirect + tasksFromRenamed}, total=${total}`);
+  // #2664 —— 旧日志只有条数，于是「total=0 却花了 10 秒」在生产里完全看不见。
+  console.log(`[commhub] node_id backfill: inbox=${inboxDirect + inboxRenamed}, tasks.to=${tasksToDirect + tasksToRenamed}, tasks.from=${tasksFromDirect + tasksFromRenamed}, total=${total}, took=${Math.round(performance.now() - t0)}ms`);
 }
 
 backfillMessageNodeIds();
