@@ -129,4 +129,10 @@ check_feature "stall vs timer served count"   "requests_since_last_tick"     "0.
 check_feature "backfill duration log"         "took="                        "0.9.0-preview.163"
 check_feature "schedule failure backoff knob" "COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS" "0.9.0-preview.163"
 
+# .164 —— 两处行为改动各带一个可验证锚点（#2571 / #2668）：
+#   · alias_latency_baseline —— 每目标 p99 基线的表名（告警不再用全局常数）；
+#   · COMMHUB_OFFLINE_DELIVERY_TTL_MINUTES —— 投给离线目标的收尾时限开关。
+check_feature "alias p99 baseline table"   "alias_latency_baseline"                  "0.9.0-preview.164"
+check_feature "offline delivery ttl knob"  "COMMHUB_OFFLINE_DELIVERY_TTL_MINUTES"     "0.9.0-preview.164"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
