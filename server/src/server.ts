@@ -23,7 +23,7 @@ import { normalizeSessionRuntime } from "./runtime-label.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
-import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
+import { db, logTaskEvent, logAudit, syncScheduledRunForTask, runDeferredBootBackfills } from "./db.js";
 import { ensureNetworkRulesOnce, readNetworkRules, writeNetworkRules } from "./network-rules.js";
 import { deriveTeamRulesView } from "./team-rules-status.js";
 import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
@@ -5658,6 +5658,19 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // “同一秒里 retention 跑了 10 秒 + 有两百个请求在排队”。
   const eventLoopLagTimer = startEventLoopLagMonitor();
 
+  // #2664 —— 两个历史回填（node_id 映射 / task_terminal_events）原来在 import 阶段跑，
+  // 生产实测合计约 3.5 秒，正好落在会话重连风暴窗口里。现在等监听稳定后再跑：
+  // 它们只修历史缺口，新行由触发器实时写入。
+  const deferredBackfillTimer = setTimeout(() => {
+    try {
+      const r = runDeferredBootBackfills();
+      console.log(`[commhub] deferred boot backfills: node_id=${r.nodeIdsMs}ms terminal_events=${r.terminalEventsMs}ms`);
+    } catch (e: any) {
+      console.error(`[commhub] deferred boot backfills failed: ${e?.message || e}`);
+    }
+  }, 15_000);
+  (deferredBackfillTimer as any)?.unref?.();
+
   // #2571（第三轮）—— 每个目标自己的投递延迟 p99 基线，供 delivered_stale 判据使用。
   // 生产库上重算一次约 0.46s（116k tasks / 7 天窗口），所以只每小时一次、且与 retention 错开。
   // 失败不影响任何请求路径：基线表只是缓存，读不到就退回全局阈值。
@@ -5707,6 +5720,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   (retentionSweeperTimer as any)?.unref?.();
   (eventLoopLagTimer as any)?.unref?.();
   (aliasBaselineTimer as any)?.unref?.();
+  clearTimeout(deferredBackfillTimer);
   (staleSweeperTimer as any)?.unref?.();
   (rateLimitSweepTimer as any)?.unref?.();
   (taskPatrolTimer as any)?.unref?.();

@@ -1467,7 +1467,38 @@ export function backfillMessageNodeIds() {
   console.log(`[commhub] node_id backfill: inbox=${inboxDirect + inboxRenamed}, tasks.to=${tasksToDirect + tasksToRenamed}, tasks.from=${tasksFromDirect + tasksFromRenamed}, total=${total}, took=${Math.round(performance.now() - t0)}ms`);
 }
 
-backfillMessageNodeIds();
+// #2664 —— 不在 import 时跑（见 runDeferredBootBackfills 的说明）。
+
+/**
+ * #2664 —— 两个 boot 期的历史回填，挪到「服务已开始监听之后」再跑。
+ *
+ * 为什么：这两条语句在生产上合计约 3.5 秒（慢 SQL 日志实测：`UPDATE tasks … FROM` 1511ms +
+ * `INSERT OR IGNORE INTO task_terminal_events` 2137ms），而它们只修**历史缺口**——
+ * 新行由触发器实时写入。把 3.5 秒挡在启动路径上，等于让 369 个会话的重连风暴多等 3.5 秒，
+ * 而这段时间里 Hub 本来就最脆弱。
+ *
+ * 调用点：startHub() 监听成功后延迟数秒执行（见 server.ts）。
+ */
+export function runDeferredBootBackfills(): { nodeIdsMs: number; terminalEventsMs: number } {
+  const t0 = performance.now();
+  try { backfillMessageNodeIds(); } catch (e: any) {
+    console.error(`[commhub] node_id backfill failed: ${e?.message || e}`);
+  }
+  const t1 = performance.now();
+  try {
+    if (db.dialect === "sqlite") {
+      db.run(`INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+              SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
+                FROM tasks
+               WHERE status IN ('replied', 'failed', 'cancelled', 'expired')
+               ORDER BY COALESCE(completed_at, created_at), task_id`);
+    }
+  } catch (e: any) {
+    console.error(`[commhub] task_terminal_events backfill failed: ${e?.message || e}`);
+  }
+  const t2 = performance.now();
+  return { nodeIdsMs: Math.round(t1 - t0), terminalEventsMs: Math.round(t2 - t1) };
+}
 
 // ── P0: sessions alias uniqueness is network-scoped.
 // Older SQLite databases created `alias TEXT UNIQUE`, which prevents the same
@@ -1656,11 +1687,8 @@ if (db.dialect === "sqlite") {
       VALUES (NEW.task_id, NEW.network_id, NEW.from_node_id, COALESCE(NEW.completed_at, datetime('now')));
     END;
   `);
-  db.run(`INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
-          SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
-            FROM tasks
-           WHERE status IN ('replied', 'failed', 'cancelled', 'expired')
-           ORDER BY COALESCE(completed_at, created_at), task_id`);
+  // #2664 —— 回填本身挪到 runDeferredBootBackfills()（启动后再跑）。这里只留触发器定义：
+  // 触发器负责**新**行的写入，回填只修历史缺口，不该占启动的关键路径。
 } else {
   db.exec(`
     CREATE OR REPLACE FUNCTION record_task_terminal_event() RETURNS trigger AS $$
