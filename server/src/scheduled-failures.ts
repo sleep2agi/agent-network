@@ -167,6 +167,65 @@ export function evaluateScheduleFailures(scheduleId: string, now = new Date()): 
   return notice;
 }
 
+/**
+ * #2622 —— 失败退避：连续失败达到 N 次后把**间隔翻倍**（上限 1 小时），成功一次立刻恢复原节奏。
+ *
+ * 为什么不是「暂停」：`#523` 已经有 `COMMHUB_SCHEDULE_FAILURE_AUTO_PAUSE_RUNS`（默认关），
+ * 但它会把排程**停下来**，需要人来恢复。对“上游额度暂时打满”这类外部原因，暂停太久同样是损失；
+ * 退避只是**放慢重试**，外部原因一恢复就会自己跑回原节奏。
+ *
+ * 现场（2026-10-27 生产 24h）：一个 `every_seconds=180` 的排程失败 351 次、成功 24 次 ——
+ * 失败与成功交替出现，所以“连续失败”很少攒到暂停阈值，而**每次失败都在按 3 分钟原速重试**。
+ *
+ * 存储复用 `backoff_effective_seconds`（派发时按 `max(every_seconds, backoff_effective_seconds)` 生效），
+ * 与 `no_change_backoff` 互斥：那套逻辑自己会写这一列，这里只在 `no_change_backoff = 0` 时介入。
+ *
+ * 环境变量：`COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS`（默认 6；0 = 关闭）。
+ */
+export function failureBackoffRuns(): number { return envInt("COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS", 6, 0); }
+
+const FAILURE_BACKOFF_CAP_SECONDS = 3600;
+
+export function applyFailureBackoff(scheduleId: string, now = new Date()): { streak: number; effective_seconds: number | null } | null {
+  const from = failureBackoffRuns();
+  if (from <= 0) return null;
+  const row = db.get<any>(
+    `SELECT schedule_id, revision, status, schedule_type, schedule_json, no_change_backoff,
+            backoff_effective_seconds, next_run_at
+       FROM scheduled_tasks WHERE schedule_id = ?1`,
+    scheduleId,
+  );
+  if (!row || row.status !== "active" || row.no_change_backoff === 1) return null;
+  if (row.schedule_type !== "interval") return null;
+  let spec: any = null;
+  try { spec = JSON.parse(row.schedule_json || "{}"); } catch { spec = null; }
+  const base = spec && spec.type === "interval" ? Number(spec.every_seconds) : NaN;
+  if (!Number.isFinite(base) || base <= 0) return null;
+
+  const streak = failureStreak(scheduleId).consecutiveFailures;
+  const effective = streak >= from
+    ? Math.min(FAILURE_BACKOFF_CAP_SECONDS, base * 2 ** Math.min(streak - from + 1, 6))
+    : null;
+  const target = effective ?? base;
+  const previous = row.backoff_effective_seconds ?? base;
+  let next = row.next_run_at;
+  if (target !== previous && next) {
+    // 放大：至少推到 now + target（不把已经更远的 next 拉近）；
+    // 恢复：至少拉回 now + target（不把已经更近的 next 推远）。
+    const candidate = new Date(now.getTime() + target * 1000).toISOString();
+    const existing = Date.parse(next);
+    if (Number.isFinite(existing)) {
+      next = new Date(target > previous ? Math.max(existing, Date.parse(candidate)) : Math.min(existing, Date.parse(candidate))).toISOString();
+    }
+  }
+  db.run(
+    `UPDATE scheduled_tasks SET backoff_streak = ?1, backoff_effective_seconds = ?2, next_run_at = ?3,
+       updated_at = datetime('now') WHERE schedule_id = ?4 AND revision = ?5 AND status = 'active'`,
+    [streak, effective, next, scheduleId, row.revision],
+  );
+  return { streak, effective_seconds: effective };
+}
+
 /** GET /runs 的附加字段。 */
 export function failureSummary(scheduleId: string): { consecutive_failures: number; failure_alert_threshold: number; last_failure_alert_at: string | null } {
   const streak = failureStreak(scheduleId);
@@ -176,4 +235,10 @@ export function failureSummary(scheduleId: string): { consecutive_failures: numb
 
 setScheduledRunTerminalHook((scheduleId, status) => {
   if (status === "failed") evaluateScheduleFailures(scheduleId);
+  // #2622 —— 成功一次就把间隔恢复原样；失败则按连续失败次数放大间隔。
+  try {
+    applyFailureBackoff(scheduleId);
+  } catch (e: any) {
+    console.error(`[scheduled-tasks] failure backoff failed schedule=${scheduleId}: ${e?.message || e}`);
+  }
 });
