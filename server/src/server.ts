@@ -34,6 +34,7 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
+import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
 import { flagOrphanTasks } from "./task-orphan.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { pickAliasNetwork } from "./rest-alias-network-fallback.js";
@@ -983,6 +984,19 @@ export function patrolExpiredTasks(): void {
       if (notices.length > 0) console.log(`[patrol] sent ${notices.length} expiry notice(s)`);
     }
   } catch {}
+  // #2668 —— 投给「已离线」目标的陈年投递：超过 TTL（默认 30 分钟）就过期，并走与 TTL 相同的通知路径。
+  // 只处理“目标明确不在”这一种；忙 ⇒ queued_behind_busy 告警，不在这里处置。
+  try {
+    const offlineDropped = expireDeliveredToOfflineTargets();
+    if (offlineDropped.length > 0) {
+      console.log(`[patrol] expired ${offlineDropped.length} task(s) queued to an offline target (#2668)`);
+      for (const task of offlineDropped) logTaskEvent(task.task_id, "delivered", "expired", "patrol");
+      const notices = notifyExpiredTasks(offlineDropped as any);
+      if (notices.length > 0) console.log(`[patrol] sent ${notices.length} offline-expiry notice(s)`);
+    }
+  } catch (e: any) {
+    console.error(`[patrol] offline-delivery phase failed: ${e?.message || e}`);
+  }
   // #519 — acked/running with no activity for COMMHUB_STALE_OPEN_TASK_HOURS
   // (default 0 = off) → expired, at most 500 per pass, no sender notice
   // (task-stale-open.ts). Its own try: a failure here must not hide the TTL phase.
