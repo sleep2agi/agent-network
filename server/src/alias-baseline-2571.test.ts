@@ -94,6 +94,16 @@ describe("#2571 alias p99 baseline", () => {
     expect(eventsFor(`bl-slow-6000-${stamp}`)).toContain("task.warning.delivered_stale_600s");
   });
 
+  test("基线极大（p99=50min）时，等满 30 分钟仍然报（上限兜底）", () => {
+    seedSession(`bl-very-slow-${stamp}`, "idle");
+    setBaseline(`bl-very-slow-${stamp}`, 3017); // ×1.5 = 4525s，若无上限就永远不报
+    seedTask(`bl-very-slow-1900-${stamp}`, `bl-very-slow-${stamp}`, 1900);
+    seedTask(`bl-very-slow-1700-${stamp}`, `bl-very-slow-${stamp}`, 1700);
+    recordDeliveredStaleEvents(NOW);
+    expect(eventsFor(`bl-very-slow-1900-${stamp}`)).toContain("task.warning.delivered_stale_600s");
+    expect(eventsFor(`bl-very-slow-1700-${stamp}`)).toEqual([]);
+  });
+
   test("基线更窄（快节点）：不允许比全局下限更敏感", () => {
     seedSession(`bl-fast-${stamp}`, "idle");
     setBaseline(`bl-fast-${stamp}`, 2); // 阈值 max(600, 3) = 600

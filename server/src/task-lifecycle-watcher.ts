@@ -1,5 +1,5 @@
 import { db } from "./db.js";
-import { ALIAS_BASELINE_TABLE, BASELINE_P99_FACTOR, ensureAliasBaselineTable } from "./alias-baseline.js";
+import { ALIAS_BASELINE_TABLE, BASELINE_MAX_SECONDS, BASELINE_P99_FACTOR, ensureAliasBaselineTable } from "./alias-baseline.js";
 
 export const DELIVERED_STALE_THRESHOLDS = [600, 1800] as const;
 
@@ -82,9 +82,11 @@ function recordStale(thresholdSeconds: 600 | 1800, cutoff: string, referenceIso:
        AND (
          b.b_p99 IS NULL
          OR delivered_at <= datetime(?8, '-' || CAST(b.b_p99 * 1.5 AS INTEGER) || ' seconds')
+         -- 上限：再慢的节点，等满 30 分钟也必须报（否则 p99=50min 的节点永远不响）。
+         OR delivered_at <= datetime(?8, '-' || CAST(?9 AS INTEGER) || ' seconds')
        )
      ON CONFLICT(task_id, event_key) DO NOTHING`,
-    [staleType, staleDetail, cutoff, busyType, staleType, busyDetail, staleDetail, referenceIso],
+    [staleType, staleDetail, cutoff, busyType, staleType, busyDetail, staleDetail, referenceIso, BASELINE_MAX_SECONDS],
   );
   return result.changes;
 }

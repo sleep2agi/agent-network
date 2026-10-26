@@ -19,6 +19,16 @@ export const BASELINE_MIN_SAMPLES = 20;
 /** 阈值 = max(全局下限, p99 × 这个倍数)。1.5 是“比它自己最慢的 1% 再宽 50%”。 */
 export const BASELINE_P99_FACTOR = 1.5;
 
+/**
+ * 基线的**上限**：再慢的节点，等满 30 分钟也必须报。
+ *
+ * 没有这条上限时，p99=3017s（50 分钟）的节点会把自己的阈值推到 75 分钟 —— 它卡死时永远不报。
+ * 生产实测（2026-10-27 用最近 24h 数据回溯模拟）：加基线后 46 条 → 8 条（-83%），
+ * 但被抑制的样本里出现了 `TMA设计师` 两条最终 **failed** 的任务（它的 p99 是 50 分钟）
+ * ⇒ 慢节点需要一条“无论如何都要响”的底线。
+ */
+export const BASELINE_MAX_SECONDS = 1800;
+
 export function ensureAliasBaselineTable(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS ${ALIAS_BASELINE_TABLE} (
