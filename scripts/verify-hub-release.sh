@@ -108,4 +108,9 @@ check_feature "sse degraded drop counter"     "sseDegradedDropCount"        "0.9
 check_feature "mcp inflight gauge"           "mcp_inflight"                "0.9.0-preview.160"
 check_feature "mcp inflight high-water"      "mcp_inflight_peak"           "0.9.0-preview.160"
 
+# .161 —— 告警分流（#2571）：目标忙 ⇒ queued_behind_busy_*；目标空闲/离线 ⇒ delivered_stale_*。
+# 断言的是**事件名与文案的区分**，不是数量——数量要上线 24h 后才有意义。
+check_feature "queued-behind-busy event"      "queued_behind_busy_"         "0.9.0-preview.161"
+check_feature "stale copy distinguishes idle" "not working on another task" "0.9.0-preview.161"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
