@@ -63,6 +63,24 @@ streak >= N  → effective = min(3600, every × 2^(streak-N+1))
 `N = COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS`（默认 **6**，`0` 关闭）；只对 `active` + `interval` 生效；
 与 `no_change_backoff` 互斥。**不是暂停**：外部原因一恢复就自动回到原节奏，不需要人介入。
 
+## 更正：`.162` 说明里对 retention 的一个过度承诺
+
+`.162` 的发布说明写「retention 之后应到**亚秒级**」。生产实测（索引已生效）是：
+
+```
+2026-10-27 00:21:14  [commhub retention] swept in 1209ms
+2026-10-27 01:21:14  [commhub retention] swept in 1332ms
+```
+
+**1.2–1.3 秒，不是亚秒。** 相对改前的 8777ms / 13568ms 是 7–10 倍改善，但没到我承诺的量级。
+
+原因：删掉全表扫描只解决了**扫描**成本；`agent_telemetry` 上还有 4 个索引（3 个复合 + 新增的 `created_at`），
+每删一行都要维护这 4 个索引。剩下的 1.2 秒主要花在这里。
+
+要进一步压到亚秒，需要（未做，另行评估）：分批 `DELETE … LIMIT` 让出事件循环，或精简该表上的冗余索引。
+
+**以后写发布说明：区分“我改了什么”与“它应该变成多少”，后者必须有实测再写。**
+
 ## Install
 
 ```bash
