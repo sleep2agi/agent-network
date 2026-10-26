@@ -173,3 +173,56 @@ PY
 ```bash
 setsid nohup python3 /tmp/opencode/inflight-watch.py /tmp/opencode/inflight-160.tsv 43200 30 &
 ```
+
+## 卡顿归因：先分清「受害者」与「凶手」（2026-10-26 起，`.162` 补齐）
+
+2026-10-26 21:55–22:12 生产出现两次尖峰（RSS 3.6 → 4.5 GB，`mcp_inflight` 387 → 807）。
+当时手上有三样东西，但**没有一样能指出“谁在卡”**：
+
+| 证据 | 能回答 | 不能回答 |
+|---|---|---|
+| `mcp_inflight` / `peak`（`.160` 起） | 有多少请求在**排队** | 谁把它们堵住的 |
+| `GET /api/stats/routes` 的 `max_ms` | 哪个请求**受害**了 | 它的耗时里有多少是排队 |
+| 日志行的时间戳 | 什么时候停过（**单线程 ⇒ 日志静默 = 阻塞**） | 阻塞的是哪段代码 |
+
+第三条是当时唯一能定性的一条：按日志时间戳找 ≥10 秒的静默，就得到 14/22/28/47 秒的四次停顿。
+其中最规整的一次每小时出现（`18:11`、`19:11`、`21:46`），且每次静默后都紧跟一行
+`[commhub retention] swept in 8331/9863/10588ms`。
+
+### `.162` 起多两条直接证据
+
+```bash
+# 1) 停顿本身：最大 tick 间隔 + 最近 20 次停顿（含当时 RSS）
+curl -s localhost:9200/health | python3 -c 'import sys,json;print(json.dumps(json.load(sys.stdin)["event_loop"],indent=2,ensure_ascii=False))'
+
+# 2) 慢 SQL（>1s 才打，默认阈值 1000ms；COMMHUB_SLOW_SQL_MS=0 关闭）
+grep "commhub slow-sql" ~/.commhub/pm2-hub-out.log | tail -5
+```
+
+判定顺序（照这个顺序问，能省掉大部分猜测）：
+
+1. `event_loop.recent_stalls` 有没有对应时间点？
+   - **没有** ⇒ 不是事件循环阻塞（想想客户端慢、网络、GC 之外的进程外因素）。
+   - 有 ⇒ 记下 `stall_ms` 与 `rss_mb`。
+2. 同一时间点有没有 `[commhub slow-sql]`？
+   - 有 ⇒ 就是那条 SQL。先 `EXPLAIN QUERY PLAN` 看是不是全表扫（今天的例子：`agent_telemetry` 三个复合索引都以 `network_id` 打头，而删除语句只按 `created_at` ⇒ 每小时扫 62 万行）。
+   - 没有 ⇒ 是 JS 里的同步块（同步文件 IO、超大 `JSON.stringify`、同步压缩），不是数据库。
+3. 两条都没有、但 RSS 很高 ⇒ 才轮到怀疑运行时/GC。**不要**在没排除 1、2 之前谈 GC。
+
+### 一条被排除的候选：上传
+
+`/api/stats/routes` 里 `POST /api/upload` 当天最慢 **178 s**、p95 52 s，看起来很像元凶。
+但它是**受害者**：耗时 = 客户端上行时间。隔离实测 12 MB 上传在本机磁盘上 **41–70 ms**，
+并且上传后内存立即回落，撑不起 4.5 GB。**路由耗时里含排队时间，别拿它当“服务端慢”的证据。**
+
+### 一次真实的归因样例（保留过程，不删）
+
+```
+21:59  /health 首次超时（6s）
+22:02  RSS 3588 MB  inflight 387  peak 662   /health 最慢 13.2s
+22:06  回落 280 MB
+22:10  RSS 4502 MB  peak 807                 ← 第二次比第一次更高
+```
+两次都**没有重启**、也没有触发 6 GiB 上限。把它们与日志静默对齐后，得到两条不同性质的结论：
+一条是 retention 的索引缺失（可修，已修），另一条是至今未定性的 14–47 秒随机停顿。
+**把两件事分开记，比合成一个“Hub 不稳”的结论有用得多。**
