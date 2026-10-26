@@ -113,4 +113,12 @@ check_feature "mcp inflight high-water"      "mcp_inflight_peak"           "0.9.
 check_feature "queued-behind-busy event"      "queued_behind_busy_"         "0.9.0-preview.161"
 check_feature "stale copy distinguishes idle" "not working on another task" "0.9.0-preview.161"
 
+# .162 —— 停顿可观测（#2614）：/health 给出事件循环单次最大 tick 间隔与最近停顿留档。
+# 起因是 2026-10-26 21:55–22:12 两次 RSS 3.6/4.5 GB 尖峰：当时能看到的只有
+# “请求排队变多”（mcp_inflight 387→807）和“路由变慢”（/api/stats/routes 里
+# POST /api/upload 出现 178 s），但**没有任何字段说明服务端为什么卡住**，
+# 只能靠事后比对日志静默手工推断。这两个字段让下次停顿自己带证据。
+check_feature "event-loop stall gauge"       "event_loop"                  "0.9.0-preview.162"
+check_feature "event-loop max gap"           "max_gap_ms"                  "0.9.0-preview.162"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
