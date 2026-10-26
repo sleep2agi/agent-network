@@ -117,10 +117,24 @@ jobs:
       # (「CLI 保留全部能力」两张卡片的正文与 curl 命令被裁);修复后 30/30、rc=0。
       # 🔴 那次红里「盒子出界」判据是 0 条 —— 卡片被 .VPHome 的 overflow 兜住、
       #    scrollWidth 也等于视口宽度,只有「文字被裁」那一层抓到了。别删那一层。
+      # #2697 —— 这一步在 2026-10-26/27 一晚挂起三次（13–15 分钟直到 job 超时被 cancelled）：
+      #   `npx playwright install --with-deps chromium` 偶发卡在下载/apt，或浏览器启动无超时。
+      # 处置：① 缓存浏览器；② **给每一步单独的 timeout-minutes** —— 挂起会变成“红”，
+      # 而挂起最坏的地方不是慢，是它让这个 job 变成“薛定谔的红”，人就学会忽略它。
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('docs-site/package-lock.json') }}
+
+      - name: Install Playwright chromium (#2697)
+        timeout-minutes: 5
+        run: npx playwright install --with-deps chromium
+        working-directory: docs-site
+
       - name: home page fits phone widths (#568)
-        run: |
-          npx playwright install --with-deps chromium
-          npm run test:home-mobile
+        timeout-minutes: 4
+        run: npm run test:home-mobile
         working-directory: docs-site
 
       # 分母承重:上面那步在 docs/ 被清空时**也会 rc=0** —— 0 个页面、0 条死链,
