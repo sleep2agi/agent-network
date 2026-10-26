@@ -7,7 +7,7 @@
      latest 标记已核对的通道版本，preview 标记本页核对的版本；是否发布另核 npm 精确版本；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.190 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.198 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.199 -->
 
 从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。
 
@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.190`）打印随机密码（该路径自 `.181` 起未改），形如 `anet-` 加 22 位十六进制字符。**已发布**的 CLI `2.3.0-preview.198` 相对 `.197` 只改配对常量，指向已发布的 agent-node `2.5.0-preview.163`（含心跳与首次 SSE 重连的抖动：周期性状态上报、以及 Hub 重启后的重连都被摊开，不再同一秒一起到达——Hub 侧实测那一波曾产生 308 个在飞请求）；这两个精确版本已核实可从 npm 查询。`.156` 相对 `.155` 新增一个**默认关闭**的能力：设 `ANET_TEAM_RULES=1` 时，节点在完整启动读一次 Hub 的网络规则，并在 `CLAUDE.md`/`AGENTS.md` 顶部维护一个受管块（块外逐字节不动；标记残缺拒写；同 revision 不产生 diff；Hub 不可达保留原文件且不阻塞启动）。另含三条只改测试的修复（Windows 用例显式 60s 超时、探针失败打印 `probe=`、出生查询测时与重试）。**不设该环境变量时行为与 `.155` 完全一致；这一版只注入 Hub 一层，Daemon 层与层间冲突裁决仍未实现。****默认初始化 / 随机密码路径未改动。**
+已核对的 `latest`（`2.3.0-preview.190`）打印随机密码（该路径自 `.181` 起未改），形如 `anet-` 加 22 位十六进制字符。**已发布**的 CLI `2.3.0-preview.199` 相对 `.198` 只改配对常量，指向已发布的 agent-node `2.5.0-preview.164`（含心跳与首次 SSE 重连的抖动：周期性状态上报、以及 Hub 重启后的重连都被摊开，不再同一秒一起到达——Hub 侧实测那一波曾产生 308 个在飞请求）；这两个精确版本已核实可从 npm 查询。`.156` 相对 `.155` 新增一个**默认关闭**的能力：设 `ANET_TEAM_RULES=1` 时，节点在完整启动读一次 Hub 的网络规则，并在 `CLAUDE.md`/`AGENTS.md` 顶部维护一个受管块（块外逐字节不动；标记残缺拒写；同 revision 不产生 diff；Hub 不可达保留原文件且不阻塞启动）。另含三条只改测试的修复（Windows 用例显式 60s 超时、探针失败打印 `probe=`、出生查询测时与重试）。**不设该环境变量时行为与 `.155` 完全一致；这一版只注入 Hub 一层，Daemon 层与层间冲突裁决仍未实现。****默认初始化 / 随机密码路径未改动。**
 精确版本已发布不代表通道标记永远指向它，也不代表现役节点已升级。当前通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
