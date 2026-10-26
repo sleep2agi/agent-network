@@ -174,6 +174,13 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_agent_telemetry_alias_time
     ON agent_telemetry(network_id, alias, created_at);
+
+  -- #2614 —— retention 每小时跑一次 DELETE FROM agent_telemetry WHERE created_at < ?。
+  -- 上面三个复合索引都以 network_id 打头，**这个查询用不上**（没有 network_id 等值条件），
+  -- 于是每次扫全表 62 万行 → 生产实测每小时出现 **8–11 秒的事件循环阻塞**
+  -- （[commhub retention] swept in 8331ms / 9863ms / 10588ms，同时日志静默 11 秒）。
+  -- 单独给 created_at 建索引，让这个扫描变成范围 seek。
+  CREATE INDEX IF NOT EXISTS idx_agent_telemetry_created ON agent_telemetry(created_at);
 `);
 
 // Round-2/4 review ② — server-health index split.
