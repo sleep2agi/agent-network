@@ -19,35 +19,42 @@ function sqliteUtcTimestamp(date: Date): string {
  * threshold is write-once across restarts, patrols, and multiple Hub workers.
  */
 /**
- * #2571 —— 写一条 stale 事件，按目标节点**此刻**的状态做过滤。
+ * #2571 —— 把「慢」和「坏」分开：目标正在跑别的任务时，事件写成 `queued_behind_busy_*`；
+ * 目标空闲/离线/未知时，才写成 `delivered_stale_*`。
  *
- * `only` 取值：
- *   - "working"     → 只命中「目标正在跑别的任务」的任务；
- *   - "not-working" → 只命中「目标不在跑（idle/offline/未知）」的任务。
- *
- * 保持不变的两件事：event_key 唯一（每个阈值只写一次）、只对 `status='delivered'` 写。
+ * 为什么是一条 SQL（而不是两条 INSERT）：`test683` 的 mutation 门用**字符串锚点**钉住
+ * “write-once 冲突门”“只认 delivered”“网络字段透传”三件事；拆成两条 INSERT 会让锚点
+ * 命中次数变成 0 或让 mutation 只命中一半 —— 那就把“可被变异测试覆盖”这条性质弄丢了。
+ * 因此这里仍然只保留**一条** INSERT，用 CASE 选择事件名与文案。
  */
-function recordStale(
-  thresholdSeconds: number,
-  eventType: string,
-  detail: string,
-  cutoff: string,
-  only: "working" | "not-working",
-): number {
-  const statusExpr = `COALESCE((SELECT s.status FROM sessions s
-                               WHERE s.alias = t.to_name AND s.network_id = t.network_id), 'unknown')`;
-  const predicate = only === "working" ? `${statusExpr} = 'working'` : `${statusExpr} <> 'working'`;
+function recordStale(thresholdSeconds: 30 | 60, cutoff: string): number {
+  const busyType = `task.warning.queued_behind_busy_${thresholdSeconds}s`;
+  const staleType = `task.warning.delivered_stale_${thresholdSeconds}s`;
+  const busyDetail = `queued after ${thresholdSeconds}s; target is working on another task`;
+  const staleDetail = thresholdSeconds === 30
+    ? "still delivered after 30s; target is not working on another task and has not started"
+    : "still delivered after 60s; target is idle or offline and not consuming";
   const result = db.run(
     `INSERT INTO task_events
        (task_id, from_status, to_status, event_type, event_key, actor, detail, network_id)
-     SELECT t.task_id, 'delivered', 'delivered', ?1, ?1, 'patrol', ?2, t.network_id
-     FROM tasks t
-     WHERE t.status = 'delivered'
-       AND t.delivered_at IS NOT NULL
-       AND t.delivered_at <= ?3
-       AND ${predicate}
+     SELECT task_id, 'delivered', 'delivered',
+            CASE WHEN COALESCE((SELECT s.status FROM sessions s
+                                  WHERE s.alias = tasks.to_name AND s.network_id = tasks.network_id), 'unknown') = 'working'
+                 THEN ?4 ELSE ?5 END,
+            CASE WHEN COALESCE((SELECT s.status FROM sessions s
+                                  WHERE s.alias = tasks.to_name AND s.network_id = tasks.network_id), 'unknown') = 'working'
+                 THEN ?4 ELSE ?5 END,
+            'patrol',
+            CASE WHEN COALESCE((SELECT s.status FROM sessions s
+                                  WHERE s.alias = tasks.to_name AND s.network_id = tasks.network_id), 'unknown') = 'working'
+                 THEN ?6 ELSE ?7 END,
+            network_id
+     FROM tasks
+     WHERE status = 'delivered'
+       AND delivered_at IS NOT NULL
+       AND delivered_at <= ?3
      ON CONFLICT(task_id, event_key) DO NOTHING`,
-    [eventType, detail, cutoff],
+    [staleType, staleDetail, cutoff, busyType, staleType, busyDetail, staleDetail],
   );
   return result.changes;
 }
@@ -60,31 +67,9 @@ export function recordDeliveredStaleEvents(now = new Date()): DeliveredStalePatr
 
   for (const thresholdSeconds of DELIVERED_STALE_THRESHOLDS) {
     const cutoff = sqliteUtcTimestamp(new Date(now.getTime() - thresholdSeconds * 1000));
-    // #2571 —— 关键区别：**“慢”与“坏”不是一回事**。
-    // 生产实测（24h）：出现过 delivered_stale 的任务里 83% 最终成功；等待中位数 2.9 分钟、
-    // p90 27 分钟——**事件事实成立，但把“目标正忙着跑别的任务”写成“可能离线”会制造告警疲劳**。
-    // 因此按目标节点**告警时刻**的状态分两类：
-    //   · working（含 busy 语义）→ 归入 `queued_behind_busy_*`：这是排队，不是故障；
-    //   · idle / offline / unknown → 保留 `delivered_stale_*`：空闲却不消费、或掉线，都值得人看。
-    // 两类都**照常写事件**（不静默真实延迟），只是让仪表盘/值班可以分别过滤。
-    const busy = recordStale(
-      thresholdSeconds,
-      `task.warning.queued_behind_busy_${thresholdSeconds}s`,
-      `queued after ${thresholdSeconds}s; target is working on another task`,
-      cutoff,
-      "working",
-    );
-    const stale = recordStale(
-      thresholdSeconds,
-      `task.warning.delivered_stale_${thresholdSeconds}s`,
-      thresholdSeconds === 30
-        ? "still delivered after 30s; target is not working on another task and has not started"
-        : "still delivered after 60s; target is idle or offline and not consuming",
-      cutoff,
-      "not-working",
-    );
-    byThreshold[thresholdSeconds] = busy + stale;
-    inserted += busy + stale;
+    const changes = recordStale(thresholdSeconds, cutoff);
+    byThreshold[thresholdSeconds] = changes;
+    inserted += changes;
   }
 
   return { inserted, by_threshold_seconds: byThreshold };
