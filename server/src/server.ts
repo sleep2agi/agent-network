@@ -1006,10 +1006,12 @@ export function patrolOrphanTasks(): void {
 }
 
 function patrolDeliveredStaleTasks(): void {
+  // #2571 —— watcher 现在按“目标节点此刻是否 working”分流写两类事件，但仍然是**同步**
+  // （db.run 是同步的）：巡逻旁路绝不因为 await 打乱调度时序。
   try {
     const result = recordDeliveredStaleEvents();
     if (result.inserted > 0) {
-      console.warn(`[patrol] recorded ${result.inserted} delivered-stale task warning(s)`);
+      console.warn(`[patrol] recorded ${result.inserted} delivered-stale/queued-behind-busy task warning(s)`);
     }
   } catch (error: any) {
     console.error(`[patrol] delivered-stale watcher failed: ${error?.message || error}`);
