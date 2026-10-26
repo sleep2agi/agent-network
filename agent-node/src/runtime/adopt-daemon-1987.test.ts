@@ -43,8 +43,8 @@ describe("#1987 adopt error codes survive the whitelist", () => {
 
   test("路径与 OS 错误原文被折叠（不泄露文件系统细节）", () => {
     for (const raw of [
-      "/home/vansin/comm-ou2/.anet/nodes/通信欧2号: EACCES",
-      "ENOENT: no such file or directory, lstat '/home/x'",
+      "/home/someone/work/.anet/nodes/n1: EACCES",
+      "ENOENT: no such file or directory, lstat '/home/someone/x'",
       "adopt_something bad",
       "",
       undefined,
