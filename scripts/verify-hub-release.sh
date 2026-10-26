@@ -138,4 +138,8 @@ check_feature "offline delivery ttl knob"  "COMMHUB_OFFLINE_DELIVERY_TTL_MINUTES
 # .165 —— 启动回填延迟执行（#2664）：开关名与汇总日志都是可验证的锚点。
 check_feature "deferred boot backfill knob"   "COMMHUB_BOOT_BACKFILL_DELAY_MS"        "0.9.0-preview.165"
 
+# .166 —— 广播扇出分批（#2721）与采纳拒绝码（#1987）各带一个可 grep 的锚点。
+check_feature "broadcast fan-out chunking"    "BROADCAST_CHUNK"                       "0.9.0-preview.166"
+check_feature "adopt error code whitelist"    "publicAdoptError"                      "0.9.0-preview.166"
+
 echo "== RESULT: PASS ($PKG@$VERSION)"
