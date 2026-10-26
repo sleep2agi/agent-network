@@ -7523,6 +7523,12 @@ async function connectSSE() {
     abandonAfterMs: ABANDON_AFTER_MS,
     onAbandon: () => error(sseAbandonGuidance(ALIAS, COMMHUB_URL)),
     onRetryWait: (waitMs) => debug(`SSE reconnecting (${(waitMs / 1000).toFixed(1)}s)...`),
+    // #2363 —— Hub 重启会让**所有**节点的 SSE 在同一刻断开。±25% 抖动只能把重连
+    // 摊到 0.5 秒的窗口里，367 个节点就是 300+ 个请求同时在飞（生产实测
+    // `mcp_inflight_peak = 308`，≈400 MB RSS）。这里把**首次**重连再摊开 0–8 秒：
+    // 367 个节点回到 Hub 的平均到达率就从 ~300/秒 降到 ~46/秒，而全量恢复仍在 10 秒内。
+    // 后续指数退避（2/4/8/30s）不摊开，Hub 长时间不可用时的重试节奏不变。
+    firstRetrySpreadMs: 8_000,
     onError: (err: any) => warn(`SSE error: ${err?.message || err}`),
     runOnce: async (ctrl) => {
       debug(`SSE connecting: ${sseUrl}`);
