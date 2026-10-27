@@ -1,3 +1,5 @@
+import { statfsSync } from "node:fs";
+import { homedir } from "node:os";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { buildServeErrorResponse } from "./serve-error.js";
 import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
@@ -2818,6 +2820,13 @@ return Bun.serve({
         // #2721 —— 最近一次广播（时间/收件人数/批数/耗时）。广播是唯一能一次性唤醒
         // 几百个 agent 的动作；没有这一格，事后只能把停顿记录和聊天记录对时间。
         broadcast: broadcastRecentState(),
+        // #2756 —— Hub 自己所在磁盘的水位。
+        //
+        // 为什么要进 /health：2026-10-28 04:05 我做巡检时才发现根分区已经 95%（剩 28G）——
+        // 上一轮清理（85%）之后它只用了一天多就涨回去 10 个点，靠人「偶尔看一眼」
+        // 必然会漏。Hub 的 DB、日志、运行时目录都写在这块盘上，写满即生产停摆，
+        // 所以这个数字应该和 sessions/stalls 一样随手可见。
+        host_disk: hostDiskState(),
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
@@ -5808,3 +5817,31 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   startedHub = { server, startedAt: new Date().toISOString() };
   return server;
 }
+/**
+ * #2756 —— Hub 所在文件系统的水位。
+ *
+ * 只报「一块盘」：数据库目录所在的那块。多挂载点的主机（比如把 DB 放到单独卷）
+ * 也能对得上，因为我们 statfs 的是 DB 的实际路径，不是写死 `/`。
+ *
+ * 为什么不在这里做告警：告警需要阈值与通知渠道，属于运维策略；这里只提供**可观测**。
+ * 客户端/巡检脚本按 `used_pct > 90` 自己决定要不要叫。
+ */
+export function hostDiskState(): { path: string; total_gb: number; used_gb: number; avail_gb: number; used_pct: number } | null {
+  try {
+    // 探针打在**数据库实际所在目录**上，而不是写死 `/`：多挂载点主机也能对得上。
+    const dbFile = process.env.COMMHUB_DB || `${process.env.HOME || homedir()}/.commhub/commhub.db`;
+    const probe = dbFile.includes("/") ? dbFile.replace(/[^/]*$/, "") || "/" : "/";
+    const st = statfsSync(probe);
+    const total = Number(st.blocks) * Number(st.bsize);
+    const avail = Number(st.bavail) * Number(st.bsize);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    const used = total - avail;
+    const gb = (n: number) => Math.round((n / 1024 ** 3) * 10) / 10;
+    return { path: probe, total_gb: gb(total), used_gb: gb(used), avail_gb: gb(avail), used_pct: Math.round((used / total) * 1000) / 10 };
+  } catch {
+    return null;
+  }
+}
+
+
+
