@@ -11,7 +11,8 @@
 //
 // 这里只做**清理**，不动注册流程：
 //   · 只删「三个身份字段全空 + 没有任何 session」的行 —— 这种行不可能提供任何功能；
-//   · 只删 `updated_at` 早于 N 天（默认 2 天）的行 —— 正在注册中的行自然不会被误删；
+//   · 只删 `created_at` 早于 N 天（默认 2 天）的行 —— 正在注册中的行自然不会被误删；
+//     （用 created_at 不用 updated_at：后者会被无关的批量更新刷新，见下方注释里的生产实例）
 //   · 删除前把整行导成 JSON 到日志（可人工恢复），并返回被删的 id 列表。
 //
 // 为什么不用「同 alias 只留一条」这种规则：不同机器共用 alias 是**数据问题不是脏数据**
@@ -48,7 +49,11 @@ export function sweepEmptyNodeRows(
     `SELECT n.node_id
        FROM nodes n
       WHERE ${IDENTITY_EMPTY.replace(/\b(runtime|hostname|config_path)\b/g, "n.$1")}
-        AND n.updated_at < datetime('now', ?1)
+        -- #2596 —— 用 created_at 而不是 updated_at：空壳行会被无关的批量更新
+        -- 把 updated_at 顶到「今天」（生产实测：2026-10-26 的一次批量更新把 08/09 月
+        -- 建的空壳全部刷成 10-26），那样 2 天的阈值就永远删不掉它们。
+        -- created_at 才是“这行空了多久”的稳定量；在注册中的行 created_at 必然是新的。
+        AND n.created_at < datetime('now', ?1)
         AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.node_id = n.node_id)
       LIMIT 500`,
     `-${ageDays} days`,

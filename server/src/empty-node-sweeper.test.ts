@@ -5,11 +5,15 @@ import { readEmptyNodeAgeDays, sweepEmptyNodeRows } from "./empty-node-sweeper.j
 
 let networkId = "";
 
-function insertNode(nodeId: string, alias: string, opts: { identity?: boolean; updatedDaysAgo?: number } = {}) {
-  const { identity = false, updatedDaysAgo = 10 } = opts;
+function insertNode(
+  nodeId: string,
+  alias: string,
+  opts: { identity?: boolean; updatedDaysAgo?: number; createdDaysAgo?: number } = {},
+) {
+  const { identity = false, updatedDaysAgo = 10, createdDaysAgo = 30 } = opts;
   db.run(
-    `INSERT INTO nodes (node_id, node_name, alias, runtime, hostname, config_path, network_id, updated_at)
-     VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, datetime('now', ?7))`,
+    `INSERT INTO nodes (node_id, node_name, alias, runtime, hostname, config_path, network_id, created_at, updated_at)
+     VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, datetime('now', ?8), datetime('now', ?7))`,
     [
       nodeId,
       alias,
@@ -18,6 +22,7 @@ function insertNode(nodeId: string, alias: string, opts: { identity?: boolean; u
       identity ? "/data/x" : null,
       networkId,
       `-${updatedDaysAgo} days`,
+      `-${createdDaysAgo} days`,
     ],
   );
 }
@@ -33,7 +38,7 @@ beforeAll(async () => {
   networkId = auth.network_id!;
 
   insertNode("gc-empty-old", "ghost-a");                       // 该删
-  insertNode("gc-empty-fresh", "ghost-b", { updatedDaysAgo: 0 }); // 太新：可能正在注册
+  insertNode("gc-empty-fresh", "ghost-b", { createdDaysAgo: 0, updatedDaysAgo: 0 }); // 太新：可能正在注册
   insertNode("gc-real", "real-node", { identity: true });      // 有身份：绝不删
   insertNode("gc-real-alias-2", "real-node", { identity: true }); // 不同机器同 alias：也绝不删
   // 空壳但有 session（在线但还没上报身份）⇒ 不删
@@ -77,6 +82,14 @@ describe("sweepEmptyNodeRows (#2596)", () => {
   test("keeps a placeholder that still has a session", () => {
     sweepEmptyNodeRows();
     expect(exists("gc-empty-with-session")).toBe(true);
+  });
+
+  test("a fresh bulk update does NOT protect an old empty row (created_at is the clock)", () => {
+    // 生产实测：2026-10-26 的一次批量更新把 08/09 月建的空壳 updated_at 全刷成 10-26，
+    // 若按 updated_at 判龄，2 天阈值永远删不掉它们。
+    insertNode("gc-empty-bulk-touched", "ghost-d", { createdDaysAgo: 40, updatedDaysAgo: 0 });
+    sweepEmptyNodeRows();
+    expect(exists("gc-empty-bulk-touched")).toBe(false);
   });
 
   test("env <= 0 disables the sweep", () => {
