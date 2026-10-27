@@ -56,7 +56,7 @@ jobs:
   download-platforms:
     name: download-platforms-docker
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Core download page in Docker (no accounts or installation)
@@ -67,7 +67,7 @@ jobs:
     # 这个 name 是分支保护里 required check 唯一能写的标识符,必须全仓唯一。
     name: docs-site-build
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -135,9 +135,17 @@ jobs:
         run: npx playwright install chromium
         working-directory: docs-site
 
-      - name: Install Playwright system deps (#2697)
-        timeout-minutes: 5
-        run: npx playwright install-deps chromium
+      # #2697 —— 2026-10-27 连续两次卡在 apt（5 分钟超时）。ubuntu-latest 上 chromium 需要的
+      # 共享库（libnss3 / libatk / libgbm 等）**通常已经存在**，apt 只是保险。
+      # 所以：先探测，缺了才 apt。这样常见路径 0 秒，异常路径仍有兜底。
+      - name: Install Playwright system deps if missing (#2697)
+        timeout-minutes: 6
+        run: |
+          if ldconfig -p | grep -q 'libnss3.so'; then
+            echo "system libs already present — skipping apt"
+          else
+            npx playwright install-deps chromium
+          fi
         working-directory: docs-site
 
       - name: home page fits phone widths (#568)
