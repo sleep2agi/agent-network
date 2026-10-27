@@ -19,6 +19,7 @@
 
 import { db, setScheduledRunTerminalHook } from "./db.js";
 import { sendAgentNotice } from "./agent-notice.js";
+import { parseHubTimestamp } from "./hub-timestamp.js";
 
 export const SCHEDULE_FAILING_NOTICE_KIND = "schedule_failing";
 const ERROR_PREVIEW_CHARS = 300;
@@ -290,9 +291,11 @@ export function applyNoProgressBackoff(scheduleId: string, now = new Date()): { 
   // 回到原间隔（成功 / 换链 / 未达阈值都走这里；只在真的退避过时才写）
   const restore = () => {
     if ((row.backoff_streak ?? 0) === 0 && row.backoff_effective_seconds == null) return;
-    const next = row.next_run_at
-      ? new Date(Math.min(Date.parse(row.next_run_at), now.getTime() + base * 1000)).toISOString()
-      : row.next_run_at;
+    // next_run_at 是 hub 的 TEXT UTC（无时区标记），必须走 parseHubTimestamp
+    const cur = parseHubTimestamp(row.next_run_at);
+    const next = cur === null
+      ? row.next_run_at
+      : new Date(Math.min(cur, now.getTime() + base * 1000)).toISOString();
     db.run(
       `UPDATE scheduled_tasks SET backoff_streak = 0, backoff_effective_seconds = NULL, next_run_at = ?1,
          updated_at = datetime('now') WHERE schedule_id = ?2 AND revision = ?3 AND status = 'active'`,
@@ -315,8 +318,8 @@ export function applyNoProgressBackoff(scheduleId: string, now = new Date()): { 
   let next = row.next_run_at;
   if (effective !== previous && next) {
     const candidate = now.getTime() + effective * 1000;
-    const existing = Date.parse(next);
-    if (Number.isFinite(existing)) {
+    const existing = parseHubTimestamp(next);
+    if (existing !== null) {
       next = new Date(effective > previous ? Math.max(existing, candidate) : Math.min(existing, candidate)).toISOString();
     }
   }

@@ -13,6 +13,7 @@ import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { blockerTimedOut, blockerTimeoutClock, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
 import { applyNoProgressBackoff, evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
+import { parseHubTimestamp } from "./hub-timestamp.js";
 import { scheduledTargetOffline, sendOfflineNotice, type OfflineNotice } from "./scheduled-offline.js";
 
 export type ScheduleSpec =
@@ -454,7 +455,8 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         const bo = applyNoProgressBackoff(row.schedule_id);
         if (bo && bo.effective_seconds) {
           const sched = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
-          if (sched?.next_run_at) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, new Date(sched.next_run_at));
+          const at = parseHubTimestamp(sched?.next_run_at);
+          if (at !== null) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, new Date(at));
         }
       } catch (e: any) {
         console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
