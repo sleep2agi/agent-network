@@ -78,6 +78,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSy
 import { dirname as pathDirname, join as pathJoin } from "path";
 import { startRetentionSweeper } from "./retention.js";
 import { sweepEmptyNodeRows } from "./empty-node-sweeper.js";
+import { versionStats } from "./version-stats.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import {
   AUDIT_LOG_REST_SELECT,
@@ -3187,6 +3188,19 @@ return Bun.serve({
       const minutes = Math.min(Math.max(Number(url.searchParams.get("minutes")) || 15, 1), 1440);
       const byCaller = url.searchParams.get("by") === "caller";
       return withCors(req, Response.json({ ok: true, ...routeStats(minutes * 60_000, Date.now(), { byCaller }) }));
+    }
+
+    // ── #2720 REST: 版本债务（只读聚合）──
+    // 为什么要有这一条：370 个 session 里 159 个没有版本号，而「没有版本」不是一个桶 ——
+    // 24 个是 claude-code（LLM 会话自己调工具，没有版本概念），9 个才是老 agent-node。
+    // 把两者混算会得出“升级节点能修好 33 个”的错误结论（只能修好 9 个）。
+    // 返回聚合数字，不含 alias 明细；节点令牌只看自己绑定的网络。
+    if (url.pathname === "/api/stats/versions" && req.method === "GET") {
+      if (restAuth && !isAdmin && !restAuth.networkId) {
+        return withCors(req, Response.json({ ok: false, error: "admin or network token required" }, { status: 403 }));
+      }
+      const scopeNet = restAuth?.networkId ?? null;
+      return withCors(req, Response.json({ ok: true, ...versionStats(scopeNet) }));
     }
 
     // ── #473 REST: SSE connection detail (ops-only) ──
