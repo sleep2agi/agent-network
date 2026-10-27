@@ -12,7 +12,7 @@ import { dispatchVerdict } from "./node-permissions.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { blockerTimedOut, blockerTimeoutClock, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
-import { evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
+import { applyNoProgressBackoff, evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
 import { scheduledTargetOffline, sendOfflineNotice, type OfflineNotice } from "./scheduled-offline.js";
 
 export type ScheduleSpec =
@@ -449,6 +449,16 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         targetAlias: targetNode.alias,
       };
       if (advanceSchedule) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, advanceAfter);
+      // #2622 —— 目标长期离线时按同因链放慢（默认 3 次后 2 倍递增，上限 1 小时）。
+      try {
+        const bo = applyNoProgressBackoff(row.schedule_id);
+        if (bo && bo.effective_seconds) {
+          const sched = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
+          if (sched?.next_run_at) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, new Date(sched.next_run_at));
+        }
+      } catch (e: any) {
+        console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
+      }
       return;
     }
     // Seeing the target online rearms exactly one warning for a future offline episode.
@@ -603,6 +613,13 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     // Dispatch is not completion. Keep the run open until the exact bound
     // task reaches replied/failed/cancelled/expired; db.ts owns that mirror.
     db.run("UPDATE scheduled_task_runs SET task_id = ?1, status = ?2, completed_at = NULL WHERE run_id = ?3", [taskId, deliveryState, runId]);
+
+        // #2622 —— 上一层任务还没跑完时按同因链放慢（间隔 180s 的排程曾一天写 343 行 skip）。
+        try {
+          applyNoProgressBackoff(row.schedule_id);
+        } catch (e: any) {
+          console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
+        }
     db.run(`UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3`, [sessionTaskPreview(taskContent), node.node_id, row.network_id]);
     db.run("UPDATE scheduled_tasks SET target_alias = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3", [node.alias, scheduledFor, row.schedule_id]);
     if (advanceSchedule) advance({ ...row, target_alias: node.alias }, scheduledFor, advanceAfter);
