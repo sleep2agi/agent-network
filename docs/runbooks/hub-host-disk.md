@@ -7,7 +7,7 @@
 
 ```bash
 curl -sS http://127.0.0.1:9200/health | python3 -c "import sys,json;print(json.load(sys.stdin)['host_disk'])"
-# {'path': '/home/vansin/.commhub/', 'total_gb': 491.8, 'used_gb': 449.2, 'avail_gb': 42.5, 'used_pct': 91.4}
+# {'path': '~/.commhub/', 'total_gb': 491.8, 'used_gb': 449.2, 'avail_gb': 42.5, 'used_pct': 91.4}
 ```
 
 `host_disk.used_pct` 与 `df` 同口径；探针打在 **数据库实际所在目录**，不是写死 `/`。
