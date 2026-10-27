@@ -30,7 +30,7 @@ import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
 import { enterMcpInflight, leaveMcpInflight, getMcpInflightStats } from "./mcp-inflight.js";
 import { eventLoopStats, startEventLoopLagMonitor } from "./event-loop-lag.js";
-import { refreshAliasBaseline } from "./alias-baseline.js";
+import { aliasBaselineRefreshState, refreshAliasBaseline } from "./alias-baseline.js";
 import { enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
@@ -2810,6 +2810,9 @@ return Bun.serve({
         // 单次 tick 的最大间隔（正常 ≈250ms），recent_stalls 保留最近 20 次
         // 超过阈值的停顿（含当时 RSS），用于和内存曲线对齐。
         event_loop: eventLoopStats(),
+        // #2571 —— 告警阈值用的「每目标 p99 基线」最近一次刷新（只读聚合：时间/写了几行/现在共几行）。
+        // 没有它，「这条告警为什么没报」只能进机器 sqlite 查。
+        alert_baselines: aliasBaselineRefreshState(),
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",

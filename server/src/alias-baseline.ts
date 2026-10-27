@@ -29,6 +29,15 @@ export const BASELINE_P99_FACTOR = 1.5;
  */
 export const BASELINE_MAX_SECONDS = 1800;
 
+// #2571 —— 最近一次刷新的结果，供 /health 暴露（只读、聚合，不含 alias 明细）。
+// 为什么需要：告警阈值依赖这张缓存表；「为什么这条没报/为什么报了」第一个要看的就是
+// 「基线最近一次什么时候算的、算出来几行」。否则只能进机器 sqlite。
+let lastRefresh: { at: string; rows: number; aliases: number } | null = null;
+
+export function aliasBaselineRefreshState(): { at: string; rows: number; aliases: number } | null {
+  return lastRefresh;
+}
+
 export function ensureAliasBaselineTable(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS ${ALIAS_BASELINE_TABLE} (
@@ -84,6 +93,8 @@ export function refreshAliasBaseline(now = new Date()): { rows: number } {
   );
   // 窗口内没有样本的 alias（长期不活跃）不该继续用旧基线兜着。
   db.run(`DELETE FROM ${ALIAS_BASELINE_TABLE} WHERE computed_at < ?1`, [since]);
+  const aliases = db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${ALIAS_BASELINE_TABLE}`)?.n ?? 0;
+  lastRefresh = { at: iso, rows: result.changes, aliases: Number(aliases) };
   return { rows: result.changes };
 }
 

@@ -17,6 +17,7 @@ import {
   ALIAS_BASELINE_TABLE,
   BASELINE_MIN_SAMPLES,
   aliasBaseline,
+  aliasBaselineRefreshState,
   ensureAliasBaselineTable,
   refreshAliasBaseline,
 } from "./alias-baseline.js";
@@ -135,6 +136,15 @@ describe("#2571 alias p99 baseline", () => {
     expect(row!.samples).toBe(BASELINE_MIN_SAMPLES); // 失败的不算
     expect(row!.p99Seconds).toBeGreaterThanOrEqual(9); // 10s 左右的样本
     expect(row!.p99Seconds).toBeLessThanOrEqual(11);
+  });
+
+  test("刷新状态可读（/health 用）：时间 / 写入行数 / 当前总行数", () => {
+    refreshAliasBaseline(NOW);
+    const state = aliasBaselineRefreshState();
+    expect(state).not.toBeNull();
+    expect(typeof state!.at).toBe("string");
+    expect(state!.rows).toBeGreaterThanOrEqual(0);
+    expect(state!.aliases).toBeGreaterThanOrEqual(1); // 前面用例已写入若干 alias
   });
 
   test("样本不足不写基线行（退回全局）", () => {
