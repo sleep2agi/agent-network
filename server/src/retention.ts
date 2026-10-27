@@ -24,6 +24,8 @@
 //   COMMHUB_DB=/tmp/test-retention.db bun test src/retention.test.ts
 
 import { db } from "./db.js";
+import { getMcpInflightStats } from "./mcp-inflight.js";
+import { eventLoopStats } from "./event-loop-lag.js";
 import { sweepNodeRequestContent, type NodeRequestSweepResult } from "./node-request-retention.js";
 
 export type RetentionConfig = {
@@ -130,6 +132,54 @@ const DEFAULT_CHUNK_ROWS = 2000;
 /** 每次 sweep 最多回收多少空闲页（≈4 KB/页）。见下面的 incremental_vacuum 注释。 */
 const INCREMENTAL_VACUUM_PAGES = 200;
 const MAX_TABLE_MS = 10 * 60 * 1000;
+
+/**
+ * #2614（第三轮）—— 首次 sweep 要等**循环真的安静下来**，而不是固定等 N 秒。
+ *
+ * 2026-10-27 两次部署实测：
+ * ``` 
+ * 18:55 部署：60 秒后 sweep → 3894ms / max 1238ms（风暴 2 分钟后仍在）
+ * 19:51 部署：180 秒后 sweep → 9153ms / max 3919ms（风暴持续 5 分钟，RSS 3.6 GB）
+ * ```
+ * 固定延迟只是把「撞上风暴」变成「可能撞上风暴」——风暴长短取决于同时重连多少节点。
+ *
+ * 判据（都来自 `/health` 的同名指标）：
+ *   · `mcp_inflight < 20`：没有成批请求在排队；
+ *   · 最近一次 stall 至少在 60 秒前：循环刚刚不抖。
+ * 每 15 秒看一次，最多等 15 分钟；等不到就照常跑（宁可慢，不可不删）。
+ */
+export const FIRST_SWEEP_QUIET_INFLIGHT = 20;
+export const FIRST_SWEEP_QUIET_STALL_AGE_MS = 60_000;
+export const FIRST_SWEEP_MAX_WAIT_MS = 15 * 60_000;
+export const FIRST_SWEEP_POLL_MS = 15_000;
+
+/** 纯函数，便于单测：把「此刻该不该继续等」与时钟解耦。 */
+export function firstSweepShouldWait(input: {
+  now: number;
+  inflight: number;
+  lastStallAtIso: string | null;
+}): boolean {
+  if (input.inflight >= FIRST_SWEEP_QUIET_INFLIGHT) return true;
+  if (!input.lastStallAtIso) return false;
+  const last = Date.parse(input.lastStallAtIso);
+  if (!Number.isFinite(last)) return false;
+  return input.now - last < FIRST_SWEEP_QUIET_STALL_AGE_MS;
+}
+
+async function waitForQuietLoop(): Promise<void> {
+  const startedMs = Date.now();
+  while (Date.now() - startedMs < FIRST_SWEEP_MAX_WAIT_MS) {
+    const stats = eventLoopStats();
+    if (!firstSweepShouldWait({
+      now: Date.now(),
+      inflight: getMcpInflightStats().inflight,
+      lastStallAtIso: stats.last_stall_at,
+    })) {
+      return;
+    }
+    await Bun.sleep(FIRST_SWEEP_POLL_MS);
+  }
+}
 
 /** 启动后第一次 sweep 的延迟；默认 180 秒（见 startRetentionSweeper 里的实测）。 */
 function readFirstSweepDelayMs(): number {
@@ -526,7 +576,13 @@ export function startRetentionSweeper(
   // 18:56:26 stall 2.7s · 18:57:28 stall 3.4s · 18:57:31 stall 2.6s   ← 风暴 2 分钟还没排空
   // ```
   // 稳态同一批删除是 0.24ms/行 ⇒ 60 秒时风暴仍在，max 单批被推到 1.2 秒（越过 1 秒慢 SQL 阈值）。
-  if (firstDelayMs > 0) setTimeout(() => { void sweep(); }, firstDelayMs);
-  else setImmediate(() => { void sweep(); });
+  const firstSweep = async () => {
+    // 先等固定延迟越过重连风暴的**起点**，再等循环真的安静（见 waitForQuietLoop）。
+    if (firstDelayMs > 0) await Bun.sleep(firstDelayMs);
+    await waitForQuietLoop();
+    await sweep();
+  };
+  if (firstDelayMs > 0) setTimeout(() => { void firstSweep(); }, 0).unref?.();
+  else setImmediate(() => { void firstSweep(); });
   return setInterval(() => { void sweep(); }, intervalMs);
 }
