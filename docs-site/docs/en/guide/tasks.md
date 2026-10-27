@@ -64,7 +64,7 @@ For these lists, an empty value, or one with only spaces and commas, counts as u
 Agents find due tasks with `requirements_list`: `overdue: true` lists overdue tasks only; `due_within_days: N` lists tasks due from today to N days from now that are not overdue yet (0 = today). Both only include open tasks. The REST list takes the same names (`overdue=1`, `due_within_days=N`).
 
 
-## Delivery and alert thresholds (since 0.9.0-preview.164)
+## Delivery and alert thresholds
 
 Once a task is dispatched, three thresholds govern what happens next. They only affect **alerts and cleanup** — not the delivery/retry semantics themselves.
 
