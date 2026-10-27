@@ -242,6 +242,8 @@ export function applyFailureBackoff(scheduleId: string, now = new Date()): { str
  *   · 与 `no_change_backoff=1` 的排程互斥（那套逻辑自己拥有 backoff_* 三列）。
  */
 const NO_PROGRESS_CODES = ["previous_run_active", "target_offline"] as const;
+/** 统计窗口：看最近多少次 run 里同因跳过出现了几次（默认 10）。 */
+const NO_PROGRESS_WINDOW = 10;
 export type NoProgressCause = (typeof NO_PROGRESS_CODES)[number];
 
 function noProgressFromRuns(runs: Array<{ status: string; error_code: string | null }>): { cause: NoProgressCause | null; streak: number } {
@@ -253,10 +255,16 @@ function noProgressFromRuns(runs: Array<{ status: string; error_code: string | n
     cause = first.error_code as NoProgressCause;
   }
   if (!cause) return { cause: null, streak: 0 };
+  // #2622（实测修正）—— **按窗口计数，不按连续链**。
+  // 生产 4.3 小时实测：一批排程的模式是「跳过 → 跳过 → 成功 → 跳过…」，
+  // 成功会把连续链打断，于是 streak 永远攒不到阈值，退避一次都没触发
+  // （previous_run_active 24h 从 2397/天 只降到 2258/天）。
+  // 改成「最近 N 次里同因跳过出现几次」：仍然要求最新一次是同因跳过（不干扰成功后的恢复），
+  // 但如果它在这 N 次里反复出现，就按窗口值放慢。
+  const window = runs.slice(0, NO_PROGRESS_WINDOW);
   let streak = 0;
-  for (const r of runs) {
-    if (r.status !== "skipped" || r.error_code !== cause) break;
-    streak++;
+  for (const r of window) {
+    if (r.status === "skipped" && r.error_code === cause) streak++;
   }
   return { cause, streak };
 }

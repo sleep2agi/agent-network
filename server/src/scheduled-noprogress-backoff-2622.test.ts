@@ -108,6 +108,22 @@ describe("applyNoProgressBackoff (#2622)", () => {
     expect(applyNoProgressBackoff(id)).toBeNull();
   });
 
+
+  test("alternating skip/success pattern still backs off (window, not strict chain)", () => {
+    // 生产实测：一批排程是「跳过 → 跳过 → 成功 → 跳过…」，成功会把连续链打断，
+    // 按严格链计数永远攒不到阈值。窗口计数必须能抓住它。
+    const id = seedSchedule(180);
+    addRun(id, "skipped", "previous_run_active");
+    addRun(id, "skipped", "previous_run_active");
+    addRun(id, "replied", null);            // 成功打断链
+    addRun(id, "skipped", "previous_run_active");
+    const r = applyNoProgressBackoff(id);
+    expect(r).not.toBeNull();
+    expect(r!.cause).toBe("previous_run_active");
+    expect(r!.streak).toBe(3);
+    expect(r!.effective_seconds).toBeGreaterThan(180);
+  });
+
   test("schedules that opt into no_change_backoff are left to the other mechanism", () => {
     const id = seedSchedule(180, { no_change_backoff: 1 });
     for (let i = 0; i < 5; i++) addRun(id, "skipped", "target_offline");
