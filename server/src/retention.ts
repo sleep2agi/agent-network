@@ -131,6 +131,14 @@ const DEFAULT_CHUNK_ROWS = 2000;
 const INCREMENTAL_VACUUM_PAGES = 200;
 const MAX_TABLE_MS = 10 * 60 * 1000;
 
+/** 启动后第一次 sweep 的延迟；默认 60 秒（见 startRetentionSweeper 里的实测）。 */
+function readFirstSweepDelayMs(): number {
+  const raw = process.env.COMMHUB_RETENTION_FIRST_DELAY_MS;
+  if (raw === undefined || raw.trim() === "") return 60_000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 60_000;
+}
+
 function readChunkRows(): number {
   const raw = process.env.COMMHUB_RETENTION_CHUNK_ROWS;
   const n = Number(raw);
@@ -462,6 +470,7 @@ export async function sweepRetention(cfg: RetentionConfig = readRetentionConfig(
 export function startRetentionSweeper(
   intervalMs = 60 * 60 * 1000, // 1 hour
   cfg?: RetentionConfig,
+  firstDelayMs = readFirstSweepDelayMs(),
 ): ReturnType<typeof setInterval> {
   // 防重入：一轮 sweep 现在会跨多个 tick（每批之间让出事件循环）。若上一轮还没
   // 跑完就再来一轮，两轮会同时删同一批行 —— 白做功，还会把写锁争用放大。
@@ -498,9 +507,17 @@ export function startRetentionSweeper(
       running = false;
     }
   };
-  // Fire once on startup so a long-running hub eventually catches up
-  // even if it's restarted just after the previous sweep. setImmediate
-  // (vs synchronous) keeps server startup from blocking on the sweep.
-  setImmediate(() => { void sweep(); });
+  // Fire once after startup so a long-running hub eventually catches up.
+  //
+  // #2614（第二轮）—— 不再 setImmediate。2026-10-27 18:11 的启动实测：
+  // ``` 
+  // [commhub stall] loop idle ~14085ms (served 614)      ← 重连风暴 + 启动工作
+  // [commhub retention] swept in 15693ms (max 957ms) — telemetry=3320 行/13928ms
+  // ```
+  // 同一批删除在稳态是 0.24ms/行，在启动那一分钟是 4.2ms/行（慢 17 倍）——
+  // 不是删除变慢了，是它在和重连风暴抢 CPU/WAL。而这一分钟的阻塞最容易被误记成
+  // “retention 又卡了”。默认延后 60 秒（可用 COMMHUB_RETENTION_FIRST_DELAY_MS 覆盖，0=立即）。
+  if (firstDelayMs > 0) setTimeout(() => { void sweep(); }, firstDelayMs);
+  else setImmediate(() => { void sweep(); });
   return setInterval(() => { void sweep(); }, intervalMs);
 }
