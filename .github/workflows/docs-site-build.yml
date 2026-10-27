@@ -127,9 +127,17 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('docs-site/package-lock.json') }}
 
-      - name: Install Playwright chromium (#2697)
+      # #2697 —— 2026-10-27 实测：缓存命中（269MB）后 `--with-deps` 仍然 5 分钟超时，
+      # 因为慢的是 **apt-get 装系统依赖**，不是浏览器下载。所以拆成两步、各自计时：
+      # 失败时能一眼看出是“下载”还是“apt”，而不是一个 13 分钟的 job 级 cancelled。
+      - name: Install Playwright browser (#2697)
+        timeout-minutes: 3
+        run: npx playwright install chromium
+        working-directory: docs-site
+
+      - name: Install Playwright system deps (#2697)
         timeout-minutes: 5
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install-deps chromium
         working-directory: docs-site
 
       - name: home page fits phone widths (#568)
