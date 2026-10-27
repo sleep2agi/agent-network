@@ -1,8 +1,7 @@
 ARG SOURCE_COMMIT
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS build
 # #720 — real codex binaries (the two versions in use on nodes) + bun for the unit layer.
 ENV npm_config_audit=false npm_config_fund=false
-ARG SOURCE_COMMIT
 # Pinned bun, per .github/scripts/check-bun-install-pin.py (same pin as test750).
 # 🔴 ENV, not ARG: hub-orphan-gates passes --build-arg NAME=$GITHUB_SHA for every ARG.
 ENV BUN_VERSION=1.3.14
@@ -39,9 +38,14 @@ RUN printf '%s\n' '#!/bin/sh' \
   && chmod 0755 /usr/local/bin/codex
 COPY . /workspace
 RUN rm -rf /workspace/.git /workspace/.anet
-# 缓存关键：provenance 的 ENV 必须放在**所有重活之后**。
-# 它引用 $SOURCE_COMMIT，而每次构建都传 --build-arg SOURCE_COMMIT=$GITHUB_SHA ——
-# 放在 apt / 两个 codex 二进制安装之前，会让下面每一层每次都失效，
-# buildx 的层缓存等于没用（实测：同 ref 重跑 14.9 分钟 → 14.9 分钟，零命中）。
+
+# 🔴 溯源单独一层 stage（缓存关键）。
+# `ARG SOURCE_COMMIT` 在**同一 stage 内**声明，会让它之后每一层都进入该 ARG 的缓存键；
+# 每次构建传的 $GITHUB_SHA 都不同 ⇒ apt 与两个 ~150MB codex 二进制安装层永远 miss。
+# 本地实测（仅改 --build-arg SOURCE_COMMIT）：
+#   单 stage        : apt 22.6s / codex 26.1s 全部重建
+#   多阶段（本写法）: 全部 CACHED，第二次构建累计 0.6s
+FROM build
+ARG SOURCE_COMMIT
 ENV T720_SOURCE_COMMIT=$SOURCE_COMMIT
 ENTRYPOINT ["bash", "tests/test720-codex-commhub-tool-approval/run.sh"]
