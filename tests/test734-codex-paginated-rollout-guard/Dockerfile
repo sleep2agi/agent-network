@@ -3,7 +3,6 @@ FROM node:22-bookworm-slim
 # board #734 — real codex 0.133.0 (pre-ordinal) and 0.159.2 (paginated rollouts) + bun.
 ENV npm_config_audit=false npm_config_fund=false
 ARG SOURCE_COMMIT
-ENV T734_SOURCE_COMMIT=$SOURCE_COMMIT
 # Pinned bun, per .github/scripts/check-bun-install-pin.py (same pin as test720/test750).
 # 🔴 ENV, not ARG: hub-orphan-gates passes --build-arg NAME=$GITHUB_SHA for every ARG.
 ENV BUN_VERSION=1.3.14
@@ -42,4 +41,9 @@ RUN for v in 0.133.0 0.159.2; do \
  && ln -s /usr/local/bin/codex-stub-0.159.2 /usr/local/bin/codex
 COPY . /workspace
 RUN rm -rf /workspace/.git /workspace/.anet
+# 缓存关键：provenance 的 ENV 必须放在**所有重活之后**。
+# 它引用 $SOURCE_COMMIT，而每次构建都传 --build-arg SOURCE_COMMIT=$GITHUB_SHA ——
+# 放在 apt / 两个 codex 二进制安装之前，会让下面每一层每次都失效，
+# buildx 的层缓存等于没用（实测：同 ref 重跑 14.9 分钟 → 14.9 分钟，零命中）。
+ENV T734_SOURCE_COMMIT=$SOURCE_COMMIT
 ENTRYPOINT ["bash", "tests/test734-codex-paginated-rollout-guard/run.sh"]
