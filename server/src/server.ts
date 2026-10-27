@@ -31,7 +31,7 @@ import { createSSEStream, createNetworkObserverStream, createUserEventStream, pu
 import { enterMcpInflight, leaveMcpInflight, getMcpInflightStats } from "./mcp-inflight.js";
 import { eventLoopStats, startEventLoopLagMonitor } from "./event-loop-lag.js";
 import { aliasBaselineRefreshState, refreshAliasBaseline } from "./alias-baseline.js";
-import { enqueueBroadcast } from "./broadcast-fanout.js";
+import { broadcastRecentState, enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
