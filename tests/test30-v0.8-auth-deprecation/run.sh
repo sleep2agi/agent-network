@@ -36,8 +36,18 @@ echo "[1] fresh hub bootstrap without COMMHUB_AUTH_TOKEN"
 safe_rm_rf "$HOME/.anet/server" "$HOME/.commhub"
 anet hub start --host 127.0.0.1 --port 9200 --username admin --password "$ADMIN_PW" >/tmp/hub.log 2>&1 &
 HUB_PID=$!
-for i in {1..60}; do curl -fsS http://127.0.0.1:9200/health >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS http://127.0.0.1:9200/health >/dev/null
+# 冷启动要 **npm 拉整个 commhub-server 包** 再起进程。2026-10-27 的 main 红：
+# 15:50:02 启动 → 15:51:02 还没监听（60 秒正好用完）→ curl exit 7，日志里
+# 只有一行 `curl: (7) Failed to connect`，看不出是拉包慢还是进程崩了。
+# 判据是「hub 能起来」，不是「60 秒内起来」；同时把日志尾巴打出来，别再让红变成一条空转超时。
+HUB_WAIT=180
+for i in $(seq 1 $HUB_WAIT); do curl -fsS http://127.0.0.1:9200/health >/dev/null 2>&1 && break; sleep 1; done
+if ! curl -fsS http://127.0.0.1:9200/health >/dev/null 2>&1; then
+  echo "FAIL: fresh hub bootstrap did not answer /health within ${HUB_WAIT}s"
+  echo "--- /tmp/hub.log (last 60 lines) ---"
+  tail -60 /tmp/hub.log 2>/dev/null || echo "(no hub.log)"
+  exit 1
+fi
 for i in {1..30}; do test -f "$HOME/.anet/server/admin-utok.json" && break; sleep 1; done
 test -f "$HOME/.anet/server/admin-utok.json"
 test "$(stat -c %a "$HOME/.anet/server/admin-utok.json")" = "600"
