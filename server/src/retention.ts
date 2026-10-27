@@ -63,6 +63,8 @@ export type SweepResult = {
   batches: number;
   /** 整轮里单批最长耗时（毫秒）。生产上这条数字 = 「一次 sweep 最长阻塞多久」。 */
   maxBatchMs: number;
+  /** 各阶段耗时（毫秒）：多张表 + vacuum。生产上「15 秒里谁花的」靠它，不靠猜。 */
+  phases: Record<string, number>;
   truncated: string[];
   nodeRequests: NodeRequestSweepResult;
   vacuum: {
@@ -125,6 +127,8 @@ export function readRetentionConfig(): RetentionConfig {
 // ⇒ 教训：**副本的 schema 也必须与生产一致**，否则「按副本优化」会变成新的全表扫。
 // 总耗时略增是有意的取舍：**可被打断优先于最快跑完**。
 const DEFAULT_CHUNK_ROWS = 2000;
+/** 每次 sweep 最多回收多少空闲页（≈4 KB/页）。见下面的 incremental_vacuum 注释。 */
+const INCREMENTAL_VACUUM_PAGES = 200;
 const MAX_TABLE_MS = 10 * 60 * 1000;
 
 function readChunkRows(): number {
@@ -163,6 +167,8 @@ function yieldToLoop(): Promise<void> {
 export type TableSweepResult = {
   deleted: number;
   batches: number;
+  /** 这张表这轮花了多久（毫秒）—— 生产上排查「15 秒里到底谁花的」靠它。 */
+  ms: number;
   /** 单批最长耗时（毫秒）—— 生产上「一次 sweep 最长阻塞多久」就是这个数。 */
   maxBatchMs: number;
   /** 单表跑满 maxTableMs 被截断；剩余行下一轮继续（不吞掉、不假装完成）。 */
@@ -179,20 +185,21 @@ async function sweepTable(
   // days < 0 → operator opt-out for this table; skip the DELETE.
   // days === 0 is a legitimate "sweep everything older than now"
   // (effectively a TRUNCATE); we honour it.
-  if (days < 0) return { deleted: 0, batches: 0, maxBatchMs: 0, truncated: false };
+  if (days < 0) return { deleted: 0, batches: 0, maxBatchMs: 0, ms: 0, truncated: false };
   // PostgreSQL: 单条 DELETE + autovacuum 本来就按批回收，且报文里报的 10 秒停顿
   // 出在 SQLite 侧（`#2614` 的生产现场是 SQLite）。这里不引入 rowid（pg 没有），
   // 保持原样，避免在没观测到问题的方言上改语义。
   if (db.dialect !== "sqlite") {
     try {
       const res = db.run(`DELETE FROM ${table} WHERE ${where}`, [param]);
-      return { deleted: res.changes ?? 0, batches: 1, maxBatchMs: 0, truncated: false };
+      return { deleted: res.changes ?? 0, batches: 1, maxBatchMs: 0, ms: 0, truncated: false };
     } catch (e: any) {
       console.log(`[commhub retention] sweep failed (${table}): ${e?.message ?? e}`);
-      return { deleted: 0, batches: 0, maxBatchMs: 0, truncated: false };
+      return { deleted: 0, batches: 0, maxBatchMs: 0, ms: 0, truncated: false };
     }
   }
   const startedMs = Date.now();
+  const tTable0 = performance.now();
   let deleted = 0;
   let batches = 0;
   let maxBatchMs = 0;
@@ -214,7 +221,7 @@ async function sweepTable(
         param,
         chunkRows,
       );
-      if (rows.length === 0) return { deleted, batches, maxBatchMs, truncated: false };
+      if (rows.length === 0) return { deleted, batches, maxBatchMs, ms: Math.round(performance.now() - tTable0), truncated: false };
       const ids = rows.map((r) => r.r);
       const placeholders = ids.map((_, i) => `?${i + 1}`).join(",");
       const res = db.run(`DELETE FROM ${table} WHERE rowid IN (${placeholders})`, ids);
@@ -222,20 +229,20 @@ async function sweepTable(
       batches += 1;
       maxBatchMs = Math.max(maxBatchMs, performance.now() - batchT0);
       // 这一批没取满 ⇒ 已经没有更多符合条件的行了，收工。
-      if (rows.length < chunkRows) return { deleted, batches, maxBatchMs, truncated: false };
+      if (rows.length < chunkRows) return { deleted, batches, maxBatchMs, ms: Math.round(performance.now() - tTable0), truncated: false };
       if (Date.now() - startedMs > MAX_TABLE_MS) {
         console.log(
           `[commhub retention] ${table}: stopped after ${batches} batches / ${deleted} rows ` +
             `(>${Math.round(MAX_TABLE_MS / 60000)}min); remaining rows continue next sweep`,
         );
-        return { deleted, batches, maxBatchMs, truncated: true };
+        return { deleted, batches, maxBatchMs, ms: Math.round(performance.now() - tTable0), truncated: true };
       }
       // 让出事件循环：这是 #2614 的全部要点 —— 停顿的可感知单位是「单批」。
       await yieldToLoop();
     }
   } catch (e: any) {
     console.log(`[commhub retention] sweep failed (${table}): ${e?.message ?? e}`);
-    return { deleted, batches, maxBatchMs, truncated: false };
+    return { deleted, batches, maxBatchMs, ms: Math.round(performance.now() - tTable0), truncated: false };
   }
 }
 
@@ -398,7 +405,11 @@ export async function sweepRetention(cfg: RetentionConfig = readRetentionConfig(
     // weren't, the operator would have to run a full one-time VACUUM
     // to migrate — out of scope for the sweeper.
     const freelistBefore = db.get<{ freelist_count: number }>("PRAGMA freelist_count");
-    db.exec("PRAGMA incremental_vacuum");
+    // #2614 —— 必须带页数上限。`PRAGMA incremental_vacuum`（不带参数）会**一次回收
+    // 全部空闲页**：生产 `.169` 上线时那一拍整轮 15.3s，其中大部分是这个语句
+    // （它走 db.exec，不进 slow-sql 日志，所以第一眼看不见）。
+    // 每小时回 200 页（≈800 KB）足够跟上增长，又不会变成一次长阻塞；剩下的下次继续。
+    db.exec(`PRAGMA incremental_vacuum(${INCREMENTAL_VACUUM_PAGES})`);
     const freelistAfter = db.get<{ freelist_count: number }>("PRAGMA freelist_count");
     incrementalFreedPages =
       (freelistBefore?.freelist_count ?? 0) - (freelistAfter?.freelist_count ?? 0);
@@ -422,6 +433,13 @@ export async function sweepRetention(cfg: RetentionConfig = readRetentionConfig(
       telemetry.batches + taskEvents.batches + inbox.batches +
       tasksSafeTerminal.batches + tasksRepliedChildSafe.batches + auditLog.batches,
     // 生产上「一次 sweep 最长阻塞多久」= 这个数字（#2614 的验收看它）
+    phases: {
+      telemetry: telemetry.ms,
+      events: taskEvents.ms,
+      inbox: inbox.ms,
+      tasks: tasksSafeTerminal.ms + tasksRepliedChildSafe.ms,
+      audit: auditLog.ms,
+    },
     maxBatchMs: Math.round(Math.max(
       telemetry.maxBatchMs, taskEvents.maxBatchMs, inbox.maxBatchMs,
       tasksSafeTerminal.maxBatchMs, tasksRepliedChildSafe.maxBatchMs, auditLog.maxBatchMs,
@@ -465,7 +483,8 @@ export function startRetentionSweeper(
       const nr = r.nodeRequests;
       if (totalDeletes > 0 || nr.purged > 0 || nr.deleted > 0 || nr.timedOut > 0 || r.vacuum.errored) {
         console.log(
-          `[commhub retention] swept in ${r.durationMs}ms (${r.batches} batches) — ` +
+          `[commhub retention] swept in ${r.durationMs}ms (${r.batches} batches, max ${r.maxBatchMs}ms) — ` +
+            `phases ${Object.entries(r.phases).map(([k, v]) => `${k}=${v}ms`).join(" ")} · ` +
             `telemetry=${r.deletes.agent_telemetry} events=${r.deletes.task_events} ` +
             `inbox=${r.deletes.inbox} tasks=${r.deletes.tasks} audit=${r.deletes.audit_log} ` +
             `nodeReqPurged=${nr.purged} nodeReqDeleted=${nr.deleted} nodeReqTimedOut=${nr.timedOut} ` +
