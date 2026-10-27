@@ -676,6 +676,12 @@ jobs:
       docs_only: ${{ steps.plan.outputs.docs_only }}
       skip: ${{ steps.plan.outputs.skip }}
       l1_only: ${{ steps.plan.outputs.l1_only }}
+      # #2800 —— 「发版提交」在 main 上不再触发重型矩阵。
+      # 现场（2026-10-27 23:45）：一条只改版本号+发布说明的 chore(release) 提交
+      # 触发了 176 个 job，把 runner 池占满，导致**发版门自己排了 6 分钟没动**。
+      # 判据只看提交信息（chore(release)），不看 diff —— diff 判据会把“改了依赖的
+      # 版本号”和“改了代码”混在一起，误判代价比多跑一轮 CI 高得多。
+      release_only: ${{ steps.plan.outputs.release_only }}
     steps:
       # depth 2:pull_request 检出的是 refs/pull/N/merge,要拿到它的第一个父提交(base 尖)。
       - uses: actions/checkout@v4
@@ -690,6 +696,19 @@ jobs:
       - name: Plan
         id: plan
         run: python3 .github/scripts/ci-docs-only.py plan >> "$GITHUB_OUTPUT"
+
+      # #2800 —— 发版提交识别（只看 push 到 main 的提交信息首行）。
+      # PR 上永远为空：PR 的改动必须跑全套，这条只用来避免“发版提交把自己的发版门堵住”。
+      - name: Release-commit classifier
+        id: release
+        run: |
+          set -euo pipefail
+          msg='${{ github.event_name == 'push' && github.event.head_commit.message || '' }}'
+          first=$(printf '%s' "$msg" | head -n1)
+          case "$first" in
+            "chore(release):"*) echo "release_only=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "release_only=false" >> "$GITHUB_OUTPUT" ;;
+          esac
       # #2136 第二步：**只报告**，不改变任何 job 的跑/不跑。
       # 目的：先积累"如果按套件子树收窄，会跳过哪些套件"的真实数据（每个 PR 的 job summary 里），
       # 人肉确认没漏跑之后，才谈把它接进 if:。判据在 scripts/qa-suite-scope-report.py 文件头。
@@ -2147,7 +2166,10 @@ jobs:
     # 名字说得出它管什么：改名规范化 / 登录闸 / daemon 私有状态 / 遗留修复 / 任务证据 / owner 门控调度。
     name: hub semantics + guards (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    # #2800 —— 发版提交（只改版本号/发布说明/verify 锚点）在 main 上跳过这 95 个分片：
+    # 它们的代码内容在上一个 PR 里已经跑过同一套矩阵；再跑一遍只会把 runner 池占满，
+    # 让 release-gate 排在后面（2026-10-27 实测卡了 6 分钟）。
+    if: ${{ !cancelled() && needs.changes.outputs.release_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
