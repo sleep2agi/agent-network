@@ -63,6 +63,61 @@ For these lists, an empty value, or one with only spaces and commas, counts as u
 
 Agents find due tasks with `requirements_list`: `overdue: true` lists overdue tasks only; `due_within_days: N` lists tasks due from today to N days from now that are not overdue yet (0 = today). Both only include open tasks. The REST list takes the same names (`overdue=1`, `due_within_days=N`).
 
+
+## Delivery and alert thresholds (since 0.9.0-preview.164)
+
+Once a task is dispatched, three thresholds govern what happens next. They only affect **alerts and cleanup** — not the delivery/retry semantics themselves.
+
+### Offline target: cleaned up after 30 minutes
+
+A task sent to an **offline** node does not sit around for 24 hours: after 30 minutes it becomes `expired`, its inbox row is acked, and the sender gets a notice. The recorded event is `task.expired`.
+
+Only the "target is definitely gone" case is handled:
+
+| Target state | Action |
+|---|---|
+| `offline` / no session row | past the threshold ⇒ expire |
+| `working` (busy with another task) | **not touched** — reported as `queued_behind_busy` |
+| already consumed (`consumed_at` set) | not touched (orphan detection owns it) |
+
+- `COMMHUB_OFFLINE_DELIVERY_TTL_MINUTES`: default `30`; `0` disables.
+
+### "Delivery looks stuck" alerts: judged against each target's own pace
+
+When a task has been delivered but the target has not started consuming it, the Hub records a warning event. The threshold is not a global constant:
+
+```
+waited > max(global floor, that target's own p99 × 1.5)   (capped at 30 minutes)
+```
+
+- global floors: 10 minutes (tier 1), 30 minutes (tier 2);
+- the per-target p99 is recomputed hourly from the last 7 days of **successful** tasks (needs ≥ 20 samples, otherwise the global floor applies);
+- the 30-minute cap: however slow a node is, waiting 30 minutes must still alert.
+
+So "everyone is running long turns tonight" no longer floods the alert stream, while "one specific node is stuck" still shows up. When the target is busy with another task the event is `queued_behind_busy_*`; only idle/offline targets produce `delivered_stale_*`.
+
+To see the thresholds actually in force (the table is a cache — clear it to fall back to the global floors):
+
+```bash
+sqlite3 ~/.commhub/commhub.db "SELECT alias, p99_seconds, samples FROM alias_latency_baseline ORDER BY p99_seconds DESC LIMIT 10;"
+```
+
+### Repeatedly failing schedules: automatic slowdown
+
+A schedule that keeps failing does not keep retrying at its normal interval:
+
+```
+consecutive failures < N  → unchanged
+consecutive failures ≥ N  → interval × 2 (doubles per extra failure, capped at 1 hour)
+one success               → interval restored immediately
+```
+
+- `COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS`: default `6`; `0` disables;
+- only `interval` schedules in `active` state are affected;
+- mutually exclusive with the "no changes" backoff (`no_change_backoff`) — they never rewrite the same column.
+
+> Why: an external cause such as an exhausted quota, retried every 3 minutes, produces hundreds of failed rows a day and drowns the real failure rate. Slowing down keeps self-healing while keeping the metrics honest.
+
 ## GitHub Issues
 
 In the detail drawer, use + Link issue. Paste an issue URL, or type `owner/repo#123` (number 1–10000000). You can link several, up to 8 by hand. Linking and unlinking save immediately. Cards and the list show how many are linked, and a click opens the issue in the browser.
