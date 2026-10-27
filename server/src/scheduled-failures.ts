@@ -324,11 +324,18 @@ export function applyNoProgressBackoff(scheduleId: string, now = new Date()): { 
   const effective = Math.min(cap, base * 2 ** Math.min(streak - from + 1, 5));
   const previous = row.backoff_effective_seconds ?? base;
   let next = row.next_run_at;
-  if (effective !== previous && next) {
+  // 🔴 生产实测（2026-10-28，`.181` 的两行日志）：
+  //   offline-backoff        effective=5760s next_before=+180s   ← 退避值没推进去
+  //   offline-backoff-final  next_after=+360s                    ← 二次 advance 又加了一个 base
+  // 根因就在这里：原来用 `effective !== previous` 做守卫，退避一旦进入**稳态**（例如已是 5760），
+  // 这个条件恒为 false ⇒ 不再推 next_run_at；而调用方在此之前刚 `advance()` 把 next 重置成 +base。
+  // 于是「退避值写着 5760，实际每 360s 跳一次」，且永远不会自愈。
+  // 正确语义：只要这一步是「同因跳过」，next_run_at 至少要 ≥ now + effective（只能往后推，不往前拉）。
+  if (next) {
     const candidate = now.getTime() + effective * 1000;
     const existing = parseHubTimestamp(next);
     if (existing !== null) {
-      next = new Date(effective > previous ? Math.max(existing, candidate) : Math.min(existing, candidate)).toISOString();
+      next = new Date(Math.max(existing, candidate)).toISOString();
     }
   }
   db.run(
