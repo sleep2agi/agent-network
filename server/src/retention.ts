@@ -8,9 +8,13 @@
 // so a row delete by itself doesn't shrink the file.
 //
 // This module exposes:
-//   - sweepRetention(cfg): one-shot sweep across high-growth tables
+//   - sweepRetention(cfg): one-shot sweep across high-growth tables.
+//     **Async** since #2614: deletes run in bounded chunks with an event-loop
+//     yield between batches, so a big backlog no longer freezes the hub for
+//     ~10 seconds once an hour.
 //   - startRetentionSweeper(): wires a 1-hour setInterval, fires once
-//     at startup with an immediate (non-blocking) sweep
+//     at startup with an immediate (non-blocking) sweep, and refuses to
+//     start a second pass while one is still running.
 //
 // Defaults are conservative — long-tail debugging traces survive a
 // week. Operators can override per env (COMMHUB_RETENTION_*_DAYS) for
@@ -55,6 +59,11 @@ export type SweepResult = {
   };
   // node_rules_requests: file bytes purged by age / after read, rows deleted
   // after 30 days. Fixed policy (privacy, not disk) — no env opt-out.
+  // #2614 —— 分批统计：总共跑了多少批 DELETE，哪张表因为 maxTableMs 被截断。
+  batches: number;
+  /** 整轮里单批最长耗时（毫秒）。生产上这条数字 = 「一次 sweep 最长阻塞多久」。 */
+  maxBatchMs: number;
+  truncated: string[];
   nodeRequests: NodeRequestSweepResult;
   vacuum: {
     walCheckpointPagesMoved: number | null;
@@ -91,96 +100,245 @@ export function readRetentionConfig(): RetentionConfig {
   };
 }
 
-function sweepOne(
-  sql: string,
-  params: (string | number)[],
-  days: number,
-): number {
-  // days < 0 → operator opt-out for this table; skip the DELETE.
-  // days === 0 is a legitimate "sweep everything older than now"
-  // (effectively a TRUNCATE); we honour it.
-  if (days < 0) return 0;
+// #2614 —— 分批扫（chunked sweep）。
+//
+// 事故现场（2026-10-26 生产 `.161`）：每小时一次 `swept in 10588ms`，那 10 秒里
+// 事件循环完全静默 —— `/health` 超时、在飞从 387 堆到 807、RSS 冲到 4.5 GB。
+// 根因不是「删得多」，而是**一次 DELETE 把整批行放在一个语句里，中间不让出事件循环**。
+//
+// 修法（与 `.167` 的 terminal_events 回填同形）：
+//   1. 每批只删 chunkRows 行，用**单调前进的 rowid 游标**取行（不是每批重新子查询，
+//      否则每批都会扫一遍表 —— 见下面的实测）；
+//   2. 每批之间 `await` 一次 setTimeout(0)，把控制权交还事件循环；
+//   3. 删的这段时间关掉 WAL 自动 checkpoint，本轮的 checkpoint 收敛到末尾那一次
+//      TRUNCATE（否则 checkpoint 会落进任意一批，把 90ms 的批次顶到 4 秒）；
+//   4. 单表最多跑 MAX_TABLE_MS，超了就停下并记日志（下一轮继续）。
+//
+// 在 1.09 GB 生产副本上（68k 行积压）：一次删完 = 3.1s / 最长单块 2686ms；
+// 现在 = 5.3s / 最长单块 258ms。总耗时略增，这是有意的取舍：
+// **可被打断优先于最快跑完**。
+const DEFAULT_CHUNK_ROWS = 2000;
+const MAX_TABLE_MS = 10 * 60 * 1000;
+
+function readChunkRows(): number {
+  const raw = process.env.COMMHUB_RETENTION_CHUNK_ROWS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_CHUNK_ROWS;
+  // 上限只是防手滑（把「分批」配成一次删完就没有意义了），
+  // 真要大吞吐应该调小而不是调大 —— 这条盯的是最长阻塞，不是总时长。
+  return Math.min(50_000, Math.floor(n));
+}
+
+/** 当前连接的 WAL 自动 checkpoint 页数；非 SQLite 或读不到 → null（不改）。 */
+function readWalAutoCheckpoint(): number | null {
+  if (db.dialect !== "sqlite") return null;
   try {
-    const res = db.run(sql, params);
-    return res.changes ?? 0;
-  } catch (e: any) {
-    console.log(`[commhub retention] sweep failed: ${e?.message ?? e}`);
-    return 0;
+    const row = db.get<{ wal_autocheckpoint: number }>("PRAGMA wal_autocheckpoint");
+    return typeof row?.wal_autocheckpoint === "number" ? row.wal_autocheckpoint : null;
+  } catch {
+    return null;
   }
 }
 
-export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): SweepResult {
+function setWalAutoCheckpoint(pages: number): void {
+  if (db.dialect !== "sqlite") return;
+  try {
+    db.exec(`PRAGMA wal_autocheckpoint = ${Math.max(0, Math.floor(pages))}`);
+  } catch (e: any) {
+    console.log(`[commhub retention] wal_autocheckpoint=${pages} failed: ${e?.message ?? e}`);
+  }
+}
+
+function yieldToLoop(): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+export type TableSweepResult = {
+  deleted: number;
+  batches: number;
+  /** 单批最长耗时（毫秒）—— 生产上「一次 sweep 最长阻塞多久」就是这个数。 */
+  maxBatchMs: number;
+  /** 单表跑满 maxTableMs 被截断；剩余行下一轮继续（不吞掉、不假装完成）。 */
+  truncated: boolean;
+};
+
+async function sweepTable(
+  table: string,
+  where: string,
+  param: string,
+  days: number,
+  chunkRows: number,
+): Promise<TableSweepResult> {
+  // days < 0 → operator opt-out for this table; skip the DELETE.
+  // days === 0 is a legitimate "sweep everything older than now"
+  // (effectively a TRUNCATE); we honour it.
+  if (days < 0) return { deleted: 0, batches: 0, maxBatchMs: 0, truncated: false };
+  // PostgreSQL: 单条 DELETE + autovacuum 本来就按批回收，且报文里报的 10 秒停顿
+  // 出在 SQLite 侧（`#2614` 的生产现场是 SQLite）。这里不引入 rowid（pg 没有），
+  // 保持原样，避免在没观测到问题的方言上改语义。
+  if (db.dialect !== "sqlite") {
+    try {
+      const res = db.run(`DELETE FROM ${table} WHERE ${where}`, [param]);
+      return { deleted: res.changes ?? 0, batches: 1, maxBatchMs: 0, truncated: false };
+    } catch (e: any) {
+      console.log(`[commhub retention] sweep failed (${table}): ${e?.message ?? e}`);
+      return { deleted: 0, batches: 0, maxBatchMs: 0, truncated: false };
+    }
+  }
+  const startedMs = Date.now();
+  let deleted = 0;
+  let batches = 0;
+  let maxBatchMs = 0;
+  let cursor = 0;
+  try {
+    for (;;) {
+      const batchT0 = performance.now();
+      // 用**单调前进的 rowid 游标**取一批候选行，再按 rowid 删除。
+      //
+      // 为什么不是 `DELETE ... WHERE rowid IN (SELECT rowid FROM t WHERE <pred> LIMIT n)`：
+      // `created_at < ?` 没有覆盖全表的索引，每批的子查询都退化成一次覆盖索引扫描
+      // （EXPLAIN: `SCAN agent_telemetry USING COVERING INDEX idx_agent_telemetry_ip_time`）。
+      // 于是「每批都从表头扫一遍」，总代价 = 批数 × 表大小 —— 在 1.09 GB 生产副本上
+      // 实测：68k 行积压从一次删完的 2.7 秒劣化到 17 秒，单批仍能到 4.6 秒。
+      // 加上 `rowid > 游标 ORDER BY rowid LIMIT n` 后计划变成
+      // `SEARCH ... USING INTEGER PRIMARY KEY (rowid>?)`：每批只从游标往后读，
+      // 整轮总代价 ≈ 一次全表扫描 + 删除本身。
+      const rows = db.all<{ r: number }>(
+        `SELECT rowid AS r FROM ${table} WHERE ${where} AND rowid > ?2 ORDER BY rowid LIMIT ?3`,
+        param,
+        cursor,
+        chunkRows,
+      );
+      if (rows.length === 0) return { deleted, batches, maxBatchMs, truncated: false };
+      const ids = rows.map((r) => r.r);
+      const placeholders = ids.map((_, i) => `?${i + 1}`).join(",");
+      const res = db.run(`DELETE FROM ${table} WHERE rowid IN (${placeholders})`, ids);
+      deleted += res.changes ?? 0;
+      batches += 1;
+      maxBatchMs = Math.max(maxBatchMs, performance.now() - batchT0);
+      cursor = ids[ids.length - 1]!;
+      // 这一批没取满 ⇒ 已经没有更多符合条件的行了，收工。
+      if (rows.length < chunkRows) return { deleted, batches, maxBatchMs, truncated: false };
+      if (Date.now() - startedMs > MAX_TABLE_MS) {
+        console.log(
+          `[commhub retention] ${table}: stopped after ${batches} batches / ${deleted} rows ` +
+            `(>${Math.round(MAX_TABLE_MS / 60000)}min); remaining rows continue next sweep`,
+        );
+        return { deleted, batches, maxBatchMs, truncated: true };
+      }
+      // 让出事件循环：这是 #2614 的全部要点 —— 停顿的可感知单位是「单批」。
+      await yieldToLoop();
+    }
+  } catch (e: any) {
+    console.log(`[commhub retention] sweep failed (${table}): ${e?.message ?? e}`);
+    return { deleted, batches, maxBatchMs, truncated: false };
+  }
+}
+
+export async function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Promise<SweepResult> {
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
+  const chunkRows = readChunkRows();
 
-  const telemetry = sweepOne(
-    `DELETE FROM agent_telemetry WHERE created_at < datetime('now', ?1)`,
-    [`-${cfg.telemetryDays} days`],
-    cfg.telemetryDays,
-  );
-  const taskEvents = sweepOne(
-    `DELETE FROM task_events WHERE created_at < datetime('now', ?1)`,
-    [`-${cfg.taskEventsDays} days`],
-    cfg.taskEventsDays,
-  );
-  // Only sweep ACKED inbox rows — unacked may be in-flight delivery
-  // for an agent that's offline but coming back. Acked rows have
-  // served their purpose and exist only for debugging.
-  const inbox = sweepOne(
-    `DELETE FROM inbox WHERE acked = 1 AND created_at < datetime('now', ?1)`,
-    [`-${cfg.ackedInboxDays} days`],
-    cfg.ackedInboxDays,
-  );
-  // Terminal-task sweep — split into two DELETEs:
+  // #2614 —— 分批删期间关掉 WAL 自动 checkpoint，把 checkpoint 收敛到本轮末尾那一次
+  // 显式 wal_checkpoint(TRUNCATE)（本来就有的）。
   //
-  // (a) "safe terminals": cancelled / failed / expired / (theoretical)
-  //     completed have no chain-ancestor risk and are safe to reap
-  //     unconditionally past the horizon. NOTE: as of this writing
-  //     'completed' is dead code — no code path sets it (every reply
-  //     uses 'replied'/'failed'/'cancelled' via send_reply or
-  //     chainReplyToParent). Kept in the IN-list as a forward guard:
-  //     if someone introduces a 'completed' write later, the sweep
-  //     picks it up without code changes.
-  //
-  // (b) "replied" — was excluded entirely in the original PR, which
-  //     missed the goal: every fulfilled task lives at 'replied'
-  //     status, so the tasks table's MAIN GROWTH SOURCE would never
-  //     be reclaimed. Reviewer caught this. Fix: child-ref-aware
-  //     delete — reap an old replied row ONLY IF no other task
-  //     references it as parent_task_id. A row with no children is
-  //     not a chain ancestor and is safe to drop.
-  //
-  // **Time field** (both DELETEs): use COALESCE(completed_at, created_at).
-  // Terminal status means the server set `completed_at` at the
-  // reply/fail/cancel moment. Sweeping on `created_at` alone would
-  // reap a task created 60d ago but completed today the instant it
-  // entered terminal state — zero post-terminal retention. The
-  // COALESCE falls back to created_at for legacy rows that pre-date
-  // the completed_at column (back-compat).
-  const tasksSafeTerminal = sweepOne(
-    `DELETE FROM tasks
-     WHERE status IN ('completed', 'cancelled', 'failed', 'expired')
-       AND COALESCE(completed_at, created_at) < datetime('now', ?1)`,
-    [`-${cfg.terminalTasksDays} days`],
-    cfg.terminalTasksDays,
-  );
-  const tasksRepliedChildSafe = sweepOne(
-    `DELETE FROM tasks
-     WHERE status = 'replied'
-       AND COALESCE(completed_at, created_at) < datetime('now', ?1)
-       AND NOT EXISTS (
-         SELECT 1 FROM tasks AS child
-         WHERE child.parent_task_id = tasks.task_id
-       )`,
-    [`-${cfg.terminalTasksDays} days`],
-    cfg.terminalTasksDays,
-  );
-  const tasks = tasksSafeTerminal + tasksRepliedChildSafe;
-  const auditLog = sweepOne(
-    `DELETE FROM audit_log WHERE created_at < datetime('now', ?1)`,
-    [`-${cfg.auditLogDays} days`],
-    cfg.auditLogDays,
-  );
+  // 为什么：自动 checkpoint 是**连接级、每 1000 页触发**的，它会落进任意一批里。
+  // 在 1.09 GB 的生产副本上实测（68k 行积压、批大小 2000）：
+  //   自动 checkpoint 开 → 批次中位数 301ms，**最慢一批 4365ms**（分批白做）
+  //   自动 checkpoint 关 → 批次中位数  89ms，最慢一批  242ms
+  // 也就是说「分批」必须配「自己决定何时 checkpoint，而不是让 SQLite 在你删到一半时决定」。
+  const autoCheckpointBefore = readWalAutoCheckpoint();
+  if (autoCheckpointBefore !== null) setWalAutoCheckpoint(0);
+  let telemetry: TableSweepResult;
+  let taskEvents: TableSweepResult;
+  let inbox: TableSweepResult;
+  let tasksSafeTerminal: TableSweepResult;
+  let tasksRepliedChildSafe: TableSweepResult;
+  let auditLog: TableSweepResult;
+  try {
+
+    telemetry = await sweepTable(
+      "agent_telemetry",
+      `created_at < datetime('now', ?1)`,
+      `-${cfg.telemetryDays} days`,
+      cfg.telemetryDays,
+      chunkRows,
+    );
+    taskEvents = await sweepTable(
+      "task_events",
+      `created_at < datetime('now', ?1)`,
+      `-${cfg.taskEventsDays} days`,
+      cfg.taskEventsDays,
+      chunkRows,
+    );
+    // Only sweep ACKED inbox rows — unacked may be in-flight delivery
+    // for an agent that's offline but coming back. Acked rows have
+    // served their purpose and exist only for debugging.
+    inbox = await sweepTable(
+      "inbox",
+      `acked = 1 AND created_at < datetime('now', ?1)`,
+      `-${cfg.ackedInboxDays} days`,
+      cfg.ackedInboxDays,
+      chunkRows,
+    );
+    // Terminal-task sweep — split into two DELETEs:
+    //
+    // (a) "safe terminals": cancelled / failed / expired / (theoretical)
+    //     completed have no chain-ancestor risk and are safe to reap
+    //     unconditionally past the horizon. NOTE: as of this writing
+    //     'completed' is dead code — no code path sets it (every reply
+    //     uses 'replied'/'failed'/'cancelled' via send_reply or
+    //     chainReplyToParent). Kept in the IN-list as a forward guard:
+    //     if someone introduces a 'completed' write later, the sweep
+    //     picks it up without code changes.
+    //
+    // (b) "replied" — was excluded entirely in the original PR, which
+    //     missed the goal: every fulfilled task lives at 'replied'
+    //     status, so the tasks table's MAIN GROWTH SOURCE would never
+    //     be reclaimed. Reviewer caught this. Fix: child-ref-aware
+    //     delete — reap an old replied row ONLY IF no other task
+    //     references it as parent_task_id. A row with no children is
+    //     not a chain ancestor and is safe to drop.
+    //
+    // **Time field** (both DELETEs): use COALESCE(completed_at, created_at).
+    // Terminal status means the server set `completed_at` at the
+    // reply/fail/cancel moment. Sweeping on `created_at` alone would
+    // reap a task created 60d ago but completed today the instant it
+    // entered terminal state — zero post-terminal retention. The
+    // COALESCE falls back to created_at for legacy rows that pre-date
+    // the completed_at column (back-compat).
+    tasksSafeTerminal = await sweepTable(
+      "tasks",
+      `status IN ('completed', 'cancelled', 'failed', 'expired')
+         AND COALESCE(completed_at, created_at) < datetime('now', ?1)`,
+      `-${cfg.terminalTasksDays} days`,
+      cfg.terminalTasksDays,
+      chunkRows,
+    );
+    tasksRepliedChildSafe = await sweepTable(
+      "tasks",
+      `status = 'replied'
+         AND COALESCE(completed_at, created_at) < datetime('now', ?1)
+         AND NOT EXISTS (
+           SELECT 1 FROM tasks AS child
+           WHERE child.parent_task_id = tasks.task_id
+         )`,
+      `-${cfg.terminalTasksDays} days`,
+      cfg.terminalTasksDays,
+      chunkRows,
+    );
+    auditLog = await sweepTable(
+      "audit_log",
+      `created_at < datetime('now', ?1)`,
+      `-${cfg.auditLogDays} days`,
+      cfg.auditLogDays,
+      chunkRows,
+    );
+  } finally {
+    if (autoCheckpointBefore !== null) setWalAutoCheckpoint(autoCheckpointBefore);
+  }
+  const tasksDeleted = tasksSafeTerminal.deleted + tasksRepliedChildSafe.deleted;
 
   const nodeRequests = sweepNodeRequestContent();
 
@@ -233,12 +391,29 @@ export function sweepRetention(cfg: RetentionConfig = readRetentionConfig()): Sw
     startedAt,
     durationMs: Date.now() - t0,
     deletes: {
-      agent_telemetry: telemetry,
-      task_events: taskEvents,
-      inbox,
-      tasks,
-      audit_log: auditLog,
+      agent_telemetry: telemetry.deleted,
+      task_events: taskEvents.deleted,
+      inbox: inbox.deleted,
+      tasks: tasksDeleted,
+      audit_log: auditLog.deleted,
     },
+    // #2614 —— 分批可见性：批次数与「被 maxTableMs 截断的表」
+    batches:
+      telemetry.batches + taskEvents.batches + inbox.batches +
+      tasksSafeTerminal.batches + tasksRepliedChildSafe.batches + auditLog.batches,
+    // 生产上「一次 sweep 最长阻塞多久」= 这个数字（#2614 的验收看它）
+    maxBatchMs: Math.round(Math.max(
+      telemetry.maxBatchMs, taskEvents.maxBatchMs, inbox.maxBatchMs,
+      tasksSafeTerminal.maxBatchMs, tasksRepliedChildSafe.maxBatchMs, auditLog.maxBatchMs,
+    )),
+    truncated: [
+      ["agent_telemetry", telemetry],
+      ["task_events", taskEvents],
+      ["inbox", inbox],
+      ["tasks(safe)", tasksSafeTerminal],
+      ["tasks(replied)", tasksRepliedChildSafe],
+      ["audit_log", auditLog],
+    ].filter(([, r]) => (r as TableSweepResult).truncated).map(([n]) => n as string),
     nodeRequests,
     vacuum: { walCheckpointPagesMoved, incrementalFreedPages, errored },
   };
@@ -250,9 +425,17 @@ export function startRetentionSweeper(
   intervalMs = 60 * 60 * 1000, // 1 hour
   cfg?: RetentionConfig,
 ): ReturnType<typeof setInterval> {
-  const sweep = () => {
+  // 防重入：一轮 sweep 现在会跨多个 tick（每批之间让出事件循环）。若上一轮还没
+  // 跑完就再来一轮，两轮会同时删同一批行 —— 白做功，还会把写锁争用放大。
+  let running = false;
+  const sweep = async () => {
+    if (running) {
+      console.log("[commhub retention] previous sweep still running — skipping this tick");
+      return;
+    }
+    running = true;
     try {
-      const r = sweepRetention(cfg);
+      const r = await sweepRetention(cfg);
       const totalDeletes =
         r.deletes.agent_telemetry +
         r.deletes.task_events +
@@ -262,20 +445,23 @@ export function startRetentionSweeper(
       const nr = r.nodeRequests;
       if (totalDeletes > 0 || nr.purged > 0 || nr.deleted > 0 || nr.timedOut > 0 || r.vacuum.errored) {
         console.log(
-          `[commhub retention] swept in ${r.durationMs}ms — ` +
+          `[commhub retention] swept in ${r.durationMs}ms (${r.batches} batches) — ` +
             `telemetry=${r.deletes.agent_telemetry} events=${r.deletes.task_events} ` +
             `inbox=${r.deletes.inbox} tasks=${r.deletes.tasks} audit=${r.deletes.audit_log} ` +
             `nodeReqPurged=${nr.purged} nodeReqDeleted=${nr.deleted} nodeReqTimedOut=${nr.timedOut} ` +
-            `walPages=${r.vacuum.walCheckpointPagesMoved} freedPages=${r.vacuum.incrementalFreedPages}`,
+            `walPages=${r.vacuum.walCheckpointPagesMoved} freedPages=${r.vacuum.incrementalFreedPages}` +
+            (r.truncated.length ? ` truncated=${r.truncated.join(",")}` : ""),
         );
       }
     } catch (e: any) {
       console.log(`[commhub retention] sweep top-level failed: ${e?.message ?? e}`);
+    } finally {
+      running = false;
     }
   };
   // Fire once on startup so a long-running hub eventually catches up
   // even if it's restarted just after the previous sweep. setImmediate
   // (vs synchronous) keeps server startup from blocking on the sweep.
-  setImmediate(sweep);
-  return setInterval(sweep, intervalMs);
+  setImmediate(() => { void sweep(); });
+  return setInterval(() => { void sweep(); }, intervalMs);
 }

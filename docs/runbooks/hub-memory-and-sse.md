@@ -227,6 +227,50 @@ grep "commhub slow-sql" ~/.commhub/pm2-hub-out.log | tail -5
 一条是 retention 的索引缺失（可修，已修），另一条是至今未定性的 14–47 秒随机停顿。
 **把两件事分开记，比合成一个“Hub 不稳”的结论有用得多。**
 
+### retention 那次停顿的修法（#2614，`0.9.0-preview.168`）
+
+每小时一次 `swept in 8–11s` 的静默，根因不是“删得多”，而是**一次 DELETE 把整批行放在同一个语句里，
+中间不让出事件循环**。`.168` 起改成：
+
+```
+每批 ≤ COMMHUB_RETENTION_CHUNK_ROWS（默认 2000）行
+  → 用单调前进的 rowid 游标取行 + 按 rowid 删
+  → 每批之间 await 一次 setTimeout(0)，把控制权交还事件循环
+  → 删的这段时间关掉 WAL 自动 checkpoint，本轮的 checkpoint 收敛到末尾那一次 TRUNCATE
+  → 单表最多跑 10 分钟；超了记 truncated 并下一轮继续
+  → 同一时刻只允许一轮 sweep（上一轮没跑完就跳过这一拍）
+```
+
+**这两条都是被副本实验逼出来的**（1.09 GB 生产副本，68k 行积压）：
+
+| 写法 | 合计 | 最长单次阻塞 |
+|---|---|---|
+| 一次 DELETE（旧） | 3.1 s | **2686 ms** |
+| 分批 + 每批重新子查询（第一版） | 17 s | **4634 ms** ← 更糟 |
+| 分批 + rowid 游标，但留着自动 checkpoint | 13.6 s | **4221 ms** |
+| 分批 + rowid 游标 + 关自动 checkpoint（现在） | 5.4 s | **281 ms** |
+
+第一版为什么更糟：`WHERE created_at < ? LIMIT n` 没有覆盖全表的索引，每批的子查询都退化成
+一次覆盖索引扫描（`EXPLAIN: SCAN … USING COVERING INDEX idx_agent_telemetry_ip_time`），
+于是「每批从表头扫一遍」，总代价 = 批数 × 表大小。加上 `rowid > 游标 ORDER BY rowid`
+之后计划变成 `SEARCH … USING INTEGER PRIMARY KEY (rowid>?)`，每批只从游标往后读。
+
+第二版为什么还慢：自动 checkpoint 是**连接级、每 1000 页触发**的，会落进任意一批里，
+实测把中位数 89ms 的批次顶到 4.3 秒 —— **分批必须配「自己决定何时 checkpoint」**。
+
+验证（上线后第一小时内应能看到）：
+
+```bash
+grep "commhub retention" ~/.commhub/pm2-hub-out.log | tail -3
+#   期望：swept in <2000ms (N batches, max <300ms) —— 8–11 秒的单块变多批
+curl -s localhost:9200/health | python3 -c 'import sys,json;e=json.load(sys.stdin)["event_loop"];print(e.get("max_gap_ms"),e.get("stall_count"))'
+#   期望：不再出现每小时一次的 ~10 秒 gap
+```
+
+**取舍**：分批 + 让出会让总耗时略增（3.1 s → 5.3 s，可被打断）。
+这里选的是「可被打断」而不是「最快跑完」——一次 10 秒不可打断的停顿，
+代价是 800 个请求在飞和 4.5 GB RSS。
+
 ## 两种"看起来一样、处置相反"的现象：阻塞 vs timer 饥饿（2026-10-27 起）
 
 `.162` 的停顿监测上线后第一批数据就踩到一个坑，值得写死：
