@@ -681,7 +681,7 @@ jobs:
       # 触发了 176 个 job，把 runner 池占满，导致**发版门自己排了 6 分钟没动**。
       # 判据只看提交信息（chore(release)），不看 diff —— diff 判据会把“改了依赖的
       # 版本号”和“改了代码”混在一起，误判代价比多跑一轮 CI 高得多。
-      release_only: ${{ steps.plan.outputs.release_only }}
+      release_only: ${{ steps.release.outputs.release_only }}
     steps:
       # depth 2:pull_request 检出的是 refs/pull/N/merge,要拿到它的第一个父提交(base 尖)。
       - uses: actions/checkout@v4
@@ -701,10 +701,12 @@ jobs:
       # PR 上永远为空：PR 的改动必须跑全套，这条只用来避免“发版提交把自己的发版门堵住”。
       - name: Release-commit classifier
         id: release
+        env:
+          # 用 env 传，不要拼进 run: 的 shell 字符串 —— 提交信息里的引号会打断脚本。
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          msg='${{ github.event_name == 'push' && github.event.head_commit.message || '' }}'
-          first=$(printf '%s' "$msg" | head -n1)
+          first=$(printf '%s' "${COMMIT_MSG:-}" | head -n1)
           case "$first" in
             "chore(release):"*) echo "release_only=true" >> "$GITHUB_OUTPUT" ;;
             *) echo "release_only=false" >> "$GITHUB_OUTPUT" ;;
