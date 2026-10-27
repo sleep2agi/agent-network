@@ -1482,25 +1482,39 @@ console.log("[commhub] node_id backfill: deferred until after start (#2664)");
  *
  * 调用点：startHub() 监听成功后延迟数秒执行（见 server.ts）。
  */
-export function runDeferredBootBackfills(): { nodeIdsMs: number; terminalEventsMs: number } {
+export async function runDeferredBootBackfills(): Promise<{ nodeIdsMs: number; terminalEventsMs: number; chunks: number }> {
+  // #2664（第二批）—— 前一版把两条回填整体挪到启动后，但**每条仍是一次性长查询**：
+  // 生产实测 `node_id=1194ms terminal_events=1593ms`，对应一次 2.7秒级的 stall
+  // （`.165`/`.166` 启动窗口都观测到 3–3.7 秒)。这里把它们切成小块、块间让出事件循环，
+  // 让「2.7 秒卡一下」变成「若干次 <300ms 的让出」。
   const t0 = performance.now();
   try { backfillMessageNodeIds(); } catch (e: any) {
     console.error(`[commhub] node_id backfill failed: ${e?.message || e}`);
   }
+  await Bun.sleep(0);   // 两条之间先让一次：即使前半段偏慢，也不会和后半段叠成一段长阻塞
   const t1 = performance.now();
+  let chunks = 0;
   try {
     if (db.dialect === "sqlite") {
-      db.run(`INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
-              SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
-                FROM tasks
-               WHERE status IN ('replied', 'failed', 'cancelled', 'expired')
-               ORDER BY COALESCE(completed_at, created_at), task_id`);
+      const maxRow = db.get<{ m: number | null }>("SELECT MAX(rowid) AS m FROM tasks")?.m ?? 0;
+      const CHUNK = 20000;
+      for (let lo = 0; lo <= maxRow; lo += CHUNK) {
+        db.run(`INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+                SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
+                  FROM tasks
+                 WHERE rowid BETWEEN ?1 AND ?2
+                   AND status IN ('replied', 'failed', 'cancelled', 'expired')
+                 ORDER BY COALESCE(completed_at, created_at), task_id`,
+          [lo, lo + CHUNK - 1]);
+        chunks++;
+        await Bun.sleep(0);   // 每 2 万行让出一次
+      }
     }
   } catch (e: any) {
     console.error(`[commhub] task_terminal_events backfill failed: ${e?.message || e}`);
   }
   const t2 = performance.now();
-  return { nodeIdsMs: Math.round(t1 - t0), terminalEventsMs: Math.round(t2 - t1) };
+  return { nodeIdsMs: Math.round(t1 - t0), terminalEventsMs: Math.round(t2 - t1), chunks };
 }
 
 // ── P0: sessions alias uniqueness is network-scoped.

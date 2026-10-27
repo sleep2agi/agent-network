@@ -5646,12 +5646,14 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // 生产实测合计约 3.5 秒，正好落在会话重连风暴窗口里。现在等监听稳定后再跑：
   // 它们只修历史缺口，新行由触发器实时写入。
   const deferredBackfillTimer = setTimeout(() => {
-    try {
-      const r = runDeferredBootBackfills();
-      console.log(`[commhub] deferred boot backfills: node_id=${r.nodeIdsMs}ms terminal_events=${r.terminalEventsMs}ms`);
-    } catch (e: any) {
-      console.error(`[commhub] deferred boot backfills failed: ${e?.message || e}`);
-    }
+    void (async () => {
+      try {
+        const r = await runDeferredBootBackfills();
+        console.log(`[commhub] deferred boot backfills: node_id=${r.nodeIdsMs}ms terminal_events=${r.terminalEventsMs}ms chunks=${r.chunks}`);
+      } catch (e: any) {
+        console.error(`[commhub] deferred boot backfills failed: ${e?.message || e}`);
+      }
+    })();
   }, Number(process.env.COMMHUB_BOOT_BACKFILL_DELAY_MS) >= 0 ? Number(process.env.COMMHUB_BOOT_BACKFILL_DELAY_MS) : 15_000);
   (deferredBackfillTimer as any)?.unref?.();
 
