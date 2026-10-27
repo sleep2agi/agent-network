@@ -456,7 +456,13 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         if (bo && bo.effective_seconds) {
           const sched = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
           const at = parseHubTimestamp(sched?.next_run_at);
+          // 可观测性（不是装饰）：生产出现「backoff_effective_seconds=5760 但实际每 6 分钟跳一次」，
+          // 只看列分不清是哪一步把 next_run_at 写回去了。这行把「算出的 eff」与「此刻落库的 next」
+          // 打在一起；再配上本函数返回前的最终值，就能对上账。
+          console.error(`[commhub scheduled-tasks] offline-backoff schedule=${row.schedule_id} cause=${bo.cause} streak=${bo.streak} effective=${bo.effective_seconds}s next_before=${sched?.next_run_at ?? 'null'}`);
           if (at !== null) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, new Date(at));
+          const after = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
+          console.error(`[commhub scheduled-tasks] offline-backoff-final schedule=${row.schedule_id} next_after=${after?.next_run_at ?? 'null'}`);
         }
       } catch (e: any) {
         console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
