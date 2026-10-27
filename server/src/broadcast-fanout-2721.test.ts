@@ -11,7 +11,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { db } from "./db.js";
-import { BROADCAST_CHUNK, enqueueBroadcast } from "./broadcast-fanout.js";
+import { BROADCAST_CHUNK, enqueueBroadcast, broadcastRecentState } from './broadcast-fanout.js';
 
 const stamp = `${Date.now()}`;
 let NET = "";
@@ -95,5 +95,24 @@ describe("#2721 broadcast fan-out is chunked", () => {
     });
     expect(res.ids).toEqual([]);
     expect(yields).toBe(0);
+  });
+});
+
+// #2721 —— /health 的 `broadcast` 一格：最近一次广播的时间/人数/批数/耗时。
+describe('broadcastRecentState', () => {
+  test('records the last broadcast so a stall can be reconciled afterwards', async () => {
+    const targets = Array.from({ length: 7 }, (_, i) => ({ alias: `r${i}`, node_id: null, network_id: 'n1' }));
+    await enqueueBroadcast(targets, 'hello', 'hub', 'n1', {
+      isActive: () => true,
+      notify: () => {},
+      yieldBetweenChunks: async () => {},
+      chunkSize: 3,
+    });
+    const rec = broadcastRecentState();
+    expect(rec).not.toBeNull();
+    expect(rec!.recipients).toBe(7);
+    expect(rec!.chunks).toBe(3); // ceil(7/3)
+    expect(typeof rec!.took_ms).toBe('number');
+    expect(Number.isNaN(Date.parse(rec!.at))).toBe(false);
   });
 });

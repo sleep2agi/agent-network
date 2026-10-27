@@ -20,6 +20,26 @@ import { db } from "./db.js";
 /** 一批多少个收件人。50 是“一次事务不至于太长、又明显少于一次全量”的折中。 */
 export const BROADCAST_CHUNK = 50;
 
+/**
+ * #2721 —— 最近一次广播的「事后可对上时间的」记录。
+ *
+ * 为什么要有：07:11 那次事故里，我花了不少时间才把“143.9 秒停顿”与“07:10 那条广播”
+ * 对上 —— 因为停顿记录（`event_loop.recent_stalls`）里只有时间与 RSS，没有“当时发生了什么”。
+ * 广播是唯一一种能一次性唤醒几百个 agent 的动作，值得在 `/health` 里留一格。
+ */
+export type BroadcastRecord = {
+  at: string;
+  recipients: number;
+  chunks: number;
+  took_ms: number;
+};
+
+let lastBroadcast: BroadcastRecord | null = null;
+
+export function broadcastRecentState(): BroadcastRecord | null {
+  return lastBroadcast;
+}
+
 export type BroadcastTarget = { alias: string; node_id: string | null; network_id: string | null };
 export type BroadcastDelivered = { alias: string; netId: string | null };
 
@@ -40,6 +60,7 @@ export async function enqueueBroadcast(
   effectiveNetId: string | null,
   deps: BroadcastDeps,
 ): Promise<{ ids: string[]; delivered: BroadcastDelivered[] }> {
+  const startedMs = Date.now();
   const chunk = deps.chunkSize && deps.chunkSize > 0 ? deps.chunkSize : BROADCAST_CHUNK;
   const ids: string[] = [];
   const delivered: BroadcastDelivered[] = [];
@@ -67,5 +88,11 @@ export async function enqueueBroadcast(
   }
 
   for (const d of delivered) deps.notify(d.alias, d.netId);
+  lastBroadcast = {
+    at: new Date().toISOString(),
+    recipients: delivered.length,
+    chunks: Math.ceil(targets.length / chunk),
+    took_ms: Date.now() - startedMs,
+  };
   return { ids, delivered };
 }

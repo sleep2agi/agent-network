@@ -2814,6 +2814,9 @@ return Bun.serve({
         // #2571 —— 告警阈值用的「每目标 p99 基线」最近一次刷新（只读聚合：时间/写了几行/现在共几行）。
         // 没有它，「这条告警为什么没报」只能进机器 sqlite 查。
         alert_baselines: aliasBaselineRefreshState(),
+        // #2721 —— 最近一次广播（时间/收件人数/批数/耗时）。广播是唯一能一次性唤醒
+        // 几百个 agent 的动作；没有这一格，事后只能把停顿记录和聊天记录对时间。
+        broadcast: broadcastRecentState(),
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
