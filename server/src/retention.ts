@@ -131,12 +131,12 @@ const DEFAULT_CHUNK_ROWS = 2000;
 const INCREMENTAL_VACUUM_PAGES = 200;
 const MAX_TABLE_MS = 10 * 60 * 1000;
 
-/** 启动后第一次 sweep 的延迟；默认 60 秒（见 startRetentionSweeper 里的实测）。 */
+/** 启动后第一次 sweep 的延迟；默认 180 秒（见 startRetentionSweeper 里的实测）。 */
 function readFirstSweepDelayMs(): number {
   const raw = process.env.COMMHUB_RETENTION_FIRST_DELAY_MS;
-  if (raw === undefined || raw.trim() === "") return 60_000;
+  if (raw === undefined || raw.trim() === "") return 180_000;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 60_000;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 180_000;
 }
 
 function readChunkRows(): number {
@@ -516,7 +516,16 @@ export function startRetentionSweeper(
   // ```
   // 同一批删除在稳态是 0.24ms/行，在启动那一分钟是 4.2ms/行（慢 17 倍）——
   // 不是删除变慢了，是它在和重连风暴抢 CPU/WAL。而这一分钟的阻塞最容易被误记成
-  // “retention 又卡了”。默认延后 60 秒（可用 COMMHUB_RETENTION_FIRST_DELAY_MS 覆盖，0=立即）。
+  // “retention 又卡了”。默认延后 180 秒（可用 COMMHUB_RETENTION_FIRST_DELAY_MS 覆盖，0=立即）。
+  //
+  // 为什么是 180 而不是 60（.173 上线后实测修正）：
+  // ``` 
+  // 18:55:24 boot
+  // 18:55:38 stall 20.6s (served 812)   ← 重连风暴
+  // 18:56:24 retention（+60s） swept 3894ms, max 1238ms, telemetry=2964 行/2935ms = 0.99ms/行
+  // 18:56:26 stall 2.7s · 18:57:28 stall 3.4s · 18:57:31 stall 2.6s   ← 风暴 2 分钟还没排空
+  // ```
+  // 稳态同一批删除是 0.24ms/行 ⇒ 60 秒时风暴仍在，max 单批被推到 1.2 秒（越过 1 秒慢 SQL 阈值）。
   if (firstDelayMs > 0) setTimeout(() => { void sweep(); }, firstDelayMs);
   else setImmediate(() => { void sweep(); });
   return setInterval(() => { void sweep(); }, intervalMs);
