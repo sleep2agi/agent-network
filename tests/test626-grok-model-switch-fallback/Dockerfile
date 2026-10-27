@@ -1,8 +1,7 @@
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS build
 
 # scripts/qa.sh 靠 grep `^ARG SOURCE_COMMIT` 决定传不传 --build-arg。
 # 没有这一行就**不传,而且不报错** —— 这次运行的输出无法被钉到任何提交上。
-ARG SOURCE_COMMIT=dev
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 
 RUN apt-get update \
@@ -36,4 +35,9 @@ RUN cd agent-node && bun install
 
 COPY . /workspace
 
+# 🔴 溯源单独一层 stage（缓存关键）。
+# `ARG SOURCE_COMMIT` 在 stage 内声明（哪怕没人引用它）也会让它之后每一层进入该 ARG 的缓存键；
+# 每次构建的 $GITHUB_SHA 都不同 ⇒ 前面的 RUN 层永远 miss（本地实测 146.5s vs 0.6s）。
+FROM build
+ARG SOURCE_COMMIT
 ENTRYPOINT ["bash", "tests/test626-grok-model-switch-fallback/run.sh"]
