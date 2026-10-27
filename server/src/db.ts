@@ -1599,6 +1599,11 @@ migrateSessionsNetworkAliasUnique();
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_network ON sessions(network_id)"); } catch {}
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_network_alias_unique ON sessions(network_id, alias)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network ON tasks(network_id)"); } catch {}
+// #2722 —— 任务统计（`SELECT status, COUNT(*) FROM tasks WHERE network_id=? GROUP BY status`）是
+// Dashboard/状态接口最常走的聚合：只有上面的单列索引时，它要扫该网络**全部**行再建临时 B 树
+// （生产 116k 行实测 **5325ms**；同库副本 294ms）。加覆盖索引后副本 **24ms（12×）**。
+// 只加列、不改任何查询；老库首次启动多花约 0.4 秒建索引。
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_status ON tasks(network_id, status)"); } catch {}
 // #500 — covering index for the full /api/status queue_depth GROUP BY (task-queue-ahead.ts queueDepthQuery): the 24 h
 // created_at range plus every column that query reads, so it never touches the (wide) task rows. Here, not in the
 // CREATE TABLE block: tasks.network_id only exists after the ALTER above. On a read-only copy of the production DB
