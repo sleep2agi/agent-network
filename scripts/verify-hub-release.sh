@@ -140,6 +140,8 @@ check_feature "deferred boot backfill knob"   "COMMHUB_BOOT_BACKFILL_DELAY_MS"  
 
 # .166 —— 广播扇出分批（#2721）与采纳拒绝码（#1987）各带一个可 grep 的锚点。
 check_feature "broadcast fan-out chunking"    "BROADCAST_CHUNK"                       "0.9.0-preview.166"
-check_feature "adopt error code whitelist"    "publicAdoptError"                      "0.9.0-preview.166"
+# 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
+# 本脚本校验的是 commhub-server 的 tarball，把 node 的锚点放进来只会在发版时必红一次
+# （2026-10-27 `.166` 就白跑了一轮）。node 的能力请用 agent-node 自己的发版校验。
 
 echo "== RESULT: PASS ($PKG@$VERSION)"
