@@ -1,6 +1,4 @@
 FROM oven/bun:1.2.22 AS build
-ENV TEST225_STOP_SOURCE_COMMIT=$SOURCE_COMMIT
-LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ procps tmux && rm -rf /var/lib/apt/lists/*
 COPY agent-network/ agent-network/
@@ -15,4 +13,8 @@ RUN chmod 0755 /app/run.sh
 # 每次构建的 $GITHUB_SHA 都不同 ⇒ 前面的 RUN 层永远 miss（本地实测 146.5s vs 0.6s）。
 FROM build
 ARG SOURCE_COMMIT
+# 🔴 与 test626 同理：这两个值原来引用 build stage 里的 ARG，ARG 移走后会变空，
+# 套件断言 `TEST225_STOP_SOURCE_COMMIT 必须是完整小写 Git SHA` 会红（CI 已实测）。
+ENV TEST225_STOP_SOURCE_COMMIT=$SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
 ENTRYPOINT ["bash", "/app/run.sh"]
