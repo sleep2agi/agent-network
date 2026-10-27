@@ -77,6 +77,7 @@ import {
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, unlinkSync, renameSync } from "fs";
 import { dirname as pathDirname, join as pathJoin } from "path";
 import { startRetentionSweeper } from "./retention.js";
+import { sweepEmptyNodeRows } from "./empty-node-sweeper.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import {
   AUDIT_LOG_REST_SELECT,
@@ -5639,6 +5640,22 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     : 60 * 60 * 1000;
   const retentionSweeperTimer = startRetentionSweeper(sweepIntervalMs);
 
+  // #2596 —— 空白 node 行（注册失败留下的空壳：runtime/hostname/config_path 全空、
+  // 没有 session）会让组织架构页出现“重复名字”。启动跑一次 + 每天一次。
+  // 判据写死在 empty-node-sweeper.ts：只删够旧、无身份、无 session 的行；删前把整行 JSON 打进日志。
+  const sweepEmptyNodes = () => {
+    try {
+      const r = sweepEmptyNodeRows();
+      if (r.deleted > 0) {
+        console.log(`[patrol] removed ${r.deleted} empty placeholder node row(s) older than ${r.ageDays}d`);
+      }
+    } catch (e: any) {
+      console.log(`[patrol] empty node sweep failed: ${e?.message ?? e}`);
+    }
+  };
+  setImmediate(sweepEmptyNodes);
+  const emptyNodeGcTimer = setInterval(sweepEmptyNodes, 24 * 60 * 60 * 1000);
+
   // #2614 —— 事件循环停顿监测。放这里是因为 startHub() 才是“真的在跑一个 Hub”
   // 的入口（测试用 bootServer() 不会背这个 timer）。停顿日志与
   // `[commhub retention]` / `[commhub slow-sql]` 共用前缀族，便于一次 grep 出
@@ -5707,6 +5724,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // jobs must not — otherwise a test (or a future caller) that stops the
   // server would still hang on live intervals it cannot reach.
   (retentionSweeperTimer as any)?.unref?.();
+  (emptyNodeGcTimer as any)?.unref?.();
   (eventLoopLagTimer as any)?.unref?.();
   (aliasBaselineTimer as any)?.unref?.();
   (staleSweeperTimer as any)?.unref?.();
