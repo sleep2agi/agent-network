@@ -1624,6 +1624,11 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_status ON tasks(netw
 // (57k tasks, 1.9k in the last 24 h) the statement went from ~3 ms (idx_tasks_created + one row lookup per task) to
 // ~0.3 ms; building it there took ~170 ms once. Plain composite index: the same DDL runs on PostgreSQL.
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_queue ON tasks(created_at, status, network_id, to_name)"); } catch {}
+// #2614（顺手发现）—— `/api/stats` 的「最近 5 条任务」是 `WHERE network_id=? ORDER BY created_at DESC LIMIT 5`。
+// 只有 idx_tasks_network_status 时优化器只能按 network_id 取到**全部 11.8 万行**再建临时 B 树排序
+// （生产空闲态实测 **359ms**，风暴期 3.9 秒）。加 (network_id, created_at) 后可直接倒序走索引取 5 行。
+// 只加列、不改查询；老库首次启动多花约 0.4–0.6 秒建索引。
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_created ON tasks(network_id, created_at DESC)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodes_network ON nodes(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_network ON task_events(network_id)"); } catch {}

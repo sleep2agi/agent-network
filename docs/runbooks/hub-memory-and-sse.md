@@ -323,6 +323,26 @@ curl -s localhost:9200/health | python3 -c 'import sys,json;e=json.load(sys.stdi
 | 每小时 10 s 静默 | retention 删得太多 | 一次 DELETE 不可打断 | 分批 + 让出（`#2614`） |
 | 部署后 retention 15.7 s / 4.2 ms 行 | 分批失效了 | 首次 sweep 与**启动风暴抢 CPU/WAL**（稳态 0.24 ms/行） | 同一批删除在稳态的耗时作对照 |
 
+### 一次完整的部署风暴（2026-10-27 18:55，`.173`）
+
+```
+18:55:24  boot（372 sessions / 148 SSE 同时重连）
+18:55:38  stall 20.6s (served 812)
+18:56:22  slow-sql 1128ms  DELETE ...（首次 sweep 撞上风暴，60 秒仍不够）
+18:56:24  retention swept 3894ms, max 1238ms
+18:59:11  slow-sql 7725ms  SELECT ... FROM tasks        ← 争用下同一查询稳态只需 24ms
+19:01:05  slow-sql 17315ms SELECT ... FROM tasks
+19:00:58  RSS 4399 MB · /health 6 秒超时（0 字节）
+19:02:xx  RSS 回落 367–598 MB · inflight 0 · 未触发 6 GiB 上限
+```
+
+**判读**：这是**饱和**（`served` 大、`inflight` 峰值 431），不是阻塞；风暴 6 分钟自行排空。
+`max_memory_restart` 6 GiB 全程未被触发（峰值 4.4 GB）。
+
+**它教会的两件事**：
+1. 部署后 **0–6 分钟**的延迟指标全部不可用（同一查询 24ms → 17s 只是争用）；
+2. 首次 sweep 的延迟不是“越早越好”：60 秒仍在风暴里，`.174` 改为 **180 秒**。
+
 ### 三条可复用的判据
 
 1. **任何“变慢了”的结论，先问“它是不是和部署同时发生”**。启动后 60 秒内的任何指标都不可信：
