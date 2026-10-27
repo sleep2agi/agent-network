@@ -236,7 +236,7 @@ export function applyFailureBackoff(scheduleId: string, now = new Date()): { str
  *
  * 这里只做「放慢」，不改变派发语义：
  *   · 同一 error_code 连续出现 ≥ N（默认 3）⇒ 间隔按 2 倍放大，上限 1800 秒；
- *   · `target_offline` 的链用更长的上限（3600 秒）——目标不在时没有理由每 3 分钟试一次；
+ *   · `target_offline` 的链用更长的上限（7200 秒 = 2 小时）——目标不在时没有理由每 3 分钟试一次；
  *   · 换链（原因变了）或出现成功 ⇒ 立刻回到原间隔；
  *   · 与 `no_change_backoff=1` 的排程互斥（那套逻辑自己拥有 backoff_* 三列）。
  */
@@ -302,7 +302,12 @@ export function applyNoProgressBackoff(scheduleId: string, now = new Date()): { 
 
   if (!cause) { restore(); return null; }
 
-  const cap = cause === "target_offline" ? 3600 : 1800;
+  // 上限按原因分开：
+  //   previous_run_active —— 上一次还在跑，30 分钟足够等到它结束；
+  //   target_offline      —— 目标连续 6 次不在（按 180s 基底已是 18 分钟），
+  //                          再用 3 分钟一次的节奏去敲没有意义；2 小时一次仍能及时接住它回来。
+  // 判据：#2622「同类原因日增量 ≤20」——180s 基底配 2 小时上限 ⇒ 12 次/天。
+  const cap = cause === "target_offline" ? 7200 : 1800;
   if (streak < from) { restore(); return null; }
 
   const effective = Math.min(cap, base * 2 ** Math.min(streak - from + 1, 5));

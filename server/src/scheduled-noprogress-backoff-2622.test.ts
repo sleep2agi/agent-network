@@ -61,14 +61,14 @@ describe("applyNoProgressBackoff (#2622)", () => {
     expect(noProgressBackoffRuns()).toBe(3);
   });
 
-  test("target_offline streak widens the interval (capped at 1h)", () => {
+  test("target_offline streak widens the interval (capped at 2h)", () => {
     const id = seedSchedule(180);
     for (let i = 0; i < 4; i++) addRun(id, "skipped", "target_offline");
     const r = applyNoProgressBackoff(id)!;
     expect(r.cause).toBe("target_offline");
     expect(r.streak).toBe(4);
     expect(r.effective_seconds).toBeGreaterThan(180);
-    expect(r.effective_seconds!).toBeLessThanOrEqual(3600);
+    expect(r.effective_seconds!).toBeLessThanOrEqual(7200);
     expect(reload(id).backoff_effective_seconds).toBe(r.effective_seconds);
   });
 
