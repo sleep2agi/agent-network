@@ -1437,10 +1437,18 @@ jobs:
           if-no-files-found: warn
 
   qa:
-    name: L0 + L1 (report-only)
+    name: ${{ matrix.shard == '' && 'L0 (report-only)' || format('L1 (report-only, shard {0})', matrix.shard) }}
     needs: changes
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    # #2800 —— 墙钟地板是「L0+L1 单 job 串行 87 个套件 ≈25.8 分钟」，并行度再高也压不下去。
+    # 拆成 1 个 L0 + 3 个 L1 分片：qa.sh 的 QA_L1_SHARD 按索引取模切片，
+    # 三片互不相交且并集等于全集（本地用 --list 的 87 个套件验证过：29/29/29）。
+    # 判据没有减少：每片都跑它那一份，--list 仍是完整清单。
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['', '1/3', '2/3', '3/3']
     # 🔴 2026-08-19：5 → 10。实测（同一个 job，两次 PR）：
     #     L1 = 24 条（含 test657）  3.50 分钟  success
     #     L1 = 25 条（加 test654）  5.32 分钟  **cancelled** ← 撞上原来的 5 分钟
@@ -1476,6 +1484,7 @@ jobs:
       # 测试碰巧只走到零依赖的模块;import 链一长(#2247:db.ts 引入 node-health-store → zod/v4)
       # 就在「任何测试开始之前」红,而 main 上恰好是绿的。依赖照 lockfile 装,不靠运气。
       - name: Install server dependencies (L0 imports server/src)
+        if: ${{ matrix.shard == '' }}
         working-directory: server
         run: bun install --frozen-lockfile
 
@@ -1483,12 +1492,15 @@ jobs:
         run: bash scripts/qa.sh --list
 
       - name: Run L0 (bun test, ms-budget)
+        if: ${{ matrix.shard == '' }}
         run: bash scripts/qa.sh --l0
 
       - name: Run L1 (Docker contract tests, ~16s parallel)
         # docs-only PR 时只跑镜像里有 docs-site 的 L1 套件;其他 PR 这里是空串 = 全部。
+        if: ${{ matrix.shard != '' }}
         env:
           QA_L1_ONLY: ${{ needs.changes.outputs.l1_only }}
+          QA_L1_SHARD: ${{ matrix.shard }}
         run: bash scripts/qa.sh --l1
 
       - name: Dump test logs on failure

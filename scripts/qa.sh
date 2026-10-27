@@ -414,6 +414,29 @@ if [[ -n "${QA_L1_ONLY:-}" ]]; then
   L1_TESTS=("${_l1_keep[@]}")
 fi
 
+# #2800 —— L1 分片：墙钟地板是「L0+L1 单个 job 跑 66 个套件 25.8 分钟」，
+# 并行度再高也压不下去。这里按索引取模切片，由 qa.yml 的 matrix 传 QA_L1_SHARD=i/n。
+# 判据：各分片并集 == 全集（顺序无关），且每片至少 1 个套件。
+if [[ -n "${QA_L1_SHARD:-}" ]]; then
+  if [[ ! "$QA_L1_SHARD" =~ ^([0-9]+)/([0-9]+)$ ]]; then
+    fail "QA_L1_SHARD 格式应为 i/n（例 1/3），收到: $QA_L1_SHARD"; exit 2
+  fi
+  _i=${BASH_REMATCH[1]}; _n=${BASH_REMATCH[2]}
+  if (( _n < 1 || _i < 1 || _i > _n )); then
+    fail "QA_L1_SHARD 越界: $_i/$_n"; exit 2
+  fi
+  _l1_shard=(); _idx=0
+  for _t in "${L1_TESTS[@]}"; do
+    if (( _idx % _n == _i - 1 )); then _l1_shard+=("$_t"); fi
+    _idx=$((_idx+1))
+  done
+  if (( ${#_l1_shard[@]} == 0 )); then
+    fail "QA_L1_SHARD=$_i/$_n 分到 0 个套件（总数 ${#L1_TESTS[@]}）"; exit 2
+  fi
+  note "QA_L1_SHARD=$_i/$_n: 本片 ${#_l1_shard[@]}/${#L1_TESTS[@]} 个 L1 套件"
+  L1_TESTS=("${_l1_shard[@]}")
+fi
+
 START=$(date +%s)
 FAILED=0
 
