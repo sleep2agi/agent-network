@@ -227,48 +227,69 @@ grep "commhub slow-sql" ~/.commhub/pm2-hub-out.log | tail -5
 一条是 retention 的索引缺失（可修，已修），另一条是至今未定性的 14–47 秒随机停顿。
 **把两件事分开记，比合成一个“Hub 不稳”的结论有用得多。**
 
-### retention 那次停顿的修法（#2614，`0.9.0-preview.168`）
+### retention 那次停顿的修法（#2614，`0.9.0-preview.168` → `.169`）
 
 每小时一次 `swept in 8–11s` 的静默，根因不是“删得多”，而是**一次 DELETE 把整批行放在同一个语句里，
-中间不让出事件循环**。`.168` 起改成：
+中间不让出事件循环**。现在：
 
 ```
 每批 ≤ COMMHUB_RETENTION_CHUNK_ROWS（默认 2000）行
-  → 用单调前进的 rowid 游标取行 + 按 rowid 删
+  → DELETE … WHERE rowid IN (SELECT rowid FROM t WHERE <谓词> LIMIT n)   ← 索引驱动
   → 每批之间 await 一次 setTimeout(0)，把控制权交还事件循环
-  → 删的这段时间关掉 WAL 自动 checkpoint，本轮的 checkpoint 收敛到末尾那一次 TRUNCATE
+  → 删的这段时间关掉 WAL 自动 checkpoint，本轮 checkpoint 收敛到末尾那一次 TRUNCATE
   → 单表最多跑 10 分钟；超了记 truncated 并下一轮继续
   → 同一时刻只允许一轮 sweep（上一轮没跑完就跳过这一拍）
 ```
 
-**这两条都是被副本实验逼出来的**（1.09 GB 生产副本，68k 行积压）：
+**两条是被副本实验逼出来的，第三条是被生产打回来的**：
 
-| 写法 | 合计 | 最长单次阻塞 |
-|---|---|---|
-| 一次 DELETE（旧） | 3.1 s | **2686 ms** |
-| 分批 + 每批重新子查询（第一版） | 17 s | **4634 ms** ← 更糟 |
-| 分批 + rowid 游标，但留着自动 checkpoint | 13.6 s | **4221 ms** |
-| 分批 + rowid 游标 + 关自动 checkpoint（现在） | 5.4 s | **281 ms** |
+| 写法 | 合计 | 最长单次阻塞 | 结论 |
+|---|---|---|---|
+| 一次 DELETE（旧） | 3.1 s | 2686 ms | 不可打断 |
+| 分批 + 每批重新子查询（无索引副本） | 17 s | 4634 ms | 每批全扫，**更糟** |
+| 分批 + rowid 游标（无索引副本） | 5.4 s | 281 ms | 副本上很好 |
+| **分批 + rowid 游标（生产）** | 6.2 s | **4716 ms** | 🔴 打回：见下 |
+| 分批 + 索引驱动 `LIMIT n`（现状） | 1.8 s | 249 ms | 生产副本实测（当前 schema） |
 
-第一版为什么更糟：`WHERE created_at < ? LIMIT n` 没有覆盖全表的索引，每批的子查询都退化成
-一次覆盖索引扫描（`EXPLAIN: SCAN … USING COVERING INDEX idx_agent_telemetry_ip_time`），
-于是「每批从表头扫一遍」，总代价 = 批数 × 表大小。加上 `rowid > 游标 ORDER BY rowid`
-之后计划变成 `SEARCH … USING INTEGER PRIMARY KEY (rowid>?)`，每批只从游标往后读。
+**第一条教训（索引缺失）**：`created_at < ?` 若没有可用索引，子查询会退化成覆盖索引扫描，
+于是「每批从表头扫一遍」，总代价 = 批数 × 表大小。
 
-第二版为什么还慢：自动 checkpoint 是**连接级、每 1000 页触发**的，会落进任意一批里，
-实测把中位数 89ms 的批次顶到 4.3 秒 —— **分批必须配「自己决定何时 checkpoint」**。
+**第二条教训（checkpoint）**：自动 checkpoint 是连接级、每 1000 页触发的，会落进任意一批，
+实测把中位数 89ms 的批次顶到 4.3 秒 ⇒ **分批必须配「自己决定何时 checkpoint」**。
 
-验证（上线后第一小时内应能看到）：
+**第三条教训（我的副本过期了）**：`.168` 上线第一拍的生产日志是
+
+```
+[commhub slow-sql] 4716ms SELECT rowid … WHERE created_at < ?1 AND rowid > ?2 ORDER BY rowid LIMIT ?3
+[commhub retention] swept in 6157ms (3 batches) — telemetry=266
+```
+
+只删 266 行却花了 4.7 秒。原因是我用的副本是 **10-26 的快照**，那时 `agent_telemetry`
+还没有 `idx_agent_telemetry_created`（#3065 之后才加的）。现在生产上谓词本来走索引范围，
+但 `ORDER BY rowid` 把计划改成了 `INTEGER PRIMARY KEY` 从 rowid=0 一路扫完 60 万行。
+
+⇒ 结论：**副本实验必须先确认副本 schema 与生产一致，否则“优化”会变成新的全表扫。**
+一并验证了各表在**生产**上的真实计划：
+
+```
+agent_telemetry  SEARCH … USING COVERING INDEX idx_agent_telemetry_created
+task_events      SEARCH … USING COVERING INDEX idx_task_events_created
+tasks            SEARCH … USING INDEX idx_tasks_status
+audit_log        SEARCH … USING COVERING INDEX idx_audit_created
+inbox            SCAN（没有谓词索引）→ 每小时可删行很少，一轮只有一批，代价可忽略
+```
+
+验证（每小时整点后）：
 
 ```bash
 grep "commhub retention" ~/.commhub/pm2-hub-out.log | tail -3
-#   期望：swept in <2000ms (N batches, max <300ms) —— 8–11 秒的单块变多批
+#   期望 /   swept in <2000ms (N batches, max <300ms)
+#   不得再出现 /  [commhub slow-sql] … SELECT rowid …   ← 出现就是又退化成全表扫了
+
 curl -s localhost:9200/health | python3 -c 'import sys,json;e=json.load(sys.stdin)["event_loop"];print(e.get("max_gap_ms"),e.get("stall_count"))'
-#   期望：不再出现每小时一次的 ~10 秒 gap
 ```
 
-**取舍**：分批 + 让出会让总耗时略增（3.1 s → 5.3 s，可被打断）。
-这里选的是「可被打断」而不是「最快跑完」——一次 10 秒不可打断的停顿，
+**取舍**：分批 + 让出会让总耗时略增（可被打断优先）。一次 10 秒不可打断的停顿，
 代价是 800 个请求在飞和 4.5 GB RSS。
 
 ## 两种"看起来一样、处置相反"的现象：阻塞 vs timer 饥饿（2026-10-27 起）

@@ -107,16 +107,23 @@ export function readRetentionConfig(): RetentionConfig {
 // 根因不是「删得多」，而是**一次 DELETE 把整批行放在一个语句里，中间不让出事件循环**。
 //
 // 修法（与 `.167` 的 terminal_events 回填同形）：
-//   1. 每批只删 chunkRows 行，用**单调前进的 rowid 游标**取行（不是每批重新子查询，
-//      否则每批都会扫一遍表 —— 见下面的实测）；
+//   1. 每批只删 chunkRows 行，用 `DELETE … WHERE rowid IN (SELECT rowid FROM t WHERE <谓词> LIMIT n)`
+//      —— 谓词有索引时这是索引范围扫描（O(n)）；没有索引时它退化成一次全扫，
+//      所以「谓词必须有索引」是这条路径的前提（见下面的三条实测）；
 //   2. 每批之间 `await` 一次 setTimeout(0)，把控制权交还事件循环；
 //   3. 删的这段时间关掉 WAL 自动 checkpoint，本轮的 checkpoint 收敛到末尾那一次
 //      TRUNCATE（否则 checkpoint 会落进任意一批，把 90ms 的批次顶到 4 秒）；
 //   4. 单表最多跑 MAX_TABLE_MS，超了就停下并记日志（下一轮继续）。
 //
-// 在 1.09 GB 生产副本上（68k 行积压）：一次删完 = 3.1s / 最长单块 2686ms；
-// 现在 = 5.3s / 最长单块 258ms。总耗时略增，这是有意的取舍：
-// **可被打断优先于最快跑完**。
+// 三条实测（都在 1.09 GB 生产副本上）：
+//   · 一次删完                                        3.1s / 单块 2686ms
+//   · 分批 + rowid 游标（副本里谓词**没有**索引）      5.3s / 单块 258ms
+//   · 分批 + rowid 游标（生产，谓词**有**索引）        → 单块 4716ms 🔴 打回
+//     `ORDER BY rowid` 让优化器放弃 created_at 索引，为了凑够一批从 rowid=0 扫全表；
+//     只删 266 行花了 4.7 秒（`.168` 上线第一拍的真实日志）。
+//   · 分批 + 索引驱动 LIMIT（现状，生产副本）          1.8s / 单块 249ms
+// ⇒ 教训：**副本的 schema 也必须与生产一致**，否则「按副本优化」会变成新的全表扫。
+// 总耗时略增是有意的取舍：**可被打断优先于最快跑完**。
 const DEFAULT_CHUNK_ROWS = 2000;
 const MAX_TABLE_MS = 10 * 60 * 1000;
 
@@ -189,7 +196,6 @@ async function sweepTable(
   let deleted = 0;
   let batches = 0;
   let maxBatchMs = 0;
-  let cursor = 0;
   try {
     for (;;) {
       const batchT0 = performance.now();
@@ -204,9 +210,8 @@ async function sweepTable(
       // `SEARCH ... USING INTEGER PRIMARY KEY (rowid>?)`：每批只从游标往后读，
       // 整轮总代价 ≈ 一次全表扫描 + 删除本身。
       const rows = db.all<{ r: number }>(
-        `SELECT rowid AS r FROM ${table} WHERE ${where} AND rowid > ?2 ORDER BY rowid LIMIT ?3`,
+        `SELECT rowid AS r FROM ${table} WHERE ${where} LIMIT ?2`,
         param,
-        cursor,
         chunkRows,
       );
       if (rows.length === 0) return { deleted, batches, maxBatchMs, truncated: false };
@@ -216,7 +221,6 @@ async function sweepTable(
       deleted += res.changes ?? 0;
       batches += 1;
       maxBatchMs = Math.max(maxBatchMs, performance.now() - batchT0);
-      cursor = ids[ids.length - 1]!;
       // 这一批没取满 ⇒ 已经没有更多符合条件的行了，收工。
       if (rows.length < chunkRows) return { deleted, batches, maxBatchMs, truncated: false };
       if (Date.now() - startedMs > MAX_TABLE_MS) {
@@ -361,16 +365,32 @@ export async function sweepRetention(cfg: RetentionConfig = readRetentionConfig(
   let incrementalFreedPages: number | null = null;
   let errored = false;
   const sqliteVacuum = db.dialect === "sqlite";
-  if (sqliteVacuum) try {
+  if (sqliteVacuum) {
     // wal_checkpoint(TRUNCATE) returns a row { busy, log, checkpointed }.
     // We expose `log` (page count moved into the main DB) for ops visibility.
-    const checkpoint = db.get<{ busy: number; log: number; checkpointed: number }>(
-      "PRAGMA wal_checkpoint(TRUNCATE)",
-    );
-    walCheckpointPagesMoved = checkpoint?.log ?? null;
-  } catch (e: any) {
-    console.log(`[commhub retention] wal_checkpoint failed: ${e?.message ?? e}`);
-    errored = true;
+    //
+    // #2614 —— 重试 3 次：本轮刚跑完一批 `db.all` 时，同连接上可能还有未重置的
+    // 读语句，`wal_checkpoint` 会直接报 `database table is locked`（SQLITE_LOCKED，
+    // 不是 BUSY）。这是**瞬时**的：让出一次事件循环再试就好。别把它记成 errored
+    // —— 那会让「本轮 vacuum 是否出错」这个字段说谎。
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const checkpoint = db.get<{ busy: number; log: number; checkpointed: number }>(
+          "PRAGMA wal_checkpoint(TRUNCATE)",
+        );
+        walCheckpointPagesMoved = checkpoint?.log ?? null;
+        lastErr = null;
+        break;
+      } catch (e: any) {
+        lastErr = e;
+        await yieldToLoop();
+      }
+    }
+    if (lastErr) {
+      console.log(`[commhub retention] wal_checkpoint failed after 3 attempts: ${lastErr?.message ?? lastErr}`);
+      errored = true;
+    }
   }
   if (sqliteVacuum) try {
     // incremental_vacuum is a no-op on databases not created with
