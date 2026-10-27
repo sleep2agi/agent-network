@@ -514,6 +514,24 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         const skips = skipsBlockedBy(row.schedule_id, open.task_id);
         if (skips === stuckNoticeSkips()) notices.push(stuckNoticeFor(row, "stuck", open, skips, stuckTimeoutMs(row.schedule_json)));
         if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+        // #2622（第二轮漏接的就是这里）—— 「上一次还在跑」这条跳过路径**从来没有调用过**退避：
+        // 上面的 UPDATE 把 run 记成 `skipped/previous_run_active`，然后直接 `advance` + `return`，
+        // 于是 `every_seconds=180` 的排程在上游一直忙的时候每 3 分钟写一行 skip，永不减速。
+        // 生产实测（.178，2026-10-28 00:05 起 1.9 小时）：10 个排程写了 175 行，
+        // 其中 4 个各 31–35 行、`backoff_effective_seconds` **全部为 NULL** ——
+        // 而同一次部署里走 target_offline 路径的排程退避是正常的（840 秒）。
+        // 顺序要紧：必须放在 UPDATE 之后（退避函数读「最近 12 次」，
+        // 最新那条 skip 必须已经入表），也要放在 advance 之后（它会把 next_run_at 再往后推）。
+        try {
+          const bo = applyNoProgressBackoff(row.schedule_id);
+          if (bo && bo.effective_seconds) {
+            const sched = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
+            const at = parseHubTimestamp(sched?.next_run_at);
+            if (at !== null) advance(row, scheduledFor, new Date(at));
+          }
+        } catch (e: any) {
+          console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
+        }
         return;
       }
     }
