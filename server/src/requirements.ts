@@ -10,7 +10,7 @@ import { markGzipReusable } from "./http-gzip.js";
 import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from "./requirement-tags.js";
 import { buildTagNodes, isDescendant, MAX_TAG_DEPTH, parseCreateTag, TAG_TREE_CAPABILITY, tagDepth, tagSubtreeHeight, type TagNodeRow } from "./requirement-tag-tree.js";
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
-import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestReadNetworkId, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
 import { nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, type NodeIdentity, type Verdict } from "./node-permissions.js";
 import {
@@ -1761,7 +1761,8 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
   if (url.pathname === "/api/requirements/projects" || url.pathname.startsWith("/api/requirements/projects/")) return handleProjects(ctx);
 
   if (url.pathname === "/api/requirements/tags" && req.method === "GET") {
-    const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+    // 只读端点用读解析器：非 admin 会员（只有一个网络）不该被 400 打回。
+    const networkId = resolveRestReadNetworkId(ctx.scope, ctx.auth);
     if (!networkId) return jsonError("network_id_required", 400);
     const tagParams: unknown[] = [networkId];
     const tagSql = addTaskVisibilityScope("SELECT tags_json FROM requirements WHERE network_id=?1", tagParams, taskCaller(ctx));
@@ -1799,7 +1800,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
   // 仪表盘聚合(requirements-stats.ts):一个网络、调用者看得见的卡(与列表同一个可见范围),含归档的卡 ——
   // 完成的卡常被归档,不算它们「今天完成了多少」就会偏少。
   if (url.pathname === "/api/requirements/stats" && req.method === "GET") {
-    const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+    const networkId = resolveRestReadNetworkId(ctx.scope, ctx.auth);
     if (!networkId) return jsonError("network_id_required", 400);
     const sq = parseStatsQuery(url.searchParams, Date.now());
     if ("error" in sq) return jsonError(sq.error, 400);
@@ -1816,7 +1817,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
 
   // #473 —— MCP requirements_people:紧凑通讯录(用户名、角色、部门、名下 Agent),q / limit / offset。
   if (url.pathname === '/api/requirements/people/directory' && req.method === 'GET') {
-    const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+    const networkId = resolveRestReadNetworkId(ctx.scope, ctx.auth);
     if (!networkId) return jsonError('network_id_required', 400);
     const pq = parsePeopleQuery(url.searchParams);
     if ('error' in pq) return jsonError(pq.error, 400);
@@ -1824,7 +1825,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
   }
 
   if (url.pathname === '/api/requirements/people' && req.method === 'GET') {
-    const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+    const networkId = resolveRestReadNetworkId(ctx.scope, ctx.auth);
     if (!networkId) return jsonError('network_id_required', 400);
     // name = 显示用的名字(没设 display_name 时回落到用户名 / alias,旧 app 只读它);display_name 单独给出、没设为 ""
     // —— 分享图等对外场景据此判断「只有用户名」,不把 admin 之类的账号名印出去。

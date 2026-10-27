@@ -23,7 +23,7 @@
 
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { db } from "./db.js";
-import { resolveRestNetworkScope, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { resolveRestNetworkScope, resolveRestReadNetworkId, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 
 const NET_A = "net_819_a";
 const NET_B = "net_819_b";
@@ -129,5 +129,44 @@ describe("#819 作用域优先于成员关系回退", () => {
     // 归属由作用域决定,不由「他碰巧属于哪个网络」决定。
     // 如果实现把两者的优先级搞反,这条会返回 NET_A。
     expect(resolveRestWriteNetworkId(scopeOf(NET_B), ctx(U_SINGLE), true)).toBe(NET_B);
+  });
+});
+
+// #2720 后续 —— **只读**端点（tags / stats / people / people-directory）借用了
+// `resolveRestWriteNetworkId`，于是「非 admin 且请求里没带 network_id」一律 400
+// `network_id_required`，哪怕这个人只属于一个网络。客户端看到的表现不是
+// 「你少传参数」，而是「通讯录/统计读不到」。
+//
+// 读解析器只放宽两件**不改变归属**的事：调用者自己的网络绑定（会话令牌上的
+// networkId），以及「恰好一个成员关系」。写仍然只走写解析器。
+describe("#2720 resolveRestReadNetworkId — 只读端点不该因为「没带 network_id」就 400", () => {
+  test("🔴 非 admin + 恰好 1 个成员关系 + 全局作用域 → 用那个网络（修复点）", () => {
+    // 修之前这里是 null ⇒ 端点回 400。
+    expect(resolveRestReadNetworkId(ADMIN_SCOPE, ctx(U_SINGLE))).toBe(NET_A);
+  });
+
+  test("调用者自己的网络绑定优先于成员关系回退", () => {
+    expect(resolveRestReadNetworkId(ADMIN_SCOPE, { userId: U_MULTI, networkId: NET_B })).toBe(NET_B);
+  });
+
+  test("作用域里的网络优先于绑定（调用方显式指定就该听它）", () => {
+    expect(resolveRestReadNetworkId(scopeOf(NET_A), { userId: U_MULTI, networkId: NET_B })).toBe(NET_A);
+  });
+
+  test("2 个成员关系且没有绑定 → 仍然是 null（歧义不猜）", () => {
+    expect(resolveRestReadNetworkId(ADMIN_SCOPE, ctx(U_MULTI))).toBeNull();
+  });
+
+  test("0 个成员关系 → null", () => {
+    expect(resolveRestReadNetworkId(ADMIN_SCOPE, ctx(U_NONE))).toBeNull();
+  });
+
+  test("没有 authCtx → null", () => {
+    expect(resolveRestReadNetworkId(ADMIN_SCOPE, null)).toBeNull();
+  });
+
+  test("🔴 正控：写解析器在同样输入下仍然是 null（读的放宽不能漏到写上）", () => {
+    expect(resolveRestWriteNetworkId(ADMIN_SCOPE, ctx(U_SINGLE), false)).toBeNull();
+    expect(resolveRestReadNetworkId(ADMIN_SCOPE, ctx(U_SINGLE))).toBe(NET_A);
   });
 });

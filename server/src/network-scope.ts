@@ -256,6 +256,34 @@ export function resolveRestWriteNetworkId(
 }
 
 /**
+ * Resolve one network for a REST **read**.
+ *
+ * 与 `resolveRestWriteNetworkId` 只差一条：**读**可以回落到调用者自己的网络
+ * 绑定（会话/分段令牌上的 `networkId`），以及「恰好一个成员关系」的**普通成员**。
+ * 写仍然只走 `resolveRestWriteNetworkId` —— 写不能继承歧义（落错网络会写脏数据），
+ * 读落到调用者自己所属的网络则没有这个问题，行级可见范围仍由
+ * `addHumanNetworkScope` / `hiddenNodeFilter` 兜着。
+ *
+ * 修的是：`/api/requirements/people/directory` 这类**只读**接口借用了写解析器，
+ * 于是任何非 admin 会员（哪怕只属于一个网络、请求里也没带 network_id）都会被
+ * `400 network_id_required` 打回 —— 客户端看到的表现是「通讯录读不到」，
+ * 而不是「你少传了一个参数」。
+ *
+ * 仍然保持：0 个成员关系、或 ≥2 个且没有绑定/显式指定 ⇒ null（调用方回 400）。
+ */
+export function resolveRestReadNetworkId(
+  scope: RestNetworkScope,
+  authCtx: { userId: string; networkId: string | null } | null,
+): string | null {
+  const scoped = singleNetworkId(scope);
+  if (scoped) return scoped;
+  if (!authCtx) return null;
+  if (authCtx.networkId) return authCtx.networkId;
+  const memberships = getUserNetworkIds(authCtx.userId);
+  return memberships.length === 1 ? memberships[0] : null;
+}
+
+/**
  * 能不能往这个网络写**面向 Agent 的东西**(派任务、改节点、排程……)。
  * 受限成员在受限网络里恒为 false(fail-closed);给授权 Agent 发任务的路径另用
  * canMessageAgent 单独放行,人类侧的写入(私信、需求、上传)用 canRestWriteNetworkAsHuman。
