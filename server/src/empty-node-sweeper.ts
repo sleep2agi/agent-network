@@ -48,7 +48,7 @@ export function sweepEmptyNodeRows(
     `SELECT n.node_id
        FROM nodes n
       WHERE ${IDENTITY_EMPTY.replace(/\b(runtime|hostname|config_path)\b/g, "n.$1")}
-        AND datetime(n.updated_at) < datetime('now', ?1)
+        AND n.updated_at < datetime('now', ?1)
         AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.node_id = n.node_id)
       LIMIT 500`,
     `-${ageDays} days`,
