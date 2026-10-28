@@ -43,6 +43,7 @@ import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
 import { flagOrphanTasks } from "./task-orphan.js";
 import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { withBusyElapsed } from "./scheduled-failure-code.js";
 import { pickAliasNetwork } from "./rest-alias-network-fallback.js";
 import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
 import { listAdoptionCandidates, snapshotReportsAdoptionDiscovery } from "./adoption-candidates.js";
@@ -5430,10 +5431,12 @@ return Bun.serve({
       let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE task_id = ?1`;
       sql = addAgentTimelineScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       sql += " LIMIT 1";
-      const task = db.get(sql, ...params);
-      if (!task) {
+      const rawTask = db.get(sql, ...params);
+      if (!rawTask) {
         return withCors(req, Response.json({ ok: false, error: "task_not_found", task_id: taskId }, { status: 404 }));
       }
+      // #2884 —— 共享会话忙：读取时补上「排队 / 会话等待」拆解（幂等，不改写入）。
+      const task = withBusyElapsed(rawTask as any);
       const taskNetworkId = typeof task.network_id === "string" ? task.network_id : null;
       const canonicalTarget = task.to_node_id
         ? null
@@ -5535,7 +5538,7 @@ return Bun.serve({
       sql += ` ORDER BY created_at DESC, task_id DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
 
-      const rows = db.all<any>(sql, ...params);
+      const rows = db.all<any>(sql, ...params).map((row: any) => withBusyElapsed(row));
       // Existing desktop clients implement their one-task detail read as
       // `/api/tasks?task_id=…&limit=1`. Keep broad list responses lean, but
       // enrich that exact-detail shape as well as `/api/tasks/:id`.

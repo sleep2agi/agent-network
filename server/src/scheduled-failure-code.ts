@@ -47,9 +47,13 @@ function fmtMinutes(ms: number): string {
 }
 
 /**
- * 把一条失败任务拆成「排队 / 会话等待」两段，供 run 记录展示。#2884
+ * 把一条失败任务拆成「排队 / 会话等待」两段，供 run 记录与任务详情展示。
  *
  * 读不出时刻就不编：宁可只说总计，也不把两段硬凑成 30 分钟。
+ *
+ * #2884 —— 为什么排程与非排程任务都要覆盖：
+ *   现场那条 412 分钟的任务**不是排程任务**（scheduled_task_runs 里查不到），是直连任务。
+ *   只改排程 run 的投影，最该被修的那一类反而看不到拆解。
  */
 export function busyElapsedNote(
   createdAt: string | null | undefined,
@@ -70,4 +74,26 @@ export function busyElapsedNote(
   return `实测总耗时 ${fmtMinutes(total)}：排队 ${fmtMinutes(queued)}（任务创建→节点开始处理）`
     + ` + 会话等待 ${fmtMinutes(waited)}（节点开始处理→失败）。`
     + `失败文案里的等待上限只代表后一段，不代表总共等了多久。`;
+}
+
+/** 幂等标记：已经加过拆解就不再重复追加。 */
+const BUSY_NOTE_MARK = "实测总耗时";
+export const BUSY_NOTE_MARKER = BUSY_NOTE_MARK;
+
+/**
+ * #2884 —— 在读取投影上补「排队 / 会话等待」拆解（幂等，不改写入路径）。
+ *
+ * 只对 `task_failed_busy` 生效：其它失败原因的耗时与「排队」无关，
+ * 追加会让失败的真正原因更难看清。
+ */
+export function withBusyElapsed<T extends {
+  status?: string | null; result?: string | null;
+  created_at?: string | null; started_at?: string | null; completed_at?: string | null;
+}>(task: T): T {
+  if (!task || scheduledFailureCode(task.status ?? null, task.result ?? null) !== "task_failed_busy") return task;
+  const current = typeof task.result === "string" ? task.result : null;
+  if (current && current.includes(BUSY_NOTE_MARK)) return task; // 已加过
+  const note = busyElapsedNote(task.created_at, task.started_at, task.completed_at);
+  if (!note) return task;
+  return { ...task, result: [current, note].filter(Boolean).join(" ") };
 }

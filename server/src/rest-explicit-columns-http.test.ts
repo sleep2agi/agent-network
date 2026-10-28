@@ -197,6 +197,48 @@ describe("#311 REST response projections are stable across future ALTER TABLE", 
     expect(detail.task[INTERNAL_SENTINEL]).toBeUndefined();
   });
 
+  // #2884 —— 共享会话忙的失败：任务详情/列表要把「排队」与「会话等待」分开报。
+  // 现场那条 412 分钟的任务**不是排程任务**（scheduled_task_runs 里没有它），
+  // 所以投影必须落在任务读端点，不能只改排程 run。
+  test("#2884 busy failures expose queue vs session-wait split (non-scheduled tasks too)", async () => {
+    const BUSY = "[n] opencode 任务未提交：共享会话在 30 分钟 内一直处于忙碌状态，本任务没有发出";
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, status, content, priority, result,
+                          created_at, started_at, completed_at, network_id)
+       VALUES ('task-busy-shape', 'sender', 'rest-shape-node', 'failed', 'busy', 'normal', ?1,
+               datetime('now', '-412 minutes'), datetime('now', '-30 minutes'), datetime('now'), ?2)`,
+      [BUSY, networkId],
+    );
+    // 对照组：同一形状但原因不是会话忙 ⇒ 不能被加拆解
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, status, content, priority, result,
+                          created_at, started_at, completed_at, network_id)
+       VALUES ('task-plain-fail', 'sender', 'rest-shape-node', 'failed', 'plain', 'normal',
+               '执行出错: upstream refused', datetime('now', '-400 minutes'),
+               datetime('now', '-370 minutes'), datetime('now'), ?1)`,
+      [networkId],
+    );
+
+    const detail = await api(`/api/tasks/task-busy-shape?network_id=${networkId}`);
+    expect(detail.task.status).toBe("failed");
+    expect(detail.task.result).toContain("共享会话");
+    expect(detail.task.result).toContain("排队 382 分钟");
+    expect(detail.task.result).toContain("会话等待 30 分钟");
+    expect(detail.task.result).toContain("不代表总共等了多久");
+    // 幂等：再读一次不重复追加
+    const again = await api(`/api/tasks/task-busy-shape?network_id=${networkId}`);
+    expect(again.task.result.match(/实测总耗时/g)?.length).toBe(1);
+
+    const plain = await api(`/api/tasks/task-plain-fail?network_id=${networkId}`);
+    expect(plain.task.result).not.toContain("排队");
+
+    // 列表端点走同一条投影
+    const list = await api(`/api/tasks?network_id=${networkId}&task_id=task-busy-shape&skip_stats=1`);
+    expect(list.tasks[0].result).toContain("排队 382 分钟");
+    // 响应键不变（不新增字段）
+    expect(sortedKeys(list.tasks[0])).toEqual(sorted(GOLDEN_RESPONSE_KEYS.task));
+  });
+
   test("audit, task-event, and completion rows are explicit", async () => {
     const audit = await api("/api/audit-log?action=shape_action");
     expect(sortedKeys(audit.logs[0])).toEqual(sorted(GOLDEN_RESPONSE_KEYS.audit));
