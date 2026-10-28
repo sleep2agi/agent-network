@@ -371,7 +371,13 @@ export function captureWindowsDescendantIdentities(
   root: WindowsManagedIdentity,
   opts: { cap?: number; runPowerShell?: (script: string) => string } = {},
 ): WindowsDescendantCapture {
-  const cap = opts.cap ?? 16;
+  // 🔴 2026-10-28（#2869）：默认上限 16 在繁忙的 Windows 宿主上不够用。
+  //    CI 实测：`node stop windows-picker` 报
+  //      descendant count 139 exceeds cap 16 for bridge pid=8232 → STOP_TIMEOUT → 测试判红
+  //    11 次里红 2 次，本地（进程树小）从没红过 —— 是确定性阈值，不是抖动。
+  //    139 个后代对 PowerShell 枚举与解析都不算大，所以把默认抬到 256；
+  //    显式的 opts.cap 仍然优先（既有 cap 测试传的就是显式值）。
+  const cap = opts.cap ?? Number(process.env.ANET_WINDOWS_DESCENDANT_CAP ?? 256);
   const run = opts.runPowerShell ?? defaultPowerShellRunner;
   const label = `${root.role} pid=${root.pid}`;
   let parsed: ReturnType<typeof parseWindowsCapture> = null;
