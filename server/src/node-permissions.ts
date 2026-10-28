@@ -73,7 +73,21 @@ db.exec(`
 `);
 
 let callLogFull = false;
-export const TOOL_CALL_MAX_ROWS = 20_000;
+/**
+ * 行数上限。**刻意比 `LOG_MAX_ROWS`(20 000) 高一个数量级**。
+ *
+ * 为什么不能沿用 20 000：这张表的键是 `(network, node, tool, hour)` —— 每过一个小时
+ * 就是一整批新键。生产实测（.184 上线 1 小时）：75 行/小时 ⇒ 1 800 行/天，
+ * 20 000 ÷ 1 800 ≈ **11 天**，而保留期是 30 天。
+ *
+ * 撞上限的后果不是「变慢」，而是 `callLogFull` 只给已有行加次数、**不再插新行**，
+ * 于是新的一小时一行都写不进去 —— 计数**静默归零**，不报错、不告警。
+ * 而这张表正是 #525「要不要切 enforce」的判据，读到归零会把「没人调用」当成结论。
+ *
+ * 200 000 行 ≈ 26 MB（实测 91 行 = 12 KB），对这张表完全可接受；
+ * 按当前速率可覆盖 30 天保留期且留 2 倍余量。
+ */
+export const TOOL_CALL_MAX_ROWS = 200_000;
 
 /** 计一次「到达权限闸」的工具调用。绝不影响请求本身 —— 出错只写日志。 */
 export function recordNodeToolCall(id: NodeIdentity, tool: string): void {

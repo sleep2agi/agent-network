@@ -256,6 +256,19 @@ describe("GET /api/networks/:id/node-permission-report", () => {
 // #2823 —— 调用面计数：拒绝日志给不了分母。
 // 生产 30 天 `node_permission_log` 0 行，分不清「没人越界」和「没人碰过这些工具」，
 // 而 #525 要切 enforce，恰恰需要一个分母。
+describe("#2823 计数表的上限必须覆盖整个保留期", () => {
+  // 撞上限的后果是**静默归零**（callLogFull 只给已有行加次数、不插新行），
+  // 而这正是 #525 用来判「要不要切 enforce」的判据 —— 读到归零会把「没人调用」当结论。
+  // 生产实测 75 行/小时（.184 上线首小时）；这里按 100 行/小时留余量。
+  test("TOOL_CALL_MAX_ROWS 覆盖 LOG_RETENTION_DAYS × 100 行/小时，否则会在保留期内静默停表", async () => {
+    const { TOOL_CALL_MAX_ROWS, LOG_RETENTION_DAYS } = await import("./node-permissions.js");
+    const worstCasePerHour = 100;
+    expect(TOOL_CALL_MAX_ROWS).toBeGreaterThanOrEqual(LOG_RETENTION_DAYS * 24 * worstCasePerHour);
+    // 反向验证这条测试有判别力：旧的 20 000 必须不满足
+    expect(20_000).toBeLessThan(LOG_RETENTION_DAYS * 24 * worstCasePerHour);
+  });
+});
+
 describe("#2823 调用面计数（node_tool_calls）", () => {
   const callHits = (nodeId: string, tool: string) => Number(
     db.get<{ h: number | string | null }>(
