@@ -85,6 +85,7 @@ import { sweepEmptyNodeRows } from "./empty-node-sweeper.js";
 import { versionStats } from "./version-stats.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import { scanNodeFailureAlerts } from "./node-failure-alert.js";
+import { scanStarvedSchedules } from "./schedule-starved.js";
 import {
   AUDIT_LOG_REST_SELECT,
   COMPLETION_REST_SELECT,
@@ -5800,6 +5801,20 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     }
   }, nodeFailureAlertMs);
   (nodeFailureAlertTimer as any).unref?.();
+
+  // #2880 —— 空转排程巡检：默认**只记录**「本来会被暂停哪些」，不动作。
+  // 开启 COMMHUB_SCHEDULE_STARVED_AUTOPAUSE=1 才真暂停（判据见 schedule-starved.ts 头注释）。
+  // 与告警分开：告警解决「没人知道」，这里解决「知道了但一直不停」。
+  const scheduleStarvedTimer = setInterval(() => {
+    try {
+      const r = scanStarvedSchedules();
+      if (r.paused.length > 0) console.log(`[commhub schedule-starved] paused ${r.paused.length}: ${r.paused.join(", ")}`);
+      else if (r.candidates.length > 0) console.log(`[commhub schedule-starved] would pause ${r.candidates.length} (autopause off): ${r.candidates.join(", ")}`);
+    } catch (e: any) {
+      console.log(`[commhub schedule-starved] failed: ${e?.message ?? e}`);
+    }
+  }, nodeFailureAlertMs);
+  (scheduleStarvedTimer as any).unref?.();
 
   // #476 — the two legacy module-level intervals, now owned by startHub
   // like every other periodic job: rate-limit map cleanup (memory only)
