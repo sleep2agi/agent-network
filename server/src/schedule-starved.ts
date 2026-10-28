@@ -33,11 +33,26 @@ export function autopauseEnabled(): boolean {
 export function starvedMinRuns(): number { return envInt("COMMHUB_SCHEDULE_STARVED_MIN_RUNS", 20, 1); }
 export function starvedWindowHours(): number { return envInt("COMMHUB_SCHEDULE_STARVED_WINDOW_HOURS", 24, 1); }
 
-export type ScheduleStats = { schedule_id: string; total: number; replied: number };
+export type ScheduleStats = { schedule_id: string; total: number; replied: number; offline_skips: number };
 
-/** 纯函数：是否判定为空转。便于单测，不做任何 IO。 */
-export function isStarved(s: { total: number; replied: number }, minRuns = starvedMinRuns()): boolean {
-  return s.total >= minRuns && s.replied === 0;
+/** 目标不可达占比超过这个比例 ⇒ 不算空转（是在等节点回来，不是排程有问题）。 */
+export const OFFLINE_SKIP_RATIO_MAX = 0.9;
+
+/**
+ * 纯函数：是否判定为空转。便于单测，不做任何 IO。
+ *
+ * 🔴 2026-10-28 生产实测修正：只看「执行≥N 且成功=0」会把「等离线节点」误判成空转。
+ *   那天 6 个候选里 4 个的 79 次运行**全部是 skipped/target_offline** —— 它们没建过任务、
+ *   没浪费等待，节点一回来就会自己接着跑。把它们暂停，反而要多一次人工恢复。
+ *   ⇒ target_offline 占比 > 90% 视为「目标不可达」，不算空转。
+ */
+export function isStarved(
+  s: { total: number; replied: number; offline_skips?: number },
+  minRuns = starvedMinRuns(),
+): boolean {
+  if (s.total < minRuns || s.replied !== 0) return false;
+  const offline = s.offline_skips ?? 0;
+  return offline <= s.total * OFFLINE_SKIP_RATIO_MAX;
 }
 
 export type StarvedScanResult = { paused: string[]; candidates: string[]; enabled: boolean };
@@ -52,7 +67,8 @@ export function scanStarvedSchedules(now = new Date()): StarvedScanResult {
   const rows = db.all<ScheduleStats>(
     `SELECT schedule_id,
             COUNT(*) AS total,
-            SUM(CASE WHEN status = 'replied' THEN 1 ELSE 0 END) AS replied
+            SUM(CASE WHEN status = 'replied' THEN 1 ELSE 0 END) AS replied,
+            SUM(CASE WHEN status = 'skipped' AND error_code = 'target_offline' THEN 1 ELSE 0 END) AS offline_skips
        FROM scheduled_task_runs
       WHERE created_at >= ?1
       GROUP BY schedule_id`,

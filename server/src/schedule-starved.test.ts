@@ -45,6 +45,15 @@ describe("空转排程判定与自动暂停", () => {
     expect(isStarved({ total: 129, replied: 1 }, 20)).toBe(false); // 只要成功过一次就不算
   });
 
+  // 2026-10-28 生产实测：6 个候选里 4 个的 79 次运行全是 target_offline ——
+  // 它们在等节点回来，暂停它们反而要多一次人工恢复。
+  test("目标离线占比过高 ⇒ 不算空转（那是在等节点，不是排程有问题）", () => {
+    expect(isStarved({ total: 79, replied: 0, offline_skips: 79 }, 20)).toBe(false); // 100% 离线
+    expect(isStarved({ total: 100, replied: 0, offline_skips: 91 }, 20)).toBe(false); // >90%
+    expect(isStarved({ total: 100, replied: 0, offline_skips: 89 }, 20)).toBe(true);  // <90% 仍算空转
+    expect(isStarved({ total: 94, replied: 0, offline_skips: 0 }, 20)).toBe(true);    // 纯 busy/失败型
+  });
+
   test("默认关闭：只报候选，不改排程状态", () => {
     delete process.env.COMMHUB_SCHEDULE_STARVED_AUTOPAUSE;
     mkSchedule("sched_starved_a", "空转A");
