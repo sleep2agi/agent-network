@@ -20,6 +20,7 @@
 import { db, setScheduledRunTerminalHook } from "./db.js";
 import { sendAgentNotice } from "./agent-notice.js";
 import { parseHubTimestamp } from "./hub-timestamp.js";
+import { busyElapsedNote } from "./scheduled-failure-code.js";
 
 export const SCHEDULE_FAILING_NOTICE_KIND = "schedule_failing";
 const ERROR_PREVIEW_CHARS = 300;
@@ -73,8 +74,12 @@ export type FailureNotice = {
 };
 
 function latestFailure(scheduleId: string): { error_code: string | null; error_message: string | null } {
-  const row = db.get<{ error_code: string | null; error_message: string | null; result: string | null }>(
-    `SELECT r.error_code, r.error_message, t.result
+  const row = db.get<{
+    error_code: string | null; error_message: string | null; result: string | null;
+    task_created_at: string | null; task_started_at: string | null; task_completed_at: string | null;
+  }>(
+    `SELECT r.error_code, r.error_message, t.result,
+            t.created_at AS task_created_at, t.started_at AS task_started_at, t.completed_at AS task_completed_at
        FROM scheduled_task_runs r
        LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
       WHERE r.schedule_id = ?1 AND r.status = 'failed'
@@ -82,7 +87,15 @@ function latestFailure(scheduleId: string): { error_code: string | null; error_m
     scheduleId,
   );
   // 任务以 failed 结束时 run.error_message 为空,原因在任务的回复正文里。
-  return { error_code: row?.error_code ?? null, error_message: row?.error_message || row?.result || null };
+  // #2884 —— 共享会话忙的那一类，再把「排队 / 会话等待」两段实测补在后面：
+  // 只读拼接，不改写入路径，所以节点原文不会被覆盖。
+  const base = row?.error_message || row?.result || null;
+  if (row?.error_code !== "task_failed_busy") return { error_code: row?.error_code ?? null, error_message: base };
+  const note = busyElapsedNote(row?.task_created_at, row?.task_started_at, row?.task_completed_at);
+  return {
+    error_code: row?.error_code ?? null,
+    error_message: note ? [base, note].filter(Boolean).join(" ") : base,
+  };
 }
 
 function truncate(s: string, max: number): string {

@@ -14,6 +14,7 @@ import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { blockerTimedOut, blockerTimeoutClock, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
 import { applyNoProgressBackoff, evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
 import { parseHubTimestamp } from "./hub-timestamp.js";
+import { busyElapsedNote } from "./scheduled-failure-code.js";
 import { scheduledTargetOffline, sendOfflineNotice, type OfflineNotice } from "./scheduled-offline.js";
 
 export type ScheduleSpec =
@@ -264,14 +265,22 @@ export function cancelSchedule(row: ScheduledRow): void {
 export function scheduleRuns(row: ScheduledRow, limit: number): Record<string, unknown> {
   const runs = db.all(
     // #523 — a task that ended `failed` leaves run.error_message empty; its reason is the task's reply text.
+    // #2884 — 共享会话忙的失败额外带上实测拆解（排队 / 会话等待两个量分开报）。
     `SELECT r.run_id, r.schedule_id, r.scheduled_for, r.task_id, r.status, r.error_code,
             CASE WHEN r.error_message IS NULL AND r.status = 'failed' THEN SUBSTR(t.result, 1, 500) ELSE r.error_message END AS error_message,
-            r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at, r.work_outcome, r.schedule_revision, r.work_outcome_node_id
+            r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at, r.work_outcome, r.schedule_revision, r.work_outcome_node_id,
+            t.created_at AS task_created_at, t.started_at AS task_started_at, t.completed_at AS task_completed_at
        FROM scheduled_task_runs r
        LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
       WHERE r.schedule_id = ?1 AND r.network_id = ?2 ORDER BY r.created_at DESC, r.scheduled_for DESC LIMIT ?3`,
     row.schedule_id, row.network_id, limit,
-  );
+  ).map((r: any) => {
+    const note = r.error_code === "task_failed_busy"
+      ? busyElapsedNote(r.task_created_at, r.task_started_at, r.task_completed_at)
+      : null;
+    const { task_created_at, task_started_at, task_completed_at, ...rest } = r;
+    return note ? { ...rest, error_message: [r.error_message, note].filter(Boolean).join(" ") } : rest;
+  });
   return { runs, ...failureSummary(row.schedule_id) };
 }
 

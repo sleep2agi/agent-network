@@ -231,3 +231,48 @@ describe("#523 GET /runs", () => {
     expect(typeof again.last_failure_alert_at).toBe("string");
   });
 });
+
+// #2884 —— 共享会话忙：run 记录要把「排队」和「会话等待」两个量分开报。
+// 生产实测（2026-10-27, TMA需求欧）：一条 412 分钟才失败的任务，拆开是排队 382 + 会话等待 30。
+// 文案只说过「30 分钟」，于是报表把所有长等待都算成「会话忙」，掩盖了「排队几小时」这一层。
+describe("#2884 busy runs report queue and session wait separately", () => {
+  const BUSY = "[TMA需求欧] opencode 任务未提交：共享会话在 30 分钟 内一直处于忙碌状态（可能有人正在 TUI 里跑一轮），本任务没有发出";
+
+  test("error_message carries both numbers; the node's own wording is kept", async () => {
+    const s = seedSchedule("忙的情况");
+    const r = fire(s);
+    expect(r.status).toBe("delivered");
+    // 造出「排了 382 分钟、轮到后等了 30 分钟」：把创建时刻前移 412 分钟、开始处理前移 30 分钟，
+    // 回复会把 completed_at 设成现在。
+    db.run(
+      `UPDATE tasks SET created_at = datetime('now', '-412 minutes'),
+                        started_at = datetime('now', '-30 minutes')
+        WHERE task_id = ?1`,
+      r.taskId,
+    );
+    const out = await nodeReply({ alias: "scheduler", text: BUSY, in_reply_to: r.taskId, status: "failed", from_session: ALIAS });
+    expect(out.ok).toBe(true);
+
+    const body = await getRuns(s.schedule_id);
+    const run = body.runs.find((x: any) => x.run_id === r.runId);
+    expect(run.status).toBe("failed");
+    expect(run.error_code).toBe("task_failed_busy");
+    // 两个量分开
+    expect(run.error_message).toContain("排队 382 分钟");
+    expect(run.error_message).toContain("会话等待 30 分钟");
+    // 节点原文没有被读数覆盖
+    expect(run.error_message).toContain("共享会话");
+    // 不能让人把 30 分钟读成总时长
+    expect(run.error_message).toContain("不代表总共等了多久");
+  });
+
+  test("not-busy failures never get the breakdown appended", async () => {
+    const s = seedSchedule("真失败");
+    const { runId } = await runOnce(s);
+    const body = await getRuns(s.schedule_id);
+    const run = body.runs.find((x: any) => x.run_id === runId);
+    expect(run.error_code).toBe("task_failed");
+    expect(run.error_message).toContain("safety system");
+    expect(run.error_message).not.toContain("排队");
+  });
+});
