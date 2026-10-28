@@ -62,6 +62,32 @@ WORK=$(mktemp -d /root/t738-work.XXXXXX)
 ANET=(bun /workspace/agent-network/bin/cli.ts)
 (cd "$WORK" && { printf '\n' | "${ANET[@]}" init --hub "$HUB" || true; "${ANET[@]}" register --username t738 --password pass123456 || true; "${ANET[@]}" login --username t738 --password pass123456 || true; }) > /root/t738-anet-setup.log 2>&1
 NODE_N=0
+# _run_until_settled CMD… —— #2852：原来每个场景都用 `timeout 150` 兜住 launcher，
+# 但「真的 fork 了」的 5 个场景里 node 起来后常驻、launcher 不会退出，
+# 于是每个都白等满 150 秒（CI 日志实测 153.4s ×5 ≈ 12.6 分钟，占整个 job 的 84%）。
+# 断言读的是杀掉之后的 $LOG 与文件，所以那 150 秒是纯等待，不是工作。
+# 改成：起后台 → 轮询 $LOG 出现终态标记 → 再给 GRACE 秒让落盘完成 → 主动结束整棵进程树；
+# 150 秒上限原样保留兜底（fail-closed 的场景本来 1–3 秒就自己退出，行为不变）。
+_run_until_settled() {
+  local cap=${T738_LAUNCH_CAP:-150} grace=${T738_LAUNCH_GRACE:-3}
+  local pid waited=0 i=0
+  "$@" &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$cap" ]; then break; fi
+    if grep -qE 'forked thread|Not confirmed|Fail-closed|also needs --yes|\[y/N\]' "$LOG" 2>/dev/null; then
+      sleep "$grace"; break
+    fi
+    sleep 1; waited=$((waited + 1))
+  done
+  pkill -TERM -P "$pid" 2>/dev/null || true
+  kill -TERM "$pid" 2>/dev/null || true
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 10 ]; do sleep 0.5; i=$((i + 1)); done
+  pkill -KILL -P "$pid" 2>/dev/null || true
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  return 0
+}
 # launch FIXTURE(mixed|broken) ANSWER(-|y|n) [EXTRA-ARGS...] → a fresh node holding a copy of the
 # fixture rollout, recorded thread = TID; runs its real start (ANSWER != - : on a pty, answering
 # the y/N prompt). Sets LOG NODE_DIR NH ROLLOUT SUM0 MODE0 CFG_THREAD.
@@ -85,8 +111,8 @@ PY
   SUM0=$(sha256sum "$ROLLOUT"); MODE0=$(stat -c '%a %s %Y' "$ROLLOUT")
   LOG="/root/t738-start-$node.log"
   local cmd=(env PATH="$PATH" timeout --foreground 150 "${ANET[@]}" node start "$node" --accept-dev-channels --codex-bin "$C159" "$@")
-  if [ "$answer" = - ]; then (cd "$WORK" && "${cmd[@]}" < /dev/null) > "$LOG" 2>&1 || true
-  else (cd "$WORK" && python3 /workspace/$SUITE/answer.py 'into a new thread now? [y/N]' "$answer" -- "${cmd[@]}") > "$LOG" 2>&1 || true; fi
+  if [ "$answer" = - ]; then (cd "$WORK" && _run_until_settled "${cmd[@]}" < /dev/null > "$LOG" 2>&1)
+  else (cd "$WORK" && _run_until_settled python3 /workspace/$SUITE/answer.py 'into a new thread now? [y/N]' "$answer" -- "${cmd[@]}" > "$LOG" 2>&1); fi
   CFG_THREAD=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('codexThreadId',''))" "$NODE_DIR/config.json")
   (cd "$WORK" && timeout 30 "${ANET[@]}" node stop "$node") >/dev/null 2>&1 || true
 }
