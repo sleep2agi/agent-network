@@ -69,7 +69,7 @@ NODE_N=0
 # 改成：起后台 → 轮询 $LOG 出现终态标记 → 再给 GRACE 秒让落盘完成 → 主动结束整棵进程树；
 # 150 秒上限原样保留兜底（fail-closed 的场景本来 1–3 秒就自己退出，行为不变）。
 _run_until_settled() {
-  local cap=${T738_LAUNCH_CAP:-150} grace=${T738_LAUNCH_GRACE:-3}
+  local cap=${T738_LAUNCH_CAP:-150} grace=${T738_LAUNCH_GRACE:-5}
   local pid waited=0 i=0
   "$@" &
   pid=$!
