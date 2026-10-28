@@ -20,6 +20,7 @@ export HOME=/tmp/anethome
 # tests/lib/safe-rm.sh for the helper definition.
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/safe-rm.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/install-published.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/hub-start-failure.sh"
 mkdir -p "$HOME" /tmp/work
 cd /tmp/work
 
@@ -64,6 +65,8 @@ done
 if [[ "$hub_up" != 1 ]]; then
   echo "FAIL: hub did not answer /health within 180s (pid ${HUB_PID:-?}); last 40 lines of /tmp/hub.log:" >&2
   tail -40 /tmp/hub.log >&2 || true
+  # #2867 —— 标出是「取包链失败」还是「hub 自身不健康」；两者都仍然 exit 1。
+  classify_hub_start_failure /tmp/hub.log >&2 || true
   exit 1
 fi
 
