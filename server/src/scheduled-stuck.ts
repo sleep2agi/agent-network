@@ -169,9 +169,42 @@ export function stuckNoticeText(n: StuckNotice): { title: string; text: string }
   };
 }
 
-/** 提交之后调用。没有创建者 / 创建者不在网络里 → 不发。 */
+// #2881 —— 同一个排程的「卡住」通知每天限 N 条。
+//
+// 现场（2026-10-28 只读统计）：7 天 1162 条 schedule_stuck 通知，其中单个排程 220 条。
+// 原因不是提醒不够，而是**提醒的设计前提被打破**：本意是「一个新的阻塞任务 = 一个新事件」，
+// 于是每个阻塞者都会重新上膛。但节点如果长期被人占着，每一轮都会产生新的阻塞者，
+// 于是一个永远跑不成的排程就能一天发几十条 —— 结果没人再看。
+//
+// 这里只加天花板，不动「新阻塞者 = 新事件」的语义（前 N 条照发），
+// 也没有任何自动动作：排程状态不受影响。
+export function stuckNoticeMaxPerDay(): number {
+  return Math.floor(envNumber("COMMHUB_SCHEDULE_STUCK_NOTICE_MAX_PER_DAY", 4, 1));
+}
+
+/** 该排程近 24 小时已发过几条卡住通知。 */
+export function stuckNoticesSentToday(scheduleId: string): number {
+  try {
+    return db.get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM user_inbox
+        WHERE kind = ?1 AND json_extract(meta_json, '$.schedule_stuck.schedule_id') = ?2
+          AND created_at >= datetime('now', '-24 hours')`,
+      SCHEDULE_STUCK_NOTICE_KIND, scheduleId,
+    )?.n ?? 0;
+  } catch {
+    return 0; // 读不到就不拦（宁可多发一条，也不要因为查询失败而彻底静音）
+  }
+}
+
+/** 提交之后调用。没有创建者 / 创建者不在网络里 / 当日已超上限 → 不发。 */
 export function sendStuckNotice(n: StuckNotice): string | null {
   if (!n.createdBy) return null;
+  const cap = stuckNoticeMaxPerDay();
+  const sentToday = stuckNoticesSentToday(n.scheduleId);
+  if (sentToday >= cap) {
+    console.log(`[scheduled-tasks] stuck notice capped schedule=${n.scheduleId} sent_today=${sentToday} cap=${cap} (${n.reason})`);
+    return null;
+  }
   try {
     const { title, text } = stuckNoticeText(n);
     return sendAgentNotice({
