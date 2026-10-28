@@ -58,7 +58,7 @@ Endpoints:
 | Endpoint | What it does |
 |---|---|
 | `GET /api/auth/me` | `networks[].managed_department_ids`: the departments you manage, sub-departments included; an empty array means you are not a head |
-| `GET /api/networks/{id}/departments` | Each department gets `viewer_can: {manage, create_child}`; owners and admins also get `project_grants` |
+| `GET /api/networks/{id}/departments` | Each department gets `viewer_can: {manage, create_child}`; owners and admins also get `project_grants`. **The two department axes are reported separately**: `member_count` is the direct human headcount (people axis, `network_members.department_id`), while `agent_count` is the number of Agents explicitly assigned to that department (Agent axis, `nodes.department_id`, one entry per alias keeping the newest `updated_at`); `agents_unassigned` is the number of Agents with no explicit department. Agent placement is never inferred from "which department the owner sits in" (#1976 / #2822) |
 | `POST / PATCH / DELETE /api/networks/{id}/departments[/{dept}]`, `PUT /api/networks/{id}/members/{uid}/department` | Owners and admins, or a head inside their department |
 | `GET / PUT /api/networks/{id}/departments/{dept}/project-grants` | Department project grants. `PUT` replaces the whole list `{project_grants: [{project_id, can_edit}]}`. Owners and admins only; if any project is not in the network, nothing is written and it returns 400 |
 | `GET /api/networks/{id}/departments/{dept}/nodes` | Nodes owned by members of the department and its sub-departments: alias, status, health, owner. Read-only. Heads, owners, and admins |
