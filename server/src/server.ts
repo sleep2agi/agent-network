@@ -5569,6 +5569,18 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: true, completions: rows }));
     }
 
+    // #2946 —— 未匹配的 /api/* 必须 404，而不是 200 + 帮助页。
+    // 现场：带 token 打 /api/lang/status（不存在）→ 200 + 652B 帮助文本，
+    // 四个不同的假路径返回完全相同的字节 ⇒ 探针把「端点改名/拼错」读成「正常」。
+    // 这与 #2559（401 被伪装成空数据）同类：错误被伪装成成功。
+    // 根路径 / 仍然返回帮助页（那是给人/curl 看的入口说明）。
+    if (url.pathname.startsWith("/api/")) {
+      return withCors(req, Response.json(
+        { ok: false, error: "not_found", path: url.pathname },
+        { status: 404 },
+      ));
+    }
+
     return withCors(req, new Response(
       `CommHub MCP Server v${SERVER_VERSION} (Streamable HTTP + SSE Push)
 
