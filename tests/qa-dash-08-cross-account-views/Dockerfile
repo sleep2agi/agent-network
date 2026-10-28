@@ -12,6 +12,7 @@ WORKDIR /app
 COPY tests/qa-dash-08-cross-account-views/run.sh /app/run.sh
 COPY tests/lib/safe-rm.sh /lib/safe-rm.sh
 COPY tests/lib/install-published.sh /lib/install-published.sh
+COPY tests/lib/hub-start-failure.sh /lib/hub-start-failure.sh
 RUN chmod +x /app/run.sh
 
 # SHA 绑定（#1092）。scripts/qa.sh 从这里 grep `^ARG SOURCE_COMMIT` 决定传不传
