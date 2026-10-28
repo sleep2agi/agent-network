@@ -13237,6 +13237,9 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
       // `survived`/`unverifiable` 都在删记录与通知 Hub 离线**之前**退出。
       const stop = orchestrateWindowsManagedStop(
         decision.safe.map((p) => ({ role: p.role, pid: p.pid, creationDate: p.creationDate })),
+        process.env.ANET_WINDOWS_STOP_DIAGNOSTICS === "1"
+          ? { diagnostic: (line) => console.error(`[anet-stop-evidence] ${line}`) }
+          : {},
       );
       for (const diagnostic of stop.verdict.retainedDiagnostics) console.warn(`[anet] ⚠ ${diagnostic}`);
       if (stop.verdict.kind === "survived") {
