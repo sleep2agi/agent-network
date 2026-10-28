@@ -437,7 +437,57 @@ if [[ -n "${QA_L1_SHARD:-}" ]]; then
   L1_TESTS=("${_l1_shard[@]}")
 fi
 
+# #2871 —— 单个 L1 套件的 build 命令，**唯一来源**。
+# 预构建阶段与主循环都必须调它：任何一边复制一份命令字符串，都会让两边悄悄分叉。
+# （2026-10-28 踩过：预构建漏了 $build_args，而它装着 SOURCE_COMMIT —— 那是 provenance 门的输入。）
+_qa_l1_build_cmd() {
+  local t="$1" build_args="" arg_name _qa_sha _qa_blob _heavy
+  arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}' || true)
+  _qa_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$arg_name" && -n "$_qa_sha" ]]; then
+    build_args="--build-arg $arg_name=$_qa_sha"
+    _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
+    [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
+  fi
+  case "$t" in
+    test8-runtime|test1203-btw-production-e2e) _heavy=1 ;;
+    *) _heavy=0 ;;
+  esac
+  if [[ "$_heavy" == "1" && "${QA_BUILDX_CACHE:-0}" == "1" ]] && docker buildx version >/dev/null 2>&1; then
+    printf 'docker buildx build --load %s --cache-from type=gha,scope=l1h-%s --cache-to type=gha,mode=min,scope=l1h-%s -t anet-%s -f tests/%s/Dockerfile .' \
+      "$build_args" "$t" "$t" "$t" "$t"
+  else
+    printf 'docker build -q %s -t anet-%s -f tests/%s/Dockerfile .' "$build_args" "$t" "$t"
+  fi
+}
+
 START=$(date +%s)
+
+# #2871 —— 可选并行预构建（默认关闭；QA_L1_BUILD_PAR<=1 时这段完全不执行）。
+# build 占了 L1 墙钟的 90%（实测 shard1 344/384s、shard2 496/549s），而它是串行 for。
+# 这里先用同一个 _qa_l1_build_cmd 并行构建，主循环凭 /tmp/qa-l1-<t>-prebuilt 跳过 build。
+# 失败语义：预构建失败的套件**不写标记**，主循环会照常再串行构建一次并在那里报错 ——
+# 也就是最坏情况退化成今天的行为，不会因为并行而少报错。
+_l1_bpar="${QA_L1_BUILD_PAR:-1}"
+if [[ "$_l1_bpar" =~ ^[0-9]+$ ]] && (( _l1_bpar > 1 )); then
+  note "L1 预构建并发 = ${_l1_bpar}（QA_L1_BUILD_PAR）"
+  rm -f /tmp/qa-l1-*-prebuilt
+  : > /tmp/qa-l1-prebuild.log
+  _pb0=$SECONDS
+  for _pt in "${L1_TESTS[@]}"; do
+    while (( $(jobs -rp | wc -l) >= _l1_bpar )); do wait -n 2>/dev/null || true; done
+    (
+      _pcmd="$(_qa_l1_build_cmd "$_pt")"
+      if eval "$_pcmd" >"/tmp/qa-l1-$_pt-build.log" 2>&1; then
+        touch "/tmp/qa-l1-$_pt-prebuilt"
+      else
+        printf '%s\n' "$_pt" >> /tmp/qa-l1-prebuild.log
+      fi
+    ) &
+  done
+  wait
+  note "L1 预构建完成，用时 $(( SECONDS - _pb0 ))s；失败 $(wc -l < /tmp/qa-l1-prebuild.log) 个（主循环将串行重试）"
+fi
 FAILED=0
 
 # 🔴 启动时清掉**上一轮**的日志。复用的 runner 上,`/tmp/qa-l0-*.log` 与
@@ -539,58 +589,13 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     # 命令替换,set -e 于是在第一个这样的套件上把 runner 打死。
     # 第一版就是这么挂的:CI 在 `build qa-cli-01-hub-start` 处 exit 1,
     # 一个套件都没跑成,而失败看起来像「L1 挂了」而不是「参数推导写错了」。
-    build_args=""
-    arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' \
-      "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}' || true)
-    # 🔴 git 调用必须是非致命的。test823 会在一个**只装了 bash/coreutils/procps、
-    # 没有 git** 的容器里重放这个脚本(它桩了 docker 和 npm,但没桩 git)。
-    # 直接写 $(git rev-parse HEAD):容器里 git 不存在 → 127 → set -e 当场中断
-    # → docker 桩一次都没被调用 → 峰值恒为 0 → 闸门自己的回归「通过」得毫无意义。
-    _qa_sha="$(git rev-parse HEAD 2>/dev/null || true)"
-    if [[ -n "$arg_name" && -n "$_qa_sha" ]]; then
-      build_args="--build-arg $arg_name=$_qa_sha"
-    fi
-    # blob 绑定:光验 SOURCE_COMMIT 的格式不够(任何 40 位十六进制都能过,
-    # 而那个 SHA 可能根本不含镜像里被测的文件)。套件的 Dockerfile 声明了
-    # ARG RUNSH_BLOB 时才供给 —— 同样从 Dockerfile 读,不猜。
-    if grep -qE '^ARG RUNSH_BLOB' "tests/$t/Dockerfile" 2>/dev/null; then
-      _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
-      [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
-    fi
-    # 🔴 #1593 —— build 的耗时必须**自己报**,不能靠相邻 note 行的时间差去推。
-    #    2026-09-01 整晚我都在用「相邻 `build` 行的间隔」当作单个套件的 build 耗时,
-    #    那个数把 build **和它后面那段发射/等待逻辑**混在一起 —— 够用来分「今天整体慢没慢」
-    #    (绿 11.9-12.3s vs 撞守卫 25.2-29.0s,两簇分得很开),但**答不了「慢在谁身上」**。
-    #    当晚 9 次 L0+L1 里 5 次撞 30 分钟守卫、152 分钟零产出(74%),
-    #    而唯一能下钻的量都还是推出来的。加这一行,下次就是读数不是推算。
     _b0=$SECONDS
-    # 🔴 #2846 —— 镜像构建原本没有跨运行缓存,CI 每次从零重建。
-    #    实测(L1-TIMING total=1012s / 29 suites):两个套件吃掉 588s(58%)
-    #    —— test8-runtime 282s、test1203-btw-production-e2e 306s;
-    #    其余 27 个 build 只有 2–13s。缓存命中时这两个从 ~5 分钟掉到十几秒。
-    #    QA_BUILDX_CACHE=1 且 buildx 可用时才走缓存路径:不满足就与改动前逐字相同,
-    #    所以「缓存没配好」只会退化成现在的耗时,不会让门变绿或变红。
-    # 🔴 #2846 实测回退（2026-10-28）：给**全部 29 个套件**开缓存的净效果是负的。
-    #    两次 CI 相对改前基线（shard 2 = 17.0min）：
-    #      首轮（冷缓存）20.4min · 次轮（已有缓存）19.6min
-    #    原因是 buildx 走 docker-container 驱动，`--load` 要把镜像再导回 docker 守护进程，
-    #    29 个小镜像每次都要付这份钱，而它们本来只构建 2–13 秒。
-    #    所以只对**两个真的贵**的镜像开缓存（test8-runtime 282s / test1203 306s），
-    #    其余 27 个照旧用 plain docker build（一个字节都没变）。
-    case "$t" in
-      test8-runtime|test1203-btw-production-e2e) _heavy=1 ;;
-      *) _heavy=0 ;;
-    esac
-    if [[ "$_heavy" == "1" && "${QA_BUILDX_CACHE:-0}" == "1" ]] && docker buildx version >/dev/null 2>&1; then
-      # mode=min 照抄本仓 hub semantics 分片的既有做法（那里写明 mode=max 会挤爆 10GB 缓存预算）。
-      _build="docker buildx build --load $build_args \
-        --cache-from type=gha,scope=l1h-$t \
-        --cache-to type=gha,mode=min,scope=l1h-$t \
-        -t anet-$t -f tests/$t/Dockerfile ."
-    else
-      _build="docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ."
-    fi
-    if ! dockerrun "$_build" >/tmp/qa-l1-$t-build.log 2>&1; then
+    _build="$(_qa_l1_build_cmd "$t")"
+    if [[ -f "/tmp/qa-l1-$t-prebuilt" ]]; then
+      # #2871 预构建阶段已成功（同一函数、同一条命令）⇒ 跳过 build
+      rm -f "/tmp/qa-l1-$t-prebuilt"
+      printf '· build done %s  [prebuilt]\n' "$t"
+    elif ! dockerrun "$_build" >/tmp/qa-l1-$t-build.log 2>&1; then
       printf '· build fail %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
       FAILED=$((FAILED+1))
