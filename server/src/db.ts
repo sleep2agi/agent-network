@@ -1,3 +1,4 @@
+import { scheduledFailureCode } from "./scheduled-failure-code.js";
 import { refreshScheduledBackoff } from "./scheduled-backoff.js";
 import { createAdapter, type DbAdapter } from "./db-adapter"; import { withStatementHook } from "./status-read-cache"; // #431 写 sessions 的语句让 /api/status 缓存失效
 
@@ -2345,6 +2346,7 @@ type ScheduledTaskLifecycleRow = {
   network_id: string | null;
   status: string;
   completed_at: string | null;
+  result: string | null;
 };
 
 type ScheduledTaskBinding = { run_id: string; schedule_id: string };
@@ -2368,7 +2370,7 @@ export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: stri
 
 function syncScheduledRunForTaskInTransaction(taskId: string, expectedNetworkId?: string | null): { matched: boolean; status?: string } {
   const task = db.get<ScheduledTaskLifecycleRow>(
-    `SELECT task_id, network_id, status, completed_at
+    `SELECT task_id, network_id, status, completed_at, result
        FROM tasks
       WHERE task_id = ?1
         AND (CAST(?2 AS TEXT) IS NULL OR network_id = ?2)`,
@@ -2389,7 +2391,7 @@ function syncScheduledRunForTaskInTransaction(taskId: string, expectedNetworkId?
   const binding = bindings[0];
 
   if (SCHEDULED_RUN_TERMINAL_STATUSES.has(task.status)) {
-    const errorCode = task.status === "replied" ? null : `task_${task.status}`;
+    const errorCode = scheduledFailureCode(task.status, task.result);
     const updated = db.run(
       `UPDATE scheduled_task_runs
           SET status = ?1,
