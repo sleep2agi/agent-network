@@ -20,7 +20,7 @@ export const ALERT_STREAK_THRESHOLD = 5;
 /** 只看这么久以内的任务（更早的失败已经不可操作）。 */
 export const SCAN_WINDOW_HOURS = 24;
 
-type Category = "missing_env" | "binary_missing" | "login_required";
+type Category = "missing_env" | "binary_missing" | "login_required" | "quota_exhausted";
 
 const PATTERNS: Array<{ category: Category; re: RegExp; label: string; hint: string }> = [
   { category: "missing_env", re: /Missing environment variable/i, label: "缺环境变量",
@@ -29,6 +29,18 @@ const PATTERNS: Array<{ category: Category; re: RegExp; label: string; hint: str
     hint: "检查该节点的运行时是否安装完整，必要时重装后重启节点" },
   { category: "login_required", re: /login required|Unauthorized|\b401\b/i, label: "凭据/登录失效",
     hint: "重新登录该节点（anet node codex login-status 可先自检）" },
+  // #2891 —— 额度耗尽：与前三类同性质（不会自愈、必须人处理），但**必须与「限流」分开**。
+  //
+  // 校准（2026-10-28，近 7 天 2825 条失败）：
+  //   provider.quota / usage limit has been reached  → 507 条（占全部失败 18%）
+  //   限流类文案（rate limit / 429 / too many requests） → 2 条
+  //   ⇒ 宽泛匹配「额度|limit|quota」会到 513，多出来的 6 条是**任务正文在讨论额度**（假阳性），
+  //     所以这里只认 provider.quota / usage limit has been reached 这两句原文。
+  //
+  // 为什么不能把限流并进来：限流会自愈（等几秒重试即可），额度不会。
+  // 混成一类会让告警失去「必须人处理」这个唯一有用的性质。
+  { category: "quota_exhausted", re: /provider\.quota:\s|usage limit has been reached/i, label: "模型额度耗尽",
+    hint: "该节点的上游额度已用完：换 key / 充值 / 换 provider 后重启节点；限流（rate limit）不属此类，会自愈" },
 ];
 
 /** 只认确定性错误；timeout / 任务内容错误一律返回 null（那类会自愈或与节点无关）。 */

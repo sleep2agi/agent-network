@@ -41,6 +41,17 @@ describe("#2840 节点连续确定性失败告警", () => {
     expect(classifyDeterministicFailure("spawn ENOENT")).toBe("binary_missing");
     expect(classifyDeterministicFailure("401 Unauthorized")).toBe("login_required");
     expect(classifyDeterministicFailure("codex request 'turn/start' timed out")).toBeNull();
+    // #2891 —— 额度耗尽单列一类；限流（会自愈）**不能**混进来
+    expect(classifyDeterministicFailure("opencode 错误: 模型调用失败（provider.quota: The usage limit has been reached）")).toBe("quota_exhausted");
+    expect(classifyDeterministicFailure("provider.quota: Free usage limit reached.")).toBe("quota_exhausted");
+    // 限流不是额度：等几秒就好，不该惊动人
+    expect(classifyDeterministicFailure("429 Too Many Requests (rate limit)")).toBeNull();
+    // 任务正文里**提到**额度（不是错误原文）→ 不能命中
+    expect(classifyDeterministicFailure("本轮汇报：我把 provider.quota 的含义写进了 runbook")).toBeNull();
+    // 已知限制：正文**逐字引用**错误原文（含冒号）时仍会命中。
+    // 生产 7 天语料里这样的假阳性 1/507，且告警要「连续 5 次」才发，故不改判据；
+    // 这里把它钉成测试，避免以后有人误以为这是完备的语义判断。
+    expect(classifyDeterministicFailure("引用：provider.quota: The usage limit has been reached")).toBe("quota_exhausted");
     expect(classifyDeterministicFailure("任务内容写错了")).toBeNull();
     expect(classifyDeterministicFailure(null)).toBeNull();
   });
