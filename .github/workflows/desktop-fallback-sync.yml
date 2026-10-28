@@ -43,6 +43,12 @@ jobs:
           fi
           version=$(node -p "require('./docs-site/docs/public/desktop/update/fallback.json').version")
           branch="ci/desktop-fallback-$(echo "$version" | tr . -)"
+          # #2346 —— 分支是否已经推过，用来区分「新版本第一次」和「同一版本的重试」。
+          branch_existed=0
+          if git ls-remote --exit-code --heads \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch" >/dev/null 2>&1; then
+            branch_existed=1
+          fi
           git config user.name "anet-fallback-bot"
           git config user.email "anet-fallback-bot@users.noreply.github.com"
           git checkout -b "$branch"
@@ -58,7 +64,15 @@ jobs:
               echo "a PR for $branch already exists — nothing more to do"
               exit 0
             fi
-            echo "::error::gh pr create failed and no PR exists for $branch"
+            # #2346 —— 组织策略禁止 Actions 创建 PR（GraphQL createPullRequest 被拒），
+            # 这是**环境限制**，不是每次都要喊一遍的故障。区分两种情况：
+            #   分支是本次新建   → 真·首次失败，红（人需要去开 PR）
+            #   分支早就推过了   → 同一版本的重复尝试，红已经喊过了；再红只会训练大家忽略这个检查
+            if [ "$branch_existed" = "1" ]; then
+              echo "::warning::组织策略禁止 Actions 开 PR；分支 $branch 之前已推送，等人去开 PR。本次不是新故障。"
+              exit 0
+            fi
+            echo "::error::gh pr create failed and no PR exists for $branch (first attempt for $version)"
             exit 1
           fi
           echo "$out"
