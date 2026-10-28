@@ -93,7 +93,12 @@ describe.skipIf(process.platform !== "win32")("Windows native process/ACL smoke"
     await Bun.sleep(200);
     expect(probeWindowsCreationDate(child.pid!)).toBeNull();
     pids.splice(pids.indexOf(child.pid!), 1);
-  }, 15_000);
+    // #2869 —— 原来是 15_000，太贴边：这条用例内部要跑两次 WMI/PowerShell
+    // 查询（probeWindowsCreationDate）+ 一次 taskkill，满载的 Windows runner 上
+    // 单次 WMI 就可能要几秒。CI 实测 15134ms 撞 15000 上限，整条 145-job run 因此作废。
+    // 放宽到 45s 不降低这条用例的价值（它验证的是「进程树真的被停掉」，
+    // 不是「多久停掉」），而 job 本身还有 10 分钟上限兜底。
+  }, 45_000);
 
   test("credential directory gets protected native ACLs", () => {
     const dir = join(root, "credentials");
