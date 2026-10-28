@@ -5272,7 +5272,8 @@ return Bun.serve({
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
-                        display_name, team, tags, attrs_revision, permission_mode, owner_user_id
+                        display_name, team, tags, attrs_revision, permission_mode, owner_user_id,
+                        department_id
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });

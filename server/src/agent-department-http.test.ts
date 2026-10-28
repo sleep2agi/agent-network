@@ -149,6 +149,22 @@ describe("Agent 显式归属部门", () => {
   // #1976 —— Agent 归属与人类部门是两个独立的结构。通讯录顶层要说明「这个 Hub 支持显式
   // Agent 部门」,客户端据此把「行里没有 department_id」读成「没有显式归属」,
   // 而不是从「负责人在哪个部门」推断出来。
+  // #2888（通信客户端欧 2026-10-28 提）—— 军团按部门分区时，N 个部门要发 N 次
+  // `…/departments/:dept/nodes` 才能拼出「每个 Agent 属于哪个部门」，人数一多就慢。
+  // 事实上 /api/nodes 早就返回全部节点，只是没 select `department_id` 这一列。
+  // 补上之后一次往返就能完成分区初始化。
+  test("/api/nodes 一次返回全部节点且带 department_id（免 N 次部门往返）", async () => {
+    expect((await send(U.owner.token, "PUT", `/api/networks/${NET}/nodes/${NODE_A}/department`, { department_id: D.tmai })).status).toBe(200);
+    const all = await send(U.owner.token, "GET", `/api/nodes?network_id=${NET}`);
+    expect(all.status).toBe(200);
+    const row = (all.body.nodes ?? []).find((n: any) => n.node_id === NODE_A);
+    expect(row).toBeDefined();
+    expect(row.department_id).toBe(D.tmai);
+    // 未归属的节点这一格是 null（不是缺键）——分区逻辑可以统一按 null 判「未分组」。
+    const other = (all.body.nodes ?? []).find((n: any) => n.node_id === NODE_OUTSIDE);
+    if (other) expect(other.department_id ?? null).toBeNull();
+  });
+
   test("通讯录声明支持显式 Agent 部门（与人类部门相互独立）", async () => {
     const dir = await send(U.owner.token, "GET", `/api/requirements/people/directory?network_id=${NET}`);
     expect(dir.status).toBe(200);
