@@ -2237,7 +2237,9 @@ return Bun.serve({
         // viewer_can:manage = 能改名 / 移动 / 删除 / 换负责人;create_child = 能在它下面建子部门。
         // project_grants(部门项目授权)只给 owner / admin:项目 id 不对只看相关任务的成员公开。
         const departments = listed.departments.map((d) => ({ ...d, viewer_can: { manage: canManage || head.strict.has(d.id), create_child: canManage || head.managed.has(d.id) } }));
-        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
+        // agents_unassigned = 轴2 里没有显式归属的 Agent 数。Dashboard 的「未分组」必须用它，
+        // 不能用「人的未分配」去填（#2822：那是另一个轴，混了就会出现「105 个 Agent 在未分组」）。
+        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, agents_unassigned: listed.agents_unassigned, ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
       }
       if (deptSubMatch) {
         const deptId = decodeURIComponent(deptSubMatch[2]);

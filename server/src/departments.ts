@@ -40,7 +40,17 @@ const NAME_MAX = 40;
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 type DeptRow = { network_id: string; department_id: string; name: string; parent_id: string | null; leader_user_id: string | null; sort: number; created_at: string; updated_at: string };
-export type Department = { id: string; name: string; parent_id: string | null; leader_user_id: string | null; sort: number; member_count: number; created_at: string; updated_at: string };
+/**
+ * 部门（轴1 = 人）。
+ *
+ * `member_count` 是**直属人数**（不含子树）。
+ * `agent_count` 是**轴2**：Agent 显式归属 `nodes.department_id` 指向本部门的数量，
+ *   与「成员的 Agent」无关（RFC-040 / #1976：Agent 部门只由显式设置决定，不再按负责人推断）。
+ *   没有这一格时，任何客户端想画「部门 → Agent 数」都得自己拉全量
+ *   `people/directory` 再去重，各端口径必然分叉（#2822：Dashboard 105/TMAI 1
+ *   vs 客户端 TMWork 15/TM智能体空间 2）。
+ */
+export type Department = { id: string; name: string; parent_id: string | null; leader_user_id: string | null; sort: number; member_count: number; agent_count: number; created_at: string; updated_at: string };
 
 type Fail = { ok: false; status: number; error: string };
 type Ok<T> = { ok: true } & T;
@@ -64,7 +74,12 @@ function isMember(networkId: string, userId: string): boolean {
 }
 
 /** 读:部门(带直属人数)+ 每个成员在哪个部门。负责人不在本网络了 → null。 */
-export function listDepartments(networkId: string): { departments: Department[]; members: Array<{ user_id: string; department_id: string | null }> } {
+export function listDepartments(networkId: string): {
+  departments: Department[];
+  members: Array<{ user_id: string; department_id: string | null }>;
+  /// 轴2 里没有显式归属的 Agent 数（Dashboard 的「未分组」不该拿人的未分配去填）。
+  agents_unassigned: number;
+} {
   const members = db.all<{ user_id: string; department_id: string | null }>(
     "SELECT user_id, department_id FROM network_members WHERE network_id = ?1 ORDER BY joined_at, user_id",
     networkId,
@@ -76,6 +91,28 @@ export function listDepartments(networkId: string): { departments: Department[];
   const placed = members.map((m) => ({ user_id: m.user_id, department_id: m.department_id && ids.has(m.department_id) ? m.department_id : null }));
   const counts = new Map<string, number>();
   for (const m of placed) if (m.department_id) counts.set(m.department_id, (counts.get(m.department_id) ?? 0) + 1);
+  // ── 轴2：Agent 的显式部门（nodes.department_id）────────────────────────────
+  // 去重口径与 #2596 一致：同一个 alias 只算一个 Agent，保留 updated_at 最新的那一行，
+  // 它落在哪个部门就计入哪个部门（没有 alias 的用 node_id 当键）。
+  // 不在这里做「近 7 天」过滤：那是展示策略，接口只给事实。
+  const agentRows = db.all<{ department_id: string; alias: string | null; node_id: string; updated_at: string | null }>(
+    "SELECT department_id, alias, node_id, updated_at FROM nodes WHERE network_id = ?1 AND department_id IS NOT NULL AND department_id != ''",
+    networkId,
+  );
+  const newestByKey = new Map<string, { department_id: string; updated_at: string | null }>();
+  for (const n of agentRows) {
+    const key = n.alias || n.node_id;
+    const prev = newestByKey.get(key);
+    if (!prev || (n.updated_at ?? "") > (prev.updated_at ?? "")) {
+      newestByKey.set(key, { department_id: n.department_id, updated_at: n.updated_at });
+    }
+  }
+  const agentCounts = new Map<string, number>();
+  for (const v of newestByKey.values()) agentCounts.set(v.department_id, (agentCounts.get(v.department_id) ?? 0) + 1);
+  const unassigned = db.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM nodes WHERE network_id = ?1 AND (department_id IS NULL OR department_id = '')",
+    networkId,
+  )?.n ?? 0;
   return {
     departments: all.map((d) => ({
       id: d.department_id,
@@ -84,10 +121,12 @@ export function listDepartments(networkId: string): { departments: Department[];
       leader_user_id: d.leader_user_id && memberIds.has(d.leader_user_id) ? d.leader_user_id : null,
       sort: d.sort,
       member_count: counts.get(d.department_id) ?? 0,
+      agent_count: agentCounts.get(d.department_id) ?? 0,
       created_at: d.created_at,
       updated_at: d.updated_at,
     })),
     members: placed,
+    agents_unassigned: unassigned,
   };
 }
 

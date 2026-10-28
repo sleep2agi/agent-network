@@ -58,7 +58,7 @@ Hub 0.9.0-preview.91 起生效；app 从 0.2.196 起有「管理本部门」入�
 | 接口 | 说明 |
 |---|---|
 | `GET /api/auth/me` | `networks[].managed_department_ids`：本部门的部门 id（含下级），空数组表示不是负责人 |
-| `GET /api/networks/{id}/departments` | 每个部门多一个 `viewer_can: {manage, create_child}`；owner / admin 另外拿到 `project_grants` |
+| `GET /api/networks/{id}/departments` | 每个部门多一个 `viewer_can: {manage, create_child}`；owner / admin 另外拿到 `project_grants`。**两个部门轴分开给**：`member_count` 是直属人数（人轴，`network_members.department_id`），`agent_count` 是显式归属这个部门的 Agent 数（Agent 轴，`nodes.department_id`，同 alias 只算一次、保留 `updated_at` 最新的一行）；`agents_unassigned` 是没有显式部门的 Agent 数。不按「负责人在哪个部门」推断 Agent 归属（#1976 / #2822） |
 | `POST / PATCH / DELETE /api/networks/{id}/departments[/{dept}]`、`PUT /api/networks/{id}/members/{uid}/department` | owner / admin，或在本部门范围内的负责人 |
 | `GET / PUT /api/networks/{id}/departments/{dept}/project-grants` | 部门项目授权，`PUT` 整体替换 `{project_grants: [{project_id, can_edit}]}`。只给 owner / admin；有一条项目不属于本网络，整批不写，返回 400 |
 | `GET /api/networks/{id}/departments/{dept}/nodes` | 本部门（含下级）成员拥有的节点：别名、状态、健康、主人，只读。负责人或 owner / admin 可用 |

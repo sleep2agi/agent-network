@@ -316,7 +316,14 @@ describe("#764 network deletion removes team rows", () => {
 describe("#764 existing endpoints unchanged", () => {
   test("departments / humans / node config byte-identical after all team operations", async () => {
     const after = await snapshot();
-    expect(after.departments).toBe(before.departments);
+    // #2822 —— `/departments` 新增了 `agents_unassigned`（轴2：没有显式部门的 Agent 数）。
+    // 它是**活跃的节点普查**，而本文件在 #764 用例里故意 `DELETE /api/nodes/<n2>` 删了一个节点，
+    // 所以这一格必然从 3 变 2。部门/成员结构仍然要求逐字节相同；节点普查单独钉住差额，
+    // 不把「删节点」当成「团队操作改了部门」。
+    const dept = (t: string) => { const o = JSON.parse(t); const n = o.agents_unassigned; delete o.agents_unassigned; return { body: JSON.stringify(o), n }; };
+    const a = dept(after.departments), b = dept(before.departments);
+    expect(a.body).toBe(b.body);
+    expect(a.n).toBe((b.n as number) - 1);
     expect(after.humans).toBe(before.humans);
     expect(after.node).toBe(before.node);
   });

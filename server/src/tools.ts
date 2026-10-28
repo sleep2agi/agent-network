@@ -464,15 +464,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         const agents = db.all<{ node_id: string; alias: string; department_id: string | null }>(
           "SELECT node_id, alias, department_id FROM nodes WHERE network_id = ?1 ORDER BY alias", netId,
         );
-        const counts = new Map<string, number>();
-        let unassigned = 0;
-        for (const a of agents) {
-          if (a.department_id) counts.set(a.department_id, (counts.get(a.department_id) ?? 0) + 1);
-          else unassigned += 1;
-        }
+        // agent_count / agents_unassigned 一律取 listDepartments 的口径（含 #2596 的 alias 去重），
+        // 不在这里再算一遍 —— 否则 MCP 和 HTTP 会给出两个数（#2822 的教训）。
         return deptReply({
-          ok: true, network_id: netId, unassigned_agents: unassigned, agents,
-          departments: listed.departments.map((d) => ({ ...d, agent_count: counts.get(d.id) ?? 0 })),
+          ok: true, network_id: netId, unassigned_agents: listed.agents_unassigned, agents,
+          departments: listed.departments,
         });
       }
       if (!canManageDepartments(netId)) return writeDeniedReply(netId, "write") as any;
