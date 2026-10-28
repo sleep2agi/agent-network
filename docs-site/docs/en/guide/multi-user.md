@@ -122,7 +122,9 @@ A refusal is a 403 over REST; MCP returns the same body:
 GET /api/networks/{id}/node-permission-report?since=<ISO time>
 ```
 
-The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
+The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}], tool_calls: {total, by_tool: [{tool, hits}]}}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
+
+`total` and `nodes[]` count only would-have-been blocks; `tool_calls` is the denominator: how many times restricted tools were actually called (merged per hour). The two live in separate tables, so allowed calls never inflate the denial statistics. Without a denominator, "zero blocks" cannot be told apart from "nobody touched these tools" - and those two readings lead to opposite decisions.
 
 See RFC-041 for the design and trade-offs.
 

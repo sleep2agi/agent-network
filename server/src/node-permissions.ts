@@ -49,6 +49,59 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_node_permission_log_hour ON node_permission_log(network_id, hour);
 `);
 
+// #2823 —— 调用面计数。
+//
+// 为什么需要第二张表：`node_permission_log` 只记 **would-be denial**（`if (!verdict) return false`），
+// 所以它回答不了「节点到底有没有在调这些受限工具」。生产实测 30 天 0 行，
+// 分不清「没人越界」和「几乎没人碰过」——而这两者的结论完全相反（#525 的切 enforce 决策就卡在这）。
+//
+// 设计取舍：
+//   · 只记**到达闸的调用**（nodeDecide 的入参就是 classified 工具），不记全部 MCP 调用；
+//   · 与拒绝日志同一条纪律：按 (网络, 节点, 工具, 小时) 合并成一行 + hits，不逐次插行；
+//   · 同样的 30 天保留期与 20000 行上限，超限后只加已有的行；
+//   · 与 `node_permission_log` **分开**，绝不把放行样本混进拒绝统计（那会把既有报表口径改坏）。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS node_tool_calls (
+    network_id TEXT NOT NULL,
+    node_id    TEXT NOT NULL,
+    tool       TEXT NOT NULL,
+    hour       TEXT NOT NULL,
+    hits       INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (network_id, node_id, tool, hour)
+  );
+  CREATE INDEX IF NOT EXISTS idx_node_tool_calls_hour ON node_tool_calls(network_id, hour);
+`);
+
+let callLogFull = false;
+export const TOOL_CALL_MAX_ROWS = 20_000;
+
+/** 计一次「到达权限闸」的工具调用。绝不影响请求本身 —— 出错只写日志。 */
+export function recordNodeToolCall(id: NodeIdentity, tool: string): void {
+  try {
+    const now = new Date();
+    if (now.getTime() - lastPrune > PRUNE_EVERY_MS) {
+      pruneNodePermissionLog(now);
+      const calls = Number(db.get<{ n: number | string }>("SELECT COUNT(*) AS n FROM node_tool_calls")?.n ?? 0);
+      callLogFull = calls >= TOOL_CALL_MAX_ROWS;
+      db.run("DELETE FROM node_tool_calls WHERE hour < ?1", [hourOf(new Date(now.getTime() - LOG_RETENTION_DAYS * 86_400_000))]);
+    }
+    const hour = hourOf(now);
+    const name = tool.slice(0, 120);
+    const updated = db.run(
+      "UPDATE node_tool_calls SET hits = hits + 1 WHERE network_id = ?1 AND node_id = ?2 AND tool = ?3 AND hour = ?4",
+      [id.networkId, id.logKey, name, hour],
+    );
+    if (Number(updated?.changes ?? 0) > 0 || callLogFull) return;
+    db.run(
+      `INSERT INTO node_tool_calls (network_id, node_id, tool, hour, hits) VALUES (?1, ?2, ?3, ?4, 1)
+       ON CONFLICT(network_id, node_id, tool, hour) DO UPDATE SET hits = node_tool_calls.hits + 1`,
+      [id.networkId, id.logKey, name, hour],
+    );
+  } catch (e) {
+    console.error(`[node-permissions] tool-call counter failed: ${(e as Error).message}`);
+  }
+}
+
 /** 开关。未设 / 写错 → log(安全的默认:只记不拦)。每次现读:测试和运维改环境变量后无需重启模块。 */
 export function nodePermissionsFlag(): NodePermissionsFlag {
   const raw = (process.env.COMMHUB_NODE_PERMISSIONS ?? "").trim().toLowerCase();
@@ -131,6 +184,9 @@ export type Verdict = { reason: NodePermissionReason; sample?: string } | null;
  * 返回 true = 拒绝。
  */
 export function nodeDecide(id: NodeIdentity, route: string, verdict: Verdict): boolean {
+  // #2823 —— 先计数，再判定。放行与拒绝都算一次「到达闸的调用」，
+  // 这样「受限工具被调了 N 次、其中本来会被拒 M 次」才可测；否则分母永远是 0。
+  recordNodeToolCall(id, route);
   if (!verdict) return false;
   const explicit = MODE_REASONS.has(verdict.reason);
   const flag = nodePermissionsFlag();

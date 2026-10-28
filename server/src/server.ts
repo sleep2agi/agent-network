@@ -2998,7 +2998,24 @@ return Bun.serve({
         entry.routes.push({ route: r.route, reason: r.reason, hits, sample: r.sample, last_hour: r.last_hour });
       }
       const nodes = [...byNode.values()].sort((a, b) => b.total - a.total || a.node_id.localeCompare(b.node_id));
-      return withCors(req, Response.json({ ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(), total: nodes.reduce((n, e) => n + e.total, 0), nodes }));
+      // #2823 —— 调用面分母。`total` 只数「本来会被拒」的次数；没有分母时
+      // 「0 命中」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
+      // 这里单独给一份 classified 工具的真实调用数（按小时合并后的 hits 之和），
+      // 与拒绝统计**分表分字段**，不改上面 `total` 的口径。
+      const callRows = db.all<{ tool: string; hits: number | string }>(
+        `SELECT tool, SUM(hits) AS hits FROM node_tool_calls
+          WHERE network_id = ?1 AND hour >= ?2 GROUP BY tool ORDER BY SUM(hits) DESC`,
+        networkId, sinceHour,
+      );
+      const toolCalls = callRows.map((r) => ({ tool: r.tool, hits: Number(r.hits) }));
+      const deniedTotal = nodes.reduce((n, e) => n + e.total, 0);
+      const callsTotal = toolCalls.reduce((n, e) => n + e.hits, 0);
+      return withCors(req, Response.json({
+        ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(),
+        total: deniedTotal,
+        nodes,
+        tool_calls: { total: callsTotal, by_tool: toolCalls },
+      }));
     }
 
     // ── #1473 (#909): read-only Hub catalogs for the desktop client ──

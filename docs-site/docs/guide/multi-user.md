@@ -108,7 +108,9 @@ PUT /api/nodes/{node_id}/permission-mode   {"mode": "normal" | "readonly" | "res
 GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 ```
 
-返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
+返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}], tool_calls: {total, by_tool: [{tool, hits}]}}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
+
+`total` 与 `nodes[]` 只数「本来会被拦」的次数；`tool_calls` 是**分母**：受限工具实际被调用了多少次（按小时合并）。两套数字分表存储，放行的调用不会进拒绝统计。没有分母时「0 次拦截」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
 
 设计和取舍见 RFC-041。
 

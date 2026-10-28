@@ -253,6 +253,62 @@ describe("GET /api/networks/:id/node-permission-report", () => {
   });
 });
 
+// #2823 —— 调用面计数：拒绝日志给不了分母。
+// 生产 30 天 `node_permission_log` 0 行，分不清「没人越界」和「没人碰过这些工具」，
+// 而 #525 要切 enforce，恰恰需要一个分母。
+describe("#2823 调用面计数（node_tool_calls）", () => {
+  const callHits = (nodeId: string, tool: string) => Number(
+    db.get<{ h: number | string | null }>(
+      "SELECT SUM(hits) AS h FROM node_tool_calls WHERE network_id = ?1 AND node_id = ?2 AND tool = ?3",
+      net, nodeId, tool,
+    )?.h ?? 0);
+  const denyRows = (nodeId: string) => logRows(nodeId).length;
+  const toolCallTotal = (nodeId: string) => Number(
+    db.get<{ h: number | string | null }>(
+      "SELECT SUM(hits) AS h FROM node_tool_calls WHERE network_id = ?1 AND node_id = ?2",
+      net, nodeId,
+    )?.h ?? 0);
+
+  test("放行的调用也计数，但**不进**拒绝日志（两张表分开）", async () => {
+    const before = { calls: toolCallTotal(node.nN.id), denials: denyRows(node.nN.id) };
+    expect((await mcp(node.nN.token, "send_task", { alias: node.other.alias, task: "counted" })).ok).toBe(true);
+    expect((await mcp(node.nN.token, "send_task", { alias: node.other.alias, task: "counted again" })).ok).toBe(true);
+    expect(toolCallTotal(node.nN.id)).toBe(before.calls + 2);
+    expect(callHits(node.nN.id, "mcp:send_task")).toBeGreaterThanOrEqual(2);
+    // 关键：分母涨了，分子（拒绝）没动 —— 这才叫「命中率」可算。
+    expect(denyRows(node.nN.id)).toBe(before.denials);
+  });
+
+  test("本来会被拒的调用两个表都记（分子与分母同源）", async () => {
+    const beforeCalls = callHits(node.nN.id, "mcp:projects_create");
+    const beforeDeny = hitsOf(node.nN.id, "mcp:projects_create", "human_only");
+    const p = await mcp(node.nN.token, "projects_create", { network_id: net, name: `p-count-${stamp}` });
+    expect(p.error).not.toBe("node_permission_denied");
+    expect(callHits(node.nN.id, "mcp:projects_create")).toBe(beforeCalls + 1);
+    expect(hitsOf(node.nN.id, "mcp:projects_create", "human_only")).toBe(beforeDeny + 1);
+  });
+
+  test("报表同时给分母与分子，且拒绝口径 total 不被放行调用污染", async () => {
+    const before = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    expect(before.status).toBe(200);
+    const beforeDenied = Number(before.body.total);
+    const beforeCalls = Number(before.body.tool_calls.total);
+
+    expect((await mcp(node.nN.token, "send_task", { alias: node.other.alias, task: "report bump" })).ok).toBe(true);
+
+    const after = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    expect(after.status).toBe(200);
+    expect(Number(after.body.tool_calls.total)).toBe(beforeCalls + 1);
+    expect(Number(after.body.total)).toBe(beforeDenied);
+    expect(Array.isArray(after.body.tool_calls.by_tool)).toBe(true);
+    expect(after.body.tool_calls.by_tool.every((r: any) => typeof r.tool === "string" && typeof r.hits === "number")).toBe(true);
+  });
+
+  test("节点令牌读不到报表（分母同样只给人看）", async () => {
+    expect((await call(node.nN.token, "GET", `/api/networks/${net}/node-permission-report`)).status).toBe(403);
+  });
+});
+
 describe("bookkeeping", () => {
   test("every MCP tool a node can call has a permission class", async () => {
     const s = new McpServer({ name: "np", version: "1" });
