@@ -5806,11 +5806,23 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // #2880 —— 空转排程巡检：默认**只记录**「本来会被暂停哪些」，不动作。
   // 开启 COMMHUB_SCHEDULE_STARVED_AUTOPAUSE=1 才真暂停（判据见 schedule-starved.ts 头注释）。
   // 与告警分开：告警解决「没人知道」，这里解决「知道了但一直不停」。
+  // 🔴 「只在候选集合变化时打一行」——每 5 分钟打一次等于 288 行/天，
+  //    那正是这套机制要治的噪音（2026-10-28 上线 15 分钟就打了 8 行才被发现）。
+  let lastStarvedKey = "";
   const scheduleStarvedTimer = setInterval(() => {
     try {
       const r = scanStarvedSchedules();
-      if (r.paused.length > 0) console.log(`[commhub schedule-starved] paused ${r.paused.length}: ${r.paused.join(", ")}`);
-      else if (r.candidates.length > 0) console.log(`[commhub schedule-starved] would pause ${r.candidates.length} (autopause off): ${r.candidates.join(", ")}`);
+      if (r.paused.length > 0) {
+        console.log(`[commhub schedule-starved] paused ${r.paused.length}: ${r.paused.join(", ")}`);
+      } else {
+        const key = r.candidates.slice().sort().join(",");
+        if (r.candidates.length > 0 && key !== lastStarvedKey) {
+          console.log(`[commhub schedule-starved] would pause ${r.candidates.length} (autopause off): ${r.candidates.join(", ")}`);
+        } else if (r.candidates.length === 0 && lastStarvedKey !== "") {
+          console.log(`[commhub schedule-starved] 候选已清空（之前 ${lastStarvedKey.split(",").length} 个）`);
+        }
+        lastStarvedKey = key;
+      }
     } catch (e: any) {
       console.log(`[commhub schedule-starved] failed: ${e?.message ?? e}`);
     }
@@ -5820,11 +5832,18 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // #2880 —— 节点级「不可服务」检测：窗口内忙类失败多、成功为零 ⇒ 这个节点现在投进去必然白等。
   // 与排程级分开：排程是「某条排程该停」，这里是「某台节点该暂时不投」。
   // 默认只记录；开启 COMMHUB_NODE_BUSY_CIRCUIT=1 才用于派发判断。
+  let lastCircuitKey = "";
   const nodeBusyCircuitTimer = setInterval(() => {
     try {
       const r = scanNodeBusyCircuit();
-      if (!r.enabled && r.tripped.length > 0) {
-        console.log(`[commhub node-busy-circuit] would trip ${r.tripped.length} in ${r.windowHours}h (circuit off): ${r.tripped.join(", ")}`);
+      if (!r.enabled) {
+        const key = r.tripped.slice().sort().join(",");
+        if (r.tripped.length > 0 && key !== lastCircuitKey) {
+          console.log(`[commhub node-busy-circuit] would trip ${r.tripped.length} in ${r.windowHours}h (circuit off): ${r.tripped.join(", ")}`);
+        } else if (r.tripped.length === 0 && lastCircuitKey !== "") {
+          console.log(`[commhub node-busy-circuit] 候选已清空（之前 ${lastCircuitKey.split(",").length} 个）`);
+        }
+        lastCircuitKey = key;
       }
     } catch (e: any) {
       console.log(`[commhub node-busy-circuit] failed: ${e?.message ?? e}`);
