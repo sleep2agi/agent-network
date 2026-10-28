@@ -231,6 +231,7 @@ on:
       - 'tests/test586-codex-successor-reconcile/**'
       - 'tests/test596-goal-loop-docs/**'
       - 'tests/test638-server-aggregate-isolation/**'
+      - 'tests/test638b-aggregate-trace/**'
       - 'tests/test681-explicit-lifecycle/**'
       - 'tests/test689-owner-schedule-agent/**'
       - 'tests/test690-scheduled-run-terminal/**'
@@ -539,6 +540,7 @@ on:
       - 'tests/test586-codex-successor-reconcile/**'
       - 'tests/test596-goal-loop-docs/**'
       - 'tests/test638-server-aggregate-isolation/**'
+      - 'tests/test638b-aggregate-trace/**'
       - 'tests/test681-explicit-lifecycle/**'
       - 'tests/test689-owner-schedule-agent/**'
       - 'tests/test690-scheduled-run-terminal/**'
@@ -2290,6 +2292,11 @@ jobs:
           - test586-codex-successor-reconcile
           - test596-goal-loop-docs
           - test638-server-aggregate-isolation
+          # #2800 —— 从 test638 拆出的 syscall 侧（strace 跑一遍完整聚合 + 两条只看 syscall
+          # 才能证明的断言：继承的 shared DB 从未被 openat、没有 DB 开在 per-file root 之外）。
+          # 理由：原套件 10.0 分钟里 L1(strace) 独占 5.7 分钟，L2(并发两遍) 只要 3.8；
+          # 拆开后两条并行，矩阵最长单元从 10 上升到约 6 分钟。**断言一条未删**（29 条守恒）。
+          - test638b-aggregate-trace
           - test681-explicit-lifecycle
           - test689-owner-schedule-agent
           - test690-scheduled-run-terminal

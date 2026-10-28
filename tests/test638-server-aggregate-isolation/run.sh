@@ -15,7 +15,6 @@ RUN3=/tmp/test638-run3
 OUT1=/tmp/test638-run1.out
 OUT2=/tmp/test638-run2.out
 OUT3=/tmp/test638-run3.out
-TRACE1=/tmp/test638-run1.openat
 PROBES=(
   server/src/test638-nonzero.test.ts
   server/src/test638-timeout.test.ts
@@ -55,10 +54,9 @@ save_failure_artifacts() {
       echo "out1=$OUT1"
       echo "out2=$OUT2"
       echo "out3=$OUT3"
-      echo "trace1=$TRACE1"
     } > "$ARTIFACT_DIR/fail-context.txt" 2>/dev/null
     local f
-    for f in "$OUT1" "$OUT2" "$OUT3" "$TRACE1" \
+    for f in "$OUT1" "$OUT2" "$OUT3" \
       /tmp/test638-no-db-upload.out /tmp/test638-no-db-host.out \
       /tmp/test638-nonzero.out /tmp/test638-timeout.out /tmp/test638-signal.out \
       /tmp/test639-missing-summary.out /tmp/test639-spawn-fail.out \
@@ -130,7 +128,7 @@ dump_agg_failure() {
 }
 
 rm -rf -- /tmp/test638-run1 /tmp/test638-run2 /tmp/test638-run3
-rm -f -- "$OUT1" "$OUT2" "$OUT3" "$TRACE1" "$SHARED_DB" "$SHARED_DB-wal" "$SHARED_DB-shm"
+rm -f -- "$OUT1" "$OUT2" "$OUT3" "$SHARED_DB" "$SHARED_DB-wal" "$SHARED_DB-shm"
 
 run_one() {
   local root="$1" output="$2" order="${3:-normal}"
@@ -142,11 +140,11 @@ run_one() {
 }
 
 STAGE=L1
-echo "L1: normal order under strace"
+echo "L1: normal order (syscall trace 已拆到 test638b-aggregate-trace)"
 set +e
 NODE_ENV=test DATABASE_URL='postgres://must-not-be-inherited.invalid/prod' COMMHUB_DB="$SHARED_DB" \
   ANET_SERVER_TEST_ROOT="$RUN1" ANET_SERVER_TEST_KEEP_ROOT=1 \
-  strace -f -e trace=openat -o "$TRACE1" bun run --cwd server test >"$OUT1" 2>&1
+  bun run --cwd server test >"$OUT1" 2>&1
 rc1=$?
 set -e
 [[ $rc1 -eq 0 ]] || { dump_agg_failure "L1" "$OUT1" "$rc1"; exit 1; }
@@ -219,10 +217,10 @@ for output in "$OUT1" "$OUT2" "$OUT3"; do
 done
 
 STAGE=L3
-echo "L3: syscall DB scope + cross-suite fixtures"
-[[ $(grep -F -c "$SHARED_DB" "$TRACE1" || true) -eq 0 ]] || { echo "FAIL: inherited shared DB was opened"; exit 1; }
-outside=$(grep -oE '/tmp/[^" ]*commhub\.db' "$TRACE1" | grep -v "^$RUN1/" || true)
-[[ -z "$outside" ]] || { echo "FAIL: DB opened outside per-file root: $outside"; exit 1; }
+echo "L3: cross-suite fixtures (syscall scope 在 638b)"
+# syscall 侧的两条断言（继承的 shared DB 从未被 openat / 没有 DB 开在 per-file root 之外）
+# 已拆到 tests/test638b-aggregate-trace/run.sh —— 那里同一个 $SHARED_DB 变量名、同样的 grep，
+# 只是跑在一次独立执行的 strace 上。**断言没有删，只换了执行位置。**
 
 upload_db=$(grep -F $'TEST_DB_MAP\tserver/src/uploads-http.test.ts\t' "$OUT1" | cut -f3)
 host_db=$(grep -F $'TEST_DB_MAP\tserver/src/api-host-supervisors-fallback.test.ts\t' "$OUT1" | cut -f3)
