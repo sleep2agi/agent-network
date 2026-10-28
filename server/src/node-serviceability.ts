@@ -31,6 +31,28 @@ export function circuitEnabled(): boolean {
 }
 export function circuitWindowHours(): number { return envInt("COMMHUB_NODE_BUSY_CIRCUIT_HOURS", 6, 1); }
 export function circuitMinFails(): number { return envInt("COMMHUB_NODE_BUSY_CIRCUIT_FAILS", 5, 1); }
+/**
+ * 熔断期间**放探针**的间隔（小时）。
+ *
+ * 🔴 为什么必须有：熔断后完全不再投递 ⇒ 节点永远拿不到成功记录 ⇒ 永远解不开（死锁）。
+ * 所以每 N 小时放一条探针任务：它若成功，replied 计数不再为 0，熔断自动解除。
+ */
+export function circuitProbeHours(): number { return envInt("COMMHUB_NODE_BUSY_CIRCUIT_PROBE_HOURS", 1, 1); }
+
+/** 该节点最近一次**被投递**的时刻（ms）。没有投递过返回 null。 */
+function lastDeliveryMs(alias: string, networkId: string | null): number | null {
+  try {
+    const row = db.get<{ t: string | null }>(
+      "SELECT MAX(created_at) AS t FROM tasks WHERE to_name = ?1 AND (?2 IS NULL OR network_id = ?2)",
+      alias, networkId,
+    );
+    if (!row?.t) return null;
+    const ms = Date.parse(String(row.t).replace(" ", "T") + "Z");
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
 
 export type NodeServingStats = { alias: string; network_id: string | null; delivered: number; replied: number; busy_failed: number };
 
@@ -69,7 +91,7 @@ export function scanNodeBusyCircuit(now = new Date()): CircuitScanResult {
  * 这个节点现在能不能投递。默认永远 true（未开启 = 不拦截）。
  * 供排程派发判断；纯读，不改任何状态。
  */
-export function nodeCanAcceptDispatch(alias: string, networkId: string | null): { ok: boolean; reason?: string; busy_failed?: number } {
+export function nodeCanAcceptDispatch(alias: string, networkId: string | null): { ok: boolean; reason?: string; busy_failed?: number; probe?: boolean } {
   if (!circuitEnabled()) return { ok: true };
   const windowHours = circuitWindowHours();
   const since = new Date(Date.now() - windowHours * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
@@ -88,6 +110,12 @@ export function nodeCanAcceptDispatch(alias: string, networkId: string | null): 
   if (!row) return { ok: true };
   const stats = { delivered: Number(row.delivered ?? 0), replied: Number(row.replied ?? 0), busy_failed: Number(row.busy_failed ?? 0) };
   if (!isNotServing(stats)) return { ok: true };
+  // 熔断期间每 N 小时放一条探针，否则节点永远拿不到成功记录、永远解不开。
+  const probeHours = circuitProbeHours();
+  const last = lastDeliveryMs(alias, networkId);
+  if (last === null || Date.now() - last >= probeHours * 3_600_000) {
+    return { ok: true, probe: true, busy_failed: stats.busy_failed };
+  }
   return {
     ok: false,
     reason: `节点近 ${windowHours}h 内 ${stats.busy_failed} 次忙类失败、0 次成功（投递也只会白等），已跳过`,

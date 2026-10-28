@@ -50,6 +50,25 @@ describe("节点忙熔断：三项判据", () => {
     expect(r.enabled).toBe(false); // 默认关闭
   });
 
+  // 熔断后不能「永不投递」：否则节点拿不到成功记录 ⇒ 永远解不开（死锁）。
+  test("熔断期间按探针间隔放行一条（自愈通道）", () => {
+    process.env.COMMHUB_NODE_BUSY_CIRCUIT = "1";
+    // 黑洞节点：刚投递过 ⇒ 拦
+    db.run(`INSERT INTO tasks (task_id, content, from_name, to_name, network_id, status, created_at)
+            VALUES ('t_probe_now','x','hub','黑洞节点',?1,'failed',datetime('now'))`, [NET]);
+    const blocked = nodeCanAcceptDispatch("黑洞节点", NET);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.probe).toBeUndefined();
+    // 把最近投递推到 2 小时前（默认探针间隔 1h）⇒ 放行，且标记 probe
+    // 注意：前面的用例也给这个节点插过 created_at=now 的任务，MAX(created_at) 会取到它们
+    db.run("UPDATE tasks SET created_at = datetime('now','-2 hours') WHERE to_name = '黑洞节点'");
+    const probe = nodeCanAcceptDispatch("黑洞节点", NET);
+    expect(probe.ok).toBe(true);
+    expect(probe.probe).toBe(true);
+    // 还原，避免影响后续用例（它们依赖「最近刚投递过」这个前态）
+    db.run("UPDATE tasks SET created_at = datetime('now') WHERE to_name = '黑洞节点'");
+  });
+
   test("默认关闭时投递判断恒放行（不改任何既有行为）", () => {
     delete process.env.COMMHUB_NODE_BUSY_CIRCUIT;
     expect(circuitEnabled()).toBe(false);

@@ -6,6 +6,7 @@ import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
+import { nodeCanAcceptDispatch } from "./node-serviceability.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, type AgentRef } from "./agent-access.js";
 import { dispatchVerdict } from "./node-permissions.js";
@@ -585,6 +586,24 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       );
       if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
+    }
+
+    // #2880 —— 节点级忙熔断（默认关闭；COMMHUB_NODE_BUSY_CIRCUIT=1 才生效）。
+    // 与 lifecycle/health 的区别：节点没坏、也没停，只是最近一直没有产出（忙类失败多且 0 成功），
+    // 投进去必然白等 ~30 分钟。所以记 **skipped** 而不是 failed —— 这不是故障，是「现在别投」。
+    // 熔断期间每 COMMHUB_NODE_BUSY_CIRCUIT_PROBE_HOURS 小时会放一条探针（见 node-serviceability.ts），
+    // 避免「不投递 ⇒ 拿不到成功 ⇒ 永远解不开」的死锁。
+    {
+      const circuit = nodeCanAcceptDispatch(node.alias, row.network_id);
+      if (!circuit.ok) {
+        finalStatus = "skipped";
+        db.run(
+          "UPDATE scheduled_task_runs SET status = 'skipped', error_code = 'target_busy_no_output', error_message = ?1, completed_at = datetime('now') WHERE run_id = ?2",
+          [String(circuit.reason ?? "target_busy_no_output").slice(0, 500), runId],
+        );
+        if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+        return;
+      }
     }
 
     // #460 — the target reports a degraded layer (App Server down / TUI gone / login revoked): the run fails
