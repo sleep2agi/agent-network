@@ -86,6 +86,7 @@ import { versionStats } from "./version-stats.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
 import { scanNodeFailureAlerts } from "./node-failure-alert.js";
 import { scanStarvedSchedules } from "./schedule-starved.js";
+import { scanNodeBusyCircuit } from "./node-serviceability.js";
 import {
   AUDIT_LOG_REST_SELECT,
   COMPLETION_REST_SELECT,
@@ -5815,6 +5816,21 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     }
   }, nodeFailureAlertMs);
   (scheduleStarvedTimer as any).unref?.();
+
+  // #2880 —— 节点级「不可服务」检测：窗口内忙类失败多、成功为零 ⇒ 这个节点现在投进去必然白等。
+  // 与排程级分开：排程是「某条排程该停」，这里是「某台节点该暂时不投」。
+  // 默认只记录；开启 COMMHUB_NODE_BUSY_CIRCUIT=1 才用于派发判断。
+  const nodeBusyCircuitTimer = setInterval(() => {
+    try {
+      const r = scanNodeBusyCircuit();
+      if (!r.enabled && r.tripped.length > 0) {
+        console.log(`[commhub node-busy-circuit] would trip ${r.tripped.length} in ${r.windowHours}h (circuit off): ${r.tripped.join(", ")}`);
+      }
+    } catch (e: any) {
+      console.log(`[commhub node-busy-circuit] failed: ${e?.message ?? e}`);
+    }
+  }, nodeFailureAlertMs);
+  (nodeBusyCircuitTimer as any).unref?.();
 
   // #476 — the two legacy module-level intervals, now owned by startHub
   // like every other periodic job: rate-limit map cleanup (memory only)
