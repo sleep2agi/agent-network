@@ -570,14 +570,22 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     #    其余 27 个 build 只有 2–13s。缓存命中时这两个从 ~5 分钟掉到十几秒。
     #    QA_BUILDX_CACHE=1 且 buildx 可用时才走缓存路径:不满足就与改动前逐字相同,
     #    所以「缓存没配好」只会退化成现在的耗时,不会让门变绿或变红。
-    if [[ "${QA_BUILDX_CACHE:-0}" == "1" ]] && docker buildx version >/dev/null 2>&1; then
-      # mode=min 是照抄本仓已有的约定（qa.yml 的 hub semantics 那 95 个分片就是这么写的）：
-      # 那里明确写了 mode=max 会把仓库 10GB 的 Actions 缓存预算挤爆、LRU 淘汰掉命中率。
-      # L1 的套件都是单阶段镜像，mode=min 一样能缓存 install 层（它们在最终镜像里）。
-      # scope 用 l1- 前缀，与 hub semantics 的 scope 分开，避免互相淘汰。
+    # 🔴 #2846 实测回退（2026-10-28）：给**全部 29 个套件**开缓存的净效果是负的。
+    #    两次 CI 相对改前基线（shard 2 = 17.0min）：
+    #      首轮（冷缓存）20.4min · 次轮（已有缓存）19.6min
+    #    原因是 buildx 走 docker-container 驱动，`--load` 要把镜像再导回 docker 守护进程，
+    #    29 个小镜像每次都要付这份钱，而它们本来只构建 2–13 秒。
+    #    所以只对**两个真的贵**的镜像开缓存（test8-runtime 282s / test1203 306s），
+    #    其余 27 个照旧用 plain docker build（一个字节都没变）。
+    case "$t" in
+      test8-runtime|test1203-btw-production-e2e) _heavy=1 ;;
+      *) _heavy=0 ;;
+    esac
+    if [[ "$_heavy" == "1" && "${QA_BUILDX_CACHE:-0}" == "1" ]] && docker buildx version >/dev/null 2>&1; then
+      # mode=min 照抄本仓 hub semantics 分片的既有做法（那里写明 mode=max 会挤爆 10GB 缓存预算）。
       _build="docker buildx build --load $build_args \
-        --cache-from type=gha,scope=l1-$t \
-        --cache-to type=gha,mode=min,scope=l1-$t \
+        --cache-from type=gha,scope=l1h-$t \
+        --cache-to type=gha,mode=min,scope=l1h-$t \
         -t anet-$t -f tests/$t/Dockerfile ."
     else
       _build="docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ."

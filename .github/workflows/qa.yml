@@ -1336,12 +1336,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # #2855 —— 这 6 组 Build 占了本 job 74% 的时间（307s/415s），用的是裸 docker build。
-      # 同一 workflow 的 hub semantics 分片早就用 buildx+gha 缓存，这里只是把同一套搬过来。
-      # mode=min + 每套件独立 scope（rec- 前缀）：不与其他 job 的 scope 互相淘汰。
-      - name: Setup Docker buildx (recovered layer cache)
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
       # 🔴 顺序不是随意的。CLAUDE.md 的测试规则写明:
       #    「分层测试,从简单到复杂:环境→认证→单点通信→完整流程→多用户→安全」
       #    「前一层不过就不跑后面的」
@@ -1351,9 +1345,7 @@ jobs:
 
       - name: Build test597-dashboard-slash-namespace
         run: |
-          docker buildx build --load \
-            --cache-from type=gha,scope=rec-test597-dashboard-slash-namespace \
-            --cache-to type=gha,mode=min,scope=rec-test597-dashboard-slash-namespace \
+          docker build \
             --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-test597-dashboard-slash-namespace \
             -f tests/test597-dashboard-slash-namespace/Dockerfile .
@@ -1367,9 +1359,7 @@ jobs:
 
       - name: Build test679-task-trace
         run: |
-          docker buildx build --load \
-            --cache-from type=gha,scope=rec-test679-task-trace \
-            --cache-to type=gha,mode=min,scope=rec-test679-task-trace \
+          docker build \
             --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-test679-task-trace \
             -f tests/test679-task-trace/Dockerfile .
@@ -1389,9 +1379,7 @@ jobs:
       # Placed before test224 so the security suite remains last.
       - name: Build qa-daemon-lifecycle-e2e
         run: |
-          docker buildx build --load \
-            --cache-from type=gha,scope=rec-qa-daemon-lifecycle-e2e \
-            --cache-to type=gha,mode=min,scope=rec-qa-daemon-lifecycle-e2e \
+          docker build \
             --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" \
             -t anet-qa-daemon-lifecycle-e2e \
@@ -1413,9 +1401,7 @@ jobs:
       # one injected failure → rc=1) before wiring it here.
       - name: Build qa-rfc024-config-apply
         run: |
-          docker buildx build --load \
-            --cache-from type=gha,scope=rec-qa-rfc024-config-apply \
-            --cache-to type=gha,mode=min,scope=rec-qa-rfc024-config-apply \
+          docker build \
             -t anet-qa-rfc024-config-apply \
             -f tests/qa-rfc024-config-apply/Dockerfile .
 
@@ -1437,9 +1423,7 @@ jobs:
       # `bad` turns rc 0 -> 1.
       - name: Build qa-rfc027-stop-delete
         run: |
-          docker buildx build --load \
-            --cache-from type=gha,scope=rec-qa-rfc027-stop-delete \
-            --cache-to type=gha,mode=min,scope=rec-qa-rfc027-stop-delete \
+          docker build \
             -t anet-qa-rfc027-stop-delete \
             -f tests/qa-rfc027-stop-delete/Dockerfile .
 
@@ -1452,9 +1436,7 @@ jobs:
 
       - name: Build test224-grok-preview-security
         run: |
-          docker buildx build --load \
-            --cache-from type=gha,scope=rec-test224-grok-preview-security \
-            --cache-to type=gha,mode=min,scope=rec-test224-grok-preview-security \
+          docker build \
             --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
             -t anet-test224-grok-preview-security \
             -f tests/test224-grok-preview-security/Dockerfile .
