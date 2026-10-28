@@ -673,6 +673,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      # #2800 —— `hub-orphan-gates` 的收窄结果（脚本失败时保持「全跑」的保守默认）
+      suite_count: ${{ steps.scope.outputs.suite_count }}
+      suite_skip: ${{ steps.scope.outputs.suite_skip }}
       docs_only: ${{ steps.plan.outputs.docs_only }}
       skip: ${{ steps.plan.outputs.skip }}
       l1_only: ${{ steps.plan.outputs.l1_only }}
@@ -714,6 +717,23 @@ jobs:
       # #2136 第二步：**只报告**，不改变任何 job 的跑/不跑。
       # 目的：先积累"如果按套件子树收窄，会跳过哪些套件"的真实数据（每个 PR 的 job summary 里），
       # 人肉确认没漏跑之后，才谈把它接进 if:。判据在 scripts/qa-suite-scope-report.py 文件头。
+      # #2800 —— 把「按子树收窄」从观测器接成真正的门（#2136 第二步）。
+      # 判据复用 scripts/qa-suite-scope-report.py 的 decide()：只有「本次改动没碰任何共享面、
+      # 也没碰该套件自己」才跳过；看不清（无 diff / 取不到 PR 文件 / 超过 3000 文件）一律全跑。
+      # 20 个已合并 PR 的回放：可省 40% 分片次，『碰了共享面却跳过分片』0 次。
+      - name: Suite scope plan (narrows hub-orphan-gates; falls back to RUN ALL)
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # 保守默认先落盘：下面即使失败，也保持「全跑」而不是「跑 0 个」。
+          total=$(python3 scripts/qa-suite-scope-plan.py --total-only)
+          echo "suite_count=${total}" >> "$GITHUB_OUTPUT"
+          echo "suite_skip=[]" >> "$GITHUB_OUTPUT"
+          python3 scripts/qa-suite-scope-plan.py --event "${{ github.event_name }}"
+
       - name: Suite scope report (observability only — never skips a suite)
         run: |
           set -euo pipefail
@@ -2171,12 +2191,15 @@ jobs:
     # #2800 —— 发版提交（只改版本号/发布说明/verify 锚点）在 main 上跳过这 95 个分片：
     # 它们的代码内容在上一个 PR 里已经跑过同一套矩阵；再跑一遍只会把 runner 池占满，
     # 让 release-gate 排在后面（2026-10-27 实测卡了 6 分钟）。
-    if: ${{ !cancelled() && needs.changes.outputs.release_only != 'true' }}
+    # #2800 —— 本次改动与 hub 套件全不相干时整块跳过（否则空矩阵会让 GitHub 报错）。
+    if: ${{ !cancelled() && needs.changes.outputs.release_only != 'true' && needs.changes.outputs.suite_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        # #2800 —— 按改动范围排除无关套件；exclude 由 changes job 算好（看不清就是 []）。
+        exclude: ${{ fromJSON(needs.changes.outputs.suite_skip) }}
         suite:
           # ⏱ #2136（2026-10-25）：这三个套件要装两个 ~150 MB 的 codex 二进制、各自跑 15–20 分钟,
           # 排到矩阵末尾时它们就是整条 PR 的**唯一长尾**（实测 #2994/#2998/#3000/#3002 都是最后一条）。

@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
+import json
 import sys
 from pathlib import Path
 
@@ -47,9 +48,29 @@ SHARED_FILES = {
 
 
 def suite_list() -> list[str]:
-    """qa.yml 里 `hub-orphan-gates` 矩阵列出的套件名。"""
-    text = QA_YML.read_text(encoding="utf-8")
-    return sorted(set(re.findall(r"^\s+- (test[0-9A-Za-z._-]+)\s*$", text, re.M)))
+    """qa.yml 里 `hub-orphan-gates` 矩阵列出的套件名。
+
+    只取这个 job 的 `suite:` 列表 —— 早先的实现对整份 qa.yml 做 grep，
+    于是把 `grok-green-suites` / `hub-boundary-gates` 等**别的矩阵**的条目也收了进来
+    （93 个，而 hub 矩阵是 95 个），既有名字对不上的问题，也让 10 个 `qa-*` 套件
+    永远进不了 skip 名单。现在按块解析，并且不再假设名字以 `test` 开头。
+    """
+    lines = QA_YML.read_text(encoding="utf-8").splitlines()
+    start = next((i for i, line in enumerate(lines) if re.match(r"^\s{2}hub-orphan-gates:\s*$", line)), None)
+    if start is None:
+        return []  # 找不到这个 job -> 调用方按「全跑」处理
+    out: list[str] = []
+    seen_suite_key = False
+    for line in lines[start + 1:]:
+        if re.match(r"^\s{2}\S", line):  # 下一个 job（同级缩进）
+            break
+        if re.match(r"^\s+suite:\s*$", line):
+            seen_suite_key = True
+            continue
+        m = re.match(r"^\s+-\s+(\S+)\s*$", line)
+        if seen_suite_key and m:
+            out.append(m.group(1))
+    return sorted(set(out))
 
 
 def is_shared(path: str) -> bool:
@@ -88,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--stdin", action="store_true", help="read changed paths from stdin, one per line")
     ap.add_argument("--base", help="git base ref (used with --head)")
     ap.add_argument("--head", default="HEAD", help="git head ref")
+    ap.add_argument("--json", action="store_true",
+                    help="emit {run,skip} as JSON on stdout (for the workflow matrix exclusion)")
     args = ap.parse_args(argv)
 
     if args.files:
@@ -103,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
     suites = suite_list()
     run, skip, forced = decide(changed, suites)
     total = len(suites)
+    if args.json:
+        # 只给机器读：run/skip 都是套件名数组。任何异常都由调用方按「全跑」处理。
+        print(json.dumps({"run": run, "skip": skip}, ensure_ascii=False))
+        return 0
     print(f"changed files: {len(changed)}")
     print(f"suites in matrix: {total}")
     if forced:
