@@ -36,6 +36,7 @@ import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type Ag
 import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
 import { agentBatchScheduleInterval, agentCancelSchedule, agentCreateSchedule, agentGetSchedule, agentListSchedules, agentRunScheduleNow, agentScheduleRuns, agentUpdateSchedule } from "./schedule-agent.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict } from "./node-permissions.js";
+import { countInFlightTasks } from "./node-in-flight-tasks.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
 import { handleRequirementsRequest } from "./requirements.js";
@@ -4268,23 +4269,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 计数规则见 stop_node 内的长注释（#2022/#2029 修订：能成为「本节点正在做的
   // 工作」的行才算——tasks 行按状态判、终态不算且不设龄上限；无状态行按 60 分钟
   // 龄判）。抽成一处后，两个闸门共享同一份 SQL，不再各自漂移。
-  const IN_FLIGHT_MAX_AGE_MINUTES = 60;
-  function countInFlightTasks(alias: string, networkId: string | null): number {
-    const row = db.get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM inbox i
-         LEFT JOIN tasks t
-           ON i.type = 'task'
-          AND t.task_id = COALESCE(i.task_id, i.id)
-        WHERE i.session_name = ?1 AND i.acked = 0
-          AND COALESCE(i.network_id, ?2) = ?2
-          AND ((t.task_id IS NOT NULL
-                AND t.status NOT IN ('replied', 'failed', 'cancelled', 'expired'))
-            OR (t.task_id IS NULL
-                AND i.created_at >= datetime('now', ?3)))`,
-      alias, networkId, `-${IN_FLIGHT_MAX_AGE_MINUTES} minutes`,
-    );
-    return row?.n ?? 0;
-  }
+  // #1511 —— 计数口径抽到 `in-flight.ts`：stop_node / restart_node / REST 的
+  // restart_readiness 三处共用同一份 SQL。这里保留一个同名别名，调用点不动。
 
   server.tool(
     "restart_node",
@@ -5596,7 +5582,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     //      ever retire them, so they get the age ceiling
     //      IN_FLIGHT_MAX_AGE_MINUTES on inbox.created_at.
     // The count stays a per-alias inbox count: one PK join per row.
-    // 计数实现在上方 countInFlightTasks。#1511 让 restart_node 共用同一份规则，判据本身未变。
+    // 计数统一在 node-in-flight-tasks.ts：stop_node / restart_node / REST 的 restart_readiness 共用。
     const inFlight = countInFlightTasks(node.alias, node.network_id);
     if (inFlight > 0 && !args.force) {
       return { ok: false, error: "node_busy_in_flight", in_flight_count: inFlight, hint: "set force=true to override (audit logged)" };

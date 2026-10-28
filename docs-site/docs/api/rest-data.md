@@ -260,6 +260,22 @@ curl http://localhost:9200/api/nodes \
 `nodes` 表是**持久节点身份**（创建即写入，删 agent 才删），`sessions` 表是**运行时心跳状态**（agent 启动写入，10 分钟无心跳标 `offline`）。看 agent 是否在线用 [GET /api/status](#get-api-status)，看 agent 配置元数据用本 endpoint。
 :::
 
+**`restart_readiness`（#1511）**：每行还带一格里「能不能替你重启」，客户端保存密钥/env 后据此二选一提示用户：
+
+```json
+"restart_readiness": { "path": "restart_node", "in_flight": 0, "can_restart_now": true }
+```
+
+| 字段 | 说明 |
+|------|------|
+| `path` | `restart_node`：被 created-daemon 监督（exit-75 自动拉起）；`stop_then_start`：adopt 来的节点，`restart_node` 会拒绝但 daemon 仍能 Stop→Start；`manual`：没人管，必须上机 |
+| `in_flight` | 本节点正在做的任务数，与 `stop_node` / `restart_node` **同一份 SQL**（无状态行按 60 分钟龄判，终态任务不算） |
+| `can_restart_now` | `path !== "manual"` 且没有被在途任务挡住 |
+
+::: warning 别只读 `can_restart_now`
+它是「现在能不能点」的快照。真正发起时服务端仍会重新判一次（`node_busy_in_flight` / `adopted_restart_requires_daemon`），客户端要按这两个错误码兜底，不能把快照当承诺。
+:::
+
 ---
 
 ### GET /api/host-supervisors

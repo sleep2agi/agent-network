@@ -260,6 +260,22 @@ curl http://localhost:9200/api/nodes \
 The `nodes` table is **persistent node identity** (written at creation, deleted only when the agent is deleted). The `sessions` table is **runtime heartbeat state** (written at agent startup; marked `offline` after 10 minutes of silence). Use [GET /api/status](#get-api-status) to check whether an agent is online; use this endpoint for agent config metadata.
 :::
 
+**`restart_readiness` (#1511)**: every row also says whether this Hub can restart the node for you, so the client can tell the user which of two things will happen after a secret/env save:
+
+```json
+"restart_readiness": { "path": "restart_node", "in_flight": 0, "can_restart_now": true }
+```
+
+| Field | Meaning |
+|------|------|
+| `path` | `restart_node`: supervised by a created daemon (exit-75 relaunches it); `stop_then_start`: an adopted node — `restart_node` refuses, but the daemon can still Stop then Start; `manual`: nobody supervises it, someone must log into the machine |
+| `in_flight` | tasks this node is working on, computed by the **same SQL** as `stop_node` / `restart_node` (rows without a task are judged by a 60-minute age; terminal tasks do not count) |
+| `can_restart_now` | `path !== "manual"` and not blocked by in-flight work |
+
+::: warning It is a snapshot, not a promise
+The server re-checks on the real call (`node_busy_in_flight` / `adopted_restart_requires_daemon`). Clients must handle those two error codes instead of trusting the snapshot.
+:::
+
 ---
 
 ### GET /api/host-supervisors

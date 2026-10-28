@@ -14,6 +14,8 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
+import { activeBinding, createdDaemon } from "./node-daemon-bindings.js";
+import { countInFlightTasks } from "./node-in-flight-tasks.js";
 import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupTx, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
@@ -5258,6 +5260,41 @@ return Bun.serve({
       if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
       sql += " ORDER BY updated_at DESC";
       const rawRows = db.all<Record<string, any>>(sql, ...params);
+      // #1511 —— 「能不能替你重启」必须在客户端保存密钥前就说清楚：
+      //   path='restart_node'   被 created-daemon 监督，exit-75 会被自动拉起
+      //   path='stop_then_start' 是 adopt 来的节点：restart_node 明确拒绝，但 daemon 仍能 Stop→Start
+      //   path='manual'         没人管它，必须上机
+      // in_flight 用与 stop_node / restart_node 同一份 SQL（node-in-flight-tasks.ts），
+      // 否则会出现「客户端说空闲、一点就被拒」。
+      // 批量化：daemon 创建记录与 adopt 绑定各一条 IN 查询取齐；在途计数只对
+      // 非 manual 的节点现算（绝大多数节点没有绑定 ⇒ 一次都不查）。
+      const createdIds = new Map<string, string>();
+      const bindingIds = new Map<string, string>();
+      const wanted = rawRows.filter((r) => typeof r.node_id === "string");
+      if (wanted.length) {
+        const placeholders = wanted.map((_, i) => `?${i + 1}`).join(",");
+        // createdDaemon 的键是 `cr_` + node_id 去掉 `node_`；一次 IN 取回。
+        const crKeys = wanted.filter((r) => String(r.node_id).startsWith("node_")).map((r) => `cr_${String(r.node_id).slice(5)}`);
+        if (crKeys.length) {
+          const ph = crKeys.map((_, i) => `?${i + 1}`).join(",");
+          for (const row of db.all<{ request_id: string; daemon_node_id: string }>(
+            `SELECT request_id, daemon_node_id FROM node_create_requests WHERE request_id IN (${ph})`, ...crKeys,
+          )) createdIds.set(`node_${row.request_id.slice(3)}`, row.daemon_node_id);
+        }
+        for (const row of db.all<{ node_id: string; daemon_node_id: string }>(
+          `SELECT node_id, daemon_node_id FROM node_daemon_bindings WHERE status = 'active' AND node_id IN (${placeholders})`,
+          ...wanted.map((r) => r.node_id),
+        )) bindingIds.set(row.node_id, row.daemon_node_id);
+      }
+      const restartReadiness = (nodeId: string, alias: string | null, networkId: string | null, role: string | null, lifecycle: string | null) => {
+        const supervised = createdIds.has(nodeId) || role === "host_supervisor";
+        const adopted = !supervised && bindingIds.has(nodeId);
+        const path = supervised ? "restart_node" : adopted ? "stop_then_start" : "manual";
+        // 手动节点不需要在途计数：算出来也用不上，白查一次。
+        const inFlight = path === "manual" || !alias ? 0 : countInFlightTasks(alias, networkId);
+        const blockedByInFlight = lifecycle === "active" && inFlight > 0;
+        return { path, in_flight: inFlight, can_restart_now: path !== "manual" && !blockedByInFlight };
+      };
       // Add a single new field `role: string | null` per row, extracted from
       // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'
       // via report_status surface here; dashboard uses this for daemon
@@ -5356,6 +5393,7 @@ return Bun.serve({
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
           viewer_can: { permission_mode: canSetPermissionMode(r) },
+          restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
