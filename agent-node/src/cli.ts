@@ -8173,7 +8173,14 @@ if (RUNTIME === "codex-app-server") {
       if (copresenceAppServer && appsrvSnapshot && NODE_CODEX_HOME) {
         const gate = await waitForStartResources("codex app-server relaunch", { nodeId: NODE_ID || undefined, log, warn });
         try {
-          appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({ codexHome: NODE_CODEX_HOME, marker: nodeMarker, token: AUTH_TOKEN, log }));
+          appsrvSnapshot = await relaunchAppServer(appsrvSnapshot, realRelaunchDeps({
+            codexHome: NODE_CODEX_HOME,
+            marker: nodeMarker,
+            token: AUTH_TOKEN,
+            configEnv: fileConfig.env,
+            ambientEnv: process.env,
+            log,
+          }));
         } finally {
           gate.release();
         }

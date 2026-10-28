@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   appsrvSessionFor,
+  CODEX_APPSERVER_LAUNCHER_ENV,
+  appServerRelaunchEnv,
   buildRelaunchScript,
   captureAppServerLaunch,
   hungKillVeto,
@@ -13,7 +16,7 @@ import {
   relaunchBlocker,
   terminateHungAppServer,
   linuxProcView,
-  writeAppServerTokenFile,
+  writeAppServerRelaunchEnvFile,
   type ProcView,
   type RelaunchDeps,
 } from "./codex-appserver-relaunch";
@@ -58,6 +61,7 @@ describe("launch snapshot (#461)", () => {
   test("relaunch script: same shape as the launcher, token only via the sourced-then-removed file", () => {
     const script = buildRelaunchScript({ session: "s", url: URL_, argv: ARGV, cwd: "/w", pid: 1 }, "/n/codex-home", "/n/codex-home/.anet-copresence.env");
     expect(script).toBe([
+      "set -e",
       "export CODEX_HOME='/n/codex-home'",
       ". '/n/codex-home/.anet-copresence.env'",
       "rm -f '/n/codex-home/.anet-copresence.env'",
@@ -66,15 +70,100 @@ describe("launch snapshot (#461)", () => {
     expect(script).not.toContain("ntok_");
   });
 
-  test("token file: 0600, replaces a planted symlink instead of following it", () => {
+  test("launcher-owned env names stay aligned with agent-network", () => {
+    // The unit-test image mounts only agent-node, so the launcher's names travel as a
+    // checked-in contract that scripts/sync-codex-launcher-env-contract.mjs regenerates
+    // from agent-network/src/codex-copresence-env.ts (run it with --check for drift).
+    const contract = JSON.parse(
+      readFileSync(join(import.meta.dir, "codex-launcher-env.contract.json"), "utf8"),
+    ) as { source: string; names: string[] };
+    expect(contract.source).toBe("agent-network/src/codex-copresence-env.ts");
+    expect([...CODEX_APPSERVER_LAUNCHER_ENV].sort()).toEqual([...contract.names].sort());
+  });
+
+  test("relaunch env replays resolved config keys and proxy/CA variables while launcher identity wins", () => {
+    expect(appServerRelaunchEnv({
+      DEEPSEEK_KEY: { _envRef: "SOURCE_DEEPSEEK_KEY" },
+      AWS_REGION: "us-test-1",
+      codex_home: "/wrong/home",
+      anet_node_marker: "wrong-marker",
+      ANET_CODEX_COMMHUB_TOKEN: "ntok_wrong",
+    }, {
+      DEEPSEEK_KEY: "fake-provider-value",
+      SOURCE_DEEPSEEK_KEY: "unused-source-value",
+      AWS_REGION: "us-test-1",
+      codex_home: "/wrong/home",
+      anet_node_marker: "wrong-marker",
+      ANET_CODEX_COMMHUB_TOKEN: "ntok_wrong",
+      HTTPS_PROXY: "http://proxy.invalid:3128",
+      NO_PROXY: "127.0.0.1,.invalid",
+      SSL_CERT_FILE: "/etc/fake-ca.pem",
+    })).toEqual({
+      DEEPSEEK_KEY: "fake-provider-value",
+      AWS_REGION: "us-test-1",
+      HTTPS_PROXY: "http://proxy.invalid:3128",
+      NO_PROXY: "127.0.0.1,.invalid",
+      SSL_CERT_FILE: "/etc/fake-ca.pem",
+    });
+  });
+
+  test("invalid, reserved, or unresolved config.env entries fail before a relaunch file is written", () => {
+    expect(() => appServerRelaunchEnv({ PATH: "/bad" }, { PATH: "/bad" })).toThrow("is reserved");
+    expect(() => appServerRelaunchEnv({ "BAD;echo": "x" }, {})).toThrow("invalid config.env key");
+    expect(() => appServerRelaunchEnv({ DEEPSEEK_KEY: { _envRef: "SOURCE_DEEPSEEK_KEY" } }, {}))
+      .toThrow("config.env.DEEPSEEK_KEY was not resolved");
+  });
+
+  test("private env file: 0600, replaces a planted symlink, required token wins, values never enter argv", () => {
     const dir = mkdtempSync(join(tmpdir(), "t461-"));
     const target = join(dir, "victim");
     writeFileSync(target, "untouched\n");
     symlinkSync(target, join(dir, ".anet-copresence.env"));
-    const p = writeAppServerTokenFile(dir, "ntok_abc'def");
+    const providerValue = "fake-provider-value";
+    const p = writeAppServerRelaunchEnvFile(dir, "ntok_abc'def", {
+      DEEPSEEK_KEY: providerValue,
+      HTTPS_PROXY: "http://proxy.invalid:3128",
+      ANET_CODEX_COMMHUB_TOKEN: "ntok_configured_must_lose",
+      CODEX_HOME: "/wrong/home",
+    });
+    const text = readFileSync(p, "utf8");
     expect(readFileSync(target, "utf8")).toBe("untouched\n");
-    expect(readFileSync(p, "utf8")).toBe("export ANET_CODEX_COMMHUB_TOKEN='ntok_abc'\\''def'\n");
+    expect(text).toContain("export ANET_CODEX_COMMHUB_TOKEN='ntok_abc'\\''def'\n");
+    expect(text).toContain(`export DEEPSEEK_KEY='${providerValue}'\n`);
+    expect(text).toContain("export HTTPS_PROXY='http://proxy.invalid:3128'\n");
+    expect(text).not.toContain("ntok_configured_must_lose");
+    expect(text).not.toContain("export CODEX_HOME=");
     expect(statSync(p).mode & 0o777).toBe(0o600);
+  });
+
+  test("a real shell sources the private file and removes it before exec", () => {
+    const dir = mkdtempSync(join(tmpdir(), "t461exec-"));
+    const providerValue = "fake-provider-value";
+    const p = writeAppServerRelaunchEnvFile(dir, "ntok_node", { DEEPSEEK_KEY: providerValue });
+    const script = buildRelaunchScript({
+      session: "s", url: URL_, cwd: "/w", pid: 1,
+      argv: ["/bin/sh", "-c", "printf '%s\\n' \"$DEEPSEEK_KEY\""],
+    }, dir, p);
+    expect(script).not.toContain(providerValue);
+    expect(execFileSync("bash", ["-lc", script], { encoding: "utf8" }).trim()).toBe(providerValue);
+    expect(existsSync(p)).toBe(false);
+  });
+
+  test("a failed source aborts before exec", () => {
+    const dir = mkdtempSync(join(tmpdir(), "t461missing-"));
+    const marker = join(dir, "must-not-exist");
+    const script = buildRelaunchScript({
+      session: "s", url: URL_, cwd: "/w", pid: 1,
+      argv: ["/usr/bin/touch", marker],
+    }, dir, join(dir, "missing-env-file"));
+    const r = spawnSync("bash", ["-lc", script], { encoding: "utf8" });
+    expect(r.status).not.toBe(0);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  test("watchdog caller supplies config.env and the bridge's resolved environment", () => {
+    const cli = readFileSync(join(import.meta.dir, "../cli.ts"), "utf8");
+    expect(cli).toMatch(/configEnv: fileConfig\.env,\s+ambientEnv: process\.env,/);
   });
 
   test("marker file: ours / replaced / gone", () => {
