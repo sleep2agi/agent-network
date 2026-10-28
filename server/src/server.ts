@@ -84,6 +84,7 @@ import { startRetentionSweeper } from "./retention.js";
 import { sweepEmptyNodeRows } from "./empty-node-sweeper.js";
 import { versionStats } from "./version-stats.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
+import { scanNodeFailureAlerts } from "./node-failure-alert.js";
 import {
   AUDIT_LOG_REST_SELECT,
   COMPLETION_REST_SELECT,
@@ -5784,6 +5785,21 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // every COMMHUB_STALE_SWEEP_SECONDS (default 60s).
   const staleSweeperTimer = startStaleSessionSweeper();
 
+  // #2840 —— 节点「假活」告警：连续 5 次确定性失败（缺环境变量 / 二进制缺失 / 登录失效）
+  // 给节点主人发一条一次性通知。校准见 node-failure-alert.ts 头注释：
+  // 只算确定性错误时 7 天 6 条（0.9/天）；把 timeout 也算进去会变成 35 条。
+  const nodeFailureAlertMs = Number(process.env.COMMHUB_NODE_FAILURE_ALERT_MS) > 0
+    ? Number(process.env.COMMHUB_NODE_FAILURE_ALERT_MS) : 5 * 60 * 1000;
+  const nodeFailureAlertTimer = setInterval(() => {
+    try {
+      const r = scanNodeFailureAlerts();
+      if (r.alerts > 0) console.log(`[commhub node-failure-alert] sent ${r.alerts} alert(s): ${r.nodes.join(", ")}`);
+    } catch (e: any) {
+      console.log(`[commhub node-failure-alert] failed: ${e?.message ?? e}`);
+    }
+  }, nodeFailureAlertMs);
+  (nodeFailureAlertTimer as any).unref?.();
+
   // #476 — the two legacy module-level intervals, now owned by startHub
   // like every other periodic job: rate-limit map cleanup (memory only)
   // and task expiration patrol (writes DB — must never run on import).
@@ -5825,6 +5841,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     clearInterval(aliasBaselineTimer);
     clearTimeout(deferredBackfillTimer);
     clearInterval(staleSweeperTimer);
+    clearInterval(nodeFailureAlertTimer);
     clearInterval(rateLimitSweepTimer);
     clearInterval(taskPatrolTimer);
     clearInterval(deliveredStalePatrolTimer);
