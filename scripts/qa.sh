@@ -571,9 +571,13 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     #    QA_BUILDX_CACHE=1 且 buildx 可用时才走缓存路径:不满足就与改动前逐字相同,
     #    所以「缓存没配好」只会退化成现在的耗时,不会让门变绿或变红。
     if [[ "${QA_BUILDX_CACHE:-0}" == "1" ]] && docker buildx version >/dev/null 2>&1; then
+      # mode=min 是照抄本仓已有的约定（qa.yml 的 hub semantics 那 95 个分片就是这么写的）：
+      # 那里明确写了 mode=max 会把仓库 10GB 的 Actions 缓存预算挤爆、LRU 淘汰掉命中率。
+      # L1 的套件都是单阶段镜像，mode=min 一样能缓存 install 层（它们在最终镜像里）。
+      # scope 用 l1- 前缀，与 hub semantics 的 scope 分开，避免互相淘汰。
       _build="docker buildx build --load $build_args \
-        --cache-from type=gha,scope=anet-$t \
-        --cache-to type=gha,mode=max,scope=anet-$t \
+        --cache-from type=gha,scope=l1-$t \
+        --cache-to type=gha,mode=min,scope=l1-$t \
         -t anet-$t -f tests/$t/Dockerfile ."
     else
       _build="docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ."
