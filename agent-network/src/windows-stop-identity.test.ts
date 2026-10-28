@@ -231,6 +231,19 @@ describe("#1335 取证：后代出生身份必须来自**同一份枚举快照**
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: () => { throw new Error("powershell missing"); } }).unknownReason).toContain("capture query failed");
   });
 
+  test("#2869 默认上限必须容纳 CI 上出现过的 139 个后代；显式 cap 仍然生效", () => {
+    // CI 现场：node stop windows-picker → descendant count 139 exceeds cap 16 → STOP_TIMEOUT。
+    // 这里用同一形状的取证串直接验：默认上限不再误伤，而显式收紧仍然拦得住。
+    // 出生身份必须是 7 位小数（与 DESC_BIRTH 同形），否则 parser 直接判 "not understood"
+    const many = Array.from({ length: 139 }, (_, i) => `${8000 + i}=2026-10-16T02:41:37.${String(i).padStart(7, "0")}+00:00`).join(",");
+    const out = cap(many);
+    const byDefault = captureWindowsDescendantIdentities(root, { runPowerShell: () => out });
+    expect(byDefault.unknownReason).toBeUndefined();
+    expect(byDefault.identities).toHaveLength(139);
+    const tightened = captureWindowsDescendantIdentities(root, { runPowerShell: () => out, cap: 16 });
+    expect(tightened.unknownReason).toContain("exceeds cap 16");
+  });
+
   test("合规取证：后代身份带 kind=creation 且出生身份取自枚举", () => {
     const captured = captureWindowsDescendantIdentities(root, { runPowerShell: () => cap(`8744=${DESC_BIRTH},7656=2026-10-16T02:41:37.5555555+00:00`) });
     expect(captured.unknownReason).toBeUndefined();
