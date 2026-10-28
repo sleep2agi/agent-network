@@ -1552,6 +1552,10 @@ jobs:
           QA_L1_SHARD: ${{ matrix.shard }}
           # 只在 CI 打开:本地默认仍走 plain `docker build`(buildx 的 gha 缓存在本机不适用)。
           QA_BUILDX_CACHE: '1'
+          # #2871 —— build 占了 L1 墙钟的 90%（实测 shard1 344/384s、shard2 496/549s），
+          # 而它是串行 for 循环。这里开 4 路并行预构建；失败会退回主循环串行重试，
+          # 所以最坏情况退化成「和没有这个开关时一样」，不会少报错。
+          QA_L1_BUILD_PAR: '4'
         run: bash scripts/qa.sh --l1
 
       - name: Dump test logs on failure
