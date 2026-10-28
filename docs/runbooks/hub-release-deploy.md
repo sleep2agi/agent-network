@@ -29,7 +29,7 @@ curl -s "https://registry.npmjs.org/@sleep2agi%2fcommhub-server/<VER>" | head -c
 ## 1. 部署三步的真实形状
 
 ```bash
-REAL_HOME=/home/vansin
+REAL_HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"   # 主机真实 home，不是节点的私有 HOME
 VER=0.9.0-preview.188
 NEW_DIR="$REAL_HOME/.commhub/runtime-v188-preview188"
 
@@ -43,23 +43,23 @@ node -p "require('$NEW_DIR/node_modules/@sleep2agi/commhub-server/package.json')
 #    ~/.local/bin/hub-daemon.sh:  export HUB_RUNTIME_DIR="${HUB_RUNTIME_DIR:-<NEW_DIR>}"
 
 # c. 重启
-PM2=/home/vansin/.nvm/versions/node/v20.20.0/bin/pm2
+PM2="$(command -v pm2)"   # 或写成你的 node 版本目录下的 pm2 绝对路径
 PM2_HOME="$REAL_HOME/.pm2" HOME="$REAL_HOME" "$PM2" restart commhub-hub
 ```
 
 ## 2. 三个坑（都是我在 agent 节点会话里执行时踩的）
 
-### 坑 1：`$HOME` 不是 `/home/vansin`
+### 坑 1：`$HOME` 不是主机的真实 home
 
-在 agent 节点会话里，`$HOME` 是**节点私有目录**（如 `~comm-ou-v2/.anet/nodes/通信欧`）。
+在 agent 节点会话里，`$HOME` 是**节点私有目录**（如 `<节点工作目录>/.anet/nodes/<节点名>`）。
 启动器 `hub-daemon.sh` 用 `exec "$HOME/.local/bin/hub-daemon-base.sh"` 拼路径 —— HOME 一错就找不到。
 
-**所以**：脚本里一律显式写 `REAL_HOME=/home/vansin`，不要依赖 `$HOME`。
+**所以**：脚本里一律显式写 `REAL_HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"   # 主机真实 home，不是节点的私有 HOME`，不要依赖 `$HOME`。
 
 ### 坑 2：不指定 `PM2_HOME` 会起一个**空的** pm2 守护
 
 ```
-[PM2] Spawning PM2 daemon with pm2_home=.../通信欧/.pm2
+[PM2] Spawning PM2 daemon with pm2_home=<节点私有 HOME>/.pm2
 [PM2][ERROR] Process or Namespace commhub-hub not found
 ```
 
@@ -70,7 +70,7 @@ PM2_HOME="$REAL_HOME/.pm2" HOME="$REAL_HOME" "$PM2" restart commhub-hub
 那次把节点私有 HOME 带进去了，于是 Hub 每次启动都：
 
 ```
-bash: /…/通信欧/.local/bin/hub-daemon-base.sh: No such file or directory     ×21
+bash: <节点私有 HOME>/.local/bin/hub-daemon-base.sh: No such file or directory     ×21
 pm2 status = waiting restart · unstable restarts 11
 ```
 
@@ -78,7 +78,7 @@ pm2 status = waiting restart · unstable restarts 11
 那才是持久、可审计的位置；`pm2` 的 env 只是启动快照。
 
 > 抢救（本人实测 90 秒恢复）：
-> `PM2_HOME=/home/vansin/.pm2 HOME=/home/vansin pm2 restart commhub-hub --update-env`
+> `PM2_HOME="$REAL_HOME/.pm2" HOME="$REAL_HOME" pm2 restart commhub-hub --update-env`
 > —— 这一次性用 `--update-env` 是为了**覆盖**那个错 HOME。
 
 ## 3. 探针的传参（一个纯手误）
@@ -97,7 +97,7 @@ bash scripts/verify-hub-release.sh http://127.0.0.1:9200  # ❌ FAIL: dist-tags.
 
 ```bash
 # 1) pm2 真的稳定    —— 只看「版本变了」会被旧进程还活着骗过
-PM2_HOME=/home/vansin/.pm2 pm2 describe commhub-hub | grep -E "status|unstable restarts"
+PM2_HOME="$REAL_HOME/.pm2" pm2 describe commhub-hub | grep -E "status|unstable restarts"
 #    status=online 且 unstable restarts=0
 
 # 2) 版本是目标版本
@@ -114,8 +114,8 @@ bash scripts/verify-hub-release.sh <VER>
 
 ```bash
 # 启动器那一行指回旧 runtime 目录
-sed -i 's|runtime-v188-preview188|runtime-v187-preview187|' ~/.local/bin/hub-daemon.sh
-PM2_HOME=/home/vansin/.pm2 HOME=/home/vansin pm2 restart commhub-hub
+sed -i 's|runtime-v188-preview188|runtime-v187-preview187|' "$REAL_HOME/.local/bin/hub-daemon.sh"
+PM2_HOME="$REAL_HOME/.pm2" HOME="$REAL_HOME" pm2 restart commhub-hub
 curl -s http://127.0.0.1:9200/health | python3 -c "import json,sys;print(json.load(sys.stdin)['version'])"
 ```
 
