@@ -55,4 +55,19 @@ describe("busyElapsedNote", () => {
     expect(busyElapsedNote("2026-10-27 13:54:48", null, null)).toBeNull();
     expect(busyElapsedNote("2026-10-27 20:00:00", null, "2026-10-27 13:00:00")).toBeNull();
   });
+
+  test("跨库：PG 可能给 Date / 毫秒数，不能静默失效", () => {
+    const created = new Date(Date.now() - 412 * 60_000);
+    const started = new Date(Date.now() - 30 * 60_000);
+    const completed = new Date();
+    const fromDates = busyElapsedNote(created, started, completed);
+    expect(fromDates).toContain("排队 382 分钟");
+    expect(fromDates).toContain("会话等待 30 分钟");
+
+    const fromNumbers = busyElapsedNote(created.getTime(), started.getTime(), completed.getTime());
+    expect(fromNumbers).toContain("排队 382 分钟");
+
+    // 空串也要当「没有」，不能 parse 成 1970
+    expect(busyElapsedNote("", "", "")).toBeNull();
+  });
 });

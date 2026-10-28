@@ -33,10 +33,16 @@ export function scheduledFailureCode(status: string, result: string | null): str
 // 这里只做**如实测量与上报**，不改等待语义：fail fast 会改变派发行为，
 // 要单独定阈值（排队上限独立成卡）。阈值是不变量，得先有数再选。
 
-function parseDbTime(v: string | null | undefined): number | null {
-  if (!v) return null;
-  // 库里是 `YYYY-MM-DD HH:MM:SS`（UTC，无 Z），直接 Date.parse 会按本地时区解释。
-  const ms = Date.parse(`${String(v).replace(" ", "T")}Z`);
+function parseDbTime(v: string | Date | number | null | undefined): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  // 跨库：SQLite 给字符串（`YYYY-MM-DD HH:MM:SS`，UTC 无 Z），
+  // PG 的 timestamp 列可能直接给 Date 或毫秒数。两种都认，
+  // 否则这条投影在 PG 上会静默失效（返回 null ⇒ 不显示拆解），
+  // 而「静默失效」比「报错」难发现得多。
+  if (v instanceof Date) return Number.isFinite(v.getTime()) ? v.getTime() : null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  // 字符串里的空格要换掉：Date.parse 对 `... 20:16:52` 会按本地时区解释。
+  const ms = Date.parse(`${String(v).trim().replace(" ", "T")}Z`);
   return Number.isFinite(ms) ? ms : null;
 }
 
@@ -56,9 +62,9 @@ function fmtMinutes(ms: number): string {
  *   只改排程 run 的投影，最该被修的那一类反而看不到拆解。
  */
 export function busyElapsedNote(
-  createdAt: string | null | undefined,
-  startedAt: string | null | undefined,
-  completedAt: string | null | undefined,
+  createdAt: string | Date | number | null | undefined,
+  startedAt: string | Date | number | null | undefined,
+  completedAt: string | Date | number | null | undefined,
 ): string | null {
   const created = parseDbTime(createdAt);
   const completed = parseDbTime(completedAt);
