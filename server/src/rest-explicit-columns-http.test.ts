@@ -202,21 +202,23 @@ describe("#311 REST response projections are stable across future ALTER TABLE", 
   // 所以投影必须落在任务读端点，不能只改排程 run。
   test("#2884 busy failures expose queue vs session-wait split (non-scheduled tasks too)", async () => {
     const BUSY = "[n] opencode 任务未提交：共享会话在 30 分钟 内一直处于忙碌状态，本任务没有发出";
+    // 时间用 JS 算再传参：`datetime('now','-N minutes')` 是 SQLite 方言，
+    // PG ladder 里会直接报错 (#2884)。completed_at 留空表示「现在」，由断言侧不需要它。
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString().replace("T", " ").replace(/\..+/, "");
+    const nowTs = minutesAgo(0);
     db.run(
       `INSERT INTO tasks (task_id, from_name, to_name, status, content, priority, result,
                           created_at, started_at, completed_at, network_id)
-       VALUES ('task-busy-shape', 'sender', 'rest-shape-node', 'failed', 'busy', 'normal', ?1,
-               datetime('now', '-412 minutes'), datetime('now', '-30 minutes'), datetime('now'), ?2)`,
-      [BUSY, networkId],
+       VALUES ('task-busy-shape', 'sender', 'rest-shape-node', 'failed', 'busy', 'normal', ?1, ?2, ?3, ?4, ?5)`,
+      [BUSY, minutesAgo(412), minutesAgo(30), nowTs, networkId],
     );
     // 对照组：同一形状但原因不是会话忙 ⇒ 不能被加拆解
     db.run(
       `INSERT INTO tasks (task_id, from_name, to_name, status, content, priority, result,
                           created_at, started_at, completed_at, network_id)
        VALUES ('task-plain-fail', 'sender', 'rest-shape-node', 'failed', 'plain', 'normal',
-               '执行出错: upstream refused', datetime('now', '-400 minutes'),
-               datetime('now', '-370 minutes'), datetime('now'), ?1)`,
-      [networkId],
+               '执行出错: upstream refused', ?1, ?2, ?3, ?4)`,
+      [minutesAgo(400), minutesAgo(370), nowTs, networkId],
     );
 
     const detail = await api(`/api/tasks/task-busy-shape?network_id=${networkId}`);

@@ -244,11 +244,12 @@ describe("#2884 busy runs report queue and session wait separately", () => {
     expect(r.status).toBe("delivered");
     // 造出「排了 382 分钟、轮到后等了 30 分钟」：把创建时刻前移 412 分钟、开始处理前移 30 分钟，
     // 回复会把 completed_at 设成现在。
+    // 时间用 JS 算再传参：`datetime('now','-N minutes')` 是 SQLite 方言，
+    // 这套用例在 PG ladder 里也跑（test2123），方言会让它直接报错 (#2884)。
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString().replace("T", " ").replace(/\..+/, "");
     db.run(
-      `UPDATE tasks SET created_at = datetime('now', '-412 minutes'),
-                        started_at = datetime('now', '-30 minutes')
-        WHERE task_id = ?1`,
-      r.taskId,
+      "UPDATE tasks SET created_at = ?2, started_at = ?3 WHERE task_id = ?1",
+      [r.taskId, minutesAgo(412), minutesAgo(30)],
     );
     const out = await nodeReply({ alias: "scheduler", text: BUSY, in_reply_to: r.taskId, status: "failed", from_session: ALIAS });
     expect(out.ok).toBe(true);
