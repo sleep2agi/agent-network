@@ -1536,12 +1536,22 @@ jobs:
         if: ${{ matrix.shard == '' }}
         run: bash scripts/qa.sh --l0
 
+      # #2846 —— L1 的 docker build 原本没有跨运行缓存:每次 CI 都从零重建全部镜像。
+      # 实测(L1-TIMING total=1012s, 29 suites):588s(58%) 花在两个镜像上
+      #   test8-runtime 282s · test1203-btw-production-e2e 306s,其余 27 个 build 只有 2–13s。
+      # setup-buildx + gha 层缓存让这两个命中缓存;不命中时退化成全量构建,判据不变。
+      - name: Setup Docker buildx (L1 layer cache)
+        if: ${{ matrix.shard != '' }}
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
       - name: Run L1 (Docker contract tests, ~16s parallel)
         # docs-only PR 时只跑镜像里有 docs-site 的 L1 套件;其他 PR 这里是空串 = 全部。
         if: ${{ matrix.shard != '' }}
         env:
           QA_L1_ONLY: ${{ needs.changes.outputs.l1_only }}
           QA_L1_SHARD: ${{ matrix.shard }}
+          # 只在 CI 打开:本地默认仍走 plain `docker build`(buildx 的 gha 缓存在本机不适用)。
+          QA_BUILDX_CACHE: '1'
         run: bash scripts/qa.sh --l1
 
       - name: Dump test logs on failure

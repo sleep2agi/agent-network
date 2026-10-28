@@ -564,7 +564,21 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     #    当晚 9 次 L0+L1 里 5 次撞 30 分钟守卫、152 分钟零产出(74%),
     #    而唯一能下钻的量都还是推出来的。加这一行,下次就是读数不是推算。
     _b0=$SECONDS
-    if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
+    # 🔴 #2846 —— 镜像构建原本没有跨运行缓存,CI 每次从零重建。
+    #    实测(L1-TIMING total=1012s / 29 suites):两个套件吃掉 588s(58%)
+    #    —— test8-runtime 282s、test1203-btw-production-e2e 306s;
+    #    其余 27 个 build 只有 2–13s。缓存命中时这两个从 ~5 分钟掉到十几秒。
+    #    QA_BUILDX_CACHE=1 且 buildx 可用时才走缓存路径:不满足就与改动前逐字相同,
+    #    所以「缓存没配好」只会退化成现在的耗时,不会让门变绿或变红。
+    if [[ "${QA_BUILDX_CACHE:-0}" == "1" ]] && docker buildx version >/dev/null 2>&1; then
+      _build="docker buildx build --load $build_args \
+        --cache-from type=gha,scope=anet-$t \
+        --cache-to type=gha,mode=max,scope=anet-$t \
+        -t anet-$t -f tests/$t/Dockerfile ."
+    else
+      _build="docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ."
+    fi
+    if ! dockerrun "$_build" >/tmp/qa-l1-$t-build.log 2>&1; then
       printf '· build fail %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
       FAILED=$((FAILED+1))

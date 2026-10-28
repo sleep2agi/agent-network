@@ -10,13 +10,19 @@ RUN apt-get update && apt-get install -y curl python3 make g++ && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# #2846 —— 依赖安装层必须只依赖 lockfile,否则任何源码改动都会击穿它。
+# 实测:整个镜像 282s,而其中 3 次 install 占大头 —— 把它们提到 COPY 源码之前,
+# 让 buildx 层缓存能命中;源码变更只重跑下面几个 build 步骤(十几秒)。
+COPY server/package.json server/bun.lock server/package-lock.json server/
+RUN cd server && bun install
+COPY agent-network/package.json agent-network/package-lock.json agent-network/
+RUN cd agent-network && npm install --ignore-scripts 2>/dev/null || true
+COPY agent-node/package.json agent-node/package-lock.json agent-node/
+RUN cd agent-node && npm install --ignore-scripts 2>/dev/null || true
+
 COPY server/ server/
 COPY agent-network/ agent-network/
 COPY agent-node/ agent-node/
-
-RUN cd server && bun install
-RUN cd agent-network && npm install --ignore-scripts 2>/dev/null || true
-RUN cd agent-node && npm install --ignore-scripts 2>/dev/null || true
 RUN cd agent-network && npm run build && npm install -g .
 RUN cd agent-node && npm run build && npm link
 RUN cd agent-node && npm install @openai/codex-sdk 2>/dev/null || true
