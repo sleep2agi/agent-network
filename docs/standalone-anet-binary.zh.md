@@ -47,7 +47,7 @@ gh api --method POST \
 
 矩阵（`fail-fast: false`）：`ubuntu-24.04` + `bun-linux-x64`，`macos-14` + `bun-darwin-arm64`。Bun 与 release.yml 一样钉在 `oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6`、`1.3.14`。
 
-每条腿：`anet --version` 对得上 stamp，`--help`，`__node --help`，`__hub` 的 `/health` 为 200 且 `version` 等于 commhub-server 的包版本，体积 ≤ 110MB，SHA256 文件，`actions/attest-build-provenance@v2`。
+每条腿：`anet --version` 对得上 stamp，`--help`，`__node --help`，`__hub` 的 `/health` 为 200 且 `version` 等于 commhub-server 的包版本，体积 ≤ 110MB，生成 SHA256 文件。同仓 PR 和 `workflow_dispatch` 仍执行 `actions/attest-build-provenance@v2`；fork PR 因 GitHub 不向其发放 OIDC token，由该步骤的 `if:` 条件跳过 attestation。fork PR 仍照常编译、冒烟、生成校验和并上传产物。
 
 发布腿只在 `workflow_dispatch` 且 `publish=true` 且两条都成功时跑。它核对每条腿的三个包版本和 bundle 版本一致，写出 `SHA256SUMS` 与 `anet-bin-manifest.json`，再 `gh release create cli-bin-v<version>`。标签已存在就失败。
 
