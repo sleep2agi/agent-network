@@ -122,11 +122,15 @@ A refusal is a 403 over REST; MCP returns the same body:
 GET /api/networks/{id}/node-permission-report?since=<ISO time>
 ```
 
-The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}], tool_calls: {total, by_tool: [{tool, hits}]}}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
+The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}], tool_calls: [{tool, hits}], tool_calls_total}], tool_calls: {total, by_tool: [{tool, hits}]}}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
 
 `total` and `nodes[]` count only would-have-been blocks; `tool_calls` is the denominator: how many times restricted tools were actually called (merged per hour). The two live in separate tables, so allowed calls never inflate the denial statistics. Without a denominator, "zero blocks" cannot be told apart from "nobody touched these tools" - and those two readings lead to opposite decisions.
 
 See RFC-041 for the design and trade-offs.
+
+If an entry in `nodes[]` carries `unbound_token: true`, it is an **unbound node token** (its `node_id` looks like `token:<token_id>`). The ledger keeps the legacy per-token key, and such a token has no `nodes` row — so **neither allowlist can restrict it**. It is surfaced here so an admin does not conclude that nobody outside the list is dispatching; bind the token to a node first if you need to restrict it.
+
+**Per-node detail (`nodes[].tool_calls`)**: look at what a node *actually* called before writing its allowlist — otherwise the list is guesswork and the first deploy blocks something in use. Two things it fixes: (1) a node that never oversteps but works all day used to be missing from this report, because `nodes[]` was aggregated only from denial rows — exactly the node whose allowlist you most need to get right; (2) `nodes[]` is now sorted by `tool_calls_total` descending, busiest first.
 
 ### Secret transport gate (admin switch)
 

@@ -251,6 +251,27 @@ describe("GET /api/networks/:id/node-permission-report", () => {
     expect((await call(node.nN.token, "GET", `/api/networks/${net}/node-permission-report`)).status).toBe(403);
     expect((await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report?since=${encodeURIComponent(new Date(Date.now() + 3_600_000).toISOString())}`)).body.total).toBe(0);
   });
+
+  // #2969 —— 设白名单之前，管理员要能看「这台节点实际用过哪些工具」，
+  // 否则白名单只能凭想象写，第一次上线就拦掉在用的东西。
+  //
+  // 关键的第二条：一台**从不越界**但天天在用的节点，过去在报表里根本不存在
+  // （nodes 只从「被拒过的行」聚合）。它恰恰是最该出现在名单里的那台。
+  test("按节点的工具调用明细：从不越界的节点也要出现", async () => {
+    await mcp(node.nN.token, "list_tasks", { network_id: net, limit: 1 });
+    await mcp(node.nN.token, "list_tasks", { network_id: net, limit: 1 });
+    const r = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    expect(r.status).toBe(200);
+    const nN = r.body.nodes.find((n: any) => n.node_id === node.nN.id);
+    expect(nN).toBeTruthy();
+    expect(nN.tool_calls_total).toBeGreaterThanOrEqual(2);
+    const listTasks = nN.tool_calls.find((t: any) => t.tool === "mcp:list_tasks");
+    expect(listTasks.hits).toBeGreaterThanOrEqual(2);
+    // 排序也变了：按调用量降序，让「用得最多」的排在最前
+    expect(r.body.nodes[0].tool_calls_total).toBeGreaterThanOrEqual(nN.tool_calls_total);
+    // 网络级合计保持不变（旧口径不能因为这次改动而变）
+    expect(r.body.tool_calls.total).toBeGreaterThanOrEqual(nN.tool_calls_total);
+  });
 });
 
 // #2823 —— 调用面计数：拒绝日志给不了分母。
@@ -462,5 +483,24 @@ describe("空数组不猜：拒收，清空请传 null", () => {
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: null })).status).toBe(200);
     const row = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}&node_id=${node.other.id}`);
     expect(row.body.nodes[0].tool_allowlist).toBeNull();
+  });
+});
+
+// #2969 / #2971 —— 未绑定节点的令牌是权限体系的一个真实盲点：
+// 账本用 `token:<token_id>` 当键，它们没有 nodes 行 ⇒ 两张白名单都管不到（toolAllowlist 为 null）。
+// 报表必须把它们标出来，否则管理员会以为「名单之外没有别人在派活」。
+describe("未绑定节点的令牌在报表里必须可见", () => {
+  test("token: 键的条目带 unbound_token=true，真实节点不带", async () => {
+    db.run(`INSERT INTO node_tool_calls (network_id, node_id, tool, hour, hits) VALUES (?1, ?2, 'mcp:send_task', ?3, 4)
+            ON CONFLICT(network_id, node_id, tool, hour) DO UPDATE SET hits = node_tool_calls.hits + 4`,
+      [net, "token:tok_unbound_test", new Date().toISOString().slice(0, 13)]);
+    const r = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    expect(r.status).toBe(200);
+    const unbound = r.body.nodes.find((n: any) => n.node_id === "token:tok_unbound_test");
+    expect(unbound).toBeTruthy();
+    expect(unbound.unbound_token).toBe(true);
+    expect(unbound.tool_calls_total).toBeGreaterThanOrEqual(4);
+    const real = r.body.nodes.find((n: any) => n.node_id === node.nN.id);
+    expect(real.unbound_token).toBeUndefined();
   });
 });

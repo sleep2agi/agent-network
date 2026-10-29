@@ -3044,7 +3044,7 @@ return Bun.serve({
            FROM node_permission_log WHERE network_id = ?1 AND hour >= ?2
           GROUP BY node_id, route, reason ORDER BY node_id, route, reason`,
         networkId, sinceHour);
-      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }> }>();
+      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean }>();
       for (const r of rows) {
         let entry = byNode.get(r.node_id);
         if (!entry) {
@@ -3057,7 +3057,43 @@ return Bun.serve({
         entry.by_reason[r.reason] = (entry.by_reason[r.reason] ?? 0) + hits;
         entry.routes.push({ route: r.route, reason: r.reason, hits, sample: r.sample, last_hour: r.last_hour });
       }
-      const nodes = [...byNode.values()].sort((a, b) => b.total - a.total || a.node_id.localeCompare(b.node_id));
+      // #2969 —— 按节点的工具调用明细。
+      // 为什么要这个：管理员在设「只能用哪些工具」之前，需要先看**这台节点实际用过哪些**，
+      // 否则白名单只能凭想象写，第一次上线就是拦掉在用的工具。
+      // 之前账本只有网络级合计（by_tool），且 nodes 只从「被拒过的行」聚合 ——
+      // 一台从不越界但天天在用的节点，在报表里根本不存在。
+      //
+      // #2971 之后账本包含读类工具，这里的明细才第一次是「全部调用面」而不是「会被拦的那部分」。
+      const perNodeCalls = db.all<{ node_id: string; tool: string; hits: number | string }>(
+        `SELECT node_id, tool, SUM(hits) AS hits FROM node_tool_calls
+          WHERE network_id = ?1 AND hour >= ?2
+          GROUP BY node_id, tool ORDER BY node_id, SUM(hits) DESC`,
+        networkId, sinceHour,
+      );
+      const callsByNode = new Map<string, Array<{ tool: string; hits: number }>>();
+      for (const r of perNodeCalls) {
+        const list = callsByNode.get(r.node_id) ?? [];
+        list.push({ tool: r.tool, hits: Number(r.hits) });
+        callsByNode.set(r.node_id, list);
+      }
+      // 有调用但没被拒过的节点也要出现在结果里（total = 0）。
+      for (const nodeId of callsByNode.keys()) {
+        if (byNode.has(nodeId)) continue;
+        const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", nodeId);
+        byNode.set(nodeId, { node_id: nodeId, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [] });
+      }
+      for (const entry of byNode.values()) {
+        const list = callsByNode.get(entry.node_id) ?? [];
+        entry.tool_calls = list;
+        entry.tool_calls_total = list.reduce((n, e) => n + e.hits, 0);
+        // 未绑定节点的令牌：账本用 `token:<token_id>` 当键（nodeIdentity 的老路径）。
+        // 它们**没有 nodes 行**，所以两张白名单都管不到它们（toolAllowlist 为 null ⇒ 不限制）。
+        // 报表里必须显式标出来，否则管理员会以为「名单之外没有别人在派活」。
+        // 这里只标注，不改变任何判定。
+        if (entry.node_id.startsWith("token:")) entry.unbound_token = true;
+      }
+      const nodes = [...byNode.values()].sort((a, b) =>
+        b.tool_calls_total - a.tool_calls_total || b.total - a.total || a.node_id.localeCompare(b.node_id));
       // #2823 —— 调用面分母。`total` 只数「本来会被拒」的次数；没有分母时
       // 「0 命中」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
       // 这里单独给一份 classified 工具的真实调用数（按小时合并后的 hits 之和），
