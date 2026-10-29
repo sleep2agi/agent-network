@@ -305,8 +305,9 @@ grep -F 'server/src/test639-collision.test.ts' /tmp/test639-slug-collision.out >
 grep -F 'server/src/test639/collision.test.ts' /tmp/test639-slug-collision.out >/dev/null
 
 cp server/scripts/test-aggregate.ts server/scripts/test-aggregate-mutation.ts
-sed -i '/^[[:space:]]*assertUniqueSlugs(files);$/d' server/scripts/test-aggregate-mutation.ts
-! grep -F 'assertUniqueSlugs(files);' server/scripts/test-aggregate-mutation.ts >/dev/null
+# #2898 —— 这一行的形参从 files 改成了 enumerated（聚合器现在先排除进程级状态文件再筛 --file）。
+sed -i '/^[[:space:]]*assertUniqueSlugs(enumerated);$/d' server/scripts/test-aggregate-mutation.ts
+! grep -F 'assertUniqueSlugs(enumerated);' server/scripts/test-aggregate-mutation.ts >/dev/null
 set +e
 bun server/scripts/test-aggregate-mutation.ts --file=server/src/test639-collision.test.ts >/tmp/test639-slug-mutation.out 2>&1; slug_mutation_rc=$?
 set -e
