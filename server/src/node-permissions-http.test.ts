@@ -502,5 +502,13 @@ describe("未绑定节点的令牌在报表里必须可见", () => {
     expect(unbound.tool_calls_total).toBeGreaterThanOrEqual(4);
     const real = r.body.nodes.find((n: any) => n.node_id === node.nN.id);
     expect(real.unbound_token).toBeUndefined();
+    // 令牌名要带出来 —— 只看 `token:tok_xxx` 无法处理；名字才是「该改哪个令牌」的答案。
+    const tokRow = db.get<{ token_id: string }>("SELECT token_id FROM api_tokens LIMIT 1");
+    db.run(`INSERT INTO node_tool_calls (network_id, node_id, tool, hour, hits) VALUES (?1, ?2, 'mcp:send_task', ?3, 1)
+            ON CONFLICT(network_id, node_id, tool, hour) DO UPDATE SET hits = node_tool_calls.hits + 1`,
+      [net, `token:${tokRow.token_id}`, new Date().toISOString().slice(0, 13)]);
+    const r2 = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    const withName = r2.body.nodes.find((n: any) => n.node_id === `token:${tokRow.token_id}`);
+    expect(withName.unbound_token_name).toBeTruthy();
   });
 });
