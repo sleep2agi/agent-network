@@ -66,7 +66,7 @@ anet node start my-agent --tmux
 
 ### 启动时的环境变量优先级
 
-`agent-node`（包括直接 `agent-node --config <path>` 启动）按下面的顺序取值，**高者胜**（实现见 [`node-secrets.ts:1-20`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L1-L20) 的优先级注释，代码路径在 `:155` 的 `loadNodeSecrets`）：
+`agent-node`（包括直接 `agent-node --config <path>` 启动）按下面的顺序取值，**高者胜**（实现见 [`node-secrets.ts` 的 `loadNodeSecrets`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L155)；文件顶部注释也写着这三层）：
 
 1. **进程启动时已经存在的环境变量**（`KEY=` 空串也算已设置，会被保留）；
 2. `config.json` 的 `env` 里的键（明文或 `_envRef`）；
