@@ -176,6 +176,11 @@ PUT /api/nodes/{node_id}/tool-allowlist   {"tools": ["send_task", "requirements_
 PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // clear
 ```
 
+**Clearing takes `null` only. An empty array `[]` is rejected (400 `empty_allowlist_ambiguous`)** because it is ambiguous:
+some read it as "no restriction", some as "nothing allowed". That divergence actually happened — a client rendered `[]`
+as "no tools allowed" while the Hub normalised `[]` to `null`, i.e. everything allowed: the UI said tightened, the system
+said open. Rather than guess, reject it. `GET /api/nodes` returns either `null` or a non-empty array, never `[]`.
+
 Same authorization as `permission-mode` (user token + node owner / network owner·admin / hub admin); audits are `node_peer_allowlist_changed` and `node_tool_allowlist_changed`.
 
 | Allowlist | Covers | Enforced in |

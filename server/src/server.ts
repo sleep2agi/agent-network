@@ -2953,6 +2953,23 @@ return Bun.serve({
       const tools = Array.isArray(rawTools)
         ? rawTools.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
         : [];
+      // #2969 —— 空数组是**歧义的**，直接拒，不猜。
+      //
+      // 发生过的事：客户端把「[] = 不允许任何工具」做进了界面（PR #1165），
+      // 而 Hub 这边 `tools.length ? ... : null` 会把 [] 规范化成 null = **不限制**。
+      // 两边语义相反，结果是「用户以为收紧了，系统其实放开了」——比没有这个选项更糟。
+      //
+      // 三种做法里选了最不含糊的一种：
+      //   · 把 [] 当「禁止一切」  → 老客户端「清空」按钮会变成把节点封死，回归风险太大
+      //   · 把 [] 当 null（现状） → 界面可以无声地说「全部禁止」而实际全放开，安全洞
+      //   · 拒收 []（本实现）     → 调用方当场看到 400 和一句「清空请传 null」，没有静默行为
+      if (Array.isArray(rawTools) && tools.length === 0) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "empty_allowlist_ambiguous",
+          message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected",
+        }, { status: 400 }));
+      }
       if (tools.length > 500) {
         return withCors(req, Response.json({ ok: false, error: "too_many_tools", message: "at most 500 entries" }, { status: 400 }));
       }
@@ -2985,6 +3002,14 @@ return Bun.serve({
       const peers = Array.isArray(rawPeers)
         ? rawPeers.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
         : [];
+      // 同 tool-allowlist：空数组歧义，拒收；清空请传 null。
+      if (Array.isArray(rawPeers) && peers.length === 0) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "empty_allowlist_ambiguous",
+          message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected",
+        }, { status: 400 }));
+      }
       if (peers.length > 200) {
         return withCors(req, Response.json({ ok: false, error: "too_many_peers", message: "at most 200 entries" }, { status: 400 }));
       }

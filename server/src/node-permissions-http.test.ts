@@ -415,3 +415,35 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
     expect((await rowOf(shadowId)).env_transport).toBe("https");
   });
 });
+
+// #2969 —— 空数组是歧义的，Hub 直接拒，不猜。
+//
+// 客户端（PR #1165）把「[] = 不允许任何」做进了界面，而 Hub 的 `length ? … : null`
+// 会把 [] 规范化成 null = 不限制。两边语义相反：用户以为收紧了，系统其实放开了。
+// 三种做法里选了最不含糊的一种 —— 拒收，让调用方当场看到 400 和「清空请传 null」。
+describe("空数组不猜：拒收，清空请传 null", () => {
+  test("PUT tool-allowlist [] → 400 empty_allowlist_ambiguous，且没改动库里已有值", async () => {
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: ["send_task"] })).status).toBe(200);
+    const r = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: [] });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("empty_allowlist_ambiguous");
+    // 关键：拒收不能顺手把它清掉 —— 那等于「报错了，但行为已经变了」。
+    const row = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}&node_id=${node.other.id}`);
+    expect(row.body.nodes[0].tool_allowlist).toEqual(["send_task"]);
+  });
+
+  test("PUT peer-allowlist [] → 400，库里也没变", async () => {
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: ["boss"] })).status).toBe(200);
+    const r = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: [] });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("empty_allowlist_ambiguous");
+    const row = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}&node_id=${node.other.id}`);
+    expect(row.body.nodes[0].peer_allowlist).toEqual(["boss"]);
+  });
+
+  test("清空走 null：200，读回来是 null（不是 []）", async () => {
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: null })).status).toBe(200);
+    const row = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}&node_id=${node.other.id}`);
+    expect(row.body.nodes[0].tool_allowlist).toBeNull();
+  });
+});
