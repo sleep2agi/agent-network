@@ -77,6 +77,38 @@ while IFS= read -r _marker; do
   L1_TESTS+=("$(basename "$(dirname "$_marker")")")
 done < <(find "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests" -mindepth 2 -maxdepth 2 -name qa.l1 | sort)
 
+# #2800 —— 按**实测构建耗时降序**排序，让取模分片自然地做出「最重优先」的均衡分配。
+#
+# 为什么：取模分片（下面 `_idx % _n`）只保证「不重不漏」，不保证均衡。
+# 2026-10-30 实测（三个 shard 的套件数都是 29，很均）：
+#
+#     分片        构建总时长     墙钟
+#     shard 1/3    1792s         12.8 min
+#     shard 2/3     901s          7.3 min
+#     shard 3/3    1108s          7.1 min
+#
+# 差 891s 全部来自「哪几个重套件恰好落在哪一片」。按耗时降序排列后，
+# 取模分片等价于 LPT（最重优先）分配，预测三片 1397/1240/1164s（差 233s）。
+#
+# 耗时数据来自 CI 日志的 `[l1-build] <秒>s <套件名>`（#3231 加的），放在
+# tests/qa-l1-weights.tsv。**缺项的套件按 0 处理（排最后）** —— 所以这份表过期
+# 也只会让分配回到「接近字母序」，不会漏跑任何一个套件。
+_weights="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests/qa-l1-weights.tsv"
+if [[ -f "$_weights" && ${#L1_TESTS[@]} -gt 0 ]]; then
+  _ordered=()
+  while IFS= read -r _name; do _ordered+=("$_name"); done < <(
+    awk -F'\t' 'BEGIN{OFS="\t"} NR==FNR{ if ($1 !~ /^#/ && NF>=2) w[$1]=$2; next }
+                 { print (($1 in w) ? w[$1] : 0), $1 }' "$_weights" <(printf '%s\n' "${L1_TESTS[@]}") \
+      | sort -k1,1nr -k2,2 | cut -f2
+  )
+  # 只在「数量没变」时才采用，避免 awk/sort 出岔子把套件弄丢（那会变成静默漏跑）
+  if [[ ${#_ordered[@]} -eq ${#L1_TESTS[@]} ]]; then
+    L1_TESTS=("${_ordered[@]}")
+  else
+    note "警告：按耗时重排后条目数从 ${#L1_TESTS[@]} 变成 ${#_ordered[@]}，放弃重排（保持原顺序）"
+  fi
+fi
+
 
 if [[ "${1:-}" == "--list" ]]; then
   echo "L0 unit (bun test, local, ms-budget):"
