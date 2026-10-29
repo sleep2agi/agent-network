@@ -128,6 +128,27 @@ The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, p
 
 See RFC-041 for the design and trade-offs.
 
+### Secret transport gate (admin switch)
+
+Forwarding a secret from Hub to a node over plaintext public network is a plaintext secret. The gate looks at the node's **last reported** `env_transport`, and only guards `put` (`list` / `delete` carry no secret):
+
+| Reported transport | Verdict |
+|---|---|
+| `loopback` / `https` | allowed |
+| `plain` | refused, `secret_transport_plain` |
+| not reported (`NULL`) | **allowed by default**; refused only when strict is on, `secret_transport_unknown` |
+
+```
+ANET_SECRET_TRANSPORT_GATE=off | log | enforce     # default log: record, refuse nothing
+ANET_SECRET_TRANSPORT_GATE_STRICT=1                # default off: also refuse "not reported"
+```
+
+**Why "not reported" is allowed by default**: read-only count on 2026-10-29 — of 373 sessions, 332 (89%) had never reported a transport. Making "unknown means refuse" the default would block ~9 nodes in 10 the day `enforce` is switched on. That is not tightening; it is an unplanned outage.
+
+Keep the two reasons apart: `secret_transport_plain` means someone must look at that machine's network path; `secret_transport_unknown` means someone must **make the node report**. Different people, different machines.
+
+`log` mode records to `GET /api/networks/{id}/env-transport-log` (network owner / admin), aggregated by hour, and answers "if enforce were on right now, which puts would be refused and why".
+
 ## Agent teams
 
 Agents (nodes) have their own org tree, "agent teams", separate from the human department tree. Teams can nest, sibling names are unique, and an agent belongs to at most one team (none = unassigned). Teams only organise agents and grant nobody anything: who can see or message an agent is still decided by agent grants.

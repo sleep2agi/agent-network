@@ -140,6 +140,27 @@ GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 
 设计和取舍见 RFC-041。
 
+### 密钥传输闸门（管理员开关）
+
+把密钥从 Hub 转发给节点，走明文公网等于裸奔。闸门按节点**最近一次上报**的 `env_transport` 判，只看 `put`（`list` / `delete` 不带密钥）：
+
+| 节点上报的 transport | 判定 |
+|---|---|
+| `loopback` / `https` | 放行 |
+| `plain` | 拒，`secret_transport_plain` |
+| 未上报（`NULL`） | **默认放行**；显式打开 strict 才拒，`secret_transport_unknown` |
+
+```
+ANET_SECRET_TRANSPORT_GATE=off | log | enforce     # 默认 log：只记不拒
+ANET_SECRET_TRANSPORT_GATE_STRICT=1                # 默认关：连「未上报」一起拒
+```
+
+**为什么「未上报」默认放行**：2026-10-29 生产只读统计，373 个会话里 332 个（89%）从未上报过 transport。把「未知即拒」设成默认，等于打开 `enforce` 当天拦掉近九成节点 —— 那不是收紧，是一次不在计划内的下线。
+
+两个原因码要分开看：`secret_transport_plain` 要去查那台机器的网络链路；`secret_transport_unknown` 要做的是**让节点上报**。不同的人在不同的机器上做。
+
+`log` 模式记在 `GET /api/networks/{id}/env-transport-log`（网络 owner / admin），按小时聚合，回答的是「如果现在打开 enforce，哪几笔会被拒、原因是什么」。
+
 ## Agent 团队
 
 Agent（节点）有自己的一棵组织树「Agent 团队」，和人的部门树互不相关。团队可以多层，同一上级下不重名；一个 Agent 最多归一个团队，不归就是「未分配」。团队只用于组织 Agent，不给任何人新权限：谁能看、能对话哪个 Agent，仍按 Agent 授权。
