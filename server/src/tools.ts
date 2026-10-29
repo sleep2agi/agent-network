@@ -35,7 +35,7 @@ import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWr
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
 import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
 import { agentBatchScheduleInterval, agentCancelSchedule, agentCreateSchedule, agentGetSchedule, agentListSchedules, agentRunScheduleNow, agentScheduleRuns, agentUpdateSchedule } from "./schedule-agent.js";
-import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict, toolAllowlistVerdict } from "./node-permissions.js";
+import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, recordNodeToolCall, writeVerdict, type NodeIdentity, type Verdict, toolAllowlistVerdict } from "./node-permissions.js";
 import { countInFlightTasks } from "./node-in-flight-tasks.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
@@ -296,8 +296,15 @@ function guardNodePermissionTools(server: McpServer, tokenId: string, networkId:
         if (allowVerdict && nodeDecide(id, `mcp:${name}`, allowVerdict)) {
           return denied(allowVerdict.reason, `mcp:${name}`);
         }
+        // #2971 —— 账本要覆盖「到达工具的每一次调用」，不只是会被拦的那几类。
+        // 读类 / 需求类 / 排程类原来根本不到这里 ⇒ node_tool_calls 漏掉它们，
+        // 而 read 类里就有 list_network_secrets / list_providers / tail_node_logs 这些敏感读。
+        // 🔴 只计数、不判定：拦截语义零变化（这几类本来也不在这个闸里判）。
+        // always 类仍然不记：那是心跳（get_inbox / report_status），记进来只会把账本淹掉。
         const gated = cls !== "always" && cls !== "read" && cls !== "requirements" && cls !== "schedule";
-        if (gated) {
+        if (!gated) {
+          if (cls !== "always") recordNodeToolCall(id, `mcp:${name}`);
+        } else {
           const args = callArgs[0] && typeof callArgs[0] === "object" ? callArgs[0] as Record<string, unknown> : {};
           const verdict = verdictFor(id, name, args);
           if (nodeDecide(id, `mcp:${name}`, verdict)) return denied(verdict!.reason, `mcp:${name}`);
