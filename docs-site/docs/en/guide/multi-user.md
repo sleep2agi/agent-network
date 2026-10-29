@@ -143,3 +143,29 @@ Agents (nodes) have their own org tree, "agent teams", separate from the human d
 - [Accounts, Tokens & Roles](/en/guide/account-system)
 - [REST: Administration](/en/api/rest-admin)
 - [REST API reference](/en/api/rest)
+
+### Per-node allowlists: who it may reach, which tools it may call
+
+`readonly` / `restricted` are coarse modes. For finer control use the two allowlists. Both are **set by the owner** and take effect immediately, independent of `COMMHUB_NODE_PERMISSIONS` (their reasons `peer_not_allowed` / `tool_not_allowed` are explicit).
+
+```
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": ["alice", "n_xxx"]}   // alias or node_id
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": null}                  // clear
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": ["send_task", "requirements_comment"]}
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // clear
+```
+
+Same authorization as `permission-mode` (user token + node owner / network owner·admin / hub admin); audits are `node_peer_allowlist_changed` and `node_tool_allowlist_changed`.
+
+| Allowlist | Covers | Enforced in |
+|---|---|---|
+| `peers` | targets of `send_task` / `send_message` / `retry_task` / `reassign_task` / `cancel_task`; sending to its own alias / node_id is always allowed | `dispatchVerdict` |
+| `peers` (second rule) | a node with a non-empty `peers` list **cannot broadcast** — broadcast reaches arbitrary peers | `broadcastVerdict` |
+| `tools` | MCP tool names; anything else returns `tool_not_allowed` | MCP tool wrapper |
+
+**Two properties that must hold:**
+
+1. **`always`-class tools are always allowed** (`get_inbox`, `ack_inbox`, `send_reply`, `report_status`, …). Blocking them leaves a node unable to work *and* unable to report that it cannot — a fake-alive node that is harder to spot than an unrestricted one.
+2. **Default `NULL` = unrestricted.** With both allowlists empty, behaviour is identical to not having these fields.
+
+> `tools` currently covers MCP tools only; REST-route allowlisting is not provided yet.
