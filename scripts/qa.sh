@@ -173,11 +173,17 @@ if [[ "$_l1_bpar" =~ ^[0-9]+$ ]] && (( _l1_bpar > 1 )); then
     while (( $(jobs -rp | wc -l) >= _l1_bpar )); do wait -n 2>/dev/null || true; done
     (
       _pcmd="$(_qa_l1_build_cmd "$_pt")"
+      # #2800 —— 每套件的构建耗时必须自己报出来。
+      # 现在只知道分片总数是均的（29/29/29），却不知道哪几片重 —— 因为**没有任何一处
+      # 记录单个套件的构建时长**。没有这张表，「按耗时重新分片」就只能靠猜，
+      # 而猜错的代价是「某个套件从此不在任何分片里」（它和「跑过了」在报告里长得一样）。
+      _pb1=$SECONDS
       if eval "$_pcmd" >"/tmp/qa-l1-$_pt-build.log" 2>&1; then
         touch "/tmp/qa-l1-$_pt-prebuilt"
       else
         printf '%s\n' "$_pt" >> /tmp/qa-l1-prebuild.log
       fi
+      printf '[l1-build] %5ss  %s\n' "$(( SECONDS - _pb1 ))" "$_pt"
     ) &
   done
   wait
