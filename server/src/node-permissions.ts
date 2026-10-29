@@ -34,15 +34,22 @@ export type NodePermissionReason =
   | "tool_not_allowed"
   /** #2969 续 —— 令牌解析不到节点行（常见成因：节点改过名、令牌名没跟着改）。
    *  这类令牌**没有 nodes 行**，两张白名单都管不到它；先按「记录」模式跑，看有多少。 */
-  | "unbound_token";
+  | "unbound_token"
+  /** #2969 续 —— 主人在这个节点的 REST 白名单里没有列这条写路由。 */
+  | "rest_not_allowed";
 
 /** 显式模式的原因:不看开关,永远拒。 */
 // 白名单和 readonly/restricted 同类：**主人主动设的，设了就立刻生效**，不看开关。
-const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed", "tool_not_allowed"]);
+const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed", "tool_not_allowed", "rest_not_allowed"]);
 
 // #2969 —— 节点级对端白名单：JSON 数组（alias 或 node_id）；NULL = 不限制。
 // 只增不改：旧代码不读这一列；设为 NULL 时行为与现在完全一致。
 // #2969 后半 —— 接口白名单：JSON 数组（MCP 工具名）；NULL = 不限制。
+// #2969 续 —— REST 写接口白名单：JSON 数组（形如 "POST /api/task"）；NULL = 不限制。
+// 只对**节点令牌的写方法**生效（GET / SSE 永不经过它，否则节点会变聋）。
+try { db.exec("ALTER TABLE nodes ADD COLUMN rest_allowlist TEXT"); } catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
 try { db.exec("ALTER TABLE nodes ADD COLUMN tool_allowlist TEXT"); } catch (e: any) {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
@@ -151,7 +158,37 @@ export type NodeIdentity = {
   peerAllowlist: string[] | null;
   /** #2969 后半 —— 接口白名单（MCP 工具名）。null = 不限制。 */
   toolAllowlist: string[] | null;
+  /** #2969 续 —— REST 写接口白名单（形如 "POST /api/task"）。null = 不限制。 */
+  restAllowlist: string[] | null;
 };
+
+/**
+ * #2969 续 —— 路径归一化成路由标签。
+ *
+ * 为什么要归一化：白名单里存的是 `POST /api/task` 这种**形状稳定的标签**，
+ * 而实际请求带的是具体 id（`PUT /api/nodes/n_abc123/attrs`）。不归一化，
+ * 白名单就只能写死某台节点的 id —— 换一台就失效。
+ *
+ * 判据只看段数，不看语义：**看起来像 id 的段换成 `:id`**。
+ * 「像 id」= 含下划线/连字符/数字，或纯数字，或 UUID 形状。
+ * 宁可多换（把 `checklist` 这种词留下来是因为它不含数字也不含分隔符）。
+ */
+const ID_SEGMENT_RE = /^(?:[a-z]+_[A-Za-z0-9_-]+|[A-Za-z0-9]+-[A-Za-z0-9-]+|\d+|[0-9a-f]{8,})$/i;
+export function restRouteLabel(method: string, pathname: string): string {
+  const segs = pathname.split("/").filter(Boolean).map(seg => (ID_SEGMENT_RE.test(seg) ? ":id" : seg));
+  return `${method.toUpperCase()} /${segs.join("/")}`;
+}
+
+/**
+ * #2969 续 —— REST 写白名单判定。
+ *
+ * 只在**设置了清单**时才判（NULL = 不限制，与 MCP 白名单同构）；
+ * 两条 SSE 流永远不经过这里 —— 调用方只对写方法调用本函数。
+ */
+export function restAllowlistVerdict(id: NodeIdentity, label: string): Verdict {
+  if (!id.restAllowlist) return null;
+  return id.restAllowlist.includes(label) ? null : { reason: "rest_not_allowed", sample: label };
+}
 
 export function normalizePeerAllowlist(raw: unknown): string[] | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
@@ -190,6 +227,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       mode: "normal",
       peerAllowlist: null,
       toolAllowlist: null,
+      restAllowlist: null,
     };
   }
   if (!resolved.ok || resolved.networkId !== networkId) {
@@ -202,6 +240,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       mode: "normal",
       peerAllowlist: null,
       toolAllowlist: null,
+      restAllowlist: null,
     };
   }
   if (resolved.kind === "unregistered") {
@@ -214,10 +253,11 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       mode: "normal",
       peerAllowlist: null,
       toolAllowlist: null,
+      restAllowlist: null,
     };
   }
-  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null; peer_allowlist: string | null; tool_allowlist: string | null }>(
-    `SELECT owner_user_id, permission_mode, peer_allowlist, tool_allowlist FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
+  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null; peer_allowlist: string | null; tool_allowlist: string | null; rest_allowlist: string | null }>(
+    `SELECT owner_user_id, permission_mode, peer_allowlist, tool_allowlist, rest_allowlist FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
     resolved.nodeId, networkId,
   );
   return {
@@ -229,6 +269,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
     mode: normalizeMode(node?.permission_mode),
     peerAllowlist: normalizePeerAllowlist(node?.peer_allowlist),
     toolAllowlist: normalizeToolAllowlist(node?.tool_allowlist),
+    restAllowlist: normalizePeerAllowlist(node?.rest_allowlist),
   };
 }
 
@@ -260,6 +301,7 @@ const HINTS: Record<NodePermissionReason, string> = {
   peer_not_allowed: "this node is limited to an explicit peer allowlist; the target is not on it — ask the node's owner to add it, or clear the allowlist",
   tool_not_allowed: "this node is limited to an explicit tool allowlist; this tool is not on it — ask the node's owner to add it, or clear the allowlist",
   unbound_token: "this token does not resolve to a node (usually the node was renamed and the token was not); rename or bind the token, or issue a node-bound token",
+  rest_not_allowed: "this node is limited to an explicit REST write allowlist; this route is not on it — ask the node's owner to add it, or clear the allowlist",
 };
 
 export function nodePermissionDeniedBody(reason: NodePermissionReason, route: string): { ok: false; error: "node_permission_denied"; reason: NodePermissionReason; route: string; hint: string } {

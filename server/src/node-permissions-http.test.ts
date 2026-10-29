@@ -552,3 +552,66 @@ describe("未绑定令牌的写调用：默认只记录，不拦", () => {
     expect(nodeDecide(id, "mcp:send_task", { reason: "unbound_token", sample: "send_task" })).toBe(true);
   });
 });
+
+// #2969 续 —— REST 写接口白名单：唯一 choke point。
+//
+// 为什么必须在中央判一次：节点令牌的 REST 写面分散在两套判据里
+// （server.ts 的 restNodeDenied + requirements.ts 的 nodeTaskGate）。
+// 逐站点加会变成第三套规则，且漏掉任一处就是「装了一半的安全开关」——
+// 那比没有更危险，因为它会被当成已经收紧了。
+describe("#2969 REST 写白名单", () => {
+  test("路径归一化：11 条节点路由的标签逐字一致", async () => {
+    const { restRouteLabel } = await import("./node-permissions.js");
+    const cases: Array<[string, string, string]> = [
+      ["POST", "/api/task", "POST /api/task"],
+      ["POST", "/api/broadcast", "POST /api/broadcast"],
+      ["DELETE", "/api/nodes/n_abc123", "DELETE /api/nodes/:id"],
+      ["PUT", "/api/nodes/n_abc123/attrs", "PUT /api/nodes/:id/attrs"],
+      ["PUT", "/api/nodes/node_9f8e7d/avatar", "PUT /api/nodes/:id/avatar"],
+      ["PATCH", "/api/requirements/req_123", "PATCH /api/requirements/:id"],
+      ["PATCH", "/api/requirements/req_123/checklist/it_9", "PATCH /api/requirements/:id/checklist/:id"],
+      ["POST", "/api/requirements", "POST /api/requirements"],
+      ["POST", "/api/requirements/req_123/comments", "POST /api/requirements/:id/comments"],
+      ["PUT", "/api/nodes/tmwork_4ff6a3ee-f0b1-492c-abf6-132eea7b5e09/attrs", "PUT /api/nodes/:id/attrs"],
+    ];
+    for (const [m, p, want] of cases) expect(restRouteLabel(m, p)).toBe(want);
+  });
+
+  test("未设置清单 ⇒ 不判（不限制），行为与现在一致", async () => {
+    const { nodeIdentity, restAllowlistVerdict } = await import("./node-permissions.js");
+    const id = nodeIdentity(node.nN.tokenId, net)!;
+    expect(id.restAllowlist).toBeNull();
+    expect(restAllowlistVerdict(id, "POST /api/broadcast")).toBeNull();
+  });
+
+  test("设置了清单 ⇒ 清单外的写路由被拒，清单内的放行", async () => {
+    const { nodeIdentity, restAllowlistVerdict } = await import("./node-permissions.js");
+    db.run("UPDATE nodes SET rest_allowlist = ?1 WHERE node_id = ?2", [JSON.stringify(["POST /api/task"]), node.nN.id]);
+    const id = nodeIdentity(node.nN.tokenId, net)!;
+    expect(restAllowlistVerdict(id, "POST /api/task")).toBeNull();
+    expect(restAllowlistVerdict(id, "POST /api/broadcast")).toMatchObject({ reason: "rest_not_allowed" });
+    db.run("UPDATE nodes SET rest_allowlist = NULL WHERE node_id = ?1", [node.nN.id]);
+  });
+
+  test("HTTP：节点只有 POST /api/task 时，广播返回 403 rest_not_allowed", async () => {
+    db.run("UPDATE nodes SET rest_allowlist = ?1 WHERE node_id = ?2", [JSON.stringify(["POST /api/task"]), node.nN.id]);
+    const r = await call(node.nN.token, "POST", "/api/broadcast", { message: "should be blocked" });
+    expect(r.status).toBe(403);
+    expect(r.body.reason).toBe("rest_not_allowed");
+    db.run("UPDATE nodes SET rest_allowlist = NULL WHERE node_id = ?1", [node.nN.id]);
+  });
+
+  test("HTTP：用户令牌不受 REST 白名单影响（只对节点令牌生效）", async () => {
+    db.run("UPDATE nodes SET rest_allowlist = ?1 WHERE node_id = ?2", [JSON.stringify(["POST /api/task"]), node.nN.id]);
+    const r = await call(user.boss.token, "POST", `/api/requirements`, { name: `rest-allow-user-${stamp}`, network_id: net });
+    expect(r.status).toBe(201);
+    db.run("UPDATE nodes SET rest_allowlist = NULL WHERE node_id = ?1", [node.nN.id]);
+  });
+
+  test("GET 读回 rest_allowlist（null = 不限制）", async () => {
+    db.run("UPDATE nodes SET rest_allowlist = ?1 WHERE node_id = ?2", [JSON.stringify(["POST /api/task", "PATCH /api/requirements/:id"]), node.nN.id]);
+    const r = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}&node_id=${node.nN.id}`);
+    expect(r.body.nodes[0].rest_allowlist).toEqual(["POST /api/task", "PATCH /api/requirements/:id"]);
+    db.run("UPDATE nodes SET rest_allowlist = NULL WHERE node_id = ?1", [node.nN.id]);
+  });
+});

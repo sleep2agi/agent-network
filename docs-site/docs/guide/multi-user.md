@@ -148,6 +148,48 @@ GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 
 **按节点的明细（`nodes[].tool_calls`）**：设「只能用哪些工具」之前先看这台节点**实际用过哪些**，否则白名单只能凭想象写，第一次上线就拦掉在用的东西。它在两处比网络级合计更有用：① 一台从不越界但天天在用的节点，过去只从「被拒过的行」聚合，在报表里根本不存在，而它恰恰最该出现在名单里；② `nodes[]` 按 `tool_calls_total` 降序，用得最多的排最前。
 
+### REST 写接口白名单：只允许这些写路由
+
+节点令牌除了 MCP 工具，还能直接打 REST 写接口（派活、广播、改需求、改节点属性…）。
+`tool_allowlist` 管不到这一面，所以另有 `rest_allowlist`：
+
+```
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": ["POST /api/task", "PATCH /api/requirements/:id"]}
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": null}     // 清空 = 不限制
+```
+
+`GET /api/nodes` 的每行带 `rest_allowlist`（`null` = 不限制）。清空只能传 `null`，`[]` 会被拒。
+
+**判定发生在请求入口的唯一 choke point**，因为节点令牌的 REST 写面分散在两套既有判据里
+（`server.ts` 的 `restNodeDenied` 与 `requirements.ts` 的 `nodeTaskGate`）。逐路由各加一次会形成
+第三套规则，而且漏掉任一处就是「装了一半的安全开关」——那比没有更危险。
+
+三条边界：
+
+| 边界 | 说明 |
+|---|---|
+| 只对**节点令牌** | 用户令牌 / daemon 令牌不受影响 |
+| 只对**写方法** | `GET` / `HEAD` / `SSE` 永不经过它——挡掉 SSE，节点会变聋（收不到派活），表现为静默失联而不是报错 |
+| 只在**设置时**生效 | 默认 `NULL` = 不限制，与 MCP 工具白名单同构 |
+
+拒绝时返回 `node_permission_denied` / `reason=rest_not_allowed`，正文里的 `route` 是**实际算出的标签**，
+照着加进清单即可。标签是归一化的（`/api/nodes/n_abc123/attrs` → `PUT /api/nodes/:id/attrs`），
+所以换一台节点不用改清单。
+
+节点目前能被拦到的 REST 写路由一共 9 条（另有 2 条 SSE 不在写方法内）：
+
+```
+POST   /api/task
+POST   /api/broadcast
+DELETE /api/nodes/:id
+PUT    /api/nodes/:id/attrs
+PUT    /api/nodes/:id/avatar
+POST   /api/requirements
+POST   /api/requirements/:id/comments
+PATCH  /api/requirements/:id
+PATCH  /api/requirements/:id/checklist/:id
+```
+
 ### 密钥传输闸门（管理员开关）
 
 把密钥从 Hub 转发给节点，走明文公网等于裸奔。闸门按节点**最近一次上报**的 `env_transport` 判，只看 `put`（`list` / `delete` 不带密钥）：
