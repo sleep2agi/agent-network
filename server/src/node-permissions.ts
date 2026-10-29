@@ -31,7 +31,10 @@ export type NodePermissionReason =
   /** #2969 —— 主人给这个节点设了对端白名单，目标不在名单里。 */
   | "peer_not_allowed"
   /** #2969 后半 —— 主人在这个节点的接口白名单里没有列这个工具/路由。 */
-  | "tool_not_allowed";
+  | "tool_not_allowed"
+  /** #2969 续 —— 令牌解析不到节点行（常见成因：节点改过名、令牌名没跟着改）。
+   *  这类令牌**没有 nodes 行**，两张白名单都管不到它；先按「记录」模式跑，看有多少。 */
+  | "unbound_token";
 
 /** 显式模式的原因:不看开关,永远拒。 */
 // 白名单和 readonly/restricted 同类：**主人主动设的，设了就立刻生效**，不看开关。
@@ -256,6 +259,7 @@ const HINTS: Record<NodePermissionReason, string> = {
   owner_unknown: "this node's owner is unknown; recreate the node token from the owner's account",
   peer_not_allowed: "this node is limited to an explicit peer allowlist; the target is not on it — ask the node's owner to add it, or clear the allowlist",
   tool_not_allowed: "this node is limited to an explicit tool allowlist; this tool is not on it — ask the node's owner to add it, or clear the allowlist",
+  unbound_token: "this token does not resolve to a node (usually the node was renamed and the token was not); rename or bind the token, or issue a node-bound token",
 };
 
 export function nodePermissionDeniedBody(reason: NodePermissionReason, route: string): { ok: false; error: "node_permission_denied"; reason: NodePermissionReason; route: string; hint: string } {

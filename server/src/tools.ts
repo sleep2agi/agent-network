@@ -306,7 +306,11 @@ function guardNodePermissionTools(server: McpServer, tokenId: string, networkId:
           if (cls !== "always") recordNodeToolCall(id, `mcp:${name}`);
         } else {
           const args = callArgs[0] && typeof callArgs[0] === "object" ? callArgs[0] as Record<string, unknown> : {};
-          const verdict = verdictFor(id, name, args);
+          // #2969 续 —— 令牌解析不到节点行时（nodeId 为 null），两张白名单都管不到它。
+          // 先按「记录」模式跑：`unbound_token` **不在 MODE_REASONS 里**，
+          // 所以 log（默认）只记账、不改变行为；只有显式 enforce 才会拒。
+          // 这样「要不要强制要求绑定令牌」这个决定，将来自有数据可依据。
+          const verdict = id.nodeId ? verdictFor(id, name, args) : { reason: "unbound_token" as const, sample: name };
           if (nodeDecide(id, `mcp:${name}`, verdict)) return denied(verdict!.reason, `mcp:${name}`);
         }
       }
