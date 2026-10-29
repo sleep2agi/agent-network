@@ -230,6 +230,9 @@ check_feature "busy elapsed split"                "busyElapsedNote"             
 # 0.9.0-preview.201 —— #2969 后半：接口白名单（tool_allowlist / tool_not_allowed）。
 check_feature "tool allowlist"                    "tool_not_allowed"                          "0.9.0-preview.201"
 
+# 0.9.0-preview.202 —— #2721 假信号：启动预热窗内的 tick gap 不算停顿。
+check_feature "stall boot warmup"                 "COMMHUB_STALL_WARMUP_MS"                   "0.9.0-preview.202"
+
 # 0.9.0-preview.200 —— #2969 节点级对端白名单（peer_allowlist / peer_not_allowed）。
 check_feature "peer allowlist"                    "peer_not_allowed"                          "0.9.0-preview.200"
 
