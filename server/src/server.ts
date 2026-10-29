@@ -5361,11 +5361,17 @@ return Bun.serve({
       const transportByKey = new Map<string, string | null>();
       const aliasTransport = new Map<string, string | null>();
       if (wanted.length) {
-        const ph = wanted.map((_, i) => `?${i + 1}`).join(",");
+        // 🔴 编号参数不能复用：`?1..?n` 出现两次，而实参给了 2n 个 ——
+        // SQLite 只认得 n 个绑定位置，多出来的直接抛错，整条 GET /api/nodes 变 500。
+        // （#3214 首版就这么写的；CI 上三条互不相干的 workflow 同时红，
+        //   共同点只有一个：它们都要先 `GET /api/nodes` 把 alias 解析成 node_id。）
+        // 正确做法是第二组参数从 n+1 开始编号。
         const ids = wanted.map((r) => String(r.node_id));
+        const phA = ids.map((_, i) => `?${i + 1}`).join(",");
+        const phB = ids.map((_, i) => `?${ids.length + i + 1}`).join(",");
         for (const row of db.all<{ node_id: string | null; alias: string | null; network_id: string | null; env_transport: string | null }>(
           `SELECT node_id, alias, network_id, env_transport FROM sessions
-            WHERE node_id IN (${ph}) OR alias IN (${ph})
+            WHERE node_id IN (${phA}) OR alias IN (${phB})
             ORDER BY updated_at DESC`,
           ...ids, ...ids,
         )) {
