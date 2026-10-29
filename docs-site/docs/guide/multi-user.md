@@ -102,6 +102,32 @@ PUT /api/nodes/{node_id}/permission-mode   {"mode": "normal" | "readonly" | "res
 {"ok": false, "error": "node_permission_denied", "reason": "mode_readonly", "route": "PATCH /api/requirements/:id", "hint": "…"}
 ```
 
+### 节点级白名单：只能联系谁、只能用哪些工具
+
+`readonly` / `restricted` 是**粗粒度**模式。要更细，用两张白名单——它们都是**主人设的**，设了就立刻生效，与 `COMMHUB_NODE_PERMISSIONS` 无关（原因码 `peer_not_allowed` / `tool_not_allowed` 属于显式原因）。
+
+```
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": ["alice", "n_xxx"]}   // alias 或 node_id
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": null}                  // 清空
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": ["send_task", "requirements_comment"]}
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // 清空
+```
+
+授权口径与 `permission-mode` 相同（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员），分别记审计 `node_peer_allowlist_changed` / `node_tool_allowlist_changed`。
+
+| 白名单 | 管什么 | 判在哪 |
+|---|---|---|
+| `peers` | `send_task` / `send_message` / `retry_task` / `reassign_task` / `cancel_task` 的**目标**必须在名单里；发给自己的 alias / node_id 永远允许 | `dispatchVerdict` |
+| `peers`（另一条） | 设了 `peers` 的节点**不能广播**——广播的收件人是任意对端，与白名单语义直接冲突 | `broadcastVerdict` |
+| `tools` | MCP 工具名；名单外返回 `tool_not_allowed` | MCP 工具包装层 |
+
+**两条不能省的性质**：
+
+1. **`always` 类工具永远放行**（`get_inbox` / `ack_inbox` / `send_reply` / `report_status` 等）。挡掉它们，节点既不能干活、也不能报告自己干不了——会变成比「没受限」更隐蔽的假活节点。
+2. **默认 `NULL` = 不限制**。两张白名单为空时，行为与没有这两个字段完全一致。
+
+> 目前 `tools` 只覆盖 MCP 工具；REST 路由的白名单尚未提供。
+
 **报表**：网络 owner / admin（用户令牌）可以看过去一段时间每个节点「本来会被拦」的次数，默认 7 天：
 
 ```
