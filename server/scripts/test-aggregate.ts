@@ -175,7 +175,10 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
     const tail = output.split("\n").slice(-60).join("\n");
     console.error(`\nFAIL_SUITE ${file} exit=${exited.code} signal=${exited.signal} timeout=${timedOut}\n${tail}`);
   }
-  console.log(`TEST_FILE_RESULT\t${file}\tpass=${counts.pass}\tfail=${counts.fail}\tskip=${counts.skip}\texpects=${counts.expects}\texit=${exited.code}\tsignal=${exited.signal ?? "none"}\ttimeout=${timedOut}`);
+  // #2800 —— 把已经算出来的 wallMs 打出来：没有它就说不清「聚合的 5–6 分钟花在哪些文件上」，
+  // 只能靠猜（我先前就猜错了：以为瓶颈是 strace，实测只占 2.5 分钟）。
+  // 追加在行尾，是为了不破坏按前缀 grep 的消费者（test638/639 都用 `grep -F ...pass=..\tfail=0`）。
+  console.log(`TEST_FILE_RESULT\t${file}\tpass=${counts.pass}\tfail=${counts.fail}\tskip=${counts.skip}\texpects=${counts.expects}\texit=${exited.code}\tsignal=${exited.signal ?? "none"}\ttimeout=${timedOut}\twall_ms=${Date.now() - started}`);
   return { file, dbPath, ...counts, exitCode: exited.code, signal: exited.signal, timedOut, wallMs: Date.now() - started };
 }
 
