@@ -151,8 +151,8 @@ cp /tmp/server-tools.ts server/src/tools.ts
 
 cp server/src/server.ts /tmp/server-server.ts
 bun /harness/mutate.ts server/src/server.ts \
-  'normalizeMetaJson(stampTaskAuthOrigin(mergedMeta, authOrigin))' \
-  'normalizeMetaJson(mergedMeta)'
+  'normalizeMetaJson(stampTaskAuthOrigin(metaWithParent, authOrigin))' \
+  'normalizeMetaJson(metaWithParent)'
 export COMMHUB_DB=/tmp/test584-mutation-rest.db
 expect_red rest-node-cannot-forge-user-origin bun test server/src/task-auth-origin-http.test.ts
 cp /tmp/server-server.ts server/src/server.ts
