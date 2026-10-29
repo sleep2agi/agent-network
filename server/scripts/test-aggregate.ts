@@ -125,7 +125,12 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-async function runFile(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
+// #2800 —— 并行下观察到过一次「文件 exit=0 但没输出任何 summary」（CI 上 create-node.test.ts，
+// pass=0 fail=0 skip=0），本地串行/小批并发都复现不出来。那种情况下 validSummary=false，
+// 整个聚合会被判 bad=true 而红 —— 但它的成因是「输出丢了」，不是「测试失败」。
+// 处置：空 summary 且 exit=0 时，**串行重跑一次**（并发池里也只占一个槽），仍空才判坏。
+// 这样既不掩盖真失败（真失败会带 fail>0 或 exit!=0），也不让一次输出抖动毁掉整条 CI。
+async function runFileOnce(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
   const suiteRoot = join(runRoot, slugFor(file));
   const dbPath = join(suiteRoot, "commhub.db");
   for (const dir of [join(suiteRoot, "home"), join(suiteRoot, "tmp"), join(suiteRoot, "uploads")]) {
@@ -182,6 +187,14 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
   // 追加在行尾，是为了不破坏按前缀 grep 的消费者（test638/639 都用 `grep -F ...pass=..\tfail=0`）。
   console.log(`TEST_FILE_RESULT\t${file}\tpass=${counts.pass}\tfail=${counts.fail}\tskip=${counts.skip}\texpects=${counts.expects}\texit=${exited.code}\tsignal=${exited.signal ?? "none"}\ttimeout=${timedOut}\twall_ms=${Date.now() - started}`);
   return { file, dbPath, ...counts, exitCode: exited.code, signal: exited.signal, timedOut, wallMs: Date.now() - started };
+}
+
+async function runFile(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
+  const first = await runFileOnce(file, runRoot, timeoutMs, verbose);
+  const summaryEmpty = first.pass + first.fail + first.skip === 0;
+  if (!summaryEmpty || first.exitCode !== 0 || first.timedOut || first.signal !== null) return first;
+  console.error(`RETRY_EMPTY_SUMMARY ${file} exit=0 but no counts — rerunning serially once`);
+  return await runFileOnce(file, runRoot, timeoutMs, verbose);
 }
 
 async function main() {
