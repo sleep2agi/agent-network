@@ -291,13 +291,13 @@ function guardNodePermissionTools(server: McpServer, tokenId: string, networkId:
         // #2969 后半 —— 接口白名单先判（always 类豁免在函数内部处理）。
         // 放在模式判定之前：主人明确列了「只能用这几个」，优先于模式带来的放宽/收紧。
         const allowVerdict = toolAllowlistVerdict(id, name, cls === "always");
-        if (nodeDecide(id, `mcp:${name}`, allowVerdict)) {
-          return denied(allowVerdict!.reason, `mcp:${name}`);
+        // 只在真的要被拒时才进闸：`null` 时不写账、不改任何既有行为
+        // （读类工具原来完全不碰闸，这里也不该因为"顺手记一笔"而改变它们的路径）。
+        if (allowVerdict && nodeDecide(id, `mcp:${name}`, allowVerdict)) {
+          return denied(allowVerdict.reason, `mcp:${name}`);
         }
         const gated = cls !== "always" && cls !== "read" && cls !== "requirements" && cls !== "schedule";
-        if (!gated) {
-          recordNodeToolCall(id, `mcp:${name}`);
-        } else {
+        if (gated) {
           const args = callArgs[0] && typeof callArgs[0] === "object" ? callArgs[0] as Record<string, unknown> : {};
           const verdict = verdictFor(id, name, args);
           if (nodeDecide(id, `mcp:${name}`, verdict)) return denied(verdict!.reason, `mcp:${name}`);
