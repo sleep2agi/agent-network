@@ -17,7 +17,7 @@ process.env.COMMHUB_DB ||= join(DIR, "hub.db");
 let mod: typeof import("./node-permissions.js");
 beforeAll(async () => { mod = await import("./node-permissions.js"); });
 
-const id = (peerAllowlist: string[] | null, mode: "normal" | "readonly" | "restricted" = "normal") => ({
+const id = (peerAllowlist: string[] | null, mode: "normal" | "readonly" | "restricted" = "normal", toolAllowlist: string[] | null = null) => ({
   networkId: "net_test",
   nodeId: "n_self",
   logKey: "n_self",
@@ -25,6 +25,7 @@ const id = (peerAllowlist: string[] | null, mode: "normal" | "readonly" | "restr
   ownerUserId: "u_owner",
   mode,
   peerAllowlist,
+  toolAllowlist,
 });
 
 describe("#2969 对端白名单", () => {
@@ -71,6 +72,40 @@ describe("#2969 对端白名单", () => {
     process.env.COMMHUB_NODE_PERMISSIONS = "off";
     try {
       expect(mod.nodeDecide(id(null), "mcp:projects_create", { reason: "human_only" })).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.COMMHUB_NODE_PERMISSIONS;
+      else process.env.COMMHUB_NODE_PERMISSIONS = saved;
+    }
+  });
+});
+
+// #2969 后半 —— 接口白名单。
+describe("#2969 接口白名单", () => {
+  test("null ⇒ 不限制（与今天一致）", () => {
+    expect(mod.toolAllowlistVerdict(id(null, "normal", null), "send_task", false)).toBeNull();
+  });
+
+  test("名单内的工具 ⇒ 放行", () => {
+    expect(mod.toolAllowlistVerdict(id(null, "normal", ["send_task"]), "send_task", false)).toBeNull();
+  });
+
+  test("名单外的工具 ⇒ tool_not_allowed", () => {
+    expect(mod.toolAllowlistVerdict(id(null, "normal", ["send_task"]), "broadcast", false))
+      .toEqual({ reason: "tool_not_allowed", sample: "broadcast" });
+  });
+
+  test("always 类永远放行 —— 否则节点连回报都做不了", () => {
+    const listed = id(null, "normal", ["send_task"]);
+    for (const t of ["get_inbox", "ack_inbox", "send_reply", "report_status"]) {
+      expect(mod.toolAllowlistVerdict(listed, t, true)).toBeNull();
+    }
+  });
+
+  test("它是显式原因：开关 off 也照拒", () => {
+    const saved = process.env.COMMHUB_NODE_PERMISSIONS;
+    process.env.COMMHUB_NODE_PERMISSIONS = "off";
+    try {
+      expect(mod.nodeDecide(id(null, "normal", ["send_task"]), "mcp:broadcast", { reason: "tool_not_allowed" })).toBe(true);
     } finally {
       if (saved === undefined) delete process.env.COMMHUB_NODE_PERMISSIONS;
       else process.env.COMMHUB_NODE_PERMISSIONS = saved;

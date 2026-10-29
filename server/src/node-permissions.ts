@@ -29,14 +29,20 @@ export type NodePermissionReason =
   | "human_only"
   | "owner_unknown"
   /** #2969 —— 主人给这个节点设了对端白名单，目标不在名单里。 */
-  | "peer_not_allowed";
+  | "peer_not_allowed"
+  /** #2969 后半 —— 主人在这个节点的接口白名单里没有列这个工具/路由。 */
+  | "tool_not_allowed";
 
 /** 显式模式的原因:不看开关,永远拒。 */
 // 白名单和 readonly/restricted 同类：**主人主动设的，设了就立刻生效**，不看开关。
-const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed"]);
+const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed", "tool_not_allowed"]);
 
 // #2969 —— 节点级对端白名单：JSON 数组（alias 或 node_id）；NULL = 不限制。
 // 只增不改：旧代码不读这一列；设为 NULL 时行为与现在完全一致。
+// #2969 后半 —— 接口白名单：JSON 数组（MCP 工具名）；NULL = 不限制。
+try { db.exec("ALTER TABLE nodes ADD COLUMN tool_allowlist TEXT"); } catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
 try { db.exec("ALTER TABLE nodes ADD COLUMN peer_allowlist TEXT"); } catch (e: any) {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
@@ -140,6 +146,8 @@ export type NodeIdentity = {
   mode: NodePermissionMode;
   /** #2969 —— 对端白名单（alias / node_id 都算命中）。null = 不限制。 */
   peerAllowlist: string[] | null;
+  /** #2969 后半 —— 接口白名单（MCP 工具名）。null = 不限制。 */
+  toolAllowlist: string[] | null;
 };
 
 function normalizePeerAllowlist(raw: unknown): string[] | null {
@@ -151,6 +159,8 @@ function normalizePeerAllowlist(raw: unknown): string[] | null {
     return out.length ? out : null;
   } catch { return null; }
 }
+
+const normalizeToolAllowlist = normalizePeerAllowlist;
 
 function normalizeMode(raw: unknown): NodePermissionMode {
   return raw === "readonly" || raw === "restricted" ? raw : "normal";
@@ -176,6 +186,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       ownerUserId: row.user_id,
       mode: "normal",
       peerAllowlist: null,
+      toolAllowlist: null,
     };
   }
   if (!resolved.ok || resolved.networkId !== networkId) {
@@ -187,6 +198,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       ownerUserId: row.user_id,
       mode: "normal",
       peerAllowlist: null,
+      toolAllowlist: null,
     };
   }
   if (resolved.kind === "unregistered") {
@@ -198,10 +210,11 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       ownerUserId: row.user_id,
       mode: "normal",
       peerAllowlist: null,
+      toolAllowlist: null,
     };
   }
-  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null; peer_allowlist: string | null }>(
-    `SELECT owner_user_id, permission_mode, peer_allowlist FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
+  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null; peer_allowlist: string | null; tool_allowlist: string | null }>(
+    `SELECT owner_user_id, permission_mode, peer_allowlist, tool_allowlist FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
     resolved.nodeId, networkId,
   );
   return {
@@ -212,6 +225,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
     ownerUserId: node?.owner_user_id || row.user_id || null,
     mode: normalizeMode(node?.permission_mode),
     peerAllowlist: normalizePeerAllowlist(node?.peer_allowlist),
+    toolAllowlist: normalizeToolAllowlist(node?.tool_allowlist),
   };
 }
 
@@ -241,6 +255,7 @@ const HINTS: Record<NodePermissionReason, string> = {
   human_only: "only people can do this (members, projects, permissions, providers, secrets, other nodes); use a user token",
   owner_unknown: "this node's owner is unknown; recreate the node token from the owner's account",
   peer_not_allowed: "this node is limited to an explicit peer allowlist; the target is not on it — ask the node's owner to add it, or clear the allowlist",
+  tool_not_allowed: "this node is limited to an explicit tool allowlist; this tool is not on it — ask the node's owner to add it, or clear the allowlist",
 };
 
 export function nodePermissionDeniedBody(reason: NodePermissionReason, route: string): { ok: false; error: "node_permission_denied"; reason: NodePermissionReason; route: string; hint: string } {
@@ -312,6 +327,18 @@ export function dispatchVerdict(id: NodeIdentity, target: AgentRef): Verdict {
     return { reason: id.mode === "restricted" ? "mode_restricted_not_assigned" : "agent_not_granted_to_owner", sample };
   }
   return null;
+}
+
+/**
+ * #2969 后半 —— 接口白名单判定。
+ *
+ * 🔴 `always` 类**永远放行**：get_inbox / ack_inbox / send_reply / report_status 这些是节点
+ * 自己的生命周期协议。把它们也挡掉，节点既不能干活、也不能报告自己干不了 —— 那会变成
+ * 一个比"没受限"更隐蔽的假活节点。
+ */
+export function toolAllowlistVerdict(id: NodeIdentity, tool: string, alwaysClass: boolean): Verdict {
+  if (!id.toolAllowlist || alwaysClass) return null;
+  return id.toolAllowlist.includes(tool) ? null : { reason: "tool_not_allowed", sample: tool };
 }
 
 /** 广播:只读 / 受限都不行(会发给没派给它、也未必授权的 Agent)。 */
