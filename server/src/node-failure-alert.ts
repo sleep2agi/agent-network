@@ -27,7 +27,13 @@ const PATTERNS: Array<{ category: Category; re: RegExp; label: string; hint: str
     hint: "在节点所在机器补上该变量后重启节点（anet node start <alias>）" },
   { category: "binary_missing", re: /ENOENT|No such file or directory/i, label: "二进制/文件缺失",
     hint: "检查该节点的运行时是否安装完整，必要时重装后重启节点" },
-  { category: "login_required", re: /login required|Unauthorized|\b401\b/i, label: "凭据/登录失效",
+  // #2964 —— 真实的登录失效文案长这样（agent-node/src/runtime/codex-health.ts 生成）：
+  //   "model login expired: this node's CODEX_HOME (/…/codex-home) needs a fresh login — log in again there: …"
+  // 原来的 /login required|Unauthorized|\b401\b/ **匹配不到这一句**：它写的是
+  // "needs a fresh login"，不是 "login required"。实测 2026-10-29 一个凭据过期的节点
+  // 启动后每轮都以这句话失败，而 #2840 的告警一条都不会发 —— 分类器看不见它。
+  // 补两种状态词（expired / revoked）与那句固定结尾，仍然只认登录态，不扩大到泛化的 auth 字样。
+  { category: "login_required", re: /login required|Unauthorized|\b401\b|model login (?:expired|revoked)|needs a fresh login/i, label: "凭据/登录失效",
     hint: "重新登录该节点（anet node codex login-status 可先自检）" },
   // #2891 —— 额度耗尽：与前三类同性质（不会自愈、必须人处理），但**必须与「限流」分开**。
   //
