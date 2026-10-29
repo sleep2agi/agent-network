@@ -342,6 +342,9 @@ on:
     - cron: '0 19 * * *'
   # 需要时手动跑一次全量（发版前怀疑主干状态、或夜间那次失败后要复现）
   workflow_dispatch:
+
+# 并发：同一 PR 反复 push 时取消上一轮还在排队的运行（主干不取消 —— 那是发布/部署门）。
+concurrency:
   group: qa-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
