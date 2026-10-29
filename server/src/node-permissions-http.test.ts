@@ -292,6 +292,23 @@ describe("#2823 调用面计数（node_tool_calls）", () => {
     expect(denyRows(node.nN.id)).toBe(before.denials);
   });
 
+  // #2971 —— 读类 / 需求类 / 排程类原来根本不到闸里，账本因此完全看不到它们。
+  // 而敏感读恰恰在这一类里（list_network_secrets / list_providers / tail_node_logs）。
+  // 修法只有一个方向：**记账，但不判定** —— 拦截语义必须零变化。
+  test("#2971 读类工具会被计数，且行为不变（不被拦、不进拒绝日志）", async () => {
+    const before = { calls: callHits(node.nN.id, "mcp:list_providers"), denials: denyRows(node.nN.id) };
+    const r = await mcp(node.nN.token, "list_providers", { network_id: net });
+    expect(r.error).not.toBe("node_permission_denied");
+    expect(callHits(node.nN.id, "mcp:list_providers")).toBe(before.calls + 1);
+    expect(denyRows(node.nN.id)).toBe(before.denials);
+  });
+
+  test("#2971 always 类不进账本（心跳会把账本淹掉）", async () => {
+    const before = toolCallTotal(node.nN.id);
+    await mcp(node.nN.token, "get_inbox", { alias: node.nN.alias });
+    expect(toolCallTotal(node.nN.id)).toBe(before);
+  });
+
   test("本来会被拒的调用两个表都记（分子与分母同源）", async () => {
     const beforeCalls = callHits(node.nN.id, "mcp:projects_create");
     const beforeDeny = hitsOf(node.nN.id, "mcp:projects_create", "human_only");
