@@ -131,3 +131,33 @@ describe("applyNoProgressBackoff (#2622)", () => {
     expect(reload(id).backoff_effective_seconds).toBeNull();
   });
 });
+
+// #2935 —— 「目标根本不会接活」的**失败**码（node_degraded / target_node_not_found）
+// 也必须走这条链。生产近 7 天：node_degraded 2391（TMA云盘鲸 1388 / TMA云鲸 981）、
+// target_node_not_found 1166 —— 全部是 `every=180` 的排程在目标永久不可用时按原速烧。
+describe("#2935 目标不会接活的失败码也退避", () => {
+  test("连续 node_degraded 失败 ⇒ 间隔放大到 2 小时上限（而不是失败退避的 1 小时）", () => {
+    const id = seedSchedule(180);
+    // 窗口是 10 条；指数封顶 5 ⇒ 180s 基底最多到 180*32 = 5760s。
+    // 注意：「cap 7200」对 180s 基底其实够不到 —— 真正生效的是指数封顶那一条。
+    for (let i = 0; i < 10; i++) addRun(id, "failed", "node_degraded");
+    const r = applyNoProgressBackoff(id)!;
+    expect(r.cause).toBe("node_degraded");
+    expect(r.effective_seconds).toBe(5760);
+    expect(r.effective_seconds!).toBeGreaterThan(3600); // 严格大于失败退避的 1 小时上限
+  });
+
+  test("连续 target_node_not_found 同样走 2 小时上限", () => {
+    const id = seedSchedule(180);
+    for (let i = 0; i < 10; i++) addRun(id, "failed", "target_node_not_found");
+    const r = applyNoProgressBackoff(id)!;
+    expect(r.cause).toBe("target_node_not_found");
+    expect(r.effective_seconds).toBe(5760);
+  });
+
+  test("普通 task_failed 不被本链接管（仍由失败退避负责）", () => {
+    const id = seedSchedule(180);
+    for (let i = 0; i < 6; i++) addRun(id, "failed", "task_failed");
+    expect(applyNoProgressBackoff(id)).toBeNull();
+  });
+});
