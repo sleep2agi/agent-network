@@ -107,7 +107,7 @@ import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
-import { normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
+import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
@@ -3104,17 +3104,21 @@ return Bun.serve({
            FROM node_permission_log WHERE network_id = ?1 AND hour >= ?2
           GROUP BY node_id, route, reason ORDER BY node_id, route, reason`,
         networkId, sinceHour);
-      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean; unbound_token_name?: string | null }>();
+      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean; unbound_token_name?: string | null; enforce_impact: Record<string, number> }>();
       for (const r of rows) {
         let entry = byNode.get(r.node_id);
         if (!entry) {
           const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", r.node_id);
-          entry = { node_id: r.node_id, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [] };
+          entry = { node_id: r.node_id, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [], enforce_impact: {} };
           byNode.set(r.node_id, entry);
         }
         const hits = Number(r.hits);
         entry.total += hits;
         entry.by_reason[r.reason] = (entry.by_reason[r.reason] ?? 0) + hits;
+        // #2970 判据④ 演练发现：这些行数**不等于**「打开 enforce 行为会变」的次数。
+        // 按 enforceImpactOf 分三类，让管理员看得出哪些是真增量、哪些本来就被拦着。
+        const impact = enforceImpactOf(r.reason as any);
+        entry.enforce_impact[impact] = (entry.enforce_impact[impact] ?? 0) + hits;
         entry.routes.push({ route: r.route, reason: r.reason, hits, sample: r.sample, last_hour: r.last_hour });
       }
       // #2969 —— 按节点的工具调用明细。
@@ -3140,7 +3144,7 @@ return Bun.serve({
       for (const nodeId of callsByNode.keys()) {
         if (byNode.has(nodeId)) continue;
         const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", nodeId);
-        byNode.set(nodeId, { node_id: nodeId, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [] });
+        byNode.set(nodeId, { node_id: nodeId, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [], enforce_impact: {} });
       }
       for (const entry of byNode.values()) {
         const list = callsByNode.get(entry.node_id) ?? [];
@@ -3173,10 +3177,17 @@ return Bun.serve({
       );
       const toolCalls = callRows.map((r) => ({ tool: r.tool, hits: Number(r.hits) }));
       const deniedTotal = nodes.reduce((n, e) => n + e.total, 0);
+      // 顶层汇总：切 enforce 的真实影响面是多少（explicit / likely_already_blocked 都不算）
+      const enforceImpact: Record<string, number> = {};
+      for (const e of nodes) {
+        for (const [k, v] of Object.entries(e.enforce_impact)) enforceImpact[k] = (enforceImpact[k] ?? 0) + v;
+      }
       const callsTotal = toolCalls.reduce((n, e) => n + e.hits, 0);
       return withCors(req, Response.json({
         ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(),
         total: deniedTotal,
+        // changes_behavior 才是「打开 enforce 会改变行为」的次数；另外两类都不是增量。
+        enforce_impact: enforceImpact,
         nodes,
         tool_calls: { total: callsTotal, by_tool: toolCalls },
       }));

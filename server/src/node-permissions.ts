@@ -464,3 +464,31 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   projects_create: "human_only", projects_update: "human_only", review_skill: "human_only",
   read_opencode_catalog: "human_only", get_opencode_catalog: "human_only",
 };
+
+/**
+ * #2970 判据④ 演练发现的口径问题 —— `node_permission_log` 的行数**不等于**
+ * 「打开 enforce 后行为会改变多少次」。
+ *
+ * 演练现场（`.208`，独立实例）：
+ *
+ *     log 模式  projects_create → user_token_required       （调用方**也是被拒的**）
+ *               node_permission_log += 1（reason=human_only）
+ *     enforce   projects_create → node_permission_denied / human_only
+ *
+ * 也就是说：`projects_create` 在 log 模式下就已经被处理函数自己的「只有人能做的操作」
+ * 检查挡住了。**这一条计入 would-be denial，但它并不是 enforce 的增量。**
+ *
+ * 所以把原因码分三类，报表按类求和 —— 否则切 enforce 时拿到的是一份高估的影响面：
+ *
+ *   explicit             显式原因（MODE_REASONS）：**永远拒**，与开关无关 ⇒ 不计入影响面
+ *   likely_already_blocked  human_only：多数写路由另有一道「只有人能操作」的检查，
+ *                         log 模式下调用方本来就被拒 ⇒ 通常不是增量（逐路由不同，标而不减）
+ *   changes_behavior      只有 enforce 才会拒的理由 ⇒ **这才是真切会变的**
+ */
+export type EnforceImpact = "explicit" | "likely_already_blocked" | "changes_behavior";
+
+export function enforceImpactOf(reason: NodePermissionReason): EnforceImpact {
+  if (MODE_REASONS.has(reason)) return "explicit";
+  if (reason === "human_only") return "likely_already_blocked";
+  return "changes_behavior";
+}

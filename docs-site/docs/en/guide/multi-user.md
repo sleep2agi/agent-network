@@ -128,6 +128,19 @@ The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, p
 
 See RFC-041 for the design and trade-offs.
 
+**`enforce_impact` — how much switching to enforce actually changes** (a measurement gap found by the `#2970` drill):
+
+Row counts in `node_permission_log` are "this layer would have refused", which is **not** the same as "behaviour changes once enforce is on". In the drill, `projects_create` was already refused in log mode by the handler's own humans-only check (`user_token_required`), and yet still logged a `human_only` row. So the report buckets reasons in three layers:
+
+| Layer | Meaning | Changes under enforce? |
+|---|---|---|
+| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` | **No** — independent of the switch, always refused |
+| `likely_already_blocked` | `human_only` | most write routes carry their own humans-only check, so the caller was already refused — usually not a delta |
+| `changes_behavior` | `beyond_owner_visibility` / `agent_not_granted_to_owner` / `owner_unknown` / `unbound_token` | **Yes** — this is the real impact |
+
+Estimate impact from `enforce_impact.changes_behavior`, never from `total`.
+
+
 If an entry in `nodes[]` carries `unbound_token: true`, it is an **unbound node token** (its `node_id` looks like `token:<token_id>`), and the same entry carries `unbound_token_name` (the token's name, usually `node:<alias>`). The ledger keeps the legacy per-token key, and such a token has no `nodes` row — so **neither allowlist can restrict it**. It is surfaced here so an admin does not conclude that nobody outside the list is dispatching; **Write-class calls** from such a token (dispatch / broadcast / create project …) record an `unbound_token` hit in the permission report: in the default `log` mode it only records, and only `enforce` refuses them. That is the evidence for deciding whether binding should be mandatory — count first, decide after. **The usual cause is a renamed node whose token was not renamed** — the alias inside the token name no longer exists in `nodes`, so it resolves as unregistered. Rename the token to the current alias, or bind it to the node.
 
 **Per-node detail (`nodes[].tool_calls`)**: look at what a node *actually* called before writing its allowlist — otherwise the list is guesswork and the first deploy blocks something in use. Two things it fixes: (1) a node that never oversteps but works all day used to be missing from this report, because `nodes[]` was aggregated only from denial rows — exactly the node whose allowlist you most need to get right; (2) `nodes[]` is now sorted by `tool_calls_total` descending, busiest first.

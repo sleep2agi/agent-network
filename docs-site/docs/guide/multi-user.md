@@ -144,6 +144,19 @@ GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 `total` 与 `nodes[]` 只数「本来会被拦」的次数；`tool_calls` 是**分母**：受限工具实际被调用了多少次（按小时合并）。两套数字分表存储，放行的调用不会进拒绝统计。没有分母时「0 次拦截」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
 
 设计和取舍见 RFC-041。
+
+**`enforce_impact` —— 切 enforce 到底会影响多少**（`#2970` 演练发现的口径问题）：
+
+`node_permission_log` 的行数是「本层本来会拒」，**不等于**「打开 enforce 后行为会变」。演练实测：`projects_create` 在 log 模式下已被处理函数自己的「只有人能操作」检查拒掉（`user_token_required`），却仍记了一行 `human_only`。所以报表把原因码分三层：
+
+| 层 | 含义 | 打开 enforce 会变吗 |
+|---|---|---|
+| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` | **不会**——这些与开关无关，永远拒 |
+| `likely_already_blocked` | `human_only` | 多数写路由另有一道「只有人能操作」的检查，调用方本来就被拒 ⇒ 通常不是增量 |
+| `changes_behavior` | `beyond_owner_visibility` / `agent_not_granted_to_owner` / `owner_unknown` / `unbound_token` | **会**——这才是真实影响面 |
+
+估算影响时看 `enforce_impact.changes_behavior`，不要看 `total`。
+
 `nodes[]` 里如果出现 `unbound_token: true`，那一项是**未绑定节点的令牌**（`node_id` 形如 `token:<token_id>`），同项还带 `unbound_token_name`（令牌名，通常形如 `node:<alias>`）。账本沿用老路径按令牌记账，而这类令牌没有 `nodes` 行 —— 所以**两张白名单都管不到它们**。报表把它们标出来，是为了不让管理员以为「名单之外没有别人在派活」；这类令牌的**写类调用**（派活 / 广播 / 建项目 …）会记一条 `unbound_token` 到权限报表：默认 `log` 模式只记录不拦，切到 `enforce` 才会拒。这就是「要不要强制要求绑定令牌」的判断依据 —— 先看有多少，再决定。**最常见的原因是节点改过名而令牌没改**——令牌名里的 alias 在 `nodes` 表里已经查不到，于是解析成「未注册」。处理方式是把令牌改名到当前 alias，或把它绑定到节点。
 
 **按节点的明细（`nodes[].tool_calls`）**：设「只能用哪些工具」之前先看这台节点**实际用过哪些**，否则白名单只能凭想象写，第一次上线就拦掉在用的东西。它在两处比网络级合计更有用：① 一台从不越界但天天在用的节点，过去只从「被拒过的行」聚合，在报表里根本不存在，而它恰恰最该出现在名单里；② `nodes[]` 按 `tool_calls_total` 降序，用得最多的排最前。
