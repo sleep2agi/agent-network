@@ -123,12 +123,20 @@ export function startEventLoopLagMonitor(opts: {
   thresholdMs?: number;
   log?: (msg: string) => void;
   rssMb?: () => number;
+  /** #2721 —— 启动预热窗（毫秒），窗内的 tick gap 不计入停顿。默认读 COMMHUB_STALL_WARMUP_MS / 10000。 */
+  warmupMs?: number;
 } = {}): ReturnType<typeof setInterval> {
   const intervalMs = opts.intervalMs ?? Math.max(50, envMs("COMMHUB_STALL_TICK_MS", 250));
   const thresholdMs = opts.thresholdMs ?? envMs("COMMHUB_STALL_LOG_MS", 2000);
   const log = opts.log ?? ((m: string) => console.log(m));
   const rssMb = opts.rssMb ?? (() => Math.round(process.memoryUsage().rss / 1048576));
   let last = performance.now();
+  const startedAt = last;
+  // #2721 —— 启动预热不算停顿。
+  // 实测：2026-10-29 这次进程 22:21:06 起来，14:21:09.835Z 记到一次 gap 2972ms，
+  // 也就是**启动后 3 秒**。那段时间在做模块加载 / 打开 DB / 迁移，第一个 tick 必然偏大。
+  // 不排除它的后果是：每次部署都会在 `/health` 里留一条「停顿」，而它和线上真实卡顿长得一模一样。
+  const warmupMs = opts.warmupMs ?? envMs("COMMHUB_STALL_WARMUP_MS", 10_000);
   const timer = setInterval(() => {
     const now = performance.now();
     const gap = now - last;
@@ -136,6 +144,7 @@ export function startEventLoopLagMonitor(opts: {
     const rss = rssMb();
     const served = servedSinceTick;
     servedSinceTick = 0;
+    if (now - startedAt < warmupMs) return;  // 预热窗内只更新 last，不记 gap/停顿
     const stall = recordGap(gap, { intervalMs, thresholdMs, rssMb: rss, served });
     if (thresholdMs > 0 && stall >= thresholdMs) {
       // 和 retention/slow-sql 的日志同一前缀，方便 grep。

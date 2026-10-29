@@ -137,3 +137,24 @@ describe("db-adapter: 慢 SQL 日志", () => {
     expect(long.length).toBeLessThanOrEqual("[commhub slow-sql] 1200ms ".length + 160);
   });
 });
+
+// #2721 —— 启动预热窗内的 gap 不算停顿。
+//
+// 实测：2026-10-29 进程 22:21:06 启动，14:21:09.835Z（= 启动后 3 秒）记到 gap 2972ms / stall 2722ms。
+// 那是模块加载 + 打开 DB + 迁移，不是线上卡顿。不排除它的后果是：每次部署都会在 /health 留一条
+// 与真实卡顿同形的记录，事后无法区分。
+describe("#2721 启动预热不算停顿", () => {
+  test("预热窗内的 tick gap 不计入 stalls（窗口外照常计）", async () => {
+    const stalls: string[] = [];
+    const timer = startEventLoopLagMonitor({
+      intervalMs: 10,
+      thresholdMs: 1,
+      warmupMs: 120,
+      log: (m) => stalls.push(m),
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    clearInterval(timer as unknown as ReturnType<typeof setInterval>);
+    // 预热窗内的模拟拖延不该产生 stall 日志；窗外的真实间隔是 ~10ms，也不该触发 threshold。
+    expect(stalls).toHaveLength(0);
+  });
+});
