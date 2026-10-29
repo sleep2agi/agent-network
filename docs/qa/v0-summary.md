@@ -91,7 +91,7 @@ bash scripts/qa.sh --list    # 列测试名
 > find tests -mindepth 2 -maxdepth 2 -name qa.l1 | wc -l
 > ```
 
-[.github/workflows/qa.yml](../../.github/workflows/qa.yml) **report-only**，PR + push to main 触发，不阻塞合并。
+[.github/workflows/qa.yml](../../.github/workflows/qa.yml) **report-only**，**PR 触发**（路径过滤）；主干改为夜间 schedule 全量（#2967），不阻塞合并。
 CI 真实抓 race ≥4 次（每次都是新 hub-bootstrap 后 auth race，固化 retry pattern）。
 
 ## 累计抠出的 11 条 SDK 设计 finding

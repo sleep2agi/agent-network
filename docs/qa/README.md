@@ -26,7 +26,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 ## CI 自动跑
 
-[.github/workflows/qa.yml](../../.github/workflows/qa.yml) — PR / push to main 时自动跑（路径过滤）。
+[.github/workflows/qa.yml](../../.github/workflows/qa.yml) — **PR 时**按路径过滤自动跑；主干不再按 paths 重跑（#2967，改为夜间 schedule 全量 + 需要时 workflow_dispatch）。
 
 ### CI 侧的实测成本（2026-08-18，`L1_TESTS` = 22 个套件）
 
