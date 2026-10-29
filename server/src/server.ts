@@ -1423,6 +1423,20 @@ return Bun.serve({
     }
 
     if (url.pathname === "/api/license/activate" && req.method === "POST") {
+      // 🔴 权限审计（2026-10-29）：这条路由原来**没有任何鉴权**。
+      // 任何能访问 Hub 的人（包括未登录）都能 POST 一个 "anet-" 开头的串，
+      // 而它做的第一件事是 `DELETE FROM licenses` —— 公开可达 + 破坏性写。
+      //
+      // 现在：必须是用户令牌，且 Hub 管理员。
+      //   · 节点令牌不是人（与 /api/admin/users、secrets/providers 目录同一口径）→ user_token_required
+      //   · 普通用户不是管理员 → admin required
+      const licToken = requestToken(req, { allowQueryToken: false });
+      const licResolved = licToken ? resolveToken(licToken) : null;
+      if (!licResolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (licResolved.networkId) return userTokenRequired(req);
+      if (licResolved.user.role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "admin required" }, { status: 403 }));
+      }
       try {
         const body = await req.json() as any;
         const key = body.key;
