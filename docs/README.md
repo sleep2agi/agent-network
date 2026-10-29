@@ -62,6 +62,8 @@
 | `lint (docs integrity)` | 任意 PR 里的 `*.md`：UTF-8 + `docs/qa/**` 相对链接 |
 | `docs locale parity` | `docs-site/docs/**` 中英配对 |
 | `doc-symbol-anchors` | 符号锚文本与目标一致（required check） |
+本地自查：`bash scripts/preflight-local.sh` 会把下面这些**无依赖门**按 workflows 里现成的命令全跑一遍（缺 bun/docker 的门会标 SKIP，不算失败）。
+
 | `home-path-baseline` | 带用户路径的文件搬家必须同步 [home-path-baseline.txt](home-path-baseline.txt)（required check） |
 
 路径搬家时先查 [home-path-baseline.txt](home-path-baseline.txt)，再跑 `.github/scripts/check-docs-integrity.py`。
