@@ -5388,8 +5388,12 @@ return Bun.serve({
       const envTransportOf = (nodeId: string, alias: string | null, networkId: string | null): string | null => {
         const direct = transportByKey.get(nodeId);
         if (direct !== undefined) return direct;
-        if (!alias || !networkId) return null;
-        return aliasTransport.get(`${networkId}|${alias}`) ?? null;
+        if (!networkId) return null;
+        // 兜底顺序与 transportOf() 一致：sessions 行的 alias 可能等于**节点 id**
+        // （老注册路径就是这样），也可能等于**人给的 alias**。两种都要试，且都带网络。
+        const byId = aliasTransport.get(`${networkId}|${nodeId}`);
+        if (byId !== undefined) return byId;
+        return alias ? aliasTransport.get(`${networkId}|${alias}`) ?? null : null;
       };
       // Add a single new field `role: string | null` per row, extracted from
       // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'

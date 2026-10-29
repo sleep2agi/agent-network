@@ -393,18 +393,25 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
     db.run("UPDATE sessions SET env_transport = NULL WHERE node_id = ?1", [node.nR.id]);
     expect((await rowOf(node.nR.id)).env_transport).toBeNull();
   });
-});
 
-  test("别的网络里同名的节点不会串到这一格（alias 兜底必须带网络约束）", async () => {
-    // 另一个网络里也有一台 alias 相同的节点，且它是明文公网。
-    // 如果兜底查询不按网络约束，A 网的节点会读出 B 网的 transport —— 这一格是给人做
-    // 安全决策用的，显示错的值比显示 null 更糟。
+  test("别的网络里的同名字段不会串到这一格（alias 兜底必须带网络约束）", async () => {
+    // 场景：本网络有一台节点，它的 sessions 行只用 alias 命中（node_id 为空，
+    // alias 就等于节点 id —— 老注册路径就是这样）。
+    // 另一个网络里**恰好也有一个 alias 相同的 sessions 行**，而且是明文公网、时间更新。
+    //
+    // 如果兜底查询不按网络约束，这一格会把 B 网的 'plain' 显示成 A 网这台节点的 transport。
+    // 这一格是给人做安全决策用的（决定要不要打开 strict）——
+    // 显示错的 'plain' 会让人以为挡住了，其实挡的是别人；显示 null 至少会让人去查。
+    const shadowId = `n_np_shadow_${stamp}`;
+    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, lifecycle_state) VALUES (?1, ?1, ?2, ?3, 'active')",
+      [shadowId, `shadow-${stamp}`, net]);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', NULL, ?3, 'https', datetime('now','-1 hour'))",
+      [`s_shadow_${stamp}`, shadowId, net]);
     const otherOwner = register(`np_othernet_${stamp}_${Date.now()}`, PW);
-    const otherNet = otherOwner.network_id!;
-    const otherAlias = `x-${stamp}-shadow`;
-    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', NULL, ?3, 'plain', datetime('now','+5 minute'))",
-      [`r_shadow_${stamp}`, otherAlias, otherNet]);
-    // 目标节点：本网络、只用 alias 命中（node_id 在 sessions 里是 NULL、alias 相同）
-    db.run("UPDATE sessions SET node_id = NULL, alias = ?1 WHERE node_id = ?2", [otherAlias, node.nR.id]);
-    expect((await rowOf(node.nR.id)).env_transport).toBeNull();
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', NULL, ?3, 'plain', datetime('now','+1 hour'))",
+      [`s_shadow_other_${stamp}`, shadowId, otherOwner.network_id!]);
+
+    // 本网络这台的 'https' 必须赢；时间更新的 'plain' 不能跨网络串进来。
+    expect((await rowOf(shadowId)).env_transport).toBe("https");
   });
+});
