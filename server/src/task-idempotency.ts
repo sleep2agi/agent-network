@@ -61,7 +61,13 @@ function logicalRequestMeta(value: string | null): unknown {
   // auth_origin is a Hub-derived audit fact, not part of the client request.
   // Ignore it for replay equality so a request first accepted by the old Hub
   // (without the stamp) remains idempotent across a rolling upgrade.
-  const { auth_origin: _authOrigin, ...logical } = parsed as Record<string, unknown>;
+  //
+  // #669 —— parent_source 同理：它是 Hub 记录的「parent_task_id 是怎么来的」
+  // （explicit / inferred），由派发时的推断结果决定，**不是客户端请求的一部分**。
+  // 不排除它会让幂等重放失败：第一次调用可能没有可推断的父任务（不带该字段），
+  // 重放时上一条已经是 delivered（推断命中 ⇒ 带 parent_source:"inferred"），
+  // 于是同一请求被判成 idempotency_conflict。test1210 抓到的就是这个。
+  const { auth_origin: _authOrigin, parent_source: _parentSource, ...logical } = parsed as Record<string, unknown>;
   return logical;
 }
 

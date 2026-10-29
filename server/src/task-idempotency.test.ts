@@ -46,6 +46,22 @@ describe("dashboard task idempotency", () => {
     })).toBe(true);
   });
 
+  // #669 —— 回归：parent_source 是 Hub 派生的，不参与幂等比较。
+  // 现场（test1210 抓到）：第一次调用可能没有可推断的父任务（meta 不带该字段），
+  // 重放时上一条已 delivered ⇒ 推断命中 ⇒ meta 带上 parent_source:"inferred"，
+  // 于是同一请求被判 idempotency_conflict。本地复现后修复（比较时排除该字段）。
+  test("parent_source (Hub-derived) does not break replay equality", () => {
+    const row: StoredIdempotentTask = {
+      task_id: "idem_x", from_name: "admin", to_name: "worker", priority: "normal",
+      content: "hello", network_id: "net_a", status: "delivered",
+      meta_json: JSON.stringify({ client_request_id: "dreq_0123456789abcdef", parent_source: "inferred" }),
+    };
+    expect(idempotentTaskMatches(row, {
+      fromName: "admin", toName: "worker", priority: "normal", content: "hello", networkId: "net_a",
+      metaJson: JSON.stringify({ client_request_id: "dreq_0123456789abcdef" }),
+    })).toBe(true);
+  });
+
   test("same request id with changed payload is a conflict", () => {
     const row: StoredIdempotentTask = {
       task_id: "idem_x", from_name: "admin", to_name: "worker", priority: "normal",
