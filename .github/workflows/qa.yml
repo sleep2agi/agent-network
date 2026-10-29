@@ -1343,12 +1343,28 @@ jobs:
       #    一份安全证据,因为那份证据的前提根本没成立。
       #    第一版我把 test224 放在最前,正好把这条规则倒过来了。
 
-      - name: Build test597-dashboard-slash-namespace
+      # #2800 —— 6 个镜像的 docker build 相互独立，改成并发（原来串行 4.98 分钟 = 该 job 的 71%）。
+      # 运行顺序一点没动：安全套件 test224 仍在最后跑，保持
+      # 「底层套件先红时，不该已经产出安全证据」这条不变量。
+      - name: Build all recovered suite images (parallel)
         run: |
-          docker build \
-            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test597-dashboard-slash-namespace \
-            -f tests/test597-dashboard-slash-namespace/Dockerfile .
+          set -uo pipefail
+          pids=()
+          # test597-dashboard-slash-namespace
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test597-dashboard-slash-namespace -f tests/test597-dashboard-slash-namespace/Dockerfile . ) & pids+=($!)
+          # test679-task-trace
+          ( docker build --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" -t anet-test679-task-trace -f tests/test679-task-trace/Dockerfile . ) & pids+=($!)
+          # qa-daemon-lifecycle-e2e
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" -t anet-qa-daemon-lifecycle-e2e -f tests/qa-daemon-lifecycle-e2e/Dockerfile . ) & pids+=($!)
+          # qa-rfc024-config-apply
+          ( docker build -t anet-qa-rfc024-config-apply -f tests/qa-rfc024-config-apply/Dockerfile . ) & pids+=($!)
+          # qa-rfc027-stop-delete
+          ( docker build -t anet-qa-rfc027-stop-delete -f tests/qa-rfc027-stop-delete/Dockerfile . ) & pids+=($!)
+          # test224-grok-preview-security
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test224-grok-preview-security -f tests/test224-grok-preview-security/Dockerfile . ) & pids+=($!)
+          rc=0
+          for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+          exit $rc
 
       - name: Run test597-dashboard-slash-namespace
         run: |
@@ -1356,13 +1372,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-test597-dashboard-slash-namespace \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test597.log"
-
-      - name: Build test679-task-trace
-        run: |
-          docker build \
-            --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test679-task-trace \
-            -f tests/test679-task-trace/Dockerfile .
 
       - name: Run test679-task-trace
         run: |
@@ -1377,14 +1386,6 @@ jobs:
       # inside a 5-minute job that already spends 141-148s. Measuring only
       # the run time is measuring the wrong half.
       # Placed before test224 so the security suite remains last.
-      - name: Build qa-daemon-lifecycle-e2e
-        run: |
-          docker build \
-            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" \
-            -t anet-qa-daemon-lifecycle-e2e \
-            -f tests/qa-daemon-lifecycle-e2e/Dockerfile .
-
       - name: Run qa-daemon-lifecycle-e2e
         run: |
           set -o pipefail
@@ -1399,12 +1400,6 @@ jobs:
       # the script SIGTERM'd itself, and the exit code was 143 REGARDLESS of
       # FAIL. Fixed in the same PR; witnessed both ways (FAIL=0 → rc=0,
       # one injected failure → rc=1) before wiring it here.
-      - name: Build qa-rfc024-config-apply
-        run: |
-          docker build \
-            -t anet-qa-rfc024-config-apply \
-            -f tests/qa-rfc024-config-apply/Dockerfile .
-
       - name: Run qa-rfc024-config-apply
         run: |
           set -o pipefail
@@ -1421,25 +1416,12 @@ jobs:
       # daemon_not_resolvable / per-network list_my_children).
       # Exit-code semantics verified by mutation, not by reading: injecting one
       # `bad` turns rc 0 -> 1.
-      - name: Build qa-rfc027-stop-delete
-        run: |
-          docker build \
-            -t anet-qa-rfc027-stop-delete \
-            -f tests/qa-rfc027-stop-delete/Dockerfile .
-
       - name: Run qa-rfc027-stop-delete
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-qa-rfc027-stop-delete \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-rfc027-stop-delete.log"
-
-      - name: Build test224-grok-preview-security
-        run: |
-          docker build \
-            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test224-grok-preview-security \
-            -f tests/test224-grok-preview-security/Dockerfile .
 
       - name: Run test224-grok-preview-security
         # 🔴 --network none 不是可选项:tests/test224-.../Dockerfile 第 13 行明写
