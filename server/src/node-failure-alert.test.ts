@@ -6,7 +6,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { register } from "./auth.js";
 import { db } from "./db.js";
-import { scanNodeFailureAlerts, classifyDeterministicFailure, NODE_FAILURE_ALERT_KIND } from "./node-failure-alert.js";
+import { scanNodeFailureAlerts, scanModelAuthBlockedNodes, classifyDeterministicFailure, NODE_FAILURE_ALERT_KIND, MODEL_AUTH_BLOCKED_CATEGORY } from "./node-failure-alert.js";
 
 const DIR = mkdtempSync(join(tmpdir(), "anet-nfa-"));
 let NET = "", UID = "", NODE = "";
@@ -95,5 +95,56 @@ describe("#2840 节点连续确定性失败告警", () => {
     task(reset, "failed", "Missing environment variable: `X`", 26);
     const r = scanNodeFailureAlerts();
     expect(r.nodes).not.toContain(reset);
+  });
+});
+
+// #2964 后半 —— 节点「在线但干不了活」：状态是 error、原因是登录失效，
+// 但它一条任务都不接，所以「连续失败」那条告警路径永远不会触发。
+describe("#2964 登录失效节点（不接活）", () => {
+  const session = (alias: string, status: string, task: string | null) => {
+    db.run(
+      `INSERT OR REPLACE INTO sessions (resume_id, alias, status, task, network_id, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))`,
+      [`s_${alias}`, alias, status, task, NET],
+    );
+    db.run(
+      `INSERT OR IGNORE INTO nodes (node_id, node_name, alias, runtime, network_id, owner_user_id)
+       VALUES (?1, ?2, ?2, 'codex', ?3, ?4)`,
+      [`n_${alias}`, alias, NET, UID],
+    );
+  };
+
+  test("status=error 且原因是登录失效 → 告警一次；同一天再扫不重复", () => {
+    const alias = `nfa-auth-${Date.now()}`;
+    session(alias, "error", "model login expired: this node's CODEX_HOME needs a fresh login — log in again there");
+    const before = alerts().length;
+    expect(scanModelAuthBlockedNodes().nodes).toContain(alias);
+    expect(alerts().length).toBe(before + 1);
+    // 每节点每天一条：再扫一次不应新增
+    expect(scanModelAuthBlockedNodes().alerts).toBe(0);
+  });
+
+  test("idle 的节点不告警（没坏就别吵）", () => {
+    const alias = `nfa-auth-idle-${Date.now()}`;
+    session(alias, "idle", "model login expired: needs a fresh login");
+    expect(scanModelAuthBlockedNodes().nodes).not.toContain(alias);
+  });
+
+  test("error 但原因不是登录类（例如代码异常）不告警", () => {
+    const alias = `nfa-auth-other-${Date.now()}`;
+    session(alias, "error", "TypeError: cannot read properties of undefined (reading 'x')");
+    expect(scanModelAuthBlockedNodes().nodes).not.toContain(alias);
+  });
+
+  test("告警里带类别与当天日期（去重键）", () => {
+    const row = db.get<{ cat: string; day: string }>(
+      `SELECT json_extract(meta_json,'$.node_failure_alert.category') AS cat,
+              json_extract(meta_json,'$.node_failure_alert.first_seen') AS day
+         FROM user_inbox WHERE kind = ?1
+          AND json_extract(meta_json,'$.node_failure_alert.category') = ?2 LIMIT 1`,
+      NODE_FAILURE_ALERT_KIND, MODEL_AUTH_BLOCKED_CATEGORY,
+    );
+    expect(row?.cat).toBe(MODEL_AUTH_BLOCKED_CATEGORY);
+    expect(row?.day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

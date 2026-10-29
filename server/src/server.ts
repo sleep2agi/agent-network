@@ -85,7 +85,7 @@ import { startRetentionSweeper } from "./retention.js";
 import { sweepEmptyNodeRows } from "./empty-node-sweeper.js";
 import { versionStats } from "./version-stats.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
-import { scanNodeFailureAlerts } from "./node-failure-alert.js";
+import { scanNodeFailureAlerts, scanModelAuthBlockedNodes } from "./node-failure-alert.js";
 import { scanStarvedSchedules } from "./schedule-starved.js";
 import { scanNodeBusyCircuit } from "./node-serviceability.js";
 import {
@@ -5822,6 +5822,13 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
       if (r.alerts > 0) console.log(`[commhub node-failure-alert] sent ${r.alerts} alert(s): ${r.nodes.join(", ")}`);
     } catch (e: any) {
       console.log(`[commhub node-failure-alert] failed: ${e?.message ?? e}`);
+    }
+    // #2964 —— 「在线但干不了活」：登录失效的节点一条任务都不会接，连续失败那条路不会触发。
+    try {
+      const b = scanModelAuthBlockedNodes();
+      if (b.alerts > 0) console.log(`[commhub node-auth-blocked-alert] sent ${b.alerts} alert(s): ${b.nodes.join(", ")}`);
+    } catch (e: any) {
+      console.log(`[commhub node-auth-blocked-alert] failed: ${e?.message ?? e}`);
     }
   }, nodeFailureAlertMs);
   (nodeFailureAlertTimer as any).unref?.();
