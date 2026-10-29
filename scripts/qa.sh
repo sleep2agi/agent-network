@@ -96,7 +96,7 @@ esac
 
 # docs-only PR 的轻量路径:qa.yml 的 changes job(.github/scripts/ci-docs-only.py)
 # 只把「镜像里有 docs-site」的 L1 套件放进 QA_L1_ONLY。空/未设 = 全部 L1。
-# 名字必须逐字在 L1_TESTS 里 —— 拼错一个不是「少跑一个」,是红。
+# 名字必须逐字在 L1_TESTS 里（#675 起 = tests/<名字>/qa.l1 存在）—— 拼错一个不是「少跑一个」,是红。
 if [[ -n "${QA_L1_ONLY:-}" ]]; then
   _l1_keep=()
   for _t in $QA_L1_ONLY; do

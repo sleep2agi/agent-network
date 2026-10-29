@@ -46,7 +46,7 @@ fi
 # 🔴 数量必须**足够区分 cap=2 与 0(不限)**：桩的每条 run 睡 1.2s，6 条在 cap=2 下
 #    峰值 ≤ 2，而在 0(不限)下明显 > 2 —— 下面 `zero` 用例的「峰值 > 2」断言正是靠
 #    这个分辨力。所以不能把条数压到 3（那样两种配置都可能给出同一峰值）。
-# 🔴 选择一旦失效（名字不在 L1_TESTS、或空集合）**必须明确失败**：
+# 🔴 选择一旦失效（名字没有 qa.l1 标记即未登记、或空集合）**必须明确失败**：
 #    qa.sh 对未登记名字会 exit 2，而下面的 sel_check 会因「实际跑到的套件数」
 #    对不上而判红 —— 两条路都不会变成「空集合报绿」。
 T823_ONLY=${T823_ONLY:-"test1627-test-margin test823-l1-concurrency-cap test612-start-admission test674-binding-generation test703-codex-turn-receipts test710-late-task-replies"}
