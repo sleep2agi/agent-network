@@ -2937,6 +2937,37 @@ return Bun.serve({
       logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode }), getClientIP(req), node.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node.node_id, permission_mode: mode, previous }));
     }
+    // #2969 后半 —— 接口白名单：PUT /api/nodes/:id/tool-allowlist { tools: string[] | null }
+    // 与 peer-allowlist 同一套授权口径。
+    const toolAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/tool-allowlist$/);
+    if (toolAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawTools = body?.tools;
+      if (rawTools !== null && rawTools !== undefined && !Array.isArray(rawTools)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_tools", message: "tools must be an array of MCP tool names, or null" }, { status: 400 }));
+      }
+      const tools = Array.isArray(rawTools)
+        ? rawTools.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      if (tools.length > 500) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_tools", message: "at most 500 entries" }, { status: 400 }));
+      }
+      const nodeRef3 = decodeURIComponent(toolAllowMatch[1]);
+      const node3 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; tool_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, tool_allowlist FROM nodes WHERE node_id = ?1", nodeRef3);
+      const role3 = node3?.network_id ? getUserNetworkRole(restAuth.userId, node3.network_id) : null;
+      if (!node3 || !node3.network_id || (!role3 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!isAdmin && node3.owner_user_id !== restAuth.userId && role3 !== "owner" && role3 !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its tool allowlist" }, { status: 403 }));
+      }
+      const nextTools = tools.length ? JSON.stringify(tools) : null;
+      db.run("UPDATE nodes SET tool_allowlist = ?1 WHERE node_id = ?2", [nextTools, node3.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_tool_allowlist_changed", "node", node3.node_id, JSON.stringify({ from: node3.tool_allowlist, to: nextTools }), getClientIP(req), node3.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node3.node_id, tools: tools.length ? tools : null }));
+    }
     // #2969 —— 节点级对端白名单：PUT /api/nodes/:id/peer-allowlist { peers: string[] | null }
     // 与 permission-mode 同一套授权口径（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员）。
     // peers 为 null 或空数组 ⇒ 清空（不限制），与「没有这一列」等价。

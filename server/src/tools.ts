@@ -35,7 +35,7 @@ import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWr
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
 import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
 import { agentBatchScheduleInterval, agentCancelSchedule, agentCreateSchedule, agentGetSchedule, agentListSchedules, agentRunScheduleNow, agentScheduleRuns, agentUpdateSchedule } from "./schedule-agent.js";
-import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict } from "./node-permissions.js";
+import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, writeVerdict, type NodeIdentity, type Verdict, toolAllowlistVerdict } from "./node-permissions.js";
 import { countInFlightTasks } from "./node-in-flight-tasks.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
@@ -285,11 +285,24 @@ function guardNodePermissionTools(server: McpServer, tokenId: string, networkId:
   };
   const wrap = (name: string, handler: (...callArgs: any[]) => any) => async (...callArgs: any[]) => {
     const cls = NODE_TOOL_CLASS[name];
-    if (cls && cls !== "always" && cls !== "read" && cls !== "requirements" && cls !== "schedule") {
+    if (cls) {
       const id = nodeIdentity(tokenId, networkId);
-      const args = callArgs[0] && typeof callArgs[0] === "object" ? callArgs[0] as Record<string, unknown> : {};
-      const verdict = id ? verdictFor(id, name, args) : null;
-      if (id && nodeDecide(id, `mcp:${name}`, verdict)) return denied(verdict!.reason, `mcp:${name}`);
+      if (id) {
+        // #2969 后半 —— 接口白名单先判（always 类豁免在函数内部处理）。
+        // 放在模式判定之前：主人明确列了「只能用这几个」，优先于模式带来的放宽/收紧。
+        const allowVerdict = toolAllowlistVerdict(id, name, cls === "always");
+        if (nodeDecide(id, `mcp:${name}`, allowVerdict)) {
+          return denied(allowVerdict!.reason, `mcp:${name}`);
+        }
+        const gated = cls !== "always" && cls !== "read" && cls !== "requirements" && cls !== "schedule";
+        if (!gated) {
+          recordNodeToolCall(id, `mcp:${name}`);
+        } else {
+          const args = callArgs[0] && typeof callArgs[0] === "object" ? callArgs[0] as Record<string, unknown> : {};
+          const verdict = verdictFor(id, name, args);
+          if (nodeDecide(id, `mcp:${name}`, verdict)) return denied(verdict!.reason, `mcp:${name}`);
+        }
+      }
     }
     return handler(...callArgs);
   };
