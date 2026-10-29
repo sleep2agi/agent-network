@@ -1123,16 +1123,11 @@ db.exec(`
   );
 `);
 
-// Auto-create trial license on first run
-const existingLicense = db.get<any>("SELECT id FROM licenses LIMIT 1");
-if (!existingLicense) {
-  const trialId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
-  db.run(
-    "INSERT INTO licenses (id, license_key, type, expires_at) VALUES (?1, ?2, 'trial', datetime('now', '+14 days'))",
-    [`lic_${trialId}`, `trial-${trialId}`]
-  );
-  console.log("[commhub] 🎉 14-day free trial started!");
-}
+// license 功能已移除（2026-10-29 admin 决定）。
+// 这里原来会在首次启动时插一条 14 天 trial —— 现在没有任何代码读它，
+// 继续插只会让每个新库凭空多一行死数据。
+// `licenses` 表本身保留（CREATE TABLE 不动）：已有实例里可能还有历史行，
+// 删表的迁移代价大于留着；表从此不再被读写。
 
 // ── V3.13: network_members table (user ↔ network many-to-many) ──
 db.exec(`

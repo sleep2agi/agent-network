@@ -671,32 +671,11 @@ ws://localhost:9200/ws/tmux/anet-node-代码1号
 v0.8 起项目转 Apache 2.0 开源 + 自部署，没有官方付费 license。下面两个 endpoint 是 v0.6 试用 / 激活码体系的遗留路径，hub 仍保留 `licenses` 表 + 14 天 trial 兜底，但**新用户和文档主线不需要碰**。命中 `license_expired` 见 [troubleshooting](/troubleshooting#license-expired-授权过期-legacy-行为)。
 :::
 
-### GET /api/license
+### ~~GET /api/license~~ / ~~POST /api/license/activate~~ —— 已移除
 
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
-查 `licenses` 表第一行（按 `created_at` 升序），返回 trial / pro 状态 + 剩余天数。
-
-```bash
-curl http://localhost:9200/api/license
-# → 公开端点（不需要 Authorization header）
-```
-
-**响应**（trial / pro）：
-
-```json
-{
-  "ok": true,
-  "license": { "type": "trial", "expires_at": "2026-04-25 12:00:00", "days_left": 12, "expired": false },
-  "limits": { "max_agents": 5, "max_networks": 3, "max_tasks_day": 500 }
-}
-```
-
-**响应**（无 license 行）：
-
-```json
-{ "ok": true, "status": "no_license" }
-```
+**2026-10-29 起这两个端点已删除**（返回 404）。开源版没有任何许可/额度概念：
+CLI 的 `anet license` / `anet activate` 仍存在，但只打印「功能已移除」。
+`licenses` 表留在库里但不再被读写（历史行不删）。
 
 ### POST /api/license/activate
 
