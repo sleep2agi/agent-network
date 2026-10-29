@@ -27,6 +27,7 @@ PR #812 正在新增的 `tests/test812-tmux-target-semantics/` 就是下一个�
 对每个 `tests/<dir>/run.sh` 存在的目录：
 
   1. 目录名出现在 `scripts/qa.sh` 或任意 `.github/workflows/*`  → 可以被跑到，OK
+     （#675 起还有第三种：套件目录里有 `qa.l1` 标记 —— 那是 L1 的新登记方式）
   2. 目录里有 `NOT-IN-CI.md`                                    → 明确声明不进 CI，OK
   3. 在基线文件里                                                → 存量，OK
   4. 以上都不是                                                  → 🔴 新增孤儿，红
@@ -134,10 +135,17 @@ def classify(names: list[str], blob: str, tests_dir: pathlib.Path,
     selftest 里再写一遍判据只能证明「我写的两遍一样」，对真代码做变异不会红。
     这一点今晚踩过：自造判据四次，四次都比真判据松。
     """
-    registered = [s for s in names if s in blob]
+    # #675 —— L1 不再是一份共享名单，而是「每个套件目录里放一个 qa.l1 标记」。
+    # 有标记就等于「它会被 qa.sh 的 L1 跑」，因此算已登记。
+    # 不认这个标记的话，这道门会把所有 L1 套件当成没登记的新孤儿：
+    # 真跑出来的就是 15 个（改动后 qa.sh 里不再按名字列出它们）。
+    def wired(s: str) -> bool:
+        return s in blob or (tests_dir / s / "qa.l1").exists()
+
+    registered = [s for s in names if wired(s)]
     exempt = [s for s in names if (tests_dir / s / EXEMPT_MARKER).exists()]
     orphans = [s for s in names
-               if s not in blob and not (tests_dir / s / EXEMPT_MARKER).exists()]
+               if not wired(s) and not (tests_dir / s / EXEMPT_MARKER).exists()]
     return {
         "registered": registered,
         "exempt": exempt,
@@ -245,22 +253,26 @@ def selftest() -> int:
     """
     import tempfile
     cases = [
-        # (目录名, 是否出现在注册表, 是否有 NOT-IN-CI.md, 是否在基线, 期望判为新孤儿)
-        ("test900-wired", True, False, False, False),
-        ("test901-exempt", False, True, False, False),
-        ("test902-known", False, False, True, False),
-        ("test903-new", False, False, False, True),
-        ("test904-wired-and-known", True, False, True, False),
+        # (目录名, 是否出现在注册表, 是否有 NOT-IN-CI.md, 是否在基线, 是否有 qa.l1 标记, 期望判为新孤儿)
+        ("test900-wired", True, False, False, False, False),
+        ("test901-exempt", False, True, False, False, False),
+        ("test902-known", False, False, True, False, False),
+        ("test903-new", False, False, False, False, True),
+        ("test904-wired-and-known", True, False, True, False, False),
+        # #675：L1 的新登记方式 —— 名字不在任何名单里，但目录带 qa.l1
+        ("test905-l1-marker", False, False, False, True, False),
     ]
     bad = 0
     with tempfile.TemporaryDirectory() as td:
-        for name, reg, ex, inbase, want in cases:
+        for name, reg, ex, inbase, marker, want in cases:
             blob = f"tests/{name}/**" if reg else ""
             d = pathlib.Path(td) / name
             d.mkdir(parents=True, exist_ok=True)
             (d / "run.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             if ex:
                 (d / EXEMPT_MARKER).write_text("一次性验证\n", encoding="utf-8")
+            if marker:
+                (d / "qa.l1").write_text("", encoding="utf-8")
             base = {name} if inbase else set()
             got = name in classify([name], blob, pathlib.Path(td), base)["new"]
             if got != want:
