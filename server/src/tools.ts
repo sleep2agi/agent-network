@@ -3015,7 +3015,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             )?.bound_node_id ?? null
           : null;
         if (!boundNodeId || from_node_id !== boundNodeId) {
-          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "from_node_id_identity_mismatch" }) }] };
+          // #2768 —— 这个码其实合并了两种原因：token **没有绑定**（注册漏绑）
+          // 与 token **绑到了别的节点**（注入/串号）。客户端把两者都当「未绑定」处理
+          // （agent-node 的 UNBOUND_TOKEN_REJECTIONS 就是这个集合），行为上没问题；
+          // 但运维排障必须能分开 —— 否则只能凭日志猜是漏绑还是串号。
+          //
+          // 加 detail 是向后兼容的：错误码不变，客户端不必改；多出来的一段只给人和日志看。
+          return { content: [{ type: "text" as const, text: JSON.stringify({
+            ok: false,
+            error: "from_node_id_identity_mismatch",
+            detail: boundNodeId ? "bound_to_other_node" : "no_binding",
+            bound_node_id: boundNodeId ?? null,
+          }) }] };
         }
       }
       if (durable_terminal_cursor) {
