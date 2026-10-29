@@ -10,7 +10,7 @@
 // Hourly aggregation, like node_permission_log: a chatty node must not turn this
 // into one row per write.
 import { db } from "./db.js";
-import { getEnvTransportMode } from "./env-transport-policy.js";
+import { getEnvTransportMode, secretTransportVerdict } from "./env-transport-policy.js";
 
 const HOURS_RETAINED = 30 * 24;
 const MAX_ROWS = 20_000;
@@ -57,12 +57,18 @@ export function transportOf(networkId: string, nodeId: string): string | null {
   return row?.env_transport ?? null;
 }
 
-/** Called from the write lanes. Logs when the current policy would refuse. */
+/** Called from the write lanes. Logs when the current policy would refuse.
+ *
+ * #1510 补丁：以前这里写死了「只有 plain 才记」，于是日得表**永远只反映一种原因**。
+ * 现在改成问 `secretTransportVerdict`（把模式仮定为 enforce）：
+ * 「如果现在打开 enforce，这一笔会不会被拒、原因是什么」—— 表格才是决策输入。
+ * 默认 strict 关闭时结果与以前完全一致（只记 plain）。 */
 export function observeSecretWrite(networkId: string, nodeId: string, route: string): void {
   if (getEnvTransportMode() !== "log") return;
   const transport = transportOf(networkId, nodeId);
-  if (transport !== "plain") return;
-  noteEnvTransportWouldRefuse(networkId, nodeId, route, `transport=${transport}`);
+  const would = secretTransportVerdict(transport, { ...process.env, ANET_SECRET_TRANSPORT_GATE: "enforce" });
+  if (!would) return;
+  noteEnvTransportWouldRefuse(networkId, nodeId, route, `${would} transport=${transport ?? "unknown"}`);
 }
 
 export function readEnvTransportLog(networkId: string, sinceHour: string) {

@@ -5,7 +5,7 @@ import { getUserNetworkRole } from './auth';
 import { providerScanTargets } from './daemon-provider-snapshots';
 import { validScopedSecretKey } from './shared/scoped-secret-contract';
 import { observeSecretWrite, transportOf } from './env-transport-gate.js';
-import { refusesPlainTransport } from './env-transport-policy.js';
+import { secretTransportVerdict } from './env-transport-policy.js';
 type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
 type Daemon = { ok: false; error: string } | { ok: true; networkId: string; daemonNodeId: string; daemonAlias: string };
 type Request = { request_id: string; network_id: string; daemon_node_id: string | null; node_id: string | null;
@@ -43,7 +43,8 @@ export function requestNodeSecrets(h: Human, node: string, action: Request['acti
   // that is the only action worth observing; delete/list leak nothing.
   if (action === 'put') {
     const transport = transportOf(h.networkId!, node);
-    if (refusesPlainTransport(transport)) return denied('secret_transport_plain');
+    const verdict = secretTransportVerdict(transport);
+    if (verdict) return denied(verdict);
     observeSecretWrite(h.networkId!, node, `node_secret_${action}`);
   }
   if ([...requests.values()].some(r => r.network_id === h.networkId && r.daemon_node_id === null && r.node_id === node && r.status === 'pending')) return denied('secret_store_busy');
@@ -89,7 +90,8 @@ export function requestScopedSecrets(h: Human, daemon: string, node: string | nu
   // #1510 — same observation on the daemon lane (the daemon applies the value).
   if (action === 'put') {
     const transport = transportOf(h.networkId!, daemon);
-    if (refusesPlainTransport(transport)) return denied('secret_transport_plain');
+    const verdict = secretTransportVerdict(transport);
+    if (verdict) return denied(verdict);
     observeSecretWrite(h.networkId!, daemon, `secret_${action}`);
   }
   if ([...requests.values()].some(r => r.network_id === h.networkId && r.daemon_node_id === daemon && r.status === 'pending')) return denied('secret_store_busy');
