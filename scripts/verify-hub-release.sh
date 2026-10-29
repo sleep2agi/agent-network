@@ -236,6 +236,9 @@ check_feature "stall boot warmup"                 "COMMHUB_STALL_WARMUP_MS"     
 # 0.9.0-preview.203 —— #1510 严格档：transport 未上报独立成原因码。
 check_feature "secret transport strict"           "secret_transport_unknown"                  "0.9.0-preview.203"
 
+# 0.9.0-preview.204 —— #2969：空数组歧义拒收（清空请传 null）。
+check_feature "allowlist empty array rejected"    "empty_allowlist_ambiguous"                 "0.9.0-preview.204"
+
 # 0.9.0-preview.200 —— #2969 节点级对端白名单（peer_allowlist / peer_not_allowed）。
 check_feature "peer allowlist"                    "peer_not_allowed"                          "0.9.0-preview.200"
 
