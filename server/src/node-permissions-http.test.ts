@@ -522,7 +522,10 @@ describe("未绑定令牌的写调用：默认只记录，不拦", () => {
   const unboundKey = () => {
     const alias = `ghost-alias-${stamp}`;
     const tokenId = `tok_ghost_${stamp}`;
-    db.run("INSERT OR IGNORE INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, 'network')",
+    // 🔴 不能用 `INSERT OR IGNORE`：那是 SQLite 专有语法，PostgreSQL 会直接
+    // `syntax error at or near "OR"`（test2123-hub-postgres-ladder 实测）。
+    // 两边都认的写法是 ON CONFLICT ... DO NOTHING。
+    db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, 'network') ON CONFLICT (token_id) DO NOTHING",
       [tokenId, `hash_${tokenId}`, user.boss.id, net, `node:${alias}`]);
     return tokenId;
   };

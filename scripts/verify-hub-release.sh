@@ -230,8 +230,11 @@ check_feature "busy elapsed split"                "busyElapsedNote"             
 # 0.9.0-preview.201 —— #2969 后半：接口白名单（tool_allowlist / tool_not_allowed）。
 check_feature "tool allowlist"                    "tool_not_allowed"                          "0.9.0-preview.201"
 
-# 0.9.0-preview.202 —— #2721 假信号：启动预热窗内的 tick gap 不算停顿。
-check_feature "stall boot warmup"                 "COMMHUB_STALL_WARMUP_MS"                   "0.9.0-preview.202"
+# 0.9.0-preview.210 —— #2721 假信号：启动尖峰不算停顿。
+# 🔴 环境变量在 .210 改名了：COMMHUB_STALL_WARMUP_MS → COMMHUB_STALL_BOOT_GRACE_MS，
+#    语义也跟着变（不再是「前 N 秒全不记」，而是「只在第一个 tick 且进程刚起来时跳过」）。
+#    改名当场把这条探针打红了一次 —— 探针的意义就在这里：改名会让「能力是否仍在」失去锚点。
+check_feature "stall boot grace"                  "COMMHUB_STALL_BOOT_GRACE_MS"               "0.9.0-preview.210"
 
 # 0.9.0-preview.203 —— #1510 严格档：transport 未上报独立成原因码。
 check_feature "secret transport strict"           "secret_transport_unknown"                  "0.9.0-preview.203"
