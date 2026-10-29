@@ -91,11 +91,12 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "qa-codex-copresence-stop-start": {"qa-codex-copresence-stop-start"},
     "test562b-node-remote": {"test562b-node-remote"},
     "test571-lifecycle-safety": {"test571-lifecycle-safety"},
-    "recovered-suites": {
-        "test597-dashboard-slash-namespace", "test679-task-trace",
-        "qa-daemon-lifecycle-e2e", "qa-rfc024-config-apply",
-        "qa-rfc027-stop-delete", "test224-grok-preview-security",
-    },
+    # #2860 —— 一个 job 拆成 4 个（并行），跳过键随之拆开：一个 key 对应一个 job，
+    # 保持 verify() 的「一 key 一 job」不变量；docs-only PR 仍然 4 个全跳。
+    "recovered-suites-a": {"test597-dashboard-slash-namespace", "test679-task-trace"},
+    "recovered-suites-b": {"qa-daemon-lifecycle-e2e", "qa-rfc024-config-apply"},
+    "recovered-suites-c": {"qa-rfc027-stop-delete"},
+    "recovered-suites-security": {"test224-grok-preview-security"},
     "test225-known-failures": {"test225-grok-preview-package-live"},
     "hub-daemon-gate": {"test735-hub-daemon-rebuild", "test2124-hub-launcher-env-scrub"},
     "private-config-gates": {

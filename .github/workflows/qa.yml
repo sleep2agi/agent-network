@@ -1010,67 +1010,82 @@ jobs:
           done
           exit $rc
 
-  recovered-suites:
-    name: recovered suites (Docker)
+  # #2860 —— 6 组 Build+Run 彼此完全独立，拆成 4 个 job 并行（原来一个 job 里 12 步串行）。
+  #
+  # 🔴 顺序不变量保住了：安全套件 test224 单独一个 job，并 `needs` 其余三个。
+  #    CLAUDE.md 的测试规则是「前一层不过就不跑后面的」——底层套件先红时，
+  #    不该已经产出一份安全证据，因为那份证据的前提根本没成立。
+  #    拆并行如果让 test224 和别的套件同时跑，这条不变量就悄悄丢了。
+  #
+  # 更早的一版（#2800）已经把 6 个镜像的构建并发化；这里拆的是**运行**那一半。
+
+  recovered-suites-a:
+    name: recovered suites A (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites"') }}
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-a"') }}
     runs-on: ubuntu-latest
-    # 2026-09-16:这个 job 正常 7.3–8.8 min(12 次抽样),但同一天两次在第 12 分钟被 timeout 取消 ——
-    # 步骤全绿、只是 Docker 构建慢了几十秒。12 太贴身,放到 16;真挂死仍会在 16 分钟被杀。
-    timeout-minutes: 16
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
-      # 🔴 顺序不是随意的。CLAUDE.md 的测试规则写明:
-      #    「分层测试,从简单到复杂:环境→认证→单点通信→完整流程→多用户→安全」
-      #    「前一层不过就不跑后面的」
-      #    所以安全套件(test224)放在最后 —— 底层套件先红时,不该已经产出
-      #    一份安全证据,因为那份证据的前提根本没成立。
-      #    第一版我把 test224 放在最前,正好把这条规则倒过来了。
-
-      # #2800 —— 6 个镜像的 docker build 相互独立，改成并发（原来串行 4.98 分钟 = 该 job 的 71%）。
-      # 运行顺序一点没动：安全套件 test224 仍在最后跑，保持
-      # 「底层套件先红时，不该已经产出安全证据」这条不变量。
-      - name: Build all recovered suite images (parallel)
+      - name: Build images (parallel within this job)
         run: |
           set -uo pipefail
           pids=()
-          # test597-dashboard-slash-namespace
           ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test597-dashboard-slash-namespace -f tests/test597-dashboard-slash-namespace/Dockerfile . ) & pids+=($!)
-          # test679-task-trace
-          ( docker build --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" -t anet-test679-task-trace -f tests/test679-task-trace/Dockerfile . ) & pids+=($!)
-          # qa-daemon-lifecycle-e2e
-          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" -t anet-qa-daemon-lifecycle-e2e -f tests/qa-daemon-lifecycle-e2e/Dockerfile . ) & pids+=($!)
-          # qa-rfc024-config-apply
-          ( docker build -t anet-qa-rfc024-config-apply -f tests/qa-rfc024-config-apply/Dockerfile . ) & pids+=($!)
-          # qa-rfc027-stop-delete
-          ( docker build -t anet-qa-rfc027-stop-delete -f tests/qa-rfc027-stop-delete/Dockerfile . ) & pids+=($!)
-          # test224-grok-preview-security
-          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test224-grok-preview-security -f tests/test224-grok-preview-security/Dockerfile . ) & pids+=($!)
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" -t anet-test679-task-trace -f tests/test679-task-trace/Dockerfile . ) & pids+=($!)
           rc=0
           for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
           exit $rc
 
       - name: Run test597-dashboard-slash-namespace
         run: |
-          set -o pipefail   # 🔴 不加它,tee 的 0 会盖掉套件的非零退出
+          set -o pipefail
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-test597-dashboard-slash-namespace \
-            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test597.log"
+            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test597-dashboard-slash-namespace.log"
 
       - name: Run test679-task-trace
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-test679-task-trace \
-            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test679.log"
+            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test679-task-trace.log"
 
-      # daemon full-chain lifecycle. Sits here, not in qa.sh's L1_TESTS:
-      # the suite RUNS in 11s but COLD-BUILDS in ~244s (three bun installs
-      # + obfuscated build + two npm packs), and qa.sh builds L1 serially
-      # inside a 5-minute job that already spends 141-148s. Measuring only
-      # the run time is measuring the wrong half.
-      # Placed before test224 so the security suite remains last.
+      # root 容器写进 bind mount 的产物属主是 root/mode 0600，upload-artifact 会 EACCES。
+      - name: Normalize artifact permissions
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
+          chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-suite-artifacts-a
+          path: ${{ runner.temp }}/suite-artifacts
+          if-no-files-found: warn
+
+  recovered-suites-b:
+    name: recovered suites B (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-b"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images (parallel within this job)
+        run: |
+          set -uo pipefail
+          pids=()
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" -t anet-qa-daemon-lifecycle-e2e -f tests/qa-daemon-lifecycle-e2e/Dockerfile . ) & pids+=($!)
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-qa-rfc024-config-apply -f tests/qa-rfc024-config-apply/Dockerfile . ) & pids+=($!)
+          rc=0
+          for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+          exit $rc
+
       - name: Run qa-daemon-lifecycle-e2e
         run: |
           set -o pipefail
@@ -1078,13 +1093,6 @@ jobs:
           docker run --rm anet-qa-daemon-lifecycle-e2e \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-daemon-lifecycle-e2e.log"
 
-      # RFC-024 config-apply contract. Was an orphan (no CI reference at all)
-      # and could not have been added as-is: its EXIT trap ran
-      # `kill "${HUB_PID:-0}" "${NODE_PID:-0}"`, and NODE_PID is never assigned
-      # anywhere in that file — so `kill 0` signalled the whole process group,
-      # the script SIGTERM'd itself, and the exit code was 143 REGARDLESS of
-      # FAIL. Fixed in the same PR; witnessed both ways (FAIL=0 → rc=0,
-      # one injected failure → rc=1) before wiring it here.
       - name: Run qa-rfc024-config-apply
         run: |
           set -o pipefail
@@ -1092,15 +1100,39 @@ jobs:
           docker run --rm anet-qa-rfc024-config-apply \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-rfc024-config-apply.log"
 
-      # RFC-027 stop/delete lifecycle. Was an orphan; 59 assertions, all green
-      # on today's main — no bit-rot. Wired here rather than left unrun because
-      # it already covers two things that were about to be written from scratch:
-      # sibling isolation asserted down to the grandchild PID (each child is
-      # detached:true, so the stop's pgid scope is the wrapper's, not the
-      # daemon's), and cross-tenant refusal (forbidden_cross_tenant /
-      # daemon_not_resolvable / per-network list_my_children).
-      # Exit-code semantics verified by mutation, not by reading: injecting one
-      # `bad` turns rc 0 -> 1.
+      # root 容器写进 bind mount 的产物属主是 root/mode 0600，upload-artifact 会 EACCES。
+      - name: Normalize artifact permissions
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
+          chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-suite-artifacts-b
+          path: ${{ runner.temp }}/suite-artifacts
+          if-no-files-found: warn
+
+  recovered-suites-c:
+    name: recovered suites C (Docker)
+    needs: changes
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-c"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images (parallel within this job)
+        run: |
+          set -uo pipefail
+          pids=()
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-qa-rfc027-stop-delete -f tests/qa-rfc027-stop-delete/Dockerfile . ) & pids+=($!)
+          rc=0
+          for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+          exit $rc
+
       - name: Run qa-rfc027-stop-delete
         run: |
           set -o pipefail
@@ -1108,14 +1140,39 @@ jobs:
           docker run --rm anet-qa-rfc027-stop-delete \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-rfc027-stop-delete.log"
 
+      # root 容器写进 bind mount 的产物属主是 root/mode 0600，upload-artifact 会 EACCES。
+      - name: Normalize artifact permissions
+        if: always()
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
+          chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-suite-artifacts-c
+          path: ${{ runner.temp }}/suite-artifacts
+          if-no-files-found: warn
+
+  # 安全套件：单独一个 job，且 `needs` 其余三个 —— 顺序不变量见本段开头的注释。
+  recovered-suites-security:
+    name: recovered suites · security last (Docker)
+    needs: [changes, recovered-suites-a, recovered-suites-b, recovered-suites-c]
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-security"') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test224 image
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test224-grok-preview-security -f tests/test224-grok-preview-security/Dockerfile .
+
       - name: Run test224-grok-preview-security
-        # 🔴 --network none 不是可选项:tests/test224-.../Dockerfile 第 13 行明写
-        # 「the actual gate is run with --network none」,而 run.sh 会打印
-        # 「runtime executed with network disabled」。不带这个 flag,那句话就是假的 ——
-        # 实测两种跑法都 PASS 且都打印同一句,套件自己不会拦住这个错误。
-        #
-        # /artifacts 挂出来:该套件把 report-test224.txt 写在容器内 /artifacts 下,
-        # 而 --rm 会把那个文件系统删掉 —— 跑完什么都不留,门每次都真跑却无证据可查。
+        # 🔴 --network none 不是可选项：tests/test224-.../Dockerfile 第 13 行明写
+        #    「the actual gate is run with --network none」，不带这个 flag，那句声明就是假的。
+        # /artifacts 挂出来：该套件把 report-test224.txt 写在容器内 /artifacts 下，--rm 会删掉它。
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
@@ -1124,23 +1181,17 @@ jobs:
             anet-test224-grok-preview-security \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test224.log"
 
-      # 三个 suite 都是 root 容器写进 bind mount 的,产物属主 root、mode 0600。
-      # upload-artifact 以 runner 用户打包 → EACCES: permission denied,
-      # 于是「门全绿但 job 判红」,而且证据也归档不了。实测报错:
-      #   Error: EACCES: permission denied, open '.../suite-artifacts/report-test224.txt'
-      # if: always() —— 前面步骤红时更需要把证据传出来。
-      - name: Normalize recovered-suite artifact permissions
+      - name: Normalize artifact permissions
         if: always()
         run: |
           sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
           chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
 
-      - name: Upload recovered-suite artifacts
-        # if: always() —— 套件红了才最需要看它的输出
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recovered-suite-artifacts
+          name: recovered-suite-artifacts-security
           path: ${{ runner.temp }}/suite-artifacts
           if-no-files-found: warn
 
