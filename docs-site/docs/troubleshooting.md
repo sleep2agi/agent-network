@@ -143,7 +143,6 @@ anet hub admin reset-user --username <username>
 ### 其它认证/network 报错
 
 <a id="quota-exceeded-max-n-networks-for-free-plan"></a>
-<a id="license-expired-授权过期-legacy-行为"></a>
 
 | 报错 | 安全处理 |
 |---|---|
@@ -152,9 +151,8 @@ anet hub admin reset-user --username <username>
 | `network name already exists` | 查看当前 network，换一个名称；不要直接改数据库 |
 | `network has N active session(s)` | 用 `anet status` 找出节点，正常停止后再删除 network |
 | `quota exceeded` | 用 `anet network ls` 检查并删除不再使用的 network。目前没有公开 CLI 可修改用户 plan/全局角色；联系 Hub 运维，不要把用户直接改成全局 admin |
-| `license_expired` | 运行 `anet license` 并升级后仍出现时，联系 Hub 运维。目前没有安全的公开 CLI 可清理 legacy 行；停止 Hub、备份数据库并提交脱敏诊断，不要在线删除 `licenses` 行 |
 
-直接写数据库会绕过 API 的鉴权、审计和一致性检查，并可能损坏关联的许可或身份状态，所以这里不提供 SQL“修复”。
+直接写数据库会绕过 API 的鉴权、审计和一致性检查，并可能损坏关联的身份状态，所以这里不提供 SQL“修复”。
 
 ## Agent Node
 

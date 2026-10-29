@@ -227,6 +227,9 @@ check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"        
 # 0.9.0-preview.193 —— #2884 共享会话忙的失败分开报排队/会话等待（读时投影）。
 check_feature "busy elapsed split"                "busyElapsedNote"                           "0.9.0-preview.193"
 
+# 0.9.0-preview.199 —— 纯开源化：license 端点删除；send_task 不再检查 licenses.expires_at。
+check_feature "no license gate in send_task"      "不再产生 license_expired"                   "0.9.0-preview.199"
+
 # 0.9.0-preview.198 —— #2964 后半：扫「状态 error 且原因登录失效」的会话，每节点每天一条告警。
 check_feature "auth blocked alert scan"           "scanModelAuthBlockedNodes"                 "0.9.0-preview.198"
 

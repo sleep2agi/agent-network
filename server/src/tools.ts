@@ -2128,17 +2128,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }
       }
 
-      // License check
-      const license = db.get<any>("SELECT type, expires_at FROM licenses ORDER BY created_at LIMIT 1");
-      if (license?.expires_at) {
-        const now = new Date().toISOString().replace("T", " ").slice(0, 19);
-        if (license.expires_at < now) {
-          return { content: [{ type: "text" as const, text: JSON.stringify({
-            ok: false, error: "license_expired",
-            message: "Trial expired. Activate a license: anet activate <key>",
-          }) }] };
-        }
-      }
+      // 🔴 2026-10-29 —— license 检查已删除（纯开源，没有许可概念）。
+      // 原来是：licenses 表第一行的 expires_at 过了就拒派活（error: license_expired）。
+      // 这在一个自部署的开源 Hub 上是纯粹的故障源：
+      //   · 首次启动会自动插一条 14 天 trial（那一行在 db.ts，已一并删除）
+      //   · 端点 /api/license/activate 又没有鉴权，谁都能换掉这一行
+      //   · 一旦过期，整台 Hub 的 send_task 全部失败，而界面上只看到「Trial expired」
+      // 现在不读 licenses 表，也不再产生 license_expired。
 
       const canonical = resolveCanonicalAlias(effectiveNetId, alias);
       const targetAlias = canonical.alias;

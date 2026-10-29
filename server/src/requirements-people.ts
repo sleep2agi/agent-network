@@ -83,6 +83,36 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
     "SELECT node_id, alias, node_name, owner_user_id, department_id, updated_at, lifecycle_state FROM nodes WHERE network_id = ?1 ORDER BY COALESCE(alias, node_name), node_id",
     networkId,
   ).filter(n => !hidden?.(n.node_id));
+  // #2965 —— 同 alias 多 node 行时**不删行**（保持既有契约：重复项照样列出，客户端去重），
+  // 只额外给一个确定性的「该保留哪条」：其余行带 `duplicate_of = <首选 node_id>`。
+  //
+  // 为什么必须由 hub 判：客户端只看得到 updated_at，而重复注册常发生在同一秒 ——
+  // 实测 TM客户端基建牛 三条 updated_at 完全相同（2026-10-26 12:26:22），
+  // 按「保留最新」会随机留一条，而真正在跑的是**有会话**的那条（客户端看不到会话）。
+  //
+  // 规则：有会话 > updated_at 新 > node_id 字典序（最后一条只为让结果稳定）。
+  const liveNodeIds = new Set(
+    db.all<{ node_id: string | null }>("SELECT DISTINCT node_id FROM sessions WHERE network_id = ?1", networkId)
+      .map(r => r.node_id).filter((x): x is string => !!x),
+  );
+  const byAliasForRank = new Map<string, typeof nodes>();
+  for (const n of nodes) {
+    const key = n.alias || n.node_name;
+    const bucket = byAliasForRank.get(key);
+    if (bucket) bucket.push(n); else byAliasForRank.set(key, [n]);
+  }
+  const preferredByAlias = new Map<string, string>();
+  for (const [key, bucket] of byAliasForRank) {
+    if (bucket.length < 2) continue;
+    const ranked = [...bucket].sort((a, b) => {
+      const alive = Number(liveNodeIds.has(b.node_id)) - Number(liveNodeIds.has(a.node_id));
+      if (alive !== 0) return alive;
+      const t = String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""));
+      if (t !== 0) return t;
+      return a.node_id.localeCompare(b.node_id);
+    });
+    preferredByAlias.set(key, ranked[0].node_id);
+  }
   const memberIds = new Set(members.map(m => m.user_id));
   const byOwner = new Map<string, DirectoryAgent[]>();
   const unowned: DirectoryAgent[] = [];
@@ -97,6 +127,12 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
       // #2596 —— 客户端据此做「按 alias 去重（保留最新）」与「默认只看近 7 天」。
       updated_at: n.updated_at ?? null,
       lifecycle_state: n.lifecycle_state ?? null,
+      // #2965 —— 同 alias 的重复行：这一格指向「首选 node_id」，没有重复时不出现。
+      // 客户端可以据此只显示首选那条；也可以像以前一样自己按 updated_at 去重（行为不变）。
+      ...(() => {
+        const pref = preferredByAlias.get(n.alias || n.node_name);
+        return pref && pref !== n.node_id ? { duplicate_of: pref } : {};
+      })(),
     };
     if (n.owner_user_id && memberIds.has(n.owner_user_id)) {
       const list = byOwner.get(n.owner_user_id) ?? [];

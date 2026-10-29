@@ -124,16 +124,25 @@ NET_B=$(echo "$RB" | python3 -c "import json,sys; print(json.load(sys.stdin).get
 R=$(curl -s -X POST "$BASE/api/auth/tokens" -H "$AUTH" -H "Content-Type: application/json" -d "{\"name\":\"hack\",\"network_id\":\"$NET_B\"}")
 echo "$R" | grep -qE 'not a member|error' && pass "cross-network token blocked" || fail "privilege escalation possible!"
 
-# 6. License tampering
-echo "6. License"
-# Bad key format
-R=$(curl -s -X POST "$BASE/api/license/activate" -H "Content-Type: application/json" -d '{"key":"bad"}')
-echo "$R" | grep -q '"ok":false' && pass "bad license key rejected" || fail "bad key accepted"
-
-# Valid key
-R=$(curl -s -X POST "$BASE/api/license/activate" -H "Content-Type: application/json" -d '{"key":"anet-TEST-1234-5678-ABCD"}')
-echo "$R" | grep -q '"ok":true' && pass "valid license key accepted" || fail "valid key rejected"
-echo "$R" | grep -q '"pro"' && pass "upgraded to pro" || fail "not pro"
+# 6. License tampering —— 🔴 2026-10-29 起这条检查改成「端点必须不存在」。
+#
+# 纯开源版删掉了 license / 激活码体系（PR #3200）：
+#   GET  /api/license           → 删除
+#   POST /api/license/activate  → 删除（它原本**完全没有鉴权**，还会 DELETE FROM licenses）
+# 因此这里不再断言「坏 key 被拒 / 好 key 变 pro」，而是断言「这两条路都走不通」。
+# 用「存在性」断言而不是 404：未认证请求会先被全局鉴权拦成 401，
+# 只有带令牌才看得到 404（实测两种都试过）。
+echo "6. License（已删除，只验证不可达）"
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/license/activate" -H "Content-Type: application/json" -d '{"key":"anet-TEST-1234-5678-ABCD"}')
+case "$CODE" in
+  401|403|404) pass "license activate unreachable (HTTP $CODE)" ;;
+  *) fail "license activate still reachable (HTTP $CODE) — the unauthenticated delete-the-table endpoint is back" ;;
+esac
+CODE2=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/license")
+case "$CODE2" in
+  401|403|404) pass "license status unreachable (HTTP $CODE2)" ;;
+  *) fail "license status still reachable (HTTP $CODE2)" ;;
+esac
 
 # 7. MCP without proper auth
 echo "7. MCP auth"

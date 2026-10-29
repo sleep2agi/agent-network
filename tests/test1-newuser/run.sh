@@ -57,11 +57,14 @@ ME=$(curl -s "$BASE/api/auth/me" -H "$REST_AUTH")
 echo "$ME" | grep -q '"newuser"' && pass "auth/me" || fail "auth/me"
 echo "$ME" | grep -q '"networks"' && pass "networks in profile" || fail "no networks"
 
-# 6. License
-echo "6. License"
-LIC=$(curl -s "$BASE/api/license")
-echo "$LIC" | grep -q '"trial"' && pass "trial license" || fail "no trial"
-echo "$LIC" | grep -q '"days_left"' && pass "days_left" || fail "no days_left"
+# 6. License —— 2026-10-29 起该功能已删除（PR #3200，纯开源）。
+#    新用户不再自动获得 14 天 trial；/api/license 直接 404（未认证先 401）。
+echo "6. License removed (pure OSS)"
+LIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/license")
+case "$LIC_CODE" in
+  401|403|404) pass "no license concept (HTTP $LIC_CODE)" ;;
+  *) fail "license endpoint still answers (HTTP $LIC_CODE)" ;;
+esac
 
 # 7. Create node token
 echo "7. Node token"

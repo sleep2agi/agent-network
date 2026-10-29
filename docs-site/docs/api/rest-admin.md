@@ -668,61 +668,12 @@ ws://localhost:9200/ws/tmux/anet-node-代码1号
 ## Legacy 端点（v0.6 时代，OSS 后不再演进）
 
 ::: warning Apache 2.0 OSS 后不再依赖
-v0.8 起项目转 Apache 2.0 开源 + 自部署，没有官方付费 license。下面两个 endpoint 是 v0.6 试用 / 激活码体系的遗留路径，hub 仍保留 `licenses` 表 + 14 天 trial 兜底，但**新用户和文档主线不需要碰**。命中 `license_expired` 见 [troubleshooting](/troubleshooting#license-expired-授权过期-legacy-行为)。
+::: tip 2026-10-29 起 license 功能已整体移除
+开源版没有任何许可 / 激活码 / 额度概念。`GET /api/license` 与 `POST /api/license/activate`
+已删除（返回 404），`send_task` 也不再检查许可过期，因此**不会再出现 `license_expired`**。
+CLI 的 `anet license` / `anet activate` 保留命令名，但只打印「功能已移除」。
+`licenses` 表留在库里但不再被读写（历史行不删除）。
 :::
 
-### GET /api/license
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
-查 `licenses` 表第一行（按 `created_at` 升序），返回 trial / pro 状态 + 剩余天数。
-
-```bash
-curl http://localhost:9200/api/license
-# → 公开端点（不需要 Authorization header）
-```
-
-**响应**（trial / pro）：
-
-```json
-{
-  "ok": true,
-  "license": { "type": "trial", "expires_at": "2026-04-25 12:00:00", "days_left": 12, "expired": false },
-  "limits": { "max_agents": 5, "max_networks": 3, "max_tasks_day": 500 }
-}
-```
-
-**响应**（无 license 行）：
-
-```json
-{ "ok": true, "status": "no_license" }
-```
-
-### POST /api/license/activate
-
-> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
-注入 pro license key（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 只校验 `key.startsWith('anet-') && length >= 16`，**没真正的服务端校验**）。删除原有 license 行 + 写新 pro license（限额 50 agent / 10 network / 10000 task/day，过期 365 天）。
-
-```bash
-curl -X POST http://localhost:9200/api/license/activate \
-  -H "Content-Type: application/json" \
-  -d '{"key": "anet-anything-16-plus-chars"}'
-```
-
-**响应**（成功）：
-
-```json
-{ "ok": true, "type": "pro", "expires_in_days": 365 }
-```
-
-**4xx**：
-
-| 状态 | `error` 值 | 触发条件 |
-|------|------------|---------|
-| 400 | `key required` | 请求体缺 `key` |
-| 400 | `invalid license key` | `key` 不以 `anet-` 开头或长度 < 16（**仅前缀长度校验，无真实签名**） |
-
-> 这个 endpoint 几乎是「自助绕过」，OSS 后只为兜底命中 `license_expired` 用。详见 [troubleshooting — license_expired](/troubleshooting#license-expired-授权过期-legacy-行为) + [CLI `anet activate`](/guide/cli#其他)。
-
+---
 ---
