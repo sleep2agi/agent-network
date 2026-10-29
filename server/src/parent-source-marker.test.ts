@@ -31,9 +31,20 @@ describe("#669 parent source marker", () => {
     expect(inserts.some((l) => l.includes("metaJsonWithParent"))).toBe(true);
   });
 
-  test("REST /api/task 不走推断，因此不需要该标记（防止有人误加一份第二真相）", () => {
+  // 这条原本断言「REST 里根本没有 parent_source」——理由是「REST 不走推断，
+  // 不要造第二真相」。方向对，但结论错了一半：REST 确实**不该推断**，
+  // 可它建的子任务同样是显式父子关系，不标就会被统计漏掉。
+  //
+  // 实测（2026-10-29，.195 上线后 90 分钟）：3 条带 parent 的任务全部走 REST、
+  // 全部没有 parent_source。而 MCP 那条路是标的 ⇒ 分母只含 MCP，
+  // explicit 占比会被系统性压低。#669 要统计的正是这个比例。
+  test("REST /api/task 标「显式」，但不推断", () => {
     const rest = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
     expect(rest).toContain("body.parent_task_id ?? null");
-    expect(rest.includes("parent_source")).toBe(false);
+    expect(rest).toContain('parent_source: "explicit"');
+    // 不能出现第二份推断：REST 里没有「找最近 delivered」这种 SQL。
+    const restBlock = rest.slice(rest.indexOf("const metaWithParent"), rest.indexOf("const metaWithParent") + 400);
+    expect(restBlock.toLowerCase()).not.toContain("delivered");
+    expect(rest).not.toContain('parentSource = "inferred"');
   });
 });

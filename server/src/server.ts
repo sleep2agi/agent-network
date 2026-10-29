@@ -4248,7 +4248,15 @@ return Bun.serve({
         : restAuth
           ? "user"
           : "legacy";
-      const metaJson = normalizeMetaJson(stampTaskAuthOrigin(mergedMeta, authOrigin));
+      // #669 —— REST 这一侧只标「显式」，**绝不推断**（推断只存在于 MCP send_task）。
+      // 但不标就会有一个偏差：REST 建的子任务全部落进「无标记」，
+      // 而 MCP 建的显式子任务有标记 ⇒ 统计里 explicit 被系统性地压低。
+      // 实测（2026-10-29）：近 90 分钟 3 条带 parent 的任务全部走 REST、全部无标记。
+      // parent_source 已排除出幂等指纹（task-idempotency.ts），加上它不影响重放判定。
+      const metaWithParent = body.parent_task_id
+        ? { ...(mergedMeta && typeof mergedMeta === "object" ? mergedMeta : {}), parent_source: "explicit" }
+        : mergedMeta;
+      const metaJson = normalizeMetaJson(stampTaskAuthOrigin(metaWithParent, authOrigin));
 
       // Client-request-id idempotency, mirroring the MCP `send_task` tool
       // (tools.ts). The app/Dashboard mint one `meta.client_request_id` per
