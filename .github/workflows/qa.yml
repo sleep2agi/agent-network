@@ -1022,7 +1022,7 @@ jobs:
   recovered-suites-a:
     name: recovered suites A (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites"') }}
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-a"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -1070,7 +1070,7 @@ jobs:
   recovered-suites-b:
     name: recovered suites B (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites"') }}
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-b"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 16
     steps:
@@ -1118,7 +1118,7 @@ jobs:
   recovered-suites-c:
     name: recovered suites C (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites"') }}
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-c"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -1159,7 +1159,7 @@ jobs:
   recovered-suites-security:
     name: recovered suites · security last (Docker)
     needs: [changes, recovered-suites-a, recovered-suites-b, recovered-suites-c]
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites"') }}
+    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-security"') }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
