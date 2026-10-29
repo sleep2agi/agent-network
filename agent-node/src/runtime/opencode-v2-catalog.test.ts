@@ -45,13 +45,14 @@ test("target validation never reaches a remote host", async () => {
     await expect(readOpenCodeCatalog({ scope, url, authorization: "Basic fake" })).rejects.toThrow("invalid_target");
   }
 });
-test("authenticated local API fetch preserves scope and rejects auth failures without echo", async () => {
+test("authenticated local API fetch preserves scope in the native directory header and rejects auth failures without echo", async () => {
   let requests = 0;
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) {
     requests++;
     if (req.headers.get("authorization") !== "Basic fake") return new Response("sk-FAKE-hidden", { status: 401 });
     const url = new URL(req.url);
-    expect(url.searchParams.get("directory")).toBe(scope.directory);
+    expect(url.searchParams.get("directory")).toBeNull();
+    expect(req.headers.get("x-opencode-directory")).toBe(scope.directory);
     return Response.json(wrap(url.pathname === "/api/provider" ? providers : url.pathname === "/api/model" ? models : models[0]));
   } });
   try {

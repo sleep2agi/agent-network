@@ -104,8 +104,13 @@ export async function readOpenCodeCatalog(opts: {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const read = async (path: string): Promise<unknown> => {
     const url = new URL(path, base);
-    url.searchParams.set("directory", opts.scope.directory);
-    const response = await fetch(url, { headers: { authorization: opts.authorization }, redirect: "error", signal: controller.signal });
+    // OpenCode selects the project from this header. A `directory` query
+    // parameter is ignored by the native server, which then reports the
+    // process-global directory and makes every catalog read look out of scope.
+    const response = await fetch(url, { headers: {
+      authorization: opts.authorization,
+      "x-opencode-directory": opts.scope.directory,
+    }, redirect: "error", signal: controller.signal });
     if (response.status === 401 || response.status === 403) throw new OpenCodeCatalogError("unauthorized");
     if (!response.ok) throw new OpenCodeCatalogError("unavailable");
     if (!response.body) throw new OpenCodeCatalogError("invalid_response");

@@ -70,7 +70,8 @@ test("tilde and symlink workdirs match the endpoint, and the snapshot keeps the 
   let queried = "";
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) {
     const url = new URL(req.url);
-    queried = url.searchParams.get("directory") || "";
+    expect(url.searchParams.get("directory")).toBeNull();
+    queried = req.headers.get("x-opencode-directory") || "";
     const row = url.pathname === "/api/model/default" ? { providerID: "custom", id: "m" } : url.pathname === "/api/model"
       ? [{ providerID: "custom", id: "m" }] : [{ id: "custom", activation: "enabled" }];
     return Response.json({ location: { directory: queried }, data: row });

@@ -19,7 +19,8 @@ test("doorbell reads the owned loopback and acks a whitelist snapshot", async ()
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) {
     requests++;
     const url = new URL(req.url);
-    expect(url.searchParams.get("directory")).toBe(project);
+    expect(req.headers.get("x-opencode-directory")).toBe(project);
+    expect(url.searchParams.has("directory")).toBe(false);
     const row = url.pathname === "/api/model/default" ? { providerID: "custom", id: "m" } : url.pathname === "/api/model"
       ? [{ providerID: "custom", id: "m" }] : [{ id: "custom", activation: "enabled", settings: { apiKey: "sk-FAKE" } }];
     return Response.json({ location: { directory: project }, data: row });
