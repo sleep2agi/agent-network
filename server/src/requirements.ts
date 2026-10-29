@@ -1962,7 +1962,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const row = scopedRow(ctx, decodeURIComponent(itemMatch[1]));
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
-    const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id/checklist/:item", row);
+    const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id/checklist/:id", row);
     if (nodeDenied) return nodeDenied;
     if (!canEditTask(taskCaller(ctx), row) && !canParticipantEditTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_read_only");
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
