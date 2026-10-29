@@ -57,8 +57,11 @@ function parseArgs(argv: string[]) {
  * ⇒ 断言自己那份库内容的用例必红（即使单文件跑永远绿）。
  *
  * 判据不手写：直接读文件内容。加了新文件也自动成立。
+ *
+ * 🔴 别把正则写成 `\s*=`：多数文件用的是 `process.env.COMMHUB_DB ||= …`（允许外部覆盖），
+ *    那样会漏掉 41 个文件（实测 55 个里有 41 个是 ||= 形式），排除集只剩 14 个。
  */
-const OWNS_PROCESS_DB_RE = /^process\.env\.COMMHUB_DB\s*=/m;
+const OWNS_PROCESS_DB_RE = /^process\.env\.COMMHUB_DB\b/m;
 function ownsProcessDb(file: string): boolean {
   try { return OWNS_PROCESS_DB_RE.test(readFileSync(join(REPO_ROOT, file), "utf8")); } catch { return false; }
 }
