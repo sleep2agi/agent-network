@@ -615,3 +615,31 @@ describe("#2969 REST 写白名单", () => {
     db.run("UPDATE nodes SET rest_allowlist = NULL WHERE node_id = ?1", [node.nN.id]);
   });
 });
+
+// #2970 判据④ —— 演练发现的口径问题：
+// `node_permission_log` 的行数**不等于**「打开 enforce 行为会变」的次数。
+// 演练现场：log 模式下 projects_create 已被处理函数拒（user_token_required），
+// 但仍记了一行 human_only —— 计入影响面就会高估。
+describe("#2970 enforce 影响面分层", () => {
+  test("原因码分三类：显式永久拒 / 多数已在下游被拦 / 只有 enforce 才改变行为", async () => {
+    const { enforceImpactOf } = await import("./node-permissions.js");
+    // 显式原因：与开关无关，永远拒 ⇒ 不是增量
+    for (const r of ["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed", "tool_not_allowed", "rest_not_allowed"]) {
+      expect(enforceImpactOf(r as any)).toBe("explicit");
+    }
+    // human_only：多数写路由自带「只有人能操作」检查，log 下调用方本来就被拒
+    expect(enforceImpactOf("human_only")).toBe("likely_already_blocked");
+    // 只有这三类 + unbound_token 是 enforce 的真增量
+    for (const r of ["beyond_owner_visibility", "agent_not_granted_to_owner", "owner_unknown", "unbound_token"]) {
+      expect(enforceImpactOf(r as any)).toBe("changes_behavior");
+    }
+  });
+
+  test("报表带 enforce_impact 分层汇总", async () => {
+    const r = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    expect(r.status).toBe(200);
+    expect(r.body.enforce_impact).toBeTruthy();
+    // 每个节点也带同名结构
+    for (const n of r.body.nodes) expect(n.enforce_impact).toBeTruthy();
+  });
+});
