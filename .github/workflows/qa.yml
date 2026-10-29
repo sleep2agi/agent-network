@@ -1727,9 +1727,19 @@ jobs:
       - name: Build + run ${{ matrix.suite }}
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
         run: |
-          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+          # 从 Dockerfile 里读 provenance ARG 名，不硬编码。
+          # 硬编码 --build-arg SOURCE_COMMIT 时，用别的名字的套件会拿到空值，然后被自己的
+          # SHA 校验拒绝启动（test668 就是这样：它要 TEST668_SOURCE_COMMIT，0.4 分钟即报
+          # FAIL: TEST668_SOURCE_COMMIT must be one full lowercase Git SHA）。
+          DF="tests/${{ matrix.suite }}/Dockerfile"
+          BUILD_ARGS=()
+          while read -r name; do
+            [ -n "$name" ] && BUILD_ARGS+=(--build-arg "$name=$GITHUB_SHA")
+          done < <(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' "$DF" | awk '{print $2}')
+          echo "detected build args: ${BUILD_ARGS[*]:-(none)}"
+          docker build "${BUILD_ARGS[@]}" \
             -t anet-${{ matrix.suite }} \
-            -f tests/${{ matrix.suite }}/Dockerfile .
+            -f "$DF" .
           # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
           #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
           #        所以先把退出码收进 rc,取完再原样退出。
