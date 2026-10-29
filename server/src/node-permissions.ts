@@ -27,11 +27,19 @@ export type NodePermissionReason =
   | "mode_readonly"
   | "mode_restricted_not_assigned"
   | "human_only"
-  | "owner_unknown";
+  | "owner_unknown"
+  /** #2969 —— 主人给这个节点设了对端白名单，目标不在名单里。 */
+  | "peer_not_allowed";
 
 /** 显式模式的原因:不看开关,永远拒。 */
-const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned"]);
+// 白名单和 readonly/restricted 同类：**主人主动设的，设了就立刻生效**，不看开关。
+const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed"]);
 
+// #2969 —— 节点级对端白名单：JSON 数组（alias 或 node_id）；NULL = 不限制。
+// 只增不改：旧代码不读这一列；设为 NULL 时行为与现在完全一致。
+try { db.exec("ALTER TABLE nodes ADD COLUMN peer_allowlist TEXT"); } catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
 try { db.exec("ALTER TABLE nodes ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'normal'"); } catch (e: any) {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
@@ -130,7 +138,19 @@ export type NodeIdentity = {
   aliases: string[];
   ownerUserId: string | null;
   mode: NodePermissionMode;
+  /** #2969 —— 对端白名单（alias / node_id 都算命中）。null = 不限制。 */
+  peerAllowlist: string[] | null;
 };
+
+function normalizePeerAllowlist(raw: unknown): string[] | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const out = parsed.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map(x => x.trim());
+    return out.length ? out : null;
+  } catch { return null; }
+}
 
 function normalizeMode(raw: unknown): NodePermissionMode {
   return raw === "readonly" || raw === "restricted" ? raw : "normal";
@@ -155,6 +175,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       aliases,
       ownerUserId: row.user_id,
       mode: "normal",
+      peerAllowlist: null,
     };
   }
   if (!resolved.ok || resolved.networkId !== networkId) {
@@ -165,6 +186,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       aliases: [],
       ownerUserId: row.user_id,
       mode: "normal",
+      peerAllowlist: null,
     };
   }
   if (resolved.kind === "unregistered") {
@@ -175,10 +197,11 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       aliases: resolved.alias ? [resolved.alias] : [],
       ownerUserId: row.user_id,
       mode: "normal",
+      peerAllowlist: null,
     };
   }
-  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null }>(
-    `SELECT owner_user_id, permission_mode FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
+  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null; peer_allowlist: string | null }>(
+    `SELECT owner_user_id, permission_mode, peer_allowlist FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
     resolved.nodeId, networkId,
   );
   return {
@@ -188,6 +211,7 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
     aliases: [resolved.alias],
     ownerUserId: node?.owner_user_id || row.user_id || null,
     mode: normalizeMode(node?.permission_mode),
+    peerAllowlist: normalizePeerAllowlist(node?.peer_allowlist),
   };
 }
 
@@ -216,6 +240,7 @@ const HINTS: Record<NodePermissionReason, string> = {
   mode_restricted_not_assigned: "this node is in restricted mode and only touches tasks assigned to it; assign the task to this node, or have the owner switch it to normal",
   human_only: "only people can do this (members, projects, permissions, providers, secrets, other nodes); use a user token",
   owner_unknown: "this node's owner is unknown; recreate the node token from the owner's account",
+  peer_not_allowed: "this node is limited to an explicit peer allowlist; the target is not on it — ask the node's owner to add it, or clear the allowlist",
 };
 
 export function nodePermissionDeniedBody(reason: NodePermissionReason, route: string): { ok: false; error: "node_permission_denied"; reason: NodePermissionReason; route: string; hint: string } {
@@ -273,6 +298,13 @@ export function __resetNodePermissionLogStateForTest(): void { lastPrune = 0; lo
 export function dispatchVerdict(id: NodeIdentity, target: AgentRef): Verdict {
   if ((target.alias && id.aliases.includes(target.alias)) || (target.nodeId && id.nodeId && target.nodeId === id.nodeId)) return null;
   const sample = target.alias ?? target.nodeId ?? undefined;
+  // #2969 —— 主人设了对端白名单：不在名单上的一律拒（显式原因，不看开关）。
+  // 命中判定用 alias 或 node_id 任一即可 —— 主人按 alias 写、节点按 node_id 找，两边都要认。
+  if (id.peerAllowlist) {
+    const hit = (target.alias && id.peerAllowlist.includes(target.alias))
+      || (target.nodeId && id.peerAllowlist.includes(target.nodeId));
+    if (!hit) return { reason: "peer_not_allowed", sample };
+  }
   if (id.mode === "readonly") return { reason: "mode_readonly", sample };
   if (!id.ownerUserId) return id.mode === "restricted" ? { reason: "mode_restricted_not_assigned", sample } : { reason: "owner_unknown" };
   if (!canMessageAgent(id.ownerUserId, id.networkId, target)) {
@@ -284,6 +316,9 @@ export function dispatchVerdict(id: NodeIdentity, target: AgentRef): Verdict {
 
 /** 广播:只读 / 受限都不行(会发给没派给它、也未必授权的 Agent)。 */
 export function broadcastVerdict(id: NodeIdentity): Verdict {
+  // #2969 —— 设了对端白名单的节点不能广播：广播的收件人是「任意对端」，
+  // 与白名单的语义直接冲突（名单说「只能找这几个」，广播说「发给所有人」）。
+  if (id.peerAllowlist) return { reason: "peer_not_allowed" };
   if (id.mode === "readonly") return { reason: "mode_readonly" };
   if (id.mode === "restricted") return { reason: "mode_restricted_not_assigned" };
   if (!id.ownerUserId) return { reason: "owner_unknown" };
