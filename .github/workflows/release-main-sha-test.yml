@@ -8,6 +8,9 @@ on:
       - 'tests/release-main-sha/**'
       - '.github/scripts/verify-npm-publish-visible.sh'
       - 'tests/release-publish-visible/**'
+      - 'tests/release-publish-tlog-recover/**'
+      - '.github/scripts/publish-outcome.py'
+      - '.github/scripts/publish-with-tlog-recover.sh'
   push:
     branches: [main]
     paths:
@@ -17,6 +20,9 @@ on:
       - 'tests/release-main-sha/**'
       - '.github/scripts/verify-npm-publish-visible.sh'
       - 'tests/release-publish-visible/**'
+      - 'tests/release-publish-tlog-recover/**'
+      - '.github/scripts/publish-outcome.py'
+      - '.github/scripts/publish-with-tlog-recover.sh'
 permissions:
   contents: read
 # #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
@@ -42,3 +48,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -f tests/release-publish-visible/Dockerfile -t release-publish-visible-test .
       - run: docker run --rm release-publish-visible-test
+  # #1510 续:发布脚本在「透明度日志冲突」与「真失败」之间的分类(桩 npm,无网络)
+  publish-tlog-recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f tests/release-publish-tlog-recover/Dockerfile -t release-publish-tlog-recover-test .
+      - run: docker run --rm release-publish-tlog-recover-test
