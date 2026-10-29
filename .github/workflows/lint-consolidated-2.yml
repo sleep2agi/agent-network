@@ -96,5 +96,10 @@ jobs:
       - name: test-suite-registration
         run: python3 .github/scripts/check-test-suite-registration.py || { echo "::error::test-suite-registration failed (有测试套件没登记进聚合门)"; exit 1; }
 
+      - name: node-rest-route-classification · selftest
+        run: python3 .github/scripts/check-node-rest-route-classification.py --selftest || { echo "::error::node-rest-route-classification selftest failed"; exit 1; }
+      - name: node-rest-route-classification
+        run: python3 .github/scripts/check-node-rest-route-classification.py || { echo "::error::有节点路由没登记（新增节点路由必须先决定它归哪一类门，并同步 rest_allowlist 文档）"; exit 1; }
+
       - name: workflow-structure
         run: python3 .github/scripts/check-workflow-structure.py || { echo "::error::workflow-structure failed (某个 job 没有可执行内容 —— 空壳门)"; exit 1; }
