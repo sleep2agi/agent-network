@@ -128,11 +128,12 @@ echo "$TOO_LONG" | grep -q '"ok":false' && echo "$TOO_LONG" | grep -q 'too long'
 echo ""
 
 echo "9. License activation..."
-LICENSE=$(curl -s -X POST http://127.0.0.1:9200/api/license/activate \
-  -H "Content-Type: application/json" \
-  -d '{"key":"anet-TEST-1234-5678-ABCD"}')
-echo "$LICENSE" | grep -q '"ok":true' && pass "license activation succeeded" || { echo "$LICENSE"; fail "license activation failed"; }
-echo "$LICENSE" | grep -q '"pro"' && pass "license upgraded to pro" || fail "license not upgraded"
+# 2026-10-29 —— license 功能已删除（PR #3200，纯开源）：端点不可达即通过。
+LICENSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:9200/api/license/activate -H "Content-Type: application/json" -d '{"key":"anet-TEST-1234-5678-ABCD"}')
+case "$LICENSE_CODE" in
+  401|403|404) pass "license activate gone (HTTP $LICENSE_CODE)" ;;
+  *) fail "license activate still reachable (HTTP $LICENSE_CODE)" ;;
+esac
 echo ""
 
 echo "========================================="
