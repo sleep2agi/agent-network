@@ -2213,6 +2213,12 @@ jobs:
         # #2800 —— 按改动范围排除无关套件；exclude 由 changes job 算好（看不清就是 []）。
         exclude: ${{ fromJSON(needs.changes.outputs.suite_skip) }}
         suite:
+          # #604 —— test466-codex-copresence-p3 起回来了。它此前**从未在 CI 里执行**：
+          # 只在 paths 过滤器里出现过，不是任何 matrix 条目（所以坏了没人知道）。
+          # 同时修了它自己的一个真问题：WORK 默认在 /tmp（1777 world-writable），
+          # 包身份校验会直接拒绝，族里报 `directory /tmp … is mode 1777`。
+          # ARG 名 TEST466_SOURCE_COMMIT 符合本 job「从 Dockerfile 读 ARG 名」的探测规则。
+          - test466-codex-copresence-p3
           # ⏱ #2136（2026-10-25）：这三个套件要装两个 ~150 MB 的 codex 二进制、各自跑 15–20 分钟,
           # 排到矩阵末尾时它们就是整条 PR 的**唯一长尾**（实测 #2994/#2998/#3000/#3002 都是最后一条）。
           # 只改**顺序**、不改任何判据与命令:提前开始 = 提前结束,PR 墙钟时间少 15 分钟左右。

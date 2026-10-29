@@ -8,7 +8,11 @@ REPO="${REPO:-/app}"
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$REPO/tests/lib/safe-rm.sh"
 
-WORK="${WORK:-/tmp/test466}"
+# #604 —— 原来默认 /tmp/test466，而 /tmp 是 1777（world-writable, sticky）。
+# 套件的包身份校验会拒绝这种目录：`directory /tmp … is mode 1777`。
+# 改到镜像内的工作目录下并显式收紧权限（容器里 /app 归 root）。
+WORK="${WORK:-/app/.work/test466}"
+mkdir -p "$WORK" && chmod 700 "$WORK"
 export HOME="$WORK/home"
 export OPENAI_API_KEY="test466-not-a-real-secret"
 export TEST466_SPAWN_DETACHED=1
