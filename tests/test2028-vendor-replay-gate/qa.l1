@@ -1,0 +1,5 @@
+Board #2028. Known OpenCode runtime failures (timeout / owner_left /
+provider / v1 refusals) must never be replayed by the generic vendor
+retry. Dropping the structured-code gate turns the suppression case red;
+calling the gate with two arguments turns the wiring assertions red.
+Cheap: one bun test file + cli building, no real runtime.

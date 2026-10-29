@@ -34,7 +34,12 @@ from pathlib import Path
 QA_SH = Path(__file__).resolve().parent / "qa.sh"
 
 
-def l1_suites(qa_sh: Path = QA_SH) -> list[str]:
+def l1_suites_from_markers(tests_dir: Path) -> list[str]:
+    """#675 之后 L1 的真实来源：每个套件目录里的 `qa.l1` 标记，按名字排序。"""
+    return sorted(p.parent.name for p in tests_dir.glob("*/qa.l1"))
+
+
+def l1_suites_from_array(qa_sh: Path = QA_SH) -> list[str]:
     text = qa_sh.read_text(encoding="utf-8")
     start = text.index("L1_TESTS=(")
     end = text.index("\n)\n", start)
@@ -52,6 +57,20 @@ def l1_suites(qa_sh: Path = QA_SH) -> list[str]:
     if len(set(names)) != len(names):
         raise SystemExit("l1-shard: duplicate suite names in L1_TESTS")
     return names
+
+
+def l1_suites(qa_sh: Path = QA_SH) -> list[str]:
+    """优先读 `tests/*/qa.l1` 标记；一个都没有时才退回 qa.sh 里的数组。
+
+    两边都取不到就直接退出 —— 分片拿到空列表会让 L1 在 CI 里“跑了但什么都没跑”，
+    而绿灯看起来与真跑无异。
+    """
+    markers = l1_suites_from_markers(qa_sh.resolve().parent.parent / "tests")
+    if markers:
+        if len(set(markers)) != len(markers):
+            raise SystemExit("l1-shard: duplicate suite names in tests/*/qa.l1")
+        return markers
+    return l1_suites_from_array(qa_sh)
 
 
 def shard_of(names: list[str], total: int, index: int) -> list[str]:

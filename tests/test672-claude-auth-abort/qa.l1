@@ -1,0 +1,2 @@
+Board #672. A fake Claude key must abort on 401 before the CLI's own
+retry loop, and must not abort a 429. docker-run.args sets --cpus=2.

@@ -54,6 +54,16 @@ def _strip_comments(text: str) -> str:
     return "\n".join(line.split("#", 1)[0] for line in text.split("\n"))
 
 
+def l1_suites(tests_dir: Path, qa_sh_text: str) -> list[str]:
+    """L1 套件名：#675 之后是 `tests/<name>/qa.l1` 标记，没有标记时才退回 L1_TESTS 数组。
+
+    只看数组会让「L1 一个都没取到」被算成「没有套件被执行」，
+    于是漏洞方向反过来：真跑了的套件被报成没跑。
+    """
+    markers = sorted(p.parent.name for p in tests_dir.glob("*/qa.l1"))
+    return markers or bash_array(qa_sh_text, "L1_TESTS")
+
+
 def bash_array(text: str, name: str) -> list[str]:
     """Entries of a `NAME=( "a" "b" )` bash array, or [] when absent."""
     m = re.search(rf"{name}=\(([^)]*)\)", _strip_comments(text), re.S)
@@ -74,7 +84,7 @@ def main() -> int:
     qa_sh = QA_SH.read_text(encoding="utf-8", errors="replace")
     # L1 entries name the directory bare (no `tests/` prefix); L0 entries name
     # source files, so only the ones that resolve to a real test dir count.
-    executed = {e for e in bash_array(qa_sh, "L1_TESTS") + bash_array(qa_sh, "L0_TESTS")
+    executed = {e for e in l1_suites(TESTS_DIR, qa_sh) + bash_array(qa_sh, "L0_TESTS")
                 if e in test_dirs}
 
     # Anything a workflow references by path is executed too.

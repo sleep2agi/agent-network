@@ -1,0 +1,5 @@
+2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的**，
+而红的表面原因（逐字计数 16 vs 17）底下藏着一道**恒真的门**：
+WEAK_COUNT 的正则对真实文件命中 0 行，那句
+"docker-e2e has no weak grep-ok assertions" 永远不可能红（#1088 修）。
+修好之后 rc=0、weak_assertions=14（真实值），才够格接进来。

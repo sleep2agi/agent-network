@@ -1,0 +1,5 @@
+2026-08-19 补注册。它一直是孤儿(docs/test-suite-orphan-baseline.txt),
+而在此之前套件里有 3 处字面量随一次改名过期(#1072):1 条 production grep
+0 命中、2 条变异锚点 0 命中 ⇒ 变异是 no-op。修好之后它有三条成立的见证红,
+才够格进这里 —— **先让它真的能红，再让 CI 跑它**。
+按 qa.sh 的真实调法(docker run --rm，不挂 /artifacts)实测 rc=0。

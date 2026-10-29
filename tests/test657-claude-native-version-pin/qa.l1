@@ -1,0 +1,5 @@
+2026-08-19 补注册。孤儿，但它本来就够格:两条 sed 变异后面都紧跟
+`grep -F '<变异后形态>' … >/dev/null`(锚点过期会当场红,而不是让变异变成 no-op),
+且 :23-25 拿 resolver 的输出和【真实已安装的 SDK 版本】比,不是自证。
+按 qa.sh 的真实调法(docker run --rm,不挂 /artifacts)实测 rc=0 pass=5 fail=0,
+两条见证红都成立。耗时 build 105s + run 2s。

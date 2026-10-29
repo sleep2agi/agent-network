@@ -1,0 +1,2 @@
+board #703: a bridge/watchdog restart must recover the exact persisted
+Codex turn and emit one durable receipt without re-running the model.
