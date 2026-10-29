@@ -2060,6 +2060,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // network A dispatch and chain-reply into the wrong tenant. The
       // explicit-parent path is verified below in F2.
       let parentTaskId: string | null = parentIn ?? null;
+      // #669 —— 记录 parent_task_id 是「显式指定」还是「推断」得来的。
+      // 没有这个标记时，那张卡要求的前置统计（多少子任务靠推断挂上）根本做不出来：
+      // tasks 表只存了 parent_task_id，不记它是怎么来的（实测近 7 天 949 条里 0 条可区分）。
+      let parentSource: "explicit" | "inferred" | null = parentIn ? "explicit" : null;
       if (!humanSender && !parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
         try {
           const recentParams: any[] = [from_session];
@@ -2067,7 +2071,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           recentSql = addScope(recentSql, recentParams, effectiveNetId);
           recentSql += " ORDER BY created_at DESC LIMIT 1";
           const recent = db.get<{ task_id: string }>(recentSql, ...recentParams);
-          if (recent?.task_id) parentTaskId = recent.task_id;
+          if (recent?.task_id) { parentTaskId = recent.task_id; parentSource = "inferred"; }
+        } catch {}
+      }
+
+      // #669 —— 把来源写进 meta（只在确实有 parent 时）。失败不影响派发：
+      // 这只是给后续统计用的旁证字段，不能让一次序列化异常挡住一条任务。
+      let metaJsonWithParent = metaJson;
+      if (parentSource && parentTaskId) {
+        try {
+          const base = metaJson ? JSON.parse(metaJson) : {};
+          metaJsonWithParent = normalizeMetaJson({ ...base, parent_source: parentSource });
         } catch {}
       }
 
@@ -2225,12 +2239,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         db.run(
           `INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, context, from_session, requires_response, network_id, meta_json)
            VALUES (?1, ?1, ?2, ?3, 'task', ?4, ?5, ?6, ?7, 'reply', ?8, ?9)`,
-          [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJson]
+          [id, targetAlias, targetNodeId, priority, task, context ?? null, from_session, effectiveNetId ?? null, metaJsonWithParent]
         );
         db.run(
           `INSERT INTO tasks (task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, requires_response, created_at, delivered_at, expires_at, network_id, parent_task_id, meta_json)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'delivered', ?7, 'reply', datetime('now'), datetime('now'), datetime('now', ?8), ?9, ?10, ?11)`,
-          [id, fromNodeId, from_session, targetNodeId, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJson]
+          [id, fromNodeId, from_session, targetNodeId, targetAlias, priority, task, `+${ttl_seconds || 3600} seconds`, effectiveNetId ?? null, parentTaskId, metaJsonWithParent]
         );
         const touchParams: any[] = [sessionTaskPreview(task), targetAlias];
         let touchSql = `UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE alias = ?2`;
