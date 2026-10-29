@@ -43,7 +43,7 @@ describe("#2840 节点连续确定性失败告警", () => {
     // #2964 —— 这是生产里真实出现的那一句（agent-node 的 codex-health 生成），
     // 原来的正则在它上面返回 null ⇒ 凭据过期的节点一条告警都发不出去。
     expect(classifyDeterministicFailure(
-      "codex-app-server 错误: model login expired: this node's CODEX_HOME (/home/vansin/x/.anet/nodes/n/codex-home) needs a fresh login — log in again there: CODEX_HOME=/x codex login. Not taking work until then (do not copy another node's auth.json).",
+      "codex-app-server 错误: model login expired: this node's CODEX_HOME (/home/user/.anet/nodes/n/codex-home) needs a fresh login — log in again there: CODEX_HOME=/x codex login. Not taking work until then (do not copy another node's auth.json).",
     )).toBe("login_required");
     expect(classifyDeterministicFailure("model login revoked: this node's CODEX_HOME needs a fresh login")).toBe("login_required");
     // 反例：非登录类的失败不能被吸进来
