@@ -75,16 +75,22 @@ test("buckets older than the retention are dropped", () => {
 test("p95 comes from the histogram: close to the true value and never above max", () => {
   __resetRouteTimingForTest();
   const now = 4_000_000_000;
+  // 🔴 基准时钟取一次，不要在循环里反复取 `performance.now()`。
+  // recordRouteTiming 的时长 = now - startMs，而 `at(1)` 是 `performance.now() - 1`：
+  // 每循环一次真实时钟就往前走一点，96 次之后部分样本的时长会从 1ms 漂到 6ms 以上，
+  // 落进更高的直方图桶 ⇒ p95 偶尔 > 5ms（CI 上实测 6.4）。
+  // 这不是被测代码的问题，是这条断言自己依赖了「循环期间时钟不动」。
+  const base = performance.now();
   // 96 fast (~1 ms) and 4 slow (~200 ms): p95 (the 96th of 100, same rank as the old ring's
   // sorted[floor(n·0.95)]) must be in the fast band, max in the slow band.
-  for (let i = 0; i < 96; i++) recordRouteTiming(req("/api/p"), at(1), res(), now);
-  for (let i = 0; i < 4; i++) recordRouteTiming(req("/api/p"), at(200), res(), now);
+  for (let i = 0; i < 96; i++) recordRouteTiming(req("/api/p"), base - 1, res(), now);
+  for (let i = 0; i < 4; i++) recordRouteTiming(req("/api/p"), base - 200, res(), now);
   const r = routeStats(60_000, now).routes[0];
   expect(r.p95_ms).toBeGreaterThanOrEqual(1);
   expect(r.p95_ms).toBeLessThan(5);
   expect(r.max_ms).toBeGreaterThanOrEqual(200);
   __resetRouteTimingForTest();
-  recordRouteTiming(req("/api/q"), at(3), res(), now);
+  recordRouteTiming(req("/api/q"), base - 3, res(), now);
   const one = routeStats(60_000, now).routes[0];
   expect(one.p95_ms).toBe(one.max_ms);
 });
