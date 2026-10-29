@@ -5,7 +5,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 type Counts = { pass: number; fail: number; skip: number; expects: number };
@@ -114,12 +114,14 @@ function terminateTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Sig
   }
 }
 
-let activeChild: ChildProcessWithoutNullStreams | null = null;
+// #2800 —— 并行后可能有多个子进程同时存活；原来只有一个 activeChild，
+// 多路并发时后者会覆盖前者，导致「中断时只杀掉最后一个」。
+const activeChildren = new Set<ChildProcessWithoutNullStreams>();
 let interruptedBy: NodeJS.Signals | null = null;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     interruptedBy = signal;
-    if (activeChild) terminateTree(activeChild, signal);
+    for (const child of activeChildren) terminateTree(child, signal);
   });
 }
 
@@ -138,7 +140,7 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
   });
-  activeChild = child;
+  activeChildren.add(child);
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => {
@@ -165,7 +167,7 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
   });
   clearTimeout(timeout);
   if (killTimer) clearTimeout(killTimer);
-  activeChild = null;
+  activeChildren.delete(child);
 
   const output = `${stdout}\n${stderr}`;
   const counts = parseCounts(output);
@@ -201,15 +203,28 @@ async function main() {
   if (explicitRoot) mkdirSync(runRoot, { recursive: false, mode: 0o700 });
   const keep = process.env.ANET_SERVER_TEST_KEEP_ROOT === "1";
   const results: Result[] = [];
-  try {
-    for (const file of files) {
-      if (interruptedBy) break;
-      results.push(await runFile(file, runRoot, args.timeoutMs, args.verbose));
+  // #2800 —— 每个文件本来就跑在独立子进程、独立 DB root 里，所以文件之间的隔离
+  // 不由「串行」提供；并行只改变它们同时跑几个。默认 4 路，QA_AGGREGATE_CONCURRENCY=1
+  // 可一行回滚到串行。
+  const concurrency = Math.max(1, Math.min(
+    Number(process.env.QA_AGGREGATE_CONCURRENCY) || 4,
+    cpus().length || 1,
+  ));
+  let nextIndex = 0;
+  const worker = async () => {
+    while (!interruptedBy) {
+      const i = nextIndex++;
+      if (i >= files.length) return;
+      results.push(await runFile(files[i], runRoot, args.timeoutMs, args.verbose));
     }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
   } finally {
     if (!keep) rmSync(runRoot, { recursive: true, force: true });
   }
 
+  results.sort((a, b) => a.file.localeCompare(b.file));
   const totals = results.reduce((sum, item) => ({
     pass: sum.pass + item.pass,
     fail: sum.fail + item.fail,
@@ -227,6 +242,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(`SERVER_AGGREGATE_CRASH ${error instanceof Error ? error.stack || error.message : String(error)}`);
-  if (activeChild) terminateTree(activeChild, "SIGKILL");
+  for (const child of activeChildren) terminateTree(child, "SIGKILL");
   process.exit(2);
 });
