@@ -5359,23 +5359,31 @@ return Bun.serve({
       // 每个节点只认最新那条（与 transportOf() 的取法一致：node_id 或 alias 命中）。
       const wantedIds = new Set<string>(wanted.map((r) => String(r.node_id)));
       const transportByKey = new Map<string, string | null>();
+      const aliasTransport = new Map<string, string | null>();
       if (wanted.length) {
         const ph = wanted.map((_, i) => `?${i + 1}`).join(",");
         const ids = wanted.map((r) => String(r.node_id));
-        for (const row of db.all<{ node_id: string | null; alias: string | null; env_transport: string | null }>(
-          `SELECT node_id, alias, env_transport FROM sessions
+        for (const row of db.all<{ node_id: string | null; alias: string | null; network_id: string | null; env_transport: string | null }>(
+          `SELECT node_id, alias, network_id, env_transport FROM sessions
             WHERE node_id IN (${ph}) OR alias IN (${ph})
             ORDER BY updated_at DESC`,
           ...ids, ...ids,
         )) {
           if (row.node_id && wantedIds.has(row.node_id) && !transportByKey.has(row.node_id)) transportByKey.set(row.node_id, row.env_transport);
-          if (row.alias && wantedIds.has(row.alias) && !transportByKey.has(row.alias)) transportByKey.set(row.alias, row.env_transport);
+          // alias 只在**同一网络**内兜底：不同网络可以有同名 alias，
+          // 跨网络命中会把 A 网的 transport 显示成 B 网那台 —— 这一格是给人做安全决策用的，
+          // 宁可显示 null（未知）也不能显示错的值。
+          if (row.alias && row.network_id && wantedIds.has(row.alias)) {
+            const key = `${row.network_id}|${row.alias}`;
+            if (!aliasTransport.has(key)) aliasTransport.set(key, row.env_transport);
+          }
         }
       }
-      const envTransportOf = (nodeId: string, alias: string | null): string | null => {
+      const envTransportOf = (nodeId: string, alias: string | null, networkId: string | null): string | null => {
         const direct = transportByKey.get(nodeId);
         if (direct !== undefined) return direct;
-        return alias ? transportByKey.get(alias) ?? null : null;
+        if (!alias || !networkId) return null;
+        return aliasTransport.get(`${networkId}|${alias}`) ?? null;
       };
       // Add a single new field `role: string | null` per row, extracted from
       // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'
@@ -5482,7 +5490,7 @@ return Bun.serve({
           tool_allowlist: normalizeToolAllowlist(tool_allowlist),
           // #1510 —— 管理员要能看出「谁的 transport 未知」才敢打开 strict。
           // 这一格**只读**，不参与任何判定（判定在 env-transport-policy.ts）。
-          env_transport: envTransportOf(r.node_id, r.alias),
+          env_transport: envTransportOf(r.node_id, r.alias, r.network_id),
           restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });

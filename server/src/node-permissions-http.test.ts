@@ -394,3 +394,17 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
     expect((await rowOf(node.nR.id)).env_transport).toBeNull();
   });
 });
+
+  test("别的网络里同名的节点不会串到这一格（alias 兜底必须带网络约束）", async () => {
+    // 另一个网络里也有一台 alias 相同的节点，且它是明文公网。
+    // 如果兜底查询不按网络约束，A 网的节点会读出 B 网的 transport —— 这一格是给人做
+    // 安全决策用的，显示错的值比显示 null 更糟。
+    const otherOwner = register(`np_othernet_${stamp}_${Date.now()}`, PW);
+    const otherNet = otherOwner.network_id!;
+    const otherAlias = `x-${stamp}-shadow`;
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', NULL, ?3, 'plain', datetime('now','+5 minute'))",
+      [`r_shadow_${stamp}`, otherAlias, otherNet]);
+    // 目标节点：本网络、只用 alias 命中（node_id 在 sessions 里是 NULL、alias 相同）
+    db.run("UPDATE sessions SET node_id = NULL, alias = ?1 WHERE node_id = ?2", [otherAlias, node.nR.id]);
+    expect((await rowOf(node.nR.id)).env_transport).toBeNull();
+  });
