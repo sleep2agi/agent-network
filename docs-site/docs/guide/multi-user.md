@@ -113,6 +113,11 @@ PUT /api/nodes/{node_id}/tool-allowlist   {"tools": ["send_task", "requirements_
 PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // 清空
 ```
 
+**清空只能传 `null`。空数组 `[]` 会被拒（400 `empty_allowlist_ambiguous`）** —— 因为它是歧义的：
+有人读成「不限制」，有人读成「一个都不许」。曾经真的出现过这种分歧：客户端把 `[]` 显示成
+「不允许任何工具」，而 Hub 把 `[]` 规范化成 `null` 也就是全放开 —— 界面说收紧了，系统其实放开了。
+与其猜，不如拒收；`GET /api/nodes` 读回来只会是 `null` 或非空数组，永远不会是 `[]`。
+
 授权口径与 `permission-mode` 相同（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员），分别记审计 `node_peer_allowlist_changed` / `node_tool_allowlist_changed`。
 
 | 白名单 | 管什么 | 判在哪 |
