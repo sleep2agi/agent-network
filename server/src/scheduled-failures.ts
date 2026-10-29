@@ -255,15 +255,40 @@ export function applyFailureBackoff(scheduleId: string, now = new Date()): { str
  *   · 与 `no_change_backoff=1` 的排程互斥（那套逻辑自己拥有 backoff_* 三列）。
  */
 const NO_PROGRESS_CODES = ["previous_run_active", "target_offline"] as const;
+
+/**
+ * #2935 —— 「目标根本不会接活」的**失败**码，也要按 no-progress 退避，而不是普通失败退避。
+ *
+ * 生产实测（2026-10-30，近 7 天）：
+ *
+ *     failed node_degraded          2391    其中 TMA云盘鲸 1388 · TMA云鲸 981
+ *          「节点 X 处于降级状态(TUI 会话不在),任务不会被执行,已拒绝派发」
+ *     failed target_node_not_found  1166    「The bound node no longer exists in this network」
+ *
+ * 这两类不是「上游额度打满」那种会自愈的失败：
+ *   · `node_degraded` 的节点已经离线好几天（TMA云盘鲸/云鲸 自 10-27 起没心跳），
+ *     它的恢复时间是「小时/天」级，不是「下一次 180 秒」级；
+ *   · `target_node_not_found` 更彻底 —— 目标行已经不存在，**永远不可能成功**。
+ *
+ * 而它们走的是 `applyFailureBackoff`（上限 1 小时、且要求「连续」失败，被任何一次成功打断就清零），
+ * 于是 `every=180` 的排程在目标永久不可用的情况下依然每小时烧掉 20 次派发。
+ *
+ * 这里只把它们并进「无进展」链（上限 2 小时），**不暂停、不改谁来决定暂停**。
+ */
+const NO_PROGRESS_FAILED_CODES = ["node_degraded", "target_node_not_found"] as const;
 /** 统计窗口：看最近多少次 run 里同因跳过出现了几次（默认 10）。 */
 const NO_PROGRESS_WINDOW = 10;
-export type NoProgressCause = (typeof NO_PROGRESS_CODES)[number];
+export type NoProgressCause = (typeof NO_PROGRESS_CODES)[number] | (typeof NO_PROGRESS_FAILED_CODES)[number];
 
 function noProgressFromRuns(runs: Array<{ status: string; error_code: string | null }>): { cause: NoProgressCause | null; streak: number } {
   const first = runs[0];
   if (!first) return { cause: null, streak: 0 };
   let cause: NoProgressCause | null = null;
-  if (first.status === "failed") cause = null; // 由 applyFailureBackoff 负责，避免两套逻辑抢同一列
+  if (first.status === "failed") {
+    // 默认交给 applyFailureBackoff；但「目标根本不会接活」的两类并进来（见上面注释）。
+    const code = first.error_code ?? "";
+    cause = (NO_PROGRESS_FAILED_CODES as readonly string[]).includes(code) ? (code as unknown as NoProgressCause) : null;
+  }
   else if (first.status === "skipped" && (NO_PROGRESS_CODES as readonly string[]).includes(first.error_code ?? "")) {
     cause = first.error_code as NoProgressCause;
   }
@@ -277,7 +302,9 @@ function noProgressFromRuns(runs: Array<{ status: string; error_code: string | n
   const window = runs.slice(0, NO_PROGRESS_WINDOW);
   let streak = 0;
   for (const r of window) {
-    if (r.status === "skipped" && r.error_code === cause) streak++;
+    // #2935 —— failed 也计入：node_degraded / target_node_not_found 的 run 状态是 `failed`，
+    // 只数 `skipped` 会让它们永远攒不到阈值（改了分类却没改计数口径 = 等于没改）。
+    if ((r.status === "skipped" || r.status === "failed") && r.error_code === cause) streak++;
   }
   return { cause, streak };
 }
@@ -331,7 +358,9 @@ export function applyNoProgressBackoff(scheduleId: string, now = new Date()): { 
   //   target_offline      —— 目标连续 6 次不在（按 180s 基底已是 18 分钟），
   //                          再用 3 分钟一次的节奏去敲没有意义；2 小时一次仍能及时接住它回来。
   // 判据：#2622「同类原因日增量 ≤20」——180s 基底配 2 小时上限 ⇒ 12 次/天。
-  const cap = cause === "target_offline" ? 7200 : 1800;
+  // target_offline / node_degraded / target_node_not_found 都是「目标不接活」的形状，
+  // 恢复是小时/天级 ⇒ 统一用 2 小时上限。previous_run_active 仍用 30 分钟。
+  const cap = cause === "previous_run_active" ? 1800 : 7200;
   if (streak < from) { restore(); return null; }
 
   const effective = Math.min(cap, base * 2 ** Math.min(streak - from + 1, 5));
@@ -369,9 +398,28 @@ export function failureSummary(scheduleId: string): { consecutive_failures: numb
 setScheduledRunTerminalHook((scheduleId, status) => {
   if (status === "failed") evaluateScheduleFailures(scheduleId);
   // #2622 —— 成功一次就把间隔恢复原样；失败则按连续失败次数放大间隔。
+  //
+  // #2935 —— 但「目标根本不会接活」的失败码（node_degraded / target_node_not_found）
+  // 不走失败退避：它们的恢复是小时/天级，用 1 小时上限 + 「连续失败」判据等于每 3 分钟继续烧。
+  // 这两类改走 no-progress 链（2 小时上限），与 skipped 的 target_offline 同一形状。
   try {
-    applyFailureBackoff(scheduleId);
+    if (isNoProgressFailedCode(lastRunErrorCode(scheduleId))) applyNoProgressBackoff(scheduleId);
+    else applyFailureBackoff(scheduleId);
   } catch (e: any) {
     console.error(`[scheduled-tasks] failure backoff failed schedule=${scheduleId}: ${e?.message || e}`);
   }
 });
+
+function isNoProgressFailedCode(code: string | null): boolean {
+  return !!code && (NO_PROGRESS_FAILED_CODES as readonly string[]).includes(code);
+}
+
+/** 最近一条 run 的 error_code（终态 hook 里用它判断走哪条退避链）。 */
+function lastRunErrorCode(scheduleId: string): string | null {
+  const row = db.get<{ error_code: string | null }>(
+    `SELECT error_code FROM scheduled_task_runs WHERE schedule_id = ?1
+      ORDER BY created_at DESC, run_id DESC LIMIT 1`,
+    scheduleId,
+  );
+  return row?.error_code ?? null;
+}
