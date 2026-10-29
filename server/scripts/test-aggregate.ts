@@ -4,7 +4,7 @@
 // cwd-sensitive child commands, and module-singleton database state.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, readFileSync } from "node:fs";
 import { cpus, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
@@ -43,6 +43,27 @@ function parseArgs(argv: string[]) {
   }
   if (!Number.isFinite(timeoutMs) || timeoutMs < 100) throw new Error("timeout must be at least 100ms");
   return { reverse, verbose, selectedFiles, timeoutMs };
+}
+
+/**
+ * #2898 —— 「模块顶层拥有进程级状态」的测试文件不能进聚合跑。
+ *
+ * 这些文件长这样：
+ *   process.env.COMMHUB_DB = join(dir, "hub.db");
+ *   const { db } = await import("./db.js");        // 单例
+ *
+ * 单进程跑 272 个文件时，db.js 只在**第一个**文件 import 时初始化一次；
+ * 之后每个文件改 env 都不再生效（模块已缓存）⇒ 它们共用第一个文件的库
+ * ⇒ 断言自己那份库内容的用例必红（即使单文件跑永远绿）。
+ *
+ * 判据不手写：直接读文件内容。加了新文件也自动成立。
+ *
+ * 🔴 别把正则写成 `\s*=`：多数文件用的是 `process.env.COMMHUB_DB ||= …`（允许外部覆盖），
+ *    那样会漏掉 41 个文件（实测 55 个里有 41 个是 ||= 形式），排除集只剩 14 个。
+ */
+const OWNS_PROCESS_DB_RE = /^process\.env\.COMMHUB_DB\b/m;
+function ownsProcessDb(file: string): boolean {
+  try { return OWNS_PROCESS_DB_RE.test(readFileSync(join(REPO_ROOT, file), "utf8")); } catch { return false; }
 }
 
 function collectTests(dir: string): string[] {
@@ -199,13 +220,24 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  let files = collectTests(SERVER_SRC);
+  const enumerated = collectTests(SERVER_SRC);
   // Validate the complete enumerated tree before applying --file filters. A
   // filtered run must not hide a future path pair that would share one DB.
-  assertUniqueSlugs(files);
+  assertUniqueSlugs(enumerated);
+  // #2898 —— 把「模块顶层拥有 COMMHUB_DB」的文件排除在聚合之外；
+  // 它们由 per-file runner 覆盖（那里每个文件是新进程，环境变量才真的生效）。
+  // 不静默：打印数量与文件名，否则「少跑了 55 个文件」会变成没人看得见的假绿。
+  const excluded = enumerated.filter(ownsProcessDb);
+  let files = enumerated.filter((f) => !excluded.includes(f));
+  if (excluded.length > 0) {
+    console.log(`SKIP_PROCESS_DB\t${excluded.length} file(s) own process.env.COMMHUB_DB at module scope — covered by the per-file runner, not the aggregate`);
+    if (args.verbose) for (const f of excluded) console.log(`SKIP_PROCESS_DB_FILE\t${f}`);
+  }
+  if (files.length === 0) throw new Error("#2898: every enumerated test owns COMMHUB_DB — aggregate would run nothing");
   if (args.selectedFiles.length > 0) {
     for (const file of args.selectedFiles) {
-      if (!files.includes(file)) throw new Error(`--file is not an enumerated server test: ${file}`);
+      if (!enumerated.includes(file)) throw new Error(`--file is not an enumerated server test: ${file}`);
+      if (excluded.includes(file)) throw new Error(`--file ${file} owns process.env.COMMHUB_DB at module scope — it cannot run in the aggregate; use the per-file runner`);
     }
     files = [...new Set(args.selectedFiles)];
   }

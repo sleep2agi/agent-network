@@ -85,7 +85,7 @@ import { startRetentionSweeper } from "./retention.js";
 import { sweepEmptyNodeRows } from "./empty-node-sweeper.js";
 import { versionStats } from "./version-stats.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
-import { scanNodeFailureAlerts } from "./node-failure-alert.js";
+import { scanNodeFailureAlerts, scanModelAuthBlockedNodes } from "./node-failure-alert.js";
 import { scanStarvedSchedules } from "./schedule-starved.js";
 import { scanNodeBusyCircuit } from "./node-serviceability.js";
 import {
@@ -107,6 +107,7 @@ import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
+import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
@@ -405,6 +406,9 @@ function countNetworkUploads(networkId: string): number {
 }
 
 // RFC-041(#487):节点令牌的一次 REST 写 / 订阅先按 node-permissions.ts 判。用户令牌 → null(不判)。
+/** #2969 续 —— 会被 REST 写白名单检查的方法。GET / HEAD / OPTIONS 永远不在此列。 */
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 function restNodeDenied(req: Request, restAuth: { networkId: string | null; tokenId: string | null } | null, route: string, verdictOf: (id: NodeIdentity) => Verdict): Response | null {
   if (!restAuth?.networkId) return null;
   const id = nodeIdentity(restAuth.tokenId, restAuth.networkId);
@@ -1401,49 +1405,12 @@ return Bun.serve({
     }
 
     // ── V3: License endpoints ──
-    if (url.pathname === "/api/license" && req.method === "GET") {
-      const license = db.get<any>(
-        "SELECT type, expires_at, max_agents, max_networks, max_tasks_day FROM licenses ORDER BY created_at LIMIT 1",
-      );
-      if (!license) return withCors(req, Response.json({ ok: true, status: "no_license" }));
-      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
-      const expired = license.expires_at && license.expires_at < now;
-      // #1650 — licenses.expires_at 是 TEXT(datetime('now') 家族),UTC 但不带时区
-      //   标记;`new Date()` 会按本机时区解析,边界上差一天。parse 失败时返回 null
-      //   而不是 NaN —— JSON.stringify(NaN) 本来也序列化成 null,线上字节不变。
-      const expiresMs = parseHubTimestamp(license.expires_at);
-      const daysLeft = expiresMs === null
-        ? null
-        : Math.max(0, Math.ceil((expiresMs - Date.now()) / 86400000));
-      return withCors(req, Response.json({
-        ok: true,
-        license: { type: license.type, expires_at: license.expires_at, days_left: daysLeft, expired },
-        limits: { max_agents: license.max_agents, max_networks: license.max_networks, max_tasks_day: license.max_tasks_day },
-      }));
-    }
-
-    if (url.pathname === "/api/license/activate" && req.method === "POST") {
-      try {
-        const body = await req.json() as any;
-        const key = body.key;
-        if (!key) return withCors(req, Response.json({ ok: false, error: "key required" }, { status: 400 }));
-        // For now: accept any key starting with "anet-" as valid pro license
-        if (!key.startsWith("anet-") || key.length < 16) {
-          return withCors(req, Response.json({ ok: false, error: "invalid license key" }, { status: 400 }));
-        }
-        // Upgrade existing license or create new
-        db.run("DELETE FROM licenses");
-        const licId = `lic_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-        db.run(
-          "INSERT INTO licenses (id, license_key, type, max_agents, max_networks, max_tasks_day, activated_at, expires_at) VALUES (?1, ?2, 'pro', 50, 10, 10000, datetime('now'), datetime('now', '+365 days'))",
-          [licId, key]
-        );
-        return withCors(req, Response.json({ ok: true, type: "pro", expires_in_days: 365 }));
-      } catch (e: any) {
-        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
-      }
-    }
-
+    // 🔴 2026-10-29 admin：「license 删掉吧」。
+    // 这两个端点原本是 v0.6 试用/激活码体系的遗留路径，开源后没有任何真实用途：
+    //   GET  /api/license            —— 读 licenses 表第一行（trial/pro + 剩余天数）
+    //   POST /api/license/activate   —— 收一个 "anet-" 前缀的串，先 DELETE FROM licenses 再写一条
+    //                                  （而且**完全没有鉴权**，见 #3199）
+    // 现已移除；命中时按未知路径处理（404），不再保留兼容壳。
     // ── V3: Auth endpoints (public) ──
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
@@ -2877,6 +2844,28 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
 
+    // #2969 续 —— REST 写接口白名单：唯一 choke point。
+    //
+    // 为什么在这里而不是逐条路由：节点令牌的 REST 写面分散在两套判据里
+    // （server.ts 的 restNodeDenied + requirements.ts 的 nodeTaskGate）。
+    // 逐站点加会变成第三套规则，且漏掉任一处就是「装了一半的安全开关」——
+    // 那比没有更危险，因为它会被当成已经收紧了。
+    //
+    // 三条边界：
+    //   · 只对**节点令牌**生效（用户令牌 / daemon 令牌不受影响）
+    //   · 只对**写方法**生效：GET 与 SSE 永不经过这里 —— 挡掉 SSE 节点会变聋
+    //   · 只在**设置了清单**时生效：NULL = 不限制，与 MCP 工具白名单同构
+    if (restAuth?.networkId && WRITE_METHODS.has(req.method)) {
+      const restNode = nodeIdentity(restAuth.tokenId, restAuth.networkId);
+      if (restNode?.restAllowlist) {
+        const label = restRouteLabel(req.method, url.pathname);
+        const verdict = restAllowlistVerdict(restNode, label);
+        if (verdict && nodeDecide(restNode, label, verdict)) {
+          return withCors(req, Response.json(nodePermissionDeniedBody(verdict.reason, label), { status: 403 }));
+        }
+      }
+    }
+
     // #629: only actual user credentials gain lifecycle read metadata. Legacy
     // master/dev-open and network/daemon credentials keep their old surface.
     const lifecycleAuth = resolveRequestAuth(req, { allowQueryToken: false });
@@ -2974,6 +2963,129 @@ return Bun.serve({
       logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode }), getClientIP(req), node.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node.node_id, permission_mode: mode, previous }));
     }
+    // #2969 后半 —— 接口白名单：PUT /api/nodes/:id/tool-allowlist { tools: string[] | null }
+    // 与 peer-allowlist 同一套授权口径。
+    const toolAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/tool-allowlist$/);
+    if (toolAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawTools = body?.tools;
+      if (rawTools !== null && rawTools !== undefined && !Array.isArray(rawTools)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_tools", message: "tools must be an array of MCP tool names, or null" }, { status: 400 }));
+      }
+      const tools = Array.isArray(rawTools)
+        ? rawTools.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      // #2969 —— 空数组是**歧义的**，直接拒，不猜。
+      //
+      // 发生过的事：客户端把「[] = 不允许任何工具」做进了界面（PR #1165），
+      // 而 Hub 这边 `tools.length ? ... : null` 会把 [] 规范化成 null = **不限制**。
+      // 两边语义相反，结果是「用户以为收紧了，系统其实放开了」——比没有这个选项更糟。
+      //
+      // 三种做法里选了最不含糊的一种：
+      //   · 把 [] 当「禁止一切」  → 老客户端「清空」按钮会变成把节点封死，回归风险太大
+      //   · 把 [] 当 null（现状） → 界面可以无声地说「全部禁止」而实际全放开，安全洞
+      //   · 拒收 []（本实现）     → 调用方当场看到 400 和一句「清空请传 null」，没有静默行为
+      if (Array.isArray(rawTools) && tools.length === 0) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "empty_allowlist_ambiguous",
+          message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected",
+        }, { status: 400 }));
+      }
+      if (tools.length > 500) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_tools", message: "at most 500 entries" }, { status: 400 }));
+      }
+      const nodeRef3 = decodeURIComponent(toolAllowMatch[1]);
+      const node3 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; tool_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, tool_allowlist FROM nodes WHERE node_id = ?1", nodeRef3);
+      const role3 = node3?.network_id ? getUserNetworkRole(restAuth.userId, node3.network_id) : null;
+      if (!node3 || !node3.network_id || (!role3 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!isAdmin && node3.owner_user_id !== restAuth.userId && role3 !== "owner" && role3 !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its tool allowlist" }, { status: 403 }));
+      }
+      const nextTools = tools.length ? JSON.stringify(tools) : null;
+      db.run("UPDATE nodes SET tool_allowlist = ?1 WHERE node_id = ?2", [nextTools, node3.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_tool_allowlist_changed", "node", node3.node_id, JSON.stringify({ from: node3.tool_allowlist, to: nextTools }), getClientIP(req), node3.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node3.node_id, tools: tools.length ? tools : null }));
+    }
+    // #2969 续 —— REST 写接口白名单：PUT /api/nodes/:id/rest-allowlist { routes: string[] | null }
+    // 与 tool-allowlist 同一套授权口径与空数组语义（拒收 []，清空请传 null）。
+    const restAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/rest-allowlist$/);
+    if (restAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawRoutes = body?.routes;
+      if (rawRoutes !== null && rawRoutes !== undefined && !Array.isArray(rawRoutes)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_routes", message: "routes must be an array of route labels like \"POST /api/task\", or null" }, { status: 400 }));
+      }
+      const routes = Array.isArray(rawRoutes)
+        ? rawRoutes.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      if (Array.isArray(rawRoutes) && routes.length === 0) {
+        return withCors(req, Response.json({ ok: false, error: "empty_allowlist_ambiguous", message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected" }, { status: 400 }));
+      }
+      if (routes.length > 200) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_routes", message: "at most 200 entries" }, { status: 400 }));
+      }
+      const nodeRef4 = decodeURIComponent(restAllowMatch[1]);
+      const node4 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; rest_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, rest_allowlist FROM nodes WHERE node_id = ?1", nodeRef4);
+      const role4 = node4?.network_id ? getUserNetworkRole(restAuth.userId, node4.network_id) : null;
+      if (!node4 || !node4.network_id || (!role4 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!isAdmin && node4.owner_user_id !== restAuth.userId && role4 !== "owner" && role4 !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its REST allowlist" }, { status: 403 }));
+      }
+      const nextRoutes = routes.length ? JSON.stringify(routes) : null;
+      db.run("UPDATE nodes SET rest_allowlist = ?1 WHERE node_id = ?2", [nextRoutes, node4.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_rest_allowlist_changed", "node", node4.node_id, JSON.stringify({ from: node4.rest_allowlist, to: nextRoutes }), getClientIP(req), node4.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node4.node_id, routes: routes.length ? routes : null }));
+    }
+
+    // #2969 —— 节点级对端白名单：PUT /api/nodes/:id/peer-allowlist { peers: string[] | null }
+    // 与 permission-mode 同一套授权口径（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员）。
+    // peers 为 null 或空数组 ⇒ 清空（不限制），与「没有这一列」等价。
+    const peerAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/peer-allowlist$/);
+    if (peerAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawPeers = body?.peers;
+      if (rawPeers !== null && rawPeers !== undefined && !Array.isArray(rawPeers)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_peers", message: "peers must be an array of alias/node_id strings, or null" }, { status: 400 }));
+      }
+      const peers = Array.isArray(rawPeers)
+        ? rawPeers.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      // 同 tool-allowlist：空数组歧义，拒收；清空请传 null。
+      if (Array.isArray(rawPeers) && peers.length === 0) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "empty_allowlist_ambiguous",
+          message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected",
+        }, { status: 400 }));
+      }
+      if (peers.length > 200) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_peers", message: "at most 200 entries" }, { status: 400 }));
+      }
+      const nodeRef2 = decodeURIComponent(peerAllowMatch[1]);
+      const node2 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; peer_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, peer_allowlist FROM nodes WHERE node_id = ?1", nodeRef2);
+      const role2 = node2?.network_id ? getUserNetworkRole(restAuth.userId, node2.network_id) : null;
+      if (!node2 || !node2.network_id || (!role2 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!isAdmin && node2.owner_user_id !== restAuth.userId && role2 !== "owner" && role2 !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its peer allowlist" }, { status: 403 }));
+      }
+      const nextValue = peers.length ? JSON.stringify(peers) : null;
+      db.run("UPDATE nodes SET peer_allowlist = ?1 WHERE node_id = ?2", [nextValue, node2.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_peer_allowlist_changed", "node", node2.node_id, JSON.stringify({ from: node2.peer_allowlist, to: nextValue }), getClientIP(req), node2.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node2.node_id, peers: peers.length ? peers : null }));
+    }
     const permReportMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/node-permission-report$/);
     if (permReportMatch && req.method === "GET") {
       if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
@@ -2992,20 +3104,68 @@ return Bun.serve({
            FROM node_permission_log WHERE network_id = ?1 AND hour >= ?2
           GROUP BY node_id, route, reason ORDER BY node_id, route, reason`,
         networkId, sinceHour);
-      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }> }>();
+      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean; unbound_token_name?: string | null; enforce_impact: Record<string, number> }>();
       for (const r of rows) {
         let entry = byNode.get(r.node_id);
         if (!entry) {
           const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", r.node_id);
-          entry = { node_id: r.node_id, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [] };
+          entry = { node_id: r.node_id, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [], enforce_impact: {} };
           byNode.set(r.node_id, entry);
         }
         const hits = Number(r.hits);
         entry.total += hits;
         entry.by_reason[r.reason] = (entry.by_reason[r.reason] ?? 0) + hits;
+        // #2970 判据④ 演练发现：这些行数**不等于**「打开 enforce 行为会变」的次数。
+        // 按 enforceImpactOf 分三类，让管理员看得出哪些是真增量、哪些本来就被拦着。
+        const impact = enforceImpactOf(r.reason as any);
+        entry.enforce_impact[impact] = (entry.enforce_impact[impact] ?? 0) + hits;
         entry.routes.push({ route: r.route, reason: r.reason, hits, sample: r.sample, last_hour: r.last_hour });
       }
-      const nodes = [...byNode.values()].sort((a, b) => b.total - a.total || a.node_id.localeCompare(b.node_id));
+      // #2969 —— 按节点的工具调用明细。
+      // 为什么要这个：管理员在设「只能用哪些工具」之前，需要先看**这台节点实际用过哪些**，
+      // 否则白名单只能凭想象写，第一次上线就是拦掉在用的工具。
+      // 之前账本只有网络级合计（by_tool），且 nodes 只从「被拒过的行」聚合 ——
+      // 一台从不越界但天天在用的节点，在报表里根本不存在。
+      //
+      // #2971 之后账本包含读类工具，这里的明细才第一次是「全部调用面」而不是「会被拦的那部分」。
+      const perNodeCalls = db.all<{ node_id: string; tool: string; hits: number | string }>(
+        `SELECT node_id, tool, SUM(hits) AS hits FROM node_tool_calls
+          WHERE network_id = ?1 AND hour >= ?2
+          GROUP BY node_id, tool ORDER BY node_id, SUM(hits) DESC`,
+        networkId, sinceHour,
+      );
+      const callsByNode = new Map<string, Array<{ tool: string; hits: number }>>();
+      for (const r of perNodeCalls) {
+        const list = callsByNode.get(r.node_id) ?? [];
+        list.push({ tool: r.tool, hits: Number(r.hits) });
+        callsByNode.set(r.node_id, list);
+      }
+      // 有调用但没被拒过的节点也要出现在结果里（total = 0）。
+      for (const nodeId of callsByNode.keys()) {
+        if (byNode.has(nodeId)) continue;
+        const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", nodeId);
+        byNode.set(nodeId, { node_id: nodeId, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [], enforce_impact: {} });
+      }
+      for (const entry of byNode.values()) {
+        const list = callsByNode.get(entry.node_id) ?? [];
+        entry.tool_calls = list;
+        entry.tool_calls_total = list.reduce((n, e) => n + e.hits, 0);
+        // 未绑定节点的令牌：账本用 `token:<token_id>` 当键（nodeIdentity 的老路径）。
+        // 它们**没有 nodes 行**，所以两张白名单都管不到它们（toolAllowlist 为 null ⇒ 不限制）。
+        // 报表里必须显式标出来，否则管理员会以为「名单之外没有别人在派活」。
+        // 这里只标注，不改变任何判定。
+        if (entry.node_id.startsWith("token:")) {
+          entry.unbound_token = true;
+          // 令牌名往往就是答案：账本里是 `token:tok_xxx`，光看这个没法处理。
+          // 线上实测这 4 个令牌的名字是 `node:ANet基建` / `node:TMWork` …，而 nodes 表里
+          // 已经没有这些 alias 了 —— 节点改过名、令牌没跟着改，于是解析成「未注册」，
+          // 白名单静默不生效。把名字带出来，管理员才知道该改哪个令牌。
+          const tok = db.get<{ name: string | null }>("SELECT name FROM api_tokens WHERE token_id = ?1", entry.node_id.slice(6));
+          entry.unbound_token_name = tok?.name ?? null;
+        }
+      }
+      const nodes = [...byNode.values()].sort((a, b) =>
+        b.tool_calls_total - a.tool_calls_total || b.total - a.total || a.node_id.localeCompare(b.node_id));
       // #2823 —— 调用面分母。`total` 只数「本来会被拒」的次数；没有分母时
       // 「0 命中」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
       // 这里单独给一份 classified 工具的真实调用数（按小时合并后的 hits 之和），
@@ -3017,10 +3177,17 @@ return Bun.serve({
       );
       const toolCalls = callRows.map((r) => ({ tool: r.tool, hits: Number(r.hits) }));
       const deniedTotal = nodes.reduce((n, e) => n + e.total, 0);
+      // 顶层汇总：切 enforce 的真实影响面是多少（explicit / likely_already_blocked 都不算）
+      const enforceImpact: Record<string, number> = {};
+      for (const e of nodes) {
+        for (const [k, v] of Object.entries(e.enforce_impact)) enforceImpact[k] = (enforceImpact[k] ?? 0) + v;
+      }
       const callsTotal = toolCalls.reduce((n, e) => n + e.hits, 0);
       return withCors(req, Response.json({
         ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(),
         total: deniedTotal,
+        // changes_behavior 才是「打开 enforce 会改变行为」的次数；另外两类都不是增量。
+        enforce_impact: enforceImpact,
         nodes,
         tool_calls: { total: callsTotal, by_tool: toolCalls },
       }));
@@ -5284,7 +5451,7 @@ return Bun.serve({
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
                         display_name, team, tags, attrs_revision, permission_mode, owner_user_id,
-                        department_id
+                        department_id, peer_allowlist, tool_allowlist, rest_allowlist
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
@@ -5326,6 +5493,47 @@ return Bun.serve({
         const inFlight = path === "manual" || !alias ? 0 : countInFlightTasks(alias, networkId);
         const blockedByInFlight = lifecycle === "active" && inFlight > 0;
         return { path, in_flight: inFlight, can_restart_now: path !== "manual" && !blockedByInFlight };
+      };
+      // #1510 —— 节点的 transport 记在 sessions 行上（report_status 每次上报刷新）。
+      // 逐行查就是 N 次查询，所以先把 wanted 里所有 id / alias 一次取回、按 updated_at 倒序，
+      // 每个节点只认最新那条（与 transportOf() 的取法一致：node_id 或 alias 命中）。
+      const wantedIds = new Set<string>(wanted.map((r) => String(r.node_id)));
+      const transportByKey = new Map<string, string | null>();
+      const aliasTransport = new Map<string, string | null>();
+      if (wanted.length) {
+        // 🔴 编号参数不能复用：`?1..?n` 出现两次，而实参给了 2n 个 ——
+        // SQLite 只认得 n 个绑定位置，多出来的直接抛错，整条 GET /api/nodes 变 500。
+        // （#3214 首版就这么写的；CI 上三条互不相干的 workflow 同时红，
+        //   共同点只有一个：它们都要先 `GET /api/nodes` 把 alias 解析成 node_id。）
+        // 正确做法是第二组参数从 n+1 开始编号。
+        const ids = wanted.map((r) => String(r.node_id));
+        const phA = ids.map((_, i) => `?${i + 1}`).join(",");
+        const phB = ids.map((_, i) => `?${ids.length + i + 1}`).join(",");
+        for (const row of db.all<{ node_id: string | null; alias: string | null; network_id: string | null; env_transport: string | null }>(
+          `SELECT node_id, alias, network_id, env_transport FROM sessions
+            WHERE node_id IN (${phA}) OR alias IN (${phB})
+            ORDER BY updated_at DESC`,
+          ...ids, ...ids,
+        )) {
+          if (row.node_id && wantedIds.has(row.node_id) && !transportByKey.has(row.node_id)) transportByKey.set(row.node_id, row.env_transport);
+          // alias 只在**同一网络**内兜底：不同网络可以有同名 alias，
+          // 跨网络命中会把 A 网的 transport 显示成 B 网那台 —— 这一格是给人做安全决策用的，
+          // 宁可显示 null（未知）也不能显示错的值。
+          if (row.alias && row.network_id && wantedIds.has(row.alias)) {
+            const key = `${row.network_id}|${row.alias}`;
+            if (!aliasTransport.has(key)) aliasTransport.set(key, row.env_transport);
+          }
+        }
+      }
+      const envTransportOf = (nodeId: string, alias: string | null, networkId: string | null): string | null => {
+        const direct = transportByKey.get(nodeId);
+        if (direct !== undefined) return direct;
+        if (!networkId) return null;
+        // 兜底顺序与 transportOf() 一致：sessions 行的 alias 可能等于**节点 id**
+        // （老注册路径就是这样），也可能等于**人给的 alias**。两种都要试，且都带网络。
+        const byId = aliasTransport.get(`${networkId}|${nodeId}`);
+        if (byId !== undefined) return byId;
+        return alias ? aliasTransport.get(`${networkId}|${alias}`) ?? null : null;
       };
       // Add a single new field `role: string | null` per row, extracted from
       // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'
@@ -5403,7 +5611,9 @@ return Bun.serve({
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
           if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
         }
-        const { config_snapshot, owner_user_id, ...rest } = r;
+        // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
+        // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
+        const { config_snapshot, owner_user_id, peer_allowlist, tool_allowlist, rest_allowlist, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
@@ -5425,6 +5635,14 @@ return Bun.serve({
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
           viewer_can: { permission_mode: canSetPermissionMode(r) },
+          // #2969 —— 白名单读回来：null = 不限制；[] 不该出现（空数组在写入时已规范成 null）。
+          peer_allowlist: normalizePeerAllowlist(peer_allowlist),
+          tool_allowlist: normalizeToolAllowlist(tool_allowlist),
+          // #2969 续 —— REST 写接口白名单（形如 "POST /api/task"）。null = 不限制。
+          rest_allowlist: normalizePeerAllowlist(rest_allowlist),
+          // #1510 —— 管理员要能看出「谁的 transport 未知」才敢打开 strict。
+          // 这一格**只读**，不参与任何判定（判定在 env-transport-policy.ts）。
+          env_transport: envTransportOf(r.node_id, r.alias, r.network_id),
           restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });
@@ -5822,6 +6040,13 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
       if (r.alerts > 0) console.log(`[commhub node-failure-alert] sent ${r.alerts} alert(s): ${r.nodes.join(", ")}`);
     } catch (e: any) {
       console.log(`[commhub node-failure-alert] failed: ${e?.message ?? e}`);
+    }
+    // #2964 —— 「在线但干不了活」：登录失效的节点一条任务都不会接，连续失败那条路不会触发。
+    try {
+      const b = scanModelAuthBlockedNodes();
+      if (b.alerts > 0) console.log(`[commhub node-auth-blocked-alert] sent ${b.alerts} alert(s): ${b.nodes.join(", ")}`);
+    } catch (e: any) {
+      console.log(`[commhub node-auth-blocked-alert] failed: ${e?.message ?? e}`);
     }
   }, nodeFailureAlertMs);
   (nodeFailureAlertTimer as any).unref?.();

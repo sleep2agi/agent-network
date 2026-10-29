@@ -127,6 +127,41 @@ describe("Agent 显式归属部门", () => {
     expect((await setDept(U.owner.token, NODE_OUTSIDE, D.tmai)).status).toBe(404);
   });
 
+  // #2965 —— 同 alias 多 node 行必须在通讯录里折叠成一行，并给出「历史注册」计数。
+  // 现场：一组同名里只有一个挂过会话，其余是重复注册留下的空行；页面看起来就是「重复的 Agent」。
+  // 折叠不能只看 updated_at —— 实测那 3 个 node 的 updated_at 完全相同，必须优先保留有会话的那条。
+  test("同 alias 多 node：不删行，但其余行带 duplicate_of 指向首选（有会话者优先）", async () => {
+    const now = Date.now();
+    const dupAlias = `重复-Agent-${now}`;
+    const live = `n_live_${now}`;
+    const dead1 = `n_dead1_${now}`;
+    const dead2 = `n_dead2_${now}`;
+    // 三条 updated_at 完全一样（现场就是这样），只有 live 有会话行
+    for (const id of [dead2, live, dead1]) {
+      db.run(
+        "INSERT INTO nodes (node_id, node_name, alias, network_id, created_at, updated_at) VALUES (?1, ?2, ?2, ?3, datetime('now'), '2026-10-26 12:26:22')",
+        [id, dupAlias, NET],
+      );
+    }
+    db.run(
+      "INSERT INTO sessions (resume_id, alias, status, network_id, node_id, updated_at) VALUES (?1, ?2, 'offline', ?3, ?4, datetime('now'))",
+      [`s_${live}`, dupAlias, NET, live],
+    );
+
+    const dir = await send(U.owner.token, "GET", `/api/requirements/people/directory?network_id=${NET}`);
+    expect(dir.status).toBe(200);
+    const agents = [...(dir.body.people ?? []).flatMap((p: any) => p.agents ?? []), ...(dir.body.agents_without_owner ?? [])];
+    const rows = agents.filter((a: any) => a.alias === dupAlias);
+    // 契约不变：三条都还在（客户端照旧可按 updated_at 去重）
+    expect(rows).toHaveLength(3);
+    // 新增：其余两条都指向首选，而首选必须是**有会话**的那条（三条 updated_at 完全相同）
+    const liveRow = rows.find((a: any) => a.node_id === live);
+    expect(liveRow.duplicate_of).toBeUndefined();
+    for (const dead of [dead1, dead2]) {
+      expect(rows.find((a: any) => a.node_id === dead)?.duplicate_of).toBe(live);
+    }
+  });
+
   test("普通成员改不了（403）", async () => {
     const r = await setDept(U.member.token, NODE_A, D.tmai);
     expect(r.status).toBe(403);

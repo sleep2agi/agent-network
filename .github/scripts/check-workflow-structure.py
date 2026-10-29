@@ -100,9 +100,30 @@ def main() -> int:
 
         # 🔴 顶层触发器:没有 on 的 workflow 永远不会跑。独立审查用负向 fixture
         # 实测过:缺 on 的文件在旧版这里直接放行,jobs_checked=1 / problems=0。
-        if not (doc.get("on") or doc.get(True)):
+        trigger = doc.get("on") or doc.get(True)
+        if not trigger:
             print(f"FAIL: [no-trigger] {rel} 没有顶层 on: —— 这个 workflow 永远不会被触发", file=sys.stderr)
             bad += 1
+        else:
+            # 🔴 2026-10-30 实测事故（qa.yml，我自己 #2967 改的）：
+            # 删掉 `concurrency:` 那一行后，`group:` / `cancel-in-progress:` 变成了
+            # `workflow_dispatch:` 的子键。**文件仍是合法 YAML**，`jobs:` 也完好，
+            # 但这道门和 GitHub 都不认 —— 每次运行 **0 个 job、结论 failure**，
+            # 而 PR 页面上其它 workflow 照常全绿，看起来像"QA 没跑"而不是"QA 坏了"。
+            #
+            # 判据：`on:` 下面只允许触发器名。出现 concurrency 的字段（group /
+            # cancel-in-progress）或 jobs，说明缩进把顶层键吞进去了。
+            if isinstance(trigger, dict):
+                strays = [k for k in trigger if k in ("group", "cancel-in-progress", "jobs", "env", "permissions", "defaults")]
+                if strays:
+                    print(
+                        f"FAIL: [trigger-swallowed-top-level-keys] {rel} —— "
+                        f"on: 下面出现了 {strays}，这不是触发器；"
+                        f"通常是顶层 concurrency:/env: 的缩进丢了（删掉那一行键名）"
+                        f"⇒ GitHub 会创建 0 个 job 的失败运行",
+                        file=sys.stderr,
+                    )
+                    bad += 1
 
         for name, job in jobs.items():
             total_jobs += 1

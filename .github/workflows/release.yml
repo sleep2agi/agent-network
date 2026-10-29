@@ -750,12 +750,23 @@ jobs:
           TRUSTED_PUBLISHING: ${{ vars.NPM_TRUSTED_PUBLISHING }}
         run: |
           set -euo pipefail
+          # 2026-10-29（.203）：`npm publish` 退出码 1 ≠ 没发出去。
+          # 那次报的是 TLOG_CREATE_ENTRY_ERROR (409)「等价条目已存在」——
+          # 语义是「透明度日志里已经记过了」，而 registry 上版本其实已经有了。
+          # 后果：publish 一 exit 1，后面「发后核实（轮询 registry 最多 45 分钟）」
+          # **从来没跑**，于是「已发布」和「发布失败」在 CI 上都长成红色。
+          # 现在改成：失败时先问 registry，在 ⇒ 判成功继续；不在 ⇒ 才真失败。
+          # 逻辑在脚本里，好让 tests/release-publish-tlog-recover 用桩 npm 测到 ——
+          # 写在这里的 bash 只能靠「真发一次版」来验证，而它一年只跑几十次。
+          publish_or_recover() {
+            bash .github/scripts/publish-with-tlog-recover.sh "$TARBALL" preview
+          }
           if [ "${TRUSTED_PUBLISHING:-}" = "true" ]; then
             echo "trusted publishing(OIDC):不注入 token;npm 用本次运行的 OIDC 短时凭据发布,"
             echo "凭据作用域只限这次运行、这个仓库(this workflow)。"
             echo "前置条件:npmjs.com → 该包 → Settings → Trusted Publisher 已配置"
             echo "  org/repo=sleep2agi/agent-network  workflow=release.yml  environment=(空)"
-            npm publish "$TARBALL" --tag preview --provenance --access public
+            publish_or_recover
             exit 0
           fi
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
@@ -767,7 +778,7 @@ jobs:
             echo "     2026-10-19 起我们的 preview 发布会静默停在 staged,不要再走这条)。"
             exit 1
           fi
-          npm publish "$TARBALL" --tag preview --provenance --access public
+          publish_or_recover
 
       - name: 发后核实(看 registry 不看退出码)
         env:

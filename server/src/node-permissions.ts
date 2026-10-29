@@ -27,11 +27,35 @@ export type NodePermissionReason =
   | "mode_readonly"
   | "mode_restricted_not_assigned"
   | "human_only"
-  | "owner_unknown";
+  | "owner_unknown"
+  /** #2969 —— 主人给这个节点设了对端白名单，目标不在名单里。 */
+  | "peer_not_allowed"
+  /** #2969 后半 —— 主人在这个节点的接口白名单里没有列这个工具/路由。 */
+  | "tool_not_allowed"
+  /** #2969 续 —— 令牌解析不到节点行（常见成因：节点改过名、令牌名没跟着改）。
+   *  这类令牌**没有 nodes 行**，两张白名单都管不到它；先按「记录」模式跑，看有多少。 */
+  | "unbound_token"
+  /** #2969 续 —— 主人在这个节点的 REST 白名单里没有列这条写路由。 */
+  | "rest_not_allowed";
 
 /** 显式模式的原因:不看开关,永远拒。 */
-const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned"]);
+// 白名单和 readonly/restricted 同类：**主人主动设的，设了就立刻生效**，不看开关。
+const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed", "tool_not_allowed", "rest_not_allowed"]);
 
+// #2969 —— 节点级对端白名单：JSON 数组（alias 或 node_id）；NULL = 不限制。
+// 只增不改：旧代码不读这一列；设为 NULL 时行为与现在完全一致。
+// #2969 后半 —— 接口白名单：JSON 数组（MCP 工具名）；NULL = 不限制。
+// #2969 续 —— REST 写接口白名单：JSON 数组（形如 "POST /api/task"）；NULL = 不限制。
+// 只对**节点令牌的写方法**生效（GET / SSE 永不经过它，否则节点会变聋）。
+try { db.exec("ALTER TABLE nodes ADD COLUMN rest_allowlist TEXT"); } catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+try { db.exec("ALTER TABLE nodes ADD COLUMN tool_allowlist TEXT"); } catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+try { db.exec("ALTER TABLE nodes ADD COLUMN peer_allowlist TEXT"); } catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
 try { db.exec("ALTER TABLE nodes ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'normal'"); } catch (e: any) {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
@@ -130,7 +154,53 @@ export type NodeIdentity = {
   aliases: string[];
   ownerUserId: string | null;
   mode: NodePermissionMode;
+  /** #2969 —— 对端白名单（alias / node_id 都算命中）。null = 不限制。 */
+  peerAllowlist: string[] | null;
+  /** #2969 后半 —— 接口白名单（MCP 工具名）。null = 不限制。 */
+  toolAllowlist: string[] | null;
+  /** #2969 续 —— REST 写接口白名单（形如 "POST /api/task"）。null = 不限制。 */
+  restAllowlist: string[] | null;
 };
+
+/**
+ * #2969 续 —— 路径归一化成路由标签。
+ *
+ * 为什么要归一化：白名单里存的是 `POST /api/task` 这种**形状稳定的标签**，
+ * 而实际请求带的是具体 id（`PUT /api/nodes/n_abc123/attrs`）。不归一化，
+ * 白名单就只能写死某台节点的 id —— 换一台就失效。
+ *
+ * 判据只看段数，不看语义：**看起来像 id 的段换成 `:id`**。
+ * 「像 id」= 含下划线/连字符/数字，或纯数字，或 UUID 形状。
+ * 宁可多换（把 `checklist` 这种词留下来是因为它不含数字也不含分隔符）。
+ */
+const ID_SEGMENT_RE = /^(?:[a-z]+_[A-Za-z0-9_-]+|[A-Za-z0-9]+-[A-Za-z0-9-]+|\d+|[0-9a-f]{8,})$/i;
+export function restRouteLabel(method: string, pathname: string): string {
+  const segs = pathname.split("/").filter(Boolean).map(seg => (ID_SEGMENT_RE.test(seg) ? ":id" : seg));
+  return `${method.toUpperCase()} /${segs.join("/")}`;
+}
+
+/**
+ * #2969 续 —— REST 写白名单判定。
+ *
+ * 只在**设置了清单**时才判（NULL = 不限制，与 MCP 白名单同构）；
+ * 两条 SSE 流永远不经过这里 —— 调用方只对写方法调用本函数。
+ */
+export function restAllowlistVerdict(id: NodeIdentity, label: string): Verdict {
+  if (!id.restAllowlist) return null;
+  return id.restAllowlist.includes(label) ? null : { reason: "rest_not_allowed", sample: label };
+}
+
+export function normalizePeerAllowlist(raw: unknown): string[] | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const out = parsed.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map(x => x.trim());
+    return out.length ? out : null;
+  } catch { return null; }
+}
+
+export const normalizeToolAllowlist = normalizePeerAllowlist;
 
 function normalizeMode(raw: unknown): NodePermissionMode {
   return raw === "readonly" || raw === "restricted" ? raw : "normal";
@@ -155,6 +225,9 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       aliases,
       ownerUserId: row.user_id,
       mode: "normal",
+      peerAllowlist: null,
+      toolAllowlist: null,
+      restAllowlist: null,
     };
   }
   if (!resolved.ok || resolved.networkId !== networkId) {
@@ -165,6 +238,9 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       aliases: [],
       ownerUserId: row.user_id,
       mode: "normal",
+      peerAllowlist: null,
+      toolAllowlist: null,
+      restAllowlist: null,
     };
   }
   if (resolved.kind === "unregistered") {
@@ -175,10 +251,13 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
       aliases: resolved.alias ? [resolved.alias] : [],
       ownerUserId: row.user_id,
       mode: "normal",
+      peerAllowlist: null,
+      toolAllowlist: null,
+      restAllowlist: null,
     };
   }
-  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null }>(
-    `SELECT owner_user_id, permission_mode FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
+  const node = db.get<{ owner_user_id: string | null; permission_mode: string | null; peer_allowlist: string | null; tool_allowlist: string | null; rest_allowlist: string | null }>(
+    `SELECT owner_user_id, permission_mode, peer_allowlist, tool_allowlist, rest_allowlist FROM nodes WHERE node_id = ?1 AND network_id = ?2`,
     resolved.nodeId, networkId,
   );
   return {
@@ -188,6 +267,9 @@ export function nodeIdentity(tokenId: string | null | undefined, networkId: stri
     aliases: [resolved.alias],
     ownerUserId: node?.owner_user_id || row.user_id || null,
     mode: normalizeMode(node?.permission_mode),
+    peerAllowlist: normalizePeerAllowlist(node?.peer_allowlist),
+    toolAllowlist: normalizeToolAllowlist(node?.tool_allowlist),
+    restAllowlist: normalizePeerAllowlist(node?.rest_allowlist),
   };
 }
 
@@ -216,6 +298,10 @@ const HINTS: Record<NodePermissionReason, string> = {
   mode_restricted_not_assigned: "this node is in restricted mode and only touches tasks assigned to it; assign the task to this node, or have the owner switch it to normal",
   human_only: "only people can do this (members, projects, permissions, providers, secrets, other nodes); use a user token",
   owner_unknown: "this node's owner is unknown; recreate the node token from the owner's account",
+  peer_not_allowed: "this node is limited to an explicit peer allowlist; the target is not on it — ask the node's owner to add it, or clear the allowlist",
+  tool_not_allowed: "this node is limited to an explicit tool allowlist; this tool is not on it — ask the node's owner to add it, or clear the allowlist",
+  unbound_token: "this token does not resolve to a node (usually the node was renamed and the token was not); rename or bind the token, or issue a node-bound token",
+  rest_not_allowed: "this node is limited to an explicit REST write allowlist; this route is not on it — ask the node's owner to add it, or clear the allowlist",
 };
 
 export function nodePermissionDeniedBody(reason: NodePermissionReason, route: string): { ok: false; error: "node_permission_denied"; reason: NodePermissionReason; route: string; hint: string } {
@@ -273,6 +359,13 @@ export function __resetNodePermissionLogStateForTest(): void { lastPrune = 0; lo
 export function dispatchVerdict(id: NodeIdentity, target: AgentRef): Verdict {
   if ((target.alias && id.aliases.includes(target.alias)) || (target.nodeId && id.nodeId && target.nodeId === id.nodeId)) return null;
   const sample = target.alias ?? target.nodeId ?? undefined;
+  // #2969 —— 主人设了对端白名单：不在名单上的一律拒（显式原因，不看开关）。
+  // 命中判定用 alias 或 node_id 任一即可 —— 主人按 alias 写、节点按 node_id 找，两边都要认。
+  if (id.peerAllowlist) {
+    const hit = (target.alias && id.peerAllowlist.includes(target.alias))
+      || (target.nodeId && id.peerAllowlist.includes(target.nodeId));
+    if (!hit) return { reason: "peer_not_allowed", sample };
+  }
   if (id.mode === "readonly") return { reason: "mode_readonly", sample };
   if (!id.ownerUserId) return id.mode === "restricted" ? { reason: "mode_restricted_not_assigned", sample } : { reason: "owner_unknown" };
   if (!canMessageAgent(id.ownerUserId, id.networkId, target)) {
@@ -282,8 +375,23 @@ export function dispatchVerdict(id: NodeIdentity, target: AgentRef): Verdict {
   return null;
 }
 
+/**
+ * #2969 后半 —— 接口白名单判定。
+ *
+ * 🔴 `always` 类**永远放行**：get_inbox / ack_inbox / send_reply / report_status 这些是节点
+ * 自己的生命周期协议。把它们也挡掉，节点既不能干活、也不能报告自己干不了 —— 那会变成
+ * 一个比"没受限"更隐蔽的假活节点。
+ */
+export function toolAllowlistVerdict(id: NodeIdentity, tool: string, alwaysClass: boolean): Verdict {
+  if (!id.toolAllowlist || alwaysClass) return null;
+  return id.toolAllowlist.includes(tool) ? null : { reason: "tool_not_allowed", sample: tool };
+}
+
 /** 广播:只读 / 受限都不行(会发给没派给它、也未必授权的 Agent)。 */
 export function broadcastVerdict(id: NodeIdentity): Verdict {
+  // #2969 —— 设了对端白名单的节点不能广播：广播的收件人是「任意对端」，
+  // 与白名单的语义直接冲突（名单说「只能找这几个」，广播说「发给所有人」）。
+  if (id.peerAllowlist) return { reason: "peer_not_allowed" };
   if (id.mode === "readonly") return { reason: "mode_readonly" };
   if (id.mode === "restricted") return { reason: "mode_restricted_not_assigned" };
   if (!id.ownerUserId) return { reason: "owner_unknown" };
@@ -356,3 +464,31 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   projects_create: "human_only", projects_update: "human_only", review_skill: "human_only",
   read_opencode_catalog: "human_only", get_opencode_catalog: "human_only",
 };
+
+/**
+ * #2970 判据④ 演练发现的口径问题 —— `node_permission_log` 的行数**不等于**
+ * 「打开 enforce 后行为会改变多少次」。
+ *
+ * 演练现场（`.208`，独立实例）：
+ *
+ *     log 模式  projects_create → user_token_required       （调用方**也是被拒的**）
+ *               node_permission_log += 1（reason=human_only）
+ *     enforce   projects_create → node_permission_denied / human_only
+ *
+ * 也就是说：`projects_create` 在 log 模式下就已经被处理函数自己的「只有人能做的操作」
+ * 检查挡住了。**这一条计入 would-be denial，但它并不是 enforce 的增量。**
+ *
+ * 所以把原因码分三类，报表按类求和 —— 否则切 enforce 时拿到的是一份高估的影响面：
+ *
+ *   explicit             显式原因（MODE_REASONS）：**永远拒**，与开关无关 ⇒ 不计入影响面
+ *   likely_already_blocked  human_only：多数写路由另有一道「只有人能操作」的检查，
+ *                         log 模式下调用方本来就被拒 ⇒ 通常不是增量（逐路由不同，标而不减）
+ *   changes_behavior      只有 enforce 才会拒的理由 ⇒ **这才是真切会变的**
+ */
+export type EnforceImpact = "explicit" | "likely_already_blocked" | "changes_behavior";
+
+export function enforceImpactOf(reason: NodePermissionReason): EnforceImpact {
+  if (MODE_REASONS.has(reason)) return "explicit";
+  if (reason === "human_only") return "likely_already_blocked";
+  return "changes_behavior";
+}

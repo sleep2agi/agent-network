@@ -66,7 +66,7 @@ anet node start my-agent --tmux
 
 ### 启动时的环境变量优先级
 
-`agent-node`（包括直接 `agent-node --config <path>` 启动）按下面的顺序取值，**高者胜**：
+`agent-node`（包括直接 `agent-node --config <path>` 启动）按下面的顺序取值，**高者胜**（实现见 [`node-secrets.ts` 的 `loadNodeSecrets`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L155)；文件顶部注释也写着这三层）：
 
 1. **进程启动时已经存在的环境变量**（`KEY=` 空串也算已设置，会被保留）；
 2. `config.json` 的 `env` 里的键（明文或 `_envRef`）；
@@ -98,7 +98,7 @@ anet node migrate-token-to-envref my-agent
 
 | 文件 | 位置 | 权威范围 |
 |---|---|---|
-| `secrets.env` | `<节点目录>/secrets.env`（`config.json` 旁边，`agent-node/src/node-secrets.ts`） | 该节点自己的环境变量；启动时**只填空位** |
+| `secrets.env` | `<节点目录>/secrets.env`（`config.json` 旁边，[`node-secrets.ts:42`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L42) 定义路径） | 该节点自己的环境变量；启动时**只填空位**（[`node-secrets.ts:155`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L155) `loadNodeSecrets`） |
 | `node-secrets.json` | 节点私有通道写入 | 节点私有密钥（同名时优先于 daemon 范围的值） |
 | `scoped-secrets.json` | daemon 目录（`0600`、revision CAS） | 该 daemon 下的子节点共享值 |
 

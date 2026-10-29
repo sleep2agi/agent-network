@@ -109,9 +109,11 @@ const TABLE: [string[], Cfg, number, RegExp, number][] = [
   [["token", "revoke", "tok_x"], "logged-in", 1, /not_found/, 0],
   [["passwd", "--old-password", "a".repeat(10), "--new-password", "b".repeat(10)], "none", 1, /Not logged in/, 0],
   [["passwd", "--old-password", "a".repeat(10), "--new-password", "b".repeat(10)], "logged-in", 1, /invalid_old_password/, 0],
-  [["activate", "anet-XXXX"], "none", 1, /anet init/, 0],
-  [["activate"], "logged-in", 2, /Usage: anet activate/, 0],
-  [["activate", "anet-XXXX"], "logged-in", 1, /invalid_key/, 0],
+  // 2026-10-29 —— 激活码体系已移除：命令名保留（脚本里 `anet activate` 不会变 unknown），
+  // 但任何参数下都直接提示并返回 0，不再读 hub、不再有 usage/失败分支。
+  [["activate", "anet-XXXX"], "none", 0, /activate 已移除/, 0],
+  [["activate"], "logged-in", 0, /activate 已移除/, 0],
+  [["license"], "none", 0, /license 功能已移除/, 0],
   // status / tasks
   [["status"], "none", 1, /No hub configured/, 0],
   [["tasks"], "none", 1, /No hub configured/, 0],

@@ -227,6 +227,30 @@ check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"        
 # 0.9.0-preview.193 —— #2884 共享会话忙的失败分开报排队/会话等待（读时投影）。
 check_feature "busy elapsed split"                "busyElapsedNote"                           "0.9.0-preview.193"
 
+# 0.9.0-preview.201 —— #2969 后半：接口白名单（tool_allowlist / tool_not_allowed）。
+check_feature "tool allowlist"                    "tool_not_allowed"                          "0.9.0-preview.201"
+
+# 0.9.0-preview.210 —— #2721 假信号：启动尖峰不算停顿。
+# 🔴 环境变量在 .210 改名了：COMMHUB_STALL_WARMUP_MS → COMMHUB_STALL_BOOT_GRACE_MS，
+#    语义也跟着变（不再是「前 N 秒全不记」，而是「只在第一个 tick 且进程刚起来时跳过」）。
+#    改名当场把这条探针打红了一次 —— 探针的意义就在这里：改名会让「能力是否仍在」失去锚点。
+check_feature "stall boot grace"                  "COMMHUB_STALL_BOOT_GRACE_MS"               "0.9.0-preview.210"
+
+# 0.9.0-preview.203 —— #1510 严格档：transport 未上报独立成原因码。
+check_feature "secret transport strict"           "secret_transport_unknown"                  "0.9.0-preview.203"
+
+# 0.9.0-preview.204 —— #2969：空数组歧义拒收（清空请传 null）。
+check_feature "allowlist empty array rejected"    "empty_allowlist_ambiguous"                 "0.9.0-preview.204"
+
+# 0.9.0-preview.200 —— #2969 节点级对端白名单（peer_allowlist / peer_not_allowed）。
+check_feature "peer allowlist"                    "peer_not_allowed"                          "0.9.0-preview.200"
+
+# 0.9.0-preview.199 —— 纯开源化：license 端点删除；send_task 不再检查 licenses.expires_at。
+check_feature "no license gate in send_task"      "不再产生 license_expired"                   "0.9.0-preview.199"
+
+# 0.9.0-preview.198 —— #2964 后半：扫「状态 error 且原因登录失效」的会话，每节点每天一条告警。
+check_feature "auth blocked alert scan"           "scanModelAuthBlockedNodes"                 "0.9.0-preview.198"
+
 # 0.9.0-preview.197 —— #2964 告警分类器认得出真实的登录失效文案（model login expired / needs a fresh login）。
 check_feature "login expired alert pattern"       "needs a fresh login"                       "0.9.0-preview.197"
 

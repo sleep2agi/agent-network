@@ -49,6 +49,61 @@ const PATTERNS: Array<{ category: Category; re: RegExp; label: string; hint: str
     hint: "该节点的上游额度已用完：换 key / 充值 / 换 provider 后重启节点；限流（rate limit）不属此类，会自愈" },
 ];
 
+/** #2964 后半 —— 节点完全不接活时的告警类别（与「连续失败」区分开）。 */
+export const MODEL_AUTH_BLOCKED_CATEGORY = "login_expired";
+
+/**
+ * #2964 后半 —— 扫「在线但干不了活」的节点。
+ *
+ * 前一半（分类器认得出登录文案）只覆盖「节点产生了失败」的情况。
+ * 还有一种更安静的状态：节点启动后登录已失效，**一条任务都不接**，
+ * 于是 `#2840` 的「连续失败」永远不会触发 —— 但它同样干不了活。
+ *
+ * hub 侧的事实来源：agent-node 的 `gateStatusOnModelAuth` 会把这种节点的状态报成
+ * `error`，并把原因写进 `sessions.task`。这里直接读它，不做任何推断。
+ *
+ * 去重粒度：每节点每天最多一条（`first_seen` 用日期），因为这不是「某一次失败」，
+ * 而是一个需要人处理的状态；每隔 5 分钟提醒一次只会变成噪音。
+ */
+export function scanModelAuthBlockedNodes(now = new Date()): AlertScanResult {
+  const day = now.toISOString().slice(0, 10);
+  const rows = db.all<{ alias: string | null; network_id: string | null; task: string | null }>(
+    `SELECT alias, network_id, task FROM sessions WHERE status = 'error' AND task IS NOT NULL`,
+  );
+  const out: string[] = [];
+  for (const r of rows) {
+    const node = r.alias;
+    if (!node || !r.network_id) continue;
+    if (classifyDeterministicFailure(r.task) !== "login_required") continue;
+    const dup = db.get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM user_inbox WHERE kind = ?1 AND from_session = ?2
+        AND json_extract(meta_json, '$.node_failure_alert.category') = ?3
+        AND json_extract(meta_json, '$.node_failure_alert.first_seen') = ?4`,
+      NODE_FAILURE_ALERT_KIND, node, MODEL_AUTH_BLOCKED_CATEGORY, day,
+    )?.n ?? 0;
+    if (dup > 0) continue;
+    const owner = db.get<{ owner_user_id: string | null }>(
+      "SELECT owner_user_id FROM nodes WHERE alias = ?1 AND network_id = ?2", node, r.network_id,
+    )?.owner_user_id;
+    if (!owner) continue;
+    const sent = sendAgentNotice({
+      networkId: r.network_id,
+      userId: owner,
+      fromAlias: node,
+      kind: NODE_FAILURE_ALERT_KIND,
+      title: "节点在线但不会接活：登录失效",
+      text: `${node} 当前状态是 error，原因是登录失效。它不会接任何任务（不是慢，是干不了）。\n\n`
+        + `节点自述：\n${String(r.task).slice(0, 300)}\n\n`
+        + `处理建议：在该节点自己的 CODEX_HOME 里重新登录（不要拷贝别的节点的 auth.json），然后重启节点。`,
+      severity: "error",
+      meta: { node_failure_alert: { node, category: MODEL_AUTH_BLOCKED_CATEGORY, first_seen: day } },
+      idPrefix: "dm_nfa_",
+    });
+    if (sent) out.push(node);
+  }
+  return { alerts: out.length, nodes: out };
+}
+
 /** 只认确定性错误；timeout / 任务内容错误一律返回 null（那类会自愈或与节点无关）。 */
 export function classifyDeterministicFailure(result: string | null | undefined): Category | null {
   if (!result) return null;

@@ -102,17 +102,127 @@ PUT /api/nodes/{node_id}/permission-mode   {"mode": "normal" | "readonly" | "res
 {"ok": false, "error": "node_permission_denied", "reason": "mode_readonly", "route": "PATCH /api/requirements/:id", "hint": "…"}
 ```
 
+### 节点级白名单：只能联系谁、只能用哪些工具
+
+`readonly` / `restricted` 是**粗粒度**模式。要更细，用两张白名单——它们都是**主人设的**，设了就立刻生效，与 `COMMHUB_NODE_PERMISSIONS` 无关（原因码 `peer_not_allowed` / `tool_not_allowed` 属于显式原因）。
+
+```
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": ["alice", "n_xxx"]}   // alias 或 node_id
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": null}                  // 清空
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": ["send_task", "requirements_comment"]}
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // 清空
+```
+
+**清空只能传 `null`。空数组 `[]` 会被拒（400 `empty_allowlist_ambiguous`）** —— 因为它是歧义的：
+有人读成「不限制」，有人读成「一个都不许」。曾经真的出现过这种分歧：客户端把 `[]` 显示成
+「不允许任何工具」，而 Hub 把 `[]` 规范化成 `null` 也就是全放开 —— 界面说收紧了，系统其实放开了。
+与其猜，不如拒收；`GET /api/nodes` 读回来只会是 `null` 或非空数组，永远不会是 `[]`。
+
+授权口径与 `permission-mode` 相同（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员），分别记审计 `node_peer_allowlist_changed` / `node_tool_allowlist_changed`。
+
+| 白名单 | 管什么 | 判在哪 |
+|---|---|---|
+| `peers` | `send_task` / `send_message` / `retry_task` / `reassign_task` / `cancel_task` 的**目标**必须在名单里；发给自己的 alias / node_id 永远允许 | `dispatchVerdict` |
+| `peers`（另一条） | 设了 `peers` 的节点**不能广播**——广播的收件人是任意对端，与白名单语义直接冲突 | `broadcastVerdict` |
+| `tools` | MCP 工具名；名单外返回 `tool_not_allowed` | MCP 工具包装层 |
+
+**两条不能省的性质**：
+
+1. **`always` 类工具永远放行**（`get_inbox` / `ack_inbox` / `send_reply` / `report_status` 等）。挡掉它们，节点既不能干活、也不能报告自己干不了——会变成比「没受限」更隐蔽的假活节点。
+2. **默认 `NULL` = 不限制**。两张白名单为空时，行为与没有这两个字段完全一致。
+
+> 目前 `tools` 只覆盖 MCP 工具；REST 路由的白名单尚未提供。
+
 **报表**：网络 owner / admin（用户令牌）可以看过去一段时间每个节点「本来会被拦」的次数，默认 7 天：
 
 ```
 GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 ```
 
-返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}], tool_calls: {total, by_tool: [{tool, hits}]}}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
+返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}], tool_calls: [{tool, hits}], tool_calls_total}], tool_calls: {total, by_tool: [{tool, hits}]}}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
 
 `total` 与 `nodes[]` 只数「本来会被拦」的次数；`tool_calls` 是**分母**：受限工具实际被调用了多少次（按小时合并）。两套数字分表存储，放行的调用不会进拒绝统计。没有分母时「0 次拦截」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
 
 设计和取舍见 RFC-041。
+
+**`enforce_impact` —— 切 enforce 到底会影响多少**（`#2970` 演练发现的口径问题）：
+
+`node_permission_log` 的行数是「本层本来会拒」，**不等于**「打开 enforce 后行为会变」。演练实测：`projects_create` 在 log 模式下已被处理函数自己的「只有人能操作」检查拒掉（`user_token_required`），却仍记了一行 `human_only`。所以报表把原因码分三层：
+
+| 层 | 含义 | 打开 enforce 会变吗 |
+|---|---|---|
+| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` | **不会**——这些与开关无关，永远拒 |
+| `likely_already_blocked` | `human_only` | 多数写路由另有一道「只有人能操作」的检查，调用方本来就被拒 ⇒ 通常不是增量 |
+| `changes_behavior` | `beyond_owner_visibility` / `agent_not_granted_to_owner` / `owner_unknown` / `unbound_token` | **会**——这才是真实影响面 |
+
+估算影响时看 `enforce_impact.changes_behavior`，不要看 `total`。
+
+`nodes[]` 里如果出现 `unbound_token: true`，那一项是**未绑定节点的令牌**（`node_id` 形如 `token:<token_id>`），同项还带 `unbound_token_name`（令牌名，通常形如 `node:<alias>`）。账本沿用老路径按令牌记账，而这类令牌没有 `nodes` 行 —— 所以**两张白名单都管不到它们**。报表把它们标出来，是为了不让管理员以为「名单之外没有别人在派活」；这类令牌的**写类调用**（派活 / 广播 / 建项目 …）会记一条 `unbound_token` 到权限报表：默认 `log` 模式只记录不拦，切到 `enforce` 才会拒。这就是「要不要强制要求绑定令牌」的判断依据 —— 先看有多少，再决定。**最常见的原因是节点改过名而令牌没改**——令牌名里的 alias 在 `nodes` 表里已经查不到，于是解析成「未注册」。处理方式是把令牌改名到当前 alias，或把它绑定到节点。
+
+**按节点的明细（`nodes[].tool_calls`）**：设「只能用哪些工具」之前先看这台节点**实际用过哪些**，否则白名单只能凭想象写，第一次上线就拦掉在用的东西。它在两处比网络级合计更有用：① 一台从不越界但天天在用的节点，过去只从「被拒过的行」聚合，在报表里根本不存在，而它恰恰最该出现在名单里；② `nodes[]` 按 `tool_calls_total` 降序，用得最多的排最前。
+
+### REST 写接口白名单：只允许这些写路由
+
+节点令牌除了 MCP 工具，还能直接打 REST 写接口（派活、广播、改需求、改节点属性…）。
+`tool_allowlist` 管不到这一面，所以另有 `rest_allowlist`：
+
+```
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": ["POST /api/task", "PATCH /api/requirements/:id"]}
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": null}     // 清空 = 不限制
+```
+
+`GET /api/nodes` 的每行带 `rest_allowlist`（`null` = 不限制）。清空只能传 `null`，`[]` 会被拒。
+
+**判定发生在请求入口的唯一 choke point**，因为节点令牌的 REST 写面分散在两套既有判据里
+（`server.ts` 的 `restNodeDenied` 与 `requirements.ts` 的 `nodeTaskGate`）。逐路由各加一次会形成
+第三套规则，而且漏掉任一处就是「装了一半的安全开关」——那比没有更危险。
+
+三条边界：
+
+| 边界 | 说明 |
+|---|---|
+| 只对**节点令牌** | 用户令牌 / daemon 令牌不受影响 |
+| 只对**写方法** | `GET` / `HEAD` / `SSE` 永不经过它——挡掉 SSE，节点会变聋（收不到派活），表现为静默失联而不是报错 |
+| 只在**设置时**生效 | 默认 `NULL` = 不限制，与 MCP 工具白名单同构 |
+
+拒绝时返回 `node_permission_denied` / `reason=rest_not_allowed`，正文里的 `route` 是**实际算出的标签**，
+照着加进清单即可。标签是归一化的（`/api/nodes/n_abc123/attrs` → `PUT /api/nodes/:id/attrs`），
+所以换一台节点不用改清单。
+
+节点目前能被拦到的 REST 写路由一共 9 条（另有 2 条 SSE 不在写方法内）：
+
+```
+POST   /api/task
+POST   /api/broadcast
+DELETE /api/nodes/:id
+PUT    /api/nodes/:id/attrs
+PUT    /api/nodes/:id/avatar
+POST   /api/requirements
+POST   /api/requirements/:id/comments
+PATCH  /api/requirements/:id
+PATCH  /api/requirements/:id/checklist/:id
+```
+
+### 密钥传输闸门（管理员开关）
+
+把密钥从 Hub 转发给节点，走明文公网等于裸奔。闸门按节点**最近一次上报**的 `env_transport` 判，只看 `put`（`list` / `delete` 不带密钥）：
+
+| 节点上报的 transport | 判定 |
+|---|---|
+| `loopback` / `https` | 放行 |
+| `plain` | 拒，`secret_transport_plain` |
+| 未上报（`NULL`） | **默认放行**；显式打开 strict 才拒，`secret_transport_unknown` |
+
+```
+ANET_SECRET_TRANSPORT_GATE=off | log | enforce     # 默认 log：只记不拒
+ANET_SECRET_TRANSPORT_GATE_STRICT=1                # 默认关：连「未上报」一起拒
+```
+
+**为什么「未上报」默认放行**：2026-10-29 生产只读统计，373 个会话里 332 个（89%）从未上报过 transport。把「未知即拒」设成默认，等于打开 `enforce` 当天拦掉近九成节点 —— 那不是收紧，是一次不在计划内的下线。
+
+两个原因码要分开看：`secret_transport_plain` 要去查那台机器的网络链路；`secret_transport_unknown` 要做的是**让节点上报**。不同的人在不同的机器上做。
+
+`log` 模式记在 `GET /api/networks/{id}/env-transport-log`（网络 owner / admin），按小时聚合，回答的是「如果现在打开 enforce，哪几笔会被拒、原因是什么」。
 
 ## Agent 团队
 

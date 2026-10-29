@@ -98,6 +98,9 @@ describe("event-loop-lag: startEventLoopLagMonitor", () => {
       thresholdMs: 40,
       log: (m) => logs.push(m),
       rssMb: () => 4502,
+      // 这条测的是「停顿怎么打日志」，不是启动尖峰。测试进程刚起来几秒，
+      // 不关掉启动宽限的话第一个 tick 会被当成启动尖峰跳过（见 #2721 那组用例）。
+      bootGraceMs: 0,
     });
     const until = performance.now() + 120;
     while (performance.now() < until) { /* spin 阻塞事件循环 */ }
@@ -135,5 +138,43 @@ describe("db-adapter: 慢 SQL 日志", () => {
     expect(line).not.toContain("\n");
     const long = formatSlowSql(1_200, "SELECT " + "x".repeat(500));
     expect(long.length).toBeLessThanOrEqual("[commhub slow-sql] 1200ms ".length + 160);
+  });
+});
+
+// #2721 —— **只跳过第一个 tick**。
+//
+// 事故形状：进程启动后 3 秒记到 gap 2972ms —— 那是「监控开始 → 第一次 tick」被
+// 模块加载/开库/迁移占满的时间，度量的是启动耗时，不是线上停顿。
+//
+// 第一版实现用的是 10 秒**时间窗**，等于监控在前 10 秒什么都不记，
+// 把下面那条「阈值 40ms、spin 120ms 应打停顿日志」的既有测试整体吞掉了
+// —— 修完 qa.yml 事故、QA 恢复后立刻红。窗口越宽越像「把监控关一会儿」。
+describe("#2721 启动尖峰不算停顿（判据：进程 uptime）", () => {
+  test("进程刚启动时的第一个 gap 被跳过", async () => {
+    resetEventLoopLagForTests();
+    const logs: string[] = [];
+    const timer = startEventLoopLagMonitor({
+      intervalMs: 20, thresholdMs: 40, log: (m) => logs.push(m), rssMb: () => 123,
+      bootGraceMs: 15_000, uptimeMs: () => 3_000,   // 模拟「启动后 3 秒」
+    });
+    const until = performance.now() + 120;
+    while (performance.now() < until) { /* spin 落在第一个 tick */ }
+    await Bun.sleep(80);
+    clearInterval(timer);
+    expect(logs).toEqual([]);
+  });
+
+  test("进程已经跑了一会儿 ⇒ 第一个 gap 照常记录（不能把监控关掉）", async () => {
+    resetEventLoopLagForTests();
+    const logs: string[] = [];
+    const timer = startEventLoopLagMonitor({
+      intervalMs: 20, thresholdMs: 40, log: (m) => logs.push(m), rssMb: () => 123,
+      bootGraceMs: 15_000, uptimeMs: () => 600_000,  // 进程跑了 10 分钟
+    });
+    const until = performance.now() + 120;
+    while (performance.now() < until) { /* spin */ }
+    await Bun.sleep(80);
+    clearInterval(timer);
+    expect(logs.length).toBeGreaterThan(0);
   });
 });

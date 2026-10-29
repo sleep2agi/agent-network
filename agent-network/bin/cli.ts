@@ -19253,6 +19253,11 @@ async function licenseCommand() {
   enforced by the CLI, no telemetry.
 `);
 
+  // 2026-10-29 —— license 功能已移除（Hub 不再提供 /api/license）。
+  // 命令名保留，避免脚本里 `anet license` 变成 unknown command。
+  console.log("\n  license 功能已移除：开源版没有任何许可/额度概念，Hub 也不再提供 /api/license。\n");
+  return;
+  /* eslint-disable no-unreachable */
   const gc = loadGlobal();
   if (!gc.hub) {
     console.log(`  (no hub configured — run 'anet init' to set one if you want hub-side license info)\n`);
@@ -19277,6 +19282,10 @@ async function licenseCommand() {
 }
 
 async function activateCommand() {
+  // 2026-10-29 —— 激活码体系已移除（Hub 不再提供 /api/license/activate）。
+  console.log("\n  activate 已移除：开源版无需激活。\n");
+  return;
+  /* eslint-disable no-unreachable */
   const gc = loadGlobal();
   const hub = gc.hub;
   if (!hub) { console.error("Run 'anet init' first."); markFailed(); return; }
