@@ -227,6 +227,9 @@ check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"        
 # 0.9.0-preview.193 —— #2884 共享会话忙的失败分开报排队/会话等待（读时投影）。
 check_feature "busy elapsed split"                "busyElapsedNote"                           "0.9.0-preview.193"
 
+# 0.9.0-preview.201 —— #2969 后半：接口白名单（tool_allowlist / tool_not_allowed）。
+check_feature "tool allowlist"                    "tool_not_allowed"                          "0.9.0-preview.201"
+
 # 0.9.0-preview.200 —— #2969 节点级对端白名单（peer_allowlist / peer_not_allowed）。
 check_feature "peer allowlist"                    "peer_not_allowed"                          "0.9.0-preview.200"
 
