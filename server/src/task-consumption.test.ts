@@ -124,7 +124,11 @@ describe("task consumed_at identity and lifecycle", () => {
     expect(second.tasks).toHaveLength(25);
     expect(new Set([...first.tasks, ...second.tasks].map((task: any) => task.task_id)).size).toBe(125);
     expect([...first.tasks, ...second.tasks].some((task: any) => task.task_id === "foreign-node-row")).toBe(false);
-    expect((await call(handler, { from_node_id: `id_${NODE_B}`, durable_cursor: true, limit: 100 })).error).toBe("from_node_id_identity_mismatch");
+    const mismatch = await call(handler, { from_node_id: `id_${NODE_B}`, durable_cursor: true, limit: 100 });
+    expect(mismatch.error).toBe("from_node_id_identity_mismatch");
+    // #2768 —— 同一错误码要能区分「绑到别的节点」与「根本没有绑定」
+    expect(mismatch.detail).toBe("bound_to_other_node");
+    expect(mismatch.bound_node_id).toBe(`id_${NODE_A}`);
   });
   test("a legacy unbound node token is refused the durable cursor even for its own node", async () => {
     // Pre-RFC-036 tokens carry no immutable node binding. The durable outbox
@@ -132,7 +136,11 @@ describe("task consumed_at identity and lifecycle", () => {
     // degrades to inbox-only compensation on this exact error code.
     db.run("UPDATE api_tokens SET bound_node_id = NULL WHERE token_id = ?1", [`token_${NODE_A}`]);
     const handler = toolsFor({ alias: NODE_A, nodeToken: true }).list_tasks;
-    expect((await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 10 })).error).toBe("from_node_id_identity_mismatch");
+    const unbound = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 10 });
+    expect(unbound.error).toBe("from_node_id_identity_mismatch");
+    // 同一个码，但这里的原因是「没有绑定」——detail 让人和日志都不必再猜
+    expect(unbound.detail).toBe("no_binding");
+    expect(unbound.bound_node_id).toBeNull();
     expect((await call(handler, { from_node_id: `id_${NODE_B}`, durable_cursor: true, limit: 10 })).error).toBe("from_node_id_identity_mismatch");
     const bound = db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", `token_${NODE_A}`);
     expect(bound?.bound_node_id).toBeNull();
