@@ -669,61 +669,13 @@ Once connected the server periodically runs `tmux capture-pane` and pushes the p
 ## Legacy Endpoints (v0.6 era — frozen in OSS)
 
 ::: warning Not required since Apache 2.0
-Since v0.8 the project is Apache 2.0 open-source + self-hosted — there is no official paid license. The two endpoints below are leftovers from the v0.6 trial/activation flow. The hub still keeps a `licenses` table and an initial 14-day trial as a safety net, but new users and the main docs do not need to touch them. If you hit `license_expired`, see [troubleshooting](/en/troubleshooting#license-expired-license-expired-legacy-behavior).
+::: tip License removed entirely on 2026-10-29
+The open-source build has no licence, activation-code or quota concept. `GET /api/license` and
+`POST /api/license/activate` were deleted (they now 404), and `send_task` no longer checks licence expiry,
+so **`license_expired` can no longer occur**. `anet license` / `anet activate` keep their names but only
+print "feature removed". The `licenses` table stays in the database but is neither read nor written
+(historic rows are kept).
 :::
 
-### GET /api/license
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
-Reads the first row of the `licenses` table (by `created_at` ascending) and returns trial / pro status with `days_left`.
-
-```bash
-curl http://localhost:9200/api/license
-# → Public endpoint (no Authorization header required)
-```
-
-**Response** (trial / pro):
-
-```json
-{
-  "ok": true,
-  "license": { "type": "trial", "expires_at": "2026-04-25 12:00:00", "days_left": 12, "expired": false },
-  "limits": { "max_agents": 5, "max_networks": 3, "max_tasks_day": 500 }
-}
-```
-
-**Response** (no license row):
-
-```json
-{ "ok": true, "status": "no_license" }
-```
-
-### POST /api/license/activate
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
-Inject a pro license key. [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) only checks that `key.startsWith('anet-') && length >= 16` — **there is no real server-side validation**. The endpoint deletes any existing license row and writes a fresh pro license (limits 50 agents / 10 networks / 10000 tasks/day, expires in 365 days).
-
-```bash
-curl -X POST http://localhost:9200/api/license/activate \
-  -H "Content-Type: application/json" \
-  -d '{"key": "anet-anything-16-plus-chars"}'
-```
-
-**Response** (success):
-
-```json
-{ "ok": true, "type": "pro", "expires_in_days": 365 }
-```
-
-**4xx errors**:
-
-| Status | `error` value | Trigger |
-|------|------------|---------|
-| 400 | `key required` | Body missing `key` |
-| 400 | `invalid license key` | `key` does not start with `anet-` or is < 16 chars (**prefix-and-length check only, no real signature**) |
-
-> Effectively a self-service bypass kept around purely so that anyone hitting `license_expired` has an escape hatch in the OSS era. See [troubleshooting — license_expired](/en/troubleshooting#license-expired-license-expired-legacy-behavior) and [CLI `anet activate`](/en/guide/cli#other).
-
+---
 ---

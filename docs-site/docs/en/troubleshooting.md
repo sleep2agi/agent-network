@@ -152,7 +152,6 @@ See [Tokens and permissions](/en/guide/account-system#tokens), [Roles](/en/guide
 | `network name already exists` | Inspect current networks and choose another name; do not edit the database |
 | `network has N active session(s)` | Use `anet status`, stop the nodes normally, then retry network deletion |
 | `quota exceeded` | Use `anet network ls` and remove unused networks. There is currently no public CLI for changing a user plan/global role; contact the Hub operator and do not promote the user to global admin as a shortcut |
-| `license_expired` | If it remains after `anet license` and an upgrade, contact the Hub operator. There is no safe public CLI for cleaning legacy rows; stop the Hub, back up the database, and file a redacted diagnostic instead of deleting `licenses` rows online |
 
 Direct database writes bypass API authorization, auditing, and consistency checks and can corrupt related license or identity state, so this guide does not provide SQL “fixes.”
 
