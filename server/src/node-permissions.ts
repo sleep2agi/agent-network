@@ -150,7 +150,7 @@ export type NodeIdentity = {
   toolAllowlist: string[] | null;
 };
 
-function normalizePeerAllowlist(raw: unknown): string[] | null {
+export function normalizePeerAllowlist(raw: unknown): string[] | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -160,7 +160,7 @@ function normalizePeerAllowlist(raw: unknown): string[] | null {
   } catch { return null; }
 }
 
-const normalizeToolAllowlist = normalizePeerAllowlist;
+export const normalizeToolAllowlist = normalizePeerAllowlist;
 
 function normalizeMode(raw: unknown): NodePermissionMode {
   return raw === "readonly" || raw === "restricted" ? raw : "normal";

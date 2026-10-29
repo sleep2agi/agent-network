@@ -343,3 +343,54 @@ describe("bookkeeping", () => {
     expect(db.get("SELECT 1 AS hit FROM node_permission_log WHERE route = 'old'")).toBeFalsy();
   });
 });
+
+// #2969 / #1510 —— 「能设」之外还差一半：「能看到当前设的是什么」。
+//
+// 两张白名单原先只有 PUT，`GET /api/nodes` 里一个字都没有，客户端因此做不出
+// 「当前设置」这一屏 —— 能写不能读，等于逼用户凭记忆操作。
+// 同一处还给 #1510 的严格模式留了眼睛：管理员要能看出谁的 transport 未知。
+describe("GET /api/nodes 读回白名单与 transport", () => {
+  const rowOf = async (nodeId: string) => {
+    const r = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}&node_id=${nodeId}`);
+    expect(r.status).toBe(200);
+    expect(r.body.nodes).toHaveLength(1);
+    return r.body.nodes[0];
+  };
+
+  test("默认是 null（= 不限制），不是空数组", async () => {
+    const row = await rowOf(node.other.id);
+    expect(row.peer_allowlist).toBeNull();
+    expect(row.tool_allowlist).toBeNull();
+  });
+
+  test("写进去什么，读出来就是什么", async () => {
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: ["boss", node.nR.id] })).status).toBe(200);
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: ["send_task", "get_inbox"] })).status).toBe(200);
+    const row = await rowOf(node.other.id);
+    expect(row.peer_allowlist).toEqual(["boss", node.nR.id]);
+    expect(row.tool_allowlist).toEqual(["send_task", "get_inbox"]);
+  });
+
+  test("清空后回到 null，而不是 []", async () => {
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: null })).status).toBe(200);
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: null })).status).toBe(200);
+    const row = await rowOf(node.other.id);
+    expect(row.peer_allowlist).toBeNull();
+    expect(row.tool_allowlist).toBeNull();
+  });
+
+  test("env_transport 取该节点最新一次上报（老上报不能盖掉新的）", async () => {
+    // 两行同 node_id、不同时间：取 updated_at 更大的那条。
+    db.run("DELETE FROM sessions WHERE node_id = ?1", [node.nR.id]);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', ?3, ?4, 'plain', datetime('now','-2 hour'))",
+      [`r_old_${node.nR.id}`, "r-old-alias", node.nR.id, net]);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', ?3, ?4, 'https', datetime('now','-1 minute'))",
+      [`r_new_${node.nR.id}`, "r-new-alias", node.nR.id, net]);
+    expect((await rowOf(node.nR.id)).env_transport).toBe("https");
+  });
+
+  test("从没上报过的节点是 null（不是猜一个值填上）", async () => {
+    db.run("UPDATE sessions SET env_transport = NULL WHERE node_id = ?1", [node.nR.id]);
+    expect((await rowOf(node.nR.id)).env_transport).toBeNull();
+  });
+});
