@@ -1,0 +1,74 @@
+// #2969 —— 节点级对端白名单。
+//
+// 需求（admin 2026-10-29）：「限制他能和哪些节点通信」。
+// 现有能力只有「人这一层」的 agent_access=granted（授权一个 Agent = 它能找**所有**被授权对端），
+// 做不到「只许 A 找 B，不许 A 找 C」。
+//
+// 这一列是**主人主动设的**，因此与 readonly / restricted 同类：设了就立刻生效、不看开关。
+// NULL = 不限制 ⇒ 对现有 300+ 节点行为零变化。
+import { describe, expect, test, beforeAll } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const DIR = mkdtempSync(join(tmpdir(), "anet-peer-allow-"));
+process.env.COMMHUB_DB ||= join(DIR, "hub.db");
+
+let mod: typeof import("./node-permissions.js");
+beforeAll(async () => { mod = await import("./node-permissions.js"); });
+
+const id = (peerAllowlist: string[] | null, mode: "normal" | "readonly" | "restricted" = "normal") => ({
+  networkId: "net_test",
+  nodeId: "n_self",
+  logKey: "n_self",
+  aliases: ["self-alias"],
+  ownerUserId: "u_owner",
+  mode,
+  peerAllowlist,
+});
+
+describe("#2969 对端白名单", () => {
+  test("null ⇒ 完全不受限（与今天的行为一致）", () => {
+    expect(mod.dispatchVerdict(id(null), { alias: "anyone", nodeId: "n_any" })).toBeNull();
+  });
+
+  test("名单命中（按 alias）⇒ 放行", () => {
+    expect(mod.dispatchVerdict(id(["alice"]), { alias: "alice", nodeId: "n_alice" })).toBeNull();
+  });
+
+  test("名单命中（按 node_id）⇒ 放行 —— 主人可能只写 id", () => {
+    expect(mod.dispatchVerdict(id(["n_alice"]), { alias: "alice", nodeId: "n_alice" })).toBeNull();
+  });
+
+  test("不在名单上 ⇒ peer_not_allowed", () => {
+    expect(mod.dispatchVerdict(id(["alice"]), { alias: "bob", nodeId: "n_bob" }))
+      .toEqual({ reason: "peer_not_allowed", sample: "bob" });
+  });
+
+  test("发给自己的另一个 alias 仍然放行（白名单不该挡住自派）", () => {
+    // dispatchVerdict 的第一条早退：目标是自己的 alias / node_id ⇒ null
+    expect(mod.dispatchVerdict(id(["alice"]), { alias: "self-alias", nodeId: "n_self" })).toBeNull();
+  });
+
+  test("白名单是显式原因：开关为 off 也照拒（与 readonly 同类）", () => {
+    const saved = process.env.COMMHUB_NODE_PERMISSIONS;
+    process.env.COMMHUB_NODE_PERMISSIONS = "off";
+    try {
+      expect(mod.nodeDecide(id(["alice"]), "mcp:send_task", { reason: "peer_not_allowed" })).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.COMMHUB_NODE_PERMISSIONS;
+      else process.env.COMMHUB_NODE_PERMISSIONS = saved;
+    }
+  });
+
+  test("正常模式下的人类专属写操作，开关为 off 时仍放行（对照，防止把一切都变显式）", () => {
+    const saved = process.env.COMMHUB_NODE_PERMISSIONS;
+    process.env.COMMHUB_NODE_PERMISSIONS = "off";
+    try {
+      expect(mod.nodeDecide(id(null), "mcp:projects_create", { reason: "human_only" })).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.COMMHUB_NODE_PERMISSIONS;
+      else process.env.COMMHUB_NODE_PERMISSIONS = saved;
+    }
+  });
+});

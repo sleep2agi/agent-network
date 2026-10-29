@@ -2937,6 +2937,38 @@ return Bun.serve({
       logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode }), getClientIP(req), node.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node.node_id, permission_mode: mode, previous }));
     }
+    // #2969 —— 节点级对端白名单：PUT /api/nodes/:id/peer-allowlist { peers: string[] | null }
+    // 与 permission-mode 同一套授权口径（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员）。
+    // peers 为 null 或空数组 ⇒ 清空（不限制），与「没有这一列」等价。
+    const peerAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/peer-allowlist$/);
+    if (peerAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawPeers = body?.peers;
+      if (rawPeers !== null && rawPeers !== undefined && !Array.isArray(rawPeers)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_peers", message: "peers must be an array of alias/node_id strings, or null" }, { status: 400 }));
+      }
+      const peers = Array.isArray(rawPeers)
+        ? rawPeers.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      if (peers.length > 200) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_peers", message: "at most 200 entries" }, { status: 400 }));
+      }
+      const nodeRef2 = decodeURIComponent(peerAllowMatch[1]);
+      const node2 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; peer_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, peer_allowlist FROM nodes WHERE node_id = ?1", nodeRef2);
+      const role2 = node2?.network_id ? getUserNetworkRole(restAuth.userId, node2.network_id) : null;
+      if (!node2 || !node2.network_id || (!role2 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!isAdmin && node2.owner_user_id !== restAuth.userId && role2 !== "owner" && role2 !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its peer allowlist" }, { status: 403 }));
+      }
+      const nextValue = peers.length ? JSON.stringify(peers) : null;
+      db.run("UPDATE nodes SET peer_allowlist = ?1 WHERE node_id = ?2", [nextValue, node2.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_peer_allowlist_changed", "node", node2.node_id, JSON.stringify({ from: node2.peer_allowlist, to: nextValue }), getClientIP(req), node2.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node2.node_id, peers: peers.length ? peers : null }));
+    }
     const permReportMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/node-permission-report$/);
     if (permReportMatch && req.method === "GET") {
       if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
