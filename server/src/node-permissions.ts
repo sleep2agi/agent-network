@@ -316,6 +316,9 @@ export function dispatchVerdict(id: NodeIdentity, target: AgentRef): Verdict {
 
 /** 广播:只读 / 受限都不行(会发给没派给它、也未必授权的 Agent)。 */
 export function broadcastVerdict(id: NodeIdentity): Verdict {
+  // #2969 —— 设了对端白名单的节点不能广播：广播的收件人是「任意对端」，
+  // 与白名单的语义直接冲突（名单说「只能找这几个」，广播说「发给所有人」）。
+  if (id.peerAllowlist) return { reason: "peer_not_allowed" };
   if (id.mode === "readonly") return { reason: "mode_readonly" };
   if (id.mode === "restricted") return { reason: "mode_restricted_not_assigned" };
   if (!id.ownerUserId) return { reason: "owner_unknown" };

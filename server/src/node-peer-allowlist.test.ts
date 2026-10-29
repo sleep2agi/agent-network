@@ -61,6 +61,11 @@ describe("#2969 对端白名单", () => {
     }
   });
 
+  test("设了白名单 ⇒ 不能广播（广播的收件人是任意对端）", () => {
+    expect(mod.broadcastVerdict(id(["alice"]))).toEqual({ reason: "peer_not_allowed" });
+    expect(mod.broadcastVerdict(id(null))).toBeNull();
+  });
+
   test("正常模式下的人类专属写操作，开关为 off 时仍放行（对照，防止把一切都变显式）", () => {
     const saved = process.env.COMMHUB_NODE_PERMISSIONS;
     process.env.COMMHUB_NODE_PERMISSIONS = "off";
