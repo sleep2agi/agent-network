@@ -86,7 +86,49 @@ export function agentListSchedules(id: NodeIdentity, status?: string): AgentSche
   let sql = `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE network_id = ?1 AND (target_node_id = ?2 OR created_by_node_id = ?2)`;
   if (status) { sql += " AND status = ?3"; params.push(status); }
   sql += " ORDER BY updated_at DESC LIMIT 200";
-  return { ok: true, schedules: db.all<ScheduledRow>(sql, ...params).map(decodeRowForAgent) };
+  const rows = db.all<ScheduledRow>(sql, ...params).map(decodeRowForAgent);
+  // #2935 —— 「周期比单轮工作耗时短」的排程会**永久 skip**：退避只会让它更稀疏，追不上。
+  // 数据是现成的（scheduled_task_runs 的 completed_at - created_at），只是以前没人给出来。
+  // 这里只**报数**，不改任何调度行为。
+  for (const row of rows) {
+    const scheduleId = String((row as Record<string, unknown>).schedule_id ?? "");
+    if (!scheduleId) continue;
+    const period = intervalSecondsOf(row);
+    const p50 = medianRunSeconds(scheduleId);
+    const r = row as Record<string, unknown>;
+    r.observed_run_seconds_p50 = p50;
+    if (period !== null && p50 !== null) {
+      r.period_shorter_than_run = period < p50;
+      r.suggested_every_seconds = period < p50 ? Math.max(period, Math.round(p50)) : null;
+    } else {
+      r.period_shorter_than_run = null;
+      r.suggested_every_seconds = null;
+    }
+  }
+  return { ok: true, schedules: rows };
+}
+
+/** 从 schedule_json 里取 interval 秒数；非 interval 类型返回 null。 */
+function intervalSecondsOf(row: unknown): number | null {
+  const spec = (row as Record<string, unknown>)?.schedule;
+  const m = /"every_seconds"\s*:\s*(\d+)/.exec(JSON.stringify(spec ?? ""));
+  return m ? Number(m[1]) : null;
+}
+
+/** 近 7 天该排程「完成一轮」耗时的中位数（秒）。样本 < 3 返回 null（不够判断）。 */
+function medianRunSeconds(scheduleId: string): number | null {
+  const rows = db.all<{ secs: number | string | null }>(
+    `SELECT (julianday(completed_at) - julianday(created_at)) * 86400 AS secs
+       FROM scheduled_task_runs
+      WHERE schedule_id = ?1 AND status = 'replied' AND completed_at IS NOT NULL
+        AND created_at >= datetime('now','-7 day')
+      ORDER BY secs LIMIT 200`,
+    scheduleId,
+  ).map((r) => Number(r.secs)).filter((n) => Number.isFinite(n) && n >= 0);
+  if (rows.length < 3) return null;
+  const mid = Math.floor(rows.length / 2);
+  const median = rows.length % 2 ? rows[mid] : (rows[mid - 1] + rows[mid]) / 2;
+  return Math.round(median);
 }
 
 export function agentGetSchedule(id: NodeIdentity, scheduleId: string): AgentScheduleResult {

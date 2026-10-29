@@ -389,3 +389,41 @@ describe("provenance: an Agent's schedule never passes as a person's", () => {
     expect(replyRow(hr.body.taskId)?.session_name).toBe(`sa_boss_${stamp}`); // the person's unread, as before
   });
 });
+
+// #2935 —— 「周期比单轮工作耗时短」的排程会**永久 skip**：退避只会让它更稀疏，追不上。
+// 以前没有任何一处给出「这个排程每轮实际跑多久」，于是只能靠人翻 scheduled_task_runs。
+// 这里只报数，不改调度行为：observed_run_seconds_p50 / period_shorter_than_run / suggested_every_seconds。
+describe("#2935 排程周期诊断", () => {
+  test("周期短于实测单轮耗时时，列表里直接标出来并给建议值", async () => {
+    const c = await mcp(node.a.token, "schedule_create", {
+      name: `diag-${stamp}`, task: "t", target_node_id: node.a.id,
+      schedule: { type: "interval", every_seconds: 180 }, timezone: "Asia/Shanghai",
+    });
+    expect(c.ok).toBe(true);
+    const id = c.schedule.schedule_id;
+    // 造 3 条「一轮跑了 600 秒」的已完成 run（中位数 600s > 周期 180s）
+    for (let i = 0; i < 3; i++) {
+      // scheduled_for 必须每行不同（表上有唯一约束），否则第二条就撞 UNIQUE。
+      db.run(`INSERT INTO scheduled_task_runs (run_id, schedule_id, network_id, scheduled_for, status, created_at, completed_at)
+              VALUES (?1, ?2, ?3, datetime('now','-' || ?4 || ' minute'), 'replied',
+                      datetime('now','-' || (?4 + 10) || ' minute'), datetime('now','-' || ?4 || ' minute'))`,
+        [`srun_diag_${stamp}_${i}`, id, net, String(i * 20 + 20)]);
+    }
+    const l = await mcp(node.a.token, "schedule_list");
+    const row = l.schedules.find((x: any) => x.schedule_id === id);
+    expect(row.observed_run_seconds_p50).toBe(600);
+    expect(row.period_shorter_than_run).toBe(true);
+    expect(row.suggested_every_seconds).toBe(600);
+  });
+
+  test("样本不足 3 条时不判断（p50 / flag 均为 null）", async () => {
+    const c = await mcp(node.a.token, "schedule_create", {
+      name: `diag2-${stamp}`, task: "t", target_node_id: node.a.id,
+      schedule: { type: "interval", every_seconds: 180 }, timezone: "Asia/Shanghai",
+    });
+    const l = await mcp(node.a.token, "schedule_list");
+    const row = l.schedules.find((x: any) => x.schedule_id === c.schedule.schedule_id);
+    expect(row.observed_run_seconds_p50).toBeNull();
+    expect(row.period_shorter_than_run).toBeNull();
+  });
+});
