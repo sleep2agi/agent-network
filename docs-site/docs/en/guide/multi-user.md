@@ -128,6 +128,8 @@ The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, p
 
 See RFC-041 for the design and trade-offs.
 
+If an entry in `nodes[]` carries `unbound_token: true`, it is an **unbound node token** (its `node_id` looks like `token:<token_id>`). The ledger keeps the legacy per-token key, and such a token has no `nodes` row — so **neither allowlist can restrict it**. It is surfaced here so an admin does not conclude that nobody outside the list is dispatching; bind the token to a node first if you need to restrict it.
+
 **Per-node detail (`nodes[].tool_calls`)**: look at what a node *actually* called before writing its allowlist — otherwise the list is guesswork and the first deploy blocks something in use. Two things it fixes: (1) a node that never oversteps but works all day used to be missing from this report, because `nodes[]` was aggregated only from denial rows — exactly the node whose allowlist you most need to get right; (2) `nodes[]` is now sorted by `tool_calls_total` descending, busiest first.
 
 ### Secret transport gate (admin switch)

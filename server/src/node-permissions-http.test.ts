@@ -485,3 +485,22 @@ describe("空数组不猜：拒收，清空请传 null", () => {
     expect(row.body.nodes[0].tool_allowlist).toBeNull();
   });
 });
+
+// #2969 / #2971 —— 未绑定节点的令牌是权限体系的一个真实盲点：
+// 账本用 `token:<token_id>` 当键，它们没有 nodes 行 ⇒ 两张白名单都管不到（toolAllowlist 为 null）。
+// 报表必须把它们标出来，否则管理员会以为「名单之外没有别人在派活」。
+describe("未绑定节点的令牌在报表里必须可见", () => {
+  test("token: 键的条目带 unbound_token=true，真实节点不带", async () => {
+    db.run(`INSERT INTO node_tool_calls (network_id, node_id, tool, hour, hits) VALUES (?1, ?2, 'mcp:send_task', ?3, 4)
+            ON CONFLICT(network_id, node_id, tool, hour) DO UPDATE SET hits = node_tool_calls.hits + 4`,
+      [net, "token:tok_unbound_test", new Date().toISOString().slice(0, 13)]);
+    const r = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    expect(r.status).toBe(200);
+    const unbound = r.body.nodes.find((n: any) => n.node_id === "token:tok_unbound_test");
+    expect(unbound).toBeTruthy();
+    expect(unbound.unbound_token).toBe(true);
+    expect(unbound.tool_calls_total).toBeGreaterThanOrEqual(4);
+    const real = r.body.nodes.find((n: any) => n.node_id === node.nN.id);
+    expect(real.unbound_token).toBeUndefined();
+  });
+});

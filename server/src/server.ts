@@ -3044,7 +3044,7 @@ return Bun.serve({
            FROM node_permission_log WHERE network_id = ?1 AND hour >= ?2
           GROUP BY node_id, route, reason ORDER BY node_id, route, reason`,
         networkId, sinceHour);
-      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number }>();
+      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean }>();
       for (const r of rows) {
         let entry = byNode.get(r.node_id);
         if (!entry) {
@@ -3086,6 +3086,11 @@ return Bun.serve({
         const list = callsByNode.get(entry.node_id) ?? [];
         entry.tool_calls = list;
         entry.tool_calls_total = list.reduce((n, e) => n + e.hits, 0);
+        // 未绑定节点的令牌：账本用 `token:<token_id>` 当键（nodeIdentity 的老路径）。
+        // 它们**没有 nodes 行**，所以两张白名单都管不到它们（toolAllowlist 为 null ⇒ 不限制）。
+        // 报表里必须显式标出来，否则管理员会以为「名单之外没有别人在派活」。
+        // 这里只标注，不改变任何判定。
+        if (entry.node_id.startsWith("token:")) entry.unbound_token = true;
       }
       const nodes = [...byNode.values()].sort((a, b) =>
         b.tool_calls_total - a.tool_calls_total || b.total - a.total || a.node_id.localeCompare(b.node_id));
