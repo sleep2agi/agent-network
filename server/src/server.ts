@@ -107,7 +107,7 @@ import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
-import { normalizePeerAllowlist, normalizeToolAllowlist } from "./node-permissions.js";
+import { normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
@@ -406,6 +406,9 @@ function countNetworkUploads(networkId: string): number {
 }
 
 // RFC-041(#487):节点令牌的一次 REST 写 / 订阅先按 node-permissions.ts 判。用户令牌 → null(不判)。
+/** #2969 续 —— 会被 REST 写白名单检查的方法。GET / HEAD / OPTIONS 永远不在此列。 */
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 function restNodeDenied(req: Request, restAuth: { networkId: string | null; tokenId: string | null } | null, route: string, verdictOf: (id: NodeIdentity) => Verdict): Response | null {
   if (!restAuth?.networkId) return null;
   const id = nodeIdentity(restAuth.tokenId, restAuth.networkId);
@@ -2841,6 +2844,28 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
     }
 
+    // #2969 续 —— REST 写接口白名单：唯一 choke point。
+    //
+    // 为什么在这里而不是逐条路由：节点令牌的 REST 写面分散在两套判据里
+    // （server.ts 的 restNodeDenied + requirements.ts 的 nodeTaskGate）。
+    // 逐站点加会变成第三套规则，且漏掉任一处就是「装了一半的安全开关」——
+    // 那比没有更危险，因为它会被当成已经收紧了。
+    //
+    // 三条边界：
+    //   · 只对**节点令牌**生效（用户令牌 / daemon 令牌不受影响）
+    //   · 只对**写方法**生效：GET 与 SSE 永不经过这里 —— 挡掉 SSE 节点会变聋
+    //   · 只在**设置了清单**时生效：NULL = 不限制，与 MCP 工具白名单同构
+    if (restAuth?.networkId && WRITE_METHODS.has(req.method)) {
+      const restNode = nodeIdentity(restAuth.tokenId, restAuth.networkId);
+      if (restNode?.restAllowlist) {
+        const label = restRouteLabel(req.method, url.pathname);
+        const verdict = restAllowlistVerdict(restNode, label);
+        if (verdict && nodeDecide(restNode, label, verdict)) {
+          return withCors(req, Response.json(nodePermissionDeniedBody(verdict.reason, label), { status: 403 }));
+        }
+      }
+    }
+
     // #629: only actual user credentials gain lifecycle read metadata. Legacy
     // master/dev-open and network/daemon credentials keep their old surface.
     const lifecycleAuth = resolveRequestAuth(req, { allowQueryToken: false });
@@ -2986,6 +3011,41 @@ return Bun.serve({
       logAudit(restAuth.userId, restAuth.username, "node_tool_allowlist_changed", "node", node3.node_id, JSON.stringify({ from: node3.tool_allowlist, to: nextTools }), getClientIP(req), node3.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node3.node_id, tools: tools.length ? tools : null }));
     }
+    // #2969 续 —— REST 写接口白名单：PUT /api/nodes/:id/rest-allowlist { routes: string[] | null }
+    // 与 tool-allowlist 同一套授权口径与空数组语义（拒收 []，清空请传 null）。
+    const restAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/rest-allowlist$/);
+    if (restAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawRoutes = body?.routes;
+      if (rawRoutes !== null && rawRoutes !== undefined && !Array.isArray(rawRoutes)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_routes", message: "routes must be an array of route labels like \"POST /api/task\", or null" }, { status: 400 }));
+      }
+      const routes = Array.isArray(rawRoutes)
+        ? rawRoutes.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      if (Array.isArray(rawRoutes) && routes.length === 0) {
+        return withCors(req, Response.json({ ok: false, error: "empty_allowlist_ambiguous", message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected" }, { status: 400 }));
+      }
+      if (routes.length > 200) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_routes", message: "at most 200 entries" }, { status: 400 }));
+      }
+      const nodeRef4 = decodeURIComponent(restAllowMatch[1]);
+      const node4 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; rest_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, rest_allowlist FROM nodes WHERE node_id = ?1", nodeRef4);
+      const role4 = node4?.network_id ? getUserNetworkRole(restAuth.userId, node4.network_id) : null;
+      if (!node4 || !node4.network_id || (!role4 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!isAdmin && node4.owner_user_id !== restAuth.userId && role4 !== "owner" && role4 !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its REST allowlist" }, { status: 403 }));
+      }
+      const nextRoutes = routes.length ? JSON.stringify(routes) : null;
+      db.run("UPDATE nodes SET rest_allowlist = ?1 WHERE node_id = ?2", [nextRoutes, node4.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_rest_allowlist_changed", "node", node4.node_id, JSON.stringify({ from: node4.rest_allowlist, to: nextRoutes }), getClientIP(req), node4.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node4.node_id, routes: routes.length ? routes : null }));
+    }
+
     // #2969 —— 节点级对端白名单：PUT /api/nodes/:id/peer-allowlist { peers: string[] | null }
     // 与 permission-mode 同一套授权口径（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员）。
     // peers 为 null 或空数组 ⇒ 清空（不限制），与「没有这一列」等价。
@@ -5380,7 +5440,7 @@ return Bun.serve({
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
                         display_name, team, tags, attrs_revision, permission_mode, owner_user_id,
-                        department_id, peer_allowlist, tool_allowlist
+                        department_id, peer_allowlist, tool_allowlist, rest_allowlist
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
@@ -5542,7 +5602,7 @@ return Bun.serve({
         }
         // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
         // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
-        const { config_snapshot, owner_user_id, peer_allowlist, tool_allowlist, ...rest } = r;
+        const { config_snapshot, owner_user_id, peer_allowlist, tool_allowlist, rest_allowlist, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
@@ -5567,6 +5627,8 @@ return Bun.serve({
           // #2969 —— 白名单读回来：null = 不限制；[] 不该出现（空数组在写入时已规范成 null）。
           peer_allowlist: normalizePeerAllowlist(peer_allowlist),
           tool_allowlist: normalizeToolAllowlist(tool_allowlist),
+          // #2969 续 —— REST 写接口白名单（形如 "POST /api/task"）。null = 不限制。
+          rest_allowlist: normalizePeerAllowlist(rest_allowlist),
           // #1510 —— 管理员要能看出「谁的 transport 未知」才敢打开 strict。
           // 这一格**只读**，不参与任何判定（判定在 env-transport-policy.ts）。
           env_transport: envTransportOf(r.node_id, r.alias, r.network_id),
