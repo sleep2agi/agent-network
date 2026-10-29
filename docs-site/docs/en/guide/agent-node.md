@@ -66,7 +66,7 @@ Project-local node state is under `.anet/nodes/<alias>/`:
 
 ### Environment precedence at startup
 
-`agent-node` (including a direct `agent-node --config <path>` start) resolves variables in this order, **highest wins**:
+`agent-node` (including a direct `agent-node --config <path>` start) resolves variables in this order, **highest wins** (implementation: the precedence comment at [`node-secrets.ts:1-20`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L1-L20), code path in `loadNodeSecrets` at `:155`):
 
 1. **process env already set when the process starts** (an empty string counts as set and is kept);
 2. keys named in `config.json` `env` (plain or `_envRef`);
