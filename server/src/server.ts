@@ -107,6 +107,7 @@ import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
+import { normalizePeerAllowlist, normalizeToolAllowlist } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
@@ -5310,7 +5311,7 @@ return Bun.serve({
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
                         display_name, team, tags, attrs_revision, permission_mode, owner_user_id,
-                        department_id
+                        department_id, peer_allowlist, tool_allowlist
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
@@ -5352,6 +5353,47 @@ return Bun.serve({
         const inFlight = path === "manual" || !alias ? 0 : countInFlightTasks(alias, networkId);
         const blockedByInFlight = lifecycle === "active" && inFlight > 0;
         return { path, in_flight: inFlight, can_restart_now: path !== "manual" && !blockedByInFlight };
+      };
+      // #1510 —— 节点的 transport 记在 sessions 行上（report_status 每次上报刷新）。
+      // 逐行查就是 N 次查询，所以先把 wanted 里所有 id / alias 一次取回、按 updated_at 倒序，
+      // 每个节点只认最新那条（与 transportOf() 的取法一致：node_id 或 alias 命中）。
+      const wantedIds = new Set<string>(wanted.map((r) => String(r.node_id)));
+      const transportByKey = new Map<string, string | null>();
+      const aliasTransport = new Map<string, string | null>();
+      if (wanted.length) {
+        // 🔴 编号参数不能复用：`?1..?n` 出现两次，而实参给了 2n 个 ——
+        // SQLite 只认得 n 个绑定位置，多出来的直接抛错，整条 GET /api/nodes 变 500。
+        // （#3214 首版就这么写的；CI 上三条互不相干的 workflow 同时红，
+        //   共同点只有一个：它们都要先 `GET /api/nodes` 把 alias 解析成 node_id。）
+        // 正确做法是第二组参数从 n+1 开始编号。
+        const ids = wanted.map((r) => String(r.node_id));
+        const phA = ids.map((_, i) => `?${i + 1}`).join(",");
+        const phB = ids.map((_, i) => `?${ids.length + i + 1}`).join(",");
+        for (const row of db.all<{ node_id: string | null; alias: string | null; network_id: string | null; env_transport: string | null }>(
+          `SELECT node_id, alias, network_id, env_transport FROM sessions
+            WHERE node_id IN (${phA}) OR alias IN (${phB})
+            ORDER BY updated_at DESC`,
+          ...ids, ...ids,
+        )) {
+          if (row.node_id && wantedIds.has(row.node_id) && !transportByKey.has(row.node_id)) transportByKey.set(row.node_id, row.env_transport);
+          // alias 只在**同一网络**内兜底：不同网络可以有同名 alias，
+          // 跨网络命中会把 A 网的 transport 显示成 B 网那台 —— 这一格是给人做安全决策用的，
+          // 宁可显示 null（未知）也不能显示错的值。
+          if (row.alias && row.network_id && wantedIds.has(row.alias)) {
+            const key = `${row.network_id}|${row.alias}`;
+            if (!aliasTransport.has(key)) aliasTransport.set(key, row.env_transport);
+          }
+        }
+      }
+      const envTransportOf = (nodeId: string, alias: string | null, networkId: string | null): string | null => {
+        const direct = transportByKey.get(nodeId);
+        if (direct !== undefined) return direct;
+        if (!networkId) return null;
+        // 兜底顺序与 transportOf() 一致：sessions 行的 alias 可能等于**节点 id**
+        // （老注册路径就是这样），也可能等于**人给的 alias**。两种都要试，且都带网络。
+        const byId = aliasTransport.get(`${networkId}|${nodeId}`);
+        if (byId !== undefined) return byId;
+        return alias ? aliasTransport.get(`${networkId}|${alias}`) ?? null : null;
       };
       // Add a single new field `role: string | null` per row, extracted from
       // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'
@@ -5429,7 +5471,9 @@ return Bun.serve({
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
           if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
         }
-        const { config_snapshot, owner_user_id, ...rest } = r;
+        // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
+        // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
+        const { config_snapshot, owner_user_id, peer_allowlist, tool_allowlist, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
@@ -5451,6 +5495,12 @@ return Bun.serve({
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
           viewer_can: { permission_mode: canSetPermissionMode(r) },
+          // #2969 —— 白名单读回来：null = 不限制；[] 不该出现（空数组在写入时已规范成 null）。
+          peer_allowlist: normalizePeerAllowlist(peer_allowlist),
+          tool_allowlist: normalizeToolAllowlist(tool_allowlist),
+          // #1510 —— 管理员要能看出「谁的 transport 未知」才敢打开 strict。
+          // 这一格**只读**，不参与任何判定（判定在 env-transport-policy.ts）。
+          env_transport: envTransportOf(r.node_id, r.alias, r.network_id),
           restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });

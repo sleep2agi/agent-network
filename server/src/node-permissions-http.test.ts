@@ -343,3 +343,75 @@ describe("bookkeeping", () => {
     expect(db.get("SELECT 1 AS hit FROM node_permission_log WHERE route = 'old'")).toBeFalsy();
   });
 });
+
+// #2969 / #1510 —— 「能设」之外还差一半：「能看到当前设的是什么」。
+//
+// 两张白名单原先只有 PUT，`GET /api/nodes` 里一个字都没有，客户端因此做不出
+// 「当前设置」这一屏 —— 能写不能读，等于逼用户凭记忆操作。
+// 同一处还给 #1510 的严格模式留了眼睛：管理员要能看出谁的 transport 未知。
+describe("GET /api/nodes 读回白名单与 transport", () => {
+  const rowOf = async (nodeId: string) => {
+    const r = await call(user.boss.token, "GET", `/api/nodes?network_id=${net}&node_id=${nodeId}`);
+    expect(r.status).toBe(200);
+    expect(r.body.nodes).toHaveLength(1);
+    return r.body.nodes[0];
+  };
+
+  test("默认是 null（= 不限制），不是空数组", async () => {
+    const row = await rowOf(node.other.id);
+    expect(row.peer_allowlist).toBeNull();
+    expect(row.tool_allowlist).toBeNull();
+  });
+
+  test("写进去什么，读出来就是什么", async () => {
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: ["boss", node.nR.id] })).status).toBe(200);
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: ["send_task", "get_inbox"] })).status).toBe(200);
+    const row = await rowOf(node.other.id);
+    expect(row.peer_allowlist).toEqual(["boss", node.nR.id]);
+    expect(row.tool_allowlist).toEqual(["send_task", "get_inbox"]);
+  });
+
+  test("清空后回到 null，而不是 []", async () => {
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: null })).status).toBe(200);
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: null })).status).toBe(200);
+    const row = await rowOf(node.other.id);
+    expect(row.peer_allowlist).toBeNull();
+    expect(row.tool_allowlist).toBeNull();
+  });
+
+  test("env_transport 取该节点最新一次上报（老上报不能盖掉新的）", async () => {
+    // 两行同 node_id、不同时间：取 updated_at 更大的那条。
+    db.run("DELETE FROM sessions WHERE node_id = ?1", [node.nR.id]);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', ?3, ?4, 'plain', datetime('now','-2 hour'))",
+      [`r_old_${node.nR.id}`, "r-old-alias", node.nR.id, net]);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', ?3, ?4, 'https', datetime('now','-1 minute'))",
+      [`r_new_${node.nR.id}`, "r-new-alias", node.nR.id, net]);
+    expect((await rowOf(node.nR.id)).env_transport).toBe("https");
+  });
+
+  test("从没上报过的节点是 null（不是猜一个值填上）", async () => {
+    db.run("UPDATE sessions SET env_transport = NULL WHERE node_id = ?1", [node.nR.id]);
+    expect((await rowOf(node.nR.id)).env_transport).toBeNull();
+  });
+
+  test("别的网络里的同名字段不会串到这一格（alias 兜底必须带网络约束）", async () => {
+    // 场景：本网络有一台节点，它的 sessions 行只用 alias 命中（node_id 为空，
+    // alias 就等于节点 id —— 老注册路径就是这样）。
+    // 另一个网络里**恰好也有一个 alias 相同的 sessions 行**，而且是明文公网、时间更新。
+    //
+    // 如果兜底查询不按网络约束，这一格会把 B 网的 'plain' 显示成 A 网这台节点的 transport。
+    // 这一格是给人做安全决策用的（决定要不要打开 strict）——
+    // 显示错的 'plain' 会让人以为挡住了，其实挡的是别人；显示 null 至少会让人去查。
+    const shadowId = `n_np_shadow_${stamp}`;
+    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, lifecycle_state) VALUES (?1, ?1, ?2, ?3, 'active')",
+      [shadowId, `shadow-${stamp}`, net]);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', NULL, ?3, 'https', datetime('now','-1 hour'))",
+      [`s_shadow_${stamp}`, shadowId, net]);
+    const otherOwner = register(`np_othernet_${stamp}_${Date.now()}`, PW);
+    db.run("INSERT INTO sessions (resume_id, alias, status, node_id, network_id, env_transport, updated_at) VALUES (?1, ?2, 'idle', NULL, ?3, 'plain', datetime('now','+1 hour'))",
+      [`s_shadow_other_${stamp}`, shadowId, otherOwner.network_id!]);
+
+    // 本网络这台的 'https' 必须赢；时间更新的 'plain' 不能跨网络串进来。
+    expect((await rowOf(shadowId)).env_transport).toBe("https");
+  });
+});
