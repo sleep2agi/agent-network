@@ -829,20 +829,21 @@ pass "SSE push verified (via send_task + agent registration)"
 pass "offline detection active (10min patrol in get_all_status)"
 echo ""
 
-# 29. License system
-echo "29. Testing license system..."
-LIC=$(curl -s http://127.0.0.1:9200/api/license 2>/dev/null)
-echo "$LIC" | grep -q '"ok":true' && pass "license API works" || fail "license API broken"
-echo "$LIC" | grep -q '"trial"' && pass "auto trial created" || fail "no trial"
-echo "$LIC" | grep -q '"days_left"' && pass "days_left present" || fail "no days_left"
-echo "$LIC" | grep -q '"max_agents"' && pass "limits present" || fail "no limits"
-# Activate
-ACT=$(curl -s -X POST http://127.0.0.1:9200/api/license/activate -H "Content-Type: application/json" -d '{"key":"anet-TEST-1234-5678-ABCD"}')
-echo "$ACT" | grep -q '"ok":true' && pass "activate license" || fail "activate failed"
-echo "$ACT" | grep -q '"pro"' && pass "upgraded to pro" || fail "not pro"
-# Invalid key
-BAD=$(curl -s -X POST http://127.0.0.1:9200/api/license/activate -H "Content-Type: application/json" -d '{"key":"bad"}')
-echo "$BAD" | grep -q '"ok":false' && pass "invalid key rejected" || fail "bad key accepted"
+# 29. License system —— 🔴 2026-10-29 起该功能整体删除（PR #3200，纯开源）。
+#     原来断言 license API 可用 / 自动 trial / 激活变 pro / 坏 key 被拒；
+#     端点删除后这些断言永远失败（本套件与 docker-e2e 是同一份断言的两份拷贝）。
+#     现在只断言这两条路都走不通：未认证先被全局鉴权拦成 401，带令牌才是 404。
+echo "29. License system removed (pure OSS)"
+LIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9200/api/license 2>/dev/null)
+case "$LIC_CODE" in
+  401|403|404) pass "license API gone (HTTP $LIC_CODE)" ;;
+  *) fail "license API still reachable (HTTP $LIC_CODE)" ;;
+esac
+ACT_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:9200/api/license/activate -H "Content-Type: application/json" -d '{"key":"anet-TEST-1234-5678-ABCD"}' 2>/dev/null)
+case "$ACT_CODE" in
+  401|403|404) pass "license activate gone (HTTP $ACT_CODE)" ;;
+  *) fail "license activate still reachable (HTTP $ACT_CODE)" ;;
+esac
 echo ""
 
 # Summary
