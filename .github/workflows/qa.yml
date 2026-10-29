@@ -1712,6 +1712,12 @@ jobs:
           - test235-grok-mcp-outbound-only
           - test219-grok-copresence
           - test605-grok-startup-model-label
+          # #677 —— 套件本来就在仓里、四个变异锚点也都还在代码里
+          # （board668-inflight-task / keep-working / session-preview / parent-delivered-only），
+          # 但它只出现在 paths 过滤器里、从不是任何 matrix 条目 ⇒ 最近 8 条 run 里
+          # 含 test668 的 job 数 = 0。也就是说「它偶发失败」这件事今天既无法复现也无法验证。
+          # 这里把它接回矩阵恢复覆盖；若跑起来确实不稳定，再按 #677 处置（而不是继续不跑）。
+          - test668-grok-working-status
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
