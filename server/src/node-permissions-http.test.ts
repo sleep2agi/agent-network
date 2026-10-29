@@ -502,5 +502,53 @@ describe("未绑定节点的令牌在报表里必须可见", () => {
     expect(unbound.tool_calls_total).toBeGreaterThanOrEqual(4);
     const real = r.body.nodes.find((n: any) => n.node_id === node.nN.id);
     expect(real.unbound_token).toBeUndefined();
+    // 令牌名要带出来 —— 只看 `token:tok_xxx` 无法处理；名字才是「该改哪个令牌」的答案。
+    const tokRow = db.get<{ token_id: string }>("SELECT token_id FROM api_tokens LIMIT 1");
+    db.run(`INSERT INTO node_tool_calls (network_id, node_id, tool, hour, hits) VALUES (?1, ?2, 'mcp:send_task', ?3, 1)
+            ON CONFLICT(network_id, node_id, tool, hour) DO UPDATE SET hits = node_tool_calls.hits + 1`,
+      [net, `token:${tokRow.token_id}`, new Date().toISOString().slice(0, 13)]);
+    const r2 = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
+    const withName = r2.body.nodes.find((n: any) => n.node_id === `token:${tokRow.token_id}`);
+    expect(withName.unbound_token_name).toBeTruthy();
+  });
+});
+
+// #2969 续 —— 令牌解析不到节点行时，两张白名单都管不到它。
+// 先按「记录」跑：`unbound_token` 不在 MODE_REASONS 里 ⇒ 默认 log 模式只记账、不改变行为。
+// 这样「要不要强制要求绑定令牌」这个决定，将来自有数据可依据（而不是靠猜会不会炸）。
+describe("未绑定令牌的写调用：默认只记录，不拦", () => {
+  // 造一个**解析不到节点**的令牌：名字里的 alias 在本网络没有对应 nodes 行。
+  // 这就是线上那 4 个令牌的真实形状（节点改名、令牌名没跟着改）。
+  const unboundKey = () => {
+    const alias = `ghost-alias-${stamp}`;
+    const tokenId = `tok_ghost_${stamp}`;
+    db.run("INSERT OR IGNORE INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, 'network')",
+      [tokenId, `hash_${tokenId}`, user.boss.id, net, `node:${alias}`]);
+    return tokenId;
+  };
+
+  test("log 模式：写调用照常成功，但进 node_permission_log（reason=unbound_token）", async () => {
+    const tokenId = unboundKey();
+    const key = `token:${tokenId}`;
+    const before = Number(db.get<{ h: number | string | null }>(
+      "SELECT SUM(hits) AS h FROM node_permission_log WHERE network_id = ?1 AND node_id = ?2 AND reason = 'unbound_token'",
+      net, key)?.h ?? 0);
+    // 用一个「解析不到节点」的身份直接走判定，绕开 HTTP 令牌构造（这里验的是判据与记账）
+    const { nodeIdentity, nodeDecide } = await import("./node-permissions.js");
+    const id = nodeIdentity(tokenId, net)!;
+    expect(id.nodeId).toBeNull();
+    const allowed = nodeDecide(id, "mcp:send_task", { reason: "unbound_token", sample: "send_task" });
+    expect(allowed).toBe(false); // log 模式：不拦
+    const after = Number(db.get<{ h: number | string | null }>(
+      "SELECT SUM(hits) AS h FROM node_permission_log WHERE network_id = ?1 AND node_id = ?2 AND reason = 'unbound_token'",
+      net, key)?.h ?? 0);
+    expect(after).toBe(before + 1); // 但记了一笔
+  });
+
+  test("enforce 模式：同一个调用被拒，原因是 unbound_token", async () => {
+    process.env.COMMHUB_NODE_PERMISSIONS = "enforce";
+    const { nodeIdentity, nodeDecide } = await import("./node-permissions.js");
+    const id = nodeIdentity(unboundKey(), net)!;
+    expect(nodeDecide(id, "mcp:send_task", { reason: "unbound_token", sample: "send_task" })).toBe(true);
   });
 });

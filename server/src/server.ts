@@ -3044,7 +3044,7 @@ return Bun.serve({
            FROM node_permission_log WHERE network_id = ?1 AND hour >= ?2
           GROUP BY node_id, route, reason ORDER BY node_id, route, reason`,
         networkId, sinceHour);
-      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean }>();
+      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean; unbound_token_name?: string | null }>();
       for (const r of rows) {
         let entry = byNode.get(r.node_id);
         if (!entry) {
@@ -3090,7 +3090,15 @@ return Bun.serve({
         // 它们**没有 nodes 行**，所以两张白名单都管不到它们（toolAllowlist 为 null ⇒ 不限制）。
         // 报表里必须显式标出来，否则管理员会以为「名单之外没有别人在派活」。
         // 这里只标注，不改变任何判定。
-        if (entry.node_id.startsWith("token:")) entry.unbound_token = true;
+        if (entry.node_id.startsWith("token:")) {
+          entry.unbound_token = true;
+          // 令牌名往往就是答案：账本里是 `token:tok_xxx`，光看这个没法处理。
+          // 线上实测这 4 个令牌的名字是 `node:ANet基建` / `node:TMWork` …，而 nodes 表里
+          // 已经没有这些 alias 了 —— 节点改过名、令牌没跟着改，于是解析成「未注册」，
+          // 白名单静默不生效。把名字带出来，管理员才知道该改哪个令牌。
+          const tok = db.get<{ name: string | null }>("SELECT name FROM api_tokens WHERE token_id = ?1", entry.node_id.slice(6));
+          entry.unbound_token_name = tok?.name ?? null;
+        }
       }
       const nodes = [...byNode.values()].sort((a, b) =>
         b.tool_calls_total - a.tool_calls_total || b.total - a.total || a.node_id.localeCompare(b.node_id));
