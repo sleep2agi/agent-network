@@ -75,5 +75,17 @@ describe("#1027 get_create_request returns network_id", () => {
     expect(g.ok).toBe(true);
     expect(g.network_id).toBe(NET);
     expect(g.node_spec?.name).toBe("child-1027");
+    // 2026-10-31 —— **精确键集**（#3171）：上面全是字段级断言，
+    // 「多给一个字段」不会被发现，而这条响应会流到 daemon 侧按字段消费。
+    // ⚠️ 我先后猜了两次键集（第一次少了 child_token/env_blob，第二次多了 op/status），
+    //    两次都是断言把真实形状打出来的。这一条不写「我认为的形状」，写**它实际给的**。
+    expect(Object.keys(g).sort()).toEqual([
+      "child_token", "env_blob", "network_id", "node_spec", "ok", "request_id",
+    ].sort());
+    // 未知 id ⇒ 确定性两键**错误**形状（第三次被断言纠正：这里不是 {ok,request:null}，
+    // 而是 {ok,error}；两种都是「两键」，值不同 —— 正是精确键集要区分的那一格）。
+    const missing = await call(t.get_create_request, { request_id: "cr_does_not_exist" });
+    expect(Object.keys(missing).sort()).toEqual(["error", "ok"]);
+    expect(missing.ok).toBe(false);
   });
 });
