@@ -484,6 +484,12 @@ def main() -> int:
     if selftest_rc != 0:
         controls_failed = True
         print("✗ 分类器自检未通过 —— 本次的「0 阻塞」不能读成没有违规。", file=sys.stderr)
+        # 2026-10-31 —— 自检失败有两种成因，修法相反：
+        #   ① 正则/分类逻辑坏了 ⇒ 检测器失效 ⇒ 修代码
+        #   ② 用例描述的代码形态变了（真实重构）⇒ 检测器没坏、用例过期 ⇒ 改用例
+        # 只报「失败」的话，读的人会默认选①，而②时改代码会把判据改坏。
+        print("  ⇒ 两种成因：正则/分类坏了（修代码） vs 用例过期（改用例）。", file=sys.stderr)
+        print("     判据：跑一次 --selftest 看具体哪一例不符；若该例的输入代码形态在仓里已不存在 ⇒ 是用例过期。", file=sys.stderr)
     if controls_failed:
         print("instrument: BROKEN ⇒ 本次没有读数（不是“干净”）", file=sys.stderr)
         # 2026-10-31 —— 退出码区分「不可核」与「有违规」：
@@ -564,6 +570,8 @@ def main() -> int:
     print(f"  gate_state     : can_red={can_red} ｜ current={now}  ⇒ 二维都报，否则恒红与假绿同形")
     print("  invalidates_on : 树变（ref 或 dirty 变）｜正则变（selftest 不再 8/8）｜扫描域变（ext 计数变）")
     print("                   ⇒ 三者任一发生，上面的结论作废；不需要读者知道任何速率")
+    # 2026-10-31 —— 只列条件、不给「怎么检查」时，读者仍判断不了当前读数是否还有效。
+    print("  check          : 重跑本脚本；若上面 measured_on / scan_domain / selftest 任一行与上次不同 ⇒ 本结论作废")
     # 2026-10-31 —— **流行度**要和结论一起说。
     # 「0 处」有两种读法：① 有这种写法、但都写得对；② 本仓根本不做这件事。
     # 两者都是 0，而它们对「这个绿值多少」的答案相反。
