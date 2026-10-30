@@ -109,6 +109,8 @@ type LateReplyVerdict =
   | { state: "done_error"; error: unknown };
 
 type LateReplyWatcherDeps = {
+  /** 观察器刚挂上时回调一次（#3095 用它记录「正在等哪一轮」，供重启后识别）。 */
+  onArmed?: () => void;
   /** 会话 id，补发时作为 thread_id（Hub 只在任务行没有上下文时才用它做幂等）。 */
   threadId: string;
   /** 本轮被接受时的 message id，补发时作为 turn_id。 */
@@ -139,6 +141,7 @@ export function watchLateReply(deps: LateReplyWatcherDeps): Promise<void> {
   const deadline = Date.now() + capMs;
   let settled = false;
   return (async () => {
+    try { deps.onArmed?.(); } catch { /* 记录失败不影响观察 */ }
     while (!settled && Date.now() < deadline) {
       if (!deps.isRunning()) return;
       await (deps.sleep ? deps.sleep(POLL_INTERVAL_MS) : new Promise((r) => setTimeout(r, POLL_INTERVAL_MS)));
@@ -683,6 +686,9 @@ export async function openVettedOpenCodeV2Copresence(
             void watchLateReply({
               threadId: sessionId,
               turnId: messageId,
+              onArmed: evidence?.onLateReplyArmed
+                ? () => evidence.onLateReplyArmed!({ threadId: sessionId, turnId: messageId })
+                : undefined,
               readEntries: () => readEntriesAfter(url, password, sessionId, messageId).catch(() => null),
               isRunning: () => session.isRunning,
               onLateReply: evidence.onLateReply,
