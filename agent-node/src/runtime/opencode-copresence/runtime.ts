@@ -49,6 +49,7 @@ import { Agent } from "undici";
 import { fetchOpenCodeJson } from "./http";
 import type { SessionBackgroundControl } from "./session-background";
 import { openV1BorrowedAdmission, type V1BorrowedAdmissionOptions } from "./v1-borrowed-admission";
+import { redactUpstreamText } from "./redact-upstream-text.js";
 import {
   bindQueueOwner,
   isSessionGoneError,
@@ -1114,7 +1115,9 @@ export async function openVettedOpenCodeCopresence(
               });
               continue;
             }
-            warn(`[opencode-copresence] provider error for this turn: ${raw}`);
+            // 上游自由文本进日志前先脱敏：对外摘要收紧了，对内出口也不能原样保留。
+            // 注意 capacityRetryDecision 仍用未脱敏的 raw（它要匹配上游措辞），只在这里脱敏。
+            warn(`[opencode-copresence] provider error for this turn: ${redactUpstreamText(raw)}`);
             const partial = (message?.parts ?? []).some((p: any) => p?.type === "text" && typeof p.text === "string" && p.text.trim())
               ? parseMessageReply(message)
               : "";
