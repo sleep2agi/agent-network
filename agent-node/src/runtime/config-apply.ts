@@ -541,6 +541,17 @@ export interface MaskedSnapshot {
   flags: Record<string, unknown>;
   config_revision?: number;
   config_update_capable: boolean;
+  /** #3146 follow-up —— 同一个布尔，换个说得清的名字。
+   *
+   *  `config_update_capable` 这个名字会让人以为它管“能不能改配置”，
+   *  实际它只回答一件事：**exit 75 之后有没有东西把它拉起来**
+   *  （`anet node start` 的 sentinel-aware supervisor 才会设 1）。
+   *
+   *  「不能热更新」蕴含「这次需要重启」，但**不蕴含「重启是安全的」** ——
+   *  两个能力被一个名字合并过，导致有人在它上面写了错误的拦截规则。
+   *  这里同时上报更具名的键；Hub 优先读 `restart_supervised`，
+   *  旧字段保留以兼容存量客户端。两者永远同值。 */
+  restart_supervised?: boolean;
   /** #698 protocol capability. The Hub stores this bit only when the
    * reporting ntok is immutably bound to this exact node_id. */
   peer_reply_inbox_capable: true;
@@ -613,6 +624,7 @@ export function buildConfigSnapshot(
     flags: {},
     config_revision: revision,
     config_update_capable: configUpdateCapable,
+    restart_supervised: configUpdateCapable,
     peer_reply_inbox_capable: true,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
     // Always emit — see MaskedSnapshot.channels comment. Sort +

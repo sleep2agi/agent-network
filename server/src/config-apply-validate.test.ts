@@ -469,3 +469,17 @@ describe("readConfigUpdateCapable", () => {
     expect(readConfigUpdateCapable('{"config_update_capable":"false"}')).toBeNull();
   });
 });
+
+describe("readConfigUpdateCapable — restart_supervised 优先", () => {
+  test("prefers the named key when both are present", () => {
+    expect(readConfigUpdateCapable('{"restart_supervised":true,"config_update_capable":false}')).toBe(true);
+    expect(readConfigUpdateCapable('{"restart_supervised":false,"config_update_capable":true}')).toBe(false);
+  });
+  test("falls back to the legacy key for old nodes", () => {
+    expect(readConfigUpdateCapable('{"config_update_capable":true}')).toBe(true);
+  });
+  test("non-boolean named value falls through to legacy, then unknown", () => {
+    expect(readConfigUpdateCapable('{"restart_supervised":"true","config_update_capable":false}')).toBe(false);
+    expect(readConfigUpdateCapable('{"restart_supervised":"true"}')).toBeNull();
+  });
+});

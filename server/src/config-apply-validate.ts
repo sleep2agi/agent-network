@@ -248,6 +248,10 @@ export function readConfigUpdateCapable(configSnapshot: unknown): boolean | null
   } catch {
     return null;
   }
+  // 优先读更具名的 `restart_supervised`（agent-node 同时上报，永远同值）；
+  // 旧客户端只报 config_update_capable，回退读它。
+  const named = parsed?.restart_supervised;
+  if (typeof named === "boolean") return named;
   const value = parsed?.config_update_capable;
   return typeof value === "boolean" ? value : null;
 }
