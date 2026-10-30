@@ -255,6 +255,15 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     // 在 x86 上应当 confirmed；非 100 的架构上应当 derived；读不到才 assumed。
     expect([100].includes(body.clk_tck_assumed) || Number.isInteger(body.clk_tck_assumed)).toBe(true);
     expect(["confirmed", "derived", "assumed"]).toContain(body.clk_tck_source);
+    // 2026-10-31 —— confirmed 不能只说「相等」，必须报「差多少」+ 误差界；
+    // 而且差值大到不可能是舍入时，source 必须退回 assumed（典型成因：机器挂起过）。
+    if (body.clk_tck_source === "assumed") {
+      expect(body.clk_tck_source).toBe("assumed");
+    } else {
+      expect(typeof body.clk_tck_delta).toBe("number");
+      expect(typeof body.kernel_started_at_error_ms).toBe("number");
+      expect(Math.abs(body.clk_tck_delta)).toBeLessThan(0.01 * body.clk_tck_assumed);
+    }
     expect(["agree", "disagree", "unknown"]).toContain(body.epoch_agreement);
 
     if (body.kernel_started_at !== null) {

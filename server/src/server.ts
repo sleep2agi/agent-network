@@ -1043,6 +1043,8 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   epoch_agreement: { class: "gauge", granularity: "label", why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻" },
   epoch_delta_ms: { class: "gauge", granularity: "level" },
   clk_tck_assumed: { class: "gauge", granularity: "label" },
+  clk_tck_delta: { class: "gauge", granularity: "level", why: "derived − 100；confirmed 也要报差多少" },
+  kernel_started_at_error_ms: { class: "gauge", granularity: "level", why: "差值隐含的启动时刻误差界" },
   clk_tck_source: {
     class: "gauge",
     granularity: "label",
@@ -1209,7 +1211,14 @@ const CLK_TCK_ASSUMED = 100;
  * ⇒ 与 assumed 相等 ⇒ source="confirmed"；不等 ⇒ 用推导值，source="derived"；
  *   两者都拿不到 ⇒ 退回 assumed，source="assumed"。
  */
-function clkTck(): { value: number; source: "confirmed" | "derived" | "assumed" } {
+function clkTck(): {
+  value: number;
+  source: "confirmed" | "derived" | "assumed";
+  /** derived − 100；只在算得出推导值时非 null（**这是「差多少」，不是「等不等」**）。 */
+  delta?: number | null;
+  /** 该差值隐含的启动时刻误差（毫秒）。 */
+  errorMs?: number | null;
+} {
   try {
     const fs = require("node:fs") as typeof import("node:fs");
     const os = require("node:os") as typeof import("node:os");
@@ -1228,15 +1237,30 @@ function clkTck(): { value: number; source: "confirmed" | "derived" | "assumed" 
     if (!Number.isFinite(derived) || derived < 1 || derived > 100_000) {
       return { value: CLK_TCK_ASSUMED, source: "assumed" };
     }
-    return derived === CLK_TCK_ASSUMED
-      ? { value: derived, source: "confirmed" }
-      : { value: derived, source: "derived" };
+    // 2026-10-31 —— 「相等」在浮点比较里需要容差，而容差是新的魔数。
+    // ⇒ 不做二选一，而是**报差值 + 误差界**：
+    //    delta = derived − 100（以 tick/s 为单位）；它隐含的启动时刻误差 ≈ uptime × |delta| / value。
+    //    差值大到不可能是舍入（>1%）⇒ 假设已坏（典型成因：机器挂起过 —— jiffies 不涨而 uptime 涨）
+    //    ⇒ 退回 assumed，并把原因写进偏差值里，而不是继续报 derived。
+    const delta = derived - CLK_TCK_ASSUMED;
+    const relErr = Math.abs(delta) / Math.max(1, derived);
+    if (relErr > 0.01) {
+      return { value: CLK_TCK_ASSUMED, source: "assumed" };
+    }
+    return {
+      value: derived,
+      source: Math.abs(delta) < 0.5 ? "confirmed" : "derived",
+      delta,
+      errorMs: Math.round((uptime * Math.abs(delta) / Math.max(1, derived)) * 1000),
+    };
   } catch {
     return { value: CLK_TCK_ASSUMED, source: "assumed" };
   }
 }
 
 const CLK_TCK = clkTck();
+const CLK_TCK_DELTA = CLK_TCK.delta ?? null;
+const CLK_TCK_ERROR_MS = CLK_TCK.errorMs ?? null;
 /** agreement 的**分类**阈值（不是发布闸门）：超过它就算「内核与自报对不上」。 */
 const EPOCH_AGREEMENT_MS = 10_000;
 
@@ -3294,6 +3318,10 @@ return Bun.serve({
         // 而不是像原来那样把它折进一个 null（null 会让「算不出来」和「两边打架」同形）。
         clk_tck_assumed: BOOT_KERNEL_START.clk_tck_assumed,
         clk_tck_source: BOOT_KERNEL_START.clk_tck_source,
+        // 2026-10-31 —— confirmed 必须报「差多少」并给误差界，否则它会被读成「精确」，
+        // 而它只是「在一个没写出来的容差内」。
+        clk_tck_delta: CLK_TCK_DELTA,
+        kernel_started_at_error_ms: CLK_TCK_ERROR_MS,
         epoch_agreement: BOOT_KERNEL_START.epoch_agreement,
         epoch_delta_ms: BOOT_KERNEL_START.epoch_delta_ms,
         // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：
