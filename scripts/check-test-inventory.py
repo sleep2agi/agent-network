@@ -300,6 +300,32 @@ def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
     return names, dynamic, unreliable
 
 
+def rename_pairs(gone: list[str], new: list[str]) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    import difflib as _dl
+    by_file: dict[str, list[str]] = {}
+    for n in new:
+        by_file.setdefault(n.split("::")[0], []).append(n)
+    pairs: list[tuple[str, str]] = []
+    used: set[str] = set()
+    rest_gone: list[str] = []
+    for g in gone:
+        f = g.split("::")[0]
+        best, score = None, 0.0
+        for cand in by_file.get(f, []):
+            if cand in used:
+                continue
+            r = _dl.SequenceMatcher(None, g, cand).ratio()
+            if r > score:
+                best, score = cand, r
+        if best and score >= 0.80:
+            pairs.append((g, best))
+            used.add(best)
+        else:
+            rest_gone.append(g)
+    rest_new = [n for n in new if n not in used]
+    return pairs, rest_gone, rest_new
+
+
 def main() -> int:
     repo = Path(__file__).resolve().parent.parent
     counts, dynamic, unreliable = collect(repo)
@@ -389,6 +415,20 @@ def main() -> int:
     disappeared = sorted(baseline - current)
     added = sorted(current - baseline)
 
+    # 2026-10-31 —— 「消失 + 新增」只定位了位置，没定位**关系**：
+    #   改名 ⇒ 一条消失 + 一条新增（处置：接受，落基线）
+    #   真删 ⇒ 一条消失（处置：问为什么）
+    #   两者在输出上同形（都是两条列表），而处置相反 ⇒ 会把人引向改错的那一份。
+    # ⇒ 用「同一文件 + 名字相似」把它们配成**疑似改名**，剩下的才是真消失/真新增。
+    rename_pairs_out, gone_only, new_only = rename_pairs(disappeared, added)
+    if rename_pairs_out:
+        # 名字里的摘要只能提示「变了」，说明「变的是什么」要两个值并排。
+        print(f"· 疑似**改名** {len(rename_pairs_out)} 对（同一文件、名字相似度 ≥0.80）：", file=sys.stderr)
+        for before, after in rename_pairs_out[:10]:
+            print(f"    ↔ {before}", file=sys.stderr)
+            print(f"      → {after}", file=sys.stderr)
+        print("  ⇒ 改名的处置是「接受并落基线」；真删除的处置是「问为什么」。两者不同，别混着看。", file=sys.stderr)
+
     # ② 未保护桶的上限：新增 dynamic 测试原来是静默的
     if baseline_dynamic is None:
         print("⚠ 基线里没有 dynamic 上限（旧格式）⇒ 本次不检查；下次 --update 会写入", file=sys.stderr)
@@ -401,19 +441,22 @@ def main() -> int:
 
     if disappeared:
         print(f"✗ 有 {len(disappeared)} 条测试**消失**了（计数相同也可能发生）：", file=sys.stderr)
-        for name in disappeared[:20]:
+        for name in gone_only[:20]:
             print(f"    - {name}", file=sys.stderr)
-        if len(disappeared) > 20:
-            print(f"    …（共 {len(disappeared)} 条）", file=sys.stderr)
+        if len(gone_only) > 20:
+            print(f"    …（共 {len(gone_only)} 条）", file=sys.stderr)
         print("  ⇒ 若确为有意删除，请在同一次提交里跑 --update 并说明原因。", file=sys.stderr)
         return 1
 
-    if added:
-        print(f"· 新增 {len(added)} 条（绿）。落基线：python3 scripts/check-test-inventory.py --update")
-        for name in added[:10]:
+    if disappeared and not gone_only:
+        # 全部配对成改名 ⇒ 这里不该判失败
+        pass
+    if new_only or gone_only:
+        print(f"· 新增 {len(new_only)} 条（绿）。落基线：python3 scripts/check-test-inventory.py --update")
+        for name in new_only[:10]:
             print(f"    + {name}")
-        if len(added) > 10:
-            print(f"    …（共 {len(added)} 条）")
+        if len(new_only) > 10:
+            print(f"    …（共 {len(new_only)} 条）")
     else:
         print("✓ 测试清单与基线一致：无消失、无新增、无重名")
     if baseline_dynamic is not None and dynamic < baseline_dynamic:
