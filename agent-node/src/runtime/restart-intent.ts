@@ -17,8 +17,13 @@
 //
 //   ① **三态**：absent / present / unreadable。
 //      文件存在但解析失败 ≠ 没有意图 —— 把后者折成前者会让「查不到」变成「没发生」。
-//   ② **不做时间过期**：标记的失效只由「成功启动后清除」触发。
-//      用 TTL 的话，「多久算过期」又变成一个要被解释的数（今晚那个时钟问题的翻版）。
+//   ② **时效判据：先比内核 boot_id，再比时间**（2026-10-31 修订）。
+//      我原来写的是「不做 TTL」，理由是「多久算过期又是一个要被解释的数」。
+//      但那只反驳了「TTL 单独够用」，没反驳「没有时效判据」：
+//      一个陈旧标记会把**崩溃/重启机器**引起的启动误标成「按计划重启」——静默的误归因。
+//      ⇒ 两级：boot_id 不同 ⇒ 这次启动**不可能**由那条意图造成（与时间无关，不需要阈值）；
+//         boot_id 相同 ⇒ 才轮到时间（同一 boot 内 `at` 与 `now` 同钟域，比较是安全的）。
+//      ⇒ TTL 只在「同 boot 且时间可比」这一支里出现，不是全局的魔数。
 //   ③ **原子写**：先写临时文件再 rename。否则崩溃在写一半会留下一个不可解析的标记 ⇒ 见 ①。
 //
 // ## 它不做什么
@@ -34,11 +39,29 @@ export const RESTART_INTENT_FILE = "restart-intent.json";
 export interface RestartIntent {
   /** 为什么想重启（例如 apply_restart_tier / model_changed）。自由文本，但必须是可枚举的来源。 */
   reason: string;
-  /** 写入时刻（ms）。**只用于人读与排序，不用于过期判断。** */
+  /** 写入时刻（ms）。**只在与内核 boot_id 相同的前提下**才用于时效判断（同 boot 内同钟域）。 */
   at: number;
   /** 写入者的 pid 与 boot_id：让读的人能判断「这是上一代的意图还是这一代的」。 */
   pid: number;
+  /** **内核口径**的 boot_id（`/proc/sys/kernel/random/boot_id`），不是自报。读不到就是 null。 */
   boot_id: string | null;
+  /** 触发这次重启的那条指令（config_update 的 update_id），用于把「意图」对回「谁让它重启的」。 */
+  instruction_id?: string | null;
+  /** 目标版本（如果有）：让「重启后是不是到了该到的版本」可对账。 */
+  target_version?: string | null;
+}
+
+/** 同 boot 内的时效上限：超过它就不再把这次启动归因给那条意图，但**照样启动**。 */
+export const RESTART_INTENT_TTL_MS = 10 * 60 * 1000;
+
+/** 内核口径的 boot_id。读不到 ⇒ null（**不是**「没有 boot」）。 */
+export function currentBootId(): string | null {
+  try {
+    const raw = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    return raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
 }
 
 export type ReadResult =
@@ -83,6 +106,8 @@ export function readRestartIntent(dir: string): ReadResult {
       at: typeof parsed.at === "number" ? parsed.at : 0,
       pid: typeof parsed.pid === "number" ? parsed.pid : 0,
       boot_id: typeof parsed.boot_id === "string" ? parsed.boot_id : null,
+      instruction_id: typeof parsed.instruction_id === "string" ? parsed.instruction_id : null,
+      target_version: typeof parsed.target_version === "string" ? parsed.target_version : null,
     },
   };
 }
@@ -120,10 +145,35 @@ export type StartDecision =
  * 坏文件不删，改名保留：`restart-intent.json.bad-<ts>` ⇒ 既不会再触发 needs_review，
  * 也留下了现场（与「读失败 ≠ 没有」同一条）。
  */
+export type ConsumedRestart = {
+  /** 「这次启动是被那条意图造成的吗」的**判定**（不是「要不要启动」——启动永远照常）。 */
+  verdict: "planned" | "stale" | "stale_reboot" | "unknown_age" | "absent" | "unreadable";
+  planned: boolean;
+  note: string;
+};
+
+/**
+ * 启动时调用一次：读标记 → 判定归因 → 清掉（或把坏文件改名保留）→ 返回一行可打日志的结论。
+ *
+ * 🔴 **它从不阻止启动。** 标记是观测用的，不是闸门 ——
+ *    一个「命中就不起服务」的设计会把「exit 75 后没人拉起」换成「标记一直在，永远不起」，
+ *    更难发现（机器看起来正常，只是不回来）。若将来真有 launcher 拿它当闸门，
+ *    那时必须同时有 TTL 失效与 `--force` 覆盖 + audit，缺一不可。
+ *
+ * 🔴 归因分三支（这是本轮修掉的**静默误归因**）：
+ *    · boot_id 不同 ⇒ `stale_reboot`：机器重启过，这次启动不可能由那条意图造成
+ *    · boot_id 相同但超 TTL ⇒ `stale`：同 boot 内的旧意图，不再归因
+ *    · boot_id 任一侧未知 ⇒ `unknown_age`：**落点是「我不知道」，不是「计划重启」**
+ *    · 只有「同 boot + 未超 TTL」才叫 `planned`
+ */
 export function consumePlannedRestart(
   dir: string,
-  now: () => number = Date.now,
-): { planned: boolean; note: string } {
+  opts: { now?: () => number; bootId?: () => string | null; ttlMs?: number } = {},
+): ConsumedRestart {
+  const now = opts.now ?? Date.now;
+  const readBoot = opts.bootId ?? currentBootId;
+  const ttlMs = opts.ttlMs ?? RESTART_INTENT_TTL_MS;
+
   const d = decideStart(dir);
   if (!d.planned) {
     if ("needs_review" in d) {
@@ -133,14 +183,55 @@ export function consumePlannedRestart(
       } catch {
         /* 改名失败也不阻塞启动 */
       }
-      return { planned: false, note: `restart_intent_unreadable:${d.error} (kept as ${bad})` };
+      return {
+        verdict: "unreadable",
+        planned: false,
+        note: `restart_intent_unreadable:${d.error} (kept as ${bad})`,
+      };
     }
-    return { planned: false, note: "no_planned_restart" };
+    return { verdict: "absent", planned: false, note: "no_planned_restart" };
   }
+
+  const i = d.intent;
+  const who = `reason=${i.reason} instruction=${i.instruction_id ?? "unknown"} target=${i.target_version ?? "unknown"} pid=${i.pid}`;
   clearRestartIntent(dir);
+
+  const current = readBoot();
+  if (!current || !i.boot_id) {
+    return {
+      verdict: "unknown_age",
+      planned: false,
+      note: `restart_intent_cannot_attribute (boot_id ${current ? "present" : "unreadable"} vs marker ${i.boot_id ? "present" : "missing"}; same-boot unprovable) ${who}`,
+    };
+  }
+  if (current !== i.boot_id) {
+    return {
+      verdict: "stale_reboot",
+      planned: false,
+      note: `restart_intent_from_previous_boot (marker boot ${i.boot_id.slice(0, 8)} ≠ current ${current.slice(0, 8)}; this start was NOT caused by it) ${who}`,
+    };
+  }
+  // `at` 缺失/为 0 ⇒ 时间不可比 ⇒ 不能证明「新鲜」，落点是 unknown 而不是 stale
+  //（stale 是「我知道它旧了」，unknown 是「我不知道它多旧」）。
+  if (!Number.isFinite(i.at) || i.at <= 0) {
+    return {
+      verdict: "unknown_age",
+      planned: false,
+      note: `restart_intent_age_unknown (written_at unrecorded in marker) ${who}`,
+    };
+  }
+  const age = now() - i.at;
+  if (!Number.isFinite(age) || age < 0 || age > ttlMs) {
+    return {
+      verdict: "stale",
+      planned: false,
+      note: `restart_intent_stale (age ${Number.isFinite(age) ? Math.round(age / 1000) + "s" : "unknown"} > ttl ${Math.round(ttlMs / 1000)}s; not attributed) ${who}`,
+    };
+  }
   return {
+    verdict: "planned",
     planned: true,
-    note: `planned_restart:${d.intent.reason} (written at ${new Date(d.intent.at).toISOString()} by pid ${d.intent.pid})`,
+    note: `planned_restart:${i.reason} (age ${Math.round(age / 1000)}s, same boot, written at ${new Date(i.at).toISOString()}) ${who}`,
   };
 }
 

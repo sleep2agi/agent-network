@@ -1376,7 +1376,7 @@ import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows-tui-health";
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
-import { consumePlannedRestart, writeRestartIntent } from "./runtime/restart-intent.js";
+import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
 import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -7374,7 +7374,12 @@ async function processConfigUpdate(): Promise<void> {
         reason: "apply_restart_only",
         at: Date.now(),
         pid: process.pid,
-        boot_id: null,
+        // 内核口径，不是自报：读不到就是 null ⇒ 下一次启动会落 unknown_age，而不是冒充 planned
+        boot_id: currentBootId(),
+        instruction_id: updateId,
+        // ConfigUpdate 里没有「目标版本」这一格 ⇒ 记 null。
+        // 记当前版本会是一次编造：那不是这次重启的目标，是它之前的现状。
+        target_version: null,
       });
       log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor (restart intent recorded)`);
       process.exit(RESTART_SENTINEL);
@@ -7551,7 +7556,9 @@ async function processConfigUpdate(): Promise<void> {
       reason: "apply_restart",
       at: Date.now(),
       pid: process.pid,
-      boot_id: null,
+      boot_id: currentBootId(),
+      instruction_id: updateId,
+      target_version: null,
     });
     log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor (restart intent recorded)`);
     process.exit(RESTART_SENTINEL);
@@ -8194,10 +8201,12 @@ log("已注册到 CommHub");
 //   坏文件不删、改名保留 ⇒ 既不重复触发，也留下现场（「读失败 ≠ 没有」）。
 {
   const plannedRestart = consumePlannedRestart(NODE_DIR);
-  if (plannedRestart.planned) {
+  if (plannedRestart.verdict === "planned") {
     log(`[anet] ${plannedRestart.note}`);
-  } else if (plannedRestart.note !== "no_planned_restart") {
-    warn(`[anet] ${plannedRestart.note}`);
+  } else if (plannedRestart.verdict !== "absent") {
+    // stale / stale_reboot / unknown_age / unreadable 都要说出来：
+    // 它们恰恰是「看起来一切正常，但归因是错的」那几格。
+    warn(`[anet] restart-intent ${plannedRestart.verdict}: ${plannedRestart.note}`);
   }
 }
 

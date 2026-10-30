@@ -3,7 +3,7 @@
 // 它替代的是「用退出码表达意图」，所以测试也要钉住那三件事：
 //   ① 意图**持久**（进程退出后仍在）
 //   ② 三态：absent / present / unreadable，且 unreadable 不许折成 absent
-//   ③ 清除只由「兑现之后」触发，没有 TTL
+//   ③ 清除只由「兑现之后」触发；**时效判据先比内核 boot_id，再比时间**（见 TTL 段）
 
 import { describe, expect, test, beforeEach } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
@@ -23,7 +23,14 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "restart-intent-"));
 });
 
-const intent = { reason: "apply_restart_tier", at: 1_700_000_000_000, pid: 4242, boot_id: "d6fb613b-1" };
+const intent = {
+  reason: "apply_restart_tier",
+  at: 1_700_000_000_000,
+  pid: 4242,
+  boot_id: "d6fb613b-1",
+  instruction_id: "upd_123",
+  target_version: "1.20.12",
+};
 
 describe("writeRestartIntent / readRestartIntent", () => {
   test("round-trips the intent and persists it as a file (the point: it outlives the process)", () => {
@@ -68,25 +75,66 @@ describe("clearRestartIntent", () => {
 });
 
 describe("consumePlannedRestart（启动时调用一次）", () => {
-  test("planned restart: reports it and clears the marker (lifecycle = one exit → next start)", () => {
-    writeRestartIntent(dir, intent);
-    const r = consumePlannedRestart(dir);
+  const BOOT = "boot-aaaa";
+  // 同 boot、未超 TTL 的唯一一支才叫 planned
+  test("same boot + fresh ⇒ planned, and the marker is cleared (lifecycle = one exit → next start)", () => {
+    writeRestartIntent(dir, { ...intent, boot_id: BOOT });
+    const r = consumePlannedRestart(dir, { now: () => intent.at + 5_000, bootId: () => BOOT });
+    expect(r.verdict).toBe("planned");
     expect(r.planned).toBe(true);
     expect(r.note).toContain("planned_restart:apply_restart_tier");
     expect(readRestartIntent(dir)).toEqual({ kind: "absent" });
   });
 
-  test("no marker ⇒ planned:false with a plain note", () => {
-    expect(consumePlannedRestart(dir)).toEqual({ planned: false, note: "no_planned_restart" });
+  test("no marker ⇒ absent with a plain note", () => {
+    expect(consumePlannedRestart(dir, { bootId: () => BOOT })).toEqual({
+      verdict: "absent",
+      planned: false,
+      note: "no_planned_restart",
+    });
   });
 
   test("unreadable marker is renamed, not deleted — keep the scene, stop the recurrence", () => {
     writeFileSync(join(dir, RESTART_INTENT_FILE), "not json", "utf8");
-    const r = consumePlannedRestart(dir, () => 1234);
+    const r = consumePlannedRestart(dir, { now: () => 1234, bootId: () => BOOT });
+    expect(r.verdict).toBe("unreadable");
     expect(r.planned).toBe(false);
     expect(r.note).toContain("restart_intent_unreadable:invalid_json");
-    expect(readRestartIntent(dir)).toEqual({ kind: "absent" });          // 不再触发
-    expect(existsSync(join(dir, `${RESTART_INTENT_FILE}.bad-1234`))).toBe(true); // 但留了现场
+    expect(readRestartIntent(dir)).toEqual({ kind: "absent" });
+    expect(existsSync(join(dir, `${RESTART_INTENT_FILE}.bad-1234`))).toBe(true);
+  });
+
+  // 🔴 本轮修的静默误归因：陈旧的意图会把「崩溃/重启机器」造成的启动说成「按计划重启」
+  test("different boot ⇒ stale_reboot: this start cannot have been caused by that intent (no threshold involved)", () => {
+    writeRestartIntent(dir, { ...intent, boot_id: BOOT });
+    const r = consumePlannedRestart(dir, { now: () => intent.at + 1_000, bootId: () => "boot-bbbb" });
+    expect(r.verdict).toBe("stale_reboot");
+    expect(r.planned).toBe(false);
+    expect(r.note).toContain("NOT caused by it");
+    expect(readRestartIntent(dir)).toEqual({ kind: "absent" }); // 仍然读一次就清，不回流
+  });
+
+  test("same boot but older than TTL ⇒ stale: not attributed, and still starts", () => {
+    writeRestartIntent(dir, { ...intent, boot_id: BOOT });
+    const r = consumePlannedRestart(dir, { now: () => intent.at + 11 * 60 * 1000, bootId: () => BOOT });
+    expect(r.verdict).toBe("stale");
+    expect(r.planned).toBe(false);
+    expect(r.note).toContain("restart_intent_stale");
+  });
+
+  test("either side's boot_id unknown ⇒ unknown_age (land on 'I cannot tell', never on 'planned')", () => {
+    writeRestartIntent(dir, { ...intent, boot_id: BOOT });
+    expect(consumePlannedRestart(dir, { now: () => intent.at + 1_000, bootId: () => null }).verdict).toBe("unknown_age");
+
+    writeRestartIntent(dir, { ...intent, boot_id: null });
+    expect(consumePlannedRestart(dir, { now: () => intent.at + 1_000, bootId: () => BOOT }).verdict).toBe("unknown_age");
+  });
+
+  test("missing `at` (0) ⇒ unknown_age, not stale: 'I don't know how old' ≠ 'I know it's old'", () => {
+    writeRestartIntent(dir, { ...intent, at: 0, boot_id: BOOT });
+    const r = consumePlannedRestart(dir, { now: () => 1_000, bootId: () => BOOT });
+    expect(r.verdict).toBe("unknown_age");
+    expect(r.planned).toBe(false);
   });
 });
 

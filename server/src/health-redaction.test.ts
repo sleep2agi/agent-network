@@ -237,26 +237,50 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   });
 
   // 2026-10-31 —— 内核口径的进程身份：与自报 startedAt 互为独立的第二条腿。
-  // 设计要点：换算值**不无条件发布** —— 只有与 startedAt 相差 ≤10s 才给；
-  // 否则给 null + 原因。这样「CLK_TCK 不是 100」或「startedAt 是错的」都不会被发布成一个
-  // 看起来正确的错误时刻。
-  test("kernel-derived process identity is published only when it agrees with the self-report", async () => {
+  // 2026-10-31 修订 —— 原来这条写的是「两条腿一致才发布」，那是**让自报字段否决内核读数**。
+  // 现在：判据 = 内核三元组（无条件发布）;展示 = kernel_started_at（永远带 agreement 标记）;
+  // 不一致 = 一条独立读数（disagree + delta），**不再折成 null**。
+  test("kernel identity is the judgment basis; disagreement with the self-report is its own reading, not a null", async () => {
     // 🔴 用**鉴权**响应：pid / boot_id / kernel_started_at 是「路标」不是「仪表」
     //    ⇒ 不在匿名白名单里（这条测试第一次就是因为读了匿名响应而红 —— 白名单生效了）。
     const body = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     expect(body.pid).toBe(process.pid);
     if (body.boot_id !== null) expect(String(body.boot_id)).toMatch(/^[0-9a-f-]{16,64}$/i);
     expect(body.proc_start_ticks === null || typeof body.proc_start_ticks === "number").toBe(true);
+
+    // 判据三元组：pid 必须等于真值；boot_id 可读时必须合法 —— 二者都不依赖 startedAt
+    // 换算假设必须显式
+    expect(body.clk_tck_assumed).toBe(100);
+    expect(["agree", "disagree", "unknown"]).toContain(body.epoch_agreement);
+
     if (body.kernel_started_at !== null) {
       expect(typeof body.kernel_started_at).toBe("string");
-      // 两条腿一致才允许发布 ⇒ 差值必须很小
-      const delta = Math.abs(Date.parse(body.kernel_started_at) - Date.parse(body.startedAt));
-      expect(delta).toBeLessThanOrEqual(10_000);
       expect(body.kernel_started_at_note).toBeNull();
+      // 🔴 关键：发布条件**不再**是「与自报一致」
+      //    实测这台机器上应当一致 ⇒ 断言的是一条**真实现象**，而不是发布条件的复述
+      const delta = Math.abs(Date.parse(body.kernel_started_at) - Date.parse(body.startedAt));
+      if (body.epoch_agreement === "agree") expect(delta).toBeLessThanOrEqual(10_000);
+      if (body.epoch_agreement === "disagree") {
+        // 分歧必须能被外部算出来：delta 与 agreement 同向，不能一个说 disagree 一个给个小 delta
+        expect(delta).toBeGreaterThan(10_000);
+        expect(typeof body.epoch_delta_ms).toBe("number");
+      }
     } else {
-      // 不发布时必须给出原因，不能是“静默的 null”
+      // 算不出来时必须给出原因，不能是“静默的 null”
       expect(typeof body.kernel_started_at_note).toBe("string");
+      expect(body.epoch_agreement).toBe("unknown");
     }
+  });
+
+  // 否定断言必须配镜像肯定断言：上面允许 null，这条要求「在 Linux 上它必须不是 null」。
+  // 否则「永远给 null」也能满足上面那条。
+  test("on Linux the kernel trio is actually present (a permanent null would satisfy the test above)", async () => {
+    if (process.platform !== "linux") return;
+    const body = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    expect(body.boot_id).not.toBeNull();
+    expect(body.proc_start_ticks).not.toBeNull();
+    expect(body.kernel_started_at).not.toBeNull();
+    expect(body.epoch_agreement).not.toBe("unknown");
   });
 
   // 2026-10-31 —— 白名单的另一半：**无死条目**。

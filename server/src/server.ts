@@ -1023,17 +1023,32 @@ const BOOT_GIT = detectBootGitIdentity();
  * 内核侧有两条独立信息：`/proc/stat` 的 `btime`（开机时刻）与 `/proc/self/stat` 第 22 字段
  * （开机后的 clock ticks）。→ 启动时刻 = btime + ticks/CLK_TCK。
  *
- * 🔴 但 ticks→秒 依赖 CLK_TCK（通常 100，但并非处处如此）。所以这里**不无条件发布换算结果**：
- *    只有当换算值与自报 startedAt 相差 ≤10s 时才发布；否则发布 null 并给原因。
- *    ⇒ 两个独立来源一致 ⇒ 可以发布；不一致 ⇒ 说「我不知道」，而不是发布一个可能错的数。
- *    （这条与今晚那条一致：派生值只有在两条腿都站得住时才配当读数。）
+ * 🔴 2026-10-31 修订（原设计是反的）：原来「换算值与 startedAt 差 >10s ⇒ 不发布」，
+ *    等于让**自报字段否决内核读数** —— 而 startedAt 恰恰是可被伪造/可被替换的那一侧。
+ *    今晚刚立的规则是：判据用内核三元组（boot_id, pid, proc_start_ticks），
+ *    自报值只用于**展示/对账**，两者不一致是一条**独立告警**，不是「变 null」。
+ *
+ *    ⇒ 现在的分法：
+ *       · 判据：boot_id / pid / proc_start_ticks  —— 无条件发布，不含单位假设（不需要 CLK_TCK）
+ *       · 展示：kernel_started_at —— 只要 btime+ticks 可得就发布，但**永远带 agreement 标记**
+ *       · 不一致：epoch_agreement=disagree + epoch_delta_ms ⇒ 单独可读，不被折成 unknown
+ *       · 换算依赖 CLK_TCK=100 这个假设 ⇒ 显式给 clk_tck_assumed，读者可自行折算
+ *    10s 只用来**分类** agreement，不再是发布的闸门。
  */
+/** 换算 ticks 时假设的 CLK_TCK：假设本身要**显式**出现在读数里，而不是藏在代码里。 */
+const CLK_TCK_ASSUMED = 100;
+/** agreement 的**分类**阈值（不是发布闸门）：超过它就算「内核与自报对不上」。 */
+const EPOCH_AGREEMENT_MS = 10_000;
+
 function detectKernelStart(startedAtIso: string): {
   boot_id: string | null;
   pid: number;
   proc_start_ticks: number | null;
   kernel_started_at: string | null;
   kernel_started_at_note: string | null;
+  clk_tck_assumed: number;
+  epoch_agreement: "agree" | "disagree" | "unknown";
+  epoch_delta_ms: number | null;
 } {
   const pid = process.pid;
   let bootId: string | null = null;
@@ -1061,18 +1076,31 @@ function detectKernelStart(startedAtIso: string): {
   } catch { /* null */ }
 
   if (ticks === null || btime === null) {
-    return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: null, kernel_started_at_note: "proc_btime_or_ticks_unavailable" };
+    return {
+      boot_id: bootId, pid, proc_start_ticks: ticks,
+      kernel_started_at: null,
+      kernel_started_at_note: "proc_btime_or_ticks_unavailable",
+      clk_tck_assumed: CLK_TCK_ASSUMED,
+      epoch_agreement: "unknown",
+      epoch_delta_ms: null,
+    };
   }
-  const candidateMs = (btime + ticks / 100) * 1000;
+  const candidateMs = (btime + ticks / CLK_TCK_ASSUMED) * 1000;
   const selfMs = Date.parse(startedAtIso);
-  if (!Number.isFinite(selfMs)) {
-    return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: null, kernel_started_at_note: "startedAt_unparseable" };
-  }
-  if (Math.abs(candidateMs - selfMs) > 10_000) {
-    // 换算与自报差太多 ⇒ 不发布换算值（可能是 CLK_TCK 不是 100，也可能 startedAt 是错的）
-    return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: null, kernel_started_at_note: "ticks_conversion_disagrees_with_startedAt" };
-  }
-  return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: new Date(candidateMs).toISOString(), kernel_started_at_note: null };
+  // 自报值解析不了 ⇒ 只影响 agreement，不影响内核读数的发布
+  const delta = Number.isFinite(selfMs) ? candidateMs - selfMs : null;
+  const agreement: "agree" | "disagree" | "unknown" =
+    delta === null ? "unknown" : Math.abs(delta) <= EPOCH_AGREEMENT_MS ? "agree" : "disagree";
+  return {
+    boot_id: bootId,
+    pid,
+    proc_start_ticks: ticks,
+    kernel_started_at: new Date(candidateMs).toISOString(),
+    kernel_started_at_note: null,
+    clk_tck_assumed: CLK_TCK_ASSUMED,
+    epoch_agreement: agreement,
+    epoch_delta_ms: delta === null ? null : Math.round(delta),
+  };
 }
 
 const BOOT_GIT_COMMIT = BOOT_GIT.commit;
@@ -3031,14 +3059,18 @@ return Bun.serve({
         // 而计数器是这台机器上的累计值 ⇒ 窗口的两端必须在**同一个时钟域**里。
         // 判据：凡是速率/窗口类字段，分子分母各要自己的时刻戳；**被声明的那个永远不算**。
         served_at: new Date().toISOString(),
-        // 2026-10-31 —— 内核口径的进程身份：与自报 startedAt 交叉校验，
-        // 这样「进程在撒谎」或「CLK_TCK 不是 100」都会表现为 kernel_started_at=null + 一个原因，
-        // 而不是一个看起来正确的错误时刻。
+        // 2026-10-31 —— 内核口径的进程身份：**这一组是判据**（不含单位假设、不会被自报值否决）。
+        // 「进程在自报时间上撒谎」不再表现为 null，而是 epoch_agreement=disagree + 差值。
         boot_id: BOOT_KERNEL_START.boot_id,
         pid: BOOT_KERNEL_START.pid,
         proc_start_ticks: BOOT_KERNEL_START.proc_start_ticks,
         kernel_started_at: BOOT_KERNEL_START.kernel_started_at,
         kernel_started_at_note: BOOT_KERNEL_START.kernel_started_at_note,
+        // 判据是上面三元组；这两个只是把「内核 vs 自报」的分歧**显式化**，
+        // 而不是像原来那样把它折进一个 null（null 会让「算不出来」和「两边打架」同形）。
+        clk_tck_assumed: BOOT_KERNEL_START.clk_tck_assumed,
+        epoch_agreement: BOOT_KERNEL_START.epoch_agreement,
+        epoch_delta_ms: BOOT_KERNEL_START.epoch_delta_ms,
         // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：
         //    commit sha 对匿名读者 = 精确告诉外部这是哪一版代码（本仓公开）。
         //    与 git_commit 成对：dirty=true ⇒ 只能写 prod@自称，不能写 prod@<sha>。
