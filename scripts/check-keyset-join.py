@@ -356,11 +356,18 @@ SELFTEST_CASES = [
 ]
 
 
-def selftest() -> int:
+def selftest(quiet: bool = False) -> int:
     import tempfile
 
     # 遍历 0 个用例也是通过 —— 这是 empty-assertion 的最小形状。
     # 所以先钉数量，再跑用例：任何人删掉一个用例，这里先红。
+    if quiet:
+        import builtins
+        import sys as _s
+        def print(*a, **k):  # noqa: A001 - 局部遮蔽，仅在本函数内
+            # 静默模式下只保留 stderr 与失败信息，stdout 的 ✓ 列表不重复打印
+            if k.get("file") is _s.stderr or not a:
+                builtins.print(*a, **k)
     if len(SELFTEST_CASES) != 6:
         print(f"✗ selftest 用例数应为 6，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
@@ -428,9 +435,23 @@ def main() -> int:
         print("✗ 阳性对照失败：全仓连一个 `.join(` 都没找到", file=sys.stderr)
         print("  ⇒ 可能是正则/扫描域坏了，或仓库为空 —— 此刻的 0 **不能**读成“没有违规”。", file=sys.stderr)
         controls_failed = True
+    # 2026-10-31 —— 「先证仪器，再读世界」。
+    # 只证明「宽形状非 0」不够：分类器若塌陷，会把命中全判成不阻塞
+    # ⇒ 仍然「0 阻塞 + 1510 命中」，看起来完全正常。
+    # ⇒ 每次主跑也跑一遍 selftest（6 个已知答案夹具，含一个负例）。
+    selftest_rc = 0
+    try:
+        selftest_rc = selftest(quiet=True)
+    except Exception as exc:  # noqa: BLE001
+        selftest_rc = 1
+        print(f"✗ selftest 抛错：{exc}", file=sys.stderr)
+    if selftest_rc != 0:
+        controls_failed = True
+        print("✗ 分类器自检未通过 —— 本次的「0 阻塞」不能读成没有违规。", file=sys.stderr)
     if controls_failed:
-        print("✗ 结论：本次没有读数（不是“干净”）", file=sys.stderr)
+        print("instrument: BROKEN ⇒ 本次没有读数（不是“干净”）", file=sys.stderr)
         return 1
+    print("instrument: valid （selftest 6/6 通过 且 宽形状对照非 0 ⇒ 分类器有能力判出阻塞）")
 
     for bucket, mark, title in (
         (blocking, "✗", "键集拼接（阻塞）"),
