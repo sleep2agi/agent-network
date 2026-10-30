@@ -201,14 +201,40 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 要证「它在跟着墙钟走」，断言里必须出现**两次读数之差**。
   // （今晚的教训：startedAt 的敏感性当初是靠「换进程才变」证的，不是靠「刷新两次相同」。）
   test("served_at actually advances with the wall clock (difference, not just monotonicity)", async () => {
-    const t1 = (await (await fetch(`${BASE}/health`)).json() as any).served_at;
+    const read = async () => (await (await fetch(`${BASE}/health`)).json() as any).served_at;
+    const t1 = await read();
     const startedAt = Date.now();
     await new Promise((r) => setTimeout(r, 250));
-    const t2 = (await (await fetch(`${BASE}/health`)).json() as any).served_at;
+    const t2 = await read();
     const elapsed = Date.now() - startedAt;
     const delta = Date.parse(t2) - Date.parse(t1);
-    expect(delta).toBeGreaterThan(0);                       // 真的走了
-    expect(Math.abs(delta - elapsed)).toBeLessThanOrEqual(1000); // 且走的是同一个墙钟（容差 1s）
+    expect(delta).toBeGreaterThan(0);   // 真的走了（否定「常量」）
+    // 2026-10-31 —— (b) 容差必须**大于被测时钟可能的最大步进**，否则一次 NTP 步进就假红，
+    //   而假红会被读成「字段坏了」，实际是「时钟动了一下」。
+    //   NTP：slew 阈 128ms，超阈值即步进（秒级）。⇒ 容差 5s，不是 1s。
+    //   ⚠️ 这条量的是**速率**（差 / 等待）；「时钟偏置」（绝对值）在 epoch_delta_ms 那条，
+    //      两者不能共用容差 —— 它们量的是两件事。
+    const STEP_ALLOWANCE_MS = 5000;
+    expect(Math.abs(delta - elapsed)).toBeLessThanOrEqual(STEP_ALLOWANCE_MS);
+    // 2026-10-31 —— (a) 「必须变」没排除「以错误的方式变」：
+    //   每次请求变 / 每秒变 / 每次部署变 都满足「差 > 0」，而语义完全不同。
+    //   两次读数上，「每次请求变」与「每秒变」同形 ⇒ 需要第二条锁定**时间尺度**：
+    //   在同样的等待里多打若干请求，差值不应随请求数增长。
+    const t3 = await read();
+    const burstStart = Date.now();
+    const BURST = 20;
+    for (let i = 0; i < BURST; i++) await read();   // 20 次额外请求
+    await new Promise((r) => setTimeout(r, 250));
+    const t4 = await read();
+    const burstElapsed = Date.now() - burstStart;
+    const burstDelta = Date.parse(t4) - Date.parse(t3);
+    // ⚠️ 这一条的容差**不能**用上面那个时钟步进容差，否则判据被它自己压平：
+    //   20 次请求 × 每次 +150ms 的假实现 = +3000ms，而我第一版给的是 +5000ms ⇒ 照样绿。
+    //   （witnessed-red 抓到了：把 served_at 改成每次请求 +150ms，那一版仍然 68 pass。）
+    //   ⇒ 这里用「与请求数无关」的紧口：20 次请求带来的增量必须远小于其漂移规模。
+    const PER_REQUEST_ALLOWANCE_MS = 1000;   // 20 次请求合计只许 +1s；每请求漂移 ≥50ms 就会红
+    expect(burstDelta).toBeLessThanOrEqual(burstElapsed + PER_REQUEST_ALLOWANCE_MS);
+    expect(burstDelta).toBeGreaterThanOrEqual(0);
   });
 
   // 2026-10-31 —— 误差界必须有**地板**。
