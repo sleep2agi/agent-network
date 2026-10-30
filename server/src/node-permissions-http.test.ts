@@ -581,6 +581,47 @@ describe("未绑定令牌的写调用：默认只记录，不拦", () => {
   });
 });
 
+// #2719 —— 凭据台账：把「哪把钥匙、绑没绑、还在不在用」变成可查的东西。
+//
+// 为什么需要它：node-permission-report 是按**流量**聚合的，只列出「近 N 天有调用」的身份。
+// 生产实测 760 个未吊销令牌里 381 个是 `node:` 开头但未绑定，而其中只有 4 个近 24h 出现过 ——
+// 剩下 377 个在任何报表里都不存在，于是「这把钥匙还有人在用吗」永远答不清，也就不敢吊销。
+describe("#2719 凭据台账", () => {
+  test("owner 能看到未绑定令牌，区分「有流量」与「零流量」", async () => {
+    const loudId = `tok_ledger_loud_${stamp}`;
+    const quietId = `tok_ledger_quiet_${stamp}`;
+    for (const [id, nm] of [[loudId, "node:ledger-loud"], [quietId, "node:ledger-quiet"]] as const) {
+      db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, 'network') ON CONFLICT (token_id) DO NOTHING",
+        [id, `hash_${id}`, user.boss.id, net, nm]);
+    }
+    const hour = new Date().toISOString().slice(0, 13);
+    db.run(`INSERT INTO node_tool_calls (network_id, node_id, tool, hour, hits) VALUES (?1, ?2, 'mcp:send_task', ?3, 5)
+            ON CONFLICT(network_id, node_id, tool, hour) DO UPDATE SET hits = node_tool_calls.hits + 5`,
+      [net, `token:${loudId}`, hour]);
+
+    const r = await call(user.boss.token, "GET", `/api/networks/${net}/token-ledger?limit=1000`);
+    expect(r.status).toBe(200);
+    const loud = r.body.tokens.find((t: any) => t.token_id === loudId);
+    const quiet = r.body.tokens.find((t: any) => t.token_id === quietId);
+    expect(loud.unbound_node).toBe(true);
+    expect(loud.calls_24h).toBe(5);
+    expect(loud.writes_24h).toBe(5);
+    expect(quiet.calls_24h).toBe(0);          // 零流量也要在名单里 —— 这正是它存在的理由
+    expect(r.body.summary.unbound_node).toBeGreaterThanOrEqual(2);
+    // 绑定的节点令牌必须被标成「已绑定」，不能被算进未绑定
+    const bound = r.body.tokens.find((t: any) => t.token_id === node.nN.tokenId);
+    expect(bound.bound_node_id).toBe(node.nN.id);
+    expect(bound.unbound_node).toBe(false);
+  });
+
+  test("成员（非 owner/admin）看不到；节点令牌也看不到", async () => {
+    const r = await call(user.mem.token, "GET", `/api/networks/${net}/token-ledger`);
+    expect(r.status).toBe(403);
+    const n = await call(node.nN.token, "GET", `/api/networks/${net}/token-ledger`);
+    expect(n.status).toBe(403);
+  });
+});
+
 // #2969 续 —— REST 写接口白名单：唯一 choke point。
 //
 // 为什么必须在中央判一次：节点令牌的 REST 写面分散在两套判据里
