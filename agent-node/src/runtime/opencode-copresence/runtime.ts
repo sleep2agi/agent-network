@@ -55,6 +55,7 @@ import {
   isSessionGoneError,
   ownerLeftDecision,
   ownerLeftText,
+  queueOwnerLabel,
   type QueueOwnerBinding,
 } from "./queue-ownership";
 export { fetchOpenCodeJson } from "./http";
@@ -989,7 +990,21 @@ export async function openVettedOpenCodeCopresence(
           // 只有后者时，日志里只剩“死了的”，没有“来过的” —— 差值读不出来。
           const budgetLabel = budgetMs > 0 ? `${budgetMs}ms` : "unbounded";
           log(`[opencode-copresence] task accepted task=${owner?.taskId ?? "-"} budget=${budgetLabel}`);
-          await waitUntilSessionIdle(url, password, created.id, admissionBudgetMs, request, evidence?.onAdmissionBusy, queueOwner);
+          // 2026-10-31 —— 排队失败要有**自己的日志行**，与入口行成对。
+          //   入口行说明「它来过」，这一行说明「它没排上、等了多久、是谁的」。
+          //   没有这一行时，日志里 只有「accepted」而没有对应的结局 ⇒
+          //   「有进无出」的差值读不出来（而那条正是运维唯一能反查的形状）。
+          // ⚠️ 不改文案、不改错误类型：只加一行日志，异常原样抛出。
+          const admissionStartedAt = Date.now();
+          try {
+            await waitUntilSessionIdle(url, password, created.id, admissionBudgetMs, request, evidence?.onAdmissionBusy, queueOwner);
+          } catch (admissionErr) {
+            const waited = Date.now() - admissionStartedAt;
+            log(`[opencode-copresence] task admission-expired task=${owner?.taskId ?? "-"} `
+              + `waited=${waited}ms cap=${admissionBudgetMs > 0 ? `${admissionBudgetMs}ms` : "unbounded"} `
+              + `owner=${queueOwnerLabel?.(queueOwner) ?? "-"} err=${(admissionErr as Error)?.name ?? "Error"}`);
+            throw admissionErr;
+          }
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
