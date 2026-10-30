@@ -119,6 +119,7 @@ import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 import { createProductionSideThreadTransport } from "./side-thread-production.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
+import { taskRejectionCounters } from "./rejection-counters.js";
 import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
 const PORT = resolvePort(process.env.PORT);
@@ -954,6 +955,17 @@ function detectBootGitCommit(): string | null {
 }
 
 const BOOT_GIT_COMMIT = detectBootGitCommit();
+
+/**
+ * 2026-10-31 —— 窗口起点**在 boot 时算一次**，不要每次请求重算。
+ *
+ * 原来它是 per-request 的 `new Date(Date.now() - uptime*1000)`：毫秒舍入会让两次读数
+ * 差 1ms ⇒ 而「flapping 判据」正是拿两次读数的 startedAt 比较 ⇒ **同一进程会被读成重启过**。
+ * 一个用于证明“它没重启”的字段，自己每次都在变，是本末倒置。
+ *
+ * 稳定之后它才满足那条判据：`S2 === S1 ⇒ 没重启`。
+ */
+const startedAtIso = new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString();
 
 function withCors(req: Request, res: Response): Response {
   const headers = corsHeaders(req);
@@ -2871,13 +2883,18 @@ return Bun.serve({
         // 的观测窗口都只是 [startedAt, now]，重启即归零。
         // 只给 uptime 时读者要自己换算，实际使用中经常被忽略 ⇒
         // “stall_count: 0”于是被读成“从未卡顿”。给出绝对时刻让窗口可被外部计算。
-        startedAt: new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString(),
+        startedAt: startedAtIso,
         // 2026-10-31 —— 结论的「站位」本身要可验。
         // 今晚有一句话写着 prod@18445bf4，而线上跑的是 e230677f：标签可以随手写。
         // 这个字段由进程自己产生 ⇒ 外部读到的不是“某人说它在哪”，是“它说自己在哪”。
         // 🔴 取不到就是 null（npm 安装形态没有 .git），**不回退成 version** ——
         //    未验的断言标了“未验”仍然有用，标成事实会污染的整张表。
         git_commit: BOOT_GIT_COMMIT,
+        // 2026-10-31 —— 拒绝原因计数（与那条日志同一位置 +1，不会漏记）。
+        // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
+        //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。
+        //    （历史教训：拿累计值除以 uptime 当速率 ⇒ 分母与分子不独立 ⇒ 刚重启必假阳性。）
+        counters: { since: startedAtIso, task_rejections: taskRejectionCounters() },
         // #496 — public, stable capability data. Dashboard upload proxies
         // need the Hub's real limits before opening a streaming request;
         // duplicating these constants client-side creates a silent

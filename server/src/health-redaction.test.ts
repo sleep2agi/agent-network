@@ -110,6 +110,20 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     if (value !== null) expect(value).not.toBe(body.version);
   });
 
+  // 2026-10-31 —— 计数必须带窗口，且窗口起点要**稳定**。
+  // 两条一起断：① counters.since === startedAt（窗口可被外部计算）
+  //             ② 连续两次读到的 startedAt 完全相同（否则重启判据会自己假阳性）
+  test("rejection counters carry an explicit window, and startedAt is stable across reads", async () => {
+    const a = await (await fetch(`${BASE}/health`)).json() as any;
+    const b = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(a.counters).toBeTruthy();
+    expect(a.counters.since).toBe(a.startedAt);
+    expect(typeof a.counters.task_rejections.total).toBe("number");
+    expect(a.counters.task_rejections.by_reason).toBeTruthy();
+    // 稳定：同一进程的两次读数必须逐字符相同。
+    expect(b.startedAt).toBe(a.startedAt);
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);
