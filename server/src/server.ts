@@ -3193,6 +3193,87 @@ return Bun.serve({
       }));
     }
 
+    // ── #2719 —— 凭据台账：哪把钥匙、绑没绑、最后一次用是什么时候、用它调过什么 ──
+    //
+    // 为什么不能只用 node-permission-report：那张报表是**按流量**聚合的，
+    // 只列出「近 N 天有调用」的身份。生产实测 760 个未吊销令牌里有 381 个是
+    // `node:` 开头但没绑定节点的，而其中只有 4 个在近 24h 出现过。
+    // 剩下 377 个**在任何报表里都不存在** —— 于是「这把钥匙还有人在用吗」
+    // 这个问题永远答不清，也就永远不敢吊销。
+    //
+    // 这里只读、只列元信息（不返回 token 值，Hub 本来也只存 hash），
+    // 且要求「人的令牌 + 网络 owner/admin」—— 节点不能枚举网络的钥匙。
+    const ledgerMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/token-ledger$/);
+    if (ledgerMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = decodeURIComponent(ledgerMatch[1]);
+      const role = getUserNetworkRole(restAuth.userId, networkId);
+      if (!isAdmin && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 200) || 200, 1), 1000);
+      const rows = db.all<{ token_id: string; name: string | null; bound_node_id: string | null; scope: string | null; created_at: string | null; last_used_at: string | null }>(
+        `SELECT token_id, name, bound_node_id, scope, created_at, last_used_at
+           FROM api_tokens
+          WHERE network_id = ?1 AND revoked_at IS NULL
+          ORDER BY name, created_at DESC LIMIT ?2`,
+        networkId, limit,
+      );
+      // 近 24h 的调用面（按账本键 `token:<id>`）。没有这一列，台账只是一份名单；
+      // 有了它才能回答「这条要不要吊销」。
+      const sinceHour = new Date(Date.now() - 86_400_000).toISOString().slice(0, 13);
+      const calls = db.all<{ node_id: string; tool: string; hits: number | string }>(
+        `SELECT node_id, tool, SUM(hits) AS hits FROM node_tool_calls
+          WHERE network_id = ?1 AND hour >= ?2 AND node_id LIKE 'token:%'
+          GROUP BY node_id, tool ORDER BY SUM(hits) DESC`,
+        networkId, sinceHour,
+      );
+      const byToken = new Map<string, Array<{ tool: string; hits: number }>>();
+      for (const c of calls) {
+        const id = c.node_id.slice(6);
+        const list = byToken.get(id) ?? [];
+        list.push({ tool: c.tool, hits: Number(c.hits) });
+        byToken.set(id, list);
+      }
+      const tokens = rows.map((r) => {
+        const tools = byToken.get(r.token_id) ?? [];
+        const writes = tools.filter((t) => t.tool.startsWith("mcp:send_") || t.tool.startsWith("mcp:requirements_")
+          || t.tool.startsWith("mcp:projects_") || ["POST", "PUT", "PATCH", "DELETE"].includes(t.tool.split(" ")[0]))
+          .reduce((n, t) => n + t.hits, 0);
+        return {
+          token_id: r.token_id,
+          name: r.name,
+          scope: r.scope,
+          bound_node_id: r.bound_node_id,
+          // 名字说自己是节点、却没有绑定 ⇒ 三张白名单都管不到它（nodeIdentity 会退化成 token: 键）
+          looks_like_node: !!r.name && r.name.startsWith("node:"),
+          unbound_node: !!r.name && r.name.startsWith("node:") && !r.bound_node_id,
+          created_at: r.created_at,
+          last_used_at: r.last_used_at,
+          calls_24h: tools.reduce((n, t) => n + t.hits, 0),
+          writes_24h: writes,
+          top_tools: tools.slice(0, 3),
+        };
+      });
+      const unbound = tokens.filter((t) => t.unbound_node);
+      return withCors(req, Response.json({
+        ok: true,
+        network_id: networkId,
+        since: new Date(Date.now() - 86_400_000).toISOString(),
+        limit,
+        summary: {
+          total: tokens.length,
+          bound: tokens.filter((t) => !!t.bound_node_id).length,
+          unbound_node: unbound.length,
+          // 「名义上还在、实际上没人用」的数量：这才是能不能吊销的判据
+          unused_24h: tokens.filter((t) => t.calls_24h === 0).length,
+          unbound_node_in_use: unbound.filter((t) => t.calls_24h > 0).length,
+        },
+        tokens,
+      }));
+    }
+
     // ── #1473 (#909): read-only Hub catalogs for the desktop client ──
     //
     // Skills / network secrets / Providers have existed on this Hub only as
