@@ -2809,6 +2809,12 @@ return Bun.serve({
         multi_network: true,
         license: license?.type || "none",
         uptime: Math.floor(process.uptime()),
+        // 2026-10-31 —— 把窗口起点显式暴露。
+        // 同一响应里的 stall_count / last_stall_at / recent_stalls 以及各 …last_error_at
+        // 的观测窗口都只是 [startedAt, now]，重启即归零。
+        // 只给 uptime 时读者要自己换算，实际使用中经常被忽略 ⇒
+        // “stall_count: 0”于是被读成“从未卡顿”。给出绝对时刻让窗口可被外部计算。
+        startedAt: new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString(),
         // #496 — public, stable capability data. Dashboard upload proxies
         // need the Hub's real limits before opening a streaming request;
         // duplicating these constants client-side creates a silent
