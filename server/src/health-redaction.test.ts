@@ -530,15 +530,61 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 2026-10-31 —— gauge 的粒度词表是**封闭枚举**，且必须分清「电平」与「累积」。
   // 一个电平不能算速率，一个累积不能回答「现在怎么样」——两者在 JSON 里都是数字。
   describe("granularity vocabulary is closed and distinguishes level from cumulative", () => {
-    test("every gauge declares one of level/cumulative/instant/label/boolean", async () => {
+    test("every gauge declares one of level/cumulative/instant/label/boolean/verdict", async () => {
       const { HEALTH_FIELD_META } = await import("./server.js");
-      const allowed = ["level", "cumulative", "instant", "label", "boolean"];
+      const allowed = ["level", "cumulative", "instant", "label", "boolean", "verdict"];
       const bad = Object.entries(HEALTH_FIELD_META)
         .filter(([, m]) => m.class === "gauge" && !allowed.includes(String(m.granularity)))
         .map(([k, m]) => `${k}=${m.granularity}`);
       expect(bad).toEqual([]);
       // 分母非空：这一条今天必须有东西可查
       expect(Object.values(HEALTH_FIELD_META).filter((m) => m.class === "gauge").length).toBeGreaterThan(20);
+    });
+
+    // 2026-10-31 —— verdict 与 label 的差别只有一条，但它是致命的：
+    //   label   是描述（"streamable-http"）⇒ 为常量无害
+    //   verdict 是判定（"ok"/"degraded"）⇒ 若另一支不可观测，它就不是判定而是装饰
+    // 起因：一次复核提议给 /health 加 `ptyWsAttached`，而 attach 在 listen 回调里无条件执行
+    // ⇒ true 恒成立、false 不可观测 ⇒ 这个字段永远只有一个读数，正是被审的「一侧不可达」缺陷本身。
+    test("every verdict names how to make the OTHER branch fire", async () => {
+      const { HEALTH_FIELD_META } = await import("./server.js");
+      // HEALTH_FIELD_META 覆盖**两个投影**（匿名 + 鉴权）⇒ 存在性要对着完整那份查。
+      const full = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      const anon = await (await fetch(`${BASE}/health`)).json() as any;
+      const verdicts = Object.entries(HEALTH_FIELD_META).filter(([, m]) => m.granularity === "verdict");
+      // 分母非空：今天至少要有这么多真判定，否则这条门是装饰
+      expect(verdicts.length).toBeGreaterThanOrEqual(4);
+      for (const [k, m] of verdicts) {
+        expect((m.verdict_other_branch ?? "").length).toBeGreaterThanOrEqual(20);
+        // 判定必须真的在载荷里（不许给不存在的字段配说明）
+        expect(Object.prototype.hasOwnProperty.call(full, k)).toBe(true);
+      }
+      // 匿名/鉴权的边界也钉住：新增一个 verdict 时必须**显式决定**它匿不匿名，
+      // 否则它会静默地默认进匿名载荷（或默认被滤掉，而没人注意到）。
+      const anonVerdicts = verdicts.map(([k]) => k)
+        .filter((k) => Object.prototype.hasOwnProperty.call(anon, k)).sort();
+      expect(anonVerdicts).toEqual(["build_identified", "license_state", "status"]);
+    });
+
+    // 反面：断言自己是常量的字段，必须给出「另一支为什么不会出现」，并且**真的还是那个常量**。
+    test("fields declared constant-by-design still read as that constant", async () => {
+      const { HEALTH_FIELD_META } = await import("./server.js");
+      const b = await (await fetch(`${BASE}/health`)).json() as any;
+      const claimed: Record<string, unknown> = {
+        ok: true,
+        api_version: "v3",
+        transport: "streamable-http",
+        version_role: "deployment_label",
+        v3_auth: true,
+        multi_network: true,
+      };
+      for (const [k, want] of Object.entries(claimed)) {
+        const m = (HEALTH_FIELD_META as any)[k];
+        expect((m.constant_by_design ?? "").length).toBeGreaterThanOrEqual(20);
+        expect(b[k]).toBe(want);
+      }
+      // 反例守卫：一条「常量」若其实是可变的，claim 就写错了 ⇒ 这里会红
+      expect(b.status).toBe("ok");
     });
 
     test("the two that people confuse are labelled right (peak is cumulative, inflight is a level)", async () => {

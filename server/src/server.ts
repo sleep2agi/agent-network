@@ -973,11 +973,35 @@ export type HealthGranularity =
   | "level"       // 读的那一刻的值（会上下波动）
   | "cumulative"  // 自某个起点累计（只增；起点必须另有字段）
   | "instant"     // 某个时刻戳
-  | "label"       // 枚举/字符串
-  | "boolean";
+  | "label"       // 枚举/字符串（描述性：可以为常量）
+  | "boolean"
+  /**
+   * 2026-10-31 —— **verdict：一个关于对错的判定**。
+   *
+   * 与 label 的差别只有一条，但它是致命的：
+   *   label   是描述（"streamable-http"），为常量无害 —— 它回答「这是什么」
+   *   verdict 是判定（"ok"/"degraded"），若另一支不可观测，它就不是判定而是装饰
+   *
+   * 起因：一次复核提出给 /health 加 `ptyWsAttached`，而 attach 在 listen 回调里
+   * **无条件**执行 ⇒ true 恒成立、false 不可观测 ⇒ 这个字段永远只有一个读数。
+   * ⇒ 判据：一个判定的另一支若在当前部署形态下不可达，这个字段就没有判别力。
+   *   verdict 档必须写 `verdict_other_branch`（怎么让它响），写不出即为缺口。
+   */
+  | "verdict";
 
 export interface HealthFieldMeta {
   class: HealthFieldClass;
+  /**
+   * granularity: "verdict" 必填 —— **另一支怎么才能读到**。
+   * 写不出「怎么让它响」就说明这个判定只会有一种取值。
+   */
+  verdict_other_branch?: string;
+  /**
+   * 单向字段必填 —— 另一支**在任何部署里都不会出现**的原因。
+   * 与 verdict_other_branch 是同一件事的两面：
+   *   前者答「我没有实现那一支」，后者答「我实现了，但你要怎样才看得到」。
+   */
+  constant_by_design?: string;
   /** gauge 必填：粒度（封闭枚举，见 HealthGranularity） */
   granularity?: HealthGranularity;
   /** credential 专用：该值由请求方带来（回显），因此不构成额外泄露 */
@@ -1008,15 +1032,20 @@ export interface HealthFieldMeta {
 
 export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   // ── gauge：聚合 / 粗标签 ─────────────────────────────────────────────
-  ok: { class: "gauge", granularity: "boolean" },
+  ok: {
+    class: "gauge",
+    granularity: "boolean",
+    constant_by_design: "200 是 watchdog 契约下的承诺 ⇒ 这一支只有 true；非 200 时读者根本拿不到这个字段（另一支在传输层，不在载荷里）",
+  },
   version: { class: "gauge", granularity: "label", why: "粗粒度版本号；精确字节身份由 git_commit 承担，而它不匿名" },
   version_role: {
     class: "gauge",
     granularity: "label",
     why: "把「version 是部署标签不是指纹」写进载荷 —— 读者不会去查它数的是什么",
+    constant_by_design: "本字段是那句话本身；另一支（version 当指纹）是错误用法，不是另一个取值",
   },
-  api_version: { class: "gauge", granularity: "label" },
-  transport: { class: "gauge", granularity: "label" },
+  api_version: { class: "gauge", granularity: "label", constant_by_design: "本进程只实现 v3；若将来并存两代，这里才会出现第二个取值" },
+  transport: { class: "gauge", granularity: "label", constant_by_design: "本进程只实现 streamable-http（另一支 SSE-only 是历史形态，已不接受配置）" },
   uptime: { class: "gauge", granularity: "cumulative" },
   startedAt: { frozen_at_boot: true, class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
   sessions_count: { class: "gauge", granularity: "level" },
@@ -1027,34 +1056,53 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   auth: { class: "gauge", granularity: "label" },
   security: { class: "gauge", granularity: "label" },
   tmux: { class: "gauge", granularity: "label" },
-  v3_auth: { class: "gauge", granularity: "label" },
-  multi_network: { class: "gauge", granularity: "label" },
+  v3_auth: { class: "gauge", granularity: "label", constant_by_design: "编译期能力，没有开关；false 只可能出现在老版本服务端上 —— 要读它请读 version" },
+  multi_network: { class: "gauge", granularity: "label", constant_by_design: "同上：多网络是数据模型能力，不是运行时开关 ⇒ 单网络部署里它也是 true" },
   license: { class: "gauge", granularity: "label" },
-  license_state: { class: "gauge", granularity: "label" },
+  license_state: {
+    class: "gauge",
+    granularity: "verdict",
+    verdict_other_branch: "absent：删掉 license 行；unknown：让查询抛错（表被锁/被改名）—— 两者形状不同，这正是它存在的理由",
+  },
   limits: { class: "gauge", granularity: "label" },
   capabilities: { class: "gauge", granularity: "label" },
   // ⚠️ 例外：**形似启动快照，但会变** —— 它的全部价值在于变，标成快照会毁掉它。
   served_at: { class: "gauge", granularity: "instant" },
-  build_identified: { class: "gauge", granularity: "boolean", why: "只说「有没有构建标识」，不说「是什么」" },
+  build_identified: {
+    class: "gauge",
+    granularity: "verdict",
+    why: "只说「有没有构建标识」，不说「是什么」",
+    verdict_other_branch: "false：从 npm 包（非 git 工作树）启动，包内没有 .git ⇒ 拿不到 commit ⇒ 这是最常见的生产形态，不是异常",
+  },
   alert_baselines: { class: "gauge", granularity: "cumulative" },
   broadcast: { class: "gauge", granularity: "level" },
   host_disk: { class: "gauge", granularity: "level" },
   counters: { class: "gauge", granularity: "cumulative", why: "按 status:code 分桶、封顶 64；聚合量，但当前只给鉴权读者" },
-  epoch_agreement: { class: "gauge", granularity: "label", why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻" },
+  epoch_agreement: {
+    class: "gauge",
+    granularity: "verdict",
+    why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻",
+    verdict_other_branch: "disagree：宿主时钟被改过（NTP 大步进 / 手工 date / 虚拟机恢复快照）⇒ 差值超出误差界；unknown：/proc 不可读",
+  },
   epoch_delta_ms: { class: "gauge", granularity: "level" },
   clk_tck_assumed: { class: "gauge", granularity: "label" },
   clk_tck_delta: { class: "gauge", granularity: "level", why: "derived − 100；confirmed 也要报差多少" },
   kernel_started_at_error_ms: { class: "gauge", granularity: "level", why: "差值隐含的启动时刻误差界" },
   clk_tck_source: {
     class: "gauge",
-    granularity: "label",
+    granularity: "verdict",
     why: "assumed/derived/confirmed —— 一个叫 assumed 的字段必须有一条「它是否成立」的判定",
+    verdict_other_branch: "derived/assumed：非 x86 宿主（USER_HZ≠100）、/proc 不可读、或容器里 auxv 被剥 ⇒ 三档都在真实部署里出现过",
   },
 
   // ── landmark：精确位置/身份 ──────────────────────────────────────────
   git_commit: { frozen_at_boot: true, class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
   git_dirty: { class: "landmark" },
-  status: { class: "gauge", granularity: "label" },
+  status: {
+    class: "gauge",
+    granularity: "verdict",
+    verdict_other_branch: "degraded：让 DB 读不到（chmod/移走 db 文件）或让 license 查询失败 ⇒ status_reasons 同时非空",
+  },
   status_reasons: { class: "gauge", granularity: "level" },
   build_identity_note: {
     class: "landmark",
