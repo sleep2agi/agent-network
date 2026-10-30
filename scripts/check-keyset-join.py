@@ -498,7 +498,11 @@ def main() -> int:
             print(f"✓ {title}: 0 处")
 
     print(f"✓ 扫描 {scanned} 个源文件（已排除构建产物 / node_modules）")
-    print(f"✓ 阳性对照：宽形状 `.join(` 命中 {any_join_hits} 次 ⇒ 判据确实到达了代码")
+    # 2026-10-31 —— 对照要分两维，别拿「在别处命中」冒充「看得见目标」。
+    print(f"✓ control_breadth：宽形状 `.join(` 命中 {any_join_hits} 次")
+    print("                   ⇒ 只证明「工具跑起来了」，**不证明它看得见目标上下文**")
+    print("✓ control_position：selftest 8 例覆盖目标上下文（同行 / 跨行 / 变量拆分 / 负例）")
+    print("                   ⇒ 这一条才支撑「0 处」读成「那种写法不存在」")
 
     if advisory:
         print(f"· 数组 join（不阻塞，{len(advisory)} 处，后果是去重口径而非契约绕过）:")
