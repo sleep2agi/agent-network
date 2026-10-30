@@ -45,6 +45,10 @@ DOC_GLOBS = ["docs/**/*.md", "docs-site/**/*.md", "skills/**/*.md", "README.md",
 # ADHOC 登记表：一次性/人肉工具放这里。**必须**有「谁会发现它烂了」与「什么时候可以删掉这一行」。
 # 空字典是合法的 —— 但它同时意味着「本仓没有一次性工具」。新增一条就是一次显式决定。
 ADHOC: dict[str, tuple[str, str]] = {
+    'report-reason-branches.py': (
+        "按需读「reason 被当 code 分支」的清单 + 冻结基线；棘轮由 --assert 承担，未接线到 CI",
+        "把 --assert 接进 test-inventory.yml 后删除本行",
+    ),
     'report-contract-pairs.py': (
         "按需读一次「同名契约两侧容错方向」的清单；它明确不是判据（同名的两侧可能不是同一个契约）",
         "并入 check-keyset-join.py 的 --json 消费者后删除本行",
