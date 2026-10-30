@@ -920,7 +920,7 @@ function corsHeaders(req: Request): Record<string, string> {
  */
 export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
   // 存活/版本：外部 watchdog 与运维只靠这些判断「活没活」
-  "ok", "version", "version_role", "api_version", "transport", "uptime", "startedAt",
+  "ok", "status", "status_reasons", "version", "version_role", "api_version", "transport", "uptime", "startedAt",
   // 规模与健康度聚合（不含拓扑明细）
   "sessions_count", "sse_connections", "mcp_inflight", "mcp_inflight_peak",
   // 事件循环停顿是**一个对象**（event_loop: {max_gap_ms, recent_stalls,…}），
@@ -1052,6 +1052,8 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   // ── landmark：精确位置/身份 ──────────────────────────────────────────
   git_commit: { frozen_at_boot: true, class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
   git_dirty: { class: "landmark" },
+  status: { class: "gauge", granularity: "label" },
+  status_reasons: { class: "gauge", granularity: "level" },
   build_identity_note: {
     class: "landmark",
     why: "解释 git_commit 为什么为空；没有它，「没有」与「读不到」同形",
@@ -3126,7 +3128,16 @@ return Bun.serve({
       //     dashboard user proxies with the logged-in user's utok_ so
       //     their own network's aliases surface; strangers' networks do
       //     not
-      const count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
+      // 2026-10-31 —— 「200 那一格」原来没有任何 body 判据：ok 恒 true。
+      // 于是「活着但降级」与「一切正常」在读数上同形（与 counters.releases 同族）。
+      // ⇒ 这里记录读库是否成功，供下面的 status 使用；不改变 200 这个 HTTP 承诺。
+      let dbReadable = true;
+      let count: { cnt: number } | undefined;
+      try {
+        count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
+      } catch {
+        dbReadable = false;
+      }
       const sse = getSSEStats();
       // 2026-10-31 —— 查询失败不再拖垮整个 /health（它有 500 兜底，但健康端点不该因附属数据挂掉），
       // 并且让「查失败」与「没有 license 行」在读数上可分（见 license-state.ts）。
@@ -3202,8 +3213,14 @@ return Bun.serve({
       // scopedSessions undefined → sse_sessions field omitted entirely
       // (watchdog + arbitrary internet strangers see aggregates only).
 
+      const statusReasons: string[] = [];
+      if (!dbReadable) statusReasons.push("db_unreadable");
+      if (licenseQueryFailed) statusReasons.push("license_unreadable");
       const body: Record<string, unknown> = {
         ok: true,
+        // 200 是**承诺**（watchdog 契约），不等于「健康」。健康与否放在 body 里：
+        status: statusReasons.length === 0 ? "ok" : "degraded",
+        status_reasons: statusReasons,
         version: SERVER_VERSION,
         // 2026-10-31 —— **version 是部署标签，不是代码指纹**（生产实例：4 分钟内 version 变、
         // buildCommit 一字未变，同 commit 重新打包）。

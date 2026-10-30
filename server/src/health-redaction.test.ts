@@ -353,6 +353,19 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.counters.task_rejections.scope).toBe("process_lifetime");
   });
 
+  // 2026-10-31 —— 「200 那一格」必须有 body 判据：ok 恒 true 不等于健康。
+  // 与 counters.releases 同族：一个恒真的字段，读起来像「一切正常」。
+  test("status separates alive-but-degraded from all-normal (200 stays a promise, not a verdict)", async () => {
+    const res = await fetch(`${BASE}/health`);
+    expect(res.status).toBe(200);                       // 承诺不变
+    const b = await res.json() as any;
+    expect(["ok", "degraded"]).toContain(b.status);
+    expect(Array.isArray(b.status_reasons)).toBe(true);
+    if (b.status === "ok") expect(b.status_reasons).toEqual([]);   // 两字段必须自洽
+    else expect(b.status_reasons.length).toBeGreaterThan(0);
+    expect(b.ok).toBe(true);                            // 兼容字段仍在，但不再承担判据
+  });
+
   // 2026-10-31 —— 形状测试必须先证明**输入彼此不同**，否则它测的是同一个形状 N 次。
   // 顺序不能反：先断言两两不等，再断言各自的行为。
   test("the four projection witnesses are pairwise distinct inputs (else it is four selfies)", () => {
