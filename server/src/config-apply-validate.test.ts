@@ -15,6 +15,7 @@ import {
   readOpencodeSnapshotFlags,
   readConfigUpdateCapable,
   configUpdateCapabilityDivergence,
+  readSystemdSupervision,
   validatePatch,
   narrowChannelsPatch,
 } from "./config-apply-validate";
@@ -511,5 +512,28 @@ describe("configUpdateCapabilityDivergence — 双写字段的分歧本身就是
   test("accepts an already-parsed object (nodes may hand us either form)", () => {
     expect(configUpdateCapabilityDivergence({ restart_supervised: true, config_update_capable: false }))
       .toEqual({ named: true, legacy: false });
+  });
+});
+
+
+// 2026-10-31 —— #3168：节点自报的三态托管判定。
+// 「它说自己没人拉」与「它说有人拉」处置相反；而「不知道」两边都不能当。
+describe("readSystemdSupervision", () => {
+  test("reads the three declared states verbatim", () => {
+    expect(readSystemdSupervision(JSON.stringify({ systemd_supervision: "supervised" }))).toBe("supervised");
+    expect(readSystemdSupervision('{"systemd_supervision":"not_supervised"}')).toBe("not_supervised");
+    expect(readSystemdSupervision({ systemd_supervision: "unknown" })).toBe("unknown");
+  });
+
+  test("missing field ⇒ null, which is NOT the same as unknown", () => {
+    // 缺失 = 这一版还不会报（老节点）；unknown = 会报但这次判不出来。
+    expect(readSystemdSupervision('{"config_update_capable":false}')).toBeNull();
+    expect(readSystemdSupervision("")).toBeNull();
+    expect(readSystemdSupervision("not json")).toBeNull();
+  });
+
+  test("rejects values outside the declared set (a typo must not silently mean 'supervised')", () => {
+    expect(readSystemdSupervision('{"systemd_supervision":"yes"}')).toBeNull();
+    expect(readSystemdSupervision('{"systemd_supervision":true}')).toBeNull();
   });
 });

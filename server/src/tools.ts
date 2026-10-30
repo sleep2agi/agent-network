@@ -103,8 +103,7 @@ import {
   configUpdateCapabilityDivergence,
   validatePatch,
   narrowChannelsPatch,
-  isAllowedToChangeFlag,
-} from "./config-apply-validate.js";
+  isAllowedToChangeFlag, readSystemdSupervision } from "./config-apply-validate.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
@@ -3784,7 +3783,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             + `Verify how this node is launched before relying on a restart-tier change.`,
         });
       }
-      if (applyMode !== "hot" && configUpdateCapable === false) {
+      // #3168 —— 具名判定优先：节点自己说了算，legacy 布尔只在「不知道」时兜底。
+      const systemdSupervision = readSystemdSupervision(node.config_snapshot);
+      if (applyMode !== "hot" && systemdSupervision === "not_supervised") {
+        warnings.push({
+          code: "restart_requires_manual_respawn",
+          message: "this node reports systemd_supervision=not_supervised, i.e. it says nothing will respawn it. "
+            + "A restart-tier patch makes the process exit 75 and stay down: the update will time out and the "
+            + "node will be offline until someone starts it again. Use Stop -> Start instead of a restart-tier "
+            + "patch, or launch it under a supervisor first (anet start / pm2 / systemd).",
+        });
+      } else if (applyMode !== "hot" && systemdSupervision === null && configUpdateCapable === false) {
         warnings.push({
             code: "restart_supervision_unknown",
             // 不说 "no supervisor" —— 这个字段只说明「没有声明 sentinel-75 重启包装」，

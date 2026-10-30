@@ -289,6 +289,39 @@ export function configUpdateCapabilityDivergence(
 }
 
 /**
+ * 2026-10-31 —— 用节点**自己**报的托管判定取代「没有声明」（#3168 的自然下一步）。
+ *
+ * `config_update_capable=false` 只说明「没有声明 sentinel-75 重启包装」，
+ * 而 systemd/pm2 托管的节点也可能报 false（它们不走那套包装）⇒ 于是只能写成
+ * 「does not advertise」，把判断交给调用方 —— 那是对的，但不够具体。
+ *
+ * 节点现在会上报三态 `systemd_supervision`（supervised / not_supervised / unknown），
+ * 于是「它自己说没人拉它」与「它自己说有人拉它」可以被分开讲：
+ *
+ *   not_supervised ⇒ 明确后果：exit 75 之后**没有东西会把它拉起来**
+ *   supervised     ⇒ 不做警告（具名判定优先，胜过 legacy 布尔）
+ *   unknown/缺失   ⇒ 退回旧口径（「没有声明」），因为「不知道」不能当成「没人拉」
+ *
+ * 🔴 三态而不是布尔：`unknown` 与 `not_supervised` 在处置上完全相反 ——
+ *    前者要人去看，后者要人别发这类变更。
+ */
+export function readSystemdSupervision(
+  configSnapshot: unknown,
+): "supervised" | "not_supervised" | "unknown" | null {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    return null;
+  }
+  const v = parsed?.systemd_supervision;
+  if (v === "supervised" || v === "not_supervised" || v === "unknown") return v;
+  return null; // 老节点没有这个字段：**缺失 ≠ unknown**，缺失是「这一版还不会报」
+}
+
+/**
  * Classify the patch's required apply mode. Empty patch (model + flags
  * both empty, no channels) → "restart_only" (used by restart_node tool).
  * Any restart-required field present, OR a channels change → "restart"
