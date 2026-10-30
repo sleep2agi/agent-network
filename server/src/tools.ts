@@ -109,6 +109,7 @@ import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue
 import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
+import { pollPacer } from "./poll-pacing.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, updateDepartment } from "./departments.js";
 
 function ts(): string {
@@ -2996,10 +2997,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (task) {
         task.late_replies = listTaskLateReplies(db, task_id, typeof task.network_id === "string" ? task.network_id : null);
       }
+      // #3001 —— 轮询节奏提示。只多一个字段，不改状态、不返回错误：
+      // 调用方忽略它照常工作；连着打的才会看到这句话。
+      // 放在 Hub 侧而不是只改 agent-node，是因为 get_task 由 Hub 提供 ——
+      // 发版即对所有节点生效，不必等客户端升级。
+      const pacing = pollPacer.record(`${callerTokenId ?? callerAlias ?? "anon"}:${task_id}`);
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify(task ? { ok: true, task } : { ok: false, error: "task not found" }),
+          text: JSON.stringify(task
+            ? { ok: true, task, ...(pacing ? { pacing } : {}) }
+            : { ok: false, error: "task not found", ...(pacing ? { pacing } : {}) }),
         }],
       };
     }
