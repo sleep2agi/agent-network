@@ -409,7 +409,9 @@ def _measured_on(repo: "pathlib.Path") -> str:
                                    capture_output=True, text=True, timeout=10).stdout.strip()
         if not ref:
             return "ref=unknown dirty=unknown"
-        return f"ref={ref[:12]} dirty={'true' if porcelain else 'false'}"
+        from datetime import datetime, timezone
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return f"ref={ref[:12]} dirty={'true' if porcelain else 'false'} observed_at={stamp}"
     except Exception:
         # 读不到就说读不到 —— 不写 ref=none（那会读成「干净的未知」）
         return "ref=unknown dirty=unknown"

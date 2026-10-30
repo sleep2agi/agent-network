@@ -131,7 +131,9 @@ def _measured_on() -> str:
                                capture_output=True, text=True, timeout=10).stdout.strip()
         if not ref:
             return "ref=unknown dirty=unknown"
-        return f"ref={ref[:12]} dirty={'true' if dirty else 'false'}"
+        from datetime import datetime, timezone
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return f"ref={ref[:12]} dirty={'true' if dirty else 'false'} observed_at={stamp}"
     except Exception:
         return "ref=unknown dirty=unknown"
 
