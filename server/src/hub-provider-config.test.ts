@@ -1,3 +1,11 @@
+// 2026-10-31 —— **本地直跑会看到 3 条红，那不是回归**。
+// 这 7 条里有 3 条（HTTP 端点 / names-only 密钥 / daemon 队列）依赖
+// `.github/workflows/hub-provider-core.yml` 里的容器环境（`tests/test907-hub-provider/run.sh`，
+// `--network none` + 特定 host 映射）；在仓外 `bun test src/hub-provider-config.test.ts`
+// 会看到 `status: "failed"`（服务端 URL 走不到 secure transport）。
+// ⇒ 按本仓规矩把环境依赖写在文件头：否则下一个人会把 3 条环境红当成自己改坏的。
+// ⇒ 判定这条文件是否健康，看那套 Docker 测试，不看本地 bun test。
+
 import './require-explicit-test-db';
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -101,6 +109,15 @@ test('actual Hub tool atomically saves encrypted Provider; metadata read and con
   const human = client(); const result = await save(human); expect(result.ok).toBe(true);
   expect(result.provider).toMatchObject({ id: 'shared', revision: 1, source: 'hub', credential_present: true, compatible_runtimes: ['codex-tui'] });
   const read = await human('daemon_provider_snapshot', { action: 'hub_read', id: 'hub', network_id: net }); expect(read.providers).toHaveLength(1);
+  // 2026-10-31 —— **精确键集**（#3171）：客户端「可选模型」这一面直接消费这两个投影，
+  // 而多给一个键（尤其 secret_key_ref）在这条线上是最严重的那类改动。
+  // 实际四键（我第一版漏了 network_id —— 断言当场纠正）。
+  expect(Object.keys(read).sort()).toEqual(["network_id", "ok", "providers", "source"]);
+  // provider 视图实际 12 键（我第一版写了 6 个，漏了 baseUrl/enabled/models/protocol/updated_at/verification）
+  expect(Object.keys(result.provider).sort()).toEqual([
+    "baseUrl", "compatible_runtimes", "credential_present", "enabled", "id", "label",
+    "models", "protocol", "revision", "source", "updated_at", "verification",
+  ]);
   expect(JSON.stringify([result, read])).not.toContain(key);
   expect(await save(human)).toMatchObject({ ok: false, error: 'hub_provider_revision_conflict' });
   const secret = db.get<any>('SELECT ciphertext FROM network_secrets WHERE network_id=?1', net);
