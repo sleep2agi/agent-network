@@ -1192,6 +1192,36 @@ export async function openVettedOpenCodeCopresence(
  * and launch-scoped env preparation as the ACP runtime, then open the native
  * serve+attach topology. No rejected executable receives provider auth.
  */
+/**
+ * #3146 —— 共享 OpenCode Server 分支的包装对象。
+ *
+ * 只做转发，不改变任何语义。**独立导出是为了能被单测直接覆盖**：
+ * 这个字面量曾经漏转发 `selectedModel` / `setSelectedModel`，于是
+ * `typeof session.setSelectedModel === "function"` 在共享 server 形态下恒为 false，
+ * 热切模型结构性不可达（生产表现：每次切模型都重启一次）。
+ * 当时没有任何测试覆盖 wrapper —— 它们都直接测 core。
+ */
+export function wrapSharedCopresenceSession(
+  core: OpenCodeCopresenceSession,
+  hooks: { afterClose?: () => Promise<void> | void } = {},
+): OpenCodeCopresenceSession {
+  return {
+    get url() { return core.url; },
+    get sessionId() { return core.sessionId; },
+    get attachScriptPath() { return core.attachScriptPath; },
+    get isRunning() { return core.isRunning; },
+    get backgroundControl() { return core.backgroundControl; },
+    ...(core.selectedModel ? { selectedModel: () => core.selectedModel!() } : {}),
+    ...(core.setSelectedModel ? { setSelectedModel: (model: string) => core.setSelectedModel!(model) } : {}),
+    notify: (message, timeoutMs, sender) => core.notify(message, timeoutMs, sender),
+    submit: (prompt, timeoutMs, sender, evidence) => core.submit(prompt, timeoutMs, sender, evidence),
+    async close(mode?: { restart?: boolean }) {
+      await core.close(mode);
+      await hooks.afterClose?.();
+    },
+  };
+}
+
 export async function openOpenCodeCopresenceRuntime(
   opts: OpenOpenCodeCopresenceOptions,
 ): Promise<OpenCodeCopresenceSession> {
@@ -1330,34 +1360,15 @@ export async function openOpenCodeCopresenceRuntime(
       warn: opts.warn,
     });
     await opts.onSession?.(core.sessionId);
-    const wrapped: OpenCodeCopresenceSession = {
-      get url() { return core!.url; },
-      get sessionId() { return core!.sessionId; },
-      get attachScriptPath() { return core!.attachScriptPath; },
-      get isRunning() { return core!.isRunning; },
-      get backgroundControl() { return core!.backgroundControl; },
-      // #3146 —— 共享 OpenCode Server 这条路（opencodeSharedServerUrl / 外部 server）
-      // 原来只转发 isRunning/notify/submit/close，**没有转发 selectedModel /
-      // setSelectedModel**。于是 `typeof session.setSelectedModel === "function"`
-      // 恒为 false ⇒ 热切模型在任何“共享 server”形态的节点上结构性不可达：
-      //   改前：ack rejected（"OpenCode V2 session is not running"，文案还误导）
-      //   改后（2.5.0-preview.167 的降级）：每次切模型都重启一次
-      // 生产实测（通信欧2号，shared server ready 且任务能正常跑）依然降级，
-      // 就是这两行缺失造成的。透传即可，不改变任何判据语义。
-      ...(core!.selectedModel ? { selectedModel: () => core!.selectedModel!() } : {}),
-      ...(core!.setSelectedModel ? { setSelectedModel: (m: string) => core!.setSelectedModel!(m) } : {}),
-      notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
-      submit: (prompt, timeoutMs, sender, evidence) =>
-        core!.submit(prompt, timeoutMs, sender, evidence),
-      async close(mode?: { restart?: boolean }) {
-        await core!.close(mode);
+    const wrapped: OpenCodeCopresenceSession = wrapSharedCopresenceSession(core!, {
+      afterClose: async () => {
         await sharedMcp?.close();
         removeInstructions();
         if (!await cleanupAfterExit(cleanup)) {
           opts.warn?.("[opencode-copresence] launch-root cleanup deferred; a live descendant still references it");
         }
       },
-    };
+    });
     return wrapped;
   } catch (error) {
     await core?.close().catch(() => {});
