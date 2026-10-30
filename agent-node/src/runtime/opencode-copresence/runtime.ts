@@ -993,7 +993,10 @@ export async function openVettedOpenCodeCopresence(
           for (;;) {
           const messageId = createOpenCodeAscendingMessageId();
           if (deadline > 0 && Date.now() >= deadline) {
-            throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+            // 这里已经过了 waitUntilSessionIdle（准入），是**回复阶段**的整体截止。
+            // 原来标成 "admission" 会让运维分不清“没排上队”和“跑太久没回来”——
+            // 两者处置完全不同（前者改投别的节点，后者看这一轮的产出）。
+            throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
           }
           let message: any;
           const turnTimeoutMs = deadline > 0 ? Math.max(1, deadline - Date.now()) : 0;
