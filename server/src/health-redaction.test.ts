@@ -383,6 +383,26 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(b.ok).toBe(true);                            // 兼容字段仍在，但不再承担判据
   });
 
+  // 2026-10-31 —— 契约测试，不是碰撞测试：用**对抗输入**证明「不在白名单里就进不去」，
+  // 而不是去证明某个具体分隔符撞不撞。
+  // （外部复核的原话：只写「不能碰撞」的测试，测的是实现；契约是「键集恰好是这些」。）
+  test("adversarial keys (separator-in-name / extra / landmark) never survive the projection", () => {
+    const adversarial = {
+      "ok\u0000version": 1,          // 含分隔符的键名：任何 join 方案都会在这里含糊
+      "ok,version": 2,                // 逗号分隔符
+      ok: true,                       // 合法
+      git_commit: "deadbeef",         // landmark：必须被丢
+      sessions_count: 3,              // 合法
+      "__proto__": { polluted: true },// 原型污染形态
+    } as Record<string, unknown>;
+    const out = projectPublicHealth(adversarial);
+    const keys = Object.keys(out).sort();
+    // 断言的是**键集恰好**，不是「某些键被丢」—— 后者在「什么都丢」时也成立
+    expect(keys).toEqual(["ok", "sessions_count"]);
+    expect((out as any)["ok\u0000version"]).toBeUndefined();
+    expect(JSON.stringify(out)).not.toContain("polluted");
+  });
+
   // 2026-10-31 —— 形状测试必须先证明**输入彼此不同**，否则它测的是同一个形状 N 次。
   // 顺序不能反：先断言两两不等，再断言各自的行为。
   test("the four projection witnesses are pairwise distinct inputs (else it is four selfies)", () => {
