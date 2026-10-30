@@ -122,6 +122,11 @@ def main() -> int:
     # 2026-10-31 —— 「在哪个版本上量的」必须跟着数字走。
     # 今晚刚发生过一次：两边的数对不上，根因不是谁数错，是**在数两棵不同的树**。
     print(f"measured_on    : {_measured_on()}")
+    # 2026-10-31 —— 一个绿属于**二元组**（被测物, 测法）。只钉被测物时，
+    # 测法一改（改口径/改正则），那个绿属于哪一对就不可判 —— 而它会以「这条过了」被引用很多次。
+    import hashlib as _h, pathlib as _pl
+    _self = _pl.Path(__file__).read_bytes()
+    print(f"measured_by    : {_pl.Path(__file__).name} sha256={_h.sha256(_self).hexdigest()[:12]}")
     print("invalidates_on : 工具注册变（server.tool 增删）｜断言写法变（EXACT_KEYSET 正则不再匹配）")
     print("                 ｜归因口径变（文件级 ↔ 邻近级窗口）⇒ 三者任一发生，上面的比例作废")
     return 0
