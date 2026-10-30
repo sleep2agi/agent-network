@@ -910,9 +910,25 @@ const BroadcastSchema = z.object({
 });
 
 // ── HTTP Server (Bun native) ────────────────────────
-const CORS_ORIGINS = process.env.COMMHUB_CORS_ORIGINS
-  ? process.env.COMMHUB_CORS_ORIGINS.split(",").map((s) => s.trim())
-  : ["http://localhost:3000", "http://localhost:3001"];
+/**
+ * 2026-10-31 —— **「设了空」与「没设」是两件事**。
+ *
+ *   `if (process.env.X)` 把两者都判假：于是 `COMMHUB_CORS_ORIGINS=`（运维想「一个都不许」）
+ *   会悄悄回退到 localhost 默认值 —— 而那是**更松**的一侧。
+ *   `'X' in process.env` 才区分得开。
+ *
+ * ⇒ 口径：未设 ⇒ 开发默认（localhost 两个端口）；设了但为空 ⇒ **空清单**（谁都不许）。
+ *   这是「空必须落在更严的一侧」在本字段上的具体落点：
+ *   这个字段的**最松值**不是空，而是 `*`；所以空不能被读成「用默认」。
+ */
+export function parseCorsOrigins(raw: string | undefined): string[] {
+  if (raw === undefined) return ["http://localhost:3000", "http://localhost:3001"];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean); // 空串 / 全逗号 ⇒ 空清单（更严）
+}
+
+const CORS_ORIGINS = parseCorsOrigins(
+  "COMMHUB_CORS_ORIGINS" in process.env ? (process.env.COMMHUB_CORS_ORIGINS ?? "") : undefined,
+);
 
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
