@@ -97,14 +97,32 @@ def main() -> int:
     if covered:
         print("\n已覆盖：")
         for name in covered:
-            print(f"  {name}  ← {', '.join(test_mentions[name])}")
+            print(f"  {name}  ← {', '.join(file_level[name])}")
     if uncovered:
         print(f"\n未覆盖（{len(uncovered)}）：")
         for name in uncovered:
             print(f"  {name}  ({tools[name].relative_to(REPO)})")
-    print("\n⚠️ 这是启发式下界：解析器只认「工具名出现在含精确键集断言的测试文件里」，")
+    print("\n⚠️ 归因是代理：多算与少算都可能，误差方向未知（不是下界）。")
     print("   不认间接断言、不认运行期生成的键集、不认跨文件共享的测试助手。")
+    # 2026-10-31 —— 「在哪个版本上量的」必须跟着数字走。
+    # 今晚刚发生过一次：两边的数对不上，根因不是谁数错，是**在数两棵不同的树**。
+    print(f"measured_on    : {_measured_on()}")
     return 0
+
+
+def _measured_on() -> str:
+    """读不到就写 unknown —— 不写「干净」（那会被读成「已验证的干净」）。"""
+    try:
+        import subprocess
+        ref = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"],
+                               capture_output=True, text=True, timeout=10).stdout.strip()
+        if not ref:
+            return "ref=unknown dirty=unknown"
+        return f"ref={ref[:12]} dirty={'true' if dirty else 'false'}"
+    except Exception:
+        return "ref=unknown dirty=unknown"
 
 
 if __name__ == "__main__":
