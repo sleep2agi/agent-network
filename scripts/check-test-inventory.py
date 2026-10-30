@@ -73,31 +73,68 @@ def tracked_files(repo: Path) -> list[Path]:
     return sorted(files)
 
 
-def _strip_strings(line: str) -> str:
-    """去掉字符串字面量后再数花括号 —— 否则 `test("a { b")` 会污染深度。"""
-    out = []
-    i = 0
-    quote = None
-    while i < len(line):
-        ch = line[i]
-        if quote:
-            if ch == "\\" and i + 1 < len(line):
+def _strip_code(lines: list[str]) -> list[str]:
+    """按**跨行状态**去掉注释与字符串，只留代码字符。
+
+    2026-10-31 —— 原来的逐行版本处理不了两类东西，而它们在测试文件里很常见：
+      · 跨行模板串（反引号）—— 之后每一行都被当成代码，括号计数整体偏
+      · 跨行块注释（/* … */）
+    ⇒ 结果是「文件末深度不为 0」。那本身是有用的报警（见 collect 的 unreliable），
+      但**根因是剥得不干净，不是文件真的不配平**。所以这里改成状态机。
+    """
+    out: list[str] = []
+    in_block = False
+    in_template = False
+    for line in lines:
+        buf: list[str] = []
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            nxt = line[i + 1] if i + 1 < len(line) else ""
+            if in_block:
+                if ch == "*" and nxt == "/":
+                    in_block = False
+                    i += 2
+                    continue
+                i += 1
+                continue
+            if in_template:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == "`":
+                    in_template = False
+                i += 1
+                continue
+            if ch == "/" and nxt == "*":
+                in_block = True
                 i += 2
                 continue
-            if ch == quote:
-                quote = None
+            if ch == "/" and nxt == "/":
+                break
+            if ch == "`":
+                in_template = True
+                i += 1
+                continue
+            if ch in "\"'":
+                quote = ch
+                i += 1
+                while i < len(line):
+                    if line[i] == "\\":
+                        i += 2
+                        continue
+                    if line[i] == quote:
+                        i += 1
+                        break
+                    i += 1
+                continue
+            buf.append(ch)
             i += 1
-            continue
-        if ch in "\"'`":
-            quote = ch
-            i += 1
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
+        out.append("".join(buf))
+    return out
 
 
-def collect(repo: Path) -> tuple[dict[str, int], int]:
+def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
     """返回 (名字 → 出现次数, dynamic 计数)。
 
     用**多重集**而不是集合：集合对重数失明，而「同名测试出现两次」是一次真实事故
@@ -105,6 +142,10 @@ def collect(repo: Path) -> tuple[dict[str, int], int]:
     """
     names: dict[str, int] = {}
     dynamic = 0
+    # 2026-10-31 —— 用深度推 describe 路径时，**一处括号错配会让该文件之后的所有路径整体错位**。
+    # 原实现把深度钳到 ≥0：那正好吃掉了「错配」这个唯一的报警值，而输出仍然是一个漂亮的数。
+    # ⇒ 不在中途钳位，而是在**文件结束时断言深度为 0**；不为 0 ⇒ 该文件整体不可信。
+    unreliable: list[str] = []
     # 2026-10-31 —— 元素身份必须包含「让它合法的那个维度」。
     # 只按 file::name 计次会把「同一文件、不同 describe 里的同名」和
     # 「同一 describe 里写了两遍」合成同一个计数 —— 前者合法，后者是缺陷。
@@ -121,8 +162,9 @@ def collect(repo: Path) -> tuple[dict[str, int], int]:
         # 跨文件累计的 depth 会让上一个文件的花括号把下一个文件的路径吃掉。
         depth = 0
         stack = []
-        for line in text.splitlines():
-            stripped = _strip_strings(line)
+        raw_lines = text.splitlines()
+        code_lines = _strip_code(raw_lines)
+        for line, stripped in zip(raw_lines, code_lines):
             delta = stripped.count("{") - stripped.count("}")
             d = DESCRIBE_CALL.match(line)
             if d:
@@ -130,37 +172,44 @@ def collect(repo: Path) -> tuple[dict[str, int], int]:
                     stack.pop()
                 stack.append(d.group(2))
             if not ANY_TEST_CALL.match(line):
-                depth = max(0, depth + delta)
+                depth += delta
                 while stack and len(stack) > depth:
                     stack.pop()
                 continue
             m = TEST_CALL.match(line)
             if not m:
                 dynamic += 1
-                depth = max(0, depth + delta)
+                depth += delta
                 continue
             name = m.group(2)
             if not name.strip() or "${" in name:
                 dynamic += 1
-                depth = max(0, depth + delta)
+                depth += delta
                 continue
             # 记录时用「进入这一行之前」的深度；记录完再算这一行自己的花括号，
             # 否则 test 体的 `{` 会把后面的路径整体推深一格。
             path = ">".join(stack[:depth]) if stack else ""
             key = f"{rel}::{path}::{name}" if path else f"{rel}::{name}"
             names[key] = names.get(key, 0) + 1
-            depth = max(0, depth + delta)
-    return names, dynamic
+            depth += delta
+        if depth != 0:
+            unreliable.append(f"{rel} (end depth {depth})")
+    return names, dynamic, unreliable
 
 
 def main() -> int:
     repo = Path(__file__).resolve().parent.parent
-    counts, dynamic = collect(repo)
+    counts, dynamic, unreliable = collect(repo)
     current = set(counts)
     baseline_path = repo / BASELINE
 
     print(f"literal 测试名: {len(current)} 条（多重集，共 {sum(counts.values())} 次出现）")
     print(f"dynamic 测试名: {dynamic} 条（**抓不到，不受逐条棘轮保护，但有上限**）")
+    if unreliable:
+        print(f"⚠ {len(unreliable)} 个文件括号不配平 ⇒ describe 路径可能整体错位，重名检测在这些文件里不可信：",
+              file=sys.stderr)
+        for u in unreliable[:10]:
+            print(f"    {u}", file=sys.stderr)
 
     # 注意：`rel::name` 不含 describe 路径 ⇒ **同名但在不同 describe 里是合法的**，
     # 仓库里现在就有 6 个这种（已记进基线的计数里）。所以这里不做「绝对值唯一」断言，
@@ -193,7 +242,15 @@ def main() -> int:
 
     # ① 多重集棘轮：同名出现次数不许增加（集合对重数失明）
     if isinstance(baseline_counts, dict):
-        grew = sorted((k, baseline_counts.get(k, 0), counts[k]) for k in counts if counts[k] > baseline_counts.get(k, 0))
+        # 括号不配平的文件，其 describe 路径不可信 ⇒ 它们的键**不参与**重名棘轮。
+        # 这是「已知不可信的域」，而不是「没问题」——所以同时把域大小报出来。
+        skip_prefixes = tuple(f + "::" for f in (u.split(" (end depth")[0] for u in unreliable))
+        def _in_unreliable(k: str) -> bool:
+            return k.startswith(skip_prefixes) if skip_prefixes else False
+        checked = {k: c for k, c in counts.items() if not _in_unreliable(k)}
+        print(f"重名棘轮域：{len(checked)}/{len(counts)} 条键（{len(unreliable)} 个文件因括号不配平被排除，"
+              f"⇒ 那些文件里的重名**未检查**，不等于没有）")
+        grew = sorted((k, baseline_counts.get(k, 0), checked[k]) for k in checked if checked[k] > baseline_counts.get(k, 0))
         if grew:
             print(f"✗ 有 {len(grew)} 条测试的**出现次数增加**了（集合不变，但实际多出一条）：", file=sys.stderr)
             for k, before, after in grew[:20]:
