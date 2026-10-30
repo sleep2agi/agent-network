@@ -274,6 +274,15 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
       //    实测这台机器上应当一致 ⇒ 断言的是一条**真实现象**，而不是发布条件的复述
       const delta = Math.abs(Date.parse(body.kernel_started_at) - Date.parse(body.startedAt));
       if (body.epoch_agreement === "agree") expect(delta).toBeLessThanOrEqual(10_000);
+      // 2026-10-31 —— 「两次读数相同」只证明相同，证明不了「它会变」：
+      // 一个写死的常量头与真的 startedAt 在那个测法下完全一样。
+      // 我们的独立生产者是**内核**：epoch_delta_ms = (btime + ticks/CLK_TCK) − startedAt。
+      // ⇒ 只有当 startedAt 与内核推出的时刻一致时，它才不是抄来的配置值。
+      if (body.epoch_agreement === "agree") {
+        expect(typeof body.epoch_delta_ms).toBe("number");
+        expect(Math.abs(body.epoch_delta_ms)).toBeLessThanOrEqual(10_000);
+        expect(body.kernel_started_at).not.toBeNull();
+      }
       if (body.epoch_agreement === "disagree") {
         // 分歧必须能被外部算出来：delta 与 agreement 同向，不能一个说 disagree 一个给个小 delta
         expect(delta).toBeGreaterThan(10_000);
