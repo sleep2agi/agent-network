@@ -2539,7 +2539,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (lateCandidate && !["created", "delivered", "acked", "running"].includes(lateCandidate.status)) {
           if (workSignal.outcome) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "scheduled_work_outcome_terminal", reply_queued: false }) }] };
           // Old runtimes do not send turn identity and retain the old result.
-          if (!threadId || !turnId) {
+          // #3061 续 —— 任务**从未记下 turn 上下文**时，不该再要求调用方凭空给出 id。
+          //
+          // 现场（2026-10-30，通信Dash欧）：它对一条 failed 任务调 send_reply 想补结果，
+          // 拿到 `reply_task_terminal`，只好先 retry_task 把任务重置成 delivered 再回复 ——
+          // 代价是账本里那条从 failed 变成 retried→replied，**「当初失败过」这个事实被抹掉了**。
+          // 而 #3244 只放宽了「id 对不上」，没放宽「必须提供 id」。
+          //
+          // 新语义：
+          //   · 任务存了 thread/turn ⇒ 仍然要求调用方给出**匹配**的 id（防串号）
+          //   · 任务两个都是 null     ⇒ 不要求 id；归属/终态/目标三条判据照样生效
+          const storedCtx = !!(lateCandidate.thread_id || lateCandidate.turn_id);
+          if (storedCtx && (!threadId || !turnId)) {
             return { content: [{ type: "text" as const, text: JSON.stringify({
               ok: false, error: "reply_task_terminal",
               message: `cannot apply reply: task is already terminal (${lateCandidate.status})`,
@@ -2556,7 +2567,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           if (!token?.bound_node_id || !lateCandidate.to_node_id || token.bound_node_id !== lateCandidate.to_node_id) {
             return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_task_not_owned", reply_queued: false }) }] };
           }
-          if (!lateReplyContextMatches(lateCandidate.thread_id, lateCandidate.turn_id, threadId, turnId)) {
+          if (storedCtx && !lateReplyContextMatches(lateCandidate.thread_id, lateCandidate.turn_id, threadId!, turnId!)) {
             return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_context_mismatch", reply_queued: false }) }] };
           }
           const canonicalOrigin = resolveCanonicalAlias(enforceNetworkId, lateCandidate.from_name).alias;
@@ -2564,6 +2575,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "reply_target_mismatch", reply_queued: false }) }] };
           }
 
+          // 表列是 NOT NULL：任务没有上下文时用稳定占位值。
+          // 幂等键是 (task_id, thread_id, turn_id)，占位值仍能让「同一任务的重复补发」收敛成一条。
+          const lateThreadId = threadId ?? "unrecorded";
+          const lateTurnId = turnId ?? "unrecorded";
           const lateOutcome = db.transaction(() => {
             const currentParams: any[] = [in_reply_to];
             let currentSql = "SELECT status,to_node_id,thread_id,turn_id FROM tasks WHERE task_id=?1";
@@ -2572,12 +2587,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             if (!current || ["created", "delivered", "acked", "running"].includes(current.status)) {
               return { ok: false as const, error: "late_reply_task_not_terminal" as const };
             }
-            if (current.to_node_id !== token.bound_node_id || !lateReplyContextMatches(current.thread_id, current.turn_id, threadId, turnId)) {
+            // 与上面同一判据：只有任务真的记过 thread/turn 时才要求调用方 id 匹配；
+            // 两个都 null 的任务（#3061 的 289 条）不因为「没 id」被挡回去。
+            const currentHasCtx = !!(current.thread_id || current.turn_id);
+            if (current.to_node_id !== token.bound_node_id
+              || (currentHasCtx && !lateReplyContextMatches(current.thread_id, current.turn_id, threadId!, turnId!))) {
               return { ok: false as const, error: "late_reply_context_mismatch" as const };
             }
             const existing = db.get<{ late_reply_id: string; inbox_id: string; from_node_id: string; status: string; result: string }>(
               "SELECT late_reply_id,inbox_id,from_node_id,status,result FROM task_late_replies WHERE task_id=?1 AND thread_id=?2 AND turn_id=?3",
-              in_reply_to, threadId, turnId,
+              in_reply_to, lateThreadId, lateTurnId,
             );
             if (existing) {
               if (existing.from_node_id !== token.bound_node_id || existing.status !== replyStatus || existing.result !== text) {
@@ -2588,7 +2607,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             const lateReplyId = uuidv4();
             const lateMeta = normalizeMetaJson({
               ...(mergedMeta && typeof mergedMeta === "object" && !Array.isArray(mergedMeta) ? mergedMeta : {}),
-              late: true, late_reply_id: lateReplyId, thread_id: threadId, turn_id: turnId,
+              late: true, late_reply_id: lateReplyId, thread_id: lateThreadId, turn_id: lateTurnId,
             });
             db.run(
               `INSERT INTO inbox (id,session_name,node_id,type,priority,content,from_session,in_reply_to,requires_response,network_id,meta_json)
@@ -2601,7 +2620,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                (late_reply_id,inbox_id,task_id,network_id,from_node_id,thread_id,turn_id,status,result,meta_json)
                VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)`,
               [lateReplyId, id, in_reply_to, effectiveNetId ?? null, token.bound_node_id,
-              threadId, turnId, replyStatus, text, lateMeta],
+              lateThreadId, lateTurnId, replyStatus, text, lateMeta],
             );
             return { ok: true as const, duplicate: false as const, lateReplyId, inboxId: id };
           });
