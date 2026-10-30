@@ -115,4 +115,35 @@ describe('broadcastRecentState', () => {
     expect(typeof rec!.took_ms).toBe('number');
     expect(Number.isNaN(Date.parse(rec!.at))).toBe(false);
   });
+
+  // 🔴 这条是 2026-10-30 补的：上半句只把 INSERT 摊开，notify 仍然在所有批次之后。
+  // 那等于「入库分 3 批、唤醒仍旧同一 tick」—— 而唤醒才是让 Hub 停顿 143.9 秒的原因。
+  test("通知与入库同批（不是全部入库完再一起推）", async () => {
+    const order: string[] = [];
+    const targets = Array.from({ length: 120 }, (_, i) => ({ alias: `a${i}`, node_id: null, network_id: "net_x" }));
+    await enqueueBroadcast(targets, "hi", "hub", "net_x", {
+      isActive: () => true,
+      notify: (alias) => order.push(`n:${alias}`),
+      yieldBetweenChunks: async () => { order.push("y"); },
+      chunkSize: 50,
+    });
+    // 结构应为 n×50 y n×50 y n×20 y —— 每一批后面紧跟一个让出，而不是 n×120 全在末尾
+    const firstYield = order.indexOf("y");
+    expect(firstYield).toBe(50);
+    expect(order.filter((x) => x === "y").length).toBe(3);
+    // 最后一批的通知必须在最后一次让出之前
+    const lastNotify = order.lastIndexOf(order.filter((x) => x.startsWith("n:")).at(-1)!);
+    expect(lastNotify).toBeLessThan(order.lastIndexOf("y"));
+  });
+
+  test("某一条通知抛错：其余收件人照常入库（不能因为推不出去就漏发）", async () => {
+    const targets = Array.from({ length: 120 }, (_, i) => ({ alias: `b${i}`, node_id: null, network_id: "net_y" }));
+    const { ids } = await enqueueBroadcast(targets, "hi", "hub", "net_y", {
+      isActive: () => true,
+      notify: (alias) => { if (alias === "b0") throw new Error("sse down"); },
+      yieldBetweenChunks: async () => {},
+      chunkSize: 50,
+    });
+    expect(ids.length).toBe(120);
+  });
 });
