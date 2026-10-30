@@ -116,6 +116,9 @@ describe("#2822 部门 → Agent 计数走 nodes.department_id（轴2）", () =>
     try {
       const raw: any = await client.callTool({ name: "departments", arguments: { action: "list" } });
       const mcp = JSON.parse(String(raw.content?.[0]?.text ?? "{}"));
+      // 2026-10-31 —— **精确键集**（#3171）：紧挨调用写，且单行（键集断言被任何换行拆开时，
+      // 静态计数器就读不到它 —— 而读不到与没写同形）。实际五键，我第一版只写了三个。
+      expect(Object.keys(mcp).sort()).toEqual(["agents", "departments", "network_id", "ok", "unassigned_agents"]);
       const http = (await send(TOKEN, "GET", D())).body;
       const httpByName = new Map<string, any>((http.departments as any[]).map((d) => [d.name, d]));
       expect(mcp.departments.length).toBeGreaterThan(0);

@@ -181,6 +181,10 @@ describe("list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)", () => {
     const handler = buildToolHandler(userA);
     const reply = await callList(handler, { network_id: NET_ALPHA });
     expect(reply.ok).toBe(true);
+    // 2026-10-31 —— **精确键集**（#3171）：这条响应此前只断言了 daemons[].alias，
+    // 于是「多给一个顶层键」不会被发现 —— 而这是个按网络隔离的列表，多给一格就是泄露。
+    // 实际三键（我第一版漏了 count —— 断言当场纠正）。
+    expect(Object.keys(reply).sort()).toEqual(["count", "daemons", "ok"]);
     const aliases = (reply.daemons ?? []).map(d => d.alias).sort();
     expect(aliases).toEqual(["alpha-daemon-1", "alpha-daemon-2"]);
   });
