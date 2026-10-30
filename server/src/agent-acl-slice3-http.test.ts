@@ -288,6 +288,22 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort().sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— #3171 续：再一个节点侧读面（count/counts 同源的那类）。
+  describe("list_my_pending_create_requests: pinned key set", () => {
+    test("⇒ {clone_count, clone_requests, count, ok, requests}, and count === requests.length", async () => {
+      const N3 = { alias: "acl3-pend-n", node: "node_acl3_pend_n" };
+      seedAgent({ alias: N3.alias, node: N3.node });
+      const minted = createNetworkTokenForNode(adminId, NET, N3.alias, N3.node);
+      expect(minted.ok).toBe(true);
+      const r = await tool(minted.token!, "list_my_pending_create_requests", {});
+      expect(Object.keys(r).sort()).toEqual(["clone_count", "clone_requests", "count", "ok", "requests"]);
+      expect(Array.isArray(r.requests)).toBe(true);
+      expect(Array.isArray(r.clone_requests)).toBe(true);
+      expect(r.count).toBe(r.requests.length);        // 计数与数组同源
+      expect(r.clone_count).toBe(r.clone_requests.length);
+    });
+  });
+
   // 2026-10-31 —— #3171 续：两个节点侧只读工具的键集（有 ntok 夹具后成本很低）。
   describe("node-side read tools: pinned key sets", () => {
     test("list_my_children ⇒ {children, count, ok}; get_completions ⇒ {completions, ok}", async () => {
