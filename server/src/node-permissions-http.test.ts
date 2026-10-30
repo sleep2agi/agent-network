@@ -614,6 +614,20 @@ describe("#2719 凭据台账", () => {
     expect(bound.unbound_node).toBe(false);
   });
 
+  // 🔴 线上第一次真实调用就抓到的 bug：`?limit=5` 时 summary.total 报 5，
+  // 而那个网络实际有 580 个令牌。分页只该影响 tokens 数组，不该影响计数。
+  test("分页只截断 tokens，不影响 summary（summary 必须是全量）", async () => {
+    const full = await call(user.boss.token, "GET", `/api/networks/${net}/token-ledger?limit=1000`);
+    expect(full.status).toBe(200);
+    const page = await call(user.boss.token, "GET", `/api/networks/${net}/token-ledger?limit=1`);
+    expect(page.status).toBe(200);
+    expect(page.body.tokens.length).toBe(1);
+    expect(page.body.returned).toBe(1);
+    // 两个请求的 summary 必须完全一样
+    expect(page.body.summary).toEqual(full.body.summary);
+    expect(page.body.summary.total).toBeGreaterThan(1);
+  });
+
   test("成员（非 owner/admin）看不到；节点令牌也看不到", async () => {
     const r = await call(user.mem.token, "GET", `/api/networks/${net}/token-ledger`);
     expect(r.status).toBe(403);
