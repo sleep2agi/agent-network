@@ -18,6 +18,7 @@ import { tmpdir } from "os";
 import { register, addNetworkMember, removeNetworkMember } from "./auth.js";
 import { db } from "./db.js";
 import { MAX_REQUEST_CONTENT_LENGTH, MAX_UPLOAD_BYTES } from "./uploads.js";
+import { HEALTH_FIELD_META, PUBLIC_HEALTH_KEYS, mayBePublic, projectPublicHealth } from "./server.js";
 
 const SERVER_DB = mkdtempSync(join(tmpdir(), "anet-health-red-db-")) + "/commhub.db";
 
@@ -281,6 +282,44 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.proc_start_ticks).not.toBeNull();
     expect(body.kernel_started_at).not.toBeNull();
     expect(body.epoch_agreement).not.toBe("unknown");
+  });
+
+  // 2026-10-31 —— 三分类从「注释里的提醒」变成「字段上的必填标签」。
+  //
+  // 原来的问题：probe_nonce 恰好是对的，但那是因为**恰好这样写**；
+  // 「凭证类要慎给」这四个字在代码里没有任何东西能检查。
+  // ⇒ 现在每个字段必填一档，匿名合法与否由这一档推出来。
+  describe("field classification is machine-checked, not documentation", () => {
+    test("every field in the authenticated body carries a class (no untagged field may exist)", async () => {
+      const body = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      const untagged = Object.keys(body).filter((k) => !HEALTH_FIELD_META[k]);
+      expect(untagged).toEqual([]); // 空数组 ⇒ 没有「加字段忘了分类」的路
+    });
+
+    test("nothing in the anonymous whitelist is a landmark or a server-issued credential", () => {
+      const illegal = [...PUBLIC_HEALTH_KEYS].filter((k) => !mayBePublic(HEALTH_FIELD_META[k]));
+      expect(illegal).toEqual([]);
+    });
+
+    test("no landmark field actually appears in the anonymous body (the rule has a witness today: git_commit/pid/boot_id)", async () => {
+      const authBody = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      const anonBody = await (await fetch(`${BASE}/health`)).json() as any;
+      const landmarks = Object.keys(HEALTH_FIELD_META).filter((k) => HEALTH_FIELD_META[k].class === "landmark");
+      // 分母：这份断言今天必须有分子可看，否则它是空的
+      expect(landmarks.some((k) => k in authBody)).toBe(true);
+      expect(landmarks.filter((k) => k in anonBody)).toEqual([]);
+    });
+
+    // 合成体见证：将来有人加一个「我们生成的凭证」字段，这一条必须红。
+    test("projection drops unknown fields and landmarks; keeps only gauge + caller-supplied echo (synthetic witness)", () => {
+      const out = projectPublicHealth({
+        ok: true,
+        git_commit: "deadbeef",
+        future_issued_token: "abc123",   // 没登记 ⇒ 未分类 ⇒ 丢掉（默认安全方向）
+        probe_nonce: "n-1",              // 请求方自带 ⇒ 保留
+      });
+      expect(out).toEqual({ ok: true, probe_nonce: "n-1" });
+    });
   });
 
   // 2026-10-31 —— 白名单的另一半：**无死条目**。

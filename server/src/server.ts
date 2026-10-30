@@ -938,8 +938,101 @@ export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
   "build_identified",
 ]);
 
+/**
+ * 2026-10-31 —— **三分类必须是字段上的标签，不是一张文档里的表。**
+ *
+ * 原来「凭证类要慎给」只写在注释里 ⇒ 下一个人加 requestId 时，他看到的是「一个无害的字符串」。
+ * ⇒ 现在每个字段**必填**一档，且匿名暴露的合法性由这一档决定：
+ *
+ *   landmark   告诉你「精确在哪」（进程身份 / 提交 / 启动时刻 / 自报与内核是否打架）
+ *              ⇒ 一律不进匿名响应
+ *   gauge      聚合量或粗标签（计数、档位、能力位）
+ *              ⇒ **可以**匿名，但必须写清聚合到什么粒度
+ *   credential 用途是「与内部对上账」的值
+ *              ⇒ 不进匿名响应，**除非**它是请求方自己带来的（caller_supplied）
+ *                 因为那时它不构成「读者本来拿不到的信息」
+ *
+ * 🔴 判据（来自复核）：
+ *    · 凭证类的判据不是「可不可预测」，而是「拿到它与内部对上账能做什么」——
+ *      随机 uuid 的 trace id 也一样可关联 ⇒ 随机性解决伪造，解决不了关联。
+ *    · **一个分类只有在它成为字段上的必填标签时才可检查**；写在文档里的分类，只是写给愿意读的人。
+ */
+export type HealthFieldClass = "landmark" | "gauge" | "credential";
+
+export interface HealthFieldMeta {
+  class: HealthFieldClass;
+  /** gauge 必填：聚合到什么粒度（count / bucket / label / seconds / boolean …） */
+  granularity?: string;
+  /** credential 专用：该值由请求方带来（回显），因此不构成额外泄露 */
+  caller_supplied?: true;
+  /** 为什么把它放这一档（只在有争议的字段上写） */
+  why?: string;
+}
+
+export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
+  // ── gauge：聚合 / 粗标签 ─────────────────────────────────────────────
+  ok: { class: "gauge", granularity: "boolean" },
+  version: { class: "gauge", granularity: "label", why: "粗粒度版本号；精确字节身份由 git_commit 承担，而它不匿名" },
+  api_version: { class: "gauge", granularity: "label" },
+  transport: { class: "gauge", granularity: "label" },
+  uptime: { class: "gauge", granularity: "seconds" },
+  startedAt: { class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
+  sessions_count: { class: "gauge", granularity: "count" },
+  sse_connections: { class: "gauge", granularity: "count" },
+  mcp_inflight: { class: "gauge", granularity: "count" },
+  mcp_inflight_peak: { class: "gauge", granularity: "count" },
+  event_loop: { class: "gauge", granularity: "bucket" },
+  auth: { class: "gauge", granularity: "label" },
+  security: { class: "gauge", granularity: "label" },
+  tmux: { class: "gauge", granularity: "label" },
+  v3_auth: { class: "gauge", granularity: "label" },
+  multi_network: { class: "gauge", granularity: "label" },
+  license: { class: "gauge", granularity: "label" },
+  license_state: { class: "gauge", granularity: "label" },
+  limits: { class: "gauge", granularity: "label" },
+  capabilities: { class: "gauge", granularity: "label" },
+  served_at: { class: "gauge", granularity: "instant" },
+  build_identified: { class: "gauge", granularity: "boolean", why: "只说「有没有构建标识」，不说「是什么」" },
+  alert_baselines: { class: "gauge", granularity: "bucket" },
+  broadcast: { class: "gauge", granularity: "count" },
+  host_disk: { class: "gauge", granularity: "count" },
+  counters: { class: "gauge", granularity: "bucket", why: "按 status:code 分桶、封顶 64；聚合量，但当前只给鉴权读者" },
+  epoch_agreement: { class: "gauge", granularity: "label", why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻" },
+  epoch_delta_ms: { class: "gauge", granularity: "count" },
+  clk_tck_assumed: { class: "gauge", granularity: "label" },
+
+  // ── landmark：精确位置/身份 ──────────────────────────────────────────
+  git_commit: { class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
+  git_dirty: { class: "landmark" },
+  // 逐会话明细 = 拓扑 ⇒ 只需「有几个」，不需要「哪几个」（与 #473 的审计同一条）
+  sse_sessions: { class: "landmark", why: "按键列出连接 = 网络 id + 别名，正是 #473 那个泄露面" },
+  pid: { class: "landmark" },
+  boot_id: { class: "landmark" },
+  proc_start_ticks: { class: "landmark" },
+  kernel_started_at: { class: "landmark", why: "内核口径的精确启动时刻 ⇒ 可与外部日志对账" },
+  kernel_started_at_note: { class: "landmark" },
+
+  // ── credential ─────────────────────────────────────────────────────
+  probe_nonce: {
+    class: "credential",
+    caller_supplied: true,
+    why: "用途是「证明这一次」，且值由请求方自带 ⇒ 不构成读者本来拿不到的信息",
+  },
+};
+
+/**
+ * 匿名可见的充要条件（可执行）：
+ *   gauge，或 credential 且 caller_supplied。
+ * ⇒ landmark 永不匿名；我们**生成**的 credential 永不匿名。
+ */
+export function mayBePublic(meta: HealthFieldMeta | undefined): boolean {
+  if (!meta) return false;
+  if (meta.class === "gauge") return true;
+  return meta.class === "credential" && meta.caller_supplied === true;
+}
+
 /** 匿名投影：只保留白名单里的键。逐键复制，绝不返回原对象的引用。 */
-function projectPublicHealth(body: Record<string, unknown>): Record<string, unknown> {
+export function projectPublicHealth(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(body)) {
     if (PUBLIC_HEALTH_KEYS.has(key)) out[key] = body[key];
