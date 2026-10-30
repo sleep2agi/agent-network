@@ -347,7 +347,17 @@ LEXER_SELFTEST = [
 ]
 
 
+LEXER_SELFTEST_EXPECTED = 7
+
+
 def lexer_selftest(quiet: bool = False) -> int:
+    # 2026-10-31 —— **遍历 0 个用例同样会通过**。
+    # 用例表被清空/被删掉几条时，循环一句不报，结果与「全过」同形。
+    # ⇒ 数量本身要钉住（外部复核给的同款钉子，照抄）。
+    if len(LEXER_SELFTEST) != LEXER_SELFTEST_EXPECTED:
+        print(f"✗ selftest 用例数应为 {LEXER_SELFTEST_EXPECTED}，实际 {len(LEXER_SELFTEST)} —— 有人动过用例表",
+              file=sys.stderr)
+        return 1
     bad = []
     for why, src, want in LEXER_SELFTEST:
         got_lines = _strip_code(src.split("\n"))

@@ -126,10 +126,14 @@ def scan(path: Path) -> dict[str, int]:
     return out
 
 
+SELFTEST_EXPECTED = 3
+
+
 def selftest(quiet: bool = False) -> int:
     """副本检测的可失败用例：一个「永远返回相同」的实现过不了第二条。"""
     import tempfile
     bad = []
+    ran = 0
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         (root / "a").mkdir(); (root / "b").mkdir()
@@ -138,21 +142,28 @@ def selftest(quiet: bool = False) -> int:
         (root / "b" / "dup.ts").write_text(body)
         files = {"dup.ts": {"a": root / "a" / "dup.ts", "b": root / "b" / "dup.ts"}}
         c1 = copies(files)[0]
+        ran += 1
         if not c1["identical"]:
             bad.append("两份逐字符相同应判 identical=True")
         elif not quiet:
             print("✓ selftest 两份逐字符相同 ⇒ identical=True")
         (root / "b" / "dup.ts").write_text(body + "// one side edited\n")
+        ran += 1
         c2 = copies(files)[0]
         if c2["identical"]:
             bad.append("单侧改一行后仍判 identical=True —— 这条门对分叉是瞎的")
         elif not quiet:
             print("✓ selftest 单侧改一行 ⇒ identical=False（必须红的那一格）")
         files1 = {"solo.ts": {"a": root / "a" / "dup.ts"}}
+        ran += 1
         if copies(files1):
             bad.append("只有一侧的文件不该被当成副本")
         elif not quiet:
             print("✓ selftest 只有一侧 ⇒ 不算副本")
+    if ran != SELFTEST_EXPECTED:
+        # 遍历 0 个用例同样会通过 ⇒ 数量本身要钉
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
+        return 1
     if bad:
         print("✗ 副本检测自检失败：", file=sys.stderr)
         for b in bad:

@@ -112,16 +112,26 @@ SELFTEST_TRAP_PRINT = "set -euo pipefail\ntrap _early_stop ERR\ncmd\n"
 SELFTEST_GUARDED = "set -e\nif git diff --quiet x; then rc=0; else rc=$?; fi\n"
 
 
-def selftest(quiet: bool = False) -> int:
-    """门自己的可失败用例：一个「永远返回绿」的实现过不了 SELFTEST_BAD。"""
-    import tempfile
-    cases = [
+SELFTEST_CASES = [
         ("trap ERR + set -e ⇒ 结构性风险", SELFTEST_BAD, True),
         ("set -e 下 if/else 采集 ⇒ 安全", SELFTEST_GUARDED, False),
         ("没有 set -e ⇒ 采集正确", SELFTEST_GOOD, False),
         ("trap 把 rc 原样传出去 ⇒ 安全", SELFTEST_TRAP_OK, False),
         ("trap 只打印不 exit ⇒ bash 仍按原状态退出，安全（本仓 QA runner 是这种）", SELFTEST_TRAP_PRINT, False),
     ]
+
+SELFTEST_EXPECTED = 5
+
+
+def selftest(quiet: bool = False) -> int:
+    """门自己的可失败用例：一个「永远返回绿」的实现过不了 SELFTEST_BAD。"""
+    import tempfile
+    cases = SELFTEST_CASES
+    # 2026-10-31 —— 遍历 0 个用例同样会通过 ⇒ 数量要钉。
+    if len(cases) != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {len(cases)}", file=sys.stderr)
+        return 1
+    bad = []
     bad = []
     with tempfile.TemporaryDirectory() as td:
         for why, src, want_risk in cases:
