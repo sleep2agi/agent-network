@@ -158,6 +158,34 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(bumped).toBeTruthy();
   });
 
+  // 2026-10-31 —— 把「已知缺口」钉在 CI 里，而不是只写在注释里。
+  //
+  // 🔴 这条断言的语义是：**目前如此**，不是「应该如此」。
+  //    将来谁把计数上移到中间件，这条会红 —— 那就对了：他必须同时更新
+  //    模块注释里的覆盖比例（现在是 1/4 类出口）。
+  test("KNOWN GAP: unauthenticated /api/task rejection is NOT counted (see rejection-counters.ts)", async () => {
+    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const beforeTotal = before.counters.task_rejections.total as number;
+
+    // 不带 Authorization ⇒ 鉴权中间件在到达 handler 之前就返回 401。
+    const rej = await fetch(`${BASE}/api/task`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(rej.status).toBeGreaterThanOrEqual(400);
+
+    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    if (after.counters.task_rejections.total !== beforeTotal) {
+      throw new Error(
+        "已知缺口已被修复？401 出口现在会计数了 —— "
+        + "请同时更新 rejection-counters.ts 的出口清单与覆盖比例（当前 1/4），"
+        + "并把这条测试改成断言「已被计数」。",
+      );
+    }
+    expect(after.counters.task_rejections.total).toBe(beforeTotal);
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);
