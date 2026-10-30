@@ -959,10 +959,27 @@ export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
  */
 export type HealthFieldClass = "landmark" | "gauge" | "credential";
 
+/**
+ * 2026-10-31 —— gauge 的**粒度词表改成封闭枚举**，而且必须区分
+ * **电平（level）** 与 **累积（cumulative）**。
+ *
+ * 起因：一次复核里同一个文件四行四种语义，而其中一行（`under_oom`）是**电平**，
+ * 被当成计数器用 ⇒「用它判断有没有 OOM 过」恒为否 —— 一个结构上必然为否的读数。
+ *
+ * ⇒ 一个电平不能算速率；一个累积不能算「现在怎么样」。
+ *   两者在 JSON 里都是数字，**只有字段名或元数据能把它们分开**。
+ */
+export type HealthGranularity =
+  | "level"       // 读的那一刻的值（会上下波动）
+  | "cumulative"  // 自某个起点累计（只增；起点必须另有字段）
+  | "instant"     // 某个时刻戳
+  | "label"       // 枚举/字符串
+  | "boolean";
+
 export interface HealthFieldMeta {
   class: HealthFieldClass;
-  /** gauge 必填：聚合到什么粒度（count / bucket / label / seconds / boolean …） */
-  granularity?: string;
+  /** gauge 必填：粒度（封闭枚举，见 HealthGranularity） */
+  granularity?: HealthGranularity;
   /** credential 专用：该值由请求方带来（回显），因此不构成额外泄露 */
   caller_supplied?: true;
   /** 为什么把它放这一档（只在有争议的字段上写） */
@@ -980,13 +997,13 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   },
   api_version: { class: "gauge", granularity: "label" },
   transport: { class: "gauge", granularity: "label" },
-  uptime: { class: "gauge", granularity: "seconds" },
+  uptime: { class: "gauge", granularity: "cumulative" },
   startedAt: { class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
-  sessions_count: { class: "gauge", granularity: "count" },
-  sse_connections: { class: "gauge", granularity: "count" },
-  mcp_inflight: { class: "gauge", granularity: "count" },
-  mcp_inflight_peak: { class: "gauge", granularity: "count" },
-  event_loop: { class: "gauge", granularity: "bucket" },
+  sessions_count: { class: "gauge", granularity: "level" },
+  sse_connections: { class: "gauge", granularity: "level" },
+  mcp_inflight: { class: "gauge", granularity: "level" },
+  mcp_inflight_peak: { class: "gauge", granularity: "cumulative" },
+  event_loop: { class: "gauge", granularity: "cumulative" },
   auth: { class: "gauge", granularity: "label" },
   security: { class: "gauge", granularity: "label" },
   tmux: { class: "gauge", granularity: "label" },
@@ -998,12 +1015,12 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   capabilities: { class: "gauge", granularity: "label" },
   served_at: { class: "gauge", granularity: "instant" },
   build_identified: { class: "gauge", granularity: "boolean", why: "只说「有没有构建标识」，不说「是什么」" },
-  alert_baselines: { class: "gauge", granularity: "bucket" },
-  broadcast: { class: "gauge", granularity: "count" },
-  host_disk: { class: "gauge", granularity: "count" },
-  counters: { class: "gauge", granularity: "bucket", why: "按 status:code 分桶、封顶 64；聚合量，但当前只给鉴权读者" },
+  alert_baselines: { class: "gauge", granularity: "cumulative" },
+  broadcast: { class: "gauge", granularity: "level" },
+  host_disk: { class: "gauge", granularity: "level" },
+  counters: { class: "gauge", granularity: "cumulative", why: "按 status:code 分桶、封顶 64；聚合量，但当前只给鉴权读者" },
   epoch_agreement: { class: "gauge", granularity: "label", why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻" },
-  epoch_delta_ms: { class: "gauge", granularity: "count" },
+  epoch_delta_ms: { class: "gauge", granularity: "level" },
   clk_tck_assumed: { class: "gauge", granularity: "label" },
   clk_tck_source: {
     class: "gauge",

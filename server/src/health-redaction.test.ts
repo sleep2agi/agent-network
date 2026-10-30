@@ -353,6 +353,28 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.counters.task_rejections.scope).toBe("process_lifetime");
   });
 
+  // 2026-10-31 —— gauge 的粒度词表是**封闭枚举**，且必须分清「电平」与「累积」。
+  // 一个电平不能算速率，一个累积不能回答「现在怎么样」——两者在 JSON 里都是数字。
+  describe("granularity vocabulary is closed and distinguishes level from cumulative", () => {
+    test("every gauge declares one of level/cumulative/instant/label/boolean", async () => {
+      const { HEALTH_FIELD_META } = await import("./server.js");
+      const allowed = ["level", "cumulative", "instant", "label", "boolean"];
+      const bad = Object.entries(HEALTH_FIELD_META)
+        .filter(([, m]) => m.class === "gauge" && !allowed.includes(String(m.granularity)))
+        .map(([k, m]) => `${k}=${m.granularity}`);
+      expect(bad).toEqual([]);
+      // 分母非空：这一条今天必须有东西可查
+      expect(Object.values(HEALTH_FIELD_META).filter((m) => m.class === "gauge").length).toBeGreaterThan(20);
+    });
+
+    test("the two that people confuse are labelled right (peak is cumulative, inflight is a level)", async () => {
+      const { HEALTH_FIELD_META } = await import("./server.js");
+      expect(HEALTH_FIELD_META.mcp_inflight_peak.granularity).toBe("cumulative");
+      expect(HEALTH_FIELD_META.mcp_inflight.granularity).toBe("level");
+      expect(HEALTH_FIELD_META.uptime.granularity).toBe("cumulative");
+    });
+  });
+
   // 2026-10-31 —— 规则：「每个可为 null 的字段都必须有一个能解释它的兄弟字段。」
   // 反过来：不许用 false 冒充「不知道」—— git_dirty=false 读起来是「干净树」。
   describe("nullable fields carry an explainer", () => {
