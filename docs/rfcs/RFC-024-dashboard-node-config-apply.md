@@ -152,7 +152,7 @@ Migration 跟现有 `must_change_password` (P0-2 PR #264) 同 pattern — `try {
 
 | 字段 | 当前如何使用 | 类别 | 应用路径 | **Min role to change** | Reasoning |
 |---|---|---|---|---|---|
-| `model` | claude SDK options 启动时一次, codex Codex.startThread, grok runtime args | **restart-required** | sentinel re-spawn | `member` (运行成本影响, 不是提权) | SDK 实例已 bound 到 model, 切换需新进程 |
+| `model` | claude SDK options 启动时一次, codex Codex.startThread, grok runtime args；**OpenCode V2 共存例外，见下** | **restart-required**（OpenCode V2 共存为 **hot**） | sentinel re-spawn（或 V2 会话内热切） | `member` (运行成本影响, 不是提权) | SDK 实例已 bound 到 model, 切换需新进程 |
 | `flags.permissionMode` | claude SDK options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (通信龙 per Vincent autonomy 2026-06-28) | SDK options 不可热改 |
 | `flags.dangerouslySkipPermissions` | claude SDK / codex Codex options 启动一次 | **restart-required** | sentinel re-spawn | **`admin`** ✅ decided (同上) | 同上 |
 | ~~`flags.teammateMode`~~ | **DROPPED from P1 (#290 review 2026-06-28)** — only consumed by `claude-code-cli` runtime via `agent-network/bin/cli.ts` `--teammate-mode` arg; agent-node-driven runtimes don't consume it. Including silently ack'd no-op changes (same class as B2). | — | — | — | P2: add claude-code-cli config-apply path |
@@ -169,6 +169,34 @@ Migration 跟现有 `must_change_password` (P0-2 PR #264) 同 pattern — `try {
 **核心收益**: 用户改 maxTurns/budget 一类 token 节流配置秒级生效零重启; 改 model/权限模式接受 5-10s 重启等待 — 大多数日常调整是前者. 安全 flag 提权操作通过 role 拦住非 admin 用户.
 
 `apply_mode` 由 hub 校验时按 patch 字段计算: 任一字段是 restart → mode=restart; 全 hot → mode=hot.
+
+### 4.1 OpenCode V2 共存节点：`model` 是 hot（2026-10-31 起）
+
+Hub 在算 `apply_mode` 时会读目标节点的 runtime 身份，**纯 `model` patch** 在下列**全部**成立时判 `hot`：
+
+```
+runtime ∈ {opencode-sdk, opencode-cli, opencode}    ← 三种拼写都认（nodes.runtime 是 -sdk 桶）
+opencodeGeneration === "v2"
+opencodeMode === "copresence"
+patch 只含 model（不带 flags / channels）
+```
+
+节点侧把 `setSelectedModel` 打到**运行中的 TUI 会话**上并回读确认；成功时进程不重启、`startedAt` 不变。
+hub 与节点用同一组条件（`agent-node/src/runtime/config-apply.ts` 与
+`agent-node/src/runtime/opencode-copresence/runtime.ts`）。
+
+**降级规则**：节点的共存会话不可用（未起、或该实现不提供 `setSelectedModel`）时，
+节点把 hot **降级成 restart**，而不是 ack 一个 `rejected` —— 用户的模型改动必须落地。
+日志形如 `hot model switch unavailable (sessionRunning=…, setSelectedModel=…); degrading to restart`。
+
+⚠️ 两条判据（别用错）：
+
+- **「model 变了」不能证明走的是 hot** —— 降级重启也会让 model 变。证 hot 要看三元组：
+  `pid 不变 + 会话 id 不变 + model 变`。
+- **`config_update_capable=false` 不能证明「重启不安全」** —— 它只说明没有声明
+  sentinel-75 重启包装。`anet node start` 起的节点恒报 `true`；裸 `node cli.js`
+  （无论外面是 nohup / systemd Restart= / pm2）报 `false`。
+  节点同时上报更具名的 `restart_supervised`（同值），Hub 优先读它。
 
 ---
 
