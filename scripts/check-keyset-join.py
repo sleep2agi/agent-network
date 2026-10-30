@@ -391,6 +391,24 @@ def main() -> int:
     repo = Path(__file__).resolve().parent.parent
     blocking, unproven, advisory, review, scanned, any_join_hits = scan(repo)
 
+    # 🔴 先跑控制，再打结论。
+    #
+    # 2026-10-31 —— 实测过的一个洞：仓库不可读时，原来的顺序会先打
+    #   「✓ 键集拼接: 0 处」「✓ 扫描 0 个源文件」，最后才打「✗ 阳性对照失败」。
+    # 退出码是对的（1），但**读输出的人会先看到两个 ✓** —— 而绝大多数人只看 ✓。
+    # ⇒ 没有读数的那一次，不许输出任何 ✓。先证仪器到达，再谈结论。
+    controls_failed = False
+    if scanned == 0:
+        print("✗ 没有可扫描的源文件（git ls-files 返回空）", file=sys.stderr)
+        controls_failed = True
+    if any_join_hits == 0:
+        print("✗ 阳性对照失败：全仓连一个 `.join(` 都没找到", file=sys.stderr)
+        print("  ⇒ 可能是正则/扫描域坏了，或仓库为空 —— 此刻的 0 **不能**读成“没有违规”。", file=sys.stderr)
+        controls_failed = True
+    if controls_failed:
+        print("✗ 结论：本次没有读数（不是“干净”）", file=sys.stderr)
+        return 1
+
     for bucket, mark, title in (
         (blocking, "✗", "键集拼接（阻塞）"),
         (unproven, "·", "∎unproven：无法证明不是键集比较（**不阻塞**，需人工确认）"),
@@ -403,11 +421,6 @@ def main() -> int:
             print(f"✓ {title}: 0 处")
 
     print(f"✓ 扫描 {scanned} 个源文件（已排除构建产物 / node_modules）")
-    # 阳性对照：宽形状必须命中。0 说明判据本身失效（或扫描域为空），不是“代码干净”。
-    if any_join_hits == 0:
-        print("✗ 阳性对照失败：全仓连一个 `.join(` 都没找到", file=sys.stderr)
-        print("  ⇒ 要么正则/扫描域坏了，要么仓库是空的。此刻的 0 不能读成“没有违规”。", file=sys.stderr)
-        return 1
     print(f"✓ 阳性对照：宽形状 `.join(` 命中 {any_join_hits} 次 ⇒ 判据确实到达了代码")
 
     if advisory:
