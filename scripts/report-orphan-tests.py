@@ -71,9 +71,25 @@ def main() -> int:
             if not p.is_file() or "node_modules" in p.parts:
                 continue
             try:
-                runner_text.append((str(p.relative_to(REPO)), p.read_text(encoding="utf-8", errors="replace")))
+                body = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            # 2026-10-31 —— **注释不是 runner**。
+            # 实测：我在 workflow 里写了一行注释 `*.test.mjs`，本脚本就把两个孤儿测试
+            # 判成「有 runner 覆盖」⇒ 守卫的登记表失效、而输出仍然全绿。
+            # ⇒ YAML 去掉行注释；package.json 只取 scripts 的值。
+            if p.suffix in (".yml", ".yaml"):
+                body = "\n".join(
+                    ln.split(" #")[0] if not ln.lstrip().startswith("#") else ""
+                    for ln in body.splitlines()
+                )
+            elif p.name == "package.json":
+                try:
+                    import json as _json
+                    body = "\n".join(str(v) for v in (_json.loads(body).get("scripts") or {}).values())
+                except Exception:  # noqa: BLE001
+                    body = ""
+            runner_text.append((str(p.relative_to(REPO)), body))
     if not runner_text:
         print("扫描域为空：没找到任何 runner 配置 ⇒ 没有读数（不是「都没有执行者」）", file=sys.stderr)
         return 2
