@@ -27,3 +27,9 @@ jobs:
           fetch-depth: 0
       - name: no test may disappear without an explicit baseline update
         run: python3 scripts/check-test-inventory.py
+      # 2026-10-31 —— 「义务已写进文件，缺的只是执行者」。
+      # 这个门存在了一整晚，但没有任何 workflow 调过它：
+      # 名字像 gate 却只手动的 workflow，等于一道没人记得点的门。
+      # ⇒ 现在它必须自己跑：名字像门（gate|qa|check）却只手动 ⇒ 红。
+      - name: gate-shaped workflows must not be manual-only
+        run: python3 scripts/report-workflow-triggers.py --assert
