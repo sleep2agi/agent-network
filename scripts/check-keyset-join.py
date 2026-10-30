@@ -485,6 +485,13 @@ def _measured_on(repo: "pathlib.Path") -> str:
 
 
 def main() -> int:
+    # 2026-10-31 —— `--json` 模式下，所有**人读**输出改道到 stderr，
+    # 只在最后把一份 JSON 打到 stdout。否则 stdout 里会混进「✓ 0 处」这类散文，
+    # 而 json.loads 会直接抛错 —— 那正是「能读不能引」的另一种形态。
+    _json_mode = "--json" in sys.argv
+    _real_stdout = sys.stdout
+    if _json_mode:
+        sys.stdout = sys.stderr
     if "--selftest" in sys.argv:
         return selftest()
     repo = Path(__file__).resolve().parent.parent
@@ -571,6 +578,45 @@ def main() -> int:
     # 一句「这是防事故装置，不是防对手装置」如果只写在人读的报告里，
     # 下一次有人引用这个绿时，那句话不会跟着走 —— 于是绿会被当成更强的结论。
     # ⇒ 所以作用域直接打进输出：谁把这次结果贴出去，作用域就一起贴出去。
+    # 2026-10-31 —— `--json`：让**别的脚本**能读这份 SCOPE，而不是让人去 grep 散文。
+    # 散文与字段的差别不在准确度，在能否被检查（同 #3203 那条）。
+    # ⚠️ 这里刻意复用下面文本分支要用的同一组取值，不另算一遍 ——
+    #    「两个生产者算同一个数」会立刻分叉，而分叉后两个读数都还在。
+    if "--json" in sys.argv:
+        import hashlib as _h2, json as _json, platform as _pf2, sys as _sys2
+        from collections import Counter as _Counter2
+        _ext = _Counter2(p.suffix for p in collect(Path(__file__).resolve().parent.parent))
+        try:
+            import yaml as _y2
+            _yaml2 = getattr(_y2, "__version__", "unknown")
+        except Exception:
+            _yaml2 = "absent"
+        doc = {
+            "instrument": "valid",
+            "gate_state": {"can_red": True, "current": "green" if not blocking else "red"},
+            "counts": {
+                "blocking": len(blocking),
+                "unproven": len(unproven),
+                "scanned_files": scanned,
+                "wide_shape_hits": any_join_hits,
+            },
+            "covers": "git 跟踪的非测试源文件里、源码可见的 .sort().join(...) 键集比较",
+            "does_not_cover": ["运行期拼出来的比较", "其它仓库", "测试文件", "动态语言特性"],
+            "scan_domain": {str(k): int(v) for k, v in sorted(_ext.items())},
+            "measured_on": _measured_on(Path(__file__).resolve().parent.parent),
+            "measured_by": {
+                "script": Path(__file__).name,
+                "sha256_12": _h2.sha256(Path(__file__).read_bytes()).hexdigest()[:12],
+                "env": {"python": _sys2.version.split()[0], "os": _pf2.system(), "pyyaml": _yaml2},
+            },
+            "invalidates_on": INVALIDATES,
+            "consumers": [".github/workflows/keyset-join.yml", "卡评论里「0 阻塞」的引文"],
+            "prevalence": {"kindset_comparisons": 0 if not blocking else len(blocking)},
+        }
+        sys.stdout = _real_stdout
+        print(_json.dumps(doc, ensure_ascii=False, indent=2))
+        return 0
+
     print()
     print("SCOPE (这段与上面的结论同寿，引用时请一起引用):")
     print("  covers         : 本仓 git 跟踪的**非测试**源文件里、源码可见的 `.sort().join(...)` 键集比较")
