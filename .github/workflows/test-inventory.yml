@@ -25,6 +25,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # 2026-10-31 —— 「先证仪器，再读世界」：剥字符串状态机有自己的自检（7 例，含 1 个必须红的负例）。
+      # 主跑里也会先跑一遍（quiet），不过 ⇒ 退出码 2（没有读数）。
+      - name: the string-stripping state machine passes its own fixtures
+        run: python3 scripts/check-test-inventory.py --selftest
       - name: no test may disappear without an explicit baseline update
         run: python3 scripts/check-test-inventory.py
       # 2026-10-31 —— 「义务已写进文件，缺的只是执行者」。

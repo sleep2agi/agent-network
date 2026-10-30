@@ -326,8 +326,56 @@ def rename_pairs(gone: list[str], new: list[str]) -> tuple[list[tuple[str, str]]
     return pairs, rest_gone, rest_new
 
 
+# 2026-10-31 —— 剥字符串状态机的**自检**。
+#
+# 为什么需要：「所有文件都配平」是一个弱预言机 —— 状态机坏得很轻时，它仍然可能全平衡
+# （今天两次实测：一次 522 个文件不配平，一次只差一个文件，而两次的代码都「看起来对」）。
+# ⇒ 用手写用例把踩过的三类 bug 各钉一条，并留一条**必须红**的用例（真不配平的文件）——
+#   否则一个「永远返回 0」的实现也能通过前五条。
+LEXER_SELFTEST = [
+    # (说明, 源码, 期望的文件末深度)
+    ("模板串插值里是代码", "const a = `x${y}z`;", 0),
+    ("正则字符类里的 / 不结束正则", "const r = /^[a-z/]+$/;", 0),
+    # 第二行必须**含一个花括号**：否则「逗号被吃掉」这件事不会改变深度，
+    # 于是这条用例对那个 bug 就没有判别力（我第一版就是这样，witnessed-red 当场为空）。
+    ("数组里的正则字面量（off-by-one 现场）",
+     "const pats = [\n  /\\$\\{alias\\.padEnd\\(/,\n  /if \\(x\\) \\{/,\n];\n", 0),
+    ("字符串里的花括号不计数", 'const s = "}"; const o = "{{";', 0),
+    ("行注释里的花括号不计数", "// { this is not code\nconst x = 1;", 0),
+    ("块注释里的花括号不计数", "/* { } */\nconst x = 1;", 0),
+    ("**必须红**：真不配平的文件", "if (x) {\n  y();\n", 1),
+]
+
+
+def lexer_selftest(quiet: bool = False) -> int:
+    bad = []
+    for why, src, want in LEXER_SELFTEST:
+        got_lines = _strip_code(src.split("\n"))
+        got = sum(l.count("{") - l.count("}") for l in got_lines)
+        if got != want:
+            bad.append(f"{why}: 期望深度 {want}，实际 {got}")
+        elif not quiet:
+            print(f"✓ selftest {why}: 深度 {got}")
+    if bad:
+        print("✗ 剥字符串自检失败：", file=sys.stderr)
+        for b in bad:
+            print(f"    · {b}", file=sys.stderr)
+        print("  ⇒ 两种成因：① 状态机坏了（修代码）② 用例描述的语言形态已变（改用例）。", file=sys.stderr)
+        print("     判据：若该用例的输入在真实代码里已不存在 ⇒ 是用例过期。", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {len(LEXER_SELFTEST)} 例全部符合预期（含 1 个必须红的负例）")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return lexer_selftest()
     repo = Path(__file__).resolve().parent.parent
+    # 2026-10-31 —— 「先证仪器，再读世界」：状态机自检不过 ⇒ 本文的任何计数都不是读数。
+    if lexer_selftest(quiet=True) != 0:
+        print("✗ 剥字符串状态机自检未通过 ⇒ 本次的计数不是读数（退出码 2）", file=sys.stderr)
+        return 2
     counts, dynamic, unreliable = collect(repo)
     current = set(counts)
     baseline_path = repo / BASELINE
