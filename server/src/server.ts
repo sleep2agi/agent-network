@@ -982,6 +982,16 @@ export interface HealthFieldMeta {
   granularity?: HealthGranularity;
   /** credential 专用：该值由请求方带来（回显），因此不构成额外泄露 */
   caller_supplied?: true;
+  /**
+   * 2026-10-31 —— credential 类的**可对账性**，把「读法之争」变成取值。
+   *
+   *   echo_only        值由请求方带来，服务端只是回显 ⇒ 不构成读者本来拿不到的信息
+   *   server_generated 由我们生成/持有 ⇒ 拿到它就能与内部对上账 ⇒ **永不可匿名**
+   *
+   * 原来的做法是在注释里写「若按最严读法……」——那是把决定权交给读法。
+   * 现在两种读法都是字段的取值，谁要严就断言 joinability !== "echo_only" 不许进匿名。
+   */
+  joinability?: "echo_only" | "server_generated";
   /** 为什么把它放这一档（只在有争议的字段上写） */
   why?: string;
 }
@@ -1047,6 +1057,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   probe_nonce: {
     class: "credential",
     caller_supplied: true,
+    joinability: "echo_only",
     why: "用途是「证明这一次」，且值由请求方自带 ⇒ 不构成读者本来拿不到的信息",
   },
 };
@@ -1059,7 +1070,10 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
 export function mayBePublic(meta: HealthFieldMeta | undefined): boolean {
   if (!meta) return false;
   if (meta.class === "gauge") return true;
-  return meta.class === "credential" && meta.caller_supplied === true;
+  // credential 只有「回显」这一种可匿名；服务端生成的一律不可 —— 与 caller_supplied 同向，互为冗余。
+  return meta.class === "credential"
+    && meta.caller_supplied === true
+    && meta.joinability === "echo_only";
 }
 
 /** 匿名投影：只保留白名单里的键。逐键复制，绝不返回原对象的引用。 */

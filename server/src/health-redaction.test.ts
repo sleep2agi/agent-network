@@ -353,6 +353,16 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.counters.task_rejections.scope).toBe("process_lifetime");
   });
 
+  // 2026-10-31 —— credential 的「可对账性」是**字段取值**，不是注释里的辩论。
+  test("joinability decides anonymity, not the reader's interpretation", async () => {
+    const { HEALTH_FIELD_META, mayBePublic } = await import("./server.js");
+    const creds = Object.entries(HEALTH_FIELD_META).filter(([, m]) => m.class === "credential");
+    expect(creds.length).toBeGreaterThan(0);                       // 分母非空
+    const bad = creds.filter(([, m]) => m.joinability !== "echo_only" && mayBePublic(m)).map(([k]) => k);
+    expect(bad).toEqual([]);                                       // 服务端生成的一律不可匿名
+    expect(HEALTH_FIELD_META.probe_nonce.joinability).toBe("echo_only");
+  });
+
   // 2026-10-31 —— gauge 的粒度词表是**封闭枚举**，且必须分清「电平」与「累积」。
   // 一个电平不能算速率，一个累积不能回答「现在怎么样」——两者在 JSON 里都是数字。
   describe("granularity vocabulary is closed and distinguishes level from cumulative", () => {
@@ -417,8 +427,12 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
       const authBody = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
       const anonBody = await (await fetch(`${BASE}/health`)).json() as any;
       const landmarks = Object.keys(HEALTH_FIELD_META).filter((k) => HEALTH_FIELD_META[k].class === "landmark");
-      // 分母：这份断言今天必须有分子可看，否则它是空的
-      expect(landmarks.some((k) => k in authBody)).toBe(true);
+      // 分母：这份断言今天必须有分子可看，否则它是空的。
+      // 2026-10-31 —— 分母**写死今天的数**（不是在运行时重算），这样：
+      //   有人把某个字段从 landmark 改成 gauge ⇒ 分母下降 ⇒ 这里先红。
+      //   若只检查「一个都不出现」，那次改动会让断言**更容易通过**。
+      const present = landmarks.filter((k) => k in authBody).length;
+      expect(present).toBeGreaterThanOrEqual(5);
       expect(landmarks.filter((k) => k in anonBody)).toEqual([]);
     });
 
