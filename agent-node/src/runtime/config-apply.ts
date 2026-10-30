@@ -552,6 +552,22 @@ export interface MaskedSnapshot {
    *  这里同时上报更具名的键；Hub 优先读 `restart_supervised`，
    *  旧字段保留以兼容存量客户端。两者永远同值。 */
   restart_supervised?: boolean;
+  /**
+   * 2026-10-31 —— 实例身份（内核口径），让「它有没有重启过」不再只靠自报时间戳。
+   *
+   * 三个字段都是 **boot_ 快照语义**：启动时读一次，进程内永不变。
+   *   boot_id                 /proc/sys/kernel/random/boot_id —— **机器**启动的标识
+   *   pid                     进程 id
+   *   proc_starttime_ticks    /proc/self/stat 第 22 字段 —— **进程**启动的刻度
+   *
+   * 🔴 为什么要它：`startedAt` 是自报的，而自报值可以被同一进程复用/伪造；
+   *    (boot_id, pid, starttime) 是内核给的，重启后三者至少变一个。
+   *    判据：两次读数三者全同 ⇔ 同一个进程代次；任一变化 ⇔ 换过一次。
+   *    ⚠️ pid 会复用 ⇒ 单看 pid 不够，必须与 starttime 一起看。
+   */
+  boot_id?: string | null;
+  pid?: number;
+  proc_starttime_ticks?: number | null;
   /** #698 protocol capability. The Hub stores this bit only when the
    * reporting ntok is immutably bound to this exact node_id. */
   peer_reply_inbox_capable: true;
@@ -593,6 +609,42 @@ export interface MaskedSnapshot {
    *  tier POSTs are refused instead of quietly killing the node. */
   channels: string[];
 }
+
+/**
+ * 2026-10-31 —— 实例身份：内核口径的三个 boot 快照值。
+ *
+ * 在模块加载时**读一次**（进程内不可能变），读不到就是 null/缺省 ——
+ * 明确“我不知道”比回退成一个看起来像值的数要好。
+ *
+ * `/proc/self/stat` 第 22 字段是 starttime（单位：开机后的 clock ticks）。
+ * 解析时注意 comm 字段可能含空格与括号，所以从**最后一个** ')' 之后切。
+ */
+function readProcStarttimeTicks(): number | null {
+  try {
+    const stat = readFileSync("/proc/self/stat", "utf8");
+    const close = stat.lastIndexOf(")");
+    if (close < 0) return null;
+    const rest = stat.slice(close + 1).trim().split(/\s+/);
+    // 第 22 字段相对于整行；')' 之后从第 3 字段（state）开始 ⇒ rest[19] 是 starttime。
+    const ticks = Number(rest[19]);
+    return Number.isFinite(ticks) ? ticks : null;
+  } catch {
+    return null;
+  }
+}
+
+function readBootId(): string | null {
+  try {
+    const id = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    return /^[0-9a-f-]{16,64}$/i.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+const BOOT_BOOT_ID = readBootId();
+const BOOT_PROC_STARTTIME = readProcStarttimeTicks();
+
 export function buildConfigSnapshot(
   fileConfig: any,
   configUpdateCapable: boolean,
@@ -625,6 +677,10 @@ export function buildConfigSnapshot(
     config_revision: revision,
     config_update_capable: configUpdateCapable,
     restart_supervised: configUpdateCapable,
+    // 内核口径的实例身份（boot 快照）：与自报的 startedAt 交叉校验用。
+    boot_id: BOOT_BOOT_ID,
+    pid: process.pid,
+    proc_starttime_ticks: BOOT_PROC_STARTTIME,
     peer_reply_inbox_capable: true,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
     // Always emit — see MaskedSnapshot.channels comment. Sort +
