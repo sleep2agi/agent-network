@@ -385,6 +385,29 @@ def selftest() -> int:
     return 0
 
 
+def _measured_on(repo: "pathlib.Path") -> str:
+    """2026-10-31 —— SCOPE 有空间维度，缺**版本维度**。
+
+    四行（covers / does_not_cover / threat_model / reading_rule）回答「我看了什么」，
+    不回答「我看的是哪棵树」。而今晚整类「0 命中」结论都被树同一性封顶
+    （本树 ≠ 线上；本地无该 ref 时行号全对不上）。
+    ⇒ 补这一行后，一个贴在错树上的 SCOPE 块**自己会说出来**；
+      否则它描述的是一个不存在的仓库，而它看起来完全权威。
+    """
+    try:
+        import subprocess
+        ref = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        porcelain = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                                   capture_output=True, text=True, timeout=10).stdout.strip()
+        if not ref:
+            return "ref=unknown dirty=unknown"
+        return f"ref={ref[:12]} dirty={'true' if porcelain else 'false'}"
+    except Exception:
+        # 读不到就说读不到 —— 不写 ref=none（那会读成「干净的未知」）
+        return "ref=unknown dirty=unknown"
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
@@ -450,6 +473,11 @@ def main() -> int:
     print("  threat_model   : accident —— 能挡「顺手写成可碰撞分隔符」这类误用；")
     print("                   不挡有意伪造（无签名、无外部锚）")
     print("  reading_rule   : 「0 处」只在阳性对照命中时才有意义（见上方的宽形状计数）")
+    print(f"  measured_on    : {_measured_on(Path(__file__).resolve().parent.parent)}")
+    print("                   —— 换一棵树，上面几行 covers 描述的就是另一个仓库")
+    # threat_model 回答「挡得住什么」，failure_mode 回答「挡不住时会怎样」——
+    # 只写前者，读者会把「不覆盖」读成「覆盖了但没发生」。
+    print("  failure_mode   : loud —— 正则因重构失效时，宽形状计数会掉到 0 ⇒ 阳性对照失败 ⇒ exit 1")
     return 1 if blocking else 0
 
 
