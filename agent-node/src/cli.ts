@@ -11,6 +11,7 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
+import { GET_TASK_TOOL_LINE, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -3043,7 +3044,7 @@ async function processWithClaude(
     `- mcp__commhub__get_all_status() — 查看哪些 agent 在线。`,
     `- mcp__commhub__send_task(alias, task, parent_task_id="${currentTaskId}") — 派任务给指定 agent。`,
     `  ⚠ 必须把 parent_task_id 设成你当前任务的 ID，系统会自动把子任务的最终结果串回给 ${from}。`,
-    `- mcp__commhub__get_task(task_id) — 轮询子任务状态，直到 replied/failed。`,
+    GET_TASK_TOOL_LINE,
     `- mcp__commhub__send_message(alias, message) — 发纯消息（不要求对方回复）。`,
     `- mcp__commhub__send_reply(task_id, text) — 给某 task 发回复（不会再触发处理）。`,
     `- mcp__commhub__get_session_status(alias) — 单 agent 详情。`,
@@ -3727,9 +3728,11 @@ const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
   `1. 先 get_all_status 看哪些 agent 在线。`,
   `2. 用 send_task(alias, task, parent_task_id=<env CURRENT_TASK_ID>) 派给合适的 agent。`,
   `   ⚠ 必须把 parent_task_id 设成你当前任务的 ID（环境变量 CURRENT_TASK_ID 里），系统会自动把子任务最终结果串回给你的上游。`,
-  `3. 用 get_task 轮询子任务直到 status=replied/failed。允许中途汇报"还在等"，但要继续轮询。`,
+  ...POLL_STEP_LINES,
   `4. 拿到 reply 后整合进你给上游的最终汇报。`,
   `   即使你的 session 中途断开，只要 parent_task_id 设了，结果也会被系统自动 chain 回上游，不必焦虑。`,
+  ``,
+  ...POLL_DISCIPLINE_LINES,
   ``,
   `【禁止】`,
   `- 不要回复"收到""好的""ok""在线""待命"等无内容确认。`,
