@@ -288,6 +288,23 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— #3171 续：两个「读面」工具的键集。
+  // 选它们的理由：这两个是**客户端会按字段名逐个读**的（provider 列表 / 密钥名列表），
+  // 而它们此前没有任何精确键集断言 —— 覆盖率脚本把它们列在 59 个未覆盖里。
+  describe("read-surface tools have pinned key sets", () => {
+    test("list_providers ⇒ exactly {ok, providers}; list_network_secrets ⇒ exactly {keys, ok}", async () => {
+      const providers = await tool(adminToken, "list_providers", { network_id: NET });
+      expect(Object.keys(providers).sort()).toEqual(["ok", "providers"]);
+      expect(Array.isArray(providers.providers)).toBe(true);
+
+      const secrets = await tool(adminToken, "list_network_secrets", { network_id: NET });
+      expect(Object.keys(secrets).sort()).toEqual(["keys", "ok"]);
+      expect(Array.isArray(secrets.keys)).toBe(true);
+      // 值永远不出来：这是 RFC-028 的承诺，键集测试顺手把它钉住
+      for (const k of secrets.keys) expect(typeof k).toBe("string");
+    });
+  });
+
   // 2026-10-31 —— #3171 第 2 项：restart_node 的成功体与 update_node_config 同构。
   describe("restart_node success body", () => {
     test("pinned key set (same shape family as update_node_config)", async () => {
