@@ -10,9 +10,14 @@
     分子 = 有「精确键集断言」的 MCP 工具
     分母 = 全部 MCP 工具（按 `server.tool("<name>"` 注册处计数）
 
-⚠️ 归因是**启发式**：断言写在测试文件里，靠「同文件里提到该工具名 + 出现精确键集断言」
-   来归属，不解析 AST。所以它给的是**下界**，且明确标注为下界 ——
-   宁可少报，也不要为了好看把它报成精确值。
+⚠️ 归因是**启发式**，而且**误差方向未知** —— 这一点比「是下界」重要得多：
+   · 可能少算：间接断言、运行期生成、共享测试助手都不认
+   · 也可能多算：同一个测试文件里提到该工具名、而精确键集断言是为**别的**工具写的
+⇒ 所以这里**故意给两个口径**并排印：
+     文件级（宽）  ：文件里提到工具名 + 文件里有精确键集断言
+     邻近级（严）  ：工具名与该断言相距 ≤ WINDOW 行
+⇒ 两个数之间的差额，就是「文件级代理的误报面」。
+   只印一个数，读的人会以为它是精确值；印两个，差额自己会说话。
 
 用法：python3 scripts/report-mcp-key-set-coverage.py [--json]
 """
@@ -27,6 +32,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TOOL_DEF = re.compile(r"""server\.tool\(\s*"([a-z0-9_]+)\"""")
 EXACT_KEYSET = re.compile(r"Object\.keys\([^)]*\)\.sort\(\)\)\.toEqual\(\[")
+WINDOW = 30  # 邻近级口径：工具名与断言之间允许的最大行距
 
 
 def tracked(patterns: list[str]) -> list[Path]:
@@ -49,35 +55,45 @@ def main() -> int:
         for name in TOOL_DEF.findall(text):
             tools.setdefault(name, path)
 
-    test_mentions: dict[str, list[str]] = {}
+    file_level: dict[str, list[str]] = {}
+    near_level: dict[str, list[str]] = {}
     for path in tracked(["server/src/*.test.ts"]):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if not EXACT_KEYSET.search(text):
+        lines = text.splitlines()
+        assert_lines = [i for i, ln in enumerate(lines) if EXACT_KEYSET.search(ln)]
+        if not assert_lines:
             continue
         for name in tools:
-            if re.search(rf"""["']{re.escape(name)}["']""", text):
-                test_mentions.setdefault(name, []).append(path.name)
+            hits = [i for i, ln in enumerate(lines) if re.search(rf"""["']{re.escape(name)}["']""", ln)]
+            if not hits:
+                continue
+            file_level.setdefault(name, []).append(path.name)
+            if any(abs(a - h) <= WINDOW for a in assert_lines for h in hits):
+                near_level.setdefault(name, []).append(path.name)
 
-    covered = sorted(test_mentions)
+    covered = sorted(file_level)
     uncovered = sorted(set(tools) - set(covered))
 
+    near = sorted(near_level)
     if "--json" in sys.argv:
         print(json.dumps({
             "tools_total": len(tools),
-            "tools_with_exact_key_set_assertion": len(covered),
-            "covered": covered,
+            "covered_file_level": len(covered),
+            "covered_near_level": len(near),
+            "evidence_class": "proxy; error direction unknown (can both under- and over-count)",
+            "near_names": near,
             "uncovered": uncovered,
-            "attribution": "heuristic: same test file mentions the tool name AND contains an exact key-set assertion (lower bound)",
         }, ensure_ascii=False, indent=1))
         return 0
 
     print(f"MCP 工具：{len(tools)} 个（分母 = 注册点，不是 grep 次数）")
-    print(f"有精确键集断言：{len(covered)} 个（**下界**：按「同文件提及 + 该文件有精确键集断言」归因）")
-    if tools:
-        print(f"比例：{len(covered)}/{len(tools)} = {len(covered) / len(tools):.1%}")
+    print(f"文件级（宽）：{len(covered)} 个 ⇒ 比例 {len(covered)}/{len(tools)} = {len(covered) / max(len(tools), 1):.1%}")
+    print(f"邻近级（严，≤{WINDOW} 行）：{len(near)} 个 ⇒ 比例 {len(near)}/{len(tools)} = {len(near) / max(len(tools), 1):.1%}")
+    print(f"⇒ 两个数之差 {len(covered) - len(near)} 就是「文件级代理的误报面」。")
+    print("⚠️ 这不是下界：多算与少算都可能发生，所以**误差方向未知**，只能当代理读。")
     if covered:
         print("\n已覆盖：")
         for name in covered:
