@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import {
   RESTART_INTENT_FILE,
   clearRestartIntent,
+  consumePlannedRestart,
   decideStart,
   readRestartIntent,
   writeRestartIntent,
@@ -63,6 +64,29 @@ describe("clearRestartIntent", () => {
 
   test("is idempotent — clearing twice is not an error", () => {
     expect(() => { clearRestartIntent(dir); clearRestartIntent(dir); }).not.toThrow();
+  });
+});
+
+describe("consumePlannedRestart（启动时调用一次）", () => {
+  test("planned restart: reports it and clears the marker (lifecycle = one exit → next start)", () => {
+    writeRestartIntent(dir, intent);
+    const r = consumePlannedRestart(dir);
+    expect(r.planned).toBe(true);
+    expect(r.note).toContain("planned_restart:apply_restart_tier");
+    expect(readRestartIntent(dir)).toEqual({ kind: "absent" });
+  });
+
+  test("no marker ⇒ planned:false with a plain note", () => {
+    expect(consumePlannedRestart(dir)).toEqual({ planned: false, note: "no_planned_restart" });
+  });
+
+  test("unreadable marker is renamed, not deleted — keep the scene, stop the recurrence", () => {
+    writeFileSync(join(dir, RESTART_INTENT_FILE), "not json", "utf8");
+    const r = consumePlannedRestart(dir, () => 1234);
+    expect(r.planned).toBe(false);
+    expect(r.note).toContain("restart_intent_unreadable:invalid_json");
+    expect(readRestartIntent(dir)).toEqual({ kind: "absent" });          // 不再触发
+    expect(existsSync(join(dir, `${RESTART_INTENT_FILE}.bad-1234`))).toBe(true); // 但留了现场
   });
 });
 

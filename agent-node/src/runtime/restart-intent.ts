@@ -109,6 +109,41 @@ export type StartDecision =
   | { start: true; planned: true; intent: RestartIntent }
   | { start: true; needs_review: true; error: string };
 
+/**
+ * 启动时调用一次：读标记 → 清掉（或把坏文件改名保留）→ 返回一行可打日志的结论。
+ *
+ * 🔴 为什么由**本进程**读而不是只留给 wrapper：
+ *    wrapper 只关心「要不要拉起」，而节点自己关心「我这次是被按计划重启的吗」——
+ *    后者对排障有价值（能区分「计划内重启」与「崩溃后自愈」）。
+ *    ⇒ 读了就清：标记的生命周期是「一次退出 → 下一次启动」，不是一段时间。
+ *
+ * 坏文件不删，改名保留：`restart-intent.json.bad-<ts>` ⇒ 既不会再触发 needs_review，
+ * 也留下了现场（与「读失败 ≠ 没有」同一条）。
+ */
+export function consumePlannedRestart(
+  dir: string,
+  now: () => number = Date.now,
+): { planned: boolean; note: string } {
+  const d = decideStart(dir);
+  if (!d.planned) {
+    if ("needs_review" in d) {
+      const bad = join(dir, `${RESTART_INTENT_FILE}.bad-${now()}`);
+      try {
+        renameSync(join(dir, RESTART_INTENT_FILE), bad);
+      } catch {
+        /* 改名失败也不阻塞启动 */
+      }
+      return { planned: false, note: `restart_intent_unreadable:${d.error} (kept as ${bad})` };
+    }
+    return { planned: false, note: "no_planned_restart" };
+  }
+  clearRestartIntent(dir);
+  return {
+    planned: true,
+    note: `planned_restart:${d.intent.reason} (written at ${new Date(d.intent.at).toISOString()} by pid ${d.intent.pid})`,
+  };
+}
+
 export function decideStart(dir: string): StartDecision {
   const r = readRestartIntent(dir);
   if (r.kind === "absent") return { start: true, planned: false };
