@@ -108,6 +108,10 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     // null 是**设计**（没有 .git），不是缺陷；但任何别的形状都不允许。
     expect(isSha || value === null).toBe(true);
     if (value !== null) expect(value).not.toBe(body.version);
+    // 2026-10-31 —— dirty 位必须与 sha 成对存在，否则 vantage 会把脏树读数当成提交。
+    expect(typeof body.git_dirty).toBe("boolean");
+    // 契约：没有 sha 的机器上不该出现「干净」这个断言。
+    if (value === null) expect(body.git_dirty).toBe(false);
   });
 
   // 2026-10-31 —— 计数必须带窗口，且窗口起点要**稳定**。

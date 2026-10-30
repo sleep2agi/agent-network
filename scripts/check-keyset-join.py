@@ -178,8 +178,27 @@ def scan_paths(files: list[Path], repo: Path):
         test_file = is_test_path(rel)
         any_join_hits += len(ANY_JOIN.findall(text))
         lines = text.splitlines()
-        # 本文件内「键集派生」的标识符（弱数据流：同一文件的赋值即视为派生）
+        # 本文件内「键集派生」的标识符 —— 但**只在它没被改写时**才算键集。
+        #
+        # 🔴 2026-10-31 修正：早先只要某标识符被 `= Object.keys(...)` 赋过值，
+        #    它在本文件后续所有 join 都会被当作键集 ⇒ 而它可能早已被改成普通数组：
+        #        let list = Object.keys(cfg); list = list.concat(otherIds);
+        #        if (list.join(',') !== 'a,b')        ← 此时 list 不再是键集
+        #    ⇒ 这正是阻塞档最不该有的假红。
+        #
+        # 「什么情况下它不会命中」必须说得出来，这就是那条：
+        #   该标识符在文件中被**重新赋值**（ident = …，出现 >1 次），
+        #   或被**派生改写**（push/splice/concat/map/filter），
+        #   ⇒ 不再算键集派生 ⇒ 不进阻塞档。
+        # （sort/slice 不算派生：`keys.sort()` 之后仍是同一组键。）
         tainted = {m.group(1) for m in KEYSET_ASSIGN.finditer(text)}
+        for ident in list(tainted):
+            assigns = len(re.findall(rf"\b{re.escape(ident)}\s*=(?!=)", text))
+            derived = bool(re.search(
+                rf"\b{re.escape(ident)}\s*\.(?:push|splice|concat|map|filter)\s*\(", text
+            ))
+            if assigns > 1 or derived:
+                tainted.discard(ident)
 
         def line_of(i: int) -> tuple[int, str]:
             n = text.count("\n", 0, i) + 1
@@ -192,12 +211,32 @@ def scan_paths(files: list[Path], repo: Path):
             n, snippet = line_of(m.start())
             if snippet.startswith("//") or snippet.startswith("*") or snippet.startswith("/*"):
                 continue
-            stmt = statement_window(text, m.start())
-            keyset = bool(KEYSET.search(stmt)) or any(
-                re.search(rf"\b{re.escape(t)}\b", stmt) for t in tainted
-            )
+            # 键集信号必须与这次 join 处在**同一个表达式**里。
+            #
+            # 🔴 2026-10-31 修正：早先用「语句窗口（到上一个 ;/{/} 为止）」判定，
+            #    而本仓大量省略分号 ⇒ 窗口会一路吞到函数开头，把上面几行的
+            #    `Object.keys(...)` 也算进来：
+            #        let list = Object.keys(cfg)
+            #        list = list.concat(other)
+            #        if (list.sort().join(",") !== "a,b")     ← 被误判成键集比较
+            #    ⇒ 这就是阻塞档里的假红来源。
+            #
+            # 现在的判据（能说清“什么情况下不命中”）：
+            #   在 `.sort()` 之前 400 字符内出现的**最近一处** Object.keys，
+            #   与本次 join 之间**不得再有语句起始关键字**
+            #   （if/for/while/return/let/const/var/await）⇒ 否则不是同一表达式。
+            window = text[max(0, m.start() - 400):m.start()]
+            cut = max(window.rfind("Object.keys("), window.rfind("Object.getOwnPropertyNames("))
+            same_expression = False
+            if cut >= 0:
+                between = window[cut:]
+                same_expression = not re.search(
+                    r"\b(?:if|for|while|return|let|const|var|await)\b", between
+                )
+            tainted_in_line = any(re.search(rf"\b{re.escape(t)}\b", lines[n - 1]) for t in tainted)
+            keyset = same_expression or tainted_in_line
             compared = bool(COMPARISON_AFTER.match(text[m.end():m.end() + 8])) or bool(
-                re.search(r"!==|===|!=|==", stmt)
+                re.search(r"!==|===|!=|==", lines[n - 1])
             )
             label_keys = f"键集拼字符串（分隔符 {m.group(1)} 可碰撞 ⇒ 多一个键会被读成通过）"
             # 数组信号的证据范围是**链**：一直向前到最近一个 `;` 为止。
@@ -296,6 +335,17 @@ SELFTEST_CASES = [
         "blocking", "键集拼字符串",
     ),
     (
+        # 负例（阻塞档）：键集派生的标识符**被改写之后**再 join，不是键集比较。
+        # 这条钉住「taint 不失效」这个假红来源 —— 它与「宁可漏不可假红」是同一条。
+        "taint_invalidated_by_concat",
+        'export function f(cfg: Record<string, unknown>, other: string[]) {\n'
+        '  let list = Object.keys(cfg)\n'
+        '  list = list.concat(other)\n'
+        '  if (list.sort().join(",") !== "a,b") throw new Error("x")\n'
+        '}\n',
+        "advisory", "数组 join",
+    ),
+    (
         "array_message_negative",
         'export function f(xs: string[]) {\n'
         '  const note = xs.map((x) => ({ x })).map((o) => o.x).sort().join(", ")\n'
@@ -311,8 +361,8 @@ def selftest() -> int:
 
     # 遍历 0 个用例也是通过 —— 这是 empty-assertion 的最小形状。
     # 所以先钉数量，再跑用例：任何人删掉一个用例，这里先红。
-    if len(SELFTEST_CASES) != 5:
-        print(f"✗ selftest 用例数应为 5，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
+    if len(SELFTEST_CASES) != 6:
+        print(f"✗ selftest 用例数应为 6，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
     failures = 0
     with tempfile.TemporaryDirectory() as td:

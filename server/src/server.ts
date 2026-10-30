@@ -932,7 +932,7 @@ function probeNonceOf(req: Request): string | null {
  * 只在启动时算一次（boot_* 语义）：git commit 不可能在进程生命周期内变化，
  * 所以它满足「变更周期 ⊇ 进程生命周期」，可以绑进程边界。
  */
-function detectBootGitCommit(): string | null {
+function detectBootGitIdentity(): { commit: string | null; dirty: boolean } {
   const start = (import.meta as { dir?: string }).dir ?? process.cwd();
   let dir = start;
   for (let i = 0; i < 6; i += 1) {
@@ -942,19 +942,34 @@ function detectBootGitCommit(): string | null {
           stdio: ["ignore", "pipe", "ignore"],
           timeout: 1500,
         }).toString().trim();
-        return /^[0-9a-f]{40}$/.test(out) ? out : null;
+        if (!/^[0-9a-f]{40}$/.test(out)) return { commit: null, dirty: false };
+        // 2026-10-31 —— dirty 位不能省：commit sha 单独一个字段，
+        // 无法区分「干净树构建」与「脏树构建」，于是 vantage 依然可能把一个
+        // 非提交的值当成提交。dirty 一旦为 true，这个读数只能写 prod@自称。
+        let dirty = false;
+        try {
+          const st = execFileSync("git", ["-C", dir, "status", "--porcelain"], {
+            stdio: ["ignore", "pipe", "ignore"],
+            timeout: 1500,
+          }).toString();
+          dirty = st.trim().length > 0;
+        } catch {
+          dirty = true;   // 读不到状态 ⇒ 保守认定为脏（不许把“不知道”当干净）
+        }
+        return { commit: out, dirty };
       } catch {
-        return null;
+        return { commit: null, dirty: false };
       }
     }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return null;
+  return { commit: null, dirty: false };
 }
 
-const BOOT_GIT_COMMIT = detectBootGitCommit();
+const BOOT_GIT = detectBootGitIdentity();
+const BOOT_GIT_COMMIT = BOOT_GIT.commit;
 
 /**
  * 2026-10-31 —— 窗口起点**在 boot 时算一次**，不要每次请求重算。
@@ -2890,6 +2905,9 @@ return Bun.serve({
         // 🔴 取不到就是 null（npm 安装形态没有 .git），**不回退成 version** ——
         //    未验的断言标了“未验”仍然有用，标成事实会污染的整张表。
         git_commit: BOOT_GIT_COMMIT,
+        // 🔴 与 git_commit 必须成对：sha 单独一个字段区分不了「干净树」与「脏树」。
+        //    dirty=true ⇒ 这个读数不能写成 prod@<sha>，只能写 prod@自称。
+        git_dirty: BOOT_GIT.dirty,
         // 2026-10-31 —— 拒绝原因计数（与那条日志同一位置 +1，不会漏记）。
         // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
         //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。
