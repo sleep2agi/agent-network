@@ -817,13 +817,28 @@ interface CopresenceOptions {
 }
 
 /** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
- *  to know something is listening, not to read anything from it. */
+ *  to know something is listening, not to read anything from it.
+ *
+ *  2026-10-31 —— 但「答了」不等于「健康」，而这正是 /health 新增 status 字段的理由。
+ *  加了字段却没人读，它就是一个被记录下来的判定（今晚反复出现的那一格）。
+ *  ⇒ 这里做它的第一个读者：**只告警、不阻断**（阻断会让一个降级 hub 变成起不来的节点）。
+ */
 async function hubAnswersHealth(hub: string, timeoutMs = hubHealthTimeoutMs(hub)): Promise<boolean> {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     const res = await fetch(`${hub}/health`, { signal: ctl.signal });
     clearTimeout(t);
+    if (res.ok) {
+      // 读 body 只为看 status；解析失败不影响「答了」这个结论。
+      try {
+        const body = await res.json() as { status?: string; status_reasons?: unknown };
+        if (body?.status === "degraded") {
+          const why = Array.isArray(body.status_reasons) ? body.status_reasons.join(", ") : "unknown";
+          console.error(`[anet] ⚠ ${hub} answers /health but reports status=degraded (${why}) — continuing`);
+        }
+      } catch { /* body 不可解析 ⇒ 仍然算「答了」 */ }
+    }
     return res.ok || res.status === 401;   // 401 = up, just gated
   } catch { return false; }
 }
