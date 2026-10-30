@@ -1005,6 +1005,11 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   epoch_agreement: { class: "gauge", granularity: "label", why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻" },
   epoch_delta_ms: { class: "gauge", granularity: "count" },
   clk_tck_assumed: { class: "gauge", granularity: "label" },
+  clk_tck_source: {
+    class: "gauge",
+    granularity: "label",
+    why: "assumed/derived/confirmed —— 一个叫 assumed 的字段必须有一条「它是否成立」的判定",
+  },
 
   // ── landmark：精确位置/身份 ──────────────────────────────────────────
   git_commit: { class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
@@ -1135,6 +1140,47 @@ const BOOT_GIT = detectBootGitIdentity();
  */
 /** 换算 ticks 时假设的 CLK_TCK：假设本身要**显式**出现在读数里，而不是藏在代码里。 */
 const CLK_TCK_ASSUMED = 100;
+
+/**
+ * 2026-10-31 —— 一个叫 assumed 的字段，必须有一条「它是否成立」的判定。
+ *
+ * 否则它只是一个被记录下来的数：换内核（USER_HZ 不是 100 的架构）之后它会**静默变错**，
+ * 而字段名里的 "assumed" 没有任何东西去校它。
+ *
+ * 推导方式（不依赖 sysconf，Node 没暴露）：
+ *   /proc/stat 里所有 cpu 行之和 = 自启动以来的总 jiffies
+ *   CLK_TCK ≈ 总 jiffies / (uptime 秒 × CPU 数)
+ * ⇒ 与 assumed 相等 ⇒ source="confirmed"；不等 ⇒ 用推导值，source="derived"；
+ *   两者都拿不到 ⇒ 退回 assumed，source="assumed"。
+ */
+function clkTck(): { value: number; source: "confirmed" | "derived" | "assumed" } {
+  try {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const os = require("node:os") as typeof import("node:os");
+    let jiffies = 0;
+    for (const line of fs.readFileSync("/proc/stat", "utf8").splitlines()) {
+      if (!/^cpu\d*\s/.test(line)) continue;
+      const parts = line.trim().split(/\s+/).slice(1).map(Number);
+      if (parts.every((n) => Number.isFinite(n))) jiffies += parts.reduce((a, b) => a + b, 0);
+    }
+    const uptime = os.uptime();
+    const cpus = Math.max(1, os.cpus().length);
+    if (!Number.isFinite(jiffies) || jiffies <= 0 || !Number.isFinite(uptime) || uptime <= 0) {
+      return { value: CLK_TCK_ASSUMED, source: "assumed" };
+    }
+    const derived = Math.round(jiffies / (uptime * cpus));
+    if (!Number.isFinite(derived) || derived < 1 || derived > 100_000) {
+      return { value: CLK_TCK_ASSUMED, source: "assumed" };
+    }
+    return derived === CLK_TCK_ASSUMED
+      ? { value: derived, source: "confirmed" }
+      : { value: derived, source: "derived" };
+  } catch {
+    return { value: CLK_TCK_ASSUMED, source: "assumed" };
+  }
+}
+
+const CLK_TCK = clkTck();
 /** agreement 的**分类**阈值（不是发布闸门）：超过它就算「内核与自报对不上」。 */
 const EPOCH_AGREEMENT_MS = 10_000;
 
@@ -1145,6 +1191,7 @@ function detectKernelStart(startedAtIso: string): {
   kernel_started_at: string | null;
   kernel_started_at_note: string | null;
   clk_tck_assumed: number;
+  clk_tck_source: "confirmed" | "derived" | "assumed";
   epoch_agreement: "agree" | "disagree" | "unknown";
   epoch_delta_ms: number | null;
 } {
@@ -1178,12 +1225,13 @@ function detectKernelStart(startedAtIso: string): {
       boot_id: bootId, pid, proc_start_ticks: ticks,
       kernel_started_at: null,
       kernel_started_at_note: "proc_btime_or_ticks_unavailable",
-      clk_tck_assumed: CLK_TCK_ASSUMED,
+      clk_tck_assumed: CLK_TCK.value,
+      clk_tck_source: CLK_TCK.source,
       epoch_agreement: "unknown",
       epoch_delta_ms: null,
     };
   }
-  const candidateMs = (btime + ticks / CLK_TCK_ASSUMED) * 1000;
+  const candidateMs = (btime + ticks / CLK_TCK.value) * 1000;
   const selfMs = Date.parse(startedAtIso);
   // 自报值解析不了 ⇒ 只影响 agreement，不影响内核读数的发布
   const delta = Number.isFinite(selfMs) ? candidateMs - selfMs : null;
@@ -1195,7 +1243,8 @@ function detectKernelStart(startedAtIso: string): {
     proc_start_ticks: ticks,
     kernel_started_at: new Date(candidateMs).toISOString(),
     kernel_started_at_note: null,
-    clk_tck_assumed: CLK_TCK_ASSUMED,
+    clk_tck_assumed: CLK_TCK.value,
+      clk_tck_source: CLK_TCK.source,
     epoch_agreement: agreement,
     epoch_delta_ms: delta === null ? null : Math.round(delta),
   };
@@ -3173,6 +3222,7 @@ return Bun.serve({
         // 判据是上面三元组；这两个只是把「内核 vs 自报」的分歧**显式化**，
         // 而不是像原来那样把它折进一个 null（null 会让「算不出来」和「两边打架」同形）。
         clk_tck_assumed: BOOT_KERNEL_START.clk_tck_assumed,
+        clk_tck_source: BOOT_KERNEL_START.clk_tck_source,
         epoch_agreement: BOOT_KERNEL_START.epoch_agreement,
         epoch_delta_ms: BOOT_KERNEL_START.epoch_delta_ms,
         // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：

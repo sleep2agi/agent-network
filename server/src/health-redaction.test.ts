@@ -251,7 +251,10 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
 
     // 判据三元组：pid 必须等于真值；boot_id 可读时必须合法 —— 二者都不依赖 startedAt
     // 换算假设必须显式
-    expect(body.clk_tck_assumed).toBe(100);
+    // 一个叫 assumed 的字段必须有一条「它是否成立」的判定：
+    // 在 x86 上应当 confirmed；非 100 的架构上应当 derived；读不到才 assumed。
+    expect([100].includes(body.clk_tck_assumed) || Number.isInteger(body.clk_tck_assumed)).toBe(true);
+    expect(["confirmed", "derived", "assumed"]).toContain(body.clk_tck_source);
     expect(["agree", "disagree", "unknown"]).toContain(body.epoch_agreement);
 
     if (body.kernel_started_at !== null) {
