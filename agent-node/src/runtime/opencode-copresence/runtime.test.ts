@@ -692,7 +692,7 @@ describe("OpenCode native serve+attach copresence", () => {
 // FilePartSource[Text]). A completed turn with zero TextPart is a
 // canonical shape, not a bug.
 describe("OpenCode copresence task deadline", () => {
-  async function open(extraEnv: NodeJS.ProcessEnv) {
+  async function open(extraEnv: NodeJS.ProcessEnv, logSink?: (line: string) => void) {
     const f = fixture(extraEnv);
     const runtime = await openVettedOpenCodeCopresence({
       binary: f.binary,
@@ -701,6 +701,7 @@ describe("OpenCode copresence task deadline", () => {
       workDir: f.root,
       model: "opencode/fake",
       startupTimeoutMs: 5_000,
+      ...(logSink ? { log: logSink } : {}),
     });
     return { f, runtime };
   }
@@ -943,7 +944,11 @@ describe("OpenCode copresence task deadline", () => {
 
   test("admission timeout on a busy human session says the task was not submitted", async () => {
     const log = join(tmpdir(), `opencode-admission-${process.pid}-${Date.now()}.log`);
-    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000", FAKE_LOG: log });
+    // 2026-10-31 —— 抓 runtime 自己的日志行（不是 fake engine 的 FAKE_LOG）：
+    //   入口那行说「它来过」，admission-expired 那行说「它没排上、等了多久」。
+    //   只有前者时，「有进无出」的差值读不出来 —— 而那条正是运维唯一能反查的形状。
+    const runtimeLogs: string[] = [];
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000", FAKE_LOG: log }, (line) => runtimeLogs.push(line));
     try {
       let thrown: any;
       let busyNotes = 0;
@@ -962,6 +967,12 @@ describe("OpenCode copresence task deadline", () => {
       const trace = readFileSync(log, "utf8");
       expect(trace).not.toContain("ABORT");
       expect(trace).not.toMatch(/\/abort/);
+      // 2026-10-31 —— 入口行与结局行必须**成对**：只有 entry 时读不出「有进无出」。
+      expect(runtimeLogs.some((l) => l.includes("task accepted"))).toBe(true);
+      const expired = runtimeLogs.find((l) => l.includes("task admission-expired"));
+      expect(expired).toBeTruthy();
+      expect(expired).toContain("waited=");
+      expect(expired).toContain("cap=");
     } finally {
       await runtime.close();
       f.close();
