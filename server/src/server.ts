@@ -120,6 +120,7 @@ import { createProductionSideThreadTransport } from "./side-thread-production.js
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
 import { taskRejectionCounters } from "./rejection-counters.js";
+import { legacyLicenseField, licenseStateOf } from "./license-state.js";
 import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
 const PORT = resolvePort(process.env.PORT);
@@ -2791,7 +2792,15 @@ return Bun.serve({
       //     not
       const count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
       const sse = getSSEStats();
-      const license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
+      // 2026-10-31 —— 查询失败不再拖垮整个 /health（它有 500 兜底，但健康端点不该因附属数据挂掉），
+      // 并且让「查失败」与「没有 license 行」在读数上可分（见 license-state.ts）。
+      let license: any = null;
+      let licenseQueryFailed = false;
+      try {
+        license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
+      } catch {
+        licenseQueryFailed = true;
+      }
 
       // Non-fatal auth probe (no 401 — /health must stay 200 anonymous).
       const healthAuth = resolveRequestAuth(req);
@@ -2891,7 +2900,10 @@ return Bun.serve({
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
         v3_auth: true,
         multi_network: true,
-        license: license?.type || "none",
+        // 兼容字段：语义不精确（"none" 同时表示「没有行」「type 为空」「查失败」），勿用于判据。
+        license: legacyLicenseField(license),
+        // 判据请用这个三态：known / absent / unknown(reason)
+        license_state: licenseStateOf(license, licenseQueryFailed),
         uptime: Math.floor(process.uptime()),
         // 2026-10-31 —— 把窗口起点显式暴露。
         // 同一响应里的 stall_count / last_stall_at / recent_stalls 以及各 …last_error_at

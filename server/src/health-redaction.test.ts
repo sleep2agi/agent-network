@@ -195,6 +195,18 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
   });
 
+  // 2026-10-31 —— license 三态必须是「三种不同的可修性」，不能折成一个 "none"。
+  // 本条只断言形状（测试库没有 license 行 ⇒ absent）；四种映射由 license-state.test.ts 钉死。
+  test("license_state distinguishes absent from unknown instead of collapsing to none", async () => {
+    const body = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(typeof body.license).toBe("string");           // 兼容字段仍在
+    const st = body.license_state;
+    expect(st && typeof st.kind).toBeTruthy();
+    expect(["known", "absent", "unknown"]).toContain(st.kind);
+    if (st.kind === "known") expect(typeof st.type).toBe("string");
+    if (st.kind === "unknown") expect(typeof st.reason).toBe("string");
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);
