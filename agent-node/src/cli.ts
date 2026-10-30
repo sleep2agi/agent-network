@@ -1376,7 +1376,7 @@ import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows-tui-health";
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
-import { writeRestartIntent } from "./runtime/restart-intent.js";
+import { consumePlannedRestart, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
 import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -8187,6 +8187,19 @@ if (RUNTIME === "codex" || RUNTIME === "codex-app-server") {
 }
 await register();
 log("已注册到 CommHub");
+
+// 2026-10-31 —— 上一次退出是「按计划的」吗？读了就清。
+//   生命周期 = 一次退出 → 下一次启动（不做 TTL）：标记只回答「我是被计划重启拉起来的吗」，
+//   而这个问题只在启动的那一刻有意义。
+//   坏文件不删、改名保留 ⇒ 既不重复触发，也留下现场（「读失败 ≠ 没有」）。
+{
+  const plannedRestart = consumePlannedRestart(NODE_DIR);
+  if (plannedRestart.planned) {
+    log(`[anet] ${plannedRestart.note}`);
+  } else if (plannedRestart.note !== "no_planned_restart") {
+    warn(`[anet] ${plannedRestart.note}`);
+  }
+}
 
 // Subscribe before the human TUI starts. Lazy-on-first-task attachment can
 // miss the TUI's turn/started notification; relying on thread/read to recover
