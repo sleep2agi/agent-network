@@ -288,6 +288,30 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     });
   });
 
+  // 2026-10-31 —— `/health` 的 validator 语义：**不发 ETag，且 `If-None-Match: *` 也回 200**。
+  //
+  // 起因（外部复核在同族端点上实测到的）：当响应体里带时间/计数器时，
+  // 「回不回 304」从头到尾不由 cache-control 决定：
+  //   · Express 的默认 etag 对每个 body 都变 ⇒ validator 永远匹配不上 ⇒ 一次 If-None-Match 测不出任何东西
+  //   · `if-none-match: *` 会**直接跳过** etag 比较（RFC 9110 §13.1.2：资源存在 ⇒ 304）
+  // ⇒ 本仓的选择是：不发 ETag（没有 validator 可匹配），并且对 `*` 也回 200 ——
+  //   因为我们每一份正文都是「此刻的读数」，回 304 等于告诉客户端「你手里那份是当前的」，那是假话。
+  //   这条断言把「不发的决定」和「对 * 的例外」都钉住；否则它只是注释里的一句话。
+  describe("/health 的 validator 语义", () => {
+    test("no ETag at all, and If-None-Match: * still returns 200 with fresh body", async () => {
+      const a = await fetch(`${BASE}/health`);
+      expect(a.headers.get("etag")).toBeNull();          // 没有 validator 可匹配
+      expect(a.headers.get("cache-control")).toBe("no-store");
+      const b = await fetch(`${BASE}/health`, { headers: { "If-None-Match": "*" } });
+      expect(b.status).toBe(200);                        // RFC 会要 304；我们是**故意的例外**
+      const bodyB = await b.json() as any;
+      const bodyA = await a.json() as any;
+      // 而且正文确实是新的（不是把上一份原样回给条件请求）
+      expect(typeof bodyB.served_at).toBe("string");
+      expect(Date.parse(bodyB.served_at)).toBeGreaterThanOrEqual(Date.parse(bodyA.served_at));
+    });
+  });
+
   // 2026-10-31 —— 补的是**反方向**：既有的
   //   "every field in the authenticated body carries a class"
   // 只查 payload → meta（加字段忘了分类）；它查不到 meta → payload（**声明了一个永远不出现的字段**）。
