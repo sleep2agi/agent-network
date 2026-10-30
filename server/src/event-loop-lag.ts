@@ -80,6 +80,19 @@ export function recordGap(
   return stallMs;
 }
 
+/**
+ * 2026-10-31 —— 窗口两端必须跟着读数一起走（#3174）。
+ *
+ * 原来 event_loop 给了 stall_count / last_stall_at，却没有窗口起点：
+ * 计数器随进程重启归零，而「归零」与「从未发生」在读数上同值 ⇒
+ * 单独引用 stall_count 的读者会把它读成「从上线以来没卡过」。
+ *
+ * ⇒ 现在两个时刻戳都在这对象里：`since`（起点，模块初始化时冻结）与 `observed_at`（读的时刻）。
+ *    引用者不必再去 /health 顶层猜窗口，窗口与读数同域。
+ *    判据：分子分母各要自己的时刻戳；**被声明的那个永远不算**。
+ */
+let sinceIso = new Date().toISOString();
+
 export function eventLoopStats(): {
   max_gap_ms: number;
   last_gap_ms: number;
@@ -87,6 +100,10 @@ export function eventLoopStats(): {
   last_stall_ms: number;
   last_stall_at: string | null;
   recent_stalls: EventLoopStall[];
+  /** 窗口起点（本进程 event-loop 观察开始时刻）。 */
+  since: string;
+  /** 这次读的时刻。与 `since` 一起才构成窗口；单独任一个都不构成。 */
+  observed_at: string;
 } {
   return {
     max_gap_ms: Math.round(maxGapMs),
@@ -95,6 +112,8 @@ export function eventLoopStats(): {
     last_stall_ms: Math.round(lastStallMs),
     last_stall_at: lastStallAt,
     recent_stalls: [...stalls].reverse(),
+    since: sinceIso,
+    observed_at: new Date().toISOString(),
   };
 }
 
@@ -106,6 +125,7 @@ export function resetEventLoopLagForTests(): void {
   lastStallAt = null;
   lastStallMs = 0;
   stalls.length = 0;
+  sinceIso = new Date().toISOString(); // 重置窗口起点 —— 否则测试里「归零」与「没归零」同形
 }
 
 function envMs(name: string, fallback: number): number {

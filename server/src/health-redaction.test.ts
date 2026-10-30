@@ -284,6 +284,33 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.epoch_agreement).not.toBe("unknown");
   });
 
+  // #3174 —— stall_count / last_stall_at 原来只有 [startedAt, now] 这个**隐含**窗口：
+  // 单独引用它，读者会把「计数器归零」读成「从未卡过」。
+  // ⇒ 现在窗口两端跟着读数一起走（event_loop.since / event_loop.observed_at）。
+  describe("event_loop carries its own window (no implicit [startedAt, now])", () => {
+    test("both ends are present, and they are ordered", async () => {
+      const body = await (await fetch(`${BASE}/health`)).json() as any;
+      expect(typeof body.event_loop.since).toBe("string");
+      expect(typeof body.event_loop.observed_at).toBe("string");
+      expect(Date.parse(body.event_loop.since)).toBeLessThanOrEqual(Date.parse(body.event_loop.observed_at));
+    });
+
+    // 敏感性：起点**不许**跟着时间走，终点**必须**跟着时间走。
+    // 只断言「两者可比」的话，一个冻结的时钟也能通过。
+    test("since is frozen while observed_at advances (difference, not just comparability)", async () => {
+      const a = (await (await fetch(`${BASE}/health`)).json() as any).event_loop;
+      const waitStart = Date.now();
+      await new Promise((r) => setTimeout(r, 250));
+      const b = (await (await fetch(`${BASE}/health`)).json() as any).event_loop;
+      const elapsed = Date.now() - waitStart;
+
+      expect(b.since).toBe(a.since);                                   // 起点不动
+      const delta = Date.parse(b.observed_at) - Date.parse(a.observed_at);
+      expect(delta).toBeGreaterThan(0);                                // 终点真的走
+      expect(Math.abs(delta - elapsed)).toBeLessThanOrEqual(1000);     // 且走的是同一个墙钟
+    });
+  });
+
   // 2026-10-31 —— 三分类从「注释里的提醒」变成「字段上的必填标签」。
   //
   // 原来的问题：probe_nonce 恰好是对的，但那是因为**恰好这样写**；
