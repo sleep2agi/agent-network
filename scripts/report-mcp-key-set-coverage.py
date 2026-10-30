@@ -78,6 +78,12 @@ def main() -> int:
     uncovered = sorted(set(tools) - set(covered))
 
     near = sorted(near_level)
+
+    # 2026-10-31 —— **子串假阳性**是这类统计的通用事故形态：
+    # 一次外部复核里，`counters` 被无关的 DB 表名 `usage_counters` 匹配上，
+    # 而假阳性恰好藏掉了那条线正在讨论的字段。
+    # ⇒ 工具名之间存在前/后缀包含时，按名字匹配必然把两者混在一起。
+    ambiguous = sorted((a, b) for a in tools for b in tools if a != b and a in b)
     if "--json" in sys.argv:
         print(json.dumps({
             "tools_total": len(tools),
@@ -102,6 +108,11 @@ def main() -> int:
         print(f"\n未覆盖（{len(uncovered)}）：")
         for name in uncovered:
             print(f"  {name}  ({tools[name].relative_to(REPO)})")
+    if ambiguous:
+        print(f"\n⚠️ 子串歧义 {len(ambiguous)} 对（按名字匹配会把它们混在一起）：")
+        for a, b in ambiguous:
+            print(f"    {a}  ⊂  {b}")
+        print("  ⇒ 这几对的归因结果不可单独引用；要看证据行本身。")
     print("\n⚠️ 归因是代理：多算与少算都可能，误差方向未知（不是下界）。")
     print("   不认间接断言、不认运行期生成的键集、不认跨文件共享的测试助手。")
     # 2026-10-31 —— 「在哪个版本上量的」必须跟着数字走。
