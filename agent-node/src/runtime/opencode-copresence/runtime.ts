@@ -1336,6 +1336,16 @@ export async function openOpenCodeCopresenceRuntime(
       get attachScriptPath() { return core!.attachScriptPath; },
       get isRunning() { return core!.isRunning; },
       get backgroundControl() { return core!.backgroundControl; },
+      // #3146 —— 共享 OpenCode Server 这条路（opencodeSharedServerUrl / 外部 server）
+      // 原来只转发 isRunning/notify/submit/close，**没有转发 selectedModel /
+      // setSelectedModel**。于是 `typeof session.setSelectedModel === "function"`
+      // 恒为 false ⇒ 热切模型在任何“共享 server”形态的节点上结构性不可达：
+      //   改前：ack rejected（"OpenCode V2 session is not running"，文案还误导）
+      //   改后（2.5.0-preview.167 的降级）：每次切模型都重启一次
+      // 生产实测（通信欧2号，shared server ready 且任务能正常跑）依然降级，
+      // 就是这两行缺失造成的。透传即可，不改变任何判据语义。
+      ...(core!.selectedModel ? { selectedModel: () => core!.selectedModel!() } : {}),
+      ...(core!.setSelectedModel ? { setSelectedModel: (m: string) => core!.setSelectedModel!(m) } : {}),
       notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
       submit: (prompt, timeoutMs, sender, evidence) =>
         core!.submit(prompt, timeoutMs, sender, evidence),
