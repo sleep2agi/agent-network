@@ -284,6 +284,29 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.epoch_agreement).not.toBe("unknown");
   });
 
+  // 2026-10-31 —— 头集合断言：**与登录无关**的那条判据。
+  //
+  // 为什么需要它：凡是「需要会话才能判」的断言都会继承 vantage 病
+  // （未登录 CI 恒红 / 有会话环境恒绿 ⇒ 它测的是环境，不是代码）。
+  // 头集合不需要会话就能读 ⇒ 它回答的是「我站在哪一层」，而不是「我有没有登录」。
+  describe("header set (vantage-free: readable without a session)", () => {
+    test("anonymous /health does not leak build identity through headers", async () => {
+      const res = await fetch(`${BASE}/health`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type") || "").toContain("application/json");
+      // 正文里我们只给 build_identified；头里更不能给指纹
+      const leaky = [...res.headers.keys()].filter((h) => /git|commit|build[-_]?(sha|id)/i.test(h));
+      expect(leaky).toEqual([]);
+    });
+
+    test("version carries its role in the payload (a label, not a fingerprint)", async () => {
+      const body = await (await fetch(`${BASE}/health`)).json() as any;
+      expect(body.version_role).toBe("deployment_label");
+      // 反证：同一次响应里**没有**匿名可读的 commit（否则那条角色声明是多余的）
+      expect(body.git_commit).toBeUndefined();
+    });
+  });
+
   // #3174 —— stall_count / last_stall_at 原来只有 [startedAt, now] 这个**隐含**窗口：
   // 单独引用它，读者会把「计数器归零」读成「从未卡过」。
   // ⇒ 现在窗口两端跟着读数一起走（event_loop.since / event_loop.observed_at）。

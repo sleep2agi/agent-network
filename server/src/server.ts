@@ -920,7 +920,7 @@ function corsHeaders(req: Request): Record<string, string> {
  */
 export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
   // 存活/版本：外部 watchdog 与运维只靠这些判断「活没活」
-  "ok", "version", "api_version", "transport", "uptime", "startedAt",
+  "ok", "version", "version_role", "api_version", "transport", "uptime", "startedAt",
   // 规模与健康度聚合（不含拓扑明细）
   "sessions_count", "sse_connections", "mcp_inflight", "mcp_inflight_peak",
   // 事件循环停顿是**一个对象**（event_loop: {max_gap_ms, recent_stalls,…}），
@@ -973,6 +973,11 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   // ── gauge：聚合 / 粗标签 ─────────────────────────────────────────────
   ok: { class: "gauge", granularity: "boolean" },
   version: { class: "gauge", granularity: "label", why: "粗粒度版本号；精确字节身份由 git_commit 承担，而它不匿名" },
+  version_role: {
+    class: "gauge",
+    granularity: "label",
+    why: "把「version 是部署标签不是指纹」写进载荷 —— 读者不会去查它数的是什么",
+  },
   api_version: { class: "gauge", granularity: "label" },
   transport: { class: "gauge", granularity: "label" },
   uptime: { class: "gauge", granularity: "seconds" },
@@ -3097,6 +3102,12 @@ return Bun.serve({
       const body: Record<string, unknown> = {
         ok: true,
         version: SERVER_VERSION,
+        // 2026-10-31 —— **version 是部署标签，不是代码指纹**（生产实例：4 分钟内 version 变、
+        // buildCommit 一字未变，同 commit 重新打包）。
+        // ⇒ 任何以 version 为键的巡检/回滚检测都会假跳或永远不跳。
+        // ⇒ 这里把它的角色写进载荷本身，因为**读者不会去查它数的是什么**。
+        //    判据：监控/告警/对账只认 buildCommit（本字段鉴权可见）；version 只用于人读。
+        version_role: "deployment_label",
         api_version: "v3",
         transport: "streamable-http",
         sessions_count: count?.cnt ?? 0,
