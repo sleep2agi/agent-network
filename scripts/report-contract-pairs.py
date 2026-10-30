@@ -126,7 +126,49 @@ def scan(path: Path) -> dict[str, int]:
     return out
 
 
+def selftest(quiet: bool = False) -> int:
+    """副本检测的可失败用例：一个「永远返回相同」的实现过不了第二条。"""
+    import tempfile
+    bad = []
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "a").mkdir(); (root / "b").mkdir()
+        body = "export const X = 1;\n"
+        (root / "a" / "dup.ts").write_text(body)
+        (root / "b" / "dup.ts").write_text(body)
+        files = {"dup.ts": {"a": root / "a" / "dup.ts", "b": root / "b" / "dup.ts"}}
+        c1 = copies(files)[0]
+        if not c1["identical"]:
+            bad.append("两份逐字符相同应判 identical=True")
+        elif not quiet:
+            print("✓ selftest 两份逐字符相同 ⇒ identical=True")
+        (root / "b" / "dup.ts").write_text(body + "// one side edited\n")
+        c2 = copies(files)[0]
+        if c2["identical"]:
+            bad.append("单侧改一行后仍判 identical=True —— 这条门对分叉是瞎的")
+        elif not quiet:
+            print("✓ selftest 单侧改一行 ⇒ identical=False（必须红的那一格）")
+        files1 = {"solo.ts": {"a": root / "a" / "dup.ts"}}
+        if copies(files1):
+            bad.append("只有一侧的文件不该被当成副本")
+        elif not quiet:
+            print("✓ selftest 只有一侧 ⇒ 不算副本")
+    if bad:
+        print("✗ 副本检测自检失败：", file=sys.stderr)
+        for b in bad:
+            print(f"    · {b}", file=sys.stderr)
+        return 1
+    if not quiet:
+        print("✓ selftest 3 例全部符合预期（含 1 个必须红的分叉例）")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 本次没有读数（退出码 2）", file=sys.stderr)
+        return 2
     files: dict[str, dict[str, Path]] = {}
     for group, root in GROUPS.items():
         if not root.is_dir():

@@ -58,7 +58,9 @@ jobs:
       # 任何单侧改动都会让副本分叉，而改的那一侧不知道另一端。
       # 分叉不一定是错，但必须是显式决定（改回去 / 删基线行并说明）。
       - name: duplicated criteria copies have not silently diverged
-        run: python3 scripts/report-contract-pairs.py --assert
+        run: |
+          python3 scripts/report-contract-pairs.py --selftest
+          python3 scripts/report-contract-pairs.py --assert
       - name: the curl exit-code classifier still classifies the layers we rely on
         run: bash scripts/lib/curl-exit.sh --selftest
       - name: no shell trap may overwrite the exit code
