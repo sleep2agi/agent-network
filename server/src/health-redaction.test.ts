@@ -148,6 +148,10 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
 
     const after = await (await fetch(`${BASE}/health`)).json() as any;
     expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
+    // 🔴 窗口起点必须不动：计数器 +1 而 since 变化，会让「这段时间拒了几次」算错。
+    //    没有窗口的计数器是「没有域的数」；没有 must-fire 的计数器是「没有证据的数」。
+    expect(after.counters.since).toBe(before.counters.since);
+    expect(after.startedAt).toBe(before.startedAt);
     const bumped = Object.keys(after.counters.task_rejections.by_reason).find(
       (k) => k.startsWith(`${rej.status}:`),
     );
