@@ -7453,13 +7453,21 @@ async function processConfigUpdate(): Promise<void> {
         );
       } catch (switchErr: any) {
         const reason = String(switchErr?.message || switchErr).slice(0, 400);
+        // 本地日志保留 message（便于现场排查），**上报给 Hub 的摘要只带
+        // err.name + 白名单 err.code**：message 可能包含上游原文，
+        // 而 ack.error 会进 Hub 库、也可能被界面展示。
+        // 依据：Portal 自己的 mapper 从不读 error.message，
+        // 并有测试把 Error('synthetic-secret') 钉成固定 code —— 这条风险在他们那边已被识别。
+        const errName = typeof switchErr?.name === "string" ? switchErr.name : "Error";
+        const rawCode = typeof switchErr?.code === "string" ? switchErr.code : "";
+        const errCode = /^[A-Za-z0-9_.-]{1,64}$/.test(rawCode) ? rawCode : "unknown";
         warn(`[config-apply] OpenCode V2 model switch failed: ${reason}`);
         // 失败路径的 ack 也要有上限:一次就够,别在「拒绝」这件事上再等 4×30s。
         try {
           await callCommHub("ack_config_update", {
             update_id: updateId,
             status: "rejected",
-            error: `OpenCode session model switch failed: ${reason}`,
+            error: `OpenCode session model switch failed: ${errName}/${errCode}`,
           }, 0);
         } catch (ackErr: any) {
           warn(`[config-apply] ack rejected failed: ${ackErr?.message || ackErr}`);
