@@ -7414,8 +7414,13 @@ async function processConfigUpdate(): Promise<void> {
       const sessionRunning = opencodeCopresenceSession?.isRunning === true;
       const switchable = typeof opencodeCopresenceSession?.setSelectedModel === "function";
       if (!sessionRunning || !switchable) {
-        warn(`[config-apply] hot model switch unavailable (sessionRunning=${sessionRunning}, `
-          + `setSelectedModel=${switchable}); degrading to restart`);
+        // 打印「分支 + 输入」，不打印「谓词的布尔」：
+        // 布尔只能区分“方法在不在”，而“方法在但一调用就抛”会被读成 true，
+        // 正好回到这个坑本身（present ≠ 可用）。
+        // 抛错那一支在下面 try/catch 里另有一行，带原始错误。
+        warn(`[config-apply] hot model switch unavailable `
+          + `(session=${sessionRunning ? "running" : "not-running"}, `
+          + `setSelectedModel=${switchable ? "present" : "missing"}); degrading to restart`);
         mode = "restart";
       }
     }
