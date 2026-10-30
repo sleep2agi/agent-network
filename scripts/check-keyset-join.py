@@ -162,6 +162,9 @@ def scan_paths(files: list[Path], repo: Path):
     advisory: list[str] = []
     review: list[str] = []
     scanned = 0
+    # 🔴 阳性对照：正则若因重构失效，全仓会「干净地」报 0 —— 与真的没有违规同形。
+    #    所以同时数一个**必须命中**的宽形状（任意 .join( ）；它为 0 就是判据坏了，不是代码干净。
+    any_join_hits = 0
     for path in files:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -173,6 +176,7 @@ def scan_paths(files: list[Path], repo: Path):
             rel = path.name
         scanned += 1
         test_file = is_test_path(rel)
+        any_join_hits += len(ANY_JOIN.findall(text))
         lines = text.splitlines()
         # 本文件内「键集派生」的标识符（弱数据流：同一文件的赋值即视为派生）
         tainted = {m.group(1) for m in KEYSET_ASSIGN.finditer(text)}
@@ -243,7 +247,7 @@ def scan_paths(files: list[Path], repo: Path):
                     review if test_file else blocking, n,
                     f"键集派生标识符 `{ident}` 拼字符串后参与比较（分隔符可碰撞）", snippet,
                 )
-    return blocking, unproven, advisory, review, scanned
+    return blocking, unproven, advisory, review, scanned, any_join_hits
 
 
 # ---------------------------------------------------------------------------
@@ -294,13 +298,18 @@ SELFTEST_CASES = [
 def selftest() -> int:
     import tempfile
 
+    # 遍历 0 个用例也是通过 —— 这是 empty-assertion 的最小形状。
+    # 所以先钉数量，再跑用例：任何人删掉一个用例，这里先红。
+    if len(SELFTEST_CASES) != 4:
+        print(f"✗ selftest 用例数应为 4，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
+        return 1
     failures = 0
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         for name, body, bucket, marker in SELFTEST_CASES:
             f = root / f"{name}.ts"
             f.write_text(body, encoding="utf-8")
-            blocking, unproven, advisory, review, _ = scan_paths([f], root)
+            blocking, unproven, advisory, review, _, _ = scan_paths([f], root)
             pool = {"blocking": blocking, "unproven": unproven, "advisory": advisory, "review": review}[bucket]
             hit = [item for item in pool if marker in item]
             ok = bool(hit)
@@ -319,7 +328,7 @@ def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
     repo = Path(__file__).resolve().parent.parent
-    blocking, unproven, advisory, review, scanned = scan(repo)
+    blocking, unproven, advisory, review, scanned, any_join_hits = scan(repo)
 
     for bucket, mark, title in (
         (blocking, "✗", "键集拼接（阻塞）"),
@@ -333,6 +342,12 @@ def main() -> int:
             print(f"✓ {title}: 0 处")
 
     print(f"✓ 扫描 {scanned} 个源文件（已排除构建产物 / node_modules）")
+    # 阳性对照：宽形状必须命中。0 说明判据本身失效（或扫描域为空），不是“代码干净”。
+    if any_join_hits == 0:
+        print("✗ 阳性对照失败：全仓连一个 `.join(` 都没找到", file=sys.stderr)
+        print("  ⇒ 要么正则/扫描域坏了，要么仓库是空的。此刻的 0 不能读成“没有违规”。", file=sys.stderr)
+        return 1
+    print(f"✓ 阳性对照：宽形状 `.join(` 命中 {any_join_hits} 次 ⇒ 判据确实到达了代码")
 
     if advisory:
         print(f"· 数组 join（不阻塞，{len(advisory)} 处，后果是去重口径而非契约绕过）:")
