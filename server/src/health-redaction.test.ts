@@ -124,6 +124,32 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(b.startedAt).toBe(a.startedAt);
   });
 
+  // 2026-10-31 —— 拒绝计数的 **must-fire**：注入一次真实拒绝，看它跳不跳。
+  //
+  // 为什么必须有这一条：光断言 by_reason 存在，测的是形状；形状对、接线错，读数照样是 0。
+  // 而「只有异常路径能让它 +1」这一类，0 与「从没出过错」同形 —— 不注入就永远发现不了。
+  test("a real rejected /api/task actually bumps the counter (must-fire, not just shape)", async () => {
+    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const beforeTotal = before.counters.task_rejections.total as number;
+
+    // 🔴 必须**带登录态**、并在 handler 内部失败：
+    // 全局鉴权中间件的 401 在到达 /api/task 之前就返回 ⇒ 根本不经过 logTaskRejection。
+    // （这本身就是一条已知缺口，写在 rejection-counters.ts 的注释里。）
+    const rej = await fetch(`${BASE}/api/task`, {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${userToken}` },
+      body: JSON.stringify({}),   // schema 校验失败 ⇒ 400，走 reject()
+    });
+    expect(rej.status).toBeGreaterThanOrEqual(400);
+
+    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
+    const bumped = Object.keys(after.counters.task_rejections.by_reason).find(
+      (k) => k.startsWith(`${rej.status}:`),
+    );
+    expect(bumped).toBeTruthy();
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);
