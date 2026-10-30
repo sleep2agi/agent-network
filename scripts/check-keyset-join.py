@@ -531,6 +531,11 @@ def main() -> int:
     print("  failure_mode   : loud —— 正则因重构失效时，宽形状计数会掉到 0 ⇒ 阳性对照失败 ⇒ exit 1")
     # 2026-10-31 —— 会过期的读数要给「它何时失效」的**可计算条件**，不是「测量于某时刻」。
     # 「测量于 T」要求读者自己知道衰减率；而衰减率只有发布者知道。
+    # 2026-10-31 —— 门的状态是**二维**的：能不能红 × 今天红不红。
+    # 只报一维时，「恒红」与「假绿」在报告里同形（都是「有问题/没问题」）。
+    can_red = "yes（selftest 7/7 + 跨行 canary）"
+    now = "green（0 阻塞）" if not blocking else f"red（{len(blocking)} 处）"
+    print(f"  gate_state     : can_red={can_red} ｜ current={now}  ⇒ 二维都报，否则恒红与假绿同形")
     print("  invalidates_on : 树变（ref 或 dirty 变）｜正则变（selftest 不再 7/7）｜扫描域变（ext 计数变）")
     print("                   ⇒ 三者任一发生，上面的结论作废；不需要读者知道任何速率")
     # 2026-10-31 —— **流行度**要和结论一起说。
