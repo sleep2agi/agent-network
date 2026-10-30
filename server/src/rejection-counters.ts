@@ -92,7 +92,21 @@ export function recordTaskRejection(status: number, code: unknown): void {
  *   - 排序是为了让两次读数可比（无序 Map 会让「同一个计数器」看起来在变）
  *   - 上限 64 个桶，超出的合并进 `other` —— 计数器的价值在「为什么」，不在「穷举」
  */
-export function taskRejectionCounters(): { total: number; by_reason: Record<string, number> } {
+/**
+ * 2026-10-31 —— 加一个 `scope` 字段：让「这个数是进程生命期内的」无法被误读。
+ *
+ * null 有三个成因，而只有前两个被写进过文档：
+ *   ① 真的没发生
+ *   ② 记录随进程没了（进程内计数器）
+ *   ③ **记录还在日志里，只是不在这个窗口里**
+ * ⇒ 第三种最常见，而它与「没发生」在读数上同值。
+ * ⇒ 与其在注释里提醒，不如让数据自己说明：`scope: "process_lifetime"`。
+ */
+export function taskRejectionCounters(): {
+  scope: "process_lifetime";
+  total: number;
+  by_reason: Record<string, number>;
+} {
   let total = 0;
   const entries = [...REJECTION_COUNTS.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const byReason: Record<string, number> = {};
@@ -103,7 +117,10 @@ export function taskRejectionCounters(): { total: number; by_reason: Record<stri
     else other += count;
   }
   if (other > 0) byReason.other = other;
-  return { total, by_reason: byReason };
+  // ⚠️ `scope` 说的是**这个计数的生命期**，不是证据的生命期：
+  //    进程没了 ⇒ 这里归零；但对应日志行仍在磁盘上 ⇒
+  //    「计数器为 0 且日志里有拒绝」是正常的，不是矛盾。
+  return { scope: "process_lifetime", total, by_reason: byReason };
 }
 
 /** 测试用：清空。生产路径不调用。 */

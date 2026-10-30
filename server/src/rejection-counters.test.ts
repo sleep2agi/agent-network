@@ -61,6 +61,12 @@ describe("taskRejectionCounters", () => {
   });
 
   test("empty state is a readable zero, not an absent field", () => {
-    expect(taskRejectionCounters()).toEqual({ total: 0, by_reason: {} });
+    expect(taskRejectionCounters()).toEqual({ scope: "process_lifetime", total: 0, by_reason: {} });
+  });
+
+  // 2026-10-31 —— null 的第三个成因：记录还在日志里，只是不在这个窗口里。
+  // 那个事实必须由**数据**说出来，不能只写在注释里（读者不会去看注释）。
+  test("scope names the counter's lifetime, so a zero cannot be read as 'never happened'", () => {
+    expect(taskRejectionCounters().scope).toBe("process_lifetime");
   });
 });
