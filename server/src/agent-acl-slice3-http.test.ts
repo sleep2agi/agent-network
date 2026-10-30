@@ -288,6 +288,28 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— #3171 续：org_whoami 也是**两支**（第二支多一个 pacing）。
+  // 它同时是「工具自带节流提示」的唯一一处，所以顺便把节流也钉住。
+  describe("org_whoami: base shape + the conditional pacing key", () => {
+    test("first call ⇒ no pacing; after the pacer trips ⇒ pacing appears (keys still pinned)", async () => {
+      const O = { alias: "acl3-whoami-o", node: "node_acl3_whoami_o" };
+      seedAgent({ alias: O.alias, node: O.node });
+      const minted = createNetworkTokenForNode(adminId, NET, O.alias, O.node);
+      expect(minted.ok).toBe(true);
+      const ntok = minted.token!;
+
+      const first = await tool(ntok, "org_whoami", {});
+      expect(first.ok).toBe(true);
+      expect(Object.keys(first)).not.toContain("pacing"); // 基线：第一次不该被提示
+
+      // 节流阈值 8 次/60 秒 ⇒ 连续调用后最后一条必须带 pacing
+      let last: any = null;
+      for (let i = 0; i < 10; i++) last = await tool(ntok, "org_whoami", {});
+      expect(Object.keys(last)).toContain("pacing");
+      expect(typeof last.pacing).toBe("object");
+    });
+  });
+
   // 2026-10-31 —— #3171 续：**条件出现的键**（与 update_node_config 的 warnings 同族）。
   // get_inbox 在 human 模式下多带一个 human_inbox —— 只钉无 flag 那一支，
   // 等于允许另一支任意变形。
