@@ -178,6 +178,15 @@ def main() -> int:
     if live and on_disk:
         same = live == on_disk
         print(f"③ 交叉：exe sha256 {live[:16]}… vs 部署路径 {on_disk[:16]}… ⇒ {'同一份字节' if same else '不是同一份字节'}")
+        # 2026-10-31 —— 第四种情形要单独念出来，否则它会被并进前三种的语义里：
+        #   进程换了、产物也换了、但 exe 哈希相同 ⇒ **同包重部署**
+        #   ⇒ 它应当记为「重启」，不能计入「发版」，否则发版次数会被重部署污染。
+        if deleted and same:
+            print("④ 组合：exe 已 deleted 且哈希相同 ⇒ **同包重部署**（记「重启」，不计「发版」）")
+        elif deleted and not same:
+            print("④ 组合：exe 已 deleted 且哈希不同 ⇒ **新包已上线，进程仍持旧 inode**（此刻读到的行为属于旧包）")
+        else:
+            print("④ 组合：未 deleted ⇒ 不涉及「同包重部署」判定")
     else:
         print("③ 交叉：无法判定（权限或文件已不可读）")
     return 0
