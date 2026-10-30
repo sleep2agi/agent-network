@@ -150,3 +150,40 @@ test("nonterminal legacy reply retains its established behavior", async () => {
   expect(db.get("SELECT status,result FROM tasks WHERE task_id=?1", openId)).toEqual({ status: "replied", result: "ordinary final" });
   expect(db.get("SELECT COUNT(*) AS n FROM task_late_replies WHERE task_id=?1", openId).n).toBe(0);
 });
+
+// #3061 —— 任务**从未记下 turn 上下文**时，迟到结果也必须能收。
+//
+// 现场（2026-10-30 生产实测）：
+//   「仍在 TUI 会话里运行，等待回复已达 30 分钟上限」的失败任务 289 条，
+//   其中 thread_id/turn_id 非空的 **0 条**；「任务未提交」781 条里只有 1 条有。
+//   ⇒ 这类任务的迟到结果永远匹配不上上下文，等于「活干完了但结果必定丢弃」。
+//   全库 task_late_replies 只有 4 行，正是这条路走不通的证据。
+test("既有任务没有 turn 上下文时，迟到结果仍可落账并投递给发送方", async () => {
+  const contextlessId = "task_late710_noctx";
+  db.run(`INSERT INTO tasks
+    (task_id,from_name,to_name,to_node_id,status,content,result,network_id,thread_id,turn_id,completed_at)
+    VALUES(?1,?2,'late710-worker',?3,'failed','never started a turn','共享会话忙，30 分钟内未提交',?4,NULL,NULL,datetime('now'))`,
+    [contextlessId, owner.user.username, workerId, owner.network_id]);
+
+  const accepted = await mcp(workerToken, "send_reply", {
+    in_reply_to: contextlessId,
+    text: "结果其实跑完了",
+    status: "replied",
+    thread_id: "thread_from_runtime_any",
+    turn_id: "turn_from_runtime_any",
+  });
+  expect(accepted).toMatchObject({ ok: true, late: true, duplicate: false });
+  // 任务行不被改写
+  expect(db.get("SELECT status,result FROM tasks WHERE task_id=?1", contextlessId))
+    .toEqual({ status: "failed", result: "共享会话忙，30 分钟内未提交" });
+  // 落进 append-only 账，并带上运行时给的上下文
+  const row = db.get("SELECT thread_id,turn_id,status,result FROM task_late_replies WHERE task_id=?1", contextlessId);
+  expect(row).toMatchObject({ thread_id: "thread_from_runtime_any", turn_id: "turn_from_runtime_any", status: "replied", result: "结果其实跑完了" });
+  // 发送方能在 inbox 里看到它（否则「活干完了没人知道」）
+  const inbox = await mcp(owner.token, "get_inbox", { alias: owner.user.username, limit: 100 });
+  expect(inbox.messages).toContainEqual(expect.objectContaining({ id: accepted.message_id, late: true, content: "结果其实跑完了" }));
+  // 不是这个任务的负责人，仍然拒（放宽只针对上下文，不放宽归属）
+  expect(await mcp(siblingToken, "send_reply", {
+    in_reply_to: contextlessId, text: "impostor", thread_id: "t", turn_id: "u",
+  })).toMatchObject({ ok: false, error: "late_reply_task_not_owned" });
+});
