@@ -288,6 +288,32 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     });
   });
 
+  // 2026-10-31 —— 补的是**反方向**：既有的
+  //   "every field in the authenticated body carries a class"
+  // 只查 payload → meta（加字段忘了分类）；它查不到 meta → payload（**声明了一个永远不出现的字段**）。
+  // 后者是「死 meta」：一条 meta 写着 class/granularity/frozen_at_boot，而没有任何响应会带它，
+  // 于是它会一直正确地描述一个不存在的东西 —— 并且看起来比没有更权威。
+  // （写这条时我以为两个方向都没覆盖；实测 witness 表明正向早就有，只有反向是空的。）
+  test("every field in the full payload has meta, and every meta appears in it", async () => {
+    const full = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    const payloadKeys = Object.keys(full);
+    const metaKeys = Object.keys(HEALTH_FIELD_META);
+    const undocumented = payloadKeys.filter((k) => !metaKeys.includes(k)).sort();
+    // **有条件出现的字段**：meta 里有、默认响应里没有。每一项都必须能说出触发条件，
+    // 并且在这里当场把它触发一次 —— 否则「有条件出现」与「写错了」同形。
+    const conditional: Record<string, string> = {
+      probe_nonce: "只在带 X-Probe-Nonce 时出现",
+    };
+    const phantom = metaKeys.filter((k) => !payloadKeys.includes(k) && !(k in conditional)).sort();
+    expect({ undocumented, phantom }).toEqual({ undocumented: [], phantom: [] });
+    // 把每个条件字段真的触发一次
+    for (const k of Object.keys(conditional)) {
+      if (k !== "probe_nonce") continue;
+      const withNonce = await (await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": "meta-bijection" } })).json() as any;
+      expect(Object.prototype.hasOwnProperty.call(withNonce, k)).toBe(true);
+    }
+  });
+
   // 2026-10-31 —— license 三态必须是「三种不同的可修性」，不能折成一个 "none"。
   // 本条只断言形状（测试库没有 license 行 ⇒ absent）；四种映射由 license-state.test.ts 钉死。
   test("license_state distinguishes absent from unknown instead of collapsing to none", async () => {
