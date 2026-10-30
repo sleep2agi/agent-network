@@ -1014,6 +1014,10 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   // ── landmark：精确位置/身份 ──────────────────────────────────────────
   git_commit: { class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
   git_dirty: { class: "landmark" },
+  build_identity_note: {
+    class: "landmark",
+    why: "解释 git_commit 为什么为空；没有它，「没有」与「读不到」同形",
+  },
   // 逐会话明细 = 拓扑 ⇒ 只需「有几个」，不需要「哪几个」（与 #473 的审计同一条）
   sse_sessions: { class: "landmark", why: "按键列出连接 = 网络 id + 别名，正是 #473 那个泄露面" },
   pid: { class: "landmark" },
@@ -1081,7 +1085,13 @@ function probeNonceOf(req: Request): string | null {
  * 只在启动时算一次（boot_* 语义）：git commit 不可能在进程生命周期内变化，
  * 所以它满足「变更周期 ⊇ 进程生命周期」，可以绑进程边界。
  */
-function detectBootGitIdentity(): { commit: string | null; dirty: boolean } {
+function detectBootGitIdentity(): {
+  commit: string | null;
+  /** 只有 commit 非空时才有意义；commit 为空时必须是 null（**不是 false**）。 */
+  dirty: boolean | null;
+  /** commit 为空时说明**为什么**空 —— 没有它，「没有」与「读不到」同形。 */
+  reason: "not_a_git_checkout" | "git_unavailable" | "unexpected_rev_parse_output" | null;
+} {
   const start = (import.meta as { dir?: string }).dir ?? process.cwd();
   let dir = start;
   for (let i = 0; i < 6; i += 1) {
@@ -1091,7 +1101,9 @@ function detectBootGitIdentity(): { commit: string | null; dirty: boolean } {
           stdio: ["ignore", "pipe", "ignore"],
           timeout: 1500,
         }).toString().trim();
-        if (!/^[0-9a-f]{40}$/.test(out)) return { commit: null, dirty: false };
+        if (!/^[0-9a-f]{40}$/.test(out)) {
+          return { commit: null, dirty: null, reason: "unexpected_rev_parse_output" };
+        }
         // 2026-10-31 —— dirty 位不能省：commit sha 单独一个字段，
         // 无法区分「干净树构建」与「脏树构建」，于是 vantage 依然可能把一个
         // 非提交的值当成提交。dirty 一旦为 true，这个读数只能写 prod@自称。
@@ -1105,16 +1117,16 @@ function detectBootGitIdentity(): { commit: string | null; dirty: boolean } {
         } catch {
           dirty = true;   // 读不到状态 ⇒ 保守认定为脏（不许把“不知道”当干净）
         }
-        return { commit: out, dirty };
+        return { commit: out, dirty, reason: null };
       } catch {
-        return { commit: null, dirty: false };
+        return { commit: null, dirty: null, reason: "git_unavailable" };
       }
     }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return { commit: null, dirty: false };
+  return { commit: null, dirty: null, reason: "not_a_git_checkout" };
 }
 
 const BOOT_GIT = detectBootGitIdentity();
@@ -3229,7 +3241,10 @@ return Bun.serve({
         //    commit sha 对匿名读者 = 精确告诉外部这是哪一版代码（本仓公开）。
         //    与 git_commit 成对：dirty=true ⇒ 只能写 prod@自称，不能写 prod@<sha>。
         git_commit: BOOT_GIT_COMMIT,
-        git_dirty: BOOT_GIT.dirty,
+        git_dirty: BOOT_GIT.commit ? BOOT_GIT.dirty : null,
+        // 2026-10-31 —— 每个可为 null 的字段都要有一个**能解释它的兄弟字段**。
+        // 没有它时，「不是 git 树」「git 不可用」「rev-parse 输出异常」三种成因同形。
+        build_identity_note: BOOT_GIT.reason,
         // 2026-10-31 —— 拒绝原因计数（与那条日志同一位置 +1，不会漏记）。
         // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
         //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。

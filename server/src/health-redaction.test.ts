@@ -353,6 +353,27 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.counters.task_rejections.scope).toBe("process_lifetime");
   });
 
+  // 2026-10-31 —— 规则：「每个可为 null 的字段都必须有一个能解释它的兄弟字段。」
+  // 反过来：不许用 false 冒充「不知道」—— git_dirty=false 读起来是「干净树」。
+  describe("nullable fields carry an explainer", () => {
+    test("git identity: committed ⇒ note null & dirty boolean; absent ⇒ note non-null & dirty null", async () => {
+      const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      if (b.git_commit !== null) {
+        expect(b.build_identity_note).toBeNull();
+        expect(typeof b.git_dirty).toBe("boolean");
+      } else {
+        expect(typeof b.build_identity_note).toBe("string");
+        expect(b.git_dirty).toBeNull();   // 不知道 ≠ 干净
+      }
+    });
+
+    test("kernel_started_at has its explainer sibling (already true, pinned so it stays true)", async () => {
+      const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      if (b.kernel_started_at === null) expect(typeof b.kernel_started_at_note).toBe("string");
+      else expect(b.kernel_started_at_note).toBeNull();
+    });
+  });
+
   // 2026-10-31 —— 三分类从「注释里的提醒」变成「字段上的必填标签」。
   //
   // 原来的问题：probe_nonce 恰好是对的，但那是因为**恰好这样写**；
