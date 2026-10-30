@@ -370,8 +370,16 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(plain.status).toBe(200);
     expect((plain.headers.get("cache-control") || "").toLowerCase()).toContain("no-store");
 
+    // 2026-10-31 —— 先分清「不可能 304」与「可能 304 但服务端拒绝了」：
+    // 没有 ETag 时，条件请求必然 200，那条断言是**空的**（vacuous），
+    // 而它与「实测过 304 不存在」在报告里长得一样。
+    const etag = plain.headers.get("etag");
+    if (etag === null) {
+      // 明确记录：本服务不产生 ETag ⇒ 304 在协议层不可能发生；这一格不靠条件请求证明。
+      expect(plain.headers.get("etag")).toBeNull();
+    }
     const conditional = await fetch(`${BASE}/health`, {
-      headers: { "cache-control": "no-cache", "if-none-match": "*" },
+      headers: { "cache-control": "no-cache", "if-none-match": etag ?? "*" },
     });
     expect(conditional.status).toBe(200);   // 304 会让 startedAt 冻结、counters 照涨 = 假 flapping
     const body = await conditional.json() as any;
