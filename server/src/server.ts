@@ -992,6 +992,16 @@ export interface HealthFieldMeta {
    * 现在两种读法都是字段的取值，谁要严就断言 joinability !== "echo_only" 不许进匿名。
    */
   joinability?: "echo_only" | "server_generated";
+  /**
+   * 2026-10-31 —— 是不是**启动快照**（启动时刻定值、之后不再变）。
+   *
+   * 这一类字段有一个单向盲区：它们只会**漏报**，不会误报——
+   *   读初始快照的判据把「后来才有的」读成「从来没有」，
+   *   而结果与「真的没有」在读数上完全一致。
+   * ⇒ 所以分类必须写出**谁不算**：`served_at` 长得一模一样，而它的全部价值在于会变。
+   *   只写「什么算」的分类，对形似字段没有抵抗力。
+   */
+  frozen_at_boot?: true;
   /** 为什么把它放这一档（只在有争议的字段上写） */
   why?: string;
 }
@@ -1008,7 +1018,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   api_version: { class: "gauge", granularity: "label" },
   transport: { class: "gauge", granularity: "label" },
   uptime: { class: "gauge", granularity: "cumulative" },
-  startedAt: { class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
+  startedAt: { frozen_at_boot: true, class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
   sessions_count: { class: "gauge", granularity: "level" },
   sse_connections: { class: "gauge", granularity: "level" },
   mcp_inflight: { class: "gauge", granularity: "level" },
@@ -1023,6 +1033,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   license_state: { class: "gauge", granularity: "label" },
   limits: { class: "gauge", granularity: "label" },
   capabilities: { class: "gauge", granularity: "label" },
+  // ⚠️ 例外：**形似启动快照，但会变** —— 它的全部价值在于变，标成快照会毁掉它。
   served_at: { class: "gauge", granularity: "instant" },
   build_identified: { class: "gauge", granularity: "boolean", why: "只说「有没有构建标识」，不说「是什么」" },
   alert_baselines: { class: "gauge", granularity: "cumulative" },
@@ -1039,7 +1050,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   },
 
   // ── landmark：精确位置/身份 ──────────────────────────────────────────
-  git_commit: { class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
+  git_commit: { frozen_at_boot: true, class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
   git_dirty: { class: "landmark" },
   build_identity_note: {
     class: "landmark",
@@ -1047,10 +1058,10 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   },
   // 逐会话明细 = 拓扑 ⇒ 只需「有几个」，不需要「哪几个」（与 #473 的审计同一条）
   sse_sessions: { class: "landmark", why: "按键列出连接 = 网络 id + 别名，正是 #473 那个泄露面" },
-  pid: { class: "landmark" },
-  boot_id: { class: "landmark" },
-  proc_start_ticks: { class: "landmark" },
-  kernel_started_at: { class: "landmark", why: "内核口径的精确启动时刻 ⇒ 可与外部日志对账" },
+  pid: { frozen_at_boot: true, class: "landmark" },
+  boot_id: { frozen_at_boot: true, class: "landmark" },
+  proc_start_ticks: { frozen_at_boot: true, class: "landmark" },
+  kernel_started_at: { frozen_at_boot: true, class: "landmark", why: "内核口径的精确启动时刻 ⇒ 可与外部日志对账" },
   kernel_started_at_note: { class: "landmark" },
 
   // ── credential ─────────────────────────────────────────────────────

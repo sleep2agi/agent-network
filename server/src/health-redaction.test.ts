@@ -353,6 +353,18 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.counters.task_rejections.scope).toBe("process_lifetime");
   });
 
+  // 2026-10-31 —— 分类必须写出**谁不算**：形似启动快照但会变的那个字段。
+  // 读初始快照的判据只会漏报、不会误报；而它的失效形态与「真的没有」同形。
+  test("test_spawn_time_snapshot_family_excludes_the_one_field_that_must_change", async () => {
+    const { HEALTH_FIELD_META } = await import("./server.js");
+    // 分子：至少 5 个被明确标成启动快照（今天：startedAt / git_commit / boot_id / pid / proc_start_ticks / kernel_started_at）
+    const frozen = Object.entries(HEALTH_FIELD_META).filter(([, m]) => m.frozen_at_boot === true).map(([k]) => k);
+    expect(frozen.length).toBeGreaterThanOrEqual(5);
+    // 例外必须显式：served_at 长得一模一样，但它会变
+    expect(frozen).not.toContain("served_at");
+    expect(HEALTH_FIELD_META.served_at.frozen_at_boot).toBeUndefined();
+  });
+
   // 2026-10-31 —— credential 的「可对账性」是**字段取值**，不是注释里的辩论。
   test("joinability decides anonymity, not the reader's interpretation", async () => {
     const { HEALTH_FIELD_META, mayBePublic } = await import("./server.js");
