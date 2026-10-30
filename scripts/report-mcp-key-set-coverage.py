@@ -132,8 +132,13 @@ def main() -> int:
     print("object         : server/src/*.ts 里的 `server.tool(` 注册（**服务端**的工具表；不含客户端/控制台侧符号）")
     print("断言侧对象     : server/src/*.test.ts（服务端测试；不看其它包与构建产物）")
     print(f"MCP 工具：{len(tools)} 个（分母 = 注册点，不是 grep 次数）")
-    print(f"文件级（宽）：{len(covered)} 个 ⇒ 比例 {len(covered)}/{len(tools)} = {len(covered) / max(len(tools), 1):.1%}")
-    print(f"邻近级（严，≤{WINDOW} 行）：{len(near)} 个 ⇒ 比例 {len(near)}/{len(tools)} = {len(near) / max(len(tools), 1):.1%}")
+    # 2026-10-31 —— 头条数字换成**严格口径**。
+    # 实测抽查：list_tasks 在测试里被调用过、该文件也有一条 Object.keys 断言，
+    # 但那条断言测的是 humans[0]，与 list_tasks 无关 ⇒ 文件级把这种算成了「已覆盖」。
+    # ⇒ 读者只看第一个数，所以第一个数必须是最不容易被高估的那个。
+    print(f"覆盖（严格口径，断言与调用 ≤{WINDOW} 行）：{len(near)} 个 ⇒ {len(near)}/{len(tools)} = {len(near) / max(len(tools), 1):.1%}")
+    print(f"上界（文件级，**含可能测空气**）：{len(covered)} 个 ⇒ {len(covered)}/{len(tools)} = {len(covered) / max(len(tools), 1):.1%}")
+
     print(f"调用表达式级（名字出现在 tool( 调用里）按**断言距调用**的距离分档：")
     print(f"    ≤15 行：{len(strict_15)} 个（{len(strict_15) / max(len(tools), 1):.1%}）"
           f"｜≤40 行：{len(strict_40)} 个（{len(strict_40) / max(len(tools), 1):.1%}）"
