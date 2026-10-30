@@ -288,6 +288,34 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— #3171：warnings 出现时的成功体也必须被钉住。
+  // 上面那条钉的是「没有 warning」的形状；而 warnings 是**条件出现**的 ⇒
+  // 只断言前者，等于允许后者任意变形（今天它没出事，靠的是客户端宽松解析）。
+  test("带 warning 的成功体恰好 {apply_mode, ok, update_id, warnings}，且 warning 项恰好 {code, message}", async () => {
+    const W = { alias: "acl3-agent-w", node: "node_acl3_w" };
+    db.run(`INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, config_snapshot)
+            VALUES (?1, ?2, ?2, ?3, ?4, ?5)`,
+      [W.node, W.alias, NET, adminId, JSON.stringify({ systemd_supervision: "not_supervised" })]);
+    db.run(`INSERT INTO sessions (resume_id, alias, node_id, status, network_id, updated_at, last_seen_at)
+            VALUES (?1, ?2, ?3, 'idle', ?4, datetime('now'), datetime('now'))`,
+      [`r_${W.node}`, W.alias, W.node, NET]);
+
+    const r = await tool(adminToken, "update_node_config", {
+      node_id: W.node, base_revision: 0, patch: { channels: [] }, network_id: NET,
+    });
+
+    expect(r.ok).toBe(true);
+    expect(r.apply_mode).not.toBe("hot");                       // restart-tier：这正是危险的那一档
+    // 两个方向都钉：少一个键红，多一个键也红
+    expect(Object.keys(r).sort()).toEqual(["apply_mode", "ok", "update_id", "warnings"]);
+    expect(Array.isArray(r.warnings)).toBe(true);
+    expect(r.warnings.length).toBe(1);
+    expect(Object.keys(r.warnings[0]).sort()).toEqual(["code", "message"]);
+    // code 是稳定枚举，不是自由文本 —— 客户端要靠它分支
+    expect(r.warnings[0].code).toBe("restart_requires_manual_respawn");
+    expect(typeof r.warnings[0].message).toBe("string");
+  });
+
   test("revision 冲突恰好 {current_revision, error, ok}", async () => {
     // 用另一台干净节点，避开上面那条的在途状态
     const r = await tool(adminToken, "update_node_config", {
