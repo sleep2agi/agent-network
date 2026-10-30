@@ -13,8 +13,8 @@
 （文档、注释、错误消息、workflow）都必须能解析到一个真实文件。
 
 解析口径（按**引用者所在目录**向上找最近的 scripts/）：
-    agent-network/src/x.ts 里写 `scripts/y.mjs` ⇒ 就近指 agent-network/scripts/y.mjs
-    docs/ 里写 `scripts/y.sh`            ⇒ 指仓库根 scripts/y.sh
+    agent-network/src/x.ts 里写 scripts/<name>.mjs ⇒ 就近指 agent-network/scripts/<name>.mjs
+    docs/ 里写 scripts/<name>.sh          ⇒ 指仓库根 scripts/<name>.sh
 ⇒ 不做就近解析会产生大量假阳（实测 35 条里 30 条是这个原因）
 
 用法：python3 scripts/check-script-references.py [--json]
