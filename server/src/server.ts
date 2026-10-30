@@ -3254,7 +3254,10 @@ return Bun.serve({
         version_role: "deployment_label",
         api_version: "v3",
         transport: "streamable-http",
-        sessions_count: count?.cnt ?? 0,
+        // 2026-10-31 —— 读库失败时给 null，不给 0。
+        // 「0 个会话」与「读不到」在读数上同形，而 0 是一个合法值 ⇒ 它会被当成事实。
+        // 兄弟字段 status_reasons 里已有 db_unreadable，两者一起读才构成完整读数。
+        sessions_count: count?.cnt ?? null,
         sse_connections: sse.total,
         // #2363 —— MCP 在飞数（只观测）。RSS 与它成正比（≈1.2–1.4 MB/条），
         // 而 `sse_connections` 只反映长连接，看不到“同秒打进来的一批请求”。

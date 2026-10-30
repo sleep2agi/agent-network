@@ -388,6 +388,19 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(typeof body.served_at).toBe("string");
   });
 
+  // 2026-10-31 —— 「读不到」不许渲染成 0。
+  // 0 是一个合法值，而它会被当成事实；「0 个会话」与「读库失败」在读数上同形。
+  // 兄弟字段 status_reasons 里已有 db_unreadable ⇒ 两者一起读才完整。
+  test("sessions_count is a number when the DB is readable, and null (not 0) when it is not", async () => {
+    const b = await (await fetch(`${BASE}/health`)).json() as any;
+    const dbBad = Array.isArray(b.status_reasons) && b.status_reasons.includes("db_unreadable");
+    if (dbBad) {
+      expect(b.sessions_count).toBeNull();
+    } else {
+      expect(typeof b.sessions_count).toBe("number");
+    }
+  });
+
   // 2026-10-31 —— 「200 那一格」必须有 body 判据：ok 恒 true 不等于健康。
   // 与 counters.releases 同族：一个恒真的字段，读起来像「一切正常」。
   test("status separates alive-but-degraded from all-normal (200 stays a promise, not a verdict)", async () => {
