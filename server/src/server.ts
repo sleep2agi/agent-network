@@ -2899,15 +2899,21 @@ return Bun.serve({
         // 只给 uptime 时读者要自己换算，实际使用中经常被忽略 ⇒
         // “stall_count: 0”于是被读成“从未卡顿”。给出绝对时刻让窗口可被外部计算。
         startedAt: startedAtIso,
-        // 2026-10-31 —— 结论的「站位」本身要可验。
-        // 今晚有一句话写着 prod@18445bf4，而线上跑的是 e230677f：标签可以随手写。
-        // 这个字段由进程自己产生 ⇒ 外部读到的不是“某人说它在哪”，是“它说自己在哪”。
-        // 🔴 取不到就是 null（npm 安装形态没有 .git），**不回退成 version** ——
-        //    未验的断言标了“未验”仍然有用，标成事实会污染的整张表。
-        git_commit: BOOT_GIT_COMMIT,
-        // 🔴 与 git_commit 必须成对：sha 单独一个字段区分不了「干净树」与「脏树」。
-        //    dirty=true ⇒ 这个读数不能写成 prod@<sha>，只能写 prod@自称。
-        git_dirty: BOOT_GIT.dirty,
+        // 2026-10-31 —— 「站位」要可验，但**可读性必须与敏感性配对**。
+        //
+        // /health 是**匿名**端点（watchdog 契约）。commit sha 对匿名读者等于
+        // 「精确告诉外部这是哪一版代码」——本仓是公开仓 ⇒ 等于把已知问题清单指给外人。
+        // ⇒ 匿名只回答「有没有构建标识」，**不给是什么**；完整值只给已鉴权者。
+        //    与 SSE 明细同一条规则：匿名给聚合、鉴权给明细。
+        build_identified: BOOT_GIT_COMMIT !== null,
+        ...(healthIsMaster || healthIsDevOpen || healthIsAdmin
+          ? {
+              // 🔴 与 git_commit 必须成对：sha 单独一个字段区分不了「干净树」与「脏树」。
+              //    dirty=true ⇒ 这个读数只能写 prod@自称，不能写 prod@<sha>。
+              git_commit: BOOT_GIT_COMMIT,
+              git_dirty: BOOT_GIT.dirty,
+            }
+          : {}),
         // 2026-10-31 —— 拒绝原因计数（与那条日志同一位置 +1，不会漏记）。
         // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
         //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。

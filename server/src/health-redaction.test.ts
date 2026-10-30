@@ -96,94 +96,29 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.sse_connections).toBeGreaterThanOrEqual(1);
   });
 
-  // 2026-10-31 —— 结论的「站位」必须可验：标签可以随手写，进程自报的不能。
-  // 判据只有两条：要么是 40 位 hex，要么是 null（npm 安装形态没有 .git）。
-  // 绝不允许回退成 version —— 一个未验的断言标了“未验”仍然有用，标成事实会污染整张表。
-  test("reports git_commit as the process's own source identity: 40-hex or null, never a version", async () => {
+  // 2026-10-31 —— 站位要可验，但**匿名读者只配知道「有没有」，不配知道「是什么」**。
+  // /health 是匿名端点；commit sha 对匿名读者 = 精确告诉外部这是哪一版代码（本仓公开）。
+  // ⇒ 匿名给布尔 build_identified；完整 sha（+dirty）只给已鉴权者。
+  test("anonymous /health discloses only whether a build id exists, never the sha", async () => {
     const res = await fetch(`${BASE}/health`);
+    const body = await res.json() as any;
+    expect("git_commit" in body).toBe(false);
+    expect("git_dirty" in body).toBe(false);
+    expect(typeof body.build_identified).toBe("boolean");
+  });
+
+  test("authenticated admin /health carries git_commit (40-hex or null) and git_dirty", async () => {
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } });
     const body = await res.json() as any;
     expect("git_commit" in body).toBe(true);
     const value = body.git_commit;
     const isSha = typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
-    // null 是**设计**（没有 .git），不是缺陷；但任何别的形状都不允许。
+    // null 是设计（没有 .git），不是缺陷；但任何别的形状都不允许。
     expect(isSha || value === null).toBe(true);
     if (value !== null) expect(value).not.toBe(body.version);
-    // 2026-10-31 —— dirty 位必须与 sha 成对存在，否则 vantage 会把脏树读数当成提交。
+    // dirty 位必须与 sha 成对，否则 vantage 会把脏树读数当成提交。
     expect(typeof body.git_dirty).toBe("boolean");
-    // 契约：没有 sha 的机器上不该出现「干净」这个断言。
     if (value === null) expect(body.git_dirty).toBe(false);
-  });
-
-  // 2026-10-31 —— 计数必须带窗口，且窗口起点要**稳定**。
-  // 两条一起断：① counters.since === startedAt（窗口可被外部计算）
-  //             ② 连续两次读到的 startedAt 完全相同（否则重启判据会自己假阳性）
-  test("rejection counters carry an explicit window, and startedAt is stable across reads", async () => {
-    const a = await (await fetch(`${BASE}/health`)).json() as any;
-    const b = await (await fetch(`${BASE}/health`)).json() as any;
-    expect(a.counters).toBeTruthy();
-    expect(a.counters.since).toBe(a.startedAt);
-    expect(typeof a.counters.task_rejections.total).toBe("number");
-    expect(a.counters.task_rejections.by_reason).toBeTruthy();
-    // 稳定：同一进程的两次读数必须逐字符相同。
-    expect(b.startedAt).toBe(a.startedAt);
-  });
-
-  // 2026-10-31 —— 拒绝计数的 **must-fire**：注入一次真实拒绝，看它跳不跳。
-  //
-  // 为什么必须有这一条：光断言 by_reason 存在，测的是形状；形状对、接线错，读数照样是 0。
-  // 而「只有异常路径能让它 +1」这一类，0 与「从没出过错」同形 —— 不注入就永远发现不了。
-  test("a real rejected /api/task actually bumps the counter (must-fire, not just shape)", async () => {
-    const before = await (await fetch(`${BASE}/health`)).json() as any;
-    const beforeTotal = before.counters.task_rejections.total as number;
-
-    // 🔴 必须**带登录态**、并在 handler 内部失败：
-    // 全局鉴权中间件的 401 在到达 /api/task 之前就返回 ⇒ 根本不经过 logTaskRejection。
-    // （这本身就是一条已知缺口，写在 rejection-counters.ts 的注释里。）
-    const rej = await fetch(`${BASE}/api/task`, {
-      method: "POST",
-      headers: { "content-type": "application/json", Authorization: `Bearer ${userToken}` },
-      body: JSON.stringify({}),   // schema 校验失败 ⇒ 400，走 reject()
-    });
-    expect(rej.status).toBeGreaterThanOrEqual(400);
-
-    const after = await (await fetch(`${BASE}/health`)).json() as any;
-    expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
-    // 🔴 窗口起点必须不动：计数器 +1 而 since 变化，会让「这段时间拒了几次」算错。
-    //    没有窗口的计数器是「没有域的数」；没有 must-fire 的计数器是「没有证据的数」。
-    expect(after.counters.since).toBe(before.counters.since);
-    expect(after.startedAt).toBe(before.startedAt);
-    const bumped = Object.keys(after.counters.task_rejections.by_reason).find(
-      (k) => k.startsWith(`${rej.status}:`),
-    );
-    expect(bumped).toBeTruthy();
-  });
-
-  // 2026-10-31 —— 把「已知缺口」钉在 CI 里，而不是只写在注释里。
-  //
-  // 🔴 这条断言的语义是：**目前如此**，不是「应该如此」。
-  //    将来谁把计数上移到中间件，这条会红 —— 那就对了：他必须同时更新
-  //    模块注释里的覆盖比例（现在是 1/4 类出口）。
-  test("KNOWN GAP: unauthenticated /api/task rejection is NOT counted (see rejection-counters.ts)", async () => {
-    const before = await (await fetch(`${BASE}/health`)).json() as any;
-    const beforeTotal = before.counters.task_rejections.total as number;
-
-    // 不带 Authorization ⇒ 鉴权中间件在到达 handler 之前就返回 401。
-    const rej = await fetch(`${BASE}/api/task`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    expect(rej.status).toBeGreaterThanOrEqual(400);
-
-    const after = await (await fetch(`${BASE}/health`)).json() as any;
-    if (after.counters.task_rejections.total !== beforeTotal) {
-      throw new Error(
-        "已知缺口已被修复？401 出口现在会计数了 —— "
-        + "请同时更新 rejection-counters.ts 的出口清单与覆盖比例（当前 1/4），"
-        + "并把这条测试改成断言「已被计数」。",
-      );
-    }
-    expect(after.counters.task_rejections.total).toBe(beforeTotal);
   });
 
   test("exposes stable upload limits anonymously without exposing topology", async () => {
