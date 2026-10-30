@@ -77,6 +77,21 @@ def tracked(roots: list[str]) -> list[Path]:
     return [p for p in files if not p.name.endswith(".test.ts") and p.exists()]
 
 
+def wide_shape_count() -> int:
+    """阳性对照用的**宽形状**：`.reason` 这个子串在扫描域里出现多少次。
+
+    2026-10-31 —— 外部复核那条：正则若因重构失效 ⇒「干净地」报 0 处 ⇒ 与真的没有同形。
+    ⇒ 每次都要同时数一个宽形状；它为 0 说明判据坏了，而不是世界干净了。
+    """
+    n = 0
+    for p in tracked(SCAN_ROOTS):
+        try:
+            n += p.read_text(encoding="utf-8", errors="replace").count(".reason")
+        except OSError:
+            continue
+    return n
+
+
 def scan() -> list[dict]:
     hits: list[dict] = []
     for p in tracked(SCAN_ROOTS):
@@ -94,9 +109,18 @@ def scan() -> list[dict]:
 
 
 def main() -> int:
+    wide = wide_shape_count()
+    if wide == 0:
+        print("✗ 阳性对照失败：扫描域里连一个 `.reason` 都没有 ⇒ 判据可能坏了，"
+              "此时「0 处」不能读成「没有按 reason 分支」", file=sys.stderr)
+        return 2
     hits = scan()
     if not hits:
-        print("扫描域为空：没有扫到任何 .ts ⇒ 没有读数（不是「0 处」）", file=sys.stderr)
+        # 2026-10-31 —— 这一支与「正则坏了」同形：宽形状见到了 `.reason`，但一条分支都没匹到。
+        # 两种成因处置相反（真没有 vs 修正则），所以**不许**把它当结论，只能报「没有读数」。
+        print(f"✗ 0 处按 reason 分支，但宽形状见到 `.reason` {wide} 次 ⇒ "
+              f"这可能是「真的没有」，也可能是**正则坏了**；两者在这里同形", file=sys.stderr)
+        print("  ⇒ 先跑 --selftest/看一眼 BRANCH 正则，再决定是哪一种。", file=sys.stderr)
         return 2
     files = sorted({h["file"] for h in hits})
     unregistered = [h for h in hits if h["file"] not in ALLOWLIST]
@@ -108,7 +132,8 @@ def main() -> int:
         return 1 if unregistered else 0
 
     print(f"对象：{', '.join(SCAN_ROOTS)}（git ls-files，不含 *.test.ts）")
-    print(f"`.reason` 被按字面量分支：**{len(hits)} 处**，分布在 {len(files)} 个文件")
+    print(f"`.reason` 被按字面量分支：**{len(hits)} 处**，分布在 {len(files)} 个文件"
+          f"（阳性对照：宽形状 `.reason` 出现 {wide} 次 ⇒ 判据确实在跑）")
     print()
     for f in files:
         note = ALLOWLIST.get(f)

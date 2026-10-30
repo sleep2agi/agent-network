@@ -189,6 +189,11 @@ def main() -> int:
                 continue
             files.setdefault(p.name, {})[group] = p
 
+    total_ts = sum(len(side) for side in files.values())
+    if total_ts == 0:
+        # 阳性对照：三个包里必然有大量 .ts；为 0 ⇒ basename 扫描坏了
+        print("✗ 阳性对照失败：三个包里一个 .ts 都没扫到 ⇒ 此时「0 组同名」不是结论", file=sys.stderr)
+        return 2
     shared = {name: side for name, side in files.items() if len(side) >= 2}
     if not shared:
         print("扫描域为空：没有任何同名契约文件 ⇒ 没有读数（不是「一致」）", file=sys.stderr)
@@ -232,7 +237,8 @@ def main() -> int:
         return 0
 
     print("同名契约文件（basename 相同、非测试）—— 只查**可静态看见的**容错方向")
-    print(f"对象：server/src · agent-node/src · agent-network/src（不含 *.test.ts）⇒ 共 {len(rows)} 对/组")
+    print(f"对象：server/src · agent-node/src · agent-network/src（不含 *.test.ts）⇒ 共 {len(rows)} 对/组"
+          f"（阳性对照：扫到 {total_ts} 个 .ts 文件）")
     print()
     print("| 文件 | 侧 | 宽松标记 | 严格标记 | 方向相反 |")
     print("|---|---|---|---|---|")

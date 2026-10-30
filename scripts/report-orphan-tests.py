@@ -105,6 +105,13 @@ def main() -> int:
         else:
             rows.append({"file": f, "verdict": "ORPHAN", "why": "没有任何 runner 提到它"})
 
+    inv_count = sum(1 for r in rows if r["verdict"] == "A_inventory")
+    if inv_count == 0:
+        # 2026-10-31 —— 阳性对照：本仓有 800+ 条 *.test.ts。若一条都没有，说明
+        # LOOKS_LIKE_TEST 或 tracked() 坏了 ⇒ 此时「未归属 0」不是结论。
+        print("✗ 阳性对照失败：一个 *.test.ts 都没识别到 ⇒ 判据可能坏了，"
+              "此时「未归属 0」不能读成「都有人跑」", file=sys.stderr)
+        return 2
     orphans = [r for r in rows if r["verdict"] == "ORPHAN"]
     if "--json" in sys.argv:
         print(json.dumps({"object": "git ls-files ∩ 名字像测试", "total": len(rows),
