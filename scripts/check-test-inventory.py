@@ -59,6 +59,33 @@ DESCRIBE_CALL = re.compile(r"^\s*describe\s*\(\s*([\"'`])((?:(?!\1).)*)\1")
 ANY_TEST_CALL = re.compile(r"^\s*(?:test|it)\s*\(")
 
 
+def unseen_by_git(repo: Path) -> list[str]:
+    """**git 看不见**的测试文件：未跟踪且未被忽略的那些。
+
+    2026-10-31 —— 外部复核那条「四类漂移源」在本门的对应物：
+      `git ls-files` 只列 **tracked**；而开发者刚写的测试文件在 `git add` 之前
+      既不在 tracked，也不在「有改动」里 ⇒ 本门会报「无新增」，而那个文件确实存在。
+    ⇒ 这里把它列出来（**只报告，不判红**）：CI 跑的是提交后的状态，本地则要有人知道。
+
+    刻意不做的事：不把 ignored 的文件算进来（`node_modules` 之类）——
+    忽略清单是「明确允许不存在于仓库」的东西，把它们当测试文件是另一种误报。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-o", "--exclude-standard", "-z"],
+            cwd=repo, check=True, capture_output=True,
+        ).stdout.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return []
+    hints = []
+    for rel in out.split("\0"):
+        if not rel or rel.startswith("node_modules/"):
+            continue
+        if rel.endswith((".test.ts", ".test.mts", ".test.js")):
+            hints.append(rel)
+    return sorted(hints)
+
+
 def tracked_files(repo: Path) -> list[Path]:
     out = subprocess.run(
         ["git", "ls-files", "-z"], cwd=repo, check=True, capture_output=True
@@ -387,6 +414,13 @@ def main() -> int:
         print("✗ 剥字符串状态机自检未通过 ⇒ 本次的计数不是读数（退出码 2）", file=sys.stderr)
         return 2
     counts, dynamic, unreliable = collect(repo)
+    # 2026-10-31 —— 「git 知道的东西」≠「文件系统知道的东西」。
+    unseen = unseen_by_git(repo)
+    if unseen:
+        print(f"⚠ {len(unseen)} 个测试文件**还没进 git**（因此不在上面的清单里）：", file=sys.stderr)
+        for rel in unseen[:10]:
+            print(f"    · {rel}", file=sys.stderr)
+        print("  ⇒ 这不是失败：CI 跑的是提交后的状态。但在本地，「无新增」不能当成「没写新测试」。", file=sys.stderr)
     current = set(counts)
     baseline_path = repo / BASELINE
 
