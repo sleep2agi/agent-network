@@ -302,6 +302,34 @@ def scan_paths(files: list[Path], repo: Path):
 #
 # 负例（不该红的）同样要有：否则一个「什么都说违规」的门也能让正例全绿。
 # ---------------------------------------------------------------------------
+# 2026-10-31 —— 失效条件的三条，写成**类型字段**而不是散文。
+# type 是封闭集合：ref_dirty（树变了）｜behavior（尺子行为变了）｜domain（扫描域变了）。
+# check 必须是**一条能直接跑的命令或一次可比较的取样**，否则「条件未触发」与「没人检查」同形。
+INVALIDATES: list[dict[str, str]] = [
+    {"id": "tree_changed", "type": "ref_dirty",
+     "check": "重跑本脚本；SCOPE 的 measured_on 行与上次不同 ⇒ 作废"},
+    {"id": "selftest_not_full", "type": "behavior",
+     "check": "python3 scripts/check-keyset-join.py --selftest（必须 8/8）"},
+    {"id": "scan_domain_changed", "type": "domain",
+     "check": "重跑本脚本；SCOPE 的 scan_domain 里 ext 计数与上次不同 ⇒ 作废"},
+]
+INVALIDATE_TYPES = {"ref_dirty", "behavior", "domain"}
+
+
+def invalidates_complete() -> list[str]:
+    """返回不完整的条目（空 = 自洽）。给自检用：散文可以漏，字段不能漏。"""
+    bad = []
+    for item in INVALIDATES:
+        for k in ("id", "type", "check"):
+            if not item.get(k):
+                bad.append(f"{item.get('id','?')}: missing {k}")
+        if item.get("type") and item["type"] not in INVALIDATE_TYPES:
+            bad.append(f"{item.get('id','?')}: unknown type {item['type']}")
+        if item.get("check") and len(item["check"]) < 12:
+            bad.append(f"{item.get('id','?')}: check too short to be runnable")
+    return bad
+
+
 SELFTEST_CASES = [
     (
         "keyset_adjacent",
@@ -402,6 +430,11 @@ def selftest(quiet: bool = False) -> int:
         if quiet and k.get("file") is not _sys_shim.stderr and a:
             return
         builtins.print(*a, **k)
+    bad = invalidates_complete()
+    if bad:
+        print(f"✗ invalidates_on 字段不自洽：{bad}", file=sys.stderr)
+        print("  ⇒ 散文可以漏一项而不被发现；字段不能 —— 这就是把它写成字段的理由。", file=sys.stderr)
+        return 2
     if len(SELFTEST_CASES) != 8:
         print(f"✗ selftest 用例数应为 8，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
@@ -568,8 +601,13 @@ def main() -> int:
     can_red = "yes（selftest 8/8 + 跨行 canary）"
     now = "green（0 阻塞）" if not blocking else f"red（{len(blocking)} 处）"
     print(f"  gate_state     : can_red={can_red} ｜ current={now}  ⇒ 二维都报，否则恒红与假绿同形")
-    print("  invalidates_on : 树变（ref 或 dirty 变）｜正则变（selftest 不再 8/8）｜扫描域变（ext 计数变）")
-    print("                   ⇒ 三者任一发生，上面的结论作废；不需要读者知道任何速率")
+    # 2026-10-31 —— 散文三行 → **带类型的字段**。
+    # 差别不在准确度，在能否被检查：散文里「树变」是一个形容词，
+    # 而 type= 是一个能被人和脚本同时读的取值；缺 type 时下面那条自检会红。
+    print("  invalidates_on :（每一项都必须有 type 与 check；缺一即本 SCOPE 不自洽）")
+    for item in INVALIDATES:
+        print(f"    · id={item['id']}  type={item['type']}  check={item['check']}")
+    print("                   ⇒ 任一条件成立，上面的结论作废；不需要读者知道任何速率")
     # 2026-10-31 —— 只列条件、不给「怎么检查」时，读者仍判断不了当前读数是否还有效。
     print("  check          : 重跑本脚本；若上面 measured_on / scan_domain / selftest 任一行与上次不同 ⇒ 本结论作废")
     # 2026-10-31 —— 尺子不止是代码。
