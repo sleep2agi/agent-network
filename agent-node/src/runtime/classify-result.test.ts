@@ -229,3 +229,34 @@ describe("formatClassificationError — message shape (parsed by IM bridge)", ()
     expect(s.length).toBeLessThan(200);
   });
 });
+
+// 2026-10-31 —— 「code 是契约、reason 是散文」。
+// 为什么要钉：cli.ts 曾按 reason 那句散文分支（"empty vendor result despite success signal"），
+// 文案一改，分支静默失效 —— 而失效的表现是「这个判断永远为假」，与「确实不该拦」同形。
+describe("two soft-fail-empty flavors are told apart by code, not by prose", () => {
+  test("each flavor carries a distinct machine code", () => {
+    // 静默拒绝那一支：result **非空**但三个 usage 全零（上游 429 被 SDK 静默吞掉）
+    const silent = classifyRuntimeResult({
+      result: "ok", usage: { input_tokens: 0, output_tokens: 0 }, totalCostUsd: 0,
+    });
+    // 成功信号之后结果为空那一支：usage 有数，result 是空串
+    const afterSuccess = classifyRuntimeResult({
+      result: "", usage: { input_tokens: 1200, output_tokens: 300 }, totalCostUsd: 0.01,
+    });
+    expect(silent.kind).toBe("soft-fail-empty");
+    expect(afterSuccess.kind).toBe("soft-fail-empty");
+    expect(silent.code).toBe("upstream_silent_reject");
+    expect(afterSuccess.code).toBe("empty_result_after_success");
+    expect(silent.code).not.toBe(afterSuccess.code);
+  });
+
+  test("the reason text may change without changing the code (契约不跟着文案走)", () => {
+    const c = classifyRuntimeResult({
+      result: "", usage: { input_tokens: 1200, output_tokens: 300 }, totalCostUsd: 0.01,
+    });
+    // code 是稳定契约；reason 只是给人读的一句话（这里只断言它存在，不锁措辞）
+    expect(c.code).toBe("empty_result_after_success");
+    expect(typeof c.reason).toBe("string");
+    expect((c.reason ?? "").length).toBeGreaterThan(0);
+  });
+});

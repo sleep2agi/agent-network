@@ -3565,14 +3565,15 @@ async function processWithClaude(
             //       earlier turns (would show the model's "let me
             //       check that" mid-thought as the final answer).
             //
-            // Gated to `soft-fail-empty` classifier with the
-            // "empty vendor result despite success signal" reason —
+            // Gated to the `soft-fail-empty` classifier with
+            // code === "empty_result_after_success" —
             // the other soft-fail-empty flavor (in=0 out=0 cost=0
             // silent reject) means the vendor is broken, not the
             // model choosing thinking-only; re-prompt would burn
             // tokens for nothing.
+            // 2026-10-31 —— 按 **code** 分支，不按 reason 那句散文（文案会变，code 不会）。
             const isThinkingOnlyShape = cls.kind === "soft-fail-empty"
-              && cls.reason === "empty vendor result despite success signal"
+              && cls.code === "empty_result_after_success"
               && !!claudeSessionId
               && (m.num_turns ?? 0) >= 1
               && process.env.ANET_DISABLE_383_REPROMPT !== "1";

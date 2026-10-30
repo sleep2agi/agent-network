@@ -37,7 +37,6 @@ KNOWN: set[str] = {
     'agent-network/src/codex-copresence-rpc.ts::string',
     'agent-network/src/codex-login-share-guard.ts::missing',
     'agent-network/src/node-delete-hub.ts::no-hub',
-    'agent-node/src/cli.ts::empty vendor result despite success signal',
     'agent-node/src/cli.ts::empty_sessions',
     'agent-node/src/cli.ts::no_sessions_field',
     'agent-node/src/cli.ts::self_only',
