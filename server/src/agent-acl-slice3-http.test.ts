@@ -288,6 +288,27 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— #3171 第 5 项：错误信封的形状也要钉住。
+  // 今天它们是「约定俗成」：每个出口手写 {ok:false,error}，
+  // 于是谁顺手多塞一个字段，客户端的分支就多一个没人知道的键。
+  describe("error envelope: exactly {ok, error} unless the error carries its own fields", () => {
+    test("get_config_update without a node token ⇒ exactly {error, ok}", async () => {
+      const r = await tool(adminToken, "get_config_update", {});
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("network_token_required");
+      expect(Object.keys(r).sort()).toEqual(["error", "ok"]);
+    });
+
+    test("ack_config_update without a node token ⇒ exactly {error, ok}", async () => {
+      const r = await tool(adminToken, "ack_config_update", {
+        update_id: "u_missing", status: "applied", network_id: NET,
+      });
+      expect(r.ok).toBe(false);
+      expect(r.error).toBe("network_token_required");
+      expect(Object.keys(r).sort()).toEqual(["error", "ok"]);
+    });
+  });
+
   // 2026-10-31 —— #3171：warnings 出现时的成功体也必须被钉住。
   // 上面那条钉的是「没有 warning」的形状；而 warnings 是**条件出现**的 ⇒
   // 只断言前者，等于允许后者任意变形（今天它没出事，靠的是客户端宽松解析）。
