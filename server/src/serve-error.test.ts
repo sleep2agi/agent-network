@@ -35,4 +35,26 @@ describe("#695 fetch exceptions become JSON with the exception's own message", (
     }
   });
 
+  // 2026-10-31 —— join 的**前提**：一个错误要能被念回来，且念回的那个 id 必须真的进日志。
+  // 只说「加了 id」不算：三者（body / header / log）不一致时，念回 id 反而更糟 ——
+  // 它会让人以为服务端有记录。
+  describe("error_id: the join key must exist in all three places, identically", () => {
+    test("body.error_id === x-error-id === the logged id", async () => {
+      const logged: string[] = [];
+      const res = buildServeErrorResponse(new Error("boom-join"), (l) => logged.push(l));
+      const body = await res.json() as any;
+      expect(typeof body.error_id).toBe("string");
+      expect(body.error_id).toMatch(/^[0-9a-f]{8}$/);
+      expect(res.headers.get("x-error-id")).toBe(body.error_id);
+      // 分母：日志必须真的有一条，且里面就是那个 id
+      expect(logged.length).toBe(1);
+      expect(logged[0]).toContain(`id=${body.error_id}`);
+    });
+
+    test("ids differ per failure (a constant id would join every incident to one line)", () => {
+      const a = serveErrorBody(new Error("a"));
+      const b = serveErrorBody(new Error("b"));
+      expect(a.error_id).not.toBe(b.error_id);
+    });
+  });
 });
