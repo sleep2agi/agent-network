@@ -306,6 +306,16 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.epoch_agreement).not.toBe("unknown");
   });
 
+  // 2026-10-31 —— `limits` 故意保持匿名（dashboard 上传代理开流前要读，且已在公开文档里），
+  // 但「故意公开」不等于「可以长东西」：它必须只有静态容量上限，不许出现路径/主机/用户。
+  test("anonymous `limits` carries ONLY static byte caps (public by decision, pinned in shape)", async () => {
+    const b = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(Object.keys(b.limits).sort()).toEqual(["max_request_content_length", "max_upload_bytes"]);
+    for (const v of Object.values(b.limits)) expect(typeof v).toBe("number");
+    // 反例守卫：路径/用户名/主机名一类的字符串一旦混进来，这条会红
+    expect(JSON.stringify(b.limits)).not.toMatch(/\/|[A-Za-z]:\\|@/);
+  });
+
   // 2026-10-31 —— 头集合断言：**与登录无关**的那条判据。
   //
   // 为什么需要它：凡是「需要会话才能判」的断言都会继承 vantage 病
