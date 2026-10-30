@@ -11,6 +11,7 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
+import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copresence/late-reply-recover.js";
 import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
 import { GET_TASK_TOOL_LINE, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
@@ -8355,6 +8356,25 @@ reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.m
 //
 // 阶段一（本段）：不静默。给原发送方补一条说明，并清掉记录。
 // 阶段二（未实现）：用 readEntriesAfter 续挂观察器把小结果显示回来 —— 见 #3095。
+/**
+ * #3095 阶段二 —— 从共享 opencode server 的历史里读回那一轮的结果。
+ * 只在能确定读到最终回答时返回文本；其余（未完成 / 历史已丢 / 读取失败）返回 null，
+ * 由调用方降级成「告知丢失」。绝不把「不确定」当成「有结果」。
+ */
+async function recoverLateResult(rec: { sessionId: string; turnId: string }): Promise<string | null> {
+  const url = fileConfig.opencodeSharedServerUrl;
+  const passwordFile = fileConfig.opencodeSharedServerPasswordFile;
+  if (!url || !passwordFile) return null;
+  let password = "";
+  try { password = readFileSync(passwordFile, "utf8").trim(); } catch { return null; }
+  if (!password) return null;
+  const entries = await readSessionEntries(url, password, rec.sessionId);
+  if (!entries) return null;
+  const result = extractTurnResult(entries, rec.turnId);
+  return result.state === "done" ? result.text : null;
+}
+
+// #3095 —— 启动扫描：先尝试**把结果读回来**（阶段二），读不到才降级成「告知丢失」。
 {
   const { records, corrupted } = listLateReplyRecords(NODE_DIR);
   if (corrupted > 0) warn(`[late-reply] dropped ${corrupted} corrupted pending record(s)`);
@@ -8363,21 +8383,26 @@ reportStatus("idle").catch((e: any) => warn(`initial reportStatus failed: ${e?.m
     // 放到后台，绝不阻塞启动（注册/心跳优先）。
     setTimeout(() => {
       for (const rec of records) {
-        const text = `[迟到结果] 节点在等待这一轮期间重启（${rec.armedAt || "时间未知"}），结果没有自动回传。` +
-          `这一轮可能已经在节点 TUI 里跑完，请到该节点查看；如需结果请重发或直接询问节点负责人。`;
-        void callCommHub("send_reply", {
-          in_reply_to: rec.taskId,
-          text,
-          status: "failed",
-          thread_id: rec.threadId,
-          turn_id: rec.turnId,
-        }, 0).then((response: any) => {
+        void (async () => {
+          // 阶段二：共享 opencode server 仍持有历史时，把那一轮的结果读回来。
+          const recovered = await recoverLateResult(rec);
+          const text = recovered ?? `[迟到结果] 节点在等待这一轮期间重启（${rec.armedAt || "时间未知"}），结果没有自动回传。` +
+            `这一轮可能已经在节点 TUI 里跑完，请到该节点查看；如需结果请重发或直接询问节点负责人。`;
+          if (recovered) log(`[late-reply] recovered content for ${rec.taskId} from session history`);
+          return callCommHub("send_reply", {
+            in_reply_to: rec.taskId,
+            text,
+            status: recovered ? "replied" : "failed",
+            thread_id: rec.threadId,
+            turn_id: rec.turnId,
+          }, 0).then((response: any) => {
           if (response?.ok === false) warn(`[late-reply] startup notice refused: ${response?.error ?? "?"}`);
           else {
             clearLateReplyRecord(NODE_DIR, rec.taskId);
             log(`[late-reply] startup notice sent for ${rec.taskId}`);
           }
-        }).catch((error: any) => warn(`[late-reply] startup notice failed: ${error?.message ?? error}`));
+          }).catch((error: any) => warn(`[late-reply] startup notice failed: ${error?.message ?? error}`));
+        })();
       }
     }, 5_000).unref?.();
   }
