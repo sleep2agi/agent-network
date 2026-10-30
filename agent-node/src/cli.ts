@@ -1375,6 +1375,7 @@ import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runti
 import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows-tui-health";
+import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
 import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -1979,6 +1980,9 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
         runtimeReadinessMonitor?.current(),
       ), codexForkCapabilityMonitor?.current()), heartbeatAdoptionCandidates(fileConfig, COMMHUB_URL, NETWORK_ID)),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
+      // 2026-10-31 —— systemd 托管状态（三态读数）。与 restart_supervised（声明）分开：
+      // 声明说「我以为我在被托管」，读数说「systemd 说这个 unit 会不会重启我」。
+      ...systemdSupervisionSnapshot(),
       // #1958 — informational; the hub's RFC-024 content-match reads
       // snapshot.model (still the configured value) field-by-field, so extra
       // keys are safe and older hubs drop them (non-strict object).

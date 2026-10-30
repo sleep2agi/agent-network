@@ -553,6 +553,15 @@ export interface MaskedSnapshot {
    *  旧字段保留以兼容存量客户端。两者永远同值。 */
   restart_supervised?: boolean;
   /**
+   * 2026-10-31 —— systemd 托管状态（三态）。由 cli.ts 用 systemd-supervision-snapshot 填入。
+   * 🔴 与 `restart_supervised` 的区别：后者是**声明**（env 说“我在被托管”），
+   *    这个是**读数**（systemd 自己说这个 unit 的 Restart=/Type=/LoadState= 是什么）。
+   *    两者不一致时，以读数优先，并把分歧暴露出来。
+   */
+  systemd_supervision?: "supervised" | "not_supervised" | "unknown";
+  systemd_supervision_reason?: string;
+  respawns_on_exit75?: boolean | null;
+  /**
    * 2026-10-31 —— 实例身份（内核口径），让「它有没有重启过」不再只靠自报时间戳。
    *
    * 三个字段都是 **boot_ 快照语义**：启动时读一次，进程内永不变。
