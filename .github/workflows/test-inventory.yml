@@ -33,3 +33,11 @@ jobs:
       # ⇒ 现在它必须自己跑：名字像门（gate|qa|check）却只手动 ⇒ 红。
       - name: gate-shaped workflows must not be manual-only
         run: python3 scripts/report-workflow-triggers.py --assert
+      # 2026-10-31 —— 同一晚第二遍「义务没有执行者」：
+      # 这三个 check-*.py 存在但没有任何 workflow / qa.sh 引用它们。
+      # 实测三者当前都 exit=0，所以接线不会把 CI 变红；不接线则它们只是文档。
+      - name: orphan checks that were never executed (now wired)
+        run: |
+          python3 scripts/check-hub-v2-protocol-inputs.py
+          python3 scripts/check-mcp-tool-anchor-sections.py
+          python3 scripts/check-mcp-tool-index-coverage.py
