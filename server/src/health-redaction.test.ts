@@ -730,6 +730,50 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(seen[0]).toContain("[health] probe nonce=");
   });
 
+  // 2026-10-31 —— 上面那条 `== 1` 需要一个**镜像**，否则它只在「日志存在」时成立，
+  // 而在「日志被去重」时同样成立 —— 而去重恰好会毁掉 ==1 判据的全部价值：
+  //   判据里的 `> 1` 只有在「复用会被记两次」时才能被发现。
+  // ⇒ 一个看起来无害的优化（同一 nonce 只打一行、或加个 seen 集合）会让复用永远读成「新鲜」。
+  test("reusing the same nonce logs TWICE (so `>1` can actually fire)", async () => {
+    const nonce = `reuse-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const seen: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.includes(nonce)) seen.push(line);
+      original(...args);
+    };
+    try {
+      for (let i = 0; i < 2; i++) {
+        const res = await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": nonce } });
+        await res.json();
+      }
+    } finally {
+      console.log = original;
+    }
+    expect(seen.length).toBe(2);   // 去重实现会让这条红 —— 那是故意的
+  });
+
+  test("two distinct nonces are each logged once (no cross-talk)", async () => {
+    const mk = () => `pair-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const a = mk(); const b = mk();
+    const seen: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.includes("pair-")) seen.push(line);
+      original(...args);
+    };
+    try {
+      await (await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": a } })).json();
+      await (await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": b } })).json();
+    } finally {
+      console.log = original;
+    }
+    expect(seen.filter(l => l.includes(a)).length).toBe(1);
+    expect(seen.filter(l => l.includes(b)).length).toBe(1);
+  });
+
   // 2026-10-31 —— served_at 变成**常驻**：窗口的两端必须在同一个时钟域里。
   // 没有它，读者只能拿自己的钟去减 since ⇒ 偷偷假设两边时钟一致。
   // 而 probe_nonce 仍然只在带 X-Probe-Nonce 时出现（它是“这一次”的凭据）。
