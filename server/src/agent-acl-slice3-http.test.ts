@@ -10,7 +10,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { register, addNetworkMember } from "./auth.js";
+import { register, addNetworkMember, createNetworkTokenForNode } from "./auth.js";
 import { db } from "./db.js";
 import { replaceAgentGrants } from "./agent-access.js";
 import { dispatchScheduledOccurrence } from "./scheduled-tasks.js";
@@ -286,6 +286,56 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toBe("update_in_flight");
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
+  });
+
+  // 2026-10-31 —— #3171 第 2 项：restart_node 的成功体与 update_node_config 同构。
+  describe("restart_node success body", () => {
+    test("pinned key set (same shape family as update_node_config)", async () => {
+      const R = { alias: "acl3-restart-r", node: "node_acl3_restart_r" };
+      seedAgent({ alias: R.alias, node: R.node });
+      const r = await tool(adminToken, "restart_node", { node_id: R.node, network_id: NET });
+      // 与 update_node_config 同构（不含 warnings：restart 不带 patch，分档固定为 restart_only）
+      expect(Object.keys(r).sort()).toEqual(["apply_mode", "ok", "update_id"]);
+      expect(r.ok).toBe(true);
+      expect(r.apply_mode).toBe("restart_only");
+    });
+  });
+
+  // 2026-10-31 —— #3171 第 3 项：get_config_update 的两态。
+  // 「有 pending」与「无 pending」是**两条不同形状**，而旧测试只在 SQL 层模拟过它们，
+  // 从没有一条断言钉住工具真正返回的那两个 JSON。
+  describe("get_config_update: both states have pinned shapes", () => {
+    test("no pending ⇒ exactly {ok, update:null}; with pending ⇒ exactly {ok, update:{apply_mode,base_revision,patch,update_id}}", async () => {
+      const N = { alias: "acl3-puller-n", node: "node_acl3_puller_n" };
+      seedAgent({ alias: N.alias, node: N.node });
+      const minted = createNetworkTokenForNode(adminId, NET, N.alias, N.node);
+      expect(minted.ok).toBe(true);
+      const ntok = minted.token!;
+
+      // ① 无 pending
+      const empty = await tool(ntok, "get_config_update", {});
+      expect(Object.keys(empty).sort()).toEqual(["ok", "update"]);
+      expect(empty.ok).toBe(true);
+      expect(empty.update).toBeNull();
+
+      // ② 有 pending
+      db.run(`INSERT INTO node_config_updates (update_id, node_id, network_id, patch_json, apply_mode, base_revision, status, created_at, created_by_token)
+              VALUES (?1, ?2, ?3, ?4, 'hot', 0, 'pending', ?5, 'test')`,
+        ["u_acl3_pending", N.node, NET, JSON.stringify({ model: "m" }), Date.now()]);
+      const one = await tool(ntok, "get_config_update", {});
+      expect(Object.keys(one).sort()).toEqual(["ok", "update"]);
+      expect(Object.keys(one.update).sort()).toEqual(["apply_mode", "base_revision", "patch", "update_id"]);
+      expect(one.update.update_id).toBe("u_acl3_pending");
+      expect(one.update.apply_mode).toBe("hot");
+
+      // ③ #3171 第 4 项：ack 成功回执恰好 {ok, status}
+      const ack = await tool(ntok, "ack_config_update", {
+        update_id: "u_acl3_pending", status: "applied", new_revision: 1,
+      });
+      expect(Object.keys(ack).sort()).toEqual(["ok", "status"]);
+      expect(ack.ok).toBe(true);
+      expect(ack.status).toBe("applied");
+    });
   });
 
   // 2026-10-31 —— #3171 第 5 项：错误信封的形状也要钉住。
