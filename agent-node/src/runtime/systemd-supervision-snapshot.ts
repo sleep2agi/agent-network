@@ -73,14 +73,18 @@ export function systemdSupervisionSnapshot(
   opts: { reader?: (unit: string) => UnitFacts; cgroupText?: string } = {},
 ): {
   systemd_supervision: "supervised" | "not_supervised" | "unknown";
-  systemd_supervision_reason: string;
+  /** **判出来之后**是哪个旋钮决定的（只在 not_supervised / supervised 时有意义）。 */
+  systemd_supervision_knob: string | null;
+  /** 只在 unknown 时填，且一律带 `missing:` 前缀 —— 它只回答「为什么判不出来」。 */
+  systemd_supervision_reason: string | null;
   respawns_on_exit75: boolean | null;
 } {
   const unit = detectOwnUnitName(opts.cgroupText ?? readCgroup());
   if (!unit) {
     return {
       systemd_supervision: "unknown",
-      systemd_supervision_reason: "own_unit_not_identifiable",
+      systemd_supervision_knob: null,
+      systemd_supervision_reason: "missing:own_unit_not_identifiable",
       respawns_on_exit75: null,
     };
   }
@@ -91,23 +95,29 @@ export function systemdSupervisionSnapshot(
   }
   const facts = cache.get(unit);
   const verdict = classifySupervision(facts);
+  // 🔴 2026-10-31 —— reason 只回答「为什么判不出来」；「判出来了，结果是 X」属于 verdict。
+  //    早先两者混在一个字段里 ⇒ 消费方无法区分「不可判」与「判定为否」。
   if (verdict.kind === "unknown") {
     return {
       systemd_supervision: "unknown",
-      systemd_supervision_reason: verdict.reason,
+      systemd_supervision_knob: null,
+      systemd_supervision_reason: `missing:${verdict.reason}`,
       respawns_on_exit75: null,
     };
   }
   if (verdict.kind === "not_supervised") {
     return {
       systemd_supervision: "not_supervised",
-      systemd_supervision_reason: verdict.reason,
+      // 判定为否时，说清是哪个旋钮否的（load_state:… / type:… / restart_no / restart_unset）
+      systemd_supervision_knob: verdict.reason,
+      systemd_supervision_reason: null,
       respawns_on_exit75: false,
     };
   }
   return {
     systemd_supervision: "supervised",
-    systemd_supervision_reason: verdict.respawnsOnExit75 === null ? "respawn_undecidable" : "ok",
+    systemd_supervision_knob: verdict.respawnsOnExit75 === null ? "respawn_undecidable" : "ok",
+    systemd_supervision_reason: null,
     respawns_on_exit75: verdict.respawnsOnExit75,
   };
 }

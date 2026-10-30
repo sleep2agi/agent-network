@@ -559,7 +559,10 @@ export interface MaskedSnapshot {
    *    两者不一致时，以读数优先，并把分歧暴露出来。
    */
   systemd_supervision?: "supervised" | "not_supervised" | "unknown";
-  systemd_supervision_reason?: string;
+  /** 判定为否/为是时，是哪个旋钮决定的（load_state:… / type:… / restart_no / restart_unset / ok） */
+  systemd_supervision_knob?: string | null;
+  /** **只在 unknown 时**出现，且一律 `missing:` 前缀 —— 它只回答「为什么判不出来」 */
+  systemd_supervision_reason?: string | null;
   respawns_on_exit75?: boolean | null;
   /**
    * 2026-10-31 —— 实例身份（内核口径），让「它有没有重启过」不再只靠自报时间戳。

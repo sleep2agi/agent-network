@@ -39,7 +39,8 @@ describe("systemdSupervisionSnapshot", () => {
     const s = systemdSupervisionSnapshot({ cgroupText: "0::/\n" });
     expect(s).toEqual({
       systemd_supervision: "unknown",
-      systemd_supervision_reason: "own_unit_not_identifiable",
+      systemd_supervision_knob: null,
+      systemd_supervision_reason: "missing:own_unit_not_identifiable",
       respawns_on_exit75: null,
     });
   });
@@ -50,7 +51,9 @@ describe("systemdSupervisionSnapshot", () => {
       reader: () => { throw new Error("systemctl: not found"); },
     });
     expect(s.systemd_supervision).toBe("unknown");
-    expect(s.systemd_supervision_reason).toBe("unit_facts_unavailable");
+    // reason 带 missing: 前缀 —— 它只回答「为什么判不出来」
+    expect(s.systemd_supervision_reason).toBe("missing:unit_facts_unavailable");
+    expect(s.systemd_supervision_knob).toBeNull();
     expect(s.respawns_on_exit75).toBeNull();
   });
 
@@ -61,7 +64,8 @@ describe("systemdSupervisionSnapshot", () => {
     });
     expect(s).toMatchObject({
       systemd_supervision: "not_supervised",
-      systemd_supervision_reason: "load_state:not-found",
+      systemd_supervision_knob: "load_state:not-found",
+      systemd_supervision_reason: null,
       respawns_on_exit75: false,
     });
   });
@@ -71,7 +75,7 @@ describe("systemdSupervisionSnapshot", () => {
       cgroupText: cgroup("/system.slice/x.service"),
       reader: () => facts({ restart: "no" }),
     });
-    expect(s).toMatchObject({ systemd_supervision: "not_supervised", systemd_supervision_reason: "restart_no" });
+    expect(s).toMatchObject({ systemd_supervision: "not_supervised", systemd_supervision_knob: "restart_no" });
   });
 
   test("on-failure + SuccessExitStatus=75 ⇒ supervised, but exit75 will NOT respawn", () => {
@@ -98,6 +102,6 @@ describe("systemdSupervisionSnapshot", () => {
     });
     expect(s.systemd_supervision).toBe("supervised");
     expect(s.respawns_on_exit75).toBeNull();
-    expect(s.systemd_supervision_reason).toBe("respawn_undecidable");
+    expect(s.systemd_supervision_knob).toBe("respawn_undecidable");
   });
 });

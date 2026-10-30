@@ -195,6 +195,20 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
   });
 
+  // 2026-10-31 —— served_at 的**敏感性**：单调不减只证「它没倒退」，常量也满足。
+  // 要证「它在跟着墙钟走」，断言里必须出现**两次读数之差**。
+  // （今晚的教训：startedAt 的敏感性当初是靠「换进程才变」证的，不是靠「刷新两次相同」。）
+  test("served_at actually advances with the wall clock (difference, not just monotonicity)", async () => {
+    const t1 = (await (await fetch(`${BASE}/health`)).json() as any).served_at;
+    const startedAt = Date.now();
+    await new Promise((r) => setTimeout(r, 250));
+    const t2 = (await (await fetch(`${BASE}/health`)).json() as any).served_at;
+    const elapsed = Date.now() - startedAt;
+    const delta = Date.parse(t2) - Date.parse(t1);
+    expect(delta).toBeGreaterThan(0);                       // 真的走了
+    expect(Math.abs(delta - elapsed)).toBeLessThanOrEqual(1000); // 且走的是同一个墙钟（容差 1s）
+  });
+
   // 2026-10-31 —— license 三态必须是「三种不同的可修性」，不能折成一个 "none"。
   // 本条只断言形状（测试库没有 license 行 ⇒ absent）；四种映射由 license-state.test.ts 钉死。
   test("license_state distinguishes absent from unknown instead of collapsing to none", async () => {
