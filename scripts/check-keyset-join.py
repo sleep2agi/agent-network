@@ -48,9 +48,25 @@
 ⇒ 顺序很重要：**先排掉产物，再翻方向**。否则翻完第一天满屏红，
   结局一定是加基线或删门 —— **门的死法通常不是被反对，是被噪声淹死。**
 
+## 🔴 2026-10-31 第三次修正：宁可漏，不可假红
+
+判「同一条语句」用的是 `;` 近似，它两边都会错：
+  · 字符串/模板里的 `;` ⇒ 一条语句被切成两条 ⇒ **漏**
+  · 无 `;` 的多行表达式 ⇒ 两条语句并成一条 ⇒ **假红**
+
+而假红会走一条闭合回路：一次无害重构导致红 ⇒ 下次真红被当噪声 ⇒
+「改一下测试就绿」⇒ 护栏被削弱，而**削弱护栏的人同时改了测试，所以没有任何东西会红**。
+
+⇒ 所以阻塞档只留**不依赖 `;` 启发式**的形状：
+   keyset 信号 + `join(...)` **紧邻**比较运算符；
+   或本文件内 keyset 派生标识符 + `join(...)` **紧邻**比较运算符。
+   其余（靠窗口判定键集、靠语句窗口判定比较、unproven）一律**列举不阻塞**。
+
+⇒ 漏掉的那些由 keyset 契约单测兜住；假红没人兜，它只会训练人忽略红灯。
+
 ## 判据
 
-两个非零集合（blocking / unproven）都必须为空；退出码 0。
+blocking 必须为空（退出码 0）。unproven / advisory / review 全部打印但不阻塞。
 """
 import re
 import subprocess
@@ -184,16 +200,26 @@ def scan_paths(files: list[Path], repo: Path):
             # 不能只看语句窗口：`.map((c) => { … })` 里箭头体的 `}` 会把窗口截断，
             # 于是同一表达式里的 `.map(` 落在窗口外（实测在 codex-auth-fingerprint.ts:370 踩到）。
             chain = chain_before(text, m.start())
-            if keyset and compared:
+            adjacent_compared = bool(COMPARISON_AFTER.match(text[m.end():m.end() + 8]))
+            if keyset and adjacent_compared:
+                # 唯一**不需要 `;` 启发式**的阻塞形状：键集信号 + 紧邻比较运算符。
                 push(blocking if not test_file else review, n, label_keys, snippet)
+            elif keyset and compared:
+                # 键集信号靠窗口、比较靠语句窗口 ⇒ 两者都依赖 `;` 近似 ⇒ **只列举，不阻塞**。
+                push(review if test_file else advisory, n,
+                     "键集拼接（比较靠语句窗口判定，启发式，可能误判 ⇒ 不阻塞）", snippet)
             elif keyset:
                 # 键集派生但没看到比较：可能拼进人读的消息。留 advisory，但要求 review。
                 push(review if test_file else advisory, n, "键集拼接（未检测到比较，可能是消息拼接）", snippet)
             elif ARRAY_SIGNAL.search(chain):
                 push(advisory, n, "数组 join（同类不同罪，本门不阻塞）", snippet)
             else:
-                # 🔴 fail-closed：证不出是数组 ⇒ 阻塞（原先是放行）
-                push(unproven if not test_file else review, n, "∎unproven 无法证明这不是键集比较（需补证据）", snippet)
+                # 2026-10-31 —— 这一格原来是 fail-closed（阻塞），现在降为**列举**。
+                # 理由：判「是不是数组」依赖窗口与 `;` 近似，而启发式会产生**假红**。
+                # 而假红会走那条闭合回路：一次无害重构导致红 ⇒ 下次真红被当噪声 ⇒
+                # 「改一下测试就绿」⇒ 护栏被削弱而没有任何东西会红。
+                # ⇒ 宁可漏，不可假红：漏由 keyset 单测兜住，假红会把整道门训练成噪声。
+                push(advisory, n, "∎unproven 无法证明这不是键集比较（不阻塞，需人工确认）", snippet)
 
         # 第二档：`const k = Object.keys(x).sort()` … 后面 `k.join(...)` 参与比较
         for ident in tainted:
@@ -297,7 +323,7 @@ def main() -> int:
 
     for bucket, mark, title in (
         (blocking, "✗", "键集拼接（阻塞）"),
-        (unproven, "✗", "∎unproven：无法证明不是键集比较（阻塞，fail-closed）"),
+        (unproven, "·", "∎unproven：无法证明不是键集比较（**不阻塞**，需人工确认）"),
     ):
         if bucket:
             print(f"{mark} {title} {len(bucket)} 处:", file=sys.stderr)
@@ -323,7 +349,7 @@ def main() -> int:
     else:
         print("⚠ 测试/待复核里出现集合拼接: 0 处")
 
-    return 1 if (blocking or unproven) else 0
+    return 1 if blocking else 0
 
 
 if __name__ == "__main__":
