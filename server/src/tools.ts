@@ -99,6 +99,7 @@ import {
   EDITABLE_CHANNELS,
   computeApplyMode,
   readOpencodeSnapshotFlags,
+  readConfigUpdateCapable,
   validatePatch,
   narrowChannelsPatch,
   isAllowedToChangeFlag,
@@ -3759,10 +3760,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       pushEvent(node.alias, { type: "config_update", update_id: updateId }, networkId);
 
+      // 裸起节点（无 supervisor）收到 restart-tier 变更会 **安静地死掉**：
+      // 它写配置 → ack restarting → exit 75，而没人拉起；
+      // 更新停在 pending/restarting，60s 后被 reaper 判 timeout ——
+      // 调用方看到的只有「超时」，永远学不到「这台节点现在是下线的」。
+      // 不擅自拒绝（会破坏合法流程），但必须把后果说在前面。
+      const configUpdateCapable = readConfigUpdateCapable(node.config_snapshot);
+      const warnings = applyMode !== "hot" && configUpdateCapable === false
+        ? [{
+            code: "restart_requires_supervisor",
+            message: "this node reports config_update_capable=false (bare spawn, no supervisor). "
+              + "A restart-tier patch will make it exit 75 and nothing will respawn it — the update "
+              + "will time out and the node will stay offline. Use Stop then Start, or a supervised "
+              + "process (anet start / pm2) before sending restart-tier changes.",
+          }]
+        : undefined;
+
       return {
         content: [{
           type: "text" as const,
-          text: JSON.stringify({ ok: true, update_id: updateId, apply_mode: applyMode }),
+          text: JSON.stringify({
+            ok: true, update_id: updateId, apply_mode: applyMode,
+            ...(warnings ? { warnings } : {}),
+          }),
         }],
       };
     },

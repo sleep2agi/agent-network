@@ -226,6 +226,33 @@ export function isHotModelSwitchSupported(
 }
 
 /**
+ * Read `config_update_capable` from `nodes.config_snapshot`.
+ *
+ * agent-node reports this as "this process runs under a supervisor wrapper that
+ * honours the sentinel-75 restart path" (agent-node/src/cli.ts report_status).
+ * A bare-spawn node (`nohup node cli.js …`, no pm2/anet wrapper) reports
+ * `false` — and a restart-tier patch on such a node writes the config, acks
+ * `restarting`, exits 75, and **nothing respawns it**. The update then sits in
+ * `pending`/`restarting` until the 60s reaper marks it `timeout`, so the caller
+ * only ever sees "timed out" and never learns that the node is now down.
+ *
+ * Absent/unparseable snapshot → `null` ("unknown"), never `false`: we must not
+ * warn on nodes that simply haven't reported it yet.
+ */
+export function readConfigUpdateCapable(configSnapshot: unknown): boolean | null {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    return null;
+  }
+  const value = parsed?.config_update_capable;
+  return typeof value === "boolean" ? value : null;
+}
+
+/**
  * Classify the patch's required apply mode. Empty patch (model + flags
  * both empty, no channels) → "restart_only" (used by restart_node tool).
  * Any restart-required field present, OR a channels change → "restart"

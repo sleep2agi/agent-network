@@ -13,6 +13,7 @@ import {
   isAllowedToChangeFlag,
   computeApplyMode,
   readOpencodeSnapshotFlags,
+  readConfigUpdateCapable,
   validatePatch,
   narrowChannelsPatch,
 } from "./config-apply-validate";
@@ -451,5 +452,20 @@ describe("Codex config flags (#815)", () => {
   test("codex flags on claude runtime rejected", () => {
     expect(validatePatch(undefined, { modelReasoningEffort: "low" }, undefined, "claude-agent-sdk")?.field)
       .toBe("flags.modelReasoningEffort");
+  });
+});
+
+// 裸起节点（无 supervisor）收到 restart-tier 变更会安静地死掉：
+// 写配置 → ack restarting → exit 75 → 没人拉起 → 更新判 timeout，
+// 而调用方只看到「超时」。这里锁住「把后果说在前面」的读法。
+describe("readConfigUpdateCapable", () => {
+  test("true / false / absent / junk", () => {
+    expect(readConfigUpdateCapable('{"config_update_capable":true}')).toBe(true);
+    expect(readConfigUpdateCapable('{"config_update_capable":false}')).toBe(false);
+    expect(readConfigUpdateCapable('{"model":"x"}')).toBeNull();
+    expect(readConfigUpdateCapable("not json")).toBeNull();
+    expect(readConfigUpdateCapable(null)).toBeNull();
+    // 非布尔一律 unknown，不能当成 false —— 否则会给没上报的节点发警告
+    expect(readConfigUpdateCapable('{"config_update_capable":"false"}')).toBeNull();
   });
 });
