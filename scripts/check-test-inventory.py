@@ -85,6 +85,7 @@ def _strip_code(lines: list[str]) -> list[str]:
     out: list[str] = []
     in_block = False
     in_template = False
+    prev_code = ""   # 上一个「代码字符」，用来判断 / 是除号还是正则起点
     for line in lines:
         buf: list[str] = []
         i = 0
@@ -116,6 +117,20 @@ def _strip_code(lines: list[str]) -> list[str]:
                 in_template = True
                 i += 1
                 continue
+            if ch == "/" and (prev_code == "" or prev_code in "(,=:[!&|?{};+-*%<>~^" or prev_code == "return"):
+                # 正则字面量起点（启发式）：跳过到未转义的 /
+                # 不处理它会让 /if \(status\) \{/ 里的 { 被当成代码括号，
+                # 于是「文件末深度」不为 0 —— 而那不是文件不配平，是剥得不干净。
+                i += 1
+                while i < len(line):
+                    if line[i] == "\\":
+                        i += 2
+                        continue
+                    if line[i] == "/":
+                        i += 1
+                        break
+                    i += 1
+                continue
             if ch in "\"'":
                 quote = ch
                 i += 1
@@ -129,6 +144,8 @@ def _strip_code(lines: list[str]) -> list[str]:
                     i += 1
                 continue
             buf.append(ch)
+            if not ch.isspace():
+                prev_code = ch
             i += 1
         out.append("".join(buf))
     return out
