@@ -62,6 +62,11 @@ jobs:
       # 这条就是那个消费者：源码变了而表没跟上 ⇒ 红。
       - name: generated REST route table is not stale
         run: python3 scripts/check-rest-route-table.py
+      # 2026-10-31 —— 顺序承载语义：`/api/messages?scope=user` 必须排在通用分支之前。
+      # 静态不变量，不替代行为测试；它挡的是「重构时顺手排序」。
+      # 同时钉住「哪些 path 应该有 query 判别」——判别消失会让不变量静默跳过。
+      - name: specific query discriminators still precede generic branches
+        run: python3 scripts/check-rest-route-order.py
       - name: duplicated criteria copies have not silently diverged
         run: |
           python3 scripts/report-contract-pairs.py --selftest
