@@ -288,6 +288,26 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— #3171 续：两个节点侧只读工具的键集（有 ntok 夹具后成本很低）。
+  describe("node-side read tools: pinned key sets", () => {
+    test("list_my_children ⇒ {children, count, ok}; get_completions ⇒ {completions, ok}", async () => {
+      const N2 = { alias: "acl3-node-read-n", node: "node_acl3_node_read_n" };
+      seedAgent({ alias: N2.alias, node: N2.node });
+      const minted = createNetworkTokenForNode(adminId, NET, N2.alias, N2.node);
+      expect(minted.ok).toBe(true);
+      const ntok = minted.token!;
+
+      const children = await tool(ntok, "list_my_children", {});
+      expect(Object.keys(children).sort()).toEqual(["children", "count", "ok"]);
+      expect(Array.isArray(children.children)).toBe(true);
+      expect(children.count).toBe(children.children.length); // 计数与数组同源
+
+      const completions = await tool(ntok, "get_completions", {});
+      expect(Object.keys(completions).sort()).toEqual(["completions", "ok"]);
+      expect(Array.isArray(completions.completions)).toBe(true);
+    });
+  });
+
   // 2026-10-31 —— #3171 续：org_whoami 也是**两支**（第二支多一个 pacing）。
   // 它同时是「工具自带节流提示」的唯一一处，所以顺便把节流也钉住。
   describe("org_whoami: base shape + the conditional pacing key", () => {
