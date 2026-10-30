@@ -7389,7 +7389,27 @@ async function processConfigUpdate(): Promise<void> {
     if (localMode !== update.apply_mode) {
       warn(`[config-apply] mode mismatch hub=${update.apply_mode} local=${localMode}; trusting local for safety`);
     }
-    const mode = localMode;
+    let mode = localMode;
+
+    // #3146 —— hub 现在会把「OpenCode V2 共存节点的纯 model patch」判成 hot
+    // （server/src/config-apply-validate.ts）。但 hub 看不到这台机器上 TUI 会话
+    // 是否还活着，而 hot 切模型唯一的手段就是驱动那个会话。
+    //
+    // 会话不在时的两条路，选降级：
+    //   · 照 hot 走 → ack 一个 rejected，用户的模型改动**根本没发生**
+    //     （生产实测：配置是 copresence，会话却没起，节点回了
+    //       "OpenCode V2 session is not running; model was not changed"）
+    //   · 降级成 restart → 模型改动一定生效，代价是一次重启
+    //
+    // 用户点「切模型」要的是结果，不是「切换方式」。所以这里宁可重启。
+    // 注意方向：#2050 那条闸门是「hot 能力缺失不得否决 hub 请求的重启」，
+    // 这里是反方向（hot 不可行时升级为重启），不会造成 hot↔restart 互相打架。
+    if (mode === "hot" && update.patch.model && RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+      && !(opencodeCopresenceSession?.isRunning === true
+        && typeof opencodeCopresenceSession.setSelectedModel === "function")) {
+      warn(`[config-apply] hub requested hot model switch but the co-presence session is not running; degrading to restart`);
+      mode = "restart";
+    }
 
     if (!configFilePath) {
       warn(`[config-apply] no configFilePath (node started without --config); rejecting ${updateId}`);
