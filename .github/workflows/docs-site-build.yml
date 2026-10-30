@@ -158,7 +158,12 @@ jobs:
       - name: rendered-page denominator
         run: |
           set -euo pipefail
-          md=$(git ls-files docs-site/docs | grep -c '\.md$')
+          # 2026-10-31 —— 「空输出 ≠ 干净」：git ls-files 失败时输出也是空，
+          # 而 `grep -c` 无匹配同样输出 0 —— 两者方向相反，不能共用一种写法。
+          #   · git 失败 ⇒ 不可归因，必须 exit 1（并说清楚是哪一步）
+          #   · grep 无匹配 ⇒ 返回 1，是**正常结果**，才用 || true
+          files=$(git ls-files docs-site/docs) || { echo '不可归因：git ls-files 执行失败' >&2; exit 1; }
+          md=$(printf '%s\n' "$files" | grep -c '\.md$') || true
           html=$(find docs-site/docs/.vitepress/dist -name '*.html' | wc -l | tr -d ' ')
           echo "tracked_md=$md rendered_html=$html"
           FLOOR=80
