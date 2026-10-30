@@ -9,7 +9,7 @@
 3. `GET /api/scheduled-tasks/:id/runs`:5 条跳过记录都带 `blocked_by_task_id = A` 与 `blocked_by_state`。
 4. A 开满 20 秒后的下一次:A 变 `expired`(`GET /api/tasks/A` 仍可读),A 的 run 为 `expired / task_expired`
    并写明是调度器超时;这一次派出新任务 B;不再多发通知。
-5. 节点晚到的回复(`send_reply in_reply_to=A`)被 `reply_task_terminal` 拒掉,A、B 都不变;B 照常回复,排程照常往下跑。
+5. 节点晚到的回复(`send_reply in_reply_to=A`)被 `late reply（task_late_replies）` 拒掉,A、B 都不变;B 照常回复,排程照常往下跑。
 6. witnessed-red:把「恰好第 N 次」改成「第 N 次及以后」,换全新 hub 重跑 ⇒ 多于 1 条(第 2 步会红)。
 
 跑法(仓库根):

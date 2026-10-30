@@ -969,6 +969,37 @@ describe("OpenCode copresence task deadline", () => {
     }
   }, 20_000);
 
+  // #3103 —— 排队（admission）只能吃掉自己的上限，不能吃掉回复预算。
+  // 现场：一条 30 分钟的任务若排队 29 分钟才提交，回复只剩 1 分钟，
+  // 于是「执行了但回复被撤」。这里把上限压到 400ms，总预算给 60s：
+  // 必须在 ~400ms 就明确报「排队没排上」，而不是等满 60s。
+  test("admission is capped so a busy TUI cannot eat the reply budget (#3103)", async () => {
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000" });
+    const previous = process.env.OPENCODE_ADMISSION_CAP_MS;
+    process.env.OPENCODE_ADMISSION_CAP_MS = "400";
+    try {
+      const started = Date.now();
+      let thrown: any;
+      try {
+        await runtime.submit("queued behind a long human turn", 60_000);
+      } catch (error) { thrown = error; }
+      const elapsed = Date.now() - started;
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      // The wording must report the cap it actually waited, not the 60s budget.
+      expect(thrown.timeoutMs).toBe(400);
+      expect(thrown.userReplyText).toContain("400ms");
+      expect(elapsed).toBeGreaterThanOrEqual(380);
+      // Proves the cap fired: with the whole budget it would have waited 60s.
+      expect(elapsed).toBeLessThan(10_000);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_ADMISSION_CAP_MS;
+      else process.env.OPENCODE_ADMISSION_CAP_MS = previous;
+      await runtime.close();
+      f.close();
+    }
+  }, 20_000);
+
   // #1879 ③ —— 归属与终止：共享会话的负责人（TUI）离开后会话也没了时，
   // 排队中的任务必须被**明确终止**（owner_left），而不是沉默地等满预算
   // 再报一个泛泛的「会话忙」。终止理由要能点名是谁的那条任务。

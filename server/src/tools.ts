@@ -2536,7 +2536,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         let lateSql = "SELECT status,from_name,to_node_id,thread_id,turn_id FROM tasks WHERE task_id=?1";
         lateSql = addScope(lateSql, lateParams, effectiveNetId);
         const lateCandidate = db.get<LateTask>(lateSql, ...lateParams) ?? null;
-        if (lateCandidate && !["created", "delivered", "acked", "running"].includes(lateCandidate.status)) {
+        // #3259 收口 —— 迟到通道只对「终态但**没有成功交付回复**」的任务开放。
+        // `replied` 的任务发送方已经拿到了结果，再补一次就是重复投递
+        // （#698 的 idempotency 测试就是这条：replay 不能变成第二条 inbox 回复）。
+        if (lateCandidate && lateCandidate.status !== "replied"
+          && !["created", "delivered", "acked", "running"].includes(lateCandidate.status)) {
           if (workSignal.outcome) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "scheduled_work_outcome_terminal", reply_queued: false }) }] };
           // Old runtimes do not send turn identity and retain the old result.
           // #3061 续 —— 任务**从未记下 turn 上下文**时，不该再要求调用方凭空给出 id。

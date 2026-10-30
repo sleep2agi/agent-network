@@ -17,7 +17,8 @@
  * 写入必须是原子的：进程可能被 kill -9，半截 JSON 会让扫描逻辑读到脏数据。
  * 做法是 tmp + rename（同一文件系统内 rename 是原子的）。
  */
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { join } from "node:path";
 
 export type LateReplyRecord = {
@@ -51,7 +52,11 @@ export function saveLateReplyRecord(nodeDir: string, record: LateReplyRecord): b
     const target = join(dir, recordName(record.taskId));
     const tmp = `${target}.tmp`;
     writeFileSync(tmp, JSON.stringify(record, null, 2), "utf8");
-    renameSync(tmp, target);
+    // #2224/#3095 —— 同一 task 重新布防时会**覆盖已存在的记录**：
+    // Windows 上目标正被别的句柄打开时裸 renameSync 会 EPERM/EBUSY/EACCES，
+    // 而这里失败只返回 false ⇒ 迟到结果不会被落盘，重启就读不回来。
+    // 与其它原子写一致，走有界重试的 renameOverExistingSync。
+    renameOverExistingSync(tmp, target);
     return true;
   } catch {
     return false;

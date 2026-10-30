@@ -358,6 +358,8 @@ describe("#698 atomic peer reply", () => {
     expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id = ?1", taskId)?.n).toBe(0);
   });
 
+  // #3259 收口 —— 迟到通道只对「终态但没成功交付过回复」的任务开放；
+  // `replied` 的任务再补就是重复投递，仍然必须以 reply_task_terminal 拒绝。
   test("terminal replay is rejected and cannot deliver twice", async () => {
     const taskId = await dispatch(A, B, "idempotent work");
     const handler = toolsFor(B).send_peer_reply;

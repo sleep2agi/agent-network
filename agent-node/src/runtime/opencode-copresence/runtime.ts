@@ -40,7 +40,11 @@ import {
   renderAttachRecordShell,
   stopRecordedAttach,
 } from "./attach-tui";
-import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
+import {
+  OPENCODE_DEFAULT_TASK_TIMEOUT_MS,
+  admissionBudgetFor,
+  resolveAdmissionCapMs,
+} from "../opencode-timeout";
 import { Agent } from "undici";
 import { fetchOpenCodeJson } from "./http";
 import type { SessionBackgroundControl } from "./session-background";
@@ -103,7 +107,8 @@ export class OpenCodeCopresenceTimeoutError extends Error {
           // #1879 —— 过期文案要点名「共享会话忙」和「等了多久」,不能让人读成「节点卡死」,
           // 也不能让人以为是模型/网络问题。原来那句「共享会话在 30 分钟内一直处于忙碌状态」
           // 已经点了名,但没说清是**共享会话被占**、等了**多久**、以及**这不是节点坏了**。
-          : `opencode 任务未提交：共享会话忙，${budget} 内未获提交 —— 这段时间共享会话一直被 TUI 里的一轮占着（不是节点卡死），本任务没有发出，可稍后重发。${knob}。`;
+          : `opencode 任务未提交：共享会话忙，${budget} 内未获提交 —— 这段时间共享会话一直被 TUI 里的一轮占着（不是节点卡死），本任务没有发出，可稍后重发。` +
+            `排队上限可用 OPENCODE_ADMISSION_CAP_MS 调整（默认 10 分钟，0 = 不额外限制）。${knob}。`;
     super(stopped === "aborted"
       ? `OpenCode reply wait exceeded ${timeoutMs}ms; the shared session was aborted`
       : stopped === "abort_failed"
@@ -953,11 +958,14 @@ export async function openVettedOpenCodeCopresence(
           // the sleep is not counted as #651 reply time (see the retry site).
           const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
           let deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
+          // #3103 —— 排队只拿自己的上限，不吃回复预算。被 TUI 占着时等再久也没用，
+          // 所以到点就说「排队没排上」，把剩下的时间留给真正执行后的回复。
+          const admissionBudgetMs = admissionBudgetFor(budgetMs, resolveAdmissionCapMs({ env: process.env.OPENCODE_ADMISSION_CAP_MS }));
           let capacityRetries = 0;
           // #1879 ③ —— 排队项的归属在**开始等**的那一刻就定下来：
           // 后面无论是超时还是「负责人离开」，都要能说清是谁的那条任务。
           const queueOwner = bindQueueOwner({ taskId: owner?.taskId, sender, sinceMs: Date.now() });
-          await waitUntilSessionIdle(url, password, created.id, budgetMs, request, evidence?.onAdmissionBusy, queueOwner);
+          await waitUntilSessionIdle(url, password, created.id, admissionBudgetMs, request, evidence?.onAdmissionBusy, queueOwner);
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
