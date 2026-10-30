@@ -2862,7 +2862,24 @@ return Bun.serve({
       const probeNonce = probeNonceOf(req);
       if (probeNonce) {
         body.probe_nonce = probeNonce;
+        // `served_at` 只是**人读的上下文**，不参与任何判据。
+        // 🔴 一个不被断言的字段，就会变成下一个 startedAt：看起来像证据，但没有消费者。
+        //    真正证明“新鲜”的是 probe_nonce（缓存不可能为它生成响应）；
+        //    时间字段要参与判据还得先定义容差与 skew，今天没有。
         body.served_at = new Date().toISOString();
+        // 2026-10-31 —— 「三件套」的第③件：把 nonce 写进**响应之外**的地方。
+        //   ① body code      住在响应里（层标识）
+        //   ② probe_nonce    住在响应里（本次标识）
+        //   ③ 这一行日志      住在响应之外 ⇒ 中间层能伪造响应，伪造不了服务端日志
+        // 判据：探针发 nonce（一次性、不复用）⇒ 响应回显 ⇒
+        //       `grep -c "probe nonce=<value>" <hub log>` 必须为 **1**。
+        //   == 1 ⇒ 这次请求真的到了这个进程；
+        //   == 0 ⇒ 响应是别处伪造/伪造不了的日志缺失；
+        //   > 1  ⇒ 有人在复用同一个 nonce（重试没换）⇒ 那次读数不可信（见下）。
+        // 🔴 nonce 必须一次性：重试要生成新的。复用会让缓存返回上一次的响应，
+        //    而那响应里恰好有同一个 nonce ⇒ 会被读成“新鲜”。上面那条 ==1 正是拦它的。
+        // 只在带该头时打印，所以日志量与探针次数同阶，不随请求速率增长。
+        console.log(`[health] probe nonce=${probeNonce}`);
         // 回显只对「这一次」有意义 ⇒ 顺手把这一份响应标成不可缓存，
         // 否则探针自己会制造出它要防的那种残骸。
         const probeRes = Response.json(body);

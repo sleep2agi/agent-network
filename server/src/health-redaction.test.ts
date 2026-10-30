@@ -119,10 +119,36 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(res.headers.get("cache-control")).toBe("no-store");
     const body = await res.json() as any;
     expect(body.probe_nonce).toBe(nonce);
-    // served_at 必须能被解析，且不早于这次请求的发出时刻 —— 否则它回显的是一个旧值。
+    // 🔴 served_at 的断言只到「可解析」——它**不证明新鲜**，也不参与任何判据。
+    //    真正证明“这一次”的是 probe_nonce（缓存不可能为它生成响应）。
+    //    这里把它标清楚，否则它就会变成下一个 startedAt：看着像证据，却没有消费者。
     const servedAt = Date.parse(body.served_at);
     expect(Number.isFinite(servedAt)).toBe(true);
     expect(servedAt).toBeGreaterThan(0);
+  });
+
+  // 三件套的第③件：nonce 必须也出现在**响应之外**（服务端日志）。
+  // 判据：一次探针之后，日志里该 nonce 出现**恰好 1 次**。
+  //   == 1 ⇒ 这次请求真的到了这个进程（中间层伪造不了服务端日志）
+  //   == 0 ⇒ 缺日志
+  //   >  1 ⇒ 有人复用了同一个 nonce（重试没换）⇒ 那次读数不可信
+  test("logs the probe nonce exactly once, outside the response", async () => {
+    const nonce = `log-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const seen: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (line.includes(nonce)) seen.push(line);
+      original(...args);
+    };
+    try {
+      const res = await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": nonce } });
+      await res.json();
+    } finally {
+      console.log = original;
+    }
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toContain("[health] probe nonce=");
   });
 
   test("default /health body stays byte-identical: no probe_nonce / served_at without the header", async () => {
