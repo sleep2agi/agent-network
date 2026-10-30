@@ -218,6 +218,18 @@ describe("human ↔ human DM (/api/dm): restricted members can talk to people", 
     const threads = await get(daveToken, `/api/dm/threads?network_id=${NET}`);
     expect(threads.body.threads).toEqual([expect.objectContaining({ other_user_id: carolId, unread: 1 })]);
     expect((await get(daveToken, `/api/messages?scope=user&network_id=${NET}`)).body.messages.map((m: any) => m.content)).toContain("hi dave");
+    // 2026-10-31 —— **顺序承载语义**的行为对照（#3214）。
+    // `/api/messages` 在 server.ts 里有两处：:5581 是 `?scope=user`，:5648 是通用（inbox，按 Agent）。
+    // 若有人把通用分支挪到前面，这一句带 scope 的请求会被它吃掉 —— 而响应仍是合法 200，
+    // 只是形状从 user_inbox 变成 inbox。两组断言必须同时在场，才能把这件事钉住。
+    const withScope = await get(daveToken, `/api/messages?scope=user&network_id=${NET}`);
+    const withoutScope = await get(daveToken, `/api/messages?network_id=${NET}`);
+    // user 视角：来自 user_inbox，字段是 message_id / acked_at
+    expect(withScope.body.messages[0]).toHaveProperty("message_id");
+    // 通用视角：来自 inbox，字段是 id / to_alias / from_alias
+    expect(withoutScope.body.messages[0] ?? {}).not.toHaveProperty("message_id");
+    expect(withScope.body.messages.map((m: any) => m.content)).toContain("hi dave");
+    expect((withoutScope.body.messages ?? []).map((m: any) => m.content)).not.toContain("hi dave");
     expect((await send(daveToken, "POST", "/api/dm", { network_id: NET, to_username: "acl3_carol", message: "hi carol" })).status).toBe(200);
     const thread = await get(carolToken, `/api/dm?network_id=${NET}&with=${daveId}`);
     expect(thread.body.messages.map((m: any) => [m.direction, m.content])).toEqual([["in", "hi carol"], ["out", "hi dave"]]);
