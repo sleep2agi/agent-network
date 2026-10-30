@@ -288,6 +288,28 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— #3171 续：**条件出现的键**（与 update_node_config 的 warnings 同族）。
+  // get_inbox 在 human 模式下多带一个 human_inbox —— 只钉无 flag 那一支，
+  // 等于允许另一支任意变形。
+  describe("get_inbox: both shapes are pinned (the second key is conditional)", () => {
+    test("default ⇒ {messages, ok}; human ⇒ {human_inbox, messages, ok} and human_inbox is {examined, mode, version}", async () => {
+      const I = { alias: "acl3-inbox-i", node: "node_acl3_inbox_i" };
+      seedAgent({ alias: I.alias, node: I.node });
+      const minted = createNetworkTokenForNode(adminId, NET, I.alias, I.node);
+      expect(minted.ok).toBe(true);
+      const ntok = minted.token!;
+
+      const plain = await tool(ntok, "get_inbox", { alias: I.alias, limit: 5 });
+      expect(Object.keys(plain).sort()).toEqual(["messages", "ok"]);
+      expect(Array.isArray(plain.messages)).toBe(true);
+
+      const human = await tool(ntok, "get_inbox", { alias: I.alias, limit: 5, human_first: true });
+      expect(Object.keys(human).sort()).toEqual(["human_inbox", "messages", "ok"]);
+      expect(Object.keys(human.human_inbox).sort()).toEqual(["examined", "mode", "version"]);
+      expect(human.human_inbox.mode).toBe("metadata-keyset");
+    });
+  });
+
   // 2026-10-31 —— #3171 续：两个「读面」工具的键集。
   // 选它们的理由：这两个是**客户端会按字段名逐个读**的（provider 列表 / 密钥名列表），
   // 而它们此前没有任何精确键集断言 —— 覆盖率脚本把它们列在 59 个未覆盖里。
