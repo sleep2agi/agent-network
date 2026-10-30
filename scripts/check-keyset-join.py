@@ -513,6 +513,17 @@ def main() -> int:
     print("  threat_model   : accident —— 能挡「顺手写成可碰撞分隔符」这类误用；")
     print("                   不挡有意伪造（无签名、无外部锚）")
     print("  reading_rule   : 「0 处」只在阳性对照命中时才有意义（见上方的宽形状计数）")
+    # 2026-10-31 —— **扫描域必须写出来**，否则「0 处」会被读成「全仓没有」。
+    # 一次真实事故：只 grep 了两个目录，被说成「全仓 0 处」；全仓跑完是 3 处。
+    from collections import Counter as _Counter
+    ext_counts = _Counter(p.suffix for p in collect(Path(__file__).resolve().parent.parent))
+    domain = " ".join(f"{e}={n}" for e, n in sorted(ext_counts.items()))
+    print(f"  scan_domain    : git ls-files ∩ {sorted(SRC)} − {list(EXCLUDE_SEGMENTS)} ⇒ {domain}")
+    # 域看门狗：任何一族静默消失（比如 EXCLUDE_SEGMENTS 被加宽）都会让「0 处」变轻。
+    missing = [e for e in (".ts", ".mjs") if ext_counts.get(e, 0) == 0]
+    if missing:
+        print(f"  ✗ 扫描域缺族：{missing} —— 这一族的文件没进来，「0 处」不代表它们干净", file=sys.stderr)
+        return 1
     print(f"  measured_on    : {_measured_on(Path(__file__).resolve().parent.parent)}")
     print("                   —— 换一棵树，上面几行 covers 描述的就是另一个仓库")
     # threat_model 回答「挡得住什么」，failure_mode 回答「挡不住时会怎样」——
