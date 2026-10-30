@@ -326,5 +326,25 @@ describe("department_id filter and the read-only node list", () => {
     expect((await dept(U.owner.token, "GET", `/${D.rd}/nodes`)).body.nodes.length).toBe(1);
     expect((await dept(U.head.token, "POST", `/${D.fe}/nodes`, {})).status).toBe(405);
     expect((await send(NODE_TOKEN, "GET", `/api/networks/${NET}/departments/${D.fe}/nodes`)).body.error).toBe("department_scope_denied");
+
+    // 2026-10-31 —— `status` 与 `degraded[].reason` 同形：**两个生产者，同一个字符串**。
+    //   节点自报的 status 里本来就有 "offline"（report_status 的 enum 含它），
+    //   而 Hub 在没有 session 行时也兜底写 "offline"。
+    // ⇒ 「它说自己下线了」与「我们从没听到过它」在响应里一字不差，
+    //   唯一能分开的是兄弟字段 last_seen_at（null = 从没上报过）。
+    expect(r.body.nodes[0].status).toBe("offline");
+    expect(r.body.nodes[0].last_seen_at).toBeNull();
+
+    // must-fire 的另一支：节点**上报过**并声明 offline ⇒ 同一个 status 字符串、last_seen_at 非空。
+    // 没有这一支，「null 能代替兜底」只是一句注释。
+    db.run(
+      "INSERT INTO sessions (resume_id, alias, status, node_id, network_id, last_seen_at, updated_at) VALUES ('rid_dept_offline', ?, 'offline', 'node_dh_m', ?, ?, datetime('now'))",
+      ["示例-成员节点", NET, new Date().toISOString()],
+    );
+    const declared = (await dept(U.head.token, "GET", `/${D.fe}/nodes`)).body.nodes[0];
+    expect(declared.status).toBe("offline");
+    expect(typeof declared.last_seen_at).toBe("string");
+    expect(declared.last_seen_at.length).toBeGreaterThan(0);
+    db.run("DELETE FROM sessions WHERE resume_id = 'rid_dept_offline'");
   });
 });
