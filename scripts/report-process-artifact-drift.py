@@ -87,6 +87,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pid", type=int)
     ap.add_argument("--match", default=None, help="按 /proc/<pid>/comm 子串找进程")
+    ap.add_argument("--artifact-dir", default=None,
+                    help="解释型服务的产物目录（三条判据覆盖不到的**业务代码**在这里补）")
     args = ap.parse_args()
 
     pid = args.pid
@@ -139,6 +141,37 @@ def main() -> int:
         print("⚠ 解释型运行时：exe 只是解释器（"
               + base + "）⇒ ①②③ 只覆盖解释器，不覆盖业务代码；"
               "业务产物请另用部署目录的 mtime/内容哈希去比。")
+
+    if args.artifact_dir:
+        # 解释型服务的「产物」是代码目录，不是 exe ⇒ 这里补那格观测点。
+        # 用 max(mtime) 与 start_time 比，是**同一形状的判据**（产物换了但进程没换）。
+        newest, newest_path, count = 0, "", 0
+        for root, dirs, files in os.walk(args.artifact_dir):
+            dirs[:] = [d for d in dirs if d not in {"node_modules", ".git"}]
+            for f in files:
+                if not f.endswith((".js", ".mjs", ".cjs", ".ts")):
+                    continue
+                # 测试文件不属于「跑起来的产物」；把它们算进来会让最新 mtime 落在测试上，
+                # 于是这条判据测的是「测试什么时候写的」，不是「代码什么时候发布的」。
+                if ".test." in f or ".spec." in f:
+                    continue
+                fp = os.path.join(root, f)
+                try:
+                    m = int(os.stat(fp).st_mtime)
+                except OSError:
+                    continue
+                count += 1
+                if m > newest:
+                    newest, newest_path = m, fp
+        if count == 0:
+            print(f"④ 产物目录 {args.artifact_dir}：没扫到代码文件（不判定）")
+        else:
+            print(f"④ 产物目录：{count} 个代码文件，最新 mtime {newest}（{__import__('datetime').datetime.fromtimestamp(newest).isoformat(sep=' ')}）")
+            print(f"   最新那份：{newest_path}")
+            if started is not None:
+                d = newest - started
+                print(f"   与进程启动之差：{d}s ⇒ "
+                      + ("**产物比进程新：进程跑的是旧代码**" if d > 0 else "产物不晚于进程启动（一致）"))
 
     live = sha256_of(exe_link)      # 读 /proc/<pid>/exe 即读进程实际持有的那份
     on_disk = sha256_of(real_path)
