@@ -37,7 +37,13 @@ curl_layer() {
     7)   echo "连接：建立失败 ⇒ 请求没到应用层";;
     56)  echo "传输层通了，但 HTTP 没人读（RST）⇒ 第一怀疑代理/网关/WAF";;
     52)  echo "请求被读了，但没应答就被关 ⇒ 有服务端在处理（不是「没通」）";;
-    28)  echo "读到了但挂住（超时）⇒ 不是「没通」，是「不回」";;
+    # 2026-10-31 —— 28 **不是终态**，是「加大 --max-time 再跑一次」的提示。
+    #   28 @ -m 8 之后用 -m 30 重跑同一条：
+    #     变成 401/403/404 ⇒ 只是慢（服务端在处理）
+    #     仍是 28         ⇒ N 翻近 4 倍仍无响应 ⇒ 才算不可判
+    #   ⇒ 两个读数必须**分开记**（28@8s / 28@30s），否则差值丢了，
+    #     也会把冷启动 / 首次 TLS / 慢查询误记成「卡住」。
+    28)  echo "读到了但挂住（超时）⇒ 不是「没通」，是「不回」；**加大 --max-time 重跑一次再判**（两次都 28 才算卡住，两个读数分开记）";;
     101) echo "真正升级（WS）；带 Accept 校验才算安全项";;
     *)   echo "未分类退出码 ⇒ 贴原文，不要翻译";;
   esac
@@ -50,7 +56,11 @@ curl_fail() {
 
 _selftest() {
   local bad=0
+  local ran=0
+  local expect=8
+  # witness 用：临时把 expect 改坏
   check() { # name, rc, 期望包含
+    ran=$((ran+1))
     local got; got="$(curl_layer "$2")"
     if [[ "$got" == *"$3"* ]]; then
       printf '✓ selftest %s: rc=%s ⇒ %s\n' "$1" "$2" "$got"
@@ -64,10 +74,16 @@ _selftest() {
   check "HTTP 没人读"   56 "没人读"
   check "被读了没应答"  52 "没应答"
   check "挂住"          28 "挂住"
+  check "28 不是终态"   28 "重跑"
   check "探针自身错"    400 "不算读数"
   check "未分类"        9  "贴原文"
+  # 2026-10-31 —— 用例数也要钉：遍历 0 个用例同样会「通过」。
+  if [ "$ran" -ne "$expect" ]; then
+    echo "✗ selftest 用例数应为 $expect，实际 $ran" >&2
+    return 1
+  fi
   if [ "$bad" -eq 0 ]; then
-    echo "✓ selftest 7 例全部符合预期（含 1 个必须分类失败的负例：rc=9）"
+    echo "✓ selftest $ran 例全部符合预期（含 1 个必须分类失败的负例：rc=9）"
   fi
   return "$bad"
 }
