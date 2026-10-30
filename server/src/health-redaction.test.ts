@@ -334,6 +334,22 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     });
   });
 
+  // 2026-10-31 —— 「累计值 ÷ (now − since)」这个用法本身是错的，而且错法很隐蔽。
+  //
+  // 本仓的 counters.since **就等于 startedAt**（同一个字符串）⇒ 分母是 uptime，不是窗口长度。
+  //   · 进程刚重启 ⇒ 分母趋近 0 ⇒ 比值巨大 ⇒ 与 flapping 长得一模一样
+  //     而「刚部署」比 flapping 常见得多 ⇒ **这条判据的主要阳性是正常状态**
+  //   · 而且分子会被派去看它的人推动（如果那是应答计数）
+  // ⇒ 正确判据是**两次读数的差分**：S2 ≠ S1 ∧ (t2 − t1 很小)，不需要除法。
+  //
+  // 这条测试不是「验证除法」，是**把那个事实钉住**：
+  // 哪一天有人给 counters 加了真正的窗口起点，这里会红，届时才允许重新讨论除法。
+  test("counters.since is the process start, so it is NOT a window length (denominator trap)", async () => {
+    const body = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    expect(body.counters.since).toBe(body.startedAt);
+    expect(body.counters.task_rejections.scope).toBe("process_lifetime");
+  });
+
   // 2026-10-31 —— 三分类从「注释里的提醒」变成「字段上的必填标签」。
   //
   // 原来的问题：probe_nonce 恰好是对的，但那是因为**恰好这样写**；
