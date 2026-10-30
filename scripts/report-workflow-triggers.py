@@ -114,6 +114,16 @@ def main() -> int:
     total = sum(len(v) for v in buckets.values())
     print(f"\n合计 {total} 个 workflow")
 
+    # 2026-10-31 —— 负断言的值域由**代码导出**时，导出失败会变成空集 ⇒ 负断言恒真。
+    # ⇒ 先断言值域非空（正控），再谈「没有违规」。
+    domain = [name for name, _ in buckets["auto"] + buckets["manual"] + buckets["none"]
+              if GATE_NAME.search(name)]
+    if not domain:
+        print("✗ 值域为空：没有任何 workflow 名字匹配 gate|qa|check ⇒ 下面的「无违规」恒真，不可读成通过",
+              file=sys.stderr)
+        return 1 if "--assert" in sys.argv else 0
+    print(f"值域（名字匹配 gate|qa|check 的 workflow）：{len(domain)} 个")
+
     flagged = [
         (name, detail) for name, detail in buckets["manual"] + buckets["none"]
         if GATE_NAME.search(name) and name not in ALLOWLIST
