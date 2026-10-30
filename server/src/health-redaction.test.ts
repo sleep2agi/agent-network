@@ -455,7 +455,10 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     // 分子：至少 5 个被明确标成启动快照（今天：startedAt / git_commit / boot_id / pid / proc_start_ticks / kernel_started_at）
     const frozen = Object.entries(HEALTH_FIELD_META).filter(([, m]) => m.frozen_at_boot === true).map(([k]) => k);
     expect(frozen.length).toBeGreaterThanOrEqual(5);
-    // 例外必须显式：served_at 长得一模一样，但它会变
+    // 例外必须显式：served_at 长得一模一样，但它会变。
+    // ⚠️ 但「不被冻结」只是一个**否定**，它在很多实现上都成立（没打标 / 标打错 / 字段不存在）。
+    // ⇒ 它的正面断言在别处：「served_at actually advances with the wall clock」——
+    //   那条要求**连续两次读数不同**，是「必须变」而不是「没有被打标」。
     expect(frozen).not.toContain("served_at");
     expect(HEALTH_FIELD_META.served_at.frozen_at_boot).toBeUndefined();
   });
