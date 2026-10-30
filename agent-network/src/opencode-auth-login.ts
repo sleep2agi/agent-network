@@ -813,7 +813,10 @@ export function readOpencodeAuthLoginCredential(
     throw new Error("OpenCode auth login did not produce a selected-provider API-key credential");
   }
   const record = selected as Record<string, unknown>;
-  if (Object.keys(record).sort().join(",") !== "key,type"
+  // 🔴 必须 `JSON.stringify`，不能用 `sort().join(",")`：键名可以含逗号，
+  //    `{"key,type": …}` 会拼出同样的字符串，于是「多一个键」被读成「正好这两个键」。
+  //    碰撞的方向是**静默通过**，不是偶尔红。
+  if (JSON.stringify(Object.keys(record).sort()) !== '["key","type"]'
     || record.type !== "api"
     || typeof record.key !== "string"
     || record.key.length === 0

@@ -205,6 +205,46 @@ describe("OpenCode manual auth-login sandbox", () => {
     }
   });
 
+  // 🔴 契约：凭据记录的键集必须**恰好**是 {key, type}，一个不多一个不少。
+  //    这里用含分隔符的键名做对抗输入，是因为该判断曾经写成
+  //    `Object.keys(record).sort().join(",") !== "key,type"` —— 键名可以含逗号，
+  //    `{"key,type": …}` 会拼出同一个字符串。当时它没造成接受（后面还有
+  //    `record.type !== "api"` 兜着），但那属于「靠下一行偶然拦住」，
+  //    不是「这一行判断对了」。改成 JSON.stringify 之后，这条断言才在
+  //    键集这一层就是对的。
+  test("rejects a credential record whose key set is not exactly {key,type}", () => {
+    const { node, launchBase } = makeNode("keyset-node", "openai");
+    const sandbox = createOpencodeAuthLoginSandbox({
+      nodeWorkDir: node,
+      provider: "openai",
+      launchBase,
+    });
+    try {
+      for (const record of [
+        { key: "sk-test", type: "api", extra: "smuggled" },
+        { "key,type": "sk-test" },
+        { "key type": "sk-test" },
+        { key: "sk-test" },
+      ]) {
+        writeFileSync(sandbox.authPath, JSON.stringify({ openai: record }), { mode: 0o600 });
+        expect(() => readOpencodeAuthLoginCredential(sandbox)).toThrow(
+          /selected-provider API-key credential/,
+        );
+      }
+      // 恰好两个键才是唯一被接受的那个形状 —— 否则上面四条可能只是「全都抛错」。
+      writeFileSync(sandbox.authPath, JSON.stringify({
+        openai: { key: "sk-test", type: "api" },
+      }), { mode: 0o600 });
+      expect(readOpencodeAuthLoginCredential(sandbox)).toEqual({
+        provider: "openai",
+        type: "api",
+        key: "sk-test",
+      });
+    } finally {
+      cleanupOpencodeAuthLoginSandbox(sandbox);
+    }
+  });
+
   test("refuses OAuth, mixed-provider and symlink auth shapes without disclosing secrets", () => {
     const { node, launchBase } = makeNode();
     const sandbox = createOpencodeAuthLoginSandbox({

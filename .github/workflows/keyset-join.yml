@@ -1,0 +1,35 @@
+# 禁止把「键集」拼成字符串再比较。
+#
+# 形状：`Object.keys(x).sort().join(",") !== "a,b"`
+# 碰撞的方向是**静默通过** —— 键名含分隔符时，「多一个键」被读成「正好这几个键」。
+# 与其它 lint 门不同，这个门的判据是「零」，因为该形状没有任何合法用途：
+# 安全的写法只有 `JSON.stringify(sorted)` 与逐元素比较。
+#
+# 为什么是独立的一个 workflow，而不是塞进已有的 lint：
+# 它的**分母**（git 跟踪的全部非测试源文件）和 home-path-baseline 一样是全仓，
+# 加 `paths:` 过滤器会正好漏掉它该防的那类提交（新文件、新目录）。
+#
+# 脚本本身会额外打印「数组 join」的读数但不阻塞 —— 那是同类不同罪的形状
+# （碰撞的后果是去重口径错误，不是契约绕过）。**不阻塞 ≠ 不存在**，
+# 所以它必须出现在输出里，否则沉默会被读成后者。
+
+name: lint (keyset join)
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  scan:
+    name: keyset-join
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `git ls-files` 取集：需要真实工作树，浅克隆足够。
+          fetch-depth: 0
+      - name: forbid sort().join() key-set comparison
+        # 不带参数 —— 脚本自己会打印分母与被排除的那一类。
+        run: python3 scripts/check-keyset-join.py
