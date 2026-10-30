@@ -1,0 +1,29 @@
+# 测试清单棘轮：**允许新增，不允许消失**。
+#
+# 为什么按「名字集合」而不是计数：
+#   2026-10-31 一次「两个锚点之间整段替换」把两条测试连同区间内容一起删掉，
+#   同时新增了另外两条 ⇒ 测试总数 31 → 31，看起来没变。
+#   ⇒ 计数相同 ≠ 覆盖相同；集合差集才是唯一通用的检测器（也覆盖「测试文件被整段替换」）。
+#
+# 判据：基线里有、现在没有 ⇒ 红。新增 ⇒ 绿并提示落基线。
+# 脚本每次都打印 literal / dynamic 两条分母 —— dynamic 那部分不受棘轮保护，
+# 不打印就会被读成「全覆盖」。
+
+name: lint (test inventory)
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  ratchet:
+    name: test-inventory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: no test may disappear without an explicit baseline update
+        run: python3 scripts/check-test-inventory.py
