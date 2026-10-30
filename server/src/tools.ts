@@ -137,6 +137,21 @@ function lateReplyContextMatches(
   threadId: string,
   turnId: string,
 ): boolean {
+  // #3061 —— 任务**从未记下 turn 上下文**时，不能用「上下文不符」把它挡回去。
+  //
+  // 现场（2026-10-30 生产实测）：
+  //   「仍在 TUI 会话里运行，等待回复已达 30 分钟上限」的失败任务 289 条，
+  //   其中 thread_id/turn_id **非空的 0 条**；「任务未提交」781 条里只有 1 条有。
+  //   ⇒ 这类任务的迟到结果永远匹配不上，等于**工作做完了但结果必定丢弃**。
+  //   全库 task_late_replies 只有 4 行，正是这条路走不通的证据。
+  //
+  // 放宽的边界（三条同时满足才放行）：
+  //   · 存的两个 id 都是 null（不是「存了 A 却来了 B」——那种仍然拒）
+  //   · 任务已经是终态（调用点在别处已判）
+  //   · 令牌就是该任务的负责人（late_reply_task_not_owned 的检查在调用点，未改动）
+  // 在这种情况下，迟到结果只会写进 append-only 的 task_late_replies，并投递给原发送方；
+  // 不改写任务行、不跑父任务回链，所以不会把已完成的任务「再改一遍」。
+  if (storedThreadId === null && storedTurnId === null) return true;
   return storedThreadId === threadId && storedTurnId === turnId;
 }
 
