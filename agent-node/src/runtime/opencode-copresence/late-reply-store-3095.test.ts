@@ -87,4 +87,28 @@ describe("#3095 迟到结果的落盘记录", () => {
     expect(names[0]).not.toContain("/");
     expect(readFileSync(join(pendingDir(dir), names[0]), "utf8")).toContain("../../etc/passwd");
   });
+
+  // kill -9 的窗口：writeFileSync 写完 .tmp、rename 还没执行时进程被杀，
+  // 目录里会留下一个**半截或完整的 .tmp**，而目标 .json 还没出现。
+  // 判据：这种残留既不能被当成有效记录，也不能让扫描崩掉。
+  test("崩溃窗口留下的 .tmp 不被当成记录，也不影响其他记录", () => {
+    const dir = freshDir();
+    saveLateReplyRecord(dir, rec("good"));
+    writeFileSync(join(pendingDir(dir), "good.json.tmp"), '{"taskId":"good","thr', "utf8");
+    const { records, corrupted } = listLateReplyRecords(dir);
+    expect(corrupted).toBe(0);                       // .tmp 不是「损坏的 .json」，只是没完成
+    expect(records.map((r) => r.taskId)).toEqual(["good"]);
+  });
+
+  test("先写 tmp 再 rename ⇒ 任何时刻读到的 .json 都是完整 JSON", () => {
+    const dir = freshDir();
+    mkdirSync(pendingDir(dir), { recursive: true });
+    // 模拟写入过程中的两个中间状态
+    writeFileSync(join(pendingDir(dir), "t9.json.tmp"), '{"taskId":"t9","threadId":"s', "utf8");
+    expect(listLateReplyRecords(dir).records).toHaveLength(0);  // 还没 rename ⇒ 看不见
+    saveLateReplyRecord(dir, rec("t9"));                         // rename 之后才可见
+    const out = listLateReplyRecords(dir);
+    expect(out.records).toHaveLength(1);
+    expect(out.corrupted).toBe(0);
+  });
 });
