@@ -137,17 +137,24 @@ def statement_window(text: str, idx: int) -> str:
 
 
 def scan(repo: Path):
+    return scan_paths(collect(repo), repo)
+
+
+def scan_paths(files: list[Path], repo: Path):
     blocking: list[str] = []
     unproven: list[str] = []
     advisory: list[str] = []
     review: list[str] = []
     scanned = 0
-    for path in collect(repo):
+    for path in files:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        rel = str(path.relative_to(repo))
+        try:
+            rel = str(path.relative_to(repo))
+        except ValueError:
+            rel = path.name
         scanned += 1
         test_file = is_test_path(rel)
         lines = text.splitlines()
@@ -213,7 +220,78 @@ def scan(repo: Path):
     return blocking, unproven, advisory, review, scanned
 
 
+# ---------------------------------------------------------------------------
+# --selftest：让门**证明自己会红**。
+#
+# 对方给的那条判据：断言的有效性 = 你能让它变红一次。
+# 而这里有一个陷阱必须排除：**「退出码非 0」不等于「为预期的原因而红」** ——
+# 脚本语法错、路径写错、依赖缺失都会非 0，看起来和“成功抓到”一模一样。
+# ⇒ 所以每个用例都断言 **桶名（预期原因）**，不只断言退出码。
+#
+# 负例（不该红的）同样要有：否则一个「什么都说违规」的门也能让正例全绿。
+# ---------------------------------------------------------------------------
+SELFTEST_CASES = [
+    (
+        "keyset_adjacent",
+        'export function f(b: Record<string, unknown>) {\n'
+        '  if (Object.keys(b).sort().join(",") !== "a,b") throw new Error("x")\n'
+        '}\n',
+        "blocking", "键集拼字符串",
+    ),
+    (
+        "keyset_via_variable_with_if_between",
+        'export function f(b: Record<string, unknown>) {\n'
+        '  const keys = Object.keys(b).sort()\n'
+        '  if (keys.join(",") !== "a,b") throw new Error("x")\n'
+        '}\n',
+        "blocking", "键集派生标识符",
+    ),
+    (
+        "keyset_multiline",
+        'export function f(b: Record<string, unknown>) {\n'
+        '  if (Object.keys(b).sort()\n'
+        '    .join("\\0") !== "a\\0b") throw new Error("x")\n'
+        '}\n',
+        "blocking", "键集拼字符串",
+    ),
+    (
+        "array_message_negative",
+        'export function f(xs: string[]) {\n'
+        '  const note = xs.map((x) => ({ x })).map((o) => o.x).sort().join(", ")\n'
+        '  return `ids: ${note}`\n'
+        '}\n',
+        "advisory", "数组 join",
+    ),
+]
+
+
+def selftest() -> int:
+    import tempfile
+
+    failures = 0
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for name, body, bucket, marker in SELFTEST_CASES:
+            f = root / f"{name}.ts"
+            f.write_text(body, encoding="utf-8")
+            blocking, unproven, advisory, review, _ = scan_paths([f], root)
+            pool = {"blocking": blocking, "unproven": unproven, "advisory": advisory, "review": review}[bucket]
+            hit = [item for item in pool if marker in item]
+            ok = bool(hit)
+            print(f"{'✓' if ok else '✗'} selftest {name}: 期望落在 {bucket}（含 {marker!r}）"
+                  f"{'' if ok else f' —— 实际 blocking={len(blocking)} unproven={len(unproven)} advisory={len(advisory)}'}")
+            if not ok:
+                failures += 1
+    if failures:
+        print(f"✗ selftest 失败 {failures} 例：门没有按预期变红/变绿", file=sys.stderr)
+        return 1
+    print(f"✓ selftest {len(SELFTEST_CASES)} 例全部按预期（含 1 个负例）")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
     repo = Path(__file__).resolve().parent.parent
     blocking, unproven, advisory, review, scanned = scan(repo)
 

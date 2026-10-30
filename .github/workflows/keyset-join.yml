@@ -36,6 +36,12 @@ jobs:
         with:
           # `git ls-files` 取集：需要真实工作树，浅克隆足够。
           fetch-depth: 0
+      - name: prove the gate can go red (must-fail fixtures)
+        # 断言的有效性 = 你能让它变红一次。
+        # 先跑自测：不给门一个「它会红」的证明，红与绿在读数上完全一样。
+        # 每个用例都断言**预期原因（桶名）**而不只是退出码 ——
+        # 否则脚本崩溃也会被当成“成功抓到”。
+        run: python3 scripts/check-keyset-join.py --selftest
       - name: forbid sort().join() key-set comparison
         # 不带参数 —— 脚本自己会打印分母与被排除的那一类。
         run: python3 scripts/check-keyset-join.py
