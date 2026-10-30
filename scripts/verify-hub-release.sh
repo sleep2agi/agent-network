@@ -23,6 +23,10 @@ CHANNEL="${3:-preview}"
 if [ "${2:-}" = "--tag" ]; then CHANNEL="${3:-preview}"; fi
 
 fail() { echo "FAIL: $*"; exit 1; }
+# 2026-10-31 —— curl 失败要报**层**，不是「连不上」：
+#   rc=56（传输层通了但 HTTP 没人读，首疑代理/WAF）与 rc=28（读了但挂住）与 rc=60（TLS）
+#   的第一动作完全不同，而 `|| fail "cannot read"` 把三者压成一句。
+. "$(dirname "$0")/lib/curl-exit.sh"
 
 command -v curl >/dev/null || fail "curl is required"
 command -v python3 >/dev/null || fail "python3 is required"
@@ -31,7 +35,7 @@ command -v tar >/dev/null || fail "tar is required"
 registry="https://registry.npmjs.org/${PKG}"
 
 echo "== dist-tags"
-tags=$(curl -sS --max-time 25 "$registry") || fail "cannot read the registry"
+if ! tags=$(curl -sS --max-time 25 "$registry"); then rc=$?; curl_fail "读取 registry" "$rc" >&2; exit 1; fi
 if [ -z "$VERSION" ]; then
   VERSION=$(printf '%s' "$tags" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("dist-tags",{}).get("preview",""))')
   [ -n "$VERSION" ] || fail "registry has no preview dist-tag"
@@ -44,10 +48,11 @@ echo "OK   dist-tags.$CHANNEL == $VERSION"
 echo "== tarball"
 work=$(mktemp -d "${TMPDIR:-/tmp}/verify-hub-release-XXXXXX") || fail "mktemp failed"
 trap 'rm -rf "$work"' EXIT
-tarball=$(curl -sS --max-time 25 "$registry/$VERSION" \
+if ! meta=$(curl -sS --max-time 25 "$registry/$VERSION"); then rc=$?; curl_fail "读取版本元数据" "$rc" >&2; exit 1; fi
+tarball=$(printf '%s' "$meta" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("dist",{}).get("tarball",""))')
 [ -n "$tarball" ] || fail "no tarball url for $VERSION"
-curl -sSL --max-time 180 "$tarball" -o "$work/pkg.tgz" || fail "tarball download failed: $tarball"
+if ! curl -sSL --max-time 180 "$tarball" -o "$work/pkg.tgz"; then rc=$?; curl_fail "下载 tarball（$tarball）" "$rc" >&2; exit 1; fi
 echo "OK   downloaded $(wc -c <"$work/pkg.tgz") bytes"
 tar -xzf "$work/pkg.tgz" -C "$work" || fail "tarball is not a readable .tgz"
 [ -d "$work/package" ] || fail "tarball has no package/ directory"
