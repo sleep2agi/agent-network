@@ -316,6 +316,20 @@ SELFTEST_CASES = [
         "blocking", "键集派生标识符",
     ),
     (
+        # 2026-10-31 —— **别拿字面邻近冒充数据流**。
+        # 外部复核里，一个真实的上游响应体键集检查因为 `.sort()` 与 `.join(',')`
+        # 被一条 `if` 分开，被归进了「数组 join，不阻塞」⇒ 归类错，而清单会被下一个人信任。
+        # 本仓靠的是「键集派生标识符」跨行追踪，所以它本来就该落在 blocking ——
+        # 这个用例就是防止有人把它退化成「同行有没有 Object.keys(」。
+        "keyset_variable_split_by_unrelated_if",
+        'export function f(body: Record<string, unknown>) {\n'
+        '  const keys = Object.keys(body).sort()\n'
+        '  if (keys.length !== 2) throw new Error("x")\n'
+        '  if (keys.join(",") !== "a,b") throw new Error("y")\n'
+        '}\n',
+        "blocking", "键集派生标识符",
+    ),
+    (
         # 2026-10-31 —— **跨行盲区的看门狗**：
         # 一次格式化（prettier 阈值附近）会把 `Object.keys(...).sort()` 与 `.join(...)` 断成两行；
         # 若门的正则只认同一行，最危险的那几处（键最多、最容易撞）会静默消失。
@@ -385,8 +399,8 @@ def selftest(quiet: bool = False) -> int:
         if quiet and k.get("file") is not _sys_shim.stderr and a:
             return
         builtins.print(*a, **k)
-    if len(SELFTEST_CASES) != 7:
-        print(f"✗ selftest 用例数应为 7，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
+    if len(SELFTEST_CASES) != 8:
+        print(f"✗ selftest 用例数应为 8，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
     failures = 0
     with tempfile.TemporaryDirectory() as td:
@@ -470,7 +484,7 @@ def main() -> int:
     if controls_failed:
         print("instrument: BROKEN ⇒ 本次没有读数（不是“干净”）", file=sys.stderr)
         return 1
-    print("instrument: valid （selftest 7/7 通过 且 宽形状对照非 0 ⇒ 分类器有能力判出阻塞）")
+    print("instrument: valid （selftest 8/8 通过 且 宽形状对照非 0 ⇒ 分类器有能力判出阻塞）")
 
     for bucket, mark, title in (
         (blocking, "✗", "键集拼接（阻塞）"),
@@ -533,10 +547,10 @@ def main() -> int:
     # 「测量于 T」要求读者自己知道衰减率；而衰减率只有发布者知道。
     # 2026-10-31 —— 门的状态是**二维**的：能不能红 × 今天红不红。
     # 只报一维时，「恒红」与「假绿」在报告里同形（都是「有问题/没问题」）。
-    can_red = "yes（selftest 7/7 + 跨行 canary）"
+    can_red = "yes（selftest 8/8 + 跨行 canary）"
     now = "green（0 阻塞）" if not blocking else f"red（{len(blocking)} 处）"
     print(f"  gate_state     : can_red={can_red} ｜ current={now}  ⇒ 二维都报，否则恒红与假绿同形")
-    print("  invalidates_on : 树变（ref 或 dirty 变）｜正则变（selftest 不再 7/7）｜扫描域变（ext 计数变）")
+    print("  invalidates_on : 树变（ref 或 dirty 变）｜正则变（selftest 不再 8/8）｜扫描域变（ext 计数变）")
     print("                   ⇒ 三者任一发生，上面的结论作废；不需要读者知道任何速率")
     # 2026-10-31 —— **流行度**要和结论一起说。
     # 「0 处」有两种读法：① 有这种写法、但都写得对；② 本仓根本不做这件事。
