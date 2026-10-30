@@ -1376,6 +1376,7 @@ import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows-tui-health";
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
+import { writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
 import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -7367,7 +7368,15 @@ async function processConfigUpdate(): Promise<void> {
       }
       await drainInFlightThink();
       await closeOpencodeRuntime("config restart_only");
-      log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
+      // 2026-10-31 —— 退出前写**持久标记**：退出码只有 8 bit、语义由接收方解释、且不持久。
+      // wrapper 启动时读它，才知道「这次退出是按计划的」。
+      writeRestartIntent(NODE_DIR, {
+        reason: "apply_restart_only",
+        at: Date.now(),
+        pid: process.pid,
+        boot_id: null,
+      });
+      log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor (restart intent recorded)`);
       process.exit(RESTART_SENTINEL);
     }
 
@@ -7538,7 +7547,13 @@ async function processConfigUpdate(): Promise<void> {
     }
     await drainInFlightThink();
     await closeOpencodeRuntime("config restart");
-    log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor`);
+    writeRestartIntent(NODE_DIR, {
+      reason: "apply_restart",
+      at: Date.now(),
+      pid: process.pid,
+      boot_id: null,
+    });
+    log(`[config-apply] exiting with RESTART_SENTINEL=${RESTART_SENTINEL} for parent supervisor (restart intent recorded)`);
     process.exit(RESTART_SENTINEL);
   } catch (err: any) {
     error(`[config-apply] failed: ${err?.message || err}`);
