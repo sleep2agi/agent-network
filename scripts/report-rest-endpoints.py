@@ -52,6 +52,19 @@ def main() -> int:
             found.setdefault(kind, set()).add(m.group(1))
 
     total = sum(len(v) for v in found.values())
+    if "--markdown" in sys.argv:
+        rows = []
+        for kind, _ in PATTERNS:
+            for v in sorted(found.get(kind, ())):
+                rows.append((v, kind))
+        print("| path | 匹配形态 |")
+        print("|---|---|")
+        for v, kind in sorted(rows):
+            print(f"| `{v}` | {kind} |")
+        print()
+        print(f"共 {len(rows)} 条（对象：server/src/server.ts；生成于本脚本，**不要手改**）")
+        return 0
+
     if "--json" in sys.argv:
         print(json.dumps({
             "object": "server/src/server.ts",
