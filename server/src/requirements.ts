@@ -431,7 +431,22 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     // (canWrite + projectRef 拒归档 + canUseProject)。只加字段;客户端据此只列能编辑的项目(app 任务页审计 L13)。
     const writable = canWrite(ctx, networkId);
     const canUse = projectUseResolver(taskCaller(ctx), networkId);
-    return Response.json({ ok: true, projects: rows.map((row) => ({ ...projectPublic(row), viewer_can: { edit: writable && !row.archived && canUse(row.project_id) } })) });
+    // #2899 —— 回显**实际使用的** network_id。
+    //
+    // 现场（2026-10-30，两个独立复核）：
+    //   ① 用户令牌 + 非成员 network_id → 200 + 空数组
+    //   ② 用户令牌属于多网络、不带 network_id → 400 network_id_required（这才是当时那个 400）
+    //   ③ 网络作用域节点令牌 + 任意 network_id → 200 + **它自己网络的数据**
+    // 三条共同点：响应码不携带「你问的是不是这个网络」。
+    // ③ 尤其危险 —— 客户端以为在看 A 的项目，实际拿到的是 B 的（自己的）。
+    //
+    // 只加一个回显字段：不改鉴权、不改返回内容、不引入新的 4xx。
+    // 调用方（dashboard / MCP）可以据此判定「拿到的到底是谁的网络」。
+    return Response.json({
+      ok: true,
+      network_id: networkId,
+      projects: rows.map((row) => ({ ...projectPublic(row), viewer_can: { edit: writable && !row.archived && canUse(row.project_id) } })),
+    });
   }
   if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
   // 项目管理(建 / 改名 / 归档 / 删)只给不受任务范围限制的人。
