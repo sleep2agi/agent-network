@@ -6178,7 +6178,6 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::status separates alive-but-degraded from all-normal (200 stays a promise, not a verdict)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::stays anonymous 200 with parseable aggregates (watchdog judge: curl -sf gets 2xx)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::test_spawn_time_snapshot_family_excludes_the_one_field_that_must_change": 1,
-  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::the four projection witnesses are pairwise distinct inputs (else it is four selfies)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>event_loop carries its own window (no implicit [startedAt, now])::both ends are present, and they are ordered": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>event_loop carries its own window (no implicit [startedAt, now])::since is frozen while observed_at advances (difference, not just comparability)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>field classification is machine-checked, not documentation::every field in the authenticated body carries a class (no untagged field may exist)": 1,
@@ -8059,7 +8058,7 @@
   "tests/test906-provider-create/core.test.ts::create doorbell initializes via actual pinned CLI before spawn; conflict makes zero spawn attempts": 1,
   "tests/test906-provider-create/core.test.ts::wrong scope/revision/model refuses before writing credentials or selecting a default": 1
  },
- "dynamic": 86,
+ "dynamic": 87,
  "names": [
   "agent-network/src/active-network-task.test.ts::clampOutboundPriority::full mode keeps high",
   "agent-network/src/active-network-task.test.ts::clampOutboundPriority::outbound-only demotes a model-chosen high to normal and leaves the rest",
@@ -14239,7 +14238,6 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::status separates alive-but-degraded from all-normal (200 stays a promise, not a verdict)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::stays anonymous 200 with parseable aggregates (watchdog judge: curl -sf gets 2xx)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::test_spawn_time_snapshot_family_excludes_the_one_field_that_must_change",
-  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::the four projection witnesses are pairwise distinct inputs (else it is four selfies)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>event_loop carries its own window (no implicit [startedAt, now])::both ends are present, and they are ordered",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>event_loop carries its own window (no implicit [startedAt, now])::since is frozen while observed_at advances (difference, not just comparability)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>field classification is machine-checked, not documentation::every field in the authenticated body carries a class (no untagged field may exist)",

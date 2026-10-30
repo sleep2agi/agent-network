@@ -15,6 +15,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { createHash } from "node:crypto";
 import { register, addNetworkMember, removeNetworkMember } from "./auth.js";
 import { db } from "./db.js";
 import { MAX_REQUEST_CONTENT_LENGTH, MAX_UPLOAD_BYTES } from "./uploads.js";
@@ -422,7 +423,13 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
 
   // 2026-10-31 —— 形状测试必须先证明**输入彼此不同**，否则它测的是同一个形状 N 次。
   // 顺序不能反：先断言两两不等，再断言各自的行为。
-  test("the four projection witnesses are pairwise distinct inputs (else it is four selfies)", () => {
+  // 2026-10-31 —— 夹具的身份写进**测试名**（每次运行都会打印、且不依赖测试通过）。
+  // 有人后加一份重复的 ⇒ 名字里的 sha 立刻变，diff 里就能看见，而不用等断言红。
+  const WITNESS_SET_SHA = createHash("sha256")
+    .update(JSON.stringify({ unknown_field: { ok: true }, landmark: { git_commit: "deadbeef" } }))
+    .digest("hex")
+    .slice(0, 8);
+  test(`the four projection witnesses are pairwise distinct inputs (fixtureset=${WITNESS_SET_SHA})`, () => {
     const cases = {
       unknown_field: { ok: true, future_issued_token: "abc" },   // 未登记 ⇒ 丢
       landmark: { ok: true, git_commit: "deadbeef" },            // landmark ⇒ 丢
@@ -430,11 +437,18 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
       echo: { probe_nonce: "n-1" },                              // credential(echo) ⇒ 留
     };
     const serialized = Object.entries(cases).map(([k, v]) => [k, JSON.stringify(v)] as const);
+    // 2026-10-31 —— 报「哪一对相等」，不是只报「存在相等」。
+    // 只报「存在相等」时，红的人要在四份夹具里自己找，而他通常先怀疑新加的那份；
+    // 而问题可能在一份旧的里（旧的那份才是标准）。
+    const equalPairs: string[] = [];
     for (let i = 0; i < serialized.length; i += 1) {
       for (let j = i + 1; j < serialized.length; j += 1) {
-        expect(serialized[i][1]).not.toBe(serialized[j][1]);     // 两两不等
+        if (serialized[i][1] === serialized[j][1]) {
+          equalPairs.push(`${serialized[i][0]} == ${serialized[j][0]}`);
+        }
       }
     }
+    expect(equalPairs).toEqual([]);
     // 2026-10-31 —— 这条前置断言自己也要有反例，否则它只是在数份数：
     // 用「内容不同但长度相同」的对，证明判定按**内容**而不是按长度/份数。
     const sameLenDifferent = [{ a: "xy" }, { a: "yz" }];
