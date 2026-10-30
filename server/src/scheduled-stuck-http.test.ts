@@ -204,7 +204,11 @@ describe("#464 stuck timeout", () => {
     const inboxBefore = db.get<any>("SELECT COUNT(*) AS n FROM inbox WHERE network_id = ?1", NET).n;
     const out = await nodeReply({ alias: "scheduler", text: "late answer", in_reply_to: first.taskId, status: "replied", from_session: ALIAS });
     expect(out.ok).toBe(false);
-    expect(out.error).toBe("reply_task_terminal");
+    // #3259 / .216 —— 到期任务不再以 reply_task_terminal 一刀切拒绝：迟到的回复
+    // 会进入「迟到结果」通道（task_late_replies，任务行保持 expired）。而这条通道
+    // 只对**执行节点**开放，这里是从 from_session 的路由回执，因此被按节点令牌拦下。
+    // 结论不变：这次回复什么都没改（下面几条断言仍然检查这一点）。
+    expect(out.error).toBe("late_reply_node_token_required");
     expect(out.reply_queued).toBe(false);
     expect(taskRow(first.taskId!).status).toBe("expired");
     expect(runRow(first.runId).status).toBe("expired");

@@ -235,8 +235,10 @@ describe("#519 at 72h", () => {
     withHours("72", () => patrol());
     expect(taskRow(a.id).status).toBe("expired");
     const r = await tool(nodes.target.token, "send_reply", { in_reply_to: a.id, text: "late answer", status: "replied", network_id: NET });
-    expect(r.ok).toBe(false);
-    expect(r.error).toBe("reply_task_terminal");
+    // #3259 / .216 —— 执行节点的迟到结果不再被 reply_task_terminal 拒绝：
+    // 它作为 task_late_replies 追加，任务行**保持 expired**（迟到 ≠ 追认成功）。
+    expect(r.ok).toBe(true);
+    expect(r.late).toBe(true);
     expect(taskRow(a.id).status).toBe("expired");
   });
 
