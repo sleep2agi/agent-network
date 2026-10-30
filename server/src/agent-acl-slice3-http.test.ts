@@ -310,6 +310,19 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(w.message).toContain("the observation wins");
   });
 
+  // 2026-10-31 —— #3171：补一个「文件级算过、邻近级没有」的工具（list_tasks）。
+  // 之前该文件里唯一的 Object.keys 断言测的是 humans[0]，与本工具无关 —— 这正是「测空气」。
+  describe("list_tasks: pinned key set next to the call", () => {
+    test("⇒ {count, next_cursor, ok, stats, tasks} and count === tasks.length", async () => {
+      const r = await tool(adminToken, "list_tasks", { network_id: NET });
+      // ⚠️ 我从源码里读到的形状（capability / next_terminal_seq）与实际返回不同 ——
+      //    这一条断言当场纠正了我：**读码得到的形状必须由一次真实调用确认**。
+      expect(Object.keys(r).sort()).toEqual(["count", "next_cursor", "ok", "stats", "tasks"]);
+      expect(Array.isArray(r.tasks)).toBe(true);
+      expect(r.count).toBe(r.tasks.length);            // 计数与数组同源
+    });
+  });
+
   // 2026-10-31 —— #3171 续：再一个节点侧读面（count/counts 同源的那类）。
   describe("list_my_pending_create_requests: pinned key set", () => {
     test("⇒ {clone_count, clone_requests, count, ok, requests}, and count === requests.length", async () => {
