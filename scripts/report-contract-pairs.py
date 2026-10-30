@@ -43,6 +43,72 @@ STRICT = (
 )
 
 
+COPIED_BASELINE: dict[str, str] = {
+    'codex-auth-fingerprint.ts': '689285557bf1',
+    'codex-home-enforce.ts': 'de5f3ba27b12',
+    'codex-inventory.ts': '5d4e47348763',
+    'codex-rollout-history-guard.ts': '5351fc8c3b8a',
+    'external-schedule-contract.ts': 'a865578c968c',
+    'host-telemetry.ts': '9399bdcb8557',
+    'node-files.ts': '6b55dc786d9a',
+    'node-name.ts': '628328e729b1',
+    'node-skills.ts': '77bb3ba24abb',
+    'opencode-borrowed-launch-health.ts': '3e5ec8c197a2',
+    'opencode-owner-mode.ts': '7c932368bf73',
+    'opencode-preset.ts': '0ed6eebf6964',
+    'opencode-runtime-binding.ts': '8482ac779ff0',
+    'opencode-v2-configured-model.ts': '1472e67655d3',
+    'opencode-versions.ts': 'b9750b386cb9',
+    'posix-modes.ts': '426bf7e653cc',
+    'probe-host-allowlist.ts': '4632e1b3fdbb',
+    'process-telemetry.ts': '1bea1eb433c4',
+    'provider-application.ts': 'c13b8fafe2c6',
+    'provider-collection.ts': '538452f7bf8f',
+    'provider-initialization.ts': '7e858bb3f0fa',
+    'reserved-env.ts': '23bae14e42ec',
+    'rules-file.ts': '24c630ec32f9',
+    'scoped-secret-contract.ts': 'c06f7e3fa57b',
+    'scoped-secret-env.ts': '3d6e42b337db',
+    'start-resource-gate.ts': 'fade10a367b3',
+    'task-content-limit.ts': '7dfc4ad8210d',
+    'task-trace.ts': 'dd0508dfcf54',
+    'tmux-format.ts': '871dd1837b03',
+    'tmux.ts': '0d48fbf91592',
+    'windows-rename-retry.ts': '4a45f6c4f902',
+}
+
+
+def sha12(path: Path) -> str:
+    import hashlib
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return "????????????"
+
+
+def copies(files: dict[str, dict[str, Path]]) -> list[dict]:
+    """逐字符相同的副本组。
+
+    2026-10-31 —— 外部复核那条：「同一条判据复制在两个仓，今天逐字符相同
+    ⇒ 任何单侧改动都会静默重开，而改的那一侧不知道另一端」。
+
+    比「消费者埋在别仓」更深一层：那次是消费者在别处，这次是**判据**在别处。
+    ⇒ 这里只给出「副本几份、sha 多少」；是否允许分叉是人的决定（见 COPIED_BASELINE）。
+    """
+    out = []
+    for name, side in files.items():
+        if len(side) < 2:
+            continue
+        shas = {g: sha12(p) for g, p in side.items()}
+        out.append({
+            "file": name,
+            "sides": sorted(shas),
+            "sha": shas,
+            "identical": len(set(shas.values())) == 1,
+        })
+    return out
+
+
 def scan(path: Path) -> dict[str, int]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -95,8 +161,21 @@ def main() -> int:
             "detail": marks,
         })
 
+    cp = copies(files)
+    dup = [c for c in cp if c["identical"] and len(c["sides"]) >= 2]
+    diverged = [c for c in cp if not c["identical"] and c["file"] in COPIED_BASELINE]
+    missing = sorted(set(COPIED_BASELINE) - {c["file"] for c in dup})
+
     if "--json" in sys.argv:
-        print(json.dumps({"pairs": rows, "object": "basename-matched .ts（不含 *.test.ts）"}, ensure_ascii=False, indent=2))
+        print(json.dumps({
+            "pairs": rows,
+            "copies": {"identical": [{"file": c["file"], "sides": c["sides"], "sha": list(c["sha"].values())[0]} for c in dup],
+                       "diverged_from_baseline": [{"file": c["file"], "sha": c["sha"]} for c in diverged],
+                       "missing": missing},
+            "object": "basename-matched .ts（不含 *.test.ts）",
+        }, ensure_ascii=False, indent=2))
+        if "--assert" in sys.argv and (diverged or missing):
+            return 1
         return 0
 
     print("同名契约文件（basename 相同、非测试）—— 只查**可静态看见的**容错方向")
@@ -116,7 +195,26 @@ def main() -> int:
     print("     server 侧 = zod 快照 schema（strict/literal）；agent-node 侧 = 读端点目录（JSON.parse + ?? 默认值）")
     print("     ⇒ 两个不同契约同名，不是「容错方向相反」的那一类。")
     print("   要判定「哪一侧是契约的那一侧」，必须再读一次调用方 —— 本脚本没有那个能力。")
-    print("check  : 重跑本脚本；新增同名文件会出现在表里，方向差也要显式看一眼。")
+    print()
+    print(f"逐字符相同的**副本**：{len(dup)} 组（共 {len(cp)} 组同名文件）")
+    print("  ⇒ 判据复制在 N 个包里：任何单侧改动都会让副本分叉，而改的那一侧不知道另一端。")
+    for c in dup[:8]:
+        print(f"    · {c['file']} × {len(c['sides'])}（{', '.join(c['sides'])}）sha={list(c['sha'].values())[0]}")
+    if len(dup) > 8:
+        print(f"    …（共 {len(dup)} 组）")
+    if diverged:
+        print(f"\n⚠ 相对基线**已分叉** {len(diverged)} 组：", file=sys.stderr)
+        for c in diverged:
+            print(f"    · {c['file']} sha={c['sha']}", file=sys.stderr)
+        print("  ⇒ 分叉不一定是错（可能是有意解耦），但必须是**显式决定**：", file=sys.stderr)
+        print("     要么把两侧改回一致，要么从 COPIED_BASELINE 里删掉这一行并说明理由。", file=sys.stderr)
+    if missing:
+        print(f"\n· 基线条目已不成立 {len(missing)} 组（不再是逐字符相同）：{', '.join(missing[:5])}", file=sys.stderr)
+    print("check  : 重跑本脚本；新增同名文件会出现在表里，方向差与副本分叉都要显式看一眼。")
+    if "--assert" in sys.argv and (diverged or missing):
+        # 分叉 = 判据副本不再逐字符相同 ⇒ 必须是一次显式决定（改回去 / 删基线行并说明）
+        print(f"\n✗ 副本分叉或基线失效：diverged={len(diverged)} missing={len(missing)}", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -49,10 +49,6 @@ ADHOC: dict[str, tuple[str, str]] = {
         "按需读「reason 被当 code 分支」的清单 + 冻结基线；棘轮由 --assert 承担，未接线到 CI",
         "把 --assert 接进 test-inventory.yml 后删除本行",
     ),
-    'report-contract-pairs.py': (
-        "按需读一次「同名契约两侧容错方向」的清单；它明确不是判据（同名的两侧可能不是同一个契约）",
-        "并入 check-keyset-join.py 的 --json 消费者后删除本行",
-    ),
     'assert-pr-mergeable.py': (
         '人工在合 PR 前跑；它问的是 GitHub 的实时状态，CI 里没法代替',
         '合 PR 流程改成 gh pr merge 自动检查后删除本行',

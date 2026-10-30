@@ -54,6 +54,11 @@ jobs:
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。
       # 2026-10-31 —— curl 退出码分层的帮助函数：它自己也会烂（码表被改、case 漏一格），
       # 所以自检必须由 CI 跑，而不是靠人记得 `bash scripts/lib/curl-exit.sh --selftest`。
+      # 2026-10-31 —— 「这条判据的副本有几份？」：31 组逐字符相同的同名文件跨 3 个包。
+      # 任何单侧改动都会让副本分叉，而改的那一侧不知道另一端。
+      # 分叉不一定是错，但必须是显式决定（改回去 / 删基线行并说明）。
+      - name: duplicated criteria copies have not silently diverged
+        run: python3 scripts/report-contract-pairs.py --assert
       - name: the curl exit-code classifier still classifies the layers we rely on
         run: bash scripts/lib/curl-exit.sh --selftest
       - name: no shell trap may overwrite the exit code
