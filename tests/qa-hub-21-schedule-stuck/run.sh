@@ -153,10 +153,12 @@ ok 'stuck task stays readable as expired; its run is expired/task_expired with t
 ok 'no second notice for the same episode'
 
 late=$(mcp_call "$NTOK" send_reply "$(jq -nc --arg t "$A" '{in_reply_to:$t,text:"late answer",status:"replied"}')")
-jq -e '.ok == false and .error == "reply_task_terminal" and .reply_queued == false' >/dev/null <<<"$late" || fail "late reply: $late"
+# #3259（.216）—— 执行节点的迟到结果不再被 reply_task_terminal 拒绝，
+# 而是作为 task_late_replies 追加；任务行**保持 expired**，新任务不受影响。
+jq -e '.ok == true and .late == true' >/dev/null <<<"$late" || fail "late reply: $late"
 api GET "/api/tasks/$A" "$BOSS" | jq -e '.task.status == "expired"' >/dev/null || fail 'late reply changed the stuck task'
 api GET "/api/tasks/$B" "$BOSS" | jq -e '.task.status == "delivered"' >/dev/null || fail 'late reply touched the new task'
-ok 'a late reply to the timed-out task is refused (reply_task_terminal) and changes nothing'
+ok 'a late reply to the timed-out task is kept as a late reply and changes neither task'
 ontime=$(mcp_call "$NTOK" send_reply "$(jq -nc --arg t "$B" '{in_reply_to:$t,text:"on time",status:"replied"}')")
 jq -e '.ok == true' >/dev/null <<<"$ontime" || fail "reply to the new task: $ontime"
 [[ $(run_now | jq -r .status) == delivered ]] || fail 'schedule should run normally after the new task replied'
