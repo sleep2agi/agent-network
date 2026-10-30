@@ -81,9 +81,17 @@ def main() -> int:
     text = TARGET.read_text(encoding="utf-8", errors="replace")
 
     found: dict[str, set[str]] = {}
+    # 2026-10-31 —— 每条匹配都要带**行号**：路由表的下一个使用者是「抽表」，
+    # 而抽表必须知道每一条在源码哪里（否则改完对不上账）。同时保留**重复**：
+    # 同一个路径在两处被匹配，是抽表时最容易漏的一类。
+    entries: list[dict] = []
     for kind, pat in PATTERNS:
         for m in pat.finditer(text):
             found.setdefault(kind, set()).add(m.group(1))
+            lineno = text.count("\n", 0, m.start()) + 1
+            line_text = text.splitlines()[lineno - 1].strip() if lineno - 1 < len(text.splitlines()) else ""
+            entries.append({"path": m.group(1), "kind": kind, "line": lineno, "text": line_text[:120]})
+    entries.sort(key=lambda e: (e["line"], e["kind"], e["path"]))
 
     total = sum(len(v) for v in found.values())
     if "--markdown" in sys.argv:
@@ -94,12 +102,14 @@ def main() -> int:
         for line in _provenance():
             print(line)
         print()
-        print("| path | 匹配形态 |")
-        print("|---|---|")
-        for v, kind in sorted(rows):
-            print(f"| `{v}` | {kind} |")
+        print("| path | 匹配形态 | 源码行 |")
+        print("|---|---|---|")
+        for e in entries:
+            print(f"| `{e['path']}` | {e['kind']} | :{e['line']} |")
         print()
-        print(f"共 {len(rows)} 条（对象：server/src/server.ts；生成于本脚本，**不要手改**）")
+        dup = len(entries) - len({(e["path"], e["kind"]) for e in entries})
+        print(f"共 {len(entries)} 条匹配（去重后 {len(rows)} 条 path+形态；重复 {dup} 条）")
+        print("（对象：server/src/server.ts；生成于本脚本，**不要手改**）")
         return 0
 
     if "--json" in sys.argv:
@@ -107,6 +117,8 @@ def main() -> int:
             "object": "server/src/server.ts",
             "by_kind": {k: sorted(v) for k, v in found.items()},
             "total": total,
+            "entries": entries,
+            "provenance": [l.lstrip("> ") for l in _provenance()],
             "not_a_denominator_because": [
                 "variable-built paths are invisible",
                 "dynamic segments inside regexes are cut at the first variable char",
