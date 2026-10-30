@@ -90,7 +90,17 @@ def main() -> int:
             found.setdefault(kind, set()).add(m.group(1))
             lineno = text.count("\n", 0, m.start()) + 1
             line_text = text.splitlines()[lineno - 1].strip() if lineno - 1 < len(text.splitlines()) else ""
-            entries.append({"path": m.group(1), "kind": kind, "line": lineno, "text": line_text[:120]})
+            # 2026-10-31 —— 路由表的**主键不是 path**。
+            # 实测：8 个多处 path 里 6 个是「同一 path、不同 method」或「同一 path、不同 query 判别」，
+            # 而 /api/messages 的 `?scope=user` 分支**必须排在**通用分支之前（顺序承载语义）。
+            # ⇒ 这里把 method 与 query 判别一起抽出来，作为「这一条到底识别什么」的部分键。
+            meth = re.search(r'req\.method\s*===\s*"([A-Z]+)"', line_text)
+            qkeys = re.findall(r'searchParams\.get\("([^"]+)"\)', line_text)
+            entries.append({
+                "path": m.group(1), "kind": kind, "line": lineno, "text": line_text[:120],
+                "method": meth.group(1) if meth else None,
+                "query": qkeys,
+            })
     entries.sort(key=lambda e: (e["line"], e["kind"], e["path"]))
 
     total = sum(len(v) for v in found.values())
@@ -121,13 +131,24 @@ def main() -> int:
         print(f"按 path 分组：{len(groups)} 个不同 path，其中 **{len(multi)} 个出现在多处**"
               f"（共 {sum(len(v) for v in multi.values())} 条匹配）")
         print()
-        print("| path | 处数 | 各处行号 | 形态是否一致 |")
-        print("|---|---|---|---|")
+        print("| path | 处数 | 各处行号 | 判别键（method / query） | 形态是否一致 |")
+        print("|---|---|---|---|---|")
         for path, items in sorted(multi.items(), key=lambda kv: (-len(kv[1]), kv[0])):
             kinds = {i["kind"] for i in items}
+            keys = []
+            for i in items:
+                k = (i.get("method") or "-") + ("?" + ",".join(i.get("query") or []) if i.get("query") else "")
+                keys.append(f"{k}@:{i['line']}")
             print(f"| `{path}` | {len(items)} | {', '.join(':' + str(i['line']) for i in items)} "
-                  f"| {'是' if len(kinds) == 1 else '否（' + '/'.join(sorted(kinds)) + '）'} |")
+                  f"| {' ｜ '.join(keys)} | {'是' if len(kinds) == 1 else '否（' + '/'.join(sorted(kinds)) + '）'} |")
         print()
+        # 「同一 path、不同判别键」= 抽表时必须把它们当成**不同的行**，且保持原顺序。
+        split_by_key = [k for k, v in multi.items()
+                        if len({(i.get("method"), tuple(i.get("query") or [])) for i in v}) > 1]
+        print(f"⇒ 同一 path 下**判别键不同**（method/query）的有 {len(split_by_key)} 个："
+              f"{', '.join('`' + k + '`' for k in sorted(split_by_key))}")
+        print("   抽表时它们是**不同的行**，且顺序承载语义（更具体的判别必须在前）——")
+        print("   按 path 做键会把它们合并成一行，而合并后行为改变、测试未必红。")
         mixed = [k for k, v in multi.items() if len({i["kind"] for i in v}) > 1]
         if mixed:
             print(f"⇒ 「形态不一致」的有 {len(mixed)} 组（{', '.join('`' + m + '`' for m in mixed[:5])}）："
