@@ -3256,20 +3256,42 @@ return Bun.serve({
           top_tools: tools.slice(0, 3),
         };
       });
-      const unbound = tokens.filter((t) => t.unbound_node);
+      // 🔴 summary 必须按**全量**算，不能按这一页算。
+      // 2026-10-30 上线后第一次真实调用就抓到了：`?limit=5` 时 summary.total 报 5，
+      // 而那个网络实际有 580 个令牌 —— 管理员会以为「只有 5 把钥匙」。
+      // 分页只应影响 tokens 数组，不应影响计数。
+      const agg = db.get<{ total: number | string; bound: number | string; unbound_node: number | string; unbound_node_in_use: number | string; unused_24h: number | string }>(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN bound_node_id IS NOT NULL THEN 1 ELSE 0 END) AS bound,
+           SUM(CASE WHEN name LIKE 'node:%' AND bound_node_id IS NULL THEN 1 ELSE 0 END) AS unbound_node,
+           SUM(CASE WHEN name LIKE 'node:%' AND bound_node_id IS NULL
+                     AND EXISTS (SELECT 1 FROM node_tool_calls k
+                                  WHERE k.node_id = 'token:' || t.token_id AND k.hour >= ?2)
+                    THEN 1 ELSE 0 END) AS unbound_node_in_use,
+           SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM node_tool_calls k
+                                      WHERE k.node_id = 'token:' || t.token_id AND k.hour >= ?2)
+                    THEN 1 ELSE 0 END) AS unused_24h
+         FROM api_tokens t
+        WHERE t.network_id = ?1 AND t.revoked_at IS NULL`,
+        networkId, sinceHour,
+      );
+      const num = (v: number | string | null | undefined) => Number(v ?? 0);
       return withCors(req, Response.json({
         ok: true,
         network_id: networkId,
         since: new Date(Date.now() - 86_400_000).toISOString(),
         limit,
+        // summary 是全量；tokens 只是这一页（returned 一眼能看出被截断没有）
         summary: {
-          total: tokens.length,
-          bound: tokens.filter((t) => !!t.bound_node_id).length,
-          unbound_node: unbound.length,
+          total: num(agg?.total),
+          bound: num(agg?.bound),
+          unbound_node: num(agg?.unbound_node),
           // 「名义上还在、实际上没人用」的数量：这才是能不能吊销的判据
-          unused_24h: tokens.filter((t) => t.calls_24h === 0).length,
-          unbound_node_in_use: unbound.filter((t) => t.calls_24h > 0).length,
+          unused_24h: num(agg?.unused_24h),
+          unbound_node_in_use: num(agg?.unbound_node_in_use),
         },
+        returned: tokens.length,
         tokens,
       }));
     }
