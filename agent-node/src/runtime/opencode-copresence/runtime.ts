@@ -90,10 +90,22 @@ export class OpenCodeCopresenceTimeoutError extends Error {
   readonly timeoutMs: number;
   readonly aborted: boolean;
   readonly userReplyText: string;
+  /**
+   * 2026-10-31 —— **谁结束了这次等待**。
+   *
+   *   local   我方到点放弃（自己的 deadline / 自己 abort）
+   *   remote  对方超时或断开（连接被对端中止）
+   *   unknown 说不清
+   *
+   * 没有它时，「我方到点」与「别人中止」被抹成同一个 name ——
+   * 于是任何「谁违约」的统计都会系统性偏向一方，而偏向方向由实现决定、不由事实决定。
+   */
+  readonly endedBy: "local" | "remote" | "unknown";
   constructor(
     phase: "admission" | "reply",
     timeoutMs: number,
     outcome: "running" | "aborted" | "abort_failed" = "running",
+    endedBy: "local" | "remote" | "unknown" = "local",
   ) {
     const budget = formatOpenCodeTimeout(timeoutMs);
     const knob = "可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调整（单位 ms，0 = 不设上限）";
@@ -121,6 +133,7 @@ export class OpenCodeCopresenceTimeoutError extends Error {
     this.phase = phase;
     this.timeoutMs = timeoutMs;
     this.aborted = stopped === "aborted";
+    this.endedBy = endedBy;
     this.userReplyText = userReplyText;
   }
 }
@@ -1038,6 +1051,10 @@ export async function openVettedOpenCodeCopresence(
             // aborted before that reply goes out.
             if (turnSignal?.aborted
               && (error?.name === "TimeoutError" || error?.name === "AbortError")) {
+              // TimeoutError = 我方 deadline 到了；AbortError = 被动中止（可能是别人）。
+              const endedBy: "local" | "remote" | "unknown" =
+                error?.name === "TimeoutError" ? "local"
+                  : error?.name === "AbortError" ? "remote" : "unknown";
               // Abort only when the live turn is provably ours. Unreadable
               // history (this GET's own failure is often the same stall) and
               // an undecidable queue must not cancel whoever is using the
@@ -1047,17 +1064,17 @@ export async function openVettedOpenCodeCopresence(
               const decision = timedOutTurnAbortDecision(history, messageId);
               if (decision === "not_submitted") {
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission did not land`);
-                throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+                throw new OpenCodeCopresenceTimeoutError("admission", budgetMs, "running", endedBy);
               }
               if (decision !== "abort") {
                 if (borrowed) unknownWrite = true;
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; leaving the session running (history unread or the live turn is not ours)`);
-                throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
+                throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, "running", endedBy);
               }
               const aborted = await abortOwnTurn(created.id);
               if (borrowed && !aborted) unknownWrite = true;
               warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission landed — session ${aborted ? "aborted" : "abort failed"}`);
-              throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed");
+              throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed", endedBy);
             }
             if (borrowed) unknownWrite = true;
             throw error;

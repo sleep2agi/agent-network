@@ -413,3 +413,28 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     session = undefined;
   });
 });
+
+
+// 2026-10-31 —— `ended_by`：谁结束了这次等待。
+// 没有它时，「我方到点」与「别人中止」被抹成同一个 name，
+// 于是任何「谁违约」的统计都会系统性偏向一方，而偏向方向由实现决定、不由事实决定。
+describe("OpenCodeCopresenceTimeoutError.endedBy", () => {
+  test("defaults to local（我方到点）；显式传 remote / unknown 时照原样保留", async () => {
+    const { OpenCodeCopresenceTimeoutError } = await import("./runtime.js");
+    const dflt = new OpenCodeCopresenceTimeoutError("reply", 1000);
+    expect(dflt.endedBy).toBe("local");
+    const remote = new OpenCodeCopresenceTimeoutError("reply", 1000, "running", "remote");
+    expect(remote.endedBy).toBe("remote");
+    const unk = new OpenCodeCopresenceTimeoutError("admission", 1000, "running", "unknown");
+    expect(unk.endedBy).toBe("unknown");
+  });
+
+  test("endedBy 不改变既有判据（phase / aborted / timeoutMs 与之前一致）", async () => {
+    const { OpenCodeCopresenceTimeoutError } = await import("./runtime.js");
+    const e = new OpenCodeCopresenceTimeoutError("reply", 2500, "aborted", "remote");
+    expect(e.phase).toBe("reply");
+    expect(e.aborted).toBe(true);
+    expect(e.timeoutMs).toBe(2500);
+    expect(e.endedBy).toBe("remote");
+  });
+});
