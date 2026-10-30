@@ -869,11 +869,17 @@ const TaskSchema = z.object({
   force: z.boolean().optional(),
 });
 
-/** #460 — `{ degraded: [{ layer, label, reason }] }` when the node's fresh health says a layer is down, else `{}`. */
-function degradedField(networkId: string | null | undefined, alias: string): { degraded?: Array<{ layer: string; label: string; reason: string }> } {
+/**
+ * #460 — `{ degraded: [{ layer, label, reason, origin }] }` when the node's fresh health says a layer is down, else `{}`.
+ *
+ * `origin` 必带（2026-10-31）：`reason` 有两个生产者 —— 节点上报的摘要，与 Hub 合成的
+ * `"unreachable"`。少了这一格，「节点说自己不可达」与「Hub 问不到节点」在响应里同形，
+ * 而上游可以原样声明那个字面量，所以改名或拆 catch 都不构成判别力。
+ */
+function degradedField(networkId: string | null | undefined, alias: string): { degraded?: Array<{ layer: string; label: string; reason: string; origin: "node" | "hub" }> } {
   const h = readNodeHealth(networkId ?? "default", alias);
   const layers = degradedLayers(h?.health);
-  return layers.length ? { degraded: layers.map(l => ({ layer: l.layer, label: l.label, reason: l.reason })) } : {};
+  return layers.length ? { degraded: layers.map(l => ({ layer: l.layer, label: l.label, reason: l.reason, origin: l.origin })) } : {};
 }
 
 const BroadcastSchema = z.object({
@@ -2729,7 +2735,7 @@ return Bun.serve({
             return {
               node_id: n.node_id, alias: n.alias, display_name: n.display_name, owner_user_id: n.owner_user_id,
               status: session?.status ?? "offline", last_seen_at: session?.last_seen_at ?? null,
-              health: h?.health ?? null, degraded: degradedLayers(h?.health).map((l) => ({ layer: l.layer, label: l.label, reason: l.reason })),
+              health: h?.health ?? null, degraded: degradedLayers(h?.health).map((l) => ({ layer: l.layer, label: l.label, reason: l.reason, origin: l.origin })),
             };
           });
           return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, nodes }));

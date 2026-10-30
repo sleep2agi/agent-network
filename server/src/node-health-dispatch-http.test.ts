@@ -97,6 +97,15 @@ describe("#460 which layers count as degraded", () => {
     expect(degradedLayers({ tui: { ok: false, reason: "sleep-placeholder" } }).map(l => [l.layer, l.reason, l.label])).toEqual([["tui", "sleep-placeholder", "TUI 被占位(sleep)"]]);
     expect(degradedLayers({ model_auth: "revoked" }).map(l => l.label)).toEqual(["需要重新登录"]);
     expect(degradedLayers({ model_auth: "expired" }).map(l => l.label)).toEqual(["登录已过期"]);
+    // 2026-10-31 —— `reason` 有两个生产者（节点上报 vs Hub 合成 "unreachable"），
+    // 所以 origin 是唯一能把两者分开的一格。上游可以**原样声明** "unreachable"，
+    // 因此改名 / 拆分 catch / 加前缀都不构成判别力（`:148` 同形）。
+    expect(degradedLayers(DOWN_APP).map(l => [l.layer, l.origin])).toEqual([["app_server", "node"]]);
+    expect(degradedLayers({ app_server: { ok: false, rtt_ms: null, last_error: null } }).map(l => [l.reason, l.origin])).toEqual([["unreachable", "hub"]]);
+    // must-fire：两边都写出 "unreachable" 时，只有 origin 不同 —— 这条就是那一格存在的理由
+    expect(degradedLayers({ app_server: { ok: false, rtt_ms: null, last_error: "unreachable" } }).map(l => [l.reason, l.origin])).toEqual([["unreachable", "node"]]);
+    expect(degradedLayers({ tui: { ok: false, reason: "sleep-placeholder" } })[0].origin).toBe("node");
+
     // 修法只指向本节点重新登录,不教人拷别人的凭据
     expect(degradedLayers({ model_auth: "revoked" })[0].hint).toContain("不要拷别的节点的 auth.json");
   });
@@ -126,6 +135,7 @@ describe("#460 REST /api/task", () => {
     expect(r.body.alias).toBe(TARGET);
     expect(r.body.layers.map((l: any) => l.layer)).toEqual(["app_server"]);
     expect(r.body.layers[0].reason).toContain("ECONNREFUSED");
+    expect(r.body.layers[0].origin).toBe("node");
     expect(r.body.message).toContain("App Server 断开");
     expect(r.body.hint).toContain("force=true");
     expect(r.body.force_allowed).toBe(true);
@@ -265,9 +275,11 @@ describe("#460 /api/status carries `degraded` only for degraded nodes", () => {
   });
   test("degraded → light and full rows list the failing layers with the app's labels", async () => {
     setHealth({ bridge: "ok", app_server: { ok: false, rtt_ms: null, last_error: "refused" }, model_auth: "revoked" });
+    // 2026-10-31 —— 加了 `origin`（reason 的生产者）。这是**加字段**，不是改语义：
+    // 少这一格，「节点说自己不可达」与「Hub 问不到节点」在响应里同形。
     const want = [
-      { layer: "app_server", label: "App Server 断开", reason: "refused" },
-      { layer: "model_auth", label: "需要重新登录", reason: "revoked" },
+      { layer: "app_server", label: "App Server 断开", reason: "refused", origin: "node" },
+      { layer: "model_auth", label: "需要重新登录", reason: "revoked", origin: "node" },
     ];
     expect((await row(true)).degraded).toEqual(want);
     expect((await row(false)).degraded).toEqual(want);
