@@ -150,6 +150,82 @@ export function isAllowedToChangeFlag(
 }
 
 /**
+ * Runtime families the hub treats as "OpenCode". `nodes.runtime` is
+ * written from report_status and carries the legacy `-sdk` bucket
+ * (`opencode-sdk`) for older CLI builds, while newer callers pass the
+ * config-level spelling (`opencode-cli` / `opencode`). All three mean
+ * the same agent-node runtime, so the hot-model-switch gate below must
+ * accept every spelling — otherwise the same node flips between hot
+ * and restart depending on which build reported last.
+ */
+const OPENCODE_RUNTIME_LABELS = new Set<string>(["opencode-sdk", "opencode-cli", "opencode"]);
+
+/**
+ * Read the OpenCode knobs the hub persists in `nodes.config_snapshot`.
+ * Both are reported by agent-node (see buildConfigSnapshot in
+ * agent-node/src/runtime/config-apply.ts) and are the only two fields
+ * the apply-mode decision needs.
+ *
+ * Snapshot is stored as text but older rows hold objects; a parse
+ * failure means "this cell is empty" (never an exception) — same
+ * fail-shape as the api-nodes projection.
+ */
+export function readOpencodeSnapshotFlags(configSnapshot: unknown): {
+  opencodeGeneration: "v1" | "v2" | null;
+  opencodeMode: string | null;
+} {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    parsed = null;
+  }
+  const flags = parsed?.flags;
+  const generation = flags?.opencodeGeneration;
+  const mode = flags?.opencodeMode;
+  return {
+    opencodeGeneration: generation === "v1" || generation === "v2" ? generation : null,
+    opencodeMode: typeof mode === "string" && mode.length <= 32 ? mode : null,
+  };
+}
+
+/**
+ * True when the node can swap the live model without a process restart.
+ *
+ * Mirrors `computeApplyMode` in agent-node/src/runtime/config-apply.ts
+ * (#3146). The node has been able to do this since OpenCode V2
+ * co-presence shipped, but the hub classified every `model` patch as
+ * `restart`, so the client showed "restarting" and waited for a
+ * restart that the node deliberately never performed. Hub and node now
+ * agree on the same three conditions:
+ *
+ *   runtime ∈ OpenCode   ·   opencodeGeneration === "v2"   ·   mode === "copresence"
+ *
+ * `copresence` is required because the hot switch drives the running
+ * TUI session (`opencodeCopresenceSession.setSelectedModel`); a
+ * headless V2 node has no such session and must restart. Only a
+ * model-ONLY patch qualifies — adding flags or channels drags in
+ * restart-tier fields, and the node would restart anyway.
+ */
+export function isHotModelSwitchSupported(
+  model: string | undefined,
+  flags: Record<string, unknown>,
+  channels: string[] | undefined,
+  runtime: string | null | undefined,
+  opencodeGeneration: "v1" | "v2" | null,
+  opencodeMode: string | null,
+): boolean {
+  if (model === undefined) return false;
+  if (Object.keys(flags).length !== 0) return false;
+  if (channels !== undefined) return false;
+  if (!runtime || !OPENCODE_RUNTIME_LABELS.has(runtime)) return false;
+  if (opencodeGeneration !== "v2") return false;
+  return opencodeMode === "copresence";
+}
+
+/**
  * Classify the patch's required apply mode. Empty patch (model + flags
  * both empty, no channels) → "restart_only" (used by restart_node tool).
  * Any restart-required field present, OR a channels change → "restart"
@@ -157,15 +233,34 @@ export function isAllowedToChangeFlag(
  * once at boot in agent-node/src/cli.ts and forks per-channel workers
  * from it, so a channel enable/disable takes effect on process restart
  * only — see #260 P5 wire discipline). Otherwise → "hot".
+ *
+ * `opts` carries the target node's runtime identity. Callers that omit
+ * it get the pre-#3146 behaviour (model ⇒ restart), which is the safe
+ * answer for any node we know nothing about.
  */
 export function computeApplyMode(
   model: string | undefined,
   flags: Record<string, unknown>,
   channels?: string[] | undefined,
+  opts?: {
+    runtime?: string | null;
+    opencodeGeneration?: "v1" | "v2" | null;
+    opencodeMode?: string | null;
+  },
 ): "hot" | "restart" | "restart_only" {
   const fieldCount = (model !== undefined ? 1 : 0) + Object.keys(flags).length + (channels !== undefined ? 1 : 0);
   if (fieldCount === 0) return "restart_only";
-  if (model !== undefined) return "restart";
+  if (model !== undefined) {
+    if (isHotModelSwitchSupported(
+      model,
+      flags,
+      channels,
+      opts?.runtime,
+      opts?.opencodeGeneration ?? null,
+      opts?.opencodeMode ?? null,
+    )) return "hot";
+    return "restart";
+  }
   if (channels !== undefined) return "restart";
   for (const key of Object.keys(flags)) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";

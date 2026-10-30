@@ -98,6 +98,7 @@ import {
   SECURITY_SENSITIVE_FLAGS,
   EDITABLE_CHANNELS,
   computeApplyMode,
+  readOpencodeSnapshotFlags,
   validatePatch,
   narrowChannelsPatch,
   isAllowedToChangeFlag,
@@ -3734,7 +3735,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Compute apply_mode + persist + push doorbell.
       const updateId = `cu_${uuidv4()}`;
-      const applyMode = computeApplyMode(model, flags, channels);
+      // #3146 —— 把目标节点的 runtime 身份带进分类器。OpenCode V2 共存
+      // 节点可以在 TUI 会话里就地换模型（agent-node 侧早就能，见
+      // agent-node/src/runtime/config-apply.ts）；不带这三个字段时
+      // computeApplyMode 退回旧行为（model ⇒ restart），那正是客户端
+      // 显示「重启中」却永远等不到重启的原因。
+      const opencodeSnap = readOpencodeSnapshotFlags(node.config_snapshot);
+      const applyMode = computeApplyMode(model, flags, channels, {
+        runtime: node.runtime,
+        opencodeGeneration: opencodeSnap.opencodeGeneration,
+        opencodeMode: opencodeSnap.opencodeMode,
+      });
       const patchJson = JSON.stringify({
         ...(model !== undefined ? { model } : {}),
         flags,

@@ -12,6 +12,7 @@ import {
   EDITABLE_CHANNELS,
   isAllowedToChangeFlag,
   computeApplyMode,
+  readOpencodeSnapshotFlags,
   validatePatch,
   narrowChannelsPatch,
 } from "./config-apply-validate";
@@ -179,6 +180,67 @@ describe("computeApplyMode — tier classifier (RFC-024 §4)", () => {
 
   test("mixed (hot + one restart flag) → restart", () => {
     expect(computeApplyMode(undefined, { maxTurns: 50, timeout: 60000 })).toBe("restart");
+  });
+});
+
+// #3146 —— 客户端「切模型不必重启」。agent-node 从 OpenCode V2 共存起就能
+// 在运行中的 TUI 会话里换模型，但 hub 把所有 `model` patch 一律判成
+// restart，于是客户端显示「重启中」而节点永远不会重启。
+describe("computeApplyMode — OpenCode V2 hot model switch (#3146)", () => {
+  const v2Copresence = {
+    runtime: "opencode-sdk",
+    opencodeGeneration: "v2" as const,
+    opencodeMode: "copresence",
+  };
+
+  test("model alone on an OpenCode V2 co-presence node → hot", () => {
+    expect(computeApplyMode("deepseek/deepseek-flash", {}, undefined, v2Copresence)).toBe("hot");
+  });
+
+  test("runtime spelling aliases all resolve to hot (opencode-cli / opencode / opencode-sdk)", () => {
+    for (const runtime of ["opencode-sdk", "opencode-cli", "opencode"]) {
+      expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, runtime })).toBe("hot");
+    }
+  });
+
+  test("model alone without opts keeps the pre-#3146 restart answer", () => {
+    expect(computeApplyMode("deepseek/deepseek-flash", {})).toBe("restart");
+  });
+
+  test("v1 node → restart (no live V2 session to switch)", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, opencodeGeneration: "v1" })).toBe("restart");
+  });
+
+  test("unknown generation → restart", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, opencodeGeneration: null })).toBe("restart");
+  });
+
+  test("headless V2 node → restart (no co-presence session to drive)", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, opencodeMode: "headless" })).toBe("restart");
+  });
+
+  test("non-OpenCode runtime → restart", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, runtime: "codex-app-server-sdk" })).toBe("restart");
+  });
+
+  test("model + any flag → restart (mixed patch stays on the restart path)", () => {
+    expect(computeApplyMode("m", { maxTurns: 50 }, undefined, v2Copresence)).toBe("restart");
+    expect(computeApplyMode("m", { timeout: 60000 }, undefined, v2Copresence)).toBe("restart");
+  });
+
+  test("model + channels → restart", () => {
+    expect(computeApplyMode("m", {}, ["feishu"], v2Copresence)).toBe("restart");
+  });
+
+  test("readOpencodeSnapshotFlags parses text, object, and junk", () => {
+    expect(readOpencodeSnapshotFlags('{"flags":{"opencodeGeneration":"v2","opencodeMode":"copresence"}}'))
+      .toEqual({ opencodeGeneration: "v2", opencodeMode: "copresence" });
+    expect(readOpencodeSnapshotFlags({ flags: { opencodeGeneration: "v1" } }))
+      .toEqual({ opencodeGeneration: "v1", opencodeMode: null });
+    expect(readOpencodeSnapshotFlags("not json")).toEqual({ opencodeGeneration: null, opencodeMode: null });
+    expect(readOpencodeSnapshotFlags(null)).toEqual({ opencodeGeneration: null, opencodeMode: null });
+    expect(readOpencodeSnapshotFlags('{"flags":{"opencodeGeneration":"v9"}}'))
+      .toEqual({ opencodeGeneration: null, opencodeMode: null });
   });
 });
 

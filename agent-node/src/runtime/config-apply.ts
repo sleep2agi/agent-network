@@ -214,8 +214,15 @@ export function computeApplyMode(patch: ConfigPatch, opts?: {
   if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
   // OpenCode V2 switches the live TUI session and writes config.model so the
   // dashboard poll can finish. A restart would reopen the old session model.
+  //
+  // #3146 —— `runtime` here is the RAW config value (`fileConfig.runtime`),
+  // and agent-node accepts both spellings ("opencode-cli" and the short
+  // alias "opencode", see RUNTIME_MAP). Matching only the long form made a
+  // node configured with the alias restart on every model change while its
+  // twin hot-swapped — same build, different config string.
   if (hasModel && flagKeys.length === 0 && !hasChannels
-    && opts?.runtime === "opencode-cli" && opts?.opencodeGeneration === "v2") {
+    && (opts?.runtime === "opencode-cli" || opts?.runtime === "opencode")
+    && opts?.opencodeGeneration === "v2") {
     // #2050: a missing hot capability must not veto a Hub-requested restart.
     // This decision is made before any model API call; an attempted/failed
     // hot switch must never be replayed as a restart here.
