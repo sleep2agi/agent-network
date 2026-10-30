@@ -106,7 +106,17 @@ export async function readOwnedOpenCodeV2Catalog(input: OwnedCatalogRead): Promi
     }
     return { ok: true, snapshot };
   } catch (error) {
-    const code = error instanceof OpenCodeCatalogError ? error.code : "unavailable";
+    // 2026-10-31 —— 兜底不许点名因果。
+    //
+    // 这里原来把所有非 OpenCodeCatalogError 的异常都记成 "unavailable"。
+    // 但 "unavailable" 是一个**指名道姓的结论**（服务不可用），
+    // 而我们此刻知道的只是「出了个我没预料到的错」—— 二者不是同一件事。
+    // 上游一旦是 bug（TypeError / 解析失败 / 路径越界），调用方会照着
+    // "服务不可用" 去排查，而那是一条错误的因果。
+    //
+    // ⇒ 正确落点是 "unexpected"：静默可以，但不许替调用方下结论。
+    //   （判据：喂一个真实但意外的错误，它还会说 "unavailable" 吗？）
+    const code: CatalogError = error instanceof OpenCodeCatalogError ? error.code : "unexpected";
     return { ok: false, error: code };
   }
 }

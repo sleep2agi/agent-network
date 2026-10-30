@@ -20,7 +20,16 @@ export interface OpenCodeCatalogSnapshot {
   defaultModel: { providerId: string; id: string } | null;
 }
 
-export type CatalogError = "invalid_target" | "unauthorized" | "unavailable" | "invalid_response" | "scope_mismatch" | "too_large";
+// 2026-10-31 —— 兜底落点补一格。
+//
+// "unavailable" 是一个**指名道姓的结论**（服务不可用）；
+// 而「抓到我没预料到的异常」不等于服务不可用 —— 它可能是个 bug。
+// 两者混用会把排查方向指向错误的一层，而且**不会喊**（这正是它难查的原因）。
+//
+// 🔴 同一条不变式在 server 侧也有一份（server/src/opencode-v2-catalog.ts 的
+//    CATALOG_ERROR_CODES）。两份手工同步的联合类型，本身就有一条「两副本」风险：
+//    加码时只改一侧 ⇒ 另一侧会静默落到自己的兜底。
+export type CatalogError = "invalid_target" | "unauthorized" | "unavailable" | "invalid_response" | "scope_mismatch" | "too_large" | "unexpected" | "directory_not_ascii";
 export class OpenCodeCatalogError extends Error {
   constructor(readonly code: CatalogError) { super(`opencode_catalog_${code}`); }
 }
@@ -98,6 +107,19 @@ export async function readOpenCodeCatalog(opts: {
     throw new OpenCodeCatalogError("invalid_target");
   }
   if (!opts.scope.networkId || !opts.scope.daemonId || !opts.scope.directory || !opts.authorization || /[\r\n]/.test(opts.authorization)) throw new OpenCodeCatalogError("invalid_target");
+  // 2026-10-31 —— 非 ASCII 目录**在这一层就报真因**，别让它变成一次 TypeError。
+  //
+  // 事实：OpenCode 只认 `x-opencode-directory` 这个**头**（注释里写明 query 参数被忽略），
+  // 而 fetch/undici 对非 ASCII 的 header 值直接抛
+  //   TypeError: Header 'x-opencode-directory' has invalid value: …
+  // ⇒ 任何 workdir 里含中文等字符的节点都读不到 catalog，
+  //   而这个 TypeError 在调用方原来被兜底成 "unavailable"（**指名道姓的错因**）：
+  //   排查会照着“服务不可用”走，而真相是“这个值这个通道运不了”。
+  //
+  // 我们的节点目录本身就长这样（`.anet/nodes/<中文别名>`），所以这条不是理论边角。
+  // 不能改成 query 参数（原生服务忽略它）⇒ 这是**传输层的结构性限制**，
+  // 唯一诚实的做法是：给出它自己的码，让人一眼看见限制在哪一层。
+  if (!/^[\x20-\x7e]*$/.test(opts.scope.directory)) throw new OpenCodeCatalogError("directory_not_ascii");
   const timeoutMs = opts.timeoutMs ?? 5_000;
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new OpenCodeCatalogError("invalid_target");
   const controller = new AbortController();

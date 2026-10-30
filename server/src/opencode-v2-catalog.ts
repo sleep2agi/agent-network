@@ -21,6 +21,10 @@ const SECRET = /^(sk-|gh[pousr]_|github_pat_|xox[baprs]-|AKIA|AIza|ya29\.|glpat-
 
 export const CATALOG_ERROR_CODES = [
   "invalid_target", "unauthorized", "unavailable", "invalid_response", "scope_mismatch", "too_large",
+  // 2026-10-31 —— 两格新增，都要与 agent-node 侧的手工联合类型同步：
+  //   "unexpected"           兜底不许点名因果（原先把非目录错误一律报 "unavailable"）
+  //   "directory_not_ascii"  传输层结构性限制：OpenCode 只认 header，而 header 运不了非 ASCII
+  "unexpected", "directory_not_ascii",
 ] as const;
 export type CatalogErrorCode = (typeof CATALOG_ERROR_CODES)[number];
 
