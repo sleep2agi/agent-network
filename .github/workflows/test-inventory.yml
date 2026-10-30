@@ -40,6 +40,11 @@ jobs:
       # 我今晚让人跑过一个不存在的判别器（?probe=1），而它返回的是**合理读数**。
       - name: every scripts/… reference must resolve to a real file
         run: python3 scripts/check-script-references.py
+      # 2026-10-31 —— 反方向：引用了的东西存在（上一行），**存在的东西有人跑**（这一行）。
+      # 一个写好了却没有任何调用者的脚本，失效速度是 0 —— 不是很小，是 0。
+      # 它不要求每个脚本都进 CI；它要求每个脚本都落进三档之一，ADHOC 必须有「谁会发现它烂了」+「什么时候删这一行」。
+      - name: every script has a discoverer when it stops running
+        run: python3 scripts/report-script-cadence.py --assert
       - name: orphan checks that were never executed (now wired)
         run: |
           python3 scripts/check-hub-v2-protocol-inputs.py
