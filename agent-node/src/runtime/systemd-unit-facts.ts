@@ -25,17 +25,58 @@ export interface UnitFacts {
   loadState: string;
   /** Type：service / oneshot / notify / … */
   type: string;
-  /** Restart：no / always / on-failure / on-abnormal / …（空串表示未设置）。 */
+  /** Restart：no / always / on-failure / on-abnormal / on-success / on-abort / on-watchdog。空串 = 未设置。 */
   restart: string;
+  /**
+   * SuccessExitStatus：被视为「成功退出」的额外退出码/信号名列表（空格分隔）。
+   * 🔴 2026-10-31 修正：决定 exit 75 会不会被重新拉起的，是 **Restart= 与 SuccessExitStatus=**，
+   *    不是 RestartPreventExitStatus（后者只在「不重启的那些状态」上做例外）。
+   *    而且未设置时 systemd 打印字面量 `[unprintable]`，**不是 `0`** ——
+   *    任何把它当 0 解析的代码都会静默误判。
+   */
+  successExitStatus: string;
   readAt: number;
 }
 
 export type UnitFactsReader = (unit: string) => UnitFacts;
 
 export type Supervision =
-  | { kind: "supervised"; facts: UnitFacts }
-  | { kind: "not_supervised"; reason: string; facts: UnitFacts }
+  | { kind: "supervised"; respawnsOnExit75: boolean | null; facts: UnitFacts }
+  | { kind: "not_supervised"; reason: string; respawnsOnExit75: false; facts: UnitFacts }
   | { kind: "unknown"; reason: string };
+
+/**
+ * 2026-10-31 —— exit 75 会不会被重新拉起？
+ *
+ * `Restart=` 的语义按退出状态分类，而 75 属于「失败」还是「成功」由 `SuccessExitStatus=` 决定：
+ *   always     ⇒ 无论成败都重启          ⇒ true
+ *   no         ⇒ 从不重启                ⇒ false
+ *   on-failure ⇒ 仅失败时重启 ⇒ 75 在 SuccessExitStatus 里（=被当成功）则不重启 ⇒ 取反
+ *   on-success ⇒ 仅成功时重启 ⇒ 75 在列表里才重启
+ *   其它（on-abnormal/on-abort/on-watchdog/on-abnormal…）⇒ 与 75 的常规退出无关 ⇒ null
+ *
+ * ⇒ 返回 null = 「我算不出来」，不是 false。**不知道不能折成「不会重启」。**
+ */
+export function respawnsOnExit75(restart: string, successExitStatus: string): boolean | null {
+  const list = successExitStatus
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  // `[unprintable]` 是 systemd 对「未设置」的字面量输出，不能当数字解析。
+  const seventyFiveIsSuccess = list.includes("75");
+  switch (restart) {
+    case "always":
+      return true;
+    case "no":
+      return false;
+    case "on-failure":
+      return !seventyFiveIsSuccess;
+    case "on-success":
+      return seventyFiveIsSuccess;
+    default:
+      return null;
+  }
+}
 
 export interface UnitFactsCache {
   /** 读一次（TTL 内命中缓存）。失败返回 null —— 由调用方决定是 unknown 还是重试。 */
@@ -90,18 +131,22 @@ export function classifySupervision(facts: UnitFacts | null): Supervision {
     return { kind: "unknown", reason: "unit_facts_incomplete" };
   }
   if (facts.loadState !== "loaded") {
-    return { kind: "not_supervised", reason: `load_state:${facts.loadState}`, facts };
+    return { kind: "not_supervised", reason: `load_state:${facts.loadState}`, respawnsOnExit75: false, facts };
   }
   if (facts.type !== "service") {
-    return { kind: "not_supervised", reason: `type:${facts.type}`, facts };
+    return { kind: "not_supervised", reason: `type:${facts.type}`, respawnsOnExit75: false, facts };
   }
   if (!facts.restart) {
-    return { kind: "not_supervised", reason: "restart_unset", facts };
+    return { kind: "not_supervised", reason: "restart_unset", respawnsOnExit75: false, facts };
   }
   if (facts.restart === "no") {
-    return { kind: "not_supervised", reason: "restart_no", facts };
+    return { kind: "not_supervised", reason: "restart_no", respawnsOnExit75: false, facts };
   }
-  return { kind: "supervised", facts };
+  return {
+    kind: "supervised",
+    respawnsOnExit75: respawnsOnExit75(facts.restart, facts.successExitStatus),
+    facts,
+  };
 }
 
 /** 解析 `systemctl show -p LoadState,Type,Restart` 的输出（`K=V` 每行一条）。 */
@@ -116,6 +161,7 @@ export function parseSystemctlShow(stdout: string, readAt: number): UnitFacts {
     loadState: map.get("LoadState") ?? "",
     type: map.get("Type") ?? "",
     restart: map.get("Restart") ?? "",
+    successExitStatus: map.get("SuccessExitStatus") ?? "",
     readAt,
   };
 }

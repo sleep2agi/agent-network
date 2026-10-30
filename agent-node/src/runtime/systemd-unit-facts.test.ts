@@ -11,6 +11,7 @@ import {
   classifySupervision,
   createUnitFactsCache,
   parseSystemctlShow,
+  respawnsOnExit75,
   type UnitFacts,
 } from "./systemd-unit-facts";
 
@@ -18,6 +19,7 @@ const facts = (over: Partial<UnitFacts> = {}): UnitFacts => ({
   loadState: "loaded",
   type: "service",
   restart: "always",
+  successExitStatus: "",
   readAt: 0,
   ...over,
 });
@@ -91,10 +93,76 @@ describe("classifySupervision", () => {
   });
 });
 
+// 2026-10-31 —— exit 75 会不会被重新拉起：由 Restart= 与 SuccessExitStatus= 共同决定。
+// 对方实测：`systemctl show -p Restart` 对「unit 不存在」也输出 no + rc=0 ⇒
+// 「不存在」与「Restart=no」同输出同成功码 ⇒ 三态的产出者是 LoadState，不是 Restart。
+describe("respawnsOnExit75", () => {
+  test("always ⇒ true regardless of SuccessExitStatus", () => {
+    expect(respawnsOnExit75("always", "")).toBe(true);
+    expect(respawnsOnExit75("always", "75")).toBe(true);
+  });
+
+  test("no ⇒ false", () => {
+    expect(respawnsOnExit75("no", "")).toBe(false);
+    expect(respawnsOnExit75("no", "75")).toBe(false);
+  });
+
+  test("on-failure ⇒ restarts 75 unless 75 is listed as a success exit", () => {
+    expect(respawnsOnExit75("on-failure", "")).toBe(true);
+    expect(respawnsOnExit75("on-failure", "75")).toBe(false);
+    expect(respawnsOnExit75("on-failure", "0 75")).toBe(false);
+    expect(respawnsOnExit75("on-failure", "0 70")).toBe(true);
+  });
+
+  test("on-success ⇒ restarts 75 only if listed", () => {
+    expect(respawnsOnExit75("on-success", "75")).toBe(true);
+    expect(respawnsOnExit75("on-success", "")).toBe(false);
+  });
+
+  test("other Restart= values are NOT guessed into a boolean", () => {
+    for (const v of ["on-abnormal", "on-abort", "on-watchdog", "", "on-abnormal "]) {
+      expect(respawnsOnExit75(v, "")).toBeNull();
+    }
+  });
+
+  test("the [unprintable] literal for unset SuccessExitStatus is not parsed as a number", () => {
+    // systemd 对未设置打的是字面量，不是 0 ⇒ 解析它不能产生「75 在列表里」的错觉
+    expect(respawnsOnExit75("on-failure", "[unprintable]")).toBe(true);
+  });
+});
+
+describe("classifySupervision — exit75 视角", () => {
+  test("Restart=on-failure + SuccessExitStatus=75 ⇒ supervised 但 exit75 **不**(会被当成成功退出)", () => {
+    const r = classifySupervision(facts({ restart: "on-failure", successExitStatus: "75" }));
+    expect(r.kind).toBe("supervised");
+    if (r.kind === "supervised") expect(r.respawnsOnExit75).toBe(false);
+  });
+
+  test("Restart=on-failure without the list ⇒ exit75 会重启", () => {
+    const r = classifySupervision(facts({ restart: "on-failure" }));
+    if (r.kind === "supervised") expect(r.respawnsOnExit75).toBe(true);
+  });
+
+  test("RestartPreventExitStatus is NOT the knob — unset prints [unprintable], we don't read it", () => {
+    // 只断言我们的输入里根本没有这个字段：读它等于查错旋钮。
+    const f = facts();
+    expect("restartPreventExitStatus" in f).toBe(false);
+  });
+});
+
 describe("parseSystemctlShow", () => {
   test("parses K=V lines and keeps unknowns empty (no invented defaults)", () => {
-    const f = parseSystemctlShow("LoadState=loaded\nType=service\nRestart=on-failure\n", 42);
-    expect(f).toEqual({ loadState: "loaded", type: "service", restart: "on-failure", readAt: 42 });
+    const f = parseSystemctlShow(
+      "LoadState=loaded\nType=service\nRestart=on-failure\nSuccessExitStatus=0 75\n",
+      42,
+    );
+    expect(f).toEqual({
+      loadState: "loaded",
+      type: "service",
+      restart: "on-failure",
+      successExitStatus: "0 75",
+      readAt: 42,
+    });
   });
 
   test("missing properties stay empty strings so classify can call them unknown", () => {
