@@ -121,7 +121,7 @@ describe("requirement events", () => {
     expect(r1.status).toBe(200);
     const list = of((await events(admin.token)).body.events, card.id);
     const byField = Object.fromEntries(list.filter((e: any) => e.kind === "changed").map((e: any) => [e.field, e]));
-    expect(Object.keys(byField).sort()).toEqual(["agent_owner", "column", "due", "participants", "priority", "tags", "title"]);
+    expect(Object.keys(byField).sort().sort()).toEqual(["agent_owner", "column", "due", "participants", "priority", "tags", "title"]);
     expect(byField.column).toMatchObject({ old: "pool", new: "doing", actor: user(member.id) });
     expect(byField.priority).toMatchObject({ old: "normal", new: "high" });
     expect(byField.due).toMatchObject({ old: null, new: "2026-10-03" });

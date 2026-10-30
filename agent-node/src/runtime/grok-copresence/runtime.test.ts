@@ -173,7 +173,7 @@ describe("Grok copresence launch and injection policy", () => {
     expect(grokCopresenceFailureSubcode(tagged)).toBe("chat.stat.size_regressed");
     expect(grokCopresenceFailureCode(new Error("private runtime detail"))).toBe("unknown");
     expect(grokCopresenceFailureSubcode(new Error("private runtime detail"))).toBe("unknown");
-    expect(Object.keys(tagged).sort()).toEqual(["failureCode", "name"]);
+    expect(Object.keys(tagged).sort().sort()).toEqual(["failureCode", "name"]);
     expect(grokCopresenceFailureSubcode(
       new GrokCopresenceFailure("timeout", "private runtime detail", "chat.stat.io_other"),
     )).toBe("none");

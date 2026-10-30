@@ -123,7 +123,7 @@ describe("GET /api/status for the old alias resolver", () => {
     expect(r.status).toBe(200);
     expect(r.projection).toBe("alias-resolver");
     expect(r.body.sessions).toHaveLength(ROWS);
-    expect(Object.keys(r.body.sessions[0]).sort()).toEqual(["agent", "alias", "network_id", "node_id", "runtime", "server", "status", "task", "updated_at"]);
+    expect(Object.keys(r.body.sessions[0]).sort().sort()).toEqual(["agent", "alias", "network_id", "node_id", "runtime", "server", "status", "task", "updated_at"]);
     expect(r.body.summary.total).toBe(ROWS);
   });
 

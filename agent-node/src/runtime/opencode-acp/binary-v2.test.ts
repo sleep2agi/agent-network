@@ -52,7 +52,7 @@ describe("OpenCode V2 package gate (#543)", () => {
   test("V1 attestations keep their pre-#543 shape (no generation key)", () => {
     const binary = stub(trustedRoot(), "opencode-ai", OPENCODE_DEFAULT_PIN, OPENCODE_DEFAULT_PIN);
     const attestation = resolvePinnedOpencodeBinaryAttestation({ requestedBinary: binary });
-    expect(Object.keys(attestation).sort()).toEqual(["binary", "binaryFile", "expectedVersion", "packageJson", "packageJsonFile"]);
+    expect(Object.keys(attestation).sort().sort()).toEqual(["binary", "binaryFile", "expectedVersion", "packageJson", "packageJsonFile"]);
   });
 
   test("the V1 gate (default) refuses a V2 package — a V1 node never runs @opencode/cli", () => {

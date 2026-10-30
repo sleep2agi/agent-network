@@ -320,7 +320,7 @@ describe("department_id filter and the read-only node list", () => {
     const r = await dept(U.head.token, "GET", `/${D.fe}/nodes`);
     expect(r.status).toBe(200);
     expect(r.body.nodes.map((n: any) => n.node_id)).toEqual(["node_dh_m"]);
-    expect(Object.keys(r.body.nodes[0]).sort()).toEqual(["alias", "degraded", "display_name", "health", "last_seen_at", "node_id", "owner_user_id", "status"]);
+    expect(Object.keys(r.body.nodes[0]).sort().sort()).toEqual(["alias", "degraded", "display_name", "health", "last_seen_at", "node_id", "owner_user_id", "status"]);
     expect((await dept(U.head.token, "GET", `/${D.be}/nodes`)).body.error).toBe("department_scope_denied");
     expect((await dept(U.member.token, "GET", `/${D.fe}/nodes`)).body.error).toBe("department_scope_denied");
     expect((await dept(U.owner.token, "GET", `/${D.rd}/nodes`)).body.nodes.length).toBe(1);

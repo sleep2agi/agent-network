@@ -44,7 +44,7 @@ describe("#695 fetch exceptions become JSON with the exception's own message", (
     expect(Object.keys(serveErrorBody(new Error("x"))).sort()).toEqual(
       ["error", "error_id", "id", "jsonrpc", "message", "ok"],
     );
-    expect(Object.keys(serveErrorBody(new Error("x")).error).sort()).toEqual(["code", "message"]);
+    expect(Object.keys(serveErrorBody(new Error("x")).error).sort().sort()).toEqual(["code", "message"]);
   });
 
   describe("error_id: the join key must exist in all three places, identically", () => {

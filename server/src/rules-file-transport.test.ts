@@ -133,7 +133,7 @@ describe("app#225 rules file — read round trip", () => {
 
       const pulled = await n.call("get_rules_file_request", {});
       expect(pulled.ok).toBe(true);
-      expect(Object.keys(pulled.request).sort()).toEqual(["op", "request_id"]);
+      expect(Object.keys(pulled.request).sort().sort()).toEqual(["op", "request_id"]);
       expect(pulled.request).toEqual({ request_id: enq.request_id, op: "read" });
       // 第二次拉:已经 in_progress,不再重复下发
       expect(await n.call("get_rules_file_request", {})).toEqual({ ok: true, request: null });

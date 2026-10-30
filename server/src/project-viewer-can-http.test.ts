@@ -93,7 +93,7 @@ describe("GET /api/requirements/projects 的 viewer_can.edit", () => {
     const row = (await projects("alice"))["pvc-P2"];
     // parentId 是 2026-10-24 加的「子项目」字段（admin：管理项目里看不到层级）；
     // 它同样是加法式的：这里钉的是「已知键一个不多一个不少」，新键必须显式加进这个清单。
-    expect(Object.keys(row).sort()).toEqual(["archived", "color", "createdAt", "id", "name", "parentId", "sort", "viewer_can"]);
+    expect(Object.keys(row).sort().sort()).toEqual(["archived", "color", "createdAt", "id", "name", "parentId", "sort", "viewer_can"]);
     expect(Object.keys(row.viewer_can)).toEqual(["edit"]);
   });
 
