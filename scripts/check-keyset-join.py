@@ -486,7 +486,12 @@ def main() -> int:
         print("✗ 分类器自检未通过 —— 本次的「0 阻塞」不能读成没有违规。", file=sys.stderr)
     if controls_failed:
         print("instrument: BROKEN ⇒ 本次没有读数（不是“干净”）", file=sys.stderr)
-        return 1
+        # 2026-10-31 —— 退出码区分「不可核」与「有违规」：
+        #   2 = 没有读数（仪器坏了 / 域窄了 / 扫不到）
+        #   1 = 有违规（真的找到了）
+        # 这两个在 CI 里都被当成失败，但对人完全不同：前者补读数，后者修代码。
+        # 「不可核 ≠ 失效」，与对方那条退出码表同构。
+        return 2
     print("instrument: valid （selftest 8/8 通过 且 宽形状对照非 0 ⇒ 分类器有能力判出阻塞）")
 
     for bucket, mark, title in (
