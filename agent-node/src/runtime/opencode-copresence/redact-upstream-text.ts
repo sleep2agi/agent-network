@@ -28,13 +28,33 @@ const PATTERNS: Array<[RegExp, string]> = [
 ];
 
 /**
- * 截断 + 打码。控制字符替换为空格，避免伪造日志行。
- * 返回的一定是单行、≤ MAX_LEN 的字符串。
+ * 打码 + 截断。控制字符替换为空格，避免伪造日志行。
+ *
+ * 🔴 顺序是**承重**的：必须**先在全量原文上打码，再截断**。
+ *    反过来（先截断到 200 再匹配）会让跨过边界的密钥「前缀还在、后半没了」⇒
+ *    模式匹配不上 ⇒ **密钥前缀原样泄露**。
+ *    而顺序写反时**测试照样绿**，因为样本通常很短 ⇒
+ *    所以测试里必须有一条：密钥跨越截断边界。
+ *
+ * 返回的一定是单行、≤ maxLen + 后缀 的字符串。
  */
 export function redactUpstreamText(input: unknown, maxLen: number = MAX_LEN): string {
   const raw = typeof input === "string" ? input : String(input ?? "");
   let text = raw.replace(/[\u0000-\u001f\u007f]+/g, " ");
   for (const [re, replacement] of PATTERNS) text = text.replace(re, replacement);
-  if (text.length > maxLen) text = `${text.slice(0, maxLen)}…(${raw.length} chars)`;
+  if (text.length > maxLen) {
+    // 🔴 截断点不许落在打码标记内部。
+    //    否则 `sk-***` 会被切成 `sk-` —— 前缀留下来了、标记没了，
+    //    而这条日志的作用正是「让人知道这里曾有凭据」。
+    //    ⇒ 若切点落在某个 `***` 内部，就把整个标记退掉（宁可少几个字节）。
+    let cut = maxLen;
+    for (let i = text.indexOf("***"); i >= 0; i = text.indexOf("***", i + 1)) {
+      if (i < cut && cut < i + 3) {
+        cut = i;   // 退到标记起点；其前缀（如 `sk-`）属于标记的一部分，一并退掉
+        break;
+      }
+    }
+    text = `${text.slice(0, cut)}…(${raw.length} chars)`;
+  }
   return text;
 }

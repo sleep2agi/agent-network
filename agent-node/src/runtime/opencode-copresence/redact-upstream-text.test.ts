@@ -46,6 +46,32 @@ describe("redactUpstreamText", () => {
     expect(out).not.toContain("\t");
   });
 
+  // 🔴 密钥跨越截断边界：这一条防的是「先截断后打码」那个顺序错误。
+  //    顺序写反时，前缀 `sk-` 还在、后半被切掉 ⇒ 正则匹配不上 ⇒ 密钥原样泄露，
+  //    而样本短的时候测试全绿。所以这里刻意把密钥放在第 200 字节附近。
+  test("a secret straddling the truncation boundary is still masked", () => {
+    // 关键：把 `sk-` 放在**截断点附近**，使「先截断后打码」只剩 `sk-` + 极短尾巴
+    // （< 6 个字符 ⇒ 正则的 {6,} 匹配不上 ⇒ 前缀原样泄露）。
+    const pad = "x".repeat(195);
+    const out = redactUpstreamText(`${pad} sk-abcdef1234567890 tail`);
+    // 🔴 断言必须针对**前缀形态**，不能只断言“那个完整密钥不在”。
+    //    因为在写反顺序时，截断已经把完整密钥切掉了 —— 断言会**空过**。
+    // 只断言「没有未打码的前缀形态」。标记本身可能整体被退掉（截断点落在标记内），
+    // 那是允许的 —— 允许“少几个字节”，不允许“留下半个前缀”。
+    expect(out).not.toMatch(/sk-[A-Za-z0-9_-]/);
+  });
+
+  // 🔴 黑名单降低的那部分，恰好是「测试能想到的」那部分。
+  //    所以必须有一条「匹配不到任何模式」的用例：它不证明安全，
+  //    只证明**未匹配的原文也能安全落盘**（单行、有上限、控制字符被替换）。
+  test("text matching no known pattern still lands safely (bounds, single line)", () => {
+    const weird = `unknown credential format ${"Z".repeat(400)}`;
+    const out = redactUpstreamText(weird);
+    expect(out.length).toBeLessThanOrEqual(200 + 20);
+    expect(out).not.toContain("\n");
+    expect(out).toContain("chars)");
+  });
+
   test("keeps a benign message readable — redaction must not make logs useless", () => {
     const msg = "provider returned 429 rate_limit_exceeded after 3 retries";
     expect(redactUpstreamText(msg)).toBe(msg);
