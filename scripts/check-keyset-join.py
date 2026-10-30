@@ -231,7 +231,10 @@ def scan_paths(files: list[Path], repo: Path):
             if cut >= 0:
                 between = window[cut:]
                 same_expression = not re.search(
-                    r"\b(?:if|for|while|return|let|const|var|await)\b", between
+                    # 2026-10-31 补 `;` —— 语句边界。
+                    # 外部复核实测过一次假红：上一条语句的 Object.keys 让下一条的数组 join
+                    # 被算成键集判断。只按「前 N 字符里出现过」判，就是这个形状。
+                    r"\b(?:if|for|while|return|let|const|var|await)\b|;", between
                 )
             tainted_in_line = any(re.search(rf"\b{re.escape(t)}\b", lines[n - 1]) for t in tainted)
             keyset = same_expression or tainted_in_line
