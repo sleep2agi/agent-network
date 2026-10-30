@@ -203,6 +203,11 @@ export interface OpenCodeCopresenceSession {
        * 不提供它＝保持旧行为（结果丢弃）；提供它就由调用方把它作为迟到结果补发回 Hub。
        */
       onLateReply?: (payload: LateReplyPayload) => void | Promise<void>;
+      /**
+       * #3095 —— 观察器挂上时回调一次（threadId=会话 id，turnId=这一轮的 message id）。
+       * 调用方用它把「正在等哪一轮」落盘，这样进程重启后能知道自己错过了什么。
+       */
+      onLateReplyArmed?: (info: { threadId: string; turnId: string }) => void;
     },
     /**
      * #1879 ③ —— 排队项的归属：这条任务是谁的（task id + 提交者）。
@@ -928,6 +933,11 @@ export async function openVettedOpenCodeCopresence(
           /** Once, when admission sees a non-idle session. Does not shorten the wait. */
           onAdmissionBusy?: () => void | Promise<void>;
           onLateReply?: (payload: LateReplyPayload) => void | Promise<void>;
+      /**
+       * #3095 —— 观察器挂上时回调一次（threadId=会话 id，turnId=这一轮的 message id）。
+       * 调用方用它把「正在等哪一轮」落盘，这样进程重启后能知道自己错过了什么。
+       */
+      onLateReplyArmed?: (info: { threadId: string; turnId: string }) => void;
         },
         /**
          * #1879 ③ —— 归属：排队项绑定 task 与提交者。
