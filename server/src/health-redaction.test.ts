@@ -245,6 +245,23 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     }
   });
 
+  // 2026-10-31 —— 白名单的另一半：**无死条目**。
+  //
+  // 已有的那条断言「匿名响应里每个键都在白名单内」防的是泄露；
+  // 缺的这半边防的是「死条目」：白名单里的键若早就不再出现（改名/删除），
+  // 它却一直躺在那里，看起来「这个字段是公开的」⇒ 下一个人把同名字段加回来时**默认就是公开的**。
+  // ⇒ 白名单会从「审批记录」退化成「历史残留」。
+  // 这与今晚那条镜像规则同构：否定断言必须配肯定断言，否则前者可被「永远不给」满足。
+  test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
+    const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
+    const plain = await (await fetch(`${BASE}/health`)).json() as any;
+    // 条件出现的键（只在带 X-Probe-Nonce 时出现）要在第二种请求里核对
+    const probed = await (await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": "dead-entry-check" } })).json() as any;
+    const seen = new Set([...Object.keys(plain), ...Object.keys(probed)]);
+    const dead = [...PUBLIC_HEALTH_KEYS].filter((k) => !seen.has(k));
+    expect(dead).toEqual([]);
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);

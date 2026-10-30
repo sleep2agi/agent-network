@@ -923,7 +923,9 @@ export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
   "ok", "version", "api_version", "transport", "uptime", "startedAt",
   // 规模与健康度聚合（不含拓扑明细）
   "sessions_count", "sse_connections", "mcp_inflight", "mcp_inflight_peak",
-  "stall_count", "last_stall_at", "recent_stalls",
+  // 事件循环停顿是**一个对象**（event_loop: {max_gap_ms, recent_stalls,…}），
+  // 不是我原先以为的三个顶层键 —— 死条目测试当场抓到了这一点。
+  "event_loop",
   // 访问模式与安全档位（不含任何凭据/路径）
   "auth", "security", "tmux", "v3_auth", "multi_network",
   // 授权类型只需要「是什么」，不需要行内容
@@ -3104,13 +3106,16 @@ return Bun.serve({
         //    而那响应里恰好有同一个 nonce ⇒ 会被读成“新鲜”。上面那条 ==1 正是拦它的。
         // 只在带该头时打印，所以日志量与探针次数同阶，不随请求速率增长。
         console.log(`[health] probe nonce=${probeNonce}`);
-        // 回显只对「这一次」有意义 ⇒ 顺手把这一份响应标成不可缓存，
-        // 否则探针自己会制造出它要防的那种残骸。
-        const probeRes = Response.json(shape(body));
-        probeRes.headers.set("Cache-Control", "no-store");
-        return withCors(req, probeRes);
       }
-      return withCors(req, Response.json(shape(body)));
+      // 2026-10-31 —— **单一出口**。
+      // 之前是两个 return 各自记得调 shape()（匿名投影）—— 而「必须在所有字段写完之后执行」
+      // 的变换，多出口 × 惰性 = 迟早漏：下一个人加第三条出口（比如 degraded 分支）就会裸奔。
+      // ⇒ 收敛成一个 return，投影与 header 都在这里做完。
+      const healthRes = Response.json(shape(body));
+      // 回显只对「这一次」有意义 ⇒ 带 nonce 的那一份标成不可缓存，
+      // 否则探针自己会制造出它要防的那种残骸。
+      if (probeNonce) healthRes.headers.set("Cache-Control", "no-store");
+      return withCors(req, healthRes);
     }
 
     // ── All REST /api endpoints require auth (if token configured) ──
