@@ -353,6 +353,28 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.counters.task_rejections.scope).toBe("process_lifetime");
   });
 
+  // 2026-10-31 —— 形状测试必须先证明**输入彼此不同**，否则它测的是同一个形状 N 次。
+  // 顺序不能反：先断言两两不等，再断言各自的行为。
+  test("the four projection witnesses are pairwise distinct inputs (else it is four selfies)", () => {
+    const cases = {
+      unknown_field: { ok: true, future_issued_token: "abc" },   // 未登记 ⇒ 丢
+      landmark: { ok: true, git_commit: "deadbeef" },            // landmark ⇒ 丢
+      gauge: { ok: true, sessions_count: 3 },                    // gauge ⇒ 留
+      echo: { probe_nonce: "n-1" },                              // credential(echo) ⇒ 留
+    };
+    const serialized = Object.entries(cases).map(([k, v]) => [k, JSON.stringify(v)] as const);
+    for (let i = 0; i < serialized.length; i += 1) {
+      for (let j = i + 1; j < serialized.length; j += 1) {
+        expect(serialized[i][1]).not.toBe(serialized[j][1]);     // 两两不等
+      }
+    }
+    // 再断言各自行为（顺序与上面一致：先证输入不同，再看结果）
+    expect(Object.keys(projectPublicHealth(cases.unknown_field))).toEqual(["ok"]);
+    expect(Object.keys(projectPublicHealth(cases.landmark))).toEqual(["ok"]);
+    expect(Object.keys(projectPublicHealth(cases.gauge)).sort()).toEqual(["ok", "sessions_count"]);
+    expect(Object.keys(projectPublicHealth(cases.echo))).toEqual(["probe_nonce"]);
+  });
+
   // 2026-10-31 —— 分类必须写出**谁不算**：形似启动快照但会变的那个字段。
   // 读初始快照的判据只会漏报、不会误报；而它的失效形态与「真的没有」同形。
   test("test_spawn_time_snapshot_family_excludes_the_one_field_that_must_change", async () => {
