@@ -285,6 +285,17 @@ SELFTEST_CASES = [
         "blocking", "键集拼字符串",
     ),
     (
+        # 线上真实形状（agent-portal server/src/tmwork-cloud-runtime-claims.ts:53）：
+        # 单表达式，两侧各一次 join('\0')，比较运算符在**第二个** join 之后。
+        # 这条用例钉的是：门必须抓住这种「两侧都拼」的写法 ——
+        # 它正是我们最想让门抓的那个真实对象。
+        "exact_style_both_sides",
+        'export function exact(v: Record<string, unknown>, keys: string[]) {\n'
+        '  return Object.keys(v).sort().join("\\0") === [...keys].sort().join("\\0")\n'
+        '}\n',
+        "blocking", "键集拼字符串",
+    ),
+    (
         "array_message_negative",
         'export function f(xs: string[]) {\n'
         '  const note = xs.map((x) => ({ x })).map((o) => o.x).sort().join(", ")\n'
@@ -300,8 +311,8 @@ def selftest() -> int:
 
     # 遍历 0 个用例也是通过 —— 这是 empty-assertion 的最小形状。
     # 所以先钉数量，再跑用例：任何人删掉一个用例，这里先红。
-    if len(SELFTEST_CASES) != 4:
-        print(f"✗ selftest 用例数应为 4，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
+    if len(SELFTEST_CASES) != 5:
+        print(f"✗ selftest 用例数应为 5，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
     failures = 0
     with tempfile.TemporaryDirectory() as td:
