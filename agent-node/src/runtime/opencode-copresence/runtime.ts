@@ -965,6 +965,16 @@ export async function openVettedOpenCodeCopresence(
           // #1879 ③ —— 排队项的归属在**开始等**的那一刻就定下来：
           // 后面无论是超时还是「负责人离开」，都要能说清是谁的那条任务。
           const queueOwner = bindQueueOwner({ taskId: owner?.taskId, sender, sinceMs: Date.now() });
+          // 2026-10-31 —— **入口先落一行，不等结果**。
+          //
+          // 任何诊断通道，如果它的消费者可能在我们写之前就消失，那就不是通道。
+          // 这条任务会因为「排队没排上」「进程重启」「客户端先断」而永远不产生结果日志；
+          // 只有在入口写过的这一行，才能让人事后按**时间窗**反查「有进无出」的那些。
+          //
+          // 与超时日志的分工：入口这行说明「它来过」，超时那行说明「它怎么死的」。
+          // 只有后者时，日志里只剩“死了的”，没有“来过的” —— 差值读不出来。
+          const budgetLabel = budgetMs > 0 ? `${budgetMs}ms` : "unbounded";
+          log(`[opencode-copresence] task accepted task=${owner?.taskId ?? "-"} budget=${budgetLabel}`);
           await waitUntilSessionIdle(url, password, created.id, admissionBudgetMs, request, evidence?.onAdmissionBusy, queueOwner);
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
