@@ -54,7 +54,48 @@ def triggers(text: str) -> tuple[str, str]:
     return "none", "未识别的触发条件"
 
 
+def _probe(cmd: list[str]) -> tuple[bool, str]:
+    """跑一条探针命令，返回 (能不能在这里跑, 依据)。
+
+    🔴 只报「可跑/不可跑」是不够的：**不可跑有两种**，而它们的处置相反 ——
+       · 这台机器没有该工具（换台机器就能跑）
+       · 工具有但不可用（daemon 没起 / 权限不对）
+       所以这里连**判定依据**一起返回，调用方必须把它打出来。
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which(cmd[0]) is None:
+        return False, f"`{cmd[0]}` 不在 PATH 里"
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=20)
+    except Exception as e:  # noqa: BLE001
+        return False, f"`{' '.join(cmd)}` 抛错：{e}"
+    if r.returncode != 0:
+        first = (r.stderr or r.stdout).decode("utf-8", "replace").strip().splitlines()
+        return False, f"`{' '.join(cmd)}` exit={r.returncode}：{first[0] if first else ''}"
+    return True, f"`{' '.join(cmd)}` exit=0"
+
+
+def report_layers() -> int:
+    """L0 到处能跑，L1 需要 docker —— 所以「在哪一层跑过」必须比「跑没跑」更具体。"""
+    layers = [
+        ("L0 （bun test 单测）", ["bun", "--version"]),
+        ("L1 （docker 契约测试）", ["docker", "info"]),
+    ]
+    print("测试层：能不能**在这台机器上**跑（不是「有没有跑过」）")
+    for name, cmd in layers:
+        ok, why = _probe(cmd)
+        print(f"  {name:24s} {'可跑' if ok else '不可跑'}   ← {why}")
+    print("  ⚠️ 「不可跑」有两种：工具缺失（换机器可解）与工具不可用（daemon/权限）。")
+    print("     而「沉默」会被读成「没跑」——这里至少把沉默变成一行明确的不可跑。")
+    return 0
+
+
 def main() -> int:
+    if "--layers" in sys.argv:
+        return report_layers()
+
     if not WF.is_dir():
         print(f"✗ 找不到 {WF}", file=sys.stderr)
         return 2
