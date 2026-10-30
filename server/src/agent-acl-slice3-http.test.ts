@@ -288,6 +288,28 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
+  // 2026-10-31 —— 「意图」与「能力」两份不一致时，冲突必须被说出来。
+  // 否则 restart_supervised=true 会被读成「已验证」，而观测说没人拉它。
+  test("declared restart_supervised=true + observed not_supervised ⇒ the warning names the conflict", async () => {
+    const C = { alias: "acl3-conflict-c", node: "node_acl3_conflict_c" };
+    db.run(`INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, config_snapshot)
+            VALUES (?1, ?2, ?2, ?3, ?4, ?5)`,
+      [C.node, C.alias, NET, adminId,
+       JSON.stringify({ restart_supervised: true, systemd_supervision: "not_supervised" })]);
+    db.run(`INSERT INTO sessions (resume_id, alias, node_id, status, network_id, updated_at, last_seen_at)
+            VALUES (?1, ?2, ?3, 'idle', ?4, datetime('now'), datetime('now'))`,
+      [`r_${C.node}`, C.alias, C.node, NET]);
+
+    const r = await tool(adminToken, "update_node_config", {
+      node_id: C.node, base_revision: 0, patch: { channels: [] }, network_id: NET,
+    });
+    expect(r.ok).toBe(true);
+    const w = (r.warnings || []).find((x: any) => x.code === "restart_requires_manual_respawn");
+    expect(w).toBeTruthy();
+    expect(w.message).toContain("DECLARES restart_supervised=true");
+    expect(w.message).toContain("the observation wins");
+  });
+
   // 2026-10-31 —— #3171 续：再一个节点侧读面（count/counts 同源的那类）。
   describe("list_my_pending_create_requests: pinned key set", () => {
     test("⇒ {clone_count, clone_requests, count, ok, requests}, and count === requests.length", async () => {

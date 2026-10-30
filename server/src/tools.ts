@@ -3788,7 +3788,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (applyMode !== "hot" && systemdSupervision === "not_supervised") {
         warnings.push({
           code: "restart_requires_manual_respawn",
-          message: "this node reports systemd_supervision=not_supervised, i.e. it says nothing will respawn it. "
+          // 2026-10-31 —— 「意图 + 能力」两份要能对上：节点可能**声明**有重启能力，
+          // 而同时**观测**到没人拉它。两者不一致时以观测为准，并且必须把冲突说出来 ——
+          // 否则 restart_supervised=true 会被读成「已验证」。
+          message: (configUpdateCapable === true
+            ? "this node DECLARES restart_supervised=true but REPORTS systemd_supervision=not_supervised. "
+              + "The declaration and the observation disagree; the observation wins. "
+            : "")
+            + "this node reports systemd_supervision=not_supervised, i.e. it says nothing will respawn it. "
             + "A restart-tier patch makes the process exit 75 and stay down: the update will time out and the "
             + "node will be offline until someone starts it again. Use Stop -> Start instead of a restart-tier "
             + "patch, or launch it under a supervisor first (anet start / pm2 / systemd).",
