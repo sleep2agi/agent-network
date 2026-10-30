@@ -575,8 +575,21 @@ if [[ "$L1_SOFT_BUDGET_S" != "0" && $ELAPSED -gt $L1_SOFT_BUDGET_S ]]; then
 fi
 
 echo
+# 2026-10-31 —— 「ALL PASS」在没有说清**跑了哪几层**时是两个事件的同值：
+#   (L0+L1 全过) 与 (只跑了 L0) —— 而后者在 CI 里出现过（--l0 / 早退）。
+#   外部复核给的同款反例：某 gate 的「全绿」= L0 全过，或 L0 全过 + 27 条没有读数。
+# ⇒ 汇总行必须自带作用域；未跑的层单独印一行，不许让它消失在一个绿里。
+SCOPE=""
+[[ $RUN_L0 -eq 1 ]] && SCOPE="${SCOPE}L0"
+[[ $RUN_L1 -eq 1 ]] && SCOPE="${SCOPE:+$SCOPE+}L1"
+NOT_RUN=""
+[[ $RUN_L0 -eq 0 ]] && NOT_RUN="${NOT_RUN}L0 "
+[[ $RUN_L1 -eq 0 ]] && NOT_RUN="${NOT_RUN}L1 "
+if [[ -n "$NOT_RUN" ]]; then
+  note "本次**未运行**：${NOT_RUN}（--l0 / 环境变量所致）⇒ 上面的绿不覆盖这些层"
+fi
 if [[ $FAILED -eq 0 ]]; then
-  ok "ALL PASS in ${ELAPSED}s"
+  ok "ALL PASS in ${ELAPSED}s (scope: ${SCOPE:-none})"
   exit 0
 else
   fail "$FAILED test(s) failed in ${ELAPSED}s"
