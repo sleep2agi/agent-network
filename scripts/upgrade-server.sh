@@ -18,9 +18,19 @@ echo ""
 
 # Step 1: Pre-flight checks
 echo -e "${C_YELLOW}[1/5]${C_RESET} Pre-flight checks..."
-OLD_HEALTH=$(curl -sf "$HUB/health" 2>/dev/null || echo "{}")
-OLD_VER=$(echo "$OLD_HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('version','unknown'))" 2>/dev/null || echo "unknown")
-OLD_SESSIONS=$(echo "$OLD_HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('sessions_count',0))" 2>/dev/null || echo "0")
+# 2026-10-31 —— `curl -sf ... || echo "{}"` 把「读不到」写成了「空的成功」：
+#   两条完全不同的路（Hub 没起 / 起来了但 /health 不回）在这里合并成 OLD_VER=unknown，
+#   而 unknown 又会与「版本字段真的缺席」同形。⇒ 现在把 rc 一起报出来，并给出所属层。
+. "$(dirname "$0")/lib/curl-exit.sh"
+if OLD_HEALTH=$(curl -sf "$HUB/health" 2>/dev/null); then
+  OLD_RC=0
+else
+  OLD_RC=$?
+  echo "  ⚠ 读 /health 失败：$(curl_layer "$OLD_RC")（rc=$OLD_RC）—— 版本/会话数一律记 unknown，不记 0"
+fi
+OLD_VER=$(printf '%s' "${OLD_HEALTH:-}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('version','unknown'))" 2>/dev/null || echo "unknown")
+# ⚠️ sessions_count 读不到时不再回落成 0：0 是合法值，会被当成事实。
+OLD_SESSIONS=$(printf '%s' "${OLD_HEALTH:-}" | python3 -c "import json,sys; v=json.load(sys.stdin).get('sessions_count'); print('unknown' if v is None else v)" 2>/dev/null || echo "unknown")
 echo "  Current version: $OLD_VER"
 echo "  Active sessions: $OLD_SESSIONS"
 echo "  Database: $(ls -lh ~/.commhub/commhub.db 2>/dev/null | awk '{print $5}')"
@@ -77,8 +87,13 @@ fi
 # Step 5: Verify
 echo -e "${C_YELLOW}[5/5]${C_RESET} Verifying..."
 sleep 3
-NEW_HEALTH=$(curl -sf "$HUB/health" 2>/dev/null || echo "{}")
-NEW_VER=$(echo "$NEW_HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('version','FAILED'))" 2>/dev/null || echo "FAILED")
+if NEW_HEALTH=$(curl -sf "$HUB/health" 2>/dev/null); then
+  NEW_RC=0
+else
+  NEW_RC=$?
+  echo "  ⚠ 读 /health 失败：$(curl_layer "$NEW_RC")（rc=$NEW_RC）"
+fi
+NEW_VER=$(printf '%s' "${NEW_HEALTH:-}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('version','FAILED'))" 2>/dev/null || echo "FAILED")
 
 if [ "$NEW_VER" != "FAILED" ]; then
   echo -e "  ${C_GREEN}Server running: v$NEW_VER${C_RESET}"

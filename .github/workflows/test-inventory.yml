@@ -52,6 +52,10 @@ jobs:
       # 2026-10-31 —— `trap '<...> exit 1' ERR` 会把 RC 采集吃掉：`RC=$?` 到不了，
       # 于是「已失效（2）」被读成「未预期（1）」，动作从「更新卡」错到「查脚本」。
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。
+      # 2026-10-31 —— curl 退出码分层的帮助函数：它自己也会烂（码表被改、case 漏一格），
+      # 所以自检必须由 CI 跑，而不是靠人记得 `bash scripts/lib/curl-exit.sh --selftest`。
+      - name: the curl exit-code classifier still classifies the layers we rely on
+        run: bash scripts/lib/curl-exit.sh --selftest
       - name: no shell trap may overwrite the exit code
         run: |
           python3 scripts/check-shell-rc-capture.py --selftest
