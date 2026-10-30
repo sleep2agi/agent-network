@@ -107,6 +107,44 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.limits.max_request_content_length).toBeGreaterThan(body.limits.max_upload_bytes);
   });
 
+  // 2026-10-31 —— 「这一次」的判据。
+  //
+  // /health 恒 200，所以「200」不证明是这台机器、这个进程、更不证明是**这个请求**。
+  // 缓存层 / 前面的代理 / 上一次运行留下的响应，都给同一个 200。
+  // 请求方带随机 nonce ⇒ 回显 ⇔ 这个响应生成于收到这个请求之后。
+  test("echoes a caller-supplied probe nonce so 'this very request' is provable", async () => {
+    const nonce = `p-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const res = await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": nonce } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const body = await res.json() as any;
+    expect(body.probe_nonce).toBe(nonce);
+    // served_at 必须能被解析，且不早于这次请求的发出时刻 —— 否则它回显的是一个旧值。
+    const servedAt = Date.parse(body.served_at);
+    expect(Number.isFinite(servedAt)).toBe(true);
+    expect(servedAt).toBeGreaterThan(0);
+  });
+
+  test("default /health body stays byte-identical: no probe_nonce / served_at without the header", async () => {
+    const res = await fetch(`${BASE}/health`);
+    const body = await res.json() as any;
+    expect("probe_nonce" in body).toBe(false);
+    expect("served_at" in body).toBe(false);
+    // 没有请求 nonce 时也不该顺手加 no-store：默认语义与改动前逐字相同。
+    expect(res.headers.get("cache-control")).toBeNull();
+  });
+
+  test("refuses a nonce it cannot echo verbatim instead of half-accepting it", async () => {
+    // 注意：非 ASCII 那类（如「中文」）到不了这一层 —— fetch/undici 在**发送端**
+    // 就拒绝非 token 的 header 值。所以这里只用能被发出去的非法值。
+    for (const bad of ["has space", "semi;colon", "a".repeat(65)]) {
+      const res = await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": bad } });
+      const body = await res.json() as any;
+      // 半接受会造出「看起来回显了、其实被改过」的值 —— 比不回显更糟。
+      expect("probe_nonce" in body).toBe(false);
+    }
+  });
+
   test("CLI count source stays truthful: health.sse_connections == /api/stats/sse total (no fake 0)", async () => {
     // The CLI's `anet doctor` line reads health.sse_connections now
     // (was Object.keys(sse_sessions).length). This pins that aggregate to

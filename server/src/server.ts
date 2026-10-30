@@ -898,6 +898,23 @@ function corsHeaders(req: Request): Record<string, string> {
   };
 }
 
+/**
+ * 2026-10-31 —— `/health` 的「这一次」回显位。
+ *
+ * 读 `X-Probe-Nonce`，只接受 1–64 个 `[A-Za-z0-9._-]`。
+ * 非法/超长一律**当作没带**（不裁剪、不转义、不回显）：
+ * 半接受会造出一个「看起来回显了、其实被改过」的值，比不回显更糟。
+ *
+ * 为什么用请求方给的值而不是自己生成：我们要证的是
+ * 「这个响应是收到**这个**请求之后生成的」，
+ * 所以 nonce 必须由调用方在**发请求之前**定下来，否则它只能证明「有个服务在答」。
+ */
+function probeNonceOf(req: Request): string | null {
+  const raw = req.headers.get("X-Probe-Nonce");
+  if (!raw) return null;
+  return /^[A-Za-z0-9._-]{1,64}$/.test(raw) ? raw : null;
+}
+
 function withCors(req: Request, res: Response): Response {
   const headers = corsHeaders(req);
   for (const [k, v] of Object.entries(headers)) {
@@ -2830,6 +2847,28 @@ return Bun.serve({
         capabilities: HUB_HEALTH_CAPABILITIES,
       };
       if (scopedSessions !== undefined) body.sse_sessions = scopedSessions;
+      // 2026-10-31 —— 「这一次」的判据（探针回显）。
+      //
+      // /health 恒 200，于是「200」只证明*某处*有个 200：证不了是这台机器、这个进程，
+      // 更证不了**是这个请求**。缓存层、前面的代理、上一次运行留下的响应，
+      // 都会给出同一个 200 —— 而且失败不会产生空值，它产生的是**上一次的值**。
+      //
+      // 请求方带一个随机 nonce（`X-Probe-Nonce`），我们原样回显：
+      //   响应体里出现这个 nonce ⇔ 这个响应是在**收到这个请求之后**生成的。
+      // 这比 `startedAt` 强一格：startedAt 证明「某个实例在答」，nonce 证明「这一次」，
+      // 因为缓存不可能为一个**新的** nonce 生成响应。
+      //
+      // 🔴 只在带该头时追加两个键，默认响应体逐字节不变（那边有键集断言钉着）。
+      const probeNonce = probeNonceOf(req);
+      if (probeNonce) {
+        body.probe_nonce = probeNonce;
+        body.served_at = new Date().toISOString();
+        // 回显只对「这一次」有意义 ⇒ 顺手把这一份响应标成不可缓存，
+        // 否则探针自己会制造出它要防的那种残骸。
+        const probeRes = Response.json(body);
+        probeRes.headers.set("Cache-Control", "no-store");
+        return withCors(req, probeRes);
+      }
       return withCors(req, Response.json(body));
     }
 
