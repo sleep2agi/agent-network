@@ -126,6 +126,11 @@ def main() -> int:
         }, ensure_ascii=False, indent=1))
         return 0
 
+    # 2026-10-31 —— 先声明**对象**，再谈范围。
+    # 外部复核踩过一次更坏的：用 A 产物的读数去否证 B 产物上的判据
+    #（「不是范围不够，是对象换了」）。
+    print("object         : server/src/*.ts 里的 `server.tool(` 注册（**服务端**的工具表；不含客户端/控制台侧符号）")
+    print("断言侧对象     : server/src/*.test.ts（服务端测试；不看其它包与构建产物）")
     print(f"MCP 工具：{len(tools)} 个（分母 = 注册点，不是 grep 次数）")
     print(f"文件级（宽）：{len(covered)} 个 ⇒ 比例 {len(covered)}/{len(tools)} = {len(covered) / max(len(tools), 1):.1%}")
     print(f"邻近级（严，≤{WINDOW} 行）：{len(near)} 个 ⇒ 比例 {len(near)}/{len(tools)} = {len(near) / max(len(tools), 1):.1%}")
