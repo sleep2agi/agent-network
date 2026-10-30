@@ -610,7 +610,11 @@ def main() -> int:
                 "env": {"python": _sys2.version.split()[0], "os": _pf2.system(), "pyyaml": _yaml2},
             },
             "invalidates_on": INVALIDATES,
-            "consumers": [".github/workflows/keyset-join.yml", "卡评论里「0 阻塞」的引文"],
+            "consumers": [
+                ".github/workflows/keyset-join.yml（门本身）",
+                "scripts/check-scope-json.py（结构消费者：缺键/缺 env/缺 check 都会红）",
+                "卡评论里「0 阻塞」的引文（人工）",
+            ],
             "prevalence": {"kindset_comparisons": 0 if not blocking else len(blocking)},
         }
         sys.stdout = _real_stdout
@@ -670,7 +674,9 @@ def main() -> int:
           f" ｜ env: python {_sys.version.split()[0]} / {_pf.system()} / PyYAML {_yaml_v}")
     print("                   ⇒ 只引 sha 不引 env 时，同一个数可能来自两把不同的尺子")
     # 2026-10-31 —— 第三件：**谁在用**。作废的影响面只由它决定。
-    print("  consumers      : .github/workflows/keyset-join.yml（红即阻塞）｜卡评论里「0 阻塞」这个引文")
+    print("  consumers      : .github/workflows/keyset-join.yml（红即阻塞）")
+    print("                   ｜scripts/check-scope-json.py（自动消费者：本 JSON 缺键/缺 env/缺 check ⇒ 红）")
+    print("                   ｜卡评论里「0 阻塞」这个引文（人工）")
     print("                   ⇒ 这一栏为空时要读作「我们不知道有没有人用」，不是「没人用」")
     # 2026-10-31 —— **流行度**要和结论一起说。
     # 「0 处」有两种读法：① 有这种写法、但都写得对；② 本仓根本不做这件事。
