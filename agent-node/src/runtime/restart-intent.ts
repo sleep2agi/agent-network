@@ -26,6 +26,22 @@
 //      ⇒ TTL 只在「同 boot 且时间可比」这一支里出现，不是全局的魔数。
 //   ③ **原子写**：先写临时文件再 rename。否则崩溃在写一半会留下一个不可解析的标记 ⇒ 见 ①。
 //
+// ## 生产者分工（2026-10-31 修正：我原来只做了一个生产者，而且选错了一半）
+//
+//   **intent**（本文件，子进程写）：我打算按计划退出并重启。
+//   **outcome**（缺，应由父/包装器写）：我真的把它拉起来了吗 / 它是被我拉起来的吗。
+//
+// 🔴 为什么必须两个生产者：
+//   子进程只有在**自愿退出**时才有机会写字；SIGKILL / OOM-kill 没有执行机会。
+//   所以「读不到标记」同时表示两件事：
+//      ① 没人要求过重启
+//      ② 请求过，但进程被硬杀，来不及记
+//   ⇒ 一个字段承载了两个事实，而且**无法在后验里分开**。
+//   ⇒ 这不是判据写得不好，是**字段定义处就折叠掉了**（与「Restart 折叠了 LoadState」同形）。
+//
+//   补 outcome 需要改启动器（anet start / systemd / pm2 写一行），本次不做；
+//   但在读侧必须把这条歧义**说出来**，而不是让 absent 读成「没要求过」。
+//
 // ## 它不做什么
 //
 // 它不判断「该不该重启」——那是 config-apply 的职责。它只负责**把意图持久化**，
@@ -189,7 +205,14 @@ export function consumePlannedRestart(
         note: `restart_intent_unreadable:${d.error} (kept as ${bad})`,
       };
     }
-    return { verdict: "absent", planned: false, note: "no_planned_restart" };
+    return {
+      verdict: "absent",
+      planned: false,
+      // ⚠️ 「没有标记」是两个事实的同一个形状：没人要求过重启，**或**请求过但被硬杀来不及记。
+      //    这一条不能在生产侧分开（子进程被 SIGKILL 就没有执行机会），
+      //    只能在这里如实说出歧义，而不是让读者默认「没要求过」。
+      note: "no_planned_restart (ambiguous: nothing was requested, OR the process was killed before it could record one)",
+    };
   }
 
   const i = d.intent;

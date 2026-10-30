@@ -86,12 +86,12 @@ describe("consumePlannedRestart（启动时调用一次）", () => {
     expect(readRestartIntent(dir)).toEqual({ kind: "absent" });
   });
 
-  test("no marker ⇒ absent with a plain note", () => {
-    expect(consumePlannedRestart(dir, { bootId: () => BOOT })).toEqual({
-      verdict: "absent",
-      planned: false,
-      note: "no_planned_restart",
-    });
+  test("no marker ⇒ absent, and the note says the two meanings are indistinguishable", () => {
+    const r = consumePlannedRestart(dir, { bootId: () => BOOT });
+    expect(r.verdict).toBe("absent");
+    expect(r.planned).toBe(false);
+    // 不在测试里逐字比对整句，但必须钉住那条**歧义**：没有标记 ≠ 没要求过重启
+    expect(r.note).toContain("ambiguous");
   });
 
   test("unreadable marker is renamed, not deleted — keep the scene, stop the recurrence", () => {
