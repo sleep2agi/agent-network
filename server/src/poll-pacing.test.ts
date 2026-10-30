@@ -49,6 +49,16 @@ describe("#3001 get_task 轮询节奏提示", () => {
     }
   });
 
+  test("身份查询用更宽的阈值（p50 约 2.3 次/分钟是设计频率，不该被提示打扰）", () => {
+    const { pacer } = pacerWithClock();
+    // 同一个 60 秒窗口内：task_poll 第 5 次就提示，identity_poll 要到第 9 次
+    for (let i = 1; i <= 8; i++) expect(pacer.record("whoami:x", "identity_poll")).toBeNull();
+    const pacing = pacer.record("whoami:x", "identity_poll");
+    expect(pacing).not.toBeNull();
+    expect(pacing!.calls_last_60s).toBe(9);
+    expect(pacing!.note).toContain("org_whoami");
+  });
+
   test("提示文案必须说明「结果会自动 chain」——否则 agent 仍会紧盯", () => {
     expect(POLL_PACING_NOTE).toContain("60 秒");
     expect(POLL_PACING_NOTE).toContain("chain 回上游");

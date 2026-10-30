@@ -7096,7 +7096,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   // #765: exact authenticated node; team tree is independent of human departments.
   server.tool("org_whoami", "Your Agent team, ancestors, lead, owner and up to 50 teammates. Read-only.", {},
-    async () => scheduleCall(id => agentTeamWhoami(id.networkId, id.nodeId)));
+    async () => {
+      const res = scheduleCall(id => agentTeamWhoami(id.networkId, id.nodeId));
+      // #3001 续 —— 全舰队 6 小时 52522 次工具调用里，org_whoami 占 21900（42%），
+      // 而其中十来个节点在同期收到 0 个任务（实测 1420–2190 次/6h）。
+      // 这些调用与 get_task 那一类一样：每次都跑完一轮 LLM，却没有推进任何工作。
+      // 阈值比 get_task 宽（8 次/60 秒）—— p50 约 2.3 次/分钟是设计频率，不该被提示打扰。
+      const pacing = pollPacer.record(`whoami:${callerTokenId ?? callerAlias ?? "anon"}`, "identity_poll");
+      if (!pacing) return res;
+      try {
+        const body = JSON.parse(res.content[0].text);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ...body, pacing }) }] };
+      } catch {
+        return res; // 解析失败就原样返回：提示绝不该让一个只读工具失败
+      }
+    });
 
   // #478:tools/list 只列这个调用者真能用的工具(tool-audience.ts)。只滤列表,tools/call 不变。
   const caller: ToolCaller = callerTokenIsNetwork

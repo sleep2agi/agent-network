@@ -28,6 +28,10 @@ export type PollPacing = {
   note: string;
 };
 
+export const WHOAMI_PACING_NOTE =
+  "org_whoami 只需要在「不确定自己是谁/团队变了」时查。实测有节点以约 4–6 次/分钟连续查询、" +
+  "同时窗口内没接到任何任务 —— 这些调用没有推进工作。建议隔 60 秒以上再看。";
+
 export const POLL_PACING_NOTE =
   "每次 get_task 都是一整轮 LLM 调用。子任务的最终结果会通过 parent_task_id 自动 chain 回上游，" +
   "所以不必连续轮询 —— 建议隔 60 秒以上再看。";
@@ -36,9 +40,19 @@ export const POLL_WINDOW_MS = 60_000;
 export const POLL_NUDGE_THRESHOLD = 4;
 export const POLL_RECOMMENDED_SECONDS = 60;
 
+/** 两类轮询的阈值与文案。分开是因为「正常频率」差一个数量级。 */
+export const PACE_KINDS = {
+  /** 等子任务：正常是「隔几分钟看一眼」，1 分钟内 4 次以上基本就是连环打。 */
+  task_poll: { threshold: POLL_NUDGE_THRESHOLD, note: POLL_PACING_NOTE },
+  /** 身份查询：p50 约 2.3 次/分钟是设计频率，1 分钟内 8 次以上才提示。 */
+  identity_poll: { threshold: 8, note: WHOAMI_PACING_NOTE },
+} as const;
+
+export type PaceKind = keyof typeof PACE_KINDS;
+
 export type PollPacer = {
   /** 记一次调用；超过阈值时返回提示，否则返回 null。 */
-  record(key: string): PollPacing | null;
+  record(key: string, kind?: PaceKind): PollPacing | null;
   /** 仅测试用：当前记录的 key 数。 */
   size(): number;
 };
@@ -50,7 +64,7 @@ export function createPollPacer(opts: {
   now?: () => number;
 } = {}): PollPacer {
   const windowMs = opts.windowMs ?? POLL_WINDOW_MS;
-  const threshold = opts.threshold ?? POLL_NUDGE_THRESHOLD;
+  const defaultThreshold = opts.threshold ?? POLL_NUDGE_THRESHOLD;
   const maxKeys = opts.maxKeys ?? 2000;
   const now = opts.now ?? Date.now;
   const seen = new Map<string, number[]>();
@@ -63,7 +77,11 @@ export function createPollPacer(opts: {
   }
 
   return {
-    record(key: string): PollPacing | null {
+    record(key: string, kind: PaceKind = "task_poll"): PollPacing | null {
+      // 显式传了 threshold（测试用）就压过 kind 表
+      const spec = opts.threshold !== undefined
+        ? { threshold: defaultThreshold, note: PACE_KINDS[kind].note }
+        : PACE_KINDS[kind];
       const t = now();
       const cutoff = t - windowMs;
       const prev = seen.get(key);
@@ -88,11 +106,11 @@ export function createPollPacer(opts: {
         }
       }
 
-      if (ts.length <= threshold) return null;
+      if (ts.length <= spec.threshold) return null;
       return {
         calls_last_60s: ts.length,
         recommended_interval_seconds: POLL_RECOMMENDED_SECONDS,
-        note: POLL_PACING_NOTE,
+        note: spec.note,
       };
     },
     size(): number {
