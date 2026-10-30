@@ -55,6 +55,7 @@ from pathlib import Path
 BASELINE = "scripts/test-inventory-baseline.json"
 # test("...") / it("...") —— 只认双引号/单引号/反引号字面量开头，且不含 ${}
 TEST_CALL = re.compile(r"^\s*(?:test|it)\s*\(\s*([\"'`])((?:(?!\1).)*)\1")
+DESCRIBE_CALL = re.compile(r"^\s*describe\s*\(\s*([\"'`])((?:(?!\1).)*)\1")
 ANY_TEST_CALL = re.compile(r"^\s*(?:test|it)\s*\(")
 
 
@@ -72,6 +73,30 @@ def tracked_files(repo: Path) -> list[Path]:
     return sorted(files)
 
 
+def _strip_strings(line: str) -> str:
+    """去掉字符串字面量后再数花括号 —— 否则 `test("a { b")` 会污染深度。"""
+    out = []
+    i = 0
+    quote = None
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\" and i + 1 < len(line):
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "\"'`":
+            quote = ch
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def collect(repo: Path) -> tuple[dict[str, int], int]:
     """返回 (名字 → 出现次数, dynamic 计数)。
 
@@ -80,25 +105,51 @@ def collect(repo: Path) -> tuple[dict[str, int], int]:
     """
     names: dict[str, int] = {}
     dynamic = 0
+    # 2026-10-31 —— 元素身份必须包含「让它合法的那个维度」。
+    # 只按 file::name 计次会把「同一文件、不同 describe 里的同名」和
+    # 「同一 describe 里写了两遍」合成同一个计数 —— 前者合法，后者是缺陷。
+    # ⇒ 键里必须带上 describe 路径。这里用一个轻量的花括号深度栈来重建它。
+    depth = 0
+    stack: list[str] = []
     for path in tracked_files(repo):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         rel = path.relative_to(repo)
+        # 每个文件重置一次：describe 嵌套是文件内的结构，
+        # 跨文件累计的 depth 会让上一个文件的花括号把下一个文件的路径吃掉。
+        depth = 0
+        stack = []
         for line in text.splitlines():
+            stripped = _strip_strings(line)
+            delta = stripped.count("{") - stripped.count("}")
+            d = DESCRIBE_CALL.match(line)
+            if d:
+                while stack and len(stack) > max(depth, 0):
+                    stack.pop()
+                stack.append(d.group(2))
             if not ANY_TEST_CALL.match(line):
+                depth = max(0, depth + delta)
+                while stack and len(stack) > depth:
+                    stack.pop()
                 continue
             m = TEST_CALL.match(line)
             if not m:
                 dynamic += 1
+                depth = max(0, depth + delta)
                 continue
             name = m.group(2)
             if not name.strip() or "${" in name:
                 dynamic += 1
+                depth = max(0, depth + delta)
                 continue
-            key = f"{rel}::{name}"
+            # 记录时用「进入这一行之前」的深度；记录完再算这一行自己的花括号，
+            # 否则 test 体的 `{` 会把后面的路径整体推深一格。
+            path = ">".join(stack[:depth]) if stack else ""
+            key = f"{rel}::{path}::{name}" if path else f"{rel}::{name}"
             names[key] = names.get(key, 0) + 1
+            depth = max(0, depth + delta)
     return names, dynamic
 
 
