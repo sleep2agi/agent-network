@@ -17,7 +17,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { addNetworkMember, createNetworkTokenForNode, register } from "./auth.js";
 import { replaceTaskGrants } from "./task-access.js";
-import { db } from "./db.js";
+import { db, hashToken } from "./db.js";
 import { NODE_TOOL_CLASS, pruneNodePermissionLog, __resetNodePermissionLogStateForTest } from "./node-permissions.js";
 import { registerTools } from "./tools.js";
 
@@ -546,6 +546,31 @@ describe("未绑定令牌的写调用：默认只记录，不拦", () => {
       "SELECT SUM(hits) AS h FROM node_permission_log WHERE network_id = ?1 AND node_id = ?2 AND reason = 'unbound_token'",
       net, key)?.h ?? 0);
     expect(after).toBe(before + 1); // 但记了一笔
+  });
+
+  // 🔴 令牌前缀必须是 `ntok_`：`atok_` 会被当成**用户**令牌（服务端按前缀分流），
+  // 那样测出来的是「用户派活」，不是「未绑定节点令牌派活」—— 我第一次就这么写错了，
+  // 结果任务记在 boss 名下、账本一行都没有。
+  // 🔴 上面两条只调了**判据函数**（nodeDecide），而生产里真正决定「记不记」的是
+  // tools.ts 里那层 MCP 包装：它只在 `if (id)` 内部才走到判据。如果哪天有人把包装
+  // 改成「只对绑定节点记账」，上面两条测试仍然全绿，而未绑定令牌的写调用会**静默消失** ——
+  // 那正是 #3221 想解决的问题。所以这里补一条真正走 HTTP + MCP 的端到端。
+  test("HTTP 端到端：未绑定令牌真的调 MCP send_task ⇒ 进 node_permission_log", async () => {
+    const alias = `ghost-e2e-${stamp}`;
+    const tokenId = `tok_ghost_e2e_${stamp}`;
+    const plain = `ntok_ghost_e2e_${stamp}`;
+    db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, 'network') ON CONFLICT (token_id) DO NOTHING",
+      [tokenId, hashToken(plain), user.boss.id, net, `node:${alias}`]);
+
+    const out = await mcp(plain, "send_task", { alias: node.nN.alias, task: "hello from a ghost token" });
+    // log 模式（默认）：不因「未绑定」被拦 —— 拦不拦是另一个开关的事
+    expect(out.error ?? "").not.toBe("unbound_token");
+
+    const hits = Number(db.get<{ h: number | string | null }>(
+      `SELECT SUM(hits) AS h FROM node_permission_log
+        WHERE network_id = ?1 AND node_id = ?2 AND reason = 'unbound_token' AND route = 'mcp:send_task'`,
+      net, `token:${tokenId}`)?.h ?? 0);
+    expect(hits).toBe(1);
   });
 
   test("enforce 模式：同一个调用被拒，原因是 unbound_token", async () => {
