@@ -165,6 +165,10 @@ def main() -> int:
     import hashlib as _h, pathlib as _pl
     _self = _pl.Path(__file__).read_bytes()
     print(f"measured_by    : {_pl.Path(__file__).name} sha256={_h.sha256(_self).hexdigest()[:12]}")
+    # 2026-10-31 —— 必填的 falsifier：说不出「什么输入能让它变假」的断言是恒真的。
+    print("falsifier      : 删掉某个被计为「已覆盖」的工具的精确键集断言 ⇒ 文件级该数应 −1；"
+          "若删了不变 ⇒ 归因链坏了")
+    print("                 （另一条：把某个未覆盖工具加一条精确断言 ⇒ ≤15 行档应 +1）")
     print("invalidates_on : 工具注册变（server.tool 增删）｜断言写法变（EXACT_KEYSET 正则不再匹配）")
     print("                 ｜归因口径变（文件级 ↔ 邻近级窗口）⇒ 三者任一发生，上面的比例作废")
     return 0
