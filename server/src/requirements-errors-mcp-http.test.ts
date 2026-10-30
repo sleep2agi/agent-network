@@ -145,7 +145,7 @@ describe("compatibility", () => {
     expect(r.status).toBe(400);
     expect(r.body.ok).toBe(false);
     expect(r.body.error).toBe("invalid_due");
-    expect(Object.keys(r.body).sort().sort()).toEqual(["error", "field", "hint", "message", "ok"]);
+    expect(Object.keys(r.body).sort()).toEqual(["error", "field", "hint", "message", "ok"]);
     // A code without an entry is exactly the old shape.
     expect(errorBody("some_future_code")).toEqual({ ok: false, error: "some_future_code" });
   });

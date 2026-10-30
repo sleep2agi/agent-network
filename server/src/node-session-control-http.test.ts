@@ -102,7 +102,7 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
     const row = db.get("SELECT token_id,bound_node_id,network_id FROM api_tokens WHERE token_id=?1", ntok.token_id);
     expect(response.status).toBe(200);
     expect(response.body.identity).toEqual({ node_id: row.bound_node_id, network_id: row.network_id, token_id: row.token_id });
-    expect(Object.keys(response.body).sort().sort()).toEqual(["expires_at", "identity", "ok"]);
+    expect(Object.keys(response.body).sort()).toEqual(["expires_at", "identity", "ok"]);
     expect(JSON.stringify(response.body)).not.toContain(ntok.token);
   });
   test("normal state and background receipts are separate from actual tool completion", async () => {

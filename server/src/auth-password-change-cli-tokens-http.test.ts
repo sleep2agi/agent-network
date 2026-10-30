@@ -170,7 +170,7 @@ describe("POST /api/auth/password with keep_cli_tokens=true (anet passwd)", () =
     const idOf = (t: string) => db.get<any>("SELECT token_id FROM api_tokens WHERE token_hash = ?1", hashToken(t)).token_id;
     expect(kept.map((k) => k.token_id).sort()).toEqual([idOf(f.cliByKind), idOf(f.apiToken)].sort());
     for (const k of kept) {
-      expect(Object.keys(k).sort().sort()).toEqual(["client_label", "created_at", "last_used_at", "name", "token_id"]);
+      expect(Object.keys(k).sort()).toEqual(["client_label", "created_at", "last_used_at", "name", "token_id"]);
       expect(k.token_id).toMatch(/^tok_[0-9a-f]{12}$/);
     }
     expect(kept.find((k) => k.token_id === idOf(f.apiToken)).name).toBe("ci-script");
@@ -309,7 +309,7 @@ describe("network password opt-in", () => {
     expect(r.body.revoked).toBe(5);
     expect(r.body.kept_network_tokens.map((x: any) => x.token_id).sort()).toEqual([id(f.netToken), id(extra.token!)].sort());
     for (const row of r.body.kept_network_tokens) {
-      expect(Object.keys(row).sort().sort()).toEqual(["created_at", "last_used_at", "name", "network_id", "token_id"]);
+      expect(Object.keys(row).sort()).toEqual(["created_at", "last_used_at", "name", "network_id", "token_id"]);
     }
     const body = JSON.stringify(r.body);
     expect(body.includes("token_hash")).toBe(false);

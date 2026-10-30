@@ -61,7 +61,7 @@ describe("withoutOptionalTelemetry", () => {
       host: { ip: null }, process_telemetry: { rss: 1 }, external_schedules: { schedules: [] },
     };
     const out = withoutOptionalTelemetry(params) as Record<string, unknown>;
-    expect(Object.keys(out).sort().sort()).toEqual(["alias", "resume_id", "status"]);
+    expect(Object.keys(out).sort()).toEqual(["alias", "resume_id", "status"]);
   });
 
   test("🔴 不改原对象 —— 重试路径不能顺手把调用方的负载改掉", () => {

@@ -276,7 +276,7 @@ describe("update_node_config 响应键集（exact key set）", () => {
       node_id: X.node, base_revision: 0, patch: { model: "exact-keys-model" }, network_id: NET,
     });
     expect(r.ok).toBe(true);
-    expect(Object.keys(r).sort().sort()).toEqual(["apply_mode", "ok", "update_id"]);
+    expect(Object.keys(r).sort()).toEqual(["apply_mode", "ok", "update_id"]);
   });
 
   test("在途冲突恰好 {age_ms, error, existing_update_id, ok}", async () => {
@@ -285,7 +285,7 @@ describe("update_node_config 响应键集（exact key set）", () => {
     });
     expect(r.ok).toBe(false);
     expect(r.error).toBe("update_in_flight");
-    expect(Object.keys(r).sort().sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
+    expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
   });
 
   // 2026-10-31 —— #3171 续：再一个节点侧读面（count/counts 同源的那类）。
@@ -314,12 +314,12 @@ describe("update_node_config 响应键集（exact key set）", () => {
       const ntok = minted.token!;
 
       const children = await tool(ntok, "list_my_children", {});
-      expect(Object.keys(children).sort().sort()).toEqual(["children", "count", "ok"]);
+      expect(Object.keys(children).sort()).toEqual(["children", "count", "ok"]);
       expect(Array.isArray(children.children)).toBe(true);
       expect(children.count).toBe(children.children.length); // 计数与数组同源
 
       const completions = await tool(ntok, "get_completions", {});
-      expect(Object.keys(completions).sort().sort()).toEqual(["completions", "ok"]);
+      expect(Object.keys(completions).sort()).toEqual(["completions", "ok"]);
       expect(Array.isArray(completions.completions)).toBe(true);
     });
   });
@@ -358,12 +358,12 @@ describe("update_node_config 响应键集（exact key set）", () => {
       const ntok = minted.token!;
 
       const plain = await tool(ntok, "get_inbox", { alias: I.alias, limit: 5 });
-      expect(Object.keys(plain).sort().sort()).toEqual(["messages", "ok"]);
+      expect(Object.keys(plain).sort()).toEqual(["messages", "ok"]);
       expect(Array.isArray(plain.messages)).toBe(true);
 
       const human = await tool(ntok, "get_inbox", { alias: I.alias, limit: 5, human_first: true });
-      expect(Object.keys(human).sort().sort()).toEqual(["human_inbox", "messages", "ok"]);
-      expect(Object.keys(human.human_inbox).sort().sort()).toEqual(["examined", "mode", "version"]);
+      expect(Object.keys(human).sort()).toEqual(["human_inbox", "messages", "ok"]);
+      expect(Object.keys(human.human_inbox).sort()).toEqual(["examined", "mode", "version"]);
       expect(human.human_inbox.mode).toBe("metadata-keyset");
     });
   });
@@ -374,11 +374,11 @@ describe("update_node_config 响应键集（exact key set）", () => {
   describe("read-surface tools have pinned key sets", () => {
     test("list_providers ⇒ exactly {ok, providers}; list_network_secrets ⇒ exactly {keys, ok}", async () => {
       const providers = await tool(adminToken, "list_providers", { network_id: NET });
-      expect(Object.keys(providers).sort().sort()).toEqual(["ok", "providers"]);
+      expect(Object.keys(providers).sort()).toEqual(["ok", "providers"]);
       expect(Array.isArray(providers.providers)).toBe(true);
 
       const secrets = await tool(adminToken, "list_network_secrets", { network_id: NET });
-      expect(Object.keys(secrets).sort().sort()).toEqual(["keys", "ok"]);
+      expect(Object.keys(secrets).sort()).toEqual(["keys", "ok"]);
       expect(Array.isArray(secrets.keys)).toBe(true);
       // 值永远不出来：这是 RFC-028 的承诺，键集测试顺手把它钉住
       for (const k of secrets.keys) expect(typeof k).toBe("string");
@@ -392,7 +392,7 @@ describe("update_node_config 响应键集（exact key set）", () => {
       seedAgent({ alias: R.alias, node: R.node });
       const r = await tool(adminToken, "restart_node", { node_id: R.node, network_id: NET });
       // 与 update_node_config 同构（不含 warnings：restart 不带 patch，分档固定为 restart_only）
-      expect(Object.keys(r).sort().sort()).toEqual(["apply_mode", "ok", "update_id"]);
+      expect(Object.keys(r).sort()).toEqual(["apply_mode", "ok", "update_id"]);
       expect(r.ok).toBe(true);
       expect(r.apply_mode).toBe("restart_only");
     });
@@ -411,7 +411,7 @@ describe("update_node_config 响应键集（exact key set）", () => {
 
       // ① 无 pending
       const empty = await tool(ntok, "get_config_update", {});
-      expect(Object.keys(empty).sort().sort()).toEqual(["ok", "update"]);
+      expect(Object.keys(empty).sort()).toEqual(["ok", "update"]);
       expect(empty.ok).toBe(true);
       expect(empty.update).toBeNull();
 
@@ -420,8 +420,8 @@ describe("update_node_config 响应键集（exact key set）", () => {
               VALUES (?1, ?2, ?3, ?4, 'hot', 0, 'pending', ?5, 'test')`,
         ["u_acl3_pending", N.node, NET, JSON.stringify({ model: "m" }), Date.now()]);
       const one = await tool(ntok, "get_config_update", {});
-      expect(Object.keys(one).sort().sort()).toEqual(["ok", "update"]);
-      expect(Object.keys(one.update).sort().sort()).toEqual(["apply_mode", "base_revision", "patch", "update_id"]);
+      expect(Object.keys(one).sort()).toEqual(["ok", "update"]);
+      expect(Object.keys(one.update).sort()).toEqual(["apply_mode", "base_revision", "patch", "update_id"]);
       expect(one.update.update_id).toBe("u_acl3_pending");
       expect(one.update.apply_mode).toBe("hot");
 
@@ -429,7 +429,7 @@ describe("update_node_config 响应键集（exact key set）", () => {
       const ack = await tool(ntok, "ack_config_update", {
         update_id: "u_acl3_pending", status: "applied", new_revision: 1,
       });
-      expect(Object.keys(ack).sort().sort()).toEqual(["ok", "status"]);
+      expect(Object.keys(ack).sort()).toEqual(["ok", "status"]);
       expect(ack.ok).toBe(true);
       expect(ack.status).toBe("applied");
     });
@@ -443,7 +443,7 @@ describe("update_node_config 响应键集（exact key set）", () => {
       const r = await tool(adminToken, "get_config_update", {});
       expect(r.ok).toBe(false);
       expect(r.error).toBe("network_token_required");
-      expect(Object.keys(r).sort().sort()).toEqual(["error", "ok"]);
+      expect(Object.keys(r).sort()).toEqual(["error", "ok"]);
     });
 
     test("ack_config_update without a node token ⇒ exactly {error, ok}", async () => {
@@ -452,7 +452,7 @@ describe("update_node_config 响应键集（exact key set）", () => {
       });
       expect(r.ok).toBe(false);
       expect(r.error).toBe("network_token_required");
-      expect(Object.keys(r).sort().sort()).toEqual(["error", "ok"]);
+      expect(Object.keys(r).sort()).toEqual(["error", "ok"]);
     });
   });
 
@@ -475,10 +475,10 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(r.ok).toBe(true);
     expect(r.apply_mode).not.toBe("hot");                       // restart-tier：这正是危险的那一档
     // 两个方向都钉：少一个键红，多一个键也红
-    expect(Object.keys(r).sort().sort()).toEqual(["apply_mode", "ok", "update_id", "warnings"]);
+    expect(Object.keys(r).sort()).toEqual(["apply_mode", "ok", "update_id", "warnings"]);
     expect(Array.isArray(r.warnings)).toBe(true);
     expect(r.warnings.length).toBe(1);
-    expect(Object.keys(r.warnings[0]).sort().sort()).toEqual(["code", "message"]);
+    expect(Object.keys(r.warnings[0]).sort()).toEqual(["code", "message"]);
     // code 是稳定枚举，不是自由文本 —— 客户端要靠它分支
     expect(r.warnings[0].code).toBe("restart_requires_manual_respawn");
     expect(typeof r.warnings[0].message).toBe("string");
@@ -493,6 +493,6 @@ describe("update_node_config 响应键集（exact key set）", () => {
     // 实际契约：code 是 revision_conflict（不是 config_revision_conflict），
     // 且带 base_revision —— 顺手纠正了卡上写错的错误名。
     expect(r.error).toBe("revision_conflict");
-    expect(Object.keys(r).sort().sort()).toEqual(["base_revision", "current_revision", "error", "ok"]);
+    expect(Object.keys(r).sort()).toEqual(["base_revision", "current_revision", "error", "ok"]);
   });
 });

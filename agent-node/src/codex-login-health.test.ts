@@ -127,7 +127,7 @@ describe("#594 codex_login health", () => {
     const surfaces = [JSON.stringify(report), ...said, ...written];
     for (const surface of surfaces) for (const s of secrets) expect(surface).not.toContain(s);
     // Only these keys leave the process.
-    expect(Object.keys(report).sort().sort()).toEqual(["codex_home", "fingerprint", "shared_home_with", "shared_with"]);
+    expect(Object.keys(report).sort()).toEqual(["codex_home", "fingerprint", "shared_home_with", "shared_with"]);
   });
 
   test("rate-limited recompute; warning printed once per change of the colliding set, not every heartbeat", () => {

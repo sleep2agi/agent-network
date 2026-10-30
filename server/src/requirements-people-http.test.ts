@@ -106,7 +106,7 @@ describe("GET /api/requirements/people display_name", () => {
   test("the existing fields keep their shape for old apps", async () => {
     const r = await people(owner.token);
     for (const p of r.body.people) {
-      expect(Object.keys(p).sort().sort()).toEqual(["display_name", "id", "kind", "name", "networkId"]);
+      expect(Object.keys(p).sort()).toEqual(["display_name", "id", "kind", "name", "networkId"]);
       expect(typeof p.name).toBe("string");
       expect(p.name.length).toBeGreaterThan(0);
     }

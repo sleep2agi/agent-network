@@ -125,7 +125,7 @@ describe("GET /api/networks/:id/humans — online / last_seen_at", () => {
   test("never connected since hub start → online=false, last_seen_at=null (unknown, not 'long ago')", async () => {
     const r = await get(users.pres_alpha.token, `/api/networks/${NET}/humans`);
     expect(r.status).toBe(200);
-    expect(Object.keys(r.body.humans[0]).sort().sort()).toEqual(["avatar_url", "display_name", "last_seen_at", "online", "user_id", "username"]);
+    expect(Object.keys(r.body.humans[0]).sort()).toEqual(["avatar_url", "display_name", "last_seen_at", "online", "user_id", "username"]);
     expect(r.body.humans.every((h: any) => h.avatar_url === null)).toBe(true);
     const beta = r.body.humans.find((h: any) => h.user_id === users.pres_beta.userId);
     expect(beta.online).toBe(false);
@@ -187,7 +187,7 @@ describe("who must NOT see presence", () => {
     const r = await get(nodeToken, `/api/networks/${NET}/humans`);
     expect(r.status).toBe(200);
     for (const h of r.body.humans) {
-      expect(Object.keys(h).sort().sort()).toEqual(["avatar_url", "display_name", "user_id", "username"]);
+      expect(Object.keys(h).sort()).toEqual(["avatar_url", "display_name", "user_id", "username"]);
       expect(h.avatar_url).toBeNull();
     }
     // 节点令牌也不能订阅用户流(既有行为,这里钉住:不能借它收 member_presence)。
