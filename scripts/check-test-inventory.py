@@ -166,12 +166,18 @@ def _strip_code(raw_lines: list[str]) -> list[str]:
                 elif c == "]":
                     in_class = False
                 elif c == "/" and not in_class:
-                    j += 1
                     break
                 j += 1
+            # ⚠️ 这里**不要**再 `j += 1`：调用方统一用 `i = j + 1` 跳过结束符，
+            #    两处都加就把紧跟的逗号一起吃掉 ⇒ 下一个 token 的 prev 变成 "/"，
+            #    于是数组里下一行的正则字面量被判成除法（pad-display-sweep.test.ts:51 的成因）。
             out.append(" " * (j - i + 1))
             i = j + 1
-            prev = "/"
+            # 正则字面量是**操作数**：它后面出现的 `/` 只能是除号。
+            # 原来这里写 prev = "/"，而 "/" 不在 REGEX_PREV 里，看似也对 ——
+            # 但下一行以 `/` 开头时（数组里的正则字面量），前一个 token 是逗号之前那次赋值，
+            # 于是整行被判成除法 ⇒ 该行之后的深度全错（pad-display-sweep.test.ts:51 就是这么来的）。
+            prev = "id"
             continue
         if ch == "{":
             if interp:
@@ -366,6 +372,10 @@ def main() -> int:
         # （这正是「不钳位」换来的信号 —— 钳位会把它吃掉）。
         for f, why in unreliable[:10]:
             print(f"    · 排除 {f} —— {why}")
+        if not unreliable:
+            # 2026-10-31 —— 域完整时要说出来：
+            # 一个「0 个文件被排除」与「没跑排除逻辑」在输出上都是没有那一行。
+            print("    ⇒ 棘轮域**完整**：每个测试键都参与重名检测（0 个文件被排除）")
         grew = sorted((k, baseline_counts.get(k, 0), checked[k]) for k in checked if checked[k] > baseline_counts.get(k, 0))
         if grew:
             print(f"✗ 有 {len(grew)} 条测试的**出现次数增加**了（集合不变，但实际多出一条）：", file=sys.stderr)
