@@ -316,6 +316,21 @@ SELFTEST_CASES = [
         "blocking", "键集派生标识符",
     ),
     (
+        # 2026-10-31 —— **跨行盲区的看门狗**：
+        # 一次格式化（prettier 阈值附近）会把 `Object.keys(...).sort()` 与 `.join(...)` 断成两行；
+        # 若门的正则只认同一行，最危险的那几处（键最多、最容易撞）会静默消失。
+        # 本仓的 SET_JOIN 用 \s* 连接，天然跨行 —— 这个用例就是防止有人把它改成 [^\n]*。
+        "keyset_cross_line_after_formatting",
+        'export function f(b: Record<string, unknown>) {\n'
+        '  if (\n'
+        '    Object.keys(b)\n'
+        '      .sort()\n'
+        '      .join(",") !== "a,b"\n'
+        '  ) throw new Error("x")\n'
+        '}\n',
+        "blocking", "键集拼字符串",
+    ),
+    (
         "keyset_multiline",
         'export function f(b: Record<string, unknown>) {\n'
         '  if (Object.keys(b).sort()\n'
@@ -361,15 +376,17 @@ def selftest(quiet: bool = False) -> int:
 
     # 遍历 0 个用例也是通过 —— 这是 empty-assertion 的最小形状。
     # 所以先钉数量，再跑用例：任何人删掉一个用例，这里先红。
-    if quiet:
-        import builtins
-        import sys as _s
-        def print(*a, **k):  # noqa: A001 - 局部遮蔽，仅在本函数内
-            # 静默模式下只保留 stderr 与失败信息，stdout 的 ✓ 列表不重复打印
-            if k.get("file") is _s.stderr or not a:
-                builtins.print(*a, **k)
-    if len(SELFTEST_CASES) != 6:
-        print(f"✗ selftest 用例数应为 6，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
+    # 注意：无论 quiet 与否都要定义这个 shim —— 否则 Python 把 print 当局部名，
+    # 非 quiet 路径会 UnboundLocalError（今晚实测过一次）。
+    import builtins
+    import sys as _sys_shim
+
+    def print(*a, **k):  # noqa: A001 - 局部遮蔽，仅在本函数内
+        if quiet and k.get("file") is not _sys_shim.stderr and a:
+            return
+        builtins.print(*a, **k)
+    if len(SELFTEST_CASES) != 7:
+        print(f"✗ selftest 用例数应为 7，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
     failures = 0
     with tempfile.TemporaryDirectory() as td:
@@ -453,7 +470,7 @@ def main() -> int:
     if controls_failed:
         print("instrument: BROKEN ⇒ 本次没有读数（不是“干净”）", file=sys.stderr)
         return 1
-    print("instrument: valid （selftest 6/6 通过 且 宽形状对照非 0 ⇒ 分类器有能力判出阻塞）")
+    print("instrument: valid （selftest 7/7 通过 且 宽形状对照非 0 ⇒ 分类器有能力判出阻塞）")
 
     for bucket, mark, title in (
         (blocking, "✗", "键集拼接（阻塞）"),
