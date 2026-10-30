@@ -83,6 +83,33 @@ def main() -> int:
 
     near = sorted(near_level)
 
+    # 2026-10-31 —— 「测空气」检查：名字出现在文件里 ≠ 那条断言在测这个工具。
+    # 第三口径最严：名字必须出现在**调用表达式**里（tool( / callTool( 同行），
+    # 且与精确键集断言相距 ≤15 行。
+    strict_level: dict[str, list[str]] = {}
+    _min_dist: dict[str, int] = {}
+    for path in tracked(["server/src/*.test.ts"]):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        assert_lines = [i for i, ln in enumerate(lines) if EXACT_KEYSET.search(ln)]
+        if not assert_lines:
+            continue
+        for name in tools:
+            call_lines = [i for i, ln in enumerate(lines)
+                          if re.search(rf'(?:tool|callTool|invoke)\([^)]*["\']{re.escape(name)}["\']', ln)]
+            if call_lines:
+                dist = min(abs(a - c) for a in assert_lines for c in call_lines)
+                prev = strict_level.get(name)
+                # 记录该工具在哪个距离档上「有调用」；用一个附加字典存最小距离
+                strict_level.setdefault(name, []).append(path.name)
+                _min_dist[name] = min(_min_dist.get(name, 10 ** 9), dist)
+    strict = sorted(strict_level)
+    band = lambda lim: sorted(n for n, d in _min_dist.items() if d <= lim)  # noqa: E731
+    strict_15, strict_40, strict_80 = band(15), band(40), band(80)
+
     # 2026-10-31 —— **子串假阳性**是这类统计的通用事故形态：
     # 一次外部复核里，`counters` 被无关的 DB 表名 `usage_counters` 匹配上，
     # 而假阳性恰好藏掉了那条线正在讨论的字段。
@@ -102,7 +129,13 @@ def main() -> int:
     print(f"MCP 工具：{len(tools)} 个（分母 = 注册点，不是 grep 次数）")
     print(f"文件级（宽）：{len(covered)} 个 ⇒ 比例 {len(covered)}/{len(tools)} = {len(covered) / max(len(tools), 1):.1%}")
     print(f"邻近级（严，≤{WINDOW} 行）：{len(near)} 个 ⇒ 比例 {len(near)}/{len(tools)} = {len(near) / max(len(tools), 1):.1%}")
-    print(f"⇒ 两个数之差 {len(covered) - len(near)} 就是「文件级代理的误报面」。")
+    print(f"调用表达式级（名字出现在 tool( 调用里）按**断言距调用**的距离分档：")
+    print(f"    ≤15 行：{len(strict_15)} 个（{len(strict_15) / max(len(tools), 1):.1%}）"
+          f"｜≤40 行：{len(strict_40)} 个（{len(strict_40) / max(len(tools), 1):.1%}）"
+          f"｜≤80 行：{len(strict_80)} 个（{len(strict_80) / max(len(tools), 1):.1%}）")
+    print(f"⇒ 文件级 {len(covered)} 与 ≤80 行档 {len(strict_80)} 之差 = "
+          f"{len(covered) - len(strict_80)} 个「可能测的是空气」：名字出现过，但没有证据表明那条断言在调它。")
+    print("   ⚠️ 距离档不是可信度本身：中间夹着 setup 的测试会落在远档，而它可能完全有效。")
     print("⚠️ 这不是下界：多算与少算都可能发生，所以**误差方向未知**，只能当代理读。")
     if covered:
         print("\n已覆盖：")
