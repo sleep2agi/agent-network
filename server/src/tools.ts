@@ -100,6 +100,7 @@ import {
   computeApplyMode,
   readOpencodeSnapshotFlags,
   readConfigUpdateCapable,
+  configUpdateCapabilityDivergence,
   validatePatch,
   narrowChannelsPatch,
   isAllowedToChangeFlag,
@@ -3766,8 +3767,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 调用方看到的只有「超时」，永远学不到「这台节点现在是下线的」。
       // 不擅自拒绝（会破坏合法流程），但必须把后果说在前面。
       const configUpdateCapable = readConfigUpdateCapable(node.config_snapshot);
-      const warnings = applyMode !== "hot" && configUpdateCapable === false
-        ? [{
+      // 2026-10-31 —— 两个字段都被允许“遮住对方”的时候，被遮住的那个值就再也读不到了。
+      // 文档说它们永远同值，所以**不同值**本身是信号（半升级 / 旧节点 / 手改快照）。
+      // 判据不变（仍以 restart_supervised 为准），但分歧必须能被看见 ——
+      // 否则「两个一致」与「有一个被遮住了」在调用方看来完全一样。
+      const capabilityDivergence = configUpdateCapabilityDivergence(node.config_snapshot);
+      const warnings: Array<{ code: string; message: string }> = [];
+      if (capabilityDivergence) {
+        warnings.push({
+          code: "restart_supervision_flag_divergence",
+          message: `config snapshot carries two disagreeing capability flags: `
+            + `restart_supervised=${capabilityDivergence.named} but config_update_capable=${capabilityDivergence.legacy}. `
+            + `The named field wins, so this update was classified as supervised=${capabilityDivergence.named}. `
+            + `They are documented to always agree, so a divergence means a half-upgraded node (a wrapper that `
+            + `forwards one flag but not the other), an older node, or a hand-edited snapshot. `
+            + `Verify how this node is launched before relying on a restart-tier change.`,
+        });
+      }
+      if (applyMode !== "hot" && configUpdateCapable === false) {
+        warnings.push({
             code: "restart_supervision_unknown",
             // 不说 "no supervisor" —— 这个字段只说明「没有声明 sentinel-75 重启包装」，
             // 而 systemd/pm2 托管的节点同样可能报 false（它们不走那套包装）。
@@ -3780,15 +3798,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               + "and the node will be offline until it is started again. Verify how this node is "
               + "launched (anet start / pm2 / systemd) before sending restart-tier changes; "
               + "model-only changes on an OpenCode V2 co-presence node are hot and unaffected.",
-          }]
-        : undefined;
+        });
+      }
 
       return {
         content: [{
           type: "text" as const,
           text: JSON.stringify({
             ok: true, update_id: updateId, apply_mode: applyMode,
-            ...(warnings ? { warnings } : {}),
+            ...(warnings.length > 0 ? { warnings } : {}),
           }),
         }],
       };

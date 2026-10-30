@@ -257,6 +257,38 @@ export function readConfigUpdateCapable(configSnapshot: unknown): boolean | null
 }
 
 /**
+ * 2026-10-31 —— 双写字段的**分歧**本身是一条读数，而今天它是静默的。
+ *
+ * `readConfigUpdateCapable` 在两个字段都在时优先读 `restart_supervised`，
+ * 文档说它们「永远同值」。所以「不同值」不是噪声，是一个真实信号：
+ * 半升级（wrapper 转发了一路、漏了另一路）、旧节点、或有人手改了快照。
+ *
+ * 🔴 为什么值得单独一个函数：
+ *    两个生产者的字段，只要**允许一个遮住另一个**，那个被遮住的值就再也读不到了 ——
+ *    而“读不到”与“两个一致”在调用方看来完全一样。这正是隐性回退的通用形状：
+ *    值从一个隐式来源解析出来，解析过程不留痕。
+ *
+ * 返回值：只在**两个都是布尔且不同**时给出两份值；其余一律 null（没有分歧可报）。
+ * 调用方负责把 `restart_supervision_flag_divergence` 放进 warnings —— 本函数不改判据。
+ */
+export function configUpdateCapabilityDivergence(
+  configSnapshot: unknown,
+): { named: boolean; legacy: boolean } | null {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    return null;
+  }
+  const named = parsed?.restart_supervised;
+  const legacy = parsed?.config_update_capable;
+  if (typeof named !== "boolean" || typeof legacy !== "boolean") return null;
+  return named === legacy ? null : { named, legacy };
+}
+
+/**
  * Classify the patch's required apply mode. Empty patch (model + flags
  * both empty, no channels) → "restart_only" (used by restart_node tool).
  * Any restart-required field present, OR a channels change → "restart"

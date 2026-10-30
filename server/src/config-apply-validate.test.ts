@@ -14,6 +14,7 @@ import {
   computeApplyMode,
   readOpencodeSnapshotFlags,
   readConfigUpdateCapable,
+  configUpdateCapabilityDivergence,
   validatePatch,
   narrowChannelsPatch,
 } from "./config-apply-validate";
@@ -481,5 +482,34 @@ describe("readConfigUpdateCapable — restart_supervised 优先", () => {
   test("non-boolean named value falls through to legacy, then unknown", () => {
     expect(readConfigUpdateCapable('{"restart_supervised":"true","config_update_capable":false}')).toBe(false);
     expect(readConfigUpdateCapable('{"restart_supervised":"true"}')).toBeNull();
+  });
+});
+
+// 2026-10-31 —— 「被遮住的值」必须能被看见。
+// readConfigUpdateCapable 一旦选定 restart_supervised，config_update_capable 就再也读不到了；
+// 而「两个一致」与「有一个被遮住了」在调用方看来完全一样 —— 这是隐式回退的通用形状。
+describe("configUpdateCapabilityDivergence — 双写字段的分歧本身就是读数", () => {
+  test("reports both values when they disagree, in either direction", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true,"config_update_capable":false}'))
+      .toEqual({ named: true, legacy: false });
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":false,"config_update_capable":true}'))
+      .toEqual({ named: false, legacy: true });
+  });
+  test("stays quiet when they agree — that is the documented normal case", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true,"config_update_capable":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":false,"config_update_capable":false}')).toBeNull();
+  });
+  test("no divergence to report when only one field is present or shapes are unusable", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"config_update_capable":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":"true","config_update_capable":false}')).toBeNull();
+    expect(configUpdateCapabilityDivergence("")).toBeNull();
+    expect(configUpdateCapabilityDivergence("not json")).toBeNull();
+    expect(configUpdateCapabilityDivergence(null)).toBeNull();
+    expect(configUpdateCapabilityDivergence(undefined)).toBeNull();
+  });
+  test("accepts an already-parsed object (nodes may hand us either form)", () => {
+    expect(configUpdateCapabilityDivergence({ restart_supervised: true, config_update_capable: false }))
+      .toEqual({ named: true, legacy: false });
   });
 });
