@@ -73,104 +73,143 @@ def tracked_files(repo: Path) -> list[Path]:
     return sorted(files)
 
 
-def _strip_code(lines: list[str]) -> list[str]:
-    """按**跨行状态**去掉注释与字符串，只留代码字符。
+# 正则字面量只能在「期待一个表达式」的位置起始；这是一份保守的启发式集合。
+REGEX_PREV = set("(,=:[!&|?{};+-*%<>~^")
 
-    2026-10-31 —— 原来的逐行版本处理不了两类东西，而它们在测试文件里很常见：
-      · 跨行模板串（反引号）—— 之后每一行都被当成代码，括号计数整体偏
-      · 跨行块注释（/* … */）
-    ⇒ 结果是「文件末深度不为 0」。那本身是有用的报警（见 collect 的 unreliable），
-      但**根因是剥得不干净，不是文件真的不配平**。所以这里改成状态机。
-    """
-    out: list[str] = []
-    in_block = False
-    in_template = False
-    prev_code = ""   # 上一个「代码字符」，用来判断 / 是除号还是正则起点
-    for line in lines:
-        buf: list[str] = []
-        i = 0
-        while i < len(line):
-            ch = line[i]
-            nxt = line[i + 1] if i + 1 < len(line) else ""
-            if in_block:
-                if ch == "*" and nxt == "/":
-                    in_block = False
-                    i += 2
-                    continue
+
+def _strip_code(raw_lines: list[str]) -> list[str]:
+    # 2026-10-31 —— 栈式剥字符串（第七个状态：模板串里的 ${...} 是**代码**）。
+    # 旧实现把整段模板当纯文本，插值里的 `/`（`>/dev/null`、`/^[a-z/-]+$/`）会被当成正则起点，
+    # 于是后面一段被吞、深度失衡 ⇒ 文件被误判「不配平」并整体排除出棘轮域。
+    text = "\n".join(raw_lines)
+    out = []
+    i, n = 0, len(text)
+    state = "code"          # code | tmpl | bcomment | lcomment
+    interp: list[int] = []  # 每层 ${...} 的花括号计数
+    prev = ""               # 上一个「有意义的代码字符」或关键字
+    word = ""
+    while i < n:
+        ch = text[i]
+        nx = text[i + 1] if i + 1 < n else ""
+        if state == "lcomment":
+            if ch == "\n":
+                state = "code"
+                out.append(ch)
+            else:
+                out.append(" ")
+            i += 1
+            continue
+        if state == "bcomment":
+            if ch == "*" and nx == "/":
+                state = "code"
+                out.append("  ")
+                i += 2
+            else:
+                out.append("\n" if ch == "\n" else " ")
                 i += 1
-                continue
-            if in_template:
-                if ch == "\\":
-                    i += 2
-                    continue
-                if ch == "`":
-                    in_template = False
-                    i += 1
-                    continue
-                # 2026-10-31 —— 第七个状态：模板串里的 `${...}` 是**代码**。
-                # 不跟踪它时，`${q(x)} >/dev/null` 里的 / 会被当成正则起点，
-                # 于是后面整段被吞掉、深度失衡 —— 而那不是文件不配平，是剥得不干净。
-                i += 1
-                continue
-            if ch == "/" and nxt == "*":
-                in_block = True
+            continue
+        if state == "tmpl":
+            if ch == "\\":
+                out.append("  ")
                 i += 2
                 continue
-            if ch == "/" and nxt == "/":
-                break
             if ch == "`":
-                in_template = True
+                state = "code"
+                out.append(" ")
+                prev = "`"
                 i += 1
                 continue
-            if ch == "/" and (prev_code == "" or prev_code in "(,=:[!&|?{};+-*%<>~^" or prev_code == "return"):
-                # 正则字面量起点（启发式）：跳过到未转义的 /
-                # 不处理它会让 /if \(status\) \{/ 里的 { 被当成代码括号，
-                # 于是「文件末深度」不为 0 —— 而那不是文件不配平，是剥得不干净。
-                i += 1
-                while i < len(line):
-                    if line[i] == "\\":
-                        i += 2
-                        continue
-                    if line[i] == "/":
-                        i += 1
-                        break
-                    i += 1
+            if ch == "$" and nx == "{":
+                state = "code"
+                interp.append(0)
+                out.append(" ")   # 进入插值：**不记** { ，退出时也不记 }（两边都不记才配平）
+                prev = "{"
+                i += 2
                 continue
-            if ch in "\"'":
-                quote = ch
-                i += 1
-                while i < len(line):
-                    if line[i] == "\\":
-                        i += 2
-                        continue
-                    if line[i] == quote:
-                        i += 1
-                        break
-                    i += 1
-                continue
-            buf.append(ch)
-            if not ch.isspace():
-                prev_code = ch
+            out.append("\n" if ch == "\n" else " ")
             i += 1
-        out.append("".join(buf))
-    return out
+            continue
+        # ---- code ----
+        if ch == "/" and nx == "*":
+            state = "bcomment"; out.append("  "); i += 2; continue
+        if ch == "/" and nx == "/":
+            state = "lcomment"; out.append("  "); i += 2; continue
+        if ch == "`":
+            state = "tmpl"; out.append(" "); i += 1; continue
+        if ch in "\"'":
+            q = ch
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == q or text[j] == "\n":
+                    break
+                j += 1
+            out.append(" " * (j - i + 1))
+            i = j + 1
+            prev = "s"
+            continue
+        if ch == "/" and (prev == "" or prev in REGEX_PREV or prev == "return"):
+            # ⚠️ 字符类 [...] 里的 `/` 不结束正则：`/^[A-Za-z0-9_@%+=:,./-]+$/` 就是反例。
+            j = i + 1
+            in_class = False
+            while j < n:
+                c = text[j]
+                if c == "\\":
+                    j += 2
+                    continue
+                if c == "\n":
+                    break
+                if c == "[":
+                    in_class = True
+                elif c == "]":
+                    in_class = False
+                elif c == "/" and not in_class:
+                    j += 1
+                    break
+                j += 1
+            out.append(" " * (j - i + 1))
+            i = j + 1
+            prev = "/"
+            continue
+        if ch == "{":
+            if interp:
+                interp[-1] += 1
+            out.append(ch)
+            prev = "{"
+            i += 1
+            continue
+        if ch == "}":
+            if interp:
+                if interp[-1] == 0:
+                    interp.pop()
+                    state = "tmpl"
+                    out.append(" ")
+                    prev = "}"
+                    i += 1
+                    continue
+                interp[-1] -= 1
+            out.append(ch)
+            prev = "}"
+            i += 1
+            continue
+        if ch.isalpha() or ch == "$" or ch == "_":
+            word += ch
+            out.append(ch)
+            i += 1
+            continue
+        else:
+            if word:
+                prev = "return" if word == "return" else "id"
+                word = ""
+            if not ch.isspace():
+                prev = ch
+        out.append(ch)
+        i += 1
+    return "".join(out).split("\n")
 
 
-# 2026-10-31 —— 已知缺失的**第七个状态**（写在函数外，防止它在重构里消失）：
-#
-#   模板串里的 `${...}` 是代码，而当前实现把整段模板当作纯文本跳过 ⇒
-#   插值里的 `/`（如 `>/dev/null`）仍可能被当成正则起点，于是后面一段被吞、深度失衡。
-#   本机实测落点：agent-node/src/runtime/opencode-copresence/launcher-health.test.ts:213
-#   （负深度 -1；根因在 154 行嵌套模板 + 165 行的 `>/dev/null`）。
-#
-#   我试过一版「插值栈」实现（进入 ${ 记一个 {、退出不记 }），
-#   **把 522 个文件的配平全带偏了** ⇒ 已回退。不做完整小词法器，不硬上。
-#
-#   ⇒ 下一步要的是「模板栈 + 表达式栈」，不是在本函数里再塞两个布尔。
-#   falsifier：改完后该文件 end depth 应为 0；若仍为 -1 ⇒ 还有第八个状态没加，
-#              而不是「这个文件本来就不配平」（它通过 tsc，本来就配平）。
-#
-#
 def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
     """返回 (名字 → 出现次数, dynamic 计数)。
 
