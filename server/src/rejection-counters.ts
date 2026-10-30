@@ -28,10 +28,19 @@
 //     ─────────────────────────────────────────────────────────────
 //     鉴权中间件 401                        ✗          在到达 /api/task 之前返回，不调用 logTaskRejection
 //     全局/路由 404（未匹配）               ✗          同上，不进 handler
-//     handler 内拒绝（非 2xx）              ✓          ← **唯一被覆盖的**
-//     未捕获异常 → 500 兜底                 ✗          由上层兜底，不经 logTaskRejection
+//     **请求体超限 (Bun maxRequestBodySize)** ✗       在 fetch() 之前由服务器拒绝，根本没有我们的代码
+//     **非法 JSON（parser 级）**             ✓          ← 注意：**我们**在 handler 里 `await req.json()`，
+//                                                        所以这一类落在 handler 内、被计数。
+//                                                        （Express 的 express.json() 会 next(err) ⇒ 进错误中间件
+//                                                          ⇒ **不计**。同一类失败，出口类别取决于 parser 放在哪。）
+//     handler 内拒绝（schema/权限等，非 2xx） ✓          ← 被覆盖的
+//     未捕获异常 → 500 兜底（error hook）     ✗          由 buildServeErrorResponse 兜底，不经 logTaskRejection
 //
-//   ⇒ **覆盖 1/4 类出口。**
+//   ⇒ **覆盖 2/6 类出口**（原写 1/4，漏了「请求体超限」与「parser 级」两类；
+//      而 parser 级恰好是被覆盖的 —— 因为我们在 handler 内解析，这一点与 Express 相反）。
+//   ⇒ 清单要能被一次坏输入打出来，而不是靠回想中间件有哪些：
+//      `curl -X POST /api/task -H 'content-type: application/json' -d '{bad'` ⇒ 400，
+//      看计数器动不动 ⇒ 动 ⇒ 这一类被覆盖（本仓就是动的，见 health-redaction.test.ts）。
 //   ⇒ 为什么必须写分母：一个有分母的缺口是可排期的；一个没有分母的缺口只会被当成注释。
 //   ⇒ 补齐路径：把 +1 上移到中间件（401/404）或统一错误兜底（500），本次不做。
 //

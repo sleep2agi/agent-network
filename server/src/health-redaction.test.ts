@@ -121,6 +121,80 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     if (value === null) expect(body.git_dirty).toBe(false);
   });
 
+  // 2026-10-31 —— 拒绝计数的 **must-fire**：注入一次真实拒绝，看它跳不跳。
+  //
+  // 为什么必须有这一条：光断言 by_reason 存在，测的是形状；形状对、接线错，读数照样是 0。
+  // 而「只有异常路径能让它 +1」这一类，0 与「从没出过错」同形 —— 不注入就永远发现不了。
+  test("a real rejected /api/task actually bumps the counter (must-fire, not just shape)", async () => {
+    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const beforeTotal = before.counters.task_rejections.total as number;
+
+    // 🔴 必须**带登录态**、并在 handler 内部失败：
+    // 全局鉴权中间件的 401 在到达 /api/task 之前就返回 ⇒ 根本不经过 logTaskRejection。
+    // （这本身就是一条已知缺口，写在 rejection-counters.ts 的注释里。）
+    const rej = await fetch(`${BASE}/api/task`, {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${userToken}` },
+      body: JSON.stringify({}),   // schema 校验失败 ⇒ 400，走 reject()
+    });
+    expect(rej.status).toBeGreaterThanOrEqual(400);
+
+    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
+    // 🔴 窗口起点必须不动：计数器 +1 而 since 变化，会让「这段时间拒了几次」算错。
+    //    没有窗口的计数器是「没有域的数」；没有 must-fire 的计数器是「没有证据的数」。
+    expect(after.counters.since).toBe(before.counters.since);
+    expect(after.startedAt).toBe(before.startedAt);
+    const bumped = Object.keys(after.counters.task_rejections.by_reason).find(
+      (k) => k.startsWith(`${rej.status}:`),
+    );
+    expect(bumped).toBeTruthy();
+  });
+
+  // 2026-10-31 —— 把「已知缺口」钉在 CI 里，而不是只写在注释里。
+  //
+  // 🔴 这条断言的语义是：**目前如此**，不是「应该如此」。
+  //    将来谁把计数上移到中间件，这条会红 —— 那就对了：他必须同时更新
+  //    模块注释里的覆盖比例（现在是 2/6 类出口）。
+  test("KNOWN GAP: unauthenticated /api/task rejection is NOT counted (see rejection-counters.ts)", async () => {
+    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const beforeTotal = before.counters.task_rejections.total as number;
+
+    // 不带 Authorization ⇒ 鉴权中间件在到达 handler 之前就返回 401。
+    const rej = await fetch(`${BASE}/api/task`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(rej.status).toBeGreaterThanOrEqual(400);
+
+    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    if (after.counters.task_rejections.total !== beforeTotal) {
+      throw new Error(
+        "已知缺口已被修复？401 出口现在会计数了 —— "
+        + "请同时更新 rejection-counters.ts 的出口清单与覆盖比例（当前 2/6），"
+        + "并把这条测试改成断言「已被计数」。",
+      );
+    }
+    expect(after.counters.task_rejections.total).toBe(beforeTotal);
+  });
+
+  // 2026-10-31 —— parser 级拒绝在本仓**是**被计数的，因为我们在 handler 内 await req.json()。
+  // 与 Express 恰好相反（express.json() 走 next(err) ⇒ 错误中间件 ⇒ 不计）。
+  // ⇒ 这类出口的归属取决于 parser 放在哪，而不是取决于框架。
+  test("malformed JSON on /api/task IS counted — parser lives inside our handler", async () => {
+    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const beforeTotal = before.counters.task_rejections.total as number;
+    const rej = await fetch(`${BASE}/api/task`, {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${userToken}` },
+      body: "{bad",
+    });
+    expect(rej.status).toBe(400);
+    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);
