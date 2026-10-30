@@ -3768,11 +3768,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const configUpdateCapable = readConfigUpdateCapable(node.config_snapshot);
       const warnings = applyMode !== "hot" && configUpdateCapable === false
         ? [{
-            code: "restart_requires_supervisor",
-            message: "this node reports config_update_capable=false (bare spawn, no supervisor). "
-              + "A restart-tier patch will make it exit 75 and nothing will respawn it — the update "
-              + "will time out and the node will stay offline. Use Stop then Start, or a supervised "
-              + "process (anet start / pm2) before sending restart-tier changes.",
+            code: "restart_supervision_unknown",
+            // 不说 "no supervisor" —— 这个字段只说明「没有声明 sentinel-75 重启包装」，
+            // 而 systemd/pm2 托管的节点同样可能报 false（它们不走那套包装）。
+            // 「不能热更新」蕴含「这次需要重启」，但**不蕴含**「重启是安全的」，
+            // 反过来也不蕴含「重启是危险的」。这里只能如实说“没有声明”，
+            // 把判断交给调用方，并给出可执行的两种处置。
+            message: "this node does not advertise config_update_capable=true, i.e. it does not declare "
+              + "a supervisor that honours the sentinel-75 restart path. If nothing respawns it, a "
+              + "restart-tier patch makes the process exit 75 and stay down: the update will time out "
+              + "and the node will be offline until it is started again. Verify how this node is "
+              + "launched (anet start / pm2 / systemd) before sending restart-tier changes; "
+              + "model-only changes on an OpenCode V2 co-presence node are hot and unaffected.",
           }]
         : undefined;
 
