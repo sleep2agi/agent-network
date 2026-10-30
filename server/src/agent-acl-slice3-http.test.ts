@@ -265,3 +265,38 @@ describe("human ↔ human DM (/api/dm): restricted members can talk to people", 
     expect(r.status).toBeGreaterThanOrEqual(401);
   });
 });
+
+// 响应体是契约：update_node_config 的成功体被客户端按字段名读取，
+// 任何「多加一栏」都应当是一次**有意识的**决定，而不是顺手。
+// 这条测试钉住当前的键集（顺序无关，sorted 后比较），
+// 让下一次加字段必须先让它变红、再明确决定要不要更新契约。
+describe("update_node_config 响应键集（exact key set）", () => {
+  test("成功体恰好 {apply_mode, ok, update_id}，不多不少", async () => {
+    const r = await tool(adminToken, "update_node_config", {
+      node_id: X.node, base_revision: 0, patch: { model: "exact-keys-model" }, network_id: NET,
+    });
+    expect(r.ok).toBe(true);
+    expect(Object.keys(r).sort()).toEqual(["apply_mode", "ok", "update_id"]);
+  });
+
+  test("在途冲突恰好 {age_ms, error, existing_update_id, ok}", async () => {
+    const r = await tool(adminToken, "update_node_config", {
+      node_id: X.node, base_revision: 0, patch: { model: "again" }, network_id: NET,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("update_in_flight");
+    expect(Object.keys(r).sort()).toEqual(["age_ms", "error", "existing_update_id", "ok"]);
+  });
+
+  test("revision 冲突恰好 {current_revision, error, ok}", async () => {
+    // 用另一台干净节点，避开上面那条的在途状态
+    const r = await tool(adminToken, "update_node_config", {
+      node_id: Z.node, base_revision: 99, patch: { model: "stale" }, network_id: NET,
+    });
+    expect(r.ok).toBe(false);
+    // 实际契约：code 是 revision_conflict（不是 config_revision_conflict），
+    // 且带 base_revision —— 顺手纠正了卡上写错的错误名。
+    expect(r.error).toBe("revision_conflict");
+    expect(Object.keys(r).sort()).toEqual(["base_revision", "current_revision", "error", "ok"]);
+  });
+});
