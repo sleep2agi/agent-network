@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { randomBytes } from "crypto";
+import type { LateReplyPayload } from "./v2-session";
 import { cleanupAfterExit } from "./close-cleanup";
 import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { renameOverExistingSync } from "../../shared/windows-rename-retry";
@@ -197,6 +198,11 @@ export interface OpenCodeCopresenceSession {
       capacityRetrySleep?: (ms: number) => Promise<void>;
       /** Once, when admission sees a non-idle session. Does not shorten the wait. */
       onAdmissionBusy?: () => void | Promise<void>;
+      /**
+       * #3071 —— 超时之后这一轮才结束时的回调。
+       * 不提供它＝保持旧行为（结果丢弃）；提供它就由调用方把它作为迟到结果补发回 Hub。
+       */
+      onLateReply?: (payload: LateReplyPayload) => void | Promise<void>;
     },
     /**
      * #1879 ③ —— 排队项的归属：这条任务是谁的（task id + 提交者）。
@@ -921,6 +927,7 @@ export async function openVettedOpenCodeCopresence(
           capacityRetrySleep?: (ms: number) => Promise<void>;
           /** Once, when admission sees a non-idle session. Does not shorten the wait. */
           onAdmissionBusy?: () => void | Promise<void>;
+          onLateReply?: (payload: LateReplyPayload) => void | Promise<void>;
         },
         /**
          * #1879 ③ —— 归属：排队项绑定 task 与提交者。
