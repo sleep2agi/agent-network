@@ -41,36 +41,24 @@ PATTERNS = (
 
 
 def _provenance() -> list[str]:
-    """2026-10-31 —— 让「手抄的清单」无法冒充「生成的清单」。
+    """2026-10-31 —— 生成物的归属要按**内容**，不按提交。
 
-    分母非零只是必要条件：一份**手写的、与代码不同步**的清单同样非零，而它仍然错。
-    ⇒ 完成判据是「从代码生成 + 一条命令能重跑 + 重跑后不变」。
-    这三件事里，只有第一件能被贴在一行文本里：
-        generated_from: <扫描根> @ <ref>[+dirty]
-    手抄的清单产不出这一行，因为它没有 ref。
+    第一版写的是 `generated_from: <file> @ <ref>`。它有两个问题：
+      ① 每提交一次（哪怕没改这个文件）它就过期 ⇒ 一个天天变红的检查会被学会忽略；
+      ② 它回答的是「我在哪个提交生成」，而读者真正要问的是「我手里的这份对不对应当前源码」。
 
-    reproduce 是第二件（命令）。第三件（重跑不变）由人跑两次比对 —— 但至少这一行让比对有对象。
+    ⇒ 改成 source_sha256（前 12 位）。它只在**源码变了**的时候变。
+    手抄的清单产不出这一行（它没有 sha）。
     """
-    import subprocess
-    def git(*args: str) -> str:
-        try:
-            return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True, timeout=10).stdout.strip()
-        except Exception:
-            return ""
-    ref = git("rev-parse", "--short", "HEAD") or "unknown"
-    dirty = git("status", "--porcelain")
-    # ⚠️ 只报「相对本文件」的 dirty：整棵树的 dirty 会让这一行在无关改动下天天变，
-    #    于是读者学会忽略它（一个天天变的字段等于没有字段）。
+    import hashlib
     try:
-        local_dirty = subprocess.run(["git", "status", "--porcelain", str(TARGET.relative_to(REPO))],
-                                     cwd=REPO, capture_output=True, text=True, timeout=10).stdout.strip()
-    except Exception:
-        local_dirty = ""
-    state = "+dirty" if local_dirty else ""
+        sha = hashlib.sha256(TARGET.read_bytes()).hexdigest()[:12]
+    except OSError:
+        sha = "unreadable"
     return [
-        f"> generated_from: `{TARGET.relative_to(REPO)}` @ `{ref}{state}`",
-        f"> reproduce: `python3 scripts/report-rest-endpoints.py --markdown`",
-        "> 机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`（`--table-json`）",
+        f"> generated_from: `{TARGET.relative_to(REPO)}` source_sha256=`{sha}`",
+        "> reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）",
+        "> 机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`",
         "> 重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）",
     ]
 

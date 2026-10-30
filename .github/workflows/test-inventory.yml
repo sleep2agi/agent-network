@@ -57,6 +57,11 @@ jobs:
       # 2026-10-31 —— 「这条判据的副本有几份？」：31 组逐字符相同的同名文件跨 3 个包。
       # 任何单侧改动都会让副本分叉，而改的那一侧不知道另一端。
       # 分叉不一定是错，但必须是显式决定（改回去 / 删基线行并说明）。
+      # 2026-10-31 —— 生成物的唯一风险不是它错，是它**停在过去某一天**。
+      # docs/rest-route-table.json 写着「重跑后不一致 ⇒ 过期」，但没有任何东西去重跑。
+      # 这条就是那个消费者：源码变了而表没跟上 ⇒ 红。
+      - name: generated REST route table is not stale
+        run: python3 scripts/check-rest-route-table.py
       - name: duplicated criteria copies have not silently diverged
         run: |
           python3 scripts/report-contract-pairs.py --selftest

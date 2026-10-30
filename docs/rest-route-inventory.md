@@ -4,9 +4,9 @@
 > 对象：只扫 `server/src/server.ts`。它不是分母：变量拼的路径、其它文件里的匹配、中间件顺序都看不见。
 > **口径**：回答「有多少条、什么形态、在源码哪一行、同一 path 出现在几处、各自的判别键是什么」，不回答「一共有多少个端点」。
 
-> generated_from: `server/src/server.ts` @ `afd50416b`
-> reproduce: `python3 scripts/report-rest-endpoints.py --markdown`
-> 机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`（`--table-json`）
+> generated_from: `server/src/server.ts` source_sha256=`a9585bd32a2d`
+> reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）
+> 机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`
 > 重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）
 
 | 序 | path | method | query 判别 | 匹配形态 | 源码行 |

@@ -838,9 +838,9 @@
   }
  ],
  "provenance": [
-  "generated_from: `server/src/server.ts` @ `afd50416b`",
-  "reproduce: `python3 scripts/report-rest-endpoints.py --markdown`",
-  "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`（`--table-json`）",
+  "generated_from: `server/src/server.ts` source_sha256=`a9585bd32a2d`",
+  "reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）",
+  "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`",
   "重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）"
  ]
 }
