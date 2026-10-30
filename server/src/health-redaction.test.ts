@@ -211,6 +211,57 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(Math.abs(delta - elapsed)).toBeLessThanOrEqual(1000); // 且走的是同一个墙钟（容差 1s）
   });
 
+  // 2026-10-31 —— 误差界必须有**地板**。
+  //   uptime×|delta|/value 只覆盖尺子自己的舍入，delta=0 时报 0；
+  //   而 btime 是整秒（±500ms）、jiffies 是 10ms 量化 —— 这两项不会因为尺子变准而消失。
+  // ⇒ 判据：误差界的最小值是「尺子之外的误差之和」，不是 0。
+  describe("clk_tck 的误差界与守卫的可检出下限", () => {
+    test("error bound never reports 0 (floor from btime seconds + jiffies quantum)", async () => {
+      const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      if (b.kernel_started_at === null) return; // 非 Linux：这一族本来就不发布
+      expect(typeof b.kernel_started_at_error_ms).toBe("number");
+      expect(b.kernel_started_at_error_ms).toBeGreaterThanOrEqual(510);
+      // 即使 delta=0（尺子最准的那一刻），地板仍然在
+      if (b.clk_tck_delta === 0) expect(b.kernel_started_at_error_ms).toBeGreaterThanOrEqual(510);
+    });
+
+    // 2026-10-31 —— 阈值决定了它抓得住多大的异常；不报换算，读者无法区分
+    //   「没有挂起过」与「挂起太小，抓不到」—— 两者都读成 derived。
+    test("publishes the smallest suspend the 1% guard could actually catch", async () => {
+      const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      if (b.kernel_started_at === null) return;
+      expect(typeof b.clk_tck_guard_min_suspend_s).toBe("number");
+      // relErr ≈ 挂起 / **机器** uptime ⇒ 1% ⇒ 0.01 × host_uptime_s
+      // ⚠️ 不是 b.uptime（那是进程的），两者相差可以上万倍 —— 这一条正是在钉这个区别
+      expect(typeof b.host_uptime_s).toBe("number");
+      const expected = 0.01 * b.host_uptime_s;
+      expect(Math.abs(b.clk_tck_guard_min_suspend_s - expected)).toBeLessThanOrEqual(2);
+      expect(b.clk_tck_guard_min_suspend_s).toBeGreaterThan(0);
+      // 机器 uptime ≥ 进程 uptime（本进程是这台机器上后起的）—— 两个量确实不同名不同物
+      expect(b.host_uptime_s).toBeGreaterThanOrEqual(b.uptime);
+      // 2026-10-31 —— 原始估计与阈值判定分开报：
+      //   本机实测 estimate=99.35 而 suspend_total_s=0 ⇒ 被打回 assumed 不是挂起造成的，是估计器偏置。
+      //   没有这一格，那句「为什么是 assumed」说不出来（只能看到 assumed）。
+      expect(typeof b.clk_tck_estimate).toBe("number");
+      expect(Math.abs(b.clk_tck_estimate - 100)).toBeLessThan(10);
+      if (b.clk_tck_source === "confirmed") expect(Math.abs(b.clk_tck_estimate - 100)).toBeLessThan(0.5);
+    });
+
+    // 2026-10-31 —— 把**推导的前提**做成读数：累计挂起 = (now − btime) − /proc/uptime。
+    // 没有它，derived 与 confirmed 在读数上只差一个容差，而「没挂起过」这个前提在两者之外。
+    test("derived carries its premise: suspend_total_s is published (null ≠ 0)", async () => {
+      const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      if (b.kernel_started_at === null) return;
+      expect("suspend_total_s" in b).toBe(true);
+      const s = b.suspend_total_s;
+      expect(s === null || (typeof s === "number" && s >= 0)).toBe(true);
+      // 前提与结论必须一致：若已挂起超过守卫的可检出下限，就不该还报 confirmed
+      if (typeof s === "number" && s > (b.clk_tck_guard_min_suspend_s ?? Infinity)) {
+        expect(b.clk_tck_source).not.toBe("confirmed");
+      }
+    });
+  });
+
   // 2026-10-31 —— license 三态必须是「三种不同的可修性」，不能折成一个 "none"。
   // 本条只断言形状（测试库没有 license 行 ⇒ absent）；四种映射由 license-state.test.ts 钉死。
   test("license_state distinguishes absent from unknown instead of collapsing to none", async () => {

@@ -1113,8 +1113,38 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   },
   epoch_delta_ms: { class: "gauge", granularity: "level" },
   clk_tck_assumed: { class: "gauge", granularity: "label" },
+  clk_tck_estimate: {
+    class: "gauge",
+    granularity: "level",
+    why: "**未应用阈值**的原始估计；有它才能分辨「守卫被挂起打回」与「估计器本身有偏置」",
+  },
+  host_uptime_s: {
+    class: "gauge",
+    granularity: "cumulative",
+    why: "**机器**已开机秒数（与进程 uptime 是两个量）；守卫的可检出下限以它为基准，没有它这个阈值不可验",
+  },
+  clk_tck_assumed_reason: {
+    class: "gauge",
+    granularity: "verdict",
+    why: "退回 assumed 的原因；三支挤在同一个值里时，「设备不支持」与「真的挂起过」同形",
+    verdict_other_branch: "rel_error_above_1pct：宿主挂起（uptime 涨、jiffies 不涨）超过 1% —— 本机实测已出现",
+  },
   clk_tck_delta: { class: "gauge", granularity: "level", why: "derived − 100；confirmed 也要报差多少" },
-  kernel_started_at_error_ms: { class: "gauge", granularity: "level", why: "差值隐含的启动时刻误差界" },
+  kernel_started_at_error_ms: {
+    class: "gauge",
+    granularity: "level",
+    why: "启动时刻误差界，**含地板**（btime 整秒 ±500ms + jiffies 10ms）；地板不会因为尺子变准而消失",
+  },
+  clk_tck_guard_min_suspend_s: {
+    class: "gauge",
+    granularity: "level",
+    why: "1% 相对偏差 = 多长的挂起 ⇒ 这是这个守卫**抓得住的最小异常**（134 天的机器约 32 小时）",
+  },
+  suspend_total_s: {
+    class: "gauge",
+    granularity: "cumulative",
+    why: "推导的前提（累计挂起）；有了它 derived 带前提，没有它前提在读数之外",
+  },
   clk_tck_source: {
     class: "gauge",
     granularity: "verdict",
@@ -1291,51 +1321,105 @@ function clkTck(): {
   source: "confirmed" | "derived" | "assumed";
   /** derived − 100；只在算得出推导值时非 null（**这是「差多少」，不是「等不等」**）。 */
   delta?: number | null;
-  /** 该差值隐含的启动时刻误差（毫秒）。 */
+  /**
+   * 2026-10-31 —— **未应用任何阈值**的原始估计（tick/s，两位小数）。
+   *
+   * 为什么要它：本机实测 estimate=99.35、而 suspend_total_s=0 ⇒
+   * 「守卫被 1% 阈值打回 assumed」这件事**不是挂起造成的，是估计器本身的偏置**。
+   * 没有这一格时，那句话说不出来 —— 只能看到 assumed，看不到为什么。
+   */
+  estimate?: number | null;
+  /** 该差值隐含的启动时刻误差（毫秒）；**含地板**，见下。 */
   errorMs?: number | null;
+  /** 1% 相对偏差对应多长的挂起（秒）—— 这就是这个守卫**抓得住的最小异常**。 */
+  guardMinSuspendS?: number | null;
+  /**
+   * 2026-10-31 —— 退回 assumed 的**原因**。
+   * 原来三支（读不到 / 算出来不可能 / 偏差过大）都返回同一个 `{value:100, source:"assumed"}`，
+   * 于是「设备不支持」与「这台机器真的挂起了 32 分钟」在读数上完全一样。
+   */
+  assumedReason?: "stat_unreadable" | "derived_out_of_range" | "rel_error_above_1pct";
 } {
   try {
     const fs = require("node:fs") as typeof import("node:fs");
     const os = require("node:os") as typeof import("node:os");
     let jiffies = 0;
-    for (const line of fs.readFileSync("/proc/stat", "utf8").splitlines()) {
-      if (!/^cpu\d*\s/.test(line)) continue;
+    // 2026-10-31 —— **这里曾经是 Python 的 splitlines()**：JS 没有这个方法 ⇒ TypeError ⇒
+    // 被本函数的 catch 吞掉 ⇒ 永远 return { value: 100, source: "assumed" }。
+    // ⇒ 整条推导是死代码：clk_tck_delta / kernel_started_at_error_ms 恒为 null，
+    //   而「恒为 null」在报告里与「这台机器刚好是 100」同形。
+    //   外部复核指出的两件事（误差界没地板、1% 守卫抓不到一小时挂起）都作用在这条死路径上。
+    // ⇒ 现在改成 split，并在 catch 里带上原因，不再把「算不出」与「刚好等于 100」压成同一个值。
+    for (const line of fs.readFileSync("/proc/stat", "utf8").split(/\r?\n/)) {
+      // ⚠️ `cpu\d*` 会**同时**匹配聚合行 `cpu` 与每核行 `cpu0..cpuN` ⇒ 全部计两遍，
+      //    除以 cpus 只除一次 ⇒ 推导值翻倍（本机实测 199 而非 100）⇒ delta=99 ⇒ 被 1% 阈值打成 assumed。
+      // ⇒ 只数每核行（`cpu\d+`）；聚合行等于各核之和，再数一次就是重复计。
+      if (!/^cpu\d+\s/.test(line)) continue;
       const parts = line.trim().split(/\s+/).slice(1).map(Number);
       if (parts.every((n) => Number.isFinite(n))) jiffies += parts.reduce((a, b) => a + b, 0);
     }
     const uptime = os.uptime();
     const cpus = Math.max(1, os.cpus().length);
     if (!Number.isFinite(jiffies) || jiffies <= 0 || !Number.isFinite(uptime) || uptime <= 0) {
-      return { value: CLK_TCK_ASSUMED, source: "assumed" };
+      return { value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "stat_unreadable" };
     }
     const derived = Math.round(jiffies / (uptime * cpus));
     if (!Number.isFinite(derived) || derived < 1 || derived > 100_000) {
-      return { value: CLK_TCK_ASSUMED, source: "assumed" };
+      return { value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "derived_out_of_range" };
     }
     // 2026-10-31 —— 「相等」在浮点比较里需要容差，而容差是新的魔数。
     // ⇒ 不做二选一，而是**报差值 + 误差界**：
     //    delta = derived − 100（以 tick/s 为单位）；它隐含的启动时刻误差 ≈ uptime × |delta| / value。
     //    差值大到不可能是舍入（>1%）⇒ 假设已坏（典型成因：机器挂起过 —— jiffies 不涨而 uptime 涨）
     //    ⇒ 退回 assumed，并把原因写进偏差值里，而不是继续报 derived。
+    const estimate = Math.round((jiffies / (uptime * cpus)) * 100) / 100;
     const delta = derived - CLK_TCK_ASSUMED;
     const relErr = Math.abs(delta) / Math.max(1, derived);
+    // 这两项**无论退不退回都要发布**：它们是「尺子的分辨率」与「守卫的检出下限」，
+    // 退回 assumed 只说明「我不信这个值」，不说明这两件事没发生。
+    const RULER_FLOOR_MS = 500 + 10;
+    const errorMs = RULER_FLOOR_MS + Math.round((uptime * Math.abs(delta) / Math.max(1, derived)) * 1000);
+    const guardMinSuspendS = Math.round(0.01 * uptime);
     if (relErr > 0.01) {
-      return { value: CLK_TCK_ASSUMED, source: "assumed" };
+      return {
+        value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "rel_error_above_1pct",
+        delta, errorMs, guardMinSuspendS, estimate,
+      };
     }
+    // 2026-10-31 —— 误差界必须有**地板**。
+    //   uptime×|delta|/value 只覆盖「尺子自己的舍入」，delta=0 时它报 0；
+    //   而 btime 是**整秒**（±500ms）、/proc/stat 的 jiffies 是 10ms 量化。
+    //   ⇒ 这两项不会因为尺子变准而消失 ⇒ 误差界的最小值是「尺子之外的误差之和」，不是 0。
+    //   （外部复核原话：一个误差界在「尺子最准」时报 0，说明它只覆盖了尺子的误差。）
     return {
       value: derived,
       source: Math.abs(delta) < 0.5 ? "confirmed" : "derived",
       delta,
-      errorMs: Math.round((uptime * Math.abs(delta) / Math.max(1, derived)) * 1000),
+      errorMs,
+      estimate,
+      // 2026-10-31 —— 阈值决定了它抓得住多大的异常：relErr ≈ 挂起时长 / uptime ⇒ 1% ⇒ 挂起 ≥ 1% uptime。
+      //   134 天的机器 ⇒ ≈ 32 小时才触发 ⇒ 一小时的挂起读成「没有挂起」（derived 与 confirmed 只差一个容差）。
+      //   ⇒ 把这个量级印出来，读者才知道自己手里的 derived 意味着「没发生」还是「太小没看见」。
+      guardMinSuspendS,
     };
   } catch {
-    return { value: CLK_TCK_ASSUMED, source: "assumed" };
+    return { value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "stat_unreadable" };
   }
 }
 
 const CLK_TCK = clkTck();
 const CLK_TCK_DELTA = CLK_TCK.delta ?? null;
 const CLK_TCK_ERROR_MS = CLK_TCK.errorMs ?? null;
+const CLK_TCK_GUARD_MIN_SUSPEND_S = CLK_TCK.guardMinSuspendS ?? null;
+const CLK_TCK_ASSUMED_REASON = CLK_TCK.assumedReason ?? null;
+const CLK_TCK_ESTIMATE = CLK_TCK.estimate ?? null;
+/** 机器 uptime（秒）。与 `uptime`（进程）分开报：守卫的阈值以这台机器为量纲。 */
+const HOST_UPTIME_S = (() => {
+  try {
+    const u = (require("node:os") as typeof import("node:os")).uptime();
+    return Number.isFinite(u) ? Math.round(u) : null;
+  } catch { return null; }
+})();
 /** agreement 的**分类**阈值（不是发布闸门）：超过它就算「内核与自报对不上」。 */
 const EPOCH_AGREEMENT_MS = 10_000;
 
@@ -1349,6 +1433,13 @@ function detectKernelStart(startedAtIso: string): {
   clk_tck_source: "confirmed" | "derived" | "assumed";
   epoch_agreement: "agree" | "disagree" | "unknown";
   epoch_delta_ms: number | null;
+  /**
+   * 2026-10-31 —— 把**推导的前提**做成读数。
+   * 推导「kernel_started_at = btime + ticks/CLK_TCK」依赖「这台机器没挂起过」，
+   * 而挂起留下的唯一痕迹就是：(now − btime) 与 /proc/uptime 的差。
+   * ⇒ 有了它，derived 带着前提；没有它，前提在读数之外，推导的正确性只是没被推翻过。
+   */
+  suspend_total_s: number | null;
 } {
   const pid = process.pid;
   let bootId: string | null = null;
@@ -1384,6 +1475,7 @@ function detectKernelStart(startedAtIso: string): {
       clk_tck_source: CLK_TCK.source,
       epoch_agreement: "unknown",
       epoch_delta_ms: null,
+      suspend_total_s: null,
     };
   }
   const candidateMs = (btime + ticks / CLK_TCK.value) * 1000;
@@ -1402,7 +1494,31 @@ function detectKernelStart(startedAtIso: string): {
       clk_tck_source: CLK_TCK.source,
     epoch_agreement: agreement,
     epoch_delta_ms: delta === null ? null : Math.round(delta),
+    suspend_total_s: suspendTotalSeconds(btime),
   };
+}
+
+/**
+ * 累计挂起时长（秒）= 墙钟自开机以来 − /proc/uptime。
+ *
+ * btime 是开机时刻的**墙钟**（挂起期间照走），而 /proc/uptime 统计的是**不挂起**的时长
+ * ⇒ 两者之差就是累计挂起。取不到（非 Linux / 读失败）⇒ null，不给 0。
+ * 「0 秒挂起」与「不知道挂没挂起」在读数上必须不同：前者是推导的前提成立，后者是前提未知。
+ */
+function suspendTotalSeconds(btime: number | null): number | null {
+  if (btime === null) return null;
+  try {
+    const os = require("node:os") as typeof import("node:os");
+    const uptime = os.uptime();
+    if (!Number.isFinite(uptime)) return null;
+    const wall = Date.now() / 1000 - btime;
+    const diff = wall - uptime;
+    // btime 是整秒 ⇒ |diff| < 1s 的读数就是 0（不是负挂起）；明显为负 ⇒ 时钟不可信 ⇒ null
+    if (!Number.isFinite(diff) || diff < -5) return null;
+    return Math.max(0, Math.round(diff));
+  } catch {
+    return null;
+  }
 }
 
 const BOOT_GIT_COMMIT = BOOT_GIT.commit;
@@ -3400,6 +3516,11 @@ return Bun.serve({
         // 而它只是「在一个没写出来的容差内」。
         clk_tck_delta: CLK_TCK_DELTA,
         kernel_started_at_error_ms: CLK_TCK_ERROR_MS,
+        clk_tck_guard_min_suspend_s: CLK_TCK_GUARD_MIN_SUSPEND_S,
+        clk_tck_assumed_reason: CLK_TCK_ASSUMED_REASON,
+        clk_tck_estimate: CLK_TCK_ESTIMATE,
+        host_uptime_s: HOST_UPTIME_S,
+        suspend_total_s: BOOT_KERNEL_START.suspend_total_s,
         epoch_agreement: BOOT_KERNEL_START.epoch_agreement,
         epoch_delta_ms: BOOT_KERNEL_START.epoch_delta_ms,
         // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：
