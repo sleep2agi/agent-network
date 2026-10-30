@@ -12,7 +12,7 @@
 // Run: COMMHUB_DB=/tmp/2756-health-disk.db bun test src/health-host-disk-2756.test.ts
 
 import { describe, expect, test } from "bun:test";
-import { hostDiskState } from "./server.js";
+import { hostDiskState, redactHomeInPath } from "./server.js";
 
 describe("#2756 /health.host_disk", () => {
   test("形状完整且数值自洽", () => {
@@ -45,5 +45,27 @@ describe("#2756 /health.host_disk", () => {
     const st = fs.statfsSync(d.path);
     const pct = Math.round((1 - Number(st.bavail) / Number(st.blocks)) * 1000) / 10;
     expect(Math.abs(d.used_pct - pct)).toBeLessThan(10);
+  });
+});
+
+describe("#2756 /health 暴露面：家目录不进免鉴权响应", () => {
+  test("redactHomeInPath 把家目录换成 ~，其余路径不动", () => {
+    const home = process.env.HOME || "";
+    if (!home || home === "/") return;
+    const red = redactHomeInPath({ path: home + "/.commhub/" });
+    expect(red!.path).toBe("~/.commhub/");
+    expect(red!.path.includes(home)).toBe(false);
+    // 非家目录路径保持原样
+    expect(redactHomeInPath({ path: "/var/lib/commhub/" })!.path).toBe("/var/lib/commhub/");
+    // null 透传
+    expect(redactHomeInPath(null)).toBeNull();
+  });
+
+  test("真实 /health 响应里的 host_disk.path 不含家目录", () => {
+    const d = redactHomeInPath(hostDiskState());
+    const home = process.env.HOME || "";
+    if (d && home && home !== "/") {
+      expect(d.path.startsWith(home)).toBe(false);
+    }
   });
 });

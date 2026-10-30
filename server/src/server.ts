@@ -2801,7 +2801,7 @@ return Bun.serve({
         // 上一轮清理（85%）之后它只用了一天多就涨回去 10 个点，靠人「偶尔看一眼」
         // 必然会漏。Hub 的 DB、日志、运行时目录都写在这块盘上，写满即生产停摆，
         // 所以这个数字应该和 sessions/stalls 一样随手可见。
-        host_disk: hostDiskState(),
+        host_disk: redactHomeInPath(hostDiskState()),
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
@@ -6308,6 +6308,21 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
  * 为什么不在这里做告警：告警需要阈值与通知渠道，属于运维策略；这里只提供**可观测**。
  * 客户端/巡检脚本按 `used_pct > 90` 自己决定要不要叫。
  */
+/**
+ * `/health` 是**免鉴权**端点，而 host_disk.path 是数据库所在目录 ——
+ * 在常见部署里就是 `$HOME/.commhub/`，等于把用户名公开出去。
+ * 形状（挂载点）是运维需要的信息，**具体家目录名不是**。
+ * 只在响应层做替换：hostDiskState() 仍返回真实路径（测试与 statfs 要用）。
+ */
+export function redactHomeInPath<T extends { path: string } | null>(d: T): T {
+  if (!d) return d;
+  const home = process.env.HOME || homedir();
+  if (!home || home === "/") return d;
+  return d.path === home || d.path.startsWith(home + "/")
+    ? { ...d, path: "~" + d.path.slice(home.length) }
+    : d;
+}
+
 export function hostDiskState(): { path: string; total_gb: number; used_gb: number; avail_gb: number; used_pct: number } | null {
   try {
     // 探针打在**数据库实际所在目录**上，而不是写死 `/`：多挂载点主机也能对得上。
