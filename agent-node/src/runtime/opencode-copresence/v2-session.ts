@@ -76,6 +76,100 @@ const HISTORY_PAGE_LIMIT = 200;
 const HISTORY_MAX_PAGES = 25;
 const POLL_INTERVAL_MS = 250;
 
+/**
+ * #3071 —— 超时不等于结果丢失。
+ *
+ * 现场（2026-10-30 生产实测）：`仍在节点的 TUI 会话里运行…等待回复已达 30 分钟上限`
+ * 的历史失败任务 289 条，其中 thread/turn 非空的 **0 条**；全库迟到结果只有 4 行。
+ * 也就是说：那一轮最终跑完了，但**没有人在听**，结果直接蒸发。
+ *
+ * 为什么这个改动很小：bridge 判断「这一轮好了没」本来就是**轮询会话历史**
+ * （`readEntriesAfter`），不是事件订阅。所以超时后只需要让这个轮询继续活着，
+ * 等 turn 真的结束再补发一次 —— 不需要新的通道、不需要订阅生命周期。
+ *
+ * 三条边界：
+ * · 硬上限 `capMs`：到点就放弃并记日志（不能让一个跑飞的 turn 永久占一个定时器）
+ * · 定时器 `unref()`：不阻止进程退出
+ * · 只补一次：`settled` 标志 + Hub 侧以 (task_id, thread, turn) 幂等
+ */
+export const LATE_REPLY_CAP_MS = 60 * 60_000;
+
+export type LateReplyPayload = {
+  /** 会话 id，作为 thread_id 补发（Hub 在任务行没有上下文时才用它做幂等）。 */
+  threadId: string;
+  /** 本轮被接受时的 message id，作为 turn_id。 */
+  turnId: string;
+  replyText: string;
+  status: "replied" | "failed";
+};
+
+type LateReplyVerdict =
+  | { state: "pending" }
+  | { state: "done"; replyText: string }
+  | { state: "done_error"; error: unknown };
+
+type LateReplyWatcherDeps = {
+  /** 会话 id，补发时作为 thread_id（Hub 只在任务行没有上下文时才用它做幂等）。 */
+  threadId: string;
+  /** 本轮被接受时的 message id，补发时作为 turn_id。 */
+  turnId: string;
+  readEntries: () => Promise<OpenCodeV2Entry[] | null>;
+  isRunning: () => boolean;
+  onLateReply: (payload: LateReplyPayload) => void | Promise<void>;
+  capMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (message: string) => void;
+  /** 测试缝：把「这一轮好了没」的判据换掉，避免测试去造真实的 history 形状。 */
+  evaluate?: (after: OpenCodeV2Entry[]) => LateReplyVerdict;
+};
+
+function evaluateLateReply(after: OpenCodeV2Entry[], turnId: string): LateReplyVerdict {
+  const verdict = openCodeV2TurnVerdict(after);
+  if (verdict.state !== "done") return { state: "pending" };
+  try {
+    return { state: "done", replyText: openCodeV2Outcome(verdict, turnId).replyText };
+  } catch (error) {
+    return { state: "done_error", error };
+  }
+}
+
+/** 超时之后继续盯着这一轮；结束时把结果交出去。返回一个可 await 的 promise（测试用）。 */
+export function watchLateReply(deps: LateReplyWatcherDeps): Promise<void> {
+  const capMs = deps.capMs ?? LATE_REPLY_CAP_MS;
+  const deadline = Date.now() + capMs;
+  let settled = false;
+  return (async () => {
+    while (!settled && Date.now() < deadline) {
+      if (!deps.isRunning()) return;
+      await (deps.sleep ? deps.sleep(POLL_INTERVAL_MS) : new Promise((r) => setTimeout(r, POLL_INTERVAL_MS)));
+      if (!deps.isRunning() || Date.now() >= deadline) break;
+      let after: OpenCodeV2Entry[] | null = null;
+      try {
+        after = await deps.readEntries();
+      } catch (error: any) {
+        deps.log?.(`[opencode-copresence] late-reply history read failed: ${error?.message ?? error}`);
+        continue;
+      }
+      if (!after) continue;
+      const verdict = (deps.evaluate ?? ((entries) => evaluateLateReply(entries, deps.turnId)))(after);
+      if (verdict.state === "pending") continue;
+      settled = true;
+      const payloadOk = verdict.state === "done"
+        ? { threadId: deps.threadId, turnId: deps.turnId, replyText: verdict.replyText, status: "replied" as const }
+        // provider 报错也算「这一轮结束了」：把失败原因交出去，
+        // 比让它彻底消失有用（发送方至少知道为什么没成）。
+        : { threadId: deps.threadId, turnId: deps.turnId, replyText: `[迟到结果] 这一轮以错误结束：${(verdict.error as any)?.message ?? verdict.error}`, status: "failed" as const };
+      try {
+        await deps.onLateReply(payloadOk);
+      } catch (error: any) {
+        deps.log?.(`[opencode-copresence] late-reply delivery failed: ${error?.message ?? error}`);
+      }
+      return;
+    }
+    if (!settled) deps.log?.(`[opencode-copresence] late-reply window closed (${Math.round(capMs / 60000)} min) without a result`);
+  })();
+}
+
 /** One V2 history entry, read defensively. */
 export interface OpenCodeV2Entry {
   id?: string;
@@ -582,6 +676,19 @@ export async function openVettedOpenCodeV2Copresence(
             throw new OpenCodeCopresenceTimeoutError(withdrawn ? "admission" : "reply", budgetMs);
           }
           warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; the turn continues in the TUI session`);
+          // #3071 —— 这一轮还在跑，别把结果丢掉：把「等结果」留在后台。
+          // 不 await：调用方要立刻拿到超时结论（Hub 侧任务要终结），
+          // 补发走旁路，失败只写日志，绝不阻塞收件循环。
+          if (evidence?.onLateReply) {
+            void watchLateReply({
+              threadId: sessionId,
+              turnId: messageId,
+              readEntries: () => readEntriesAfter(url, password, sessionId, messageId).catch(() => null),
+              isRunning: () => session.isRunning,
+              onLateReply: evidence.onLateReply,
+              log: warn,
+            });
+          }
           throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
           }
         });

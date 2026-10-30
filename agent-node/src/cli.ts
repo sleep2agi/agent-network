@@ -4265,6 +4265,25 @@ async function processWithOpencode(
       // #1879 —— 选「排队」的第一半：等待期间把「在等、等了多久」持续报出去。
       // 节点会话行本来就带 task 文本，Hub/客户端的节点卡片直接显示它 ⇒ 不用翻日志，
       // 也不会被误读成「节点卡死」。30 分钟硬预算不变（那是在兜住合法的长构建）。
+      // #3071 —— 超时之后这一轮才结束时，把结果作为迟到结果补发回 Hub。
+      // 现场：289 条「TUI 里跑超 30 分钟」的失败任务，thread/turn 全为 null，
+      // 全库迟到结果只有 4 行 —— 那一轮跑完了，但没人在听。
+      // 这里不阻塞任何调用：补发是旁路，失败只写日志。
+      onLateReply: (payload) => {
+        if (!taskId) return;
+        log(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] late reply for ${taskId}: ${payload.status} (${payload.replyText.length} chars)`);
+        void callCommHub("send_reply", {
+          in_reply_to: taskId,
+          text: payload.replyText,
+          status: payload.status,
+          thread_id: payload.threadId,
+          turn_id: payload.turnId,
+        }, 0).then((response: any) => {
+          if (response?.ok === false) warn(`[late-reply] hub refused: ${response?.error ?? "?"}`);
+        }).catch((error: any) => {
+          warn(`[late-reply] delivery failed: ${error?.message ?? error}`);
+        });
+      },
       onAdmissionBusy: () => {
         if (busySince === 0) {
           busySince = Date.now();
