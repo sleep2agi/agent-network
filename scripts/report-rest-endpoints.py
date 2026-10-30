@@ -110,6 +110,31 @@ def main() -> int:
         dup = len(entries) - len({(e["path"], e["kind"]) for e in entries})
         print(f"共 {len(entries)} 条匹配（去重后 {len(rows)} 条 path+形态；重复 {dup} 条）")
         print("（对象：server/src/server.ts；生成于本脚本，**不要手改**）")
+        # 2026-10-31 —— 抽表前的第三格：**按 path 分组**。
+        # 抽表不能「一条一条搬」：同一个 path 出现在多处时，搬漏一处就是行为改变。
+        from collections import defaultdict as _dd
+        groups: dict[str, list[dict]] = _dd(list)
+        for e in entries:
+            groups[e["path"]].append(e)
+        multi = {k: v for k, v in groups.items() if len(v) > 1}
+        print()
+        print(f"按 path 分组：{len(groups)} 个不同 path，其中 **{len(multi)} 个出现在多处**"
+              f"（共 {sum(len(v) for v in multi.values())} 条匹配）")
+        print()
+        print("| path | 处数 | 各处行号 | 形态是否一致 |")
+        print("|---|---|---|---|")
+        for path, items in sorted(multi.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            kinds = {i["kind"] for i in items}
+            print(f"| `{path}` | {len(items)} | {', '.join(':' + str(i['line']) for i in items)} "
+                  f"| {'是' if len(kinds) == 1 else '否（' + '/'.join(sorted(kinds)) + '）'} |")
+        print()
+        mixed = [k for k, v in multi.items() if len({i["kind"] for i in v}) > 1]
+        if mixed:
+            print(f"⇒ 「形态不一致」的有 {len(mixed)} 组（{', '.join('`' + m + '`' for m in mixed[:5])}）："
+                  f"抽表时最容易改坏 —— 搬进表里必须保持它们的先后与形态。")
+        else:
+            print("⇒ 本日**没有**形态不一致的分组（0 组）—— 所以这一格今天不构成风险；"
+                  "但它必须留在输出里：下次出现时，读者才知道该看哪一栏。")
         return 0
 
     if "--json" in sys.argv:
