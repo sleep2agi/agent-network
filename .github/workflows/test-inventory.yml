@@ -67,6 +67,10 @@ jobs:
       # 同时钉住「哪些 path 应该有 query 判别」——判别消失会让不变量静默跳过。
       - name: specific query discriminators still precede generic branches
         run: python3 scripts/check-rest-route-order.py
+      # 2026-10-31 —— 「名字像测试但没有 runner」：当前未归属 0。
+      # 接线之后，任何新增的 *.test.mjs / *.pw.ts 若没接进任何 runner ⇒ 红。
+      - name: no test-looking file is missing a runner
+        run: python3 scripts/report-orphan-tests.py
       - name: duplicated criteria copies have not silently diverged
         run: |
           python3 scripts/report-contract-pairs.py --selftest
