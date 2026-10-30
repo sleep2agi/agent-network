@@ -53,6 +53,10 @@ describe("#695 fetch exceptions become JSON with the exception's own message", (
       const res = buildServeErrorResponse(new Error("boom-join"), (l) => logged.push(l));
       const body = await res.json() as any;
       expect(typeof body.error_id).toBe("string");
+      // ⚠️ 2026-10-31 —— 这条 `header === body.error_id` 的判别力有限：
+      //    header 与 body 由**同一个变量**序列化 ⇒ 它结构上恒真（改成任何实现都成立）。
+      //    真正的独立证据在下面两条：日志行里的 id 与之相同（另一个生产者），
+      //    以及「每次失败 id 不同」（常量会失败）。
       expect(body.error_id).toMatch(/^[0-9a-f]{8}$/);
       expect(res.headers.get("x-error-id")).toBe(body.error_id);
       // 分母：日志必须真的有一条，且里面就是那个 id

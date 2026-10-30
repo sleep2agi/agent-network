@@ -310,6 +310,11 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
       // 正文里我们只给 build_identified；头里更不能给指纹
       const leaky = [...res.headers.keys()].filter((h) => /git|commit|build[-_]?(sha|id)/i.test(h));
       expect(leaky).toEqual([]);
+      // 2026-10-31 —— 镜像必须针对**同一个属性在另一种条件下确实存在**，
+      // 而不是「这个响应是 JSON」（那只排除了取错对象）。
+      const authed = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+      expect(typeof authed.git_commit).toBe("string");   // 同一 URL、登录态下确实有指纹
+      // ⇒ 于是「匿名不带」才是一个有对照的读数
     });
 
     test("version carries its role in the payload (a label, not a fingerprint)", async () => {
@@ -369,7 +374,10 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   test("health is never cacheable, and a conditional request still yields 200 (not 304)", async () => {
     const plain = await fetch(`${BASE}/health`);
     expect(plain.status).toBe(200);
-    expect((plain.headers.get("cache-control") || "").toLowerCase()).toContain("no-store");
+    // 2026-10-31 —— 「包含」不是值级：`toContain("no-store")` 允许
+    // `private, no-store, max-age=31536000`（两者矛盾）而不红，而「被加料」正是缓存头最危险的改法。
+    // 合法值唯一（就是 no-store）⇒ 用「等于」。
+    expect(plain.headers.get("cache-control")).toBe("no-store");
 
     // 2026-10-31 —— 先分清「不可能 304」与「可能 304 但服务端拒绝了」：
     // 没有 ETag 时，条件请求必然 200，那条断言是**空的**（vacuous），
@@ -674,7 +682,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     // 2026-10-31 修订：**一律 no-store**。原来只在带 nonce 时设，
     // 而 /health 每个字段都是「此刻的读数」——304 会冻结 startedAt 而 counters 照涨，
     // 那正是 flapping 的假阳性形状。断言方向随之从 null 改成必须存在。
-    expect((res.headers.get("cache-control") || "").toLowerCase()).toContain("no-store");
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
   test("refuses a nonce it cannot echo verbatim instead of half-accepting it", async () => {
