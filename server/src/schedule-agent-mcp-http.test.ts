@@ -401,13 +401,16 @@ describe("#2935 排程周期诊断", () => {
     });
     expect(c.ok).toBe(true);
     const id = c.schedule.schedule_id;
-    // 造 3 条「一轮跑了 600 秒」的已完成 run（中位数 600s > 周期 180s）
+    // 造 3 条「一轮跑了 600 秒」的已完成 run（中位数 600s > 周期 180s）。
+    // scheduled_for 必须每行不同（表上有唯一约束）；时间戳在 JS 里算好再传字面量 ——
+    // SQL 里写 `datetime('now','-'||?||' minute')` 这种拼接适配层翻译不了，
+    // PostgreSQL 会报 `function datetime(unknown, text) does not exist`（PG 梯形套件实测）。
+    const hubTs = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().slice(0, 19).replace("T", " ");
     for (let i = 0; i < 3; i++) {
-      // scheduled_for 必须每行不同（表上有唯一约束），否则第二条就撞 UNIQUE。
+      const minsAgo = i * 20 + 20;
       db.run(`INSERT INTO scheduled_task_runs (run_id, schedule_id, network_id, scheduled_for, status, created_at, completed_at)
-              VALUES (?1, ?2, ?3, datetime('now','-' || ?4 || ' minute'), 'replied',
-                      datetime('now','-' || (?4 + 10) || ' minute'), datetime('now','-' || ?4 || ' minute'))`,
-        [`srun_diag_${stamp}_${i}`, id, net, String(i * 20 + 20)]);
+              VALUES (?1, ?2, ?3, ?4, 'replied', ?5, ?4)`,
+        [`srun_diag_${stamp}_${i}`, id, net, hubTs(minsAgo * 60_000), hubTs((minsAgo + 10) * 60_000)]);
     }
     const l = await mcp(node.a.token, "schedule_list");
     const row = l.schedules.find((x: any) => x.schedule_id === id);
