@@ -40,6 +40,40 @@ PATTERNS = (
 )
 
 
+def _provenance() -> list[str]:
+    """2026-10-31 —— 让「手抄的清单」无法冒充「生成的清单」。
+
+    分母非零只是必要条件：一份**手写的、与代码不同步**的清单同样非零，而它仍然错。
+    ⇒ 完成判据是「从代码生成 + 一条命令能重跑 + 重跑后不变」。
+    这三件事里，只有第一件能被贴在一行文本里：
+        generated_from: <扫描根> @ <ref>[+dirty]
+    手抄的清单产不出这一行，因为它没有 ref。
+
+    reproduce 是第二件（命令）。第三件（重跑不变）由人跑两次比对 —— 但至少这一行让比对有对象。
+    """
+    import subprocess
+    def git(*args: str) -> str:
+        try:
+            return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True, timeout=10).stdout.strip()
+        except Exception:
+            return ""
+    ref = git("rev-parse", "--short", "HEAD") or "unknown"
+    dirty = git("status", "--porcelain")
+    # ⚠️ 只报「相对本文件」的 dirty：整棵树的 dirty 会让这一行在无关改动下天天变，
+    #    于是读者学会忽略它（一个天天变的字段等于没有字段）。
+    try:
+        local_dirty = subprocess.run(["git", "status", "--porcelain", str(TARGET.relative_to(REPO))],
+                                     cwd=REPO, capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        local_dirty = ""
+    state = "+dirty" if local_dirty else ""
+    return [
+        f"> generated_from: `{TARGET.relative_to(REPO)}` @ `{ref}{state}`",
+        f"> reproduce: `python3 scripts/report-rest-endpoints.py --markdown`",
+        "> 重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）",
+    ]
+
+
 def main() -> int:
     if not TARGET.exists():
         print(f"✗ 找不到 {TARGET}", file=sys.stderr)
@@ -57,6 +91,9 @@ def main() -> int:
         for kind, _ in PATTERNS:
             for v in sorted(found.get(kind, ())):
                 rows.append((v, kind))
+        for line in _provenance():
+            print(line)
+        print()
         print("| path | 匹配形态 |")
         print("|---|---|")
         for v, kind in sorted(rows):

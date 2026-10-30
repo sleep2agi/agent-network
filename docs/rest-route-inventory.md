@@ -1,8 +1,13 @@
 # REST 端点清单（草稿，非分母）
 
 > 由 `scripts/report-rest-endpoints.py --markdown` 生成，**不要手改**。
-> 对象：`server/src/server.ts`（只是这一个文件）。
-> 它不是分母：变量拼的路径、其它文件里的匹配、中间件顺序都看不见。
+> 对象：只扫 `server/src/server.ts`。它不是分母：变量拼的路径、其它文件里的匹配、中间件顺序都看不见。
+> **口径**：本文档回答「散落的手写匹配有多少条、各是什么形态」，不回答「一共有多少个端点」。
+
+> generated_from: `server/src/server.ts` @ `4b6e3db2d`
+> reproduce: `python3 scripts/report-rest-endpoints.py --markdown`
+> 重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）
+
 | path | 匹配形态 |
 |---|---|
 | `/api/` | starts_with |
