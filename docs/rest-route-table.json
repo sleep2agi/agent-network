@@ -1,0 +1,846 @@
+{
+ "note": "表草稿：不是运行时路由表，也还没有被任何代码消费。order 承载语义，不许排序。",
+ "key": [
+  "path",
+  "method",
+  "query"
+ ],
+ "rows": [
+  {
+   "id": 1,
+   "order": 1,
+   "path": "ws",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 1750
+  },
+  {
+   "id": 2,
+   "order": 2,
+   "path": "/mcp",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 1758
+  },
+  {
+   "id": 3,
+   "order": 3,
+   "path": "events",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 1847
+  },
+  {
+   "id": 4,
+   "order": 4,
+   "path": "/events/users/me",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 1906
+  },
+  {
+   "id": 5,
+   "order": 5,
+   "path": "events",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 1930
+  },
+  {
+   "id": 6,
+   "order": 6,
+   "path": "/api/auth/register",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2069
+  },
+  {
+   "id": 7,
+   "order": 7,
+   "path": "/api/auth/login",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2084
+  },
+  {
+   "id": 8,
+   "order": 8,
+   "path": "/api/auth/me",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2122
+  },
+  {
+   "id": 9,
+   "order": 9,
+   "path": "/api/auth/me/avatar",
+   "method": "PUT",
+   "query": [],
+   "kind": "eq",
+   "line": 2142
+  },
+  {
+   "id": 10,
+   "order": 10,
+   "path": "/api/auth/me/avatar/upload",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2175
+  },
+  {
+   "id": 11,
+   "order": 11,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2262
+  },
+  {
+   "id": 12,
+   "order": 12,
+   "path": "/api/auth/me",
+   "method": "PUT",
+   "query": [],
+   "kind": "eq",
+   "line": 2310
+  },
+  {
+   "id": 13,
+   "order": 13,
+   "path": "/api/auth/password",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2335
+  },
+  {
+   "id": 14,
+   "order": 14,
+   "path": "/api/auth/node-token",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2361
+  },
+  {
+   "id": 15,
+   "order": 15,
+   "path": "/api/node-rename/prepare",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2381
+  },
+  {
+   "id": 16,
+   "order": 16,
+   "path": "/api/node-rename/commit",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2400
+  },
+  {
+   "id": 17,
+   "order": 17,
+   "path": "/api/node-rename/abort",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2417
+  },
+  {
+   "id": 18,
+   "order": 18,
+   "path": "/api/auth/tokens",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2435
+  },
+  {
+   "id": 19,
+   "order": 19,
+   "path": "/api/auth/tokens",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2445
+  },
+  {
+   "id": 20,
+   "order": 20,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2461
+  },
+  {
+   "id": 21,
+   "order": 21,
+   "path": "/api/auth/sessions",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2475
+  },
+  {
+   "id": 22,
+   "order": 22,
+   "path": "/api/auth/sessions/revoke-others",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2485
+  },
+  {
+   "id": 23,
+   "order": 23,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2499
+  },
+  {
+   "id": 24,
+   "order": 24,
+   "path": "/api/networks",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2514
+  },
+  {
+   "id": 25,
+   "order": 25,
+   "path": "/api/networks",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2544
+  },
+  {
+   "id": 26,
+   "order": 26,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2564
+  },
+  {
+   "id": 27,
+   "order": 27,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2611
+  },
+  {
+   "id": 28,
+   "order": 28,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2680
+  },
+  {
+   "id": 29,
+   "order": 29,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2722
+  },
+  {
+   "id": 30,
+   "order": 30,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2781
+  },
+  {
+   "id": 31,
+   "order": 31,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2782
+  },
+  {
+   "id": 32,
+   "order": 32,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2822
+  },
+  {
+   "id": 33,
+   "order": 33,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2843
+  },
+  {
+   "id": 34,
+   "order": 34,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2844
+  },
+  {
+   "id": 35,
+   "order": 35,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2845
+  },
+  {
+   "id": 36,
+   "order": 36,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2846
+  },
+  {
+   "id": 37,
+   "order": 37,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3035
+  },
+  {
+   "id": 38,
+   "order": 38,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3131
+  },
+  {
+   "id": 39,
+   "order": 39,
+   "path": "api",
+   "method": "POST",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3184
+  },
+  {
+   "id": 40,
+   "order": 40,
+   "path": "/api/networks/join",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 3201
+  },
+  {
+   "id": 41,
+   "order": 41,
+   "path": "/api/admin/users",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 3218
+  },
+  {
+   "id": 42,
+   "order": 42,
+   "path": "/api/users",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 3247
+  },
+  {
+   "id": 43,
+   "order": 43,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3258
+  },
+  {
+   "id": 44,
+   "order": 44,
+   "path": "/health",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 3335
+  },
+  {
+   "id": 45,
+   "order": 45,
+   "path": "/api/node-lifecycle-requests",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 3672
+  },
+  {
+   "id": 46,
+   "order": 46,
+   "path": "/api/adoption-candidates",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 3677
+  },
+  {
+   "id": 47,
+   "order": 47,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3739
+  },
+  {
+   "id": 48,
+   "order": 48,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3766
+  },
+  {
+   "id": 49,
+   "order": 49,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3814
+  },
+  {
+   "id": 50,
+   "order": 50,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3850
+  },
+  {
+   "id": 51,
+   "order": 51,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3887
+  },
+  {
+   "id": 52,
+   "order": 52,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4004
+  },
+  {
+   "id": 53,
+   "order": 53,
+   "path": "/api/skills",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4106
+  },
+  {
+   "id": 54,
+   "order": 54,
+   "path": "/api/secrets",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4107
+  },
+  {
+   "id": 55,
+   "order": 55,
+   "path": "/api/providers",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4108
+  },
+  {
+   "id": 56,
+   "order": 56,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4157
+  },
+  {
+   "id": 57,
+   "order": 57,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4188
+  },
+  {
+   "id": 58,
+   "order": 58,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4189
+  },
+  {
+   "id": 59,
+   "order": 59,
+   "path": "/api/dm",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4239
+  },
+  {
+   "id": 60,
+   "order": 60,
+   "path": "/api/dm/threads",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4239
+  },
+  {
+   "id": 61,
+   "order": 61,
+   "path": "/api/dm",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 4243
+  },
+  {
+   "id": 62,
+   "order": 62,
+   "path": "/api/dm/threads",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4264
+  },
+  {
+   "id": 63,
+   "order": 63,
+   "path": "/api/stats/routes",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 4289
+  },
+  {
+   "id": 64,
+   "order": 64,
+   "path": "/api/stats/versions",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 4303
+  },
+  {
+   "id": 65,
+   "order": 65,
+   "path": "/api/stats/sse",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4319
+  },
+  {
+   "id": 66,
+   "order": 66,
+   "path": "/api/status",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4341
+  },
+  {
+   "id": 67,
+   "order": 67,
+   "path": "/api/servers",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4520
+  },
+  {
+   "id": 68,
+   "order": 68,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4592
+  },
+  {
+   "id": 69,
+   "order": 69,
+   "path": "/api/upload",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 4722
+  },
+  {
+   "id": 70,
+   "order": 70,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5022
+  },
+  {
+   "id": 71,
+   "order": 71,
+   "path": "/api/task",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 5153
+  },
+  {
+   "id": 72,
+   "order": 72,
+   "path": "/api/broadcast",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 5481
+  },
+  {
+   "id": 73,
+   "order": 73,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5517
+  },
+  {
+   "id": 74,
+   "order": 74,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5541
+  },
+  {
+   "id": 75,
+   "order": 75,
+   "path": "/api/messages",
+   "method": null,
+   "query": [
+    "scope"
+   ],
+   "kind": "eq",
+   "line": 5581
+  },
+  {
+   "id": 76,
+   "order": 76,
+   "path": "/api/messages",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 5648
+  },
+  {
+   "id": 77,
+   "order": 77,
+   "path": "/api/messages/ack",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 5680
+  },
+  {
+   "id": 78,
+   "order": 78,
+   "path": "/api/stats",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 5748
+  },
+  {
+   "id": 79,
+   "order": 79,
+   "path": "/api/server-logs",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 5788
+  },
+  {
+   "id": 80,
+   "order": 80,
+   "path": "/api/audit-log",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 5804
+  },
+  {
+   "id": 81,
+   "order": 81,
+   "path": "/api/task_events",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 5827
+  },
+  {
+   "id": 82,
+   "order": 82,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5847
+  },
+  {
+   "id": 83,
+   "order": 83,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5900
+  },
+  {
+   "id": 84,
+   "order": 84,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5954
+  },
+  {
+   "id": 85,
+   "order": 85,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6051
+  },
+  {
+   "id": 86,
+   "order": 86,
+   "path": "/api/node-create-requests",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 6106
+  },
+  {
+   "id": 87,
+   "order": 87,
+   "path": "/api/host-supervisors",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6127
+  },
+  {
+   "id": 88,
+   "order": 88,
+   "path": "/api/nodes",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6334
+  },
+  {
+   "id": 89,
+   "order": 89,
+   "path": "api",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6554
+  },
+  {
+   "id": 90,
+   "order": 90,
+   "path": "/api/tasks",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6626
+  },
+  {
+   "id": 91,
+   "order": 91,
+   "path": "/api/completions",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6689
+  },
+  {
+   "id": 92,
+   "order": 92,
+   "path": "/api/",
+   "method": null,
+   "query": [],
+   "kind": "starts_with",
+   "line": 6704
+  }
+ ],
+ "provenance": [
+  "generated_from: `server/src/server.ts` @ `afd50416b`",
+  "reproduce: `python3 scripts/report-rest-endpoints.py --markdown`",
+  "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`（`--table-json`）",
+  "重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）"
+ ]
+}

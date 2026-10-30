@@ -70,6 +70,7 @@ def _provenance() -> list[str]:
     return [
         f"> generated_from: `{TARGET.relative_to(REPO)}` @ `{ref}{state}`",
         f"> reproduce: `python3 scripts/report-rest-endpoints.py --markdown`",
+        "> 机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`（`--table-json`）",
         "> 重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）",
     ]
 
@@ -112,10 +113,11 @@ def main() -> int:
         for line in _provenance():
             print(line)
         print()
-        print("| path | 匹配形态 | 源码行 |")
-        print("|---|---|---|")
-        for e in entries:
-            print(f"| `{e['path']}` | {e['kind']} | :{e['line']} |")
+        print("| 序 | path | method | query 判别 | 匹配形态 | 源码行 |")
+        print("|---|---|---|---|---|---|")
+        for i, e in enumerate(entries, 1):
+            print(f"| {i} | `{e['path']}` | {e.get('method') or '—'} | "
+                  f"{','.join(e.get('query') or []) or '—'} | {e['kind']} | :{e['line']} |")
         print()
         dup = len(entries) - len({(e["path"], e["kind"]) for e in entries})
         print(f"共 {len(entries)} 条匹配（去重后 {len(rows)} 条 path+形态；重复 {dup} 条）")
@@ -156,6 +158,28 @@ def main() -> int:
         else:
             print("⇒ 本日**没有**形态不一致的分组（0 组）—— 所以这一格今天不构成风险；"
                   "但它必须留在输出里：下次出现时，读者才知道该看哪一栏。")
+        return 0
+
+    if "--table-json" in sys.argv:
+        # 2026-10-31 —— 「表该长什么样」先落成**数据**，再由下一轮的路由重构去消费。
+        # 主键 = (path, method, query)；order = 源码顺序（**顺序承载语义**，见分组段）。
+        rows = []
+        for i, e in enumerate(entries, 1):
+            rows.append({
+                "id": i,
+                "order": i,
+                "path": e["path"],
+                "method": e.get("method"),
+                "query": e.get("query") or [],
+                "kind": e["kind"],
+                "line": e["line"],
+            })
+        print(json.dumps({
+            "note": "表草稿：不是运行时路由表，也还没有被任何代码消费。order 承载语义，不许排序。",
+            "key": ["path", "method", "query"],
+            "rows": rows,
+            "provenance": [l.lstrip("> ") for l in _provenance()],
+        }, ensure_ascii=False, indent=1))
         return 0
 
     if "--json" in sys.argv:
