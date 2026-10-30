@@ -310,6 +310,20 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(w.message).toContain("the observation wins");
   });
 
+  // 2026-10-31 —— #3171：再补两个「文件级算过、邻近级没有」的工具。
+  describe("projects_list / get_session_status: pinned key sets next to the call", () => {
+    test("projects_list ⇒ {network_id, ok, projects}; get_session_status ⇒ {inbox_pending, ok, recent_completions, session}", async () => {
+      const pl = await tool(adminToken, "projects_list", { network_id: NET });
+      expect(Object.keys(pl).sort()).toEqual(["network_id", "ok", "projects"]);
+      expect(Array.isArray(pl.projects)).toBe(true);
+
+      const gs = await tool(adminToken, "get_session_status", { alias: "acl3-agent-x", network_id: NET });
+      expect(Object.keys(gs).sort()).toEqual(["inbox_pending", "ok", "recent_completions", "session"]);
+      expect(typeof gs.inbox_pending).toBe("number");
+      expect(Array.isArray(gs.recent_completions)).toBe(true);
+    });
+  });
+
   // 2026-10-31 —— #3171：补一个「文件级算过、邻近级没有」的工具（list_tasks）。
   // 之前该文件里唯一的 Object.keys 断言测的是 humans[0]，与本工具无关 —— 这正是「测空气」。
   describe("list_tasks: pinned key set next to the call", () => {
