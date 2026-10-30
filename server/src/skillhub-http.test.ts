@@ -71,9 +71,21 @@ describe("SkillHub real Hub + SQLite", () => {
   test("pending is reviewer-only; owner publishes; published becomes visible", async () => {
     const nodeList = await tool(nodeToken, "list_skills", { network_id: networkId, include_pending: true });
     expect(nodeList.skills).toHaveLength(0);
+    // 2026-10-31 —— **精确键集**（#3171）：这两个工具此前只有字段级断言，
+    // 于是「多给了一个字段」不会被任何测试发现 —— 而多给字段正是匿名/权限面最危险的改法。
+    // 列表投影固定三键；差别在 reviewer 的真假，而不是键的有无。
+    // （我第一版写成「非 reviewer 只有两键」—— 实测 reviewer 始终存在，只是 false。
+    //  ⇒ 这条断言当场把我自己写错的形状说出来，这正是它应有的作用。）
+    expect(Object.keys(nodeList).sort()).toEqual(["ok", "reviewer", "skills"]);
+    expect(nodeList.reviewer).toBe(false);
+    // 详情未找到：只有两个键；多一个键就意味着错误响应开始夹带上下文。
+    expect(Object.keys(await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).sort())
+      .toEqual(["error", "ok"]);
     expect((await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).error).toBe("skill_not_found");
     const ownerList = await tool(ownerToken, "list_skills", { network_id: networkId, include_pending: true });
-    expect(ownerList.reviewer).toBe(true); expect(ownerList.skills.map((x: any) => x.skill_id)).toContain(skillId);
+    expect(ownerList.reviewer).toBe(true);
+    // reviewer 视角多一格 reviewer：三键，不多不少。
+    expect(Object.keys(ownerList).sort()).toEqual(["ok", "reviewer", "skills"]); expect(ownerList.skills.map((x: any) => x.skill_id)).toContain(skillId);
     expect((await tool(ownerToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill.content).toContain("Verify facts");
     const reviewed = await tool(ownerToken, "review_skill", { network_id: networkId, skill_id: skillId, decision: "published" });
     expect(reviewed.status).toBe("published");
