@@ -435,6 +435,12 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
         expect(serialized[i][1]).not.toBe(serialized[j][1]);     // 两两不等
       }
     }
+    // 2026-10-31 —— 这条前置断言自己也要有反例，否则它只是在数份数：
+    // 用「内容不同但长度相同」的对，证明判定按**内容**而不是按长度/份数。
+    const sameLenDifferent = [{ a: "xy" }, { a: "yz" }];
+    expect(JSON.stringify(sameLenDifferent[0]).length).toBe(JSON.stringify(sameLenDifferent[1]).length);
+    expect(JSON.stringify(sameLenDifferent[0])).not.toBe(JSON.stringify(sameLenDifferent[1]));
+
     // 再断言各自行为（顺序与上面一致：先证输入不同，再看结果）
     expect(Object.keys(projectPublicHealth(cases.unknown_field))).toEqual(["ok"]);
     expect(Object.keys(projectPublicHealth(cases.landmark))).toEqual(["ok"]);
