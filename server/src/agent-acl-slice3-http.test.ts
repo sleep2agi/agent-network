@@ -310,6 +310,17 @@ describe("update_node_config 响应键集（exact key set）", () => {
     expect(w.message).toContain("the observation wins");
   });
 
+  // 2026-10-31 —— #3171：剩下两个待核（get_all_status / list_node_skills）。
+  describe("get_all_status pinned (list_node_skills needs a live node → covered elsewhere)", () => {
+    test("⇒ {ok, sessions, sessions_returned, summary, summary_scope}; sessions 与 sessions_returned 同源", async () => {
+      const g = await tool(adminToken, "get_all_status", { network_id: NET });
+      expect(Object.keys(g).sort()).toEqual(["ok", "sessions", "sessions_returned", "summary", "summary_scope"]);
+      expect(Array.isArray(g.sessions)).toBe(true);
+      expect(g.sessions_returned).toBe(g.sessions.length);      // 计数与数组同源
+      expect(typeof g.summary_scope).toBe("string");
+    });
+  });
+
   // 2026-10-31 —— #3171：再补两个「文件级算过、邻近级没有」的工具。
   describe("projects_list / get_session_status: pinned key sets next to the call", () => {
     test("projects_list ⇒ {network_id, ok, projects}; get_session_status ⇒ {inbox_pending, ok, recent_completions, session}", async () => {
