@@ -2961,6 +2961,12 @@ return Bun.serve({
         // ⇒ 匿名只回答「有没有构建标识」，**不给是什么**；完整值只给已鉴权者。
         //    与 SSE 明细同一条规则：匿名给聚合、鉴权给明细。
         build_identified: BOOT_GIT_COMMIT !== null,
+        // 2026-10-31 —— 常驻的 served_at：让「窗口」有两个时刻戳，而不是只有一个起点。
+        //
+        // 没有它，读者算速率只能拿**自己的**时钟去减 since ⇒ 偷偷假设了「我的钟和他的钟一致」。
+        // 而计数器是这台机器上的累计值 ⇒ 窗口的两端必须在**同一个时钟域**里。
+        // 判据：凡是速率/窗口类字段，分子分母各要自己的时刻戳；**被声明的那个永远不算**。
+        served_at: new Date().toISOString(),
         // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：
         //    commit sha 对匿名读者 = 精确告诉外部这是哪一版代码（本仓公开）。
         //    与 git_commit 成对：dirty=true ⇒ 只能写 prod@自称，不能写 prod@<sha>。
@@ -3012,11 +3018,9 @@ return Bun.serve({
       const probeNonce = probeNonceOf(req);
       if (probeNonce) {
         body.probe_nonce = probeNonce;
-        // `served_at` 只是**人读的上下文**，不参与任何判据。
-        // 🔴 一个不被断言的字段，就会变成下一个 startedAt：看起来像证据，但没有消费者。
-        //    真正证明“新鲜”的是 probe_nonce（缓存不可能为它生成响应）；
-        //    时间字段要参与判据还得先定义容差与 skew，今天没有。
-        body.served_at = new Date().toISOString();
+        // `served_at` 现在是**常驻**字段（见 base body）：它给的是这个响应生成时的服务端时刻，
+        // 与 counters.since / startedAt 同一时钟域 ⇒ 窗口两端可比。
+        // 但它仍然**不证明新鲜**：证明“这一次”的是 probe_nonce（缓存不可能为新 nonce 生成响应）。
         // 2026-10-31 —— 「三件套」的第③件：把 nonce 写进**响应之外**的地方。
         //   ① body code      住在响应里（层标识）
         //   ② probe_nonce    住在响应里（本次标识）

@@ -277,12 +277,21 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(seen[0]).toContain("[health] probe nonce=");
   });
 
-  test("default /health body stays byte-identical: no probe_nonce / served_at without the header", async () => {
+  // 2026-10-31 —— served_at 变成**常驻**：窗口的两端必须在同一个时钟域里。
+  // 没有它，读者只能拿自己的钟去减 since ⇒ 偷偷假设两边时钟一致。
+  // 而 probe_nonce 仍然只在带 X-Probe-Nonce 时出现（它是“这一次”的凭据）。
+  test("default /health always carries served_at (same clock domain) but never probe_nonce", async () => {
     const res = await fetch(`${BASE}/health`);
     const body = await res.json() as any;
     expect("probe_nonce" in body).toBe(false);
-    expect("served_at" in body).toBe(false);
-    // 没有请求 nonce 时也不该顺手加 no-store：默认语义与改动前逐字相同。
+    expect(typeof body.served_at).toBe("string");
+    const served = Date.parse(body.served_at);
+    expect(Number.isFinite(served)).toBe(true);
+    // 同一时钟域：served_at 不早于进程起点，且两次读数单调不减。
+    expect(served).toBeGreaterThanOrEqual(Date.parse(body.startedAt));
+    const second = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(Date.parse(second.served_at)).toBeGreaterThanOrEqual(served);
+    // 没有请求 nonce 时也不该顺手加 no-store。
     expect(res.headers.get("cache-control")).toBeNull();
   });
 
