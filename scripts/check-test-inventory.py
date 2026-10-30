@@ -105,6 +105,11 @@ def _strip_code(lines: list[str]) -> list[str]:
                     continue
                 if ch == "`":
                     in_template = False
+                    i += 1
+                    continue
+                # 2026-10-31 —— 第七个状态：模板串里的 `${...}` 是**代码**。
+                # 不跟踪它时，`${q(x)} >/dev/null` 里的 / 会被当成正则起点，
+                # 于是后面整段被吞掉、深度失衡 —— 而那不是文件不配平，是剥得不干净。
                 i += 1
                 continue
             if ch == "/" and nxt == "*":
@@ -151,6 +156,21 @@ def _strip_code(lines: list[str]) -> list[str]:
     return out
 
 
+# 2026-10-31 —— 已知缺失的**第七个状态**（写在函数外，防止它在重构里消失）：
+#
+#   模板串里的 `${...}` 是代码，而当前实现把整段模板当作纯文本跳过 ⇒
+#   插值里的 `/`（如 `>/dev/null`）仍可能被当成正则起点，于是后面一段被吞、深度失衡。
+#   本机实测落点：agent-node/src/runtime/opencode-copresence/launcher-health.test.ts:213
+#   （负深度 -1；根因在 154 行嵌套模板 + 165 行的 `>/dev/null`）。
+#
+#   我试过一版「插值栈」实现（进入 ${ 记一个 {、退出不记 }），
+#   **把 522 个文件的配平全带偏了** ⇒ 已回退。不做完整小词法器，不硬上。
+#
+#   ⇒ 下一步要的是「模板栈 + 表达式栈」，不是在本函数里再塞两个布尔。
+#   falsifier：改完后该文件 end depth 应为 0；若仍为 -1 ⇒ 还有第八个状态没加，
+#              而不是「这个文件本来就不配平」（它通过 tsc，本来就配平）。
+#
+#
 def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
     """返回 (名字 → 出现次数, dynamic 计数)。
 
@@ -162,7 +182,9 @@ def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
     # 2026-10-31 —— 用深度推 describe 路径时，**一处括号错配会让该文件之后的所有路径整体错位**。
     # 原实现把深度钳到 ≥0：那正好吃掉了「错配」这个唯一的报警值，而输出仍然是一个漂亮的数。
     # ⇒ 不在中途钳位，而是在**文件结束时断言深度为 0**；不为 0 ⇒ 该文件整体不可信。
-    unreliable: list[str] = []
+    # (相对路径, 说明)。说明里带行号时更有定位力 —— 「文件末不为 0」只告诉你文件级，
+    # 而「负深度」能指到具体一行（状态机在哪一行判错）。
+    unreliable: list[tuple[str, str]] = []
     # 2026-10-31 —— 元素身份必须包含「让它合法的那个维度」。
     # 只按 file::name 计次会把「同一文件、不同 describe 里的同名」和
     # 「同一 describe 里写了两遍」合成同一个计数 —— 前者合法，后者是缺陷。
@@ -181,7 +203,9 @@ def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
         stack = []
         raw_lines = text.splitlines()
         code_lines = _strip_code(raw_lines)
+        lineno = 0
         for line, stripped in zip(raw_lines, code_lines):
+            lineno += 1
             delta = stripped.count("{") - stripped.count("}")
             d = DESCRIBE_CALL.match(line)
             if d:
@@ -190,6 +214,9 @@ def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
                 stack.append(d.group(2))
             if not ANY_TEST_CALL.match(line):
                 depth += delta
+                if depth < 0:
+                    unreliable.append((str(rel), f"line {lineno}: negative depth {depth}"))
+                    break
                 while stack and len(stack) > depth:
                     stack.pop()
                 continue
@@ -197,11 +224,17 @@ def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
             if not m:
                 dynamic += 1
                 depth += delta
+                if depth < 0:
+                    unreliable.append((str(rel), f"line {lineno}: negative depth {depth}"))
+                    break
                 continue
             name = m.group(2)
             if not name.strip() or "${" in name:
                 dynamic += 1
                 depth += delta
+                if depth < 0:
+                    unreliable.append((str(rel), f"line {lineno}: negative depth {depth}"))
+                    break
                 continue
             # 记录时用「进入这一行之前」的深度；记录完再算这一行自己的花括号，
             # 否则 test 体的 `{` 会把后面的路径整体推深一格。
@@ -209,8 +242,16 @@ def collect(repo: Path) -> tuple[dict[str, int], int, list[str]]:
             key = f"{rel}::{path}::{name}" if path else f"{rel}::{name}"
             names[key] = names.get(key, 0) + 1
             depth += delta
+            # 2026-10-31 —— 负深度是**状态机本身**的信号，比「文件末不为 0」更有定位力：
+            #   它说明某一段被误判成代码/注释（多出一个右括号）⇒ 后面的深度全错。
+            # 不钳位只是「不让它被吃掉」；这里再给它一个立刻可读的落点（文件 + 行号）。
+            if depth < 0:
+                unreliable.append((str(rel), f"line {lineno}: negative depth {depth}"))
+                break
+        if depth < 0:
+            continue  # 已记进 unreliable（带行号），不重复报「末端不配平」
         if depth != 0:
-            unreliable.append(f"{rel} (end depth {depth})")
+            unreliable.append((str(rel), f"end depth {depth}"))
     return names, dynamic, unreliable
 
 
@@ -225,8 +266,10 @@ def main() -> int:
     if unreliable:
         print(f"⚠ {len(unreliable)} 个文件括号不配平 ⇒ describe 路径可能整体错位，重名检测在这些文件里不可信：",
               file=sys.stderr)
-        for u in unreliable[:10]:
-            print(f"    {u}", file=sys.stderr)
+        for f, why in unreliable[:10]:
+            print(f"    · {f} —— {why}", file=sys.stderr)
+        print("  ⇒ 负深度（带行号）说明剥字符串状态机在那一行判错（正则/模板串/块注释）；"
+              "末端不为 0 说明文件本身不配平。两者都让该文件的重名检测不可信。", file=sys.stderr)
 
     # 注意：`rel::name` 不含 describe 路径 ⇒ **同名但在不同 describe 里是合法的**，
     # 仓库里现在就有 6 个这种（已记进基线的计数里）。所以这里不做「绝对值唯一」断言，
@@ -261,12 +304,23 @@ def main() -> int:
     if isinstance(baseline_counts, dict):
         # 括号不配平的文件，其 describe 路径不可信 ⇒ 它们的键**不参与**重名棘轮。
         # 这是「已知不可信的域」，而不是「没问题」——所以同时把域大小报出来。
-        skip_prefixes = tuple(f + "::" for f in (u.split(" (end depth")[0] for u in unreliable))
+        skip_prefixes = tuple(f + "::" for (f, _why) in unreliable)
         def _in_unreliable(k: str) -> bool:
             return k.startswith(skip_prefixes) if skip_prefixes else False
         checked = {k: c for k, c in counts.items() if not _in_unreliable(k)}
-        print(f"重名棘轮域：{len(checked)}/{len(counts)} 条键（{len(unreliable)} 个文件因括号不配平被排除，"
-              f"⇒ 那些文件里的重名**未检查**，不等于没有）")
+        excluded = len(counts) - len(checked)
+        pct = (100.0 * excluded / len(counts)) if counts else 0.0
+        # 2026-10-31 —— 文件数与键数**不成比例**：读者看到「19 个文件」会估计影响面很小，
+        # 而真实的被排除条数可能是它的几十倍。⇒ 两个量都要报，且报比例
+        #（外部复核：7771/8058 条参与 ⇒ 287 条被排除 = 3.6%）。
+        print(f"重名棘轮域：{len(checked)}/{len(counts)} 条键"
+              f"（{len(unreliable)} 个文件因括号不配平被排除 ⇒ 被排除 {excluded} 条键 = {pct:.1f}%；"
+              f"那些键里的重名**未检查**，不等于没有）")
+        # 2026-10-31 —— 排除必须**指名**，否则「被排除 1 个文件」谁也不知道该看哪里。
+        # 负深度的落点是「文件 + 行号」：它说明剥字符串状态机在那一行判错了
+        # （这正是「不钳位」换来的信号 —— 钳位会把它吃掉）。
+        for f, why in unreliable[:10]:
+            print(f"    · 排除 {f} —— {why}")
         grew = sorted((k, baseline_counts.get(k, 0), checked[k]) for k in checked if checked[k] > baseline_counts.get(k, 0))
         if grew:
             print(f"✗ 有 {len(grew)} 条测试的**出现次数增加**了（集合不变，但实际多出一条）：", file=sys.stderr)
