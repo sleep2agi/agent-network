@@ -7404,11 +7404,20 @@ async function processConfigUpdate(): Promise<void> {
     // 用户点「切模型」要的是结果，不是「切换方式」。所以这里宁可重启。
     // 注意方向：#2050 那条闸门是「hot 能力缺失不得否决 hub 请求的重启」，
     // 这里是反方向（hot 不可行时升级为重启），不会造成 hot↔restart 互相打架。
-    if (mode === "hot" && update.patch.model && RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
-      && !(opencodeCopresenceSession?.isRunning === true
-        && typeof opencodeCopresenceSession.setSelectedModel === "function")) {
-      warn(`[config-apply] hub requested hot model switch but the co-presence session is not running; degrading to restart`);
-      mode = "restart";
+    //
+    // 🔴 2026-10-31 —— 这条日志原来把两种完全不同原因说成了一句
+    // "the co-presence session is not running"，于是生产上（.167，共享 server）
+    // 明明是 **setSelectedModel 没被转发出来**，日志却指着 isRunning，
+    // 我据此判断了两次"isRunning 与 ready 语义不一致"，两次都错。
+    // 一个笼统的墓碑文案会让后面每一个人去查错对象 —— 所以分开写。
+    if (mode === "hot" && update.patch.model && RUNTIME === "opencode" && OPENCODE_GENERATION === "v2") {
+      const sessionRunning = opencodeCopresenceSession?.isRunning === true;
+      const switchable = typeof opencodeCopresenceSession?.setSelectedModel === "function";
+      if (!sessionRunning || !switchable) {
+        warn(`[config-apply] hot model switch unavailable (sessionRunning=${sessionRunning}, `
+          + `setSelectedModel=${switchable}); degrading to restart`);
+        mode = "restart";
+      }
     }
 
     if (!configFilePath) {
