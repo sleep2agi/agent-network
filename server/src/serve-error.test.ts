@@ -38,6 +38,15 @@ describe("#695 fetch exceptions become JSON with the exception's own message", (
   // 2026-10-31 —— join 的**前提**：一个错误要能被念回来，且念回的那个 id 必须真的进日志。
   // 只说「加了 id」不算：三者（body / header / log）不一致时，念回 id 反而更糟 ——
   // 它会让人以为服务端有记录。
+  // 我自己刚加了 error_id ⇒ 按本仓的「键集纪律」，这次加字段也必须是一次**有意识的**改动。
+  // 不加这条的话，下次再有人往这个 body 里加东西，没有任何测试会因此变红。
+  test("the error body's key set is pinned (adding a field here is a contract change)", () => {
+    expect(Object.keys(serveErrorBody(new Error("x"))).sort()).toEqual(
+      ["error", "error_id", "id", "jsonrpc", "message", "ok"],
+    );
+    expect(Object.keys(serveErrorBody(new Error("x")).error).sort()).toEqual(["code", "message"]);
+  });
+
   describe("error_id: the join key must exist in all three places, identically", () => {
     test("body.error_id === x-error-id === the logged id", async () => {
       const logged: string[] = [];
