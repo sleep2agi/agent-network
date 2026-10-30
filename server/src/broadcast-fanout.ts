@@ -11,6 +11,11 @@
 // 但每 50 个收件人一批、批间让出事件循环，把「同一毫秒 384 次 commit」
 // 变成「8 批、每批一次事务」。
 //
+// 2026-10-30 补下半句：**通知（SSE 推送）也必须在批内**。
+// 上半句只摊开了入库，通知仍是「所有批次之后一次性循环」——
+// 于是 384 个 agent 还是在同一个 tick 里被唤醒。入库摊开对客户端几乎无感，
+// 唤醒摊开才是「随机大停顿」的解法。
+//
 // 为什么有用：真正的负载大头是收件 agent 随后各自的 report_status/get_inbox/send_reply
 // （实测一条广播 ≈ 500+ 次调用）。把入库摊开几百毫秒，能让唤醒时刻自然分散，
 // 而不是让 384 个 agent 在同一秒同时醒来。
@@ -68,6 +73,7 @@ export async function enqueueBroadcast(
 
   for (let i = 0; i < targets.length; i += chunk) {
     const slice = targets.slice(i, i + chunk);
+    const batch: BroadcastDelivered[] = [];
     // 一批一个事务：把 N 次 autocommit 变成 1 次，既快又不会长时间占写锁。
     db.transaction(() => {
       for (const t of slice) {
@@ -80,14 +86,27 @@ export async function enqueueBroadcast(
           [id, t.alias, t.node_id ?? null, message, fromSession, netId],
         );
         ids.push(id);
-        delivered.push({ alias: t.alias, netId });
+        const d = { alias: t.alias, netId };
+        delivered.push(d);
+        batch.push(d);
       }
     });
+    // #2721 下半 —— 通知也必须在批内做。
+    // 原来这句循环在**所有批次之后**：入库摊开了，但 384 次 SSE 推送又落回同一个 tick，
+    // 于是「同一秒全员唤醒」这个真正的问题一点没变 —— 只是把 INSERT 挪开了。
+    // 推送失败绝不能中断后续批次：原来通知在所有入库之后，抛错时「入库已全」；
+    // 现在挪进批内，一次推送异常会让剩下的人**收不到广播**。这里逐条兜住。
+    for (const d of batch) {
+      try {
+        deps.notify(d.alias, d.netId);
+      } catch (e) {
+        console.error(`[broadcast] notify failed alias=${d.alias}: ${(e as Error).message}`);
+      }
+    }
     // 批间让出：没有这一句，384 行仍然是在同一个 tick 里写完的。
     await yieldNow();
   }
 
-  for (const d of delivered) deps.notify(d.alias, d.netId);
   lastBroadcast = {
     at: new Date().toISOString(),
     recipients: delivered.length,
