@@ -34,8 +34,13 @@ AUTO = re.compile(r"\b(push|pull_request|pull_request_target|schedule|release|wo
 GATE_NAME = re.compile(r"(gate|qa|check)", re.I)
 
 # 例外：名字像门、但确实只能手动。**必须写理由**，否则下一个人不知道它是故意的还是忘了。
+# 2026-10-31 —— 豁免表必须带「什么情况下可以移出」。
+# 只有理由与到期时，它会按期续命；而「登记成已知」会让它从「缺失」变成「已处理」。
 ALLOWLIST = {
-    "windows-real-codex-gate.yml": "需要一台真 Windows 机器与真实 codex 登录，成本与可用性都不允许自动跑",
+    "windows-real-codex-gate.yml": {
+        "why": "需要一台真 Windows 机器与真实 codex 登录，成本与可用性都不允许自动跑",
+        "exit_when": "出现常驻的 Windows runner（或该门被并入一个自带 Windows 矩阵的 workflow）",
+    },
 }
 
 
@@ -136,8 +141,16 @@ def main() -> int:
         if "--assert" in sys.argv:
             return 1
 
-    for name, reason in sorted(ALLOWLIST.items()):
-        print(f"\n· 例外：{name} —— {reason}")
+    for name, meta in sorted(ALLOWLIST.items()):
+        print(f"\n· 例外：{name}")
+        print(f"    理由：{meta['why']}")
+        print(f"    移出条件：{meta['exit_when']}")
+    missing_exit = [n for n, m in ALLOWLIST.items() if not m.get("exit_when")]
+    if missing_exit:
+        print(f"\n✗ 豁免项缺「移出条件」：{missing_exit}", file=sys.stderr)
+        print("  ⇒ 没有它，这条豁免会一直停在这里，下一个人会以为有人在跟。", file=sys.stderr)
+        if "--assert" in sys.argv:
+            return 1
     return 0
 
 
