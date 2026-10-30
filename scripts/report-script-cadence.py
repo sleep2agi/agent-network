@@ -109,8 +109,7 @@ def classify(name: str) -> str:
         for f in REPO.glob(pat):
             if needle in f.read_text(encoding="utf-8", errors="replace"):
                 return "CI"
-    # 以文件名（不带目录）出现在 workflow 里也算（如 `python3 scripts/x.py` 已覆盖，
-    # 但 matrix 里可能只写 x.py）
+    # 以文件名（不带目录）出现在 workflow 里也算：matrix 里可能只写裸文件名。
     for pat in AUTO_GLOBS:
         for f in REPO.glob(pat):
             if re.search(rf"(?<![\w./-]){re.escape(name)}(?![\w.-])", f.read_text(encoding="utf-8", errors="replace")):

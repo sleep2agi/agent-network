@@ -572,6 +572,22 @@ def main() -> int:
     print("                   ⇒ 三者任一发生，上面的结论作废；不需要读者知道任何速率")
     # 2026-10-31 —— 只列条件、不给「怎么检查」时，读者仍判断不了当前读数是否还有效。
     print("  check          : 重跑本脚本；若上面 measured_on / scan_domain / selftest 任一行与上次不同 ⇒ 本结论作废")
+    # 2026-10-31 —— 尺子不止是代码。
+    # 同一个脚本在不同环境上可以给出不同读数（今晚实测：同一份 spec，python 3.12 rc=2 vs PyYAML 6.0.1 rc=0）。
+    # 所以归属是三件：(被测物, 尺子的代码, 尺子的环境)。
+    import hashlib as _h, platform as _pf, sys as _sys
+    _self_sha = _h.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+    try:
+        import yaml as _yaml
+        _yaml_v = getattr(_yaml, "__version__", "unknown")
+    except Exception:
+        _yaml_v = "absent"
+    print(f"  measured_by    : {Path(__file__).name} sha256={_self_sha}"
+          f" ｜ env: python {_sys.version.split()[0]} / {_pf.system()} / PyYAML {_yaml_v}")
+    print("                   ⇒ 只引 sha 不引 env 时，同一个数可能来自两把不同的尺子")
+    # 2026-10-31 —— 第三件：**谁在用**。作废的影响面只由它决定。
+    print("  consumers      : .github/workflows/keyset-join.yml（红即阻塞）｜卡评论里「0 阻塞」这个引文")
+    print("                   ⇒ 这一栏为空时要读作「我们不知道有没有人用」，不是「没人用」")
     # 2026-10-31 —— **流行度**要和结论一起说。
     # 「0 处」有两种读法：① 有这种写法、但都写得对；② 本仓根本不做这件事。
     # 两者都是 0，而它们对「这个绿值多少」的答案相反。

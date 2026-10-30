@@ -169,7 +169,15 @@ def main() -> int:
     # 测法一改（改口径/改正则），那个绿属于哪一对就不可判 —— 而它会以「这条过了」被引用很多次。
     import hashlib as _h, pathlib as _pl
     _self = _pl.Path(__file__).read_bytes()
-    print(f"measured_by    : {_pl.Path(__file__).name} sha256={_h.sha256(_self).hexdigest()[:12]}")
+    # 2026-10-31 —— 尺子不止是代码：同一脚本在不同环境上可以给出不同读数。
+    # 归属是三件：(被测物, 尺子的代码, 尺子的环境)。只引 sha 时，两个不同的尺子会让同一个数看起来是同一个来源。
+    import platform as _pf, sys as _sys
+    print(f"measured_by    : {_pl.Path(__file__).name} sha256={_h.sha256(_self).hexdigest()[:12]}"
+          f" ｜ env: python {_sys.version.split()[0]} / {_pf.system()} / re(CPython)")
+    print("                 ⇒ 引用时 sha 与 env 要一起引；缺 env 的读数只能读，不能引")
+    # 2026-10-31 —— 第三件：**谁在用**。作废的影响面只由它决定。
+    print("consumers      : #3171 的覆盖率读数（人工引用）｜决定「还差几个工具没硬钉」")
+    print("                 ⇒ 这一栏为空时要读作「我们不知道有没有人用」，不是「没人用」")
     # 2026-10-31 —— 必填的 falsifier：说不出「什么输入能让它变假」的断言是恒真的。
     print("falsifier      : 删掉某个被计为「已覆盖」的工具的精确键集断言 ⇒ 文件级该数应 −1；"
           "若删了不变 ⇒ 归因链坏了")
