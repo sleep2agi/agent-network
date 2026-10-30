@@ -31,7 +31,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 TOOL_DEF = re.compile(r"""server\.tool\(\s*"([a-z0-9_]+)\"""")
-EXACT_KEYSET = re.compile(r"Object\.keys\([^)]*\)\.sort\(\)\)\.toEqual\(\[")
+# 2026-10-31 —— 必须同时认「排序」与「未排序」两种写法。
+# 之前只认 `Object.keys(x)).toEqual([`，于是我们把断言统一改成 `.sort()` 之后，
+# **覆盖率从 35 掉到 20** —— 掉的不是覆盖，是检测器认不出新形状。
+# ⇒ 判据：指标跟着被测代码的形状走时，它衡量的就是「形状有没有变」。
+EXACT_KEYSET = re.compile(r"Object\.keys\([^)]*\)(?:\.sort\(\))?\)\.toEqual\(\[")
 WINDOW = 30  # 邻近级口径：工具名与断言之间允许的最大行距
 
 
@@ -118,6 +122,8 @@ def main() -> int:
     # 2026-10-31 —— 「在哪个版本上量的」必须跟着数字走。
     # 今晚刚发生过一次：两边的数对不上，根因不是谁数错，是**在数两棵不同的树**。
     print(f"measured_on    : {_measured_on()}")
+    print("invalidates_on : 工具注册变（server.tool 增删）｜断言写法变（EXACT_KEYSET 正则不再匹配）")
+    print("                 ｜归因口径变（文件级 ↔ 邻近级窗口）⇒ 三者任一发生，上面的比例作废")
     return 0
 
 
