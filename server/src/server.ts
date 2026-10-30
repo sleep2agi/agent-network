@@ -134,7 +134,7 @@ const SECURITY_LABEL = DEV_OPEN ? "⚠️ DEV OPEN MODE" : "🔒 secured";
 const TMUX_ALLOWLIST = new Set(
   (process.env.COMMHUB_TMUX_ALLOWLIST || "")
     .split(",")
-    .map((s) => s.trim())
+    .map((s) => normalizeRequestIp(s))
     .filter(Boolean)
 );
 let masterTokenDeprecationLogged = false;
@@ -320,6 +320,27 @@ function streamOwnerNodeId(alias: string, networkId: string): string | null {
   return rows.length === 1 ? rows[0].node_id : null;
 }
 
+/**
+ * 2026-10-31 —— 把 IPv4-mapped IPv6 折回 IPv4：`::ffff:1.2.3.4` ⇒ `1.2.3.4`。
+ *
+ * 为什么必须折：allowlist 是人手写的（通常写 IPv4），而 socket 地址在双栈监听下
+ * 常常是 `::ffff:` 形式 ⇒ 同一台机器在两个字符串下被判成两回事。
+ * 这属于「两个生产者、不同字符串」那一族：判据一样，字面不同 ⇒ 永远不相等。
+ * 方向是**少给**（不匹配 ⇒ 拒绝），所以它是 fail-closed 的静默锁死，而不是越权。
+ */
+export function normalizeRequestIp(ip: string): string {
+  const s = (ip || "").trim().toLowerCase();
+  const m = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(s);
+  return m ? m[1] : s;
+}
+
+/** 允许清单判定（纯函数，供测试直接钉方向）：空清单 = 只允许本机。 */
+export function ipAllowedBy(ip: string, allowlist: ReadonlySet<string>): boolean {
+  const n = normalizeRequestIp(ip);
+  if (isLocalhostIP(n) || isLocalhostIP((ip || "").trim().toLowerCase())) return true;
+  return allowlist.has(n);
+}
+
 function isLocalhostIP(ip: string): boolean {
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip === "localhost";
 }
@@ -330,7 +351,7 @@ function isLocalhostIP(ip: string): boolean {
 const normalizeRuntime = normalizeSessionRuntime;
 
 function isTmuxAllowedIP(ip: string): boolean {
-  return isLocalhostIP(ip) || TMUX_ALLOWLIST.has(ip);
+  return ipAllowedBy(ip, TMUX_ALLOWLIST);
 }
 
 // 节点令牌(ntok_ / 邀请码令牌,api_tokens.network_id 非空)是一个节点在一个网络里的身份。
