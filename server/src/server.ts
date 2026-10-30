@@ -3372,9 +3372,13 @@ return Bun.serve({
       // 的变换，多出口 × 惰性 = 迟早漏：下一个人加第三条出口（比如 degraded 分支）就会裸奔。
       // ⇒ 收敛成一个 return，投影与 header 都在这里做完。
       const healthRes = Response.json(shape(body));
-      // 回显只对「这一次」有意义 ⇒ 带 nonce 的那一份标成不可缓存，
-      // 否则探针自己会制造出它要防的那种残骸。
-      if (probeNonce) healthRes.headers.set("Cache-Control", "no-store");
+      // 2026-10-31 —— **一律不可缓存**，不只是带 nonce 的那一份。
+      //
+      // 原来只有 probe_nonce 存在时才设 no-store。而 /health 的每个字段都是「此刻的读数」：
+      // 一旦某层做协商缓存返回 304，`startedAt` 会冻结而 `counters` 照涨 ——
+      // **那正是 flapping 的假阳性形状**（看起来像「刚重启过」）。
+      // ⇒ 探针还必须显式断言 200 而非 304（见 health-redaction 的对应用例）。
+      healthRes.headers.set("Cache-Control", "no-store");
       return withCors(req, healthRes);
     }
 

@@ -353,6 +353,23 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.counters.task_rejections.scope).toBe("process_lifetime");
   });
 
+  // 2026-10-31 —— 304 会让「重启判据」假阳性：
+  // 若某层做协商缓存，304 会冻结 startedAt，而 counters 照涨 ⇒ 看起来像 flapping。
+  // ⇒ 探针必须显式拿到 200，且服务端必须禁止缓存。
+  test("health is never cacheable, and a conditional request still yields 200 (not 304)", async () => {
+    const plain = await fetch(`${BASE}/health`);
+    expect(plain.status).toBe(200);
+    expect((plain.headers.get("cache-control") || "").toLowerCase()).toContain("no-store");
+
+    const conditional = await fetch(`${BASE}/health`, {
+      headers: { "cache-control": "no-cache", "if-none-match": "*" },
+    });
+    expect(conditional.status).toBe(200);   // 304 会让 startedAt 冻结、counters 照涨 = 假 flapping
+    const body = await conditional.json() as any;
+    expect(typeof body.startedAt).toBe("string");
+    expect(typeof body.served_at).toBe("string");
+  });
+
   // 2026-10-31 —— 「200 那一格」必须有 body 判据：ok 恒 true 不等于健康。
   // 与 counters.releases 同族：一个恒真的字段，读起来像「一切正常」。
   test("status separates alive-but-degraded from all-normal (200 stays a promise, not a verdict)", async () => {
@@ -581,8 +598,10 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(served).toBeGreaterThanOrEqual(Date.parse(body.startedAt));
     const second = await (await fetch(`${BASE}/health`)).json() as any;
     expect(Date.parse(second.served_at)).toBeGreaterThanOrEqual(served);
-    // 没有请求 nonce 时也不该顺手加 no-store。
-    expect(res.headers.get("cache-control")).toBeNull();
+    // 2026-10-31 修订：**一律 no-store**。原来只在带 nonce 时设，
+    // 而 /health 每个字段都是「此刻的读数」——304 会冻结 startedAt 而 counters 照涨，
+    // 那正是 flapping 的假阳性形状。断言方向随之从 null 改成必须存在。
+    expect((res.headers.get("cache-control") || "").toLowerCase()).toContain("no-store");
   });
 
   test("refuses a nonce it cannot echo verbatim instead of half-accepting it", async () => {
