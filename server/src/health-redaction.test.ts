@@ -222,6 +222,29 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect("sse_sessions" in body).toBe(false);
   });
 
+  // 2026-10-31 —— 内核口径的进程身份：与自报 startedAt 互为独立的第二条腿。
+  // 设计要点：换算值**不无条件发布** —— 只有与 startedAt 相差 ≤10s 才给；
+  // 否则给 null + 原因。这样「CLK_TCK 不是 100」或「startedAt 是错的」都不会被发布成一个
+  // 看起来正确的错误时刻。
+  test("kernel-derived process identity is published only when it agrees with the self-report", async () => {
+    // 🔴 用**鉴权**响应：pid / boot_id / kernel_started_at 是「路标」不是「仪表」
+    //    ⇒ 不在匿名白名单里（这条测试第一次就是因为读了匿名响应而红 —— 白名单生效了）。
+    const body = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    expect(body.pid).toBe(process.pid);
+    if (body.boot_id !== null) expect(String(body.boot_id)).toMatch(/^[0-9a-f-]{16,64}$/i);
+    expect(body.proc_start_ticks === null || typeof body.proc_start_ticks === "number").toBe(true);
+    if (body.kernel_started_at !== null) {
+      expect(typeof body.kernel_started_at).toBe("string");
+      // 两条腿一致才允许发布 ⇒ 差值必须很小
+      const delta = Math.abs(Date.parse(body.kernel_started_at) - Date.parse(body.startedAt));
+      expect(delta).toBeLessThanOrEqual(10_000);
+      expect(body.kernel_started_at_note).toBeNull();
+    } else {
+      // 不发布时必须给出原因，不能是“静默的 null”
+      expect(typeof body.kernel_started_at_note).toBe("string");
+    }
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);

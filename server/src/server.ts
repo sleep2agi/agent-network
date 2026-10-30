@@ -1013,6 +1013,66 @@ function detectBootGitIdentity(): { commit: string | null; dirty: boolean } {
 }
 
 const BOOT_GIT = detectBootGitIdentity();
+
+/**
+ * 2026-10-31 —— 内核口径的「本进程何时开始」。
+ *
+ * `startedAt` 是**自报**的（`Date.now() - uptime`），可被伪造、也可被同一进程复用。
+ * 内核侧有两条独立信息：`/proc/stat` 的 `btime`（开机时刻）与 `/proc/self/stat` 第 22 字段
+ * （开机后的 clock ticks）。→ 启动时刻 = btime + ticks/CLK_TCK。
+ *
+ * 🔴 但 ticks→秒 依赖 CLK_TCK（通常 100，但并非处处如此）。所以这里**不无条件发布换算结果**：
+ *    只有当换算值与自报 startedAt 相差 ≤10s 时才发布；否则发布 null 并给原因。
+ *    ⇒ 两个独立来源一致 ⇒ 可以发布；不一致 ⇒ 说「我不知道」，而不是发布一个可能错的数。
+ *    （这条与今晚那条一致：派生值只有在两条腿都站得住时才配当读数。）
+ */
+function detectKernelStart(startedAtIso: string): {
+  boot_id: string | null;
+  pid: number;
+  proc_start_ticks: number | null;
+  kernel_started_at: string | null;
+  kernel_started_at_note: string | null;
+} {
+  const pid = process.pid;
+  let bootId: string | null = null;
+  try {
+    const raw = require("node:fs").readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    if (/^[0-9a-f-]{16,64}$/i.test(raw)) bootId = raw;
+  } catch { /* 非 Linux 或不可读 ⇒ null */ }
+
+  let ticks: number | null = null;
+  try {
+    const stat = require("node:fs").readFileSync("/proc/self/stat", "utf8");
+    const close = stat.lastIndexOf(")");
+    if (close >= 0) {
+      const rest = stat.slice(close + 1).trim().split(/\s+/);
+      const n = Number(rest[19]); // 第 22 字段（`')' 之后` 从 state 起算 ⇒ 索引 19）
+      if (Number.isFinite(n)) ticks = n;
+    }
+  } catch { /* null */ }
+
+  let btime: number | null = null;
+  try {
+    const stat = require("node:fs").readFileSync("/proc/stat", "utf8");
+    const m = /^btime\s+(\d+)/m.exec(stat);
+    if (m) btime = Number(m[1]);
+  } catch { /* null */ }
+
+  if (ticks === null || btime === null) {
+    return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: null, kernel_started_at_note: "proc_btime_or_ticks_unavailable" };
+  }
+  const candidateMs = (btime + ticks / 100) * 1000;
+  const selfMs = Date.parse(startedAtIso);
+  if (!Number.isFinite(selfMs)) {
+    return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: null, kernel_started_at_note: "startedAt_unparseable" };
+  }
+  if (Math.abs(candidateMs - selfMs) > 10_000) {
+    // 换算与自报差太多 ⇒ 不发布换算值（可能是 CLK_TCK 不是 100，也可能 startedAt 是错的）
+    return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: null, kernel_started_at_note: "ticks_conversion_disagrees_with_startedAt" };
+  }
+  return { boot_id: bootId, pid, proc_start_ticks: ticks, kernel_started_at: new Date(candidateMs).toISOString(), kernel_started_at_note: null };
+}
+
 const BOOT_GIT_COMMIT = BOOT_GIT.commit;
 
 /**
@@ -1025,6 +1085,8 @@ const BOOT_GIT_COMMIT = BOOT_GIT.commit;
  * 稳定之后它才满足那条判据：`S2 === S1 ⇒ 没重启`。
  */
 const startedAtIso = new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString();
+
+const BOOT_KERNEL_START = detectKernelStart(startedAtIso);
 
 function withCors(req: Request, res: Response): Response {
   const headers = corsHeaders(req);
@@ -2967,6 +3029,14 @@ return Bun.serve({
         // 而计数器是这台机器上的累计值 ⇒ 窗口的两端必须在**同一个时钟域**里。
         // 判据：凡是速率/窗口类字段，分子分母各要自己的时刻戳；**被声明的那个永远不算**。
         served_at: new Date().toISOString(),
+        // 2026-10-31 —— 内核口径的进程身份：与自报 startedAt 交叉校验，
+        // 这样「进程在撒谎」或「CLK_TCK 不是 100」都会表现为 kernel_started_at=null + 一个原因，
+        // 而不是一个看起来正确的错误时刻。
+        boot_id: BOOT_KERNEL_START.boot_id,
+        pid: BOOT_KERNEL_START.pid,
+        proc_start_ticks: BOOT_KERNEL_START.proc_start_ticks,
+        kernel_started_at: BOOT_KERNEL_START.kernel_started_at,
+        kernel_started_at_note: BOOT_KERNEL_START.kernel_started_at_note,
         // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：
         //    commit sha 对匿名读者 = 精确告诉外部这是哪一版代码（本仓公开）。
         //    与 git_commit 成对：dirty=true ⇒ 只能写 prod@自称，不能写 prod@<sha>。
