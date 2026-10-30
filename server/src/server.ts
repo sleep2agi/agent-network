@@ -1,4 +1,6 @@
-import { statfsSync } from "node:fs";
+import { existsSync, statfsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { buildServeErrorResponse } from "./serve-error.js";
@@ -914,6 +916,44 @@ function probeNonceOf(req: Request): string | null {
   if (!raw) return null;
   return /^[A-Za-z0-9._-]{1,64}$/.test(raw) ? raw : null;
 }
+
+/**
+ * 2026-10-31 —— 让「结论的站位」可验。
+ *
+ * 今晚反复踩到同一件事：一句话写着 `prod@18445bf4`，而线上其实跑 e230677f。
+ * **标签可以随手写；要让标签可验，就得有一个由系统自己产生、外部可读的值。**
+ * 这个字段就是那个值：`/health` 由进程自己报出它所在源码树的 commit。
+ *
+ * 🔴 取不到就是 **null**，绝不回退成 version 或任何“看起来像值”的东西 ——
+ *    一个未验的断言标了“未验”仍然有用；标成事实会污染整张表。
+ *    npm 安装形态没有 .git ⇒ 恒为 null，这是**设计**，不是缺陷。
+ *
+ * 只在启动时算一次（boot_* 语义）：git commit 不可能在进程生命周期内变化，
+ * 所以它满足「变更周期 ⊇ 进程生命周期」，可以绑进程边界。
+ */
+function detectBootGitCommit(): string | null {
+  const start = (import.meta as { dir?: string }).dir ?? process.cwd();
+  let dir = start;
+  for (let i = 0; i < 6; i += 1) {
+    if (existsSync(join(dir, ".git"))) {
+      try {
+        const out = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], {
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 1500,
+        }).toString().trim();
+        return /^[0-9a-f]{40}$/.test(out) ? out : null;
+      } catch {
+        return null;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+const BOOT_GIT_COMMIT = detectBootGitCommit();
 
 function withCors(req: Request, res: Response): Response {
   const headers = corsHeaders(req);
@@ -2832,6 +2872,12 @@ return Bun.serve({
         // 只给 uptime 时读者要自己换算，实际使用中经常被忽略 ⇒
         // “stall_count: 0”于是被读成“从未卡顿”。给出绝对时刻让窗口可被外部计算。
         startedAt: new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString(),
+        // 2026-10-31 —— 结论的「站位」本身要可验。
+        // 今晚有一句话写着 prod@18445bf4，而线上跑的是 e230677f：标签可以随手写。
+        // 这个字段由进程自己产生 ⇒ 外部读到的不是“某人说它在哪”，是“它说自己在哪”。
+        // 🔴 取不到就是 null（npm 安装形态没有 .git），**不回退成 version** ——
+        //    未验的断言标了“未验”仍然有用，标成事实会污染的整张表。
+        git_commit: BOOT_GIT_COMMIT,
         // #496 — public, stable capability data. Dashboard upload proxies
         // need the Hub's real limits before opening a streaming request;
         // duplicating these constants client-side creates a silent

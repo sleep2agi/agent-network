@@ -96,6 +96,20 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(body.sse_connections).toBeGreaterThanOrEqual(1);
   });
 
+  // 2026-10-31 —— 结论的「站位」必须可验：标签可以随手写，进程自报的不能。
+  // 判据只有两条：要么是 40 位 hex，要么是 null（npm 安装形态没有 .git）。
+  // 绝不允许回退成 version —— 一个未验的断言标了“未验”仍然有用，标成事实会污染整张表。
+  test("reports git_commit as the process's own source identity: 40-hex or null, never a version", async () => {
+    const res = await fetch(`${BASE}/health`);
+    const body = await res.json() as any;
+    expect("git_commit" in body).toBe(true);
+    const value = body.git_commit;
+    const isSha = typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
+    // null 是**设计**（没有 .git），不是缺陷；但任何别的形状都不允许。
+    expect(isSha || value === null).toBe(true);
+    if (value !== null) expect(value).not.toBe(body.version);
+  });
+
   test("exposes stable upload limits anonymously without exposing topology", async () => {
     const res = await fetch(`${BASE}/health`);
     expect(res.status).toBe(200);
