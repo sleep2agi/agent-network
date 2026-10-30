@@ -903,6 +903,49 @@ function corsHeaders(req: Request): Record<string, string> {
 }
 
 /**
+ * 2026-10-31 —— `/health` 的**匿名投影白名单**。
+ *
+ * 🔴 为什么是白名单而不是「逐个字段加鉴权门」：
+ *    原来的默认值是「加到 body 就自动匿名可见」，于是每加一个字段都要**记得**收进鉴权门。
+ *    而今晚我加了四次字段，四次都没想到 —— 因为**默认值不要求你想**。
+ *    ⇒ 改成：全量字段默认属于**鉴权投影**；匿名投影只给这里显式列出的键。
+ *    ⇒ 于是「忘了想」的结果是**少给**，不是泄露。
+ *
+ * 判据：安全相关的默认值必须落在「少给」那一侧。
+ *
+ * 加新字段时的三问（缺第二问就等于没问）：
+ *   ① 谁能读（匿名 / 鉴权 / 内部）
+ *   ② 知道它之后，读者能做什么以前做不到的事
+ *   ③ 默认投哪一档（答案是「鉴权」，除非在这里显式加一行）
+ */
+export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
+  // 存活/版本：外部 watchdog 与运维只靠这些判断「活没活」
+  "ok", "version", "api_version", "transport", "uptime", "startedAt",
+  // 规模与健康度聚合（不含拓扑明细）
+  "sessions_count", "sse_connections", "mcp_inflight", "mcp_inflight_peak",
+  "stall_count", "last_stall_at", "recent_stalls",
+  // 访问模式与安全档位（不含任何凭据/路径）
+  "auth", "security", "tmux", "v3_auth", "multi_network",
+  // 授权类型只需要「是什么」，不需要行内容
+  "license", "license_state",
+  // 容量与能力位（dashboard 上传代理要在开流前读）
+  "limits", "capabilities",
+  // 探针回显：只有带 X-Probe-Nonce 时才出现，本身不含敏感信息
+  "probe_nonce", "served_at",
+  // 值得匿名披露的「有没有」，不是「是什么」
+  "build_identified",
+]);
+
+/** 匿名投影：只保留白名单里的键。逐键复制，绝不返回原对象的引用。 */
+function projectPublicHealth(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(body)) {
+    if (PUBLIC_HEALTH_KEYS.has(key)) out[key] = body[key];
+  }
+  return out;
+}
+
+/**
  * 2026-10-31 —— `/health` 的「这一次」回显位。
  *
  * 读 `X-Probe-Nonce`，只接受 1–64 个 `[A-Za-z0-9._-]`。
@@ -2918,14 +2961,11 @@ return Bun.serve({
         // ⇒ 匿名只回答「有没有构建标识」，**不给是什么**；完整值只给已鉴权者。
         //    与 SSE 明细同一条规则：匿名给聚合、鉴权给明细。
         build_identified: BOOT_GIT_COMMIT !== null,
-        ...(healthIsMaster || healthIsDevOpen || healthIsAdmin
-          ? {
-              // 🔴 与 git_commit 必须成对：sha 单独一个字段区分不了「干净树」与「脏树」。
-              //    dirty=true ⇒ 这个读数只能写 prod@自称，不能写 prod@<sha>。
-              git_commit: BOOT_GIT_COMMIT,
-              git_dirty: BOOT_GIT.dirty,
-            }
-          : {}),
+        // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：
+        //    commit sha 对匿名读者 = 精确告诉外部这是哪一版代码（本仓公开）。
+        //    与 git_commit 成对：dirty=true ⇒ 只能写 prod@自称，不能写 prod@<sha>。
+        git_commit: BOOT_GIT_COMMIT,
+        git_dirty: BOOT_GIT.dirty,
         // 2026-10-31 —— 拒绝原因计数（与那条日志同一位置 +1，不会漏记）。
         // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
         //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。
@@ -2946,6 +2986,17 @@ return Bun.serve({
         capabilities: HUB_HEALTH_CAPABILITIES,
       };
       if (scopedSessions !== undefined) body.sse_sessions = scopedSessions;
+
+      // 🔴 投影放在**最外层**：先构全量，再决定给谁。
+      //    这样新字段默认落在鉴权侧；只有显式写进 PUBLIC_HEALTH_KEYS 的才匿名可见。
+      // 🔴 白名单只作用于**匿名**读者。
+      //    任何已鉴权调用者（成员 token / master / admin / dev-open）拿到全量 ——
+      //    否则会把「成员可见的 sse_sessions」误伤成匿名投影（我曾这么错过一次）。
+      //    安全边界在「有没有身份」，不在「身份多高」。
+      //    注意：投影必须调用在**所有字段写完之后**（探针字段是后加的），
+      //    所以这里只做一个惰性函数，而不是提前算好一个快照。
+      const isAnonymous = !healthAuth && !healthIsMaster && !healthIsDevOpen;
+      const shape = (b: Record<string, unknown>) => (isAnonymous ? projectPublicHealth(b) : b);
       // 2026-10-31 —— 「这一次」的判据（探针回显）。
       //
       // /health 恒 200，于是「200」只证明*某处*有个 200：证不了是这台机器、这个进程，
@@ -2981,11 +3032,11 @@ return Bun.serve({
         console.log(`[health] probe nonce=${probeNonce}`);
         // 回显只对「这一次」有意义 ⇒ 顺手把这一份响应标成不可缓存，
         // 否则探针自己会制造出它要防的那种残骸。
-        const probeRes = Response.json(body);
+        const probeRes = Response.json(shape(body));
         probeRes.headers.set("Cache-Control", "no-store");
         return withCors(req, probeRes);
       }
-      return withCors(req, Response.json(body));
+      return withCors(req, Response.json(shape(body)));
     }
 
     // ── All REST /api endpoints require auth (if token configured) ──

@@ -126,7 +126,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 为什么必须有这一条：光断言 by_reason 存在，测的是形状；形状对、接线错，读数照样是 0。
   // 而「只有异常路径能让它 +1」这一类，0 与「从没出过错」同形 —— 不注入就永远发现不了。
   test("a real rejected /api/task actually bumps the counter (must-fire, not just shape)", async () => {
-    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const before = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     const beforeTotal = before.counters.task_rejections.total as number;
 
     // 🔴 必须**带登录态**、并在 handler 内部失败：
@@ -139,7 +139,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     });
     expect(rej.status).toBeGreaterThanOrEqual(400);
 
-    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    const after = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
     // 🔴 窗口起点必须不动：计数器 +1 而 since 变化，会让「这段时间拒了几次」算错。
     //    没有窗口的计数器是「没有域的数」；没有 must-fire 的计数器是「没有证据的数」。
@@ -157,7 +157,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   //    将来谁把计数上移到中间件，这条会红 —— 那就对了：他必须同时更新
   //    模块注释里的覆盖比例（现在是 2/6 类出口）。
   test("KNOWN GAP: unauthenticated /api/task rejection is NOT counted (see rejection-counters.ts)", async () => {
-    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const before = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     const beforeTotal = before.counters.task_rejections.total as number;
 
     // 不带 Authorization ⇒ 鉴权中间件在到达 handler 之前就返回 401。
@@ -168,7 +168,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     });
     expect(rej.status).toBeGreaterThanOrEqual(400);
 
-    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    const after = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     if (after.counters.task_rejections.total !== beforeTotal) {
       throw new Error(
         "已知缺口已被修复？401 出口现在会计数了 —— "
@@ -183,7 +183,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 与 Express 恰好相反（express.json() 走 next(err) ⇒ 错误中间件 ⇒ 不计）。
   // ⇒ 这类出口的归属取决于 parser 放在哪，而不是取决于框架。
   test("malformed JSON on /api/task IS counted — parser lives inside our handler", async () => {
-    const before = await (await fetch(`${BASE}/health`)).json() as any;
+    const before = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     const beforeTotal = before.counters.task_rejections.total as number;
     const rej = await fetch(`${BASE}/api/task`, {
       method: "POST",
@@ -191,7 +191,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
       body: "{bad",
     });
     expect(rej.status).toBe(400);
-    const after = await (await fetch(`${BASE}/health`)).json() as any;
+    const after = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     expect(after.counters.task_rejections.total).toBe(beforeTotal + 1);
   });
 
@@ -205,6 +205,21 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(["known", "absent", "unknown"]).toContain(st.kind);
     if (st.kind === "known") expect(typeof st.type).toBe("string");
     if (st.kind === "unknown") expect(typeof st.reason).toBe("string");
+  });
+
+  // 2026-10-31 —— 匿名投影必须是**白名单**：新字段默认不出现。
+  // 这条断言的是「每一个匿名可见的键都在白名单里」——
+  // 于是「忘了想」的结果是**少给**，不是泄露。
+  test("anonymous /health exposes ONLY allow-listed keys (new fields default to authenticated)", async () => {
+    const body = await (await fetch(`${BASE}/health`)).json() as any;
+    const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
+    for (const key of Object.keys(body)) {
+      expect(PUBLIC_HEALTH_KEYS.has(key)).toBe(true);
+    }
+    // 两个敏感的典型：不进匿名投影。
+    expect("git_commit" in body).toBe(false);
+    expect("counters" in body).toBe(false);
+    expect("sse_sessions" in body).toBe(false);
   });
 
   test("exposes stable upload limits anonymously without exposing topology", async () => {
