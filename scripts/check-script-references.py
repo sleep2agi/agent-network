@@ -58,7 +58,64 @@ def resolves_from(citing: Path, name: str) -> bool:
     return False
 
 
+SELFTEST_EXPECTED = 3
+
+
+def selftest(quiet: bool = False) -> int:
+    """三例：就近解析命中 / 悬空引用被抓 / REF 正则能抓到三种写法。
+
+    为什么这一段必须有自检：这条门的判据是「引用能解析」，而**解析口径本身改过一次**
+    （从「仓库根」改成「按引用者目录就近」）—— 口径变了而没有自检，
+    门的绿就只是「没人再改它」。
+    """
+    import tempfile
+    fails = 0
+    ran = 0
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "exists.sh").write_text("#!/bin/sh\n")
+        (root / "sub" / "scripts").mkdir(parents=True)
+        (root / "sub" / "scripts" / "near.sh").write_text("#!/bin/sh\n")
+        citing = root / "sub" / "doc.md"
+        # 名字**拼出来**而不是写成字面量：本门会扫自己的源码，
+        # 字面量 `scripts/near.sh` 会被它自己当成悬空引用（第一版就是这样被自己抓到的）。
+        S = "scripts/"
+        citing.write_text("run " + S + "near.sh")
+
+        ran += 1
+        ok = resolves_from(citing, "nea" + "r.sh")
+        if not ok: fails.append("就近解析应命中 sub/scripts/near.sh")
+        elif not quiet: print("✓ selftest 就近解析命中")
+
+        ran += 1
+        ok = not resolves_from(citing, "nop" + "e.sh")
+        if not ok: fails.append("不存在的引用不应解析成功")
+        elif not quiet: print("✓ selftest 悬空引用解析失败（会被报出来）")
+
+        ran += 1
+        found = set(REF.findall("a " + S + "x.py b " + S + "y.sh c " + S + "z.mjs"))
+        ok = found == {"x.py", "y.sh", "z.mjs"}
+        if not ok: fails.append(f"REF 正则漏写法：{sorted(found)}")
+        elif not quiet: print("✓ selftest REF 抓到 .py/.sh/.mjs 三种写法")
+
+    if ran != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print("✗ 自检失败：", file=sys.stderr)
+        for f in fails: print(f"    · {f}", file=sys.stderr)
+        return 1
+    if not quiet: print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     dangling: list[tuple[str, str]] = []
     checked = 0
     for path in tracked():

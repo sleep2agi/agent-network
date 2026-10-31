@@ -55,7 +55,6 @@ KNOWN_NO_SELFTEST: set[str] = {
     "scripts/check-hub-v2-protocol-inputs.py",
     "scripts/check-mcp-tool-anchor-sections.py",
     "scripts/check-mcp-tool-index-coverage.py",
-    "scripts/check-script-references.py",
     "scripts/report-orphan-tests.py",
     "scripts/report-script-cadence.py",
     "scripts/report-workflow-triggers.py",
