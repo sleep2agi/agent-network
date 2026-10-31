@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -100,6 +101,16 @@ def workflow_text() -> str:
             # 行尾注释：只在 ` #` 之后切（避免切断 URL 里的 # 片段）
             if " #" in line:
                 line = line.split(" #", 1)[0]
+            # 2026-10-31 —— 外部复核补的第二层：「剥注释」还不够，**echo/printf 里提到也不算接线**
+            # （他们的 gates.sh:300 就是 `echo "… scripts/verify-nine-requirements.sh …"`）。
+            # 这些行不会执行脚本，只会在日志里打出名字。⇒ 整行丢弃。
+            # 只剥**引号内**的内容，而不是整行丢弃：
+            #   `echo "scripts/x.py"`                       ⇒ 名字在引号里 ⇒ 剥掉后不剩 ⇒ 不算接线 ✓
+            #   `python3 scripts/x.py || { echo "…"; }`     ⇒ 名字在引号外 ⇒ 保留 ⇒ 仍算接线 ✓
+            # （第一版整行丢弃，把这种合法的带错误提示调用也一起判成未接线，当场被抓到）
+            if re.search(r"\b(echo|printf)\b", line):
+                line = re.sub(r'"[^"]*"', "", line)
+                line = re.sub(r"'[^']*'", "", line)
             out.append(line)
     return "\n".join(out)
 
