@@ -100,10 +100,19 @@ def main(argv: list[str]) -> int:
     if not got:
         return 2                      # 没有读数 ≠ 全部不变
     keys = sorted(set().union(*[set(d) for d in got]))
-    constant, varying = [], []
+    constant, varying, no_reading = [], [], []
     for k in keys:
         vals = [json.dumps(d.get(k), sort_keys=True) for d in got]
-        (constant if len(set(vals)) == 1 else varying).append(k)
+        if len(set(vals)) > 1:
+            varying.append(k)
+        elif set(vals) == {"null"}:
+            # 2026-10-31 —— **`null` 是「没有读数」，不是「没有变化」**（外部复核：
+            # 「把 null 记作『无读数』而非『未变』」）。
+            # 一个恒为 null 的字段与一个恒为 5 的字段，在「不变」这一列里同形，
+            # 但处置相反：前者要去修取数，后者可能是有意的常量。
+            no_reading.append(k)
+        else:
+            constant.append(k)
 
     documented = documented_constants()
     undoc = [k for k in constant if k not in documented]
@@ -113,7 +122,9 @@ def main(argv: list[str]) -> int:
         "url": url,
         "samples": samples,
         "counts": {"fields": len(keys), "constant": len(constant), "varying": len(varying),
+                   "no_reading": len(no_reading),
                    "constant_documented": len(constant) - len(undoc), "constant_undocumented": len(undoc)},
+        "no_reading_fields": no_reading,
         "constant_undocumented": undoc,
         "covers": "一眼 /health 载荷在 N 次读数里哪些字段从不变化",
         "does_not_cover": [
@@ -130,7 +141,9 @@ def main(argv: list[str]) -> int:
     c = res["counts"]
     print(f"HEALTH-LIVENESS v1 url={url} samples={samples} fields={c['fields']} "
           f"constant={c['constant']} varying={c['varying']} "
-          f"constant_undocumented={c['constant_undocumented']}")
+          f"no_reading={c['no_reading']} constant_undocumented={c['constant_undocumented']}")
+    if no_reading:
+        print("  ⚠ 恒为 null 的字段（**没有读数**，不是「没有变化」）：" + ", ".join(no_reading))
     print("  ⚠ **首要读法**：空闲负载下，计数器本来就该不变 —— 那些「不变」不构成结论。")
     print("     要看结论，请在**有流量**时采（--samples 6 边跑边采），或只看下面这组：")
     print("     构造上是常量的字段（HEALTH_FIELD_META 里写了 constant_by_design）："

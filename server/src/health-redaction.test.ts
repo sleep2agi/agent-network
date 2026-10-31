@@ -895,6 +895,13 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     const moved = pinned.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
     expect(moved).toEqual([]);   // 声明是 pinned，就必须在窗口内真的不动
 
+    // 2026-10-31 —— **节流会让「不变」变得廉价**（外部复核：
+    // 「三个 `*_age_sec` 里有两个是 10s 节流采样的，同一秒两次读 diff 恒为 0
+    //   ⇒ 会被误判成 pinned，而 pinned 正好放行最不该放行的字节比较」）。
+    // 本仓的同形风险：任何按 10s/30s 节流刷新的字段，在 1.2s 窗口里都必然「不变」。
+    // ⇒ 所以这条窗口断言**只对「启动快照族」成立**（它们与时间无关），
+    //   不能拿它去证明「这个字段是稳定的」——后者需要跨节流周期的窗口。
+    //
     // ⚠️ 这条检查的**弱点必须写出来**（否则它会被读成比实际更强的东西）：
     //   一个值**本来就在这个窗口里不变**的字段，即使被错误地标成 pinned，也照样通过。
     //   实测 witness：把 `sessions_count` 标成 `frozen_at_boot + stable_within:"process"`，
