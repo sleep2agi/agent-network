@@ -27,7 +27,16 @@ async function activate(){
   // status 一并回来，调用方不必再查一次「这条请求现在是什么状态」。
   expect(Object.keys(r).sort()).toEqual(["ok","request_id","status"]);
   expect(r.ok).toBe(true);
-  expect((await ack(r.request_id)).status).toBe("active");return r.request_id;}
+  // #3275 批次 1·d —— ack_adopt_request 的成功回执形状：
+  // 源码里有两种（`{ok, key}` 与 `{ok, status}`），到底哪一种取决于这条请求是
+  // 「首次收养（要发 key）」还是「已有绑定代际」。只断言 .status 时，
+  // 把**带 key 的那个出口**顺手删掉/改名，不会有任何东西变红。
+  const acked = await ack(r.request_id);
+  // 实测两次都是 ["ok","status"]（打印过）；源码里那条 `{ok, key}` 出口走的是**另一条路径**
+  // （首次收养要下发 key），本夹具没走到。⇒ 这里钉住本夹具实际走的那个，**不声称两条都钉住**。
+  expect(Object.keys(acked).sort()).toEqual(["ok", "status"]);
+  expect(acked.status).toBe("active");
+  return r.request_id;}
 beforeAll(async()=>{
   ({db}=await import("./db.js"));
   const {register}=await import("./auth.js");
