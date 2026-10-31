@@ -214,6 +214,16 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(prefix).toBe(0);                // 链路覆盖（前缀）—— 第 1 个位置就是洞
     // 反例守卫：一旦数错集合（把第 1 行改成 counted），前缀与计数会一起变 —— 那时必须改比例与注释
     expect(instrumented).not.toBe(prefix);
+
+    // 2026-10-31 —— **构造自洽的断言不会以我们关心的方式失败**（外部复核 164b3e5e：
+    // 「14 个块数得对，但那是构造自洽的断言，不会以我们关心的方式失败」）。
+    // 上面那些都是对着**自己声明的表**断言 —— 它只证明「表没被改」，不证明「表描述的世界还在」。
+    // ⇒ 加一条**跨源**检查：计数器的主语（/api/task）必须真的出现在生成的路由清单里。
+    //    若有人改了路由名而没改计数器，这条会红；而只对自己的表断言的测试永远不会。
+    const { readFileSync } = await import("node:fs");
+    // 仓根的 docs/（从 server/src 出发是 ../../docs），不是 server/docs
+    const table = JSON.parse(readFileSync(new URL("../../docs/rest-route-table.json", import.meta.url), "utf8"));
+    expect(table.rows.some((r: any) => r.path === "/api/task")).toBe(true);
   });
 
   // 2026-10-31 —— parser 级拒绝在本仓**是**被计数的，因为我们在 handler 内 await req.json()。
