@@ -260,6 +260,11 @@ def main(argv: list[str]) -> int:
     #   · 只在注释/子进程命令里提到 --selftest 的门 → 也 True ✗（本脚本自己就是例子）
     # 单射做不到时，至少要把「我用的是哪种观测」写出来，否则读者会以为它是执行结果。
     print("  selftest_detected_by : text.includes('--selftest')（**不单射**：注释里提到也算；本脚本对自己豁免）")
+    # 2026-10-31 —— 外部复核：「**锚必须与被测层同 transport**；否则 404/401 的归属无法判定，
+    # 而它读起来仍然像一个读数。」本脚本里有两类证据，transport 不同，不能混读：
+    print("  wiring_evidence      : workflow **文本**（`名字出现在 run: 里`）⇒ 证明「被接线」，不证明「跑过」")
+    print("  selftest_evidence    : **执行** `--selftest`（上面的自检实跑）⇒ 证明「跑得起来」")
+    print("                         ⇒ 两者是不同 transport 的证据，别把前者的绿读成后者")
     if slow_skipped:
         print(f"  · 有 selftest 但本步**不执行**（慢门，各自 CI 步骤跑）：{len(slow_skipped)} 个")
         for x in slow_skipped:
