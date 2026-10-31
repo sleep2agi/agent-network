@@ -6220,6 +6220,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::license_state distinguishes absent from unknown instead of collapsing to none": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::logs the probe nonce exactly once, outside the response": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::malformed JSON on /api/task IS counted — parser lives inside our handler": 1,
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::mcp_inflight_peak dominates the current value and never decreases": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::no dead entries: every allow-listed key is actually served to anonymous callers": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::on Linux the kernel trio is actually present (a permanent null would satisfy the test above)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::refuses a nonce it cannot echo verbatim instead of half-accepting it": 1,
@@ -14367,6 +14368,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::license_state distinguishes absent from unknown instead of collapsing to none",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::logs the probe nonce exactly once, outside the response",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::malformed JSON on /api/task IS counted — parser lives inside our handler",
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::mcp_inflight_peak dominates the current value and never decreases",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::no dead entries: every allow-listed key is actually served to anonymous callers",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::on Linux the kernel trio is actually present (a permanent null would satisfy the test above)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::refuses a nonce it cannot echo verbatim instead of half-accepting it",
@@ -16294,7 +16296,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "430a9a4b70d5c97f1843fcd683495c04083841c8",
+  "commit": "57c8633d2c2b996ee7dbf9af2c9f9a25d971a958",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

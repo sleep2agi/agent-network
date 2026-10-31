@@ -1338,6 +1338,31 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(/git|commit|build[-_]?(sha|id)?/.test("x-commhub")).toBe(false);
   });
 
+  // 2026-10-31 —— **计数之间的守恒式**（外部复核：「human + worker + unassigned == 待办行数；
+  // 不等 ⇒ RuntimeError。它防的是将来改坏分桶：漏一类左边小、重复计一类左边大」）。
+  // 本仓这里的两个数是同一个量的两个名字：mcp_inflight（当前）与 mcp_inflight_peak（峰值）。
+  // 守恒式：peak ≥ inflight（任何时刻都成立，与采样时机无关）；
+  //   反过来若有人把 peak 写成"本次采样值"，两者会相等而看不出——所以还要一条
+  //   「peak 只增不减」：在窗口内取三次，peak 序列必须单调不减。
+  test("mcp_inflight_peak dominates the current value and never decreases", async () => {
+    const samples: Array<{ now: number; peak: number }> = [];
+    for (let i = 0; i < 3; i++) {
+      const d = await (await fetch(`${BASE}/health`)).json() as any;
+      samples.push({ now: Number(d.mcp_inflight), peak: Number(d.mcp_inflight_peak) });
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    for (const s of samples) {
+      expect(Number.isFinite(s.now)).toBe(true);
+      expect(Number.isFinite(s.peak)).toBe(true);
+      expect(s.peak).toBeGreaterThanOrEqual(s.now);      // 守恒式
+      expect(s.now).toBeGreaterThanOrEqual(0);
+    }
+    // 单调：峰值不许下降（它不是一个采样值）
+    for (let i = 1; i < samples.length; i++) {
+      expect(samples[i].peak).toBeGreaterThanOrEqual(samples[i - 1].peak);
+    }
+  });
+
   // 2026-10-31 —— **一致时零证据**（外部复核：「status / db / mineruProxy 三个字段是同一个位，
   // 一致时零证据」）。本仓的 status 与 status_reasons 由构造保证一致 ⇒
   // 「status=='ok' ⟺ reasons 为空」是恒真断言，保护不了任何东西。
