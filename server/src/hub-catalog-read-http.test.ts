@@ -361,6 +361,15 @@ describe("GET /api/providers", () => {
       expect(e.body.state).not.toBe("applied");
       expect(e.body.observed_status).toBe("cancelled_by_operator");
       expect(String(e.body.hint)).toContain("不等于已生效");
+
+      // 2026-10-31 —— **要数的是「出口量里能独立变化的维度数」，不是「有几条路径」**
+      // （外部复核 (d)：「出口三元组实测秩 = 1：头无条件设置、键数恒为 3、状态是 code 的纯函数
+      //   ⇒ A、B 两条向量改变的是同一个出口量」）。
+      // 对应到本路由：五个 state 如果**去掉 state 字段**就分不出来，那 state 就是唯一信息源，
+      // 载荷只是标签的复读 —— 秩 = 1。判据：把 state 删掉之后，五个载荷仍两两可区分。
+      const strip = (b: any) => { const { state: _s, ...rest } = b; return JSON.stringify(rest); };
+      const five = [a, b, c, d, e].map((r) => strip(r.body));
+      expect(new Set(five).size).toBe(5);   // 两两不同 ⇒ 秩 ≥ 2，state 不是唯一维度
     } finally {
       db.run(`DELETE FROM daemon_provider_snapshots WHERE daemon_node_id = ?1`, [nodeId]);
       db.run(`DELETE FROM node_daemon_bindings WHERE request_id = 'bind_ps'`);
