@@ -405,6 +405,38 @@ def lexer_selftest(quiet: bool = False) -> int:
     return 0
 
 
+def predicate_digest() -> str:
+    """「什么算一条测试」这件事的**定义指纹**。
+
+    2026-10-31 —— 外部复核 (e)：「`{predicate, command, count}` 仍不够：
+    谓词是**代码**，改 haystack 会静默放宽 ⇒ 需要 `{definition_sha256, count}`。」
+
+    本仓的基线存的是**名字多重集**（比计数强），但「名字怎么被抽出来」仍是代码：
+    把 TEST_CALL 的正则放宽一点（比如允许 `t(` 前缀），基线里不会多一条，
+    而抽取范围变宽了 —— 那正是「改谓词不改变读数」的最坏形态。
+
+    所以指纹只覆盖**谓词本体**（三条正则 + 去注释 + 采集函数），
+    不含 main()/报告格式 —— 否则改一句提示语也要重落基线，会训练人无脑 --update。
+    """
+    import hashlib as _h
+    import re as _re
+    src = Path(__file__).read_text(encoding="utf-8")
+    lines = src.splitlines()
+    preds = [m.group(0) for m in _re.finditer(
+        r"^(TEST_CALL|DESCRIBE_CALL|ANY_TEST_CALL) = re\.compile\(.*\)$", src, _re.M)]
+
+    def fn_block(name: str) -> str:
+        i = next((k for k, l in enumerate(lines) if l.startswith(f"def {name}(")), None)
+        if i is None:
+            return ""
+        j = i + 1
+        while j < len(lines) and not lines[j].startswith("def "):
+            j += 1
+        return "\n".join(lines[i:j])
+
+    body = "\n".join(preds) + "\n" + fn_block("_strip_code") + "\n" + fn_block("collect")
+    return _h.sha256(body.encode("utf-8")).hexdigest()
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return lexer_selftest()
@@ -462,6 +494,7 @@ def main() -> int:
                     "dynamic": dynamic,
                     "source": {
                         "commit": src_commit,
+                        "definition_sha256": predicate_digest(),
                         "command": "python3 scripts/check-test-inventory.py --update",
                         "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限",
                     },
@@ -496,6 +529,15 @@ def main() -> int:
         ok_sha = len(c) == 40 and all(ch in "0123456789abcdef" for ch in c)
         print(f"  baseline_source_commit: {c[:12] if ok_sha else f'✗ 非法 sha {c!r}'}"
               f"（本基线由 `{src.get('command','?')}` 生成）")
+        # 2026-10-31 —— 谓词指纹：抽取规则变了 ⇒ 基线要重落，否则「读数没变」可能只是「范围变了而值没变」
+        want_def = src.get("definition_sha256")
+        now_def = predicate_digest()
+        if want_def and want_def != now_def:
+            print(f"✗ 抽取谓词变了（基线 {str(want_def)[:12]} ≠ 现在 {now_def[:12]}）", file=sys.stderr)
+            print("  ⇒ 谓词是代码：放宽规则不会让基线多一条，只会让读数悄悄变宽。", file=sys.stderr)
+            print("  ⇒ 若确为有意改动，跑 --update 并在提交信息里说明放宽了什么。", file=sys.stderr)
+            return 1
+        print(f"  baseline_predicate_sha256: {str(want_def)[:12] if want_def else '（旧格式，缺）'}")
         if not ok_sha:
             print("✗ source.commit 不是 40 位 hex ⇒ 这份基线无法被独立复核", file=sys.stderr)
             return 1
