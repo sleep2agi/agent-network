@@ -5562,6 +5562,11 @@
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::records the last broadcast so a stall can be reconciled afterwards": 1,
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::某一条通知抛错：其余收件人照常入库（不能因为推不出去就漏发）": 1,
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::通知与入库同批（不是全部入库完再一起推）": 1,
+  "server/src/build-info.test.ts::#3177 build-info 读取::absent：目录里没有文件 —— 这是**正常状态**（部署形态没注入），不是缺陷": 1,
+  "server/src/build-info.test.ts::#3177 build-info 读取::invalid：文件在但形状不对 ⇒ 与 absent **分开报**": 1,
+  "server/src/build-info.test.ts::#3177 build-info 读取::present：格式正确就原样读出（含可选 source）": 1,
+  "server/src/build-info.test.ts::#3177 build-info 读取::严格校验：这几个都不接受（每一个都是真实会写错的形态）": 1,
+  "server/src/build-info.test.ts::#3177 build-info 读取::脏树可以注入，但读数里必须看得见 dirty —— 否则「脏树构建」会被当成提交": 1,
   "server/src/chain-attempt-dedup.test.ts::E — a descendant notice does not consume the executor's own completion::grandparent ← parent ← leaf: leaf notice then parent completion both record": 1,
   "server/src/chain-attempt-dedup.test.ts::E — a descendant notice does not consume the executor's own completion::two different leaves under one parent each keep their own notice": 1,
   "server/src/chain-attempt-dedup.test.ts::N — a legal second attempt keeps its own notice::retry queues a new transport row → the second result still records": 1,
@@ -13722,6 +13727,11 @@
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::records the last broadcast so a stall can be reconciled afterwards",
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::某一条通知抛错：其余收件人照常入库（不能因为推不出去就漏发）",
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::通知与入库同批（不是全部入库完再一起推）",
+  "server/src/build-info.test.ts::#3177 build-info 读取::absent：目录里没有文件 —— 这是**正常状态**（部署形态没注入），不是缺陷",
+  "server/src/build-info.test.ts::#3177 build-info 读取::invalid：文件在但形状不对 ⇒ 与 absent **分开报**",
+  "server/src/build-info.test.ts::#3177 build-info 读取::present：格式正确就原样读出（含可选 source）",
+  "server/src/build-info.test.ts::#3177 build-info 读取::严格校验：这几个都不接受（每一个都是真实会写错的形态）",
+  "server/src/build-info.test.ts::#3177 build-info 读取::脏树可以注入，但读数里必须看得见 dirty —— 否则「脏树构建」会被当成提交",
   "server/src/chain-attempt-dedup.test.ts::E — a descendant notice does not consume the executor's own completion::grandparent ← parent ← leaf: leaf notice then parent completion both record",
   "server/src/chain-attempt-dedup.test.ts::E — a descendant notice does not consume the executor's own completion::two different leaves under one parent each keep their own notice",
   "server/src/chain-attempt-dedup.test.ts::N — a legal second attempt keeps its own notice::retry queues a new transport row → the second result still records",
@@ -16320,7 +16330,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "2150f7dee7ad41301b5c2f0bc1dfc62692e681fa",
+  "commit": "5ab69479d7993af655aaea9b8c32440b049c4b51",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
