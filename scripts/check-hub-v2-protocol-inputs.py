@@ -108,6 +108,14 @@ def main() -> int:
     if not ok:
         sys.exit(1)
     print(f"PASS: {manifest['package']}@{manifest['version']} inputs match {commit}")
+    # 2026-10-31 —— 外部复核 (c)：「两份内容不同、声明 commit 不同的产物**都是 exit 0**；
+    # 且 checker 一次都没读 metadata.source ⇒ 自洽是免费的，绿只说明手续齐全。」
+    # 本门同构：它证明的是「清单 ↔ 某个 commit 的字节」自洽。
+    # 它**不**证明「那个 commit 就是已发布 tarball 的来源」—— 把清单换成另一颗 sha
+    # 重新生成，本门依然全绿。所以这一行必须自己说出来，读者才不该把别的期待压上来。
+    print(f"  证明：清单里的期望哈希 ↔ {commit[:12]} 的字节，逐条相符")
+    print("  不证明：该 commit 就是已发布包的来源（清单换成另一颗 sha 仍会全绿）")
+    print("          ⇒ 要证那一步，只能靠发布记录（release.yml 的 commit 输入）或 tarball 内容比对")
     return 0
 
 
