@@ -181,13 +181,27 @@ def main() -> int:
         print("✗ 自检未通过 ⇒ 本次没有读数（退出码 2）", file=sys.stderr)
         return 2
     files: dict[str, dict[str, Path]] = {}
+    # 2026-10-31 —— **前置条件要显式化**（外部复核那条：fail-close 的门通常因为
+    # 「在 pooler/socket 下恒红」而被运维改松）。
+    # 本脚本的同款：某个包目录不存在（单包检出 / 部分克隆）时，原先只是 `continue`，
+    # 于是副本组从 3 侧变成 2 侧 ⇒ 被判成「已分叉」⇒ 红。那会把「本部署不适用」错报成「坏了」。
+    missing_groups: list[str] = []
     for group, root in GROUPS.items():
         if not root.is_dir():
+            missing_groups.append(group)
             continue
         for p in root.rglob("*.ts"):
             if p.name.endswith(".test.ts"):
                 continue
             files.setdefault(p.name, {})[group] = p
+
+    if missing_groups:
+        # `not-applicable` 与 `unknown` 必须分开：前者说「别修仪器，换判据」，后者说「去补一次取数」。
+        print(f"not-applicable：缺少扫描根 {missing_groups} ⇒ 本判据在此部署上不适用（不是通过，也不是失败）",
+              file=sys.stderr)
+        print("  ⇒ 副本组会因缺侧而被误判成『已分叉』，所以这里**不作判定**。", file=sys.stderr)
+        print("  ⇒ 完整判定请在包含全部三个目录的检出上重跑本脚本。", file=sys.stderr)
+        return 3
 
     total_ts = sum(len(side) for side in files.values())
     if total_ts == 0:
