@@ -429,9 +429,23 @@ describe("GET /api/providers", () => {
       expect(defs.length).toBe(1);
       const readers = files.flatMap(({ f, src }) =>
         src.split("\n").map((line, i) => ({ line, f, i }))
-          .filter(({ line }) => line.includes(name) && !line.includes(`export const ${name}`)));
+          .filter(({ line }) => line.includes(name) && !line.includes(`export const ${name}`))
+          // 2026-10-31 —— **注释不是读点**：`// 状态码来自穷尽表（PROVIDER_WRITE_STATUS…）`
+          // 会满足「读到过」而实际上没有任何代码用它。这正是本仓实测到的形态。
+          .filter(({ line }) => {
+            const t = line.trim();
+            return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+          }));
       // 「读」= 出现但不是定义行（索引 / 展开 / 断言都算）
       expect(readers.length).toBeGreaterThan(0);
+      // 2026-10-31 —— **计数 = 1 还不够，位置也要在集合内**（外部复核：
+      // 「只断言计数 1 ⇒ 留下的是『1 个读点，它自己另搞一套』—— 完全满足计数 1，
+      //  而语义已经不是你想的那个。」）
+      // ⇒ 读点必须落在**路由文件**里（server.ts），否则等于表有了、用法另有其处。
+      // 位置：读点必须落在**实现或路由**里（不是只落在注释里）
+      const readerFiles = new Set(readers.map((r) => String(r.f).split("/").pop()));
+      expect(readerFiles.size).toBeGreaterThan(0);
+      expect([...readerFiles].some((f) => f === "server.ts" || f === "hub-provider-config.ts" || f === "requirements.ts")).toBe(true);
     }
   });
 
