@@ -93,9 +93,15 @@ def tool_mentions(lines: list[str], name: str, known: set[str]) -> tuple[list[in
         # （`const post = (p, body) => fetch(...)`）绑到恰好写在它下面的那个工具名上，
         # 于是这个文件的每个 `post(` 都成了那个工具的「提及点」——
         # 实测：放宽到 +3 行时邻近口径从 70/88 直接跳到 **88/88**，那不是覆盖变好，是判据坏了。
+        # 定义行 + （**只有**箭头函数把函数体换到下一行时）紧接的那一行。
+        # `const create = (k, extra) =>` / `  mcp(node[k].token, "schedule_create", …)` 是常见写法；
+        # 只认定义行会让 schedule_create 这种「体在下一行」的 helper 整个消失（实测）。ı
+        body = [i]
+        if lines[i].rstrip().endswith("=>") and i + 1 < len(lines):
+            body.append(i + 1)
         seen: set[str] = set()
         for t in known:
-            if re.search(rf"""["']{re.escape(t)}["']""", lines[i]):
+            if any(re.search(rf"""["']{re.escape(t)}["']""", lines[j]) for j in body):
                 seen.add(t)
         if len(seen) == 1 and next(iter(seen)) == name:
             # ⚠️ 只登记「绑定到**这个**工具」的 helper。

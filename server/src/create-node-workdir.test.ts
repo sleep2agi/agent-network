@@ -207,6 +207,15 @@ describe("create_node + workdir", () => {
   test("list_host_supervisors (MCP) surfaces default_workdir_root for admin", async () => {
     seed({ default_workdir_root: ROOT });
     const r = await call(tools().list_host_supervisors, {});
+    // 2026-10-31 —— #3275：外层与每行的键集（此前只断言了 `default_workdir_root` 这个值）。
+    expect(Object.keys(r as any).sort()).toEqual(["count", "daemons", "ok"]);
+    expect(Object.keys((r as any).daemons[0]).sort()).toEqual([
+      "alias", "allowed_secret_keys", "daemon_node_id", "default_workdir_root",
+      "host_telemetry", "hostname", "last_seen_at", "online", "runtimes_supported",
+    ]);
+    // 计数与数组同源（#3214 那条的镜像）：`count` 是给人读的，`daemons` 是给程序读的，
+    // 两者不同源时界面上的「N 台」会与列表长度对不上。
+    expect((r as any).count).toBe((r as any).daemons.length);
     const d = (r as any).daemons.find((x: any) => x.daemon_node_id === DAEMON_ID);
     expect(d.default_workdir_root).toBe(ROOT);
   });
