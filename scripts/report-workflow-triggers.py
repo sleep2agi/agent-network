@@ -27,6 +27,12 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    print("✗ 缺 PyYAML ⇒ 没有读数（不等于「全部不可解析」）", file=sys.stderr)
+    raise SystemExit(2)
+
 REPO = Path(__file__).resolve().parent.parent
 WF = REPO / ".github" / "workflows"
 
@@ -45,21 +51,58 @@ ALLOWLIST = {
 
 
 def triggers(text: str) -> tuple[str, str]:
-    """→ (state, detail)。state ∈ {"auto", "manual", "none"}。"""
-    m = re.search(r"^on:\s*(.*)$", text, re.M)
-    if not m:
+    """→ (state, detail)。state ∈ {"auto", "manual", "none", "unparsable"}。
+
+    🔴 2026-10-31 —— 第四态是因为这台机器上真出过一次：
+        `- name: empty-equality scan (advisory: only the ...)` 里的裸 `": "`
+        让整个文件**无法被 YAML 解析**。GitHub 的行为不是「跳过这一行」，
+        而是**整个 workflow 起不来**：277 次运行、0 个 job、21 条脚本从此没跑过。
+        而本函数此前用 `re.search("^on:")` 读**文本** —— 于是它把这个文件判成
+        「自动：84」里的一个，也就是**对「这道门会不会跑」这件事给了假绿**。
+
+        教训：判据的仪器必须与被判对象同层。文件能不能跑，只有解析器知道；
+        正则读到的 `on:` 只证明**有人写下了** on:，不证明这份文件被接受。
+    """
+    try:
+        doc = yaml.safe_load(text)
+    except Exception as e:  # noqa: BLE001
+        mark = getattr(e, "problem_mark", None)
+        where = f"L{mark.line + 1}:C{mark.column + 1}" if mark else "未知位置"
+        first = str(e).split("\n")[0]
+        return "unparsable", f"{where} {first}"
+    if not isinstance(doc, dict):
+        return "unparsable", "顶层不是映射"
+    on = doc.get(True, doc.get("on"))
+    if on is None:
         return "none", "没有 on:"
-    inline = m.group(1).strip()
-    block = text[m.start(): m.start() + 600]
-    if AUTO.search(inline) or AUTO.search(block.split("jobs:")[0]):
-        found = sorted(set(AUTO.findall(inline) or AUTO.findall(block.split("jobs:")[0])))
-        return "auto", ",".join(found)
-    if "workflow_dispatch" in block:
+    if isinstance(on, str):
+        events = [on]
+    elif isinstance(on, list):
+        events = [str(x) for x in on]
+    elif isinstance(on, dict):
+        events = [str(k) for k in on.keys()]
+    else:
+        return "none", f"on: 形状不认识（{type(on).__name__}）"
+    auto = sorted({e for e in events if AUTO.search(e)})
+    if auto:
+        return "auto", ",".join(auto)
+    if "workflow_dispatch" in events:
         return "manual", "workflow_dispatch"
-    return "none", "未识别的触发条件"
+    return "none", "未识别的触发条件：" + ",".join(events)
 
 
-SELFTEST_EXPECTED = 5
+def silenced(text: str) -> tuple[int, int]:
+    """一个跑不起来的 workflow 里，有多少步、多少条脚本从此不会执行。
+
+    只报「失败」不够：`parse error` 与「某条断言红了」在结论列里同色，
+    区别只在 job 列表 —— 而 job 列表是空的这件事，只有数一数才看得出来。
+    """
+    steps = [ln for ln in text.split("\n") if re.match(r"^\s*- (name|uses|run):", ln)]
+    scripts = [ln for ln in text.split("\n") if "scripts/" in ln and not ln.strip().startswith("#")]
+    return len(steps), len(scripts)
+
+
+SELFTEST_EXPECTED = 7
 
 
 def selftest(quiet: bool = False) -> int:
@@ -75,6 +118,9 @@ def selftest(quiet: bool = False) -> int:
         ("on: workflow_dispatch\njobs:\n  a:\n", "manual"),
         ("jobs:\n  a:\n", "none"),
         ("on: \njobs:\n  a:\n", "none"),
+        # 第四态：不可解析。这两例都来自 2026-10-31 的真实事故形状。
+        ("on: push\njobs:\n  a:\n    steps:\n      - name: x (advisory: y)\n", "unparsable"),
+        ("on: push\njobs:\n\ta:\n", "unparsable"),   # 制表符缩进：GitHub 也不接受
     ]
     fails = 0
     for text, want in cases:
@@ -148,29 +194,49 @@ def main() -> int:
         print(f"✗ 找不到 {WF}", file=sys.stderr)
         return 2
 
-    buckets: dict[str, list[tuple[str, str]]] = {"auto": [], "manual": [], "none": []}
+    buckets: dict[str, list[tuple[str, str]]] = {"auto": [], "manual": [], "none": [], "unparsable": []}
+    silent: dict[str, tuple[int, int]] = {}
     for path in sorted(WF.glob("*.yml")):
-        state, detail = triggers(path.read_text(encoding="utf-8", errors="replace"))
+        text = path.read_text(encoding="utf-8", errors="replace")
+        state, detail = triggers(text)
         buckets[state].append((path.name, detail))
+        if state == "unparsable":
+            silent[path.name] = silenced(text)
 
-    for state, label in (("auto", "自动"), ("manual", "**只手动**"), ("none", "不跑 / 未识别")):
+    for state, label in (("unparsable", "**不可解析 ⇒ 整份都不跑**"), ("auto", "自动"),
+                         ("manual", "**只手动**"), ("none", "不跑 / 未识别")):
         rows = buckets[state]
         print(f"{label}：{len(rows)}")
         if state != "auto":
             for name, detail in rows:
-                print(f"  {name}  （{detail}）")
+                extra = ""
+                if state == "unparsable":
+                    st, sc = silent[name]
+                    extra = f" ⇒ **{st} 步 / {sc} 行调脚本从未执行**"
+                print(f"  {name}  （{detail}）{extra}")
     total = sum(len(v) for v in buckets.values())
     print(f"\n合计 {total} 个 workflow")
 
     # 2026-10-31 —— 负断言的值域由**代码导出**时，导出失败会变成空集 ⇒ 负断言恒真。
     # ⇒ 先断言值域非空（正控），再谈「没有违规」。
-    domain = [name for name, _ in buckets["auto"] + buckets["manual"] + buckets["none"]
+    domain = [name for name, _ in buckets["auto"] + buckets["manual"] + buckets["none"] + buckets["unparsable"]
               if GATE_NAME.search(name)]
     if not domain:
         print("✗ 值域为空：没有任何 workflow 名字匹配 gate|qa|check ⇒ 下面的「无违规」恒真，不可读成通过",
               file=sys.stderr)
         return 1 if "--assert" in sys.argv else 0
     print(f"值域（名字匹配 gate|qa|check 的 workflow）：{len(domain)} 个")
+
+    # 不可解析：**不看名字**。它里面的每一条命令都不会跑，与「名字像不像门」无关。
+    unparsable = buckets["unparsable"]
+    if unparsable:
+        print("\n✗ 这些 workflow 文件**解析不了** ⇒ 它们里面的每一条命令都不会执行：", file=sys.stderr)
+        for name, detail in unparsable:
+            st, sc = silent[name]
+            print(f"    {name}  （{detail}）⇒ {st} 步 / {sc} 行调脚本", file=sys.stderr)
+        print("  ⇒ 修 YAML，别改触发器：现在这份文件**连被触发都做不到**。", file=sys.stderr)
+        if "--assert" in sys.argv:
+            return 1
 
     flagged = [
         (name, detail) for name, detail in buckets["manual"] + buckets["none"]

@@ -120,7 +120,8 @@ NOT_A_GATE: set[str] = set()
 #   · 名单外新接线却没有 selftest ⇒ 红（新增的门必须自带）
 KNOWN_NO_SELFTEST: set[str] = {
     "scripts/check-doc-symbol-pins.py",
-    "scripts/report-script-cadence.py",
+    # 2026-10-31 —— report-script-cadence.py 已有 --selftest ⇒ 从欠账名单移出
+    # （这道门自己写着「把基线改宽不算修好」；欠账项补齐后必须**缩窄**名单，否则名单会一直停在那里）
     # 本脚本自己不提供 --selftest（它跑别人的），否则会自我递归
     "scripts/check-gates-wired.py",
 }

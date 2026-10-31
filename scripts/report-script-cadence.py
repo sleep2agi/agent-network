@@ -45,6 +45,57 @@ DOC_GLOBS = ["docs/**/*.md", "docs-site/**/*.md", "skills/**/*.md", "README.md",
 # ADHOC 登记表：一次性/人肉工具放这里。**必须**有「谁会发现它烂了」与「什么时候可以删掉这一行」。
 # 空字典是合法的 —— 但它同时意味着「本仓没有一次性工具」。新增一条就是一次显式决定。
 ADHOC: dict[str, tuple[str, str]] = {
+    # 2026-10-31 —— 12 条「没有发现者通道」的脚本。这一批**不是新写的**，
+    # 而是这道门第一次在 CI 里真的跑起来时才被数出来（此前它自己也只在人肉清单里）。
+    # 每一条都要回答两件事：谁会发现它烂了 / 什么时候删掉这一行。
+    'check-claim-existence.py': (
+        '读「卡里声称已完成」与来源是否对得上；输入是 Hub 上的实时卡，CI 里没有那份数据',
+        '有一个带 Hub 读权限的定时 job 后，接进去再删本行',
+    ),
+    'check-control-run.sh': (
+        '要容器内的控制组读数（进程面 + timer 面）；CI 的 runner 不是那台机器',
+        '接进 L2 docker 套件、且套件里有同名容器后删本行',
+    ),
+    'cleanup-dangling-requirement-refs.py': (
+        '**写入型**：会改 Hub 上的卡；CI 不允许写生产',
+        '有 staging Hub 后接进定时任务再删本行',
+    ),
+    'health-snapshot.py': (
+        '25 道门的总表（逐条 --selftest + 主跑）；CI 里这些门已各自单独跑，再跑一遍只是翻倍 runner 时间，且它要 docker',
+        '其余 workflow 覆盖了同一组门之后删本行（届时它只剩本地复核用途，进 docs 引用）',
+    ),
+    'install-diff-shape-hook.sh': (
+        '一次性：往 .git/hooks 装 pre-commit 钩子；CI 没有 git hooks 这回事',
+        '改为仓库自带 core.hooksPath 之后删本行',
+    ),
+    'probe-cors-cells.sh': (
+        '探测**线上** CORS 组合（需要已部署的 hub 地址与凭据）',
+        'CORS 组合进 e2e-docker 的部署后探测后删本行',
+    ),
+    'report-header-producers.py': (
+        '读「谁写这个响应头」的静态报告；人读，无判定',
+        '并入 check-keyset-join.py 的来源分析后删本行',
+    ),
+    'report-health-liveness.py': (
+        '要线上 /health 的实时读数；CI 里没有那台 hub',
+        '接进 canary/巡检 job 后删本行',
+    ),
+    'report-rest-coverage.py': (
+        'REST 覆盖率的静态报告；人读',
+        '并入 check-rest-route-table.py 的输出后删本行',
+    ),
+    'report-server-test-triage.py': (
+        '台架失败归因（四档）；输入是 run-server-tests.sh 的逐文件输出，只在本地台架存在',
+        'CI 直接产出逐文件结果并自带归因后删本行',
+    ),
+    'report-type-assertions.py': (
+        '静态读「类型断言在哪」；人读，无判定',
+        '并入类型检查棘轮输出后删本行',
+    ),
+    'run-server-tests.sh': (
+        '逐文件跑 server 套件、每文件独立 DB；CI 里由 L1/L2 套件承担，这里是人肉台架（且要 bun + 本地 sqlite）',
+        'CI 能按同一隔离粒度跑全量后删本行',
+    ),
     'report-reason-branches.py': (
         "按需读「reason 被当 code 分支」的清单 + 冻结基线；棘轮由 --assert 承担，未接线到 CI",
         "把 --assert 接进 test-inventory.yml 后删除本行",

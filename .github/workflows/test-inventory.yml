@@ -13,6 +13,8 @@ name: lint (test inventory)
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -104,7 +106,7 @@ jobs:
         run: |
           python3 scripts/check-jq-default-operator.py --selftest
           python3 scripts/check-jq-default-operator.py
-      - name: empty-equality scan (advisory: only the gate path must be clean)
+      - name: empty-equality scan (advisory — only the gate path must be clean)
         # tests/ 与 docs/ 里的 before/after 比较大多是 fail-closed（另一侧是字面量），
         # 所以这条**不阻塞**；它每天把 gate 路径的读数打出来，变红了才有人看。
         run: python3 scripts/check-shell-empty-equality.py
