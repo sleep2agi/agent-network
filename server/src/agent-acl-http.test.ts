@@ -274,6 +274,11 @@ describe("humans: restricted members can still see and DM other humans", () => {
   });
   test("alice → bob send_desktop_message works; bob reads it from his user inbox", async () => {
     const r = await tool(aliceToken, "send_desktop_message", { to_username: "acl_bob", message: "hello bob", network_id: NET });
+    // #3275 批次 2 —— send_desktop_message 是七个键里**唯一带 reason** 的回执：
+    // delivered=false 时 reason 说明为什么（不在线/没落库），而它是客户端唯一能据以重试的字段。
+    expect(Object.keys(r).sort()).toEqual([
+      "delivered", "delivered_to_user_id", "message_id", "network_id", "ok", "persisted", "reason",
+    ]);
     expect(r.ok).toBe(true);
     const inbox = await get(bobToken, `/api/messages?scope=user&network_id=${NET}`);
     expect(inbox.body.messages.map((m: any) => m.content)).toContain("hello bob");

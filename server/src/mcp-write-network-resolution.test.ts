@@ -176,6 +176,8 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
   test("send_message resolves to the only membership", async () => {
     const { tools } = buildHandlers({ userId: U_SINGLE });
     const r = await call(tools["send_message"], { alias: A1, message: "x517 g1 send_message" });
+    // #3275 批次 2 —— send_message 外层闭集（实测）
+    expect(Object.keys(r).sort()).toEqual(["message_id", "ok", "session_status"]);
     expect(r.ok).toBe(true);
     expect(inboxRow("x517 g1 send_message")?.network_id).toBe(NET_A);
   });
@@ -200,6 +202,9 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
     const { tools } = buildHandlers({ userId: U_SINGLE });
     const t = makeTask(A1, "delivered", "x517 g1 send_ack");
     const r = await call(tools["send_ack"], { task_id: t });
+    // #3275 批次 2 —— send_ack 外层闭集（实测）：`updated` 是**这次是否真的改了状态**，
+    // 与 ok 不同（ok=调用成功）；少了它，客户端分不清「已 ack」与「早就是 ack 状态」。
+    expect(Object.keys(r).sort()).toEqual(["ok", "task_id", "updated"]);
     expect(r.ok).toBe(true);
     expect(taskById(t)?.status).toBe("acked");
   });
