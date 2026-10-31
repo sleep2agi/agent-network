@@ -1,0 +1,69 @@
+// #3271 —— 「到死都没被取走」的计数：**正控 + 负数用例**。
+//
+// 现场：一台节点上 4 条任务，一次又一次「等满 60 分钟 ⇒ expired」，而积压数**两次读数都是 4**。
+// 「又过期了一条」是可见的（Hub 会发通知），但「这台节点连续 N 次一次都没取走」没有读数。
+//
+// 这个计数器属于「只有异常路径能让它 +1」那一类 ⇒ 必须有 must-fire：
+//   ① 注入一条**未消费**就过期的任务 ⇒ 计数 +1（正控）
+//   ② 注入一条**已消费**后过期的任务 ⇒ 计数**不动**（负数用例）
+// 少了 ②，这个计数就退化成「过期了多少条」——而那是另一个更没用的数。
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { db } from "./db.js";
+import { neverConsumedExpiryCounters, noteNeverConsumedExpiry, resetNeverConsumedExpiryCountersForTest } from "./expiry-counters.js";
+import { patrolExpiredTasks } from "./server.js";
+
+const NET = "net_expiry_cnt";
+
+function seedTask(id: string, opts: { toName: string; consumed: boolean; expiredSecondsAgo?: number }) {
+  const ago = opts.expiredSecondsAgo ?? 120;
+  db.run(
+    `INSERT INTO tasks (task_id, network_id, from_name, to_name, content, status, created_at, expires_at, consumed_at)
+     VALUES (?1, ?2, 'sender', ?3, 'fixture', 'delivered', datetime('now', '-1 hour'), datetime('now', ?4), ?5)`,
+    [id, NET, opts.toName, `-${ago} seconds`, opts.consumed ? new Date(Date.now() - 3600_000).toISOString().replace("T", " ").slice(0, 19) : null],
+  );
+}
+
+function cleanup() {
+  try { db.run("DELETE FROM tasks WHERE network_id = ?1", [NET]); } catch {}
+}
+
+beforeEach(() => { cleanup(); resetNeverConsumedExpiryCountersForTest(); });
+afterAll(() => { cleanup(); });
+
+describe("#3271 从未取走过的过期计数", () => {
+  test("🔴 must-fire：未消费就过期的任务 ⇒ 该节点计数 +1", () => {
+    seedTask("t_never_1", { toName: "stuck-node", consumed: false });
+    patrolExpiredTasks();
+    const c = neverConsumedExpiryCounters();
+    expect(c.by_node["stuck-node"]).toBe(1);
+    expect(c.total).toBe(1);
+    expect(typeof c.since).toBe("string");   // 窗口左端必须在，否则「归零」与「没发生」同值
+  });
+
+  test("🔴 负数用例：**已消费**后过期的任务 ⇒ 计数不动（那不是「没人取」）", () => {
+    seedTask("t_consumed_1", { toName: "busy-but-alive", consumed: true });
+    patrolExpiredTasks();
+    expect(neverConsumedExpiryCounters().total).toBe(0);
+  });
+
+  test("按节点分桶：两个节点各一条 ⇒ 各自 1，总数 2", () => {
+    seedTask("t_a", { toName: "node-a", consumed: false });
+    seedTask("t_b", { toName: "node-b", consumed: false });
+    patrolExpiredTasks();
+    const c = neverConsumedExpiryCounters();
+    expect(c.by_node).toEqual({ "node-a": 1, "node-b": 1 });
+    expect(c.total).toBe(2);
+  });
+
+  test("同一个节点连续 N 次 ⇒ 累加（这是「这一台从来不吃活」的证据形态）", () => {
+    for (let i = 0; i < 4; i += 1) noteNeverConsumedExpiry("ghost-node");
+    expect(neverConsumedExpiryCounters().by_node["ghost-node"]).toBe(4);
+  });
+
+  test("桶按名字排序且空桶不出现 —— 读数要能直接对比两次快照", () => {
+    noteNeverConsumedExpiry("z-node");
+    noteNeverConsumedExpiry("a-node");
+    const c = neverConsumedExpiryCounters();
+    expect(Object.keys(c.by_node)).toEqual(["a-node", "z-node"]);
+  });
+});

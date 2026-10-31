@@ -122,6 +122,7 @@ import { createProductionSideThreadTransport } from "./side-thread-production.js
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
 import { taskRejectionCounters } from "./rejection-counters.js";
+import { neverConsumedExpiryCounters, noteNeverConsumedExpiry } from "./expiry-counters.js";
 import { legacyLicenseField, licenseStateOf } from "./license-state.js";
 import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
@@ -1889,7 +1890,7 @@ export function patrolExpiredTasks(): void {
       // report_status match. Leave it for the node to finish. A consumed_at
       // stamped AFTER the deadline (late receipt replay) does not save it.
       const due = db.all<ExpiredTaskRow>(
-        `SELECT task_id, network_id, from_name, from_node_id, to_name, content, created_at, expires_at, parent_task_id, meta_json
+        `SELECT task_id, network_id, from_name, from_node_id, to_name, to_node_id, content, created_at, expires_at, consumed_at, parent_task_id, meta_json
            FROM tasks
           WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
             AND status IN ('created', 'delivered')
@@ -1924,7 +1925,15 @@ export function patrolExpiredTasks(): void {
     });
     if (expired.length > 0) {
       console.log(`[patrol] expired ${expired.length} stale task(s)`);
-      for (const task of expired) logTaskEvent(task.task_id, null, "expired", "patrol");
+      for (const task of expired) {
+        logTaskEvent(task.task_id, null, "expired", "patrol");
+        // #3271 —— 只数「**从未取走**」那一批（consumed_at 为空）。
+        // 取走过但没回报完成的（consumed_at < expires_at）不是「没人取」，把它们算进来，
+        // 这个计数就退化成「过期了多少条」——那是另一个更没用的数。
+        if ((task as any).consumed_at === undefined || (task as any).consumed_at === null) {
+          noteNeverConsumedExpiry((task as any).to_name || (task as any).to_node_id || "(unknown)");
+        }
+      }
       // #500 — tell the sender, after commit (task-expiry-notice.ts).
       const notices = notifyExpiredTasks(expired);
       if (notices.length > 0) console.log(`[patrol] sent ${notices.length} expiry notice(s)`);
@@ -3820,7 +3829,12 @@ return Bun.serve({
         // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
         //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。
         //    （历史教训：拿累计值除以 uptime 当速率 ⇒ 分母与分子不独立 ⇒ 刚重启必假阳性。）
-        counters: { since: startedAtIso, task_rejections: taskRejectionCounters() },
+        counters: {
+          since: startedAtIso,
+          task_rejections: taskRejectionCounters(),
+          // #3271 —— 「到死都没被取走」按节点分桶。窗口用同一个 since。
+          task_expiries_never_consumed: neverConsumedExpiryCounters(),
+        },
         // #496 — public, stable capability data. Dashboard upload proxies
         // need the Hub's real limits before opening a streaming request;
         // duplicating these constants client-side creates a silent

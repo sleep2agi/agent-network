@@ -33,6 +33,9 @@ export type ExpiredTaskRow = {
   from_name: string | null;
   from_node_id: string | null;
   to_name: string;
+  /** #3271 —— 有它才能区分「从未取走」与「取走过但没回报完成」。可空：老查询不带这一列。 */
+  consumed_at?: string | null;
+  to_node_id?: string | null;
   content: string | null;
   created_at: string | null;
   expires_at: string | null;
