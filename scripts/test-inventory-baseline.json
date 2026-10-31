@@ -7719,6 +7719,7 @@
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + FRESH in-flight start (< 60s) → refused node_already_starting (not superseded)": 1,
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + NO in-flight row (orphaned state) → self-heals by re-dispatching": 1,
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + STALE in-flight start (> 60s) → supersede old + re-dispatch (converges)": 1,
+  "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the full projection to that agent": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the light projection too": 1,
@@ -15870,6 +15871,7 @@
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + FRESH in-flight start (< 60s) → refused node_already_starting (not superseded)",
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + NO in-flight row (orphaned state) → self-heals by re-dispatching",
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + STALE in-flight start (> 60s) → supersede old + re-dispatch (converges)",
+  "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the full projection to that agent",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the light projection too",
@@ -16302,7 +16304,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "595b69a58e5eeb3d0bf29435b23c8ca4f542b8bc",
+  "commit": "f6c1a974695bbba4b69b5225406c1b4a34061ef6",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

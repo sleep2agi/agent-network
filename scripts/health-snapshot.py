@@ -164,6 +164,23 @@ def main(argv: list[str]) -> int:
     #   混为一谈会造出两种坏门：没有 must-fire 的门，和恒红的门。」）
     # 本脚本此前只回答后者；前者由 check-gates-wired 的「自检实跑」回答 —— 两条来自**不同工具**，
     # 读者不会自己去对。把两者放进同一段输出里，才看得出「今天绿」是哪种绿。
+    # 2026-10-31 —— **成功路径也要报入参**（外部复核 ②：
+    # 「红时打印行列与原因，绿时 why 从不打印 ⇒ 而绿是绝大多数运行；
+    #   凡入参不由仓决定、且成功路径不打印的，都必须进头。」）
+    # 这里的入参有三样不由仓决定：解释器版本、树的状态、L1 是否可达（docker）。
+    # 不打印它们的话，两台机器上的「25/25」看起来是同一个结论。
+    import platform as _platform
+    import subprocess as _sp
+    try:
+        _ref = _sp.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO),
+                       capture_output=True, text=True, timeout=10).stdout.strip() or "unknown"
+        _dirty = bool(_sp.run(["git", "status", "--porcelain"], cwd=str(REPO),
+                              capture_output=True, text=True, timeout=10).stdout.strip())
+    except Exception:  # noqa: BLE001
+        _ref, _dirty = "unknown", None
+    import shutil as _sh
+    print(f"env：ref={_ref} dirty={_dirty} python={_platform.python_version()} "
+          f"docker={'yes' if _sh.which('docker') else 'no'}")
     print(f"对象：scripts/check-*.py {sum(1 for r in rows if r['layer'] == 'gate')} 个 + L0 + L1")
     gate_rows = [r for r in rows if r["layer"] == "gate"]
     can_go_red = sum(1 for r in gate_rows if r.get("can_go_red"))
