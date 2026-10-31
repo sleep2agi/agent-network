@@ -60,7 +60,19 @@ for f in "${FILES[@]}"; do
 done
 
 echo
-echo "逐文件结果：PASS=$pass FAIL=$fail（共 ${#FILES[@]} 个文件，每个独立 DB 与进程）"
+# 2026-10-31 —— 守恒式，不是「两个数相等」（外部复核 (b)：
+#   「那条等式在两个分支**真假相反**，不是不变量。改成守恒式
+#    `EXECUTED_L1 + SKIP_L1 == grep -c …`，还能抓『写在嵌套 if 里、既没执行也没登记』的行。」）
+# 这里对应的是：**列出来的文件数 == PASS + FAIL**。
+# 少一个文件不会报错，只会让汇总看起来更小 —— 而「更小」读起来像「更少失败」。
+TOTAL=${#FILES[@]}
+if [ $((pass + fail)) -ne "$TOTAL" ]; then
+  echo "✗ 守恒式不成立：列出 $TOTAL 个文件，但只统计到 PASS=$pass FAIL=$fail" >&2
+  echo "  ⇒ 有文件既没记 PASS 也没记 FAIL（跑到一半退出 / 被 timeout 杀掉）——这是**没有读数**，不是通过" >&2
+  exit 2
+fi
+
+echo "逐文件结果：PASS=$pass FAIL=$fail ｜ 列出 $TOTAL ｜ 守恒 $((pass + fail))==$TOTAL（每个文件独立 DB 与进程）"
 if [ $fail -ne 0 ]; then
   echo "  ⇒ 失败文件：$failed_list" >&2
   exit 1
