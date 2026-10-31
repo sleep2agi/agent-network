@@ -135,7 +135,10 @@ describe("happy path from a node", () => {
       "scheduled_for", "status", "task_id", "work_outcome", "work_outcome_node_id"]);
     expect(runs.runs.map((x: any) => x.task_id)).toContain(r.taskId);
 
-    expect(await mcp(node.a.token, "schedule_cancel", { schedule_id: s.schedule_id })).toEqual({ ok: true, status: "cancelled" });
+    // #3275 批次 2 —— 先接住再断言（同变量口径）；值本来就是闭集，缺的只是「它是一条断言的对象」。
+    const cancelled = await mcp(node.a.token, "schedule_cancel", { schedule_id: s.schedule_id });
+    expect(Object.keys(cancelled).sort()).toEqual(["ok", "status"]);
+    expect(cancelled).toEqual({ ok: true, status: "cancelled" });
     expect((await mcp(node.a.token, "schedule_get", { schedule_id: s.schedule_id })).schedule.status).toBe("cancelled");
     expect((await mcp(node.a.token, "schedule_run_now", { schedule_id: s.schedule_id })).error).toBe("schedule_cancelled");
   });
@@ -160,6 +163,8 @@ describe("happy path from a node", () => {
 
   test("a schedule for another node the caller can send_task to; the target can read it but not change it", async () => {
     const c = await create("a", { target_node_id: node.b.id });
+    // 与外层同族但**各自钉**：同族不共享形状这件事今晚已经被 checklist_toggle 打过一次脸。
+    expect(Object.keys(c).sort()).toEqual(["ok", "schedule"]);
     expect(c.ok).toBe(true);
     const id = c.schedule.schedule_id;
     expect((await mcp(node.b.token, "schedule_list")).schedules.map((x: any) => x.schedule_id)).toContain(id);
@@ -180,6 +185,8 @@ describe("happy path from a node", () => {
     expect(r.status).toBe(201);
     const id = r.body.schedule.schedule_id;
     const got = await mcp(node.a.token, "schedule_get", { schedule_id: id });
+    // #3275 批次 2 —— schedule_get / schedule_create 的外层都是 {ok, schedule}（实测）。
+    expect(Object.keys(got).sort()).toEqual(["ok", "schedule"]);
     expect(got.schedule.created_by_node_id).toBeNull();
     expect((await mcp(node.a.token, "schedule_runs", { schedule_id: id })).ok).toBe(true);
     expect((await mcp(node.a.token, "schedule_list")).schedules.map((x: any) => x.schedule_id)).toContain(id);
