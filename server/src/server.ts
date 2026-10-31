@@ -1048,6 +1048,16 @@ export interface HealthFieldMeta {
    */
   arbiter?: string;
   /**
+   * 2026-10-31 —— **身份三分类**（外部复核那条：产物属性 / 调用属性 / 声明）。
+   *
+   *   artifact     换调用方式不变（例：产物里注入的 commit）⇒ 它是「运行的是什么」的权威
+   *   call         换 cwd / 命令行就变（例：运行时读 RELEASE_COMMIT）⇒ 它描述「怎么被启动的」
+   *   declaration  写它的人影响不了它在跑什么（例：version）⇒ 它是标签，不是事实
+   * ⇒ 三类混在一起且不标注，就是「六个身份」的根。
+   * 每个问题**恰好一个** artifact 类权威；若存在 call 类覆盖，必须能被看出来（root_kind）。
+   */
+  identity_class?: "artifact" | "call" | "declaration";
+  /**
    * 单向字段必填 —— 另一支**在任何部署里都不会出现**的原因。
    * 与 verdict_other_branch 是同一件事的两面：
    *   前者答「我没有实现那一支」，后者答「我实现了，但你要怎样才看得到」。
@@ -1088,7 +1098,12 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
     granularity: "boolean",
     constant_by_design: "200 是 watchdog 契约下的承诺 ⇒ 这一支只有 true；非 200 时读者根本拿不到这个字段（另一支在传输层，不在载荷里）",
   },
-  version: { class: "gauge", granularity: "label", why: "粗粒度版本号；精确字节身份由 git_commit 承担，而它不匿名" },
+  version: {
+    class: "gauge",
+    granularity: "label",
+    why: "粗粒度版本号；精确字节身份由 git_commit 承担，而它不匿名",
+    identity_class: "declaration",
+  },
   version_role: {
     class: "gauge",
     granularity: "label",
@@ -1182,7 +1197,12 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   },
 
   // ── landmark：精确位置/身份 ──────────────────────────────────────────
-  git_commit: { frozen_at_boot: true, class: "landmark", why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单" },
+  git_commit: {
+    frozen_at_boot: true,
+    class: "landmark",
+    why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单",
+    identity_class: "artifact",
+  },
   git_dirty: { class: "landmark" },
   status: {
     class: "gauge",
@@ -1193,6 +1213,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   status_reasons: { class: "gauge", granularity: "level" },
   git_identity_root: {
     class: "landmark",
+    identity_class: "call",
     why: "commit 是从**模块目录**（制品所在处）读的，还是退回 **cwd** 读的；后者会把启动目录里另一个仓库的身份报成本包的身份",
   },
   build_identity_note: {

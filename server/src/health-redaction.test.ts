@@ -726,7 +726,25 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     //   verdict 是判定（"ok"/"degraded"）⇒ 若另一支不可观测，它就不是判定而是装饰
     // 起因：一次复核提议给 /health 加 `ptyWsAttached`，而 attach 在 listen 回调里无条件执行
     // ⇒ true 恒成立、false 不可观测 ⇒ 这个字段永远只有一个读数，正是被审的「一侧不可达」缺陷本身。
-    // 2026-10-31 —— **身份是从哪个根读的**（外部复核那条：release 读的是 cwd，不是可执行文件目录）。
+    // 2026-10-31 —— **身份三分类，且恰好一个权威**（外部复核：产物属性 / 调用属性 / 声明）。
+  // 「三类混在一起且不标注，就是『六个身份』的根。」
+  test("identity fields carry a class; exactly one artifact-class authority", async () => {
+    const { HEALTH_FIELD_META } = await import("./server.js");
+    const rows = Object.entries(HEALTH_FIELD_META).filter(([, m]: any) => m.identity_class);
+    const cls = (r: [string, any]) => r[1].identity_class;
+    // 三类都必须有代表（否则分类只是给已有字段贴了个词）
+    for (const want of ["artifact", "call", "declaration"]) {
+      expect(rows.filter((r) => cls(r as [string, any]) === want).length).toBeGreaterThanOrEqual(1);
+    }
+    // **恰好一个 artifact 类权威** —— 两个权威等于回到「谁说了算」
+    expect(rows.filter((r) => cls(r as [string, any]) === "artifact").length).toBe(1);
+    // 有 call 类覆盖时，必须同时存在 artifact 类（否则「怎么被启动的」在冒充「跑的是什么」）
+    if (rows.some((r) => cls(r as [string, any]) === "call")) {
+      expect(rows.some((r) => cls(r as [string, any]) === "artifact")).toBe(true);
+    }
+  });
+
+  // 2026-10-31 —— **身份是从哪个根读的**（外部复核那条：release 读的是 cwd，不是可执行文件目录）。
   // 我们优先模块目录，只在拿不到时退回 cwd —— 但若没有字段说明是哪一支，
   // 「读到的是本包的身份」与「读到的是启动目录里另一个仓库」在载荷上完全同形。
   test("git identity says which root it came from (module_dir vs cwd)", async () => {
