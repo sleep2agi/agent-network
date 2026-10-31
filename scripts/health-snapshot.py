@@ -70,8 +70,15 @@ def gates(timeout: int) -> list[dict]:
     out: list[dict] = []
     for p in sorted(GATES_DIR.glob("check-*.py")):
         if p.name in NEEDS_INPUT:
+            # 2026-10-31 —— 「这次没喂输入」与「它不会红」是两件事。
+            # 前者是 not-run（状态），后者是能力问题（can_go_red）。
+            # 原来这里直接 continue ⇒ 需要输入的门被记成「不能证明会红」，
+            # 而它其实有 --selftest、只是不依赖那份输入。
+            interp_nei = {"": [sys.executable], ".py": [sys.executable], ".sh": ["bash"], ".mjs": ["node"]}.get(
+                p.suffix, [sys.executable])
+            self_rc_nei, _ = run(interp_nei + [str(p.relative_to(REPO)), "--selftest"], timeout)
             out.append({"layer": "gate", "name": p.name, "exit": None, "state": "not-run",
-                        "detail": f"未运行：{NEEDS_INPUT[p.name]}"})
+                        "detail": f"未运行：{NEEDS_INPUT[p.name]}", "can_go_red": self_rc_nei == 0})
             continue
         args = [sys.executable, str(p.relative_to(REPO))] + GATE_ARGS.get(p.name, [])
         rc, txt = run(args, timeout)
