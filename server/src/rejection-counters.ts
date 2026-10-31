@@ -126,4 +126,29 @@ export function taskRejectionCounters(): {
 /** 测试用：清空。生产路径不调用。 */
 export function resetTaskRejectionCounters(): void {
   REJECTION_COUNTS.clear();
-}
+}/**
+ * 2026-10-31 —— 出口清单**导出成数据**（外部复核 ②：「那张表的分母本身需要一个来源」）。
+ *
+ * 以前这六行只活在注释里：加一个中间件时，注释不会自己变，而「覆盖 2/6」这个比例
+ * 也没人知道分母从哪来。⇒ 现在它是数据，测试会断言：
+ *   · 行数恰好 6（有变化就必须改测试，而不是让注释漂）
+ *   · 每个 `counted: true` 的位置都有 must-fire 用例覆盖
+ *   · 每个 `counted: false` 的位置都有「已知缺口」用例钉住（防止它悄悄被修好而报告仍写 0/6）
+ */
+export const TASK_REJECTION_EXITS: ReadonlyArray<{
+  /** 位置（谁在那里拒绝）——分类键选位置，不选失败种类（种类会漂，位置不会） */
+  position: string;
+  /** 这个位置拒绝时，task_rejections 计数器会不会 +1 */
+  counted: boolean;
+  /** 钉住这一行的测试名（空串 = 还没有测试，属于缺口） */
+  pinned_by: string;
+}> = [
+  { position: "before_auth_middleware", counted: false, pinned_by: "KNOWN GAP: unauthenticated /api/task rejection is NOT counted" },
+  { position: "before_route_table", counted: false, pinned_by: "" },
+  { position: "before_fetch_runtime_body_limit", counted: false, pinned_by: "" },
+  { position: "handler_parse", counted: true, pinned_by: "malformed JSON on /api/task IS counted" },
+  { position: "handler_validate_or_permission", counted: true, pinned_by: "a real rejected /api/task actually bumps the counter" },
+  { position: "error_hook_500", counted: false, pinned_by: "" },
+];
+
+

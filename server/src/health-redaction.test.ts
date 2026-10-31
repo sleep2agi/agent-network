@@ -188,6 +188,22 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(after.counters.task_rejections.total).toBe(beforeTotal);
   });
 
+  // 2026-10-31 —— **出口清单的分母要有来源**（外部复核 ②）：
+  // 六行以前只活在注释里；现在它是数据，这条断言把「表」与「钉住它的测试」绑在一起。
+  test("rejection exit inventory: 6 rows, and every counted row names a pinning test", async () => {
+    const { TASK_REJECTION_EXITS } = await import("./rejection-counters.js");
+    expect(TASK_REJECTION_EXITS.length).toBe(6);
+    // counted 的位置必须有测试钉住（空串 ⇒ 缺口，红）
+    for (const row of TASK_REJECTION_EXITS) {
+      if (row.counted) expect(row.pinned_by.length).toBeGreaterThan(0);
+    }
+    // 反过来：未计数的位置若已有测试钉住，名字必须非空 —— 否则「钉住了」只是注释
+    const pinnedNames = TASK_REJECTION_EXITS.map((r) => r.pinned_by).filter(Boolean);
+    expect(pinnedNames.length).toBeGreaterThanOrEqual(3);
+    // 位置名必须唯一（否则两行描述同一处，比例就重复计了）
+    expect(new Set(TASK_REJECTION_EXITS.map((r) => r.position)).size).toBe(TASK_REJECTION_EXITS.length);
+  });
+
   // 2026-10-31 —— parser 级拒绝在本仓**是**被计数的，因为我们在 handler 内 await req.json()。
   // 与 Express 恰好相反（express.json() 走 next(err) ⇒ 错误中间件 ⇒ 不计）。
   // ⇒ 这类出口的归属取决于 parser 放在哪，而不是取决于框架。
