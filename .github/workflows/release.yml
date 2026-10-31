@@ -211,7 +211,11 @@ jobs:
         run: |
           set -euo pipefail
           # npm pack honors prepublishOnly + .npmignore, exactly what `npm publish` would ship
-          tarball=$(npm pack --json | bun -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(a[0].filename)')
+          # 2026-10-31 —— 解析要能容忍**前缀杂质**：任何一个 lifecycle 脚本（我们新加的 prepack
+          # 就是）只要往 stdout 打一行，`JSON.parse(整个 stdout)` 就会失败 ⇒ tarball 为空 ⇒
+          # 这条 stage 红（实测：0.9.0-preview.247 的 build 就是这么红的）。
+          # 做法：先取 n 个**提示而不判据**，再从输出里截出第一段 `[`…`]` 交给 JSON.parse。
+          tarball=$(npm pack --json | bun -e 'const s=require("fs").readFileSync(0,"utf8");const i=s.indexOf("["),j=s.lastIndexOf("]");if(i<0||j<0)throw new Error("no JSON array in npm pack output");const a=JSON.parse(s.slice(i,j+1));console.log(a[0].filename)')
           echo "tarball=${{ steps.resolve.outputs.dir }}/$tarball" >> "$GITHUB_OUTPUT"
           ls -la "$tarball"
 

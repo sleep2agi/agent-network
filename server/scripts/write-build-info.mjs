@@ -71,4 +71,6 @@ const payload = {
   source: picked.source,
 };
 writeFileSync(outPath, `${JSON.stringify(payload, null, 2)}\n`);
-console.log(`[build-info] wrote ${outPath} (commit=${payload.commit.slice(0, 12)} dirty=${payload.dirty} source=${payload.source})`);
+// ⚠️ 必须走 stderr：这个脚本由 `prepack` 触发，而发布流程用 `npm pack --json` 解析 stdout。
+// 实测：写 stdout 一行就把 JSON 前缀污染，`JSON.parse` 失败 ⇒ tarball 名为空 ⇒ 构建 stage 红。
+console.error(`[build-info] wrote ${outPath} (commit=${payload.commit.slice(0, 12)} dirty=${payload.dirty} source=${payload.source})`);
