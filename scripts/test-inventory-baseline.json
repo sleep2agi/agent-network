@@ -16269,5 +16269,10 @@
   "tests/test906-provider-create/core.test.ts::actual CLI initializes an isolated API-key child, no login copy; exact replay is non-mutating",
   "tests/test906-provider-create/core.test.ts::create doorbell initializes via actual pinned CLI before spawn; conflict makes zero spawn attempts",
   "tests/test906-provider-create/core.test.ts::wrong scope/revision/model refuses before writing credentials or selecting a default"
- ]
+ ],
+ "source": {
+  "command": "python3 scripts/check-test-inventory.py --update",
+  "commit": "645873d88821e824aecc9fe61f34d0d1674a2b97",
+  "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
+ }
 }

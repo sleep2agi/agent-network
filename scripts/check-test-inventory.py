@@ -442,9 +442,30 @@ def main() -> int:
     #   · 在新 describe 里合法地起同一个名字 ⇒ 也会 +1 ⇒ 需要 --update 并说明
     #     （代价是一次显式动作；换来的是「静默多出一条」不再可能）
     if "--update" in sys.argv:
+        # 2026-10-31 —— 外部复核 ③：「自动生成产物的 diff 必须包含『为什么变』，
+        # 而不只是『变了多少』—— 只含增量的 diff 无法被评审，只能被接受。
+        #   --update：diff 里只有数字变化 ⇒ 评审无法从 diff 判断「为什么变」
+        #   CUTOFF_COMMIT：diff 里出现一个 sha，而那个 sha 里有没有债务，别人能独立算」
+        # ⇒ 本基线写入时同时记 source 三元（与「棘轮存的是命令不是数」同构）：
+        #   谓词 / 命令 / 生成时的 commit。改了基线，diff 里就有一个可独立复核的 sha。
+        try:
+            src_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(Path(__file__).resolve().parents[1]), text=True).strip()
+        except Exception:  # noqa: BLE001
+            src_commit = ""
         baseline_path.write_text(
             json.dumps(
-                {"names": sorted(current), "counts": counts, "dynamic": dynamic},
+                {
+                    "names": sorted(current),
+                    "counts": counts,
+                    "dynamic": dynamic,
+                    "source": {
+                        "commit": src_commit,
+                        "command": "python3 scripts/check-test-inventory.py --update",
+                        "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限",
+                    },
+                },
                 ensure_ascii=False,
                 indent=1,
                 sort_keys=True,
@@ -467,6 +488,17 @@ def main() -> int:
     baseline = set(raw["names"])
     baseline_dynamic = raw.get("dynamic")
     baseline_counts = raw.get("counts")
+    src = raw.get("source") or {}
+    if not src:
+        print("⚠ 基线里没有 source 三元（旧格式）⇒ 本次无法报「为什么变」；下次 --update 会写入", file=sys.stderr)
+    else:
+        c = str(src.get("commit") or "")
+        ok_sha = len(c) == 40 and all(ch in "0123456789abcdef" for ch in c)
+        print(f"  baseline_source_commit: {c[:12] if ok_sha else f'✗ 非法 sha {c!r}'}"
+              f"（本基线由 `{src.get('command','?')}` 生成）")
+        if not ok_sha:
+            print("✗ source.commit 不是 40 位 hex ⇒ 这份基线无法被独立复核", file=sys.stderr)
+            return 1
 
     # ① 多重集棘轮：同名出现次数不许增加（集合对重数失明）
     if isinstance(baseline_counts, dict):
