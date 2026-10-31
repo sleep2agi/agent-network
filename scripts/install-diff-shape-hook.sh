@@ -20,7 +20,13 @@
 set -uo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "✗ 不在 git 仓库里" >&2; exit 2; }
-HOOK="$ROOT/.git/hooks/commit-msg"
+# 2026-10-31 —— 在 **worktree** 里 `.git` 是一个文件（指向 worktree 的 gitdir），不是目录。
+# 原来这里写死 `$ROOT/.git/hooks/commit-msg`：mkdir -p 会在一个**文件**下面建目录、必然失败，
+# 而脚本仍然打印「✓ 已安装」⇒ 钩子根本不存在，`diffShape.enabled=true` 也永远不会生效。
+# 这正是「一道无法被转红的门」的变体：门没装上，而报告说装上了。
+# 用 `git rev-parse --git-path hooks` —— 它自己会解析 worktree / submodule / core.hooksPath。
+HOOKS_DIR="$(git rev-parse --git-path hooks)"
+HOOK="$HOOKS_DIR/commit-msg"
 
 if [ "${1:-}" = "--uninstall" ]; then
   if [ -f "$HOOK" ] && grep -q "diffShape" "$HOOK"; then
@@ -31,7 +37,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
-mkdir -p "$ROOT/.git/hooks"
+mkdir -p "$HOOKS_DIR"
 cat > "$HOOK" <<'HOOK_BODY'
 #!/usr/bin/env bash
 # 由 scripts/install-diff-shape-hook.sh 安装（diffShape）。改形状：提交信息必须写 `Diff-Shape: +A/-D`。
@@ -56,6 +62,8 @@ fi
 exit 0
 HOOK_BODY
 chmod +x "$HOOK"
+# 装完必须**读回来**：一个「打印了 ✓ 但文件不在」的安装脚本，与没装是同一件事。
+[ -x "$HOOK" ] || { echo "✗ 安装后 $HOOK 不可执行 —— 没有装上" >&2; exit 1; }
 echo "✓ 已安装 $HOOK"
 echo "  启用：git config --local diffShape.enabled true"
 echo "  停用：git config --local diffShape.enabled false（不必卸载）"
