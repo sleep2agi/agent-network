@@ -716,6 +716,27 @@ def main() -> int:
     if missing:
         print(f"  ✗ 扫描域缺族：{missing} —— 这一族的文件没进来，「0 处」不代表它们干净", file=sys.stderr)
         return 1
+    # 2026-10-31 —— **分隔符分布**（外部复核 ①：48 个点里逗号 31、NUL 11、空格 6；
+    # 「逗号攻击不需要任何转义：{"generation,name":"x"} 直接 exact()=true」）。
+    # 括号可碰撞性是同一件事，但**成本不同**：NUL 要动脑子，逗号能直接敲。
+    # ⇒ 同一个「0 阻塞」下面，读者的下一步动作取决于这些点用的是哪种分隔符。
+    from collections import Counter as _SepCounter
+    _seps = _SepCounter()
+    for _p in collect(Path(__file__).resolve().parent.parent):
+        try:
+            _t = _p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for _m in SET_JOIN.finditer(_t):
+            _seps[_m.group(1).strip() or "<default:,>"] += 1
+    if _seps:
+        _top = ", ".join(f"{k}×{v}" for k, v in _seps.most_common(6))
+        print(f"  separators     : {_top}")
+        def _is_comma(k: str) -> bool:
+            t = k.strip().strip("\"'")
+            return k == "<default:,>" or t.startswith(",")
+        _commaish = sum(v for k, v in _seps.items() if _is_comma(k))
+        print(f"                   ⇒ 其中**逗号族 {_commaish} 处**：这类碰撞不需要任何转义（加一个键名即可）")
     print(f"  measured_on    : {_measured_on(Path(__file__).resolve().parent.parent)}")
     print("                   —— 换一棵树，上面几行 covers 描述的就是另一个仓库")
     # threat_model 回答「挡得住什么」，failure_mode 回答「挡不住时会怎样」——
