@@ -59,6 +59,44 @@ def triggers(text: str) -> tuple[str, str]:
     return "none", "未识别的触发条件"
 
 
+SELFTEST_EXPECTED = 5
+
+
+def selftest(quiet: bool = False) -> int:
+    """五例：auto(push) / auto(schedule) / manual / none(无 on:) / 未识别。
+
+    为什么要自检：这门的全部价值在于把「可触发」拆成三态，
+    而**「手动」是最容易被误写成「自动」的那一态** —— 判定逻辑一旦回归，
+    所有 workflow 会一起显示成「在保护我们」。
+    """
+    cases = [
+        ("on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n", "auto"),
+        ("on:\n  schedule:\n    - cron: '0 3 * * *'\njobs:\n  a:\n", "auto"),
+        ("on: workflow_dispatch\njobs:\n  a:\n", "manual"),
+        ("jobs:\n  a:\n", "none"),
+        ("on: \njobs:\n  a:\n", "none"),
+    ]
+    fails = 0
+    for text, want in cases:
+        got, detail = triggers(text)
+        ok = got == want
+        if not ok:
+            fails += 1
+            if not quiet:
+                print(f"  ✗ 期望 {want} 实际 {got}（{detail}）")
+        elif not quiet:
+            print(f"  ✓ {want}: {detail}")
+    if len(cases) != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {len(cases)}", file=sys.stderr)
+        return 1
+    if fails:
+        print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {SELFTEST_EXPECTED}/{SELFTEST_EXPECTED} 通过")
+    return 0
+
+
 def _probe(cmd: list[str]) -> tuple[bool, str]:
     """跑一条探针命令，返回 (能不能在这里跑, 依据)。
 
@@ -98,6 +136,11 @@ def report_layers() -> int:
 
 
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     if "--layers" in sys.argv:
         return report_layers()
 
