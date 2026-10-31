@@ -7455,14 +7455,19 @@ async function processConfigUpdate(): Promise<void> {
     }
     if (mode === "hot" && update.patch.model && RUNTIME === "opencode" && OPENCODE_GENERATION === "v2") {
       const session = opencodeCopresenceSession;
-      if (!session?.isRunning || !session.setSelectedModel) {
-        await callCommHub("ack_config_update", {
-          update_id: updateId,
-          status: "rejected",
-          error: "OpenCode V2 session is not running; model was not changed",
-        });
-        return;
+      // #3166 —— 这一支原来 ack rejected 后 return（模型改动**根本没发生**）。
+      // 与上面 7431 那段「会话不在 ⇒ 降级重启」的说法自相矛盾，而这里才是实际执行到的那个。
+      // 现在统一成同一条哲学：切模型要的是结果 ⇒ 失败了降级重启，绝不 ack rejected 了事。
+      const hotUsable = session?.isRunning === true && typeof session.setSelectedModel === "function";
+      if (!hotUsable) {
+        warn(`[config-apply] hot model switch unavailable at apply time `
+          + `(session=${session?.isRunning === true ? "running" : "not-running"}, `
+          + `setSelectedModel=${typeof session?.setSelectedModel === "function" ? "present" : "missing"}); degrading to restart`);
+        mode = "restart";
       }
+      // 只有真正可用时才走「切 + 写配置 + ack applied」这一串；
+      // 降级时**必须跳过它**，否则会 ack 一个没发生的 applied。
+      if (hotUsable) {
       // #1976 —— 切换 + 写配置 + ack 一起有上限。超时的多半是「这台机器没有这个模型」。
       try {
         await withDeadlineMs(
@@ -7480,18 +7485,11 @@ async function processConfigUpdate(): Promise<void> {
         const errName = typeof switchErr?.name === "string" ? switchErr.name : "Error";
         const rawCode = typeof switchErr?.code === "string" ? switchErr.code : "";
         const errCode = /^[A-Za-z0-9_.-]{1,64}$/.test(rawCode) ? rawCode : "unknown";
-        warn(`[config-apply] OpenCode V2 model switch failed: ${reason}`);
-        // 失败路径的 ack 也要有上限:一次就够,别在「拒绝」这件事上再等 4×30s。
-        try {
-          await callCommHub("ack_config_update", {
-            update_id: updateId,
-            status: "rejected",
-            error: `OpenCode session model switch failed: ${errName}/${errCode}`,
-          }, 0);
-        } catch (ackErr: any) {
-          warn(`[config-apply] ack rejected failed: ${ackErr?.message || ackErr}`);
-        }
-        return;
+        warn(`[config-apply] OpenCode V2 model switch failed (${errName}/${errCode}): ${reason}; degrading to restart`);
+        // #3166 —— 原来这里 ack rejected 后 return：**用户的模型改动没有发生**，
+        // 而他点的是「切模型」。改成降级重启（模型一定生效，代价是一次重启）。
+        // 方向与 #2050 不冲突：那条是「hot 能力缺失不得否决 hub 请求的重启」，这里是反方向。
+        mode = "restart";
       }
       const backup = backupOpencodeConfig(configFilePath);
       const merged = mergePatch(fileConfig, { model: update.patch.model });
@@ -7505,9 +7503,10 @@ async function processConfigUpdate(): Promise<void> {
         status: "applied",
         new_revision: currentConfigRevision,
       });
-      log(`[config-apply] OpenCode V2 session model=${update.patch.model} (no restart, .prev backedUp=${backup.backedUp})`);
-      void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
-      return;
+        log(`[config-apply] OpenCode V2 session model=${update.patch.model} (no restart, .prev backedUp=${backup.backedUp})`);
+        void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
+        return;
+      }
     }
     const backup = RUNTIME === "opencode"
       ? backupOpencodeConfig(configFilePath)
