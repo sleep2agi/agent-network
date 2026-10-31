@@ -116,8 +116,18 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect(db.get("SELECT bound_node_id FROM api_tokens WHERE token_id='owner678_legacy'").bound_node_id).toBeNull();
   for (const token of [legacy, bound]) {
     expect((await call(token, "list_my_children")).ok).toBe(true);
-    expect((await call(token, "list_my_pending_create_requests")).ok).toBe(true);
-    expect((await call(token, "list_my_pending_lifecycle_requests")).ok).toBe(true);
+    // 2026-10-31 —— #3275 批次 2：这两条是 **SSE 重连补偿**的入口（漏了门铃节点会卡死），
+    // 客户端按字段名读；键集从未被钉住。改为 `const` 赋值，顺便让严格口径能数到它们。
+    const pendCreate = await call(token, "list_my_pending_create_requests");
+    expect(pendCreate.ok).toBe(true);
+    expect(Object.keys(pendCreate).sort()).toEqual(["clone_count", "clone_requests", "count", "ok", "requests"]);
+
+    const pendLife = await call(token, "list_my_pending_lifecycle_requests");
+    expect(pendLife.ok).toBe(true);
+    expect(Object.keys(pendLife).sort()).toEqual(["ok", "start_count", "start_requests", "stop_count", "stop_requests"]);
+    // 计数与数组同源：两个 count 必须等于各自数组长度（否则「有 N 条」与「列出来」会分叉）
+    expect(pendLife.stop_count).toBe(pendLife.stop_requests.length);
+    expect(pendLife.start_count).toBe(pendLife.start_requests.length);
     expect((await call(token, "get_adopt_request", { request_id: requestId })).ok).toBe(true);
   }
   // An explicit binding does not bypass the network or revocation boundaries.
