@@ -16302,7 +16302,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "0e8bbe4113eeccfd1663a901f4b0e0a7c132daf3",
+  "commit": "3fe70ccac634479428de252bd38b408fa9d7a87c",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

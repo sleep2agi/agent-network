@@ -136,7 +136,8 @@ describe("send + history", () => {
     expect(r.status).toBe(200);
     expect(r.body.duplicate).toBe(false);
     expect(r.body.message).toMatchObject({ group_id: GRP.rd, network_id: NET, sender_user_id: U.alice.id, from_session: U.alice.username, content: "大家好", kind: "group_message", direction: "out", meta_json: null });
-    expect(typeof r.body.message.seq).toBe("number");
+    expect(Number.isInteger(r.body.message.seq)).toBe(true);
+    expect(r.body.message.seq).toBeGreaterThanOrEqual(1);   // seq 从 1 起；类型不是断言
     expect(r.body.message.created_at).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}$/);
     const audits = db.all<{ target_id: string }>("SELECT target_id FROM audit_log WHERE action = 'chat_group_message_sent' AND user_id = ?1", U.alice.id);
     expect(audits.map((x) => x.target_id)).toEqual([GRP.rd]);

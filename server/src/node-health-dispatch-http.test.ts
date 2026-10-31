@@ -168,7 +168,8 @@ describe("#460 REST /api/task", () => {
     expect(r.body.message).toContain("App Server 断开");
     expect(r.body.hint).toContain("force=true");
     expect(r.body.force_allowed).toBe(true);
-    expect(typeof r.body.health_observed_ms_ago).toBe("number");
+    expect(Number.isFinite(r.body.health_observed_ms_ago)).toBe(true);
+    expect(r.body.health_observed_ms_ago).toBeGreaterThanOrEqual(0);   // 类型不是断言
     expect(taskCount()).toBe(before);
   });
 

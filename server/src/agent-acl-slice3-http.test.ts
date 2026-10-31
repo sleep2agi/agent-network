@@ -354,7 +354,8 @@ describe("update_node_config 响应键集（exact key set）", () => {
 
       const gs = await tool(adminToken, "get_session_status", { alias: "acl3-agent-x", network_id: NET });
       expect(Object.keys(gs).sort()).toEqual(["inbox_pending", "ok", "recent_completions", "session"]);
-      expect(typeof gs.inbox_pending).toBe("number");
+      expect(Number.isInteger(gs.inbox_pending)).toBe(true);
+      expect(gs.inbox_pending).toBeGreaterThanOrEqual(0);   // 2026-10-31：类型不是断言
       expect(Array.isArray(gs.recent_completions)).toBe(true);
     });
   });
