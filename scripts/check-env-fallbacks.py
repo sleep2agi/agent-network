@@ -65,7 +65,8 @@ KNOWN_ALIAS: dict[tuple[str, str], tuple[str, str]] = {
     ),
     ("OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD"): (
         "测试夹具里的旧名/新名",
-        "当夹具统一到新名 ⇒ 删掉回退",
+        "当夹具统一到新名 ⇒ 删掉回退 ｜ zero-hits-ok: 命中在 fixtures 里，而本门扫描域排除 fixtures"
+        " ⇒ 这一条今天 0 命中是**扫描域**的结果，不是代码里没有；它只对『哪天搬出 fixtures』生效",
     ),
 }
 # 明确判定为「不同概念」的（出现即红）。空 = 本仓目前没有。
@@ -138,10 +139,21 @@ def main(argv: list[str]) -> int:
     bad_alias = [(k, v) for k, v in KNOWN_ALIAS.items()
                  if not (isinstance(v, tuple) and len(v) == 2 and all(str(x).strip() for x in v))]
     borrows = [h for h in hits if (h["a"], h["b"]) in KNOWN_BORROW]
+    # 2026-10-31 —— **闭集不许有死成员**（外部复核 (d)：「命名撞车会让『0 命中』永远不可复跑」）。
+    # 别名表按 (A,B) 对登记、不按文件登记 ⇒ 一条今天 0 命中的登记不算「暂时用不到」，
+    # 而是「它已经不再覆盖任何代码，却仍然对**未来任何文件**生效」——
+    # 这正是白名单腐化后的形态：只加不减，每条都有理由。
+    # ⇒ 0 命中的条目必须**自己说清为什么**（zero-hits-ok: …），否则红。
+    seen_pairs = {(h["a"], h["b"]) for h in hits}
+    stale = [(k, v) for k, v in KNOWN_ALIAS.items()
+             if k not in seen_pairs and "zero-hits-ok:" not in " ".join(str(x) for x in v)]
     if "--json" in argv:
         print(json.dumps({"files": files, "fallbacks": len(hits), "unregistered": unregistered,
-                          "borrows": borrows}, ensure_ascii=False, indent=2))
-        return 1 if (unregistered or borrows) else 0
+                          "borrows": borrows,
+                          "alias_hits": {f"{k[0]}->{k[1]}": (k in seen_pairs) for k in KNOWN_ALIAS},
+                          "stale_alias": [f"{k[0]}->{k[1]}" for k, _ in stale]},
+                         ensure_ascii=False, indent=2))
+        return 1 if (unregistered or borrows or stale) else 0
     print(f"扫描 {files} 个源文件：跨 env 回退 {len(hits)} 处"
           f"（已登记 alias {len(hits) - len(unregistered) - len(borrows)}，未登记 {len(unregistered)}，borrow {len(borrows)}）")
     for h in unregistered[:12]:
@@ -152,7 +164,13 @@ def main(argv: list[str]) -> int:
         print(f"    ✗ 别名表条目缺「理由 + 删除条件」：{k[0]} → {k[1]}（{v!r}）", file=sys.stderr)
     if KNOWN_ALIAS:
         print(f"  · 别名表 {len(KNOWN_ALIAS)} 条，每条都带删除条件（示例：{list(KNOWN_ALIAS)[0][0]} → {list(KNOWN_ALIAS)[0][1]}）")
-    if unregistered or borrows or bad_alias:
+    for k, v in stale:
+        print(f"    ✗ 别名表 0 命中且未说明：{k[0]} → {k[1]} ⇒ 它不再覆盖任何代码，"
+              f"却对**未来任何文件**生效；要么删掉，要么写 `zero-hits-ok: <为什么>`.", file=sys.stderr)
+    if KNOWN_ALIAS:
+        counts = "，".join(f"{k[0]}→{k[1]}={sum(1 for h in hits if (h['a'], h['b']) == k)}" for k in KNOWN_ALIAS)
+        print(f"  · 每条登记的命中数：{counts}")
+    if unregistered or borrows or bad_alias or stale:
         print("  ⇒ 每个跨变量回退必须回答：这两个是**同一个概念**吗？"
               "是 ⇒ 登记进 KNOWN_ALIAS；不是 ⇒ 禁止（改成显式判空，别用 || 借）。", file=sys.stderr)
         return 1
