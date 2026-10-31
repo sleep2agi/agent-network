@@ -17,6 +17,7 @@
 // 跑法:cd server && COMMHUB_DB=/tmp/x.db bun test src/task-expiry-notice-http.test.ts
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { resetNeverConsumedExpiryCountersForTest } from "./expiry-counters.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,7 +90,10 @@ const until = async (cond: () => boolean, tries = 150) => { for (let k = 0; k < 
 let seq = 0;
 /** 经 POST /api/task 派一条;返回 task_id。 */
 async function dispatch(token: string, to: string, extra: Record<string, unknown> = {}): Promise<string> {
-  const r = await send(token, "POST", "/api/task", { alias: to, task: `expiry case ${stamp} #${++seq}`, network_id: NET, ...extra });
+  // 2026-10-31 —— 这里**故意**发 expired 任务（本文件测的就是过期通知），
+  // 所以同一目标很快就会攒到 ≥3 次「从未取走」。#3271 的硬闸会因此拒发（这是它的本意：
+  // 不让任务继续堆到一台从不消费的节点上）。测过期通知走的是**人工知情**的路径 ⇒ 带 force。
+  const r = await send(token, "POST", "/api/task", { alias: to, task: `expiry case ${stamp} #${++seq}`, network_id: NET, force: true, ...extra });
   expect(r.status).toBe(200);
   expect(r.body.ok).toBe(true);
   return r.body.task_id;
@@ -138,6 +142,10 @@ beforeAll(async () => {
 }, 30_000);
 
 beforeEach(() => {
+  // 2026-10-31 —— #3271 的硬闸是**进程级**计数：上一条用例攒下的「从未取走」会带到这里，
+  // 于是本文件的下一条用例第一次派发就被拒（我第一次只清在循环里，正是漏了这个）。
+  // 本文件测的是过期通知，不是那道闸 ⇒ 每条用例前清零。
+  resetNeverConsumedExpiryCountersForTest();
   // 每条用例自己的数据:上一条留下的开着的任务不许算进「前面还有几个」,也不许被这一次巡检过期。
   db.run("UPDATE tasks SET status = 'replied', completed_at = datetime('now') WHERE network_id = ?1 AND status IN ('created', 'delivered', 'acked', 'running')", [NET]);
   db.run("DELETE FROM inbox WHERE network_id = ?1 AND id LIKE 'exp_%'", [NET]);
@@ -268,7 +276,10 @@ describe("#500 child task expires", () => {
 describe("#500 one notice per (sender, target) per patrol pass", () => {
   test("5 expiring to the same target → one summarized notice listing all 5", async () => {
     const ids: string[] = [];
-    for (let i = 0; i < 5; i++) ids.push(await dispatch(nodes.sender.token, nodes.target.alias));
+    // 2026-10-31 —— 这里连发 5 条给同一目标，会攒到 #3271 的硬闸阈值（≥3 次从未取走）。
+    // 而本文件测的是**过期通知的合并**，不是那道闸；闸自己的行为在 node-health-dispatch-http 与
+    // expiry-counters.test 里钉着。⇒ 每次派发后清一次进程内计数，把闸本意地旁路掉（并写明理由）。
+    for (let i = 0; i < 5; i++) { ids.push(await dispatch(nodes.sender.token, nodes.target.alias)); resetNeverConsumedExpiryCountersForTest(); }
     // 再来一条派给另一个目标:那是另一组,单独一条。
     const elsewhere = await dispatch(nodes.sender.token, nodes.other.alias);
     for (const id of [...ids, elsewhere]) backdate(id);
