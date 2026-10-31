@@ -46,8 +46,29 @@ ALLOW = {
 ALLOW_LINE = re.compile(r"^\s*license:\s*legacyLicenseField\(")
 
 
+# 2026-10-31 —— **扫描域太窄 = 护栏只保护三分之一**（外部复核 (c) 的原话：
+# 「三个调用点本来就在同一目录，但风险是真的，已扩域」）。
+# 本仓实测：原来的三根 ROOTS 之外，`agent-network/bin/cli.ts` 有 **3 处**真在读 `.license`
+#   （19283/19284/19513：CLI 把 /health 的 license 打出来）。
+# ⇒ 域内（ROOTS）仍是「必须为零」；域外不是豁免，而是**白名单 + 理由**：
+#   新增域外读取 ⇒ 红；白名单条目失效（文件没了 / 那行没了）⇒ 也红。
+KNOWN_OUT_OF_DOMAIN = {
+    ("agent-network/bin/cli.ts", "if (res && res.ok && res.license) {"):
+        "CLI 只读展示：把 /health 的 license 打印给人看，不参与任何判定",
+    ("agent-network/bin/cli.ts", "const lic = res.license;"):
+        "同上（展示用变量）",
+    ("agent-network/bin/cli.ts", 'if (health.license) info("License", health.license);'):
+        "同上（info 一行）",
+}
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.split())
+
+
 def tracked() -> list[Path]:
-    out = subprocess.run(["git", "ls-files", *[f"{r}/*.ts" for r in ROOTS]],
+    """全仓 .ts（不含 *.test.ts）—— 域不再由三根目录决定，而由「域内/域外」分类决定。"""
+    out = subprocess.run(["git", "ls-files", "*.ts"],
                          cwd=REPO, capture_output=True, text=True, timeout=60).stdout
     return [REPO / l for l in out.split("\n") if l.strip() and not l.endswith(".test.ts")]
 
@@ -59,14 +80,43 @@ def scan() -> tuple[list[dict], int]:
             continue
         files += 1
         rel = str(p.relative_to(REPO))
-        if rel in ALLOW:
+        in_domain = any(rel.startswith(r + "/") for r in ROOTS)
+        if in_domain and rel in ALLOW:
             continue
         for i, ln in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             if ln.lstrip().startswith("//") or ln.lstrip().startswith("*"):
                 continue
-            if READ.search(ln) and not ALLOW_LINE.search(ln):
-                hits.append({"file": rel, "line": i, "text": ln.strip()[:120]})
+            if not READ.search(ln):
+                continue
+            if in_domain and ALLOW_LINE.search(ln):
+                continue
+            if not in_domain and (rel, _norm(ln.strip())) in KNOWN_OUT_OF_DOMAIN:
+                continue
+            hits.append({"file": rel, "line": i, "text": ln.strip()[:120], "in_domain": in_domain})
     return hits, files
+
+
+def domain_health() -> list[str]:
+    """域断言：域内三根必须各自还有源文件；域外白名单条目必须**仍然存在**。
+
+    两条都是「域漂移」的抗体：
+      · 某个 ROOT 被改名/删掉 ⇒ 域内变成 0 文件，扫描会静默变宽或变空
+      · 白名单里那行被删了 ⇒ 白名单会静默变成「一张过去的照片」
+    """
+    problems: list[str] = []
+    for root in ROOTS:
+        n = sum(1 for p in tracked() if str(p.relative_to(REPO)).startswith(root + "/") and p.exists())
+        if n == 0:
+            problems.append(f"域内根 {root} 一个源文件都没有 ⇒ 域已漂移")
+    for (rel, text), _why in KNOWN_OUT_OF_DOMAIN.items():
+        p = REPO / rel
+        if not p.exists():
+            problems.append(f"域外白名单条目 {rel} 文件已不存在 ⇒ 白名单是过期照片")
+            continue
+        body = "\n".join(_norm(l) for l in p.read_text(encoding="utf-8", errors="replace").splitlines())
+        if _norm(text) not in body:
+            problems.append(f"域外白名单条目 {rel}: {text!r} 那行已不存在 ⇒ 白名单是过期照片")
+    return problems
 
 
 def selftest(quiet: bool = False) -> int:
@@ -110,6 +160,12 @@ def main() -> int:
     if selftest(quiet=True) != 0:
         print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
         return 2
+    drift = domain_health()
+    if drift:
+        print("✗ 扫描域漂移（先修域，再谈结论）：", file=sys.stderr)
+        for d in drift:
+            print(f"    · {d}", file=sys.stderr)
+        return 1
     hits, files = scan()
     if files == 0:
         print("扫描域为空：一个源文件都没扫到 ⇒ 没有读数", file=sys.stderr)
@@ -118,7 +174,10 @@ def main() -> int:
         print(json.dumps({"object": ROOTS, "files": files, "bypass_reads": hits,
                           "allow": ALLOW}, ensure_ascii=False, indent=2))
         return 1 if hits else 0
-    print(f"对象：{files} 个源文件（不含 *.test.ts）；读取 `.license` 的旁路点：{len(hits)}")
+    in_d = [h for h in hits if h["in_domain"]]
+    out_d = [h for h in hits if not h["in_domain"]]
+    print(f"对象：{files} 个源文件（全仓 .ts，不含 *.test.ts）；读取 `.license` 的旁路点：{len(hits)}")
+    print(f"  分域：域内（{'・'.join(ROOTS)}）{len(in_d)} 处 ｜ 域外 {len(out_d)} 处（白名单 {len(KNOWN_OUT_OF_DOMAIN)} 条）")
     if hits:
         print("✗ 有代码在读兼容字段 `license` —— 它区分不了「没有授权」与「没查到」：", file=sys.stderr)
         for h in hits[:20]:
