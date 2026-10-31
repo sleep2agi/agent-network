@@ -45,7 +45,69 @@ def generate() -> str | None:
     return res.stdout
 
 
+def diff_tables(committed: str, fresh: str) -> dict:
+    """比较两份表的**纯函数**（从 main 里抽出来，才能自检）。
+
+    返回 {identical, gone, new, provenance_changed, rows_committed, rows_fresh}。
+    抽出来的理由很实际：这段比较逻辑今晚修过一次真实崩溃（method=None 时 sorted 抛 TypeError，
+    而且恰好在它要报告「已过期」的场合崩溃）—— 那种地方必须有自检，否则下次还会静默炸。
+    """
+    if committed == fresh:
+        return {"identical": True, "gone": [], "new": [], "provenance_changed": False,
+                "rows_committed": len(json.loads(fresh).get("rows", [])), "rows_fresh": len(json.loads(fresh).get("rows", []))}
+    a, b = json.loads(committed), json.loads(fresh)
+    ra = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in a.get("rows", [])}
+    rb = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in b.get("rows", [])}
+    return {
+        "identical": False,
+        "gone": sorted(ra - rb, key=str),
+        "new": sorted(rb - ra, key=str),
+        "provenance_changed": a.get("provenance") != b.get("provenance"),
+        "rows_committed": len(a.get("rows", [])),
+        "rows_fresh": len(b.get("rows", [])),
+    }
+
+
+def selftest(quiet: bool = False) -> int:
+    """三例：逐字节相同 / 少一行 / 只有 provenance 变（后者也必须报）。"""
+    base = {"rows": [{"path": "/api/a", "method": "GET", "query": [], "line": 1},
+                     {"path": "/api/b", "method": None, "query": ["x"], "line": 2}],
+            "provenance": ["gen from a.ts sha256=aaaa"]}
+    same = json.dumps(base, ensure_ascii=False)
+    fails = 0
+
+    d = diff_tables(same, same)
+    ok = d["identical"] is True
+    if not quiet: print(("✓" if ok else "✗") + " selftest 逐字节相同 ⇒ identical")
+    fails += 0 if ok else 1
+
+    # 方向：committed 是文件（旧），fresh 是现在生成的（新）。
+    # 「文件里少一行」= 源码现在多一行 ⇒ new=1（第一版我写反了方向，自检当场抓到）。
+    dropped = json.dumps({**base, "rows": base["rows"][:1]}, ensure_ascii=False)
+    d = diff_tables(same, dropped)
+    ok = (d["identical"] is False) and len(d["gone"]) == 1 and len(d["new"]) == 0
+    if not quiet: print(("✓" if ok else "✗") + " selftest 文件多一行（源码删了它）⇒ gone=1 / new=0")
+    fails += 0 if ok else 1
+
+    # 关键：method=None 的行必须能参与比较而不抛异常（今晚真实崩溃的那一格）
+    prov = json.dumps({**base, "provenance": ["gen from a.ts sha256=bbbb"]}, ensure_ascii=False)
+    try:
+        d = diff_tables(prov, same)
+        ok = d["provenance_changed"] is True and d["gone"] == [] and d["new"] == []
+    except TypeError:
+        ok = False
+    if not quiet: print(("✓" if ok else "✗") + " selftest 只有 provenance 变 ⇒ 报 provenance（且 method=None 不炸）")
+    fails += 0 if ok else 1
+    if not quiet: print(f"✓ selftest {3 - fails}/3 通过")
+    return 0 if fails == 0 else 1
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     fresh = generate()
     if fresh is None:
         return 2
