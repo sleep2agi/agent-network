@@ -113,6 +113,11 @@ jobs:
         run: |
           python3 scripts/check-tmp-hygiene.py --selftest
           python3 scripts/check-tmp-hygiene.py
+      # 2026-10-31 —— 元门：已接线的门必须**真的跑得起来**（执行 --selftest），
+      # 未接线的门必须登记理由；无 selftest 的欠账名单冻结、不许增长。
+      # 判据来自外部复核 (c)：「文本里提到」不等于「会执行」。
+      - name: every wired gate is wired for real (executes, not text-matches)
+        run: python3 scripts/check-gates-wired.py
       - name: orphan checks that were never executed (now wired)
         run: |
           python3 scripts/check-hub-v2-protocol-inputs.py

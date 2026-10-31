@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""门是否**真的被接线并被跑过** —— 而不是「名字出现在某个 yml 的文本里」。
+
+2026-10-31 —— 外部复核 (c)（原话）：
+    「元门的覆盖关系是**文本包含**（`txt.includes`）：我用一个**只有注释**、挂进 gates.sh 的
+      文件做实验，missing 集合 17→16，消失的正是那个真门。
+      真仓会被阳控拦下，但只钉了 1/10；其余 9 条可被注释买走，
+      而门的提示是『请把 BASELINE 改成 N』⇒ 提示会引导固化假覆盖。」
+
+本仓没有那种「元门」，但有一个更朴素的问题：**新加的门可能根本没进 CI**。
+⇒ 本脚本做两件事，都是**可执行**的，不是文本比对：
+
+  ① 接线检查：scripts/ 下每个可执行的门（带 --selftest 的 check-*/report-*）都必须在
+     .github/workflows/*.yml 里被**调用**；未接线的必须登记理由（KNOWN_UNWIRED）。
+  ② 自检实跑：对已接线的门**真的执行** `<gate> --selftest`，退出码必须是 0。
+     「文本里提到 --selftest」不算数 —— 那正是上面那个洞。
+
+退出码：0 = 全部接线且自检通过 ｜ 1 = 有未接线/自检失败 ｜ 2 = 没有读数（找不到门）。
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+GATE_PATTERNS = ("check-*.py", "report-*.py", "check-*.sh")
+
+# 未接线的门必须在这里给出理由（空着 = 没有例外）
+KNOWN_UNWIRED: dict[str, str] = {
+    "scripts/check-claim-existence.py": "写报告前用的工具，不对代码下结论；不进 CI",
+    "scripts/check-control-run.sh": "本地对照运行工具（需要 git worktree），CI 里没有干净副本的意义",
+    "scripts/check-diff-shape.sh": "提交时用（配合 install-diff-shape-hook.sh），不是 CI 门",
+    "scripts/report-process-artifact-drift.py": "读数报告，非阻塞；有需求再接",
+    "scripts/report-code-producers.py": "读数报告（谁产出某字段），人工按需跑",
+    "scripts/report-mcp-key-set-coverage.py": "读数报告（键集覆盖率三口径），人工按需跑",
+    "scripts/report-node-versions.py": "读数报告（舰队版本分布），人工按需跑",
+    "scripts/report-reason-branches.py": "读数报告（按 reason 分支的处数），人工按需跑",
+    "scripts/report-rest-endpoints.py": "读数报告（路由清单草稿的生成来源），人工按需跑",
+    "scripts/report-table-driven-nonempty.py": "读数报告，人工按需跑",
+}
+# 这些不是「门」，是库或测试工具，不参与接线检查
+NOT_A_GATE: set[str] = set()
+
+# 2026-10-31 —— **已接线但没有 --selftest 的门 = 欠账**（不是错误，但不能增长）。
+# 今晚之前也有「每个门都带 selftest」的说法，实际是 14/26。写死这份名单，让数字可对账：
+#   · 名单里的门出现 ⇒ 记 debt，不判红
+#   · 名单外新接线却没有 selftest ⇒ 红（新增的门必须自带）
+KNOWN_NO_SELFTEST: set[str] = {
+    "scripts/check-doc-claims.py",
+    "scripts/check-doc-source-pins.py",
+    "scripts/check-doc-symbol-pins.py",
+    "scripts/check-hub-launcher-pin.py",
+    "scripts/check-hub-v2-protocol-inputs.py",
+    "scripts/check-mcp-tool-anchor-sections.py",
+    "scripts/check-mcp-tool-index-coverage.py",
+    "scripts/check-rest-route-table.py",
+    "scripts/check-script-references.py",
+    "scripts/report-orphan-tests.py",
+    "scripts/report-script-cadence.py",
+    "scripts/report-workflow-triggers.py",
+    "scripts/check-scope-json.py",
+    # 本脚本自己不提供 --selftest（它跑别人的），否则会自我递归
+    "scripts/check-gates-wired.py",
+}
+
+# 少数门的自检本来就慢（>60s）。**这里不执行它们**，但要在输出里点名：
+# 「有 selftest 但本步没跑」与「没有 selftest」是两件事，不能混成一句「都在跑」。
+KNOWN_SLOW: dict[str, str] = {
+    "scripts/check-mutation-pins.py": "自检约 3 分钟；由它自己的 CI 步骤跑（本步只核对接线与 selftest 存在）",
+}
+
+
+def gates() -> list[Path]:
+    out: set[Path] = set()
+    for pat in GATE_PATTERNS:
+        out.update(REPO.glob(f"scripts/{pat}"))
+    return sorted(p for p in out if p.is_file())
+
+
+def workflow_text() -> str:
+    return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in (REPO / ".github" / "workflows").glob("*.yml"))
+
+
+def supports_selftest(p: Path) -> bool:
+    txt = p.read_text(encoding="utf-8", errors="replace")
+    return "--selftest" in txt
+
+
+def run_selftest(p: Path, timeout_s: int = 60) -> tuple[int, str]:
+    """单个门的自检，带超时：**超时是失败，不是跳过**（否则慢门会静默免检）。"""
+    cmd = ["bash", str(p), "--selftest"] if p.suffix == ".sh" else ["python3", str(p), "--selftest"]
+    try:
+        r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=timeout_s)
+        return r.returncode, (r.stdout + r.stderr)[-400:]
+    except subprocess.TimeoutExpired:
+        return 124, f"超时（>{timeout_s}s）—— 慢门不能因此免检"
+
+
+def main(argv: list[str]) -> int:
+    wf = workflow_text()
+    all_gates = gates()
+    if not all_gates:
+        print("scripts/ 下没有门 ⇒ 没有读数", file=sys.stderr)
+        return 2
+
+    wired, unwired = [], []
+    for p in all_gates:
+        rel = str(p.relative_to(REPO))
+        if rel in NOT_A_GATE:
+            continue
+        (wired if p.name in wf else unwired).append(p)
+
+    bad_unwired = [str(p.relative_to(REPO)) for p in unwired if str(p.relative_to(REPO)) not in KNOWN_UNWIRED]
+    # 白名单本身也要能对账：登记了却已经接线，说明白名单是过期照片
+    stale_allow = [k for k in KNOWN_UNWIRED if all(k != str(p.relative_to(REPO)) for p in unwired)]
+
+    failures: list[dict] = []
+    checked = 0
+    debt: list[str] = []
+    slow_skipped: list[str] = []
+    SELF = Path(__file__).resolve()
+    import concurrent.futures as _cf
+    runnable: list[Path] = []
+    SELF = Path(__file__).resolve()
+    for p in wired:
+        rel = str(p.relative_to(REPO))
+        if not supports_selftest(p):
+            if rel in KNOWN_NO_SELFTEST:
+                debt.append(rel)          # 欠账：红不了，但数字要报出来
+            else:
+                failures.append({"gate": rel, "why": "已接线但没有 --selftest（新增的门必须自带）"})
+            continue
+        # 自递归守卫：本脚本源码里也写着 "--selftest"（注释 + 子进程命令），
+        # 只用文本判断会把它自己当成「有 selftest 的门」⇒ 无限自我调用。
+        if p.resolve() == SELF:
+            debt.append(rel)
+            continue
+        if rel in KNOWN_SLOW:
+            slow_skipped.append(rel)
+            continue
+        runnable.append(p)
+
+    # 并行跑（单个 60s 超时）：串行时一个慢门就能把整个元门拖过超时
+    import concurrent.futures as _cf
+    with _cf.ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda q: (q, *run_selftest(q)), runnable))
+    for q, rc, tail in results:
+        checked += 1
+        if rc != 0:
+            last = tail.strip().splitlines()[-1] if tail.strip() else ""
+            failures.append({"gate": str(q.relative_to(REPO)), "why": f"--selftest 退出码 {rc}：{last}"})
+
+    if "--json" in argv:
+        print(json.dumps({
+            "gates": len(all_gates), "wired": len(wired), "unwired": [str(p.relative_to(REPO)) for p in unwired],
+            "selftests_run": checked, "failures": failures, "bad_unwired": bad_unwired, "stale_allow": stale_allow,
+            "debt_no_selftest": debt, "selftest_not_run_here": slow_skipped,
+        }, ensure_ascii=False, indent=2))
+        return 1 if (failures or bad_unwired or stale_allow) else 0
+
+    print(f"门：{len(all_gates)} 个 ｜ 已接线 {len(wired)} ｜ 未接线 {len(unwired)}（登记理由 {len(KNOWN_UNWIRED)} 条）")
+    print(f"自检实跑：{checked} 个（**执行** --selftest，不是文本比对）")
+    if slow_skipped:
+        print(f"  · 有 selftest 但本步**不执行**（慢门，各自 CI 步骤跑）：{len(slow_skipped)} 个")
+        for x in slow_skipped:
+            print(f"      · {x} —— {KNOWN_SLOW[x]}")
+    if debt:
+        print(f"  ⚠ 已接线但无 selftest 的欠账：{len(debt)} 个（名单冻结，不允许增长）：")
+        for d in debt[:12]:
+            print(f"      · {d}")
+    for f in failures:
+        print(f"    ✗ {f['gate']}  {f['why']}", file=sys.stderr)
+    for g in bad_unwired:
+        print(f"    ✗ 未接线且没登记理由：{g}", file=sys.stderr)
+    for k in stale_allow:
+        print(f"    · 白名单已过期（该门现在已接线）：{k}")
+    if failures or bad_unwired:
+        return 1
+    print("  ✓ 已接线的门全部自检通过；未接线的都有登记理由")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
