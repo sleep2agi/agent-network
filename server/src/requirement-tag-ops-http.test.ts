@@ -109,6 +109,24 @@ afterAll(() => {
   try { rmSync(DIR, { recursive: true, force: true }); } catch {}
 });
 
+// 2026-10-31 —— **穷尽映射的运行时钉**（外部复核 (c)：「应改成 Record<ErrorCode, number> 由 tsc 报红」）。
+// 本仓 server 没有 tsc 门（只有 agent-network 在 e2e-docker 里 typecheck），
+// 所以那条约束只有写成运行时断言才真的存在：
+//   码集合 = TAG_CREATE_ERRORS（唯一来源）｜映射键必须与它逐字相等｜每个值必须是合法 HTTP 状态
+test("tag create: every error code has a status, and nothing else does", async () => {
+  const { TAG_CREATE_ERRORS, TAG_CREATE_STATUS } = await import("./requirements.js");
+  expect(Object.keys(TAG_CREATE_STATUS).sort()).toEqual([...TAG_CREATE_ERRORS].sort());
+  for (const code of TAG_CREATE_ERRORS) {
+    const status = TAG_CREATE_STATUS[code];
+    expect(Number.isInteger(status)).toBe(true);
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  }
+  // 反例守卫：默认分支的「未映射 ⇒ 400」不许再出现（那正是被替换掉的那行）
+  const src = await (await import("node:fs")).readFileSync(new URL("./requirements.ts", import.meta.url), "utf8");
+  expect(src).not.toMatch(/result\.error === "tag_exists" \? 409/);
+});
+
 describe("GET /api/requirements/tags", () => {
   test("owner:tags 仍是排序后的字符串数组(旧 App 形状不变),多出 counts / colors / can_manage", async () => {
     const r = await tagsOf(admin.token);

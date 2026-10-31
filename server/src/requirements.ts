@@ -692,8 +692,13 @@ function networkTagNames(networkId: string): Set<string> {
  * 新增一个错误码时它**默认落到 400**，而有些码 400 是错的（冲突应是 409），且没人会提醒你。
  * 改成穷尽表之后，漏一个码 = tsc 红。
  */
-type TagCreateError = "tag_exists" | "tag_parent_not_found" | "tag_depth_exceeded";
-const TAG_CREATE_STATUS: Record<TagCreateError, number> = {
+// 2026-10-31 —— **本仓 server 没有 tsc 门**（只有 agent-network 在 e2e-docker 里 typecheck），
+// 所以「漏一个码 = tsc 红」在这里是空头支票。⇒ 用运行时钉住：
+//   码集合由这个数组当**唯一来源**，测试断言映射表的键与它逐字相等。
+// 这样新增一个码只改一处（数组），而「忘了加 status」会红在测试里，不依赖编辑器。
+export const TAG_CREATE_ERRORS = ["tag_exists", "tag_parent_not_found", "tag_depth_exceeded"] as const;
+export type TagCreateError = (typeof TAG_CREATE_ERRORS)[number];
+export const TAG_CREATE_STATUS: Record<TagCreateError, number> = {
   tag_exists: 409,
   tag_parent_not_found: 404,
   tag_depth_exceeded: 400,
