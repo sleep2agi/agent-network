@@ -69,23 +69,25 @@ describe("#3271 从未取走过的过期计数", () => {
 });
 
 // ---- 派单侧硬闸（#3271）----
-import { neverConsumeGate, NEVER_CONSUME_LIMIT } from "./expiry-counters.js";
+import { neverConsumeGate, NEVER_CONSUME_LIMIT, NEVER_CONSUME_STALE_MS } from "./expiry-counters.js";
 
 describe("#3271 派单侧硬闸：从未取走过的目标", () => {
-  const counters = (n: number, alias = "ghost") => ({
+  const NOW = Date.parse("2026-10-31T10:00:00.000Z");
+  const counters = (n: number, alias = "ghost", lastAt = new Date(NOW - 60_000).toISOString()) => ({
     since: "2026-10-31T00:00:00.000Z",
     total: n,
     by_node: n > 0 ? { [alias]: n } : {},
+    last_at: n > 0 ? { [alias]: lastAt } : {},
   });
 
   test("窗口内 0–2 次 ⇒ 放行（一次两次可能是宿主重启，三次才是形态）", () => {
     for (const n of [0, 1, 2]) {
-      expect(neverConsumeGate({ alias: "ghost", counters: counters(n), force: false, forceAllowed: true }).ok).toBe(true);
+      expect(neverConsumeGate({ alias: "ghost", counters: counters(n), force: false, forceAllowed: true, now: Date.parse("2026-10-31T10:00:00.000Z") }).ok).toBe(true);
     }
   });
 
   test("🔴 达到阈值 ⇒ 拒绝，且拒绝体给全（alias / expiries / window_since / 下一步）", () => {
-    const r = neverConsumeGate({ alias: "ghost", counters: counters(NEVER_CONSUME_LIMIT), force: false, forceAllowed: true });
+    const r = neverConsumeGate({ alias: "ghost", counters: counters(NEVER_CONSUME_LIMIT), force: false, forceAllowed: true, now: Date.parse("2026-10-31T10:00:00.000Z") });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
     expect(r.error).toBe("target_never_consumes");
@@ -96,16 +98,44 @@ describe("#3271 派单侧硬闸：从未取走过的目标", () => {
   });
 
   test("人令牌 + force ⇒ 放行（出口存在，但必须显式）", () => {
-    expect(neverConsumeGate({ alias: "ghost", counters: counters(9), force: true, forceAllowed: true }).ok).toBe(true);
+    expect(neverConsumeGate({ alias: "ghost", counters: counters(9), force: true, forceAllowed: true, now: Date.parse("2026-10-31T10:00:00.000Z") }).ok).toBe(true);
   });
 
   test("🔴 节点令牌不能自己放行：force 传了也不算（forceAllowed=false）", () => {
-    const r = neverConsumeGate({ alias: "ghost", counters: counters(9), force: true, forceAllowed: false });
+    const r = neverConsumeGate({ alias: "ghost", counters: counters(9), force: true, forceAllowed: false, now: Date.parse("2026-10-31T10:00:00.000Z") });
     expect(r.ok).toBe(false);
   });
 
   test("别的节点的计数不影响本目标（分桶不是总数）", () => {
-    const c = { since: "s", total: 9, by_node: { other: 9 } };
-    expect(neverConsumeGate({ alias: "ghost", counters: c, force: false, forceAllowed: true }).ok).toBe(true);
+    const c = { since: "s", total: 9, by_node: { other: 9 }, last_at: { other: new Date().toISOString() } };
+    expect(neverConsumeGate({ alias: "ghost", counters: c, force: false, forceAllowed: true, now: Date.parse("2026-10-31T10:00:00.000Z") }).ok).toBe(true);
+  });
+});
+
+describe("#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑", () => {
+  const NOW = Date.parse("2026-10-31T10:00:00.000Z");
+  const mk = (lastAtIso: string) => ({
+    since: "2026-10-31T00:00:00.000Z",
+    total: 5,
+    by_node: { ghost: 5 },
+    last_at: { ghost: lastAtIso },
+  });
+
+  test("最近一次是 1 分钟前 ⇒ 仍然拒（形态是新鲜的）", () => {
+    const r = neverConsumeGate({ alias: "ghost", counters: mk(new Date(NOW - 60_000).toISOString()), force: false, forceAllowed: true, now: NOW });
+    expect(r.ok).toBe(false);
+  });
+
+  test("🔴 最近一次超过 TTL ⇒ 放行（节点可能已恢复；计数仍留在读数里）", () => {
+    const r = neverConsumeGate({ alias: "ghost", counters: mk(new Date(NOW - NEVER_CONSUME_STALE_MS - 1).toISOString()), force: false, forceAllowed: true, now: NOW });
+    expect(r.ok).toBe(true);
+  });
+
+  test("读数里带 last_at —— 光有计数看不出「多久没犯了」", () => {
+    resetNeverConsumedExpiryCountersForTest(new Date(NOW));
+    noteNeverConsumedExpiry("ghost", NOW);
+    const c = neverConsumedExpiryCounters();
+    expect(c.last_at["ghost"]).toBe(new Date(NOW).toISOString());
+    expect(c.by_node["ghost"]).toBe(1);
   });
 });

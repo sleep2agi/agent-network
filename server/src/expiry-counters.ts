@@ -23,25 +23,31 @@ export type NeverConsumedExpiryCounters = {
   total: number;
   /** 按节点分桶；键是 node alias（可读），值是计数。空桶不出现。 */
   by_node: Record<string, number>;
+  /** 每个节点最近一次「从未取走」的时刻（ISO）。**光有计数会永久拉黑一台恢复了的节点。** */
+  last_at: Record<string, string>;
 };
 
-const counters = new Map<string, number>();
+type Bucket = { count: number; lastAt: number };
+const counters = new Map<string, Bucket>();
 let since = new Date().toISOString();
 
 /** 记一次「过期且从未取走」。node 名用别名（人读），没有别名时退回 node id。 */
-export function noteNeverConsumedExpiry(node: string): void {
+export function noteNeverConsumedExpiry(node: string, now = Date.now()): void {
   const key = node || "(unknown)";
-  counters.set(key, (counters.get(key) ?? 0) + 1);
+  const prev = counters.get(key);
+  counters.set(key, { count: (prev?.count ?? 0) + 1, lastAt: now });
 }
 
 export function neverConsumedExpiryCounters(): NeverConsumedExpiryCounters {
   let total = 0;
   const by_node: Record<string, number> = {};
+  const last_at: Record<string, string> = {};
   for (const [k, v] of [...counters.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    by_node[k] = v;
-    total += v;
+    by_node[k] = v.count;
+    last_at[k] = new Date(v.lastAt).toISOString();
+    total += v.count;
   }
-  return { since, total, by_node };
+  return { since, total, by_node, last_at };
 }
 
 /** 仅测试用：清零并重置窗口。 */
@@ -63,6 +69,8 @@ export function resetNeverConsumedExpiryCountersForTest(now = new Date()): void 
  *   ③ 拒绝体给全：alias / expiries / window_since / 下一步。只说 "refused" 会让调用方去猜。
  */
 export const NEVER_CONSUME_LIMIT = 3;
+/** 「最近一次从未取走」超过这个时长 ⇒ 不再拒发（节点可能已经恢复；计数仍留在读数里）。 */
+export const NEVER_CONSUME_STALE_MS = 2 * 60 * 60_000;
 
 export type NeverConsumeGate =
   | { ok: true }
@@ -75,10 +83,21 @@ export function neverConsumeGate(input: {
   /** 人令牌才能用 force；节点令牌传 false。 */
   forceAllowed: boolean;
   limit?: number;
+  /** 「最近一次」的时效：超过它就不再拒发（节点可能已经恢复）。 */
+  staleAfterMs?: number;
+  now?: number;
 }): NeverConsumeGate {
   const limit = input.limit ?? NEVER_CONSUME_LIMIT;
   const expiries = input.counters.by_node[input.alias] ?? 0;
   if (expiries < limit) return { ok: true };
+  // 2026-10-31 —— **只数不衰减会把恢复了的节点永久拉黑**。
+  // 实测的教训来自另一台机（TM中转运维）：连「抑制了多少」这个数本身都在被环缓冲淘汰，
+  // 所以任何「累计」都只在它的窗口内可引用；这里把窗口写进判据：最近一次过期超过 TTL ⇒ 放行。
+  const lastAt = input.counters.last_at?.[input.alias];
+  if (lastAt) {
+    const age = (input.now ?? Date.now()) - Date.parse(lastAt);
+    if (Number.isFinite(age) && age > (input.staleAfterMs ?? NEVER_CONSUME_STALE_MS)) return { ok: true };
+  }
   if (input.force && input.forceAllowed) return { ok: true };
   return {
     ok: false,

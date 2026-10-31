@@ -6070,6 +6070,9 @@
   "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::窗口内 0–2 次 ⇒ 放行（一次两次可能是宿主重启，三次才是形态）": 1,
   "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 节点令牌不能自己放行：force 传了也不算（forceAllowed=false）": 1,
   "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 达到阈值 ⇒ 拒绝，且拒绝体给全（alias / expiries / window_since / 下一步）": 1,
+  "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::最近一次是 1 分钟前 ⇒ 仍然拒（形态是新鲜的）": 1,
+  "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::读数里带 last_at —— 光有计数看不出「多久没犯了」": 1,
+  "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::🔴 最近一次超过 TTL ⇒ 放行（节点可能已恢复；计数仍留在读数里）": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set": 1,
@@ -14270,6 +14273,9 @@
   "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::窗口内 0–2 次 ⇒ 放行（一次两次可能是宿主重启，三次才是形态）",
   "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 节点令牌不能自己放行：force 传了也不算（forceAllowed=false）",
   "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 达到阈值 ⇒ 拒绝，且拒绝体给全（alias / expiries / window_since / 下一步）",
+  "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::最近一次是 1 分钟前 ⇒ 仍然拒（形态是新鲜的）",
+  "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::读数里带 last_at —— 光有计数看不出「多久没犯了」",
+  "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::🔴 最近一次超过 TTL ⇒ 放行（节点可能已恢复；计数仍留在读数里）",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set",
@@ -16400,7 +16406,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "fb39e18b6c10d109c687438d448859af96116bd7",
+  "commit": "7699c0c15835340c4f4a3f31fb91d73d4a1f7a3f",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
