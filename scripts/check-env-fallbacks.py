@@ -115,6 +115,21 @@ def scan() -> tuple[list[dict], int]:
     return hits, files
 
 
+def verdict(hits: int, unregistered: int, borrows: int, bad_alias: int, stale: int) -> tuple[int, str]:
+    """退出码/摘要的**唯一**决定点。
+
+    2026-10-31 —— 外部复核 ④：「exit 0 ⟺ FAIL==0 ∧ MISSING==0 ⇒ PASS=FAIL=MISSING=0
+    （连树被换）⇒ 仍 exit 0，印『通过 0』。⇒ 空跑为 exit 2，不是 exit 0。」
+    本门原来就是「没有任何未登记 ⇒ 通过」：把全仓的跨 env 回退都删掉，
+    它会打印「✓ 所有跨变量回退都已登记」——**一个都没核过**。
+    """
+    if unregistered or borrows or bad_alias or stale:
+        return 1, "有未登记 / borrow / 表不自洽（见上）"
+    if hits == 0:
+        return 2, "扫描到 0 处跨 env 回退 ⇒ 没有读数（不是『全部已登记』）"
+    return 0, "所有跨 env 回退都已登记为「同概念别名」"
+
+
 SELFTEST = [
     ("process.env.AAA || process.env.BBB", ("AAA", "BBB")),
     ("const x = process.env.CCC ?? process.env.DDD ?? ''", ("CCC", "DDD")),
@@ -131,6 +146,13 @@ def selftest(quiet: bool = False) -> int:
         if not quiet:
             print(f"  {'✓' if ok else '✗'} 期望 {want} 实际 {got}  {src[:52]}")
         fails += 0 if ok else 1
+    # 2026-10-31 —— 空跑必须 exit 2（「一个都没核过」不能读成「全部合规」）
+    empty_code, _ = verdict(0, 0, 0, 0, 0)
+    ok_empty = empty_code == 2
+    if not quiet:
+        print(f"  {'✓' if ok_empty else '✗'} 0 处命中 ⇒ 没有读数（实际 exit={empty_code}）")
+    fails += 0 if ok_empty else 1
+
     if not KNOWN_BORROW:
         if not quiet:
             print("  ✓ selftest KNOWN_BORROW 为空（本仓目前没有已判定的错借）")
@@ -185,11 +207,16 @@ def main(argv: list[str]) -> int:
     if KNOWN_ALIAS:
         counts = "，".join(f"{k[0]}→{k[1]}={sum(1 for h in hits if (h['a'], h['b']) == k)}" for k in KNOWN_ALIAS)
         print(f"  · 每条登记的命中数：{counts}")
-    if unregistered or borrows or bad_alias or stale:
+    code, why = verdict(len(hits), len(unregistered), len(borrows), len(bad_alias), len(stale))
+    if code == 1:
         print("  ⇒ 每个跨变量回退必须回答：这两个是**同一个概念**吗？"
               "是 ⇒ 登记进 KNOWN_ALIAS；不是 ⇒ 禁止（改成显式判空，别用 || 借）。", file=sys.stderr)
         return 1
-    print("  ✓ 所有跨 env 回退都已登记为「同概念别名」")
+    if code == 2:
+        print(f"  ✗ {why}", file=sys.stderr)
+        print("  ⇒ 0 处与「全部已登记」在载荷上同形；先说清扫描域是不是坏了，再说通过。", file=sys.stderr)
+        return 2
+    print(f"  ✓ {why}")
     return 0
 
 
