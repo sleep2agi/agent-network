@@ -91,6 +91,34 @@ def triggers(text: str) -> tuple[str, str]:
     return "none", "未识别的触发条件：" + ",".join(events)
 
 
+def surface(events: list[str], push: object) -> str:
+    """这份 workflow 到底**守不守 main** —— 与「会不会自己跑」是两条轴。
+
+    main    push 到 main（或 schedule，或 push 无 branches 过滤）⇒ main 上有读数
+    pr-only 只在 pull_request 上跑 ⇒ **它护的是 PR，不是 main**
+    manual  只有 workflow_dispatch / 其它
+
+    2026-10-31 —— 为什么要这一栏：本仓的 agent 是**直接 push 到 main** 的，
+    所以「只在 PR 上跑」的门在 main 上一次都没有执行过。
+    实测 86 个 workflow 里 56 个只挂在 pull_request 上 ——
+    而在此之前，它们和 push:main 的那些在报告里长得一模一样（都是「自动」）。
+    """
+    if "schedule" in events or "workflow_run" in events or "merge_group" in events:
+        return "main"
+    if "push" in events:
+        if not isinstance(push, dict):
+            return "main"                      # `push:` 无过滤 ⇒ 每个分支都跑
+        branches = push.get("branches")
+        if not branches or any(b in ("main", "**", "*") for b in branches):
+            return "main"
+        return "manual"                        # 只推特定分支 ⇒ main 上没有
+    if "pull_request" in events or "pull_request_target" in events:
+        return "pr-only"
+    if "workflow_dispatch" in events or "release" in events:
+        return "manual"
+    return "manual"
+
+
 def silenced(text: str) -> tuple[int, int]:
     """一个跑不起来的 workflow 里，有多少步、多少条脚本从此不会执行。
 
@@ -102,7 +130,30 @@ def silenced(text: str) -> tuple[int, int]:
     return len(steps), len(scripts)
 
 
+def surface_of(text: str) -> str:
+    """从文本判 surface；不可解析时返回 "unparsable"（与 triggers 的四态一致）。"""
+    try:
+        doc = yaml.safe_load(text)
+    except Exception:
+        return "unparsable"
+    if not isinstance(doc, dict):
+        return "unparsable"
+    on = doc.get(True, doc.get("on"))
+    if on is None:
+        return "manual"
+    if isinstance(on, str):
+        events, push = [on], None
+    elif isinstance(on, list):
+        events, push = [str(x) for x in on], None
+    elif isinstance(on, dict):
+        events, push = [str(k) for k in on.keys()], on.get("push")
+    else:
+        return "manual"
+    return surface(events, push)
+
+
 SELFTEST_EXPECTED = 7
+SURFACE_EXPECTED = 6
 
 
 def selftest(quiet: bool = False) -> int:
@@ -132,14 +183,35 @@ def selftest(quiet: bool = False) -> int:
                 print(f"  ✗ 期望 {want} 实际 {got}（{detail}）")
         elif not quiet:
             print(f"  ✓ {want}: {detail}")
+    surface_cases = [
+        ("on: push\njobs:\n  a:\n", "main"),
+        ("on:\n  push:\n    branches: [main]\njobs:\n  a:\n", "main"),
+        ("on: pull_request\njobs:\n  a:\n", "pr-only"),
+        # 🔴 只推特定分支 ⇒ main 上没有读数，这一格最容易漏
+        ("on:\n  push:\n    branches: [feat/x]\njobs:\n  a:\n", "manual"),
+        ("on: workflow_dispatch\njobs:\n  a:\n", "manual"),
+        ("on: push\n  bad: [\n", "unparsable"),
+    ]
+    for text, want in surface_cases:
+        got = surface_of(text)
+        ok = got == want
+        if not ok:
+            fails += 1
+            if not quiet:
+                print(f"  ✗ surface 期望 {want} 实际 {got}")
+        elif not quiet:
+            print(f"  ✓ surface {got}")
     if len(cases) != SELFTEST_EXPECTED:
         print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {len(cases)}", file=sys.stderr)
         return 1
     if fails:
         print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
         return 1
+    if len(surface_cases) != SURFACE_EXPECTED:
+        print(f"✗ surface 用例数应为 {SURFACE_EXPECTED}，实际 {len(surface_cases)}", file=sys.stderr)
+        return 1
     if not quiet:
-        print(f"✓ selftest {SELFTEST_EXPECTED}/{SELFTEST_EXPECTED} 通过")
+        print(f"✓ selftest {SELFTEST_EXPECTED}/{SELFTEST_EXPECTED} + surface {SURFACE_EXPECTED}/{SURFACE_EXPECTED} 通过")
     return 0
 
 
@@ -216,6 +288,15 @@ def main() -> int:
                 print(f"  {name}  （{detail}）{extra}")
     total = sum(len(v) for v in buckets.values())
     print(f"\n合计 {total} 个 workflow")
+
+    # 第二条轴：守不守 main。本仓 agent 直接 push 到 main，所以这一栏才是「谁在看着 main」。
+    surf: dict[str, list[str]] = {"main": [], "pr-only": [], "manual": [], "unparsable": []}
+    for path in sorted(WF.glob("*.yml")):
+        surf[surface_of(path.read_text(encoding="utf-8", errors="replace"))].append(path.name)
+    print(f"守 main（push:main / schedule）：{len(surf['main'])} ｜ **只在 PR**：{len(surf['pr-only'])} ｜ "
+          f"只能手动：{len(surf['manual'])} ｜ 不可解析：{len(surf['unparsable'])}")
+    print("  ⚠️ 「只在 PR」不是缺陷，但它**不保护 main**：本仓的 agent 直接 push 到 main，")
+    print("     所以那批门在 main 上一次都没有执行过。要引用「main 是绿的」，只能引用前两个数里的第一个。")
 
     # 2026-10-31 —— 负断言的值域由**代码导出**时，导出失败会变成空集 ⇒ 负断言恒真。
     # ⇒ 先断言值域非空（正控），再谈「没有违规」。
