@@ -902,6 +902,26 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     //       ② 用第二个观测者（另一个实例、另一台机器），而不是对同一实例再采样一次。
     //   今天本仓两样都没有 ⇒ 这一格只能到「窗口声明 + 窗口内不变」为止。
     //
+    // 2026-10-31 —— **名字生成候选，差值定罪**（外部复核 ②：
+    // 「名字匹配 /(age|elapsed|uptime|remaining|ttl|since)/ ⇒ 候选；
+    //   同一秒两次读，逐字段算差：过去时刻 ⇒ 差 == 0；时长 ⇒ 差 == 间隔」）。
+    // 只靠名字会漏掉改了名的那个，只靠表达式会误抓所有 now 派生量 ⇒ 两条都要。
+    if (typeof a.uptime === "number" && typeof b.uptime === "number") {
+      const dUp = b.uptime - a.uptime;
+      // uptime 是「活着的时长」：窗口 1.2s，它的增量必须落在 (0, 窗口+1s] 内
+      expect(dUp).toBeGreaterThan(0);
+      expect(dUp).toBeLessThanOrEqual(WINDOW_MS / 1000 + 1);
+    }
+    if (typeof a.startedAt === "string" && typeof b.startedAt === "string") {
+      // startedAt 是「过去的时刻」：差值必须恰好 0（它不该像 uptime 那样走）
+      expect(b.startedAt).toBe(a.startedAt);
+    }
+    if (typeof a.served_at === "string" && typeof b.served_at === "string") {
+      const dServed = Date.parse(b.served_at) - Date.parse(a.served_at);
+      expect(dServed).toBeGreaterThanOrEqual(WINDOW_MS - 50);   // 它必须走满窗口（不是抄同一份）
+      expect(dServed).toBeLessThanOrEqual(WINDOW_MS + 5_000);
+    }
+
     // 正向对照：窗口内必须**有东西会变**，否则「都没变」可能只是「两次读的是同一份缓存」。
     // 这不是洁癖：一个恒定的响应体可以让上面那条永远绿。
     const changed = Object.keys(a).filter((k) => k in b && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
