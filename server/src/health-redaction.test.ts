@@ -1135,6 +1135,19 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     }
   });
 
+  // 2026-10-31 —— **单一出口**（外部复核 (a)：
+  // 「一个必须在『所有字段写完之后』执行的变换，只有收敛到单一出口才可靠 —— 多出口 × 惰性 = 迟早漏」）。
+  // 这条门只看一件事：`shape(...)` 在源码里只能出现在**一处**。
+  // 出现第二处 ⇒ 说明又有一个 return 各自记得调它 ⇒ 下一个人加第三个出口时就会裸奔。
+  test("the anonymous projection is applied at exactly one call site", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+    const calls = [...src.matchAll(/Response\.json\(\s*shape\(/g)];
+    expect(calls.length).toBe(1);
+    // 定义处也算一处（`const shape = ...`），但它不是 Response.json 包裹，所以上面的正则不会数到
+    expect((src.match(/const shape = /g) || []).length).toBe(1);
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
