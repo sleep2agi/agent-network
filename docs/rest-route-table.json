@@ -13,7 +13,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 1942
+   "line": 1962
   },
   {
    "id": 2,
@@ -22,7 +22,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 1950
+   "line": 1970
   },
   {
    "id": 3,
@@ -31,7 +31,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2039
+   "line": 2059
   },
   {
    "id": 4,
@@ -40,7 +40,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 2098
+   "line": 2118
   },
   {
    "id": 5,
@@ -49,7 +49,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2122
+   "line": 2142
   },
   {
    "id": 6,
@@ -58,7 +58,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2261
+   "line": 2281
   },
   {
    "id": 7,
@@ -67,7 +67,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2276
+   "line": 2296
   },
   {
    "id": 8,
@@ -76,7 +76,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 2314
+   "line": 2334
   },
   {
    "id": 9,
@@ -85,7 +85,7 @@
    "method": "PUT",
    "query": [],
    "kind": "eq",
-   "line": 2334
+   "line": 2354
   },
   {
    "id": 10,
@@ -94,7 +94,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2367
+   "line": 2387
   },
   {
    "id": 11,
@@ -103,7 +103,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2454
+   "line": 2474
   },
   {
    "id": 12,
@@ -112,7 +112,7 @@
    "method": "PUT",
    "query": [],
    "kind": "eq",
-   "line": 2502
+   "line": 2522
   },
   {
    "id": 13,
@@ -121,7 +121,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2527
+   "line": 2547
   },
   {
    "id": 14,
@@ -130,7 +130,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2553
+   "line": 2573
   },
   {
    "id": 15,
@@ -139,7 +139,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2573
+   "line": 2593
   },
   {
    "id": 16,
@@ -148,7 +148,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2592
+   "line": 2612
   },
   {
    "id": 17,
@@ -157,7 +157,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2609
+   "line": 2629
   },
   {
    "id": 18,
@@ -166,7 +166,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 2627
+   "line": 2647
   },
   {
    "id": 19,
@@ -175,7 +175,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2637
+   "line": 2657
   },
   {
    "id": 20,
@@ -184,7 +184,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2653
+   "line": 2673
   },
   {
    "id": 21,
@@ -193,7 +193,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 2667
+   "line": 2687
   },
   {
    "id": 22,
@@ -202,7 +202,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2677
+   "line": 2697
   },
   {
    "id": 23,
@@ -211,7 +211,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2691
+   "line": 2711
   },
   {
    "id": 24,
@@ -220,7 +220,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 2706
+   "line": 2726
   },
   {
    "id": 25,
@@ -229,7 +229,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 2736
+   "line": 2756
   },
   {
    "id": 26,
@@ -238,7 +238,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2756
+   "line": 2776
   },
   {
    "id": 27,
@@ -247,7 +247,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2803
+   "line": 2823
   },
   {
    "id": 28,
@@ -256,7 +256,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2872
+   "line": 2892
   },
   {
    "id": 29,
@@ -265,7 +265,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2914
+   "line": 2934
   },
   {
    "id": 30,
@@ -274,7 +274,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2973
+   "line": 2993
   },
   {
    "id": 31,
@@ -283,7 +283,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 2974
+   "line": 2994
   },
   {
    "id": 32,
@@ -292,7 +292,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3014
+   "line": 3034
   },
   {
    "id": 33,
@@ -301,7 +301,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3035
+   "line": 3055
   },
   {
    "id": 34,
@@ -310,7 +310,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3036
+   "line": 3056
   },
   {
    "id": 35,
@@ -319,7 +319,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3037
+   "line": 3057
   },
   {
    "id": 36,
@@ -328,7 +328,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3038
+   "line": 3058
   },
   {
    "id": 37,
@@ -337,7 +337,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3227
+   "line": 3247
   },
   {
    "id": 38,
@@ -346,7 +346,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3323
+   "line": 3343
   },
   {
    "id": 39,
@@ -355,7 +355,7 @@
    "method": "POST",
    "query": [],
    "kind": "regex_prefix",
-   "line": 3376
+   "line": 3396
   },
   {
    "id": 40,
@@ -364,7 +364,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 3393
+   "line": 3413
   },
   {
    "id": 41,
@@ -373,7 +373,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 3410
+   "line": 3430
   },
   {
    "id": 42,
@@ -382,7 +382,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 3439
+   "line": 3459
   },
   {
    "id": 43,
@@ -391,7 +391,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3450
+   "line": 3470
   },
   {
    "id": 44,
@@ -400,7 +400,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 3527
+   "line": 3547
   },
   {
    "id": 45,
@@ -409,7 +409,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 3866
+   "line": 3886
   },
   {
    "id": 46,
@@ -418,7 +418,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 3871
+   "line": 3891
   },
   {
    "id": 47,
@@ -427,7 +427,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3933
+   "line": 3953
   },
   {
    "id": 48,
@@ -436,7 +436,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 3961
+   "line": 3981
   },
   {
    "id": 49,
@@ -445,7 +445,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4071
+   "line": 4091
   },
   {
    "id": 50,
@@ -454,7 +454,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4119
+   "line": 4139
   },
   {
    "id": 51,
@@ -463,7 +463,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4155
+   "line": 4175
   },
   {
    "id": 52,
@@ -472,7 +472,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4192
+   "line": 4212
   },
   {
    "id": 53,
@@ -481,7 +481,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4309
+   "line": 4329
   },
   {
    "id": 54,
@@ -490,7 +490,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4411
+   "line": 4431
   },
   {
    "id": 55,
@@ -499,7 +499,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4412
+   "line": 4432
   },
   {
    "id": 56,
@@ -508,7 +508,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4413
+   "line": 4433
   },
   {
    "id": 57,
@@ -517,7 +517,7 @@
    "method": "PUT",
    "query": [],
    "kind": "eq",
-   "line": 4463
+   "line": 4483
   },
   {
    "id": 58,
@@ -526,7 +526,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4491
+   "line": 4511
   },
   {
    "id": 59,
@@ -535,7 +535,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4522
+   "line": 4542
   },
   {
    "id": 60,
@@ -544,7 +544,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4523
+   "line": 4543
   },
   {
    "id": 61,
@@ -553,7 +553,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4573
+   "line": 4593
   },
   {
    "id": 62,
@@ -562,7 +562,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4573
+   "line": 4593
   },
   {
    "id": 63,
@@ -571,7 +571,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 4577
+   "line": 4597
   },
   {
    "id": 64,
@@ -580,7 +580,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4598
+   "line": 4618
   },
   {
    "id": 65,
@@ -589,7 +589,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 4623
+   "line": 4643
   },
   {
    "id": 66,
@@ -598,7 +598,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 4637
+   "line": 4657
   },
   {
    "id": 67,
@@ -607,7 +607,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4653
+   "line": 4673
   },
   {
    "id": 68,
@@ -616,7 +616,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4675
+   "line": 4695
   },
   {
    "id": 69,
@@ -625,7 +625,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 4854
+   "line": 4874
   },
   {
    "id": 70,
@@ -634,7 +634,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 4926
+   "line": 4946
   },
   {
    "id": 71,
@@ -643,7 +643,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 5056
+   "line": 5076
   },
   {
    "id": 72,
@@ -652,7 +652,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 5356
+   "line": 5376
   },
   {
    "id": 73,
@@ -661,7 +661,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 5487
+   "line": 5507
   },
   {
    "id": 74,
@@ -670,7 +670,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 5815
+   "line": 5835
   },
   {
    "id": 75,
@@ -679,7 +679,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 5851
+   "line": 5871
   },
   {
    "id": 76,
@@ -688,7 +688,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 5875
+   "line": 5895
   },
   {
    "id": 77,
@@ -699,7 +699,7 @@
     "scope"
    ],
    "kind": "eq",
-   "line": 5915
+   "line": 5935
   },
   {
    "id": 78,
@@ -708,7 +708,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 5982
+   "line": 6002
   },
   {
    "id": 79,
@@ -717,7 +717,7 @@
    "method": "POST",
    "query": [],
    "kind": "eq",
-   "line": 6014
+   "line": 6034
   },
   {
    "id": 80,
@@ -726,7 +726,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6082
+   "line": 6102
   },
   {
    "id": 81,
@@ -735,7 +735,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6122
+   "line": 6142
   },
   {
    "id": 82,
@@ -744,7 +744,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6138
+   "line": 6158
   },
   {
    "id": 83,
@@ -753,7 +753,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6161
+   "line": 6181
   },
   {
    "id": 84,
@@ -762,7 +762,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 6181
+   "line": 6201
   },
   {
    "id": 85,
@@ -771,7 +771,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 6234
+   "line": 6254
   },
   {
    "id": 86,
@@ -780,7 +780,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 6288
+   "line": 6308
   },
   {
    "id": 87,
@@ -789,7 +789,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 6385
+   "line": 6405
   },
   {
    "id": 88,
@@ -798,7 +798,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 6440
+   "line": 6460
   },
   {
    "id": 89,
@@ -807,7 +807,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6461
+   "line": 6481
   },
   {
    "id": 90,
@@ -816,7 +816,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6668
+   "line": 6688
   },
   {
    "id": 91,
@@ -825,7 +825,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 6888
+   "line": 6908
   },
   {
    "id": 92,
@@ -834,7 +834,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6960
+   "line": 6980
   },
   {
    "id": 93,
@@ -843,7 +843,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 7023
+   "line": 7043
   },
   {
    "id": 94,
@@ -852,11 +852,11 @@
    "method": null,
    "query": [],
    "kind": "starts_with",
-   "line": 7038
+   "line": 7058
   }
  ],
  "provenance": [
-  "generated_from: `server/src/server.ts` source_sha256=`9bbceb69b9b7`",
+  "generated_from: `server/src/server.ts` source_sha256=`1b3e8f065b09`",
   "reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）",
   "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`",
   "重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）"

@@ -5041,6 +5041,11 @@
   "agent-node/src/tmux-format.test.ts::#556 ratchet — agent-node tmux listings use the helper::collects src recursively (取集 self-check)": 1,
   "agent-node/src/tmux-format.test.ts::#556 ratchet — agent-node tmux listings use the helper::criterion self-check: each pre-#556 shape is flagged, the helper shapes are not": 1,
   "agent-node/src/tmux-format.test.ts::#556 ratchet — agent-node tmux listings use the helper::no parsed tmux listing in agent-node/src bypasses tmux-format.ts": 1,
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::URL 末尾斜杠被规范掉（否则拼出的 /api/upload 会变成 //api/upload）": 1,
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::两个都缺 ⇒ 点名两个（不是只说『配置错误』）": 1,
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::兼容名 AUTH_TOKEN 可替代 token，但 URL 仍然必填": 1,
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::只缺 token ⇒ 只点 token（缺什么说什么）": 1,
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::空字符串不算「配了」（`export X=` 是最常见的半配置）": 1,
   "agent-node/src/util/access-resolve.test.ts::buildEmptyAllowlistWarn — boot-time visibility::returns null for wildcard-allow (channel intentionally open)": 1,
   "agent-node/src/util/access-resolve.test.ts::buildEmptyAllowlistWarn — boot-time visibility::returns null when allowFrom has at least one entry": 1,
   "agent-node/src/util/access-resolve.test.ts::buildEmptyAllowlistWarn — boot-time visibility::returns warn string for empty allowFrom": 1,
@@ -13180,6 +13185,11 @@
   "agent-node/src/tmux-format.test.ts::#556 ratchet — agent-node tmux listings use the helper::collects src recursively (取集 self-check)",
   "agent-node/src/tmux-format.test.ts::#556 ratchet — agent-node tmux listings use the helper::criterion self-check: each pre-#556 shape is flagged, the helper shapes are not",
   "agent-node/src/tmux-format.test.ts::#556 ratchet — agent-node tmux listings use the helper::no parsed tmux listing in agent-node/src bypasses tmux-format.ts",
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::URL 末尾斜杠被规范掉（否则拼出的 /api/upload 会变成 //api/upload）",
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::两个都缺 ⇒ 点名两个（不是只说『配置错误』）",
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::兼容名 AUTH_TOKEN 可替代 token，但 URL 仍然必填",
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::只缺 token ⇒ 只点 token（缺什么说什么）",
+  "agent-node/src/upload-file-mcp-stdio.test.ts::upload-file stdio MCP refuses to start without its required env::空字符串不算「配了」（`export X=` 是最常见的半配置）",
   "agent-node/src/util/access-resolve.test.ts::buildEmptyAllowlistWarn — boot-time visibility::returns null for wildcard-allow (channel intentionally open)",
   "agent-node/src/util/access-resolve.test.ts::buildEmptyAllowlistWarn — boot-time visibility::returns null when allowFrom has at least one entry",
   "agent-node/src/util/access-resolve.test.ts::buildEmptyAllowlistWarn — boot-time visibility::returns warn string for empty allowFrom",
@@ -16278,7 +16288,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "587498374baff08e335d528ab48c3d13856321e4",
+  "commit": "2741a5c3d4a037de9cddf8cfddeedbc4785f2ff0",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
 }

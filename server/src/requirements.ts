@@ -769,7 +769,8 @@ function toPublic(row: Row) {
     seq: row.seq == null ? null : Number(row.seq),
     name: row.title,
     priority: row.priority,
-    assignee: row.assignee || "",
+    // 引用优先：owner/agent_owner 在写入时被校验过；assignee 可能停在旧值（见 displayAssignee）
+    assignee: displayAssignee(row as any),
     due: row.due_on || "",
     // 开始(可空,甘特图用)。形状同 due;没设 = ""。旧 App 不认识这个字段,忽略即可。
     start: row.start_on || "",
@@ -1457,6 +1458,28 @@ function departmentNetworks(ctx: RequirementsRequestContext, deptId: string): st
 
 const LIST_ORDER = " ORDER BY created_at DESC, requirement_id DESC";
 type LightRow = { requirement_id: string; seq?: number | null; network_id: string; created_at: string; title: string; description: string | null; assignee: string | null; tags_json: string | null; project_id: string | null; owner_json: string | null; agent_owner_json: string | null; participants_json: string | null };
+/**
+ * 2026-10-31 —— `assignee` 是**派生展示字段**，但它有自己的旧写入路径，会停在旧值。
+ *
+ * 实测（ANet 项目 archived=0，1105 张）：25 张与 owner/agent_owner 不一致，
+ * 其中 22 张「有 assignee 但既无 owner 也无 agent_owner」。读的人看的是 assignee，
+ * 于是「有人负责」这句话可以比事实晚很久。
+ *
+ * 判据：**owner / agent_owner 是写入时被校验过的引用**（owner 必须是本网络 user，
+ * agent_owner 必须是本网络 node），而 assignee 是自由文本。两者冲突时，读一侧应以引用为准。
+ * 没有引用时保留自由文本 —— 它可能是系统外的人（例如「王工」），删掉就等于丢信息。
+ */
+export function displayAssignee(row: { assignee?: string | null; owner_json?: string | null; agent_owner_json?: string | null }): string {
+  const pick = (json: string | null | undefined): string => {
+    if (!json) return "";
+    try {
+      const ref = JSON.parse(json) as { alias?: string; username?: string; id?: string } | null;
+      return String(ref?.alias || ref?.username || ref?.id || "").trim();
+    } catch { return ""; }
+  };
+  return pick(row.agent_owner_json) || pick(row.owner_json) || String(row.assignee || "").trim();
+}
+
 const parseRef = (json: string | null) => { try { return json ? JSON.parse(json) : null; } catch { return null; } };
 
 /**
@@ -1481,7 +1504,7 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
     for (const r of light) {
       let m = maps.get(r.network_id);
       if (!m) maps.set(r.network_id, m = searchNameMaps(ctx, r.network_id));
-      const row = { name: r.title, description: r.description || "", assignee: r.assignee || "", tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
+      const row = { name: r.title, description: r.description || "", assignee: displayAssignee(r), tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
       // #471 —— tag= 在这里按存好的标签数组精确比(JSON 列,SQLite / PostgreSQL 写法不同,所以不进 SQL)。
       if (lq.tag !== null && !row.tags.includes(lq.tag)) continue;
       if (!lq.terms.length || matchesTaskId(r, lq.idQuery) || matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
