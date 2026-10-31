@@ -144,7 +144,7 @@ export const TASK_REJECTION_EXITS: ReadonlyArray<{
   pinned_by: string;
 }> = [
   { position: "before_auth_middleware", counted: false, pinned_by: "KNOWN GAP: unauthenticated /api/task rejection is NOT counted" },
-  { position: "before_route_table", counted: false, pinned_by: "" },
+  { position: "before_route_table", counted: false, pinned_by: "KNOWN GAP: unmatched /api/* route 404 is NOT counted" },
   { position: "before_fetch_runtime_body_limit", counted: false, pinned_by: "" },
   { position: "handler_parse", counted: true, pinned_by: "malformed JSON on /api/task IS counted" },
   { position: "handler_validate_or_permission", counted: true, pinned_by: "a real rejected /api/task actually bumps the counter" },

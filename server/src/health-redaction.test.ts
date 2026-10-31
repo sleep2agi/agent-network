@@ -188,6 +188,25 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(after.counters.task_rejections.total).toBe(beforeTotal);
   });
 
+  // 2026-10-31 —— 出口清单里「before_route_table」那一行原本 pinned_by 为空（= 缺口）。
+  // 补上它的钉：未匹配的 /api/* 在路由表之前就 404，**不经过 handler，也不计数**。
+  // 这一条同时是「清单要能被一次坏输入打出来」的实例（对方那句）。
+  test("KNOWN GAP: unmatched /api/* route 404 is NOT counted (route table rejects before handler)", async () => {
+    const read = async () => (await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any);
+    const before = await read();
+    const r = await fetch(`${BASE}/api/definitely-not-a-route-xyz`, {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${userToken}` },
+      body: JSON.stringify({}),
+    });
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    const after = await read();
+    if (after.counters.task_rejections.total !== before.counters.task_rejections.total) {
+      throw new Error("已知缺口已被修复？404 出口现在会计数了 —— 请更新 TASK_REJECTION_EXITS 与这条测试。");
+    }
+    expect(after.counters.task_rejections.total).toBe(before.counters.task_rejections.total);
+  });
+
   // 2026-10-31 —— **出口清单的分母要有来源**（外部复核 ②）：
   // 六行以前只活在注释里；现在它是数据，这条断言把「表」与「钉住它的测试」绑在一起。
   test("rejection exit inventory: 6 rows, and every counted row names a pinning test", async () => {
