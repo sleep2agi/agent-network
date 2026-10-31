@@ -220,7 +220,25 @@ def main() -> int:
             )
             if not name:
                 continue
-            window = "\n".join(lines[i:i + 16])
+            # 2026-10-31 —— 窗口原来是**固定 16 行**，实测是个假下限：
+            #   report_completion 的同变量断言就在它的调用下面，但之间隔着 10 行
+            #   「我为什么改了三版」的注释 ⇒ 16 行窗口看不到它，于是这个工具被记成「未覆盖」。
+            #   **注释越长、越诚实，这条断言越容易被判成不存在** —— 这恰好奖励了少写注释。
+            # ⇒ 改成**按块截断**：扫到这个块里又一次 `const x = await` 或下一个 test( 为止，
+            #   而不是数行数。判据是「同一个块内的断言」，块边界本来就是语法给的。
+            #
+            # ⚠️ 换成新定义后的**已知假阴性**（实测 diff）：`retry_task` 从"有"变成"没有" ——
+            #    它的断言与调用之间还夹着一次别的调用赋值，于是块边界截断在了断言之前。
+            #    同一份代码，旧窗口（16 行）看得见它、新窗口看不见；反过来 report_completion 只有新的看得见。
+            #    ⇒ **两把窗口各有一个假阴性**。这里选「块」是因为它有语法依据；而数行数没有 ——
+            #      16 是拍的，换成 24/30/60 同一份代码分别给出 57/57/58。
+            #    所以引用这个数时要连口径一起引；口径换了，数就不能和旧数直接比。
+            end = i + 1
+            while end < len(lines) and end < i + 120:
+                if ASSIGN.search(lines[end]) or re.match(r"\s*test\(", lines[end]):
+                    break
+                end += 1
+            window = "\n".join(lines[i:end])
             if re.search(rf"Object\.keys\(\s*{re.escape(var)}\s*\)", window):
                 own_result.setdefault(name, []).append(path.name)
     own = sorted(own_result)
