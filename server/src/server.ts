@@ -3928,7 +3928,14 @@ return Bun.serve({
         "SELECT node_id, network_id FROM nodes WHERE node_id = ?1", nodeRef);
       const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
       if (!node || !node.network_id || (!role && !isAdmin)) {
-        return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+        // 2026-10-31 —— 外部复核：「当一个选项对应两种修法相反的成因时，它不是选项，是问题的前半句。」
+        // 这里 404 同时表示「不存在」与「不在你的可见范围」，两者修法相反（找对节点 vs 申请权限）。
+        // 合并是**故意的**（否则可以枚举网络里有哪些节点），所以不能靠 hint 猜一个成因 ——
+        // 只能把「这是有意合并的」写进载荷，让前端不臆断。
+        return withCors(req, Response.json({
+          ok: false, error: "node_not_found",
+          note: "不存在，或不在你的可见范围内（两者故意同码，避免枚举）",
+        }, { status: 404 }));
       }
       const row = db.get<{ request_id: string; status: string; observed_at: number | null; snapshot_json: string | null; error: string | null }>(
         `SELECT request_id, status, observed_at, snapshot_json, error FROM daemon_provider_snapshots
@@ -3966,7 +3973,11 @@ return Bun.serve({
         "SELECT node_id, network_id FROM nodes WHERE node_id = ?1", nodeRef);
       const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
       if (!node || !node.network_id || (!role && !isAdmin)) {
-        return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+        // 同 GET：404 同时表示「不存在」与「不可见」，两者修法相反，合并是故意的 ⇒ 只说明「有意合并」
+        return withCors(req, Response.json({
+          ok: false, error: "node_not_found",
+          note: "不存在，或不在你的可见范围内（两者故意同码，避免枚举）",
+        }, { status: 404 }));
       }
       let body: any = null;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
