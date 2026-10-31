@@ -112,6 +112,43 @@ describe("#3271 派单侧硬闸：从未取走过的目标", () => {
   });
 });
 
+describe("#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）", () => {
+  const NOW = Date.parse("2026-10-31T10:00:00.000Z");
+  const empty = { since: "2026-10-31T10:00:00.000Z", total: 0, by_node: {}, last_at: {} };
+
+  // 🔴 这条是 2026-10-31 生产实测的 must-fire：
+  //   `.254` 部署（22:39）后，我给一台**已经 10 次到死没被取走**的节点派单，
+  //   闸返回 ok:true —— 因为计数器随进程重启归零，而故障是以「周」计的。
+  test("🔴 内存计数为空，但 tasks 表里有 3 条历史 ⇒ 必须拒绝", () => {
+    const r = neverConsumeGate({
+      alias: "ghost", counters: empty, force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 3, last_at: new Date(NOW - 60_000).toISOString().replace("T", " ").slice(0, 19) },
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.expiries).toBe(3);
+  });
+
+  test("两个来源取**并集**（内存 2 + 表里 3 ⇒ 按 3 判，不是相加也不是取小）", () => {
+    const counters = { since: "s", total: 2, by_node: { ghost: 2 }, last_at: { ghost: new Date(NOW - 60_000).toISOString() } };
+    const r = neverConsumeGate({
+      alias: "ghost", counters, force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 3, last_at: new Date(NOW - 60_000).toISOString().replace("T", " ").slice(0, 19) },
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.expiries).toBe(3);
+  });
+
+  test("表里的历史很旧（超过时效）⇒ 放行：节点可能已经恢复", () => {
+    const r = neverConsumeGate({
+      alias: "ghost", counters: empty, force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 9, last_at: "2026-10-20T00:00:00" },
+    });
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe("#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑", () => {
   const NOW = Date.parse("2026-10-31T10:00:00.000Z");
   const mk = (lastAtIso: string) => ({

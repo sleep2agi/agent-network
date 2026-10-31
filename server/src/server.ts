@@ -122,7 +122,7 @@ import { createProductionSideThreadTransport } from "./side-thread-production.js
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
 import { taskRejectionCounters } from "./rejection-counters.js";
-import { neverConsumedExpiryCounters, noteNeverConsumedExpiry, neverConsumeGate } from "./expiry-counters.js";
+import { neverConsumedExpiryCounters, noteNeverConsumedExpiry, neverConsumeGate, persistentNeverConsumedExpiries } from "./expiry-counters.js";
 import { legacyLicenseField, licenseStateOf } from "./license-state.js";
 import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
@@ -5865,6 +5865,8 @@ return Bun.serve({
           counters: neverConsumedExpiryCounters(),
           force: body.force === true,
           forceAllowed: !restAuth?.networkId,
+          // #3271 —— 与 MCP 面同一份持久证据。
+          persistent: persistentNeverConsumedExpiries(db, targetAlias, taskNetId ?? null),
         });
         if (!gate.ok) return reject(withCors(req, Response.json(gate, { status: 409 })));
       }

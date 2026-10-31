@@ -72,6 +72,46 @@ export const NEVER_CONSUME_LIMIT = 3;
 /** 「最近一次从未取走」超过这个时长 ⇒ 不再拒发（节点可能已经恢复；计数仍留在读数里）。 */
 export const NEVER_CONSUME_STALE_MS = 2 * 60 * 60_000;
 
+/**
+ * #3271 🔴 2026-10-31 修 —— 这道闸原来**只读进程内计数器**，而计数器随部署归零。
+ *
+ * 实测打脸：`.254` 部署（22:39）之后我给 TM官网运维 派了一条自检任务，
+ * 它明明已经 10 次「到死没被取走」，闸却 `ok:true` 放行了 —— 因为计数器在重启时被清空。
+ * ⇒ **证据的生命期比故障短**：故障以「周」计，计数器以「本次进程」计。
+ *    一条只在本次进程内有效的判据，会被每一次发版重置，而发版比故障频繁得多。
+ *
+ * 所以判据必须有一个**持久**来源：tasks 表里已经写着每一条过期的 `status='expired'` 与
+ * `consumed_at IS NULL` —— 那是过期发生时就落库的事实，不随重启消失。
+ *
+ * 两个来源**取并集**（不是二选一）：
+ *   · 进程内计数器：本次进程内发生的最新鲜的那几条（可能在 tasks 行写之前就有）
+ *   · tasks 表：跨重启的历史（窗口由调用方给，默认 7 天 —— 与「节点可能恢复」同一个取舍）
+ */
+export interface PersistentExpiryEvidence { expiries: number; last_at: string | null }
+
+export const NEVER_CONSUME_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+
+export function persistentNeverConsumedExpiries(
+  db: { get<T = any>(sql: string, ...params: any[]): T | null },
+  alias: string,
+  networkId: string | null,
+  opts: { now?: number; lookbackMs?: number } = {},
+): PersistentExpiryEvidence {
+  const since = new Date((opts.now ?? Date.now()) - (opts.lookbackMs ?? NEVER_CONSUME_LOOKBACK_MS)).toISOString().replace("T", " ").slice(0, 19);
+  const row = networkId
+    ? db.get<{ n: number; last: string | null }>(
+        `SELECT COUNT(*) AS n, MAX(created_at) AS last FROM tasks
+          WHERE to_name = ?1 AND network_id = ?2 AND status = 'expired' AND consumed_at IS NULL
+            AND created_at >= ?3`,
+        alias, networkId, since)
+    : db.get<{ n: number; last: string | null }>(
+        `SELECT COUNT(*) AS n, MAX(created_at) AS last FROM tasks
+          WHERE to_name = ?1 AND status = 'expired' AND consumed_at IS NULL
+            AND created_at >= ?2`,
+        alias, since);
+  return { expiries: Number(row?.n ?? 0), last_at: row?.last ?? null };
+}
+
 export type NeverConsumeGate =
   | { ok: true }
   | { ok: false; error: "target_never_consumes"; alias: string; expiries: number; window_since: string; message: string };
@@ -86,14 +126,21 @@ export function neverConsumeGate(input: {
   /** 「最近一次」的时效：超过它就不再拒发（节点可能已经恢复）。 */
   staleAfterMs?: number;
   now?: number;
+  /** tasks 表里的历史（跨重启）。与进程内计数器**取并集**，见 persistentNeverConsumedExpiries 的注释。 */
+  persistent?: PersistentExpiryEvidence;
 }): NeverConsumeGate {
   const limit = input.limit ?? NEVER_CONSUME_LIMIT;
-  const expiries = input.counters.by_node[input.alias] ?? 0;
+  const fromMemory = input.counters.by_node[input.alias] ?? 0;
+  const fromDb = input.persistent?.expiries ?? 0;
+  const expiries = Math.max(fromMemory, fromDb);
   if (expiries < limit) return { ok: true };
   // 2026-10-31 —— **只数不衰减会把恢复了的节点永久拉黑**。
   // 实测的教训来自另一台机（TM中转运维）：连「抑制了多少」这个数本身都在被环缓冲淘汰，
   // 所以任何「累计」都只在它的窗口内可引用；这里把窗口写进判据：最近一次过期超过 TTL ⇒ 放行。
-  const lastAt = input.counters.last_at?.[input.alias];
+  const lastAt = [input.counters.last_at?.[input.alias], input.persistent?.last_at ?? undefined]
+    .filter((x): x is string => typeof x === "string")
+    .sort()
+    .pop();
   if (lastAt) {
     const age = (input.now ?? Date.now()) - Date.parse(lastAt);
     if (Number.isFinite(age) && age > (input.staleAfterMs ?? NEVER_CONSUME_STALE_MS)) return { ok: true };

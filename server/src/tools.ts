@@ -112,7 +112,7 @@ import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
 import { pollPacer } from "./poll-pacing.js";
-import { neverConsumedExpiryCounters, neverConsumeGate } from "./expiry-counters.js";
+import { neverConsumedExpiryCounters, neverConsumeGate, persistentNeverConsumedExpiries } from "./expiry-counters.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, updateDepartment } from "./departments.js";
 
 function ts(): string {
@@ -2278,6 +2278,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           counters: neverConsumedExpiryCounters(),
           force: force === true,
           forceAllowed: !callerTokenIsNetwork,
+          // #3271 —— 进程内计数器随部署归零，所以必须并上 tasks 表里的历史（跨重启）。
+          persistent: persistentNeverConsumedExpiries(db, targetAlias, effectiveNetId ?? null),
         });
         if (!gate.ok) return { content: [{ type: "text" as const, text: JSON.stringify(gate) }] };
       }
