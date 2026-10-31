@@ -106,6 +106,29 @@ def main() -> int:
                 # 记录该工具在哪个距离档上「有调用」；用一个附加字典存最小距离
                 strict_level.setdefault(name, []).append(path.name)
                 _min_dist[name] = min(_min_dist.get(name, 10 ** 9), dist)
+    # 2026-10-31 —— 第四档「own_result」：**同一变量的键集**。
+    # 前三档都只看距离，于是「断言写在某个工具调用旁边」就能把它算进覆盖 ——
+    # 今天实测到两次（upsert_network_secret、list_node_skills），两次都是我把断言写在别人旁边。
+    # ⇒ 这一档要求：`const X = await …("tool"` 之后 ≤15 行出现 `Object.keys(X)`。
+    own_result: dict[str, list[str]] = {}
+    ASSIGN = re.compile(r"(?:const|let|var)\s+(\w+)\s*=\s*await\s+[^\n]*?[\(\s][\"']([a-z_]+)[\"']")
+    for path in tracked(["server/src/*.test.ts"]):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, ln in enumerate(lines):
+            m = ASSIGN.search(ln)
+            if not m:
+                continue
+            var, name = m.group(1), m.group(2)
+            if name not in tools:
+                continue
+            window = "\n".join(lines[i:i + 16])
+            if re.search(rf"Object\.keys\(\s*{re.escape(var)}\s*\)", window):
+                own_result.setdefault(name, []).append(path.name)
+    own = sorted(own_result)
+
     strict = sorted(strict_level)
     band = lambda lim: sorted(n for n, d in _min_dist.items() if d <= lim)  # noqa: E731
     strict_15, strict_40, strict_80 = band(15), band(40), band(80)
@@ -120,6 +143,8 @@ def main() -> int:
             "tools_total": len(tools),
             "covered_file_level": len(covered),
             "covered_near_level": len(near),
+            "covered_own_result": len(own),
+            "own_result_names": own,
             "evidence_class": "proxy; error direction unknown (can both under- and over-count)",
             "near_names": near,
             "uncovered": uncovered,
@@ -136,7 +161,10 @@ def main() -> int:
     # 实测抽查：list_tasks 在测试里被调用过、该文件也有一条 Object.keys 断言，
     # 但那条断言测的是 humans[0]，与 list_tasks 无关 ⇒ 文件级把这种算成了「已覆盖」。
     # ⇒ 读者只看第一个数，所以第一个数必须是最不容易被高估的那个。
-    print(f"覆盖（严格口径，断言与调用 ≤{WINDOW} 行）：{len(near)} 个 ⇒ {len(near)}/{len(tools)} = {len(near) / max(len(tools), 1):.1%}")
+    print(f"覆盖（邻近口径，断言与调用 ≤{WINDOW} 行）：{len(near)} 个 ⇒ {len(near)}/{len(tools)} = {len(near) / max(len(tools), 1):.1%}")
+    # 2026-10-31 —— 「同变量口径」：这条断言是不是在测**它自己的**调用结果。
+    print(f"覆盖（**同变量口径**）：{len(own)} 个 ⇒ {len(own)}/{len(tools)} = {len(own) / max(len(tools), 1):.1%}")
+    print("  ⇒ 同变量口径才接近「这条断言在测这个工具」；邻近口径会把写在旁边的一起算进去。")
     print(f"上界（文件级，**含可能测空气**）：{len(covered)} 个 ⇒ {len(covered)}/{len(tools)} = {len(covered) / max(len(tools), 1):.1%}")
 
     print(f"调用表达式级（名字出现在 tool( 调用里）按**断言距调用**的距离分档：")

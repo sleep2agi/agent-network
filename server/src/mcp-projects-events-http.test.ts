@@ -94,6 +94,9 @@ describe("projects_create / projects_update", () => {
     const id = created.project.id as string;
     expect(created.project.name).toBe("mpe-项目甲");
     const renamed = await mcp(U.owner.token, "projects_update", { network_id: NET, id, name: "mpe-项目乙", color: "#16a34a" });
+    // 2026-10-31 —— **精确键集**（#3171）：项目更新回执是 `{ok, project}` 两键；
+    // 多给一格（比如回显整个项目集合）会让「一次更新」变成「一次列表」。
+    expect(Object.keys(renamed).sort()).toEqual(["ok", "project"]);
     expect(renamed.project.name).toBe("mpe-项目乙");
     expect(renamed.project.color).toBe("#16a34a");
     expect((await mcp(U.owner.token, "projects_update", { network_id: NET, id, archived: true })).project.archived).toBe(true);
