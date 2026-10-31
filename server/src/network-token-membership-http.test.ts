@@ -48,6 +48,38 @@ const GETS = () => [
 // 2026-10-31 —— #3214：上面那张 GETS 清单把这些端点**打过一遍**（只看状态码），
 // 但成功体的形状从未被钉。这里挑一个结构最简单的先钉住：
 //   GET /api/completions ⇒ {completions, ok}，且 completions 是数组（客户端按此分页/渲染）
+// 2026-10-31 —— #3214 续：同一张 GETS 清单里的另外两个读面，形状也从未被钉。
+describe("GET /api/servers 与 /api/host-supervisors: shape", () => {
+  test("/api/servers ⇒ {ok, servers} 且每台机器字段固定", async () => {
+    const r = await fetch(`${base}/api/servers?network_id=${net}`, {
+      headers: { Authorization: `Bearer ${tok.bossUser}` },
+    });
+    expect(r.status).toBe(200);
+    const b = await r.json() as any;
+    // ⚠️ 实测：这个端点返回**裸数组**，不是 {ok, servers}（我按同族猜错了 —— 本卡第 N 次）
+    expect(Array.isArray(b)).toBe(true);
+    for (const srv of b as any[]) {
+      expect(Object.keys(srv).sort()).toEqual([
+        "agent_count", "cpu_cores", "cpu_load_1min", "hostname", "ip",
+        "last_seen", "mem_avail_gb", "mem_used_gb",
+      ]);
+      expect(typeof srv.hostname).toBe("string");
+      expect(Number.isInteger(srv.agent_count)).toBe(true);
+    }
+  });
+
+  test("/api/host-supervisors ⇒ {count, daemons, ok}；受限成员拿到空列表也算读数", async () => {
+    const r = await fetch(`${base}/api/host-supervisors?network_id=${net}`, {
+      headers: { Authorization: `Bearer ${tok.bossUser}` },
+    });
+    expect(r.status).toBe(200);
+    const b = await r.json() as any;
+    expect(Object.keys(b).sort()).toEqual(["count", "daemons", "ok"]);
+    expect(Array.isArray(b.daemons)).toBe(true);
+    expect(b.count).toBe(b.daemons.length);   // 计数与数组同源
+  });
+});
+
 describe("GET /api/completions: shape", () => {
   test("⇒ {completions, ok} 且 completions 为数组", async () => {
     const r = await fetch(`${base}/api/completions?network_id=${net}`, {

@@ -6435,6 +6435,8 @@
   "server/src/network-token-membership-http.test.ts::#488 (iii) a restricted owner's node token says why it is refused::an unknown token gets no reason (nothing to explain, nothing leaked)": 1,
   "server/src/network-token-membership-http.test.ts::#488 unchanged for members::an all-access member's node token reads and heartbeats as before": 1,
   "server/src/network-token-membership-http.test.ts::GET /api/completions: shape::⇒ {completions, ok} 且 completions 为数组": 1,
+  "server/src/network-token-membership-http.test.ts::GET /api/servers 与 /api/host-supervisors: shape::/api/host-supervisors ⇒ {count, daemons, ok}；受限成员拿到空列表也算读数": 1,
+  "server/src/network-token-membership-http.test.ts::GET /api/servers 与 /api/host-supervisors: shape::/api/servers ⇒ {ok, servers} 且每台机器字段固定": 1,
   "server/src/node-attrs.test.ts::#2293 opencode bits on GET /api/nodes (real HTTP)::a node that never reported them reads as null / [] (old node, no invented values)": 1,
   "server/src/node-attrs.test.ts::#2293 opencode bits on GET /api/nodes (real HTTP)::generation / mode / server / catalog are projected; config_snapshot is not": 1,
   "server/src/node-attrs.test.ts::node display attrs — CAS concurrency guard::stale base_attrs_revision → 409 with the current revision, and NO write happens": 1,
@@ -14590,6 +14592,8 @@
   "server/src/network-token-membership-http.test.ts::#488 (iii) a restricted owner's node token says why it is refused::an unknown token gets no reason (nothing to explain, nothing leaked)",
   "server/src/network-token-membership-http.test.ts::#488 unchanged for members::an all-access member's node token reads and heartbeats as before",
   "server/src/network-token-membership-http.test.ts::GET /api/completions: shape::⇒ {completions, ok} 且 completions 为数组",
+  "server/src/network-token-membership-http.test.ts::GET /api/servers 与 /api/host-supervisors: shape::/api/host-supervisors ⇒ {count, daemons, ok}；受限成员拿到空列表也算读数",
+  "server/src/network-token-membership-http.test.ts::GET /api/servers 与 /api/host-supervisors: shape::/api/servers ⇒ {ok, servers} 且每台机器字段固定",
   "server/src/node-attrs.test.ts::#2293 opencode bits on GET /api/nodes (real HTTP)::a node that never reported them reads as null / [] (old node, no invented values)",
   "server/src/node-attrs.test.ts::#2293 opencode bits on GET /api/nodes (real HTTP)::generation / mode / server / catalog are projected; config_snapshot is not",
   "server/src/node-attrs.test.ts::node display attrs — CAS concurrency guard::stale base_attrs_revision → 409 with the current revision, and NO write happens",
@@ -16310,7 +16314,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "f357f9249ad1bfe9459948be5bba97fe3233d01e",
+  "commit": "830f52526a75c0fcbd9762be7fff3c61cb809b8b",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
