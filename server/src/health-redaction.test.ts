@@ -436,6 +436,11 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect("counters" in body).toBe(false);
     expect("sse_sessions" in body).toBe(false);
 
+    // 2026-10-31 —— **witness 已做隔离版**（上一轮记的是「未验」，本轮转「已验」）：
+    //   只在**鉴权分支**丢掉 sse_sessions（匿名投影一字未动）
+    //   ⇒ 上面三条否定断言**全绿**（"不存在"仍然成立），失败点恰好落在下面第 446 行的镜像上。
+    //   ⇒ 这就是「否定断言单独的强度是零」的现场：它抓不住「鉴权侧丢键」，镜像抓得住。
+    //
     // 2026-10-31 —— **否定断言必须配镜像**（外部复核：「一条否定断言单独的强度是零 ——
     // 它和『这里什么都没有』无法区分」）。
     // 上面三条都是「不出现在匿名里」；若投影实现坏成「什么都不给」，它们仍然全绿。
