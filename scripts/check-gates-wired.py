@@ -30,7 +30,7 @@ GATE_PATTERNS = ("check-*.py", "report-*.py", "check-*.sh")
 
 # 未接线的门必须在这里给出理由（空着 = 没有例外）。
 # 理由必须以 [tag] 开头，tag 取自 UNWIRED_TAGS —— 散文负责说服人，tag 负责让机器能分支。
-UNWIRED_TAGS = ("report-only", "interactive", "needs-host", "excluded")
+UNWIRED_TAGS = ("report-only", "interactive", "needs-host")
 
 
 def derived_tag(rel: str) -> str | None:
@@ -224,6 +224,11 @@ def main(argv: list[str]) -> int:
     # 「一个提示如果指向『一个可以直接编辑的数』，那它就不是提示，而是后门」）。
     # 这里把「只改名单」这条路堵上：名单里的门若**已经有** --selftest，说明名单过期了，
     # 那是「把基线改宽」而不是「把门修好」—— 必须红，否则欠账可以被一行动词归零。
+    # 2026-10-31 —— **枚举不能有死成员**（外部复核 (b)：
+    # 「新测试把每个成员各造一条产出路径，断言 set(实际产出) == set(SOURCE_VALUES)」）。
+    used_tags = {t for why in KNOWN_UNWIRED.values() for t in UNWIRED_TAGS if why.startswith(f"[{t}]")}
+    dead_tags = [t for t in UNWIRED_TAGS if t not in used_tags]
+
     stale_debt = []
     self_rel = str(Path(__file__).resolve().relative_to(REPO))
     for rel in list(KNOWN_NO_SELFTEST):
@@ -243,7 +248,7 @@ def main(argv: list[str]) -> int:
             "gates": len(all_gates), "wired": len(wired), "unwired": [str(p.relative_to(REPO)) for p in unwired],
             "selftests_run": checked, "failures": failures, "bad_unwired": bad_unwired, "stale_allow": stale_allow,
             "debt_no_selftest": debt, "selftest_not_run_here": slow_skipped,
-            "stale_debt": [r for r, _ in stale_debt],
+            "stale_debt": [r for r, _ in stale_debt], "dead_tags": dead_tags,
         }, ensure_ascii=False, indent=2))
         return 1 if (failures or bad_unwired or stale_allow) else 0
 
@@ -269,11 +274,14 @@ def main(argv: list[str]) -> int:
         print(f"    ✗ 未接线且没登记理由：{g}", file=sys.stderr)
     for rel, why in bad_tag:
         print(f"    ✗ 理由缺结构标签（须以 [{'|'.join(UNWIRED_TAGS)}] 开头）：{rel} —— {why}…", file=sys.stderr)
+    for t in dead_tags:
+        print(f"    ✗ 标签 [{t}] 是死成员：UNWIRED_TAGS 里登记了，但没有任何未接线的门用它"
+              f"（要么用上，要么从闭集删掉）", file=sys.stderr)
     for k in stale_allow:
         print(f"    · 白名单已过期（该门现在已接线）：{k}")
     for rel, why in stale_debt:
         print(f"    ✗ 欠账名单过期：{rel} —— {why}（把基线改宽不算修好）", file=sys.stderr)
-    if failures or bad_unwired or stale_debt or bad_tag:
+    if failures or bad_unwired or stale_debt or bad_tag or dead_tags:
         return 1
     # 2026-10-31 —— 外部复核：「分类表已经存在，但全仓 grep 是**写 1 处、读 0 处**
     # ⇒ 缺口不是『缺分类』，是『分类没有消费者』」。
