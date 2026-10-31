@@ -148,7 +148,15 @@ describe("rename broadcast does not leak aliases to restricted members", () => {
     const renameTo = async (oldAlias: string, newAlias: string) => {
       const p = await send(adminToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: oldAlias, new_alias: newAlias });
       expect(p.body.ok).toBe(true);
-      expect((await send(adminToken, "POST", "/api/node-rename/commit", { txn_id: p.body.txn_id })).body.ok).toBe(true);
+      // 2026-10-31 —— #3214：rename 的两个端点此前只断言 ok，形状从未被钉。
+      // 形状由**真实调用**给出（我先写了一版「按 in body 过滤」的断言 —— 那是恒真的，等于没写）。
+      //   prepare ⇒ {ok, txn_id}   两阶段的第一步：客户端必须拿到 txn_id 才能 commit
+      //   commit  ⇒ {ok, txn_id}   回执同样只这两键
+      expect(Object.keys(p.body).sort()).toEqual(["ok", "txn_id"]);
+      expect(typeof p.body.txn_id).toBe("string");
+      const c = await send(adminToken, "POST", "/api/node-rename/commit", { txn_id: p.body.txn_id });
+      expect(c.body.ok).toBe(true);
+      expect(Object.keys(c.body).sort()).toEqual(["ok", "txn_id"]);
     };
     await renameTo(Z.alias, "acl3-agent-z2");
     await renameTo(X.alias, "acl3-agent-x2");
