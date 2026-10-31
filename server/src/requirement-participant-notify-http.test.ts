@@ -231,6 +231,10 @@ describe("参与人能改的", () => {
     const no = await mcp(pat.token, "requirements_update", { id, network_id: NET, name: "改名" });
     expect(no).toMatchObject({ ok: false, error: "task_read_only", field: "name", status: 403 });
     const tog = await mcp(pat.token, "requirements_checklist_toggle", { id, network_id: NET, item_id: "i2", done: true });
+    // #3275 批次 2 —— 勾选清单项的外层闭集。**我先按族推断写成 {checklist, ok}，实测红了**：
+    //   真实形状是 {ok, requirement} —— 回带的是**整张卡**，不是清单片段。
+    // ⇒ 这条注释就是那次推断的墓碑：同族的工具**不共享**回执形状，必须各自量。
+    expect(Object.keys(tog).sort()).toEqual(["ok", "requirement"]);
     expect(tog.ok).toBe(true);
   });
 

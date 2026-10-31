@@ -63,6 +63,9 @@ describe("requirements MCP tools", () => {
       // P0–P3:lowest(P3 极低)在建 / 改 / upsert 都能写;不认识的值在协议边界被拒
       expect((await s.call("requirements_create", { name: "x", priority: "urgent" })).mcpError).toBe(true);
       const low = await s.call("requirements_create", { name: "极低", priority: "lowest" });
+      // #3275 批次 2 —— 创建与更新的**外层**是同一个闭集 {ok, requirement}。
+      // 这两个工具是今晚我每轮都在用的写面；钉住外层之后，「顺手加一个顶层键」才会红。
+      expect(Object.keys(low).sort()).toEqual(["ok", "requirement"]);
       expect(low.requirement.priority).toBe("lowest");
       expect((await s.call("requirements_update", { id: low.requirement.id, priority: "high" })).requirement.priority).toBe("high");
       expect((await s.call("requirements_update", { id: low.requirement.id, priority: "lowest" })).requirement.priority).toBe("lowest");
@@ -78,6 +81,7 @@ describe("requirements MCP tools", () => {
       expect(first.ok).toBe(true);
       expect(first.created).toBe(true);
       const tagged = await s.call("requirements_update", { id: first.requirement.id, tags: ["release"] });
+      expect(Object.keys(tagged).sort()).toEqual(["ok", "requirement"]);
       expect(tagged.requirement.tags).toEqual(["release"]);
       expect(first.requirement.created_by).toEqual({ kind: "node", id: "node_gh_sync" });
       const again = await s.call("requirements_upsert_by_external_ref", { external_ref: ref, name: "修复登录(改了标题)" });
