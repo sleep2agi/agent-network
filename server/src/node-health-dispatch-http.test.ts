@@ -284,6 +284,21 @@ describe("#460 /api/status carries `degraded` only for degraded nodes", () => {
     expect((await row(true)).degraded).toEqual(want);
     expect((await row(false)).degraded).toEqual(want);
   });
+  // 2026-10-31 —— **两个面必须说同一件事**（外部复核那条「共用的是解析还是判据」）。
+  // 同一个节点健康，经两条路到达用户：
+  //   ① /api/task 的 409 `layers`（派发被拒时当场告诉他哪层坏了）
+  //   ② /api/status 行里的 `degraded`（列表里一直可见）
+  // 二者都由 degradedLayers() 产出，但**没有任何测试保证两个面一致** ——
+  // 只要有人在其中一处 map 里漏掉 `origin`，两处就会开始说不同的版本。
+  test("parity: 409 layers and status degraded describe the same failure", async () => {
+    setHealth({ bridge: "ok", app_server: { ok: false, rtt_ms: null, last_error: "refused" }, model_auth: "revoked" });
+    const r = await postTask(ownerToken);
+    expect(r.status).toBe(409);
+    const fromTask = (r.body.layers as any[]).map((l) => [l.layer, l.reason, l.origin]);
+    const fromStatus = ((await row(false)).degraded as any[]).map((l) => [l.layer, l.reason, l.origin]);
+    expect(fromTask).toEqual(fromStatus);
+  });
+
   test("stale → no `degraded`", async () => {
     setHealth(DOWN_APP, Date.now() - NODE_HEALTH_TTL_MS - 1_000);
     expect("degraded" in (await row(true))).toBe(false);
