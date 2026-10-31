@@ -1199,7 +1199,15 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   },
   api_version: { class: "gauge", granularity: "label", constant_by_design: "本进程只实现 v3；若将来并存两代，这里才会出现第二个取值" },
   transport: { class: "gauge", granularity: "label", constant_by_design: "本进程只实现 streamable-http（另一支 SSE-only 是历史形态，已不接受配置）" },
-  uptime: { class: "gauge", granularity: "cumulative" },
+  uptime: {
+    class: "gauge",
+    granularity: "cumulative",
+    // 2026-10-31 —— 这一格是**同一 body 里的第二个时钟源**（外部复核：
+    // 「time ← CLOCK_REALTIME（可被 NTP 拉、可冻结）；uptime ← CLOCK_MONOTONIC（只走不跳）」）。
+    // ⇒ 「served_at 不动而 uptime 在走」= 冻结的是墙钟，不是进程：**单次读数、零外部依赖、有方向**。
+    // 前提必须成立：uptime 来自 process.uptime()（单调），**不是** Date.now()-startedAt（同源就没判别力）。
+    why: "进程已运行秒数（process.uptime()，单调时钟）。与 served_at/startedAt 不同源：墙钟被 NTP 冻结时它仍在走 ⇒ 可判「是钟停了还是进程停了」",
+  },
   startedAt: { frozen_at_boot: true, class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
   sessions_count: { class: "gauge", granularity: "level" },
   sse_connections: { class: "gauge", granularity: "level" },

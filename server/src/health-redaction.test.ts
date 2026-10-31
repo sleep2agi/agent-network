@@ -1148,6 +1148,26 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect((src.match(/const shape = /g) || []).length).toBe(1);
   });
 
+  // 2026-10-31 —— **同一 body 里的两个时钟源**（外部复核：
+  // 「要解耦两个读数，必须证明它们来自不同的源，而不是来自不同的字段名」）。
+  // 这条同时证明两件事：
+  //   ① uptime 的来源是 process.uptime()（单调时钟），不是 Date.now()-startedAt；
+  //   ② startedAt 与 uptime 互相自洽（startedAt = now - uptime），所以它是「同一对的另一侧」。
+  // 若哪天有人把 uptime 改成 Date.now()-startedAt，① 会红 —— 那时两个字段会同源、判别力归零。
+  test("uptime comes from the monotonic clock (a separate source from served_at)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+    expect(src).toContain("uptime: Math.floor(process.uptime())");
+    expect(src).not.toMatch(/uptime:\s*Math\.floor\(\(Date\.now\(\)\s*-/);
+
+    const body = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(Number.isInteger(body.uptime)).toBe(true);
+    expect(body.uptime).toBeGreaterThanOrEqual(0);
+    // 自洽：now - startedAt ≈ uptime（±5s 容差，覆盖处理时间与秒级取整）
+    const derived = (Date.now() - Date.parse(body.startedAt)) / 1000;
+    expect(Math.abs(derived - body.uptime)).toBeLessThanOrEqual(5);
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
