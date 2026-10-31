@@ -1211,6 +1211,11 @@ const REAL_NODE_PROBE = (() => {
   try {
     const info = JSON.parse(probe.stdout.trim());
     if (info.bun) return { ok: false, why: `\`node\` on PATH is Bun posing as Node ${info.version}` };
+    // 2026-10-31 —— 还要有 undici 本体。它是 package.json 的依赖，但本机 agent-node/node_modules
+    // 常常是部分安装（实测这里没有 undici）⇒ 用例会红在 `expect(existsSync(undiciEntry))` 上，
+    // 而红的样子和「回归」一模一样。判据取「文件在不在」，与 /opt/x 那条同一处理：跳过并打理由。
+    const undiciEntry = join(import.meta.dir, "..", "..", "..", "node_modules", "undici", "index.js");
+    if (!existsSync(undiciEntry)) return { ok: false, why: `undici is not installed (${undiciEntry})` };
     return { ok: true, why: `node ${info.version}` };
   } catch {
     return { ok: false, why: `unreadable \`node\` probe output: ${probe.stdout}` };
