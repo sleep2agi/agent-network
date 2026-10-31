@@ -683,8 +683,24 @@ function networkTagNames(networkId: string): Set<string> {
   return names;
 }
 
+/**
+ * 2026-10-31 —— **状态码是 code 的函数，映射表必须穷尽**（外部复核 (c)：
+ * 「三元式默认分支 = 未映射与某个真实含义同值 ⇒ 口令字段；应改成
+ *  `Record<ErrorCode, number>` 由 tsc 报红」）。
+ *
+ * 原来是 `code === "tag_exists" ? 409 : code === "tag_parent_not_found" ? 404 : 400`：
+ * 新增一个错误码时它**默认落到 400**，而有些码 400 是错的（冲突应是 409），且没人会提醒你。
+ * 改成穷尽表之后，漏一个码 = tsc 红。
+ */
+type TagCreateError = "tag_exists" | "tag_parent_not_found" | "tag_depth_exceeded";
+const TAG_CREATE_STATUS: Record<TagCreateError, number> = {
+  tag_exists: 409,
+  tag_parent_not_found: 404,
+  tag_depth_exceeded: 400,
+};
+
 type CreateTagOutcome =
-  | { error: "tag_exists" | "tag_parent_not_found" | "tag_depth_exceeded" }
+  | { error: TagCreateError }
   | { name: string; parent: string | null; depth: number; parentRegistered: boolean };
 
 /** POST /api/requirements/tags/create —— 建标签(可带父)。原子、整网络判重、父不存在就报错。 */
@@ -724,8 +740,7 @@ async function handleTagCreate(ctx: RequirementsRequestContext): Promise<Respons
     return { name: input.name, parent: input.parent, depth: tagDepth(input.name, parentOf), parentRegistered };
   });
   if ("error" in result) {
-    const status = result.error === "tag_exists" ? 409 : result.error === "tag_parent_not_found" ? 404 : 400;
-    return jsonError(result.error, status);
+    return jsonError(result.error, TAG_CREATE_STATUS[result.error]);
   }
   if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_tag_create", "requirement_tag", result.name, JSON.stringify({ parent_id: result.parent, depth: result.depth }).slice(0, 1000), undefined, networkId);
   return Response.json({ ok: true, tag: { name: result.name, parent_id: result.parent, depth: result.depth }, parent_registered: result.parentRegistered }, { status: 201 });
