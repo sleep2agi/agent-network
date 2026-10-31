@@ -55,7 +55,120 @@ def tracked() -> list[str]:
     return [l for l in out.split("\n") if l.strip()]
 
 
+def runner_body(path: Path, body: str) -> str:
+    """把一份 runner 配置文本变成「只有真的会执行的内容」。
+
+    2026-10-31 —— **注释不是 runner**（实测）：我在 workflow 里写了一行注释 `*.test.mjs`，
+    本脚本就把两个孤儿测试判成「有 runner 覆盖」⇒ 登记表失效、而输出仍然全绿。
+    """
+    if path.suffix in (".yml", ".yaml"):
+        return "\n".join(
+            ln.split(" #")[0] if not ln.lstrip().startswith("#") else ""
+            for ln in body.splitlines()
+        )
+    if path.name == "package.json":
+        try:
+            doc = json.loads(body)
+            return "\n".join(str(v) for v in (doc.get("scripts") or {}).values())
+        except Exception:  # noqa: BLE001
+            return ""
+    return body
+
+
+def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict[str, str]) -> dict:
+    """一个候选文件落进哪一类。抽成纯函数是为了能自检（元门要求 --selftest）。"""
+    name = f.split("/")[-1]
+    if f.endswith(".test.ts"):
+        return {"file": f, "verdict": "A_inventory", "why": "*.test.ts 由 check-test-inventory.py 计数"}
+    # 「被引用」有三种形态，只认第一种会误报：
+    #   ① 点名文件：body 里出现文件名
+    #   ② **glob**：`node --test test/*.test.mjs` —— 文件没被点名，但它真的会被跑
+    #   ③ 路径点名
+    referenced = [r for r, body in runner_text if name in body or f in body]
+    if not referenced:
+        for r, body in runner_text:
+            for pat in re.findall(r"[\w./*-]*\*(?:\.test\.\w+|/\*\.test\.\w+)[\w./*-]*", body):
+                if fnmatch.fnmatch(f, pat) or fnmatch.fnmatch(f, "*/" + pat.lstrip("./")):
+                    referenced.append(r)
+                    break
+            if referenced:
+                break
+    if referenced:
+        return {"file": f, "verdict": "B_runner", "why": ", ".join(sorted(set(referenced))[:3])}
+    if f in not_run_by_design:
+        return {"file": f, "verdict": "C_by_design", "why": not_run_by_design[f]}
+    return {"file": f, "verdict": "ORPHAN", "why": "没有任何 runner 提到它"}
+
+
+SELFTEST_EXPECTED = 7
+
+
+def selftest(quiet: bool = False) -> int:
+    """2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`。
+
+    这门的判据是「这份文件落进哪一类」，纯函数化后可以喂合成输入：
+    每一类都必须**被命中**，且注释与 package.json 的无关字段必须**不**算 runner。
+    只验「能跑」是不够的：一个只会全绿的分类器与一次什么都没查同形。
+    """
+    fails, ran = 0, 0
+
+    def case(label: str, got: str, want: str) -> None:
+        nonlocal fails, ran
+        ran += 1
+        if got != want:
+            fails += 1
+            print(f"✗ {label}：期望 {want}，实际 {got}", file=sys.stderr)
+        elif not quiet:
+            print(f"✓ {label} ⇒ {want}")
+
+    runners = [("scripts/qa.sh", "bun test src/*.test.ts"),
+               ("run.mjs", "node --test test/*.test.mjs"),
+               (".github/workflows/x.yml", "run: bun test scripts/named.test.mjs")]
+    nrbd: dict[str, str] = {"hand/manual.test.mjs": "只给手工环境用"}
+
+    case("*.test.ts ⇒ 测试清单", classify("server/src/a.test.ts", runners, nrbd)["verdict"], "A_inventory")
+    case("点名文件 ⇒ 有 runner", classify("scripts/named.test.mjs", runners, nrbd)["verdict"], "B_runner")
+    case("命中 glob ⇒ 有 runner", classify("test/other.test.mjs", runners, nrbd)["verdict"], "B_runner")
+    case("无人提到 ⇒ 未归属", classify("scripts/lonely.test.mjs", runners, nrbd)["verdict"], "ORPHAN")
+    case("登记为不跑 ⇒ C 类", classify("hand/manual.test.mjs", runners, nrbd)["verdict"], "C_by_design")
+
+    # 注释不是 runner：YAML 行注释里的 glob 必须被剥掉
+    raw = "# node --test test/*.test.mjs\nrun: echo hi\n"
+    stripped = runner_body(Path(".github/workflows/x.yml"), raw)
+    ran += 1
+    if "*.test.mjs" in stripped:
+        fails += 1
+        print("✗ YAML 注释未被剥掉 ⇒ 注释会被当成 runner", file=sys.stderr)
+    elif not quiet:
+        print("✓ YAML 注释被剥掉 ⇒ 注释不会被当成 runner")
+
+    # package.json 只取 scripts 的值（描述里的文件名不算）
+    raw2 = json.dumps({"description": "see wild.test.mjs", "scripts": {"t": "bun test x"}})
+    stripped2 = runner_body(Path("package.json"), raw2)
+    ran += 1
+    if "wild.test.mjs" in stripped2:
+        fails += 1
+        print("✗ package.json 的非 scripts 字段被当成 runner", file=sys.stderr)
+    elif not quiet:
+        print("✓ package.json 只取 scripts")
+
+    if ran != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     files = tracked()
     if not files:
         print("扫描域为空：git ls-files 没有结果 ⇒ 没有读数", file=sys.stderr)
@@ -74,52 +187,13 @@ def main() -> int:
                 body = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            # 2026-10-31 —— **注释不是 runner**。
-            # 实测：我在 workflow 里写了一行注释 `*.test.mjs`，本脚本就把两个孤儿测试
-            # 判成「有 runner 覆盖」⇒ 守卫的登记表失效、而输出仍然全绿。
-            # ⇒ YAML 去掉行注释；package.json 只取 scripts 的值。
-            if p.suffix in (".yml", ".yaml"):
-                body = "\n".join(
-                    ln.split(" #")[0] if not ln.lstrip().startswith("#") else ""
-                    for ln in body.splitlines()
-                )
-            elif p.name == "package.json":
-                try:
-                    import json as _json
-                    body = "\n".join(str(v) for v in (_json.loads(body).get("scripts") or {}).values())
-                except Exception:  # noqa: BLE001
-                    body = ""
-            runner_text.append((str(p.relative_to(REPO)), body))
+            runner_text.append((str(p.relative_to(REPO)), runner_body(p, body)))
     if not runner_text:
         print("扫描域为空：没找到任何 runner 配置 ⇒ 没有读数（不是「都没有执行者」）", file=sys.stderr)
         return 2
 
-    rows = []
-    for f in cands:
-        name = f.split("/")[-1]
-        if f.endswith(".test.ts"):
-            rows.append({"file": f, "verdict": "A_inventory", "why": "*.test.ts 由 check-test-inventory.py 计数"})
-            continue
-        # 2026-10-31 —— 「被引用」有三种形态，只认第一种会误报：
-        #   ① 点名文件：body 里出现文件名
-        #   ② **glob**：`node --test test/*.test.mjs` / `bun test scripts/*.test.mjs`
-        #      —— 文件没被点名，但它真的会被跑（我第一版漏了这一种，误报了 2 个）
-        #   ③ 路径点名
-        referenced = [r for r, body in runner_text if name in body or f in body]
-        if not referenced:
-            for r, body in runner_text:
-                for pat in re.findall(r"[\w./*-]*\*(?:\.test\.\w+|/\*\.test\.\w+)[\w./*-]*", body):
-                    if fnmatch.fnmatch(f, pat) or fnmatch.fnmatch(f, "*/" + pat.lstrip("./")):
-                        referenced.append(r)
-                        break
-                if referenced:
-                    break
-        if referenced:
-            rows.append({"file": f, "verdict": "B_runner", "why": ", ".join(sorted(set(referenced))[:3])})
-        elif f in NOT_RUN_BY_DESIGN:
-            rows.append({"file": f, "verdict": "C_by_design", "why": NOT_RUN_BY_DESIGN[f]})
-        else:
-            rows.append({"file": f, "verdict": "ORPHAN", "why": "没有任何 runner 提到它"})
+    # 判据只有一份（classify），main 不再复制一遍 —— 复制的那一份会与自检过的那个漂开。
+    rows = [classify(f, runner_text, NOT_RUN_BY_DESIGN) for f in cands]
 
     inv_count = sum(1 for r in rows if r["verdict"] == "A_inventory")
     if inv_count == 0:

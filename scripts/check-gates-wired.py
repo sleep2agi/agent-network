@@ -73,7 +73,6 @@ KNOWN_NO_SELFTEST: set[str] = {
     "scripts/check-doc-symbol-pins.py",
     "scripts/check-mcp-tool-anchor-sections.py",
     "scripts/check-mcp-tool-index-coverage.py",
-    "scripts/report-orphan-tests.py",
     "scripts/report-script-cadence.py",
     # 本脚本自己不提供 --selftest（它跑别人的），否则会自我递归
     "scripts/check-gates-wired.py",
