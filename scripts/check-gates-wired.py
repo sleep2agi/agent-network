@@ -72,7 +72,6 @@ KNOWN_NO_SELFTEST: set[str] = {
     "scripts/check-doc-claims.py",
     "scripts/check-doc-source-pins.py",
     "scripts/check-doc-symbol-pins.py",
-    "scripts/check-hub-launcher-pin.py",
     "scripts/check-hub-v2-protocol-inputs.py",
     "scripts/check-mcp-tool-anchor-sections.py",
     "scripts/check-mcp-tool-index-coverage.py",
