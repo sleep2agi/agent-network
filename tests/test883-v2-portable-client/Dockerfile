@@ -13,6 +13,8 @@ RUN git init -q && git remote add origin https://github.com/sleep2agi/agent-netw
 RUN npm ci --ignore-scripts && npm run typecheck && npx --no-install expo export --platform web --output-dir /client-web
 
 FROM base AS product
+# #3294 —— 这个 stage 里就要写 build-info，所以 ARG 必须在这里声明一次。
+ARG SOURCE_COMMIT
 WORKDIR /qa-tools
 COPY tests/test883-v2-portable-client/tools/package*.json ./
 RUN npm ci && ln -s /qa-tools/node_modules/.bin/opencode /usr/local/bin/opencode && test "$(opencode --version)" = 'opencode v2.0.22'
@@ -24,6 +26,10 @@ RUN cd server && npm ci --ignore-scripts && cd ../agent-network && npm ci --igno
 COPY server ./server
 COPY agent-network ./agent-network
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
+# #3294 —— 让节点带上**构建标识**：prepack 在发布时会写 build-info.json，而这里直接
+# `npm run build` 不走 pack ⇒ 没有那个文件 ⇒ 节点报 absent ⇒ /api/nodes 的 build_commit
+# 恒为 null，这条链路就永远没有端到端读数。所以显式跑一次同一个 writer（SOURCE_COMMIT 由 ci.sh 传）。
+RUN cd /opt/node_modules/@sleep2agi/agent-node && node scripts/write-build-info.mjs && ls -l build-info.json && cat build-info.json
 RUN cd /opt/node_modules/@sleep2agi/agent-node && npm run build && chmod 644 package.json && chmod 755 dist/cli.js && chmod -R go-w /opt/node_modules && ln -s /opt/node_modules/@sleep2agi/agent-node/dist/cli.js /usr/local/bin/agent-node
 RUN cd agent-network && npm run build && chmod 755 dist/bin/anet.cjs
 COPY --from=client /client-web /client-web

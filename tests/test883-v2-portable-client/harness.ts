@@ -135,6 +135,19 @@ try {
   check('daemon did not reject the runtime after registration',
     !(logs.daemon ?? '').includes('runtime_capability_check_failed'));
   check('child token remains active after daemon verdict', settled?.status === 'succeeded' && settled.revoked_at === null);
+
+  // #3294 —— 端到端：**真实 agent-node 进程**报上来的构建标识，能不能在 REST 投影上读到。
+  // 这一格补的是「schema / 落库 / 投影」三段各自单测之外的那条链：
+  // 之前构建标识只在单元测试里出现过，没有任何一次是「一个真进程报、一个真接口读」。
+  let buildRow: any;
+  check('#3294 /api/nodes 投影里读到 build_commit（真进程 → 真接口）', await until(async () => {
+    const r = await api(`/api/nodes?network_id=${networkId}`);
+    buildRow = (r.nodes ?? []).find((n: any) => n.node_id === row.child_node_id || n.alias === 'oc829');
+    return typeof buildRow?.build_commit === 'string' && buildRow.build_commit.length >= 7;
+  }, 20000));
+  console.log('build evidence:', JSON.stringify({ build_commit: buildRow?.build_commit ?? null, expected: process.env.SOURCE_COMMIT ?? null }));
+  // 标识必须等于**这次构建的源提交**；只断言「非空」等于只证明格式。
+  check('#3294 build_commit 等于本次构建的源提交', buildRow?.build_commit === process.env.SOURCE_COMMIT);
   let completion: any;
   check('client REST receives explicit daemon launch proof and exact child identity', await until(async () => {
     completion = await api(`/api/node-create-requests?request_id=${created.request_id}&network_id=${networkId}`);
