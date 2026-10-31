@@ -52,23 +52,40 @@ fi
 
 fails=0
 FAILED_LABELS=""
+# 2026-10-31 —— 外部复核：「一个实验如果可能同时改变两个以上变量，它就不是这一轮的实验，
+# 是下一轮的。它最危险的失效方式是：看起来像『更彻底的验证』，
+# 实际是把判别力换成了覆盖更多。」
+# ⇒ 每格必须**只改一个变量**：这里显式声明，并在最后断言声明集合无重复、非空。
+DECLARED_VARS=""
 check() {
-  local label="$1" origin="$2" want="$3"
+  local label="$1" origin="$2" want="$3" var="$4"
   local r acao
   r=$(probe "$label" "$origin")
   acao=$(printf '%s' "$r" | cut -f3)
   local ok=0
   if [ "$want" = "echo" ] && [ "$acao" != "-" ] && [ -n "$acao" ]; then ok=1; fi
   if [ "$want" = "none" ] && { [ "$acao" = "-" ] || [ -z "$acao" ]; }; then ok=1; fi
-  printf '  %-28s acao=%-32s want=%-5s %s\n' "$label" "${acao:--}" "$want" $([ $ok -eq 1 ] && echo ✓ || echo ✗)
+  DECLARED_VARS="${DECLARED_VARS}${DECLARED_VARS:+,}${var}"
+  printf '  %-24s [改:%s] acao=%-28s want=%-5s %s\n' "$label" "$var" "${acao:--}" "$want" $([ $ok -eq 1 ] && echo ✓ || echo ✗)
   [ $ok -eq 1 ] || { fails=$((fails + 1)); FAILED_LABELS="${FAILED_LABELS}${FAILED_LABELS:+、}${label}"; }
 }
 
-check "大写形式（规范化）" "$UPPER" echo
-check "尾斜杠（规范化）"   "$SLASH" echo
-check "清单外（反例）"     "$FOREIGN" none
+check "大写形式（规范化）" "$UPPER" echo "大小写"
+check "尾斜杠（规范化）"   "$SLASH" echo "尾斜杠"
+check "清单外（反例）"     "$FOREIGN" none "host"
 
-echo "判定：基准格成立 ⇒ 其余格有效"
+# 声明集合自检：三格必须各改一个**不同**的变量（无重复、无空）
+# 注意：`wc -l` 数的是换行符，最后一项没有换行 ⇒ 会少数一个（第一版就是这样误报的）
+UNIQ=$(printf '%s\n' "$DECLARED_VARS" | tr ',' '\n' | grep -c .)
+TOTAL=$(printf '%s\n' "$DECLARED_VARS" | tr ',' '\n' | grep -c . || true)
+TOTAL=$(printf '%s\n' "$DECLARED_VARS" | tr ',' '\n' | sed '/^$/d' | wc -l | tr -d ' ')
+UNIQ=$(printf '%s\n' "$DECLARED_VARS" | tr ',' '\n' | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+if [ "$UNIQ" -ne "$TOTAL" ] || printf '%s' "$DECLARED_VARS" | grep -q '^,';
+then
+  echo "✗ 有格改了不止一个变量（或声明重复）：$DECLARED_VARS ⇒ 这些格的读数不可归因" >&2
+  exit 1
+fi
+echo "判定：基准格成立 ⇒ 其余格有效（每格只改一个变量：$DECLARED_VARS）"
 [ $fails -eq 0 ] && { echo "✓ 全部符合预期"; exit 0; }
 
 # 2026-10-31 —— 外部复核 ④：「预测落空时先说清**哪些格一起反常**，再说为什么——
