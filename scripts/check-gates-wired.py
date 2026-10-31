@@ -44,6 +44,28 @@ INTERPRETER_BY_SUFFIX: dict[str, tuple[str, ...]] = {
 # 理由必须以 [tag] 开头，tag 取自 UNWIRED_TAGS —— 散文负责说服人，tag 负责让机器能分支。
 UNWIRED_TAGS = ("report-only", "interactive", "needs-host")
 
+# 2026-10-31 —— **每条豁免必须写「移出条件」**（外部复核：
+# 「把孤儿登记成『已知』会让它从『缺失』变成『已处理』；除非登记项带『什么情况下可以移出』，
+#   它会一直停在那里，而下一次看到它的人会以为有人在跟。」）
+# 理由（why）回答「为什么现在不接」，移出条件（exit_when）回答「什么情况下该接/该删」。
+# 两者分开存：一条写了理由的豁免看起来负责，只有写了移出条件的豁免才会结束。
+UNWIRED_EXIT_WHEN: dict[str, str] = {
+    "scripts/check-claim-existence.py": "它被接进某个 CI 步骤（而不是人工按需跑）⇒ 移出本表",
+    "scripts/check-control-run.sh": "CI 里有干净的 git worktree 副本可供它跑 ⇒ 移出本表",
+    "scripts/check-diff-shape.sh": "提交形状检查改由 CI（而不是本地钩子）承担 ⇒ 移出本表",
+    "scripts/report-process-artifact-drift.py": "出现固定读者（人或门）⇒ 移出本表并接线",
+    "scripts/report-code-producers.py": "出现固定读者 ⇒ 移出本表并接进巡检",
+    "scripts/report-rest-coverage.py": "REST 覆盖率被接进 CI 的覆盖率门 ⇒ 移出本表",
+    "scripts/report-header-producers.py": "「同一路由内 >1 生产者」被做成门 ⇒ 移出本表",
+    "scripts/report-health-liveness.py": "有了带负载的定时运行点 ⇒ 移出本表",
+    "scripts/cleanup-dangling-requirement-refs.py": "存量清完且删除路径有断言守住 ⇒ 本脚本可删",
+    "scripts/report-mcp-key-set-coverage.py": "键集覆盖率进 CI 并设下限 ⇒ 移出本表",
+    "scripts/report-node-versions.py": "舰队版本分布出现固定读者 ⇒ 移出本表",
+    "scripts/report-reason-branches.py": "出现固定读者 ⇒ 移出本表",
+    "scripts/report-rest-endpoints.py": "路由表由它生成且被门消费（已如此）⇒ 可并入该门",
+    "scripts/report-table-driven-nonempty.py": "出现固定读者 ⇒ 移出本表并接线",
+}
+
 
 def derived_tag(rel: str) -> str | None:
     """从**文件名**推出的标签（能推就不许手填）。
@@ -214,6 +236,17 @@ def main(argv: list[str]) -> int:
         (wired if p.name in wf else unwired).append(p)
 
     bad_unwired = [str(p.relative_to(REPO)) for p in unwired if str(p.relative_to(REPO)) not in KNOWN_UNWIRED]
+    # 移出条件必须**每条都有**，且指向的脚本必须真的在 KNOWN_UNWIRED 里（防死条目）
+    no_exit = [k for k in KNOWN_UNWIRED if not str(UNWIRED_EXIT_WHEN.get(k, "")).strip()]
+    dead_exit = [k for k in UNWIRED_EXIT_WHEN if k not in KNOWN_UNWIRED]
+    if no_exit:
+        print(f"✗ 这些豁免没有写移出条件（{len(no_exit)} 条）⇒ 它们会永远停在这里：", file=sys.stderr)
+        for k in no_exit:
+            print(f"    · {k}", file=sys.stderr)
+        return 1
+    if dead_exit:
+        print(f"✗ 移出条件指向了不在豁免表里的脚本（{len(dead_exit)} 条）：{dead_exit}", file=sys.stderr)
+        return 1
     # 结构标签：理由不能只是散文（「用质量掩盖缺席」）
     bad_tag = []
     for rel, why in KNOWN_UNWIRED.items():
