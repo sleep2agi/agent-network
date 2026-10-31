@@ -417,7 +417,11 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       _run_cmd+=" ${_qa_run_flags} anet-$t"
       dockerrun "$_run_cmd" >/tmp/qa-l1-$t-run.log 2>&1 || _rc=$?
       _e=$(( $(date +%s) - START ))
-      printf '%s\t%s\t%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv
+      # 2026-10-31 —— 时间线改成**带标签**的一行（外部复核 ⑥：「给 log_format 加列会移动其后的所有下标
+      # ⇒ 会亲手制造第 ⑤ 条；必须先把消费方改成按标签取值」）。
+      # 这个文件是 /tmp 里的临时产物，不是历史 —— 所以改它不会让任何历史 run 对不上，
+      # 而按位置取值的消费方（$2/$3）会在加一列时静默算错时长。
+      printf 'suite=%s\tstart=%s\tend=%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv
       # 🔴 **完成即打印**,不要只留给结尾的汇总。
       #    2026-08-27 一次 L0+L1 顶到 30 分天花板被 kill(run 33126449082,1815s):
       #    18 个 build 起来了,而时间线**一行都没有** —— 因为汇总只在所有 wait 结束后才跑,
@@ -439,7 +443,7 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     #    bash/coreutils/procps 的容器里重放(见本文件上面那条注释),那里未必有。
     #    退化行为是「安静地取不到时间」而不是报错,但那正是最难发现的一种坏 ——
     #    输出少了一段,谁也不会注意到。awk 是字段比较,不涉及正则方言。
-    _line=$(awk -F'\t' -v t="$_t" '$1==t{last=$0} END{if(last)print last}' /tmp/qa-l1-timing.tsv 2>/dev/null || true)
+    _line=$(awk -F'\t' -v t="suite=$_t" '$1==t{last=$0} END{if(last)print last}' /tmp/qa-l1-timing.tsv 2>/dev/null || true)
     [ -z "$_line" ] && return 0
     local _a _b
     _a=$(printf '%s' "$_line" | cut -f2); _b=$(printf '%s' "$_line" | cut -f3)
@@ -515,8 +519,16 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
   if [ -s /tmp/qa-l1-timing.tsv ]; then
     echo
     echo "L1 时间线（相对 L1 起点，按开始偏移排序）— #1333"
-    sort -t$'\t' -k2,2n /tmp/qa-l1-timing.tsv \
-      | awk -F'\t' '{printf "  +%4ds .. +%4ds  (%3ds)  %s\n", $2, $3, $3-$2, $1}'
+    # 按标签取值（不按位置）：插一个字段也不会让三列错位。
+    awk -F'\t' '
+      function lab(key,   i) { for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+      { n = lab("suite"); st = lab("start"); en = lab("end")
+        if (n == "" || st == "" || en == "") { bad++; next }
+        printf "%d\t%d\t%d\t%s\n", st, en, en - st, n }
+      END { if (bad) printf "✗ 时间线有 %d 行缺少 suite=/start=/end= 标签 ⇒ 拒绝出表（不打印猜出来的数字）\n", bad > "/dev/stderr" }
+    ' /tmp/qa-l1-timing.tsv \
+      | sort -k1,1n \
+      | awk -F'\t' '{printf "  +%4ds .. +%4ds  (%3ds)  %s\n", $1, $2, $3, $4}'
     # 🔴 #1627 —— 一行**格式固定**的摘要,专门为了「跨 run 比快慢」。
     #
     #    今天(2026-08-31)我能判定五次红都是「慢 runner 撞绝对超时」,
@@ -533,7 +545,13 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     # ⚠ 时长是**算出来的**($3-$2),不是列 —— 不能直接 `sort -k4`。
     #   第一版我就这么写了,输出是一串带时长的套件名、**看起来完全合理**,
     #   实际是原文件顺序(漏掉真正第 3 慢的那个,混进一个 1s 的)。
-    _slowest=$(awk -F'\t' '{print $3-$2"\t"$1}' /tmp/qa-l1-timing.tsv 2>/dev/null \
+    # ⚠ 时长是**算出来的**（end-start），仍然不是列 —— 但现在两侧都按标签取。
+    _slowest=$(awk -F'\t' '
+        function lab(key,   i) { for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+        { n = lab("suite"); st = lab("start"); en = lab("end")
+          if (n == "" || st == "" || en == "") next
+          print (en - st)"\t"n }
+      ' /tmp/qa-l1-timing.tsv 2>/dev/null \
       | sort -k1,1nr \
       | awk -F'\t' 'NR<=5{printf "%s%s=%ds", (NR>1?",":""), $2, $1}')
     echo "L1-TIMING v1 total=$(( $(date +%s) - START ))s suites=$(wc -l < /tmp/qa-l1-timing.tsv | tr -d ' ') slowest=${_slowest}"
