@@ -94,7 +94,81 @@ def check(doc: dict) -> list[str]:
     return gaps
 
 
+SELFTEST_EXPECTED = 6
+
+
+def _good_doc() -> dict:
+    return {
+        "instrument": "check-keyset-join",
+        "gate_state": "green",
+        "counts": {"scanned_files": 12, "blocked": 0},
+        "covers": ["键集拼接比较点"],
+        "does_not_cover": ["动态生成的键"],
+        "scan_domain": {"root": "server/src", "glob": "*.ts"},
+        "measured_on": "2026-10-31",
+        "measured_by": {"script": "check-keyset-join.py", "sha256_12": "0123456789ab",
+                        "env": {"python": "3.11", "os": "Linux"}},
+        "invalidates_on": [{"id": "ref_dirty", "type": "ref_dirty", "check": "git status --porcelain"}],
+        "consumers": ["check-scope-json.py"],
+    }
+
+
+def selftest(quiet: bool = False) -> int:
+    """2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`。
+    这里的判据只有一个纯函数 check(doc)，所以自检就是给它喂合成文档：
+    一份合规的（必须 0 gap）+ 五份各缺一位的（必须命中那一位）。
+    「跑过」与「什么都没查」不同形，靠的是**每份都必须命中它该命中的那一条**。
+    """
+    fails = 0
+    ran = 0
+    cases: list[tuple[str, dict, str]] = []
+
+    cases.append(("合规文档 ⇒ 0 gap", _good_doc(), ""))
+    d = _good_doc(); d.pop("consumers")
+    cases.append(("缺 consumers ⇒ 命中", d, "consumers"))
+    d = _good_doc(); d["consumers"] = []
+    cases.append(("consumers 为空 ⇒ 命中（不是『没人用』）", d, "consumers"))
+    d = _good_doc(); d["measured_by"] = {"script": "x", "sha256_12": "y"}
+    cases.append(("measured_by 缺 env ⇒ 命中", d, "env"))
+    d = _good_doc(); d["invalidates_on"] = [{"id": "a", "type": "made_up", "check": "c"}]
+    cases.append(("invalidates_on.type 越界 ⇒ 命中", d, "封闭集合"))
+    d = _good_doc(); d["counts"]["scanned_files"] = 0
+    cases.append(("scanned_files=0 ⇒ 命中（0 不是结论）", d, "scanned_files"))
+
+    for label, doc, expect in cases:
+        ran += 1
+        gaps = check(doc)
+        if expect == "":
+            if gaps:
+                fails += 1
+                print(f"✗ {label}：期望 0 gap，实际 {gaps}", file=sys.stderr)
+            elif not quiet:
+                print(f"✓ {label}")
+        else:
+            if not any(expect in g for g in gaps):
+                fails += 1
+                print(f"✗ {label}：期望命中含「{expect}」的 gap，实际 {gaps}", file=sys.stderr)
+            elif not quiet:
+                print(f"✓ {label}：命中「{expect}」")
+
+    if ran != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
+
     doc = load()
     if doc is None:
         return 2
