@@ -170,6 +170,20 @@ def main(argv: list[str]) -> int:
     print(f"  能红（--selftest 实跑成功）  : {can_go_red}/{len(gate_rows)}"
           f"（没有这一项的门即使今天绿，也只是『没查』）")
     print(f"  今天不红（本次 exit=0）      : {sum(1 for r in gate_rows if r['state'] == 'pass')}/{len(gate_rows)}")
+    # 2026-10-31 —— **两维必须交叉看**（外部复核：「只报一维时，『恒红』与『假绿』在报告里同形」）。
+    #   能红 × 今天不红   ⇒ 可用（只有这一种是门）
+    #   能红 × 今天红     ⇒ 恒红（会被所有人忽略）
+    #   不能红 × 今天不红 ⇒ 假绿（恒真，零证据）
+    #   不能红 × 今天红   ⇒ 不可达
+    quad = {"可用": 0, "恒红": 0, "假绿": 0, "不可达": 0}
+    for r in gate_rows:
+        can = bool(r.get("can_go_red"))
+        green = r["state"] == "pass"
+        quad["可用" if (can and green) else "恒红" if (can and not green) else "假绿" if (not can and green) else "不可达"] += 1
+    print(f"  交叉：可用 {quad['可用']} ｜ 恒红 {quad['恒红']} ｜ **假绿 {quad['假绿']}** ｜ 不可达 {quad['不可达']}")
+    if quad["假绿"]:
+        names = [r["name"] for r in gate_rows if not r.get("can_go_red") and r["state"] == "pass"]
+        print("    ⇒ 假绿（今天不红，但没有任何输入能让它红）：" + ", ".join(names))
     for state, label in (("pass", "通过"), ("fail", "失败"), ("no-reading", "**没有读数**"), ("not-run", "**未运行**")):
         n = c.get(state, 0)
         if n:
