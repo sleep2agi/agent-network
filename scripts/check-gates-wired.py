@@ -26,7 +26,19 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-GATE_PATTERNS = ("check-*.py", "report-*.py", "check-*.sh")
+GATE_PATTERNS = ("check-*.py", "report-*.py", "check-*.sh", "check-*.mjs", "report-*.mjs")
+# 2026-10-31 —— **一条规则要和它的覆盖度一起报**（外部复核 ①：
+# 「node 23 / bash 73 / python3 2 / env 2 ⇒ 98 行里只有 23 行进得了判别器
+#   ⇒ 把『树被换过 ⇒ exit 2』写成规则，它今天覆盖 23%，而它读起来像全覆盖」）。
+# 本门自己就有同一个形状：GATE_PATTERNS 只收 .py/.sh ⇒ `check-pair-published.mjs`
+# 这类门**从未进入统计**，而摘要里的「门：39 个」读起来像「全部」。
+CANDIDATE_SUFFIXES = (".py", ".sh", ".mjs")
+# 后缀 → 解释器。闭集：新增一种后缀而没在这里登记 ⇒ 自检报错，而不是被某个默认分支悄悄跑错。
+INTERPRETER_BY_SUFFIX: dict[str, tuple[str, ...]] = {
+    ".py": ("python3",),
+    ".sh": ("bash",),
+    ".mjs": ("node",),
+}
 
 # 未接线的门必须在这里给出理由（空着 = 没有例外）。
 # 理由必须以 [tag] 开头，tag 取自 UNWIRED_TAGS —— 散文负责说服人，tag 负责让机器能分支。
@@ -89,7 +101,30 @@ def gates() -> list[Path]:
     out: set[Path] = set()
     for pat in GATE_PATTERNS:
         out.update(REPO.glob(f"scripts/{pat}"))
-    return sorted(p for p in out if p.is_file())
+    # 2026-10-31 —— 测试文件跟着被测门走，不单独算门（`.mjs` 门带 `*.test.mjs` 的写法把这条暴露了）
+    return sorted(p for p in out if p.is_file() and ".test." not in p.name)
+
+
+def coverage() -> tuple[list[Path], list[Path]]:
+    """→ (被统计的门, 落在候选域里却**没被统计**的文件)。
+
+    候选域 = scripts/ 下名字以 check- / report- 开头、后缀属于 CANDIDATE_SUFFIXES、
+    且不是测试文件（`*.test.mjs` 之类跟着被测门走，不单独算门）。
+    """
+    covered = gates()
+    cov_set = set(covered)
+    missed: list[Path] = []
+    for p in sorted((REPO / "scripts").iterdir()):
+        if not p.is_file():
+            continue
+        name = p.name
+        if not (name.startswith("check-") or name.startswith("report-")):
+            continue
+        if ".test." in name or not name.endswith(CANDIDATE_SUFFIXES):
+            continue
+        if p not in cov_set:
+            missed.append(p)
+    return covered, missed
 
 
 def workflow_text() -> str:
@@ -137,7 +172,14 @@ def supports_selftest(p: Path) -> bool:
 
 def run_selftest(p: Path, timeout_s: int = 60) -> tuple[int, str]:
     """单个门的自检，带超时：**超时是失败，不是跳过**（否则慢门会静默免检）。"""
-    cmd = ["bash", str(p), "--selftest"] if p.suffix == ".sh" else ["python3", str(p), "--selftest"]
+    # 2026-10-31 —— **解释器也要按后缀选**（外部复核 ②：
+    # 「一条教训只修它自己举的例子时，它不减少缺陷，它迁移缺陷」）。
+    # 原来只有两支：.sh ⇒ bash，其余 ⇒ python3 ⇒ 加进 .mjs 门之后，
+    # `python3 xx.mjs --selftest` 会以 SyntaxError 失败 —— 而它看起来像「这个门的自检坏了」。
+    runner = INTERPRETER_BY_SUFFIX.get(p.suffix)
+    if runner is None:
+        return 1, f"没有登记 {p.suffix} 的解释器（INTERPRETER_BY_SUFFIX）⇒ 无法跑自检"
+    cmd = [*runner, str(p), "--selftest"]
     try:
         r = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=timeout_s)
         return r.returncode, (r.stdout + r.stderr)[-400:]
@@ -258,7 +300,20 @@ def main(argv: list[str]) -> int:
         }, ensure_ascii=False, indent=2))
         return 1 if (failures or bad_unwired or stale_allow) else 0
 
+    _covered, _missed = coverage()
+    _total = len(_covered) + len(_missed)
     print(f"门：{len(all_gates)} 个 ｜ 已接线 {len(wired)} ｜ 未接线 {len(unwired)}（登记理由 {len(KNOWN_UNWIRED)} 条）")
+    # 覆盖度必须与规则同报（外部复核 ①）：「门：N 个」不是在说「全部」，
+    # 它说的是「按这份模式找到的 N 个」——模式之外还剩几个，只有这一行能回答。
+    print(f"  coverage: {len(_covered)}/{_total} 个候选（scripts/ 下 check-*/report-* 且后缀 ∈ "
+          f"{'/'.join(CANDIDATE_SUFFIXES)}，排除 *.test.*）")
+    _no_interp = [suf for suf in CANDIDATE_SUFFIXES if suf not in INTERPRETER_BY_SUFFIX]
+    if _no_interp:
+        print(f"  ✗ 这些后缀没有登记解释器 ⇒ 它们的自检跑不起来：{_no_interp}")
+    if _missed:
+        print(f"  ⚠ 未被统计（不在 GATE_PATTERNS 里 ⇒ 它们的接线/自检**从未被检查**）：")
+        for p in _missed:
+            print(f"      · {p.relative_to(REPO)}")
     print(f"自检实跑：{checked} 个（**执行** --selftest，不是文本比对）")
     # 2026-10-31 —— 外部复核 (c)：**观测点合格 ⇔ 它的值在「要区分的两个状态」上单射**。
     # 「这个门有没有 selftest」这一格的观测点是**文本包含 `--selftest`** —— 它不单射：

@@ -42,7 +42,38 @@ export function checkPair({ network, node }, lookup) {
   return { ok: problems.length === 0, pair: { network, node }, problems };
 }
 
+// 2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`（否则「绿」与「什么都没查」同形）。
+// 这门的判据是纯函数 `checkPair`，所以自检直接喂合成 lookup：三种输入必须各自命中。
+function selftest() {
+  const cases = [
+    ["两半都在", { network: '0.9.9', node: '0.2.9' },
+      (spec) => spec.includes('agent-network@') ? '0.9.9' : '0.2.9', true, 0],
+    ["node 那半没发", { network: '0.9.9', node: '0.2.9' },
+      (spec) => spec.includes('agent-network@') ? '0.9.9' : null, false, 1],
+    ["CLI 那半没发", { network: '0.9.9', node: '0.2.9' },
+      (spec) => spec.includes('agent-network@') ? null : '0.2.9', false, 1],
+  ];
+  let fails = 0;
+  for (const [label, pair, lookup, wantOk, wantProblems] of cases) {
+    const r = checkPair(pair, lookup);
+    const ok = r.ok === wantOk && r.problems.length === wantProblems;
+    if (!ok) { fails += 1; console.error(`✗ selftest ${label}: ok=${r.ok} problems=${r.problems.length}（期望 ${wantOk}/${wantProblems}）`); }
+    else console.log(`✓ selftest ${label} ⇒ ok=${r.ok} problems=${r.problems.length}`);
+  }
+  // 空对（读不到常量）必须自己说「读不到」，不能当成 ok
+  const empty = readPair('export const NOTHING = 1');
+  if (empty !== null) { fails += 1; console.error('✗ selftest 读不到常量时应返回 null'); }
+  else console.log('✓ selftest 读不到常量 ⇒ null（不是 ok）');
+  if (fails) { console.error(`✗ selftest ${fails} 例失败`); return 1; }
+  console.log('✓ selftest 3/3 + 空对一例通过');
+  return 0;
+}
+
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain && process.argv.includes('--selftest')) {
+  process.exit(selftest());
+}
+
 if (isMain) {
   const pair = readPair(readFileSync(join(root, 'agent-network/src/opencode-agent-node-pair.ts'), 'utf8'));
   if (!pair) { console.error('check-pair-published: cannot read the pair constants'); process.exit(2); }
