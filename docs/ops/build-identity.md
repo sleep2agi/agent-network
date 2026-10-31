@@ -64,3 +64,59 @@ detectBootGitIdentity()  从 module_dir 向上最多 6 层找 `.git`，然后 gi
 
 - `agent-node` / `agent-network` 两个包的制品没有同样的注入（本文只覆盖 `commhub-server`）。
 - `/health` 的匿名投影仍然只有一个布尔；要回答「是哪一份」必须用鉴权读或读部署日志。
+
+## 六、2026-10-31：三个包都有了，而且第一次被自己的仪器抓到一次错
+
+三个包（`commhub-server` / `agent-node` / `agent-network`）各自在 `prepack` 时写
+`build-info.json`，读侧三份独立实现（不能跨包 import：发布后相对路径会断），**判据同一套**：
+`present` / `absent` / `invalid` 三态，坏掉的**不冒充没有**。
+
+### 6.1 writer 的优先级原先反了（实测抓到）
+
+```
+agent-network .205 发布日志：ref 9bb1a399 ｜ HEAD is now at 9bb1a3995 ｜ commit=9bb1a399
+制品 build-info.json：                                  commit=644c95cd   ← 事件的 sha
+```
+原因是 `GITHUB_SHA ?? git`，而 release workflow 的 checkout 是
+`ref: ${{ inputs.commit || github.sha }}`。**「指定 commit 发布」时两者必然不同**：
+被打包的树是 `inputs.commit`，`GITHUB_SHA` 是分支 HEAD。
+
+⇒ 改成 **git 优先**（`git rev-parse HEAD` 描述的是这棵树），`GITHUB_SHA` 只兜底没有 `.git` 的安装树；
+两者都有且不同时记 `event_sha`，并在 stderr 说清。语义因此定死：
+
+> **`commit` 描述被打包的那棵树；`event_sha` 描述触发事件（只在两者不同时出现）。**
+
+`agent-node@2.5.0-preview.171` 实测：`commit=4bb7094b… source=git dirty=false`，与 dispatch 一致。
+
+### 6.2 判据：「同版本、不同字节必须可分辨」怎么算通过
+
+这条判据**不能**用「读到了一个 40 位 hex」来证明 —— 那只能证明格式。
+可执行的形态是：**造两个同为 `.171` 却来自不同树的安装，读侧必须给出不同的 commit。**
+
+```bash
+git worktree add /tmp/wt-a 4bb7094b && git worktree add /tmp/wt-b 1c0ed8f5
+(cd /tmp/wt-a/agent-node && npm pack --json)     # version 都是 2.5.0-preview.171
+(cd /tmp/wt-b/agent-node && npm pack --json)
+# 解包后各读一次 build-info，再各跑一次 readBuildInfo(dir)
+```
+
+2026-10-31 实测读数：
+
+| 安装 | version | tarball 字节 | commit |
+|---|---|---|---|
+| A（4bb7094b 打包） | `2.5.0-preview.171` | 6607 | `4bb7094b50ec…` |
+| B（1c0ed8f5 打包） | `2.5.0-preview.171` | 6604 | `1c0ed8f5d8a2…` |
+| npm 上的 `.171` | `2.5.0-preview.171` | — | `4bb7094b50ec…`（与 A 一致） |
+
+⇒ 同版本、不同字节 ⇒ 读侧给出不同 commit。**这条判据在 6.3 之前一直只是断言，今天是第一次有读数。**
+
+### 6.3 这条判据**不**覆盖什么（必须写在旁边）
+
+`commit` 是**仓库级**的树标识，不是「这个包目录的子树哈希」。
+
+- 两个只差 `.github/` 的提交，`agent-node/` 的内容逐字节相同，`commit` 仍会不同；
+- 反过来，工作树脏（`dirty=true`）时，两份 `dirty` 安装可能共用一个 `commit` ——
+  此时分辨它们要的第二个量是「构建时间 + 构建主机」，而这两个都不在 `build-info.json` 里。
+
+所以它的用法只有一句：**回答「这台机器跑的是哪一次构建」，不回答「这份二进制是不是被改过」。**
+后者需要签名或内容哈希，属于另一张卡。
