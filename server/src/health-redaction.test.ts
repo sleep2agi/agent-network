@@ -250,6 +250,53 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
 
   // 2026-10-31 —— **出口清单的分母要有来源**（外部复核 ②）：
   // 六行以前只活在注释里；现在它是数据，这条断言把「表」与「钉住它的测试」绑在一起。
+  // 2026-10-31 —— **白名单条目必须指得出读者**（外部复核 ⑤ 第 ②′ 问：路标还是仪表）。
+  // 三分类（landmark/gauge/credential）回答「该不该给」，这张表回答「谁在读」。
+  // 关键是它**跨源**：声明 reader=cli 的键，必须在 agent-network/src 里真的出现，
+  // 否则「有人在读」就只是白名单里的一个愿望。
+  test("every anonymous key names a reader, and reader=cli is cross-checked against the CLI source", async () => {
+    const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
+    const { PUBLIC_HEALTH_KEY_READERS } = await import("./health-anon-readers.js");
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    // ① 覆盖：白名单里每个键都要有读者登记，反之亦然（两边同集合，防「删了白名单留下登记」）
+    expect(Object.keys(PUBLIC_HEALTH_KEY_READERS).sort()).toEqual([...PUBLIC_HEALTH_KEYS].sort());
+
+    // ② 读者类别必须在闭集里（防「reader: 某个系统」这种自由文本）
+    for (const [key, entry] of Object.entries(PUBLIC_HEALTH_KEY_READERS)) {
+      expect(["cli", "probe", "external"]).toContain(entry.reader);
+      // 「同上」在这一类表里是无效理由：它把理由指向另一行，而那行改了它不会跟着改。
+      expect(entry.why).not.toContain("同上");
+      expect(entry.why.length).toBeGreaterThan(3);
+      // external 必须写明「未验」或指明是哪类系统 —— 两种都接受，但不能什么都不说
+      if (entry.reader === "external") expect(entry.why.length).toBeGreaterThan(10);
+      expect(key.length).toBeGreaterThan(0);
+    }
+
+    // ③ 跨源：reader=cli 必须能在客户端源码里找到这个名字
+    // 两个根都要扫：`src/`（库）与 `bin/`（CLI 入口）。第一版只扫了 src，
+    // 于是把「只在 cli.ts 里读」的 4 个键误判成「没有读者」——
+    // 这正是这类跨源断言最容易出的错：**读者在，只是不在我扫的那个目录里**。
+    const roots = [
+      join(import.meta.dir, "..", "..", "agent-network", "src"),
+      join(import.meta.dir, "..", "..", "agent-network", "bin"),
+    ];
+    const walk = (dir: string, out: string[] = []): string[] => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) walk(full, out);
+        else if (name.endsWith(".ts") && !name.endsWith(".test.ts")) out.push(full);
+      }
+      return out;
+    };
+    const cliSource = roots.flatMap((r) => walk(r)).map((f) => readFileSync(f, "utf8")).join("\n");
+    const cliKeys = Object.entries(PUBLIC_HEALTH_KEY_READERS).filter(([, e]) => e.reader === "cli").map(([k]) => k);
+    expect(cliKeys.length).toBeGreaterThan(0);
+    const missing = cliKeys.filter((k) => !new RegExp(`\\b${k}\\b`).test(cliSource));
+    if (missing.length) throw new Error(`声明 reader=cli 但这些键在客户端源码里找不到：${missing.join(", ")}`);
+  });
+
   test("rejection exit inventory: 6 rows, and every counted row names a pinning test", async () => {
     const { TASK_REJECTION_EXITS } = await import("./rejection-counters.js");
     expect(TASK_REJECTION_EXITS.length).toBe(6);
