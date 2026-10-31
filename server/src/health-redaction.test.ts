@@ -435,6 +435,17 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect("git_commit" in body).toBe(false);
     expect("counters" in body).toBe(false);
     expect("sse_sessions" in body).toBe(false);
+
+    // 2026-10-31 —— **否定断言必须配镜像**（外部复核：「一条否定断言单独的强度是零 ——
+    // 它和『这里什么都没有』无法区分」）。
+    // 上面三条都是「不出现在匿名里」；若投影实现坏成「什么都不给」，它们仍然全绿。
+    // ⇒ 镜像：同一 URL 在**鉴权态**下，这几个键必须真的出现。
+    const authed = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    expect("git_commit" in authed).toBe(true);
+    expect("counters" in authed).toBe(true);
+    expect("sse_sessions" in authed).toBe(true);
+    // 再强一格：鉴权投影必须**严格大于**匿名投影（否则「白名单」可能只是把两边都截了）
+    expect(Object.keys(authed).length).toBeGreaterThan(Object.keys(body).length);
   });
 
   // 2026-10-31 —— 内核口径的进程身份：与自报 startedAt 互为独立的第二条腿。
