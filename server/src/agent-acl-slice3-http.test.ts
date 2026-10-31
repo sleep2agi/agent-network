@@ -434,6 +434,11 @@ describe("update_node_config 响应键集（exact key set）", () => {
       expect(Array.isArray(plain.messages)).toBe(true);
 
       const human = await tool(ntok, "get_inbox", { alias: I.alias, limit: 5, human_first: true });
+
+      // 2026-10-31 —— **先证两份夹具彼此不同，再各自断言**（外部复核 (c)：
+      // 「若四份夹具序列化出的字节相同，它只有一种形状 —— 后面的『各自断言』就是四次自拍」）。
+      // 这里两态也一样：若 human_first 其实没生效，下面两条键集断言会变成「同一个形状断两次」。
+      expect(JSON.stringify(Object.keys(plain).sort())).not.toBe(JSON.stringify(Object.keys(human).sort()));
       expect(Object.keys(human).sort()).toEqual(["human_inbox", "messages", "ok"]);
       expect(Object.keys(human.human_inbox).sort()).toEqual(["examined", "mode", "version"]);
       expect(human.human_inbox.mode).toBe("metadata-keyset");
