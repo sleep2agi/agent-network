@@ -1194,7 +1194,14 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   limits: { class: "gauge", granularity: "label" },
   capabilities: { class: "gauge", granularity: "label" },
   // ⚠️ 例外：**形似启动快照，但会变** —— 它的全部价值在于变，标成快照会毁掉它。
-  served_at: { class: "gauge", granularity: "instant" },
+  served_at: {
+    class: "gauge",
+    granularity: "instant",
+    // 2026-10-31 —— granularity=instant 的字段必须写出**反事实**（外部复核 (c)：
+    // 「判法应改为对『这个值变了，世界上什么变了』做反事实询问」）：
+    // 它变的不是世界，是**这一次读取的时刻**；所以它只能当窗口端点，不能当「新鲜度」。
+    why: "这一次读取的服务端时刻：变了不代表 Hub 状态变化，只代表又问了一次；用作窗口右端，不证明新鲜",
+  },
   build_identified: {
     class: "gauge",
     granularity: "verdict",

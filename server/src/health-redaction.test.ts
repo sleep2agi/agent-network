@@ -1122,6 +1122,19 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     else expect(body.version).not.toBe("?");
   });
 
+  // 2026-10-31 —— **granularity=instant 的字段必须写出反事实**（外部复核 (c)：
+  // 「判法改为对『这个值变了，世界上什么变了』做反事实询问」）。
+  // 这一类的共同陷阱：值在变，看起来有信息，而它变的可能只是**读的时刻**。
+  test("every instant-granularity field states its counterfactual (why is mandatory)", async () => {
+    const { HEALTH_FIELD_META } = await import("./server.js");
+    const instant = Object.entries(HEALTH_FIELD_META).filter(([, m]: any) => m.granularity === "instant");
+    expect(instant.length).toBeGreaterThanOrEqual(2);
+    const missing = instant.filter(([, m]: any) => !(m.why && String(m.why).length > 8)).map(([k]) => k);
+    if (missing.length) {
+      throw new Error(`instant 字段没有写「变了意味着什么」：${missing.join(", ")}\n  ⇒ 它可能只是读的时刻在变，而不是状态在变。`);
+    }
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
