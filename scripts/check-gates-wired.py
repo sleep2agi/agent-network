@@ -249,6 +249,12 @@ def main(argv: list[str]) -> int:
 
     print(f"门：{len(all_gates)} 个 ｜ 已接线 {len(wired)} ｜ 未接线 {len(unwired)}（登记理由 {len(KNOWN_UNWIRED)} 条）")
     print(f"自检实跑：{checked} 个（**执行** --selftest，不是文本比对）")
+    # 2026-10-31 —— 外部复核 (c)：**观测点合格 ⇔ 它的值在「要区分的两个状态」上单射**。
+    # 「这个门有没有 selftest」这一格的观测点是**文本包含 `--selftest`** —— 它不单射：
+    #   · 有 selftest 的门 → True ✓
+    #   · 只在注释/子进程命令里提到 --selftest 的门 → 也 True ✗（本脚本自己就是例子）
+    # 单射做不到时，至少要把「我用的是哪种观测」写出来，否则读者会以为它是执行结果。
+    print("  selftest_detected_by : text.includes('--selftest')（**不单射**：注释里提到也算；本脚本对自己豁免）")
     if slow_skipped:
         print(f"  · 有 selftest 但本步**不执行**（慢门，各自 CI 步骤跑）：{len(slow_skipped)} 个")
         for x in slow_skipped:
