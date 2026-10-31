@@ -136,6 +136,27 @@ describe("GET /api/skills", () => {
     const owner = await get(`/api/providers?network_id=${ownerNet}`, ownerToken);
     expect(owner.body.state).toBe("configured");
     expect("hint" in owner.body).toBe(false);
+
+    // 2026-10-31 —— **闭集不许有死成员**：客户端 union 里写着 all_disabled，
+    // 而这个端点原来只产出前两个 ⇒ 那一格永远不会出现、界面分支永远跑不到。
+    // 本地 hub 实测：建了 enabled:true 的行 ⇒ configured；把 enabled 改成 false ⇒ **仍是 configured**
+    // ⇒ 读的人会把「全都关了」看成「配置好了」。现在三态都必须可产出。
+    db.run(`UPDATE hub_provider_configs SET config_json = json_set(config_json, '$.enabled', json('false'))
+            WHERE network_id = ?1`, [ownerNet]);
+    const disabled = await get(`/api/providers?network_id=${ownerNet}`, ownerToken);
+    expect(disabled.body.state).toBe("all_disabled");
+    expect(disabled.body.counts.providers_enabled).toBe(0);
+    expect(disabled.body.counts.providers_disabled).toBeGreaterThan(0);
+    expect(disabled.body.counts.models_enabled).toBe(0);
+    expect(disabled.body.hint).toContain("全部被禁用");
+    expect(disabled.body.hint).toContain("不是「还没配置」");
+
+    // 还原：否则后面的用例会看到一个全禁用的网络
+    db.run(`UPDATE hub_provider_configs SET config_json = json_set(config_json, '$.enabled', json('true'))
+            WHERE network_id = ?1`, [ownerNet]);
+    const back = await get(`/api/providers?network_id=${ownerNet}`, ownerToken);
+    expect(back.body.state).toBe("configured");
+    expect(back.body.counts.models_enabled).toBeGreaterThan(0);
   });
 
   test("a member of another network is refused", async () => {

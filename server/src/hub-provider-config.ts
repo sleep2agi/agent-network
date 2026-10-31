@@ -95,12 +95,33 @@ export function readHubProviders(h: Human, exposeRefs = false) {
   const otherSource = db.get<{ cnt: number }>(
     'SELECT COUNT(*) AS cnt FROM providers WHERE network_id=?1 AND enabled=1', h.networkId!);
   const otherCount = otherSource?.cnt ?? 0;
-  const state = rows.length > 0 ? 'configured' as const : 'unconfigured' as const;
+  // 2026-10-31 —— **闭集不许有死成员**：客户端 union 里写着
+  // "configured" | "unconfigured" | "all_disabled"，而这个端点原来只产出前两个
+  // ⇒ all_disabled 是一格永远不会出现的状态，界面里那条分支也就永远跑不到
+  // （实测：本地 hub 建了一行 enabled:true 的 provider 之后，state 仍是 configured／空表是 unconfigured，
+  //   把 enabled 改成 false 依旧是 configured ⇒ 读的人会把「全都关了」看成「配置好了」）。
+  // 现在三态都可产出，并把「哪些算可用」用计数说清（客户端不必自己再数一遍）。
+  const parsed = rows.map(r => JSON.parse(r.config_json) as { enabled?: boolean; models?: string[] });
+  const enabledRows = parsed.filter(c => c.enabled === true);
+  const state = rows.length === 0 ? 'unconfigured' as const
+    : enabledRows.length === 0 ? 'all_disabled' as const
+    : 'configured' as const;
   return { ok: true as const, network_id: h.networkId!, source: 'hub' as const,
     // 读的是哪张表 —— 名字直接写出来，避免下一个人拿这个结果去解释另一个接口
     source_table: 'hub_provider_configs' as const,
     state,
-    counts: { providers: rows.length, providers_in_cli_registry: otherCount },
+    counts: {
+      providers: rows.length,
+      providers_enabled: enabledRows.length,
+      providers_disabled: rows.length - enabledRows.length,
+      models_enabled: enabledRows.reduce((n, c) => n + (Array.isArray(c.models) ? c.models.length : 0), 0),
+      providers_without_models: enabledRows.filter(c => !Array.isArray(c.models) || c.models.length === 0).length,
+      providers_in_cli_registry: otherCount,
+    },
+    ...(state === 'all_disabled' ? {
+      hint: '这个网络里配置了 ' + rows.length + ' 个 provider，但**全部被禁用** ⇒ 客户端仍然没有可选模型。'
+        + '这不是「还没配置」，要做的是启用其中一个（或在确认无用后删除）。',
+    } : {}),
     ...(state === 'unconfigured' ? {
       hint: otherCount > 0
         ? '本端点读 hub_provider_configs（网络自有 provider 配置），此处为空；但要给客户端选模型，还需要这里至少一行 —— CLI 注册表里的 ' + otherCount + ' 条不会自动出现在本端点。'

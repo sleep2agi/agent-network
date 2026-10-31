@@ -23,7 +23,13 @@ function catalogBanner(c: ProviderCatalogResp | null): { kind: string; text: str
   if (!c) return { kind: "loading", text: "读取 provider 目录…", action: "" };
   const models = c.counts?.models_enabled ?? c.providers.reduce((n, p) => n + (p.models?.length ?? 0), 0);
   if (c.state === "all_disabled") {
-    return { kind: "warn", text: "provider 都被停用了", action: "请管理员启用至少一个 provider" };
+    // 2026-10-31 —— 这一态服务端此前**从不产出**（union 里的死成员）：
+    // 建了一行 enabled:false 的 provider，载荷仍是 configured ⇒ 读的人把「全都关了」看成「配置好了」。
+    return {
+      kind: "error",
+      text: `已配置 ${c.counts?.providers ?? "?"} 个 provider，但全部被禁用 —— 这不是「还没配置」`,
+      action: "请管理员启用其中一个，或在确认无用后删除",
+    };
   }
   if (c.state !== "configured") {
     return { kind: "warn", text: "还没有配置 provider", action: "请管理员录入第一个 provider（含密钥与模型）" };
