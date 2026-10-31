@@ -79,6 +79,13 @@ describe("happy path from a node", () => {
   test("create (default target = self) → list / get / update / pause / run_now / runs / cancel", async () => {
     const c = await create("a");
     expect(c.ok).toBe(true);
+    // 2026-10-31 —— #3275：schedule_* 九件此前一条键集断言都没有（报告里这九个是 uncovered）。
+    // 形状全部由**真实调用**给出，不是从类型定义推的。
+    expect(Object.keys(c).sort()).toEqual(["ok", "schedule"]);
+    expect(Object.keys(c.schedule).sort()).toEqual(["created_at", "created_by_node_id", "last_run_at", "misfire_policy", "name",
+      "network_id", "next_run_at", "overlap_policy", "priority", "revision", "schedule",
+      "schedule_id", "schedule_type", "status", "target_alias", "target_node_id",
+      "task_content", "timezone", "updated_at"]);
     const s = c.schedule;
     expect(s.target_node_id).toBe(node.a.id);
     expect(s.created_by_node_id).toBe(node.a.id);
@@ -87,20 +94,45 @@ describe("happy path from a node", () => {
     expect(storedRow(s.schedule_id)).toEqual({ created_by: user.boss.id, created_by_node_id: node.a.id });
 
     const l = await mcp(node.a.token, "schedule_list");
+    expect(Object.keys(l).sort()).toEqual(["ok", "schedules"]);
+    // **同一个 schedule 对象，两条路两个形状** —— 这正是客户端最容易踩的那类差异：
+    //   create ⇒ 19 键（存下来的行）
+    //   list   ⇒ 22 键（行 + 三个**算出来的**字段：p50 / 周期短于一次运行 / 建议间隔）
+    // 所以不只钉两边，还钉**差集恰好是那三个**（多一个少一个都要先变红）。
+    expect(Object.keys(l.schedules[0]).sort()).toEqual(["created_at", "created_by_node_id", "last_run_at", "misfire_policy", "name",
+      "network_id", "next_run_at", "observed_run_seconds_p50", "overlap_policy",
+      "period_shorter_than_run", "priority", "revision", "schedule", "schedule_id",
+      "schedule_type", "status", "suggested_every_seconds", "target_alias",
+      "target_node_id", "task_content", "timezone", "updated_at"]);
+    expect(Object.keys(l.schedules[0]).filter((k) => !(k in s)).sort()).toEqual(["observed_run_seconds_p50", "period_shorter_than_run", "suggested_every_seconds"]);
     expect(l.schedules.map((x: any) => x.schedule_id)).toContain(s.schedule_id);
     expect((await mcp(node.a.token, "schedule_get", { schedule_id: s.schedule_id })).schedule.name).toBe(s.name);
 
     const u = await mcp(node.a.token, "schedule_update", { schedule_id: s.schedule_id, name: "renamed", schedule: { type: "daily", time: "09:30" }, timezone: "Asia/Shanghai" });
     expect(u.ok).toBe(true);
+    // update 回执的外层与 create 一致；内层是**同一个 schedule 投影**（不是另起一套）。
+    expect(Object.keys(u).sort()).toEqual(["ok", "schedule"]);
+    expect(Object.keys(u.schedule).sort()).toEqual(Object.keys(s).sort());
     expect(u.schedule).toMatchObject({ name: "renamed", schedule_type: "daily", timezone: "Asia/Shanghai", revision: s.revision + 1 });
     const p = await mcp(node.a.token, "schedule_update", { schedule_id: s.schedule_id, status: "paused" });
     expect(p.schedule).toMatchObject({ status: "paused", next_run_at: null });
 
     const r = await mcp(node.a.token, "schedule_run_now", { schedule_id: s.schedule_id });
     expect(r.ok).toBe(true);
+    // ⚠️ 一个**命名不一致**，钉住它而不是顺手改掉（改它是对外契约变更）：
+    // 其余字段全是 snake_case，只有 run_now 回 `runId` / `taskId` 两个驼峰键。
+    expect(Object.keys(r).sort()).toEqual(["ok", "runId", "status", "taskId"]);
     expect(r.taskId).toBeTruthy();
     expect(db.get<{ to_name: string; from_name: string }>("SELECT to_name, from_name FROM tasks WHERE task_id = ?1", r.taskId)).toEqual({ to_name: node.a.alias, from_name: "scheduler" });
     const runs = await mcp(node.a.token, "schedule_runs", { schedule_id: s.schedule_id });
+    // 外层是「这条 schedule 的失败面貌」（连续失败数 + 阈值 + 上次告警时刻），
+    // 内层是每次运行的记录；同一响应里 ⇒ 客户端回答「为什么没跑」不必再取一次。
+    expect(Object.keys(runs).sort()).toEqual([
+      "consecutive_failures", "failure_alert_threshold", "last_failure_alert_at", "ok", "runs",
+    ]);
+    expect(Object.keys(runs.runs[0]).sort()).toEqual(["blocked_by_state", "blocked_by_task_id", "completed_at", "created_at",
+      "error_code", "error_message", "run_id", "schedule_id", "schedule_revision",
+      "scheduled_for", "status", "task_id", "work_outcome", "work_outcome_node_id"]);
     expect(runs.runs.map((x: any) => x.task_id)).toContain(r.taskId);
 
     expect(await mcp(node.a.token, "schedule_cancel", { schedule_id: s.schedule_id })).toEqual({ ok: true, status: "cancelled" });
