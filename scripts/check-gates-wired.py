@@ -336,6 +336,8 @@ def main(argv: list[str]) -> int:
             "gates": len(all_gates), "wired": len(wired), "unwired": [str(p.relative_to(REPO)) for p in unwired],
             "selftests_run": checked, "failures": failures, "bad_unwired": bad_unwired, "stale_allow": stale_allow,
             "debt_no_selftest": debt, "selftest_not_run_here": slow_skipped,
+            # 2026-10-31 —— 移出条件也要进机器可读输出：否则「谁能结束这条豁免」只有人读得到。
+            "unwired_exit_when": {k: UNWIRED_EXIT_WHEN.get(k, "") for k in KNOWN_UNWIRED},
             "stale_debt": [r for r, _ in stale_debt], "dead_tags": dead_tags,
         }, ensure_ascii=False, indent=2))
         return 1 if (failures or bad_unwired or stale_allow) else 0
