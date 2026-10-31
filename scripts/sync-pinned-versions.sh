@@ -39,6 +39,8 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -z "$REPO_ROOT" ]]; then
   echo "ERROR: 必须在 git 仓库内运行" >&2
+  echo "verdict=not-applicable"
+  echo "premise=not_a_git_repo"
   exit 3
 fi
 cd "$REPO_ROOT"

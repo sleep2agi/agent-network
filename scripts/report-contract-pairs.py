@@ -126,7 +126,27 @@ def scan(path: Path) -> dict[str, int]:
     return out
 
 
-SELFTEST_EXPECTED = 3
+
+# 2026-10-31 —— 外部复核 ②：「not-applicable 必须带『哪个前提没满足』。
+#   不带前提的 n/a 会被人当成『再试一次』」。
+# ⇒ 退出码 3 的每一处都必须同时输出一行 `premise=<id>`，且 id 必须取自下面的闭集。
+#   散文继续留在 stderr（给人看），premise 是给消费者分支用的（机器契约）。
+NOT_APPLICABLE_PREMISES = {
+    "missing_scan_root",          # 扫描根不全 ⇒ 副本组会因缺侧被误判成「已分叉」
+    "no_discriminating_groups",   # 当前代码里没有这类组 ⇒ 这条不变量无处可验
+}
+
+
+def emit_not_applicable(premise: str, why: str) -> int:
+    if premise not in NOT_APPLICABLE_PREMISES:
+        raise SystemExit(f"内部错误：未登记的前提 id {premise!r}")
+    print("verdict=not-applicable")
+    print(f"premise={premise}")
+    if why:
+        print(f"  ⇒ {why}", file=sys.stderr)
+    return 3
+
+SELFTEST_EXPECTED = 5
 
 
 def selftest(quiet: bool = False) -> int:
@@ -147,6 +167,25 @@ def selftest(quiet: bool = False) -> int:
             bad.append("两份逐字符相同应判 identical=True")
         elif not quiet:
             print("✓ selftest 两份逐字符相同 ⇒ identical=True")
+        # 2026-10-31 —— n/a 的契约：**必须同时给出 verdict 与 premise**（外部复核 ②：
+        # 「不带前提的 n/a 会被人当成『再试一次』」）。
+        import contextlib as _ctx, io as _io
+        buf = _io.StringIO()
+        with _ctx.redirect_stdout(buf):
+            rc = emit_not_applicable("missing_scan_root", "")
+        ran += 1
+        emitted = buf.getvalue()
+        if rc != 3 or "premise=missing_scan_root" not in emitted or "verdict=not-applicable" not in emitted:
+            bad.append("n/a 必须输出 verdict=not-applicable 且带 premise=<id>，并返回 3")
+        elif not quiet:
+            print("✓ selftest n/a 输出 verdict + premise，退出码 3")
+        ran += 1
+        try:
+            emit_not_applicable("not_registered", "")
+            bad.append("未登记的前提 id 必须直接报错（否则 premise 会漂成自由文本）")
+        except SystemExit:
+            if not quiet:
+                print("✓ selftest 未登记前提 id ⇒ 直接报错")
         (root / "b" / "dup.ts").write_text(body + "// one side edited\n")
         ran += 1
         c2 = copies(files)[0]
@@ -170,7 +209,8 @@ def selftest(quiet: bool = False) -> int:
             print(f"    · {b}", file=sys.stderr)
         return 1
     if not quiet:
-        print("✓ selftest 3 例全部符合预期（含 1 个必须红的分叉例）")
+        # 这句以前硬编码「3 例」，加了两条 n/a 用例后它会继续报 3 —— 数字必须来自 SELFTEST_EXPECTED
+        print(f"✓ selftest {ran} 例全部符合预期（含 1 个必须红的分叉例、2 个 n/a 契约例）")
     return 0
 
 
@@ -201,7 +241,7 @@ def main() -> int:
               file=sys.stderr)
         print("  ⇒ 副本组会因缺侧而被误判成『已分叉』，所以这里**不作判定**。", file=sys.stderr)
         print("  ⇒ 完整判定请在包含全部三个目录的检出上重跑本脚本。", file=sys.stderr)
-        return 3
+        return emit_not_applicable("missing_scan_root", "换检出（含全部三个目录）再跑，不要重试同一命令")
 
     total_ts = sum(len(side) for side in files.values())
     if total_ts == 0:

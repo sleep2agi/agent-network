@@ -47,6 +47,46 @@ def load() -> dict | None:
 # 2026-10-31 —— 光有「若存在则必须在前」是不够的：
 # 把判别**去掉**（改键名/改条件）也会让它跳过检查，而跳过与成立同形。
 # ⇒ 把「哪些 path 应该有 query 判别」也钉住；少一个就红。
+
+# 2026-10-31 —— 外部复核 ②：「not-applicable 必须带『哪个前提没满足』。
+#   不带前提的 n/a 会被人当成『再试一次』」。
+# ⇒ 退出码 3 的每一处都必须同时输出一行 `premise=<id>`，且 id 必须取自下面的闭集。
+#   散文继续留在 stderr（给人看），premise 是给消费者分支用的（机器契约）。
+NOT_APPLICABLE_PREMISES = {
+    "missing_scan_root",          # 扫描根不全 ⇒ 副本组会因缺侧被误判成「已分叉」
+    "no_discriminating_groups",   # 当前代码里没有这类组 ⇒ 这条不变量无处可验
+}
+
+
+def _selftest() -> int:
+    """只有一条契约要钉：**n/a 必须带 premise**（外部复核 ②：不带前提的 n/a 会被当成「再试一次」）。"""
+    import contextlib, io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = emit_not_applicable("no_discriminating_groups", "")
+    out = buf.getvalue()
+    ok = rc == 3 and "verdict=not-applicable" in out and "premise=no_discriminating_groups" in out
+    print(("✓" if ok else "✗") + " selftest n/a 输出 verdict + premise，退出码 3")
+    if not ok:
+        return 1
+    try:
+        emit_not_applicable("bogus", "")
+    except SystemExit:
+        print("✓ selftest 未登记前提 id ⇒ 直接报错")
+        return 0
+    print("✗ 未登记的前提 id 没有报错（premise 会漂成自由文本）")
+    return 1
+
+
+def emit_not_applicable(premise: str, why: str) -> int:
+    if premise not in NOT_APPLICABLE_PREMISES:
+        raise SystemExit(f"内部错误：未登记的前提 id {premise!r}")
+    print("verdict=not-applicable")
+    print(f"premise={premise}")
+    if why:
+        print(f"  ⇒ {why}", file=sys.stderr)
+    return 3
+
 EXPECTED_DISCRIMINATED: dict[str, str] = {
     "/api/messages": "scope",
 }
@@ -115,7 +155,7 @@ def main() -> int:
         print("not-applicable：没有任何『同 path、既有 query 判别又有通用分支』的组 ⇒ "
               "本判据在当前代码上不适用（不是通过，也不是失败）", file=sys.stderr)
         print("  ⇒ 若确实新增了这类组，请同时把它加进 EXPECTED_DISCRIMINATED。", file=sys.stderr)
-        return 3
+        return emit_not_applicable("no_discriminating_groups", "换判据（或先造出这类组），不是重试")
 
     if "--json" in sys.argv:
         print(json.dumps({"checked_paths": checked, "violations": violations}, ensure_ascii=False, indent=2))
@@ -135,4 +175,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        raise SystemExit(_selftest())
     sys.exit(main())
