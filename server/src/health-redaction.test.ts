@@ -1187,6 +1187,25 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(Math.abs(derived - body.uptime)).toBeLessThanOrEqual(5);
   });
 
+  // 2026-10-31 —— **响应头也不能泄露指纹**（外部复核：「匿名 /health 响应头里不得出现
+  // git / commit / build(sha|id) 类头；这两条不需要会话就能读 ⇒ 它们回答『我站在哪一层』，
+  // 不是『我有没有登录』」）。
+  // 为什么需要它：body 有白名单，**头没有**。将来有人把 build id 塞进 `X-Build-Id`，
+  // body 侧断言全绿，而匿名读者已经拿到了指纹。
+  test("anonymous /health exposes no fingerprint-bearing response header", async () => {
+    const res = await fetch(`${BASE}/health`);
+    expect(res.status).toBe(200);
+    const names = [...res.headers.keys()].map((k) => k.toLowerCase());
+    const forbidden = names.filter((n) => /git|commit|build[-_]?(sha|id)?/.test(n));
+    if (forbidden.length) {
+      throw new Error(`匿名 /health 出现了指纹类响应头：${forbidden.join(", ")}\n` +
+        "  ⇒ body 白名单不覆盖响应头；要么删掉这个头，要么它只在鉴权分支发。");
+    }
+    // 镜像：同一个端点在**鉴权**分支下可以有 X-* 头，但也不能有指纹 —— 迄今也没有；
+    // 这条留作记录：若哪天加了，必须先在白名单测试里显式放行。
+    expect(forbidden).toEqual([]);
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
