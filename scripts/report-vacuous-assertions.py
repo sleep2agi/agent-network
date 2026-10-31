@@ -110,6 +110,32 @@ def selftest(quiet: bool = False) -> int:
     return 0
 
 
+SERIALIZED_ROUNDTRIP = re.compile(
+    r"expect\(\s*JSON\.parse\(\s*JSON\.stringify\(\s*([A-Za-z_$][\w.$]*)\s*\)\s*\)\s*\)\s*\.(?:toBe|toEqual|toStrictEqual)\(\s*\1\s*\)"
+)
+
+
+def scan_roundtrips() -> list[dict]:
+    """`expect(JSON.parse(JSON.stringify(X))).toEqual(X)` —— 结构化的往返恒真。
+
+    2026-10-31 —— 外部复核（原话）：
+      「selftest 的夹具由 `safe_dump` 生成，序列化器会给所有含冒号标量加引号，
+        **系统性地擦掉了这道门唯一脆弱的那类输入** ⇒ 这条自测结构上不可能看见该 bug。」
+
+    同一个病在 JS 侧的形状是：先用序列化器造夹具、再断言序列化后仍相等。
+    它不是「检查有没有坏」，而是「检查序列化器是不是它自己」。
+    """
+    hits: list[dict] = []
+    for p in tracked():
+        if not p.exists():
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for m in SERIALIZED_ROUNDTRIP.finditer(text):
+            line = text[: m.start()].count("\n") + 1
+            hits.append({"file": str(p.relative_to(REPO)), "line": line, "kind": "serializer_roundtrip", "text": m.group(0)[:100]})
+    return hits
+
+
 def scan_tautologies() -> list[dict]:
     """`Object.keys(X).every(k => Object.hasOwn(X, k))` —— 结构上恒真的键集检查。
 
@@ -161,6 +187,15 @@ def main() -> int:
         for h in vac[:20]:
             print(f"    · {h['file']}:{h['line']}  {h['expr']}", file=sys.stderr)
         return 1
+    rt = scan_roundtrips()
+    if rt:
+        # 2026-10-31 —— **判红之前先看它是不是合法的**：
+        # `expect(JSON.parse(JSON.stringify(X))).toEqual(X)` 在「X 可能含 BigInt/undefined 等
+        # 非 JSON 安全值」时是一条**真实**断言（它证明往返无损）。本脚本看不出 X 的类型。
+        # ⇒ 降为 advisory：只打印，不判红；判红会逼人删掉一条有效断言。
+        print(f"· 序列化往返断言 {len(rt)} 条（**advisory**：值为 JSON 安全时它是恒真；含 BigInt 等时它有效）：")
+        for h in rt[:10]:
+            print(f"    · {h['file']}:{h['line']}  {h['text']}")
     taut = scan_tautologies()
     if taut:
         print(f"✗ **恒真的键集检查** {len(taut)} 条（Object.keys(X).every(k => hasOwn(X,k))）：", file=sys.stderr)
