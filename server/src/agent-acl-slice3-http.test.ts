@@ -709,6 +709,19 @@ describe("update_node_config 响应键集（exact key set）", () => {
       const foreign = await tool(minted.token!, "ack_start_request", { request_id: "start_someone_else", status: "started" });
       expect(Object.keys(foreign).sort()).toEqual(["error", "ok"]);
       expect(foreign).toEqual({ ok: false, error: "not_your_request" });
+
+      // 第三档：请求在**别的网络**里。它与「不是你的」同样是拒绝，但成因不同
+      // （一个跨租户，一个同租户不同节点）—— 合并成一个码就会把跨租户的信号抹掉。
+      db.run(`INSERT INTO node_start_requests
+              (request_id, network_id, daemon_node_id, child_node_id, child_alias, created_by_token, status, created_at)
+              VALUES (?1, ?2, ?3, ?4, ?5, 'test', 'pending', ?6)`,
+        // ⚠️ 判定顺序是：not_found → **not_your_request（daemon_node_id）** → cross_network_request（network_id）。
+        // 所以要让第三档可达，这一行的 daemon_node_id 必须**是我**，只有 network 不同 ——
+        // 我第一次填了别的 daemon，于是只到得了第二档（实测 not_your_request）。
+        ["start_other_network", "net_acl3_other_network", D.node, "node_x_child", "x-child", Date.now()]);
+      const cross = await tool(minted.token!, "ack_start_request", { request_id: "start_other_network", status: "started" });
+      expect(Object.keys(cross).sort()).toEqual(["error", "ok"]);
+      expect(cross).toEqual({ ok: false, error: "cross_network_request" });
     });
   });
 
