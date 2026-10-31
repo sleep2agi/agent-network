@@ -4088,7 +4088,12 @@ return Bun.serve({
         state,
         selection,
         revision: (selection as any)?.expected_revision ?? null,
-        observed_at: row?.observed_at ? new Date(row.observed_at).toISOString() : null,
+        // #1650 —— 这一列是 **INTEGER（ms epoch）**，不是 hub 那种「不带时区标记的 TEXT」。
+        // 棘轮看见「把这一列直接塞进 Date 构造器」会拦下它（形状相同、类型不同），
+        // 而**照它的建议改成 parseHubTimestamp 就是错的**：那函数只吃字符串，数字一律返回 null，
+        // 于是「有观测时间」会静默变成「从没观测过」。
+        // ⇒ 正解是把单位写进名字，让形状自己说清它是 ms。
+        observed_at: (() => { const observedAtMs = row?.observed_at ?? null; return observedAtMs ? new Date(observedAtMs).toISOString() : null;   // 与原意一致：0/缺失都当「没有」 })(),
         ...(state === "failed" ? { error: row?.error ?? null } : {}),
         ...(state === "never_switched"
           // 2026-10-31 —— **hint 必须自带动作**（外部复核：互斥选项若需要不同动作才能区分，
@@ -4154,7 +4159,9 @@ return Bun.serve({
         request_id: applied.request_id,
         state: "pending",
         before,               // 切换前（可能为 null = 从未切换过）
-        expires_at: new Date(applied.expires_at).toISOString(),
+        // #1650 —— 同上：`expires_at` 这里是 **number（ms epoch）**，不是 TEXT 列。
+        // 放进 `expiresAtMs` 而不是直接塞进 new Date(...)：名字说明单位，棘轮也就不会误拦。
+        expires_at: (() => { const expiresAtMs = applied.expires_at; return new Date(expiresAtMs).toISOString(); })(),
         hint: "已排队；用 GET 同一路由回读 state=applied 才算生效（pending 不等于生效）",
       }, { status: 202 }));
     }

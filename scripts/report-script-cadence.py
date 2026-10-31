@@ -133,7 +133,7 @@ ADHOC: dict[str, tuple[str, str]] = {
         '键集覆盖率到 100% 或被并入 check-keyset-join.py 后删除本行',
     ),
     'report-node-versions.py': (
-        '读生产节点版本分布；需要 HOME=/home/vansin 与真实库，CI 里跑不了',
+        '读生产节点版本分布；需要在真实机器上以生产用户身份访问真库，CI 里跑不了',
         '节点全部升到同一版本后删除本行',
     ),
     'report-process-artifact-drift.py': (
