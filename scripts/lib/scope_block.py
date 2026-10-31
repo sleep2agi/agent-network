@@ -18,6 +18,23 @@
 from __future__ import annotations
 
 THREAT_MODELS = ("accident", "adversary")
+FAILURE_MODES = ("loud", "silent")
+
+import subprocess as _sp
+
+
+def _measured_on() -> str:
+    """这棵树是哪一棵 —— 不带版本的作用域声明，描述的是**一类**仓库，不是一个仓库。
+
+    2026-10-31 —— 外部复核 ①：「补 measured_on: ref=<sha> dirty=<bool>
+    ⇒ 贴在错的树上的 SCOPE 块自己会说出来。」
+    """
+    try:
+        ref = _sp.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=10).stdout.strip() or "unknown"
+        dirty = bool(_sp.run(["git", "status", "--porcelain"], capture_output=True, text=True, timeout=15).stdout.strip())
+        return f"ref={ref} dirty={'yes' if dirty else 'no'}"
+    except Exception:
+        return "ref=unknown dirty=unknown"
 # 2026-10-31 —— 外部复核 (c)：「断言须写成 (命题, 定义域, 观测点, 可信度)，并加 verified_on」。
 # 这一格回答的是「这个读数在哪里成立的」：本机直跑 ≠ CI 跑过 ≠ 线上跑过。
 # 少了它，「本仓 0 命中」会被当成「线上安全」——而那是两件事。
@@ -25,6 +42,7 @@ VERIFIED_ON = ("local", "ci", "production", "unknown")
 
 
 def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_rule: str,
+                failure_mode: str, failure_mode_how: str,
                 verified_on: str = "local", domain_count: int | None = None,
                 domain_source: str = "") -> None:
     """domain_count / domain_source —— 2026-10-31 外部复核 ④：
@@ -45,6 +63,10 @@ def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_
             raise SystemExit(f"内部错误：SCOPE 的 {name} 不能为空（空着等于没有边界）")
     if not isinstance(domain_count, int) or domain_count <= 0:
         raise SystemExit("内部错误：domain_count 必填且必须为正整数（「扫了 X」要能说清 X 有多少）")
+    if failure_mode not in FAILURE_MODES:
+        raise SystemExit(f"内部错误：failure_mode 必须是 {FAILURE_MODES} 之一（边界外它会红还是会静默报 0）")
+    if not failure_mode_how or not str(failure_mode_how).strip():
+        raise SystemExit("内部错误：failure_mode_how 必填（靠什么变响 / 为什么不会响）")
     if not domain_source or not str(domain_source).strip():
         raise SystemExit("内部错误：domain_source 必填（那个数是哪来的：git ls-files / rglob / 显式清单）")
     print("SCOPE")
@@ -52,14 +74,16 @@ def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_
     print(f"  does_not_cover : {does_not_cover}")
     print(f"  threat_model   : {threat_model}")
     print(f"  reading_rule   : {reading_rule}")
+    print(f"  failure_mode   : {failure_mode}（{failure_mode_how}）")
     print(f"  domain_count   : {domain_count}（{domain_source}）")
+    print(f"  measured_on    : {_measured_on()}")
     print(f"  verified_on    : {verified_on}（这个读数在哪里成立；local ≠ CI ≠ 线上）")
 
 
 def selftest() -> int:
     """四个字段缺一个都必须炸 —— 否则「有 SCOPE 块」会退化成「有个块」。"""
     fails = 0
-    ok_args = dict(domain_count=1, domain_source="selftest")
+    ok_args = dict(domain_count=1, domain_source="selftest", failure_mode="loud", failure_mode_how="selftest")
     cases = [
         ("空 covers", dict(covers="", does_not_cover="x", threat_model="accident", reading_rule="x", **ok_args)),
         ("空 does_not_cover", dict(covers="x", does_not_cover="  ", threat_model="accident", reading_rule="x", **ok_args)),
@@ -68,15 +92,17 @@ def selftest() -> int:
         ("非法 verified_on", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", verified_on="somewhere", **ok_args)),
         ("缺 domain_count", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", domain_source="selftest")),
         ("缺 domain_source", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", domain_count=3)),
+        ("非法 failure_mode", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", domain_count=1, domain_source="s", failure_mode="maybe", failure_mode_how="x")),
+        ("空 failure_mode_how", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", domain_count=1, domain_source="s", failure_mode="loud", failure_mode_how="")),
     ]
     for label, kwargs in cases:
         try:
             print_scope(**kwargs)
-        except SystemExit:
+        except (SystemExit, TypeError):
             print(f"  ✓ selftest {label} ⇒ 拒绝输出")
         else:
             fails += 1
             print(f"  ✗ selftest {label} ⇒ 居然输出了")
     if fails == 0:
-        print("  ✓ selftest 7/7：缺少任一边界字段（含 domain_count / domain_source）都不会输出")
+        print("  ✓ selftest 9/9：缺少任一边界字段（含 failure_mode / domain_count）都不会输出")
     return 0 if fails == 0 else 1

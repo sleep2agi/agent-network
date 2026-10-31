@@ -154,7 +154,8 @@ def _print_scope_block(files: int) -> None:
         does_not_cover="运行期拼出来的 jq 表达式 / 非仓库文件 / 变量里存的过滤器 / .yaml 与 .txt",
         threat_model="accident",
         reading_rule="0 处只在「同一次扫描里 fail-closed 折叠 2 处」被同时打印时才有意义（它证明扫描器在动）",
-        domain_count=files,
+        failure_mode="loud",
+        failure_mode_how="任意一条 fail-open 命中即 exit 1；且同一次输出里打 fail-closed 计数作阳性对照",domain_count=files,
         domain_source="git ls-files *.sh/*.ts/*.md，减去 EXCLUDED_DIRS/GLOBS",
     )
 

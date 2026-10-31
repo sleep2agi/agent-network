@@ -348,7 +348,8 @@ def main() -> int:
                 does_not_cover="其它包 / tests 与 docs / 非 .ts / 运行期生成的代码",
                 threat_model="accident",
                 reading_rule="「31 组逐字符相同」只在同一次输出里「49 组同名」被同时打印时才有意义（分母是 49 不是 31）",
-                domain_count=len(dup) + 0 if False else max(1, len(dup)),
+                failure_mode="loud",
+                failure_mode_how="--assert 下任一副本分叉即 exit 1；缺扫描根时 exit 3（不适用，不是通过）",domain_count=len(dup) + 0 if False else max(1, len(dup)),
                 domain_source="三个目录下 basename 同名的 .ts 组数（分母=同名组，不是副本组）",
                 verified_on="local",
             )
