@@ -112,6 +112,15 @@ for (const [name, arguments_] of endpoints) {
   });
 }
 
+// #3275 批次 1 —— 上面那个表驱动循环里工具名是**变量**，所以「同变量」统计口径按名字归因不到任何一个工具。
+// 这不是测试写得不好，是**统计的粒度**问题：一条循环里的断言无法被归到被循环的那 N 个工具上。
+// ⇒ 给 ack_create_request 补一条带字面量的：错误信封是闭集 {error, ok}。
+test("#3275 ack_create_request 的错误信封恰好 {error, ok}", async () => {
+  const denied = await call(owner.token, "ack_create_request", { request_id: "cr_fixture_absent", status: "started" });
+  expect(denied.ok).toBe(false);
+  expect(Object.keys(denied).sort()).toEqual(["error", "ok"]);
+});
+
 test("legacy owner and exact bound identity remain supported", async () => {
   expect(db.get("SELECT bound_node_id FROM api_tokens WHERE token_id='owner678_legacy'").bound_node_id).toBeNull();
   for (const token of [legacy, bound]) {

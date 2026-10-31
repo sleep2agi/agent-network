@@ -138,9 +138,13 @@ describe("app#225 rules file — read round trip", () => {
       // 第二次拉:已经 in_progress,不再重复下发
       expect(await n.call("get_rules_file_request", {})).toEqual({ ok: true, request: null });
 
-      expect(await n.call("ack_rules_file_request", {
+      // #3275 批次 1 —— 同变量口径：这条断言必须测**这次调用的返回值**，而不是写在旁边的另一个值。
+      // 成功回执是闭集：{ok, request_id, status}。多一个键（例如 hint）客户端就会多一个没人知道的分支。
+      const acked = await n.call("ack_rules_file_request", {
         request_id: enq.request_id, status: "done", file_name: "CLAUDE.md", exists: true, content: "# 规则\n",
-      })).toMatchObject({ ok: true, status: "done" });
+      });
+      expect(Object.keys(acked).sort()).toEqual(["ok", "request_id", "status"]);
+      expect(acked).toMatchObject({ ok: true, status: "done", request_id: enq.request_id });
 
       const res = await u.call("get_rules_file_result", { request_id: enq.request_id });
       expect(res).toMatchObject({ ok: true, status: "done", op: "read", file_name: "CLAUDE.md", exists: true, content: "# 规则\n", error: null });

@@ -5889,6 +5889,7 @@
   "server/src/daemon-provider-snapshots.test.ts::secret fields / misleading verification are rejected, never saved in Hub DB": 1,
   "server/src/daemon-provider-snapshots.test.ts::timeout is explicit; late daemon reply cannot overwrite it": 1,
   "server/src/daemon-provider-snapshots.test.ts::write core chain: encrypted Hub request → target daemon CLI → durable replay → public readback": 1,
+  "server/src/daemon-token-owner-http.test.ts::#3275 ack_create_request 的错误信封恰好 {error, ok}": 1,
   "server/src/daemon-token-owner-http.test.ts::all production token issuers explicitly mark the rollout epoch": 1,
   "server/src/daemon-token-owner-http.test.ts::duplicate legacy aliases use bound IDs and an unbound token follows its owner": 1,
   "server/src/daemon-token-owner-http.test.ts::fresh ID cannot mint another node alias": 1,
@@ -14115,6 +14116,7 @@
   "server/src/daemon-provider-snapshots.test.ts::secret fields / misleading verification are rejected, never saved in Hub DB",
   "server/src/daemon-provider-snapshots.test.ts::timeout is explicit; late daemon reply cannot overwrite it",
   "server/src/daemon-provider-snapshots.test.ts::write core chain: encrypted Hub request → target daemon CLI → durable replay → public readback",
+  "server/src/daemon-token-owner-http.test.ts::#3275 ack_create_request 的错误信封恰好 {error, ok}",
   "server/src/daemon-token-owner-http.test.ts::all production token issuers explicitly mark the rollout epoch",
   "server/src/daemon-token-owner-http.test.ts::duplicate legacy aliases use bound IDs and an unbound token follows its owner",
   "server/src/daemon-token-owner-http.test.ts::fresh ID cannot mint another node alias",
@@ -16452,7 +16454,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "4531a6b9fd3eacbeb11a3c7a565a58402485b1d1",
+  "commit": "85c2c13a74f794a2328b373862a79758a8a7da14",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
