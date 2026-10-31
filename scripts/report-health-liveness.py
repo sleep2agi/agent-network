@@ -63,17 +63,25 @@ def documented_constants() -> set[str]:
 
 
 def sample(url: str, samples: int, interval: float) -> list[dict] | None:
+    """采样 N 次。
+
+    2026-10-31 —— **第一次采样是残窗口，不进统计**（外部复核 (d)：
+    「首尾两分钟 78/82 是残分钟（观测窗口被截断），中间 12 个完整分钟才是 140–198。
+      算基线必须先剔残分钟，否则『基线漂移』会被边缘效应放大成假象。」）。
+    本脚本的第一次采样常常紧贴进程启动（或紧贴上一次调用），窗口被截断 ⇒ 丢掉它。
+    """
     got: list[dict] = []
-    for i in range(samples):
+    budget = samples + 1              # 多采一次，第一次直接丢弃
+    for i in range(budget):
         try:
             with urllib.request.urlopen(url, timeout=10) as r:
                 got.append(json.loads(r.read().decode()))
         except Exception as exc:  # noqa: BLE001
             print(f"✗ 第 {i + 1} 次采样失败：{exc}", file=sys.stderr)
             return None
-        if i + 1 < samples:
+        if i + 1 < budget:
             time.sleep(interval)
-    return got
+    return got[1:] if len(got) > samples else got
 
 
 def main(argv: list[str]) -> int:
@@ -111,6 +119,7 @@ def main(argv: list[str]) -> int:
         "does_not_cover": [
             "「不变」不等于「错」：常量可能是有意的",
             "只采匿名投影（带 token 的字段不在样本里）",
+            "**第一次采样被丢弃**（残窗口：窗口可能紧贴进程启动/上次调用）",
             "N 次采样之间若某项恰好没变（例如空闲期的计数），也会被算作不变 ⇒ 需人再看一眼",
         ],
     }
