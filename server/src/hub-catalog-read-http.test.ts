@@ -109,6 +109,35 @@ describe("GET /api/skills", () => {
     expect(slugs).toContain("hc-pending");
   });
 
+  // 2026-10-31 —— **两条「providers」读的是不同的表**，而空数组在载荷里长得一样：
+  //   GET /api/providers → hub_provider_configs ｜ MCP list_providers → providers / provider_models
+  // 客户端「没有可选模型」既可能是前者空，也可能是后者空 ⇒ 必须能在载荷里区分。
+  test("an empty registry says which table it read, and whether the CLI registry has rows", async () => {
+    const { db } = await import("./db.js");
+    // strangerNet 里没有 hub_provider_configs 行；先看「两张表都空」这一档
+    const before = await get(`/api/providers?network_id=${strangerNet}`, strangerToken);
+    expect(before.status).toBe(200);
+    expect(before.body.state).toBe("unconfigured");
+    expect(before.body.source_table).toBe("hub_provider_configs");
+    expect(before.body.counts.providers).toBe(0);
+    expect(before.body.hint).toContain("hub_provider_configs");
+
+    // 再给 CLI 注册表塞一行（另一张表），本端点**仍然为空**，但 hint 必须改口
+    db.run(
+      `INSERT OR REPLACE INTO providers (provider_id, network_id, name, vendor, base_url, secret_key_ref, created_at, created_by, enabled)
+       VALUES ('hc-cli-only', ?1, 'hc-cli-only', 'openai', 'https://api.example.com', 'K', ?2, 'test', 1)`,
+      [strangerNet, Date.now()],
+    );
+    const after = await get(`/api/providers?network_id=${strangerNet}`, strangerToken);
+    expect(after.body.providers).toHaveLength(0);        // 本端点还是空
+    expect(after.body.counts.providers_in_cli_registry).toBeGreaterThan(0);
+    expect(after.body.hint).toContain("不会自动出现在本端点");
+    // 反向：有行时不该带 hint（载荷不变胖，且「有理由」与「没理由」可区分）
+    const owner = await get(`/api/providers?network_id=${ownerNet}`, ownerToken);
+    expect(owner.body.state).toBe("configured");
+    expect("hint" in owner.body).toBe(false);
+  });
+
   test("a member of another network is refused", async () => {
     const r = await get(`/api/skills?network_id=${ownerNet}`, strangerToken);
     expect(r.status).toBe(403);

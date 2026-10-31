@@ -40,7 +40,26 @@ function publicRow(networkId: string, stored: Row, exposeRef = false) {
 export function readHubProviders(h: Human, exposeRefs = false) {
   const refusal = auth(h, false); if (refusal) return refusal;
   const rows = db.all<Row>('SELECT revision,config_json,secret_key_ref,updated_at FROM hub_provider_configs WHERE network_id=?1 ORDER BY provider_id', h.networkId!);
+  // 2026-10-31 —— **这个端点的空数组也必须自报家门**（与 MCP list_providers 同一课）。
+  // 关键事实：两条「providers」读的是**不同的表** ——
+  //   GET /api/providers  → hub_provider_configs（网络自有的 provider 配置，本函数）
+  //   MCP list_providers  → providers / provider_models
+  // 于是「客户端没有可选模型」既可能是「这张表空」，也可能是「另一张表空」，
+  // 而两者在载荷里长得一模一样。⇒ 在 source 之外再说清 state 与「另一处叫什么」。
+  const otherSource = db.get<{ cnt: number }>(
+    'SELECT COUNT(*) AS cnt FROM providers WHERE network_id=?1 AND enabled=1', h.networkId!);
+  const otherCount = otherSource?.cnt ?? 0;
+  const state = rows.length > 0 ? 'configured' as const : 'unconfigured' as const;
   return { ok: true as const, network_id: h.networkId!, source: 'hub' as const,
+    // 读的是哪张表 —— 名字直接写出来，避免下一个人拿这个结果去解释另一个接口
+    source_table: 'hub_provider_configs' as const,
+    state,
+    counts: { providers: rows.length, providers_in_cli_registry: otherCount },
+    ...(state === 'unconfigured' ? {
+      hint: otherCount > 0
+        ? '本端点读 hub_provider_configs（网络自有 provider 配置），此处为空；但要给客户端选模型，还需要这里至少一行 —— CLI 注册表里的 ' + otherCount + ' 条不会自动出现在本端点。'
+        : '本端点读 hub_provider_configs，此处为空，且 CLI 注册表（providers）也是 0 条 ⇒ 客户端没有任何可选模型；需要管理员先录入第一行。',
+    } : {}),
     ...(exposeRefs ? { secret_reference_supported: true } : {}), providers: rows.map(r => publicRow(h.networkId!, r, exposeRefs)) };
 }
 export function putHubProvider(h: Human, revision: number, input: unknown) {
