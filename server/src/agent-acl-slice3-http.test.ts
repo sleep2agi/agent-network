@@ -510,6 +510,12 @@ describe("update_node_config 响应键集（exact key set）", () => {
       expect(c.counts.providers_without_models).toBe(1);
       expect("hint" in c).toBe(false);   // configured 时不带 hint（载荷不变胖）
 
+      // 2026-10-31 —— **键集变化必须是结构性可枚举的，不是「测到哪算哪」**（外部复核 (b)：
+      // 「不造业务上限，改成结构性证明：键集对任意 n 恒定，不再依赖枚举」）。
+      // 本载荷的 n 是「provider 条数」，键集必须与 n 无关；唯一的条件字段是 `hint`，
+      // 且它只由 `state` 决定 ⇒ 用「所有 state 的键集集合」把这条结构钉死：
+      //   不同的键集恰好 2 种，且它们的差恰好是 {"hint"}。
+      // 这样新增第三个条件字段时会红 —— 而不是「反正测试里的 n 只有 0 和 1，没测到」。
       // ④ 有模型但不启用 ⇒ all_disabled（不是 none_configured）
       db.run(
         `INSERT INTO provider_models (model_id, provider_id, model_name, enabled, created_at)
@@ -518,6 +524,18 @@ describe("update_node_config 响应键集（exact key set）", () => {
       );
       const d = await readState();
       expect(d.providers[0].models_state).toBe("all_disabled");
+
+      // 结构性键集：四次读数覆盖 4 种 state，键集只允许有 2 种，且差恰好 {"hint"}
+      const keySets = new Map<string, string[]>();
+      for (const [label, payload] of [["unconfigured", a], ["all_disabled", b], ["configured", c], ["models disabled", d]] as const) {
+        keySets.set(label, Object.keys(payload).sort());
+      }
+      const distinct = [...new Set([...keySets.values()].map((k) => k.join(",")))];
+      expect(distinct.length).toBe(2);
+      const withHint = distinct.find((k) => k.includes("hint"))!;
+      const withoutHint = distinct.find((k) => !k.includes("hint"))!;
+      expect(withHint.split(",").filter((k) => !withoutHint.split(",").includes(k))).toEqual(["hint"]);
+      expect(withoutHint.split(",").filter((k) => !withHint.split(",").includes(k))).toEqual([]);
     } finally {
       cleanup();
     }
