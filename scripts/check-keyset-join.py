@@ -324,12 +324,17 @@ BLOCKING_RULES: list[dict[str, str]] = [
         #    于是整份输出变成「二进制」而 grep 直接放弃（实测踩过一次）。
         "not_hit_when": "分隔符不在 SEPARATORS 白名单内（例如换行 / NUL 这类不可碰撞的分隔符）；"
                         "或比较运算符不在 8 字符内；或该文件是测试文件（降为 review）",
+        # 2026-10-31 —— **可执行形态**：不命中条件不能只是一句中文，
+        # 否则「规则」退化成「描述」，下一次得靠人来解释它（外部复核那条）。
+        # 这里指向 SELFTEST_CASES 里的一个用例名；自检会跑它并断言它**不落阻塞**。
+        "not_hit_fixture": "adjacent_not_keyset_after_semicolon",
     },
     {
         "id": "derived_keyset_separator",
         "site": "标识符由 Object.keys 赋值派生，且在 80 字符窗口外、但同一语句内拼 join 后紧邻比较",
         "not_hit_when": "标识符被重新赋值、或被 push/splice/concat/map/filter 派生（taint 失效）；"
                         "或 join 后没有紧邻的比较运算符；或该文件是测试文件",
+        "not_hit_fixture": "taint_invalidated_by_concat",
     },
 ]
 
@@ -337,14 +342,27 @@ INVALIDATE_TYPES = {"ref_dirty", "behavior", "domain"}
 
 
 def blocking_rules_complete() -> list[str]:
-    """每条阻塞规则都必须有 id / site / not_hit_when。缺一 ⇒ 它还在猜。"""
+    """每条阻塞规则都必须有 id / site / not_hit_when，**且 not_hit_fixture 必须真实存在并确实不阻塞**。
+
+    2026-10-31 —— 外部复核那条：规则的表述也必须是**可执行**的，否则它自己就是一种新机制。
+    ⇒ `not_hit_when` 那句话只能是注释；真正算数的是 `not_hit_fixture`：
+      自检会跑它，并断言它落在**非阻塞**桶。
+    """
     bad = []
+    by_name = {c[0]: c for c in SELFTEST_CASES}
     for r in BLOCKING_RULES:
-        for k in ("id", "site", "not_hit_when"):
+        for k in ("id", "site", "not_hit_when", "not_hit_fixture"):
             if not r.get(k):
                 bad.append(f"{r.get('id', '?')}: missing {k}")
         if r.get("not_hit_when") and len(r["not_hit_when"]) < 20:
             bad.append(f"{r.get('id', '?')}: not_hit_when 太短，等于没说")
+        fx = r.get("not_hit_fixture")
+        if fx:
+            case = by_name.get(fx)
+            if not case:
+                bad.append(f"{r.get('id', '?')}: not_hit_fixture `{fx}` 不在 SELFTEST_CASES 里")
+            elif case[2] == "blocking":
+                bad.append(f"{r.get('id', '?')}: not_hit_fixture `{fx}` 竟然期望 blocking —— 它不能当反例")
     return bad
 
 
