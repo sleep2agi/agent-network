@@ -57,8 +57,8 @@ UNWIRED_EXIT_WHEN: dict[str, str] = {
     "scripts/report-code-producers.py": "出现固定读者 ⇒ 移出本表并接进巡检",
     "scripts/report-rest-coverage.py": "REST 覆盖率被接进 CI 的覆盖率门 ⇒ 移出本表",
     "scripts/report-header-producers.py": "「同一路由内 >1 生产者」被做成门 ⇒ 移出本表",
+    "scripts/report-type-assertions.py": "type_only 计数被做成棘轮门（基线入库、只许降不许升）⇒ 移出本表",
     "scripts/report-health-liveness.py": "有了带负载的定时运行点 ⇒ 移出本表",
-    "scripts/cleanup-dangling-requirement-refs.py": "存量清完且删除路径有断言守住 ⇒ 本脚本可删",
     "scripts/report-mcp-key-set-coverage.py": "键集覆盖率进 CI 并设下限 ⇒ 移出本表",
     "scripts/report-node-versions.py": "舰队版本分布出现固定读者 ⇒ 移出本表",
     "scripts/report-reason-branches.py": "出现固定读者 ⇒ 移出本表",
@@ -93,10 +93,15 @@ KNOWN_UNWIRED: dict[str, str] = {
                                        "它回答「分母是多少」，不对代码下结论，不进 CI",
     "scripts/report-header-producers.py": "[report-only] 读数报告（每个响应头有几个写出点）；"
                                           "多生产者不是缺陷，但它是「改一处只改了一半」的前置条件",
+    # 2026-10-31 —— 它在这次提交里把本门弄红了（新 report-* 没登记），这条记录就是那次红。
+    "scripts/report-type-assertions.py": "[report-only] 读数报告（`expect(typeof x).toBe(\"T\")` 的三分类）；"
+                                         "68 条 type_only 里多数是 fixture 守卫，直接当门会立刻红而且红得没信息",
     "scripts/report-health-liveness.py": "[report-only] 读数报告（/health 里哪些字段多次采样从不变化）；"
                                          "空闲负载下不变不构成结论，它是「有流量时再看一眼」的入口",
-    "scripts/cleanup-dangling-requirement-refs.py": "[needs-host] 一次性存量清理（只清指向已删节点的引用）；"
-                                                    "默认 dry-run，--apply 会直接改库，需备份与停机窗口",
+    # 2026-10-31 —— 移除 `cleanup-dangling-requirement-refs.py` 的豁免条目：
+    # 它不匹配 GATE_PATTERNS（check-*/report-*），永远不会出现在 unwired 里，
+    # 于是这条登记只会被本门印成「白名单已过期」—— 死成员比缺席更糟：
+    # 下一个人会以为有人在跟这条，而它从来没有被检查过。
     "scripts/report-mcp-key-set-coverage.py": "[report-only] 读数报告（键集覆盖率三口径），人工按需跑",
     "scripts/report-node-versions.py": "[report-only] 读数报告（舰队版本分布），人工按需跑",
     "scripts/report-reason-branches.py": "[report-only] 读数报告（按 reason 分支的处数），人工按需跑",
