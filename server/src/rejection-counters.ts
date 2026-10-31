@@ -142,13 +142,32 @@ export const TASK_REJECTION_EXITS: ReadonlyArray<{
   counted: boolean;
   /** 钉住这一行的测试名（空串 = 还没有测试，属于缺口） */
   pinned_by: string;
+  /**
+   * 当 `pinned_by` 是空串时，**必须**说明为什么钉不住、以及什么能让它被钉住。
+   *
+   * 2026-10-31 —— 外部复核 (b) 那条的直接应用：
+   * 「兜底值必须说出自己是兜底」（`failure_reason_source: none` / `artifact_errors_source: empty`）。
+   * 本表同款：空的 `pinned_by` 与「忘了填」在数据里长得一样 ——
+   * 而填一个 gap_reason 之后，「我们知道这是洞」与「我们没看见这个洞」就分开了。
+   *
+   * 反例守卫：`pinned_by` 与 `gap_reason` **恰好填一个**（两个都填 = 自相矛盾；都不填 = 又回到静默缺口）。
+   */
+  gap_reason?: string;
 }> = [
   { position: "before_auth_middleware", counted: false, pinned_by: "KNOWN GAP: unauthenticated /api/task rejection is NOT counted" },
   { position: "before_route_table", counted: false, pinned_by: "KNOWN GAP: unmatched /api/* route 404 is NOT counted" },
   { position: "before_fetch_runtime_body_limit", counted: false, pinned_by: "KNOWN GAP: body over runtime maxRequestBodySize is NOT counted" },
   { position: "handler_parse", counted: true, pinned_by: "malformed JSON on /api/task IS counted" },
   { position: "handler_validate_or_permission", counted: true, pinned_by: "a real rejected /api/task actually bumps the counter" },
-  { position: "error_hook_500", counted: false, pinned_by: "" },
+  {
+    position: "error_hook_500",
+    counted: false,
+    pinned_by: "",
+    gap_reason:
+      "未捕获异常 → 500 的出口目前没有夹具：要钉它必须能**按需诱发**一次未捕获异常，" +
+      "而本仓没有测试专用路由（也不打算为测试在路由表里开洞）。" +
+      "解锁条件：出现一个可被合法输入诱发、且不依赖测试钩子的异常路径，或在测试里单独起一个只注册 error hook 的最小 server。",
+  },
 ];
 
 

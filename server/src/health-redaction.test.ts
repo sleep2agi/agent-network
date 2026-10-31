@@ -257,6 +257,19 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     for (const row of TASK_REJECTION_EXITS) {
       if (row.counted) expect(row.pinned_by.length).toBeGreaterThan(0);
     }
+    // 2026-10-31 —— **空 pinned_by 必须自报家门**（外部复核 (b)：「兜底值必须说出自己是兜底」）。
+    // 空的 pinned_by 与「忘了填」在数据里长得一样 ⇒ 要求 `pinned_by` 与 `gap_reason` **恰好填一个**。
+    // 两个都填 = 自相矛盾（既说钉住了又说钉不住）；都不填 = 又回到静默缺口。
+    for (const row of TASK_REJECTION_EXITS) {
+      const hasPin = row.pinned_by.length > 0;
+      const hasGap = (row.gap_reason ?? "").length > 0;
+      expect(hasPin !== hasGap).toBe(true);
+    }
+    // 声明为缺口的行：目前恰好 1 行（error_hook_500），且理由里必须同时写出「卡在哪」与「什么能解锁」
+    const gaps = TASK_REJECTION_EXITS.filter((r) => !r.pinned_by.length);
+    expect(gaps.map((r) => r.position)).toEqual(["error_hook_500"]);
+    expect(gaps[0].gap_reason).toContain("解锁条件");
+
     // 反过来：未计数的位置若已有测试钉住，名字必须非空 —— 否则「钉住了」只是注释
     const pinnedNames = TASK_REJECTION_EXITS.map((r) => r.pinned_by).filter(Boolean);
     expect(pinnedNames.length).toBeGreaterThanOrEqual(3);
