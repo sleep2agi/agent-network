@@ -153,17 +153,24 @@ describe("requirement events", () => {
     const card = await create(admin.token, { name: "对账示例", priority: "normal" });
     const read = async () => (await send(admin.token, "GET", `/api/requirements/${card.id}?network_id=${NET}`)).body.requirement;
     const before = await read();
-    const r = await patch(member.token, card.id, { column: "doing", priority: "high", due: "2026-10-09" });
+    // 2026-10-31 —— **同一个 PATCH 里混一个「赋相同值」的字段**（外部复核 (a) 的原话：
+    // 「同一次 update 里加一个赋相同值的字段，断言它不在 changes 里」）。
+    // 这是「变化集 vs 赋值集」两种实现唯一分叉的输入形态：
+    //   只测「整单都是空操作」时，两种实现都绿；混一个不变字段，只有按值比较的那种才绿。
+    const r = await patch(member.token, card.id, { column: "doing", priority: "high", due: "2026-10-09", assignee: "" });
     expect(r.status).toBe(200);
     const after = await read();
-    // 只看这次 PATCH 涉及的三个字段：读回来的行里**真的不同**的那些
-    const keys = ["column", "priority", "due"] as const;
+    // 只看这次 PATCH 涉及的四个字段（三个改了、一个赋的是原值）：读回来的行里**真的不同**的那些
+    const keys = ["column", "priority", "due", "assignee"] as const;
     const actuallyChanged = keys.filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null)).sort();
     const eventFields = of((await events(admin.token)).body.events, card.id)
       .filter((e: any) => e.kind === "changed")
       .map((e: any) => e.field).sort();
     expect(eventFields).toEqual(actuallyChanged);
     expect(actuallyChanged).toEqual(["column", "due", "priority"]);
+    // 赋相同值的那个字段：既不在实际变化里，也不在流水里（否则「赋值集」实现会多记一条）
+    expect(actuallyChanged).not.toContain("assignee");
+    expect(eventFields).not.toContain("assignee");
   });
 
   test("checklist: ticking an item is `checklist_item` (repeat is a no-op); adding items is `checklist`", async () => {
