@@ -32,15 +32,41 @@ EXCLUDE_PARTS = ("node_modules", "dist", "fixtures", ".worktrees")
 # 跨 env 回退：(A, B) —— A 缺失时借 B。
 PAIR = re.compile(r"process\.env\.([A-Z][A-Z0-9_]*)\s*(?:\?\?|\|\|)\s*process\.env\.([A-Z][A-Z0-9_]*)")
 
-# 已登记：两个变量是**同一个概念**的不同名字（历史遗留 / 兼容期双名）
-KNOWN_ALIAS: dict[tuple[str, str], str] = {
-    ("COMMHUB_URL", "ANET_HUB_URL"): "hub 地址的旧名/新名（兼容期并存）",
-    ("HOME", "USERPROFILE"): "家目录：POSIX 与 Windows 的不同名字",
-    ("COMMHUB_RESUME_ID", "CLAUDE_RESUME_ID"): "会话恢复 id 的旧名/新名",
-    ("COMMHUB_TOKEN", "AUTH_TOKEN"): "节点令牌的旧名/新名（stdio 上传工具内）",
-    ("ANET_UPLOAD_ALIAS", "COMMHUB_ALIAS"): "别名的新名/旧名",
-    ("OPENAI_BASE_URL", "OPENAI_API_BASE"): "同一端点变量的两种社区写法",
-    ("OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD"): "测试夹具里的旧名/新名",
+# 已登记：两个变量是**同一个概念**的不同名字（历史遗留 / 兼容期双名）。
+#
+# 2026-10-31 —— 外部复核 ④：「别名表一旦没有删除条件，就长成第二个白名单：
+# 只加不减，每条都有理由。」⇒ 每条必须写「什么时候可以删掉这一行」，
+# 否则它会永远留在表里，而下一个人无法判断它还有没有用。
+# 结构与 KNOWN_UNWIRED 的「理由 + 移出条件」一致。
+KNOWN_ALIAS: dict[tuple[str, str], tuple[str, str]] = {
+    ("COMMHUB_URL", "ANET_HUB_URL"): (
+        "hub 地址的旧名/新名（兼容期并存）",
+        "当全仓不再出现 ANET_HUB_URL 的写入方（发布说明里宣告弃用之后）⇒ 删掉这一行与 `|| ANET_HUB_URL`",
+    ),
+    ("HOME", "USERPROFILE"): (
+        "家目录：POSIX 与 Windows 的不同名字",
+        "永不移除（操作系统差异，不是版本差异）；若改成显式 process.platform 分支 ⇒ 改为按平台取，不再回退",
+    ),
+    ("COMMHUB_RESUME_ID", "CLAUDE_RESUME_ID"): (
+        "会话恢复 id 的旧名/新名",
+        "当 CLI 不再接受 CLAUDE_RESUME_ID 环境变量 ⇒ 删掉这一行与回退",
+    ),
+    ("COMMHUB_TOKEN", "AUTH_TOKEN"): (
+        "节点令牌的旧名/新名（stdio 上传工具内）",
+        "当 AUTH_TOKEN 在文档与示例里彻底消失 ⇒ 删掉回退",
+    ),
+    ("ANET_UPLOAD_ALIAS", "COMMHUB_ALIAS"): (
+        "别名的新名/旧名",
+        "当 COMMHUB_ALIAS 不再被任何脚本设置 ⇒ 删掉回退",
+    ),
+    ("OPENAI_BASE_URL", "OPENAI_API_BASE"): (
+        "同一端点变量的两种社区写法",
+        "永不移除（社区两种写法长期并存）；若只支持一种 ⇒ 删掉回退并在文档写清",
+    ),
+    ("OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD"): (
+        "测试夹具里的旧名/新名",
+        "当夹具统一到新名 ⇒ 删掉回退",
+    ),
 }
 # 明确判定为「不同概念」的（出现即红）。空 = 本仓目前没有。
 KNOWN_BORROW: dict[tuple[str, str], str] = {}
@@ -108,6 +134,9 @@ def main(argv: list[str]) -> int:
         print("扫描域为空 ⇒ 没有读数", file=sys.stderr)
         return 2
     unregistered = [h for h in hits if (h["a"], h["b"]) not in KNOWN_ALIAS and (h["a"], h["b"]) not in KNOWN_BORROW]
+    # 别名表自身的质量：理由与删除条件都必须非空（空着就是「只加不减」的白名单）
+    bad_alias = [(k, v) for k, v in KNOWN_ALIAS.items()
+                 if not (isinstance(v, tuple) and len(v) == 2 and all(str(x).strip() for x in v))]
     borrows = [h for h in hits if (h["a"], h["b"]) in KNOWN_BORROW]
     if "--json" in argv:
         print(json.dumps({"files": files, "fallbacks": len(hits), "unregistered": unregistered,
@@ -119,7 +148,11 @@ def main(argv: list[str]) -> int:
         print(f"    ✗ {h['file']}:{h['line']}  {h['a']} → {h['b']}   {h['text']}")
     for h in borrows[:12]:
         print(f"    ✗（已判定错借）{h['file']}:{h['line']}  {h['a']} → {h['b']}", file=sys.stderr)
-    if unregistered or borrows:
+    for k, v in bad_alias:
+        print(f"    ✗ 别名表条目缺「理由 + 删除条件」：{k[0]} → {k[1]}（{v!r}）", file=sys.stderr)
+    if KNOWN_ALIAS:
+        print(f"  · 别名表 {len(KNOWN_ALIAS)} 条，每条都带删除条件（示例：{list(KNOWN_ALIAS)[0][0]} → {list(KNOWN_ALIAS)[0][1]}）")
+    if unregistered or borrows or bad_alias:
         print("  ⇒ 每个跨变量回退必须回答：这两个是**同一个概念**吗？"
               "是 ⇒ 登记进 KNOWN_ALIAS；不是 ⇒ 禁止（改成显式判空，别用 || 借）。", file=sys.stderr)
         return 1
