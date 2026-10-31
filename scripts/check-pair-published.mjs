@@ -27,6 +27,13 @@ export function readPair(text) {
   return net && node ? { network: net, node } : null;
 }
 
+/** 从 CI 的 TARBALL 路径认出「本次发的是哪个包」；认不出就返回 null（不猜）。 */
+function mineFromTarball(tarball) {
+  if (!tarball) return null;
+  const m = /sleep2agi-(agent-node|agent-network)-/.exec(String(tarball));
+  return m ? m[1] : null;
+}
+
 function publishedVersion(pkg) {
   try {
     return execFileSync('npm', ['view', `${pkg}`, 'version'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -84,6 +91,21 @@ if (isMain) {
     console.error(`🔴 half pair: agent-network@${pair.network} + agent-node@${pair.node}`);
     for (const p of result.problems) console.error(`  - ${p}`);
     console.error('  do not announce the surviving half; publish the missing one (or pin users to the previous full pair)');
+    // 2026-10-31 —— 实测踩了一次：两个 dispatch 只隔 6 秒 ⇒ 两个 job 并行，
+    // node 那半收尾时 CLI 还在 registry 传播中 ⇒ 这条报「half pair」，读起来像**发布失败**。
+    // 而实际上 publish 步骤是成功的（registry + shasum 都核对过）。
+    // ⇒ 把「顺序问题」与「发布失败」分开说：只有当**本次这条 job 发的那个包**已经在 registry 上、
+    //    缺的只是对面那半时，才给出这条提示。
+    const mine = mineFromTarball(process.env.TARBALL);
+    if (mine) {
+      // 只认「缺的恰好是**对面那半**」这一种：本次发的那个包没在 problems 里 ⇒ 它没缺。
+      const missing = result.problems.map((x) => (x.startsWith('agent-node@') ? 'agent-node' : 'agent-network'));
+      const onlyCounterpart = missing.length === 1 && !missing.includes(mine);
+      if (onlyCounterpart) {
+        console.error(`  ⓘ 本次发布的是 ${mine}，它已在 registry 上；缺的是 ${missing[0]} —— **可能是顺序**，不是发布失败。`);
+        console.error('    下一步：确认对面那半的 job 是否还在「发后核实」轮询中；两半应当**顺序** dispatch（先 node 后 CLI）。');
+      }
+    }
   }
   process.exit(result.ok ? 0 : 1);
 }
