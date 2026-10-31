@@ -729,6 +729,12 @@ function forkRecoveryOptions(nodeId: string, displayName: string, opts: Copresen
 }
 
 async function askTypedConfirmation(prompt: string, expected: string): Promise<boolean> {
+  // 同 #2293：打字确认在非 TTY 里等价于「永远等一个不会来的回答」⇒ 直接判否。
+  // 判否是安全的那一侧：确认类问题唯一的危险答案是被当成「是」。
+  if (!process.stdin.isTTY) {
+    process.stderr.write(`[anet] 非交互环境：跳过打字确认（视为「否」）—— ${prompt.replace(/\n/g, " ").slice(0, 120)}\n`);
+    return false;
+  }
   const rl = getRL();
   const answer = await new Promise<string>((resolve) => rl.question(prompt, (s) => resolve(s)));
   closeRL();
@@ -5066,6 +5072,11 @@ async function initGlobal() {
   let hub = opts.hub;
 
   if (!hub) {
+    // #2293：具体到「该传什么」，而不是让通用错误去兜。
+    if (!process.stdin.isTTY) {
+      console.error("Error: 没有给 --hub，且 stdin 不是终端 ⇒ 不会提问。用法: anet init --hub http://YOUR_IP:9200");
+      process.exit(1);
+    }
     hub = await ask("CommHub URL (e.g. http://YOUR_IP:9200)");
   }
 
@@ -6984,7 +6995,27 @@ function getRL() {
 }
 function closeRL() { if (_rl) { _rl.close(); _rl = null; } }
 
+// 2026-10-31 —— #2293：**非 TTY 下绝不等待输入**。
+//
+// 缺陷形状（实测，不是推理）：客户端把 CLI 当子进程拉起时，stdin 是一条**一直被握着的管道**
+// （不是 /dev/null）。`rl.question` 于是永远等不到 EOF：
+//   spawn("anet init", stdio:["pipe",...]) → 6 秒后仍未退出，stdout 只有一行提示串
+//   ⇒ 客户端那边看到的是「卡住」，而且**没有任何可读的原因**（提示串看起来像还在正常工作）。
+// 修复不是「更快地等待」，而是**这类环境里根本不发起提问**：
+//   有默认值 ⇒ 用默认值并说明（stderr，不改 stdout 的机器可读面）
+//   没有默认值 ⇒ 抛出 `non_interactive_prompt`，带上「该传什么」的下一步
 function ask(question: string, defaultVal?: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    if (defaultVal !== undefined) {
+      process.stderr.write(`[anet] 非交互环境（stdin 不是终端）：${question} → 采用默认值 ${JSON.stringify(defaultVal)}\n`);
+      return Promise.resolve(defaultVal);
+    }
+    // 单行：顶层 catch 只印第一行（实测多行提示会被吞掉，只有第一行到得了用户眼里）。
+    return Promise.reject(new Error(
+      `non_interactive_prompt: ${question} —— stdin 不是终端（客户端/管道/CI），这一问不会有人回答；`
+      + `用命令行参数或环境变量给出该值后重跑。`,
+    ));
+  }
   const suffix = defaultVal ? ` [${defaultVal}]` : "";
   return new Promise(resolve => {
     getRL().question(`${question}${suffix}: `, (answer) => {
