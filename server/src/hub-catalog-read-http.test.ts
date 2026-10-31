@@ -480,6 +480,28 @@ describe("GET /api/providers", () => {
       //  而语义已经不是你想的那个。」）
       // ⇒ 读点必须落在**路由文件**里（server.ts），否则等于表有了、用法另有其处。
       // 位置：读点必须落在**实现或路由**里（不是只落在注释里）
+      // 2026-10-31 —— **同值不能证明同源**（外部复核：「facade 走映射链、pty 直接写字面，
+      // 今天同值，而链改了 pty 不跟 ⇒ 任何静态断言都看不见这一格；
+      // 同值能证明它们此刻一致，不能证明它们受同一个约束。」）
+      //
+      // 本仓的同形：`state` 的取值域由**服务端**产出（闭集映射 + never_switched + unknown），
+      // 而**客户端**的 TS union 是另一份手写清单。两份今天相等，改一边不会红。
+      // 判据：把「服务端实际可产出的集合」与「客户端 union 的集合」直接比；
+      // 并且这条比较本身必须能红（witness：改客户端 union 少一个值 ⇒ 立刻红）。
+      const { SELECTION_STATE_BY_STATUS } = await import("./server.js");
+      const serverStates = new Set<string>([
+        "never_switched",
+        ...Object.values(SELECTION_STATE_BY_STATUS as Record<string, string>),
+        "unknown",
+      ]);
+      const clientSrc = readFileSync(join(import.meta.dir, "..", "..", "prototype", "anet-client-app", "src", "api.ts"), "utf8");
+      const unionLine = clientSrc.split("\n").find((l) => l.includes("export type ProviderSelectionState")) ?? "";
+      const clientStates = new Set([...unionLine.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
+      expect(clientStates.size).toBeGreaterThan(0);              // 解析不出 union ⇒ 没有读数
+      expect([...clientStates].sort()).toEqual([...serverStates].sort());
+      // 空集守卫：两边都不能是空（否则「相等」是真空真）
+      expect(serverStates.size).toBe(5);
+
       // 2026-10-31 —— **兜底不许把「我们的缺陷」说成「客户端的错」**：
       // 表里查不到的码 ⇒ 归因指向了错误的行动方（返回 400 会让客户端去改自己的请求）。
       // 判据同「遍历每个抛点断言它不等于 catch-all」：逐个码断言它映射到**自己那一格**，

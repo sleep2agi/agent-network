@@ -1191,6 +1191,19 @@ export interface HealthFieldMeta {
   why?: string;
 }
 
+/**
+ * provider-selection 的**取值域生产者**（daemon status → 对外 state）。
+ *
+ * 提到模块作用域并导出，是为了让「服务端可产出的集合」与「客户端 TS union」
+ * 能被同一条跨源断言直接比较 —— 两份手写清单今天相等，不足以证明它们受同一个约束。
+ */
+export const SELECTION_STATE_BY_STATUS: Record<string, "pending" | "applied" | "failed"> = {
+  pending: "pending",
+  succeeded: "applied",   // daemon 侧成功的实际取值（不是 "applied"）
+  failed: "failed",
+  expired: "failed",      // 过期＝没生效；对使用者与失败同一档
+};
+
 export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   // ── gauge：聚合 / 粗标签 ─────────────────────────────────────────────
   ok: {
@@ -3975,12 +3988,8 @@ return Bun.serve({
       // 而 daemon 侧新增一个状态（取消 / 回滚 / 拼错的 succeeded_）时，界面会读到「切好了」——
       // 这是所有折叠方向里唯一会**主动撒谎**的方向。
       // ⇒ 改成闭集显式映射；不在表里的 status 报 unknown 并把原值带出去（不猜、不美化）。
-      const SELECTION_STATE_BY_STATUS: Record<string, "pending" | "applied" | "failed"> = {
-        pending: "pending",
-        succeeded: "applied",   // daemon 侧成功的实际取值（不是 "applied"）
-        failed: "failed",
-        expired: "failed",      // 过期＝没生效；对使用者与失败同一档
-      };
+      // 表本身提到模块作用域并 export：它是**取值域的生产者**，客户端 union 是另一份手写清单，
+      // 两者必须能被同一条断言比较（否则「今天同值」永远只是巧合）。
       const state = !row ? "never_switched" : (SELECTION_STATE_BY_STATUS[row.status] ?? "unknown");
       let selection: unknown = null;
       if (row?.snapshot_json) { try { selection = JSON.parse(row.snapshot_json); } catch { selection = null; } }
