@@ -239,7 +239,10 @@ def main() -> int:
                     break
                 end += 1
             window = "\n".join(lines[i:end])
-            if re.search(rf"Object\.keys\(\s*{re.escape(var)}\s*\)", window):
+            # 2026-10-31 —— `Object.keys(x as any)` 也是同变量断言，而原正则要求 `x` 后面紧跟 `)`。
+            # 实测：`delete_node` 早就有一条精确键集断言，只因写了 `as any` 就被记成「没有」。
+            # ⇒ 类型断言不改变被测对象，所以它不该改变归属。
+            if re.search(rf"Object\.keys\(\s*{re.escape(var)}(\s+as\s+[\w.<>\[\]]+)?\s*\)", window):
                 own_result.setdefault(name, []).append(path.name)
     own = sorted(own_result)
 
