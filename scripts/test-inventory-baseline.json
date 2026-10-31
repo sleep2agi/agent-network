@@ -6196,6 +6196,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::anonymous /health exposes ONLY allow-listed keys (new fields default to authenticated)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::anonymous /health exposes no fingerprint-bearing response header": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::anonymous `limits` carries ONLY static byte caps (public by decision, pinned in shape)": 1,
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::any difference-shaped field names both of its endpoints in the same payload": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::authenticated admin /health carries git_commit (40-hex or null) and git_dirty": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::counters.since is the process start, so it is NOT a window length (denominator trap)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::default /health always carries served_at (same clock domain) but never probe_nonce": 1,
@@ -14334,6 +14335,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::anonymous /health exposes ONLY allow-listed keys (new fields default to authenticated)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::anonymous /health exposes no fingerprint-bearing response header",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::anonymous `limits` carries ONLY static byte caps (public by decision, pinned in shape)",
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::any difference-shaped field names both of its endpoints in the same payload",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::authenticated admin /health carries git_commit (40-hex or null) and git_dirty",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::counters.since is the process start, so it is NOT a window length (denominator trap)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::default /health always carries served_at (same clock domain) but never probe_nonce",
@@ -16276,7 +16278,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "1f2588f2844c18cfdbf5da33898b42a7d57c5729",
+  "commit": "98b15da4afe7edc445ee5e0de1b482f8b6e22413",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
 }

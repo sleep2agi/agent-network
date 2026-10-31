@@ -1269,6 +1269,39 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 判据不是「content-type 是 json」（那要求每个客户端都记得先看），
   // 而是一个**静态**产出者标记：有它 ⇒ 这段字节出自 hub；没有 ⇒ 出自它前面的某一层。
   // 必须是静态值：一旦它随进程/版本变化，它就变成了指纹（与 version_role 那条相冲突）。
+  // 2026-10-31 —— **凡是差值字段，必须同时给出两个端点的原始值**
+  // （外部复核：「任何 `a − b` 都会把『两字段一源』变成不可见；读者至少能看出可能同源，
+  //   只剩一个数时他无法质疑两个端点」）。
+  //
+  // 谓词落在**名字**上而不是「源码里出现了减法」（外部复核：
+  // 「`startedAt` / `lastSuccessAt` 也是减法算出来的但**稳**；只扫减法会漏掉无条件的那个」）。
+  // 分母必须报出来：命中 0 个差值字段 ⇒ 这条断言是真空真。
+  test("any difference-shaped field names both of its endpoints in the same payload", async () => {
+    const { HEALTH_FIELD_META } = await import("./server.js");
+    const DIFFY = /(age|elapsed|uptime|remaining|ttl|delta|drift|lag)/i;
+    const named = Object.keys(HEALTH_FIELD_META).filter((k) => DIFFY.test(k));
+    expect(named.length).toBeGreaterThan(0);            // 分母：按名字至少命中 1 个
+
+    const derived = named.filter((k) => (HEALTH_FIELD_META as any)[k].derived_from);
+    // 本仓今天有 2 个真差值（epoch_delta_ms / clk_tck_delta）；`uptime` 是**单调读数**不是差值，
+    // 它显式不写 derived_from —— 所以这里要求的是「写了端点的必须两端齐全」，
+    // 而不是「所有命中名字的都必须写」（后者会把这条规则变成填表）。
+    expect(derived.length).toBeGreaterThanOrEqual(2);
+
+    const problems: string[] = [];
+    for (const k of derived) {
+      const ends = (HEALTH_FIELD_META as any)[k].derived_from as readonly string[];
+      if (!Array.isArray(ends) || ends.length < 2) { problems.push(`${k}: 端点少于 2 个`); continue; }
+      for (const e of ends) {
+        if (!(e in HEALTH_FIELD_META)) problems.push(`${k}: 端点 ${e} 不是本载荷里的字段（拼错的端点等于没有端点）`);
+      }
+    }
+    expect(problems).toEqual([]);
+    // 镜像：非差值字段**不该**被要求给端点（否则「填表」会取代判据）——
+    // 断言 uptime 没有 derived_from，并且它确实不是 now-startedAt 那种同源减法。
+    expect((HEALTH_FIELD_META as any).uptime.derived_from).toBeUndefined();
+  });
+
   test("every hub response carries a constant producer marker (so a proxy page is distinguishable)", async () => {
     const paths = ["/health", "/api/definitely-not-a-route", "/"];
     const seen: (string | null)[] = [];

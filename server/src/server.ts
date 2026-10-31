@@ -1187,6 +1187,14 @@ export interface HealthFieldMeta {
    * ⇒ 一个分类不写窗口，就无法被证伪：读一次相同与读一年相同，在断言上同形。
    */
   stable_within?: "request" | "process" | "deploy";
+  /**
+   * 2026-10-31 —— **凡是差值字段，必须同时给出两个端点的原始值**
+   * （外部复核：「任何 `a − b` 都会把『两字段一源』变成不可见；
+   *   读者至少能看出可能同源，只剩一个数时他无法质疑两个端点」）。
+   * ⇒ 派生字段在这里点名它的端点（必须是同一载荷里真实存在的键），
+   *   非派生字段不写。断言由 health-redaction 的「差值字段两端点」那条守。
+   */
+  derived_from?: readonly string[];
   /** 为什么把它放这一档（只在有争议的字段上写） */
   why?: string;
 }
@@ -1233,6 +1241,10 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   uptime: {
     class: "gauge",
     granularity: "cumulative",
+    // 2026-10-31 —— uptime 是**单调时钟的读数**，不是 `now − startedAt`（后者同源、无判别力）。
+    // 所以它不写 derived_from；这条区别正是「差值字段必须给端点」的反面例子：
+    // 一个**不是**差值的字段，不该被要求给端点 —— 否则那条规则会变成填表。
+    // （对照：epoch_delta_ms / clk_tck_delta 是真差值，它们都有两个端点。）
     // 2026-10-31 —— 这一格是**同一 body 里的第二个时钟源**（外部复核：
     // 「time ← CLOCK_REALTIME（可被 NTP 拉、可冻结）；uptime ← CLOCK_MONOTONIC（只走不跳）」）。
     // ⇒ 「served_at 不动而 uptime 在走」= 冻结的是墙钟，不是进程：**单次读数、零外部依赖、有方向**。
@@ -1286,7 +1298,11 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
     why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻",
     verdict_other_branch: "disagree：宿主时钟被改过（NTP 大步进 / 手工 date / 虚拟机恢复快照）⇒ 差值超出误差界；unknown：/proc 不可读",
   },
-  epoch_delta_ms: { class: "gauge", granularity: "level" },
+  epoch_delta_ms: {
+    class: "gauge", granularity: "level",
+    derived_from: ["kernel_started_at", "startedAt"],
+    why: "内核口径时刻 − 进程口径时刻；两个端点都在同一载荷里，读者才能自己算一遍",
+  },
   clk_tck_assumed: { class: "gauge", granularity: "label" },
   clk_tck_estimate: {
     class: "gauge",
@@ -1305,7 +1321,11 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
     why: "退回 assumed 的原因；三支挤在同一个值里时，「设备不支持」与「真的挂起过」同形",
     verdict_other_branch: "rel_error_above_1pct：宿主挂起（uptime 涨、jiffies 不涨）超过 1% —— 本机实测已出现",
   },
-  clk_tck_delta: { class: "gauge", granularity: "level", why: "derived − 100；confirmed 也要报差多少" },
+  clk_tck_delta: {
+    class: "gauge", granularity: "level",
+    derived_from: ["clk_tck_estimate", "clk_tck_assumed"],
+    why: "derived − 100；confirmed 也要报差多少",
+  },
   kernel_started_at_error_ms: {
     class: "gauge",
     granularity: "level",
