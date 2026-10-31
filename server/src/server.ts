@@ -3947,10 +3947,19 @@ return Bun.serve({
           ORDER BY created_at DESC LIMIT 1`,
         node.network_id, node.node_id);
       // 三态而不是「有/没有」：从未切换过 / 正在切 / 切失败，界面要给的下一步完全不同。
-      const state = !row ? "never_switched"
-        : row.status === "pending" ? "pending"
-        : row.status === "failed" || row.status === "expired" ? "failed"
-        : "applied";
+      //
+      // 2026-10-31 —— **兜底不许是最乐观的那一档**：
+      // 原来写的是 `… ? "failed" : "applied"`，即任何**没被枚举到**的 status 都会折叠成「已生效」。
+      // 而 daemon 侧新增一个状态（取消 / 回滚 / 拼错的 succeeded_）时，界面会读到「切好了」——
+      // 这是所有折叠方向里唯一会**主动撒谎**的方向。
+      // ⇒ 改成闭集显式映射；不在表里的 status 报 unknown 并把原值带出去（不猜、不美化）。
+      const SELECTION_STATE_BY_STATUS: Record<string, "pending" | "applied" | "failed"> = {
+        pending: "pending",
+        succeeded: "applied",   // daemon 侧成功的实际取值（不是 "applied"）
+        failed: "failed",
+        expired: "failed",      // 过期＝没生效；对使用者与失败同一档
+      };
+      const state = !row ? "never_switched" : (SELECTION_STATE_BY_STATUS[row.status] ?? "unknown");
       let selection: unknown = null;
       if (row?.snapshot_json) { try { selection = JSON.parse(row.snapshot_json); } catch { selection = null; } }
       return withCors(req, Response.json({
@@ -3963,6 +3972,12 @@ return Bun.serve({
         ...(state === "failed" ? { error: row?.error ?? null } : {}),
         ...(state === "never_switched"
           ? { hint: "这个节点还没有被切换过 provider；显示的是它的本地默认配置（不是 Hub 的读数）" }
+          : {}),
+        ...(state === "unknown"
+          ? {
+              observed_status: row?.status ?? null,
+              hint: "Hub 读到一个它不认识的切换状态；**这不等于已生效**，也不等于失败 —— 去 daemon 侧看这次请求的实际结果",
+            }
           : {}),
       }));
     }

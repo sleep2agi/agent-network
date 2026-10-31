@@ -413,7 +413,10 @@ export function putProvider(
   });
 }
 
-export type ProviderSelectionState = "never_switched" | "pending" | "applied" | "failed";
+// "unknown" 不是「还没读到」，而是「Hub 读到一个它不认识的切换状态」。
+// 2026-10-31 —— 服务端原来把任何没枚举到的 status 折叠成 applied（唯一会主动撒谎的方向）；
+// 现在闭集映射，不认识的值报 unknown 并把原值带在 observed_status 里。
+export type ProviderSelectionState = "never_switched" | "pending" | "applied" | "failed" | "unknown";
 
 export interface NodeProviderSelectionResp {
   ok: true;
@@ -424,6 +427,8 @@ export interface NodeProviderSelectionResp {
   observed_at: string | null;
   error?: string | null;
   hint?: string;
+  /** 仅 state="unknown" 时出现：daemon 回报的原始状态值（不猜、不美化） */
+  observed_status?: string | null;
 }
 
 export function getNodeProviderSelection(token: string, nodeId: string): Promise<NodeProviderSelectionResp> {

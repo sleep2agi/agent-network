@@ -47,6 +47,12 @@ function selectionLine(s: NodeProviderSelectionResp | null): { kind: string; tex
       const sel = s.selection as { provider_id?: string; model?: string } | null;
       return { kind: "ok", text: `已生效：${sel?.provider_id ?? "?"} / ${sel?.model ?? "?"}（revision ${s.revision ?? "?"}）` };
     }
+    case "unknown":
+      // 不猜：它既不是「已生效」也不是「失败」。界面必须这么说，否则用户会当成切好了。
+      return {
+        kind: "warn",
+        text: `Hub 读到不认识的切换状态（${s.observed_status ?? "未回报"}）—— 这不等于已生效，去 daemon 侧看这次请求的实际结果`,
+      };
     default:
       return { kind: "muted", text: `未知状态：${String(s.state)}` };
   }

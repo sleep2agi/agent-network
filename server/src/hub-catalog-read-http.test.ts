@@ -312,7 +312,12 @@ describe("GET /api/providers", () => {
       expect("hint" in b.body).toBe(false);
 
       // ③ 已生效：selection 原样带回，并给出 revision
-      q("dpa_probe_2", "completed", JSON.stringify({ expected_revision: 7, provider_id: "main", model: "m1" }), null);
+      // 2026-10-31 —— 这条 fixture 原来写 `"completed"`，而**生产端从不写这个值**
+      // （daemon 成功时写的是 `succeeded`，见 daemon-provider-snapshots.ts:322）。
+      // 于是这条断言只在「兜底分支」上成立：它证明的不是「applied 状态能读到」，
+      // 而是「任何没枚举到的值都会被读成 applied」——一条把缺陷当契约保护起来的断言。
+      // ⇒ fixture 改用生产者真的会写的值；兜底方向另立一条断言（见下面的 unknown 用例）。
+      q("dpa_probe_2", "succeeded", JSON.stringify({ expected_revision: 7, provider_id: "main", model: "m1" }), null);
       const c = await read();
       expect(c.body.state).toBe("applied");
       expect(c.body.selection).toMatchObject({ provider_id: "main", model: "m1" });
@@ -324,6 +329,17 @@ describe("GET /api/providers", () => {
       const d = await read();
       expect(d.body.state).toBe("failed");
       expect(d.body.error).toBe("daemon_rejected_selection");
+
+      // ⑤ 未知状态：**兜底不许是最乐观的那一档**
+      // 原实现是 `… ? "failed" : "applied"` ⇒ 任何没被枚举到的 status 都折叠成「已生效」。
+      // daemon 侧只要新增一个状态（取消 / 回滚 / 拼错），界面就会读到「切好了」—— 唯一会主动撒谎的折叠方向。
+      // 现在闭集显式映射，不认识的值报 unknown 且把原值带出去（不猜、不美化）。
+      q("dpa_probe_4", "cancelled_by_operator", null, null);
+      const e = await read();
+      expect(e.body.state).toBe("unknown");
+      expect(e.body.state).not.toBe("applied");
+      expect(e.body.observed_status).toBe("cancelled_by_operator");
+      expect(String(e.body.hint)).toContain("不等于已生效");
     } finally {
       db.run(`DELETE FROM daemon_provider_snapshots WHERE daemon_node_id = ?1`, [nodeId]);
       db.run(`DELETE FROM node_daemon_bindings WHERE request_id = 'bind_ps'`);
