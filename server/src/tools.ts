@@ -884,6 +884,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // it knows the last hop. Reporting only; no write path reads it yet.
       env_transport: z.enum(["loopback", "https", "plain"]).optional().describe("Hub link kind"),
       version: z.string().max(100).optional().describe("Agent version"),
+      // 2026-10-31 —— #3294：**字节标识**。40 位 hex；也接受 12 位前缀（CI 里截过的那种）。
+      // 与 version 分开：version 是标签，build_commit 是「哪一份字节」。
+      build_commit: z.string().regex(/^[0-9a-f]{7,40}$/).optional().describe("Build commit (hex, 7–40), from the packaged build-info.json"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
       node_id: z.string().max(200).optional().describe("Stable node identifier"),
@@ -1125,7 +1128,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // instead of rejecting the whole report (see node-health-store.ts).
       health: nodeHealthSchema,
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, team_rules: teamRules, health: nodeHealth, secret_keys: secretKeys, env_transport: envTransport }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, team_rules: teamRules, health: nodeHealth, secret_keys: secretKeys, env_transport: envTransport, build_commit: buildCommit }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -1336,6 +1339,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           db.run(
             `UPDATE sessions SET env_transport = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,
             [resume_id, envTransport],
+          );
+        }
+        // 2026-10-31 —— #3294：同一手法（自己的 UPDATE，INSERT 字节形状不动）。
+        if (buildCommit) {
+          db.run(
+            `UPDATE sessions SET build_commit = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,
+            [resume_id, buildCommit],
           );
         }
         if (Array.isArray(secretKeys)) {

@@ -6830,6 +6830,9 @@ return Bun.serve({
       const wantedIds = new Set<string>(wanted.map((r) => String(r.node_id)));
       const transportByKey = new Map<string, string | null>();
       const aliasTransport = new Map<string, string | null>();
+      // #3294 —— 与 transport 同一批行里取 build_commit（同一个键、同一套兜底顺序）。
+      const buildByKey = new Map<string, string | null>();
+      const aliasBuild = new Map<string, string | null>();
       if (wanted.length) {
         // 🔴 编号参数不能复用：`?1..?n` 出现两次，而实参给了 2n 个 ——
         // SQLite 只认得 n 个绑定位置，多出来的直接抛错，整条 GET /api/nodes 变 500。
@@ -6839,19 +6842,21 @@ return Bun.serve({
         const ids = wanted.map((r) => String(r.node_id));
         const phA = ids.map((_, i) => `?${i + 1}`).join(",");
         const phB = ids.map((_, i) => `?${ids.length + i + 1}`).join(",");
-        for (const row of db.all<{ node_id: string | null; alias: string | null; network_id: string | null; env_transport: string | null }>(
-          `SELECT node_id, alias, network_id, env_transport FROM sessions
+        for (const row of db.all<{ node_id: string | null; alias: string | null; network_id: string | null; env_transport: string | null; build_commit: string | null }>(
+          `SELECT node_id, alias, network_id, env_transport, build_commit FROM sessions
             WHERE node_id IN (${phA}) OR alias IN (${phB})
             ORDER BY updated_at DESC`,
           ...ids, ...ids,
         )) {
           if (row.node_id && wantedIds.has(row.node_id) && !transportByKey.has(row.node_id)) transportByKey.set(row.node_id, row.env_transport);
+          if (row.node_id && wantedIds.has(row.node_id) && !buildByKey.has(row.node_id)) buildByKey.set(row.node_id, row.build_commit ?? null);
           // alias 只在**同一网络**内兜底：不同网络可以有同名 alias，
           // 跨网络命中会把 A 网的 transport 显示成 B 网那台 —— 这一格是给人做安全决策用的，
           // 宁可显示 null（未知）也不能显示错的值。
           if (row.alias && row.network_id && wantedIds.has(row.alias)) {
             const key = `${row.network_id}|${row.alias}`;
             if (!aliasTransport.has(key)) aliasTransport.set(key, row.env_transport);
+            if (!aliasBuild.has(key)) aliasBuild.set(key, row.build_commit ?? null);
           }
         }
       }
@@ -6864,6 +6869,15 @@ return Bun.serve({
         const byId = aliasTransport.get(`${networkId}|${nodeId}`);
         if (byId !== undefined) return byId;
         return alias ? aliasTransport.get(`${networkId}|${alias}`) ?? null : null;
+      };
+      // #3294 —— 与 envTransportOf 同构：先按 node_id，再按 (network, node_id)，最后按 (network, alias)。
+      const buildCommitOf = (nodeId: string, alias: string | null, networkId: string | null): string | null => {
+        const direct = buildByKey.get(nodeId);
+        if (direct !== undefined) return direct;
+        if (!networkId) return null;
+        const byId = aliasBuild.get(`${networkId}|${nodeId}`);
+        if (byId !== undefined) return byId;
+        return alias ? aliasBuild.get(`${networkId}|${alias}`) ?? null : null;
       };
       // Add a single new field `role: string | null` per row, extracted from
       // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'
@@ -6973,6 +6987,10 @@ return Bun.serve({
           // #1510 —— 管理员要能看出「谁的 transport 未知」才敢打开 strict。
           // 这一格**只读**，不参与任何判定（判定在 env-transport-policy.ts）。
           env_transport: envTransportOf(r.node_id, r.alias, r.network_id),
+          // #3294 —— 「跑的是哪一份字节」。null 有两种成因（节点没报 / 老节点不报这个字段），
+          // 所以配一个 note 说明该怎么读它 —— 单一 null 会把两种成因压成一个。
+          build_commit: buildCommitOf(r.node_id, r.alias, r.network_id),
+          build_note: "null = 这个节点没有上报 build_commit（老版本节点不会报）；空字符串不出现",
           restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });

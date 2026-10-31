@@ -2480,6 +2480,11 @@ try { db.exec("ALTER TABLE sessions ADD COLUMN secret_keys TEXT"); } catch {}
 // the node itself. Appended at EOF like the other post-1.0 columns so the doc
 // and test846 line anchors below it never drift.
 try { db.exec("ALTER TABLE sessions ADD COLUMN env_transport TEXT"); } catch {}
+// 2026-10-31 —— #3294：节点侧的**字节标识**（与 /health 的 git_commit 同一概念，但对象不同）。
+// 只有 version 时，「两个 .169 是不同字节」无法分辨；而 #3178 的批量升级前后都要问这句话。
+// 可为 NULL：老节点不报 ⇒ 「没报」与「没有标识」在这一列上同形，所以读侧必须配一个 reason
+// （见 /api/nodes 的 build_note）。
+try { db.exec("ALTER TABLE sessions ADD COLUMN build_commit TEXT"); } catch {}
 
 // #1510 — hourly count of secret writes that a transport gate WOULD have refused
 // (nodes reporting a plain-HTTP hub link). Log-only until an operator decides.
