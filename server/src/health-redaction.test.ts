@@ -663,6 +663,25 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // #3174 —— stall_count / last_stall_at 原来只有 [startedAt, now] 这个**隐含**窗口：
   // 单独引用它，读者会把「计数器归零」读成「从未卡过」。
   // ⇒ 现在窗口两端跟着读数一起走（event_loop.since / event_loop.observed_at）。
+  // 2026-10-31 —— **0 只能作为读数出现，不能冒充「没测」**（外部复核 ④：
+  // 「『未取』被系统翻译成『正常』——而零恰好是最好看的那个值」）。
+  // event_loop 的计数类字段天然可能是 0（真的没停顿）。所以必须能区分：
+  //   窗口存在 ⇒ 0 是「这段时间内没有停顿」（读数）
+  //   窗口为零长 ⇒ 0 是「还没测」（不是读数）
+  // 断言：窗口两端必须同时存在，且 since ≤ observed_at；窗口为空时**不得**声称 0 是结论。
+  test("zero-valued stall counters carry a window, so 0 is a reading rather than 'not measured'", async () => {
+    const body = await (await fetch(`${BASE}/health`)).json() as any;
+    const el = body.event_loop;
+    const since = Date.parse(el.since), observed = Date.parse(el.observed_at);
+    expect(Number.isFinite(since)).toBe(true);
+    expect(Number.isFinite(observed)).toBe(true);
+    expect(observed).toBeGreaterThanOrEqual(since);
+    if (el.stall_count === 0) {
+      // 0 停顿 + 正长度窗口 = 读数；0 停顿 + 零长度窗口 = 还没测，此时不能当成「没有停顿」
+      expect(observed - since).toBeGreaterThan(0);
+    }
+  });
+
   describe("event_loop carries its own window (no implicit [startedAt, now])", () => {
     test("both ends are present, and they are ordered", async () => {
       const body = await (await fetch(`${BASE}/health`)).json() as any;
