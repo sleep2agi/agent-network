@@ -1398,6 +1398,9 @@
   "agent-network/src/node-subcommand-help-parity.test.ts::node 子命令的三处名单必须覆盖 dispatcher 的全集::dispatcher 的每个子命令都在主帮助里(HIDDEN 除外)": 1,
   "agent-network/src/node-subcommand-help-parity.test.ts::node 子命令的三处名单必须覆盖 dispatcher 的全集::三处不得列出 dispatcher 不认识的子命令(反向:表比实现多也是错)": 1,
   "agent-network/src/node-subcommand-help-parity.test.ts::node 子命令的三处名单必须覆盖 dispatcher 的全集::取集正控:四侧都真的解析出了东西(任一为空会让下面的差集恒绿)": 1,
+  "agent-network/src/non-interactive-prompts.test.ts::#2293 非 TTY（打开且不关闭的 stdin）下不得等待输入::分界没被推宽：给了 --hub 就不再走提问那条路": 1,
+  "agent-network/src/non-interactive-prompts.test.ts::#2293 非 TTY（打开且不关闭的 stdin）下不得等待输入::通用兜底存在：非 TTY 的 ask() 不会把提示串当成功": 1,
+  "agent-network/src/non-interactive-prompts.test.ts::#2293 非 TTY（打开且不关闭的 stdin）下不得等待输入::🔴 `anet init` 没有 --hub：立刻报错并给出 `--hub`，而不是卡住": 1,
   "agent-network/src/normalize-runtime.test.ts::normalizeRuntime — explicit choices are preserved::'codex' / 'codex-sdk' → codex-sdk": 1,
   "agent-network/src/normalize-runtime.test.ts::normalizeRuntime — explicit choices are preserved::'codex' still → codex-sdk (legacy short alias unchanged)": 1,
   "agent-network/src/normalize-runtime.test.ts::normalizeRuntime — explicit choices are preserved::'codex-sdk' still → codex-sdk (not shadowed by the app-server branch)": 1,
@@ -9555,6 +9558,9 @@
   "agent-network/src/node-subcommand-help-parity.test.ts::node 子命令的三处名单必须覆盖 dispatcher 的全集::dispatcher 的每个子命令都在主帮助里(HIDDEN 除外)",
   "agent-network/src/node-subcommand-help-parity.test.ts::node 子命令的三处名单必须覆盖 dispatcher 的全集::三处不得列出 dispatcher 不认识的子命令(反向:表比实现多也是错)",
   "agent-network/src/node-subcommand-help-parity.test.ts::node 子命令的三处名单必须覆盖 dispatcher 的全集::取集正控:四侧都真的解析出了东西(任一为空会让下面的差集恒绿)",
+  "agent-network/src/non-interactive-prompts.test.ts::#2293 非 TTY（打开且不关闭的 stdin）下不得等待输入::分界没被推宽：给了 --hub 就不再走提问那条路",
+  "agent-network/src/non-interactive-prompts.test.ts::#2293 非 TTY（打开且不关闭的 stdin）下不得等待输入::通用兜底存在：非 TTY 的 ask() 不会把提示串当成功",
+  "agent-network/src/non-interactive-prompts.test.ts::#2293 非 TTY（打开且不关闭的 stdin）下不得等待输入::🔴 `anet init` 没有 --hub：立刻报错并给出 `--hub`，而不是卡住",
   "agent-network/src/normalize-runtime.test.ts::normalizeRuntime — explicit choices are preserved::'codex' / 'codex-sdk' → codex-sdk",
   "agent-network/src/normalize-runtime.test.ts::normalizeRuntime — explicit choices are preserved::'codex' still → codex-sdk (legacy short alias unchanged)",
   "agent-network/src/normalize-runtime.test.ts::normalizeRuntime — explicit choices are preserved::'codex-sdk' still → codex-sdk (not shadowed by the app-server branch)",
@@ -16314,7 +16320,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "1a97b5ced38913c910721af1f858d32e3977828b",
+  "commit": "5388cab67d76ef02ad6511ccd22208b9c28976c7",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
