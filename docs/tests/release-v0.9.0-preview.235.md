@@ -40,6 +40,15 @@ channel preview.
 npm install -g @sleep2agi/commhub-server@0.9.0-preview.235
 ```
 
+## Upgrade
+
+```sh
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.235
+```
+
+No schema change. Behaviour change is limited to one read route (see the table above); a Hub that is
+not serving clients on `GET /api/nodes/:id/provider-selection` behaves identically.
+
 ## Rolling back
 
 `0.9.0-preview.234` differs only in the provider-selection state mapping; roll back to it if any
