@@ -298,13 +298,13 @@ describe.skipIf(!isProdMode)("#500 CR2 — HEAD /api/files/:file_id authorizatio
     // — check Content-Type so a future fallback rewrite (e.g. adding
     // "requested resource type: X") does not silently form an oracle
     // while HEAD still returns 200 from that page.
-    expect(res.headers.get("content-type")?.toLowerCase()).toContain("application/json");
+    expect((res.headers.get("content-type") || "").toLowerCase().split(";")[0].trim()).toBe("application/json");
   });
 
   test("HEAD unknown file_id → 404 with same shape as cross-owner (no enumeration signal)", async () => {
     const res = await headAs(userAToken, "0123456789abcdef0123456789abcdef");
     expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")?.toLowerCase()).toContain("application/json");
+    expect((res.headers.get("content-type") || "").toLowerCase().split(";")[0].trim()).toBe("application/json");
   });
 
   test("HEAD anonymous → 401 (auth still required, symmetric with GET)", async () => {

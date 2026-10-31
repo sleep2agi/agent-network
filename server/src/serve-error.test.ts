@@ -25,7 +25,7 @@ describe("#695 fetch exceptions become JSON with the exception's own message", (
     try {
       const res = await fetch(`http://127.0.0.1:${server.port}/mcp`, { method: "POST", body: "{}" });
       expect(res.status).toBe(500);
-      expect(res.headers.get("content-type") ?? "").toContain("application/json");
+      expect((res.headers.get("content-type") ?? "").split(";")[0].trim()).toBe("application/json");
       const json = await res.json() as { error: { code: number; message: string }; ok: boolean };
       expect(json.error.code).toBe(-32603);
       expect(json.error.message).toBe("boom-695-live");

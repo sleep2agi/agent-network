@@ -666,7 +666,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     test("anonymous /health does not leak build identity through headers", async () => {
       const res = await fetch(`${BASE}/health`);
       expect(res.status).toBe(200);
-      expect(res.headers.get("content-type") || "").toContain("application/json");
+      expect((res.headers.get("content-type") || "").split(";")[0].trim()).toBe("application/json");
       // 正文里我们只给 build_identified；头里更不能给指纹
       const leaky = [...res.headers.keys()].filter((h) => /git|commit|build[-_]?(sha|id)/i.test(h));
       expect(leaky).toEqual([]);
