@@ -328,6 +328,8 @@ BLOCKING_RULES: list[dict[str, str]] = [
         # 否则「规则」退化成「描述」，下一次得靠人来解释它（外部复核那条）。
         # 这里指向 SELFTEST_CASES 里的一个用例名；自检会跑它并断言它**不落阻塞**。
         "not_hit_fixture": "adjacent_not_keyset_after_semicolon",
+        # 2026-10-31 —— **服务哪个决定**：答不出的规则迟早变成「有读数无结论」的负担。
+        "serves": "合并前要不要拦下这次改动：本句是否用可碰撞分隔符比较键集",
     },
     {
         "id": "derived_keyset_separator",
@@ -335,6 +337,7 @@ BLOCKING_RULES: list[dict[str, str]] = [
         "not_hit_when": "标识符被重新赋值、或被 push/splice/concat/map/filter 派生（taint 失效）；"
                         "或 join 后没有紧邻的比较运算符；或该文件是测试文件",
         "not_hit_fixture": "taint_invalidated_by_concat",
+        "serves": "同上，但覆盖「键集先派生到标识符、再跨行拼 join」的形状",
     },
 ]
 
@@ -351,7 +354,7 @@ def blocking_rules_complete() -> list[str]:
     bad = []
     by_name = {c[0]: c for c in SELFTEST_CASES}
     for r in BLOCKING_RULES:
-        for k in ("id", "site", "not_hit_when", "not_hit_fixture"):
+        for k in ("id", "site", "not_hit_when", "not_hit_fixture", "serves"):
             if not r.get(k):
                 bad.append(f"{r.get('id', '?')}: missing {k}")
         if r.get("not_hit_when") and len(r["not_hit_when"]) < 20:
@@ -721,6 +724,7 @@ def main() -> int:
         print(f"    · {_r['id']}")
         print(f"        命中  ：{_r['site']}")
         print(f"        不命中：{_r['not_hit_when']}")
+        print(f"        服务于：{_r.get('serves', '（未写 ⇒ 该删）')}")
     print(f"  gate_state     : can_red={can_red} ｜ current={now}  ⇒ 二维都报，否则恒红与假绿同形")
     # 2026-10-31 —— 散文三行 → **带类型的字段**。
     # 差别不在准确度，在能否被检查：散文里「树变」是一个形容词，
