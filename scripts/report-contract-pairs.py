@@ -104,6 +104,13 @@ def copies(files: dict[str, dict[str, Path]]) -> list[dict]:
             "file": name,
             "sides": sorted(shas),
             "sha": shas,
+            # 2026-10-31 —— **红的时候要打印两侧的真实路径**（外部复核 ③：
+            # 「能让失败的仪器自己报原因的场合，就不要用第二台仪器去反推」）。
+            # 之前只打印组名与 sha，人还得自己去找是哪两个文件 ⇒ 那一步就是反推。
+            # 相对路径仅在仓内成立；selftest 用临时目录时必须退化成绝对路径，
+            # 否则「打印路径」这个改进会让 selftest 直接崩（第一版就是这样）。
+            "paths": {g: (str(p.relative_to(REPO)) if str(p).startswith(str(REPO)) else str(p))
+                      for g, p in side.items()},
             "identical": len(set(shas.values())) == 1,
         })
     return out
@@ -319,6 +326,11 @@ def main() -> int:
         print(f"\n⚠ 相对基线**已分叉** {len(diverged)} 组：", file=sys.stderr)
         for c in diverged:
             print(f"    · {c['file']} sha={c['sha']}", file=sys.stderr)
+            for g, rel in sorted(c.get("paths", {}).items()):
+                print(f"        {g}: {rel}", file=sys.stderr)
+            # 逐侧 sha：两侧不同 == 分叉点就在这两个文件之间，不需要再去找
+            for g, h in sorted(c["sha"].items()):
+                print(f"        {g} sha={h}", file=sys.stderr)
         print("  ⇒ 分叉不一定是错（可能是有意解耦），但必须是**显式决定**：", file=sys.stderr)
         print("     要么把两侧改回一致，要么从 COPIED_BASELINE 里删掉这一行并说明理由。", file=sys.stderr)
     if missing:
