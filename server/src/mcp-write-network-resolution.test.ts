@@ -227,6 +227,10 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
     const { tools } = buildHandlers({ userId: U_SINGLE });
     const t = makeTask(A1, "delivered", "x517 g1 reassign_task");
     const r = await call(tools["reassign_task"], { task_id: t, new_alias: A2 });
+    // #3275 批次 2 —— 同变量口径，形状由一次真实调用给出（不是按源码推断）：
+    // 回执带**两端**（reassigned_from / reassigned_to）。少一个，调用方就不知道它是从哪来的；
+    // 而这两端正是「改派」与「新建」在回执上唯一可分的地方。
+    expect(Object.keys(r).sort()).toEqual(["ok", "reassigned_from", "reassigned_to", "task_id"]);
     expect(r.ok).toBe(true);
     expect(taskById(t)?.to_name).toBe(A2);
   });
