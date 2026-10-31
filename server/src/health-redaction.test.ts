@@ -1037,6 +1037,15 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     const probed = await (await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": "dead-entry-check" } })).json() as any;
     const seen = new Set([...Object.keys(plain), ...Object.keys(probed)]);
     const dead = [...PUBLIC_HEALTH_KEYS].filter((k) => !seen.has(k));
+    // 2026-10-31 —— 失败时必须点名（外部复核 ③）：只说 `toEqual([])` 的失败信息里
+    // 没有「是哪几个键」，而修它需要的正是那几个名字。
+    if (dead.length) {
+      throw new Error(
+        `白名单里有 ${dead.length} 个键在任何投影里都不出现（死条目）：${dead.join(", ")}\n` +
+        "  ⇒ 要么从 PUBLIC_HEALTH_KEYS 删掉，要么让 body 真的产出它；" +
+        "留着等于给未来的同名字段预授权。",
+      );
+    }
     expect(dead).toEqual([]);
   });
 
