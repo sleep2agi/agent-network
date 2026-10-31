@@ -108,6 +108,11 @@ jobs:
         # tests/ 与 docs/ 里的 before/after 比较大多是 fail-closed（另一侧是字面量），
         # 所以这条**不阻塞**；它每天把 gate 路径的读数打出来，变红了才有人看。
         run: python3 scripts/check-shell-empty-equality.py
+      # 2026-10-31 —— /tmp 卫生：固定路径必须登记（并发 / 预置 / 残留三条）。
+      - name: fixed /tmp paths are registered (with a reason each)
+        run: |
+          python3 scripts/check-tmp-hygiene.py --selftest
+          python3 scripts/check-tmp-hygiene.py
       - name: orphan checks that were never executed (now wired)
         run: |
           python3 scripts/check-hub-v2-protocol-inputs.py
