@@ -28,6 +28,15 @@ REPO = Path(__file__).resolve().parent.parent
 # expect( <lhs> ).toBe( <rhs> ) / toEqual / toStrictEqual —— 只取单行形式（多行留给人工）
 ASSERT = re.compile(r"expect\((.+?)\)\.(toBe|toEqual|toStrictEqual)\((.+?)\)\s*;?\s*$")
 
+# 2026-10-31 —— 外部复核（原话）：
+#   「`Object.keys(x).every(k => Object.hasOwn(x, k))` **恒真**（实测）
+#     ⇒ 长得像正确形态的逃生口；正确形态必须由负数用例定义。」
+# 这是「键集相等」的常见**假正确写法**：它只证明「迭代到的键在对象里」，而那正是迭代的来源。
+TAUTOLOGY = re.compile(
+    r"Object\.keys\(\s*([A-Za-z_$][\w.$]*)\s*\)\s*\.\s*every\s*\(\s*\(?\s*([A-Za-z_$][\w$]*)\s*\)?\s*=>\s*"
+    r"Object\.hasOwn(?:Property)?\(\s*\1\s*,\s*\2\s*\)\s*\)"
+)
+
 
 def norm(expr: str) -> str:
     """规范化：去掉所有空白与包裹的括号，只比「是不是同一个表达式」。"""
@@ -101,6 +110,23 @@ def selftest(quiet: bool = False) -> int:
     return 0
 
 
+def scan_tautologies() -> list[dict]:
+    """`Object.keys(X).every(k => Object.hasOwn(X, k))` —— 结构上恒真的键集检查。
+
+    它看起来在「确认键都在」，实际只是把 Object.keys 的结果再问了一遍。
+    真正要断的是**与另一个来源相等**，或由负数用例定义（少一个键要红）。
+    """
+    hits: list[dict] = []
+    for p in tracked():
+        if not p.exists():
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for m in TAUTOLOGY.finditer(text):
+            line = text[: m.start()].count("\n") + 1
+            hits.append({"file": str(p.relative_to(REPO)), "line": line, "kind": "tautological_keyset", "text": m.group(0)[:100]})
+    return hits
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
@@ -119,7 +145,8 @@ def main() -> int:
         print(json.dumps({"object": "git ls-files *.test.ts/*.test.mjs", "files": len(files),
                           "single_line_assertions": asserted,
                           "vacuous": [h for h in hits if h["kind"] == "vacuous"],
-                          "determinism": [h for h in hits if h["kind"] == "determinism"]},
+                          "determinism": [h for h in hits if h["kind"] == "determinism"],
+                          "tautological_keyset": scan_tautologies()},
                          ensure_ascii=False, indent=2))
         return 1 if any(h["kind"] == "vacuous" for h in hits) else 0
     print(f"对象：{len(files)} 个测试文件，识别到 {asserted} 条单行断言（阳性对照）")
@@ -134,7 +161,15 @@ def main() -> int:
         for h in vac[:20]:
             print(f"    · {h['file']}:{h['line']}  {h['expr']}", file=sys.stderr)
         return 1
+    taut = scan_tautologies()
+    if taut:
+        print(f"✗ **恒真的键集检查** {len(taut)} 条（Object.keys(X).every(k => hasOwn(X,k))）：", file=sys.stderr)
+        for h in taut[:10]:
+            print(f"    · {h['file']}:{h['line']}  {h['text']}", file=sys.stderr)
+        print("  ⇒ 改写成与**另一个来源**相等，或用负数用例定义（少一个键必须红）。", file=sys.stderr)
+        return 1
     print("✓ 没有「纯取值、两侧同一表达式」的恒真断言")
+    print("✓ 也没有「Object.keys(X).every(k => hasOwn(X,k))」这种恒真的键集检查（本仓 0 处）")
     print("  局限：两侧由同一变量分别序列化、或不同函数但同源 —— 这两种静态查不出，只能人读。")
     return 0
 
