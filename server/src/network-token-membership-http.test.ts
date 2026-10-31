@@ -45,6 +45,21 @@ const GETS = () => [
   `/api/task/${taskId}`, "/api/tasks", "/api/completions", "/api/dm/threads", "/api/requirements",
 ];
 
+// 2026-10-31 —— #3214：上面那张 GETS 清单把这些端点**打过一遍**（只看状态码），
+// 但成功体的形状从未被钉。这里挑一个结构最简单的先钉住：
+//   GET /api/completions ⇒ {completions, ok}，且 completions 是数组（客户端按此分页/渲染）
+describe("GET /api/completions: shape", () => {
+  test("⇒ {completions, ok} 且 completions 为数组", async () => {
+    const r = await fetch(`${base}/api/completions?network_id=${net}`, {
+      headers: { Authorization: `Bearer ${tok.bossUser}` },
+    });
+    expect(r.status).toBe(200);
+    const b = await r.json() as any;
+    expect(Object.keys(b).sort()).toEqual(["completions", "ok"]);
+    expect(Array.isArray(b.completions)).toBe(true);
+  });
+});
+
 beforeAll(async () => {
   const boss = register(`tm_boss_${stamp}`, PW); net = boss.network_id!; ids.boss = boss.user!.user_id; tok.bossUser = boss.token!;
   for (const k of ["exm", "rem", "mia", "stay"]) {
