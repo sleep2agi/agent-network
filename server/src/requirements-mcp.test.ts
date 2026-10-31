@@ -120,7 +120,8 @@ describe("requirements MCP tools", () => {
       const slimRow = slim.requirements.find((r: any) => r.id === id);
       expect(slim.view).toBe("summary");
       expect("description" in slimRow).toBe(false);
-      expect(typeof slimRow.checklist_count.total).toBe("number");
+      expect(Number.isInteger(slimRow.checklist_count.total)).toBe(true);
+      expect(slimRow.checklist_count.total).toBeGreaterThanOrEqual(0);   // 类型不是断言
       expect(typeof slimRow.has_description).toBe("boolean");
       expect((await s.call("requirements_list", { view: "tiny" })).mcpError).toBe(true);
       expect((await s.call("requirements_list", { changes: true })).error).toBe("updated_since_required");

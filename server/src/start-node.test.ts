@@ -228,7 +228,8 @@ describe("start_node — stale-starting reaper (#1448 finding-2)", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toBe("node_already_starting");
     expect(r.existing_request_id).toBe("str_fresh");
-    expect(typeof r.age_ms).toBe("number");
+    expect(Number.isFinite(r.age_ms)).toBe(true);
+    expect(r.age_ms).toBeGreaterThanOrEqual(0);   // 类型不是断言：NaN/负数都是 number
     // old request untouched, no new dispatch
     expect(db.get<any>(`SELECT status FROM node_start_requests WHERE request_id='str_fresh'`)?.status).toBe("delivered");
   });

@@ -231,7 +231,8 @@ describe("ack_create_request HANDLER — B2 audit_log daemon_capability_lied", (
     expect(detail.runtime).toBe("codex-sdk");
     expect(detail.daemon_node_id).toBe(DAEMON_NODE_ID);
     expect(detail.error).toBe("OPENAI_API_KEY unset");
-    expect(typeof detail.acked_at).toBe("number");
+    expect(Number.isFinite(detail.acked_at)).toBe(true);
+    expect(detail.acked_at).toBeGreaterThan(0);    // 时间戳应为正；类型不是断言
   });
 
   test("does NOT write daemon_capability_lied on generic 'failed' ack (status discriminates)", async () => {
