@@ -15,6 +15,9 @@
 #   stage=health_version_mismatch (14) 切换后版本不是目标（多半指错了目录）
 #   stage=rollback_failed      (15)  回滚也没起来 —— 这时候只能人工介入
 #   stage=home_not_found       (16)  COMMHUB_HOME 不存在（拷脚本到别的机器时最常见的错）
+#   stage=pm2_missing          (17)  找不到 pm2 可执行文件（**今天真的发生过**）
+#   stage=switch_failed        (18)  pm2 restart 返回非 0（切换没执行，但旧进程还活着）
+#   stage=unsafe_runtime_path  (19)  运行时目录不在 COMMHUB_HOME 里 —— 拒绝切换（**今天真的发生过**）
 #
 # 判据：**「没成功」与「哪一步没成功」是两句话**；后一句才能决定下一步做什么
 # （registry 缺失 ⇒ 去发版；install 失败 ⇒ 清缓存；health 不通 ⇒ 立刻回滚）。
@@ -43,6 +46,29 @@ done
 stage_fail() { printf 'stage=%s\n  ⇒ %s\n' "$1" "$2" >&2; exit "$3"; }
 say() { printf '  %s\n' "$*"; }
 
+# 2026-10-31 —— 生产上真的踩到了：`pm2` 不在 PATH 时
+#   `HUB_RUNTIME_DIR=… pm2 restart … >/dev/null 2>&1` 静默失败 ⇒ 旧进程继续跑
+#   ⇒ 回读仍是旧版本 ⇒ 脚本报 health_version_mismatch（**指向了错误的 stage**）。
+# 判据：**重定向到 /dev/null 的那一行，必须紧跟一次退出码检查**；
+#       否则「没执行」和「执行了但没生效」在日志里是同一行。
+resolve_pm2() {
+  if command -v pm2 >/dev/null 2>&1; then command -v pm2; return 0; fi
+  local c
+  for c in "$HOME"/.nvm/versions/node/*/bin/pm2 /usr/local/bin/pm2 /usr/bin/pm2; do
+    [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
+pm2_restart() { # $1=runtime dir  ⇒ 成功 0 / 失败非 0（**不**打印，由调用方决定 stage）
+  local dir="$1" out rc
+  out=$(HUB_RUNTIME_DIR="$dir" "$PM2_BIN" restart "$PM2_NAME" --update-env 2>&1); rc=$?
+  if [ $rc -ne 0 ]; then
+    printf '%s\n' "$out" | tail -3 >&2
+  fi
+  return $rc
+}
+
 health_version() {
   local body
   body=$(curl -s --max-time 6 "$HUB_URL/health" 2>/dev/null) || return 1
@@ -52,10 +78,10 @@ health_version() {
 if [ "${SELFTEST:-0}" = "1" ]; then
   # 只自检「stage 枚举是封闭且互不相同」这条契约 —— 真装/真切换不适合在自检里跑。
   fails=0
-  codes="10 11 12 13 14 15 16"
+  codes="10 11 12 13 14 15 16 17 18 19"
   n=$(printf '%s\n' $codes | sort -u | wc -l | tr -d ' ')
-  [ "$n" = "7" ] && echo "✓ selftest stage 退出码 7 个且互不相同" || { echo "✗ stage 退出码有重复"; fails=$((fails+1)); }
-  for s in registry_missing install_failed install_version_mismatch health_unreachable health_version_mismatch rollback_failed home_not_found; do
+  [ "$n" = "10" ] && echo "✓ selftest stage 退出码 10 个且互不相同" || { echo "✗ stage 退出码有重复"; fails=$((fails+1)); }
+  for s in registry_missing install_failed install_version_mismatch health_unreachable health_version_mismatch rollback_failed home_not_found pm2_missing switch_failed unsafe_runtime_path; do
     grep -q "stage=$s" "$0" && echo "✓ selftest 登记了 stage=$s" || { echo "✗ 缺 stage=$s"; fails=$((fails+1)); }
   done
   [ "$fails" -eq 0 ] && { echo "✓ selftest 全部通过"; exit 0; }
@@ -90,8 +116,25 @@ if [ "$INSTALLED" != "$VERSION" ]; then
 fi
 say "install ok：$INSTALLED"
 
+# ③b 路径包含性：运行时目录必须在 COMMHUB_HOME 之内。
+# 2026-10-31 —— 我为了「验证 pm2_missing 这个 stage」用 COMMHUB_HOME=/tmp/fakehub 跑了一次真实执行，
+#   以为换掉 COMMHUB_HOME 就是沙箱；但 restart **不读 COMMHUB_HOME**，它读 RUNTIME_DIR
+#   ⇒ pm2 把**生产**从真目录切到了 /tmp/fakehub/...（版本号相同，所以 /health 一切正常，
+#     唯一能看出来的地方是 `pm2 env 3` 里的 HUB_RUNTIME_DIR）。
+# 判据：**一个沙箱只有覆盖了「会改变全局状态的那一步」才算沙箱**；
+#       换输入变量 ≠ 换输出目的地。这里让「目的地不在允许范围」直接变成 stage 19。
+# ⚠️ 第一版守护写成「RUNTIME_DIR 是否在 COMMHUB_HOME 之内」——那是**恒真**的
+# （RUNTIME_DIR 就是由 COMMHUB_HOME 拼出来的）= 一条保护不了任何东西的断言。
+# 真正要挡的是：**拿一个非生产 home 去重启生产进程**。所以判据换成「home 必须是生产 home」。
+PROD_HOME="${PROD_COMMHUB_HOME:-$HOME/.commhub}"
+if [ "$COMMHUB_HOME" != "$PROD_HOME" ] && [ "${ALLOW_NONPROD_HOME:-0}" != "1" ]; then
+  stage_fail unsafe_runtime_path "COMMHUB_HOME=$COMMHUB_HOME 不是生产 home（$PROD_HOME）⇒ 拒绝切换：restart 不读 COMMHUB_HOME，它会把这个**生产进程**指到别的目录去。要演练请显式 ALLOW_NONPROD_HOME=1" 19
+fi
+
 # ④ 切换
-HUB_RUNTIME_DIR="$RUNTIME_DIR" pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1
+PM2_BIN="$(resolve_pm2)" || stage_fail pm2_missing "PATH 里没有 pm2，常见位置也没找到 ⇒ 切换**没有执行**（旧进程仍在跑，无需回滚）。把 pm2 所在 bin 加进 PATH 后重试" 17
+HUB_RUNTIME_DIR="$RUNTIME_DIR" "$PM2_BIN" restart "$PM2_NAME" --update-env >/dev/null 2>&1 \
+  || stage_fail switch_failed "$PM2_BIN restart $PM2_NAME 返回非 0（切换没发生；旧进程仍在跑）。看 pm2 logs $PM2_NAME" 18
 sleep 9
 
 # ⑤ 回读；失败立刻回滚到切换前的版本
@@ -103,7 +146,7 @@ if [ -z "$NEWV" ]; then
   # 否则「gate 通过 + 起不来」就变成一次需要人值守的窗口。
   if [ -n "$CURRENT" ]; then
     say "新版本起不来 ⇒ 自动回滚到 $CURRENT"
-    HUB_RUNTIME_DIR="$COMMHUB_HOME/runtime-${CURRENT//./-}" pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1
+    pm2_restart "$COMMHUB_HOME/runtime-${CURRENT//./-}" || true   # 失败会在下面的回读里体现
     sleep 8
     BACK=$(health_version)
     if [ "$BACK" = "$CURRENT" ]; then
@@ -115,7 +158,7 @@ if [ -z "$NEWV" ]; then
 fi
 if [ "$NEWV" != "$VERSION" ]; then
   if [ -n "$CURRENT" ]; then
-    HUB_RUNTIME_DIR="$COMMHUB_HOME/runtime-${CURRENT//./-}" pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1
+    pm2_restart "$COMMHUB_HOME/runtime-${CURRENT//./-}" || true   # 失败会在下面的回读里体现
     sleep 8
     BACK=$(health_version)
     if [ "$BACK" != "$CURRENT" ]; then
