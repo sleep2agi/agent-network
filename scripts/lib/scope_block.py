@@ -62,11 +62,23 @@ def _measured_on() -> str:
 # 少了它，「本仓 0 命中」会被当成「线上安全」——而那是两件事。
 VERIFIED_ON = ("local", "ci", "production", "unknown")
 
+# 2026-10-31 —— **证据的域必须与命题同域**（外部复核 ②：
+# 「『系统有没有导出 btime』的域是内核导出，源码 grep 是文本域 ⇒ 跨域 ⇒ 必然 0；
+#   三例都是跨域取证，三例都返回 0，而 0 读起来像『不存在』。」）
+# ⇒ 每个读数自报「这段证据来自哪个域」，跨域引用必须显式，且结论强度重置。
+EVIDENCE_DOMAINS = ("source", "system", "wire", "artifact")
+
 
 def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_rule: str,
                 failure_mode: str, failure_mode_how: str,
                 verified_on: str = "local", domain_count: int | None = None,
-                domain_source: str = "") -> None:
+                domain_source: str = "", evidence_domain: str = "source",
+                cross_domain: str = "") -> None:
+    """evidence_domain —— 见 EVIDENCE_DOMAINS 的注释。
+
+    cross_domain 非空 = 这条读数**换了域**（例如用源码 grep 推线上行为）；
+    此时必须写清「换的是哪一段」，因为跨域结论的强度要重置，不能与同域读数并列。
+    """
     """domain_count / domain_source —— 2026-10-31 外部复核 ④：
 
     「定义域也是一个集合，就必须有分母和来源；手写的定义域基数会在下一次重构后
@@ -91,6 +103,8 @@ def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_
         raise SystemExit("内部错误：failure_mode_how 必填（靠什么变响 / 为什么不会响）")
     if not domain_source or not str(domain_source).strip():
         raise SystemExit("内部错误：domain_source 必填（那个数是哪来的：git ls-files / rglob / 显式清单）")
+    if evidence_domain not in EVIDENCE_DOMAINS:
+        raise SystemExit(f"内部错误：evidence_domain 必须是 {EVIDENCE_DOMAINS} 之一，收到 {evidence_domain!r}")
     print("SCOPE")
     print(f"  covers         : {covers}")
     print(f"  does_not_cover : {does_not_cover}")
@@ -100,6 +114,8 @@ def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_
     print(f"  domain_count   : {domain_count}（{domain_source}）")
     print(f"  measured_on    : {_measured_on()}")
     print(f"  verified_on    : {verified_on}（这个读数在哪里成立；local ≠ CI ≠ 线上）")
+    print(f"  evidence_domain: {evidence_domain}"
+          + (f"  ⚠ 跨域：{cross_domain}（结论强度重置，不能与同域读数并列）" if cross_domain else ""))
 
 
 def selftest() -> int:

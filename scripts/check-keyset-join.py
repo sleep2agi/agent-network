@@ -777,6 +777,9 @@ def main() -> int:
             "covers": "git 跟踪的非测试源文件里、源码可见的 .sort().join(...) 键集比较",
             "does_not_cover": ["运行期拼出来的比较", "其它仓库", "测试文件", "动态语言特性"],
             "scan_domain": {str(k): int(v) for k, v in sorted(_ext.items())},
+            # 2026-10-31 —— **证据的域**：本门读的是**文本**（源码），不是运行时、不是线上产物。
+            # 跨域取证的典型误用：用它去推「线上有没有某行为」——那需要 wire/artifact 域的读数。
+            "evidence_domain": "source",
             "measured_on": _measured_on(Path(__file__).resolve().parent.parent),
             "measured_by": {
                 "script": Path(__file__).name,
@@ -906,6 +909,8 @@ def main() -> int:
                 failure_mode_how="命中即 exit 1；规则跑不起来（阳性对照 0）则 exit 2 而不是绿",domain_count=len(files),
                 domain_source="git ls-files（按 SRC 扩展名过滤，排除 EXCLUDE_SEGMENTS）",
                 verified_on="local",
+                evidence_domain="source",
+                cross_domain="",
             )
         except Exception:
             pass

@@ -29,7 +29,10 @@ PRODUCER = REPO / "scripts" / "check-keyset-join.py"
 REQUIRED = [
     "instrument", "gate_state", "counts", "covers", "does_not_cover",
     "scan_domain", "measured_on", "measured_by", "invalidates_on", "consumers",
+    # 2026-10-31 —— 「证据的域必须与命题同域」：不加这个键，跨域引用就无法被发现
+    "evidence_domain",
 ]
+EVIDENCE_DOMAINS = {"source", "system", "wire", "artifact"}
 INVALIDATE_TYPES = {"ref_dirty", "behavior", "domain"}
 
 
@@ -84,6 +87,12 @@ def check(doc: dict) -> list[str]:
     if not cons:
         gaps.append("consumers 为空 ⇒ 按口径这是「不知道有没有人用」，不是「没人用」")
 
+    ed = doc.get("evidence_domain")
+    if not ed:
+        gaps.append("evidence_domain 为空 ⇒ 读者不知道这段证据来自哪个域（跨域取证只会返回 0）")
+    elif ed not in EVIDENCE_DOMAINS:
+        gaps.append(f"evidence_domain 不在闭集：{ed}")
+
     dom = doc.get("scan_domain") or {}
     if not dom:
         gaps.append("scan_domain 为空 ⇒ 「0 处」会被读成「全仓没有」")
@@ -94,7 +103,7 @@ def check(doc: dict) -> list[str]:
     return gaps
 
 
-SELFTEST_EXPECTED = 6
+SELFTEST_EXPECTED = 7
 
 
 def _good_doc() -> dict:
@@ -110,6 +119,7 @@ def _good_doc() -> dict:
                         "env": {"python": "3.11", "os": "Linux"}},
         "invalidates_on": [{"id": "ref_dirty", "type": "ref_dirty", "check": "git status --porcelain"}],
         "consumers": ["check-scope-json.py"],
+        "evidence_domain": "source",
     }
 
 
@@ -134,6 +144,8 @@ def selftest(quiet: bool = False) -> int:
     cases.append(("invalidates_on.type 越界 ⇒ 命中", d, "封闭集合"))
     d = _good_doc(); d["counts"]["scanned_files"] = 0
     cases.append(("scanned_files=0 ⇒ 命中（0 不是结论）", d, "scanned_files"))
+    d = _good_doc(); d["evidence_domain"] = "somewhere"
+    cases.append(("evidence_domain 越界 ⇒ 命中（跨域取证只会返回 0）", d, "evidence_domain"))
 
     for label, doc, expect in cases:
         ran += 1
