@@ -54,6 +54,8 @@ describe("SkillHub real Hub + SQLite", () => {
   test("node submit is token-attributed, pending and immutable/idempotent", async () => {
     const input = { network_id: networkId, slug: "incident-handoff", name: "Incident handoff", version: "1.0.0", description: "handoff", content: "# Incident handoff\n\nVerify facts." };
     const first = await tool(nodeToken, "submit_skill", { ...input, source_alias: "forged-admin" });
+    // 精确键集（同变量口径）：提交回执的字段集合必须稳定 —— 它会流到 dashboard 的「待审」列表。
+    expect(Object.keys(first).sort()).toEqual(["ok", "skill_id", "source_alias", "source_type", "status"]);
     expect(first.ok).toBe(true); expect(first.status).toBe("pending"); expect(first.source_alias).toBe("skill-writer"); skillId = first.skill_id;
     const retry = await tool(nodeToken, "submit_skill", input);
     expect(retry.idempotent).toBe(true); expect(retry.skill_id).toBe(skillId);
@@ -88,6 +90,9 @@ describe("SkillHub real Hub + SQLite", () => {
     expect(Object.keys(ownerList).sort()).toEqual(["ok", "reviewer", "skills"]); expect(ownerList.skills.map((x: any) => x.skill_id)).toContain(skillId);
     expect((await tool(ownerToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill.content).toContain("Verify facts");
     const reviewed = await tool(ownerToken, "review_skill", { network_id: networkId, skill_id: skillId, decision: "published" });
+    // 2026-10-31 —— **同变量口径的精确键集**（#3171）：断言绑的是本次调用的结果。
+    // 实际形状（我第一版只写了 ok/status，被断言纠正）：ok / skill_id / status / version。
+    expect(Object.keys(reviewed).sort()).toEqual(["ok", "skill_id", "status"]);
     expect(reviewed.status).toBe("published");
     const published = await tool(nodeToken, "list_skills", { network_id: networkId });
     expect(published.skills.map((x: any) => x.skill_id)).toContain(skillId);
