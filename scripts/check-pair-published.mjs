@@ -51,28 +51,55 @@ export function checkPair({ network, node }, lookup) {
 
 // 2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`（否则「绿」与「什么都没查」同形）。
 // 这门的判据是纯函数 `checkPair`，所以自检直接喂合成 lookup：三种输入必须各自命中。
+
+/**
+ * 把「两半都在 / 顺序问题 / 发布失败」拆开 —— 三者的处置完全不同。
+ *
+ *   ok       两半都在
+ *   ordering 本次发的这半**已在 registry 上**，缺的只是对面那半
+ *            （先 node 后 CLI 的发布顺序使然：node 那半收尾时 CLI 还没发）
+ *   publish  本次发的这半**自己就缺** ⇒ 真的没发出去
+ *
+ * 为什么必须拆：2026-10-31 实发 `.171` 时，publish 步骤成功、registry 上查得到，
+ * 但这条断言仍然 exit 1 —— 于是**每一次配对发布都会在 jobs 列表里留一个红**。
+ * 红得永远合理的地方，就没有红。这与 test-inventory 那 277 次 0 job 是同一个病。
+ */
+export function classify(problems, mine) {
+  if (problems.length === 0) return 'ok';
+  if (!mine) return 'publish';                       // 认不出本次发的哪个 ⇒ 不猜，按失败处理
+  const missing = problems.map((x) => (x.startsWith('agent-node@') ? 'agent-node' : 'agent-network'));
+  return missing.includes(mine) ? 'publish' : 'ordering';
+}
+
 function selftest() {
+  // 每条都写明「本次发的是哪个包」—— 同一个 problems，mine 不同则处置不同。
   const cases = [
     ["两半都在", { network: '0.9.9', node: '0.2.9' },
-      (spec) => spec.includes('agent-network@') ? '0.9.9' : '0.2.9', true, 0],
-    ["node 那半没发", { network: '0.9.9', node: '0.2.9' },
-      (spec) => spec.includes('agent-network@') ? '0.9.9' : null, false, 1],
-    ["CLI 那半没发", { network: '0.9.9', node: '0.2.9' },
-      (spec) => spec.includes('agent-network@') ? null : '0.2.9', false, 1],
+      (spec) => spec.includes('agent-network@') ? '0.9.9' : '0.2.9', 'agent-node', true, 0, 'ok'],
+    // 发 node，缺 CLI ⇒ 顺序（先 node 后 CLI）
+    ["发 node、缺 CLI", { network: '0.9.9', node: '0.2.9' },
+      (spec) => spec.includes('agent-network@') ? null : '0.2.9', 'agent-node', false, 1, 'ordering'],
+    // 发 CLI，缺 node ⇒ 也是对面那半缺失（处置同样是「去 dispatch 它」）
+    ["发 CLI、缺 node", { network: '0.9.9', node: '0.2.9' },
+      (spec) => spec.includes('agent-network@') ? '0.9.9' : null, 'agent-network', false, 1, 'ordering'],
+    // 🔴 本次发的那个包自己就缺 ⇒ 不是顺序问题，是真没发出去
+    ["发 node、而 node 自己没出去", { network: '0.9.9', node: '0.2.9' },
+      (spec) => spec.includes('agent-network@') ? '0.9.9' : null, 'agent-node', false, 1, 'publish'],
   ];
   let fails = 0;
-  for (const [label, pair, lookup, wantOk, wantProblems] of cases) {
+  for (const [label, pair, lookup, mine, wantOk, wantProblems, wantKind] of cases) {
     const r = checkPair(pair, lookup);
-    const ok = r.ok === wantOk && r.problems.length === wantProblems;
-    if (!ok) { fails += 1; console.error(`✗ selftest ${label}: ok=${r.ok} problems=${r.problems.length}（期望 ${wantOk}/${wantProblems}）`); }
-    else console.log(`✓ selftest ${label} ⇒ ok=${r.ok} problems=${r.problems.length}`);
+    const kind = classify(r.problems, mine);
+    const ok = r.ok === wantOk && r.problems.length === wantProblems && kind === wantKind;
+    if (!ok) { fails += 1; console.error(`✗ selftest ${label}: ok=${r.ok} problems=${r.problems.length} kind=${kind}（期望 ${wantOk}/${wantProblems}/${wantKind}）`); }
+    else console.log(`✓ selftest ${label} ⇒ ok=${r.ok} kind=${kind}`);
   }
   // 空对（读不到常量）必须自己说「读不到」，不能当成 ok
   const empty = readPair('export const NOTHING = 1');
   if (empty !== null) { fails += 1; console.error('✗ selftest 读不到常量时应返回 null'); }
   else console.log('✓ selftest 读不到常量 ⇒ null（不是 ok）');
   if (fails) { console.error(`✗ selftest ${fails} 例失败`); return 1; }
-  console.log('✓ selftest 3/3 + 空对一例通过');
+  console.log('✓ selftest 4/4 + 空对一例通过');
   return 0;
 }
 
@@ -102,10 +129,18 @@ if (isMain) {
       const missing = result.problems.map((x) => (x.startsWith('agent-node@') ? 'agent-node' : 'agent-network'));
       const onlyCounterpart = missing.length === 1 && !missing.includes(mine);
       if (onlyCounterpart) {
-        console.error(`  ⓘ 本次发布的是 ${mine}，它已在 registry 上；缺的是 ${missing[0]} —— **可能是顺序**，不是发布失败。`);
-        console.error('    下一步：确认对面那半的 job 是否还在「发后核实」轮询中；两半应当**顺序** dispatch（先 node 后 CLI）。');
+        console.error(`  ⓘ 本次发布的是 ${mine}，它已在 registry 上；缺的是 ${missing[0]} —— **是顺序**，不是发布失败。`);
+        console.error('    下一步：dispatch 对面那半（先 node 后 CLI）；两半的顺序由 release-pair-core 复查。');
       }
     }
   }
-  process.exit(result.ok ? 0 : 1);
+  // 🔴 只有 ok 与 ordering 才 exit 0。
+  //    ordering 用 ::warning:: 留在 Actions 页上（不吞掉），因为「半边」这个事实仍需要被看见；
+  //    但它不再是红 —— 在先 node 后 CLI 的顺序下，这条断言**永远**会在 node 那一轮红。
+  const kind = classify(result.problems, mineFromTarball(process.env.TARBALL));
+  if (kind === 'ordering') {
+    console.log(`::warning::half pair (ordering): agent-network@${pair.network} + agent-node@${pair.node} —— 缺的是对面那半，dispatch 它`);
+    process.exit(0);
+  }
+  process.exit(kind === 'ok' ? 0 : 1);
 }
