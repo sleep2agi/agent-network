@@ -31,6 +31,21 @@ GATE_PATTERNS = ("check-*.py", "report-*.py", "check-*.sh")
 # 未接线的门必须在这里给出理由（空着 = 没有例外）。
 # 理由必须以 [tag] 开头，tag 取自 UNWIRED_TAGS —— 散文负责说服人，tag 负责让机器能分支。
 UNWIRED_TAGS = ("report-only", "interactive", "needs-host", "excluded")
+
+
+def derived_tag(rel: str) -> str | None:
+    """从**文件名**推出的标签（能推就不许手填）。
+
+    2026-10-31 —— 外部复核：「桶得由条目本身决定，不由作者指派；
+    否则作者在创建那一刻就能把本该 actionable 的写成 note，而迁移计数一次都不触发。」
+
+    本仓可推的一半：`report-*` 一律是读数报告（它的名字就是它做的事）。
+    ⇒ 这类门手填成别的标签 ⇒ 红（作者不能重分类）。
+    推不出来的（check-*）才允许声明，且必须给 tag。
+    """
+    if rel.rsplit("/", 1)[-1].startswith("report-"):
+        return "report-only"
+    return None
 KNOWN_UNWIRED: dict[str, str] = {
     # 2026-10-31 —— 外部复核：「只校验『非空字符串』，于是长散文用质量掩盖了缺席。
     # 建议每个理由必带一个封闭枚举的**结构标签**」。⇒ 每条理由必须以 [tag] 开头，
@@ -150,6 +165,11 @@ def main(argv: list[str]) -> int:
     for rel, why in KNOWN_UNWIRED.items():
         if not any(why.startswith(f"[{t}]") for t in UNWIRED_TAGS):
             bad_tag.append((rel, why[:40]))
+            continue
+        declared = next(t for t in UNWIRED_TAGS if why.startswith(f"[{t}]"))
+        derived = derived_tag(rel)
+        if derived is not None and declared != derived:
+            bad_tag.append((rel, f"声明 [{declared}] 与可推导的 [{derived}] 不一致（分类权不在作者手里）"))
     # 白名单本身也要能对账：登记了却已经接线，说明白名单是过期照片
     stale_allow = [k for k in KNOWN_UNWIRED if all(k != str(p.relative_to(REPO)) for p in unwired)]
 
