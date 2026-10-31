@@ -127,8 +127,15 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(isSha || value === null).toBe(true);
     if (value !== null) expect(value).not.toBe(body.version);
     // dirty 位必须与 sha 成对，否则 vantage 会把脏树读数当成提交。
-    expect(typeof body.git_dirty).toBe("boolean");
-    if (value === null) expect(body.git_dirty).toBe(false);
+    //
+    // 2026-10-31 —— 这里原来写的是 `if (value === null) expect(git_dirty).toBe(false)`。
+    // 它与服务端的契约**相反**：server.ts 是 `git_dirty: BOOT_GIT.commit ? BOOT_GIT.dirty : null`
+    // （「commit 为空时必须是 null（不是 false）」）。
+    // 而本地跑永远走不到这一支 —— 因为仓库里**有** .git ⇒ value 非空 ⇒ 那条断言一次都没执行过。
+    // CI 的容器镜像只 COPY 源码（没有 .git）⇒ 走 null 支 ⇒ 立刻红（run 41140921488）。
+    // ⇒ 两个环境各只能看到一半，所以这里必须把**两条分支都写成断言**，而不是只写走到的那条。
+    if (value === null) expect(body.git_dirty).toBeNull();
+    else expect(typeof body.git_dirty).toBe("boolean");
   });
 
   // 2026-10-31 —— 拒绝计数的 **must-fire**：注入一次真实拒绝，看它跳不跳。
@@ -666,8 +673,16 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
       // 2026-10-31 —— 镜像必须针对**同一个属性在另一种条件下确实存在**，
       // 而不是「这个响应是 JSON」（那只排除了取错对象）。
       const authed = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
-      expect(typeof authed.git_commit).toBe("string");   // 同一 URL、登录态下确实有指纹
-      // ⇒ 于是「匿名不带」才是一个有对照的读数
+      // 同一 URL、登录态下**这个字段确实存在**（值可能是 null：容器镜像里没有 .git）。
+      // 2026-10-31 —— 原来这里写 `typeof authed.git_commit === "string"`：只在**有 .git** 的环境成立，
+      // 于是它在本地永远绿、在 CI 容器里永远红（run 41140921488 的两条失败之一）。
+      // 对照的强度取决于环境，这一点必须写出来而不是假装验过：
+      expect("git_commit" in authed).toBe(true);
+      if (authed.build_identified === true) {
+        expect(typeof authed.git_commit).toBe("string");   // 有指纹 ⇒ 匿名侧确实不带，这才是有对照的读数
+      } else {
+        expect(authed.git_commit).toBeNull();             // 没有指纹 ⇒ 「匿名不带」在这一轮**没有对照**
+      }
     });
 
     test("version carries its role in the payload (a label, not a fingerprint)", async () => {
