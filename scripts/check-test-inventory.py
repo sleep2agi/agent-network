@@ -556,6 +556,13 @@ def main() -> int:
             print(f"    …（共 {len(new_only)} 条）")
     else:
         print("✓ 测试清单与基线一致：无消失、无新增、无重名")
+    # 2026-10-31 —— **自产摆据必须自报身份**（外部复核 ①：
+    # 「用被测对象的出口去生成它的入口输入，等于让它自己出题自己判卷；
+    #   它会稳定地给自己满分，因为出题时它已经把自己答不出的题删掉了。」）。
+    # 本仓的基线正是 `--update` 自己写的 ⇒ 它只能发现**变化**，不能发现**从一开始就漏掉的**。
+    print("  baseline_source: 自产（`--update` 由本脚本写出）")
+    print("                   ⇒ 它证明「没有变化」，不证明「没有长期遗漏」；")
+    print("                     后者只能靠与另一来源对账（例如 `bun test --listTests` 或 CI 实跑条数）。")
     if baseline_dynamic is not None and dynamic < baseline_dynamic:
         print(f"· dynamic 从 {baseline_dynamic} 降到 {dynamic}（好事，落基线：--update）")
     return 0
