@@ -77,3 +77,22 @@ describe("redactUpstreamText", () => {
     expect(redactUpstreamText(msg)).toBe(msg);
   });
 });
+
+// 2026-10-31 —— 两条都是**实测发现的**，不是预防性写的。
+describe("截断与匹配的相互作用", () => {
+  test("截断点落在打码标记内部时，**标记整体保留**（不是退到它前面）", () => {
+    // 196 个 a + `sk-ABCDEFGHIJKLMNOP`：打码后 `***` 恰好跨在第 200 字节上。
+    // 原实现把切点退到 `***` 之前 ⇒ 输出 `...sk-` —— 标记没了、前缀还在。
+    const out = redactUpstreamText("a".repeat(196) + "sk-ABCDEFGHIJKLMNOP");
+    expect(out).toContain("sk-***");          // 标记完整
+    expect(out).not.toContain("ABCD");        // 密钥体不在
+    expect(out).not.toMatch(/sk-[A-Za-z0-9]/); // 也不留「像密钥的开头」
+  });
+
+  test("密钥紧贴字母（无词边界）也要被打码", () => {
+    // `\b` 在 `x` 与 `s` 之间不成立 ⇒ 原实现整条不匹配，原样落盘。
+    const out = redactUpstreamText("x".repeat(10) + "sk-ABCDEFGHIJKLMNOP");
+    expect(out).toContain("sk-***");
+    expect(out).not.toContain("ABCD");
+  });
+});

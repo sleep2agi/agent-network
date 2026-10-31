@@ -17,7 +17,10 @@ const MAX_LEN = 200;
 
 const PATTERNS: Array<[RegExp, string]> = [
   // 常见密钥前缀（与 opencode-v2-catalog 的 SECRET 同源，但这里只用于日志打码）
-  [/\b(sk-|gh[pousr]_|github_pat_|xox[baprs]-|AKIA|AIza|ya29\.|glpat-)[A-Za-z0-9_\-]{6,}/g, "$1***"],
+  // 2026-10-31 —— 去掉前缀上的 `\b`：`...aaaask-ABCDEF` 这种「密钥紧贴字母」的形态下
+  // `\b` 不成立（前一字符是字母）⇒ **整条不会被打码**，而截断会把它的前缀留下来。
+  // 误伤（把普通词多打几个 ***）比漏掉一个真密钥便宜得多。
+  [/(sk-|gh[pousr]_|github_pat_|xox[baprs]-|AKIA|AIza|ya29\.|glpat-)[A-Za-z0-9_\-]{6,}/g, "$1***"],
   // Authorization 头里的凭据
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._\-+/=]{8,}/gi, "$1 ***"],
   // URL 查询参数里的敏感值
@@ -50,7 +53,11 @@ export function redactUpstreamText(input: unknown, maxLen: number = MAX_LEN): st
     let cut = maxLen;
     for (let i = text.indexOf("***"); i >= 0; i = text.indexOf("***", i + 1)) {
       if (i < cut && cut < i + 3) {
-        cut = i;   // 退到标记起点；其前缀（如 `sk-`）属于标记的一部分，一并退掉
+        // 2026-10-31 —— **把标记整体保留**，而不是退到它前面。
+        //   原来写 `cut = i`，输出就变成 `...sk-` ：标记没了、前缀还在 ——
+        //   既丢了「这里曾有凭据」的信号，又留下一个像密钥的开头。
+        //   ⇒ 退到标记**之后**（多留 ≤2 字节，长度上界本来就有后缀空间）。
+        cut = i + 3;
         break;
       }
     }
