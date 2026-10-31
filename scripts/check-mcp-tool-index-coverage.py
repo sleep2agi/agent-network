@@ -79,7 +79,81 @@ def indexed_tools(root: Path, rel: str) -> set[str]:
     return found
 
 
+SELFTEST_EXPECTED = 5
+
+
+def selftest(quiet: bool = False) -> int:
+    """2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`。
+
+    本门的判据有两半都容易假绿：
+      ① 索引区**只认表格第一格**（散文里的反引号不是工具名）
+      ② 注册点解析不出 ⇒ 分母塌了，必须 exit 2 而不是「没有差集 ⇒ 通过」
+    自检在临时目录里造一份最小树，逐条命中这几种形状。
+    """
+    import tempfile
+    fails, ran = 0, 0
+
+    def case(label: str, got, want, ) -> None:
+        nonlocal fails, ran
+        ran += 1
+        if got != want:
+            fails += 1
+            print(f"✗ {label}: 期望 {want!r}，实际 {got!r}", file=sys.stderr)
+        elif not quiet:
+            print(f"✓ {label}")
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "server" / "src").mkdir(parents=True)
+        # 两个注册点：一个 server.tool(...)，一个 server.registerTool(...)
+        (root / TOOLS_TS).write_text(
+            'server.tool("alpha_tool", "d", {}, async () => ({}));\n'
+            'server.registerTool("beta_tool", { description: "d" }, async () => ({}));\n',
+            encoding="utf-8",
+        )
+        case("注册点解析出两个", registered_tools(root), {"alpha_tool", "beta_tool"})
+
+        # 索引区：表格第一格才算；散文里的反引号不算
+        doc = (
+            "Intro with `not_a_tool` in prose.\n\n"
+            "| Tool | What |\n|---|---|\n"
+            "| [`alpha_tool`](#alpha) | a |\n"
+            "| `beta_tool` | b |\n"
+            "\n---\n\n## detail\n| `alpha_tool` | 重复出现的小节，不算索引 |\n"
+        )
+        (root / "docs").mkdir()
+        rel = "docs/mcp-tools.md"
+        (root / rel).write_text(doc, encoding="utf-8")
+        case("索引只认表格第一格且截止到 ---", indexed_tools(root, rel), {"alpha_tool", "beta_tool"})
+
+        # 散文里的名字必须没有被收进来（否则「索引列全了」会被散文蒙混）
+        listed = indexed_tools(root, rel)
+        case("散文里的反引号不算工具名", "not_a_tool" in listed, False)
+
+        # 分母塌了：没有注册点 ⇒ registered_tools 为空（调用方据此 exit 2）
+        (root / TOOLS_TS).write_text("// no registrations here\n", encoding="utf-8")
+        case("没有注册点 ⇒ 空集（分母塌了，不是通过）", registered_tools(root), set())
+
+        # index_region 在没有 --- 时返回全文（不能因为缺分隔线就当成空索引区）
+        case("缺 --- 时索引区退回全文", index_region("| `a` | x |"), "| `a` | x |")
+
+    if ran != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
     registered = registered_tools(root)
