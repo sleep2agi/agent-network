@@ -375,6 +375,27 @@ describe("GET /api/providers", () => {
       //   ⇒ A、B 两条向量改变的是同一个出口量」）。
       // 对应到本路由：五个 state 如果**去掉 state 字段**就分不出来，那 state 就是唯一信息源，
       // 载荷只是标签的复读 —— 秩 = 1。判据：把 state 删掉之后，五个载荷仍两两可区分。
+      // 2026-10-31 —— **从属字段在主条件为假时不得有值**（外部复核 (d)：
+      // 「从属字段在主字段为假时不得有值；不校验就会存下不可能的状态，
+      //   后来者无法区分它与历史遗留，只会当成有效读数。」）
+      // 本路由的三个从属键：
+      //   error            ⟺ state === "failed"
+      //   observed_status  ⟺ state === "unknown"
+      //   hint             ⟺ state ∈ {never_switched, unknown}（pending/applied 不该有 hint）
+      const has = (o: any, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+      const cases: Array<[string, any, { error: boolean; observed_status: boolean; hint: boolean }]> = [
+        ["never_switched", a.body, { error: false, observed_status: false, hint: true }],
+        ["pending", b.body, { error: false, observed_status: false, hint: false }],
+        ["applied", c.body, { error: false, observed_status: false, hint: false }],
+        ["failed", d.body, { error: true, observed_status: false, hint: false }],
+        ["unknown", e.body, { error: false, observed_status: true, hint: true }],
+      ];
+      for (const [label, body, want] of cases) {
+        expect({ label, error: has(body, "error") }).toEqual({ label, error: want.error });
+        expect({ label, observed: has(body, "observed_status") }).toEqual({ label, observed: want.observed_status });
+        expect({ label, hint: has(body, "hint") }).toEqual({ label, hint: want.hint });
+      }
+
       const strip = (b: any) => { const { state: _s, ...rest } = b; return JSON.stringify(rest); };
       const five = [a, b, c, d, e].map((r) => strip(r.body));
       expect(new Set(five).size).toBe(5);   // 两两不同 ⇒ 秩 ≥ 2，state 不是唯一维度
