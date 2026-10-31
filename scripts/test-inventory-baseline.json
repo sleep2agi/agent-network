@@ -6054,6 +6054,11 @@
   "server/src/event-loop-lag.test.ts::event-loop-lag: recordGap::超过阈值的 tick 记一条停顿，带 stall_ms / rss_mb / at": 1,
   "server/src/event-loop-lag.test.ts::event-loop-lag: startEventLoopLagMonitor::真实停顿会打一行 [commhub stall] 且带 rss": 1,
   "server/src/event-loop-lag.test.ts::event-loop-lag: startEventLoopLagMonitor::阈值 0 时不打日志，但仍然计数": 1,
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::同一个节点连续 N 次 ⇒ 累加（这是「这一台从来不吃活」的证据形态）": 1,
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::按节点分桶：两个节点各一条 ⇒ 各自 1，总数 2": 1,
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::桶按名字排序且空桶不出现 —— 读数要能直接对比两次快照": 1,
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 must-fire：未消费就过期的任务 ⇒ 该节点计数 +1": 1,
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 负数用例：**已消费**后过期的任务 ⇒ 计数不动（那不是「没人取」）": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set": 1,
@@ -14236,6 +14241,11 @@
   "server/src/event-loop-lag.test.ts::event-loop-lag: recordGap::超过阈值的 tick 记一条停顿，带 stall_ms / rss_mb / at",
   "server/src/event-loop-lag.test.ts::event-loop-lag: startEventLoopLagMonitor::真实停顿会打一行 [commhub stall] 且带 rss",
   "server/src/event-loop-lag.test.ts::event-loop-lag: startEventLoopLagMonitor::阈值 0 时不打日志，但仍然计数",
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::同一个节点连续 N 次 ⇒ 累加（这是「这一台从来不吃活」的证据形态）",
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::按节点分桶：两个节点各一条 ⇒ 各自 1，总数 2",
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::桶按名字排序且空桶不出现 —— 读数要能直接对比两次快照",
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 must-fire：未消费就过期的任务 ⇒ 该节点计数 +1",
+  "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 负数用例：**已消费**后过期的任务 ⇒ 计数不动（那不是「没人取」）",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set",
@@ -16364,7 +16374,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "63d9348d6a82acc64e5589dbb8a66b41912b9900",
+  "commit": "e4fb4172d666b379a54b9b5c6499410ce791d506",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
