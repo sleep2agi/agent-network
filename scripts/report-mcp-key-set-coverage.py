@@ -71,7 +71,19 @@ def tool_mentions(lines: list[str], name: str, known: set[str]) -> tuple[list[in
     把 `NAME(` 的调用点也算作该工具的提及点。提到两个就放弃（宁可不认，也不猜）。
     返回 (字面量行, helper 调用行) —— 分开返回是为了让报告能说清「这条是凭什么算上的」。
     """
-    literal = [i for i, ln in enumerate(lines) if re.search(rf"""["']{re.escape(name)}["']""", ln)]
+    # 2026-10-31 —— 三种提及形态都要认，否则「覆盖率」衡量的是**写法**而不是覆盖：
+    #   mcp(tok, "tool", …)        —— 引号字面量（最常见）
+    #   toolsFor(A).tool(…)        —— handler 表成员调用（peer-reply-atomic 就是这么测的）
+    #   tools["tool"](…)           —— 索引调用
+    # 只认第一种时，send_peer_reply / report_completion 明明被调用过、也断言过，却算 uncovered。
+    literal = [
+        i for i, ln in enumerate(lines)
+        if re.search(rf"""["']{re.escape(name)}["']""", ln)
+        # 成员/索引**引用**也算：`call(toolsFor(B).send_peer_reply, {…})` 是把 handler 当参数传，
+        # 名字后面跟的是逗号不是括号 —— 要求 `(` 会把这种（本仓最常用的 handler 表写法）漏掉。
+        or re.search(rf"\.{re.escape(name)}\b", ln)
+        or re.search(rf"\[\s*[\"']{re.escape(name)}[\"']\s*\]", ln)
+    ]
     helpers: dict[str, int] = {}
     for i, ln in enumerate(lines):
         m = HELPER_DEF.match(ln)
@@ -186,7 +198,12 @@ def main() -> int:
             if not m:
                 continue
             var = m.group(1)
-            name = next((c for c in QUOTED.findall(ln) if c in tools), None)
+            # 2026-10-31 —— 名字有两种写法：`mcp(t, "tool", …)` 与 `call(toolsFor(B).tool, …)`。
+            # 只认引号会把后者整类漏掉（send_peer_reply / report_completion 就是这样被漏的）。
+            name = next(
+                (c for c in QUOTED.findall(ln) if c in tools),
+                next((t for t in tools if re.search(rf"\.{re.escape(t)}\b", ln)), None),
+            )
             if not name:
                 continue
             window = "\n".join(lines[i:i + 16])

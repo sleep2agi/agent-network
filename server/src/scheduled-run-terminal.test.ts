@@ -140,6 +140,14 @@ describe("#690 scheduled run follows the real task lifecycle", () => {
       network_id: NET,
       attachments: [{ type: "file", file_id: "file_690_reply", name: "evidence.json", size: 12, mime: "application/json" }],
     });
+    // 2026-10-31 —— #3275：report_completion 的形状。
+    // ⚠️ warning 与 attachments_saved 是**条件键**（混合版本告警 / 有 artifact 时才出现）；
+    //    本夹具恰好两条都触发 ⇒ 这条断言钉的是「**条件键之外没有别的键**」，
+    //    而不是「这两个键永远在」。
+    expect(Object.keys(reply).sort()).toEqual([
+      "attachments_saved", "message_id", "ok", "session_status", "warning",
+    ]);
+    expect(reply.session_status).toBe("idle");
     expect(reply.ok).toBe(true);
     expect(readRun(runId).status).toBe("replied");
     expect(readRun(runId).completed_at).toBeTruthy();
