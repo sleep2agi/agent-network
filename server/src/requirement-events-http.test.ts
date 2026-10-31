@@ -240,6 +240,22 @@ describe("requirement events", () => {
     expect((await events(scoped.token, `&requirement_id=${theirs.id}`)).body.events).toEqual([]);
   });
 
+  test("the CARD payload hides a hidden node's alias too (assignee is a string, not a ref)", async () => {
+    // 2026-10-31 —— #3285 的另一半，比事件列表**常用得多**的那一面。
+    // assignee 是派生展示字段（自由文本），写侧在设 agent_owner 时回填别名；
+    // 它没有 {kind,id} 形状 ⇒ isHiddenRef 判不了 ⇒ 只抹引用的话，卡列表上照样看得到别名。
+    const card = await create(admin.token, { name: "动态示例十之半" });
+    await patch(admin.token, card.id, { agent_owner: { kind: "node", id: NODE } });
+    const mine = (await send(admin.token, "GET", `/api/requirements?network_id=${NET}&limit=500`)).body.requirements
+      .find((c: any) => c.id === card.id);
+    expect(mine.assignee).toBe("ev-node");            // 无限制的读者：看得到（这是如实回显）
+    const theirs = (await send(restricted.token, "GET", `/api/requirements?network_id=${NET}&limit=500`)).body.requirements
+      .find((c: any) => c.id === card.id);
+    expect(theirs).toBeDefined();                      // 卡本身他看得见（不是「看不见的卡」那条规则）
+    expect(theirs.assignee).toBeNull();                // 但执行人那一栏不能借别名漏出去
+    expect(JSON.stringify(theirs)).not.toContain("ev-node");
+  });
+
   test("an agent-restricted member: hidden nodes are masked, and an event that only differs by a hidden node is dropped", async () => {
     const card = await create(admin.token, { name: "动态示例十" });
     await patch(nodeToken, card.id, { priority: "high" });

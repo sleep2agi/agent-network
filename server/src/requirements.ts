@@ -829,6 +829,34 @@ function hiddenNodeFilter(ctx: RequirementsRequestContext, networkId: string): H
   const visible = new Set(visibleAgents(ctx.auth.userId, networkId).nodeIds);
   return (nodeId: string) => !visible.has(nodeId);
 }
+/**
+ * 2026-10-31 —— **派生展示字段绕过了引用抹除**（#3285 的另一半）。
+ *
+ * `owner` / `agent_owner` / `participants` 都是 `{kind:"node", id}` 引用，所以能被
+ * `isHiddenRef` 判定并抹掉。而 `assignee` 与事件里的同名字段存的是**别名字符串** ——
+ * 没有任何 {kind,id} 可判 ⇒ 受限成员在**卡片列表**上（比事件列表常用得多）直接读到
+ * 一个他看不见的 Agent 的名字。
+ *
+ * 只能在「别名集合」这一层判：把该网络里受限成员看不见的节点的别名收成一个集合。
+ * 方向写死：**命中就抹**（宁可少显示一个名字，也不多露一个）。
+ */
+const aliasSetByCtx = new WeakMap<RequirementsRequestContext, Map<string, Set<string>>>();
+export function hiddenNodeAliases(ctx: RequirementsRequestContext, networkId: string): Set<string> {
+  const hidden = hiddenNodeFilter(ctx, networkId);
+  if (!hidden) return EMPTY_ALIAS_SET;
+  let perNet = aliasSetByCtx.get(ctx);
+  if (!perNet) aliasSetByCtx.set(ctx, perNet = new Map());
+  let set = perNet.get(networkId);
+  if (!set) {
+    const rows = db.all<{ node_id: string; alias: string | null }>(
+      "SELECT node_id, alias FROM nodes WHERE network_id = ?1", networkId);
+    set = new Set(rows.filter(r => r.alias && hidden(r.node_id)).map(r => r.alias as string));
+    perNet.set(networkId, set);
+  }
+  return set;
+}
+const EMPTY_ALIAS_SET: Set<string> = new Set();
+
 function isHiddenRef(ref: unknown, hidden: HiddenNode): boolean {
   if (!hidden || !ref || typeof ref !== "object") return false;
   const r = ref as { kind?: unknown; id?: unknown };
@@ -851,8 +879,11 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
   const pub = can ? { ...base, viewer_can: can } : base;
   const hidden = hiddenNodeFilter(ctx, row.network_id);
   if (!hidden) return pub;
+  const hiddenAliases = hiddenNodeAliases(ctx, row.network_id);
   return {
     ...pub,
+    // 别名不是引用 ⇒ 单列一条（见 hiddenNodeAliases 的长注释）
+    assignee: hiddenAliases.has(pub.assignee) ? null : pub.assignee,
     owner: isHiddenRef(pub.owner, hidden) ? null : pub.owner,
     agent_owner: isHiddenRef(pub.agent_owner, hidden) ? null : pub.agent_owner,
     participants: Array.isArray(pub.participants) ? pub.participants.filter((ref: unknown) => !isHiddenRef(ref, hidden)) : pub.participants,
@@ -1779,16 +1810,8 @@ function listEvents(ctx: RequirementsRequestContext): Response {
   // 而同一张卡的 agent_owner 事件已被正确抹掉 ⇒ 名字从旁边漏了出去。
   // 修法：按「隐藏节点的别名集合」判，命中就抹成 null；随后「抹后 old==new」的规则会把整条丢弃。
   // 方向选择：宁可多抹（隐藏）也不多露 —— 别名与人名冲突时，少显示一个名字的代价小于多露一个。
-  let hiddenAliases: Set<string> | null = null;
-  const hiddenAlias = (v: unknown): boolean => {
-    if (!hidden || typeof v !== "string" || !v) return false;
-    if (hiddenAliases === null) {
-      const rows = db.all<{ node_id: string; alias: string | null }>(
-        "SELECT node_id, alias FROM nodes WHERE network_id = ?1", networkId);
-      hiddenAliases = new Set(rows.filter(r => r.alias && hidden(r.node_id)).map(r => r.alias as string));
-    }
-    return hiddenAliases.has(v);
-  };
+  const aliasSet = hiddenNodeAliases(ctx, networkId);
+  const hiddenAlias = (v: unknown): boolean => !!hidden && typeof v === "string" && v !== "" && aliasSet.has(v);
   const aware = knowsAbandoned(ctx);
   const seen = new Map<string, boolean>();
   const canSee = (id: string): boolean => {

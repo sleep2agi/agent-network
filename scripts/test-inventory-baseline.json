@@ -6985,6 +6985,7 @@
   "server/src/requirement-events-http.test.ts::requirement events::migration is idempotent and leaves the rows alone": 1,
   "server/src/requirement-events-http.test.ts::requirement events::paging: newest first, limit + next_cursor without overlap; since; bad params 400": 1,
   "server/src/requirement-events-http.test.ts::requirement events::tag rename, project delete and card delete each record per-card events": 1,
+  "server/src/requirement-events-http.test.ts::requirement events::the CARD payload hides a hidden node's alias too (assignee is a string, not a ref)": 1,
   "server/src/requirement-events-http.test.ts::requirement events::the actor of a node token is the node": 1,
   "server/src/requirement-events-http.test.ts::requirement events::the write and its events are one transaction: no events table → the PATCH fails and the card is unchanged": 1,
   "server/src/requirement-events.test.ts::diffRequirement::checklist: reorder, rename, add or remove is one `checklist` event with counts": 1,
@@ -15145,6 +15146,7 @@
   "server/src/requirement-events-http.test.ts::requirement events::migration is idempotent and leaves the rows alone",
   "server/src/requirement-events-http.test.ts::requirement events::paging: newest first, limit + next_cursor without overlap; since; bad params 400",
   "server/src/requirement-events-http.test.ts::requirement events::tag rename, project delete and card delete each record per-card events",
+  "server/src/requirement-events-http.test.ts::requirement events::the CARD payload hides a hidden node's alias too (assignee is a string, not a ref)",
   "server/src/requirement-events-http.test.ts::requirement events::the actor of a node token is the node",
   "server/src/requirement-events-http.test.ts::requirement events::the write and its events are one transaction: no events table → the PATCH fails and the card is unchanged",
   "server/src/requirement-events.test.ts::diffRequirement::checklist: reorder, rename, add or remove is one `checklist` event with counts",
@@ -16320,7 +16322,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "2e9a09cef7c4782913d228a254c207edbb93bcea",
+  "commit": "c3005ed9f12750ca4f5c2567606306de620905e6",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
