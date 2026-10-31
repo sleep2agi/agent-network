@@ -213,4 +213,54 @@ describe("GET /api/providers", () => {
     expect(r.status).toBe(403);
     expect(r.body.error).toBe("user_token_required");
   });
+  // 2026-10-31 —— **写侧原来只有 MCP**：客户端能显示「还没有 provider」，却没办法把它变成「有」。
+  // 这条把「第一行」确认成一次 HTTP 调用，并核对三件事：落库、读回来一致、revision 冲突是 409。
+  test("PUT /api/providers creates the first row, and the read side sees it", async () => {
+    const body = {
+      revision: 0,
+      provider: {
+        id: "hc-first", label: "First Provider", enabled: true,
+        protocol: "openai-chat-completions", baseUrl: "https://api.example.com/v1",
+        models: ["gpt-x"], key: "sk-test-not-a-real-secret",
+      },
+    };
+    const r = await fetch(`${base}/api/providers?network_id=${ownerNet}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const saved = await r.json() as any;
+    expect(r.status).toBe(200);
+    expect(saved.ok).toBe(true);
+    expect(saved.provider.id).toBe("hc-first");
+    expect(saved.provider.revision).toBe(1);
+    // 密钥永不回显
+    expect(JSON.stringify(saved)).not.toContain("sk-test-not-a-real-secret");
+
+    const read = await get(`/api/providers?network_id=${ownerNet}`, ownerToken);
+    const ids = read.body.providers.map((p: any) => p.id);
+    expect(ids).toContain("hc-first");
+
+    // 用旧 revision 再写一次 ⇒ 409（乐观锁；这正是「两个人同时改」的那一格）
+    const stale = await fetch(`${base}/api/providers?network_id=${ownerNet}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...body, revision: 0, provider: { ...body.provider, label: "Second Writer" } }),
+    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json() as any).error).toBe("hub_provider_revision_conflict");
+
+    // 别的网络成员不许写
+    const foreign = await fetch(`${base}/api/providers?network_id=${ownerNet}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${strangerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...body, revision: 1 }),
+    });
+    expect(foreign.status).toBe(403);
+
+    // 清理：这条测试造了一行，后面的断言按「1 行」计数，不能留痕
+    const { db } = await import("./db.js");
+    db.run(`DELETE FROM hub_provider_configs WHERE network_id = ?1 AND provider_id = 'hc-first'`, [ownerNet]);
+  });
+
 });

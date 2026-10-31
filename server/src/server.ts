@@ -106,7 +106,7 @@ import { listTaskLateReplies } from "./task-late-replies.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
-import { readHubProviders } from "./hub-provider-config.js";
+import { readHubProviders, putHubProvider } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
@@ -4199,6 +4199,37 @@ return Bun.serve({
         return withCors(req, Response.json(providers, { status: 403 }));
       }
       return withCors(req, Response.json({ ...providers, network_id: networkId }));
+    }
+    // 2026-10-31 —— **写侧也必须有 HTTP 面**，否则「第一行」只能由会用 MCP 的人录入。
+    //
+    // 现状：读有 REST（/api/providers），写只有 MCP（provider 工具 action=hub_put）
+    //   ⇒ 客户端能显示「还没有 provider」，却没有任何办法把它变成「有」；
+    //     而这一步恰好是「可选模型」的唯一阻塞。
+    // 这里不复制校验逻辑：直接调用**同一个** putHubProvider，
+    //   权限（owner）与校验（revision、模型名、baseUrl）都保持不变。
+    if (url.pathname === "/api/providers" && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      if (!isAdmin && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      let body: any = null;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const revision = Number.isSafeInteger(body?.revision) ? body.revision : NaN;
+      if (!Number.isSafeInteger(revision)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_revision", hint: "传 0 表示新建；后续传回读到的 revision" }, { status: 400 }));
+      }
+      const saved = putHubProvider({ userId: restAuth.userId ?? null, isNode: false, networkId }, revision, body?.provider);
+      if (!saved.ok) {
+        const status = saved.error === "provider_owner_required" ? 403
+          : saved.error === "hub_provider_revision_conflict" ? 409
+          : saved.error === "provider_access_denied" ? 403 : 400;
+        return withCors(req, Response.json(saved, { status }));
+      }
+      return withCors(req, Response.json({ ...saved, network_id: networkId }));
     }
 
     // ── #1510: the log-only view of the secret transport gate ──
