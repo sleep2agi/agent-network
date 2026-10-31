@@ -5297,6 +5297,7 @@
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::在途冲突恰好 {age_ms, error, existing_update_id, ok}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::带 warning 的成功体恰好 {apply_mode, ok, update_id, warnings}，且 warning 项恰好 {code, message}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::成功体恰好 {apply_mode, ok, update_id}，不多不少": 1,
+  "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>#3168: a node that declares no supervisor gets a warning, not silence::restart-tier patch ⇒ warnings 含 restart_supervision_unknown（且 message 给出两种处置）": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::ack_config_update without a node token ⇒ exactly {error, ok}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::get_config_update without a node token ⇒ exactly {error, ok}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_all_status pinned (list_node_skills needs a live node → covered elsewhere)::⇒ {ok, sessions, sessions_returned, summary, summary_scope}; sessions 与 sessions_returned 同源": 1,
@@ -13446,6 +13447,7 @@
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::在途冲突恰好 {age_ms, error, existing_update_id, ok}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::带 warning 的成功体恰好 {apply_mode, ok, update_id, warnings}，且 warning 项恰好 {code, message}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::成功体恰好 {apply_mode, ok, update_id}，不多不少",
+  "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>#3168: a node that declares no supervisor gets a warning, not silence::restart-tier patch ⇒ warnings 含 restart_supervision_unknown（且 message 给出两种处置）",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::ack_config_update without a node token ⇒ exactly {error, ok}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::get_config_update without a node token ⇒ exactly {error, ok}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_all_status pinned (list_node_skills needs a live node → covered elsewhere)::⇒ {ok, sessions, sessions_returned, summary, summary_scope}; sessions 与 sessions_returned 同源",
@@ -16298,7 +16300,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "4c81714123854c30ba8c1b6c6aeed3f65956f895",
+  "commit": "ad749de5d07f65970930557ffa2929e340b85049",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

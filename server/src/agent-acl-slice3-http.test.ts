@@ -546,6 +546,30 @@ describe("update_node_config 响应键集（exact key set）", () => {
     }
   });
 
+  // 2026-10-31 —— **#3168 的核心分支此前没有任何测试**：
+  // 「节点没声明 supervisor（config_update_capable=false）、也没报 systemd_supervision」，
+  // 这条分支会给出 `restart_supervision_unknown` 警告 —— 而它正是「手工起的节点被一次
+  // restart-tier 下发弄死」的那一格。警告不是拒绝：Hub 不替调用方判断安全性，但必须说出来。
+  describe("#3168: a node that declares no supervisor gets a warning, not silence", () => {
+    test("restart-tier patch ⇒ warnings 含 restart_supervision_unknown（且 message 给出两种处置）", async () => {
+      const U = { alias: "acl3-nosup-u", node: "node_acl3_nosup_u" };
+      db.run(`INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, config_snapshot)
+              VALUES (?1, ?2, ?2, ?3, ?4, ?5)`,
+        [U.node, U.alias, NET, adminId, JSON.stringify({ config_update_capable: false })]);
+      const r = await tool(adminToken, "update_node_config", {
+        node_id: U.node, base_revision: 0, patch: { channels: [] }, network_id: NET,
+      });
+      expect(r.ok).toBe(true);
+      const w = (r.warnings || []).find((x: any) => x.code === "restart_supervision_unknown");
+      expect(w).toBeTruthy();
+      // 警告必须带**可执行的处置**（否则它只是把风险念了一遍）。
+      // 实测这一支给的是「先确认它是怎么被拉起的（anet start / pm2 / systemd）」，
+      // 而 Stop→Start 那句在**另一支**（systemd_supervision=not_supervised 已报告）里。
+      expect(String(w.message)).toContain("anet start / pm2 / systemd");
+      expect(String(w.message)).toContain("restart-tier");
+    });
+  });
+
   // 2026-10-31 —— #3171 第 2 项：restart_node 的成功体与 update_node_config 同构。
   describe("restart_node success body", () => {
     test("pinned key set (same shape family as update_node_config)", async () => {
