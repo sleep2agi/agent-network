@@ -180,6 +180,10 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect(gotCatalog.ok).toBe(false);
   expect(Object.keys(gotCatalog).sort()).toEqual(["error", "ok"]);
   const stop = await call(owner.token, "stop_node", { node_id: child, network_id: owner.network_id });
+  // #3275 批次 2·f —— stop_node 的外层（实测）。比 start_node 多两个键：
+  // `action` 说明触发的是哪条路径（restart_node 走同一条），`in_flight_at_dispatch` 说明
+  // **下发那一刻**手上还有几条任务 —— 少了它，客户端无法区分「干净停机」与「截断在跑的任务」。
+  expect(Object.keys(stop).sort()).toEqual(["action", "in_flight_at_dispatch", "lifecycle_state", "ok", "request_id"]);
   expect(stop.ok).toBe(true);
   // 2026-10-31 —— #3275 批次 2：get_stop_request 的**成功体**键集（daemon 按字段名读，
   // 尤其 delete_config / grace_seconds / force 三个决定它要不要删配置）
@@ -192,6 +196,9 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect(stoppedAck.ok).toBe(true);
   expect(Object.keys(stoppedAck).sort()).toEqual(["ok", "status"]);   // #3275：成功体键集
   const start = await call(owner.token, "start_node", { node_id: child, network_id: owner.network_id });
+  // start_node 只有四个键：**它没有 in_flight_at_dispatch** ——
+  // 因为「启动时手上还有几条任务」不是一个有意义的问题。两个工具同名不同形，各自量。
+  expect(Object.keys(start).sort()).toEqual(["lifecycle_state", "ok", "request_id"]);
   expect(start.ok).toBe(true);
   const gotStart = await call(legacy, "get_start_request", { request_id: start.request_id });
   expect(gotStart.ok).toBe(true);
