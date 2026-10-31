@@ -265,7 +265,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
 
     // ② 读者类别必须在闭集里（防「reader: 某个系统」这种自由文本）
     for (const [key, entry] of Object.entries(PUBLIC_HEALTH_KEY_READERS)) {
-      expect(["cli", "probe", "external"]).toContain(entry.reader);
+      expect(["cli", "probe", "external", "operator"]).toContain(entry.reader);
       // 「同上」在这一类表里是无效理由：它把理由指向另一行，而那行改了它不会跟着改。
       expect(entry.why).not.toContain("同上");
       expect(entry.why.length).toBeGreaterThan(3);

@@ -16,7 +16,12 @@
  *
  * 判据：**一个白名单条目，如果连读者都指不出来，它就不是「仪表」，而是没人看的暴露面。**
  */
-export type AnonReader = "cli" | "probe" | "external";
+// 2026-10-31 —— 第四档是今晚查出来的：
+//   `mcp_inflight` / `mcp_inflight_peak` / `event_loop` 在仓内**没有任何代码读**，
+//   只出现在注释（引用生产实测数值）与历史报告里 —— 读它们的是**人**（运维手工 curl）。
+//   「程序读」与「人读」是两件事：前者能跨源核对，后者只能登记谁在什么场合看。
+//   把它们混进 external（外部程序）会让「有读者」这句话虚高。
+export type AnonReader = "cli" | "probe" | "external" | "operator";
 
 export interface AnonReaderEntry {
   reader: AnonReader;
@@ -27,18 +32,18 @@ export interface AnonReaderEntry {
 export const PUBLIC_HEALTH_KEY_READERS: Readonly<Record<string, AnonReaderEntry>> = {
   ok: { reader: "cli", why: "CLI/客户端判断「Hub 是否在」的第一位" },
   status: { reader: "cli", why: "客户端展示 Hub 的细分状态（ok / degraded）" },
-  status_reasons: { reader: "external", why: "运维与告警规则读它做分级（仓内无消费者，未验）" },
+  status_reasons: { reader: "cli", why: "anet status 把 status_reasons 拼成一行原因给用户看（bin/cli.ts）" },
   version: { reader: "cli", why: "版本不一致提示（anet 与 hub 的版本对齐）" },
-  version_role: { reader: "external", why: "仓外 dashboard/监控用来区分 hub/cli 构建；仓内无消费者，未验" },
+  version_role: { reader: "external", why: "docs/release-hub-runbook.md 描述的仓外 dashboard 读它区分构建；仓内无消费者，未验" },
   api_version: { reader: "cli", why: "客户端与 Hub 协商协议版本，不匹配时给出升级提示" },
   transport: { reader: "cli", why: "协议协商（streamable-http）" },
   uptime: { reader: "cli", why: "`anet status` 展示" },
   startedAt: { reader: "cli", why: "展示启动时刻（粗粒度，不是 landmark 的 git_commit）" },
   sessions_count: { reader: "cli", why: "状态面板的连接数" },
   sse_connections: { reader: "cli", why: "状态面板展示当前 SSE 长连接数量" },
-  mcp_inflight: { reader: "external", why: "负载均衡/监控判断拥塞；仓内无消费者，未验" },
-  mcp_inflight_peak: { reader: "external", why: "监控读 MCP 在途峰值判断拥塞趋势；仓内无消费者，未验" },
-  event_loop: { reader: "external", why: "监控读停顿指标；仓内无消费者，未验" },
+  mcp_inflight: { reader: "operator", why: "运维手工 curl 看实时在途数；仓内无代码读，仅注释引用过生产数值" },
+  mcp_inflight_peak: { reader: "operator", why: "运维手工看**峰值**，用于判断重连风暴是否发生过；无程序读者" },
+  event_loop: { reader: "operator", why: "停顿指标只出现在历史发布报告里，仓内无代码读；靠人看" },
   auth: { reader: "cli", why: "客户端据此决定登录方式" },
   security: { reader: "cli", why: "客户端据此提示是否需要 TLS/密钥配置" },
   tmux: { reader: "cli", why: "共存 TUI 的前置检查" },
@@ -50,5 +55,5 @@ export const PUBLIC_HEALTH_KEY_READERS: Readonly<Record<string, AnonReaderEntry>
   capabilities: { reader: "cli", why: "客户端据此隐藏未实现的功能入口" },
   probe_nonce: { reader: "probe", why: "探针回显：只在带 X-Probe-Nonce 时出现，用于验证同一次请求" },
   served_at: { reader: "probe", why: "响应时刻：探针用它判断两次读数是不是同一次处理的产物" },
-  build_identified: { reader: "external", why: "运维判断构建是否可识别；仓内无消费者，未验" },
+  build_identified: { reader: "operator", why: "按 release-hub-runbook.md 由人核对构建是否可识别；无程序读者" },
 };
