@@ -128,7 +128,17 @@ test("legacy owner and exact bound identity remain supported", async () => {
     // 计数与数组同源：两个 count 必须等于各自数组长度（否则「有 N 条」与「列出来」会分叉）
     expect(pendLife.stop_count).toBe(pendLife.stop_requests.length);
     expect(pendLife.start_count).toBe(pendLife.start_requests.length);
-    expect((await call(token, "get_adopt_request", { request_id: requestId })).ok).toBe(true);
+    // 2026-10-31 —— #3275：形状由**一次真实调用**给出（不靠读源码猜）
+    const gotAdopt = await call(token, "get_adopt_request", { request_id: requestId });
+    expect(gotAdopt.ok).toBe(true);
+    // ⚠️ 我第一版按源码猜了 7 个键（binding_request_id / child_alias / child_node_id …）——**全错**。
+    // 真实形状由这次调用给出，12 个键；其中 error 为空、request_id 是这一行自己的 id。
+    // 这是本卡第三次被「读源码猜形状」打回，写进注释免得下一个人再猜：
+    //   行对象整行透传时，源码里看到的字段名是**SQL 的列名**，与对外载荷不是一回事。
+    expect(Object.keys(gotAdopt).sort()).toEqual([
+      "alias", "created_at", "daemon_node_id", "error", "network_id", "node_id",
+      "ok", "request_id", "requested_by", "status", "updated_at", "workdir",
+    ]);
   }
   // An explicit binding does not bypass the network or revocation boundaries.
   expect(await call(crossNetwork, "list_my_children")).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
