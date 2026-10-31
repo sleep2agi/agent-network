@@ -100,7 +100,13 @@ for (const [name, arguments_] of endpoints) {
   test(`daemon identity boundary: ${name}`, async () => {
     const args = name.includes("adopt_request") ? { ...arguments_, request_id: requestId } : arguments_;
     for (const token of [mismatched, wrongBound, ownerless, owner.token, member.token]) {
-      expect(await call(token, name, args)).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
+      const denied = await call(token, name, args);
+      expect(denied).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
+      // 2026-10-31 —— #3275：**错误信封也是契约**。
+      // 这八个 ack/get 工具此前只被断言过 error 的**值**，没有一条钉住键集：
+      // 谁顺手在某个出口多塞一个字段（例如 hint / request_id），客户端的分支就多一个没人知道的键。
+      // ⇒ 在同一个循环里把形状钉住，成本几乎为零。
+      expect(Object.keys(denied).sort()).toEqual(["error", "ok"]);
     }
     expect(db.get("SELECT status FROM node_daemon_bindings WHERE request_id=?1", requestId).status).toBe("pending");
   });
