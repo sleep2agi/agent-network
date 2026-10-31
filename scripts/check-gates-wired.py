@@ -86,7 +86,6 @@ NOT_A_GATE: set[str] = set()
 #   · 名单外新接线却没有 selftest ⇒ 红（新增的门必须自带）
 KNOWN_NO_SELFTEST: set[str] = {
     "scripts/check-doc-symbol-pins.py",
-    "scripts/check-mcp-tool-anchor-sections.py",
     "scripts/report-script-cadence.py",
     # 本脚本自己不提供 --selftest（它跑别人的），否则会自我递归
     "scripts/check-gates-wired.py",
