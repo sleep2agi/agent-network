@@ -96,6 +96,27 @@ def main() -> int:
         print("  ⇒ 判别消失会让「顺序」这条不变量静默跳过，而跳过与成立同形。", file=sys.stderr)
         return 1
 
+    # 2026-10-31 —— 反向：**代码里有判别组，而登记表是空的** ⇒ 这不是「不适用」，是「登记丢了」。
+    # 两者处置相反：「不适用」要换测试，「登记丢了」要补登记。
+    if checked > 0 and not EXPECTED_DISCRIMINATED:
+        print(f"✗ 代码里有 {checked} 个判别组，但 EXPECTED_DISCRIMINATED 是空的 ⇒ "
+              f"登记表被清空/漏登记（不是「不适用」）", file=sys.stderr)
+        for path in sorted(by_path):
+            with_q = [r for r in by_path[path] if r.get("query")]
+            if with_q:
+                print(f"    · {path}（判别键：{sorted({k for r in with_q for k in (r.get('query') or [])})}）", file=sys.stderr)
+        print("  ⇒ 把它们加回 EXPECTED_DISCRIMINATED；否则这条不变量会在没人注意时失去约束。", file=sys.stderr)
+        return 1
+
+    if checked == 0 and not EXPECTED_DISCRIMINATED:
+        # 2026-10-31 —— **「不适用」不能渲染成「通过」**（外部复核：verdict 至少四值
+        # pass / fail / unknown / not-applicable；「不适用」要换测试，「不可判」要补读数，处置相反）。
+        # 本门：一个「同 path 既有 query 判别又有通用分支」的组都没有 ⇒ 这条不变量无处可验。
+        print("not-applicable：没有任何『同 path、既有 query 判别又有通用分支』的组 ⇒ "
+              "本判据在当前代码上不适用（不是通过，也不是失败）", file=sys.stderr)
+        print("  ⇒ 若确实新增了这类组，请同时把它加进 EXPECTED_DISCRIMINATED。", file=sys.stderr)
+        return 3
+
     if "--json" in sys.argv:
         print(json.dumps({"checked_paths": checked, "violations": violations}, ensure_ascii=False, indent=2))
         return 1 if violations else 0
