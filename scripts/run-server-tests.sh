@@ -44,7 +44,13 @@ if [ ! -d "$SERVER/src" ]; then
 fi
 
 mapfile -t FILES < <(
-  cd "$SERVER" && ls src/*.test.ts src/**/*.test.ts 2>/dev/null | sort -u | while read -r f; do
+  # 2026-10-31 —— **用 find，不用 shell glob**。
+  # `src/**/*.test.ts` 在 bash 里（未开 globstar）等价于 `src/*/*.test.ts`，只匹配**一层**子目录。
+  # 实测：agent-node/src 下 find 有 273 个 *.test.ts，而这行只发现 179 个 ⇒
+  # **94 个文件从来没被这个脚本跑过**（我此前报「179/179 全绿」就是在这个错误分母上说的）。
+  # 守恒式（列出 == PASS + FAIL）照旧成立 —— 它守的是「列出的都记了账」，
+  # 不是「磁盘上的都列出来了」。这两件事必须分开。
+  cd "$SERVER" && find src -type f -name '*.test.ts' | sort -u | while read -r f; do
     if [ ${#PATTERNS[@]} -eq 0 ]; then echo "$f"; continue; fi
     for p in "${PATTERNS[@]}"; do case "$f" in *"$p"*) echo "$f"; break ;; esac; done
   done

@@ -94,6 +94,35 @@ const POLL_INTERVAL_MS = 250;
  */
 export const LATE_REPLY_CAP_MS = 60 * 60_000;
 
+/**
+ * #3166 —— **共享 server 的「活着」判据**。
+ *
+ * 原来是一个粘滞布尔 `sharedDisconnected`：一次 ECONNRESET 之后置 true，**没有任何地方置回 false**
+ * ⇒ `isRunning` 从此恒为 false ⇒ 热切模型永久降级成重启（生产实测：一次抖动就够了）。
+ *
+ * 判据改成**带时间窗的提示**：连接类错误只说明「刚刚那一下断了」，不说明「现在也断着」。
+ * 窗口之外，下一次切模型会真的去试；真断了就再记一次，代价是一次失败的尝试（不会更坏）。
+ *
+ * 为什么用纯函数：这条语义要能被单测钉住，而单测不该需要一台活着的 v2 server。
+ */
+export const SHARED_DISCONNECT_GRACE_MS = 30_000;
+
+export function openCodeV2SessionAlive(input: {
+  closed: boolean;
+  /** 最近一次连接类错误的发生时刻（毫秒）；null = 没有记录过。 */
+  disconnectedAt: number | null;
+  now: number;
+  /** 私服子进程；共享 server 为 null。 */
+  child: { exitCode: number | null; signalCode: string | null } | null;
+  graceMs?: number;
+}): boolean {
+  if (input.closed) return false;
+  const grace = input.graceMs ?? SHARED_DISCONNECT_GRACE_MS;
+  if (input.disconnectedAt !== null && input.now - input.disconnectedAt < grace) return false;
+  const child = input.child;
+  return !child || (child.exitCode === null && child.signalCode === null);
+}
+
 export type LateReplyPayload = {
   /** 会话 id，作为 thread_id 补发（Hub 在任务行没有上下文时才用它做幂等）。 */
   threadId: string;
@@ -432,7 +461,8 @@ export async function openVettedOpenCodeV2Copresence(
   }
 
   let closed = false;
-  let sharedDisconnected = false;
+  // #3166 —— 从粘滞布尔改成时间戳（理由见 openCodeV2SessionAlive）
+  let sharedDisconnectedAt: number | null = null;
   let queue = Promise.resolve();
   let notifyWarned = false;
   const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
@@ -530,7 +560,12 @@ export async function openVettedOpenCodeV2Copresence(
       sessionId,
       attachScriptPath,
       get isRunning() {
-        return !closed && !sharedDisconnected && (!child || (child.exitCode === null && child.signalCode === null));
+        return openCodeV2SessionAlive({
+          closed,
+          disconnectedAt: sharedDisconnectedAt,
+          now: Date.now(),
+          child: child ? { exitCode: child.exitCode, signalCode: child.signalCode } : null,
+        });
       },
       backgroundControl: createSessionBackgroundControl({
         sessionId,
@@ -700,7 +735,7 @@ export async function openVettedOpenCodeV2Copresence(
         });
         const observed = operation.catch((error: any) => {
           if (shared && /ECONNREFUSED|ECONNRESET|UND_ERR_SOCKET|EPIPE/.test(error?.message ?? "")) {
-            sharedDisconnected = true;
+            sharedDisconnectedAt = Date.now();
           }
           throw error;
         });
