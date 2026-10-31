@@ -147,6 +147,13 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     //    没有窗口的计数器是「没有域的数」；没有 must-fire 的计数器是「没有证据的数」。
     expect(after.counters.since).toBe(before.counters.since);
     expect(after.startedAt).toBe(before.startedAt);
+    // 2026-10-31 —— **窗口与值必须同响应**（外部复核 ③：窗口是分母，必须先固定再取数）。
+    // 本仓的结构比「s1 = since; v = counter; s2 = since」更强：since 与各计数在**同一份载荷**里，
+    // 单次读就原子，不存在跨越 reset 的长读。⇒ 这里把「同一个对象里」这件事钉住。
+    expect(Object.prototype.hasOwnProperty.call(before.counters, "since")).toBe(true);
+    expect(typeof before.counters.since).toBe("string");
+    // 跨两次读的读者（如上面的 before/after 比较）必须自己比对 since —— 本条就是那个例子。
+    expect(before.counters.since.length).toBeGreaterThan(0);
     const bumped = Object.keys(after.counters.task_rejections.by_reason).find(
       (k) => k.startsWith(`${rej.status}:`),
     );
