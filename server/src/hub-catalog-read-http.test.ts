@@ -457,7 +457,7 @@ describe("GET /api/providers", () => {
   // 「白名单管『怎么写』，这条管『写几处』」）。
   // 这两张状态映射各自只能有**一处定义**，且必须被生产代码**至少读一次**：
   //   只有定义、没有读取 ⇒ 它是一张装饰表（写 1 处、读 0 处）。
-  test("status maps are defined exactly once and actually read by production code", async () => {
+  test("status maps are defined exactly once and read by production code (a comment mentioning them does not count)", async () => {
     const { readFileSync, readdirSync, statSync } = await import("node:fs");
     const { join } = await import("node:path");
     const root = join(import.meta.dir);

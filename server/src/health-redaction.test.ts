@@ -865,7 +865,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   //   allowed  = 没打 frozen 标      ⇒ 变不变都可以，本测试不管
   //   excluded = 会变且不该被 pinned  ⇒ 必须存在并在正向对照里出现（见下）
   // 窗口显式：WINDOW_MS 写在断言里，而不是「两次读一下大概就行」。
-  test("frozen_at_boot fields really do not change within a declared window", async () => {
+  test("frozen_at_boot fields do not change within a declared window (and this does NOT prove the pinning is correct)", async () => {
     const { HEALTH_FIELD_META } = await import("./server.js");
     const WINDOW_MS = 1200;
     expect(WINDOW_MS).toBeGreaterThan(0);   // 窗口为 0 的「没变」不构成读数
@@ -1296,7 +1296,7 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 谓词落在**名字**上而不是「源码里出现了减法」（外部复核：
   // 「`startedAt` / `lastSuccessAt` 也是减法算出来的但**稳**；只扫减法会漏掉无条件的那个」）。
   // 分母必须报出来：命中 0 个差值字段 ⇒ 这条断言是真空真。
-  test("any difference-shaped field names both of its endpoints in the same payload", async () => {
+  test("difference-shaped fields name both endpoints in the same payload (proves endpoints exist, not that the value is right)", async () => {
     const { HEALTH_FIELD_META } = await import("./server.js");
     const DIFFY = /(age|elapsed|uptime|remaining|ttl|delta|drift|lag)/i;
     const named = Object.keys(HEALTH_FIELD_META).filter((k) => DIFFY.test(k));
