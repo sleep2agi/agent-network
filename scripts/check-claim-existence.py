@@ -58,11 +58,31 @@ def candidates(text: str) -> list[str]:
 
 
 def exists(name: str) -> bool:
+    """名字是否存在 —— **按词边界**，不是子串。
+
+    2026-10-31 —— 外部复核 (c)：「`route_unavailable` 子串命中 `runtime_sdk_route_unavailable`，
+    机械脚本会误标 existing。」子串匹配会把「更长名字的一部分」当成「这个名字存在」，
+    而它读起来和一个真命中一模一样。⇒ `git grep -F` 先粗筛，再用词边界逐文件确认。
+    """
     p = REPO / name
     if "/" in name and p.exists():
         return True
-    r = subprocess.run(["git", "grep", "-F", "-q", "--", name], cwd=REPO)
-    return r.returncode == 0
+    r = subprocess.run(["git", "grep", "-F", "-l", "--", name], cwd=REPO, capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    pat = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])")
+    # 自己的自检向量里写着那些名字 ⇒ 必须排除本文件，否则「不存在」的用例永远命中自己
+    self_rel = str(Path(__file__).resolve().relative_to(REPO))
+    for rel in r.stdout.splitlines():
+        if rel == self_rel:
+            continue
+        try:
+            text = (REPO / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if pat.search(text):
+            return True
+    return False
 
 
 SELFTEST_VECTORS = [
