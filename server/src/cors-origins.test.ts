@@ -12,7 +12,7 @@
 // 判据：写一个允许清单的默认值之前，先写出它的**最松值**。
 //       这里最松值不是空（空 = 谁都不许 = 最严），而是 `*`。所以空绝不能被读成「用默认」。
 import { describe, expect, test } from "bun:test";
-import { parseCorsOrigins } from "./server.js";
+import { normalizeOrigin, parseCorsOrigins } from "./server.js";
 
 describe("parseCorsOrigins: 未设 / 设空 / 设值 三态", () => {
   test("未设 ⇒ 开发默认（localhost 两个端口）", () => {
@@ -31,10 +31,26 @@ describe("parseCorsOrigins: 未设 / 设空 / 设值 三态", () => {
     expect(parseCorsOrigins("https://a.example,")).toEqual(["https://a.example"]);
   });
 
-  test("must-fire：'*' 不会被当成通配（本实现是精确匹配清单）", () => {
-    // 如果哪天有人把 '*' 当通配实现，这条仍会过 —— 但 corsHeaders 用的是 includes，
-    // 所以这里钉的是「清单里有什么就是什么」，不是「* 有特殊含义」。
-    expect(parseCorsOrigins("*")).toEqual(["*"]);
+  // 2026-10-31 —— **语义变更（更严）**：非法条目现在被丢弃，而不是原样保留。
+  // 旧实现保留 "*"，于是运行期 `includes(origin)` 永远不命中 ——
+  // 「保留一条永不匹配的项」与「丢弃它」在行为上相同，但前者会让运维以为已经放行。
+  test("非法条目被丢弃（'*' / 裸主机名 / 非 http(s)）", () => {
+    expect(parseCorsOrigins("*")).toEqual([]);
+    expect(parseCorsOrigins("a.example")).toEqual([]);
+    expect(parseCorsOrigins("ftp://a.example")).toEqual([]);
     expect(parseCorsOrigins(undefined)).not.toContain("*");
+  });
+
+  // 外部复核 ①：`https://host` 与 `https://host:443` 在字符串上不等、在 origin 上相等。
+  test("默认端口与大小写被规范化 —— 字符串比较会在这里判不同", () => {
+    expect(normalizeOrigin("https://A.Example:443")).toBe("https://a.example");
+    expect(normalizeOrigin("https://a.example")).toBe("https://a.example");
+    expect(normalizeOrigin("http://a.example:80")).toBe("http://a.example");
+    expect(normalizeOrigin("https://a.example:8443")).toBe("https://a.example:8443");
+    expect(normalizeOrigin("https://a.example/")).toBe("https://a.example");
+    // 清单写成带默认端口 ⇒ 规范化后与不带端口的请求相等（这正是那批「地址栏正常却全 403」的用户）
+    expect(parseCorsOrigins("https://a.example:443")).toEqual(["https://a.example"]);
+    // 去重：同一 origin 的两种写法只留一条
+    expect(parseCorsOrigins("https://a.example,https://a.example:443/")).toEqual(["https://a.example"]);
   });
 });

@@ -921,9 +921,36 @@ const BroadcastSchema = z.object({
  *   这是「空必须落在更严的一侧」在本字段上的具体落点：
  *   这个字段的**最松值**不是空，而是 `*`；所以空不能被读成「用默认」。
  */
+/**
+ * 2026-10-31 —— **Origin 必须「解析后比较」，不能「字符串比较」**
+ * （外部复核 ①：`https://host` 与 `https://host:443` 在字符串上不等，在 origin 上相等；
+ *  若按字符串比，那一批用户全部被 CORS 挡掉，而他们的地址栏看起来完全正常）。
+ *
+ * `new URL(x).origin` 做的正是规范化：主机小写、**丢弃默认端口**、去掉尾斜杠与路径。
+ * 非 http(s) 或解析失败的条目返回空串（= 丢弃）——
+ * 因为「一条永远匹配不上的清单项」与「没有这一项」在行为上相同，
+ * 而前者会让运维以为已经放行了。
+ */
+export function normalizeOrigin(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    return u.origin;
+  } catch {
+    return "";
+  }
+}
+
 export function parseCorsOrigins(raw: string | undefined): string[] {
   if (raw === undefined) return ["http://localhost:3000", "http://localhost:3001"];
-  return raw.split(",").map((s) => s.trim()).filter(Boolean); // 空串 / 全逗号 ⇒ 空清单（更严）
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const norm = normalizeOrigin(part);
+    if (norm && !out.includes(norm)) out.push(norm); // 空串 / 全逗号 / 非法 ⇒ 空清单（更严）
+  }
+  return out;
 }
 
 const CORS_ORIGINS = parseCorsOrigins(
@@ -936,7 +963,10 @@ function corsHeaders(req: Request): Record<string, string> {
   // Default (env unset) allows localhost dev origins only — see CORS_ORIGINS above.
   // No author-specific domains are hardcoded; production deployments must set
   // COMMHUB_CORS_ORIGINS explicitly. See docs/concepts/security.md "CORS 配置".
-  const allowed = CORS_ORIGINS.includes(origin) ? origin : "";
+  // 比较的是**规范化后的 origin**，回写给浏览器的也是规范化后的值。
+  // （回写原始字符串会让「带默认端口」的请求拿到一个与自身不符的 allow-origin。）
+  const normalized = normalizeOrigin(origin);
+  const allowed = normalized && CORS_ORIGINS.includes(normalized) ? normalized : "";
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
