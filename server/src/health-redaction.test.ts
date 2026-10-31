@@ -109,7 +109,12 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     const body = await res.json() as any;
     expect("git_commit" in body).toBe(false);
     expect("git_dirty" in body).toBe(false);
-    expect(typeof body.build_identified).toBe("boolean");
+    // 2026-10-31 —— #3214 收尾：这里原来是 `typeof === "boolean"`，它证明「有个布尔」，
+    // 不证明这个布尔**说的是实话**。改问两个投影是否一致：
+    //   匿名给「有没有」，鉴权给「是什么」⇒ 两个投影必须互相印证（同一台 server 同一 BOOT_GIT_COMMIT）。
+    // 这能抓住「匿名侧按请求现算是非、鉴权侧读启动常量」这类分叉，类型断言抓不住。
+    const authed = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    expect(body.build_identified).toBe(authed.git_commit !== null);
   });
 
   test("authenticated admin /health carries git_commit (40-hex or null) and git_dirty", async () => {
@@ -154,7 +159,10 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     // 本仓的结构比「s1 = since; v = counter; s2 = since」更强：since 与各计数在**同一份载荷**里，
     // 单次读就原子，不存在跨越 reset 的长读。⇒ 这里把「同一个对象里」这件事钉住。
     expect(Object.prototype.hasOwnProperty.call(before.counters, "since")).toBe(true);
-    expect(typeof before.counters.since).toBe("string");
+    // 2026-10-31 —— #3214 收尾：`typeof === "string"` 换成**同源**断言。
+    // counters.since 就是窗口起点 startedAt（server.ts: `counters: { since: startedAtIso, ... }`），
+    // 不是另取一次时间 ⇒ 两者必须逐字符相同；否则「窗口」与「计数」来自两个时钟域。
+    expect(before.counters.since).toBe(before.startedAt);
     // 跨两次读的读者（如上面的 before/after 比较）必须自己比对 since —— 本条就是那个例子。
     expect(before.counters.since.length).toBeGreaterThan(0);
     const bumped = Object.keys(after.counters.task_rejections.by_reason).find(

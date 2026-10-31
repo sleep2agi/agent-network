@@ -297,7 +297,10 @@ describe("list_node_files: pinned success shape", () => {
   test("⇒ {ok, op, request_id}", async () => {
     const r = await tool(adminToken, "list_node_files", { alias: "acl3-agent-x", network_id: NET });
     expect(Object.keys(r).sort()).toEqual(["ok", "op", "request_id"]);
-    expect(typeof r.op).toBe("string");           // 这一次读的是什么操作
+    // 2026-10-31 —— #3214 收尾：`typeof === "string"` 换成**这次到底是什么操作**。
+    // list_node_files 只是工具名；它下发的是 `files_list` 请求（列表在 get_rules_file_result 里取）。
+    // 名字与载荷不是一回事 —— 钉住 op 就是为了让「工具改了但 op 没跟上」立刻变红。
+    expect(r.op).toBe("files_list");
     expect(r.request_id.length).toBeGreaterThan(0);
   });
 });
@@ -435,7 +438,13 @@ describe("update_node_config 响应键集（exact key set）", () => {
       let last: any = null;
       for (let i = 0; i < 10; i++) last = await tool(ntok, "org_whoami", {});
       expect(Object.keys(last)).toContain("pacing");
-      expect(typeof last.pacing).toBe("object");
+      // 2026-10-31 —— #3214 收尾：`typeof === "object"` 换成键集（PollPacing 恰好三键）。
+      // 「有个对象」不能证明这个提示可用：客户端要读 recommended_interval_seconds 才停得下来。
+      expect(Object.keys(last.pacing).sort()).toEqual([
+        "calls_last_60s", "note", "recommended_interval_seconds",
+      ]);
+      expect(last.pacing.calls_last_60s).toBeGreaterThanOrEqual(8);   // 阈值 8 次/60 秒
+      expect(last.pacing.recommended_interval_seconds).toBeGreaterThan(0);
     });
   });
 
