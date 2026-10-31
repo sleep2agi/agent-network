@@ -157,6 +157,14 @@ describe("GET /api/skills", () => {
     const back = await get(`/api/providers?network_id=${ownerNet}`, ownerToken);
     expect(back.body.state).toBe("configured");
     expect(back.body.counts.models_enabled).toBeGreaterThan(0);
+
+    // 2026-10-31 —— **形状测试必须先证明输入彼此不同，再断言各自属性**
+    // （外部复核 ③：「顺序不能反：先断言几种形状的字节两两不等，再断言各自含有应有的属性；
+    //   反过来时『四种其实是一种』也能全绿。」）
+    // 这里是三态：删掉 state 之后，三份载荷必须两两不同 —— 否则「三态」只是同一个载荷换了标签。
+    const strip = (b: any) => { const { state: _s, ...rest } = b; return JSON.stringify(rest); };
+    const three = [strip(before.body), strip(disabled.body), strip(back.body)];
+    expect(new Set(three).size).toBe(3);
   });
 
   test("a member of another network is refused", async () => {
