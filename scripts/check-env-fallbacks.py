@@ -29,6 +29,13 @@ REPO = Path(__file__).resolve().parent.parent
 SCAN = ("*.ts",)
 EXCLUDE_PARTS = ("node_modules", "dist", "fixtures", ".worktrees")
 
+# 2026-10-31 —— **第三类：静态看不见的读法**（外部复核 (a)：把「检测不到的」单列，
+# 而不是让它默认缺席 ——「`opaque=0` 现在只表示『有检测器的形状里没有』」）。
+#   process.env[someVar]   ⇒ 键名在运行期才确定，配对检测器**结构上看不见**
+# 单列成 not_detectable，并给计数；它不判红，但必须出现在报告里，
+# 否则「0 处错借」会被读成「全仓都查过了」。
+DYNAMIC_READ = re.compile(r"process\.env\[\s*[^\]'\"]")
+
 # 跨 env 回退：(A, B) —— A 缺失时借 B。
 # 2026-10-31 —— 两种宿主都要认：
 #   process.env.X || process.env.Y          （直接读全局）
@@ -100,6 +107,24 @@ def tracked() -> list[Path]:
     return files
 
 
+def dynamic_reads() -> list[str]:
+    """列出 `process.env[<非字面量>]` 的位置（静态不可见的读法）。"""
+    out: list[str] = []
+    for p in REPO.rglob("*.ts"):
+        if any(part in p.parts for part in EXCLUDE_PARTS) or ".test." in p.name:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("//"):
+                continue
+            if DYNAMIC_READ.search(line):
+                out.append(f"{p.relative_to(REPO)}:{i}")
+    return out
+
+
 def scan() -> tuple[list[dict], int]:
     hits, files = [], 0
     for p in tracked():
@@ -164,6 +189,12 @@ def selftest(quiet: bool = False) -> int:
             print(f"  {'✓' if ok else '✗'} {label}（期望 {want}，实际 {got}）")
         fails += 0 if ok else 1
 
+    # must-fire：动态读法必须被认出来；字面量读法不许被误收
+    dyn_ok = bool(DYNAMIC_READ.search('const a = process.env[NAME];')) and not DYNAMIC_READ.search('const a = process.env.NAME;')
+    if not quiet:
+        print(f"  {'✓' if dyn_ok else '✗'} not_detectable 谓词：只认 process.env[<非字面量>]")
+    fails += 0 if dyn_ok else 1
+
     if not KNOWN_BORROW:
         if not quiet:
             print("  ✓ selftest KNOWN_BORROW 为空（本仓目前没有已判定的错借）")
@@ -212,6 +243,14 @@ def main(argv: list[str]) -> int:
         print(f"    ✗ 别名表条目缺「理由 + 删除条件」：{k[0]} → {k[1]}（{v!r}）", file=sys.stderr)
     if KNOWN_ALIAS:
         print(f"  · 别名表 {len(KNOWN_ALIAS)} 条，每条都带删除条件（示例：{list(KNOWN_ALIAS)[0][0]} → {list(KNOWN_ALIAS)[0][1]}）")
+    # 2026-10-31 —— **第三类：静态看不见的读法**。它不判红，但必须出现在报告里，
+    # 否则「0 处错借」会被读成「全仓都查过了」——而 `process.env[<变量>]` 这段根本不在本门的视野里。
+    dyn = dynamic_reads()
+    print(f"  · not_detectable：{len(dyn)} 处 `process.env[<非字面量>]`（键名运行期才定 ⇒ 本门看不见）")
+    for d in dyn[:5]:
+        print(f"      {d}")
+    if len(dyn) > 5:
+        print(f"      …（共 {len(dyn)} 处）")
     for k, v in stale:
         print(f"    ✗ 别名表 0 命中且未说明：{k[0]} → {k[1]} ⇒ 它不再覆盖任何代码，"
               f"却对**未来任何文件**生效；要么删掉，要么写 `zero-hits-ok: <为什么>`.", file=sys.stderr)
