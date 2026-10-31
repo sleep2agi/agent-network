@@ -18,11 +18,18 @@
 from __future__ import annotations
 
 THREAT_MODELS = ("accident", "adversary")
+# 2026-10-31 —— 外部复核 (c)：「断言须写成 (命题, 定义域, 观测点, 可信度)，并加 verified_on」。
+# 这一格回答的是「这个读数在哪里成立的」：本机直跑 ≠ CI 跑过 ≠ 线上跑过。
+# 少了它，「本仓 0 命中」会被当成「线上安全」——而那是两件事。
+VERIFIED_ON = ("local", "ci", "production", "unknown")
 
 
-def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_rule: str) -> None:
+def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_rule: str,
+                verified_on: str = "local") -> None:
     if threat_model not in THREAT_MODELS:
         raise SystemExit(f"内部错误：threat_model 必须是 {THREAT_MODELS} 之一，收到 {threat_model!r}")
+    if verified_on not in VERIFIED_ON:
+        raise SystemExit(f"内部错误：verified_on 必须是 {VERIFIED_ON} 之一，收到 {verified_on!r}")
     for name, value in (("covers", covers), ("does_not_cover", does_not_cover),
                         ("threat_model", threat_model), ("reading_rule", reading_rule)):
         if not value or not str(value).strip():
@@ -32,6 +39,7 @@ def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_
     print(f"  does_not_cover : {does_not_cover}")
     print(f"  threat_model   : {threat_model}")
     print(f"  reading_rule   : {reading_rule}")
+    print(f"  verified_on    : {verified_on}（这个读数在哪里成立；local ≠ CI ≠ 线上）")
 
 
 def selftest() -> int:
@@ -42,6 +50,7 @@ def selftest() -> int:
         ("空 does_not_cover", dict(covers="x", does_not_cover="  ", threat_model="accident", reading_rule="x")),
         ("非法 threat_model", dict(covers="x", does_not_cover="x", threat_model="maybe", reading_rule="x")),
         ("空 reading_rule", dict(covers="x", does_not_cover="x", threat_model="adversary", reading_rule="")),
+        ("非法 verified_on", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", verified_on="somewhere")),
     ]
     for label, kwargs in cases:
         try:
@@ -52,5 +61,5 @@ def selftest() -> int:
             fails += 1
             print(f"  ✗ selftest {label} ⇒ 居然输出了")
     if fails == 0:
-        print("  ✓ selftest 4/4：四个字段缺任何一个都不会输出")
+        print("  ✓ selftest 5/5：五个字段缺任何一个/取值不在闭集都不会输出")
     return 0 if fails == 0 else 1
