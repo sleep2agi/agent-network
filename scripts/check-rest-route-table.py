@@ -52,6 +52,11 @@ def main() -> int:
     if "--update" in sys.argv:
         DATAFILE.write_text(fresh, encoding="utf-8")
         print(f"✓ 已写入 {DATAFILE.relative_to(REPO)}")
+        # 2026-10-31 —— **证据列加一格：这次执行有没有改动被观测对象**。
+        # 「可重跑」不等于「幂等」：带 --update 的这一次**改变了仓库内容**，
+        # 于是它与上一次「只比较」的读数描述的不是同一个对象。
+        print(f"  mutates_subject: YES（写入 {DATAFILE.relative_to(REPO)}；"
+              f"下一次比较的基线已被这次执行改变）")
         return 0
     if not DATAFILE.exists():
         print(f"✗ 缺 {DATAFILE.relative_to(REPO)}；先跑 --update", file=sys.stderr)
@@ -60,6 +65,7 @@ def main() -> int:
     if committed == fresh:
         n = len(json.loads(fresh)["rows"])
         print(f"✓ 路由表草稿与源码一致（{n} 行）")
+        print("  mutates_subject: no（只读比较；本次执行未改变被观测文件）")
         print("  check: 重跑本脚本；源码里新增/移动一条匹配 ⇒ 这里会红，直到 --update。")
         return 0
 
@@ -73,6 +79,7 @@ def main() -> int:
     ra = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in a.get("rows", [])}
     rb = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in b.get("rows", [])}
     gone, new = sorted(ra - rb), sorted(rb - ra)
+    print("  mutates_subject: no（只读比较；未写入任何文件）")
     print(f"✗ 路由表草稿**已过期**：文件 {len(a.get('rows', []))} 行 / 现在 {len(b.get('rows', []))} 行", file=sys.stderr)
     for g in gone[:5]:
         print(f"    文件里有、源码里没有：{g}", file=sys.stderr)
