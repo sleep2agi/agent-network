@@ -27,18 +27,23 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 GATE_PATTERNS = ("check-*.py", "report-*.py", "check-*.sh")
 
-# 未接线的门必须在这里给出理由（空着 = 没有例外）
+# 未接线的门必须在这里给出理由（空着 = 没有例外）。
+# 理由必须以 [tag] 开头，tag 取自 UNWIRED_TAGS —— 散文负责说服人，tag 负责让机器能分支。
+UNWIRED_TAGS = ("report-only", "interactive", "needs-host", "excluded")
 KNOWN_UNWIRED: dict[str, str] = {
-    "scripts/check-claim-existence.py": "写报告前用的工具，不对代码下结论；不进 CI",
-    "scripts/check-control-run.sh": "本地对照运行工具（需要 git worktree），CI 里没有干净副本的意义",
-    "scripts/check-diff-shape.sh": "提交时用（配合 install-diff-shape-hook.sh），不是 CI 门",
-    "scripts/report-process-artifact-drift.py": "读数报告，非阻塞；有需求再接",
-    "scripts/report-code-producers.py": "读数报告（谁产出某字段），人工按需跑",
-    "scripts/report-mcp-key-set-coverage.py": "读数报告（键集覆盖率三口径），人工按需跑",
-    "scripts/report-node-versions.py": "读数报告（舰队版本分布），人工按需跑",
-    "scripts/report-reason-branches.py": "读数报告（按 reason 分支的处数），人工按需跑",
-    "scripts/report-rest-endpoints.py": "读数报告（路由清单草稿的生成来源），人工按需跑",
-    "scripts/report-table-driven-nonempty.py": "读数报告，人工按需跑",
+    # 2026-10-31 —— 外部复核：「只校验『非空字符串』，于是长散文用质量掩盖了缺席。
+    # 建议每个理由必带一个封闭枚举的**结构标签**」。⇒ 每条理由必须以 [tag] 开头，
+    # tag ∈ UNWIRED_TAGS；散文跟在后头（给人看），tag 给机器分支。
+    "scripts/check-claim-existence.py": "[report-only] 写报告前用的工具，不对代码下结论；不进 CI",
+    "scripts/check-control-run.sh": "[needs-host] 本地对照运行工具（需要 git worktree），CI 里没有干净副本的意义",
+    "scripts/check-diff-shape.sh": "[interactive] 提交时用（配合 install-diff-shape-hook.sh），不是 CI 门",
+    "scripts/report-process-artifact-drift.py": "[report-only] 读数报告，非阻塞；有需求再接",
+    "scripts/report-code-producers.py": "[report-only] 读数报告（谁产出某字段），人工按需跑",
+    "scripts/report-mcp-key-set-coverage.py": "[report-only] 读数报告（键集覆盖率三口径），人工按需跑",
+    "scripts/report-node-versions.py": "[report-only] 读数报告（舰队版本分布），人工按需跑",
+    "scripts/report-reason-branches.py": "[report-only] 读数报告（按 reason 分支的处数），人工按需跑",
+    "scripts/report-rest-endpoints.py": "[report-only] 读数报告（路由清单草稿的生成来源），人工按需跑",
+    "scripts/report-table-driven-nonempty.py": "[report-only] 读数报告，人工按需跑",
 }
 # 这些不是「门」，是库或测试工具，不参与接线检查
 NOT_A_GATE: set[str] = set()
@@ -111,6 +116,11 @@ def main(argv: list[str]) -> int:
         (wired if p.name in wf else unwired).append(p)
 
     bad_unwired = [str(p.relative_to(REPO)) for p in unwired if str(p.relative_to(REPO)) not in KNOWN_UNWIRED]
+    # 结构标签：理由不能只是散文（「用质量掩盖缺席」）
+    bad_tag = []
+    for rel, why in KNOWN_UNWIRED.items():
+        if not any(why.startswith(f"[{t}]") for t in UNWIRED_TAGS):
+            bad_tag.append((rel, why[:40]))
     # 白名单本身也要能对账：登记了却已经接线，说明白名单是过期照片
     stale_allow = [k for k in KNOWN_UNWIRED if all(k != str(p.relative_to(REPO)) for p in unwired)]
 
@@ -203,11 +213,13 @@ def main(argv: list[str]) -> int:
         print(f"    ✗ {f['gate']}  {f['why']}", file=sys.stderr)
     for g in bad_unwired:
         print(f"    ✗ 未接线且没登记理由：{g}", file=sys.stderr)
+    for rel, why in bad_tag:
+        print(f"    ✗ 理由缺结构标签（须以 [{'|'.join(UNWIRED_TAGS)}] 开头）：{rel} —— {why}…", file=sys.stderr)
     for k in stale_allow:
         print(f"    · 白名单已过期（该门现在已接线）：{k}")
     for rel, why in stale_debt:
         print(f"    ✗ 欠账名单过期：{rel} —— {why}（把基线改宽不算修好）", file=sys.stderr)
-    if failures or bad_unwired or stale_debt:
+    if failures or bad_unwired or stale_debt or bad_tag:
         return 1
     # 2026-10-31 —— 外部复核：「分类表已经存在，但全仓 grep 是**写 1 处、读 0 处**
     # ⇒ 缺口不是『缺分类』，是『分类没有消费者』」。
