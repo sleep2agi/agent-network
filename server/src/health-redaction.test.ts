@@ -188,6 +188,47 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(after.counters.task_rejections.total).toBe(beforeTotal);
   });
 
+  // 2026-10-31 —— 出口清单里最后一行空 pinned_by：**请求体超限**（Bun maxRequestBodySize）。
+  // 它是**运行时在 fetch() 之前**拒绝的：我们的代码一行都没跑 ⇒ 不可能计数。
+  // 这一条钉住的是「不计数」，而它最容易怀疑的方向恰好相反（"那么大一个请求，肯定记了吧"）。
+  test("KNOWN GAP: body over runtime maxRequestBodySize is NOT counted (rejected before fetch())", async () => {
+    const read = async () => (await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any);
+    const before = await read();
+    const huge = "x".repeat(MAX_REQUEST_CONTENT_LENGTH + 1024);
+    let status: number | null = null;
+    let rejectedAtTransport = false;
+    try {
+      const r = await fetch(`${BASE}/api/task`, {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${userToken}` },
+        body: huge,
+      });
+      status = r.status;
+      await r.text();
+    } catch {
+      rejectedAtTransport = true;
+    }
+    const after = await read();
+    // 形态有两条：运行时回 413，或传输层直接断（两者都算「没到我们的代码」）。
+    // 本机实测：**status=413**（Bun 在 fetch() 之前就回了，响应体不是我们的 handler 生成的）。
+    expect(rejectedAtTransport || status === 413).toBe(true);
+
+    // 2026-10-31 —— **否定断言必须配镜像**：上面「没计数」在「这条路由根本不通」时也成立。
+    // ⇒ 同一条路由 + 同一组鉴权头，用小请求体必须**走到 handler**（拿到 HTTP 状态码）。
+    //   两条合起来才说明：计数没变是**因为这个请求太大了**，不是因为这条路本来就不计数。
+    const control = await fetch(`${BASE}/api/task`, {
+      method: "POST",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${userToken}` },
+      body: JSON.stringify({}),
+    });
+    expect(control.status).toBeGreaterThanOrEqual(200);
+    await control.text();
+    if (after.counters.task_rejections.total !== before.counters.task_rejections.total) {
+      throw new Error("已知缺口已被修复？超限请求体现在会计数了 —— 请更新 TASK_REJECTION_EXITS 与这条测试。");
+    }
+    expect(after.counters.task_rejections.total).toBe(before.counters.task_rejections.total);
+  });
+
   // 2026-10-31 —— 出口清单里「before_route_table」那一行原本 pinned_by 为空（= 缺口）。
   // 补上它的钉：未匹配的 /api/* 在路由表之前就 404，**不经过 handler，也不计数**。
   // 这一条同时是「清单要能被一次坏输入打出来」的实例（对方那句）。
