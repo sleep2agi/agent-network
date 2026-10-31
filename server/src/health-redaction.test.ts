@@ -769,7 +769,8 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     if (dbBad) {
       expect(b.sessions_count).toBeNull();
     } else {
-      expect(typeof b.sessions_count).toBe("number");
+      expect(Number.isInteger(b.sessions_count)).toBe(true);
+      expect(b.sessions_count).toBeGreaterThanOrEqual(0);   // 类型不是断言
     }
   });
 
@@ -1654,8 +1655,12 @@ describe("#473 GET /api/stats/sse — detail survives, behind ops auth", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.ok).toBe(true);
-    expect(typeof body.total).toBe("number");
+    expect(Number.isInteger(body.total)).toBe(true);
+    expect(body.total).toBeGreaterThanOrEqual(0);          // 类型不是断言
     expect(body.sessions[`${userNetworkId}:${userName}`]).toBeGreaterThanOrEqual(1);
+    // 结构关系：total 必须等于各计数之和（否则「总数」与「明细」是两个读数）
+    const detailSum = Object.values(body.sessions as Record<string, number>).reduce((a, b) => a + b, 0);
+    expect(detailSum).toBe(body.total);
   });
 
   test("legacy master token → 200 (ops path — restAuth null, isLegacyAuthToken)", () => {
