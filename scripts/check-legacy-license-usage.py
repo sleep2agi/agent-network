@@ -193,6 +193,8 @@ def main() -> int:
         does_not_cover="*.test.ts / 非 TS 文件 / 动态属性名（obj[k]）/ 跨仓消费者",
         threat_model="accident",
         reading_rule="域内 0 处只在同一次输出里打印了「域外白名单 3 条」时才有意义（域太窄的绿是假绿）",
+        domain_count=files,
+        domain_source="git ls-files *.ts（不含 *.test.ts）",
     )
     print("  check : 重跑本脚本；新增 `.license` 读取 ⇒ 红。")
     return 0

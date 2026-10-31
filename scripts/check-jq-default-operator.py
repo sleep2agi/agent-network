@@ -132,14 +132,14 @@ def main(argv: list[str]) -> int:
         print(f"    · {h['file']}:{h['line']}  {h['text']}")
     if open_hits:
         print("  ⇒ 缺席折叠成通过：把 `// true` 改成显式三态（有值 / 缺失 / false 分别处理）。", file=sys.stderr)
-        _print_scope_block()
+        _print_scope_block(files)
         return 1
     print("  ✓ 没有把「缺席」折成「通过」的地方（fail-closed 的折叠仍会丢信息，但不会误放行）")
-    _print_scope_block()
+    _print_scope_block(files)
     return 0
 
 
-def _print_scope_block() -> None:
+def _print_scope_block(files: int) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
     from scope_block import print_scope  # noqa: E402
     print_scope(
@@ -147,6 +147,8 @@ def _print_scope_block() -> None:
         does_not_cover="运行期拼出来的 jq 表达式 / 非仓库文件 / 变量里存的过滤器 / .yaml 与 .txt",
         threat_model="accident",
         reading_rule="0 处只在「同一次扫描里 fail-closed 折叠 2 处」被同时打印时才有意义（它证明扫描器在动）",
+        domain_count=files,
+        domain_source="git ls-files *.sh/*.ts/*.md，减去 EXCLUDED_DIRS/GLOBS",
     )
 
 

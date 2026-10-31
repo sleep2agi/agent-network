@@ -824,6 +824,8 @@ def main() -> int:
                 does_not_cover="运行期拼出来的比较 / 其它仓库 / 测试文件（只列举不判断）/ 动态语言特性",
                 threat_model="accident",
                 reading_rule="「0 阻塞」只在同一次输出里阳性对照（宽形状 join 命中数）非 0 时才成立",
+                domain_count=len(files),
+                domain_source="git ls-files（按 SRC 扩展名过滤，排除 EXCLUDE_SEGMENTS）",
                 verified_on="local",
             )
         except Exception:

@@ -135,6 +135,8 @@ def main(argv: list[str]) -> int:
         does_not_cover="tests/ 与 docs/ 里的固定 /tmp（量大且多为失败现场取证）/ 运行期拼出来的路径 / $TMPDIR 变体",
         threat_model="accident",
         reading_rule="「34 处全登记」只在同时打印 mktemp 次数（7）时才有意义：它说明两类写法都在被数",
+        domain_count=files,
+        domain_source="scripts/ 下 rglob(*.sh)（不经 git，能扫到未提交脚本）",
     )
     return 0
 

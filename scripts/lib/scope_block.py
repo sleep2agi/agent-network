@@ -25,7 +25,16 @@ VERIFIED_ON = ("local", "ci", "production", "unknown")
 
 
 def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_rule: str,
-                verified_on: str = "local") -> None:
+                verified_on: str = "local", domain_count: int | None = None,
+                domain_source: str = "") -> None:
+    """domain_count / domain_source —— 2026-10-31 外部复核 ④：
+
+    「定义域也是一个集合，就必须有分母和来源；手写的定义域基数会在下一次重构后
+      变成假命题，而它长得完全正常。」
+
+    ⇒ 这两个参数**必填**：任何一个门说「我扫了 X」，都要能说清 X 有多少、那个数是哪来的
+      （git ls-files / rglob / 显式清单）。缺一个就拒绝输出。
+    """
     if threat_model not in THREAT_MODELS:
         raise SystemExit(f"内部错误：threat_model 必须是 {THREAT_MODELS} 之一，收到 {threat_model!r}")
     if verified_on not in VERIFIED_ON:
@@ -34,23 +43,31 @@ def print_scope(*, covers: str, does_not_cover: str, threat_model: str, reading_
                         ("threat_model", threat_model), ("reading_rule", reading_rule)):
         if not value or not str(value).strip():
             raise SystemExit(f"内部错误：SCOPE 的 {name} 不能为空（空着等于没有边界）")
+    if not isinstance(domain_count, int) or domain_count <= 0:
+        raise SystemExit("内部错误：domain_count 必填且必须为正整数（「扫了 X」要能说清 X 有多少）")
+    if not domain_source or not str(domain_source).strip():
+        raise SystemExit("内部错误：domain_source 必填（那个数是哪来的：git ls-files / rglob / 显式清单）")
     print("SCOPE")
     print(f"  covers         : {covers}")
     print(f"  does_not_cover : {does_not_cover}")
     print(f"  threat_model   : {threat_model}")
     print(f"  reading_rule   : {reading_rule}")
+    print(f"  domain_count   : {domain_count}（{domain_source}）")
     print(f"  verified_on    : {verified_on}（这个读数在哪里成立；local ≠ CI ≠ 线上）")
 
 
 def selftest() -> int:
     """四个字段缺一个都必须炸 —— 否则「有 SCOPE 块」会退化成「有个块」。"""
     fails = 0
+    ok_args = dict(domain_count=1, domain_source="selftest")
     cases = [
-        ("空 covers", dict(covers="", does_not_cover="x", threat_model="accident", reading_rule="x")),
-        ("空 does_not_cover", dict(covers="x", does_not_cover="  ", threat_model="accident", reading_rule="x")),
-        ("非法 threat_model", dict(covers="x", does_not_cover="x", threat_model="maybe", reading_rule="x")),
-        ("空 reading_rule", dict(covers="x", does_not_cover="x", threat_model="adversary", reading_rule="")),
-        ("非法 verified_on", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", verified_on="somewhere")),
+        ("空 covers", dict(covers="", does_not_cover="x", threat_model="accident", reading_rule="x", **ok_args)),
+        ("空 does_not_cover", dict(covers="x", does_not_cover="  ", threat_model="accident", reading_rule="x", **ok_args)),
+        ("非法 threat_model", dict(covers="x", does_not_cover="x", threat_model="maybe", reading_rule="x", **ok_args)),
+        ("空 reading_rule", dict(covers="x", does_not_cover="x", threat_model="adversary", reading_rule="", **ok_args)),
+        ("非法 verified_on", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", verified_on="somewhere", **ok_args)),
+        ("缺 domain_count", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", domain_source="selftest")),
+        ("缺 domain_source", dict(covers="x", does_not_cover="x", threat_model="accident", reading_rule="x", domain_count=3)),
     ]
     for label, kwargs in cases:
         try:
@@ -61,5 +78,5 @@ def selftest() -> int:
             fails += 1
             print(f"  ✗ selftest {label} ⇒ 居然输出了")
     if fails == 0:
-        print("  ✓ selftest 5/5：五个字段缺任何一个/取值不在闭集都不会输出")
+        print("  ✓ selftest 7/7：缺少任一边界字段（含 domain_count / domain_source）都不会输出")
     return 0 if fails == 0 else 1
