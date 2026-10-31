@@ -83,6 +83,8 @@ EXCLUDE_SEGMENTS = (
 
 # `sort()` 紧跟 `join(...)`
 SET_JOIN = re.compile(r"\.sort\s*\(\s*\)\s*\.join\s*\(\s*([^)]*?)\s*\)")
+# 与目标**同位置**的对照：目标 = `.sort().join(…)`，它的前一段就是 `.sort()`。
+SORT_CALL = re.compile(r"\.sort\s*\(\s*\)")
 # 任意 join（用于 fail-closed 的第二档）
 ANY_JOIN = re.compile(r"\.join\s*\(\s*([^)]*?)\s*\)")
 # 2026-10-31 —— **别把「没有 join」当成「没有拼接」**（外部复核：「『没有人碰过它』
@@ -178,6 +180,12 @@ def scan_paths(files: list[Path], repo: Path):
     # 🔴 阳性对照：正则若因重构失效，全仓会「干净地」报 0 —— 与真的没有违规同形。
     #    所以同时数一个**必须命中**的宽形状（任意 .join( ）；它为 0 就是判据坏了，不是代码干净。
     any_join_hits = 0
+    # 2026-10-31 —— **阳性对照必须与目标在同一位置成立**（外部复核 ④：
+    # 「宽形状 .join( 命中 1510 ⇒ 只证明工具跑起来了，不证明它看得见目标位置；
+    #   目标形状带一个锚，而语料里那个锚总被别的语法打断 ⇒ 1510 与 0 同时成立」）。
+    # 本门的锚是 `.sort()`：如果 SORT_CALL 一条都匹配不到，而宽形状仍有命中，
+    # 那么「0 处键集比较」可能只是**锚坏了**，不是语料里没有。
+    sort_call_hits = 0
     for path in files:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -190,6 +198,7 @@ def scan_paths(files: list[Path], repo: Path):
         scanned += 1
         test_file = is_test_path(rel)
         any_join_hits += len(ANY_JOIN.findall(text))
+        sort_call_hits += len(SORT_CALL.findall(text))
         lines = text.splitlines()
         # 本文件内「键集派生」的标识符 —— 但**只在它没被改写时**才算键集。
         #
@@ -337,7 +346,7 @@ def scan_paths(files: list[Path], repo: Path):
                 push(review if test_file else blocking, n, label, snip)
             else:
                 push(review if test_file else advisory, n, f"{label}（未检测到比较）", snip)
-    return blocking, unproven, advisory, review, scanned, any_join_hits
+    return blocking, unproven, advisory, review, scanned, (any_join_hits, sort_call_hits)
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +678,8 @@ def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
     repo = Path(__file__).resolve().parent.parent
-    blocking, unproven, advisory, review, scanned, any_join_hits = scan(repo)
+    blocking, unproven, advisory, review, scanned, controls = scan(repo)
+    any_join_hits, sort_call_hits = controls
 
     # 🔴 先跑控制，再打结论。
     #
@@ -684,6 +694,12 @@ def main() -> int:
     if any_join_hits == 0:
         print("✗ 阳性对照失败：全仓连一个 `.join(` 都没找到", file=sys.stderr)
         print("  ⇒ 可能是正则/扫描域坏了，或仓库为空 —— 此刻的 0 **不能**读成“没有违规”。", file=sys.stderr)
+        controls_failed = True
+    # 与目标**同位置**的对照：目标形状是 `.sort().join(…)`，它的锚是 `.sort()`。
+    # 宽形状非 0 只说明「工具跑起来了」；锚为 0 才说明「它看不见目标位置」。
+    if sort_call_hits == 0:
+        print("✗ 同位置对照失败：全仓一个 `.sort()` 都没有 ⇒ 锚可能坏了", file=sys.stderr)
+        print("  ⇒ 此时「0 处键集比较」不能读成“这种写法不存在”。", file=sys.stderr)
         controls_failed = True
     # 2026-10-31 —— 「先证仪器，再读世界」。
     # 只证明「宽形状非 0」不够：分类器若塌陷，会把命中全判成不阻塞
@@ -727,7 +743,8 @@ def main() -> int:
 
     print(f"✓ 扫描 {scanned} 个源文件（已排除构建产物 / node_modules）")
     # 2026-10-31 —— 对照要分两维，别拿「在别处命中」冒充「看得见目标」。
-    print(f"✓ control_breadth：宽形状 `.join(` 命中 {any_join_hits} 次")
+    print(f"✓ control_breadth：宽形状 `.join(` 命中 {any_join_hits} 次（证明工具跑起来了）")
+    print(f"✓ control_same_position：`.sort()` 命中 {sort_call_hits} 次（证明它看得见目标位置的锚）")
     print("                   ⇒ 只证明「工具跑起来了」，**不证明它看得见目标上下文**")
     print("✓ control_position：selftest 8 例覆盖目标上下文（同行 / 跨行 / 变量拆分 / 负例）")
     print("                   ⇒ 这一条才支撑「0 处」读成「那种写法不存在」")
