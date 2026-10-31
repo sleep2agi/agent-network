@@ -42,7 +42,15 @@ GATE_ARGS: dict[str, list[str]] = {}
 # 实际是它要一个报告文件（卡/文档全文）当输入，而巡检没给。
 # ⇒ 「我这次没喂它」与「它喂了也说不出话」是两件事，报告要分开。
 NEEDS_INPUT: dict[str, str] = {
+    # 2026-10-31 —— 给它一个**稳定输入**，而不是永远记「未运行」。
+    # 一份永远「未运行」的条目等于把这一层从巡检里删掉（这是本文件自己写过的判据）。
+    # docs/RELEASE-SOP.md 今天 124 个反引号标识符全部命中 ⇒ 它同时是这条门的**正控**：
+    # 若哪天它开始红，要么文档点名了不存在的脚本，要么门的谓词坏了 —— 两者都该被看见。
     "check-claim-existence.py": "需要一个报告/卡全文作为输入（把里面的反引号标识符逐个 grep）",
+}
+# NEEDS_INPUT 的默认输入：有它就不再是 not-run
+NEEDS_INPUT_ARGS: dict[str, list[str]] = {
+    "check-claim-existence.py": ["docs/RELEASE-SOP.md"],
 }
 
 
@@ -69,7 +77,7 @@ def run(cmd: list[str], timeout: int) -> tuple[int, str]:
 def gates(timeout: int) -> list[dict]:
     out: list[dict] = []
     for p in sorted(GATES_DIR.glob("check-*.py")):
-        if p.name in NEEDS_INPUT:
+        if p.name in NEEDS_INPUT and p.name not in NEEDS_INPUT_ARGS:
             # 2026-10-31 —— 「这次没喂输入」与「它不会红」是两件事。
             # 前者是 not-run（状态），后者是能力问题（can_go_red）。
             # 原来这里直接 continue ⇒ 需要输入的门被记成「不能证明会红」，
@@ -80,7 +88,8 @@ def gates(timeout: int) -> list[dict]:
             out.append({"layer": "gate", "name": p.name, "exit": None, "state": "not-run",
                         "detail": f"未运行：{NEEDS_INPUT[p.name]}", "can_go_red": self_rc_nei == 0})
             continue
-        args = [sys.executable, str(p.relative_to(REPO))] + GATE_ARGS.get(p.name, [])
+        args = [sys.executable, str(p.relative_to(REPO))] + GATE_ARGS.get(p.name, []) \
+            + NEEDS_INPUT_ARGS.get(p.name, [])
         rc, txt = run(args, timeout)
         # 另一个问题：**它会不会红**（能力），与「今天红不红」（现状）无关。
         # 对 .sh/.mjs 用对应解释器（元门里也踩过同一个坑）。
