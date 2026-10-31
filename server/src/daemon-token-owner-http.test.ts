@@ -142,13 +142,24 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect((await call(legacy, "list_my_children")).children).toContainEqual({ child_node_id: child, alias: child, lifecycle_state: "active", managed: "adopted", binding_request_id: requestId });
   const stop = await call(owner.token, "stop_node", { node_id: child, network_id: owner.network_id });
   expect(stop.ok).toBe(true);
-  expect((await call(legacy, "get_stop_request", { request_id: stop.request_id })).ok).toBe(true);
+  // 2026-10-31 —— #3275 批次 2：get_stop_request 的**成功体**键集（daemon 按字段名读，
+  // 尤其 delete_config / grace_seconds / force 三个决定它要不要删配置）
+  const gotStop = await call(legacy, "get_stop_request", { request_id: stop.request_id });
+  expect(gotStop.ok).toBe(true);
+  expect(Object.keys(gotStop).sort()).toEqual([
+    "action", "child_alias", "child_node_id", "delete_config", "force", "grace_seconds", "ok", "request_id",
+  ]);
   const stoppedAck = await call(legacy, "ack_stop_request", { request_id: stop.request_id, status: "stopped" });
   expect(stoppedAck.ok).toBe(true);
   expect(Object.keys(stoppedAck).sort()).toEqual(["ok", "status"]);   // #3275：成功体键集
   const start = await call(owner.token, "start_node", { node_id: child, network_id: owner.network_id });
   expect(start.ok).toBe(true);
-  expect((await call(legacy, "get_start_request", { request_id: start.request_id })).ok).toBe(true);
+  const gotStart = await call(legacy, "get_start_request", { request_id: start.request_id });
+  expect(gotStart.ok).toBe(true);
+  // 成功体：四个固定键 + start_completion_capable；fork_recovery 只在「创建即恢复」路径出现（条件键）
+  expect(Object.keys(gotStart).sort()).toEqual([
+    "child_alias", "child_node_id", "ok", "request_id", "start_completion_capable",
+  ]);
   const startedAck = await call(legacy, "ack_start_request", { request_id: start.request_id, status: "started", child_pid: 4321 });
   expect(startedAck).toMatchObject({ ok: true, status: "started" });
   expect(Object.keys(startedAck).sort()).toEqual(["ok", "status"]);   // #3275：成功体键集
