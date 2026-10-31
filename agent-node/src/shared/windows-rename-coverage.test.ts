@@ -38,6 +38,8 @@ const ALLOWED: Record<string, string> = {
     "quarantine 目录搬运（唯一一处残留是 path → quarantine）：目录级、且之后有校验；与文件被占用不是同一类失败。",
   "shared/opencode-borrowed-launch-health.ts":
     "#1226 要求本文件与 agent-network 里那份**逐字节相同**(测试用 cmp 比对)，而两个包里 helper 的相对路径不同(agent-node 有 shared/，agent-network 只有 src/)。保持字节一致优先：此处保留裸 rename，交换代价是这两个包的目录布局，不在本卡范围。",
+  "runtime/restart-intent.ts":
+    "只剩**清理**一处：把读不出来的 restart-intent 改名成 .bad-<ts>。改名失败不阻塞启动（catch 后继续），重试只会把「一份坏文件还在原地」拖成更久的启动等待 —— 与「原子写覆盖一个被占用的目标」不是同一类。",
   "shared/windows-rename-retry.ts":
     "helper 自身（内部就是要调用一次裸 rename）。",
 };

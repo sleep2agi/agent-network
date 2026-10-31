@@ -48,6 +48,7 @@
 // 让「计划内的退出」在事后仍然可读。
 
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { join } from "node:path";
 
 export const RESTART_INTENT_FILE = "restart-intent.json";
@@ -90,7 +91,10 @@ export function writeRestartIntent(dir: string, intent: RestartIntent): void {
   const target = join(dir, RESTART_INTENT_FILE);
   const tmp = `${target}.tmp-${process.pid}`;
   writeFileSync(tmp, `${JSON.stringify(intent)}\n`, { encoding: "utf8", mode: 0o600 });
-  renameSync(tmp, target);
+  // 2026-10-31 —— 这里原来是裸 `renameSync(tmp, target)`：#2224 的整类（Windows 上目标被别的
+  // 句柄打开时 EPERM/EBUSY/EACCES，POSIX 永远成功 ⇒ Linux CI 看不见）。
+  // 这正是 `windows-rename-retry.ts` 存在的理由 —— 换成有界重试版本。
+  renameOverExistingSync(tmp, target);
 }
 
 /**
