@@ -812,6 +812,22 @@ def main() -> int:
     if not blocking:
         print("  prevalence     : 键集比较点 = **0 处** ⇒ 这个绿**不是在保护现有实现**，")
         print("                   而是在阻止将来引入那种写法（它现在守着一块空地）")
+    # 2026-10-31 —— SCOPE 五字段（外部复核：让结论带着边界一起出门）
+    _lib = Path(__file__).resolve().parent / "lib"
+    if _lib.is_dir():
+        import sys as _sysx
+        _sysx.path.insert(0, str(_lib))
+        try:
+            from scope_block import print_scope
+            print_scope(
+                covers="本仓非测试源文件里、源码可见的 .sort().join(...) 之后紧跟比较的键集拼接点",
+                does_not_cover="运行期拼出来的比较 / 其它仓库 / 测试文件（只列举不判断）/ 动态语言特性",
+                threat_model="accident",
+                reading_rule="「0 阻塞」只在同一次输出里阳性对照（宽形状 join 命中数）非 0 时才成立",
+                verified_on="local",
+            )
+        except Exception:
+            pass
     return 1 if blocking else 0
 
 

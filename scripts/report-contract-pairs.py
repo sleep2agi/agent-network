@@ -336,6 +336,22 @@ def main() -> int:
     if missing:
         print(f"\n· 基线条目已不成立 {len(missing)} 组（不再是逐字符相同）：{', '.join(missing[:5])}", file=sys.stderr)
     print("check  : 重跑本脚本；新增同名文件会出现在表里，方向差与副本分叉都要显式看一眼。")
+    # 2026-10-31 —— SCOPE 五字段：让「31 组副本」这个数带着边界出门
+    _lib = Path(__file__).resolve().parent / "lib"
+    if _lib.is_dir():
+        import sys as _sysx
+        _sysx.path.insert(0, str(_lib))
+        try:
+            from scope_block import print_scope
+            print_scope(
+                covers="server/src ・ agent-node/src ・ agent-network/src 三个目录下、按 basename 同名的 .ts（不含 *.test.ts）",
+                does_not_cover="其它包 / tests 与 docs / 非 .ts / 运行期生成的代码",
+                threat_model="accident",
+                reading_rule="「31 组逐字符相同」只在同一次输出里「49 组同名」被同时打印时才有意义（分母是 49 不是 31）",
+                verified_on="local",
+            )
+        except Exception:
+            pass
     if "--assert" in sys.argv and (diverged or missing):
         # 分叉 = 判据副本不再逐字符相同 ⇒ 必须是一次显式决定（改回去 / 删基线行并说明）
         print(f"\n✗ 副本分叉或基线失效：diverged={len(diverged)} missing={len(missing)}", file=sys.stderr)
