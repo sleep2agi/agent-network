@@ -266,6 +266,22 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(Object.keys(agg.by_node)).toContain("unread-probe-node");
   });
 
+  // #3193 子卡 —— 拒绝次数的**总数**也必须匿名可读（明细 by_reason 仍留鉴权投影）。
+  test("#3193 拒绝计数：匿名给总数，by_reason 留鉴权", async () => {
+    const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
+    expect(PUBLIC_HEALTH_KEYS.has("task_rejections_total")).toBe(true);
+    expect(PUBLIC_HEALTH_KEYS.has("counters")).toBe(false);           // 明细不外泄
+    const { recordTaskRejection, taskRejectionCounters, resetTaskRejectionCounters } = await import("./rejection-counters.js");
+    resetTaskRejectionCounters();
+    recordTaskRejection(401, "invalid_token");
+    recordTaskRejection(401, "invalid_token");
+    recordTaskRejection(403, "forbidden");
+    const c = taskRejectionCounters();
+    expect(c.total).toBe(3);
+    expect(c.by_reason["401:invalid_token"]).toBe(2);
+    expect(c.by_reason["403:forbidden"]).toBe(1);
+  });
+
   // 2026-10-31 —— 出口清单里「before_route_table」那一行原本 pinned_by 为空（= 缺口）。
   // 补上它的钉：未匹配的 /api/* 在路由表之前就 404，**不经过 handler，也不计数**。
   // 这一条同时是「清单要能被一次坏输入打出来」的实例（对方那句）。

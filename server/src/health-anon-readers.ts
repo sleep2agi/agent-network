@@ -50,6 +50,8 @@ export const PUBLIC_HEALTH_KEY_READERS: Readonly<Record<string, AnonReaderEntry>
   // ⇒ 聚合走匿名投影；by_node 仍是拓扑，不给。
   task_expiries_never_consumed_total: { reader: "operator", why: "运维/agent 判断「派单硬闸有没有真的 fire 过」；只有总数，不含节点名" },
   counters_since: { reader: "operator", why: "上一条的窗口起点：计数器随重启归零，只有总数时「刚重启」与「一次都没发生」同值" },
+  // #3193 子卡 —— 与上一条同形：拒绝次数的总数给匿名，by_reason 明细留在鉴权投影。
+  task_rejections_total: { reader: "operator", why: "运维/agent 判断「今天拒了多少」而不必翻日志（日志轮转后 grep 会静默 0）" },
   auth: { reader: "cli", why: "客户端据此决定登录方式" },
   security: { reader: "cli", why: "客户端据此提示是否需要 TLS/密钥配置" },
   tmux: { reader: "cli", why: "共存 TUI 的前置检查" },

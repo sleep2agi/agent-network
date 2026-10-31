@@ -1057,6 +1057,8 @@ export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
   // #3271 —— 「到死没被取走」的**总数**（聚合，不含 by_node：节点名是拓扑）。
   // 配 counters_since 一起读：只有总数时，「进程刚重启」与「一次都没发生」同值。
   "task_expiries_never_consumed_total", "counters_since",
+  // 同一个理由：拒绝次数的**总数**是规模读数；by_reason 的明细留在鉴权投影。
+  "task_rejections_total",
   // 事件循环停顿是**一个对象**（event_loop: {max_gap_ms, recent_stalls,…}），
   // 不是我原先以为的三个顶层键 —— 死条目测试当场抓到了这一点。
   "event_loop",
@@ -1275,6 +1277,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   event_loop: { class: "gauge", granularity: "cumulative" },
   // #3271 —— 聚合计数：规模/强度，不含拓扑（by_node 留在鉴权投影里）。
   task_expiries_never_consumed_total: { class: "gauge", granularity: "cumulative" },
+  task_rejections_total: { class: "gauge", granularity: "cumulative" },
   counters_since: { class: "gauge", granularity: "label" },
   auth: { class: "gauge", granularity: "label" },
   security: { class: "gauge", granularity: "label" },
@@ -3847,6 +3850,8 @@ return Bun.serve({
         //    ⇒ 聚合值走匿名投影：**只给总数与窗口，不给 by_node**（节点名是拓扑，计数不是）。
         //    这也与 sessions_count 同一条取舍：规模可以公开，明细不行。
         task_expiries_never_consumed_total: neverConsumedExpiryCounters().total,
+        // #3193 子卡 —— 拒绝计数同一个缺口：原来只在鉴权投影里。聚合给匿名，by_reason 留鉴权。
+        task_rejections_total: taskRejectionCounters().total,
         // 窗口的另一端：计数器随进程重启归零，而「归零」与「没有发生」同值 ⇒ 必须配起点。
         counters_since: startedAtIso,
         // #496 — public, stable capability data. Dashboard upload proxies
