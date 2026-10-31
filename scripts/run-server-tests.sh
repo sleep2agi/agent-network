@@ -25,9 +25,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # 只认 packages 下真实存在的目录，拼错就报错 —— 不猜。
 PKG="server"
 PATTERNS=()
+# 2026-10-31 —— `--triage`：跑完自动按**失败原因**分档（report-server-test-triage.py）。
+# 为什么放在这里而不是让人记得再跑一次：今天我一共手动跑了三次这个组合，
+# 每次都靠记忆拼命令 —— 而「记得跑第二步」正是本仓反复栽的那类。
+TRIAGE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --pkg) PKG="${2:-}"; shift 2 ;;
+    --triage) TRIAGE=1; shift ;;
     *) PATTERNS+=("$1"); shift ;;
   esac
 done
@@ -50,21 +55,28 @@ if [ ${#FILES[@]} -eq 0 ]; then
   exit 2
 fi
 
+RUN_LOG="$(mktemp -u "/tmp/anet-pertest-run-XXXXXX.log")"
+: > "$RUN_LOG"
+trap 'rm -f "$RUN_LOG"' EXIT
 pass=0; fail=0; failed_list=""
 for f in "${FILES[@]}"; do
   db="$(mktemp -u "/tmp/anet-pertest-XXXXXX.db")"
   out=$(cd "$SERVER" && COMMHUB_DB="$db" timeout 600 bun test "$f" 2>&1)
+  # 🔴 rc 必须**紧接**在被测命令之后。我加 --triage 时把落盘那行插在中间，
+  # rc 于是一直读到 `>> LOG` 的 0 —— 而 `>>` 成功后 rc 就变成 0 了。
+  # 实测后果：hub-provider-config 明明 4 pass / 3 fail，脚本记成 PASS，汇总仍是全绿。
   rc=$?
+  { printf '%s\n' "$out"; } >> "$RUN_LOG"
   rm -f "$db"
   n=$(printf '%s' "$out" | grep -cE '^ *[0-9]+ pass$' || true)
   line=$(printf '%s' "$out" | grep -E '^ *[0-9]+ (pass|fail)$' | tr '\n' ' ')
   if [ $rc -eq 0 ]; then
     pass=$((pass + 1))
-    printf 'PASS %-56s %s\n' "$f" "$line"
+    printf 'PASS %-56s %s\n' "$f" "$line" | tee -a "$RUN_LOG"
   else
     fail=$((fail + 1))
     failed_list="$failed_list $f"
-    printf 'FAIL %-56s %s\n' "$f" "$line"
+    printf 'FAIL %-56s %s\n' "$f" "$line" | tee -a "$RUN_LOG"
     # 2026-10-31 —— **失败按根因归并**（外部复核：「812 不是 812 个缺陷，
     # 它是一次没有归并的输出；按条排队修它，永远修不完」）。
     # 这里只对**失败的文件**做归并输出，且不吞掉原输出（前 5 条仍在下面）。
@@ -89,6 +101,19 @@ if [ $((pass + fail)) -ne "$TOTAL" ]; then
 fi
 
 echo "逐文件结果：PASS=$pass FAIL=$fail ｜ 列出 $TOTAL ｜ 守恒 $((pass + fail))==$TOTAL（每个文件独立 DB 与进程）"
+
+if [ "$TRIAGE" = "1" ] && [ $fail -ne 0 ]; then
+  # 分档要用完整日志（含每个失败文件的失败块）。上面的循环逐行打印过，
+  # 但没留下文件；重跑一遍太贵，所以这里用**本次已打印的内容**重建：
+  # 让循环把输出 tee 到临时文件是更干净的做法，见下面 RUN_LOG。
+  echo
+  if [ -s "${RUN_LOG:-/dev/null}" ]; then
+    python3 "$ROOT/scripts/report-server-test-triage.py" "$RUN_LOG" || true
+  else
+    echo "  （--triage：本次没有留下运行日志，跳过；这是脚本 bug，不是「没有红」）" >&2
+  fi
+fi
+
 if [ $fail -ne 0 ]; then
   echo "  ⇒ 失败文件：$failed_list" >&2
   exit 1
