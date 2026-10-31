@@ -567,6 +567,12 @@ describe("GET /api/providers", () => {
       // ⇒ 换成两条能假、且各自守一件事的断言：
       //   ① 码清单与状态表的**键集相等**（新增一个码却没给状态 ⇒ 红）
       //   ② 每个值落在 HTTP 闭集里（有人写 299 / 0 ⇒ 红）
+      // 2026-10-31 —— **值域由代码导出时，先证它非空**（外部复核：
+      // 「若导出为空 ⇒ 谓词变成空值域 ⇒ 负断言『不得出现 ∈ ∅』恒真；
+      //   比手写更危险：手写至少会写错成一个大集合，导出失败会变成空集」）。
+      // 下面那条键集相等：若 CODES 与 STATUS 同时为空，它同样通过 —— 所以先钉分母。
+      expect(CODES.length).toBeGreaterThan(0);
+      expect(Object.keys(STATUS).length).toBe(CODES.length);
       expect(Object.keys(STATUS).sort()).toEqual([...CODES].sort());
       for (const code of CODES) {
         expect(CLOSED.has(STATUS[code])).toBe(true);

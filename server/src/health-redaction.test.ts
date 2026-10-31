@@ -264,6 +264,8 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     const { join } = await import("node:path");
 
     // ① 覆盖：白名单里每个键都要有读者登记，反之亦然（两边同集合，防「删了白名单留下登记」）
+    // 2026-10-31 —— 同样的空集风险：两个集合同时为空时这条相等断言照样通过。
+    expect([...PUBLIC_HEALTH_KEYS].length).toBeGreaterThan(10);   // 今天 51 个；钉下限而不是钉具体数
     expect(Object.keys(PUBLIC_HEALTH_KEY_READERS).sort()).toEqual([...PUBLIC_HEALTH_KEYS].sort());
 
     // ② 读者类别必须在闭集里（防「reader: 某个系统」这种自由文本）
