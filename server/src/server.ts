@@ -1040,6 +1040,14 @@ export interface HealthFieldMeta {
    */
   verdict_other_branch?: string;
   /**
+   * 2026-10-31 —— **仲裁字段**（外部复核那条「每个问题一个权威字段 + 一个仲裁字段」）。
+   *
+   * 一个 verdict 只说结论，不解释结论怎么来的；当它被判错时，读者需要第二个字段去仲裁。
+   * 例如 `status` 被读成 "ok"，到底是「真的没问题」还是「检查没跑」—— 只有 `status_reasons` 能回答。
+   * ⇒ verdict 类字段必须声明仲裁字段；测试断言它真的在载荷里（存在即可，可为 null）。
+   */
+  arbiter?: string;
+  /**
    * 单向字段必填 —— 另一支**在任何部署里都不会出现**的原因。
    * 与 verdict_other_branch 是同一件事的两面：
    *   前者答「我没有实现那一支」，后者答「我实现了，但你要怎样才看得到」。
@@ -1105,6 +1113,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   license_state: {
     class: "gauge",
     granularity: "verdict",
+    arbiter: "license",
     verdict_other_branch: "absent：删掉 license 行；unknown：让查询抛错（表被锁/被改名）—— 两者形状不同，这正是它存在的理由",
   },
   limits: { class: "gauge", granularity: "label" },
@@ -1114,6 +1123,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   build_identified: {
     class: "gauge",
     granularity: "verdict",
+    arbiter: "build_identity_note",
     why: "只说「有没有构建标识」，不说「是什么」",
     verdict_other_branch: "false：从 npm 包（非 git 工作树）启动，包内没有 .git ⇒ 拿不到 commit ⇒ 这是最常见的生产形态，不是异常",
   },
@@ -1124,6 +1134,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   epoch_agreement: {
     class: "gauge",
     granularity: "verdict",
+    arbiter: "epoch_delta_ms",
     why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻",
     verdict_other_branch: "disagree：宿主时钟被改过（NTP 大步进 / 手工 date / 虚拟机恢复快照）⇒ 差值超出误差界；unknown：/proc 不可读",
   },
@@ -1142,6 +1153,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   clk_tck_assumed_reason: {
     class: "gauge",
     granularity: "verdict",
+    arbiter: "clk_tck_estimate",
     why: "退回 assumed 的原因；三支挤在同一个值里时，「设备不支持」与「真的挂起过」同形",
     verdict_other_branch: "rel_error_above_1pct：宿主挂起（uptime 涨、jiffies 不涨）超过 1% —— 本机实测已出现",
   },
@@ -1164,6 +1176,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   clk_tck_source: {
     class: "gauge",
     granularity: "verdict",
+    arbiter: "clk_tck_delta",
     why: "assumed/derived/confirmed —— 一个叫 assumed 的字段必须有一条「它是否成立」的判定",
     verdict_other_branch: "derived/assumed：非 x86 宿主（USER_HZ≠100）、/proc 不可读、或容器里 auxv 被剥 ⇒ 三档都在真实部署里出现过",
   },
@@ -1174,6 +1187,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   status: {
     class: "gauge",
     granularity: "verdict",
+    arbiter: "status_reasons",
     verdict_other_branch: "degraded：让 DB 读不到（chmod/移走 db 文件）或让 license 查询失败 ⇒ status_reasons 同时非空",
   },
   status_reasons: { class: "gauge", granularity: "level" },

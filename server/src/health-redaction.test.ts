@@ -688,7 +688,24 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     //   verdict 是判定（"ok"/"degraded"）⇒ 若另一支不可观测，它就不是判定而是装饰
     // 起因：一次复核提议给 /health 加 `ptyWsAttached`，而 attach 在 listen 回调里无条件执行
     // ⇒ true 恒成立、false 不可观测 ⇒ 这个字段永远只有一个读数，正是被审的「一侧不可达」缺陷本身。
-    test("every verdict names how to make the OTHER branch fire", async () => {
+    // 2026-10-31 —— **每个 verdict 都要有仲裁字段**（外部复核那条：
+  // 「每个问题一个权威字段 + 一个仲裁字段」）。
+  // 只有权威字段时，读者无法区分「结论是对的」与「检查没跑」。
+  test("every verdict declares an arbiter field that is actually in the payload", async () => {
+    const full = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    const verdicts = Object.entries(HEALTH_FIELD_META).filter(([, m]: any) => m.granularity === "verdict");
+    expect(verdicts.length).toBeGreaterThanOrEqual(4);
+    for (const [k, m] of verdicts as Array<[string, any]>) {
+      expect(typeof m.arbiter).toBe("string");
+      expect(m.arbiter.length).toBeGreaterThan(2);
+      // 仲裁字段必须在同一个载荷里（否则读者还得再发一次请求，那就不是仲裁而是推测）
+      expect(Object.prototype.hasOwnProperty.call(full, m.arbiter)).toBe(true);
+      // 不能自己仲裁自己
+      expect(m.arbiter).not.toBe(k);
+    }
+  });
+
+  test("every verdict names how to make the OTHER branch fire", async () => {
       const { HEALTH_FIELD_META } = await import("./server.js");
       // HEALTH_FIELD_META 覆盖**两个投影**（匿名 + 鉴权）⇒ 存在性要对着完整那份查。
       const full = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
