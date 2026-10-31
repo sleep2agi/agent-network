@@ -2089,6 +2089,10 @@
   "agent-network/tests/project-key.test.ts::encodeCwd (Windows P0)::only-invalid-chars input still returns dashes not 'unknown'": 1,
   "agent-network/tests/project-key.test.ts::encodeCwd (Windows P0)::preserves hyphens (agent-orchestra is not mangled)": 1,
   "agent-network/tests/project-key.test.ts::encodeCwd (Windows P0)::preserves underscores (usernames like your_user stay readable)": 1,
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::absent：没有文件（源码检出 / 老制品）—— 正常状态": 1,
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::invalid 与 absent 分开（写坏了 ≠ 没有）": 1,
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::present：原样读出": 1,
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::严格校验：每种坏形状都拒绝": 1,
   "agent-node/src/callcommhub-timeout.test.ts::#1357 callCommHub per-request timeout::AbortSignal.timeout aborts a hung fetch with a retryable (thrown) error": 1,
   "agent-node/src/callcommhub-timeout.test.ts::#1357 callCommHub per-request timeout::callCommHub's fetch carries signal: AbortSignal.timeout(CALL_COMMHUB_TIMEOUT_MS)": 1,
   "agent-node/src/callcommhub-timeout.test.ts::#1357 callCommHub per-request timeout::cli.ts defines CALL_COMMHUB_TIMEOUT_MS": 1,
@@ -10295,6 +10299,10 @@
   "agent-network/tests/project-key.test.ts::encodeCwd (Windows P0)::only-invalid-chars input still returns dashes not 'unknown'",
   "agent-network/tests/project-key.test.ts::encodeCwd (Windows P0)::preserves hyphens (agent-orchestra is not mangled)",
   "agent-network/tests/project-key.test.ts::encodeCwd (Windows P0)::preserves underscores (usernames like your_user stay readable)",
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::absent：没有文件（源码检出 / 老制品）—— 正常状态",
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::invalid 与 absent 分开（写坏了 ≠ 没有）",
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::present：原样读出",
+  "agent-node/src/build-info.test.ts::#3294 agent-node build-info::严格校验：每种坏形状都拒绝",
   "agent-node/src/callcommhub-timeout.test.ts::#1357 callCommHub per-request timeout::AbortSignal.timeout aborts a hung fetch with a retryable (thrown) error",
   "agent-node/src/callcommhub-timeout.test.ts::#1357 callCommHub per-request timeout::callCommHub's fetch carries signal: AbortSignal.timeout(CALL_COMMHUB_TIMEOUT_MS)",
   "agent-node/src/callcommhub-timeout.test.ts::#1357 callCommHub per-request timeout::cli.ts defines CALL_COMMHUB_TIMEOUT_MS",
@@ -16412,7 +16420,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "e622a9f95417be853a65a280cb10c59d5889a729",
+  "commit": "dc34c02e09f2ca860349d15ddc7f62cb08d49461",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
