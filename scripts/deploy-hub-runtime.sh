@@ -97,7 +97,21 @@ sleep 9
 # ⑤ 回读；失败立刻回滚到切换前的版本
 NEWV=$(health_version)
 if [ -z "$NEWV" ]; then
-  stage_fail health_unreachable "/health 读不到 —— 立刻回滚（见下方 rollback）" 13
+  # 2026-10-31 —— 外部复核：「当『修好』会解锁一个会造成全量故障的路径时，
+  # 修复动作本身是一个新的发布风险。」新版本可能**起不来**（例如启动期断言拒绝了配置），
+  # 那时只打印「立刻回滚」是不够的：脚本必须在同一次执行里真的回滚，
+  # 否则「gate 通过 + 起不来」就变成一次需要人值守的窗口。
+  if [ -n "$CURRENT" ]; then
+    say "新版本起不来 ⇒ 自动回滚到 $CURRENT"
+    HUB_RUNTIME_DIR="$COMMHUB_HOME/runtime-${CURRENT//./-}" pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1
+    sleep 8
+    BACK=$(health_version)
+    if [ "$BACK" = "$CURRENT" ]; then
+      stage_fail health_unreachable "新版本 /health 读不到；**已自动回滚到 $CURRENT**（服务可用）" 13
+    fi
+    stage_fail rollback_failed "新版本读不到，回滚到 $CURRENT 也没起来（现在是 ${BACK:-读不到}）—— 需要人工介入" 15
+  fi
+  stage_fail health_unreachable "/health 读不到，且不知道切换前版本，无法自动回滚" 13
 fi
 if [ "$NEWV" != "$VERSION" ]; then
   if [ -n "$CURRENT" ]; then
