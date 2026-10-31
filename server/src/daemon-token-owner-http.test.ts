@@ -156,6 +156,11 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect(gotProbe.ok).toBe(false);
   // 实测：错误分支多一个 reason（不是只 {error, ok}）——**又一次由真实调用纠正**
   expect(Object.keys(gotProbe).sort()).toEqual(["error", "ok", "reason"]);
+  // 2026-10-31 —— #3275：get_opencode_catalog_request 的**不存在**分支恰好两键
+  // （与 get_probe_request 的三键不同族 —— 又一次说明「错误信封不是全仓一个形状」）
+  const gotCatalog = await call(legacy, "get_opencode_catalog_request", { request_id: "cat_fixture_absent" });
+  expect(gotCatalog.ok).toBe(false);
+  expect(Object.keys(gotCatalog).sort()).toEqual(["error", "ok"]);
   const stop = await call(owner.token, "stop_node", { node_id: child, network_id: owner.network_id });
   expect(stop.ok).toBe(true);
   // 2026-10-31 —— #3275 批次 2：get_stop_request 的**成功体**键集（daemon 按字段名读，
