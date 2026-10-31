@@ -49,3 +49,45 @@ export function resetNeverConsumedExpiryCountersForTest(now = new Date()): void 
   counters.clear();
   since = now.toISOString();
 }
+
+/**
+ * #3271 —— 派单侧的**硬闸**判据（纯函数，便于单测）。
+ *
+ * 起因：一台节点连续 9 次「等满 60 分钟未取走」，而每一次都只是「又过期了一条」的通知。
+ * 派单方只能靠人记住。⇒ 这里把它变成一个**在派单那一刻就拒绝**的判据，并留一个显式出口。
+ *
+ * 三条设计选择：
+ *   ① 阈值取「本进程窗口内 ≥3 次」——一次两次可能是宿主重启，三次已经是形态。
+ *   ② 出口是 `force`，且**只有人**能用（节点令牌不能自己给自己放行）——与既有的
+ *      `assertNodeHealthy(force, forceAllowed)` 同一条规矩。
+ *   ③ 拒绝体给全：alias / expiries / window_since / 下一步。只说 "refused" 会让调用方去猜。
+ */
+export const NEVER_CONSUME_LIMIT = 3;
+
+export type NeverConsumeGate =
+  | { ok: true }
+  | { ok: false; error: "target_never_consumes"; alias: string; expiries: number; window_since: string; message: string };
+
+export function neverConsumeGate(input: {
+  alias: string;
+  counters: NeverConsumedExpiryCounters;
+  force: boolean;
+  /** 人令牌才能用 force；节点令牌传 false。 */
+  forceAllowed: boolean;
+  limit?: number;
+}): NeverConsumeGate {
+  const limit = input.limit ?? NEVER_CONSUME_LIMIT;
+  const expiries = input.counters.by_node[input.alias] ?? 0;
+  if (expiries < limit) return { ok: true };
+  if (input.force && input.forceAllowed) return { ok: true };
+  return {
+    ok: false,
+    error: "target_never_consumes",
+    alias: input.alias,
+    expiries,
+    window_since: input.counters.since,
+    message:
+      `this target has expired ${expiries} task(s) without ever taking one (window since ${input.counters.since}); `
+      + `nothing will queue correctly here until it consumes again — pass force:true (user tokens) if you know it recovered`,
+  };
+}

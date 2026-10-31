@@ -6059,6 +6059,11 @@
   "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::桶按名字排序且空桶不出现 —— 读数要能直接对比两次快照": 1,
   "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 must-fire：未消费就过期的任务 ⇒ 该节点计数 +1": 1,
   "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 负数用例：**已消费**后过期的任务 ⇒ 计数不动（那不是「没人取」）": 1,
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::人令牌 + force ⇒ 放行（出口存在，但必须显式）": 1,
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::别的节点的计数不影响本目标（分桶不是总数）": 1,
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::窗口内 0–2 次 ⇒ 放行（一次两次可能是宿主重启，三次才是形态）": 1,
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 节点令牌不能自己放行：force 传了也不算（forceAllowed=false）": 1,
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 达到阈值 ⇒ 拒绝，且拒绝体给全（alias / expiries / window_since / 下一步）": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set": 1,
@@ -14246,6 +14251,11 @@
   "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::桶按名字排序且空桶不出现 —— 读数要能直接对比两次快照",
   "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 must-fire：未消费就过期的任务 ⇒ 该节点计数 +1",
   "server/src/expiry-counters.test.ts::#3271 从未取走过的过期计数::🔴 负数用例：**已消费**后过期的任务 ⇒ 计数不动（那不是「没人取」）",
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::人令牌 + force ⇒ 放行（出口存在，但必须显式）",
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::别的节点的计数不影响本目标（分桶不是总数）",
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::窗口内 0–2 次 ⇒ 放行（一次两次可能是宿主重启，三次才是形态）",
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 节点令牌不能自己放行：force 传了也不算（forceAllowed=false）",
+  "server/src/expiry-counters.test.ts::#3271 派单侧硬闸：从未取走过的目标::🔴 达到阈值 ⇒ 拒绝，且拒绝体给全（alias / expiries / window_since / 下一步）",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set",
@@ -16374,7 +16384,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "e4fb4172d666b379a54b9b5c6499410ce791d506",
+  "commit": "2e35664f09fdf5ab46c692c3350120411e6a05dc",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

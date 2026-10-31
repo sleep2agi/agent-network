@@ -112,6 +112,7 @@ import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
 import { pollPacer } from "./poll-pacing.js";
+import { neverConsumedExpiryCounters, neverConsumeGate } from "./expiry-counters.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, updateDepartment } from "./departments.js";
 
 function ts(): string {
@@ -2258,6 +2259,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       {
         const hg = assertNodeHealthy(targetAlias, effectiveNetId ?? null, { force, forceAllowed: !callerTokenIsNetwork });
         if (!hg.ok) return { content: [{ type: "text" as const, text: JSON.stringify(hg) }] };
+      }
+      // #3271 —— 同一形状的第二道闸：**这台节点从未取走过任务**（本进程窗口内 ≥3 次过期且 consumed_at 全空）。
+      // 原来这里什么都没有：每次只是「又过期了一条」的通知，派单方只能靠人记住。
+      {
+        const gate = neverConsumeGate({
+          alias: targetAlias,
+          counters: neverConsumedExpiryCounters(),
+          force: force === true,
+          forceAllowed: !callerTokenIsNetwork,
+        });
+        if (!gate.ok) return { content: [{ type: "text" as const, text: JSON.stringify(gate) }] };
       }
 
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);

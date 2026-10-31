@@ -67,3 +67,45 @@ describe("#3271 从未取走过的过期计数", () => {
     expect(Object.keys(c.by_node)).toEqual(["a-node", "z-node"]);
   });
 });
+
+// ---- 派单侧硬闸（#3271）----
+import { neverConsumeGate, NEVER_CONSUME_LIMIT } from "./expiry-counters.js";
+
+describe("#3271 派单侧硬闸：从未取走过的目标", () => {
+  const counters = (n: number, alias = "ghost") => ({
+    since: "2026-10-31T00:00:00.000Z",
+    total: n,
+    by_node: n > 0 ? { [alias]: n } : {},
+  });
+
+  test("窗口内 0–2 次 ⇒ 放行（一次两次可能是宿主重启，三次才是形态）", () => {
+    for (const n of [0, 1, 2]) {
+      expect(neverConsumeGate({ alias: "ghost", counters: counters(n), force: false, forceAllowed: true }).ok).toBe(true);
+    }
+  });
+
+  test("🔴 达到阈值 ⇒ 拒绝，且拒绝体给全（alias / expiries / window_since / 下一步）", () => {
+    const r = neverConsumeGate({ alias: "ghost", counters: counters(NEVER_CONSUME_LIMIT), force: false, forceAllowed: true });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error("unreachable");
+    expect(r.error).toBe("target_never_consumes");
+    expect(r.alias).toBe("ghost");
+    expect(r.expiries).toBe(NEVER_CONSUME_LIMIT);
+    expect(r.window_since).toBe("2026-10-31T00:00:00.000Z");
+    expect(r.message).toContain("force:true");
+  });
+
+  test("人令牌 + force ⇒ 放行（出口存在，但必须显式）", () => {
+    expect(neverConsumeGate({ alias: "ghost", counters: counters(9), force: true, forceAllowed: true }).ok).toBe(true);
+  });
+
+  test("🔴 节点令牌不能自己放行：force 传了也不算（forceAllowed=false）", () => {
+    const r = neverConsumeGate({ alias: "ghost", counters: counters(9), force: true, forceAllowed: false });
+    expect(r.ok).toBe(false);
+  });
+
+  test("别的节点的计数不影响本目标（分桶不是总数）", () => {
+    const c = { since: "s", total: 9, by_node: { other: 9 } };
+    expect(neverConsumeGate({ alias: "ghost", counters: c, force: false, forceAllowed: true }).ok).toBe(true);
+  });
+});
