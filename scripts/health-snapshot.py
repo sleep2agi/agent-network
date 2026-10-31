@@ -37,6 +37,14 @@ DEFAULT_TIMEOUT = 300
 #   一条永远记成「没读数」的条目，等于把那一层从巡检里删掉。
 GATE_ARGS: dict[str, list[str]] = {}
 
+# 需要**外部输入**才能跑的门：巡检不提供输入时，它们是「未运行」，不是「没有读数」。
+# 2026-10-31 —— 第一版把 check-claim-existence 记成 no-reading，读起来像「这个门坏了」；
+# 实际是它要一个报告文件（卡/文档全文）当输入，而巡检没给。
+# ⇒ 「我这次没喂它」与「它喂了也说不出话」是两件事，报告要分开。
+NEEDS_INPUT: dict[str, str] = {
+    "check-claim-existence.py": "需要一个报告/卡全文作为输入（把里面的反引号标识符逐个 grep）",
+}
+
 
 def classify(rc: int) -> str:
     """退出码 → 三态。这一条就是整份巡检的判据，所以它必须能被自检。"""
@@ -61,6 +69,10 @@ def run(cmd: list[str], timeout: int) -> tuple[int, str]:
 def gates(timeout: int) -> list[dict]:
     out: list[dict] = []
     for p in sorted(GATES_DIR.glob("check-*.py")):
+        if p.name in NEEDS_INPUT:
+            out.append({"layer": "gate", "name": p.name, "exit": None, "state": "not-run",
+                        "detail": f"未运行：{NEEDS_INPUT[p.name]}"})
+            continue
         args = [sys.executable, str(p.relative_to(REPO))] + GATE_ARGS.get(p.name, [])
         rc, txt = run(args, timeout)
         state = classify(rc)
