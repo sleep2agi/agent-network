@@ -282,6 +282,18 @@ describe("human ↔ human DM (/api/dm): restricted members can talk to people", 
 // 任何「多加一栏」都应当是一次**有意识的**决定，而不是顺手。
 // 这条测试钉住当前的键集（顺序无关，sorted 后比较），
 // 让下一次加字段必须先让它变红、再明确决定要不要更新契约。
+// 2026-10-31 —— #3275：list_node_files 的**成功体**只有三键 {ok, op, request_id}
+// （形状由一次真实调用给出：它是「下发一个读请求」而不是「返回文件列表」，
+//   列表在 op 里/后续拉取 —— 名字与载荷不是一回事，这是本卡第 6 次「按名字猜」被打回）。
+describe("list_node_files: pinned success shape", () => {
+  test("⇒ {ok, op, request_id}", async () => {
+    const r = await tool(adminToken, "list_node_files", { alias: "acl3-agent-x", network_id: NET });
+    expect(Object.keys(r).sort()).toEqual(["ok", "op", "request_id"]);
+    expect(typeof r.op).toBe("string");           // 这一次读的是什么操作
+    expect(r.request_id.length).toBeGreaterThan(0);
+  });
+});
+
 describe("update_node_config 响应键集（exact key set）", () => {
   test("成功体恰好 {apply_mode, ok, update_id}，不多不少", async () => {
     const r = await tool(adminToken, "update_node_config", {
