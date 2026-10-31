@@ -17,13 +17,20 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { requireEnv } from "./env-required.js";
 import {
   defaultControlledUploadRoots,
   uploadControlledLocalFile,
 } from "./controlled-upload.js";
 
-const HUB = (process.env.COMMHUB_URL || "").replace(/\/+$/, "");
-const TOKEN = process.env.COMMHUB_TOKEN || process.env.AUTH_TOKEN || "";
+const _env = requireEnv(process.env as Record<string, string | undefined>);
+if (!_env.ok) {
+  console.error(`[upload-file-mcp] 缺少必填环境变量：${_env.missing.join(", ")}`);
+  console.error("[upload-file-mcp] 拒绝启动：把工具列出来再在第一次调用时失败，等于把配置错误留给运行期");
+  process.exit(2);
+}
+const HUB = _env.hub;
+const TOKEN = _env.token;
 const ALIAS = process.env.ANET_UPLOAD_ALIAS || process.env.COMMHUB_ALIAS || "";
 const NODE_DIR = process.env.ANET_NODE_DIR || "";
 
