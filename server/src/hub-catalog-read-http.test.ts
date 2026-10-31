@@ -480,6 +480,22 @@ describe("GET /api/providers", () => {
       //  而语义已经不是你想的那个。」）
       // ⇒ 读点必须落在**路由文件**里（server.ts），否则等于表有了、用法另有其处。
       // 位置：读点必须落在**实现或路由**里（不是只落在注释里）
+      // 2026-10-31 —— **兜底不许把「我们的缺陷」说成「客户端的错」**：
+      // 表里查不到的码 ⇒ 归因指向了错误的行动方（返回 400 会让客户端去改自己的请求）。
+      // 判据同「遍历每个抛点断言它不等于 catch-all」：逐个码断言它映射到**自己那一格**，
+      // 再断言未登记的码落 500 而不是 400。
+      const { PROVIDER_WRITE_ERROR_CODES: CODES, PROVIDER_WRITE_STATUS: STATUS, providerWriteStatus: statusOf } =
+        await import("./hub-provider-config.js");
+      const CLOSED = new Set([400, 401, 403, 404, 409, 500, 503]);
+      for (const code of CODES) {
+        expect(statusOf(code)).toBe(STATUS[code]);
+        expect(CLOSED.has(statusOf(code))).toBe(true);
+      }
+      // 镜像（must-fire）：一个**不在表里**的码必须落到 500，不能落 400
+      const bogus = statusOf("definitely_not_a_listed_code" as any);
+      expect(bogus).toBe(500);
+      expect(bogus).not.toBe(400);
+
       const readerFiles = new Set(readers.map((r) => String(r.f).split("/").pop()));
       expect(readerFiles.size).toBeGreaterThan(0);
       expect([...readerFiles].some((f) => f === "server.ts" || f === "hub-provider-config.ts" || f === "requirements.ts")).toBe(true);

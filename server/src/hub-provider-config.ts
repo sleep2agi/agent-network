@@ -50,8 +50,19 @@ export const PROVIDER_WRITE_STATUS: Record<ProviderWriteErrorCode, number> = {
   hub_provider_save_failed: 500,
   vault_unavailable: 503,
 };
-export function providerWriteStatus(code: string): number {
-  return (PROVIDER_WRITE_STATUS as Record<string, number>)[code] ?? 400;
+/**
+ * 码 → HTTP 状态。
+ *
+ * 2026-10-31 —— 参数类型从 `string` 收紧到 `ProviderWriteErrorCode`：
+ * 之前签名收 `string`，于是「表里加码、忘了加状态」在**调用点**不会被类型拦住
+ * （编译器只看见一个字符串）。而 `Record<ProviderWriteErrorCode, number>` 只在
+ * 「用类型化的键去索引」时才保证穷尽 —— 签名放宽就等于把穷尽性丢了。
+ *
+ * 兜底也改了方向：`?? 400` 会告诉客户端「你的请求不对」，而表里查不到的码是**我们**的缺陷
+ * ⇒ 归因指向了错误的行动方。现在兜底返回 500（服务端错误），并让测试断言它不被 400 顶替。
+ */
+export function providerWriteStatus(code: ProviderWriteErrorCode): number {
+  return PROVIDER_WRITE_STATUS[code] ?? 500;
 }
 const idValid = (id: unknown) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id);
 function auth(h: Human, write: boolean, owner = false) {
