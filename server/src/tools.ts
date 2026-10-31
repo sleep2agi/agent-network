@@ -6637,9 +6637,52 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           `SELECT model_id, model_name, display_name, context_window, supports_vision, enabled FROM provider_models WHERE provider_id = ?1 AND enabled = 1 ORDER BY model_name`,
           p.provider_id,
         );
-        return { ...p, in_vault: true, models };  // in_vault: true since we required it on upsert
+        // 2026-10-31 —— 每个 provider 自己也要能说「我一个可用模型都没有」。
+        // 否则客户端的模型下拉只会是空的，用户看不出是 provider 没配模型还是全部被停用。
+        const modelsDisabled = db.get<any>(
+          `SELECT COUNT(*) AS cnt FROM provider_models WHERE provider_id = ?1 AND enabled = 0`,
+          p.provider_id,
+        );
+        return {
+          ...p,
+          in_vault: true,  // in_vault: true since we required it on upsert
+          models,
+          models_state: models.length > 0
+            ? "available"
+            : ((modelsDisabled?.cnt ?? 0) > 0 ? "all_disabled" : "none_configured"),
+        };
       });
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, providers: out }) }] };
+
+      // 2026-10-31 —— **空的 providers 数组有四种含义**，以前只回一个 `[]`：
+      //   ① 这个网络还没配过任何 provider（管理员还没录第一行）
+      //   ② 配过，但全被 enabled=0 停用
+      //   ③ 配过、也启用，但一条模型都没有（客户端下拉必然空）
+      //   ④ 查询本身失败（这一支会 throw，不会走到这里 —— 但读者需要知道它不在这个 `[]` 里）
+      // 客户端拿到 `[]` 时无法区分 ①②③，于是空状态只能显示「没有」，
+      // 这正是外部复核那句「兜底值必须说出自己是兜底」的现场版。
+      // ⇒ 加 state + counts + hint（只有非 configured 时才给 hint，避免正常载荷变胖）。
+      const disabledProviders = db.get<any>(
+        `SELECT COUNT(*) AS cnt FROM providers WHERE network_id = ?1 AND enabled = 0`,
+        effectiveNetId || "default",
+      );
+      const providerState = out.length > 0
+        ? "configured"
+        : ((disabledProviders?.cnt ?? 0) > 0 ? "all_disabled" : "unconfigured");
+      const stateBlock = {
+        state: providerState,
+        counts: {
+          providers_enabled: out.length,
+          providers_disabled: disabledProviders?.cnt ?? 0,
+          models_enabled: out.reduce((n: number, p: any) => n + p.models.length, 0),
+          providers_without_models: out.filter((p: any) => p.models_state !== "available").length,
+        },
+        ...(providerState === "configured" ? {} : {
+          hint: providerState === "all_disabled"
+            ? "此网络的 provider 全部被停用（enabled=0）；管理员用 update_provider {enabled:true} 重新启用"
+            : "此网络还没有任何 provider；管理员需要先录入一个 provider 及其模型，客户端才有可选模型",
+        }),
+      };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, providers: out, ...stateBlock }) }] };
     },
   );
 

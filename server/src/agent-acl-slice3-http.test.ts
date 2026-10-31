@@ -446,7 +446,21 @@ describe("update_node_config 响应键集（exact key set）", () => {
   describe("read-surface tools have pinned key sets", () => {
     test("list_providers ⇒ exactly {ok, providers}; list_network_secrets ⇒ exactly {keys, ok}", async () => {
       const providers = await tool(adminToken, "list_providers", { network_id: NET });
-      expect(Object.keys(providers).sort()).toEqual(["ok", "providers"]);
+      // 2026-10-31 —— 载荷扩容：`[]` 有四种含义（未配 / 全停用 / 配了没模型 / 查询失败），
+      // 所以 `state` 与 `counts` 必须与 providers 同载荷；否则客户端只能显示「没有」。
+      // 键集有**两种合法形状**（不是放宽成数组包含）：configured 时不给 hint，其余状态必须给 ——
+      // 「有理由」和「没理由」在载荷上必须可区分，否则客户端只能说「没有」。
+      const baseKeys = ["counts", "ok", "providers", "state"];
+      expect(Object.keys(providers).sort()).toEqual(
+        providers.state === "configured" ? baseKeys : [...baseKeys, "hint"].sort(),
+      );
+      if (providers.state !== "configured") expect(String(providers.hint).length).toBeGreaterThan(10);
+      expect(Object.keys(providers.counts).sort()).toEqual(
+        ["models_enabled", "providers_disabled", "providers_enabled", "providers_without_models"],
+      );
+      expect(["configured", "all_disabled", "unconfigured"]).toContain(providers.state);
+      // 唯一一条跨字段不变量：state 与 providers 数组必须自洽
+      expect(providers.state === "configured").toBe(providers.providers.length > 0);
       expect(Array.isArray(providers.providers)).toBe(true);
 
       const secrets = await tool(adminToken, "list_network_secrets", { network_id: NET });
@@ -455,6 +469,58 @@ describe("update_node_config 响应键集（exact key set）", () => {
       // 值永远不出来：这是 RFC-028 的承诺，键集测试顺手把它钉住
       for (const k of secrets.keys) expect(typeof k).toBe("string");
     });
+  });
+
+  // 2026-10-31 —— **空的 providers 数组有四种含义**（外部复核「兜底值必须说出自己是兜底」）。
+  // 这条测试把 ①②③ 三种状态逐个造出来，断言 state 与 hint 各自不同 ——
+  // 只测「空 == 空」的话，三种状态在载荷里长得一样，客户端的空状态就只能显示「没有」。
+  test("list_providers: an empty registry says WHY it is empty (unconfigured / all_disabled / no models)", async () => {
+    const pid = `acl3-probe-${Date.now()}`;
+    const readState = async () => await tool(adminToken, "list_providers", { network_id: NET });
+    const cleanup = () => {
+      db.run(`DELETE FROM provider_models WHERE provider_id = ?1`, [pid]);
+      db.run(`DELETE FROM providers WHERE provider_id = ?1`, [pid]);
+    };
+    try {
+      // ① 未配置
+      const a = await readState();
+      expect(a.providers.length).toBe(0);
+      expect(a.state).toBe("unconfigured");
+      expect(String(a.hint)).toContain("还没有任何 provider");
+
+      // ② 配过但停用
+      db.run(
+        `INSERT INTO providers (provider_id, network_id, name, vendor, base_url, secret_key_ref, created_at, created_by, enabled)
+         VALUES (?1, ?2, ?3, 'openai', 'https://api.example.com', 'K', ?4, 'test', 0)`,
+        [pid, NET, pid, Date.now()],
+      );
+      const b = await readState();
+      expect(b.providers.length).toBe(0);
+      expect(b.state).toBe("all_disabled");
+      expect(b.counts.providers_disabled).toBe(1);
+      expect(String(b.hint)).toContain("停用");
+
+      // ③ 启用但一条模型都没有
+      db.run(`UPDATE providers SET enabled = 1 WHERE provider_id = ?1`, [pid]);
+      const c = await readState();
+      expect(c.state).toBe("configured");
+      expect(c.providers.length).toBe(1);
+      expect(c.providers[0].models.length).toBe(0);
+      expect(c.providers[0].models_state).toBe("none_configured");
+      expect(c.counts.providers_without_models).toBe(1);
+      expect("hint" in c).toBe(false);   // configured 时不带 hint（载荷不变胖）
+
+      // ④ 有模型但不启用 ⇒ all_disabled（不是 none_configured）
+      db.run(
+        `INSERT INTO provider_models (model_id, provider_id, model_name, enabled, created_at)
+         VALUES (?1, ?2, 'm1', 0, ?3)`,
+        [`${pid}-m1`, pid, Date.now()],
+      );
+      const d = await readState();
+      expect(d.providers[0].models_state).toBe("all_disabled");
+    } finally {
+      cleanup();
+    }
   });
 
   // 2026-10-31 —— #3171 第 2 项：restart_node 的成功体与 update_node_config 同构。
