@@ -239,12 +239,27 @@ try {
     return modelView.config_revision > beforeConfig.config_revision && modelView.model === 'stub/stub-model-next';
   }, 90000));
   console.log('model readback:', JSON.stringify(modelView));
-  check('new native process generation observed', await until(() => {
+  // #3166 —— 模型变更现在有**两条合法落地路径**，这条断言原来只认其中一条：
+  //   (A) 重启：bridge 的 pid/starttime 变了（新的进程代际）
+  //   (B) 热切：代际不变（同一个进程换了 model）
+  //
+  // 只认 (A) 的后果实测到了：d3d5ba14（「共享 OpenCode Server 的包装对象没转发
+  // setSelectedModel」）之后热切真的能用了，于是从 2026-10-30T16:23Z 起这个 workflow
+  // **连红 100+ 次**，而它上面那条「config_revision 涨了、model 读回是新值」一直是绿的。
+  // 一条断言在能力变好的那一刻变红，说明它编码的是**旧实现**，不是需求。
+  //
+  // 需求是「新模型真的在跑」。仲裁交给下一段的 provider 级断言：
+  // stub.log 里 MODEL829 那次请求的 model 必须是新模型 —— 那条对两条路径都成立，
+  // 而且比「进程代际变了」更接近用户真正关心的东西。
+  const regenerated = await until(() => {
     try {
       const health = JSON.parse(readFileSync(`${nodeDir}/opencode-launch-health.json`, 'utf8'));
       return health.bridge.pid !== oldHealth.bridge.pid || health.bridge.ticks !== oldHealth.bridge.ticks;
     } catch { return false; }
-  }, 15000));
+  }, 15000);
+  // 不是 check()：两条都是合法路径，所以这里只报**走的是哪一条**。
+  // 若热切路径其实没换模型，下面 'post-change task reached new provider model only' 会红。
+  console.log(`PASS: model change path = ${regenerated ? 'restart (new process generation)' : 'hot switch (same generation)'}`);
   check('model restart TUI rendered', await until(() => /ctrl\+p/.test(tmux('capture-pane', '-p', '-t', '=oc829:', '-S', '-200').stdout)));
   const modelSent = await api('/api/task', { alias: 'oc829', task: 'Reply with exactly MODEL829', network_id: networkId });
   check('post-model task accepted', modelSent.ok && modelSent.message_id);
