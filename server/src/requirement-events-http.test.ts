@@ -146,6 +146,26 @@ describe("requirement events", () => {
     expect(JSON.stringify(later[2])).not.toContain("一段描述");
   });
 
+  // 2026-10-31 —— **变化字段集合 == 实际被写库的字段集合**（外部复核那条的对账形态）。
+  // 上一节断言的是「事件字段集合」；这里把它与「读回来的行真的变了哪些字段」逐项比对 ——
+  // 只有两边相等，才能说「流水没有漏记，也没有凭空多记」。
+  test("changed-field set equals the set of columns that actually changed in the stored row", async () => {
+    const card = await create(admin.token, { name: "对账示例", priority: "normal" });
+    const read = async () => (await send(admin.token, "GET", `/api/requirements/${card.id}?network_id=${NET}`)).body.requirement;
+    const before = await read();
+    const r = await patch(member.token, card.id, { column: "doing", priority: "high", due: "2026-10-09" });
+    expect(r.status).toBe(200);
+    const after = await read();
+    // 只看这次 PATCH 涉及的三个字段：读回来的行里**真的不同**的那些
+    const keys = ["column", "priority", "due"] as const;
+    const actuallyChanged = keys.filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null)).sort();
+    const eventFields = of((await events(admin.token)).body.events, card.id)
+      .filter((e: any) => e.kind === "changed")
+      .map((e: any) => e.field).sort();
+    expect(eventFields).toEqual(actuallyChanged);
+    expect(actuallyChanged).toEqual(["column", "due", "priority"]);
+  });
+
   test("checklist: ticking an item is `checklist_item` (repeat is a no-op); adding items is `checklist`", async () => {
     const card = await create(admin.token, { name: "动态示例三", checklist: [{ id: "a", text: "第一项" }, { id: "b", text: "第二项" }] });
     const tick = (done: boolean) => send(member.token, "PATCH", `/api/requirements/${card.id}/checklist/a?network_id=${NET}`, { done });
