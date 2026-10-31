@@ -1021,15 +1021,24 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 2026-10-31 —— **身份是从哪个根读的**（外部复核那条：release 读的是 cwd，不是可执行文件目录）。
   // 我们优先模块目录，只在拿不到时退回 cwd —— 但若没有字段说明是哪一支，
   // 「读到的是本包的身份」与「读到的是启动目录里另一个仓库」在载荷上完全同形。
-  test("git identity says which root it came from (module_dir vs cwd)", async () => {
+  test("git identity says which root it came from (build_info vs module_dir vs cwd)", async () => {
     const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
-    expect(["module_dir", "cwd"]).toContain(b.git_identity_root);
+    // 2026-10-31 —— 加了第三支 `build_info`（#3177：生产 runtime 没有 .git，
+    // 只有在**打包时**写进 build-info.json 才可能有标识）。
+    expect(["build_info", "module_dir", "cwd"]).toContain(b.git_identity_root);
     // 从 cwd 读出来的身份，必须显式承认它不是制品身份
     if (b.git_identity_root === "cwd") {
       expect(b.build_identity_note === null || typeof b.build_identity_note === "string").toBe(true);
     }
     // 反向：有 commit 却说不出来源 ⇒ 这条断言不允许
-    if (b.git_commit) expect(["module_dir", "cwd"]).toContain(b.git_identity_root);
+    if (b.git_commit) expect(["build_info", "module_dir", "cwd"]).toContain(b.git_identity_root);
+    // 新支的存在意义：**注入存在 ⇒ 标识必须存在**。
+    // 这一条让「注入了但读不到」变成红，而不是静默退回「没有标识」。
+    if (b.git_identity_root === "build_info") {
+      expect(b.build_identified).toBe(true);
+      expect(b.git_commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(typeof b.git_dirty).toBe("boolean");
+    }
   });
 
   // 2026-10-31 —— **每个 verdict 都要有仲裁字段**（外部复核那条：

@@ -9,12 +9,14 @@
   },
   "files": [
     "src",
-    "bin"
+    "bin",
+    "build-info.json"
   ],
   "scripts": {
     "start": "COMMHUB_SERVER=1 bun run src/index.ts",
     "dev": "COMMHUB_SERVER=1 bun --watch run src/index.ts",
-    "test": "bun run scripts/test-aggregate.ts"
+    "test": "bun run scripts/test-aggregate.ts",
+    "prepack": "node scripts/write-build-info.mjs"
   },
   "keywords": [
     "commhub",

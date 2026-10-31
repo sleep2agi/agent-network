@@ -6256,7 +6256,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::every verdict declares an arbiter field that is actually in the payload": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::every verdict names how to make the OTHER branch fire": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::fields declared constant-by-design still read as that constant": 1,
-  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::git identity says which root it came from (module_dir vs cwd)": 1,
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::git identity says which root it came from (build_info vs module_dir vs cwd)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::identity fields carry a class; exactly one artifact-class authority": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::the two that people confuse are labelled right (peak is cumulative, inflight is a level)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>header set (vantage-free: readable without a session)::anonymous /health does not leak build identity through headers": 1,
@@ -14416,7 +14416,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::every verdict declares an arbiter field that is actually in the payload",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::every verdict names how to make the OTHER branch fire",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::fields declared constant-by-design still read as that constant",
-  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::git identity says which root it came from (module_dir vs cwd)",
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::git identity says which root it came from (build_info vs module_dir vs cwd)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::identity fields carry a class; exactly one artifact-class authority",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>granularity vocabulary is closed and distinguishes level from cumulative::the two that people confuse are labelled right (peak is cumulative, inflight is a level)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak>header set (vantage-free: readable without a session)::anonymous /health does not leak build identity through headers",
@@ -16320,7 +16320,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "c8e77e0a98ff71a3ccb50d049d78550a2d244378",
+  "commit": "2150f7dee7ad41301b5c2f0bc1dfc62692e681fa",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

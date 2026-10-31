@@ -47,3 +47,4 @@ docs/dashboard-screenshots/
 #    而「靠人记得手动删」不是一个能长期成立的安排。
 __pycache__/
 *.pyc
+server/build-info.json

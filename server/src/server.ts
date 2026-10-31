@@ -107,6 +107,7 @@ import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startS
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
+import { readBuildInfo } from "./build-info.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
@@ -1460,7 +1461,12 @@ function detectBootGitIdentity(): {
   /** 只有 commit 非空时才有意义；commit 为空时必须是 null（**不是 false**）。 */
   dirty: boolean | null;
   /** commit 为空时说明**为什么**空 —— 没有它，「没有」与「读不到」同形。 */
-  reason: "not_a_git_checkout" | "git_unavailable" | "unexpected_rev_parse_output" | null;
+  /**
+   * 2026-10-31 —— #3177：`build_info_invalid` 与 `not_a_git_checkout` 必须分开。
+   * 前者是**缺陷**（注入写坏了），后者是**部署形态的正常状态**（npm 包里没有 .git）。
+   * 合成一个 reason，就等于把「写坏了」读成「本来就没有」。
+   */
+  reason: "not_a_git_checkout" | "git_unavailable" | "unexpected_rev_parse_output" | "build_info_invalid" | null;
   /**
    * 2026-10-31 —— **这个 commit 是从哪个根读出来的**（外部复核那条：
    * 「release 读的是 cwd 而不是可执行文件目录 ⇒ 它标识部署动作，不标识运行内容」）。
@@ -1470,11 +1476,25 @@ function detectBootGitIdentity(): {
    * 在载荷上完全同形 —— 后者会把一台跑着旧包的机器报成新提交。
    * ⇒ 加一格 root_kind 作仲裁；cwd 那一支必须能被看出来。
    */
-  root_kind: "module_dir" | "cwd";
+  root_kind: "module_dir" | "cwd" | "build_info";
 } {
   const moduleDir = (import.meta as { dir?: string }).dir;
   const start = moduleDir ?? process.cwd();
   const rootKind: "module_dir" | "cwd" = moduleDir ? "module_dir" : "cwd";
+  // 2026-10-31 —— #3177：**先读构建期注入**，再退回运行期 git。
+  // 生产是 `npm install` 出来的 runtime（没有 .git），运行期这条路在那里根本不存在 ⇒
+  // 只能由构建时写下 commit/dirty/built_at。读到了就以它为准（它是**制品的一部分**，
+  // 比「启动目录恰好是个 git 仓库」更能代表跑的是什么字节）。
+  // 包内布局是 `bin/commhub.ts` + `build-info.json` 在包根 ⇒ 两处都看。
+  const candidates = [start, dirname(start)];
+  let buildInfoInvalid = false;
+  for (const c of candidates) {
+    const read = readBuildInfo(c);
+    if (read.kind === "present") {
+      return { commit: read.info.commit, dirty: read.info.dirty, reason: null, root_kind: "build_info" };
+    }
+    if (read.kind === "invalid") buildInfoInvalid = true;
+  }
   let dir = start;
   for (let i = 0; i < 6; i += 1) {
     if (existsSync(join(dir, ".git"))) {
@@ -1508,7 +1528,13 @@ function detectBootGitIdentity(): {
     if (parent === dir) break;
     dir = parent;
   }
-  return { commit: null, dirty: null, reason: "not_a_git_checkout", root_kind: rootKind };
+  return {
+    commit: null,
+    dirty: null,
+    // 注入文件在但写坏了 ⇒ 这是缺陷，不能与「部署形态没有 .git」同形
+    reason: buildInfoInvalid ? "build_info_invalid" : "not_a_git_checkout",
+    root_kind: rootKind,
+  };
 }
 
 const BOOT_GIT = detectBootGitIdentity();
