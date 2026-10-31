@@ -74,6 +74,11 @@ export function Providers() {
   const [sel, setSel] = useState<NodeProviderSelectionResp | null>(null);
   const [selErr, setSelErr] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  // 2026-10-31 —— **切换面**（这张卡真正要的东西：像 OpenCode 那样选 Provider 与模型）
+  const [pickProvider, setPickProvider] = useState<string>("");
+  const [pickModel, setPickModel] = useState<string>("");
+  const [applyMsg, setApplyMsg] = useState<string>("");
+  const [applyErr, setApplyErr] = useState<string>("");
 
   useEffect(() => {
     if (!utok || !networkId) return;
@@ -92,6 +97,45 @@ export function Providers() {
     } catch (e) {
       setSel(null);
       setSelErr(String(e));
+    }
+  };
+
+  const enabledProviders = (catalog?.providers ?? []).filter((p) => p.enabled);
+  const picked = enabledProviders.find((p) => p.id === pickProvider);
+  const models = (picked?.models ?? []).filter((m): m is string => typeof m === "string");
+
+  const apply = async () => {
+    if (!utok || !nodeId || !pickProvider || !pickModel) return;
+    setBusy(true); setApplyErr(""); setApplyMsg("");
+    try {
+      // revision 传「当前回读到的 revision」；没读过就先读一次，避免盲目传 0
+      let revision = sel?.revision ?? null;
+      if (revision === null) {
+        const fresh = await getNodeProviderSelection(utok, nodeId);
+        setSel(fresh);
+        revision = fresh.revision ?? 0;
+      }
+      const r = await applyNodeProvider(utok, nodeId, {
+        revision,
+        selection: { provider_id: pickProvider, model: pickModel },
+      });
+      setApplyMsg(`已排队（request_id ${r.request_id}）—— pending **不等于生效**，正在回读…`);
+      // 回读：只有 GET 读到 applied 才算切好（服务端 202 的 hint 也是这么说的）
+      for (let i = 0; i < 12; i++) {
+        await new Promise((res) => setTimeout(res, 1500));
+        const now = await getNodeProviderSelection(utok, nodeId);
+        setSel(now);
+        if (now.state === "applied" || now.state === "failed" || now.state === "unknown") {
+          setApplyMsg(now.state === "applied"
+            ? `已生效：${pickProvider} / ${pickModel}`
+            : `状态 ${now.state}${now.state === "unknown" ? `（daemon 回报 ${now.observed_status ?? "?"}）` : ""} —— 去看 daemon 侧结果`);
+          break;
+        }
+      }
+    } catch (e) {
+      setApplyErr(String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -139,6 +183,39 @@ export function Providers() {
             重新读一次（确认是否已生效）
           </button>
         ) : null}
+      </section>
+
+      <section>
+        <h3>切换 Provider / 模型</h3>
+        {/* 没有可选项时不要给一个空下拉：那会读成「随便选也行」 */}
+        {enabledProviders.length === 0 ? (
+          <p className="muted">没有已启用的 provider ⇒ 无从切换。先让管理员在上面的目录里录入并启用一个。</p>
+        ) : (
+          <>
+            <select value={pickProvider} onChange={(e) => { setPickProvider(e.target.value); setPickModel(""); }}>
+              <option value="">选 provider…</option>
+              {enabledProviders.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}（{p.id}）</option>
+              ))}
+            </select>
+            <select value={pickModel} disabled={!pickProvider} onChange={(e) => setPickModel(e.target.value)}>
+              <option value="">{pickProvider ? "选模型…" : "先选 provider"}</option>
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <button
+              className="primary"
+              disabled={busy || !nodeId || !pickProvider || !pickModel}
+              onClick={apply}
+            >
+              切换到该模型
+            </button>
+            <p className="muted">
+              提交后会回读 state=applied 才算生效；pending 只是排队（服务端 202 的语义）。
+            </p>
+          </>
+        )}
+        {applyErr ? <p className="error">{applyErr}</p> : null}
+        {applyMsg ? <p className="muted">{applyMsg}</p> : null}
       </section>
     </div>
   );
