@@ -226,6 +226,11 @@ test("new name-only registration binds once and its holder can refresh with eith
   const result = await call(first.body.token, "report_status", {
     resume_id: "refresh-fixture-session", alias: "refresh_fixture", status: "idle", node_id: "n_refresh_fixture",
   });
+  // #3275 批次 2 —— 同变量口径，形状由一次真实调用给出：
+  //   ["alias","inbox_count","ok","resume_id"]
+  // 少一个 `inbox_count`，客户端就再也不知道「还有几条待办」——而它正是每轮心跳唯一的推送面；
+  // 少一个 `alias`，多网络下的会话就认不出自己是谁。只断言 ok 时，这两个都能被悄悄删掉。
+  expect(Object.keys(result).sort()).toEqual(["alias", "inbox_count", "ok", "resume_id"]);
   expect(result.ok).toBe(true);
   expect(db.get("SELECT bound_node_id FROM api_tokens WHERE token_id=?1", first.body.token_id).bound_node_id).toBe("n_refresh_fixture");
   expect(db.get("SELECT owner_user_id FROM nodes WHERE node_id='n_refresh_fixture'").owner_user_id).toBeNull();
