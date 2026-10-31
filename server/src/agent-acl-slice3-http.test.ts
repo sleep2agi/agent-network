@@ -664,6 +664,21 @@ describe("update_node_config 响应键集（exact key set）", () => {
       const foreign = await tool(ntok, "ack_config_update", { update_id: "u_not_mine", status: "applied" });
       expect(Object.keys(foreign).sort()).toEqual(["ignored", "ok"]);
       expect(foreign).toEqual({ ok: true, ignored: "unknown_or_foreign_update" });
+
+      // ⑤ 「令牌在、node 没了」时**到不了** `ignored: "alias_unknown"`：
+      //    实测返回 {"ok":false,"error":"alias_required"} —— 因为 callerAlias 本身是从
+      //    resolveNodeCaller(令牌) 解析出来的：node 行一删，alias 就是空，
+      //    于是**更早的** `if (!callerAlias)` 守卫先拒。
+      //    ⇒ 这个出口要可达，需要「alias 解析得到、但工具内 resolveCallerNode() 解析不到」，
+      //      即一种跨网络的错配状态 —— 本夹具构造不出来，所以**今天不声称它被钉住**。
+      //    先把现在这条行为钉住（它同样是契约：残留令牌不该被当成隐式放行）。
+      const ghost = createNetworkTokenForNode(adminId, NET, "acl3-ghost-alias", "node_acl3_ghost");
+      expect(ghost.ok).toBe(true);
+      db.run("DELETE FROM nodes WHERE node_id = ?1", ["node_acl3_ghost"]);
+      db.run("DELETE FROM sessions WHERE alias = ?1", ["acl3-ghost-alias"]);
+      const staleTokenAck = await tool(ghost.token!, "ack_config_update", { update_id: "u_acl3_pending", status: "applied" });
+      expect(Object.keys(staleTokenAck).sort()).toEqual(["error", "ok"]);
+      expect(staleTokenAck).toEqual({ ok: false, error: "alias_required" });
     });
   });
 

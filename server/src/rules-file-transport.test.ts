@@ -144,6 +144,12 @@ describe("app#225 rules file — read round trip", () => {
         request_id: enq.request_id, status: "done", file_name: "CLAUDE.md", exists: true, content: "# 规则\n",
       });
       expect(Object.keys(acked).sort()).toEqual(["ok", "request_id", "status"]);
+      // #3275 批次 1·b —— 重复 ack 走 already_terminal：**形状不一样**（多一个 current_status）。
+      const twice = await n.call("ack_rules_file_request", {
+        request_id: enq.request_id, status: "done", file_name: "CLAUDE.md", exists: true,
+      });
+      expect(Object.keys(twice).sort()).toEqual(["current_status", "ignored", "ok"]);
+      expect(twice).toMatchObject({ ok: true, ignored: "already_terminal" });
       expect(acked).toMatchObject({ ok: true, status: "done", request_id: enq.request_id });
 
       const res = await u.call("get_rules_file_result", { request_id: enq.request_id });
