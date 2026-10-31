@@ -1121,23 +1121,23 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 2026-10-31 —— **有覆盖、零仲裁**（外部复核 (d)）：version 有两个来源
   // （standalone 二进制注入的 env / 磁盘 package.json），此前只报结果、不报谁赢了。
   // version_source 就是那个仲裁位；下面四例钉住它的语义。
-  test("version_source names which override won (embedded_env / package_json / unknown)", async () => {
+  test("version_source names which override won (and splits the two failure causes)", async () => {
     const { resolveServerVersion } = await import("./server.js");
     expect(resolveServerVersion("0.9.0-preview.999", () => "0.9.0-preview.1"))
       .toEqual({ version: "0.9.0-preview.999", source: "embedded_env" });
     // env 形状不对 ⇒ 落到磁盘，而不是把非法值当版本号
     expect(resolveServerVersion("latest", () => "0.9.0-preview.1"))
       .toEqual({ version: "0.9.0-preview.1", source: "package_json" });
-    // 磁盘读失败 ⇒ unknown，而不是伪装成某个来源
+    // 磁盘读失败 ⇒ read_failed；读到空 ⇒ empty_value（**两个成因两个值**，不是一个 unknown）
     expect(resolveServerVersion(undefined, () => { throw new Error("ENOENT"); }))
-      .toEqual({ version: "?", source: "unknown" });
+      .toEqual({ version: "?", source: "read_failed" });
     expect(resolveServerVersion("  ", () => "?"))
-      .toEqual({ version: "?", source: "unknown" });
+      .toEqual({ version: "?", source: "empty_value" });
 
     // 线上读数与语义自洽：unknown ⇔ version 是 "?"
     const body = await (await fetch(`${BASE}/health`)).json() as any;
-    expect(["embedded_env", "package_json", "unknown"]).toContain(body.version_source);
-    if (body.version_source === "unknown") expect(body.version).toBe("?");
+    expect(["embedded_env", "package_json", "read_failed", "empty_value"]).toContain(body.version_source);
+    if (body.version_source === "read_failed" || body.version_source === "empty_value") expect(body.version).toBe("?");
     else expect(body.version).not.toBe("?");
   });
 

@@ -176,7 +176,11 @@ const MCP_LABEL_MAX_BYTES = 1024 * 1024;
  *   · 或以为在用二进制内嵌版本，其实是磁盘那个
  * 两个方向都只能靠猜。⇒ 现在把来源作为字段一起给出。
  */
-export type VersionSource = "embedded_env" | "package_json" | "unknown";
+// 2026-10-31 —— 外部复核：「diagnosticIdValid 失败时**静默丢键** ⇒ id_absent 与 id_malformed
+// 不可区分。」同一形状在本字段上：原来 unknown 同时表示「读失败」与「读到空」，
+// 而两者的下一步完全不同（查文件权限 vs 修 package.json）。
+// ⇒ 拆成两个值，不新增字段：**两个成因就不是一个取值**。
+export type VersionSource = "embedded_env" | "package_json" | "read_failed" | "empty_value";
 export function resolveServerVersion(
   embeddedRaw: string | undefined,
   readPackageVersion: () => string,
@@ -188,9 +192,9 @@ export function resolveServerVersion(
   try {
     const v = readPackageVersion();
     if (v && v !== "?") return { version: v, source: "package_json" };
-    return { version: "?", source: "unknown" };
+    return { version: "?", source: "empty_value" };
   } catch {
-    return { version: "?", source: "unknown" };
+    return { version: "?", source: "read_failed" };
   }
 }
 const RESOLVED_VERSION = resolveServerVersion(process.env.ANET_EMBEDDED_COMMHUB_VERSION, () => {
