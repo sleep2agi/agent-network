@@ -210,7 +210,11 @@ describe("task consumed_at identity and lifecycle", () => {
     expect(queued?.task).toBe(content);
     expect(queued?.last_seen_at).toBe(before?.last_seen_at);
 
-    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: taskId })).ok).toBe(true);
+    // #3275 批次 1 —— 同变量口径：断言的对象就是这次调用的返回值（不是「附近的某个断言」）。
+    // ack_inbox 成功路径的键集是**闭合的两态**：成功 {ok}，失败 {ok, error}。
+    const acked = await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: taskId });
+    expect(Object.keys(acked).sort()).toEqual(["ok"]);
+    expect(acked.ok).toBe(true);
     expect(runtimeSubmittedAt(taskId)).toBeNull();
     expect(consumedAt(taskId)).toBeNull();
   });
