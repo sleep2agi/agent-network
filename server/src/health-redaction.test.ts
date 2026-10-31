@@ -1054,6 +1054,51 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(Object.keys(authedProbe).length).toBeGreaterThan(Object.keys(anonProbe).length);
   });
 
+  // 2026-10-31 —— **未被读的字段 = 未验证的字段**（外部复核 ①：
+  // 「not_applicable 占用了 hash 槽却活到今天，是因为那个字段从未被读取；
+  //   字段『看起来有值』比『未被测的代码』更隐蔽」）。
+  // 断言：HEALTH_FIELD_META 里每个键都必须至少被一条 server 测试提到；例外显式登记。
+  // 上面那条 ratchet 抓出来的两个「被产出但没人读」字段，这里补上断言（而不是登记成例外）。
+  test("alert_baselines and clk_tck_assumed_reason are actually read (not just produced)", async () => {
+    const body = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    // alert_baselines：null（还没刷过）或 {at, rows, aliases} —— 两种形态都必须能说清
+    expect(body).toHaveProperty("alert_baselines");
+    if (body.alert_baselines !== null) {
+      expect(typeof body.alert_baselines.at).toBe("string");
+      expect(Number.isInteger(body.alert_baselines.rows)).toBe(true);
+      expect(Number.isInteger(body.alert_baselines.aliases)).toBe(true);
+    }
+    // clk_tck_assumed_reason：一个必须能解释「为什么用假设值」的字符串（空串是合法的：读到了真实值）
+    expect(typeof body.clk_tck_assumed_reason).toBe("string");
+    // 它与 clk_tck_source 配对：source=assumed 时必须有理由，否则必须是空串
+    if (body.clk_tck_source === "assumed") expect(body.clk_tck_assumed_reason.length).toBeGreaterThan(0);
+    else expect(body.clk_tck_assumed_reason).toBe("");
+  });
+
+  test("every /health field is read by at least one test (unread = unverified)", async () => {
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(new URL("./server.ts", import.meta.url), "utf8");
+    const start = src.indexOf("HEALTH_FIELD_META");
+    const block = src.slice(start, src.indexOf("};", start));
+    const keys = [...block.matchAll(/^ {2}([A-Za-z_][A-Za-z0-9_]*):\s*\{/gm)].map((m) => m[1]);
+    expect(keys.length).toBeGreaterThan(30);
+    const walk = (dir: string, out: string[] = []): string[] => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) walk(full, out);
+        else if (name.endsWith(".test.ts")) out.push(full);
+      }
+      return out;
+    };
+    const testSource = walk(join(import.meta.dir)).map((f) => readFileSync(f, "utf8")).join("\n");
+    const ALLOW_UNREAD: Record<string, string> = {};
+    const unread = keys.filter((k) => !ALLOW_UNREAD[k] && !new RegExp(`\\b${k}\\b`).test(testSource));
+    if (unread.length) {
+      throw new Error(`这 ${unread.length} 个字段被产出但没有任何测试读它们：${unread.join(", ")}\n  ⇒ 要么加断言，要么登记进 ALLOW_UNREAD 并写明为什么可以不读。`);
+    }
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
