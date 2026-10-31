@@ -21,7 +21,13 @@ const list=(t=token)=>mcp(t,"list_my_children");
 const request=()=>mcp(owner.token,"request_adopt_node",{node_id:child,daemon_node_id:daemon,workdir:"/fixture/project"});
 const ack=(id:string,status="adopted")=>mcp(token,"ack_adopt_request",{request_id:id,status});
 const unadopt=()=>mcp(owner.token,"unadopt_node",{node_id:child});
-async function activate(){const r=await request();expect(r.ok).toBe(true);expect((await ack(r.request_id)).status).toBe("active");return r.request_id;}
+async function activate(){
+  const r=await request();
+  // 2026-10-31 —— #3275：request_adopt_node 的形状（收养也是**下发一个请求**）。
+  // status 一并回来，调用方不必再查一次「这条请求现在是什么状态」。
+  expect(Object.keys(r).sort()).toEqual(["ok","request_id","status"]);
+  expect(r.ok).toBe(true);
+  expect((await ack(r.request_id)).status).toBe("active");return r.request_id;}
 beforeAll(async()=>{
   ({db}=await import("./db.js"));
   const {register}=await import("./auth.js");

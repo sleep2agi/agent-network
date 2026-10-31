@@ -417,11 +417,22 @@ describe("requirement_tags (MCP)", () => {
     expect((await send(admin.token, "POST", `/api/requirements/tags/create?network_id=${NET}`, { name: "MCP子", parent_id: null })).status).toBe(201);
 
     const listed = await mcp(admin.token, "requirement_tags", { action: "list" });
+    // 2026-10-31 —— #3275：requirement_tags 的两个动作形状都由真实调用给出。
+    // list 回 7 键（含 can_manage 与 counts —— 「这一页的树」与「我能不能改」是两件事，
+    // 客户端要同时决定怎么画和要不要画按钮）；每行 6 键。
+    expect(Object.keys(listed).sort()).toEqual([
+      "can_manage", "colors", "counts", "networkId", "nodes", "ok", "tags",
+    ]);
+    expect(Object.keys((listed.nodes as any[])[0]).sort()).toEqual([
+      "color", "count", "depth", "name", "parent_id", "registered",
+    ]);
     const rows = listed.nodes as Array<{ name: string; parent_id: string | null; depth: number; registered: boolean }>;
     expect(rows.find(node => node.name === "MCP父")).toMatchObject({ parent_id: null, depth: 1, registered: true });
     expect(rows.find(node => node.name === "MCP子")).toMatchObject({ parent_id: null, depth: 1 });
 
     const moved = await mcp(admin.token, "requirement_tags", { action: "reparent", tag: "MCP子", parent: "MCP父" });
+    // reparent 回**四个数/名**，不回整棵树：调用方拿 affected/reparented 就能判断要不要重读。
+    expect(Object.keys(moved).sort()).toEqual(["affected", "ok", "op", "reparented"]);
     expect(moved).toMatchObject({ ok: true, op: "reparent", affected: 0, reparented: 1 });
     expect((await nodes(admin.token)).find(node => node.name === "MCP子")).toMatchObject({ parent_id: "MCP父", depth: 2 });
 

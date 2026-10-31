@@ -359,6 +359,14 @@ for (const shape of ["frozen", "legacy null", "wrong frozen", "same alias rebuil
             VALUES(?1,?2,?3,?4,?5,'fixture','{}','[]','started',?6,?7,'fixture')`,
       [`cr_${f.childId.slice(5)}`, f.daemonId, f.childAlias, f.childId, NET, childTok.tokenId, Date.now()]);
     const dispatched = await tool(ownerToken, "delete_node", { child_node_id: f.childId, daemon_node_id: f.daemonId, network_id: NET, confirm_alias: f.childAlias });
+    // 2026-10-31 —— #3275：delete_node 的形状（删节点是**下发**，不是立即删除）。
+    // in_flight_at_dispatch 是关键那一格：它告诉调用方「此刻这个节点上还有几条在飞」——
+    // 没有它，用户会以为删完就没在跑的任务了。
+    expect(Object.keys(dispatched as any).sort()).toEqual([
+      "action", "in_flight_at_dispatch", "lifecycle_state", "ok", "request_id",
+    ]);
+    expect((dispatched as any).action).toBe("delete");
+    expect((dispatched as any).lifecycle_state).toBe("deleting");
     expect(dispatched.ok).toBe(true);
     expect(db.get<{ child_token_id: string }>("SELECT child_token_id FROM node_stop_requests WHERE request_id=?1", dispatched.request_id)?.child_token_id).toBe(childTok.tokenId);
     if (shape === "legacy null" || shape === "wrong frozen") db.run("UPDATE node_stop_requests SET child_token_id=?1 WHERE request_id=?2", [shape === "wrong frozen" ? wrong.tokenId : null, dispatched.request_id]);
