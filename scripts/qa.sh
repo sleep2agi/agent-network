@@ -606,6 +606,20 @@ NOT_RUN=""
 if [[ -n "$NOT_RUN" ]]; then
   note "本次**未运行**：${NOT_RUN}（--l0 / 环境变量所致）⇒ 上面的绿不覆盖这些层"
 fi
+# 2026-10-31 —— **「没有读数」必须进退出码**（外部复核：
+# 「聚合器在散文里说对，在退出码里说反」——NORUN 印成「没有读数(不是通过)」却不在退出条件里）。
+# 本仓的具体形态：请求了某一层，而那一层**一个套件都没跑**（!= 全过）。
+#   L1 请求了但时间线为空 ⇒ 不是「L1 全绿」，是「L1 没有读数」。
+NO_READING=""
+if [[ $RUN_L1 -eq 1 ]]; then
+  _l1_ran=$(wc -l < /tmp/qa-l1-timing.tsv 2>/dev/null | tr -d ' ' || echo 0)
+  [[ "${_l1_ran:-0}" -eq 0 ]] && NO_READING="${NO_READING}L1(0 套件) "
+fi
+if [[ -n "$NO_READING" && $FAILED -eq 0 ]]; then
+  fail "没有读数（不是通过）：${NO_READING}—— 请求了该层，但它一个套件都没产出结果"
+  echo "  ⇒ 这与「该层全过」是两件事；先查为什么没跑起来（构建失败 / 早退 / 过滤条件）。"
+  exit 1
+fi
 if [[ $FAILED -eq 0 ]]; then
   ok "ALL PASS in ${ELAPSED}s (scope: ${SCOPE:-none})"
   exit 0
