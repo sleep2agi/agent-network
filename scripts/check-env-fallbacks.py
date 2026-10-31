@@ -147,11 +147,22 @@ def selftest(quiet: bool = False) -> int:
             print(f"  {'✓' if ok else '✗'} 期望 {want} 实际 {got}  {src[:52]}")
         fails += 0 if ok else 1
     # 2026-10-31 —— 空跑必须 exit 2（「一个都没核过」不能读成「全部合规」）
-    empty_code, _ = verdict(0, 0, 0, 0, 0)
-    ok_empty = empty_code == 2
-    if not quiet:
-        print(f"  {'✓' if ok_empty else '✗'} 0 处命中 ⇒ 没有读数（实际 exit={empty_code}）")
-    fails += 0 if ok_empty else 1
+    # 同时给 verdict 三支各一个**阴控**（外部复核 ④：
+    # 「只有正控时，一条『全部命中』的规则也能通过」——只有一个「应当通过」的样例时，
+    #   一个永远返回 0 的实现也能全绿）。
+    verdicts = [
+        ((0, 0, 0, 0, 0), 2, "0 处命中 ⇒ 没有读数"),
+        ((12, 1, 0, 0, 0), 1, "有未登记 ⇒ 红"),
+        ((12, 0, 1, 0, 0), 1, "有 borrow ⇒ 红"),
+        ((12, 0, 0, 0, 1), 1, "别名表 0 命中且未说明 ⇒ 红"),
+        ((12, 0, 0, 0, 0), 0, "都核过了 ⇒ 通过"),
+    ]
+    for (args, want, label) in verdicts:
+        got, _ = verdict(*args)
+        ok = got == want
+        if not quiet:
+            print(f"  {'✓' if ok else '✗'} {label}（期望 {want}，实际 {got}）")
+        fails += 0 if ok else 1
 
     if not KNOWN_BORROW:
         if not quiet:
