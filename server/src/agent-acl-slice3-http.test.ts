@@ -682,6 +682,36 @@ describe("update_node_config 响应键集（exact key set）", () => {
     });
   });
 
+  // #3275 批次 1·c 的先决条件：**daemon 绑定 + MCP 可用**的凭证。
+  // 前面试过两条走不通的路（owner 令牌 ⇒ caller_not_a_daemon；REST 用的 bound 令牌 ⇒ 非 200），
+  // 正解是：种子一个 node + 用 createNetworkTokenForNode 铸一把网络令牌（它同时是 MCP 凭证）。
+  describe("daemon-shaped caller: existence branches are reachable", () => {
+    test("ack_start_request / ack_stop_request 不存在 ⇒ 恰好 {error:'request_not_found', ok:false}", async () => {
+      const D = { alias: "acl3-ack-daemon", node: "node_acl3_ack_daemon" };
+      seedAgent({ alias: D.alias, node: D.node });
+      const minted = createNetworkTokenForNode(adminId, NET, D.alias, D.node);
+      expect(minted.ok).toBe(true);
+      for (const [name, args] of [
+        ["ack_start_request", { request_id: "start_absent", status: "started" }],
+        ["ack_stop_request", { request_id: "stop_absent", status: "stopped" }],
+      ] as [string, Record<string, unknown>][]) {
+        const r = await tool(minted.token!, name, args);
+        expect(Object.keys(r).sort()).toEqual(["error", "ok"]);
+        expect(r).toEqual({ ok: false, error: "request_not_found" });
+      }
+
+      // 「存在，但不是我的」是**另一档**：这两档对调用方的下一步完全不同
+      // （前者去查 ID，后者去查令牌归属）。只钉其中一档时，把两档合并成一个错误码不会有东西变红。
+      db.run(`INSERT INTO node_start_requests
+              (request_id, network_id, daemon_node_id, child_node_id, child_alias, created_by_token, status, created_at)
+              VALUES (?1, ?2, ?3, ?4, ?5, 'test', 'pending', ?6)`,
+        ["start_someone_else", NET, "node_acl3_other_daemon", "node_acl3_other_child", "acl3-other-child", Date.now()]);
+      const foreign = await tool(minted.token!, "ack_start_request", { request_id: "start_someone_else", status: "started" });
+      expect(Object.keys(foreign).sort()).toEqual(["error", "ok"]);
+      expect(foreign).toEqual({ ok: false, error: "not_your_request" });
+    });
+  });
+
   // 2026-10-31 —— #3171 第 5 项：错误信封的形状也要钉住。
   // 今天它们是「约定俗成」：每个出口手写 {ok:false,error}，
   // 于是谁顺手多塞一个字段，客户端的分支就多一个没人知道的键。
