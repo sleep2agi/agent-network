@@ -18,6 +18,7 @@
 #   stage=pm2_missing          (17)  找不到 pm2 可执行文件（**今天真的发生过**）
 #   stage=switch_failed        (18)  pm2 restart 返回非 0（切换没执行，但旧进程还活着）
 #   stage=unsafe_runtime_path  (19)  运行时目录不在 COMMHUB_HOME 里 —— 拒绝切换（**今天真的发生过**）
+#   stage=observe_window_failed(21)  切换后观察窗口内 degraded/版本漂移/会话归零 —— 已回滚
 #
 # 判据：**「没成功」与「哪一步没成功」是两句话**；后一句才能决定下一步做什么
 # （registry 缺失 ⇒ 去发版；install 失败 ⇒ 清缓存；health 不通 ⇒ 立刻回滚）。
@@ -78,10 +79,11 @@ health_version() {
 if [ "${SELFTEST:-0}" = "1" ]; then
   # 只自检「stage 枚举是封闭且互不相同」这条契约 —— 真装/真切换不适合在自检里跑。
   fails=0
-  codes="10 11 12 13 14 15 16 17 18 19"
+  codes="10 11 12 13 14 15 16 17 18 19 21"
+  # 20 刻意留空：它曾经属于一个被删掉的 stage，跳号比复用旧号安全（旧日志还能对上）
   n=$(printf '%s\n' $codes | sort -u | wc -l | tr -d ' ')
-  [ "$n" = "10" ] && echo "✓ selftest stage 退出码 10 个且互不相同" || { echo "✗ stage 退出码有重复"; fails=$((fails+1)); }
-  for s in registry_missing install_failed install_version_mismatch health_unreachable health_version_mismatch rollback_failed home_not_found pm2_missing switch_failed unsafe_runtime_path; do
+  [ "$n" = "11" ] && echo "✓ selftest stage 退出码 11 个且互不相同（20 刻意留空）" || { echo "✗ stage 退出码有重复"; fails=$((fails+1)); }
+  for s in registry_missing install_failed install_version_mismatch health_unreachable health_version_mismatch rollback_failed home_not_found pm2_missing switch_failed unsafe_runtime_path observe_window_failed; do
     grep -q "stage=$s" "$0" && echo "✓ selftest 登记了 stage=$s" || { echo "✗ 缺 stage=$s"; fails=$((fails+1)); }
   done
   [ "$fails" -eq 0 ] && { echo "✓ selftest 全部通过"; exit 0; }
@@ -171,6 +173,48 @@ fi
 
 pm2 save >/dev/null 2>&1
 say "切换完成：$CURRENT → $NEWV（pm2 save 已执行）"
+
+# ⑤b 观察窗口（外部复核：「一个动作若会改变『谁能受害』，它的风险等级就等于一次发布；
+#   门槛是**回滚、顺序、观察窗口**三件，不是『改动很小』。」）
+# 回滚与顺序本脚本已有；缺的是**观察窗口** —— 切换成功那一刻的 /health 只说明它起来了，
+# 不说明它稳。窗口内出现 degraded / 版本漂移 / 会话数归零 ⇒ 当作失败并回滚。
+OBSERVE_S="${OBSERVE_S:-30}"
+say "观察窗口：${OBSERVE_S}s（每 10s 采一次 /health）"
+elapsed=0
+while [ "$elapsed" -lt "$OBSERVE_S" ]; do
+  sleep 10
+  elapsed=$((elapsed + 10))
+  BODY=$(curl -s --max-time 6 "$HUB_URL/health" 2>/dev/null)
+  if [ -z "$BODY" ]; then
+    BAD="health_unreachable"
+  else
+    BAD=$(printf '%s' "$BODY" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("unparseable"); raise SystemExit
+if d.get("version") != sys.argv[1]: print("version_drift"); raise SystemExit
+if d.get("status") not in (None, "ok"): print("status_degraded"); raise SystemExit
+if isinstance(d.get("sessions_count"), int) and d["sessions_count"] == 0: print("sessions_zero"); raise SystemExit
+print("")
+' "$VERSION" 2>/dev/null)
+  fi
+  if [ -n "$BAD" ]; then
+    say "观察窗口内失败：$BAD ⇒ 回滚到 $CURRENT"
+    if [ -n "$CURRENT" ]; then
+      pm2_restart "$COMMHUB_HOME/runtime-${CURRENT//./-}" || true
+      sleep 8
+      BACK=$(health_version)
+      if [ "$BACK" = "$CURRENT" ]; then
+        stage_fail observe_window_failed "观察窗口内 $BAD；**已回滚到 $CURRENT**" 21
+      fi
+      stage_fail rollback_failed "观察窗口内 $BAD，回滚也没起来（现在是 ${BACK:-读不到}）" 15
+    fi
+    stage_fail observe_window_failed "观察窗口内 $BAD，且不知道原版本，无法回滚" 21
+  fi
+done
+say "观察窗口通过：${OBSERVE_S}s 内 version/status/sessions 均正常"
 # 2026-10-31 —— **哨兵行定型**（外部复核：「version 单独一行标 role，观察时刻单独标 observed」）。
 # 一行、字段固定、可 grep：跨 run 比对时不需要人读散文。
 #   role=deployment_label —— 这一格是**部署标签**，不是代码指纹（同 /health.version_role）
