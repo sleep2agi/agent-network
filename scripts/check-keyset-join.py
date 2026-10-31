@@ -379,6 +379,25 @@ def blocking_rules_complete() -> list[str]:
     return bad
 
 
+def rules_sha256() -> str:
+    """**门自己的规则哈希**（外部复核 ⑦：门输出自己的规则哈希）。
+
+    为什么需要：判定规则与密码无关 —— 关键是「这次读数用的是哪一版规则」。
+    规则改了而输出不变的通知里，没人能判断旧读数是否还成立。
+    ⇒ 把规则面（正则 + 白名单 + 阻塞规则 id + 自检用例数）打成一个 12 位哈希，随 SCOPE 一起出。
+    """
+    import hashlib as _h
+    parts = [
+        SET_JOIN.pattern, ANY_JOIN.pattern, KEYSET.pattern, KEYSET_ASSIGN.pattern,
+        ARRAY_SIGNAL.pattern, COMPARISON_AFTER.pattern, COMPARISON_CONTEXT.pattern,
+        ",".join(SRC), ",".join(sorted(EXCLUDE_SEGMENTS)), str(LOOKBEHIND),
+        ",".join(r["id"] for r in BLOCKING_RULES),
+        ",".join(r.get("not_hit_fixture", "") for r in BLOCKING_RULES),
+        str(len(SELFTEST_CASES)),
+    ]
+    return _h.sha256("\u0000".join(parts).encode()).hexdigest()[:12]
+
+
 def invalidates_complete() -> list[str]:
     """返回不完整的条目（空 = 自洽）。给自检用：散文可以漏，字段不能漏。"""
     bad = []
@@ -777,6 +796,8 @@ def main() -> int:
         _yaml_v = getattr(_yaml, "__version__", "unknown")
     except Exception:
         _yaml_v = "absent"
+    print(f"  rules_sha256   : {rules_sha256()}（正则 + 白名单 + 阻塞规则 id + 自检用例数）")
+    print("                   ⇒ 规则改了而哈希没变是不可能的；反过来，哈希变了就必须重读结论")
     print(f"  measured_by    : {Path(__file__).name} sha256={_self_sha}"
           f" ｜ env: python {_sys.version.split()[0]} / {_pf.system()} / PyYAML {_yaml_v}")
     print("                   ⇒ 只引 sha 不引 env 时，同一个数可能来自两把不同的尺子")
