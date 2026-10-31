@@ -124,16 +124,24 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect(await call(crossNetwork, "list_my_children")).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
   const denied = await fetch(`${base}/mcp`, { method: "POST", headers: { Authorization: `Bearer ${revoked}` } });
   expect(denied.status).toBe(401);
-  expect(await call(legacy, "ack_adopt_request", { request_id: requestId, status: "adopted" })).toMatchObject({ ok: true, status: "active" });
+  // 2026-10-31 —— #3275：**成功体也要钉键集**（上面那个循环钉的是错误信封）。
+  // 这四条是 daemon 侧最常被按字段名读的回执；多一个键不会让谁报错，但会改变解析分支。
+  const adopted = await call(legacy, "ack_adopt_request", { request_id: requestId, status: "adopted" });
+  expect(adopted).toMatchObject({ ok: true, status: "active" });
+  expect(Object.keys(adopted).sort()).toEqual(["ok", "status"]);
   expect((await call(legacy, "list_my_children")).children).toContainEqual({ child_node_id: child, alias: child, lifecycle_state: "active", managed: "adopted", binding_request_id: requestId });
   const stop = await call(owner.token, "stop_node", { node_id: child, network_id: owner.network_id });
   expect(stop.ok).toBe(true);
   expect((await call(legacy, "get_stop_request", { request_id: stop.request_id })).ok).toBe(true);
-  expect((await call(legacy, "ack_stop_request", { request_id: stop.request_id, status: "stopped" })).ok).toBe(true);
+  const stoppedAck = await call(legacy, "ack_stop_request", { request_id: stop.request_id, status: "stopped" });
+  expect(stoppedAck.ok).toBe(true);
+  expect(Object.keys(stoppedAck).sort()).toEqual(["ok", "status"]);   // #3275：成功体键集
   const start = await call(owner.token, "start_node", { node_id: child, network_id: owner.network_id });
   expect(start.ok).toBe(true);
   expect((await call(legacy, "get_start_request", { request_id: start.request_id })).ok).toBe(true);
-  expect(await call(legacy, "ack_start_request", { request_id: start.request_id, status: "started", child_pid: 4321 })).toMatchObject({ ok: true, status: "started" });
+  const startedAck = await call(legacy, "ack_start_request", { request_id: start.request_id, status: "started", child_pid: 4321 });
+  expect(startedAck).toMatchObject({ ok: true, status: "started" });
+  expect(Object.keys(startedAck).sort()).toEqual(["ok", "status"]);   // #3275：成功体键集
 });
 
 test("ownerless legacy daemon remains supported without rewriting its owner", async () => {
