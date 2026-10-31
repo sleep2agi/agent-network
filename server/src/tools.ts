@@ -39,7 +39,7 @@ import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, n
 import { countInFlightTasks } from "./node-in-flight-tasks.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
-import { handleRequirementsRequest } from "./requirements.js";
+import { handleRequirementsRequest, clearNodeFromRequirements } from "./requirements.js";
 import {
   buildAnetArgs as _unused_buildAnetArgs,           // ensure module is loaded
   validateName as validateChildName,
@@ -6003,6 +6003,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             // By node_id, not alias — a same-alias rebuild keeps its session.
             db.run(`DELETE FROM sessions WHERE node_id = ?1`, [row.child_node_id]);
             clearNodeFromAgentTeams(row.child_node_id); // #764
+            // 2026-10-31 —— #3277：卡上的引用也要清（实测 3 个已删节点仍被 27 张卡引用，
+            // 其中 2 个 id 在 api_tokens 里还有绑定行 ⇒ 这是删除路径的缺口，不是录入错误）。
+            clearNodeFromRequirements(row.child_node_id);
             auditCreateNodeStrict({
               action: "delete_node_completed",
               user_id: null, network_id: row.network_id, target_id: request_id,

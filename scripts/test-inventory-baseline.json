@@ -7048,6 +7048,7 @@
   "server/src/requirements-abandoned-http.test.ts::abandoned column::old clients (no declaration) see abandoned as done; their writes cannot un-abandon it by echo": 1,
   "server/src/requirements-abandoned-http.test.ts::abandoned column::schema accepts abandoned; the legacy CHECK migration is idempotent (SQLite rebuild / PG constraint swap)": 1,
   "server/src/requirements-abandoned-http.test.ts::abandoned column::set and restore: events recorded each way, no completedAt, restorable to pool and doing": 1,
+  "server/src/requirements-assignee-drift.test.ts::#3277 — deleting a node clears the cards that referenced it::agent_owner 被置空、participants 被摘掉，卡本身保留": 1,
   "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::写侧对账：设 agent_owner 时旧 assignee 被回填为引用（不再累积分叉）": 1,
   "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::陈旧自由文本被引用覆盖（agent_owner 优先 > owner > 文本）": 1,
   "server/src/requirements-comment-http.test.ts::requirements_comment::a person comments over REST; both show in requirements_events with the full text, newest first": 1,
@@ -15196,6 +15197,7 @@
   "server/src/requirements-abandoned-http.test.ts::abandoned column::old clients (no declaration) see abandoned as done; their writes cannot un-abandon it by echo",
   "server/src/requirements-abandoned-http.test.ts::abandoned column::schema accepts abandoned; the legacy CHECK migration is idempotent (SQLite rebuild / PG constraint swap)",
   "server/src/requirements-abandoned-http.test.ts::abandoned column::set and restore: events recorded each way, no completedAt, restorable to pool and doing",
+  "server/src/requirements-assignee-drift.test.ts::#3277 — deleting a node clears the cards that referenced it::agent_owner 被置空、participants 被摘掉，卡本身保留",
   "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::写侧对账：设 agent_owner 时旧 assignee 被回填为引用（不再累积分叉）",
   "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::陈旧自由文本被引用覆盖（agent_owner 优先 > owner > 文本）",
   "server/src/requirements-comment-http.test.ts::requirements_comment::a person comments over REST; both show in requirements_events with the full text, newest first",
@@ -16296,7 +16298,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "57c8633d2c2b996ee7dbf9af2c9f9a25d971a958",
+  "commit": "4c81714123854c30ba8c1b6c6aeed3f65956f895",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

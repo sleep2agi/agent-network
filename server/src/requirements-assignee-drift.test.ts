@@ -60,7 +60,9 @@ afterAll(() => { try { hub?.stop?.(); } catch {} rmSync(DIR, { recursive: true, 
 
 describe("assignee never contradicts a validated owner/agent_owner reference", () => {
   test("陈旧自由文本被引用覆盖（agent_owner 优先 > owner > 文本）", async () => {
-    const { displayAssignee } = await import("./requirements.js").catch(() => ({ displayAssignee: null as any })) as any;
+    const { displayAssignee, refDisplayName } = await import("./requirements.js").catch(
+      () => ({ displayAssignee: null as any, refDisplayName: null as any })) as any;
+    if (typeof refDisplayName !== "function") throw new Error("refDisplayName 未导出");
     if (typeof displayAssignee !== "function") {
       // 函数未导出时的退路：直接验证读取路径（下面两条 HTTP 用例已经覆盖），
       // 这里不静默通过 —— 明确记录「没有读数」的边界。
@@ -71,8 +73,13 @@ describe("assignee never contradicts a validated owner/agent_owner reference", (
       owner_json: JSON.stringify({ kind: "user", username: "王工" }),
       agent_owner_json: JSON.stringify({ kind: "node", id: "n_x", alias: "通信欧" }),
     };
-    expect(displayAssignee(row)).toBe("通信欧");
-    expect(displayAssignee({ ...row, agent_owner_json: null })).toBe("王工");
+    // 读侧：只回显存下来的自由文本（不从引用推导 —— 无法区分「没设过」与「显式清空」）
+    expect(displayAssignee({ assignee: "ANet基建" })).toBe("ANet基建");
+    expect(displayAssignee({ assignee: "" })).toBe("");
+    // 写侧回填用的名字解析：引用 → 人名（node 用 alias，user 用 username）
+    expect(refDisplayName(JSON.stringify({ kind: "node", id: "n_x", alias: "通信欧" }))).toBe("通信欧");
+    expect(refDisplayName(JSON.stringify({ kind: "user", username: "王工" }))).toBe("王工");
+    expect(refDisplayName("")).toBe("");
     // 没有引用时保留自由文本（系统外的人，删掉等于丢信息）
     expect(displayAssignee({ assignee: " 王工 ", owner_json: null, agent_owner_json: null })).toBe("王工");
     // 全是空 ⇒ 空串，不是 "undefined"/"null"
@@ -113,10 +120,35 @@ describe("assignee never contradicts a validated owner/agent_owner reference", (
     expect(renamed.body.requirement.name).toBe("改个名字而已");
     expect(renamed.body.requirement.assignee).toBe("asg-probe");   // 与上面那条同一张卡
 
-    // 两者**同时存在**时读侧以引用为准（这是有意的取舍：引用写入时被校验过，自由文本没有）。
-    // 记录在这里，免得下一个人把它当成 bug 再改回去。
+    // 两者**同时存在**时，读侧以**显式自由文本**为准（既有契约：调用方给的 assignee 不被覆盖）。
+    // 漂移的修法在写侧：设引用而**没显式给** assignee 时回填 —— 上面那条已经证明了这一点。
     const both = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, { assignee: "王工" });
     expect(both.status).toBe(200);
-    expect(both.body.requirement.assignee).toBe("asg-probe");
+    expect(both.body.requirement.assignee).toBe("王工");
+  });
+});
+
+describe("#3277 — deleting a node clears the cards that referenced it", () => {
+  test("agent_owner 被置空、participants 被摘掉，卡本身保留", async () => {
+    const { clearNodeFromRequirements } = await import("./requirements.js");
+    const created = await send("POST", `/api/requirements?network_id=${NET}`, {
+      name: "引用一个即将被删的节点",
+      column: "pool",
+      agent_owner: { kind: "node", alias: "asg-probe" },
+      participants: [{ kind: "node", alias: "asg-probe" }],
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.requirement.id as string;
+
+    const res = clearNodeFromRequirements("n_asg_probe");
+    expect(res.agentOwnerCleared).toBeGreaterThan(0);
+    expect(res.participantsTouched).toBeGreaterThan(0);
+
+    const after = await send("GET", `/api/requirements/${id}?network_id=${NET}`);
+    expect(after.status).toBe(200);
+    // 卡还在，但不再指向一个不存在的节点
+    expect(after.body.requirement.agent_owner ?? null).toBeNull();
+    const parts = after.body.requirement.participants ?? [];
+    expect(parts.some((p: any) => p?.kind === "node" && p?.id === "n_asg_probe")).toBe(false);
   });
 });

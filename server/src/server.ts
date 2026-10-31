@@ -105,7 +105,7 @@ import { diagnoseTask } from "./task-diagnostic.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
-import { handleRequirementsRequest } from "./requirements.js";
+import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
@@ -6238,6 +6238,7 @@ return Bun.serve({
       db.transaction(() => {
         db.run("DELETE FROM nodes WHERE node_id = ?1", [node.node_id]);
         clearNodeFromAgentTeams(node.node_id); // #764
+        clearNodeFromRequirements(node.node_id); // #3277：卡上指向它的引用一并清掉
         if (node.alias) {
           db.run(
             "DELETE FROM sessions WHERE alias = ?1 AND (network_id = ?2 OR (CAST(?2 AS TEXT) IS NULL AND network_id IS NULL))",

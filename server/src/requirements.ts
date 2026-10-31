@@ -1263,11 +1263,9 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   // 规则：调用方**没有显式给 assignee** 时，用本次写入后的引用回填；显式给了就以调用方为准
   // （那可能是系统外的人，例如「王工」—— 用引用覆盖它等于丢信息）。
   if (!has("assignee") && (has("owner") || has("agent_owner"))) {
-    const fromRef = displayAssignee({
-      assignee: "",
-      owner_json: people.ownerJson,
-      agent_owner_json: people.agentOwnerJson,
-    });
+    // 用 refDisplayName（把 {kind,id} 换回人名），**不是** displayAssignee
+    // （后者只回显存下来的自由文本 —— 这里正是要从引用推）。
+    const fromRef = refDisplayName(people.agentOwnerJson) || refDisplayName(people.ownerJson);
     if (fromRef) assignee = fromRef.slice(0, 80);
   }
   // RFC-040:只凭负责人身份改这张卡时,负责人 / 负责 Agent 只能交给本部门的人(或自己)/ 本部门成员的 Agent,
@@ -1483,30 +1481,76 @@ type LightRow = { requirement_id: string; seq?: number | null; network_id: strin
  * agent_owner 必须是本网络 node），而 assignee 是自由文本。两者冲突时，读一侧应以引用为准。
  * 没有引用时保留自由文本 —— 它可能是系统外的人（例如「王工」），删掉就等于丢信息。
  */
-export function displayAssignee(row: { assignee?: string | null; owner_json?: string | null; agent_owner_json?: string | null }): string {
-  const parse = (json: string | null | undefined): { kind?: string; id?: string; alias?: string; username?: string } | null => {
-    if (!json) return null;
-    try { return JSON.parse(json); } catch { return null; }
-  };
-  // 引用存的是 {kind, id}（名字在写入时已被解析成 id）⇒ 读侧要把 id 换回**给人看的名字**，
-  // 否则 assignee 会变成 "n_xxxx"，那比停在旧值更糟（至少旧值是句话）。
-  const name = (ref: { kind?: string; id?: string; alias?: string; username?: string } | null): string => {
-    if (!ref) return "";
-    const inline = String(ref.alias || ref.username || "").trim();
-    if (inline) return inline;
-    if (!ref.id) return "";
-    try {
-      if (ref.kind === "node") {
-        const r = db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE node_id = ?1", ref.id);
-        if (r?.alias) return String(r.alias);
-      } else if (ref.kind === "user") {
-        const r = db.get<{ username: string | null }>("SELECT username FROM users WHERE user_id = ?1", ref.id);
-        if (r?.username) return String(r.username);
-      }
-    } catch { /* 读不到就退回 id：比空更好，且不会崩 */ }
-    return String(ref.id);
-  };
-  return name(parse(row.agent_owner_json)) || name(parse(row.owner_json)) || String(row.assignee || "").trim();
+/**
+ * 2026-10-31 —— **删节点时要清掉指向它的卡引用**（#3277，实测 31 条悬空）。
+ *
+ * 实测：三个已删除的 node id 仍被 27 张卡引用，其中两个 id 在 api_tokens 里还有绑定行
+ * ⇒ 悬空不是录入错误，是**删除路径的缺口**；而读侧把它显示成「负责人是 n_xxxx」。
+ *
+ * 处理：
+ *   · agent_owner 指向该节点 ⇒ 置空（卡本身不动，它是正确的）
+ *   · participants 含该节点     ⇒ 从列表里摘掉
+ *   · owner 是**人**，删节点不影响它 ⇒ 不动
+ * 返回 { agentOwnerCleared, participantsTouched }，供删除路径写进审计。
+ */
+export function clearNodeFromRequirements(nodeId: string): { agentOwnerCleared: number; participantsTouched: number } {
+  const needle = `"id":"${nodeId}"`;
+  let agentOwnerCleared = 0;
+  const owners = db.all<{ requirement_id: string }>(
+    "SELECT requirement_id FROM requirements WHERE agent_owner_json LIKE ?1", `%${needle}%`);
+  for (const row of owners) {
+    db.run("UPDATE requirements SET agent_owner_json = NULL, updated_at = ?2 WHERE requirement_id = ?1",
+      [row.requirement_id, new Date().toISOString()]);
+    agentOwnerCleared += 1;
+  }
+  let participantsTouched = 0;
+  const parts = db.all<{ requirement_id: string; participants_json: string | null }>(
+    "SELECT requirement_id, participants_json FROM requirements WHERE participants_json LIKE ?1", `%${needle}%`);
+  for (const row of parts) {
+    let list: Array<{ kind?: string; id?: string }> = [];
+    try { list = JSON.parse(row.participants_json || "[]") as any[]; } catch { continue; }
+    const next = (list || []).filter((ref) => !(ref?.kind === "node" && ref?.id === nodeId));
+    if (next.length !== (list || []).length) {
+      db.run("UPDATE requirements SET participants_json = ?2, updated_at = ?3 WHERE requirement_id = ?1",
+        [row.requirement_id, JSON.stringify(next), new Date().toISOString()]);
+      participantsTouched += 1;
+    }
+  }
+  return { agentOwnerCleared, participantsTouched };
+}
+
+export function refDisplayName(json: string | null | undefined): string {
+  /**
+   * 把写入侧的引用 `{kind,id}` 换回**给人看的名字**（node → nodes.alias，user → users.username）。
+   * 只给**写侧回填**用：读侧不再由它推导 assignee（见 displayAssignee 的注释）。
+   */
+  let ref: { kind?: string; id?: string; alias?: string; username?: string } | null = null;
+  try { ref = json ? JSON.parse(json) : null; } catch { return ""; }
+  if (!ref) return "";
+  const inline = String(ref.alias || ref.username || "").trim();
+  if (inline) return inline;
+  if (!ref.id) return "";
+  try {
+    if (ref.kind === "node") {
+      const r = db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE node_id = ?1", ref.id);
+      if (r?.alias) return String(r.alias);
+    } else if (ref.kind === "user") {
+      const r = db.get<{ username: string | null }>("SELECT username FROM users WHERE user_id = ?1", ref.id);
+      if (r?.username) return String(r.username);
+    }
+  } catch { /* 读不到就退回 id */ }
+  return String(ref.id);
+}
+
+export function displayAssignee(row: { assignee?: string | null }): string {
+  /**
+   * 2026-10-31 —— **只回显存下来的值，不从引用推导**（两次实测把方向改对了）：
+   *   · 契约要求「显式 assignee 不被引用覆盖」（requirements-http 老测试）
+   *   · 契约也要求「显式清空后就是空」（同文件的 cleared 用例）
+   * 两者合起来意味着：读侧无法区分「从没设过」与「显式清空」⇒ 推导就会猜错其中一边。
+   * ⇒ 漂移的修法放在**写侧回填**（设引用且没显式给 assignee 时），读侧只负责如实显示。
+   */
+  return String(row.assignee || "").trim();
 }
 
 const parseRef = (json: string | null) => { try { return json ? JSON.parse(json) : null; } catch { return null; } };
