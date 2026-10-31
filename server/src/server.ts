@@ -1728,6 +1728,14 @@ function withCors(req: Request, res: Response): Response {
   for (const [k, v] of Object.entries(headers)) {
     res.headers.set(k, v);
   }
+  // 2026-10-31 —— **「谁写的」比「谁先谁后」更抗重构**（外部复核：
+  // 「头集合作第二主判据：它判『谁写的』，不判『谁先谁后』」）。
+  // 部署在前面有 nginx / 任何反代时，客户端拿到的错误页可能不是我们写的：
+  //   代理的 502/504 页面是 HTML，而我们的错误是 JSON —— 但只靠 content-type 判，
+  //   等于要求每个客户端都记得先看 content-type。
+  // ⇒ 加一个**静态**的产出者标记：同一个值永远不变，所以它不构成指纹
+  //   （与 `version_role` / `git_commit` 那类「回答我站在哪一层」的头不是一回事）。
+  res.headers.set("X-CommHub", "hub");
   return res;
 }
 

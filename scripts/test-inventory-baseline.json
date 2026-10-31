@@ -6204,6 +6204,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every /health field is read by at least one test (unread = unverified)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every anonymous key names a reader, and reader=cli is cross-checked against the CLI source": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every field in the full payload has meta, and every meta appears in it": 1,
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every hub response carries a constant producer marker (so a proxy page is distinguishable)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every instant-granularity field states its counterfactual (why is mandatory)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::exposes stable upload limits anonymously without exposing topology": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::frozen_at_boot fields really do not change within a declared window": 1,
@@ -14341,6 +14342,7 @@
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every /health field is read by at least one test (unread = unverified)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every anonymous key names a reader, and reader=cli is cross-checked against the CLI source",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every field in the full payload has meta, and every meta appears in it",
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every hub response carries a constant producer marker (so a proxy page is distinguishable)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::every instant-granularity field states its counterfactual (why is mandatory)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::exposes stable upload limits anonymously without exposing topology",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::frozen_at_boot fields really do not change within a declared window",
@@ -16274,7 +16276,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "c9b27254dd48854a6c0941ab8be5152804b041d4",
+  "commit": "1f2588f2844c18cfdbf5da33898b42a7d57c5729",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
 }

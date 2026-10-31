@@ -1264,6 +1264,27 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(forbidden).toEqual([]);
   });
 
+  // 2026-10-31 —— **「谁写的」比「谁先谁后」更抗重构**（外部复核：头集合当主判据）。
+  // 部署前面有 nginx/反代时，客户端拿到的错误页可能不是我们写的。
+  // 判据不是「content-type 是 json」（那要求每个客户端都记得先看），
+  // 而是一个**静态**产出者标记：有它 ⇒ 这段字节出自 hub；没有 ⇒ 出自它前面的某一层。
+  // 必须是静态值：一旦它随进程/版本变化，它就变成了指纹（与 version_role 那条相冲突）。
+  test("every hub response carries a constant producer marker (so a proxy page is distinguishable)", async () => {
+    const paths = ["/health", "/api/definitely-not-a-route", "/"];
+    const seen: (string | null)[] = [];
+    for (const path of paths) {
+      const res = await fetch(`${BASE}${path}`);
+      seen.push(res.headers.get("X-CommHub"));
+    }
+    // 三个不同出口（健康检查 / 404 / 帮助页）都必须带，且值相同
+    expect(seen).toEqual(["hub", "hub", "hub"]);
+    // 静态性：同一路径两次读到的值必须一致（否则它是指纹，不是产出者标记）
+    const again = await fetch(`${BASE}/health`);
+    expect(again.headers.get("X-CommHub")).toBe("hub");
+    // 与「匿名无指纹」那条不冲突：这个头不含 git/commit/build 类词
+    expect(/git|commit|build[-_]?(sha|id)?/.test("x-commhub")).toBe(false);
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
