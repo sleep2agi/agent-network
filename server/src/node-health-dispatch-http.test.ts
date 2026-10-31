@@ -111,6 +111,35 @@ describe("#460 which layers count as degraded", () => {
   });
 });
 
+// 2026-10-31 —— **属性断言**（外部复核 ④：「键集契约只能对工厂断言，不能对样本断言」）。
+// degradedLayers(health) 是工厂：它对**任意** health 形状都必须产出同一种元素形状。
+// 这里枚举 2×2×5×2 = 40 种组合，断言每个元素的键集恒为那五个。
+describe("degradedLayers 是工厂：任意 health 组合下元素键集不变", () => {
+  test("40 种组合，元素键集恒为 {layer,reason,origin,label,hint}", () => {
+    const seen = new Set<string>();
+    for (const appOk of [true, false]) {
+      for (const tuiOk of [true, false]) {
+        for (const auth of ["ok", "revoked", "expired", "unknown", undefined]) {
+          for (const lastErr of [null, "refused"]) {
+            const health: any = {
+              bridge: "ok",
+              app_server: appOk ? { ok: true, rtt_ms: 1, last_error: null }
+                : { ok: false, rtt_ms: null, last_error: lastErr },
+              ...(tuiOk === undefined ? {} : { tui: { ok: tuiOk, reason: "sleep-placeholder" } }),
+              ...(auth === undefined ? {} : { model_auth: auth }),
+            };
+            for (const layer of degradedLayers(health)) {
+              seen.add(Object.keys(layer).sort().join(","));
+            }
+          }
+        }
+      }
+    }
+    // 排序后的顺序是字典序（label 在 layer 前）——我第一版按定义顺序写，被断言当场纠正。
+    expect([...seen]).toEqual(["hint,label,layer,origin,reason"]);
+  });
+});
+
 describe("#460 REST /api/task", () => {
   test("unknown health (old agent-node) → dispatched exactly as before", async () => {
     const before = taskCount();
