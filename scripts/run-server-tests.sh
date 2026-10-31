@@ -19,11 +19,22 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVER="$ROOT/server"
-PATTERNS=("$@")
+# 2026-10-31 —— `--pkg <name>`：同一个隔离纪律（每文件一个进程、一个全新 DB、守恒式）
+# 也需要用在别的包上。agent-node 今天就有本地红，而没有逐文件读数时，
+# 「3 条失败」既可能是 3 个缺陷，也可能是一次共享状态污染。
+# 只认 packages 下真实存在的目录，拼错就报错 —— 不猜。
+PKG="server"
+PATTERNS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pkg) PKG="${2:-}"; shift 2 ;;
+    *) PATTERNS+=("$1"); shift ;;
+  esac
+done
+SERVER="$ROOT/$PKG"
 
 if [ ! -d "$SERVER/src" ]; then
-  echo "✗ 找不到 $SERVER/src" >&2
+  echo "✗ 找不到 $SERVER/src（--pkg=$PKG）⇒ 没有读数，不是「全过」" >&2
   exit 2
 fi
 
