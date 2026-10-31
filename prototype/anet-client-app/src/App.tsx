@@ -5,6 +5,7 @@ import { selfAlias, useAuth } from "./auth";
 import { Login } from "./pages/Login";
 import { NodeList } from "./pages/NodeList";
 import { Chat } from "./pages/Chat";
+import { Providers } from "./pages/Providers";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const utok = useAuth((s) => s.utok);
@@ -108,6 +109,14 @@ export function App() {
           element={
             <RequireAuth>
               <NodeList />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/providers"
+          element={
+            <RequireAuth>
+              <Providers />
             </RequireAuth>
           }
         />
