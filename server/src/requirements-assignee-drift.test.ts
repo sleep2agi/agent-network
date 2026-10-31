@@ -103,6 +103,16 @@ describe("assignee never contradicts a validated owner/agent_owner reference", (
     expect(manual.status).toBe(200);
     expect(manual.body.requirement.assignee).toBe("王工");
 
+    // 2026-10-31 —— **双向可测**（外部复核 ④：
+    // 「改粒度维度 ⇒ 结果变（确实相关）；改其它维度 ⇒ 结果不变（确实无关）。
+    //   只做前一向时，一个『什么都相关』的模型也能满足它。」）
+    // 第一向（相关）上面已经有了：改 agent_owner ⇒ assignee 跟着变。
+    // 这一向（无关）：改一个**不相干**的字段（name），assignee 必须**不变**。
+    const renamed = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, { name: "改个名字而已" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.requirement.name).toBe("改个名字而已");
+    expect(renamed.body.requirement.assignee).toBe("asg-probe");   // 与上面那条同一张卡
+
     // 两者**同时存在**时读侧以引用为准（这是有意的取舍：引用写入时被校验过，自由文本没有）。
     // 记录在这里，免得下一个人把它当成 bug 再改回去。
     const both = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, { assignee: "王工" });
