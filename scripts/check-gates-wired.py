@@ -108,7 +108,13 @@ def workflow_text() -> str:
     ⇒ 先剥两种注释（整行 `#` 开头、行尾 ` # …`），再匹配。
     """
     out = []
-    for p in (REPO / ".github" / "workflows").glob("*.yml"):
+    wf_dir = REPO / ".github" / "workflows"
+    if not wf_dir.is_dir() or not list(wf_dir.glob("*.yml")):
+        # 2026-10-31 —— 外部复核 ③：「任何『存在/不存在』的二值判定，
+        # 只要取得它需要一次可能失败的操作，就必须有第三格。」
+        # 读不到 workflows（目录不存在 / 空）不是「都没接线」，是 **cannot_read**。
+        raise FileNotFoundError(str(wf_dir))
+    for p in wf_dir.glob("*.yml"):
         for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
             if line.lstrip().startswith("#"):
                 continue
@@ -145,7 +151,12 @@ def run_selftest(p: Path, timeout_s: int = 60) -> tuple[int, str]:
 
 
 def main(argv: list[str]) -> int:
-    wf = workflow_text()
+    try:
+        wf = workflow_text()
+    except FileNotFoundError as e:
+        print(f"stage=cannot_read —— 读不到 workflows 目录或其中没有 *.yml：{e}", file=sys.stderr)
+        print("  ⇒ 这不是「所有门都没接线」，是「接线情况不可读」（三态里的第三格）。", file=sys.stderr)
+        return 2
     all_gates = gates()
     if not all_gates:
         print("scripts/ 下没有门 ⇒ 没有读数", file=sys.stderr)
