@@ -1030,6 +1030,30 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 它却一直躺在那里，看起来「这个字段是公开的」⇒ 下一个人把同名字段加回来时**默认就是公开的**。
   // ⇒ 白名单会从「审批记录」退化成「历史残留」。
   // 这与今晚那条镜像规则同构：否定断言必须配肯定断言，否则前者可被「永远不给」满足。
+  // 2026-10-31 —— **2×2 的第四格**（外部复核 (e)：「等价性断言必须按 (通道 × 配置) 组合进行」）。
+  // 本仓的 /health 有两个维度：谁在读（匿名 / 鉴权）× 有没有带 X-Probe-Nonce。
+  // 前面只覆盖了三格（匿名、匿名+探针、鉴权），**鉴权+探针**这一格没测过 ——
+  // 而它正是「探针回显会不会被鉴权分支吃掉」的唯一读数。
+  test("all four cells of (audience × probe-header) carry the fields they must", async () => {
+    const anon = await (await fetch(`${BASE}/health`)).json() as any;
+    const anonProbe = await (await fetch(`${BASE}/health`, { headers: { "X-Probe-Nonce": "cell-anon" } })).json() as any;
+    const authed = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    const authedProbe = await (await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${adminToken}`, "X-Probe-Nonce": "cell-authed" },
+    })).json() as any;
+
+    // 探针格：带头的两格都必须回显 nonce，且 served_at 都在（窗口两端同域）
+    expect(anonProbe.probe_nonce).toBe("cell-anon");
+    expect(authedProbe.probe_nonce).toBe("cell-authed");
+    for (const body of [anon, anonProbe, authed, authedProbe]) {
+      expect(typeof body.served_at).toBe("string");
+    }
+    // 不带头的一格不该出现 probe_nonce（否则「这一次的凭据」变成常驻字段）
+    expect("probe_nonce" in anon).toBe(false);
+    // 鉴权格必须比匿名格多（否则白名单形同虚设）——第四格同样成立
+    expect(Object.keys(authedProbe).length).toBeGreaterThan(Object.keys(anonProbe).length);
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
