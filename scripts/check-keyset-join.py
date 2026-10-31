@@ -85,6 +85,19 @@ EXCLUDE_SEGMENTS = (
 SET_JOIN = re.compile(r"\.sort\s*\(\s*\)\s*\.join\s*\(\s*([^)]*?)\s*\)")
 # 任意 join（用于 fail-closed 的第二档）
 ANY_JOIN = re.compile(r"\.join\s*\(\s*([^)]*?)\s*\)")
+# 2026-10-31 —— **别把「没有 join」当成「没有拼接」**（外部复核：「『没有人碰过它』
+# 和『碰过但它原样透传』效果一样，但只有前者会在被改动时报警」）。
+# 把键集变成字符串还有几种写法，一个都不含 `join`：
+#   Object.keys(b).sort().toString()      ← Array#toString 就是 join(",")
+#   Object.keys(b).sort() + ""            ← 隐式 toString
+#   `${Object.keys(b).sort()}`            ← 模板字面量隐式 toString
+#   keys.toString() / keys + ""           ← 键集先派生到标识符再强转
+# 只查 join 的话，一次「改成 toString」的重构会让计数 1→0 —— 而 0 读起来更像没问题。
+SET_TOSTRING = re.compile(r"\.sort\s*\(\s*\)\s*\.toString\s*\(\s*\)")
+SET_PLUS = re.compile(r"\.sort\s*\(\s*\)\s*\+\s*[\"'`]")
+IDENT_TOSTRING = re.compile(r"\b(\w+)\s*\.toString\s*\(\s*\)")
+IDENT_PLUS = re.compile(r"\b(\w+)\s*\+\s*[\"'`]")
+TEMPLATE_KEYS = re.compile(r"\$\{\s*(?:Object\.keys|Object\.getOwnPropertyNames)\s*\([^}]*\)\s*\}")
 KEYSET = re.compile(r"Object\.(?:keys|getOwnPropertyNames)\s*\(")
 # 键集派生：`const keys = Object.keys(...)` / `keys = Object.keys(...)`
 KEYSET_ASSIGN = re.compile(r"(\w+)\s*=\s*Object\.(?:keys|getOwnPropertyNames)\s*\(")
@@ -204,6 +217,10 @@ def scan_paths(files: list[Path], repo: Path):
             n = text.count("\n", 0, i) + 1
             return n, lines[n - 1].strip()[:110]
 
+        def snippet_of(i: int) -> str:
+            n = text.count("\n", 0, i) + 1
+            return lines[n - 1].strip()[:110]
+
         def push(bucket: list[str], n: int, label: str, snippet: str) -> None:
             bucket.append(f"{rel}:{n}: {label}  {snippet}")
 
@@ -289,6 +306,37 @@ def scan_paths(files: list[Path], repo: Path):
                     review if test_file else blocking, n,
                     f"键集派生标识符 `{ident}` 拼字符串后参与比较（分隔符可碰撞）", snippet,
                 )
+        # 第三档：不含 join 的等价拼接（toString / 隐式 toString / 模板字面量）。
+        # 判据与 join 档同构：键集派生 + **紧邻**比较运算符 ⇒ 阻塞；否则列举。
+        coerce_sites: list[tuple[int, str, str]] = []
+        for m in SET_TOSTRING.finditer(text):
+            coerce_sites.append((m.start(), ".toString()", snippet_of(m.start())))
+        for m in SET_PLUS.finditer(text):
+            coerce_sites.append((m.start(), "+ \"\"", snippet_of(m.start())))
+        for m in TEMPLATE_KEYS.finditer(text):
+            coerce_sites.append((m.start(), "模板字面量", snippet_of(m.start())))
+        for ident in tainted:
+            for m in IDENT_TOSTRING.finditer(text):
+                if m.group(1) == ident:
+                    coerce_sites.append((m.start(), f"`{ident}.toString()`", snippet_of(m.start())))
+            for m in IDENT_PLUS.finditer(text):
+                if m.group(1) == ident:
+                    coerce_sites.append((m.start(), f"`{ident} + \"\"`", snippet_of(m.start())))
+        seen_pos: set[int] = set()
+        for pos, how, snip in coerce_sites:
+            if pos in seen_pos or snip.startswith("//") or snip.startswith("*") or snip.startswith("/*"):
+                continue
+            seen_pos.add(pos)
+            n = text.count("\n", 0, pos) + 1
+            line = lines[n - 1]
+            # 比较运算符必须在**同一行**且紧随其后（与 join 档一致的严格度）
+            tail = line[line.find(how.split("`")[-1].split(".")[0]) if False else 0:]
+            compared = bool(re.search(r"!==|===|!=|==", line))
+            label = f"键集强转字符串（{how} ⇒ 与 join 等价，同样可碰撞）"
+            if compared:
+                push(review if test_file else blocking, n, label, snip)
+            else:
+                push(review if test_file else advisory, n, f"{label}（未检测到比较）", snip)
     return blocking, unproven, advisory, review, scanned, any_join_hits
 
 
@@ -309,7 +357,7 @@ INVALIDATES: list[dict[str, str]] = [
     {"id": "tree_changed", "type": "ref_dirty",
      "check": "重跑本脚本；SCOPE 的 measured_on 行与上次不同 ⇒ 作废"},
     {"id": "selftest_not_full", "type": "behavior",
-     "check": "python3 scripts/check-keyset-join.py --selftest（必须 9/9）"},
+     "check": "python3 scripts/check-keyset-join.py --selftest（必须 12/12）"},
     {"id": "scan_domain_changed", "type": "domain",
      "check": "重跑本脚本；SCOPE 的 scan_domain 里 ext 计数与上次不同 ⇒ 作废"},
 ]
@@ -508,7 +556,37 @@ SELFTEST_CASES = [
         '  return `ids: ${note}`\n'
         '}\n',
         "advisory", "数组 join",
+    ),    # 2026-10-31 —— **不含 join 的等价拼接**（外部复核：「『没有人碰过它』和
+    # 『碰过但它原样透传』效果一样，但只有前者会在被改动时报警。」
+    # 只查 join ⇒ 一次「改成 toString」的重构让计数 1→0，而 0 更像没问题）。
+    (
+        "keyset_tostring_compared",
+        'export function f(b: Record<string, unknown>) {\n'
+        '  if (Object.keys(b).sort().toString() !== "a,b") throw new Error("x")\n'
+        '}\n',
+        "blocking", "强转字符串",
     ),
+    (
+        "keyset_toString_via_variable_compared",
+        'export function f(b: Record<string, unknown>) {\n'
+        '  const keys = Object.keys(b).sort()\n'
+        '  if (keys.toString() !== "a,b") throw new Error("x")\n'
+        '}\n',
+        "blocking", "强转字符串",
+    ),
+    (
+        # ⚠️ 这一档的严格度与 join 档一致：**比较必须在同一行**。
+        # 若把结果先赋给变量再在下一行比较，本门落 advisory（列举不阻塞）——
+        # 那是有意的：跨语句窗口会把「拼进消息」误判成「比较」，而假红会把门训练成噪声。
+        # 这条 fixture 因此写成同一行，它证明的是「同一行的模板字面量比较会被抓到」。
+        "keyset_template_literal_compared",
+        'export function f(b: Record<string, unknown>) {\n'
+        '  const want = "a,b"\n'
+        '  if (`${Object.keys(b).sort()}` === want) throw new Error("x")\n'
+        '}\n',
+        "blocking", "模板字面量",
+    ),
+
 ]
 
 
@@ -531,8 +609,8 @@ def selftest(quiet: bool = False) -> int:
         print(f"✗ invalidates_on 字段不自洽：{bad}", file=sys.stderr)
         print("  ⇒ 散文可以漏一项而不被发现；字段不能 —— 这就是把它写成字段的理由。", file=sys.stderr)
         return 2
-    if len(SELFTEST_CASES) != 9:
-        print(f"✗ selftest 用例数应为 9，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
+    if len(SELFTEST_CASES) != 12:
+        print(f"✗ selftest 用例数应为 12，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
     failures = 0
     with tempfile.TemporaryDirectory() as td:
