@@ -30,7 +30,15 @@ SCAN = ("*.ts",)
 EXCLUDE_PARTS = ("node_modules", "dist", "fixtures", ".worktrees")
 
 # 跨 env 回退：(A, B) —— A 缺失时借 B。
-PAIR = re.compile(r"process\.env\.([A-Z][A-Z0-9_]*)\s*(?:\?\?|\|\|)\s*process\.env\.([A-Z][A-Z0-9_]*)")
+# 2026-10-31 —— 两种宿主都要认：
+#   process.env.X || process.env.Y          （直接读全局）
+#   env.X || env.Y                          （把 env 当参数传进来的可测形式）
+# 漏了后者会怎样（实测）：我把 `process.env.COMMHUB_TOKEN || process.env.AUTH_TOKEN`
+# 重构成 `requireEnv(env)` 里的 `env.COMMHUB_TOKEN || env.AUTH_TOKEN` 之后，
+# 本门从「1 处已登记」变成「0 处」，于是那条登记被报成死条目 —— **不是代码变干净了，是检测器看不见了**。
+PAIR = re.compile(
+    r"(?:process\.)?env\.([A-Z][A-Z0-9_]*)\s*(?:\?\?|\|\|)\s*(?:process\.)?env\.([A-Z][A-Z0-9_]*)"
+)
 
 # 已登记：两个变量是**同一个概念**的不同名字（历史遗留 / 兼容期双名）。
 #
@@ -42,6 +50,13 @@ KNOWN_ALIAS: dict[tuple[str, str], tuple[str, str]] = {
     ("COMMHUB_URL", "ANET_HUB_URL"): (
         "hub 地址的旧名/新名（兼容期并存）",
         "当全仓不再出现 ANET_HUB_URL 的写入方（发布说明里宣告弃用之后）⇒ 删掉这一行与 `|| ANET_HUB_URL`",
+    ),
+    # 2026-10-31 —— 同一个概念的**反方向**写法（Windows 优先、POSIX 回退）。
+    # 登记的是「这一对是同一个概念」，与顺序无关；漏了它会让新检测器一上线就红，
+    # 而红的原因是「配对表只写了正方向」，不是代码有问题。
+    ("USERPROFILE", "HOME"): (
+        "家目录：Windows 与 POSIX 的不同名字（顺序与上一行相反，概念相同）",
+        "同上：永不移除（操作系统差异）；若改成显式 process.platform 分支 ⇒ 两条一起删",
     ),
     ("HOME", "USERPROFILE"): (
         "家目录：POSIX 与 Windows 的不同名字",

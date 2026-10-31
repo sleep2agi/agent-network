@@ -67,6 +67,8 @@ KNOWN_UNWIRED: dict[str, str] = {
     "scripts/check-diff-shape.sh": "[interactive] 提交时用（配合 install-diff-shape-hook.sh），不是 CI 门",
     "scripts/report-process-artifact-drift.py": "[report-only] 读数报告，非阻塞；有需求再接",
     "scripts/report-code-producers.py": "[report-only] 读数报告（谁产出某字段），人工按需跑",
+    "scripts/report-rest-coverage.py": "[report-only] 读数报告（REST 端点的测试引用率）；"
+                                       "它回答「分母是多少」，不对代码下结论，不进 CI",
     "scripts/report-mcp-key-set-coverage.py": "[report-only] 读数报告（键集覆盖率三口径），人工按需跑",
     "scripts/report-node-versions.py": "[report-only] 读数报告（舰队版本分布），人工按需跑",
     "scripts/report-reason-branches.py": "[report-only] 读数报告（按 reason 分支的处数），人工按需跑",
@@ -92,6 +94,8 @@ KNOWN_NO_SELFTEST: set[str] = {
 # 「有 selftest 但本步没跑」与「没有 selftest」是两件事，不能混成一句「都在跑」。
 KNOWN_SLOW: dict[str, str] = {
     "scripts/check-mutation-pins.py": "自检约 3 分钟；由它自己的 CI 步骤跑（本步只核对接线与 selftest 存在）",
+    "scripts/report-rest-coverage.py": "[report-only] 读数报告（REST 端点的测试引用率）；"
+                                       "它回答「分母是多少」，不对代码下结论，不进 CI",
 }
 
 
