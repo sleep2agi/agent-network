@@ -116,7 +116,17 @@ describe("#1278 opt-in durable no-change backoff through real HTTP/MCP", () => {
     const latest = db.get<any>("SELECT task_id FROM scheduled_task_runs WHERE run_id = ?1", before.backoff_last_run_id)!;
     expect((await reply(latest.task_id, { scheduled_work_outcome: "no_changes" })).ok).toBe(false);
     syncScheduledRunForTask(latest.task_id, network); expect(state(scheduleId)).toEqual(before);
-    const child = Bun.spawn([process.execPath, "-e", `import {db} from './server/src/db.ts'; import {refreshScheduledBackoff} from './server/src/scheduled-backoff.ts'; db.transaction(()=>refreshScheduledBackoff(${JSON.stringify(scheduleId)},${JSON.stringify(network)})); console.log(JSON.stringify(db.get('SELECT backoff_streak,backoff_effective_seconds FROM scheduled_tasks WHERE schedule_id=?1',${JSON.stringify(scheduleId)})));`], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
+    // 2026-10-31 —— 这里原来写的是**相对路径** `'./server/src/db.ts'` + `cwd: process.cwd()`。
+    // 那只在「从仓库根跑」时成立；从 `server/` 跑（scripts/run-server-tests.sh 就是这么跑的）
+    // 子进程立刻退出 1，于是这条断言长期在本地是红的、而看起来像「另一个进程也不能加两次」失败。
+    // ⇒ 用 import.meta.dir 拼**绝对路径**：断言要测的是并发语义，不该顺带测 cwd。
+    const dbTs = new URL("./db.ts", import.meta.url).pathname;
+    const backoffTs = new URL("./scheduled-backoff.ts", import.meta.url).pathname;
+    const child = Bun.spawn([process.execPath, "-e",
+      `import {db} from ${JSON.stringify(dbTs)}; import {refreshScheduledBackoff} from ${JSON.stringify(backoffTs)};`
+      + ` db.transaction(()=>refreshScheduledBackoff(${JSON.stringify(scheduleId)},${JSON.stringify(network)}));`
+      + ` console.log(JSON.stringify(db.get('SELECT backoff_streak,backoff_effective_seconds FROM scheduled_tasks WHERE schedule_id=?1',${JSON.stringify(scheduleId)})));`],
+      { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
     const output = await new Response(child.stdout).text(); expect(await child.exited).toBe(0);
     expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({ backoff_streak: 3, backoff_effective_seconds: 600 });
     expect(state(scheduleId)).toEqual(before);

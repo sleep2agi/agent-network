@@ -110,7 +110,11 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
   });
   test("old events and duplicate consumption do not replay after enable or process reopen", async () => {
     await card(); const { scheduleId } = await atThree(), before = state(scheduleId); expect(poll(scheduleId)).toBe(false);
-    const child = Bun.spawn([process.execPath, "-e", `import {consumeRequirementWake} from './server/src/scheduled-requirement-wake.ts'; console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})}));`], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
+    // 2026-10-31 —— 绝对路径，不再用 `'./server/src/…'` + `cwd: process.cwd()`。
+    // 那种写法只在「从仓库根跑」时成立；从 `server/` 跑（scripts/run-server-tests.sh 就是这样）
+    // 子进程立刻退出 1，于是断言长期红着，而看起来像被测行为失败。断言不该顺带测 cwd。
+    const wakeTs = new URL("./scheduled-requirement-wake.ts", import.meta.url).pathname;
+    const child = Bun.spawn([process.execPath, "-e", `import {consumeRequirementWake} from ${JSON.stringify(wakeTs)}; console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})}));`], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
     const output = await new Response(child.stdout).text(); expect(await child.exited).toBe(0);
     expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({ wake: false }); expect(state(scheduleId)).toEqual(before);
   });
@@ -246,7 +250,9 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
   });
   test("two independent SQLite processes consume the event once and persist one generation",async()=>{
     const {scheduleId}=await atThree();await card();const before=state(scheduleId), gate=`/tmp/wake1279-${crypto.randomUUID()}`;
-    const code=`import {consumeRequirementWake} from './server/src/scheduled-requirement-wake.ts'; import {existsSync} from 'node:fs'; console.log('READY'); while(!existsSync(${JSON.stringify(gate)}))await Bun.sleep(10); for(let i=0;;i++){try{console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})})); break;}catch(e){if(i>=4||!String(e).includes('locked'))throw e;await Bun.sleep(20);}}`;
+    // 同上：绝对路径（这条要测的是**两个进程抢同一个事件**，不是 cwd 解析）
+    const wakeTs2 = new URL("./scheduled-requirement-wake.ts", import.meta.url).pathname;
+    const code=`import {consumeRequirementWake} from ${JSON.stringify(wakeTs2)}; import {existsSync} from 'node:fs'; console.log('READY'); while(!existsSync(${JSON.stringify(gate)}))await Bun.sleep(10); for(let i=0;;i++){try{console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})})); break;}catch(e){if(i>=4||!String(e).includes('locked'))throw e;await Bun.sleep(20);}}`;
     const workers=[] as any[];
     // Initialize each adapter before releasing both against the same DB;
     // schema startup is not the race under qualification.
