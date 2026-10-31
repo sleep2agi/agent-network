@@ -886,7 +886,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       version: z.string().max(100).optional().describe("Agent version"),
       // 2026-10-31 —— #3294：**字节标识**。40 位 hex；也接受 12 位前缀（CI 里截过的那种）。
       // 与 version 分开：version 是标签，build_commit 是「哪一份字节」。
-      build_commit: z.string().regex(/^[0-9a-f]{7,40}$/).optional().describe("Build commit (hex, 7–40), from the packaged build-info.json"),
+      build_commit: z.string().regex(/^[0-9a-f]{7,40}$/).optional().describe("Build commit (hex)"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
       node_id: z.string().max(200).optional().describe("Stable node identifier"),
