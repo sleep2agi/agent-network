@@ -186,6 +186,8 @@ def main(argv: list[str]) -> int:
             if counts["declared_by_author"]:
                 print(f"  ⚠ 其中 {counts['declared_by_author']} 个文件是**作者声明的本地必红**："
                       f"本次运行没有验证它们，也不把它们算进「绿」。")
+                print("     且声明的权威套件**不一定在 HEAD 上跑过**——本仓这类容器套件多为路径过滤触发，"
+                      "没改到那些文件就不会跑；「上次绿」不等于「HEAD 绿」。")
             for b in BUCKETS:
                 group = [r for r in res["rows"] if r["bucket"] == b]
                 if not group:
