@@ -6295,6 +6295,7 @@
   "server/src/hub-catalog-read-http.test.ts::GET /api/providers::provider write: every error code has a status, and every status code is really produced": 1,
   "server/src/hub-catalog-read-http.test.ts::GET /api/providers::returns the registry without secret references": 1,
   "server/src/hub-catalog-read-http.test.ts::GET /api/providers::status maps are defined exactly once and read by production code (a comment mentioning them does not count)": 1,
+  "server/src/hub-catalog-read-http.test.ts::GET /api/secrets: keys and timestamps only::⇒ 恰好 {keys, network_id, ok}；每个 key 恰好 {key, updated_at}；值从不出现": 1,
   "server/src/hub-catalog-read-http.test.ts::GET /api/secrets::a member of another network is refused and learns no key names": 1,
   "server/src/hub-catalog-read-http.test.ts::GET /api/secrets::a node token is refused": 1,
   "server/src/hub-catalog-read-http.test.ts::GET /api/secrets::returns key names and timestamps, never the value": 1,
@@ -14448,6 +14449,7 @@
   "server/src/hub-catalog-read-http.test.ts::GET /api/providers::provider write: every error code has a status, and every status code is really produced",
   "server/src/hub-catalog-read-http.test.ts::GET /api/providers::returns the registry without secret references",
   "server/src/hub-catalog-read-http.test.ts::GET /api/providers::status maps are defined exactly once and read by production code (a comment mentioning them does not count)",
+  "server/src/hub-catalog-read-http.test.ts::GET /api/secrets: keys and timestamps only::⇒ 恰好 {keys, network_id, ok}；每个 key 恰好 {key, updated_at}；值从不出现",
   "server/src/hub-catalog-read-http.test.ts::GET /api/secrets::a member of another network is refused and learns no key names",
   "server/src/hub-catalog-read-http.test.ts::GET /api/secrets::a node token is refused",
   "server/src/hub-catalog-read-http.test.ts::GET /api/secrets::returns key names and timestamps, never the value",
@@ -16306,7 +16308,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "ec926073adb0ae5704e2a592d74a469c00df6b3c",
+  "commit": "f2538857fb19181c1f956f8736c8f684fa2cd936",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

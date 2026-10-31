@@ -87,9 +87,31 @@ afterAll(() => {
   try { rmSync(PRIVATE_DB_DIR, { recursive: true, force: true }); } catch {}
 });
 
+describe("GET /api/secrets: keys and timestamps only", () => {
+  test("⇒ 恰好 {keys, network_id, ok}；每个 key 恰好 {key, updated_at}；值从不出现", async () => {
+    const r = await get(`/api/secrets?network_id=${ownerNet}`, ownerToken);
+    expect(r.status).toBe(200);
+    expect(Object.keys(r.body).sort()).toEqual(["keys", "network_id", "ok"]);
+    for (const k of r.body.keys as any[]) {
+      expect(Object.keys(k).sort()).toEqual(["key", "updated_at"]);
+    }
+    // 哨兵：本测试里写进 vault 的那个值，任何情况下都不许出现在响应里
+    expect(r.text).not.toContain(SECRET_VALUE);
+  });
+});
+
 describe("GET /api/skills", () => {
   test("owner sees published skills and no content body", async () => {
     const r = await get(`/api/skills?network_id=${ownerNet}`, ownerToken);
+    // 2026-10-31 —— #3214：这两个只读目录端点的**键集**从未被钉（只断言了内容）。
+    // 多一个键 = 又一处没人读的字段；少一个键 = 客户端拿不到分页/审核信息。
+    expect(Object.keys(r.body).sort()).toEqual(["network_id", "ok", "reviewer", "skills"]);
+    if ((r.body.skills as any[]).length > 0) {
+      expect(Object.keys((r.body.skills as any[])[0]).sort()).toEqual([
+        "created_at", "description", "name", "review_note", "reviewed_at",
+        "skill_id", "slug", "source_alias", "source_type", "status", "updated_at", "version",
+      ]);
+    }
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
     expect(r.body.reviewer).toBe(true);
