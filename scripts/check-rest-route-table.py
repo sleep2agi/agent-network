@@ -78,7 +78,10 @@ def main() -> int:
         return 1
     ra = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in a.get("rows", [])}
     rb = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in b.get("rows", [])}
-    gone, new = sorted(ra - rb), sorted(rb - ra)
+    # 2026-10-31 —— 修一个真实崩溃：tuple 里 method 可能是 None，
+    # 而 `sorted()` 在比较 (str, None, …) 时抛 TypeError ⇒ **恰好在它要报告的场合崩溃**。
+    # （实测：给 server.ts 加了几行注释导致行号平移，本脚本没有报「过期」，而是抛异常。）
+    gone, new = sorted(ra - rb, key=str), sorted(rb - ra, key=str)
     print("  mutates_subject: no（只读比较；未写入任何文件）")
     print(f"✗ 路由表草稿**已过期**：文件 {len(a.get('rows', []))} 行 / 现在 {len(b.get('rows', []))} 行", file=sys.stderr)
     for g in gone[:5]:
