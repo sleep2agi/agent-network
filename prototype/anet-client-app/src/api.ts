@@ -368,3 +368,84 @@ export async function captureTmux(token: string, alias: string): Promise<TmuxRes
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+// ── Provider 目录与「这个节点现在用哪个」(#3144 / #3145 / #3146) ──
+//
+// 2026-10-31 —— 这两组调用对应的服务端契约已经上线（0.9.0-preview.226）：
+//   GET  /api/providers                        → { ok, state, counts, hint?, providers }
+//   PUT  /api/providers?network_id=…           → 建/改一行（owner；密钥只写不读）
+//   GET  /api/nodes/:id/provider-selection     → { ok, state: never_switched|pending|applied|failed, selection, … }
+//   POST /api/nodes/:id/provider-selection     → 202 { request_id, state:"pending", before, hint }
+//
+// 为什么客户端要四个都接：**「上次操作成功」与「现在生效」不是同一件事** ——
+// 少了读口，界面只能显示自己刚才点过什么。
+
+export type ProviderCatalogState = "configured" | "unconfigured" | "all_disabled";
+
+export interface ProviderCatalogResp {
+  ok: true;
+  network_id: string;
+  source_table: string;
+  state: ProviderCatalogState;
+  counts: {
+    providers: number;
+    providers_disabled?: number;
+    providers_enabled?: number;
+    models_enabled?: number;
+    providers_without_models?: number;
+    providers_in_cli_registry?: number;
+  };
+  hint?: string;
+  providers: Array<{ id: string; label: string; enabled: boolean; models: unknown[]; models_state?: string }>;
+}
+
+export function getProviderCatalog(token: string, networkId: string): Promise<ProviderCatalogResp> {
+  return call<ProviderCatalogResp>(`/api/providers?network_id=${encodeURIComponent(networkId)}`, { token });
+}
+
+export function putProvider(
+  token: string,
+  networkId: string,
+  body: { revision: number; provider: Record<string, unknown> },
+): Promise<{ ok: true; provider: { id: string; revision: number } }> {
+  return call(`/api/providers?network_id=${encodeURIComponent(networkId)}`, {
+    token, method: "PUT", body: JSON.stringify(body),
+  });
+}
+
+export type ProviderSelectionState = "never_switched" | "pending" | "applied" | "failed";
+
+export interface NodeProviderSelectionResp {
+  ok: true;
+  node_id: string;
+  state: ProviderSelectionState;
+  selection: unknown | null;
+  revision: number | null;
+  observed_at: string | null;
+  error?: string | null;
+  hint?: string;
+}
+
+export function getNodeProviderSelection(token: string, nodeId: string): Promise<NodeProviderSelectionResp> {
+  return call<NodeProviderSelectionResp>(`/api/nodes/${encodeURIComponent(nodeId)}/provider-selection`, { token });
+}
+
+export interface ApplyProviderResp {
+  ok: true;
+  node_id: string;
+  request_id: string;
+  state: "pending";
+  before: unknown | null;
+  expires_at: string;
+  hint: string;
+}
+
+export function applyNodeProvider(
+  token: string,
+  nodeId: string,
+  body: { revision: number; selection: Record<string, unknown> },
+): Promise<ApplyProviderResp> {
+  return call<ApplyProviderResp>(`/api/nodes/${encodeURIComponent(nodeId)}/provider-selection`, {
+    token, method: "POST", body: JSON.stringify(body),
+  });
+}
