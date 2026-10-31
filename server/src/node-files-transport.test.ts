@@ -182,6 +182,9 @@ describe("list / read by alias reach a session with no nodes row", () => {
     const s = await connect(asSession);
     try {
       const enq = await u.call("read_node_file", { alias: SESSION_ALIAS, path: "docs/README.md" });
+      // 2026-10-31 —— #3275：read_node_file 与 list_node_files 是**同一族**（都只是下发请求），
+      // 所以形状也应当一样：{ok, op, request_id}。钉住它，顺带钉住「两个工具不能长成两种形状」。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(enq).toMatchObject({ ok: true, op: "file_read" });
       expect((await s.call("get_rules_file_request", {})).request).toEqual({ request_id: enq.request_id, op: "file_read", content: "docs/README.md" });
       const payload = JSON.stringify({ path: "docs/README.md", name: "README.md", kind: "text", size: 6, content: "# hi\n" });
