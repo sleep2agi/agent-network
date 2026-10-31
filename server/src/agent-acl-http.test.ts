@@ -655,6 +655,11 @@ describe("lifecycle", () => {
     const before = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?1 AND network_id = ?2", carol.user!.user_id, NET)!.n;
     const j = await send(carol.token!, "POST", "/api/networks/join", { invite_code: inv.body.invite_code });
     expect(j.status).toBe(200);
+    // 2026-10-31 —— #3214：这个端点的成功体此前只被断言过 status。形状钉住：
+    // 恰好 {network_id, ok, role} —— 客户端按 role 决定进哪个界面，多一个键就是多一个没人读的字段。
+    expect(Object.keys(j.body).sort()).toEqual(["network_id", "ok", "role"]);
+    expect(j.body.network_id).toBe(NET);
+    expect(j.body.role).toBe("member");
     expect((await get(carol.token!, `/api/status?network_id=${NET}`)).body.sessions).toEqual([]);
     expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?1 AND network_id = ?2", carol.user!.user_id, NET)!.n).toBe(before);
   });
