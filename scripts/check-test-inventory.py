@@ -424,6 +424,7 @@ def main() -> int:
     current = set(counts)
     baseline_path = repo / BASELINE
 
+    print("mutates_subject: none（只读比对；不写任何文件）") if "--update" not in sys.argv else None
     print(f"literal 测试名: {len(current)} 条（多重集，共 {sum(counts.values())} 次出现）")
     print(f"dynamic 测试名: {dynamic} 条（**抓不到，不受逐条棘轮保护，但有上限**）")
     if unreliable:
@@ -452,6 +453,10 @@ def main() -> int:
             encoding="utf-8",
         )
         print(f"✓ 基线已更新：{BASELINE}（{len(current)} 条 / dynamic {dynamic}）")
+        # 2026-10-31 —— 外部复核那条：把「能不能重跑」从「要思考」变成「查字段」。
+        #   mutation: none | self | other（self 类只能用「声明窗口内的 Δ」）
+        print("  mutates_subject: self（写基线 ⇒ 改变**下一次比较**的输入；"
+              "上一次读数与这一次描述的不是同一个基线）")
         return 0
 
     if not baseline_path.exists():
