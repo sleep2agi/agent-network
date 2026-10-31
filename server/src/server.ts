@@ -1756,6 +1756,33 @@ const startedAtIso = new Date(Date.now() - Math.floor(process.uptime() * 1000)).
 
 const BOOT_KERNEL_START = detectKernelStart(startedAtIso);
 
+/**
+ * 2026-10-31 —— **两条上传路径的两个逐字相同的生产者，收成一个**。
+ *
+ * 头像上传与文件上传各自写了一份 `earlyReject`（withCors + Connection: close）
+ * 和一份 429 限流头（X-RateLimit-*）。计数报告实测：`x-ratelimit-limit` 等三个头各有 2 处写出点。
+ * ⇒ 改一处只改了一半，而**没有任何测试会因为两处不一致而红**。
+ *
+ * 判据：这个值有几个生产者？>1 时，正确说法是「改掉了其中的 1/N」。
+ */
+function uploadEarlyReject(req: Request, res: Response): Response {
+  // pre-drain 拒绝统一关闭连接：keepalive 上残留的 multipart 未读字节会把
+  // 下一个请求读成垃圾。
+  const wrapped = withCors(req, res);
+  wrapped.headers.set("Connection", "close");
+  return wrapped;
+}
+
+function uploadRateLimitHeaders(rate: { resetAt: number; retryAfterMs?: number }): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-RateLimit-Limit": String(60),
+    "X-RateLimit-Remaining": "0",
+    "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
+  };
+  if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
+  return headers;
+}
+
 function withCors(req: Request, res: Response): Response {
   const headers = corsHeaders(req);
   for (const [k, v] of Object.entries(headers)) {
@@ -2387,11 +2414,7 @@ return Bun.serve({
     if (url.pathname === "/api/auth/me/avatar/upload" && req.method === "POST") {
       // pre-drain 拒绝统一关闭连接：keepalive 上残留的 multipart 未读字节会把
       // 下一个请求读成垃圾（与 /api/upload 的 earlyReject 同一理由）。
-      const earlyReject = (res: Response): Response => {
-        const wrapped = withCors(req, res);
-        wrapped.headers.set("Connection", "close");
-        return wrapped;
-      };
+      const earlyReject = (res: Response): Response => uploadEarlyReject(req, res);
       const token = req.headers.get("Authorization")?.replace("Bearer ", "");
       if (!token) return earlyReject(Response.json({ ok: false, error: "token required" }, { status: 401 }));
       const resolved = resolveToken(token);
@@ -2404,12 +2427,7 @@ return Bun.serve({
       const rateKey = authCtx?.tokenId ?? `ip:${getClientIP(req, server)}`;
       const rate = sharedUploadRateLimiter.check(rateKey);
       if (!rate.allowed) {
-        const headers: Record<string, string> = {
-          "X-RateLimit-Limit": String(60),
-          "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
-        };
-        if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
+        const headers = uploadRateLimitHeaders(rate);
         return earlyReject(new Response(
           JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
           { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },
@@ -5083,11 +5101,7 @@ return Bun.serve({
       // just made it visible under aggregate `bun test` with a 12MiB
       // upload immediately followed by another request. Per-file green
       // hides this class of bug.
-      const earlyReject = (res: Response): Response => {
-        const wrapped = withCors(req, res);
-        wrapped.headers.set("Connection", "close");
-        return wrapped;
-      };
+      const earlyReject = (res: Response): Response => uploadEarlyReject(req, res);
       const authErr = requireAuth(req);
       if (authErr) return earlyReject(authErr);
 
@@ -5097,12 +5111,7 @@ return Bun.serve({
       const rateKey = authCtx?.tokenId ?? `ip:${getClientIP(req, server)}`;
       const rate = sharedUploadRateLimiter.check(rateKey);
       if (!rate.allowed) {
-        const headers: Record<string, string> = {
-          "X-RateLimit-Limit": String(60),
-          "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
-        };
-        if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
+        const headers = uploadRateLimitHeaders(rate);
         return earlyReject(new Response(
           JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
           { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },   // #426 — legacy clients default to ISO-8859-1 without charset
