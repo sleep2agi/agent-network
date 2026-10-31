@@ -122,6 +122,26 @@ def classify(rows: list[dict], corpus: str, corpus_lines=None, keyset=None) -> d
     }
 
 
+def _measured_by() -> dict:
+    """2026-10-31 —— **一个绿属于（被测物，测法）二元组**（外部复核：
+    「向量表更新而制品没变 ⇒ 测试显示『旧字节通过了新向量』⇒ 那个绿同时属于两对，
+      而你分不清是哪一对。」）
+
+    树的 ref 在别处已记；这里补**尺子自己的版本**：
+    脚本本体 sha256 前 12 位 + 解释器版本。改过口径（例如改过正则）之后，
+    读的人能判断「数字变了」是代码变了还是尺子变了。
+    """
+    import hashlib as _h
+    import platform as _pf
+    import sys as _sys
+    try:
+        digest = _h.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+    except OSError:
+        digest = "unreadable"
+    return {"script": Path(__file__).name, "sha256_12": digest,
+            "python": _sys.version.split()[0], "os": _pf.system()}
+
+
 def main(argv: list[str]) -> int:
     rows = load_routes()
     if rows is None:
@@ -138,6 +158,7 @@ def main(argv: list[str]) -> int:
     if "--json" in argv:
         print(json.dumps({
             "instrument": "report-rest-coverage",
+            "measured_by": _measured_by(),
             "evidence_domain": "source",
             "counts": {
                 "endpoints_total": res["endpoints_total"],

@@ -84,6 +84,26 @@ def sample(url: str, samples: int, interval: float) -> list[dict] | None:
     return got[1:] if len(got) > samples else got
 
 
+def _measured_by() -> dict:
+    """2026-10-31 —— **一个绿属于（被测物，测法）二元组**（外部复核：
+    「向量表更新而制品没变 ⇒ 测试显示『旧字节通过了新向量』⇒ 那个绿同时属于两对，
+      而你分不清是哪一对。」）
+
+    树的 ref 在别处已记；这里补**尺子自己的版本**：
+    脚本本体 sha256 前 12 位 + 解释器版本。改过口径（例如改过正则）之后，
+    读的人能判断「数字变了」是代码变了还是尺子变了。
+    """
+    import hashlib as _h
+    import platform as _pf
+    import sys as _sys
+    try:
+        digest = _h.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+    except OSError:
+        digest = "unreadable"
+    return {"script": Path(__file__).name, "sha256_12": digest,
+            "python": _sys.version.split()[0], "os": _pf.system()}
+
+
 def main(argv: list[str]) -> int:
     url = "http://127.0.0.1:9200/health"
     samples = 5
@@ -118,6 +138,7 @@ def main(argv: list[str]) -> int:
     undoc = [k for k in constant if k not in documented]
     res = {
         "instrument": "report-health-liveness",
+        "measured_by": _measured_by(),
         "evidence_domain": "wire",
         "url": url,
         "samples": samples,
