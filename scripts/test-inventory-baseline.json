@@ -5574,6 +5574,9 @@
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::records the last broadcast so a stall can be reconciled afterwards": 1,
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::某一条通知抛错：其余收件人照常入库（不能因为推不出去就漏发）": 1,
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::通知与入库同批（不是全部入库完再一起推）": 1,
+  "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::① 没报 ⇒ null，且 note 说明「这不是缺陷」": 1,
+  "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::② 🔴 报了 ⇒ 落库 ⇒ /api/nodes 投影里读得到，且与 version 是两个东西": 1,
+  "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::③ 形状不对的 build_commit 被 schema 拒（不是静默丢弃）": 1,
   "server/src/build-info.test.ts::#3177 build-info 读取::absent：目录里没有文件 —— 这是**正常状态**（部署形态没注入），不是缺陷": 1,
   "server/src/build-info.test.ts::#3177 build-info 读取::invalid：文件在但形状不对 ⇒ 与 absent **分开报**": 1,
   "server/src/build-info.test.ts::#3177 build-info 读取::present：格式正确就原样读出（含可选 source）": 1,
@@ -13777,6 +13780,9 @@
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::records the last broadcast so a stall can be reconciled afterwards",
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::某一条通知抛错：其余收件人照常入库（不能因为推不出去就漏发）",
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::通知与入库同批（不是全部入库完再一起推）",
+  "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::① 没报 ⇒ null，且 note 说明「这不是缺陷」",
+  "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::② 🔴 报了 ⇒ 落库 ⇒ /api/nodes 投影里读得到，且与 version 是两个东西",
+  "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::③ 形状不对的 build_commit 被 schema 拒（不是静默丢弃）",
   "server/src/build-info.test.ts::#3177 build-info 读取::absent：目录里没有文件 —— 这是**正常状态**（部署形态没注入），不是缺陷",
   "server/src/build-info.test.ts::#3177 build-info 读取::invalid：文件在但形状不对 ⇒ 与 absent **分开报**",
   "server/src/build-info.test.ts::#3177 build-info 读取::present：格式正确就原样读出（含可选 source）",
@@ -16406,7 +16412,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "80c9209017dbd19868433cdde35d8ddd1fe53557",
+  "commit": "e622a9f95417be853a65a280cb10c59d5889a729",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

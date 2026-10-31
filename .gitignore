@@ -49,3 +49,4 @@ __pycache__/
 *.pyc
 server/build-info.json
 agent-network/build-info.json
+agent-node/build-info.json

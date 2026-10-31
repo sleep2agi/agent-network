@@ -1370,6 +1370,10 @@ import { installProcessSurvivalLog } from "./process-survival-log";
 //    只拷 src/ 会 `error: Could not resolve: "../package.json"`。
 //    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
+import { buildCommitOfThisInstall } from "./build-info";
+// #3294 —— 「跑的是哪一份字节」。npm 安装树里没有 .git，运行期读 git 这条路不存在，
+// 所以标识由**打包时**写下（prepack），运行期只读。读不到就是 undefined（老制品/源码检出）。
+const AGENT_NODE_BUILD_COMMIT: string | undefined = buildCommitOfThisInstall();
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
 import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runtime/codex-reasoning-effort.js";
 import { installTeamSkills } from "./runtime/node-skills";
@@ -1773,6 +1777,9 @@ const register = async () => {
     server: osHostname(), hostname: osHostname(),
     agent: RUNTIME_AGENT_LABEL, project_dir: process.cwd(),
     version: AGENT_NODE_VERSION,
+    // #3294 —— 与 version 并列：version 是标签，build_commit 是「哪一份字节」。
+    // 老 Hub 会把不认识的顶层键**静默丢弃**（#2211 的先例），所以先发发送侧是安全的。
+    ...(AGENT_NODE_BUILD_COMMIT ? { build_commit: AGENT_NODE_BUILD_COMMIT } : {}),
     node_id: NODE_ID || undefined,
     node_name: NODE_NAME || undefined,
     session_id: activeSessionId,
@@ -1916,6 +1923,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // resume_id 时会整行 DELETE+INSERT,没带的列被清成 NULL;.49 之前的 hub 没有接手逻辑,
     // 这里带上至少让 agent-node 自己的每次上报都把 version 写回去。
     version: AGENT_NODE_VERSION,
+    ...(AGENT_NODE_BUILD_COMMIT ? { build_commit: AGENT_NODE_BUILD_COMMIT } : {}),
     // #2211 — what this process last did with the network's team rules. An old Hub
     // strips an unknown top-level key silently (it is not strict), so shipping the
     // sender first is safe: no node dies, and nothing changes until the Hub reads it.
