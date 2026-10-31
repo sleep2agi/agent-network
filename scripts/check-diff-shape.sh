@@ -13,9 +13,15 @@
 #   scripts/check-diff-shape.sh --added 12 --deleted 3
 #   scripts/check-diff-shape.sh --added 0 --deleted 0 --range origin/main..HEAD
 #
+# 2026-10-31 —— **加的第二个问题**：「你改的那个东西，它自己的门是绿的么？」
+#   起因：我加了 scripts/report-type-assertions.py，`check-gates-wired.py` 当场红了两条提交。
+#   我提交前跑的是「覆盖率 / 清单 / 路由表」—— 我习惯的那三个，不是「我改动所影响的那一个」。
+#   ⇒ 只要 diff 里有 scripts/ 下的文件，就在提交前**真的执行**接线门（实测 1.0s，不阻塞）。
+#   换个说法：不是让作者记得跑更多门，是让门跟着**改动范围**自己出现。
+#
 # 退出码：
-#   0 = 与声明一致
-#   1 = 与声明不一致（**在提交前**就该看到这个）
+#   0 = 与声明一致（且 scripts/ 有改动时接线门是绿的）
+#   1 = 与声明不一致，或 scripts/ 有改动而接线门是红的（**在提交前**就该看到这个）
 #   2 = 没有声明增删数（= 没有读数：本门拒绝在「没说要改多少」的情况下给通过）
 
 set -uo pipefail
@@ -61,7 +67,21 @@ if [ "${SELFTEST:-0}" = "1" ]; then
   else
     echo "✗ selftest 不声明也给了结论 / 缺理由串"; fails=$((fails+1))
   fi
-  [ "$fails" -eq 0 ] && { echo "✓ selftest 3/3 通过"; exit 0; }
+  # 第二条判据：scripts/ 有改动时，接线门必须被**真的执行**（用假门证明它被执行且能红）
+  mkdir -p "$tmp/scripts" && printf 'x\n' > "$tmp/scripts/report-new.py"
+  out=$(cd "$tmp" && GATES_WIRED_CMD=false bash "$SELF" --added 3 --deleted 1 2>&1); rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "接线门是红的"; then
+    echo "✓ selftest scripts/ 有改动 + 接线门红 ⇒ exit 1 且理由指向接线门"
+  else
+    echo "✗ selftest scripts/ 有改动但接线门没被执行/没红: $out"; fails=$((fails+1))
+  fi
+  out=$(cd "$tmp" && GATES_WIRED_CMD=true bash "$SELF" --added 3 --deleted 1 2>&1); rc=$?
+  if [ "$rc" -eq 0 ]; then
+    echo "✓ selftest scripts/ 有改动 + 接线门绿 ⇒ 仍 exit 0（不把正常提交挡死）"
+  else
+    echo "✗ selftest 接线门绿却挡住提交: $out"; fails=$((fails+1))
+  fi
+  [ "$fails" -eq 0 ] && { echo "✓ selftest 5/5 通过"; exit 0; }
   exit 1
 fi
 
@@ -90,5 +110,24 @@ fi
 echo "✓ 与声明一致"
 if [ "$act_del" -gt 0 ]; then
   echo "  ⚠ 删了 $act_del 行：确认每一处删除都是本次意图（尤其带测试的文件）。"
+fi
+
+# 第二步：改动了 scripts/ ⇒ 接线门必须**真的跑过且绿**。
+# GATES_WIRED_CMD 只为 selftest 留口（默认就是真门）；不是给作者绕过用的开关。
+if [ -n "$RANGE" ]; then
+  touched=$(git diff --name-only "$RANGE")
+else
+  # 含 untracked：新加的脚本在 `git add` 之前正是最容易被忘掉的那个状态
+  touched=$( { git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } )
+fi
+if printf '%s\n' "$touched" | grep -q '^scripts/'; then
+  out=$(${GATES_WIRED_CMD:-python3 scripts/check-gates-wired.py} 2>&1); grc=$?
+  if [ "$grc" -ne 0 ]; then
+    echo "✗ 本次改动了 scripts/，而接线门是红的 —— 提交前必须绿：" >&2
+    printf '%s\n' "$out" | grep -E '✗' | head -6 >&2
+    echo "  ⇒ 新脚本要进 workflow，或在 KNOWN_UNWIRED 里登记 [tag] 理由 + 移出条件。" >&2
+    exit 1
+  fi
+  echo "✓ scripts/ 有改动：接线门已执行且绿"
 fi
 exit 0
