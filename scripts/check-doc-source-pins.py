@@ -148,16 +148,17 @@ def collect_pins(files: list[str]) -> tuple[dict[tuple[str, int], set[str]], int
     return pins, occurrences, pinned_to_sha
 
 
-def classify(path: str, line: int) -> tuple[str, str] | None:
+def classify(path: str, line: int, repo: Path | None = None) -> tuple[str, str] | None:
     """返回 (失效类别, 那一行的内容);指不出问题时返回 None。"""
     # 🔴 文档里写 `blob/main/../../etc/passwd#L1` 时,直接拼到 REPO 上会读出
     #    仓库外的文件,而 /etc/passwd 第一行非平凡 —— 一个根本不指向本仓的链接
     #    就被判成健康。先拒绝绝对路径与 .. 分量,再核解析后仍在 REPO 之下。
     if path.startswith("/") or ".." in Path(path).parts:
         return ("path-escapes-repo", path)
-    target = REPO / path
+    repo = repo or REPO
+    target = repo / path
     try:
-        target.resolve().relative_to(REPO)
+        target.resolve().relative_to(repo)
     except ValueError:
         return ("path-escapes-repo", path)
     if not target.is_file():
@@ -187,7 +188,61 @@ def read_baseline() -> set[str]:
     return entries
 
 
+SELFTEST_EXPECTED = 6
+
+
+def selftest(quiet: bool = False) -> int:
+    """2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`。
+
+    这门的判据就是 `classify()`：一条文档里的 `docs/x.md#L12` 指向的行是否可核。
+    自检在临时目录里造文件，逐类命中（每一类都必须被**它自己那一类**命中，
+    而不是「有报错就行」——那与「什么都没查」在退出码上同形）。
+    """
+    import tempfile
+    fails, ran = 0, 0
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "docs").mkdir()
+        (root / "docs" / "ok.md").write_text("l1\nl2\n", encoding="utf-8")
+        (root / "docs" / "trivial.md").write_text("  }\n---\n", encoding="utf-8")
+
+        def case(label: str, path: str, line: int, want: str | None) -> None:
+            nonlocal fails, ran
+            ran += 1
+            got = classify(path, line, root)
+            kind = got[0] if got else None
+            if kind != want:
+                fails += 1
+                print(f"✗ {label}: 期望 {want}，实际 {kind}", file=sys.stderr)
+            elif not quiet:
+                print(f"✓ {label} ⇒ {kind}")
+
+        case("正常行 ⇒ 无问题", "docs/ok.md", 1, None)
+        case("绝对路径 ⇒ 拒绝", "/etc/passwd", 1, "path-escapes-repo")
+        case(".. 逃逸 ⇒ 拒绝", "docs/../../etc/passwd", 1, "path-escapes-repo")
+        case("文件不存在 ⇒ 报出", "docs/ghost.md", 1, "missing-file")
+        case("行号 0 ⇒ 越界（不是读最后一行）", "docs/ok.md", 0, "line-out-of-range")
+        case("行号超上界 ⇒ 越界", "docs/ok.md", 99, "line-out-of-range")
+        case("平凡行 ⇒ 报出", "docs/trivial.md", 1, "trivial-line")
+
+    if ran != SELFTEST_EXPECTED + 1:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED + 1}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
+
     files, mode = tracked_docs()
     pins, occurrences, pinned_to_sha = collect_pins(files)
     print(f"listing_mode={mode}")
