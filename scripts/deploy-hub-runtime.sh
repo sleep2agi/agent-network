@@ -218,6 +218,23 @@ say "观察窗口通过：${OBSERVE_S}s 内 version/status/sessions 均正常"
 # 2026-10-31 —— **哨兵行定型**（外部复核：「version 单独一行标 role，观察时刻单独标 observed」）。
 # 一行、字段固定、可 grep：跨 run 比对时不需要人读散文。
 #   role=deployment_label —— 这一格是**部署标签**，不是代码指纹（同 /health.version_role）
-printf 'DEPLOY v=%s role=%s observed=%s\n' "$NEWV" "deployment_label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# 2026-10-31 —— #3177：**这一行原来只有部署标签，没有字节标识**。
+# 「同一版本号、不同字节」在部署日志里完全同形（.245 与 .246 就是），而部署记录正是
+# 事后要说清「那天上线的是什么」的地方。制品里现在有 build-info.json（prepack 注入），
+# 直接读**我们刚装进去的那份**，不依赖 /health 的鉴权投影、也不依赖 git。
+BUILD_INFO="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/build-info.json"
+BUILD_COMMIT="-"; BUILD_DIRTY="-"
+if [ -f "$BUILD_INFO" ]; then
+  BUILD_COMMIT=$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' "$BUILD_INFO" | head -1)
+  BUILD_DIRTY=$(sed -n 's/.*"dirty"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$BUILD_INFO" | head -1)
+  [ -n "$BUILD_COMMIT" ] || BUILD_COMMIT="-"
+  [ -n "$BUILD_DIRTY" ] || BUILD_DIRTY="-"
+else
+  # 没有不等于没问题：老版本制品里没有这个文件，要能看出来「这一格没读到」
+  BUILD_COMMIT="absent"
+fi
+printf 'DEPLOY v=%s role=%s observed=%s build_commit=%s dirty=%s\n' \
+  "$NEWV" "deployment_label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "$(printf '%s' "$BUILD_COMMIT" | cut -c1-12)" "$BUILD_DIRTY"
 say "回滚命令：HUB_RUNTIME_DIR=$COMMHUB_HOME/runtime-$(printf '%s' "${CURRENT:-}" | tr '.' '-') pm2 restart $PM2_NAME --update-env"
 exit 0
