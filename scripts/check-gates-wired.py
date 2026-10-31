@@ -209,6 +209,17 @@ def main(argv: list[str]) -> int:
         print(f"    ✗ 欠账名单过期：{rel} —— {why}（把基线改宽不算修好）", file=sys.stderr)
     if failures or bad_unwired or stale_debt:
         return 1
+    # 2026-10-31 —— 外部复核：「分类表已经存在，但全仓 grep 是**写 1 处、读 0 处**
+    # ⇒ 缺口不是『缺分类』，是『分类没有消费者』」。
+    # 本仓有三张**声明式清单**同样只被测试读（不是被生产代码读）。这不是错，但必须显式：
+    DECLARATIVE_TEST_ONLY = {
+        "TASK_REJECTION_EXITS": "出口清单：消费者是 health-redaction 的 must-fire + 跨源路由表断言",
+        "HEALTH_FIELD_META": "字段三分类：消费者是 health-redaction 的分类/未读字段断言",
+        "PUBLIC_HEALTH_KEY_READERS": "匿名读者登记：消费者是跨源 grep 断言（reader=cli 必须在客户端出现）",
+    }
+    print("  · 声明式清单（只被测试读，不被生产代码读）——形状已知，不是漏读：")
+    for name, why in DECLARATIVE_TEST_ONLY.items():
+        print(f"      · {name} —— {why}")
     print("  ✓ 已接线的门全部自检通过；未接线的都有登记理由")
     return 0
 
