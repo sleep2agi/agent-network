@@ -184,7 +184,13 @@ describe("list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)", () => {
     // 2026-10-31 —— **精确键集**（#3171）：这条响应此前只断言了 daemons[].alias，
     // 于是「多给一个顶层键」不会被发现 —— 而这是个按网络隔离的列表，多给一格就是泄露。
     // 实际三键（我第一版漏了 count —— 断言当场纠正）。
+    // ⚠️ 这条预期值来自**实现**（读实际响应），不是来自规格 —— 它是变更探测器，不是契约。
+    //    契约来源是 RFC-026 §P2-A 的验收行（`count=2`）与它的示例；
+    //    2026-10-31 实测发现**两份不一致**（示例漏了 count），已把示例补上。
+    //    ⇒ 判据：一条键集断言的依据必须能指到「哪一份规格/哪一次观测」；
+    //      指不到，它只能防变化，不能证明正确。
     expect(Object.keys(reply).sort()).toEqual(["count", "daemons", "ok"]);
+    expect((reply as any).count).toBe(2);        // 与 RFC §P2-A 的验收行同值
     const aliases = (reply.daemons ?? []).map(d => d.alias).sort();
     expect(aliases).toEqual(["alpha-daemon-1", "alpha-daemon-2"]);
   });
