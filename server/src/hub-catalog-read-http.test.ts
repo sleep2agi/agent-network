@@ -406,4 +406,32 @@ describe("GET /api/providers", () => {
       db.run(`DELETE FROM nodes WHERE node_id = ?1`, [nodeId]);
     }
   });
+
+  // 2026-10-31 —— **格式约束与数量约束分开**（外部复核 (a)：
+  // 「白名单管『怎么写』，这条管『写几处』」）。
+  // 这两张状态映射各自只能有**一处定义**，且必须被生产代码**至少读一次**：
+  //   只有定义、没有读取 ⇒ 它是一张装饰表（写 1 处、读 0 处）。
+  test("status maps are defined exactly once and actually read by production code", async () => {
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const root = join(import.meta.dir);
+    const walk = (dir: string, out: string[] = []): string[] => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) walk(full, out);
+        else if (name.endsWith(".ts") && !name.endsWith(".test.ts")) out.push(full);
+      }
+      return out;
+    };
+    const files = walk(root).map((f) => ({ f, src: readFileSync(f, "utf8") }));
+    for (const name of ["PROVIDER_WRITE_STATUS", "TAG_CREATE_STATUS"]) {
+      const defs = files.filter(({ src }) => src.includes(`export const ${name}`));
+      expect(defs.length).toBe(1);
+      const readers = files.flatMap(({ f, src }) =>
+        src.split("\n").map((line, i) => ({ line, f, i }))
+          .filter(({ line }) => line.includes(name) && !line.includes(`export const ${name}`)));
+      // 「读」= 出现但不是定义行（索引 / 展开 / 断言都算）
+      expect(readers.length).toBeGreaterThan(0);
+    }
+  });
 });
