@@ -326,6 +326,83 @@ describe("GET /api/providers", () => {
       expect(d.body.error).toBe("daemon_rejected_selection");
     } finally {
       db.run(`DELETE FROM daemon_provider_snapshots WHERE daemon_node_id = ?1`, [nodeId]);
+      db.run(`DELETE FROM node_daemon_bindings WHERE request_id = 'bind_ps'`);
+      db.run(`DELETE FROM nodes WHERE node_id = 'ps-target-node'`);
+      db.run(`DELETE FROM api_tokens WHERE token_id = 'tok_ps_write'`);
+      db.run(`DELETE FROM nodes WHERE node_id = ?1`, [nodeId]);
+    }
+  });
+
+  // 2026-10-31 —— 写侧：切 provider 的**第一步**（排队 + 带切换前读数）。
+  // 关键断言不是「返回 202」，而是「它把 before 带回来了」——没有 before，
+  // 「切成功了吗」只能靠客户端自己记住上一次。
+  test("POST /api/nodes/:id/provider-selection queues an application and returns the pre-state", async () => {
+    const { db } = await import("./db.js");
+    const nodeId = "ps-write-node";
+    // provider 切换只对 host_supervisor 守护进程有意义 —— 那条前置条件本身也要先被证明：
+    // 普通节点 ⇒ 404 daemon_not_found（下面第一条断言）。
+    db.run(`INSERT OR REPLACE INTO nodes (node_id, node_name, network_id, alias, created_at, updated_at, config_snapshot)
+            VALUES (?1, 'ps-write', ?2, 'ps-write', ?3, ?3, '{}')`, [nodeId, ownerNet, Date.now()]);
+    const selection0 = { node_id: nodeId, node_revision: "a".repeat(64), provider_id: "main", auth_id: "auth1", model: "m1", confirm_restart: true };
+    const postRaw = async (body: any) => {
+      const r = await fetch(`${base}/api/nodes/${nodeId}/provider-selection`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { status: r.status, body: await r.json() as any };
+    };
+    db.run(`INSERT OR REPLACE INTO daemon_provider_snapshots (request_id, network_id, daemon_node_id, requested_by, status, created_at, expires_at, observed_at, snapshot_json, error)
+            VALUES ('dpa_prev', ?1, ?2, 'test', 'completed', ?3, ?4, ?3, ?5, NULL)`,
+      [ownerNet, nodeId, Date.now(), Date.now() + 60_000, JSON.stringify({ expected_revision: 3, provider_id: "prev", model: "m0" })]);
+    // 真实语义：切的是**被这个守护进程监督的节点**，不是守护进程自己 ⇒ 需要一个 target 节点 + 一条 active 绑定
+    const targetId = "ps-target-node";
+    db.run(`INSERT OR REPLACE INTO nodes (node_id, node_name, network_id, alias, created_at, updated_at)
+            VALUES (?1, 'ps-target', ?2, 'ps-target', ?3, ?3)`, [targetId, ownerNet, Date.now()]);
+    db.run(`INSERT OR REPLACE INTO node_daemon_bindings (request_id, network_id, node_id, daemon_node_id, workdir, requested_by, status, created_at, updated_at)
+            VALUES ('bind_ps', ?1, ?2, ?3, '/tmp', 'test', 'active', ?4, ?4)`, [ownerNet, targetId, nodeId, Date.now()]);
+    const selection = { node_id: targetId, node_revision: "a".repeat(64), provider_id: "main", auth_id: "auth1", model: "m1", confirm_restart: true };
+    try {
+      const post = async (body: any) => {
+        const r = await fetch(`${base}/api/nodes/${nodeId}/provider-selection`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return { status: r.status, body: await r.json() as any };
+      };
+      // ① 普通节点（不是 host_supervisor）⇒ 404：切换只对守护进程有意义
+      expect((await postRaw({ revision: 3, selection: selection0 })).status).toBe(404);
+
+      // 补上前置条件：节点既要有 node-scoped token，也要 config_snapshot.role=host_supervisor
+      db.run(`INSERT OR REPLACE INTO api_tokens (token_id, token_hash, user_id, network_id, name, created_at)
+              VALUES ('tok_ps_write', 'hash', ?1, ?2, 'node:ps-write', datetime('now'))`, [ownerUserId, ownerNet]);
+      db.run(`UPDATE nodes SET config_snapshot = '{"role":"host_supervisor"}' WHERE node_id = ?1`, [nodeId]);
+
+      // 缺 revision ⇒ 400（且提示「先 GET 同一路由」）
+      const noRev = await post({ selection });
+      expect(noRev.status).toBe(400);
+      expect(noRev.body.error).toBe("invalid_revision");
+
+      // 正常：202 + state=pending + before 是上一次生效的 selection
+      const ok = await post({ revision: 3, selection });
+      if (ok.status !== 202) throw new Error(`期望 202，实际 ${ok.status}：${JSON.stringify(ok.body)}`);
+      expect(ok.status).toBe(202);
+      expect(ok.body.state).toBe("pending");
+      expect(ok.body.request_id).toMatch(/^dpa_/);
+      expect(ok.body.before).toMatchObject({ provider_id: "prev", model: "m0" });
+      expect(String(ok.body.hint)).toContain("pending 不等于生效");
+
+      // 回读：pending 状态在 GET 上立刻可见（写与读用同一个状态源）
+      const get = await fetch(`${base}/api/nodes/${nodeId}/provider-selection`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+      const got = await get.json() as any;
+      expect(got.state).toBe("pending");
+    } finally {
+      db.run(`DELETE FROM daemon_provider_applications WHERE request_id IN (SELECT request_id FROM daemon_provider_snapshots WHERE daemon_node_id = ?1)`, [nodeId]);
+      db.run(`DELETE FROM daemon_provider_snapshots WHERE daemon_node_id = ?1`, [nodeId]);
+      db.run(`DELETE FROM node_daemon_bindings WHERE request_id = 'bind_ps'`);
+      db.run(`DELETE FROM nodes WHERE node_id = 'ps-target-node'`);
+      db.run(`DELETE FROM api_tokens WHERE token_id = 'tok_ps_write'`);
       db.run(`DELETE FROM nodes WHERE node_id = ?1`, [nodeId]);
     }
   });

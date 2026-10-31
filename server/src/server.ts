@@ -107,6 +107,7 @@ import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startS
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
+import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
@@ -3919,6 +3920,56 @@ return Bun.serve({
           ? { hint: "这个节点还没有被切换过 provider；显示的是它的本地默认配置（不是 Hub 的读数）" }
           : {}),
       }));
+    }
+    // 2026-10-31 —— **写侧：切这个节点的 provider / 模型**（#3146 的第一个动作面）。
+    // 直接复用 requestProviderApplication（校验/授权/加密下发都在那边），
+    // 这里只做两件 REST 侧的事：把「切换前是什么」一起回给对方，并给出下一步该看什么。
+    if (providerSelMatch && req.method === "POST") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const nodeRef = decodeURIComponent(providerSelMatch[1]);
+      const node = db.get<{ node_id: string; network_id: string | null }>(
+        "SELECT node_id, network_id FROM nodes WHERE node_id = ?1", nodeRef);
+      const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
+      if (!node || !node.network_id || (!role && !isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      }
+      let body: any = null;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const revision = Number.isSafeInteger(body?.revision) ? body.revision : NaN;
+      if (!Number.isSafeInteger(revision) || revision < 0) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_revision", hint: "传节点当前的 config revision；不确定就先 GET 同一路由" }, { status: 400 }));
+      }
+      // 切换前读数（对照）：没有它，「切成功了吗」只能靠客户端自己记住上一次
+      const beforeRow = db.get<{ snapshot_json: string | null }>(
+        `SELECT snapshot_json FROM daemon_provider_snapshots
+          WHERE network_id = ?1 AND daemon_node_id = ?2 AND request_id LIKE 'dpa\_%' ESCAPE '\\'
+          ORDER BY created_at DESC LIMIT 1`, node.network_id, node.node_id);
+      let before: unknown = null;
+      if (beforeRow?.snapshot_json) { try { before = JSON.parse(beforeRow.snapshot_json); } catch { before = null; } }
+
+      const applied = requestProviderApplication(
+        { userId: restAuth.userId ?? null, isNode: false, networkId: node.network_id },
+        node.node_id, revision, body?.selection,
+      );
+      if (!applied.ok) {
+        const status = applied.error === "user_token_required" ? 401
+          : applied.error === "provider_admin_required" ? 403
+          : applied.error === "daemon_not_found" ? 404
+          : applied.error === "application_target_not_bound" ? 400
+          : applied.error === "invalid_application" ? 400
+          : 409;
+        return withCors(req, Response.json({ ...applied, before }, { status }));
+      }
+      return withCors(req, Response.json({
+        ok: true,
+        node_id: node.node_id,
+        request_id: applied.request_id,
+        state: "pending",
+        before,               // 切换前（可能为 null = 从未切换过）
+        expires_at: new Date(applied.expires_at).toISOString(),
+        hint: "已排队；用 GET 同一路由回读 state=applied 才算生效（pending 不等于生效）",
+      }, { status: 202 }));
     }
     // #2969 后半 —— 接口白名单：PUT /api/nodes/:id/tool-allowlist { tools: string[] | null }
     // 与 peer-allowlist 同一套授权口径。
