@@ -3881,6 +3881,45 @@ return Bun.serve({
       logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode }), getClientIP(req), node.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node.node_id, permission_mode: mode, previous }));
     }
+    // 2026-10-31 —— **读侧：这个节点当前用的是哪个 provider / 模型**（#3145 的数据面）。
+    // 写侧（切哪个）已有 requestProviderApplication（MCP），但客户端要"显示当前"，需要一个 REST 读口，
+    // 否则界面只能显示上次操作的结果——而"上次操作"与"现在生效"不是同一件事。
+    const providerSelMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/provider-selection$/);
+    if (providerSelMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const nodeRef = decodeURIComponent(providerSelMatch[1]);
+      const node = db.get<{ node_id: string; network_id: string | null }>(
+        "SELECT node_id, network_id FROM nodes WHERE node_id = ?1", nodeRef);
+      const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
+      if (!node || !node.network_id || (!role && !isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      }
+      const row = db.get<{ request_id: string; status: string; observed_at: number | null; snapshot_json: string | null; error: string | null }>(
+        `SELECT request_id, status, observed_at, snapshot_json, error FROM daemon_provider_snapshots
+          WHERE network_id = ?1 AND daemon_node_id = ?2 AND request_id LIKE 'dpa\_%' ESCAPE '\\'
+          ORDER BY created_at DESC LIMIT 1`,
+        node.network_id, node.node_id);
+      // 三态而不是「有/没有」：从未切换过 / 正在切 / 切失败，界面要给的下一步完全不同。
+      const state = !row ? "never_switched"
+        : row.status === "pending" ? "pending"
+        : row.status === "failed" || row.status === "expired" ? "failed"
+        : "applied";
+      let selection: unknown = null;
+      if (row?.snapshot_json) { try { selection = JSON.parse(row.snapshot_json); } catch { selection = null; } }
+      return withCors(req, Response.json({
+        ok: true,
+        node_id: node.node_id,
+        state,
+        selection,
+        revision: (selection as any)?.expected_revision ?? null,
+        observed_at: row?.observed_at ? new Date(row.observed_at).toISOString() : null,
+        ...(state === "failed" ? { error: row?.error ?? null } : {}),
+        ...(state === "never_switched"
+          ? { hint: "这个节点还没有被切换过 provider；显示的是它的本地默认配置（不是 Hub 的读数）" }
+          : {}),
+      }));
+    }
     // #2969 后半 —— 接口白名单：PUT /api/nodes/:id/tool-allowlist { tools: string[] | null }
     // 与 peer-allowlist 同一套授权口径。
     const toolAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/tool-allowlist$/);

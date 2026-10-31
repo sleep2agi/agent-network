@@ -280,4 +280,53 @@ describe("GET /api/providers", () => {
     const missing = [...PROVIDER_WRITE_ERROR_CODES].filter((c) => !src.includes(`'${c}'`) && !src.includes(`"${c}"`));
     if (missing.length) throw new Error(`码清单里这些码在源码中找不到产出点：${missing.join(", ")}`);
   });
+
+  // 2026-10-31 —— 节点当前 provider/模型的三态读口（#3145 的数据面）。
+  // 关键：**从未切换过 / 正在切 / 切失败** 必须能分开 —— 界面给的下一步完全不同。
+  test("GET /api/nodes/:id/provider-selection distinguishes never_switched / pending / applied / failed", async () => {
+    const { db } = await import("./db.js");
+    const nodeId = "ps-probe-node";
+    db.run(`INSERT OR REPLACE INTO nodes (node_id, node_name, network_id, alias, created_at, updated_at)
+            VALUES (?1, 'ps-probe', ?2, 'ps-probe', ?3, ?3)`, [nodeId, ownerNet, Date.now()]);
+    const read = async () => {
+      const r = await fetch(`${base}/api/nodes/${nodeId}/provider-selection`, { headers: { Authorization: `Bearer ${ownerToken}` } });
+      return { status: r.status, body: await r.json() as any };
+    };
+    try {
+      // ① 从未切换过：带 hint，selection 为 null（不假装是 Hub 的读数）
+      const a = await read();
+      expect(a.status).toBe(200);
+      expect(a.body.state).toBe("never_switched");
+      expect(a.body.selection).toBeNull();
+      expect(String(a.body.hint)).toContain("本地默认配置");
+
+      // ② 正在切：pending 时不带 hint（hint 只属于「没有读数」那一档）
+      const q = (requestId: string, status: string, payload: string | null, error: string | null) => db.run(
+        `INSERT OR REPLACE INTO daemon_provider_snapshots (request_id, network_id, daemon_node_id, requested_by, status, created_at, expires_at, observed_at, snapshot_json, error)
+         VALUES (?1, ?2, ?3, 'test', ?4, ?5, ?6, ?5, ?7, ?8)`,
+        [requestId, ownerNet, nodeId, status, Date.now(), Date.now() + 60_000, payload, error],
+      );
+      q("dpa_probe_1", "pending", null, null);
+      const b = await read();
+      expect(b.body.state).toBe("pending");
+      expect("hint" in b.body).toBe(false);
+
+      // ③ 已生效：selection 原样带回，并给出 revision
+      q("dpa_probe_2", "completed", JSON.stringify({ expected_revision: 7, provider_id: "main", model: "m1" }), null);
+      const c = await read();
+      expect(c.body.state).toBe("applied");
+      expect(c.body.selection).toMatchObject({ provider_id: "main", model: "m1" });
+      expect(c.body.revision).toBe(7);
+      expect(typeof c.body.observed_at).toBe("string");
+
+      // ④ 失败：必须带 error（否则界面只能说「失败了」）
+      q("dpa_probe_3", "failed", null, "daemon_rejected_selection");
+      const d = await read();
+      expect(d.body.state).toBe("failed");
+      expect(d.body.error).toBe("daemon_rejected_selection");
+    } finally {
+      db.run(`DELETE FROM daemon_provider_snapshots WHERE daemon_node_id = ?1`, [nodeId]);
+      db.run(`DELETE FROM nodes WHERE node_id = ?1`, [nodeId]);
+    }
+  });
 });
