@@ -142,8 +142,17 @@ async function fetchOne(
   } finally {
     clearTimeout(timeout);
   }
-  if (response.status === 401 || response.status === 403) {
-    return { ok: false, code: "auth_failed", message: `Hub refused attachment download (HTTP ${response.status})` };
+  // 2026-10-31 —— **401 与 403 不能合并成同一个 code**（外部复核 (a)：「这里的 403 不是鉴权；
+  // 接入方若把 403 统一映射成登录跳转，改 412」）。
+  // 本机实测的两种真实含义：
+  //   401 ⇒ 凭据缺失/无效 ⇒ 该做的事是重新登录
+  //   403 ⇒ 凭据有效、但这个身份不许读这张附件 ⇒ 重新登录**不会有任何变化**
+  // 旧代码把两者都报成 `auth_failed`，调用方只能猜。
+  if (response.status === 401) {
+    return { ok: false, code: "auth_failed", message: "Hub refused attachment download (HTTP 401): credential missing or invalid — sign in again" };
+  }
+  if (response.status === 403) {
+    return { ok: false, code: "forbidden", message: "Hub refused attachment download (HTTP 403): this identity may not read this attachment — signing in again will not help" };
   }
   if (!response.ok) {
     return { ok: false, code: "fetch_failed", message: `Hub attachment download returned HTTP ${response.status}` };

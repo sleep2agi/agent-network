@@ -8100,7 +8100,7 @@
   "tests/test906-provider-create/core.test.ts::create doorbell initializes via actual pinned CLI before spawn; conflict makes zero spawn attempts": 1,
   "tests/test906-provider-create/core.test.ts::wrong scope/revision/model refuses before writing credentials or selecting a default": 1
  },
- "dynamic": 87,
+ "dynamic": 88,
  "names": [
   "agent-network/src/active-network-task.test.ts::clampOutboundPriority::full mode keeps high",
   "agent-network/src/active-network-task.test.ts::clampOutboundPriority::outbound-only demotes a model-chosen high to normal and leaves the rest",

@@ -128,6 +128,31 @@ describe("Claude channel attachments", () => {
     expect(appendChannelAttachmentPaths("original dashboard text", result.paths)).toBe("original dashboard text");
   });
 
+  // 2026-10-31 —— 401 与 403 必须给出**不同的可执行下一步**（外部复核 (a)：
+  // 「把 403 统一映射成登录跳转」是真实风险；本仓旧代码两个都报 auth_failed）。
+  for (const [status, wantCode, wantHint] of [
+    [401, "auth_failed", "sign in again"],
+    [403, "forbidden", "will not help"],
+  ] as const) {
+    test(`HTTP ${status} attachment refusal carries its own code and next step`, async () => {
+      const root = mkdtempSync(join(tmpdir(), `channel-attachment-${status}-`));
+      roots.push(root);
+      const result = await downloadChannelImageAttachments({
+        meta_json: JSON.stringify({ attachments: [{ type: "image", file_id: `file_denied_${status}`, mime: "image/png" }] }),
+      }, {
+        hubUrl: "http://hub.invalid",
+        authToken: "ntok_must_not_leak",
+        cacheDir: channelAttachmentCacheDir(root, "owner"),
+        fetch: (async () => new Response("denied", { status })) as typeof fetch,
+      });
+      expect(result.failures).toHaveLength(1);
+      expect(result.failures[0]?.code).toBe(wantCode);
+      expect(String(result.failures[0]?.message)).toContain(wantHint);
+      // 两种状态**不能**共用一个 code —— 这正是「403 被当成鉴权」的形态
+      expect(result.failures[0]?.code).not.toBe(status === 401 ? "forbidden" : "auth_failed");
+    });
+  }
+
   test("rejects traversal-shaped file ids before any fetch", async () => {
     let fetches = 0;
     const result = await downloadChannelImageAttachments({
