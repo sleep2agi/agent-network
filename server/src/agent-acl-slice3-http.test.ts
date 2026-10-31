@@ -567,6 +567,10 @@ describe("update_node_config 响应键集（exact key set）", () => {
       // 而 Stop→Start 那句在**另一支**（systemd_supervision=not_supervised 已报告）里。
       expect(String(w.message)).toContain("anet start / pm2 / systemd");
       expect(String(w.message)).toContain("restart-tier");
+      // 2026-10-31 —— **「存在」不是断言，「存在且值等于 X」才是**（外部复核 (b)：
+      // 「写『存在』⇒ 它被改成任何值都绿」）。这一条把 warning 的形状也钉住：
+      // 多一个键 = 又一处没人读的字段；少一个键 = 客户端拿不到处置。
+      expect(Object.keys(w).sort()).toEqual(["code", "message"]);
     });
   });
 
