@@ -16,6 +16,7 @@
 // characters so a client cannot forge extra log lines.
 
 import { recordTaskRejection } from "./rejection-counters.js";
+import { clipSafe } from "./clip.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -25,7 +26,9 @@ function clip(value: unknown, max = 64): string {
   if (typeof value !== "string" || !value) return "-";
   const clean = value.replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
   if (!clean) return "-";
-  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+  // 2026-10-31 —— 用 clipSafe 而不是 slice：切点落在代理对中间会产出孤立 surrogate，
+  // 那一行日志本身就不是合法 UTF-8（外部复核：后果不是「截短了」，是日志管道在那一行炸）。
+  return clipSafe(clean, max + 1);
 }
 
 export interface TaskRejectionContext {

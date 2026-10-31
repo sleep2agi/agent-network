@@ -1,6 +1,7 @@
 // 需求池。长期卡片，存在 Hub 上，手机和电脑读同一份。
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { errorBody, errorFrom, RequirementFieldError, type ErrorContext } from "./requirements-errors.js";
+import { clipSafe } from "./clip.js";
 import { createHash } from "node:crypto";
 import { parsePeopleQuery, peopleDirectory, resolvePersonName } from "./requirements-people.js";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
@@ -256,7 +257,8 @@ const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/issues\/(\d+)\/?$/;
 
 function clipTitle(value: unknown): string {
-  return typeof value === "string" ? value.replace(/[\r\n\t]/g, " ").trim().slice(0, 120) : "";
+  // 120 是**渲染上限**；clipSafe 保证截断不产生孤立代理（否则该标题在 JSON 里「合法」、在 UTF-8 里非法）
+  return typeof value === "string" ? clipSafe(value.replace(/[\r\n\t]/g, " ").trim(), 120) : "";
 }
 
 function issueFromParts(repo: string, number: number, title: string) {
