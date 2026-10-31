@@ -518,9 +518,19 @@ describe("GET /api/providers", () => {
       const { PROVIDER_WRITE_ERROR_CODES: CODES, PROVIDER_WRITE_STATUS: STATUS, providerWriteStatus: statusOf } =
         await import("./hub-provider-config.js");
       const CLOSED = new Set([400, 401, 403, 404, 409, 500, 503]);
+      // 2026-10-31 —— **把「恒真的断言」换成能假的那条**（外部复核 (a)：
+      // 「同一个字面量 code 有两个 id 生产者，而选择依据是另一个观测量 ⇒
+      //   两条测试都没覆盖第二个分支 ⇒ `observed.id === body.error.diagnosticId` 永远成立」）。
+      //
+      // 本仓原来这里写的是 `expect(statusOf(code)).toBe(STATUS[code])` ——
+      // 而 statusOf 的实现就是 `STATUS[code] ?? 500` ⇒ 对表里的码**恒真**，
+      // 它证明不了任何东西（把状态表整个改成 200 它也绿，只要两边一起改）。
+      // ⇒ 换成两条能假、且各自守一件事的断言：
+      //   ① 码清单与状态表的**键集相等**（新增一个码却没给状态 ⇒ 红）
+      //   ② 每个值落在 HTTP 闭集里（有人写 299 / 0 ⇒ 红）
+      expect(Object.keys(STATUS).sort()).toEqual([...CODES].sort());
       for (const code of CODES) {
-        expect(statusOf(code)).toBe(STATUS[code]);
-        expect(CLOSED.has(statusOf(code))).toBe(true);
+        expect(CLOSED.has(STATUS[code])).toBe(true);
       }
       // 镜像（must-fire）：一个**不在表里**的码必须落到 500，不能落 400
       const bogus = statusOf("definitely_not_a_listed_code" as any);
