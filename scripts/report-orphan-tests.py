@@ -75,6 +75,24 @@ def runner_body(path: Path, body: str) -> str:
     return body
 
 
+def collect_runner_text() -> list[tuple[str, str]]:
+    """收集所有 runner 配置的**可执行文本**（注释已剥、package.json 只取 scripts）。
+
+    main 与自检共用这一份 —— 两处各写一遍的话，「自检证明的那份」和「实际跑的那份」会漂开。
+    """
+    out: list[tuple[str, str]] = []
+    for pat in RUNNER_FILES_GLOBS:
+        for p in REPO.glob(pat):
+            if not p.is_file() or "node_modules" in p.parts:
+                continue
+            try:
+                body = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            out.append((str(p.relative_to(REPO)), runner_body(p, body)))
+    return out
+
+
 def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict[str, str]) -> dict:
     """一个候选文件落进哪一类。抽成纯函数是为了能自检（元门要求 --selftest）。"""
     name = f.split("/")[-1]
@@ -100,7 +118,7 @@ def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict
     return {"file": f, "verdict": "ORPHAN", "why": "没有任何 runner 提到它"}
 
 
-SELFTEST_EXPECTED = 7
+SELFTEST_EXPECTED = 8
 
 
 def selftest(quiet: bool = False) -> int:
@@ -152,6 +170,30 @@ def selftest(quiet: bool = False) -> int:
     elif not quiet:
         print("✓ package.json 只取 scripts")
 
+    # 2026-10-31 —— **每条排除规则要有「只有它命中」的专属夹具**（外部复核 (b)：
+    # 「`_matched_rules(rel) == {rule}`（独占，删掉该规则这条就红）；
+    #   `set(fixtures.values()) == 声明规则集`（加规则没夹具、夹具指向不存在的规则都红）」）。
+    # 本仓的分类有四个出口（A 清单 / B runner / C 登记为不跑 / ORPHAN），
+    # 其中 C 最容易被**遮蔽**：一条登记为「不跑」的文件如果同时被某 runner 的 glob 命中，
+    # 分类结果会是 B —— 登记成了死条目，而**没有任何输出会显示它已经失效**。
+    # ⇒ 对每条 C 登记断言：classify 的结果必须**仍然是 C**。
+    live_runners = collect_runner_text()
+    if not live_runners:
+        ran += 1
+        fails += 1
+        print("✗ 拿不到 live runner 文本 ⇒ 无法证明 C 登记没有被遮蔽（没有读数）", file=sys.stderr)
+    else:
+        for f in NOT_RUN_BY_DESIGN:
+            if not f.startswith("scripts/"):
+                continue          # 另一条在 docs-site/，不在本门扫描域里
+            ran += 1
+            verdict = classify(f, live_runners, NOT_RUN_BY_DESIGN)["verdict"]
+            if verdict != "C_by_design":
+                fails += 1
+                print(f"✗ C 登记被遮蔽：{f} 实际分类 {verdict} ⇒ 这条登记已经失效，应删除", file=sys.stderr)
+            elif not quiet:
+                print(f"✓ C 登记未被遮蔽：{f} ⇒ C_by_design")
+
     if ran != SELFTEST_EXPECTED:
         print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
         return 1
@@ -178,16 +220,7 @@ def main() -> int:
         print("扫描域为空：一个像测试的文件都没有 ⇒ 没有读数", file=sys.stderr)
         return 2
 
-    runner_text: list[tuple[str, str]] = []
-    for pat in RUNNER_FILES_GLOBS:
-        for p in REPO.glob(pat):
-            if not p.is_file() or "node_modules" in p.parts:
-                continue
-            try:
-                body = p.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            runner_text.append((str(p.relative_to(REPO)), runner_body(p, body)))
+    runner_text = collect_runner_text()
     if not runner_text:
         print("扫描域为空：没找到任何 runner 配置 ⇒ 没有读数（不是「都没有执行者」）", file=sys.stderr)
         return 2
