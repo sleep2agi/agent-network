@@ -144,6 +144,16 @@ fail_slow() {
 #    以及 ANET_HUB_SECRET_VAULT_KEY、ANET_SSE_*），所以这里是**显式名单**，不是「清掉
 #    所有 COMMHUB_*」—— 后者会把合法配置一起清掉。
 #    只打印**名字**，绝不打印值（里面有令牌）。
+# 2026-10-31 —— #3159：`*_API_KEY` 也进清理名单。
+#
+# 判据不是推测，是**源码读数**：
+#   grep -rn "API_KEY" server/src --include=*.ts  → 只有两处**注释**命中
+#   （db.ts:419 的 `allowed_secret_keys` 示例），没有任何 `process.env` 读取。
+#   ⇒ hub 自己不读这些 key；它们出现在 /proc/<pid>/environ 里纯粹是从**执行重启的那个会话**继承来的。
+#
+# 真需要时怎么办：写进 $ENV_FILE（600）。它在本次 scrub **之后**被 source（第 207 行），
+# 所以显式声明的值照样生效 —— 这条路径由 test2124 的「hub.env-set denylisted-prefix var」用例守着。
+# 注意 ANET_HUB_SECRET_VAULT_KEY 结尾是 `_KEY` 不是 `_API_KEY`，不会被这条误伤（它是 vault 的根密钥）。
 _scrub_node_identity_env() {
   local name scrubbed=""
   for name in $(compgen -e); do
@@ -152,7 +162,9 @@ _scrub_node_identity_env() {
       ANET_NODE_MARKER|ANET_CODEX_COMMHUB_TOKEN|ANET_INTERNAL_GROK_COPRESENCE_PROFILE|\
       ANET_CONFIG_UPDATE_CAPABLE|\
       CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_PLUGIN_DATA|CLAUDE_CODE_*|\
-      CODEX_*|GROK_*|TMUX|TMUX_PANE)
+      CODEX_*|GROK_*|TMUX|TMUX_PANE|\
+      AGENT|AI_AGENT|OPENCODE|OPENCODE_*|COMMHUB_SESSION_ID|\
+      *_API_KEY|*_API_KEY_*)
         unset "$name" && scrubbed="$scrubbed $name"
         ;;
     esac
