@@ -1772,6 +1772,23 @@ function listEvents(ctx: RequirementsRequestContext): Response {
   const serverTime = new Date().toISOString();
   const caller = taskCaller(ctx);
   const hidden = hiddenNodeFilter(ctx, networkId);
+  // 2026-10-31 —— `assignee` 是**派生展示字段**，存的是**别名字符串**，不是 {kind,id} 引用。
+  // 于是它绕过了 isHiddenRef：受限成员会在事件里读到「某个他看不见的 Agent 的名字」。
+  // 实测（本仓）：把 agent_owner 设成一个受限成员看不见的节点后，事件列表里多出
+  //   { field:"assignee", old:null, new:"<那个节点的别名>" }
+  // 而同一张卡的 agent_owner 事件已被正确抹掉 ⇒ 名字从旁边漏了出去。
+  // 修法：按「隐藏节点的别名集合」判，命中就抹成 null；随后「抹后 old==new」的规则会把整条丢弃。
+  // 方向选择：宁可多抹（隐藏）也不多露 —— 别名与人名冲突时，少显示一个名字的代价小于多露一个。
+  let hiddenAliases: Set<string> | null = null;
+  const hiddenAlias = (v: unknown): boolean => {
+    if (!hidden || typeof v !== "string" || !v) return false;
+    if (hiddenAliases === null) {
+      const rows = db.all<{ node_id: string; alias: string | null }>(
+        "SELECT node_id, alias FROM nodes WHERE network_id = ?1", networkId);
+      hiddenAliases = new Set(rows.filter(r => r.alias && hidden(r.node_id)).map(r => r.alias as string));
+    }
+    return hiddenAliases.has(v);
+  };
   const aware = knowsAbandoned(ctx);
   const seen = new Map<string, boolean>();
   const canSee = (id: string): boolean => {
@@ -1794,6 +1811,11 @@ function listEvents(ctx: RequirementsRequestContext): Response {
     const mask = (ref: unknown) => (isHiddenRef(ref, hidden) ? null : ref);
     const masked = { ...ev, actor: mask(ev.actor) };
     if (ev.field === "owner" || ev.field === "agent_owner") { masked.old = mask(ev.old); masked.new = mask(ev.new); }
+    if (ev.field === "assignee") {
+      // 见上：别名字符串同样要按隐藏节点判定
+      masked.old = hiddenAlias(ev.old) ? null : ev.old;
+      masked.new = hiddenAlias(ev.new) ? null : ev.new;
+    }
     if (ev.field === "participants") {
       masked.old = Array.isArray(ev.old) ? ev.old.filter(ref => !isHiddenRef(ref, hidden)) : ev.old;
       masked.new = Array.isArray(ev.new) ? ev.new.filter(ref => !isHiddenRef(ref, hidden)) : ev.new;

@@ -247,11 +247,18 @@ describe("requirement events", () => {
     await patch(admin.token, card.id, { participants: [user(admin.id), { kind: "node", id: NODE }] });
     const seen = of((await events(restricted.token)).body.events, card.id);
     const all = of((await events(admin.token)).body.events, card.id);
-    expect(all.map((e: any) => e.field)).toEqual(["participants", "agent_owner", "priority", null]);
+    // 2026-10-31 —— 加了 `assignee` 这一条：它是**派生展示字段**（写侧在设 agent_owner 时
+    // 同步回填），存的是**别名字符串**而不是 {kind,id} 引用。列表顺序按事件 id 倒序 ⇒
+    // 它排在 agent_owner 之后、priority 之前。
+    expect(all.map((e: any) => e.field)).toEqual(["participants", "agent_owner", "assignee", "priority", null]);
+    expect(all[2]).toMatchObject({ field: "assignee", old: null, new: "ev-node" });
+    // 受限成员那边：agent_owner 与**由它派生的 assignee** 都必须消失（后者是别名字符串，
+    // 不走 isHiddenRef，2026-10-31 实测会漏；见 requirements.ts 的 hiddenAlias）。
     expect(seen.map((e: any) => e.field)).toEqual(["participants", "priority", null]);
     expect(seen[0]).toMatchObject({ old: [], new: [user(admin.id)] });
     expect(seen[1]).toMatchObject({ field: "priority", actor: null });
     expect(JSON.stringify(seen)).not.toContain(NODE);
+    expect(JSON.stringify(seen)).not.toContain("ev-node");   // ← 别名也不能漏
   });
 
   test("paging: newest first, limit + next_cursor without overlap; since; bad params 400", async () => {
