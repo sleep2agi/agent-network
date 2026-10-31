@@ -128,6 +128,14 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 1
     print("  ✓ 所有固定 /tmp 路径都已登记（理由见 KNOWN_FIXED_TMP）")
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+    from scope_block import print_scope  # noqa: E402
+    print_scope(
+        covers="scripts/ 下 .sh 里字面写出的 /tmp 路径（含 mktemp 模板）",
+        does_not_cover="tests/ 与 docs/ 里的固定 /tmp（量大且多为失败现场取证）/ 运行期拼出来的路径 / $TMPDIR 变体",
+        threat_model="accident",
+        reading_rule="「34 处全登记」只在同时打印 mktemp 次数（7）时才有意义：它说明两类写法都在被数",
+    )
     return 0
 
 
