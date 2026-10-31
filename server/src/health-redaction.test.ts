@@ -92,9 +92,12 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.ok).toBe(true);
-    expect(typeof body.version).toBe("string");
-    expect(typeof body.sessions_count).toBe("number");
-    expect(typeof body.sse_connections).toBe("number");
+    // 2026-10-31 —— **类型不是断言**（外部复核：「写『存在』⇒ 它被改成任何值都绿」）。
+    // 这三行原来只断言 typeof ⇒ 一个空字符串版本号、一个负数会话数、一个 -1 连接数都会绿。
+    expect(body.version).toMatch(/^\d+\.\d+\.\d+(-[a-z0-9.]+)?$/);   // 形如 0.9.0-preview.244
+    expect(Number.isInteger(body.sessions_count)).toBe(true);
+    expect(body.sessions_count).toBeGreaterThanOrEqual(0);
+    expect(Number.isInteger(body.sse_connections)).toBe(true);
     expect(body.sse_connections).toBeGreaterThanOrEqual(1);
   });
 
