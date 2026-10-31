@@ -120,6 +120,13 @@ describe("clone_node — happy path (Hub #938)", () => {
       name: "cloned-child",
       network_id: NET,
     });
+    // #3275 批次 3 —— clone_node 是**最宽的**一张回执（8 键），因为它要同时描述：
+    // 新子节点（child_name / daemon_node_id）、这次下发的请求（request_id）、
+    // 以及两条**契约**（contract / session_contract）与目录策略（workdir_policy / copy_session）。
+    // 少掉 contract 类键 ⇒ 调用方会以为「子节点起来了就等于契约也过了」，而那是两件事。
+    expect(Object.keys(r).sort()).toEqual([
+      "child_name", "contract", "copy_session", "daemon_node_id", "ok", "request_id", "session_contract", "workdir_policy",
+    ]);
     // 2026-10-31 —— #3275：clone_node 的形状（此前只断言了散值）。
     // 8 键，其中 contract 是**给人读的三句话**、session_contract 是**给程序读的契约**：
     //   contract         { token, workdir, session } —— 三条「新开了什么」的散文

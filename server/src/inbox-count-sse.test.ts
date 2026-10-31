@@ -281,6 +281,10 @@ describe("#1440 broadcast delivery set", () => {
 
     const tools = buildHandlers(SENDER);
     const res = await call(tools.broadcast, { message: "all hands", network_id: NET });
+    // #3275 批次 3 —— broadcast 回执三键：**message_ids 与 recipients 不是一回事**
+    // （一条消息 × N 个收件人，或 N 条消息 × 1 个收件人，取决于实现），
+    // 少了 recipients，调用方无法回答「谁没收到」。
+    expect(Object.keys(res).sort()).toEqual(["message_ids", "ok", "recipients"]);
 
     // The active recipient is served — this proves the broadcast ran, so
     // the absence checked below is "not sent", not "not yet sent"
