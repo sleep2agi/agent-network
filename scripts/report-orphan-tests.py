@@ -127,9 +127,9 @@ def selftest(quiet: bool = False) -> int:
     nrbd: dict[str, str] = {"hand/manual.test.mjs": "只给手工环境用"}
 
     case("*.test.ts ⇒ 测试清单", classify("server/src/a.test.ts", runners, nrbd)["verdict"], "A_inventory")
-    case("点名文件 ⇒ 有 runner", classify("scripts/named.test.mjs", runners, nrbd)["verdict"], "B_runner")
+    case("点名文件 ⇒ 有 runner", classify("probe/named.test.mjs", runners, nrbd)["verdict"], "B_runner")
     case("命中 glob ⇒ 有 runner", classify("test/other.test.mjs", runners, nrbd)["verdict"], "B_runner")
-    case("无人提到 ⇒ 未归属", classify("scripts/lonely.test.mjs", runners, nrbd)["verdict"], "ORPHAN")
+    case("无人提到 ⇒ 未归属", classify("probe/lonely.test.mjs", runners, nrbd)["verdict"], "ORPHAN")
     case("登记为不跑 ⇒ C 类", classify("hand/manual.test.mjs", runners, nrbd)["verdict"], "C_by_design")
 
     # 注释不是 runner：YAML 行注释里的 glob 必须被剥掉

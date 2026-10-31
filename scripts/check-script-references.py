@@ -41,6 +41,18 @@ ALLOWLIST = {
         ("同上（英文版）", "同上"),
     ("docs/pre-pr-selfcheck.md", "check-xxx.py"):
         ("文档里的占位符，示例写法", "若有人把它当真：改成真实脚本名或标注「示例」"),
+    # 2026-10-31 —— **自检夹具**：这些名字是故意不存在的，用来证明「门会红」。
+    # 豁免它们不是放水：把它们改成真实存在的文件，那条 must-fire 用例就失去意义了
+    # （一条永远绿的用例与没有用例同形）。
+    ("scripts/check-gates-wired.py", "x.sh"):
+        ("自检夹具：证明「名字只出现在引号里 ⇒ 不算接线」这一格",
+         "若该用例改成用真实脚本演示 ⇒ 删掉这条豁免"),
+    ("scripts/check-script-references.py", "x.sh"):
+        ("自检夹具：证明 REF 正则会抓 .py/.sh/.mjs 三种写法",
+         "若该用例改用拼字符串构造样本 ⇒ 删掉这条豁免"),
+    ("scripts/report-orphan-tests.py", "named.test.mjs"):
+        ("自检夹具：证明「被 runner 点名」这一格（文件故意不存在）",
+         "若该用例改用真实测试文件 ⇒ 删掉这条豁免"),
 }
 
 
@@ -58,7 +70,29 @@ def resolves_from(citing: Path, name: str) -> bool:
     return False
 
 
-SELFTEST_EXPECTED = 3
+COMMENT_SUFFIXES = {".py", ".sh", ".bash", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".yml", ".yaml"}
+
+
+def strip_comment_lines(text: str, suffix: str) -> str:
+    """把**整行注释**挖空。
+
+    2026-10-31 —— 与「注释不是 runner」同一条：本门扫的是「去跑 X」的**指令**，
+    而注释里写 `scripts/x.sh` 是在解释一个例子，不是让人去跑。
+    实测本仓 4 处悬空引用全部来自注释里的示例 ⇒ 这不是豁免，是判据少了一半。
+    """
+    if suffix not in COMMENT_SUFFIXES:
+        return text
+    out = []
+    for ln in text.splitlines():
+        t = ln.lstrip()
+        if t.startswith("#") or t.startswith("//") or t.startswith("*") or t.startswith("/*"):
+            out.append("")
+        else:
+            out.append(ln)
+    return "\n".join(out)
+
+
+SELFTEST_EXPECTED = 4
 
 
 def selftest(quiet: bool = False) -> int:
@@ -99,6 +133,14 @@ def selftest(quiet: bool = False) -> int:
         if not ok: fails.append(f"REF 正则漏写法：{sorted(found)}")
         elif not quiet: print("✓ selftest REF 抓到 .py/.sh/.mjs 三种写法")
 
+    ran += 1
+    S2 = "scr" + "ipts/"
+    stripped = strip_comment_lines("# 例如 `" + S2 + "ghost.py` 这样写\nrun: bash " + S2 + "real.sh\n", ".py")
+    if S2 + "ghost.py" in stripped:
+        fails.append("整行注释里的引用没有被剥掉 ⇒ 注释会被当成指令")
+    elif not quiet:
+        print("✓ selftest 整行注释里的引用被剥掉（注释不是指令）")
+
     if ran != SELFTEST_EXPECTED:
         print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
         return 1
@@ -124,7 +166,7 @@ def main() -> int:
         except OSError:
             continue
         rel = str(path.relative_to(REPO))
-        for name in set(REF.findall(text)):
+        for name in set(REF.findall(strip_comment_lines(text, path.suffix))):
             checked += 1
             if not resolves_from(path, name) and (rel, name) not in ALLOWLIST:
                 dangling.append((rel, name))

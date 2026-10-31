@@ -61,6 +61,11 @@ def scan() -> tuple[list[dict], int, int]:
                 # 同一行里的 mktemp 模板也记下来，后面统一判定
             for m in TMP.finditer(line):
                 path = m.group(0).rstrip(".")
+                # 2026-10-31 —— **XXXXXX 模板不是固定路径**：它交给 mktemp 填，
+                # 每次运行都不一样。判据是「这条路径是否每次相同」，而不是「它是否写在字符串里」。
+                # （实测：scripts/run-server-tests.sh 的 mktemp -u "/tmp/…-XXXXXX.db" 被判成固定路径。）
+                if "XXXXXX" in path and "mktemp" in line:
+                    continue
                 if not path or path == "/tmp/":
                     continue
                 hits.append({"file": str(p.relative_to(REPO)), "line": i, "path": path, "text": line.strip()[:120]})
