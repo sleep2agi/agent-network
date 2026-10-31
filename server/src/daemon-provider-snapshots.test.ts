@@ -180,7 +180,15 @@ test('application transport: scoped intent, capability gate, exact public receip
     expect((await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, application: bad })).error).toBe('invalid_application_receipt');
   }
   expect((await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, snapshot: snapshot() })).ok).toBe(false);
-  expect((await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, application: receipt })).status).toBe('succeeded');
+  // #3275 批次 1·d —— 同变量口径 + 闭集：成功回执恰好 {ok, status}；
+  // 而「重复 ack（非 pending）」走的是 {ok, status} 的**另一个值域**（status=已有状态），
+  // 只断言 .status 时，把两个出口合并、或给某一个出口多加一个键，都不会有东西变红。
+  const appliedAck = await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, application: receipt });
+  expect(Object.keys(appliedAck).sort()).toEqual(['ok', 'status']);
+  expect(appliedAck).toEqual({ ok: true, status: 'succeeded' });
+  const reAck = await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, failed: true });
+  expect(Object.keys(reAck).sort()).toEqual(['ok', 'status']);
+  expect(reAck).toEqual({ ok: true, status: 'succeeded' });   // 已终态 ⇒ 原样回读，不被改成 failed
   await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, failed: true });
   const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
   expect(read.status).toBe('succeeded'); expect(read.application).toEqual(receipt); expect(read.snapshot).toBeNull();
