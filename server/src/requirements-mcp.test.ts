@@ -95,7 +95,16 @@ describe("requirements MCP tools", () => {
       expect((await s.call("requirements_update", { id, column: "doing", agent_owner: { kind: "node", id: "node_gh_sync" } })).requirement.column).toBe("doing");
       const ticked = await s.call("requirements_checklist_toggle", { id, item_id: "c1", done: true });
       expect(ticked.requirement.checklist.map((i: any) => i.done)).toEqual([true, false]);
-      expect((await s.call("requirements_get", { id })).requirement.agent_owner).toEqual({ kind: "node", id: "node_gh_sync" });
+      // #3275 批次 2 —— 同变量口径：`requirements_get` 的**外层**是闭集，内层 requirement 是实体投影。
+      // 今晚我每轮都靠这个工具读卡，而它的键集从来没有被钉过：
+      // 少一个 `column` 前端就分不出列；多一个字段，客户端会多一条没人写过的分支。
+      const got = await s.call("requirements_get", { id });
+      expect(Object.keys(got).sort()).toEqual(["ok", "requirement"]);
+      expect(got.requirement.agent_owner).toEqual({ kind: "node", id: "node_gh_sync" });
+      // 内层必须带这几个字段（不是全键集：实体字段会随产品增长，钉**读卡必需**的那几个）
+      for (const k of ["id", "seq", "name", "column", "tags", "updatedAt"]) {
+        expect(got.requirement).toHaveProperty(k);
+      }
       expect((await s.call("requirements_list", { status: "doing", agent_owner: "node:node_gh_sync" })).requirements.map((r: any) => r.id)).toContain(id);
       expect((await s.call("requirements_update", { id, owner: { kind: "node", id: "node_gh_sync" }, agent_owner: null })).error).toBe("owner_must_be_human");
       expect((await s.call("requirements_update", { id, archived: true })).requirement.archived).toBe(true);
