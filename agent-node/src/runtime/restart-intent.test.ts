@@ -161,3 +161,42 @@ describe("decideStart", () => {
     expect(r.kind).toBe("present");
   });
 });
+
+// 2026-10-31 —— **「谁可以读这个标记」本身要是一条断言**（外部复核那条的落点）：
+// 对方在另一处确认「把 pending 置 true 只是人工队列标记，不是自动任务触发器」，
+// 靠的是把**写入点与读取点逐个清点**。本仓的等价物是 restart-intent.json：
+//   · 写：cli.ts 的两处（计划内重启发起时）
+//   · 读：consumePlannedRestart（cli.ts:8204 启动路径）
+// 只要有人新增第三个读点并据此重启，标记就从一个「意图」变成了「触发器」——
+// 而两次重启在日志里长得一模一样。
+describe("谁可以读 restart-intent（消费者清单）", () => {
+  test("引用点必须与登记表完全一致；新增消费者 = 新增决定，必须改这里", async () => {
+    const { execSync } = await import("node:child_process");
+    const { readFileSync: rf } = await import("node:fs");
+    const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+    // ⚠️ `git ls-files` 只列 **tracked**：刚写的新消费者在 `git add` 之前看不见 ——
+    //    而「没人读它」与「我看不到有人读它」同形（今天在测试清单门里踩过一次）。
+    // ⇒ 把未跟踪但未被忽略的文件也并进来。
+    const trackedList = execSync(
+      "git ls-files 'agent-node/src/*.ts' 'agent-network/src/*.ts' 'server/src/*.ts'",
+      { cwd: repo, encoding: "utf8" },
+    ).split("\n").filter(Boolean);
+    const untrackedList = execSync(
+      "git ls-files -o --exclude-standard 'agent-node/src/*.ts' 'agent-network/src/*.ts' 'server/src/*.ts'",
+      { cwd: repo, encoding: "utf8" },
+    ).split("\n").filter(Boolean);
+    const files = [...new Set([...trackedList, ...untrackedList])];
+    const KNOWN = new Set([
+      "agent-node/src/cli.ts",                 // 唯一的生产者 + 唯一的消费者（启动路径）
+      "agent-node/src/runtime/config-apply.ts", // 只在注释里提及，不 import
+      "agent-node/src/runtime/restart-intent.ts", // 定义本身
+      "agent-node/src/runtime/restart-intent.test.ts", // 本文件（含这条清单断言）
+    ]);
+    const refs = files.filter((f) => {
+      if (KNOWN.has(f)) return false;
+      const body = rf(join(repo, f), "utf8");
+      return /from "\.[^"]*restart-intent(\.js)?"|require\("\.[^"]*restart-intent/.test(body);
+    });
+    expect(refs).toEqual([]); // 有新增消费者 ⇒ 先在这里登记，再谈它会不会自己重启
+  });
+});
