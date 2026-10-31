@@ -30,6 +30,30 @@
 set -uo pipefail
 
 STRICT=0
+if [ "${1:-}" = "--selftest" ]; then
+  # 2026-10-31 —— 本仓自己的纪律：**每个门都带 --selftest**，否则「它跑过」与「它什么都没检查」同形。
+  # 这个脚本之前没有，是不一致的。三条用例，全部在临时仓里造：
+  #   ① HEAD 绿 + 当前绿 ⇒ exit 0
+  #   ② HEAD 绿 + 当前红 ⇒ exit 1（可归因）
+  #   ③ HEAD 红 + 当前红 ⇒ exit 0（不可归因，默认不判失败）
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+  git -C "$tmp" init -q; git -C "$tmp" config user.email t@t; git -C "$tmp" config user.name t
+  printf '#!/bin/sh\nexit 0\n' > "$tmp/gate.sh"; chmod +x "$tmp/gate.sh"
+  git -C "$tmp" add gate.sh; git -C "$tmp" commit -qm base
+  fails=0
+  out=$(cd "$tmp" && bash "$SELF" ./gate.sh 2>&1); rc=$?
+  [ "$rc" -eq 0 ] && echo "✓ selftest 两边都绿 ⇒ exit 0" || { echo "✗ selftest 都绿却 exit=$rc"; fails=$((fails+1)); }
+  printf '#!/bin/sh\nexit 1\n' > "$tmp/gate.sh"
+  out=$(cd "$tmp" && bash "$SELF" ./gate.sh 2>&1); rc=$?
+  [ "$rc" -eq 1 ] && echo "✓ selftest HEAD 绿 + 当前红 ⇒ exit 1（可归因）" || { echo "✗ selftest 可归因却 exit=$rc"; fails=$((fails+1)); }
+  git -C "$tmp" commit -qam red
+  printf '#!/bin/sh\nexit 1\n' > "$tmp/gate.sh"
+  out=$(cd "$tmp" && bash "$SELF" ./gate.sh 2>&1); rc=$?
+  [ "$rc" -eq 0 ] && echo "✓ selftest 基线也红 ⇒ exit 0（不可归因，默认不判失败）" || { echo "✗ selftest 基线红却 exit=$rc"; fails=$((fails+1)); }
+  [ "$fails" -eq 0 ] && { echo "✓ selftest 3/3 通过"; exit 0; }
+  exit 1
+fi
 if [ "${1:-}" = "--strict" ]; then STRICT=1; shift; fi
 
 if [ $# -eq 0 ]; then
