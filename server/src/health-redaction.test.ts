@@ -426,10 +426,15 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     test("publishes the smallest suspend the 1% guard could actually catch", async () => {
       const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
       if (b.kernel_started_at === null) return;
-      expect(typeof b.clk_tck_guard_min_suspend_s).toBe("number");
+      // 2026-10-31 —— 「是数字」不是断言（外部复核 (b)）：负数、NaN、Infinity 都是 number。
+      expect(Number.isFinite(b.clk_tck_guard_min_suspend_s)).toBe(true);
+      expect(b.clk_tck_guard_min_suspend_s).toBeGreaterThanOrEqual(0);
       // relErr ≈ 挂起 / **机器** uptime ⇒ 1% ⇒ 0.01 × host_uptime_s
       // ⚠️ 不是 b.uptime（那是进程的），两者相差可以上万倍 —— 这一条正是在钉这个区别
-      expect(typeof b.host_uptime_s).toBe("number");
+      expect(Number.isFinite(b.host_uptime_s)).toBe(true);
+      expect(b.host_uptime_s).toBeGreaterThanOrEqual(0);
+      // 机器 uptime 至少不短于进程 uptime（同一台机上，这是结构关系，不是巧合）
+      expect(b.host_uptime_s).toBeGreaterThanOrEqual(b.uptime - 5);
       const expected = 0.01 * b.host_uptime_s;
       expect(Math.abs(b.clk_tck_guard_min_suspend_s - expected)).toBeLessThanOrEqual(2);
       expect(b.clk_tck_guard_min_suspend_s).toBeGreaterThan(0);
