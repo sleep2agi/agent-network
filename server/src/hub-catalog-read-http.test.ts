@@ -434,4 +434,33 @@ describe("GET /api/providers", () => {
       expect(readers.length).toBeGreaterThan(0);
     }
   });
+
+  // 2026-10-31 —— **枚举里不能有打不中的值**（外部复核：
+  // 「5 值枚举里 2 个不可达（stage_missing / id_not_uuid）——那是装饰，
+  //  而读者会以为那两条分支存在且被测过」）。
+  // 判据：每个成员的字面量必须在**生产源码**里出现（类型声明行不算）。
+  test("every enum member is actually produced somewhere in production code", async () => {
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const walk = (dir: string, out: string[] = []): string[] => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) walk(full, out);
+        else if (name.endsWith(".ts") && !name.endsWith(".test.ts")) out.push(full);
+      }
+      return out;
+    };
+    const prod = walk(join(import.meta.dir)).map((f) => readFileSync(f, "utf8")).join("\n");
+    const enums: Record<string, string[]> = {
+      version_source: ["embedded_env", "package_json", "read_failed", "empty_value"],
+      provider_selection_state: ["never_switched", "pending", "applied", "failed"],
+    };
+    for (const [label, members] of Object.entries(enums)) {
+      const dead = members.filter((m) => !new RegExp(`["']${m}["']`).test(prod));
+      if (dead.length) {
+        throw new Error(`${label} 里有打不中成员（生产源码没出现过这个字面量）：${dead.join(", ")}\n` +
+          "  ⇒ 要么删掉该成员，要么补上产出它的分支；留着等于给读者一条不存在的分支。");
+      }
+    }
+  });
 });
