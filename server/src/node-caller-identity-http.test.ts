@@ -998,7 +998,15 @@ function activityTask(nodeId: string, alias: string, network = NET) {
 }
 const activitySnap = (id: string) => db.get<any>("SELECT status, consumed_at, runtime_submitted_at, started_at, thread_id, turn_id, last_activity_at FROM tasks WHERE task_id = ?1", id);
 async function consumeActivityTask(context: {task_id: string; thread_id: string; turn_id: string}) {
-  expect((await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: [context.task_id], task_contexts: [context] })).ok).toBe(true);
+  const consumed = await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: [context.task_id], task_contexts: [context] });
+  expect(consumed.ok).toBe(true);
+  // 2026-10-31 —— **精确键集**（#3171）：这条响应此前只断言 ok。
+  // 键集来自实现（变更探测器）；契约来源是 tools.ts 的描述与本文件的消费方。
+  expect(Object.keys(consumed).sort()).toEqual(["ok", "tasks"]);
+  // 拒绝形状：不带 task_id 的拒绝只有两键（多一个就把「通用错误」变成「某条任务的错误」）
+  const denied = await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: ["nope", "nope"], task_contexts: [] });
+  expect(denied.ok).toBe(false);
+  expect(Object.keys(denied).sort()).toEqual(["error", "ok"]);
 }
 const renewActivity = (token: string, contexts: Array<{task_id: string; thread_id: string; turn_id: string}>) => tool(token, "mark_tasks_consumed", { task_ids: contexts.map(c => c.task_id), task_contexts: contexts, activity_only: true });
 
