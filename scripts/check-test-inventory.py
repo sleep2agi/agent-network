@@ -637,6 +637,15 @@ def main() -> int:
     # 2026-10-31 —— 棘轮必须写清放弃什么（外部复核：「集合相等不漏增长，漏的是重数」）
     # 外部复核 ②：同上 —— 放弃声明里的基数不能手打，必须来自产出者（这里是基线 + 本次实测）
     print(f"  ratchet_gives_up: 放弃『dynamic 名字的逐条身份』（上限 {baseline_dynamic}（基线）／实测 {dynamic}）；放弃『测试是否真的执行』")
+    # 2026-10-31 —— **防护强度是 Σcap，不是每桶占比**（外部复核：
+    # 「A 桶 cap 10；新增 B 桶 cap 5 并从 A 迁走 5 条 ⇒ 每桶都合规，而可豁免总量 10 → 15，
+    #   受保护面扩大 50%. 可观测的量是 Σcap，不是每桶占比。」
+    # 本仓目前只有一个桶（dynamic），所以 Σcap 就是它；这里把它单独打出来 ——
+    # 一旦将来有人加第二个桶，这行会立刻变成两数相加，而不是两个各自"合规"的占比。
+    caps = {"dynamic": baseline_dynamic or 0}
+    total_cap = sum(int(v) for v in caps.values())
+    print(f"  exempt_caps: Σcap={total_cap}（桶：{'，'.join(f'{k}={v}' for k, v in caps.items())}）"
+          f" ⇒ 防护强度看这个和，不看每桶占比")
     print("  baseline_source: 自产（`--update` 由本脚本写出）")
     print("                   ⇒ 它证明「没有变化」，不证明「没有长期遗漏」；")
     print("                     后者只能靠与另一来源对账（例如 `bun test --listTests` 或 CI 实跑条数）。")
