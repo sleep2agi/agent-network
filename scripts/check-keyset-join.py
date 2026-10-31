@@ -309,7 +309,7 @@ INVALIDATES: list[dict[str, str]] = [
     {"id": "tree_changed", "type": "ref_dirty",
      "check": "重跑本脚本；SCOPE 的 measured_on 行与上次不同 ⇒ 作废"},
     {"id": "selftest_not_full", "type": "behavior",
-     "check": "python3 scripts/check-keyset-join.py --selftest（必须 8/8）"},
+     "check": "python3 scripts/check-keyset-join.py --selftest（必须 9/9）"},
     {"id": "scan_domain_changed", "type": "domain",
      "check": "重跑本脚本；SCOPE 的 scan_domain 里 ext 计数与上次不同 ⇒ 作废"},
 ]
@@ -408,6 +408,20 @@ SELFTEST_CASES = [
         "blocking", "键集拼字符串",
     ),
     (
+        # 2026-10-31 —— **adjacent 规则的 must-not-hit**（外部复核那条：
+        # 「任何规则进阻塞档之前，先写一个必须命中的 fixture + 一个必须不命中的 fixture」）。
+        # 形状：上一句用过 Object.keys，本句只是对一个**数组**做 sort().join() 并比较；
+        # 分号已把两句切开 ⇒ 键集信号不该跨过它 ⇒ 必须落 advisory（不阻塞）。
+        "adjacent_not_keyset_after_semicolon",
+        'export function f(b: Record<string, unknown>, items: string[]) {\n'
+        '  const ks = Object.keys(b);\n'
+        '  const joined = items.sort().join(",") !== "a,b";\n'
+        '  return joined || ks.length > 0;\n'
+        '}\n',
+        # 落在 advisory 的哪个子桶不重要（实测是 ∎unproven），**不阻塞**才是契约。
+        "advisory", "unproven",
+    ),
+    (
         "keyset_multiline",
         'export function f(b: Record<string, unknown>) {\n'
         '  if (Object.keys(b).sort()\n'
@@ -467,8 +481,8 @@ def selftest(quiet: bool = False) -> int:
         print(f"✗ invalidates_on 字段不自洽：{bad}", file=sys.stderr)
         print("  ⇒ 散文可以漏一项而不被发现；字段不能 —— 这就是把它写成字段的理由。", file=sys.stderr)
         return 2
-    if len(SELFTEST_CASES) != 8:
-        print(f"✗ selftest 用例数应为 8，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
+    if len(SELFTEST_CASES) != 9:
+        print(f"✗ selftest 用例数应为 9，实际 {len(SELFTEST_CASES)} —— 有人动过用例表", file=sys.stderr)
         return 1
     failures = 0
     with tempfile.TemporaryDirectory() as td:
@@ -680,7 +694,7 @@ def main() -> int:
     # 「测量于 T」要求读者自己知道衰减率；而衰减率只有发布者知道。
     # 2026-10-31 —— 门的状态是**二维**的：能不能红 × 今天红不红。
     # 只报一维时，「恒红」与「假绿」在报告里同形（都是「有问题/没问题」）。
-    can_red = "yes（selftest 8/8 + 跨行 canary）"
+    can_red = f"yes（selftest {len(SELFTEST_CASES)}/{len(SELFTEST_CASES)} + 跨行 canary）"
     now = "green（0 阻塞）" if not blocking else f"red（{len(blocking)} 处）"
     # 2026-10-31 —— **每条阻塞规则都必须写明「什么情况下它不会命中」**。
     # 说不出来 ⇒ 它还在猜；而一道在猜的闸比没有闸更危险（它让人以为已经查过了）。
