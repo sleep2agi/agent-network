@@ -211,6 +211,9 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
     const t = makeTask(A1, "delivered", "x517 g1 cancel_task");
     const r = await call(tools["cancel_task"], { task_id: t });
     expect(r.ok).toBe(true);
+    // 2026-10-31 —— **同变量口径的精确键集**（#3171）：这条断言绑的是本次调用的结果变量 r。
+    // 实际三键（我第一版只写了 ok —— 断言当场纠正）。
+    expect(Object.keys(r).sort()).toEqual(["cancelled", "ok", "task_id"]);
     expect(taskById(t)?.status).toBe("cancelled");
   });
 

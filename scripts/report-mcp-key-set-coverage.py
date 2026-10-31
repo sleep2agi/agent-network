@@ -111,7 +111,12 @@ def main() -> int:
     # 今天实测到两次（upsert_network_secret、list_node_skills），两次都是我把断言写在别人旁边。
     # ⇒ 这一档要求：`const X = await …("tool"` 之后 ≤15 行出现 `Object.keys(X)`。
     own_result: dict[str, list[str]] = {}
-    ASSIGN = re.compile(r"(?:const|let|var)\s+(\w+)\s*=\s*await\s+[^\n]*?[\(\s][\"']([a-z_]+)[\"']")
+    # 2026-10-31 —— 调用有四种写法：`tool(token,"x")` / `call(tools["x"],…)` / `mcp(t,"x",…)` / `.call("x",…)`。
+    # 只认第一种会漏掉 `tools["cancel_task"]`（实测）；而放宽成「行内第一个小写词」又会抓错。
+    # ⇒ 取行内**所有**带引号的小写标识符，命中工具表的那一个才算。
+    ASSIGN = re.compile(r"(?:const|let|var)\s+(\w+)\s*=\s*await\b")
+    QUOTED = re.compile(r"[\"']([a-z_]+)[\"']")
+    own_result: dict[str, list[str]] = {}
     for path in tracked(["server/src/*.test.ts"]):
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -121,8 +126,9 @@ def main() -> int:
             m = ASSIGN.search(ln)
             if not m:
                 continue
-            var, name = m.group(1), m.group(2)
-            if name not in tools:
+            var = m.group(1)
+            name = next((c for c in QUOTED.findall(ln) if c in tools), None)
+            if not name:
                 continue
             window = "\n".join(lines[i:i + 16])
             if re.search(rf"Object\.keys\(\s*{re.escape(var)}\s*\)", window):
