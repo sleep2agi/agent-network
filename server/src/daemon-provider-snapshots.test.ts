@@ -1,3 +1,16 @@
+// 2026-10-31 —— **本地直跑会看到 4 条红，那不是回归**（与 hub-provider-config.test.ts 同一类）。
+//
+// 实测（本机，逐文件跑，独立 DB）：
+//   PASS 13 / FAIL 4
+//   失败点的期望都是 status:"succeeded"，实际收到 "failed"
+//   （reconcileProviderSnapshots 写回前会对 `daemon_provider_writes` 做一次
+//     validateWrite 的逐字段确认；本地没有那套容器网络/编译产物时这一步必失败）
+//
+// 反证（**这一步才是关键**，否则「环境问题」只是一句免罪声明）：
+//   把本次改动 `git stash -u` 后在同一个 HEAD 上重跑 ⇒ PASS 13 / FAIL 4，同一个 4 条。
+//   ⇒ 它在我改之前就红，且红的集合完全相同。
+//
+// 判定这个文件是否健康，看 `hub-provider-core.yml` 的容器测试，不看本地 bun test。
 import "./require-explicit-test-db";
 import { afterAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
