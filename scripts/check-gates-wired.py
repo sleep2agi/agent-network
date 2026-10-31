@@ -69,6 +69,8 @@ KNOWN_UNWIRED: dict[str, str] = {
     "scripts/report-code-producers.py": "[report-only] 读数报告（谁产出某字段），人工按需跑",
     "scripts/report-rest-coverage.py": "[report-only] 读数报告（REST 端点的测试引用率）；"
                                        "它回答「分母是多少」，不对代码下结论，不进 CI",
+    "scripts/report-header-producers.py": "[report-only] 读数报告（每个响应头有几个写出点）；"
+                                          "多生产者不是缺陷，但它是「改一处只改了一半」的前置条件",
     "scripts/report-mcp-key-set-coverage.py": "[report-only] 读数报告（键集覆盖率三口径），人工按需跑",
     "scripts/report-node-versions.py": "[report-only] 读数报告（舰队版本分布），人工按需跑",
     "scripts/report-reason-branches.py": "[report-only] 读数报告（按 reason 分支的处数），人工按需跑",
