@@ -34,6 +34,7 @@ export const PUBLIC_HEALTH_KEY_READERS: Readonly<Record<string, AnonReaderEntry>
   status: { reader: "cli", why: "客户端展示 Hub 的细分状态（ok / degraded）" },
   status_reasons: { reader: "cli", why: "anet status 把 status_reasons 拼成一行原因给用户看（bin/cli.ts）" },
   version: { reader: "cli", why: "版本不一致提示（anet 与 hub 的版本对齐）" },
+  version_source: { reader: "operator", why: "运维判断「版本没变」是没发出去还是被 env 覆盖；仓内无代码读" },
   version_role: { reader: "external", why: "docs/release-hub-runbook.md 描述的仓外 dashboard 读它区分构建；仓内无消费者，未验" },
   api_version: { reader: "cli", why: "客户端与 Hub 协商协议版本，不匹配时给出升级提示" },
   transport: { reader: "cli", why: "协议协商（streamable-http）" },

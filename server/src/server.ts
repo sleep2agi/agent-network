@@ -165,14 +165,39 @@ const MCP_LABEL_MAX_BYTES = 1024 * 1024;
 // Read version from package.json so banners and /health stay in sync.
 // ANET_EMBEDDED_COMMHUB_VERSION is set only by the standalone anet binary
 // (bin/anet-bin.ts). npm/bunx leaves it unset and keeps the disk read.
-const SERVER_VERSION = (() => {
-  const embedded = process.env.ANET_EMBEDDED_COMMHUB_VERSION?.trim() ?? "";
-  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embedded)) return embedded;
+/**
+ * 2026-10-31 —— **有覆盖、零仲裁**（外部复核 (d)：
+ * 「`versionSource`/`versionEnvIgnored` 在本仓库 0 命中 ⇒ `version` 是『有覆盖、零仲裁』的缺陷形态」）。
+ *
+ * 这个值有两个可能来源（standalone 二进制注入的 env / 磁盘 package.json），
+ * 而 `/health` 只报结果、不报**谁赢了**。后果：
+ *   · 有人改了 package.json 却发现线上版本没变（被 env 覆盖）
+ *   · 或以为在用二进制内嵌版本，其实是磁盘那个
+ * 两个方向都只能靠猜。⇒ 现在把来源作为字段一起给出。
+ */
+export type VersionSource = "embedded_env" | "package_json" | "unknown";
+export function resolveServerVersion(
+  embeddedRaw: string | undefined,
+  readPackageVersion: () => string,
+): { version: string; source: VersionSource } {
+  const embedded = (embeddedRaw ?? "").trim();
+  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embedded)) {
+    return { version: embedded, source: "embedded_env" };
+  }
   try {
-    const url = new URL("../package.json", import.meta.url);
-    return JSON.parse(require("fs").readFileSync(url, "utf8")).version || "?";
-  } catch { return "?"; }
-})();
+    const v = readPackageVersion();
+    if (v && v !== "?") return { version: v, source: "package_json" };
+    return { version: "?", source: "unknown" };
+  } catch {
+    return { version: "?", source: "unknown" };
+  }
+}
+const RESOLVED_VERSION = resolveServerVersion(process.env.ANET_EMBEDDED_COMMHUB_VERSION, () => {
+  const url = new URL("../package.json", import.meta.url);
+  return JSON.parse(require("fs").readFileSync(url, "utf8")).version || "?";
+});
+const SERVER_VERSION = RESOLVED_VERSION.version;
+const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 
 // Feature flags advertised on /health (see the /health handler). Exported for tests.
 // node_permission_mode(#489):节点有 permission_mode、GET /api/nodes 每行带 viewer_can.permission_mode,
@@ -993,7 +1018,7 @@ function corsHeaders(req: Request): Record<string, string> {
  */
 export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
   // 存活/版本：外部 watchdog 与运维只靠这些判断「活没活」
-  "ok", "status", "status_reasons", "version", "version_role", "api_version", "transport", "uptime", "startedAt",
+  "ok", "status", "status_reasons", "version", "version_source", "version_role", "api_version", "transport", "uptime", "startedAt",
   // 规模与健康度聚合（不含拓扑明细）
   "sessions_count", "sse_connections", "mcp_inflight", "mcp_inflight_peak",
   // 事件循环停顿是**一个对象**（event_loop: {max_gap_ms, recent_stalls,…}），
@@ -1133,6 +1158,11 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
     granularity: "label",
     why: "粗粒度版本号；精确字节身份由 git_commit 承担，而它不匿名",
     identity_class: "declaration",
+  },
+  version_source: {
+    class: "gauge",
+    granularity: "label",
+    why: "同一字段的**仲裁位**：说明 version 是 env 注入（standalone 二进制）还是磁盘 package.json；不暴露路径或提交",
   },
   version_role: {
     class: "gauge",
@@ -3534,6 +3564,7 @@ return Bun.serve({
         status: statusReasons.length === 0 ? "ok" : "degraded",
         status_reasons: statusReasons,
         version: SERVER_VERSION,
+        version_source: SERVER_VERSION_SOURCE,
         // 2026-10-31 —— **version 是部署标签，不是代码指纹**（生产实例：4 分钟内 version 变、
         // buildCommit 一字未变，同 commit 重新打包）。
         // ⇒ 任何以 version 为键的巡检/回滚检测都会假跳或永远不跳。
