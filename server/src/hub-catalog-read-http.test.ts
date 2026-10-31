@@ -354,7 +354,14 @@ describe("GET /api/providers", () => {
       expect(c.body.state).toBe("applied");
       expect(c.body.selection).toMatchObject({ provider_id: "main", model: "m1" });
       expect(c.body.revision).toBe(7);
+      // 2026-10-31 —— 「存在/类型」不是断言（外部复核 (b)）：
+      // observed_at 是「这份 selection 是什么时候观测到的」，它必须**可解析**且**不晚于现在**，
+      // 否则它只是一个格式正确的字符串。
       expect(typeof c.body.observed_at).toBe("string");
+      const observedMs = Date.parse(c.body.observed_at);
+      expect(Number.isFinite(observedMs)).toBe(true);
+      expect(observedMs).toBeLessThanOrEqual(Date.now() + 1000);
+      expect(observedMs).toBeGreaterThan(Date.now() - 86_400_000);   // 不该是 1970 或其他纪元
 
       // ④ 失败：必须带 error（否则界面只能说「失败了」）
       q("dpa_probe_3", "failed", null, "daemon_rejected_selection");
