@@ -1191,6 +1191,10 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
     verdict_other_branch: "degraded：让 DB 读不到（chmod/移走 db 文件）或让 license 查询失败 ⇒ status_reasons 同时非空",
   },
   status_reasons: { class: "gauge", granularity: "level" },
+  git_identity_root: {
+    class: "landmark",
+    why: "commit 是从**模块目录**（制品所在处）读的，还是退回 **cwd** 读的；后者会把启动目录里另一个仓库的身份报成本包的身份",
+  },
   build_identity_note: {
     class: "landmark",
     why: "解释 git_commit 为什么为空；没有它，「没有」与「读不到」同形",
@@ -1272,8 +1276,20 @@ function detectBootGitIdentity(): {
   dirty: boolean | null;
   /** commit 为空时说明**为什么**空 —— 没有它，「没有」与「读不到」同形。 */
   reason: "not_a_git_checkout" | "git_unavailable" | "unexpected_rev_parse_output" | null;
+  /**
+   * 2026-10-31 —— **这个 commit 是从哪个根读出来的**（外部复核那条：
+   * 「release 读的是 cwd 而不是可执行文件目录 ⇒ 它标识部署动作，不标识运行内容」）。
+   *
+   * 我们优先用模块目录（= 制品所在处），只在拿不到时退回 cwd。
+   * 但**没有字段说明用了哪个**时，「读到的是制品身份」与「读到的是启动目录里某个别的仓库」
+   * 在载荷上完全同形 —— 后者会把一台跑着旧包的机器报成新提交。
+   * ⇒ 加一格 root_kind 作仲裁；cwd 那一支必须能被看出来。
+   */
+  root_kind: "module_dir" | "cwd";
 } {
-  const start = (import.meta as { dir?: string }).dir ?? process.cwd();
+  const moduleDir = (import.meta as { dir?: string }).dir;
+  const start = moduleDir ?? process.cwd();
+  const rootKind: "module_dir" | "cwd" = moduleDir ? "module_dir" : "cwd";
   let dir = start;
   for (let i = 0; i < 6; i += 1) {
     if (existsSync(join(dir, ".git"))) {
@@ -1283,7 +1299,7 @@ function detectBootGitIdentity(): {
           timeout: 1500,
         }).toString().trim();
         if (!/^[0-9a-f]{40}$/.test(out)) {
-          return { commit: null, dirty: null, reason: "unexpected_rev_parse_output" };
+          return { commit: null, dirty: null, reason: "unexpected_rev_parse_output", root_kind: rootKind };
         }
         // 2026-10-31 —— dirty 位不能省：commit sha 单独一个字段，
         // 无法区分「干净树构建」与「脏树构建」，于是 vantage 依然可能把一个
@@ -1298,16 +1314,16 @@ function detectBootGitIdentity(): {
         } catch {
           dirty = true;   // 读不到状态 ⇒ 保守认定为脏（不许把“不知道”当干净）
         }
-        return { commit: out, dirty, reason: null };
+        return { commit: out, dirty, reason: null, root_kind: rootKind };
       } catch {
-        return { commit: null, dirty: null, reason: "git_unavailable" };
+        return { commit: null, dirty: null, reason: "git_unavailable", root_kind: rootKind };
       }
     }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return { commit: null, dirty: null, reason: "not_a_git_checkout" };
+  return { commit: null, dirty: null, reason: "not_a_git_checkout", root_kind: rootKind };
 }
 
 const BOOT_GIT = detectBootGitIdentity();
@@ -3561,6 +3577,7 @@ return Bun.serve({
         // 2026-10-31 —— 每个可为 null 的字段都要有一个**能解释它的兄弟字段**。
         // 没有它时，「不是 git 树」「git 不可用」「rev-parse 输出异常」三种成因同形。
         build_identity_note: BOOT_GIT.reason,
+        git_identity_root: BOOT_GIT.root_kind,
         // 2026-10-31 —— 拒绝原因计数（与那条日志同一位置 +1，不会漏记）。
         // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
         //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。

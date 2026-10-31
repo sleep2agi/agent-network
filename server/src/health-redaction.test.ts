@@ -688,7 +688,21 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     //   verdict 是判定（"ok"/"degraded"）⇒ 若另一支不可观测，它就不是判定而是装饰
     // 起因：一次复核提议给 /health 加 `ptyWsAttached`，而 attach 在 listen 回调里无条件执行
     // ⇒ true 恒成立、false 不可观测 ⇒ 这个字段永远只有一个读数，正是被审的「一侧不可达」缺陷本身。
-    // 2026-10-31 —— **每个 verdict 都要有仲裁字段**（外部复核那条：
+    // 2026-10-31 —— **身份是从哪个根读的**（外部复核那条：release 读的是 cwd，不是可执行文件目录）。
+  // 我们优先模块目录，只在拿不到时退回 cwd —— 但若没有字段说明是哪一支，
+  // 「读到的是本包的身份」与「读到的是启动目录里另一个仓库」在载荷上完全同形。
+  test("git identity says which root it came from (module_dir vs cwd)", async () => {
+    const b = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    expect(["module_dir", "cwd"]).toContain(b.git_identity_root);
+    // 从 cwd 读出来的身份，必须显式承认它不是制品身份
+    if (b.git_identity_root === "cwd") {
+      expect(b.build_identity_note === null || typeof b.build_identity_note === "string").toBe(true);
+    }
+    // 反向：有 commit 却说不出来源 ⇒ 这条断言不允许
+    if (b.git_commit) expect(["module_dir", "cwd"]).toContain(b.git_identity_root);
+  });
+
+  // 2026-10-31 —— **每个 verdict 都要有仲裁字段**（外部复核那条：
   // 「每个问题一个权威字段 + 一个仲裁字段」）。
   // 只有权威字段时，读者无法区分「结论是对的」与「检查没跑」。
   test("every verdict declares an arbiter field that is actually in the payload", async () => {
