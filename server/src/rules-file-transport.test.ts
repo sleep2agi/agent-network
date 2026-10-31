@@ -194,7 +194,12 @@ describe("app#225 rules file — SEC-1 and lifecycle", () => {
     try {
       const enq = await u.call("read_node_rules_file", { node_id: NODE_ID });
       expect(await o.call("get_rules_file_request", {})).toEqual({ ok: true, request: null });
-      expect(await o.call("ack_rules_file_request", { request_id: enq.request_id, status: "done", content: "stolen" })).toMatchObject({ ok: true, ignored: "unknown_or_foreign_request" });
+      // #3275 批次 1·b —— 别的节点 ack 别人的请求：**忽略也是契约**。
+      // 形状是 {ok, ignored} 两键（不带 request_id/status —— 那是主分支的形状），
+      // 只写 toMatchObject 时，多塞一个 current_status 不会有任何东西变红。
+      const foreignAck = await o.call("ack_rules_file_request", { request_id: enq.request_id, status: "done", content: "stolen" });
+      expect(Object.keys(foreignAck).sort()).toEqual(["ignored", "ok"]);
+      expect(foreignAck).toEqual({ ok: true, ignored: "unknown_or_foreign_request" });
       expect(db.get<{ status: string }>("SELECT status FROM node_rules_requests WHERE request_id = ?1", enq.request_id)?.status).toBe("pending");
     } finally { await u.close(); await o.close(); }
   }, 20_000);

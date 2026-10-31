@@ -651,6 +651,19 @@ describe("update_node_config 响应键集（exact key set）", () => {
       expect(Object.keys(ack).sort()).toEqual(["ok", "status"]);
       expect(ack.ok).toBe(true);
       expect(ack.status).toBe("applied");
+
+      // ④ #3275 批次 1·b —— **ignored 三个分支的左端不是同一个形状**：
+      //    `{ok, ignored}` / `{ok, ignored, current_status}`。
+      //    只钉主分支时，「顺手把 current_status 加到另外两个分支」不会有任何东西变红。
+      const again = await tool(ntok, "ack_config_update", {
+        update_id: "u_acl3_pending", status: "applied", new_revision: 1,
+      });
+      expect(Object.keys(again).sort()).toEqual(["current_status", "ignored", "ok"]);
+      expect(again).toMatchObject({ ok: true, ignored: "already_terminal", current_status: "applied" });
+
+      const foreign = await tool(ntok, "ack_config_update", { update_id: "u_not_mine", status: "applied" });
+      expect(Object.keys(foreign).sort()).toEqual(["ignored", "ok"]);
+      expect(foreign).toEqual({ ok: true, ignored: "unknown_or_foreign_update" });
     });
   });
 
