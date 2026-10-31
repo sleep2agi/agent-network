@@ -46,11 +46,21 @@ if [ "${1:-}" = "--selftest" ]; then
   [ "$rc" -eq 0 ] && echo "✓ selftest 两边都绿 ⇒ exit 0" || { echo "✗ selftest 都绿却 exit=$rc"; fails=$((fails+1)); }
   printf '#!/bin/sh\nexit 1\n' > "$tmp/gate.sh"
   out=$(cd "$tmp" && bash "$SELF" ./gate.sh 2>&1); rc=$?
-  [ "$rc" -eq 1 ] && echo "✓ selftest HEAD 绿 + 当前红 ⇒ exit 1（可归因）" || { echo "✗ selftest 可归因却 exit=$rc"; fails=$((fails+1)); }
+  # 2026-10-31 —— **不能只断言退出码**（外部复核：「非零即红对今天的崩溃已经绿了」）：
+  # 崩溃/用法错误也给非零，而那证明不了「它判对了」。同时断言**矩阵说的是哪一格**。
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "你的改动弄红的"; then
+    echo "✓ selftest HEAD 绿 + 当前红 ⇒ exit 1 且点名「你的改动弄红的」"
+  else
+    echo "✗ selftest 可归因却 exit=$rc / 或缺归因那一行"; fails=$((fails+1))
+  fi
   git -C "$tmp" commit -qam red
   printf '#!/bin/sh\nexit 1\n' > "$tmp/gate.sh"
   out=$(cd "$tmp" && bash "$SELF" ./gate.sh 2>&1); rc=$?
-  [ "$rc" -eq 0 ] && echo "✓ selftest 基线也红 ⇒ exit 0（不可归因，默认不判失败）" || { echo "✗ selftest 基线红却 exit=$rc"; fails=$((fails+1)); }
+  if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "基线本来就红"; then
+    echo "✓ selftest 基线也红 ⇒ exit 0 且点名「基线本来就红」"
+  else
+    echo "✗ selftest 基线红却 exit=$rc / 或缺那行说明"; fails=$((fails+1))
+  fi
   [ "$fails" -eq 0 ] && { echo "✓ selftest 3/3 通过"; exit 0; }
   exit 1
 fi

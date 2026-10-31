@@ -48,9 +48,19 @@ if [ "${SELFTEST:-0}" = "1" ]; then
   out=$(cd "$tmp" && bash "$SELF" --added 3 --deleted 1 2>&1); rc=$?
   [ "$rc" -eq 0 ] && echo "✓ selftest 声明 3/1 与实际 3/1 一致 ⇒ exit 0" || { echo "✗ selftest 一致却报错: $out"; fails=$((fails+1)); }
   out=$(cd "$tmp" && bash "$SELF" --added 3 --deleted 0 2>&1); rc=$?
-  [ "$rc" -eq 1 ] && echo "✓ selftest 声明删除 0 但实际删 1 ⇒ exit 1" || { echo "✗ selftest 不一致却通过: $out"; fails=$((fails+1)); }
+  # 2026-10-31 —— 只断言退出码会让「崩溃」也算红（外部复核：「非零即红对今天的崩溃已经绿了」）。
+  # 因此同时断言**理由串**：形状不符时必须说「与声明不一致」，而不是 traceback。
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "与声明不一致"; then
+    echo "✓ selftest 声明删除 0 但实际删 1 ⇒ exit 1 且理由是「与声明不一致」"
+  else
+    echo "✗ selftest 不一致却通过或缺理由串: $out"; fails=$((fails+1))
+  fi
   out=$(cd "$tmp" && bash "$SELF" 2>&1); rc=$?
-  [ "$rc" -eq 2 ] && echo "✓ selftest 不声明 ⇒ exit 2（没有读数）" || { echo "✗ selftest 不声明也给了结论"; fails=$((fails+1)); }
+  if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "没有声明"; then
+    echo "✓ selftest 不声明 ⇒ exit 2 且理由是「没有声明」（没有读数）"
+  else
+    echo "✗ selftest 不声明也给了结论 / 缺理由串"; fails=$((fails+1))
+  fi
   [ "$fails" -eq 0 ] && { echo "✓ selftest 3/3 通过"; exit 0; }
   exit 1
 fi
