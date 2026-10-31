@@ -6875,6 +6875,11 @@
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::只加字段:其余键与之前逐字相同": 1,
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::授权改成可编辑后立即反映": 1,
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::每个调用者的取值": 1,
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::get_probe_results 空历史的键集（真实调用给出）": 1,
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 派发成功体的键集（真实调用给出）": 1,
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 缺 daemon 时的拒绝体": 1,
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 缺 model 时的拒绝体（{ok,error,...}）": 1,
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::upsert_provider 成功体的键集（真实调用给出）": 1,
   "server/src/push.test.ts::getSSEStats — closed clients excluded::manually-closed client is not counted in stats": 1,
   "server/src/push.test.ts::getSSEStats — closed clients excluded::mixed alive + closed clients → only alive count": 1,
   "server/src/push.test.ts::pushEvent integration with backpressure::push to half-open client → client evicted from map": 1,
@@ -15040,6 +15045,11 @@
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::只加字段:其余键与之前逐字相同",
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::授权改成可编辑后立即反映",
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::每个调用者的取值",
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::get_probe_results 空历史的键集（真实调用给出）",
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 派发成功体的键集（真实调用给出）",
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 缺 daemon 时的拒绝体",
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 缺 model 时的拒绝体（{ok,error,...}）",
+  "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::upsert_provider 成功体的键集（真实调用给出）",
   "server/src/push.test.ts::getSSEStats — closed clients excluded::manually-closed client is not counted in stats",
   "server/src/push.test.ts::getSSEStats — closed clients excluded::mixed alive + closed clients → only alive count",
   "server/src/push.test.ts::pushEvent integration with backpressure::push to half-open client → client evicted from map",
@@ -16330,7 +16340,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "a0e3eccae0c23b36bdbad7075f1fffe6bb3f61db",
+  "commit": "07af67df34a872abf9c142a35bbf4c119b81dbb5",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

@@ -40,8 +40,16 @@ WINDOW = 30  # 邻近级口径：工具名与断言之间允许的最大行距
 
 
 def tracked(patterns: list[str]) -> list[Path]:
+    """Git 里**已跟踪 + 未跟踪**的匹配文件。
+
+    2026-10-31 —— 原来只取 `ls-files`（已跟踪）。于是**刚写好还没 commit 的测试文件**
+    对这份报告完全不可见：我新加了一个文件覆盖三个工具，报告仍然说它们 uncovered。
+    而「刚写的那个」恰好是最该被计数的那个。
+    ⇒ 用 `-co`（cached + others）并排除 gitignore；工作树状态会影响读数这件事写在 --json 的
+      does_not_cover 里，不让它悄悄成立。
+    """
     out = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", *patterns],
+        ["git", "-C", str(REPO), "ls-files", "-co", "--exclude-standard", *patterns],
         capture_output=True, text=True,
     ).stdout.split()
     return [REPO / p for p in out if p.endswith(".ts")]
