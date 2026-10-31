@@ -17029,9 +17029,17 @@ async function demoDebateCommand() {
   }
   if (!topic) { console.error("  ❌ 议题不能为空."); markFailed(); return; }
 
-  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  // 2026-10-31 —— **跨厂商凭据不许回退**（外部复核：「一个初始化里两个不同 process.env.X 即错借」）。
+  // 原来这里是 `opts.key || MINIMAX_KEY || ANTHROPIC_AUTH_TOKEN`：
+  // 后者是**另一家厂商**的凭据；把它发给 MiniMax 只会得到一个难查的 401，
+  // 而失败现场看起来像「MiniMax key 错了」。
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || "";
   if (!minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
+    if (process.env.ANTHROPIC_AUTH_TOKEN) {
+      // 提示而不借用：说清「你设的那个是另一家的」
+      console.error("     （检测到 ANTHROPIC_AUTH_TOKEN —— 那是另一家厂商的凭据，本命令不会用它）");
+    }
     markFailed(); return;
   }
 
@@ -17434,7 +17442,8 @@ async function demoSocialMediaCommand() {
     markUsageError(); return;
   }
 
-  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  // 同 17032 处：跨厂商凭据不回退（ANTHROPIC_AUTH_TOKEN 是另一家的，借来只会得到难查的 401）
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || "";
   if (!minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=...");
     markFailed(); return;
@@ -17945,7 +17954,8 @@ async function demoPrReviewCommand() {
     console.log(`  ⚠️  diff 大小 ${diffKb} KB > 30 KB，可能超 model context。建议用 'gh api -X GET repos/.../files' 先筛关键文件。继续...`);
   }
 
-  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  // 同 17032 处：跨厂商凭据不回退（ANTHROPIC_AUTH_TOKEN 是另一家的，借来只会得到难查的 401）
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || "";
   if (!mockMode && !minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
     markFailed(); return;

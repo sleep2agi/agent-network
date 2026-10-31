@@ -118,6 +118,11 @@ jobs:
       # 判据来自外部复核 (c)：「文本里提到」不等于「会执行」。
       - name: every wired gate is wired for real (executes, not text-matches)
         run: python3 scripts/check-gates-wired.py
+      # 2026-10-31 —— 跨 env 回退必须登记「同概念」：`A || B` 在类型上永远成立，错的不是类型是语义。
+      - name: cross-env fallbacks are registered as same-concept aliases
+        run: |
+          python3 scripts/check-env-fallbacks.py --selftest
+          python3 scripts/check-env-fallbacks.py
       - name: orphan checks that were never executed (now wired)
         run: |
           python3 scripts/check-hub-v2-protocol-inputs.py
