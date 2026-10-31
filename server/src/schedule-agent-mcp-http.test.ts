@@ -200,10 +200,21 @@ describe("batch interval updates (#816)", () => {
 
   test("two updates, deduplicated IDs, paused stays paused, unselected stays untouched", async () => {
     const a = (await create("b")).schedule, b = (await create("b")).schedule;
+    // 2026-10-31 —— #3275：schedule_batch_interval 的形状（批量接口的形状与单条不同，
+    // 这才是它值得单独钉的原因：**部分失败**是它独有的状态）。
+    //   外层 4 键 { ok, updated, failed, results }
+    //   每行 6 键 { schedule_id, ok, every_seconds, next_run_at, status, revision }
+    // ⇒ 「updated + failed == 提交的条数（去重后）」是一条守恒式：少了它没人知道有没有漏掉某一条。
     const untouched = (await create("b")).schedule;
     await mcp(node.b.token, "schedule_update", { schedule_id: b.schedule_id, status: "paused" });
     const before = Date.now();
     const result = await batch(node.b.token, [a.schedule_id, b.schedule_id, a.schedule_id]);
+    expect(Object.keys(result).sort()).toEqual(["failed", "ok", "results", "updated"]);
+    expect(Object.keys(result.results[0]).sort()).toEqual([
+      "every_seconds", "next_run_at", "ok", "revision", "schedule_id", "status",
+    ]);
+    expect(result.updated + result.failed).toBe(result.results.length);
+    expect(result.results).toHaveLength(2);   // 三个 id、去重后两条
     expect(result).toMatchObject({ ok: true, updated: 2, failed: 0 });
     expect(result.results).toHaveLength(2);
     expect(result.results[0]).toMatchObject({ schedule_id: a.schedule_id, every_seconds: 600, revision: a.revision + 1, status: "active" });
