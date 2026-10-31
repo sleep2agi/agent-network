@@ -327,7 +327,10 @@ describe("GET /api/providers", () => {
       expect(a.status).toBe(200);
       expect(a.body.state).toBe("never_switched");
       expect(a.body.selection).toBeNull();
-      expect(String(a.body.hint)).toContain("本地默认配置");
+      expect(String(a.body.hint)).toContain("本地的默认配置");
+      // 2026-10-31 —— **hint 必须自带动作**（外部复核：一句只描述状态的提示产不出下一步）。
+      // 这条断言钉住「它至少告诉读者第一步是什么」，而不是只说「现在是这样」。
+      expect(String(a.body.hint)).toMatch(/POST|GET|切一次/);
 
       // ② 正在切：pending 时不带 hint（hint 只属于「没有读数」那一档）
       const q = (requestId: string, status: string, payload: string | null, error: string | null) => db.run(

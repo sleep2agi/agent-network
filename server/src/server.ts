@@ -4051,7 +4051,10 @@ return Bun.serve({
         observed_at: row?.observed_at ? new Date(row.observed_at).toISOString() : null,
         ...(state === "failed" ? { error: row?.error ?? null } : {}),
         ...(state === "never_switched"
-          ? { hint: "这个节点还没有被切换过 provider；显示的是它的本地默认配置（不是 Hub 的读数）" }
+          // 2026-10-31 —— **hint 必须自带动作**（外部复核：互斥选项若需要不同动作才能区分，
+          // 「一次动作」就只对其中一部分成立；同理，一句只描述状态的 hint 产不出下一步）。
+          // 原来这句只说「显示的是本地默认配置」——读者知道现状，但不知道该做什么。
+          ? { hint: "这个节点还没有被切换过 provider，现在显示的是它本地的默认配置（不是 Hub 的读数）。要看 Hub 这份读数，先给节点切一次：POST 同一路由 {revision, selection}，再 GET 回读 state 是否变 applied" }
           : {}),
         ...(state === "unknown"
           ? {
