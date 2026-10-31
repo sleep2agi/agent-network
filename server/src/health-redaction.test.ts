@@ -202,6 +202,18 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(pinnedNames.length).toBeGreaterThanOrEqual(3);
     // 位置名必须唯一（否则两行描述同一处，比例就重复计了）
     expect(new Set(TASK_REJECTION_EXITS.map((r) => r.position)).size).toBe(TASK_REJECTION_EXITS.length);
+
+    // 2026-10-31 —— **「数对、集合错」**（外部复核 164b3e5e 那条：14 个块数得对，
+    // 而「13 个公共头」不成立，因为 14 个头集合的交集是空集）。
+    // 本表同款：有 2 个位置装了表（一个**计数**），但链路必须先过前面若干个位置 ——
+    // 所以「链路覆盖」只能是**前缀长度**，不能是「计数 / 总数」。
+    const instrumented = TASK_REJECTION_EXITS.filter((r) => r.counted).length;
+    let prefix = 0;
+    for (const r of TASK_REJECTION_EXITS) { if (r.counted) prefix += 1; else break; }
+    expect(instrumented).toBe(2);          // 装了几个点（计数）
+    expect(prefix).toBe(0);                // 链路覆盖（前缀）—— 第 1 个位置就是洞
+    // 反例守卫：一旦数错集合（把第 1 行改成 counted），前缀与计数会一起变 —— 那时必须改比例与注释
+    expect(instrumented).not.toBe(prefix);
   });
 
   // 2026-10-31 —— parser 级拒绝在本仓**是**被计数的，因为我们在 handler 内 await req.json()。
