@@ -7046,6 +7046,7 @@
   "server/src/requirements-abandoned-http.test.ts::abandoned column::old clients (no declaration) see abandoned as done; their writes cannot un-abandon it by echo": 1,
   "server/src/requirements-abandoned-http.test.ts::abandoned column::schema accepts abandoned; the legacy CHECK migration is idempotent (SQLite rebuild / PG constraint swap)": 1,
   "server/src/requirements-abandoned-http.test.ts::abandoned column::set and restore: events recorded each way, no completedAt, restorable to pool and doing": 1,
+  "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::写侧对账：设 agent_owner 时旧 assignee 被回填为引用（不再累积分叉）": 1,
   "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::陈旧自由文本被引用覆盖（agent_owner 优先 > owner > 文本）": 1,
   "server/src/requirements-comment-http.test.ts::requirements_comment::a person comments over REST; both show in requirements_events with the full text, newest first": 1,
   "server/src/requirements-comment-http.test.ts::requirements_comment::an Agent comments over MCP (#N): one comment event, attributed to the node; the task itself is untouched": 1,
@@ -15191,6 +15192,7 @@
   "server/src/requirements-abandoned-http.test.ts::abandoned column::old clients (no declaration) see abandoned as done; their writes cannot un-abandon it by echo",
   "server/src/requirements-abandoned-http.test.ts::abandoned column::schema accepts abandoned; the legacy CHECK migration is idempotent (SQLite rebuild / PG constraint swap)",
   "server/src/requirements-abandoned-http.test.ts::abandoned column::set and restore: events recorded each way, no completedAt, restorable to pool and doing",
+  "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::写侧对账：设 agent_owner 时旧 assignee 被回填为引用（不再累积分叉）",
   "server/src/requirements-assignee-drift.test.ts::assignee never contradicts a validated owner/agent_owner reference::陈旧自由文本被引用覆盖（agent_owner 优先 > owner > 文本）",
   "server/src/requirements-comment-http.test.ts::requirements_comment::a person comments over REST; both show in requirements_events with the full text, newest first",
   "server/src/requirements-comment-http.test.ts::requirements_comment::an Agent comments over MCP (#N): one comment event, attributed to the node; the task itself is untouched",
@@ -16290,7 +16292,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "d0ddf587988325a7ad3422462c8c10277fabf1c1",
+  "commit": "5d77fba4c4ce2ef43e28970af956f7b162ac225a",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
 }

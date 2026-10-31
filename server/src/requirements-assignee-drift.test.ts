@@ -40,19 +40,20 @@ async function send(method: string, path: string, payload?: unknown): Promise<{ 
 }
 
 beforeAll(async () => {
-  const srv = await import("./server.js");
-  hub = srv.default ?? srv;
-  const { register } = await import("./auth.js");
   db = (await import("./db.js")).db;
+  const { register } = await import("./auth.js");
   const stamp = Date.now();
   const reg = register(`asg_${stamp}`, PW);
   expect(reg.ok).toBe(true);
   TOKEN = reg.token!;
   NET = reg.network_id!;
   USER_ID = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", `asg_${stamp}`)!.user_id;
-  BASE = `http://127.0.0.1:${(hub.server ?? hub).port ?? 0}`;
-  if (!BASE.endsWith("0")) return;
-  BASE = "";
+  // 一个可解析的 node（agent_owner 必须是本网络 node）
+  db.run(`INSERT OR REPLACE INTO nodes (node_id, node_name, network_id, alias, created_at, updated_at)
+          VALUES ('n_asg_probe', 'asg-probe', ?1, 'asg-probe', ?2, ?2)`, [NET, Date.now()]);
+  const mod: any = await import("./server.js");
+  hub = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
+  BASE = `http://127.0.0.1:${hub.port}`;
 }, 60_000);
 
 afterAll(() => { try { hub?.stop?.(); } catch {} rmSync(DIR, { recursive: true, force: true }); });
@@ -76,5 +77,36 @@ describe("assignee never contradicts a validated owner/agent_owner reference", (
     expect(displayAssignee({ assignee: " 王工 ", owner_json: null, agent_owner_json: null })).toBe("王工");
     // 全是空 ⇒ 空串，不是 "undefined"/"null"
     expect(displayAssignee({ assignee: null, owner_json: null, agent_owner_json: null })).toBe("");
+  });
+
+  test("写侧对账：设 agent_owner 时旧 assignee 被回填为引用（不再累积分叉）", async () => {
+    const created = await send("POST", `/api/requirements?network_id=${NET}`, {
+      name: "assignee 写侧对账",
+      column: "pool",
+      assignee: "ANet基建",           // 旧值（看起来有人、其实解析不到）
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.requirement.id as string;
+    expect(created.body.requirement.assignee).toBe("ANet基建");
+
+    // 只改 agent_owner，不显式给 assignee ⇒ 回填为 node alias
+    const patched = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, {
+      agent_owner: { kind: "node", alias: "asg-probe" },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.requirement.assignee).toBe("asg-probe");
+
+    // 显式给 assignee 且**没有引用** ⇒ 自由文本就是唯一事实（系统外的人，例如「王工」）
+    const other = await send("POST", `/api/requirements?network_id=${NET}`, { name: "无引用的卡", column: "pool" });
+    expect(other.status).toBe(201);
+    const manual = await send("PATCH", `/api/requirements/${other.body.requirement.id}?network_id=${NET}`, { assignee: "王工" });
+    expect(manual.status).toBe(200);
+    expect(manual.body.requirement.assignee).toBe("王工");
+
+    // 两者**同时存在**时读侧以引用为准（这是有意的取舍：引用写入时被校验过，自由文本没有）。
+    // 记录在这里，免得下一个人把它当成 bug 再改回去。
+    const both = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, { assignee: "王工" });
+    expect(both.status).toBe(200);
+    expect(both.body.requirement.assignee).toBe("asg-probe");
   });
 });

@@ -1256,6 +1256,20 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   }
   let people;
   try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id), ctx.strictOwner === true); } catch (e) { return errorFrom(e); }
+
+  // 2026-10-31 —— **写侧对账**（#3270 的另一半）：
+  // 读侧已经以 owner/agent_owner 为准（displayAssignee），但库里那一列仍会停在旧值。
+  // 一个派生字段只要有第二个写入路径，就迟早会与事实分叉；同一次写入里把它对齐，分叉就不会累积。
+  // 规则：调用方**没有显式给 assignee** 时，用本次写入后的引用回填；显式给了就以调用方为准
+  // （那可能是系统外的人，例如「王工」—— 用引用覆盖它等于丢信息）。
+  if (!has("assignee") && (has("owner") || has("agent_owner"))) {
+    const fromRef = displayAssignee({
+      assignee: "",
+      owner_json: people.ownerJson,
+      agent_owner_json: people.agentOwnerJson,
+    });
+    if (fromRef) assignee = fromRef.slice(0, 80);
+  }
   // RFC-040:只凭负责人身份改这张卡时,负责人 / 负责 Agent 只能交给本部门的人(或自己)/ 本部门成员的 Agent,
   // 不能把卡推出本部门(推出去等于替别的部门派活)。清空(null)不限制。
   const headOnly = (has("owner") || has("agent_owner")) ? headOnlyEditScope(caller, row) : null;
@@ -1470,14 +1484,29 @@ type LightRow = { requirement_id: string; seq?: number | null; network_id: strin
  * 没有引用时保留自由文本 —— 它可能是系统外的人（例如「王工」），删掉就等于丢信息。
  */
 export function displayAssignee(row: { assignee?: string | null; owner_json?: string | null; agent_owner_json?: string | null }): string {
-  const pick = (json: string | null | undefined): string => {
-    if (!json) return "";
-    try {
-      const ref = JSON.parse(json) as { alias?: string; username?: string; id?: string } | null;
-      return String(ref?.alias || ref?.username || ref?.id || "").trim();
-    } catch { return ""; }
+  const parse = (json: string | null | undefined): { kind?: string; id?: string; alias?: string; username?: string } | null => {
+    if (!json) return null;
+    try { return JSON.parse(json); } catch { return null; }
   };
-  return pick(row.agent_owner_json) || pick(row.owner_json) || String(row.assignee || "").trim();
+  // 引用存的是 {kind, id}（名字在写入时已被解析成 id）⇒ 读侧要把 id 换回**给人看的名字**，
+  // 否则 assignee 会变成 "n_xxxx"，那比停在旧值更糟（至少旧值是句话）。
+  const name = (ref: { kind?: string; id?: string; alias?: string; username?: string } | null): string => {
+    if (!ref) return "";
+    const inline = String(ref.alias || ref.username || "").trim();
+    if (inline) return inline;
+    if (!ref.id) return "";
+    try {
+      if (ref.kind === "node") {
+        const r = db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE node_id = ?1", ref.id);
+        if (r?.alias) return String(r.alias);
+      } else if (ref.kind === "user") {
+        const r = db.get<{ username: string | null }>("SELECT username FROM users WHERE user_id = ?1", ref.id);
+        if (r?.username) return String(r.username);
+      }
+    } catch { /* 读不到就退回 id：比空更好，且不会崩 */ }
+    return String(ref.id);
+  };
+  return name(parse(row.agent_owner_json)) || name(parse(row.owner_json)) || String(row.assignee || "").trim();
 }
 
 const parseRef = (json: string | null) => { try { return json ? JSON.parse(json) : null; } catch { return null; } };
