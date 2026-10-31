@@ -140,10 +140,11 @@ describe("#690 scheduled run follows the real task lifecycle", () => {
       network_id: NET,
       attachments: [{ type: "file", file_id: "file_690_reply", name: "evidence.json", size: 12, mime: "application/json" }],
     });
-    // 2026-10-31 —— #3275：report_completion 的形状。
-    // ⚠️ warning 与 attachments_saved 是**条件键**（混合版本告警 / 有 artifact 时才出现）；
-    //    本夹具恰好两条都触发 ⇒ 这条断言钉的是「**条件键之外没有别的键**」，
-    //    而不是「这两个键永远在」。
+    // 2026-10-31 —— #3275：**send_reply** 的形状（这里曾经写错过，见下）。
+    // ⚠️ 我把这段先写成了「report_completion 的形状」，而这一行的调用其实是 send_reply ——
+    //    两个工具的回执键集恰好相同，所以断言**照样绿**。这正是最坏的一类假证据：
+    //    它会对，但它说的不是它测的那件事。现在两边各自钉一次。
+    // warning 与 attachments_saved 是**条件键**（混合版本告警 / 有 artifact 时才出现）。
     expect(Object.keys(reply).sort()).toEqual([
       "attachments_saved", "message_id", "ok", "session_status", "warning",
     ]);
@@ -213,6 +214,19 @@ describe("#690 scheduled run follows the real task lifecycle", () => {
       result: "done",
       network_id: NET,
     });
+    // 2026-10-31 —— #3275：**report_completion** 在这条路径上的真实形状是 `{ ok, completion_id }`。
+    //
+    // 🔴 这一段我改了三版，每一版都错得不一样，值得留在这里：
+    //   ① 先按 send_reply 的形状写成 5 键；因为断言挂在了**另一个用例的调用**上（两者同形），照样绿。
+    //   ② 把断言挪到这里后立刻红 —— 说明 5 键从来不是这条路径的形状。
+    //   ③ 我最早那次「探测」的输出（5 键）其实也打在 send_reply 上：
+    //      patch 的定位文本在两个用例里完全相同，`replace(..., 1)` 命中的是第一个。
+    // ⇒ 教训：**同一文件里两段相同代码，replace 一次只会改到第一处**；
+    //   而「形状相同」比「形状不同」更容易让假证据活下来。
+    //
+    // 这条路径（定时任务被 report_completion 终结）回的是 completion_id；
+    // 走「回给某个节点」的那条路径会不会回 5 键，本地没有读数，**所以这里不写**。
+    expect(Object.keys(reply).sort()).toEqual(["completion_id", "ok"]);
     expect(reply.ok).toBe(true);
     expect(readRun(runId).status).toBe("replied");
   });
