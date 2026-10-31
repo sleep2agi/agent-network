@@ -1212,6 +1212,17 @@ export const SELECTION_STATE_BY_STATUS: Record<string, "pending" | "applied" | "
   expired: "failed",      // 过期＝没生效；对使用者与失败同一档
 };
 
+/**
+ * 2026-10-31 —— `status` 与 `status_reasons` **是同一个位的两种说法**（外部复核：
+ * 「三字段一致时零证据」）。既然它们由构造保证一致，那么「status=='ok' ⟺ reasons 为空」
+ * 这条断言**恒真**，它保护不了任何东西。
+ * ⇒ 把映射抽成一个纯函数，测试改为断言**映射本身**（给一个理由就必须 degraded），
+ *   这样「有人把映射改成忽略 reasons」会红，而「两者一致」这种同义反复不会写成测试。
+ */
+export function statusFromReasons(reasons: readonly string[]): "ok" | "degraded" {
+  return reasons.length === 0 ? "ok" : "degraded";
+}
+
 export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   // ── gauge：聚合 / 粗标签 ─────────────────────────────────────────────
   ok: {
@@ -3680,7 +3691,7 @@ return Bun.serve({
       const body: Record<string, unknown> = {
         ok: true,
         // 200 是**承诺**（watchdog 契约），不等于「健康」。健康与否放在 body 里：
-        status: statusReasons.length === 0 ? "ok" : "degraded",
+        status: statusFromReasons(statusReasons),
         status_reasons: statusReasons,
         version: SERVER_VERSION,
         version_source: SERVER_VERSION_SOURCE,

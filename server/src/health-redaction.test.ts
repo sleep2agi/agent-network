@@ -1338,6 +1338,21 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(/git|commit|build[-_]?(sha|id)?/.test("x-commhub")).toBe(false);
   });
 
+  // 2026-10-31 —— **一致时零证据**（外部复核：「status / db / mineruProxy 三个字段是同一个位，
+  // 一致时零证据」）。本仓的 status 与 status_reasons 由构造保证一致 ⇒
+  // 「status=='ok' ⟺ reasons 为空」是恒真断言，保护不了任何东西。
+  // ⇒ 改成断言**映射本身**：给一个理由就必须 degraded；且映射是纯函数、可被单独喂输入。
+  test("status mapping is a pure function of the reasons list (one reason is enough to degrade)", async () => {
+    const { statusFromReasons } = await import("./server.js");
+    expect(statusFromReasons([])).toBe("ok");
+    expect(statusFromReasons(["db_unreadable"])).toBe("degraded");
+    expect(statusFromReasons(["license_unreadable"])).toBe("degraded");
+    expect(statusFromReasons(["anything_at_all"])).toBe("degraded");   // 不认识的理由也不许吞
+    // 且线上载荷与函数一致（不是两套逻辑）
+    const live = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(live.status).toBe(statusFromReasons(live.status_reasons ?? []));
+  });
+
   test("no dead entries: every allow-listed key is actually served to anonymous callers", async () => {
     const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
     const plain = await (await fetch(`${BASE}/health`)).json() as any;
