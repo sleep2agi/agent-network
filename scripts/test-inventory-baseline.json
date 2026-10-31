@@ -3579,7 +3579,6 @@
   "agent-node/src/runtime/daemon-create-capability.test.ts::#1545 evaluateCreateCapability —— 边界::role 缺失 → 同样 undefined(不猜)": 1,
   "agent-node/src/runtime/daemon-create-capability.test.ts::#1545 evaluateCreateCapability —— 边界::非 host_supervisor → undefined,且探针一次都不调用": 1,
   "agent-node/src/runtime/daemon-extra-path.test.ts::cli.ts 在启动和热更新时都把 daemonExtraPath 交给同一份 PATH": 1,
-  "agent-node/src/runtime/daemon-extra-path.test.ts::codex 只在 /opt/x/bin: 不配置则 missing_cli 且拒绝建节点; 配置后 ready 且能建": 1,
   "agent-node/src/runtime/daemon-extra-path.test.ts::parseDaemonExtraPath: 只要绝对路径,去重,不接受字符串": 1,
   "agent-node/src/runtime/daemon-extra-path.test.ts::test-only child PATH prefix is searched first and is absent unless a test sets it": 1,
   "agent-node/src/runtime/daemon-program-node.test.ts::daemon-program-node (#1417)::every other role falls through to the runtime path": 1,
@@ -11740,7 +11739,6 @@
   "agent-node/src/runtime/daemon-create-capability.test.ts::#1545 evaluateCreateCapability —— 边界::role 缺失 → 同样 undefined(不猜)",
   "agent-node/src/runtime/daemon-create-capability.test.ts::#1545 evaluateCreateCapability —— 边界::非 host_supervisor → undefined,且探针一次都不调用",
   "agent-node/src/runtime/daemon-extra-path.test.ts::cli.ts 在启动和热更新时都把 daemonExtraPath 交给同一份 PATH",
-  "agent-node/src/runtime/daemon-extra-path.test.ts::codex 只在 /opt/x/bin: 不配置则 missing_cli 且拒绝建节点; 配置后 ready 且能建",
   "agent-node/src/runtime/daemon-extra-path.test.ts::parseDaemonExtraPath: 只要绝对路径,去重,不接受字符串",
   "agent-node/src/runtime/daemon-extra-path.test.ts::test-only child PATH prefix is searched first and is absent unless a test sets it",
   "agent-node/src/runtime/daemon-program-node.test.ts::daemon-program-node (#1417)::every other role falls through to the runtime path",
@@ -16322,7 +16320,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "c3005ed9f12750ca4f5c2567606306de620905e6",
+  "commit": "de8f111b9a045cf29ea57bf283a25bc6baf6cc87",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

@@ -34,6 +34,31 @@ import {
 import { probeRuntimeReadiness, realReadinessDeps } from "./runtime-readiness.js";
 
 const CODEX = "/opt/x/bin/codex";
+
+/**
+ * 2026-10-31 —— 这条用例需要一个**可写**的 /opt/x/bin。
+ *
+ * CI 的镜像里 Dockerfile 有 `install -d -o node -g node /opt/x/bin`，所以它一直在跑；
+ * 而本机（非 root、/opt/x 不存在）会 `EACCES: mkdir '/opt/x'` ⇒ 红，
+ * 红得和真缺陷一模一样，而它测的东西一点没坏。
+ *
+ * 判据：**能不能写**，不是「是不是 root」—— 判 root 会在 CI 的 non-root 镜像里误跳。
+ * 跳过的理由必须打出来（静默跳过 = 「没跑」冒充「通过」）。
+ */
+const OPT_X_WRITABLE = (() => {
+  try {
+    mkdirSync("/opt/x/bin", { recursive: true });
+    writeFileSync("/opt/x/bin/.probe", "");
+    unlinkSync("/opt/x/bin/.probe");
+    return true;
+  } catch {
+    return false;
+  }
+})();
+if (!OPT_X_WRITABLE) {
+  console.warn("[daemon-extra-path] 跳过 /opt/x/bin 用例：本机不可写（CI 镜像里有）—— 这一条**本次没有运行**");
+}
+const optXTest = OPT_X_WRITABLE ? test : test.skip;
 const MARKER = "board648-fake-codex";
 const TOKEN = "rt-demo-placeholder";
 
@@ -69,7 +94,7 @@ test("test-only child PATH prefix is searched first and is absent unless a test 
   expect(minimalEnv({}, "linux", { HOME: "/home/user" }).PATH).toBe(computeChildPath("linux"));
 });
 
-test("codex 只在 /opt/x/bin: 不配置则 missing_cli 且拒绝建节点; 配置后 ready 且能建", async () => {
+optXTest("codex 只在 /opt/x/bin: 不配置则 missing_cli 且拒绝建节点; 配置后 ready 且能建", async () => {
   if (existsSync(CODEX) && !readFileSync(CODEX, "utf8").includes(MARKER)) {
     throw new Error("refusing to overwrite existing /opt/x/bin/codex");
   }
