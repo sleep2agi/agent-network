@@ -122,7 +122,7 @@ import { createProductionSideThreadTransport } from "./side-thread-production.js
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
 import { taskRejectionCounters } from "./rejection-counters.js";
-import { neverConsumedExpiryCounters, noteNeverConsumedExpiry } from "./expiry-counters.js";
+import { neverConsumedExpiryCounters, noteNeverConsumedExpiry, neverConsumeGate } from "./expiry-counters.js";
 import { legacyLicenseField, licenseStateOf } from "./license-state.js";
 import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
@@ -5826,6 +5826,17 @@ return Bun.serve({
       {
         const hg = assertNodeHealthy(targetAlias, taskNetId ?? null, { force: body.force === true, forceAllowed: !restAuth?.networkId });
         if (!hg.ok) return reject(withCors(req, Response.json(hg, { status: 409 })));
+      }
+      // #3271 —— 与 MCP send_task 同一道闸（**两个派单面必须同形**，否则修了一个、另一个照旧）。
+      // 拒绝体与 MCP 路径逐字相同，只是走 409（REST 既有语义）。
+      {
+        const gate = neverConsumeGate({
+          alias: targetAlias,
+          counters: neverConsumedExpiryCounters(),
+          force: body.force === true,
+          forceAllowed: !restAuth?.networkId,
+        });
+        if (!gate.ok) return reject(withCors(req, Response.json(gate, { status: 409 })));
       }
       // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).
       const queueInfo = dispatchQueueInfo(targetAlias, taskNetId, target.session?.status, ttlSeconds);

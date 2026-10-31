@@ -6575,6 +6575,8 @@
   "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::owner escape hatch: force=true with a user token dispatches": 1,
   "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::stale report (older than the TTL) = unknown → dispatched": 1,
   "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::unknown health (old agent-node) → dispatched exactly as before": 1,
+  "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::🔴 同一目标带 force（用户令牌）⇒ 放行；节点令牌带 force 仍被拒": 1,
+  "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::🔴 连续 3 次过期且从未消费 ⇒ 409 target_never_consumes，拒绝体带 window_since": 1,
   "server/src/node-health-dispatch-http.test.ts::#460 scheduled tasks::a due run on a degraded node fails with node_degraded and creates no task": 1,
   "server/src/node-health-dispatch-http.test.ts::#460 which layers count as degraded::each failing layer is named; ok / missing layers are not": 1,
   "server/src/node-health-dispatch-http.test.ts::degradedLayers 是工厂：任意 health 组合下元素键集不变::40 种组合，元素键集恒为 {layer,reason,origin,label,hint}": 1,
@@ -14767,6 +14769,8 @@
   "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::owner escape hatch: force=true with a user token dispatches",
   "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::stale report (older than the TTL) = unknown → dispatched",
   "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::unknown health (old agent-node) → dispatched exactly as before",
+  "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::🔴 同一目标带 force（用户令牌）⇒ 放行；节点令牌带 force 仍被拒",
+  "server/src/node-health-dispatch-http.test.ts::#460 REST /api/task::🔴 连续 3 次过期且从未消费 ⇒ 409 target_never_consumes，拒绝体带 window_since",
   "server/src/node-health-dispatch-http.test.ts::#460 scheduled tasks::a due run on a degraded node fails with node_degraded and creates no task",
   "server/src/node-health-dispatch-http.test.ts::#460 which layers count as degraded::each failing layer is named; ok / missing layers are not",
   "server/src/node-health-dispatch-http.test.ts::degradedLayers 是工厂：任意 health 组合下元素键集不变::40 种组合，元素键集恒为 {layer,reason,origin,label,hint}",
@@ -16384,7 +16388,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "446428c52d24d8090200fcc727e6767c70761bb4",
+  "commit": "d2467f4b821dcc83e47970737b2c2fe65086d270",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

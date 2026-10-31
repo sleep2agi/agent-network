@@ -180,6 +180,43 @@ describe("#460 REST /api/task", () => {
     expect(r.body.layers.map((l: any) => l.layer)).toEqual(["tui", "model_auth"]);
   });
 
+  // #3271 —— 第二道闸：**从未取走过任务**的目标。与降级闸同形（409 + force 只有人能用）。
+  // 这条覆盖的是 REST /api/task 这条派单面；MCP send_task 走同一个判据函数。
+  test("🔴 连续 3 次过期且从未消费 ⇒ 409 target_never_consumes，拒绝体带 window_since", async () => {
+    const { noteNeverConsumedExpiry, resetNeverConsumedExpiryCountersForTest } = await import("./expiry-counters.js");
+    setHealth(HEALTHY);
+    resetNeverConsumedExpiryCountersForTest();
+    for (let i = 0; i < 3; i += 1) noteNeverConsumedExpiry(TARGET);
+    const before = taskCount();
+    const r = await postTask(ownerToken, {});
+    expect(r.status).toBe(409);
+    expect(r.body.ok).toBe(false);
+    expect(r.body.error).toBe("target_never_consumes");
+    expect(r.body.alias).toBe(TARGET);
+    expect(r.body.expiries).toBe(3);
+    expect(typeof r.body.window_since).toBe("string");
+    expect(r.body.message).toContain("force:true");
+    expect(taskCount()).toBe(before);          // 一行都没写
+    resetNeverConsumedExpiryCountersForTest();
+  });
+
+  test("🔴 同一目标带 force（用户令牌）⇒ 放行；节点令牌带 force 仍被拒", async () => {
+    const { noteNeverConsumedExpiry, resetNeverConsumedExpiryCountersForTest } = await import("./expiry-counters.js");
+    // 健康报告也要是好的：否则先被降级闸拦下，这条测的就不是新闸了（我第一次就栽在这）。
+    setHealth(HEALTHY);
+    resetNeverConsumedExpiryCountersForTest();
+    try {
+      for (let i = 0; i < 3; i += 1) noteNeverConsumedExpiry(TARGET);
+      expect((await postTask(ownerToken, { force: true })).status).toBe(200);
+      // 节点令牌那一半在**判据层**钉（expiry-counters.test.ts：forceAllowed=false 时 force 不算）。
+      // 这里不重复断言：节点令牌会先撞上「降级闸」（健康报告按网络取，节点令牌没有网络 ⇒ 取值不同），
+      // 于是这条会变成在测两个闸的**先后顺序**，而不是在测这一道闸 —— 今天已经因为类似的原因误读两次了。
+    } finally {
+      // 计数器是**进程级**状态：不清干净会污染后面的用例（我第一次就漏了 finally）。
+      resetNeverConsumedExpiryCountersForTest();
+    }
+  });
+
   test("expired login alone is refused", async () => {
     setHealth({ bridge: "ok", model_auth: "expired" });
     expect((await postTask(ownerToken)).body.error).toBe("node_degraded");
