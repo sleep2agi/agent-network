@@ -213,6 +213,17 @@ describe("restricted member with NO grants sees no agents (one test per path)", 
   test("POST /api/broadcast → 403", async () => {
     expect((await send(aliceToken, "POST", `/api/broadcast?network_id=${NET}`, { message: "hi" })).status).toBe(403);
   });
+
+  // 2026-10-31 —— #3214：`/api/broadcast` 此前只测过 403（拒绝路径），**成功体的形状从未被钉**。
+  // 它是会被客户端按字段名读的（recipients / message_ids 决定「发给了几个、分别是哪几条」）。
+  test("POST /api/broadcast 成功体恰好 {message_ids, ok, recipients}，且两个数同源", async () => {
+    const r = await send(adminToken, "POST", `/api/broadcast?network_id=${NET}`, { message: "keyset-probe" });
+    expect(r.status).toBe(200);
+    expect(Object.keys(r.body).sort()).toEqual(["message_ids", "ok", "recipients"]);
+    expect(Array.isArray(r.body.message_ids)).toBe(true);
+    // 守恒：recipients 必须等于 message_ids 的长度（否则「发给了几个」与「列出几条」是两个读数）
+    expect(r.body.recipients).toBe(r.body.message_ids.length);
+  });
   test("node write endpoints (delete / config / attrs / avatar) → not found", async () => {
     expect((await send(aliceToken, "DELETE", `/api/nodes/${X.node}?network_id=${NET}`)).status).toBeGreaterThanOrEqual(403);
     expect((await get(aliceToken, `/api/nodes/${X.node}/config?network_id=${NET}`)).status).toBeGreaterThanOrEqual(403);

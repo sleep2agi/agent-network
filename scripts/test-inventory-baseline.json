@@ -5275,6 +5275,7 @@
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::MCP non-allowlisted agent tools → agent_access_restricted (with and without network_id)": 1,
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::MCP send_task / send_message → agent_not_granted": 1,
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::POST /api/broadcast → 403": 1,
+  "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::POST /api/broadcast 成功体恰好 {message_ids, ok, recipients}，且两个数同源": 1,
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::POST /api/task to an agent → 403 agent_not_granted; nonexistent alias gets the identical response": 1,
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::node write endpoints (delete / config / attrs / avatar) → not found": 1,
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::requirements people list: humans only, no nodes": 1,
@@ -13427,6 +13428,7 @@
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::MCP non-allowlisted agent tools → agent_access_restricted (with and without network_id)",
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::MCP send_task / send_message → agent_not_granted",
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::POST /api/broadcast → 403",
+  "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::POST /api/broadcast 成功体恰好 {message_ids, ok, recipients}，且两个数同源",
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::POST /api/task to an agent → 403 agent_not_granted; nonexistent alias gets the identical response",
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::node write endpoints (delete / config / attrs / avatar) → not found",
   "server/src/agent-acl-http.test.ts::restricted member with NO grants sees no agents (one test per path)::requirements people list: humans only, no nodes",
@@ -16304,7 +16306,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "f6c1a974695bbba4b69b5225406c1b4a34061ef6",
+  "commit": "ec926073adb0ae5704e2a592d74a469c00df6b3c",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
