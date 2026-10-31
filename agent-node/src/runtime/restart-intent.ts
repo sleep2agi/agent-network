@@ -195,20 +195,24 @@ export function consumePlannedRestart(
   const ttlMs = opts.ttlMs ?? RESTART_INTENT_TTL_MS;
 
   const d = decideStart(dir);
-  if (!d.planned) {
-    if ("needs_review" in d) {
-      const bad = join(dir, `${RESTART_INTENT_FILE}.bad-${now()}`);
-      try {
-        renameSync(join(dir, RESTART_INTENT_FILE), bad);
-      } catch {
-        /* 改名失败也不阻塞启动 */
-      }
-      return {
-        verdict: "unreadable",
-        planned: false,
-        note: `restart_intent_unreadable:${d.error} (kept as ${bad})`,
-      };
+  // 🔴 先按 `needs_review` 窄化，再谈 `planned`。
+  //    `StartDecision` 的判别位是 `start: true` + 可选成员，所以 `d.planned` 并不存在
+  //    于所有分支上 —— 直接读它（原来的写法）会被 tsc 判成 TS2339，
+  //    而在运行期它只是「恰好 undefined」⇒ 靠运气对。窄化顺序 = 类型与运行期同一份判据。
+  if ("needs_review" in d) {
+    const bad = join(dir, `${RESTART_INTENT_FILE}.bad-${now()}`);
+    try {
+      renameSync(join(dir, RESTART_INTENT_FILE), bad);
+    } catch {
+      /* 改名失败也不阻塞启动 */
     }
+    return {
+      verdict: "unreadable",
+      planned: false,
+      note: `restart_intent_unreadable:${d.error} (kept as ${bad})`,
+    };
+  }
+  if (!d.planned) {
     return {
       verdict: "absent",
       planned: false,

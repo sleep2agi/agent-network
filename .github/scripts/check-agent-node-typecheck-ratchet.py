@@ -12,7 +12,18 @@
 
 ## 判据
 
-    src/**/*.ts 的 tsc 错误条数 <= BASELINE
+    src/**/*.ts 的 tsc 错误**集合** == agent-node/typecheck-baseline.txt
+
+## 2026-10-31 —— 为什么从「计数」换成「集合」
+
+这道门原来是 `错误条数 <= 81`。它今天连着红了 100 次（8b1d71c5 之后 3 条新错误，
+84 > 81）—— 而 84 与 81 的差别在日志里是一行数字，**看不出是哪三条**，
+于是没人修，红了 100 次就等于不存在。
+
+更糟的是这个形状本身：**修好 3 条 + 新增 3 条 ⇒ 81 ⇒ 绿**。
+与 test-inventory 那次「删两条加两条 ⇒ 31 => 31 ⇒ 看起来没变」是同一条：
+**计数相同 ≠ 覆盖相同。** 所以基线必须存**身份**（file + TS 码 + 消息），
+而不是一个整数。
 
 `strict: true`,与两个兄弟包(`agent-network/tsconfig.json`、`server/tsconfig.json`)一致。
 
@@ -45,12 +56,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-BASELINE = 81   # 2026-08-30, #1545: 82 → 81。少掉的那一条是 config-apply.ts 的
-                # createCapability.reason 只声明了 "anet_bin_pin_unresolved",而调用方
-                # 传的是五类真实 code —— 把那个联合单一来源化(CreateNodesBlockedReason)
-                # 之后它自然消失了。
-                # 2026-08-30, origin/main, strict:true, src/**/*.ts (排除 *.test.ts);
-                # 环境须与 CI 一致:agent-node 下 npm install --no-save typescript@5.9.3 @types/node@20
 TS_VERSION = "5.9.3"
 TYPES_NODE_VERSION = "20"
 ERROR_RE = re.compile(r"error TS\d+")
@@ -66,11 +71,84 @@ FILES_FLOOR = 25
 
 ROOT = Path(__file__).resolve().parents[2]
 TSCONFIG = ROOT / "agent-node" / "tsconfig.json"
+BASELINE_FILE = ROOT / "agent-node" / "typecheck-baseline.txt"
 
 
 def count_errors(output: str) -> int:
     """一行可能含多个 `error TSxxxx`? 实测 tsc 一行一条,但按出现次数数更稳。"""
     return len(ERROR_RE.findall(output))
+
+
+ERR_LINE_RE = re.compile(r"^(\S.*?)\((\d+),(\d+)\): error (TS\d+): (.*)$")
+
+
+def fingerprint(line: str, root: Path) -> str | None:
+    """从一行 tsc 输出取**身份**：`相对路径|TS码|消息`（丢掉行列号）。
+
+    丢行列号是为了让「文件里别处加了几行」不触发重写基线；
+    保留消息是为了分清同一文件同一码的多个错误（child-env.ts 有 4 条 TS2365）。
+    """
+    m = ERR_LINE_RE.match(line.strip())
+    if not m:
+        return None
+    path, _ln, _col, code, msg = m.groups()
+    try:
+        rel = str(Path(path).resolve().relative_to(root))
+    except ValueError:
+        rel = path
+    return f"{rel}|{code}|{re.sub(r'\\s+', ' ', msg).strip()}"
+
+
+def fingerprints(output: str, root: Path) -> list[str]:
+    out = []
+    for line in output.splitlines():
+        fp = fingerprint(line, root)
+        if fp:
+            out.append(fp)
+    return out
+
+
+def load_baseline(path: Path) -> dict[str, int] | None:
+    """基线是 `身份<TAB>条数`。
+
+    🔴 为什么还要条数：81 行错误只collapse成 40 个身份（同一文件同一码同一消息会有多份，
+       例如 `Cannot find name 'Bun'.` 在同一个文件里出现 3 次）。只存身份的话，
+       「同一条错误又复制了一份」是看不见的 —— 那正是把尺子换粗一档。
+    """
+    if not path.exists():
+        return None
+    out: dict[str, int] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        ln = raw.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        if "\t" not in ln:
+            raise ValueError(f"基线行缺少条数（应为 `身份<TAB>n`）：{ln!r}")
+        ident, n = ln.rsplit("\t", 1)
+        out[ident] = int(n)
+    return out
+
+
+def count_by_identity(items: list[str]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for it in items:
+        out[it] = out.get(it, 0) + 1
+    return out
+
+
+def diff_sets(now: dict[str, int], base: dict[str, int]) -> dict[str, list[str]]:
+    """四个方向分开报，因为处置不同：
+
+    added   身份从无到有        ⇒ **红**（这才是「新增了一个错误」）
+    grew    同一身份条数变多    ⇒ **红**（同一条错误又被复制了一份，身份集合看不出来）
+    removed 身份消失            ⇒ 提示（基线比现实宽）
+    shrank  同一身份条数变少    ⇒ 提示
+    """
+    added = sorted(k for k in now if k not in base)
+    grew = sorted(f"{k}\t{base[k]}→{now[k]}" for k in now if k in base and now[k] > base[k])
+    removed = sorted(k for k in base if k not in now)
+    shrank = sorted(f"{k}\t{base[k]}→{now[k]}" for k in now if k in base and now[k] < base[k])
+    return {"added": added, "grew": grew, "removed": removed, "shrank": shrank}
 
 
 def classify(rc: int, count: int, output: str = "", files_checked: int | None = None) -> tuple[bool, str]:
@@ -133,6 +211,32 @@ def selftest() -> int:
     check("noEmit is on (a gate must not write build output)",
           cfg.get("compilerOptions", {}).get("noEmit"), True)
 
+    print("selftest — 集合层(身份而不是计数)")
+    root = Path("/repo")
+    base_lines = [
+        "/repo/agent-node/src/a.ts(10,5): error TS1234: Type 'x' is not assignable.",
+        "/repo/agent-node/src/a.ts(99,1): error TS1234: Type 'x' is not assignable.",
+    ]
+    base_fps = [f for f in (fingerprint(ln, root) for ln in base_lines) if f]
+    check("同一行号不同位置 ⇒ 同一身份", len(set(base_fps)), 1)
+    base = count_by_identity(base_fps)
+    d = diff_sets(count_by_identity(base_fps + [f for f in [fingerprint(
+        "/repo/agent-node/src/b.ts(1,1): error TS9999: boom", root)] if f]), base)
+    check("新增一条被点出来", len(d["added"]), 1)
+    check("新增时无 removed", len(d["removed"]), 0)
+    d2 = diff_sets({}, base)
+    check("修好后 added 为空", len(d2["added"]), 0)
+    check("修好后 removed 被点出来（基线比现实宽）", len(d2["removed"]), 1)
+    # 🔴 计数版藏得住的那一格：删一条 + 加一条，条数不变
+    swapped = count_by_identity(base_fps[:1] + [f for f in [fingerprint(
+        "/repo/agent-node/src/c.ts(3,3): error TS0001: new", root)] if f])
+    check("条数相同但身份不同 ⇒ 仍然点出新增", len(diff_sets(swapped, base)["added"]), 1)
+    # 🔴 只存身份会藏住的那一格：同一条错误又复制了一份
+    dup = count_by_identity(base_fps + [f for f in [fingerprint(
+        "/repo/agent-node/src/a.ts(200,1): error TS1234: Type 'x' is not assignable.", root)] if f])
+    dd = diff_sets(dup, base)
+    check("同一身份多一份 ⇒ added 为空但 grew 有值", (len(dd["added"]), len(dd["grew"])), (0, 1))
+
     print(f"\nselftest: {'PASS' if fails == 0 else f'FAIL ({fails})'}")
     return 1 if fails else 0
 
@@ -181,20 +285,63 @@ def main() -> int:
             print(f"  {line}")
         return 1
 
-    print(f"agent-node typecheck: {count} error(s) (baseline {BASELINE}) — {why}")
-    if count > BASELINE:
-        print(f"::error::agent-node type errors rose to {count}, above the baseline of {BASELINE}. "
-              f"This gate does not require zero — it requires that the number not grow. "
-              f"Fix the new error(s), or if you genuinely lowered the count, update BASELINE in "
-              f"{Path(__file__).name} to the new value.")
-        for line in output.splitlines():
-            if ERROR_RE.search(line):
-                print(f"  {line}")
+    now = fingerprints(output, ROOT)
+    if len(now) != count:
+        print(f"::error::parsed {count} error line(s) but extracted {len(now)} fingerprint(s) — "
+              f"the set view disagrees with the count, so neither is readable.")
         return 1
 
-    if count < BASELINE:
-        print(f"::notice::type errors dropped to {count} (baseline {BASELINE}). "
-              f"Please lower BASELINE to {count} so the ratchet keeps its grip.")
+    if "--update" in sys.argv:
+        fresh = count_by_identity(now)
+        old = load_baseline(BASELINE_FILE) or {}
+        d = diff_sets(fresh, old)
+        added, removed = d["added"], d["removed"]
+        BASELINE_FILE.write_text(
+            "# agent-node 的类型错误**身份**基线：`文件|TS码|消息<TAB>条数`（丢行列号）。\n"
+            "# 由 `python3 .github/scripts/check-agent-node-typecheck-ratchet.py --update` 重写。\n"
+            "# 规则：新增身份 / 同一身份变多 ⇒ 红；消失 / 变少 ⇒ 提示，跑 --update 收缩。\n"
+            "# 为什么存条数：81 行错误只 collapse 成 40 个身份 —— 只存身份就看不见「又复制了一份」。\n"
+            + "".join(f"{k}\t{v}\n" for k, v in sorted(fresh.items())), encoding="utf-8")
+        print(f"基线已重写：{len(fresh)} 个身份 / {sum(fresh.values())} 行 ｜ "
+              f"+{len(added)} / -{len(removed)}")
+        for a in added:
+            print(f"  + {a}")
+        for r in removed:
+            print(f"  - {r}")
+        return 0
+
+    base = load_baseline(BASELINE_FILE)
+    if base is None:
+        print(f"::error::{BASELINE_FILE} 不存在 —— 没有基线就没有判据（不等于零错误）。")
+        print("::error::首次建立：python3 .github/scripts/check-agent-node-typecheck-ratchet.py --update")
+        return 1
+
+    d = diff_sets(count_by_identity(now), base)
+    print(f"agent-node typecheck: {count} 行 / {len(set(now))} 个身份 ｜ 基线 {len(base)} 身份 / "
+          f"{sum(base.values())} 行 ｜ 新增 {len(d['added'])} ｜ 变多 {len(d['grew'])} ｜ "
+          f"消失 {len(d['removed'])} ｜ 变少 {len(d['shrank'])} — {why}")
+
+    if d["added"] or d["grew"]:
+        if d["added"]:
+            print(f"::error::{len(d['added'])} 个**新的**类型错误身份"
+                  f"（不是「条数涨了」——是这几条从没被接受过）：")
+            for a in d["added"]:
+                print(f"::error::  + {a}")
+        if d["grew"]:
+            print(f"::error::{len(d['grew'])} 个已接受的错误**又复制了一份**"
+                  f"（身份集合看不出来，所以基线存了条数）：")
+            for g in d["grew"]:
+                print(f"::error::  × {g}")
+        print("::error::修掉它们；若确实是设计决定，必须同时改基线并说明为什么接受。")
+        return 1
+
+    if d["removed"] or d["shrank"]:
+        print(f"::notice::{len(d['removed'])} 个身份 + {len(d['shrank'])} 处条数已经不存在/变少。"
+              f"跑 --update 收缩基线，否则基线比现实宽（宽出来的位置可以让将来的一条新增错误不被点名）。")
+        for r in d["removed"]:
+            print(f"::notice::  - {r}")
+        for r in d["shrank"]:
+            print(f"::notice::  - {r}")
     return 0
 
 

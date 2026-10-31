@@ -1,0 +1,44 @@
+# agent-node 的类型错误**身份**基线：`文件|TS码|消息<TAB>条数`（丢行列号）。
+# 由 `python3 .github/scripts/check-agent-node-typecheck-ratchet.py --update` 重写。
+# 规则：新增身份 / 同一身份变多 ⇒ 红；消失 / 变少 ⇒ 提示，跑 --update 收缩。
+# 为什么存条数：81 行错误只 collapse 成 40 个身份 —— 只存身份就看不见「又复制了一份」。
+agent-node/src/cli.ts|TS18046|'msg' is of type 'unknown'.	13
+agent-node/src/cli.ts|TS18047|'sideThreadNodeRuntime' is possibly 'null'.	1
+agent-node/src/cli.ts|TS2322|Type '{ enabled: false; capability: SideThreadCapability; close(): void; } | { enabled: true; capability: SideThreadCapability; close(): void; }' is not assignable to type '{ enabled: boolean; capability: Record<string, unknown>; close(): void; } | null'.	1
+agent-node/src/cli.ts|TS2345|Argument of type 'string | null' is not assignable to parameter of type 'string'.	2
+agent-node/src/cli.ts|TS2345|Argument of type '{ file_id?: unknown; path?: unknown; type?: unknown; mime?: unknown; name?: unknown; }' is not assignable to parameter of type 'AttachmentDescriptor'.	1
+agent-node/src/cli.ts|TS2367|This comparison appears to be unintentional because the types 'string' and 'boolean' have no overlap.	1
+agent-node/src/cli.ts|TS7006|Parameter 'msg' implicitly has an 'any' type.	2
+agent-node/src/runtime/codex-app-server/runtime.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.	1
+agent-node/src/runtime/codex-app-server/runtime.ts|TS7006|Parameter 'e' implicitly has an 'any' type.	1
+agent-node/src/runtime/commhub-poll-compensator.ts|TS2367|This comparison appears to be unintentional because the types '"active" | "probing"' and '"realtime-only"' have no overlap.	1
+agent-node/src/runtime/config-apply.ts|TS2322|Type 'CreateNodesBlockedReason | "anet_bin_pin_unresolved"' is not assignable to type 'CreateNodesBlockedReason | undefined'.	1
+agent-node/src/runtime/feishu-envelope.ts|TS2339|Property 'file_id' does not exist on type 'never'.	2
+agent-node/src/runtime/feishu-envelope.ts|TS2339|Property 'mime' does not exist on type 'never'.	2
+agent-node/src/runtime/feishu-envelope.ts|TS2339|Property 'name' does not exist on type 'never'.	2
+agent-node/src/runtime/feishu-envelope.ts|TS2339|Property 'path' does not exist on type 'never'.	1
+agent-node/src/runtime/feishu-envelope.ts|TS2339|Property 'size' does not exist on type 'never'.	2
+agent-node/src/runtime/grok-build-acp/events.ts|TS18048|'update' is possibly 'undefined'.	1
+agent-node/src/runtime/grok-build-cli-home.ts|TS18048|'before' is possibly 'undefined'.	4
+agent-node/src/runtime/grok-build-cli-home.ts|TS18048|'stat' is possibly 'undefined'.	6
+agent-node/src/runtime/grok-build-cli-home.ts|TS2345|Argument of type 'Stats | BigIntStats | undefined' is not assignable to parameter of type '{ dev: number; ino: number; }'.	5
+agent-node/src/runtime/grok-build-cli-home.ts|TS2345|Argument of type 'Stats | BigIntStats' is not assignable to parameter of type '{ dev: number; ino: number; } | undefined'.	2
+agent-node/src/runtime/grok-build-cli-home.ts|TS2345|Argument of type 'Stats | BigIntStats' is not assignable to parameter of type '{ dev: number; ino: number; }'.	2
+agent-node/src/runtime/grok-build-cli-home.ts|TS2345|Argument of type 'number | bigint' is not assignable to parameter of type 'number'.	1
+agent-node/src/runtime/grok-build-cli-home.ts|TS2345|Argument of type 'number | undefined' is not assignable to parameter of type 'number'.	3
+agent-node/src/runtime/grok-build-cli-home.ts|TS2365|Operator '&' cannot be applied to types 'number | bigint' and 'number'.	1
+agent-node/src/runtime/grok-build-cli.ts|TS18047|'child.stderr' is possibly 'null'.	2
+agent-node/src/runtime/grok-build-cli.ts|TS18047|'child.stdout' is possibly 'null'.	2
+agent-node/src/runtime/grok-build-cli.ts|TS2345|Argument of type 'string' is not assignable to parameter of type '"grep" | "web_search" | "read_file" | "list_dir" | "web_fetch"'.	1
+agent-node/src/runtime/grok-copresence/copresence-human-fixture.ts|TS2868|Cannot find name 'Bun'. Do you need to install type definitions for Bun? Try `npm i --save-dev @types/bun` and then add 'bun' to the types field in your tsconfig.	3
+agent-node/src/runtime/grok-copresence/runtime.ts|TS2353|Object literal may only specify known properties, and 'args' does not exist in type '{ cwd?: string | undefined; env?: ProcessEnv | undefined; binary?: string | undefined; model?: string | undefined; }'.	1
+agent-node/src/runtime/opencode-acp/child-env.ts|TS2304|Cannot find name 'exitedProcess'.	1
+agent-node/src/runtime/opencode-acp/child-env.ts|TS2322|Type 'boolean' is not assignable to type 'LinuxProcessStat'.	1
+agent-node/src/runtime/opencode-acp/child-env.ts|TS2365|Operator '&' cannot be applied to types 'number | bigint' and 'number'.	3
+agent-node/src/runtime/opencode-acp/child-env.ts|TS2365|Operator '-' cannot be applied to types 'number' and 'number | bigint'.	1
+agent-node/src/runtime/opencode-acp/events.ts|TS18048|'update' is possibly 'undefined'.	2
+agent-node/src/runtime/probe-daemon.ts|TS2345|Argument of type 'ProbeAckPayload' is not assignable to parameter of type 'Record<string, unknown>'.	1
+agent-node/src/runtime/probe-daemon.ts|TS2454|Variable 'result' is used before being assigned.	1
+agent-node/src/runtime/side-thread/domain.ts|TS2367|This comparison appears to be unintentional because the types '"running" | "failed" | "completed" | "cancelled" | "ready"' and '"purged"' have no overlap.	1
+agent-node/src/runtime/side-thread/fork-process-race-worker.ts|TS2868|Cannot find name 'Bun'. Do you need to install type definitions for Bun? Try `npm i --save-dev @types/bun` and then add 'bun' to the types field in your tsconfig.	1
+agent-node/src/runtime/side-thread/operation-ledger.ts|TS2345|Argument of type 'OperationState' is not assignable to parameter of type 'never'.	1

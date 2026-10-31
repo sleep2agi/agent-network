@@ -7466,7 +7466,11 @@ async function processConfigUpdate(): Promise<void> {
       // #3166 —— 这一支原来 ack rejected 后 return（模型改动**根本没发生**）。
       // 与上面 7431 那段「会话不在 ⇒ 降级重启」的说法自相矛盾，而这里才是实际执行到的那个。
       // 现在统一成同一条哲学：切模型要的是结果 ⇒ 失败了降级重启，绝不 ack rejected 了事。
-      const hotUsable = session?.isRunning === true && typeof session.setSelectedModel === "function";
+      // 🔴 先取成局部量再判：TS 不会因为 `hotUsable` 这个布尔常量而窄化
+      //    `session.setSelectedModel`（TS2722：可能是 undefined）。局部量 + typeof 守卫
+      //    才是同一份判据同时管住类型与运行期。
+      const setModel = session?.isRunning === true ? session.setSelectedModel : undefined;
+      const hotUsable = typeof setModel === "function";
       if (!hotUsable) {
         warn(`[config-apply] hot model switch unavailable at apply time `
           + `(session=${session?.isRunning === true ? "running" : "not-running"}, `
@@ -7475,11 +7479,12 @@ async function processConfigUpdate(): Promise<void> {
       }
       // 只有真正可用时才走「切 + 写配置 + ack applied」这一串；
       // 降级时**必须跳过它**，否则会 ack 一个没发生的 applied。
-      if (hotUsable) {
+      // 守卫写成 typeof 而不是复用 hotUsable：两者恒等，但只有 typeof 会窄化。
+      if (typeof setModel === "function") {
       // #1976 —— 切换 + 写配置 + ack 一起有上限。超时的多半是「这台机器没有这个模型」。
       try {
         await withDeadlineMs(
-          session.setSelectedModel(update.patch.model),
+          setModel(update.patch.model),
           MODEL_SWITCH_DEADLINE_MS,
           `OpenCode session model switch timed out after ${MODEL_SWITCH_DEADLINE_MS}ms`,
         );
