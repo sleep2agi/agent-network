@@ -59,7 +59,12 @@ test("generation projection and unchanged created row",async()=>{
   expect(r.children.find((n:any)=>n.child_node_id==="node_binding_created")).toEqual({child_node_id:"node_binding_created",alias:"created",lifecycle_state:"active"});
   // Old consumers continue reading exactly the same fields; additive only.
   expect(r.children.map(({child_node_id,alias,lifecycle_state,managed}:any)=>({child_node_id,alias,lifecycle_state,managed}))).toContainEqual({child_node_id:child,alias:child,lifecycle_state:"active",managed:"adopted"});
-  expect((await unadopt()).ok).toBe(true);
+  // 2026-10-31 —— #3275：unadopt_node 的成功体 {ok, status}，且 status 必须是**第二终态**
+  // 「revoked」而不是「unadopted」—— 名字与载荷不是一回事（同 #3214 里 list_node_files 那一课）。
+  const un = await unadopt();
+  expect(Object.keys(un).sort()).toEqual(["ok", "status"]);
+  expect(un.status).toBe("revoked");
+  expect(un.ok).toBe(true);
 });
 test("token boundary denies humans general revoked and other owners",async()=>{
   await activate();

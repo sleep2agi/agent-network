@@ -71,6 +71,12 @@ afterAll(() => {
 describe("#652 create_node via /mcp — Unicode names", () => {
   test("「测试」 is accepted; the daemon gets the same alias", async () => {
     const r = await create("测试");
+    // 2026-10-31 —— #3275：create_node 的成功体（此前只有 ok）。
+    // 它和 read_node_file / list_node_files **同一族**：只下发一个请求，结果去 daemon 侧取。
+    // ⇒ 形状必须一样：{ok, request_id}。名字叫「create」，载荷里却没有节点 —— 这是对的，
+    //   因为它回答的是「请求排队了没有」，不是「节点建好了没有」。
+    expect(Object.keys(r).sort()).toEqual(["ok", "request_id"]);
+    expect(typeof r.request_id).toBe("string");
     expect(r.ok).toBe(true);
     expect(String(r.request_id)).toMatch(/^cr_/);
     expect(rows("测试")).toBe(1);

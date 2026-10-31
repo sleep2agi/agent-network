@@ -47,6 +47,58 @@ def tracked(patterns: list[str]) -> list[Path]:
     return [REPO / p for p in out if p.endswith(".ts")]
 
 
+# **必须是函数定义**，不能是 `const card = await mcp(..., "requirements_create", ...)`
+# —— 那是「结果变量」，不是 helper。把它当 helper 的后果实测过：
+#   邻近口径从 70/88 直接变成 **88/88**（`a(` / `all(` / `after(` 出现在各处，
+#   于是每个工具都被算成「附近有键集断言」）。判据放宽一步，读数就整体失去信息。
+# 还必须是**箭头函数**（`= (a, b) => …`）或 `function f(`。
+# `const x = (await mcp(...))` 这种「带括号的表达式」不是 helper ——
+# 实测：只要求 `= (` 时，`created` / `got` / `first` / `res` 这批**结果变量**全被绑成 helper。
+HELPER_DEF = re.compile(
+    r"^\s*(?:export\s+)?(?:const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
+    r"|function\s+([A-Za-z_$][\w$]*)\s*\()"
+)
+
+
+def tool_mentions(lines: list[str], name: str, known: set[str]) -> tuple[list[int], list[int]]:
+    """这一个测试文件里，**tool 的提及点**：字面量出现行 + 本地 helper 的调用行。
+
+    2026-10-31 —— 与 REST 侧同一个缺陷类（`report-rest-coverage.py` 的 MentionIndex）：
+    测试常把工具调用包一层，`const create = (n) => mcp(OWNER, "create_node", …)`，
+    于是**真正的调用点**那几行里没有工具名字面量，键集断言即使紧贴调用点也会被算成「没钉」。
+
+    只做很窄的一件事：定义行 + 后 3 行内**恰好**提到一个已知工具名时，
+    把 `NAME(` 的调用点也算作该工具的提及点。提到两个就放弃（宁可不认，也不猜）。
+    返回 (字面量行, helper 调用行) —— 分开返回是为了让报告能说清「这条是凭什么算上的」。
+    """
+    literal = [i for i, ln in enumerate(lines) if re.search(rf"""["']{re.escape(name)}["']""", ln)]
+    helpers: dict[str, int] = {}
+    for i, ln in enumerate(lines):
+        m = HELPER_DEF.match(ln)
+        if not m:
+            continue
+        # **只认定义行本身**（不放宽到后几行）：放宽到 +3 行会把通用 helper
+        # （`const post = (p, body) => fetch(...)`）绑到恰好写在它下面的那个工具名上，
+        # 于是这个文件的每个 `post(` 都成了那个工具的「提及点」——
+        # 实测：放宽到 +3 行时邻近口径从 70/88 直接跳到 **88/88**，那不是覆盖变好，是判据坏了。
+        seen: set[str] = set()
+        for t in known:
+            if re.search(rf"""["']{re.escape(t)}["']""", lines[i]):
+                seen.add(t)
+        if len(seen) == 1 and next(iter(seen)) == name:
+            # ⚠️ 只登记「绑定到**这个**工具」的 helper。
+            # 第一版漏了这句 `== name`：于是任何 helper 的调用点都被算成本工具的提及点，
+            # 邻近口径从 70/88 直接变成 88/88 —— 覆盖没变，判据变成了恒真。
+            helpers.setdefault(m.group(1) or m.group(2), i)
+    calls: list[int] = []
+    for i, ln in enumerate(lines):
+        for h in helpers:
+            if re.search(rf"\b{re.escape(h)}\s*\(", ln):
+                calls.append(i)
+                break
+    return literal, calls
+
+
 def main() -> int:
     tools: dict[str, Path] = {}
     for path in tracked(["server/src/*.ts"]):
@@ -61,6 +113,7 @@ def main() -> int:
 
     file_level: dict[str, list[str]] = {}
     near_level: dict[str, list[str]] = {}
+    helper_only: dict[str, list[str]] = {}
     for path in tracked(["server/src/*.test.ts"]):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -71,12 +124,18 @@ def main() -> int:
         if not assert_lines:
             continue
         for name in tools:
-            hits = [i for i, ln in enumerate(lines) if re.search(rf"""["']{re.escape(name)}["']""", ln)]
+            literal, calls = tool_mentions(lines, name, set(tools))
+            hits = literal + calls
             if not hits:
                 continue
             file_level.setdefault(name, []).append(path.name)
-            if any(abs(a - h) <= WINDOW for a in assert_lines for h in hits):
+            near_by_literal = any(abs(a - h) <= WINDOW for a in assert_lines for h in literal)
+            near_by_helper = any(abs(a - h) <= WINDOW for a in assert_lines for h in calls)
+            if near_by_literal or near_by_helper:
                 near_level.setdefault(name, []).append(path.name)
+            # 口径变过就要能指认：只有靠 helper 才认出来的，单独记一份
+            if near_by_helper and not near_by_literal:
+                helper_only.setdefault(name, []).append(path.name)
 
     covered = sorted(file_level)
     uncovered = sorted(set(tools) - set(covered))
@@ -153,6 +212,9 @@ def main() -> int:
             "own_result_names": own,
             "evidence_class": "proxy; error direction unknown (can both under- and over-count)",
             "near_names": near,
+            # 口径可指认：这几个是**只靠本地 helper 的调用点**才认出来的
+            #（工具名只出现在 helper 定义行，调用点那几行没有字面量）
+            "near_via_local_helper": sorted(helper_only),
             "uncovered": uncovered,
         }, ensure_ascii=False, indent=1))
         return 0
@@ -171,6 +233,9 @@ def main() -> int:
     # 2026-10-31 —— 「同变量口径」：这条断言是不是在测**它自己的**调用结果。
     print(f"覆盖（**同变量口径**）：{len(own)} 个 ⇒ {len(own)}/{len(tools)} = {len(own) / max(len(tools), 1):.1%}")
     print("  ⇒ 同变量口径才接近「这条断言在测这个工具」；邻近口径会把写在旁边的一起算进去。")
+    if helper_only:
+        print(f"  ·其中 {len(helper_only)} 个是**只靠本地 helper 调用点**认出来的：{', '.join(sorted(helper_only))}")
+        print("   （工具名只出现在 `const x = (…) => mcp(…, \"tool\" …)` 这一行，调用点里没有字面量）")
     print(f"上界（文件级，**含可能测空气**）：{len(covered)} 个 ⇒ {len(covered)}/{len(tools)} = {len(covered) / max(len(tools), 1):.1%}")
 
     print(f"调用表达式级（名字出现在 tool( 调用里）按**断言距调用**的距离分档：")
