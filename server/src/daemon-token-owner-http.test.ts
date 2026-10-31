@@ -115,6 +115,15 @@ for (const [name, arguments_] of endpoints) {
 // #3275 批次 1 —— 上面那个表驱动循环里工具名是**变量**，所以「同变量」统计口径按名字归因不到任何一个工具。
 // 这不是测试写得不好，是**统计的粒度**问题：一条循环里的断言无法被归到被循环的那 N 个工具上。
 // ⇒ 给 ack_create_request 补一条带字面量的：错误信封是闭集 {error, ok}。
+//
+// 批次 1·c 的结论（写在这里，因为它是这一批的**真实成本**：夹具不够，不是断言不够）：
+//   三个 `ack_*_request` 的失败分支闭集是 request_not_found / not_your_request /
+//   cross_network_request / caller_not_a_daemon。今天只有最后一条可达（上面的循环已钉住 {error,ok}）。
+//   前三条要么需要**绑定到 daemon 的** MCP 凭证（owner 令牌先撞 caller_not_a_daemon），
+//   要么需要跨网络 daemon 凭证 —— 本夹具里的 `bound` 只用于 REST 侧 mint 测试，
+//   拿它调 /mcp 直接非 200（实测），所以那条路走不通。
+// ⇒ 批次 1·c 要先造一个「daemon 绑定 + MCP 可用」的凭证，再谈断言。
+//   在那之前，任何「4 条失败分支已覆盖」的说法都是假的。
 test("#3275 ack_create_request 的错误信封恰好 {error, ok}", async () => {
   const denied = await call(owner.token, "ack_create_request", { request_id: "cr_fixture_absent", status: "started" });
   expect(denied.ok).toBe(false);
