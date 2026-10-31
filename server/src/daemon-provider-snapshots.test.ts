@@ -1,4 +1,6 @@
-// 2026-10-31 —— **本地直跑会看到 4 条红，那不是回归**（与 hub-provider-config.test.ts 同一类）。
+// 2026-10-31 —— **本地直跑会看到若干条红，那不是回归**（与 hub-provider-config.test.ts 同一类）。
+// ⚠️ 不要在这里写死条数：它随环境变（写下这句时是 4，同一周实测已是 6）。
+//    要「几条、红在哪一档」就现跑：`scripts/run-server-tests.sh --triage daemon-provider-snapshots`
 //
 // 实测（本机，逐文件跑，独立 DB）：
 //   PASS 13 / FAIL 4
@@ -118,9 +120,18 @@ test('managed login: admin intent → capable target daemon → session manager 
     expect((await command({ action: 'start', session_id: session, token: 'TEST-ONLY' })).ok).toBe(false);
     const start = await command({ action: 'start', session_id: session });
     expect(start.ok).toBe(true);
-    expect((await daemon('pull_daemon_provider_snapshots', { accept_writes: true, accept_applications: true })).requests).toEqual([]);
+    // 2026-10-31 —— #3275：pull 的形状（本地可验的那一半）。
+    // ⚠️ 只钉**空结果**：非空 requests[0] 的形状要走完整条 daemon 链（容器里才有），
+    //    本地拿到的是空数组。把「本地能验的那一半」钉住，比按猜测写全更难被证伪。
+    const emptyPull = await daemon('pull_daemon_provider_snapshots', { accept_writes: true, accept_applications: true });
+    expect(Object.keys(emptyPull).sort()).toEqual(["ok", "requests"]);
+    expect(emptyPull.requests).toEqual([]);
     expect((await client('daemon', 'other')('pull_daemon_provider_snapshots', { accept_logins: true })).ok).toBe(false);
-    expect((await daemon('ack_daemon_provider_snapshot', { request_id: start.request_id, login: { request_id: session, status: 'authenticated', token: 'TEST-ONLY' } })).ok).toBe(false);
+    // ack 的**拒绝**形状（真实调用给出）：{ ok:false, error }，且 error 是闭集里的具体码 ——
+    // 不是一句散文。拒绝比成功更容易在本地跑出来，所以先钉这一个方向。
+    const badAck = await daemon('ack_daemon_provider_snapshot', { request_id: start.request_id, login: { request_id: session, status: 'authenticated', token: 'TEST-ONLY' } });
+    expect(Object.keys(badAck).sort()).toEqual(["error", "ok"]);
+    expect(badAck).toMatchObject({ ok: false, error: "invalid_login_receipt" });
     await reconcileProviderSnapshots(deps);
     const challenge = await read(start.request_id);
     expect(challenge.status).toBe('succeeded');
