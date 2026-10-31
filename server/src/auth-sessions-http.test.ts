@@ -203,6 +203,9 @@ describe("revoking sessions", () => {
     const other2 = await loginAs("other2");
     const r = await call(keep.token, "POST", "/api/auth/sessions/revoke-others");
     expect(r.status).toBe(200);
+    // 2026-10-31 —— #3214：形状钉住（此前只有值断言）
+    expect(Object.keys(r.body).sort()).toEqual(["kept_token_id", "ok", "revoked"]);
+    expect(Number.isInteger(r.body.revoked)).toBe(true);
     expect(r.body.kept_token_id).toBe(keep.token_id);
     expect(r.body.revoked).toBeGreaterThanOrEqual(2);
     expect((await call(keep.token, "GET", "/api/auth/me")).status).toBe(200);

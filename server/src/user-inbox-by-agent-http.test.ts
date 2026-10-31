@@ -131,6 +131,10 @@ describe("#1828 POST /api/messages/ack covers inbox reply rows", () => {
   test("🔴 B 拿 A 的 inbox id 来 ack:匹配不到,A 的数不动", async () => {
     const { body } = await post("/api/messages/ack", bToken, { message_ids: ["ib_a1"] });
     expect(body).toMatchObject({ ok: true, acked: 0, acked_inbox: 0 });
+    // 2026-10-31 —— #3214：ack 的形状钉住（两个分桶 + 总数，客户端按这三个数更新未读角标）
+    expect(Object.keys(body).sort()).toEqual(["acked", "acked_inbox", "acked_user_inbox", "ok", "scope"]);
+    // 守恒：两个分桶之和 == 总数（否则角标与明细是两个读数）
+    expect(body.acked_inbox + body.acked_user_inbox).toBe(body.acked);
     const a = await get("/api/messages?scope=user", aToken);
     expect(a.body.unread_by_agent["peer-1"]).toBe(2);
   });
