@@ -162,11 +162,30 @@ def main(argv: list[str]) -> int:
         print(f"✗ 阳性对照失败：只执行了 {checked} 个自检（下限 {MIN_EXECUTED}）⇒ 这个「欠账数」不可用", file=sys.stderr)
         return 2
 
+    # 2026-10-31 —— **基线只能由源码变更来更新**（外部复核：
+    # 「一个提示如果指向『一个可以直接编辑的数』，那它就不是提示，而是后门」）。
+    # 这里把「只改名单」这条路堵上：名单里的门若**已经有** --selftest，说明名单过期了，
+    # 那是「把基线改宽」而不是「把门修好」—— 必须红，否则欠账可以被一行动词归零。
+    stale_debt = []
+    self_rel = str(Path(__file__).resolve().relative_to(REPO))
+    for rel in list(KNOWN_NO_SELFTEST):
+        # 自己豁免：本脚本文本里也写着 "--selftest"，按文本判断会把自己算成「已有自检」。
+        # 这不是放宽，而是承认文本判据在「命令拼字符串」的场景下不可用（注释已写明）。
+        if rel == self_rel:
+            continue
+        gate_path = REPO / rel
+        if not gate_path.exists():
+            stale_debt.append((rel, "文件已不存在"))
+            continue
+        if supports_selftest(gate_path):
+            stale_debt.append((rel, "该门已经有 --selftest 了"))
+
     if "--json" in argv:
         print(json.dumps({
             "gates": len(all_gates), "wired": len(wired), "unwired": [str(p.relative_to(REPO)) for p in unwired],
             "selftests_run": checked, "failures": failures, "bad_unwired": bad_unwired, "stale_allow": stale_allow,
             "debt_no_selftest": debt, "selftest_not_run_here": slow_skipped,
+            "stale_debt": [r for r, _ in stale_debt],
         }, ensure_ascii=False, indent=2))
         return 1 if (failures or bad_unwired or stale_allow) else 0
 
@@ -186,7 +205,9 @@ def main(argv: list[str]) -> int:
         print(f"    ✗ 未接线且没登记理由：{g}", file=sys.stderr)
     for k in stale_allow:
         print(f"    · 白名单已过期（该门现在已接线）：{k}")
-    if failures or bad_unwired:
+    for rel, why in stale_debt:
+        print(f"    ✗ 欠账名单过期：{rel} —— {why}（把基线改宽不算修好）", file=sys.stderr)
+    if failures or bad_unwired or stale_debt:
         return 1
     print("  ✓ 已接线的门全部自检通过；未接线的都有登记理由")
     return 0
