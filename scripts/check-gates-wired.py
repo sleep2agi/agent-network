@@ -150,6 +150,18 @@ def main(argv: list[str]) -> int:
             last = tail.strip().splitlines()[-1] if tail.strip() else ""
             failures.append({"gate": str(q.relative_to(REPO)), "why": f"--selftest 退出码 {rc}：{last}"})
 
+    # 2026-10-31 —— **阳性对照**（外部复核：「任何单字段结论，先问有没有一个对照能把它劈成两支」）。
+    # 「欠账 12 个」这种数字有三种成因：真是 12 / 扫描器没找到门 / 所有门都没接线。
+    # ⇒ 两个下限：找到的门数、真的执行过自检的门数。低于下限 ⇒ 红，而不是报一个更小的欠账。
+    MIN_GATES = 30
+    MIN_EXECUTED = 8
+    if len(all_gates) < MIN_GATES:
+        print(f"✗ 阳性对照失败：只找到 {len(all_gates)} 个门（下限 {MIN_GATES}）⇒ 不是「欠账变少」，是扫描器瞎了", file=sys.stderr)
+        return 2
+    if checked < MIN_EXECUTED:
+        print(f"✗ 阳性对照失败：只执行了 {checked} 个自检（下限 {MIN_EXECUTED}）⇒ 这个「欠账数」不可用", file=sys.stderr)
+        return 2
+
     if "--json" in argv:
         print(json.dumps({
             "gates": len(all_gates), "wired": len(wired), "unwired": [str(p.relative_to(REPO)) for p in unwired],
