@@ -133,6 +133,13 @@ test("adopt query preserves all persisted states, request id and bounded project
   for (const status of ["pending", "active", "refused", "revoked"]) {
     const r = await get(query("adopt", `request_id=adopt_read_${status}`));
     expect(r.status).toBe(200);
+    console.log("LIFE_KEYS=" + JSON.stringify(Object.keys(r.body).sort()) + " REQ_KEYS=" + JSON.stringify(Object.keys(r.body.request).sort()));
+    // 2026-10-31 —— #3214：外层与 request 的键集都由真实调用给出（此前只断言了值）
+    expect(Object.keys(r.body).sort()).toEqual(["ok", "request"]);
+    expect(Object.keys(r.body.request).sort()).toEqual([
+      "created_at", "daemon_node_id", "error", "kind", "network_id",
+      "node_id", "request_id", "status", "updated_at",
+    ]);
     expect(r.body.request).toMatchObject({ kind: "adopt", status, request_id: `adopt_read_${status}` });
     expect(r.body.request.workdir).toBeUndefined();
     expect(r.body.request.requested_by).toBeUndefined();
