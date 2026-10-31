@@ -19,6 +19,8 @@
 #   stage=switch_failed        (18)  pm2 restart 返回非 0（切换没执行，但旧进程还活着）
 #   stage=unsafe_runtime_path  (19)  运行时目录不在 COMMHUB_HOME 里 —— 拒绝切换（**今天真的发生过**）
 #   stage=observe_window_failed(21)  切换后观察窗口内 degraded/版本漂移/会话归零 —— 已回滚
+#   stage=build_identity_absent(22)  制品里有 build-info.json，但 /health 的 build_identified 不是 true
+#                                    ⇒ 进程没从这份字节起（**不回滚**：版本与健康都正常，这里只是没对上身份）
 #
 # 判据：**「没成功」与「哪一步没成功」是两句话**；后一句才能决定下一步做什么
 # （registry 缺失 ⇒ 去发版；install 失败 ⇒ 清缓存；health 不通 ⇒ 立刻回滚）。
@@ -232,6 +234,16 @@ if [ -f "$BUILD_INFO" ]; then
 else
   # 没有不等于没问题：老版本制品里没有这个文件，要能看出来「这一格没读到」
   BUILD_COMMIT="absent"
+fi
+# 2026-10-31 —— #3177：既然制品里有 build-info，就把「**跑起来的那份字节认不认得自己**」变成断言。
+# 不做这一步时，我们能确认「装进去的目录对」，但没法确认「进程真的从这份字节起了」——
+# 而 .245/.246 那两次恰恰证明了「版本号对」不足以回答这个问题。
+if [ "$BUILD_COMMIT" != "absent" ] && [ "$BUILD_COMMIT" != "-" ]; then
+  IDENT=$(curl -s --max-time 6 "$HUB_URL/health" | sed -n 's/.*"build_identified"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | head -1)
+  if [ "$IDENT" != "true" ]; then
+    stage_fail build_identity_absent "制品里有 build-info.json（commit=${BUILD_COMMIT:0:12}），但 /health 的 build_identified=${IDENT:-<读不到>} —— 进程没有从这份字节起" 22
+  fi
+  say "构建标识自证：/health build_identified=true（制品 commit=${BUILD_COMMIT:0:12}）"
 fi
 printf 'DEPLOY v=%s role=%s observed=%s build_commit=%s dirty=%s\n' \
   "$NEWV" "deployment_label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
