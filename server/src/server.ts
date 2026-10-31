@@ -106,7 +106,7 @@ import { listTaskLateReplies } from "./task-late-replies.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { handleRequirementsRequest } from "./requirements.js";
-import { readHubProviders, putHubProvider } from "./hub-provider-config.js";
+import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
@@ -4254,10 +4254,8 @@ return Bun.serve({
       }
       const saved = putHubProvider({ userId: restAuth.userId ?? null, isNode: false, networkId }, revision, body?.provider);
       if (!saved.ok) {
-        const status = saved.error === "provider_owner_required" ? 403
-          : saved.error === "hub_provider_revision_conflict" ? 409
-          : saved.error === "provider_access_denied" ? 403 : 400;
-        return withCors(req, Response.json(saved, { status }));
+        // 状态码来自穷尽表（hub-provider-config.ts: PROVIDER_WRITE_STATUS），不再在这里写三元式
+        return withCors(req, Response.json(saved, { status: providerWriteStatus(saved.error) }));
       }
       return withCors(req, Response.json({ ...saved, network_id: networkId }));
     }

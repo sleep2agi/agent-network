@@ -263,4 +263,21 @@ describe("GET /api/providers", () => {
     db.run(`DELETE FROM hub_provider_configs WHERE network_id = ?1 AND provider_id = 'hc-first'`, [ownerNet]);
   });
 
+
+  // 2026-10-31 —— **写侧状态码是穷尽表**（外部复核：三元式默认分支 = 未映射与真实含义同值）。
+  // 两条断言分开：① 映射键 == 码清单；② 码清单里的每个码都真的在源码里被产出（跨源）。
+  test("provider write: every error code has a status, and every status code is really produced", async () => {
+    const { PROVIDER_WRITE_ERROR_CODES, PROVIDER_WRITE_STATUS } = await import("./hub-provider-config.js");
+    const { readFileSync } = await import("node:fs");
+    expect(Object.keys(PROVIDER_WRITE_STATUS).sort()).toEqual([...PROVIDER_WRITE_ERROR_CODES].sort());
+    for (const code of PROVIDER_WRITE_ERROR_CODES) {
+      expect(Number.isInteger(PROVIDER_WRITE_STATUS[code])).toBe(true);
+      expect(PROVIDER_WRITE_STATUS[code]).toBeGreaterThanOrEqual(400);
+    }
+    // 跨源：这些码必须能在源码里找到（`denied('x')` 或 vault 的 code 字面量），
+    // 否则清单会退化成「我们以为会发生的错误」。
+    const src = readFileSync(new URL("./hub-provider-config.ts", import.meta.url), "utf8");
+    const missing = [...PROVIDER_WRITE_ERROR_CODES].filter((c) => !src.includes(`'${c}'`) && !src.includes(`"${c}"`));
+    if (missing.length) throw new Error(`码清单里这些码在源码中找不到产出点：${missing.join(", ")}`);
+  });
 });

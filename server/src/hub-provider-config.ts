@@ -7,6 +7,52 @@ import { requestProviderWrite } from './daemon-provider-snapshots';
 type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
 type Config = { id: string; label: string; enabled: boolean; protocol: 'openai-responses' | 'openai-chat-completions' | 'anthropic-messages'; baseUrl: string; models: string[] };
 const denied = (error: string) => ({ ok: false as const, error });
+
+/**
+ * 2026-10-31 —— **写侧错误的 HTTP 状态必须是穷尽表**（外部复核：三元式默认分支
+ * = 未映射与某个真实含义同值 ⇒ 口令字段；应改成 `Record<Code, number>`）。
+ *
+ * 原来 REST 路由里写的是：
+ *   provider_owner_required ? 403 : revision_conflict ? 409 : access_denied ? 403 : 400
+ * ⇒ 新增一个错误码时它会**默认落到 400**，而 400 对某些码是错的（例如 vault 缺失应是 409/503）。
+ *
+ * 这里的码集合来自本文件里所有 `denied('...')` 与 VaultError 的 code；
+ * 测试会断言「映射键 == 码清单」，并且**码清单必须能在源码里逐个找到**（跨源，不是自说自话）。
+ */
+export const PROVIDER_WRITE_ERROR_CODES = [
+  "user_token_required",
+  "provider_owner_required",
+  "provider_access_denied",
+  "invalid_revision",
+  "invalid_hub_provider",
+  "invalid_provider_key",
+  "invalid_provider_secret_reference",
+  "provider_secret_reference_missing",
+  "provider_key_required",
+  "hub_provider_revision_conflict",
+  "hub_provider_disabled",
+  "hub_provider_save_failed",
+  "vault_unavailable",
+] as const;
+export type ProviderWriteErrorCode = (typeof PROVIDER_WRITE_ERROR_CODES)[number];
+export const PROVIDER_WRITE_STATUS: Record<ProviderWriteErrorCode, number> = {
+  user_token_required: 401,
+  provider_owner_required: 403,
+  provider_access_denied: 403,
+  invalid_revision: 400,
+  invalid_hub_provider: 400,
+  invalid_provider_key: 400,
+  invalid_provider_secret_reference: 400,
+  provider_secret_reference_missing: 400,
+  provider_key_required: 400,
+  hub_provider_revision_conflict: 409,
+  hub_provider_disabled: 409,
+  hub_provider_save_failed: 500,
+  vault_unavailable: 503,
+};
+export function providerWriteStatus(code: string): number {
+  return (PROVIDER_WRITE_STATUS as Record<string, number>)[code] ?? 400;
+}
 const idValid = (id: unknown) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id);
 function auth(h: Human, write: boolean, owner = false) {
   if (h.isNode || !h.userId || !h.networkId) return denied('user_token_required');
