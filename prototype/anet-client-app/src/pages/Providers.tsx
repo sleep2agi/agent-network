@@ -54,8 +54,8 @@ function selectionLine(s: NodeProviderSelectionResp | null): { kind: string; tex
 
 export function Providers() {
   const utok = useAuth((s) => s.utok);
-  const user = useAuth((s) => s.user);
-  const networkId = user?.network_id ?? "";
+  // networkId 来自 auth store（不是 user 对象：AnetUser 上没有 network_id 字段）
+  const networkId = useAuth((s) => s.networkId) ?? "";
   const [catalog, setCatalog] = useState<ProviderCatalogResp | null>(null);
   const [catalogErr, setCatalogErr] = useState<string>("");
   const [nodeId, setNodeId] = useState("");
