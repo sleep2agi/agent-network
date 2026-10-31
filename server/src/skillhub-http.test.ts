@@ -96,6 +96,23 @@ describe("SkillHub real Hub + SQLite", () => {
     expect(reviewed.status).toBe("published");
     const published = await tool(nodeToken, "list_skills", { network_id: networkId });
     expect(published.skills.map((x: any) => x.skill_id)).toContain(skillId);
+    // 2026-10-31 —— **属性断言**（外部复核 (b)：「断的是函数不产生条件键」，而不是几个样例）。
+    // 对 include_pending × query × limit 的笛卡尔组合逐一取键集，要求**全部相等**。
+    // 样例断言会说「这四个我试过」；属性断言说的是「任何组合都不变」——后者才是契约。
+    const combos: Array<Record<string, unknown>> = [];
+    for (const include_pending of [true, false]) {
+      for (const query of [undefined, "ship", "no-such-skill"]) {
+        for (const limit of [undefined, 1, 50]) {
+          combos.push({ network_id: networkId, include_pending, query, limit });
+        }
+      }
+    }
+    const keySets = new Set<string>();
+    for (const args of combos) {
+      const r = await tool(nodeToken, "list_skills", args as any);
+      keySets.add(JSON.stringify(Object.keys(r).sort()));
+    }
+    expect([...keySets]).toEqual([JSON.stringify(["ok", "reviewer", "skills"])]);
     expect((await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill.skill_id).toBe(skillId);
     const detail = (await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill;
     expect(detail.created_by_user).toBeUndefined(); expect(detail.reviewed_by_user).toBeUndefined(); expect(detail.content_hash).toBeUndefined();
