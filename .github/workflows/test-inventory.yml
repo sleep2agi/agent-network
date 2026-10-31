@@ -98,6 +98,16 @@ jobs:
       # 这个消费者就是那个「谁在用」：缺键 / 缺 env / 缺 check / consumers 空 ⇒ 红。
       - name: the SCOPE JSON has a real consumer (structure, provenance, lifetime)
         run: python3 scripts/check-scope-json.py
+      # 2026-10-31 —— 今晚新增的两道门接进 CI。
+      # 判据：一个只在人肉跑的门，与「没写」的区别是**有人记得**；而 CI 负责让人不用记得。
+      - name: jq `//` never folds "absent" into "pass" (fail-open)
+        run: |
+          python3 scripts/check-jq-default-operator.py --selftest
+          python3 scripts/check-jq-default-operator.py
+      - name: empty-equality scan (advisory: only the gate path must be clean)
+        # tests/ 与 docs/ 里的 before/after 比较大多是 fail-closed（另一侧是字面量），
+        # 所以这条**不阻塞**；它每天把 gate 路径的读数打出来，变红了才有人看。
+        run: python3 scripts/check-shell-empty-equality.py
       - name: orphan checks that were never executed (now wired)
         run: |
           python3 scripts/check-hub-v2-protocol-inputs.py
