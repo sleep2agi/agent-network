@@ -12,7 +12,7 @@
 // 判据：写一个允许清单的默认值之前，先写出它的**最松值**。
 //       这里最松值不是空（空 = 谁都不许 = 最严），而是 `*`。所以空绝不能被读成「用默认」。
 import { describe, expect, test } from "bun:test";
-import { normalizeOrigin, parseCorsOrigins } from "./server.js";
+import { assertCorsOrigins, normalizeOrigin, parseCorsOrigins } from "./server.js";
 
 describe("parseCorsOrigins: 未设 / 设空 / 设值 三态", () => {
   test("未设 ⇒ 开发默认（localhost 两个端口）", () => {
@@ -52,5 +52,22 @@ describe("parseCorsOrigins: 未设 / 设空 / 设值 三态", () => {
     expect(parseCorsOrigins("https://a.example:443")).toEqual(["https://a.example"]);
     // 去重：同一 origin 的两种写法只留一条
     expect(parseCorsOrigins("https://a.example,https://a.example:443/")).toEqual(["https://a.example"]);
+  });
+
+  // 2026-10-31 —— **配错了就别起服务**（「解除武装 ≠ 修好」）：
+  // 丢弃非法条目只是让服务更安全，但配置仍然是错的，而且没有任何信号。
+  // 这里钉的是启动期断言：非法条目必须**抛**，且把非法条目逐个点出来。
+  test("startup assertion refuses invalid CORS entries and names them", () => {
+    expect(() => assertCorsOrigins(undefined)).not.toThrow();     // 未设 ⇒ 默认，合法
+    expect(() => assertCorsOrigins("")).not.toThrow();             // 设空 ⇒ 空清单，合法（更严）
+    expect(() => assertCorsOrigins("https://a.example,http://b.example:8080")).not.toThrow();
+    // 每个非法形态都要抛，并且错误信息里能看到那个值
+    for (const bad of ["*", "a.example", "ftp://a.example", "https://a.example, *"]) {
+      let msg = "";
+      try { assertCorsOrigins(bad); } catch (e) { msg = String((e as Error).message); }
+      expect(msg).toContain("不是 http(s) origin");
+      expect(msg.length).toBeGreaterThan(20);
+    }
+    expect(() => assertCorsOrigins("*")).toThrow(/\*/);
   });
 });

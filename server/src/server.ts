@@ -979,9 +979,35 @@ export function parseCorsOrigins(raw: string | undefined): string[] {
   return out;
 }
 
-const CORS_ORIGINS = parseCorsOrigins(
-  "COMMHUB_CORS_ORIGINS" in process.env ? (process.env.COMMHUB_CORS_ORIGINS ?? "") : undefined,
-);
+/**
+ * 2026-10-31 —— **「解除武装」不等于「修好」**（外部复核：
+ * 「『断掉』和『修好』都是正确的下一步，但它们解决的不是同一个问题」）。
+ *
+ * 现在非法条目会被**丢弃**（等于不放行）——那是解除武装：更安全，但**配置仍然是错的**，
+ * 而且没有任何信号，运维只会看到「前端突然 CORS 不过」。
+ * ⇒ 启动时直接拒绝：非法条目 = 配错了，别让它带着错的清单跑起来。
+ * （生产未设置这个变量，走 localhost 默认，不受影响。）
+ */
+export function assertCorsOrigins(raw: string | undefined): void {
+  if (raw === undefined) return;
+  const bad: string[] = [];
+  for (const part of raw.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (!normalizeOrigin(trimmed)) bad.push(trimmed);
+  }
+  if (bad.length) {
+    throw new Error(
+      `COMMHUB_CORS_ORIGINS 里有 ${bad.length} 个条目不是 http(s) origin：${bad.join(", ")}\n` +
+      "  ⇒ 它们会被丢弃（等于不放行）。配错了就别起服务：改成 https://host[:port] 的形式再启动。",
+    );
+  }
+}
+const CORS_ORIGINS = (() => {
+  const raw = "COMMHUB_CORS_ORIGINS" in process.env ? (process.env.COMMHUB_CORS_ORIGINS ?? "") : undefined;
+  assertCorsOrigins(raw);
+  return parseCorsOrigins(raw);
+})();
 
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
