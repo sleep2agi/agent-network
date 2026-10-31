@@ -7268,7 +7268,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // #478:tools/list 只列这个调用者真能用的工具(tool-audience.ts)。只滤列表,tools/call 不变。
   const caller: ToolCaller = callerTokenIsNetwork
     ? { kind: "node", tokenId: callerTokenId ?? null, networkId: enforceNetworkId ?? null, includeProtocol: listing.includeProtocol === true }
-    : enforceUserId ? { kind: "user", includeProtocol: listing.includeProtocol === true } : { kind: "unknown" };
+    : enforceUserId ? { kind: "user", includeProtocol: listing.includeProtocol === true } : { kind: "anonymous", why: "no_identity" };
   scopeToolsList(server, listedToolFilter(caller));
 }
 
