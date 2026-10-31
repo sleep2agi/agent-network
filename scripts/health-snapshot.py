@@ -75,12 +75,17 @@ def gates(timeout: int) -> list[dict]:
             continue
         args = [sys.executable, str(p.relative_to(REPO))] + GATE_ARGS.get(p.name, [])
         rc, txt = run(args, timeout)
+        # 另一个问题：**它会不会红**（能力），与「今天红不红」（现状）无关。
+        # 对 .sh/.mjs 用对应解释器（元门里也踩过同一个坑）。
+        interp = {"": [sys.executable], ".py": [sys.executable], ".sh": ["bash"], ".mjs": ["node"]}.get(p.suffix, [sys.executable])
+        self_rc, _ = run(interp + [str(p.relative_to(REPO)), "--selftest"], timeout)
         state = classify(rc)
         detail = ""
         if state != "pass":
             lines = [l.strip() for l in txt.splitlines() if l.strip()]
             detail = (lines[0] if lines else "")[:160]
-        out.append({"layer": "gate", "name": p.name, "exit": rc, "state": state, "detail": detail})
+        out.append({"layer": "gate", "name": p.name, "exit": rc, "state": state, "detail": detail,
+                    "can_go_red": self_rc == 0})
     return out
 
 
@@ -138,7 +143,17 @@ def main(argv: list[str]) -> int:
         }, ensure_ascii=False, indent=2))
         return 1 if c.get("fail") else (2 if (c.get("no-reading") or c.get("not-run")) else 0)
 
+    # 2026-10-31 —— **「能红」与「今天不红」是两条要求，必须并排说**（外部复核 ④：
+    # 「门必须『能红』（变异测试证明）且『今天不红』（基线证明）；
+    #   混为一谈会造出两种坏门：没有 must-fire 的门，和恒红的门。」）
+    # 本脚本此前只回答后者；前者由 check-gates-wired 的「自检实跑」回答 —— 两条来自**不同工具**，
+    # 读者不会自己去对。把两者放进同一段输出里，才看得出「今天绿」是哪种绿。
     print(f"对象：scripts/check-*.py {sum(1 for r in rows if r['layer'] == 'gate')} 个 + L0 + L1")
+    gate_rows = [r for r in rows if r["layer"] == "gate"]
+    can_go_red = sum(1 for r in gate_rows if r.get("can_go_red"))
+    print(f"  能红（--selftest 实跑成功）  : {can_go_red}/{len(gate_rows)}"
+          f"（没有这一项的门即使今天绿，也只是『没查』）")
+    print(f"  今天不红（本次 exit=0）      : {sum(1 for r in gate_rows if r['state'] == 'pass')}/{len(gate_rows)}")
     for state, label in (("pass", "通过"), ("fail", "失败"), ("no-reading", "**没有读数**"), ("not-run", "**未运行**")):
         n = c.get(state, 0)
         if n:
