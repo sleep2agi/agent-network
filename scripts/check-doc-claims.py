@@ -80,7 +80,50 @@ def parse(text: str) -> list[tuple[str, int | None, str]]:
     return out
 
 
+SELFTEST_EXPECTED = 4
+
+
+def selftest(quiet: bool = False) -> int:
+    """四例：两列 / 三列 / 注释与空行跳过 / 列数不对必须抛。
+
+    这门的全部逻辑就在 parse()：把 ```doc-claims 块解析成断言清单。
+    块标记写错 ⇒ 0 条断言 ⇒ 它会红（分母承重），但**列数解析错**也是一种静默：
+    多一个 `::` 会把 needle 截断，而那看起来仍然「有断言、通过了」。
+    """
+    fails = 0
+    cases = [
+        ("两列", "```doc-claims\nserver/src/a.ts :: export function f\n```", [("server/src/a.ts", None, "export function f")]),
+        ("三列", "```doc-claims\nserver/src/a.ts :: 12 :: const X = 1\n```", [("server/src/a.ts", 12, "const X = 1")]),
+        ("注释与空行", "```doc-claims\n# 注释\n\nserver/src/a.ts :: x\n```", [("server/src/a.ts", None, "x")]),
+    ]
+    for label, text, want in cases:
+        got = parse(text)
+        ok = got == want
+        if not ok: fails.append(f"{label}: 期望 {want}，实际 {got}")
+        elif not quiet: print(f"✓ selftest {label}")
+
+    try:
+        parse("```doc-claims\na :: b :: c :: d\n```")
+        fails.append("四列应抛，实际接受了（多一个 :: 会截断 needle 而看起来正常）")
+    except SystemExit:
+        if not quiet: print("✓ selftest 四列 ⇒ 抛")
+    if len(cases) + 1 != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}", file=sys.stderr)
+        return 1
+    if fails:
+        print("✗ 自检失败：", file=sys.stderr)
+        for f in fails: print(f"    · {f}", file=sys.stderr)
+        return 1
+    if not quiet: print(f"✓ selftest {SELFTEST_EXPECTED}/{SELFTEST_EXPECTED} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     total = 0
     bad = 0
     for rel in DOCS:

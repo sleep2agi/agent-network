@@ -69,7 +69,6 @@ NOT_A_GATE: set[str] = set()
 #   · 名单里的门出现 ⇒ 记 debt，不判红
 #   · 名单外新接线却没有 selftest ⇒ 红（新增的门必须自带）
 KNOWN_NO_SELFTEST: set[str] = {
-    "scripts/check-doc-claims.py",
     "scripts/check-doc-source-pins.py",
     "scripts/check-doc-symbol-pins.py",
     "scripts/check-hub-v2-protocol-inputs.py",
