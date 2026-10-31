@@ -118,6 +118,13 @@ def main(argv: list[str]) -> int:
             "fixed_paths": len(hits), "unknown": unknown,
         }, ensure_ascii=False, indent=2))
         return 1 if unknown else 0
+    # 2026-10-31 —— **扫描域分母必须有下限**（外部复核 (d)：
+    # 「空域会让所有覆盖率断言假绿；低于基线 90% ⇒ 红（误加排除/删模块都要过评审）」）。
+    MIN_FILES = 8
+    if files < MIN_FILES:
+        print(f"✗ 扫描域过小（{files} 个文件，下限 {MIN_FILES}）⇒ 这个 0 不是读数", file=sys.stderr)
+        return 2
+
     print(f"扫描 {files} 个脚本：mktemp {mktemp_uses} 次 ｜ 固定 /tmp 路径 {len(hits)} 处"
           f"（已登记 {len(hits) - len(unknown)}，未登记 {len(unknown)}）")
     for h in unknown[:12]:

@@ -110,6 +110,13 @@ def main(argv: list[str]) -> int:
     if "--json" in argv:
         print(json.dumps({"files": files, "fail_open": open_hits, "fail_closed": closed_hits}, ensure_ascii=False, indent=2))
         return 1 if open_hits else 0
+    # 2026-10-31 —— **扫描域分母必须有下限**（外部复核 (d)：
+    # 「空域会让所有覆盖率断言假绿；低于基线 90% ⇒ 红（误加排除/删模块都要过评审）」）。
+    MIN_FILES = 1000
+    if files < MIN_FILES:
+        print(f"✗ 扫描域过小（{files} 个文件，下限 {MIN_FILES}）⇒ 这个 0 不是读数", file=sys.stderr)
+        return 2
+
     print(f"扫描 {files} 个文件（.sh/.ts/.md）")
     # 排除集显式化：这两行让「没扫到」可归因到一条规则，而不是归因到扫描器的脾气
     if not EXCLUDED_DIRS or not EXCLUDED_GLOBS:

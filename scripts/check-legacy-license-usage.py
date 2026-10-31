@@ -160,6 +160,12 @@ def main() -> int:
     if selftest(quiet=True) != 0:
         print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
         return 2
+    # 2026-10-31 —— **扫描域分母必须有下限**（外部复核 (d)：「空域会让所有覆盖率断言假绿」）。
+    MIN_FILES = 500
+    _scanned = sum(1 for _p in tracked() if _p.exists())
+    if _scanned < MIN_FILES:
+        print(f"✗ 扫描域过小（{_scanned} 个文件，下限 {MIN_FILES}）⇒ 这个 0 不是读数", file=sys.stderr)
+        return 2
     drift = domain_health()
     if drift:
         print("✗ 扫描域漂移（先修域，再谈结论）：", file=sys.stderr)
