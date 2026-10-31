@@ -73,6 +73,12 @@ jobs:
         run: python3 scripts/report-orphan-tests.py
       # 2026-10-31 —— 恒真断言（两侧同一**纯取值**表达式）永远不可能变红。
       # 静态只能查这一类；「两侧同源但不同表达式」要靠人读，脚本自己写着这条局限。
+      # 2026-10-31 —— 兼容字段 `license` 的**生产不可达护栏**：它区分不了
+      # 「没有授权」与「没查到」，所以只许出现在渲染点与赋值点。
+      - name: legacy license field has no production readers
+        run: |
+          python3 scripts/check-legacy-license-usage.py --selftest
+          python3 scripts/check-legacy-license-usage.py
       - name: no assertion compares a value to itself
         run: |
           python3 scripts/report-vacuous-assertions.py --selftest
