@@ -1054,6 +1054,9 @@ export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
   "ok", "status", "status_reasons", "version", "version_source", "version_role", "api_version", "transport", "uptime", "startedAt",
   // 规模与健康度聚合（不含拓扑明细）
   "sessions_count", "sse_connections", "mcp_inflight", "mcp_inflight_peak",
+  // #3271 —— 「到死没被取走」的**总数**（聚合，不含 by_node：节点名是拓扑）。
+  // 配 counters_since 一起读：只有总数时，「进程刚重启」与「一次都没发生」同值。
+  "task_expiries_never_consumed_total", "counters_since",
   // 事件循环停顿是**一个对象**（event_loop: {max_gap_ms, recent_stalls,…}），
   // 不是我原先以为的三个顶层键 —— 死条目测试当场抓到了这一点。
   "event_loop",
@@ -1270,6 +1273,9 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   mcp_inflight: { class: "gauge", granularity: "level" },
   mcp_inflight_peak: { class: "gauge", granularity: "cumulative" },
   event_loop: { class: "gauge", granularity: "cumulative" },
+  // #3271 —— 聚合计数：规模/强度，不含拓扑（by_node 留在鉴权投影里）。
+  task_expiries_never_consumed_total: { class: "gauge", granularity: "cumulative" },
+  counters_since: { class: "gauge", granularity: "label" },
   auth: { class: "gauge", granularity: "label" },
   security: { class: "gauge", granularity: "label" },
   tmux: { class: "gauge", granularity: "label" },
@@ -3835,6 +3841,14 @@ return Bun.serve({
           // #3271 —— 「到死都没被取走」按节点分桶。窗口用同一个 since。
           task_expiries_never_consumed: neverConsumedExpiryCounters(),
         },
+        // 🔴 2026-10-31 —— 上面那个 counters 对象**不在匿名投影里**（PUBLIC_HEALTH_KEYS）。
+        //    而 #3271 交付时我把「观察它有没有 fire」写成了 `/health.counters.…` ——
+        //    没有 token 的读者看不到它 ⇒ 那条 must-fire 判据**我自己也没法验**。
+        //    ⇒ 聚合值走匿名投影：**只给总数与窗口，不给 by_node**（节点名是拓扑，计数不是）。
+        //    这也与 sessions_count 同一条取舍：规模可以公开，明细不行。
+        task_expiries_never_consumed_total: neverConsumedExpiryCounters().total,
+        // 窗口的另一端：计数器随进程重启归零，而「归零」与「没有发生」同值 ⇒ 必须配起点。
+        counters_since: startedAtIso,
         // #496 — public, stable capability data. Dashboard upload proxies
         // need the Hub's real limits before opening a streaming request;
         // duplicating these constants client-side creates a silent

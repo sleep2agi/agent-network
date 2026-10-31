@@ -247,6 +247,25 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(after.counters.task_rejections.total).toBe(before.counters.task_rejections.total);
   });
 
+  // #3271 —— 「派单硬闸有没有真的 fire 过」必须是**匿名可读的聚合**。
+  // 我第一版把它只放在鉴权投影里（counters.task_expiries_never_consumed），
+  // 于是没有 token 的读者——包括当时的我——看不到它，也就无法验证它有没有 fire。
+  // 这两条断言把「公开的那一半」钉住：**给总数与窗口，不给 by_node**（节点名是拓扑）。
+  test("#3271 派单硬闸的读数：匿名给总数+窗口，by_node 留在鉴权投影", async () => {
+    const { PUBLIC_HEALTH_KEYS } = await import("./server.js");
+    expect(PUBLIC_HEALTH_KEYS.has("task_expiries_never_consumed_total")).toBe(true);
+    expect(PUBLIC_HEALTH_KEYS.has("counters_since")).toBe(true);
+    // by_node / last_at 不在公开白名单里 —— 拓扑不外泄（这条是**否定断言**，所以要配上面两条肯定断言）
+    expect(PUBLIC_HEALTH_KEYS.has("task_expiries_never_consumed")).toBe(false);
+    expect(PUBLIC_HEALTH_KEYS.has("by_node")).toBe(false);
+    const { neverConsumedExpiryCounters, noteNeverConsumedExpiry } = await import("./expiry-counters.js");
+    noteNeverConsumedExpiry("unread-probe-node");
+    const agg = neverConsumedExpiryCounters();
+    expect(agg.total).toBeGreaterThan(0);
+    expect(typeof agg.since).toBe("string");
+    expect(Object.keys(agg.by_node)).toContain("unread-probe-node");
+  });
+
   // 2026-10-31 —— 出口清单里「before_route_table」那一行原本 pinned_by 为空（= 缺口）。
   // 补上它的钉：未匹配的 /api/* 在路由表之前就 404，**不经过 handler，也不计数**。
   // 这一条同时是「清单要能被一次坏输入打出来」的实例（对方那句）。

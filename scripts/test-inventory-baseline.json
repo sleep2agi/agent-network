@@ -6235,6 +6235,7 @@
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::anonymous → 401": 1,
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::legacy master token → 200 (ops path — restAuth null, isLegacyAuthToken)": 1,
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::regular member token → 403 (detail spans every network)": 1,
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::#3271 派单硬闸的读数：匿名给总数+窗口，by_node 留在鉴权投影": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::CLI count source stays truthful: health.sse_connections == /api/stats/sse total (no fake 0)": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::KNOWN GAP: body over runtime maxRequestBodySize is NOT counted (rejected before fetch())": 1,
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::KNOWN GAP: unauthenticated /api/task rejection is NOT counted (see rejection-counters.ts)": 1,
@@ -14449,6 +14450,7 @@
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::anonymous → 401",
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::legacy master token → 200 (ops path — restAuth null, isLegacyAuthToken)",
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::regular member token → 403 (detail spans every network)",
+  "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::#3271 派单硬闸的读数：匿名给总数+窗口，by_node 留在鉴权投影",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::CLI count source stays truthful: health.sse_connections == /api/stats/sse total (no fake 0)",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::KNOWN GAP: body over runtime maxRequestBodySize is NOT counted (rejected before fetch())",
   "server/src/health-redaction.test.ts::#473 anonymous /health — watchdog contract intact, no topology leak::KNOWN GAP: unauthenticated /api/task rejection is NOT counted (see rejection-counters.ts)",
@@ -16428,7 +16430,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "4bf9c778576489526d80322bfd000c1472349599",
+  "commit": "3cd0931c7c1d45d5a1050613ea13fd68c622f162",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

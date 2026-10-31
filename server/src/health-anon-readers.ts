@@ -45,6 +45,11 @@ export const PUBLIC_HEALTH_KEY_READERS: Readonly<Record<string, AnonReaderEntry>
   mcp_inflight: { reader: "operator", why: "运维手工 curl 看实时在途数；仓内无代码读，仅注释引用过生产数值" },
   mcp_inflight_peak: { reader: "operator", why: "运维手工看**峰值**，用于判断重连风暴是否发生过；无程序读者" },
   event_loop: { reader: "operator", why: "停顿指标只出现在历史发布报告里，仓内无代码读；靠人看" },
+  // #3271 —— 我原来把「观察这条闸有没有 fire」写成了 /health.counters.…，
+  // 而 counters 不在匿名投影里 ⇒ 没有 token 的读者（包括当时的我）看不到它。
+  // ⇒ 聚合走匿名投影；by_node 仍是拓扑，不给。
+  task_expiries_never_consumed_total: { reader: "operator", why: "运维/agent 判断「派单硬闸有没有真的 fire 过」；只有总数，不含节点名" },
+  counters_since: { reader: "operator", why: "上一条的窗口起点：计数器随重启归零，只有总数时「刚重启」与「一次都没发生」同值" },
   auth: { reader: "cli", why: "客户端据此决定登录方式" },
   security: { reader: "cli", why: "客户端据此提示是否需要 TLS/密钥配置" },
   tmux: { reader: "cli", why: "共存 TUI 的前置检查" },
