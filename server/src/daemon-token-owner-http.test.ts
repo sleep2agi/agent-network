@@ -150,6 +150,12 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect(adopted).toMatchObject({ ok: true, status: "active" });
   expect(Object.keys(adopted).sort()).toEqual(["ok", "status"]);
   expect((await call(legacy, "list_my_children")).children).toContainEqual({ child_node_id: child, alias: child, lifecycle_state: "active", managed: "adopted", binding_request_id: requestId });
+  // 2026-10-31 —— #3275：get_probe_request 的**不存在**分支键集（成功分支需要真实 probe 夹具，
+  // 本文件不造；错误分支同样是契约：客户端按 error 分支，多一个键就会多一个没人知道的分支）
+  const gotProbe = await call(legacy, "get_probe_request", { probe_id: "probe_fixture_absent" });
+  expect(gotProbe.ok).toBe(false);
+  // 实测：错误分支多一个 reason（不是只 {error, ok}）——**又一次由真实调用纠正**
+  expect(Object.keys(gotProbe).sort()).toEqual(["error", "ok", "reason"]);
   const stop = await call(owner.token, "stop_node", { node_id: child, network_id: owner.network_id });
   expect(stop.ok).toBe(true);
   // 2026-10-31 —— #3275 批次 2：get_stop_request 的**成功体**键集（daemon 按字段名读，
