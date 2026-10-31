@@ -4093,7 +4093,11 @@ return Bun.serve({
         // 而**照它的建议改成 parseHubTimestamp 就是错的**：那函数只吃字符串，数字一律返回 null，
         // 于是「有观测时间」会静默变成「从没观测过」。
         // ⇒ 正解是把单位写进名字，让形状自己说清它是 ms。
-        observed_at: (() => { const observedAtMs = row?.observed_at ?? null; return observedAtMs ? new Date(observedAtMs).toISOString() : null;   // 与原意一致：0/缺失都当「没有」 })(),
+        observed_at: (() => {
+          const observedAtMs = row?.observed_at ?? null;
+          // 与原意一致：0 / 缺失都当「没有」。
+          return observedAtMs ? new Date(observedAtMs).toISOString() : null;
+        })(),
         ...(state === "failed" ? { error: row?.error ?? null } : {}),
         ...(state === "never_switched"
           // 2026-10-31 —— **hint 必须自带动作**（外部复核：互斥选项若需要不同动作才能区分，
