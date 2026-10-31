@@ -48,3 +48,4 @@ docs/dashboard-screenshots/
 __pycache__/
 *.pyc
 server/build-info.json
+agent-network/build-info.json

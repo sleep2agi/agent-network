@@ -11,6 +11,7 @@
  */
 
 import { constants, openSync, closeSync, fstatSync, chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
+import { formatBuildLine, readPackageBuildInfo } from "../src/build-info";
 import { hasBorrowedV1Intent, readBorrowedLaunchConfig, waitForBorrowedLaunchHealth } from "../src/shared/opencode-borrowed-launch-health";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
@@ -3714,6 +3715,13 @@ function detectAgentNodeSubDeps(): { claudeAgentSdk: string | null; codexSdk: st
 function printVersionReport() {
   const versions = detectInstalledPackages();
   process.stdout.write(formatAnetVersionBanner(versions.anet.version, standaloneBundleVersion(STANDALONE_BUILD_STAMP)));
+  // 2026-10-31 —— #3294：版本标签之外还要有**字节标识**。
+  // 「同一版本号、不同字节」在只有标签时不可分辨；而 absent 与 invalid 也必须分开说
+  // （前者是源码检出的正常状态，后者是注入写坏了）。
+  {
+    const r = readPackageBuildInfo();
+    console.log(`  ${formatBuildLine(r)}`);
+  }
 
   console.log("Components (auto-fetched on first use, you don't need to install them manually):");
   console.log(`  ${formatLazyComponent(versions.agentNode)}`);
