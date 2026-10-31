@@ -635,6 +635,22 @@ def selftest(quiet: bool = False) -> int:
                   f"{'' if ok else f' —— 实际 blocking={len(blocking)} unproven={len(unproven)} advisory={len(advisory)}'}")
             if not ok:
                 failures += 1
+        # 2026-10-31 —— **把「错了之后读数长什么样」变成一个断言**（外部复核 ②：
+        # 「你写了：X 会被读成 Y ⇒ 而这句话本身不会让它变红；有效形态是把 X 喂进判据 ⇒ 必须红」）。
+        #
+        # 本门这轮新加的同位置对照说：「`.sort()` 命中 0 ⇒ 锚坏了，此时的 0 不能读成没有」。
+        # 那就把那种语料真的喂进去：一份**有 `.join(` 但没有 `.sort()`** 的文件。
+        # 期望：宽形状非 0（工具活着）而锚为 0（判不了）—— 两个对照必须能分开。
+        poison = root / "anchor_gone.ts"
+        poison.write_text('const s = ["a","b"].join(",");\n', encoding="utf-8")
+        _, _, _, _, _, ctrl = scan_paths([poison], root)
+        wide, anchor = ctrl
+        ok = wide > 0 and anchor == 0
+        print(f"{'✓' if ok else '✗'} selftest 锚消失：宽形状={wide}（>0）且锚={anchor}（=0）"
+              f"{'' if ok else ' —— 两个对照没有被分开，同位置对照失效'}")
+        if not ok:
+            failures += 1
+
     if failures:
         print(f"✗ selftest 失败 {failures} 例：门没有按预期变红/变绿", file=sys.stderr)
         return 1
