@@ -348,6 +348,14 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(["known", "absent", "unknown"]).toContain(st.kind);
     if (st.kind === "known") expect(typeof st.type).toBe("string");
     if (st.kind === "unknown") expect(typeof st.reason).toBe("string");
+
+    // 2026-10-31 —— 兼容字段 `license` 与三态之间的**配对约束**（外部复核在本仓指到的那个洞）：
+    //   `license: "none"` 同时表示 absent 与 unknown ⇒ 单看它无法支撑「是否商业授权」。
+    //   这一条把它的歧义**限定在一个范围内**：只有这两种状态才允许渲染成 "none"；
+    //   反过来，known 时 "none" 绝不允许出现（那才是真的把「有授权」读成「没有」）。
+    const legacy = body.license;
+    if (legacy === "none") expect(["absent", "unknown"]).toContain(st.kind);
+    if (st.kind === "known") expect(legacy).not.toBe("none");
   });
 
   // 2026-10-31 —— 匿名投影必须是**白名单**：新字段默认不出现。
