@@ -111,8 +111,18 @@ test('actual Hub tool atomically saves encrypted Provider; metadata read and con
   const read = await human('daemon_provider_snapshot', { action: 'hub_read', id: 'hub', network_id: net }); expect(read.providers).toHaveLength(1);
   // 2026-10-31 —— **精确键集**（#3171）：客户端「可选模型」这一面直接消费这两个投影，
   // 而多给一个键（尤其 secret_key_ref）在这条线上是最严重的那类改动。
-  // 实际四键（我第一版漏了 network_id —— 断言当场纠正）。
-  expect(Object.keys(read).sort()).toEqual(["network_id", "ok", "providers", "source"]);
+  //
+  // 2026-10-31 晚 —— 补齐到 7 键。原因是端点自己长出了三态自述（counts / source_table / state）：
+  // 「providers 是空数组」与「全都禁用」在旧载荷里长得一模一样，读的人只能猜。
+  // 这条精确键集因此**当场变红**——而这正是它该做的事：让「多加一栏」必须是一次有意识的决定。
+  // 两个键的存在理由：state ∈ {configured, unconfigured, all_disabled}（空数组不是结论）；
+  // source_table 说明读的是**哪张表**（本仓另有 MCP list_providers 读 providers 表，两者不同源）。
+  expect(Object.keys(read).sort()).toEqual([
+    "counts", "network_id", "ok", "providers", "source", "source_table", "state",
+  ]);
+  expect(["configured", "unconfigured", "all_disabled"]).toContain(read.state);
+  expect(read.source_table).toBe("hub_provider_configs");
+  expect(read.counts.providers).toBe(read.providers.length);   // 计数与数组同源
   // provider 视图实际 12 键（我第一版写了 6 个，漏了 baseUrl/enabled/models/protocol/updated_at/verification）
   expect(Object.keys(result.provider).sort()).toEqual([
     "baseUrl", "compatible_runtimes", "credential_present", "enabled", "id", "label",
