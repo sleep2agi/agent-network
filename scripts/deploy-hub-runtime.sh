@@ -128,5 +128,9 @@ fi
 
 pm2 save >/dev/null 2>&1
 say "切换完成：$CURRENT → $NEWV（pm2 save 已执行）"
+# 2026-10-31 —— **哨兵行定型**（外部复核：「version 单独一行标 role，观察时刻单独标 observed」）。
+# 一行、字段固定、可 grep：跨 run 比对时不需要人读散文。
+#   role=deployment_label —— 这一格是**部署标签**，不是代码指纹（同 /health.version_role）
+printf 'DEPLOY v=%s role=%s observed=%s\n' "$NEWV" "deployment_label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 say "回滚命令：HUB_RUNTIME_DIR=$COMMHUB_HOME/runtime-$(printf '%s' "${CURRENT:-}" | tr '.' '-') pm2 restart $PM2_NAME --update-env"
 exit 0
