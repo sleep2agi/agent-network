@@ -51,6 +51,7 @@ if [ "$BASE_ACAO" = "-" ] || [ -z "$BASE_ACAO" ]; then
 fi
 
 fails=0
+FAILED_LABELS=""
 check() {
   local label="$1" origin="$2" want="$3"
   local r acao
@@ -60,7 +61,7 @@ check() {
   if [ "$want" = "echo" ] && [ "$acao" != "-" ] && [ -n "$acao" ]; then ok=1; fi
   if [ "$want" = "none" ] && { [ "$acao" = "-" ] || [ -z "$acao" ]; }; then ok=1; fi
   printf '  %-28s acao=%-32s want=%-5s %s\n' "$label" "${acao:--}" "$want" $([ $ok -eq 1 ] && echo ✓ || echo ✗)
-  [ $ok -eq 1 ] || fails=$((fails + 1))
+  [ $ok -eq 1 ] || { fails=$((fails + 1)); FAILED_LABELS="${FAILED_LABELS}${FAILED_LABELS:+、}${label}"; }
 }
 
 check "大写形式（规范化）" "$UPPER" echo
@@ -69,6 +70,23 @@ check "清单外（反例）"     "$FOREIGN" none
 
 echo "判定：基准格成立 ⇒ 其余格有效"
 [ $fails -eq 0 ] && { echo "✓ 全部符合预期"; exit 0; }
-echo "✗ $fails 格不符预期" >&2
-echo "  ⇒ 若「大写/尾斜杠」两格也失败，说明线上跑的是**字符串比较**那一版（不是解析后比较）" >&2
+
+# 2026-10-31 —— 外部复核 ④：「预测落空时先说清**哪些格一起反常**，再说为什么——
+# 单看一格的反常，三种成因不可分。」下面按「哪些格一起坏」分支，而不是逐格解释。
+echo "✗ $fails 格不符预期（一起反常的格：$FAILED_LABELS）" >&2
+NORM_BAD=0; NEG_BAD=0
+case "$FAILED_LABELS" in
+  *大写*|*尾斜杠*) NORM_BAD=1 ;;
+esac
+case "$FAILED_LABELS" in *清单外*) NEG_BAD=1 ;; esac
+if [ $NORM_BAD -eq 1 ] && [ $NEG_BAD -eq 0 ]; then
+  echo "  ⇒ **只有规范化那两格坏、反例是对的** ＝ 线上跑的是字符串比较那一版（不是解析后比较）" >&2
+elif [ $NORM_BAD -eq 0 ] && [ $NEG_BAD -eq 1 ]; then
+  echo "  ⇒ **只有反例坏** ＝ 闸放得比清单宽（清单外也被回显）；先查清单内容与是否有人加了通配" >&2
+else
+  echo "  ⇒ **规范化与反例一起坏** ＝ 单看这几格分不出三种成因，按这个顺序排：" >&2
+  echo "     ① 源码不是线上那份（整张表不成立 —— 所有格一起反常时优先怀疑这个）" >&2
+  echo "     ② 前层改写了 Origin（本份配置 grep 0 命中，但线上是另一个 ref，未验）" >&2
+  echo "     ③ 读错了代码位置（侧别不对称：一侧反常另一侧正常）" >&2
+fi
 exit 1
