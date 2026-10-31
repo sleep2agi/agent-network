@@ -122,7 +122,7 @@ describe("#3271 证据的生命期必须 ≥ 故障的生命期（进程内计�
   test("🔴 内存计数为空，但 tasks 表里有 3 条历史 ⇒ 必须拒绝", () => {
     const r = neverConsumeGate({
       alias: "ghost", counters: empty, force: false, forceAllowed: true, now: NOW,
-      persistent: { expiries: 3, last_at: new Date(NOW - 60_000).toISOString().replace("T", " ").slice(0, 19) },
+      persistent: { expiries: 3, last_at: new Date(NOW - 60_000).toISOString().replace("T", " ").slice(0, 19), last_reply_at: null },
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
@@ -133,19 +133,28 @@ describe("#3271 证据的生命期必须 ≥ 故障的生命期（进程内计�
     const counters = { since: "s", total: 2, by_node: { ghost: 2 }, last_at: { ghost: new Date(NOW - 60_000).toISOString() } };
     const r = neverConsumeGate({
       alias: "ghost", counters, force: false, forceAllowed: true, now: NOW,
-      persistent: { expiries: 3, last_at: new Date(NOW - 60_000).toISOString().replace("T", " ").slice(0, 19) },
+      persistent: { expiries: 3, last_at: new Date(NOW - 60_000).toISOString().replace("T", " ").slice(0, 19), last_reply_at: null },
     });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error("unreachable");
     expect(r.expiries).toBe(3);
   });
 
-  test("表里的历史很旧（超过时效）⇒ 放行：节点可能已经恢复", () => {
+  // 🔴 语义修正（2026-10-31 第二次实测）：DB 证据**不用固定 TTL**。
+  // 固定 2 小时是我拍的，而那台节点的故障节律是「天」——于是闸在 22 小时前的那次过期之后
+  // 判「已恢复」并放行，而它这 22 小时一条都没回。
+  // 现在 DB 证据自带边界（「最后一次回复之后」），陈旧不陈旧由回复本身回答。
+  test("🔴 表里的历史很旧、但之后没有回复 ⇒ 仍然拒绝（固定 TTL 只留给纯内存计数）", () => {
     const r = neverConsumeGate({
       alias: "ghost", counters: empty, force: false, forceAllowed: true, now: NOW,
-      persistent: { expiries: 9, last_at: "2026-10-20T00:00:00" },
+      persistent: { expiries: 9, last_at: "2026-10-20T00:00:00", last_reply_at: "2026-10-18T00:00:00" },
     });
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe(false);
+  });
+
+  test("纯内存计数仍然有 2 小时时效（没有回复时间可比，只能按时长兜底）", () => {
+    const counters = { since: "s", total: 9, by_node: { ghost: 9 }, last_at: { ghost: new Date(NOW - 3 * 3600_000).toISOString() } };
+    expect(neverConsumeGate({ alias: "ghost", counters, force: false, forceAllowed: true, now: NOW }).ok).toBe(true);
   });
 });
 

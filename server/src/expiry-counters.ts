@@ -87,29 +87,77 @@ export const NEVER_CONSUME_STALE_MS = 2 * 60 * 60_000;
  *   · 进程内计数器：本次进程内发生的最新鲜的那几条（可能在 tasks 行写之前就有）
  *   · tasks 表：跨重启的历史（窗口由调用方给，默认 7 天 —— 与「节点可能恢复」同一个取舍）
  */
-export interface PersistentExpiryEvidence { expiries: number; last_at: string | null }
+export interface PersistentExpiryEvidence {
+  /** 「最后一次成功回复之后」仍过期且无回复的条数。 */
+  expiries: number;
+  /** 这些过期里最近的一条（用于读数，不用于时效判断）。 */
+  last_at: string | null;
+  /** 该节点最后一次成功回复的时间；null = 从来没有回复过（那才是真正的「从未消费」）。 */
+  last_reply_at: string | null;
+}
 
 export const NEVER_CONSUME_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
 
+/**
+ * #3271 🔴 2026-10-31 第二次修正 —— 判据的**语义**错了，不只是寿命。
+ *
+ * 第一次修正（内存 ∪ tasks 表）解决的是「部署清空计数器」，但生产实测仍然放行，查库后发现：
+ *
+ *     tasks WHERE to_name='TM官网运维'
+ *       replied            252 条   ← 它其实会干活
+ *       status='expired'    37 条   且 consumed_at 全为 NULL
+ *       全库 consumed_at 非空 83,332 条（这个字段是被正常使用的）
+ *
+ * ⇒ **`consumed_at IS NULL` 不等于「从未取走」**：这台节点回复过 252 条，只是从不写这个字段。
+ *    计数器叫「从未取走」，量的却是「没写 consumed_at」—— 我把字段名当成了行为名。
+ *
+ * 所以判据改为**以「最后一次成功回复」为界**：
+ *   「在你最后一次回复之后，又有多少条过期且没人回」= 它到底还在不在服务。
+ *   之后已经回复过 ⇒ 放行（它是活的，只是某几条没接）。
+ *
+ * 这也让固定 TTL 变得不必要：DB 这条路自带边界（回复时间），
+ * 而固定 TTL 是凭直觉定的 —— 实测那台节点的故障节律是「天」，我给的是「2 小时」。
+ */
 export function persistentNeverConsumedExpiries(
   db: { get<T = any>(sql: string, ...params: any[]): T | null },
   alias: string,
   networkId: string | null,
   opts: { now?: number; lookbackMs?: number } = {},
 ): PersistentExpiryEvidence {
-  const since = new Date((opts.now ?? Date.now()) - (opts.lookbackMs ?? NEVER_CONSUME_LOOKBACK_MS)).toISOString().replace("T", " ").slice(0, 19);
+  const since = new Date((opts.now ?? Date.now()) - (opts.lookbackMs ?? NEVER_CONSUME_LOOKBACK_MS))
+    .toISOString().replace("T", " ").slice(0, 19);
+
+  // ① 最后一次成功回复（replied / completed 都算「还活着」的证据）
+  const reply = networkId
+    ? db.get<{ last: string | null }>(
+        `SELECT MAX(COALESCE(completed_at, created_at)) AS last FROM tasks
+          WHERE to_name = ?1 AND network_id = ?2 AND status IN ('replied','completed')`,
+        alias, networkId)
+    : db.get<{ last: string | null }>(
+        `SELECT MAX(COALESCE(completed_at, created_at)) AS last FROM tasks
+          WHERE to_name = ?1 AND status IN ('replied','completed')`,
+        alias);
+  const lastReplyAt = reply?.last ?? null;
+
+  // ② 它之后仍「过期且无回复」的条数
+  const boundary = lastReplyAt && lastReplyAt > since ? lastReplyAt : since;
   const row = networkId
     ? db.get<{ n: number; last: string | null }>(
         `SELECT COUNT(*) AS n, MAX(created_at) AS last FROM tasks
-          WHERE to_name = ?1 AND network_id = ?2 AND status = 'expired' AND consumed_at IS NULL
-            AND created_at >= ?3`,
-        alias, networkId, since)
+          WHERE to_name = ?1 AND network_id = ?2 AND status = 'expired' AND result IS NULL
+            AND created_at > ?3`,
+        alias, networkId, boundary)
     : db.get<{ n: number; last: string | null }>(
         `SELECT COUNT(*) AS n, MAX(created_at) AS last FROM tasks
-          WHERE to_name = ?1 AND status = 'expired' AND consumed_at IS NULL
-            AND created_at >= ?2`,
-        alias, since);
-  return { expiries: Number(row?.n ?? 0), last_at: row?.last ?? null };
+          WHERE to_name = ?1 AND status = 'expired' AND result IS NULL
+            AND created_at > ?2`,
+        alias, boundary);
+
+  return {
+    expiries: Number(row?.n ?? 0),
+    last_at: row?.last ?? null,
+    last_reply_at: lastReplyAt,
+  };
 }
 
 export type NeverConsumeGate =
@@ -134,6 +182,22 @@ export function neverConsumeGate(input: {
   const fromDb = input.persistent?.expiries ?? 0;
   const expiries = Math.max(fromMemory, fromDb);
   if (expiries < limit) return { ok: true };
+  // DB 证据**自带边界**（「最后一次回复之后」），所以它不需要固定 TTL —— 那个 TTL 是我拍的。
+  // 只有「纯内存计数」这条路才需要时效：它没有回复时间可比，只能靠时长兜底。
+  if (fromDb >= limit) {
+    if (input.force && input.forceAllowed) return { ok: true };
+    return {
+      ok: false,
+      error: "target_never_consumes",
+      alias: input.alias,
+      expiries,
+      window_since: input.counters.since,
+      message:
+        `this target has ${fromDb} expired task(s) with no reply since its last reply`
+        + `${input.persistent?.last_reply_at ? ` (${input.persistent.last_reply_at})` : " (it has never replied)"}; `
+        + `nothing will queue correctly here until it replies again — pass force:true (user tokens) if you know it recovered`,
+    };
+  }
   // 2026-10-31 —— **只数不衰减会把恢复了的节点永久拉黑**。
   // 实测的教训来自另一台机（TM中转运维）：连「抑制了多少」这个数本身都在被环缓冲淘汰，
   // 所以任何「累计」都只在它的窗口内可引用；这里把窗口写进判据：最近一次过期超过 TTL ⇒ 放行。

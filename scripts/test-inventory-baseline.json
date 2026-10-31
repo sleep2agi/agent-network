@@ -6085,8 +6085,9 @@
   "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::读数里带 last_at —— 光有计数看不出「多久没犯了」": 1,
   "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::🔴 最近一次超过 TTL ⇒ 放行（节点可能已恢复；计数仍留在读数里）": 1,
   "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::两个来源取**并集**（内存 2 + 表里 3 ⇒ 按 3 判，不是相加也不是取小）": 1,
-  "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::表里的历史很旧（超过时效）⇒ 放行：节点可能已经恢复": 1,
+  "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::纯内存计数仍然有 2 小时时效（没有回复时间可比，只能按时长兜底）": 1,
   "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::🔴 内存计数为空，但 tasks 表里有 3 条历史 ⇒ 必须拒绝": 1,
+  "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::🔴 表里的历史很旧、但之后没有回复 ⇒ 仍然拒绝（固定 TTL 只留给纯内存计数）": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set": 1,
@@ -14304,8 +14305,9 @@
   "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::读数里带 last_at —— 光有计数看不出「多久没犯了」",
   "server/src/expiry-counters.test.ts::#3271 硬闸的时效：只数不衰减会把恢复了的节点永久拉黑::🔴 最近一次超过 TTL ⇒ 放行（节点可能已恢复；计数仍留在读数里）",
   "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::两个来源取**并集**（内存 2 + 表里 3 ⇒ 按 3 判，不是相加也不是取小）",
-  "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::表里的历史很旧（超过时效）⇒ 放行：节点可能已经恢复",
+  "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::纯内存计数仍然有 2 小时时效（没有回复时间可比，只能按时长兜底）",
   "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::🔴 内存计数为空，但 tasks 表里有 3 条历史 ⇒ 必须拒绝",
+  "server/src/expiry-counters.test.ts::#3271 证据的生命期必须 ≥ 故障的生命期（进程内计数器不够）::🔴 表里的历史很旧、但之后没有回复 ⇒ 仍然拒绝（固定 TTL 只留给纯内存计数）",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::existing-blob path rejects every malformed token and accepts the shared legal set",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::new-upload path rejects every malformed token and accepts the shared legal set",
@@ -16438,7 +16440,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "6d56e16638af8b9c53f0e761dad9cfb46bbab1d1",
+  "commit": "48dfcef3d19bda8f1b70090fb55d763f047868df",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
