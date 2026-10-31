@@ -313,7 +313,39 @@ INVALIDATES: list[dict[str, str]] = [
     {"id": "scan_domain_changed", "type": "domain",
      "check": "重跑本脚本；SCOPE 的 scan_domain 里 ext 计数与上次不同 ⇒ 作废"},
 ]
+# 2026-10-31 —— **阻塞档每一条规则，都要说出「什么情况下它不会命中」**（外部复核的落点）。
+# 说不出来，这条规则就还在猜 —— 而一道在猜的闸比没有闸更危险：它让人以为已经查过了。
+# ⇒ 这里把两条阻塞规则的「不命中条件」写成字段，由自检强制非空。
+BLOCKING_RULES: list[dict[str, str]] = [
+    {
+        "id": "adjacent_keyset_separator",
+        "site": "SET_JOIN 命中，且**紧邻**比较运算符（8 字符内）",
+        # ⚠️ 不要在这里写反斜杠转义：`\\n` / `\\0` 会被 Python 解析成真的换行与 NUL，
+        #    于是整份输出变成「二进制」而 grep 直接放弃（实测踩过一次）。
+        "not_hit_when": "分隔符不在 SEPARATORS 白名单内（例如换行 / NUL 这类不可碰撞的分隔符）；"
+                        "或比较运算符不在 8 字符内；或该文件是测试文件（降为 review）",
+    },
+    {
+        "id": "derived_keyset_separator",
+        "site": "标识符由 Object.keys 赋值派生，且在 80 字符窗口外、但同一语句内拼 join 后紧邻比较",
+        "not_hit_when": "标识符被重新赋值、或被 push/splice/concat/map/filter 派生（taint 失效）；"
+                        "或 join 后没有紧邻的比较运算符；或该文件是测试文件",
+    },
+]
+
 INVALIDATE_TYPES = {"ref_dirty", "behavior", "domain"}
+
+
+def blocking_rules_complete() -> list[str]:
+    """每条阻塞规则都必须有 id / site / not_hit_when。缺一 ⇒ 它还在猜。"""
+    bad = []
+    for r in BLOCKING_RULES:
+        for k in ("id", "site", "not_hit_when"):
+            if not r.get(k):
+                bad.append(f"{r.get('id', '?')}: missing {k}")
+        if r.get("not_hit_when") and len(r["not_hit_when"]) < 20:
+            bad.append(f"{r.get('id', '?')}: not_hit_when 太短，等于没说")
+    return bad
 
 
 def invalidates_complete() -> list[str]:
@@ -430,7 +462,7 @@ def selftest(quiet: bool = False) -> int:
         if quiet and k.get("file") is not _sys_shim.stderr and a:
             return
         builtins.print(*a, **k)
-    bad = invalidates_complete()
+    bad = blocking_rules_complete() + invalidates_complete()
     if bad:
         print(f"✗ invalidates_on 字段不自洽：{bad}", file=sys.stderr)
         print("  ⇒ 散文可以漏一项而不被发现；字段不能 —— 这就是把它写成字段的理由。", file=sys.stderr)
@@ -650,6 +682,13 @@ def main() -> int:
     # 只报一维时，「恒红」与「假绿」在报告里同形（都是「有问题/没问题」）。
     can_red = "yes（selftest 8/8 + 跨行 canary）"
     now = "green（0 阻塞）" if not blocking else f"red（{len(blocking)} 处）"
+    # 2026-10-31 —— **每条阻塞规则都必须写明「什么情况下它不会命中」**。
+    # 说不出来 ⇒ 它还在猜；而一道在猜的闸比没有闸更危险（它让人以为已经查过了）。
+    print(f"  blocking_rules : {len(BLOCKING_RULES)} 条，逐条写明不命中条件：")
+    for _r in BLOCKING_RULES:
+        print(f"    · {_r['id']}")
+        print(f"        命中  ：{_r['site']}")
+        print(f"        不命中：{_r['not_hit_when']}")
     print(f"  gate_state     : can_red={can_red} ｜ current={now}  ⇒ 二维都报，否则恒红与假绿同形")
     # 2026-10-31 —— 散文三行 → **带类型的字段**。
     # 差别不在准确度，在能否被检查：散文里「树变」是一个形容词，
