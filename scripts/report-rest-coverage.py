@@ -75,17 +75,83 @@ def keyset_sites() -> list[tuple[str, int]]:
     return out
 
 
-def keyset_near(corpus_lines: list[tuple[str, int, str]], keyset: list[tuple[str, int]], path: str, window: int = 30) -> bool:
+ROUTE_LITERAL = re.compile(r"/(?:api|ws|events)/[A-Za-z0-9_\-/.]*")
+CONST_DEF = re.compile(r"\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*[:=]")
+
+
+class MentionIndex:
+    """2026-10-31 —— 路由被**藏在本地助手**后面的情形。
+
+    为什么需要：mention 的判定原来是「路径字面量出现在这一行」。测试把路由写进一个
+    本地 builder（`const query = (k, s) => `/api/node-lifecycle-requests?...`` 很常见），
+    **真正的调用点**那几行里没有路径字面量 ⇒ 键集断言即使紧贴调用点，
+    也会因为「离字面量 100 多行」被算成没钉。
+
+    这里只做很窄的一件事：定义行 + 后两行内**恰好**出现一条路由时，
+    把 `NAME(` 的调用点登记为该路由的额外 mention 点。
+    刻意不做全量数据流 —— 一个别名指向两条路由就放弃（宁可不认，也不猜）。
+    """
+
+    def __init__(self, corpus_lines: list[tuple[str, int, str]]):
+        self.by_file: dict[str, dict[int, str]] = {}
+        for f, ln, text in corpus_lines:
+            self.by_file.setdefault(f, {})[ln] = text
+        # (file, alias) -> route
+        self.alias: dict[tuple[str, str], str] = {}
+        for f, lines in self.by_file.items():
+            for ln, text in lines.items():
+                m = CONST_DEF.match(text)
+                if not m:
+                    continue
+                seen: set[str] = set()
+                for k in (ln, ln + 1, ln + 2):
+                    t = lines.get(k)
+                    if t is None:
+                        continue
+                    seen.update(r.rstrip(".") for r in ROUTE_LITERAL.findall(t))
+                if len(seen) == 1:
+                    self.alias[(f, m.group(1))] = next(iter(seen))
+
+    def iter_lines(self):
+        for f, lines in self.by_file.items():
+            for ln, text in lines.items():
+                yield f, ln, text
+
+    def lines_for(self, path: str) -> list[tuple[str, int, str]]:
+        out: list[tuple[str, int]] = []
+        aliases: dict[str, list[str]] = {}
+        for (f, name), route in self.alias.items():
+            if route == path:
+                aliases.setdefault(f, []).append(name)
+        for f, lines in self.by_file.items():
+            names = aliases.get(f, [])
+            pats = [re.compile(rf"\b{re.escape(n)}\s*\(") for n in names]
+            for ln, text in lines.items():
+                literal = path in text
+                alias = any(pt.search(text) for pt in pats)
+                if literal:
+                    out.append((f, ln, "literal"))
+                elif alias:
+                    out.append((f, ln, "alias"))
+        return out
+
+
+def keyset_near(index: MentionIndex, keyset: list[tuple[str, int]], path: str, window: int = 30) -> set[str]:
+    """返回**认这条路路由的提及方式**集合：{"literal"} / {"alias"} / 两者。
+
+    2026-10-31 —— 之前只返回布尔。布尔藏了一件事：口径变过之后，
+    「为什么它现在算钉上了」无从追问。这里把依据一并交出去。
+    """
     by_file: dict[str, list[int]] = {}
     for f, ln in keyset:
         by_file.setdefault(f, []).append(ln)
-    for f, ln, text in corpus_lines:
-        if path not in text:
-            continue
+    via: set[str] = set()
+    for f, ln, kind in index.lines_for(path):
         for kl in by_file.get(f, []):
             if abs(kl - ln) <= window:
-                return True
-    return False
+                via.add(kind)
+                break
+    return via
 
 
 def test_corpus() -> str:
@@ -98,9 +164,9 @@ def test_corpus() -> str:
     return "\n".join(out)
 
 
-def classify(rows: list[dict], corpus: str, corpus_lines=None, keyset=None) -> dict:
+def classify(rows: list[dict], corpus: str, mention_index: "MentionIndex | None" = None, keyset=None) -> dict:
     literal = [r for r in rows if isinstance(r.get("path"), str) and LITERAL.match(r["path"])]
-    referenced, unreferenced, with_keyset = [], [], []
+    referenced, unreferenced, with_keyset, alias_only = [], [], [], []
     for r in literal:
         # 用路径字面量做检索：模板串里写 `${id}` 的调用点不会命中，这是**已知漏报方向**
         # （宁可少算引用，也不要多算 —— 报出一个假的「已覆盖」比报一个假的缺口更糟）。
@@ -110,8 +176,12 @@ def classify(rows: list[dict], corpus: str, corpus_lines=None, keyset=None) -> d
             continue
         referenced.append(key)
         # 2026-10-31 —— 「被提到」≠「形状被断言过」：再看该路径附近的 30 行内有没有键集断言
-        if corpus_lines is not None and keyset is not None and keyset_near(corpus_lines, keyset, key):
-            with_keyset.append(key)
+        if keyset is not None:
+            via = keyset_near(mention_index, keyset, key)
+            if via:
+                with_keyset.append(key)
+                if via == {"alias"}:
+                    alias_only.append(key)
     return {
         "endpoints_total": len(rows),
         "endpoints_literal": len(literal),
@@ -119,6 +189,7 @@ def classify(rows: list[dict], corpus: str, corpus_lines=None, keyset=None) -> d
         "referenced": sorted(set(referenced)),
         "unreferenced": sorted(set(unreferenced)),
         "with_keyset": sorted(set(with_keyset)),
+        "keyset_via_local_builder_only": sorted(set(alias_only)),
     }
 
 
@@ -153,7 +224,8 @@ def main(argv: list[str]) -> int:
                 lines.append((p.name, i, line))
         except OSError:
             continue
-    res = classify(rows, test_corpus(), lines, keyset_sites())
+    index = MentionIndex(lines)
+    res = classify(rows, test_corpus(), index, keyset_sites())
 
     if "--json" in argv:
         print(json.dumps({
@@ -167,6 +239,9 @@ def main(argv: list[str]) -> int:
                 "referenced": len(res["referenced"]),
                 "unreferenced": len(res["unreferenced"]),
                 "with_keyset_near": len(res["with_keyset"]),
+                # 口径说明：这几个端点在测试里**没有**字面量调用点，形状断言是跟着
+                # 本地 builder 别名认出来的（见 MentionIndex）。改过口径就要能被指认。
+                "keyset_via_local_builder_only": res["keyset_via_local_builder_only"],
             },
             "unreferenced": res["unreferenced"],
             "covers": "REST 路由的**等值路径**在 server/src/*.test.ts 里是否被提到",

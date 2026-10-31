@@ -144,7 +144,16 @@ test("rename registry: another network's node does not reserve the local alias",
   seedNode(`n_idv_foreign_target_${stamp}`, target, NET2, outsiderId);
   const prepared = await api(ownerToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: victimAlias, new_alias: target });
   expect(prepared.body.ok).toBe(true);
-  expect((await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id })).body.ok).toBe(true);
+  // 2026-10-31 —— #3214：abort 的成功体形状此前完全没钉（只断言了 ok）。
+  // 形状由真实调用给出：{ok, txn_id}，且回执里的 txn_id 必须是**被取消的那一笔** ——
+  // 客户端靠它把本地 pending 的 prepare 清掉，回错 id 就等于没清。
+  const aborted = await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id });
+  expect(Object.keys(aborted.body).sort()).toEqual(["ok", "txn_id"]);
+  expect(aborted.body.txn_id).toBe(prepared.body.txn_id);
+  // 幂等：再 abort 一次仍是同一对（rename.ts 里 `status === "aborted"` 分支显式回落）
+  const again = await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id });
+  expect(Object.keys(again.body).sort()).toEqual(["ok", "txn_id"]);
+  expect(again.body.txn_id).toBe(prepared.body.txn_id);
 });
 
 test("rename registry: a free alias commits and preserves node identity", async () => {
