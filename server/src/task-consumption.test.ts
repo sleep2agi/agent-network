@@ -218,7 +218,15 @@ describe("task consumed_at identity and lifecycle", () => {
   test("runtime submission is visible without claiming authoritative consumption", async () => {
     const taskId = await createTask("vendor request accepted but no turn event yet");
     const handler = toolsFor({ alias: NODE_A, nodeToken: true }).mark_tasks_runtime_submitted;
-    expect((await call(handler, { task_ids: [taskId] })).ok).toBe(true);
+    const submitted = await call(handler, { task_ids: [taskId] });
+    // 2026-10-31 —— #3275：mark_tasks_runtime_submitted 的形状（此前只断言 ok）。
+    // 外层两键；每个 evidence 行 5 键 —— 其中 consumed_at 与 runtime_submitted_at **同时存在**
+    // 是有意的：这一条工具只推进「提交到运行时」，不推进「消费」。
+    expect(Object.keys(submitted).sort()).toEqual(["ok", "tasks"]);
+    expect(Object.keys(submitted.tasks[0]).sort()).toEqual([
+      "consumed_at", "runtime_submitted_at", "task_id", "thread_id", "turn_id",
+    ]);
+    expect(submitted.ok).toBe(true);
     expect(typeof runtimeSubmittedAt(taskId)).toBe("string");
     expect(consumedAt(taskId)).toBeNull();
   });
