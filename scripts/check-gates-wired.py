@@ -58,6 +58,7 @@ UNWIRED_EXIT_WHEN: dict[str, str] = {
     "scripts/report-rest-coverage.py": "REST 覆盖率被接进 CI 的覆盖率门 ⇒ 移出本表",
     "scripts/report-header-producers.py": "「同一路由内 >1 生产者」被做成门 ⇒ 移出本表",
     "scripts/report-type-assertions.py": "type_only 计数被做成棘轮门（基线入库、只许降不许升）⇒ 移出本表",
+    "scripts/report-server-test-triage.py": "它被接进 CI 的「全量 server 测试」步骤，红/黄分档直接进 PR 摘要 ⇒ 移出本表",
     "scripts/report-health-liveness.py": "有了带负载的定时运行点 ⇒ 移出本表",
     "scripts/report-mcp-key-set-coverage.py": "键集覆盖率进 CI 并设下限 ⇒ 移出本表",
     "scripts/report-node-versions.py": "舰队版本分布出现固定读者 ⇒ 移出本表",
@@ -96,6 +97,8 @@ KNOWN_UNWIRED: dict[str, str] = {
     # 2026-10-31 —— 它在这次提交里把本门弄红了（新 report-* 没登记），这条记录就是那次红。
     "scripts/report-type-assertions.py": "[report-only] 读数报告（`expect(typeof x).toBe(\"T\")` 的三分类）；"
                                          "68 条 type_only 里多数是 fixture 守卫，直接当门会立刻红而且红得没信息",
+    "scripts/report-server-test-triage.py": "[report-only] 读数是「这次全量跑红在哪一档」；"
+                                           "它不改代码也不阻断，人工用它做归因",
     "scripts/report-health-liveness.py": "[report-only] 读数报告（/health 里哪些字段多次采样从不变化）；"
                                          "空闲负载下不变不构成结论，它是「有流量时再看一眼」的入口",
     # 2026-10-31 —— 移除 `cleanup-dangling-requirement-refs.py` 的豁免条目：
