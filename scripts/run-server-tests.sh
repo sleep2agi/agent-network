@@ -54,6 +54,11 @@ for f in "${FILES[@]}"; do
     fail=$((fail + 1))
     failed_list="$failed_list $f"
     printf 'FAIL %-56s %s\n' "$f" "$line"
+    # 2026-10-31 —— **失败按根因归并**（外部复核：「812 不是 812 个缺陷，
+    # 它是一次没有归并的输出；按条排队修它，永远修不完」）。
+    # 这里只对**失败的文件**做归并输出，且不吞掉原输出（前 5 条仍在下面）。
+    printf '%s\n' "$out" | python3 "$ROOT/scripts/summarize-test-failures.py" 2>/dev/null \
+      | sed 's/^/      /' | head -6
     printf '%s\n' "$out" | grep -E '\(fail\)' | head -5 | sed 's/^/      /'
   fi
   : "${n:=0}"

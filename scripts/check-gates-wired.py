@@ -73,6 +73,8 @@ KNOWN_UNWIRED: dict[str, str] = {
                                           "多生产者不是缺陷，但它是「改一处只改了一半」的前置条件",
     "scripts/report-health-liveness.py": "[report-only] 读数报告（/health 里哪些字段多次采样从不变化）；"
                                          "空闲负载下不变不构成结论，它是「有流量时再看一眼」的入口",
+    "scripts/summarize-test-failures.py": "[interactive] 失败归并工具，由 run-server-tests.sh 在失败时调用；"
+                                          "它只读失败，判断绿请看 runner 的退出码",
     "scripts/report-mcp-key-set-coverage.py": "[report-only] 读数报告（键集覆盖率三口径），人工按需跑",
     "scripts/report-node-versions.py": "[report-only] 读数报告（舰队版本分布），人工按需跑",
     "scripts/report-reason-branches.py": "[report-only] 读数报告（按 reason 分支的处数），人工按需跑",
