@@ -83,7 +83,25 @@ def gates() -> list[Path]:
 
 
 def workflow_text() -> str:
-    return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in (REPO / ".github" / "workflows").glob("*.yml"))
+    """workflows 的正文，**剥掉注释**。
+
+    2026-10-31 —— 外部复核（原话）：
+      「注释绕过的漏洞换了一层：入口采集对 ENTRY_FILES 是原文 matchAll、零过滤
+        ⇒ 一行 `// … scripts/x.sh` 就够把 missing 集合消掉。」
+
+    本仓同样的洞：`p.name in wf` 会被**任何出现**满足，包括 YAML 注释里的一句提及。
+    ⇒ 先剥两种注释（整行 `#` 开头、行尾 ` # …`），再匹配。
+    """
+    out = []
+    for p in (REPO / ".github" / "workflows").glob("*.yml"):
+        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            # 行尾注释：只在 ` #` 之后切（避免切断 URL 里的 # 片段）
+            if " #" in line:
+                line = line.split(" #", 1)[0]
+            out.append(line)
+    return "\n".join(out)
 
 
 def supports_selftest(p: Path) -> bool:
