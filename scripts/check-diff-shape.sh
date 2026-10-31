@@ -81,7 +81,16 @@ if [ "${SELFTEST:-0}" = "1" ]; then
   else
     echo "✗ selftest 接线门绿却挡住提交: $out"; fails=$((fails+1))
   fi
-  [ "$fails" -eq 0 ] && { echo "✓ selftest 5/5 通过"; exit 0; }
+  # 版本文档：改动 docs-site/ ⇒ 版本文档门必须被真的执行
+  mkdir -p "$tmp/docs-site/guide" && printf 'x\n' > "$tmp/docs-site/guide/g.md"
+  # 同时给 GATES_WIRED_CMD=true：临时仓里没有真接线门，上一组的 scripts/report-new.py 还在
+  out=$(cd "$tmp" && GATES_WIRED_CMD=true DOC_CLAIMS_CMD=false bash "$SELF" --added 3 --deleted 1 2>&1); rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "版本文档门的自检是红的"; then
+    echo "✓ selftest docs-site 有改动 + 版本文档门红 ⇒ exit 1 且理由指向该门"
+  else
+    echo "✗ selftest docs-site 有改动但版本文档门没被执行/没红: $out"; fails=$((fails+1))
+  fi
+  [ "$fails" -eq 0 ] && { echo "✓ selftest 6/6 通过"; exit 0; }
   exit 1
 fi
 
@@ -129,5 +138,20 @@ if printf '%s\n' "$touched" | grep -q '^scripts/'; then
     exit 1
   fi
   echo "✓ scripts/ 有改动：接线门已执行且绿"
+fi
+
+# 第三步：改动了**版本文档**（docs-site/** 或发布说明）⇒ 版本文档门必须跑过且绿。
+# 2026-10-31 —— 这一条是当天第二次栽的同一个跟头：dispatch 前我只跑了本地测试，
+# 于是 gate 3（发布说明缺文件）与 gate 4（getting-started 仍断言 .201）在 CI 上才红。
+# 两者的输入都在这条 diff 里 ⇒ 门应当**跟着改动范围**自己出现，而不是等我记得。
+if printf '%s\n' "$touched" | grep -qE '^(docs-site/|docs/tests/release-)'; then
+  out=$(${DOC_CLAIMS_CMD:-python3 scripts/check-doc-version-claims.py --selftest} 2>&1); drc=$?
+  if [ "$drc" -ne 0 ]; then
+    echo "✗ 本次改动了版本文档，而版本文档门的自检是红的：" >&2
+    printf '%s\n' "$out" | tail -6 >&2
+    exit 1
+  fi
+  echo "✓ 版本文档有改动：check-doc-version-claims --selftest 已执行且绿"
+  echo "  ⚠ 它只查**结构**（戳与正文是否自洽）；「戳指着正在发的那个版本」要发版前带 --version 跑。"
 fi
 exit 0
