@@ -1173,6 +1173,20 @@ export interface HealthFieldMeta {
    *   只写「什么算」的分类，对形似字段没有抵抗力。
    */
   frozen_at_boot?: true;
+  /**
+   * 2026-10-31 —— **分类必须带窗口**（外部复核 (e)：「六分类不决定『变不变』，
+   * 还缺『窗口』这一参数；`startedAt` 属 instance 却会在 failover 时变，
+   * 处理应分三态 pinned / excluded / allowed，而不是混进白名单」）。
+   *
+   * 「这个字段是常量」不是一句可以单独成立的话——它总得回答「在多长的时间里」。
+   * 本仓的取值：
+   *   request —— 同一次请求内不变（例如聚合出来的标签）
+   *   process —— 同一个进程内不变（startedAt / pid / boot_id / git_commit）；
+   *              **跨进程会变**（重启 / failover / 换制品），所以它不能用来做实例身份
+   *   deploy  —— 跨进程也不变（例如 version_source 的取值域）
+   * ⇒ 一个分类不写窗口，就无法被证伪：读一次相同与读一年相同，在断言上同形。
+   */
+  stable_within?: "request" | "process" | "deploy";
   /** 为什么把它放这一档（只在有争议的字段上写） */
   why?: string;
 }
@@ -1212,7 +1226,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
     // 前提必须成立：uptime 来自 process.uptime()（单调），**不是** Date.now()-startedAt（同源就没判别力）。
     why: "进程已运行秒数（process.uptime()，单调时钟）。与 served_at/startedAt 不同源：墙钟被 NTP 冻结时它仍在走 ⇒ 可判「是钟停了还是进程停了」",
   },
-  startedAt: { frozen_at_boot: true, class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
+  startedAt: { frozen_at_boot: true, stable_within: "process", class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
   sessions_count: { class: "gauge", granularity: "level" },
   sse_connections: { class: "gauge", granularity: "level" },
   mcp_inflight: { class: "gauge", granularity: "level" },
@@ -1304,7 +1318,7 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
 
   // ── landmark：精确位置/身份 ──────────────────────────────────────────
   git_commit: {
-    frozen_at_boot: true,
+    frozen_at_boot: true, stable_within: "deploy",
     class: "landmark",
     why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单",
     identity_class: "artifact",
@@ -1328,10 +1342,10 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   },
   // 逐会话明细 = 拓扑 ⇒ 只需「有几个」，不需要「哪几个」（与 #473 的审计同一条）
   sse_sessions: { class: "landmark", why: "按键列出连接 = 网络 id + 别名，正是 #473 那个泄露面" },
-  pid: { frozen_at_boot: true, class: "landmark" },
-  boot_id: { frozen_at_boot: true, class: "landmark" },
-  proc_start_ticks: { frozen_at_boot: true, class: "landmark" },
-  kernel_started_at: { frozen_at_boot: true, class: "landmark", why: "内核口径的精确启动时刻 ⇒ 可与外部日志对账" },
+  pid: { frozen_at_boot: true, stable_within: "process", class: "landmark" },
+  boot_id: { frozen_at_boot: true, stable_within: "process", class: "landmark" },
+  proc_start_ticks: { frozen_at_boot: true, stable_within: "process", class: "landmark" },
+  kernel_started_at: { frozen_at_boot: true, stable_within: "process", class: "landmark", why: "内核口径的精确启动时刻 ⇒ 可与外部日志对账" },
   kernel_started_at_note: { class: "landmark" },
 
   // ── credential ─────────────────────────────────────────────────────

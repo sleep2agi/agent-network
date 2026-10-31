@@ -852,6 +852,64 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
     expect(HEALTH_FIELD_META.served_at.frozen_at_boot).toBeUndefined();
   });
 
+  // 2026-10-31 —— **分类不决定「变不变」，还缺「窗口」这个参数**（外部复核 (e)：
+  // 「`startedAt` 属 instance，却会在 failover 时变，正是你自己那张表的反例；
+  //   处理分三态 pinned / excluded / allowed，而不是混进白名单」）。
+  //
+  // 本仓的 `frozen_at_boot: true` 到此为止只是一条**声明**：没有任何断言把它和
+  // 「同一个进程在窗口内读两次，这个值不变」对上。声明与行为之间没有桥，
+  // 于是分类错了只会被下一个人读出来，不会被测试读出来。
+  //
+  // 判据（三态在这里的落法）：
+  //   pinned   = frozen_at_boot:true  ⇒ 窗口内必须**逐字节相同**，变了就红
+  //   allowed  = 没打 frozen 标      ⇒ 变不变都可以，本测试不管
+  //   excluded = 会变且不该被 pinned  ⇒ 必须存在并在正向对照里出现（见下）
+  // 窗口显式：WINDOW_MS 写在断言里，而不是「两次读一下大概就行」。
+  test("frozen_at_boot fields really do not change within a declared window", async () => {
+    const { HEALTH_FIELD_META } = await import("./server.js");
+    const WINDOW_MS = 1200;
+    expect(WINDOW_MS).toBeGreaterThan(0);   // 窗口为 0 的「没变」不构成读数
+
+    const a = await (await fetch(`${BASE}/health`)).json() as Record<string, unknown>;
+    await new Promise((r) => setTimeout(r, WINDOW_MS));
+    const b = await (await fetch(`${BASE}/health`)).json() as Record<string, unknown>;
+
+    // 每一个 pinned 字段还必须**声明窗口**：不写窗口的「不变」无法被证伪。
+    // 三态（外部复核 (e)）：pinned ＝ 有窗口且窗口内必须不变；allowed ＝ 没打标；
+    // excluded ＝ 会变且不该被打成 pinned —— 它必须存在，否则「都 pinned」就没有反例。
+    const pinnedAll = Object.entries(HEALTH_FIELD_META).filter(([, m]) => m.frozen_at_boot === true);
+    const noWindow = pinnedAll.filter(([, m]) => !m.stable_within).map(([k]) => k);
+    expect(noWindow).toEqual([]);                       // 声明了 pinned 就必须声明窗口
+    const windows = new Set(pinnedAll.map(([, m]) => m.stable_within));
+    for (const w of windows) expect(["request", "process", "deploy"]).toContain(w as string);
+
+    const pinned = pinnedAll
+      .map(([k]) => k)
+      .filter((k) => k in a && k in b);
+    // 分母：匿名投影里至少要能看见 1 个 pinned 字段，否则这条测试是真空真
+    expect(pinned.length).toBeGreaterThan(0);
+
+    const moved = pinned.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+    expect(moved).toEqual([]);   // 声明是 pinned，就必须在窗口内真的不动
+
+    // ⚠️ 这条检查的**弱点必须写出来**（否则它会被读成比实际更强的东西）：
+    //   一个值**本来就在这个窗口里不变**的字段，即使被错误地标成 pinned，也照样通过。
+    //   实测 witness：把 `sessions_count` 标成 `frozen_at_boot + stable_within:"process"`，
+    //   测试**仍然绿** —— 因为空测试库里它恒为 0。
+    //   ⇒ 这条断言真正守住的是「标了 pinned 的字段在窗口内不许变」，
+    //     它**不能**守住「pinned 打得对」。后者只有两种办法：
+    //       ① 造一个真会变的场景（连接数变化 / 重启 / failover）再读两次；
+    //       ② 用第二个观测者（另一个实例、另一台机器），而不是对同一实例再采样一次。
+    //   今天本仓两样都没有 ⇒ 这一格只能到「窗口声明 + 窗口内不变」为止。
+    //
+    // 正向对照：窗口内必须**有东西会变**，否则「都没变」可能只是「两次读的是同一份缓存」。
+    // 这不是洁癖：一个恒定的响应体可以让上面那条永远绿。
+    const changed = Object.keys(a).filter((k) => k in b && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+    expect(changed.length).toBeGreaterThan(0);
+    // 且变化必须**不含**任何 pinned 字段（与上面互为镜像：一条说“没变”，一条说“别的在变”）
+    expect(changed.filter((k) => pinned.includes(k))).toEqual([]);
+  });
+
   // 2026-10-31 —— credential 的「可对账性」是**字段取值**，不是注释里的辩论。
   test("joinability decides anonymity, not the reader's interpretation", async () => {
     const { HEALTH_FIELD_META, mayBePublic } = await import("./server.js");
