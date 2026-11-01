@@ -123,6 +123,7 @@ import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
 import { taskRejectionCounters } from "./rejection-counters.js";
 import { neverConsumedExpiryCounters, noteNeverConsumedExpiry, neverConsumeGate, persistentNeverConsumedExpiries } from "./expiry-counters.js";
+import { authAbuseSnapshot, noteLoginIpRateLimited, noteLoginLocked, noteRegisterRateLimited } from "./auth-abuse-counters.js";
 import { legacyLicenseField, licenseStateOf } from "./license-state.js";
 import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
@@ -2363,6 +2364,7 @@ return Bun.serve({
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
       if (!checkRateLimit(clientIP, 30)) {
+        noteRegisterRateLimited(clientIP);
         return withCors(req, Response.json({ ok: false, error: "too many requests, try again later" }, { status: 429 }));
       }
       try {
@@ -2380,6 +2382,7 @@ return Bun.serve({
       const ipRate = sharedLoginIpRateLimiter.check(clientIP || "unknown");
       if (!ipRate.allowed) {
         logAudit(null, null, "login_rate_limited", "auth", undefined, clientIP);
+        noteLoginIpRateLimited(clientIP);
         return withCors(req, Response.json(
           { ok: false, error: "rate_limited", message: "Too many login attempts. Try again later.", retry_after_ms: ipRate.retryAfterMs },
           { status: 429, headers: { "Retry-After": String(Math.ceil((ipRate.retryAfterMs ?? 1000) / 1000)) } }
@@ -2390,6 +2393,7 @@ return Bun.serve({
         const lock = sharedLoginFailureLockout.check(body.username);
         if (lock.locked) {
           logAudit(null, body.username, "login_locked", "auth", undefined, `retry_after_ms=${lock.retryAfterMs ?? 0}`);
+          noteLoginLocked(body.username);
           return withCors(req, Response.json(
             { ok: false, error: "login_locked", message: "Too many failed login attempts. Try again later.", retry_after_ms: lock.retryAfterMs },
             { status: 429, headers: { "Retry-After": String(Math.ceil((lock.retryAfterMs ?? 1000) / 1000)) } }
@@ -3843,6 +3847,11 @@ return Bun.serve({
           task_rejections: taskRejectionCounters(),
           // #3271 —— 「到死都没被取走」按节点分桶。窗口用同一个 since。
           task_expiries_never_consumed: neverConsumedExpiryCounters(),
+          // #3314 B 类 —— 故意匿名的那两条路由（register / login）没有身份门，
+          // 它们的健康度只能从「限流与锁定命中了几次、打到了几个不同来源」读出来。
+          // 比值才是有意义的部分：命中数 ≫ 去重数 ⇒ 单点重试；两者接近 ⇒ 换 IP / 撒网。
+          // 只给计数与去重数，不给 IP / 用户名的值（集合本身不出进程）。
+          auth_abuse: authAbuseSnapshot(),
         },
         // 🔴 2026-10-31 —— 上面那个 counters 对象**不在匿名投影里**（PUBLIC_HEALTH_KEYS）。
         //    而 #3271 交付时我把「观察它有没有 fire」写成了 `/health.counters.…` ——

@@ -162,4 +162,28 @@ if printf '%s\n' "$touched" | grep -qE '^(docs-site/|docs/tests/release-)'; then
   echo "✓ 版本文档有改动：check-doc-version-claims --selftest 已执行且绿"
   echo "  ⚠ 它只查**结构**（戳与正文是否自洽）；「戳指着正在发的那个版本」要发版前带 --version 跑。"
 fi
+
+# 第四步：改动了**测试文件** ⇒ 测试清单棘轮必须真的跑过且绿。
+# 2026-11-01 —— 这一条是从 CI 上栽回来的：`b7c8cd2e` 新增了 6 条测试，
+# 我只跑了那些测试本身（6/6 pass），没跑清单门；CI 的 `lint (test inventory)`
+# 立刻红在「有 6 条测试的出现次数增加了（集合不变）」。
+# 关键在于：**测试通过**与**清单认得出它**是两件事，而前者会让人以为后者也成立。
+# 所以这里不检查「测试是否绿」（那由 runner 负责），只检查清单有没有被这次改动带歪。
+if printf '%s\n' "$touched" | grep -qE '(^|/)src/[^/]*\.test\.ts$|(^|/)tests/'; then
+  out=$(${TEST_INVENTORY_CMD:-python3 scripts/check-test-inventory.py} 2>&1); trc=$?
+  if [ "$trc" -ne 0 ]; then
+    echo "✗ 本次改动了测试文件，而测试清单棘轮是红的 —— 提交前必须绿：" >&2
+    if printf '%s\n' "$out" | grep -qE '✗'; then
+      printf '%s\n' "$out" | grep -E '✗' | head -8 >&2
+      printf '%s\n' "$out" | sed -n '/✗/,/⇒/p' | grep -E '^\s+×' | head -8 >&2
+    else
+      echo "  ⇒ 门没给出任何 ✗ —— 多半是**没跑起来**（缺 python/权限），不是清单错。末尾输出：" >&2
+      printf '%s\n' "$out" | tail -5 | sed 's/^/    /' >&2
+    fi
+    echo "  ⇒ 新增测试：python3 scripts/check-test-inventory.py --update（并在提交信息里说明新加了哪几条）。" >&2
+    echo "  ⇒ 删了测试：那是本门的本体 —— 先回答「为什么可以不跑」。不要 --update 绕过。" >&2
+    exit 1
+  fi
+  echo "✓ 测试文件有改动：测试清单棘轮已执行且绿"
+fi
 exit 0
