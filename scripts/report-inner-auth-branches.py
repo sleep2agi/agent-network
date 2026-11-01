@@ -48,6 +48,12 @@ BRANCH_PATTERNS = (
 
 # 已经做过「短路这一支 ⇒ 跑测试 ⇒ 看红不红」实验的那些（结论要写明依据）。
 PROBED = {
+    # 2026-11-01 —— 第三档：**unpinned**（短路后没有测试变红）。
+    # 它既不是 reachable（没测试守它）也不是 unreachable（可能只是没测），
+    # 而两者在「短路后仍绿」这个读数上完全同形 —— 所以单列一档，不合并。
+    "L4222 /api/nodes/:id/tool-allowlist (!restAuth)": ("unpinned", "短路后 node-permissions 54 pass / 0 fail"),
+    "L4343 /api/nodes/:id/rest-allowlist (!restAuth)": ("unpinned", "同上"),
+    "L4460 /api/nodes/:id/peer-allowlist (!restAuth)": ("unpinned", "同上"),
     "POST /api/messages/ack": ("unreachable", "短路该支后测试仍绿；实测响应体是全局层的 unauthorized"),
     "POST /api/upload": ("unreachable", '短路 case "anonymous" 后测试仍绿；源码注释自称 Unreachable'),
     "POST /api/auth/tokens": ("reachable", "短路后 reds=1（可隔离 witness）"),
