@@ -17,6 +17,17 @@
 // 已知偏差（写在读数旁边，不写在文档里）：
 //   · 进程内计数，重启归零 ⇒ 与 /health 的 counters_since 同源，读之前先看 since。
 //   · 去重集合有上限（512）⇒ capped=true 时 distinct_* 是**下界**，不是真值。
+//   · 🔴 **本机来源下这三个计数恒为 0，而且那不是「没有被滥用」。**
+//     `checkRateLimit()` 对 `127.0.0.1` / `::1` / `""` / `"unknown"` 直接 `return true`
+//     （server.ts:249，为 dev/test 留的口子），于是 register 的限流分支根本不会走到。
+//     实测（`0.9.0-preview.258` 的制品，本地起在 9311）：
+//       · 不带 X-Forwarded-For 打 36 次注册 ⇒ 全部 200，register_rate_limited_total 仍是 0
+//       · 带 `X-Forwarded-For: 203.0.113.9` 打 34 次 ⇒ 30×200 + 4×429，
+//         register_rate_limited_total = 4、distinct_register_limited_ips = 1（**逐次对得上**）
+//       · 带 `X-Forwarded-For: 203.0.113.77` 用同一个用户名错 8 次 ⇒ 5×401 + 3×429，
+//         login_locked_total = 3、distinct_locked_usernames = 1
+//     ⇒ 所以「本地读到 0」是一个结构性假阴性：要见证必须模拟外部来源（XFF），
+//       否则 0 会被读成「没有滥用」，而它其实只说明「限流器跳过了本机」。
 
 export const DISTINCT_CAP = 512;
 
