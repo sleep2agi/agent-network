@@ -45,6 +45,15 @@ DOC_GLOBS = ["docs/**/*.md", "docs-site/**/*.md", "skills/**/*.md", "README.md",
 # ADHOC 登记表：一次性/人肉工具放这里。**必须**有「谁会发现它烂了」与「什么时候可以删掉这一行」。
 # 空字典是合法的 —— 但它同时意味着「本仓没有一次性工具」。新增一条就是一次显式决定。
 ADHOC: dict[str, tuple[str, str]] = {
+    'report-requirement-field-gaps.py': (
+        '读生产库 requirements 算「新建卡缺字段占比」（#3068）；CI 的临时库没有真实建卡行为',
+        '并进统一舰队巡检（每天一行）后删本行',
+    ),
+    'hub-requirement-gaps.sh': (
+        '生产机上的巡检包装（每天一行「新建/缺字段」），读生产库 requirements；'
+        'CI 的临时库没有真实建卡行为 ⇒ 跑不出读数',
+        '并进统一舰队巡检后删本行',
+    ),
     'hub-idle-poll-share.sh': (
         '生产机上的巡检包装（每 6h 记一行「问状态/问活」占比，读的是生产库的 node_tool_calls）；'
         'CI 的临时库没有这些行，跑不出比例 ⇒ CI 里不可能有发现者',
