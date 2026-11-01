@@ -5428,6 +5428,8 @@
   "server/src/api-nodes-shape.test.ts::#2293 opencode_* scalars::unknown generation / absent fields → null (old nodes keep rendering)": 1,
   "server/src/api-nodes-shape.test.ts::#2293 opencode_catalog projection::absent / malformed / wrong shape → null, row still served": 1,
   "server/src/api-nodes-shape.test.ts::#2293 opencode_catalog projection::valid list reaches the row, order kept": 1,
+  "server/src/api-nodes-shape.test.ts::#3144 opencode_catalog_seen_at —— 三态，不塌成两种::有 opencode_catalog_seen_at ⇒ 原样投影": 1,
+  "server/src/api-nodes-shape.test.ts::#3144 opencode_catalog_seen_at —— 三态，不塌成两种::没有那个字段 ⇒ null（不是空串、不是当前时间）": 1,
   "server/src/api-nodes-shape.test.ts::RFC-024 regression — GET /api/nodes response shape (no SELECT *)::daemon discovery use-case: dashboard finds role=host_supervisor without prefix heuristic": 1,
   "server/src/api-nodes-shape.test.ts::RFC-024 regression — GET /api/nodes response shape (no SELECT *)::explicit columns + role extracted: config_snapshot NOT in response, role IS": 1,
   "server/src/api-nodes-shape.test.ts::RFC-024 regression — GET /api/nodes response shape (no SELECT *)::internal columns are still readable via dedicated query (config snapshot endpoint path)": 1,
@@ -13718,6 +13720,8 @@
   "server/src/api-nodes-shape.test.ts::#2293 opencode_* scalars::unknown generation / absent fields → null (old nodes keep rendering)",
   "server/src/api-nodes-shape.test.ts::#2293 opencode_catalog projection::absent / malformed / wrong shape → null, row still served",
   "server/src/api-nodes-shape.test.ts::#2293 opencode_catalog projection::valid list reaches the row, order kept",
+  "server/src/api-nodes-shape.test.ts::#3144 opencode_catalog_seen_at —— 三态，不塌成两种::有 opencode_catalog_seen_at ⇒ 原样投影",
+  "server/src/api-nodes-shape.test.ts::#3144 opencode_catalog_seen_at —— 三态，不塌成两种::没有那个字段 ⇒ null（不是空串、不是当前时间）",
   "server/src/api-nodes-shape.test.ts::RFC-024 regression — GET /api/nodes response shape (no SELECT *)::daemon discovery use-case: dashboard finds role=host_supervisor without prefix heuristic",
   "server/src/api-nodes-shape.test.ts::RFC-024 regression — GET /api/nodes response shape (no SELECT *)::explicit columns + role extracted: config_snapshot NOT in response, role IS",
   "server/src/api-nodes-shape.test.ts::RFC-024 regression — GET /api/nodes response shape (no SELECT *)::internal columns are still readable via dedicated query (config snapshot endpoint path)",
@@ -16580,7 +16584,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "6f1d8cab0526130c3afa3ed1e8a07e594b405812",
+  "commit": "c9ee0dd7f70571f8a903771274b0ec542b39359f",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

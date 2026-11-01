@@ -6974,6 +6974,8 @@ return Bun.serve({
         // 客户端在**没有 daemon 绑定**时用它当建议列表。读法同 role：快照可能是文本或对象；
         // 解析失败/形状不对 = 这一格没有（null），不影响整行。
         let opencodeCatalog: string[] | null = null;
+        // null = daemon 没报采集时刻（不是「很久以前」，也不是「刚刚」）
+        let opencodeCatalogSeenAt: string | null = null;
         let opencodeGeneration: "v1" | "v2" | null = null;
         let opencodeMode: string | null = null;
         let opencodeServer: string | null = null;
@@ -6986,6 +6988,13 @@ return Bun.serve({
           const raw = parsed?.opencode_catalog;
           if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
             opencodeCatalog = raw.slice(0, 400);
+            // #3144 —— 目录是**快照**：51 个模型是刚才采集的还是三周前的，
+            // 读的人此前分不出（`last_seen_at` 是节点心跳，不是采集时刻）。
+            // 这里只做**投影**：daemon 报了 `opencode_catalog_seen_at` 就带出来，
+            // 没报就是 null（显式三态，不塌成「很久以前」也不塌成「刚刚」）。
+            const seen = parsed?.opencode_catalog_seen_at;
+            opencodeCatalogSeenAt =
+              typeof seen === "string" && seen.length > 0 && seen.length <= 40 ? seen : null;
           }
           // #2293 —— 客户端「Runtime · V2」和「OpenCode Server」两行要的正是快照里这三格标量。
           // PR #1092 之前从 `node.config_snapshot` 读，但这个端点**刻意不带整个快照**
@@ -7013,6 +7022,8 @@ return Bun.serve({
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
           opencode_catalog: opencodeCatalog,
+          // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
+          opencode_catalog_seen_at: opencodeCatalogSeenAt,
           opencode_generation: opencodeGeneration,
           opencode_mode: opencodeMode,
           opencode_server: opencodeServer,

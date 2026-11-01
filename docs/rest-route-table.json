@@ -849,7 +849,7 @@
    "method": null,
    "query": [],
    "kind": "regex_prefix",
-   "line": 7042
+   "line": 7053
   },
   {
    "id": 92,
@@ -858,7 +858,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 7114
+   "line": 7125
   },
   {
    "id": 93,
@@ -867,7 +867,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 7177
+   "line": 7188
   },
   {
    "id": 94,
@@ -876,11 +876,11 @@
    "method": null,
    "query": [],
    "kind": "starts_with",
-   "line": 7192
+   "line": 7203
   }
  ],
  "provenance": [
-  "generated_from: `server/src/server.ts` source_sha256=`9bd081a49b32`",
+  "generated_from: `server/src/server.ts` source_sha256=`336e104d58b1`",
   "reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）",
   "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`",
   "重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）"
