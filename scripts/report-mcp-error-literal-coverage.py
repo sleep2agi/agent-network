@@ -133,7 +133,16 @@ def selftest() -> int:
     # 直接测正则，不走磁盘（避免改 REPO 全局）
     ok = (len(KEYSET_ASSERT.findall((tmp / "a.test.ts").read_text())) == 1
           and not KEYSET_ASSERT.search((tmp / "c.test.ts").read_text()))
-    print(f"{'ok  ' if ok else 'FAIL'}  精度识别器：内联写法命中、toMatchObject 不命中")
+    # 换行拆开的形态必须落进 unparsed，而不是被当成「没写」
+    (tmp / "d.test.ts").write_text('expect(\n  Object.keys(x).sort(),\n).toEqual(["a"]);\n')
+    _lines = (tmp / "d.test.ts").read_text().splitlines()
+    _unp = 0
+    for _i, _ln in enumerate(_lines):
+        if "Object.keys(" in _ln and not KEYSET_ASSERT.search(_ln):
+            if any(k in "\n".join(_lines[_i:_i + 4]) for k in (".toEqual(", ".toBe(")):
+                _unp += 1
+    ok = ok and _unp == 1
+    print(f"{'ok  ' if ok else 'FAIL'}  精度识别器：内联命中 / toMatchObject 不命中 / 换行拆开落进 unparsed")
     if not ok:
         bad += 1
     total = len(SELFTEST_CASES) + 1
@@ -159,9 +168,12 @@ def precision_reading() -> dict:
     files = sorted((REPO / "server" / "src").glob("*.test.ts"))
     inline = 0
     helpers = 0
+    unparsed = 0
+    unparsed_sample = []
     files_with = []
     for f in files:
-        body = f.read_text()
+        lines = f.read_text().splitlines()
+        body = "\n".join(lines)
         n_inline = len(KEYSET_ASSERT.findall(body))
         n_helper_def = len(HELPER_DEF.findall(body))
         # 用了本地辅助函数时，调用点也算 —— 否则「提取成函数」会让读数下降（假倒退）
@@ -170,7 +182,20 @@ def precision_reading() -> dict:
             files_with.append(f.name)
         inline += n_inline
         helpers += n_helper_calls
+
+        # 2026-11-01 —— **读不到 ≠ 没写**：`Object.keys(...)` 被换行拆开时，单行正则读不到，
+        # 于是「写了但计数器看不见」与「没写」在数上同形。
+        # 修法不是让被测对象迁就工具（改成一整行），而是让计数器报 `unparsed`。
+        for i, ln in enumerate(lines):
+            if "Object.keys(" not in ln or KEYSET_ASSERT.search(ln):
+                continue
+            window = "\n".join(lines[i:i + 4])
+            if ".toEqual(" in window or ".toBe(" in window:
+                unparsed += 1
+                if len(unparsed_sample) < 5:
+                    unparsed_sample.append(f"{f.name}:{i + 1}")
     return {"inline_assertions": inline, "helper_calls": helpers,
+            "unparsed": unparsed, "unparsed_sample": unparsed_sample,
             "files": len(files_with), "sample": files_with[:8],
             "unit": "assertions"}
 
@@ -250,6 +275,13 @@ def main() -> int:
           f"（内联 {pr['inline_assertions']} + 本地辅助调用 {pr['helper_calls']}），分布在 {pr['files']} 个测试文件")
     print("  ⇒ 这一格存在的理由：覆盖率对「断言有多精确」无感，")
     print("     所以把字段级换成精确键集时，覆盖率不动 —— 那不等于「没做事」。")
+    # 读不到 ≠ 没写：换行拆开的键集断言单行正则抓不到，必须单独报。
+    print(f"  **读不到 {pr['unparsed']} 处**（看见了 Object.keys( 且附近有 toEqual，但单行正则解析不出）")
+    print(f"  ⇒ 所以这条读数的真值是「≥ {pr['inline_assertions'] + pr['helper_calls'] + pr['unparsed']} 处」；"
+          f"已解析的 {pr['inline_assertions'] + pr['helper_calls']} 只是**下界**")
+    if pr["unparsed_sample"]:
+        print(f"  例：{', '.join(pr['unparsed_sample'])}")
+    print("  ⇒ 让被测对象改写成一行以便被统计，会把「顺手写整齐」变成「为了被统计而写整齐」。")
     if pr["sample"]:
         print(f"  例：{', '.join(pr['sample'][:5])}")
 
