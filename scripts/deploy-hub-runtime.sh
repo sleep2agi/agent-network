@@ -259,6 +259,8 @@ say "回滚命令：HUB_RUNTIME_DIR=$COMMHUB_HOME/runtime-$(printf '%s' "${CURRE
 #   1. 清理在 `exit 0` 之后做，且**不影响部署结果** —— 删目录失败不该让一次成功的切换变红。
 #   2. 删除前**打印清单与合计大小**：可核对，而不是「它自己删了些东西」。
 #   3. 只删 `runtime-*` 目录，且要求路径在 $COMMHUB_HOME 内（与 stage 19 同一条防线）。
+# 常量驱动，不写死在文案里：文案若写「保留 2 个」而常量改成 3，
+# 那句文案就变成了一条没人检查的断言（改了常量、句子不变、也不会红）。
 DEPLOY_RUNTIME_KEEP=2
 prune_old_runtimes() {
   local keep_cur="$COMMHUB_HOME/runtime-$(printf '%s' "$NEWV" | tr '.' '-')"
@@ -272,7 +274,12 @@ prune_old_runtimes() {
   done
   [ ${#victims[@]} -eq 0 ] && { say "运行时候选：无需清理（保留 $DEPLOY_RUNTIME_KEEP 个：当前 + 回滚目标）"; return 0; }
   total=$(du -sm "${victims[@]}" 2>/dev/null | awk '{s+=$1} END{printf "%d", s+0}')
-  say "运行时清理：将删除 ${#victims[@]} 个旧目录，合计约 ${total} MB（保留当前 $NEWV 与回滚目标 ${CURRENT:-?}）"
+  # 保留数**从实际保留集算**，不从常量抄 —— 否则常量改成 3 而文案仍说 2，
+  # 那句文案就成了一条没人检查的断言（#3321 的自纠）。
+  # 保留的两项**按名字说**，不按数字说：数字写死在文案里就成了没人检查的断言
+  # （常量改成 3 时句子不变，也不会红）。名字不会过期 —— 它们就是被保留的那两个路径。
+  say "运行时清理：删除 ${#victims[@]} 个旧目录，合计约 ${total} MB"\
+"（保留 $(basename "$keep_cur") 与 $(basename "$keep_prev")）"
   for v in "${victims[@]}"; do
     case "$v" in "$COMMHUB_HOME"/runtime-*) rm -rf -- "$v" || say "  ⚠ 删除失败：$v";; *) say "  ⚠ 跳过（不在 $COMMHUB_HOME 内）：$v";; esac
   done
