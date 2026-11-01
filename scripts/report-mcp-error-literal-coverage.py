@@ -38,6 +38,12 @@ REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "server" / "src"
 GEN = REPO / "scripts" / "report-mcp-outcome-domain.py"
 
+# 2026-11-01 —— 两档的**上轮读数**（用来报 Δ）。刻意报两个 Δ 而不是一个总数：
+#   Δadjacent = +4 而 Δstrict = +2 ⇒ 差额 2 = 「新写的断言里有两处真的检查了返回值」
+#   只报新总数时，「写了两条高质量断言」与「写了四条只被邻近数到」在曲线上同形。
+# 这也是「加了东西数字不动」那个信号的一半：不动 ⇒ 先读尺子，别先改代码。
+METRIC_BASELINE = {"adjacent": 74, "strict": 71}
+
 # 基线：**一次都没出现过**的字面量个数。增长 ⇒ 又有一个 error 只在生产里才会被看见。
 NEVER_BASELINE = 2
 
@@ -323,6 +329,17 @@ def main() -> int:
     print("  ⇒ 让被测对象改写成一行以便被统计，会把「顺手写整齐」变成「为了被统计而写整齐」。")
     if pr["sample"]:
         print(f"  例：{', '.join(pr['sample'][:5])}")
+
+    d_adj = c["near_expect"] - METRIC_BASELINE["adjacent"]
+    d_str = c["strict"] - METRIC_BASELINE["strict"]
+    print(f"\nΔ vs 上轮基线（adjacent {METRIC_BASELINE['adjacent']} / strict {METRIC_BASELINE['strict']}）："
+          f" Δadjacent {d_adj:+d} · Δstrict {d_str:+d}")
+    if d_adj and not d_str:
+        print("  ⚠ 邻近涨了而严格没涨 ⇒ 新写的那几条**只是离得近**，没有真的检查返回值")
+    elif d_str > 0 and d_adj == 0:
+        print("  ✓ 严格涨了而邻近没涨 ⇒ 新断言直接替换/并入已有邻近位置（质量提升，覆盖未变宽）")
+    elif d_str > 0:
+        print(f"  ⇒ 新增里真正检查返回值的有 {d_str} 条；其余 {d_adj - d_str} 条只是落到了邻近窗口里")
 
     if c["by_design"]:
         print("\n登记为「不做」的（造不出真实状态，理由写在这里）：")
