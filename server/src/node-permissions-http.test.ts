@@ -416,6 +416,21 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
     expect(row.tool_allowlist).toEqual(["send_task", "get_inbox"]);
   });
 
+  // #3354 —— 白名单路由的 L3 证据：拒绝必须同时证明「403」与「行没变」，允许要有镜像。
+  test("改白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）", async () => {
+    const read = () => db.get<{ tool_allowlist: string | null }>(
+      "SELECT tool_allowlist FROM nodes WHERE node_id = ?1", node.other.id)!.tool_allowlist;
+    const before = read();
+    const denied = await call(user.mem.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: ["send_task"] });
+    expect(denied.status).toBe(403);
+    // 只断 403 时，「拒了但已经写进去」也会绿 —— 而那正是这条路由最坏的一种缺陷。
+    expect(read()).toBe(before);
+    // 镜像：允许时必须真的变，否则「永远拒绝」也会绿。
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: ["send_task"] });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before);
+  });
+
   test("清空后回到 null，而不是 []", async () => {
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: null })).status).toBe(200);
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: null })).status).toBe(200);

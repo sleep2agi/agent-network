@@ -6776,6 +6776,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::从没上报过的节点是 null（不是猜一个值填上）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::写进去什么，读出来就是什么": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::别的网络里的同名字段不会串到这一格（alias 兜底必须带网络约束）": 1,
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::清空后回到 null，而不是 []": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::默认是 null（= 不限制），不是空数组": 1,
   "server/src/node-permissions-http.test.ts::PUT /api/nodes/:id/permission-mode::owner and network owner/admin can set it and it applies on the next request; others cannot": 1,
@@ -15109,6 +15110,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::从没上报过的节点是 null（不是猜一个值填上）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::写进去什么，读出来就是什么",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::别的网络里的同名字段不会串到这一格（alias 兜底必须带网络约束）",
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::清空后回到 null，而不是 []",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::默认是 null（= 不限制），不是空数组",
   "server/src/node-permissions-http.test.ts::PUT /api/nodes/:id/permission-mode::owner and network owner/admin can set it and it applies on the next request; others cannot",
@@ -16666,7 +16668,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "210bd833efdd69bfb090b8c1576a55918ab2c2ff",
+  "commit": "901911630a62476e15b2d2c8637367d48ea6b7b2",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
