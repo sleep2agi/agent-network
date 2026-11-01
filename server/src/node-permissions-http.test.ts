@@ -447,6 +447,23 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
     expect(r.body.sent).toBeUndefined();
   });
 
+  // #3354 —— PUT /api/nodes/:id/avatar：拒绝之后 avatar_url 必须没变。
+  // 门与 attrs 相同（canRestWriteNetwork + restNodeDenied）⇒ 拒绝方是 readonly 模式下的节点自己，
+  // 不是普通成员（成员有网络写权是设计如此 —— 第一次按节点主人模板写就猜错了）。
+  test("改节点头像：readonly 节点被拒且 avatar_url 没变；owner 200 且真的变了（镜像）", async () => {
+    const read = () => db.get<{ avatar_url: string | null }>(
+      "SELECT avatar_url FROM nodes WHERE node_id = ?1", node.other.id)!.avatar_url;
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "readonly" })).status).toBe(200);
+    const before = read();
+    const denied = await call(node.other.token, "PUT", `/api/nodes/${node.other.id}/avatar`, { avatar_url: "/avatars/avatar-11.webp" });
+    expect(denied.status).toBe(403);
+    expect(read()).toBe(before);
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/avatar`, { avatar_url: "/avatars/avatar-11.webp" });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before);
+  });
+
   // #3354 —— DELETE /api/nodes/:id：拒绝之后**行必须还在**。
   // 这是唯一一条「只要写进去了就不可逆」的写路由 —— 拒了但删了，没有任何读数能复原。
   // 用**可丢弃的 scratch 节点**做靶子：拒绝方是 readonly 模式下的 node.other，

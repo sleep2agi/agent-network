@@ -6785,6 +6785,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 attrs：readonly 节点被拒且行没变；owner 200 且行真变；旧 revision 409 且行没变": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 peer 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）": 1,
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改节点头像：readonly 节点被拒且 avatar_url 没变；owner 200 且真的变了（镜像）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::清空后回到 null，而不是 []": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::默认是 null（= 不限制），不是空数组": 1,
   "server/src/node-permissions-http.test.ts::PUT /api/nodes/:id/permission-mode::owner and network owner/admin can set it and it applies on the next request; others cannot": 1,
@@ -15130,6 +15131,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 attrs：readonly 节点被拒且行没变；owner 200 且行真变；旧 revision 409 且行没变",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 peer 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）",
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改节点头像：readonly 节点被拒且 avatar_url 没变；owner 200 且真的变了（镜像）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::清空后回到 null，而不是 []",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::默认是 null（= 不限制），不是空数组",
   "server/src/node-permissions-http.test.ts::PUT /api/nodes/:id/permission-mode::owner and network owner/admin can set it and it applies on the next request; others cannot",
@@ -16690,7 +16692,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "5280d083a38dd5a7d0ff42328f1353a30d338c01",
+  "commit": "b703d077a7673a7fe14bd24613a28f0e6b2c699c",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
