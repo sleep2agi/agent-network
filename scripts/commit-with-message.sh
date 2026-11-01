@@ -53,6 +53,9 @@ staged=$(git diff --cached --name-only)
 
 miss=""
 for tok in $(printf '%s' "$subj" | grep -oE '[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*' | sort -u); do
+  # 纯数字比例（`37/93`）不是路径 —— 第一版把它当成路径，于是标题里一写比率就被拦。
+  # 判据：路径至少要有「像名字」的成分（含字母），或含扩展名的点。
+  printf '%s' "$tok" | grep -qE '[A-Za-z]' || continue
   # 只查「看起来是仓内路径」的：必须带 / 且不含空格已在正则里保证
   printf '%s\n' "$staged" | grep -qxF "$tok" && continue
   # 允许只写目录前缀或文件名后缀（标题里常写 `scripts/` 或 `qa.sh`）

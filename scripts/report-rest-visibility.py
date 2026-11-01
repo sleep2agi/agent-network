@@ -225,6 +225,42 @@ def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
     }
 
 
+# 「门」的 token 表 —— 它自己也是一个**识别器**，而识别器必须被写出来：
+# 换一份 token 表，下面的数会变，而分母不动。所以输出里必须带 R 的定义。
+GATE_TOKENS = {
+    "userTokenRequired": r"userTokenRequired\(",
+    "restAuth-bang": r"if \(!restAuth\)",
+    "canRestWriteNetwork": r"canRestWriteNetwork\(",
+    "canRestWriteNodeSecurity": r"canRestWriteNodeSecurity\(",
+    "isAdmin": r"\bisAdmin\b",
+    "role-owner-admin": r'role !== "owner"|role === "owner"',
+    "canManage": r"\bcanManage\b",
+}
+
+
+def gate_tokens_by_row(lines: list[str], rows: list[dict]) -> dict:
+    """每一行的**门 token**（来自它自己的 if 块，窗口 25 行）+ 读不到门的行数。
+
+    判据边界同 guarding_if：门要记在**判定发生的那一行**，不能记在包的 if 上。
+    读不到门 ≠ 没有门 —— 它可能是：门在 helper 里、用了别的写法、
+    或 token 表里没有这个名字。三种成因处置不同，所以这里只报「读不到」的个数。
+    """
+    import re as _re
+    compiled = {n: _re.compile(rx) for n, rx in GATE_TOKENS.items()}
+    out: dict[int, list[str]] = {}
+    none_rows = []
+    for r in rows:
+        ln = r.get("line")
+        g = guarding_if(lines, ln) if ln else None
+        block = lines[max(0, (g or ln or 1) - 1): (g or ln or 1) + 25]
+        toks = sorted({n for n, rx in compiled.items() if any(rx.search(l) for l in block)})
+        if not toks:
+            none_rows.append({"line": ln, "path": r.get("path")})
+        out[ln] = toks
+    return {"by_row": out, "no_gate_tokens": none_rows,
+            "recognizer": "GATE_TOKENS（7 个名字）—— 换表则数会变，分母不动"}
+
+
 def measure() -> dict:
     table = json.loads(TABLE.read_text())
     return measure_text(SERVER.read_text(), table.get("rows", []))
@@ -445,6 +481,14 @@ def main() -> int:
     print("  ⇒ 判不了 ≠ 没走过：前者要改提取器（用正则字面量），后者要补测试。")
     for x in bc["never_sample"]:
         print(f"     [从未] L{x['line']} {x['method']} {x['path']}")
+
+    g = gate_tokens_by_row(SERVER.read_text().splitlines(),
+                           json.loads(TABLE.read_text()).get("rows", []))
+    print(f"\n门 token（R = {g['recognizer']}）：")
+    print(f"  **读不到门**的行 {len(g['no_gate_tokens'])} / {len(g['by_row'])}"
+          f" —— 不是「没有门」，是这份 token 表认不出：")
+    for x in g["no_gate_tokens"][:8]:
+        print(f"     L{x['line']} {x['path']}")
 
     if args.assert_:
         if m["non_literal_path_judgments"] > NON_LITERAL_BASELINE:
