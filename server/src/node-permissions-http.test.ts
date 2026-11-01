@@ -433,6 +433,26 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
 
   // #3354 —— rest-allowlist 此前**一条测试都没有**（同族里唯一零覆盖的写路由）。
   // 它改的是「这个节点能调哪些 REST 路由」，与 tool-allowlist 同一套授权口径。
+  // #3354 —— DELETE /api/nodes/:id：拒绝之后**行必须还在**。
+  // 这是唯一一条「只要写进去了就不可逆」的写路由 —— 拒了但删了，没有任何读数能复原。
+  // 用**可丢弃的 scratch 节点**做靶子：拒绝方是 readonly 模式下的 node.other，
+  // 这样 witness 若让闸失效，被误删的也只是 scratch，不会连带毁掉后面用例的公共夹具。
+  test("删节点：readonly 调用者被拒且行还在；owner 允许且行真的没了", async () => {
+    const scratch = `n_del_${Math.random().toString(36).slice(2, 8)}`;
+    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, lifecycle_state) VALUES (?1, ?1, ?1, ?2, 'active')", [scratch, net]);
+    expect(db.get("SELECT node_id FROM nodes WHERE node_id = ?1", scratch)).toBeTruthy();
+    // ① 拒绝：readonly 的 node.other 去删 scratch ⇒ 403，且 scratch 还在
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "readonly" })).status).toBe(200);
+    const denied = await call(node.other.token, "DELETE", `/api/nodes/${scratch}`);
+    expect(denied.status).toBe(403);
+    expect(db.get("SELECT node_id FROM nodes WHERE node_id = ?1", scratch)).toBeTruthy();
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    // ② 允许：owner 删同一个 scratch ⇒ 200 且行真的没了（镜像）
+    const ok = await call(user.boss.token, "DELETE", `/api/nodes/${scratch}`);
+    expect(ok.status).toBe(200);
+    expect(db.get("SELECT node_id FROM nodes WHERE node_id = ?1", scratch)).toBeFalsy();
+  });
+
   // #3354 —— ATTRS：这条的门是 canRestWriteNetwork + restNodeDenied，另有**乐观锁**。
   // 普通成员有网络写权是设计如此 ⇒ 这里的拒绝方是「readonly 模式下的节点自己」。
   // 三件事必须一起钉：① 拒绝且行没变 ② 允许且行真变 ③ 旧 revision ⇒ 409 且行没变。

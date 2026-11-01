@@ -6775,6 +6775,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::env_transport 取该节点最新一次上报（老上报不能盖掉新的）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::从没上报过的节点是 null（不是猜一个值填上）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::写进去什么，读出来就是什么": 1,
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::删节点：readonly 调用者被拒且行还在；owner 允许且行真的没了": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::别的网络里的同名字段不会串到这一格（alias 兜底必须带网络约束）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 REST 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）；[] 歧义 400": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 attrs：readonly 节点被拒且行没变；owner 200 且行真变；旧 revision 409 且行没变": 1,
@@ -15112,6 +15113,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::env_transport 取该节点最新一次上报（老上报不能盖掉新的）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::从没上报过的节点是 null（不是猜一个值填上）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::写进去什么，读出来就是什么",
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::删节点：readonly 调用者被拒且行还在；owner 允许且行真的没了",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::别的网络里的同名字段不会串到这一格（alias 兜底必须带网络约束）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 REST 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）；[] 歧义 400",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::改 attrs：readonly 节点被拒且行没变；owner 200 且行真变；旧 revision 409 且行没变",
@@ -16674,7 +16676,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "14ab4cb5d89bfe52369a8eb4cf75119df2fffd01",
+  "commit": "b3e90187c491fc5889d91408568c8cf143e632f5",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
