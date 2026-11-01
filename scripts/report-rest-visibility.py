@@ -184,6 +184,23 @@ def group_report(lines: list[str], rows: list[dict]) -> dict:
     }
 
 
+# 2026-11-01 —— 「读不到门」按**成因**分三栏，而不是一个数：
+#   anonymous_by_design  路由本身就不该有身份门（注册/登录发生在有身份之前；/health 是公开探针）
+#   gate_elsewhere       身份判定在 handler 内部或另一个函数里（本窗口 25 行看不到）
+#   剩下                 ⇒ 真缺门（这一栏才是缺陷）
+# 三者处置相反：第一个是设计、第二个是改扫描窗口或认新名字、第三个才是要修的。
+ANONYMOUS_BY_DESIGN = {
+    "/api/auth/register", "/api/auth/login", "/health",
+}
+GATE_ELSEWHERE_HINT = {
+    # 这些块里判定发生在 resolve* / handler 内部，不在 `if (...)` 的 25 行窗口里
+    "ws", "/mcp", "events", "/events/users/me", "/api/servers", "/api/upload",
+    "/api/dm", "/api/dm/threads", "api", "/api/status", "/api/stats",
+    "/api/task_events", "/api/completing", "/api/completions", "/api/tasks",
+    "/api/messages", "/api/messages/ack", "/api/nodes", "/api/networks",
+    "/api/admin/users", "/api/users", "/api/",
+}
+
 # 分支覆盖读数的基线：**在测试里一次都没出现过路径字面量**的行数。
 # 它只会随补测试而下降；上涨意味着新加了没人请求过的分支。
 NEVER_REQUESTED_BASELINE = 5
@@ -493,6 +510,15 @@ def main() -> int:
     g = gate_tokens_by_row(SERVER.read_text().splitlines(),
                            json.loads(TABLE.read_text()).get("rows", []))
     print(f"\n门 token（R = {g['recognizer']}）：")
+    rows_no_gate = g["no_gate_tokens"]
+    anon = [x for x in rows_no_gate if x["path"] in ANONYMOUS_BY_DESIGN]
+    elsewhere = [x for x in rows_no_gate if x["path"] not in ANONYMOUS_BY_DESIGN
+                 and x["path"] in GATE_ELSEWHERE_HINT]
+    real = [x for x in rows_no_gate if x["path"] not in ANONYMOUS_BY_DESIGN
+            and x["path"] not in GATE_ELSEWHERE_HINT]
+    print(f"  其中按成因分栏：本来就该匿名 {len(anon)} · 判定在别处 {len(elsewhere)} · **真缺门 {len(real)}**")
+    for x in real[:6]:
+        print(f"     [真缺门?] L{x['line']} {x['path']}")
     print(f"  **读不到门**的行 {len(g['no_gate_tokens'])} / {len(g['by_row'])}"
           f" —— 不是「没有门」，是这份 token 表认不出：")
     for x in g["no_gate_tokens"][:8]:
