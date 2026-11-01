@@ -37,6 +37,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 TABLE = REPO / "docs" / "rest-route-table.json"
+# 2026-11-01 —— L3 的缺口从「一句注释」变成**一张可 diff 的表**：
+# 注释里写「这条还没测」是不可数的；每个写路由一行、`pinned_by` 为空就是缺口，才可数。
+# 并且按外部复核的判据：表要从**路由清单**驱动（遍历路由填出口），
+# 不是从出口反推（那只能得到「这个出口有几条路由」）。
+EVIDENCE = REPO / "docs" / "rest-gate-evidence.json"
 SOURCE = REPO / "server" / "src" / "server.ts"
 
 WRITE_METHODS = ("PUT", "POST", "PATCH", "DELETE")
@@ -452,9 +457,90 @@ def chain_coverage(result: dict) -> tuple[int, str]:
     return covered, gap
 
 
+def build_evidence(doc: dict, lines: list[str], result: dict) -> dict:
+    """遍历**路由表**的每条写路由，填它走哪个门、以及钉住它的测试。"""
+    gates_by_route = {(p, m): syms for p, m, syms in result["gated"]}
+    # 已填的 pinned_by 必须保留：重新生成表时抹掉它，等于把「已钉」退回「未钉」，
+    # 而基线会跟着涨 —— 那是**棘轮自己往回走**，比没有表更糟。
+    prev: dict[tuple[str, str], str] = {}
+    if EVIDENCE.exists():
+        try:
+            for r in (json.loads(EVIDENCE.read_text(encoding="utf-8")).get("rows") or []):
+                if r.get("pinned_by"):
+                    prev[(str(r.get("path")), str(r.get("method")))] = str(r["pinned_by"])
+        except Exception:  # noqa: BLE001
+            prev = {}
+    rows = []
+    for r in write_routes(doc):
+        key = (str(r.get("path")), str(r.get("method")))
+        rows.append({
+            "path": r.get("path"),
+            "method": r.get("method"),
+            "line": r.get("line"),
+            "gates": gates_by_route.get(key, []),
+            "public_by_design": key in PUBLIC_BY_DESIGN,
+            # 空字符串 = **这个缺口还没被钉住**（可数、可 diff；注释形态不可数）
+            "pinned_by": prev.get(key, ""),
+        })
+    return {
+        "note": "由 scripts/report-rest-gates.py --emit-evidence 生成；表从路由清单驱动。"
+                "`pinned_by` 为空 = 这条写路由还没有「真的拒绝过」的行为证据。",
+        "ratchet": {
+            "why": "空 pinned_by 的行数只许降不许升（棘轮），否则「还剩 N 行」没有方向",
+            "baseline_empty": sum(1 for x in rows if not x["pinned_by"]),
+        },
+        "rows": rows,
+    }
+
+
+def check_evidence(doc: dict, result: dict) -> list[str]:
+    """证据表的两条断言：覆盖完整 + 空值数不回升 + 点名的测试真的存在。"""
+    if not EVIDENCE.exists():
+        return [f"EVIDENCE_MISSING: 缺 {EVIDENCE.name}（先跑 --emit-evidence）"
+                f" ⇒ 没有这张表时，「L3 未验」只是一句注释，不可数"]
+    ev = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    rows = ev.get("rows") or []
+    want = {(str(r.get("path")), str(r.get("method"))) for r in write_routes(doc)}
+    have = {(str(r.get("path")), str(r.get("method"))) for r in rows}
+    out: list[str] = []
+    if want - have:
+        out.append(f"EVIDENCE_INCOMPLETE: 有 {len(want - have)} 条写路由不在证据表里"
+                   f"（{sorted(want - have)[:3]}）⇒ 表不是从路由清单驱动的")
+    if have - want:
+        out.append(f"EVIDENCE_STALE: 证据表里 {len(have - want)} 行已不是写路由（{sorted(have - want)[:3]}）")
+    empty = [r for r in rows if not r.get("pinned_by")]
+    base = int((ev.get("ratchet") or {}).get("baseline_empty") or 0)
+    if len(empty) > base:
+        out.append(f"L3_GAP_ROSE: 空 pinned_by {len(empty)} 行 > 基线 {base} ⇒ 缺口在扩大"
+                   f"（{[(r['method'], r['path']) for r in empty if r not in rows][:2]}）")
+    # 点名的测试必须真的在仓里（否则「已钉」是假的）
+    tests_dir = REPO / "server" / "src"
+    for r in rows:
+        pin = r.get("pinned_by") or ""
+        if not pin:
+            continue
+        fname = pin.split("::")[0]
+        if not (tests_dir / fname).exists():
+            out.append(f"EVIDENCE_PIN_MISSING: {r.get('method')} {r.get('path')} 指向 {fname}，"
+                       f"而该文件不存在")
+    return out
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
+    if "--emit-evidence" in sys.argv:
+        if not TABLE.exists() or not SOURCE.exists():
+            print("✗ 没有读数", file=sys.stderr)
+            return 2
+        doc0 = json.loads(TABLE.read_text(encoding="utf-8"))
+        res0 = classify(doc0, source_lines())
+        EVIDENCE.write_text(json.dumps(build_evidence(doc0, source_lines(), res0),
+                                       ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"✓ 已写入 {EVIDENCE.relative_to(REPO)}（"
+              f"{len(build_evidence(doc0, source_lines(), res0)['rows'])} 行）")
+        print("  mutates: baseline（这张表是**下一次比较的参照**）")
+        return 0
     if not TABLE.exists() or not SOURCE.exists():
         print(f"✗ 读不到 {TABLE.name} 或 server.ts ⇒ 没有读数", file=sys.stderr)
         return 2
@@ -492,6 +578,12 @@ def main() -> int:
     census = result.get("census") or {}
     print("  守卫形态普查：" + " · ".join(f"{k} {v} 行" for k, v in sorted(census.items()))
           + "（要不要加第三种形态，看这张表的分布，不靠记性）")
+    if EVIDENCE.exists():
+        _ev = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+        _rows = _ev.get("rows") or []
+        _empty = sum(1 for r in _rows if not r.get("pinned_by"))
+        print(f"  L3 证据表：{len(_rows) - _empty}/{len(_rows)} 条写路由已钉"
+              f"（{_empty} 条 pinned_by 为空 = **可数的缺口**；基线 {(_ev.get('ratchet') or {}).get('baseline_empty')}）")
     print(f"  链路覆盖 {covered}/{len(CHAIN)} @ first_gap={gap}")
     for i, (name, why) in enumerate(CHAIN):
         state = "已验" if i < covered else ("**首个缺口**" if name == gap else "未验")
@@ -522,7 +614,7 @@ def main() -> int:
               file=sys.stderr)
         if "--assert" in sys.argv:
             return 1
-    probs = problems_for(result, doc)
+    probs = problems_for(result, doc) + check_evidence(doc, result)
     for x in probs:
         print(f"✗ {x}", file=sys.stderr)
     print("  mutates: none（只读）")
