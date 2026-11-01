@@ -34,7 +34,10 @@ function tools(callerUserId: string): Record<string, ToolHandler> {
   return out;
 }
 
-// 精确键集 = 集合相等（不是计数、也不是「有这几个字段」）。
+// 🔴 basis: impl —— 下面这些键集**取自真实调用的响应**，因此它是**变更探测器**，不是契约读数。
+//   红的意思是「实现变了，去看是不是故意的」；而「实现错了」这一类它测不出来
+//   （若实现多返回一个字段，断言会红，但那可能是正确的修复）。
+//   要不要升级成 spec 列：需要一处**独立于实现**的书面来源；指不出来时，它就只能留在这里。
 function expectKeys(obj: Record<string, unknown>, want: string[]) {
   expect(Object.keys(obj).sort(), "键集合必须完全等于期望").toEqual([...want].sort());
 }
