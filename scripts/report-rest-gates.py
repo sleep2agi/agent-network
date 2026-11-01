@@ -202,6 +202,25 @@ def write_routes(doc: dict) -> list[dict]:
     return rows
 
 
+def rules_shape() -> dict[str, int]:
+    """规则集的**形状向量** —— 哈希只说「变了」，形状说「变了哪个维度」。
+
+    2026-11-01 —— 只有哈希时，「加了一个维度」与「改了一条正则」给出同一个信号，
+    而处置完全不同（前者要重新核对用例覆盖，后者要看抽出的符号有没有变）。
+    形状是那个唯一不需要读懂内容就能比对的东西的补充：它廉价、可 diff、能指出维度。
+    """
+    return {
+        "known_gates": len(KNOWN_GATES),
+        "extra_names": len(EXTRA_GATE_NAMES),
+        "gate_re": 1,
+        "write_methods": len(WRITE_METHODS),
+        "guard_forms": len(GUARD_FORMS),
+        "public_by_design": len(PUBLIC_BY_DESIGN),
+        "min_write": MIN_WRITE_ROUTES,
+        "min_multi": MIN_MULTI_WRITE_ROUTES,
+    }
+
+
 def rules_rev() -> str:
     """规则集自身的版本号。
 
@@ -588,8 +607,11 @@ def main() -> int:
     total = len(result["gated"]) + len(result["public"]) + len(result["unknown"])
     print(f"写路由 {total}：有门 {len(result['gated'])} · 按设计公开 {len(result['public'])} "
           f"· 判不了 {len(result['unknown'])}")
+    _shape = rules_shape()
     print(f"  rules_rev={rules_rev()}（检查器的身份）· "
           f"source_sha256={_source_sha(doc)}（被检查对象的身份）—— 两条独立轴")
+    # ① 哈希旁边必须有形状：哈希告诉你去查，形状告诉你查哪一维
+    print("  rules_shape：" + " · ".join(f"{k}={v}" for k, v in _shape.items()))
     print("  门的判据：**守卫位置**（if+拒绝词 / 赋值后被 if 检查），不是「块里出现过」")
     if result["unlisted"]:
         print(f"  ⚠ 源码里有、但清单里没有的门符号 {len(result['unlisted'])} 个："
@@ -617,6 +639,11 @@ def main() -> int:
     note = "（仪器都在链路之外）" if instrumented and not covered else ""
     print(f"  仪器 instrumented={instrumented} ≥ prefix={covered} ✓{note}")
     census = result.get("census") or {}
+    # ④ selftest 的形态清单是**下界**（我写了哪几种），普查是更接近上界的那一侧。
+    # 声明了却在真实代码里 0 命中的形态，要么是死的，要么是抽取器看不见它 —— 两种都要报。
+    _empty_forms = [f for f in GUARD_FORMS if census.get(f, 0) == 0]
+    if _empty_forms:
+        print(f"  ⚠ 形态在真实代码里 0 命中：{_empty_forms}（声明了但没用到，或抽取器看不见）")
     print("  守卫形态普查：" + " · ".join(f"{k} {v} 行" for k, v in sorted(census.items()))
           + "（要不要加第三种形态，看这张表的分布，不靠记性）")
     if EVIDENCE.exists():
