@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 import sys
 from collections import Counter
@@ -38,6 +39,17 @@ PATTERNS = (
     ("starts_with", re.compile(r'url\.pathname\.startsWith\(\s*"([^"]+)"')),
     ("regex_prefix", re.compile(r'url\.pathname\.match\(\s*/\^\\/([^/\\$?(]+)')),
 )
+
+
+def _self_sha256() -> str:
+    """本生成器自己的 sha256 —— 让「表变了」这句话有主语。
+
+    读的是**文件内容**，不是 mtime / commit：内容没变就是同一个抽取器，
+    换行符或提交重写都不会让它假变。
+    """
+    import hashlib
+    body = pathlib.Path(__file__).resolve().read_bytes()
+    return hashlib.sha256(body).hexdigest()
 
 
 def _provenance() -> list[str]:
@@ -170,6 +182,15 @@ def main() -> int:
             # 保序就只活在注释里：一旦有人按下标排序输出，键会合并成一格而表仍看起来完整。
             # ⇒ 键必须带上 order（分支在源文件中的序位）。
             "key": ["path", "method", "query", "order"],
+            # 2026-11-01 —— 生成器的**内容身份**：下一轮对比时先比它再比表。
+            # 没有它，「表变了」这句话没有主语：可能是路由变了，也可能是抽取逻辑变了，
+            # 而两者的处置完全相反（改代码 vs 改这个脚本）。
+            "generator": {"path": "scripts/report-rest-endpoints.py", "sha256": _self_sha256()},
+            # 消费者分两种：**内容消费**（有人按行读它）与**自洽消费**（重跑能复现）。
+            # 本表今天没有前者，但有后者 —— 写「消费者：无」会让 reproduce 那一行看起来也没人用，
+            # 而它每个 CI run 都在用。
+            "consumers": {"content": [], "self_consistency":
+                          ["scripts/check-rest-route-table.py（每次 CI run 重跑本生成器并逐字节比较）"]},
             "key_note": "order = 分支在源文件中的序位；它进键是因为 (path,method,query) 实测不唯一（40/94 行与人同键）",
             "rows": rows,
             "provenance": [l.lstrip("> ") for l in _provenance()],

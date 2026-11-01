@@ -6,6 +6,16 @@
   "query",
   "order"
  ],
+ "generator": {
+  "path": "scripts/report-rest-endpoints.py",
+  "sha256": "b5b2b026be2b95f07148e5b92e0aedd1d48023b08c811297e4a1bca309186e48"
+ },
+ "consumers": {
+  "content": [],
+  "self_consistency": [
+   "scripts/check-rest-route-table.py（每次 CI run 重跑本生成器并逐字节比较）"
+  ]
+ },
  "key_note": "order = 分支在源文件中的序位；它进键是因为 (path,method,query) 实测不唯一（40/94 行与人同键）",
  "rows": [
   {

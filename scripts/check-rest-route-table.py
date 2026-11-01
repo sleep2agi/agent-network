@@ -26,6 +26,56 @@ GEN = REPO / "scripts" / "report-rest-endpoints.py"
 DATAFILE = REPO / "docs" / "rest-route-table.json"
 
 
+# 2026-11-01 —— `kind` 是**闭集**：它看起来是描述性字段，而描述性字段的边界
+# 天然被当成可以自由扩展 ⇒ 三次提交内会长出 handler / route / branch / endpoint
+# 这些近义词，而那时按它分组的统计已经不可比。所以值域在落地这一轮就封死。
+KIND_ENUM = {"eq", "regex_prefix", "starts_with"}
+
+# order 与数组顺序是同一件事写了两次 —— 必须断言二者一致，否则双写会分叉，
+# 而分叉在 diff 里完全看不见（两处都是同一个文件里的数字）。
+def check_order_sequence(doc: dict) -> list[str]:
+    rows = doc.get("rows") or []
+    problems = []
+    for i, r in enumerate(rows):
+        want = i + 1
+        if r.get("order") != want:
+            problems.append(f"ORDER_MISMATCH: 第 {i + 1} 行的 order={r.get('order')}"
+                            f"（数组顺序）≠ {want} —— 「保序」被双写成两个值")
+            break
+    return problems
+
+
+def check_kind_enum(doc: dict) -> list[str]:
+    rows = doc.get("rows") or []
+    unknown = sorted({str(r.get("kind")) for r in rows if r.get("kind") not in KIND_ENUM})
+    if unknown:
+        return [f"KIND_UNKNOWN: {unknown} 不在闭集 {sorted(KIND_ENUM)} 里"
+                f" —— 新增分类要改 KIND_ENUM 并说明为什么旧的三种不够"]
+    return []
+
+
+def check_generator_identity(doc: dict) -> list[str]:
+    """生成器的内容身份必须与当前文件一致。
+
+    不一致 ⇒ 「表变了」这句话有两个可能的主语：路由变了，或抽取逻辑变了。
+    两者的处置相反（改路由代码 / 改这个脚本），所以必须先比生成器再比表。
+    """
+    import hashlib
+    from pathlib import Path as _P
+    gen = doc.get("generator") or {}
+    rel, recorded = gen.get("path"), gen.get("sha256")
+    if not rel or not recorded:
+        return ["GENERATOR_UNPINNED: 表里没有记录生成器的内容身份 ⇒ 「表变了」没有主语"]
+    path = REPO / rel
+    if not path.exists():
+        return [f"GENERATOR_MISSING: {rel} 不存在"]
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != recorded:
+        return [f"GENERATOR_CHANGED: {rel} 的 sha256 从 {recorded[:12]} 变成 {actual[:12]}"
+                f" —— 先确认这一轮变的是**抽取逻辑**还是**路由**，再 --update"]
+    return []
+
+
 def check_key_uniqueness(doc: dict) -> list[str]:
     """声明的 `key` 必须真的能标识行 —— 否则它是注释，不是键。
 
@@ -141,7 +191,21 @@ def selftest(quiet: bool = False) -> int:
     if not quiet: print(("✓" if ok else "✗") + " selftest 键不含 order ⇒ KEY_NOT_UNIQUE（2 行同键只算一格）")
     fails += 0 if ok else 1
 
-    if not quiet: print(f"✓ selftest {5 - fails}/5 通过")
+    # 2026-11-01 —— 三条新的形状钉子，各自都要有「红过」的见证：
+    ok = check_order_sequence({"rows": [{"order": 1}, {"order": 2}]}) == []
+    if not quiet: print(("✓" if ok else "✗") + " selftest order == 数组顺序 ⇒ 无问题")
+    fails += 0 if ok else 1
+
+    ok = bool(check_order_sequence({"rows": [{"order": 1}, {"order": 9}]}))
+    if not quiet: print(("✓" if ok else "✗") + " selftest order 与下标分叉 ⇒ ORDER_MISMATCH")
+    fails += 0 if ok else 1
+
+    ok = check_kind_enum({"rows": [{"kind": "eq"}, {"kind": "regex_prefix"}]}) == [] \
+        and bool(check_kind_enum({"rows": [{"kind": "handler"}]}))
+    if not quiet: print(("✓" if ok else "✗") + " selftest kind 闭集：已知三种过、handler 红")
+    fails += 0 if ok else 1
+
+    if not quiet: print(f"✓ selftest {8 - fails}/8 通过")
     return 0 if fails == 0 else 1
 
 
@@ -156,7 +220,9 @@ def main() -> int:
         return 2
     if "--update" in sys.argv:
         # 写之前先验键：一份「键不唯一」的表写进仓库，等于把注释当键焊死。
-        key_problems = check_key_uniqueness(json.loads(fresh))
+        key_problems = (check_key_uniqueness(json.loads(fresh))
+                        + check_order_sequence(json.loads(fresh))
+                        + check_kind_enum(json.loads(fresh)))
         if key_problems:
             for x in key_problems:
                 print(f"✗ {x}", file=sys.stderr)
@@ -174,11 +240,25 @@ def main() -> int:
         return 1
     committed = DATAFILE.read_text(encoding="utf-8")
     # 键唯一性：即使内容与源码一致，一份「键不能标识行」的表也不是可引用的清单。
-    key_problems = check_key_uniqueness(json.loads(committed)) if committed.strip() else []
+    _doc = json.loads(committed) if committed.strip() else {}
+    key_problems = (check_key_uniqueness(_doc) + check_order_sequence(_doc)
+                    + check_kind_enum(_doc) + check_generator_identity(_doc))
     if key_problems:
         for x in key_problems:
             print(f"✗ {x}", file=sys.stderr)
-        print("  ⇒ 给 key 补一列（同键多分支时 order 是唯一能区分它们的），再 --update。", file=sys.stderr)
+        # 每一类问题给**各自的**下一步 —— 一句写死的提示会把修法指错。
+        hints = {
+            "KEY_NOT_UNIQUE": "给 key 补一列（同键多分支时 order 是唯一能区分它们的），再 --update。",
+            "ORDER_MISMATCH": "order 与数组顺序双写分叉了：改生成器让二者同源，再 --update。",
+            "KIND_UNKNOWN": "新分类先加进 KIND_ENUM 并说明旧的三种为什么不够，再 --update。",
+            "GENERATOR_CHANGED": "先确认变的是抽取逻辑还是路由，再 --update；两者不可混在一次对比里。",
+            "GENERATOR_UNPINNED": "生成器要在产物里记 sha256，否则「表变了」没有主语。",
+        }
+        for x in key_problems:
+            for k, h in hints.items():
+                if x.startswith(k):
+                    print(f"  ⇒ {h}", file=sys.stderr)
+                    break
         return 1
     if committed == fresh:
         n = len(json.loads(fresh)["rows"])
