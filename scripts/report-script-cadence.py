@@ -55,12 +55,6 @@ ADHOC: dict[str, tuple[str, str]] = {
         '它只在有人真的用它提交时生效，CI 里没有「提交」这个动作可跑',
         '等 commit-msg 钩子能自己安全地生成并校验消息（而不是读一个可能遗留的文件）后，删本行',
     ),
-    'report-parent-source-coverage.py': (
-        '读生产库回答「写 parent_task_id 却没写 parent_source」这一格（#669 的另一半断言）；'
-        '它要的是**生产数据的形状**，CI 的临时库里没有历史，跑不出缺口'
-        ' ⇒ CI 里不可能有发现者。改为：出事时由人在快照上跑一次',
-        '等这条不变式进了 DB 约束或每次部署后的自检清单（deploy-hub-runtime.sh 的 stage 里跑一次）后，删本行',
-    ),
     'report-mcp-shape-branches.py': (
         '读「每个工具有几个源码出口形状」（#3309 分支维度的分母）；读数用，不是门',
         '分支维度结卡（或该维度被别的报告吸收）后删除本行',

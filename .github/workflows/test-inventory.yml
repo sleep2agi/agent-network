@@ -120,6 +120,13 @@ jobs:
       # 2026-10-31 —— 顺序承载语义：`/api/messages?scope=user` 必须排在通用分支之前。
       # 静态不变量，不替代行为测试；它挡的是「重构时顺手排序」。
       # 同时钉住「哪些 path 应该有 query 判别」——判别消失会让不变量静默跳过。
+      # 2026-11-01 —— 写路由的**门**：名字从源码抽，不靠人背下来的那张表。
+      # 起因是上一轮我用手写 11 个符号去扫，报「10 条写路由无门」，逐个人读后全是假阴性
+      # （`canRestWriteNetwork` / `restNodeDenied` / `requireTmuxAccess` 不在那张表里）。
+      # 手写表让扫描结果永远是下界，而「扫不到」与「没有」在报表上同形。
+      # 这条断言两件事：清单与源码**逐字相等**；每条写路由要么有门、要么在公开名单里有理由。
+      - name: every write route either has a gate or a stated reason
+        run: python3 scripts/report-rest-gates.py --assert
       - name: specific query discriminators still precede generic branches
         run: python3 scripts/check-rest-route-order.py
       # 2026-10-31 —— 「名字像测试但没有 runner」：当前未归属 0。
