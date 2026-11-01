@@ -436,6 +436,17 @@ def selftest() -> int:
     fails += cases[-1]
 
     # ① 关系断言自检：prefix 不可能超过 instrumented
+    # ① 三行要来自三个产生者：分母那句话里的数字必须来自**遍历**，不是规则常量。
+    # 判别法：喂一个不是 34 的输入，看它念的是哪个数。
+    code0, _m0 = denominator_verdict(0, 0)
+    code30, m30 = denominator_verdict(30, 3)
+    code34, _m34 = denominator_verdict(34, 3)
+    ok = (code0 == "not_applicable" and code30 == "registry_lost"
+          and code34 is None and "30" in m30 and "34" not in m30.replace("下限 34", ""))
+    print(("✓" if ok else "✗") + " selftest 分母那句话嵌入的是遍历数（喂 30 ⇒ 念 30，不是常量 34）")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
     # ② 单一决策点：三种来源（形态 / KNOWN / EXTRA）都必须经过同一个函数，
     # 且答案必须与「直接查那三个集合」一致 —— 后者是**比对谓词**，不是第二份实现。
     ok = (is_gate_symbol("canRestWriteNetwork")
@@ -584,6 +595,25 @@ def check_evidence(doc: dict, result: dict) -> list[str]:
     return out
 
 
+def denominator_verdict(total: int, multi_write: int) -> tuple[str | None, str]:
+    """分母判定的纯函数：返回 (原因码 or None, 一句话)。
+
+    2026-11-01 —— 抽出来是为了能断言一件事：
+    **这句话里的数字来自遍历，不是来自规则里的下限常量。**
+    两者今天都是 34，所以从输出上看不出差别 —— 而差别在于：
+    如果遍历坏了（返回 0 或 30），这句话必须跟着变，而不是继续念「34」。
+    """
+    if total == 0:
+        return ("not_applicable",
+                "表里 0 条写路由 ⇒ 没有东西可检查（这是「没读数」，不是「全部通过」）")
+    if total < MIN_WRITE_ROUTES or multi_write < MIN_MULTI_WRITE_ROUTES:
+        return ("registry_lost",
+                f"写路由 {total} 条（下限 {MIN_WRITE_ROUTES}）· "
+                f"多方法含写 {multi_write} 条（下限 {MIN_MULTI_WRITE_ROUTES}）"
+                f" ⇒ 分母掉了，比例没有意义")
+    return (None, "")
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
@@ -669,15 +699,13 @@ def main() -> int:
     multi_write = [m for m in ((doc.get("method_parse") or {}).get("multi_method") or [])
                    if any(x in WRITE_METHODS for x in (m.get("methods") or ()))]
     total = len(result["gated"]) + len(result["public"]) + len(result["unknown"])
-    if total == 0:
-        print("✗ not_applicable: 表里 0 条写路由 ⇒ 没有东西可检查"
-              "（这是「没读数」，不是「全部通过」）", file=sys.stderr)
+    _code, _msg = denominator_verdict(total, len(multi_write))
+    if _code == "not_applicable":
+        print(f"✗ not_applicable: {_msg}", file=sys.stderr)
         print("  ⇒ 先看 docs/rest-route-table.json 是不是被换了 / 被清空了", file=sys.stderr)
         return 3
-    if total < MIN_WRITE_ROUTES or len(multi_write) < MIN_MULTI_WRITE_ROUTES:
-        print(f"✗ registry_lost: 写路由 {total} 条（下限 {MIN_WRITE_ROUTES}）· "
-              f"多方法含写 {len(multi_write)} 条（下限 {MIN_MULTI_WRITE_ROUTES}）"
-              f" ⇒ 分母掉了，比例没有意义", file=sys.stderr)
+    if _code == "registry_lost":
+        print(f"✗ registry_lost: {_msg}", file=sys.stderr)
         print("  ⇒ 是 method_parse 被清空、还是路由真的变少了？先答这个再看下面的比例",
               file=sys.stderr)
         if "--assert" in sys.argv:
