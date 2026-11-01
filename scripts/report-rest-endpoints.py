@@ -33,6 +33,29 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TARGET = REPO / "server" / "src" / "server.ts"
 
+# 2026-11-01 —— 正则路由的 `path` 原来只取到第一个 `/`，于是
+#   `/^\/api\/users\/([^/]+)\/avatar\/\.png$/` 变成裸 `"api"`
+# ⇒ 40 行在表里长得一模一样（同一 path），分支覆盖/门判定全部「判不了」。
+# 这里改成**把正则字面量归一成参数化路径**：`([^/]+)` → `:param`，转义 `\/` → `/`。
+REGEX_ROUTE = re.compile(r'url\.pathname\.match\(\s*/\^(.*?)\$/')
+PARAM_PAT = re.compile(r'\(\[\^/\]\+\)|\(\[\.\-\]\+\)|\(\\.\+\)')
+
+
+def regex_route_path(line: str) -> str | None:
+    m = REGEX_ROUTE.search(line)
+    if not m:
+        return None
+    body = m.group(1).replace("\\/", "/").replace("\\", "")
+    # 把 `([^/]+)` / `(.*)` 这类捕获组换成 `:param`（位置序）
+    n = 0
+    def sub(_m):
+        nonlocal n
+        n += 1
+        return f":param{n}"
+    body = re.sub(r"\([^()]*\)", sub, body)
+    return body if body.startswith("/") else "/" + body
+
+
 PATTERNS = (
     ("eq", re.compile(r'url\.pathname\s*===\s*"([^"]+)"')),
     ("eq_neg", re.compile(r'url\.pathname\s*!==\s*"([^"]+)"')),
@@ -98,7 +121,8 @@ def main() -> int:
             meth = re.search(r'req\.method\s*===\s*"([A-Z]+)"', line_text)
             qkeys = re.findall(r'searchParams\.get\("([^"]+)"\)', line_text)
             entries.append({
-                "path": m.group(1), "kind": kind, "line": lineno, "text": line_text[:120],
+                "path": (regex_route_path(line_text) or m.group(1)) if kind == "regex_prefix" else m.group(1),
+            "kind": kind, "line": lineno, "text": line_text[:120],
                 "method": meth.group(1) if meth else None,
                 "query": qkeys,
             })

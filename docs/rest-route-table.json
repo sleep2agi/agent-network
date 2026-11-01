@@ -20,7 +20,7 @@
  },
  "generator": {
   "path": "scripts/report-rest-endpoints.py",
-  "sha256": "a1e3bd657a94ffe20f919b9dbd8bcfb29c18073160c1842312ca27c158fc78b9"
+  "sha256": "b9cb07d37b73aa167724e1ccd43236a6ca6272e9808eec7cb700758bc4d18982"
  },
  "consumers": {
   "content": [],
@@ -33,7 +33,7 @@
   {
    "id": 1,
    "order": 1,
-   "path": "ws",
+   "path": "/ws/tmux/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -51,7 +51,7 @@
   {
    "id": 3,
    "order": 3,
-   "path": "events",
+   "path": "/events/network/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -69,7 +69,7 @@
   {
    "id": 5,
    "order": 5,
-   "path": "events",
+   "path": "/events/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -123,7 +123,7 @@
   {
    "id": 11,
    "order": 11,
-   "path": "api",
+   "path": "/api/users/:param1/avatar/:param2.png",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -204,7 +204,7 @@
   {
    "id": 20,
    "order": 20,
-   "path": "api",
+   "path": "/api/auth/tokens/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -231,7 +231,7 @@
   {
    "id": 23,
    "order": 23,
-   "path": "api",
+   "path": "/api/auth/sessions/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -258,7 +258,7 @@
   {
    "id": 26,
    "order": 26,
-   "path": "api",
+   "path": "/api/networks/:param1/rules",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -267,7 +267,7 @@
   {
    "id": 27,
    "order": 27,
-   "path": "api",
+   "path": "/api/networks/:param1/agent-groups(?:/:param2:param3?)?",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -276,7 +276,7 @@
   {
    "id": 28,
    "order": 28,
-   "path": "api",
+   "path": "/api/networks/:param1/members/:param2/task-grants",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -285,7 +285,7 @@
   {
    "id": 29,
    "order": 29,
-   "path": "api",
+   "path": "/api/networks/:param1/members/:param2/agent-grants",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -294,7 +294,7 @@
   {
    "id": 30,
    "order": 30,
-   "path": "api",
+   "path": "/api/networks/:param1/agent-teams(?:/:param2)?",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -303,7 +303,7 @@
   {
    "id": 31,
    "order": 31,
-   "path": "api",
+   "path": "/api/networks/:param1/nodes/:param2/agent-team",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -312,7 +312,7 @@
   {
    "id": 32,
    "order": 32,
-   "path": "api",
+   "path": "/api/networks/:param1/humans",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -321,7 +321,7 @@
   {
    "id": 33,
    "order": 33,
-   "path": "api",
+   "path": "/api/networks/:param1/departments(?:/:param2)?",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -330,7 +330,7 @@
   {
    "id": 34,
    "order": 34,
-   "path": "api",
+   "path": "/api/networks/:param1/members/:param2/department",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -339,7 +339,7 @@
   {
    "id": 35,
    "order": 35,
-   "path": "api",
+   "path": "/api/networks/:param1/nodes/:param2/department",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -348,7 +348,7 @@
   {
    "id": 36,
    "order": 36,
-   "path": "api",
+   "path": "/api/networks/:param1/departments/:param2/:param3",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -357,7 +357,7 @@
   {
    "id": 37,
    "order": 37,
-   "path": "api",
+   "path": "/api/networks/:param1/chat-groups(?:/:param2(?:/:param3(?:/:param4)?)?)?",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -366,7 +366,7 @@
   {
    "id": 38,
    "order": 38,
-   "path": "api",
+   "path": "/api/networks/:param1/members(?:/:param2)?",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -375,7 +375,7 @@
   {
    "id": 39,
    "order": 39,
-   "path": "api",
+   "path": "/api/networks/:param1/invite",
    "method": "POST",
    "query": [],
    "kind": "regex_prefix",
@@ -411,7 +411,7 @@
   {
    "id": 43,
    "order": 43,
-   "path": "api",
+   "path": "/api/networks/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -447,7 +447,7 @@
   {
    "id": 47,
    "order": 47,
-   "path": "api",
+   "path": "/api/nodes/:param1/permission-mode",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -456,7 +456,7 @@
   {
    "id": 48,
    "order": 48,
-   "path": "api",
+   "path": "/api/nodes/:param1/provider-selection",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -465,7 +465,7 @@
   {
    "id": 49,
    "order": 49,
-   "path": "api",
+   "path": "/api/nodes/:param1/tool-allowlist",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -474,7 +474,7 @@
   {
    "id": 50,
    "order": 50,
-   "path": "api",
+   "path": "/api/nodes/:param1/rest-allowlist",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -483,7 +483,7 @@
   {
    "id": 51,
    "order": 51,
-   "path": "api",
+   "path": "/api/nodes/:param1/peer-allowlist",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -492,7 +492,7 @@
   {
    "id": 52,
    "order": 52,
-   "path": "api",
+   "path": "/api/networks/:param1/node-permission-report",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -501,7 +501,7 @@
   {
    "id": 53,
    "order": 53,
-   "path": "api",
+   "path": "/api/networks/:param1/token-ledger",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -546,7 +546,7 @@
   {
    "id": 58,
    "order": 58,
-   "path": "api",
+   "path": "/api/networks/:param1/env-transport-log",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -555,7 +555,7 @@
   {
    "id": 59,
    "order": 59,
-   "path": "api",
+   "path": "/api/nodes/:param1/secrets",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -564,7 +564,7 @@
   {
    "id": 60,
    "order": 60,
-   "path": "api",
+   "path": "/api/nodes/:param1/secrets/:param2",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -654,7 +654,7 @@
   {
    "id": 70,
    "order": 70,
-   "path": "api",
+   "path": "/api/server/:param1/:param2",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -672,7 +672,7 @@
   {
    "id": 72,
    "order": 72,
-   "path": "api",
+   "path": "/api/files/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -699,7 +699,7 @@
   {
    "id": 75,
    "order": 75,
-   "path": "api",
+   "path": "/api/tmux/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -708,7 +708,7 @@
   {
    "id": 76,
    "order": 76,
-   "path": "api",
+   "path": "/api/tmux/:param1/send",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -782,7 +782,7 @@
   {
    "id": 84,
    "order": 84,
-   "path": "api",
+   "path": "/api/nodes/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -791,7 +791,7 @@
   {
    "id": 85,
    "order": 85,
-   "path": "api",
+   "path": "/api/nodes/:param1/config",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -800,7 +800,7 @@
   {
    "id": 86,
    "order": 86,
-   "path": "api",
+   "path": "/api/nodes/:param1/attrs",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -809,7 +809,7 @@
   {
    "id": 87,
    "order": 87,
-   "path": "api",
+   "path": "/api/nodes/:param1/avatar",
    "method": null,
    "query": [],
    "kind": "regex_prefix",
@@ -845,7 +845,7 @@
   {
    "id": 91,
    "order": 91,
-   "path": "api",
+   "path": "/api/tasks?/:param1",
    "method": null,
    "query": [],
    "kind": "regex_prefix",

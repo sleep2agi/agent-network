@@ -192,18 +192,48 @@ def group_report(lines: list[str], rows: list[dict]) -> dict:
 ANONYMOUS_BY_DESIGN = {
     "/api/auth/register", "/api/auth/login", "/health",
 }
+# 2026-11-01 —— 正则路由的 path 从「裸前缀」改成了参数化路径（`/api/files/:param1`），
+# 于是下面这张表**必须跟着改**：否则原本「判定在别处」的行会全部掉进「真缺门」，
+# 而那看起来像 5 处新缺陷。这正是「提取器一变，依赖它的分类就要重核」。
 GATE_ELSEWHERE_HINT = {
+    "/events/network/:param1": "netEventsMatch：鉴权在块内",
+    "/api/server/:param1/:param2": "serverDetailMatch：鉴权在块内",
+    "/api/files/:param1": "fileMatch + authorizeFileDownload：鉴权在调用里",
+    "/api/nodes/:param1/config": "nodeConfigMatch：鉴权在块内",
+    "/api/tasks?/:param1": "taskPathMatch：鉴权在块内",
     # 这些块里判定发生在 resolve* / handler 内部，不在 `if (...)` 的 25 行窗口里
-    "ws", "/mcp", "events", "/events/users/me", "/api/servers", "/api/upload",
-    "/api/dm", "/api/dm/threads", "api", "/api/status", "/api/stats",
-    "/api/task_events", "/api/completing", "/api/completions", "/api/tasks",
-    "/api/messages", "/api/messages/ack", "/api/nodes", "/api/networks",
-    "/api/admin/users", "/api/users", "/api/",
+    "ws": "requireTmuxAccess 之外还有会话校验",
+    "/mcp": "MCP transport 自己校验",
+    "events": "eventsMatch：鉴权在块内",
+    "/events/users/me": "鉴权在块内",
+    "/api/servers": "鉴权在块内",
+    "/api/upload": "鉴权在块内",
+    "/api/dm": "同网络成员即可",
+    "/api/dm/threads": "同网络成员即可",
+    "/api/status": "公开探针",
+    "/api/stats": "鉴权在块内",
+    "/api/task_events": "鉴权在块内",
+    "/api/completions": "鉴权在块内",
+    "/api/tasks": "鉴权在块内",
+    "/api/messages": "鉴权在块内",
+    "/api/messages/ack": "鉴权在块内",
+    "/api/nodes": "鉴权在块内",
+    "/api/networks": "鉴权在块内",
+    "/api/admin/users": "鉴权在块内",
+    "/api/users": "鉴权在块内",
+    "/api/": "兜底 404/405，不做业务",
+    "api": "旧提取器留下的裸前缀（改参数化路径后应消失）",
 }
 
 # 分支覆盖读数的基线：**在测试里一次都没出现过路径字面量**的行数。
 # 它只会随补测试而下降；上涨意味着新加了没人请求过的分支。
-NEVER_REQUESTED_BASELINE = 5
+# 🔴 2026-11-01 重定基线：5 → 45。**这不是回归，是口径变了。**
+# 提取器把正则路由从「裸前缀」改成参数化路径后，40 行从「判不了」变成「可判」，
+# 而它们本来就没被任何请求走过 —— 于是「从未被请求」从 5 涨到 45。
+# 旧数 5 只统计了「可判的 54 行里」的那部分，与新的 45 不可比。
+# 两个口径都不能替代对方：旧口径说「在看得见的那半边里，覆盖率是 49/54」，
+# 新口径说「在全部 94 行里，49 行被请求过、45 行没有」。
+NEVER_REQUESTED_BASELINE = 45
 
 
 def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
