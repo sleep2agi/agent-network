@@ -16,6 +16,12 @@ rows = []
 for i in range(len(starts) - 1):
     s, name = starts[i]; e = starts[i + 1][0]
     block = text[s:e]
+    # 2026-11-01 —— 块边界不能只看「下一个 server.tool(」：注册之后**紧跟的辅助函数**
+    # 也会被算成「这个工具的出口」（实测 ack_config_update 被多算 1 个：那是后面
+    # notifyRulesFileRequest 的返回）。⇒ 先截到本工具自己的收尾 `\n  );`。
+    tail = block.find("\n  );")
+    if tail > 0:
+        block = block[:tail]
     shapes = set()
     for m in re.finditer(r'JSON\.stringify\(\{\s*ok:\s*true([^}]{0,80})', block):
         shapes.add(re.sub(r"\s+", " ", m.group(1))[:40])
