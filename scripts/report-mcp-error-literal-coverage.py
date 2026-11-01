@@ -65,10 +65,15 @@ def domain() -> dict | None:
     return json.loads(out.stdout)
 
 
-def classify(literals: list[str], texts: list[str]) -> tuple[set[str], set[str]]:
-    """返回 (mentioned, near_expect)。纯函数 —— selftest 直接喂夹具，不摸磁盘。"""
+def classify(literals: list[str], texts: list[str]) -> tuple[set[str], set[str], set[str]]:
+    """返回 (mentioned, near_expect, strict)。
+
+    两级判据**并存**（不是取代）：adjacent 续历史、strict 从今天起算，
+    两者之差就是「命名级别的不确定性」。
+    """
     mentioned: set[str] = set()
     near_expect: set[str] = set()
+    strict: set[str] = set()
     for text in texts:
         lines = text.splitlines()
         for i, line in enumerate(lines):
@@ -79,7 +84,14 @@ def classify(literals: list[str], texts: list[str]) -> tuple[set[str], set[str]]
                 lo, hi = max(0, i - 3), min(len(lines), i + 4)
                 if "expect(" in line or any("expect(" in lines[j] for j in range(lo, hi)):
                     near_expect.add(e)
-    return mentioned, near_expect
+                # 2026-11-01 —— **严格级**：字面量必须与 expect( **同一行**。
+                # 邻近级（±3 行）的偏差是**单向的**（只会多算），所以任何「上涨」
+                # 都可能是「距离变近」而不是「覆盖变好」——而距离变近可以由一次
+                # 无关改动造成（在它旁边加了一条别的断言）。
+                # 双列并存：adjacent 续历史，strict 从今天起算。
+                if "expect(" in line:
+                    strict.add(e)
+    return mentioned, near_expect, strict
 
 
 SELFTEST_CASES = [
@@ -113,7 +125,7 @@ SELFTEST_CASES = [
 def selftest() -> int:
     bad = 0
     for label, literals, texts, want in SELFTEST_CASES:
-        mentioned, near = classify(literals, texts)
+        mentioned, near, _strict = classify(literals, texts)
         e = literals[0]
         got = "near_expect" if e in near else ("mentioned_only" if e in mentioned else "never")
         ok = got == want
@@ -121,6 +133,15 @@ def selftest() -> int:
         if not ok:
             bad += 1
             print(f"        got={got} want={want}")
+    # 严格级与邻近级必须真的不同：夹具放在「离 expect 2 行」时，
+    # adjacent 命中而 strict 不命中 —— 两者之差就是距离带来的不确定性。
+    _near_only = ['const x = r.error;\n  // "err_near"\n  expect(x).toBeTruthy();']
+    _m, _n, _s = classify(["err_near"], _near_only)
+    ok = ("err_near" in _n) and ("err_near" not in _s)
+    print(f"{'ok  ' if ok else 'FAIL'}  邻近级命中而严格级不命中（距离 = 不确定性）")
+    if not ok:
+        bad += 1
+
     # 精度读数的识别器也要能被证伪：两种写法各命中一次，第三种不命中。
     import tempfile, pathlib as _pl
     tmp = _pl.Path(tempfile.mkdtemp())
@@ -145,7 +166,7 @@ def selftest() -> int:
     print(f"{'ok  ' if ok else 'FAIL'}  精度识别器：内联命中 / toMatchObject 不命中 / 换行拆开落进 unparsed")
     if not ok:
         bad += 1
-    total = len(SELFTEST_CASES) + 1
+    total = len(SELFTEST_CASES) + 2
     print(f"\nselftest: {total - bad}/{total}")
     return 1 if bad else 0
 
@@ -207,7 +228,7 @@ def measure(m: dict) -> dict:
         for e in r["errors"]:
             by_literal_tools.setdefault(e, []).append(r["tool"])
 
-    mentioned, near_expect = classify(
+    mentioned, near_expect, strict = classify(
         literals, [p.read_text() for p in sorted(SRC.glob("*.test.ts"))]
     )
 
@@ -229,6 +250,7 @@ def measure(m: dict) -> dict:
         "selectivity": (round(len(literals) / m["error_literal_occurrences"], 3)
                         if m.get("error_literal_occurrences") else 0.0),
         "near_expect": len(near_expect),
+        "strict": len(strict),
         "mentioned_only": len(mentioned_only),
         "never": len(never),
         "never_all": len(never_all),
@@ -265,7 +287,8 @@ def main() -> int:
           f" ｜ 命中（去重后，values）={c['literals']} ｜ 比值={c['selectivity']:.2f}")
     print("  比值偏低是**去重**造成的（同一个 error 在多个工具里出现算一次），不是筛选。")
     print(f"错误字面量（去重）{c['literals']} 个")
-    print(f"  在 expect 附近出现   {c['near_expect']:3d}   （**上界**，可能是断言别的属性）")
+    print(f"  在 expect 附近出现   {c['near_expect']:3d}   （邻近级 ±3 行，**单向偏多**）")
+    print(f"  与 expect **同行**   {c['strict']:3d}   （严格级，从 2026-11-01 起算；两者之差=距离带来的不确定性）")
     print(f"  出现但离 expect 很远 {c['mentioned_only']:3d}   （注释 / 夹具 / 日志串）")
     print(f"  **一次都没出现**     {c['never_all']:3d}   "
           f"= 待补 {c['never']} + 登记不做 {len(c['by_design'])}")
