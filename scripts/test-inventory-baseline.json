@@ -6961,6 +6961,11 @@
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::只加字段:其余键与之前逐字相同": 1,
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::授权改成可编辑后立即反映": 1,
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::每个调用者的取值": 1,
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::同名 provider 第二次入库 ⇒ provider_name_conflict（带 name）": 1,
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::四条载荷都没有 code 字段（现状，不是契约）": 1,
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::审一个已发布的技能 ⇒ skill_not_pending（带当前 status）": 1,
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::成员审技能 ⇒ skill_review_admin_required": 1,
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::成员建 provider ⇒ insufficient_role_for_provider（带 required_role / caller_role）": 1,
   "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::get_probe_results 空历史的键集（真实调用给出）": 1,
   "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 派发成功体的键集（真实调用给出）": 1,
   "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 缺 daemon 时的拒绝体": 1,
@@ -15232,6 +15237,11 @@
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::只加字段:其余键与之前逐字相同",
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::授权改成可编辑后立即反映",
   "server/src/project-viewer-can-http.test.ts::GET /api/requirements/projects 的 viewer_can.edit::每个调用者的取值",
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::同名 provider 第二次入库 ⇒ provider_name_conflict（带 name）",
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::四条载荷都没有 code 字段（现状，不是契约）",
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::审一个已发布的技能 ⇒ skill_not_pending（带当前 status）",
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::成员审技能 ⇒ skill_review_admin_required",
+  "server/src/provider-skill-error-domain.test.ts::#3309 upsert_provider / review_skill 的错误值域::成员建 provider ⇒ insufficient_role_for_provider（带 required_role / caller_role）",
   "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::get_probe_results 空历史的键集（真实调用给出）",
   "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 派发成功体的键集（真实调用给出）",
   "server/src/provider-tools-shape.test.ts::provider 三件工具的形状::probe_provider_model 缺 daemon 时的拒绝体",
@@ -16542,7 +16552,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "eacb907785d3a98567598254d4511399f6574a20",
+  "commit": "e6e0e02ca08f5533e200fa25b98e5c208964be4d",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
