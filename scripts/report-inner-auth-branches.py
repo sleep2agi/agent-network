@@ -47,6 +47,18 @@ BRANCH_PATTERNS = (
 )
 
 # 已经做过「短路这一支 ⇒ 跑测试 ⇒ 看红不红」实验的那些（结论要写明依据）。
+# 2026-11-01 —— 抽样 14 条路由（跨 6 个族）的未认证响应体，得到一条**分界**：
+#
+#   {"error":"unauthorized"}              ⇒ 全局鉴权层先答 ⇒ handler 内那条分支**不可达**（10/14）
+#   {"ok":false,"error":"token required"} ⇒ handler 自己就是那道门 ⇒ **可达**（2/14：/api/auth/me、/api/networks）
+#
+# 所以「handler 内有 401」不能一律判死 —— 判据是**这一次请求是谁答的**，而它是可读的。
+# 其余 2 条落在别的形状上（见 OTHER_SHAPES），不归这两档。
+OTHER_SHAPES = {
+    "GET /api/networks": "handler 自己取 token 并给出 {ok:false, error:'token required'}",
+    "GET /api/auth/me": "同上",
+}
+
 PROBED = {
     # 2026-11-01 —— 第三档：**unpinned**（短路后没有测试变红）。
     # 它既不是 reachable（没测试守它）也不是 unreachable（可能只是没测），
@@ -130,7 +142,12 @@ def main() -> int:
         by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
     print("  形态分布：" + " · ".join(f"{k}={v}" for k, v in sorted(by_kind.items())))
     print()
-    print("  可达性：**本脚本不给结论**（本仓没有可枚举的中间件栈）。")
+    print("  分界（抽样 14 条路由，实测响应体）：")
+    print("    {\"error\":\"unauthorized\"}              ⇒ 全局层先答 ⇒ handler 那条分支不可达（10/14）")
+    print("    {\"ok\":false,\"error\":\"token required\"} ⇒ handler 自己就是门 ⇒ 可达（2/14）")
+    print("  ⇒ 「handler 内有 401」不能一律判死；判据是**这一次请求是谁答的**。")
+    print()
+    print("  可达性：**本脚本不给整体结论**（本仓没有可枚举的中间件栈）。")
     print("  结论只能来自「短路这一支 ⇒ 跑测试 ⇒ 看红不红」的逐个实验。已做过的：")
     for route, (verdict, why) in sorted(PROBED.items()):
         print(f"    {verdict:<11} {route:<34} {why}")
