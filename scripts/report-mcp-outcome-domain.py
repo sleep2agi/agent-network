@@ -79,6 +79,9 @@ def measure_text(text: str) -> dict:
             "distinguishable": len(shapes) + len(errs),
         })
 
+    # 宽形状：源码里 `server.tool("` 的出现次数（单位 occurrences）。
+    # 命中 = 切出来的工具数（单位 tools）。两者不同单位 —— 并列时必须各自带单位。
+    wide = len(re.findall(r'server\.tool\(\s*"', text))
     total_shapes = sum(r["ok_shapes"] for r in rows)
     total_errs = sum(r["error_domain"] for r in rows)
     # 形状维度会低估的那些：成功形状 ≥1 且有 ≥2 个错误值
@@ -88,6 +91,9 @@ def measure_text(text: str) -> dict:
     )
     return {
         "tools": len(rows),
+        "wide_shape_occurrences": wide,
+        "error_literal_occurrences": len(ERR.findall(text)),
+        "selectivity": round(len(rows) / wide, 3) if wide else 0.0,
         "ok_shapes_total": total_shapes,
         "error_literals_total": total_errs,
         "distinguishable_total": total_shapes + total_errs,
@@ -184,6 +190,9 @@ def main() -> int:
         print(json.dumps(m, ensure_ascii=False, indent=1))
         return 0
 
+    print(f"宽形状（`server.tool(\"` 出现，occurrences）={m['wide_shape_occurrences']}"
+          f" ｜ 命中（tools）={m['tools']} ｜ 比值={m['selectivity']:.2f}")
+    print("  比值≈1 ⇒ 谓词没在筛（它就是在数同一件事）；比值<1 ⇒ 有工具用了别的注册写法，需人看。")
     print(f"工具 {m['tools']} 个")
     print(f"成功出口形状合计 {m['ok_shapes_total']}（形状口径的分子）")
     print(f"错误字面量合计   {m['error_literals_total']}**（下界）**（本口径的分子）")

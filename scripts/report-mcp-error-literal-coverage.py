@@ -133,6 +133,9 @@ def measure(m: dict) -> dict:
 
     return {
         "literals": len(literals),
+        "raw_occurrences": m.get("error_literal_occurrences", 0),
+        "selectivity": (round(len(literals) / m["error_literal_occurrences"], 3)
+                        if m.get("error_literal_occurrences") else 0.0),
         "near_expect": len(near_expect),
         "mentioned_only": len(mentioned_only),
         "never": len(never),
@@ -163,6 +166,9 @@ def main() -> int:
         print(json.dumps(c, ensure_ascii=False, indent=1))
         return 0
 
+    print(f"宽形状（`error: \"` 出现，occurrences）={c['raw_occurrences']}"
+          f" ｜ 命中（去重后，values）={c['literals']} ｜ 比值={c['selectivity']:.2f}")
+    print("  比值偏低是**去重**造成的（同一个 error 在多个工具里出现算一次），不是筛选。")
     print(f"错误字面量（去重）{c['literals']} 个")
     print(f"  在 expect 附近出现   {c['near_expect']:3d}   （**上界**，可能是断言别的属性）")
     print(f"  出现但离 expect 很远 {c['mentioned_only']:3d}   （注释 / 夹具 / 日志串）")

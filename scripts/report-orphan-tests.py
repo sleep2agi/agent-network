@@ -300,6 +300,15 @@ def main() -> int:
         return 1 if orphans else 0
 
     print(f"谓词：{LOOKS_LIKE_TEST.pattern}")
+    # 「宽形状 ÷ 命中」是**筛选强度**。两端都不健康，而处置相反：
+    #   比值 ≈ 1 ⇒ 谓词没做筛选（任何路径含 test/spec 都算）
+    #   比值 ≈ 0 ⇒ 谓词可能写窄了，或扫描域太大
+    # 只报绝对数时，817 与 705 看起来是同一种量 —— 所以这里两个数 + 单位一起给。
+    wide = [f for f in files if re.search(r"(test|spec)", f, re.I)]
+    ratio = len(rows) / len(wide) if wide else 0.0
+    print(f"宽形状（路径含 test/spec，单位 files）={len(wide)} ｜ 命中（单位 files）={len(rows)}"
+          f" ｜ 比值={ratio:.2f}")
+    print("  比值≈1 ⇒ 谓词没在筛；比值≈0 ⇒ 谓词可能写窄或域太大。两者处置相反。")
     print(f"对象：git ls-files ∩ 名字像测试 ⇒ {len(rows)} 个文件")
     for v, label in (("A_inventory", "A 测试清单计数"), ("B_runner", "B 有 runner 引用"),
                      ("C_by_design", "C 登记为不跑"), ("ORPHAN", "**未归属**")):
