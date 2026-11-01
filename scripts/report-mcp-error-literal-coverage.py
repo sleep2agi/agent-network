@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import json
 import subprocess
 import sys
@@ -120,8 +121,58 @@ def selftest() -> int:
         if not ok:
             bad += 1
             print(f"        got={got} want={want}")
-    print(f"\nselftest: {len(SELFTEST_CASES) - bad}/{len(SELFTEST_CASES)}")
+    # 精度读数的识别器也要能被证伪：两种写法各命中一次，第三种不命中。
+    import tempfile, pathlib as _pl
+    tmp = _pl.Path(tempfile.mkdtemp())
+    (tmp / "a.test.ts").write_text('expect(Object.keys(x).sort()).toEqual(["a"]);')
+    (tmp / "b.test.ts").write_text('function expectKeys(o, w) {}\nexpectKeys(x, ["a"]);')
+    (tmp / "c.test.ts").write_text('expect(x).toMatchObject({ a: 1 });')
+    global REPO
+    _old = REPO
+    REPO = tmp.parent if False else _old
+    # 直接测正则，不走磁盘（避免改 REPO 全局）
+    ok = (len(KEYSET_ASSERT.findall((tmp / "a.test.ts").read_text())) == 1
+          and not KEYSET_ASSERT.search((tmp / "c.test.ts").read_text()))
+    print(f"{'ok  ' if ok else 'FAIL'}  精度识别器：内联写法命中、toMatchObject 不命中")
+    if not ok:
+        bad += 1
+    total = len(SELFTEST_CASES) + 1
+    print(f"\nselftest: {total - bad}/{total}")
     return 1 if bad else 0
+
+
+KEYSET_ASSERT = re.compile(r"Object\.keys\([^)]*\)\.sort\(\)\s*\)?\.?\s*to(Equal|Be)\(")
+HELPER_DEF = re.compile(r"function expectKeys\(")
+
+
+def precision_reading() -> dict:
+    """另一个读数：**形状钉得多精确**。
+
+    覆盖率口径数的是「这条 error 有没有被断言过」，它对「断言有多精确」完全无感 ——
+    把字段级换成精确键集，覆盖率分子不动，于是「这一轮做了什么」在曲线上看不见。
+    ⇒ 所以另立一个读数，并写明它的单位是**断言处数**，不是 error 数量：
+    两者分母不同，不能相除。
+
+    ⚠ 已知偏差：只认 `Object.keys(...).sort()` 与本地 `expectKeys(` 辅助两种写法；
+    其他等价写法（`toEqual(Object.keys(...))`、快照）不计 ⇒ **下界**。
+    """
+    files = sorted((REPO / "server" / "src").glob("*.test.ts"))
+    inline = 0
+    helpers = 0
+    files_with = []
+    for f in files:
+        body = f.read_text()
+        n_inline = len(KEYSET_ASSERT.findall(body))
+        n_helper_def = len(HELPER_DEF.findall(body))
+        # 用了本地辅助函数时，调用点也算 —— 否则「提取成函数」会让读数下降（假倒退）
+        n_helper_calls = len(re.findall(r"expectKeys\(", body)) - n_helper_def if n_helper_def else 0
+        if n_inline or n_helper_calls:
+            files_with.append(f.name)
+        inline += n_inline
+        helpers += n_helper_calls
+    return {"inline_assertions": inline, "helper_calls": helpers,
+            "files": len(files_with), "sample": files_with[:8],
+            "unit": "assertions"}
 
 
 def measure(m: dict) -> dict:
@@ -193,6 +244,15 @@ def main() -> int:
     print(f"  出现但离 expect 很远 {c['mentioned_only']:3d}   （注释 / 夹具 / 日志串）")
     print(f"  **一次都没出现**     {c['never_all']:3d}   "
           f"= 待补 {c['never']} + 登记不做 {len(c['by_design'])}")
+    pr = precision_reading()
+    print(f"\n形状精度（单位 {pr['unit']}，**与上面的 never 分母不同，不能相除**）：")
+    print(f"  精确键集断言 {pr['inline_assertions'] + pr['helper_calls']} 处"
+          f"（内联 {pr['inline_assertions']} + 本地辅助调用 {pr['helper_calls']}），分布在 {pr['files']} 个测试文件")
+    print("  ⇒ 这一格存在的理由：覆盖率对「断言有多精确」无感，")
+    print("     所以把字段级换成精确键集时，覆盖率不动 —— 那不等于「没做事」。")
+    if pr["sample"]:
+        print(f"  例：{', '.join(pr['sample'][:5])}")
+
     if c["by_design"]:
         print("\n登记为「不做」的（造不出真实状态，理由写在这里）：")
         for e in c["by_design"]:
