@@ -104,6 +104,10 @@ describe("provider 三件工具的形状", () => {
     expect(up.provider_id).toMatch(/^prov_/);
     expect(Array.isArray(up.model_ids)).toBe(true);
     expect(up.model_ids).toHaveLength(1);
+
+    // #3309 分支：upsert 的「no_changes」出口用同参再调一次**到不了** —— 实测返回
+    // {"ok":false,"error":…,"name":…}（重名优先于「无变化」）。要到达它需要一次以 provider_id
+    // 定位的更新，而本夹具没有那条路径 ⇒ **这里不声称覆盖**，登记在卡上。
     expect(up.model_ids[0]).toMatch(/^pm_/);
   });
 
