@@ -210,8 +210,14 @@ describe("restricted member with NO grants sees no agents (one test per path)", 
     expect(real.body.error).toBe("agent_not_granted");
     expect(fake).toEqual(real);
   });
-  test("POST /api/broadcast → 403", async () => {
+  // #3354 —— 403 之外还要钉「没有副作用」：广播的副作用是**给每个目标写一条 inbox**，
+  // 只断状态码时，「拒了但已经把消息塞进大家收件箱」也会绿。
+  test("POST /api/broadcast → 403 且**一条 inbox 都没写**（拒绝不许有副作用）", async () => {
+    const inboxRows = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM inbox WHERE network_id = ?1", NET)!.n;
+    const before = inboxRows();
     expect((await send(aliceToken, "POST", `/api/broadcast?network_id=${NET}`, { message: "hi" })).status).toBe(403);
+    expect(inboxRows()).toBe(before);
   });
 
   // 2026-10-31 —— #3214：`/api/broadcast` 此前只测过 403（拒绝路径），**成功体的形状从未被钉**。
