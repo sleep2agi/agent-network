@@ -193,9 +193,19 @@ _scrub_node_identity_env
 # 所以报错必须同时给出 HUB_HOME 与调用者 HOME：只报路径看不出是谁的家目录。
 # 🔴 必须放进**同一次** fail_slow：它是 sleep 30 + exit 1，分开写后面几句永远不执行。
 if [ ! -f "$ENTRY" ]; then
-  fail_slow "固化安装缺失：$ENTRY（在 $RUNTIME_DIR 跑 npm install 重建）
+  _msg="固化安装缺失：$ENTRY（在 $RUNTIME_DIR 跑 npm install 重建）
     HUB_HOME=${HUB_HOME}（路径基准）· 调用者 HOME=${CALLER_HOME}
     ⇒ 两者不同时，说明这次启动是从别的会话继承来的（见 #3160）"
+  # 2026-11-01（#3160 后续）—— 默认 RUNTIME_DIR 是**写死的一个旧版本目录**，
+  # 生产上通常不存在（现有的都是 runtime-<版本>）。没显式给 HUB_RUNTIME_DIR 时，
+  # 报错要列出**真的存在**的目录，否则读的人会以为是自己路径写错。
+  if [ -z "${HUB_RUNTIME_DIR:-}" ]; then
+    _avail=$(ls -1d "$HUB_HOME"/.commhub/runtime-* 2>/dev/null | tail -3 | tr '\n' ' ')
+    _msg="$_msg
+    ⇒ 未显式给 HUB_RUNTIME_DIR（默认是写死的旧目录）。可用的 runtime：${_avail:-（一个都没有）}
+      （用法：HUB_RUNTIME_DIR=<上面某个> 启动/重启）"
+  fi
+  fail_slow "$_msg"
 fi
 
 # --- 预检 3：vault 密钥必须存在且非空（fail-closed）---
