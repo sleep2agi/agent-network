@@ -7829,6 +7829,11 @@
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + FRESH in-flight start (< 60s) → refused node_already_starting (not superseded)": 1,
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + NO in-flight row (orphaned state) → self-heals by re-dispatching": 1,
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + STALE in-flight start (> 60s) → supersede old + re-dispatch (converges)": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack started 但不给 child_pid ⇒ child_pid_required": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack 一个已结束的启动请求 ⇒ request_not_ackable（带当前 status）": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::pending 但没有 env blob ⇒ env_blob_unavailable": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::按 clone 流程要一个非 clone 请求 ⇒ not_a_clone": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）": 1,
   "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the full projection to that agent": 1,
@@ -16095,6 +16100,11 @@
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + FRESH in-flight start (< 60s) → refused node_already_starting (not superseded)",
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + NO in-flight row (orphaned state) → self-heals by re-dispatching",
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + STALE in-flight start (> 60s) → supersede old + re-dispatch (converges)",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack started 但不给 child_pid ⇒ child_pid_required",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack 一个已结束的启动请求 ⇒ request_not_ackable（带当前 status）",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::pending 但没有 env blob ⇒ env_blob_unavailable",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::按 clone 流程要一个非 clone 请求 ⇒ not_a_clone",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）",
   "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the full projection to that agent",
@@ -16532,7 +16542,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "2a410106cda5b9f10f4959efd5e6be50192808b2",
+  "commit": "eacb907785d3a98567598254d4511399f6574a20",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
