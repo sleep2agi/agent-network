@@ -94,6 +94,38 @@ def if_block(lines: list[str], row_line: int) -> tuple[int, list[str]] | None:
     return None
 
 
+DENY_RE = re.compile(r"\b(return|throw)\b|40[13]|denied|forbid", re.I)
+
+
+def guard_position_lines(block: list[str]) -> set[int]:
+    """块内「门**真的被用来拒绝**」的那些行下标。
+
+    2026-11-01 —— 上一版只问「块里出现过这个符号」。那是**入口层**证据：
+    `console.log(canRestWriteNetwork(...))` 也满足它，而它一点也没拦住谁。
+    （外部复核的判别法：把那个调用挪到不拦截的位置，断言仍绿 ⇒ 只到入口层。）
+
+    这里换成两条守卫形态，都是可判的：
+      · `if (<含门符号>)` 且 1–2 行内出现拒绝词（return / throw / 401 / 403 / denied）
+      · `const denied = <门>()` 之后 3 行内出现引用它的 `if (…)`
+    """
+    out: set[int] = set()
+    for i, line in enumerate(block):
+        if re.match(r"\s*if\s*\(", line):
+            window = " ".join(block[i:i + 3])
+            if DENY_RE.search(window):
+                out.add(i)
+    for i, line in enumerate(block):
+        m = re.match(r"\s*(?:const|let)\s+(\w+)\s*=", line)
+        if not m:
+            continue
+        name = m.group(1)
+        for j in range(i + 1, min(i + 4, len(block))):
+            if re.match(r"\s*if\s*\(", block[j]) and name in block[j]:
+                out.add(i)
+                break
+    return out
+
+
 def write_routes(doc: dict) -> list[dict]:
     rows = [r for r in (doc.get("rows") or []) if (r.get("method") or "") in WRITE_METHODS]
     for m in ((doc.get("method_parse") or {}).get("multi_method") or []):
@@ -134,9 +166,15 @@ def classify(doc: dict, lines: list[str]) -> dict:
         #   ② 已登记名字的存在性       —— 覆盖 resolveToken / restAuth / callerUserId 这类
         # 只开 ① 会重演那个假阴性：第一版脚本报「19 条写路由无门」，而它们全都调了 resolveToken。
         syms, _extra = symbols_in(block)
+        guard_idx = guard_position_lines(block)
+        guard_syms = sorted({s for i in guard_idx for s in symbols_in([block[i]])[0]})
         syms = sorted(syms)
-        if syms:
-            gated.append((path, r.get("method"), syms))
+        if guard_syms:
+            gated.append((path, r.get("method"), guard_syms))
+        elif syms:
+            # 块里有门符号，但不在守卫位置 ⇒ 入口层证据，不算有门。
+            unknown.append((path, r.get("method"), r.get("line"),
+                            f"块里有门符号 {syms[:3]}，但没有一处处在守卫位置（if+拒绝 / 赋值后被 if 检查）"))
         elif (path, str(r.get("method"))) in PUBLIC_BY_DESIGN:
             public.append((path, r.get("method")))
         else:
@@ -219,6 +257,13 @@ def selftest() -> int:
     ok = any(x.startswith("GATE_SYMBOL_UNUSED") for x in probs)
     print(("✓" if ok else "✗") + " selftest 登记了却抽不到 ⇒ GATE_SYMBOL_UNUSED")
     fails += 0 if ok else 1
+
+    # 2026-11-01 —— 入口层 vs 守卫层：符号出现在块里但没拦住任何人 ⇒ 不算有门。
+    weak = ["", "if (m) {", "  console.log(canRestWriteNetwork(a));", "  return ok();", "}"]
+    res_weak = classify({"rows": [{"path": "/w/weak", "method": "PUT", "line": 2}]}, weak)
+    ok = len(res_weak["gated"]) == 0 and len(res_weak["unknown"]) == 1
+    print(("✓" if ok else "✗") + " selftest 块里有门符号但不在守卫位置 ⇒ 判不了（不是有门）")
+    fails += 0 if ok else 1
     return 0 if fails == 0 else 1
 
 
@@ -233,6 +278,7 @@ def main() -> int:
     total = len(result["gated"]) + len(result["public"]) + len(result["unknown"])
     print(f"写路由 {total}：有门 {len(result['gated'])} · 按设计公开 {len(result['public'])} "
           f"· 判不了 {len(result['unknown'])}")
+    print("  门的判据：**守卫位置**（if+拒绝词 / 赋值后被 if 检查），不是「块里出现过」")
     if result["unlisted"]:
         print(f"  ⚠ 源码里有、但清单里没有的门符号 {len(result['unlisted'])} 个："
               f"{', '.join(sorted(result['unlisted']))[:160]}")
