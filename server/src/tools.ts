@@ -114,6 +114,7 @@ import { listTaskLateReplies } from "./task-late-replies.js";
 import { pollPacer } from "./poll-pacing.js";
 import { neverConsumedExpiryCounters, neverConsumeGate, persistentNeverConsumedExpiries } from "./expiry-counters.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, updateDepartment } from "./departments.js";
+import { decideParentInference, noteInferAccepted, noteInferRejected } from "./parent-infer.js";
 
 function ts(): string {
   return new Date().toTimeString().slice(0, 8);
@@ -2125,12 +2126,25 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let parentSource: "explicit" | "inferred" | null = parentIn ? "explicit" : null;
       if (!humanSender && !parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
         try {
+          // #669 —— 取**全部**候选而非最近一条：裁定需要知道「是不是唯一」。
           const recentParams: any[] = [from_session];
-          let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered')"; // board668-parent-delivered-only
+          let recentSql = "SELECT task_id, created_at FROM tasks WHERE to_name = ?1 AND status IN ('delivered')"; // board668-parent-delivered-only
           recentSql = addScope(recentSql, recentParams, effectiveNetId);
-          recentSql += " ORDER BY created_at DESC LIMIT 1";
-          const recent = db.get<{ task_id: string }>(recentSql, ...recentParams);
-          if (recent?.task_id) { parentTaskId = recent.task_id; parentSource = "inferred"; }
+          recentSql += " ORDER BY created_at DESC LIMIT 5";
+          const cands = db.all<{ task_id: string; created_at: string | null }>(recentSql, ...recentParams);
+          const verdict = decideParentInference(
+            cands.map((c) => ({ task_id: c.task_id, created_at_ms: c.created_at ? Date.parse(c.created_at) : null })),
+            Date.now(),
+          );
+          if (verdict.ok) {
+            parentTaskId = verdict.task_id;
+            parentSource = "inferred";
+            noteInferAccepted();
+          } else if (verdict.rejection.candidates > 0) {
+            // 只有「本来有候选但被拒」才计数：没有候选是常态（没有要接的任务），
+            // 把它记成拒绝会让分母虚高。
+            noteInferRejected(verdict.rejection);
+          }
         } catch {}
       }
 

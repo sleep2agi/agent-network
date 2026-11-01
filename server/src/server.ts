@@ -123,6 +123,7 @@ import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
 import { taskRejectionCounters } from "./rejection-counters.js";
 import { neverConsumedExpiryCounters, noteNeverConsumedExpiry, neverConsumeGate, persistentNeverConsumedExpiries } from "./expiry-counters.js";
+import { parentInferCounters } from "./parent-infer.js";
 import { authAbuseSnapshot, noteLoginIpRateLimited, noteLoginLocked, noteRegisterRateLimited } from "./auth-abuse-counters.js";
 import { legacyLicenseField, licenseStateOf } from "./license-state.js";
 import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
@@ -3852,6 +3853,9 @@ return Bun.serve({
           // 比值才是有意义的部分：命中数 ≫ 去重数 ⇒ 单点重试；两者接近 ⇒ 换 IP / 撒网。
           // 只给计数与去重数，不给 IP / 用户名的值（集合本身不出进程）。
           auth_abuse: authAbuseSnapshot(),
+          // #669 —— 父任务推断的收窄效果：accepted 与两个 rejected 一起看，
+          // 否则「收窄了多少」与「收窄没生效」同形（两者都让 7 天失败率下降）。
+          parent_infer: parentInferCounters(),
         },
         // 🔴 2026-10-31 —— 上面那个 counters 对象**不在匿名投影里**（PUBLIC_HEALTH_KEYS）。
         //    而 #3271 交付时我把「观察它有没有 fire」写成了 `/health.counters.…` ——
