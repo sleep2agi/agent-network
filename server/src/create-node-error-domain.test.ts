@@ -34,6 +34,11 @@ function tools(callerUserId: string): Record<string, ToolHandler> {
   return out;
 }
 
+// 精确键集 = 集合相等（不是计数、也不是「有这几个字段」）。
+function expectKeys(obj: Record<string, unknown>, want: string[]) {
+  expect(Object.keys(obj).sort(), "键集合必须完全等于期望").toEqual([...want].sort());
+}
+
 async function callCreate(userId: string, spec: Record<string, unknown> = {}) {
   const h = tools(userId).create_node;
   const r = await h({
@@ -76,6 +81,7 @@ describe("#3309 create_node 错误值域：三条「这台 daemon 现在不能�
     expect(r.error).toBe("insufficient_role_for_create_node");
     expect(r.required_role).toBe("admin");
     expect(r.caller_role).toBe("member");
+    expectKeys(r, ["ok", "error", "required_role", "caller_role"]);
   });
 
   test("daemon 只支持 codex，却要求 opencode-cli ⇒ runtime_not_in_local_allowlist（回显 allowed）", async () => {
@@ -86,6 +92,7 @@ describe("#3309 create_node 错误值域：三条「这台 daemon 现在不能�
     expect(r.runtime).toBe("opencode-cli");
     // 回显这台机器**允许**什么，否则读的人只知道"不行"，要回 daemon 上自己查。
     expect(r.allowed).toEqual(["codex"]);
+    expectKeys(r, ["ok", "error", "runtime", "allowed"]);
   });
 
   test("子节点已达上限 ⇒ daemon_max_children（带 current / max）", async () => {
@@ -102,6 +109,7 @@ describe("#3309 create_node 错误值域：三条「这台 daemon 现在不能�
     expect(r.error).toBe("daemon_max_children");
     expect(r.current).toBe(1);
     expect(r.max).toBe(1);
+    expectKeys(r, ["ok", "error", "current", "max"]);
   });
 
   test("三条的载荷都没有 code 字段（现状，不是契约）", async () => {

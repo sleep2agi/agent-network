@@ -49,6 +49,12 @@ async function callProbe(userId: string, args: Record<string, unknown>) {
 
 const base = { provider_id: PROVIDER, model_name: "probe-model", daemon_node_id: DAEMON };
 
+// 2026-11-01 —— **精确键集，写成集合相等**（不是计数、也不是「有这几个字段」）。
+// 计数可以被换名满足；字段级断言放过多给的键。两者都放过「换名 + 少给」这种最常见的结构变动。
+function expectKeys(obj: Record<string, unknown>, want: string[]) {
+  expect(Object.keys(obj).sort(), "键集合必须完全等于期望").toEqual([...want].sort());
+}
+
 function cleanup() {
   db.run("DELETE FROM provider_models WHERE provider_id = ?1", [PROVIDER]);
   db.run("DELETE FROM providers WHERE network_id = ?1", [NET]);
@@ -87,6 +93,7 @@ describe("#3309 probe_provider_model 错误值域：四条拒绝各有一条会�
     // 拒绝体还带着「需要什么角色 / 调用者是什么角色」—— 否则读的人只知道被拒，不知道为什么。
     expect(r.required_role).toBe("admin");
     expect(r.caller_role).toBe("member");
+    expectKeys(r, ["ok", "error", "required_role", "caller_role"]);
   });
 
   test("provider 不存在 ⇒ error === provider_not_found", async () => {
@@ -94,6 +101,7 @@ describe("#3309 probe_provider_model 错误值域：四条拒绝各有一条会�
     expect(r.ok).toBe(false);
     expect(r.error).toBe("provider_not_found");
     expect(r.provider_id).toBe("prov_does_not_exist");
+    expectKeys(r, ["ok", "error", "provider_id"]);
   });
 
   test("provider 存在但停用 ⇒ error === provider_disabled（**不是** provider_not_found）", async () => {
@@ -104,6 +112,7 @@ describe("#3309 probe_provider_model 错误值域：四条拒绝各有一条会�
     // 这两条的区别就是这张测试存在的理由：一个要建、一个只要启用。
     expect(r.error).not.toBe("provider_not_found");
     expect(r.hint).toContain("enabled:true");
+    expectKeys(r, ["ok", "error", "provider_id", "hint"]);
   });
 
   test("provider 引用的密钥不在 vault ⇒ error === secret_not_in_vault，且带上键名", async () => {
@@ -111,6 +120,7 @@ describe("#3309 probe_provider_model 错误值域：四条拒绝各有一条会�
     expect(r.ok).toBe(false);
     expect(r.error).toBe("secret_not_in_vault");
     expect(r.key).toBe("PROBE_ERR_ABSENT");
+    expectKeys(r, ["ok", "error", "key"]);
     // 键名是标识不是凭据：报出来才能让人去补哪一把。
   });
 
