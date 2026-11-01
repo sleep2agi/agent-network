@@ -8075,6 +8075,10 @@
   "server/src/tools-list-json-schema.test.ts::#1075 node_secrets_capable survives report_status::config_snapshot's shape declares node_secrets_capable": 1,
   "server/src/tools-list-json-schema.test.ts::#1756 tools/list::client.listTools() succeeds and returns every registered tool": 1,
   "server/src/tools-list-json-schema.test.ts::#1756 tools/list::every registered tool converts to JSON Schema on its own (names the offender)": 1,
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::三条的载荷都**没有** code 字段（现状，不是契约）": 1,
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::成员改安全敏感 flag ⇒ insufficient_role_for_security_flag（带 field 与 required_role）": 1,
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::模型名非法 ⇒ invalid_patch（带 field=model 与 reason）": 1,
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::渠道全不认识 ⇒ channels_all_invalid（且回显 requested，**不是** invalid_patch）": 1,
   "server/src/update-provider.test.ts::update_provider — SQL invariants (RFC-028 P1.5)::SEC-1: provider_id is unique-per-network — netA query for netB provider_id returns nothing": 1,
   "server/src/update-provider.test.ts::update_provider — SQL invariants (RFC-028 P1.5)::audit detail does NOT contain secret_key_ref VALUE under any patch": 1,
   "server/src/update-provider.test.ts::update_provider — SQL invariants (RFC-028 P1.5)::base_url change rejected via validateBaseUrl when host not in vendor allowlist": 1,
@@ -16333,6 +16337,10 @@
   "server/src/tools-list-json-schema.test.ts::#1075 node_secrets_capable survives report_status::config_snapshot's shape declares node_secrets_capable",
   "server/src/tools-list-json-schema.test.ts::#1756 tools/list::client.listTools() succeeds and returns every registered tool",
   "server/src/tools-list-json-schema.test.ts::#1756 tools/list::every registered tool converts to JSON Schema on its own (names the offender)",
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::三条的载荷都**没有** code 字段（现状，不是契约）",
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::成员改安全敏感 flag ⇒ insufficient_role_for_security_flag（带 field 与 required_role）",
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::模型名非法 ⇒ invalid_patch（带 field=model 与 reason）",
+  "server/src/update-node-config-error-domain.test.ts::#3309 update_node_config 错误值域：三条拒绝各有一条会红的断言::渠道全不认识 ⇒ channels_all_invalid（且回显 requested，**不是** invalid_patch）",
   "server/src/update-provider.test.ts::update_provider — SQL invariants (RFC-028 P1.5)::SEC-1: provider_id is unique-per-network — netA query for netB provider_id returns nothing",
   "server/src/update-provider.test.ts::update_provider — SQL invariants (RFC-028 P1.5)::audit detail does NOT contain secret_key_ref VALUE under any patch",
   "server/src/update-provider.test.ts::update_provider — SQL invariants (RFC-028 P1.5)::base_url change rejected via validateBaseUrl when host not in vendor allowlist",
@@ -16516,7 +16524,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "1c0931a86900356301a4d38aa24c64e16e6a720a",
+  "commit": "4eb3e3b0c7770fedd5cc9a57a1ac748d5179c103",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
