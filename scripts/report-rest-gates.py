@@ -458,6 +458,16 @@ def selftest() -> int:
     cases.append(0 if ok else 1)
     fails += cases[-1]
 
+    # #3330 —— 权限档合并演练：同一条路由，把门从 NodeSecurity 换成 Network，
+    # 必要条件档必须从 owner_admin 掉到 network_write（否则这条不变量抓不到合并）。
+    before = scope_of(["canRestWriteNodeSecurity", "userTokenRequired"])
+    after = scope_of(["canRestWriteNetwork", "userTokenRequired"])
+    ok = (before == "owner_admin" and after == "network_write"
+          and SCOPE_RANK[after] > SCOPE_RANK[before])
+    print(("✓" if ok else "✗") + " selftest 合并演练：NodeSecurity→Network ⇒ 档位从 owner_admin 掉到 network_write")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
     # ① 关系断言自检：prefix 不可能超过 instrumented
     # ① 三行要来自三个产生者：分母那句话里的数字必须来自**遍历**，不是规则常量。
     # 判别法：喂一个不是 34 的输入，看它念的是哪个数。
@@ -593,6 +603,43 @@ def build_evidence(doc: dict, lines: list[str], result: dict) -> dict:
         },
         "rows": rows,
     }
+
+
+# 2026-11-01 —— #3330 的核心不变量：这四条改的是**节点的安全边界**（权限模式 + 三张白名单），
+# 它们必须是 owner_admin（节点主人 / 网络 owner·admin），不许被合并到 network_write
+# （「有网络写权的成员」）—— 而那正是「合并两个权限档时静默放宽」的形态。
+NODE_SECURITY_WRITES = {
+    ("PUT", "/api/nodes/:param1/permission-mode"),
+    ("PUT", "/api/nodes/:param1/tool-allowlist"),
+    ("PUT", "/api/nodes/:param1/rest-allowlist"),
+    ("PUT", "/api/nodes/:param1/peer-allowlist"),
+}
+SCOPE_RANK = {name: i for i, name in enumerate(SCOPE_ORDER)}
+
+
+def check_node_security_scope(doc: dict) -> list[str]:
+    """节点安全边界的四条写路由，其必要条件不得弱于 owner_admin。
+
+    判据用的是**必要条件档**（门符号算出来的），不是注释、不是命名。
+    合并权限档时这一条会红，而状态码测试不会（两者都会 200，只是谁能改变了）。
+    """
+    # 🔴 必须读**证据表**：路由表（doc）里的行没有 gates / required_scope 两列，
+    # 拿它来算会得到「全部 public」—— 第一版就是这么写的，四条全红而门其实都在。
+    if not EVIDENCE.exists():
+        return ["EVIDENCE_MISSING: 没有证据表 ⇒ 节点安全边界的权限档无从判定"]
+    ev = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+    out: list[str] = []
+    for r in (ev.get("rows") or []):
+        key = (str(r.get("method")), str(r.get("path")))
+        if key not in NODE_SECURITY_WRITES:
+            continue
+        scope = scope_of(list(r.get("gates") or []))
+        if SCOPE_RANK.get(scope, 99) > SCOPE_RANK["owner_admin"]:
+            out.append(f"NODE_SECURITY_SCOPE_WEAKENED: {key[0]} {key[1]} 的必要条件档是 "
+                       f"{scope}（弱于 owner_admin）⇒ 节点安全边界被放宽了")
+    if len({k for k in NODE_SECURITY_WRITES}) != 4:
+        out.append("NODE_SECURITY_SET_CHANGED: 这份清单本身被改过（应为 4 条）—— 改它要说明为什么")
+    return out
 
 
 def check_evidence(doc: dict, result: dict) -> list[str]:
@@ -763,7 +810,8 @@ def main() -> int:
               file=sys.stderr)
         if "--assert" in sys.argv:
             return 1
-    probs = problems_for(result, doc) + check_evidence(doc, result)
+    probs = (problems_for(result, doc) + check_evidence(doc, result)
+             + check_node_security_scope(doc))
     for x in probs:
         print(f"✗ {x}", file=sys.stderr)
     print("  mutates: none（只读）")
