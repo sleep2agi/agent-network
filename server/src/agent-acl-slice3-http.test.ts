@@ -764,6 +764,36 @@ describe("update_node_config 响应键集（exact key set）", () => {
     });
   });
 
+  // #3309 顺序维度余 2 —— `node_create_requests` 的两条读/写面同样「归属先于租户」：
+  //   not_found → not_your_request（daemon_node_id）→ cross_network_request（network_id）
+  describe("create-request reads/writes: same rejection order", () => {
+    test("get_create_request / ack_create_request：别人的 ⇒ not_your_request；别的网络 ⇒ cross_network_request", async () => {
+      const D = { alias: "acl3-cr-daemon", node: "node_acl3_cr_daemon" };
+      seedAgent({ alias: D.alias, node: D.node });
+      const minted = createNetworkTokenForNode(adminId, NET, D.alias, D.node);
+      expect(minted.ok).toBe(true);
+      const U = Math.random().toString(36).slice(2, 8);
+      const now = Date.now();
+      const ins = (id: string, net: string, daemon: string) =>
+        db.run(`INSERT INTO node_create_requests
+                (request_id, daemon_node_id, child_name, network_id, runtime, flags_json, env_keys, status, created_at, created_by_token)
+                VALUES (?1, ?2, ?3, ?4, 'opencode', '{}', '[]', 'awaiting_register', ?5, 'test')`,
+          [id, daemon, `child_${U}`, net, now]);
+      ins(`cr_other_daemon_${U}`, NET, "node_acl3_other_daemon");
+      ins(`cr_other_network_${U}`, "net_acl3_other_network", D.node);
+
+      for (const [toolName, extra] of [
+        ["get_create_request", {}],
+        ["ack_create_request", { status: "started" }],
+      ] as [string, Record<string, unknown>][]) {
+        const foreign = await tool(minted.token!, toolName, { request_id: `cr_other_daemon_${U}`, ...extra });
+        expect(foreign).toEqual({ ok: false, error: "not_your_request" });
+        const cross = await tool(minted.token!, toolName, { request_id: `cr_other_network_${U}`, ...extra });
+        expect(cross).toEqual({ ok: false, error: "cross_network_request" });
+      }
+    });
+  });
+
   // 2026-10-31 —— #3171 第 5 项：错误信封的形状也要钉住。
   // 今天它们是「约定俗成」：每个出口手写 {ok:false,error}，
   // 于是谁顺手多塞一个字段，客户端的分支就多一个没人知道的键。
