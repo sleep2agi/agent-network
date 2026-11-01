@@ -166,10 +166,18 @@ def check_method_parse(doc: dict) -> list[str]:
         if not binding:
             continue
         ident = binding.group(1)
+        # 2026-11-01 —— 找「引用 ident 的 if」不能按**行数窗口**（上一版是「向下 3 行」）。
+        # 窗口参数不可调：调窄漏掉隔了几行的 if，调宽会把相邻分支的 if 算进来。
+        # 改成**括号配平**：从绑定行向下扫，直到这一层的块结束；遇到的第一个引用 ident 的 if 才算。
         hit = None
-        for k in range(ln + 1, min(ln + 4, len(src))):
-            if re.match(r"\s*if\s*\(", src[k]) and ident in src[k]:
-                hit = src[k]
+        depth = 0
+        for k in range(ln, len(src)):
+            line = src[k]
+            depth += line.count("{") - line.count("}")
+            if k > ln and depth < 0:
+                break                      # 这一层已经结束
+            if k > ln and re.match(r"\s*if\s*\(", line) and ident in line:
+                hit = line
                 break
         if hit is None:
             continue

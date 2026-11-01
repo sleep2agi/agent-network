@@ -107,54 +107,84 @@ DENY_RE = re.compile(r"\b(return|throw)\b|40[13]|denied|forbid", re.I)
 GUARD_FORMS = ("if_plus_deny", "assign_then_test")
 
 
+def statement_span(block: list[str], i: int) -> tuple[int, int]:
+    """从第 i 行开始的**语句**范围（含首尾），边界由括号配平决定，不由行数。
+
+    2026-11-01 —— 上一版用的是「1–2 行内出现拒绝词」。窗口参数是不可调的：
+    调窄漏掉跨行的 `return`，调宽把**相邻分支**的拒绝词算进来。
+    窗口一出现，就说明这个检测器缺一个语法边界 —— 而它的取值会被人当经验值调几次然后固定。
+    """
+    j = i
+    depth = 0
+    seen_brace = False
+    while j < len(block):
+        line = block[j]
+        depth += line.count("{") - line.count("}")
+        if "{" in line:
+            seen_brace = True
+        if seen_brace and depth <= 0:
+            return i, j
+        if not seen_brace and line.rstrip().endswith(";"):
+            return i, j          # 单行语句（`if (x) return 403;`）
+        j += 1
+    return i, len(block) - 1
+
+
 def guard_form_census(block: list[str]) -> dict[str, int]:
     """每种守卫形态在这块里命中几行。
 
-    2026-11-01 —— 形态种类不由我背下来，由**普查**决定：
-    这条读数回答「要不要加第三种形态」，而它是一次扫描的成本。
-    写死两份形态而不报频次时，第三份形态出现只会表现为「某条路由突然判不了」。
+    形态种类不由我背下来，由**普查**决定：这条读数回答「要不要加第三种形态」。
     """
     out = {f: 0 for f in GUARD_FORMS}
     for i, line in enumerate(block):
-        if re.match(r"\s*if\s*\(", line) and DENY_RE.search(" ".join(block[i:i + 3])):
-            out["if_plus_deny"] += 1
+        if re.match(r"\s*if\s*\(", line):
+            _, j = statement_span(block, i)
+            if DENY_RE.search(" ".join(block[i:j + 1])):
+                out["if_plus_deny"] += 1
     for i, line in enumerate(block):
         m = re.match(r"\s*(?:const|let)\s+(\w+)\s*=", line)
         if not m:
             continue
-        for j in range(i + 1, min(i + 4, len(block))):
-            if re.match(r"\s*if\s*\(", block[j]) and m.group(1) in block[j]:
-                out["assign_then_test"] += 1
-                break
+        if _var_tested_later(block, i, m.group(1)):
+            out["assign_then_test"] += 1
     return out
+
+
+def _var_tested_later(block: list[str], i: int, name: str) -> bool:
+    """变量 name 在第 i 行赋值后，**在同一个块内**是否被某个 `if (` 检查过。
+
+    边界同样是括号配平（到该层块结束），不是「3 行内」。
+    """
+    depth = 0
+    for j in range(i, len(block)):
+        line = block[j]
+        depth += line.count("{") - line.count("}")
+        if j > i and depth < 0:
+            return False
+        if j > i and re.match(r"\s*if\s*\(", line) and name in line:
+            return True
+        if j > i and depth <= 0 and re.match(r"\s*\}", line):
+            return False
+    return False
 
 
 def guard_position_lines(block: list[str]) -> set[int]:
     """块内「门**真的被用来拒绝**」的那些行下标。
 
-    2026-11-01 —— 上一版只问「块里出现过这个符号」。那是**入口层**证据：
-    `console.log(canRestWriteNetwork(...))` 也满足它，而它一点也没拦住谁。
-    （外部复核的判别法：把那个调用挪到不拦截的位置，断言仍绿 ⇒ 只到入口层。）
-
-    这里换成两条守卫形态，都是可判的：
-      · `if (<含门符号>)` 且 1–2 行内出现拒绝词（return / throw / 401 / 403 / denied）
-      · `const denied = <门>()` 之后 3 行内出现引用它的 `if (…)`
+    两条形态，边界都由括号配平给出：
+      · `if (<含门符号>)` ⇒ 它的**语句体**里出现拒绝词（不是「附近两行」）
+      · `const denied = <门>()` ⇒ 同一块内出现引用它的 `if (…)`
     """
     out: set[int] = set()
     for i, line in enumerate(block):
         if re.match(r"\s*if\s*\(", line):
-            window = " ".join(block[i:i + 3])
-            if DENY_RE.search(window):
+            _, j = statement_span(block, i)
+            if DENY_RE.search(" ".join(block[i:j + 1])):
                 out.add(i)
     for i, line in enumerate(block):
         m = re.match(r"\s*(?:const|let)\s+(\w+)\s*=", line)
-        if not m:
-            continue
-        name = m.group(1)
-        for j in range(i + 1, min(i + 4, len(block))):
-            if re.match(r"\s*if\s*\(", block[j]) and name in block[j]:
-                out.add(i)
-                break
+        if m and _var_tested_later(block, i, m.group(1)):
+            out.add(i)
     return out
 
 
@@ -319,6 +349,25 @@ def selftest() -> int:
     form_assign = ["", "const denied = restNodeDenied(req);", "if (denied) return denied;"]
     ok = len(guard_position_lines(form_assign)) > 0
     print(("✓" if ok else "✗") + " selftest 形态 assign_then_test 单独命中")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
+    # 窗口 → 配平：两方向各一例。
+    # 例 A（漏报方向）：拒绝词在第 6 行 —— 旧窗口（±2 行）看不到它。
+    far = ["", "if (m) {", "  const a = 1;", "  const b = 2;", "  const c = 3;", "  return 403;", "}"]
+    ok = len(guard_position_lines(far)) > 0
+    print(("✓" if ok else "✗") + " selftest 拒绝词在语句体深处（第 6 行）仍算守卫位置")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
+    # 例 B（假阳方向）：前一个 if 体是空的，紧跟的后一个 if 才拒绝 ——
+    # 旧窗口会把后者的拒绝词算到前者头上（因为它在「附近两行」里）。
+    # 下标 1 是**空体**的 if（`{}`），下标 2 才是真拒绝。
+    # 旧窗口从下标 1 看 `[1, 2, 3]` ⇒ 会看见 403 ⇒ 把空体的 if 算成守卫位置（假阳）。
+    adjacent = ["", "if (empty) {}", "if (other) return 403;"]
+    guard_idx = guard_position_lines(adjacent)
+    ok = (2 in guard_idx) and (1 not in guard_idx)
+    print(("✓" if ok else "✗") + " selftest 空体的 if 不吃邻居的拒绝词（假阳方向）")
     cases.append(0 if ok else 1)
     fails += cases[-1]
 
