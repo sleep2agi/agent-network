@@ -985,6 +985,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // （约定见 tool-audience-http.test.ts：加字段先砍描述或合并，别改那三个数）。
         // `.catch(undefined)`：形状不对只丢这一格，绝不拒掉整份心跳。
         opencode_catalog: z.array(z.string()).max(400).optional().catch(undefined),
+        // #3144 —— 目录是**快照**：没有采集时刻，51 个模型是刚才的还是三周前的分不出。
+        // 🔴 这一格必须写进 schema：zod 的 object 默认**丢掉未知键** ⇒ 不写在这里，
+        //    daemon 报上来也会被静默剥掉，而 /api/nodes 的投影读到的永远是 null
+        //    （#3294 的 build_commit 就是同一个坑）。`.catch(undefined)` 与邻居一致：
+        //    形状不对只丢这一格，绝不拒掉整份心跳。
+        opencode_catalog_seen_at: z.string().max(40).optional().catch(undefined),
         // #2293 —— 这台机器上 OpenCode serve 的 loopback 端点（`http://127.0.0.1:PORT`）。
         // 客户端「OpenCode Server」行此前只能写「端口未上报」。只收 loopback URL，不收密码。
         opencode_server: z.string().max(200).optional().catch(undefined),

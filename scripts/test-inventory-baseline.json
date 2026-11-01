@@ -5597,6 +5597,8 @@
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::records the last broadcast so a stall can be reconciled afterwards": 1,
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::某一条通知抛错：其余收件人照常入库（不能因为推不出去就漏发）": 1,
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::通知与入库同批（不是全部入库完再一起推）": 1,
+  "server/src/build-commit-report-http.test.ts::#3144 opencode_catalog_seen_at 的三段链路（真 HTTP）::只报目录、不报时刻 ⇒ 时刻是 null（不是空串、不是当前时间）": 1,
+  "server/src/build-commit-report-http.test.ts::#3144 opencode_catalog_seen_at 的三段链路（真 HTTP）::报了两个字段 ⇒ 投影里都读得到": 1,
   "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::① 没报 ⇒ null，且 note 说明「这不是缺陷」": 1,
   "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::② 🔴 报了 ⇒ 落库 ⇒ /api/nodes 投影里读得到，且与 version 是两个东西": 1,
   "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::③ 形状不对的 build_commit 被 schema 拒（不是静默丢弃）": 1,
@@ -13893,6 +13895,8 @@
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::records the last broadcast so a stall can be reconciled afterwards",
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::某一条通知抛错：其余收件人照常入库（不能因为推不出去就漏发）",
   "server/src/broadcast-fanout-2721.test.ts::broadcastRecentState::通知与入库同批（不是全部入库完再一起推）",
+  "server/src/build-commit-report-http.test.ts::#3144 opencode_catalog_seen_at 的三段链路（真 HTTP）::只报目录、不报时刻 ⇒ 时刻是 null（不是空串、不是当前时间）",
+  "server/src/build-commit-report-http.test.ts::#3144 opencode_catalog_seen_at 的三段链路（真 HTTP）::报了两个字段 ⇒ 投影里都读得到",
   "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::① 没报 ⇒ null，且 note 说明「这不是缺陷」",
   "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::② 🔴 报了 ⇒ 落库 ⇒ /api/nodes 投影里读得到，且与 version 是两个东西",
   "server/src/build-commit-report-http.test.ts::#3294 节点上报 build_commit 的三段链路::③ 形状不对的 build_commit 被 schema 拒（不是静默丢弃）",
@@ -16592,7 +16596,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "152b8ef41668466983af07b1764447a451bd3cea",
+  "commit": "b35cc731796dd4b60e2e66293a398faa913a9f67",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

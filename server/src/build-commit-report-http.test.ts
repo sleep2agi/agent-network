@@ -101,3 +101,28 @@ describe("#3294 节点上报 build_commit 的三段链路", () => {
     expect(r.ok).toBeFalsy();
   });
 });
+
+// #3144 —— 与 build_commit 同一个坑：**schema 里没有的键会被 zod 静默丢掉**。
+// 所以「/api/nodes 能读到 opencode_catalog_seen_at」必须走一次真实的
+// report_status → 落库 → 投影，而不是读一个镜像映射（镜像永远不会红）。
+describe("#3144 opencode_catalog_seen_at 的三段链路（真 HTTP）", () => {
+  test("报了两个字段 ⇒ 投影里都读得到", async () => {
+    expect((await report({
+      config_snapshot: {
+        opencode_catalog: ["openai/gpt-6.1-terra", "kimi-code-plan-cn/k3.1-pro"],
+        opencode_catalog_seen_at: "2026-11-01T02:00:00Z",
+      },
+    })).ok).toBe(true);
+    const row = (await nodes()).nodes.find((n: any) => n.alias === ALIAS);
+    expect(row.opencode_catalog).toEqual(["openai/gpt-6.1-terra", "kimi-code-plan-cn/k3.1-pro"]);
+    expect(row.opencode_catalog_seen_at).toBe("2026-11-01T02:00:00Z");
+  });
+
+  test("只报目录、不报时刻 ⇒ 时刻是 null（不是空串、不是当前时间）", async () => {
+    expect((await report({ config_snapshot: { opencode_catalog: ["a/b"] } })).ok).toBe(true);
+    const row = (await nodes()).nodes.find((n: any) => n.alias === ALIAS);
+    expect(row.opencode_catalog).toEqual(["a/b"]);
+    expect(row.opencode_catalog_seen_at).toBeNull();
+    expect(row.opencode_catalog_seen_at).not.toBe("");
+  });
+});
