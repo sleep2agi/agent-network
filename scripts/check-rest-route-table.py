@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 import re
 import subprocess
 import sys
@@ -29,6 +30,19 @@ GEN = REPO / "scripts" / "report-rest-endpoints.py"
 # 那条分支的唯一执行条件就是它要报告的那个条件（表过期），所以在正常 CI 里它永远绿在
 # 另一条分支上 —— 「它绿着」与「它跑过并绿」同形。selftest 里用一份人造过期的副本喂它。
 DATAFILE = Path(os.environ.get("ROUTE_TABLE_FILE") or (REPO / "docs" / "rest-route-table.json"))
+
+
+def _disp(p: Path) -> str:
+    """路径的显示形式：在仓内就相对，仓外就绝对。
+
+    2026-11-01 —— `p.relative_to(REPO)` 在路径指向仓外时会抛 ValueError，
+    而 --update 的**全部用途**就是「往参照文件里写」——它恰好是唯一会被喂仓外路径的那条路。
+    于是 selftest 的 update→re-run 链第一次跑就崩在这里（而崩溃被读成「更新失败」）。
+    """
+    try:
+        return str(p.relative_to(REPO))
+    except ValueError:
+        return str(p)
 
 
 # 2026-11-01 —— `kind` 是**闭集**：它看起来是描述性字段，而描述性字段的边界
@@ -359,10 +373,48 @@ def selftest(quiet: bool = False) -> int:
     # 断言三件事：退出码 1（不是 2、不是异常）、说了「已过期」、**没有 traceback**。
     # 第二条最重要：它正是当年在要报错的场合抛 TypeError 的那一格。
     import tempfile
+    cases.append(_selftest_update_then_check(quiet))
     cases.append(_selftest_diff_branch(quiet))
     fails += cases[-1]
     if not quiet: print(f"✓ selftest {len(cases) - fails}/{len(cases)} 通过")
     return 0 if fails == 0 else 1
+
+
+def _selftest_update_then_check(quiet: bool) -> int:
+    """`--update` 写入 → **立刻再跑一次** → 必须一致。
+
+    2026-11-01 —— 「写完就一致」与「写入后又跑一次仍一致」是两条路径：
+    前者只证明这次比较通过，后者才证明**基线被正确写入**。
+    缺这一格时，「写完就一致」与「写入失败但别的原因让它一致」同形 ——
+    而 `key=str` 那次崩溃就发生在这条从未被完整走过的路径上。
+    """
+    if os.environ.get("ROUTE_TABLE_SELFTEST_CHILD") == "1":
+        return 0
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+            fh.write("{}")   # 故意给一份空表：--update 必须能把它写成真表
+            tmp = fh.name
+        env = dict(os.environ, ROUTE_TABLE_FILE=tmp, ROUTE_TABLE_SELFTEST_CHILD="1")
+        up = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--update"],
+                            capture_output=True, text=True, env=env, timeout=120)
+        re_run = subprocess.run([sys.executable, str(Path(__file__).resolve())],
+                                capture_output=True, text=True, env=env, timeout=120)
+        out = (up.stdout or "") + (up.stderr or "") + (re_run.stdout or "") + (re_run.stderr or "")
+        ok = (up.returncode == 0 and re_run.returncode == 0
+              and "path: consistent" in (re_run.stdout or "")
+              and "Traceback" not in out
+              and "基线已更新至" in (up.stdout or ""))
+        if not quiet:
+            print(("✓" if ok else "✗") +
+                  f" selftest --update → 立刻再跑 ⇒ 一致（update rc={up.returncode}、"
+                  f"re-run rc={re_run.returncode}、报出基线={('基线已更新至' in (up.stdout or ''))}）")
+        Path(tmp).unlink(missing_ok=True)
+        return 0 if ok else 1
+    except Exception as exc:  # noqa: BLE001
+        if not quiet:
+            print(f"✗ selftest update→re-run 那一格跑不起来：{exc}")
+        return 1
 
 
 def _selftest_diff_branch(quiet: bool) -> int:
@@ -436,7 +488,7 @@ def main() -> int:
                 print(f"✗ {x}", file=sys.stderr)
             return 1
         DATAFILE.write_text(fresh, encoding="utf-8")
-        print(f"✓ 已写入 {DATAFILE.relative_to(REPO)}")
+        print(f"✓ 已写入 {_disp(DATAFILE)}")
         # 2026-10-31 —— **证据列加一格：这次执行有没有改动被观测对象**。
         # 「可重跑」不等于「幂等」：带 --update 的这一次**改变了仓库内容**，
         # 于是它与上一次「只比较」的读数描述的不是同一个对象。
@@ -445,12 +497,19 @@ def main() -> int:
         #   baseline ⇒ 只改写「下一次比较的参照」——对象在这一刻是对的，但下一次的合格线变了
         #   none     ⇒ 这次运行对后续无影响
         # 二值的 no/YES 把「没碰」与「碰了参照」压成一格，而后者正是 --update 的全部作用。
-        print(f"  mutates: baseline（写入 {DATAFILE.relative_to(REPO)} = **参照**；"
+        # 2026-11-01 —— **必须报出更新到了什么**，而不只是「更新过了」：
+        # 只写「mutates: baseline」时，「更新后再跑一次绿」与「一直在绿」在报表上同形，
+        # 而前者是一次**期望值被移动**之后取得的绿 —— 移动的方向由当次缺陷决定。
+        _new = json.loads(fresh)
+        _sha = ((_new.get("generator") or {}).get("sha256") or "")[:12]
+        _src = ((_new.get("provenance") or [""])[0] or "")
+        print(f"  mutates: baseline（写入 {_disp(DATAFILE)} = **参照**；"
               f"对象此刻与源码一致，但下一次比较的合格线已被这次执行改变）")
+        print(f"  基线已更新至：generator sha256={_sha} · {_src} · @ {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
         _branch("updated")
         return 0
     if not DATAFILE.exists():
-        print(f"✗ 缺 {DATAFILE.relative_to(REPO)}；先跑 --update", file=sys.stderr)
+        print(f"✗ 缺 {_disp(DATAFILE)}；先跑 --update", file=sys.stderr)
         return 1
     committed = DATAFILE.read_text(encoding="utf-8")
     # 键唯一性：即使内容与源码一致，一份「键不能标识行」的表也不是可引用的清单。
