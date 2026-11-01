@@ -184,6 +184,47 @@ def group_report(lines: list[str], rows: list[dict]) -> dict:
     }
 
 
+# 分支覆盖读数的基线：**在测试里一次都没出现过路径字面量**的行数。
+# 它只会随补测试而下降；上涨意味着新加了没人请求过的分支。
+NEVER_REQUESTED_BASELINE = 5
+
+
+def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
+    """每个分支**有没有被任何请求走过** —— 用测试里出现的路径字面量当代理。
+
+    这条读数的意义：表可以「分支都记下来了」，而其中只有一个被走过。
+    在 completeness 上这两件事同形，所以必须分开报。
+
+    已知偏差（写在输出里，不写在文档里）：
+      · 代理是「测试文件里出现过这个路径字面量」，不是「真的发过请求」⇒ **上界**。
+      · 正则路由在表里被压成前缀（`api` / `events` / `ws`）⇒ 按路径查不到，
+        这 40 行**判不了**，不是「没被走过」。判不了与没走过处置不同：
+        前者要改提取器（用正则字面量而不是前缀），后者要补测试。
+    """
+    tests = [p.read_text() for p in sorted((REPO / "server" / "src").glob("*.test.ts"))]
+    blob = "\n".join(tests)
+    judgeable, covered, never, unjudgeable = [], [], [], []
+    for r in rows:
+        path = r.get("path") or ""
+        if path in ("api", "events", "ws") or not path.startswith("/"):
+            unjudgeable.append(r)
+            continue
+        judgeable.append(r)
+        if f'"{path}"' in blob or f"'{path}'" in blob:
+            covered.append(r)
+        else:
+            never.append(r)
+    return {
+        "rows": len(rows),
+        "judgeable": len(judgeable),
+        "covered": len(covered),
+        "never_requested": len(never),
+        "unjudgeable": len(unjudgeable),
+        "never_sample": [{"line": r.get("line"), "path": r.get("path"), "method": r.get("method")}
+                         for r in never[:8]],
+    }
+
+
 def measure() -> dict:
     table = json.loads(TABLE.read_text())
     return measure_text(SERVER.read_text(), table.get("rows", []))
@@ -335,7 +376,17 @@ def selftest() -> int:
             bad += 1
             print(f"        got kinds={grp and grp['predicate_kinds']} mergeable={grp and grp['mergeable']}"
                   f" want {want_kinds}/{want_mergeable}")
-    total = len(SELFTEST_CASES) + len(GROUP_SELFTEST_CASES)
+    # 分支覆盖：前缀路由必须落进 unjudgeable，而不是被悄悄算成「没走过」。
+    bc = branch_coverage(
+        [{"path": "api", "line": 1}, {"path": "/api/x", "line": 2}],
+        [],
+    )
+    ok = bc["unjudgeable"] == 1 and bc["judgeable"] == 1
+    print(f"{'ok  ' if ok else 'FAIL'}  前缀路由判不了（不等于「没走过」）")
+    if not ok:
+        bad += 1
+        print(f"        got unjudgeable={bc['unjudgeable']} judgeable={bc['judgeable']}")
+    total = len(SELFTEST_CASES) + len(GROUP_SELFTEST_CASES) + 1
     print(f"\nselftest: {total - bad}/{total}")
     return 1 if bad else 0
 
@@ -387,10 +438,22 @@ def main() -> int:
             print(f"  {s['path']}  L{s['line']}")
     print(f"\n基线：非字面量判定 ≤ {NON_LITERAL_BASELINE}")
 
+    bc = branch_coverage(json.loads(TABLE.read_text()).get("rows", []), SERVER.read_text().splitlines())
+    print(f"\n分支覆盖（代理：测试里出现过路径字面量，**上界**）：")
+    print(f"  可判 {bc['judgeable']} / {bc['rows']} 行：被请求过 {bc['covered']}、**从未出现 {bc['never_requested']}**")
+    print(f"  判不了 {bc['unjudgeable']} 行 —— 正则路由被提取器压成了前缀，按路径查不到")
+    print("  ⇒ 判不了 ≠ 没走过：前者要改提取器（用正则字面量），后者要补测试。")
+    for x in bc["never_sample"]:
+        print(f"     [从未] L{x['line']} {x['method']} {x['path']}")
+
     if args.assert_:
         if m["non_literal_path_judgments"] > NON_LITERAL_BASELINE:
             print(f"✗ 非字面量 pathname 判定从 {NON_LITERAL_BASELINE} 涨到 "
                   f"{m['non_literal_path_judgments']} —— 清单又多了一个看不见的入口")
+            return 1
+        if bc["never_requested"] > NEVER_REQUESTED_BASELINE:
+            print(f"✗ 「从未被请求过」从基线 {NEVER_REQUESTED_BASELINE} 涨到 {bc['never_requested']}"
+                  f" —— 新增了一个没有请求走到的分支", file=sys.stderr)
             return 1
         if m["rows_without_owner"]:
             print(f"✗ {m['rows_without_owner']} 行找不到归属 if —— 分组会稳定地产出错误的合并建议")
