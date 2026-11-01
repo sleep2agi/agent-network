@@ -4607,8 +4607,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // No additional tools in model context; ordinary Provider actions unchanged.
       if (action === 'secret_read') return providerReply(getScopedSecrets(human, id));
       if (action === 'node_secret_list' || action === 'node_secret_put' || action === 'node_secret_delete') {
-        const input = provider as { key?: string; value?: string } | undefined;
-        const result = requestNodeSecrets(human, id, action === 'node_secret_list' ? 'list' : action === 'node_secret_put' ? 'put' : 'delete', input?.key, input?.value, revision);
+        const input = provider as { key?: string; value?: string; from_vault?: boolean } | undefined;
+        const result = requestNodeSecrets(human, id, action === 'node_secret_list' ? 'list' : action === 'node_secret_put' ? 'put' : 'delete', input?.key, input?.value, revision, input?.from_vault === true);
         if (result.ok) {
           const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', id, human.networkId!);
           if (target) pushEvent(target.alias, { type: 'node_secrets', request_id: result.request_id }, human.networkId!);
