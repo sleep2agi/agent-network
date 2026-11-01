@@ -79,11 +79,41 @@ def unseen_by_git(repo: Path) -> list[str]:
         return []
     hints = []
     for rel in out.split("\0"):
-        if not rel or rel.startswith("node_modules/"):
+        # 任意层级的 node_modules —— 只判前缀会让 server/node_modules/... 全漏进来
+        # （实测：第一版报出 400 个「被忽略的名字像测试的文件」，全部是 zod 自带的测试）
+        if not rel or rel.startswith("node_modules/") or "/node_modules/" in rel:
             continue
         if rel.endswith((".test.ts", ".test.mts", ".test.js")):
             hints.append(rel)
     return sorted(hints)
+
+
+def ignored_matching(repo: Path) -> list[str]:
+    """**被 .gitignore 吃掉、但名字像测试**的文件 —— 域外的那一栏。
+
+    2026-11-01 —— `--exclude-standard` 排掉的正是「本门看不见的地方」。
+    一条宽泛的 `.gitignore` 规则（`test/` / `*.test.ts`）就足以让整类测试从这个门里消失，
+    而它既不在 tracked、也不在 unseen ⇒「无新增」在那一类上再次成立。
+
+    所以这一栏**只报告、不判红**：忽略清单的语义是「明确允许不在仓库里」，
+    把它当误报来源是另一种错误；但它是盲区读数，必须可见。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-o", "-i", "--exclude-standard", "-z"],
+            cwd=repo, check=True, capture_output=True,
+        ).stdout.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return []
+    hits = []
+    for rel in out.split("\0"):
+        # 任意层级的 node_modules —— 只判前缀会让 server/node_modules/... 全漏进来
+        # （实测：第一版报出 400 个「被忽略的名字像测试的文件」，全部是 zod 自带的测试）
+        if not rel or rel.startswith("node_modules/") or "/node_modules/" in rel:
+            continue
+        if rel.endswith((".test.ts", ".test.mts", ".test.js")):
+            hits.append(rel)
+    return sorted(hits)
 
 
 def tracked_files(repo: Path) -> list[Path]:
@@ -92,7 +122,9 @@ def tracked_files(repo: Path) -> list[Path]:
     ).stdout.decode("utf-8", "replace")
     files = []
     for rel in out.split("\0"):
-        if not rel or rel.startswith("node_modules/"):
+        # 任意层级的 node_modules —— 只判前缀会让 server/node_modules/... 全漏进来
+        # （实测：第一版报出 400 个「被忽略的名字像测试的文件」，全部是 zod 自带的测试）
+        if not rel or rel.startswith("node_modules/") or "/node_modules/" in rel:
             continue
         if not (rel.endswith(".test.ts") or rel.endswith(".test.mts") or rel.endswith(".test.js")):
             continue
@@ -446,14 +478,30 @@ def main() -> int:
         print("✗ 剥字符串状态机自检未通过 ⇒ 本次的计数不是读数（退出码 2）", file=sys.stderr)
         return 2
     counts, dynamic, unreliable = collect(repo)
-    # 2026-10-31 —— 「git 知道的东西」≠「文件系统知道的东西」。
-    unseen = unseen_by_git(repo)
-    if unseen:
-        print(f"⚠ {len(unseen)} 个测试文件**还没进 git**（因此不在上面的清单里）：", file=sys.stderr)
-        for rel in unseen[:10]:
-            print(f"    · {rel}", file=sys.stderr)
-        print("  ⇒ 这不是失败：CI 跑的是提交后的状态。但在本地，「无新增」不能当成「没写新测试」。", file=sys.stderr)
     current = set(counts)
+    # 2026-10-31 —— 「git 知道的东西」≠「文件系统知道的东西」。
+    # 2026-11-01 —— 两栏，按「是否在本门的域内」分开：处置不同。
+    #   域内 unseen           ⇒ 待办（git add 就进清单）
+    #   域外 ignored_matching ⇒ 设计（.gitignore 明确允许不在仓库里），只需可见
+    # 混成一个「未看见 N」时，域外那部分会让域内那部分看起来也一样无害。
+    unseen = unseen_by_git(repo)
+    ignored_hits = ignored_matching(repo)
+    # **恒打印**：只报告类读数如果有才打印，它的第一次出现会被当噪声、第二次之后被忽略，
+    # 而它第三次真正该被人看到时已经不在被看的范围里了。
+    print(f"git 视野：tracked={len(current)} unseen={len(unseen)} "
+          f"ignored_matching={len(ignored_hits)} ⇒ 本门能看见 {len(current)} / "
+          f"还差 {len(unseen)} 个待 add、{len(ignored_hits)} 个被忽略清单挡在域外",
+          file=sys.stderr)
+    if unseen:
+        print(f"  ⚠ 域内（待办）：{len(unseen)} 个测试文件**还没进 git** ⇒ 不在上面的清单里", file=sys.stderr)
+        for rel in unseen[:10]:
+            print(f"      · {rel}", file=sys.stderr)
+        print("  ⇒ 这不是失败：CI 跑的是提交后的状态。但在本地，「无新增」不能当成「没写新测试」。", file=sys.stderr)
+    if ignored_hits:
+        print(f"  · 域外（设计）：{len(ignored_hits)} 个名字像测试的文件被 .gitignore 挡着 ⇒ 本门永远看不见它们", file=sys.stderr)
+        for rel in ignored_hits[:5]:
+            print(f"      · {rel}", file=sys.stderr)
+        print("  ⇒ 不判红：忽略清单的语义是「明确允许不在仓库里」。它是盲区读数，不是缺陷。", file=sys.stderr)
     baseline_path = repo / BASELINE
 
     print("mutates_subject: none（只读比对；不写任何文件）") if "--update" not in sys.argv else None
