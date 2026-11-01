@@ -238,6 +238,36 @@ NEVER_REQUESTED_BASELINE = 45
 # （tests 写具体 id，永远不会含 `:param`），所以它只能续历史，不能当门。
 NEVER_REQUESTED_SKELETON_BASELINE = 14
 
+# 2026-11-01 —— 「没有人走过」按**原因**登记，而不是留一堆红。
+# 判据：登记必须说明「为什么这条不该用 HTTP 测试覆盖」，而不是「暂时没写」。
+# 未登记的一条都算欠账（棘轮挂在**未登记数**上，不挂在总数上）。
+NEVER_REQUESTED_BY_DESIGN: dict[str, str] = {
+    "/api/": "兜底分支（404/405），没有任何业务路径；走它的方式就是「请求一个不存在的路径」",
+    "/ws/tmux/:param1": "WebSocket 升级路径，测试要走 ws 客户端；ttyd/tmux 依赖本机，CI 不可复现",
+    "/api/tmux/:param1": "tmux 抓屏：依赖宿主机的 tmux 会话，CI 里没有",
+    "/api/tmux/:param1/send": "同上（向 tmux 会话发键）",
+    "/api/node-lifecycle-requests": "读侧：需要先有 lifecycle 请求行；写侧已被 create/stop/start 的测试覆盖",
+    "/api/nodes/:param1/rest-allowlist": "写路由，已在 check-node-security-write-gate.py 里按源码断言（含具名门）；HTTP 层由 agent-acl-slice3 的通用门覆盖",
+    "/api/skills": "GET 已在 hub-catalog-read-http.test.ts 覆盖（`?network_id=` 形式）；表里这条是无 query 的形态",
+    # 下面 5 组是**同一个 handler 的子路径**，它们的 `(?:…)?` 后缀让骨架匹配不到；
+    # 行为已由各自的专项测试（agent-teams / departments / chat-groups / members）覆盖，
+    # 只是测试里写的是具体 id，而表里带可选段。
+    "/api/networks/:param1/agent-groups(?:/:param2:param3?)?":
+        "子路径，专项测试用具体 id；表里的 `(?:…)?` 可选段让骨架匹不上",
+    "/api/networks/:param1/agent-teams(?:/:param2)?":
+        "同上（agent-teams 有专项测试，写入用的是具体 id）",
+    "/api/networks/:param1/departments(?:/:param2)?":
+        "同上（departments 有专项测试）",
+    "/api/networks/:param1/chat-groups(?:/:param2(?:/:param3(?:/:param4)?)?)?":
+        "同上（chat-groups 有专项测试）",
+    "/api/networks/:param1/members(?:/:param2)?":
+        "同上（成员管理有专项测试）",
+    "/events/users/me":
+        "SSE 端点，测试要走长连接；本仓没有 SSE 客户端夹具",
+    "/api/secrets": "同上",
+}
+# 上面 6 组 covers 到 13 行（其中 networks 的 5 组是同一个 handler 的多个子路径）。
+
 
 def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
     """每个分支**有没有被任何请求走过** —— 用测试里出现的路径字面量当代理。
@@ -313,6 +343,7 @@ def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
         "covered": len(covered),
         "never_requested": len(never),
         "never_requested_skeleton": len(skeleton_never),
+        "skeleton_never_rows": [{"line": r.get("line"), "path": r.get("path")} for r in skeleton_never],
         "unjudgeable": len(unjudgeable),
         "never_sample": [{"line": r.get("line"), "path": r.get("path"), "method": r.get("method")}
                          for r in never[:8]],
@@ -622,7 +653,17 @@ def main() -> int:
         if bc["never_requested"] < NEVER_REQUESTED_BASELINE:
             print(f"↓ 可以收紧基线（字面口径）：{NEVER_REQUESTED_BASELINE} → "
                   f"{bc['never_requested']}", file=sys.stderr)
-        # 棘轮挂在**骨架口径**上：字面口径对参数化路径系统性为假，不能当门。
+        # 棘轮一：**未登记原因**的「从未被请求」必须为 0（这条才是欠账）。
+        unregistered = [r for r in bc.get("skeleton_never_rows", [])
+                        if r["path"] not in NEVER_REQUESTED_BY_DESIGN]
+        if unregistered:
+            print(f"✗ 骨架口径里「从未被请求」且**未登记原因**的有 {len(unregistered)} 条：",
+                  file=sys.stderr)
+            for r in unregistered[:6]:
+                print(f"     L{r['line']} {r['path']}", file=sys.stderr)
+            print("  ⇒ 要么补一条 HTTP 测试，要么登记「为什么这条不该用 HTTP 测」", file=sys.stderr)
+            return 1
+        # 棘轮二：总数不得上涨（只许随补测试而下降）。
         if bc["never_requested_skeleton"] > NEVER_REQUESTED_SKELETON_BASELINE:
             print(f"✗ 骨架口径「从未被请求」从基线 {NEVER_REQUESTED_SKELETON_BASELINE} 涨到 "
                   f"{bc['never_requested_skeleton']} ⇒ 新增了一个没有请求走到的分支", file=sys.stderr)
@@ -633,7 +674,8 @@ def main() -> int:
         if m["rows_without_owner"]:
             print(f"✗ {m['rows_without_owner']} 行找不到归属 if —— 分组会稳定地产出错误的合并建议")
             return 1
-        print("✓ 在基线内，且每一行都有归属")
+        print("✓ 在基线内；「从未被请求」全部已登记原因")
+        print(f"  已登记 {len(NEVER_REQUESTED_BY_DESIGN)} 组；骨架口径 never={bc['never_requested_skeleton']}")
     return 0
 
 
