@@ -244,7 +244,15 @@ def measure(m: dict) -> dict:
                 agg.setdefault(t, []).append(e)
         return agg
 
+    # 2026-11-01 —— 两档**是否嵌套**决定了「差值」是不是一个数：
+    #   若 strict ⊆ adjacent ⇒ 邻近只高估，方向已知，差值 = 「距离带来的不确定」；
+    #   若不嵌套 ⇒ 差值只说明两个谓词交集的大小，没有解释力。
+    # 这一句可以**算**，不需要判断 —— 所以不能把它留在注释里当「方向未知」。
+    nested = strict <= near_expect
     return {
+        "nested": nested,
+        "adjacent_minus_strict": len(near_expect - strict),
+        "strict_outside_adjacent": sorted(strict - near_expect)[:5],
         "literals": len(literals),
         "raw_occurrences": m.get("error_literal_occurrences", 0),
         "selectivity": (round(len(literals) / m["error_literal_occurrences"], 3)
@@ -287,8 +295,16 @@ def main() -> int:
           f" ｜ 命中（去重后，values）={c['literals']} ｜ 比值={c['selectivity']:.2f}")
     print("  比值偏低是**去重**造成的（同一个 error 在多个工具里出现算一次），不是筛选。")
     print(f"错误字面量（去重）{c['literals']} 个")
-    print(f"  在 expect 附近出现   {c['near_expect']:3d}   （邻近级 ±3 行，**单向偏多**）")
-    print(f"  与 expect **同行**   {c['strict']:3d}   （严格级，从 2026-11-01 起算；两者之差=距离带来的不确定性）")
+    print(f"  在 expect 附近出现   {c['near_expect']:3d}   （邻近级 ±3 行）它答：「有没有断言**碰过**它」")
+    print(f"  与 expect **同行**   {c['strict']:3d}   （严格级，从 2026-11-01 起算）它答：「断言是否真的**检查**了它」")
+    if c["nested"]:
+        print(f"  ⇒ 两档**嵌套**（strict ⊆ adjacent）⇒ 邻近只高估，差值 {c['adjacent_minus_strict']} "
+              f"= 「写在同一段但不是同一行」的那几个")
+    else:
+        print(f"  ✗ 两档**不嵌套**（strict 中有 {len(c['strict_outside_adjacent'])} 个不在 adjacent 里）："
+              f"{c['strict_outside_adjacent']}", file=sys.stderr)
+        print("  ⇒ 此时两数之差只表示两个谓词交集的大小，不表示「距离带来的不确定性」", file=sys.stderr)
+        return 2
     print(f"  出现但离 expect 很远 {c['mentioned_only']:3d}   （注释 / 夹具 / 日志串）")
     print(f"  **一次都没出现**     {c['never_all']:3d}   "
           f"= 待补 {c['never']} + 登记不做 {len(c['by_design'])}")
