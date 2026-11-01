@@ -96,6 +96,14 @@ jobs:
         run: |
           python3 scripts/report-mcp-outcome-domain.py --selftest
           python3 scripts/report-mcp-outcome-domain.py --assert
+      # #3309 第四条 —— 值域告诉我们「一个工具能返回哪几种 error」，它没告诉我们
+      # 「每一种有没有一条输入，违反时能让某个断言变红」。分界不在「有没有写进测试」，
+      # 而在「违反时有没有读数」：实测 80 个字面量里 34 个在测试里一次都没出现过。
+      # 断言的是 never 数不增长（新增一个没有读数的 error ⇒ 红），不是覆盖率百分比。
+      - name: every error literal has at least a chance of a red assertion (never-mentioned ratchet)
+        run: |
+          python3 scripts/report-mcp-error-literal-coverage.py --selftest
+          python3 scripts/report-mcp-error-literal-coverage.py --assert
       # 2026-10-31 —— `trap '<...> exit 1' ERR` 会把 RC 采集吃掉：`RC=$?` 到不了，
       # 于是「已失效（2）」被读成「未预期（1）」，动作从「更新卡」错到「查脚本」。
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。
