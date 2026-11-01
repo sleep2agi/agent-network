@@ -433,6 +433,20 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
 
   // #3354 —— rest-allowlist 此前**一条测试都没有**（同族里唯一零覆盖的写路由）。
   // 它改的是「这个节点能调哪些 REST 路由」，与 tool-allowlist 同一套授权口径。
+  // #3354 —— peer-allowlist 原本只有 200 / 400 / null，没有 403 分支。
+  // 它改的是「这个节点能跟哪些 peer 通信」⇒ 被拒失败等于任何人可改它的通信边界。
+  test("改 peer 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）", async () => {
+    const read = () => db.get<{ peer_allowlist: string | null }>(
+      "SELECT peer_allowlist FROM nodes WHERE node_id = ?1", node.other.id)!.peer_allowlist;
+    const before = read();
+    const denied = await call(user.mem.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: ["boss"] });
+    expect(denied.status).toBe(403);
+    expect(read()).toBe(before);   // 拒绝不许改数据
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: ["boss"] });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before); // 镜像：允许时必须真的变
+  });
+
   test("改 REST 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）；[] 歧义 400", async () => {
     const read = () => db.get<{ rest_allowlist: string | null }>(
       "SELECT rest_allowlist FROM nodes WHERE node_id = ?1", node.other.id)!.rest_allowlist;
