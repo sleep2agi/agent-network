@@ -129,6 +129,61 @@ def enclosing_if(lines: list[str], target: int) -> int | None:
     return None
 
 
+def guard_condition(lines: list[str], target: int) -> str:
+    """守这一行的 if 的**条件原文**（只归一化空白）。
+
+    🔴 不抹变量名。第一版把 `*Match` 统一替换成 `M`，于是
+       `netEventsMatch && method=GET` 与 `eventsMatch && method=GET` 变成了同一个字符串，
+       报告会给出「同谓词 ⇒ 可抽象」的建议 —— 而它们匹配的是**两个不同的正则**。
+       归一化抹掉的恰好是判别位，而判别位正是「能不能合并」的唯一依据。
+    """
+    g = guarding_if(lines, target)
+    if g is None:
+        return "<unknown>"
+    line = lines[g - 1]
+    m = re.search(r"if\s*\((.*)\)\s*\{", line)
+    return re.sub(r"\s+", " ", (m.group(1) if m else line)).strip()
+
+
+def group_report(lines: list[str], rows: list[dict]) -> dict:
+    """按 path 分组，数**谓词种类**而不是出现次数。
+
+    两种语义在这里必须分开（它们的处置相反）：
+
+        同一判断被复制 N 次  ⇒ 可以抽象成一个谓词
+        同一 path 有 N 个入口 ⇒ **可能必须分开保留**
+
+    只看计数会把两者混成同一个数。区分它们不需要新读数：数谓词种类即可。
+    注意 `api × 37` 这种：37 处并列第一，但谓词有 32 种 —— 它不是一个 37 次的复制，
+    而是**提取器把正则路由的前缀压成了 `api`** ⇒ 分组粒度由提取器决定，不由逻辑决定。
+    """
+    by_path: dict[str, list[dict]] = {}
+    for r in rows:
+        by_path.setdefault(r.get("path") or "", []).append(r)
+
+    groups = []
+    for path, items in by_path.items():
+        if len(items) < 2:
+            continue
+        kinds: dict[str, list[int]] = {}
+        for r in items:
+            kinds.setdefault(guard_condition(lines, r["line"]), []).append(r["line"])
+        groups.append({
+            "path": path,
+            "rows": len(items),
+            "predicate_kinds": len(kinds),
+            "mergeable": len(kinds) == 1 and "<unknown>" not in kinds,
+            "kinds": {k: v for k, v in sorted(kinds.items())},
+        })
+    groups.sort(key=lambda g: -g["rows"])
+    return {
+        "multi_path_groups": len(groups),
+        "rows_in_groups": sum(g["rows"] for g in groups),
+        "mergeable_groups": sum(1 for g in groups if g["mergeable"]),
+        "groups": groups,
+    }
+
+
 def measure() -> dict:
     table = json.loads(TABLE.read_text())
     return measure_text(SERVER.read_text(), table.get("rows", []))
@@ -221,6 +276,36 @@ SELFTEST_CASES = [
 ]
 
 
+GROUP_SELFTEST_CASES = [
+    (
+        "同一 if 守两个字面量 ⇒ 1 组、1 种谓词、可抽象",
+        'const a = url.pathname.match(/^\\/a$/);\nconst b = url.pathname.match(/^\\/b$/);\n'
+        'if (a || b) {\n  ok();\n}\n',
+        [{"path": "p", "line": 1}, {"path": "p", "line": 2}],
+        1,
+        True,
+    ),
+    (
+        "同一 path 两个入口（GET / PUT）⇒ 2 种谓词、**不可合并**",
+        'if (url.pathname === "/x" && req.method === "GET") {\n  ok();\n}\n'
+        'if (url.pathname === "/x" && req.method === "PUT") {\n  ok();\n}\n',
+        [{"path": "/x", "line": 1}, {"path": "/x", "line": 4}],
+        2,
+        False,
+    ),
+    (
+        "🔴 两个不同的 match 变量 + 同一 method ⇒ 谓词**不同**（抹变量名会误判成可合并）",
+        'const netEventsMatch = url.pathname.match(/^\\/net\\/events$/);\n'
+        'if (netEventsMatch && req.method === "GET") {\n  ok();\n}\n'
+        'const eventsMatch = url.pathname.match(/^\\/events$/);\n'
+        'if (eventsMatch && req.method === "GET") {\n  ok();\n}\n',
+        [{"path": "events", "line": 1}, {"path": "events", "line": 5}],
+        2,
+        False,
+    ),
+]
+
+
 def selftest() -> int:
     bad = 0
     for label, src, rows, want_owner_rows, want_nonliteral in SELFTEST_CASES:
@@ -240,7 +325,18 @@ def selftest() -> int:
         if not ok:
             bad += 1
             print(f"        got={ {k: m[k] for k in ('rows_without_owner', 'non_literal_path_judgments')} }")
-    print(f"\nselftest: {len(SELFTEST_CASES) - bad}/{len(SELFTEST_CASES)}")
+    for label, src, rows, want_kinds, want_mergeable in GROUP_SELFTEST_CASES:
+        g = group_report(src.splitlines(), rows)
+        grp = g["groups"][0] if g["groups"] else None
+        ok = (grp is not None and grp["predicate_kinds"] == want_kinds
+              and grp["mergeable"] == want_mergeable)
+        print(f"{'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            bad += 1
+            print(f"        got kinds={grp and grp['predicate_kinds']} mergeable={grp and grp['mergeable']}"
+                  f" want {want_kinds}/{want_mergeable}")
+    total = len(SELFTEST_CASES) + len(GROUP_SELFTEST_CASES)
+    print(f"\nselftest: {total - bad}/{total}")
     return 1 if bad else 0
 
 
@@ -277,6 +373,14 @@ def main() -> int:
         print("\n**一个 if 守多行**（这些行是同一分支里的不同入口 —— 按 path 分组会把它们切开）：")
         for ln, paths in sorted(m["owners_shared_by_multiple_rows"].items(), key=lambda kv: int(kv[0])):
             print(f"  if@L{ln:<6} 守 {len(paths)} 行：{', '.join(str(x) for x in paths)}")
+    g = group_report([SERVER.read_text().splitlines()][0], json.loads(TABLE.read_text()).get("rows", []))
+    print(f"\n同一 path 出现多次：{g['multi_path_groups']} 组 / {g['rows_in_groups']} 处；"
+          f"其中**谓词只有一种**（可抽象）的 {g['mergeable_groups']} 组")
+    for grp in g["groups"][:10]:
+        tag = "同谓词复制" if grp["mergeable"] else f"{grp['predicate_kinds']} 种谓词（不同入口）"
+        print(f"  {grp['path'] or '(空)'[:28]:28s} × {grp['rows']:2d}  {tag}")
+    print("  ⇒ 计数说的是「触及同一前缀几次」，谓词种类说的是「几次里有多少个其实是同一个」。")
+
     if m["rows_without_owner_sample"]:
         print("\n没有归属的行（无法判断是否同一分支）：")
         for s in m["rows_without_owner_sample"]:
