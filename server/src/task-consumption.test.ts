@@ -118,6 +118,12 @@ describe("task consumed_at identity and lifecycle", () => {
     );
     const handler = toolsFor({ alias: NODE_A, nodeToken: true }).list_tasks;
     const first = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100 });
+    // #3309 分支 —— list_tasks 的两个成功出口不是同一形状：
+    //   非游标：{ok, tasks, …}                     （无 capability）
+    //   游标  ：多一个 capability = "list_tasks.immutable-node-cursor.v1"
+    // 只断言 capability 的值时，「顺手把它也加到非游标那条」不会有东西变红。
+    // 实测五键：我按源码读成三键（漏了 count 与 stats）——又一次「按代码读会少」
+    expect(Object.keys(first).sort()).toEqual(["capability", "count", "next_cursor", "ok", "stats", "tasks"]);
     expect(first.capability).toBe("list_tasks.immutable-node-cursor.v1");
     expect(first.tasks).toHaveLength(100);
     const second = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100, ...first.next_cursor });
