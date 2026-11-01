@@ -2681,6 +2681,7 @@
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::流程第 3 步同时给出间隔与成本理由": 1,
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::纪律小节包含实测数字与「不会丢结果」的安抚": 1,
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::cli 的提示词里真的注入了这一段（不是只写在常量里）": 1,
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::把 list_tasks / get_task 也算进同一族，并给出四项合计比例": 1,
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::明确说 whoami 答案在启动时就定了": 1,
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::给出实测数字（否则它只是意见）": 1,
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::说明「活是推来的」，并给出间隔底线": 1,
@@ -11039,6 +11040,7 @@
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::流程第 3 步同时给出间隔与成本理由",
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::纪律小节包含实测数字与「不会丢结果」的安抚",
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::cli 的提示词里真的注入了这一段（不是只写在常量里）",
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::把 list_tasks / get_task 也算进同一族，并给出四项合计比例",
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::明确说 whoami 答案在启动时就定了",
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::给出实测数字（否则它只是意见）",
   "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::说明「活是推来的」，并给出间隔底线",
@@ -16716,7 +16718,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "c446e855c9a78a9b37d74548a6bc71a03a5bf5ce",
+  "commit": "46a936c91ed486453595c50484baeff34f12a34f",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

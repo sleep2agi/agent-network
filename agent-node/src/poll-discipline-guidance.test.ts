@@ -47,6 +47,12 @@ describe("#3119 不要反复确认自己", () => {
     expect(text).toContain("56%");
   });
 
+  test("把 list_tasks / get_task 也算进同一族，并给出四项合计比例", () => {
+    expect(text).toContain("list_tasks");
+    expect(text).toContain("get_task");
+    expect(text).toContain("84.9%");
+  });
+
   test("说明「活是推来的」，并给出间隔底线", () => {
     expect(text).toContain("推");
     expect(text).toContain("至少隔 5 分钟");
