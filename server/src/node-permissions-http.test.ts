@@ -433,6 +433,20 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
 
   // #3354 —— rest-allowlist 此前**一条测试都没有**（同族里唯一零覆盖的写路由）。
   // 它改的是「这个节点能调哪些 REST 路由」，与 tool-allowlist 同一套授权口径。
+  // #3354 —— POST /api/tmux/:id/send：三层门里最外层的一条。
+  // 门 = TMUX_ENABLED → IP 白名单 → 管理员。测试环境默认第 1 层就是关的，
+  // 于是这条路由在**功能未启用**时必须是 404 拒绝，而不是「悄悄成功」。
+  // ⚠ 允许路径需要真 tmux，本仓测试不具条件 ⇒ 只验拒绝（证据表里标了 note）。
+  test("tmux send：功能未启用时 404 拒绝，且不返回任何执行痕迹", async () => {
+    const r = await call(user.boss.token, "POST", "/api/tmux/whatever/send", { text: "echo pwned" });
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe("tmux disabled");
+    // 「拒了」还要求「没有假装成功」：ok 必须是 false（不是 true、也不是缺失 ——
+    // 缺失会让调用方按 `if (!body.ok)` 之外的写法读成成功），且不许有 sent 字段。
+    expect(r.body.ok).toBe(false);
+    expect(r.body.sent).toBeUndefined();
+  });
+
   // #3354 —— DELETE /api/nodes/:id：拒绝之后**行必须还在**。
   // 这是唯一一条「只要写进去了就不可逆」的写路由 —— 拒了但删了，没有任何读数能复原。
   // 用**可丢弃的 scratch 节点**做靶子：拒绝方是 readonly 模式下的 node.other，

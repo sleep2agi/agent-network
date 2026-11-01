@@ -6773,6 +6773,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/networks/:id/node-permission-report::按节点的工具调用明细：从不越界的节点也要出现": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes viewer_can.permission_mode (#489)::true exactly for the callers PUT …/permission-mode accepts; node tokens get false; /health advertises it": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::env_transport 取该节点最新一次上报（老上报不能盖掉新的）": 1,
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::tmux send：功能未启用时 404 拒绝，且不返回任何执行痕迹": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::从没上报过的节点是 null（不是猜一个值填上）": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::写进去什么，读出来就是什么": 1,
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::删节点：readonly 调用者被拒且行还在；owner 允许且行真的没了": 1,
@@ -15111,6 +15112,7 @@
   "server/src/node-permissions-http.test.ts::GET /api/networks/:id/node-permission-report::按节点的工具调用明细：从不越界的节点也要出现",
   "server/src/node-permissions-http.test.ts::GET /api/nodes viewer_can.permission_mode (#489)::true exactly for the callers PUT …/permission-mode accepts; node tokens get false; /health advertises it",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::env_transport 取该节点最新一次上报（老上报不能盖掉新的）",
+  "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::tmux send：功能未启用时 404 拒绝，且不返回任何执行痕迹",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::从没上报过的节点是 null（不是猜一个值填上）",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::写进去什么，读出来就是什么",
   "server/src/node-permissions-http.test.ts::GET /api/nodes 读回白名单与 transport::删节点：readonly 调用者被拒且行还在；owner 允许且行真的没了",
@@ -16676,7 +16678,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "b3e90187c491fc5889d91408568c8cf143e632f5",
+  "commit": "229e2b3030a382a1c389c5d891bd03361cd61079",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
