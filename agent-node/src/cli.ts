@@ -1383,6 +1383,8 @@ import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapsh
 import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
 import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
+// #3144 —— 清单与采集时刻同进同出（纯函数在 runtime/opencode-catalog-report.ts，可单测）
+import { catalogReport } from "./runtime/opencode-catalog-report";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
@@ -1855,7 +1857,7 @@ let claudeLoginDead = false;
  *
  * 失败一律 undefined:心跳既不许被这件事拖住(3s 超时),也不许因为读列表失败被拒。
  */
-async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: string; directory: string } | null): Promise<string[] | undefined> {
+async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: string; directory: string } | null): Promise<{ models: string[]; seenAt: string } | undefined> {
   if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || !endpoint) return undefined;
   try {
     const snapshot = await readOpenCodeCatalog({
@@ -1864,8 +1866,11 @@ async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: s
       authorization: endpoint.authorization,
       timeoutMs: 3_000,
     });
-    const models = snapshot.models.map(m => `${m.providerId}/${m.id}`).slice(0, 400);
-    return models.length ? models : undefined;
+    // #3144 —— 清单和它的**采集时刻**必须一起报。
+    // 只报清单时，51 个模型是刚采的还是三周前的分不出，而 sessions 的心跳时间
+    // (`last_seen_at`) 不是采集时刻 —— 那只是「这个节点还活着」。
+    // `observedAt` 是 readOpenCodeCatalog 归一化时写下的，正是这次采集的时刻。
+    return catalogReport(snapshot);
   } catch { return undefined; }
 }
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
@@ -1999,7 +2004,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       // #2293 —— 节点自报的 OpenCode V2 模型清单与 loopback 端点。
       // 🔴 必须在 **config_snapshot 里面**：report_status 的顶层 schema 不认这两个键，
       //    放在顶层会被**静默丢弃**（.159 首版就这样白跑过一次，2026-10-25 用独立验证节点发现）。
-      ...(reportedCatalog ? { opencode_catalog: reportedCatalog } : {}),
+      // #3144 —— 清单 + 采集时刻同进同出（只报清单时，读者无法判断它多旧）。
+      // 空字符串表示「采到了模型但上游没给时刻」：显式说出来，而不是让读者当成刚采的。
+      ...(reportedCatalog ? {
+        opencode_catalog: reportedCatalog.models,
+        ...(reportedCatalog.seenAt ? { opencode_catalog_seen_at: reportedCatalog.seenAt } : {}),
+      } : {}),
       ...(catalogEndpoint ? { opencode_server: catalogEndpoint.url } : {}),
     },
   });
