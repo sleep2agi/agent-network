@@ -7842,7 +7842,9 @@
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack started 但不给 child_pid ⇒ child_pid_required": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack 一个已结束的启动请求 ⇒ request_not_ackable（带当前 status）": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::clone 与 non-clone 两侧互斥（各一例，同一条测试）": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::launch_verified=true 却不给有效 pid ⇒ verified_child_pid_required": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::「缺 blob」与「状态不对」两侧互斥（各一例，同一条测试）": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::不声明 launch_verified 时不要求 pid（证明上一条是条件触发的）": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）": 1,
   "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::两条载荷都没有 code 字段（现状，不是契约）": 1,
   "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::反向：pending 的启动请求可以拉（证明上一条是「状态」而不是「总被拒」）": 1,
@@ -16130,7 +16132,9 @@
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack started 但不给 child_pid ⇒ child_pid_required",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack 一个已结束的启动请求 ⇒ request_not_ackable（带当前 status）",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::clone 与 non-clone 两侧互斥（各一例，同一条测试）",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::launch_verified=true 却不给有效 pid ⇒ verified_child_pid_required",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::「缺 blob」与「状态不对」两侧互斥（各一例，同一条测试）",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::不声明 launch_verified 时不要求 pid（证明上一条是条件触发的）",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）",
   "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::两条载荷都没有 code 字段（现状，不是契约）",
   "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::反向：pending 的启动请求可以拉（证明上一条是「状态」而不是「总被拒」）",
@@ -16576,7 +16580,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "e9c446f2cb895fc81035940af7e9829670108842",
+  "commit": "6f1d8cab0526130c3afa3ed1e8a07e594b405812",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

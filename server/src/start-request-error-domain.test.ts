@@ -146,6 +146,24 @@ describe("#3309 ack_start_request / get_create_request 的错误值域", () => {
     expect(notPending.error).not.toBe(noBlob.error);
   });
 
+  test("launch_verified=true 却不给有效 pid ⇒ verified_child_pid_required", async () => {
+    seedCreateRequest("cr_verified", { status: "delivered" });
+    const r = await call("ack_create_request", {
+      request_id: "cr_verified", status: "started", launch_verified: true,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("verified_child_pid_required");
+    // 与 child_pid_required（ack_start_request 的那条）区别：这条只在**声明已验证**时才要求 pid，
+    // 不声明验证时 pid 可以缺 —— 两种「缺 pid」处置完全不同。
+    expect(r.error).not.toBe("child_pid_required");
+  });
+
+  test("不声明 launch_verified 时不要求 pid（证明上一条是条件触发的）", async () => {
+    seedCreateRequest("cr_unverified", { status: "delivered" });
+    const r = await call("ack_create_request", { request_id: "cr_unverified", status: "started" });
+    expect(r.error).not.toBe("verified_child_pid_required");
+  });
+
   test("这四条载荷都没有 code 字段（现状，不是契约）", async () => {
     seedStartRequest("sr_done2", "succeeded");
     seedStartRequest("sr_nopid2", "pending");

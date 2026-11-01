@@ -39,7 +39,7 @@ SRC = REPO / "server" / "src"
 GEN = REPO / "scripts" / "report-mcp-outcome-domain.py"
 
 # 基线：**一次都没出现过**的字面量个数。增长 ⇒ 又有一个 error 只在生产里才会被看见。
-NEVER_BASELINE = 6
+NEVER_BASELINE = 3
 
 # 登记为「不做」的：**造不出真实状态**，而不是「懒得写」。
 # 判据：理由必须说明「为什么造出来的绿等于假绿」，而不是「暂时没空」。
