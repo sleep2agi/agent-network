@@ -180,8 +180,14 @@ describe("account and network management need a user token", () => {
     const foreign = await call(adminToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "other-node", new_alias: "other-node-2" });
     expect(foreign.body.ok).toBe(true);
     expect((await call(ntok, "POST", "/api/node-rename/commit", { txn_id: foreign.body.txn_id })).status).toBe(403);
-    // #3354 —— 拒绝不许消耗掉那个事务：abort 仍必须成功（若 commit 的拒绝顺手把它作废，
-    // 这里就会变成「已结束」，而两件事在 403 上完全同形）。
+    // #3354 —— 同理，abort 别人的事务也要被拒，且**拒绝之后那行事务还在**（状态仍是 prepared）。
+    // 只断 403 时，「拒了但已经把事务作废」也会绿 —— 而那会让真正的事务主人 abort 时拿到「已结束」。
+    const txnStatus = () => db.get<{ status: string }>(
+      "SELECT status FROM rename_txn WHERE txn_id = ?1", foreign.body.txn_id)?.status;
+    const statusBefore = txnStatus();
+    expect((await call(ntok, "POST", "/api/node-rename/abort", { txn_id: foreign.body.txn_id })).status).toBe(403);
+    expect(txnStatus()).toBe(statusBefore);
+    // 事务仍可被它的主人 abort（拒绝不许消耗掉它）
     expect((await call(adminToken, "POST", "/api/node-rename/abort", { txn_id: foreign.body.txn_id })).body.ok).toBe(true);
     // 自己:照常(anet node rename 就是这么用的)
     db.run(`INSERT INTO sessions (resume_id, alias, status, network_id) VALUES ('r_self_node', 'ntok-node', 'idle', ?1)`, [NET]);

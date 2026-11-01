@@ -200,7 +200,12 @@ describe("默认值与授权接口", () => {
     const keep = await send(admin.token, "PUT", `/api/networks/${NET}/members/${alice.id}/task-grants`, { task_access: "scoped" });
     expect(keep.body.project_grants.length).toBe(2);
     expect((await send(alice.token, "GET", `/api/networks/${NET}/members/${alice.id}/task-grants`)).status).toBe(403);
+    // #3354 —— 拒绝之外钉「授权没变」：读回来的 project_grants 必须仍是原来那两条。
+    // 只断 403 时，「拒了但已经把 task_access 改成 all」也会绿 —— 那是一次越权的权限提升。
     expect((await send(carol.token, "PUT", `/api/networks/${NET}/members/${alice.id}/task-grants`, { task_access: "all" })).status).toBe(403);
+    const afterDenied = await get(admin.token, `/api/networks/${NET}/members/${alice.id}/task-grants`);
+    expect(afterDenied.body.task_access).toBe("scoped");
+    expect(afterDenied.body.project_grants.length).toBe(2);
     const nt = await send(admin.token, "POST", "/api/auth/node-token", { network_id: NET, node_name: "ta-node", node_id: "node_ta_1" });
     expect((await get(nt.body.token, `/api/networks/${NET}/members/${alice.id}/task-grants`)).status).toBe(403);
     expect(db.get("SELECT 1 FROM audit_log WHERE action = 'member_task_grants_changed' AND network_id = ?1", NET)).toBeTruthy();
