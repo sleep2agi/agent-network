@@ -143,6 +143,9 @@ describe("app#225 rules file — read round trip", () => {
       expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
 
       const pulled = await n.call("get_rules_file_request", {});
+      // #3309 分支 —— 有请求态的外层闭集 {ok, request}（与空态同形，但 request 非 null）；
+      // 空态已在上一条钉过 ⇒ 两个出口各自有断言，而不是「一个断言代表两态」。
+      expect(Object.keys(pulled).sort()).toEqual(["ok", "request"]);
       expect(pulled.ok).toBe(true);
       expect(Object.keys(pulled.request).sort()).toEqual(["op", "request_id"]);
       expect(pulled.request).toEqual({ request_id: enq.request_id, op: "read" });

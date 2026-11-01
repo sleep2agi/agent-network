@@ -61,7 +61,12 @@ test("adopted stop/start complete through existing protocol; revocation removes 
   expect((await call(d.list_my_children)).children[0].lifecycle_state).toBe("stopped");
   const start = await call(u.start_node, { child_node_id: CHILD, network_id: NET }); expect(start.ok).toBe(true);
   expect((await call(d.get_start_request, { request_id: start.request_id })).ok).toBe(true);
-  expect((await call(d.ack_start_request, { request_id: start.request_id, status: "started", child_pid: 4321 })).ok).toBe(true);
+  // #3309 分支 —— ack_start_request 的**成功出口**（此前只钉了它的三条失败分支：
+  // request_not_found / not_your_request / cross_network_request）。
+  // 先接住再断言，形状由这次真实调用给出。
+  const startedAck = await call(d.ack_start_request, { request_id: start.request_id, status: "started", child_pid: 4321 });
+  expect(startedAck.ok).toBe(true);
+  expect(Object.keys(startedAck).sort()).toEqual(["ok", "status"]);
   // #3275 批次 4 —— 先接住再断言（同变量口径）
   const unadopted = await call(u.unadopt_node, { node_id: CHILD });
   // #3275 批次 4 —— unadopt_node 两键 {ok, status}（实测）：status 说明解绑后的生命周期档，
