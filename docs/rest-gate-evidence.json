@@ -4,7 +4,7 @@
  "note": "由 scripts/report-rest-gates.py --emit-evidence 生成；表从路由清单驱动。`pinned_by` 为空 = 这条写路由还没有「真的拒绝过」的行为证据。",
  "ratchet": {
   "why": "空 pinned_by 的行数只许降不许升（棘轮），否则「还剩 N 行」没有方向",
-  "baseline_empty": 26
+  "baseline_empty": 25
  },
  "rows": [
   {
@@ -273,7 +273,7 @@
     "restScope"
    ],
    "public_by_design": false,
-   "pinned_by": ""
+   "pinned_by": "dm-file-scope-http.test.ts::非该网络成员 ⇒ 403，且没有私信落库；成员 ⇒ 200 且真的落了（镜像）"
   },
   {
    "path": "/api/upload",

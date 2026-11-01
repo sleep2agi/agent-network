@@ -73,6 +73,37 @@ afterAll(() => {
   try { rmSync(DIR, { recursive: true, force: true }); } catch {}
 });
 
+// #3354 —— POST /api/dm 的 L3 证据：非该网络成员必须被拒，且**一条私信都不许落库**。
+// 这条路由的门是 restAuth + getUserNetworkRole，两处都在 sendHumanDm 里。
+describe("POST /api/dm 的拒绝与镜像", () => {
+  const dmRows = (userId: string) =>
+    db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE user_id = ?1 AND kind = 'human_dm'", userId)!.n;
+
+  test("非该网络成员 ⇒ 403，且没有私信落库；成员 ⇒ 200 且真的落了（镜像）", async () => {
+    // 造一个「自己有自己的网络、但不是 NET 成员」的人
+    const outsider = register(`dmfs_outsider_${Date.now()}`, PW);
+    expect(outsider.network_id).not.toBe(NET);
+    const before = dmRows(bob.id);
+    const denied = await fetch(`${BASE}/api/dm`, {
+      method: "POST",
+      headers: { ...auth(outsider.token!), "Content-Type": "application/json" },
+      body: JSON.stringify({ network_id: NET, to_user_id: bob.id, message: "hi" }),
+    });
+    expect(denied.status).toBe(403);
+    expect((await denied.json() as any).error).toBe("not a member of this network");
+    // 拒绝的第二半：**没有落库**（只断状态码时，「拒了但已经写进收件箱」也会绿）
+    expect(dmRows(bob.id)).toBe(before);
+    // 镜像：成员发给 bob ⇒ 200，且收件箱真的多一条
+    const ok = await fetch(`${BASE}/api/dm`, {
+      method: "POST",
+      headers: { ...auth(alice.token), "Content-Type": "application/json" },
+      body: JSON.stringify({ network_id: NET, to_user_id: bob.id, message: "hi from alice" }),
+    });
+    expect(ok.status).toBe(200);
+    expect(dmRows(bob.id)).toBe(before + 1);
+  });
+});
+
 describe("upload ?purpose=dm", () => {
   test("marks the index entry; absent purpose writes no scope key (old shape)", async () => {
     expect(entry(await uploadId(alice.token, "p1", "&purpose=dm")).scope).toBe("dm");
