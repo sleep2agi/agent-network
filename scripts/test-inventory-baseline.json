@@ -6270,6 +6270,11 @@
   "server/src/health-host-disk-2756.test.ts::#2756 /health.host_disk::形状完整且数值自洽": 1,
   "server/src/health-host-disk-2756.test.ts::#2756 /health.host_disk::探针目录来自 COMMHUB_DB 所在目录（不是写死 /）": 1,
   "server/src/health-host-disk-2756.test.ts::#2756 /health.host_disk::水位与 df 同量级（10% 以内偏差，防止把字节单位算错）": 1,
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::① 每个产生点都在声明范围内（含经变量的那一类）": 1,
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::② 每个声明值都有产生点（没有死值）": 1,
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::③ 三个取值各自的产生方式（向量，不是一个计数）": 1,
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::④ 经变量的那一类必须能被解析出值域（否则 ①② 会静默漏掉它）": 1,
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::声明集合非空且无重复（否则下面几条会在空集上恒真）": 1,
   "server/src/health-redaction.test.ts::#2149 error paths never echo credentials::no 4xx/5xx body contains the presented token, cookie or query secret": 1,
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::admin → 200 with the full key breakdown (ops capability preserved)": 1,
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::anonymous → 401": 1,
@@ -14592,6 +14597,11 @@
   "server/src/health-host-disk-2756.test.ts::#2756 /health.host_disk::形状完整且数值自洽",
   "server/src/health-host-disk-2756.test.ts::#2756 /health.host_disk::探针目录来自 COMMHUB_DB 所在目录（不是写死 /）",
   "server/src/health-host-disk-2756.test.ts::#2756 /health.host_disk::水位与 df 同量级（10% 以内偏差，防止把字节单位算错）",
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::① 每个产生点都在声明范围内（含经变量的那一类）",
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::② 每个声明值都有产生点（没有死值）",
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::③ 三个取值各自的产生方式（向量，不是一个计数）",
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::④ 经变量的那一类必须能被解析出值域（否则 ①② 会静默漏掉它）",
+  "server/src/health-identity-root.test.ts::git_identity_root 值域 == 生产者集合::声明集合非空且无重复（否则下面几条会在空集上恒真）",
   "server/src/health-redaction.test.ts::#2149 error paths never echo credentials::no 4xx/5xx body contains the presented token, cookie or query secret",
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::admin → 200 with the full key breakdown (ops capability preserved)",
   "server/src/health-redaction.test.ts::#473 GET /api/stats/sse — detail survives, behind ops auth::anonymous → 401",
@@ -16644,7 +16654,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "c830c6e10d2a1a3d5c2e06e4c6ef3e0fca052602",
+  "commit": "b710138fb320e60c5b0489ca3cf6e690fcde650b",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
