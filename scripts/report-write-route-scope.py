@@ -100,18 +100,23 @@ def main() -> int:
     rows = [r for r in (doc.get("rows") or []) if not r.get("public_by_design") or r.get("gates")]
 
     counts: dict[str, int] = {}
-    per_scope: dict[str, list[str]] = {}
     unknown: list[str] = []
     for r in doc.get("rows") or []:
-        s = scope_of(list(r.get("gates") or []))
+        # 2026-11-01 —— 优先读**表里存的** required_scope（那是被断言过的值）；
+        # 只有旧表没这一列时才就地推一次，并在输出里说明「推导的」。
+        s = r.get("required_scope") or scope_of(list(r.get("gates") or []))
         if s == "public" and r.get("public_by_design"):
             s = "public"
         counts[s] = counts.get(s, 0) + 1
-        per_scope.setdefault(s, []).append(f"{r.get('method')} {r.get('path')}")
+        # per_scope 只用于可能的分档明细，今天不打印；保留计数即可
+
         if s == "unknown":
             unknown.append(f"{r.get('method')} {r.get('path')}（gates={r.get('gates')}）")
 
-    print(f"写路由 {len(doc.get('rows') or [])} 条，按**必要条件**分档：")
+    have = sum(1 for r in (doc.get("rows") or []) if r.get("required_scope"))
+    total = len(doc.get("rows") or [])
+    print(f"写路由 {total} 条，按**必要条件**分档"
+          f"（{have}/{total} 来自证据表里被断言过的列；其余为就地推导）：")
     for scope in SCOPE_ORDER:
         n = counts.get(scope, 0)
         if not n:

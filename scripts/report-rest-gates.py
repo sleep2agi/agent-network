@@ -202,6 +202,29 @@ def write_routes(doc: dict) -> list[dict]:
     return rows
 
 
+# 2026-11-01 —— #3330：每条写路由的**必要条件**（强度从强到弱，取最强的一档）。
+# 它进证据表而不是只活在报告里：字段一旦入库，权限被合并/放宽时那一格会跟着变，
+# 于是「这次改动降低了权限要求」在 diff 里看得见，而不是只在人的记忆里。
+SCOPE_BY_GATE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("admin", ("requireTmuxAccess",)),
+    ("owner_admin", ("canRestWriteNodeSecurity",)),
+    ("network_write", ("canRestWriteNetwork",)),
+    ("human_only", ("canRestWriteNetworkAsHuman",)),
+    ("user_token", ("userTokenRequired", "isNodeCredential", "resolveToken",
+                    "restAuth", "restScope", "callerUserId")),
+    ("node_mode", ("restNodeDenied", "restrictedMemberAttachmentsDenied", "scopeDenied")),
+)
+SCOPE_ORDER = [name for name, _ in SCOPE_BY_GATE] + ["public", "unknown"]
+
+
+def scope_of(gates: list[str]) -> str:
+    """门符号 ⇒ 必要条件档。取**最强**：任何一档拒绝都成立，更强的那个是必要条件。"""
+    for scope, symbols in SCOPE_BY_GATE:
+        if any(g in symbols for g in gates):
+            return scope
+    return "public" if not gates else "unknown"
+
+
 def rules_shape() -> dict[str, int]:
     """规则集的**形状向量** —— 哈希只说「变了」，形状说「变了哪个维度」。
 
@@ -552,6 +575,8 @@ def build_evidence(doc: dict, lines: list[str], result: dict) -> dict:
             "method": r.get("method"),
             "line": r.get("line"),
             "gates": gates_by_route.get(key, []),
+            # 必要条件：写进表里，权限被放宽时这一格会变（而不是只活在报告里）
+            "required_scope": scope_of(gates_by_route.get(key, [])),
             "public_by_design": key in PUBLIC_BY_DESIGN,
             # 空字符串 = **这个缺口还没被钉住**（可数、可 diff；注释形态不可数）
             "pinned_by": prev.get(key, ""),
@@ -590,6 +615,12 @@ def check_evidence(doc: dict, result: dict) -> list[str]:
                    f"现在是 {rules_rev()} ⇒ 规则变了，已钉的行可能不再成立；重跑 --emit-evidence")
     # 棘轮的分母也要排除「按设计公开」的行 —— 否则公开路由会被算成缺口，
     # 而它们本来就不需要拒绝证据（分母与分子必须同口径）。
+    # 必要性档必须与「现在按门符号算出来的」一致 —— 否则表里存的是一个旧结论。
+    for r in rows:
+        want = scope_of(list(r.get("gates") or []))
+        if r.get("required_scope") and r["required_scope"] != want:
+            out.append(f"SCOPE_STALE: {r.get('method')} {r.get('path')} 记为 "
+                       f"{r['required_scope']} 但按门符号应为 {want} ⇒ 表里存的是旧结论")
     empty = [r for r in rows if not r.get("pinned_by") and not r.get("public_by_design")]
     base = int((ev.get("ratchet") or {}).get("baseline_empty") or 0)
     if len(empty) > base:

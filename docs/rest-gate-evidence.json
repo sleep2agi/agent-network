@@ -12,6 +12,7 @@
    "method": "POST",
    "line": 2379,
    "gates": [],
+   "required_scope": "public",
    "public_by_design": true,
    "pinned_by": ""
   },
@@ -20,6 +21,7 @@
    "method": "POST",
    "line": 2395,
    "gates": [],
+   "required_scope": "public",
    "public_by_design": true,
    "pinned_by": ""
   },
@@ -32,6 +34,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "user-avatar-http.test.ts::human avatar: auth → save/read/login → member visibility → isolation/rejection → clear"
   },
@@ -44,6 +47,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "user-avatar-upload-http.test.ts::account avatar upload: user token only, PNG limits, visibility by shared network, revoke, atomic replace"
   },
@@ -56,6 +60,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::cannot edit the owner's profile or password"
   },
@@ -68,6 +73,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::cannot edit the owner's profile or password"
   },
@@ -80,6 +86,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::token management: cannot list, mint user tokens, mint node tokens or revoke"
   },
@@ -91,6 +98,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::renames: a node token may only rename ITSELF in its bound network"
   },
@@ -102,6 +110,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::renames: a node token may only rename ITSELF in its bound network"
   },
@@ -113,6 +122,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::renames: a node token may only rename ITSELF in its bound network"
   },
@@ -125,6 +135,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::token management: cannot list, mint user tokens, mint node tokens or revoke"
   },
@@ -137,6 +148,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::节点令牌不能吊销用户令牌：403 且目标行仍在"
   },
@@ -149,6 +161,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "auth-sessions-http.test.ts::revoke-others refuses node tokens and non-session tokens"
   },
@@ -161,6 +174,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "auth-sessions-http.test.ts::DELETE /api/auth/sessions/:id revokes one other session"
   },
@@ -173,6 +187,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::cannot create, rename or delete networks"
   },
@@ -185,6 +200,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::cannot manage members, invites or join"
   },
@@ -197,6 +213,7 @@
     "resolveToken",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::cannot manage members, invites or join"
   },
@@ -210,6 +227,7 @@
     "restAuth",
     "userTokenRequired"
    ],
+   "required_scope": "owner_admin",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::owner and network owner/admin can set it and it applies on the next request; others cannot"
   },
@@ -223,6 +241,7 @@
     "restAuth",
     "userTokenRequired"
    ],
+   "required_scope": "owner_admin",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::改白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）"
   },
@@ -236,6 +255,7 @@
     "restAuth",
     "userTokenRequired"
    ],
+   "required_scope": "owner_admin",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::改 REST 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）；[] 歧义 400"
   },
@@ -249,6 +269,7 @@
     "restAuth",
     "userTokenRequired"
    ],
+   "required_scope": "owner_admin",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::改 peer 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）"
   },
@@ -262,6 +283,7 @@
     "restScope",
     "userTokenRequired"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "hub-catalog-read-http.test.ts::PUT /api/providers 别的网络 owner ⇒ 403 且 providers 列表不变（拒绝不许有副作用）"
   },
@@ -272,6 +294,7 @@
    "gates": [
     "restScope"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "dm-file-scope-http.test.ts::非该网络成员 ⇒ 403，且没有私信落库；成员 ⇒ 200 且真的落了（镜像）"
   },
@@ -283,6 +306,7 @@
     "canRestWriteNetworkAsHuman",
     "requireAuth"
    ],
+   "required_scope": "human_only",
    "public_by_design": false,
    "pinned_by": "dm-file-scope-http.test.ts::未认证 ⇒ 401，且 .index 条目数不变（拒绝不许有副作用）"
   },
@@ -299,6 +323,7 @@
     "restAuth",
     "restrictedMemberAttachmentsDenied"
    ],
+   "required_scope": "human_only",
    "public_by_design": false,
    "pinned_by": "agent-acl-http.test.ts::POST /api/task to an agent → 403 agent_not_granted; nonexistent alias gets the identical response"
   },
@@ -313,6 +338,7 @@
     "restNodeDenied",
     "restScope"
    ],
+   "required_scope": "network_write",
    "public_by_design": false,
    "pinned_by": "agent-acl-http.test.ts::POST /api/broadcast → 403 且**一条 inbox 都没写**（拒绝不许有副作用）"
   },
@@ -323,6 +349,7 @@
    "gates": [
     "requireTmuxAccess"
    ],
+   "required_scope": "admin",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::tmux send：功能未启用时 404 拒绝，且不返回任何执行痕迹"
   },
@@ -334,6 +361,7 @@
     "callerUserId",
     "restAuth"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "user-inbox-by-agent-http.test.ts::🔴 未认证 ⇒ 401，且 A 的未读数一条都不减（拒绝不许有副作用）"
   },
@@ -348,6 +376,7 @@
     "restNodeDenied",
     "restScope"
    ],
+   "required_scope": "network_write",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::删节点：readonly 调用者被拒且行还在；owner 允许且行真的没了"
   },
@@ -362,6 +391,7 @@
     "restNodeDenied",
     "restScope"
    ],
+   "required_scope": "network_write",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::改 attrs：readonly 节点被拒且行没变；owner 200 且行真变；旧 revision 409 且行没变"
   },
@@ -376,6 +406,7 @@
     "restNodeDenied",
     "restScope"
    ],
+   "required_scope": "network_write",
    "public_by_design": false,
    "pinned_by": "node-permissions-http.test.ts::改节点头像：readonly 节点被拒且 avatar_url 没变；owner 200 且真的变了（镜像）"
   },
@@ -386,6 +417,7 @@
    "gates": [
     "resolveToken"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "task-access-http.test.ts::（同一条 grants 测试内的越权 PUT）"
   },
@@ -396,6 +428,7 @@
    "gates": [
     "resolveToken"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::POST /api/admin/users and agent-grants"
   },
@@ -406,6 +439,7 @@
    "gates": [
     "resolveToken"
    ],
+   "required_scope": "user_token",
    "public_by_design": false,
    "pinned_by": "node-token-privilege-http.test.ts::POST /api/admin/users and agent-grants"
   }
