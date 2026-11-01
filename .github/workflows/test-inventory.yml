@@ -67,6 +67,16 @@ jobs:
         run: |
           python3 scripts/check-node-security-write-gate.py --selftest
           python3 scripts/check-node-security-write-gate.py
+      # #3314 复核 —— 「首次写」字段的写入必须是**条件写**（`AND <col> IS NULL` 与 SET 同句）。
+      # 起因：`WHERE … IS NULL` 与「SELECT 后 if 再 UPDATE」在单线程夹具里**都绿**，
+      # 差别只在并发。所以这条判据测不到行为上，只能落在语句文本上；当时那处
+      # (`node-request-retention.ts:102`) 已是条件写，但只有一条注释在守它 —— 注释不会红。
+      # 三态：0=全部条件写；1=有非条件写；2=**一个写入都没扫到**（列名改了/代码搬走），
+      # 后者与「全部合规」在同一句话里同形，所以必须分开。
+      - name: first-write columns are written conditionally (AND col IS NULL in the same statement)
+        run: |
+          python3 scripts/check-first-write-conditional.py --selftest
+          python3 scripts/check-first-write-conditional.py
       # 2026-10-31 —— `trap '<...> exit 1' ERR` 会把 RC 采集吃掉：`RC=$?` 到不了，
       # 于是「已失效（2）」被读成「未预期（1）」，动作从「更新卡」错到「查脚本」。
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。
