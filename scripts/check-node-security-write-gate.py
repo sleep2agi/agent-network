@@ -168,8 +168,17 @@ SELFTEST_CASES = [
 ]
 
 
+# 2026-11-01 —— 数量钉防删除，不防替换。这里再加一条**强度下界**：
+# 期望「报错」的用例必须占多数，否则自检退化成「合法输入不报错」。
+NEGATIVE_EXPECTED = 3
+
+
 def selftest() -> int:
     bad = 0
+    negative = sum(1 for _, _, exp in SELFTEST_CASES if exp is not None)
+    if negative < NEGATIVE_EXPECTED:
+        print(f"✗ 负例（期望报错的用例）只有 {negative} 个，应至少 {NEGATIVE_EXPECTED} 个")
+        bad += 1
     for label, src, expect in SELFTEST_CASES:
         problems = check_source(src)
         if expect is None:
@@ -181,7 +190,8 @@ def selftest() -> int:
             bad += 1
             for p in problems:
                 print(f"        {p}")
-    print(f"\nselftest: {len(SELFTEST_CASES) - bad}/{len(SELFTEST_CASES)}")
+    print(f"\nselftest: {len(SELFTEST_CASES) - bad}/{len(SELFTEST_CASES)}"
+          f"（其中负例 {negative}/{NEGATIVE_EXPECTED}）")
     return 1 if bad else 0
 
 

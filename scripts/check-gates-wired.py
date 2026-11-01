@@ -272,6 +272,9 @@ def main(argv: list[str]) -> int:
     stale_allow = [k for k in KNOWN_UNWIRED if all(k != str(p.relative_to(REPO)) for p in unwired)]
 
     failures: list[dict] = []
+    # 2026-11-01 —— 与 failures **分开**的一桶：exit=2 是「装置没跑起来 / 没有读数」，
+    # 不是「某条用例失败」。合并时上层只能看到「有几个门红」，而它们要修的层不同。
+    no_reading: list[dict] = []
     checked = 0
     debt: list[str] = []
     slow_skipped: list[str] = []
@@ -303,9 +306,15 @@ def main(argv: list[str]) -> int:
         results = list(pool.map(lambda q: (q, *run_selftest(q)), runnable))
     for q, rc, tail in results:
         checked += 1
-        if rc != 0:
-            last = tail.strip().splitlines()[-1] if tail.strip() else ""
-            failures.append({"gate": str(q.relative_to(REPO)), "why": f"--selftest 退出码 {rc}：{last}"})
+        if rc == 0:
+            continue
+        last = tail.strip().splitlines()[-1] if tail.strip() else ""
+        # 2026-11-01 —— 1 与 2 是**两种不同的红**，不能并成一个 failures 列表：
+        #   1 ⇒ 自检真的红了（某条用例失败）      ⇒ 修那个门
+        #   2 ⇒ 装置没跑起来 / 没有读数（缺依赖、扫描域为空） ⇒ 修环境
+        # 合并之后，上层只能看到「有 3 个门红」，而其中可能 2 个根本不是门的问题。
+        bucket = failures if rc == 1 else no_reading
+        bucket.append({"gate": str(q.relative_to(REPO)), "rc": rc, "why": last})
 
     # 2026-10-31 —— **阳性对照**（外部复核：「任何单字段结论，先问有没有一个对照能把它劈成两支」）。
     # 「欠账 12 个」这种数字有三种成因：真是 12 / 扫描器没找到门 / 所有门都没接线。
@@ -345,13 +354,13 @@ def main(argv: list[str]) -> int:
     if "--json" in argv:
         print(json.dumps({
             "gates": len(all_gates), "wired": len(wired), "unwired": [str(p.relative_to(REPO)) for p in unwired],
-            "selftests_run": checked, "failures": failures, "bad_unwired": bad_unwired, "stale_allow": stale_allow,
+            "selftests_run": checked, "failures": failures, "no_reading": no_reading, "bad_unwired": bad_unwired, "stale_allow": stale_allow,
             "debt_no_selftest": debt, "selftest_not_run_here": slow_skipped,
             # 2026-10-31 —— 移出条件也要进机器可读输出：否则「谁能结束这条豁免」只有人读得到。
             "unwired_exit_when": {k: UNWIRED_EXIT_WHEN.get(k, "") for k in KNOWN_UNWIRED},
             "stale_debt": [r for r, _ in stale_debt], "dead_tags": dead_tags,
         }, ensure_ascii=False, indent=2))
-        return 1 if (failures or bad_unwired or stale_allow) else 0
+        return 1 if (failures or no_reading or bad_unwired or stale_allow) else 0
 
     _covered, _missed = coverage()
     _total = len(_covered) + len(_missed)
@@ -387,6 +396,8 @@ def main(argv: list[str]) -> int:
         print(f"  ⚠ 已接线但无 selftest 的欠账：{len(debt)} 个（名单冻结，不允许增长）：")
         for d in debt[:12]:
             print(f"      · {d}")
+    for f in no_reading:
+        print(f"  ⚠ 没有读数（exit={f['rc']}，修环境不是修用例）：{f['gate']} —— {f['why']}")
     for f in failures:
         print(f"    ✗ {f['gate']}  {f['why']}", file=sys.stderr)
     for g in bad_unwired:
@@ -400,7 +411,7 @@ def main(argv: list[str]) -> int:
         print(f"    · 白名单已过期（该门现在已接线）：{k}")
     for rel, why in stale_debt:
         print(f"    ✗ 欠账名单过期：{rel} —— {why}（把基线改宽不算修好）", file=sys.stderr)
-    if failures or bad_unwired or stale_debt or bad_tag or dead_tags:
+    if failures or no_reading or bad_unwired or stale_debt or bad_tag or dead_tags:
         return 1
     # 2026-10-31 —— 外部复核：「分类表已经存在，但全仓 grep 是**写 1 处、读 0 处**
     # ⇒ 缺口不是『缺分类』，是『分类没有消费者』」。

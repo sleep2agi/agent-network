@@ -158,8 +158,19 @@ SELFTEST_CASES = [
 ]
 
 
+# 2026-11-01 —— **数量钉防删除，不防替换**：七个用例换成七个必定通过的，计数仍是 7。
+# 所以再加一条**强度下界**：必须有几个用例的期望是「报错」，而不是「没问题」。
+# 负例数为 0 时，整个自检只剩「合法输入不报错」，而那什么都证明不了。
+NEGATIVE_EXPECTED = 3
+
+
 def selftest() -> int:
     bad = 0
+    negative = sum(1 for _, _, exp in SELFTEST_CASES if exp)
+    if negative < NEGATIVE_EXPECTED:
+        print(f"✗ 负例（期望报错的用例）只有 {negative} 个，应至少 {NEGATIVE_EXPECTED} 个")
+        print("  ⇒ 数量没变但强度掉了：把负例换成「合法输入」也会让计数保持为 6/6")
+        bad += 1
     for label, src, expect_prefixes in SELFTEST_CASES:
         tmp = Path("/tmp/first-write-selftest.ts")
         tmp.write_text(src)
@@ -170,7 +181,8 @@ def selftest() -> int:
         if not ok:
             bad += 1
             print(f"        got={got} want={expect_prefixes}")
-    print(f"\nselftest: {len(SELFTEST_CASES) - bad}/{len(SELFTEST_CASES)}")
+    print(f"\nselftest: {len(SELFTEST_CASES) - bad}/{len(SELFTEST_CASES)}"
+          f"（其中负例 {negative}/{NEGATIVE_EXPECTED}）")
     return 1 if bad else 0
 
 
