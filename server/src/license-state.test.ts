@@ -54,3 +54,52 @@ describe("legacyLicenseField", () => {
     expect(legacyLicenseField({ type: 0 as unknown })).toBe("none");
   });
 });
+
+// 2026-11-01 —— 值域 == 生产者集合，**用穷举**而不是用声明。
+//
+// `LicenseState` 是一个联合类型：它声明了 {known, absent, unknown} 与两个 reason。
+// 声明本身不会红 —— 有人加了第四个分支（例如 expired）而忘了改类型时，
+// TypeScript 会红，但**改类型而不加分支**（往联合里加一个没人产生的成员）不会红，
+// 于是「值域里有它、但没人会产生它」这一格没有任何断言。
+//
+// 这里的域是有限的（failed × 5 种 row）⇒ 可以穷举：
+//   ① 产生的 kind 集合 == 声明的 kind 集合
+//   ② 产生的 reason 集合 == 声明的 reason 集合
+//   ③ 每个输入恰好落在一格里（互斥）
+describe("值域 == 生产者集合（穷举有限域）", () => {
+  const ROWS: unknown[] = [
+    null, undefined, {}, { type: "" }, { type: "   " }, { type: 42 }, { type: "pro" }, { type: " team " },
+  ];
+  const OUT = ROWS.flatMap((r) => [false, true].map((failed) => licenseStateOf(r as any, failed)));
+
+  test("① kind 集合恰好是 known / absent / unknown 三个", () => {
+    expect([...new Set(OUT.map((o) => o.kind))].sort()).toEqual(["absent", "known", "unknown"]);
+  });
+
+  test("② reason 集合恰好是两个（多一个 ⇒ 有值没有生产者；少一个 ⇒ 有生产者没有值）", () => {
+    const reasons = OUT.flatMap((o) => (o.kind === "unknown" ? [o.reason] : [])).sort();
+    expect([...new Set(reasons)]).toEqual(["license_query_failed", "license_row_without_type"]);
+  });
+
+  // ④ 声明的值域 vs 产生的值域：只比「产生的」抓不到「声明了但没人产生」。
+  // 这一条读源码里的联合类型字面量，与上面 ② 的产出集合对账。
+  test("④ 类型里声明的 reason 集合 == 实际产出的集合（无声明无生产者）", async () => {
+    const { licenseStateOf: fn } = await import("./license-state.js");
+    const src = (await import("node:fs")).readFileSync(new URL("./license-state.ts", import.meta.url), "utf8");
+    // 注意结尾：联合类型的**最后一个**成员后面是 ` }` 而不是 `|`，
+    // 只写 `(?=\||;)` 会漏掉它 —— 而漏掉的那一个正好是「最后加进去的那个」，
+    // 也就是这条断言最该抓到的那一个。
+    const declared = [...src.matchAll(/"([a-z_]+)"\s*(?=[|;}])/g)].map((m) => m[1])
+      .filter((x) => x.startsWith("license_"));
+    const produced = [...new Set(OUT.flatMap((o) => (o.kind === "unknown" ? [o.reason] : [])))].sort();
+    expect([...new Set(declared)].sort()).toEqual(produced);
+    expect(typeof fn).toBe("function");
+  });
+
+  test("③ 每个输入恰好落在一格里（互斥，不重叠）", () => {
+    for (const o of OUT) {
+      const hits = [o.kind === "known", o.kind === "absent", o.kind === "unknown"].filter(Boolean).length;
+      expect(hits).toBe(1);
+    }
+  });
+});

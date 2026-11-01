@@ -6420,6 +6420,10 @@
   "server/src/license-state.test.ts::licenseStateOf::the three states are mutually exclusive — no input yields two of them": 1,
   "server/src/license-state.test.ts::licenseStateOf::unknown(query_failed) wins over the row — a failed query tells us nothing about the row": 1,
   "server/src/license-state.test.ts::licenseStateOf::unknown(row_without_type): a row exists but the type is empty — different fix from absent": 1,
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::① kind 集合恰好是 known / absent / unknown 三个": 1,
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::② reason 集合恰好是两个（多一个 ⇒ 有值没有生产者；少一个 ⇒ 有生产者没有值）": 1,
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::③ 每个输入恰好落在一格里（互斥，不重叠）": 1,
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::④ 类型里声明的 reason 集合 == 实际产出的集合（无声明无生产者）": 1,
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::adopted 节点（binding 证明的是 stop/start 授权）⇒ restart 必须拒": 1,
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 传一个我不属于的 network_id ⇒ forbidden_cross_tenant（scope.denied）": 1,
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 对不存在的 node ⇒ **第三次值** daemon_not_resolvable（不是我猜的两个）": 1,
@@ -14738,6 +14742,10 @@
   "server/src/license-state.test.ts::licenseStateOf::the three states are mutually exclusive — no input yields two of them",
   "server/src/license-state.test.ts::licenseStateOf::unknown(query_failed) wins over the row — a failed query tells us nothing about the row",
   "server/src/license-state.test.ts::licenseStateOf::unknown(row_without_type): a row exists but the type is empty — different fix from absent",
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::① kind 集合恰好是 known / absent / unknown 三个",
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::② reason 集合恰好是两个（多一个 ⇒ 有值没有生产者；少一个 ⇒ 有生产者没有值）",
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::③ 每个输入恰好落在一格里（互斥，不重叠）",
+  "server/src/license-state.test.ts::值域 == 生产者集合（穷举有限域）::④ 类型里声明的 reason 集合 == 实际产出的集合（无声明无生产者）",
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::adopted 节点（binding 证明的是 stop/start 授权）⇒ restart 必须拒",
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 传一个我不属于的 network_id ⇒ forbidden_cross_tenant（scope.denied）",
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 对不存在的 node ⇒ **第三次值** daemon_not_resolvable（不是我猜的两个）",
@@ -16636,7 +16644,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "9d9fe954eda2fd7c559df363b3cba7298daf19c5",
+  "commit": "c830c6e10d2a1a3d5c2e06e4c6ef3e0fca052602",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
