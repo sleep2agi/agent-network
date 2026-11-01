@@ -51,6 +51,12 @@ jobs:
       # 它不要求每个脚本都进 CI；它要求每个脚本都落进三档之一，ADHOC 必须有「谁会发现它烂了」+「什么时候删这一行」。
       - name: every script has a discoverer when it stops running
         run: python3 scripts/report-script-cadence.py --assert
+      # #3306 —— 凭据台账也要有门：多一列少一列 / 贴了密钥内容 / 「已填待填」计数停在过去，
+      # 三种都不会让任何东西报错。空表与填好的表在报告上同形，所以那张表必须自己会腐朽。
+      - name: the credential ledger keeps its own structure (no secrets, revocation column, live counts)
+        run: |
+          python3 scripts/check-credential-ledger.py --selftest
+          python3 scripts/check-credential-ledger.py
       # 2026-10-31 —— `trap '<...> exit 1' ERR` 会把 RC 采集吃掉：`RC=$?` 到不了，
       # 于是「已失效（2）」被读成「未预期（1）」，动作从「更新卡」错到「查脚本」。
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。
