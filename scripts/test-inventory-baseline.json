@@ -6905,6 +6905,11 @@
   "server/src/poll-pacing.test.ts::#3001 get_task 轮询节奏提示::提示文案必须说明「结果会自动 chain」——否则 agent 仍会紧盯": 1,
   "server/src/poll-pacing.test.ts::#3001 get_task 轮询节奏提示::身份查询用更宽的阈值（p50 约 2.3 次/分钟是设计频率，不该被提示打扰）": 1,
   "server/src/poll-pacing.test.ts::#3001 get_task 轮询节奏提示::隔一分钟以上再看，计数清零、不再提示（纪律生效后自动安静）": 1,
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::provider 不存在 ⇒ error === provider_not_found": 1,
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::provider 存在但停用 ⇒ error === provider_disabled（**不是** provider_not_found）": 1,
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::provider 引用的密钥不在 vault ⇒ error === secret_not_in_vault，且带上键名": 1,
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::四条的形状都**没有** code 字段（现状，不是契约）": 1,
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::成员（非 owner/admin）⇒ error === insufficient_role_for_probe": 1,
   "server/src/probe-validate.test.ts::ProbeAckPayloadSchema (§4.4.4 v3 R3 strict whitelist)::REJECTS bad enum status": 1,
   "server/src/probe-validate.test.ts::ProbeAckPayloadSchema (§4.4.4 v3 R3 strict whitelist)::REJECTS extra error_message field (zod .strict, v3 R3 attacker daemon catch)": 1,
   "server/src/probe-validate.test.ts::ProbeAckPayloadSchema (§4.4.4 v3 R3 strict whitelist)::REJECTS extra response_body / response_headers / url / vendor_text": 1,
@@ -15158,6 +15163,11 @@
   "server/src/poll-pacing.test.ts::#3001 get_task 轮询节奏提示::提示文案必须说明「结果会自动 chain」——否则 agent 仍会紧盯",
   "server/src/poll-pacing.test.ts::#3001 get_task 轮询节奏提示::身份查询用更宽的阈值（p50 约 2.3 次/分钟是设计频率，不该被提示打扰）",
   "server/src/poll-pacing.test.ts::#3001 get_task 轮询节奏提示::隔一分钟以上再看，计数清零、不再提示（纪律生效后自动安静）",
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::provider 不存在 ⇒ error === provider_not_found",
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::provider 存在但停用 ⇒ error === provider_disabled（**不是** provider_not_found）",
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::provider 引用的密钥不在 vault ⇒ error === secret_not_in_vault，且带上键名",
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::四条的形状都**没有** code 字段（现状，不是契约）",
+  "server/src/probe-provider-error-domain.test.ts::#3309 probe_provider_model 错误值域：四条拒绝各有一条会红的断言::成员（非 owner/admin）⇒ error === insufficient_role_for_probe",
   "server/src/probe-validate.test.ts::ProbeAckPayloadSchema (§4.4.4 v3 R3 strict whitelist)::REJECTS bad enum status",
   "server/src/probe-validate.test.ts::ProbeAckPayloadSchema (§4.4.4 v3 R3 strict whitelist)::REJECTS extra error_message field (zod .strict, v3 R3 attacker daemon catch)",
   "server/src/probe-validate.test.ts::ProbeAckPayloadSchema (§4.4.4 v3 R3 strict whitelist)::REJECTS extra response_body / response_headers / url / vendor_text",
@@ -16506,7 +16516,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "6a398b8bacfe7f7afd525f5b04788d986f5c6146",
+  "commit": "1c0931a86900356301a4d38aa24c64e16e6a720a",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
