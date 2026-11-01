@@ -7844,6 +7844,11 @@
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::clone 与 non-clone 两侧互斥（各一例，同一条测试）": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::「缺 blob」与「状态不对」两侧互斥（各一例，同一条测试）": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）": 1,
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::两条载荷都没有 code 字段（现状，不是契约）": 1,
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::反向：pending 的启动请求可以拉（证明上一条是「状态」而不是「总被拒」）": 1,
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::反向：绑定了别名的节点可以提交（证明上一条是「身份」而不是「节点不能写」）": 1,
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::拉一份已结束的启动请求 ⇒ request_not_startable（带当前 status）": 1,
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::节点令牌却没有绑定别名 ⇒ node_identity_unbound": 1,
   "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the full projection to that agent": 1,
@@ -16125,6 +16130,11 @@
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::clone 与 non-clone 两侧互斥（各一例，同一条测试）",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::「缺 blob」与「状态不对」两侧互斥（各一例，同一条测试）",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）",
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::两条载荷都没有 code 字段（现状，不是契约）",
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::反向：pending 的启动请求可以拉（证明上一条是「状态」而不是「总被拒」）",
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::反向：绑定了别名的节点可以提交（证明上一条是「身份」而不是「节点不能写」）",
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::拉一份已结束的启动请求 ⇒ request_not_startable（带当前 status）",
+  "server/src/start-skill-error-domain.test.ts::#3309 get_start_request / submit_skill 的错误值域::节点令牌却没有绑定别名 ⇒ node_identity_unbound",
   "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::alias narrows the full projection to that agent",
@@ -16562,7 +16572,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "154536f0bca7966ba275a03f132f695a6ab412fc",
+  "commit": "5bbea2bebd450717d62a84e6ba32f63b37e24ac2",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
