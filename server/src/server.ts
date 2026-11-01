@@ -107,6 +107,7 @@ import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startS
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
+import { readLastConfigUpdate } from "./node-config-last-update.js";
 import { readBuildInfo } from "./build-info.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
@@ -6400,6 +6401,14 @@ return Bun.serve({
       if (node.config_snapshot) {
         try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
       }
+      // #3146 —— 上一次下发的**结局**。没有这一格时，客户端只能靠
+      // 「config_revision 有没有涨」推断，涨不了就一律显示成 timeout（「90s 内没回来，去看日志」），
+      // 而生产上真实结局是 rejected，原因（OpenCode V2 session is not running）就写在本库里。
+      // ⇒ 读者拿不到答案，于是被指去机器上看日志 —— 一句话把人送错了层。
+      const lastUpdate = readLastConfigUpdate(
+        (sql: string, ...params: any[]) => (db.get as any)(sql, ...params),
+        node.node_id,
+      );
       return withCors(req, Response.json({
         ok: true,
         node_id: node.node_id,
@@ -6409,6 +6418,8 @@ return Bun.serve({
         model: snapshot.model ?? null,
         flags: snapshot.flags ?? {},
         config_update_capable: snapshot.config_update_capable ?? false,
+        // null = 这个节点从来没有被下发过配置（与「下发过但还没终局」是两件事）
+        last_update: lastUpdate,
       }));
     }
 
