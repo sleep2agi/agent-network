@@ -41,6 +41,13 @@ SOURCE = REPO / "server" / "src" / "server.ts"
 
 WRITE_METHODS = ("PUT", "POST", "PATCH", "DELETE")
 
+# 2026-11-01 —— **分母也要有断言**，否则「每条写路由都有门」可以靠分母丢掉而为真：
+#   表里 0 条写路由 ⇒ `✓ 每条写路由都能说出它的门`（0/0）
+#   多方法登记丢了 ⇒ 34 变 31，比例照样好看
+# 这两个常量是**下限**：真要变（新增/删除写路由），必须有意改它，而不是让它自己漂。
+MIN_WRITE_ROUTES = 34
+MIN_MULTI_WRITE_ROUTES = 3
+
 # 门符号的形态。**宽进**：宁可多认一个再去登记，也不要因为「它看起来不像门」而漏掉。
 GATE_RE = re.compile(r"\b((?:can|require|assert)[A-Z]\w*|\w+Denied)\s*\(")
 
@@ -423,13 +430,33 @@ def main() -> int:
     print("  前置：本脚本按表里的行号定位源码。**行号可信的前提**是"
           " `check-rest-route-table.py` 已经逐字节对齐（同一 workflow 里先跑它）。"
           "本脚本不自己验证这一点 —— 表过期时这里给出的会是「行号错了」的读数，不是「门没了」。")
+    # ①② 分母丢失：先判「有没有东西可查」，再判「查出来对不对」。
+    # 两者用不同的码，因为它们要的动作相反（换表 vs 补登记）。
+    multi_write = [m for m in ((doc.get("method_parse") or {}).get("multi_method") or [])
+                   if any(x in WRITE_METHODS for x in (m.get("methods") or ()))]
+    total = len(result["gated"]) + len(result["public"]) + len(result["unknown"])
+    if total == 0:
+        print("✗ not_applicable: 表里 0 条写路由 ⇒ 没有东西可检查"
+              "（这是「没读数」，不是「全部通过」）", file=sys.stderr)
+        print("  ⇒ 先看 docs/rest-route-table.json 是不是被换了 / 被清空了", file=sys.stderr)
+        return 3
+    if total < MIN_WRITE_ROUTES or len(multi_write) < MIN_MULTI_WRITE_ROUTES:
+        print(f"✗ registry_lost: 写路由 {total} 条（下限 {MIN_WRITE_ROUTES}）· "
+              f"多方法含写 {len(multi_write)} 条（下限 {MIN_MULTI_WRITE_ROUTES}）"
+              f" ⇒ 分母掉了，比例没有意义", file=sys.stderr)
+        print("  ⇒ 是 method_parse 被清空、还是路由真的变少了？先答这个再看下面的比例",
+              file=sys.stderr)
+        if "--assert" in sys.argv:
+            return 1
     probs = problems_for(result, doc)
     for x in probs:
         print(f"✗ {x}", file=sys.stderr)
     print("  mutates: none（只读）")
     if probs:
         return 1 if "--assert" in sys.argv else 0
-    print("✓ 每条写路由都能说出它的门（或说出它为什么不需要）")
+    # ② 绝对数必须与比例一起出现：`1/1` 与 `34/34` 在比例上同形。
+    print(f"✓ 每条写路由都能说出它的门（{total} 条：有门 {len(result['gated'])} + "
+          f"按设计公开 {len(result['public'])} + 判不了 {len(result['unknown'])}）")
     return 0
 
 
