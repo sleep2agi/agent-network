@@ -794,6 +794,34 @@ describe("update_node_config 响应键集（exact key set）", () => {
     });
   });
 
+  // #3309 分支 —— ack_create_request 的**两个成功出口**：键集相同 {ok,status}，
+  // 但 status 的取值不同（started ⇒ "awaiting_register"；failed ⇒ "failed"）。
+  // 只钉键集时，「把两个分支合并成一个 status」不会有东西变红。
+  describe("ack_create_request: two success exits share keys, differ in value", () => {
+    test("started ⇒ awaiting_register；failed ⇒ failed", async () => {
+      const D = { alias: "acl3-ackcr-daemon", node: "node_acl3_ackcr_daemon" };
+      seedAgent({ alias: D.alias, node: D.node });
+      const minted = createNetworkTokenForNode(adminId, NET, D.alias, D.node);
+      expect(minted.ok).toBe(true);
+      const U = Math.random().toString(36).slice(2, 8);
+      // ⚠️ UNIQUE(daemon_node_id, child_name) ⇒ 两行必须用**不同子名**，
+      // 否则冲突会以「主键冲突」的样子出现，把断言掩盖成 db 报错。
+      const ins = (id: string, suffix: string) =>
+        db.run(`INSERT INTO node_create_requests
+                (request_id, daemon_node_id, child_name, network_id, runtime, flags_json, env_keys, status, created_at, created_by_token)
+                VALUES (?1, ?2, ?3, ?4, 'opencode', '{}', '[]', 'delivered', ?5, 'test')`,
+          [id, D.node, `child_${U}_${suffix}`, NET, Date.now()]);
+      ins(`cr_ackcr_started_${U}`, "s");
+      const started = await tool(minted.token!, "ack_create_request", { request_id: `cr_ackcr_started_${U}`, status: "started" });
+      expect(Object.keys(started).sort()).toEqual(["ok", "status"]);
+      expect(started).toEqual({ ok: true, status: "awaiting_register" });
+      ins(`cr_ackcr_failed_${U}`, "f");
+      const failed = await tool(minted.token!, "ack_create_request", { request_id: `cr_ackcr_failed_${U}`, status: "failed" });
+      expect(Object.keys(failed).sort()).toEqual(["ok", "status"]);
+      expect(failed).toEqual({ ok: true, status: "failed" });
+    });
+  });
+
   // 2026-10-31 —— #3171 第 5 项：错误信封的形状也要钉住。
   // 今天它们是「约定俗成」：每个出口手写 {ok:false,error}，
   // 于是谁顺手多塞一个字段，客户端的分支就多一个没人知道的键。

@@ -5322,6 +5322,7 @@
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::带 warning 的成功体恰好 {apply_mode, ok, update_id, warnings}，且 warning 项恰好 {code, message}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::成功体恰好 {apply_mode, ok, update_id}，不多不少": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>#3168: a node that declares no supervisor gets a warning, not silence::restart-tier patch ⇒ warnings 含 restart_supervision_unknown（且 message 给出两种处置）": 1,
+  "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>ack_create_request: two success exits share keys, differ in value::started ⇒ awaiting_register；failed ⇒ failed": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>create-request reads/writes: same rejection order::get_create_request / ack_create_request：别人的 ⇒ not_your_request；别的网络 ⇒ cross_network_request": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>daemon-shaped caller: existence branches are reachable::ack_start_request / ack_stop_request 不存在 ⇒ 恰好 {error:'request_not_found', ok:false}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::ack_config_update without a node token ⇒ exactly {error, ok}": 1,
@@ -13553,6 +13554,7 @@
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::带 warning 的成功体恰好 {apply_mode, ok, update_id, warnings}，且 warning 项恰好 {code, message}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）::成功体恰好 {apply_mode, ok, update_id}，不多不少",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>#3168: a node that declares no supervisor gets a warning, not silence::restart-tier patch ⇒ warnings 含 restart_supervision_unknown（且 message 给出两种处置）",
+  "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>ack_create_request: two success exits share keys, differ in value::started ⇒ awaiting_register；failed ⇒ failed",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>create-request reads/writes: same rejection order::get_create_request / ack_create_request：别人的 ⇒ not_your_request；别的网络 ⇒ cross_network_request",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>daemon-shaped caller: existence branches are reachable::ack_start_request / ack_stop_request 不存在 ⇒ 恰好 {error:'request_not_found', ok:false}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::ack_config_update without a node token ⇒ exactly {error, ok}",
@@ -16462,7 +16464,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "896c40f5330aa3dbf0b38c0a2fb58e17eced1f25",
+  "commit": "92817a23c58dc5331d74b54adc1567aec17c3429",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
