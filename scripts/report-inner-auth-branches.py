@@ -51,9 +51,18 @@ PROBED = {
     # 2026-11-01 —— 第三档：**unpinned**（短路后没有测试变红）。
     # 它既不是 reachable（没测试守它）也不是 unreachable（可能只是没测），
     # 而两者在「短路后仍绿」这个读数上完全同形 —— 所以单列一档，不合并。
-    "L4222 /api/nodes/:id/tool-allowlist (!restAuth)": ("unpinned", "短路后 node-permissions 54 pass / 0 fail"),
-    "L4343 /api/nodes/:id/rest-allowlist (!restAuth)": ("unpinned", "同上"),
-    "L4460 /api/nodes/:id/peer-allowlist (!restAuth)": ("unpinned", "同上"),
+    # 2026-11-01 升级：这六条从 unpinned 改判 **unreachable**，证据是**响应体形状**：
+    # 未认证请求回来的是 {"error":"unauthorized"}（全局层），不是 handler 的
+    # {"ok":false,"error":"auth required"} ⇒ 处理那一条分支从来没有机会执行。
+    # （此前只有「短路后不红」这一个读数，它推不出这一句。）
+    "L4222 /api/nodes/:id/tool-allowlist (!restAuth)": ("unreachable", "短路后 0 红；未认证响应体是全局层 unauthorized"),
+    "L4343 /api/nodes/:id/rest-allowlist (!restAuth)": ("unreachable", "同上"),
+    "L4460 /api/nodes/:id/peer-allowlist (!restAuth)": ("unreachable", "同上"),
+    # 2026-11-01 第二批：三个 provider/节点区间里的 !restAuth 分支，
+    # 各跑两个最可能的测试文件（hub-catalog-read / node-permissions），都是 0 条红。
+    "L4070 (!restAuth)": ("unreachable", "短路后 0 红；/api/nodes 未认证响应体是全局层 unauthorized"),
+    "L4098 (!restAuth)": ("unreachable", "同上（/api/providers）"),
+    "L4166 (!restAuth)": ("unreachable", "同上（/api/nodes/:id/permission-mode）"),
     "POST /api/messages/ack": ("unreachable", "短路该支后测试仍绿；实测响应体是全局层的 unauthorized"),
     "POST /api/upload": ("unreachable", '短路 case "anonymous" 后测试仍绿；源码注释自称 Unreachable'),
     "POST /api/auth/tokens": ("reachable", "短路后 reds=1（可隔离 witness）"),
