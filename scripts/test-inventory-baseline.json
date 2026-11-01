@@ -1717,6 +1717,10 @@
   "agent-network/src/private-state.test.ts::#472 private state writer::read repair refuses a symlink instead of chmod-following it": 1,
   "agent-network/src/private-state.test.ts::#472 private state writer::repairs a legacy file and parent before reading": 1,
   "agent-network/src/private-state.test.ts::#472 private state writer::replaces a leaf symlink instead of writing through it": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::patch 只记 opencodeMode ⇒ 磁盘上的 model（Hub 改过的）必须原样保留": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::不丢其它键：磁盘上的 token / node_id 必须还在（合并不是重建）": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::判据函数：patch 里没写 model 时 patchTouchesModel 为 false（调用方据此不需要特判）": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::镜像：patch 显式给 model ⇒ 才允许改动它（那是意图，不是快照）": 1,
   "agent-network/src/profile-network-id-persist.test.ts::#1469 finding-2 — network_id persist gap::core identity fields still present (regression floor for the refactor)": 1,
   "agent-network/src/profile-network-id-persist.test.ts::#1469 finding-2 — network_id persist gap::normalized has network_id but profile does not ⇒ persist normalized's value": 1,
   "agent-network/src/profile-network-id-persist.test.ts::#1469 finding-2 — network_id persist gap::profile has network_id but normalized does not ⇒ fall back to profile": 1,
@@ -10110,6 +10114,10 @@
   "agent-network/src/private-state.test.ts::#472 private state writer::read repair refuses a symlink instead of chmod-following it",
   "agent-network/src/private-state.test.ts::#472 private state writer::repairs a legacy file and parent before reading",
   "agent-network/src/private-state.test.ts::#472 private state writer::replaces a leaf symlink instead of writing through it",
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::patch 只记 opencodeMode ⇒ 磁盘上的 model（Hub 改过的）必须原样保留",
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::不丢其它键：磁盘上的 token / node_id 必须还在（合并不是重建）",
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::判据函数：patch 里没写 model 时 patchTouchesModel 为 false（调用方据此不需要特判）",
+  "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::镜像：patch 显式给 model ⇒ 才允许改动它（那是意图，不是快照）",
   "agent-network/src/profile-network-id-persist.test.ts::#1469 finding-2 — network_id persist gap::core identity fields still present (regression floor for the refactor)",
   "agent-network/src/profile-network-id-persist.test.ts::#1469 finding-2 — network_id persist gap::normalized has network_id but profile does not ⇒ persist normalized's value",
   "agent-network/src/profile-network-id-persist.test.ts::#1469 finding-2 — network_id persist gap::profile has network_id but normalized does not ⇒ fall back to profile",
@@ -16786,7 +16794,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "406dd33e0287368cb45cf25f9364ea56683a1ad4",
+  "commit": "67b398a34011ddc3b7eb8beb0299b790e54fe618",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

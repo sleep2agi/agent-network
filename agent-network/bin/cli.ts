@@ -86,6 +86,7 @@ import { OPENCODE_KEYLESS_FREE_MODEL_NOTE, opencodeFreeTierSafePresetWarning } f
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
+import { mergeProfilePatch } from "../src/profile-merge";
 import { backfillOpencodeGeneration, stampOpencodeGeneration } from "../src/opencode-generation-record";
 import {
   applyOpencodeGenerationCreateOption,
@@ -2413,8 +2414,10 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     process.exit(1);
   }
 
+  // #3418 —— 这里只想记一格 opencodeMode。原来用内存里的 resolved.profile 整份回写，
+  // 会把启动之后 Hub 改过的 model 一起覆盖掉（生产实测丢过一次）。
   const profile: Profile = { ...resolved.profile, opencodeMode: "copresence" };
-  saveProfile(resolved.id, profile);
+  patchProfileFields(resolved.id, { opencodeMode: "copresence" } as Partial<Profile>);
   const bridgeSession = `${displayName}-桥`;
   const tuiSession = displayName;
   const attachScript = join(nodesDir(), resolved.id, "opencode-attach.sh");
@@ -3223,6 +3226,26 @@ function resolveStartProfile(
   return { profile, runtime };
 }
 
+/**
+ * #3418 —— 只往 config.json 里写声明的那几格：以**磁盘当前内容**打底，patch 覆盖它。
+ *
+ * 为什么不是 `saveProfile(id, { ...profile, x: 1 })`：`profile` 是进程启动时读到的快照，
+ * 长命进程（共存桥）握着它很久；期间 Hub 可能已经把 model 改掉（并 applied 了）。
+ * 用旧快照整份回写，就把那次改动悄悄抹掉了 —— 生产上就是这样丢的（见 profile-merge.ts）。
+ *
+ * 读不到磁盘就不写：宁可少记一格，也不要用读不懂的旧值覆盖整份文件。
+ * 返回是否真的写了（便于调用方打日志，不用于控制流）。
+ */
+function patchProfileFields(id: string, patch: Partial<Profile>): boolean {
+  let onDisk: Profile;
+  try {
+    onDisk = JSON.parse(readFileSync(join(nodesDir(), id, "config.json"), "utf-8")) as Profile;
+  } catch {
+    return false;
+  }
+  saveProfile(id, mergeProfilePatch(onDisk as unknown as Record<string, unknown>, patch as unknown as Record<string, unknown>) as unknown as Profile);
+  return true;
+}
 function saveProfile(id: string, profile: Profile) {
   const dir = join(nodesDir(), id);
   const isOpencode = normalizeRuntime(profile) === "opencode-cli";
@@ -8853,10 +8876,8 @@ async function startCommand() {
       // Record the opt-in BEFORE orchestrating, so a node that comes up shared
       // is never left with a profile claiming the operator never asked.
       if (shouldPersistGrokCopresence(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
-        saveProfile(resolvedForCopresence.id, {
-          ...(resolvedForCopresence.profile as any),
-          grokCopresenceAuto: true,
-        });
+        // #3418 —— 只记这一格，不整份回写。
+        patchProfileFields(resolvedForCopresence.id, { grokCopresenceAuto: true } as any);
         console.log(`[anet] remembered co-presence for this node — next time \`anet node start ${shellQuote(nodeDisplayName(resolvedForCopresence.id, resolvedForCopresence.profile))}\` is enough.`);
       }
       await startGrokCopresenceOrchestration(id, { hub: opts.hub });
@@ -8875,7 +8896,8 @@ async function startCommand() {
     if (shouldPersistCodexCopresence(copresenceFlagPassed, prof)) remember.codexCopresence = true;
     if (shouldPersistCodexFullAccess(danger, prof)) remember.codexCopresenceFullAccess = true;
     if (Object.keys(remember).length > 0) {
-      saveProfile(resolvedForCopresence.id, { ...prof, ...remember });
+      // #3418 —— 只记要记的那几格。
+      patchProfileFields(resolvedForCopresence.id, remember as any);
       if (remember.codexCopresence) {
         console.log(`[anet] remembered co-presence for this node — next time \`anet node start ${shellQuote(displayNameForCopresence)}\` is enough.`);
       }
