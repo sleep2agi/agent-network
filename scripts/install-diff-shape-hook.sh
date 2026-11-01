@@ -59,6 +59,23 @@ if [ "$want_add" -ne "$act_add" ] || [ "$want_del" -ne "$act_del" ]; then
   echo "  ⇒ 先回答：这些多出来/少掉的删行是谁删的？改完再提交。" >&2
   exit 1
 fi
+
+# 2026-11-01 —— 形状对上**不等于**受影响的门是绿的。
+# 实测（`1c0931a8`）：我手工跑了 check-diff-shape.sh，它正确地打印了
+# 「新增测试：--update」，而我用 `;` 串命令、提交照样成功 ⇒ 基线漏写、CI 红。
+# 所以这里把「受影响的那一道门」放进钩子里 —— 门跟着**改动范围**自己出现，
+# 而不是靠我记得用 `&&`。
+# 只跑一道、只跑快的那一道（实测 ~1s）：钩子一旦变慢，就会被 --no-verify 永久绕过。
+if git diff --cached --name-only | grep -qE '(^|/)src/[^/]*\.test\.(ts|mts|js)$|^tests/test'; then
+  if ! out=$(python3 scripts/check-test-inventory.py 2>&1); then
+    echo "✗ 暂存区改了测试文件，而测试清单棘轮是红的：" >&2
+    printf '%s\n' "$out" | grep -E '✗' | head -4 >&2
+    printf '%s\n' "$out" | grep -E '^\s+×' | head -6 >&2
+    echo "  ⇒ 新增测试：python3 scripts/check-test-inventory.py --update" >&2
+    echo "  ⚠ 必须在 \`git add\` **之后**跑：--update 用 git ls-files 枚举，看不到未跟踪文件。" >&2
+    exit 1
+  fi
+fi
 exit 0
 HOOK_BODY
 chmod +x "$HOOK"
