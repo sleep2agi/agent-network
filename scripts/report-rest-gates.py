@@ -197,12 +197,28 @@ def write_routes(doc: dict) -> list[dict]:
     return rows
 
 
+def is_gate_symbol(name: str) -> bool:
+    """**唯一**的一处「这个符号算不算门」。
+
+    2026-11-01 —— 上一版这个决定散在三处：`GATE_RE.findall(...)` 算一处、
+    `name in KNOWN_GATES` 一处、`name in EXTRA_GATE_NAMES` 一处，而「算不算门」的答案
+    由三处的并集给出。三处各自都对，但它们是**三个校验点**而不是一个决策点：
+    改其中一处（例如往 EXTRA 里加一个名字）会让另一处的读数悄悄跟着变，
+    而没有任何一条断言在乎它们是否还一致。
+
+    ⇒ 收成一个函数。使用点可以多（读同一个决策不会产生分歧），校验点必须唯一。
+    """
+    return (name in KNOWN_GATES) or (name in EXTRA_GATE_NAMES) or bool(GATE_RE.fullmatch(name + "("))
+
+
 def symbols_in(block: list[str]) -> tuple[set[str], set[str]]:
     """(块内的门符号, 块内「形态认得但清单没登记」的符号)。"""
     text = "\n".join(block)
     by_pattern = set(GATE_RE.findall(text))
     by_name = {g for g in EXTRA_GATE_NAMES if re.search(rf"\b{re.escape(g)}\b", text)}
-    return by_pattern | by_name, by_pattern - KNOWN_GATES
+    candidates = by_pattern | by_name
+    # 决策只有一处：is_gate_symbol。这里是「读」它，不是第二份判定。
+    return {c for c in candidates if is_gate_symbol(c)}, by_pattern - KNOWN_GATES
 
 
 def classify(doc: dict, lines: list[str]) -> dict:
@@ -372,6 +388,15 @@ def selftest() -> int:
     fails += cases[-1]
 
     # ① 关系断言自检：prefix 不可能超过 instrumented
+    # ② 单一决策点：三种来源（形态 / KNOWN / EXTRA）都必须经过同一个函数，
+    # 且答案必须与「直接查那三个集合」一致 —— 后者是**比对谓词**，不是第二份实现。
+    ok = (is_gate_symbol("canRestWriteNetwork")
+          and is_gate_symbol("resolveToken")
+          and not is_gate_symbol("consoleLog"))
+    print(("✓" if ok else "✗") + " selftest is_gate_symbol 是唯一决策点（形态/已登记/非门三种输入）")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
     ok = instruments_in_place({}) >= 0 and chain_coverage(result={"gated": [1], "public": [], "unknown": []})[0] <= instruments_in_place({})
     print(("✓" if ok else "✗") + " selftest prefix ≤ instrumented（两个数互相约束）")
     cases.append(0 if ok else 1)
