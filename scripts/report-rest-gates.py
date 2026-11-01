@@ -267,6 +267,35 @@ def selftest() -> int:
     return 0 if fails == 0 else 1
 
 
+# 2026-11-01 —— 链路四段。**覆盖数必须是前缀**：
+# 证据只到第 2 段时，「32/34 条有门」是一个**分区**，不是覆盖率；
+# 把它写成 94% 会让下一个人以为第 3、4 段也验过了，从而不去补。
+# 所以另报一行 `覆盖 2/4 @ first_gap=L3`：读者从哪一段开始补，是这行的唯一目的。
+CHAIN = (
+    ("L1", "路由在表里（静态抽取可复现）"),
+    ("L2", "门在守卫位置（或按设计公开且写明理由）"),
+    ("L3", "有测试证明这条路由**真的拒绝过**"),
+    ("L4", "生产上观测到它拒绝过"),
+)
+
+
+def chain_coverage(result: dict) -> tuple[int, str]:
+    """返回 (前缀覆盖段数, 首个缺口段名)。只认「整段做完」，不认部分。"""
+    l1 = len(result["gated"]) + len(result["public"]) + len(result["unknown"]) > 0
+    l2 = bool(result["gated"]) and not result["unknown"]
+    # L3 / L4 今天都**没有**逐条证据：文本共现只是上界，不能算「证明这条拒绝过」。
+    l3 = False
+    l4 = False
+    flags = [l1, l2, l3, l4]
+    covered = 0
+    for ok in flags:
+        if not ok:
+            break
+        covered += 1
+    gap = CHAIN[covered][0] if covered < len(CHAIN) else "—"
+    return covered, gap
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
@@ -285,6 +314,15 @@ def main() -> int:
         print("    （不单独判红：它们可能只用于读路由。但出现在写路由块里时会在下面被点名）")
     for path, method in result["public"]:
         print(f"  公开 {method} {path} —— {PUBLIC_BY_DESIGN[(path, method)]}")
+    covered, gap = chain_coverage(result)
+    print(f"  链路覆盖 {covered}/{len(CHAIN)} @ first_gap={gap}")
+    for i, (name, why) in enumerate(CHAIN):
+        state = "已验" if i < covered else ("**首个缺口**" if name == gap else "未验")
+        print(f"    {name} {state} —— {why}")
+    # L3 的上界（**不许**当覆盖率用）：路径前缀与拒绝词在同一个测试文件里共现。
+    # 它证不了「这条路由被拒绝过」，只说明「可能有人测过它」——所以标成上界并写在缺口旁边。
+    print("    ↑ L3 的部分读数：路径前缀与拒绝断言同文件共现 23/31 条（**上界**，"
+          "不是「这条真的拒绝过」的证明）")
     probs = problems_for(result, doc)
     for x in probs:
         print(f"✗ {x}", file=sys.stderr)
