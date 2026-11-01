@@ -38,9 +38,33 @@ describe("#status_reasons 值域 == 生产者集合", () => {
     expect([...pushed].sort()).toEqual([...STATUS_REASONS].sort());
   });
 
-  test("② push 点数 == 不同字面量数（同一个成因不许两处推）", () => {
+  // ② 报成**向量**而不是一个数：`1,1` 与 `1,2` 在「点数 == 不同值数」这条上都会红，
+  // 但前者是「新增了一类成因」，后者是「同一个成因被推了两次」—— 处置相反。
+  // 单条计数断言把这两种压成一格，而它读起来更严格。
+  test("② 每个成因恰好一个生产者（报向量，不是一个数）", () => {
     const all = pushedReasonLiterals(src);
-    expect(all.length).toBe(new Set(all).size);
+    const counts: Record<string, number> = {};
+    for (const r of all) counts[r] = (counts[r] ?? 0) + 1;
+    const vector = Object.entries(counts).sort().map(([k, v]) => `${k}=${v}`).join(" · ");
+    expect(vector).toBe(
+      "db_unreadable=1 · license_unreadable=1",
+    );
+    // 上面那条是**精确向量**：新增一类或某类多一处，都会让它红，
+    // 而且失败信息里直接看得出是哪种（多了一个 `x=1` 还是某个变成 `=2`）。
+  });
+
+  // ⑤ 域不能是空集，也不能是全集 —— 否则上面几条会在空集上恒真。
+  // 这正是「取反后仍然绿」的那一格：把 STATUS_REASONS 清空，①（集合相等）与 ③（无死值）
+  // 都会通过，因为没有东西可比；而它们看起来仍然在守东西。
+  test("⑤ 值域非空且不是全集（至少两类可区分）", async () => {
+    const { STATUS_REASONS } = await import("./server.js");
+    const pushed = new Set(pushedReasonLiterals(src));
+    // 下界：这个字段存在的理由就是区分「真的没问题」与「检查没跑」——至少要两类。
+    expect(STATUS_REASONS.length).toBeGreaterThanOrEqual(2);
+    // 上界：值域的成员必须都在源码里出现（否则是死值，由 ③ 报）——
+    // 这里再钉一条「域不比生产者宽」，因为「全集」正是那种能让谓词恒真的情形。
+    expect(STATUS_REASONS.length).toBeLessThanOrEqual(pushed.size + 0 * 0 + 0);
+    expect(pushed.size).toBeGreaterThan(0);
   });
 
   test("③ 没有死值：STATUS_REASONS 每个成员都在源码里被 push 过", async () => {

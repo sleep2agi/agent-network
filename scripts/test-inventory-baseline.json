@@ -6364,9 +6364,10 @@
   "server/src/health-redaction.test.ts::f28a6c1b CR3 — network-scoped filter matrix (M1-M7)::M6: observer keys (\\\\0netobs:<net>) are classified through the shared prefix constant, member sees own network's observer entry": 1,
   "server/src/health-redaction.test.ts::f28a6c1b CR3 — network-scoped filter matrix (M1-M7)::M6b: userB (not in N_A) does NOT see N_A's observer key — mutation-red for prefix constant drift": 1,
   "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::① push 的字面量集合与 STATUS_REASONS 相等": 1,
-  "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::② push 点数 == 不同字面量数（同一个成因不许两处推）": 1,
+  "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::② 每个成因恰好一个生产者（报向量，不是一个数）": 1,
   "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::③ 没有死值：STATUS_REASONS 每个成员都在源码里被 push 过": 1,
   "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::④ status 由 reasons 派生，不是独立写的第二个真相": 1,
+  "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::⑤ 值域非空且不是全集（至少两类可区分）": 1,
   "server/src/host-supervisor-identity-http.test.ts::batched list performs three reads for many daemons and multiple scoped networks": 1,
   "server/src/host-supervisors-daemon-version.test.ts::#973 — daemon list carries the self-reported runtime version::a daemon whose newest session reported a version exposes agent_node_version": 1,
   "server/src/host-supervisors-daemon-version.test.ts::#973 — daemon list carries the self-reported runtime version::an older session's version does not win over the newest one": 1,
@@ -14681,9 +14682,10 @@
   "server/src/health-redaction.test.ts::f28a6c1b CR3 — network-scoped filter matrix (M1-M7)::M6: observer keys (\\\\0netobs:<net>) are classified through the shared prefix constant, member sees own network's observer entry",
   "server/src/health-redaction.test.ts::f28a6c1b CR3 — network-scoped filter matrix (M1-M7)::M6b: userB (not in N_A) does NOT see N_A's observer key — mutation-red for prefix constant drift",
   "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::① push 的字面量集合与 STATUS_REASONS 相等",
-  "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::② push 点数 == 不同字面量数（同一个成因不许两处推）",
+  "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::② 每个成因恰好一个生产者（报向量，不是一个数）",
   "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::③ 没有死值：STATUS_REASONS 每个成员都在源码里被 push 过",
   "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::④ status 由 reasons 派生，不是独立写的第二个真相",
+  "server/src/health-status-reasons.test.ts::#status_reasons 值域 == 生产者集合::⑤ 值域非空且不是全集（至少两类可区分）",
   "server/src/host-supervisor-identity-http.test.ts::batched list performs three reads for many daemons and multiple scoped networks",
   "server/src/host-supervisors-daemon-version.test.ts::#973 — daemon list carries the self-reported runtime version::a daemon whose newest session reported a version exposes agent_node_version",
   "server/src/host-supervisors-daemon-version.test.ts::#973 — daemon list carries the self-reported runtime version::an older session's version does not win over the newest one",
@@ -16634,7 +16636,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "af6331c238c824ca1b556340536d54a503b2ebd9",
+  "commit": "9d9fe954eda2fd7c559df363b3cba7298daf19c5",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
