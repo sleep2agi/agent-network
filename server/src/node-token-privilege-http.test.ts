@@ -86,7 +86,14 @@ describe("hub-admin powers need a user token", () => {
     expect((await call(ntok, "POST", "/api/admin/users", { username: "ntok_made", password: PW })).status).toBe(403);
     expect(userRows()).toBe(beforeUsers);
     expect(db.get("SELECT 1 FROM users WHERE username = 'ntok_made'")).toBeFalsy();
+    // #3354 —— 写 side：节点令牌不能改 agent-grants（读的 403 上面已有）。
+    // 副作用是**多一条授权**（那意味着一个 Agent 对这个人可见）。
+    const grants = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM network_member_agent_grants WHERE network_id = ?1", NET)!.n;
+    const beforeGrants = grants();
     expect((await call(ntok, "GET", `/api/networks/${NET}/members/${adminId}/agent-grants`)).status).toBe(403);
+    expect((await call(ntok, "PUT", `/api/networks/${NET}/members/${adminId}/agent-grants`, { node_ids: ["n_x"] })).status).toBe(403);
+    expect(grants()).toBe(beforeGrants);
   });
 });
 
