@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { GET_TASK_TOOL_LINE, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance";
+import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance";
 
 // #3001 —— 提示词也要能被断言钉住。
 // 现场：cli.ts 里原来只写「用 get_task 轮询子任务直到 replied/failed」，**没有间隔约定**，
@@ -29,5 +29,33 @@ describe("#3001 轮询纪律", () => {
     const all = [GET_TASK_TOOL_LINE, ...POLL_STEP_LINES, ...POLL_DISCIPLINE_LINES].join("\n");
     expect(all).not.toContain("要连续轮询");
     expect(all).not.toContain("立刻重试");
+  });
+});
+
+// #3119 —— 与 #3001 同族：把「不要在空闲里烧调用」写进提示词，并钉住它不会退回原样。
+describe("#3119 不要反复确认自己", () => {
+  const text = IDENTITY_POLL_DISCIPLINE_LINES.join("\n");
+
+  test("明确说 whoami 答案在启动时就定了", () => {
+    expect(text).toContain("org_whoami");
+    expect(text).toContain("进程启动时就定了");
+  });
+
+  test("给出实测数字（否则它只是意见）", () => {
+    expect(text).toContain("6,474");
+    expect(text).toContain("5,738");
+    expect(text).toContain("56%");
+  });
+
+  test("说明「活是推来的」，并给出间隔底线", () => {
+    expect(text).toContain("推");
+    expect(text).toContain("至少隔 5 分钟");
+  });
+
+  test("cli 的提示词里真的注入了这一段（不是只写在常量里）", () => {
+    const cli = require("node:fs").readFileSync(
+      new URL("./cli.ts", import.meta.url), "utf8") as string;
+    // 必须断言**展开那一行**（三个点），只匹配常量名会被 import 行满足 —— 实测撞到
+    expect(cli).toContain("...IDENTITY_POLL_DISCIPLINE_LINES");
   });
 });

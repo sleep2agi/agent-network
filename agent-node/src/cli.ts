@@ -13,7 +13,7 @@
 
 import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copresence/late-reply-recover.js";
 import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
-import { GET_TASK_TOOL_LINE, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
+import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -3749,6 +3749,8 @@ const CODEX_INSTRUCTIONS = SYSTEM_PROMPT || [
   `   即使你的 session 中途断开，只要 parent_task_id 设了，结果也会被系统自动 chain 回上游，不必焦虑。`,
   ``,
   ...POLL_DISCIPLINE_LINES,
+  ``,
+  ...IDENTITY_POLL_DISCIPLINE_LINES,
   ``,
   `【禁止】`,
   `- 不要回复"收到""好的""ok""在线""待命"等无内容确认。`,

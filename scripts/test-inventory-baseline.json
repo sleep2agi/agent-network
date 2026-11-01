@@ -2680,6 +2680,10 @@
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::工具清单那行明确写出 60 秒间隔": 1,
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::流程第 3 步同时给出间隔与成本理由": 1,
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::纪律小节包含实测数字与「不会丢结果」的安抚": 1,
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::cli 的提示词里真的注入了这一段（不是只写在常量里）": 1,
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::明确说 whoami 答案在启动时就定了": 1,
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::给出实测数字（否则它只是意见）": 1,
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::说明「活是推来的」，并给出间隔底线": 1,
   "agent-node/src/private-log.test.ts::Grok preview private ordinary logs::does not follow a log-directory symlink introduced after preparation": 1,
   "agent-node/src/private-log.test.ts::Grok preview private ordinary logs::rejects a multiply-linked log instead of rewriting another pathname": 1,
   "agent-node/src/private-log.test.ts::Grok preview private ordinary logs::rejects a symlinked directory or final log file": 1,
@@ -11034,6 +11038,10 @@
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::工具清单那行明确写出 60 秒间隔",
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::流程第 3 步同时给出间隔与成本理由",
   "agent-node/src/poll-discipline-guidance.test.ts::#3001 轮询纪律::纪律小节包含实测数字与「不会丢结果」的安抚",
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::cli 的提示词里真的注入了这一段（不是只写在常量里）",
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::明确说 whoami 答案在启动时就定了",
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::给出实测数字（否则它只是意见）",
+  "agent-node/src/poll-discipline-guidance.test.ts::#3119 不要反复确认自己::说明「活是推来的」，并给出间隔底线",
   "agent-node/src/private-log.test.ts::Grok preview private ordinary logs::does not follow a log-directory symlink introduced after preparation",
   "agent-node/src/private-log.test.ts::Grok preview private ordinary logs::rejects a multiply-linked log instead of rewriting another pathname",
   "agent-node/src/private-log.test.ts::Grok preview private ordinary logs::rejects a symlinked directory or final log file",
@@ -16708,7 +16716,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "24819f65630bd4fd80f30a9061e9524c87ea261a",
+  "commit": "ce652a04f370e037e5056d645799ebb2e374c5be",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
