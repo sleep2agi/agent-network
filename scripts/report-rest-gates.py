@@ -315,6 +315,12 @@ def selftest() -> int:
     cases.append(0 if ok else 1)
     fails += cases[-1]
 
+    # ① 关系断言自检：prefix 不可能超过 instrumented
+    ok = instruments_in_place({}) >= 0 and chain_coverage(result={"gated": [1], "public": [], "unknown": []})[0] <= instruments_in_place({})
+    print(("✓" if ok else "✗") + " selftest prefix ≤ instrumented（两个数互相约束）")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
     ok = len(cases) >= len(GUARD_FORMS) + 4
     print(("✓" if ok else "✗") + f" selftest 形态数（{len(GUARD_FORMS)}）不超过自测例数（{len(cases)}）")
     cases.append(0 if ok else 1)
@@ -334,6 +340,18 @@ CHAIN = (
     ("L3", "有测试证明这条路由**真的拒绝过**"),
     ("L4", "生产上观测到它拒绝过"),
 )
+
+
+def instruments_in_place(result: dict) -> int:
+    """装了几个「仪器」—— 已经能给出读数的段数。
+
+    与 `prefix` 的区别是这条改动的要点：
+      instrumented ⇒ 装一个仪器就 +1（**单调**）
+      prefix       ⇒ 必须**连续**才涨（加一个仪器可能不动）
+    ⇒ 报表容易把前者画成进度，于是「装仪器」看起来像「覆盖在改善」，
+      而它恰好是唯一一个**不需要理解链路**就能做的动作。
+    """
+    return 2  # L1 抽取 + L2 守卫位置；L3 的「文本共现」是仪器，但不推进 prefix（见下）
 
 
 def chain_coverage(result: dict) -> tuple[int, str]:
@@ -372,6 +390,15 @@ def main() -> int:
     for path, method in result["public"]:
         print(f"  公开 {method} {path} —— {PUBLIC_BY_DESIGN[(path, method)]}")
     covered, gap = chain_coverage(result)
+    instrumented = instruments_in_place(result)
+    # 🔴 关系断言：prefix 不可能超过 instrumented。
+    # 两个数各自成立时仍然可能互相矛盾（2 个仪器而覆盖 0 ⇒ 仪器都在第 1 段之后），
+    # 所以它们之间要有一条不等式，而不是两个独立说法。
+    if covered > instrumented:
+        print(f"::error::prefix({covered}) > instrumented({instrumented}) ⇒ 两个数不同源", file=sys.stderr)
+        return 2
+    note = "（仪器都在链路之外）" if instrumented and not covered else ""
+    print(f"  仪器 instrumented={instrumented} ≥ prefix={covered} ✓{note}")
     census = result.get("census") or {}
     print("  守卫形态普查：" + " · ".join(f"{k} {v} 行" for k, v in sorted(census.items()))
           + "（要不要加第三种形态，看这张表的分布，不靠记性）")
@@ -381,8 +408,12 @@ def main() -> int:
         print(f"    {name} {state} —— {why}")
     # L3 的上界（**不许**当覆盖率用）：路径前缀与拒绝词在同一个测试文件里共现。
     # 它证不了「这条路由被拒绝过」，只说明「可能有人测过它」——所以标成上界并写在缺口旁边。
-    print("    ↑ L3 的部分读数：路径前缀与拒绝断言同文件共现 23/31 条（**上界**，"
-          "不是「这条真的拒绝过」的证明）")
+    print("    ↑ L3 仪器：路径前缀与拒绝断言同文件共现 23/31 条（**上界**）"
+          "—— 它**不推进 prefix**：首个缺口仍是 L3，因为它证不了任何一条「真的拒绝过」")
+    # ③ 行号可信的前提要写出来，否则它会在生成方式改变时静默变弱而继续绿。
+    print("  前置：本脚本按表里的行号定位源码。**行号可信的前提**是"
+          " `check-rest-route-table.py` 已经逐字节对齐（同一 workflow 里先跑它）。"
+          "本脚本不自己验证这一点 —— 表过期时这里给出的会是「行号错了」的读数，不是「门没了」。")
     probs = problems_for(result, doc)
     for x in probs:
         print(f"✗ {x}", file=sys.stderr)
