@@ -8046,6 +8046,7 @@
   "server/src/task-network-resolution-http.test.ts::POST /api/task single-network resolution (#448)::zero-membership admin gets the same accurate error": 1,
   "server/src/task-not-found-error-domain.test.ts::#3309 「task not found」：三个工具共用同一句话::三个工具在不存在的 id 上给出**同一句**（逐字相同）": 1,
   "server/src/task-not-found-error-domain.test.ts::#3309 「task not found」：三个工具共用同一句话::这句话**带空格**（不是 code 风格）—— 现状，记下来": 1,
+  "server/src/task-not-found-error-domain.test.ts::#3325 运行时键集（get_task 失败路径）::get_task 的失败载荷**只有两个键**（运行时，不是从代码读出来的）": 1,
   "server/src/task-not-found-error-domain.test.ts::#3325 运行时键集（list_tasks 成功路径）::list_tasks 成功响应的键集 == 静态期望（两者不符即有一侧是缺陷）": 1,
   "server/src/task-offline-delivery-2668.test.ts::#2668 delivered-to-offline expiry::TTL=0 时整个阶段关闭": 1,
   "server/src/task-offline-delivery-2668.test.ts::#2668 delivered-to-offline expiry::目标离线且超过 TTL ⇒ 过期；未超时/目标忙/已取走 ⇒ 都不动": 1,
@@ -16347,6 +16348,7 @@
   "server/src/task-network-resolution-http.test.ts::POST /api/task single-network resolution (#448)::zero-membership admin gets the same accurate error",
   "server/src/task-not-found-error-domain.test.ts::#3309 「task not found」：三个工具共用同一句话::三个工具在不存在的 id 上给出**同一句**（逐字相同）",
   "server/src/task-not-found-error-domain.test.ts::#3309 「task not found」：三个工具共用同一句话::这句话**带空格**（不是 code 风格）—— 现状，记下来",
+  "server/src/task-not-found-error-domain.test.ts::#3325 运行时键集（get_task 失败路径）::get_task 的失败载荷**只有两个键**（运行时，不是从代码读出来的）",
   "server/src/task-not-found-error-domain.test.ts::#3325 运行时键集（list_tasks 成功路径）::list_tasks 成功响应的键集 == 静态期望（两者不符即有一侧是缺陷）",
   "server/src/task-offline-delivery-2668.test.ts::#2668 delivered-to-offline expiry::TTL=0 时整个阶段关闭",
   "server/src/task-offline-delivery-2668.test.ts::#2668 delivered-to-offline expiry::目标离线且超过 TTL ⇒ 过期；未超时/目标忙/已取走 ⇒ 都不动",
@@ -16602,7 +16604,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "5ccf02d1ee9be7af48b2c18215bdb0299ae2c867",
+  "commit": "90d8cfaf4d733d2f08817f87939ad6fd5462339b",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

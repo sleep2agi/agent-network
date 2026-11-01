@@ -74,6 +74,20 @@ describe("#3325 运行时键集（list_tasks 成功路径）", () => {
   });
 });
 
+describe("#3325 运行时键集（get_task 失败路径）", () => {
+  test("get_task 的失败载荷**只有两个键**（运行时，不是从代码读出来的）", async () => {
+    // 我原本想钉 get_task 的**成功**键集，插了一行 tasks 之后仍回 "task not found"
+    // （它的可见性不看 from_name/to_name，我这里没构造出能被看见的那一行）。
+    // 于是改成钉失败载荷 —— 它同样是运行时读数，且这条**碰巧**是可判的：
+    // 失败体若哪天多带了 `task_id` 之类的定位信息，这条会红。
+    const r = await call("get_task", { task_id: "task_rt_missing" });
+    expect(r.ok).toBe(false);
+    expect(Object.keys(r).sort()).toEqual(["error", "ok"].sort());
+    // 成功路径的那一格**没做成**，记在这里而不是假装有：
+    // 需要一份「调用者视角可见」的 task 行（其可见性不由 from/to 决定），未构造出来。
+  });
+});
+
 describe('#3309 「task not found」：三个工具共用同一句话', () => {
   test("三个工具在不存在的 id 上给出**同一句**（逐字相同）", async () => {
     const missing = "task_9th_does_not_exist";
