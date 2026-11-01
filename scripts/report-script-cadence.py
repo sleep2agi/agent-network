@@ -45,6 +45,11 @@ DOC_GLOBS = ["docs/**/*.md", "docs-site/**/*.md", "skills/**/*.md", "README.md",
 # ADHOC 登记表：一次性/人肉工具放这里。**必须**有「谁会发现它烂了」与「什么时候可以删掉这一行」。
 # 空字典是合法的 —— 但它同时意味着「本仓没有一次性工具」。新增一条就是一次显式决定。
 ADHOC: dict[str, tuple[str, str]] = {
+    'hub-rotate-logs.sh': (
+        '生产机上的运维脚本：按大小原地截断 hub/pm2 日志；它必须跑在**那台机器**上，'
+        'CI 的 runner 没有那些日志 ⇒ CI 里不可能有发现者',
+        '等它被某个部署/安装步骤接管（例如 deploy-hub-runtime.sh 里调一次或装 cron）后，删本行',
+    ),
     'commit-with-message.sh': (
         '人肉提交助手：把「先写消息再提交」链上的空消息 / 形状不符 / 标题与 diff 不符三面堵住；'
         '它只在有人真的用它提交时生效，CI 里没有「提交」这个动作可跑',
