@@ -249,4 +249,34 @@ printf 'DEPLOY v=%s role=%s observed=%s build_commit=%s dirty=%s\n' \
   "$NEWV" "deployment_label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   "$(printf '%s' "$BUILD_COMMIT" | cut -c1-12)" "$BUILD_DIRTY"
 say "回滚命令：HUB_RUNTIME_DIR=$COMMHUB_HOME/runtime-$(printf '%s' "${CURRENT:-}" | tr '.' '-') pm2 restart $PM2_NAME --update-env"
+
+# ── #3321 运行时目录保留策略 ────────────────────────────────────────
+# 实测（2026-11-01）：`.commhub` 下曾有 43 个 runtime-*（各 48M，合计 2.0G），全靠手工删。
+# 而「忘了删」不会报错 —— 它只让磁盘慢慢涨，涨到 93% 才有人看见。
+#
+# 保留策略：**当前版本**与**本次回滚目标**（就是上面那行打印出来的那个），其余删除。
+# 三个刻意的选择：
+#   1. 清理在 `exit 0` 之后做，且**不影响部署结果** —— 删目录失败不该让一次成功的切换变红。
+#   2. 删除前**打印清单与合计大小**：可核对，而不是「它自己删了些东西」。
+#   3. 只删 `runtime-*` 目录，且要求路径在 $COMMHUB_HOME 内（与 stage 19 同一条防线）。
+DEPLOY_RUNTIME_KEEP=2
+prune_old_runtimes() {
+  local keep_cur="$COMMHUB_HOME/runtime-$(printf '%s' "$NEWV" | tr '.' '-')"
+  local keep_prev="$COMMHUB_HOME/runtime-$(printf '%s' "${CURRENT:-}" | tr '.' '-')"
+  local victims=() v total=0 size
+  for v in "$COMMHUB_HOME"/runtime-*; do
+    [ -d "$v" ] || continue
+    [ "$v" = "$keep_cur" ] && continue
+    [ "$v" = "$keep_prev" ] && continue
+    victims+=("$v")
+  done
+  [ ${#victims[@]} -eq 0 ] && { say "运行时候选：无需清理（保留 $DEPLOY_RUNTIME_KEEP 个：当前 + 回滚目标）"; return 0; }
+  total=$(du -sm "${victims[@]}" 2>/dev/null | awk '{s+=$1} END{printf "%d", s+0}')
+  say "运行时清理：将删除 ${#victims[@]} 个旧目录，合计约 ${total} MB（保留当前 $NEWV 与回滚目标 ${CURRENT:-?}）"
+  for v in "${victims[@]}"; do
+    case "$v" in "$COMMHUB_HOME"/runtime-*) rm -rf -- "$v" || say "  ⚠ 删除失败：$v";; *) say "  ⚠ 跳过（不在 $COMMHUB_HOME 内）：$v";; esac
+  done
+}
+# 清理失败不影响部署结论（退出码仍是 0），但必须有人看得到那句话。
+prune_old_runtimes || say "⚠ 运行时清理过程出错（部署已成功，见上）"
 exit 0
