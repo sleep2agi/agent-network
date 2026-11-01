@@ -84,13 +84,16 @@ describe("provider 三件工具的形状", () => {
     const tools = handlers();
     // provider 的 secret 必须先在金库里 —— 这是工具自己的前置（实测第一次跑就撞上
     // `secret_not_in_vault`，提示原话是「upsert_network_secret first」）。
-    const secret = await call(tools.upsert_network_secret, { network_id: NET, key: SECRET_KEY, value: "TEST-ONLY-probe-shape" });
+    // #3309 否定维度 —— 唯一哨兵值：它出现一次以上就说明有回显。
+    // 用随机后缀而不是字面量：字面量可能恰好在别处存在，会让「没回声」的断言因别的原因成立。
+    const SENTINEL = `SK-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+    const secret = await call(tools.upsert_network_secret, { network_id: NET, key: SECRET_KEY, value: SENTINEL });
     // #3275 批次 4 —— 写密钥的成功体**只回标识**（不回声任何值）：
     // 这条属性比键集本身更重要 —— 回读才回内容，写入路径永远不带值。
     // 实测（首次写入）：["key","ok"] —— 我按族推断多写了一个 `overwrote`，当场红。
     // ⇒ 覆盖写入那条分支可能多一个字段，但**本夹具没走到，所以不声称**。
     expect(Object.keys(secret).sort()).toEqual(["key", "ok"]);
-    expect(JSON.stringify(secret)).not.toContain("TEST-ONLY-probe-shape");
+    expect(JSON.stringify(secret)).not.toContain(SENTINEL);
     expect(secret.ok).toBe(true);
     const up = await call(tools.upsert_provider, {
       name: "shape-provider", vendor: "anthropic", base_url: "https://api.anthropic.com",
@@ -102,6 +105,8 @@ describe("provider 三件工具的形状", () => {
     // 这个形状是对的：写入路径回**标识**，回读才回内容 —— 两件事分开，密钥那条线才不会被顺手带出来。
     expect(Object.keys(up).sort()).toEqual(["model_ids", "ok", "provider_id"]);
     expect(up.provider_id).toMatch(/^prov_/);
+    // #3309 否定维度 —— provider 的写回执同样不得携带密钥值（它只该带 secret_key_ref 这个名字）。
+    expect(JSON.stringify(up)).not.toContain(SENTINEL);
     expect(Array.isArray(up.model_ids)).toBe(true);
     expect(up.model_ids).toHaveLength(1);
 
