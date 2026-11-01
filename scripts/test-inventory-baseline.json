@@ -6414,7 +6414,9 @@
   "server/src/license-state.test.ts::licenseStateOf::unknown(query_failed) wins over the row — a failed query tells us nothing about the row": 1,
   "server/src/license-state.test.ts::licenseStateOf::unknown(row_without_type): a row exists but the type is empty — different fix from absent": 1,
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::adopted 节点（binding 证明的是 stop/start 授权）⇒ restart 必须拒": 1,
+  "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 传一个我不属于的 network_id ⇒ forbidden_cross_tenant（scope.denied）": 1,
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 对不存在的 node ⇒ **第三次值** daemon_not_resolvable（不是我猜的两个）": 1,
+  "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::stop_node：daemon 与 child 分属不同网络 ⇒ daemon_cross_tenant（SEC-1 加固）": 1,
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::两条载荷都没有 code 字段（现状，不是契约）": 1,
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::反向：supervisor 节点（created/role=host_supervisor）不会被这条挡": 1,
   "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::ack 一个根本不存在的 id ⇒ 同一句（两种成因**故意**不区分）": 1,
@@ -14712,7 +14714,9 @@
   "server/src/license-state.test.ts::licenseStateOf::unknown(query_failed) wins over the row — a failed query tells us nothing about the row",
   "server/src/license-state.test.ts::licenseStateOf::unknown(row_without_type): a row exists but the type is empty — different fix from absent",
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::adopted 节点（binding 证明的是 stop/start 授权）⇒ restart 必须拒",
+  "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 传一个我不属于的 network_id ⇒ forbidden_cross_tenant（scope.denied）",
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::start_node 对不存在的 node ⇒ **第三次值** daemon_not_resolvable（不是我猜的两个）",
+  "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::stop_node：daemon 与 child 分属不同网络 ⇒ daemon_cross_tenant（SEC-1 加固）",
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::两条载荷都没有 code 字段（现状，不是契约）",
   "server/src/lifecycle-error-domain.test.ts::#3309 restart_node / start_node 的两条拒绝::反向：supervisor 节点（created/role=host_supervisor）不会被这条挡",
   "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::ack 一个根本不存在的 id ⇒ 同一句（两种成因**故意**不区分）",
@@ -16596,7 +16600,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "4eb4ac37d48e19c9a0df79186e2e5105263507dc",
+  "commit": "d1e3dbd7fc9b494b6120042b9dc5fec62a93d503",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

@@ -17,9 +17,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
 
 const NET = "net_10th_err";
+const NET_OTHER = "net_10th_other";   // 调用者**不在**里面的网络（用来触发 scope.denied）
+const NET_DAEMON = "net_10th_daemon"; // daemon 所在的另一个网络（用来触发 daemon_cross_tenant）
 const OWNER = "u_10th_owner";
 const DAEMON = "node_10th_daemon";
 const ADOPTED = "node_10th_adopted";
+const DAEMON_OTHER_NET = "node_10th_daemon_other";
 
 type ToolHandler = (args: any) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
 
@@ -41,7 +44,9 @@ function cleanup() {
   for (const t of ["node_daemon_bindings", "node_create_requests", "nodes", "network_members"]) {
     try { db.run(`DELETE FROM ${t} WHERE network_id = ?1`, [NET]); } catch {}
   }
-  try { db.run("DELETE FROM networks WHERE network_id = ?1", [NET]); } catch {}
+  for (const n of [NET, NET_OTHER, NET_DAEMON]) {
+    try { db.run("DELETE FROM networks WHERE network_id = ?1", [n]); } catch {}
+  }
   try { db.run("DELETE FROM users WHERE user_id = ?1", [OWNER]); } catch {}
 }
 
@@ -59,6 +64,10 @@ function seed() {
   db.run("INSERT INTO users (user_id, username, password_hash, role, created_at) VALUES (?1, ?1, 'x', 'user', datetime('now'))", [OWNER]);
   db.run("INSERT INTO networks (network_id, network_name, owner_id, created_at) VALUES (?1, ?1, ?2, datetime('now'))", [NET, OWNER]);
   db.run("INSERT INTO network_members (user_id, network_id, role, joined_at) VALUES (?1, ?2, 'owner', datetime('now'))", [OWNER, NET]);
+  // 两个「不属于我」的网络：NET_OTHER 我完全不在里面；NET_DAEMON 里放一台别的网络的 daemon
+  for (const n of [NET_OTHER, NET_DAEMON]) {
+    db.run("INSERT INTO networks (network_id, network_name, owner_id, created_at) VALUES (?1, ?1, ?2, datetime('now'))", [n, OWNER]);
+  }
   node(DAEMON, "10th-daemon", { role: "host_supervisor" });
   node(ADOPTED, "10th-adopted", null);
   // adopted 的判据：有 **active** binding，且不是 created（没有 cr_ 记录）
@@ -86,6 +95,37 @@ describe("#3309 restart_node / start_node 的两条拒绝", () => {
     const r = await call("restart_node", { node_id: DAEMON });
     // 会不会成功取决于后续的生命周期校验，但**不该**是 adopted 这条。
     expect(r.error).not.toBe("adopted_restart_requires_daemon");
+  });
+
+  test("start_node 传一个我不属于的 network_id ⇒ forbidden_cross_tenant（scope.denied）", async () => {
+    // 先让 child→daemon 可解析，否则会先撞 daemon_not_resolvable（我上一轮就撞过）。
+    db.run(
+      `INSERT INTO node_create_requests (request_id, daemon_node_id, child_name, network_id, runtime, model,
+                                         flags_json, env_keys, status, created_at, created_by_token)
+       VALUES ('cr_lc_child_x', ?1, 'lc-child-x', ?2, 'opencode-cli', NULL, '{}', '[]', 'succeeded', ?3, 'tok_x')`,
+      [DAEMON, NET, Date.now()],
+    );
+    const r = await call("start_node", { node_id: "node_lc_child_x", network_id: NET_OTHER });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("forbidden_cross_tenant");
+  });
+
+  test("stop_node：daemon 与 child 分属不同网络 ⇒ daemon_cross_tenant（SEC-1 加固）", async () => {
+    // 这个状态正常流程造不出来（代码注释也这么写：shouldn't be possible in normal flow），
+    // 所以这条测的是**加固分支本身**：库被写坏时它必须拒绝，而不是跨租户操作。
+    // 夹具：child 在 NET，daemon 在 NET_DAEMON，且 create 记录把两者绑在一起。
+    node(DAEMON_OTHER_NET, "10th-daemon-other", null);
+    db.run("UPDATE nodes SET network_id = ?1 WHERE node_id = ?2", [NET_DAEMON, DAEMON_OTHER_NET]);
+    node("node_lc_child_2", "10th-child-2", null);
+    db.run(
+      `INSERT INTO node_create_requests (request_id, daemon_node_id, child_name, network_id, runtime, model,
+                                         flags_json, env_keys, status, created_at, created_by_token)
+       VALUES ('cr_lc_child_2', ?1, 'lc-child-2', ?2, 'opencode-cli', NULL, '{}', '[]', 'succeeded', ?3, 'tok_x')`,
+      [DAEMON_OTHER_NET, NET, Date.now()],
+    );
+    const r = await call("stop_node", { node_id: "node_lc_child_2" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("daemon_cross_tenant");
   });
 
   test("start_node 对不存在的 node ⇒ **第三次值** daemon_not_resolvable（不是我猜的两个）", async () => {
