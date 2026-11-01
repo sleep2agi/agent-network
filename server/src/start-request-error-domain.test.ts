@@ -81,7 +81,9 @@ function seedCreateRequest(request_id: string, opts: { status?: string; clone?: 
   db.run(
     `INSERT INTO node_create_requests (request_id, daemon_node_id, child_name, network_id, runtime, model,
                                        flags_json, env_keys, status, created_at, created_by_token)
-     VALUES (?1, ?2, 'child-5th', ?3, 'opencode-cli', NULL, '{}', '[]', ?4, ?5, ?6)`,
+     VALUES (?1, ?2, ?1, ?3, 'opencode-cli', NULL, '{}', '[]', ?4, ?5, ?6)`,
+    // child_name 用 request_id 本身：表上有 (daemon_node_id, child_name) 的唯一约束，
+    // 两条测试行共用同一个名字会 SQLITE_CONSTRAINT_UNIQUE。
     [request_id, DAEMON_NODE, NET, opts.status ?? "pending", Date.now(), DAEMON_TOKEN],
   );
 }
@@ -108,22 +110,40 @@ describe("#3309 ack_start_request / get_create_request 的错误值域", () => {
     expect(r.error).not.toBe("request_not_ackable");
   });
 
-  test("按 clone 流程要一个非 clone 请求 ⇒ not_a_clone", async () => {
+  // 2026-11-01 —— **两侧写在同一条测试里**（而不是两条）：
+  // 分在两条里时，「一条红一条绿」会产生「有一个通过」的假象；
+  // 而合成一条之后，互补性由这条测试自己保证。
+  // 代价在失败信息：所以每一条断言都带一句**指名是哪一侧**的消息。
+  test("clone 与 non-clone 两侧互斥（各一例，同一条测试）", async () => {
     seedCreateRequest("cr_plain", { status: "pending" });
-    const r = await call("get_create_request", { request_id: "cr_plain", expect_clone: true });
-    expect(r.ok).toBe(false);
-    expect(r.error).toBe("not_a_clone");
-    // 反方向（clone 请求却没按 clone 要）是 clone_request —— 两个方向都要能分开。
-    expect(r.error).not.toBe("clone_request");
+    const asClone = await call("get_create_request", { request_id: "cr_plain", expect_clone: true });
+    expect(asClone.ok, "非 clone 请求被当成 clone 要 ⇒ 应当拒绝").toBe(false);
+    expect(asClone.error).toBe("not_a_clone");
+
+    seedCreateRequest("cr_isclone", { status: "pending" });
+    db.run("UPDATE node_create_requests SET clone_json = ?1 WHERE request_id = 'cr_isclone'",
+           [JSON.stringify({ from_node_id: "n_src" })]);
+    const asPlain = await call("get_create_request", { request_id: "cr_isclone" });
+    expect(asPlain.ok, "clone 请求被当成非 clone 要 ⇒ 应当拒绝").toBe(false);
+    expect(asPlain.error).toBe("clone_request");
+
+    // 互斥：两侧的 error 必须不同 —— 相同说明「区分」这件事根本没发生。
+    expect(asPlain.error).not.toBe(asClone.error);
   });
 
-  test("pending 但没有 env blob ⇒ env_blob_unavailable", async () => {
+  test("「缺 blob」与「状态不对」两侧互斥（各一例，同一条测试）", async () => {
     seedCreateRequest("cr_noblob", { status: "pending" });
-    const r = await call("get_create_request", { request_id: "cr_noblob" });
-    expect(r.ok).toBe(false);
-    expect(r.error).toBe("env_blob_unavailable");
-    // 不是 request_not_pending：那一格的 status 是对的，缺的是 blob 本身。
-    expect(r.error).not.toBe("request_not_pending");
+    const noBlob = await call("get_create_request", { request_id: "cr_noblob" });
+    expect(noBlob.ok, "pending 但没有 blob ⇒ 应当拒绝").toBe(false);
+    expect(noBlob.error).toBe("env_blob_unavailable");
+
+    seedCreateRequest("cr_delivered", { status: "delivered" });
+    const notPending = await call("get_create_request", { request_id: "cr_delivered" });
+    expect(notPending.ok, "状态不是 pending ⇒ 应当拒绝").toBe(false);
+    expect(notPending.error).toBe("request_not_pending");
+    expect(notPending.current_status).toBe("delivered");
+
+    expect(notPending.error).not.toBe(noBlob.error);
   });
 
   test("这四条载荷都没有 code 字段（现状，不是契约）", async () => {

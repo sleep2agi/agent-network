@@ -7841,8 +7841,8 @@
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + STALE in-flight start (> 60s) → supersede old + re-dispatch (converges)": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack started 但不给 child_pid ⇒ child_pid_required": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack 一个已结束的启动请求 ⇒ request_not_ackable（带当前 status）": 1,
-  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::pending 但没有 env blob ⇒ env_blob_unavailable": 1,
-  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::按 clone 流程要一个非 clone 请求 ⇒ not_a_clone": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::clone 与 non-clone 两侧互斥（各一例，同一条测试）": 1,
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::「缺 blob」与「状态不对」两侧互斥（各一例，同一条测试）": 1,
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）": 1,
   "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶": 1,
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias": 1,
@@ -16122,8 +16122,8 @@
   "server/src/start-node.test.ts::start_node — stale-starting reaper (#1448 finding-2)::starting + STALE in-flight start (> 60s) → supersede old + re-dispatch (converges)",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack started 但不给 child_pid ⇒ child_pid_required",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::ack 一个已结束的启动请求 ⇒ request_not_ackable（带当前 status）",
-  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::pending 但没有 env blob ⇒ env_blob_unavailable",
-  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::按 clone 流程要一个非 clone 请求 ⇒ not_a_clone",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::clone 与 non-clone 两侧互斥（各一例，同一条测试）",
+  "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::「缺 blob」与「状态不对」两侧互斥（各一例，同一条测试）",
   "server/src/start-request-error-domain.test.ts::#3309 ack_start_request / get_create_request 的错误值域::这四条载荷都没有 code 字段（现状，不是契约）",
   "server/src/stats-versions-http.test.ts::/api/stats/versions::键集固定、计数守恒、同 agent 不同版本分桶",
   "server/src/status-alias-filter-http.test.ts::/api/status?alias=::a non-admin member only ever gets their own network's row for a shared alias",
@@ -16562,7 +16562,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "37aac7b80913e1f4f2a8194d903ce869a69dbdff",
+  "commit": "154536f0bca7966ba275a03f132f695a6ab412fc",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
