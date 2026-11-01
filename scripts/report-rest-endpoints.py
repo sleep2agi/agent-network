@@ -164,7 +164,13 @@ def main() -> int:
             })
         print(json.dumps({
             "note": "表草稿：不是运行时路由表，也还没有被任何代码消费。order 承载语义，不许排序。",
-            "key": ["path", "method", "query"],
+            # 2026-11-01 —— `(path, method, query)` **不是唯一键**：实测 94 行里只有 57 个唯一值，
+            # 其中 `("api", null, ())` 一组就占了 36 行（正则路由被提取器压成同一前缀）。
+            # 而「同键多个分支」正是 `order` 承载的那一格语义 —— 顺序不在键里，
+            # 保序就只活在注释里：一旦有人按下标排序输出，键会合并成一格而表仍看起来完整。
+            # ⇒ 键必须带上 order（分支在源文件中的序位）。
+            "key": ["path", "method", "query", "order"],
+            "key_note": "order = 分支在源文件中的序位；它进键是因为 (path,method,query) 实测不唯一（40/94 行与人同键）",
             "rows": rows,
             "provenance": [l.lstrip("> ") for l in _provenance()],
         }, ensure_ascii=False, indent=1))

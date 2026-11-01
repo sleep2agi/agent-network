@@ -26,6 +26,33 @@ GEN = REPO / "scripts" / "report-rest-endpoints.py"
 DATAFILE = REPO / "docs" / "rest-route-table.json"
 
 
+def check_key_uniqueness(doc: dict) -> list[str]:
+    """声明的 `key` 必须真的能标识行 —— 否则它是注释，不是键。
+
+    2026-11-01 —— 实测：`(path, method, query)` 在 94 行里只有 57 个唯一值
+    （`("api", null, ())` 一组占 36 行）。那种表**看起来完整**，
+    因为重复行并排摆着；但任何「按键索引」的读者都会只拿到最后一支。
+    而且它丢掉的恰好是 `order` 承载的那一格语义：同键多个分支的先后。
+
+    所以这里断言：按声明的 key 取元组，行数与唯一键数必须相等。
+    不等 ⇒ 红，并打印组数与最大一组（读的人立刻知道该给键补哪一列）。
+    """
+    rows = doc.get("rows") or []
+    key = doc.get("key") or []
+    if not rows or not key:
+        return ["KEY_SHAPE: 表里没有 rows 或没有声明 key"]
+    from collections import Counter
+    tuples = [tuple(str(r.get(k)) for k in key) for r in rows]
+    counts = Counter(tuples)
+    dups = {k: v for k, v in counts.items() if v > 1}
+    if dups:
+        biggest = max(dups.values())
+        worst = [k for k, v in dups.items() if v == biggest][0]
+        return [f"KEY_NOT_UNIQUE: key={key} 只给出 {len(counts)} 个唯一值 / {len(rows)} 行；"
+                f"{len(dups)} 组同键，最大一组 {biggest} 行（例：{worst[:2]}）"]
+    return []
+
+
 def generate() -> str | None:
     try:
         res = subprocess.run([sys.executable, str(GEN), "--table-json"],
@@ -98,7 +125,23 @@ def selftest(quiet: bool = False) -> int:
         ok = False
     if not quiet: print(("✓" if ok else "✗") + " selftest 只有 provenance 变 ⇒ 报 provenance（且 method=None 不炸）")
     fails += 0 if ok else 1
-    if not quiet: print(f"✓ selftest {3 - fails}/3 通过")
+    # 2026-11-01 —— 键唯一性是**新加的一条**，它自己也要有「红过」的见证：
+    #   (path,method,query) 在真实表里只有 57/94 唯一 ⇒ 那条真实数据就是负例的样子。
+    kp = check_key_uniqueness({"key": ["path", "method", "query", "order"],
+                               "rows": [{"path": "/a", "method": "GET", "query": [], "order": 1},
+                                        {"path": "/a", "method": "GET", "query": [], "order": 2}]})
+    ok = kp == []
+    if not quiet: print(("✓" if ok else "✗") + " selftest 键带 order ⇒ 同 path 同 method 仍是两行")
+    fails += 0 if ok else 1
+
+    kp = check_key_uniqueness({"key": ["path", "method", "query"],
+                               "rows": [{"path": "api", "method": None, "query": [], "order": 1},
+                                        {"path": "api", "method": None, "query": [], "order": 2}]})
+    ok = len(kp) == 1 and kp[0].startswith("KEY_NOT_UNIQUE")
+    if not quiet: print(("✓" if ok else "✗") + " selftest 键不含 order ⇒ KEY_NOT_UNIQUE（2 行同键只算一格）")
+    fails += 0 if ok else 1
+
+    if not quiet: print(f"✓ selftest {5 - fails}/5 通过")
     return 0 if fails == 0 else 1
 
 
@@ -112,6 +155,12 @@ def main() -> int:
     if fresh is None:
         return 2
     if "--update" in sys.argv:
+        # 写之前先验键：一份「键不唯一」的表写进仓库，等于把注释当键焊死。
+        key_problems = check_key_uniqueness(json.loads(fresh))
+        if key_problems:
+            for x in key_problems:
+                print(f"✗ {x}", file=sys.stderr)
+            return 1
         DATAFILE.write_text(fresh, encoding="utf-8")
         print(f"✓ 已写入 {DATAFILE.relative_to(REPO)}")
         # 2026-10-31 —— **证据列加一格：这次执行有没有改动被观测对象**。
@@ -124,9 +173,16 @@ def main() -> int:
         print(f"✗ 缺 {DATAFILE.relative_to(REPO)}；先跑 --update", file=sys.stderr)
         return 1
     committed = DATAFILE.read_text(encoding="utf-8")
+    # 键唯一性：即使内容与源码一致，一份「键不能标识行」的表也不是可引用的清单。
+    key_problems = check_key_uniqueness(json.loads(committed)) if committed.strip() else []
+    if key_problems:
+        for x in key_problems:
+            print(f"✗ {x}", file=sys.stderr)
+        print("  ⇒ 给 key 补一列（同键多分支时 order 是唯一能区分它们的），再 --update。", file=sys.stderr)
+        return 1
     if committed == fresh:
         n = len(json.loads(fresh)["rows"])
-        print(f"✓ 路由表草稿与源码一致（{n} 行）")
+        print(f"✓ 路由表草稿与源码一致（{n} 行，键唯一）")
         print("  mutates_subject: no（只读比较；本次执行未改变被观测文件）")
         print("  check: 重跑本脚本；源码里新增/移动一条匹配 ⇒ 这里会红，直到 --update。")
         return 0
