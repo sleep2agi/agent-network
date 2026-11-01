@@ -129,6 +129,11 @@ jobs:
       # （messages/ack、upload）⇒ 那些分支看起来在防守，实际由全局层先答。
       # 这份脚本**只报清单不给可达性结论**（没有可枚举的中间件栈），
       # 但把「已做过变异实验的几条」和「还没做实验的 70 处」分开列出来。
+      # 2026-11-01 —— #3330：每条写路由「需要什么权限」的**必要条件列**。
+      # 起因：合并两个权限档时只改一行代码，而「这条路由现在要求什么」没有任何一处被写下来。
+      # 这一列从证据表里的门符号推（单一决策点），不重新分类。
+      - name: required scope per write route (necessary condition, not sufficiency)
+        run: python3 scripts/report-write-route-scope.py --assert
       - name: inner auth branches inventory (reachability needs per-branch mutation)
         run: python3 scripts/report-inner-auth-branches.py
       - name: every write route either has a gate or a stated reason
