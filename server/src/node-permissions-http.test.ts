@@ -465,6 +465,22 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
   // #3354 —— PUT /api/nodes/:id/avatar：拒绝之后 avatar_url 必须没变。
   // 门与 attrs 相同（canRestWriteNetwork + restNodeDenied）⇒ 拒绝方是 readonly 模式下的节点自己，
   // 不是普通成员（成员有网络写权是设计如此 —— 第一次按节点主人模板写就猜错了）。
+  // #3018 判据④ —— 「GET 只可能返回 null 或非空数组」这句话要能扛住**库里的历史 []**。
+  // 客户端收不到 []，才无从把它读成「全部禁止」。
+  test("库里有历史 [] ⇒ GET 读回 null（不是 []），三条白名单都一样", async () => {
+    const target = node.other.id;
+    db.run("UPDATE nodes SET tool_allowlist = '[]', rest_allowlist = '[]', peer_allowlist = '[]' WHERE node_id = ?1", [target]);
+    const row = (await call(user.boss.token, "GET", `/api/nodes?node_id=${target}&network_id=${net}`)).body.nodes[0];
+    expect(row.tool_allowlist).toBeNull();
+    expect(row.rest_allowlist).toBeNull();
+    expect(row.peer_allowlist).toBeNull();
+    // 否定断言配镜像：非空的仍然原样返回
+    db.run(`UPDATE nodes SET tool_allowlist = '["send_task"]' WHERE node_id = ?1`, [target]);
+    const row2 = (await call(user.boss.token, "GET", `/api/nodes?node_id=${target}&network_id=${net}`)).body.nodes[0];
+    expect(row2.tool_allowlist).toEqual(["send_task"]);
+    db.run("UPDATE nodes SET tool_allowlist = NULL WHERE node_id = ?1", [target]);
+  });
+
   test("改节点头像：readonly 节点被拒且 avatar_url 没变；owner 200 且真的变了（镜像）", async () => {
     const read = () => db.get<{ avatar_url: string | null }>(
       "SELECT avatar_url FROM nodes WHERE node_id = ?1", node.other.id)!.avatar_url;
