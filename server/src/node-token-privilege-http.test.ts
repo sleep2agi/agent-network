@@ -141,7 +141,11 @@ describe("account and network management need a user token", () => {
   test("cannot manage members, invites or join", async () => {
     expect((await call(ntok, "GET", `/api/networks/${NET}/members`)).status).toBe(403);
     expect((await call(ntok, "POST", `/api/networks/${NET}/members`, { user_id: "u_x" })).status).toBe(403);
+    // #3354 —— 邀请的副作用是**多一行 invite**（那行能换出一个新成员）。
+    const invites = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_invites")!.n;
+    const beforeInvites = invites();
     expect((await call(ntok, "POST", `/api/networks/${NET}/invite`, { role: "admin" })).status).toBe(403);
+    expect(invites()).toBe(beforeInvites);
     // #3354 —— 拒绝之外还要钉「没加入任何网络」：join 的副作用是**多一行 network_members**。
     // 只断 403 时，「拒了但已经加进去了」也会绿 —— 而那意味着节点令牌借邀请码混进了别人的租户。
     const memberships = () => db.get<{ n: number }>(

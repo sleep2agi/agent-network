@@ -577,7 +577,9 @@ def check_evidence(doc: dict, result: dict) -> list[str]:
     if ev.get("rules_rev") and ev["rules_rev"] != rules_rev():
         out.append(f"EVIDENCE_RULES_CHANGED: 证据表由 rules_rev={ev['rules_rev']} 生成，"
                    f"现在是 {rules_rev()} ⇒ 规则变了，已钉的行可能不再成立；重跑 --emit-evidence")
-    empty = [r for r in rows if not r.get("pinned_by")]
+    # 棘轮的分母也要排除「按设计公开」的行 —— 否则公开路由会被算成缺口，
+    # 而它们本来就不需要拒绝证据（分母与分子必须同口径）。
+    empty = [r for r in rows if not r.get("pinned_by") and not r.get("public_by_design")]
     base = int((ev.get("ratchet") or {}).get("baseline_empty") or 0)
     if len(empty) > base:
         out.append(f"L3_GAP_ROSE: 空 pinned_by {len(empty)} 行 > 基线 {base} ⇒ 缺口在扩大"
@@ -679,9 +681,14 @@ def main() -> int:
     if EVIDENCE.exists():
         _ev = json.loads(EVIDENCE.read_text(encoding="utf-8"))
         _rows = _ev.get("rows") or []
-        _empty = sum(1 for r in _rows if not r.get("pinned_by"))
-        print(f"  L3 证据表：{len(_rows) - _empty}/{len(_rows)} 条写路由已钉"
-              f"（{_empty} 条 pinned_by 为空 = **可数的缺口**；基线 {(_ev.get('ratchet') or {}).get('baseline_empty')}）")
+        # 按设计公开的路由**不需要拒绝证据**（它们本来就无身份可拒），
+        # 所以缺口分母要减掉它们 —— 否则「公开」会被永久计成「没验」。
+        _need = [r for r in _rows if not r.get("public_by_design")]
+        _empty = sum(1 for r in _need if not r.get("pinned_by"))
+        _public = len(_rows) - len(_need)
+        print(f"  L3 证据表：{len(_need) - _empty}/{len(_need)} 条**需要拒绝证据**的写路由已钉"
+              f"（缺口 {_empty} 条；另 {_public} 条按设计公开，不需要）"
+              f"；基线 {(_ev.get('ratchet') or {}).get('baseline_empty')}")
     print(f"  链路覆盖 {covered}/{len(CHAIN)} @ first_gap={gap}")
     for i, (name, why) in enumerate(CHAIN):
         state = "已验" if i < covered else ("**首个缺口**" if name == gap else "未验")
