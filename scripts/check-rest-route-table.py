@@ -272,8 +272,13 @@ def main() -> int:
         # 2026-10-31 —— **证据列加一格：这次执行有没有改动被观测对象**。
         # 「可重跑」不等于「幂等」：带 --update 的这一次**改变了仓库内容**，
         # 于是它与上一次「只比较」的读数描述的不是同一个对象。
-        print(f"  mutates_subject: YES（写入 {DATAFILE.relative_to(REPO)}；"
-              f"下一次比较的基线已被这次执行改变）")
+        # 2026-11-01 —— 三档，不是两档：
+        #   subject  ⇒ 写了**被观测对象本身**（表），内容变了
+        #   baseline ⇒ 只改写「下一次比较的参照」——对象在这一刻是对的，但下一次的合格线变了
+        #   none     ⇒ 这次运行对后续无影响
+        # 二值的 no/YES 把「没碰」与「碰了参照」压成一格，而后者正是 --update 的全部作用。
+        print(f"  mutates: baseline（写入 {DATAFILE.relative_to(REPO)} = **参照**；"
+              f"对象此刻与源码一致，但下一次比较的合格线已被这次执行改变）")
         return 0
     if not DATAFILE.exists():
         print(f"✗ 缺 {DATAFILE.relative_to(REPO)}；先跑 --update", file=sys.stderr)
@@ -304,7 +309,7 @@ def main() -> int:
     if committed == fresh:
         n = len(json.loads(fresh)["rows"])
         print(f"✓ 路由表草稿与源码一致（{n} 行，键唯一）")
-        print("  mutates_subject: no（只读比较；本次执行未改变被观测文件）")
+        print("  mutates: none（只读比较；未写入任何文件）")
         print("  check: 重跑本脚本；源码里新增/移动一条匹配 ⇒ 这里会红，直到 --update。")
         # 2026-11-01 —— 绿的时候也要说清它**没**证明什么：
         # 这是构建期自洽，不是运行时事实；没有这一行，绿会被读成「路由已被覆盖」。
@@ -331,7 +336,7 @@ def main() -> int:
     # 而 `sorted()` 在比较 (str, None, …) 时抛 TypeError ⇒ **恰好在它要报告的场合崩溃**。
     # （实测：给 server.ts 加了几行注释导致行号平移，本脚本没有报「过期」，而是抛异常。）
     gone, new = sorted(ra - rb, key=str), sorted(rb - ra, key=str)
-    print("  mutates_subject: no（只读比较；未写入任何文件）")
+    print("  mutates: none（只读比较；未写入任何文件）")
     print(f"✗ 路由表草稿**已过期**：文件 {len(a.get('rows', []))} 行 / 现在 {len(b.get('rows', []))} 行", file=sys.stderr)
     d = diff_tables(committed, fresh)
     if d.get("first_diff"):
