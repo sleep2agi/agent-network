@@ -235,6 +235,14 @@ GATE_TOKENS = {
     "isAdmin": r"\bisAdmin\b",
     "role-owner-admin": r'role !== "owner"|role === "owner"',
     "canManage": r"\bcanManage\b",
+    # 2026-11-01 —— 加这四个名字之前，「读不到门」是 37/93。而其中**大多数**块里
+    # 明明写着 `const token = requestToken(req, ...)` —— 也就是说那 37 里有一部分
+    # 不是「没有门」，是**识别器不认这几个名字**。
+    # 这正说明「读不到」这个数永远是识别器的像：加名字，数就掉。
+    "requestToken": r"\brequestToken\(",
+    "resolveToken": r"\bresolveToken\(",
+    "isHubAdminCredential": r"\bisHubAdminCredential\(",
+    "requireTmuxAccess": r"\brequireTmuxAccess\(",
 }
 
 
@@ -258,7 +266,7 @@ def gate_tokens_by_row(lines: list[str], rows: list[dict]) -> dict:
             none_rows.append({"line": ln, "path": r.get("path")})
         out[ln] = toks
     return {"by_row": out, "no_gate_tokens": none_rows,
-            "recognizer": "GATE_TOKENS（7 个名字）—— 换表则数会变，分母不动"}
+            "recognizer": f"GATE_TOKENS（{len(GATE_TOKENS)} 个名字）—— 换表则数会变，分母不动"}
 
 
 def measure() -> dict:
