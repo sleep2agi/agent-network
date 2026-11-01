@@ -129,7 +129,16 @@ describe("app#225 rules file — read round trip", () => {
       expect(enq).toMatchObject({ ok: true, op: "read" });
       expect(enq.request_id).toMatch(/^rf_/);
 
-      expect(await u.call("get_rules_file_result", { request_id: enq.request_id })).toMatchObject({ ok: true, status: "pending", op: "read" });
+      // #3275 批次 4 —— 先接住再断言（同变量口径）：外层是 pending 态的闭集。
+      const pending = await u.call("get_rules_file_result", { request_id: enq.request_id });
+      // #3275 批次 4 —— 实测 9 键（我按族推断的 7 键少了 node_id 与 age_ms，当场红）。
+      // `age_ms` 尤其不能少：pending 唯一的「还要等多久」信号；没有它，客户端只能盲轮询。
+      expect(Object.keys(pending).sort()).toEqual([
+        "age_ms", "error", "exists", "file_name", "node_id", "ok", "op", "request_id", "status",
+      ]);
+      expect(pending).toMatchObject({ ok: true, status: "pending", op: "read" });
+      // read_node_rules_file 的外层（enq）：
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
 
       const pulled = await n.call("get_rules_file_request", {});
       expect(pulled.ok).toBe(true);
