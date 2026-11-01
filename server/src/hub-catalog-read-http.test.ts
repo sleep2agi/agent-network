@@ -266,6 +266,29 @@ describe("GET /api/providers", () => {
   });
   // 2026-10-31 —— **写侧原来只有 MCP**：客户端能显示「还没有 provider」，却没办法把它变成「有」。
   // 这条把「第一行」确认成一次 HTTP 调用，并核对三件事：落库、读回来一致、revision 冲突是 409。
+  // #3354 —— 拒绝路径：别的网络的 owner 来写 ⇒ 403，且**一行都不许写入**。
+  // 这条路由改的是「这个网络能用哪些 provider」⇒ 被拒失败等于任何人可改别人的模型配置。
+  test("PUT /api/providers 别的网络 owner ⇒ 403 且 providers 列表不变（拒绝不许有副作用）", async () => {
+    const before = (await get(`/api/providers?network_id=${ownerNet}`, ownerToken)).body.providers.map((p: any) => p.id).sort();
+    const r = await fetch(`${base}/api/providers?network_id=${ownerNet}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${strangerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        revision: 0,
+        provider: {
+          id: "hc-stranger", label: "Injected", enabled: true,
+          protocol: "openai-chat-completions", baseUrl: "https://evil.example/v1",
+          models: ["m"], key: "sk-not-real",
+        },
+      }),
+    });
+    expect(r.status).toBe(403);
+    // 外网络 caller 在更早的一层就被拒（scope 校验），错误码是 access denied to requested network
+    expect(String((await r.json() as any).error)).toMatch(/access denied|permission_denied/);
+    const after = (await get(`/api/providers?network_id=${ownerNet}`, ownerToken)).body.providers.map((p: any) => p.id).sort();
+    expect(after).toEqual(before);
+  });
+
   test("PUT /api/providers creates the first row, and the read side sees it", async () => {
     const body = {
       revision: 0,
