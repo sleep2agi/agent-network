@@ -227,6 +227,29 @@ def precision_reading() -> dict:
             "unit": "assertions"}
 
 
+# 「值的分支维度」：一个工具的值域有 ≥2 个值时，**至少要有 2 个值被断言**，
+# 否则它只能证明「会拒绝」，不能分辨「拒的是哪一种」。
+DISTINGUISHING_BASELINE = 24
+
+
+def branch_dimension(m: dict, asserted: set[str]) -> dict:
+    """按工具算：值域 ≥2 的工具里，有几个做到了「≥2 个值被断言」。
+
+    这是 #3309 缺的最后一格：值域口径说「能返回哪几种」，读数覆盖说「哪种被碰过」，
+    这一格说「能不能**分辨**它们」。三者的分母各不相同。
+    """
+    multi, dist, single, zero = [], [], [], []
+    for r in m["rows"]:
+        errs = [e for e in r["errors"] if e in asserted]
+        if len(r["errors"]) < 2:
+            continue
+        multi.append(r["tool"])
+        (dist if len(errs) >= 2 else (single if len(errs) == 1 else zero)).append((r["tool"], errs, len(r["errors"])))
+    return {"tools_with_domain_ge2": len(multi), "distinguishing": len(dist),
+            "single_only": single[:8], "none": zero[:8],
+            "unit": "tools"}
+
+
 def measure(m: dict) -> dict:
     literals = sorted({e for r in m["rows"] for e in r["errors"]})
     by_literal_tools: dict[str, list[str]] = {}
@@ -255,7 +278,10 @@ def measure(m: dict) -> dict:
     #   若不嵌套 ⇒ 差值只说明两个谓词交集的大小，没有解释力。
     # 这一句可以**算**，不需要判断 —— 所以不能把它留在注释里当「方向未知」。
     nested = strict <= near_expect
+    bd = branch_dimension(m, strict)
     return {
+        "branch_dimension": bd,
+
         "nested": nested,
         "adjacent_minus_strict": len(near_expect - strict),
         "strict_outside_adjacent": sorted(strict - near_expect)[:5],
@@ -314,7 +340,23 @@ def main() -> int:
     print(f"  出现但离 expect 很远 {c['mentioned_only']:3d}   （注释 / 夹具 / 日志串）")
     print(f"  **一次都没出现**     {c['never_all']:3d}   "
           f"= 待补 {c['never']} + 登记不做 {len(c['by_design'])}")
+    # 值的分支维度：用「与 expect 同行」这一档当断言集合（严格口径）
+    bd = c["branch_dimension"]
     pr = precision_reading()
+    print(f"\n值的分支维度（单位 {bd['unit']}）：值域 ≥2 的工具 {bd['tools_with_domain_ge2']} 个，"
+          f"其中 **{bd['distinguishing']} 个**有 ≥2 个值被断言")
+    print("  它答的问题与另两格都不同：值域答「能返回哪几种」、读数覆盖答「哪种被碰过」、")
+    print("  这一格答「能不能**分辨**它们」——只有 1 个值被断言时，断言证明的是「会拒绝」，")
+    print("  不是「拒的是哪一种」。")
+    if bd["distinguishing"] < DISTINGUISHING_BASELINE:
+        print(f"  ⚠ 能分辨分支的工具从基线 {DISTINGUISHING_BASELINE} 降到 {bd['distinguishing']}"
+              f" ⇒ 有工具退化成「只测了一个值」", file=sys.stderr)
+    elif bd["distinguishing"] > DISTINGUISHING_BASELINE:
+        print(f"  ↓ 可以上调基线：{DISTINGUISHING_BASELINE} → {bd['distinguishing']}")
+    if bd["single_only"]:
+        for t, errs, n in bd["single_only"][:5]:
+            print(f"     [只测了 1/{n}] {t}：{errs}")
+
     print(f"\n形状精度（单位 {pr['unit']}，**与上面的 never 分母不同，不能相除**）：")
     print(f"  精确键集断言 {pr['inline_assertions'] + pr['helper_calls']} 处"
           f"（内联 {pr['inline_assertions']} + 本地辅助调用 {pr['helper_calls']}），分布在 {pr['files']} 个测试文件")
