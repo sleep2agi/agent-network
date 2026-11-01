@@ -38,7 +38,7 @@ SRC = REPO / "server" / "src"
 GEN = REPO / "scripts" / "report-mcp-outcome-domain.py"
 
 # 基线：**一次都没出现过**的字面量个数。增长 ⇒ 又有一个 error 只在生产里才会被看见。
-NEVER_BASELINE = 7
+NEVER_BASELINE = 6
 
 
 def domain() -> dict | None:
