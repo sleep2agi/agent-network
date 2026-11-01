@@ -54,6 +54,19 @@ BRANCH_PATTERNS = (
 #
 # 所以「handler 内有 401」不能一律判死 —— 判据是**这一次请求是谁答的**，而它是可读的。
 # 其余 2 条落在别的形状上（见 OTHER_SHAPES），不归这两档。
+# 2026-11-01 —— **全量实测**：对证据表里 34 条写路由逐条发未认证请求，按响应体分档：
+#
+#     14  全局层先答        {"error":"unauthorized"}                  ⇒ handler 内那条不可达
+#     13  handler 就是门    {"ok":false,"error":"auth required"}      ⇒ **可达**（它们才是门）
+#      5  handler 就是门    {"ok":false,"error":"token required"}     ⇒ 可达
+#      2  按设计公开（register / login，各自返回参数错误）
+#
+# ⇒ 结论与「六条样本」相反：**13+5=18 条 handler 级 401 是真门**，只有 14 条被全局层盖住。
+# 这条全量读数是本卡目前最硬的一条，也是「样本不能推广」的实证。
+
+UNREACHABLE_BEHIND_GLOBAL = 14
+REACHABLE_HANDLER_GATE = 18
+
 OTHER_SHAPES = {
     "GET /api/networks": "handler 自己取 token 并给出 {ok:false, error:'token required'}",
     "GET /api/auth/me": "同上",
@@ -142,9 +155,12 @@ def main() -> int:
         by_kind[r["kind"]] = by_kind.get(r["kind"], 0) + 1
     print("  形态分布：" + " · ".join(f"{k}={v}" for k, v in sorted(by_kind.items())))
     print()
-    print("  分界（抽样 14 条路由，实测响应体）：")
-    print("    {\"error\":\"unauthorized\"}              ⇒ 全局层先答 ⇒ handler 那条分支不可达（10/14）")
-    print("    {\"ok\":false,\"error\":\"token required\"} ⇒ handler 自己就是门 ⇒ 可达（2/14）")
+    print(f"  全量实测（34 条写路由逐条发未认证请求）：全局层盖住 {UNREACHABLE_BEHIND_GLOBAL} 条"
+          f" · handler 自己就是门 {REACHABLE_HANDLER_GATE} 条（**可达**）")
+    print("  分界：")
+    print("    {\"error\":\"unauthorized\"}              ⇒ 全局层先答 ⇒ handler 那条分支不可达")
+    print("    {\"ok\":false,\"error\":\"auth required\"}   ⇒ handler 自己就是门")
+    print("    {\"ok\":false,\"error\":\"token required\"} ⇒ handler 自己就是门（另一句文案）")
     print("  ⇒ 「handler 内有 401」不能一律判死；判据是**这一次请求是谁答的**。")
     print()
     print("  可达性：**本脚本不给整体结论**（本仓没有可枚举的中间件栈）。")
