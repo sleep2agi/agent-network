@@ -67,6 +67,10 @@ BRANCH_PATTERNS = (
 UNREACHABLE_BEHIND_GLOBAL = 14
 REACHABLE_HANDLER_GATE = 18
 
+# 2026-11-01 读路由抽样（24 条 GET）：7 全局层 · 3 handler_token · 1 404（tmux 未启用）· 1 /health 公开
+# 写路由与读路由的分档比例不同，所以「按写路由的比例推读路由」也会错。
+READ_ROUTE_SAMPLE = {"global_unauthorized": 7, "handler_token": 3, "other": 2}
+
 OTHER_SHAPES = {
     "GET /api/networks": "handler 自己取 token 并给出 {ok:false, error:'token required'}",
     "GET /api/auth/me": "同上",

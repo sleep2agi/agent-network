@@ -70,6 +70,10 @@ const TABLE: Array<[string, string, Shape, string]> = [
   ["DELETE", "/api/auth/tokens/tok_x", "handler_auth", "同上"],
   ["PUT", "/api/auth/me", "handler_token", "handler 取 token 并给出 token required"],
   ["POST", "/api/networks", "handler_token", "同上"],
+  // 读路由也分档（2026-11-01 抽样 24 条读路由：7 全局层 / 3 handler_token / 1 404 / 1 公开）
+  ["GET", "/api/auth/tokens", "handler_auth", "读路由里 handler 自己把关的一类"],
+  ["GET", "/api/networks/:NET/rules", "handler_auth", "同上"],
+  ["GET", "/api/users/x/avatar/y.png", "handler_token", "handler 取 token 并给出 token required"],
   ["POST", "/api/auth/register", "public_input", "按设计公开：直接进参数校验"],
   ["POST", "/api/auth/login", "public_input", "按设计公开"],
 ];
