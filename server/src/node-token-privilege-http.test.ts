@@ -101,7 +101,13 @@ describe("account and network management need a user token", () => {
     expect((await call(ntok, "POST", "/api/auth/password", { old_password: PW, new_password: "AnotherPassw0rd!" })).status).toBe(403);
   });
   test("cannot create, rename or delete networks", async () => {
+    // #3354 —— 拒绝之外还要钉「没有副作用」：建网络的副作用是**多一行 networks**。
+    // 只断 403 时，「拒了但已经建出来了」也会绿 —— 而那是一个节点令牌自己开了租户。
+    const netCount = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM networks")!.n;
+    const beforeNets = netCount();
     expect((await call(ntok, "POST", "/api/networks", { name: "ntok-made" })).status).toBe(403);
+    expect(netCount()).toBe(beforeNets);
+    expect(db.get("SELECT 1 FROM networks WHERE network_name = 'ntok-made'")).toBeFalsy();
     expect((await call(ntok, "PUT", `/api/networks/${OTHER_NET}`, { name: "renamed" })).status).toBe(403);
     expect((await call(ntok, "DELETE", `/api/networks/${OTHER_NET}`)).status).toBe(403);
     expect(db.get("SELECT 1 FROM networks WHERE network_id = ?1", OTHER_NET)).toBeTruthy();

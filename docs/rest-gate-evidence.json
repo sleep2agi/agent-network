@@ -4,7 +4,7 @@
  "note": "由 scripts/report-rest-gates.py --emit-evidence 生成；表从路由清单驱动。`pinned_by` 为空 = 这条写路由还没有「真的拒绝过」的行为证据。",
  "ratchet": {
   "why": "空 pinned_by 的行数只许降不许升（棘轮），否则「还剩 N 行」没有方向",
-  "baseline_empty": 20
+  "baseline_empty": 19
  },
  "rows": [
   {
@@ -174,7 +174,7 @@
     "userTokenRequired"
    ],
    "public_by_design": false,
-   "pinned_by": ""
+   "pinned_by": "node-token-privilege-http.test.ts::cannot create, rename or delete networks"
   },
   {
    "path": "/api/networks/:param1/invite",
