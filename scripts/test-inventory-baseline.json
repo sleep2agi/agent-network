@@ -5786,6 +5786,10 @@
   "server/src/create-node-blocked-gate.test.ts::#1545 拒绝文案带上「这个判断是多久以前做的」::边界:恰好一年被接受 ⇒ 上面那些不是因为恒判 unknown 才绿": 1,
   "server/src/create-node-blocked-gate.test.ts::#1545 拒绝文案带上「这个判断是多久以前做的」::🔴 daemon 没报年龄 → 两个键都在:null + unknown_legacy_daemon(不是省略)": 1,
   "server/src/create-node-blocked-gate.test.ts::#1545 拒绝文案带上「这个判断是多久以前做的」::🔴 hub 不返回具体修法命令,只把人指到那唯一一份": 1,
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::daemon 只支持 codex，却要求 opencode-cli ⇒ runtime_not_in_local_allowlist（回显 allowed）": 1,
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::三条的载荷都没有 code 字段（现状，不是契约）": 1,
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::子节点已达上限 ⇒ daemon_max_children（带 current / max）": 1,
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::成员建节点 ⇒ insufficient_role_for_create_node（带 required_role / caller_role）": 1,
   "server/src/create-node-network-id.test.ts::#1027 get_create_request returns network_id::network_id is included in the response": 1,
   "server/src/create-node-tool-schema.test.ts::create_node MCP schema::#829 rejects misplaced V2 controls instead of stripping them": 1,
   "server/src/create-node-tool-schema.test.ts::create_node MCP schema::model is optional on daemon create specs but empty strings stay invalid": 1,
@@ -14048,6 +14052,10 @@
   "server/src/create-node-blocked-gate.test.ts::#1545 拒绝文案带上「这个判断是多久以前做的」::边界:恰好一年被接受 ⇒ 上面那些不是因为恒判 unknown 才绿",
   "server/src/create-node-blocked-gate.test.ts::#1545 拒绝文案带上「这个判断是多久以前做的」::🔴 daemon 没报年龄 → 两个键都在:null + unknown_legacy_daemon(不是省略)",
   "server/src/create-node-blocked-gate.test.ts::#1545 拒绝文案带上「这个判断是多久以前做的」::🔴 hub 不返回具体修法命令,只把人指到那唯一一份",
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::daemon 只支持 codex，却要求 opencode-cli ⇒ runtime_not_in_local_allowlist（回显 allowed）",
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::三条的载荷都没有 code 字段（现状，不是契约）",
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::子节点已达上限 ⇒ daemon_max_children（带 current / max）",
+  "server/src/create-node-error-domain.test.ts::#3309 create_node 错误值域：三条「这台 daemon 现在不能接」的拒绝::成员建节点 ⇒ insufficient_role_for_create_node（带 required_role / caller_role）",
   "server/src/create-node-network-id.test.ts::#1027 get_create_request returns network_id::network_id is included in the response",
   "server/src/create-node-tool-schema.test.ts::create_node MCP schema::#829 rejects misplaced V2 controls instead of stripping them",
   "server/src/create-node-tool-schema.test.ts::create_node MCP schema::model is optional on daemon create specs but empty strings stay invalid",
@@ -16524,7 +16532,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "22dce116b35ed386d8f6947433001feebd3adb4b",
+  "commit": "2a410106cda5b9f10f4959efd5e6be50192808b2",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
