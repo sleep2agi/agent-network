@@ -6,7 +6,7 @@
 // 变成私信文件,之后转进私信也照旧全网成员可见。私信文件只能由看得见它的人再转发。
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { register, addNetworkMember } from "./auth.js";
@@ -101,6 +101,24 @@ describe("POST /api/dm 的拒绝与镜像", () => {
     });
     expect(ok.status).toBe(200);
     expect(dmRows(bob.id)).toBe(before + 1);
+  });
+});
+
+// #3354 —— POST /api/upload 的 L3 证据：未认证必须 401，且**一个文件都没落盘**。
+// 这条路由有 8 种拒绝（401 / 403 / 411 / 413 / 415 / 429 / bad_content_length / bad_purpose），
+// 本轮验的是最外一层：没有身份就没有上传。
+describe("POST /api/upload 的拒绝与副作用", () => {
+  const indexCount = () => {
+    try { return readdirSync(join(DIR, "uploads", ".index")).length; } catch { return 0; }
+  };
+
+  test("未认证 ⇒ 401，且 .index 条目数不变（拒绝不许有副作用）", async () => {
+    const before = indexCount();
+    const form = new FormData();
+    form.append("file", new Blob([new TextEncoder().encode("probe")], { type: "image/png" }), "probe.png");
+    const res = await fetch(`${BASE}/api/upload?network_id=${NET}`, { method: "POST", body: form });
+    expect(res.status).toBe(401);
+    expect(indexCount()).toBe(before);
   });
 });
 
