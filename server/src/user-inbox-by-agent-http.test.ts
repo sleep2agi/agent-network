@@ -151,6 +151,30 @@ describe("#1828 POST /api/messages/ack covers inbox reply rows", () => {
     expect(again.body.acked).toBe(0);
   });
 
+  // #3354 —— 拒绝路径：未认证必须 401，且**一条都不许 ack**。
+  // 这条路由的门是 `restAuth?.userId`（没有它就没有"我的消息"这个概念）。
+  test("🔴 未认证 ⇒ 401，且 A 的未读数一条都不减（拒绝不许有副作用）", async () => {
+    const before = await get("/api/messages?scope=user", aToken);
+    const res = await fetch(`${base}/api/messages/ack`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_ids: ["ib_a1"] }),
+    });
+    expect(res.status).toBe(401);
+    const after = await get("/api/messages?scope=user", aToken);
+    expect(after.body.unread_total).toBe(before.body.unread_total);
+  });
+
+  // 同时给 agent 与 message_ids 是歧义的：拒收，且不 ack 任何一边
+  test("🔴 {agent} 与 {message_ids} 同给 ⇒ 400 ambiguous_ack，且两边都不动", async () => {
+    const before = await get("/api/messages?scope=user", aToken);
+    const { status, body } = await post("/api/messages/ack", aToken, { agent: "peer-1", message_ids: ["ib_a1"] }) as any;
+    expect(status).toBe(400);
+    expect(body.error).toBe("ambiguous_ack");
+    const after = await get("/api/messages?scope=user", aToken);
+    expect(after.body.unread_total).toBe(before.body.unread_total);
+  });
+
   test("status 类 inbox 行不会被用户 ack 掉(不是发给用户的消息)", async () => {
     const { body } = await post("/api/messages/ack", aToken, { message_ids: ["ib_a_status"] });
     expect(body.acked_inbox).toBe(0);

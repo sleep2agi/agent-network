@@ -8238,6 +8238,8 @@
   "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::status 类 inbox 行不会被用户 ack 掉(不是发给用户的消息)": 1,
   "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 B 拿 A 的 inbox id 来 ack:匹配不到,A 的数不动": 1,
   "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 C 撞名:节点的待办不能被用户 ack 走": 1,
+  "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 {agent} 与 {message_ids} 同给 ⇒ 400 ambiguous_ack，且两边都不动": 1,
+  "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 未认证 ⇒ 401，且 A 的未读数一条都不减（拒绝不许有副作用）": 1,
   "server/src/user-inbox-netid-notnull.test.ts::#1493 user_inbox.network_id NOT NULL (belt-and-suspenders)::idempotent: booting an already-migrated (NOT NULL) DB twice is a no-op": 1,
   "server/src/user-inbox-netid-notnull.test.ts::#1493 user_inbox.network_id NOT NULL (belt-and-suspenders)::migration guard: old table with a network_id IS NULL row → fail-safe (warn + skip, hub boots, data intact)": 1,
   "server/src/user-inbox-netid-notnull.test.ts::#1493 user_inbox.network_id NOT NULL (belt-and-suspenders)::migration: old nullable table with valid rows → rebuilt NOT NULL, rows preserved, index recreated": 1,
@@ -16578,6 +16580,8 @@
   "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::status 类 inbox 行不会被用户 ack 掉(不是发给用户的消息)",
   "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 B 拿 A 的 inbox id 来 ack:匹配不到,A 的数不动",
   "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 C 撞名:节点的待办不能被用户 ack 走",
+  "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 {agent} 与 {message_ids} 同给 ⇒ 400 ambiguous_ack，且两边都不动",
+  "server/src/user-inbox-by-agent-http.test.ts::#1828 POST /api/messages/ack covers inbox reply rows::🔴 未认证 ⇒ 401，且 A 的未读数一条都不减（拒绝不许有副作用）",
   "server/src/user-inbox-netid-notnull.test.ts::#1493 user_inbox.network_id NOT NULL (belt-and-suspenders)::idempotent: booting an already-migrated (NOT NULL) DB twice is a no-op",
   "server/src/user-inbox-netid-notnull.test.ts::#1493 user_inbox.network_id NOT NULL (belt-and-suspenders)::migration guard: old table with a network_id IS NULL row → fail-safe (warn + skip, hub boots, data intact)",
   "server/src/user-inbox-netid-notnull.test.ts::#1493 user_inbox.network_id NOT NULL (belt-and-suspenders)::migration: old nullable table with valid rows → rebuilt NOT NULL, rows preserved, index recreated",
@@ -16680,7 +16684,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "247089618f212556aea43e6a7b9cd61e990f8119",
+  "commit": "8b8158a78bed940100746eeac4ac816627dcee21",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
