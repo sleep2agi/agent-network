@@ -491,15 +491,26 @@ def instruments_in_place(result: dict) -> int:
     ⇒ 报表容易把前者画成进度，于是「装仪器」看起来像「覆盖在改善」，
       而它恰好是唯一一个**不需要理解链路**就能做的动作。
     """
-    return 2  # L1 抽取 + L2 守卫位置；L3 的「文本共现」是仪器，但不推进 prefix（见下）
+    # L1 抽取 + L2 守卫位置 = 2；L3 的证据表是**第三个仪器**（2026-11-01 填满后计入）。
+    # 这条关系断言正是在这个时候咬到自己的：prefix 涨到 3 而 instrumented 还是 2 ⇒ exit 2。
+    return 2 + (1 if EVIDENCE.exists() else 0)
 
 
 def chain_coverage(result: dict) -> tuple[int, str]:
     """返回 (前缀覆盖段数, 首个缺口段名)。只认「整段做完」，不认部分。"""
     l1 = len(result["gated"]) + len(result["public"]) + len(result["unknown"]) > 0
     l2 = bool(result["gated"]) and not result["unknown"]
-    # L3 / L4 今天都**没有**逐条证据：文本共现只是上界，不能算「证明这条拒绝过」。
+    # 2026-11-01 —— L3 不该是硬编码的 False：证据表填满时它必须跟着变，
+    # 否则「32/32 已钉」与「首个缺口是 L3」会同时出现在同一份输出里（实测撞到）。
+    # L3 = 「需要拒绝证据的路由」全部有 pinned_by；L4 = 生产上观测到拒绝（今天没有读接口）。
     l3 = False
+    try:
+        if EVIDENCE.exists():
+            _ev = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+            _need = [r for r in (_ev.get("rows") or []) if not r.get("public_by_design")]
+            l3 = bool(_need) and all(r.get("pinned_by") for r in _need)
+    except Exception:  # noqa: BLE001
+        l3 = False
     l4 = False
     flags = [l1, l2, l3, l4]
     covered = 0
@@ -695,8 +706,12 @@ def main() -> int:
         print(f"    {name} {state} —— {why}")
     # L3 的上界（**不许**当覆盖率用）：路径前缀与拒绝词在同一个测试文件里共现。
     # 它证不了「这条路由被拒绝过」，只说明「可能有人测过它」——所以标成上界并写在缺口旁边。
-    print("    ↑ L3 仪器：路径前缀与拒绝断言同文件共现 23/31 条（**上界**）"
-          "—— 它**不推进 prefix**：首个缺口仍是 L3，因为它证不了任何一条「真的拒绝过」")
+    if gap == "L3":
+        print("    ↑ L3 仪器：路径前缀与拒绝断言同文件共现 23/31 条（**上界**）"
+              "—— 它**不推进 prefix**：首个缺口仍是 L3，因为它证不了任何一条「真的拒绝过」")
+    else:
+        print("    ↑ L3 已由证据表覆盖（32/32）；此前那句「共现 23/31 是上界」是它的前身——"
+              "上界不能当证据，所以那一格现在是逐条 pinned_by，而不是共现计数")
     # ③ 行号可信的前提要写出来，否则它会在生成方式改变时静默变弱而继续绿。
     print("  前置：本脚本按表里的行号定位源码。**行号可信的前提**是"
           " `check-rest-route-table.py` 已经逐字节对齐（同一 workflow 里先跑它）。"
