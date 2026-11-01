@@ -135,10 +135,22 @@ def diff_tables(committed: str, fresh: str) -> dict:
     a, b = json.loads(committed), json.loads(fresh)
     ra = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in a.get("rows", [])}
     rb = {(r["path"], r.get("method"), tuple(r.get("query") or []), r["line"]) for r in b.get("rows", [])}
+
+    # 2026-11-01 —— 行数相等**不等于**内容相等：改一行（92→92）只能报「内容不一致」，
+    # 而「改一个 method」恰是最常见的一类。所以报**首个不一致的行号与两侧内容**，
+    # 长度差只当快速信号。这一格的检出成本决定这张表会不会真的有人维护。
+    first_diff = None
+    rows_a, rows_b = a.get("rows", []), b.get("rows", [])
+    for i in range(min(len(rows_a), len(rows_b))):
+        if rows_a[i] != rows_b[i]:
+            first_diff = {"index": i + 1, "committed": rows_a[i], "fresh": rows_b[i]}
+            break
+
     return {
         "identical": False,
         "gone": sorted(ra - rb, key=str),
         "new": sorted(rb - ra, key=str),
+        "first_diff": first_diff,
         "provenance_changed": a.get("provenance") != b.get("provenance"),
         "rows_committed": len(a.get("rows", [])),
         "rows_fresh": len(b.get("rows", [])),
@@ -265,6 +277,16 @@ def main() -> int:
         print(f"✓ 路由表草稿与源码一致（{n} 行，键唯一）")
         print("  mutates_subject: no（只读比较；本次执行未改变被观测文件）")
         print("  check: 重跑本脚本；源码里新增/移动一条匹配 ⇒ 这里会红，直到 --update。")
+        # 2026-11-01 —— 绿的时候也要说清它**没**证明什么：
+        # 这是构建期自洽，不是运行时事实；没有这一行，绿会被读成「路由已被覆盖」。
+        claim = _doc.get("runtime_claim") or {}
+        if claim.get("is_runtime_fact") is False:
+            print(f"  ⚠ 非运行时事实：{claim.get('why')}")
+            print(f"    升级出口：{claim.get('upgrade_condition')}")
+        dom = _doc.get("source_domain") or {}
+        if dom:
+            print(f"  哈希域：{dom.get('files')}（{dom.get('granularity')}）—— "
+                  f"{dom.get('known_bias', '')[:40]}…")
         return 0
 
     # 差在哪：行数与增删的 path
@@ -282,6 +304,17 @@ def main() -> int:
     gone, new = sorted(ra - rb, key=str), sorted(rb - ra, key=str)
     print("  mutates_subject: no（只读比较；未写入任何文件）")
     print(f"✗ 路由表草稿**已过期**：文件 {len(a.get('rows', []))} 行 / 现在 {len(b.get('rows', []))} 行", file=sys.stderr)
+    d = diff_tables(committed, fresh)
+    if d.get("first_diff"):
+        fd = d["first_diff"]
+        print(f"  首个不一致在第 {fd['index']} 行：", file=sys.stderr)
+        print(f"    文件里：{json.dumps(fd['committed'], ensure_ascii=False)}", file=sys.stderr)
+        print(f"    现在  ：{json.dumps(fd['fresh'], ensure_ascii=False)}", file=sys.stderr)
+    # 2026-11-01 —— 报「预期红频率」，让这个数可被审：
+    # 高一个数量级会训练出忽略（忽略一旦形成，与「从未触发」在报表上同形），
+    # 低一个数量级会漏。
+    print("  预期红频率：**只在 server/src/server.ts 变化时**（本检查器不读别的文件）；"
+          "改注释也会红 —— 见 source_domain", file=sys.stderr)
     for g in gone[:5]:
         print(f"    文件里有、源码里没有：{g}", file=sys.stderr)
     for n in new[:5]:

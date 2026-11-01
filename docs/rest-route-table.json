@@ -6,9 +6,21 @@
   "query",
   "order"
  ],
+ "source_domain": {
+  "files": [
+   "server/src/server.ts"
+  ],
+  "granularity": "whole_file",
+  "known_bias": "改注释/空行也会让 source_sha256 变 ⇒ 表被判过期。这是**故意的**：把域收窄到「路由注册那一块」需要一份比正则更硬的结构，而那份结构本身要先被测。"
+ },
+ "runtime_claim": {
+  "is_runtime_fact": false,
+  "why": "本表由正则从源码抽取，路由代码不读它 ⇒ 表与运行时注册集合可能不同",
+  "upgrade_condition": "要么路由从表生成（表成为唯一生产者），要么加一条「运行时注册集合 == 表」的等价断言"
+ },
  "generator": {
   "path": "scripts/report-rest-endpoints.py",
-  "sha256": "b5b2b026be2b95f07148e5b92e0aedd1d48023b08c811297e4a1bca309186e48"
+  "sha256": "a1e3bd657a94ffe20f919b9dbd8bcfb29c18073160c1842312ca27c158fc78b9"
  },
  "consumers": {
   "content": [],
