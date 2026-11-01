@@ -77,6 +77,16 @@ jobs:
         run: |
           python3 scripts/check-first-write-conditional.py --selftest
           python3 scripts/check-first-write-conditional.py
+      # #3314 复核 #4 —— 「行号 + path」不足以判「是不是同一个分支」：控制流不在行号里。
+      # 实测三种写法并存：字面量与 if 同行 / `const m = …match(…)` 后下一行才 if /
+      # **一个 if 守 2~4 个字面量**（`if (a || b)`、三元链）。所以清单在分组前必须
+      # 让每一处带上「被哪个 if 包着」这个字段，否则分组会稳定地产出错误的合并建议。
+      # 同时报「下界」：清单只枚举**字面路径**，非字面量判定（前缀常量/循环注册）
+      # 完全看不见，而盲区集中在批量注册那一侧 ⇒ 不能拿可见行数做比例外推。
+      - name: REST route inventory knows its blind spot and each row's guarding branch
+        run: |
+          python3 scripts/report-rest-visibility.py --selftest
+          python3 scripts/report-rest-visibility.py --assert
       # 2026-10-31 —— `trap '<...> exit 1' ERR` 会把 RC 采集吃掉：`RC=$?` 到不了，
       # 于是「已失效（2）」被读成「未预期（1）」，动作从「更新卡」错到「查脚本」。
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。
