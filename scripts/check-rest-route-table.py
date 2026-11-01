@@ -17,13 +17,18 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 GEN = REPO / "scripts" / "report-rest-endpoints.py"
-DATAFILE = REPO / "docs" / "rest-route-table.json"
+# 2026-11-01 —— 路径可用环境变量覆盖，**只为一件事**：让「报差异」那条分支能被真的执行一次。
+# 那条分支的唯一执行条件就是它要报告的那个条件（表过期），所以在正常 CI 里它永远绿在
+# 另一条分支上 —— 「它绿着」与「它跑过并绿」同形。selftest 里用一份人造过期的副本喂它。
+DATAFILE = Path(os.environ.get("ROUTE_TABLE_FILE") or (REPO / "docs" / "rest-route-table.json"))
 
 
 # 2026-11-01 —— `kind` 是**闭集**：它看起来是描述性字段，而描述性字段的边界
@@ -83,6 +88,10 @@ def check_generator_identity(doc: dict) -> list[str]:
 # 「运行时依赖」，那时 runtime_claim 那句话就不成立了，必须红。
 PRODUCTION_GLOBS = ("server/src/**/*.ts",)
 TABLE_NAME = "rest-route-table.json"
+SOURCE = REPO / "server" / "src" / "server.ts"
+
+# 2026-11-01 —— 写方法集合：判「写路由」靠它，所以它**只有一个定义**。
+WRITE_METHODS = ("PUT", "POST", "PATCH", "DELETE")
 
 
 def check_no_production_consumer() -> list[str]:
@@ -102,6 +111,93 @@ def check_no_production_consumer() -> list[str]:
         return [f"TABLE_CONSUMED_BY_PRODUCTION: {TABLE_NAME} 出现在 {len(hits)} 处生产源码里"
                 f"（{', '.join(hits[:3])}）⇒ 表已成运行时依赖，runtime_claim 的「非运行时事实」不再成立"]
     return []
+
+
+def check_method_parse(doc: dict) -> list[str]:
+    """表里 `method=None` 的行，必须在源码里**真的**不限方法。
+
+    2026-11-01 —— 这条检查是「表说自己没错」之外的一份独立读数：
+    它**重新读源码**、重新抽方法，而不是相信 `method_parse` 那一格的自述。
+
+    为什么需要它：实测 24 条路由把方法判在**下一行**（`const X = …match(…)` 绑定、
+    下一行 `if (X && req.method === "PUT")`）。只按同行抽 ⇒ 它们全是 `method=None`，
+    而 `None` 在「按 method 判写路由」时被算成非写 ⇒ **7 条 PUT/POST + 3 条 DELETE
+    落在分母外，且不产生任何红**。这不叫漏测，叫分母错了而报表看起来完整。
+
+    三态，各自处置不同：
+      · 源码里确实不限方法        ⇒ 合法缺省，不报
+      · 绑定语句 + 引用它的 if 里恰一个方法 ⇒ **解析漏**，必须报（这是可以修的）
+      · 那一行里有多个方法        ⇒ 单值字段容不下 ⇒ 只允许出现在 `method_parse.multi_method`
+    """
+    if not SOURCE.exists():
+        return [f"SOURCE_MISSING: 读不到 {SOURCE.relative_to(REPO)} ⇒ 无法独立复核 method"]
+    src = SOURCE.read_text(encoding="utf-8", errors="replace").splitlines()
+    problems: list[str] = []
+    misses: list[str] = []
+    multis: list[tuple[str, int, tuple[str, ...]]] = []
+    for r in doc.get("rows") or []:
+        if r.get("method"):
+            continue
+        ln = int(r.get("line") or 0) - 1
+        if not (0 <= ln < len(src)):
+            continue
+        cur = src[ln]
+        # 同一行内就写了多个方法（`if (… && (req.method === "GET" || req.method === "POST"))`）
+        # —— 这类行没有绑定语句，但它**同样是多方法**，必须进同一份登记。
+        inline_multi = tuple(sorted(set(re.findall(r'req\.method\s*===\s*"([A-Z]+)"', cur))))
+        if len(inline_multi) > 1:
+            multis.append((str(r.get("path")), int(r.get("line") or 0), inline_multi))
+            continue
+        binding = re.match(r"\s*(?:const|let|var)\s+(\w+)\s*=", cur)
+        if not binding:
+            continue
+        ident = binding.group(1)
+        hit = None
+        for k in range(ln + 1, min(ln + 4, len(src))):
+            if re.match(r"\s*if\s*\(", src[k]) and ident in src[k]:
+                hit = src[k]
+                break
+        if hit is None:
+            continue
+        meths = tuple(sorted(set(re.findall(r'req\.method\s*===\s*"([A-Z]+)"', hit))))
+        if len(meths) == 1:
+            misses.append(f"第 {r.get('line')} 行 {r.get('path')}（源码判 {meths[0]}）")
+        elif len(meths) > 1:
+            multis.append((str(r.get("path")), int(r.get("line") or 0), meths))
+
+    if misses:
+        problems.append(
+            f"METHOD_PARSE_MISS: {len(misses)} 行 method=None 但源码判了唯一方法"
+            f"（{'; '.join(misses[:4])}…）⇒ 按 method 判写路由时它们被算成非写，"
+            f"分母会小，而表看起来完整")
+
+    registered = {(m.get("path"), int(m.get("line") or 0), tuple(m.get("methods") or ()))
+                  for m in ((doc.get("method_parse") or {}).get("multi_method") or [])}
+    unregistered = [m for m in multis if m not in registered]
+    if unregistered:
+        problems.append(
+            f"MULTI_METHOD_UNREGISTERED: {len(unregistered)} 条多方法路由没进 method_parse.multi_method"
+            f"（{unregistered[:2]}）⇒ 「多个方法」与「不限方法」在 method 列上同形，"
+            f"而这两类对写路由判定相反")
+    stale = registered - {m for m in multis}
+    if stale:
+        problems.append(
+            f"MULTI_METHOD_STALE: method_parse 里登记了 {len(stale)} 条源码已不再如此的记录"
+            f"（{sorted(stale)[:2]}）⇒ 登记表在腐化，读它的人会按旧名单理解今天")
+    return problems
+
+
+def write_route_count(doc: dict) -> tuple[int, int, int]:
+    """写路由的三个数：单方法写 / 多方法里含写 / 合计。
+
+    分开报的理由：多方法那 3 条在 `method` 列上是 None，
+    只报合计时它们从哪来读不出来；只报单方法时它们又消失。
+    """
+    rows = doc.get("rows") or []
+    w_single = sum(1 for r in rows if (r.get("method") or "") in WRITE_METHODS)
+    multi = ((doc.get("method_parse") or {}).get("multi_method") or [])
+    w_multi = sum(1 for m in multi if any(x in WRITE_METHODS for x in (m.get("methods") or ())))
+    return w_single, w_multi, w_single + w_multi
 
 
 def check_key_uniqueness(doc: dict) -> list[str]:
@@ -245,8 +341,66 @@ def selftest(quiet: bool = False) -> int:
     if not quiet: print(("✓" if ok else "✗") + " selftest kind 闭集：已知三种过、handler 红")
     fails += 0 if ok else 1
 
-    if not quiet: print(f"✓ selftest {8 - fails}/8 通过")
+    # 2026-11-01 —— 「报差异」这条分支此前**一次都没成功执行过**：
+    # 它唯一的执行条件就是它要报告的那个条件（表过期），而在正常 CI 里表总是新的
+    # ⇒ 它绿着，但那是另一条分支的颜色。这里人造一份过期表，喂给真进程。
+    # 断言三件事：退出码 1（不是 2、不是异常）、说了「已过期」、**没有 traceback**。
+    # 第二条最重要：它正是当年在要报错的场合抛 TypeError 的那一格。
+    import tempfile
+    fails += _selftest_diff_branch(quiet)
+    if not quiet: print(f"✓ selftest {9 - fails}/9 通过")
     return 0 if fails == 0 else 1
+
+
+def _selftest_diff_branch(quiet: bool) -> int:
+    """跑**真进程**，喂一份人造过期的表，断言它输出差异而不是崩。
+
+    🔴 子进程会先跑它自己的 selftest ⇒ 没有这个守卫时这里会自我递归，
+    表现是「跑到超时」，而超时会被读成「慢」，不是「无限递归」。
+    """
+    if os.environ.get("ROUTE_TABLE_SELFTEST_CHILD") == "1":
+        return 0
+    import tempfile
+    try:
+        if not DATAFILE.exists():
+            return 0  # 仓里还没有表 ⇒ 这条不适用（不是失败）
+        doc = json.loads(DATAFILE.read_text(encoding="utf-8"))
+        if not doc.get("rows"):
+            return 0
+        # 去掉**最后一行**，模拟「源码里没这条了」。
+        #
+        # 不用「行号整体 +100」那种突变：那会让另一组检查（method 解析、order）
+        # 先红，于是这条 selftest 测到的是别的分支 —— 绿了也不知道差异分支跑没跑。
+        # 删末行不破坏 order 也不破坏 method 解析（剩下的行都还在原位）。
+        doc["rows"] = doc["rows"][:-1]
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False, indent=1)
+            tmp = fh.name
+        env = dict(os.environ, ROUTE_TABLE_FILE=tmp, ROUTE_TABLE_SELFTEST_CHILD="1")
+        # 不带 --selftest：要跑的就是 main 的完整比较路径（含它自己的 selftest 前置）。
+        res = subprocess.run([sys.executable, str(Path(__file__).resolve())],
+                             capture_output=True, text=True, env=env, timeout=120)
+        out = (res.stdout or "") + (res.stderr or "")
+        ok = (res.returncode == 1 and "已过期" in out and "Traceback" not in out)
+        if not quiet:
+            print(("✓" if ok else "✗") +
+                  f" selftest 人造过期 ⇒ 报差异不崩（rc={res.returncode}·"
+                  f"说已过期={'已过期' in out}·无 traceback={'Traceback' not in out}）")
+        Path(tmp).unlink(missing_ok=True)
+        return 0 if ok else 1
+    except Exception as exc:  # noqa: BLE001
+        if not quiet:
+            print(f"✗ selftest 人造过期那一格跑不起来：{exc}")
+        return 1
+
+
+# 2026-11-01 —— 本次**走了哪条分支**，一行。
+#
+# 为什么需要：这个脚本有四条出口（更新 / 一致 / 有问题 / 报差异），
+# 而「报差异」那条的唯一执行条件就是它要报告的那个条件 —— 于是它平时永远不跑，
+# 而「它绿着」与「它跑过并绿」在输出上同形。一行 print 让「从未执行」第一次成为可见状态。
+def _branch(name: str) -> None:
+    print(f"  path: {name}")
 
 
 def main() -> int:
@@ -262,7 +416,8 @@ def main() -> int:
         # 写之前先验键：一份「键不唯一」的表写进仓库，等于把注释当键焊死。
         key_problems = (check_key_uniqueness(json.loads(fresh))
                         + check_order_sequence(json.loads(fresh))
-                        + check_kind_enum(json.loads(fresh)))
+                        + check_kind_enum(json.loads(fresh))
+                        + check_method_parse(json.loads(fresh)))
         if key_problems:
             for x in key_problems:
                 print(f"✗ {x}", file=sys.stderr)
@@ -279,6 +434,7 @@ def main() -> int:
         # 二值的 no/YES 把「没碰」与「碰了参照」压成一格，而后者正是 --update 的全部作用。
         print(f"  mutates: baseline（写入 {DATAFILE.relative_to(REPO)} = **参照**；"
               f"对象此刻与源码一致，但下一次比较的合格线已被这次执行改变）")
+        _branch("updated")
         return 0
     if not DATAFILE.exists():
         print(f"✗ 缺 {DATAFILE.relative_to(REPO)}；先跑 --update", file=sys.stderr)
@@ -288,7 +444,7 @@ def main() -> int:
     _doc = json.loads(committed) if committed.strip() else {}
     key_problems = (check_key_uniqueness(_doc) + check_order_sequence(_doc)
                     + check_kind_enum(_doc) + check_generator_identity(_doc)
-                    + check_no_production_consumer())
+                    + check_no_production_consumer() + check_method_parse(_doc))
     if key_problems:
         for x in key_problems:
             print(f"✗ {x}", file=sys.stderr)
@@ -299,12 +455,17 @@ def main() -> int:
             "KIND_UNKNOWN": "新分类先加进 KIND_ENUM 并说明旧的三种为什么不够，再 --update。",
             "GENERATOR_CHANGED": "先确认变的是抽取逻辑还是路由，再 --update；两者不可混在一次对比里。",
             "GENERATOR_UNPINNED": "生成器要在产物里记 sha256，否则「表变了」没有主语。",
+            "METHOD_PARSE_MISS": "生成器的 method 抽取没覆盖这种写法：补上规则再 --update（不要手工填表）。",
+            "MULTI_METHOD_UNREGISTERED": "把这条多方法路由登记进 method_parse.multi_method，再 --update。",
+            "MULTI_METHOD_STALE": "源码已不再多方法 ⇒ 从 method_parse 里删掉，再 --update。",
+            "SOURCE_MISSING": "先确认 source_domain 指向的文件还在；域变了要同时改生成器与这里。",
         }
         for x in key_problems:
             for k, h in hints.items():
                 if x.startswith(k):
                     print(f"  ⇒ {h}", file=sys.stderr)
                     break
+        _branch("problems")
         return 1
     if committed == fresh:
         n = len(json.loads(fresh)["rows"])
@@ -321,6 +482,7 @@ def main() -> int:
         if dom:
             print(f"  哈希域：{dom.get('files')}（{dom.get('granularity')}）—— "
                   f"{dom.get('known_bias', '')[:40]}…")
+        _branch("consistent")
         return 0
 
     # 差在哪：行数与增删的 path
@@ -335,7 +497,14 @@ def main() -> int:
     # 2026-10-31 —— 修一个真实崩溃：tuple 里 method 可能是 None，
     # 而 `sorted()` 在比较 (str, None, …) 时抛 TypeError ⇒ **恰好在它要报告的场合崩溃**。
     # （实测：给 server.ts 加了几行注释导致行号平移，本脚本没有报「过期」，而是抛异常。）
-    gone, new = sorted(ra - rb, key=str), sorted(rb - ra, key=str)
+    # 这一段就是当年在「要报告过期」的场合抛 TypeError 的地方。现在有名字了：
+    # 崩了要打 `path: crashed` 并按「拿不到读数」退出（2），而不是混成 1。
+    try:
+        gone, new = sorted(ra - rb, key=str), sorted(rb - ra, key=str)
+    except Exception as exc:  # noqa: BLE001
+        print(f"::error::差异计算崩溃：{type(exc).__name__}: {exc}", file=sys.stderr)
+        _branch("crashed")
+        return 2
     print("  mutates: none（只读比较；未写入任何文件）")
     print(f"✗ 路由表草稿**已过期**：文件 {len(a.get('rows', []))} 行 / 现在 {len(b.get('rows', []))} 行", file=sys.stderr)
     d = diff_tables(committed, fresh)
@@ -356,6 +525,7 @@ def main() -> int:
     if a.get("provenance") != b.get("provenance"):
         print(f"    provenance 也变了：{a.get('provenance', [None])[0]} → {b.get('provenance', [None])[0]}", file=sys.stderr)
     print("  ⇒ python3 scripts/check-rest-route-table.py --update", file=sys.stderr)
+    _branch("diff_reported")
     return 1
 
 

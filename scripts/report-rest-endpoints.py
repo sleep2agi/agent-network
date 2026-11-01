@@ -118,12 +118,47 @@ def main() -> int:
             # 实测：8 个多处 path 里 6 个是「同一 path、不同 method」或「同一 path、不同 query 判别」，
             # 而 /api/messages 的 `?scope=user` 分支**必须排在**通用分支之前（顺序承载语义）。
             # ⇒ 这里把 method 与 query 判别一起抽出来，作为「这一条到底识别什么」的部分键。
-            meth = re.search(r'req\.method\s*===\s*"([A-Z]+)"', line_text)
+            # 2026-11-01 —— method 不能只看**这一行**。
+            #
+            # 实测 24 条路由的写法是「先绑定路径匹配，再在下一行判方法」：
+            #     const tokenDeleteMatch = url.pathname.match(/^\/api\/auth\/tokens\/([^/]+)$/);
+            #     if (tokenDeleteMatch && req.method === "DELETE") {
+            # 只看本行 ⇒ method=None ⇒ 包括 **7 条 PUT/POST 与 3 条 DELETE** 在内，
+            # 表里看起来「方法不限」。而「写路由」的分母是按 method 算的：
+            # 少算不会红，表照样看起来完整 —— 于是 8 条改权限/白名单的写路由被漏在分母外。
+            #
+            # 规则必须**精确**，否则会把邻近分支的方法挪过来（第一版 ±3 行窗口就把
+            # method 有值的行从 33 抬到 58，多出来的 25 条全是错的）。所以：
+            #   ① 本行必须是绑定语句 `const X = …`，取出 X；
+            #   ② 向下最多 3 行内找到**引用了 X** 的 `if (`；
+            #   ③ 只从那一行取方法。
+            # 三条同时成立才认；不成立就保留 None（源码确实不限方法，是合法缺省）。
+            src_lines = text.splitlines()
+            meths: list[str] = []
+            inline = re.findall(r'req\.method\s*===\s*"([A-Z]+)"', line_text)
+            if inline:
+                # 一行里可能有**多个**方法（`req.method === "GET" || req.method === "PUT"`）。
+                # 只取第一个会把「GET 或 PUT」折成「只有 GET」——
+                # 而这两条正是需要写权限的路由（改成员的 task/agent 授权）。
+                meths = sorted(set(inline))
+            else:
+                binding = re.match(r"\s*(?:const|let|var)\s+(\w+)\s*=", line_text)
+                if binding:
+                    ident = binding.group(1)
+                    for k in range(lineno, min(lineno + 3, len(src_lines))):
+                        probe = src_lines[k]
+                        if re.match(r"\s*if\s*\(", probe) and ident in probe:
+                            meths = sorted(set(re.findall(r'req\.method\s*===\s*"([A-Z]+)"', probe)))
+                            break
             qkeys = re.findall(r'searchParams\.get\("([^"]+)"\)', line_text)
             entries.append({
                 "path": (regex_route_path(line_text) or m.group(1)) if kind == "regex_prefix" else m.group(1),
             "kind": kind, "line": lineno, "text": line_text[:120],
-                "method": meth.group(1) if meth else None,
+                # 恰好一个方法 ⇒ 记它；零个 ⇒ 源码确实不限方法（合法缺省）；
+                # **多个** ⇒ 单值字段容不下（`GET || PUT`、`GET || HEAD`）。
+                # 多个不能折成 None：那样它与「不限方法」同形，而两者的写路由判定相反。
+                "method": meths[0] if len(meths) == 1 else None,
+                "methods_multi": meths if len(meths) > 1 else [],
                 "query": qkeys,
             })
     entries.sort(key=lambda e: (e["line"], e["kind"], e["path"]))
@@ -226,6 +261,22 @@ def main() -> int:
                                      "要么加一条「运行时注册集合 == 表」的等价断言",
             },
             "generator": {"path": "scripts/report-rest-endpoints.py", "sha256": _self_sha256()},
+            # 2026-11-01 —— method 的**解析口径**要连同它的缺口一起登记。
+            # `method` 是单值：`GET || PUT`、`GET || HEAD` 容不下，只能留 None。
+            # 而 None 有两种含义（源码确实不限方法 / 有多种方法），两者对「写路由」判定相反，
+            # 所以多方法必须**单独列名**，不能折进 None。
+            "method_parse": {
+                "rule": "同一行；否则 `const X = …` 绑定后 3 行内引用 X 的 `if (` 那一行",
+                "literal": sum(1 for e in entries if e.get("method")),
+                "absent": sum(1 for e in entries if not e.get("method") and not e.get("methods_multi")),
+                "multi_method": [
+                    {"path": (regex_route_path(e["text"]) or e["path"]) if e["kind"] == "regex_prefix" else e["path"],
+                     "line": e["line"], "methods": e["methods_multi"]}
+                    for e in entries if e.get("methods_multi")
+                ],
+                "known_gap": "多方法路由在 method 列里是 None ⇒ 按 method 判写路由时它们**既不算写也不算读**，"
+                             "必须并进这一格来数；6 行（GET||PUT ×2、GET||POST、GET||HEAD）在今天的分母里。",
+            },
             # 消费者分两种：**内容消费**（有人按行读它）与**自洽消费**（重跑能复现）。
             # 本表今天没有前者，但有后者 —— 写「消费者：无」会让 reproduce 那一行看起来也没人用，
             # 而它每个 CI run 都在用。
