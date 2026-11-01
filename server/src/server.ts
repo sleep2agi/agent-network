@@ -1232,6 +1232,20 @@ export function statusFromReasons(reasons: readonly string[]): "ok" | "degraded"
   return reasons.length === 0 ? "ok" : "degraded";
 }
 
+/**
+ * 2026-11-01 —— `status_reasons` 的**值域**，与它的生产者逐个对应。
+ *
+ * 为什么要有这一格：`status_reasons` 是「`status: ok` 到底是没问题、还是检查没跑」的唯一读数。
+ * 它的值域若比生产者少 ⇒ 两个成因被合并成一个字（读的人分不出该修哪），
+ * 多 ⇒ 有原因却没有任何代码会产生它（死值，读者会为它设计一条不存在的修法）。
+ *
+ * 🔴 push 点**保留字面量**而不是引用这个常量：抽取判据要看的是「哪一行推了什么」，
+ *    改成 `push(STATUS_REASONS[0])` 之后，那条检查就只能看见下标，看不见成因。
+ *    ⇒ 这份常量是**断言的靶子**，不是运行时唯一入口。
+ *    两者的关系由 health-status-reasons.test.ts 断言（集合相等 + 生产者数 == 值数）。
+ */
+export const STATUS_REASONS = ["db_unreadable", "license_unreadable"] as const;
+
 export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   // ── gauge：聚合 / 粗标签 ─────────────────────────────────────────────
   ok: {

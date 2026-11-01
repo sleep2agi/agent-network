@@ -420,29 +420,38 @@ def _selftest_update_then_check(quiet: bool) -> int:
 def _selftest_diff_branch(quiet: bool) -> int:
     """跑**真进程**，喂一份人造过期的表，断言它输出差异而不是崩。
 
-    🔴 子进程会先跑它自己的 selftest ⇒ 没有这个守卫时这里会自我递归，
+    🔴 必须先把它做成**当下的**表（先跑一次 --update 到临时文件）再突变。
+    直接拿仓库里那份来突变时，如果仓库那份本身就是过期的
+    （刚改过 server.ts、还没 --update），别的检查会先红 ⇒ 这里测到的不是差异分支。
+    「测到了别的分支」与「差异分支正常」在输出上都是 rc=1 —— 只有 `已过期` 这个词能分开。
+
+    🔴 子进程会先跑它自己的 selftest ⇒ 没有 ROUTE_TABLE_SELFTEST_CHILD 守卫时这里会自我递归，
     表现是「跑到超时」，而超时会被读成「慢」，不是「无限递归」。
     """
     if os.environ.get("ROUTE_TABLE_SELFTEST_CHILD") == "1":
         return 0
     import tempfile
     try:
-        if not DATAFILE.exists():
-            return 0  # 仓里还没有表 ⇒ 这条不适用（不是失败）
-        doc = json.loads(DATAFILE.read_text(encoding="utf-8"))
-        if not doc.get("rows"):
-            return 0
-        # 去掉**最后一行**，模拟「源码里没这条了」。
-        #
-        # 不用「行号整体 +100」那种突变：那会让另一组检查（method 解析、order）
-        # 先红，于是这条 selftest 测到的是别的分支 —— 绿了也不知道差异分支跑没跑。
-        # 删末行不破坏 order 也不破坏 method 解析（剩下的行都还在原位）。
-        doc["rows"] = doc["rows"][:-1]
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
-            json.dump(doc, fh, ensure_ascii=False, indent=1)
+            fh.write("{}")
             tmp = fh.name
         env = dict(os.environ, ROUTE_TABLE_FILE=tmp, ROUTE_TABLE_SELFTEST_CHILD="1")
-        # 不带 --selftest：要跑的就是 main 的完整比较路径（含它自己的 selftest 前置）。
+        # ① 先把它变成「当下的表」
+        up = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--update"],
+                            capture_output=True, text=True, env=env, timeout=120)
+        if up.returncode != 0:
+            if not quiet:
+                print(f"✗ selftest 差异分支：前置 --update 失败（rc={up.returncode}）")
+            Path(tmp).unlink(missing_ok=True)
+            return 1
+        # ② 追加一行**合成的**路由（文件里有、源码里没有）
+        doc = json.loads(Path(tmp).read_text(encoding="utf-8"))
+        rows = doc.get("rows") or []
+        rows.append({"id": len(rows) + 1, "order": len(rows) + 1,
+                     "path": "/__selftest_ghost__", "method": "GET",
+                     "query": [], "kind": "eq", "line": 1})
+        Path(tmp).write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+        # ③ 真进程跑差异分支
         res = subprocess.run([sys.executable, str(Path(__file__).resolve())],
                              capture_output=True, text=True, env=env, timeout=120)
         out = (res.stdout or "") + (res.stderr or "")
@@ -461,7 +470,7 @@ def _selftest_diff_branch(quiet: bool) -> int:
 
 # 2026-11-01 —— 本次**走了哪条分支**，一行。
 #
-# 为什么需要：这个脚本有四条出口（更新 / 一致 / 有问题 / 报差异），
+# 这个脚本有四条出口（updated / consistent / problems / diff_reported），
 # 而「报差异」那条的唯一执行条件就是它要报告的那个条件 —— 于是它平时永远不跑，
 # 而「它绿着」与「它跑过并绿」在输出上同形。一行 print 让「从未执行」第一次成为可见状态。
 def _branch(name: str) -> None:
