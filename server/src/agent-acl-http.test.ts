@@ -204,11 +204,16 @@ describe("restricted member with NO grants sees no agents (one test per path)", 
     expect((await get(aliceToken, `/api/messages?alias=${X.alias}&since=2000-01-01`)).body.messages).toEqual([]);
   });
   test("POST /api/task to an agent → 403 agent_not_granted; nonexistent alias gets the identical response", async () => {
+    // #3354 —— 拒绝之外还要钉「没有副作用」：派单的副作用是**写一条 tasks**，
+    // 只断 403 时，「拒了但任务已经进了队列」也会绿 —— 而那条任务会被目标真的执行。
+    const taskRows = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tasks WHERE network_id = ?1", NET)!.n;
+    const before = taskRows();
     const real = await send(aliceToken, "POST", "/api/task", { alias: X.alias, task: "hi", network_id: NET });
     const fake = await send(aliceToken, "POST", "/api/task", { alias: "no-such-agent", task: "hi", network_id: NET });
     expect(real.status).toBe(403);
     expect(real.body.error).toBe("agent_not_granted");
     expect(fake).toEqual(real);
+    expect(taskRows()).toBe(before);   // 两条被拒的派单都不许落库
   });
   // #3354 —— 403 之外还要钉「没有副作用」：广播的副作用是**给每个目标写一条 inbox**，
   // 只断状态码时，「拒了但已经把消息塞进大家收件箱」也会绿。
