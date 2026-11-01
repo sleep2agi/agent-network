@@ -51,6 +51,7 @@ UNWIRED_TAGS = ("report-only", "interactive", "needs-host")
 # 两者分开存：一条写了理由的豁免看起来负责，只有写了移出条件的豁免才会结束。
 UNWIRED_EXIT_WHEN: dict[str, str] = {
     "scripts/check-claim-existence.py": "它被接进某个 CI 步骤（而不是人工按需跑）⇒ 移出本表",
+    "scripts/report-mcp-shape-branches.py": "#3309 分支维度结卡、或该读数被并进 check 类门 ⇒ 移出本表",
     "scripts/check-control-run.sh": "CI 里有干净的 git worktree 副本可供它跑 ⇒ 移出本表",
     "scripts/check-diff-shape.sh": "提交形状检查改由 CI（而不是本地钩子）承担 ⇒ 移出本表",
     "scripts/report-process-artifact-drift.py": "出现固定读者（人或门）⇒ 移出本表并接线",
@@ -107,6 +108,7 @@ KNOWN_UNWIRED: dict[str, str] = {
     # 下一个人会以为有人在跟这条，而它从来没有被检查过。
     "scripts/report-mcp-key-set-coverage.py": "[report-only] 读数报告（键集覆盖率三口径），人工按需跑",
     "scripts/report-node-versions.py": "[report-only] 读数报告（舰队版本分布），人工按需跑",
+    "scripts/report-mcp-shape-branches.py": "[report-only] 读数报告（每个工具有几个源码出口形状，是上界），人工按需跑；#3309 分支维度的分母",
     "scripts/report-reason-branches.py": "[report-only] 读数报告（按 reason 分支的处数），人工按需跑",
     "scripts/report-rest-endpoints.py": "[report-only] 读数报告（路由清单草稿的生成来源），人工按需跑",
     "scripts/report-table-driven-nonempty.py": "[report-only] 读数报告，人工按需跑",
