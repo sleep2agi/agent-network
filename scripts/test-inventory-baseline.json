@@ -5463,6 +5463,7 @@
   "server/src/auth-kdf-migration.test.ts::verifyPassword — new format round-trip::hashPassword + verifyPassword round-trips, needsRehash=false": 1,
   "server/src/auth-kdf-migration.test.ts::verifyPassword — new format round-trip::malformed new-format strings rejected (not silently passed)": 1,
   "server/src/auth-kdf-migration.test.ts::verifyPassword — new format round-trip::wrong password rejected, needsRehash=false": 1,
+  "server/src/auth-layer-shape.test.ts::鉴权层形状（谁答这条未认证请求）::抽查：handler 就是门的那几条，响应体里带 ok:false（不是裸 error）": 1,
   "server/src/auth-password-change-cli-tokens-http.test.ts::POST /api/auth/password (default: old apps, dashboard proxy — no field)::a client-declared cli token (client_kind / anet label) does NOT survive a default password change": 1,
   "server/src/auth-password-change-cli-tokens-http.test.ts::POST /api/auth/password (default: old apps, dashboard proxy — no field)::a non-boolean keep_cli_tokens is not an opt-in; the removed revoke_cli_tokens field does nothing": 1,
   "server/src/auth-password-change-cli-tokens-http.test.ts::POST /api/auth/password (default: old apps, dashboard proxy — no field)::every other non-network token is revoked (pre-#711 behaviour); node tokens and the rotated current session survive": 1,
@@ -8345,7 +8346,7 @@
   "tests/test906-provider-create/core.test.ts::create doorbell initializes via actual pinned CLI before spawn; conflict makes zero spawn attempts": 1,
   "tests/test906-provider-create/core.test.ts::wrong scope/revision/model refuses before writing credentials or selecting a default": 1
  },
- "dynamic": 88,
+ "dynamic": 89,
  "names": [
   "agent-network/src/active-network-task.test.ts::clampOutboundPriority::full mode keeps high",
   "agent-network/src/active-network-task.test.ts::clampOutboundPriority::outbound-only demotes a model-chosen high to normal and leaves the rest",
@@ -13810,6 +13811,7 @@
   "server/src/auth-kdf-migration.test.ts::verifyPassword — new format round-trip::hashPassword + verifyPassword round-trips, needsRehash=false",
   "server/src/auth-kdf-migration.test.ts::verifyPassword — new format round-trip::malformed new-format strings rejected (not silently passed)",
   "server/src/auth-kdf-migration.test.ts::verifyPassword — new format round-trip::wrong password rejected, needsRehash=false",
+  "server/src/auth-layer-shape.test.ts::鉴权层形状（谁答这条未认证请求）::抽查：handler 就是门的那几条，响应体里带 ok:false（不是裸 error）",
   "server/src/auth-password-change-cli-tokens-http.test.ts::POST /api/auth/password (default: old apps, dashboard proxy — no field)::a client-declared cli token (client_kind / anet label) does NOT survive a default password change",
   "server/src/auth-password-change-cli-tokens-http.test.ts::POST /api/auth/password (default: old apps, dashboard proxy — no field)::a non-boolean keep_cli_tokens is not an opt-in; the removed revoke_cli_tokens field does nothing",
   "server/src/auth-password-change-cli-tokens-http.test.ts::POST /api/auth/password (default: old apps, dashboard proxy — no field)::every other non-network token is revoked (pre-#711 behaviour); node tokens and the rotated current session survive",
@@ -16694,7 +16696,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "eec8ee121cad2da79f0e9bebd061369e8dcad081",
+  "commit": "4af7825809b1055d1d9f4aad6646085f70fa9b3e",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
