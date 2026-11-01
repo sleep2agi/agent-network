@@ -169,7 +169,11 @@ fi
 # 立刻红在「有 6 条测试的出现次数增加了（集合不变）」。
 # 关键在于：**测试通过**与**清单认得出它**是两件事，而前者会让人以为后者也成立。
 # 所以这里不检查「测试是否绿」（那由 runner 负责），只检查清单有没有被这次改动带歪。
-if printf '%s\n' "$touched" | grep -qE '(^|/)src/[^/]*\.test\.ts$|(^|/)tests/'; then
+# 2026-11-01 —— 判据：匹配范围要窄到「真的是测试」，否则门会为**文档**跑到红。
+# 第一版写成 `(^|/)tests/`，于是 `docs/tests/release-v….md` 一改就被报成
+# 「测试文件有改动」—— 门是绿的所以没出事，但它把一个文档提交读成了测试提交，
+# 而下次真的红时，人会先怀疑「我明明只改了文档」。
+if printf '%s\n' "$touched" | grep -qE '(^|/)src/[^/]*\.test\.(ts|mts|js)$|^tests/test'; then
   out=$(${TEST_INVENTORY_CMD:-python3 scripts/check-test-inventory.py} 2>&1); trc=$?
   if [ "$trc" -ne 0 ]; then
     echo "✗ 本次改动了测试文件，而测试清单棘轮是红的 —— 提交前必须绿：" >&2
