@@ -172,8 +172,13 @@ describe("app#225 rules file — read round trip", () => {
     try {
       const body = "# new rules\n\n- 不碰生产 DB\n";
       const enq = await u.call("write_node_rules_file", { node_id: NODE_ID, content: body });
+      // #3275 批次 4 —— write 的外层与 read 同形（三键），但**必须各自钉**：
+      // 这个文件里 `enq` 被赋值 4 次，一条断言只属于它所在的那一次。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(enq).toMatchObject({ ok: true, op: "write" });
       const pulled = await n.call("get_rules_file_request", {});
+      // get_rules_file_request 的空态：`request: null`（两态，闭集两键）
+      expect(Object.keys(pulled).sort()).toEqual(["ok", "request"]);
       expect(pulled.request).toEqual({ request_id: enq.request_id, op: "write", content: body });
       await n.call("ack_rules_file_request", { request_id: enq.request_id, status: "done", file_name: "CLAUDE.md", exists: true });
       const res = await u.call("get_rules_file_result", { request_id: enq.request_id });
