@@ -54,6 +54,7 @@ UNWIRED_EXIT_WHEN: dict[str, str] = {
     "scripts/report-mcp-shape-branches.py": "#3309 分支维度结卡、或该读数被并进 check 类门 ⇒ 移出本表",
     "scripts/check-control-run.sh": "CI 里有干净的 git worktree 副本可供它跑 ⇒ 移出本表",
     "scripts/report-parent-source-coverage.py": "这条不变式进了 DB 约束、或成为部署脚本的一个 stage ⇒ 移出本表",
+    "scripts/report-idle-poll-share.py": "它进了巡检（定时跑、退化就报）⇒ 移出本表",
     "scripts/check-diff-shape.sh": "提交形状检查改由 CI（而不是本地钩子）承担 ⇒ 移出本表",
     "scripts/report-process-artifact-drift.py": "出现固定读者（人或门）⇒ 移出本表并接线",
     "scripts/report-code-producers.py": "出现固定读者 ⇒ 移出本表并接进巡检",
@@ -90,6 +91,8 @@ KNOWN_UNWIRED: dict[str, str] = {
     "scripts/check-claim-existence.py": "[report-only] 写报告前用的工具，不对代码下结论；不进 CI",
     # #3348 的收尾：它读**生产库的形状**（要的历史在 CI 的临时库里不存在），
     # 所以它只能是「人在快照上跑一次」。「未接线」在这里不是欠账，是它的输入位置决定的。
+    # #3119 的读数：读**生产库**的 node_tool_calls（CI 的临时库没有这些行，跑不出比例）
+    "scripts/report-idle-poll-share.py": "[report-only] 读生产库算「问状态/问活」占比；CI 无历史数据",
     "scripts/report-parent-source-coverage.py": "[report-only] 读生产库回答「父有值但来源缺失」这一格；CI 的临时库没有历史，跑不出缺口",
     "scripts/check-control-run.sh": "[needs-host] 本地对照运行工具（需要 git worktree），CI 里没有干净副本的意义",
     "scripts/check-diff-shape.sh": "[interactive] 提交时用（配合 install-diff-shape-hook.sh），不是 CI 门",
