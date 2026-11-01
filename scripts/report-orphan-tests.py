@@ -26,11 +26,21 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+# 谓词：**「名字像测试」的定义就是这个正则**。报告必须把它打出来 ——
+# 否则「未归属 0」会被读成「没有漏」，而它只证明「在这 857 个里没有漏」。
 LOOKS_LIKE_TEST = re.compile(
     r"(\.(test|spec|pw)\.(ts|tsx|mjs|cjs|js)$)"
     r"|(^|/)test_[^/]*\.py$"
     r"|(_test\.py$)"
 )
+# 2026-11-01 —— 谓词的**补集**里有没有测试？必须报，因为谓词只认
+# `.test.(ts|tsx|mjs|cjs|js)` / `test_*.py` / `*_test.py`：
+#   `foo.test.sh`、`bar-test.mjs`、`baz-test.sh` 都**不在**里面，而它们是同一种命名习惯。
+# 这一栏默认按「不是测试」处理 —— 所以它必须可读，否则「未归属 0」会把补集一起吃掉。
+CODE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".py", ".sh", ".go", ".rs", ".cs", ".ps1")
+# 补集里的**代码文件**个数基线（不是全部含 test 的路径：那有 2575 个，大多是产物/文档）。
+COMPLEMENT_BASELINE = 30
+
 # 执行者：任何这些文件里提到候选文件名 ⇒ 有据可查
 RUNNER_FILES_GLOBS = [
     ".github/workflows/*.yml", ".github/workflows/*.yaml",
@@ -73,6 +83,41 @@ def runner_body(path: Path, body: str) -> str:
         except Exception:  # noqa: BLE001
             return ""
     return body
+
+
+FIND_GLOB = re.compile(r"find\s+(?P<dir>[^\s|;&]+)\s+(?P<rest>[^|;&\n]*)")
+NAME_GLOB = re.compile(r"-name\s+['\"](?P<pat>[^'\"]+)['\"]")
+SHELL_GLOB = re.compile(r"(?P<dir>[A-Za-z0-9_./-]+)/(?P<pat>\*[A-Za-z0-9_.*-]*)")
+
+
+def runner_globs(runner_text: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """从 runner 文本里抽出 (目录, 文件名模式)。支持两种写法：
+
+        find tests/lib -maxdepth 1 -name '*.test.sh'
+        tests/lib/*.test.sh
+    """
+    out: list[tuple[str, str]] = []
+    for _, body in runner_text:
+        for m in FIND_GLOB.finditer(body):
+            d = m.group("dir").strip("'\"")
+            for n in NAME_GLOB.finditer(m.group("rest")):
+                out.append((d.rstrip("/"), n.group("pat")))
+        for m in SHELL_GLOB.finditer(body):
+            d = m.group("dir").rstrip("/")
+            if d and not d.startswith("-"):
+                out.append((d, m.group("pat")))
+    return out
+
+
+def glob_match(path: str, runner_text: list[tuple[str, str]]) -> bool:
+    import fnmatch
+    for d, pat in runner_globs(runner_text):
+        if not d or d.startswith("-"):
+            continue
+        prefix = d + "/"
+        if path.startswith(prefix) and "/" not in path[len(prefix):] and fnmatch.fnmatch(path.rsplit("/", 1)[-1], pat):
+            return True
+    return False
 
 
 def collect_runner_text() -> list[tuple[str, str]]:
@@ -118,7 +163,7 @@ def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict
     return {"file": f, "verdict": "ORPHAN", "why": "没有任何 runner 提到它"}
 
 
-SELFTEST_EXPECTED = 8
+SELFTEST_EXPECTED = 11
 
 
 def selftest(quiet: bool = False) -> int:
@@ -149,6 +194,17 @@ def selftest(quiet: bool = False) -> int:
     case("命中 glob ⇒ 有 runner", classify("test/other.test.mjs", runners, nrbd)["verdict"], "B_runner")
     case("无人提到 ⇒ 未归属", classify("probe/lonely.test.mjs", runners, nrbd)["verdict"], "ORPHAN")
     case("登记为不跑 ⇒ C 类", classify("hand/manual.test.mjs", runners, nrbd)["verdict"], "C_by_design")
+
+    # 2026-11-01 —— glob 与点名的失效方向相反，所以两者都要能被判出来：
+    case("find <dir> -name '*.test.sh' ⇒ glob 覆盖",
+         str(glob_match("tests/lib/x.test.sh", [(".github/workflows/qa.yml", "find tests/lib -maxdepth 1 -name '*.test.sh'")])),
+         "True")
+    case("目录不同 ⇒ glob 不覆盖（目录移动即断）",
+         str(glob_match("other/lib/x.test.sh", [(".github/workflows/qa.yml", "find tests/lib -maxdepth 1 -name '*.test.sh'")])),
+         "False")
+    case("shell 写法 tests/lib/*.test.sh 也算 glob",
+         str(glob_match("tests/lib/y.test.sh", [("scripts/qa.sh", "bash tests/lib/*.test.sh")])),
+         "True")
 
     # 注释不是 runner：YAML 行注释里的 glob 必须被剥掉
     raw = "# node --test test/*.test.mjs\nrun: echo hi\n"
@@ -243,11 +299,52 @@ def main() -> int:
                           "orphans": orphans}, ensure_ascii=False, indent=2))
         return 1 if orphans else 0
 
+    print(f"谓词：{LOOKS_LIKE_TEST.pattern}")
     print(f"对象：git ls-files ∩ 名字像测试 ⇒ {len(rows)} 个文件")
     for v, label in (("A_inventory", "A 测试清单计数"), ("B_runner", "B 有 runner 引用"),
                      ("C_by_design", "C 登记为不跑"), ("ORPHAN", "**未归属**")):
         n = sum(1 for r in rows if r["verdict"] == v)
         print(f"  {label}: {n}")
+
+    # 补集：谓词覆盖不到、但「看起来也是测试」的代码文件。
+    comp = sorted(
+        f for f in files
+        if not LOOKS_LIKE_TEST.search(f)
+        and f.endswith(CODE_SUFFIXES)
+        and re.search(r"(test|spec)", f.rsplit("/", 1)[-1], re.I)
+    )
+    print(f"\n补集（代码后缀 + 文件名含 test/spec，但**谓词不命中**）：{len(comp)} 个"
+          f"（基线 {COMPLEMENT_BASELINE}）")
+    print("  ⇒ 这一栏**默认按「不是测试」处理**，所以它必须可读：")
+    print("     「未归属 0」只证明「在这 N 个里没有漏」，不证明「补集里没有测试」。")
+    # 补集里再分**三**栏 —— 它们的失效方向各自不同（三条读数，不是一条的三种写法）：
+    #   点名    ⇒ 精确；**改名即断**
+    #   glob    ⇒ 宽泛；改名不断，**目录移动即断**（`find <dir> -name '*.test.sh'`）
+    #   零入口  ⇒ 真的没有被任何已收集 runner 触及
+    referenced = [f for f in comp if f.rsplit("/", 1)[-1] in runner_text]
+    glob_covered, rest = [], []
+    for f in comp:
+        if f in set(referenced):
+            continue
+        (glob_covered if glob_match(f, runner_text) else rest).append(f)
+    # 判定**自己也有一个域**：只扫 RUNNER_FILES_GLOBS 里那些文件。域外的引用一律算零入口。
+    print(f"  判定域：{len(runner_text)} 个 runner 文件（{', '.join(sorted({r[0].split('/')[0] for r in runner_text}))}）")
+    print(f"  ① 按名字点名 {len(referenced)} 个（改名即断）")
+    print(f"  ② 由 glob 覆盖 {len(glob_covered)} 个（改名不断；目录移动即断）")
+    print(f"  ③ 零入口 {len(rest)} 个")
+    for f in glob_covered[:4]:
+        print(f"     [glob] {f}")
+    for f in rest[:6]:
+        print(f"     [无]   {f}")
+    same_habit = [f for f in comp if re.search(r"[.-]test\.(sh|mjs|cjs|py)$", f)]
+    if same_habit:
+        print(f"  其中**同一命名习惯、只是后缀不在谓词里**的 {len(same_habit)} 个：")
+        for f in same_habit[:8]:
+            print(f"    {f}")
+    if len(comp) > COMPLEMENT_BASELINE:
+        print(f"\n✗ 补集从基线 {COMPLEMENT_BASELINE} 涨到 {len(comp)} —— "
+              f"检查是否有真测试落进了「不算测试」的那一栏")
+        return 1
     if orphans:
         print("\n⚠ 这些文件**没有任何 runner 会跑它**（不是「跑失败了」，是「不会跑」）：", file=sys.stderr)
         for r in orphans:
