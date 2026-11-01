@@ -99,6 +99,25 @@ test("上限按「有没有真的丢过一条」判，不按「集合是否已�
   assert.equal(s.distinct_locked_usernames, 0);
 });
 
+// 2026-11-01 —— 「同一个对象里」只保证同一次调用；**已读出的那份之后不得再变**。
+// 这条可判：读一次快照 → 再触发计数 → 早先那份的值不许动。
+// 缺它时，一次读取拿到的是**活引用**与**不可变快照**在报告上同形，
+// 而活引用会让「读完之后又涨了」被读成「同一份读数自相矛盾」。
+test("快照是不可变的一份，不是内部状态的活引用", () => {
+  noteRegisterRateLimited("10.1.1.1");
+  const first = authAbuseSnapshot();
+  const before = first.register_rate_limited_total;
+  noteRegisterRateLimited("10.1.1.2");
+  noteRegisterRateLimited("10.1.1.3");
+  // 早先那份必须一字不动
+  expect(first.register_rate_limited_total).toBe(before);
+  expect(first.distinct_register_limited_ips).toBe(1);
+  // 再读一次才看得到新的
+  const second = authAbuseSnapshot();
+  expect(second.register_rate_limited_total).toBe(before + 2);
+  expect(second.distinct_register_limited_ips).toBe(3);
+});
+
 test("快照形状固定（键集是契约，不是实现细节）", () => {
   const keys = Object.keys(authAbuseSnapshot()).sort();
   assert.deepEqual(keys, [

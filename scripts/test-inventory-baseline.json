@@ -5439,6 +5439,7 @@
   "server/src/auth-abuse-counters.test.ts::去重集合到顶：distinct 停在上限、capped 置真、命中数继续涨": 1,
   "server/src/auth-abuse-counters.test.ts::同一来源重复命中：命中数涨，去重数不涨": 1,
   "server/src/auth-abuse-counters.test.ts::快照形状固定（键集是契约，不是实现细节）": 1,
+  "server/src/auth-abuse-counters.test.ts::快照是不可变的一份，不是内部状态的活引用": 1,
   "server/src/auth-abuse-counters.test.ts::快照里没有来源本身（IP / 用户名）": 1,
   "server/src/auth-abuse-counters.test.ts::撒网（每次换来源）：命中数与去重数同步涨": 1,
   "server/src/auth-abuse-counters.test.ts::缺来源（null / undefined / 空串）仍计数，但不污染去重集合": 1,
@@ -13741,6 +13742,7 @@
   "server/src/auth-abuse-counters.test.ts::去重集合到顶：distinct 停在上限、capped 置真、命中数继续涨",
   "server/src/auth-abuse-counters.test.ts::同一来源重复命中：命中数涨，去重数不涨",
   "server/src/auth-abuse-counters.test.ts::快照形状固定（键集是契约，不是实现细节）",
+  "server/src/auth-abuse-counters.test.ts::快照是不可变的一份，不是内部状态的活引用",
   "server/src/auth-abuse-counters.test.ts::快照里没有来源本身（IP / 用户名）",
   "server/src/auth-abuse-counters.test.ts::撒网（每次换来源）：命中数与去重数同步涨",
   "server/src/auth-abuse-counters.test.ts::缺来源（null / undefined / 空串）仍计数，但不污染去重集合",
@@ -16604,7 +16606,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "eccb985834b6024664f9a2f649044276de84f2c9",
+  "commit": "459239c861ac536f3b1c9123d8d4d72510001d45",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
