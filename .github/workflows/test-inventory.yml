@@ -87,6 +87,15 @@ jobs:
         run: |
           python3 scripts/report-rest-visibility.py --selftest
           python3 scripts/report-rest-visibility.py --assert
+      # #3309 第三条口径 —— 「形状」只数成功出口，于是 `start_node` 在形状报告里是 1 个出口，
+      # 而它会返回 10 个不同的 error。失败出口在形状上同一个、在语义上是 10 个 ⇒ 必须补一条
+      # 「错误值域」口径，否则「只有 1 条路径」与「1 个成功形状 + N 条失败路径」在报告里同形。
+      # 断言的是**扫描器还看得见**：工具数不得降（改名/移走会让它少切出几个而报告仍说合规），
+      # 错误字面量不得降（改成 e.message 这类动态值 ⇒ 值域变窄、下界更失真）。
+      - name: MCP outcome domain (success shapes + error value domain) still fully enumerated
+        run: |
+          python3 scripts/report-mcp-outcome-domain.py --selftest
+          python3 scripts/report-mcp-outcome-domain.py --assert
       # 2026-10-31 —— `trap '<...> exit 1' ERR` 会把 RC 采集吃掉：`RC=$?` 到不了，
       # 于是「已失效（2）」被读成「未预期（1）」，动作从「更新卡」错到「查脚本」。
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。
