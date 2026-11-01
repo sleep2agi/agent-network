@@ -78,6 +78,9 @@ describe("requirements MCP tools", () => {
     try {
       const ref = "github:acme/widgets#42";
       const first = await s.call("requirements_upsert_by_external_ref", { external_ref: ref, external_url: "https://github.com/acme/widgets/issues/42", name: "修复登录", description: "issue 正文", checklist: [{ id: "c1", text: "复现" }, { id: "c2", text: "修" }] });
+      // #3275 批次 4 —— upsert 的外层与 create/update 同族：{ok, requirement, created}
+      // `created` 是 upsert 独有的：调用方靠它区分「新建」与「命中已有」。
+      expect(Object.keys(first).sort()).toEqual(["created", "ok", "requirement"]);
       expect(first.ok).toBe(true);
       expect(first.created).toBe(true);
       const tagged = await s.call("requirements_update", { id: first.requirement.id, tags: ["release"] });

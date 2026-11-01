@@ -81,8 +81,10 @@ describe("SkillHub real Hub + SQLite", () => {
     expect(Object.keys(nodeList).sort()).toEqual(["ok", "reviewer", "skills"]);
     expect(nodeList.reviewer).toBe(false);
     // 详情未找到：只有两个键；多一个键就意味着错误响应开始夹带上下文。
-    expect(Object.keys(await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).sort())
-      .toEqual(["error", "ok"]);
+    // #3275 批次 4 —— 同变量口径：先接住再断言（内联 `Object.keys(await f())` 在语义上一样，
+    // 但没有任何变量名可供归因；这条改完之后，它就是一次可被引用的形状断言）。
+    const missing = await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId });
+    expect(Object.keys(missing).sort()).toEqual(["error", "ok"]);
     expect((await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).error).toBe("skill_not_found");
     const ownerList = await tool(ownerToken, "list_skills", { network_id: networkId, include_pending: true });
     expect(ownerList.reviewer).toBe(true);
