@@ -17,7 +17,7 @@ const DIR = mkdtempSync(join(tmpdir(), "anet-ntok-priv-"));
 let BASE = "";
 let hub: any = null;
 const PW = "NtokPrivPassw0rd!";
-let adminToken = "", adminId = "", NET = "", OTHER_NET = "", ntok = "";
+let adminToken = "", adminId = "", NET = "", OTHER_NET = "", ntok = "", adminUsername = "";
 
 const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 async function call(token: string, method: string, path: string, body?: unknown) {
@@ -33,7 +33,8 @@ beforeAll(async () => {
   process.env.COMMHUB_DB ||= join(DIR, "hub.db");
   process.env.COMMHUB_UPLOADS_DIR = join(DIR, "uploads");
   process.env.HOST = "127.0.0.1";
-  const admin = register(`ntok_admin_${Date.now()}`, PW);
+  adminUsername = `ntok_admin_${Date.now()}`;
+  const admin = register(adminUsername, PW);
   adminToken = admin.token!; adminId = admin.user!.user_id; NET = admin.network_id!;
   db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", [adminId]);
   const other = createNetwork(adminId, "ntok-other");
@@ -132,6 +133,10 @@ describe("account and network management need a user token", () => {
     expect((await call(ntok, "PUT", "/api/auth/me", { display_name: "pwned" })).status).toBe(403);
     expect(db.get<{ display_name: string }>("SELECT display_name FROM users WHERE user_id = ?1", adminId)?.display_name).not.toBe("pwned");
     expect((await call(ntok, "POST", "/api/auth/password", { old_password: PW, new_password: "AnotherPassw0rd!" })).status).toBe(403);
+    // #3354 —— 拒绝的第二半：**旧密码仍然可用**（改密的副作用是旧密码立刻失效）。
+    // 只断 403 时，「拒了但密码已经被改掉」也会绿 —— 那会让主人当场登不进来。
+    const relogin = await call("", "POST", "/api/auth/login", { username: adminUsername, password: PW });
+    expect(relogin.status).toBe(200);
   });
   test("cannot create, rename or delete networks", async () => {
     // #3354 —— 拒绝之外还要钉「没有副作用」：建网络的副作用是**多一行 networks**。
