@@ -202,6 +202,30 @@ def write_routes(doc: dict) -> list[dict]:
     return rows
 
 
+def rules_rev() -> str:
+    """规则集自身的版本号。
+
+    2026-11-01 —— `source_sha256` 回答「**被检查的东西**没变」，这条回答「**检查器**没变」。
+    两者是独立的两条轴：缺后者时，「结果变了」无法归因 ——
+    可能是路由改了，也可能是我把某条规则放宽/收紧了，而两者在读数上同形。
+
+    参与哈希的只有**决定结论的东西**：门符号集合、形态正则、公开名单的键、
+    守卫形态枚举。注释、print 文案、行序都不参与 —— 它们变了不该让规则版本变。
+    """
+    import hashlib
+    payload = json.dumps({
+        "known": sorted(KNOWN_GATES),
+        "extra": sorted(EXTRA_GATE_NAMES),
+        "gate_re": GATE_RE.pattern,
+        "write_methods": list(WRITE_METHODS),
+        "guard_forms": list(GUARD_FORMS),
+        "public_by_design": sorted(f"{p} {m}" for p, m in PUBLIC_BY_DESIGN),
+        "min_write": MIN_WRITE_ROUTES,
+        "min_multi": MIN_MULTI_WRITE_ROUTES,
+    }, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def is_gate_symbol(name: str) -> bool:
     """**唯一**的一处「这个符号算不算门」。
 
@@ -457,6 +481,15 @@ def chain_coverage(result: dict) -> tuple[int, str]:
     return covered, gap
 
 
+def _source_sha(doc: dict) -> str:
+    """从路由表里读被检查对象的哈希（表由生成器写入，本脚本不自己算）。"""
+    for line in (doc.get("provenance") or []):
+        m = re.search(r"source_sha256=`?([0-9a-f]{6,})`?", str(line))
+        if m:
+            return m.group(1)
+    return "（表里没有 source_sha256）"
+
+
 def build_evidence(doc: dict, lines: list[str], result: dict) -> dict:
     """遍历**路由表**的每条写路由，填它走哪个门、以及钉住它的测试。"""
     gates_by_route = {(p, m): syms for p, m, syms in result["gated"]}
@@ -483,6 +516,9 @@ def build_evidence(doc: dict, lines: list[str], result: dict) -> dict:
             "pinned_by": prev.get(key, ""),
         })
     return {
+        # 两份身份都写进表：缺 rules_rev 时，两次运行的绿不可比（规则变了而读的人不知道）
+        "rules_rev": rules_rev(),
+        "source_sha256": _source_sha(doc),
         "note": "由 scripts/report-rest-gates.py --emit-evidence 生成；表从路由清单驱动。"
                 "`pinned_by` 为空 = 这条写路由还没有「真的拒绝过」的行为证据。",
         "ratchet": {
@@ -508,6 +544,9 @@ def check_evidence(doc: dict, result: dict) -> list[str]:
                    f"（{sorted(want - have)[:3]}）⇒ 表不是从路由清单驱动的")
     if have - want:
         out.append(f"EVIDENCE_STALE: 证据表里 {len(have - want)} 行已不是写路由（{sorted(have - want)[:3]}）")
+    if ev.get("rules_rev") and ev["rules_rev"] != rules_rev():
+        out.append(f"EVIDENCE_RULES_CHANGED: 证据表由 rules_rev={ev['rules_rev']} 生成，"
+                   f"现在是 {rules_rev()} ⇒ 规则变了，已钉的行可能不再成立；重跑 --emit-evidence")
     empty = [r for r in rows if not r.get("pinned_by")]
     base = int((ev.get("ratchet") or {}).get("baseline_empty") or 0)
     if len(empty) > base:
@@ -549,6 +588,8 @@ def main() -> int:
     total = len(result["gated"]) + len(result["public"]) + len(result["unknown"])
     print(f"写路由 {total}：有门 {len(result['gated'])} · 按设计公开 {len(result['public'])} "
           f"· 判不了 {len(result['unknown'])}")
+    print(f"  rules_rev={rules_rev()}（检查器的身份）· "
+          f"source_sha256={_source_sha(doc)}（被检查对象的身份）—— 两条独立轴")
     print("  门的判据：**守卫位置**（if+拒绝词 / 赋值后被 if 检查），不是「块里出现过」")
     if result["unlisted"]:
         print(f"  ⚠ 源码里有、但清单里没有的门符号 {len(result['unlisted'])} 个："
