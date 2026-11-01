@@ -433,6 +433,38 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
 
   // #3354 —— rest-allowlist 此前**一条测试都没有**（同族里唯一零覆盖的写路由）。
   // 它改的是「这个节点能调哪些 REST 路由」，与 tool-allowlist 同一套授权口径。
+  // #3354 —— ATTRS：这条的门是 canRestWriteNetwork + restNodeDenied，另有**乐观锁**。
+  // 普通成员有网络写权是设计如此 ⇒ 这里的拒绝方是「readonly 模式下的节点自己」。
+  // 三件事必须一起钉：① 拒绝且行没变 ② 允许且行真变 ③ 旧 revision ⇒ 409 且行没变。
+  test("改 attrs：readonly 节点被拒且行没变；owner 200 且行真变；旧 revision 409 且行没变", async () => {
+    const row = () => db.get<{ display_name: string | null; attrs_revision: number | string }>(
+      "SELECT display_name, attrs_revision FROM nodes WHERE node_id = ?1", node.other.id)!;
+    // 先把节点设成 readonly（owner 才做得动），再让节点自己写属性 ⇒ 必须被拒
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "readonly" })).status).toBe(200);
+    const before = row();
+    const denied = await call(node.other.token, "PUT", `/api/nodes/${node.other.id}/attrs`, {
+      display_name: "pwned", base_attrs_revision: Number(before.attrs_revision),
+    });
+    expect(denied.status).toBe(403);
+    expect(row()).toEqual(before);          // 拒绝不许改数据（名字与 revision 都要看）
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    // 允许：200 且名字变了、revision 前进
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/attrs`, {
+      display_name: "renamed-by-owner", base_attrs_revision: Number(before.attrs_revision),
+    });
+    expect(ok.status).toBe(200);
+    const after = row();
+    expect(after.display_name).toBe("renamed-by-owner");
+    expect(Number(after.attrs_revision)).toBeGreaterThan(Number(before.attrs_revision));
+    // 旧 revision 再写：409，且行不许被这次写入改掉
+    const conflict = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/attrs`, {
+      display_name: "lost-the-race", base_attrs_revision: Number(before.attrs_revision),
+    });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error).toBe("attrs_revision_conflict");
+    expect(row()).toEqual(after);
+  });
+
   // #3354 —— peer-allowlist 原本只有 200 / 400 / null，没有 403 分支。
   // 它改的是「这个节点能跟哪些 peer 通信」⇒ 被拒失败等于任何人可改它的通信边界。
   test("改 peer 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）", async () => {
