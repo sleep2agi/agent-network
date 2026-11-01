@@ -449,6 +449,10 @@ describe("#2935 排程周期诊断", () => {
       name: `diag-${stamp}`, task: "t", target_node_id: node.a.id,
       schedule: { type: "interval", every_seconds: 180 }, timezone: "Asia/Shanghai",
     });
+    // #3275 批次 4 —— 上面那些 `create("a")` 断言其实**已经**钉住 schedule_create，
+    // 但调用在 helper 里、工具名不在同一行 ⇒ 统计口径归因不到。
+    // ⇒ 这里补一条**字面量直调**的：形状同外层，代价一次调用。
+    expect(Object.keys(c).sort()).toEqual(["ok", "schedule"]);
     expect(c.ok).toBe(true);
     const id = c.schedule.schedule_id;
     // 造 3 条「一轮跑了 600 秒」的已完成 run（中位数 600s > 周期 180s）。
