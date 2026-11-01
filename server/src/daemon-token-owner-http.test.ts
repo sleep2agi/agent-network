@@ -61,6 +61,9 @@ beforeAll(async () => {
   const { bootServer } = await import("./server.js");
   hub = bootServer({ port: 0, hostname: "127.0.0.1" }); base = `http://127.0.0.1:${hub.port}`;
   const request = await call(owner.token, "request_adopt_node", { node_id: child, daemon_node_id: daemon, workdir: "/fixture/project" });
+  // #3275 批次 4 —— request_adopt_node 的外层三键（与 read_node_rules_file 同形：
+  // 「下发一个请求」这一族的统一形状）。status 一并回来，调用方不必再查一次。
+  expect(Object.keys(request).sort()).toEqual(["ok", "request_id", "status"]);
   expect(request.ok).toBe(true); requestId = request.request_id;
 }, 60000);
 afterAll(() => hub?.stop(true));

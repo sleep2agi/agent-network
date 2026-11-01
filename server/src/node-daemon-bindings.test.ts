@@ -62,7 +62,12 @@ test("adopted stop/start complete through existing protocol; revocation removes 
   const start = await call(u.start_node, { child_node_id: CHILD, network_id: NET }); expect(start.ok).toBe(true);
   expect((await call(d.get_start_request, { request_id: start.request_id })).ok).toBe(true);
   expect((await call(d.ack_start_request, { request_id: start.request_id, status: "started", child_pid: 4321 })).ok).toBe(true);
-  expect((await call(u.unadopt_node, { node_id: CHILD })).ok).toBe(true);
+  // #3275 批次 4 —— 先接住再断言（同变量口径）
+  const unadopted = await call(u.unadopt_node, { node_id: CHILD });
+  // #3275 批次 4 —— unadopt_node 两键 {ok, status}（实测）：status 说明解绑后的生命周期档，
+  // 少了它，调用方只知「成功」，不知「现在是哪一档」。
+  expect(Object.keys(unadopted).sort()).toEqual(["ok", "status"]);
+  expect(unadopted.ok).toBe(true);
   expect((await call(d.list_my_children)).children).toHaveLength(0);
   expect((await call(u.stop_node, { child_node_id: CHILD, daemon_node_id: DAEMON, network_id: NET })).ok).toBe(false);
 });

@@ -85,6 +85,12 @@ describe("provider 三件工具的形状", () => {
     // provider 的 secret 必须先在金库里 —— 这是工具自己的前置（实测第一次跑就撞上
     // `secret_not_in_vault`，提示原话是「upsert_network_secret first」）。
     const secret = await call(tools.upsert_network_secret, { network_id: NET, key: SECRET_KEY, value: "TEST-ONLY-probe-shape" });
+    // #3275 批次 4 —— 写密钥的成功体**只回标识**（不回声任何值）：
+    // 这条属性比键集本身更重要 —— 回读才回内容，写入路径永远不带值。
+    // 实测（首次写入）：["key","ok"] —— 我按族推断多写了一个 `overwrote`，当场红。
+    // ⇒ 覆盖写入那条分支可能多一个字段，但**本夹具没走到，所以不声称**。
+    expect(Object.keys(secret).sort()).toEqual(["key", "ok"]);
+    expect(JSON.stringify(secret)).not.toContain("TEST-ONLY-probe-shape");
     expect(secret.ok).toBe(true);
     const up = await call(tools.upsert_provider, {
       name: "shape-provider", vendor: "anthropic", base_url: "https://api.anthropic.com",
