@@ -145,12 +145,16 @@ export function persistentNeverConsumedExpiries(
     ? db.get<{ n: number; last: string | null }>(
         `SELECT COUNT(*) AS n, MAX(created_at) AS last FROM tasks
           WHERE to_name = ?1 AND network_id = ?2 AND status = 'expired' AND result IS NULL
-            AND created_at > ?3`,
+            AND created_at > ?3
+            -- #3271 后续 —— **诊断探针不算证据**：我自己派去测「它到底消不消费」的 probe，
+            -- 过期后与「一条真活没人接」在表里同形；用它去证明节点不行，是自证。
+            AND COALESCE(meta_json, '') NOT LIKE '%"probe"%'`,
         alias, networkId, boundary)
     : db.get<{ n: number; last: string | null }>(
         `SELECT COUNT(*) AS n, MAX(created_at) AS last FROM tasks
           WHERE to_name = ?1 AND status = 'expired' AND result IS NULL
-            AND created_at > ?2`,
+            AND created_at > ?2
+            AND COALESCE(meta_json, '') NOT LIKE '%"probe"%'`,
         alias, boundary);
 
   return {

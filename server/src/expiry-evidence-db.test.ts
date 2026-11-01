@@ -77,6 +77,21 @@ describe("#3271 持久证据：以「最后一次回复」为界", () => {
     expect(ev.expiries).toBe(0);
   });
 
+  // #3271 后续 —— 诊断探针不算证据。
+  // 现场：我给一台节点派了 3 条 probe 去测「它到底消不消费」，其中 2 条过期 ⇒
+  // 「回复后无回复过期 = 2」，再涨一条就会触发闸 —— 而那一条也会是我的 probe。
+  // **用自己的探针去证明节点不行，是自证。** ⇒ meta_json 里带 `"probe"` 的行不参与计数。
+  test("🔴 meta_json 里带 probe 的过期不计入（诊断流量不是证据）", () => {
+    const now = Date.parse("2026-10-31T22:00:00.000Z");
+    db.run(
+      `INSERT INTO tasks (task_id, to_name, status, content, network_id, created_at, meta_json)
+       VALUES ('t_probe', ?1, 'expired', 'probe', ?2, '2026-10-31 09:00:00', '{"probe":true}')`,
+      [ALIAS, NET]);
+    task("t_real", "expired", "2026-10-31 10:00:00");
+    const ev = persistentNeverConsumedExpiries(db, ALIAS, NET, { now });
+    expect(ev.expiries).toBe(1);            // 只剩那条真活
+  });
+
   test("别的节点的账不串台", () => {
     const now = Date.parse("2026-10-31T22:00:00.000Z");
     db.run(

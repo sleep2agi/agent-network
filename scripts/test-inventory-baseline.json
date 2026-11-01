@@ -6094,6 +6094,7 @@
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::从来没有回复过 ⇒ last_reply_at 为 null（那才是真正的「从未消费」）": 1,
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::别的节点的账不串台": 1,
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::窗口外的旧账不算：lookback 之外的不再计入": 1,
+  "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::🔴 meta_json 里带 probe 的过期不计入（诊断流量不是证据）": 1,
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::🔴 回复之后又连续过期 ⇒ 计数（这才是「它没在服务」）": 1,
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::🔴 回复之后的过期才算数：回复之前的过期不计入": 1,
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values": 1,
@@ -14322,6 +14323,7 @@
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::从来没有回复过 ⇒ last_reply_at 为 null（那才是真正的「从未消费」）",
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::别的节点的账不串台",
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::窗口外的旧账不算：lookback 之外的不再计入",
+  "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::🔴 meta_json 里带 probe 的过期不计入（诊断流量不是证据）",
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::🔴 回复之后又连续过期 ⇒ 计数（这才是「它没在服务」）",
   "server/src/expiry-evidence-db.test.ts::#3271 持久证据：以「最后一次回复」为界::🔴 回复之后的过期才算数：回复之前的过期不计入",
   "server/src/ext-token-shared.test.ts::#527 shared extension-token invariant::all three boundaries fail closed on non-string runtime values",
@@ -16456,7 +16458,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "f1dfac4278fa0cb36c5984fdd02799c616a18641",
+  "commit": "cc6483b894999c428b9d835b0fe60c195a087736",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
