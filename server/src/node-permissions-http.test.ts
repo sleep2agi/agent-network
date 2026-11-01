@@ -213,7 +213,14 @@ describe("PUT /api/nodes/:id/permission-mode", () => {
     expect((await call(node.nN.token, "PATCH", `/api/requirements/${card.boss}`, { description: "mode flip" })).status).toBe(200);
     expect((await call(user.sco.token, "PUT", `/api/nodes/${node.nS.id}/permission-mode`, { mode: "restricted" })).status).toBe(200); // sco 是 nS 的主人
     expect((await call(user.sco.token, "PUT", `/api/nodes/${node.nS.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    // #3354 —— 403 之后**行必须没变**。只断状态码时，「拒了但已经写进去」也会绿，
+    // 而那是这条路由最坏的一种缺陷（拒绝语义看起来对，实际改了数据）。
+    const modeBeforeDenied = db.get<{ permission_mode: string }>(
+      "SELECT permission_mode FROM nodes WHERE node_id = ?1", node.nN.id)!.permission_mode;
     expect((await call(user.mem.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "readonly" })).status).toBe(403);
+    const modeAfterDenied = db.get<{ permission_mode: string }>(
+      "SELECT permission_mode FROM nodes WHERE node_id = ?1", node.nN.id)!.permission_mode;
+    expect(modeAfterDenied).toBe(modeBeforeDenied);
     expect((await call(node.nN.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "normal" })).body.error).toBe("user_token_required");
     expect((await call(user.out.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "readonly" })).status).toBe(404);
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "admin" })).status).toBe(400);
