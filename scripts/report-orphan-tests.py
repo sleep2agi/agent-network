@@ -163,7 +163,7 @@ def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict
     return {"file": f, "verdict": "ORPHAN", "why": "没有任何 runner 提到它"}
 
 
-SELFTEST_EXPECTED = 12
+SELFTEST_EXPECTED = 13
 
 
 def selftest(quiet: bool = False) -> int:
@@ -194,6 +194,12 @@ def selftest(quiet: bool = False) -> int:
     case("命中 glob ⇒ 有 runner", classify("test/other.test.mjs", runners, nrbd)["verdict"], "B_runner")
     case("无人提到 ⇒ 未归属", classify("probe/lonely.test.mjs", runners, nrbd)["verdict"], "ORPHAN")
     case("登记为不跑 ⇒ C 类", classify("hand/manual.test.mjs", runners, nrbd)["verdict"], "C_by_design")
+
+    # 第三向的负例：给一条**不承重**的登记（那两条本来就有人跑），必须被检出。
+    _b_runner = classify("test/other.test.mjs", runners, {})["verdict"]
+    case("不承重的登记会被检出（本来就在 B ⇒ 清空后仍是 B）",
+         str(_b_runner != "ORPHAN"),
+         "True")
 
     # 2026-11-01 —— **账平是恒等式，下限是不等式**：
     # 只有恒等式能在差 1 时反解出缺了哪一类；不等式只证明「至少有一项」。
@@ -332,6 +338,25 @@ def main() -> int:
         print(f"✗ 账不平：四格之和 {sum(counts.values())} ≠ 被分类的行数 {len(rows)}"
               f" ⇒ 有 verdict 落在这四格之外（分类器返回了新值却没加进来）", file=sys.stderr)
         return 2
+
+    # 2026-11-01 —— **第三向验收**：登记的那几条确实「不跑」吗？
+    # 前两向（造新孤儿 ⇒ 红；清空登记表 ⇒ 红并点名）只证明检测器**看得到**与**在意**，
+    # 不证明它**说的是真的** —— 若那两条本来就在 B（有 runner 引用），
+    # 登记表里写两个随便的名字，前两向照样红过。
+    # 判据：把登记表清空后重新分类，它们必须掉进 ORPHAN。掉不进 ⇒ 这条登记是多余的。
+    if NOT_RUN_BY_DESIGN:
+        surplus = []
+        for rel in NOT_RUN_BY_DESIGN:
+            v = classify(rel, runner_text, {})["verdict"]
+            if v != "ORPHAN":
+                surplus.append((rel, v))
+        if surplus:
+            print("  ⚠ 这几条登记并不承重（清空登记表后仍不是 ORPHAN）⇒ 登记可以删掉：", file=sys.stderr)
+            for rel, v in surplus:
+                print(f"     · {rel} ⇒ 清空后仍是 {v}", file=sys.stderr)
+        else:
+            print(f"  ✓ 第三向：{len(NOT_RUN_BY_DESIGN)} 条登记都承重"
+                  f"（清空后各自掉进 ORPHAN）")
 
     # 补集：谓词覆盖不到、但「看起来也是测试」的代码文件。
     comp = sorted(
