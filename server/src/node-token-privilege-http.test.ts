@@ -169,7 +169,11 @@ describe("account and network management need a user token", () => {
   });
   test("renames: a node token may only rename ITSELF in its bound network", async () => {
     // 别的网络 / 别的节点 → user_token_required
+    // #3354 —— 拒绝之外钉「没有开出事务」：prepare 的副作用是多一行 rename_txn。
+    const txns = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM rename_txn")!.n;
+    const beforeTxns = txns();
     expect((await call(ntok, "POST", "/api/node-rename/prepare", { network_id: OTHER_NET, old_alias: "ntok-node", new_alias: "b" })).status).toBe(403);
+    expect(txns()).toBe(beforeTxns);
     db.run(`INSERT INTO sessions (resume_id, alias, status, network_id) VALUES ('r_other_node', 'other-node', 'idle', ?1)`, [NET]);
     expect((await call(ntok, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "other-node", new_alias: "b" })).status).toBe(403);
     // 另一个节点(管理员用户令牌)开的事务,本节点不能提交
