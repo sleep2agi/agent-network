@@ -183,6 +183,29 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
   // 🔴 这条断言的语义是：**目前如此**，不是「应该如此」。
   //    将来谁把计数上移到中间件，这条会红 —— 那就对了：他必须同时更新
   //    模块注释里的覆盖比例（现在是 2/6 类出口）。
+  // #669 —— 新加的计数必须**两侧都验**：鉴权侧看得到形状，匿名侧看不到键。
+  // 只验一侧时有两种假绿：
+  //   · 只验匿名侧「没有」⇒ 字段根本没加也能过；
+  //   · 只验鉴权侧「有」 ⇒ 它同时泄露给了匿名读者也能过。
+  // 这两句合起来才是「加进了 counters，且仍在鉴权侧」这个事实。
+  test("#669 counters.parent_infer 在鉴权投影里，匿名投影里没有", async () => {
+    const authed = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
+    const pi = authed.counters?.parent_infer;
+    expect(pi).toBeTruthy();
+    // 形状是契约：五个键，一个不多一个不少。
+    expect(Object.keys(pi).sort()).toEqual([
+      "accepted", "rejected_ambiguous", "rejected_too_old", "since", "window_ms",
+    ]);
+    // 窗口常量本身也是读数：「10 分钟」这个策略值必须从服务端读得到，
+    // 否则客户端只能写死一份拷贝，而那两份迟早不一致。
+    expect(pi.window_ms).toBe(600_000);
+
+    const anon = await (await fetch(`${BASE}/health`)).json() as any;
+    expect(anon.counters).toBeUndefined();
+    // 否定断言要配镜像：不能只在顶层没有就过 —— 也可能被拍平成了 counters_parent_infer。
+    expect(JSON.stringify(anon).includes("parent_infer")).toBe(false);
+  });
+
   test("KNOWN GAP: unauthenticated /api/task rejection is NOT counted (see rejection-counters.ts)", async () => {
     const before = await (await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } })).json() as any;
     const beforeTotal = before.counters.task_rejections.total as number;
