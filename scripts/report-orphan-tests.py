@@ -373,6 +373,9 @@ def main() -> int:
         print(f"  其中**同一命名习惯、只是后缀不在谓词里**的 {len(same_habit)} 个：")
         for f in same_habit[:8]:
             print(f"    {f}")
+    # 两侧都要有动作：上调 ⇒ 查是否真测试落进「不算测试」；下调 ⇒ 收紧基线。
+    if len(comp) < COMPLEMENT_BASELINE:
+        print(f"  ↓ 可以收紧基线：{COMPLEMENT_BASELINE} → {len(comp)}")
     if len(comp) > COMPLEMENT_BASELINE:
         print(f"\n✗ 补集从基线 {COMPLEMENT_BASELINE} 涨到 {len(comp)} —— "
               f"检查是否有真测试落进了「不算测试」的那一栏")

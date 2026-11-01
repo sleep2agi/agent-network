@@ -306,6 +306,13 @@ def main() -> int:
                 print(f"    {t}: {', '.join(sorted(es))}")
             print("  ⇒ 要么给它一条会红的断言，要么把基线调高并在提交信息里写清为什么。")
             return 1
+        # 2026-11-01 —— 棘轮**两侧都要有动作**：
+        # 上调 ⇒ 要么修，要么显式接受并记录；下调 ⇒ 收紧基线。
+        # 只在「变好」一侧给动作时，「变坏」那一侧等于没有出口，
+        # 而没出口的状态会被两种方式消掉：忽略它，或做一次文件里没写的改动。
+        if c["never"] < NEVER_BASELINE:
+            print(f"↓ 可以收紧基线：{NEVER_BASELINE} → {c['never']}"
+                  f"（这 {NEVER_BASELINE - c['never']} 个的松动会吸收下一次漂移）")
         print("✓ 在基线内")
     return 0
 

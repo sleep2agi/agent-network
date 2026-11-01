@@ -495,6 +495,10 @@ def main() -> int:
             print(f"✗ 非字面量 pathname 判定从 {NON_LITERAL_BASELINE} 涨到 "
                   f"{m['non_literal_path_judgments']} —— 清单又多了一个看不见的入口")
             return 1
+        # 两侧都要有动作（同一条纪律）：上调 ⇒ 查新分支；下调 ⇒ 收紧基线。
+        if bc["never_requested"] < NEVER_REQUESTED_BASELINE:
+            print(f"↓ 可以收紧基线：never_requested {NEVER_REQUESTED_BASELINE} → "
+                  f"{bc['never_requested']}", file=sys.stderr)
         if bc["never_requested"] > NEVER_REQUESTED_BASELINE:
             print(f"✗ 「从未被请求过」从基线 {NEVER_REQUESTED_BASELINE} 涨到 {bc['never_requested']}"
                   f" —— 新增了一个没有请求走到的分支", file=sys.stderr)
