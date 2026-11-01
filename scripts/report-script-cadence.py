@@ -45,6 +45,12 @@ DOC_GLOBS = ["docs/**/*.md", "docs-site/**/*.md", "skills/**/*.md", "README.md",
 # ADHOC 登记表：一次性/人肉工具放这里。**必须**有「谁会发现它烂了」与「什么时候可以删掉这一行」。
 # 空字典是合法的 —— 但它同时意味着「本仓没有一次性工具」。新增一条就是一次显式决定。
 ADHOC: dict[str, tuple[str, str]] = {
+    'hub-idle-poll-share.sh': (
+        '生产机上的巡检包装（每 6h 记一行「问状态/问活」占比，读的是生产库的 node_tool_calls）；'
+        'CI 的临时库没有这些行，跑不出比例 ⇒ CI 里不可能有发现者',
+        '它由 crontab 驱动（17 */6 * * *）并写 ~/.commhub/idle-poll-share.log；'
+        '若该巡检被并进统一的舰队巡检，删本行',
+    ),
     'hub-rotate-logs.sh': (
         '生产机上的运维脚本：按大小原地截断 hub/pm2 日志；它必须跑在**那台机器**上，'
         'CI 的 runner 没有那些日志 ⇒ CI 里不可能有发现者',
