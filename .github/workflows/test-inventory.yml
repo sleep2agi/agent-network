@@ -125,6 +125,12 @@ jobs:
       # （`canRestWriteNetwork` / `restNodeDenied` / `requireTmuxAccess` 不在那张表里）。
       # 手写表让扫描结果永远是下界，而「扫不到」与「没有」在报表上同形。
       # 这条断言两件事：清单与源码**逐字相等**；每条写路由要么有门、要么在公开名单里有理由。
+      # 2026-11-01 —— #3365：handler 内的鉴权分支清单。两次实测撞到「短路后测试仍绿」
+      # （messages/ack、upload）⇒ 那些分支看起来在防守，实际由全局层先答。
+      # 这份脚本**只报清单不给可达性结论**（没有可枚举的中间件栈），
+      # 但把「已做过变异实验的几条」和「还没做实验的 70 处」分开列出来。
+      - name: inner auth branches inventory (reachability needs per-branch mutation)
+        run: python3 scripts/report-inner-auth-branches.py
       - name: every write route either has a gate or a stated reason
         run: python3 scripts/report-rest-gates.py --assert
       - name: specific query discriminators still precede generic branches
