@@ -236,7 +236,7 @@ GATE_ELSEWHERE_HINT = {
 NEVER_REQUESTED_BASELINE = 45
 # 2026-11-01 —— 棘轮改挂**骨架口径**（15）。字面口径对参数化路径系统性为假
 # （tests 写具体 id，永远不会含 `:param`），所以它只能续历史，不能当门。
-NEVER_REQUESTED_SKELETON_BASELINE = 15
+NEVER_REQUESTED_SKELETON_BASELINE = 14
 
 
 def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
@@ -260,7 +260,18 @@ def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
     # 所以：字面口径续历史（45），骨架口径是这个数该有的读数（15）。
     # 骨架 = 把 `:paramN` 去掉，剩下的静态段必须在同一条字面量里按序出现。
     import re as _re
-    lits = [m.group(1) for m in _re.finditer(r'["\'`](/[^"\'`\s]+)["\'`]', blob)]
+    # 2026-11-01 —— 模板串也算：tests 里常写 `` `/api/nodes/${id}/provider-selection` ``，
+    # 只认单双引号会把这类**系统性**记成「没请求过」（实测：provider-selection 明明有测试）。
+    # 处理：把 `${…}` 当成一个参数段（替换成 `/`），再按骨架比。
+    # 不要求以 `/` 开头：`` `${base}/api/nodes/${id}/x` `` 这种整串开头是变量，
+    # 但它**包含**完整路径。所以先抓所有字面量，再筛含 `/` 的。
+    raw_lits = [m.group(1) for m in _re.finditer(r'["\'`]([^"\'`\n]{2,})["\'`]', blob)
+                if "/" in m.group(1)]
+    lits = []
+    for lit in raw_lits:
+        lits.append(lit)
+        if "${" in lit:
+            lits.append(_re.sub(r"\$\{[^}]*\}", "", lit))
 
     def covered_literal(p: str) -> bool:
         return f'"{p}"' in blob or f"'{p}'" in blob
