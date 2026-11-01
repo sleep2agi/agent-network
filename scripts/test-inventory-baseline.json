@@ -6409,6 +6409,11 @@
   "server/src/license-state.test.ts::licenseStateOf::the three states are mutually exclusive — no input yields two of them": 1,
   "server/src/license-state.test.ts::licenseStateOf::unknown(query_failed) wins over the row — a failed query tells us nothing about the row": 1,
   "server/src/license-state.test.ts::licenseStateOf::unknown(row_without_type): a row exists but the type is empty — different fix from absent": 1,
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::ack 一个根本不存在的 id ⇒ 同一句（两种成因**故意**不区分）": 1,
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::ack 一条已 ack 过的消息 ⇒ message not found or already acknowledged": 1,
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::durable_terminal_cursor=true 但没给 durable_cursor ⇒ durable_cursor_required": 1,
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::不给 durable_terminal_cursor 时不要求游标（条件性必需）": 1,
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::两条载荷都没有 code 字段（现状，不是契约）": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::SEC-1.1: cross-tenant utok_ caller with foreign network_id → DENIED": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::SEC-1.2: admin caller with own network_id returns own daemons": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::SEC-1.3: caller without network_id arg → returns daemons across member networks only": 1,
@@ -14685,6 +14690,11 @@
   "server/src/license-state.test.ts::licenseStateOf::the three states are mutually exclusive — no input yields two of them",
   "server/src/license-state.test.ts::licenseStateOf::unknown(query_failed) wins over the row — a failed query tells us nothing about the row",
   "server/src/license-state.test.ts::licenseStateOf::unknown(row_without_type): a row exists but the type is empty — different fix from absent",
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::ack 一个根本不存在的 id ⇒ 同一句（两种成因**故意**不区分）",
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::ack 一条已 ack 过的消息 ⇒ message not found or already acknowledged",
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::durable_terminal_cursor=true 但没给 durable_cursor ⇒ durable_cursor_required",
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::不给 durable_terminal_cursor 时不要求游标（条件性必需）",
+  "server/src/list-ack-error-domain.test.ts::#3309 list_tasks / ack_inbox 的错误值域::两条载荷都没有 code 字段（现状，不是契约）",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::SEC-1.1: cross-tenant utok_ caller with foreign network_id → DENIED",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::SEC-1.2: admin caller with own network_id returns own daemons",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::SEC-1.3: caller without network_id arg → returns daemons across member networks only",
@@ -16552,7 +16562,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "e6e0e02ca08f5533e200fa25b98e5c208964be4d",
+  "commit": "37aac7b80913e1f4f2a8194d903ce869a69dbdff",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
