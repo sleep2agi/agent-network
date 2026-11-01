@@ -65,6 +65,24 @@ def tracked() -> list[str]:
     return [l for l in out.split("\n") if l.strip()]
 
 
+def untracked_matching() -> list[str]:
+    """未跟踪、但「名字像测试」的代码文件 —— 它们此前**完全不在候选集里**。
+
+    2026-11-01 —— 同一个谓词错我在本仓出现了不止一次：
+    `git ls-files` 只列 tracked，而刚写的测试文件在被 `git add` 之前两边都不在。
+    后果不是「报错」，是**它根本不进候选集**，于是「新增了一个没人跑的测试」
+    在本地读数里等于不存在。
+
+    处置：把候选集扩成 tracked ∪ untracked，并给未跟踪的单列一格 verdict
+    （不并进 ORPHAN —— 未跟踪是「还没进库」，孤儿是「进了库没人跑」，两者处置不同）。
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "-o", "--exclude-standard"],
+        cwd=REPO, capture_output=True, text=True, timeout=60,
+    ).stdout
+    return [l for l in out.split("\n") if l.strip() and LOOKS_LIKE_TEST.search(l)]
+
+
 def runner_body(path: Path, body: str) -> str:
     """把一份 runner 配置文本变成「只有真的会执行的内容」。
 
@@ -138,9 +156,18 @@ def collect_runner_text() -> list[tuple[str, str]]:
     return out
 
 
-def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict[str, str]) -> dict:
-    """一个候选文件落进哪一类。抽成纯函数是为了能自检（元门要求 --selftest）。"""
+def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict[str, str],
+             untracked: set[str] | None = None) -> dict:
+    """一个候选文件落进哪一类。抽成纯函数是为了能自检（元门要求 --selftest）。
+
+    2026-11-01 —— 新增 D_untracked：未进 git 的测试文件单列一格。
+    理由：它是「还没进库」，与孤儿（进了库没人跑）处置不同 ——
+    前者 `git add` 就消失，后者要补 runner 或登记。
+    """
     name = f.split("/")[-1]
+    if untracked and f in untracked:
+        return {"file": f, "verdict": "D_untracked",
+                "why": "未进 git（git add 之后才会进 A/B/C 的判定）"}
     if f.endswith(".test.ts"):
         return {"file": f, "verdict": "A_inventory", "why": "*.test.ts 由 check-test-inventory.py 计数"}
     # 「被引用」有三种形态，只认第一种会误报：
@@ -288,7 +315,10 @@ def main() -> int:
     if not files:
         print("扫描域为空：git ls-files 没有结果 ⇒ 没有读数", file=sys.stderr)
         return 2
-    cands = [f for f in files if LOOKS_LIKE_TEST.search(f)]
+    # 候选集 = tracked ∪ 未跟踪（同一个谓词错我犯过两次：未 add 的文件两边都不在）
+    untracked = untracked_matching()
+    seen_tracked = {f for f in files if LOOKS_LIKE_TEST.search(f)}
+    cands = sorted(seen_tracked | set(untracked))
     if not cands:
         print("扫描域为空：一个像测试的文件都没有 ⇒ 没有读数", file=sys.stderr)
         return 2
@@ -299,7 +329,7 @@ def main() -> int:
         return 2
 
     # 判据只有一份（classify），main 不再复制一遍 —— 复制的那一份会与自检过的那个漂开。
-    rows = [classify(f, runner_text, NOT_RUN_BY_DESIGN) for f in cands]
+    rows = [classify(f, runner_text, NOT_RUN_BY_DESIGN, set(untracked)) for f in cands]
 
     inv_count = sum(1 for r in rows if r["verdict"] == "A_inventory")
     if inv_count == 0:
@@ -328,9 +358,10 @@ def main() -> int:
     print("  比值≈1 ⇒ 谓词没在筛；比值≈0 ⇒ 谓词可能写窄或域太大。两者处置相反。")
     print(f"对象：git ls-files ∩ 名字像测试 ⇒ {len(rows)} 个文件")
     counts = {v: sum(1 for r in rows if r["verdict"] == v)
-              for v in ("A_inventory", "B_runner", "C_by_design", "ORPHAN")}
+              for v in ("A_inventory", "B_runner", "C_by_design", "ORPHAN", "D_untracked")}
     for v, label in (("A_inventory", "A 测试清单计数"), ("B_runner", "B 有 runner 引用"),
-                     ("C_by_design", "C 登记为不跑"), ("ORPHAN", "**未归属**")):
+                     ("C_by_design", "C 登记为不跑"), ("D_untracked", "D 未进 git（单列）"),
+                     ("ORPHAN", "**未归属**")):
         print(f"  {label}: {counts[v]}")
     # 2026-11-01 —— **恒等式，不是不等式**：四格之和必须等于被分类的行数。
     # 写 `PASS+FAIL > 0` 只能证明「不全空」；写恒等式才能在差 1 时反解出缺了哪一类。
