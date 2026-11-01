@@ -451,21 +451,41 @@ export function getUserNetworks(userId: string) {
     userId);
 }
 
-// Quota limits by plan
-const QUOTAS: Record<string, { max_networks_owned: number; max_networks_joined: number }> = {
-  free:  { max_networks_owned: 2, max_networks_joined: 3 },
-  pro:   { max_networks_owned: 10, max_networks_joined: 20 },
-  admin: { max_networks_owned: Infinity, max_networks_joined: Infinity },
-};
+// 2026-11-01（#2980）—— 自建 Hub 的**单一上限**，不再有 free/pro 套餐概念。
+//
+// 原来是一张 `QUOTAS` 表：free 2/3、pro 10/20、admin 无限。
+// `pro` 那一行**没有任何路径能到达**（没有代码把 plan 设成 pro），
+// 而它对自部署的人是可见的 —— 报错写的是「max 2 networks for free plan」，
+// 这句话在纯开源语境里无法解释（哪来的套餐？谁在收费？）。
+//
+// ⇒ 改成「一个可配置的上限」：默认仍是 2（**零行为变化**），
+//   但「为什么是 2」变成可解释、可调整的：COMMHUB_MAX_NETWORKS_PER_USER。
+//   `users.plan` 列保留但不参与判定（与 licenses 表同样处理：不删列，避免迁移风险）。
+export const DEFAULT_MAX_NETWORKS_PER_USER = 2;
+
+/** 每次调用时读环境变量（而不是模块加载时定死）：测试与运维都能改。 */
+export function maxNetworksPerUser(): number {
+  const raw = process.env.COMMHUB_MAX_NETWORKS_PER_USER;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_NETWORKS_PER_USER;
+  const n = Number(raw);
+  // 非法值**回落到默认**而不是抛错：这是启动期配置，抛错会让整个 Hub 起不来。
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_MAX_NETWORKS_PER_USER;
+}
 
 export function createNetwork(userId: string, name: string, description?: string) {
-  // Quota check
-  const user = db.get<any>("SELECT plan, role FROM users WHERE user_id = ?1", userId);
-  const plan = user?.role === "admin" ? "admin" : (user?.plan || "free");
-  const quota = QUOTAS[plan] || QUOTAS.free;
+  // 上限检查（#2980）：admin 无限，其余按 COMMHUB_MAX_NETWORKS_PER_USER（默认 2）
+  const user = db.get<any>("SELECT role FROM users WHERE user_id = ?1", userId);
   const ownedCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM networks WHERE owner_id = ?1", userId);
-  if ((ownedCount?.cnt || 0) >= quota.max_networks_owned) {
-    return { ok: false, error: `quota exceeded: max ${quota.max_networks_owned} networks for ${plan} plan` };
+  if (user?.role !== "admin") {
+    const max = maxNetworksPerUser();
+    if ((ownedCount?.cnt || 0) >= max) {
+      // 文案要能自解释：不出现「套餐」，并说出怎么改。
+      return {
+        ok: false,
+        error: `quota exceeded: max ${max} networks per user on this hub `
+          + `(set COMMHUB_MAX_NETWORKS_PER_USER to change it)`,
+      };
+    }
   }
 
   const existing = db.get<any>(

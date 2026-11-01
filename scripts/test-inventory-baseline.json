@@ -6532,6 +6532,11 @@
   "server/src/model-auth-notify-http.test.ts::#462 transition logic::text names the node, the cause and the per-node re-login; never says to copy credentials": 1,
   "server/src/network-name-http.test.ts::GET /api/networks name compatibility (#449)::network-bound ntok rows expose the same alias": 1,
   "server/src/network-name-http.test.ts::GET /api/networks name compatibility (#449)::utok rows expose equal non-null name and network_name": 1,
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::admin 不受上限约束（与改动前一致）": 1,
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::上限可调：调大之后能继续建，调到正好时再建就拒": 1,
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::达到上限时的报错**不含套餐词**，且说出怎么改": 1,
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::非法值回落到默认，而不是让 Hub 起不来": 1,
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::默认值是 2，且环境变量缺省/空串时都用默认": 1,
   "server/src/network-rules-http.test.ts::#993 — network rules storage + CAS write::a member reads an empty document as revision 0": 1,
   "server/src/network-rules-http.test.ts::#993 — network rules storage + CAS write::a node token cannot read another network's rules": 1,
   "server/src/network-rules-http.test.ts::#993 — network rules storage + CAS write::a node token cannot write (user_token_required)": 1,
@@ -14880,6 +14885,11 @@
   "server/src/model-auth-notify-http.test.ts::#462 transition logic::text names the node, the cause and the per-node re-login; never says to copy credentials",
   "server/src/network-name-http.test.ts::GET /api/networks name compatibility (#449)::network-bound ntok rows expose the same alias",
   "server/src/network-name-http.test.ts::GET /api/networks name compatibility (#449)::utok rows expose equal non-null name and network_name",
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::admin 不受上限约束（与改动前一致）",
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::上限可调：调大之后能继续建，调到正好时再建就拒",
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::达到上限时的报错**不含套餐词**，且说出怎么改",
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::非法值回落到默认，而不是让 Hub 起不来",
+  "server/src/network-quota-config.test.ts::#2980 每用户网络数上限::默认值是 2，且环境变量缺省/空串时都用默认",
   "server/src/network-rules-http.test.ts::#993 — network rules storage + CAS write::a member reads an empty document as revision 0",
   "server/src/network-rules-http.test.ts::#993 — network rules storage + CAS write::a node token cannot read another network's rules",
   "server/src/network-rules-http.test.ts::#993 — network rules storage + CAS write::a node token cannot write (user_token_required)",
@@ -16696,7 +16706,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "91160b894bc7382e1afc4953e921852963ad9899",
+  "commit": "2a0fe80f75ce79e6e47a3722e20abcd692cc4c12",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
