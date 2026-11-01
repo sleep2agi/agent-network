@@ -247,6 +247,21 @@ describe("GET /api/nodes viewer_can.permission_mode (#489)", () => {
 });
 
 describe("GET /api/networks/:id/node-permission-report", () => {
+  // #3316 判据④ 在**这个字段上不可满足**，而原因是 schema：`permission_mode` 是
+  // `NOT NULL DEFAULT 'normal'` ⇒ 「从未设置」在库层面不存在，任何读口都只能给出 normal。
+  //
+  // 我试过加 `permission_mode_source: explicit|default`，但实测它恒为 explicit
+  // （因为列不可能为 NULL）⇒ 那样的字段比没有更糟：它长得像三态，实际是常量。
+  // ⇒ 回滚该字段，改成把这条**结构性边界**钉住：谁若允许 NULL，这条会红并强制更新读口。
+  test("permission_mode 是 NOT NULL DEFAULT 'normal' ⇒ 「没设过」在库层面不可表达（#3316 判据④ 的前置）", () => {
+    const ddl = db.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='nodes'")!.sql;
+    expect(ddl).toMatch(/permission_mode\s+TEXT\s+NOT NULL\s+DEFAULT\s+'normal'/);
+    const fresh = `n_fresh_${Math.random().toString(36).slice(2, 8)}`;
+    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, lifecycle_state) VALUES (?1, ?1, ?1, ?2, 'active')", [fresh, net]);
+    expect(db.get<{ permission_mode: string }>("SELECT permission_mode FROM nodes WHERE node_id = ?1", fresh)!.permission_mode).toBe("normal");
+  });
+
   test("owner sees would-have-blocked counts per node; members and node tokens are refused", async () => {
     const r = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
     expect(r.status).toBe(200);
