@@ -50,6 +50,30 @@ function seed() {
 beforeEach(seed);
 afterAll(cleanup);
 
+// #3325 第一格运行时对照 —— 静态口径说「断言写了什么」，这一条说「它实际返回什么」。
+// 只做**键集**比较（不比对值）：值的语义要另一套夹具，而键集已经有静态期望可对照。
+describe("#3325 运行时键集（list_tasks 成功路径）", () => {
+  test("list_tasks 成功响应的键集 == 静态期望（两者不符即有一侧是缺陷）", async () => {
+    const r = await call("list_tasks", { limit: 20 });
+    expect(r.ok).toBe(true);
+    // 这个期望来自**一次真实调用**（先跑出来，再抄进来），因此它同时是：
+    //   ① 运行时事实（它刚刚确实这么返回）
+    //   ② 变更探测器（实现改了键 ← 会红）
+    // 它**不是**契约读数：指不出一份独立于实现的书面来源。
+    // 🔴 我第一次写的是四个键（count/ok/stats/tasks）—— 真实调用给出 **五个**：
+    //    `next_cursor` 也在里面。这就是这一格存在的理由：静态读代码得到的键集是
+    //    「我以为它返回什么」，而运行时对照得到的是「它实际返回什么」。
+    expect(Object.keys(r).sort()).toEqual([
+      "count", "next_cursor", "ok", "stats", "tasks",
+    ].sort());
+    // 空库时这几格的具体形态也钉住（**第二次被真实调用纠正**：我写「stats 是对象」，
+    // 实测它是**数组** —— 源码里 stats 来自 `GROUP BY status` 的 db.all(...)，本来就是行数组）。
+    expect(r.count).toBe(0);
+    expect(r.tasks).toEqual([]);
+    expect(Array.isArray(r.stats)).toBe(true);
+  });
+});
+
 describe('#3309 「task not found」：三个工具共用同一句话', () => {
   test("三个工具在不存在的 id 上给出**同一句**（逐字相同）", async () => {
     const missing = "task_9th_does_not_exist";
