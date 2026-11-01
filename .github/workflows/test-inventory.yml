@@ -57,6 +57,16 @@ jobs:
         run: |
           python3 scripts/check-credential-ledger.py --selftest
           python3 scripts/check-credential-ledger.py
+      # #3314 —— 「改节点安全配置」的授权判据曾有**两种写法**：手写四条件（owner/admin）
+      # 与具名函数 canRestWriteNetwork（任何非 viewer，含 member）。它们在调用点同形，
+      # 而强度差在被调函数里 ⇒ 谁新写一条路由，就照抄它附近那一行，而那是哪一种取决于
+      # 他当时读到哪段代码。合并的方向是**放宽**，且现有夹具全是 owner/admin 探针，
+      # 放宽不会让任何测试变红。所以这里钉三件事：四条路由都走具名门、不许手写残留、
+      # 具名函数与它的测试都在位。判据边界按花括号取这条路由自己的 if 块（不是行窗口）。
+      - name: node security writes go through one named gate (and it is stricter than network writes)
+        run: |
+          python3 scripts/check-node-security-write-gate.py --selftest
+          python3 scripts/check-node-security-write-gate.py
       # 2026-10-31 —— `trap '<...> exit 1' ERR` 会把 RC 采集吃掉：`RC=$?` 到不了，
       # 于是「已失效（2）」被读成「未预期（1）」，动作从「更新卡」错到「查脚本」。
       # 本脚本自带 must-fire（--selftest 5 例，含 1 个必须红的负例）。

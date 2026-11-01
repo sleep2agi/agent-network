@@ -44,7 +44,7 @@ import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
 import { flagOrphanTasks } from "./task-orphan.js";
-import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, canRestWriteNodeSecurity, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { withBusyElapsed } from "./scheduled-failure-code.js";
 import { pickAliasNetwork } from "./rest-alias-network-fallback.js";
 import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
@@ -4055,7 +4055,7 @@ return Bun.serve({
       // 看不见这个节点(不在它的网络里)与不存在同一个 404。
       if (!node || !node.network_id || (!role && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
       // 节点主人、网络 owner / admin、Hub 管理员能改;部门负责人和别的成员不能(RFC-041 §2.3 / §2.4)。
-      if (!isAdmin && node.owner_user_id !== restAuth.userId && role !== "owner" && role !== "admin") {
+      if (!canRestWriteNodeSecurity(restAuth, node.owner_user_id, role, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its permission mode" }, { status: 403 }));
       }
       const previous = (node.permission_mode || "normal") as NodePermissionMode;
@@ -4228,7 +4228,7 @@ return Bun.serve({
         "SELECT node_id, network_id, owner_user_id, tool_allowlist FROM nodes WHERE node_id = ?1", nodeRef3);
       const role3 = node3?.network_id ? getUserNetworkRole(restAuth.userId, node3.network_id) : null;
       if (!node3 || !node3.network_id || (!role3 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
-      if (!isAdmin && node3.owner_user_id !== restAuth.userId && role3 !== "owner" && role3 !== "admin") {
+      if (!canRestWriteNodeSecurity(restAuth, node3.owner_user_id, role3, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its tool allowlist" }, { status: 403 }));
       }
       const nextTools = tools.length ? JSON.stringify(tools) : null;
@@ -4262,7 +4262,7 @@ return Bun.serve({
         "SELECT node_id, network_id, owner_user_id, rest_allowlist FROM nodes WHERE node_id = ?1", nodeRef4);
       const role4 = node4?.network_id ? getUserNetworkRole(restAuth.userId, node4.network_id) : null;
       if (!node4 || !node4.network_id || (!role4 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
-      if (!isAdmin && node4.owner_user_id !== restAuth.userId && role4 !== "owner" && role4 !== "admin") {
+      if (!canRestWriteNodeSecurity(restAuth, node4.owner_user_id, role4, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its REST allowlist" }, { status: 403 }));
       }
       const nextRoutes = routes.length ? JSON.stringify(routes) : null;
@@ -4303,7 +4303,7 @@ return Bun.serve({
         "SELECT node_id, network_id, owner_user_id, peer_allowlist FROM nodes WHERE node_id = ?1", nodeRef2);
       const role2 = node2?.network_id ? getUserNetworkRole(restAuth.userId, node2.network_id) : null;
       if (!node2 || !node2.network_id || (!role2 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
-      if (!isAdmin && node2.owner_user_id !== restAuth.userId && role2 !== "owner" && role2 !== "admin") {
+      if (!canRestWriteNodeSecurity(restAuth, node2.owner_user_id, role2, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its peer allowlist" }, { status: 403 }));
       }
       const nextValue = peers.length ? JSON.stringify(peers) : null;

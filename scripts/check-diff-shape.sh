@@ -133,7 +133,15 @@ if printf '%s\n' "$touched" | grep -q '^scripts/'; then
   out=$(${GATES_WIRED_CMD:-python3 scripts/check-gates-wired.py} 2>&1); grc=$?
   if [ "$grc" -ne 0 ]; then
     echo "✗ 本次改动了 scripts/，而接线门是红的 —— 提交前必须绿：" >&2
-    printf '%s\n' "$out" | grep -E '✗' | head -6 >&2
+    # 2026-11-01 —— 只 grep '✗' 会把「门跑不起来」显示成「门是红的但没有原因」。
+    # 实测：PATH 里没有 node 时 check-gates-wired.py 抛 FileNotFoundError、rc=1，
+    # 而输出里一行 ✗ 都没有 —— 读起来与「接线真的错了」同形，处理方式却相反（查环境）。
+    if printf '%s\n' "$out" | grep -qE '✗'; then
+      printf '%s\n' "$out" | grep -E '✗' | head -6 >&2
+    else
+      echo "  ⇒ 门没给出任何 ✗ —— 它多半是**没跑起来**（环境/依赖），不是接线错。末尾输出：" >&2
+      printf '%s\n' "$out" | tail -5 | sed 's/^/    /' >&2
+    fi
     echo "  ⇒ 新脚本要进 workflow，或在 KNOWN_UNWIRED 里登记 [tag] 理由 + 移出条件。" >&2
     exit 1
   fi
