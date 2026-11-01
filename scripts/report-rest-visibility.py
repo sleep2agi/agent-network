@@ -274,6 +274,9 @@ def gate_tokens_by_row(lines: list[str], rows: list[dict]) -> dict:
     compiled = {n: _re.compile(rx) for n, rx in GATE_TOKENS.items()}
     out: dict[int, list[str]] = {}
     none_rows = []
+    # 每条规则**当前命中几处**：从不命中的规则与「这条规则有用」在报告上同形，
+    # 而一张全是零命中的规则表读起来像一套完备的防护。
+    hit_count = {n: 0 for n in GATE_TOKENS}
     for r in rows:
         ln = r.get("line")
         g = guarding_if(lines, ln) if ln else None
@@ -281,8 +284,10 @@ def gate_tokens_by_row(lines: list[str], rows: list[dict]) -> dict:
         toks = sorted({n for n, rx in compiled.items() if any(rx.search(l) for l in block)})
         if not toks:
             none_rows.append({"line": ln, "path": r.get("path")})
+        for t in toks:
+            hit_count[t] += 1
         out[ln] = toks
-    return {"by_row": out, "no_gate_tokens": none_rows,
+    return {"by_row": out, "no_gate_tokens": none_rows, "hit_count": hit_count,
             "recognizer": f"GATE_TOKENS（{len(GATE_TOKENS)} 个名字）—— 换表则数会变，分母不动"}
 
 
@@ -519,6 +524,10 @@ def main() -> int:
     print(f"  其中按成因分栏：本来就该匿名 {len(anon)} · 判定在别处 {len(elsewhere)} · **真缺门 {len(real)}**")
     for x in real[:6]:
         print(f"     [真缺门?] L{x['line']} {x['path']}")
+    dead = [n for n, k in g["hit_count"].items() if k == 0]
+    print(f"  规则命中分布：{', '.join(f'{n}={k}' for n, k in sorted(g['hit_count'].items(), key=lambda kv: -kv[1]))}")
+    if dead:
+        print(f"  ⚠ **从不命中**的规则 {len(dead)} 条：{dead} ⇒ 它们在表里，但没有在为任何东西工作")
     print(f"  **读不到门**的行 {len(g['no_gate_tokens'])} / {len(g['by_row'])}"
           f" —— 不是「没有门」，是这份 token 表认不出：")
     for x in g["no_gate_tokens"][:8]:
