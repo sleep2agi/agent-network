@@ -97,6 +97,31 @@ def if_block(lines: list[str], row_line: int) -> tuple[int, list[str]] | None:
 DENY_RE = re.compile(r"\b(return|throw)\b|40[13]|denied|forbid", re.I)
 
 
+GUARD_FORMS = ("if_plus_deny", "assign_then_test")
+
+
+def guard_form_census(block: list[str]) -> dict[str, int]:
+    """每种守卫形态在这块里命中几行。
+
+    2026-11-01 —— 形态种类不由我背下来，由**普查**决定：
+    这条读数回答「要不要加第三种形态」，而它是一次扫描的成本。
+    写死两份形态而不报频次时，第三份形态出现只会表现为「某条路由突然判不了」。
+    """
+    out = {f: 0 for f in GUARD_FORMS}
+    for i, line in enumerate(block):
+        if re.match(r"\s*if\s*\(", line) and DENY_RE.search(" ".join(block[i:i + 3])):
+            out["if_plus_deny"] += 1
+    for i, line in enumerate(block):
+        m = re.match(r"\s*(?:const|let)\s+(\w+)\s*=", line)
+        if not m:
+            continue
+        for j in range(i + 1, min(i + 4, len(block))):
+            if re.match(r"\s*if\s*\(", block[j]) and m.group(1) in block[j]:
+                out["assign_then_test"] += 1
+                break
+    return out
+
+
 def guard_position_lines(block: list[str]) -> set[int]:
     """块内「门**真的被用来拒绝**」的那些行下标。
 
@@ -147,6 +172,7 @@ def classify(doc: dict, lines: list[str]) -> dict:
     gated, public, unknown, unlisted = [], [], [], set()
     # 全路由（读+写）用到的符号：用来判「登记在腐化」。
     # 只在写路由块里找会把「只守读路由的门」误判成已死 —— 那会给出一条假的清理建议。
+    census: dict[str, int] = {}
     all_used: set[str] = set()
     for r in (doc.get("rows") or []):
         found = if_block(lines, int(r.get("line") or 0))
@@ -167,6 +193,8 @@ def classify(doc: dict, lines: list[str]) -> dict:
         # 只开 ① 会重演那个假阴性：第一版脚本报「19 条写路由无门」，而它们全都调了 resolveToken。
         syms, _extra = symbols_in(block)
         guard_idx = guard_position_lines(block)
+        for form, n in guard_form_census(block).items():
+            census[form] = census.get(form, 0) + n
         guard_syms = sorted({s for i in guard_idx for s in symbols_in([block[i]])[0]})
         syms = sorted(syms)
         if guard_syms:
@@ -181,6 +209,7 @@ def classify(doc: dict, lines: list[str]) -> dict:
             unknown.append((path, r.get("method"), r.get("line"), "块内没有任何门符号"))
     return {"gated": gated, "public": public, "unknown": unknown,
             "used": all_used, "unlisted": unlisted,
+            "census": census,
             "extracted": all_used & (set(GATE_RE.findall("\n".join(lines))) or set()),
             "source_text": "\n".join(lines)}
 
@@ -215,6 +244,8 @@ def problems_for(result: dict, doc: dict) -> list[str]:
 
 def selftest() -> int:
     """合成输入，钉住三件事：有门算有门 / 无门且未登记要报 / 登记腐化要报。"""
+    # 条数由登记了几例派生（理由同 check-rest-route-table.py：写死常数会在加例时算错）
+    cases: list[int] = []
     fails = 0
     doc = {"rows": [
         {"path": "/w/gated", "method": "PUT", "line": 2},
@@ -238,32 +269,58 @@ def selftest() -> int:
     res = classify(doc, lines)
     ok = [p for p, _, _ in res["gated"]] == ["/w/gated"]
     print(("✓" if ok else "✗") + " selftest 有门的写路由被算作 gated")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     probs = problems_for(res, doc)
     ok = any(x.startswith("WRITE_ROUTE_UNGATED") and "/w/bare" in x for x in probs)
     print(("✓" if ok else "✗") + " selftest 无门且未登记 ⇒ WRITE_ROUTE_UNGATED 点名那条")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     ok = not any("/api/auth/login" in x for x in probs)
     print(("✓" if ok else "✗") + " selftest 公开名单里的那条不算缺口")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     stale_doc = {"rows": [{"path": "/w/gated", "method": "PUT", "line": 2}]}
     ok = any(x.startswith("PUBLIC_ENTRY_STALE") for x in problems_for(res, stale_doc))
     print(("✓" if ok else "✗") + " selftest 公开名单里的路由消失 ⇒ PUBLIC_ENTRY_STALE")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     ok = any(x.startswith("GATE_SYMBOL_UNUSED") for x in probs)
     print(("✓" if ok else "✗") + " selftest 登记了却抽不到 ⇒ GATE_SYMBOL_UNUSED")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     # 2026-11-01 —— 入口层 vs 守卫层：符号出现在块里但没拦住任何人 ⇒ 不算有门。
     weak = ["", "if (m) {", "  console.log(canRestWriteNetwork(a));", "  return ok();", "}"]
     res_weak = classify({"rows": [{"path": "/w/weak", "method": "PUT", "line": 2}]}, weak)
     ok = len(res_weak["gated"]) == 0 and len(res_weak["unknown"]) == 1
     print(("✓" if ok else "✗") + " selftest 块里有门符号但不在守卫位置 ⇒ 判不了（不是有门）")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+    # ② 每种守卫形态各一例：形态数 == 这一组自测数。
+    # 只测其中一种时，「另一种形态根本没实现」与「实现了但没被用到」同形。
+    form_if = ["", "if (m && !canRestWriteNetwork(a)) {", "  return 403;", "}"]
+    ok = len(guard_position_lines(form_if)) > 0
+    print(("✓" if ok else "✗") + " selftest 形态 if_plus_deny 单独命中")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
+    form_assign = ["", "const denied = restNodeDenied(req);", "if (denied) return denied;"]
+    ok = len(guard_position_lines(form_assign)) > 0
+    print(("✓" if ok else "✗") + " selftest 形态 assign_then_test 单独命中")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
+    ok = len(cases) >= len(GUARD_FORMS) + 4
+    print(("✓" if ok else "✗") + f" selftest 形态数（{len(GUARD_FORMS)}）不超过自测例数（{len(cases)}）")
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
+
+    print(f"✓ selftest {len(cases) - fails}/{len(cases)} 通过")
     return 0 if fails == 0 else 1
 
 
@@ -315,6 +372,9 @@ def main() -> int:
     for path, method in result["public"]:
         print(f"  公开 {method} {path} —— {PUBLIC_BY_DESIGN[(path, method)]}")
     covered, gap = chain_coverage(result)
+    census = result.get("census") or {}
+    print("  守卫形态普查：" + " · ".join(f"{k} {v} 行" for k, v in sorted(census.items()))
+          + "（要不要加第三种形态，看这张表的分布，不靠记性）")
     print(f"  链路覆盖 {covered}/{len(CHAIN)} @ first_gap={gap}")
     for i, (name, why) in enumerate(CHAIN):
         state = "已验" if i < covered else ("**首个缺口**" if name == gap else "未验")

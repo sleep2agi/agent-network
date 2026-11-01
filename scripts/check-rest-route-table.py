@@ -287,12 +287,17 @@ def selftest(quiet: bool = False) -> int:
                      {"path": "/api/b", "method": None, "query": ["x"], "line": 2}],
             "provenance": ["gen from a.ts sha256=aaaa"]}
     same = json.dumps(base, ensure_ascii=False)
+    # 2026-11-01 —— 条数**不写字面量**：它由登记了几例派生。
+    # 写死 `9 - fails` 时，加一例而忘了改 9 ⇒ 通过率会算出 10/9 之类的数，
+    # 而那种数在终端上看起来只是「有点怪」，不会有人去查。
+    cases: list[int] = []
     fails = 0
 
     d = diff_tables(same, same)
     ok = d["identical"] is True
     if not quiet: print(("✓" if ok else "✗") + " selftest 逐字节相同 ⇒ identical")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     # 方向：committed 是文件（旧），fresh 是现在生成的（新）。
     # 「文件里少一行」= 源码现在多一行 ⇒ new=1（第一版我写反了方向，自检当场抓到）。
@@ -300,7 +305,8 @@ def selftest(quiet: bool = False) -> int:
     d = diff_tables(same, dropped)
     ok = (d["identical"] is False) and len(d["gone"]) == 1 and len(d["new"]) == 0
     if not quiet: print(("✓" if ok else "✗") + " selftest 文件多一行（源码删了它）⇒ gone=1 / new=0")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     # 关键：method=None 的行必须能参与比较而不抛异常（今晚真实崩溃的那一格）
     prov = json.dumps({**base, "provenance": ["gen from a.ts sha256=bbbb"]}, ensure_ascii=False)
@@ -310,7 +316,8 @@ def selftest(quiet: bool = False) -> int:
     except TypeError:
         ok = False
     if not quiet: print(("✓" if ok else "✗") + " selftest 只有 provenance 变 ⇒ 报 provenance（且 method=None 不炸）")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
     # 2026-11-01 —— 键唯一性是**新加的一条**，它自己也要有「红过」的见证：
     #   (path,method,query) 在真实表里只有 57/94 唯一 ⇒ 那条真实数据就是负例的样子。
     kp = check_key_uniqueness({"key": ["path", "method", "query", "order"],
@@ -318,28 +325,33 @@ def selftest(quiet: bool = False) -> int:
                                         {"path": "/a", "method": "GET", "query": [], "order": 2}]})
     ok = kp == []
     if not quiet: print(("✓" if ok else "✗") + " selftest 键带 order ⇒ 同 path 同 method 仍是两行")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     kp = check_key_uniqueness({"key": ["path", "method", "query"],
                                "rows": [{"path": "api", "method": None, "query": [], "order": 1},
                                         {"path": "api", "method": None, "query": [], "order": 2}]})
     ok = len(kp) == 1 and kp[0].startswith("KEY_NOT_UNIQUE")
     if not quiet: print(("✓" if ok else "✗") + " selftest 键不含 order ⇒ KEY_NOT_UNIQUE（2 行同键只算一格）")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     # 2026-11-01 —— 三条新的形状钉子，各自都要有「红过」的见证：
     ok = check_order_sequence({"rows": [{"order": 1}, {"order": 2}]}) == []
     if not quiet: print(("✓" if ok else "✗") + " selftest order == 数组顺序 ⇒ 无问题")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     ok = bool(check_order_sequence({"rows": [{"order": 1}, {"order": 9}]}))
     if not quiet: print(("✓" if ok else "✗") + " selftest order 与下标分叉 ⇒ ORDER_MISMATCH")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     ok = check_kind_enum({"rows": [{"kind": "eq"}, {"kind": "regex_prefix"}]}) == [] \
         and bool(check_kind_enum({"rows": [{"kind": "handler"}]}))
     if not quiet: print(("✓" if ok else "✗") + " selftest kind 闭集：已知三种过、handler 红")
-    fails += 0 if ok else 1
+    cases.append(0 if ok else 1)
+    fails += cases[-1]
 
     # 2026-11-01 —— 「报差异」这条分支此前**一次都没成功执行过**：
     # 它唯一的执行条件就是它要报告的那个条件（表过期），而在正常 CI 里表总是新的
@@ -347,8 +359,9 @@ def selftest(quiet: bool = False) -> int:
     # 断言三件事：退出码 1（不是 2、不是异常）、说了「已过期」、**没有 traceback**。
     # 第二条最重要：它正是当年在要报错的场合抛 TypeError 的那一格。
     import tempfile
-    fails += _selftest_diff_branch(quiet)
-    if not quiet: print(f"✓ selftest {9 - fails}/9 通过")
+    cases.append(_selftest_diff_branch(quiet))
+    fails += cases[-1]
+    if not quiet: print(f"✓ selftest {len(cases) - fails}/{len(cases)} 通过")
     return 0 if fails == 0 else 1
 
 
