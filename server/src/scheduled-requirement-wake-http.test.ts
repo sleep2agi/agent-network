@@ -148,7 +148,11 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
     expect(created.ok).toBe(true); const id = created.schedule.schedule_id;
     expect(created.schedule.schedule.requirement_wake.tag).toBe("ANet");
     expect((await mcp(nodes.b.token, "schedule_update", { schedule_id: id, schedule: { type: "interval", every_seconds: 180, requirement_wake: null } })).ok).toBe(false);
-    expect((await mcp(nodes.a.token, "schedule_batch_interval", { schedule_ids: [id], every_seconds: 180 })).ok).toBe(true);
+    const bi = await mcp(nodes.a.token, "schedule_batch_interval", { schedule_ids: [id], every_seconds: 180 });
+    // #3275 批次 4 —— 批量改间隔是**部分成功**语义：updated / failed / results 三个一起才有意义。
+    // 只断言 ok 时，「失败了几条」和「分别为什么」都拿不到 —— 而批量操作恰恰最需要这个。
+    expect(Object.keys(bi).sort()).toEqual(["failed", "ok", "results", "updated"]);
+    expect(bi.ok).toBe(true);
     expect(state(id).requirement_wake_json).toBeTruthy();
     expect((await mcp(nodes.a.token, "schedule_update", { schedule_id: id, name: "metadata" })).ok).toBe(true);
     expect(state(id).requirement_wake_json).toBeTruthy();

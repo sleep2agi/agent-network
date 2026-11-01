@@ -241,6 +241,10 @@ describe("#1440 new_task inbox_count on requeue paths", () => {
 
     const tools = buildHandlers(SENDER);
     const res = await call(tools.retry_task, { task_id: taskId, network_id: NET });
+    // #3275 批次 4 —— retry_task 三键（实测）。`retried_to` 是**改派后落在谁那儿**：
+    // 与 send_task 的 actual_to 同义，但少了它，调用方只能假设「还是原来那个」——
+    // 而这个假设在「原目标已下线」时正是错的那一次。
+    expect(Object.keys(res).sort()).toEqual(["ok", "retried_to", "task_id"]);
     expect(res.ok).toBe(true);
 
     const evt = await readFrame(reader);
