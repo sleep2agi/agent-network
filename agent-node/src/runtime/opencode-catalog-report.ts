@@ -26,3 +26,21 @@ export function catalogReport(snapshot: CatalogSnapshotLike): CatalogReport | un
   // Hub 侧那一列是 max(40) 的字符串；这里先截，避免整份心跳因一格超长被拒。
   return { models, seenAt: raw.slice(0, 40) };
 }
+
+// ── 缓存：一次读失败不许把整份清单抹掉 ──
+//
+// 生产实测（2026-11-01，通信欧 n_28e6b2c2）：节点**正在干活**时，
+// /api/provider + /api/model + /api/model/default 三次读要抢同一个 busy 的
+// opencode server，3 秒超时经常不够 ⇒ reportedOpenCodeCatalog 返回 undefined
+// ⇒ 这一次心跳的 config_snapshot 里**没有** opencode_catalog（快照是整份覆盖写的，
+// 不是逐键合并）⇒ 客户端看到的是「这个节点没有清单」，于是回落到「同 runtime 其他节点」
+// 的清单 —— 用户点到本机其实也有、但来源不同的模型，切换失败时分不清是哪种原因。
+//
+// 规则：读失败就沿用**上一次成功**的那份，并保留它的 seenAt。
+// seenAt 保留是对的：它说的就是「这份清单是什么时候采的」，不是「这次心跳的时间」。
+export function keepLastCatalog(
+  previous: CatalogReport | undefined,
+  next: CatalogReport | undefined,
+): CatalogReport | undefined {
+  return next ?? previous;
+}

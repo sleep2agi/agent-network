@@ -50,3 +50,26 @@ describe("#3144 节点上报 opencode_catalog 与 opencode_catalog_seen_at 同�
     expect(src).not.toContain("opencode_catalog: reportedCatalog }");
   });
 });
+
+/** `async function reportedOpenCodeCatalog(...) { … }` 的函数体（含签名）。 */
+function reportedCatalogFn(): string {
+  const start = src.indexOf("async function reportedOpenCodeCatalog(");
+  expect(start).toBeGreaterThan(-1);
+  // 顶层函数以列 0 的 `}` 收尾（这里不能数括号：签名里有 `{ url: string }` 这种类型字面量，
+  // 数括号会在签名处就配平，取到的只有一行）。
+  const end = src.indexOf("\n}\n", start);
+  expect(end).toBeGreaterThan(start);
+  return src.slice(start, end + 3);
+}
+
+describe("#3144 读失败不许把清单抹掉（接线，不是只测纯函数）", () => {
+  test("成功分支走 keepLastCatalog，失败分支返回上一份而不是 undefined", () => {
+    const fn = reportedCatalogFn();
+    expect(fn).toContain("keepLastCatalog(lastCatalogReport, catalogReport(snapshot))");
+    expect(fn).toMatch(/catch\s*\{[\s\S]*return lastCatalogReport;/);
+  });
+
+  test("镜像否定：失败分支不许回到 `catch { return undefined; }`（那正是这次要修的行为）", () => {
+    expect(reportedCatalogFn()).not.toMatch(/catch\s*\{\s*return undefined;\s*\}/);
+  });
+});

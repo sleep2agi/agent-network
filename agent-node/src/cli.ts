@@ -1384,7 +1384,7 @@ import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runt
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
 import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
 // #3144 —— 清单与采集时刻同进同出（纯函数在 runtime/opencode-catalog-report.ts，可单测）
-import { catalogReport } from "./runtime/opencode-catalog-report";
+import { catalogReport, keepLastCatalog } from "./runtime/opencode-catalog-report";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
@@ -1857,6 +1857,8 @@ let claudeLoginDead = false;
  *
  * 失败一律 undefined:心跳既不许被这件事拖住(3s 超时),也不许因为读列表失败被拒。
  */
+// 上一次成功采到的清单。读失败时沿用它（见 keepLastCatalog 的注释）。
+let lastCatalogReport: { models: string[]; seenAt: string } | undefined;
 async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: string; directory: string } | null): Promise<{ models: string[]; seenAt: string } | undefined> {
   if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || !endpoint) return undefined;
   try {
@@ -1870,8 +1872,12 @@ async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: s
     // 只报清单时，51 个模型是刚采的还是三周前的分不出，而 sessions 的心跳时间
     // (`last_seen_at`) 不是采集时刻 —— 那只是「这个节点还活着」。
     // `observedAt` 是 readOpenCodeCatalog 归一化时写下的，正是这次采集的时刻。
-    return catalogReport(snapshot);
-  } catch { return undefined; }
+    lastCatalogReport = keepLastCatalog(lastCatalogReport, catalogReport(snapshot));
+    return lastCatalogReport;
+  } catch {
+    // 读失败：沿用上一次成功的清单（带它自己的 seenAt），而不是让这次心跳把它抹掉。
+    return lastCatalogReport;
+  }
 }
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
   // #667 — idle with nothing running writes the warning, or omits task.
