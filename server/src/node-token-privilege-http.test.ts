@@ -103,6 +103,19 @@ describe("account and network management need a user token", () => {
     expect((await call(ntok, "DELETE", "/api/auth/tokens/tok_whatever")).status).toBe(403);
     expect((await call(adminToken, "GET", "/api/auth/tokens")).status).toBe(200);
   });
+  // #3354 —— DELETE /api/auth/tokens/:id：拒绝之后**那一行必须还在**。
+  // 吊销是不可逆的副作用（令牌一旦删掉，用户的脚本当场断掉），所以拒绝时更不能碰它。
+  test("节点令牌不能吊销用户令牌：403 且目标行仍在", async () => {
+    const mint = await call(adminToken, "POST", "/api/auth/tokens", { name: "revoke-target" });
+    expect(mint.status).toBe(200);
+    const targetId = mint.body.token_id as string;
+    expect(db.get("SELECT 1 FROM api_tokens WHERE token_id = ?1", targetId)).toBeTruthy();
+    const denied = await call(ntok, "DELETE", `/api/auth/tokens/${targetId}`);
+    expect(denied.status).toBe(403);
+    // 拒绝的第二半：那一行还在（只断 403 时，「拒了但已经吊销了」也会绿）
+    expect(db.get("SELECT 1 FROM api_tokens WHERE token_id = ?1", targetId)).toBeTruthy();
+  });
+
   test("cannot edit the owner's profile or password", async () => {
     expect((await call(ntok, "PUT", "/api/auth/me", { display_name: "pwned" })).status).toBe(403);
     expect(db.get<{ display_name: string }>("SELECT display_name FROM users WHERE user_id = ?1", adminId)?.display_name).not.toBe("pwned");
