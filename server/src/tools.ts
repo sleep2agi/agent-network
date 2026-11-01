@@ -2174,6 +2174,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // still proceed; the LLM may have meant to dispatch fresh.
           console.log(`[${ts()}] ⚠ send_task: parent_task_id=${parentIn.slice(0, 8)} not found, dropping parent link`);
           parentTaskId = null;
+          // #3348 —— **来源必须与父一起丢弃**。
+          // 上面那段 meta 是在父校验**之前**拼的（`if (parentSource && parentTaskId)` 当时为真），
+          // 而这里才把 parentTaskId 置空 ⇒ 落库会留下
+          //     parent_task_id = NULL，meta.parent_source = "explicit"
+          // 这一格。#669 那条不变式正是「父有值 ⇒ 来源有值」，它只挡住了反方向
+          // （父为空时来源也不必在），于是这一格两边都放过。
+          // 生产实测：131684 行里有 2 条落在这里（10-30、10-31 各一条）。
+          parentSource = null;
+          metaJsonWithParent = metaJson;
         } else if ((parentRow.network_id ?? null) !== (effectiveNetId ?? null)) {
           console.log(`[${ts()}] 🚫 send_task: cross-network parent rejected, parent=${parentIn.slice(0, 8)} parent-net=${parentRow.network_id ?? "null"} caller-net=${effectiveNetId ?? "null"}`);
           return { content: [{ type: "text" as const, text: JSON.stringify({

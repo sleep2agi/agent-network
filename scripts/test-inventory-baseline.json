@@ -6900,6 +6900,7 @@
   "server/src/parent-source-marker.test.ts::#669 parent source marker::取候选必须看得到「不止一条」—— LIMIT 1 会让「候选唯一」静默失效": 1,
   "server/src/parent-source-marker.test.ts::#669 parent source marker::显式 parent 记为 explicit，推断命中时改写为 inferred": 1,
   "server/src/parent-source-marker.test.ts::#669 parent source marker::来源只在确实有 parent 时写进 meta，且序列化失败不影响派发": 1,
+  "server/src/parent-source-orphan.test.ts::#3348 不存在的显式父：父与来源一起丢::父不存在 ⇒ 任务照样建成，但 parent_task_id 为 NULL 且 meta 里没有 parent_source": 1,
   "server/src/password-dict.test.ts::WEAK_PASSWORDS — case insensitive contract (storage is lowercase)::lowercase lookup matches": 1,
   "server/src/password-dict.test.ts::WEAK_PASSWORDS — case insensitive contract (storage is lowercase)::uppercase lookup misses (must be lowercased by caller)": 1,
   "server/src/password-dict.test.ts::WEAK_PASSWORDS — generated families::contains 6-digit zero-padded numbers 000000..000999": 1,
@@ -15212,6 +15213,7 @@
   "server/src/parent-source-marker.test.ts::#669 parent source marker::取候选必须看得到「不止一条」—— LIMIT 1 会让「候选唯一」静默失效",
   "server/src/parent-source-marker.test.ts::#669 parent source marker::显式 parent 记为 explicit，推断命中时改写为 inferred",
   "server/src/parent-source-marker.test.ts::#669 parent source marker::来源只在确实有 parent 时写进 meta，且序列化失败不影响派发",
+  "server/src/parent-source-orphan.test.ts::#3348 不存在的显式父：父与来源一起丢::父不存在 ⇒ 任务照样建成，但 parent_task_id 为 NULL 且 meta 里没有 parent_source",
   "server/src/password-dict.test.ts::WEAK_PASSWORDS — case insensitive contract (storage is lowercase)::lowercase lookup matches",
   "server/src/password-dict.test.ts::WEAK_PASSWORDS — case insensitive contract (storage is lowercase)::uppercase lookup misses (must be lowercased by caller)",
   "server/src/password-dict.test.ts::WEAK_PASSWORDS — generated families::contains 6-digit zero-padded numbers 000000..000999",
@@ -16624,7 +16626,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "ee06865fb6609f42b431175270641b6b04fe749a",
+  "commit": "50fa4ea7607d760ccae475de5a19e4797cd3044d",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
