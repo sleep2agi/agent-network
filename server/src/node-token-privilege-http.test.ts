@@ -116,7 +116,13 @@ describe("account and network management need a user token", () => {
     expect((await call(ntok, "GET", `/api/networks/${NET}/members`)).status).toBe(403);
     expect((await call(ntok, "POST", `/api/networks/${NET}/members`, { user_id: "u_x" })).status).toBe(403);
     expect((await call(ntok, "POST", `/api/networks/${NET}/invite`, { role: "admin" })).status).toBe(403);
+    // #3354 —— 拒绝之外还要钉「没加入任何网络」：join 的副作用是**多一行 network_members**。
+    // 只断 403 时，「拒了但已经加进去了」也会绿 —— 而那意味着节点令牌借邀请码混进了别人的租户。
+    const memberships = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM network_members WHERE user_id = ?1", adminId)!.n;
+    const beforeJoin = memberships();
     expect((await call(ntok, "POST", "/api/networks/join", { invite_code: "inv_x" })).status).toBe(403);
+    expect(memberships()).toBe(beforeJoin);
     expect((await call(adminToken, "GET", `/api/networks/${NET}/members`)).status).toBe(200);
   });
   test("renames: a node token may only rename ITSELF in its bound network", async () => {
