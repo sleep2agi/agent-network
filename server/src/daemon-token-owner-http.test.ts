@@ -177,6 +177,27 @@ test("legacy owner and exact bound identity remain supported", async () => {
   expect(gotProbe.ok).toBe(false);
   // 实测：错误分支多一个 reason（不是只 {error, ok}）——**又一次由真实调用纠正**
   expect(Object.keys(gotProbe).sort()).toEqual(["error", "ok", "reason"]);
+  // #3309 分支 —— get_probe_request 的**成功出口**（此前只有不存在分支被钉）。
+  // `putPendingProbeSecret` 是导出的 ⇒ 直接把一条 probe 放进 Map 即可，不需要造真 probe 流程。
+  {
+    const { putPendingProbeSecret } = await import("./probe.js");
+    putPendingProbeSecret({
+      probe_id: "probe_fixture_live", daemon_node_id: daemon, provider_id: "prov_fixture",
+      vendor: "anthropic", base_url: "https://api.anthropic.com", model_name: "m",
+      api_key: `PROBE-SENTINEL-${Date.now()}`, network_id: owner.network_id,
+    });
+    const live = await call(legacy, "get_probe_request", { probe_id: "probe_fixture_live" });
+    // 实测六键。**注意 api_key 在里面** —— 这是本仓唯一一个「读面回传明文密钥」的出口，
+    // 它靠三条约束成立：① 只有目标 daemon 能取（cross-daemon guard）
+    //                    ② 取一次就删（takePendingProbeSecret）
+    //                    ③ 60s TTL
+    // ⇒ 断言里顺带把这三条的可观测面钉住：取走后第二次调用必须回到不存在分支。
+    expect(Object.keys(live).sort()).toEqual(["api_key", "base_url", "model_name", "ok", "probe_id", "vendor"]);
+    expect(live.ok).toBe(true);
+    const again = await call(legacy, "get_probe_request", { probe_id: "probe_fixture_live" });
+    expect(again).toEqual({ ok: false, error: "probe_request_unavailable", reason: "not_found_or_wrong_daemon_or_expired" });
+  }
+
   // 2026-10-31 —— #3275：get_opencode_catalog_request 的**不存在**分支恰好两键
   // （与 get_probe_request 的三键不同族 —— 又一次说明「错误信封不是全仓一个形状」）
   const gotCatalog = await call(legacy, "get_opencode_catalog_request", { request_id: "cat_fixture_absent" });
