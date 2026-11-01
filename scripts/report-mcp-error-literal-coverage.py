@@ -40,6 +40,20 @@ GEN = REPO / "scripts" / "report-mcp-outcome-domain.py"
 # 基线：**一次都没出现过**的字面量个数。增长 ⇒ 又有一个 error 只在生产里才会被看见。
 NEVER_BASELINE = 6
 
+# 登记为「不做」的：**造不出真实状态**，而不是「懒得写」。
+# 判据：理由必须说明「为什么造出来的绿等于假绿」，而不是「暂时没空」。
+NOT_TESTED_BY_DESIGN: dict[str, str] = {
+    "request_vanished": (
+        "代码自己标着 'Should never happen given the earlier row read' —— "
+        "要触发它必须先读到行、再让行消失，只能伪造一个不可能的中间态。"
+        "伪造出来的绿证明不了真实系统的任何东西。"
+    ),
+    "finalize_tx_failed": (
+        "要求事务里的 SQL 真的失败，而本仓没有可注入的失败点。"
+        "造一个假抛的 mock 只能证明 catch 分支存在，证明不了它会在什么条件下被走到。"
+    ),
+}
+
 
 def domain() -> dict | None:
     out = subprocess.run([sys.executable, str(GEN), "--json"], cwd=REPO,
@@ -121,7 +135,9 @@ def measure(m: dict) -> dict:
         literals, [p.read_text() for p in sorted(SRC.glob("*.test.ts"))]
     )
 
-    never = [e for e in literals if e not in mentioned]
+    never_all = [e for e in literals if e not in mentioned]
+    never = [e for e in never_all if e not in NOT_TESTED_BY_DESIGN]
+    by_design = [e for e in never_all if e in NOT_TESTED_BY_DESIGN]
     mentioned_only = [e for e in literals if e in mentioned and e not in near_expect]
 
     def tools_of(es: list[str]) -> dict[str, list[str]]:
@@ -139,6 +155,9 @@ def measure(m: dict) -> dict:
         "near_expect": len(near_expect),
         "mentioned_only": len(mentioned_only),
         "never": len(never),
+        "never_all": len(never_all),
+        "by_design": by_design,
+        "by_design_reasons": {e: NOT_TESTED_BY_DESIGN[e] for e in by_design},
         "never_by_tool": tools_of(never),
         "mentioned_only_list": sorted(mentioned_only),
         "never_list": sorted(never),
@@ -172,7 +191,12 @@ def main() -> int:
     print(f"错误字面量（去重）{c['literals']} 个")
     print(f"  在 expect 附近出现   {c['near_expect']:3d}   （**上界**，可能是断言别的属性）")
     print(f"  出现但离 expect 很远 {c['mentioned_only']:3d}   （注释 / 夹具 / 日志串）")
-    print(f"  **一次都没出现**     {c['never']:3d}   （违反时没有任何读数）")
+    print(f"  **一次都没出现**     {c['never_all']:3d}   "
+          f"= 待补 {c['never']} + 登记不做 {len(c['by_design'])}")
+    if c["by_design"]:
+        print("\n登记为「不做」的（造不出真实状态，理由写在这里）：")
+        for e in c["by_design"]:
+            print(f"  · {e} —— {c['by_design_reasons'][e]}")
     if c["never_by_tool"]:
         print("\n没有任何读数的工具（按个数排序）：")
         for t, es in sorted(c["never_by_tool"].items(), key=lambda kv: -len(kv[1]))[:12]:
