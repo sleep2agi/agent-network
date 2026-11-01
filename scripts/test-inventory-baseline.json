@@ -5325,6 +5325,7 @@
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>daemon-shaped caller: existence branches are reachable::ack_start_request / ack_stop_request 不存在 ⇒ 恰好 {error:'request_not_found', ok:false}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::ack_config_update without a node token ⇒ exactly {error, ok}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::get_config_update without a node token ⇒ exactly {error, ok}": 1,
+  "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_*_request: rejection order is the security property::别人的请求 ⇒ not_your_request；我的 daemon 但别的网络 ⇒ cross_network_request": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_all_status pinned (list_node_skills needs a live node → covered elsewhere)::⇒ {ok, sessions, sessions_returned, summary, summary_scope}; sessions 与 sessions_returned 同源": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_config_update: both states have pinned shapes::no pending ⇒ exactly {ok, update:null}; with pending ⇒ exactly {ok, update:{apply_mode,base_revision,patch,update_id}}": 1,
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_inbox: both shapes are pinned (the second key is conditional)::default ⇒ {messages, ok}; human ⇒ {human_inbox, messages, ok} and human_inbox is {examined, mode, version}": 1,
@@ -13554,6 +13555,7 @@
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>daemon-shaped caller: existence branches are reachable::ack_start_request / ack_stop_request 不存在 ⇒ 恰好 {error:'request_not_found', ok:false}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::ack_config_update without a node token ⇒ exactly {error, ok}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>error envelope: exactly {ok, error} unless the error carries its own fields::get_config_update without a node token ⇒ exactly {error, ok}",
+  "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_*_request: rejection order is the security property::别人的请求 ⇒ not_your_request；我的 daemon 但别的网络 ⇒ cross_network_request",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_all_status pinned (list_node_skills needs a live node → covered elsewhere)::⇒ {ok, sessions, sessions_returned, summary, summary_scope}; sessions 与 sessions_returned 同源",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_config_update: both states have pinned shapes::no pending ⇒ exactly {ok, update:null}; with pending ⇒ exactly {ok, update:{apply_mode,base_revision,patch,update_id}}",
   "server/src/agent-acl-slice3-http.test.ts::update_node_config 响应键集（exact key set）>get_inbox: both shapes are pinned (the second key is conditional)::default ⇒ {messages, ok}; human ⇒ {human_inbox, messages, ok} and human_inbox is {examined, mode, version}",
@@ -16458,7 +16460,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "1fb324b312dba7c475d72704488b44116ab51c00",
+  "commit": "8d9bbe193bae66c39c4fc624d84b629899b45906",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

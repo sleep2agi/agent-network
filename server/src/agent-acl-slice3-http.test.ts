@@ -725,6 +725,45 @@ describe("update_node_config 响应键集（exact key set）", () => {
     });
   });
 
+  // #3309 顺序维度 —— `get_*_request` 三条共用同一套判定顺序：
+  //   not_found → not_your_request（daemon_node_id）→ cross_network_request（network_id）
+  // 顺序本身是安全属性：先答「在别的网络」会把「这个 id 属于另一个租户」告诉尚未确认身份的人。
+  describe("get_*_request: rejection order is the security property", () => {
+    test("别人的请求 ⇒ not_your_request；我的 daemon 但别的网络 ⇒ cross_network_request", async () => {
+      const D = { alias: "acl3-order-daemon", node: "node_acl3_order_daemon" };
+      seedAgent({ alias: D.alias, node: D.node });
+      const minted = createNetworkTokenForNode(adminId, NET, D.alias, D.node);
+      expect(minted.ok).toBe(true);
+      const now = Date.now();
+      // 唯一后缀：同一个 describe 里可能被多次执行（或与别的用例撞 id），主键冲突会掩盖真正的断言。
+      const U = Math.random().toString(36).slice(2, 8);
+      const cases: [string, string][] = [
+        ["get_start_request", "node_start_requests"],
+        ["get_stop_request", "node_stop_requests"],
+      ];
+      for (const [toolName, table] of cases) {
+        // 两张表的列**不完全是同一套**（node_stop_requests 多一个 NOT NULL 的 `action`）。
+        // ⇒ 按表分别构造列，而不是假设它们同形（实测：NOT NULL constraint failed: action）。
+        const extraCols = table === "node_stop_requests" ? ", action" : "";
+        const extraVals = table === "node_stop_requests" ? ", 'stop'" : "";
+        db.run(`INSERT INTO ${table}
+                (request_id, network_id, daemon_node_id, child_node_id, child_alias, created_by_token, status, created_at${extraCols})
+                VALUES (?1, ?2, ?3, ?4, ?5, 'test', 'pending', ?6${extraVals})`,
+          // ⚠️ 表上有 UNIQUE(child_node_id)（同一子节点只能有一条未结请求）⇒ 两行必须用不同子节点，
+          // 否则主键冲突会把断言掩盖成 db 报错（实测踩到：UNIQUE constraint failed: child_node_id）。
+          [`${toolName}_other_daemon_${U}`, NET, "node_acl3_other_daemon", `node_other_child_${U}`, "other-child", now]);
+        db.run(`INSERT INTO ${table}
+                (request_id, network_id, daemon_node_id, child_node_id, child_alias, created_by_token, status, created_at${extraCols})
+                VALUES (?1, ?2, ?3, ?4, ?5, 'test', 'pending', ?6${extraVals})`,
+          [`${toolName}_other_network_${U}`, "net_acl3_other_network", D.node, `node_cross_child_${U}`, "cross-child", now]);
+        const foreign = await tool(minted.token!, toolName, { request_id: `${toolName}_other_daemon_${U}` });
+        expect(foreign).toEqual({ ok: false, error: "not_your_request" });
+        const cross = await tool(minted.token!, toolName, { request_id: `${toolName}_other_network_${U}` });
+        expect(cross).toEqual({ ok: false, error: "cross_network_request" });
+      }
+    });
+  });
+
   // 2026-10-31 —— #3171 第 5 项：错误信封的形状也要钉住。
   // 今天它们是「约定俗成」：每个出口手写 {ok:false,error}，
   // 于是谁顺手多塞一个字段，客户端的分支就多一个没人知道的键。
