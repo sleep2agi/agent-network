@@ -76,6 +76,34 @@ def check_generator_identity(doc: dict) -> list[str]:
     return []
 
 
+# 「仓内没有消费者」需要一个**消费者数量 == 0 的断言**，否则它只是当前状态：
+# 安全性依赖「没人恰好用到它」不是设计。失效形态是一行 `rest-route-table.json`
+# 出现在某个新功能里 —— 而那行代码看起来完全正常。
+# 生产源码（server/src 下非测试文件）里出现这个文件名 ⇒ 表从「构建期自洽」变成
+# 「运行时依赖」，那时 runtime_claim 那句话就不成立了，必须红。
+PRODUCTION_GLOBS = ("server/src/**/*.ts",)
+TABLE_NAME = "rest-route-table.json"
+
+
+def check_no_production_consumer() -> list[str]:
+    hits = []
+    for pat in PRODUCTION_GLOBS:
+        for f in REPO.glob(pat):
+            if ".test." in f.name:
+                continue
+            try:
+                body = f.read_text()
+            except OSError:
+                continue
+            for i, line in enumerate(body.splitlines(), 1):
+                if TABLE_NAME in line:
+                    hits.append(f"{f.relative_to(REPO)}:{i}")
+    if hits:
+        return [f"TABLE_CONSUMED_BY_PRODUCTION: {TABLE_NAME} 出现在 {len(hits)} 处生产源码里"
+                f"（{', '.join(hits[:3])}）⇒ 表已成运行时依赖，runtime_claim 的「非运行时事实」不再成立"]
+    return []
+
+
 def check_key_uniqueness(doc: dict) -> list[str]:
     """声明的 `key` 必须真的能标识行 —— 否则它是注释，不是键。
 
@@ -254,7 +282,8 @@ def main() -> int:
     # 键唯一性：即使内容与源码一致，一份「键不能标识行」的表也不是可引用的清单。
     _doc = json.loads(committed) if committed.strip() else {}
     key_problems = (check_key_uniqueness(_doc) + check_order_sequence(_doc)
-                    + check_kind_enum(_doc) + check_generator_identity(_doc))
+                    + check_kind_enum(_doc) + check_generator_identity(_doc)
+                    + check_no_production_consumer())
     if key_problems:
         for x in key_problems:
             print(f"✗ {x}", file=sys.stderr)
