@@ -126,6 +126,8 @@ describe("app#225 rules file — read round trip", () => {
     const n = await connect(asNode);
     try {
       const enq = await u.call("read_node_rules_file", { node_id: NODE_ID });
+      // #3275 批次 4 —— read 的外层三键（与 write 同形；本文件里 `enq` 被赋值 4 次，各归各的）
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(enq).toMatchObject({ ok: true, op: "read" });
       expect(enq.request_id).toMatch(/^rf_/);
 

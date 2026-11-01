@@ -131,6 +131,9 @@ describe("round trip", () => {
     const a = await connect(asA);
     try {
       const enq = await u.call("tail_node_logs", { node_id: NODE_A_ID, network_id: NET, lines: 99999 > 2000 ? 2000 : 1, level: "warn", grep: "boom", since_ts: 5, path: "/etc/passwd" });
+      // #3275 批次 4 —— tail_node_logs 与 read_node_rules_file 是**同一套请求通道**（op 不同），
+      // 所以外层同形三键；钉它等于钉住「日志与规则文件共用一条下发通道」这个事实。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(enq).toMatchObject({ ok: true, op: "logs_tail" });
       const pulled = (await a.call("get_rules_file_request", {})).request;
       expect(pulled.op).toBe("logs_tail");
