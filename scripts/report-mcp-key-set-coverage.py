@@ -207,17 +207,36 @@ def main() -> int:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             continue
+        # 2026-10-31 —— 第四种假阴性：**handler 变量转一手**。
+        #   `const handler = toolsFor(...).mark_tasks_runtime_submitted;`
+        #   `const submitted = await call(handler, {...})`
+        # 工具名在**上一行**，调用在下一行 ⇒ 按行归因不到。
+        # ⇒ 先建一张 `变量 → 工具名` 的映射（属性访问与 await mcp 两种写法），归因时穿透一次。
+        # ⚠️ 必须**按行推进**地维护这张表：同名变量（同一个 `handler`）在文件里会被反复赋值，
+        #    预先整体扫一遍只会留下最后一次的值 —— 于是第 224 行那次调用被归到别的工具上。
+        var_tool: dict[str, str] = {}
         for i, ln in enumerate(lines):
+            mh = re.search(r"(?:const|let|var)\s+(\w+)\s*=\s*[^;]*?\.([a-z_]+)\b", ln)
+            if mh and mh.group(2) in tools:
+                var_tool[mh.group(1)] = mh.group(2)
             m = ASSIGN.search(ln)
             if not m:
                 continue
             var = m.group(1)
+            _nm = next((c for c in QUOTED.findall(ln) if c in tools), None)
+            if _nm:
+                var_tool[var] = _nm
             # 2026-10-31 —— 名字有两种写法：`mcp(t, "tool", …)` 与 `call(toolsFor(B).tool, …)`。
             # 只认引号会把后者整类漏掉（send_peer_reply / report_completion 就是这样被漏的）。
             name = next(
                 (c for c in QUOTED.findall(ln) if c in tools),
                 next((t for t in tools if re.search(rf"\.{re.escape(t)}\b", ln)), None),
             )
+            # 穿透一次 handler 变量（见上面的 var_tool）
+            if not name:
+                mc = re.search(r"await\s+call\(\s*(\w+)", ln)
+                if mc:
+                    name = var_tool.get(mc.group(1))
             if not name:
                 continue
             # 2026-10-31 —— 窗口原来是**固定 16 行**，实测是个假下限：
