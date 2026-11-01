@@ -87,11 +87,19 @@ describe("hub-admin powers need a user token", () => {
 
 describe("account and network management need a user token", () => {
   test("token management: cannot list, mint user tokens, mint node tokens or revoke", async () => {
+    // #3354 —— 拒绝之外还要钉「没有新令牌」：发令牌的副作用是**多一行 api_tokens**。
+    // 只断 403 时，「拒了但令牌已经发出来了」也会绿 —— 而那一枚令牌是能真的用的。
+    const tokenRows = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?1", adminId)!.n;
+    const beforeTokens = tokenRows();
     expect((await call(ntok, "GET", "/api/auth/tokens")).status).toBe(403);
     const minted = await call(ntok, "POST", "/api/auth/tokens", { name: "escalate" });
     expect(minted.status).toBe(403);
     expect(minted.body.token).toBeUndefined();
     expect((await call(ntok, "POST", "/api/auth/node-token", { network_id: OTHER_NET, node_name: "x" })).status).toBe(403);
+    // 两条被拒的发放都不许留下任何一行
+    expect(tokenRows()).toBe(beforeTokens);
+    expect(db.get("SELECT 1 FROM api_tokens WHERE name = 'escalate'")).toBeFalsy();
     expect((await call(ntok, "DELETE", "/api/auth/tokens/tok_whatever")).status).toBe(403);
     expect((await call(adminToken, "GET", "/api/auth/tokens")).status).toBe(200);
   });
