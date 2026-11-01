@@ -387,6 +387,15 @@ def main() -> int:
         print(f"  ⚠ 源码里有、但清单里没有的门符号 {len(result['unlisted'])} 个："
               f"{', '.join(sorted(result['unlisted']))[:160]}")
         print("    （不单独判红：它们可能只用于读路由。但出现在写路由块里时会在下面被点名）")
+    # 2026-11-01 —— **跨源到什么程度**必须写出来，否则「两个产物不同」会被读成「两个生产者不同」：
+    #   路由表 ← report-rest-endpoints.py 从 server/src/server.ts 抽
+    #   门符号 ← 本脚本          从同一份 server/src/server.ts 抽
+    # ⇒ 上游是**同一个文件**。所以这一对挡不住「这种写法让两边都看不见」——
+    #   而它恰恰是最隐蔽的一类（注释掉的路由、被拼接的路径、条件注册）。
+    #   补它的唯一办法是运行时注册集合（L4），不是再找一个静态读数。
+    print("  跨源程度：两份产物（表 / 门符号）由**不同抽取器**产出，但上游是同一个 "
+          "server/src/server.ts")
+    print("            ⇒ 挡不住「这种写法让两边都看不见」；那只能靠运行时注册集合（L4）")
     for path, method in result["public"]:
         print(f"  公开 {method} {path} —— {PUBLIC_BY_DESIGN[(path, method)]}")
     covered, gap = chain_coverage(result)
