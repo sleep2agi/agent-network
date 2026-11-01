@@ -234,6 +234,9 @@ GATE_ELSEWHERE_HINT = {
 # 两个口径都不能替代对方：旧口径说「在看得见的那半边里，覆盖率是 49/54」，
 # 新口径说「在全部 94 行里，49 行被请求过、45 行没有」。
 NEVER_REQUESTED_BASELINE = 45
+# 2026-11-01 —— 棘轮改挂**骨架口径**（15）。字面口径对参数化路径系统性为假
+# （tests 写具体 id，永远不会含 `:param`），所以它只能续历史，不能当门。
+NEVER_REQUESTED_SKELETON_BASELINE = 15
 
 
 def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
@@ -251,21 +254,54 @@ def branch_coverage(rows: list[dict], lines: list[str]) -> dict:
     tests = [p.read_text() for p in sorted((REPO / "server" / "src").glob("*.test.ts"))]
     blob = "\n".join(tests)
     judgeable, covered, never, unjudgeable = [], [], [], []
+    # 2026-11-01 —— 两条口径**并存**，因为字面口径对参数化路径系统性为假：
+    #   tests 里写的是 `/api/networks/net_x/humans`，永远不含 `/api/networks/:param1/humans`
+    #   ⇒ 字面口径会把**所有**参数化路由记成「从未被请求」（实测 45 vs 骨架口径 15）。
+    # 所以：字面口径续历史（45），骨架口径是这个数该有的读数（15）。
+    # 骨架 = 把 `:paramN` 去掉，剩下的静态段必须在同一条字面量里按序出现。
+    import re as _re
+    lits = [m.group(1) for m in _re.finditer(r'["\'`](/[^"\'`\s]+)["\'`]', blob)]
+
+    def covered_literal(p: str) -> bool:
+        return f'"{p}"' in blob or f"'{p}'" in blob
+
+    def covered_skeleton(p: str) -> bool:
+        if ":" not in p:
+            return covered_literal(p)
+        segs = [x for x in p.split("/") if x and not x.startswith(":")]
+        if not segs:
+            return False
+        for lit in lits:
+            pos, ok = 0, True
+            for seg in segs:
+                i = lit.find("/" + seg, pos)
+                if i < 0:
+                    ok = False
+                    break
+                pos = i + len(seg) + 1
+            if ok:
+                return True
+        return False
+
+    skeleton_never = []
     for r in rows:
         path = r.get("path") or ""
         if path in ("api", "events", "ws") or not path.startswith("/"):
             unjudgeable.append(r)
             continue
         judgeable.append(r)
-        if f'"{path}"' in blob or f"'{path}'" in blob:
+        if covered_literal(path):
             covered.append(r)
         else:
             never.append(r)
+        if not covered_skeleton(path):
+            skeleton_never.append(r)
     return {
         "rows": len(rows),
         "judgeable": len(judgeable),
         "covered": len(covered),
         "never_requested": len(never),
+        "never_requested_skeleton": len(skeleton_never),
         "unjudgeable": len(unjudgeable),
         "never_sample": [{"line": r.get("line"), "path": r.get("path"), "method": r.get("method")}
                          for r in never[:8]],
@@ -536,7 +572,10 @@ def main() -> int:
 
     bc = branch_coverage(json.loads(TABLE.read_text()).get("rows", []), SERVER.read_text().splitlines())
     print(f"\n分支覆盖（代理：测试里出现过路径字面量，**上界**）：")
-    print(f"  可判 {bc['judgeable']} / {bc['rows']} 行：被请求过 {bc['covered']}、**从未出现 {bc['never_requested']}**")
+    print(f"  可判 {bc['judgeable']} / {bc['rows']} 行：被请求过 {bc['covered']}、"
+          f"从未出现 **字面 {bc['never_requested']} / 骨架 {bc['never_requested_skeleton']}**")
+    print("  ⇒ 字面口径对参数化路径系统性为假（tests 写具体 id，永远不含 `:param`）；"
+          "骨架口径才是这个数该有的读数")
     print(f"  判不了 {bc['unjudgeable']} 行 —— 正则路由被提取器压成了前缀，按路径查不到")
     print("  ⇒ 判不了 ≠ 没走过：前者要改提取器（用正则字面量），后者要补测试。")
     for x in bc["never_sample"]:
@@ -570,12 +609,16 @@ def main() -> int:
             return 1
         # 两侧都要有动作（同一条纪律）：上调 ⇒ 查新分支；下调 ⇒ 收紧基线。
         if bc["never_requested"] < NEVER_REQUESTED_BASELINE:
-            print(f"↓ 可以收紧基线：never_requested {NEVER_REQUESTED_BASELINE} → "
+            print(f"↓ 可以收紧基线（字面口径）：{NEVER_REQUESTED_BASELINE} → "
                   f"{bc['never_requested']}", file=sys.stderr)
-        if bc["never_requested"] > NEVER_REQUESTED_BASELINE:
-            print(f"✗ 「从未被请求过」从基线 {NEVER_REQUESTED_BASELINE} 涨到 {bc['never_requested']}"
-                  f" —— 新增了一个没有请求走到的分支", file=sys.stderr)
+        # 棘轮挂在**骨架口径**上：字面口径对参数化路径系统性为假，不能当门。
+        if bc["never_requested_skeleton"] > NEVER_REQUESTED_SKELETON_BASELINE:
+            print(f"✗ 骨架口径「从未被请求」从基线 {NEVER_REQUESTED_SKELETON_BASELINE} 涨到 "
+                  f"{bc['never_requested_skeleton']} ⇒ 新增了一个没有请求走到的分支", file=sys.stderr)
             return 1
+        if bc["never_requested_skeleton"] < NEVER_REQUESTED_SKELETON_BASELINE:
+            print(f"↓ 可以收紧基线（骨架）：{NEVER_REQUESTED_SKELETON_BASELINE} → "
+                  f"{bc['never_requested_skeleton']}")
         if m["rows_without_owner"]:
             print(f"✗ {m['rows_without_owner']} 行找不到归属 if —— 分组会稳定地产出错误的合并建议")
             return 1
