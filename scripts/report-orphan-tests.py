@@ -163,7 +163,7 @@ def classify(f: str, runner_text: list[tuple[str, str]], not_run_by_design: dict
     return {"file": f, "verdict": "ORPHAN", "why": "没有任何 runner 提到它"}
 
 
-SELFTEST_EXPECTED = 11
+SELFTEST_EXPECTED = 12
 
 
 def selftest(quiet: bool = False) -> int:
@@ -194,6 +194,17 @@ def selftest(quiet: bool = False) -> int:
     case("命中 glob ⇒ 有 runner", classify("test/other.test.mjs", runners, nrbd)["verdict"], "B_runner")
     case("无人提到 ⇒ 未归属", classify("probe/lonely.test.mjs", runners, nrbd)["verdict"], "ORPHAN")
     case("登记为不跑 ⇒ C 类", classify("hand/manual.test.mjs", runners, nrbd)["verdict"], "C_by_design")
+
+    # 2026-11-01 —— **账平是恒等式，下限是不等式**：
+    # 只有恒等式能在差 1 时反解出缺了哪一类；不等式只证明「至少有一项」。
+    # 这里用一个第四种 verdict 造一次不平，验证它会红。
+    import io as _io, sys as _sys
+    _rows = [{"verdict": v} for v in ("A_inventory", "B_runner", "C_by_design", "WEIRD")]
+    _sum = sum(1 for r in _rows if r["verdict"] in
+               ("A_inventory", "B_runner", "C_by_design"))
+    case("四格之和不等于行数 ⇒ 账不平（新 verdict 落格之外）",
+         str(_sum != len(_rows)),
+         "True")
 
     # 2026-11-01 —— glob 与点名的失效方向相反，所以两者都要能被判出来：
     case("find <dir> -name '*.test.sh' ⇒ glob 覆盖",
@@ -310,10 +321,17 @@ def main() -> int:
           f" ｜ 比值={ratio:.2f}")
     print("  比值≈1 ⇒ 谓词没在筛；比值≈0 ⇒ 谓词可能写窄或域太大。两者处置相反。")
     print(f"对象：git ls-files ∩ 名字像测试 ⇒ {len(rows)} 个文件")
+    counts = {v: sum(1 for r in rows if r["verdict"] == v)
+              for v in ("A_inventory", "B_runner", "C_by_design", "ORPHAN")}
     for v, label in (("A_inventory", "A 测试清单计数"), ("B_runner", "B 有 runner 引用"),
                      ("C_by_design", "C 登记为不跑"), ("ORPHAN", "**未归属**")):
-        n = sum(1 for r in rows if r["verdict"] == v)
-        print(f"  {label}: {n}")
+        print(f"  {label}: {counts[v]}")
+    # 2026-11-01 —— **恒等式，不是不等式**：四格之和必须等于被分类的行数。
+    # 写 `PASS+FAIL > 0` 只能证明「不全空」；写恒等式才能在差 1 时反解出缺了哪一类。
+    if sum(counts.values()) != len(rows):
+        print(f"✗ 账不平：四格之和 {sum(counts.values())} ≠ 被分类的行数 {len(rows)}"
+              f" ⇒ 有 verdict 落在这四格之外（分类器返回了新值却没加进来）", file=sys.stderr)
+        return 2
 
     # 补集：谓词覆盖不到、但「看起来也是测试」的代码文件。
     comp = sorted(
@@ -341,6 +359,11 @@ def main() -> int:
     print(f"  ① 按名字点名 {len(referenced)} 个（改名即断）")
     print(f"  ② 由 glob 覆盖 {len(glob_covered)} 个（改名不断；目录移动即断）")
     print(f"  ③ 零入口 {len(rest)} 个")
+    # 同一条恒等式用在补集上：三栏之和 == 补集大小。
+    if len(referenced) + len(glob_covered) + len(rest) != len(comp):
+        print(f"✗ 账不平：补集三栏之和 {len(referenced) + len(glob_covered) + len(rest)}"
+              f" ≠ 补集 {len(comp)} ⇒ 有文件落进了三栏之外", file=sys.stderr)
+        return 2
     for f in glob_covered[:4]:
         print(f"     [glob] {f}")
     for f in rest[:6]:
