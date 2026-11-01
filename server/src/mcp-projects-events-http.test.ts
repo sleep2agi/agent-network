@@ -90,6 +90,9 @@ describe("discoverable", () => {
 describe("projects_create / projects_update", () => {
   test("owner: create, rename, recolour, archive, unarchive — same rows the app sees", async () => {
     const created = await mcp(U.owner.token, "projects_create", { network_id: NET, name: "mpe-项目甲" });
+    // #3275 批次 4 —— projects_create 与 projects_update 同形（{ok, project}）：
+    // 「写项目」这一族回**实体**，不回集合。两个工具各自钉，不互相代言。
+    expect(Object.keys(created).sort()).toEqual(["ok", "project"]);
     expect(created.ok).toBe(true);
     const id = created.project.id as string;
     expect(created.project.name).toBe("mpe-项目甲");

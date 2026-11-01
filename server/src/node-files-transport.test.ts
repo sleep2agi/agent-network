@@ -251,6 +251,9 @@ describe("who may ask, and who may read the answer", () => {
     const other = await connect(asUserOtherLogin);
     try {
       const enq = await u.call("list_node_skills", { alias: SESSION_ALIAS });
+      // #3275 批次 4 —— list_node_skills 走的是**与 read/write/tail 同一条下发通道**
+      // （所以外层是三键 ok/op/request_id）；技能清单本体在 get_rules_file_request 里回。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(await other.call("get_rules_file_result", { request_id: enq.request_id })).toMatchObject({ ok: true, status: "pending" });
     } finally { await u.close(); await other.close(); }
   }, 20_000);

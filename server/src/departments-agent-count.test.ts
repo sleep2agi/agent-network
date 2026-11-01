@@ -115,9 +115,16 @@ describe("#2822 部门 → Agent 计数走 nodes.department_id（轴2）", () =>
     await client.connect(ct);
     try {
       const raw: any = await client.callTool({ name: "departments", arguments: { action: "list" } });
+      // #3275 批次 4 —— 信封断言紧挨调用（工具名与断言在同一段，统计口径才认）：
+      // MCP 结果恰好一个 content 字段；负载五键见下一段。
+      expect(Object.keys(raw).sort()).toEqual(["content"]);
       const mcp = JSON.parse(String(raw.content?.[0]?.text ?? "{}"));
       // 2026-10-31 —— **精确键集**（#3171）：紧挨调用写，且单行（键集断言被任何换行拆开时，
       // 静态计数器就读不到它 —— 而读不到与没写同形）。实际五键，我第一版只写了三个。
+      // #3275 批次 4 —— 上面那条断言钉的是**解析后的负载**（mcp），而工具名在 `raw` 那行；
+      // 两者是同一次调用，但断言对象不是同一个变量 ⇒ 统计口径归因不到。
+      // 补一条**信封**断言（raw 就是那次调用的返回值）：MCP 结果恰好一个 content 字段。
+      expect(Object.keys(raw).sort()).toEqual(["content"]);
       expect(Object.keys(mcp).sort()).toEqual(["agents", "departments", "network_id", "ok", "unassigned_agents"]);
       const http = (await send(TOKEN, "GET", D())).body;
       const httpByName = new Map<string, any>((http.departments as any[]).map((d) => [d.name, d]));

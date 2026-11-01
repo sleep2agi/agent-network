@@ -199,7 +199,10 @@ def main() -> int:
     # 2026-10-31 —— 调用有四种写法：`tool(token,"x")` / `call(tools["x"],…)` / `mcp(t,"x",…)` / `.call("x",…)`。
     # 只认第一种会漏掉 `tools["cancel_task"]`（实测）；而放宽成「行内第一个小写词」又会抓错。
     # ⇒ 取行内**所有**带引号的小写标识符，命中工具表的那一个才算。
-    ASSIGN = re.compile(r"(?:const|let|var)\s+(\w+)\s*=\s*await\b")
+    # 2026-10-31 —— 第五种假阴性：**带类型标注的声明**
+    #   `const raw: any = await client.callTool({ name: "departments", … })`
+    # 原正则要求 `变量名 = await`，`: any` 一挡就整条不匹配 ⇒ 这个工具的断言被记成不存在。
+    ASSIGN = re.compile(r"(?:const|let|var)\s+(\w+)\s*(?::\s*[^=;]+)?=\s*await\b")
     QUOTED = re.compile(r"[\"']([a-z_]+)[\"']")
     own_result: dict[str, list[str]] = {}
     for path in tracked(["server/src/*.test.ts"]):
