@@ -431,6 +431,29 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
     expect(read()).not.toBe(before);
   });
 
+  // #3354 —— rest-allowlist 此前**一条测试都没有**（同族里唯一零覆盖的写路由）。
+  // 它改的是「这个节点能调哪些 REST 路由」，与 tool-allowlist 同一套授权口径。
+  test("改 REST 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）；[] 歧义 400", async () => {
+    const read = () => db.get<{ rest_allowlist: string | null }>(
+      "SELECT rest_allowlist FROM nodes WHERE node_id = ?1", node.other.id)!.rest_allowlist;
+    const before = read();
+    // ① 拒绝：403 且行必须没变（只断 403 时「拒了但已写入」也会绿）
+    const denied = await call(user.mem.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: ["POST /api/task"] });
+    expect(denied.status).toBe(403);
+    expect(read()).toBe(before);
+    // ② 镜像：允许时必须真的变（只测拒绝时「永远拒绝」也会绿）
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: ["POST /api/task"] });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before);
+    // ③ 空数组是歧义的：拒收，且不许落库（与 tool-allowlist 同一决定）
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: [] })).body.error)
+      .toBe("empty_allowlist_ambiguous");
+    expect(read()).toBe(JSON.stringify(["POST /api/task"]));
+    // ④ 清空请传 null
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: null })).status).toBe(200);
+    expect(read()).toBeNull();
+  });
+
   test("清空后回到 null，而不是 []", async () => {
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: null })).status).toBe(200);
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: null })).status).toBe(200);
