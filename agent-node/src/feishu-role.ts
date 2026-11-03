@@ -1,0 +1,101 @@
+// RFC-020 权限层 —— 飞书用户不是"在或不在白名单"，而是**拿什么权限**。
+//
+// 现状（2026-11-03 之前）：access.json 只有
+//     { allowFrom: [open_id...], allowChats: [chat_id...] }
+// 即「在名单里 = 全工具、全能力」。两个真实后果：
+//
+//   1. 一进名单就等于拿到了整台机器的 Bash/Edit —— 而飞书是**外部用户**能触达的入口，
+//      与 Hub 那边"操作者可信"的前提不同（见 feishu-tool-deny.ts 的 scope 说明）。
+//   2. 想加一个"只能问、不能动"的同事，只能连同工具一起给；想收紧，只能把人删掉。
+//
+// 所以这里引入 role，三个档：
+//
+//   guest   只读问答：能 Read、能回话；不能 Bash/Edit/Write/执行任何东西
+//   member  默认档（= 今天的行为）：全工具，但 layer B 仍会拦密钥/配置路径
+//   admin   在 member 之上**允许**改通道自身配置（今天这条对所有人都是禁的；
+//           但"改白名单"这件事本身需要有人能做，否则维护只能靠登机器手改）
+//
+// 不变式（缺一条这个模型就是装饰）：
+//   · 没登记的人**不进**（准入仍由 access.json 的 allowFrom/allowChats 决定）
+//   · 登记了但没给 role ⇒ defaultRole（默认 member，保持向后兼容）
+//   · 认不出的 role 字符串 ⇒ 拒（不要静默降级成 member，那会把"打错字"变成"给了全权"）
+//   · admin 只多"改通道配置"这一项，不额外多出别的工具权限
+
+export const FEISHU_ROLES = ["guest", "member", "admin"] as const;
+export type FeishuRole = (typeof FEISHU_ROLES)[number];
+
+export interface FeishuAccessWithRoles {
+  allowFrom?: string[];
+  allowChats?: string[];
+  /** open_id → 角色。只对**已准入**的人生效。 */
+  users?: Record<string, { role?: string } | undefined>;
+  /** 明确要求时把 role 显式写出来。 */
+  defaultRole?: string;
+  /** 任何角色都不会拿到的工具（运营可追加），与 role 取并集。 */
+  denyTools?: string[];
+}
+
+/** 只读工具：guest 唯一能用的。 */
+export const GUEST_TOOLS = new Set<string>(["Read", "Glob", "Grep"]);
+
+/** 只有 admin 才允许碰的工具（改通道自身配置需要 Write/Edit 落到 channels 目录）。 */
+export const ADMIN_ONLY_CAPABILITY = "channel-config-write";
+
+export type RoleResolution =
+  | { ok: true; role: FeishuRole; reason: "explicit" | "default" }
+  | { ok: false; error: "unknown_role"; value: string };
+
+/**
+ * 把 access.json 里的 role 解析成闭集内的值。
+ *
+ * 关键决定：**认不出的 role 直接拒**。静默回落成 member 会让一次拼写错误
+ * （"admn"）变成一次授权升级 —— 而这种错误不会有人报错，只会一直生效。
+ */
+export function resolveDeclaredRole(raw: string | undefined, fallback: string | undefined): RoleResolution {
+  const pick = (v: string) => {
+    const s = v.trim().toLowerCase();
+    return (FEISHU_ROLES as readonly string[]).includes(s) ? (s as FeishuRole) : null;
+  };
+  if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+    const role = pick(String(raw));
+    return role ? { ok: true, role, reason: "explicit" } : { ok: false, error: "unknown_role", value: String(raw) };
+  }
+  if (fallback !== undefined && fallback !== null && String(fallback).trim() !== "") {
+    const role = pick(String(fallback));
+    return role ? { ok: true, role, reason: "default" } : { ok: false, error: "unknown_role", value: String(fallback) };
+  }
+  // 没写 defaultRole ⇒ member：与 2026-11-03 之前的行为逐字一致。
+  return { ok: true, role: "member", reason: "default" };
+}
+
+/**
+ * 这个发件人在这个会话里是什么角色。
+ *
+ * 注意：准入（是不是白名单里的人）不在这里判 —— 那是 bridge 的 allowFrom/allowChats。
+ * 本函数只在**已经准入**之后回答"给多少"。
+ */
+export function roleForSender(access: FeishuAccessWithRoles, senderId: string | undefined): RoleResolution {
+  const users = access.users ?? {};
+  const entry = senderId ? users[senderId] : undefined;
+  return resolveDeclaredRole(entry?.role, access.defaultRole);
+}
+
+/**
+ * 这个角色允许用哪些工具（deny 形式，便于与现有 tool-deny 层合并）。
+ *
+ * 返回「这个角色**不能**用的工具名单」：
+ *   guest  → 除 GUEST_TOOLS 之外全禁（用 null 表示"除白名单外全禁"）
+ *   member → 禁 admin 专属能力对应的工具（Write/Edit 落 channels）—— 由调用方按路径判，
+ *            这里只给工具级；路径级仍走 layer B
+ *   admin  → 不额外禁
+ */
+export function deniedToolsForRole(role: FeishuRole): { denyAllExcept?: ReadonlySet<string>; deny: ReadonlySet<string> } {
+  switch (role) {
+    case "guest":
+      return { denyAllExcept: GUEST_TOOLS, deny: new Set() };
+    case "member":
+      return { deny: new Set() };
+    case "admin":
+      return { deny: new Set() };
+  }
+}
