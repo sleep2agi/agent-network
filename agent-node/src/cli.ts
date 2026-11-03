@@ -6584,24 +6584,6 @@ async function processInbox() {
       // namespace. ANet scheduling uses `/agoal` + `/aloop`; old names remain
       // compatible only outside authenticated Dashboard traffic.
       if (shouldCreateScheduledGoal(persistenceSafeContent, RUNTIME, interactiveDashboardTask)) {
-        // #3682 —— 角色闸门（fail-closed）。V2 上「guest 只读」没有执行者（见 feishu-role.ts）。
-      {
-        const roleResolution = roleForSender(channel.accessRoles as any, ev.sender?.id);
-        const decision = roleResolution.ok
-          ? decideFeishuInbound(roleResolution.role, { opencodeGeneration: OPENCODE_GENERATION })
-          : { action: "refuse" as const, role: "member" as const,
-              reply: `[权限] access.json 里的角色无法识别（${(roleResolution as any).value}）；`
-                + `按 fail-closed 拒绝。允许值：guest / member / admin。` };
-        if (decision.action === "refuse") {
-          log(`[feishu] refused sender=${ev.sender?.id ?? "?"} role=${decision.role} reason=role-gate`);
-          if (typeof child.send === "function") {
-            try { child.send({ type: "reply", eventKey: ev.idempotencyKey, text: decision.reply }); }
-            catch (e: any) { warn(`[feishu] refuse reply send failed: ${e?.message || e}`); }
-          }
-          return;
-        }
-      }
-
       let replyText: string;
         let goalFailed = false;
         try {
@@ -7232,6 +7214,24 @@ function wireFeishuChildHandlers(
       // #3682 —— 聊天上下文（桥侧已归一化；这里只拼接，放在正文之前）。
       const contextBlock = typeof (raw as any).contextBlock === "string" ? (raw as any).contextBlock : "";
       if (contextBlock) content = `${contextBlock}\n\n${content}`;
+
+            // #3682 —— 角色闸门（fail-closed）。V2 上「guest 只读」没有执行者（见 feishu-role.ts）。
+          {
+            const roleResolution = roleForSender(channel.accessRoles as any, ev.sender?.id);
+            const decision = roleResolution.ok
+              ? decideFeishuInbound(roleResolution.role, { opencodeGeneration: OPENCODE_GENERATION })
+              : { action: "refuse" as const, role: "member" as const,
+                  reply: `[权限] access.json 里的角色无法识别（${(roleResolution as any).value}）；`
+                    + `按 fail-closed 拒绝。允许值：guest / member / admin。` };
+            if (decision.action === "refuse") {
+              log(`[feishu] refused sender=${ev.sender?.id ?? "?"} role=${decision.role} reason=role-gate`);
+              if (typeof child.send === "function") {
+                try { child.send({ type: "reply", eventKey: ev.idempotencyKey, text: decision.reply }); }
+                catch (e: any) { warn(`[feishu] refuse reply send failed: ${e?.message || e}`); }
+              }
+              return;
+            }
+          }
 
       let replyText: string;
       if (!content.trim()) {

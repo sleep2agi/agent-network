@@ -1466,7 +1466,12 @@ export async function handleCreateNodeDoorbell(
     childPid = child.pid || -1;
     launcher = child;
     const spawnedPid = childPid;
-    child.once("exit", (code, signal) => {
+    // `launch` 可能是 deps.spawnChild 注入的实现（类型比 ChildProcess 宽），
+    // 于是 `once("exit")` 会挑到 stream 的那个重载：code 变成
+    // `Error | Serializable | null | undefined`、signal 变成 `Signals | SendHandle | null`，
+    // 与 launcherExit 的 `{code: number|null, signal: Signals|null}` 对不上（TS2322）。
+    // 这里把处理函数**显式标注**再挂上去：判据仍在类型里，只是不让重载把参数类型带偏。
+    const onChildExit = (code: number | null, signal: NodeJS.Signals | null) => {
       launcherExit = { code, signal };
       // A co-presence launcher's pid is dead weight once it exits: keeping it in
       // the children map would let a later stop signal whoever reuses the number.
@@ -1476,7 +1481,8 @@ export async function handleCreateNodeDoorbell(
           .then(({ forgetSpawnedChildIfPid }) => { forgetSpawnedChildIfPid(childNodeIdForMap, spawnedPid); })
           .catch(() => { /* best-effort */ });
       }
-    });
+    };
+    (child as unknown as { once(ev: "exit", fn: typeof onChildExit): void }).once("exit", onChildExit);
     try { child.stdin?.destroy(); } catch { /* ok */ }
     try { child.stdout?.destroy(); } catch { /* ok */ }
     try { child.stderr?.destroy(); } catch { /* ok */ }
