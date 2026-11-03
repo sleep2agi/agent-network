@@ -20,6 +20,10 @@ export interface FeishuAccessList {
   allowFrom: string[];
   /** Feishu chat_ids the bot is permitted to listen in. */
   allowChats: string[];
+  /** #3682 —— open_id → 角色。只对已准入的人生效。 */
+  users?: Record<string, { role?: string } | undefined>;
+  /** #3682 —— 未登记角色的人的默认档（缺省 member，与接入前一致）。 */
+  defaultRole?: string;
 }
 
 /**
@@ -157,6 +161,9 @@ function readAccessFile(path: string): AccessFileShape {
       allowChats: Array.isArray(data.allowChats) ? data.allowChats : [],
       outboundRender:
         typeof data.outboundRender === "string" ? data.outboundRender : undefined,
+      // #3682 —— 原样透传，合法性在 agent-node 判（只有那里知道 runtime 与回合上下文）
+      users: data.users && typeof data.users === "object" ? (data.users as any) : undefined,
+      defaultRole: typeof data.defaultRole === "string" ? data.defaultRole : undefined,
     };
   } catch {
     return { allowFrom: [], allowChats: [] };

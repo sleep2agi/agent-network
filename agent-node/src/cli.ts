@@ -116,6 +116,7 @@ import { extractExplicitDelegation } from "./explicit-delegation";
 import { maskedEnv } from "./secret-mask";
 import { maskSecretsInText, summarizeHits } from "./outbound-secret-mask";
 import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
+import { decideFeishuInbound, roleForSender } from "./feishu-role";
 import { buildAttachmentDescriptors } from "./runtime/feishu-envelope";
 import {
   buildFeishuWorkerArgs,
@@ -1301,6 +1302,8 @@ const TELEGRAM_CHANNELS = CHANNELS.filter(ch => ch.type === "telegram").map(init
 interface FeishuChannel {
   type: "feishu";
   dir: string;
+  /** #3682 —— access.json 的 users/defaultRole；缺省为空 = 全员 member。 */
+  accessRoles: { users?: Record<string, { role?: string } | undefined>; defaultRole?: string };
   /** Exact binding name passed to the worker as its connectionName. */
   connectionName: string;
 }
@@ -1323,7 +1326,16 @@ function initFeishuChannel(spec: { type: string; path?: string; raw: string }): 
   // of rediscovering it from ambient env in the legacy-envelope fallback;
   // that preserves the exact worker/parent value if multi-binding support
   // later gives each channel its own name.
-  return { type: "feishu", dir, connectionName: ALIAS };
+  // #3682 —— 角色配置读在 agent-node（策略归执行侧），bridge 只管传输。
+  let accessRoles: FeishuChannel["accessRoles"] = {};
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, "access.json"), "utf-8")) as Record<string, unknown>;
+    accessRoles = {
+      users: raw.users && typeof raw.users === "object" ? (raw.users as any) : undefined,
+      defaultRole: typeof raw.defaultRole === "string" ? raw.defaultRole : undefined,
+    };
+  } catch { accessRoles = {}; }
+  return { type: "feishu", dir, connectionName: ALIAS, accessRoles };
 }
 
 const FEISHU_CHANNELS = CHANNELS.filter(ch => ch.type === "feishu")
@@ -6572,7 +6584,25 @@ async function processInbox() {
       // namespace. ANet scheduling uses `/agoal` + `/aloop`; old names remain
       // compatible only outside authenticated Dashboard traffic.
       if (shouldCreateScheduledGoal(persistenceSafeContent, RUNTIME, interactiveDashboardTask)) {
-        let replyText: string;
+        // #3682 —— 角色闸门（fail-closed）。V2 上「guest 只读」没有执行者（见 feishu-role.ts）。
+      {
+        const roleResolution = roleForSender(channel.accessRoles as any, ev.sender?.id);
+        const decision = roleResolution.ok
+          ? decideFeishuInbound(roleResolution.role, { opencodeGeneration: OPENCODE_GENERATION })
+          : { action: "refuse" as const, role: "member" as const,
+              reply: `[权限] access.json 里的角色无法识别（${(roleResolution as any).value}）；`
+                + `按 fail-closed 拒绝。允许值：guest / member / admin。` };
+        if (decision.action === "refuse") {
+          log(`[feishu] refused sender=${ev.sender?.id ?? "?"} role=${decision.role} reason=role-gate`);
+          if (typeof child.send === "function") {
+            try { child.send({ type: "reply", eventKey: ev.idempotencyKey, text: decision.reply }); }
+            catch (e: any) { warn(`[feishu] refuse reply send failed: ${e?.message || e}`); }
+          }
+          return;
+        }
+      }
+
+      let replyText: string;
         let goalFailed = false;
         try {
           // Goal state is durable and bypasses processTask. Keep the Grok

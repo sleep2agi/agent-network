@@ -99,3 +99,34 @@ export function deniedToolsForRole(role: FeishuRole): { denyAllExcept?: Readonly
       return { deny: new Set() };
   }
 }
+
+export type InboundDecision =
+  | { action: "allow"; role: FeishuRole }
+  | { action: "refuse"; role: FeishuRole; reply: string };
+
+/**
+ * 这条入站消息该不该进 think()。
+ *
+ * 为什么需要它：**OpenCode V2 上「guest 只读」是一句没有执行者的规则** ——
+ * V2 只在 flags.opencodeUnsafeTools=true 时允许跑（opencode-versions.ts 的注释写着：
+ * 它忽略 node 安全策略，所有本地工具都会启用），而飞书那层工具闸门挂在 claude 的
+ * PreToolUse hook 上，工具在 opencode server 里执行时根本不过那里。
+ *
+ * ⇒ fail-closed：V2 上不提供 guest 档。与其给一个"看起来只读、实际能跑 bash"的档，
+ *    不如明确拒绝并说清下一步。等 permission 应答（见卡）实现后再放开。
+ */
+export function decideFeishuInbound(
+  role: FeishuRole,
+  opts: { opencodeGeneration?: string | null },
+): InboundDecision {
+  if (role === "guest" && opts.opencodeGeneration === "v2") {
+    return {
+      action: "refuse",
+      role,
+      reply: "[权限] 这个节点跑在 OpenCode V2 上，目前无法执行「只读来宾」限制；"
+        + "V2 会启用全部本地工具，且不支持按回合收窄。"
+        + "请联系管理员把你提升为 member（或把节点换成 V1）后再试。",
+    };
+  }
+  return { action: "allow", role };
+}

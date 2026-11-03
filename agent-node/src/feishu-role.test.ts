@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import {
   FEISHU_ROLES,
   GUEST_TOOLS,
+  decideFeishuInbound,
   deniedToolsForRole,
   resolveDeclaredRole,
   roleForSender,
@@ -86,5 +87,26 @@ describe("角色能力：guest 只读", () => {
     for (const role of FEISHU_ROLES) {
       expect(deniedToolsForRole(role)).toBeDefined();
     }
+  });
+});
+
+describe("#3682 fail-closed：V2 上没有可执行的「只读来宾」", () => {
+  test("V2 + guest ⇒ 拒绝，且回复里说清原因与下一步", () => {
+    const d = decideFeishuInbound("guest", { opencodeGeneration: "v2" });
+    expect(d.action).toBe("refuse");
+    if (d.action === "refuse") {
+      expect(d.reply).toContain("OpenCode V2");
+      expect(d.reply).toContain("member");
+    }
+  });
+
+  test("镜像肯定：同一档在 V1 上放行（否则等于把功能整个砍掉）", () => {
+    expect(decideFeishuInbound("guest", { opencodeGeneration: "v1" }).action).toBe("allow");
+    expect(decideFeishuInbound("guest", { opencodeGeneration: undefined }).action).toBe("allow");
+  });
+
+  test("member / admin 在 V2 上照常放行（拒绝只针对没有执行者的那一档）", () => {
+    expect(decideFeishuInbound("member", { opencodeGeneration: "v2" }).action).toBe("allow");
+    expect(decideFeishuInbound("admin", { opencodeGeneration: "v2" }).action).toBe("allow");
   });
 });
