@@ -78,13 +78,28 @@ export interface FeishuChannelConfig {
  * Load Feishu channel config from a node's channels/feishu directory.
  * Throws if required secrets are missing.
  */
-export function loadFeishuChannelConfig(channelDir: string): FeishuChannelConfig {
+export function loadFeishuChannelConfig(
+  channelDir: string,
+  /**
+   * 进程环境（可选）。存在的理由：跨机节点拿不到"把 .env 拷过去"这件事 ——
+   * 密钥只能通过 Hub 保险库推到 <nodeDir>/node-secrets.json，agent-node 启动时
+   * 把它灌进 process.env（activation: next_start）。所以读取顺序是 .env > process.env；
+   * 反过来会让一个陈旧的 .env 悄悄盖掉刚推下来的值。
+   */
+  processEnv: Record<string, string | undefined> = {},
+): FeishuChannelConfig {
   const env = parseEnvFile(join(channelDir, ".env"));
-  const appId = env.FEISHU_APP_ID;
-  const appSecret = env.FEISHU_APP_SECRET;
+  const pick = (key: "FEISHU_APP_ID" | "FEISHU_APP_SECRET"): string | undefined => {
+    const fromFile = env[key];
+    if (typeof fromFile === "string" && fromFile) return fromFile;
+    const fromEnv = processEnv[key];
+    return typeof fromEnv === "string" && fromEnv ? fromEnv : undefined;
+  };
+  const appId = pick("FEISHU_APP_ID");
+  const appSecret = pick("FEISHU_APP_SECRET");
   if (!appId || !appSecret) {
     throw new Error(
-      `feishu channel: FEISHU_APP_ID / FEISHU_APP_SECRET missing in ${channelDir}/.env`,
+      `feishu channel: FEISHU_APP_ID / FEISHU_APP_SECRET missing in ${channelDir}/.env and in the process environment`,
     );
   }
   const access = readAccessFile(join(channelDir, "access.json"));

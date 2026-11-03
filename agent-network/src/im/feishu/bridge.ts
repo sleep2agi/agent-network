@@ -151,7 +151,9 @@ const RATE_LIMIT_NOTICE_TEXT = "处理频率超出限制，请稍后重试";
 export async function startFeishuBridge(
   opts: FeishuBridgeOptions,
 ): Promise<FeishuAdapter> {
-  const channelConfig = loadFeishuChannelConfig(opts.channelDir);
+  // #3682 —— 传 process.env：跨机节点的密钥走 Hub 保险库 → node-secrets.json → env，
+  // 没有"把 .env 拷到那台机器"这条路。.env 仍然优先（见 config.ts 的读取顺序）。
+  const channelConfig = loadFeishuChannelConfig(opts.channelDir, process.env as Record<string, string | undefined>);
 
   const adapter = new FeishuAdapter({ onTerminalError: opts.onTerminalError });
   await adapter.init({

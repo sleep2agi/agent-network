@@ -1305,15 +1305,16 @@ interface FeishuChannel {
   connectionName: string;
 }
 
-function initFeishuChannel(spec: { type: string; path?: string; raw: string }): FeishuChannel {
+function initFeishuChannel(spec: { type: string; path?: string; raw: string }): FeishuChannel | null {
   const dir = spec.path || defaultChannelDir("feishu");
-  if (!existsSync(join(dir, ".env"))) {
-    console.error(`[agent-node] feishu channel needs .env with FEISHU_APP_ID + FEISHU_APP_SECRET in ${dir}`);
-    process.exit(1);
-  }
+  // #3682 —— 缺文件时跳过这个渠道，不要让整个节点起不来。
+  // 对"远端节点试点"尤其重要：加 channels 与把文件送到那台机器是两件事，
+  // 顺序稍有错位节点就会整段离线，而看起来像"加个渠道把节点搞挂了"。
+  // 凭据也可以来自 process.env（Hub 保险库 → node-secrets.json → env），
+  // 所以这里只检查 access.json；凭据缺失由 bridge 明确报错并只退出那一个 worker。
   if (!existsSync(join(dir, "access.json"))) {
-    console.error(`[agent-node] feishu channel needs access.json in ${dir}`);
-    process.exit(1);
+    warn(`[agent-node] feishu channel skipped: needs access.json in ${dir} (node stays up; add the file and restart to enable it)`);
+    return null;
   }
   // .env 权限加固
   try { chmodSync(join(dir, ".env"), 0o600); } catch {}
@@ -1325,7 +1326,9 @@ function initFeishuChannel(spec: { type: string; path?: string; raw: string }): 
   return { type: "feishu", dir, connectionName: ALIAS };
 }
 
-const FEISHU_CHANNELS = CHANNELS.filter(ch => ch.type === "feishu").map(initFeishuChannel);
+const FEISHU_CHANNELS = CHANNELS.filter(ch => ch.type === "feishu")
+  .map(initFeishuChannel)
+  .filter((ch): ch is FeishuChannel => ch !== null);
 
 if (GROK_EXECUTION_MODE === "cli" && FEISHU_CHANNELS.length > 0) {
   console.error(
