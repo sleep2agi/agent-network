@@ -4947,7 +4947,11 @@ Grok co-presence (EXPERIMENTAL — shared human + network TUI; opt in explicitly
 
 Channel:
   anet channel add telegram <name> --bot-token <tok> --allow <uid>
+  anet channel add feishu <name> --app-id <id> --app-secret <secret> --allow <open_id>
+                                [--allow-chat <chat_id>]  Feishu bot (long connection)
   anet channel ls [name]  List channels
+  Note: a channel is an extra inbox next to the Hub one; the node's turn pipeline is
+        the same, so the runtime does not change (grok-build-cli is refused for now).
 
 Setup:
   anet init [--hub <url>]                                 Configure hub URL (global; no token prompt)
