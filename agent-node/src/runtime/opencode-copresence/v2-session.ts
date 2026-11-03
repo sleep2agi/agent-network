@@ -573,6 +573,21 @@ export async function openVettedOpenCodeV2Copresence(
         isCurrent: () => session.isRunning,
         request: (path, init) => fetchOpenCodeSessionControlJson(url, password, path, init),
       }),
+      /** V2 only —— 显式 steer：把新指令并入**正在跑的那一轮**。
+       *  与 submit 的 delivery:"queue" 相反；只发不读（结果从那轮回复里出来）。 */
+      async steer(prompt: string) {
+        if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
+        const text = typeof prompt === "string" ? prompt.trim() : "";
+        if (!text) throw new Error("steer needs a non-empty instruction");
+        const accepted = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/prompt`, {
+          method: "POST",
+          body: JSON.stringify({ text, delivery: "steer" }),
+        }, 15_000);
+        const messageId = accepted?.data?.id;
+        if (typeof messageId !== "string" || !/^msg_[A-Za-z0-9]+$/.test(messageId)) {
+          throw new Error("OpenCode v2 steer returned no message id");
+        }
+      },
       async selectedModel() {
         if (!session.isRunning) return undefined;
         const body = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`, {}, 2_000);

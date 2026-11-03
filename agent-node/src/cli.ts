@@ -7121,6 +7121,20 @@ async function handleQueueCommand(cmd: QueueCommand, sender: string): Promise<st
       if (t.sender !== sender) return `第 ${cmd.position} 条不是你发的，不能提。`;
       return feishuTurnQueue.promote(t.id) ? `已把第 ${cmd.position} 条（${t.id}）提到前面。` : `第 ${cmd.position} 条已开始处理。`;
     }
+    case "steer": {
+      const running = feishuTurnQueue.current();
+      if (!running) return "现在没有正在跑的回合，这条不用改口 —— 直接发就行（会正常排队）。";
+      const session = opencodeCopresenceSession;
+      if (!session?.isRunning || typeof session.steer !== "function") {
+        return "这个节点当前不是 V2 共存会话，/steer 用不了；直接发会正常排队。";
+      }
+      try {
+        await session.steer(cmd.text);
+        return `已把这条并进正在跑的那一轮（${running.id}）。注意：那一轮的回复会一起出来。`;
+      } catch (e: any) {
+        return `改口失败：${e?.message ?? String(e)}。这条没有排进队列，请重发或改用普通消息。`;
+      }
+    }
     case "clear": {
       const n = feishuTurnQueue.clear((e) => e.sender === sender);
       return n > 0 ? `已撤掉你还没开始的 ${n} 条。` : "你还没有开始的条目，没什么可撤的。";

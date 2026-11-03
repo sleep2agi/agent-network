@@ -41,3 +41,19 @@ describe("队列命令解析", () => {
     expect(parseQueueCommand(undefined)).toEqual({ kind: "none" });
   });
 });
+
+describe("/steer —— 改口：并进正在跑的那一轮", () => {
+  test("/steer 后面带正文 ⇒ 提取原文", () => {
+    expect(parseQueueCommand("/steer 改成只改 README")).toEqual({ kind: "steer", text: "改成只改 README" });
+  });
+
+  test("空正文 ⇒ 回用法（不猜要改什么）", () => {
+    expect(parseQueueCommand("/steer")).toEqual({ kind: "help" });
+    expect(parseQueueCommand("/steer   ")).toEqual({ kind: "help" });
+  });
+
+  test("正文里的斜杠与换行都要保留（命令后面是自由文本）", () => {
+    const r = parseQueueCommand("/steer 先看 /tmp/a.log\n再决定");
+    expect(r).toEqual({ kind: "steer", text: "先看 /tmp/a.log\n再决定" });
+  });
+});

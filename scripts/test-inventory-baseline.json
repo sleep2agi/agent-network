@@ -2317,6 +2317,9 @@
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::CHANNELS 的 feishu 分支会过滤掉 null（否则类型与运行时都会漏一个洞）": 1,
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::函数体内没有**语句级**的 process.exit（缺文件时不许让节点退出）": 1,
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::缺 access.json 时返回 null 并 warn（守卫在 return 之前）": 1,
+  "agent-node/src/feishu-queue-command.test.ts::/steer —— 改口：并进正在跑的那一轮::/steer 后面带正文 ⇒ 提取原文": 1,
+  "agent-node/src/feishu-queue-command.test.ts::/steer —— 改口：并进正在跑的那一轮::正文里的斜杠与换行都要保留（命令后面是自由文本）": 1,
+  "agent-node/src/feishu-queue-command.test.ts::/steer —— 改口：并进正在跑的那一轮::空正文 ⇒ 回用法（不猜要改什么）": 1,
   "agent-node/src/feishu-queue-command.test.ts::队列命令解析::/cancel 2 与 /prio 1 ⇒ 带位次": 1,
   "agent-node/src/feishu-queue-command.test.ts::队列命令解析::/clear ⇒ 只清自己的": 1,
   "agent-node/src/feishu-queue-command.test.ts::队列命令解析::/q 与 /queue ⇒ 看队列": 1,
@@ -10782,6 +10785,9 @@
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::CHANNELS 的 feishu 分支会过滤掉 null（否则类型与运行时都会漏一个洞）",
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::函数体内没有**语句级**的 process.exit（缺文件时不许让节点退出）",
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::缺 access.json 时返回 null 并 warn（守卫在 return 之前）",
+  "agent-node/src/feishu-queue-command.test.ts::/steer —— 改口：并进正在跑的那一轮::/steer 后面带正文 ⇒ 提取原文",
+  "agent-node/src/feishu-queue-command.test.ts::/steer —— 改口：并进正在跑的那一轮::正文里的斜杠与换行都要保留（命令后面是自由文本）",
+  "agent-node/src/feishu-queue-command.test.ts::/steer —— 改口：并进正在跑的那一轮::空正文 ⇒ 回用法（不猜要改什么）",
   "agent-node/src/feishu-queue-command.test.ts::队列命令解析::/cancel 2 与 /prio 1 ⇒ 带位次",
   "agent-node/src/feishu-queue-command.test.ts::队列命令解析::/clear ⇒ 只清自己的",
   "agent-node/src/feishu-queue-command.test.ts::队列命令解析::/q 与 /queue ⇒ 看队列",
@@ -16930,7 +16936,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "1578a9d51c5915a4c69f7350ef259a4407c020a7",
+  "commit": "2d6ee23c78f94f8293cfbd7b80175d22c054715d",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
