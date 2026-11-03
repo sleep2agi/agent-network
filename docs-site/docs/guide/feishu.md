@@ -8,7 +8,9 @@
 
 | 维度 | 当前能力 |
 |---|---|
-| Runtime | 仅 `claude-agent-sdk`（claude-code-cli / codex-sdk / grok-build-acp 待后续） |
+| 拓扑 | **点对点：一个飞书应用 ↔ 一个节点**（同一 `APP_ID` 不能同时挂两条长连接） |
+| 多节点 | 暂不做。一个机器人服务多个节点需要「@谁发给谁」的路由层，排在点对点稳定之后 |
+| Runtime | `claude-agent-sdk` 已验证；**OpenCode V2 共存**：出站（文字/图片）与聊天上下文已实测通过，**入站待真人验证**（机器人收不到自己发的消息）；claude-code-cli / codex-sdk / grok-build-acp 未验证 |
 | 触达 | ✅ 私聊（白名单内 `open_id`）/ ✅ 群里 @bot |
 | 媒体 | ✅ 文本 / ✅ 图片（需 vision-capable 模型，见 §4） |
 | Dashboard 拓扑 | ❌ 暂不进（commhub-gateway 后续 PR） |
