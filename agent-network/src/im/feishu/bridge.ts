@@ -6,26 +6,17 @@
  *
  * 🔴 There are TWO outbound paths, and which one runs is decided at line ~445:
  *
- *     const client = commhubClient ?? createEnvCommHubClient();
- *     if (client) return createCommHubEventHandler(...);   // (A)
- *     if (typeof process.send === "function") ...          // (B)
+ *   选路由是**显式**的（resolveFeishuBridgeMode）：默认 direct，只有
+ *   ANET_FEISHU_BRIDGE_MODE=commhub 才走 Hub。非法值启动即抛，不静默取默认。
  *
- *   (A) CommHub task dispatch — **the default on any real node.**
- *       `createEnvCommHubClient()` returns null only when neither COMMHUB_URL
- *       nor ANET_HUB_URL is set, and every provisioned node has one. Replies
- *       carry `in_reply_to`, and the correlation store tracks task status.
- *   (B) parent IPC → agent-node's `think()` — the fallback when there is no
- *       hub URL in env (standalone / test harness).
+ *   (A) direct（默认）—— 消息直接进本机节点的 think()（IPC）。
+ *       桥必须和节点同机；少一跳，失败只在一层。
+ *   (B) commhub —— 消息变成一条 **CommHub task** 派给目标 alias，再轮询自己的
+ *       inbox 取 reply。桥可以在任何机器；多一层（派发/执行/回读），
+ *       多节点还需要一层"@谁发给谁"的路由（尚未实现）。
  *
- *   Both paths end at adapter.send() back to the originating conversation.
- *
- * 🔴 This block used to say the opposite —— verbatim:
- *       "IM messages do NOT pass through commhub task dispatch."
- *   That was true of the 2026-06-24 first cut, and stayed in the file after
- *   the commhub path landed (#1252, merged 2026-08-27). It is the first thing
- *   anyone reads in this file, so it mis-answered the question "does Feishu go
- *   through CommHub" for at least one reader before being caught. If you change
- *   which path is default, change these lines in the same commit.
+ *   ⚠️ 这段曾经写成「CommHub dispatch 是任何真实节点的默认」，而代码里默认是 direct ——
+ *   谁按注释选模式就会以为自己走 Hub。改默认值时，同一提交里改这段。
  *
  * Still true of both paths (unchanged from the first cut):
  *   - No separate gateway ntok_ / dedicated commhub alias.
