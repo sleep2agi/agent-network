@@ -47,6 +47,7 @@ import type { IMCorrelationStore, NormalizedIMEvent } from "../types.js";
 import { createJsonIMCorrelationStore } from "../correlation-store.js";
 import { FeishuAdapter } from "./adapter.js";
 import { loadFeishuChannelConfig } from "./config.js";
+import { mapHistoryToContext, renderContextBlock } from "./chat-context.js";
 import {
   parseOutboundMarkers,
   validateOutboundPath,
@@ -115,6 +116,9 @@ export interface BridgeIncomingEnvelope {
    *  bridge from `event.conversation.conversationId` + `adapter
    *  .connectionName`. Trailing slash included. */
   outboundDir?: string;
+  /** #3682 —— 已归一化/裁剪/写明"不是新指令"的上下文块（跨包共享不了 mapper，
+   *  所以归一化留在有 mapper 的这一侧，node 侧只做拼接）。 */
+  contextBlock?: string;
 }
 
 /** Parent → bridge: agent reply text for a previously-forwarded event. */
@@ -670,7 +674,16 @@ export function createIPCEventHandler(
       adapter.connectionName || "feishu",
       event.conversation.conversationId,
     );
-    const envelope: BridgeIncomingEnvelope = { type: "event", event, outboundDir };
+    // #3682 —— 上下文 best-effort：拿不到就省略，绝不因此丢消息。
+    let contextBlock: string | undefined;
+    try {
+      const conv = event.conversation;
+      if (conv.conversationId) {
+        const block = renderContextBlock(mapHistoryToContext(await adapter.fetchRecentContext(conv.conversationId, 8)));
+        if (block) contextBlock = block;
+      }
+    } catch { /* 上下文失败不影响主链路 */ }
+    const envelope: BridgeIncomingEnvelope = { type: "event", event, outboundDir, ...(contextBlock ? { contextBlock } : {}) };
     process.send!(envelope);
   };
 }

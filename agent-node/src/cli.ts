@@ -7229,6 +7229,10 @@ function wireFeishuChildHandlers(
         `[飞书 outbound] 这条会话的文件分发目录: ${outboundDir}\n` +
         `把要发给用户的文件存到这个目录里，回复末尾加一行 [[send-file:绝对路径]] 即可发送 (一文件一行)。路径必须严格在这个目录下，否则 bridge 会拒绝。`;
 
+      // #3682 —— 聊天上下文（桥侧已归一化；这里只拼接，放在正文之前）。
+      const contextBlock = typeof (raw as any).contextBlock === "string" ? (raw as any).contextBlock : "";
+      if (contextBlock) content = `${contextBlock}\n\n${content}`;
+
       let replyText: string;
       if (!content.trim()) {
         // Bridge would have filtered most empty events, but defend
