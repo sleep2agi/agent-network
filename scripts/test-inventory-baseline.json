@@ -2360,6 +2360,9 @@
   "agent-node/src/feishu-turn-queue.test.ts::TurnQueue —— 能改优先级::high 入队插到 normal 前面（high 之间保持 FIFO）": 1,
   "agent-node/src/feishu-turn-queue.test.ts::TurnQueue —— 能改优先级::promote 不存在的 id ⇒ false（幂等，不抛）": 1,
   "agent-node/src/feishu-turn-queue.test.ts::TurnQueue —— 能改优先级::promote 把 normal 提到 high 区尾部（不越过已有的 high）": 1,
+  "agent-node/src/feishu-turn-queue.test.ts::队列上限：满了就明确拒绝::到上限 ⇒ 明说「没有排上」，不许给「会被处理」的错觉": 1,
+  "agent-node/src/feishu-turn-queue.test.ts::队列上限：满了就明确拒绝::未满 ⇒ 空串（正常入队，不加提示）": 1,
+  "agent-node/src/feishu-turn-queue.test.ts::队列上限：满了就明确拒绝::超过上限同样拒绝（>= 恒定）": 1,
   "agent-node/src/feishu-worker-resolve.test.ts::#1379 resolve feishu worker under npx layout::dev sibling checkout: `agent-node/dist/` next to `agent-network/dist/` still resolves without any global-prefix hint": 1,
   "agent-node/src/feishu-worker-resolve.test.ts::#1379 resolve feishu worker under npx layout::env override wins over everything": 1,
   "agent-node/src/feishu-worker-resolve.test.ts::#1379 resolve feishu worker under npx layout::green: new resolver finds the global-prefix worker via npm_config_prefix": 1,
@@ -10828,6 +10831,9 @@
   "agent-node/src/feishu-turn-queue.test.ts::TurnQueue —— 能改优先级::high 入队插到 normal 前面（high 之间保持 FIFO）",
   "agent-node/src/feishu-turn-queue.test.ts::TurnQueue —— 能改优先级::promote 不存在的 id ⇒ false（幂等，不抛）",
   "agent-node/src/feishu-turn-queue.test.ts::TurnQueue —— 能改优先级::promote 把 normal 提到 high 区尾部（不越过已有的 high）",
+  "agent-node/src/feishu-turn-queue.test.ts::队列上限：满了就明确拒绝::到上限 ⇒ 明说「没有排上」，不许给「会被处理」的错觉",
+  "agent-node/src/feishu-turn-queue.test.ts::队列上限：满了就明确拒绝::未满 ⇒ 空串（正常入队，不加提示）",
+  "agent-node/src/feishu-turn-queue.test.ts::队列上限：满了就明确拒绝::超过上限同样拒绝（>= 恒定）",
   "agent-node/src/feishu-worker-resolve.test.ts::#1379 resolve feishu worker under npx layout::dev sibling checkout: `agent-node/dist/` next to `agent-network/dist/` still resolves without any global-prefix hint",
   "agent-node/src/feishu-worker-resolve.test.ts::#1379 resolve feishu worker under npx layout::env override wins over everything",
   "agent-node/src/feishu-worker-resolve.test.ts::#1379 resolve feishu worker under npx layout::green: new resolver finds the global-prefix worker via npm_config_prefix",
@@ -16936,7 +16942,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "2d6ee23c78f94f8293cfbd7b80175d22c054715d",
+  "commit": "966cea0223d4a7d8b2ae6b859bfa8600b7504e59",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

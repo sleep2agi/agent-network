@@ -137,3 +137,23 @@ describe("TurnQueue —— 串行语义不变", () => {
     expect(ran).toEqual(["a", "b"]);
   });
 });
+
+describe("队列上限：满了就明确拒绝", () => {
+  test("未满 ⇒ 空串（正常入队，不加提示）", async () => {
+    const { queueFullNotice } = await import("./feishu-turn-queue");
+    expect(queueFullNotice(0)).toBe("");
+    expect(queueFullNotice(19, 20)).toBe("");
+  });
+
+  test("到上限 ⇒ 明说「没有排上」，不许给「会被处理」的错觉", async () => {
+    const { queueFullNotice } = await import("./feishu-turn-queue");
+    const t = queueFullNotice(20, 20);
+    expect(t).toContain("没有排上");
+    expect(t).toContain("20");
+  });
+
+  test("超过上限同样拒绝（>= 恒定）", async () => {
+    const { queueFullNotice } = await import("./feishu-turn-queue");
+    expect(queueFullNotice(25, 20)).toContain("没有排上");
+  });
+});

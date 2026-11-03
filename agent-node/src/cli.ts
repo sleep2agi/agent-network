@@ -117,7 +117,7 @@ import { maskedEnv } from "./secret-mask";
 import { maskSecretsInText, summarizeHits } from "./outbound-secret-mask";
 import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
 import { decideFeishuInbound, roleForSender } from "./feishu-role";
-import { TurnQueue } from "./feishu-turn-queue";
+import { TurnQueue, queueFullNotice } from "./feishu-turn-queue";
 import { parseQueueCommand, QUEUE_HELP_TEXT, type QueueCommand } from "./feishu-queue-command";
 import { buildAttachmentDescriptors } from "./runtime/feishu-envelope";
 import {
@@ -7339,6 +7339,15 @@ function wireFeishuChildHandlers(
           warn(`[feishu] reply send failed: ${e?.message || e}`);
         }
       };
+      // #3682 —— 上限：满了明确拒绝，而不是无限排队（后者给了"每条都会被处理"的错觉）。
+      const fullNotice = queueFullNotice(feishuTurnQueue.size);
+      if (fullNotice) {
+        if (typeof child.send === "function") {
+          try { child.send({ type: "reply", eventKey: ev.idempotencyKey, text: fullNotice }); }
+          catch (e: any) { warn(`[feishu] queue-full reply failed: ${e?.message || e}`); }
+        }
+        return;
+      }
       feishuTurnQueue.push({ sender: ev.sender?.id ?? "?", priority: "normal", payload: null });
       void feishuTurnQueue.drain(runTurn, (err) => {
         warn(`[feishu] queued turn failed: ${(err as any)?.message ?? String(err)}`);

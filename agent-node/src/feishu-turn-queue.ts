@@ -163,3 +163,18 @@ export class TurnQueue<T = unknown> {
     }
   }
 }
+
+/** 队列上限：超过就不再收，明确告诉用户，而不是让它无限排队。 */
+export const MAX_QUEUED_TURNS = 20;
+
+/**
+ * 队列满了的时候该回什么；没满返回空串（正常入队）。
+ *
+ * 为什么要有上限：没有上限时，"连发 50 条"会排出 50 轮，
+ * 用户看到的是一个越来越长的等待且**没有任何拒绝** —— 那比直接说"满了"更糟，
+ * 因为它给了"我发的每条都会被处理"的错觉。
+ */
+export function queueFullNotice(size: number, max = MAX_QUEUED_TURNS): string {
+  if (!Number.isFinite(size) || size < max) return "";
+  return `⏳ 排队已满（${max} 条）。这条**没有排上**，请等我处理完再发 —— 现在发更多只会排更久。`;
+}
