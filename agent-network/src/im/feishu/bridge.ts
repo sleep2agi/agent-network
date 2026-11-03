@@ -39,6 +39,7 @@ import { createJsonIMCorrelationStore } from "../correlation-store.js";
 import { FeishuAdapter } from "./adapter.js";
 import { loadFeishuChannelConfig } from "./config.js";
 import { mapHistoryToContext, renderContextBlock } from "./chat-context.js";
+import { queueNoticeText } from "./queue-notice.js";
 import {
   parseOutboundMarkers,
   validateOutboundPath,
@@ -616,6 +617,27 @@ export function createIPCEventHandler(
       })();
     }, ttlMs);
     timeout.unref?.();
+
+    // #3682 —— 队列可见性：入站串行（thinkQueue），第二条起会等前面跑完；
+    // 没有这句话时，"排队"与"卡死"在用户眼里一样。pending 刚把自己放进去 ⇒ ahead = size - 1。
+    const ahead = pending.size - 1;
+    if (ahead >= 1) {
+      const notice = queueNoticeText(ahead);
+      if (notice) {
+        try {
+          await adapter.send({
+            target: event.conversation,
+            text: notice,
+            replyToMessageId: event.messageId,
+            correlation: { taskId: event.idempotencyKey },
+          });
+          process.stderr.write(`[feishu:bridge] queue-notice ahead=${ahead} for ${event.idempotencyKey}\n`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[feishu:bridge] queue-notice send failed: ${msg}\n`);
+        }
+      }
+    }
 
     // Optional placeholder — gives the user an immediate push notification
     // ("bot saw my message"). Awaited so logs stay chronological. Failure
