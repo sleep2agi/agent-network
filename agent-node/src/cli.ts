@@ -117,6 +117,8 @@ import { maskedEnv } from "./secret-mask";
 import { maskSecretsInText, summarizeHits } from "./outbound-secret-mask";
 import { checkFeishuToolDeny, isFeishuChannelTurn } from "./feishu-tool-deny";
 import { decideFeishuInbound, roleForSender } from "./feishu-role";
+import { TurnQueue } from "./feishu-turn-queue";
+import { parseQueueCommand, QUEUE_HELP_TEXT, type QueueCommand } from "./feishu-queue-command";
 import { buildAttachmentDescriptors } from "./runtime/feishu-envelope";
 import {
   buildFeishuWorkerArgs,
@@ -7089,6 +7091,45 @@ async function connectFeishu(channel: FeishuChannel): Promise<void> {
 // onto a freshly-spawned worker child. Extracted from the original
 // connectFeishu body so the supervisor loop above can re-call it on each
 // re-fork without duplicating the entire handler body.
+// #3682 —— 飞书入站的队列（进程级）：串行语义与 thinkQueue 一致，
+// 区别是它能被看见（/q）、被提权（/prio）、被撤回（/cancel）。
+const feishuTurnQueue = new TurnQueue<null>();
+
+async function handleQueueCommand(cmd: QueueCommand, sender: string): Promise<string> {
+  const snap = feishuTurnQueue.list();
+  switch (cmd.kind) {
+    case "list": {
+      const running = feishuTurnQueue.current();
+      if (snap.length === 0) {
+        return running ? `队列是空的；正在处理 1 条（${running.id}）。` : "队列是空的，没有在等的东西。";
+      }
+      return [
+        `排队中 ${snap.length} 条${running ? `（另有 1 条正在处理：${running.id}）` : ""}：`,
+        ...snap.map((e) => `  ${e.position}. ${e.id} · ${e.sender} · 已等 ${Math.round(e.waitedMs / 1000)}s`),
+        "要撤某条：/cancel <位次>；要提前：/prio <位次>",
+      ].join("\n");
+    }
+    case "cancel": {
+      const t = snap.find((e) => e.position === cmd.position);
+      if (!t) return `没有第 ${cmd.position} 条（当前 ${snap.length} 条在等）。`;
+      if (t.sender !== sender) return `第 ${cmd.position} 条不是你发的，不能撤。`;
+      return feishuTurnQueue.cancel(t.id) ? `已撤掉第 ${cmd.position} 条（${t.id}）。` : `第 ${cmd.position} 条已开始处理，撤不掉了。`;
+    }
+    case "promote": {
+      const t = snap.find((e) => e.position === cmd.position);
+      if (!t) return `没有第 ${cmd.position} 条（当前 ${snap.length} 条在等）。`;
+      if (t.sender !== sender) return `第 ${cmd.position} 条不是你发的，不能提。`;
+      return feishuTurnQueue.promote(t.id) ? `已把第 ${cmd.position} 条（${t.id}）提到前面。` : `第 ${cmd.position} 条已开始处理。`;
+    }
+    case "clear": {
+      const n = feishuTurnQueue.clear((e) => e.sender === sender);
+      return n > 0 ? `已撤掉你还没开始的 ${n} 条。` : "你还没有开始的条目，没什么可撤的。";
+    }
+    default:
+      return QUEUE_HELP_TEXT;
+  }
+}
+
 function wireFeishuChildHandlers(
   child: ReturnType<typeof import("node:child_process").spawn>,
   channel: FeishuChannel,
@@ -7233,43 +7274,61 @@ function wireFeishuChildHandlers(
             }
           }
 
-      let replyText: string;
-      if (!content.trim()) {
-        // Bridge would have filtered most empty events, but defend
-        // against zero-content + no-image edge (sticker / unsupported
-        // message kind) — send a brief reply so the user sees that we
-        // heard them but had nothing actionable.
-        replyText = "[agent-node] 收到事件但没有可处理的文本/图片内容。";
-      } else {
-        try {
-          // images NOT passed to processTask — path-based flow lets the agent
-          // pick when (and whether) to visualize. The image_blocks/imageCapable
-          // SDK path remains available for other channels (telegram) that don't
-          // expose downloaded paths.
-          const result = await processTask(content, from, null);
-          replyText = result.failed
-            ? `[agent-node 处理失败] ${result.text}`
-            : result.text;
-        } catch (e: any) {
-          warn(`[feishu] think() threw: ${e?.message ?? e}`);
-          replyText = `[agent-node 异常] ${e?.message ?? String(e)}`;
+      // #3682 —— 队列命令只作用于尚未开始的条目；正在跑的撤不掉（那是"打断"）。
+      const qcmd = parseQueueCommand(ev.content?.text);
+      if (qcmd.kind !== "none") {
+        const reply = await handleQueueCommand(qcmd, ev.sender?.id ?? "?");
+        if (typeof child.send === "function") {
+          try { child.send({ type: "reply", eventKey: ev.idempotencyKey, text: reply }); }
+          catch (e: any) { warn(`[feishu] queue-command reply failed: ${e?.message || e}`); }
         }
+        return;
       }
 
-      if (GROK_EXECUTION_MODE === "cli") {
-        replyText = persistenceRedactor.redactText(replyText).text;
-      }
+      // #3682 —— 入队（串行由队列保证；可被 /q 看见、/prio 提权、/cancel 撤回）。
+      const runTurn = async (): Promise<void> => {
+        let replyText: string;
+        if (!content.trim()) {
+          // Bridge would have filtered most empty events, but defend
+          // against zero-content + no-image edge (sticker / unsupported
+          // message kind) — send a brief reply so the user sees that we
+          // heard them but had nothing actionable.
+          replyText = "[agent-node] 收到事件但没有可处理的文本/图片内容。";
+        } else {
+          try {
+            // images NOT passed to processTask — path-based flow lets the agent
+            // pick when (and whether) to visualize. The image_blocks/imageCapable
+            // SDK path remains available for other channels (telegram) that don't
+            // expose downloaded paths.
+            const result = await processTask(content, from, null);
+            replyText = result.failed
+              ? `[agent-node 处理失败] ${result.text}`
+              : result.text;
+          } catch (e: any) {
+            warn(`[feishu] think() threw: ${e?.message ?? e}`);
+            replyText = `[agent-node 异常] ${e?.message ?? String(e)}`;
+          }
+        }
 
-      if (typeof child.send !== "function") return;
-      try {
-        child.send({
-          type: "reply",
-          eventKey: ev.idempotencyKey,
-          text: replyText,
-        });
-      } catch (e: any) {
-        warn(`[feishu] reply send failed: ${e?.message || e}`);
-      }
+        if (GROK_EXECUTION_MODE === "cli") {
+          replyText = persistenceRedactor.redactText(replyText).text;
+        }
+
+        if (typeof child.send !== "function") return;
+        try {
+          child.send({
+            type: "reply",
+            eventKey: ev.idempotencyKey,
+            text: replyText,
+          });
+        } catch (e: any) {
+          warn(`[feishu] reply send failed: ${e?.message || e}`);
+        }
+      };
+      feishuTurnQueue.push({ sender: ev.sender?.id ?? "?", priority: "normal", payload: null });
+      void feishuTurnQueue.drain(runTurn, (err) => {
+        warn(`[feishu] queued turn failed: ${(err as any)?.message ?? String(err)}`);
+      });
     })().catch((e: any) => {
       // Belt-and-braces — the inner try/catch already swallows think()
       // errors, but if something between them (e.g. JSON.stringify) throws,
