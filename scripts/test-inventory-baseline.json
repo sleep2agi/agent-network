@@ -2312,6 +2312,11 @@
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::CHANNELS 的 feishu 分支会过滤掉 null（否则类型与运行时都会漏一个洞）": 1,
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::函数体内没有**语句级**的 process.exit（缺文件时不许让节点退出）": 1,
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::缺 access.json 时返回 null 并 warn（守卫在 return 之前）": 1,
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::guest ⇒ reject（只读档不许执行工具）": 1,
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::member / admin ⇒ once（只放行这一次）": 1,
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::拒绝文案：guest 与「认不出」要能区分（两者修法不同）": 1,
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::认不出的角色 ⇒ reject（fail-closed，不因为认不出就给权限）": 1,
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::🔴 任何角色都不许返回 always —— 那会把这次决定持久化成跨回合、跨身份的规则": 1,
   "agent-node/src/feishu-role.test.ts::#3682 fail-closed：V2 上没有可执行的「只读来宾」::V2 + guest ⇒ 拒绝，且回复里说清原因与下一步": 1,
   "agent-node/src/feishu-role.test.ts::#3682 fail-closed：V2 上没有可执行的「只读来宾」::member / admin 在 V2 上照常放行（拒绝只针对没有执行者的那一档）": 1,
   "agent-node/src/feishu-role.test.ts::#3682 fail-closed：V2 上没有可执行的「只读来宾」::镜像肯定：同一档在 V1 上放行（否则等于把功能整个砍掉）": 1,
@@ -10748,6 +10753,11 @@
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::CHANNELS 的 feishu 分支会过滤掉 null（否则类型与运行时都会漏一个洞）",
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::函数体内没有**语句级**的 process.exit（缺文件时不许让节点退出）",
   "agent-node/src/feishu-channel-failsoft.test.ts::#3682 飞书渠道初始化：缺文件不 fatal::缺 access.json 时返回 null 并 warn（守卫在 return 之前）",
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::guest ⇒ reject（只读档不许执行工具）",
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::member / admin ⇒ once（只放行这一次）",
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::拒绝文案：guest 与「认不出」要能区分（两者修法不同）",
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::认不出的角色 ⇒ reject（fail-closed，不因为认不出就给权限）",
+  "agent-node/src/feishu-role.test.ts::#3682 V2 permission 应答：只放行一次，绝不持久化::🔴 任何角色都不许返回 always —— 那会把这次决定持久化成跨回合、跨身份的规则",
   "agent-node/src/feishu-role.test.ts::#3682 fail-closed：V2 上没有可执行的「只读来宾」::V2 + guest ⇒ 拒绝，且回复里说清原因与下一步",
   "agent-node/src/feishu-role.test.ts::#3682 fail-closed：V2 上没有可执行的「只读来宾」::member / admin 在 V2 上照常放行（拒绝只针对没有执行者的那一档）",
   "agent-node/src/feishu-role.test.ts::#3682 fail-closed：V2 上没有可执行的「只读来宾」::镜像肯定：同一档在 V1 上放行（否则等于把功能整个砍掉）",
@@ -16872,7 +16882,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "0b22e56ff491249b253550b6562bb286766b9af9",
+  "commit": "5abeff86435004fda5673518eb1f3bcaf46e1681",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

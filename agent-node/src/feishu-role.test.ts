@@ -7,7 +7,9 @@ import {
   FEISHU_ROLES,
   GUEST_TOOLS,
   decideFeishuInbound,
+  decidePermissionReply,
   deniedToolsForRole,
+  permissionDenyNotice,
   resolveDeclaredRole,
   roleForSender,
 } from "./feishu-role";
@@ -108,5 +110,32 @@ describe("#3682 fail-closed：V2 上没有可执行的「只读来宾」", () =>
   test("member / admin 在 V2 上照常放行（拒绝只针对没有执行者的那一档）", () => {
     expect(decideFeishuInbound("member", { opencodeGeneration: "v2" }).action).toBe("allow");
     expect(decideFeishuInbound("admin", { opencodeGeneration: "v2" }).action).toBe("allow");
+  });
+});
+
+describe("#3682 V2 permission 应答：只放行一次，绝不持久化", () => {
+  test("member / admin ⇒ once（只放行这一次）", () => {
+    expect(decidePermissionReply("member")).toBe("once");
+    expect(decidePermissionReply("admin")).toBe("once");
+  });
+
+  test("guest ⇒ reject（只读档不许执行工具）", () => {
+    expect(decidePermissionReply("guest")).toBe("reject");
+  });
+
+  test("认不出的角色 ⇒ reject（fail-closed，不因为认不出就给权限）", () => {
+    expect(decidePermissionReply("unknown")).toBe("reject");
+  });
+
+  test("🔴 任何角色都不许返回 always —— 那会把这次决定持久化成跨回合、跨身份的规则", () => {
+    const roles = [...FEISHU_ROLES, "unknown"] as const;
+    for (const role of roles) {
+      expect(decidePermissionReply(role), role).not.toBe("always");
+    }
+  });
+
+  test("拒绝文案：guest 与「认不出」要能区分（两者修法不同）", () => {
+    expect(permissionDenyNotice("guest", "bash")).toContain("只读来宾");
+    expect(permissionDenyNotice("unknown", "bash")).toContain("无法确认");
   });
 });

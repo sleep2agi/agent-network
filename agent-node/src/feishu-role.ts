@@ -130,3 +130,29 @@ export function decideFeishuInbound(
   }
   return { action: "allow", role };
 }
+
+/** V2 的 permission 应答取值（来自 opencode 的 Permission.Reply）。 */
+export type PermissionReply = "once" | "always" | "reject";
+
+/**
+ * 这一回合的角色，遇到一条 permission 请求，该回什么。
+ *
+ * 🔴 **永不返回 `always`**。`always` 会把这次决定**持久化**成一条规则，
+ * 于是它跨回合、跨角色生效 —— 一个 guest 在这一轮被允许的工具，
+ * 下一轮换个身份来的人也能用。授权一旦被持久化，就再也没人知道它当初是给谁的。
+ *
+ * 因此：member/admin ⇒ `once`（只放行这一次）；guest ⇒ `reject`；
+ * 认不出的角色 ⇒ `reject`（fail-closed）。
+ */
+export function decidePermissionReply(role: FeishuRole | "unknown"): PermissionReply {
+  if (role === "member" || role === "admin") return "once";
+  return "reject";
+}
+
+/** 拒绝时给用户看的一句话（够具体，不暴露内部路径/凭据）。 */
+export function permissionDenyNotice(role: FeishuRole | "unknown", action: string): string {
+  if (role === "guest") {
+    return `[权限] 这个工具调用（${action}）超出「只读来宾」的范围，已拒绝。如需执行，请联系管理员提升你的角色。`;
+  }
+  return `[权限] 无法确认发起者的角色，按 fail-closed 拒绝了这次工具调用（${action}）。`;
+}
