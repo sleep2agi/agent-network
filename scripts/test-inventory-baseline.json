@@ -1142,6 +1142,10 @@
   "agent-network/src/im/feishu/config-env-fallback.test.ts::#3682 飞书凭据：.env 优先，process.env 兜底::没有 .env，但进程 env 里有 ⇒ 用它（跨机节点靠这条）": 1,
   "agent-network/src/im/feishu/config-env-fallback.test.ts::#3682 飞书凭据：.env 优先，process.env 兜底::空字符串不算「有」（env 里写了 FEISHU_APP_ID= 等于没配）": 1,
   "agent-network/src/im/feishu/config-env-fallback.test.ts::#3682 飞书凭据：.env 优先，process.env 兜底::🔴 两边都有 ⇒ **以 .env 为准**（不许让刚推下来的 env 悄悄改变语义，反之亦然）": 1,
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::.env 里用 SF_APP_ID / SF_APP_KEY 也能读到": 1,
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::一个主名一个别名混着也能拼起来": 1,
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::主名优先：两者都在时用 FEISHU_*": 1,
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::别名也可来自 process.env（保险库推下来时常用这种名字）": 1,
   "agent-network/src/im/feishu/queue-notice.test.ts::队列可见性::前面 0 条或负数 ⇒ 不发（每句话都加提示就是噪声）": 1,
   "agent-network/src/im/feishu/queue-notice.test.ts::队列可见性::前面 2 条 ⇒ 说清是 2 条": 1,
   "agent-network/src/im/feishu/queue-notice.test.ts::队列可见性::小数向下取整（宁可少说一条，也不要报一个其实没有的位次）": 1,
@@ -9613,6 +9617,10 @@
   "agent-network/src/im/feishu/config-env-fallback.test.ts::#3682 飞书凭据：.env 优先，process.env 兜底::没有 .env，但进程 env 里有 ⇒ 用它（跨机节点靠这条）",
   "agent-network/src/im/feishu/config-env-fallback.test.ts::#3682 飞书凭据：.env 优先，process.env 兜底::空字符串不算「有」（env 里写了 FEISHU_APP_ID= 等于没配）",
   "agent-network/src/im/feishu/config-env-fallback.test.ts::#3682 飞书凭据：.env 优先，process.env 兜底::🔴 两边都有 ⇒ **以 .env 为准**（不许让刚推下来的 env 悄悄改变语义，反之亦然）",
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::.env 里用 SF_APP_ID / SF_APP_KEY 也能读到",
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::一个主名一个别名混着也能拼起来",
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::主名优先：两者都在时用 FEISHU_*",
+  "agent-network/src/im/feishu/config-env-fallback.test.ts::凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY::别名也可来自 process.env（保险库推下来时常用这种名字）",
   "agent-network/src/im/feishu/queue-notice.test.ts::队列可见性::前面 0 条或负数 ⇒ 不发（每句话都加提示就是噪声）",
   "agent-network/src/im/feishu/queue-notice.test.ts::队列可见性::前面 2 条 ⇒ 说清是 2 条",
   "agent-network/src/im/feishu/queue-notice.test.ts::队列可见性::小数向下取整（宁可少说一条，也不要报一个其实没有的位次）",
@@ -16942,7 +16950,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "3ddf1b5ab4a1ba36d5e0eee160015a87974733a2",
+  "commit": "d136aeb15d2efb85ee04c4c1c60e33e60214b8c5",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

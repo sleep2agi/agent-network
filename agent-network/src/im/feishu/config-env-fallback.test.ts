@@ -66,3 +66,40 @@ describe("#3682 飞书凭据：.env 优先，process.env 兜底", () => {
       .toThrow(/missing/);
   });
 });
+
+describe("凭据别名：运维侧的 SF_APP_ID / SF_APP_KEY", () => {
+  const dir = (envFile?: string) => {
+    const d = mkdtempSync(join(tmpdir(), "feishu-alias-"));
+    dirs.push(d);
+    if (envFile !== undefined) writeFileSync(join(d, ".env"), envFile);
+    writeFileSync(join(d, "access.json"), JSON.stringify({ allowFrom: ["ou_x"], allowChats: [] }));
+    return d;
+  };
+
+  test(".env 里用 SF_APP_ID / SF_APP_KEY 也能读到", () => {
+    const cfg = loadFeishuChannelConfig(dir("SF_APP_ID=cli_sf\nSF_APP_KEY=sec_sf\n"), {});
+    expect(cfg.appId).toBe("cli_sf");
+    expect(cfg.appSecret).toBe("sec_sf");
+  });
+
+  test("主名优先：两者都在时用 FEISHU_*", () => {
+    const cfg = loadFeishuChannelConfig(
+      dir("FEISHU_APP_ID=cli_main\nSF_APP_ID=cli_alias\nFEISHU_APP_SECRET=sec_main\nSF_APP_KEY=sec_alias\n"),
+      {},
+    );
+    expect(cfg.appId).toBe("cli_main");
+    expect(cfg.appSecret).toBe("sec_main");
+  });
+
+  test("别名也可来自 process.env（保险库推下来时常用这种名字）", () => {
+    const cfg = loadFeishuChannelConfig(dir(undefined), { SF_APP_ID: "cli_env", SF_APP_KEY: "sec_env" });
+    expect(cfg.appId).toBe("cli_env");
+    expect(cfg.appSecret).toBe("sec_env");
+  });
+
+  test("一个主名一个别名混着也能拼起来", () => {
+    const cfg = loadFeishuChannelConfig(dir("FEISHU_APP_ID=cli_main\n"), { SF_APP_KEY: "sec_env" });
+    expect(cfg.appId).toBe("cli_main");
+    expect(cfg.appSecret).toBe("sec_env");
+  });
+});
