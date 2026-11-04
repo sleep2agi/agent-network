@@ -48,6 +48,32 @@
 顺序不能反：`.env` 优先是为了让"磁盘上写死的"永远赢过"刚推下来的"，
 否则一次推送会悄悄改变一台机器上已经跑通的行为。
 
+## 2.5 换一个飞书应用（新 app_id / app_secret）
+
+**不要**把密钥写进命令行参数（会进 shell history 和 /proc）。做法：
+
+```bash
+# 1) 把两行写进一个 0600 文件
+printf 'FEISHU_APP_ID=cli_xxx\nFEISHU_APP_SECRET=yyy\n' > /tmp/new-app.env
+chmod 600 /tmp/new-app.env
+
+# 2) 一条命令换完（校验凭据 → 写 .env(0600) → 重启 → 核 bridge online）
+bash ~/.commhub/feishu-switch-app.sh /tmp/new-app.env 通信飞书欧
+```
+
+脚本做四件事，**不做**的也写清楚：
+
+```
+做：  先拿 app_id/app_secret 换一次 tenant_access_token（换不到就一个字节都不写）
+      备份旧 .env → 写新的（0600）→ 重启节点 → 从日志核 "bridge online"
+不做：不改 access.json（白名单是另一件事）
+      不改 config.json（channels 已经在里面）
+      不校验应用是否已发布 / 机器人是否在可用范围内 —— 那两项只能在飞书后台看
+```
+
+新应用要开的能力：机器人能力 · 接收消息事件 `im.message.receive_v1` ·
+**事件订阅方式选「使用长连接」，且先起客户端再保存订阅** · 发消息与资源上传权限。
+
 ## 3. 权限：三个维度同时成立才叫「只读」
 
 | 维度 | 位置 | 判据 |
