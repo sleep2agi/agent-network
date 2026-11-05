@@ -66,6 +66,7 @@ check() {  # $1=名字(缩写) $2=文件 $3=最大年龄h $4=抽读数的 sed �
 check idle    "$LOGDIR/idle-poll-share.log"   13 's/.*share=([0-9.]+%.*)$/\1/'
 check gaps    "$LOGDIR/requirement-gaps.log"  26 's/.*(新建=[0-9]+ 缺字段=[0-9]+).*/\1/'
 check desktop "$LOGDIR/desktop-release.log"   26 's/.*version=([0-9.]+) platforms=([0-9]+) verdict=([a-z]+).*/\1\/\2p\/\3/'
+check tokens  "$LOGDIR/node-token-usage.log"  26 's/.*nodes=([0-9]+) total=([0-9]+).*/\1n\/\2t/'
 
 line="$(date -Is) verdict=$([ "$ok" = 1 ] && echo ok || echo attention) ${parts[*]}"
 echo "$line" >> "$OUT"
