@@ -6394,22 +6394,7 @@ return Bun.serve({
     // {model, flags, config_revision} the node last posted via
     // report_status (B6). NEVER reads per-node files. Network-scoped
     // via addNetworkScope so a netA viewer can't read a netB node.
-    const nodeConfigMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/config$/);
-    if (nodeConfigMatch && req.method === "GET") {
-      const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
-      const params: any[] = [nodeId];
-      let sql = "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
-      sql = addNetworkScope(sql, params, restScope);
-      sql += " LIMIT 1";
-      const node = db.get<any>(sql, ...params);
-      if (!node) {
-        return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: nodeId }, { status: 404 }));
-      }
-      let snapshot: any = {};
-      if (node.config_snapshot) {
-        try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
-      }
-      // ── #3952 Token 审计（admin 2026-11-05）──
+    // ── #3952 Token 审计（admin 2026-11-05）──
     // GET /api/token-usage?network_id=…&since_hours=24
     //   人（成员/owner/admin）读本网络各节点的 LLM token 计数聚合；节点令牌不给（user_token_required）。
     // 为什么走 REST 而不是 MCP 工具：tools/list 的 user 预算只剩 ~500 B，
@@ -6441,7 +6426,22 @@ return Bun.serve({
       }));
     }
 
-    // #3146 —— 上一次下发的**结局**。没有这一格时，客户端只能靠
+    const nodeConfigMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/config$/);
+    if (nodeConfigMatch && req.method === "GET") {
+      const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
+      const params: any[] = [nodeId];
+      let sql = "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
+      sql = addNetworkScope(sql, params, restScope);
+      sql += " LIMIT 1";
+      const node = db.get<any>(sql, ...params);
+      if (!node) {
+        return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: nodeId }, { status: 404 }));
+      }
+      let snapshot: any = {};
+      if (node.config_snapshot) {
+        try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
+      }
+      // #3146 —— 上一次下发的**结局**。没有这一格时，客户端只能靠
       // 「config_revision 有没有涨」推断，涨不了就一律显示成 timeout（「90s 内没回来，去看日志」），
       // 而生产上真实结局是 rejected，原因（OpenCode V2 session is not running）就写在本库里。
       // ⇒ 读者拿不到答案，于是被指去机器上看日志 —— 一句话把人送错了层。

@@ -831,20 +831,20 @@
   {
    "id": 85,
    "order": 85,
-   "path": "/api/nodes/:param1/config",
-   "method": "GET",
-   "query": [],
-   "kind": "regex_prefix",
-   "line": 6397
-  },
-  {
-   "id": 86,
-   "order": 86,
    "path": "/api/token-usage",
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 6418
+   "line": 6403
+  },
+  {
+   "id": 86,
+   "order": 86,
+   "path": "/api/nodes/:param1/config",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6429
   },
   {
    "id": 87,
@@ -929,7 +929,7 @@
   }
  ],
  "provenance": [
-  "generated_from: `server/src/server.ts` source_sha256=`767cba9840fe`",
+  "generated_from: `server/src/server.ts` source_sha256=`6d551ae0837c`",
   "reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）",
   "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`",
   "重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）"
