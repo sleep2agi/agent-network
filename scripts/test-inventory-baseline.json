@@ -8327,6 +8327,11 @@
   "server/src/tmux-allowlist.test.ts::tmux allowlist: 空清单的落点与两个方向的判别力::不做子串/前缀匹配：只有整串相等才算": 1,
   "server/src/tmux-allowlist.test.ts::tmux allowlist: 空清单的落点与两个方向的判别力::清单里有的必须被放行（否则「一律拒绝」也能骗过上面那条）": 1,
   "server/src/tmux-allowlist.test.ts::tmux allowlist: 空清单的落点与两个方向的判别力::空清单 = 只允许本机（最严侧），而不是「谁都行」": 1,
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::别的网络的成员看不到（not a member，且不泄漏行数）": 1,
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::本人网络：拿得到两行，且 total = input + output（cache 不进 total）": 1,
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::没令牌：401 而不是空表": 1,
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::节点令牌看不到（user_token_required，不是 404 也不是空表）": 1,
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::覆盖率分母：capable 只数 >= .180，不等于会话总数": 1,
   "server/src/tool-audience-http.test.ts::bytes per role (#476 ceilings stay meaningful per role)::node / user / all": 1,
   "server/src/tool-audience-http.test.ts::every tool is classified::registry == TOOL_AUDIENCE (no unclassified tool, no stale entry)": 1,
   "server/src/tool-audience-http.test.ts::what each caller sees::a hidden tool still answers tools/call exactly as before (only the list changes)": 1,
@@ -16851,6 +16856,11 @@
   "server/src/tmux-allowlist.test.ts::tmux allowlist: 空清单的落点与两个方向的判别力::不做子串/前缀匹配：只有整串相等才算",
   "server/src/tmux-allowlist.test.ts::tmux allowlist: 空清单的落点与两个方向的判别力::清单里有的必须被放行（否则「一律拒绝」也能骗过上面那条）",
   "server/src/tmux-allowlist.test.ts::tmux allowlist: 空清单的落点与两个方向的判别力::空清单 = 只允许本机（最严侧），而不是「谁都行」",
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::别的网络的成员看不到（not a member，且不泄漏行数）",
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::本人网络：拿得到两行，且 total = input + output（cache 不进 total）",
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::没令牌：401 而不是空表",
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::节点令牌看不到（user_token_required，不是 404 也不是空表）",
+  "server/src/token-usage-http.test.ts::#3952 /api/token-usage::覆盖率分母：capable 只数 >= .180，不等于会话总数",
   "server/src/tool-audience-http.test.ts::bytes per role (#476 ceilings stay meaningful per role)::node / user / all",
   "server/src/tool-audience-http.test.ts::every tool is classified::registry == TOOL_AUDIENCE (no unclassified tool, no stale entry)",
   "server/src/tool-audience-http.test.ts::what each caller sees::a hidden tool still answers tools/call exactly as before (only the list changes)",
@@ -17048,7 +17058,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "2900c758120c9f3936c367b8c07709d535e52a77",
+  "commit": "b88f84c0b548168d72173917ed4c62f97106e33e",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
