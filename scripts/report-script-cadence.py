@@ -105,6 +105,11 @@ ADHOC: dict[str, tuple[str, str]] = {
         '它只在有人真的用它提交时生效，CI 里没有「提交」这个动作可跑',
         '等 commit-msg 钩子能自己安全地生成并校验消息（而不是读一个可能遗留的文件）后，删本行',
     ),
+    'report-node-token-usage.py': (
+        '[report-only] 直接读生产库算「各节点 token 用量排行」（total 不含 cache，cache 单列）；'
+        'CI 的临时库既没有 node_token_usage 的行，也没跑过任何回合',
+        '它进了巡检（每天一行 + 退化就报）或客户端有了等价的读接口 ⇒ 删本行',
+    ),
     'report-idle-poll-share.py': (
         '读生产库的 node_tool_calls 算「问状态/问活」占比（#3119）；CI 的临时库没有这些行 ⇒ 跑不出比例',
         '它进了定时巡检（退化就报）后删本行',
