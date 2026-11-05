@@ -4061,8 +4061,10 @@ async function processWithCodex(
     const dt = Date.now() - t0;
     const inTokens = outcome.usage?.input_tokens || 0;
     log(`[codex] done | ${dt}ms | in=${inTokens} out=${outcome.usage?.output_tokens || 0} | items=${outcome.itemCount}`);
-    // #3952 —— 与 claude 同一口径（只报计数）。codex 没给 turns/cost 就不填。
-    reportTokenUsage(MODEL, outcome.usage?.input_tokens, outcome.usage?.output_tokens);
+    // #3952 —— 与 claude 同一口径（只报计数）。codex 不给 turns/cost 字段，
+    // 但这里**就是**一轮的收尾 ⇒ turns 记 1（否则「轮次」这一列永远是 0，
+    // 而 0 会被读成「没跑过」）。
+    reportTokenUsage(MODEL, outcome.usage?.input_tokens, outcome.usage?.output_tokens, { turns: 1 });
     // #1645 —— 上下文压力打在**成功路径**上。实测那次 300s 卡死的真因链里有
     //   `remote compaction failed last_api_response_total_tokens=195436`,而那是我们
     //   自己设的 model_auto_compact_token_limit=200000 的 97.7%。也就是说
