@@ -4,7 +4,7 @@
 # 用法：
 #   bash feishu-provision-node.sh <节点目录> <凭据文件> <open_id> [chat_id] [--dry-run]
 # 例：
-#   bash feishu-provision-node.sh /home/vansin/comm-feishu-ou/.anet/nodes/某节点 \
+#   bash feishu-provision-node.sh ~/comm-feishu-ou/.anet/nodes/某节点 \
 #        /tmp/app.env ou_abc123 oc_xyz --dry-run
 #
 # 做四件事（每步都可单独判死）：
