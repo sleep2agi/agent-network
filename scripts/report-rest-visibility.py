@@ -201,12 +201,6 @@ GATE_ELSEWHERE_HINT = {
     "/api/files/:param1": "fileMatch + authorizeFileDownload：鉴权在调用里",
     "/api/nodes/:param1/config": "nodeConfigMatch：鉴权在块内",
     "/api/tasks?/:param1": "taskPathMatch：鉴权在块内",
-    # #3951 —— 这一条的门在**外层作用域**：handler 顶部统一做
-    #   `const authErr = requireAuth(req)` + `resolveRestNetworkScope(...)` +
-    #   `if (restScope.denied) 403`，任何路由分支之前就已经挡过。
-    # 本脚本只看 `if (...)` 后 25 行的窗口，看不见 2900 行以外的统一出口 ⇒ 记在这里。
-    # 判据（可复核）：搜 `restScope.denied`，它在该分支之前、且是唯一出口。
-    "/api/host-supervisors": "restScope：门在 handler 顶部的统一 requireAuth/denied 出口",
     # 这些块里判定发生在 resolve* / handler 内部，不在 `if (...)` 的 25 行窗口里
     "ws": "requireTmuxAccess 之外还有会话校验",
     "/mcp": "MCP transport 自己校验",
