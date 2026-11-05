@@ -6572,6 +6572,11 @@
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::revoked: token with revoked_at SET also excludes daemon": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::role filter: regular member nodes (role=member) excluded after extraction": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::self-declare: runtimes_supported + allowed_secret_keys surface from columns": 1,
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::① created_since 生效：旧的看不见、新的看得见": 1,
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::② 镜像：不传 created_since ⇒ 两条都在（旧调用方零影响）": 1,
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::③ omit_stats ⇒ 不返回 stats，并明确写 stats_omitted（不是静默少一格）": 1,
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::④ 两种分支都带 server_time（客户端的水位来源）": 1,
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::空窗口 ⇒ 短响应（tasks 空、无 stats、仍有 server_time）": 1,
   "server/src/mcp-context-cost-http.test.ts::#476 requirements_events defaults::REST GET /api/requirements/events is unchanged (default 200)": 1,
   "server/src/mcp-context-cost-http.test.ts::#476 requirements_events defaults::an explicit limit still wins; one task's timeline keeps its old default (200)": 1,
   "server/src/mcp-context-cost-http.test.ts::#476 requirements_events defaults::network-wide: 50 newest by default, next_cursor pages older events": 1,
@@ -15065,6 +15070,11 @@
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::revoked: token with revoked_at SET also excludes daemon",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::role filter: regular member nodes (role=member) excluded after extraction",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::self-declare: runtimes_supported + allowed_secret_keys surface from columns",
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::① created_since 生效：旧的看不见、新的看得见",
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::② 镜像：不传 created_since ⇒ 两条都在（旧调用方零影响）",
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::③ omit_stats ⇒ 不返回 stats，并明确写 stats_omitted（不是静默少一格）",
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::④ 两种分支都带 server_time（客户端的水位来源）",
+  "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::空窗口 ⇒ 短响应（tasks 空、无 stats、仍有 server_time）",
   "server/src/mcp-context-cost-http.test.ts::#476 requirements_events defaults::REST GET /api/requirements/events is unchanged (default 200)",
   "server/src/mcp-context-cost-http.test.ts::#476 requirements_events defaults::an explicit limit still wins; one task's timeline keeps its old default (200)",
   "server/src/mcp-context-cost-http.test.ts::#476 requirements_events defaults::network-wide: 50 newest by default, next_cursor pages older events",
@@ -16986,7 +16996,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "5c663f81a428d0da5f5505b87c1b1296136444b0",
+  "commit": "4beb4dc766fcd7a5776c0da6b2ebdb0e3d76cefb",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

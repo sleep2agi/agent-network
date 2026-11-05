@@ -3122,8 +3122,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       durable_terminal_cursor: z.boolean().optional().describe("Read terminal outbound journal in monotonic order"),
       after_terminal_seq: z.number().int().min(0).optional().describe("Exclusive terminal journal watermark"),
       limit: z.number().min(1).max(100).optional().default(20),
+      // #3119 —— 轮询增量。生产实测（2026-11-05 近 6h）list_tasks 占全部工具调用 35.7%、
+      // 是最大的一格：每次轮询都拉全量再自己筛。给它一个「只要这之后创建的」，
+      // 空窗口就回极短体，比任何提示词都省（提示词只能劝，改不了接口成本）。
+      created_since: z.string().max(64).optional()
+        .describe("Only tasks created after this timestamp (ISO 8601 or 'YYYY-MM-DD HH:MM:SS'). Use the previous response's server_time as the next value."),
+      // #3119 —— stats 是全表 GROUP BY：轮询时它比任务列表本身还贵。
+      omit_stats: z.boolean().optional().default(false)
+        .describe("Skip the per-status counts (they scan every task in scope). Pollers should set true."),
     },
-    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit }) => {
+    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit, created_since, omit_stats }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       if (durable_cursor) {
@@ -3180,6 +3188,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
       if (from_node_id) { sql += ` AND from_node_id = ?${params.length + 1}`; params.push(from_node_id); }
+      if (created_since) { sql += ` AND created_at > ?${params.length + 1}`; params.push(created_since); }
       if (before_created_at && before_task_id) {
         sql += ` AND (created_at < ?${params.length + 1} OR (created_at = ?${params.length + 1} AND task_id < ?${params.length + 2}))`;
         params.push(before_created_at, before_task_id);
@@ -3188,7 +3197,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       params.push(limit);
       const tasks = db.all(sql, ...params);
 
-      // Stats
+      // Stats（#3119：轮询时默认仍然返回，调用方可用 omit_stats 显式关掉）
+      if (omit_stats) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: true,
+          ...(durable_cursor ? { capability: "list_tasks.immutable-node-cursor.v1" } : {}),
+          tasks,
+          count: tasks.length,
+          next_cursor: tasks.length === limit ? {
+            before_created_at: tasks[tasks.length - 1]?.created_at,
+            before_task_id: tasks[tasks.length - 1]?.task_id,
+          } : null,
+          // 客户端把这个值原样当下一轮的 created_since，避免两边时钟不一致。
+          server_time: new Date().toISOString(),
+          stats_omitted: true,
+        }) }] };
+      }
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
       statsSql = addAgentTimelineScope(statsSql, statsParams, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
@@ -3207,6 +3231,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               before_created_at: tasks[tasks.length - 1]?.created_at,
               before_task_id: tasks[tasks.length - 1]?.task_id,
             } : null,
+            // #3119 —— 轮询水位由服务端给，客户端别用本地时钟（两边差几秒就会漏活或重复）。
+            server_time: new Date().toISOString(),
             stats,
           }),
         }],
