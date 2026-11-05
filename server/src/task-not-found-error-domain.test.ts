@@ -63,8 +63,11 @@ describe("#3325 运行时键集（list_tasks 成功路径）", () => {
     // 🔴 我第一次写的是四个键（count/ok/stats/tasks）—— 真实调用给出 **五个**：
     //    `next_cursor` 也在里面。这就是这一格存在的理由：静态读代码得到的键集是
     //    「我以为它返回什么」，而运行时对照得到的是「它实际返回什么」。
+    // 🔴 2026-11-06 第三次被真实调用纠正（#3119 since_last 水位）：多了 `server_time`。
+    //    它不是"顺手加的一个字段"：调用方要靠它做下一次增量（`since_last` / `created_since`
+    //    都拿它当入参），所以"键集变了"在这里等于"契约变了"，值得红一次。
     expect(Object.keys(r).sort()).toEqual([
-      "count", "next_cursor", "ok", "stats", "tasks",
+      "count", "next_cursor", "ok", "server_time", "stats", "tasks",
     ].sort());
     // 空库时这几格的具体形态也钉住（**第二次被真实调用纠正**：我写「stats 是对象」，
     // 实测它是**数组** —— 源码里 stats 来自 `GROUP BY status` 的 db.all(...)，本来就是行数组）。

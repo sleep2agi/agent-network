@@ -844,7 +844,7 @@
    "method": "GET",
    "query": [],
    "kind": "regex_prefix",
-   "line": 6435
+   "line": 6448
   },
   {
    "id": 87,
@@ -853,7 +853,7 @@
    "method": "PUT",
    "query": [],
    "kind": "regex_prefix",
-   "line": 6499
+   "line": 6512
   },
   {
    "id": 88,
@@ -862,7 +862,7 @@
    "method": "PUT",
    "query": [],
    "kind": "regex_prefix",
-   "line": 6596
+   "line": 6609
   },
   {
    "id": 89,
@@ -871,7 +871,7 @@
    "method": "GET",
    "query": [],
    "kind": "eq",
-   "line": 6651
+   "line": 6664
   },
   {
    "id": 90,
@@ -880,7 +880,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6672
+   "line": 6685
   },
   {
    "id": 91,
@@ -889,7 +889,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 6879
+   "line": 6892
   },
   {
    "id": 92,
@@ -898,7 +898,7 @@
    "method": "GET",
    "query": [],
    "kind": "regex_prefix",
-   "line": 7128
+   "line": 7141
   },
   {
    "id": 93,
@@ -907,7 +907,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 7200
+   "line": 7213
   },
   {
    "id": 94,
@@ -916,7 +916,7 @@
    "method": null,
    "query": [],
    "kind": "eq",
-   "line": 7263
+   "line": 7276
   },
   {
    "id": 95,
@@ -925,11 +925,11 @@
    "method": null,
    "query": [],
    "kind": "starts_with",
-   "line": 7278
+   "line": 7291
   }
  ],
  "provenance": [
-  "generated_from: `server/src/server.ts` source_sha256=`821052e959b3`",
+  "generated_from: `server/src/server.ts` source_sha256=`eb03105e20cf`",
   "reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）",
   "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`",
   "重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）"
