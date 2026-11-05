@@ -63,6 +63,14 @@ describe("#3119 list_tasks 的增量与水印", () => {
     expect(r.tasks.map((t: any) => t.task_id)).toEqual(['t_since_new']);
   });
 
+  test("①b ISO 带 T/Z 传参也必须生效（字符串比较会在第 11 个字符判错）", async () => {
+    const call = client();
+    // 同一天的午夜：用 ISO 传，库里是 'YYYY-MM-DD HH:MM:SS'（空格）。
+    // 直接字符串比较 ⇒ ' ' < 'T' ⇒ 库里那条被判成"更早" ⇒ 返回空。
+    const r = await call('list_tasks', { alias, network_id: net, created_since: '2026-11-05T00:00:00Z', omit_stats: true, limit: 20 });
+    expect(r.tasks.map((t: any) => t.task_id).sort()).toEqual(['t_since_new', 't_since_old']);
+  });
+
   test("② 镜像：不传 created_since ⇒ 两条都在（旧调用方零影响）", async () => {
     const call = client();
     const r = await call('list_tasks', { alias, network_id: net, limit: 20 });

@@ -3188,7 +3188,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (status) { sql += ` AND status = ?${params.length + 1}`; params.push(status); }
       if (from_name) { sql += ` AND from_name = ?${params.length + 1}`; params.push(from_name); }
       if (from_node_id) { sql += ` AND from_node_id = ?${params.length + 1}`; params.push(from_node_id); }
-      if (created_since) { sql += ` AND created_at > ?${params.length + 1}`; params.push(created_since); }
+      // #3119 —— 必须用 julianday 比，不能直接拿字符串比：
+      // tasks.created_at 存的是 'YYYY-MM-DD HH:MM:SS'（空格），而客户端传 ISO 带 'T' 与 'Z'。
+      // 字符串比较在第 11 个字符就分高低（' ' 0x20 < 'T' 0x54）⇒ **同一天的记录会被判成"更早"**
+      // ⇒ 用 ISO 传参几乎永远返回空列表。上线后发现（生产实测：传 2026-11-05T00:00:00Z 返回 0 条，
+      // 而库里当天明明有记录）。julianday 两种格式都认。
+      if (created_since) { sql += ` AND julianday(created_at) > julianday(?${params.length + 1})`; params.push(created_since); }
       if (before_created_at && before_task_id) {
         sql += ` AND (created_at < ?${params.length + 1} OR (created_at = ?${params.length + 1} AND task_id < ?${params.length + 2}))`;
         params.push(before_created_at, before_task_id);
