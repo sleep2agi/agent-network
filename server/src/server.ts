@@ -53,7 +53,7 @@ import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./r
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, newMemberTaskAccess } from "./task-access.js";
-import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
+import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup, listDepartmentGrants, departmentCoverage } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -3050,6 +3050,11 @@ return Bun.serve({
           restricted: isAgentRestricted(targetUid, netId),
           grants: listAgentGrants(netId, targetUid),
           group_grants: listGroupGrants(netId, targetUid),
+          // 部门维度授权(admin 2026-11-05)：与组授权同构，展开源是部门子树。
+          department_grants: listDepartmentGrants(netId, targetUid),
+          // 覆盖率必须一起给：没填 department_id 的节点永远不可能被部门授权覆盖，
+          // 否则用户会以为「授权了就该全看见」，然后在界面上找不到人。
+          department_coverage: departmentCoverage(netId),
         }));
       }
       // 网络 admin 不能改 owner / 其他 admin 的授权(对他们本来也不生效,但别让 admin 去碰平级)。
@@ -3059,7 +3064,8 @@ return Bun.serve({
       let body: any;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
       if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
-      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined && body.group_grants === undefined) {
+      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined
+        && body.group_grants === undefined && body.department_grants === undefined) {
         return withCors(req, Response.json({ ok: false, error: "grants or agent_access required" }, { status: 400 }));
       }
       const result = replaceAgentGrants({
@@ -3068,13 +3074,14 @@ return Bun.serve({
         grants: body.grants ?? body.node_ids,
         agentAccess: body.agent_access,
         groupGrants: body.group_grants,
+        departmentGrants: body.department_grants,
         actorUserId: resolved.user.user_id,
       });
       if (!result.ok) {
         return withCors(req, Response.json({ ok: false, error: result.error, ...(result.detail ? { detail: result.detail } : {}) }, { status: result.status }));
       }
       logAudit(resolved.user.user_id, resolved.user.username, "member_agent_grants_changed", "network", netId,
-        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })), group_grants: result.group_grants.map((g) => ({ group_id: g.group_id, can_message: g.can_message })) }).slice(0, 4000),
+        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })), group_grants: result.group_grants.map((g) => ({ group_id: g.group_id, can_message: g.can_message })), department_grants: result.department_grants.map((g) => ({ department_id: g.department_id, can_message: g.can_message })) }).slice(0, 4000),
         undefined, netId);
       // 已连着的观察流 / 用户流按旧权限鉴权过,断开让它按新权限重连。
       closeUserStreamsInNetwork(netId, targetUid);

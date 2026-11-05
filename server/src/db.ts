@@ -1219,6 +1219,22 @@ db.exec(`
   -- 展开查询本身走各表主键,见 agent-groups-perf.test.ts 的 EXPLAIN QUERY PLAN。
   CREATE INDEX IF NOT EXISTS idx_group_grants_group ON network_member_group_grants(group_id);
 `);
+// ── #3432(admin 2026-11-05) 部门维度授权:把「人的组织架构」当成授权单位 ──
+// 与组授权同构(每次现算展开),差别只在展开源是 departments 子树 + nodes.department_id。
+// 单独一张表:组那张表的主键/语义都是 Agent 侧的,部门是人的树,混在一张表里以后分不清。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_member_department_grants (
+    network_id    TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    department_id TEXT NOT NULL,
+    can_message   INTEGER NOT NULL DEFAULT 1,
+    created_by    TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, user_id, department_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_dept_grants_user ON network_member_department_grants(network_id, user_id);
+`);
+
 
 // ── #84: node rename — rename_txn table (RFC-010 §4) ──
 // Single isolated table holding the rename 2PC transaction state. It doubles
