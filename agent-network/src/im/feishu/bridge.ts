@@ -310,10 +310,10 @@ export function withRateLimit(
     // and breaks legitimate heavy work. Wildcard ["*"] is the public-
     // channel shape — flood protection MUST still apply there.
     //
-    // Group conversations: NOT exempt. Even an allowFrom-explicit user
-    // can spam a shared group, and the group-side limit gates by chat
-    // id (not sender), so an exemption would let one user starve others.
-    if (event.conversation.conversationType === "dm") {
+    // 群聊原来不豁免（怕一个人饿死其他人）。2026-11-05 改：名单里的人（有限白名单）
+    // 在群里也豁免限流，改为靠队列接 —— 拒绝一条本该排队的话，比让它排第 2 位更糟。
+    // 洪水保护由两处兜住：队列上限（20，满了明确拒绝）+ 通配符白名单仍走限流。
+    {
       const allowFrom = adapter.getAllowFrom();
       const isWildcard = allowFrom.includes("*");
       const isExplicit = !isWildcard && allowFrom.includes(event.sender.id);
