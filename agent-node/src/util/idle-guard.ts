@@ -147,3 +147,35 @@ export async function runWithIdleGuard<T>(
 
   if (failure) throw failure;
 }
+
+/**
+ * 轻量 watchdog：每 poke() 一次就重置静默计时；超过 idleMs 无 poke 时回调一次。
+ *
+ * 给「不能重构循环、但需要 idle 判定」的既有调用点用（claude-agent-sdk 那条
+ * for-await 就是这种：循环体里 return/break 分支多，改写成 runWithIdleGuard
+ * 收益小于风险）。它**只负责判定与通知**，abort 由调用方决定 —— 因为
+ * 「超时之后做什么」在三条运行时里不一样。
+ */
+export function startIdleWatchdog(opts: {
+  idleMs: number;
+  onFire: (idleForMs: number) => void;
+  tickMs?: number;
+}): { poke: () => void; stop: () => void; lastPokeAt: () => number } {
+  let lastAt = Date.now();
+  let fired = false;
+  const tick = opts.tickMs ?? Math.max(50, Math.min(1_000, Math.floor(opts.idleMs / 4) || 50));
+  const timer = setInterval(() => {
+    if (fired || opts.idleMs <= 0) return;
+    const idleFor = Date.now() - lastAt;
+    if (idleFor >= opts.idleMs) {
+      fired = true;
+      try { opts.onFire(idleFor); } catch { /* 回调失败不影响后续 stop */ }
+    }
+  }, tick);
+  (timer as any)?.unref?.();
+  return {
+    poke: () => { lastAt = Date.now(); fired = false; },
+    stop: () => clearInterval(timer),
+    lastPokeAt: () => lastAt,
+  };
+}

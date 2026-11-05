@@ -4,7 +4,7 @@
 // 它们要证明的是「计时口径」，不是「SDK 怎么流式」。混在一起会得到一个
 // 需要网络、需要登录、还慢的测试，而那类测试最后都会被标 skip。
 import { describe, expect, test } from "bun:test";
-import { IdleTimeoutError, runWithIdleGuard } from "./idle-guard";
+import { IdleTimeoutError, runWithIdleGuard, startIdleWatchdog } from "./idle-guard";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -84,5 +84,27 @@ describe("#4010 idle 计时", () => {
         throw new Error("boom-from-caller");
       }),
     ).rejects.toThrow("boom-from-caller");
+  });
+});
+
+describe("#4010 watchdog（不重构循环的接线方式）", () => {
+  test("静默到点触发一次，且 poke 能重置", async () => {
+    let fired = 0;
+    const w = startIdleWatchdog({ idleMs: 120, onFire: () => { fired++; }, tickMs: 30 });
+    await sleep(60);
+    w.poke();
+    await sleep(60);
+    expect(fired).toBe(0);      // 被 poke 重置过
+    await sleep(150);
+    w.stop();
+    expect(fired).toBe(1);      // 只触发一次，不是每个 tick 都触发
+  });
+
+  test("idleMs<=0 ⇒ 永不触发", async () => {
+    let fired = 0;
+    const w = startIdleWatchdog({ idleMs: 0, onFire: () => { fired++; }, tickMs: 20 });
+    await sleep(120);
+    w.stop();
+    expect(fired).toBe(0);
   });
 });
