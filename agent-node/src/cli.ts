@@ -3439,6 +3439,10 @@ async function processWithClaude(
       ? { allowDangerouslySkipPermissions: true }
       : {}),
     settingSources: [],
+    // #4010 —— 打开流式部分消息：长回答（尤其是长 thinking / 长文本）期间也持续产事件。
+    // 两个作用：① idle 判定能区分「在想」与「卡死」；② 心跳/进度有东西可喂。
+    // 它不改变最终结果（仍是同一条 result），只是把「静默期」切开。
+    includePartialMessages: true,
     // mcpServers active when no claudePath (forced above for URL-type MCP).
     // This gives the agent commhub_send_task / get_all_status / etc. so it
     // can actually talk to other agents in the network.
