@@ -2832,6 +2832,10 @@
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 节点上报 opencode_catalog 与 opencode_catalog_seen_at 同进同出::采集时刻挂在 seenAt 为真的条件下 —— 空串时不发，不把「不知道多旧」报成时刻": 1,
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::成功分支走 keepLastCatalog，失败分支返回上一份而不是 undefined": 1,
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::镜像否定：失败分支不许回到 `catch { return undefined; }`（那正是这次要修的行为）": 1,
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 与 codex 两条路径都接了（只接一条 = 另一种运行时永远没有数据）": 1,
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 路径把 turns / cost 一起带上（它们本来就在 result message 里）": 1,
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::上报函数存在，且失败被吞掉（不阻塞回合）": 1,
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::只报计数：调用点附近不出现 prompt / content / message 之类的字段": 1,
   "agent-node/src/runtime-effective-label.test.ts::#491 regression lock — unknown runtime fails closed::unknown runtime → non-zero exit, error names the value AND the supported list": 1,
   "agent-node/src/runtime-effective-label.test.ts::#491 startup banner reports the EFFECTIVE runtime::alias input 'codex-tui' → banner names the effective runtime (codex-app-server), not just the raw input": 1,
   "agent-node/src/runtime-effective-label.test.ts::#491 startup banner reports the EFFECTIVE runtime::canonical input stays readable (no regression for the common case)": 1,
@@ -11347,6 +11351,10 @@
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 节点上报 opencode_catalog 与 opencode_catalog_seen_at 同进同出::采集时刻挂在 seenAt 为真的条件下 —— 空串时不发，不把「不知道多旧」报成时刻",
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::成功分支走 keepLastCatalog，失败分支返回上一份而不是 undefined",
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::镜像否定：失败分支不许回到 `catch { return undefined; }`（那正是这次要修的行为）",
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 与 codex 两条路径都接了（只接一条 = 另一种运行时永远没有数据）",
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 路径把 turns / cost 一起带上（它们本来就在 result message 里）",
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::上报函数存在，且失败被吞掉（不阻塞回合）",
+  "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::只报计数：调用点附近不出现 prompt / content / message 之类的字段",
   "agent-node/src/runtime-effective-label.test.ts::#491 regression lock — unknown runtime fails closed::unknown runtime → non-zero exit, error names the value AND the supported list",
   "agent-node/src/runtime-effective-label.test.ts::#491 startup banner reports the EFFECTIVE runtime::alias input 'codex-tui' → banner names the effective runtime (codex-app-server), not just the raw input",
   "agent-node/src/runtime-effective-label.test.ts::#491 startup banner reports the EFFECTIVE runtime::canonical input stays readable (no regression for the common case)",
@@ -17030,7 +17038,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "c0294d3d528136a00f2e188616c7d582383ab61f",
+  "commit": "00f6a6f5fc79688f5242eb71cb1b5322bfd93f4c",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

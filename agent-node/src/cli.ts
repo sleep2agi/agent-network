@@ -1897,6 +1897,28 @@ async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: s
     return lastCatalogReport;
   }
 }
+/**
+ * #3952 —— 每轮结束后把这一次的 token 用量报给 Hub（只报计数，不报内容）。
+ *
+ * 为什么在这里而不是在 Hub 侧算：用量只在**运行时**手里（claude 的 result message、
+ * codex 的 turn outcome），Hub 看不到；而节点此前把它只写进日志。
+ *
+ * 失败一律吞掉：记账是旁路，不能因为报不上让回合失败或让心跳变红。
+ * 只在真的拿到数字时才发（0 也发，因为 0 是「这一轮没消耗」，与「没报」不同）。
+ */
+function reportTokenUsage(model: string | undefined, input: number | undefined, output: number | undefined,
+  opts: { turns?: number; costUsd?: number } = {}): void {
+  const inTok = typeof input === "number" && Number.isFinite(input) ? Math.max(0, Math.round(input)) : undefined;
+  const outTok = typeof output === "number" && Number.isFinite(output) ? Math.max(0, Math.round(output)) : undefined;
+  if (inTok === undefined && outTok === undefined) return;
+  void callCommHub("report_token_usage", {
+    ...(model ? { model: model.slice(0, 100) } : {}),
+    ...(inTok !== undefined ? { input_tokens: inTok } : {}),
+    ...(outTok !== undefined ? { output_tokens: outTok } : {}),
+    ...(typeof opts.turns === "number" && Number.isFinite(opts.turns) ? { turns: Math.max(0, Math.round(opts.turns)) } : {}),
+    ...(typeof opts.costUsd === "number" && Number.isFinite(opts.costUsd) ? { cost_usd: Math.max(0, opts.costUsd) } : {}),
+  }).catch((e: any) => debug(`[token-usage] report failed: ${e?.message || e}`));
+}
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
   // #667 — idle with nothing running writes the warning, or omits task.
   // Register, not this path, sends "" once to clear a leftover warning.
@@ -3569,6 +3591,11 @@ async function processWithClaude(
                 writebackClaudeSessionCost(costSession, m.total_cost_usd);
               }
               log(`[claude] ${formatAttemptOutcome(m.subtype, cls)} | ${dt}ms | ${costLabel} | in=${u.input_tokens || 0} out=${u.output_tokens || 0} | turns=${m.num_turns}${attempt > 0 ? ` | attempt=${attempt + 1}` : ""}`);
+              // #3952 —— 用量上报（claude 的 result message 里本来就有）。
+              reportTokenUsage(MODEL, u.input_tokens, u.output_tokens, {
+                turns: typeof m.num_turns === "number" ? m.num_turns : undefined,
+                costUsd: typeof m.total_cost_usd === "number" ? m.total_cost_usd : undefined,
+              });
               const isEmptyResult = m.subtype === "success" && !!cls && cls.kind !== "success";
               if (resultTracker.push({ m, cls: cls! }, isEmptyResult)) {
                 debug(`[claude] #557 ignored an intermediate empty result — a later result in the same query superseded it`);
@@ -4004,6 +4031,8 @@ async function processWithCodex(
     const dt = Date.now() - t0;
     const inTokens = outcome.usage?.input_tokens || 0;
     log(`[codex] done | ${dt}ms | in=${inTokens} out=${outcome.usage?.output_tokens || 0} | items=${outcome.itemCount}`);
+    // #3952 —— 与 claude 同一口径（只报计数）。codex 没给 turns/cost 就不填。
+    reportTokenUsage(MODEL, outcome.usage?.input_tokens, outcome.usage?.output_tokens);
     // #1645 —— 上下文压力打在**成功路径**上。实测那次 300s 卡死的真因链里有
     //   `remote compaction failed last_api_response_total_tokens=195436`,而那是我们
     //   自己设的 model_auto_compact_token_limit=200000 的 97.7%。也就是说
