@@ -64,6 +64,15 @@ describe("#3952 节点 Token 审计", () => {
     expect(rows[0].total_tokens).toBe(2);
   });
 
+  test("cache 单列：报进去不进 total（它是 input 的几百倍，混算会把排行变成「谁最老」）", () => {
+    cleanup();
+    const hour = currentHourUtc();
+    reportTokenUsage({ networkId: net, nodeId: nodeA, hour, model: 'm', inputTokens: 100, outputTokens: 10, cacheReadTokens: 50_000 });
+    const rows = readTokenUsage(net, 24);
+    expect(rows[0].total_tokens).toBe(110);
+    expect(rows[0].cache_read_tokens).toBe(50_000);
+  });
+
   test("④ 形状：表里没有任何内容列（prompt / message / credential 一律不存在）", () => {
     const shape = [...NODE_TOKEN_USAGE_COLUMNS].join(",");
     expect(shape).not.toMatch(/prompt|message|content|credential|secret|token_value/i);

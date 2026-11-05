@@ -3308,10 +3308,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       model: z.string().max(100).optional(),
       input_tokens: z.number().int().min(0).optional(),
       output_tokens: z.number().int().min(0).optional(),
+      cache_read_tokens: z.number().int().min(0).optional(),
       turns: z.number().int().min(0).optional(),
       cost_usd: z.number().min(0).optional(),
     },
-    async ({ hour, model, input_tokens, output_tokens, turns, cost_usd }) => {
+    async ({ hour, model, input_tokens, output_tokens, cache_read_tokens, turns, cost_usd }) => {
       if (!callerTokenIsNetwork || !enforceNetworkId || !callerAlias) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "network_token_required" }) }] };
       }
@@ -3321,6 +3322,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         networkId: enforceNetworkId, nodeId: node.node_id,
         hour: hour ?? null, model: model ?? null,
         inputTokens: input_tokens ?? null, outputTokens: output_tokens ?? null,
+        cacheReadTokens: cache_read_tokens ?? null,
         turns: turns ?? null, costUsd: cost_usd ?? null,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(r) }] };

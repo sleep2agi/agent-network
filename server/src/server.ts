@@ -6415,9 +6415,11 @@ return Bun.serve({
       const totals = nodes.reduce((acc, r) => ({
         input_tokens: acc.input_tokens + r.input_tokens,
         output_tokens: acc.output_tokens + r.output_tokens,
+        // cache 单列：它可能是 total 的几百倍，绝不能加进 total
+        cache_read_tokens: acc.cache_read_tokens + r.cache_read_tokens,
         total_tokens: acc.total_tokens + r.total_tokens,
         cost_usd: Number((acc.cost_usd + r.cost_usd).toFixed(6)),
-      }), { input_tokens: 0, output_tokens: 0, total_tokens: 0, cost_usd: 0 });
+      }), { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, total_tokens: 0, cost_usd: 0 });
       return withCors(req, Response.json({
         ok: true, network_id: netId, since_hours: sinceHours,
         // 空表也要说清口径：0 行可能因为「没人上报」，也可能因为「窗口里没用量」。

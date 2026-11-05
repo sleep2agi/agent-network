@@ -29,6 +29,7 @@ db.exec(`
     model         TEXT NOT NULL DEFAULT 'unknown',
     input_tokens  INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     turns         INTEGER NOT NULL DEFAULT 0,
     cost_usd      REAL NOT NULL DEFAULT 0,
     updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -36,6 +37,8 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_node_token_usage_hour ON node_token_usage(network_id, hour);
 `);
+// 已存在的库补列（SQLite 没有 IF NOT EXISTS for ADD COLUMN）
+try { db.exec("ALTER TABLE node_token_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0"); } catch {}
 
 export interface TokenUsageInput {
   networkId: string;
@@ -46,6 +49,9 @@ export interface TokenUsageInput {
   model?: string | null;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  /** 缓存命中的读入量。**必须单列**：opencode 实测 cache.read 是 input+output 的 289 倍，
+   *  混进去算会让「谁用得多」变成「谁用得久」。 */
+  cacheReadTokens?: number | null;
   /** 有的运行时只给总轮数/费用；没有就留空，**不填 0**（0 与"不知道"是两件事） */
   turns?: number | null;
   costUsd?: number | null;
@@ -67,7 +73,7 @@ function nonNegativeInt(value: unknown): number | null {
 /** 校验 + 归一。返回 null 表示「这一份上报不合规」——调用方负责拒绝，不静默丢。 */
 export function normalizeUsage(input: TokenUsageInput): {
   hour: string; model: string;
-  inputTokens: number; outputTokens: number;
+  inputTokens: number; outputTokens: number; cacheReadTokens: number;
   turns: number | null; costUsd: number | null;
 } | null {
   const hour = typeof input.hour === 'string' && input.hour ? input.hour : currentHourUtc();
@@ -77,14 +83,15 @@ export function normalizeUsage(input: TokenUsageInput): {
   const model = rawModel || 'unknown';
   const inputTokens = nonNegativeInt(input.inputTokens) ?? 0;
   const outputTokens = nonNegativeInt(input.outputTokens) ?? 0;
-  if (inputTokens === 0 && outputTokens === 0 && input.turns == null && input.costUsd == null) {
+  const cacheReadTokens = nonNegativeInt(input.cacheReadTokens) ?? 0;
+  if (inputTokens === 0 && outputTokens === 0 && cacheReadTokens === 0 && input.turns == null && input.costUsd == null) {
     // 什么都没报：不写一行全 0 的记录（那会让"没有用量"和"没上报"在报表上同形）。
     return null;
   }
   const turns = nonNegativeInt(input.turns);
   const costRaw = input.costUsd;
   const costUsd = typeof costRaw === 'number' && Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : null;
-  return { hour, model, inputTokens, outputTokens, turns, costUsd };
+  return { hour, model, inputTokens, outputTokens, cacheReadTokens, turns, costUsd };
 }
 
 /** 记账：同一 (network, node, hour, model) 累加。turns/cost 可空，空则保持原值。 */
@@ -92,17 +99,19 @@ export function reportTokenUsage(input: TokenUsageInput): { ok: true; hour: stri
   const norm = normalizeUsage(input);
   if (!norm) return { ok: false, error: 'invalid_token_usage' };
   db.run(
-    `INSERT INTO node_token_usage(network_id, node_id, hour, model, input_tokens, output_tokens, turns, cost_usd, updated_at)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 0), COALESCE(?8, 0), datetime('now'))
+    `INSERT INTO node_token_usage(network_id, node_id, hour, model, input_tokens, output_tokens, cache_read_tokens, turns, cost_usd, updated_at)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(?8, 0), COALESCE(?9, 0), datetime('now'))
      ON CONFLICT(network_id, node_id, hour, model) DO UPDATE SET
        input_tokens  = input_tokens  + excluded.input_tokens,
        output_tokens = output_tokens + excluded.output_tokens,
+       cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
        turns         = COALESCE(turns, 0)         + COALESCE(excluded.turns, 0),
        cost_usd      = COALESCE(cost_usd, 0)      + COALESCE(excluded.cost_usd, 0),
        updated_at    = datetime('now')`,
     // turns / cost_usd 这里存 0 = 「没有这一项」。**存储层不区分「0 轮」与「没报轮数」**，
     // 这是已知偏差（见文件头「已知边界」）；要区分得加一列 has_turns，成本不值。
-    [input.networkId, input.nodeId, norm.hour, norm.model, norm.inputTokens, norm.outputTokens, norm.turns, norm.costUsd],
+    [input.networkId, input.nodeId, norm.hour, norm.model, norm.inputTokens, norm.outputTokens,
+      norm.cacheReadTokens, norm.turns, norm.costUsd],
   );
   return { ok: true, hour: norm.hour, model: norm.model };
 }
@@ -112,7 +121,10 @@ export interface NodeTokenUsageRow {
   alias: string | null;
   input_tokens: number;
   output_tokens: number;
+  /** input+output（**不含 cache**）—— 报表默认看这个 */
   total_tokens: number;
+  /** 单列；opencode 上它可能是 total 的几百倍 */
+  cache_read_tokens: number;
   turns: number;
   cost_usd: number;
   models: number;
@@ -138,6 +150,7 @@ export function readTokenUsage(networkId: string, sinceHours = 24): NodeTokenUsa
             COALESCE(n.alias, s.alias) AS alias,
             SUM(u.input_tokens)  AS input_tokens,
             SUM(u.output_tokens) AS output_tokens,
+            SUM(u.cache_read_tokens) AS cache_read_tokens,
             SUM(u.turns)         AS turns,
             SUM(u.cost_usd)      AS cost_usd,
             COUNT(DISTINCT u.model) AS models,
@@ -153,6 +166,7 @@ export function readTokenUsage(networkId: string, sinceHours = 24): NodeTokenUsa
   );
   return rows.map((r) => ({
     ...r,
+    cache_read_tokens: r.cache_read_tokens ?? 0,
     total_tokens: (r.input_tokens ?? 0) + (r.output_tokens ?? 0),
   }));
 }
@@ -160,5 +174,5 @@ export function readTokenUsage(networkId: string, sinceHours = 24): NodeTokenUsa
 /** 记账表与读账口径都只认这几个列 —— 形状就是「不收内容」的保证。 */
 export const NODE_TOKEN_USAGE_COLUMNS = [
   'network_id', 'node_id', 'hour', 'model',
-  'input_tokens', 'output_tokens', 'turns', 'cost_usd', 'updated_at',
+  'input_tokens', 'output_tokens', 'cache_read_tokens', 'turns', 'cost_usd', 'updated_at',
 ] as const;

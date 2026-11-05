@@ -7045,6 +7045,7 @@
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/stats/sse is limited to the bound network": 1,
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/users": 1,
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::POST /api/admin/users and agent-grants": 1,
+  "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::cache 单列：报进去不进 total（它是 input 的几百倍，混算会把排行变成「谁最老」）": 1,
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::hour 形状不对 ⇒ 拒绝（不做「猜一个」）": 1,
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::① 同一小时同一 model 报两次 ⇒ 累加": 1,
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::② 读账按节点聚合、按 total 降序": 1,
@@ -15564,6 +15565,7 @@
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/stats/sse is limited to the bound network",
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/users",
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::POST /api/admin/users and agent-grants",
+  "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::cache 单列：报进去不进 total（它是 input 的几百倍，混算会把排行变成「谁最老」）",
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::hour 形状不对 ⇒ 拒绝（不做「猜一个」）",
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::① 同一小时同一 model 报两次 ⇒ 累加",
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::② 读账按节点聚合、按 total 降序",
@@ -17038,7 +17040,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "00f6a6f5fc79688f5242eb71cb1b5322bfd93f4c",
+  "commit": "bcdbc9c86d3f526f624b23c753bffa12620aefad",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
