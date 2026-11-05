@@ -877,3 +877,25 @@ curl -sL "$(npm view <pkg>@<ver> dist.tarball)" | tar tzf - | grep -c '^package/
 ```
 
 本轮就有人（我）用 `head -5` 判过「包缺 cli.js」，实际只是输出被截断，白开了一张卡。
+
+### 7.5 一次 release 的**往返是 45 分钟**，这是设计值，不是故障
+
+`release.yml` 的「发后核实」会轮询 registry 最长 **45 分钟**
+（`VERIFY_TIMEOUT_MIN: '45'`），因为 npm 处理完毕后到 registry 可见历史上最坏约 40 分钟
+（`.186/.187` 实测；注释里写着「超时只说明尚未核实，不是没生效」）。
+
+于是有两个操作性后果，都不 obvious：
+
+```text
+① 看到 publish 步骤「in_progress」20–40 分钟，**不要重发**
+   重发会撞 E409（Cannot publish over previously staged version），把本来会好的那次也搞坏
+② 发版要**凑批**：同一个包连发两版，第二版必须等第一版从 registry 可见
+   （因为 gate 2 会 npm view 核对 pinned 常量；配对包还要断言 agent-node 已在 npm 上）
+   ⇒ 「改一点发一版」在这个仓里是 45 分钟起步，而不是 5 分钟
+```
+
+判据（别用 GitHub 的 in_progress 猜）：
+
+```bash
+npm view <pkg>@<version> version      # 出现 = 可见；npm error 404 = 还没到
+```
