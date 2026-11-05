@@ -6572,6 +6572,11 @@
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::revoked: token with revoked_at SET also excludes daemon": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::role filter: regular member nodes (role=member) excluded after extraction": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::self-declare: runtimes_supported + allowed_secret_keys surface from columns": 1,
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::① 首次调用无水位 ⇒ 全量，且 since_from=null": 1,
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::② 中间插入一条 ⇒ 第二次只回它（旧的不再出现）": 1,
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::③ 镜像：不传 since_last ⇒ 全量、且**不写**水位": 1,
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::④ 水位按 (network, caller) 隔离：B 的水位不影响 A": 1,
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::⑤ since_last 与 created_since 同时给 ⇒ 明确报错（两个下界不混用）": 1,
   "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::① created_since 生效：旧的看不见、新的看得见": 1,
   "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::①b ISO 带 T/Z 传参也必须生效（字符串比较会在第 11 个字符判错）": 1,
   "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::② 镜像：不传 created_since ⇒ 两条都在（旧调用方零影响）": 1,
@@ -15071,6 +15076,11 @@
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::revoked: token with revoked_at SET also excludes daemon",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::role filter: regular member nodes (role=member) excluded after extraction",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::self-declare: runtimes_supported + allowed_secret_keys surface from columns",
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::① 首次调用无水位 ⇒ 全量，且 since_from=null",
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::② 中间插入一条 ⇒ 第二次只回它（旧的不再出现）",
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::③ 镜像：不传 since_last ⇒ 全量、且**不写**水位",
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::④ 水位按 (network, caller) 隔离：B 的水位不影响 A",
+  "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::⑤ since_last 与 created_since 同时给 ⇒ 明确报错（两个下界不混用）",
   "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::① created_since 生效：旧的看不见、新的看得见",
   "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::①b ISO 带 T/Z 传参也必须生效（字符串比较会在第 11 个字符判错）",
   "server/src/list-tasks-since.test.ts::#3119 list_tasks 的增量与水印::② 镜像：不传 created_since ⇒ 两条都在（旧调用方零影响）",
@@ -16998,7 +17008,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "54d87dd2c5a1d5261b5953a6fc1204e34024c0cb",
+  "commit": "c4e52384575f7b413ccc62cd8c1c5a76cacab519",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

@@ -1222,6 +1222,19 @@ db.exec(`
 // ── #3432(admin 2026-11-05) 部门维度授权:把「人的组织架构」当成授权单位 ──
 // 与组授权同构(每次现算展开),差别只在展开源是 departments 子树 + nodes.department_id。
 // 单独一张表:组那张表的主键/语义都是 Agent 侧的,部门是人的树,混在一张表里以后分不清。
+// ── #3943 list_tasks 的轮询水位（每个调用者一条）──
+// 「自上次调用以来新增」比「每次拉全量再自己筛」便宜一个数量级，而提示词那一招
+// 对本项无效（实测 19.1% → 50.3%）。水位由服务端给、服务端存：
+// 客户端连时间都不用记，也就不会因为两边时钟差几秒而漏活。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS list_tasks_watermarks (
+    network_id TEXT NOT NULL,
+    caller_key TEXT NOT NULL,
+    watermark  TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, caller_key)
+  );
+`);
 db.exec(`
   CREATE TABLE IF NOT EXISTS network_member_department_grants (
     network_id    TEXT NOT NULL,

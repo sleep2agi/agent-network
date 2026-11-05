@@ -3130,8 +3130,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // #3119 —— stats 是全表 GROUP BY：轮询时它比任务列表本身还贵。
       omit_stats: z.boolean().optional().default(false)
         .describe("Skip the per-status counts (they scan every task in scope). Pollers should set true."),
+      // #3943 —— 服务端水位。调用方不传时间，Hub 用「上次给这个调用者返回的时刻」当下界，
+      // 返回后把水位推到本次的 server_time。客户端连时钟都不用记（也就不会因两边差几秒漏活）。
+      since_last: z.boolean().optional().default(false)
+        .describe("Only tasks created since this caller's previous list_tasks call. Server keeps the watermark."),
     },
-    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit, created_since, omit_stats }) => {
+    async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit, created_since, omit_stats, since_last }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       if (durable_cursor) {
@@ -3181,6 +3185,31 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           has_more: tasks.length === limit,
         }) }] };
       }
+      // #3943 —— 两种下界不许同时给：一个来自调用方，一个来自服务端，混用说不清以谁为准。
+      if (since_last && created_since) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "created_since_and_since_last_are_exclusive" }) }] };
+      }
+      const effectiveNetIdForWatermark = enforceNetworkId ?? getNetworkId(netId);
+      const watermarkKey = (() => {
+        if (callerTokenIsNetwork && callerTokenId && enforceNetworkId) {
+          const bound = db.get<{ bound_node_id: string | null }>(
+            "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2",
+            callerTokenId, enforceNetworkId,
+          )?.bound_node_id ?? null;
+          if (bound) return `n:${bound}`;
+        }
+        return `a:${callerAlias ?? ""}`;
+      })();
+      const readWatermark = (): string | null => {
+        if (!since_last || !effectiveNetIdForWatermark) return null;
+        return db.get<{ watermark: string }>(
+          "SELECT watermark FROM list_tasks_watermarks WHERE network_id = ?1 AND caller_key = ?2",
+          effectiveNetIdForWatermark, watermarkKey,
+        )?.watermark ?? null;
+      };
+      const previousWatermark = readWatermark();
+      const sinceBound = previousWatermark ?? created_since ?? null;
+
       let sql = "SELECT task_id, from_node_id, from_name, to_node_id, to_name, priority, status, content, result, created_at, runtime_submitted_at, consumed_at, thread_id, turn_id, completed_at FROM tasks WHERE 1=1";
       const params: any[] = [];
       sql = addAgentTimelineScope(sql, params, readScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
@@ -3193,7 +3222,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 字符串比较在第 11 个字符就分高低（' ' 0x20 < 'T' 0x54）⇒ **同一天的记录会被判成"更早"**
       // ⇒ 用 ISO 传参几乎永远返回空列表。上线后发现（生产实测：传 2026-11-05T00:00:00Z 返回 0 条，
       // 而库里当天明明有记录）。julianday 两种格式都认。
-      if (created_since) { sql += ` AND julianday(created_at) > julianday(?${params.length + 1})`; params.push(created_since); }
+      if (sinceBound) { sql += ` AND julianday(created_at) > julianday(?${params.length + 1})`; params.push(sinceBound); }
       if (before_created_at && before_task_id) {
         sql += ` AND (created_at < ?${params.length + 1} OR (created_at = ?${params.length + 1} AND task_id < ?${params.length + 2}))`;
         params.push(before_created_at, before_task_id);
@@ -3201,6 +3230,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       sql += ` ORDER BY created_at DESC, task_id DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
       const tasks = db.all(sql, ...params);
+      // 水位在**查询之后**推进：这样「两次调用之间创建」的任务不会因为并发被跳过。
+      // 用本次响应里的 server_time 作为下一次的下界；首次调用没有水位 ⇒ 全量，且 since_from=null
+      // （不假装有水位，否则调用方会以为「之前那些已经看过了」）。
+      const serverTime = new Date().toISOString();
+      if (since_last && effectiveNetIdForWatermark) {
+        db.run(
+          `INSERT INTO list_tasks_watermarks(network_id, caller_key, watermark, updated_at)
+           VALUES(?1, ?2, ?3, datetime('now'))
+           ON CONFLICT(network_id, caller_key) DO UPDATE SET watermark=excluded.watermark, updated_at=excluded.updated_at`,
+          [effectiveNetIdForWatermark, watermarkKey, serverTime],
+        );
+      }
 
       // Stats（#3119：轮询时默认仍然返回，调用方可用 omit_stats 显式关掉）
       if (omit_stats) {
@@ -3214,7 +3255,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             before_task_id: tasks[tasks.length - 1]?.task_id,
           } : null,
           // 客户端把这个值原样当下一轮的 created_since，避免两边时钟不一致。
-          server_time: new Date().toISOString(),
+          server_time: serverTime,
+          ...(since_last ? { since_from: previousWatermark, since_to: serverTime } : {}),
           stats_omitted: true,
         }) }] };
       }
@@ -3237,7 +3279,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               before_task_id: tasks[tasks.length - 1]?.task_id,
             } : null,
             // #3119 —— 轮询水位由服务端给，客户端别用本地时钟（两边差几秒就会漏活或重复）。
-            server_time: new Date().toISOString(),
+            server_time: serverTime,
+            ...(since_last ? { since_from: previousWatermark, since_to: serverTime } : {}),
             stats,
           }),
         }],
