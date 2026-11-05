@@ -593,6 +593,16 @@ export async function openVettedOpenCodeV2Copresence(
         const body = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`, {}, 2_000);
         return openCodeV2SessionModelRef(body);
       },
+      // #3952 —— 会话用量（**累计值**）。调用方负责转成增量：同一份数据每轮都读，
+      // 直接把绝对值报上去会把历史总量重复几十次。
+      // 字段形状：{ input, output, reasoning, cache: { read, write } }（opencode v2 实测）。
+      async usageSnapshot() {
+        if (!session.isRunning) return undefined;
+        const body = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`, {}, 2_000);
+        const data = (body as any)?.data ?? body;
+        const tokens = (data as any)?.tokens;
+        return tokens && typeof tokens === "object" ? tokens : undefined;
+      },
       async setSelectedModel(modelRef: string) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
         const parsed = parseModelRef(modelRef);

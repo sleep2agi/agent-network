@@ -1907,7 +1907,7 @@ async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: s
  * 只在真的拿到数字时才发（0 也发，因为 0 是「这一轮没消耗」，与「没报」不同）。
  */
 function reportTokenUsage(model: string | undefined, input: number | undefined, output: number | undefined,
-  opts: { turns?: number; costUsd?: number } = {}): void {
+  opts: { turns?: number; costUsd?: number; cacheReadTokens?: number } = {}): void {
   const inTok = typeof input === "number" && Number.isFinite(input) ? Math.max(0, Math.round(input)) : undefined;
   const outTok = typeof output === "number" && Number.isFinite(output) ? Math.max(0, Math.round(output)) : undefined;
   if (inTok === undefined && outTok === undefined) return;
@@ -1917,6 +1917,8 @@ function reportTokenUsage(model: string | undefined, input: number | undefined, 
     ...(outTok !== undefined ? { output_tokens: outTok } : {}),
     ...(typeof opts.turns === "number" && Number.isFinite(opts.turns) ? { turns: Math.max(0, Math.round(opts.turns)) } : {}),
     ...(typeof opts.costUsd === "number" && Number.isFinite(opts.costUsd) ? { cost_usd: Math.max(0, opts.costUsd) } : {}),
+    ...(typeof opts.cacheReadTokens === "number" && Number.isFinite(opts.cacheReadTokens) && opts.cacheReadTokens >= 0
+      ? { cache_read_tokens: Math.round(opts.cacheReadTokens) } : {}),
   }).catch((e: any) => debug(`[token-usage] report failed: ${e?.message || e}`));
 }
 const reportStatus = async (rawStatus: string, rawTask?: string) => {
@@ -2725,6 +2727,29 @@ const sessionControlBridge = sessionControlPin
     identity: sessionControlPin,
   }) : null;
 const OPENCODE_MODEL_POLL_MS = 30_000;
+// #3952 —— opencode 的会话用量是**累计值**，只能报增量。
+// 实测（通信欧）：tokens.input 39.7M / output 13.4M / cache.read 15.3B，cost $523.98。
+// 每轮直接上报 = 把历史总量重复几十次；混算 cache 会让「谁用得多」变成「谁用得久」（289 倍）。
+// 重启后 last 从 0 开始 ⇒ 第一轮只**对齐**不报（宁可少记一段，也不重复记历史）。
+let opencodeUsageBaseline: { input: number; output: number; cacheRead: number } | null = null;
+function reportOpencodeUsageDelta(tokens: { input?: number; output?: number; cache?: { read?: number } } | undefined): void {
+  if (!tokens) return;
+  const cur = {
+    input: Math.max(0, Math.round(tokens.input ?? 0)),
+    output: Math.max(0, Math.round(tokens.output ?? 0)),
+    cacheRead: Math.max(0, Math.round(tokens.cache?.read ?? 0)),
+  };
+  if (!opencodeUsageBaseline) { opencodeUsageBaseline = cur; return; }   // 首轮对齐，不报
+  const dIn = cur.input - opencodeUsageBaseline.input;
+  const dOut = cur.output - opencodeUsageBaseline.output;
+  const dCache = cur.cacheRead - opencodeUsageBaseline.cacheRead;
+  opencodeUsageBaseline = cur;
+  // 计数器只会增；变小说明会话换了/被重置 ⇒ 重新对齐，不报负数。
+  if (dIn < 0 || dOut < 0 || dCache < 0) return;
+  if (dIn === 0 && dOut === 0 && dCache === 0) return;
+  reportTokenUsage(MODEL, dIn, dOut, { cacheReadTokens: dCache });
+}
+
 let opencodeModelPollInFlight = false;
 async function pollOpencodeSessionModel(): Promise<void> {
   if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || opencodeMode !== "copresence") return;
@@ -2733,6 +2758,11 @@ async function pollOpencodeSessionModel(): Promise<void> {
   if (!session?.isRunning || !session.selectedModel) return;
   opencodeModelPollInFlight = true;
   try {
+    // #3952 —— 同一个轮询里顺带读会话用量（累计值 → 增量）。
+    try {
+      const rawSession = await session.usageSnapshot?.();
+      if (rawSession) reportOpencodeUsageDelta(rawSession);
+    } catch { /* 用量拿不到不影响模型轮询 */ }
     const next = await session.selectedModel();
     if (!next || next === opencodeEffectiveModel) return;
     const previous = opencodeEffectiveModel;

@@ -2832,6 +2832,8 @@
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 节点上报 opencode_catalog 与 opencode_catalog_seen_at 同进同出::采集时刻挂在 seenAt 为真的条件下 —— 空串时不发，不把「不知道多旧」报成时刻": 1,
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::成功分支走 keepLastCatalog，失败分支返回上一份而不是 undefined": 1,
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::镜像否定：失败分支不许回到 `catch { return undefined; }`（那正是这次要修的行为）": 1,
+  "agent-node/src/report-token-usage.test.ts::#3952 opencode 增量上报::存在「首轮只对齐」的分支，且对负数（会话重置）不报": 1,
+  "agent-node/src/report-token-usage.test.ts::#3952 opencode 增量上报::轮询里真的调它（接线，不只写函数）": 1,
   "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 与 codex 两条路径都接了（只接一条 = 另一种运行时永远没有数据）": 1,
   "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 路径把 turns / cost 一起带上（它们本来就在 result message 里）": 1,
   "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::上报函数存在，且失败被吞掉（不阻塞回合）": 1,
@@ -11352,6 +11354,8 @@
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 节点上报 opencode_catalog 与 opencode_catalog_seen_at 同进同出::采集时刻挂在 seenAt 为真的条件下 —— 空串时不发，不把「不知道多旧」报成时刻",
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::成功分支走 keepLastCatalog，失败分支返回上一份而不是 undefined",
   "agent-node/src/report-status-catalog-seen-at.test.ts::#3144 读失败不许把清单抹掉（接线，不是只测纯函数）::镜像否定：失败分支不许回到 `catch { return undefined; }`（那正是这次要修的行为）",
+  "agent-node/src/report-token-usage.test.ts::#3952 opencode 增量上报::存在「首轮只对齐」的分支，且对负数（会话重置）不报",
+  "agent-node/src/report-token-usage.test.ts::#3952 opencode 增量上报::轮询里真的调它（接线，不只写函数）",
   "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 与 codex 两条路径都接了（只接一条 = 另一种运行时永远没有数据）",
   "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::claude 路径把 turns / cost 一起带上（它们本来就在 result message 里）",
   "agent-node/src/report-token-usage.test.ts::#3952 节点上报 token 用量::上报函数存在，且失败被吞掉（不阻塞回合）",
@@ -17040,7 +17044,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "bcdbc9c86d3f526f624b23c753bffa12620aefad",
+  "commit": "a99bf9c369e357748d6171b68c0a3507e2bbccdc",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

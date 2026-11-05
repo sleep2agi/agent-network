@@ -45,3 +45,21 @@ describe("#3952 节点上报 token 用量", () => {
     expect(tail).not.toMatch(/prompt|content|message_id|credential/i);
   });
 });
+
+// #3952 —— opencode 的用量是**累计值**：必须报增量，且首轮只对齐不报。
+describe("#3952 opencode 增量上报", () => {
+  test("存在「首轮只对齐」的分支，且对负数（会话重置）不报", () => {
+    const fn = fnBody("function reportOpencodeUsageDelta(");
+    expect(fn).toContain("opencodeUsageBaseline = cur; return;");      // 首轮对齐
+    expect(fn).toMatch(/dIn < 0 \|\| dOut < 0 \|\| dCache < 0/);        // 变小 = 重置 ⇒ 不报
+    expect(fn).toContain("cacheReadTokens: dCache");                    // cache 单列传出
+  });
+
+  test("轮询里真的调它（接线，不只写函数）", () => {
+    const idx = src.indexOf("async function pollOpencodeSessionModel()");
+    const end = src.indexOf("\n}\n", idx);
+    const body = src.slice(idx, end);
+    expect(body).toContain("session.usageSnapshot?.()");
+    expect(body).toContain("reportOpencodeUsageDelta(rawSession)");
+  });
+});
