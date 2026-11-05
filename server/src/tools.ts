@@ -2134,7 +2134,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           recentSql += " ORDER BY created_at DESC LIMIT 5";
           const cands = db.all<{ task_id: string; created_at: string | null }>(recentSql, ...recentParams);
           const verdict = decideParentInference(
-            cands.map((c) => ({ task_id: c.task_id, created_at_ms: c.created_at ? Date.parse(c.created_at) : null })),
+            cands.map((c) => ({ task_id: c.task_id, created_at_ms: parseHubTimestamp(c.created_at) })),
             Date.now(),
           );
           if (verdict.ok) {

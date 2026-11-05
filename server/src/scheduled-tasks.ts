@@ -134,9 +134,11 @@ export function parseScheduleSpec(raw: unknown, timezoneRaw: unknown): { spec: S
 
   if (type === "once") {
     if (typeof obj.run_at !== "string") throw new Error("run_at_required");
-    const when = new Date(obj.run_at);
-    if (!Number.isFinite(when.getTime())) throw new Error("invalid_run_at");
-    return { spec: { type, run_at: iso(when) }, timezone };
+    // #3951 —— 用户给的 run_at 走同一个入口：无时区标记的 'YYYY-MM-DDTHH:MM:SS'
+    // 若直接 new Date() 会按**本机时区**解释（hub 的列是 UTC 无标记）⇒ 跨时区差 8 小时。
+    const whenMs = parseHubTimestamp(obj.run_at);
+    if (whenMs === null) throw new Error("invalid_run_at");
+    return { spec: { type, run_at: iso(new Date(whenMs)) }, timezone };
   }
   if (type === "interval") {
     const every = Number(obj.every_seconds);
@@ -162,8 +164,11 @@ export function parseScheduleSpec(raw: unknown, timezoneRaw: unknown): { spec: S
  * platform timezone database instead of a hand-written offset guess. */
 export function nextOccurrence(spec: ScheduleSpec, timezone: string, after: Date): Date | null {
   if (spec.type === "once") {
-    const when = new Date(spec.run_at);
-    return when.getTime() > after.getTime() ? when : null;
+    // spec.run_at 由上面的 normalize 写出（总是带 Z），但仍然走同一个解析入口：
+    // 「这一处安全」是上一行写出来的事实，不是这一行能自己保证的。
+    const ms = parseHubTimestamp(spec.run_at);
+    if (ms === null) return null;
+    return ms > after.getTime() ? new Date(ms) : null;
   }
   if (spec.type === "interval") return new Date(after.getTime() + spec.every_seconds * 1000);
 
@@ -327,7 +332,7 @@ export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>, 
       ? null
       : schedulingChanged || backoffGenerationReset || resumed || !row.next_run_at
         ? nextOccurrence(parsed.spec, parsed.timezone, new Date())
-        : new Date(row.next_run_at);
+        : new Date(parseHubTimestamp(row.next_run_at) ?? Date.now());
     if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
     // Runs no longer bump revision, so the scheduler may have advanced
     // next_run_at after `row` was read. When cadence is preserved, keep the

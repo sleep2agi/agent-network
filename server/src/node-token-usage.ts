@@ -143,6 +143,9 @@ export function readTokenUsage(networkId: string, sinceHours = 24): NodeTokenUsa
   const rows = db.all<{
     node_id: string; alias: string | null;
     input_tokens: number; output_tokens: number;
+    // #3950 —— SELECT 里已经有 SUM(cache_read_tokens)，类型漏了它时
+    // `r.cache_read_tokens` 在 TS 上是错的，而运行期是 undefined ⇒ totals 变成 NaN。
+    cache_read_tokens: number | null;
     turns: number; cost_usd: number; models: number;
     first_hour: string | null; last_hour: string | null;
   }>(
