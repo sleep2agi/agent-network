@@ -123,7 +123,11 @@ describe("task consumed_at identity and lifecycle", () => {
     //   游标  ：多一个 capability = "list_tasks.immutable-node-cursor.v1"
     // 只断言 capability 的值时，「顺手把它也加到非游标那条」不会有东西变红。
     // 实测五键：我按源码读成三键（漏了 count 与 stats）——又一次「按代码读会少」
-    expect(Object.keys(first).sort()).toEqual(["capability", "count", "next_cursor", "ok", "stats", "tasks"]);
+    // 🔴 2026-11-05 再变一次（#3119 since_last 水位）：游标出口多了 `server_time`（下一次的入参）
+    //    与 `stats_omitted`（节点令牌默认省 stats，于是 `stats` 只是一个**省略**标记而不是读数）。
+    //    ⇒ 这条断言从「六个键」变成「七个键」，而变的是**语义**不是措辞：
+    //       有 server_time ⇒ 调用方可以拿它做增量；有 stats_omitted ⇒ 「没有 stats」不再等于「stats 是空」。
+    expect(Object.keys(first).sort()).toEqual(["capability", "count", "next_cursor", "ok", "server_time", "stats_omitted", "tasks"]);
     expect(first.capability).toBe("list_tasks.immutable-node-cursor.v1");
     expect(first.tasks).toHaveLength(100);
     const second = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100, ...first.next_cursor });
