@@ -64,6 +64,11 @@ ADHOC: dict[str, tuple[str, str]] = {
         'CI 的临时库没有真实建卡行为 ⇒ 跑不出读数',
         '并进统一舰队巡检后删本行',
     ),
+    'check-desktop-release.py': (
+        '[needs-host] 读 https://anet.sh/desktop/update/latest.json 判「线上那一层」版本/平台一致；'
+        'CI 里打外网会变成对第三方站点的依赖，且它不是仓库门',
+        '它进了发布流水线的发后检查（由 release workflow 调用）后删本行',
+    ),
     'where-is-route.py': (
         '[interactive] 交互式排障助手：给一个 URL 路径，判断它是本仓的 REST 路由 / MCP 工具 / 不在本仓；'
         '它不产出可比较的读数，所以没有"被发现"这一说',
