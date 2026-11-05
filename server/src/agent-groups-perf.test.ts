@@ -181,7 +181,12 @@ describe("Agent 分组:性能守卫(50 组 × 300 节点)", () => {
       (db as any).get = (...a: any[]) => { queries++; return (get as any)(...a); };
       try { visibleAgents(who.id, NET); } finally { (db as any).all = all; (db as any).get = get; }
       console.log(`[perf] visibleAgents queries (${who === bob ? "direct-300" : "groups-50x6"}): ${queries}`);
-      expect(queries).toBeLessThanOrEqual(3);
+      // 2026-11-06 —— 预算 3 → 4：#3432（部门维度授权）在 visibleAgents 里**多了一条**
+      // 与节点数无关的查询（network_departments + nodes.department_id）。
+      // 这条测试的意图是「固定次数，不是 per-grant」，多加一个**常量**查询仍然是固定次数；
+      // 但数字必须跟着改，否则它会把一条正确的实现判成回归 —— 而更糟的读法是
+      // 「预算被悄悄抬高」：所以基准写在这里，谁再加一档谁改这一行。
+      expect(queries).toBeLessThanOrEqual(4);
     }
   });
 
