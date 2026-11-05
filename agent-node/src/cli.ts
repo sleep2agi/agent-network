@@ -4497,6 +4497,16 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
           hubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, hubToken: AUTH_TOKEN,
           binary: INITIAL_OPENCODE_BIN, binarySearchPath: INITIAL_LAUNCH_PATH, expectedVersion: INITIAL_OPENCODE_VERSION,
         }) : undefined;
+    // #3418 —— 判据在壳里是 true、在进程里是 false，说明「输入」不是我以为的那一份。
+    // 与其继续猜，就把三格真值打出来：model / marker / generation。
+    // 放在 open 之前，且**无条件**（不是只在失败时打）——失败时的那一行往往已经太晚。
+    const reconcileDecision = OPENCODE_GENERATION === "v2" &&
+      shouldReconcileOpencodeSessionModel(fileConfig, MODEL);
+    warn(`[opencode] reconcile inputs model=${JSON.stringify(MODEL ?? null)} `
+      + `marker=${JSON.stringify(typeof fileConfig?.opencodeConfiguredModelAtLastOpen === "string"
+        ? fileConfig.opencodeConfiguredModelAtLastOpen : null)} `
+      + `generation=${JSON.stringify(OPENCODE_GENERATION ?? null)} `
+      + `resume=${JSON.stringify(opencodeSessionId ?? null)} decide=${reconcileDecision}`);
     const opened = await openOpenCodeCopresenceRuntime({
       // #543 — V1 nodes pass the V1 backend, i.e. exactly the pre-#543 default.
       backend: opencodeBackendFor(OPENCODE_GENERATION ?? "v1"),
@@ -4517,8 +4527,7 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
         providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
         sharedServer,
         resumeSessionId: opencodeSessionId,
-        reconcileResumedModel: OPENCODE_GENERATION === "v2" &&
-          shouldReconcileOpencodeSessionModel(fileConfig, MODEL),
+        reconcileResumedModel: reconcileDecision,
       }),
       onSession: async (id) => {
         opencodeSessionId = id;
