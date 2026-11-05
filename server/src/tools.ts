@@ -3128,8 +3128,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       created_since: z.string().max(64).optional()
         .describe("Only tasks created after this timestamp (ISO 8601 or 'YYYY-MM-DD HH:MM:SS'). Use the previous response's server_time as the next value."),
       // #3119 —— stats 是全表 GROUP BY：轮询时它比任务列表本身还贵。
-      omit_stats: z.boolean().optional().default(false)
-        .describe("Skip the per-status counts (they scan every task in scope). Pollers should set true."),
+      // #3119 —— 不给 `.default(false)`：要能区分「没传」与「显式传 false」。
+      // 节点令牌没传时默认省略 stats（它是给「看图的人」用的计数，轮询的节点不读它）；
+      // 显式传 false 仍然可以要回来。用户令牌保持旧行为（默认返回 stats）。
+      omit_stats: z.boolean().optional()
+        .describe("Skip the per-status counts (they scan every task in scope). Defaults to true for node tokens, false otherwise."),
       // #3943 —— 服务端水位。调用方不传时间，Hub 用「上次给这个调用者返回的时刻」当下界，
       // 返回后把水位推到本次的 server_time。客户端连时钟都不用记（也就不会因两边差几秒漏活）。
       since_last: z.boolean().optional().default(false)
@@ -3189,6 +3192,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (since_last && created_since) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "created_since_and_since_last_are_exclusive" }) }] };
       }
+      // 为什么不给 since_last 也设默认：list_tasks 同时被用来回答「我手上有哪些活」，
+      // 那是一个**全集**问题；默认 since_last 会让「早就派给我、一直没动」的任务消失，
+      // 节点据此得出「没活」——把一个成本问题换成一个正确性问题，不划算。
+      const omitStats = omit_stats ?? callerTokenIsNetwork;
       const effectiveNetIdForWatermark = enforceNetworkId ?? getNetworkId(netId);
       const watermarkKey = (() => {
         if (callerTokenIsNetwork && callerTokenId && enforceNetworkId) {
@@ -3244,7 +3251,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       // Stats（#3119：轮询时默认仍然返回，调用方可用 omit_stats 显式关掉）
-      if (omit_stats) {
+      if (omitStats) {
         return { content: [{ type: "text" as const, text: JSON.stringify({
           ok: true,
           ...(durable_cursor ? { capability: "list_tasks.immutable-node-cursor.v1" } : {}),

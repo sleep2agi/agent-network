@@ -6572,6 +6572,10 @@
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::revoked: token with revoked_at SET also excludes daemon": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::role filter: regular member nodes (role=member) excluded after extraction": 1,
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::self-declare: runtimes_supported + allowed_secret_keys surface from columns": 1,
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::① 节点令牌 + 不传 ⇒ 无 stats，且明确 stats_omitted": 1,
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::② 节点令牌 + 显式 false ⇒ stats 回来（默认不是强制）": 1,
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::③ 用户令牌 + 不传 ⇒ 与以前一致（有 stats）": 1,
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::镜像否定：节点令牌默认**不**启用 since_last（否则「早就派给我」的任务会消失）": 1,
   "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::① 首次调用无水位 ⇒ 全量，且 since_from=null": 1,
   "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::② 中间插入一条 ⇒ 第二次只回它（旧的不再出现）": 1,
   "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::③ 镜像：不传 since_last ⇒ 全量、且**不写**水位": 1,
@@ -15076,6 +15080,10 @@
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::revoked: token with revoked_at SET also excludes daemon",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::role filter: regular member nodes (role=member) excluded after extraction",
   "server/src/list-host-supervisors.test.ts::list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)::self-declare: runtimes_supported + allowed_secret_keys surface from columns",
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::① 节点令牌 + 不传 ⇒ 无 stats，且明确 stats_omitted",
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::② 节点令牌 + 显式 false ⇒ stats 回来（默认不是强制）",
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::③ 用户令牌 + 不传 ⇒ 与以前一致（有 stats）",
+  "server/src/list-tasks-omit-default.test.ts::#3119 节点令牌默认省略 stats::镜像否定：节点令牌默认**不**启用 since_last（否则「早就派给我」的任务会消失）",
   "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::① 首次调用无水位 ⇒ 全量，且 since_from=null",
   "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::② 中间插入一条 ⇒ 第二次只回它（旧的不再出现）",
   "server/src/list-tasks-since-last.test.ts::#3943 list_tasks since_last（服务端水位）::③ 镜像：不传 since_last ⇒ 全量、且**不写**水位",
@@ -17008,7 +17016,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "c4e52384575f7b413ccc62cd8c1c5a76cacab519",
+  "commit": "5ab2d97f46837423a72c1270c2bc6750cdad898b",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
