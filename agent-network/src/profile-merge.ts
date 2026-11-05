@@ -25,3 +25,19 @@ export function mergeProfilePatch<T extends Record<string, unknown>>(
 export function patchTouchesModel(patch: Record<string, unknown>): boolean {
   return Object.prototype.hasOwnProperty.call(patch, "model");
 }
+
+/**
+ * #3418 —— profile 保存时**被静默丢掉的键**。
+ *
+ * serializeProfileForConfigJson 是白名单；不在名单上的键会被写没了。
+ * 而 config.json 里有一批键是**运行时写的**（opencodeConfiguredModelAtLastOpen 等），
+ * 只在 agent-node 里登记、不在启动器的名单里 ⇒ 每次 `anet node start` 都掉一次。
+ * 掉了不报错，下一次启动谁也不知道少了一格。
+ */
+export function droppedProfileKeys(
+  previous: Record<string, unknown> | null | undefined,
+  written: Record<string, unknown>,
+): string[] {
+  if (!previous) return [];
+  return Object.keys(previous).filter((key) => !(key in written)).sort();
+}

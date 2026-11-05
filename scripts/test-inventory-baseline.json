@@ -1746,6 +1746,9 @@
   "agent-network/src/private-state.test.ts::#472 private state writer::read repair refuses a symlink instead of chmod-following it": 1,
   "agent-network/src/private-state.test.ts::#472 private state writer::repairs a legacy file and parent before reading": 1,
   "agent-network/src/private-state.test.ts::#472 private state writer::replaces a leaf symlink instead of writing through it": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存丢键要出声::值从有到无但键还在 ⇒ 不算丢（调用方主动删的）": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存丢键要出声::磁盘上有、写出去没有 ⇒ 列出来": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存丢键要出声::镜像否定：新键多出来不算丢；磁盘为空/缺省也不算": 1,
   "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 为空串 ⇒ 原样保留（空串是「要触发对账」的有效信号，不是「没配」）": 1,
   "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 有形值 ⇒ 原样保留": 1,
   "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::镜像否定：从未有过 marker ⇒ 不凭空造一个（不能把 undefined 写成空串）": 1,
@@ -10236,6 +10239,9 @@
   "agent-network/src/private-state.test.ts::#472 private state writer::read repair refuses a symlink instead of chmod-following it",
   "agent-network/src/private-state.test.ts::#472 private state writer::repairs a legacy file and parent before reading",
   "agent-network/src/private-state.test.ts::#472 private state writer::replaces a leaf symlink instead of writing through it",
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存丢键要出声::值从有到无但键还在 ⇒ 不算丢（调用方主动删的）",
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存丢键要出声::磁盘上有、写出去没有 ⇒ 列出来",
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存丢键要出声::镜像否定：新键多出来不算丢；磁盘为空/缺省也不算",
   "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 为空串 ⇒ 原样保留（空串是「要触发对账」的有效信号，不是「没配」）",
   "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 有形值 ⇒ 原样保留",
   "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::镜像否定：从未有过 marker ⇒ 不凭空造一个（不能把 undefined 写成空串）",
@@ -16980,7 +16986,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "465442daff7c2415bae22ac0c34e99908818585d",
+  "commit": "b89fee85e799bc496aee8a4e0389244412ebd609",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

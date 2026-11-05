@@ -70,3 +70,20 @@ describe("#3418 profile 保存必须保住对账 marker", () => {
     expect("opencodeConfiguredModelAtLastOpen" in out).toBe(false);
   });
 });
+
+// #3418 —— 白名单之外键的**静默消失**。丢掉本身可以接受，不吭声不行。
+import { droppedProfileKeys } from "./profile-merge";
+
+describe("#3418 profile 保存丢键要出声", () => {
+  test("磁盘上有、写出去没有 ⇒ 列出来", () => {
+    expect(droppedProfileKeys({ a: 1, runtimeMarker: "", b: 2 }, { a: 1, b: 2 })).toEqual(["runtimeMarker"]);
+  });
+  test("值从有到无但键还在 ⇒ 不算丢（调用方主动删的）", () => {
+    expect(droppedProfileKeys({ a: 1, b: 2 }, { a: 1, b: undefined })).toEqual([]);
+  });
+  test("镜像否定：新键多出来不算丢；磁盘为空/缺省也不算", () => {
+    expect(droppedProfileKeys({ a: 1 }, { a: 1, brandNew: true })).toEqual([]);
+    expect(droppedProfileKeys(null, { a: 1 })).toEqual([]);
+    expect(droppedProfileKeys(undefined, {})).toEqual([]);
+  });
+});
