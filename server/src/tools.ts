@@ -16,6 +16,7 @@ import { clearNodeFromAgentTeams, agentTeamWhoami } from "./agent-teams.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
 import { z } from "zod/v4";
 import { nodeHealthSchema, normalizeNodeHealth, recordNodeHealth } from "./node-health-store.js";
+import { readTokenUsage, reportTokenUsage } from "./node-token-usage.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
 import { noteModelAuthHealth } from "./model-auth-notify.js";
 import { numberedAliasInClause, parseAliasFilter } from "./alias-filter.js";
@@ -3293,6 +3294,37 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }],
       };
     }
+  );
+
+  // ── #3952 Token 审计（admin 2026-11-05）──
+  // ── #3952 Token 审计（admin 2026-11-05）──
+  // audience=protocol：agent-node 按名字直接调、从不 list，所以它**不进 tools/list**，
+  // 也就不吃那个只剩 3 B 的 node 预算。这不是偷懒，是那条预算的实际约束推出来的唯一合理归类。
+  server.tool(
+    "report_token_usage",
+    "Node reports its own LLM token counts (never content).",
+    {
+      hour: z.string().max(13).optional(),
+      model: z.string().max(100).optional(),
+      input_tokens: z.number().int().min(0).optional(),
+      output_tokens: z.number().int().min(0).optional(),
+      turns: z.number().int().min(0).optional(),
+      cost_usd: z.number().min(0).optional(),
+    },
+    async ({ hour, model, input_tokens, output_tokens, turns, cost_usd }) => {
+      if (!callerTokenIsNetwork || !enforceNetworkId || !callerAlias) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "network_token_required" }) }] };
+      }
+      const node = resolveCallerNode();
+      if (!node) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "alias_unknown" }) }] };
+      const r = reportTokenUsage({
+        networkId: enforceNetworkId, nodeId: node.node_id,
+        hour: hour ?? null, model: model ?? null,
+        inputTokens: input_tokens ?? null, outputTokens: output_tokens ?? null,
+        turns: turns ?? null, costUsd: cost_usd ?? null,
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(r) }] };
+    },
   );
 
   // ── V2: cancel_task (取消任务) ──

@@ -50,6 +50,9 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   submit_skill: "both", list_skills: "both", get_skill: "both", review_skill: "both",
   report_completion: "both", get_inbox: "both", ack_inbox: "both",
   get_all_status: "both", get_session_status: "both",
+  // #3952 —— Token 审计：节点上报走 protocol（默认不列，agent-node 按名直调）；
+  // 人的审计视图走 REST `/api/nodes/token-usage`，**不占 tools/list 预算**。
+  report_token_usage: "protocol",
   send_task: "both", send_message: "both", send_reply: "both", send_peer_reply: "both", send_ack: "both",
   retry_task: "both", get_task: "both", list_tasks: "both", cancel_task: "both", reassign_task: "both",
   send_desktop_message: "both", broadcast: "both", get_completions: "both",

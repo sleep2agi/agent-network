@@ -108,6 +108,7 @@ import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
+import { readTokenUsage } from "./node-token-usage.js";
 import { readBuildInfo } from "./build-info.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
@@ -6408,7 +6409,39 @@ return Bun.serve({
       if (node.config_snapshot) {
         try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
       }
-      // #3146 —— 上一次下发的**结局**。没有这一格时，客户端只能靠
+      // ── #3952 Token 审计（admin 2026-11-05）──
+    // GET /api/token-usage?network_id=…&since_hours=24
+    //   人（成员/owner/admin）读本网络各节点的 LLM token 计数聚合；节点令牌不给（user_token_required）。
+    // 为什么走 REST 而不是 MCP 工具：tools/list 的 user 预算只剩 ~500 B，
+    // 而一个带 schema 的新工具要 ~900 B —— 审计页本来就是人看的表，REST 更合适。
+    // 只回计数：没有 prompt、没有消息 id、没有凭据（表形状决定的）。
+    if (url.pathname === "/api/token-usage" && req.method === "GET") {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (isNodeCredential(resolved)) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      const netId = getNetworkId(url.searchParams.get("network_id") ?? undefined);
+      if (!netId) return withCors(req, Response.json({ ok: false, error: "network_required" }, { status: 400 }));
+      const role = resolved.user.role === "admin" ? "admin" : getUserNetworkRole(resolved.user.user_id, netId);
+      if (!role) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
+      const raw = Number(url.searchParams.get("since_hours") ?? 24);
+      const sinceHours = Number.isFinite(raw) ? Math.max(1, Math.min(24 * 90, Math.floor(raw))) : 24;
+      const nodes = readTokenUsage(netId, sinceHours);
+      const totals = nodes.reduce((acc, r) => ({
+        input_tokens: acc.input_tokens + r.input_tokens,
+        output_tokens: acc.output_tokens + r.output_tokens,
+        total_tokens: acc.total_tokens + r.total_tokens,
+        cost_usd: Number((acc.cost_usd + r.cost_usd).toFixed(6)),
+      }), { input_tokens: 0, output_tokens: 0, total_tokens: 0, cost_usd: 0 });
+      return withCors(req, Response.json({
+        ok: true, network_id: netId, since_hours: sinceHours,
+        // 空表也要说清口径：0 行可能因为「没人上报」，也可能因为「窗口里没用量」。
+        note: nodes.length ? undefined : "这个窗口里没有任何节点上报过 token 用量（不是「用量为 0」）",
+        nodes, totals,
+      }));
+    }
+
+    // #3146 —— 上一次下发的**结局**。没有这一格时，客户端只能靠
       // 「config_revision 有没有涨」推断，涨不了就一律显示成 timeout（「90s 内没回来，去看日志」），
       // 而生产上真实结局是 rejected，原因（OpenCode V2 session is not running）就写在本库里。
       // ⇒ 读者拿不到答案，于是被指去机器上看日志 —— 一句话把人送错了层。
