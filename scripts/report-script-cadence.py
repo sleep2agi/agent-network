@@ -64,6 +64,11 @@ ADHOC: dict[str, tuple[str, str]] = {
         'CI 的临时库没有真实建卡行为 ⇒ 跑不出读数',
         '并进统一舰队巡检后删本行',
     ),
+    'hub-desktop-release.sh': (
+        '[needs-host] 巡检包装：每天一行「桌面端线上版本/平台数/是否一致」；读的是公网更新源，'
+        '且要写本机日志 —— 这两件事都只能在生产机上做',
+        '并进统一舰队巡检后删本行',
+    ),
     'check-desktop-release.py': (
         '[needs-host] 读 https://anet.sh/desktop/update/latest.json 判「线上那一层」版本/平台一致；'
         'CI 里打外网会变成对第三方站点的依赖，且它不是仓库门',
