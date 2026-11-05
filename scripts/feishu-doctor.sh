@@ -2,12 +2,12 @@
 # 飞书渠道体检 —— 一条命令回答「为什么机器人不说话」。
 #
 # 用法： bash scripts/feishu-doctor.sh [节点目录] [节点别名]
-#   默认： /home/vansin/comm-feishu-ou/.anet/nodes/通信飞书欧  通信飞书欧
+#   默认： $HOME/comm-feishu-ou/.anet/nodes/通信飞书欧  通信飞书欧
 #
 # 设计原则：**每一行都能独立判死**。排障最怕的是"看起来都正常"，
 # 所以这里把六种不同的失败分开报，而不是给一个总分。
 set -u
-NODE_DIR=${1:-/home/vansin/comm-feishu-ou/.anet/nodes/通信飞书欧}
+NODE_DIR=${1:-$HOME/comm-feishu-ou/.anet/nodes/通信飞书欧}
 ALIAS=${2:-通信飞书欧}
 CH="$NODE_DIR/channels/feishu"
 ok()   { printf "  ✅ %s\n" "$1"; }

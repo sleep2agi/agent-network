@@ -18,9 +18,8 @@
 #   2026-11-05T22:20:00+08:00 verdict=ok idle=85.2%@1h gaps=22@1h desktop=ok@1h
 #
 # 退出码：0 = 三条都 ok；1 = 有条目 stale/missing（--assert 时才用 1）；2 = 无法定位日志目录
-export HOME=/home/vansin
 export PATH="/usr/local/bin:/usr/bin:/bin"
-LOGDIR="${PATROL_LOG_DIR:-/home/vansin/.commhub}"
+LOGDIR="${PATROL_LOG_DIR:-$HOME/.commhub}"
 OUT="${PATROL_SUMMARY_LOG:-$LOGDIR/patrol-summary.log}"
 
 [ -d "$LOGDIR" ] || { echo "$(date -Is) rc=2 logdir_missing=$LOGDIR" >> "$OUT" 2>/dev/null; exit 2; }

@@ -1,7 +1,7 @@
 #!/bin/bash
 # #3952 的巡检：每天一行「有多少节点在报 token 用量 / 合计多少」。
 #
-# 生产机上的拷贝：/home/vansin/.commhub/node-token-usage.sh（crontab 见下）
+# 生产机上的拷贝：$HOME/.commhub/node-token-usage.sh（crontab 见下）
 # 收进仓的理由与其它巡检脚本同一条：仓外脚本没有 diff，也没有门看着它。
 #
 # 为什么一次一行而不是只在失败时报：
@@ -10,10 +10,9 @@
 #
 # 产出格式（一行）：
 #   2026-11-05T23:10:00+08:00 rc=0 nodes=3 total=1234567 cache=89012345
-export HOME=/home/vansin
-export PATH="/home/vansin/.nvm/versions/node/v20.20.0/bin:/usr/local/bin:/usr/bin:/bin"
-LOG="${NODE_TOKEN_USAGE_LOG:-/home/vansin/.commhub/node-token-usage.log}"
-REPO=${REPO:-/home/vansin/anet-main}
+export PATH="$HOME/.nvm/versions/node/v20.20.0/bin:/usr/local/bin:/usr/bin:/bin"
+LOG="${NODE_TOKEN_USAGE_LOG:-$HOME/.commhub/node-token-usage.log}"
+REPO=${REPO:-$HOME/anet-main}
 HOURS="${NODE_TOKEN_USAGE_HOURS:-24}"
 
 cd "$REPO" || { echo "$(date -Is) rc=99 cd_failed repo=$REPO" >> "$LOG"; exit 99; }
