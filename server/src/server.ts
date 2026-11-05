@@ -108,7 +108,7 @@ import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
-import { readTokenUsage } from "./node-token-usage.js";
+import { readTokenUsage, tokenUsageCoverage } from "./node-token-usage.js";
 import { readBuildInfo } from "./build-info.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
@@ -6425,6 +6425,8 @@ return Bun.serve({
         // 空表也要说清口径：0 行可能因为「没人上报」，也可能因为「窗口里没用量」。
         note: nodes.length ? undefined : "这个窗口里没有任何节点上报过 token 用量（不是「用量为 0」）",
         nodes, totals,
+        // #3950 —— 分母。只有 1 行时，读表的人必须能分清「只有 1 台在干活」还是「只有 1 台有这能力」。
+        coverage: tokenUsageCoverage(netId, nodes.length, (sql: string, ...params: any[]) => db.all(sql, ...params)),
       }));
     }
 

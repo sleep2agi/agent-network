@@ -7047,6 +7047,8 @@
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/stats/sse is limited to the bound network": 1,
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/users": 1,
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::POST /api/admin/users and agent-grants": 1,
+  "server/src/node-token-usage.test.ts::#3950 覆盖率分母::分母三数：reporting / capable / 未知版本各自独立": 1,
+  "server/src/node-token-usage.test.ts::#3950 覆盖率分母::版本判定：>= .180 会报；旧版本不会；解析不出返回 null（不猜）": 1,
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::cache 单列：报进去不进 total（它是 input 的几百倍，混算会把排行变成「谁最老」）": 1,
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::hour 形状不对 ⇒ 拒绝（不做「猜一个」）": 1,
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::① 同一小时同一 model 报两次 ⇒ 累加": 1,
@@ -15569,6 +15571,8 @@
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/stats/sse is limited to the bound network",
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::GET /api/users",
   "server/src/node-token-privilege-http.test.ts::hub-admin powers need a user token::POST /api/admin/users and agent-grants",
+  "server/src/node-token-usage.test.ts::#3950 覆盖率分母::分母三数：reporting / capable / 未知版本各自独立",
+  "server/src/node-token-usage.test.ts::#3950 覆盖率分母::版本判定：>= .180 会报；旧版本不会；解析不出返回 null（不猜）",
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::cache 单列：报进去不进 total（它是 input 的几百倍，混算会把排行变成「谁最老」）",
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::hour 形状不对 ⇒ 拒绝（不做「猜一个」）",
   "server/src/node-token-usage.test.ts::#3952 节点 Token 审计::① 同一小时同一 model 报两次 ⇒ 累加",
@@ -17044,7 +17048,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "a99bf9c369e357748d6171b68c0a3507e2bbccdc",
+  "commit": "2900c758120c9f3936c367b8c07709d535e52a77",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
