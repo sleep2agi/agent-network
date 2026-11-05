@@ -124,6 +124,11 @@ ADHOC: dict[str, tuple[str, str]] = {
         '它是拓扑安装动作，不是可重复的读数 ⇒ CI 里没有「第一次接入」这个动作',
         '接入流程被 `anet node create --feishu` 之类的一条命令接管后删本行',
     ),
+    'probe-rest-500.py': (
+        '[gate] 把 docs/rest-route-table.json 里的 GET 路由真的打一遍，5xx 即红；'
+        '它需要**一个活着的 hub + 一个用户令牌**，CI 的 runner 两样都没有 ⇒ 只能人工/在生产机上跑',
+        '等 qa.sh 能起一个带令牌的本地 hub 夹具（fixture）后，把它接进去并删本行',
+    ),
     'report-idle-poll-share.py': (
         '读生产库的 node_tool_calls 算「问状态/问活」占比（#3119）；CI 的临时库没有这些行 ⇒ 跑不出比例',
         '它进了定时巡检（退化就报）后删本行',
