@@ -239,6 +239,7 @@ import {
   writebackOpencodeSession,
   writebackOpencodeConfiguredModel,
   shouldReconcileOpencodeSessionModel,
+  armModelReconcile,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN, isAcceptedOpencodeVersion, opencodeTransitionNote } from "./runtime/opencode-acp/binary";
 import {
@@ -2715,6 +2716,17 @@ async function pollOpencodeSessionModel(): Promise<void> {
     const previous = opencodeEffectiveModel;
     opencodeEffectiveModel = next;
     log(`[opencode] session model=${next}${MODEL && next !== MODEL ? ` configured=${MODEL}` : ""}${previous ? ` was=${previous}` : ""}`);
+    // #3418 —— 会话漂出配置了：把「上次一致」的 marker 清空，下一次启动强制对账。
+    // 不清空的话，marker 会一直是那句谎话（配置==marker ⇒ 判据认为一致 ⇒ 永远不修）。
+    if (MODEL && next !== MODEL && configFilePath) {
+      try {
+        if (armModelReconcile(configFilePath)) {
+          warn(`[opencode] session model ${next} differs from configured ${MODEL}; armed reconcile-on-next-start (marker cleared)`);
+        }
+      } catch (e: any) {
+        debug(`[opencode] arm model reconcile failed: ${e?.message || e}`);
+      }
+    }
     void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
   } catch (error: any) {
     debug(`[opencode] session model poll failed: ${error?.message || error}`);

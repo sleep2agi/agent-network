@@ -1,6 +1,10 @@
 {
   "name": "@sleep2agi/agent-node",
+<<<<<<< HEAD
   "version": "2.5.0-preview.177",
+=======
+  "version": "2.5.0-preview.176",
+>>>>>>> 12e3a656 (fix(#3418): 会话漂出配置后武装一次对账，下一次启动自愈)
   "description": "AI Agent runtime for CommHub networks. Supports Claude Code CLI, Claude Agent SDK, Codex SDK, Codex app-server, Grok Build ACP, and OpenCode CLI.",
   "bin": {
     "agent-node": "dist/cli.js"
