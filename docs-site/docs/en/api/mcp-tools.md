@@ -137,7 +137,7 @@ Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and 
 | `restart_node` | Restart a node without changing its config |
 | `update_node_config` | Set a node's desired config (model + flags) and ring its doorbell |
 
-**Host-daemon protocol — internal, called by nodes and daemons** · 12
+**Host-daemon protocol — internal, called by nodes and daemons** · 13
 
 | Tool | What it does |
 |------|------|
@@ -167,6 +167,7 @@ Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and 
 | `get_adopt_request` | Only the target daemon's node token may pull the pending request; the daemon performs local path/process verification |
 | `ack_adopt_request` | Target daemon reports `adopted` / `refused`, optionally `error`. Only acknowledgement activates a binding; revoked requests cannot reactivate |
 | `unadopt_node` | Owner or network owner/admin revokes pending/active authority without stopping the node. Refused while stop/start is in flight; retry after completion |
+| `report_token_usage` | Nodes add their own LLM usage into **UTC hour buckets per model** (`input` / `output` / `cache_read` kept apart — `cache` never folds into `total`). Counts only: no prompt, no message id, no credential. Lands in `node_token_usage`; humans read `GET /api/token-usage` |
 
 Adopted children appear in `list_my_children` with `managed: "adopted"`, including stopped children.
 They cannot be deleted (`adopted_node_delete_unsupported`). Stop/start require a creation record or active binding;

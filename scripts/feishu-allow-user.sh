@@ -25,12 +25,11 @@ for a in "$@"; do
   if [ "$a" = "--dry-run" ]; then DRY=1; else ARGS+=("$a"); fi
 done
 set -- "${ARGS[@]}"
-DIR="/home/vansin/comm-feishu-ou/.anet/nodes/$NODE_NAME/channels/feishu"
+DIR="$HOME/comm-feishu-ou/.anet/nodes/$NODE_NAME/channels/feishu"
 ACC="$DIR/access.json"
-CLI=/home/vansin/.nvm/versions/node/v24.19.0/lib/node_modules/@sleep2agi/agent-network/dist/bin/cli.js
+CLI="$HOME/.nvm/versions/node/v24.19.0/lib/node_modules/@sleep2agi/agent-network/dist/bin/cli.js"
 
-export HOME=/home/vansin
-export PATH="/home/vansin/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin"
 export ANET_OPENCODE_MODE=copresence
 
 [ -f "$ACC" ] || { echo "✗ 找不到 $ACC"; exit 2; }
@@ -73,7 +72,7 @@ PY
 [ $? -ne 0 ] && exit 3
 
 echo "→ 重启节点让新白名单生效（access.json 是启动时读的）"
-cd /home/vansin/comm-feishu-ou || exit 4
+cd "$HOME/comm-feishu-ou" || exit 4
 timeout 120 node "$CLI" node restart "$NODE_NAME" 2>&1 | tail -3
 sleep 6
-grep -a "bridge online" "/home/vansin/comm-feishu-ou/.anet/nodes/$NODE_NAME/logs/copresence-bridge.log" | tail -1
+grep -a "bridge online" "$HOME/comm-feishu-ou/.anet/nodes/$NODE_NAME/logs/copresence-bridge.log" | tail -1

@@ -108,7 +108,7 @@ import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
-import { readTokenUsage } from "./node-token-usage.js";
+import { readTokenUsage, tokenUsageCoverage } from "./node-token-usage.js";
 import { readBuildInfo } from "./build-info.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
@@ -6405,10 +6405,12 @@ return Bun.serve({
       const resolved = token ? resolveToken(token) : null;
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       if (isNodeCredential(resolved)) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
-      const netId = getNetworkId(url.searchParams.get("network_id") ?? undefined);
+      // 作用域用 handler 顶部已解析的 restScope —— 它已经做过「是不是这个网络的成员」，
+      // 且 denied 分支在上面统一 return 403。**不要**再在这里自己查一次网络：
+      // 上一版调了一个本文件里不存在的 `getNetworkId()` ⇒ 这个端点自 .273 上线起一直 500，
+      // 而所有人都只会看到「空了」，不会看到「坏了」。（#3951 由 HTTP 测试抓出）
+      const netId = restScope.networkId;
       if (!netId) return withCors(req, Response.json({ ok: false, error: "network_required" }, { status: 400 }));
-      const role = resolved.user.role === "admin" ? "admin" : getUserNetworkRole(resolved.user.user_id, netId);
-      if (!role) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
       const raw = Number(url.searchParams.get("since_hours") ?? 24);
       const sinceHours = Number.isFinite(raw) ? Math.max(1, Math.min(24 * 90, Math.floor(raw))) : 24;
       const nodes = readTokenUsage(netId, sinceHours);
@@ -6425,6 +6427,8 @@ return Bun.serve({
         // 空表也要说清口径：0 行可能因为「没人上报」，也可能因为「窗口里没用量」。
         note: nodes.length ? undefined : "这个窗口里没有任何节点上报过 token 用量（不是「用量为 0」）",
         nodes, totals,
+        // #3950 —— 分母。只有 1 行时，读表的人必须能分清「只有 1 台在干活」还是「只有 1 台有这能力」。
+        coverage: tokenUsageCoverage(netId, nodes.length, (sql: string, ...params: any[]) => db.all(sql, ...params)),
       }));
     }
 

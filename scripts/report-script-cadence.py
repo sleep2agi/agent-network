@@ -109,10 +109,20 @@ ADHOC: dict[str, tuple[str, str]] = {
         '它只在有人真的用它提交时生效，CI 里没有「提交」这个动作可跑',
         '等 commit-msg 钩子能自己安全地生成并校验消息（而不是读一个可能遗留的文件）后，删本行',
     ),
-    'report-node-token-usage.py': (
-        '[report-only] 直接读生产库算「各节点 token 用量排行」（total 不含 cache，cache 单列）；'
-        'CI 的临时库既没有 node_token_usage 的行，也没跑过任何回合',
-        '它进了巡检（每天一行 + 退化就报）或客户端有了等价的读接口 ⇒ 删本行',
+    'feishu-allow-user.sh': (
+        '飞书通道的人工运维脚本：在**那台生产机**上把某个飞书用户加进 allowlist 并重启 bridge；'
+        'CI 里既没有 /home/<user>/comm-feishu-ou 这个节点目录，也没有 bridge 进程可重启',
+        '飞书 allowlist 进了 Hub 的节点设置界面（点一下就写，不需要登机器）后删本行',
+    ),
+    'feishu-doctor.sh': (
+        '飞书通道的按需体检：读生产机上某个节点的 channels/feishu 配置与 bridge 日志；'
+        'CI 的 runner 没有那个节点目录，跑起来只能读到「不存在」',
+        '飞书通道有了自动巡检（每天一行 + 退化就报）后删本行',
+    ),
+    'feishu-first-contact.sh': (
+        '飞书通道首次接入的人肉引导：改生产机上那台节点的 config 并发一条试探消息；'
+        '它是拓扑安装动作，不是可重复的读数 ⇒ CI 里没有「第一次接入」这个动作',
+        '接入流程被 `anet node create --feishu` 之类的一条命令接管后删本行',
     ),
     'report-idle-poll-share.py': (
         '读生产库的 node_tool_calls 算「问状态/问活」占比（#3119）；CI 的临时库没有这些行 ⇒ 跑不出比例',

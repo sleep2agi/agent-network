@@ -143,6 +143,9 @@ export function readTokenUsage(networkId: string, sinceHours = 24): NodeTokenUsa
   const rows = db.all<{
     node_id: string; alias: string | null;
     input_tokens: number; output_tokens: number;
+    // #3950 —— SELECT 里已经有 SUM(cache_read_tokens)，类型漏了它时
+    // `r.cache_read_tokens` 在 TS 上是错的，而运行期是 undefined ⇒ totals 变成 NaN。
+    cache_read_tokens: number | null;
     turns: number; cost_usd: number; models: number;
     first_hour: string | null; last_hour: string | null;
   }>(
@@ -176,3 +179,50 @@ export const NODE_TOKEN_USAGE_COLUMNS = [
   'network_id', 'node_id', 'hour', 'model',
   'input_tokens', 'output_tokens', 'cache_read_tokens', 'turns', 'cost_usd', 'updated_at',
 ] as const;
+
+// ── 覆盖率：让「只有一行」不被读成「只有一个节点在干活」 ──
+//
+// 生产实测（2026-11-06）：203 个 agent-node 里只有 1 个 >= .180（会报 token），
+// 其余停在 .164 / .146。于是 /api/token-usage 只返回 1 行 —— 那不是"系统没工作"，
+// 是"几乎没有节点拥有这个能力"。这两个解释在报表上同形，分母必须一起给。
+
+/** agent-node 从哪一版开始上报 token（.180 加 claude/codex，.181 加 opencode 增量）。 */
+export const TOKEN_USAGE_MIN_PREVIEW = 180;
+
+/** 这个 version 字符串会不会上报 token：true / false / null（解析不出，不猜）。 */
+export function reportsTokenUsage(version: string | null | undefined): boolean | null {
+  const raw = typeof version === "string" ? version.trim() : "";
+  const m = /^2\.5\.0-preview\.(\d+)$/.exec(raw);
+  if (!m) return null; // 换版本线 / 旧格式 ⇒ 不知道，不猜
+  return Number(m[1]) >= TOKEN_USAGE_MIN_PREVIEW;
+}
+
+export interface TokenUsageCoverage {
+  reporting_nodes: number;
+  /** 会话里能解析出版本、且版本 >= 阈值的数量（能力分母） */
+  capable_nodes: number;
+  sessions_with_version: number;
+  /** 解析不出版本线的会话数（不含在 capable 里，也不假装它们不能报） */
+  sessions_without_known_version: number;
+}
+
+export function tokenUsageCoverage(
+  networkId: string,
+  reportingNodes: number,
+  get: (sql: string, ...params: any[]) => Array<{ version: string | null }>,
+): TokenUsageCoverage {
+  const rows = get("SELECT version FROM sessions WHERE network_id = ?1", networkId);
+  let capable = 0, known = 0;
+  for (const r of rows) {
+    const verdict = reportsTokenUsage(r.version);
+    if (verdict === null) continue;
+    known += 1;
+    if (verdict) capable += 1;
+  }
+  return {
+    reporting_nodes: reportingNodes,
+    capable_nodes: capable,
+    sessions_with_version: known,
+    sessions_without_known_version: rows.length - known,
+  };
+}

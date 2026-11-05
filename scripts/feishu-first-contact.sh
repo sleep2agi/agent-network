@@ -15,7 +15,7 @@ NODE=${1:-通信飞书欧}
 ROLE=${2:-admin}
 DRY=0
 for a in "$@"; do [ "$a" = "--dry-run" ] && DRY=1; done
-NODE_DIR="/home/vansin/comm-feishu-ou/.anet/nodes/$NODE"
+NODE_DIR="$HOME/comm-feishu-ou/.anet/nodes/$NODE"
 CH="$NODE_DIR/channels/feishu"
 LOG="$NODE_DIR/logs/$(date +%Y-%m-%d).log"
 ALLOW_SCRIPT="$(dirname "$0")/feishu-allow-user.sh"

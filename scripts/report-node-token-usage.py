@@ -20,6 +20,9 @@ Hub 有了 `/api/token-usage`，但那个口要**人令牌**；而巡检机上�
 - 只统计**上报过**的节点：没接线的运行时（或没升级的节点）在这里不可见，
   分母不是"所有节点"。所以脚本会同时打印「窗口内有用的节点数」，别把它当覆盖率。
 - `turns` / `cost_usd` 在存储层 NOT NULL DEFAULT 0 ⇒「没报」与「报了 0」同形。
+- `turns` 现在只覆盖 **claude（num_turns）与 codex（每次 outcome 记 1）**；
+  opencode 走的是「按会话增量轮询」，一次上报≠一轮 ⇒ 它的 turns 仍是 0。
+  **读这一列时先看节点 runtime**：0 在 opencode 上表示「不适用」，不是「没跑过」。
 - 老 Hub 的表没有 `cache_read_tokens` 列时，本脚本会明说「这一列还不存在」，而不是当 0。
 
 ## 用法
@@ -101,7 +104,7 @@ def main() -> int:
         print("  mutates: none（只读）")
         return 0
 
-    print(f"\n{'节点':<22}{'input':>14}{'output':>12}{'total':>14}{'cache_read':>16}{'cost $':>10}{'turns':>8}")
+    print(f"\n{'节点':<22}{'input':>14}{'output':>12}{'total':>14}{'cache_read':>16}{'cost $':>10}{'turns*':>8}")
     worst = 0
     for node_id, alias, inp, outp, cache, turns, cost, _f, _l in rows[: args.top]:
         total = (inp or 0) + (outp or 0)

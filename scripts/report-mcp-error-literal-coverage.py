@@ -84,7 +84,10 @@ def classify(literals: list[str], texts: list[str]) -> tuple[set[str], set[str],
         lines = text.splitlines()
         for i, line in enumerate(lines):
             for e in literals:
-                if f'"{e}"' not in line:
+                # 2026-11-05 —— 引号口径：原来只认双引号，于是**单引号写的同一条断言
+                # 被记成「一次都没出现」**（实测：`expect(r.error).toBe('x')` 判 never）。
+                # 这不是「没覆盖」，是提取器认不出这种写法 —— 而两者在报告上同形。
+                if not any(f"{q}{e}{q}" in line for q in ('"', "'", "`")):
                     continue
                 mentioned.add(e)
                 lo, hi = max(0, i - 3), min(len(lines), i + 4)
@@ -105,6 +108,12 @@ SELFTEST_CASES = [
         "字面量与 expect 同行 ⇒ near_expect",
         ["err_one"],
         ['expect(r.error).toBe("err_one");'],
+        "near_expect",
+    ),
+    (
+        "单引号/反引号写法与双引号**等价**（引号不是判别位）",
+        ["err_sq"],
+        ["expect(r.error).toBe('err_sq');"],
         "near_expect",
     ),
     (

@@ -40,7 +40,7 @@ def load_token(alias: str) -> str | None:
     candidates = [
         Path.home() / ".anet" / "nodes" / alias / "config.json",
         Path.cwd() / ".anet" / "nodes" / alias / "config.json",
-        Path("/home/vansin/comm-ou-v2/.anet/nodes") / alias / "config.json",
+        Path(os.environ.get("ANET_NODES_DIR", str(Path.home() / "comm-ou-v2/.anet/nodes"))) / alias / "config.json",
     ]
     for path in candidates:
         try:

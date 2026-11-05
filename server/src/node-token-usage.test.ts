@@ -97,3 +97,32 @@ describe("#3952 节点 Token 审计", () => {
     expect(norm?.costUsd).toBeNull();
   });
 });
+
+// #3950 —— 覆盖率分母：让「只有一行」不被读成「只有一个节点在干活」。
+import { reportsTokenUsage, tokenUsageCoverage } from "./node-token-usage";
+
+describe("#3950 覆盖率分母", () => {
+  test("版本判定：>= .180 会报；旧版本不会；解析不出返回 null（不猜）", () => {
+    expect(reportsTokenUsage("2.5.0-preview.181")).toBe(true);
+    expect(reportsTokenUsage("2.5.0-preview.180")).toBe(true);
+    expect(reportsTokenUsage("2.5.0-preview.164")).toBe(false);
+    expect(reportsTokenUsage("2.4.1-preview.9")).toBeNull();
+    expect(reportsTokenUsage("")).toBeNull();
+    expect(reportsTokenUsage(null)).toBeNull();
+  });
+
+  test("分母三数：reporting / capable / 未知版本各自独立", () => {
+    const rows = [
+      { version: "2.5.0-preview.181" }, { version: "2.5.0-preview.164" },
+      { version: "2.5.0-preview.146" }, { version: "codex-app-server" },
+      { version: null },
+    ];
+    const cov = tokenUsageCoverage("net_x", 1, () => rows);
+    expect(cov.reporting_nodes).toBe(1);
+    expect(cov.capable_nodes).toBe(1);
+    expect(cov.sessions_with_version).toBe(3);
+    expect(cov.sessions_without_known_version).toBe(2);
+    // 镜像：capable 只统计「能解析且 >= 阈值」，不等于 sessions_with_version
+    expect(cov.capable_nodes).toBeLessThan(cov.sessions_with_version);
+  });
+});

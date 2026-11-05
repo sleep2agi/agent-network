@@ -863,18 +863,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "report_status",
-    "Report agent status. Returns inbox_count.",
+    "Report status; returns inbox_count.",
     {
-      resume_id: z.string().min(1).max(200).describe("Claude Code session UUID (unique per session)"),
-      alias: z.string().min(1).max(200).describe("Human-readable session name for dispatching (e.g. 指挥室/知识哥)"),
+      resume_id: z.string().min(1).max(200).describe("Session UUID"),
+      alias: z.string().min(1).max(200).describe("Session alias for dispatch"),
       status: z.enum(["working", "idle", "blocked", "error", "waiting_input", "offline"]),
-      task: z.string().max(TASK_CONTENT_MAX).optional().describe("Task (session stores 200 chars; full text matches tasks.content)"),
-      output: z.string().max(50000).optional().describe("Recent output (max 4000 chars stored)"),
+      task: z.string().max(TASK_CONTENT_MAX).optional().describe("Task (200 chars stored)"),
+      output: z.string().max(50000).optional().describe("Recent output (4k stored)"),
       score: z.number().min(0).max(10).optional().describe("Self-score 1-10"),
       progress: z.number().min(0).max(100).optional().describe("Progress 0-100"),
       server: z.string().max(200).optional().describe("Server identifier"),
       hostname: z.string().max(200).optional().describe("Agent hostname"),
-      agent: z.string().max(100).optional().describe("Agent type (claude-code / codex / opencode)"),
+      agent: z.string().max(100).optional().describe("Agent type"),
       project_dir: z.string().max(1000).optional().describe("Agent working directory"),
       // #1198 — OS account the process runs as (platform identity only; no env fallback).
       os_user: z.string().min(1).max(256).optional().describe("OS account"),
@@ -896,8 +896,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       config_path: z.string().max(1000).optional().describe("Config file path"),
       channels: z.string().max(2000).optional().describe("JSON array of channels"),
       model: z.string().max(200).optional().describe("AI model name"),
-      node_name: z.string().max(200).optional().describe("Stable node display name (may differ from alias)"),
-      network_id: z.string().max(200).optional().describe("Network this agent belongs to"),
+      node_name: z.string().max(200).optional().describe("Node display name"),
+      network_id: z.string().max(200).optional().describe("Network id"),
       // ╭─ 🔴 往 report_status 里加字段之前先读这一段(#1545 实测,zod 4.3.6)─────────╮
       // │ **这份 schema 的子对象一半严一半松,而后果完全不同。**
       // │
@@ -939,7 +939,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         disk_total_gb: z.number().nullable().optional(),
         disk_used_gb: z.number().nullable().optional(),
         disk_avail_gb: z.number().nullable().optional(),
-      }).optional().describe("Host telemetry reported by agent-node"),
+      }).optional().describe("Host telemetry"),
       process_telemetry: z.object({
         rss_bytes: z.number().nullable().optional(),
         rss_mb: z.number().nullable().optional(),
@@ -947,7 +947,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         cpu_pct: z.number().nullable().optional(),
         uptime_seconds: z.number().nullable().optional(),
         in_flight_count: z.number().nullable().optional(),
-      }).optional().describe("Per-agent process telemetry reported by agent-node"),
+      }).optional().describe("Process telemetry"),
       external_schedules: z.object({
         observed_at: z.string().datetime({ offset: true }).max(64),
         schedules: z.array(z.object({
@@ -967,7 +967,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           revision: z.number().int().min(0).optional(),
         }).strict()).max(64),
         error: z.enum(["invalid_manifest", "unsafe_manifest", "read_failed"]).optional(),
-      }).strict().optional().describe("Node-reported schedules; never includes host paths or commands"),
+      }).strict().optional().describe("External schedules (no paths)"),
       // RFC-024 B6 — masked snapshot of the node's effective config
       // (model + 6 dashboard-editable flags). Secrets ARE NOT in this
       // shape (env._envRef stays on host); the dashboard reads this
@@ -2071,8 +2071,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional(),
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
       network_id: z.string().max(200).optional().describe("Network scope"),
-      parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. The child's reply is auto-chained to the parent's originator, so the user sees the result even if the intermediate session ends."),
-      meta: z.any().optional().describe("Optional task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
+      parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch serves; the reply auto-chains to its originator."),
+      meta: z.any().optional().describe("Optional task metadata, e.g. { attachments: [{type,path,url,mime,name,size}] }."),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => {
@@ -2134,7 +2134,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           recentSql += " ORDER BY created_at DESC LIMIT 5";
           const cands = db.all<{ task_id: string; created_at: string | null }>(recentSql, ...recentParams);
           const verdict = decideParentInference(
-            cands.map((c) => ({ task_id: c.task_id, created_at_ms: c.created_at ? Date.parse(c.created_at) : null })),
+            cands.map((c) => ({ task_id: c.task_id, created_at_ms: parseHubTimestamp(c.created_at) })),
             Date.now(),
           );
           if (verdict.ok) {
@@ -3127,17 +3127,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 是最大的一格：每次轮询都拉全量再自己筛。给它一个「只要这之后创建的」，
       // 空窗口就回极短体，比任何提示词都省（提示词只能劝，改不了接口成本）。
       created_since: z.string().max(64).optional()
-        .describe("Only tasks created after this timestamp (ISO 8601 or 'YYYY-MM-DD HH:MM:SS'). Use the previous response's server_time as the next value."),
+        .describe("Only tasks created after this (ISO 8601 or 'YYYY-MM-DD HH:MM:SS'); pass previous server_time."),
       // #3119 —— stats 是全表 GROUP BY：轮询时它比任务列表本身还贵。
       // #3119 —— 不给 `.default(false)`：要能区分「没传」与「显式传 false」。
       // 节点令牌没传时默认省略 stats（它是给「看图的人」用的计数，轮询的节点不读它）；
       // 显式传 false 仍然可以要回来。用户令牌保持旧行为（默认返回 stats）。
       omit_stats: z.boolean().optional()
-        .describe("Skip the per-status counts (they scan every task in scope). Defaults to true for node tokens, false otherwise."),
+        .describe("Skip per-status counts (they scan every task in scope). Default true for node tokens."),
       // #3943 —— 服务端水位。调用方不传时间，Hub 用「上次给这个调用者返回的时刻」当下界，
       // 返回后把水位推到本次的 server_time。客户端连时钟都不用记（也就不会因两边差几秒漏活）。
       since_last: z.boolean().optional().default(false)
-        .describe("Only tasks created since this caller's previous list_tasks call. Server keeps the watermark."),
+        .describe("Only tasks created since this caller's previous list_tasks (watermark kept server-side)."),
     },
     async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit, created_since, omit_stats, since_last }) => {
       const readScope = resolveReadScope(netId);
@@ -3439,7 +3439,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       kind: z.string().min(1).max(80).optional().default("agent_message"),
       meta: z.record(z.string(), z.unknown()).optional(),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens; ntok stays bound to its network)."),
+      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens; ntok stays bound)."),
     },
     async ({ to_user_id, to_username, title, message, severity, kind, meta, from_session: _fromIn, network_id: netId }) => {
       const fromMismatch = fromIdentityMismatchReply(_fromIn);
@@ -3716,7 +3716,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Set the per-node config (model + flags) and push a doorbell; the node pulls, validates and applies (hot or restart per field). RFC-024.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      base_revision: z.number().int().min(0).describe("Current revision per the dashboard's last GET — 409 if hub's current revision differs."),
+      base_revision: z.number().int().min(0).describe("Revision from the dashboard's last GET — 409 if the hub's differs."),
       patch: z.object({
         model: z.string().max(200).optional(),
         flags: z.record(z.string(), z.unknown()).optional(),
@@ -4429,7 +4429,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       lines: z.number().int().min(1).max(LOGS_MAX_LINES).optional().describe("How many of the newest matching lines (default 500, max 2000)."),
       level: z.enum(["info", "warn", "error"]).optional().describe("Only lines of exactly this level."),
       grep: z.string().min(1).max(LOGS_GREP_MAX).optional().describe("Case-insensitive substring, matched after redaction."),
-      since_ts: z.number().int().min(0).optional().describe("Only lines at/after this epoch-ms timestamp (follow mode; client de-dupes by line key)."),
+      since_ts: z.number().int().min(0).optional().describe("Only lines at/after this epoch-ms (follow mode; client de-dupes by line key)."),
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, lines, level, grep, since_ts, network_id }) =>
@@ -7130,9 +7130,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
     project_id: z.string().max(200).nullable().optional(),
-    owner: reqPerson.nullable().optional().describe("负责人 (a person): {kind:'user', id | username} (ids / usernames from requirements_people; names resolve in the task's network); a node is rejected with owner_must_be_human — use agent_owner"),
+    owner: reqPerson.nullable().optional().describe("Owner (person): {kind:'user', id|username} from requirements_people; a node gets owner_must_be_human — use agent_owner"),
     agent_owner: reqPerson.nullable().optional().describe("负责 Agent: {kind:'node', id | alias}"),
-    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the whole list (like owner/agent_owner; omitted people are removed, [] clears). For a few, use participants_add/participants_remove."),
+    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the list (omitted removed; [] clears). For a few use participants_add/_remove."),
     external_url: z.string().max(500).nullable().optional(),
     parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
   };
@@ -7167,13 +7167,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
     department_id: z.string().max(64).optional().describe("owner (or its Agent's owner) in this department or below"),
     top_level: z.boolean().optional(), q: z.string().max(200).optional(),
-    overdue: z.boolean().optional().describe("true = open tasks whose due is past (date-only: before today, Asia/Shanghai); false = rest"),
+    overdue: z.boolean().optional().describe("true = open tasks past due (date-only: before today, Asia/Shanghai); false = rest"),
     due_within_days: z.number().int().min(0).max(365).optional().describe("open tasks not yet overdue, due by the end of today + N days (0 = later today)"),
     limit: z.number().int().min(1).max(1000).optional().describe(`page size, default ${REQ_LIST_MCP_DEFAULT_LIMIT}`),
     cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
-    view: z.enum(["full", "summary"]).optional().describe("default summary (no bodies; has_description/checklist_count instead); full = everything"),
-    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (incl. archived; +deleted ids +server_time; with include_last_event also newer events)"),
-    include_last_event: z.boolean().optional().describe("default false; true adds last_event per row (~150 B/row: type, field, actor, at, summary; null if none)"),
+    view: z.enum(["full", "summary"]).optional().describe("default summary (no bodies; has_description/checklist_count); full = everything"),
+    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (+deleted ids +server_time; with include_last_event also newer events)"),
+    include_last_event: z.boolean().optional().describe("default false; true adds last_event per row (~150 B: type/field/actor/at/summary; null if none)"),
   };
   const reqListKeys = Object.keys(reqListShape);
   server.registerTool(
