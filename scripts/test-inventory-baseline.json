@@ -1746,6 +1746,9 @@
   "agent-network/src/private-state.test.ts::#472 private state writer::read repair refuses a symlink instead of chmod-following it": 1,
   "agent-network/src/private-state.test.ts::#472 private state writer::repairs a legacy file and parent before reading": 1,
   "agent-network/src/private-state.test.ts::#472 private state writer::replaces a leaf symlink instead of writing through it": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 为空串 ⇒ 原样保留（空串是「要触发对账」的有效信号，不是「没配」）": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 有形值 ⇒ 原样保留": 1,
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::镜像否定：从未有过 marker ⇒ 不凭空造一个（不能把 undefined 写成空串）": 1,
   "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::patch 只记 opencodeMode ⇒ 磁盘上的 model（Hub 改过的）必须原样保留": 1,
   "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::不丢其它键：磁盘上的 token / node_id 必须还在（合并不是重建）": 1,
   "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::判据函数：patch 里没写 model 时 patchTouchesModel 为 false（调用方据此不需要特判）": 1,
@@ -10233,6 +10236,9 @@
   "agent-network/src/private-state.test.ts::#472 private state writer::read repair refuses a symlink instead of chmod-following it",
   "agent-network/src/private-state.test.ts::#472 private state writer::repairs a legacy file and parent before reading",
   "agent-network/src/private-state.test.ts::#472 private state writer::replaces a leaf symlink instead of writing through it",
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 为空串 ⇒ 原样保留（空串是「要触发对账」的有效信号，不是「没配」）",
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::marker 有形值 ⇒ 原样保留",
+  "agent-network/src/profile-merge.test.ts::#3418 profile 保存必须保住对账 marker::镜像否定：从未有过 marker ⇒ 不凭空造一个（不能把 undefined 写成空串）",
   "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::patch 只记 opencodeMode ⇒ 磁盘上的 model（Hub 改过的）必须原样保留",
   "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::不丢其它键：磁盘上的 token / node_id 必须还在（合并不是重建）",
   "agent-network/src/profile-merge.test.ts::#3418 只改声明的那一格，不用旧快照覆盖::判据函数：patch 里没写 model 时 patchTouchesModel 为 false（调用方据此不需要特判）",
@@ -16974,7 +16980,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "dcb3b00f91e421f0d689af875c57b47ab9e4f66c",
+  "commit": "465442daff7c2415bae22ac0c34e99908818585d",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
