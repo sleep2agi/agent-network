@@ -64,6 +64,11 @@ ADHOC: dict[str, tuple[str, str]] = {
         'CI 的临时库没有真实建卡行为 ⇒ 跑不出读数',
         '并进统一舰队巡检后删本行',
     ),
+    'hub-patrol-summary.sh': (
+        '[needs-host] 把本机三条巡检日志压成一行（读 ~/.commhub/*.log，写 summary）；'
+        'CI 里既没有那些日志也没有那些 cron',
+        '并进统一舰队巡检（那套本来就有汇总）后删本行',
+    ),
     'hub-desktop-release.sh': (
         '[needs-host] 巡检包装：每天一行「桌面端线上版本/平台数/是否一致」；读的是公网更新源，'
         '且要写本机日志 —— 这两件事都只能在生产机上做',
