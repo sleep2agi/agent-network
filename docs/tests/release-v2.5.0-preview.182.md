@@ -61,6 +61,12 @@ agent-node tsc：错误数 81（与 main 持平）
    实测把「120ms 判定」变成「5000ms 才抛」⇒ 只发关闭请求，不 await
 ```
 
+## Install
+
+```bash
+npm i -g @sleep2agi/agent-node@2.5.0-preview.182
+```
+
 ## Upgrade
 
 ```bash
