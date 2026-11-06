@@ -4,7 +4,7 @@
 # 用法：
 #   bash feishu-provision-node.sh <节点目录> <凭据文件> <open_id> [chat_id] [--dry-run]
 # 例：
-#   bash feishu-provision-node.sh /home/vansin/comm-feishu-ou/.anet/nodes/某节点 \
+#   bash feishu-provision-node.sh ~/comm-feishu-ou/.anet/nodes/某节点 \
 #        /tmp/app.env ou_abc123 oc_xyz --dry-run
 #
 # 做四件事（每步都可单独判死）：
@@ -27,6 +27,11 @@ for a in "$@"; do [ "$a" = "--dry-run" ] && DRY=1; done
 
 CH="$NODE_DIR/channels/feishu"
 CFG="$NODE_DIR/config.json"
+# 2026-11-06 —— 临时文件从写死的 /tmp/.feishu-provision-appid 改成 mktemp：
+# 固定名在「两个进程同时给两台节点接线」时会互相覆盖，而崩溃残留会让下一次
+# 读到一个旧的 app_id（看起来成功，实际是别人的）。tmp-hygiene 门就是拦这个的。
+APPID_FILE=$(mktemp "${TMPDIR:-/tmp}/feishu-provision-appid.XXXXXX") || { echo "无法创建临时文件"; exit 3; }
+trap 'rm -f "$APPID_FILE"' EXIT INT TERM
 ok(){ printf "  ✅ %s\n" "$1"; }
 bad(){ printf "  ❌ %s\n" "$1"; }
 warn(){ printf "  ⚠️  %s\n" "$1"; }
@@ -41,7 +46,7 @@ printf '%s' "$OPEN_ID" | grep -q '^ou_' || { bad "open_id 应以 ou_ 开头（�
 if [ -n "$CHAT_ID" ]; then printf '%s' "$CHAT_ID" | grep -q '^oc_' || { bad "chat_id 应以 oc_ 开头"; exit 2; }; fi
 
 # 1) 凭据验真（别名兼容 FEISHU_/SF_）
-python3 - "$CRED" <<'PY'
+python3 - "$CRED" "$APPID_FILE" <<'PY'
 import json,sys,urllib.request
 env={}
 for line in open(sys.argv[1]):
@@ -61,10 +66,10 @@ except Exception as e:
 if d.get("code")!=0 or not d.get("tenant_access_token"):
     print("  ❌ 飞书拒绝凭据:", d.get("code"), d.get("msg")); sys.exit(2)
 print(f"  ✅ 凭据可用（app_id={aid}）")
-open("/tmp/.feishu-provision-appid","w").write(aid)
+open(sys.argv[2],"w").write(aid)
 PY
 [ $? -ne 0 ] && { echo "⇒ 没有写任何文件"; exit 3; }
-APP_ID=$(cat /tmp/.feishu-provision-appid 2>/dev/null); rm -f /tmp/.feishu-provision-appid
+APP_ID=$(cat "$APPID_FILE" 2>/dev/null)
 
 # 2) 计划（dry-run 在这里打印完就退出）
 echo "-- 计划"

@@ -6409,7 +6409,20 @@ return Bun.serve({
       // 且 denied 分支在上面统一 return 403。**不要**再在这里自己查一次网络：
       // 上一版调了一个本文件里不存在的 `getNetworkId()` ⇒ 这个端点自 .273 上线起一直 500，
       // 而所有人都只会看到「空了」，不会看到「坏了」。（#3951 由 HTTP 测试抓出）
-      const netId = restScope.networkId;
+      // 与 catalog 端点（/api/providers 等）**同一口径**：显式给了就用，没给就回退到
+      // 「唯一所属网络」，多个/零个才 400。上一版只认 restScope.networkId，
+      // 于是一个只属于一个网络的用户在这里拿到 400、在同一页的 /api/providers 上拿到 200 ——
+      // 相邻两个端点对同一用户给不同答案，客户端被迫多写一条分支。
+      // 三档，按"信息量从高到低"取：
+      //   ① restScope.networkId   —— 显式参数 / 节点绑定 / 管理员指定
+      //   ② restScope.networkIds 长度==1 —— 普通用户只属于一个网络
+      //   ③ 以上都拿不到时，退回「这个**人**自己所属的网络」再判一次唯一性
+      // 为什么需要 ③：authCtx 为 null（无鉴权/遗留全局模式）时 resolveRestNetworkScope
+      // 会返回 {networkId: requested||null, networkIds: null} —— 那不是「属于所有网络」，
+      // 而是「这份 scope 没带成员信息」。此时若直接 400，唯一所属网络的用户会被拒，
+      // 而同一页的 /api/providers 却放行。
+      const scopeIds = restScope.networkIds ?? (restScope.networkId ? null : getUserNetworkIds(resolved.user.user_id));
+      const netId = restScope.networkId ?? (scopeIds && scopeIds.length === 1 ? scopeIds[0] : null);
       if (!netId) return withCors(req, Response.json({ ok: false, error: "network_required" }, { status: 400 }));
       const raw = Number(url.searchParams.get("since_hours") ?? 24);
       const sinceHours = Number.isFinite(raw) ? Math.max(1, Math.min(24 * 90, Math.floor(raw))) : 24;

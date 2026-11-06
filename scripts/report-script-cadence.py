@@ -109,6 +109,11 @@ ADHOC: dict[str, tuple[str, str]] = {
         '它只在有人真的用它提交时生效，CI 里没有「提交」这个动作可跑',
         '等 commit-msg 钩子能自己安全地生成并校验消息（而不是读一个可能遗留的文件）后，删本行',
     ),
+    'feishu-provision-node.sh': (
+        '飞书接入的**一次性拓扑**脚本：把凭据换成 tenant_access_token 并写进某台生产机的节点目录；'
+        '它需要真实飞书凭据与那台机器的目录结构，CI 两样都没有',
+        '接入流程被 `anet channel add feishu`（或等价命令）覆盖到 OpenCode V2 后删本行',
+    ),
     'feishu-allow-user.sh': (
         '飞书通道的人工运维脚本：在**那台生产机**上把某个飞书用户加进 allowlist 并重启 bridge；'
         'CI 里既没有 /home/<user>/comm-feishu-ou 这个节点目录，也没有 bridge 进程可重启',

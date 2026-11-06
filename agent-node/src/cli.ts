@@ -194,6 +194,7 @@ import {
 import { formatAttemptOutcome } from "./runtime/attempt-log-outcome";
 import { createClaudeResultTracker, formatClaudeTurnCost, modelInUseNotice } from "./runtime/claude-turn-log";
 import { withTimeout, TimeoutError, resolveTimeoutMs } from "./util/timeout";
+import { startIdleWatchdog } from "./util/idle-guard";
 import { superviseChild } from "./util/supervise-child";
 import { buildNodeSseHeaders, formatSupersededError, generateInstanceId, parseSupersededFrame, SupersedeBackoff } from "./util/sse-node-identity";
 import {
@@ -921,7 +922,21 @@ function currentClaudeTimeoutMs(): number {
 // const value, so for sites that genuinely want one-shot at-init read
 // we keep this const. Hot-apply-aware sites should call
 // currentClaudeTimeoutMs() instead.
+//
+// 🔴 #4010（2026-11-06）—— 语义变更：这个值现在是 **idle（无进展）上限**，不是总时长。
+// 现场：伪神明跑一次页面优化，每次都在 300s 被砍、重试 3 次 ⇒ 用户等 15 分钟只得到一句错误，
+// 而日志写的是「期间没有任何响应」——它其实一直在动，只是单条回复很长。
+// 现在：每收到一条 SDK 消息就重置；连续 idle 才判卡死。
+// 总时长仍有保险，见 currentClaudeHardCapMs()（默认 30 分钟）。
 const CLAUDE_TIMEOUT_MS = currentClaudeTimeoutMs();
+
+/** 总时长硬上限：idle 不是「永不超时」的借口。#4010 */
+function currentClaudeHardCapMs(): number {
+  const raw = process.env.CLAUDE_HARD_CAP_MS;
+  const n = raw === undefined ? NaN : parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 0) return n;
+  return 30 * 60_000;
+}
 // v0.9.2 (#129 + #132): retry count for transient LLM-call errors.
 // Auth-error class (401 / invalid_api_key / A0211) short-circuits retry —
 // retrying with the same bad credential just wastes 12s before failing
@@ -3424,6 +3439,10 @@ async function processWithClaude(
       ? { allowDangerouslySkipPermissions: true }
       : {}),
     settingSources: [],
+    // #4010 —— 打开流式部分消息：长回答（尤其是长 thinking / 长文本）期间也持续产事件。
+    // 两个作用：① idle 判定能区分「在想」与「卡死」；② 心跳/进度有东西可喂。
+    // 它不改变最终结果（仍是同一条 result），只是把「静默期」切开。
+    includePartialMessages: true,
     // mcpServers active when no claudePath (forced above for URL-type MCP).
     // This gives the agent commhub_send_task / get_all_status / etc. so it
     // can actually talk to other agents in the network.
@@ -3538,11 +3557,24 @@ async function processWithClaude(
   //   🔴 必须声明在重试循环**之外** —— 循环内声明的话,下面那个 return 读不到
   //   (同一个错我在这个文件的 codex 分支上刚犯过一次,typecheck 棘轮门抓的)。
   const claudeAttempts: { ms: number; timedOut: boolean }[] = [];
+  // #4010 —— 这一次尝试是「idle 到点」还是「硬上限到点」，以及卡住前最后一条消息是什么。
+  // 两者对外话术完全不同：前者说「卡在哪一步」，后者说「总时长超了」。
+  // 用容器而不是裸变量：TS 的控制流分析不跟踪回调里的赋值，裸变量会被窄化成 never。
+  type ClaudeIdleHit = { idleForMs: number; lastItem: string | null };
+  const claudeIdleRef: { v: ClaudeIdleHit | null } = { v: null };
+  // 读取走函数：TS 的属性窄化会把「回调里赋值」当成没发生，
+  // 直接读 claudeIdleRef.v 会被判定成 never（实测）。函数返回值不受窄化影响。
+  const claudeIdleHit = (): ClaudeIdleHit | null => claudeIdleRef.v;
+  let lastClaudeMessageType: string | null = null;
+  let claudeMessagesThisAttempt = 0;
   let capacityRetries = 0;
   let authAbortedThisAttempt = false;
   for (let attempt = 0; ; attempt++) {
     toolsRanThisAttempt = false;
     authAbortedThisAttempt = false;
+    // #4010 —— 每次尝试独立记账（否则第 2 次会被第 1 次的进展影响，重试分流就错了）
+    claudeIdleRef.v = null;
+    claudeMessagesThisAttempt = 0;
     let timedOut = false;
     const attemptStart = Date.now();
     try {
@@ -3552,6 +3584,18 @@ async function processWithClaude(
         options.abortController = ac;
         const forward = () => ac.abort();
         signal.addEventListener("abort", forward, { once: true });
+        // #4010 —— idle 看门狗：每收到一条消息 poke 一次；连续无消息到点就 abort。
+        // 用 watchdog 而不是重写这条 for-await：循环体里 authAbort / result / return 分支多，
+        // 改写成 runWithIdleGuard 的风险大于收益（回归面是整条 claude 路径）。
+        const idleMs = currentClaudeTimeoutMs();
+        const idleWatch = startIdleWatchdog({
+          idleMs,
+          onFire: (idleForMs) => {
+            claudeIdleRef.v = { idleForMs, lastItem: lastClaudeMessageType };
+            log(`[claude] idle ${Math.round(idleForMs / 1000)}s 无任何消息（上限 ${Math.round(idleMs / 1000)}s，最后一条=${lastClaudeMessageType ?? "无"}）；abort 本次尝试`);
+            ac.abort();
+          },
+        });
         try {
           const messages = query({ prompt, options });
           const resultTracker = createClaudeResultTracker<{ m: any; cls: NonNullable<ReturnType<typeof classifyRuntimeResult>> }>();
@@ -3559,6 +3603,10 @@ async function processWithClaude(
           for await (const message of messages) {
             evidence?.consumed();
             const m = message as any;
+            // #4010 —— 「有消息」就是有进展：重置 idle 计时，并记下类型用于超时定位。
+            idleWatch.poke();
+            claudeMessagesThisAttempt += 1;
+            lastClaudeMessageType = typeof m?.type === "string" ? m.type : "unknown";
             if (claudeMessageShowsExecutedTool(m)) toolsRanThisAttempt = true;
             // #672 — a dead static key retries inside the CLI (~10 times)
             // before this loop sees a thrown error. Attempt 1 is emitted
@@ -3739,16 +3787,23 @@ async function processWithClaude(
           }
           return inner;
         } finally {
+          idleWatch.stop();
           signal.removeEventListener("abort", forward);
         }
-      }, CLAUDE_TIMEOUT_MS, `claude-attempt-${attempt + 1}/${CLAUDE_MAX_RETRIES + 1}`);
+      }, currentClaudeHardCapMs(), `claude-attempt-${attempt + 1}/${CLAUDE_MAX_RETRIES + 1}`);
       if (!result.startsWith("执行出错:")) claudeLoginDead = false;
       return result;
     } catch (err: any) {
-      timedOut = err instanceof TimeoutError;
-      const msg = err instanceof TimeoutError
-        ? `timed out after ${err.timeoutMs}ms`
-        : String(err?.message || err).slice(0, 300);
+      const idleHit = claudeIdleHit();
+      timedOut = err instanceof TimeoutError || idleHit !== null;
+      // #4010 —— idle 到点走的是 abort，不是 TimeoutError；错误串要能自己说清
+      // 「卡在哪一步」。只写 "timed out after 300000ms" 时，读的人无法区分
+      // 「一直没动」与「一直在动但总量超了」，而两者的下一步动作相反。
+      const msg = idleHit
+        ? `idle ${Math.round(idleHit.idleForMs / 1000)}s（最后一条消息=${idleHit.lastItem ?? "无"}）`
+        : err instanceof TimeoutError
+          ? `timed out after ${err.timeoutMs}ms（hard cap）`
+          : String(err?.message || err).slice(0, 300);
       const attemptDt = Date.now() - attemptStart;
 
       // Abort rejects the SDK stream. That rejection is not a capacity
@@ -3802,7 +3857,19 @@ async function processWithClaude(
       lastErr = msg;
       timedOutFinal = timedOut;
       claudeAttempts.push({ ms: attemptDt, timedOut });
-      const reason = timedOut ? `timed out after ${attemptDt}ms` : `errored: ${msg.slice(0, 100)}`;
+      const reason = timedOut
+        ? (idleHit ? `idle ${Math.round(idleHit.idleForMs / 1000)}s 无消息` : `hard cap ${attemptDt}ms`)
+        : `errored: ${msg.slice(0, 100)}`;
+
+      // #4010 —— 重试**按有没有进展分流**：
+      //   零消息（连接/首包阶段就卡住）⇒ 重试有意义（可能是瞬时网络问题）
+      //   已经跑出一部分消息    ⇒ 重试只是把「15 分钟静默」再乘一次；
+      //                          而且会在同一个卡点上重复消耗。此时把可读原因交给用户。
+      const idleWithProgress = idleHit !== null && claudeMessagesThisAttempt > 0;
+      if (idleWithProgress) {
+        log(`[claude] ✗ idle 前已有 ${claudeMessagesThisAttempt} 条消息 ⇒ 不重试（避免把静默乘 ${CLAUDE_MAX_RETRIES + 1} 倍）`);
+        break;
+      }
 
       if (attempt < CLAUDE_MAX_RETRIES) {
         // Exponential backoff 4s, 8s + 0-1s jitter. Jitter spreads herd
@@ -3818,7 +3885,15 @@ async function processWithClaude(
     }
   }
   if (timedOutFinal) {
-    return `执行出错: claude-agent-sdk 调用超时 (${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s × ${CLAUDE_MAX_RETRIES + 1} attempts) — ${claudeAttemptsDetail(claudeAttempts, CLAUDE_TIMEOUT_MS)}。确切原因见节点日志里 [claude] 开头那几行。`;
+    // #4010 —— 话术分三种，因为「用户该做什么」不同：
+    //   idle 且有进展  ⇒ 任务本身慢/卡在某一步，继续等或换个更小的活（不自动重试）
+    //   idle 且零进展  ⇒ 链路问题，看节点日志与 ANTHROPIC_BASE_URL
+    //   硬上限        ⇒ 任务真的太大，该拆
+    const finalHit = claudeIdleHit();
+    if (finalHit && claudeMessagesThisAttempt > 0) {
+      return `执行出错: 连续 ${Math.round(finalHit.idleForMs / 1000)}s 没有任何进展（最后一条消息=${finalHit.lastItem ?? "无"}）— 本次已跑出 ${claudeMessagesThisAttempt} 条消息，故**没有自动重试**（重试只会让同样的静默再来一遍）。可以：把任务拆小，或点「继续」。`;
+    }
+    return `执行出错: claude-agent-sdk 调用超时 (idle ${Math.round(CLAUDE_TIMEOUT_MS / 1000)}s / 硬上限 ${Math.round(currentClaudeHardCapMs() / 60000)}min × ${CLAUDE_MAX_RETRIES + 1} attempts) — ${claudeAttemptsDetail(claudeAttempts, CLAUDE_TIMEOUT_MS)}。确切原因见节点日志里 [claude] 开头那几行。`;
   }
   return `执行出错: ${lastErr.slice(0, 200)} (after ${CLAUDE_MAX_RETRIES + 1} attempts)`;
 }

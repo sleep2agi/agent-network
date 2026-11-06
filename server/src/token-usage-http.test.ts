@@ -116,6 +116,16 @@ describe("#3952 /api/token-usage", () => {
     expect(nodes.every((n: any) => n.node_id !== "n_tu_x")).toBe(true);
   });
 
+  test("不传 network_id：唯一所属网络时自动回退（与 /api/providers 同口径）", async () => {
+    // 上一版这里 400 network_required，而同一页的 /api/providers 会给 200 ——
+    // 同一台 hub 上相邻两个端点对同一个用户给不同答案，客户端被迫多写分支。
+    const r = await get(`${TOKEN_USAGE}?since_hours=24`, ownerToken);
+    expect(r.status).toBe(200);
+    expect(r.body.network_id).toBe(ownerNet);
+    // 镜像：既然回退了，就必须回退到**自己的**网络，而不是任意一个
+    expect(r.body.network_id).not.toBe(strangerNet);
+  });
+
   test("节点令牌看不到（user_token_required，不是 404 也不是空表）", async () => {
     const r = await get(`${TOKEN_USAGE}?network_id=${ownerNet}`, nodeToken);
     expect(r.status).toBe(403);
