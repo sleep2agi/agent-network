@@ -304,22 +304,30 @@ await test("8. concurrent events tracked independently", async () => {
   const e1 = makeEvent("8a");
   const e2 = makeEvent("8b");
   await Promise.all([onEvent(e1), onEvent(e2)]);
-  assert.equal(adapter.sendCalls.length, 2, "two placeholder sends");
+  // 🔴 2026-11-06 —— 期望从 2 改成 3：并发时第二条**不是在跑，而是排队**，
+  // 而队列可见性（#3682 / .208）会为它补一条「已排队：前面还有 1 条在处理」的位置提示。
+  // 实测这条提示的原文是：`⏳ 已排队：前面还有 1 条在处理，轮到这条会立刻开始（可以继续发，不会丢）。`
+  // 判据分两半：① 两条都在动（2 个占位 + 1 条排队提示）② 顺序提示是**排第二条**的那条。
+  assert.equal(adapter.sendCalls.length, 3, "two placeholders + one queue-position notice");
+  assert.ok(
+    String((adapter.sendCalls[1] as { text: string }).text).includes("已排队"),
+    "the middle send is the queue-position notice for the second event",
+  );
   assert.equal(sentEnvelopes.length, 2, "two IPC envelopes");
 
   // Reply to second event first.
   triggerReply(e2.idempotencyKey, "reply 8b");
   await flush();
   assert.equal(adapter.editCalls.length, 0);
-  assert.equal(adapter.sendCalls.length, 3, "e2 reply send fired");
-  assert.equal((adapter.sendCalls[2] as { text: string }).text, "reply 8b");
+  assert.equal(adapter.sendCalls.length, 4, "e2 reply send fired");
+  assert.equal((adapter.sendCalls[3] as { text: string }).text, "reply 8b");
 
   // Then the first.
   triggerReply(e1.idempotencyKey, "reply 8a");
   await flush();
   assert.equal(adapter.editCalls.length, 0);
-  assert.equal(adapter.sendCalls.length, 4, "e1 reply send fired");
-  assert.equal((adapter.sendCalls[3] as { text: string }).text, "reply 8a");
+  assert.equal(adapter.sendCalls.length, 5, "e1 reply send fired");
+  assert.equal((adapter.sendCalls[4] as { text: string }).text, "reply 8a");
 });
 
 await test("9. pending evicted after reply (duplicate reply is no-op)", async () => {
@@ -600,10 +608,16 @@ await test("18. wildcard allowFrom=['*'] does NOT exempt (public channel still r
   assert.equal(notices.length, 2, "wildcard sender sees rate-limit notice on 4th + 5th");
 });
 
-await test("19. Group rate limit applies even for allowFrom-explicit user (group-side gate by chat)", async () => {
-  // Group conversations gate by chat_id (not sender), so an exemption
-  // would let one user starve the group. Explicit allowFrom does NOT
-  // bypass group-side rate-limit; this test locks the boundary.
+await test("19. Group rate limit does NOT apply to allowFrom-explicit user (exempt → queued instead)", async () => {
+  // 🔴 2026-11-06 —— 这条断言的方向**反了**，是行为变更（461422e1，2026-11-05）之后的漏改。
+  //
+  // 变更前：群聊刻意不豁免限流（怕一个人饿死其他人）。
+  // 变更后：**显式白名单**的人在群里也豁免 —— 因为实测 admin（白名单里唯一的人）
+  //         连续 @ 两次，第二次被回「处理频率超出限制」，而它本该排队。
+  //         洪水保护改由两处兜住：队列上限 20（满了明确拒绝）+ **通配符**白名单仍走限流。
+  //
+  // ⇒ 本用例测的是「显式白名单」这一侧，所以期望值从 2（被限流）改为 4（全部进队列）。
+  //    通配符那一侧仍由用例 18 锁着（它断言第 4、5 条会收到「超出限制」通知）。
   const VINCENT_OID = "ou_vincent_explicit";
   const adapter = makeMockAdapter({ allowFrom: [VINCENT_OID] });
   const innerCalls: string[] = [];
@@ -622,8 +636,8 @@ await test("19. Group rate limit applies even for allowFrom-explicit user (group
   }
   assert.equal(
     innerCalls.length,
-    2,
-    "group still applies GROUP_RATE_LIMIT_COUNT=2 even for allowFrom-explicit sender",
+    4,
+    "allowFrom-explicit sender is exempt in groups too (queued, not rejected) — flood control lives in the queue cap + wildcard path",
   );
 });
 
