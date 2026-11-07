@@ -55,6 +55,33 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// The node is SIGSTOP'd, so nothing new is sent. Wait until the hub log
+// stays still instead of a fixed 300ms. A report already on the wire — the
+// idle heartbeat from the mutation that drops the in-flight guard — can
+// land after that fixed sleep. The session is then idle, and the later
+// dispatch correctly replaces its text. That failure belongs to the
+// heartbeat assertion, which the caller checks on the state read next.
+async function drainHubLog(): Promise<void> {
+  const path = "/tmp/hub668.log";
+  const size = (): number => {
+    try { return readFileSync(path).length; } catch { return 0; }
+  };
+  let last = size();
+  let stableFor = 0;
+  const started = Date.now();
+  while (Date.now() - started < 2000) {
+    await sleep(50);
+    const now = size();
+    if (now === last) {
+      stableFor += 50;
+      if (stableFor >= 400) return;
+    } else {
+      last = now;
+      stableFor = 0;
+    }
+  }
+}
+
 function tailFile(path: string): void {
   try {
     const lines = readFileSync(path, "utf8").split("\n");
@@ -356,7 +383,15 @@ async function main(): Promise<void> {
   stopped = true;
   // Let a report already on the wire land before the next dispatch, so a
   // heartbeat cannot put the in-flight text back after a bad overwrite.
-  await sleep(300);
+  await drainHubLog();
+  const held = readState();
+  if (held.status !== "working") {
+    if (existsSync(`${HOLD}/holding`)) fail("FAIL: heartbeat-idle");
+    fail("FAIL: in-flight text");
+  }
+  if (held.rowStatus !== "running" || !held.startedAt) fail("FAIL: started");
+  if ((held.task?.length ?? 0) > PREVIEW_MAX) fail("FAIL: session-preview");
+  if (held.task !== preview || held.task.includes(LATER)) fail("FAIL: in-flight text");
 
   await sendTask(userToken, networkId, `${LATER} this arrived while the first turn was still running`);
   const during = readState();
