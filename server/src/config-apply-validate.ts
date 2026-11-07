@@ -160,6 +160,12 @@ export function isAllowedToChangeFlag(
  */
 const OPENCODE_RUNTIME_LABELS = new Set<string>(["opencode-sdk", "opencode-cli", "opencode"]);
 
+/** Reported runtime family + explicit mode only; never local ownership proof. */
+export function isOpenCodeV2CopresenceRuntime(runtime: string | null | undefined,
+  generation: "v1" | "v2" | null, mode: string | null): boolean {
+  return !!runtime && OPENCODE_RUNTIME_LABELS.has(runtime) && generation === "v2" && mode === "copresence";
+}
+
 /**
  * Read the OpenCode knobs the hub persists in `nodes.config_snapshot`.
  * Both are reported by agent-node (see buildConfigSnapshot in
@@ -220,9 +226,7 @@ export function isHotModelSwitchSupported(
   if (model === undefined) return false;
   if (Object.keys(flags).length !== 0) return false;
   if (channels !== undefined) return false;
-  if (!runtime || !OPENCODE_RUNTIME_LABELS.has(runtime)) return false;
-  if (opencodeGeneration !== "v2") return false;
-  return opencodeMode === "copresence";
+  return isOpenCodeV2CopresenceRuntime(runtime, opencodeGeneration, opencodeMode);
 }
 
 /**

@@ -115,6 +115,8 @@ export type ApplyMode = "hot" | "restart" | "restart_only";
 
 export interface ConfigPatch {
   model?: string;
+  /** Missing preserves; null clears; string selects a native model variant. */
+  modelVariant?: string | null;
   flags?: Record<string, unknown>;
   /** #260 P5 — dashboard-driven channel enable/disable. Restart-tier
    *  (agent-node boot forks channel workers from config.channels).
@@ -137,6 +139,11 @@ export function validateLocalPatch(
   patch: ConfigPatch,
   opts?: { runtime?: string | null },
 ): ValidationResult {
+  if (patch.modelVariant !== undefined) {
+    if (opts?.runtime !== "opencode" && opts?.runtime !== "opencode-cli") return { field: "modelVariant", reason: "requires OpenCode V2" };
+    if (patch.modelVariant !== null && (typeof patch.modelVariant !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}$/.test(patch.modelVariant))) return { field: "modelVariant", reason: "invalid variant" };
+    if (patch.channels !== undefined || Object.keys(patch.flags ?? {}).length) return { field: "modelVariant", reason: "must not be combined with flags or channels" };
+  }
   if (patch.model !== undefined) {
     if (typeof patch.model !== "string" || patch.model.length === 0 || patch.model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
@@ -211,6 +218,7 @@ export function computeApplyMode(patch: ConfigPatch, opts?: {
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
   const hasChannels = patch.channels !== undefined;
+  if (patch.modelVariant !== undefined) return "hot";
   if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
   // OpenCode V2 switches the live TUI session and writes config.model so the
   // dashboard poll can finish. A restart would reopen the old session model.

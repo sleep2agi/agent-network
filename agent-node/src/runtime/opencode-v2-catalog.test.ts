@@ -17,6 +17,18 @@ test("native IDs, distinct provider/model identity, counts and default survive w
   expect(JSON.stringify(value)).not.toContain("sk-FAKE-hidden");
   expect(JSON.stringify(value)).not.toContain("headers");
 });
+test("variant IDs are scoped and whitelisted; absent differs from empty", () => {
+  const rows = [
+    { providerID: "custom", id: "nested/model", variants: [{ id: "high", headers: { authorization: "sk-FAKE-hidden" }, body: { token: "sk-FAKE-hidden" } }] },
+    { providerID: "second", id: "nested/model", variants: [] },
+  ];
+  const value = normalize(undefined, wrap(rows));
+  expect(value.models).toEqual([{ providerId: "custom", id: "nested/model", variants: ["high"] }, { providerId: "second", id: "nested/model", variants: [] }]);
+  expect(value.defaultModel).toEqual({ providerId: "custom", id: "nested/model" });
+  expect(JSON.stringify(value)).not.toContain("sk-FAKE-hidden");
+  expect(normalize().models[0]).not.toHaveProperty("variants");
+  expect(() => normalize(undefined, wrap([{ ...rows[0], variants: [{ id: "high" }, { id: "high" }] }]))).toThrow("invalid_response");
+});
 test("empty snapshot is not verified empty/full availability", () => {
   const value = normalize(wrap([]), wrap([]), wrap(undefined));
   expect(value.models).toEqual([]);

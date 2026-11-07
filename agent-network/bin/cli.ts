@@ -4855,6 +4855,7 @@ async function skillCommand() {
 function printHelp() {
   console.log(`
 anet — AI Agent Network CLI (V2)
+Capabilities: ANET_CAPABILITY_SOURCE_RESUME_V1
 
 Quick start:
   anet hub start             Start local hub
@@ -8839,6 +8840,54 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  // Private source delivery never enters ordinary orchestration (which replaces
+  // alias tmux sessions) or the restart supervisor. No public dispatch enables it.
+  if ((resolvedForCopresence?.profile as any)?.sourceDelivery !== undefined) {
+    const configPath = join(nodesDir(), resolvedForCopresence!.id, "config.json");
+    const p = JSON.parse(readOpencodePrivateProfileFile(dirname(configPath), "config.json"));
+    const nonce = process.env.ANET_SOURCE_RESUME_NONCE;
+    // Route only: profile data is NOT authority. The source launcher and actual
+    // runtime independently re-read operator policy/registry + OS/native identity.
+    const sharedTest = p.sourceDelivery?.expected_version === "2.0.22-anet-test.29040e2" && !!p.sharedVariantAuthority;
+    if (process.env.ANET_SOURCE_RESUME_CONFIG !== configPath || !nonce || !/^[a-f0-9-]{36}$/.test(nonce)
+      || Object.keys(opts).some(k => k !== "_channels" && k !== "_envs") || opts._channels.length || opts._envs.length
+      || forceNewSession || p.runtime !== "opencode-cli" || p.opencodeGeneration !== "v2"
+      || p.sourceDelivery?.resume_only !== true || (p.sourceDelivery.expected_version !== "2.0.22" && !sharedTest)
+      || Date.now() >= p.sourceDelivery.expires_at || !/^ses_[A-Za-z0-9]+$/.test(p.sessionId)
+      || liveNodePidFromPidfile(resolvedForCopresence!.id) !== null) throw Error("source_resume_cli_refused");
+    checkRuntimeDependency("opencode-cli", "start");
+    if (p.flags?.opencodeUnsafeTools !== true) throw Error("source_resume_existing_policy_opt_in_required");
+    const checked = sharedTest ? (() => {
+      const binary = "/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode";
+      if (process.platform !== "linux" || realpathSync(binary) !== binary
+        || createHash("sha256").update(readFileSync(binary)).digest("hex") !== "1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786"
+        || !/^(?:opencode v)?2\.0\.22-anet-test\.29040e2$/.test(execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }).trim())) throw Error("source_resume_cli_version_refused");
+      return { ok: true, binary, version: "2.0.22-anet-test.29040e2" };
+    })() : checkOpencodeGenerationBinary("v2");
+    if (!checked.ok || checked.version !== p.sourceDelivery.expected_version) throw Error("source_resume_cli_version_refused");
+    opencodeLaunchIdentity = { binary: checked.binary, version: checked.version };
+    const plan = resolveOpencodeAgentNodeLaunchPlan();
+    const sourceHelp = execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
+      env: plan.probeEnv, timeout: 5000, maxBuffer: 131072, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (!sourceHelp.includes("ANET_CAPABILITY_SOURCE_RESUME_V1")) throw Error("source_resume_runtime_capability_required");
+    const env = { ...hardenOpencodeAgentNodeEnv(process.env, process.env.PATH),
+      ANET_OPENCODE_BIN: opencodeLaunchIdentity.binary, ANET_OPENCODE_VERSION: checked.version,
+      ANET_OPENCODE_MODE: "copresence", ANET_CONFIG_UPDATE_CAPABLE: "0",
+      ANET_SOURCE_RESUME_NONCE: nonce, ANET_SOURCE_RESUME_CONFIG: configPath };
+    const child = spawn(plan.command, [...plan.argsPrefix, "--config", configPath,
+      "--alias", p.alias, "--runtime", "opencode-cli", "--session", p.sessionId],
+      { cwd: process.cwd(), env, stdio: "inherit", shell: false });
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => { child.kill("SIGTERM"); killTimer ??= setTimeout(() => child.kill("SIGKILL"), 1000); };
+    process.on("SIGTERM", stop); process.on("SIGINT", stop);
+    const code = await new Promise<number>(resolve => {
+      child.once("error", () => resolve(1)); child.once("exit", code => resolve(code ?? 1));
+    });
+    process.removeListener("SIGTERM", stop); process.removeListener("SIGINT", stop);
+    if (killTimer) clearTimeout(killTimer);
+    process.exit(code); // one generation only, including exit 75
+  }
   // #1353 —— daemon 被 `node start` / `project up`(开机 sweep)/ `node restart` 拉起时,
   //         pin 与 `anet daemon start` 同源同规则,不再在这些起法下丢失。
   if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);

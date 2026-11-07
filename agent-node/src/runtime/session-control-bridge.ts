@@ -2,7 +2,8 @@
 // SSE is only a doorbell; immutable identity is supplied by the bound ntok.
 import { SessionBackgroundError, type SessionBackgroundControl, type SessionControlPermit } from "./opencode-copresence/session-background";
 
-type Session = { readonly isRunning: boolean; readonly sessionId: string; readonly backgroundControl?: SessionBackgroundControl };
+type Session = { readonly isRunning: boolean; readonly sessionId: string; readonly backgroundControl?: SessionBackgroundControl;
+  forkSession?(sessionId: string): Promise<import("./opencode-copresence/v2-fork").V2ForkResult> };
 type Binding = { session: Session; session_id: string; binding_id: string };
 const ROOT = "/api/node-session-control";
 const errors = new Set([
@@ -40,7 +41,7 @@ export function createSessionControlPin(opts: {
     expected, signal: cancelled.signal, checkpoint, invalidate,
     async post(path, body) {
       checkpoint();
-      if (!/^\/api\/node-session-control\/(?:bridge|pull|(?:bg|sc)_[0-9]{13}_[A-Za-z0-9_-]{8,64}\/ack)$/.test(path)) {
+      if (!/^\/api\/node-session-control\/(?:bridge|pull|source\/(?:(?:directory\/)?(?:daemon|pull|ack)|project-create\/(?:pull|ack))|(?:bg|sc|fk)_[0-9]{13}_[A-Za-z0-9_-]{8,64}\/ack)$/.test(path)) {
         throw new SessionBackgroundError("session_control_request_invalid");
       }
       const response = await (opts.fetch ?? globalThis.fetch)(`${hub}${path}`, {
@@ -62,6 +63,7 @@ export function createNodeSessionControlBridge(deps: {
 }) {
   let binding: Binding | null = null;
   let registered: Binding | null = null;
+  let forkRegistered: Binding | null = null;
   let tokenId: string | null = null;
   let drain: Promise<void> | null = null;
   const current = (b: Binding) => {
@@ -80,6 +82,7 @@ export function createNodeSessionControlBridge(deps: {
   }
   const wire = (b: Binding) => ({ session_id: b.session_id, binding_id: b.binding_id });
   async function register() {
+    forkRegistered = null;
     try {
       const b = await localBinding();
       if (!b || !current(b)) return false;
@@ -94,6 +97,17 @@ export function createNodeSessionControlBridge(deps: {
         registered = null; deps.identity.invalidate(); return false;
       }
       tokenId = identity.token_id;
+      // Old Hubs reject unknown keys. First use the existing registration,
+      // then explicitly negotiate before enabling any fork claim locally.
+      if (reply.fork_supported === true && b.session.forkSession) {
+        const enabled = await deps.identity.post(`${ROOT}/bridge`, { ...wire(b), expected: deps.identity.expected, fork_supported: true });
+        if (!current(b) || enabled?.ok !== true || enabled?.fork_supported !== true
+          || enabled?.identity?.node_id !== identity.node_id || enabled?.identity?.network_id !== identity.network_id
+          || enabled?.identity?.token_id !== tokenId) {
+          registered = null; deps.identity.invalidate(); return false;
+        }
+        forkRegistered = b;
+      }
       registered = b; return true;
     } catch { deps.warn("[session-control] registration unavailable; no session action taken"); return false; }
   }
@@ -110,19 +124,31 @@ export function createNodeSessionControlBridge(deps: {
       permit.checkpoint();
       if (!pulled?.ok || !pulled.request) return;
       const request = pulled.request;
-      if (typeof request.request_id !== "string" || !/^(?:bg|sc)_[0-9]{13}_[A-Za-z0-9_-]{8,64}$/.test(request.request_id)) return;
-      let ack: { status: "done" | "failed"; result?: unknown; error?: string };
+      if (typeof request.request_id !== "string" || !/^(?:bg|sc|fk)_[0-9]{13}_[A-Za-z0-9_-]{8,64}$/.test(request.request_id)) return;
+      let ack: { status: "done" | "failed" | "unknown"; result?: unknown; error?: string };
+      let forkStarted = false;
       try {
         if (!current(b) || request.session_id !== b.session_id || request.binding_id !== b.binding_id) throw new SessionBackgroundError("session_control_changed");
         if (!Number.isFinite(request.expires_at) || request.expires_at < Date.now()) throw new SessionBackgroundError("session_control_request_expired");
         let result: unknown;
+        let forkUnknown = false;
         if (request.operation === "state") result = await b.session.backgroundControl!.state();
         else if (request.operation === "background") result = await b.session.backgroundControl!.background({ ...wire(b), request_id: request.request_id, expires_at: request.expires_at }, permit);
-        else throw new SessionBackgroundError("session_control_request_invalid");
+        else if (request.operation === "fork") {
+          if (forkRegistered !== b || !b.session.forkSession) throw new SessionBackgroundError("session_control_unsupported");
+          forkStarted = true;
+          const fork = await b.session.forkSession(b.session_id);
+          permit.checkpoint();
+          if (forkRegistered !== b) throw new SessionBackgroundError("session_control_changed");
+          if (fork.status === "unknown") forkUnknown = true;
+          else if (fork.status !== "forked") throw new SessionBackgroundError("session_control_unsupported");
+          else result = { session_id: fork.sessionId };
+        } else throw new SessionBackgroundError("session_control_request_invalid");
         permit.checkpoint();
-        ack = { status: "done", result };
+        ack = forkUnknown ? { status: "unknown", error: "session_fork_outcome_unknown" } : { status: "done", result };
       } catch (e) {
-        ack = { status: "failed", error: e instanceof SessionBackgroundError && errors.has(e.code) ? e.code : "session_control_unavailable" };
+        ack = forkStarted ? { status: "unknown", error: "session_fork_outcome_unknown" }
+          : { status: "failed", error: e instanceof SessionBackgroundError && errors.has(e.code) ? e.code : "session_control_unavailable" };
       }
       // An ACK failure never re-enters the operation. Hub must report unknown,
       // not turn it back into a pending mutation on a reconnect.

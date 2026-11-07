@@ -6,6 +6,8 @@ import { join } from "node:path";
 const dir = mkdtempSync(join(tmpdir(), "anet-session-control-"));
 process.env.COMMHUB_DB ||= join(dir, "hub.db");
 const root = "/api/node-session-control";
+const previousForkPreview = process.env.COMMHUB_V2_FORK_PREVIEW;
+const previousSourcePreview = process.env.COMMHUB_SOURCE_FORK_PREVIEW;
 let server: any, base: string, db: any, net: string, otherNet: string;
 let owner: any, admin: any, member: any, outsider: any, ntok: any, peer: any;
 let legacyOwner: any, legacyAdmin: any, legacyMember: any, legacyOutsider: any, legacyFull: any, legacyNetwork: any;
@@ -28,6 +30,8 @@ const ack = (request: string, result: unknown, extra = {}) => api(ntok.token!, `
   { ...binding, status: "done", result, ...extra });
 
 beforeAll(async () => {
+  process.env.COMMHUB_V2_FORK_PREVIEW = "1";
+  process.env.COMMHUB_SOURCE_FORK_PREVIEW = "1";
   ({ db } = await import("./db.js"));
   const { register, addNetworkMember, createNetworkTokenForNode, createToken } = await import("./auth.js");
   const stamp = Date.now();
@@ -65,9 +69,93 @@ beforeEach(async () => {
   expect((await registerBridge()).status).toBe(200);
 });
 afterEach(() => setSystemTime());
-afterAll(() => { server?.stop(true); rmSync(dir, { recursive: true, force: true }); });
+afterAll(() => {
+  if (previousSourcePreview === undefined) delete process.env.COMMHUB_SOURCE_FORK_PREVIEW;
+  else process.env.COMMHUB_SOURCE_FORK_PREVIEW = previousSourcePreview;
+  if (previousForkPreview === undefined) delete process.env.COMMHUB_V2_FORK_PREVIEW;
+  else process.env.COMMHUB_V2_FORK_PREVIEW = previousForkPreview;
+  server?.stop(true); rmSync(dir, { recursive: true, force: true });
+});
 
 describe("#2017 human-to-exact-Bridge HTTP relay", () => {
+  test("actual Hub dispatch mounts separate gated source REST without granting human scope to node credentials", async () => {
+    expect((await api(owner.token!, `${root}/source/daemon`, {})).status).toBe(403);
+    expect((await api(owner.token!, `${root}/source`, { network_id: net, source_node_id: nodeId,
+      session_id: "ses_Isolated", mode: "fork_independent", child_name: "child", intent_id: "hub-route", url: "forbidden" })).status).toBe(400);
+    expect((await api(ntok.token!, `${root}/source`, { network_id: net, source_node_id: nodeId,
+      session_id: "ses_Isolated", mode: "fork_independent", child_name: "child", intent_id: "hub-node" })).status).toBe(400);
+  });
+  test("fork write entry remains disabled without the explicit preview gate", async () => {
+    const { createNodeSessionControlRelay } = await import("./node-session-control");
+    delete process.env.COMMHUB_V2_FORK_PREVIEW;
+    let relay: ReturnType<typeof createNodeSessionControlRelay>;
+    try { relay = createNodeSessionControlRelay(); }
+    finally { process.env.COMMHUB_V2_FORK_PREVIEW = "1"; }
+    const request = new Request(`http://isolated${root}/bridge`, { method: "POST",
+      headers: { authorization: `Bearer ${ntok.token!}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...binding, expected: { node_id: nodeId, network_id: net }, fork_supported: true }) });
+    const response = (await relay(request, new URL(request.url)))!;
+    expect(response.status).toBe(200);
+    expect((await response.json() as any).fork_supported).toBe(false);
+    const write = new Request(`http://isolated${root}`, { method: "POST",
+      headers: { authorization: `Bearer ${owner.token!}`, "content-type": "application/json" },
+      body: JSON.stringify({ network_id: net, node_id: nodeId, operation: "fork", expected: binding, intent_id: `fork_intent_${serial}_disabled` }) });
+    const refused = (await relay(write, new URL(write.url)))!;
+    expect((await refused.json() as any).error).toBe("session_control_unsupported");
+  });
+  test("fork intent survives another relay and two relays cannot claim it twice", async () => {
+    const intent = `fork_intent_${serial}_persistent`;
+    expect((await api(ntok.token!, `${root}/bridge`, { ...binding, expected: { node_id: nodeId, network_id: net }, fork_supported: true })).status).toBe(200);
+    const made = await enqueue("fork", { intent_id: intent });
+    expect(made.status).toBe(200);
+    expect(made.body.request_id).toMatch(/^fk_/);
+    expect((await enqueue("fork", { intent_id: intent })).body.request_id).toBe(made.body.request_id);
+    const { createNodeSessionControlRelay } = await import("./node-session-control");
+    const relay = createNodeSessionControlRelay();
+    const call = async (token: string, path: string, value?: unknown) => {
+      const req = new Request(`http://isolated${path}`, { method: value === undefined ? "GET" : "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        ...(value === undefined ? {} : { body: JSON.stringify(value) }) });
+      const response = (await relay(req, new URL(req.url)))!;
+      return { status: response.status, body: await response.json() as any };
+    };
+    const recovered = await call(owner.token!, `${root}/intent/${intent}?network_id=${net}`);
+    expect(recovered.body).toMatchObject({ request_id: made.body.request_id, status: "pending" });
+    expect((await call(outsider.token!, `${root}/intent/${intent}?network_id=${net}`)).status).toBe(404);
+    expect((await call(ntok.token!, `${root}/bridge`, { ...binding, expected: { node_id: nodeId, network_id: net }, fork_supported: true })).status).toBe(200);
+    expect((await pull()).body.request.request_id).toBe(made.body.request_id);
+    expect((await call(ntok.token!, `${root}/pull`, binding)).body.request).toBeNull();
+    expect((await ack(made.body.request_id, { session_id: "ses_DurableChild" })).status).toBe(200);
+    expect((await call(owner.token!, `${root}/${made.body.request_id}?network_id=${net}`)).body).toMatchObject({ status: "done", result: { session_id: "ses_DurableChild" } });
+    expect((await enqueue("fork", { intent_id: intent })).body).toMatchObject({ request_id: made.body.request_id, status: "done" });
+  });
+  test("fork lost ACK becomes a durable unknown and the same intent cannot replay", async () => {
+    const intent = `fork_intent_${serial}_lost_ack`;
+    await api(ntok.token!, `${root}/bridge`, { ...binding, expected: { node_id: nodeId, network_id: net }, fork_supported: true });
+    const made = await enqueue("fork", { intent_id: intent });
+    expect(made.status).toBe(200); expect((await pull()).body.request.request_id).toBe(made.body.request_id);
+    setSystemTime(new Date(Date.now() + 16_000));
+    expect((await read(made.body.request_id)).body).toMatchObject({ status: "unknown", error: "session_fork_outcome_unknown" });
+    expect((await ack(made.body.request_id, { session_id: "ses_LateChild" })).status).toBe(409);
+    expect((await enqueue("fork", { intent_id: intent })).body).toMatchObject({ request_id: made.body.request_id, status: "unknown" });
+    expect((await pull()).body.request).toBeNull();
+    expect((await enqueue("fork", { intent_id: intent, expected: { ...binding, binding_id: "different_binding" } })).status).toBe(409);
+  });
+  test("fork requires a durable intent and explicit capability negotiation", async () => {
+    expect((await enqueue("fork")).status).toBe(400);
+    expect((await enqueue("fork", { intent_id: `fork_intent_${serial}_closed` })).body.error).toBe("session_control_unsupported");
+  });
+  test("fork without exact expected identity refuses before reserving an intent", async () => {
+    await api(ntok.token!, `${root}/bridge`, { ...binding, expected: { node_id: nodeId, network_id: net }, fork_supported: true });
+    const intent = `fork_intent_${serial}_no_identity`;
+    for (const expected of [undefined, null, {}, { session_id: binding.session_id }]) {
+      const result = await enqueue("fork", { intent_id: intent, expected });
+      expect(result.status).toBe(400);
+      expect(result.body.error).toBe("session_control_request_invalid");
+    }
+    expect((await api(owner.token!, `${root}/intent/${intent}?network_id=${net}`)).status).toBe(404);
+    expect((await pull()).body.request).toBeNull();
+  });
   test("[2017 identity] missing or malformed expected is refused without fallback", async () => {
     for (const expected of [undefined, {}, { node_id: nodeId }, { node_id: nodeId, network_id: net, token_id: ntok.token_id }]) {
       const rejected = await api(ntok.token!, `${root}/bridge`, { ...binding, expected });
@@ -102,7 +190,7 @@ describe("#2017 human-to-exact-Bridge HTTP relay", () => {
     const row = db.get("SELECT token_id,bound_node_id,network_id FROM api_tokens WHERE token_id=?1", ntok.token_id);
     expect(response.status).toBe(200);
     expect(response.body.identity).toEqual({ node_id: row.bound_node_id, network_id: row.network_id, token_id: row.token_id });
-    expect(Object.keys(response.body).sort()).toEqual(["expires_at", "identity", "ok"]);
+    expect(Object.keys(response.body).sort()).toEqual(["expires_at", "fork_supported", "identity", "ok"]);
     expect(JSON.stringify(response.body)).not.toContain(ntok.token);
   });
   test("normal state and background receipts are separate from actual tool completion", async () => {

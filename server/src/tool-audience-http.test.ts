@@ -44,6 +44,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   upsert_network_secret: { key: "PROBE_KEY" },
   update_provider: { provider_id: "prov_probe" },
   schedule_batch_interval: { schedule_ids: ["sched_probe"], every_seconds: 60 },
+  select_opencode_session_model: { session_id: "ses_probe", model: { providerID: "stub", id: "model" } },
 };
 function fill(schema: any, key: string, ctx: Record<string, unknown>): unknown {
   if (!schema) return "probe";
@@ -117,6 +118,23 @@ describe("every tool is classified", () => {
     expect(registered.filter(n => !TOOL_AUDIENCE[n])).toEqual([]);
     expect(Object.keys(TOOL_AUDIENCE).filter(n => !registered.includes(n))).toEqual([]);
   });
+});
+
+test("create_node source_ref fails MCP validation without minting or enqueueing", async () => {
+  const count = (table: string) => db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`)!.n;
+  const before = [count("node_create_requests"), count("api_tokens")];
+  const base = { daemon_node_id: "daemon_source_fixture", network_id: NET,
+    node_spec: { name: "source-fixture", runtime: "opencode-cli" } };
+  for (const source_ref of ["src_fixture", null, "", {}]) {
+    for (const args of [{ ...base, source_ref }, { ...base, node_spec: { ...base.node_spec, source_ref } }]) {
+      const { json } = await rpc(T.owner, "tools/call", { name: "create_node", arguments: args });
+      const text = String(json.result?.content?.[0]?.text ?? "");
+      expect(json.error?.code === -32602 || /^MCP error -32602/.test(text)).toBe(true);
+    }
+  }
+  expect([count("node_create_requests"), count("api_tokens")]).toEqual(before);
+  const ordinary = await rpc(T.owner, "tools/call", { name: "create_node", arguments: base });
+  expect(JSON.parse(ordinary.json.result.content[0].text).error).toBe("daemon_not_found");
 });
 
 describe("compat replay: nothing callable today disappears from the list", () => {

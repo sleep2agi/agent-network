@@ -89,6 +89,15 @@ async function connect(id: Identity) {
 beforeEach(() => { cleanup(); seedWorld(); });
 afterAll(cleanup);
 
+test("variant config update rejects a target from another network over MCP", async () => {
+  const u = await connect(asUser);
+  try {
+    const result = await u.call("update_node_config", { node_id: OTHER_NODE_ID, base_revision: 0, patch: { modelVariant: "high" } });
+    expect(result).toMatchObject({ ok: false, error: "cross_network_node" });
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM node_config_updates WHERE node_id = ?1", OTHER_NODE_ID)?.n).toBe(0);
+  } finally { await u.close(); }
+}, 20_000);
+
 describe("app#225 rules file — schema has no path", () => {
   test("read/write tool inputs are node id + content only; no path / file_name / dir field anywhere", async () => {
     // 🔴 不走 client.listTools():main 上 report_status / send_desktop_message /

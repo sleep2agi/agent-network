@@ -4,13 +4,14 @@ import { getUserNetworkRole, resolveToken, sessionIdleDays } from "./auth.js";
 import { isAgentRestricted } from "./agent-access.js";
 import { resolveNodeCaller } from "./create-node.js";
 import { pushEvent } from "./push.js";
+import { createSessionForkStore, type ForkEntry } from "./session-fork-store.js";
 
 type Identity = { session_id: string; binding_id: string };
 type Credential = { token_id: string; user_id: string; network_id: string | null;
   bound_node_id: string | null; scope: string; role: string };
 type Node = { node_id: string; network_id: string; owner_user_id: string | null; alias: string };
-type Bridge = Identity & { tokenId: string; expires: number; retired: Set<string> };
-type Entry = Identity & { request_id: string; operation: "state" | "background";
+type Bridge = Identity & { tokenId: string; expires: number; retired: Set<string>; forkSupported: boolean };
+type Entry = Identity & { request_id: string; operation: "state" | "background" | "fork";
   networkId: string; nodeId: string; tokenId: string; requester: string; expires_at: number;
   status: "pending" | "in_progress" | "done" | "failed" | "unknown" | "expired";
   result?: unknown; error?: string };
@@ -31,7 +32,7 @@ const ok = (value: object) => Response.json({ ok: true, ...value });
 
 // Recheck stored identities without storing plaintext bearer tokens. The SQL
 // mirrors resolveToken's expiry/revoke/idle rules; membership is checked below.
-function credential(tokenId: string): Credential | null {
+export function readSessionControlCredential(tokenId: string): Credential | null {
   const days = sessionIdleDays();
   return db.get<Credential>(`SELECT t.token_id,t.user_id,t.network_id,t.bound_node_id,t.scope,u.role
     FROM api_tokens t JOIN users u ON u.user_id=t.user_id WHERE t.token_id=?1
@@ -43,19 +44,19 @@ function credential(tokenId: string): Credential | null {
 function node(nodeId: string): Node | null {
   return db.get<Node>("SELECT node_id,network_id,owner_user_id,alias FROM nodes WHERE node_id=?1", nodeId) ?? null;
 }
-function isHumanCredential(c: Credential | null): c is Credential {
+export function isHumanCredential(c: Credential | null): c is Credential {
   return !!c && c.network_id === null && c.bound_node_id === null
     && (c.scope === "user" || c.scope === "full");
 }
 function human(tokenId: string, n: Node): boolean {
-  const c = credential(tokenId);
+  const c = readSessionControlCredential(tokenId);
   if (!isHumanCredential(c) || !n.network_id) return false;
   const role = getUserNetworkRole(c.user_id, n.network_id);
   return !!role && role !== "viewer" && !isAgentRestricted(c.user_id, n.network_id)
     && (c.user_id === n.owner_user_id || role === "owner" || role === "admin" || c.role === "admin");
 }
 function bound(tokenId: string, n?: Node | null): Node | null {
-  const c = credential(tokenId);
+  const c = readSessionControlCredential(tokenId);
   if (!c?.bound_node_id || !c.network_id || c.scope !== "network") return null;
   const target = n ?? node(c.bound_node_id);
   if (!target || c.bound_node_id !== target.node_id || c.network_id !== target.network_id
@@ -64,7 +65,8 @@ function bound(tokenId: string, n?: Node | null): Node | null {
   return caller.ok && caller.kind === "node" && caller.nodeId === target.node_id
     && caller.networkId === target.network_id ? target : null;
 }
-async function body(req: Request): Promise<Record<string, unknown> | null> {
+export function resolveSessionControlNodeCaller(tokenId: string) { return bound(tokenId); }
+export async function readSessionControlBody(req: Request, limit = 8192): Promise<Record<string, unknown> | null> {
   const reader = req.body?.getReader();
   if (!reader) return null;
   const chunks: Uint8Array[] = []; let size = 0;
@@ -72,13 +74,14 @@ async function body(req: Request): Promise<Record<string, unknown> | null> {
     for (;;) {
       const part = await reader.read(); if (part.done) break;
       size += part.value.byteLength;
-      if (size > 8192) { await reader.cancel(); return null; }
+      if (size > limit) { await reader.cancel(); return null; }
       chunks.push(part.value);
     }
     const v: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     return object(v) ? v : null;
   } catch { return null; }
 }
+const body = readSessionControlBody;
 function state(value: unknown, e: Entry): boolean {
   return object(value) && keys(value, ["session_id", "binding_id", "supported", "active", "can_request_background", "observed_at"])
     && same(value as Identity, e) && typeof value.supported === "boolean" && typeof value.active === "boolean"
@@ -88,39 +91,65 @@ function state(value: unknown, e: Entry): boolean {
 }
 function validResult(v: unknown, e: Entry): boolean {
   if (e.operation === "state") return state(v, e);
+  if (e.operation === "fork") return object(v) && keys(v, ["session_id"])
+    && typeof v.session_id === "string" && /^ses_[A-Za-z0-9]+$/.test(v.session_id) && v.session_id !== e.session_id;
   return object(v) && keys(v, ["outcome", "state"])
     && (v.outcome === "request_processed" || v.outcome === "already_idle") && state(v.state, e)
     && (v.outcome !== "already_idle" || (object(v.state)
       && v.state.active === false && v.state.can_request_background === false));
 }
 
-/** One finite, process-local relay per Hub boot. Restart loses requests (404),
- * never replays them. Multi-worker deployments require process affinity.
+/** Background/state remain process-local; fork intents and claims are durable.
+ * Bridge registration still requires process affinity; the journal alone is
+ * not a distributed Server identity or authorization-generation registry.
  * A claim authorizes one delivery, not proof that any tool moved to background.
  */
 export function createNodeSessionControlRelay() {
   const bridges = new Map<string, Bridge>();
   const entries = new Map<string, Entry>();
+  const forks = createSessionForkStore(db);
+  // Journal coverage does not prove Server-generation authorization. Keep the
+  // new entry point opt-in until that independent delivery gate is satisfied.
+  const durableForks = process.env.COMMHUB_V2_FORK_PREVIEW === "1"
+    && db.dialect === "sqlite" && db.transactionalFeaturesRefusal === null;
+  const allEntries = () => [...entries.values(), ...forks.active()];
+  const lookup = (requestId: string): Entry | undefined => requestId.startsWith("fk_") ? forks.get(requestId) : entries.get(requestId);
+  const outcomeUnknown = (e: Entry) => e.operation === "fork" ? "session_fork_outcome_unknown" : "session_background_outcome_unknown";
+  function persist(e: Entry, previous: "pending" | "in_progress") {
+    if (e.operation !== "fork") return;
+    const stored = forks.settle(e as ForkEntry, previous);
+    delete e.result; delete e.error;
+    Object.assign(e, stored);
+  }
   const key = (n: Node) => JSON.stringify([n.network_id, n.node_id]);
   function close(e: Entry, error: string) {
+    const previous = e.status as "pending" | "in_progress";
     e.status = e.status === "in_progress" ? "unknown" : "failed";
-    e.error = e.status === "unknown" ? "session_background_outcome_unknown" : error;
+    e.error = e.status === "unknown" ? outcomeUnknown(e) : error;
+    persist(e, previous);
   }
   function refresh(e: Entry, now: number) {
     if (e.status !== "pending" && e.status !== "in_progress") return;
     if (now >= e.expires_at) {
+      const previous = e.status;
       e.status = e.status === "in_progress" ? "unknown" : "expired";
-      e.error = e.status === "unknown" ? "session_background_outcome_unknown" : "session_control_request_expired";
+      e.error = e.status === "unknown" ? outcomeUnknown(e) : "session_control_request_expired";
+      persist(e, previous);
       return;
     }
     const n = node(e.nodeId), b = n && bridges.get(key(n));
     if (!n || n.network_id !== e.networkId || !human(e.requester, n) || !bound(e.tokenId, n)) {
       close(e, "session_control_unavailable");
+    } else if (e.operation === "fork" && !b) {
+      // Another relay may own the live bridge. Absence here is not revocation;
+      // the persisted deadline will expire unclaimed work or mark it unknown.
+      return;
     } else if (!b || b.expires <= now || b.tokenId !== e.tokenId || !same(b, e)) {
       close(e, "session_control_changed");
     }
   }
   function sweep(now: number) {
+    for (const e of forks.active()) refresh(e, now);
     for (const [k, e] of entries) {
       refresh(e, now);
       if (now > e.expires_at + 60_000) entries.delete(k);
@@ -134,15 +163,17 @@ export function createNodeSessionControlRelay() {
     const auth = resolveToken(raw);
     if (!auth?.tokenId) return fail("session_control_unavailable", 401);
     const tokenId = auth.tokenId;
-    const c = credential(tokenId);
+    const c = readSessionControlCredential(tokenId);
     if (!c) return fail("session_control_unavailable", 401);
     const isHuman = isHumanCredential(c);
     const isNode = c.scope === "network" && !!c.network_id;
     const suffix = url.pathname.slice(ROOT.length);
-      if (req.method === "GET" && /^\/(bg|sc)_\d{13}_[A-Za-z0-9_-]{8,64}$/.test(suffix)) {
-        const e = entries.get(suffix.slice(1));
+      if (req.method === "GET" && (/^\/(bg|sc|fk)_\d{13}_[A-Za-z0-9_-]{8,64}$/.test(suffix)
+        || /^\/intent\/[A-Za-z0-9_-]{16,100}$/.test(suffix))) {
         // Unknown/restarted Hub and unauthorized reads reveal no request data.
         if (!isHuman) return fail("session_control_unavailable", 403);
+        const network = url.searchParams.get("network_id") ?? "";
+        const e = suffix.startsWith("/intent/") ? forks.intent(c.user_id, network, suffix.slice(8)) : lookup(suffix.slice(1));
         if (!e) return fail("session_control_unavailable", 404);
         const n = node(e.nodeId);
         if (!n || url.searchParams.get("network_id") !== e.networkId || n.network_id !== e.networkId || !human(tokenId, n)) {
@@ -158,13 +189,14 @@ export function createNodeSessionControlRelay() {
       const now = Date.now();
       if (suffix === "/bridge") {
         if (!isNode) return fail("session_control_unavailable", 403);
-        if (!keys(v, ["session_id", "binding_id", "expected"]) || !id(v.session_id) || !id(v.binding_id)
+        if (!keys(v, ["session_id", "binding_id", "expected", "fork_supported"]) || !id(v.session_id) || !id(v.binding_id)
+          || (v.fork_supported !== undefined && typeof v.fork_supported !== "boolean")
           || !object(v.expected) || !keys(v.expected, ["node_id", "network_id"])
           || !id(v.expected.node_id) || !id(v.expected.network_id)) return fail("session_control_request_invalid", 400);
         // Body reading is complete. This synchronous section rechecks authority
         // and expected identity BEFORE sweep, retirement, or registration writes.
         // expected is an assertion, never a source for binding or proof fields.
-        const c = credential(tokenId), n = bound(tokenId);
+        const c = readSessionControlCredential(tokenId), n = bound(tokenId);
         if (!c || !n) return fail("session_control_unavailable", 403);
         if (c.bound_node_id !== n.node_id || c.network_id !== n.network_id
           || v.expected.node_id !== c.bound_node_id || v.expected.network_id !== c.network_id) {
@@ -180,23 +212,36 @@ export function createNodeSessionControlRelay() {
         sweep(now);
         if (replacing) {
           b.retired.add(generation(b.tokenId, b));
-          for (const e of entries.values()) if (e.nodeId === n.node_id && e.networkId === n.network_id
+          for (const e of allEntries()) if (e.nodeId === n.node_id && e.networkId === n.network_id
             && (e.status === "pending" || e.status === "in_progress")) close(e, "session_control_changed");
         }
-        bridges.set(k, { ...registration, tokenId, expires: now + LEASE, retired: b?.retired ?? new Set() });
-        return ok({ expires_at: now + LEASE,
+        bridges.set(k, { ...registration, tokenId, expires: now + LEASE, retired: b?.retired ?? new Set(), forkSupported: durableForks && v.fork_supported === true });
+        return ok({ expires_at: now + LEASE, fork_supported: durableForks,
           identity: { node_id: c.bound_node_id, network_id: c.network_id, token_id: c.token_id } });
       }
       sweep(now);
       if (!suffix) {
         if (!isHuman) return fail("session_control_unavailable", 403);
-        if (!keys(v, ["network_id", "node_id", "operation", "expected"]) || !id(v.network_id) || !id(v.node_id)
-          || (v.operation !== "state" && v.operation !== "background")
-          || (v.expected !== undefined && !identity(v.expected)) || (v.operation === "background" && !identity(v.expected))) {
+        if (!keys(v, ["network_id", "node_id", "operation", "expected", "intent_id"]) || !id(v.network_id) || !id(v.node_id)
+          || (v.operation !== "state" && v.operation !== "background" && v.operation !== "fork")
+          || (v.operation === "fork" ? typeof v.intent_id !== "string" || !/^[A-Za-z0-9_-]{16,100}$/.test(v.intent_id) : v.intent_id !== undefined)
+          || (v.expected !== undefined && !identity(v.expected))
+          || ((v.operation === "background" || v.operation === "fork") && !identity(v.expected))) {
           return fail("session_control_request_invalid", 400);
         }
         const n = node(v.node_id);
         if (!n || n.network_id !== v.network_id || !human(tokenId, n)) return fail("session_control_unavailable", 403);
+        const actor = readSessionControlCredential(tokenId);
+        if (!isHumanCredential(actor)) return fail("session_control_unavailable", 403);
+        if (v.operation === "fork") {
+          if (!durableForks) return fail("session_control_unsupported");
+          const previous = forks.intent(actor.user_id, n.network_id, v.intent_id as string);
+          if (previous) {
+            if (previous.nodeId !== n.node_id || !same(previous, v.expected as Identity)) return fail("session_control_changed");
+            refresh(previous, now);
+            return ok({ request_id: previous.request_id, status: previous.status, expires_at: previous.expires_at });
+          }
+        }
         const b = bridges.get(key(n));
         // A distinct code for "this node has no live bridge" (never registered, or
         // its 75 s lease expired). #2014 needs it: the client can then say "upgrade
@@ -204,14 +249,22 @@ export function createNodeSessionControlRelay() {
         // `session_control_unavailable` (which also covers permission refusals).
         if (!b || b.expires <= now || !bound(b.tokenId, n)) return fail("session_control_bridge_missing");
         if (v.expected && !same(v.expected as Identity, b)) return fail("session_control_changed");
-        if (entries.size >= CAP || [...entries.values()].some(e => e.nodeId === n.node_id
+        if (v.operation === "fork" && !b.forkSupported) return fail("session_control_unsupported");
+        if (entries.size + forks.active().length >= CAP || allEntries().some(e => e.nodeId === n.node_id
           && e.networkId === n.network_id && (e.status === "pending" || e.status === "in_progress"))) {
           return fail("session_control_request_limit", 429);
         }
-        const request_id = `${v.operation === "background" ? "bg" : "sc"}_${now}_${randomBytes(18).toString("base64url")}`;
-        entries.set(request_id, { session_id: b.session_id, binding_id: b.binding_id, request_id,
+        const request_id = `${v.operation === "background" ? "bg" : v.operation === "fork" ? "fk" : "sc"}_${now}_${randomBytes(18).toString("base64url")}`;
+        const made = { session_id: b.session_id, binding_id: b.binding_id, request_id,
           operation: v.operation, networkId: n.network_id, nodeId: n.node_id, tokenId: b.tokenId,
-          requester: tokenId, expires_at: now + TTL, status: "pending" });
+          requester: tokenId, expires_at: now + TTL, status: "pending" as const };
+        if (v.operation === "fork") {
+          const stored = forks.reserve({ ...made, operation: "fork", intent_id: v.intent_id as string, requesterUser: actor.user_id });
+          if (stored.request_id !== request_id) {
+            if (stored.nodeId !== n.node_id || !same(stored, v.expected as Identity)) return fail("session_control_changed");
+            return ok({ request_id: stored.request_id, status: stored.status, expires_at: stored.expires_at });
+          }
+        } else entries.set(request_id, made as Entry);
         pushEvent(n.alias, { type: "session_control", request_id }, n.network_id);
         return ok({ request_id, status: "pending", expires_at: now + TTL });
       }
@@ -223,19 +276,20 @@ export function createNodeSessionControlRelay() {
       if (suffix === "/pull") {
         if (!identity(v)) return fail("session_control_request_invalid", 400);
         if (!same(b, v)) return fail("session_control_changed");
-        const e = [...entries.values()].find(e => e.nodeId === n.node_id && e.networkId === n.network_id && e.status === "pending");
+        const e = allEntries().find(e => e.nodeId === n.node_id && e.networkId === n.network_id && e.status === "pending");
         if (!e) return ok({ request: null });
         refresh(e, now);
         if (e.status !== "pending") return ok({ request: null });
+        if (e.operation === "fork" && (!b.forkSupported || !forks.claim(e as ForkEntry, now))) return ok({ request: null });
         // No await between authority recheck, claim, and response. Never requeue.
         e.status = "in_progress";
         return ok({ request: { request_id: e.request_id, operation: e.operation,
           session_id: e.session_id, binding_id: e.binding_id, expires_at: e.expires_at } });
       }
-      if (/^\/(bg|sc)_\d{13}_[A-Za-z0-9_-]{8,64}\/ack$/.test(suffix)) {
+      if (/^\/(bg|sc|fk)_\d{13}_[A-Za-z0-9_-]{8,64}\/ack$/.test(suffix)) {
         if (!keys(v, ["session_id", "binding_id", "status", "result", "error"]) || !id(v.session_id) || !id(v.binding_id)
-          || (v.status !== "done" && v.status !== "failed")) return fail("session_control_request_invalid", 400);
-        const e = entries.get(suffix.split("/")[1]);
+          || (v.status !== "done" && v.status !== "failed" && !(v.status === "unknown" && suffix.startsWith("/fk_")))) return fail("session_control_request_invalid", 400);
+        const e = lookup(suffix.split("/")[1]);
         if (!e) return fail("session_control_unavailable", 404);
         if (e.nodeId !== n.node_id || e.networkId !== n.network_id || e.tokenId !== tokenId || !same(e, v as Identity)
           || !same(b, e)) return fail("session_control_changed");
@@ -243,13 +297,17 @@ export function createNodeSessionControlRelay() {
         if (e.status !== "in_progress") return fail("session_control_request_expired");
         if (v.status === "done" && validResult(v.result, e) && v.error === undefined) {
           e.status = "done"; e.result = v.result;
+        } else if (v.status === "unknown" && e.operation === "fork" && v.error === "session_fork_outcome_unknown" && v.result === undefined) {
+          e.status = "unknown"; e.error = "session_fork_outcome_unknown";
         } else if (v.status === "failed" && typeof v.error === "string" && ERRORS.has(v.error) && v.result === undefined) {
           e.status = "failed"; e.error = v.error;
         } else {
           // Invalid/untrusted runtime replies never become success or leak raw errors.
           e.status = "unknown"; e.error = "session_control_invalid_response";
+          persist(e, "in_progress");
           return fail(e.error, 400);
         }
+        persist(e, "in_progress");
         return ok({ request_id: e.request_id, status: e.status });
       }
       return fail("session_control_request_invalid", 404);

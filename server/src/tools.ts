@@ -978,6 +978,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // can grey out remote-restart for them.
       config_snapshot: z.object({
         model: z.string().max(200).optional().nullable(),
+        model_effective: z.string().max(401).optional(),
+        modelVariant: z.string().max(200).nullable().optional(),
         flags: z.record(z.string(), z.unknown()).optional(),
         config_revision: z.number().int().min(0).optional(),
         // #2293（admin 2026-10-25）—— 节点自己上报的 OpenCode V2 模型 id 清单
@@ -993,6 +995,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         //    （#3294 的 build_commit 就是同一个坑）。`.catch(undefined)` 与邻居一致：
         //    形状不对只丢这一格，绝不拒掉整份心跳。
         opencode_catalog_seen_at: z.string().max(40).optional().catch(undefined),
+        // Heartbeat capability only; it never finalizes a pending variant write.
+        opencode_variant_config_capable: z.literal(true).optional().catch(undefined),
         // #2293 —— 这台机器上 OpenCode serve 的 loopback 端点（`http://127.0.0.1:PORT`）。
         // 客户端「OpenCode Server」行此前只能写「端口未上报」。只收 loopback URL，不收密码。
         opencode_server: z.string().max(200).optional().catch(undefined),
@@ -1105,6 +1109,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // `.catch(undefined)`:同上一格的立场 —— 一个诊断/展示字段不许拒掉整份 report。
           // 读取侧再按形状消毒(create-node-validate.ts daemonDefaultWorkdirRoot)。
           default_workdir_root: z.string().max(1024).optional().catch(undefined),
+          // Internal source-aware delivery handshake; declaration alone enables
+          // no public queue/dispatch and old daemons must not receive it.
+          source_node_delivery: z.literal("source-node-delivery-v1-opencode-2.0.22").optional().catch(undefined),
           // #622 —— 逐 runtime 实测就绪度。收得宽、坏了只丢这一格(见 runtime-readiness.ts)。
           runtime_readiness: runtimeReadinessSchema,
         }).optional(),
@@ -1712,7 +1719,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).describe("Alias"),
       message_id: z.string().min(1).max(200),
       response: z.string().max(10000).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
     },
     async ({ alias, message_id, response, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
@@ -1950,10 +1957,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_all_status",
-    "Get status of all sessions (each row has queue_depth = open tasks). Hub uses this for the patrol loop. " +
-      "Pass filter_alias (comma-separated) when you only care about specific " +
-      "nodes — the unfiltered result is one row per session with 31 columns and " +
-      "is large enough on a real fleet that callers cannot read it.",
+    "Session status for Hub patrol; queue_depth = open tasks. Use comma-separated filter_alias for specific nodes. Unfiltered: one row/session, 31 columns; large fleets can exceed client limits.",
     {
       filter_status: z.string().max(50).optional(),
       filter_server: z.string().max(200).optional(),
@@ -2420,7 +2424,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).describe("Target session alias"),
       message: z.string().min(1).max(10000).describe("Message content"),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
     },
     async ({ alias, message, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
@@ -2486,7 +2490,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
       // #507 — top-level attachments (parity with REST /api/task L506). MCP Zod
       // otherwise silently strips unknown fields, so a caller passing
       // `attachments` before this schema entry existed would see `ok:true`
@@ -2993,7 +2997,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       task_id: z.string().min(1).max(200).describe("Task ID to acknowledge"),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
     },
     async ({ task_id, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
@@ -3020,7 +3024,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     {
       task_id: z.string().min(1).max(200).describe("Task ID to retry"),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ task_id, from_session: _fromIn, network_id: netId, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
@@ -3337,7 +3341,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to cancel"),
       reason: z.string().max(1000).optional().describe("Cancellation reason"),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
     },
     async ({ task_id, reason, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
@@ -3374,7 +3378,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       task_id: z.string().min(1).max(200).describe("Task ID to reassign"),
       new_alias: z.string().min(1).max(200).describe("Target agent alias"),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
+      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ task_id, new_alias, from_session: _fromIn, network_id: netId, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
@@ -3719,6 +3723,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       base_revision: z.number().int().min(0).describe("Revision from the dashboard's last GET — 409 if the hub's differs."),
       patch: z.object({
         model: z.string().max(200).optional(),
+        modelVariant: z.string().min(1).max(200).nullable().optional(),
         flags: z.record(z.string(), z.unknown()).optional(),
         // #260 P5 — channel enable/disable. Restart-tier field (agent-node
         // reads config.channels once at boot to fork per-channel workers,
@@ -3752,6 +3757,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       if (!sec1Ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node", message: "node belongs to another network" }) }] };
+      }
+
+      // Old nodes ignore unknown patch fields and may restart or falsely ack.
+      // Require an explicitly advertised runtime capability before any queueing.
+      if (patch.modelVariant !== undefined) {
+        let snapshot: any;
+        try { snapshot = JSON.parse(node.config_snapshot || "{}"); } catch { snapshot = {}; }
+        if (snapshot.opencode_variant_config_capable !== true)
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "variant_unsupported" }) }] };
+        if ((patch.flags && Object.keys(patch.flags).length) || patch.channels !== undefined ||
+            (patch.modelVariant !== null && /[\s\x00-\x1f\x7f]/.test(patch.modelVariant)))
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_patch", field: "modelVariant" }) }] };
       }
 
       const model = typeof patch.model === "string" ? patch.model : undefined;
@@ -3910,13 +3927,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // computeApplyMode 退回旧行为（model ⇒ restart），那正是客户端
       // 显示「重启中」却永远等不到重启的原因。
       const opencodeSnap = readOpencodeSnapshotFlags(node.config_snapshot);
-      const applyMode = computeApplyMode(model, flags, channels, {
+      const applyMode = patch.modelVariant !== undefined ? "hot" : computeApplyMode(model, flags, channels, {
         runtime: node.runtime,
         opencodeGeneration: opencodeSnap.opencodeGeneration,
         opencodeMode: opencodeSnap.opencodeMode,
       });
+      let variantCapableAtQueue = false;
+      try { variantCapableAtQueue = JSON.parse(node.config_snapshot || "{}").opencode_variant_config_capable === true; } catch { /* fail closed */ }
       const patchJson = JSON.stringify({
         ...(model !== undefined ? { model } : {}),
+        ...(patch.modelVariant !== undefined ? { modelVariant: patch.modelVariant } : {}),
+        ...(model !== undefined && applyMode === "hot" && variantCapableAtQueue ? { _anet_variant_ack_required: true } : {}),
         flags,
         ...(channels !== undefined ? { channels } : {}),
       });
@@ -4078,6 +4099,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       let patch: any = {};
       try { patch = JSON.parse(update.patch_json); } catch { patch = {}; }
+      // Hub-only persistence metadata is never part of the node patch contract.
+      if (patch && typeof patch === "object") delete patch._anet_variant_ack_required;
       return {
         content: [{
           type: "text" as const,
@@ -4352,10 +4375,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_rules_file",
-    "Ask a node to send back its rules file (CLAUDE.md for claude, else AGENTS.md) from its work dir. No path argument. Poll get_rules_file_result with the returned request_id. app#225.",
+    "Read the node's workdir rules file (CLAUDE.md for claude, else AGENTS.md). No path argument. Poll get_rules_file_result with request_id. app#225.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting rules_file_capable)."),
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or rules_file_capable session alias."),
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("read", { node_id, child_node_id, alias, network_id }),
@@ -4366,7 +4389,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Ask a node to write a managed block into its rules file (CLAUDE.md / AGENTS.md). Poll get_rules_file_result. User logins only (node owner or network owner/admin).",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting rules_file_capable)."),
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or rules_file_capable session alias."),
       content: z.string().max(RULES_FILE_MAX_BYTES).describe("Full new file content (UTF-8). The node writes it atomically."),
       network_id: z.string().max(200).optional(),
     },
@@ -4375,10 +4398,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "list_node_skills",
-    "Ask a node for the skills its runtime loads (name, scope project|user|system, display path, description; team skills add origin \"team\"). No path. Poll get_rules_file_result: {skills:[...], roots, warnings}.",
+    "List runtime skills (name, scope project|user|system, display path, description; team adds origin=\"team\"). No path. Poll get_rules_file_result: {skills, roots, warnings}.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or skills_capable session alias."),
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("skills_list", { node_id, child_node_id, alias, network_id }),
@@ -4386,10 +4409,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_skill",
-    "One skill's SKILL.md by name; the node resolves it under its own skills roots (no path). Poll get_rules_file_result: {name, scope, path_rel, description, content, origin?}; origin=\"team\" only for a team skill.",
+    "Read SKILL.md by name within node skills roots (no path). Poll get_rules_file_result: {name, scope, path_rel, description, content, origin?}; origin=\"team\" only for team skills.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting skills_capable)."),
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or skills_capable session alias."),
       name: z.string().min(1).max(64).describe("Skill directory name, [A-Za-z0-9._-]."),
       network_id: z.string().max(200).optional(),
     },
@@ -4398,10 +4421,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "list_node_files",
-    "List one level of the node's work dir (read-only). `path` relative (default root); absolute and .. refused. Poll get_rules_file_result: {path, entries:[{name,type,size?,mtime?,hidden_reason?,no_descend?}], truncated, total}. User logins only.",
+    "List one level of node workdir (read-only). Relative path (default root); absolute and .. refused. Poll get_rules_file_result: {path, entries:[{name,type,size?,mtime?,hidden_reason?,no_descend?}], truncated, total}. User logins only.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting files_capable)."),
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or files_capable session alias."),
       path: z.string().max(NODE_FILE_PATH_MAX).optional().describe("Directory relative to the node's work dir; omit or \"\" for the root."),
       network_id: z.string().max(200).optional(),
     },
@@ -4410,10 +4433,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_file",
-    "One text file under the node's work dir (read-only, 256 KiB cap; binary / too large -> size only; secret-looking -> name only). `path` relative. Poll get_rules_file_result: {path, name, kind, size?, mtime?, content?, hidden_reason?}. User logins only.",
+    "Read node workdir text file (read-only, 256 KiB cap; binary/too large → size only; secret-looking → name only). Relative path. Poll get_rules_file_result: {path, name, kind, size?, mtime?, content?, hidden_reason?}. User logins only.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting files_capable)."),
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or files_capable session alias."),
       path: z.string().min(1).max(NODE_FILE_PATH_MAX).describe("File path relative to the node's work dir."),
       network_id: z.string().max(200).optional(),
     },
@@ -4422,10 +4445,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "tail_node_logs",
-    "Tail of the node's own run log (read-only, redacted on the node). No path argument. User logins only (node owner or network owner/admin). Poll get_rules_file_result: {files, lines, truncated, matched}; handed out once, then purged.",
+    "Tail node's own run log (read-only, node-redacted). No path. User login only (node owner or network owner/admin). Poll get_rules_file_result: {files, lines, truncated, matched}; handed out once, then purged.",
     {
       ...NODE_ID_ALIAS_FIELDS,
-      alias: z.string().min(1).max(200).optional().describe("Alias instead of node_id (a node, or a session reporting logs_capable)."),
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or logs_capable session alias."),
       lines: z.number().int().min(1).max(LOGS_MAX_LINES).optional().describe("How many of the newest matching lines (default 500, max 2000)."),
       level: z.enum(["info", "warn", "error"]).optional().describe("Only lines of exactly this level."),
       grep: z.string().min(1).max(LOGS_GREP_MAX).optional().describe("Case-insensitive substring, matched after redaction."),
@@ -4916,9 +4939,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // row (metadata only — no env_blob in SQL), pushEvent doorbell.
   server.tool(
     "create_node",
-    "Create/start a node on the target daemon; the child reports back to Hub.",
+    "Create/start node via daemon; child reports to Hub.",
     {
       daemon_node_id: z.string().min(1).max(200),
+      // #4150: unsupported source intent must not be stripped into ordinary create.
+      source_ref: z.never().optional(),
       node_spec: z.object({
         // #652 — 64 *code points* after trim is enforced by validateChildName (shared/node-name.ts);
         // zod's max counts UTF-16 units and surrounding whitespace, so it is only a coarse bound here.
@@ -4932,6 +4957,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         opencodeGeneration: z.never().optional(),
         opencodeUnsafeTools: z.never().optional(),
         opencodeNewServer: z.never().optional(),
+        source_ref: z.never().optional(),
         channels: z.array(z.unknown()).optional(),
         // app「新建节点」确认页的工作目录(绝对路径或 ~/…,daemon 侧展开并校验)。
         // 缺席 = 老行为:落 daemon 的 cwd。
@@ -7015,13 +7041,40 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     },
   );
 
+  // #4099: a deliberately closed entry point, NOT a queued operation. Until
+  // daemon/session ownership and an atomic idle gate are wired end-to-end,
+  // never emit a doorbell or fall back to node configuration/restart.
+  server.registerTool(
+    "select_opencode_session_model",
+    {
+      description: "OpenCode V2 session model change: unavailable; no write or restart.",
+      inputSchema: z.object({
+        network_id: z.string().min(1).max(200).optional(),
+        daemon_node_id: z.string().min(1).max(200),
+        node_id: z.string().min(1).max(200),
+        session_id: z.string().regex(/^ses_[A-Za-z0-9]+$/),
+        model: z.object({ providerID: z.string().min(1).max(200), id: z.string().min(1).max(200), variant: z.string().min(1).max(200).optional() }).strict(),
+      }).strict() as any,
+    },
+    async (args: { network_id?: string }) => {
+      const networkId = getNetworkId(args.network_id);
+      const role = enforceUserId && networkId ? getUserNetworkRole(enforceUserId, networkId) : null;
+      const result = callerTokenIsNetwork
+        ? { ok: false, error: "user_token_required" }
+        : !enforceUserId || !networkId || !["owner", "admin"].includes(role ?? "")
+          ? { ok: false, error: "access_denied" }
+          : { ok: false, status: "rejected", reason: "unsupported" };
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+    },
+  );
+
   // OpenCode V2 catalog. Human tokens queue; the owning daemon pulls scope
   // only and acks a whitelist snapshot. pending is stored authorization, not
   // a snapshot and not proof the doorbell was received.
   server.registerTool(
     "read_opencode_catalog",
     {
-      description: "Queue a native OpenCode V2 catalog read for one owned child. ok with status pending means authorized and stored in memory, not a snapshot and not proof a daemon received the doorbell. Does not start a server. url, authorization, directory, settings, headers, and body are rejected.",
+      description: "Queue an owned child’s native V2 catalog read. pending means authorized and stored in memory, not a snapshot or proof of daemon receipt. Does not start a server. URL, authorization, directory, settings, headers and body are rejected.",
       inputSchema: z.object({
         daemon_node_id: z.string().min(1).max(200),
         node_id: z.string().min(1).max(200),
@@ -7046,7 +7099,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "get_opencode_catalog",
     {
-      description: "Poll one queued OpenCode V2 catalog read. status pending is not a snapshot. Only status ready returns a whitelist snapshot, still completeness unknown and invocationVerified false.",
+      description: "Poll a V2 catalog read. pending is not a snapshot; only ready returns one, with completeness unknown and invocationVerified false.",
       inputSchema: z.object({
         request_id: z.string().min(1).max(200),
         network_id: z.string().max(200).optional(),
@@ -7066,7 +7119,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "get_opencode_catalog_request",
     {
-      description: "Daemon pulls one authorized OpenCode V2 catalog read. Scope only: no URL, authorization, settings, headers, or body.",
+      description: "Daemon pulls an authorized V2 catalog read. Scope only; no URL, authorization, settings, headers or body.",
       inputSchema: z.object({ request_id: z.string().min(1).max(200) }).strict() as any,
     },
     async (args: { request_id: string }) => {
@@ -7079,7 +7132,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "ack_opencode_catalog",
     {
-      description: "Daemon stores a whitelist OpenCode V2 catalog snapshot or a closed error code. Extra fields are rejected. A stored failure is status failed, not a transport error.",
+      description: "Daemon stores a whitelisted V2 catalog snapshot or error code. Extra fields are rejected; stored failure means status failed, not a transport error.",
       inputSchema: opencodeCatalogAckSchema as any,
     },
     async (args: unknown) => {
@@ -7121,33 +7174,33 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   });
   const reqChecklistItem = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(), text: z.string().min(1).max(500), done: z.boolean().optional() });
   const reqFields = {
-    tags: z.array(z.string()).max(10).optional().describe("Task labels; each 1–20 Unicode characters. Omit to preserve, [] to clear."),
+    tags: z.array(z.string()).max(10).optional().describe("1–20 Unicode chars each; omit preserves, [] clears."),
     name: z.string().min(1).max(80).optional(),
-    priority: z.enum(["high", "normal", "low", "lowest"]).optional().describe("high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低"),
+    priority: z.enum(["high", "normal", "low", "lowest"]).optional().describe("high=P0, normal=P1, low=P2, lowest=P3"),
     column: z.enum(["pool", "doing", "done", "abandoned"]).optional(),
-    due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 (stored as UTC seconds); \"\" clears"),
-    start: z.string().max(40).optional().describe("start date (Gantt): same shapes as due; \"\" clears"),
+    due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 (UTC sec); \"\" clears"),
+    start: z.string().max(40).optional().describe("Gantt start: as due; \"\" clears"),
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
     project_id: z.string().max(200).nullable().optional(),
-    owner: reqPerson.nullable().optional().describe("Owner (person): {kind:'user', id|username} from requirements_people; a node gets owner_must_be_human — use agent_owner"),
+    owner: reqPerson.nullable().optional().describe("Human {kind:'user',id|username}; see requirements_people. Nodes: agent_owner (owner_must_be_human)."),
     agent_owner: reqPerson.nullable().optional().describe("负责 Agent: {kind:'node', id | alias}"),
-    participants: z.array(reqPerson).max(100).optional().describe("REPLACES the list (omitted removed; [] clears). For a few use participants_add/_remove."),
+    participants: z.array(reqPerson).max(100).optional().describe("REPLACES list (omitted removed, [] clears); partial: participants_add/_remove."),
     external_url: z.string().max(500).nullable().optional(),
-    parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("parent requirement (same network, no cycles, ≤ 5 levels); null detaches"),
+    parent_id: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable().optional().describe("Same-network parent, no cycles, ≤5 levels; null detaches"),
   };
   const pick = (args: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => args[k] !== undefined).map(k => [k, args[k]]));
   const REQ_WRITE_KEYS = [...Object.keys(reqFields), "external_ref", "archived"];
   // #475 —— status 是 column 的别名(列表的筛选参数就叫 status,Agent 写任务时也常这么写)。只在 MCP 这层换名,REST 不变;
   // 两个都给且不同 → 400 status_conflicts_with_column,不替调用方挑一个。
-  const reqStatus = z.enum(["pool", "doing", "done", "abandoned"]).optional().describe("alias of column; must match it if both are sent");
+  const reqStatus = z.enum(["pool", "doing", "done", "abandoned"]).optional().describe("column alias; if both are sent they must match");
   const withColumn = (args: Record<string, unknown>, call: (args: Record<string, unknown>) => Promise<{ content: { type: "text"; text: string }[] }>) => {
     if (args.status === undefined) return call(args);
     if (args.column !== undefined && args.column !== args.status) return Promise.resolve({ content: [{ type: "text" as const, text: JSON.stringify({ ...errorBody("status_conflicts_with_column"), status: 400 }) }] });
     return call({ ...args, column: args.status });
   };
-  const reqPeopleDelta = (verb: string) => z.array(reqPerson).max(100).optional().describe(`${verb === "add" ? "Add to" : "Remove from"} the participant list, keeping the rest (atomic; not with participants).`);
-  const REQ_ID_DESC = "requirement id (req_…) or short number \"#N\" (per network; with several networks also pass network_id)";
+  const reqPeopleDelta = (verb: string) => z.array(reqPerson).max(100).optional().describe(`${verb === "add" ? "Add to" : "Remove from"} participants, keeping the rest (atomic; not with participants).`);
+  const REQ_ID_DESC = "req_… or per-network #N; pass network_id if multiple networks";
 
   // #471 —— MCP 的列表默认省流:summary 视图 + 50 张一页(REST 的默认 full + 500 不变,App 靠它)。
   // 生产实测 122 张卡:旧默认(full、500)148 KB,summary 81 KB —— 一次调用就塞满 Agent 的上下文。
@@ -7179,7 +7232,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_list",
     {
-      description: `List requirement tasks in your network, newest first. Defaults (MCP): view='summary' (no description / checklist bodies; has_description, checklist_count instead; ~0.5 KB per task) and ${REQ_LIST_MCP_DEFAULT_LIMIT} per page; has_more + next_cursor → pass cursor. Full text: requirements_get, or view='full' with a small limit (≤ 1000). Filters: seq (#N), status, project_id ('none'), owner / agent_owner ('user:<id>' / 'node:<id>' / 'none'), tag (exact), updated_since (ISO), overdue / due_within_days (open tasks only), external_ref, parent_id / top_level, department_id (owner in it or below), include_archived; q searches title / description / people / project / tags (terms ANDed). Rows carry children {total, done}; include_last_event=true adds last_event (newest event incl. comments). changes=true (with updated_since) returns only tasks changed since then, archived included, plus deleted ids and server_time for the next updated_since. Unknown parameters are rejected (-32602).`,
+      description: `List network tasks, newest first. MCP default: ${REQ_LIST_MCP_DEFAULT_LIMIT}/page, view=summary (no description/checklist bodies; has_description, checklist_count; ~0.5 KB/task). If has_more, pass next_cursor as cursor. Full text: requirements_get or view=full (limit ≤1000). Filters: seq (#N), status, project_id ('none'), owner/agent_owner ('user:<id>'/'node:<id>'/'none'), exact tag, ISO updated_since, overdue/due_within_days (open only), external_ref, parent_id/top_level, department_id (owner in it or below), include_archived. q AND-searches title/description/people/project/tags. Rows: children {total,done}; include_last_event adds newest event incl. comments. changes=true with updated_since returns changed tasks incl. archived, deleted ids, and server_time for next updated_since. Unknown parameters rejected (-32602).`,
       // Strict: registerTool honours a constructed object's unknownKeys (server.tool() would strip them silently).
       inputSchema: z.strictObject(reqListShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
@@ -7214,7 +7267,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_people",
     {
-      description: "Look up the people in your network and the Agents they own, to fill task person fields. Each row: user_id, username, display_name (\"\" if not set), role, department {id, name} or null, agents [{node_id, alias}]; Agents with no owner in this network are listed in agents_without_owner (first page only). q filters by username / display name / department / Agent alias (case-insensitive substring). 50 people per page (limit ≤ 200); has_more + next_offset → pass offset. Agents you are not granted are left out. Task person fields take these ids, or {kind:'user', username} / {kind:'node', alias}.",
+      description: "Find network people and their Agents for task fields. Rows: user_id, username, display_name (\"\" if unset), role, department {id,name} or null, agents [{node_id,alias}]. agents_without_owner: first page only. q: case-insensitive substring of username/display name/department/Agent alias. Default 50/page, limit ≤200; pass next_offset when has_more. Ungranted Agents omitted. Task person fields accept these IDs or {kind:'user',username}/{kind:'node',alias}.",
       inputSchema: z.strictObject(reqPeopleShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
           ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqPeopleKeys.join(", ")}`
@@ -7237,35 +7290,35 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "requirements_create",
-    "Create a task; name required. column (alias status) = pool/doing/done/abandoned. Duplicate external_ref -> 409 external_ref_exists with existing_id; use requirements_upsert_by_external_ref to sync.",
+    "Create task; name required. column (alias status): pool/doing/done/abandoned. Duplicate external_ref: 409 external_ref_exists with existing_id; sync via requirements_upsert_by_external_ref.",
     { network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, name: z.string().min(1).max(80), external_ref: z.string().max(200).optional() },
     async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
 
   server.tool(
     "requirements_update",
-    "Patch a task (id or \"#N\"); omitted fields keep their value. column (alias status) = pool/doing/done/abandoned. participants REPLACES the whole list (use participants_add / _remove to keep others). archived=true hides it; agents cannot delete.",
+    "Patch a task (id or #N); omitted fields unchanged. column (alias status): pool/doing/done/abandoned. participants REPLACES the list; participants_add/_remove keeps others. archived=true hides; agents cannot delete.",
     { id: z.string().min(1).max(200).describe(REQ_ID_DESC), network_id: z.string().max(200).optional(), ...reqFields, status: reqStatus, participants_add: reqPeopleDelta("add"), participants_remove: reqPeopleDelta("remove"), external_ref: z.string().max(200).nullable().optional(), archived: z.boolean().optional() },
     async (args) => withColumn(args, a => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(args.id)}`, args.network_id, pick(a, [...REQ_WRITE_KEYS, "participants_add", "participants_remove"]))),
   );
 
   server.tool(
     "requirements_checklist_toggle",
-    "Set one checklist item done / not done (only that item is written, so concurrent edits of other items are kept).",
+    "Set one checklist item done/not done; other items' concurrent edits are kept.",
     { id: z.string().min(1).max(200).describe(REQ_ID_DESC), item_id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/), done: z.boolean(), network_id: z.string().max(200).optional() },
     async ({ id, item_id, done, network_id }) => requirementsCall("PATCH", `/api/requirements/${encodeURIComponent(id)}/checklist/${encodeURIComponent(item_id)}`, network_id, { done }),
   );
 
   server.tool(
     "requirements_upsert_by_external_ref",
-    "Idempotent sync: create the task for external_ref (e.g. github:owner/repo#123) or update the one already bound to it. Returns { requirement, created }.",
+    "Idempotent sync: create for external_ref (e.g. github:owner/repo#123) or update its bound task. Returns {requirement, created}.",
     { network_id: z.string().max(200).optional(), external_ref: z.string().min(1).max(200), ...reqFields, status: reqStatus, archived: z.boolean().optional() },
     async (args) => withColumn(args, a => requirementsCall("POST", "/api/requirements/upsert", args.network_id, pick(a, REQ_WRITE_KEYS))),
   );
 
   server.tool(
     "projects_list",
-    "List requirement projects (id, name, color, sort, archived, parentId). node tokens can only read projects; creating / changing needs a person's token (projects_create / projects_update).",
+    "Projects: id, name, color, sort, archived, parentId. Node tokens read only; create/update needs a user token (projects_create/projects_update).",
     { network_id: z.string().max(200).optional() },
     async ({ network_id }) => requirementsCall("GET", "/api/requirements/projects", network_id),
   );
@@ -7275,7 +7328,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // write access and is refused to 「仅相关任务」(task-scoped) members; events use the task list's visibility.
   server.tool(
     "projects_create",
-    "Create a project (管理项目 → 新建). name 1-40, unique; color #RRGGBB; sort int; parent_id optional (<=3 levels). Returns { project }; node tokens can only read projects.",
+    "Create project (管理项目 → 新建). name 1-40, unique; color #RRGGBB; integer sort; optional parent_id (≤3 levels). Returns {project}; node tokens read only.",
     {
       network_id: z.string().max(200).optional(),
       name: z.string().min(1).max(40),
@@ -7288,7 +7341,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "projects_update",
-    "Rename, recolour, reorder, archive, or move a project under another (parent_id; null = top level; cycles / depth>3 refused). Only fields you pass change; node tokens can only read projects.",
+    "Rename, recolour, reorder, archive or move project (parent_id; null=top level; cycles/depth>3 refused). Only passed fields change; node tokens read only.",
     {
       network_id: z.string().max(200).optional(),
       id: z.string().min(1).max(200).describe("project id (proj_…), from projects_list"),
@@ -7341,7 +7394,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_events",
     {
-      description: `Read the task activity timeline (the app's 动态), newest first: field-level changes (who, when, old → new) and comments (kind=comment, text in new.text; add one with requirements_comment). With requirement_id (req_… or "#N"): that task's events (limit default 200). Without it: the whole network, ${REQ_EVENTS_NETWORK_DEFAULT_LIMIT} per page by default. limit ≤ 500; next_cursor → pass as cursor for older events; server_time → use as the next since. Same visibility as requirements_list. Unknown parameters are rejected (-32602).`,
+      description: `Task activity (动态), newest first: field changes (who, when, old → new) and comments (kind=comment, new.text; add via requirements_comment). With requirement_id (req_… or #N), default limit 200; otherwise network-wide, default ${REQ_EVENTS_NETWORK_DEFAULT_LIMIT}. limit ≤500; pass next_cursor as cursor for older events, server_time as next since. Visibility as requirements_list. Unknown parameters rejected (-32602).`,
       inputSchema: z.strictObject(reqEventsShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
           ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqEventsKeys.join(", ")}`
@@ -7371,7 +7424,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 两次调用,并发时覆盖别人刚写的描述。这条只追加,进「动态」(requirements_events kind=comment),不改任务本身。
   server.tool(
     "requirements_comment",
-    "Append a comment / progress note to a task (**append-only**; never rewrites the description). Shows in requirements_events (kind=comment, text in new.text). text: markdown 1-4000. Anyone who can see the task and write in the network may comment. Returns { event }.",
+    "Append-only task comment/progress; never rewrites description. requirements_events: kind=comment, new.text. Markdown 1-4000; caller must see task and write in network. Returns {event}.",
     {
       id: z.string().min(1).max(200).describe(REQ_ID_DESC),
       text: z.string().min(1).max(4000).describe("the comment (markdown), 1–4000 characters"),
@@ -7720,6 +7773,14 @@ export function finalizePendingMatchingUpdates(
   for (const row of pending) {
     let patch: any = {};
     try { patch = JSON.parse(row.patch_json); } catch { continue; }
+
+    // Live-session variant changes are not represented by config_snapshot.
+    // Only the explicit node ack after scoped readback may finalize them.
+    if (Object.prototype.hasOwnProperty.call(patch, "modelVariant")) continue;
+    // A capable live-session model write also preserves the selected variant.
+    // A matching old model snapshot cannot prove that operation has finished.
+    if (row.apply_mode === "hot" && patch.model !== undefined &&
+        (patch._anet_variant_ack_required === true || snapshot?.opencode_variant_config_capable === true)) continue;
 
     let matches = true;
     // restart_only / empty patch → any snapshot proves the restart

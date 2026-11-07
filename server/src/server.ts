@@ -117,6 +117,7 @@ import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAl
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
+import { createSessionSourceTransport } from "./session-source-transport.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
@@ -2032,6 +2033,8 @@ function patrolDeliveredStaleTasks(): void {
 // would swallow a legitimate `0`. Same for hostname.
 export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
 const nodeSessionControl = createNodeSessionControlRelay();
+const sessionSourceTransport = createSessionSourceTransport({ enabled: process.env.COMMHUB_SOURCE_FORK_PREVIEW === "1",
+  directoryEnabled: process.env.COMMHUB_SOURCE_DIRECTORY_PREVIEW === "1", projectEnabled: process.env.COMMHUB_PROJECT_NEW_SESSION_PREVIEW === "1" });
 return Bun.serve({
   port: opts?.port ?? PORT,
   hostname: opts?.hostname ?? HOST,
@@ -4051,6 +4054,8 @@ return Bun.serve({
     });
     if (externalScheduleEditResponse) return withCors(req, externalScheduleEditResponse);
 
+    const sourceResponse = await sessionSourceTransport(req, url);
+    if (sourceResponse) return withCors(req, sourceResponse);
     const sessionControlResponse = await nodeSessionControl(req, url);
     if (sessionControlResponse) return withCors(req, sessionControlResponse);
 
@@ -6475,6 +6480,9 @@ return Bun.serve({
         network_id: node.network_id,
         config_revision: node.config_revision || 0,
         model: snapshot.model ?? null,
+        ...(typeof snapshot.model_effective === "string" ? { model_effective: snapshot.model_effective } : {}),
+        ...(Object.prototype.hasOwnProperty.call(snapshot, "modelVariant") ? { modelVariant: snapshot.modelVariant } : {}),
+        opencode_variant_config_capable: snapshot.opencode_variant_config_capable === true,
         flags: snapshot.flags ?? {},
         config_update_capable: snapshot.config_update_capable ?? false,
         // null = 这个节点从来没有被下发过配置（与「下发过但还没终局」是两件事）
@@ -7718,6 +7726,3 @@ export function hostDiskState(): { path: string; total_gb: number; used_gb: numb
     return null;
   }
 }
-
-
-
