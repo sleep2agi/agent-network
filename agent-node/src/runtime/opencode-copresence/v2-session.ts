@@ -635,6 +635,7 @@ export async function openVettedOpenCodeV2Copresence(
         catch (error: any) { if (error?.status === 409) return "busy" as const; throw error; }
       },
     });
+    let agentSwitching = false;
     const session: OpenCodeCopresenceSession = {
       url,
       sessionId,
@@ -709,6 +710,40 @@ export async function openVettedOpenCodeV2Copresence(
       selectSessionModel(targetSessionId, model) {
         if (targetSessionId !== sessionId) return Promise.resolve({ status: "rejected", reason: "scope" });
         return selectSessionModel(model);
+      },
+      // Agent（Build）选择：POST /api/session/<ses_>/agent 实测 204，且 GET 回读
+      // 真的变成新值。代价是这里必须自己回读——204 本身不代表任何事
+      // （PATCH /api/session/{id} 也对未知字段回 204 却什么都不做）。
+      async selectedSessionAgent(targetSessionId) {
+        if (!session.isRunning || targetSessionId !== sessionId) return undefined;
+        const body = await scopedRequest(`/api/session/${sessionId}`);
+        if (!session.isRunning || !isV2SessionScope(body, sessionId, directory)) return undefined;
+        const data = (body as any)?.data ?? body;
+        const agent = (data as any)?.agent;
+        return typeof agent === "string" && agent.length > 0 ? agent : undefined;
+      },
+      async selectSessionAgent(targetSessionId, agent) {
+        if (targetSessionId !== sessionId || !session.isRunning) return { status: "rejected", reason: "scope" } as const;
+        if (typeof agent !== "string" || agent.length === 0) return { status: "rejected", reason: "invalid" } as const;
+        if (agentSwitching) return { status: "rejected", reason: "concurrent" } as const;
+        agentSwitching = true;
+        try {
+          try {
+            await scopedRequest(`/api/session/${sessionId}/agent`, {
+              method: "POST",
+              body: JSON.stringify({ agent }),
+            });
+          } catch (error: any) {
+            if (error?.status === 409) return { status: "rejected", reason: "busy" } as const;
+            throw error;
+          }
+          const after = await scopedRequest(`/api/session/${sessionId}`);
+          if (!session.isRunning || !isV2SessionScope(after, sessionId, directory)) return { status: "unknown" } as const;
+          const data = (after as any)?.data ?? after;
+          return data?.agent === agent ? { status: "applied", agent } as const : { status: "unknown" } as const;
+        } finally {
+          agentSwitching = false;
+        }
       },
       // #3952 —— 会话用量（**累计值**）。调用方负责转成增量：同一份数据每轮都读，
       // 直接把绝对值报上去会把历史总量重复几十次。
