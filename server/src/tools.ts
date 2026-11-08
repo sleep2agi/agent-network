@@ -995,6 +995,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         //    （#3294 的 build_commit 就是同一个坑）。`.catch(undefined)` 与邻居一致：
         //    形状不对只丢这一格，绝不拒掉整份心跳。
         opencode_catalog_seen_at: z.string().max(40).optional().catch(undefined),
+        // #4150-Build —— 这台节点的 OpenCode V2 暴露的 agent 列表（`build`/`plan`…）。
+        // 🔴 与上面 catalog 同一个陷阱：不写进这个 schema，daemon 报上来也**会被静默剥掉**，
+        //    `/api/nodes` 的投影读到的永远是 null。空数组合法 =「确实没有 agent」。
+        opencode_agents: z.array(z.string().max(200)).max(200).optional().catch(undefined),
+        opencode_agents_seen_at: z.string().max(40).optional().catch(undefined),
+        // 绑定会话当前使用的 agent（读不到就不报；绝不用默认值冒充）。
+        opencode_agent_current: z.string().max(200).optional().catch(undefined),
+        // 只有真的能热切 agent 的节点才置 true（客户端据此决定是否显示可点选项）。
+        opencode_agent_config_capable: z.literal(true).optional().catch(undefined),
         // Heartbeat capability only; it never finalizes a pending variant write.
         opencode_variant_config_capable: z.literal(true).optional().catch(undefined),
         // #2293 —— 这台机器上 OpenCode serve 的 loopback 端点（`http://127.0.0.1:PORT`）。
