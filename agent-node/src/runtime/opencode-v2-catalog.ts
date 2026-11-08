@@ -168,3 +168,62 @@ export async function readOpenCodeCatalog(opts: {
     throw error instanceof OpenCodeCatalogError ? error : new OpenCodeCatalogError("unavailable");
   } finally { clearTimeout(timer); controller.abort(); }
 }
+
+/** Read the agents the node's OpenCode V2 server exposes (`GET /api/agent`).
+ *  The shape is `{location:{directory}, data:[{id|name, ...}]}`; only public
+ *  identifiers are kept and nothing else is copied. An empty list is a valid
+ *  answer (this node simply defines no agents) and must not be invented into a
+ *  default "Build" entry on the client. */
+export async function readOpenCodeAgents(opts: {
+  scope: OpenCodeCatalogScope;
+  url: string;
+  authorization: string;
+  timeoutMs?: number;
+}): Promise<{ agents: string[]; observedAt: string }> {
+  const snapshot = await readOpenCodeRaw(opts, "/api/agent");
+  const rows = dataAt(snapshot, opts.scope.directory);
+  if (!Array.isArray(rows)) throw new OpenCodeCatalogError("invalid_response");
+  if (rows.length > MAX_ROWS) throw new OpenCodeCatalogError("too_large");
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!record(row)) throw new OpenCodeCatalogError("invalid_response");
+    const id = row.id ?? row.name;
+    seen.add(identifier(id));
+  }
+  return { agents: [...seen], observedAt: new Date().toISOString() };
+}
+
+/** Shared guarded fetch: loopback only, same header contract as the catalog. */
+async function readOpenCodeRaw(opts: { scope: OpenCodeCatalogScope; url: string; authorization: string; timeoutMs?: number }, path: string): Promise<unknown> {
+  let base: URL;
+  try { base = new URL(opts.url); } catch { throw new OpenCodeCatalogError("invalid_target"); }
+  if (!['127.0.0.1', '[::1]'].includes(base.hostname) || base.protocol !== 'http:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
+    throw new OpenCodeCatalogError("invalid_target");
+  }
+  if (!opts.scope.directory || !opts.authorization || /[\r\n]/.test(opts.authorization)) throw new OpenCodeCatalogError("invalid_target");
+  if (!/^[\x20-\x7e]*$/.test(opts.scope.directory)) throw new OpenCodeCatalogError("directory_not_ascii");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000);
+  try {
+    const response = await fetch(new URL(path, base), { headers: {
+      authorization: opts.authorization, "x-opencode-directory": opts.scope.directory,
+    }, redirect: "error", signal: controller.signal });
+    if (response.status === 401 || response.status === 403) throw new OpenCodeCatalogError("unauthorized");
+    if (!response.ok) throw new OpenCodeCatalogError("unavailable");
+    if (!response.body) throw new OpenCodeCatalogError("invalid_response");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = []; let size = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > MAX_BODY) throw new OpenCodeCatalogError("too_large");
+        chunks.push(chunk.value);
+      }
+    } finally { await reader.cancel().catch(() => {}); }
+    try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new OpenCodeCatalogError("invalid_response"); }
+  } catch (error) {
+    throw error instanceof OpenCodeCatalogError ? error : new OpenCodeCatalogError("unavailable");
+  } finally { clearTimeout(timer); controller.abort(); }
+}

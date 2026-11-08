@@ -1447,7 +1447,7 @@ import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
 import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
-import { readOpenCodeCatalog } from "./runtime/opencode-v2-catalog";
+import { readOpenCodeCatalog, readOpenCodeAgents } from "./runtime/opencode-v2-catalog";
 // #3144 —— 清单与采集时刻同进同出（纯函数在 runtime/opencode-catalog-report.ts，可单测）
 import { catalogReport, keepLastCatalog } from "./runtime/opencode-catalog-report";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -1944,6 +1944,23 @@ async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: s
     return lastCatalogReport;
   }
 }
+
+/** #4150-Build — the agents this node's OpenCode V2 server exposes.
+ *  Read on the same loopback endpoint as the model catalog and cached like it:
+ *  an empty answer is meaningful (no agents configured) and must not be turned
+ *  into a default entry. */
+let lastAgentsReport: { agents: string[]; seenAt: string } | undefined;
+async function reportedOpenCodeAgents(endpoint: { url: string; authorization: string; directory: string } | null): Promise<{ agents: string[]; seenAt: string } | undefined> {
+  if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || !endpoint) return undefined;
+  try {
+    const read = await readOpenCodeAgents({
+      scope: { networkId: NETWORK_ID || "default", daemonId: NODE_ID || "n_self", directory: endpoint.directory },
+      url: endpoint.url, authorization: endpoint.authorization, timeoutMs: 3_000,
+    });
+    lastAgentsReport = { agents: read.agents, seenAt: read.observedAt };
+    return lastAgentsReport;
+  } catch { return lastAgentsReport; }
+}
 /**
  * #3952 —— 每轮结束后把这一次的 token 用量报给 Hub（只报计数，不报内容）。
  *
@@ -2009,6 +2026,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     ? readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd())
     : null;
   const reportedCatalog = await reportedOpenCodeCatalog(catalogEndpoint);
+  const reportedAgents = await reportedOpenCodeAgents(catalogEndpoint);
   const variantSession = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeCopresenceSession?.variantConfigCapable
     ? opencodeCopresenceSession : undefined;
   const variantReadback = variantSession?.variantConfigReadback
@@ -2113,6 +2131,11 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       ...(reportedCatalog ? {
         opencode_catalog: reportedCatalog.models,
         ...(reportedCatalog.seenAt ? { opencode_catalog_seen_at: reportedCatalog.seenAt } : {}),
+      } : {}),
+      // #4150-Build — agents the server exposes; empty array means "none configured".
+      ...(reportedAgents ? {
+        opencode_agents: reportedAgents.agents,
+        ...(reportedAgents.seenAt ? { opencode_agents_seen_at: reportedAgents.seenAt } : {}),
       } : {}),
       ...(catalogEndpoint ? { opencode_server: catalogEndpoint.url } : {}),
     },
