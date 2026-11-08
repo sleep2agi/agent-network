@@ -106,7 +106,24 @@ export const resolveDesktopUpdate = async (fetchImpl = fetch) => {
   }
 };
 
-export default async function handler(_request, response) {
+// The desktop shell can run the app from a different origin (web build, dev
+// server, packaged app). Without an explicit allow-origin the browser blocks
+// the response and the app can only say "update server unavailable" even
+// though the endpoint answers 200 for curl. https://anet.sh also 307s to
+// www.anet.sh, so the final response is the one that must carry the header.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Max-Age': '600',
+};
+
+export default async function handler(request, response) {
+  for (const [name, value] of Object.entries(CORS_HEADERS)) response.setHeader(name, value);
+  if (request?.method === 'OPTIONS') {
+    response.status(204).end();
+    return;
+  }
   try {
     const { manifest, source } = await resolveDesktopUpdate();
     response.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -117,6 +134,7 @@ export default async function handler(_request, response) {
     response.setHeader('X-Anet-Update-Source', source);
     response.status(200).json(manifest);
   } catch (error) {
+    response.setHeader('Content-Type', 'application/json; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
     response.status(503).json({ error: 'desktop_update_unavailable' });
   }
