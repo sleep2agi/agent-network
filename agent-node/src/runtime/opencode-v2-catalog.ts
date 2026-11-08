@@ -227,3 +227,24 @@ async function readOpenCodeRaw(opts: { scope: OpenCodeCatalogScope; url: string;
     throw error instanceof OpenCodeCatalogError ? error : new OpenCodeCatalogError("unavailable");
   } finally { clearTimeout(timer); controller.abort(); }
 }
+
+/** The agent a specific native session is currently bound to (`session.agent`).
+ *  The client cannot read the node's loopback server, so this is reported with
+ *  the catalogue. Returns undefined when the session is unknown or the field is
+ *  absent - never a guessed default. */
+export async function readOpenCodeSessionAgent(opts: {
+  scope: OpenCodeCatalogScope;
+  url: string;
+  authorization: string;
+  sessionId?: string;
+  timeoutMs?: number;
+}): Promise<{ agent: string; sessionId: string } | undefined> {
+  if (!opts.sessionId || !/^ses_[A-Za-z0-9]{1,190}$/.test(opts.sessionId)) return undefined;
+  const response = await readOpenCodeRaw(opts, `/api/session/${encodeURIComponent(opts.sessionId)}`);
+  if (!record(response) || !record(response.data)) throw new OpenCodeCatalogError("invalid_response");
+  const data = response.data as Record<string, unknown>;
+  if (data.id !== opts.sessionId) throw new OpenCodeCatalogError("scope_mismatch");
+  const agent = data.agent;
+  if (agent === undefined || agent === null) return undefined;
+  return { agent: identifier(agent), sessionId: opts.sessionId };
+}

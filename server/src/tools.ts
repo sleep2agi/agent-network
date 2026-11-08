@@ -1116,6 +1116,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // Bounded and optional: an older node omits it, an empty list means "none".
           opencode_agents: z.array(z.string().max(200)).max(200).optional().catch(undefined),
           opencode_agents_seen_at: z.string().max(40).optional().catch(undefined),
+          opencode_agent_current: z.string().max(200).optional().catch(undefined),
           // #4150 — the three independent read/attach previews plus the fork
           // transport. The transport reads these off this snapshot, so a hub
           // whose report schema omits them drops them silently (zod object is

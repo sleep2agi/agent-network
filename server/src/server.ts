@@ -7081,6 +7081,7 @@ return Bun.serve({
         // "opencodeAgents is not defined" on the deployed hub.
         let opencodeAgents: string[] | null = null;
         let opencodeAgentsSeenAt: string | null = null;
+        let opencodeAgentCurrent: string | null = null;
         if (snap) {
           let parsed: any = null;
           try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
@@ -7108,6 +7109,10 @@ return Bun.serve({
             const seenAgents = parsed?.opencode_agents_seen_at;
             opencodeAgentsSeenAt = typeof seenAgents === "string" && seenAgents.length > 0 && seenAgents.length <= 40 ? seenAgents : null;
           }
+          const rawAgentCurrent = parsed?.opencode_agent_current;
+          if (typeof rawAgentCurrent === "string" && rawAgentCurrent.length > 0 && rawAgentCurrent.length <= 200) {
+            opencodeAgentCurrent = rawAgentCurrent;
+          }
           const flags = parsed?.flags;
           if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
@@ -7131,6 +7136,7 @@ return Bun.serve({
           role,
           opencode_catalog: opencodeCatalog,
           opencode_agents: opencodeAgents,
+          opencode_agent_current: opencodeAgentCurrent,
           opencode_agents_seen_at: opencodeAgentsSeenAt,
           // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
           opencode_catalog_seen_at: opencodeCatalogSeenAt,
