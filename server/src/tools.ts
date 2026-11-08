@@ -1112,6 +1112,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // Internal source-aware delivery handshake; declaration alone enables
           // no public queue/dispatch and old daemons must not receive it.
           source_node_delivery: z.literal("source-node-delivery-v1-opencode-2.0.22").optional().catch(undefined),
+          // #4150 — the three independent read/attach previews plus the fork
+          // transport. The transport reads these off this snapshot, so a hub
+          // whose report schema omits them drops them silently (zod object is
+          // non-strict) and every call answers 403 forever. Literals, and
+          // .catch(undefined) so one unknown value never rejects a whole report.
+          source_directory_read: z.literal("source-directory-read-v1-opencode-2.0.22").optional().catch(undefined),
+          project_new_session: z.literal("project-new-session-v1-opencode-2.0.22").optional().catch(undefined),
+          session_attach: z.literal("existing-session-attach-v1-opencode-2.0.22").optional().catch(undefined),
+          source_fork_transport: z.literal("source-fork-transport-v1-opencode-2.0.22").optional().catch(undefined),
           // #622 —— 逐 runtime 实测就绪度。收得宽、坏了只丢这一格(见 runtime-readiness.ts)。
           runtime_readiness: runtimeReadinessSchema,
         }).optional(),
