@@ -21,6 +21,7 @@ RUN curl --fail --silent --show-error --location \
   && rm -f /tmp/bun-linux-x64.zip
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 # 🔴 两边都用 npm ci。原来 agent-node 走的是 npm install —— 而它旁边的

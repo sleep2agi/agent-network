@@ -27,6 +27,7 @@ RUN curl --fail --silent --show-error --location \
 RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY server/package.json server/package-lock.json ./server/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 # --ignore-scripts：本套件只驱动 CLI 的编排路径、从不开 PTY,node-pty 的原生构建

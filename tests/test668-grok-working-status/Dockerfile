@@ -1,6 +1,7 @@
 FROM oven/bun:1.3.14
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json agent-node/package-lock.json /workspace/agent-node/
 COPY server/package.json server/package-lock.json /workspace/server/
 RUN cd /workspace/agent-node && bun install --frozen-lockfile --ignore-scripts \

@@ -1,0 +1,32 @@
+# Independent managed-fork delivery diagnostic
+
+Original product and test input: 7c12d59cfebc32fad2605f3f6d01e8fa8f406842.
+Earlier evidence commit d358dc7a3da9b355c2c6da496d182d99fafc13c6 retains the
+create pass and fork failure. Its report references the earlier 7c12 bundle;
+the separate bundle including d358 is /tmp/opencode/anet-4099-4150-backend-d358dc7a.bundle,
+SHA-256 b837b2691da80a289b81c84bc8b679f406c05cda386997155d52d0721dcb812a.
+Neither bundle contains the ELF.
+
+Source, contracts, fork fixture, native helper and Docker COPY files have no diff
+between d358 and ceda502e. Original fork failure has native fork HTTP 200,
+deliver ACK refused and no child registration, then unknown_rotation_required.
+That maps to profile worker's pre-work refusal or reader.deliver null before
+work begins; original output cannot discriminate the exact branch. No claim is
+made that timing, authorization or process identity caused it.
+
+The test-only diagnose-delivery.py generates a throwaway overlay of
+agent-node/src/runtime/session-source-evidence.ts with fixed refusal enums and
+lease presence/remaining milliseconds, no credentials or payload. It fails on
+anchor drift; it adds logging only, does not relax guards or change outcomes.
+This overlay was mounted only inside the isolated test container, never committed
+as product source. The ELF and image digests are in the preceding report.
+
+Generate: python3 tests/test-shared-fork/diagnose-delivery.py agent-node/src/runtime/session-source-evidence.ts /tmp/opencode/anet-release-delivery-diagnostic.ts
+Run: sg docker -c 'docker run --rm --init --network none --user 0 -e HOME=/state/test-home -e XDG_CONFIG_HOME=/state/test-config -e XDG_DATA_HOME=/state/test-data -e XDG_CACHE_HOME=/state/test-cache -e XDG_STATE_HOME=/state/test-state --mount type=bind,src=/tmp/opencode/anet-release-delivery-diagnostic.ts,dst=/work/agent-node/src/runtime/session-source-evidence.ts,readonly --mount type=bind,src=/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode,dst=/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode,readonly anet-release-4099-4150-check:local tests/test-shared-fork/chain.test.ts'
+
+New isolated action sh_1b88fd9a7001k2R8P7vXFosnPp: exit 0; 1 pass / 0 fail /
+32 assertions. Native fork 200, child registration ACK 200, same child high and
+clear applied, no identity overlay. No DELIVERY_DIAG refusal fired, so this run
+does not reveal the original failure's root cause and is not a product fix or a
+clean uninstrumented rerun. The previous failed unknown was not replayed or
+deleted. Both outcomes remain release evidence; neither cancels the other.

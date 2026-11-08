@@ -2,6 +2,7 @@ ARG SOURCE_COMMIT
 FROM oven/bun:1.3.14
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/package.json
 RUN cd agent-node && bun install --ignore-scripts
 RUN install -d /opt/codex159 && cd /opt/codex159 && bun add @openai/codex@0.159.2

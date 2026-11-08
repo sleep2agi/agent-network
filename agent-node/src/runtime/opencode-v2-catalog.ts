@@ -16,7 +16,7 @@ export interface OpenCodeCatalogSnapshot {
   completeness: "unknown";
   observedAt: string;
   providers: Array<{ id: string; activation: "auto" | "enabled" | "disabled" }>;
-  models: Array<{ providerId: string; id: string }>;
+  models: Array<{ providerId: string; id: string; variants?: string[] }>;
   defaultModel: { providerId: string; id: string } | null;
 }
 
@@ -71,7 +71,7 @@ export function normalizeOpenCodeCatalog(
     if (providers.has(id)) throw new OpenCodeCatalogError("invalid_response");
     providers.set(id, { id, activation: row.activation as "auto" | "enabled" | "disabled" });
   }
-  const models = new Map<string, { providerId: string; id: string }>();
+  const models = new Map<string, OpenCodeCatalogSnapshot["models"][number]>();
   for (const row of rawModels) {
     if (!record(row)) throw new OpenCodeCatalogError("invalid_response");
     const providerId = identifier(row.providerID), id = identifier(row.id);
@@ -80,14 +80,23 @@ export function normalizeOpenCodeCatalog(
     if (!providers.has(providerId)) throw new OpenCodeCatalogError("invalid_response");
     const key = JSON.stringify([providerId, id]);
     if (models.has(key)) throw new OpenCodeCatalogError("invalid_response");
-    models.set(key, { providerId, id });
+    let variants: string[] | undefined;
+    if (row.variants !== undefined) {
+      if (!Array.isArray(row.variants) || row.variants.length > 200) throw new OpenCodeCatalogError("invalid_response");
+      variants = row.variants.map((v: unknown) => {
+        if (!record(v)) throw new OpenCodeCatalogError("invalid_response");
+        return identifier(v.id);
+      });
+      if (new Set(variants).size !== variants.length) throw new OpenCodeCatalogError("invalid_response");
+    }
+    models.set(key, { providerId, id, ...(variants === undefined ? {} : { variants }) });
   }
   let defaultModel: OpenCodeCatalogSnapshot["defaultModel"] = null;
   if (rawDefault !== undefined && rawDefault !== null) {
     if (!record(rawDefault)) throw new OpenCodeCatalogError("invalid_response");
     const providerId = identifier(rawDefault.providerID), id = identifier(rawDefault.id);
-    defaultModel = models.get(JSON.stringify([providerId, id])) ?? null;
-    if (!defaultModel) throw new OpenCodeCatalogError("invalid_response");
+    if (!models.has(JSON.stringify([providerId, id]))) throw new OpenCodeCatalogError("invalid_response");
+    defaultModel = { providerId, id };
   }
   return { scope: { ...scope }, source: "opencode-v2-api", state: "snapshot", invocationVerified: false,
     completeness: "unknown", observedAt, providers: [...providers.values()], models: [...models.values()], defaultModel };

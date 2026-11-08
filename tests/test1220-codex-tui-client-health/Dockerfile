@@ -17,6 +17,7 @@ RUN curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --ret
  && test "$(bun --version)" = "$BUN_VERSION" \
  && rm /tmp/bun.zip
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 COPY server/package.json server/package-lock.json ./server/

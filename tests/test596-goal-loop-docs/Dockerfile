@@ -8,6 +8,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
+COPY contracts /workspace/contracts
 COPY agent-node/package.json /workspace/agent-node/package.json
 RUN cd /workspace/agent-node && bun install --ignore-scripts
 COPY agent-node /workspace/agent-node

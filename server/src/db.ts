@@ -1,7 +1,31 @@
 import { refreshScheduledBackoff } from "./scheduled-backoff.js"; import { scheduledFailureCode } from "./scheduled-failure-code.js";
 import { createAdapter, type DbAdapter } from "./db-adapter"; import { withStatementHook } from "./status-read-cache"; // #431 写 sessions 的语句让 /api/status 缓存失效
+import { sessionSourceGrantSchema } from "./session-source-grant";
+import { sessionSourceAdmissionSchema, sessionSourceExecutionSchema, sessionSourceDeliverySchema, sessionSourceTransportSchema, sessionProjectCreateSchema, migrateProjectOperationJournal } from "./session-source-admission-store";
+import { sessionSourceCreateGuards } from "./session-source-create";
 
 export const db: DbAdapter = withStatementHook(createAdapter());
+db.exec(sessionSourceGrantSchema);
+db.exec(sessionSourceAdmissionSchema);
+db.exec(sessionSourceExecutionSchema);
+db.exec(sessionSourceDeliverySchema);
+db.exec(sessionSourceTransportSchema);
+db.exec(sessionProjectCreateSchema);
+migrateProjectOperationJournal(db);
+
+// #590 additive journal. Keep intent tombstones: deleting one permits the
+// same user intent to create a second child after an uncertain outcome.
+db.exec(`CREATE TABLE IF NOT EXISTS session_fork_requests (
+  request_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL,
+  network_id TEXT NOT NULL, node_id TEXT NOT NULL, token_id TEXT NOT NULL,
+  requester_token_id TEXT NOT NULL, requester_user_id TEXT NOT NULL,
+  session_id TEXT NOT NULL, binding_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending','in_progress','done','failed','unknown','expired')),
+  result_session_id TEXT, error TEXT,
+  UNIQUE(requester_user_id, network_id, intent_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_fork_active_node
+  ON session_fork_requests(network_id,node_id) WHERE status IN ('pending','in_progress');`);
 
 // Schema
 db.exec(`
@@ -853,6 +877,17 @@ try {
   db.exec(`ALTER TABLE node_create_requests ADD COLUMN clone_json TEXT`);
 } catch (e: any) {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
+// #4150/#590 internal source admission. Add after legacy table rebuilds;
+// NULL leaves ordinary creation unchanged. PostgreSQL cannot enable admission.
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN source_ref TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+if (db.dialect === "sqlite" && db.atomicTransactions === true && db.transactionalFeaturesRefusal === null) {
+  db.exec(sessionSourceCreateGuards);
 }
 
 // #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,

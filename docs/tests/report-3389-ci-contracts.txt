@@ -1,0 +1,175 @@
+# PR #3389 CI triage — 2026-11-08
+
+Scope: make pull request #3389 (branch `release/ocv2-4150-backend`, head
+b5de733f) green without changing product behaviour, without loosening a gate,
+without touching main's pre-existing reds, and without version bumps.
+
+Evidence base: this checkout at b5de733f, the public check-run list of that
+commit (100 failing check-runs, 59 of them new relative to main 84afe24), and
+local reproduction of every failure below. Job logs are not downloadable
+without a token, so every claim here is backed by a local command, not by a log
+quote.
+
+## 1. e2e / test611 — `bin/cli.ts(8847,26)` TS2345
+
+Before (reproduced locally, `agent-network` `tsc --noEmit`):
+
+    bin/cli.ts(8847,26): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+
+Cause: `readOpencodePrivateProfileFile()` returns `string | undefined`
+(`agent-network/src/opencode-preset.ts:388`, undefined when the file is absent),
+and the source-delivery branch added in 7c12d59c passed it straight to
+`JSON.parse`. Introduced by this PR.
+
+Fix: `agent-network/bin/cli.ts` — read once, refuse when absent (same shape as
+the existing guard at cli.ts:3208), then parse. No `!`, no cast: the route is a
+private source-delivery launcher, so a missing profile is a refusal, not a
+default.
+
+After: `tsc --noEmit` exits 0 (`smol-toml` supplied from a local node_modules).
+
+## 2. Docker build contexts — `Could not resolve: "../../contracts/..."`
+
+Before (reproduced: agent-node copied to a directory with no sibling
+`contracts/`, then `bun build src/cli.ts`):
+
+    error: Could not resolve: "../../contracts/session-source-transport"
+        at /app/agent-node/src/cli.ts:21:40
+    (same for session-source-delivery, session-source-directory, session-project-create)
+
+Cause: this PR adds six root-level `contracts/*.ts` files and imports them from
+`agent-node/src/cli.ts` (module-scope capability constants),
+`agent-node/src/runtime/session-source-*.ts`, and `server/src/server.ts` (via
+`session-source-transport`). Docker images copy `server/` and `agent-node/`
+individually, so `../../contracts` resolved outside the build context. Every
+image that compiles agent-node or boots the hub from source failed at once —
+that is the whole "hub semantics + guards", e2e, rename-ghost, rest-task-api,
+v1-borrowed, shared-candidate, grok, node-secrets and daemon-suite cascade.
+
+Fix: add `COPY contracts <parent-of-package-dir>/contracts` to the Dockerfiles
+that copy `server` or `agent-node` source (297 files, one line each, placed just
+before the first package copy so the destination matches
+`COPY <pkg> <parent>/<pkg>`). Destinations were computed from each file's
+`WORKDIR` and `COPY` destination, then independently re-verified: for every
+stage, each package parent directory has a corresponding contracts copy.
+`contracts/side-thread/v1`-only copies were widened to the whole directory
+instead of adding a second copy.
+
+Two Dockerfiles were deliberately left alone:
+
+- `tests/hub-release-compat/Dockerfile` — built from a temporary context that
+  mirrors only `server/` + `compat/`; it is release-prep only (NOT-IN-CI).
+- `tests/test698-atomic-peer-reply/Dockerfile.legacy-hub` — built from a
+  `git archive` of an older base commit that has no `contracts/`; adding the
+  copy would break it.
+
+After (reproduced: agent-node in the image layout with the sibling contracts):
+
+    bun build src/cli.ts  →  1.85 MB cli.js, exit 0
+
+and for the hub, `bun build src/session-source-transport.ts` no longer reports
+`Could not resolve: ../../contracts/...` (it stops at third-party deps that the
+Dockerfile's `bun install` provides).
+
+## 3. agent-node typecheck ratchet
+
+Before: two new error identities versus `agent-node/typecheck-baseline.txt`.
+
+- `agent-node/src/runtime/session-source-directory.ts(216,52)` TS2345 — `page`
+  is an untyped HTTP payload, so the repeated `page.cursor.next` read is not
+  narrowed by the `typeof` guard and reached `Set<string>.add` as
+  `string | undefined`. Fixed by binding the value once into `next` before the
+  guard (also removes a double property read). Behaviour unchanged.
+- `agent-node/src/runtime/side-thread/domain.ts` TS2367 — the message text
+  embeds an unordered union, and the baseline carried the pre-PR member order;
+  replaced the one identity string like-for-like (still one count).
+
+After (local tsc 5.9.3 + @types/node 20.19.39, node-pty not installed here):
+82 errors, added = only `Cannot find module 'node-pty'` — a local artifact;
+`node-pty` is an `optionalDependencies` entry that the CI install provides.
+Removed = one baseline identity that no longer reproduces (notice only).
+
+## 4. home-path-baseline
+
+Before: `::error file=scripts/hub-feishu-doctor.sh::new file with hardcoded
+/home/<name>/ path(s)`.
+
+Fix: the new script now derives `HOME`, `PATH`, log and default node dir from
+`$HOME` (`HOME` required). No behaviour change for the operator; the repo no
+longer carries the login name.
+
+After: `python3 .github/scripts/check-home-path-baseline.py` → exit 0.
+
+## 5. mutation-pin-integrity
+
+Before: `tests/test-shared-variant/runtime.test.ts:1 mutator file shape not
+recognised` (unchecked 5 vs baseline 4).
+
+Cause: the new test named a local array `mutations` and wrote fixture files, so
+the scanner classified it as a mutation harness it could not resolve. It is not
+one — it counts write requests.
+
+Fix: rename the local to `postedPaths` (the array records POST paths). No
+assertion changed.
+
+After: `python3 scripts/check-mutation-pins.py` → GREEN, unchecked 4 <= 4.
+
+## 6. keyset-join (new gate red, same PR)
+
+Before: 3 blocking hits — `contracts/session-source-directory.ts` compared
+`Object.keys(x).sort().join() !== "a,b"`.
+
+Fix: exact array comparison helper `keysAreExactly(v, expected)`; the three call
+sites and the snapshot key-set check (was `[...].includes(joined)`) now compare
+sorted key arrays. Semantics preserved and exercised locally: valid, valid with
+`selection_expires_at`, extra key rejected, missing key rejected, wrong
+`expires_at` rejected, server/project/session shapes accepted, extra member key
+rejected.
+
+After: `python3 scripts/check-keyset-join.py` → 0 blocking, exit 0.
+
+## 7. docs-integrity / doc-symbol-pins / test-suite-registration
+
+- `docs/runbooks/session-project-create.md` and
+  `.../session-source-directory.md` linked to report files that were never
+  committed. Links now point at committed evidence
+  (`docs/tests/report-test4099-4150-*.txt`) and the harnesses that produce it;
+  the directory runbook states explicitly that there is no separate committed
+  report.
+- `docs/architecture.md` pinned `sub === "dashboard"` at cli.ts#L11114 (shifted
+  to 11167 by this PR's insertion) and `docs/message-lifecycle.md` pinned
+  `send_reply`/`send_ack` at tools.ts:2977/2991 (now 2981/2995: the PR edits
+  tools.ts). Both anchors corrected; the checker re-judges them.
+- `tests/test-shared-fork`, `tests/test-shared-variant`,
+  `tests/test4150-native-project` are new suites that no CI job runs. They need
+  the operator's test-only `2.0.22-anet-test.29040e2` ELF, which is not a
+  published artifact, so they cannot run on a runner. Each got a `NOT-IN-CI.md`
+  with `Verified:` and `Revisit-when:`. This is the gate's own second option,
+  not a new exemption (no baseline line added).
+
+## Verification summary (all local, all exit 0 after the change)
+
+| command | before | after |
+| --- | --- | --- |
+| `agent-network` `tsc --noEmit` | 2, `bin/cli.ts(8847,26)` TS2345 | 0 |
+| `agent-node` tsc vs baseline | +2 identities (one real) | +0 real (node-pty only, local) |
+| `python3 scripts/check-mutation-pins.py` | 2 | 0 |
+| `python3 scripts/check-keyset-join.py` | 1 | 0 |
+| `python3 .github/scripts/check-home-path-baseline.py` | 1 | 0 |
+| `python3 .github/scripts/check-docs-integrity.py` | 1 | 0 |
+| `python3 scripts/check-doc-symbol-pins.py .` | 1 | 0 |
+| `python3 .github/scripts/check-test-suite-registration.py` | 1 | 0 |
+| `bun build src/cli.ts` in image layout | 1 (contracts) | 0 |
+
+## Not verified here
+
+- No Dockerfile was built end to end: every one of them needs `npm ci` /
+  `bun install` from the network and the pinned `oven/bun` image is not in the
+  local image store. The build-context failure and its fix were reproduced by
+  replaying the exact file layout with a local Bun 1.3.14 image.
+- Windows `run.ps1` (job "Windows Codex co-presence native smoke"): the static
+  contract it starts with passes locally (`static-contract.mjs`, exit 0), so the
+  failure is inside the Windows-only body; needs the job log to attribute.
+- Jobs that were already red on main (test-inventory, agent-network unit,
+  server unit, hub daemon fail-closed, test629-mcp-schema-policy) were left
+  untouched.

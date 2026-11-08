@@ -28,6 +28,38 @@ function stubCore(over: Partial<OpenCodeCopresenceSession> = {}): OpenCodeCopres
 }
 
 describe("#3146 — shared-server wrapper", () => {
+  test("forwards scoped native model readback without flattening variant", async () => {
+    const model = { providerID: "stub", id: "model", variant: "high" };
+    const wrapped = wrapSharedCopresenceSession(stubCore({
+      selectedSessionModel: async (id) => id === "ses_stub" ? model : undefined,
+    }));
+    expect(await wrapped.selectedSessionModel!("ses_stub")).toEqual(model);
+    expect(await wrapped.selectedSessionModel!("ses_other")).toBeUndefined();
+    expect(wrapSharedCopresenceSession(stubCore()).selectedSessionModel).toBeUndefined();
+  });
+  test("forwards fork identity and preserves forked and unknown outcomes", async () => {
+    const seen: string[] = [];
+    let uncertain = false;
+    const wrapped = wrapSharedCopresenceSession(stubCore({
+      forkSession: async id => { seen.push(id); return uncertain
+        ? { status: "unknown", reason: "verification_failed" }
+        : { status: "forked", sessionId: "ses_child" }; },
+    }));
+    expect(typeof wrapped.forkSession).toBe("function");
+    expect(await wrapped.forkSession!("ses_stub")).toEqual({ status: "forked", sessionId: "ses_child" });
+    uncertain = true;
+    expect(await wrapped.forkSession!("ses_stub")).toEqual({ status: "unknown", reason: "verification_failed" });
+    expect(seen).toEqual(["ses_stub", "ses_stub"]);
+  });
+  test("forwards scoped model selection and its unsupported result", async () => {
+    const seen: unknown[] = [];
+    const wrapped = wrapSharedCopresenceSession(stubCore({
+      selectSessionModel: async (id, model) => { seen.push(id, model); return { status: "rejected", reason: "unsupported" }; },
+    }));
+    const model = { providerID: "stub", id: "model", variant: "high" };
+    expect(await wrapped.selectSessionModel!("ses_stub", model)).toEqual({ status: "rejected", reason: "unsupported" });
+    expect(seen).toEqual(["ses_stub", model]);
+  });
   test("forwards selectedModel / setSelectedModel (the two that went missing)", () => {
     const wrapped = wrapSharedCopresenceSession(stubCore());
     expect(typeof wrapped.selectedModel).toBe("function");
@@ -49,6 +81,7 @@ describe("#3146 — shared-server wrapper", () => {
     const wrapped = wrapSharedCopresenceSession(stubCore({ selectedModel: undefined, setSelectedModel: undefined }));
     expect(wrapped.selectedModel).toBeUndefined();
     expect(wrapped.setSelectedModel).toBeUndefined();
+    expect(wrapped.forkSession).toBeUndefined();
   });
 
   test("forwards the rest unchanged and runs afterClose once", async () => {

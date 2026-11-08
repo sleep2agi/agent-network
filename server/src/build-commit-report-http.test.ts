@@ -20,6 +20,7 @@ let hub: any = null;
 let USER = "";
 let NET = "";
 let ntok = "";
+let utok = "";
 let ALIAS = "";
 const PW = "BuildCommitPassw0rd!x";
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";   // 40 hex，固定值便于断言
@@ -50,6 +51,7 @@ beforeAll(async () => {
   USER = `bc_user_${STAMP}`;
   ALIAS = `bc-node-${STAMP}`;
   const reg = register(USER, PW);
+  utok = reg.token!;
   NET = reg.network_id!;
   const minted = createNetworkTokenForNode(reg.user!.user_id, NET, ALIAS, `node_bc_${STAMP}`);
   expect(minted.ok).toBe(true);
@@ -126,3 +128,91 @@ describe("#3144 opencode_catalog_seen_at 的三段链路（真 HTTP）", () => {
     expect(row.opencode_catalog_seen_at).not.toBe("");
   });
 });
+
+test("variant capability survives authenticated report_status schema and storage", async () => {
+  expect((await report({ config_snapshot: { opencode_variant_config_capable: true, model_effective: "fixture/model", modelVariant: "high" } })).ok).toBe(true);
+  const row = db.get<{ config_snapshot: string }>("SELECT config_snapshot FROM nodes WHERE node_id = ?1", `node_bc_${STAMP}`);
+  expect(JSON.parse(row!.config_snapshot).opencode_variant_config_capable).toBe(true);
+  expect(JSON.parse(row!.config_snapshot)).toMatchObject({ model_effective: "fixture/model", modelVariant: "high" });
+  const configResponse = await fetch(`${BASE}/api/nodes/node_bc_${STAMP}/config?network_id=${NET}`, { headers: auth(ntok) });
+  expect(configResponse.status).toBe(200);
+  expect(await configResponse.json()).toMatchObject({ model_effective: "fixture/model", modelVariant: "high", opencode_variant_config_capable: true });
+  expect((await report({ config_snapshot: { opencode_variant_config_capable: "true" } })).ok).toBe(true);
+  const bad = db.get<{ config_snapshot: string }>("SELECT config_snapshot FROM nodes WHERE node_id = ?1", `node_bc_${STAMP}`);
+  expect(JSON.parse(bad!.config_snapshot).opencode_variant_config_capable).toBeUndefined();
+});
+
+test("variant-capable model update persists private ack policy across lost capability", async () => {
+  const nodeId = `node_bc_${STAMP}`;
+  expect((await report({ config_snapshot: { model: "fixture/model", opencode_variant_config_capable: true, flags: { opencodeGeneration: "v2", opencodeMode: "copresence" } } })).ok).toBe(true);
+  db.run("UPDATE nodes SET runtime = ?1 WHERE node_id = ?2", ["opencode", nodeId]);
+  const queued = await rpc("update_node_config", { node_id: nodeId, base_revision: 0, patch: { model: "fixture/model" } }, utok);
+  expect(queued.ok).toBe(true);
+  expect(JSON.parse(db.get<any>("SELECT patch_json FROM node_config_updates WHERE update_id = ?1", queued.update_id).patch_json)._anet_variant_ack_required).toBe(true);
+  const pulled = await rpc("get_config_update", {});
+  expect(pulled.update.patch._anet_variant_ack_required).toBeUndefined();
+  expect((await report({ config_snapshot: { model: "fixture/model", flags: {} } })).ok).toBe(true);
+  expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", queued.update_id).status).toBe("pending");
+  expect((await rpc("ack_config_update", { update_id: queued.update_id, status: "rejected", error: "test_complete" })).ok).toBe(true);
+});
+
+test("TEST-ONLY real Hub HTTP and owned runtime variant via explicit node dispatch", async () => {
+  const { openVettedOpenCodeCopresence } = await import("../../agent-node/src/runtime/opencode-copresence/runtime.js");
+  const { OPENCODE_V2_BACKEND } = await import("../../agent-node/src/runtime/opencode-backend.js");
+  const { applyVariantConfig } = await import("../../agent-node/src/runtime/opencode-copresence/variant-config-apply.js");
+  const { readOpenCodeV2CatalogEndpoint } = await import("../../agent-node/src/runtime/opencode-v2-catalog-endpoint.js");
+  const root = mkdtempSync(join(tmpdir(), "anet-hub-variant-"));
+  const config = { model: "fixture/model", enabled_providers: ["fixture"], provider: { fixture: {
+    name: "fixture", npm: "@ai-sdk/openai-compatible", options: { baseURL: "http://127.0.0.1:1/v1", apiKey: "synthetic" },
+    models: { model: { name: "model", limit: { context: 128000, output: 16000 }, variants: { high: {}, low: {} } } },
+  } } };
+  const noTmux = () => { throw Error("unexpected tmux"); };
+  const session = await openVettedOpenCodeCopresence({ backend: OPENCODE_V2_BACKEND, binary: "/tool/opencode", cwd: root, workDir: root,
+    env: { PATH: process.env.PATH, HOME: root, XDG_CONFIG_HOME: join(root, "config"), XDG_DATA_HOME: join(root, "data"), XDG_CACHE_HOME: join(root, "cache"), XDG_STATE_HOME: join(root, "state"), ANET_VARIANT_TEST_ONLY: "1", OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
+    model: "fixture/model", startupTimeoutMs: 20000, tmuxRunner: noTmux, tmuxRespawn: noTmux });
+  try {
+    expect(session.variantConfigCapable).toBe(true);
+    const endpoint = readOpenCodeV2CatalogEndpoint(root)!;
+    let ready = false;
+    for (let i = 0; i < 60 && !ready; i++) {
+      const r = await fetch(`${endpoint.url}/api/model`, { headers: { authorization: endpoint.authorization, "x-opencode-directory": endpoint.directory } });
+      const body = await r.json() as any;
+      ready = body.location?.directory === root && body.data?.some((row: any) => row.providerID === "fixture" && row.id === "model" && row.variants?.some((v: any) => v.id === "high"));
+    }
+    expect(ready).toBe(true);
+    expect(await session.variantConfigReadback!()).toMatchObject({ providerID: "fixture", id: "model" });
+    expect((await report({ config_snapshot: { opencode_variant_config_capable: true, model: "fixture/model" } })).ok).toBe(true);
+    const nodeId = `node_bc_${STAMP}`;
+    const queued = await rpc("update_node_config", { node_id: nodeId, base_revision: 0, patch: { modelVariant: "high" } }, utok);
+    expect(queued.ok).toBe(true);
+    const pulled = await rpc("get_config_update", {});
+    expect(pulled.update).toMatchObject({ update_id: queued.update_id, patch: { modelVariant: "high" }, apply_mode: "hot" });
+    const applied = await applyVariantConfig(session, pulled.update.patch);
+    expect(applied).toMatchObject({ status: "applied", model: { providerID: "fixture", id: "model", variant: "high" } });
+    // A matching heartbeat must not finalize the pending write.
+    const observed = await session.variantConfigReadback!();
+    expect(observed).toMatchObject({ providerID: "fixture", id: "model", variant: "high" });
+    expect((await report({ config_snapshot: { opencode_variant_config_capable: true, model_effective: `${observed!.providerID}/${observed!.id}`, modelVariant: observed!.variant } })).ok).toBe(true);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", queued.update_id)?.status).toBe("pending");
+    expect((await rpc("ack_config_update", { update_id: queued.update_id, status: "applied", new_revision: 1 })).ok).toBe(true);
+    const read = await fetch(`${BASE}/api/nodes/${nodeId}/config?network_id=${NET}`, { headers: auth(utok) });
+    expect(await read.json()).toMatchObject({ model_effective: "fixture/model", modelVariant: "high", last_update: { status: "applied" } });
+    const invalid = await rpc("update_node_config", { node_id: nodeId, base_revision: 1, patch: { modelVariant: "not-listed" } }, utok);
+    expect(invalid.ok).toBe(true);
+    const invalidPull = await rpc("get_config_update", {});
+    expect(await applyVariantConfig(session, invalidPull.update.patch)).toEqual({ status: "rejected", reason: "catalog" });
+    expect(await session.selectedSessionModel!(session.sessionId)).toMatchObject({ variant: "high" });
+    expect((await rpc("ack_config_update", { update_id: invalid.update_id, status: "rejected", error: "variant_catalog" })).ok).toBe(true);
+    const clear = await rpc("update_node_config", { node_id: nodeId, base_revision: 1, patch: { modelVariant: null } }, utok);
+    expect(clear.ok).toBe(true);
+    const clearPull = await rpc("get_config_update", {});
+    expect(clearPull.update.patch).toMatchObject({ modelVariant: null });
+    expect(await applyVariantConfig(session, clearPull.update.patch)).toMatchObject({ status: "applied", model: { providerID: "fixture", id: "model", variant: "default" } });
+    expect((await rpc("ack_config_update", { update_id: clear.update_id, status: "applied", new_revision: 2 })).ok).toBe(true);
+    const actual = await session.variantConfigReadback!();
+    expect(actual).toMatchObject({ providerID: "fixture", id: "model", variant: "default" });
+    expect((await report({ config_snapshot: { opencode_variant_config_capable: true, model_effective: `${actual!.providerID}/${actual!.id}`, modelVariant: actual!.variant === "default" ? null : actual!.variant } })).ok).toBe(true);
+    const clearRead = await fetch(`${BASE}/api/nodes/${nodeId}/config?network_id=${NET}`, { headers: auth(utok) });
+    expect(await clearRead.json()).toMatchObject({ model_effective: "fixture/model", modelVariant: null, last_update: { status: "applied" } });
+  } finally { await session.close(); }
+}, 40000);

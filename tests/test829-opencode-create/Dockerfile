@@ -4,7 +4,9 @@ FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN npm install -g @opencode/cli@2.0.22 && test "$(opencode --version)" = 'opencode v2.0.22'
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY server/package*.json ./server/
+COPY contracts /opt/node_modules/@sleep2agi/contracts
 COPY agent-node/package*.json /opt/node_modules/@sleep2agi/agent-node/
 RUN cd server && npm ci --ignore-scripts && cd /opt/node_modules/@sleep2agi/agent-node && npm ci --ignore-scripts
 COPY server ./server

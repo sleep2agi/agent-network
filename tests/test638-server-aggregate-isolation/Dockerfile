@@ -6,8 +6,8 @@ RUN apt-get update \
 
 WORKDIR /work
 
+COPY contracts /work/contracts
 COPY server/ server/
-COPY contracts/side-thread/v1/ contracts/side-thread/v1/
 COPY agent-node/src/ agent-node/src/
 # The daemon credential tests import CLI error guidance and recursively inspect
 # production token issuers. Keep the same cross-package inputs as test798.

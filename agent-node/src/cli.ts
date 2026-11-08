@@ -15,8 +15,13 @@ import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copres
 import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
+import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
+import { SOURCE_FORK_CAPABILITY } from "../../contracts/session-source-transport";
+import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
+import { SOURCE_DIRECTORY_CAPABILITY } from "../../contracts/session-source-directory";
+import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
 import {
   bundledCodexVersion,
   createCodex,
@@ -318,6 +323,22 @@ import {
 /** 只用于**日志去重**的状态(见 daemon-create-capability.ts 里的注释)。
  *  🔴 它不参与任何判断 —— 上报的能力值每次都是现算的。 */
 const _createCapLogState: CreateCapabilityLogState = {};
+function sourceForkSnapshot<T extends { daemon_capabilities?: object }>(snapshot: T): T {
+  if (fileConfig.role === "host_supervisor" && process.platform === "linux" && process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1"
+    && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY) {
+    snapshot = { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, source_directory_read: fileConfig.sourceDirectoryTransport } };
+    if (process.env.ANET_PROJECT_NEW_SESSION_PREVIEW === "1" && fileConfig.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY) {
+      snapshot = { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, project_new_session: PROJECT_CREATE_CAPABILITY } };
+    }
+    if (process.env.ANET_SESSION_ATTACH_PREVIEW === "1" && fileConfig.sessionAttachTransport === SESSION_ATTACH_CAPABILITY) {
+      snapshot = { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, session_attach: SESSION_ATTACH_CAPABILITY } };
+    }
+  }
+  if (fileConfig.role !== "host_supervisor" || process.env.ANET_SOURCE_FORK_PREVIEW !== "1" || process.platform !== "linux"
+    || fileConfig.sourceForkTransport !== SOURCE_FORK_CAPABILITY || !daemonCreateCapability()?.ok) return snapshot;
+  return { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities,
+    source_node_delivery: SOURCE_DELIVERY_CAPABILITY, source_fork_transport: SOURCE_FORK_CAPABILITY } };
+}
 function daemonCreateCapability(): (DaemonCreateCapability & { defaultWorkdirRoot?: string | null }) | undefined {
   const cap = evaluateCreateCapability({
     role: fileConfig?.role,
@@ -419,6 +440,7 @@ Runtime:
   opencode-cli      opencode CLI — Anthropic/OpenAI vendor preset via ACP
 
 Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2 ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1
+Capabilities: ANET_CAPABILITY_SOURCE_RESUME_V1
 `);
     process.exit(0);
   }
@@ -732,7 +754,7 @@ const GROK_EXECUTION_MODE: "acp" | "cli" =
 // the PTY child are created. Existing credential stores are separately
 // validated/repaired by their boundary-specific writers.
 if (GROK_EXECUTION_MODE === "cli") process.umask(0o077);
-const rawGrokCopresence = opts["grok-copresence"]
+const rawGrokCopresence: unknown = opts["grok-copresence"]
   ?? fileConfig.grokCopresence
   ?? fileConfig.flags?.grokCopresence
   ?? process.env.ANET_GROK_COPRESENCE;
@@ -788,7 +810,11 @@ if (RUNTIME === "opencode" && OPENCODE_GENERATION === undefined) {
   process.exit(1);
 }
 if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && INITIAL_OPENCODE_VERSION !== undefined
-  && !isAcceptedOpencodeVersionFor("v2", INITIAL_OPENCODE_VERSION)) {
+  && !isAcceptedOpencodeVersionFor("v2", INITIAL_OPENCODE_VERSION)
+  // Exact source runtime verifies the independent operator authority and real
+  // listener itself. This exception only reaches that admission, not ordinary open.
+  && !(fileConfig.sourceDelivery && (fileConfig as any).sharedVariantAuthority
+    && INITIAL_OPENCODE_VERSION === "2.0.22-anet-test.29040e2")) {
   const v2 = opencodeGenerationSupport("v2");
   console.error(
     `[${ALIAS}] Refusing ANET_OPENCODE_VERSION=${INITIAL_OPENCODE_VERSION}; ` +
@@ -996,6 +1022,12 @@ const TELEGRAM_GETUPDATES_TIMEOUT_MS = resolveTimeoutMs({
   defaultMs: 45_000,
 }).valueMs;
 const NEW_SESSION = opts["new-session"] === "true";
+if (fileConfig.sourceDelivery && (RUNTIME !== "opencode" || fileConfig.opencodeGeneration !== "v2"
+  || fileConfig.opencodeMode !== "copresence" || NEW_SESSION || !process.env.ANET_SOURCE_RESUME_NONCE
+  || process.env.ANET_SOURCE_RESUME_CONFIG !== configFilePath
+  || (opts.session && opts.session !== fileConfig.sessionId))) {
+  throw Error("source_resume_cli_runtime_override_refused");
+}
 const SESSION_ID = NEW_SESSION ? "" : (
   RUNTIME === "grok"
     ? (GROK_EXECUTION_MODE === "cli"
@@ -1977,6 +2009,10 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     ? readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd())
     : null;
   const reportedCatalog = await reportedOpenCodeCatalog(catalogEndpoint);
+  const variantSession = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeCopresenceSession?.variantConfigCapable
+    ? opencodeCopresenceSession : undefined;
+  const variantReadback = variantSession?.variantConfigReadback
+    ? await variantSession.variantConfigReadback().catch(() => undefined) : undefined;
   return callCommHub("report_status", {
     resume_id: RESUME_ID, alias, status: resolveReportedStatus(status), task,
     // #1510 —— 每次上报都重新报一次 transport(Hub 侧「每份 report 重新测一次」的要求)。
@@ -2051,9 +2087,14 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     config_snapshot: configApplyDraining ? undefined : {
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
       ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
+      ...(variantReadback && variantSession?.isRunning ? { opencode_variant_config_capable: true } : {}),
+      ...(variantReadback && variantSession?.isRunning ? {
+        model_effective: `${variantReadback.providerID}/${variantReadback.id}`,
+        modelVariant: variantReadback.variant === "default" ? null : variantReadback.variant ?? null,
+      } : {}),
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
       ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
-        buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
+        sourceForkSnapshot(buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability())),
         runtimeReadinessMonitor?.current(),
       ), codexForkCapabilityMonitor?.current()), heartbeatAdoptionCandidates(fileConfig, COMMHUB_URL, NETWORK_ID)),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
@@ -2729,6 +2770,7 @@ if (RUNTIME === "opencode") {
 }
 let opencodeCopresenceSession:
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | null = null;
+let sourceForkWorker: ReturnType<typeof import("./runtime/session-source-transport").createSessionSourceTransportWorker> | null = null;
 const sessionControlPin = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
   && opencodeMode === "copresence" && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID
   ? createSessionControlPin({
@@ -4598,11 +4640,13 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
 > {
   if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+  if (fileConfig.sourceDelivery && opencodeCopresenceSession) throw Error("source_resume_no_reopen_rotation_required");
   if (opencodeBorrowedCli && opencodeCopresenceSession) {
     throw new Error("Borrowed V1 runtime unavailable; retain original binding/recovery, no automatic reopen");
   }
   return opencodeCopresenceOpening.run(async () => {
     if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+    if (fileConfig.sourceDelivery && opencodeCopresenceSession) throw Error("source_resume_no_reopen_rotation_required");
     if (opencodeBorrowedCli && opencodeCopresenceSession) {
       throw new Error("Borrowed V1 runtime unavailable; retain original binding/recovery, no automatic reopen");
     }
@@ -4643,7 +4687,19 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
         ? fileConfig.opencodeConfiguredModelAtLastOpen : null)} `
       + `generation=${JSON.stringify(OPENCODE_GENERATION ?? null)} `
       + `resume=${JSON.stringify(opencodeSessionId ?? null)} decide=${reconcileDecision}`);
-    const opened = await openOpenCodeCopresenceRuntime({
+    let sourceOpened: import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession | undefined;
+    if (fileConfig.sourceDelivery) {
+      const { openSourceResumeRuntime } = await import("./runtime/source-resume-launcher");
+      if (!process.env.ANET_SOURCE_RESUME_NONCE || process.env.ANET_SOURCE_RESUME_CONFIG !== configFilePath
+        || NEW_SESSION || fileConfig.sessionId !== opencodeSessionId
+        || (INITIAL_OPENCODE_VERSION !== undefined && INITIAL_OPENCODE_VERSION !== fileConfig.sourceDelivery.expected_version) || !sharedServer) throw Error("source_resume_runtime_refused");
+      // Existing shared Server's policy/MCP are retained; no project config,
+      // provider injection, model reconcile, TUI spawn or Server creation.
+      sourceOpened = await openSourceResumeRuntime({ configPath: configFilePath, cwd: process.cwd(),
+        nonce: process.env.ANET_SOURCE_RESUME_NONCE, binary: INITIAL_OPENCODE_BIN!, model: MODEL,
+        expectedVersion: fileConfig.sourceDelivery.expected_version, sessionId: opencodeSessionId!, newSession: NEW_SESSION, nodeId: NODE_ID });
+    }
+    const opened = sourceOpened ?? await openOpenCodeCopresenceRuntime({
       // #543 — V1 nodes pass the V1 backend, i.e. exactly the pre-#543 default.
       backend: opencodeBackendFor(OPENCODE_GENERATION ?? "v1"),
       cwd: process.cwd(),
@@ -7700,6 +7756,23 @@ async function processConfigUpdate(): Promise<void> {
       return;
     }
 
+    // Variant changes are live-session-only: never enter legacy restart or
+    // config-file writeback paths, including on timeout or unsupported nodes.
+    if (update.patch.modelVariant !== undefined) {
+      const result = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+        ? await withDeadlineMs(
+            applyVariantConfig(opencodeCopresenceSession ?? undefined, { model: update.patch.model, modelVariant: update.patch.modelVariant }),
+            MODEL_SWITCH_DEADLINE_MS, "variant switch timed out",
+          ).catch(() => ({ status: "unknown" as const }))
+        : { status: "rejected" as const, reason: "unsupported" as const };
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: result.status === "applied" ? "applied" : result.status === "unknown" ? "timeout" : "rejected",
+        ...(result.status === "applied" ? { new_revision: ++currentConfigRevision } : { error: result.status === "unknown" ? "variant_outcome_unknown" : `variant_${result.reason}` }),
+      });
+      return;
+    }
+
     const localMode = computeConfigApplyMode(update.patch, {
       runtime: fileConfig?.runtime,
       opencodeGeneration: fileConfig?.opencodeGeneration,
@@ -7735,6 +7808,10 @@ async function processConfigUpdate(): Promise<void> {
       const sessionRunning = opencodeCopresenceSession?.isRunning === true;
       const switchable = typeof opencodeCopresenceSession?.setSelectedModel === "function";
       if (!sessionRunning || !switchable) {
+        if (opencodeCopresenceSession?.variantConfigTestOwned) {
+          await callCommHub("ack_config_update", { update_id: updateId, status: "rejected", error: "variant_session_unavailable" });
+          return;
+        }
         // 打印「分支 + 输入」，不打印「谓词的布尔」：
         // 布尔只能区分“方法在不在”，而“方法在但一调用就抛”会被读成 true，
         // 正好回到这个坑本身（present ≠ 可用）。
@@ -7783,6 +7860,10 @@ async function processConfigUpdate(): Promise<void> {
           `OpenCode session model switch timed out after ${MODEL_SWITCH_DEADLINE_MS}ms`,
         );
       } catch (switchErr: any) {
+        if (session?.variantConfigTestOwned) {
+          await callCommHub("ack_config_update", { update_id: updateId, status: "timeout", error: "variant_model_outcome_unknown" });
+          return;
+        }
         const reason = String(switchErr?.message || switchErr).slice(0, 400);
         // 本地日志保留 message（便于现场排查），**上报给 Hub 的摘要只带
         // err.name + 白名单 err.code**：message 可能包含上游原文，
@@ -8501,6 +8582,26 @@ if (RUNTIME === "codex" || RUNTIME === "codex-app-server") {
 }
 await register();
 log("已注册到 CommHub");
+// Independent explicit directory/fork previews; directory-only never probes or
+// starts a launcher. Ordinary daemons do not poll either source queue.
+if (fileConfig.role === "host_supervisor" && ((process.env.ANET_SOURCE_FORK_PREVIEW === "1"
+  && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY) || (process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1"
+  && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY))
+  && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID && process.platform === "linux") {
+  const { createSessionSourceTransportWorker } = await import("./runtime/session-source-transport");
+  sourceForkWorker = createSessionSourceTransportWorker({ hubUrl: COMMHUB_URL, daemonWorkDir: process.cwd(), home: daemonHome(),
+    directoryEnabled: process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1" && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
+    attachEnabled: process.env.ANET_SESSION_ATTACH_PREVIEW === "1" && fileConfig.sessionAttachTransport === SESSION_ATTACH_CAPABILITY
+      && process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1" && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
+    projectEnabled: process.env.ANET_PROJECT_NEW_SESSION_PREVIEW === "1" && fileConfig.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY
+      && process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1" && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
+    forkEnabled: process.env.ANET_SOURCE_FORK_PREVIEW === "1" && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY,
+    pin: createSessionControlPin({ hubUrl: COMMHUB_URL, token: SESSION_CONTROL_START_TOKEN, nodeId: NODE_ID, networkId: NETWORK_ID,
+      epoch: sessionControlCredentialEpoch, currentToken: () => AUTH_TOKEN, currentEpoch: () => sessionControlCredentialEpoch,
+      signal: sessionControlCredentialAbort.signal }) });
+  const tick = () => { void sourceForkWorker?.tick().catch(() => warn("[source-control] transport unavailable; no automatic replay")); };
+  tick(); setInterval(tick, 1000).unref();
+}
 
 // 2026-10-31 —— 上一次退出是「按计划的」吗？读了就清。
 //   生命周期 = 一次退出 → 下一次启动（不做 TTL）：标记只回答「我是被计划重启拉起来的吗」，
@@ -8993,6 +9094,7 @@ const shutdown = async () => {
   sideThreadOwnedSession?.client.close();
   sideThreadOwnedSession?.proc?.kill("SIGTERM");
   log("shutting down...");
+  await sourceForkWorker?.stop();
   await import('./runtime/daemon-provider-login.js').then(m => m.closeProviderLogins()).catch(() => {});
   await closeOpencodeRuntime("signal shutdown");
   await grokCopresenceRuntimeSession?.close().catch((e: any) => {
@@ -9034,6 +9136,11 @@ process.on("SIGHUP", shutdown);
 if (RUNTIME === "opencode" && opencodeMode === "copresence") {
   try {
     await ensureOpencodeCopresenceRuntime();
+    if (fileConfig.sourceDelivery) {
+      await register(); // authenticated real child registration, not self-asserted health
+      const { publishSourceResumeHealth } = await import("./runtime/source-resume-launcher");
+      publishSourceResumeHealth(configFilePath, process.env.ANET_SOURCE_RESUME_NONCE!, opencodeSessionId!);
+    }
   } catch (error: any) {
     console.error(`[${ALIAS}] OpenCode copresence startup failed: ${error?.message ?? error}`);
     await closeOpencodeRuntime("startup failure");

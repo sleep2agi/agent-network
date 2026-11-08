@@ -8,6 +8,7 @@ RUN npm install -g --prefix /opt/v1 opencode-ai@1.18.34 --no-audit --no-fund \
  && /opt/v1/bin/opencode --version | grep -q '^1\.18\.34$' \
  && readlink -f /opt/v1/bin/opencode > /v1-bin
 WORKDIR /opt/node_modules/@sleep2agi/agent-node
+COPY contracts /opt/node_modules/@sleep2agi/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY agent-node .

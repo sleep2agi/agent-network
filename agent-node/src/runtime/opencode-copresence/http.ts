@@ -45,7 +45,7 @@ export async function fetchOpenCodeJson(
     throw explainFetchFailure(error, method, path);
   }
   if (!response.ok) {
-    throw new Error(`OpenCode ${method} ${path} returned HTTP ${response.status}`);
+    throw Object.assign(new Error(`OpenCode ${method} ${path} returned HTTP ${response.status}`), { status: response.status });
   }
   return text ? JSON.parse(text) : null;
 }

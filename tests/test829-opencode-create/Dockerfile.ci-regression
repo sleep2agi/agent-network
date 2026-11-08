@@ -4,8 +4,10 @@
 ARG DEPENDENCY_IMAGE=anet-test827:close-drain
 FROM ${DEPENDENCY_IMAGE}
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+COPY contracts /workspace/contracts
 COPY server /workspace/server
 COPY agent-network /workspace/agent-network
+COPY contracts /opt/node_modules/@sleep2agi/contracts
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
 RUN ln -s /opt/node_modules/@sleep2agi/agent-node /workspace/agent-node
 COPY tests/test829-opencode-create /workspace/tests/test829-opencode-create

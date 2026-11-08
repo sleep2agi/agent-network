@@ -55,6 +55,11 @@ import {
 } from "./runtime";
 import { unverifiedOwnerError } from "./reply-ownership";
 import { fetchOpenCodeSessionControlJson } from "./http";
+import { catalogSupportsVariants, createV2SelectionController, equalV2ModelSelection, isV2SessionScope, readV2ModelSelection } from "./v2-model-selection";
+import { isOwnedTestBuild, observeSharedTestBuild, sharedVariantAuthorized } from "./v2-test-build-identity";
+import { forkV2Session } from "./v2-fork";
+import { resumeV2Session } from "./v2-resume";
+import { claimSharedSessionBridge } from "../source-resume-launcher";
 import { OpenCodeProviderError, openCodeTurnError } from "../opencode-provider-error";
 import {
   CAPACITY_RETRY_EXHAUSTED_TEXT,
@@ -469,14 +474,34 @@ export async function openVettedOpenCodeV2Copresence(
   let attachScriptWritten = false;
   let catalogEndpointWritten = false;
   let clearLaunchHealth = () => {};
+  let bridgeClaim: ReturnType<typeof claimSharedSessionBridge> | undefined;
   const clearCatalogEndpoint = () => {
     try { removeOpenCodeV2CatalogEndpoint(opts.workDir); } catch { /* already gone */ }
   };
   try {
     const { version, pid: serverPid } = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
-    if (!backend.isSupportedVersion(version) || (opts.expectedVersion && version !== opts.expectedVersion)) {
+    const ownedTestBuild = opts.env.ANET_VARIANT_TEST_ONLY === "1" && await isOwnedTestBuild({ version, serverPid, childPid: child?.pid });
+    const profile = opts.env.ANET_SHARED_VARIANT_PROFILE;
+    const sharedAuthorized = () => !!shared && typeof profile === "string" && profile === join(opts.workDir, "config.json")
+      && opts.env.ANET_VARIANT_TEST_ONLY === "1" && typeof opts.resumeSessionId === "string"
+      && sharedVariantAuthorized(profile, resolve(opts.cwd), url, password, opts.resumeSessionId, serverPid);
+    const sharedEvidence = sharedAuthorized() ? await observeSharedTestBuild(url, version) : undefined;
+    const sharedTestBuild = !!sharedEvidence && sharedEvidence.pid === serverPid;
+    const variantTestBuild = ownedTestBuild || sharedTestBuild;
+    const testIdentityCurrent = async () => {
+      try {
+        if (ownedTestBuild) return await isOwnedTestBuild({ version, serverPid, childPid: child?.pid });
+        if (!sharedTestBuild || !sharedAuthorized()) return false;
+        const info = await fetchOpenCodeJson(url, password, "/api/info", { redirect: "error" }, 3000);
+        if (info?.version !== version || info.pid !== serverPid) return false;
+        const current = await observeSharedTestBuild(url, version, sharedEvidence);
+        return !!current && JSON.stringify(current) === JSON.stringify(sharedEvidence);
+      } catch { return false; }
+    };
+    if ((!backend.isSupportedVersion(version) && !variantTestBuild) || (opts.expectedVersion && version !== opts.expectedVersion)) {
       throw new Error(`OpenCode v2 server version ${version} does not match the accepted version`);
     }
+    if (sharedTestBuild && opts.reconcileResumedModel) throw Error("shared_variant_reconcile_refused");
     if (shared && opts.sharedMcpUrl) {
       const sources = await fetchOpenCodeJson(url, password, "/api/config", {
         headers: { "x-opencode-directory": resolve(opts.cwd) },
@@ -494,10 +519,14 @@ export async function openVettedOpenCodeV2Copresence(
         () => !child || (child.exitCode === null && child.signalCode === null));
     }
     let created: any;
-    if (shared && opts.resumeSessionId) {
-      if (!/^ses_[A-Za-z0-9]+$/.test(opts.resumeSessionId)) throw new Error("Invalid OpenCode v2 session id to resume");
+    const requestedResume = shared ? opts.resumeSessionId : undefined;
+    if (requestedResume !== undefined) {
+      if (!/^ses_[A-Za-z0-9]+$/.test(requestedResume)) throw new Error("Invalid OpenCode v2 session id to resume");
+      bridgeClaim = claimSharedSessionBridge({ project: resolve(opts.cwd), url, serverPid,
+        sessionId: requestedResume, workDir: opts.workDir, consume: true });
       try {
-        created = await fetchOpenCodeJson(url, password, `/api/session/${opts.resumeSessionId}`);
+        created = await resumeV2Session({ sessionId: requestedResume, directory: resolve(opts.cwd),
+          request: path => fetchOpenCodeJson(url, password, path) });
       } catch (error: any) {
         if (/returned HTTP 404$/.test(error?.message ?? "")) {
           throw new Error("OpenCode v2 session to resume was not found on the shared server; refusing to create a new session", { cause: error });
@@ -505,7 +534,7 @@ export async function openVettedOpenCodeV2Copresence(
         throw error;
       }
     }
-    if (!created) {
+    if (!created && requestedResume === undefined) {
       created = await fetchOpenCodeJson(url, password, "/api/session", {
         method: "POST",
         body: JSON.stringify({
@@ -517,7 +546,10 @@ export async function openVettedOpenCodeV2Copresence(
     }
     const sessionId = created?.data?.id;
     if (typeof sessionId !== "string" || !/^ses_[A-Za-z0-9]+$/.test(sessionId)) {
-      throw new Error("OpenCode v2 POST /api/session returned an invalid session id");
+      throw new Error(`OpenCode v2 ${requestedResume === undefined ? "POST /api/session" : "session resume response"} returned an invalid session id`);
+    }
+    if (requestedResume !== undefined && sessionId !== requestedResume) {
+      throw new Error("OpenCode v2 resumed session id does not match the requested session");
     }
     if (created?.data?.location?.directory !== resolve(opts.cwd)) {
       throw new Error("OpenCode v2 session directory does not match the node workspace");
@@ -555,10 +587,84 @@ export async function openVettedOpenCodeV2Copresence(
     log(`[opencode-copresence] v2 ${shared ? "shared" : "private"} ready version=${version} session=${sessionId.slice(0, 12)} attach=${attachScriptPath}`);
     relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
 
+    const directory = resolve(opts.cwd);
+    const scopedRequest = (path: string, init: RequestInit = {}) => fetchOpenCodeJson(url, password, path, {
+      ...init, redirect: "error", headers: { "x-opencode-directory": directory },
+    }, 5_000);
+    // Neither the profile nor a cached capability is process attestation. Check
+    // the independent local policy + exact native/OS instance around each access.
+    const variantRequest = async (path: string, init: RequestInit = {}) => {
+      if (!session.isRunning || !await testIdentityCurrent()) throw Error("shared_variant_identity_refused");
+      if (sharedTestBuild && init.method === "POST") {
+        const before = await scopedRequest(`/api/session/${sessionId}`);
+        if (!isV2SessionScope(before, sessionId, directory) || !await testIdentityCurrent()) throw Error("shared_variant_session_refused");
+      }
+      const result = await scopedRequest(path, init);
+      if (!session.isRunning || !await testIdentityCurrent()) throw Error("shared_variant_identity_refused");
+      return result;
+    };
+    const readVariantSelection = async () => {
+      const body = await variantRequest(`/api/session/${sessionId}`);
+      if (!isV2SessionScope(body, sessionId, directory)) return undefined;
+      const explicit = readV2ModelSelection(body);
+      if (explicit) return explicit;
+      // An empty newly-created native Session legitimately has no model yet.
+      // Resolve ONLY the native directory default, never the profile hint, a
+      // guessed first catalog row or a startup reconciliation/model mutation.
+      if (!sharedTestBuild || body.data.model !== undefined) return undefined;
+      const fallback = await variantRequest("/api/model/default");
+      if (fallback?.location?.directory !== directory) return undefined;
+      const selected = readV2ModelSelection({ data: { model: fallback.data } });
+      return selected ? { ...selected, variant: selected.variant ?? "default" } : undefined;
+    };
+    const selectSessionModel = createV2SelectionController(directory, {
+      isCurrent: () => session.isRunning,
+      // V2 has no proven atomic gate shared with the human TUI. Never replace
+      // this with a GET /active snapshot: it races the next provider turn.
+      acquireIdleLease: async () => variantTestBuild && session.isRunning && await testIdentityCurrent()
+        ? { release() {} } : "unsupported" as const,
+      nativeDefaultReadback: variantTestBuild,
+      readCatalog: () => variantRequest("/api/model"),
+      readSession: async () => {
+        const result = await variantRequest(`/api/session/${sessionId}`);
+        if (!isV2SessionScope(result, sessionId, directory)) throw new Error("OpenCode v2 session scope mismatch");
+        return result;
+      },
+      switchModel: async model => {
+        try { await variantRequest(`/api/session/${sessionId}/model`, { method: "POST", body: JSON.stringify({ model }) }); }
+        catch (error: any) { if (error?.status === 409) return "busy" as const; throw error; }
+      },
+    });
     const session: OpenCodeCopresenceSession = {
       url,
       sessionId,
+      ...(shared ? { async forkSession(sourceSessionId: string): Promise<import("./v2-fork").V2ForkResult> {
+        // Runtime guard only, not authorization or atomic Server generation pinning.
+        if (!shared || !session.isRunning || sourceSessionId !== sessionId) {
+          return { status: "rejected", reason: "scope" };
+        }
+        const result = await forkV2Session({ sourceSessionId, expectedDirectory: resolve(opts.cwd), request: (path, init = {}) =>
+          fetchOpenCodeJson(url, password, path, { ...init, redirect: "error", headers: { "x-opencode-directory": resolve(opts.cwd) } }, 5_000) });
+        return session.isRunning ? result : { status: "unknown", reason: "verification_failed" };
+      } } : {}),
       attachScriptPath,
+      get variantConfigCapable() { return variantTestBuild && session.isRunning; },
+      // Historical interface name: identified TEST-ONLY build, NOT Server ownership.
+      get variantConfigTestOwned() { return variantTestBuild; },
+      async variantConfigReadback() {
+        if (!variantTestBuild || !session.isRunning || !await testIdentityCurrent()) return undefined;
+        try {
+          const selected = await readVariantSelection();
+          if (!selected) return undefined;
+          const start = performance.now();
+          const catalog = await variantRequest("/api/model");
+          const age = performance.now() - start;
+          if (!session.isRunning || !Number.isFinite(age) || age < 0 || age > 5000 || !catalogSupportsVariants(catalog, directory, selected)) return undefined;
+          const final = await readVariantSelection();
+          if (!session.isRunning || !equalV2ModelSelection(final, selected)) return undefined;
+          return selected;
+        } catch { return undefined; }
+      },
       get isRunning() {
         return openCodeV2SessionAlive({
           closed,
@@ -593,6 +699,17 @@ export async function openVettedOpenCodeV2Copresence(
         const body = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`, {}, 2_000);
         return openCodeV2SessionModelRef(body);
       },
+      async selectedSessionModel(targetSessionId) {
+        if (!session.isRunning || targetSessionId !== sessionId) return undefined;
+        if (variantTestBuild) return readVariantSelection();
+        const body = await scopedRequest(`/api/session/${sessionId}`);
+        if (!session.isRunning || !isV2SessionScope(body, sessionId, directory)) return undefined;
+        return readV2ModelSelection(body);
+      },
+      selectSessionModel(targetSessionId, model) {
+        if (targetSessionId !== sessionId) return Promise.resolve({ status: "rejected", reason: "scope" });
+        return selectSessionModel(model);
+      },
       // #3952 —— 会话用量（**累计值**）。调用方负责转成增量：同一份数据每轮都读，
       // 直接把绝对值报上去会把历史总量重复几十次。
       // 字段形状：{ input, output, reasoning, cache: { read, write } }（opencode v2 实测）。
@@ -608,6 +725,15 @@ export async function openVettedOpenCodeV2Copresence(
         const parsed = parseModelRef(modelRef);
         if (!parsed || modelRef !== `${parsed.providerID}/${parsed.modelID}`) {
           throw new Error("OpenCode model must use provider/model form");
+        }
+        if (variantTestBuild) {
+          const current = await session.selectedSessionModel!(sessionId);
+          if (!current) throw new Error("OpenCode v2 session scope unavailable");
+          const target = { providerID: parsed.providerID, id: parsed.modelID,
+            ...(current.variant === undefined || current.variant === "default" ? {} : { variant: current.variant }) };
+          const outcome = await selectSessionModel(target);
+          if (outcome.status !== "applied") throw new Error(`OpenCode v2 scoped model switch ${outcome.status}`);
+          return;
         }
         await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/model`, {
           method: "POST",
@@ -772,6 +898,7 @@ export async function openVettedOpenCodeV2Copresence(
         closed = true;
         clearLaunchHealth();
         clearCatalogEndpoint();
+        bridgeClaim?.release();
         stopRecordedAttach(opts.workDir, { restart: mode?.restart === true, log, warn, tmux: opts.tmuxRunner });
         rmSync(attachScriptPath, { force: true });
         if (identity) await stopProcessGroup(child as any, identity);

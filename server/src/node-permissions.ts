@@ -464,7 +464,7 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   // 只有人能做
   upsert_network_secret: "human_only", upsert_provider: "human_only", update_provider: "human_only",
   projects_create: "human_only", projects_update: "human_only", review_skill: "human_only",
-  read_opencode_catalog: "human_only", get_opencode_catalog: "human_only",
+  read_opencode_catalog: "human_only", get_opencode_catalog: "human_only", select_opencode_session_model: "human_only",
 };
 
 /**

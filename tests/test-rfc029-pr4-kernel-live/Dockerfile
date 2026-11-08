@@ -31,6 +31,7 @@ RUN npm i -g "opencode-ai@${OPENCODE_VERSION}" --silent \
 
 WORKDIR /harness
 
+COPY contracts /contracts
 COPY agent-node /agent-node-src
 COPY tests/test-rfc029-pr4-kernel-live/harness.ts /harness/harness.ts
 COPY tests/test-rfc029-pr4-kernel-live/run.sh     /harness/run.sh
