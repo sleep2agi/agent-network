@@ -7077,6 +7077,8 @@ return Bun.serve({
         let opencodeServer: string | null = null;
         const snap = r.config_snapshot;
         if (snap) {
+          let opencodeAgents: string[] | null = null;
+          let opencodeAgentsSeenAt: string | null = null;
           let parsed: any = null;
           try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
           catch { parsed = null; }
@@ -7096,6 +7098,13 @@ return Bun.serve({
           // PR #1092 之前从 `node.config_snapshot` 读，但这个端点**刻意不带整个快照**
           // （见上方 #312 注释）⇒ 真机上两行是空的/整行不出现。这里只放三个标量出来，
           // 仍不暴露 flags 里的其它内容，更不暴露任何凭据。
+          // #4150-Build — agents this node's server exposes; [] means none configured.
+          const rawAgents = parsed?.opencode_agents;
+          if (Array.isArray(rawAgents) && rawAgents.every((a: unknown) => typeof a === "string" && a.length <= 200)) {
+            opencodeAgents = rawAgents.slice(0, 200);
+            const seenAgents = parsed?.opencode_agents_seen_at;
+            opencodeAgentsSeenAt = typeof seenAgents === "string" && seenAgents.length > 0 && seenAgents.length <= 40 ? seenAgents : null;
+          }
           const flags = parsed?.flags;
           if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
@@ -7118,6 +7127,8 @@ return Bun.serve({
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
           opencode_catalog: opencodeCatalog,
+          opencode_agents: opencodeAgents,
+          opencode_agents_seen_at: opencodeAgentsSeenAt,
           // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
           opencode_catalog_seen_at: opencodeCatalogSeenAt,
           opencode_generation: opencodeGeneration,

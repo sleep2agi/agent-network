@@ -1112,6 +1112,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // Internal source-aware delivery handshake; declaration alone enables
           // no public queue/dispatch and old daemons must not receive it.
           source_node_delivery: z.literal("source-node-delivery-v1-opencode-2.0.22").optional().catch(undefined),
+          // #4150-Build — public agent identifiers the node's OpenCode V2 server exposes.
+          // Bounded and optional: an older node omits it, an empty list means "none".
+          opencode_agents: z.array(z.string().max(200)).max(200).optional().catch(undefined),
+          opencode_agents_seen_at: z.string().max(40).optional().catch(undefined),
           // #4150 — the three independent read/attach previews plus the fork
           // transport. The transport reads these off this snapshot, so a hub
           // whose report schema omits them drops them silently (zod object is
