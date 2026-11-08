@@ -2121,6 +2121,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
       ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
       ...(variantReadback && variantSession?.isRunning ? { opencode_variant_config_capable: true } : {}),
+      // Agent (Build) hot switch: advertised only when this process actually has
+      // the bound-session writer, so the hub can fail closed for everything else.
+      ...(RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+        && opencodeCopresenceSession?.isRunning === true
+        && typeof opencodeCopresenceSession.selectSessionAgent === "function"
+        ? { opencode_agent_config_capable: true } : {}),
       ...(variantReadback && variantSession?.isRunning ? {
         model_effective: `${variantReadback.providerID}/${variantReadback.id}`,
         modelVariant: variantReadback.variant === "default" ? null : variantReadback.variant ?? null,

@@ -3738,6 +3738,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       patch: z.object({
         model: z.string().max(200).optional(),
         modelVariant: z.string().min(1).max(200).nullable().optional(),
+        // OpenCode V2 agent (Build) selection. Hot-only, live-session only:
+        // the node POSTs /api/session/<ses_>/agent and reads the value back.
+        // Absent = preserve. `null` is rejected by the node (no "clear agent"
+        // operation exists), so the hub refuses it here as well.
+        agent: z.string().min(1).max(200).optional(),
         flags: z.record(z.string(), z.unknown()).optional(),
         // #260 P5 — channel enable/disable. Restart-tier field (agent-node
         // reads config.channels once at boot to fork per-channel workers,
@@ -3783,6 +3788,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if ((patch.flags && Object.keys(patch.flags).length) || patch.channels !== undefined ||
             (patch.modelVariant !== null && /[\s\x00-\x1f\x7f]/.test(patch.modelVariant)))
           return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_patch", field: "modelVariant" }) }] };
+      }
+
+      if (patch.agent !== undefined) {
+        let snapshot: any;
+        try { snapshot = JSON.parse(node.config_snapshot || "{}"); } catch { snapshot = {}; }
+        // Fail closed on nodes that cannot switch: without the capability the
+        // node would ignore the field and ack whatever it likes, which is
+        // exactly the "looks applied, nothing changed" failure we are avoiding.
+        if (snapshot.opencode_agent_config_capable !== true)
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "agent_unsupported" }) }] };
+        if ((patch.flags && Object.keys(patch.flags).length) || patch.channels !== undefined ||
+            /[\s\x00-\x1f\x7f]/.test(patch.agent))
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_patch", field: "agent" }) }] };
       }
 
       const model = typeof patch.model === "string" ? patch.model : undefined;
@@ -3941,7 +3959,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // computeApplyMode 退回旧行为（model ⇒ restart），那正是客户端
       // 显示「重启中」却永远等不到重启的原因。
       const opencodeSnap = readOpencodeSnapshotFlags(node.config_snapshot);
-      const applyMode = patch.modelVariant !== undefined ? "hot" : computeApplyMode(model, flags, channels, {
+      const applyMode = patch.modelVariant !== undefined || patch.agent !== undefined ? "hot" : computeApplyMode(model, flags, channels, {
         runtime: node.runtime,
         opencodeGeneration: opencodeSnap.opencodeGeneration,
         opencodeMode: opencodeSnap.opencodeMode,
@@ -3951,6 +3969,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const patchJson = JSON.stringify({
         ...(model !== undefined ? { model } : {}),
         ...(patch.modelVariant !== undefined ? { modelVariant: patch.modelVariant } : {}),
+        ...(patch.agent !== undefined ? { agent: patch.agent } : {}),
         ...(model !== undefined && applyMode === "hot" && variantCapableAtQueue ? { _anet_variant_ack_required: true } : {}),
         flags,
         ...(channels !== undefined ? { channels } : {}),
