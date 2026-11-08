@@ -7076,9 +7076,12 @@ return Bun.serve({
         let opencodeMode: string | null = null;
         let opencodeServer: string | null = null;
         const snap = r.config_snapshot;
+        // #4150-Build — declared outside the `if (snap)` block: the projection below is
+        // evaluated for every row, and a block-scoped `let` here made /api/nodes throw
+        // "opencodeAgents is not defined" on the deployed hub.
+        let opencodeAgents: string[] | null = null;
+        let opencodeAgentsSeenAt: string | null = null;
         if (snap) {
-          let opencodeAgents: string[] | null = null;
-          let opencodeAgentsSeenAt: string | null = null;
           let parsed: any = null;
           try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
           catch { parsed = null; }
