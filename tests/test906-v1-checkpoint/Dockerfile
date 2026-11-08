@@ -4,6 +4,7 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm python3 procps ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN install -d -m 0755 /run/user && install -d -m 0700 -o bun -g bun /run/user/1000
 WORKDIR /repo/agent-node
+COPY contracts /repo/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-node/ ./

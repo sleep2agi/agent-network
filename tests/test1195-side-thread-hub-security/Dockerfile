@@ -3,6 +3,7 @@ FROM oven/bun:1.3.14-debian
 WORKDIR /app/server
 ARG SOURCE_COMMIT=unknown
 ENV SOURCE_COMMIT=${SOURCE_COMMIT}
+COPY contracts /app/contracts
 COPY server/package.json server/package-lock.json ./
 RUN bun install --frozen-lockfile
 COPY server/src ./src

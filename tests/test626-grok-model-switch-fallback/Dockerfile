@@ -28,6 +28,7 @@ WORKDIR /workspace
 #   failed to compute cache key: "/agent-node/bun.lock": not found
 # 于是「本地构建通过、CI 构建失败」。
 # 仓里 test34 / test467 / test697 / test698 都是 `bun.lock*`,这里是唯一漏的。
+COPY contracts /workspace/contracts
 COPY agent-node/package.json agent-node/bun.lock* ./agent-node/
 
 RUN cd agent-node && bun install

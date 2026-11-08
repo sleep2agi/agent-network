@@ -213,4 +213,7 @@ Project-new writes have a [separate gated contract](session-project-create.md);
 this directory alone never authorizes them. Unknown-binding attach and its
 ownership protocol remain a **separate next lane**. Upstream-native 2.0.22,
 complete UI lifecycle and macOS/Windows acceptance
-remain unperformed. Test commands/results: [directory report](../tests/report-test4150-source-directory.txt).
+remain unperformed. Test commands/results: the isolated source harness
+[`tests/test-shared-variant/create-chain.test.ts`](../../tests/test-shared-variant/create-chain.test.ts)
+together with the CI suite `server/src/session-source-directory-http.test.ts`; no separate
+committed directory report.

@@ -7,6 +7,7 @@ RUN npm view "opencode-ai@${OPENCODE_VERSION}" dist.integrity > /tmp/wrapper-sri
 RUN OPENCODE_VERSION=${OPENCODE_VERSION} node -e 'const f=require("fs"),v=process.env.OPENCODE_VERSION,d=require("/fixture/package-integrity.json")[v];for(const [p,n] of [["opencode-ai","wrapper"],["opencode-linux-x64","native"]])if(f.readFileSync(`/tmp/${n}-sri`,"utf8").trim()!==d[p].integrity)throw Error("package integrity changed")'
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" --no-audit --no-fund && test "$(opencode --version)" = "${OPENCODE_VERSION}"
 WORKDIR /repo/agent-node
+COPY contracts /repo/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-node/src /repo/agent-node/src

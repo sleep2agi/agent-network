@@ -212,8 +212,12 @@ export function createSourceDirectoryReader(local: { home: string; daemonWorkDir
             // Native Effect optional encoding emits null for the final empty
             // page; older protocol fixtures omitted the field. Both terminate.
             if (page.cursor.next === undefined || page.cursor.next === null) break;
-            if (typeof page.cursor.next !== "string" || page.cursor.next.length > 8192 || !page.data.length || cursors.has(page.cursor.next)) throw Error("directory_api_invalid");
-            cursor = page.cursor.next; cursors.add(cursor);
+            // Bind the native value once: `page` is an untyped HTTP payload, so a
+            // repeated property read is not narrowed by the typeof guard below and
+            // would reach the string-only cursor set as `string | undefined`.
+            const next = page.cursor.next;
+            if (typeof next !== "string" || next.length > 8192 || !page.data.length || cursors.has(next)) throw Error("directory_api_invalid");
+            cursor = next; cursors.add(next);
           }
         }
       }

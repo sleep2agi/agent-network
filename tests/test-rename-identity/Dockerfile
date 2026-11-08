@@ -22,6 +22,7 @@ COPY agent-network/ /app/agent-network/
 RUN cd /app/agent-network && npm install --no-audit --no-fund && npm run build && npm install -g .
 
 # Build agent-node (runtime) from source — main HEAD with PR-4 merged
+COPY contracts /app/contracts
 COPY agent-node/ /app/agent-node/
 RUN cd /app/agent-node && npm install --no-audit --no-fund && npm run build && npm link
 RUN cd /app/agent-node && npm install @openai/codex-sdk 2>/dev/null || true

@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=bun /usr/local/bin/bun /root/.bun/bin/bun
 ENV PATH="/root/.bun/bin:${PATH}"
 WORKDIR /app
+COPY contracts /app/contracts
 COPY server ./server
 COPY agent-node ./agent-node
 COPY agent-network ./agent-network

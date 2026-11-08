@@ -8844,7 +8844,11 @@ async function startCommand() {
   // alias tmux sessions) or the restart supervisor. No public dispatch enables it.
   if ((resolvedForCopresence?.profile as any)?.sourceDelivery !== undefined) {
     const configPath = join(nodesDir(), resolvedForCopresence!.id, "config.json");
-    const p = JSON.parse(readOpencodePrivateProfileFile(dirname(configPath), "config.json"));
+    // A profile that requests source delivery always has a private config.json;
+    // a missing file is a refusal for this route, never a fallback to defaults.
+    const rawProfile = readOpencodePrivateProfileFile(dirname(configPath), "config.json");
+    if (rawProfile === undefined) throw Error("source_resume_cli_refused");
+    const p = JSON.parse(rawProfile);
     const nonce = process.env.ANET_SOURCE_RESUME_NONCE;
     // Route only: profile data is NOT authority. The source launcher and actual
     // runtime independently re-read operator policy/registry + OS/native identity.

@@ -2,13 +2,13 @@ FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf100
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm curl ca-certificates python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /work/server
+COPY contracts /work/contracts
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY server/ ./
 COPY agent-node/src /work/agent-node/src
 COPY agent-network/src /work/agent-network/src
 COPY agent-network/bin /work/agent-network/bin
-COPY contracts/side-thread/v1 /work/contracts/side-thread/v1
 COPY tests/test1109-supervisor-identity/ /work/tests/test1109-supervisor-identity/
 COPY tests/lib/safe-rm.sh /work/tests/lib/safe-rm.sh
 ARG BASE_COMMIT=5cb8db3d4d2d907d43a7fd47d926cf323fa1df41

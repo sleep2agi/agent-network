@@ -8,10 +8,10 @@ import { acceptedOpencodeVersionsFor } from "../../agent-node/src/runtime/openco
 
 test("real shared controller: independent operator policy + exact listener identity; high/default/busy and zero-write negatives", async () => {
   const f = await fixture(); let session: any;
-  const fetchOriginal = globalThis.fetch, mutations: string[] = []; let badCatalog = false, badInfo = false, badSession = false, badDefault = false, malformedModel = false;
+  const fetchOriginal = globalThis.fetch, postedPaths: string[] = []; let badCatalog = false, badInfo = false, badSession = false, badDefault = false, malformedModel = false;
   globalThis.fetch = (async (input: any, init: any) => {
     const url = String(input);
-    if (url.startsWith(f.url) && init?.method === "POST") mutations.push(new URL(url).pathname);
+    if (url.startsWith(f.url) && init?.method === "POST") postedPaths.push(new URL(url).pathname);
     const response = await fetchOriginal(input, init);
     if (badInfo && url === f.url + "/api/info") return Response.json({ version: TEST_BUILD_VERSION, pid: process.pid });
     if (badDefault && url === f.url + "/api/model/default") return Response.json({ location: { directory: f.root }, data: { providerID: "fixture", id: "model" } });
@@ -42,10 +42,10 @@ test("real shared controller: independent operator policy + exact listener ident
       env: { ANET_VARIANT_TEST_ONLY: "1", ANET_SHARED_VARIANT_PROFILE: p.configPath }, expectedVersion: TEST_BUILD_VERSION,
       sharedServer: { url: f.url, password: f.password, passwordFile: p.passwordFile }, resumeSessionId: id, newSession: false,
       tmuxRunner: () => { throw Error("unexpected_tmux"); }, tmuxRespawn: () => { throw Error("unexpected_tmux"); } });
-    const count = mutations.length;
-    f.policy({ test_only_shared_variant: false }); await expect(open()).rejects.toThrow(/server version/); expect(mutations.length).toBe(count);
+    const count = postedPaths.length;
+    f.policy({ test_only_shared_variant: false }); await expect(open()).rejects.toThrow(/server version/); expect(postedPaths.length).toBe(count);
     f.policy(); const registry = readFileSync(f.registryPath, "utf8"); writeFileSync(f.registryPath, JSON.stringify({ url: "http://127.0.0.1:1", passwordFile: p.passwordFile }));
-    await expect(open()).rejects.toThrow(/server version/); expect(mutations.length).toBe(count); writeFileSync(f.registryPath, registry);
+    await expect(open()).rejects.toThrow(/server version/); expect(postedPaths.length).toBe(count); writeFileSync(f.registryPath, registry);
     session = await open(); expect(session.variantConfigCapable).toBe(true);
     const catalog = await f.api("/api/model"), selected = await f.api(`/api/session/${id}`), started = performance.now();
     const def = await f.api("/api/model/default");
@@ -56,26 +56,26 @@ test("real shared controller: independent operator policy + exact listener ident
       defaultDirectoryMatches: def.location?.directory === f.project,
       effective: await session.selectedSessionModel(id), catalogDirectoryMatches: catalog.location?.directory === f.project, freshCompleteCatalogAccepted: !!readback }));
     expect(readback).toEqual({ providerID: "fixture", id: "model", variant: "default" });
-    expect((await f.api(`/api/session/${id}`)).data.model).toBeUndefined(); expect(mutations.length).toBe(count);
+    expect((await f.api(`/api/session/${id}`)).data.model).toBeUndefined(); expect(postedPaths.length).toBe(count);
     badDefault = true; expect(await session.variantConfigReadback()).toBeUndefined(); badDefault = false;
-    malformedModel = true; expect(await session.variantConfigReadback()).toBeUndefined(); malformedModel = false; expect(mutations.length).toBe(count);
+    malformedModel = true; expect(await session.variantConfigReadback()).toBeUndefined(); malformedModel = false; expect(postedPaths.length).toBe(count);
     expect(await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).toEqual({ status: "applied", model: { providerID: "fixture", id: "model", variant: "high" } });
     expect((await f.api(`/api/session/${id}`)).data.model.variant).toBe("high");
     await session.setSelectedModel("fixture/model"); expect((await f.api(`/api/session/${id}`)).data.model.variant).toBe("high");
     expect(await session.selectSessionModel(id, { providerID: "fixture", id: "model" })).toEqual({ status: "applied", model: { providerID: "fixture", id: "model", variant: "default" } });
-    const noWrites = mutations.length;
+    const noWrites = postedPaths.length;
     badInfo = true; expect(await session.variantConfigReadback()).toBeUndefined();
     expect((await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).status).toBe("rejected"); badInfo = false;
     badSession = true; expect(await session.variantConfigReadback()).toBeUndefined();
     expect((await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).status).not.toBe("applied"); badSession = false;
-    expect(mutations.length).toBe(noWrites);
+    expect(postedPaths.length).toBe(noWrites);
     badCatalog = true; expect(await session.variantConfigReadback()).toBeUndefined();
     expect((await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).status).toBe("rejected"); badCatalog = false;
     f.policy({ test_only_shared_variant: false }); expect(await session.variantConfigReadback()).toBeUndefined();
-    expect((await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).status).toBe("rejected"); expect(mutations.length).toBe(noWrites); f.policy();
+    expect((await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).status).toBe("rejected"); expect(postedPaths.length).toBe(noWrites); f.policy();
     const original = JSON.stringify(p.config); p.config.sourceDelivery.server_pid = process.pid;
     writeFileSync(p.configPath, JSON.stringify(p.config)); expect(await session.variantConfigReadback()).toBeUndefined();
-    expect((await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).status).toBe("rejected"); expect(mutations.length).toBe(noWrites); writeFileSync(p.configPath, original);
+    expect((await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).status).toBe("rejected"); expect(postedPaths.length).toBe(noWrites); writeFileSync(p.configPath, original);
     await f.api(`/api/session/${id}/prompt`, { text: "synthetic held local completion" });
     await Promise.race([f.providerReached, new Promise<never>((_, reject) => setTimeout(() => reject(Error("provider_timeout")), 10000))]);
     expect(await session.selectSessionModel(id, { providerID: "fixture", id: "model", variant: "high" })).toEqual({ status: "rejected", reason: "busy" });

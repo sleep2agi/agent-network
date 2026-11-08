@@ -9,8 +9,10 @@ ENV OPENCODE_V2_VERSION=2.0.22
 RUN npm install -g "@opencode/cli@${OPENCODE_V2_VERSION}" && \
     test "$(opencode --version)" = "opencode v${OPENCODE_V2_VERSION}"
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY server/package*.json ./server/
 COPY agent-network/package*.json ./agent-network/
+COPY contracts /opt/node_modules/@sleep2agi/contracts
 COPY agent-node/package*.json /opt/node_modules/@sleep2agi/agent-node/
 RUN cd server && npm ci --ignore-scripts && \
     cd ../agent-network && npm ci --ignore-scripts && \

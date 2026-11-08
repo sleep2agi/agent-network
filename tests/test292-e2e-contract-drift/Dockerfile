@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl jq python3
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo
+COPY contracts /repo/contracts
 COPY server/ /repo/server/
 RUN cd /repo/server && bun install --frozen-lockfile
 

@@ -7,6 +7,7 @@ WORKDIR /repo
 COPY agent-network/ /repo/agent-network/
 RUN cd /repo/agent-network && bun install --frozen-lockfile
 
+COPY contracts /repo/contracts
 COPY server/ /repo/server/
 RUN cd /repo/server && bun install --frozen-lockfile
 

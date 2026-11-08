@@ -14,10 +14,10 @@
 #   wildcard=1             ⇒ 白名单被写回通配符（安全回退）
 #
 # 一次一行而不是"只在异常时报"：只在异常时报的话，"没跑"与"没问题"同形。
-export HOME=/home/vansin
-export PATH="/home/vansin/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin"
-LOG=/home/vansin/.commhub/feishu-doctor.log
-NODE_DIR=${NODE_DIR:-/home/vansin/comm-feishu-ou/.anet/nodes/通信飞书欧}
+export HOME="${HOME:?HOME must be set}"
+export PATH="$HOME/.nvm/versions/node/v24.19.0/bin:/usr/local/bin:/usr/bin:/bin"
+LOG="$HOME/.commhub/feishu-doctor.log"
+NODE_DIR=${NODE_DIR:-$HOME/comm-feishu-ou/.anet/nodes/通信飞书欧}
 CH="$NODE_DIR/channels/feishu"
 
 ch=0

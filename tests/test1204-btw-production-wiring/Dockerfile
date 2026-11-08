@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && npm install -g --no-audit --no-fund @openai/codex@0.148.0 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
+COPY contracts /repo/contracts
 COPY agent-node/package.json agent-node/package.json
 COPY server/package.json server/package-lock.json server/
 RUN cd agent-node && bun install --ignore-scripts \

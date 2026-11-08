@@ -227,7 +227,7 @@ receipts need the normal database backup; private registry/grant/credentials nee
 the operator's protected config/secret backup. In-memory directory/secret scopes
 are intentionally not recoverable after process loss; they converge unknown.
 
-Test evidence: [report](../tests/report-test4150-project-create.txt). Linux isolated
+Test evidence: [report](../tests/report-test4099-4150-release-reverification.txt). Linux isolated
 controlled Server plus synthetic native package only. Actual anet/agent-node CLI,
 shared-resume core, Hub registration and an idle SSE connection are exercised;
 this is **not upstream-native 2.0.22/TUI, provider-auth, Mac/Win or complete task
@@ -236,7 +236,7 @@ other lifecycle/fork management journal. General restart/adoption/rotation and
 client UI/native full acceptance remain separate. Unknown-binding attach is
 explicitly unimplemented; `activity:"unknown"` is never treated as idle.
 
-Follow-up [real patched native acceptance](../tests/report-test4150-native-project.txt)
+Follow-up [real patched native acceptance harness](../../tests/test4150-native-project/README.md)
 uses the independently built **2.0.22-anet-test.29040e2** ELF, not stock 2.0.22.
 Its test-copy-only exact identity/SHA overlay does not change product pins or
 authorize deployment. It replaces the controlled native HTTP Server/executable
