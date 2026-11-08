@@ -6482,6 +6482,11 @@ return Bun.serve({
         model: snapshot.model ?? null,
         ...(typeof snapshot.model_effective === "string" ? { model_effective: snapshot.model_effective } : {}),
         ...(Object.prototype.hasOwnProperty.call(snapshot, "modelVariant") ? { modelVariant: snapshot.modelVariant } : {}),
+        // Agent (Build): the live session's agent, plus whether this node can
+        // switch it at all. Absent key = node never reported (not "build").
+        opencode_agent_config_capable: snapshot.opencode_agent_config_capable === true,
+        ...(typeof snapshot.opencode_agent_current === "string" ? { agent: snapshot.opencode_agent_current } : {}),
+        ...(Array.isArray(snapshot.opencode_agents) ? { agents: snapshot.opencode_agents } : {}),
         opencode_variant_config_capable: snapshot.opencode_variant_config_capable === true,
         flags: snapshot.flags ?? {},
         config_update_capable: snapshot.config_update_capable ?? false,

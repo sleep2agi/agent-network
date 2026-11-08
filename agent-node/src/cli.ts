@@ -16,6 +16,7 @@ import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from 
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
+import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
 import { SOURCE_FORK_CAPABILITY } from "../../contracts/session-source-transport";
@@ -2120,6 +2121,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
       ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
       ...(variantReadback && variantSession?.isRunning ? { opencode_variant_config_capable: true } : {}),
+      // Agent (Build) hot switch: advertised only when this process actually has
+      // the bound-session writer, so the hub can fail closed for everything else.
+      ...(RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+        && opencodeCopresenceSession?.isRunning === true
+        && typeof opencodeCopresenceSession.selectSessionAgent === "function"
+        ? { opencode_agent_config_capable: true } : {}),
       ...(variantReadback && variantSession?.isRunning ? {
         model_effective: `${variantReadback.providerID}/${variantReadback.id}`,
         modelVariant: variantReadback.variant === "default" ? null : variantReadback.variant ?? null,
@@ -7808,6 +7815,23 @@ async function processConfigUpdate(): Promise<void> {
         update_id: updateId,
         status: result.status === "applied" ? "applied" : result.status === "unknown" ? "timeout" : "rejected",
         ...(result.status === "applied" ? { new_revision: ++currentConfigRevision } : { error: result.status === "unknown" ? "variant_outcome_unknown" : `variant_${result.reason}` }),
+      });
+      return;
+    }
+
+    // Agent selection is the same shape as the variant path: live-session only,
+    // never a config write, never a restart (a restart reopens the old agent).
+    if (update.patch.agent !== undefined) {
+      const result = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2"
+        ? await withDeadlineMs(
+            applyAgentConfig(opencodeCopresenceSession ?? undefined, update.patch.agent),
+            MODEL_SWITCH_DEADLINE_MS, "agent switch timed out",
+          ).catch(() => ({ status: "unknown" as const }))
+        : { status: "rejected" as const, reason: "unsupported" as const };
+      await callCommHub("ack_config_update", {
+        update_id: updateId,
+        status: result.status === "applied" ? "applied" : result.status === "unknown" ? "timeout" : "rejected",
+        ...(result.status === "applied" ? { new_revision: ++currentConfigRevision } : { error: result.status === "unknown" ? "agent_outcome_unknown" : `agent_${result.reason}` }),
       });
       return;
     }

@@ -211,6 +211,10 @@ export interface OpenCodeCopresenceSession {
   forkSession?(sourceSessionId: string): Promise<import("./v2-fork").V2ForkResult>;
   /** #4099: bound to this exact live session; unavailable if no atomic idle gate. */
   selectSessionModel?(sessionId: string, model: import("./v2-model-selection").V2ModelSelection): Promise<import("./v2-model-selection").V2SelectionResult>;
+  /** V2 only. The agent the bound session is running ("build"/"plan"/...). Read-only. */
+  selectedSessionAgent?(sessionId: string): Promise<string | undefined>;
+  /** V2 only. Switch the bound session's agent (POST /api/session/<id>/agent). */
+  selectSessionAgent?(sessionId: string, agent: string): Promise<import("./agent-config-apply").V2AgentResult>;
   /** #3952 —— 会话累计用量（调用方转增量后再上报）。 */
   usageSnapshot?(): Promise<{ input?: number; output?: number; cache?: { read?: number } } | undefined>;
   /** V2 only. Switch the live session. The caller writes node config. */
@@ -1279,6 +1283,8 @@ export function wrapSharedCopresenceSession(
     ...(core.variantConfigReadback ? { variantConfigReadback: () => core.variantConfigReadback!() } : {}),
     ...(core.forkSession ? { forkSession: (sessionId: string) => core.forkSession!(sessionId) } : {}),
     ...(core.selectSessionModel ? { selectSessionModel: (sessionId: string, model: import("./v2-model-selection").V2ModelSelection) => core.selectSessionModel!(sessionId, model) } : {}),
+    ...(core.selectedSessionAgent ? { selectedSessionAgent: (id: string) => core.selectedSessionAgent!(id) } : {}),
+    ...(core.selectSessionAgent ? { selectSessionAgent: (id: string, agent: string) => core.selectSessionAgent!(id, agent) } : {}),
     ...(core.usageSnapshot ? { usageSnapshot: () => core.usageSnapshot!() } : {}),
     ...(core.setSelectedModel ? { setSelectedModel: (model: string) => core.setSelectedModel!(model) } : {}),
     ...(core.selectedSessionModel ? { selectedSessionModel: (id: string) => core.selectedSessionModel!(id) } : {}),
