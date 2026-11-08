@@ -1447,7 +1447,7 @@ import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
 import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
-import { readOpenCodeCatalog, readOpenCodeAgents } from "./runtime/opencode-v2-catalog";
+import { readOpenCodeCatalog, readOpenCodeAgents, readOpenCodeSessionAgent } from "./runtime/opencode-v2-catalog";
 // #3144 —— 清单与采集时刻同进同出（纯函数在 runtime/opencode-catalog-report.ts，可单测）
 import { catalogReport, keepLastCatalog } from "./runtime/opencode-catalog-report";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -1961,6 +1961,19 @@ async function reportedOpenCodeAgents(endpoint: { url: string; authorization: st
     return lastAgentsReport;
   } catch { return lastAgentsReport; }
 }
+
+/** Current agent of the node's bound native session (client cannot read it). */
+async function reportedOpenCodeAgentCurrent(endpoint: { url: string; authorization: string; directory: string } | null): Promise<{ agent: string; seenAt: string } | undefined> {
+  if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || !endpoint) return undefined;
+  const bindSession = typeof (fileConfig as any)?.session === "string" ? (fileConfig as any).session : undefined;
+  try {
+    const read = await readOpenCodeSessionAgent({
+      scope: { networkId: NETWORK_ID || "default", daemonId: NODE_ID || "n_self", directory: endpoint.directory },
+      url: endpoint.url, authorization: endpoint.authorization, sessionId: bindSession, timeoutMs: 3_000,
+    });
+    return read ? { agent: read.agent, seenAt: new Date().toISOString() } : undefined;
+  } catch { return undefined; }
+}
 /**
  * #3952 —— 每轮结束后把这一次的 token 用量报给 Hub（只报计数，不报内容）。
  *
@@ -2027,6 +2040,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     : null;
   const reportedCatalog = await reportedOpenCodeCatalog(catalogEndpoint);
   const reportedAgents = await reportedOpenCodeAgents(catalogEndpoint);
+  const reportedAgentCurrent = await reportedOpenCodeAgentCurrent(catalogEndpoint);
   const variantSession = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeCopresenceSession?.variantConfigCapable
     ? opencodeCopresenceSession : undefined;
   const variantReadback = variantSession?.variantConfigReadback
@@ -2137,6 +2151,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
         opencode_agents: reportedAgents.agents,
         ...(reportedAgents.seenAt ? { opencode_agents_seen_at: reportedAgents.seenAt } : {}),
       } : {}),
+      // #4150-Build — the agent this node's bound session currently uses.
+      ...(reportedAgentCurrent ? { opencode_agent_current: reportedAgentCurrent.agent } : {}),
       ...(catalogEndpoint ? { opencode_server: catalogEndpoint.url } : {}),
     },
   });
