@@ -171,11 +171,16 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     await expect(open({ ANET_VARIANT_TEST_ONLY: "1", TEST_INFO_VERSION: "2.0.22-anet-test.29040e2" })).rejects.toThrow(/server version/);
   });
 
-  test("stock server stays variant unsupported even with test opt-in", async () => {
+  test("stock server: variant writes go through the idle-gated writer, not the test controller", async () => {
     const { session } = await open({ ANET_VARIANT_TEST_ONLY: "1" });
-    expect(session.variantConfigCapable).toBe(false);
-    expect(await session.selectSessionModel!(session.sessionId, { providerID: "stub", id: "stub-model", variant: "high" })).toEqual({ status: "rejected", reason: "unsupported" });
-    expect(await session.variantConfigReadback!()).toBeUndefined();
+    // The atomic-league controller still never exists on a stock server...
+    expect(await session.selectSessionModel!(session.sessionId, { providerID: "stub", id: "stub-model", variant: "high" }))
+      .toEqual({ status: "rejected", reason: "unsupported" });
+    // ...but a narrower writer does: it refuses while one of our turns is in flight and
+    // verifies the readback. OpenCode exposes no session busy flag, so a human turn in
+    // the TUI started at the same instant is NOT detectable — documented trade-off.
+    expect(session.variantConfigCapable).toBe(true);
+    expect(typeof session.setSelectedVariant).toBe("function");
   });
 
   test("MCP observation precedes session and ready launcher; close reaps serve", async () => {
