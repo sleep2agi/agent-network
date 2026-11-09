@@ -9,7 +9,7 @@ import { createSessionSourceCreateAdapter, type SourceCreateReceipt, type Verifi
 import { createSessionSourceGrantStore, type SessionSourceBinding } from "./session-source-grant";
 import { validateName } from "./create-node-validate";
 import { isSourceReadEvidence, sameSourceChallenge, isSourceLeaseConfirmation, sameSourceRecheck,
-  type SourceLeaseRecheck, type SourceReadChallenge, type SourceReadEvidence } from "../../contracts/session-source-evidence";
+  type SourceLeaseRecheck, type SourceReadChallenge, type SourceReadEvidence } from "./contracts/session-source-evidence";
 
 export type SourceAdmissionReceipt = SourceCreateReceipt & {
   source_ref: string; scope: "admission_only"; intent_id: string;

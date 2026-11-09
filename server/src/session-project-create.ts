@@ -6,7 +6,7 @@ import { putPendingEnvBlob, takePendingEnvBlob } from "./create-node";
 import { checkNodeName } from "./shared/node-name";
 import { hasFreshChildRegistration } from "./session-source-delivery";
 import { PROJECT_CREATE_ROOT as ROOT, PROJECT_CREATE_CAPABILITY as CAP, isProjectCreateId,
-  type ProjectCreateTask, type ProjectCreateSelection, type SessionAttachSelection, type ProjectOperation } from "../../contracts/session-project-create";
+  type ProjectCreateTask, type ProjectCreateSelection, type SessionAttachSelection, type ProjectOperation } from "./contracts/session-project-create";
 
 export type ProjectRow = ProjectCreateTask & { user_id: string; requester_token_id: string; daemon_token_id: string;
   daemon_instance_id: string; state: string; session_id: string | null; child_node_id: string | null;

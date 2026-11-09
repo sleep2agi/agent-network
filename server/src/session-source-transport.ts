@@ -7,14 +7,14 @@ import { createSessionSourceEvidenceQueue } from "./session-source-evidence";
 import { createSessionSourceExecutionQueue } from "./session-source-execution";
 import { createSessionSourceDeliveryQueue } from "./session-source-delivery";
 import { checkNodeName } from "./shared/node-name";
-import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
+import { SOURCE_DELIVERY_CAPABILITY } from "./contracts/session-source-delivery";
 import { secretTransportVerdict } from "./env-transport-policy";
 import { SOURCE_DIRECTORY_CAPABILITY as DIR_CAP, isDirectoryRequestId, isDirectoryServerId, isSourceDirectorySnapshot,
-  type SourceDirectoryTask, type SourceDirectorySnapshot } from "../../contracts/session-source-directory";
-import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
+  type SourceDirectoryTask, type SourceDirectorySnapshot } from "./contracts/session-source-directory";
+import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "./contracts/session-project-create";
 import { createSessionProjectTransport } from "./session-project-create";
 import { SOURCE_FORK_ROOT as ROOT, SOURCE_FORK_CAPABILITY as CAP, isSourceForkRequestId,
-  type SourceForkTask, type SourceForkStatus, type SourceForkReceipt } from "../../contracts/session-source-transport";
+  type SourceForkTask, type SourceForkStatus, type SourceForkReceipt } from "./contracts/session-source-transport";
 
 type Row = { request_id: string; user_id: string; requester_token_id: string; network_id: string; intent_id: string;
   source_node_id: string; daemon_node_id: string; daemon_token_id: string; daemon_instance_id: string; session_id: string;

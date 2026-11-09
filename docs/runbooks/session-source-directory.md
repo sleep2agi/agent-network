@@ -1,6 +1,6 @@
 # Existing OpenCode project/Session directory (read-only preview)
 
-Client contract: [`contracts/session-source-directory.ts`](../../contracts/session-source-directory.ts).
+Client contract: [`server/src/contracts/session-source-directory.ts`](../../server/src/contracts/session-source-directory.ts).
 This lane is independent of [managed-source fork](session-source-transport.md).
 It does **not** attach, fork, create, resume, adopt, mint a child credential or
 promote `source_reserved`. No client or native OpenCode tree changes are included.

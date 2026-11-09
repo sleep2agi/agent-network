@@ -5,8 +5,8 @@ import { putPendingEnvBlob, takePendingEnvBlob, resolveNodeCaller } from "./crea
 import { readSessionControlCredential } from "./node-session-control";
 import { parseDbTimestampMs } from "./db-timestamp";
 import type { createSessionSourceExecutionQueue } from "./session-source-execution";
-import { SOURCE_DELIVERY_CAPABILITY, type SourceNodeDelivery } from "../../contracts/session-source-delivery";
-import type { SourceExecutionTask } from "../../contracts/session-source-execution";
+import { SOURCE_DELIVERY_CAPABILITY, type SourceNodeDelivery } from "./contracts/session-source-delivery";
+import type { SourceExecutionTask } from "./contracts/session-source-execution";
 import { createSessionSourceIssuer } from "./session-source-issuer";
 import { canRestWriteNetwork } from "./network-scope";
 

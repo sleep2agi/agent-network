@@ -6,7 +6,7 @@ import { resolveNodeCaller } from "./create-node";
 import { canRestWriteNetwork } from "./network-scope";
 import { createSessionSourceIssuer } from "./session-source-issuer";
 import type { createSessionSourceEvidenceQueue } from "./session-source-evidence";
-import { isSourceExecutionTask, isSourceExecutionResult, type SourceExecutionTask, type SourceExecutionResult } from "../../contracts/session-source-execution";
+import { isSourceExecutionTask, isSourceExecutionResult, type SourceExecutionTask, type SourceExecutionResult } from "./contracts/session-source-execution";
 
 type Row = { execution_id: string; admission_request_id: string; task_json: string; user_id: string;
   requester_token_id: string; daemon_token_id: string; state: string; result_json: string | null };
