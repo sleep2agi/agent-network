@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { SessionControlPin } from "./session-control-bridge";
+import { sessionControlTimeoutMs, type SessionControlPin } from "./session-control-bridge";
 import { createSessionSourceEvidenceReader, handleSessionSourceEvidenceRead, handleSessionSourceLeaseRecheck } from "./session-source-evidence";
 import { createSessionSourceExecutor, handleSessionSourceExecution } from "./session-source-execution";
 import { createSessionSourceProfileWorker } from "./session-source-delivery";
@@ -63,7 +63,7 @@ export function createSessionSourceTransportWorker(local: { pin: SessionControlP
           // Child-only confirmation, using the one-shot delivered credential.
           // No token persistence, token rotation or retries on lost response.
           const r = await fetch(`${hub.origin}${ROOT}/child-register`, { method: "POST", redirect: "error",
-            signal: AbortSignal.any([pin.signal, AbortSignal.timeout(5000)]), headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            signal: AbortSignal.any([pin.signal, AbortSignal.timeout(sessionControlTimeoutMs())]), headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
             body: JSON.stringify({ ...envelope, delivery_id: deliveryId }) });
           return r.ok && (await r.json()).status === "registration_confirmed";
         } });
@@ -72,9 +72,25 @@ export function createSessionSourceTransportWorker(local: { pin: SessionControlP
     }
     if (!acknowledged) await ack({ transport_failure: "unknown_rotation_required" }); // negative-only convergence, no action retry
   }
+  // Fork lane runs on its own chain. A slow directory/project round-trip (the Hub can
+  // stall several seconds) must not delay the fork pull past the Hub's 15 s evidence
+  // challenge window — that silently turned every fork into unknown_rotation_required.
+  let forkPending: Promise<void> | null = null;
+  const forkTick = (): Promise<void> => {
+    if (local.forkEnabled === false) return Promise.resolve();
+    if (forkPending) return forkPending;
+    forkPending = (async () => {
+      pin.checkpoint();
+      if (!verified) { await verifySourceResumeLauncher(local.nativeLaunch ?? { command: loadAndVerifyAnetBin(), env: { ...minimalEnv(), HOME: local.home } }); verified = true; }
+      pin.checkpoint(); await post("daemon");
+      for (let i = 0; i < 8; i++) { pin.checkpoint(); const r = await post("pull"); if (!r.task) break; await consume(r.task); }
+    })().finally(() => { forkPending = null; });
+    return forkPending;
+  };
   return {
     tick(): Promise<void> {
-      if (pending) return pending;
+      const fork = forkTick();
+      if (pending) return Promise.all([fork, pending]).then(() => {});
       pending = (async () => {
         pin.checkpoint();
          if ((local.projectEnabled || local.attachEnabled) && !projectWorker) {
@@ -84,7 +100,7 @@ export function createSessionSourceTransportWorker(local: { pin: SessionControlP
             confirm: async (requestId, token) => {
               pin.checkpoint(); await declareDirectory();
               const r = await fetch(`${hub.origin}${PROJECT_CREATE_ROOT}/child-register`, { method: "POST", redirect: "error",
-                signal: AbortSignal.any([pin.signal, AbortSignal.timeout(5000)]), headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+                signal: AbortSignal.any([pin.signal, AbortSignal.timeout(sessionControlTimeoutMs())]), headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
                 body: JSON.stringify({ request_id: requestId }) });
               return r.ok && (await r.json()).status === "registration_confirmed";
             } });
@@ -109,11 +125,8 @@ export function createSessionSourceTransportWorker(local: { pin: SessionControlP
             pin.checkpoint(); await declareDirectory(); await projectPost("ack", { request_id: t.request_id, result });
           }
         }
-        if (local.forkEnabled === false) return;
-        if (!verified) { await verifySourceResumeLauncher(local.nativeLaunch ?? { command: loadAndVerifyAnetBin(), env: { ...minimalEnv(), HOME: local.home } }); verified = true; }
-        pin.checkpoint(); await post("daemon");
-        for (let i = 0; i < 8; i++) { pin.checkpoint(); const r = await post("pull"); if (!r.task) break; await consume(r.task); }
-      })().finally(() => { pending = null; }); return pending;
+      })().finally(() => { pending = null; });
+      return Promise.all([fork, pending]).then(() => {});
     },
     async stop() { pin.invalidate(); await projectWorker?.stop(); for (const [id, w] of children) await w.stopChild(id); children.clear(); },
   };
