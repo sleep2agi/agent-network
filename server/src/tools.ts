@@ -1,3 +1,4 @@
+import { allStatusCacheKey, cachedAllStatus } from "./all-status-cache.js";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { enqueueBroadcast } from "./broadcast-fanout.js";
 import { selectHumanInboxIds } from "./human-inbox.js";
@@ -1995,10 +1996,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ filter_status, filter_server, filter_alias, network_id: netId }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
-      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${filter_alias ? " alias=" + filter_alias.slice(0, 80) : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
+      const cacheKey = allStatusCacheKey(readScope, [filter_status ?? null, filter_server ?? null, filter_alias ?? null]);
 
       // Round-2/4 review ③: stale-marking moved to startStaleSessionSweeper()
       // (background timer, ~60s cadence). Read path no longer fires UPDATE.
+      // Members restricted to granted agents always read fresh: a grant/revoke must
+      // take effect on the next call, not up to TTL later.
+      const { text, hit } = cachedAllStatus(readScope.agentRestriction ? null : cacheKey, () => {
       let sql = "SELECT * FROM sessions WHERE 1=1";
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, readScope, { alias: "alias", nodeId: "node_id" });
@@ -2033,22 +2037,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const summary = db.all(summarySql, ...summaryParams);
 
       const filtered = !!(filter_status || filter_server || aliases.length > 0);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: true,
-              sessions,
-              summary,
-              summary_scope: filtered
-                ? "every session in the read scope — NOT narrowed by the filters applied to `sessions`"
-                : "every session in the read scope",
-              sessions_returned: sessions.length,
-            }),
-          },
-        ],
-      };
+      return JSON.stringify({
+        ok: true,
+        sessions,
+        summary,
+        summary_scope: filtered
+          ? "every session in the read scope — NOT narrowed by the filters applied to `sessions`"
+          : "every session in the read scope",
+        sessions_returned: sessions.length,
+      });
+      });
+      console.log(`[${ts()}] hub → get_all_status${hit ? " (cached)" : ""}${filter_status ? ": filter=" + filter_status : ""}${filter_alias ? " alias=" + filter_alias.slice(0, 80) : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
+      return { content: [{ type: "text" as const, text }] };
     }
   );
 
