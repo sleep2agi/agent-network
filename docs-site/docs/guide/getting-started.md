@@ -6,7 +6,7 @@
      每一处需要改的行。改了正文也要改戳,反之亦然 —— 两边不一致时门同样会红。
      latest 标记已核对的通道版本，preview 标记本页核对的版本；是否发布另核 npm 精确版本；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
-<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.190 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.221 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.223 -->
 
 从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。

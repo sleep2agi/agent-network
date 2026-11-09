@@ -7,7 +7,7 @@
      Change the prose, change the stamp — the gate also fails when the two disagree.
      The latest stamp records the checked channel version; the preview stamp records the version checked
      on this page. Verify npm publication separately. Historical references (e.g. `<= 2.3.0-preview.37`) are not stamped. -->
-<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.190 -->
+<!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.221 -->
 <!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.223 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
