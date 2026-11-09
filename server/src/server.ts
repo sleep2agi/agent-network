@@ -7087,6 +7087,9 @@ return Bun.serve({
         let opencodeAgents: string[] | null = null;
         let opencodeAgentsSeenAt: string | null = null;
         let opencodeAgentCurrent: string | null = null;
+        // 与 GET /api/nodes/:id/config 保持同一口径：列表里也要能读到「能不能切 agent」，
+        // 否则两个端点对同一台节点会给出不一致的能力结论。
+        let opencodeAgentConfigCapable = false;
         if (snap) {
           let parsed: any = null;
           try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
@@ -7118,6 +7121,7 @@ return Bun.serve({
           if (typeof rawAgentCurrent === "string" && rawAgentCurrent.length > 0 && rawAgentCurrent.length <= 200) {
             opencodeAgentCurrent = rawAgentCurrent;
           }
+          opencodeAgentConfigCapable = parsed?.opencode_agent_config_capable === true;
           const flags = parsed?.flags;
           if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
@@ -7142,6 +7146,7 @@ return Bun.serve({
           opencode_catalog: opencodeCatalog,
           opencode_agents: opencodeAgents,
           opencode_agent_current: opencodeAgentCurrent,
+          opencode_agent_config_capable: opencodeAgentConfigCapable,
           opencode_agents_seen_at: opencodeAgentsSeenAt,
           // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
           opencode_catalog_seen_at: opencodeCatalogSeenAt,
