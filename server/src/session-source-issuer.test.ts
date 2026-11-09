@@ -192,10 +192,13 @@ test("acknowledged adoption is a management relation, not canonical-directory or
 });
 
 test("freshness uses Hub receipt times and currently valid immutable node credentials", () => {
-  for (const offset of ["-2 minutes", "+2 minutes"]) {
+  for (const offset of ["-5 minutes", "+2 minutes"]) {
     db.run("UPDATE sessions SET last_seen_at=datetime('now',?1) WHERE resume_id='issuer_source'", [offset]);
     expect(inspect()).toEqual({ ok: false, error: "source_evidence_stale" });
   }
+  // Within one 3-minute status heartbeat: alive (75 s used to call this stale).
+  db.run("UPDATE sessions SET last_seen_at=datetime('now','-2 minutes') WHERE resume_id='issuer_source'");
+  expect((inspect() as any).error).not.toBe("source_evidence_stale");
   db.run("UPDATE sessions SET last_seen_at=datetime('now') WHERE resume_id='issuer_source'");
   for (const tokenId of [sourceToken.token_id!, daemonToken.token_id!]) {
     db.run("UPDATE api_tokens SET revoked_at=datetime('now') WHERE token_id=?1", [tokenId]);
