@@ -2,6 +2,7 @@ name: OpenCode V2 shared candidate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'agent-node/**'
       - 'agent-network/**'
@@ -30,6 +31,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   shared-core:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -47,6 +49,7 @@ jobs:
               src/runtime/opencode-copresence/v2-shared-native.test.ts'
 
   full-regression:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

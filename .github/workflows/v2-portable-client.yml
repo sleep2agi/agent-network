@@ -2,6 +2,7 @@ name: OpenCode V2 portable client
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'tests/test883-v2-portable-client/**'
       - 'tests/test543-opencode-v2-copresence/stub-model.py'
@@ -29,6 +30,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   real-client:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
