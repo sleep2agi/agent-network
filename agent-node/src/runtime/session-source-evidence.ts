@@ -2,11 +2,12 @@
 // adapter. No start/reload/prompt/bridge takeover. Production dispatch is off.
 import { randomUUID, createHash } from "node:crypto";
 import { constants, openSync, closeSync, fstatSync, lstatSync, readFileSync, realpathSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { checkNodeName } from "../shared/node-name";
 import { readChildWorkdirs, assertWorkdirAllowed } from "./child-workdir";
 import { LAUNCH_HEALTH_FILE, readLiveProcess } from "./opencode-copresence/launcher-health";
 import { findOwnedOpenCodeNodeDir } from "./opencode-catalog-dispatch";
+import { adoptedChild } from "./adopt-registry";
 import { readOpenCodeV2CatalogEndpoint } from "./opencode-v2-catalog-endpoint";
 import { readOpenCodeCatalog } from "./opencode-v2-catalog";
 import { observeHostSharedServe } from "./opencode-host-shared-observer";
@@ -76,15 +77,29 @@ export function createSessionSourceEvidenceReader(local: { networkId: string; da
     if (!name.ok || name.name !== q.alias) throw Error("source_scope_refused");
     directory(local.daemonWorkDir); directory(join(local.daemonWorkDir, ".anet"));
     const registry = join(local.daemonWorkDir, ".anet", "child-workdirs.json");
-    const registered = privateRecord(registry)?.[q.alias];
-    const project = readChildWorkdirs(local.daemonWorkDir)[q.alias];
-    if (registered !== project) throw Error("source_registry_changed");
-    if (!project) throw Error("source_not_registered"); // no legacy cwd fallback
+    // Daemon-created child: registry value is its project path. Adopted OpenCode V2
+    // co-presence node: registry value is the binding object (adopt-opencode-v2.ts).
+    const resolveSource = (): { project: string; nodeDir: string | null; registration: string } => {
+      const registered = privateRecord(registry)?.[q.alias];
+      if (registered && typeof registered === "object" && registered.adopted === true && registered.opencode_v2?.version === 1) {
+        const entry = adoptedChild(local.daemonWorkDir, q.alias);
+        if (!entry?.opencode_v2 || entry.node_id !== q.source_node_id) throw Error("source_not_owned");
+        // The node dir must be exactly <project>/.anet/nodes/<name>; never trust a path elsewhere.
+        if (dirname(entry.nodeDir) !== join(entry.workdir, ".anet", "nodes") || !basename(entry.nodeDir)) throw Error("source_not_owned");
+        return { project: entry.workdir, nodeDir: entry.nodeDir, registration: JSON.stringify(entry) };
+      }
+      const project = readChildWorkdirs(local.daemonWorkDir)[q.alias];
+      if (registered !== project) throw Error("source_registry_changed");
+      if (!project) throw Error("source_not_registered"); // no legacy cwd fallback
+      return { project, nodeDir: findOwnedOpenCodeNodeDir(local.daemonWorkDir, q.alias, q.source_node_id), registration: JSON.stringify(project) };
+    };
+    const resolved = resolveSource();
+    const project = resolved.project;
     assertWorkdirAllowed(project, { home: local.home });
     const identity = directory(project);
     const ancestors = [join(project, ".anet"), join(project, ".anet", "nodes")];
     const ancestry = ancestors.map(directory);
-    const nodeDir = findOwnedOpenCodeNodeDir(local.daemonWorkDir, q.alias, q.source_node_id);
+    const nodeDir = resolved.nodeDir;
     if (!nodeDir) throw Error("source_not_owned");
     const nodeIdentity = directory(nodeDir);
     const config = localConfig(join(nodeDir, "config.json"), q);
@@ -152,7 +167,9 @@ export function createSessionSourceEvidenceReader(local: { networkId: string; da
     const again = readOpenCodeV2CatalogEndpoint(nodeDir);
     if (JSON.stringify(ancestry) !== JSON.stringify(ancestors.map(directory))
       || JSON.stringify(nodeIdentity) !== JSON.stringify(directory(nodeDir))) throw Error("source_changed");
-    if (privateRecord(registry)?.[q.alias] !== project || readChildWorkdirs(local.daemonWorkDir)[q.alias] !== project || health !== healthAt()
+    let again2: ReturnType<typeof resolveSource> | null = null;
+    try { again2 = resolveSource(); } catch { again2 = null; }
+    if (!again2 || again2.registration !== resolved.registration || again2.project !== project || again2.nodeDir !== nodeDir || health !== healthAt()
       || JSON.stringify(server) !== JSON.stringify(processAt()) || JSON.stringify(identity) !== JSON.stringify(directory(project))
       || config !== localConfig(join(nodeDir, "config.json"), q) || JSON.stringify(again) !== JSON.stringify(endpoint)
       || Date.now() >= q.expires_at) throw Error("source_changed");

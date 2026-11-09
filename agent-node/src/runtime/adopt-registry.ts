@@ -11,6 +11,8 @@ export interface AdoptedChild {
   nodeDir: string;
   launch_mode: "bare" | "tmux";
   codex_v2?: { version: 1; layout: "native" | "external-appserver"; socket: string; marker: string; config_hash: string; start_inputs?: CodexStartInputs };
+  /** OpenCode V2 co-presence: registered for source reads (fork); daemon start/stop not yet supported. */
+  opencode_v2?: { version: 1; config_hash: string };
   launch_evidence?: { mode: "bare" | "tmux"; config_hash: string; socket?: string; session?: string; pane?: string };
 }
 export function readWorkdirRegistry(root: string): Record<string, unknown> {
