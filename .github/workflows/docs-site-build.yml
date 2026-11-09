@@ -38,7 +38,13 @@
 name: docs-site build
 
 on:
+  # 2026-11-09 —— PR 分层：上面「每个 PR 都跑」的理由是为了将来设成 required；
+  # 目前它不是 required，而每个 PR 白跑 ~5 分钟占 runner。先加 paths，
+  # 真要设 required 时改成 job 级 if 跳过（skipped 算通过），而不是去掉过滤。
   pull_request:
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/docs-site-build.yml'
   push:
     branches: [main]
     paths:
