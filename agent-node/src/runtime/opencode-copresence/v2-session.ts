@@ -80,6 +80,21 @@ const USERNAME = "opencode";
 const HISTORY_PAGE_LIMIT = 200;
 const HISTORY_MAX_PAGES = 25;
 const POLL_INTERVAL_MS = 250;
+/**
+ * History read timeout. `opencode serve` is single-threaded: while a turn runs a
+ * model/tool step, `GET …/message?limit=200` can take >10 s. The former fixed
+ * 10 s abort meant the bridge never saw the turn finish and the node stayed
+ * "working" with an empty output (TMA客户端欧 / TM测试基建欧, 2026-11-09).
+ * ANET_OPENCODE_HISTORY_TIMEOUT_MS overrides; clamped to 1 s–10 min.
+ */
+export function historyReadTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.ANET_OPENCODE_HISTORY_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 1_000 && raw <= 600_000 ? Math.trunc(raw) : 60_000;
+}
+/** Poll delay after `failures` consecutive history read failures: 250 ms, doubling, capped at 2 s. */
+export function historyPollDelayMs(failures: number): number {
+  return failures <= 0 ? POLL_INTERVAL_MS : Math.min(POLL_INTERVAL_MS * 2 ** Math.min(failures, 8), 2_000);
+}
 
 /**
  * #3071 —— 超时不等于结果丢失。
@@ -440,7 +455,7 @@ async function readEntriesAfter(
   const newerFirst: OpenCodeV2Entry[] = [];
   let path = `/api/session/${sessionId}/message?order=desc&limit=${HISTORY_PAGE_LIMIT}`;
   for (let page = 0; page < HISTORY_MAX_PAGES; page++) {
-    const body = await fetchOpenCodeJson(url, password, path, {}, 10_000);
+    const body = await fetchOpenCodeJson(url, password, path, {}, historyReadTimeoutMs());
     const data: OpenCodeV2Entry[] = Array.isArray(body?.data) ? body.data : [];
     for (const entry of data) {
       if (entry?.id === messageId) return newerFirst.reverse();
@@ -847,13 +862,19 @@ export async function openVettedOpenCodeV2Copresence(
           evidence?.onSubmitted?.();
           let delivered = false;
           let misses = 0;
+          let readFailures = 0;
           while (Date.now() < deadline) {
             if (!session.isRunning) throw new Error("OpenCode v2 serve exited while the network turn was pending");
             let after: OpenCodeV2Entry[] | null = null;
             try {
               after = await readEntriesAfter(url, password, sessionId, messageId);
+              readFailures = 0;
             } catch (error: any) {
-              warn(`[opencode-copresence] v2 history read failed (will retry): ${error?.message ?? error}`);
+              readFailures += 1;
+              // A busy serve fails every read; one line per failure flooded the log every ~10 s.
+              if (readFailures === 1 || readFailures % 10 === 0) {
+                warn(`[opencode-copresence] v2 history read failed (will retry, #${readFailures}): ${error?.message ?? error}`);
+              }
             }
             if (after) {
               misses = 0;
@@ -920,7 +941,7 @@ export async function openVettedOpenCodeV2Copresence(
                 misses = 0;
               }
             }
-            await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+            await new Promise((r) => setTimeout(r, historyPollDelayMs(readFailures)));
           }
           if (!delivered) {
             // Still queued behind a (human) turn: withdraw it so it can never

@@ -40,7 +40,8 @@ function privateRecord(path: string): any {
 function localConfig(path: string, q: SourceReadChallenge): string {
     const v = privateRecord(path);
     if (v.node_id !== q.source_node_id || v.network_id !== q.network_id || v.runtime !== "opencode-cli"
-      || v.opencodeGeneration !== "v2" || v.alias !== q.alias) throw Error("source_config_mismatch");
+      || v.opencodeGeneration !== "v2" || (v.alias ?? v.node_name) !== q.alias
+      || (v.alias !== undefined && v.node_name !== undefined && v.alias !== v.node_name)) throw Error("source_config_mismatch");
     return JSON.stringify([v.node_id, v.network_id, v.runtime, v.opencodeGeneration, v.alias, v.flags?.opencodeUnsafeTools,
       v.sessionId, v.sharedVariantAuthority, v.sourceDelivery]);
 }
