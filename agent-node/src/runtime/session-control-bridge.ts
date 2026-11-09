@@ -19,6 +19,13 @@ export interface SessionControlPin {
 }
 
 /** Snapshot the initial process identity. Hot rotation may disable, never rebind. */
+/** Per-request Hub timeout for session-control / source transport calls. The former fixed
+ * 5 s abort failed ~10% of calls against a loaded Hub (p90 5.1 s measured 2026-11-09).
+ * ANET_SESSION_CONTROL_TIMEOUT_MS overrides; clamped to 1 s–60 s, default 20 s. */
+export function sessionControlTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.ANET_SESSION_CONTROL_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 1_000 && raw <= 60_000 ? Math.trunc(raw) : 20_000;
+}
 export function createSessionControlPin(opts: {
   hubUrl: string; token: string; nodeId: string; networkId: string; epoch: number;
   currentToken: () => string; currentEpoch: () => number; signal: AbortSignal;
@@ -47,7 +54,7 @@ export function createSessionControlPin(opts: {
       const response = await (opts.fetch ?? globalThis.fetch)(`${hub}${path}`, {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify(body), redirect: "error",
-        signal: AbortSignal.any([cancelled.signal, AbortSignal.timeout(5_000)]),
+        signal: AbortSignal.any([cancelled.signal, AbortSignal.timeout(sessionControlTimeoutMs())]),
       });
       checkpoint();
       if (!response.ok) throw new SessionBackgroundError("session_control_unavailable");
