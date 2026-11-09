@@ -778,6 +778,14 @@ test("HTTP source-fork refusals carry a diagnostic reason once source permission
     const reused = await api(human.token!, "", { ...value("reason-reuse"), child_name: "reason-different" });
     expect(reused.status).toBe(409);
     expect(reused.body.reason).toBe("intent_reused");
+    // Hand-started source (no daemon created/adopted it): members learn why, outsiders do not.
+    const unmanaged = await api(human.token!, "", { ...value("reason-unmanaged"), source_node_id: "n_unmanaged_source" });
+    expect(unmanaged.status).toBe(409);
+    expect(unmanaged.body).toEqual({ ok: false, error: "source_fork_unavailable", reason: "source_not_managed" });
+    const stranger = register("reason_stranger", "Fixture-Strong-4150!");
+    const strangerUnmanaged = await api(stranger.token!, "", { ...value("reason-stranger"), source_node_id: "n_unmanaged_source" });
+    expect(strangerUnmanaged.status).toBe(409);
+    expect(strangerUnmanaged.body.reason).toBeUndefined();
     // Callers without permission on the source still get no reason (no management-state disclosure).
     const outsider = register("reason_outsider", "Fixture-Strong-4150!");
     const foreign = await api(outsider.token!, "", value("reason-foreign"));

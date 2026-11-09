@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { db } from "./db";
-import { resolveToken } from "./auth";
+import { resolveToken, getUserNetworkRole } from "./auth";
 import { isHumanCredential, readSessionControlCredential, resolveSessionControlNodeCaller, readSessionControlBody } from "./node-session-control";
 import { createSessionSourceIssuer } from "./session-source-issuer";
 import { createSessionSourceEvidenceQueue } from "./session-source-evidence";
@@ -26,7 +26,8 @@ const terminal = (r: Row) => ["registration_confirmed", "refused", "unknown_rota
 const ok = (value: object) => Response.json({ ok: true, ...value }, { headers: { "cache-control": "no-store" } });
 
 /** Why a fork create was refused after the caller's source permissions were verified. */
-export type SourceForkFailureReason = "daemon_offline" | "daemon_not_capable" | "hub_busy" | "evidence_unavailable" | "intent_reused";
+export type SourceForkFailureReason = "daemon_offline" | "daemon_not_capable" | "hub_busy" | "evidence_unavailable" | "intent_reused"
+  | "source_not_managed" | "source_management_ambiguous";
 
 /** Separate REST semantics within the existing session-control HTTP surface.
  * Secret bodies are never persisted. Original human Request lives ONLY in this
@@ -267,7 +268,13 @@ export function createSessionSourceTransport(options: { enabled?: boolean; direc
            WHERE node_id=?1 AND network_id=?2 AND status='active'
            UNION SELECT daemon_node_id FROM session_project_creates
            WHERE child_node_id=?1 AND network_id=?2 AND state='registration_confirmed'`, b.source_node_id, b.network_id);
-        if (owners.length !== 1) return fail();
+        if (owners.length !== 1) {
+          // No daemon (hand-started node, never adopted) or more than one: the source cannot be
+          // forked. Network members already see `managed` in /api/nodes, so naming the cause
+          // to them discloses nothing new; anyone else still gets a bare refusal.
+          const member = !!getUserNetworkRole(auth.user.user_id, b.network_id);
+          return fail(409, member ? (owners.length === 0 ? "source_not_managed" : "source_management_ambiguous") : undefined);
+        }
         const s = { network_id: b.network_id, source_node_id: b.source_node_id, daemon_node_id: owners[0].daemon_node_id, mode: "fork_independent" as const };
         if (!("permissions_verified" in issuer.inspect(req, s))) return fail(403);
         const existing = db.get<Row>("SELECT * FROM session_source_transports WHERE user_id=?1 AND network_id=?2 AND intent_id=?3", auth.user.user_id, b.network_id, b.intent_id);
