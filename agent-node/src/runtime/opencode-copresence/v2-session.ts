@@ -157,7 +157,25 @@ type LateReplyWatcherDeps = {
   log?: (message: string) => void;
   /** 测试缝：把「这一轮好了没」的判据换掉，避免测试去造真实的 history 形状。 */
   evaluate?: (after: OpenCodeV2Entry[]) => LateReplyVerdict;
+  /**
+   * Wedge breaker. When the window closes, our turn is still the live one and
+   * its history has not changed for `stallMs`, interrupt the session. Without
+   * it a tool call that never returns keeps the shared session "busy" forever
+   * and every later task times out behind it (seen on 通信欧: 11 h). Only our
+   * own, provably still-live turn qualifies: a pending verdict means no `idle`
+   * or later `user` entry closed it.
+   */
+  interruptStalled?: () => Promise<boolean>;
+  stallMs?: number;
+  now?: () => number;
 };
+
+/** A turn whose history has not moved for this long at window close is treated as wedged. */
+export const LATE_REPLY_STALL_MS = 30 * 60_000;
+
+function entriesSignature(after: readonly OpenCodeV2Entry[]): string {
+  return JSON.stringify(after.map((e: any) => [e?.id, e?.type, e?.finish, e?.outcome, JSON.stringify(e?.content ?? null).length]));
+}
 
 function evaluateLateReply(after: OpenCodeV2Entry[], turnId: string): LateReplyVerdict {
   const verdict = openCodeV2TurnVerdict(after);
@@ -171,15 +189,19 @@ function evaluateLateReply(after: OpenCodeV2Entry[], turnId: string): LateReplyV
 
 /** 超时之后继续盯着这一轮；结束时把结果交出去。返回一个可 await 的 promise（测试用）。 */
 export function watchLateReply(deps: LateReplyWatcherDeps): Promise<void> {
+  const now = deps.now ?? Date.now;
   const capMs = deps.capMs ?? LATE_REPLY_CAP_MS;
-  const deadline = Date.now() + capMs;
+  const stallMs = deps.stallMs ?? LATE_REPLY_STALL_MS;
+  const deadline = now() + capMs;
   let settled = false;
+  let lastSig: string | null = null;
+  let lastChangeAt = now();
   return (async () => {
     try { deps.onArmed?.(); } catch { /* 记录失败不影响观察 */ }
-    while (!settled && Date.now() < deadline) {
+    while (!settled && now() < deadline) {
       if (!deps.isRunning()) return;
       await (deps.sleep ? deps.sleep(POLL_INTERVAL_MS) : new Promise((r) => setTimeout(r, POLL_INTERVAL_MS)));
-      if (!deps.isRunning() || Date.now() >= deadline) break;
+      if (!deps.isRunning() || now() >= deadline) break;
       let after: OpenCodeV2Entry[] | null = null;
       try {
         after = await deps.readEntries();
@@ -188,6 +210,8 @@ export function watchLateReply(deps: LateReplyWatcherDeps): Promise<void> {
         continue;
       }
       if (!after) continue;
+      const sig = entriesSignature(after);
+      if (sig !== lastSig) { lastSig = sig; lastChangeAt = now(); }
       const verdict = (deps.evaluate ?? ((entries) => evaluateLateReply(entries, deps.turnId)))(after);
       if (verdict.state === "pending") continue;
       settled = true;
@@ -203,7 +227,15 @@ export function watchLateReply(deps: LateReplyWatcherDeps): Promise<void> {
       }
       return;
     }
-    if (!settled) deps.log?.(`[opencode-copresence] late-reply window closed (${Math.round(capMs / 60000)} min) without a result`);
+    if (settled) return;
+    deps.log?.(`[opencode-copresence] late-reply window closed (${Math.round(capMs / 60000)} min) without a result`);
+    // History never read ⇒ we cannot prove the live turn is ours: leave it.
+    if (!deps.interruptStalled || lastSig === null || !deps.isRunning()) return;
+    const stalledFor = now() - lastChangeAt;
+    if (stalledFor < stallMs) return;
+    let interrupted = false;
+    try { interrupted = await deps.interruptStalled(); } catch { interrupted = false; }
+    deps.log?.(`[opencode-copresence] our turn ${deps.turnId} made no progress for ${Math.round(stalledFor / 60000)} min after the late-reply window; session interrupt ${interrupted ? "succeeded" : "FAILED"}`);
   })();
 }
 
@@ -912,6 +944,11 @@ export async function openVettedOpenCodeV2Copresence(
                 : undefined,
               readEntries: () => readEntriesAfter(url, password, sessionId, messageId).catch(() => null),
               isRunning: () => session.isRunning,
+              // OpenCode 2.x: POST /api/session/:id/interrupt → {interrupted:true}
+              // (the V1 /session/:id/abort route does not exist on V2).
+              interruptStalled: () => fetchOpenCodeJson(url, password, `/api/session/${sessionId}/interrupt`, {
+                method: "POST", body: "{}",
+              }, 5_000).then((r: any) => r?.interrupted === true, () => false),
               onLateReply: evidence.onLateReply,
               log: warn,
             });
