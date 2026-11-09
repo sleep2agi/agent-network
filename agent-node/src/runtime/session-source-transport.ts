@@ -12,6 +12,7 @@ import { SOURCE_FORK_ROOT as ROOT, SOURCE_FORK_CAPABILITY as CAP, type SourceFor
 import { SOURCE_DIRECTORY_CAPABILITY, isSourceDirectorySnapshot } from "../../../contracts/session-source-directory";
 import { createSourceDirectoryReader } from "./session-source-directory";
 import { createProjectSessionWorker } from "./session-project-create";
+import { isSecureSourceHubUrl } from "./source-hub-url";
 import { PROJECT_CREATE_ROOT, PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../../contracts/session-project-create";
 
 /** One frozen daemon identity, process-local reader, durable execution journal,
@@ -20,11 +21,8 @@ import { PROJECT_CREATE_ROOT, PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILI
 export function createSessionSourceTransportWorker(local: { pin: SessionControlPin; hubUrl: string; daemonWorkDir: string; home: string;
   directoryEnabled?: boolean; forkEnabled?: boolean; projectEnabled?: boolean; attachEnabled?: boolean;
   nativeLaunch?: Parameters<typeof createSessionSourceProfileWorker>[0]["nativeLaunch"] }) {
+  if (!isSecureSourceHubUrl(local.hubUrl)) throw Error("source_transport_secure_hub_required");
   const hub = new URL(local.hubUrl);
-  if (hub.username || hub.password || hub.search || hub.hash || (hub.pathname !== "/" && hub.pathname !== "")
-    || !(hub.protocol === "https:" || (hub.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(hub.hostname)))) {
-    throw Error("source_transport_secure_hub_required");
-  }
   const instance = randomUUID(), pin = local.pin;
   const directory = createSourceDirectoryReader({ home: local.home, daemonWorkDir: local.daemonWorkDir,
      networkId: pin.expected.network_id, daemonId: pin.expected.node_id, signal: pin.signal, checkpoint: () => pin.checkpoint(), projectSelectionEnabled: local.projectEnabled,

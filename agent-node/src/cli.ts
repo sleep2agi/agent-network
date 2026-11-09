@@ -20,6 +20,7 @@ import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-app
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
 import { SOURCE_FORK_CAPABILITY } from "../../contracts/session-source-transport";
+import { isSecureSourceHubUrl } from "./runtime/source-hub-url";
 import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
 import { SOURCE_DIRECTORY_CAPABILITY } from "../../contracts/session-source-directory";
 import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
@@ -324,7 +325,19 @@ import {
 /** 只用于**日志去重**的状态(见 daemon-create-capability.ts 里的注释)。
  *  🔴 它不参与任何判断 —— 上报的能力值每次都是现算的。 */
 const _createCapLogState: CreateCapabilityLogState = {};
+let _insecureSourceHubWarned = false;
 function sourceForkSnapshot<T extends { daemon_capabilities?: object }>(snapshot: T): T {
+  // The source worker refuses a plain-HTTP non-loopback Hub, so advertising these
+  // lanes would make the Hub queue work nobody will ever pick up (the app then
+  // shows the fork as refused). Advertise nothing and say why, once.
+  if (fileConfig.role === "host_supervisor" && !isSecureSourceHubUrl(COMMHUB_URL)
+    && [process.env.ANET_SOURCE_FORK_PREVIEW, process.env.ANET_SOURCE_DIRECTORY_PREVIEW].includes("1")) {
+    if (!_insecureSourceHubWarned) {
+      _insecureSourceHubWarned = true;
+      warn(`[source-control] fork/directory preview disabled: Hub URL must be https:// (or http on loopback); current ${(() => { try { return new URL(COMMHUB_URL).origin; } catch { return "invalid URL"; } })()}`);
+    }
+    return snapshot;
+  }
   if (fileConfig.role === "host_supervisor" && process.platform === "linux" && process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1"
     && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY) {
     snapshot = { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, source_directory_read: fileConfig.sourceDirectoryTransport } };
@@ -8650,7 +8663,11 @@ log("已注册到 CommHub");
 if (fileConfig.role === "host_supervisor" && ((process.env.ANET_SOURCE_FORK_PREVIEW === "1"
   && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY) || (process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1"
   && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY))
-  && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID && process.platform === "linux") {
+  && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID && process.platform === "linux"
+  && isSecureSourceHubUrl(COMMHUB_URL)) {
+  // An optional preview lane must never be the reason a daemon dies: any setup
+  // error leaves the daemon running without the lane (and without advertising it).
+  try {
   const { createSessionSourceTransportWorker } = await import("./runtime/session-source-transport");
   sourceForkWorker = createSessionSourceTransportWorker({ hubUrl: COMMHUB_URL, daemonWorkDir: process.cwd(), home: daemonHome(),
     directoryEnabled: process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1" && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
@@ -8664,6 +8681,10 @@ if (fileConfig.role === "host_supervisor" && ((process.env.ANET_SOURCE_FORK_PREV
       signal: sessionControlCredentialAbort.signal }) });
   const tick = () => { void sourceForkWorker?.tick().catch(() => warn("[source-control] transport unavailable; no automatic replay")); };
   tick(); setInterval(tick, 1000).unref();
+  } catch (e: any) {
+    sourceForkWorker = null;
+    warn(`[source-control] source transport not started: ${String(e?.message || e).slice(0, 200)}`);
+  }
 }
 
 // 2026-10-31 —— 上一次退出是「按计划的」吗？读了就清。
