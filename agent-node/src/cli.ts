@@ -8679,7 +8679,16 @@ if (fileConfig.role === "host_supervisor" && ((process.env.ANET_SOURCE_FORK_PREV
     pin: createSessionControlPin({ hubUrl: COMMHUB_URL, token: SESSION_CONTROL_START_TOKEN, nodeId: NODE_ID, networkId: NETWORK_ID,
       epoch: sessionControlCredentialEpoch, currentToken: () => AUTH_TOKEN, currentEpoch: () => sessionControlCredentialEpoch,
       signal: sessionControlCredentialAbort.signal }) });
-  const tick = () => { void sourceForkWorker?.tick().catch(() => warn("[source-control] transport unavailable; no automatic replay")); };
+  // Say *why* the tick failed (was swallowed, which hid e.g. unknown_rotation_required
+  // causes). Rate-limited: once per distinct reason, or once a minute if it repeats.
+  let lastTickErr = ""; let lastTickErrAt = 0;
+  const tick = () => { void sourceForkWorker?.tick().catch((e: any) => {
+    const reason = String(e?.code || e?.message || e).replace(/\b(ntok|utok|stok|ghp)_[A-Za-z0-9_-]+/g, "$1_***").slice(0, 200);
+    const now = Date.now();
+    if (reason === lastTickErr && now - lastTickErrAt < 60_000) return;
+    lastTickErr = reason; lastTickErrAt = now;
+    warn(`[source-control] transport unavailable; no automatic replay (${reason})`);
+  }); };
   tick(); setInterval(tick, 1000).unref();
   } catch (e: any) {
     sourceForkWorker = null;
