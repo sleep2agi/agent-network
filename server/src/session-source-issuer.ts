@@ -18,6 +18,12 @@ export type SourceIssuerCode = "source_selection_invalid" | "source_auth_require
   | "source_read_forbidden" | "insufficient_role_for_create_node" | "daemon_not_found"
   | "daemon_cannot_create_nodes" | "source_runtime_unsupported" | "source_daemon_unverified"
   | "source_daemon_mismatch" | "source_evidence_stale" | "source_evidence_unavailable";
+/** Liveness window for source and daemon Hub receipt times. Nodes and daemons report
+ * status every 3 min (STATUS_HEARTBEAT_MS / node-server heartbeat), so the former
+ * 75 s window made a healthy pair look stale for ~60% of each cycle and the app's
+ * fork returned 403 almost always. One heartbeat + jitter. Still liveness only,
+ * not a generation lease (the daemon's live evidence read is the proof). */
+export const SOURCE_LIVENESS_MS = 4 * 60_000;
 export type SourceIssuerRefusal = { ok: false; error: SourceIssuerCode };
 export class SourceIssuerError extends Error {
   constructor(public readonly code: SourceIssuerCode) { super(code); this.name = "SourceIssuerError"; }
@@ -99,7 +105,7 @@ function readEvidence(p: Permissions): SourceEvidenceRead | SourceIssuerRefusal 
       WHERE node_id=?1 AND network_id=?2 ORDER BY last_seen_at DESC LIMIT 1`, nodeId, s.network_id);
     const time = parseDbTimestampMs(seen?.last_seen_at ?? "");
     const age = Date.now() - time;
-    if (!Number.isFinite(time) || age < 0 || age > 75_000) return fail("source_evidence_stale");
+    if (!Number.isFinite(time) || age < 0 || age > SOURCE_LIVENESS_MS) return fail("source_evidence_stale");
     const tokens = db.all<{ token_id: string; user_id: string }>(`SELECT t.token_id,t.user_id FROM api_tokens t JOIN users u ON u.user_id=t.user_id
       JOIN network_members m ON m.user_id=t.user_id AND m.network_id=t.network_id
       WHERE t.bound_node_id=?1 AND t.network_id=?2 AND t.scope='network' AND t.revoked_at IS NULL
