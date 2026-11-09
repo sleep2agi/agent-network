@@ -20,7 +20,13 @@ Since `.184`: two OpenCode V2 / daemon robustness fixes.
 - `late-reply-stall-interrupt.test.ts` 6 pass; with late-reply-3071 / v2-session / v2-session-alive-3166: 45 pass / 0 fail
 - `source-hub-url.test.ts` 3 pass; `tsc --noEmit -p agent-node` same 80 pre-existing errors as main
 
-## Upgrade order
+## Install
+
+```bash
+npm i -g @sleep2agi/agent-node@2.5.0-preview.185
+```
+
+## Upgrade
 
 agent-network must be re-paired to `.185` after this is visible on npm (opencode-cli requires an exact pair):
 

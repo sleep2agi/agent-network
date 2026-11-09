@@ -24,10 +24,17 @@ ships `src/` + `bin/`, so a packed Hub died on boot with
 - `session-source-evidence` 37 pass / 2 env-only fail (same 2 as main), new reason test passes
 - `package-self-contained.test.ts` fails on old main (9 escaping imports), passes here
 
-## Install / Upgrade
+## Install
 
 ```bash
 bun add -g @sleep2agi/commhub-server@0.9.0-preview.276
+```
+
+## Upgrade
+
+```bash
+bun add -g @sleep2agi/commhub-server@0.9.0-preview.276
+# production hub: scripts/deploy-hub-runtime.sh --version 0.9.0-preview.276
 ```
 
 ## What it does not do
