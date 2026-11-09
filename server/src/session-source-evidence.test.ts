@@ -765,6 +765,27 @@ test("HTTP source-fork human queue -> frozen daemon poll/read/recheck/execute/de
   } finally { await worker.stop(); }
 }, 15_000);
 
+test("HTTP source-fork refusals carry a diagnostic reason once source permissions are verified", async () => {
+  const { api, value, worker } = transportFixture();
+  try {
+    // Daemon never declared itself (offline / not polling): used to be a bare 409 the app showed as "conflict".
+    const offline = await api(human.token!, "", value("reason-offline"));
+    expect(offline.status).toBe(409);
+    expect(offline.body).toEqual({ ok: false, error: "source_fork_unavailable", reason: "daemon_offline" });
+    await worker.tick();
+    const queued = await api(human.token!, "", value("reason-reuse"));
+    expect(queued.status).toBe(200);
+    const reused = await api(human.token!, "", { ...value("reason-reuse"), child_name: "reason-different" });
+    expect(reused.status).toBe(409);
+    expect(reused.body.reason).toBe("intent_reused");
+    // Callers without permission on the source still get no reason (no management-state disclosure).
+    const outsider = register("reason_outsider", "Fixture-Strong-4150!");
+    const foreign = await api(outsider.token!, "", value("reason-foreign"));
+    expect(foreign.status).toBe(403);
+    expect(foreign.body.reason).toBeUndefined();
+  } finally { await worker.stop(); }
+}, 15_000);
+
 test("HTTP gate/caller/capability/scope/strict-selection checks; stale auth and daemon restart never requeue claimed work", async () => {
   const { api, value, binding, worker } = transportFixture();
   sourceTransport = createSessionSourceTransport();
