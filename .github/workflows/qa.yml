@@ -11,6 +11,8 @@ name: anet QA (v0)
 
 on:
   pull_request:
+    # labeled：给 PR 打上 `full-qa` 标签即触发一次全量矩阵（见 changes.full）。
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'tests/**'
       - 'server/src/human-inbox.ts'
@@ -118,6 +120,7 @@ jobs:
       suite_skip: ${{ steps.scope.outputs.suite_skip }}
       docs_only: ${{ steps.plan.outputs.docs_only }}
       skip: ${{ steps.plan.outputs.skip }}
+      full: ${{ steps.full.outputs.full }}
       l1_only: ${{ steps.plan.outputs.l1_only }}
       # #2800 —— 「发版提交」在 main 上不再触发重型矩阵。
       # 现场（2026-10-27 23:45）：一条只改版本号+发布说明的 chore(release) 提交
@@ -192,6 +195,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # 2026-11-09 —— PR 分层（admin 拍板「砍」）：
+      # 一个只改 1 个文件的 PR 曾挂 185 个 check、QA 单次 ~29 分钟，排队拖慢整个迭代。
+      # 普通 PR 只跑快速层（三套 unit + doc claims/pins + release-sync dry run + test-lib-meta）；
+      # 重型矩阵（hub semantics 95 分片、Docker e2e、copresence/lifecycle 等）只在下面三种情况跑：
+      #   · 夜间 schedule / workflow_dispatch（非 pull_request 事件）
+      #   · PR 带 `full-qa` 标签（打标签即触发）
+      # 被跳过的 job 显示为 skipped，不占 runner。
+      - id: full
+        name: Full-matrix switch (non-PR event or `full-qa` label)
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$EVENT" != "pull_request" ] || printf '%s' "$LABELS" | grep -q '"full-qa"'; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build + run test1183-sync-pinned-dryrun
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
@@ -329,7 +350,7 @@ jobs:
     # bun install,不进 L1 的 5 分钟预算,独立 job(同 server unit 的形状)。
     name: rules-file e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test1755-rules-file-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test1755-rules-file-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -351,7 +372,7 @@ jobs:
     # 已有同名目录不覆盖、两个 codex home 各链各的,以及拿掉安装调用后链接不再出现。
     name: team skills e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test9763-team-skills-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test9763-team-skills-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -374,7 +395,7 @@ jobs:
     # 后断言必红)。冷构建含两次 bun install,不进 L1 的 5 分钟预算,独立 job(同 test1755 的形状)。
     name: node run-log e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-node-logs-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-node-logs-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -391,6 +412,8 @@ jobs:
         run: docker run --rm anet-qa-node-logs-e2e
 
   qa-claude-code-node-id:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     # claude-code-cli 节点的 MCP 通道(.anet/node-server.js)report_status 要带配置里的
     # node_id —— 不带,hub 的 nodes 表就没有这个节点,定时任务 / 桌面端选择器选不到它。
     # 真 hub + 与 dist 同一条 bun build 的 node-server 产物,含「修复前产物」正控。
@@ -417,7 +440,7 @@ jobs:
     # the 5-minute L1 job. Docs-only PRs skip it.
     name: claude processWithClaude auth (Docker, real hub)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-board673-claude-process-auth"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-board673-claude-process-auth"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -440,7 +463,7 @@ jobs:
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: create-node workdir e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-workdir"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-workdir"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -464,7 +487,7 @@ jobs:
     # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
     name: codex co-presence stop → start e2e (Docker, real hub + tmux + codex)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-codex-copresence-stop-start"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-codex-copresence-stop-start"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -487,7 +510,7 @@ jobs:
     # 共存路径的依赖预检输出就是「走了共存」的证据。冷构建同 qa-create-node-workdir(~4 分钟)—— 独立 job。
     name: create-node codex co-presence e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-codex-copresence"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-codex-copresence"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -512,7 +535,7 @@ jobs:
     # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
     name: daemon stop/delete codex co-presence e2e (Docker, real hub + daemon + tmux)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-daemon-stop-codex-copresence"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-daemon-stop-codex-copresence"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -534,7 +557,7 @@ jobs:
     # 并被 agent-node 的解析器读成 600000ms、0 收、3600001 拒。冷构建同 qa-create-node-codex-copresence —— 独立 job。
     name: create-node timeout unit e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-timeout-ms"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-timeout-ms"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -558,7 +581,7 @@ jobs:
     # --network none:网络探测只经容器内假 CONNECT 代理。冷构建同 qa-create-node-workdir —— 独立 job。
     name: daemon runtime readiness e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-runtime-readiness"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-runtime-readiness"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -586,7 +609,7 @@ jobs:
     # 冷构建含三次 bun install + 两次 npm pack(同 qa-create-node-workdir 的形状),进不了 L1 —— 独立 job。
     name: node --remote e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test562b-node-remote"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test562b-node-remote"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -606,6 +629,8 @@ jobs:
           docker rm -f "run-anet-test562b" >/dev/null 2>&1 || true
           exit $rc
   test626-daemon-adoption:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: daemon adoption (Docker, real Hub + manual node)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -621,6 +646,8 @@ jobs:
           docker run --rm --init --network none anet-test626-e2e
 
   test674-binding-generation:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Binding generation (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -630,6 +657,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test674
 
   test-agent-team-whoami:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Agent team identity (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -639,6 +668,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-team-whoami
 
   test678-daemon-token-owner:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Daemon token ownership (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -648,6 +679,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test678
 
   test710-late-task-replies:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Late task replies (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -657,6 +690,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test710
 
   node-caller-identity:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Node caller identity (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -666,6 +701,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity
 
   node-caller-identity-compat:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Node caller identity compat (Docker, agent-node .110 and .121)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -675,6 +712,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity-compat
 
   test658-codex-adopt-stop:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Codex adoption and stop (Docker, two layouts)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -686,6 +725,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test658-http
 
   test703-codex-turn-receipts:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Codex interrupted-turn receipts (Docker)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -695,6 +736,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test703
 
   test627-adopted-lifecycle:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: adopted lifecycle (Docker, real Hub + private tmux)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -704,6 +747,8 @@ jobs:
       - run: docker run --rm --init --network none anet-test627
 
   test629-lifecycle-read:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: lifecycle read permissions (Docker, real HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -721,7 +766,7 @@ jobs:
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: lifecycle safety e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test571-lifecycle-safety"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test571-lifecycle-safety"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -777,7 +822,7 @@ jobs:
   recovered-suites-a:
     name: recovered suites A (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-a"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-a"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -825,7 +870,7 @@ jobs:
   recovered-suites-b:
     name: recovered suites B (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-b"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-b"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 16
     steps:
@@ -873,7 +918,7 @@ jobs:
   recovered-suites-c:
     name: recovered suites C (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-c"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-c"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -914,7 +959,7 @@ jobs:
   recovered-suites-security:
     name: recovered suites · security last (Docker)
     needs: [changes, recovered-suites-a, recovered-suites-b, recovered-suites-c]
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-security"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-security"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -953,7 +998,7 @@ jobs:
   qa:
     name: ${{ matrix.shard == '' && 'L0 (report-only)' || format('L1 (report-only, shard {0})', matrix.shard) }}
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     # #2800 —— 墙钟地板是「L0+L1 单 job 串行 87 个套件 ≈25.8 分钟」，并行度再高也压不下去。
     # 拆成 1 个 L0 + 3 个 L1 分片：qa.sh 的 QA_L1_SHARD 按索引取模切片，
@@ -1103,7 +1148,7 @@ jobs:
   test225-known-failures:
     name: test225 known-failure ratchet (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test225-known-failures"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test225-known-failures"')) }}
     runs-on: ubuntu-latest
     # 完整跑一次 ~8 分钟(装依赖 + 起容器内 Hub + 真 tmux attach)。
     timeout-minutes: 25
@@ -1183,7 +1228,7 @@ jobs:
   grok-green-suites:
     name: grok suites (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # 🔴 改成矩阵的理由是量出来的，不是「应该更快」。
@@ -1262,7 +1307,7 @@ jobs:
     #    （改已有 job 的名字会动分支保护里的 required check，风险更高，所以新开。）
     name: hub daemon fail-closed (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:hub-daemon-gate"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:hub-daemon-gate"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1336,7 +1381,7 @@ jobs:
     # 名字必须说得出它管什么。
     name: private config write boundary (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:private-config-gates"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:private-config-gates"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1399,7 +1444,7 @@ jobs:
     # 名字说得出它管什么：这四个套件守的是**鉴权 / 凭据下发 / 泄漏清洗**这一族。
     name: auth + secret hygiene (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:security-orphan-gates"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:security-orphan-gates"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1630,7 +1675,7 @@ jobs:
     # 名字说得出它管什么：这三条守的是**生产 DB 边界与 hub 生命周期**。
     name: prod-db boundary + hub lifecycle (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -1695,7 +1740,7 @@ jobs:
     # 它们的代码内容在上一个 PR 里已经跑过同一套矩阵；再跑一遍只会把 runner 池占满，
     # 让 release-gate 排在后面（2026-10-27 实测卡了 6 分钟）。
     # #2800 —— 本次改动与 hub 套件全不相干时整块跳过（否则空矩阵会让 GitHub 报错）。
-    if: ${{ !cancelled() && needs.changes.outputs.release_only != 'true' && needs.changes.outputs.suite_count != '0' }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && needs.changes.outputs.release_only != 'true' && needs.changes.outputs.suite_count != '0') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -1906,6 +1951,8 @@ jobs:
           if-no-files-found: ignore
 
   windows-codex-copresence:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Windows Codex co-presence native smoke
     runs-on: windows-latest
     timeout-minutes: 10

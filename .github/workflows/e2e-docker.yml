@@ -26,6 +26,7 @@ on:
       - 'tests/**'
       - '.github/workflows/**'
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'agent-network/**'
       - 'agent-node/**'
@@ -41,6 +42,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   e2e:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +150,7 @@ jobs:
           retention-days: 14
 
   rename-ghost-gate:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     # #180 regression gate — standalone HARD FAIL for a focused signal.
     #
     # The rename-ghost test suite (`tests/qa-180-rename-ghost/`) reproduces the
