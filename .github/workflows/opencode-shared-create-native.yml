@@ -1,6 +1,7 @@
 name: OpenCode shared create native
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '.github/workflows/opencode-shared-create-native.yml'
       - 'tests/test1327-shared-create-native/**'
@@ -24,6 +25,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   native-create:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     name: shared create native (Docker)
     runs-on: ubuntu-latest
     timeout-minutes: 20

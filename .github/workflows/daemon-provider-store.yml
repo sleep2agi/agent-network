@@ -1,6 +1,7 @@
 name: Daemon Provider persistence
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'agent-network/**'
       - 'agent-node/src/**'
@@ -26,6 +27,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   existing-discovery:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     name: daemon-existing-codex-discovery (Docker, read-only)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -36,6 +38,7 @@ jobs:
           sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.discovery -t anet-provider-management:test906-discovery .'
           sg docker -c 'docker run --init --rm --network none anet-provider-management:test906-discovery'
   managed-login:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     name: daemon-managed-login (Docker, no account sign-in)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -46,6 +49,7 @@ jobs:
           sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.login -t anet-provider-management:test906-login .'
           sg docker -c 'docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1 anet-provider-management:test906-login'
   store:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     name: daemon-provider-store (Docker)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -64,6 +68,7 @@ jobs:
           sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.transport -t anet-provider-management:test906-transport .'
           sg docker -c 'docker run --rm --network none anet-provider-management:test906-transport'
   native-application:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     name: daemon-provider-native-application (Docker)
     needs: store
     runs-on: ubuntu-latest
