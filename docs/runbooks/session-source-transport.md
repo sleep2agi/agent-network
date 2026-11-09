@@ -10,7 +10,7 @@ daemons cannot consume these tasks, and `source_reserved` is never promoted.
 
 ## Client / main-node handoff contract
 
-Types: `contracts/session-source-transport.ts` (`SourceForkSelection`,
+Types: `server/src/contracts/session-source-transport.ts` (`SourceForkSelection`,
 `SourceForkReceipt`, `SourceForkStatus`). Reuse existing Create/Clone controls;
 for this lane use a **new** endpoint, never ordinary create or background fork.
 

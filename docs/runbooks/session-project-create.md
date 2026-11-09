@@ -1,6 +1,6 @@
 # Existing project → new empty Session → independent child (gated preview)
 
-Types: [`contracts/session-project-create.ts`](../../contracts/session-project-create.ts).
+Types: [`server/src/contracts/session-project-create.ts`](../../server/src/contracts/session-project-create.ts).
 Prerequisite directory: [session-source-directory.md](session-source-directory.md).
 This is **not fork or attach**. No existing Session is selected, no source evidence
 is invented, and `oses_` IDs must never be supplied to managed fork's native `ses_`

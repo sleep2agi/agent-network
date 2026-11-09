@@ -20,7 +20,7 @@ constructor receives `{ enabled: true }`. No environment flag enables production
   The current stored-credential check is exported from `node-session-control.ts`
   (same implementation, no new authentication bypass). Stored requester checks
   are internal-only and never treat a client token ID as authentication.
-- `contracts/session-source-evidence.ts`: exact-key request/result validators.
+- `server/src/contracts/session-source-evidence.ts`: exact-key request/result validators.
   A request contains IDs, Hub-read alias, selected session and a random 32-byte
   challenge, current user/token row IDs and mode, with a 15-second deadline.
   It has **no URL, path or credential material**.

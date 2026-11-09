@@ -1,0 +1,14 @@
+export const PROJECT_CREATE_CAPABILITY = "project-new-session-v1-opencode-2.0.22";
+export const PROJECT_CREATE_ROOT = "/api/node-session-control/source/project-create";
+export const SESSION_ATTACH_CAPABILITY = "existing-session-attach-v1-opencode-2.0.22";
+export type SessionAttachSelection = { selection_scope: string; snapshot_id: string; session_id: string; child_name: string; intent_id: string };
+export type ProjectOperation = "project_new_session" | "attach_existing_session";
+export type ProjectCreateSelection = { selection_scope: string; snapshot_id: string; project_id: string; child_name: string; intent_id: string };
+export type ProjectCreateTask = ProjectCreateSelection & { request_id: string; network_id: string; source_node_id: string;
+  daemon_node_id: string; accepted_at: number; expires_at: number; operation_kind?: ProjectOperation; selected_session_id?: string | null };
+export type ProjectCreateDelivery = ProjectCreateTask & { session_id: string; child_node_id: string; child_token: string; credential_expires_at: number };
+export type ProjectCreateStatus = "create_pending" | "create_claimed" | "delivery_pending" | "delivery_claimed" | "registration_confirmed" | "unknown_rotation_required";
+export type ProjectCreateReceipt = { ok: true; request_id: string; network_id: string; daemon_node_id: string; intent_id: string; child_name: string;
+  status: ProjectCreateStatus; accepted_at: number; expires_at: number; operation_kind: ProjectOperation; session_creation: "confirmed" | "not_started" | "unknown" | "not_performed";
+  child_node_id?: string; registration_is_health: false; native_acceptance: "not_verified" };
+export const isProjectCreateId = (v: unknown): v is string => typeof v === "string" && /^prjc_[a-f0-9-]{36}$/.test(v);
