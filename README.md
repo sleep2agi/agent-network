@@ -5,8 +5,8 @@
 </picture>
 
 # Agent Network
-[![npm](https://img.shields.io/npm/v/@sleep2agi/agent-network?label=npm&color=009e7e)](https://www.npmjs.com/package/@sleep2agi/agent-network)
-[![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?filter=desktop-v*&label=download&color=2f6feb)](https://github.com/sleep2agi/agent-network-app/releases/latest)
+[![npm](https://img.shields.io/npm/v/@sleep2agi/agent-network/preview?label=npm&color=009e7e)](https://www.npmjs.com/package/@sleep2agi/agent-network)
+[![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?display_name=release&label=download&color=2f6feb)](https://www.anet.sh/download)
 [![QA](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main)](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml)
 [![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e)](https://anet.sh)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
