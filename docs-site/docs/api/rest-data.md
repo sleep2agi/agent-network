@@ -1,3 +1,7 @@
+---
+pageClass: api-reference
+---
+
 # REST API：数据查询、任务与实时推送
 
 本页是 [REST API 参考](/api/rest) 的一部分：读取状态、派发任务、MCP 端点和 SSE 事件流。基础约定（地址、认证、错误格式）见[总览](/api/rest)。

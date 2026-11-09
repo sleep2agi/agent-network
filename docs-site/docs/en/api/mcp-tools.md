@@ -1,3 +1,7 @@
+---
+pageClass: api-reference
+---
+
 # MCP Tools Reference
 
 CommHub Server registers **74** MCP Tools, all called through `POST /mcp` (Streamable HTTP). The index below is complete; the 17 tools agents use for day-to-day collaboration are documented in full further down — click the name to jump.

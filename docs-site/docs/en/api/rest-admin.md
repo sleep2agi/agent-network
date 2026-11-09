@@ -1,3 +1,7 @@
+---
+pageClass: api-reference
+---
+
 # REST API: Administration
 
 Part of the [REST API reference](/en/api/rest): tokens, network members, files, node rename, debugging and legacy endpoints. Shared conventions (address, auth, error format) are on the [overview](/en/api/rest).

@@ -1,3 +1,7 @@
+---
+pageClass: api-reference
+---
+
 # REST API：管理端点
 
 本页是 [REST API 参考](/api/rest) 的一部分：Token、网络成员、文件、节点改名、调试与 Legacy 端点。基础约定（地址、认证、错误格式）见[总览](/api/rest)。
