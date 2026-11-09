@@ -25,10 +25,14 @@ const id = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]
 const terminal = (r: Row) => ["registration_confirmed", "refused", "unknown_rotation_required"].includes(r.state);
 const ok = (value: object) => Response.json({ ok: true, ...value }, { headers: { "cache-control": "no-store" } });
 
+/** Why a fork create was refused after the caller's source permissions were verified. */
+export type SourceForkFailureReason = "daemon_offline" | "daemon_not_capable" | "hub_busy" | "evidence_unavailable" | "intent_reused";
+
 /** Separate REST semantics within the existing session-control HTTP surface.
  * Secret bodies are never persisted. Original human Request lives ONLY in this
  * bounded in-memory orchestration until terminal/expiry, like pendingEnvBlobs;
  * no plaintext requester bearer is journaled or reconstructed after restart. */
+
 export function createSessionSourceTransport(options: { enabled?: boolean; directoryEnabled?: boolean; projectEnabled?: boolean; attachEnabled?: boolean } = {}) {
   const enabled = options.enabled === true;
   const issuer = createSessionSourceIssuer(), evidence = createSessionSourceEvidenceQueue({ enabled });
@@ -145,8 +149,10 @@ export function createSessionSourceTransport(options: { enabled?: boolean; direc
     const projectResponse = await projectTransport(req, url); if (projectResponse) return projectResponse;
     if (url.pathname !== ROOT && !url.pathname.startsWith(`${ROOT}/`)) return null;
     const directoryPath = url.pathname === `${ROOT}/directory` || url.pathname.startsWith(`${ROOT}/directory/`);
-    const fail = (status = 409) => Response.json({ ok: false, error: directoryPath ? "source_directory_unavailable" : "source_fork_unavailable" },
-      { status, headers: { "cache-control": "no-store" } });
+    // `reason` is additive diagnostics for the UI (it used to show a bare "conflict" for every 409).
+    // Only attached after the caller's permissions on the source are verified — see the fork create path.
+    const fail = (status = 409, reason?: SourceForkFailureReason) => Response.json({ ok: false, error: directoryPath ? "source_directory_unavailable" : "source_fork_unavailable",
+      ...(reason ? { reason } : {}) }, { status, headers: { "cache-control": "no-store" } });
     if (directoryPath ? options.directoryEnabled !== true : !enabled) return fail(404);
     try {
       const auth = resolveToken(req.headers.get("authorization")?.match(/^Bearer (\S+)$/)?.[1] ?? "");
@@ -267,12 +273,14 @@ export function createSessionSourceTransport(options: { enabled?: boolean; direc
         const existing = db.get<Row>("SELECT * FROM session_source_transports WHERE user_id=?1 AND network_id=?2 AND intent_id=?3", auth.user.user_id, b.network_id, b.intent_id);
         if (existing) {
           if (existing.requester_token_id !== auth.tokenId || existing.source_node_id !== b.source_node_id || existing.session_id !== b.session_id
-            || existing.child_name !== b.child_name || existing.daemon_node_id !== s.daemon_node_id) return fail();
+            || existing.child_name !== b.child_name || existing.daemon_node_id !== s.daemon_node_id) return fail(409, "intent_reused");
           return ok(view(refresh(existing))); // idempotent receipt, not a new workflow
         }
         const d = daemons.get(`${s.network_id}:${s.daemon_node_id}`);
-        if (!d || d.expires <= Date.now() || !capable(s.daemon_node_id, s.network_id) || active.size >= 128) return fail();
-        const q = evidence.queue(req, s, b.session_id); if (!q) return fail();
+        if (!d || d.expires <= Date.now()) return fail(409, "daemon_offline");
+        if (!capable(s.daemon_node_id, s.network_id)) return fail(409, "daemon_not_capable");
+        if (active.size >= 128) return fail(409, "hub_busy");
+        const q = evidence.queue(req, s, b.session_id); if (!q) return fail(409, "evidence_unavailable");
         const requestId = `srcf_${randomUUID()}`, expires = Date.now() + 75_000;
         db.run(`INSERT INTO session_source_transports (request_id,user_id,requester_token_id,network_id,intent_id,source_node_id,
           daemon_node_id,daemon_token_id,daemon_instance_id,session_id,child_name,state,expires_at,evidence_id)
