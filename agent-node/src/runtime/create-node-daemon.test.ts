@@ -822,6 +822,7 @@ describe("minimalEnv — daemon identity + proxy passthrough", () => {
     all_proxy: "socks5://127.0.0.1:7897",
     NO_PROXY: "localhost,127.0.0.1",
     no_proxy: "localhost,127.0.0.1",
+    NODE_USE_ENV_PROXY: "1",
   };
 
   test("🔴 witnessed-red: darwin child keeps USER / LOGNAME (Keychain login lookup)", () => {
@@ -835,6 +836,11 @@ describe("minimalEnv — daemon identity + proxy passthrough", () => {
     for (const k of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"]) {
       expect(env[k]).toBe(parentEnv[k as keyof typeof parentEnv]);
     }
+  });
+
+  test("🔴 witnessed-red: NODE_USE_ENV_PROXY reaches the child (Node fetch ignores *_PROXY without it)", () => {
+    const env = minimalEnv({}, "linux", parentEnv);
+    expect(env.NODE_USE_ENV_PROXY).toBe("1");
   });
 
   test("still an allowlist: credentials and runtime-config keys in the daemon env do not leak", () => {
@@ -870,6 +876,7 @@ describe("minimalEnv — daemon identity + proxy passthrough", () => {
       "USER", "LOGNAME",
       "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
       "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
+      "NODE_USE_ENV_PROXY",
     ]));
   });
 });

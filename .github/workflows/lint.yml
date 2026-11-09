@@ -1,42 +1,327 @@
-# Repo-wide bash lint — destructive-rm guardrail
-#
-# Runs `tests/scripts/lint-no-bare-rm-rf.sh` on every PR and main push.
-# Fails the build if any test script under `tests/` or `agent-network/tests/`
-# contains an unguarded `rm -rf $VAR` / `rm -rf "$VAR/..."` pattern.
-#
-# Why this workflow exists
-# ========================
-# 2026-06-16 incident: a test script ran `rm -rf $HOME` where $HOME had
-# fallen back to the real /home/<user>; ai-insight / blueleap / paper
-# directories wiped (cloud-snapshot restored). 40 scripts were rewritten
-# to use `safe_rm_rf` (commit 826c8a7) and a linter (commit f16d6b9) was
-# added. This workflow enforces the linter on PRs so no future commit
-# can re-introduce the same class of bug.
-#
-# See: docs/troubleshooting/rm-rf-incident-2026-06-16.md
-#      docs/rfcs/RFC-023-destructive-command-guardrail.md
-#      tests/lib/safe-rm.sh
-#      tests/scripts/lint-no-bare-rm-rf.sh
-
-name: lint (destructive-rm guard)
-
+# 2026-11-09 —— PR 分层第二刀：原来 16 个 lint/ratchet workflow 各占一台 runner（每个 ~2.3 分钟，
+# 大部分时间花在排队和 checkout 上），runner 池同时只跑 1~2 个任务时，光 lint 就要排十几轮。
+# 现在合成一个 job、一台机器顺序跑完；每一步都带 `if: !cancelled()`，一步红不会挡住后面的步骤，
+# 所有失败一次看全。步骤命令逐字搬自原 workflow（步骤名前缀 [原文件名] 便于追溯），
+# 触发：所有 PR（不加 paths —— 守卫自身不能被路径门控）+ push main。
+# 两个 job：`lint (required)` = 原 10 个分支保护必过项（必过项改为这一个）；
+# `lint (ratchets)` = 其余 ratchet/inventory（目前在 main 上就是红的，只报告不拦截，逐个修绿后再挪进 required）。
+name: lint
 on:
-  pull_request:
-    paths:
-      - 'tests/**'
-      - 'agent-network/tests/**'
-      - '.github/workflows/lint.yml'
+  pull_request: null
+  push:
+    branches:
+    - main
 concurrency:
-  group: lint-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  bare-rm-rf:
-    name: no bare rm -rf $VAR
+  required:
+    name: lint (required)
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+    - &id001
+      uses: actions/checkout@v4
+    - &id002
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - &id003
+      run: pip install --quiet --require-hashes -r .github/scripts/requirements-workflow-structure.txt
+    - name: '[action-pins] python3 .github/scripts/check-action-pins.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-action-pins.py
+    - name: '[copresence-profile-pin] python3 .github/scripts/check-copresence-profile-pin.py --selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-copresence-profile-pin.py --selftest
+    - name: '[copresence-profile-pin] python3 .github/scripts/check-copresence-profile-pin.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-copresence-profile-pin.py
+    - name: '[doc-symbol-anchors] python3 .github/scripts/check-doc-symbol-anchors.py --selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-doc-symbol-anchors.py --selftest
+    - name: '[doc-symbol-anchors] python3 .github/scripts/check-doc-symbol-anchors.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-doc-symbol-anchors.py
+    - name: '[home-path-baseline] python3 .github/scripts/check-home-path-baseline.py --selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-home-path-baseline.py --selftest
+    - name: '[home-path-baseline] python3 .github/scripts/check-home-path-baseline.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-home-path-baseline.py
+    - name: '[l1-paths-sync] python3 .github/scripts/check-l1-paths-sync.py --selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-l1-paths-sync.py --selftest
+    - name: '[l1-paths-sync] python3 .github/scripts/check-l1-paths-sync.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-l1-paths-sync.py
+    - name: '[lint-from-session] Run lint-no-hardcoded-from-session.py'
+      if: ${{ !cancelled() }}
+      run: python3 tests/scripts/lint-no-hardcoded-from-session.py
+    - name: '[no-memory-slugs] Run check-no-memory-slugs.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-no-memory-slugs.py .
+    - name: '[public-script-safety] python3 .github/scripts/check-public-script-safety.py --selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-public-script-safety.py --selftest
+    - name: '[public-script-safety] python3 .github/scripts/check-public-script-safety.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-public-script-safety.py
+    - name: '[qa-trigger-coverage] python3 .github/scripts/check-qa-trigger-coverage.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-qa-trigger-coverage.py
+    - name: '[query-token-ratchet] python3 .github/scripts/check-query-token-ratchet.py --selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-query-token-ratchet.py --selftest
+    - name: '[query-token-ratchet] python3 .github/scripts/check-query-token-ratchet.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-query-token-ratchet.py
+  ratchets:
+    name: lint (ratchets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - *id001
+    - *id002
+    - *id003
+    - name: '[keyset-join] prove the gate can go red (must-fail fixtures)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-keyset-join.py --selftest
+    - name: '[keyset-join] forbid sort().join() key-set comparison'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-keyset-join.py
+    - name: '[lint-consolidated] hub launcher pin'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-hub-launcher-pin.py || { echo "::error::hub-launcher-pin failed (仓库启动器与 PINNED_SERVER_VERSION 不一致)"; exit 1; }
+    - name: '[lint-consolidated] no escaped comments'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-no-escaped-comments.py || { echo "::error::no-escaped-comments failed (注释里有字面 \\uXXXX)"; exit 1; }
+    - name: '[lint-consolidated] every test file is covered by a gate'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-test-file-coverage.py || { echo "::error::test-file-coverage failed (有测试文件没被任何聚合门覆盖)"; exit 1; }
+    - name: '[lint-consolidated-2] base-image-pin · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-base-image-pin.py --selftest || { echo "::error::base-image-pin selftest failed (判据自己坏了)"; exit 1; }
+    - name: '[lint-consolidated-2] base-image-pin'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-base-image-pin.py || { echo "::error::base-image-pin failed (Dockerfile 基础镜像钉不一致)"; exit 1; }
+    - name: '[lint-consolidated-2] bun-install-pin · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-bun-install-pin.py --selftest || { echo "::error::bun-install-pin selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] bun-install-pin'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-bun-install-pin.py || { echo "::error::bun-install-pin failed (bun 安装版本钉不一致)"; exit 1; }
+    - name: '[lint-consolidated-2] docs-integrity · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-docs-integrity.py --selftest || { echo "::error::docs-integrity selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] docs-integrity'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-docs-integrity.py || { echo "::error::docs-integrity failed (文档链接/结构不完整)"; exit 1; }
+    - name: '[lint-consolidated-2] release-channel-assertions · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-release-channel-assertions.py --selftest || { echo "::error::release-channel-assertions selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] release-channel-assertions'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-release-channel-assertions.py || { echo "::error::release-channel-assertions failed (信道断言清单未登记)"; exit 1; }
+    - name: '[lint-consolidated-2] docs-locale-parity · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-docs-locale-parity.py --selftest || { echo "::error::docs-locale-parity selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] docs-locale-parity'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-docs-locale-parity.py || { echo "::error::docs-locale-parity failed (中英文档不同步)"; exit 1; }
+    - name: '[lint-consolidated-2] doc-symbol-pins (docs/)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-doc-symbol-pins.py . || { echo "::error::doc-symbol-pins failed (docs/ 里的符号锚点漂移)"; exit 1; }
+    - name: '[lint-consolidated-2] doc-symbol-pins (docs-site/)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site || { echo "::error::doc-symbol-pins failed (docs-site/ 里的符号锚点漂移)"; exit 1; }
+    - name: '[lint-consolidated-2] hub-timestamp-ratchet · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-hub-timestamp-ratchet.py --selftest || { echo "::error::hub-timestamp-ratchet selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] hub-timestamp-ratchet'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-hub-timestamp-ratchet.py || { echo "::error::hub-timestamp-ratchet failed (时间戳棘轮倒退)"; exit 1; }
+    - name: '[lint-consolidated-2] l1-sha-binding · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-l1-sha-binding.py --selftest || { echo "::error::l1-sha-binding selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] l1-sha-binding'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-l1-sha-binding.py || { echo "::error::l1-sha-binding failed (L1 结果没钉在被验提交上)"; exit 1; }
+    - name: '[lint-consolidated-2] qa-paths-symmetry · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-qa-paths-symmetry.py --selftest || { echo "::error::qa-paths-symmetry selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] qa-paths-symmetry'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-qa-paths-symmetry.py || { echo "::error::qa-paths-symmetry failed (pull_request 与 push 的 paths 不对称)"; exit 1; }
+    - name: '[lint-consolidated-2] test-suite-registration · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-test-suite-registration.py --selftest || { echo "::error::test-suite-registration selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] test-suite-registration'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-test-suite-registration.py || { echo "::error::test-suite-registration failed (有测试套件没登记进聚合门)"; exit 1; }
+    - name: '[lint-consolidated-2] node-rest-route-classification · selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-node-rest-route-classification.py --selftest || { echo "::error::node-rest-route-classification selftest failed"; exit 1; }
+    - name: '[lint-consolidated-2] node-rest-route-classification'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-node-rest-route-classification.py || { echo "::error::有节点路由没登记（新增节点路由必须先决定它归哪一类门，并同步 rest_allowlist 文档）"; exit 1; }
+    - name: '[lint-consolidated-2] workflow-structure'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-workflow-structure.py || { echo "::error::workflow-structure failed (某个 job 没有可执行内容 —— 空壳门)"; exit 1; }
+    - name: '[mutation-pin-integrity] selftest (criterion)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-mutation-pins.py --selftest
+    - name: '[mutation-pin-integrity] scan repo'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-mutation-pins.py
+    - name: '[proc-gone-assertions] selftest (criterion)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-proc-gone-assertions.py --selftest
+    - name: '[proc-gone-assertions] scan repo'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-proc-gone-assertions.py .
+    - name: '[test-inventory] the string-stripping state machine passes its own fixtures'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-test-inventory.py --selftest
+    - name: '[test-inventory] no test may disappear without an explicit baseline update'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-test-inventory.py
+    - name: '[test-inventory] gate-shaped workflows must not be manual-only'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/report-workflow-triggers.py --assert
+    - name: '[test-inventory] every scripts/… reference must resolve to a real file'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-script-references.py
+    - name: '[test-inventory] every script has a discoverer when it stops running'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/report-script-cadence.py --assert
+    - name: '[test-inventory] the credential ledger keeps its own structure (no secrets, revocation column, live counts)'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-credential-ledger.py --selftest
 
-      - name: Run lint-no-bare-rm-rf.sh
-        run: bash tests/scripts/lint-no-bare-rm-rf.sh
+        python3 scripts/check-credential-ledger.py
+
+        '
+    - name: '[test-inventory] node security writes go through one named gate (and it is stricter than network writes)'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-node-security-write-gate.py --selftest
+
+        python3 scripts/check-node-security-write-gate.py
+
+        '
+    - name: '[test-inventory] first-write columns are written conditionally (AND col IS NULL in the same statement)'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-first-write-conditional.py --selftest
+
+        python3 scripts/check-first-write-conditional.py
+
+        '
+    - name: '[test-inventory] REST route inventory knows its blind spot and each row''s guarding branch'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/report-rest-visibility.py --selftest
+
+        python3 scripts/report-rest-visibility.py --assert
+
+        '
+    - name: '[test-inventory] MCP outcome domain (success shapes + error value domain) still fully enumerated'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/report-mcp-outcome-domain.py --selftest
+
+        python3 scripts/report-mcp-outcome-domain.py --assert
+
+        '
+    - name: '[test-inventory] every error literal has at least a chance of a red assertion (never-mentioned ratchet)'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/report-mcp-error-literal-coverage.py --selftest
+
+        python3 scripts/report-mcp-error-literal-coverage.py --assert
+
+        '
+    - name: '[test-inventory] generated REST route table is not stale'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-rest-route-table.py
+    - name: '[test-inventory] required scope per write route (necessary condition, not sufficiency)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/report-write-route-scope.py --assert
+    - name: '[test-inventory] inner auth branches inventory (reachability needs per-branch mutation)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/report-inner-auth-branches.py
+    - name: '[test-inventory] every write route either has a gate or a stated reason'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/report-rest-gates.py --assert
+    - name: '[test-inventory] specific query discriminators still precede generic branches'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-rest-route-order.py
+    - name: '[test-inventory] no test-looking file is missing a runner'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/report-orphan-tests.py
+    - name: '[test-inventory] legacy license field has no production readers'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-legacy-license-usage.py --selftest
+
+        python3 scripts/check-legacy-license-usage.py
+
+        '
+    - name: '[test-inventory] no assertion compares a value to itself'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/report-vacuous-assertions.py --selftest
+
+        python3 scripts/report-vacuous-assertions.py
+
+        '
+    - name: '[test-inventory] duplicated criteria copies have not silently diverged'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/report-contract-pairs.py --selftest
+
+        python3 scripts/report-contract-pairs.py --assert
+
+        '
+    - name: '[test-inventory] the curl exit-code classifier still classifies the layers we rely on'
+      if: ${{ !cancelled() }}
+      run: bash scripts/lib/curl-exit.sh --selftest
+    - name: '[test-inventory] no shell trap may overwrite the exit code'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-shell-rc-capture.py --selftest
+
+        python3 scripts/check-shell-rc-capture.py
+
+        '
+    - name: '[test-inventory] the SCOPE JSON has a real consumer (structure, provenance, lifetime)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-scope-json.py
+    - name: '[test-inventory] jq `//` never folds "absent" into "pass" (fail-open)'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-jq-default-operator.py --selftest
+
+        python3 scripts/check-jq-default-operator.py
+
+        '
+    - name: '[test-inventory] empty-equality scan (advisory — only the gate path must be clean)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-shell-empty-equality.py
+    - name: '[test-inventory] fixed /tmp paths are registered (with a reason each)'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-tmp-hygiene.py --selftest
+
+        python3 scripts/check-tmp-hygiene.py
+
+        '
+    - name: '[test-inventory] every wired gate is wired for real (executes, not text-matches)'
+      if: ${{ !cancelled() }}
+      run: python3 scripts/check-gates-wired.py
+    - name: '[test-inventory] cross-env fallbacks are registered as same-concept aliases'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-env-fallbacks.py --selftest
+
+        python3 scripts/check-env-fallbacks.py
+
+        '
+    - name: '[test-inventory] orphan checks that were never executed (now wired)'
+      if: ${{ !cancelled() }}
+      run: 'python3 scripts/check-hub-v2-protocol-inputs.py
+
+        python3 scripts/check-mcp-tool-anchor-sections.py
+
+        python3 scripts/check-mcp-tool-index-coverage.py
+
+        '

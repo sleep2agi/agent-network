@@ -585,6 +585,10 @@ export const DAEMON_CHILD_INHERITED_ENV_KEYS = [
   "all_proxy",
   "NO_PROXY",
   "no_proxy",
+  // Node's built-in fetch ignores the *_PROXY variables unless this is set, so a
+  // child forked by a daemon behind a proxy could not reach the Hub (2026-11-09:
+  // vdev fork child "fetch failed" → exit 1 while the daemon itself worked).
+  "NODE_USE_ENV_PROXY",
 ] as const;
 
 export function minimalEnv(

@@ -102,7 +102,7 @@ SKIP_DIRS = {
 # Files where the pattern is allowed (this guard talks about it by design).
 SELF_ALLOWLIST = {
     ".github/scripts/check-no-memory-slugs.py",
-    ".github/workflows/no-memory-slugs.yml",
+    ".github/workflows/lint.yml",
 }
 
 # Path-prefix allowlist for the initial rollout. The pre-existing 57
