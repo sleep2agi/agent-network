@@ -371,6 +371,40 @@ scripts/verify-hub-release.sh 0.9.0-preview.146 --tag latest
 技能一句话：**探针错了和包坏了，输出长得一模一样**；所以探针要么盯"这个动作能不能
 被调到"，要么盯"这段行为在不在"，别盯文件名。
 
+### Step 5.6：`gate 4` 要求文档**先**断言你要发的那个版本
+
+`gate 4 — 上手指南里的版本断言` 把「正在发的版本」和 `getting-started` 里的
+`version-claim` 注释比对。所以顺序是：
+
+```text
+写 release notes（gate 3）
+        ↓
+改 docs-site/docs/guide/getting-started.md 与 en/ 的 version-claim **和正文**（gate 4）
+        ↓
+才 workflow_dispatch 发版
+```
+
+2026-11-10 实测两次踩它（`.230`）：
+
+```text
+::error::正在发 agent-network@2.3.0-preview.230(preview 通道),
+         而文档仍然断言 preview=2.3.0-preview.229
+🔴 不要只改戳 —— 戳和正文不一致时这道门也会红(那正是它的第二条判据)。
+```
+
+我在拿到这条错误之前，假设的是「包先发出去，文档随后补」——**反了**。
+补发时还遇到过另一个坑：文档 PR 已提但**未合并**就重新 dispatch，仍然红；
+必须等它进 main 之后再派发。
+
+本地先自查（不发版、不碰 npm）：
+
+```bash
+python3 scripts/check-doc-version-claims.py \
+  --package agent-network --version 2.3.0-preview.230
+```
+
+判据两条都要满足：**戳指向该版本**、**正文写的是该版本的实际变化**（不是只改数字）。
+
 ### Step 6：publish preview —— 走 GitHub Actions，**不在本机发**
 
 🔴 **本机不发包。** 这是 Vincent 2026-08-27 定的规则：发版一律走 GitHub Actions，
