@@ -1,0 +1,62 @@
+#1335 bounded stop evidence, 2026-10-22
+
+Base: main d8bb4d154bb9d102b10a7ae25576f6b91831fb91.
+Purpose: collect evidence missing from run39713550790/job119610255659.
+This does NOT fix or establish the cause of that Windows stop failure.
+
+Changes:
+- ANET_WINDOWS_STOP_DIAGNOSTICS=1 explicitly enables stderr JSON lines in the
+  existing CLI stop path; disabled otherwise. test751 opts in.
+- Timestamp, elapsed/duration ms, root expected births, query kind/PID,
+  validated CAP/IDSTATE/CIMSTATE/SNAP outputs, taskkill PID/status/signal and
+  runner classification, and final verdict. No scripts, environment,
+  arbitrary query errors or new raw taskkill stderr are emitted.
+- At most 2048 ASCII characters per JSON line and 65536 including newlines
+  per orchestration. Explicit truncated marker; omitted malformed/oversize
+  payloads. CLI prefix is outside that JSON budget.
+- No new process queries, retries, waits, executable injection or stop rules.
+  Sink exceptions are ignored; query/taskkill exceptions retain their behavior.
+- Successful stop evidence is copied from captured stderr into the fixture
+  output; failed command stderr already enters the existing report. This
+  retains both first-stop and second-stop evidence in normal CI output.
+
+Red witness against unmodified product:
+  bun test src/windows-stop-identity.test.ts --test-name-pattern diagnostic
+  1 pass / 2 fail: no emitted events and no omitted-output marker.
+
+Final targeted Linux container run:
+  bun test src/windows-stop-identity.test.ts src/windows-codex-copresence.test.ts
+  39 pass / 5 skip / 0 fail, 179 assertions, 239ms.
+  Five skips are Windows-only tests, NOT native evidence.
+  Tests include opt-in/off exact query/kill sequence and verdict equivalence,
+  throwing sink, unknown queries, error-body omission, original exception
+  behavior, and a 600-root trace exceeding the budget while all 1800 queries
+  still execute. Original surviving-child, reuse and unknown negative controls
+  remain unchanged.
+
+Environment used:
+  Cached Bun 1.3.14 image anet-test2014-control-integration
+  sha256:ebabd0066419315ce1d7bbe899999b07beb1aa01b896b548b439c2d7682da028.
+  Read-only source/bin bind mounts over /work/server/src and /work/server/bin;
+  existing SDK dependencies, network=none, read-only container, 64MiB tmpfs.
+  This was a portable source-level test, not a frozen-lock installer/native run.
+
+Rebuild without that private image (existing suite Dockerfile):
+  sg docker -c 'docker build -f tests/test751-codex-copresence-windows/Dockerfile -t anet-stop-evidence .'
+  sg docker -c 'docker run --rm --network none --entrypoint bun --workdir /workspace/agent-network anet-stop-evidence test src/windows-stop-identity.test.ts src/windows-codex-copresence.test.ts'
+
+CLI compile check, same container with external packages:
+  bun build bin/cli.ts --target=bun --packages=external --outfile=/tmp/anet-cli.js
+  Bundled 167 modules, 1.52MB. No CLI start/stop command executed.
+
+Limits / next gate:
+- No Windows native run or manual rerun/dispatch; await normal PR CI.
+- Logging can affect scheduling, so equivalence tests do not prove identical
+  native timing. This is diagnostic work, not a timing-race fix.
+- Runner classification is not proof of the actual resolved executable path.
+- No additional image/ppid, delayed identity snapshot, RPC-log or filesystem/
+  Hub side-effect evidence. Existing protocol content is preserved only when
+  valid and within bounds; truncation is NOT complete process history.
+- Initial pre-orchestration ownership refusal is outside this trace.
+- No full typecheck/full matrix, release/version change, production operation
+  or change to #1335/#2028 completion status.

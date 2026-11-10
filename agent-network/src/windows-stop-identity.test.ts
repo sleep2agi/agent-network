@@ -49,6 +49,82 @@ function scriptedEnv(opts: { capture: string; probes: string[]; snapshot?: strin
 }
 
 describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
+  test("opt-in diagnostics preserve the exact query/kill sequence and verdict", () => {
+    const input = { capture: cap(`8744=${DESC_BIRTH}`),
+      probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", `CIMSTATE:CREATED=${DESC_BIRTH}`] };
+    const baseline = scriptedEnv(input);
+    const observed = scriptedEnv(input);
+    const lines: string[] = [];
+    const expected = orchestrateWindowsManagedStop([root], baseline);
+    const actual = orchestrateWindowsManagedStop([root], { ...observed, diagnostic: (line: string) => lines.push(line) });
+    expect(actual).toEqual(expected);
+    expect(observed.calls).toEqual(baseline.calls);
+    const events = lines.map((line) => JSON.parse(line));
+    expect(events.map((e) => e.phase)).toEqual(["roots", "powershell", "powershell", "taskkill", "powershell", "powershell", "powershell", "verdict"]);
+    expect(events.some((e) => e.output === `CIMSTATE:CREATED=${DESC_BIRTH}`)).toBe(true);
+    expect(events.find((e) => e.phase === "taskkill")).toMatchObject({ pid: 8100, status: 128, runner: "injected" });
+    expect(events.every((e) => Number.isFinite(e.at) && Number.isFinite(e.elapsedMs))).toBe(true);
+  });
+
+  test("diagnostic sink failures cannot change the stop verdict", () => {
+    const env = scriptedEnv({ capture: cap(""), probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT"] });
+    const stop = orchestrateWindowsManagedStop([root], { ...env, diagnostic: () => { throw new Error("sink unavailable"); } });
+    expect(stop.verdict.kind).toBe("stopped");
+    expect(env.killed).toEqual([8100]);
+  });
+
+  test("diagnostics omit malformed query/error text and remain bounded", () => {
+    const lines: string[] = [];
+    const secret = "private-token-do-not-log";
+    const stop = orchestrateWindowsManagedStop([root], {
+      diagnostic: (line: string) => lines.push(line),
+      runPowerShell: (script: string) => {
+        if (script.includes("CAP:RB=")) return cap("");
+        if (script.includes("SNAP:")) throw new Error(secret);
+        return secret.repeat(10000);
+      },
+      runTaskkill: () => { throw new Error("must not kill an unknown identity"); },
+    });
+    expect(stop.mustKeepRecord).toBe(true);
+    expect(lines.join("")).not.toContain(secret);
+    expect(lines.join("").length).toBeLessThanOrEqual(65536);
+    expect(lines.every((line) => line.length <= 2048)).toBe(true);
+    expect(lines.some((line) => line.includes('"output":"[omitted]"'))).toBe(true);
+  });
+
+  test("large traces explicitly truncate at the total limit without skipping identity queries", () => {
+    const lines: string[] = [];
+    let queries = 0;
+    const roots = Array.from({ length: 600 }, (_, i) => ({ ...root, pid: 10000 + i }));
+    const stop = orchestrateWindowsManagedStop(roots, {
+      diagnostic: (line) => lines.push(line),
+      runPowerShell: (script) => { queries++; return script.includes("CAP:RB=") ? cap("") : "IDSTATE:ABSENT"; },
+      runTaskkill: () => { throw new Error("absent roots cannot authorize a kill"); },
+    });
+    expect(stop.verdict.kind).toBe("stopped");
+    expect(queries).toBe(1800);
+    expect(lines.reduce((n, line) => n + line.length + 1, 0)).toBeLessThanOrEqual(65536);
+    expect(JSON.parse(lines.at(-1)!).phase).toBe("truncated");
+  });
+
+  test("query and taskkill exceptions retain their original behavior without logging error bodies", () => {
+    const secret = "private-error-body";
+    const lines: string[] = [];
+    const failedQuery = orchestrateWindowsManagedStop([root], {
+      diagnostic: (line) => lines.push(line),
+      runPowerShell: () => { throw new Error(secret); },
+    });
+    expect(failedQuery.mustKeepRecord).toBe(true);
+    expect(lines.some((line) => line.includes("[query threw]"))).toBe(true);
+    lines.length = 0;
+    const env = scriptedEnv({ capture: cap(""), probes: ["IDSTATE:TICKS=999"] });
+    expect(() => orchestrateWindowsManagedStop([root], { ...env,
+      diagnostic: (line) => lines.push(line), runTaskkill: () => { throw new Error(secret); },
+    })).toThrow(secret);
+    expect(lines.some((line) => line.includes("[runner threw]"))).toBe(true);
+    expect(lines.join("")).not.toContain(secret);
+  });
+
   test("正向：非零 taskkill + 原身份（含已捕获后代）均已 gone ⇒ stopped，且诊断保留", () => {
     const env = scriptedEnv({
       capture: cap(`8744=${DESC_BIRTH}`),
