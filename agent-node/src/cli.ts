@@ -7839,7 +7839,11 @@ async function processConfigUpdate(): Promise<void> {
       await callCommHub("ack_config_update", {
         update_id: updateId,
         status: result.status === "applied" ? "applied" : result.status === "unknown" ? "timeout" : "rejected",
-        ...(result.status === "applied" ? { new_revision: ++currentConfigRevision } : { error: result.status === "unknown" ? "variant_outcome_unknown" : `variant_${result.reason}` }),
+        // 拒绝时把判据一起回执：Hub 只存 `error` 这个字符串，丢掉原文之后
+        // 「恰好有一轮在飞」和「计数器卡死」在观测面上不可分（#4414）。
+        ...(result.status === "applied" ? { new_revision: ++currentConfigRevision }
+          : { error: result.status === "unknown" ? "variant_outcome_unknown"
+              : `variant_${result.reason}${result.detail ? ` ${result.detail}` : ""}` }),
       });
       return;
     }

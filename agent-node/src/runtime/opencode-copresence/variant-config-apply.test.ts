@@ -46,8 +46,12 @@ describe("applyVariantConfig — stock-build writer", () => {
       .toEqual({ status: "applied", model: { providerID: "deepseek", id: "deepseek-flash", variant: "high" } });
   });
   test("in-flight turn is rejected as busy", async () => {
-    expect(await applyVariantConfig(session({ setSelectedVariant: async () => { throw new Error("variant_busy"); } }) as any, { modelVariant: "high" }))
-      .toEqual({ status: "rejected", reason: "busy" });
+    // #4414 之后 busy 会带 detail（判据原文）。这里盯的是 status/reason 不变，
+    // 原文由下面那条用例单独断言 —— 别把两件事揉进一个 toEqual。
+    const result = await applyVariantConfig(session({ setSelectedVariant: async () => { throw new Error("variant_busy"); } }) as any, { modelVariant: "high" });
+    expect(result.status).toBe("rejected");
+    expect((result as any).reason).toBe("busy");
+    expect((result as any).detail).toBe("variant_busy");
   });
   test("readback mismatch is unknown, never applied", async () => {
     expect(await applyVariantConfig(session({ setSelectedVariant: async () => { throw new Error("variant did not change"); } }) as any, { modelVariant: "high" }))
@@ -94,5 +98,24 @@ describe("applyVariantConfig — stock build keeps the controller methods but th
     const result = await applyVariantConfig(session as any, { modelVariant: "low" });
     expect(result.status).toBe("applied");
     expect(calls).toEqual(["controller-read", "controller-write"]);
+  });
+});
+
+
+// #4414：拒绝时不能只剩枚举。Hub 的 last_update.error 存的正是这个字符串，
+// 丢掉 in_flight / turn_age_ms 之后，「恰好有一轮在飞」和「计数器卡死」不可分。
+describe("applyVariantConfig — rejection evidence", () => {
+  test("keeps the busy detail instead of only the enum", async () => {
+    const session = {
+      isRunning: true,
+      sessionId: "ses_busy",
+      variantConfigTestOwned: false,
+      setSelectedVariant: async () => { throw new Error("variant_busy (in_flight=1, turn_age_ms=42000)"); },
+    };
+    const result = await applyVariantConfig(session as any, { modelVariant: "low" });
+    expect(result.status).toBe("rejected");
+    expect((result as any).reason).toBe("busy");
+    expect((result as any).detail).toContain("in_flight=1");
+    expect((result as any).detail).toContain("turn_age_ms=42000");
   });
 });

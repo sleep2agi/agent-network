@@ -846,7 +846,9 @@ export async function openVettedOpenCodeV2Copresence(
             // 这样客户端那句「档位会对下一轮生效 —— 跑完再切」就是事实，而不是安慰。
             queuedVariant = variant === "default" ? null : variant;
             queuedVariantAt = Date.now();
-            throw new Error("variant_busy");
+            // 判据写进异常文本：它会被 applyVariantConfig 带回 ack，最终出现在 Hub 的
+            // last_update.error 里。不写，读的人只能登机器翻日志。
+            throw new Error(`variant_busy (in_flight=${inFlight}, turn_age_ms=${turnStartedAt ? Date.now() - turnStartedAt : -1})`);
           }
         }
         const body = await scopedRequest(`/api/session/${sessionId}`);
