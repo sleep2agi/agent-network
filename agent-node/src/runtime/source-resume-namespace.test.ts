@@ -1,10 +1,11 @@
 import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { claimSharedSessionBridge } from "./source-resume-launcher";
 
 function fixture() {
-  const project = mkdtempSync("/work/namespace-");
+  const project = mkdtempSync(join(process.env.ANET_TEST_WORK_ROOT ?? tmpdir(), "namespace-"));
   mkdirSync(join(project, ".anet"), { mode: 0o700 }); mkdirSync(join(project, ".anet", "nodes"), { mode: 0o700 });
   return { project, url: "http://127.0.0.1:29999", serverPid: process.pid, sessionId: "ses_Existing" };
 }

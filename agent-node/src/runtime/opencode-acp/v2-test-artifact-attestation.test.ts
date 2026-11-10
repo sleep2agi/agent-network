@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { resolvePinnedOpencodeBinaryAttestation, revalidatePinnedOpencodeBinary } from "./binary";
-import { chmodSync, copyFileSync, mkdirSync, openSync, closeSync, writeSync, unlinkSync, symlinkSync } from "node:fs";
+import { existsSync, chmodSync, copyFileSync, mkdirSync, openSync, closeSync, writeSync, unlinkSync, symlinkSync } from "node:fs";
 import { dirname } from "node:path";
 
 const path = "/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode";
-test.skipIf(process.env.ANET_TEST_ARTIFACT_COPY === "1")("isolated explicit TEST-ONLY artifact provenance is exact and revalidated", () => {
+// Needs the TEST-ONLY artifact on disk (present only in the V2 test image).
+test.skipIf(process.env.ANET_TEST_ARTIFACT_COPY === "1" || !existsSync(path))("isolated explicit TEST-ONLY artifact provenance is exact and revalidated", () => {
   const previous = process.env.ANET_VARIANT_TEST_ONLY;
   try {
     delete process.env.ANET_VARIANT_TEST_ONLY;
