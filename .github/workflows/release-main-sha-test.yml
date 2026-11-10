@@ -13,6 +13,9 @@ on:
       - 'tests/release-landed-gate/**'
       - '.github/scripts/publish-outcome.py'
       - '.github/scripts/publish-with-tlog-recover.sh'
+      - '.github/workflows/promote-latest.yml'
+      - '.github/scripts/check-full-qa-for-latest.sh'
+      - 'tests/release-latest-full-qa/**'
   push:
     branches: [main]
     paths:
@@ -27,6 +30,9 @@ on:
       - 'tests/release-landed-gate/**'
       - '.github/scripts/publish-outcome.py'
       - '.github/scripts/publish-with-tlog-recover.sh'
+      - '.github/workflows/promote-latest.yml'
+      - '.github/scripts/check-full-qa-for-latest.sh'
+      - 'tests/release-latest-full-qa/**'
 permissions:
   contents: read
 # #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
@@ -69,3 +75,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -f tests/release-landed-gate/Dockerfile -t release-landed-gate-test .
       - run: docker run --rm release-landed-gate-test
+  # 测试分层:升 latest 前要求该版本源码在 main 上的全量 QA 是绿的(桩 curl + 桩 gh,真 git 历史,无网络)
+  latest-full-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f tests/release-latest-full-qa/Dockerfile -t release-latest-full-qa-test .
+      - run: docker run --rm release-latest-full-qa-test

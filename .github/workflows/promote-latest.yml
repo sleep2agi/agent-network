@@ -9,10 +9,12 @@
 #   preview 是滚动通道(发错了下一个覆盖),latest 是所有 `npm i` / 不带版本
 #   `bunx` 的用户立刻拿到。
 #
-# 🔴 这个 workflow 会拒绝三种情况,每一种都真实发生过:
+# 🔴 这个 workflow 会拒绝以下情况,前三种都真实发生过:
 #   1. 目标版本在 npm 上不存在 —— 打错版本号
 #   2. 距 preview 发布不足 30 分钟 —— 违反 §Step 7 第一阶段
 #   3. 目标版本比当前 latest 旧 —— 回退式 promote
+#   5. 该版本源码没被 main 上的全量 QA 矩阵覆盖,或覆盖它的那次是红的 ——
+#      测试分层:preview 只跑快速门,全量矩阵只挡正式版(check-full-qa-for-latest.sh)
 #
 #   第 3 条来自 2026-08-27 的一次真实失误:当时窗口已过、owner ACK 也有,
 #   于是把 @sleep2agi/agent-node 的 latest 推到了 2.5.0-preview.34 ——
@@ -49,6 +51,7 @@ on:
 
 permissions:
   contents: read
+  actions: read       # 闸 5 读 qa.yml 的运行记录
   id-token: write
 
 jobs:
@@ -57,6 +60,10 @@ jobs:
     runs-on: ubuntu-latest
     if: inputs.ack
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       # 与 release.yml 同一条规矩:OIDC 形态下不能写 .npmrc 的 _authToken(空 token 会撞 401)。
       - name: setup-node (NPM_TOKEN)
         if: vars.NPM_TRUSTED_PUBLISHING != 'true'
@@ -125,6 +132,16 @@ jobs:
             echo "这正是 2026-08-27 那次失误的形状:窗口过了、ACK 有了,但版本里没有要发的东西。"
             exit 1
           fi
+
+      # 测试分层:preview(release.yml)只跑快速门,全量矩阵是正式版的门槛。
+      # 判据与取集见脚本文件头。
+      - name: 闸 5 —— 该版本源码在 main 上的全量 QA 是绿的
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PKG: '@sleep2agi/${{ inputs.package }}'
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+        run: bash .github/scripts/check-full-qa-for-latest.sh
 
       - name: dist-tag add … latest
         env:

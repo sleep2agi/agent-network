@@ -489,6 +489,22 @@ tarball，不是已签名的原生客户端。Daemon 使用版本源中的精确
 
 只 publish 不升 latest 也是合法终态——很多 preview 永远停在 preview 也 OK。
 
+#### 测试分层：preview 快，全量矩阵只挡 latest（2026-11-10 Vincent 定）
+
+| 通道 | 测试 | 在哪 |
+|---|---|---|
+| preview | PR 快速层（三套 unit + doc claims/pins）+ `release.yml` 四道门（install smoke / pin audit / release notes / doc claims，合计约 1–2 分钟） | `qa.yml`（PR）、`release.yml` |
+| latest | 上面全部 + **该版本源码在 main 上的全量 QA 矩阵为绿** | `promote-latest.yml` 闸 5（`.github/scripts/check-full-qa-for-latest.sh`） |
+
+闸 5 的判据：源 commit 取自 npm 上该版本的 SLSA provenance；在 `qa.yml` 的 main
+全量运行（schedule / workflow_dispatch）里取**最早**一个包含该 commit 的运行，它必须是 success。
+没有覆盖时先在 Actions 里对 main 手动跑一次 `anet QA (v0)`，或等夜间那次；
+flaky 的红就 re-run 那次运行。
+
+preview 发布剩下的耗时不在测试：`@sleep2agi/agent-network` 被 npm 接受后通常要
+**约 20 分钟**才在 registry 上可见（agent-node / commhub-server 约 2 分钟），这是
+「发后核实」那一步在等（§6.2）。
+
 ### Step 8：升 latest（owner ACK 之后）
 
 ```bash
