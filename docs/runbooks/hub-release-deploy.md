@@ -39,6 +39,15 @@ mkdir -p "$NEW_DIR" && cd "$NEW_DIR"
 HOME="$REAL_HOME" npm install --no-audit --no-fund "@sleep2agi/commhub-server@$VER"
 node -p "require('$NEW_DIR/node_modules/@sleep2agi/commhub-server/package.json').version"   # 必须等于 $VER
 
+# a2. 写 build-info.json（🔴 2026-11-10 新增：生产版本无法回溯的教训）
+#     现状：生产跑 0.9.0-preview.281，而 npm 上最新是 .280（.281 是 404），
+#     runtime 目录里既没有 git 元数据也没有 gitHead ⇒ 想确认「生产是哪个 commit」只能去 grep 产物。
+#     所以每次部署都写一份，source 如实填 npm 或 local；不知道就写 unknown，不许猜。
+cat > "$NEW_DIR/build-info.json" <<EOF
+{"version":"$VER","source":"npm|local","commit":"<full sha 或 unknown>",
+ "deployed_at":"$(date -u +%FT%TZ)","operator":"<who>","note":"<一句话>"}
+EOF
+
 # b. 切启动器（只改默认值那一行；备份 + 写好回滚注释）
 #    ~/.local/bin/hub-daemon.sh:  export HUB_RUNTIME_DIR="${HUB_RUNTIME_DIR:-<NEW_DIR>}"
 
