@@ -694,7 +694,10 @@ export async function openVettedOpenCodeV2Copresence(
     // it while a turn of ours is queued/running would silently change that turn.
     let inFlight = 0;
     /** 客户端 MODEL_SWITCH_DEADLINE_MS=45s；等待留给写入 + 回读 10s 余量。 */
-    const VARIANT_IDLE_WAIT_MS = 35_000;
+    // 🔴 外层 withDeadlineMs 是 45s。如果内部等满 35s、SSE 下发又花了 10s 以上，
+    //    外层会先判 timeout/unknown —— 那时连 rejected/busy 都发不出去（#4415 实测踩到）。
+    //    所以内部预算必须明显小于外层：25s，留 20s 给写入 + 回读 + ack。
+    const VARIANT_IDLE_WAIT_MS = 25_000;
     const session: OpenCodeCopresenceSession = {
       url,
       sessionId,
@@ -846,6 +849,9 @@ export async function openVettedOpenCodeV2Copresence(
             // 这样客户端那句「档位会对下一轮生效 —— 跑完再切」就是事实，而不是安慰。
             queuedVariant = variant === "default" ? null : variant;
             queuedVariantAt = Date.now();
+            // 打日志：这条路径此前**完全没有输出**，于是「排队到底发生了没有」只能靠猜
+            // （#4415 实测：Hub 上只看到 timeout，节点日志里一行都没有）。
+            log(`[variant] queued ${JSON.stringify(queuedVariant)} (in_flight=${inFlight}, turn_age_ms=${turnStartedAt ? Date.now() - turnStartedAt : -1})`);
             // 判据写进异常文本：它会被 applyVariantConfig 带回 ack，最终出现在 Hub 的
             // last_update.error 里。不写，读的人只能登机器翻日志。
             throw new Error(`variant_busy (in_flight=${inFlight}, turn_age_ms=${turnStartedAt ? Date.now() - turnStartedAt : -1})`);
@@ -1057,9 +1063,11 @@ export async function openVettedOpenCodeV2Copresence(
             queuedVariant = undefined;
             // 判据抽在 queued-variant.ts（纯函数、有单测）：这一轮**恰好归零**且未过期才应用。
             if (shouldApplyQueuedVariant({ hasQueued: true, inFlight, queuedAt, now: Date.now() })) {
-              void session.setSelectedVariant(pending).catch((error) => {
-                warn(`[variant] queued apply failed: ${String((error as any)?.message ?? error)}`);
-              });
+              log(`[variant] applying queued ${JSON.stringify(pending)} after ${Math.round((Date.now() - queuedAt) / 1000)}s`);
+              void session.setSelectedVariant(pending).then(
+                (applied) => log(`[variant] queued applied -> ${JSON.stringify(applied)}`),
+                (error) => warn(`[variant] queued apply failed: ${String((error as any)?.message ?? error)}`),
+              );
             } else {
               warn(`[variant] queued apply dropped after ${Math.round((Date.now() - queuedAt) / 1000)}s (ttl ${QUEUED_VARIANT_TTL_MS / 60000}min)`);
             }
