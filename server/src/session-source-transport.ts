@@ -176,7 +176,13 @@ export function createSessionSourceTransport(options: { enabled?: boolean; direc
         if (req.method !== "POST" || url.search) return fail(400);
         const b = await readSessionControlBody(req, 65536); if (!b) return fail(400);
         if (!suffix) {
-          if (!isHumanCredential(credential) || !keys(b, ["network_id", "source_node_id", "daemon_node_id", "server_id", "selection_scope"])
+          // 凭据类型与请求体是**两种不同性质**的问题，不能共用一个 400（#4467）：
+          //   · 凭据不是 human 凭据 → 权限问题，403
+          //   · 请求体键/ID 不合法  → 请求问题，400
+          // 混在一起的实际代价：2026-11-10 我用节点 token 验这条链路，
+          // 拿到 400 后第一反应是「body 拼错了」，查了半小时才想到是凭据类型。
+          if (!isHumanCredential(credential)) return fail(403);
+          if (!keys(b, ["network_id", "source_node_id", "daemon_node_id", "server_id", "selection_scope"])
             || !id(b.network_id) || !id(b.source_node_id) || !id(b.daemon_node_id)
             || (b.server_id !== undefined && (!isDirectoryServerId(b.server_id) || !isDirectoryRequestId(b.selection_scope)))
             || (b.server_id === undefined && b.selection_scope !== undefined)) return fail(400);

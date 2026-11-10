@@ -104,7 +104,11 @@ test("actual Hub HTTP -> frozen daemon worker -> native 2.0.22-shaped GET pages 
 });
 test("HTTP requires human create/source visibility, exact network, explicit daemon capability and secure channel; rejects raw inputs", async () => {
   await worker.tick();
-  for (const token of [daemon.token, source.token, outsider.token]) expect((await api(token, "", selection())).status).not.toBe(200);
+  // 节点凭据不是 human 凭据 → 403（权限），不是 400（请求）。见 #4467。
+  for (const token of [daemon.token, source.token]) expect((await api(token, "", selection())).status).toBe(403);
+  expect((await api(outsider.token, "", selection())).status).not.toBe(200);
+  // 请求体不合法 → 400，与上面的 403 区分开。
+  expect((await api(human.token, "", { ...selection(), extra: 1 })).status).toBe(400);
   for (const extra of [{ url: "http://127.0.0.1:1" }, { path: project }, { token: "forged" }, { server_id: serverId }, { network_id: "other" }, { daemon_node_id: "dir_source" }]) {
     expect((await api(human.token, "", { ...selection(), ...extra })).status).not.toBe(200);
   }
