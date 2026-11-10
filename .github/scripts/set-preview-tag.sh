@@ -111,6 +111,13 @@ if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
 
 [ -n "${PKG:-}" ] || usage_error 'PKG 必填'
 [ -n "${EXPECTED:-}" ] || usage_error 'EXPECTED 必填'
+# 🔴 必须是 npm 的**完整包名**（带 scope）。仓里的 `build-tarball.outputs.package` 是短名
+#    `agent-node`，曾经被直接塞进来 ⇒ 拼出 registry.npmjs.org/agent-node/<ver> → 404，
+#    于是一次已经成功的发布被判红。这里提前一步开骂，把「拼错名字」和「版本真不可见」分开。
+case "$PKG" in
+  @*) ;;
+  *) usage_error "PKG='$PKG' 不是带 scope 的完整包名（应为 @sleep2agi/<pkg>）—— 判据来源错了，拒绝给结论" ;;
+esac
 
 registry="${NPM_REGISTRY_URL:-https://registry.npmjs.org}"
 rollout_timeout_s="${TAG_ROLLOUT_TIMEOUT_S:-$(( ${TAG_ROLLOUT_TIMEOUT_MIN:-2} * 60 ))}"

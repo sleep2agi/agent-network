@@ -1,0 +1,64 @@
+# 把某个**已发布**版本的 dist-tags.preview 显式指过去，并回读 registry 确认。
+#
+# 为什么需要一个可单独派发的入口（2026-11-10）:
+#   release.yml 的 publish job 里那一步「收口 dist-tag」在当天因为**包名传成了短名**
+#   （`agent-node` 而不是 `@sleep2agi/agent-node`）去查 registry 拿到 404，于是把一次
+#   **已经成功**的发布判红 —— publish 成功、字节核对通过，红的却是收口那一步。
+#   后果不是红本身：是 `@preview` 停在上一版，而另一个包的 `@preview` 已经前进 ⇒
+#   按 tag 装出来是「半对」。这类修补不该靠「下次发版顺手带上」，要能单独重跑。
+#
+# 安全边界（与 promote-latest 不同的地方）:
+#   · 不碰 `latest` —— 这个 workflow 只动 `preview`；
+#   · 拒绝把 tag 往回退（脚本内部也用版本序判断，两处都拦）；
+#   · 拒绝给「registry 上还看不见的版本」设 tag（指向不存在的版本比指向旧版本更坏）。
+
+name: set preview tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: '包名(不含 @sleep2agi/)'
+        required: true
+        type: choice
+        options:
+          - agent-network
+          - agent-node
+          - commhub-server
+      version:
+        description: '要指向的版本(必须已发布在 npm 上)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  set-tag:
+    name: preview ← ${{ inputs.package }}@${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # 与 release.yml 同一条规矩:OIDC 形态下不能写 .npmrc 的 _authToken(空 token 会撞 401)。
+      - name: setup-node (NPM_TOKEN)
+        if: vars.NPM_TRUSTED_PUBLISHING != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: setup-node (trusted publishing / OIDC)
+        if: vars.NPM_TRUSTED_PUBLISHING == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 收口 dist-tag:preview(显式设置 + 回读 registry)
+        env:
+          PKG: '@sleep2agi/${{ inputs.package }}'
+          EXPECTED: ${{ inputs.version }}
+          TAG_ROLLOUT_TIMEOUT_S: '180'
+        run: bash .github/scripts/set-preview-tag.sh
