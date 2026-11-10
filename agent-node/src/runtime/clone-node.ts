@@ -56,6 +56,11 @@ const COPY_FIELDS = [
   "anet_version", "runtime", "model", "tools", "hub", "systemPrompt", "team",
   "codexBin", "codexCopresence", "codexCopresenceFullAccess",
   "opencodeGeneration", "opencodeMode", "grokCopresence",
+  // OpenCode V2 共存节点挂在机器上的共享 serve（provider 密钥只在那个进程里）。不带过去，
+  // 克隆会自己起一个私有 serve，没有密钥，第一轮就 outcome=failed（vdev 2026-11-11 实测）。
+  // 这两格是地址和**文件路径**，不是秘密本身。
+  "opencodeSharedServerUrl", "opencodeSharedServerPasswordFile",
+  "network_id",
 ] as const;
 
 export type SessionCapability = "files_copied" | "id_aliased" | "unsupported" | "skipped";
@@ -113,6 +118,23 @@ export function planCloneWorkdir(input: {
     workdir: join(dirname(source), folder),
     workdirReason: "new_empty: empty sibling under the source workdir's parent (same root); source contents are not copied",
   };
+}
+
+/** Which Hub URL the clone writes. Normally the daemon's. For an OpenCode node on the
+ * machine's SHARED serve, the shared serve itself dials the CommHub MCP at this URL —
+ * on a box where only the source's address is directly reachable (vdev: http :9300
+ * direct, https only via a proxy the shared serve does not have), the daemon's URL
+ * makes the clone fail to load its MCP. Keep the source's URL only when it is provably
+ * the same Hub: identical to the daemon's, or the `proven_hub` recorded at adoption. */
+export function cloneHubUrl(source: Record<string, unknown>, daemonHub: string, provenHub: string | null): string {
+  const own = typeof source.hub === "string" ? source.hub : "";
+  if (!own || typeof source.opencodeSharedServerUrl !== "string" || !source.opencodeSharedServerUrl) return daemonHub;
+  return own === daemonHub || (provenHub !== null && own === provenHub) ? own : daemonHub;
+}
+
+function adoptedProvenHub(daemonWorkDir: string, alias: string): string | null {
+  try { const e = adoptedChild(daemonWorkDir, alias); return typeof e?.proven_hub === "string" ? e.proven_hub : null; }
+  catch { return null; }
 }
 
 /** Human-written instruction files a fork carries into its new folder. Never the
@@ -513,7 +535,8 @@ export async function handleCloneNodeDoorbell(
     }
   }
   const { config, skipped } = buildClonedConfig({
-    source, name: req.node_spec.name, nodeId, token: req.child_token, hubUrl: deps.hubUrl,
+    source, name: req.node_spec.name, nodeId, token: req.child_token,
+    hubUrl: cloneHubUrl(source, deps.hubUrl, adoptedProvenHub(deps.workDir, alias)),
     session, targetWorkdir: childWorkDir,
   });
   if (Array.isArray(req.clone.channels) && !config.channels) {
