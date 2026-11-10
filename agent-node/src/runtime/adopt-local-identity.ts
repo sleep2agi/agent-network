@@ -12,6 +12,13 @@ export interface AdoptionIdentityRequest {
 export interface AdoptionIdentityOptions {
   home: string;
   hubUrl: string;
+  /** Operator-declared other URLs of the SAME Hub (daemon config `hub_aliases`), e.g. the plain
+   *  http :9300 port that hand-started nodes on a host still use while the daemon itself must use
+   *  https (the source-fork worker refuses non-loopback http). Never inferred: a node is accepted
+   *  only on the daemon's own URL or one its operator listed. Invalid entries are ignored. */
+  hubAliases?: readonly unknown[];
+  /** Locate the identity without the Hub URL check. ONLY for proveSameHubByToken's lookup. */
+  ignoreHub?: boolean;
   networkId: string;
   adoptRoots: readonly string[];
   uid: number;
@@ -48,6 +55,14 @@ function canonicalHub(raw: unknown): string {
   return url.href.replace(/\/$/, "");
 }
 
+function acceptedHubs(opts: Pick<AdoptionIdentityOptions, "hubUrl" | "hubAliases">): Set<string> {
+  const accepted = new Set([canonicalHub(opts.hubUrl)]);
+  for (const alias of opts.hubAliases ?? []) {
+    try { if (typeof alias === "string") accepted.add(canonicalHub(alias)); } catch { /* invalid alias: ignore */ }
+  }
+  return accepted;
+}
+
 export function verifyAdoptionLocalIdentity(req: AdoptionIdentityRequest, opts: AdoptionIdentityOptions): AdoptionLocalIdentity {
   if (opts.daemonEnv.ANET_NODE_MARKER !== undefined) refuse("daemon_has_node_marker");
   if (!opts.adoptRoots.length) refuse("adopt_roots_not_configured");
@@ -82,7 +97,8 @@ export function verifyAdoptionLocalIdentity(req: AdoptionIdentityRequest, opts: 
     if (!names.length || names.some(v => v !== req.alias)) refuse("adopt_alias_mismatch");
     if (config.role === "host_supervisor") refuse("cannot_adopt_daemon");
     if (config.network_id !== req.network_id) refuse("adopt_config_network_mismatch");
-    if (canonicalHub(config.hub) !== canonicalHub(opts.hubUrl)) refuse("adopt_hub_mismatch");
+    if (opts.ignoreHub) canonicalHub(config.hub);
+    else if (!acceptedHubs(opts).has(canonicalHub(config.hub))) refuse("adopt_hub_mismatch");
     const openCodeV2 = config.opencodeMode === "copresence" && config.runtime === "opencode-cli" && config.opencodeGeneration === "v2";
     if (config.grokCopresence || config.grokCopresenceAuto ||
         (config.opencodeMode === "copresence" && !(opts.allowOpenCodeV2 && openCodeV2)) ||
@@ -121,4 +137,40 @@ export function verifyAdoptionProcess(
   const missing = Object.keys(evidence.env).filter(key => !launcherKeys.has(key) && evidence.env[key] !== opts.reproducibleEnv[key]);
   if (missing.length) refuse(`adopt_env_not_reproducible:${missing.sort().join(",")}`);
   return tmux ? "tmux" : "bare";
+}
+
+/** A Hub URL the node's own config uses that was PROVEN to reach the daemon's Hub at adoption
+ *  (see proveSameHubByToken) is accepted for this adopted child from then on. */
+export function withProvenHub<T extends Pick<AdoptionIdentityOptions, "hubAliases">>(deps: T, entry: { proven_hub?: unknown } | null | undefined): T {
+  return typeof entry?.proven_hub === "string" ? { ...deps, hubAliases: [...(deps.hubAliases ?? []), entry.proven_hub] } : deps;
+}
+
+/**
+ * admin 2026-11-10: "本来就是同一个，别用链接判断是不是同一个". The same Hub is often reachable at
+ * more than one URL (the daemon must use https for source fork; hand-started nodes on the same box
+ * use http :9300). URL text cannot tell; the Hub can. Present the node's own credential to the
+ * DAEMON's Hub: only if that Hub accepts it as exactly this node (same network, same alias) is the
+ * node's URL the same Hub. A different Hub would reject the token. The token never leaves for any
+ * URL other than the daemon's own Hub.
+ */
+export async function proveSameHubByToken(
+  identity: AdoptionLocalIdentity, req: AdoptionIdentityRequest, hubUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const token = identity.config?.token;
+  if (typeof token !== "string" || !token) refuse("adopt_hub_mismatch");
+  let body: any;
+  try {
+    const res = await fetchImpl(`${canonicalHub(hubUrl)}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) refuse("adopt_hub_mismatch");
+    body = await res.json();
+  } catch (e: any) {
+    if (e?.message === "adopt_hub_mismatch") throw e;
+    refuse("adopt_hub_unverifiable");
+  }
+  const c = body?.credential;
+  if (body?.ok !== true || c?.kind !== "node" || c.network_id !== req.network_id || c.node_alias !== req.alias) refuse("adopt_hub_mismatch");
+  return String(identity.config.hub);
 }

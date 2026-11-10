@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { minimalEnv } from "./create-node-daemon.js";
 import { loadNodeSecrets, parseSecretsEnv } from "../node-secrets.js";
 import { CommHubError } from "../reply-reliability.js";
-import { verifyAdoptionLocalIdentity, verifyAdoptionProcess, type AdoptionIdentityOptions, type AdoptionLocalIdentity } from "./adopt-local-identity.js";
+import { proveSameHubByToken, verifyAdoptionLocalIdentity, verifyAdoptionProcess, withProvenHub, type AdoptionIdentityOptions, type AdoptionLocalIdentity } from "./adopt-local-identity.js";
 import { readAdoptionPid, readAdoptionProc, type AdoptionProc } from "./adopt-proc.js";
 import { adoptedChild, forgetAdoptedChild, readWorkdirRegistry, writeAdoptedChild } from "./adopt-registry.js";
 import { readCodexScope } from "./adopt-codex-scope.js";
@@ -33,6 +33,8 @@ export interface AdoptDaemonDeps extends AdoptionIdentityOptions {
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   readProc?: (pid: number) => AdoptionProc | null;
   warn: (message: string) => void;
+  /** Test seam for proveSameHubByToken. */
+  fetchImpl?: typeof fetch;
 }
 export function reproducibleEnvironment(identity: AdoptionLocalIdentity, deps: AdoptDaemonDeps): NodeJS.ProcessEnv {
   const cfg = identity.config;
@@ -79,6 +81,17 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
   try {
     if (process.platform !== "linux") throw Error("adopt_platform_unsupported");
     if (req.request_id !== requestId) throw Error("adopt_request_mismatch");
+    let provenHub: string | undefined;
+    try {
+      verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true, allowOpenCodeV2: true });
+    } catch (e: any) {
+      if (e?.message !== "adopt_hub_mismatch") throw e;
+      const located = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true, allowOpenCodeV2: true, ignoreHub: true });
+      provenHub = await proveSameHubByToken(located, req, deps.hubUrl, deps.fetchImpl);
+    }
+    // Everything below (re-verification, registry) runs against the proven URL set.
+    deps = withProvenHub(deps, { proven_hub: provenHub });
+    const hubField = provenHub ? { proven_hub: provenHub } : {};
     const identity = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true, allowOpenCodeV2: true });
     alias = identity.alias;
     if (identity.config.opencodeMode === "copresence") {
@@ -91,7 +104,7 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
       const checked = verifyAdoptionLocalIdentity(req, { ...deps, allowOpenCodeV2: true });
       if (!isDeepStrictEqual(identity, checked) || readOpenCodeBridgePid(identity.nodeDir, deps.uid) !== pid) throw Error("adopt_identity_changed");
       if (!isDeepStrictEqual(before, readProc(pid))) throw Error("adopt_process_changed");
-      writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, node_id: identity.nodeId,
+      writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, ...hubField, node_id: identity.nodeId,
         nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: "tmux",
         opencode_v2: { version: 1, config_hash: configHash(identity) } });
     } else if (identity.config.codexCopresence) {
@@ -105,7 +118,7 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
         if(!st.isFile() || st.isSymbolicLink() || st.uid!==deps.uid || (st.mode&0o022)) throw Error("adopt_codex_marker_unsafe");
         staleStopped={path:receipt,ino:st.ino,mtimeMs:st.mtimeMs};
       }
-      writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, node_id: identity.nodeId,
+      writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, ...hubField, node_id: identity.nodeId,
         nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: "tmux",
         codex_v2: { version: 1, layout:scope.layout, socket: scope.socket, marker: scope.marker, config_hash: configHash(identity),
           start_inputs: optionalCodexStartInputs(identity, scope, requestId) } });
@@ -123,7 +136,7 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
         !isDeepStrictEqual(expectedEnv, reproducibleEnvironment(checked, deps))) throw Error("adopt_identity_changed");
     const after = pid ? readProc(pid) : null;
     if (!isDeepStrictEqual(before, after)) throw Error("adopt_process_changed");
-    writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId,
+    writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, ...hubField,
       node_id: identity.nodeId, nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: mode });
     }
     registered = true;

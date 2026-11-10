@@ -11,7 +11,7 @@ import { assertAppsrvOwnsListen } from "./adopt-codex-listen.js";
 import { codexStartInputs, type CodexStartInputs } from "./adopt-codex-start-inputs.js";
 import type { CodexAdoptionScope } from "./adopt-codex-evidence.js";
 import { codexRoleNames } from "./adopt-codex-evidence.js";
-import { verifyAdoptionLocalIdentity, type AdoptionLocalIdentity } from "./adopt-local-identity.js";
+import { verifyAdoptionLocalIdentity, withProvenHub, type AdoptionLocalIdentity } from "./adopt-local-identity.js";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { adoptedChild, refreshAdoptedChild, type AdoptedChild } from "./adopt-registry.js";
 
@@ -136,7 +136,7 @@ async function verifyReady(identity: AdoptionLocalIdentity, scope: CodexAdoption
 function prove(identity: AdoptionLocalIdentity, scope: CodexAdoptionScope, entry: AdoptedChild, deps: AdoptDaemonDeps, saved: CodexStartInputs): ProvedStart {
   const nextIdentity = verifyAdoptionLocalIdentity(
     { node_id: entry.node_id, alias: identity.alias, network_id: deps.networkId, workdir: entry.workdir },
-    { ...deps, allowCodexV2: true });
+    { ...withProvenHub(deps, entry), allowCodexV2: true });
   if (nextIdentity.nodeDir !== identity.nodeDir) throw Error("adopt_registry_identity_mismatch");
   const nextScope = readCodexScope(nextIdentity, deps.uid);
   if (nextScope.layout !== "native" || nextScope.socket !== scope.socket || nextScope.codexHome !== scope.codexHome

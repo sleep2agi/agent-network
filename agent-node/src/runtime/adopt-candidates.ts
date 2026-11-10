@@ -32,6 +32,7 @@ export interface DiscoverAdoptionOptions {
   workDir: string;
   home: string;
   hubUrl: string;
+  hubAliases?: readonly unknown[];
   networkId: string;
   uid: number;
   daemonEnv: NodeJS.ProcessEnv;
@@ -147,7 +148,7 @@ export function discoverAdoptionCandidates(opts: DiscoverAdoptionOptions): Adopt
         // allowCodexV2 stays off: co-presence / three-stage nodes are 收编 v2, not candidates.
         const identity = verifyAdoptionLocalIdentity(
           { node_id: config.node_id, alias, network_id: config.network_id, workdir: dir },
-          { home: opts.home, hubUrl: opts.hubUrl, networkId: opts.networkId, adoptRoots: opts.adoptRoots as string[], uid: opts.uid, daemonEnv: opts.daemonEnv },
+          { home: opts.home, hubUrl: opts.hubUrl, hubAliases: opts.hubAliases, networkId: opts.networkId, adoptRoots: opts.adoptRoots as string[], uid: opts.uid, daemonEnv: opts.daemonEnv },
         );
         const key = `${identity.nodeId}\0${identity.workdir}`;
         if (seen.has(key)) continue;
@@ -201,16 +202,17 @@ export function resetAdoptionCandidateCacheForTests(): void { cached = undefined
 
 /** Heartbeat adapter. Cached for 60s so a status report does not walk the disk every time. */
 export function heartbeatAdoptionCandidates(
-  fileConfig: { role?: unknown; adopt_roots?: unknown },
+  fileConfig: { role?: unknown; adopt_roots?: unknown; hub_aliases?: unknown },
   hubUrl: string,
   networkId: string,
   now = Date.now(),
 ): AdoptionCandidate[] | undefined {
   const adoptRoots = Array.isArray(fileConfig?.adopt_roots) ? fileConfig.adopt_roots : [];
-  const key = JSON.stringify([process.cwd(), hubUrl, networkId, process.env.HOME || "", fileConfig?.role ?? null, adoptRoots]);
+  const hubAliases = Array.isArray(fileConfig?.hub_aliases) ? fileConfig.hub_aliases : [];
+  const key = JSON.stringify([process.cwd(), hubUrl, hubAliases, networkId, process.env.HOME || "", fileConfig?.role ?? null, adoptRoots]);
   if (cached && cached.key === key && now - cached.at < 60_000 && now >= cached.at) return cached.value;
   const value = discoverAdoptionCandidates({
-    workDir: process.cwd(), home: process.env.HOME || "", hubUrl, networkId,
+    workDir: process.cwd(), home: process.env.HOME || "", hubUrl, hubAliases, networkId,
     uid: process.getuid?.() ?? -1, daemonEnv: process.env, adoptRoots, role: fileConfig?.role,
   });
   cached = { key, at: now, value };

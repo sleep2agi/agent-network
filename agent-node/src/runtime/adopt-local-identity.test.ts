@@ -79,3 +79,40 @@ test("#747 sticky group-writable workdir accepted only for the workdir itself", 
   expect(verifyAdoptionLocalIdentity(f.req, f.opts).configPath).toBe(f.configPath);
   expect(() => verifyAdoptionLocalIdentity(f.req, { ...f.opts, uid: f.opts.uid + 1 })).toThrow("adopt_path_owner_mismatch");
 });
+
+// admin 2026-11-10「本来就是同一个，别用链接判断」: same Hub at another URL is proven by the Hub, not by URL text.
+import { proveSameHubByToken, withProvenHub } from "./adopt-local-identity.js";
+const fakeFetch = (status: number, body: unknown, seen: string[] = []) =>
+  (async (url: any, init: any) => { seen.push(`${url} ${init?.headers?.Authorization}`); return new Response(JSON.stringify(body), { status }); }) as unknown as typeof fetch;
+test("node on another URL of the same Hub: located with ignoreHub, proven by its own token on the daemon's Hub", async () => {
+  const f = fixture(); f.save({ hub: "http://hub.example:9300", token: "ntok_fixture" });
+  expect(() => verifyAdoptionLocalIdentity(f.req, { ...f.opts, hubUrl: "https://hub.example" })).toThrow("adopt_hub_mismatch");
+  const located = verifyAdoptionLocalIdentity(f.req, { ...f.opts, hubUrl: "https://hub.example", ignoreHub: true });
+  const seen: string[] = [];
+  const ok = { ok: true, credential: { kind: "node", network_id: f.req.network_id, node_alias: f.req.alias } };
+  expect(await proveSameHubByToken(located, f.req, "https://hub.example", fakeFetch(200, ok, seen))).toBe("http://hub.example:9300");
+  expect(seen).toEqual(["https://hub.example/api/auth/me Bearer ntok_fixture"]); // only ever the daemon's own Hub
+  // once proven, every later check accepts it for this child
+  const deps = withProvenHub({ ...f.opts, hubUrl: "https://hub.example" }, { proven_hub: "http://hub.example:9300" });
+  expect(verifyAdoptionLocalIdentity(f.req, deps).configPath).toBe(f.configPath);
+  expect(withProvenHub(f.opts, {})).toBe(f.opts);
+});
+test("proof refuses a different Hub, another node's credential, a human token, and an unreachable Hub", async () => {
+  const f = fixture(); f.save({ hub: "http://other.example:9300", token: "ntok_fixture" });
+  const located = verifyAdoptionLocalIdentity(f.req, { ...f.opts, ignoreHub: true });
+  const cred = (c: object) => ({ ok: true, credential: { kind: "node", network_id: f.req.network_id, node_alias: f.req.alias, ...c } });
+  await expect(proveSameHubByToken(located, f.req, "https://hub.example", fakeFetch(401, { ok: false }))).rejects.toThrow("adopt_hub_mismatch");
+  await expect(proveSameHubByToken(located, f.req, "https://hub.example", fakeFetch(200, cred({ node_alias: "other" })))).rejects.toThrow("adopt_hub_mismatch");
+  await expect(proveSameHubByToken(located, f.req, "https://hub.example", fakeFetch(200, cred({ network_id: "net_other" })))).rejects.toThrow("adopt_hub_mismatch");
+  await expect(proveSameHubByToken(located, f.req, "https://hub.example", fakeFetch(200, { ok: true, credential: { kind: "user" } }))).rejects.toThrow("adopt_hub_mismatch");
+  const down = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
+  await expect(proveSameHubByToken(located, f.req, "https://hub.example", down)).rejects.toThrow("adopt_hub_unverifiable");
+  f.save({ hub: "http://other.example:9300" }); // no token at all
+  const bare = verifyAdoptionLocalIdentity(f.req, { ...f.opts, ignoreHub: true });
+  await expect(proveSameHubByToken(bare, f.req, "https://hub.example", fakeFetch(200, cred({})))).rejects.toThrow("adopt_hub_mismatch");
+});
+test("operator hub_aliases accept a listed URL; invalid aliases are ignored, not fatal", () => {
+  const f = fixture(); f.save({ hub: "http://hub.example:9300" });
+  expect(verifyAdoptionLocalIdentity(f.req, { ...f.opts, hubUrl: "https://hub.example", hubAliases: ["not a url", 42, "http://hub.example:9300/"] }).configPath).toBe(f.configPath);
+  expect(() => verifyAdoptionLocalIdentity(f.req, { ...f.opts, hubUrl: "https://hub.example", hubAliases: ["http://hub.example:9301"] })).toThrow("adopt_hub_mismatch");
+});
