@@ -8,14 +8,11 @@ on:
       - 'server/**'
       - 'tests/test906-daemon-provider-management/**'
       - '.github/workflows/daemon-provider-store.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'agent-network/**'
-      - 'agent-node/src/**'
-      - 'server/**'
-      - 'tests/test906-daemon-provider-management/**'
-      - '.github/workflows/daemon-provider-store.yml'
+  # Tier 3: heavy Docker suite. Runs nightly on main, on demand, or on PRs labelled full-qa.
+  # It no longer runs on every merge to main (2 runners; it queued PR feedback).
+  schedule:
+    - cron: '40 18 * * *'
+  workflow_dispatch:
 permissions:
   contents: read
 # #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
