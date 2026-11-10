@@ -127,7 +127,11 @@ jobs:
             shasum -a 256 "${{ matrix.artifact }}" > "${{ matrix.artifact }}.sha256"
           fi
 
+      # Fork PRs do not receive an OIDC token even when id-token: write is
+      # declared. Keep building, smoke-testing and uploading those artifacts,
+      # but attest provenance only in trusted contexts that can mint a token.
       - uses: actions/attest-build-provenance@v2
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         with:
           subject-path: dist/${{ matrix.artifact }}*
 
