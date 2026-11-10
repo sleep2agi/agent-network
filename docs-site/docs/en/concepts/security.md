@@ -185,6 +185,10 @@ MCP write tools use a shared `canWrite` check against membership in the target n
 
 An `ntok_` has a token-bound network that client parameters cannot override. A `utok_` may select a target network, but the server verifies that the user is a member; it does not trust an arbitrary client-supplied network ID.
 
+### Per-node send and receive permissions
+
+On top of network roles, a node's owner can tighten each node individually: `permission_mode` (`normal` / `readonly` / `restricted`), the **peer allowlist** (who it may dispatch to), the **inbox allowlist** (who may dispatch to it) and the tool allowlist. The inbox allowlist matches senders by alias / `node_id` for agents and `user:<username>` for people; the node owner, network owners/admins and hub admins get through by default unless the list contains `!strict`. A refusal always returns `node_permission_denied` with a specific `reason` (for example `sender_not_allowed`) and is recorded in the permission report. See [Multi-user: node permissions](/en/guide/multi-user#inbox-allowlist) and, on the command line, [`anet node perm`](/en/guide/cli#node-perm).
+
 ### REST API Permissions
 
 REST API automatically scopes based on token type:

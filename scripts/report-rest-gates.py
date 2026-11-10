@@ -66,7 +66,7 @@ KNOWN_GATES = {
     "canManageGroup", "canMessageAgent", "canRestWriteNetwork",
     "canRestWriteNetworkAsHuman", "canRestWriteNodeSecurity", "canSetPermissionMode",
     "requireAuth", "requireTmuxAccess",
-    "restNodeDenied", "restrictedMemberAttachmentsDenied", "scopeDenied",
+    "inboxDenied", "restNodeDenied", "restrictedMemberAttachmentsDenied", "scopeDenied",
 }
 
 # 名字不带前缀的老门 / 已解析身份。它们**不参与**与抽取集的相等性，
@@ -605,7 +605,7 @@ def build_evidence(doc: dict, lines: list[str], result: dict) -> dict:
     }
 
 
-# 2026-11-01 —— #3330 的核心不变量：这四条改的是**节点的安全边界**（权限模式 + 三张白名单），
+# 2026-11-01 —— #3330 的核心不变量：这五条改的是**节点的安全边界**（权限模式 + 四张白名单），
 # 它们必须是 owner_admin（节点主人 / 网络 owner·admin），不许被合并到 network_write
 # （「有网络写权的成员」）—— 而那正是「合并两个权限档时静默放宽」的形态。
 NODE_SECURITY_WRITES = {
@@ -613,12 +613,13 @@ NODE_SECURITY_WRITES = {
     ("PUT", "/api/nodes/:param1/tool-allowlist"),
     ("PUT", "/api/nodes/:param1/rest-allowlist"),
     ("PUT", "/api/nodes/:param1/peer-allowlist"),
+    ("PUT", "/api/nodes/:param1/inbox-allowlist"),
 }
 SCOPE_RANK = {name: i for i, name in enumerate(SCOPE_ORDER)}
 
 
 def check_node_security_scope(doc: dict) -> list[str]:
-    """节点安全边界的四条写路由，其必要条件不得弱于 owner_admin。
+    """节点安全边界的五条写路由，其必要条件不得弱于 owner_admin。
 
     判据用的是**必要条件档**（门符号算出来的），不是注释、不是命名。
     合并权限档时这一条会红，而状态码测试不会（两者都会 200，只是谁能改变了）。
@@ -637,8 +638,9 @@ def check_node_security_scope(doc: dict) -> list[str]:
         if SCOPE_RANK.get(scope, 99) > SCOPE_RANK["owner_admin"]:
             out.append(f"NODE_SECURITY_SCOPE_WEAKENED: {key[0]} {key[1]} 的必要条件档是 "
                        f"{scope}（弱于 owner_admin）⇒ 节点安全边界被放宽了")
-    if len({k for k in NODE_SECURITY_WRITES}) != 4:
-        out.append("NODE_SECURITY_SET_CHANGED: 这份清单本身被改过（应为 4 条）—— 改它要说明为什么")
+    # 4 → 5：收件白名单（谁能给这个节点派活）与 peer 白名单同属节点安全边界，同一个门。
+    if len({k for k in NODE_SECURITY_WRITES}) != 5:
+        out.append("NODE_SECURITY_SET_CHANGED: 这份清单本身被改过（应为 5 条）—— 改它要说明为什么")
     return out
 
 

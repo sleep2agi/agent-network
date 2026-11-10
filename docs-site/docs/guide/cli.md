@@ -458,6 +458,30 @@ anet daemon unadopt demo --yes
 `.anet/child-workdirs.json`，节点配置及密钥仍在原目录。空机恢复需恢复这些私有文件和
 Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销绑定不删除工作目录。
 
+## 节点权限：`anet node perm` {#node-perm}
+
+**开发中、尚未发布**：看 / 改一个节点在 Hub 上的权限 —— 模式、对端白名单（它能发给谁）、收件白名单（谁能发给它）。
+
+```bash
+anet node perm <node> [--json]
+anet node perm <node> [--mode normal|readonly|restricted]
+                      [--peers <a,b,…>|none] [--peers-add <x>] [--peers-remove <x>]
+                      [--inbox <a,user:bob,…>|none] [--inbox-add <x>] [--inbox-remove <x>]
+                      [--hub <url>] [--json]
+```
+
+- `<node>` 可以是本地节点名、`node_id` 或 Hub 上的 alias；不带改动参数时只显示当前设置（另带 `tool` / `rest` 白名单的只读展示）。
+- `--inbox` 条目：`<alias>` / `<node_id>` 是 Agent，`user:<username>` / `user:<id>` 是人，`user:*` 是任何人，`!strict` 让节点主人和网络 owner/admin 也必须列名。语义见[收件白名单](/guide/multi-user#inbox-allowlist)。
+- `none` 清空对应名单（不限制）。`--*-remove` 删掉最后一条会被拒 —— 删空等于完全放开，必须显式写 `none`。
+- 改动要 `anet login` 的用户令牌，且是节点主人 / 网络 owner·admin / Hub 管理员。Hub 不认 `inbox_allowlist`（老 Hub）时，显示会注明，`--inbox*` 直接拒绝而不是假装成功。
+- `--json` 输出 `{ok, state, changed}`（失败为 `{ok: false, error, …}`）；用法错误退出码 2，Hub 拒绝 / 不可达退出码 1。
+
+```bash
+anet node perm reviewer --inbox planner,user:alice
+anet node perm reviewer --inbox-add user:bob
+anet node perm reviewer --peers none --mode normal --json
+```
+
 ## Preview 专属能力
 
 **开发中、尚未发布（#1053）**：Daemon/节点环境密钥管理不再只依赖演示表单。

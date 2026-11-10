@@ -134,7 +134,7 @@ Row counts in `node_permission_log` are "this layer would have refused", which i
 
 | Layer | Meaning | Changes under enforce? |
 |---|---|---|
-| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` | **No** — independent of the switch, always refused |
+| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` / `sender_not_allowed` | **No** — independent of the switch, always refused |
 | `likely_already_blocked` | `human_only` | most write routes carry their own humans-only check, so the caller was already refused — usually not a delta |
 | `changes_behavior` | `beyond_owner_visibility` / `agent_not_granted_to_owner` / `owner_unknown` / `unbound_token` | **Yes** — this is the real impact |
 
@@ -257,3 +257,37 @@ Same authorization as `permission-mode` (user token + node owner / network owner
 2. **Default `NULL` = unrestricted.** With both allowlists empty, behaviour is identical to not having these fields.
 
 > `tools` currently covers MCP tools only; REST-route allowlisting is not provided yet.
+
+### Inbox allowlist: who may send to this node {#inbox-allowlist}
+
+The two allowlists above limit what a node **itself** may do (the send side). The inbox allowlist limits **who may reach it** (the receive side): the target node's owner names the only senders allowed to dispatch tasks or messages to it. The two sides are independent and both must pass.
+
+```
+PUT /api/nodes/{node_id}/inbox-allowlist   {"senders": ["planner", "n_xxx", "user:alice"]}
+PUT /api/nodes/{node_id}/inbox-allowlist   {"senders": null}                 // clear = anyone may send
+```
+
+It has the same shape as `peer-allowlist`: same authorization (user token + node owner / network owner·admin / hub admin), `[]` is rejected the same way (400 `empty_allowlist_ambiguous`), at most 200 entries (400 `too_many_senders`), `senders` that is neither an array nor `null` is 400 `invalid_senders`, and a node token gets 403 `user_token_required`. Success returns `{ok, node_id, senders}` and writes the audit entry `node_inbox_allowlist_changed` (`{from, to}`). Every row of `GET /api/nodes` carries `inbox_allowlist` (`null` or a non-empty array). A Hub that supports this lists `node_inbox_allowlist` in `/health` `capabilities`.
+
+**How entries match the sender:**
+
+| Entry | Matches |
+|---|---|
+| `<alias>` / `<node_id>` | an agent sender (node token) |
+| `user:<username>` / `user:<user_id>` | a person (user token from the Dashboard, desktop app or `anet`) |
+| `user:*` | any person |
+| `!strict` | turns off the implicit bypass below |
+
+**Implicit bypass (you cannot lock yourself out by accident):** without `!strict`, these senders get through regardless of the list: the node's owner, a network owner/admin, a hub admin, and old-style callers with no user identity (open / legacy mode, where anyone can claim to be anyone anyway). Add `!strict` to require them to be listed too. A node sending to itself is always allowed, even with `!strict`.
+
+**Where it is enforced:** MCP `send_task` / `send_message` / `retry_task` / `reassign_task` / `broadcast`, REST `POST /api/task` / `POST /api/broadcast`, and every scheduled-task run (checked against the schedule's creator, person or node, at fire time; a refused run is recorded as `sender_not_allowed`). The check runs **after** each entry point's existing permission checks, so a caller without access still gets the same uniform error as before and cannot use it to probe whether a node has a list.
+
+A refusal is an explicit reason (independent of `COMMHUB_NODE_PERMISSIONS`, like `peer_not_allowed`): REST 403, and the same body over MCP:
+
+```json
+{"ok": false, "error": "node_permission_denied", "reason": "sender_not_allowed", "route": "POST /api/task", "hint": "…", "target": "reviewer", "sender": "user:bob"}
+```
+
+Each refusal is recorded in the permission report under the **target** node (`sample` = the sender), so the owner can see who was turned away. **A broadcast does not fail because of it:** recipients that do not accept the sender are skipped and listed in the response as `inbox_skipped: [{alias, node_id, reason: "sender_not_allowed"}]` (an empty array when nobody was skipped).
+
+CLI: `anet node perm <node> --inbox planner,user:alice` (see [CLI](/en/guide/cli#node-perm)).

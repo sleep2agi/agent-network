@@ -276,6 +276,36 @@ The `nodes` table is **persistent node identity** (written at creation, deleted 
 | `in_flight` | tasks this node is working on, computed by the **same SQL** as `stop_node` / `restart_node` (rows without a task are judged by a 60-minute age; terminal tasks do not count) |
 | `can_restart_now` | `path !== "manual"` and not blocked by in-flight work |
 
+**Permission fields**: every row also carries `permission_mode`, `peer_allowlist` (who it may send to), `inbox_allowlist` (who may send to it), `tool_allowlist` and `rest_allowlist`; an allowlist is only ever `null` (unrestricted) or a non-empty array. See [Multi-user: node permissions](/en/guide/multi-user#inbox-allowlist).
+
+### PUT /api/nodes/:id/inbox-allowlist {#put-inbox-allowlist}
+
+> [Source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
+
+Set the node's **inbox allowlist**: only senders on it may dispatch tasks or messages to the node. Same shape as `PUT /api/nodes/:id/peer-allowlist` (`{"peers": …}`). A Hub that supports it lists `node_inbox_allowlist` in `/health` `capabilities`.
+
+```bash
+curl -X PUT http://localhost:9200/api/nodes/n_abc123/inbox-allowlist \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"senders": ["planner", "n_def456", "user:alice"]}'
+```
+
+| Field | Type | Meaning |
+|------|------|------|
+| `senders` | `string[] \| null` | `<alias>` / `<node_id>` = an agent; `user:<username>` / `user:<user_id>` = a person; `user:*` = any person; `!strict` = the owner and network owner/admin must be listed too. `null` clears it (anyone may send). At most 200 entries |
+
+**Response**: `{"ok": true, "node_id": "n_abc123", "senders": ["planner", "n_def456", "user:alice"]}` (`senders: null` after a clear). Writes the audit entry `node_inbox_allowlist_changed` with `detail` `{from, to}`.
+
+| Status | `error` | Trigger |
+|------|---------|---------|
+| 400 | `invalid_json` / `invalid_senders` | Body is not JSON / `senders` is neither an array nor `null` |
+| 400 | `empty_allowlist_ambiguous` | `[]` was sent; send `null` to clear |
+| 400 | `too_many_senders` | More than 200 entries |
+| 401 | `auth required` | No token |
+| 403 | `user_token_required` | Called with a node token |
+| 403 | `permission_denied` | Not the node's owner, a network owner/admin, or a hub admin |
+| 404 | `node_not_found` | No such node, or not in your networks (same code on purpose) |
+
 ::: warning It is a snapshot, not a promise
 The server re-checks on the real call (`node_busy_in_flight` / `adopted_restart_requires_daemon`). Clients must handle those two error codes instead of trusting the snapshot.
 :::
@@ -1192,6 +1222,7 @@ token in the query string.
 | 400 | `network_id required for user token when multiple networks are available` | utok\_ caller has multiple networks; must specify `network_id` |
 | 403 | `access denied to requested network` | utok\_ caller is not a member of `network_id` |
 | 403 | `permission_denied` | Role is insufficient (viewer cannot write) |
+| 403 | `node_permission_denied` (`reason: "sender_not_allowed"`) | The target node has an [inbox allowlist](#put-inbox-allowlist) and the sender is not on it. The body carries `route` / `hint` / `target` / `sender`; explicit, independent of the switch |
 | 409 | `node_degraded` | The target's health report says a layer is down (Hub `0.9.0-preview.86`+). The body has `layers[]` (`layer` / `label` / `reason` / `hint`), `hint`, `health_observed_ms_ago` and `force_allowed`. A user token may send `"force": true` in the body to dispatch anyway; a node token may not. See [health and degraded refusal](/en/guide/codex-copresence#health) |
 
 A `new_task` SSE event is pushed to the target alias on success.
@@ -1228,11 +1259,12 @@ curl -X POST http://localhost:9200/api/broadcast \
 {
   "ok": true,
   "recipients": 10,
-  "message_ids": ["uuid-1", "uuid-2"]
+  "message_ids": ["uuid-1", "uuid-2"],
+  "inbox_skipped": [{ "alias": "reviewer", "node_id": "n_abc123", "reason": "sender_not_allowed" }]
 }
 ```
 
-`message_ids.length === recipients` — one inbox row per target session.
+`message_ids.length === recipients` — one inbox row per target session. `inbox_skipped` lists recipients skipped because their [inbox allowlist](#put-inbox-allowlist) does not accept this sender (the broadcast does not fail; an empty array when nobody was skipped). MCP `broadcast` returns the same field.
 
 **Common 4xx errors**:
 

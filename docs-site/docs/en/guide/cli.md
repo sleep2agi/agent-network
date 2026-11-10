@@ -453,6 +453,30 @@ it is still there, **send it a task** — `anet status` answers "what it last sa
 about itself", not "whether it is still running".
 
 
+## Node permissions: `anet node perm` {#node-perm}
+
+**In development, not yet released.** Show or change a node's permissions on the Hub: the mode, the peer allowlist (who it may send to) and the inbox allowlist (who may send to it).
+
+```bash
+anet node perm <node> [--json]
+anet node perm <node> [--mode normal|readonly|restricted]
+                      [--peers <a,b,…>|none] [--peers-add <x>] [--peers-remove <x>]
+                      [--inbox <a,user:bob,…>|none] [--inbox-add <x>] [--inbox-remove <x>]
+                      [--hub <url>] [--json]
+```
+
+- `<node>` is a local node name, a `node_id` or a Hub alias. Without a change flag it only prints the current settings (plus a read-only view of the `tool` / `rest` allowlists).
+- `--inbox` entries: `<alias>` / `<node_id>` is an agent, `user:<username>` / `user:<id>` is a person, `user:*` is any person, and `!strict` requires the node's owner and network owner/admin to be listed too. See [inbox allowlist](/en/guide/multi-user#inbox-allowlist).
+- `none` clears that allowlist (no restriction). Removing the last entry with `--*-remove` is refused, because an empty list means fully open; write `none` explicitly.
+- Changes need the user token from `anet login`, as the node's owner, a network owner/admin or a hub admin. Against an old Hub that does not report `inbox_allowlist`, the display says so and `--inbox*` is refused rather than pretending to succeed.
+- `--json` prints `{ok, state, changed}` (`{ok: false, error, …}` on failure). A usage error exits 2; a Hub refusal or unreachable Hub exits 1.
+
+```bash
+anet node perm reviewer --inbox planner,user:alice
+anet node perm reviewer --inbox-add user:bob
+anet node perm reviewer --peers none --mode normal --json
+```
+
 ## Node and daemon environment secrets (preview)
 
 ### Node env: `anet node secret`

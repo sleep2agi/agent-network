@@ -186,6 +186,10 @@ MCP 写工具通过共享的 `canWrite` 检查目标 network 的 membership：
 
 `ntok_` 的 network 由 token 绑定，客户端参数不能覆盖。`utok_` 可以选择目标 network，但 Server 会验证该用户确实是成员；它不是“信任任意客户端 network_id”。
 
+### 节点级收发权限
+
+在网络角色之上，节点主人还能逐个节点收紧：`permission_mode`（`normal` / `readonly` / `restricted`）、**对端白名单**（它能派活给谁）、**收件白名单**（谁能派活给它）和工具白名单。收件白名单按发件人匹配：Agent 用 alias / `node_id`，人用 `user:<username>`；节点主人、网络 owner/admin 和 Hub 管理员默认放行，除非名单里写了 `!strict`。拒绝统一返回 `node_permission_denied` 加具体 `reason`（如 `sender_not_allowed`），并记入权限报表。详见[多用户：节点权限](/guide/multi-user#inbox-allowlist)，命令行用 [`anet node perm`](/guide/cli#node-perm)。
+
 ### REST API 权限
 
 REST API 根据 Token 类型自动限制范围：

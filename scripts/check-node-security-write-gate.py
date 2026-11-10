@@ -12,7 +12,7 @@
 探针）不会因此变红。
 
 这条门钉三件事：
-  1. 四条节点安全配置路由都必须调用 canRestWriteNodeSecurity(...)；
+  1. 每条节点安全配置路由都必须调用 canRestWriteNodeSecurity(...)；
   2. 全文件不得再出现手写四条件（新增路由照抄它附近那一行，那正是回归入口）；
   3. 具名函数仍比「写网络」严（member 在它下面必须是 false）——
      靠 server/src/node-security-write-gate.test.ts 钉，这里只检查它存在且被接线。
@@ -32,11 +32,11 @@ SERVER_TS = ROOT / "server" / "src" / "server.ts"
 SCOPE_TS = ROOT / "server" / "src" / "network-scope.ts"
 TEST_TS = ROOT / "server" / "src" / "node-security-write-gate.test.ts"
 
-# 这四条是「改这台节点还能做什么」的写路由。少一条就等于少一个受管对象，
+# 这五条是「改这台节点还能做什么 / 谁能找它」的写路由。少一条就等于少一个受管对象，
 # 所以清单是显式的：新增同类路由必须来这里登记，否则它不会被检查到。
 # needle 用**字面量**而不是正则：路线一旦改名，本门要报 ROUTE_MISSING，
 # 而不是因为正则写错而报同一个错——两者都红，但只有一种红是对的。
-ROUTES = ["permission-mode", "tool-allowlist", "rest-allowlist", "peer-allowlist"]
+ROUTES = ["permission-mode", "tool-allowlist", "rest-allowlist", "peer-allowlist", "inbox-allowlist"]
 
 NAMED_GATE = "canRestWriteNodeSecurity("
 HANDWRITTEN = re.compile(
