@@ -22,6 +22,15 @@ export function createdDaemon(nodeId: string): string | null {
 export function activeBinding(nodeId: string): Binding | null {
   return db.get<Binding>("SELECT * FROM node_daemon_bindings WHERE node_id=?1 AND status='active'", nodeId);
 }
+/** clone_node source facts for an ADOPTED node (no succeeded create row).
+ * Same shape as the create row clone_node reads; flags stay empty (the
+ * daemon reads the real config from disk), runtime/model come from the node row. */
+export function adoptedCloneSourceRow(nodeId: string, networkId: string, runtime: string | null, alias: string):
+  { daemon_node_id: string; runtime: string; model: string | null; flags_json: string; child_name: string } | undefined {
+  const b = db.get<Binding>("SELECT * FROM node_daemon_bindings WHERE node_id=?1 AND network_id=?2 AND status='active'", nodeId, networkId);
+  if (!b) return undefined;
+  return { daemon_node_id: b.daemon_node_id, runtime: runtime || "", model: null, flags_json: "{}", child_name: alias };
+}
 export function resolveManagedDaemon(nodeId: string): string | null {
   return createdDaemon(nodeId) ?? activeBinding(nodeId)?.daemon_node_id ?? null;
 }

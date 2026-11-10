@@ -186,6 +186,22 @@ export function stopBackgroundTimersForTest(): void {
 // in caller's network, mark it succeeded and stamp the real
 // child_node_id. Mirrors RFC-024 finalizePendingMatchingUpdates.
 
+/** A clone (fork to a new folder) lands in its source's department, unless
+ * someone already placed it. Same rule as the source fork (#3485). Best effort. */
+export function inheritCloneDepartment(requestId: string, childNodeId: string, networkId: string): void {
+  try {
+    const raw = db.get<{ clone_json: string | null }>("SELECT clone_json FROM node_create_requests WHERE request_id = ?1", requestId)?.clone_json;
+    if (!raw) return;
+    const sourceId = (JSON.parse(raw) as { source_node_id?: unknown })?.source_node_id;
+    if (typeof sourceId !== "string" || !sourceId) return;
+    db.run(`UPDATE nodes SET department_id = (SELECT s.department_id FROM nodes s WHERE s.node_id = ?2 AND s.network_id = ?3)
+      WHERE node_id = ?1 AND network_id = ?3 AND (department_id IS NULL OR department_id = '')`,
+      [childNodeId, sourceId, networkId]);
+  } catch (e: any) {
+    console.warn(`[commhub] clone department inherit failed: ${e?.message || e}`);
+  }
+}
+
 export function finalizeCreateOnFirstRegister(
   incoming: { node_id: string; alias: string; network_id: string | null },
 ): { finalized: number; matchedIds: string[] } {
@@ -208,6 +224,7 @@ export function finalizeCreateOnFirstRegister(
       [incoming.node_id, Date.now(), row.request_id],
     );
     matchedIds.push(row.request_id);
+    inheritCloneDepartment(row.request_id, incoming.node_id, net);
     console.log(`[commhub] ✓ create-node finalize: request=${row.request_id} child=${incoming.alias} (${incoming.node_id}) daemon=${row.daemon_node_id}`);
     auditCreateNode({
       action: "create_node_succeeded",

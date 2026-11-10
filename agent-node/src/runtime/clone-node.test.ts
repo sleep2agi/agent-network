@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,6 +24,8 @@ import {
   handleCloneNodeDoorbell,
   planCloneWorkdir,
   planSessionCopy,
+  seedCloneInstructions,
+  sourceWorkdirFor,
 } from "./clone-node.js";
 
 const SOURCE_TOKEN = "ntok_source_SHOULD_NOT_COPY";
@@ -46,6 +49,53 @@ test("workdir: new empty sibling, unless the source lives in the daemon cwd", ()
   expect(shared.workdir).toBe("/srv/proj/src-child");
 });
 
+test("workdir: with a disk probe the clone takes the next free `<source folder>-N`", () => {
+  const used = new Set(["/srv/ws/client-oe-2", "/srv/ws/client-oe-3"]);
+  const plan = (sourceWorkdir: string) => planCloneWorkdir({
+    policy: "new_empty", sourceWorkdir, daemonWorkdir: "/srv/daemon", newName: "客户端欧7号", taken: (p) => used.has(p),
+  }).workdir;
+  expect(plan("/srv/ws/client-oe")).toBe("/srv/ws/client-oe-4");
+  // A source that is itself `-N` counts from its stem, not `-2-2`.
+  expect(plan("/srv/ws/client-oe-2")).toBe("/srv/ws/client-oe-4");
+  expect(plan("/srv/ws/docs")).toBe("/srv/ws/docs-2");
+});
+
+test("seedCloneInstructions copies only AGENTS.md / CLAUDE.md, never symlinks or existing files", () => {
+  const root = mkdtempSync(join(tmpdir(), "clone-seed-"));
+  try {
+    const src = join(root, "src"), dst = join(root, "dst");
+    mkdirSync(src); mkdirSync(dst);
+    writeFileSync(join(src, "AGENTS.md"), "agents");
+    writeFileSync(join(root, "secret.txt"), "secret");
+    symlinkSync(join(root, "secret.txt"), join(src, "CLAUDE.md"));
+    writeFileSync(join(src, "opencode.json"), "{}");
+    expect(seedCloneInstructions(src, dst)).toEqual(["AGENTS.md"]);
+    expect(existsSync(join(dst, "CLAUDE.md"))).toBe(false);
+    expect(existsSync(join(dst, "opencode.json"))).toBe(false);
+    writeFileSync(join(src, "AGENTS.md"), "changed");
+    expect(seedCloneInstructions(src, dst)).toEqual([]);
+    expect(readFileSync(join(dst, "AGENTS.md"), "utf8")).toBe("agents");
+    expect(seedCloneInstructions(src, src)).toEqual([]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("sourceWorkdirFor finds an adopted child's workdir (object registry entry)", () => {
+  const root = mkdtempSync(join(tmpdir(), "clone-adopted-"));
+  try {
+    const daemon = join(root, "daemon");
+    mkdirSync(join(daemon, ".anet"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(daemon, ".anet", "child-workdirs.json"), JSON.stringify({
+      "adopted-one": { adopted: true, node_id: "n_1", workdir: "/srv/ws/client-oe", nodeDir: "/srv/ws/client-oe/.anet/nodes/adopted-one",
+        request_id: "adopt_1", launch_mode: "tmux" },
+      "made-one": join(root, "made"),
+    }), { mode: 0o600 });
+    mkdirSync(join(root, "made"));
+    expect(sourceWorkdirFor(daemon, "adopted-one")).toBe("/srv/ws/client-oe");
+    expect(sourceWorkdirFor(daemon, "made-one")).toBe(join(root, "made"));
+    expect(sourceWorkdirFor(daemon, "unknown")).toBe(daemon);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("session copy is per runtime and does not pretend a missing transcript was forked", () => {
   expect(planSessionCopy({
     runtime: "claude-agent-sdk", copySession: true, sessionId: SESSION, transcriptFound: true, field: "session",
@@ -67,6 +117,12 @@ test("session copy is per runtime and does not pretend a missing transcript was 
   expect(oc.capability).toBe("id_aliased");
   expect(oc.sessionId).toBe("ses_abc");
   expect(oc.reason).toContain("not a private fork");
+  const ocNew = planSessionCopy({
+    runtime: "opencode-cli", copySession: true, sessionId: "ses_abc", transcriptFound: false, field: "session", policy: "new_empty",
+  });
+  expect(ocNew.capability).toBe("unsupported");
+  expect(ocNew.sessionId).toBeUndefined();
+  expect(ocNew.reason).toContain("fresh session");
   expect(planSessionCopy({
     runtime: "claude-agent-sdk", copySession: false, sessionId: SESSION, transcriptFound: true, field: "session",
   }).capability).toBe("skipped");
@@ -154,6 +210,9 @@ test("doorbell writes the clone with the new token and the copied Claude session
   mkdirSync(join(transcript, ".."), { recursive: true });
   writeFileSync(transcript, "{\"role\":\"user\"}\n");
   recordChildWorkdir(daemon, "src-child", srcWd);
+  writeFileSync(join(srcWd, "AGENTS.md"), "# src-child\n你的工作提 PR\n");
+  writeFileSync(join(srcWd, "opencode.json"), JSON.stringify({ mcp: { headers: { Authorization: `Bearer ${SOURCE_TOKEN}` } } }));
+  writeFileSync(join(srcWd, "ANET-COMMHUB.md"), "You are Agent Network node src-child.\n");
 
   const pkg = join(pin, "pkg");
   mkdirSync(join(pkg, "bin"), { recursive: true });
@@ -207,7 +266,12 @@ test("doorbell writes the clone with the new token and the copied Claude session
     expect(acks.map((a) => a.status)).toEqual(["started"]);
     const reg = JSON.parse(readFileSync(join(daemon, ".anet", "child-workdirs.json"), "utf8"));
     const wd = reg["cloned-child"] as string;
-    expect(wd).toBe(join(root, "cloned-child"));
+    // admin 2026-11-10: new folder = `<source folder>-N` beside the source.
+    expect(wd).toBe(join(root, "srcproj-2"));
+    expect(readFileSync(join(wd, "AGENTS.md"), "utf8")).toContain("你的工作提 PR");
+    // Per-node generated files carry the source identity/token: never seeded.
+    expect(existsSync(join(wd, "opencode.json"))).toBe(false);
+    expect(existsSync(join(wd, "ANET-COMMHUB.md"))).toBe(false);
     const cfg = JSON.parse(readFileSync(join(wd, ".anet", "nodes", "cloned-child", "config.json"), "utf8"));
     expect(cfg.token).toBe(NEW_TOKEN);
     expect(cfg.alias).toBe("cloned-child");
@@ -240,7 +304,7 @@ test("doorbell refuses when the target directory already holds another alias", a
     alias: "src-child", node_name: "src-child", runtime: "claude-agent-sdk", token: SOURCE_TOKEN,
   }));
   recordChildWorkdir(daemon, "src-child", srcWd);
-  const taken = join(root, "cloned-child", ".anet", "nodes", "cloned-child");
+  const taken = join(srcWd, ".anet", "nodes", "cloned-child");
   mkdirSync(taken, { recursive: true });
   writeFileSync(join(taken, "config.json"), JSON.stringify({ alias: "someone-else", node_name: "someone-else" }));
   const savedHome = process.env.HOME;
@@ -253,7 +317,7 @@ test("doorbell refuses when the target directory already holds another alias", a
           return {
             ok: true, child_token: NEW_TOKEN,
             node_spec: { name: "cloned-child", runtime: "claude-agent-sdk" },
-            clone: { source_alias: "src-child", copy_session: false, workdir_policy: "new_empty" },
+            clone: { source_alias: "src-child", copy_session: false, workdir_policy: "share_source" },
           };
         }
         if (tool === "ack_create_request") { acks.push(args); return { ok: true }; }
