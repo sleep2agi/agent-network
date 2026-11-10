@@ -1,5 +1,7 @@
+import { tmpdir } from "node:os";
 // Opt-in, exact SHA verified patched ELF. No new/fork acceptance rerun.
 import { test, expect } from "bun:test";
+import { testWorkRoot } from "./test-work-root";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -12,7 +14,7 @@ import { PROJECT_CREATE_ROOT as P, SESSION_ATTACH_CAPABILITY as CAP } from "../.
 
 const delegated = process.env.TEST4150_NATIVE_ATTACH_DERIVED === "1";
 test.skipIf(!process.env.TEST4150_NATIVE_BINARY)(delegated ? "real patched Linux delegated policy -> one empty existing Session attach, exact CLI registration, zero native mutation" : "real patched Linux existing empty/materialized Session attach, occupied refusal, exact child register and zero attach native writes", async () => {
-  const root = mkdtempSync("/work/native-attach-"), home = join(root, "home"), project = join(root, "project"), daemonDir = join(root, "daemon");
+  const root = mkdtempSync(join(testWorkRoot(), "native-attach-")), home = join(root, "home"), project = join(root, "project"), daemonDir = join(root, "daemon");
   for (const d of [home, project, daemonDir, join(home, ".anet"), join(project, ".anet"), join(project, ".anet", "nodes"), join(daemonDir, ".anet")]) mkdirSync(d, { mode: 0o700 });
   process.env.COMMHUB_DB = join(root, "hub.db"); process.env.COMMHUB_SOURCE_DIRECTORY_PREVIEW = "1"; process.env.COMMHUB_SESSION_ATTACH_PREVIEW = "1";
   delete process.env.COMMHUB_PROJECT_NEW_SESSION_PREVIEW; delete process.env.COMMHUB_SOURCE_FORK_PREVIEW;

@@ -168,7 +168,7 @@ describe("requirements_comment", () => {
     const lines = raw.split("\n").filter(x => x.startsWith("data:"));
     const tools = (lines.length ? JSON.parse(lines.at(-1)!.slice(5).trim()) : JSON.parse(raw)).result.tools as any[];
     const byName = new Map(tools.map(t => [t.name, t]));
-    expect(String(byName.get("requirements_comment")?.description)).toContain("append-only");
+    expect(String(byName.get("requirements_comment")?.description)).toMatch(/append-only/i);
     expect(String(byName.get("requirements_events")?.description)).toContain("kind=comment");
   });
 });

@@ -2,10 +2,11 @@ import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { sessionProjectCreateSchema, migrateProjectOperationJournal } from "./session-source-admission-store";
 
 test("actual old on-disk journal migrates twice and keeps new-session rows and intent tombstones", () => {
-  const path = join(mkdtempSync("/work/attach-migration-"), "old.db");
+  const path = join(mkdtempSync(join(tmpdir(), "attach-migration-")), "old.db");
   let sql = new Database(path);
   sql.exec(sessionProjectCreateSchema);
   sql.run(`INSERT INTO session_project_creates
