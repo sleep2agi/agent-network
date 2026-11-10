@@ -32,15 +32,27 @@ if (!asset) {
 }
 const manifest = await (await fetch(asset.browser_download_url, { headers })).json();
 
+// #4399 —— notes 要跟着这一版走，不能继承上一版。
+//
+// 原来这里写的是 `if (current.notes) next.notes = current.notes`，于是版本号在动、文案永远停在
+// 第一次写进来的那一版：2026-11-10 实测 fallback.json 的 version 已是 0.2.498，而 notes 里
+// 写的还是「What's new in 0.2.288」。走静态兜底的客户端（动态端点被限流/超时）就会看到
+// 0.2.288 的更新内容配 0.2.498 的包。
+//
+// latest.json 里的 notes 就是这一版的 releaseBody（tauri-action 原样写入），所以优先用它；
+// 只有它缺失时才退回现有文案 —— 那至少不会比现在更糟。
 const current = JSON.parse(await readFile(FILE, 'utf8'));
+const notes = typeof manifest.notes === 'string' && manifest.notes.trim() ? manifest.notes : (current.notes ?? null);
 const sameVersion = current.version === manifest.version;
 const samePlatforms = JSON.stringify(Object.keys(current.platforms ?? {}).sort()) === JSON.stringify(Object.keys(manifest.platforms).sort());
-if (sameVersion && samePlatforms) {
+// notes 也参与「是否已经一致」的判定：只比版本号会让同版本的重复跑永远修不好旧文案。
+const sameNotes = (current.notes ?? '') === (notes ?? '');
+if (sameVersion && samePlatforms && sameNotes) {
   console.log(`up-to-date: ${manifest.version}, ${Object.keys(manifest.platforms).length} platforms`);
   process.exit(0);
 }
 
 const next = { version: manifest.version, pub_date: release.published_at, platforms: manifest.platforms };
-if (current.notes) next.notes = current.notes;
+if (notes) next.notes = notes;
 await writeFile(FILE, `${JSON.stringify(next, null, 2)}\n`);
 console.log(`fallback ${current.version} -> ${manifest.version} (${Object.keys(manifest.platforms).length} platforms)`);
