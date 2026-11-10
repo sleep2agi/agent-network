@@ -83,11 +83,24 @@ To run without a global install, use forms like `npx @sleep2agi/agent-network hu
 
 ## Release channels
 
-The default install is the stable `latest` channel. To try new features early, install `preview`:
+The default install is the stable `latest` channel. To try new features early, install `preview` — but install **only the CLI**, then ask `anet pair` for the exact agent-node:
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-network@preview
+anet pair
+# install agent-node exactly as it prints, e.g.
+#   npm install -g @sleep2agi/agent-network@2.3.0-preview.226 @sleep2agi/agent-node@2.5.0-preview.194
 ```
+
+::: warning Why not `@preview` on both
+
+The two `preview` tags move at **different** times (agent-node is published first, the CLI that declares it second),
+so "both `@preview`" installs a **half pair** in that window: the CLI does not recognise that agent-node and exits with
+`Incompatible agent-node for opencode-cli`, taking the node offline.
+
+The pair judgement is the constant inside the CLI package, not the tag — `anet pair` prints it.
+`opencode-cli` also disables automatic npx, so an exact global agent-node must exist on the machine; it is never substituted.
+:::
 
 See [Upgrade Guide: release channels](/en/guide/upgrade#channels) for the difference and how to switch.
 
