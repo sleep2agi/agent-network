@@ -36,6 +36,7 @@ import { randomBytes } from "crypto";
 import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-health";
 import { waitUntilIdle } from "../idle-wait";
 import { QUEUED_VARIANT_TTL_MS, shouldApplyQueuedVariant } from "./queued-variant";
+import { queueMissVerdict } from "./queue-miss-error";
 import { rmSync } from "fs";
 import { join } from "path";
 import {
@@ -949,8 +950,13 @@ export async function openVettedOpenCodeV2Copresence(
           }
           evidence?.onSubmitted?.();
           let delivered = false;
+          // #4481 —— 记下「见过什么」，三种原因才分得开：
+          //   见过在队列里 → 后来不见了 = 真没跑；从没见过 = 提交就没落到队列；
+          //   见过在历史里 = 其实跑过（只是 correlator 的分页窗口没找到）。
+          let everQueued = false;
           let misses = 0;
           let readFailures = 0;
+          const submittedAt = Date.now();
           while (Date.now() < deadline) {
             if (!session.isRunning) throw new Error("OpenCode v2 serve exited while the network turn was pending");
             let after: OpenCodeV2Entry[] | null = null;
@@ -1015,15 +1021,25 @@ export async function openVettedOpenCodeV2Copresence(
               }
             } else if (!delivered) {
               let queued = true;
+              let known = false;
               try {
                 queued = await inboxHas(url, password, sessionId, messageId);
+                known = true;
               } catch {}
+              // 只有**确认读到**才算「见过」；读失败仍然保守当作还在队列（不改原有行为）。
+              if (known && queued) everQueued = true;
               if (!queued) {
                 // Delivered between the two reads, or removed. Two misses in
                 // a row (a full poll apart) means it left the queue unrun.
                 misses += 1;
                 if (misses >= 2) {
-                  throw new Error("OpenCode v2 network turn left the queue without running (removed in the TUI?)");
+                  // #4481 —— 文案不再把原因单向猜成「被 TUI 移除」：
+                  // 判据 + 会话/消息 id 一起带出去，Hub 的 last_update 上能直接分流。
+                  throw new Error(queueMissVerdict({
+                    sessionId, messageId, misses,
+                    waitedMs: Date.now() - submittedAt,
+                    everDelivered: delivered, everQueued,
+                  }).message);
                 }
               } else {
                 misses = 0;
