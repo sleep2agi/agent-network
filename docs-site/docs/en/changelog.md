@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: per-node inbox allowlist (who may send to it) and `anet node perm` (2026-11-10)
+
+- Nodes gain an inbox allowlist, `inbox_allowlist`: `PUT /api/nodes/:id/inbox-allowlist` `{"senders": [...] | null}`, same shape and authorization as `peer-allowlist` (node owner / network owner·admin / hub admin, audit `node_inbox_allowlist_changed`). Every `GET /api/nodes` row carries `inbox_allowlist`; `/health` capability `node_inbox_allowlist`.
+- Entries: `<alias>` / `<node_id>` match agents, `user:<username>` / `user:<user_id>` / `user:*` match people. The owner, network owners/admins and hub admins get through by default; `!strict` requires them to be listed too.
+- For MCP `send_task` / `send_message` / `retry_task` / `reassign_task`, REST `POST /api/task` and scheduled-task runs, a sender not on the list gets `node_permission_denied` / `sender_not_allowed` (explicit, independent of `COMMHUB_NODE_PERMISSIONS`). A broadcast skips those recipients and lists them in `inbox_skipped`.
+- New command `anet node perm <node>`: show or change the mode, the peer allowlist and the inbox allowlist, with `--json`. Not published to npm.
+
 ## Unreleased: standalone anet executable (build only, not published) (2026-10-11)
 
 - New unified entry `agent-network/bin/anet-bin.ts`. `bun build --compile` produces one executable: the default path is the CLI, `__hub` is the embedded Hub, and `__node` is the embedded agent-node. The npm `bin` is still `dist/bin/anet.cjs`. npm publishing in `release.yml` is unchanged.
