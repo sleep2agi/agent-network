@@ -1741,6 +1741,7 @@
 @media (max-width: 640px) {
   .api-reference .vp-doc table { font-size: 13px; }
   .http-method { min-width: 50px; padding: 5px 6px; }
+}
 
 /* ---------- 2026-11-10 首页动效（admin：炫酷一点）: 标题流光、Runtime 网络图、介绍视频、滚动出现与截图倾斜 ---------- */
 /* 只加动效与两个内容区块；不引入任何实时数字。全部遵守 prefers-reduced-motion。 */
@@ -1817,3 +1818,8 @@
   .fx { opacity: 1 !important; transform: none !important; transition: none !important; }
   .feature-shot-frame, .home-video-frame { transform: none !important; }
 }
+
+.final-cta-note { margin: 14px auto 0; max-width: 640px; font-size: 12px; line-height: 1.6; color: var(--vp-c-text-3); }
+.VPHero .tagline .hero-grok { display: block; margin-bottom: 10px; color: var(--vp-c-text-1); font-weight: 600; font-size: 1.12em; }
+.VPHero .tagline .hero-grok b { font-weight: 800; background: linear-gradient(110deg, #1554be, #3b7be6 45%, #1fb5d6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dark .VPHero .tagline .hero-grok b { background: linear-gradient(110deg, #3b7be6, #7ae9ff 55%, #38e0d0); -webkit-background-clip: text; background-clip: text; }

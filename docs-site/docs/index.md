@@ -6,7 +6,7 @@ hero:
   # 标语只写在 hero.text 这一处:页面 <title> 后缀、description、og/twitter 都由 .vitepress/config.ts 的
   # transformPageData 从 hero.text / hero.tagline 派生,换标语只改这一行。
   text: 一个人，一支 Agent 军团
-  tagline: 像用微信一样，和 Claude、Codex、Grok 节点聊天、派活、排班——任务有人跟，定时有人做，数据留在你自己手里。
+  tagline: <span class="hero-grok"><b>企业级开源版 Grok Bot</b>，更适合企业内部私有化部署</span>像用微信一样，和 Claude、Codex、Grok 节点聊天、派活、排班——任务有人跟，定时有人做，数据留在你自己手里。
   actions:
     - theme: brand
       text: 下载桌面版
@@ -74,5 +74,6 @@ features:
 <section class="final-cta">
   <h2 class="final-cta-title">让你的 Agent 真正组成团队</h2>
   <p class="final-cta-sub">从桌面应用开始，或使用 anet CLI 构建自己的协作网络。</p>
+  <p class="final-cta-note">Grok 与 Grok Bot 是 xAI 的商标；Agent Network 是独立的开源项目，与 xAI 无关联。</p>
   <div class="final-cta-actions"><a class="cta-primary" href="/download">下载桌面版</a><a class="cta-ghost" href="/guide/getting-started">开发者文档</a><a class="cta-ghost" href="https://github.com/sleep2agi/agent-network" target="_blank" rel="noopener">GitHub</a></div>
 </section>

@@ -12,7 +12,7 @@ export default withMermaid(defineConfig({
     const fm = pageData.frontmatter
     if (fm.layout !== 'home' || !fm.hero?.text) return
     const slogan = String(fm.hero.text)
-    const sub = fm.hero.tagline ? String(fm.hero.tagline) : ''
+    const sub = fm.hero.tagline ? String(fm.hero.tagline).replace(/<\/span>/g, '。').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : ''
     const name = String(fm.hero.name ?? fm.title ?? 'Agent Network')
     fm.titleTemplate = slogan
     ;(pageData as any).titleTemplate = slogan // PageData 自带 titleTemplate 字段(加载时从 frontmatter 拷过来),两处都要写
