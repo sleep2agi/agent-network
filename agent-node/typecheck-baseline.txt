@@ -7,7 +7,6 @@ agent-node/src/cli.ts|TS18047|'sideThreadNodeRuntime' is possibly 'null'.	1
 agent-node/src/cli.ts|TS2322|Type '{ enabled: false; capability: SideThreadCapability; close(): void; } | { enabled: true; capability: SideThreadCapability; close(): void; }' is not assignable to type '{ enabled: boolean; capability: Record<string, unknown>; close(): void; } | null'.	1
 agent-node/src/cli.ts|TS2345|Argument of type 'string | null' is not assignable to parameter of type 'string'.	2
 agent-node/src/cli.ts|TS2345|Argument of type '{ file_id?: unknown; path?: unknown; type?: unknown; mime?: unknown; name?: unknown; }' is not assignable to parameter of type 'AttachmentDescriptor'.	1
-agent-node/src/cli.ts|TS2367|This comparison appears to be unintentional because the types 'string' and 'boolean' have no overlap.	1
 agent-node/src/cli.ts|TS7006|Parameter 'msg' implicitly has an 'any' type.	2
 agent-node/src/runtime/codex-app-server/runtime.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.	1
 agent-node/src/runtime/codex-app-server/runtime.ts|TS7006|Parameter 'e' implicitly has an 'any' type.	1

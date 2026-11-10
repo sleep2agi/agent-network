@@ -698,6 +698,25 @@ export async function openVettedOpenCodeV2Copresence(
     //    外层会先判 timeout/unknown —— 那时连 rejected/busy 都发不出去（#4415 实测踩到）。
     //    所以内部预算必须明显小于外层：25s，留 20s 给写入 + 回读 + ack。
     const VARIANT_IDLE_WAIT_MS = 25_000;
+    // #4415 —— 排队状态。原来这段代码**只引用不声明**（tsc TS2304），
+    // 后果不是「日志少一行」而是走到忙路径时抛 ReferenceError。
+    // undefined = 没有排队意图；null = 排队「清空档位」；字符串 = 排队某个档位。
+    let queuedVariant: string | null | undefined;
+    /** 排队写入的时间戳，给 TTL 判定用（0 = 没有排队）。 */
+    let queuedVariantAt = 0;
+    /** 本轮开始时间，只用于日志里的 turn_age_ms；没有轮次时为 null。 */
+    let turnStartedAt: number | null = null;
+
+    /** 轮询等待空闲：有上界、可被会话停止打断。返回 true 表示等到了。 */
+    const waitUntilIdle = async (o: { isBusy: () => boolean; budgetMs: number }): Promise<boolean> => {
+      const deadline = Date.now() + o.budgetMs;
+      const step = 250;
+      while (Date.now() < deadline) {
+        if (!o.isBusy()) return true;
+        await new Promise((r) => setTimeout(r, Math.min(step, Math.max(0, deadline - Date.now()))));
+      }
+      return !o.isBusy();
+    };
     const session: OpenCodeCopresenceSession = {
       url,
       sessionId,
@@ -1047,6 +1066,7 @@ export async function openVettedOpenCodeV2Copresence(
           }
         });
         inFlight += 1;
+        if (turnStartedAt === null) turnStartedAt = Date.now();
         const observed = operation.catch((error: any) => {
           if (shared && /ECONNREFUSED|ECONNRESET|UND_ERR_SOCKET|EPIPE/.test(error?.message ?? "")) {
             sharedDisconnectedAt = Date.now();
@@ -1057,6 +1077,7 @@ export async function openVettedOpenCodeV2Copresence(
         void observed.finally(() => {
           inFlight = Math.max(0, inFlight - 1);
           // 这一轮结束了：如果期间用户点过档位，就在这里应用一次；只在**恰好归零**时做。
+          if (inFlight === 0) turnStartedAt = null;
           if (inFlight === 0 && queuedVariant !== undefined) {
             const pending = queuedVariant;
             const queuedAt = queuedVariantAt;
@@ -1064,10 +1085,18 @@ export async function openVettedOpenCodeV2Copresence(
             // 判据抽在 queued-variant.ts（纯函数、有单测）：这一轮**恰好归零**且未过期才应用。
             if (shouldApplyQueuedVariant({ hasQueued: true, inFlight, queuedAt, now: Date.now() })) {
               log(`[variant] applying queued ${JSON.stringify(pending)} after ${Math.round((Date.now() - queuedAt) / 1000)}s`);
-              void session.setSelectedVariant(pending).then(
-                (applied) => log(`[variant] queued applied -> ${JSON.stringify(applied)}`),
-                (error) => warn(`[variant] queued apply failed: ${String((error as any)?.message ?? error)}`),
-              );
+              // setSelectedVariant 在接口上是可选的（并非每个运行时都提供写入器）。
+              // 直接调用会得到 TS2722，而且真到这一步会抛 TypeError —— 排队了却崩在应用处，
+              // 比不排队更糟：用户以为切了。所以先确认存在，不存在就如实降级。
+              const applyVariant = session.setSelectedVariant?.bind(session);
+              if (!applyVariant) {
+                warn('[variant] queued apply skipped: this runtime exposes no variant writer');
+              } else {
+                void applyVariant(pending).then(
+                  (applied) => log(`[variant] queued applied -> ${JSON.stringify(applied)}`),
+                  (error) => warn(`[variant] queued apply failed: ${String((error as any)?.message ?? error)}`),
+                );
+              }
             } else {
               warn(`[variant] queued apply dropped after ${Math.round((Date.now() - queuedAt) / 1000)}s (ttl ${QUEUED_VARIANT_TTL_MS / 60000}min)`);
             }
