@@ -8862,6 +8862,8 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  // #1353: pin before ANY spawn below (incl. the source-resume branch), since children copy process.env at spawn.
+  if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
   // Private source delivery never enters ordinary orchestration (which replaces
   // alias tmux sessions) or the restart supervisor. No public dispatch enables it.
   if ((resolvedForCopresence?.profile as any)?.sourceDelivery !== undefined) {
@@ -8917,7 +8919,6 @@ async function startCommand() {
   }
   // #1353 —— daemon 被 `node start` / `project up`(开机 sweep)/ `node restart` 拉起时,
   //         pin 与 `anet daemon start` 同源同规则,不再在这些起法下丢失。
-  if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
   // #630 — external app-server codex node (three tmux sessions on the URL in config.json).
   {
     const rc = await maybeExternalAppserverLifecycle("start");
@@ -20271,7 +20272,7 @@ switch (command) {
         "activate", "passwd", "token", "demo", "batch", "logs", "info", "config",
         "login", "register", "logout", "whoami", "network", "run", "version", "help",
         // 这四个是后加的顶层命令,曾长期漏在本名单外 —— 见 top-commands-coverage.test.ts。
-        "daemon", "grok", "opencode", "quickstart",
+        "daemon", "grok", "opencode", "quickstart", "pair",
       ];
       const suggestion = suggestSimilar(command, TOP_COMMANDS);
       if (suggestion) console.error(`Unknown command "${command}". Did you mean: anet ${suggestion}?`);
