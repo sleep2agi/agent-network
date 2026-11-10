@@ -2,6 +2,7 @@ import DefaultTheme from 'vitepress/theme'
 import Layout from './Layout.vue'
 import PublicSkillHub from './PublicSkillHub.vue'
 import DownloadCatalog from './components/DownloadCatalog.vue'
+import HomeRuntimes from './components/HomeRuntimes.vue'
 import './custom.css'
 
 export default {
@@ -10,5 +11,6 @@ export default {
   enhanceApp({ app }) {
     app.component('PublicSkillHub', PublicSkillHub)
     app.component('DownloadCatalog', DownloadCatalog)
+    app.component('HomeRuntimes', HomeRuntimes)
   },
 }
