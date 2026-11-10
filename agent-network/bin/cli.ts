@@ -2964,6 +2964,7 @@ import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCu
 import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
 import { describeHubRemoval, removeNodeFromHub } from "../src/node-delete-hub";
 import { COMMAND_HELP, NODE_DELETE_USAGE, lookupCommandHelp } from "../src/cli-help";
+import { formatNodePerm, hasNodePermChange, NODE_PERM_USAGE, parseNodePermArgs, runNodePerm, type NodePermResult } from "../src/node-perm";
 import { nodeSecretFileModeWarning, nodeSecretFilePath, readNodeSecretKeys, removeNodeSecret, writeNodeSecret } from "../src/node-secret-file";
 import { errorText, formatTopLevelError, hubErrorText, nodeTokenReissueError, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
 import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
@@ -3112,6 +3113,39 @@ KEY=VALUE per line; reserved keys like PATH/LD_* are ignored).
   }
   console.log(`[anet] ${display}: ${r.keys.length} 个 key（只有名字，值不显示）`);
   for (const k of r.keys) console.log(`  ${k}`);
+}
+
+// `anet node perm` —— 节点在 Hub 上的权限：模式 / 对端白名单（发给谁）/ 收件白名单（谁能发给它）。逻辑在 src/node-perm.ts。
+async function nodePermCommand(argv: string[]) {
+  if (!argv.length || argv[0] === "--help" || argv[0] === "-h") { console.log(NODE_PERM_USAGE); if (!argv.length) markUsageError(); return; }
+  const parsed = parseNodePermArgs(argv);
+  if (!parsed.ok) { console.error(`[anet] ${parsed.error}\n\n${NODE_PERM_USAGE}`); process.exit(2); }
+  const { args: permArgs } = parsed;
+  const gc = loadGlobal();
+  const local = resolveNodeRef(permArgs.ref);
+  const hub = permArgs.hub || gc.hub || local?.profile.hub || "";
+  if (!hub) { console.error("[anet] no Hub configured — run: anet login (or pass --hub <url>)"); process.exit(1); }
+  if (!gc.token) { console.error("[anet] not logged in — run: anet login (node permissions need your user login)"); process.exit(1); }
+  let result: NodePermResult;
+  try {
+    result = await runNodePerm({ hub, token: gc.token }, permArgs, local?.profile.node_id);
+  } catch (e) {
+    console.error(`[anet] cannot reach the Hub at ${hub}: ${errorText(e)}`);
+    process.exit(1);
+  }
+  if (permArgs.json) {
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exit(1);
+    return;
+  }
+  if (!result.ok) {
+    if (result.changed?.length) console.error(`[anet] changed before the failure: ${result.changed.join(", ")}`);
+    console.error(`[anet] ${result.error}`);
+    process.exit(1);
+  }
+  if (result.changed.length) console.log(`[anet] updated: ${result.changed.join(", ")}`);
+  else if (hasNodePermChange(permArgs)) console.log("[anet] already set — nothing changed");
+  for (const line of formatNodePerm(result.state)) console.log(line);
 }
 
 function resolveNodeRef(ref: string): { id: string; profile: Profile } | null {
@@ -4901,6 +4935,7 @@ Node Management:
   anet node edit <n> --remote   Switch a node on another machine to --model <id>
   anet node codex <verb> <ref>  Codex TUI co-presence lifecycle: preflight|verify|canary|start|restart|resume|fork|account|rollback
   anet node secret <verb> <ref> Daemon-issued node secret: list|set|unset (owner/admin; the value never leaves the hub)
+  anet node perm <ref> [flags]  Show/set permission mode, send-to (--peers) and receive-from (--inbox) allowlists [--json]
   anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
@@ -20161,6 +20196,7 @@ switch (command) {
       case "edit": args.splice(0, 1); await nodeEditCommand(); break;
       case "loop": args.splice(0, 1); await nodeLoopCommand(); break;
       case "secret": await nodeSecretCommand(args.slice(2)); break;
+      case "perm": await nodePermCommand(args.slice(2)); break;
       case "ls": case "list": await lsCommand(); break;
       case "restart": {
         // #173 / F7-03 — node restart = stop + start, alias for symmetry
@@ -20185,7 +20221,7 @@ switch (command) {
       case "codex": args.splice(0, 1); await codexLifecycleCommand(); break; // #1856 —— Codex TUI 共存节点生命周期控制器
       default: {
         const sub = args[1];
-        const nodeUsage = `Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|secret|migrate-token-to-envref> [name]`;
+        const nodeUsage = `Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|secret|perm|migrate-token-to-envref> [name]`;
         // #561 — bare `anet node`: a menu for every runtime (TTY) / table + cheat sheet + usage (piped). src/node-menu.ts
         if (!sub) process.exit(await runNodeMenu(listProfileIds().map((id) => { const p = loadProfile(id); return { id, alias: nodeDisplayName(id, p), profile: p as Record<string, any> | null }; }), { nodesDir: nodesDir(), home, usageLine: nodeUsage }));
         if (sub) {
@@ -20193,7 +20229,7 @@ switch (command) {
           const redirect = nodeSubcommandRedirect(sub, args[2]);
           if (redirect) { for (const line of redirect) console.log(line); }
           else {
-            const suggestion = suggestSimilar(sub, ["create", "clone", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex", "secret"]);
+            const suggestion = suggestSimilar(sub, ["create", "clone", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex", "secret", "perm"]);
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }
