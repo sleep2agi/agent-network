@@ -1,12 +1,22 @@
 import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { claimSharedSessionBridge } from "./source-resume-launcher";
+import { spawn } from "node:child_process";
+import { afterAll } from "bun:test";
+
+// serverPid must name a real process that leads its own process group (like an OpenCode
+// serve). The test process itself does not qualify in a container, where it sits in
+// process group 1, and readProcessGroupIdentity rightly refuses pgrp <= 1.
+const fakeServer = spawn("sleep", ["600"], { detached: true, stdio: "ignore" });
+fakeServer.unref();
+afterAll(() => { try { process.kill(-fakeServer.pid!, "SIGKILL"); } catch { /* already gone */ } });
 
 function fixture() {
-  const project = mkdtempSync("/work/namespace-");
+  const project = mkdtempSync(join(process.env.ANET_TEST_WORK_ROOT ?? tmpdir(), "namespace-"));
   mkdirSync(join(project, ".anet"), { mode: 0o700 }); mkdirSync(join(project, ".anet", "nodes"), { mode: 0o700 });
-  return { project, url: "http://127.0.0.1:29999", serverPid: process.pid, sessionId: "ses_Existing" };
+  return { project, url: "http://127.0.0.1:29999", serverPid: fakeServer.pid!, sessionId: "ses_Existing" };
 }
 test("shared exact ordinary resume and two attach names contend on one atomic namespace; owned close releases", async () => {
   const f = fixture(), workDir = join(f.project, ".anet", "nodes", "a");

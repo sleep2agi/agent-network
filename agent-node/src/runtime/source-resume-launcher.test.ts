@@ -4,6 +4,11 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createSourceResumeLauncher, verifySourceResumeLauncher, checkSourceResume, recoverSourceResumeLaunch, SOURCE_RESUME_HEALTH, type SourceResumeChild } from "./source-resume-launcher";
 import { spawn } from "node:child_process";
+// server_pid must lead its own process group (like an OpenCode serve); the test process does
+// not in a container (process group 1). A detached sleeper stands in for the serve.
+const fakeServer = spawn("sleep", ["600"], { detached: true, stdio: "ignore" });
+fakeServer.unref();
+process.on("exit", () => { try { process.kill(-fakeServer.pid!, "SIGKILL"); } catch { /* gone */ } });
 const fixture = resolve(import.meta.dir, "fixtures/source-resume-child.ts");
 let roots: string[] = [], children: SourceResumeChild[] = [], servers: ReturnType<typeof Bun.serve>[] = [];
 afterEach(async () => {
@@ -26,7 +31,7 @@ function setup() {
     }
     if (r.headers.get("authorization") !== `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`) return new Response("", { status: 401 });
     if (r.method !== "GET") return new Response("no writes", { status: 405 });
-    if (path === "/api/info") return Response.json({ version, pid: process.pid });
+    if (path === "/api/info") return Response.json({ version, pid: fakeServer.pid! });
     if (path === "/api/session/active") return Response.json({ data: busy ? { ses_Child: { type: "running" } } : {} });
     if (path === "/api/session/ses_Child") return Response.json({ data: { id: "ses_Child", location: { directory: root }, model: { providerID: "stub", id: "model" } } });
     return Response.json({ data: {} });
@@ -37,7 +42,7 @@ function setup() {
     flags: { opencodeUnsafeTools: true }, model: "stub/model", token, sessionId: "ses_Child", hub: url,
     opencodeSharedServerUrl: url, opencodeSharedServerPasswordFile: passwordFile,
     sourceDelivery: { delivery_id: "fixture-delivery", execution_id: "fixture-execution", expires_at: Date.now() + 30_000,
-      server_pid: process.pid, resume_only: true, expected_version: "2.0.22" } };
+      server_pid: fakeServer.pid!, resume_only: true, expected_version: "2.0.22" } };
   const save = () => writeFileSync(configPath, JSON.stringify(c), { mode: 0o600 }); save();
   writeFileSync(passwordFile, password, { mode: 0o600 });
   writeFileSync(join(dir, "source-delivery-claim.json"), JSON.stringify({ delivery_id: c.sourceDelivery.delivery_id,
@@ -77,7 +82,7 @@ test("wrong exact session/new flag/version/busy/expired credential/live child ow
   await expect(p.launcher()({ ...p.input, newSession: true as any })).rejects.toThrow();
   p.version("2.0.99"); await expect(p.launcher()(p.input)).rejects.toThrow("version"); p.version("2.0.22");
   p.c.sourceDelivery.server_pid++; p.save(); await expect(p.launcher()(p.input)).rejects.toThrow("server_changed");
-  p.c.sourceDelivery.server_pid = process.pid; p.c.flags.opencodeUnsafeTools = false; p.save();
+  p.c.sourceDelivery.server_pid = fakeServer.pid!; p.c.flags.opencodeUnsafeTools = false; p.save();
   await expect(p.launcher()(p.input)).rejects.toThrow("opt_in"); p.c.flags.opencodeUnsafeTools = true; p.save();
   writeFileSync(join(p.dir, "opencode-launch-health.json"), JSON.stringify({ generation: "ses_Child", bridge: { pid: process.pid } }), { mode: 0o600 });
   await expect(p.launcher()(p.input)).rejects.toThrow("owned");

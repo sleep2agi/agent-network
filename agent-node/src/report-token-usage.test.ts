@@ -29,7 +29,7 @@ describe("#3952 节点上报 token 用量", () => {
 
   test("claude 与 codex 两条路径都接了（只接一条 = 另一种运行时永远没有数据）", () => {
     expect(src).toContain("reportTokenUsage(MODEL, u.input_tokens, u.output_tokens");
-    expect(src).toContain("reportTokenUsage(MODEL, outcome.usage?.input_tokens, outcome.usage?.output_tokens)");
+    expect(src).toContain("reportTokenUsage(MODEL, outcome.usage?.input_tokens, outcome.usage?.output_tokens");
   });
 
   test("claude 路径把 turns / cost 一起带上（它们本来就在 result message 里）", () => {

@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPENCODE_V2_BACKEND } from "../opencode-backend";
 import { openVettedOpenCodeCopresence } from "./runtime";
 import { readOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 
-test("TEST-ONLY owned binary identity and catalog-scoped variant", async () => {
+// Needs the TEST-ONLY OpenCode build at /tool/opencode (only inside the V2 test image).
+// Without it the test cannot say anything; skip instead of failing every unit run.
+test.skipIf(!existsSync("/tool/opencode"))("TEST-ONLY owned binary identity and catalog-scoped variant", async () => {
   const root = mkdtempSync(join(tmpdir(), "anet-4099-runtime-"));
   let markProvider!: () => void;
   const providerReached = new Promise<void>(resolve => { markProvider = resolve; });
