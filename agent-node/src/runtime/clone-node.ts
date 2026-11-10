@@ -17,6 +17,8 @@
 
 import { spawn } from "node:child_process";
 import {
+  chmodSync,
+  constants as fsConstants,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -25,7 +27,8 @@ import {
   readFileSync,
   rmSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { adoptedChild } from "./adopt-registry.js";
 import { childDirNameForCreate, resolveChildDirName } from "./child-dir-name.js";
 import { childWorkDirFor, prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { atomicWriteJson } from "./config-apply.js";
@@ -79,6 +82,8 @@ export function planCloneWorkdir(input: {
   sourceWorkdir: string;
   daemonWorkdir: string;
   newName: string;
+  /** Present = take `<source folder>-N` (first free N >= 2). Absent = folder named after the new node. */
+  taken?: (path: string) => boolean;
 }): CloneDiskPlan {
   const source = resolve(input.sourceWorkdir);
   const daemon = resolve(input.daemonWorkdir);
@@ -92,10 +97,53 @@ export function planCloneWorkdir(input: {
       workdirReason: "new_empty: source has no project workdir (it lives in the daemon cwd), so the clone is a new empty directory under <daemon cwd>/clone-work",
     };
   }
+  if (input.taken) {
+    // admin 2026-11-10: fork 到新目录 = 源目录旁边的 `<源目录名>-N`（与 vdev 上
+    // agent-network-client-oe / -2 / -3 的手工习惯一致）。源目录名本身已带 `-N`
+    // 时从它的主干往后数，不叠成 `-2-2`。
+    const base = basename(source).replace(/-\d+$/, "") || basename(source);
+    for (let n = 2; n < 1000; n++) {
+      const candidate = join(dirname(source), `${base}-${n}`);
+      if (!input.taken(candidate)) {
+        return { workdir: candidate, workdirReason: `new_empty: next free sibling folder ${base}-${n}; only AGENTS.md / CLAUDE.md are seeded from the source` };
+      }
+    }
+  }
   return {
     workdir: join(dirname(source), folder),
     workdirReason: "new_empty: empty sibling under the source workdir's parent (same root); source contents are not copied",
   };
+}
+
+/** Human-written instruction files a fork carries into its new folder. Never the
+ * per-node generated ones (opencode.json / ANET-COMMHUB.md hold the source's
+ * MCP Authorization header), never `.anet`, never symlinks. */
+export const CLONE_SEED_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
+const SEED_MAX_BYTES = 256 * 1024;
+
+export function seedCloneInstructions(sourceWorkdir: string, targetWorkdir: string): string[] {
+  if (resolve(sourceWorkdir) === resolve(targetWorkdir)) return [];
+  const copied: string[] = [];
+  for (const name of CLONE_SEED_FILES) {
+    const from = join(sourceWorkdir, name);
+    const to = join(targetWorkdir, name);
+    let st;
+    try { st = lstatSync(from); } catch { continue; }
+    if (!st.isFile() || st.isSymbolicLink() || st.size > SEED_MAX_BYTES) continue;
+    if (existsSync(to)) continue;
+    try { copyFileSync(from, to, fsConstants.COPYFILE_EXCL); chmodSync(to, 0o600); copied.push(name); } catch { /* best effort */ }
+  }
+  return copied;
+}
+
+/** Workdir of a source child: daemon-created entries are plain strings in the
+ * registry; adopted ones are objects (`adopted: true`, `workdir`). */
+export function sourceWorkdirFor(daemonWorkDir: string, alias: string): string {
+  try {
+    const entry = adoptedChild(daemonWorkDir, alias);
+    if (entry?.workdir) return entry.workdir;
+  } catch { /* malformed adopted entry: fall back to the plain registry */ }
+  return childWorkDirFor(daemonWorkDir, alias);
 }
 
 function sessionField(runtime: string, source: Record<string, unknown>): { field: string; id: string } | null {
@@ -120,6 +168,8 @@ export function planSessionCopy(input: {
   sessionId: string | null;
   transcriptFound: boolean;
   field: string | null;
+  /** new_empty for OpenCode = fresh session (an aliased id would make two nodes in two folders write one transcript). */
+  policy?: "new_empty" | "share_source";
 }): SessionCopyOutcome {
   if (!input.copySession) {
     return { capability: "skipped", reason: "copy_session is false; the clone starts with no session id" };
@@ -128,6 +178,9 @@ export function planSessionCopy(input: {
   if (runtime === "opencode-cli") {
     if (!input.sessionId) {
       return { capability: "unsupported", reason: "OpenCode source has no session id to alias" };
+    }
+    if (input.policy === "new_empty") {
+      return { capability: "unsupported", reason: "OpenCode clone in a new folder starts a fresh session; the source transcript is not shared across folders (hand context over by message)" };
     }
     return {
       capability: "id_aliased",
@@ -358,7 +411,7 @@ export async function handleCloneNodeDoorbell(
   const alias = req.clone.source_alias;
   const policy = req.clone.workdir_policy === "share_source" ? "share_source" : "new_empty";
   const copySession = req.clone.copy_session !== false;
-  const sourceWorkdir = childWorkDirFor(deps.workDir, alias);
+  const sourceWorkdir = sourceWorkdirFor(deps.workDir, alias);
   const nodesRoot = join(sourceWorkdir, ".anet", "nodes");
   const sourceDirName = resolveChildDirName(nodesRoot, alias);
   const sourceNodeDir = sourceDirName ? join(nodesRoot, sourceDirName) : "";
@@ -389,7 +442,7 @@ export async function handleCloneNodeDoorbell(
   }
 
   const disk = planCloneWorkdir({
-    policy, sourceWorkdir, daemonWorkdir: deps.workDir, newName: req.node_spec.name,
+    policy, sourceWorkdir, daemonWorkdir: deps.workDir, newName: req.node_spec.name, taken: existsSync,
   });
   let childWorkDir = disk.workdir;
   const childDirName = childDirNameForCreate(req.node_spec.name, policy === "new_empty" ? childWorkDir : sourceWorkdir);
@@ -409,6 +462,10 @@ export async function handleCloneNodeDoorbell(
     }
   }
   deps.log(`[clone-node] workdir ${childWorkDir} — ${disk.workdirReason}`);
+  if (policy === "new_empty") {
+    const seeded = seedCloneInstructions(sourceWorkdir, childWorkDir);
+    if (seeded.length) deps.log(`[clone-node] seeded ${seeded.join(", ")} from ${sourceWorkdir}`);
+  }
 
   const childDir = join(childWorkDir, ".anet", "nodes", childDirName);
   try {
@@ -444,6 +501,7 @@ export async function handleCloneNodeDoorbell(
     sessionId: picked?.id ?? null,
     transcriptFound: runtime === "opencode-cli" ? false : transcriptFound,
     field: picked?.field ?? null,
+    policy,
   });
   if (session.capability !== "files_copied" && runtime !== "opencode-cli") {
     // A failed or skipped copy must not leave a half-written transcript under the new cwd.

@@ -8,7 +8,7 @@ import { markTaskActivity } from "./task-activity.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
-import { requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
+import { adoptedCloneSourceRow, requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
 import { adoptionCandidatesReportSchema } from "./adoption-candidates.js";
 import { forkRecoveryRequestSchema, forkRecoveryResultSchema, publicForkResult } from "./codex-fork-contract.js";
@@ -5358,7 +5358,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           WHERE child_node_id = ?1 AND network_id = ?2 AND status = 'succeeded'
           ORDER BY created_at DESC LIMIT 1`,
         source_node_id, source.network_id || effectiveNetId || "default",
-      );
+      ) ?? adoptedCloneSourceRow(source_node_id, source.network_id || effectiveNetId || "default", source.runtime ?? null, source.alias || source.node_name || "");
       const net = source.network_id || effectiveNetId || "default";
       const nameRows = db.all<{ alias: string | null; node_name: string | null }>(
         `SELECT alias, node_name FROM nodes WHERE network_id = ?1`,
