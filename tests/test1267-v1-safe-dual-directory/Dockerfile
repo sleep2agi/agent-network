@@ -8,6 +8,8 @@ RUN OPENCODE_VERSION=${OPENCODE_VERSION} node -e 'const f=require("fs"),v=proces
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" --no-audit --no-fund && test "$(opencode --version)" = "${OPENCODE_VERSION}"
 WORKDIR /repo/agent-node
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-node/src /repo/agent-node/src

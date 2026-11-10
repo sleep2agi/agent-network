@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm pyth
 RUN install -d -m 0755 /run/user && install -d -m 0700 -o bun -g bun /run/user/1000
 WORKDIR /repo/agent-node
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-node/ ./

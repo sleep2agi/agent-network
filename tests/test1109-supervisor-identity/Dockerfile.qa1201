@@ -3,6 +3,8 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm curl ca-certificates python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /work/server
 COPY contracts /work/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /work/server/src/contracts
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY server/ ./

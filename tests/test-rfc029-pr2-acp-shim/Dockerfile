@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /harness
 
 COPY contracts /contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts //server/src/contracts
 COPY agent-node /agent-node-src
 COPY tests/test-rfc029-pr2-acp-shim/mock-opencode.mjs /harness/mock-opencode.mjs
 COPY tests/test-rfc029-pr2-acp-shim/harness.ts /harness/harness.ts

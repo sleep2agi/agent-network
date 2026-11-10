@@ -14,6 +14,8 @@ COPY agent-network/ ./
 # implementation modules and matching tests; none imports agent-node code
 # outside this directory.
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json /repo/agent-node/package.json
 COPY agent-node/src/runtime/opencode-acp/ /repo/agent-node/src/runtime/opencode-acp/
 # #542: binary.ts reads the shared supported-versions table; runtime.ts goes

@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends tmux procps \
 WORKDIR /workspace
 
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package.json server/package-lock.json ./server/
 RUN cd server && bun install --frozen-lockfile --ignore-scripts
 

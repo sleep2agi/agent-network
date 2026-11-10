@@ -9,6 +9,8 @@ RUN OPENCODE_VERSION=${OPENCODE_VERSION} node -e 'const f=require("fs"),v=proces
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" --no-audit --no-fund && test "$(opencode --version)" = "${OPENCODE_VERSION}"
 RUN install -d -m 0755 /run/user && install -d -m 0700 -o bun -g bun /run/user/1000
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/src/ /repo/agent-node/src/
 COPY tests/test1194-v1-shared-feasibility/ /fixture/
 ARG SOURCE_COMMIT

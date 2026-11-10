@@ -13,6 +13,8 @@ ENV PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
 
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/package.json ./agent-node/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 

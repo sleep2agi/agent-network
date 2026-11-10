@@ -7,6 +7,8 @@ COPY .github ./.github
 COPY tests ./tests
 COPY agent-network ./agent-network
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node ./agent-node
 COPY server ./server
 CMD ["sh", "-c", "python3 scripts/check-doc-symbol-pins.py . && python3 .github/scripts/check-qa-trigger-coverage.py"]

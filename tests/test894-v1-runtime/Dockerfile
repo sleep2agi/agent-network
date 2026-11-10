@@ -5,6 +5,8 @@ RUN npm install -g opencode-ai@1.18.34 --no-audit --no-fund && test "$(opencode 
 RUN install -d -m 0755 /run/user && install -d -m 0700 -o bun -g bun /run/user/1000
 WORKDIR /agent-node-src
 COPY contracts /contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts //server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-node/ /agent-node-src/

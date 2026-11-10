@@ -10,6 +10,8 @@ RUN npm install -g "@opencode/cli@${OPENCODE_V2_VERSION}" && \
     test "$(opencode --version)" = "opencode v${OPENCODE_V2_VERSION}"
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package*.json ./server/
 COPY agent-network/package*.json ./agent-network/
 COPY contracts /opt/node_modules/@sleep2agi/contracts

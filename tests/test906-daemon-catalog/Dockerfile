@@ -5,6 +5,8 @@ RUN npm install -g @opencode/cli@2.0.22
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/src/runtime/opencode-v2-catalog* agent-node/src/runtime/
 # Doorbell tests import child-workdir, which loads config-apply and the adopt
 # registry. cli.ts is read, not imported. The glob above stays narrow so this
