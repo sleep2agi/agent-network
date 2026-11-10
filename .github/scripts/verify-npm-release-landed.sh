@@ -46,6 +46,12 @@ usage_error() { echo "::error::$1" >&2; exit 2; }
 [ -n "${PKG:-}" ] || usage_error 'PKG 必填'
 [ -n "${EXPECTED:-}" ] || usage_error 'EXPECTED 必填'
 [ -n "${PUBLISH_RESULT:-}" ] || usage_error 'PUBLISH_RESULT 必填(publish job 的 result:success/failure/cancelled/skipped)'
+# 本仓发布的包全是 @sleep2agi/… 作用域包。短名(`agent-network`)拼出的 URL 恒 404,
+# 会让一次已落地的发布等满预算后被判「没落地」(run 42743119409)—— 那是调用方传错,不是结论。
+case "$PKG" in
+  @*/*) ;;
+  *) usage_error "PKG='$PKG' 不是作用域包名(@scope/name)—— 传的多半是目录短名,registry 上查不到" ;;
+esac
 
 registry="${NPM_REGISTRY_URL:-https://registry.npmjs.org}"
 interval="${LANDED_INTERVAL_S:-30}"
