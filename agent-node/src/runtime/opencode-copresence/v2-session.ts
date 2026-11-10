@@ -651,7 +651,12 @@ export async function openVettedOpenCodeV2Copresence(
       return result;
     };
     const readVariantSelection = async () => {
-      const body = await variantRequest(`/api/session/${sessionId}`);
+      // `variantRequest` pins the TEST-BUILD identity (it throws on a stock server),
+      // so the capability readback must use the plain scoped request there. Without
+      // this split a stock node reports opencode_variant_config_capable=false even
+      // when the catalog exposes variants for the current model.
+      const read = variantTestBuild ? variantRequest : scopedRequest;
+      const body = await read(`/api/session/${sessionId}`);
       if (!isV2SessionScope(body, sessionId, directory)) return undefined;
       const explicit = readV2ModelSelection(body);
       if (explicit) return explicit;
@@ -659,7 +664,7 @@ export async function openVettedOpenCodeV2Copresence(
       // Resolve ONLY the native directory default, never the profile hint, a
       // guessed first catalog row or a startup reconciliation/model mutation.
       if (!sharedTestBuild || body.data.model !== undefined) return undefined;
-      const fallback = await variantRequest("/api/model/default");
+      const fallback = await scopedRequest("/api/model/default");
       if (fallback?.location?.directory !== directory) return undefined;
       const selected = readV2ModelSelection({ data: { model: fallback.data } });
       return selected ? { ...selected, variant: selected.variant ?? "default" } : undefined;
@@ -709,7 +714,7 @@ export async function openVettedOpenCodeV2Copresence(
           const selected = await readVariantSelection();
           if (!selected) return undefined;
           const start = performance.now();
-          const catalog = await variantRequest("/api/model");
+          const catalog = await scopedRequest("/api/model");
           const age = performance.now() - start;
           if (!session.isRunning || !Number.isFinite(age) || age < 0 || age > 5000 || !catalogSupportsVariants(catalog, directory, selected)) return undefined;
           const final = await readVariantSelection();
