@@ -56,8 +56,21 @@ def registered_tools(root: Path) -> set[str]:
     return set(REGISTRATION.findall(src))
 
 
+def strip_front_matter(text: str) -> str:
+    """VitePress front matter（文件开头的 `---` … `---`）不是水平分隔线。
+
+    #3421 给 API 页加了 `pageClass: api-reference` front matter 之后，第一个 `\n---\n`
+    落在 front matter 的结尾，索引区被截成空串 —— 门以「分母塌了」报红，而索引本身完好。
+    """
+    if not text.startswith("---\n"):
+        return text
+    end = text.find("\n---\n", 4)
+    return text if end < 0 else text[end + len("\n---\n"):]
+
+
 def index_region(text: str) -> str:
-    """页首到第一个水平分隔线 —— 详细小节从那之后开始，不算索引。"""
+    """页首（front matter 之后）到第一个水平分隔线 —— 详细小节从那之后开始，不算索引。"""
+    text = strip_front_matter(text)
     marker = text.find("\n---\n")
     return text if marker < 0 else text[:marker]
 
@@ -79,7 +92,7 @@ def indexed_tools(root: Path, rel: str) -> set[str]:
     return found
 
 
-SELFTEST_EXPECTED = 5
+SELFTEST_EXPECTED = 6  # +1 (2026-11-10): front matter does not cut the index region
 
 
 def selftest(quiet: bool = False) -> int:
@@ -125,6 +138,10 @@ def selftest(quiet: bool = False) -> int:
         rel = "docs/mcp-tools.md"
         (root / rel).write_text(doc, encoding="utf-8")
         case("索引只认表格第一格且截止到 ---", indexed_tools(root, rel), {"alpha_tool", "beta_tool"})
+        # front matter（#3421 的 pageClass）不是分隔线：前置之后索引仍然完整
+        (root / rel).write_text("---\npageClass: api-reference\n---\n\n" + doc, encoding="utf-8")
+        case("front matter 不截断索引区", indexed_tools(root, rel), {"alpha_tool", "beta_tool"})
+        (root / rel).write_text(doc, encoding="utf-8")
 
         # 散文里的名字必须没有被收进来（否则「索引列全了」会被散文蒙混）
         listed = indexed_tools(root, rel)
