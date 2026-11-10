@@ -23,7 +23,7 @@
 
 ## 用法
 
-    python3 scripts/check-desktop-release.py [--assert] [--min-platforms 7]
+    python3 scripts/check-desktop-release.py [--assert] [--min-platforms 5]
 
 退出码：0 = 有读数且一致 / 1 = 不一致或低于阈值（--assert 时）/ 2 = 读不到 feed（**没读数 ≠ 没问题**）
 """
@@ -38,7 +38,13 @@ FEED = "https://anet.sh/desktop/update/latest.json"
 
 
 def main() -> int:
-    min_platforms = 7
+    # 🔴 2026-11-11 —— 默认阈值从 7 改成 5：Linux 现在是**opt-in**（include_linux 默认 false），
+    # 不带 Linux 的正常发布就是 5 个条目（darwin-aarch64 / darwin-aarch64-app /
+    # windows-x86_64 / windows-x86_64-msi / windows-x86_64-nsis）。
+    # 阈值 7 会让**每一个**不带 Linux 的版本都判 inconsistent —— 0.2.502/503/504 全都这样，
+    # 于是这条巡检天天在喊狼来了，真正的回归（少一个平台）反而被淹没。
+    # 仍然能抓到的回归：任何一个平台消失（5 → 4）。
+    min_platforms = 5
     if "--min-platforms" in sys.argv:
         min_platforms = int(sys.argv[sys.argv.index("--min-platforms") + 1])
 
