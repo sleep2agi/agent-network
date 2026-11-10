@@ -58,3 +58,41 @@ describe("applyVariantConfig — stock-build writer", () => {
       .toEqual({ status: "rejected", reason: "unsupported" });
   });
 });
+
+
+// The bug this pins: `applyVariantConfig` used to pick its path by asking whether the
+// controller methods EXIST. On a stock build they do (the test-build controller provides
+// them) and only deny when called, so the idle-gated writer was never reached and every
+// variant write came back `variant_unsupported`.
+describe("applyVariantConfig — stock build keeps the controller methods but they deny", () => {
+  test("falls through to the idle-gated writer instead of reporting unsupported", async () => {
+    const calls: string[] = [];
+    const session = {
+      isRunning: true,
+      sessionId: "ses_stock",
+      variantConfigTestOwned: false,
+      // present, exactly like a stock build - and they answer unsupported
+      selectedSessionModel: async () => { calls.push("controller-read"); return { providerID: "deepseek", id: "deepseek-flash" }; },
+      selectSessionModel: async () => { calls.push("controller-write"); return { status: "rejected" as const, reason: "unsupported" as const }; },
+      setSelectedVariant: async (variant: string | null) => { calls.push("stock-write"); return { providerID: "deepseek", id: "deepseek-flash", ...(variant === null ? {} : { variant }) }; },
+    };
+    const result = await applyVariantConfig(session as any, { modelVariant: "low" });
+    expect(result).toEqual({ status: "applied", model: { providerID: "deepseek", id: "deepseek-flash", variant: "low" } });
+    expect(calls).toEqual(["stock-write"]);
+  });
+
+  test("test build still uses the identity-pinned controller", async () => {
+    const calls: string[] = [];
+    const session = {
+      isRunning: true,
+      sessionId: "ses_test",
+      variantConfigTestOwned: true,
+      selectedSessionModel: async () => { calls.push("controller-read"); return { providerID: "deepseek", id: "deepseek-flash" }; },
+      selectSessionModel: async () => { calls.push("controller-write"); return { status: "applied" as const, model: { providerID: "deepseek", id: "deepseek-flash", variant: "low" } }; },
+      setSelectedVariant: async () => { calls.push("stock-write"); throw new Error("must not be used on a test build"); },
+    };
+    const result = await applyVariantConfig(session as any, { modelVariant: "low" });
+    expect(result.status).toBe("applied");
+    expect(calls).toEqual(["controller-read", "controller-write"]);
+  });
+});
