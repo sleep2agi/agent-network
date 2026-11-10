@@ -13,6 +13,20 @@ export type SourceResumeLaunch = { configPath: string; cwd: string; existingSess
   resumeSessionId: string; newSession: false; expectedVersion: string; bridgePolicy: "new_child_only" };
 /** Private worker with concrete source-only launcher. No public queue/daemon
  * dispatch registration and no ordinary-create worker fallback. */
+/**
+ * 把投递过程中被吞掉的异常转成**可读原因**。
+ *
+ * 2026-11-10 实测（CI 同款镜像）：交接守卫抛 `source_resume_claim_handoff_refused`，
+ * 被 deliver() 吞掉后 worker 只返回 unknown_rotation_required ——
+ * 客户端显示「结果未知，禁止自动重放」，运维在日志里也看不到是哪个守卫拒的。
+ * status 不能改（子目录可能已建，谎报失败会引导用户重试并留下残留），但原因必须可读。
+ */
+export const sourceDeliveryFailureReason = (e: unknown): string => {
+  const any = e as { message?: unknown } | null;
+  const msg = typeof any?.message === 'string' ? any.message : '';
+  return msg.length > 0 ? msg.slice(0, 200) : 'no reason captured';
+};
+
 export function createSessionSourceProfileWorker(local: { enabled?: boolean; capability: string; daemonWorkDir: string;
   bindingHome: string; hubUrl: string; reader: ReturnType<typeof createSessionSourceEvidenceReader>;
   launch?: (input: SourceResumeLaunch) => Promise<void | SourceResumeChild>;
@@ -29,7 +43,14 @@ export function createSessionSourceProfileWorker(local: { enabled?: boolean; cap
       const name = checkNodeName(payload.child_name);
       if (!name.ok || name.name !== payload.child_name) return { status: "refused" };
       let began = false;
-      const result = await local.reader.deliver(payload, async context => {
+      // 兜底成 unknown_rotation_required 之前先**把原因留住**。
+      //
+      // 2026-11-10 实测（CI 同款镜像）：交接守卫抛 `source_resume_claim_handoff_refused`，
+      // 被 deliver() 吞掉后 worker 只返回 unknown —— 客户端显示「结果未知，禁止自动重放」，
+      // 运维也看不到是哪个守卫拒的。status 仍然保守（子目录可能已建，不能谎报失败），
+      // 但原因必须可读。
+      let failReason: string | null = null;
+      const result = await local.reader.deliver(payload, async context => { try {
         const dir = join(context.project, ".anet", "nodes", childDirNameForCreate(payload.child_name));
         // No overwrite, auto-rotation, launch retry or adoption of prior residue.
         if (existsSync(dir)) return { status: "unknown_rotation_required" as const };
@@ -76,7 +97,8 @@ export function createSessionSourceProfileWorker(local: { enabled?: boolean; cap
         try { confirmed = await local.confirmRegistration(payload.delivery_id, payload.child_token); }
         finally { if (!confirmed && child) { await child.stop(); children.delete(payload.delivery_id); } }
         return { status: confirmed ? "registration_confirmed" as const : "unknown_rotation_required" as const, child_node_id: payload.child_node_id };
-      });
+      } catch (e) { failReason = sourceDeliveryFailureReason(e); console.error(`[source-delivery] refused: ${failReason}`); throw e; } });
+      if (result === undefined && began) console.error(`[source-delivery] delivery aborted after claim: ${failReason ?? 'no reason captured'}`);
       return result ?? { status: began ? "unknown_rotation_required" : "refused" };
     },
   };
