@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y curl python3 make g++ && \
 #    把它写进 COPY 会让 CI 在 1 秒内 build fail —— 本地因为文件在磁盘上所以看不出来。
 #    原来那段 `COPY server/ server/` 在 CI 里同样拿不到 bun.lock,所以这里去掉它不改变任何行为。
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY server/package.json server/package-lock.json server/
 RUN cd server && bun install
 COPY agent-network/package.json agent-network/package-lock.json agent-network/

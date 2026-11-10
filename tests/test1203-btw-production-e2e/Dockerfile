@@ -10,6 +10,8 @@ LABEL org.opencontainers.image.revision=$TEST1203_SOURCE_COMMIT
 
 WORKDIR /repo
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json agent-node/package.json
 COPY agent-node/src agent-node/src
 COPY tests/lib tests/lib

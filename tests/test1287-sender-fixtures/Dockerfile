@@ -4,6 +4,8 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update && apt-get install -y --no-install-recommends bash curl jq python3 ca-certificates make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY server/package.json server/package-lock.json ./server/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/

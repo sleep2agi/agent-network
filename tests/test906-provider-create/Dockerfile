@@ -6,6 +6,8 @@ WORKDIR /work
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && npm ci --ignore-scripts --no-audit --no-fund
 COPY contracts /work/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /work/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 RUN cd agent-node && npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-network ./agent-network

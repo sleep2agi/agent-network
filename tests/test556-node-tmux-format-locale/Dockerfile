@@ -22,6 +22,8 @@ RUN curl --fail --silent --show-error --location \
 
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/package.json ./agent-node/package.json
 COPY agent-node/src ./agent-node/src
 COPY tests/test556-node-tmux-format-locale ./tests/test556-node-tmux-format-locale

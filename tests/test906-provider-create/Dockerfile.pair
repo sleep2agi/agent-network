@@ -6,6 +6,8 @@ WORKDIR /repo
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 COPY agent-network/src/ ./agent-network/src/
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 COPY agent-node/src/package-version-consistency.test.ts ./agent-node/src/package-version-consistency.test.ts
 ARG SOURCE_COMMIT

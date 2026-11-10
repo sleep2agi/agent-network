@@ -2,6 +2,8 @@ FROM oven/bun:1.3.14
 
 WORKDIR /repo
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json /repo/agent-node/package.json
 RUN cd /repo/agent-node && bun install
 COPY agent-node /repo/agent-node

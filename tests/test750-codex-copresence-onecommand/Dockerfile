@@ -34,6 +34,8 @@ RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
 
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package.json server/package-lock.json ./server/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 # --ignore-scripts: this suite drives the CLI's create/start decision paths and

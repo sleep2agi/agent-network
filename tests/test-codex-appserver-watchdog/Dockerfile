@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends tmux curl procp
 
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/package.json ./agent-node/package.json
 RUN cd agent-node && bun install --ignore-scripts
 COPY agent-network/package.json ./agent-network/package.json

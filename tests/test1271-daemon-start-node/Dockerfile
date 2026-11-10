@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends bash build-esse
  && bun --version
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package*.json server/
 COPY agent-node/package*.json agent-node/
 RUN cd server && npm ci && cd ../agent-node && npm ci
