@@ -24,7 +24,9 @@ export async function applyVariantConfig(
       return { status: "applied", model: await session.setSelectedVariant!(patch.modelVariant) };
     } catch (error: any) {
       const message = String(error?.message ?? "");
-      if (message.includes("variant_busy")) return { status: "rejected", reason: "busy" };
+      // 把判据一起带回去：Hub 只存 `error` 这个字符串，丢掉原文之后
+      // 「恰好有一轮在飞」和「计数器卡死」在观测面上不可分（#4414）。
+      if (message.includes("variant_busy")) return { status: "rejected", reason: "busy", detail: message };
       if (message.includes("scope")) return { status: "rejected", reason: "scope" };
       return { status: "unknown" };
     }

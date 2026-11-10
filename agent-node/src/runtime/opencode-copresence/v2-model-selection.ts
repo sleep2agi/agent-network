@@ -48,7 +48,9 @@ export function equalV2ModelSelection(a: V2ModelSelection | undefined, b: V2Mode
 
 export type V2SelectionResult =
   | { status: "applied"; model: V2ModelSelection }
-  | { status: "rejected"; reason: "busy" | "unsupported" | "invalid" | "catalog" | "scope" | "concurrent" }
+  | { status: "rejected"; reason: "busy" | "unsupported" | "invalid" | "catalog" | "scope" | "concurrent";
+      /** 判据原文（例如 in_flight / turn_age_ms）。只用于回执，不参与分支。 */
+      detail?: string }
   | { status: "unknown" };
 
 /** Adapter must use the *same* server and directory for every read and write.
