@@ -1,0 +1,8 @@
+test1260: local TUI history preview proxy (Docker, no host state or credentials)
+PASS launcher: alias resolution, mode-600 settings, tmux environment isolation, 120s launch deadline, normal child timers, correct upstream/TUI endpoints
+PASS L0: locked workspace dependency; >64 MiB synthetic history fixture; no host state
+PASS L1: initialize and normal single RPC round-trip
+PASS L2: >64 MiB response works with native-sized client limits; all turns, user/assistant messages, tool identity and small output preserved
+PASS L3: task inputs forwarded unchanged; no model history or disk mutation
+PASS L4: non-TUI bridge remains unchanged; remote upstream rejected
+PASS: all layers
