@@ -8,6 +8,8 @@ Since `.200`: fork 到新目录对 OpenCode 共享 serve 节点可用（vdev 真
 - 克隆没带 `opencodeSharedServerUrl` / `opencodeSharedServerPasswordFile`，自己起了私有 serve，私有 serve 里没有 provider 密钥；
 - 克隆写的是 daemon 的 Hub 地址（https），共享 serve 要直连这个地址加载 CommHub MCP，在 vdev 上不经代理连不上 https。
 
+另外，挂共享 serve 的节点**在同一目录第二次启动**必然失败（`shared server did not load this workspace's CommHub MCP`）：共享 serve 对见过的目录按文件监听重载配置，有 3–10 秒延迟，而每次启动 MCP 代理端口都会换，原来只检查一次。现在改为在启动时限内轮询。
+
 现在克隆会带上共享 serve 的地址和密码文件**路径**（不是密码本身）。源节点地址与 daemon 相同，或等于收编时证明过的 `proven_hub` 时，沿用源节点的 Hub 地址。
 
 ## Install

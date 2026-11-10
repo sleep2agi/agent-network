@@ -553,13 +553,19 @@ export async function openVettedOpenCodeV2Copresence(
     }
     if (sharedTestBuild && opts.reconcileResumedModel) throw Error("shared_variant_reconcile_refused");
     if (shared && opts.sharedMcpUrl) {
-      const sources = await fetchOpenCodeJson(url, password, "/api/config", {
-        headers: { "x-opencode-directory": resolve(opts.cwd) },
-      });
-      const project = Array.isArray(sources) ? sources.find((source) =>
-        source?.type === "document" && source.path === join(resolve(opts.cwd), "opencode.json")) : undefined;
-      if (project?.info?.mcp?.servers?.commhub?.url !== opts.sharedMcpUrl) {
-        throw new Error("OpenCode v2 shared server did not load this workspace's CommHub MCP");
+      // 共享 serve 对**见过的**目录按文件监听重载配置，有 3–10 秒延迟（vdev 2026-11-11 实测：
+      // 写完 opencode.json 立刻读仍是旧内容，10 秒后才出现）。每次启动 MCP 代理端口都会换，
+      // 所以同一目录第二次起节点时，一次性检查必然撞上旧端口 —— 改成在启动时限内轮询。
+      const deadline = Date.now() + (opts.startupTimeoutMs ?? 20_000);
+      for (;;) {
+        const sources = await fetchOpenCodeJson(url, password, "/api/config", {
+          headers: { "x-opencode-directory": resolve(opts.cwd) },
+        }).catch(() => undefined);
+        const project = Array.isArray(sources) ? sources.find((source) =>
+          source?.type === "document" && source.path === join(resolve(opts.cwd), "opencode.json")) : undefined;
+        if (project?.info?.mcp?.servers?.commhub?.url === opts.sharedMcpUrl) break;
+        if (Date.now() >= deadline) throw new Error("OpenCode v2 shared server did not load this workspace's CommHub MCP");
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
     if (shared && opts.sharedMcpUrl) {
