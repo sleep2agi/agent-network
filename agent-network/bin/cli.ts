@@ -3389,6 +3389,22 @@ function getAnetVersion(): string {
   catch { return ""; }
 }
 
+// 2026-11-10 —— 让 agent-node 自报「起它的是哪个 anet CLI」用的环境变量片段。
+//
+// 为什么需要它：`config_snapshot.anet_version` 是静态占位值（写死 0.1.0），客户端因此
+// 给不出这台机器「该装哪一对包」，只能建议 `agent-node@preview` —— 装完很可能与本地
+// CLI 不成对，CLI 拒绝启动（`Incompatible agent-node for opencode-cli`），节点离线。
+//
+// 形状不认就返回**空对象**：宁可「没报」也不要报一个假版本（假版本正是上面那个 bug 的成因）。
+// 🔴 只用于**真正 spawn agent-node 子进程**的 env，不要塞进 `AgentNodeLaunchPlan.probeEnv` ——
+//    那个对象还要拿去跑 `agent-node --help` 探测，混入启动侧的东西会让探测环境与启动环境不一致。
+function launchedByCliVersionEnv(): Record<string, string> {
+  const v = getAnetVersion();
+  return /^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$/.test(v) && v.length <= 64
+    ? { ANET_LAUNCHED_BY_CLI_VERSION: v }
+    : {};
+}
+
 /** POST /api/auth/login|register 的 client_label:这条登录在 app「登录设备」里叫什么(见 src/login-client-label.ts)。 */
 function loginClientLabel(command: string): string {
   return anetClientLabel({ version: getAnetVersion(), host: hostname(), command });
@@ -7886,6 +7902,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       childEnv.ANET_CONFIG_UPDATE_CAPABLE = "0";
     }
 
+    // 2026-11-10 —— 让子进程如实知道「起它的是哪个 anet CLI」（见 launchedByCliVersionEnv）。
+    // 只写在这里（childEnv = 真实启动环境），不写进 AgentNodeLaunchPlan.probeEnv。
+    Object.assign(childEnv, launchedByCliVersionEnv());
+
     // #1353 —— 把 daemon 的 anet 二进制 pin 传给子进程。
     //
     // 🔴 这是我 #1299 那次改动的一个错误假设的修正。当时我在 `prepareDaemonAnetBin()`
@@ -8878,6 +8898,7 @@ async function startCommand() {
     const env = { ...hardenOpencodeAgentNodeEnv(process.env, process.env.PATH),
       ANET_OPENCODE_BIN: opencodeLaunchIdentity.binary, ANET_OPENCODE_VERSION: checked.version,
       ANET_OPENCODE_MODE: "copresence", ANET_CONFIG_UPDATE_CAPABLE: "0",
+      ...launchedByCliVersionEnv(), // 2026-11-10 —— 这条私有 route 也是 CLI 起 agent-node
       ANET_SOURCE_RESUME_NONCE: nonce, ANET_SOURCE_RESUME_CONFIG: configPath };
     const child = spawn(plan.command, [...plan.argsPrefix, "--config", configPath,
       "--alias", p.alias, "--runtime", "opencode-cli", "--session", p.sessionId],
@@ -14982,7 +15003,8 @@ async function opencodeBorrowedAttachCommand(ref?: string) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("borrowed V1 TUI requires an interactive terminal");
   const child=spawn(plan.command,[...plan.argsPrefix,"--opencode-borrowed-attach",cfg],{
     cwd:process.cwd(),stdio:"inherit",env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
-      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version},
+      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version,
+      ...launchedByCliVersionEnv()}, // 2026-11-10 —— 这条 attach 也是 CLI 起 agent-node
   });
   const stop=()=>{try{child.kill("SIGTERM");}catch{}};
   const signals=["SIGINT","SIGTERM","SIGHUP"] as const;
