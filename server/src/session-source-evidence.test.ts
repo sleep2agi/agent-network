@@ -582,8 +582,12 @@ test("real child token metadata -> one-shot source payload -> private profile ->
       expect(statSync(input.configPath).mode & 0o777).toBe(0o600);
       await registerFromPrivateProfile(cfg);
     }, confirmRegistration: async (id, token) => p.delivery.confirmRegistration(req(token), id) });
+  const srcReq = payload.execution.evidence.request;
+  db.run("UPDATE nodes SET department_id='dep_fork_parent' WHERE node_id=?1 AND network_id=?2", [srcReq.source_node_id, srcReq.network_id]);
   expect((await worker.run(payload)).status).toBe("registration_confirmed"); expect(launches).toBe(1);
   expect(forkPosts).toBe(beforePosts);
+  // admin 2026-11-10: a forked child inherits the source node's department.
+  expect(db.get<{ department_id: string | null }>("SELECT department_id FROM nodes WHERE node_id=?1", payload.child_node_id)?.department_id).toBe("dep_fork_parent");
   const token = db.get<{ token_hash: string; bound_node_id: string; expires_at: string | null }>("SELECT token_hash,bound_node_id,expires_at FROM api_tokens WHERE token_id=?1", resolveToken(payload.child_token)!.tokenId!);
   expect(token!.bound_node_id).toBe(payload.child_node_id); expect(token!.token_hash !== payload.child_token).toBe(true);
   expect(token!.expires_at).toBeNull();
