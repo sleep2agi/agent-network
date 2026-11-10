@@ -7,7 +7,7 @@ import { atomicWriteJson } from "./config-apply.js";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
 import { reproducibleEnvironment, type AdoptDaemonDeps } from "./adopt-daemon.js";
 import { adoptedChild, writeAdoptedChild, refreshAdoptedChild, type AdoptedChild } from "./adopt-registry.js";
-import { verifyAdoptionLocalIdentity, verifyAdoptionProcess } from "./adopt-local-identity.js";
+import { verifyAdoptionLocalIdentity, verifyAdoptionProcess, withProvenHub } from "./adopt-local-identity.js";
 import { readAdoptionPid, readAdoptionProc } from "./adopt-proc.js";
 import { processStamp, stopVerifiedTree } from "./adopt-process-tree.js";
 import { captureLaunchEvidence, configHash, privateSocket } from "./adopt-launch-evidence.js";
@@ -53,6 +53,7 @@ async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: Ad
   // OpenCode V2 co-presence is registered for source reads only; a daemon start/stop
   // would have to rebuild the human TUI + shared serve topology. Refuse explicitly.
   if (entry.opencode_v2) throw Error("adopt_opencode_lifecycle_unsupported");
+  deps = withProvenHub(deps, entry);
   const identity = verifyAdoptionLocalIdentity({ node_id: entry.node_id, alias: req.child_alias, network_id: deps.networkId, workdir: entry.workdir }, {...deps, allowCodexV2: !!entry.codex_v2});
   if (identity.nodeDir !== entry.nodeDir) throw Error("adopt_registry_identity_mismatch");
   if (entry.codex_v2) {

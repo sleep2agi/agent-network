@@ -8322,7 +8322,8 @@ async function connectSSE() {
               const requestId = typeof ev.request_id === "string" ? ev.request_id : "";
               if (!requestId) continue;
               const deps = { callCommHub, workDir: process.cwd(), home: process.env.HOME || "",
-                hubUrl: COMMHUB_URL, networkId: NETWORK_ID, uid: process.getuid?.() ?? -1,
+                hubUrl: COMMHUB_URL, hubAliases: Array.isArray(fileConfig.hub_aliases) ? fileConfig.hub_aliases : [],
+                networkId: NETWORK_ID, uid: process.getuid?.() ?? -1,
                 daemonEnv: process.env,
                 adoptRoots: Array.isArray(fileConfig.adopt_roots) ? fileConfig.adopt_roots : [],
                 warn: (m: string) => warn(m) };

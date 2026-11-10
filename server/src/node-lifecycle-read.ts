@@ -24,7 +24,7 @@ const publicLifecycleErrors = new Set([
   "adopt_workdir_outside_roots", "adopt_workdir_not_absolute",
   "adopt_alias_invalid", "adopt_alias_mismatch", "adopt_config_invalid",
   "adopt_config_network_mismatch", "adopt_network_mismatch",
-  "adopt_hub_invalid", "adopt_hub_missing", "adopt_hub_mismatch",
+  "adopt_hub_invalid", "adopt_hub_missing", "adopt_hub_mismatch", "adopt_hub_unverifiable",
   "adopt_identity_ambiguous", "adopt_identity_not_found", "adopt_identity_changed",
   "adopt_path_not_regular", "adopt_path_owner_mismatch", "adopt_path_writable_by_others",
   "adopt_process_argv_mismatch", "adopt_process_home_mismatch",

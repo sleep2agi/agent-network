@@ -14,6 +14,8 @@ export interface AdoptedChild {
   /** OpenCode V2 co-presence: registered for source reads (fork); daemon start/stop not yet supported. */
   opencode_v2?: { version: 1; config_hash: string };
   launch_evidence?: { mode: "bare" | "tmux"; config_hash: string; socket?: string; session?: string; pane?: string };
+  /** The node's own Hub URL, proven at adoption to be the daemon's Hub (proveSameHubByToken). */
+  proven_hub?: string;
 }
 export function readWorkdirRegistry(root: string): Record<string, unknown> {
   const path = join(root, ".anet", "child-workdirs.json");
