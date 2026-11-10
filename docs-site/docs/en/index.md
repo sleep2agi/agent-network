@@ -6,7 +6,7 @@ hero:
   # The tagline lives only in hero.text: the <title> suffix, description and og/twitter tags are derived from
   # hero.text / hero.tagline by transformPageData in .vitepress/config.ts, so swapping it is a one-line change.
   text: One person. A whole team of agents.
-  tagline: Chat with your Claude, Codex and Grok nodes, hand out work and set schedules — like a group chat. Tasks get followed up, routines run on time, and your data stays on your own machines.
+  tagline: <span class="hero-grok"><b>The enterprise-grade, open-source alternative to Grok Bot</b>, built for private self-hosted deployment.</span>Chat with your Claude, Codex and Grok nodes, hand out work and set schedules — like a group chat. Tasks get followed up, routines run on time, and your data stays on your own machines.
   actions:
     - theme: brand
       text: Download the desktop app
@@ -74,5 +74,6 @@ features:
 <section class="final-cta">
   <h2 class="final-cta-title">Turn your agents into a real team</h2>
   <p class="final-cta-sub">Start with the desktop app or build your own network with anet CLI.</p>
+  <p class="final-cta-note">Grok and Grok Bot are trademarks of xAI. Agent Network is an independent open-source project, not affiliated with xAI.</p>
   <div class="final-cta-actions"><a class="cta-primary" href="/en/download">Download desktop</a><a class="cta-ghost" href="/en/guide/getting-started">Developer docs</a><a class="cta-ghost" href="https://github.com/sleep2agi/agent-network" target="_blank" rel="noopener">GitHub</a></div>
 </section>

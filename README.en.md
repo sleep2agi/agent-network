@@ -12,6 +12,8 @@
 
 **[🌐 Website](https://anet.sh/en/) · [⬇️ Download the desktop app](https://www.anet.sh/en/download) · [🚀 Get started](https://anet.sh/en/guide/getting-started) · [▶️ 48-second intro video](https://anet.sh/en/) · [中文](./README.md) · English**
 
+**An enterprise-grade, open-source alternative to Grok Bot, built for private self-hosted deployment.**
+
 Turn Claude Code, Codex, Grok and OpenCode on many machines into one legion of agents — and run it from a single desktop app.
 
 <picture>
@@ -93,3 +95,5 @@ Contributions are welcome! Read [CONTRIBUTING.md](./CONTRIBUTING.md) and the [Co
 <a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
 ## License
 [Apache License 2.0](./LICENSE). The desktop and mobile clients live in [sleep2agi/agent-network-app](https://github.com/sleep2agi/agent-network-app) (MIT).
+
+Grok and Grok Bot are trademarks of xAI. Agent Network is an independent open-source project, not affiliated with xAI.

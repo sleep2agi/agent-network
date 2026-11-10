@@ -12,6 +12,8 @@
 
 **[🌐 官网](https://anet.sh) · [⬇️ 下载桌面版](https://www.anet.sh/download) · [🚀 快速上手](https://anet.sh/guide/getting-started) · [▶️ 48 秒介绍视频](https://anet.sh) · 中文 · [English](./README.en.md)**
 
+**企业级开源版 Grok Bot，更适合企业内部私有化部署。**
+
 把分布在多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团 —— 在一个桌面应用里指挥它们。
 
 </div>
@@ -95,3 +97,5 @@ flowchart LR
 <a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
 ## 许可证
 [Apache License 2.0](./LICENSE)。桌面与移动客户端源码在 [sleep2agi/agent-network-app](https://github.com/sleep2agi/agent-network-app)（MIT）。
+
+Grok 与 Grok Bot 是 xAI 的商标；Agent Network 是独立的开源项目，与 xAI 无关联。
