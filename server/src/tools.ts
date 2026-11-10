@@ -3675,7 +3675,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ ok: true, recipients: ids.length, message_ids: ids, inbox_skipped: inboxSkipped }),
+            text: JSON.stringify({ ok: true, recipients: ids.length, message_ids: ids, ...(inboxSkipped.length ? { inbox_skipped: inboxSkipped } : {}) }),
           },
         ],
       };

@@ -7,7 +7,7 @@
 //   3. 节点发件人按 alias / node_id 匹配;不在名单 ⇒ node_permission_denied + sender_not_allowed + hint,
 //      覆盖 MCP send_task / send_message / retry_task / reassign_task 与 REST POST /api/task;开关 off 也照拒(显式原因)。
 //   4. 人类发件人按 user:<username> / user:<user_id> / user:* 匹配;节点主人、网络 owner/admin 隐式放行,!strict 关掉隐式放行。
-//   5. 发给自己永远放行(含 !strict)。6. 广播跳过不收的收件人并在 inbox_skipped 里报告,不让整条广播失败。
+//   5. 发给自己永远放行(含 !strict)。6. 广播跳过不收的收件人并在 inbox_skipped 里报告(没人被跳过时没有这个键),不让整条广播失败。
 //
 // 跑法:COMMHUB_DB=/tmp/x.db bun test server/src/node-inbox-allowlist-http.test.ts
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
@@ -266,10 +266,10 @@ describe("广播 —— 跳过不收的收件人,报告而不失败", () => {
     expect(inboxRowsFor(node.c.alias)).toBe(before.c + 1);
   });
 
-  test("MCP broadcast(节点令牌)同样跳过;没人设名单时 inbox_skipped 是空数组", async () => {
+  test("MCP broadcast(节点令牌)同样跳过;没人被跳过时回执恰好三键、没有 inbox_skipped", async () => {
     const open = await mcp(node.b.token, "broadcast", { message: `open ${stamp}` });
     expect(open.ok).toBe(true);
-    expect(open.inbox_skipped).toEqual([]);
+    expect(Object.keys(open).sort()).toEqual(["message_ids", "ok", "recipients"]);
     setInbox([node.a.alias]);
     const r = await mcp(node.b.token, "broadcast", { message: `mcp bc ${stamp}` });
     expect(r.ok).toBe(true);

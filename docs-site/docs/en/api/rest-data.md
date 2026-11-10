@@ -1264,7 +1264,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 }
 ```
 
-`message_ids.length === recipients` — one inbox row per target session. `inbox_skipped` lists recipients skipped because their [inbox allowlist](#put-inbox-allowlist) does not accept this sender (the broadcast does not fail; an empty array when nobody was skipped). MCP `broadcast` returns the same field.
+`message_ids.length === recipients` — one inbox row per target session. `inbox_skipped` lists recipients skipped because their [inbox allowlist](#put-inbox-allowlist) does not accept this sender (the broadcast does not fail). **When nobody was skipped the key is absent**, so the receipt is still exactly `{ok, recipients, message_ids}`, byte-identical to before; clients read a missing key as "nobody skipped". MCP `broadcast` returns the same field.
 
 **Common 4xx errors**:
 

@@ -163,7 +163,7 @@ PUT /api/nodes/{node_id}/inbox-allowlist   {"senders": null}                 // 
 {"ok": false, "error": "node_permission_denied", "reason": "sender_not_allowed", "route": "POST /api/task", "hint": "…", "target": "reviewer", "sender": "user:bob"}
 ```
 
-每次拒绝按**目标节点**记一行权限报表（`sample` = 发件人），主人能看到谁被挡在门外。**广播不会因此失败**：不收这个发件人的收件人被跳过，响应里 `inbox_skipped: [{alias, node_id, reason: "sender_not_allowed"}]` 列出它们（没人被跳过时是空数组）。
+每次拒绝按**目标节点**记一行权限报表（`sample` = 发件人），主人能看到谁被挡在门外。**广播不会因此失败**：不收这个发件人的收件人被跳过，响应里 `inbox_skipped: [{alias, node_id, reason: "sender_not_allowed"}]` 列出它们（没人被跳过时没有这个键，回执与以前逐字节相同）。
 
 命令行：`anet node perm <node> --inbox planner,user:alice`（见 [CLI](/guide/cli#node-perm)）。
 

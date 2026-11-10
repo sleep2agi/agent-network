@@ -1335,7 +1335,7 @@ curl -X POST http://localhost:9200/api/broadcast \
 }
 ```
 
-`message_ids.length === recipients`，每个 target session 一个 inbox row。`inbox_skipped` 列出因为[收件白名单](#put-inbox-allowlist)不收这个发件人而被跳过的收件人（广播不会因此失败；没人被跳过时是空数组）。MCP `broadcast` 同样返回这一字段。
+`message_ids.length === recipients`，每个 target session 一个 inbox row。`inbox_skipped` 列出因为[收件白名单](#put-inbox-allowlist)不收这个发件人而被跳过的收件人（广播不会因此失败）。**没人被跳过时没有这个键**，回执仍恰好是 `{ok, recipients, message_ids}`，与以前逐字节相同；客户端把「没有」读成「没人被跳过」。MCP `broadcast` 同样返回这一字段。
 
 **常见 4xx**：
 

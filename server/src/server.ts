@@ -217,7 +217,7 @@ const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 // chat_groups(RFC-042,#457):部门群可用 —— …/departments/:dept/group、…/chat-groups(资料 / 成员 / 消息 / 已读)、
 // GET /api/dm/threads 的 group_threads;群对象带 viewer_can {manage, post},会话行带 last_message 预览,成员带 username / display_name。
 // node_inbox_allowlist:收件白名单可用 —— PUT /api/nodes/:id/inbox-allowlist { senders },GET /api/nodes 每行带 inbox_allowlist,
-// 被挡的派活回 reason=sender_not_allowed,广播回 inbox_skipped。
+// 被挡的派活回 reason=sender_not_allowed,广播回 inbox_skipped(有人被跳过时才出现,没人被跳过时回执与以前逐字节相同)。
 export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
@@ -6083,7 +6083,7 @@ return Bun.serve({
         isActive: (alias, netId) => assertNodeActive(alias, netId).ok,
         notify: (alias, netId) => pushEvent(alias, { type: "broadcast", inbox_count: pendingInboxCount(alias, netId) }, netId),
       });
-      return withCors(req, Response.json({ ok: true, recipients: ids.length, message_ids: ids, inbox_skipped: inboxSkipped }));
+      return withCors(req, Response.json({ ok: true, recipients: ids.length, message_ids: ids, ...(inboxSkipped.length ? { inbox_skipped: inboxSkipped } : {}) }));
     }
 
     // ── REST: tmux capture-pane ──

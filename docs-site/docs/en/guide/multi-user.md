@@ -288,6 +288,6 @@ A refusal is an explicit reason (independent of `COMMHUB_NODE_PERMISSIONS`, like
 {"ok": false, "error": "node_permission_denied", "reason": "sender_not_allowed", "route": "POST /api/task", "hint": "…", "target": "reviewer", "sender": "user:bob"}
 ```
 
-Each refusal is recorded in the permission report under the **target** node (`sample` = the sender), so the owner can see who was turned away. **A broadcast does not fail because of it:** recipients that do not accept the sender are skipped and listed in the response as `inbox_skipped: [{alias, node_id, reason: "sender_not_allowed"}]` (an empty array when nobody was skipped).
+Each refusal is recorded in the permission report under the **target** node (`sample` = the sender), so the owner can see who was turned away. **A broadcast does not fail because of it:** recipients that do not accept the sender are skipped and listed in the response as `inbox_skipped: [{alias, node_id, reason: "sender_not_allowed"}]` (the key is absent when nobody was skipped, so the receipt is byte-identical to before).
 
 CLI: `anet node perm <node> --inbox planner,user:alice` (see [CLI](/en/guide/cli#node-perm)).
