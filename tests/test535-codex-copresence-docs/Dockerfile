@@ -16,6 +16,8 @@ COPY docs-site/ docs-site/
 COPY README.md README.en.md ./
 COPY agent-network/README.md agent-network/README.md
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY agent-node/README.md agent-node/README.md
 COPY docs/rfcs/RFC-030-codex-tui-bridge.md docs/rfcs/RFC-030-codex-tui-bridge.md
 COPY docs/sop/codex-app-server-jam-restart.md docs/sop/codex-app-server-jam-restart.md

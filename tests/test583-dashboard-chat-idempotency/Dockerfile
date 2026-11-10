@@ -1,6 +1,8 @@
 FROM oven/bun:1
 WORKDIR /work/server
 COPY contracts /work/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /work/server/src/contracts
 COPY server/package.json server/package-lock.json ./
 RUN bun install --frozen-lockfile
 COPY server/src ./src

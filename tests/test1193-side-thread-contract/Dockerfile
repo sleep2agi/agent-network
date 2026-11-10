@@ -8,6 +8,8 @@ ENV TEST1193_SOURCE_COMMIT=${TEST1193_SOURCE_COMMIT}
 # （Windows 的 EPERM/EBUSY 重试）。本镜像只复制 side-thread 目录，缺这支会在加载时报
 # "Cannot find module '../../shared/windows-rename-retry'"——那是**跑法造成的红**。
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY agent-node/src/shared /app/agent-node/src/shared
 COPY agent-node/src/runtime/side-thread /app/agent-node/src/runtime/side-thread
 COPY tests/test1193-side-thread-contract /app/tests/test1193-side-thread-contract

@@ -2,6 +2,8 @@ FROM oven/bun:1.3.1
 
 WORKDIR /agent-node-src
 COPY contracts /contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts //server/src/contracts
 COPY agent-node /agent-node-src
 RUN cd /agent-node-src && bun install --frozen-lockfile
 COPY tests/test651-opencode-timeout-abort/run.sh /test651/run.sh

@@ -25,6 +25,8 @@ COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && npm ci
 
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/package.json ./agent-node/package.json
 # tests/feishu-envelope-compat.test.ts 跨包 import agent-node 的 runtime 源码。
 COPY agent-node/src ./agent-node/src

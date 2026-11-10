@@ -2,6 +2,8 @@ FROM oven/bun:1.3.14
 WORKDIR /repo
 RUN apt-get update -qq && apt-get install -y --no-install-recommends python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/*
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 RUN cd agent-node && bun install --frozen-lockfile
 COPY server/package.json server/package-lock.json ./server/

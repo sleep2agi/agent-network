@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends bash curl ca-ce
     rm -rf /var/lib/apt/lists/*
 
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY server/package*.json server/
 RUN cd server && bun install
 

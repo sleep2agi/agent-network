@@ -2,6 +2,8 @@ FROM oven/bun:1.3.1
 
 WORKDIR /agent-node-src
 COPY contracts /contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts //server/src/contracts
 COPY agent-node /agent-node-src
 # 没有这一行时，镜像里只有源码、没有 node_modules，bun build 会报
 #   error: Could not resolve: "zod" ... at /agent-node-src/src/commhub-mcp.ts

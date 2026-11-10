@@ -4,6 +4,8 @@ ARG RUNTIME_IMAGE
 FROM ${RUNTIME_IMAGE}
 USER root
 COPY contracts /contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts //server/src/contracts
 COPY agent-node/package-lock.json /tmp/current-agent-node-lock.json
 RUN cmp /tmp/current-agent-node-lock.json /agent-node-src/package-lock.json
 COPY agent-node/src/ /agent-node-src/src/

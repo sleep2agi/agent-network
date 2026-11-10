@@ -4,6 +4,8 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN npm install -g @opencode/cli@2.0.22 && test "$(opencode --version)" = 'opencode v2.0.22'
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package*.json ./server/
 COPY contracts /opt/node_modules/@sleep2agi/contracts
 # contracts/*.ts re-export ../server/src/contracts/*: ship that next to the copied contracts

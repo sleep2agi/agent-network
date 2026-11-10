@@ -4,6 +4,8 @@ LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
 WORKDIR /repo
 RUN apt-get update -qq && apt-get install -y --no-install-recommends coreutils bash python3 make g++ >/dev/null && rm -rf /var/lib/apt/lists/*
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 RUN cd agent-node && bun install --frozen-lockfile
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/

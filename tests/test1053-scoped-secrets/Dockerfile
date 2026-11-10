@@ -5,6 +5,8 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /candidate
 COPY agent-network/package*.json ./agent-network/
 COPY contracts /candidate/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /candidate/server/src/contracts
 COPY agent-node/package*.json ./agent-node/
 COPY server/package*.json ./server/
 RUN cd agent-network && npm ci --ignore-scripts --no-audit --no-fund && cd ../agent-node && npm ci --ignore-scripts --no-audit --no-fund && cd ../server && npm ci --ignore-scripts --no-audit --no-fund

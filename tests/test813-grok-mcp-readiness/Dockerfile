@@ -26,6 +26,8 @@ RUN install -d -o node -g node -m 0700 "/run/user/$(id -u node)" \
   && chown node:node /workspace
 USER node
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY --chown=node:node agent-node/package.json ./agent-node/
 COPY --chown=node:node agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-node && npm install --include=optional \
