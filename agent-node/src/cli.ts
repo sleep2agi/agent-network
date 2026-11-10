@@ -11,6 +11,7 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
+import { opencodeModelEffectiveSnapshot } from "./opencode-model-effective";
 import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copresence/late-reply-recover.js";
 import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
@@ -2140,10 +2141,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
         && opencodeCopresenceSession?.isRunning === true
         && typeof opencodeCopresenceSession.selectSessionAgent === "function"
         ? { opencode_agent_config_capable: true } : {}),
-      ...(variantReadback && variantSession?.isRunning ? {
-        model_effective: `${variantReadback.providerID}/${variantReadback.id}`,
-        modelVariant: variantReadback.variant === "default" ? null : variantReadback.variant ?? null,
-      } : {}),
+      ...(RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" ? opencodeModelEffectiveSnapshot({
+        variantReadback,
+        variantRunning: variantSession?.isRunning === true,
+        sessionModel: opencodeEffectiveModel,
+        sessionRunning: opencodeCopresenceSession?.isRunning === true,
+      }) : {}),
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
       ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
         sourceForkSnapshot(buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability())),
