@@ -9,7 +9,7 @@ import { assertNodeHealthy } from "./node-health-guard.js";
 import { nodeCanAcceptDispatch } from "./node-serviceability.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, type AgentRef } from "./agent-access.js";
-import { dispatchVerdict } from "./node-permissions.js";
+import { dispatchVerdict, inboxDenied, type InboxSender } from "./node-permissions.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { blockerTimedOut, blockerTimeoutClock, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
@@ -403,6 +403,22 @@ function agentCreatorDenial(row: ScheduledRow, target: AgentRef): { code: string
   return null;
 }
 
+/** 目标节点的收件白名单每次触发都按「建排程的人 / 节点」现判一次（名单可能在排程建好之后才设）。 */
+function creatorInboxDenial(row: ScheduledRow, target: AgentRef): { code: string; message: string } | null {
+  let sender: InboxSender;
+  if (row.created_by_node_id) {
+    const alias = db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE node_id = ?1 AND network_id = ?2", row.created_by_node_id, row.network_id)?.alias;
+    sender = { kind: "node", nodeId: row.created_by_node_id, aliases: alias ? [alias] : [] };
+  } else if (row.created_by) {
+    const user = db.get<{ username: string | null; role: string | null }>("SELECT username, role FROM users WHERE user_id = ?1", row.created_by);
+    sender = { kind: "user", userId: row.created_by, username: user?.username ?? null, isHubAdmin: user?.role === "admin" };
+  } else {
+    sender = { kind: "legacy" };
+  }
+  const denial = inboxDenied(row.network_id, target, sender, "schedule:dispatch");
+  return denial ? { code: "sender_not_allowed", message: `The target agent's inbox allowlist does not accept the schedule creator (${denial.sender})` } : null;
+}
+
 type DispatchEvent = { alias: string; networkId: string; taskId: string; priority: string; state: "delivered" | "queued" };
 
 export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: string, advanceSchedule: boolean, advanceAfter = new Date()): { runId: string; taskId?: string; status: string; event?: DispatchEvent } {
@@ -574,11 +590,11 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     // 给目标 Agent 发任务时,不再代他派发(否则受限前建的排程会永远绕过授权)。
     // Board #733 — an Agent-created schedule is that node's standing send_task: every run re-evaluates the
     // creating node as it is NOW (exists, not read-only, current owner) with send_task's own dispatchVerdict.
-    const creatorDenial = row.created_by_node_id
+    const creatorDenial = (row.created_by_node_id
       ? agentCreatorDenial(row, { alias: node.alias, nodeId: node.node_id })
       : row.created_by && !canMessageAgent(row.created_by, row.network_id, { alias: node.alias, nodeId: node.node_id })
         ? { code: "creator_access_revoked", message: "The schedule creator is no longer allowed to message this agent" }
-        : null;
+        : null) ?? creatorInboxDenial(row, { alias: node.alias, nodeId: node.node_id });
     if (creatorDenial) {
       finalStatus = "failed";
       db.run(

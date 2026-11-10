@@ -1,5 +1,12 @@
 # 更新日志
 
+## 未发布：节点收件白名单（谁能给它派活）与 `anet node perm`（2026-11-10）
+
+- 节点新增收件白名单 `inbox_allowlist`：`PUT /api/nodes/:id/inbox-allowlist` `{"senders": [...] | null}`，与 `peer-allowlist` 同形同授权（节点主人 / 网络 owner·admin / Hub 管理员，审计 `node_inbox_allowlist_changed`）。`GET /api/nodes` 每行带 `inbox_allowlist`；`/health` 能力 `node_inbox_allowlist`。
+- 条目：`<alias>` / `<node_id>` 匹配 Agent，`user:<username>` / `user:<user_id>` / `user:*` 匹配人；主人、网络 owner/admin、Hub 管理员默认放行，写 `!strict` 才要求他们也列名。
+- MCP `send_task` / `send_message` / `retry_task` / `reassign_task`、REST `POST /api/task` 与定时任务触发时，不在名单上的发件人得到 `node_permission_denied` / `sender_not_allowed`（显式拒绝，与 `COMMHUB_NODE_PERMISSIONS` 无关）。广播跳过这些收件人，并在 `inbox_skipped` 里列出。
+- 新命令 `anet node perm <node>`：看 / 改模式、对端白名单与收件白名单，支持 `--json`。未发布到 npm。
+
 ## 2026-10-14 Windows native TUI health alpha
 
 Published software alpha CLI2.3.0-preview.179 / Node2.5.0-preview.145: ongoing Windows co-presence health verifies the exact launch generation and owned loopback connection. Missing evidence remains unknown; proven exit or lost connection uses the existing Hub degradation guard. Source/native fake-Codex CI and exact-main formal publication are recorded in `report-test1175-windows-tui-health.txt` and `report-test1175-public.txt`. Both full npm and official GitHub archives are verified; the initial CLI registry-timeout workflow failure remains recorded. Original-device/model acceptance remains pending.

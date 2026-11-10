@@ -37,7 +37,7 @@ import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWr
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
 import { listedToolFilter, scopeToolsList, type ToolCaller } from "./tool-audience.js";
 import { agentBatchScheduleInterval, agentCancelSchedule, agentCreateSchedule, agentGetSchedule, agentListSchedules, agentRunScheduleNow, agentScheduleRuns, agentUpdateSchedule } from "./schedule-agent.js";
-import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, recordNodeToolCall, writeVerdict, type NodeIdentity, type Verdict, toolAllowlistVerdict } from "./node-permissions.js";
+import { broadcastVerdict, dispatchVerdict, filterBroadcastByInbox, humanOnlyVerdict, inboxDenied, inboxSenderFromAuth, NODE_TOOL_CLASS, nodeDecide, nodeIdentity, nodePermissionDeniedBody, recordNodeToolCall, writeVerdict, type InboxSender, type NodeIdentity, type Verdict, toolAllowlistVerdict } from "./node-permissions.js";
 import { countInFlightTasks } from "./node-in-flight-tasks.js";
 import { restrictedMemberAttachmentsDenied } from "./restricted-files.js";
 import { errorBody } from "./requirements-errors.js";
@@ -410,6 +410,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const explicit = enforceNetworkId ?? clientNetId ?? null;
     if (explicit !== null || !enforceUserId) return explicit;
     return singleNetworkId({ networkId: null, networkIds: getUserNetworkIds(enforceUserId) });
+  };
+
+  // 收件白名单（目标节点愿不愿意收这个发件人）。放在各工具自己的权限检查**之后**判，
+  // 这样没权限 / 没授权的调用方仍然拿到原来那条统一的错误，不能拿它探测别人设没设名单。
+  let inboxSenderCache: InboxSender | null = null;
+  const inboxSender = (): InboxSender => inboxSenderCache ??= inboxSenderFromAuth({
+    isNodeToken: callerTokenIsNetwork, tokenId: callerTokenId ?? null, boundNetworkId: enforceNetworkId ?? null,
+    userId: enforceUserId ?? null, username: callerAlias ?? null,
+  });
+  const inboxDeniedReply = (netId: string | null, target: AgentRef, tool: string) => {
+    const denial = inboxDenied(netId, target, inboxSender(), `mcp:${tool}`);
+    return denial ? { content: [{ type: "text" as const, text: JSON.stringify(denial) }] } : null;
   };
 
   // Check write access — delegates to the shared canRestWriteNetwork so MCP
@@ -2258,6 +2270,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const targetAlias = canonical.alias;
       const target = resolveDeliveryTarget(targetAlias, effectiveNetId);
       if (target.state === "not_found") return deliveryTargetReply(target)!;
+      const inboxRefused = inboxDeniedReply(effectiveNetId, { alias: targetAlias, nodeId: target.session?.node_id ?? null }, "send_task");
+      if (inboxRefused) return inboxRefused;
 
       // Dashboard sends carry a random client_request_id inside meta. Derive
       // the task primary key from authenticated scope + that request id so a
@@ -2464,6 +2478,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const targetAlias = canonical.alias;
       const target = resolveDeliveryTarget(targetAlias, effectiveNetId);
       if (target.state === "not_found") return deliveryTargetReply(target)!;
+      { const inboxRefused = inboxDeniedReply(effectiveNetId, { alias: targetAlias, nodeId: target.session?.node_id ?? null }, "send_message"); if (inboxRefused) return inboxRefused; }
       // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 2/6).
       {
         const lc = assertNodeActive(targetAlias, effectiveNetId ?? null);
@@ -3073,6 +3088,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!["failed", "expired", "cancelled"].includes(task.status)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: `task status is ${task.status}, not retryable` }) }] };
       }
+      { const inboxRefused = inboxDeniedReply(effectiveNetId ?? task.network_id ?? null, { alias: task.to_name, nodeId: task.to_node_id ?? null }, "retry_task"); if (inboxRefused) return inboxRefused; }
       // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 4/6).
       {
         const lc = assertNodeActive(task.to_name, effectiveNetId ?? task.network_id ?? null);
@@ -3429,6 +3445,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const reassignedAlias = canonical.alias;
       const target = resolveDeliveryTarget(reassignedAlias, effectiveNetId ?? task.network_id ?? null);
       const newNodeId = target.state === "not_found" ? null : (target.session?.node_id ?? null);
+      { const inboxRefused = inboxDeniedReply(effectiveNetId ?? task.network_id ?? null, { alias: reassignedAlias, nodeId: newNodeId }, "reassign_task"); if (inboxRefused) return inboxRefused; }
       // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 5/6).
       {
         const lc = assertNodeActive(reassignedAlias, effectiveNetId ?? task.network_id ?? null);
@@ -3644,7 +3661,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (filter_server) { sql += " AND server = ?"; params.push(filter_server); }
       if (filter_status) { sql += " AND status = ?"; params.push(filter_status); }
 
-      const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
+      const allTargets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
+      const { allowed: targets, skipped: inboxSkipped } = filterBroadcastByInbox(allTargets, effectiveNetId, inboxSender(), "mcp:broadcast");
       // #2721 —— 分批入库 + 批间让出（见 broadcast-fanout.ts 顶部：一条广播 384 行曾把 Hub
       // 打成 143.9 秒的 timer 饥饿）。语义不变：仍然逐个收件人一行、仍然 best-effort 跳过非 active。
       const { ids } = await enqueueBroadcast(targets, message, "hub", effectiveNetId, {
@@ -3657,7 +3675,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ ok: true, recipients: ids.length, message_ids: ids }),
+            text: JSON.stringify({ ok: true, recipients: ids.length, message_ids: ids, ...(inboxSkipped.length ? { inbox_skipped: inboxSkipped } : {}) }),
           },
         ],
       };

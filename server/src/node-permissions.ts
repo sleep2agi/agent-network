@@ -36,17 +36,23 @@ export type NodePermissionReason =
    *  这类令牌**没有 nodes 行**，两张白名单都管不到它；先按「记录」模式跑，看有多少。 */
   | "unbound_token"
   /** #2969 续 —— 主人在这个节点的 REST 白名单里没有列这条写路由。 */
-  | "rest_not_allowed";
+  | "rest_not_allowed"
+  /** 收件白名单 —— **目标**节点的主人设了收件白名单，发件人不在名单上。判的是收件方，不是调用方。 */
+  | "sender_not_allowed";
 
 /** 显式模式的原因:不看开关,永远拒。 */
 // 白名单和 readonly/restricted 同类：**主人主动设的，设了就立刻生效**，不看开关。
-const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed", "tool_not_allowed", "rest_not_allowed"]);
+const MODE_REASONS: ReadonlySet<NodePermissionReason> = new Set(["mode_readonly", "mode_restricted_not_assigned", "peer_not_allowed", "tool_not_allowed", "rest_not_allowed", "sender_not_allowed"]);
 
 // #2969 —— 节点级对端白名单：JSON 数组（alias 或 node_id）；NULL = 不限制。
 // 只增不改：旧代码不读这一列；设为 NULL 时行为与现在完全一致。
 // #2969 后半 —— 接口白名单：JSON 数组（MCP 工具名）；NULL = 不限制。
 // #2969 续 —— REST 写接口白名单：JSON 数组（形如 "POST /api/task"）；NULL = 不限制。
 // 只对**节点令牌的写方法**生效（GET / SSE 永不经过它，否则节点会变聋）。
+// 收件白名单：JSON 数组（alias / node_id / user:<username|user_id> / user:* / !strict）；NULL = 谁都能发。
+try { db.exec("ALTER TABLE nodes ADD COLUMN inbox_allowlist TEXT"); } catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
 try { db.exec("ALTER TABLE nodes ADD COLUMN rest_allowlist TEXT"); } catch (e: any) {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
@@ -304,6 +310,7 @@ const HINTS: Record<NodePermissionReason, string> = {
   tool_not_allowed: "this node is limited to an explicit tool allowlist; this tool is not on it — ask the node's owner to add it, or clear the allowlist",
   unbound_token: "this token does not resolve to a node (usually the node was renamed and the token was not); rename or bind the token, or issue a node-bound token",
   rest_not_allowed: "this node is limited to an explicit REST write allowlist; this route is not on it — ask the node's owner to add it, or clear the allowlist",
+  sender_not_allowed: "the target node only accepts tasks and messages from an explicit inbox allowlist and you are not on it — ask the target node's owner to add you (alias, node_id, or user:<username>), or clear its inbox allowlist",
 };
 
 export function nodePermissionDeniedBody(reason: NodePermissionReason, route: string): { ok: false; error: "node_permission_denied"; reason: NodePermissionReason; route: string; hint: string } {
@@ -398,6 +405,130 @@ export function broadcastVerdict(id: NodeIdentity): Verdict {
   if (id.mode === "restricted") return { reason: "mode_restricted_not_assigned" };
   if (!id.ownerUserId) return { reason: "owner_unknown" };
   return null;
+}
+
+// ── 收件白名单(接收侧) ──
+//
+// 上面几条判的都是**调用方**能不能发；这里判**收件方**愿不愿意收。两边独立、都要过。
+// 名单条目：
+//   alias / node_id        → 匹配 Agent 发件人（节点令牌）
+//   user:<username|user_id> → 匹配人（Dashboard / 桌面端的用户令牌）；user:* = 任何人
+//   !strict                → 关掉下面的隐式放行
+// 隐式放行（没有 !strict 时）：节点主人、网络 owner/admin、Hub 管理员、旧的无身份调用（open/legacy 模式，
+// 本来就「谁都是谁」，名单在那里无从判起）。目的：主人设名单时不会把自己锁在门外。
+// 节点发给自己永远放行（含 !strict）。
+export const INBOX_STRICT_ENTRY = "!strict";
+
+export type InboxSender =
+  | { kind: "node"; nodeId: string | null; aliases: string[] }
+  | { kind: "user"; userId: string; username: string | null; isHubAdmin?: boolean }
+  | { kind: "legacy" };
+
+/** 从调用方的令牌上下文得出发件人（REST 与 MCP 共用，免得两边口径漂）。 */
+export function inboxSenderFromAuth(auth: { isNodeToken: boolean; tokenId: string | null; boundNetworkId: string | null; userId: string | null; username: string | null }): InboxSender {
+  if (auth.isNodeToken) {
+    const id = auth.boundNetworkId ? nodeIdentity(auth.tokenId, auth.boundNetworkId) : null;
+    return { kind: "node", nodeId: id?.nodeId ?? null, aliases: id?.aliases ?? [] };
+  }
+  if (auth.userId) {
+    const isHubAdmin = db.get<{ role: string | null }>("SELECT role FROM users WHERE user_id = ?1", auth.userId)?.role === "admin";
+    return { kind: "user", userId: auth.userId, username: auth.username, isHubAdmin };
+  }
+  return { kind: "legacy" };
+}
+
+export function inboxSenderLabel(sender: InboxSender): string {
+  if (sender.kind === "node") return sender.aliases[0] ?? (sender.nodeId ? `node:${sender.nodeId}` : "node:?");
+  if (sender.kind === "user") return `user:${sender.username ?? sender.userId}`;
+  return "legacy";
+}
+
+type InboxTargetRow = { node_id: string; alias: string | null; owner_user_id: string | null; inbox_allowlist: string | null };
+
+function inboxTargetRow(networkId: string | null, target: AgentRef): InboxTargetRow | null {
+  if (target.nodeId) {
+    const row = db.get<InboxTargetRow>(
+      "SELECT node_id, alias, owner_user_id, inbox_allowlist FROM nodes WHERE node_id = ?1", target.nodeId);
+    if (row) return row;
+  }
+  if (target.alias && networkId) {
+    return db.get<InboxTargetRow>(
+      "SELECT node_id, alias, owner_user_id, inbox_allowlist FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1", target.alias, networkId);
+  }
+  return null;
+}
+
+/** 纯判定（不记账）：名单 + 发件人 → 放不放行。 */
+export function inboxAllows(
+  list: string[] | null,
+  sender: InboxSender,
+  ctx: { targetNodeId: string; targetAlias: string | null; ownerUserId: string | null; networkId: string | null },
+): boolean {
+  if (!list) return true;
+  if (sender.kind === "node") {
+    if ((sender.nodeId && sender.nodeId === ctx.targetNodeId) || (ctx.targetAlias && sender.aliases.includes(ctx.targetAlias))) return true;
+    return (!!sender.nodeId && list.includes(sender.nodeId)) || sender.aliases.some(a => list.includes(a));
+  }
+  const strict = list.includes(INBOX_STRICT_ENTRY);
+  if (sender.kind === "legacy") return !strict;
+  if (!strict) {
+    if (sender.isHubAdmin) return true;
+    if (ctx.ownerUserId && sender.userId === ctx.ownerUserId) return true;
+    if (ctx.networkId) {
+      const role = db.get<{ role: string }>("SELECT role FROM network_members WHERE network_id = ?1 AND user_id = ?2", ctx.networkId, sender.userId)?.role;
+      if (role === "owner" || role === "admin") return true;
+    }
+  }
+  return list.includes("user:*")
+    || list.includes(`user:${sender.userId}`)
+    || (!!sender.username && list.includes(`user:${sender.username}`));
+}
+
+export type InboxDenial = ReturnType<typeof nodePermissionDeniedBody> & { target: string; sender: string };
+
+/**
+ * 发往 target 之前判一次收件白名单。放行 → null；拒绝 → 拒绝体（REST 403 / MCP 文本同形），
+ * 并按**目标节点**记一行 node_permission_log（主人在报表里能看到谁被挡在门外）。
+ */
+export function inboxDenied(networkId: string | null, target: AgentRef, sender: InboxSender, route: string): InboxDenial | null {
+  const row = inboxTargetRow(networkId, target);
+  if (!row) return null;
+  const list = normalizePeerAllowlist(row.inbox_allowlist);
+  if (!list) return null;
+  if (inboxAllows(list, sender, { targetNodeId: row.node_id, targetAlias: row.alias ?? target.alias, ownerUserId: row.owner_user_id, networkId })) return null;
+  const senderLabel = inboxSenderLabel(sender);
+  const targetLabel = row.alias ?? target.alias ?? row.node_id;
+  if (networkId) {
+    recordNodePermission({
+      networkId, nodeId: row.node_id, logKey: row.node_id, aliases: row.alias ? [row.alias] : [], ownerUserId: row.owner_user_id,
+      mode: "normal", peerAllowlist: null, toolAllowlist: null, restAllowlist: null,
+    }, route, "sender_not_allowed", senderLabel);
+  }
+  return { ...nodePermissionDeniedBody("sender_not_allowed", route), target: targetLabel, sender: senderLabel };
+}
+
+export type InboxSkipped = { alias: string; node_id: string | null; reason: "sender_not_allowed" };
+
+/**
+ * 广播：收件白名单不收这个发件人的收件人**跳过**（不让整条广播失败），并报告给调用方。
+ * 快路径：全库没有任何节点设收件白名单时一次查询就返回，不逐个判。
+ */
+export function filterBroadcastByInbox<T extends { alias: string; node_id: string | null; network_id: string | null }>(
+  targets: readonly T[], effectiveNetId: string | null, sender: InboxSender, route: string,
+): { allowed: T[]; skipped: InboxSkipped[] } {
+  if (!targets.length || !db.get("SELECT 1 AS ok FROM nodes WHERE inbox_allowlist IS NOT NULL LIMIT 1")) {
+    return { allowed: [...targets], skipped: [] };
+  }
+  const allowed: T[] = [];
+  const skipped: InboxSkipped[] = [];
+  for (const t of targets) {
+    if (inboxDenied(effectiveNetId ?? t.network_id ?? null, { alias: t.alias, nodeId: t.node_id }, sender, route)) {
+      skipped.push({ alias: t.alias, node_id: t.node_id ?? null, reason: "sender_not_allowed" });
+    } else {
+      allowed.push(t);
+    }
+  }
+  return { allowed, skipped };
 }
 
 /** 一般的写(管节点、提交技能、探测模型…):只读 / 受限拒;正常放行(由各自的既有规则管)。 */

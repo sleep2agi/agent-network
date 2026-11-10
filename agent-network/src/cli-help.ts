@@ -17,6 +17,8 @@
 //    handler's `switch (sub)` / `sub === "x"` and runs `--help` + `-h` for each.
 //    Adding a subcommand without an entry here turns that test red.
 
+import { NODE_PERM_USAGE } from "./node-perm";
+
 const NODE_REF = "<node-id|node-name>";
 
 export const NODE_DELETE_USAGE = `Usage: anet node delete ${NODE_REF} [--force]
@@ -54,6 +56,7 @@ Commands:
   ls                            List nodes in this directory
   codex <verb> <ref>            Codex TUI co-presence lifecycle
   secret <verb> <ref>          Manage <node>/secrets.env (list | set | unset)
+  perm <ref> [flags]            Show/set a node's permission mode, send-to and receive-from allowlists
   migrate-token-to-envref <n>   Move a node's token out of config.json into .env
 
 Run 'anet node <command> --help' for details.`,
@@ -150,6 +153,7 @@ No secrets.env is a normal state (exit 0). A symlink, a non-regular file or an
 unreadable file is an error (exit 1) rather than an empty list; set/unset
 refuse to write through a symlink.
 `,
+  "node perm": NODE_PERM_USAGE,
   "node ls": `Usage: anet node ls [--verbose]
        anet node list
 

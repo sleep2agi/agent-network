@@ -276,6 +276,36 @@ curl http://localhost:9200/api/nodes \
 | `in_flight` | 本节点正在做的任务数，与 `stop_node` / `restart_node` **同一份 SQL**（无状态行按 60 分钟龄判，终态任务不算） |
 | `can_restart_now` | `path !== "manual"` 且没有被在途任务挡住 |
 
+**权限字段**：每行还带 `permission_mode`、`peer_allowlist`（它能发给谁）、`inbox_allowlist`（谁能发给它）、`tool_allowlist`、`rest_allowlist`；白名单只会是 `null`（不限制）或非空数组。含义见 [多用户：节点权限](/guide/multi-user#inbox-allowlist)。
+
+### PUT /api/nodes/:id/inbox-allowlist {#put-inbox-allowlist}
+
+> [源码 ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
+
+设置节点的**收件白名单**：只有名单上的发件人能给它派活 / 发消息。与 `PUT /api/nodes/:id/peer-allowlist`（`{"peers": …}`）同形。支持的 Hub 在 `/health` 的 `capabilities` 里带 `node_inbox_allowlist`。
+
+```bash
+curl -X PUT http://localhost:9200/api/nodes/n_abc123/inbox-allowlist \
+  -H "Authorization: Bearer utok_xxx" -H "Content-Type: application/json" \
+  -d '{"senders": ["planner", "n_def456", "user:alice"]}'
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `senders` | `string[] \| null` | `<alias>` / `<node_id>` = Agent；`user:<username>` / `user:<user_id>` = 人；`user:*` = 任何人；`!strict` = 主人和网络 owner/admin 也必须列名。`null` 清空（谁都能发）。最多 200 条 |
+
+**响应**：`{"ok": true, "node_id": "n_abc123", "senders": ["planner", "n_def456", "user:alice"]}`（清空时 `senders: null`）。记审计 `node_inbox_allowlist_changed`，`detail` 为 `{from, to}`。
+
+| 状态 | `error` | 触发条件 |
+|------|---------|---------|
+| 400 | `invalid_json` / `invalid_senders` | 请求体不是 JSON / `senders` 既不是数组也不是 `null` |
+| 400 | `empty_allowlist_ambiguous` | 传了 `[]`；清空请传 `null` |
+| 400 | `too_many_senders` | 超过 200 条 |
+| 401 | `auth required` | 没带令牌 |
+| 403 | `user_token_required` | 用节点令牌调用 |
+| 403 | `permission_denied` | 不是节点主人 / 网络 owner·admin / Hub 管理员 |
+| 404 | `node_not_found` | 节点不存在，或不在你的网络里（同码） |
+
 ::: warning 别只读 `can_restart_now`
 它是「现在能不能点」的快照。真正发起时服务端仍会重新判一次（`node_busy_in_flight` / `adopted_restart_requires_daemon`），客户端要按这两个错误码兜底，不能把快照当承诺。
 :::
@@ -1263,6 +1293,7 @@ SSE 连接数，以及权威 runtime submission/consumption 时间戳。它不�
 | 400 | `network_id required for user token when multiple networks are available` | utok\_ 调用方有多个 network，必须显式指定 `network_id` |
 | 403 | `access denied to requested network` | utok\_ 调用方不是 `network_id` 成员 |
 | 403 | `permission_denied` | 角色不足（viewer 不能写）|
+| 403 | `node_permission_denied`（`reason: "sender_not_allowed"`） | 目标节点设了[收件白名单](#put-inbox-allowlist)且发件人不在名单上。正文带 `route` / `hint` / `target` / `sender`；与开关无关，永远拒 |
 | 409 | `node_degraded` | 目标节点的健康报告说某一层坏了（Hub `0.9.0-preview.86` 起）。响应带 `layers[]`（`layer` / `label` / `reason` / `hint`）、`hint`、`health_observed_ms_ago`、`force_allowed`。用户令牌可在请求体里带 `"force": true` 强制派发；节点令牌不行。见[健康与降级](/guide/codex-copresence#health) |
 
 **不**写 audit log（[`/api/task` 处理函数 server.ts](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 没有 `logAudit` 调用，跟 `POST /api/networks` 的「不写」一致）；成功后给 target alias 推送 `new_task` SSE 事件。
@@ -1299,11 +1330,12 @@ curl -X POST http://localhost:9200/api/broadcast \
 {
   "ok": true,
   "recipients": 10,
-  "message_ids": ["uuid-1", "uuid-2"]
+  "message_ids": ["uuid-1", "uuid-2"],
+  "inbox_skipped": [{ "alias": "reviewer", "node_id": "n_abc123", "reason": "sender_not_allowed" }]
 }
 ```
 
-`message_ids.length === recipients`，每个 target session 一个 inbox row。
+`message_ids.length === recipients`，每个 target session 一个 inbox row。`inbox_skipped` 列出因为[收件白名单](#put-inbox-allowlist)不收这个发件人而被跳过的收件人（广播不会因此失败）。**没人被跳过时没有这个键**，回执仍恰好是 `{ok, recipients, message_ids}`，与以前逐字节相同；客户端把「没有」读成「没人被跳过」。MCP `broadcast` 同样返回这一字段。
 
 **常见 4xx**：
 

@@ -133,6 +133,40 @@ PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // �
 
 > 目前 `tools` 只覆盖 MCP 工具；REST 路由的白名单尚未提供。
 
+### 收件白名单：谁能给这个节点派活 {#inbox-allowlist}
+
+上面两张白名单管的是节点**自己能做什么**（发送侧）。收件白名单管的是**谁能找它**（接收侧）：目标节点的主人限定「只有这些发件人能给它派活 / 发消息」。两侧独立，都要过。
+
+```
+PUT /api/nodes/{node_id}/inbox-allowlist   {"senders": ["planner", "n_xxx", "user:alice"]}
+PUT /api/nodes/{node_id}/inbox-allowlist   {"senders": null}                 // 清空 = 谁都能发
+```
+
+与 `peer-allowlist` 完全同形：授权口径相同（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员），`[]` 同样拒收（400 `empty_allowlist_ambiguous`），最多 200 条（400 `too_many_senders`），`senders` 不是数组也不是 `null` 返回 400 `invalid_senders`，节点令牌返回 403 `user_token_required`。成功返回 `{ok, node_id, senders}`，记审计 `node_inbox_allowlist_changed`（`{from, to}`）。`GET /api/nodes` 每行带 `inbox_allowlist`（`null` 或非空数组）。支持的 Hub 在 `/health` 的 `capabilities` 里带 `node_inbox_allowlist`。
+
+**条目怎么匹配发件人**：
+
+| 条目 | 匹配 |
+|---|---|
+| `<alias>` / `<node_id>` | Agent 发件人（节点令牌） |
+| `user:<username>` / `user:<user_id>` | 人（Dashboard / 桌面端 / `anet` 的用户令牌） |
+| `user:*` | 任何人 |
+| `!strict` | 关掉下面的隐式放行 |
+
+**隐式放行（不会把自己锁在门外）**：没有 `!strict` 时，以下发件人不看名单直接放行 —— 节点主人、网络 owner / admin、Hub 管理员，以及没有用户身份的旧式调用（open / legacy 模式，本来就「谁都是谁」）。要连他们也必须列名，就加一条 `!strict`。节点发给自己永远放行（含 `!strict`）。
+
+**判在哪**：MCP `send_task` / `send_message` / `retry_task` / `reassign_task` / `broadcast`，REST `POST /api/task` / `POST /api/broadcast`，以及定时任务每次触发（按建排程的人 / 节点现判，被拒的这次运行记 `sender_not_allowed`）。判定放在各入口原有的权限检查**之后**：没权限 / 没授权的调用方仍然拿到原来那条统一错误，不能借它探测别人设没设名单。
+
+被拒时是显式原因（不看 `COMMHUB_NODE_PERMISSIONS`，与 `peer_not_allowed` 同类），REST 403，MCP 同样的正文：
+
+```json
+{"ok": false, "error": "node_permission_denied", "reason": "sender_not_allowed", "route": "POST /api/task", "hint": "…", "target": "reviewer", "sender": "user:bob"}
+```
+
+每次拒绝按**目标节点**记一行权限报表（`sample` = 发件人），主人能看到谁被挡在门外。**广播不会因此失败**：不收这个发件人的收件人被跳过，响应里 `inbox_skipped: [{alias, node_id, reason: "sender_not_allowed"}]` 列出它们（没人被跳过时没有这个键，回执与以前逐字节相同）。
+
+命令行：`anet node perm <node> --inbox planner,user:alice`（见 [CLI](/guide/cli#node-perm)）。
+
 **报表**：网络 owner / admin（用户令牌）可以看过去一段时间每个节点「本来会被拦」的次数，默认 7 天：
 
 ```
@@ -151,7 +185,7 @@ GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 
 | 层 | 含义 | 打开 enforce 会变吗 |
 |---|---|---|
-| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` | **不会**——这些与开关无关，永远拒 |
+| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` / `sender_not_allowed` | **不会**——这些与开关无关，永远拒 |
 | `likely_already_blocked` | `human_only` | 多数写路由另有一道「只有人能操作」的检查，调用方本来就被拒 ⇒ 通常不是增量 |
 | `changes_behavior` | `beyond_owner_visibility` / `agent_not_granted_to_owner` / `owner_unknown` / `unbound_token` | **会**——这才是真实影响面 |
 
