@@ -1,0 +1,64 @@
+TMWork Hub wire v0.3 — foundation only
+Date: 2026-11-09
+Source base: f2388b0ff (origin/main at branch creation)
+Branch: feat/tmwork-hub-wire-v03
+
+Scope
+  Versioned wire document and inert pure validators/types. No server import,
+  route, capability projection, runtime enum, authority or database change.
+  Owner grant, directory transport, create/ack and binding integration remain
+  separate PRs. No deployment, npm/native publication or version bump.
+
+Environment
+  Docker commands via sg docker. Network disabled, 2 vCPU/2 GiB test limit.
+  Bun 1.3.14. Existing offline image anet-release-4099-4150-check:local
+  image manifest sha256:4141d37d6cccd3049e5273de535a0ecd55058fa39f064bc5272c7b5cc16365d3.
+  This cache is a local test tool, not a claimed reproducible release input.
+  Suite Dockerfile defaults to upstream oven/bun:1.3.14-debian and accepts
+  BASE_IMAGE for offline testing; no dependencies needed by its pure probe.
+
+1. Environment / pure Docker contract
+  sg docker -c 'docker build --network none --build-arg BASE_IMAGE=anet-release-4099-4150-check:local -t anet-tmwork-wire-v03:local -f tests/test-tmwork-wire-v03/Dockerfile . && docker run --rm --network none --cpus 2 --memory 2g anet-tmwork-wire-v03:local'
+  PASS: 2 tests, 61 assertions, 0 fail (final run after Unicode-control fix).
+
+2. Targeted unit regressions, canonical server aggregate runner inside Docker
+  Source server/src, server/scripts and contracts mounted read-only over /work.
+  bun run /work/server/scripts/test-aggregate.ts
+    --file=server/src/tmwork-wire.test.ts
+    --file=server/src/create-node-validate.test.ts
+  PASS: 2 files; TMWork 5 tests/97 assertions; existing create validation
+    47 tests/187 assertions. Total 52 tests/284 assertions/0 fail.
+
+3. Existing adoption HTTP regression, isolated single-file Docker process
+  Source server/src and contracts mounted read-only over /work.
+  bun test /work/server/src/adoption-candidates-http.test.ts
+  PASS: 4 tests/41 assertions/0 fail, synthetic local Hub and temporary DB only.
+  Tests owner/node-owner visibility; member/foreign/daemon/query-token denial;
+  stale/hostname/alias/binding filters; discovery flag absent without report.
+
+Retained failed invocation evidence (runner usage, not a product assertion)
+  Initial aggregate selection named nonexistent adoption-candidates.test.ts:
+    exit 2, --file is not an enumerated server test.
+  Corrected name adoption-candidates-http.test.ts owns process.env.COMMHUB_DB,
+    so current aggregate explicitly refuses it, exit 2.
+  Correct execution is separate isolated per-file process (step 3), not changing
+    tests or weakening assertions. Both invocation failures occurred before
+    selected tests ran. Subsequent correct unit and HTTP runs passed.
+
+Coverage / boundaries
+  Pure selection: bind/new/fork, missing field, unknown/mixed mode or field,
+    null/array, invalid protocol/instance/ref/intent, raw native/path/source input.
+  Pure capability: explicit protocol/directory/modes, duplicates, unsupported
+    protocol/mode, malformed version/instance and forged owner/extra keys.
+  Create shape: ordinary options even null/empty are forbidden; runtime/flag
+    mixing rejected. Actual node names still require existing shared validator.
+  Generic runtime/buildAnetArgs remain rejecting tmwork-session (inert PR).
+  No claim of end-to-end TMWork runtime, object-level ownership authorization,
+    directory transfer, credential lifecycle, new/fork, binding or UI acceptance.
+  No full server suite or native Windows acceptance run in this foundation.
+
+Independent review
+  Read-only reviewer found no blocking issues; one low-priority inconsistency:
+    version control-character validation rejected ASCII controls but not C1.
+  Fixed using Unicode Cc guard and added U+0085 negative assertions in both
+    unit and Docker contract suites; reran both successfully.
