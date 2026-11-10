@@ -304,22 +304,28 @@ await test("8. concurrent events tracked independently", async () => {
   const e1 = makeEvent("8a");
   const e2 = makeEvent("8b");
   await Promise.all([onEvent(e1), onEvent(e2)]);
-  assert.equal(adapter.sendCalls.length, 2, "two placeholder sends");
+  // #3682: the second concurrent event also gets a queue-position notice (ahead=1).
+  assert.equal(adapter.sendCalls.length, 3, "two placeholder sends + one queue notice");
+  assert.equal(
+    adapter.sendCalls.filter((c) => /排在第|排队/.test(String((c as { text?: string }).text ?? ""))).length,
+    1,
+    "exactly one queue notice",
+  );
   assert.equal(sentEnvelopes.length, 2, "two IPC envelopes");
 
   // Reply to second event first.
   triggerReply(e2.idempotencyKey, "reply 8b");
   await flush();
   assert.equal(adapter.editCalls.length, 0);
-  assert.equal(adapter.sendCalls.length, 3, "e2 reply send fired");
-  assert.equal((adapter.sendCalls[2] as { text: string }).text, "reply 8b");
+  assert.equal(adapter.sendCalls.length, 4, "e2 reply send fired");
+  assert.equal((adapter.sendCalls[3] as { text: string }).text, "reply 8b");
 
   // Then the first.
   triggerReply(e1.idempotencyKey, "reply 8a");
   await flush();
   assert.equal(adapter.editCalls.length, 0);
-  assert.equal(adapter.sendCalls.length, 4, "e1 reply send fired");
-  assert.equal((adapter.sendCalls[3] as { text: string }).text, "reply 8a");
+  assert.equal(adapter.sendCalls.length, 5, "e1 reply send fired");
+  assert.equal((adapter.sendCalls[4] as { text: string }).text, "reply 8a");
 });
 
 await test("9. pending evicted after reply (duplicate reply is no-op)", async () => {
@@ -600,7 +606,7 @@ await test("18. wildcard allowFrom=['*'] does NOT exempt (public channel still r
   assert.equal(notices.length, 2, "wildcard sender sees rate-limit notice on 4th + 5th");
 });
 
-await test("19. Group rate limit applies even for allowFrom-explicit user (group-side gate by chat)", async () => {
+await test("19. allowFrom-explicit user is not rate-limited in groups either (461422e1: queue, not reject)", async () => {
   // Group conversations gate by chat_id (not sender), so an exemption
   // would let one user starve the group. Explicit allowFrom does NOT
   // bypass group-side rate-limit; this test locks the boundary.
@@ -620,10 +626,12 @@ await test("19. Group rate limit applies even for allowFrom-explicit user (group
       }),
     );
   }
+  // 461422e1 (2026-11-05): an explicit allow-list sender is exempt in groups too; flood
+  // protection is the queue cap (MAX_QUEUED_TURNS) and the wildcard-allowFrom rate limit.
   assert.equal(
     innerCalls.length,
-    2,
-    "group still applies GROUP_RATE_LIMIT_COUNT=2 even for allowFrom-explicit sender",
+    4,
+    "allowFrom-explicit sender is not rate-limited in a group; all four reach the queue",
   );
 });
 
