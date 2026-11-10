@@ -1274,10 +1274,14 @@ describe("#473 anonymous /health — watchdog contract intact, no topology leak"
       expect(Number.isInteger(body.alert_baselines.aliases)).toBe(true);
     }
     // clk_tck_assumed_reason：一个必须能解释「为什么用假设值」的字符串（空串是合法的：读到了真实值）
-    expect(typeof body.clk_tck_assumed_reason).toBe("string");
-    // 它与 clk_tck_source 配对：source=assumed 时必须有理由，否则必须是空串
-    if (body.clk_tck_source === "assumed") expect(body.clk_tck_assumed_reason.length).toBeGreaterThan(0);
-    else expect(body.clk_tck_assumed_reason).toBe("");
+    // d5869d53 起「读到了真实值」报 null（此前是空串）；两者都表示「没有退回 assumed」。
+    // 它与 clk_tck_source 配对：source=assumed 时必须是非空理由，否则必须是 null 或空串。
+    if (body.clk_tck_source === "assumed") {
+      expect(typeof body.clk_tck_assumed_reason).toBe("string");
+      expect(body.clk_tck_assumed_reason.length).toBeGreaterThan(0);
+    } else {
+      expect([null, ""]).toContain(body.clk_tck_assumed_reason);
+    }
   });
 
   test("every /health field is read by at least one test (unread = unverified)", async () => {

@@ -207,14 +207,14 @@ describe("tool descriptions", () => {
     const tools = (await rpc(U.nodeA.token, "tools/list", {})).result.tools as any[];
     const byName = new Map(tools.map(t => [t.name, t]));
     const update = byName.get("requirements_update");
-    expect(update.description).toContain("REPLACES the whole list");
+    expect(update.description).toMatch(/participants REPLACES the (whole )?list/);
     expect(update.inputSchema.properties.participants.description).toContain("REPLACES");
     expect(Object.keys(update.inputSchema.properties)).toEqual(expect.arrayContaining(["status", "participants_add", "participants_remove"]));
     // #478:节点令牌的 tools/list 里本来就没有 projects_create / projects_update(调了也是 403),那两条的说明从人的列表里读。
     expect(byName.has("projects_create")).toBe(false);
     const human = new Map(((await rpc(U.member.token, "tools/list", {})).result.tools as any[]).map(t => [t.name, t]));
-    expect(byName.get("projects_list").description).toMatch(/node (?:\(Agent\) )?tokens can only read projects/i);
-    for (const name of ["projects_create", "projects_update"]) expect(human.get(name).description).toMatch(/node (?:\(Agent\) )?tokens can only read projects/i);
+    expect(byName.get("projects_list").description).toMatch(/node (?:\(Agent\) )?tokens (?:can only read projects|read only)/i);
+    for (const name of ["projects_create", "projects_update"]) expect(human.get(name).description).toMatch(/node (?:\(Agent\) )?tokens (?:can only read projects|read only)/i);
     const denied = await mcp(U.nodeA.token, "projects_create", { name: "示例项目" });
     expect(denied.status).toBe(403);
     expect(denied.error).toBe("user_token_required");

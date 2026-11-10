@@ -1,13 +1,14 @@
 // Isolated real Hub + real agent-node CLI startup probe, no direct handler calls.
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { register, createNetworkTokenForNode } from "./auth.js";
 import { db } from "./db.js";
 
-test("real daemon reaches owned TEST-ONLY runtime readiness", async () => {
+// Needs the TEST-ONLY toolchain (/tool/bun, /out/cli.js) baked into the variant test image.
+test.skipIf(!existsSync("/tool/bun") || !existsSync("/out/cli.js"))("real daemon reaches owned TEST-ONLY runtime readiness", async () => {
   const root = mkdtempSync(join(tmpdir(), "anet-4099-daemon-"));
   const stamp = Date.now(), alias = `variant-daemon-${stamp}`, nodeId = `node_variant_${stamp}`;
   const user = register(`variant_owner_${stamp}`, "Fixture4099Only!x");

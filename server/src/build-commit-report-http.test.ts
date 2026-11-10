@@ -7,7 +7,7 @@
 //   ③ 读路径把它投影出来（否则界面上看不见）
 // 少任何一处，现场表现都是「节点明明发了、hub 上没有」，与 daemon 侧 bug 一模一样。
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { register, createNetworkTokenForNode } from "./auth.js";
@@ -156,7 +156,8 @@ test("variant-capable model update persists private ack policy across lost capab
   expect((await rpc("ack_config_update", { update_id: queued.update_id, status: "rejected", error: "test_complete" })).ok).toBe(true);
 });
 
-test("TEST-ONLY real Hub HTTP and owned runtime variant via explicit node dispatch", async () => {
+// Needs the TEST-ONLY OpenCode build at /tool/opencode (only in the V2 test image).
+test.skipIf(!existsSync("/tool/opencode"))("TEST-ONLY real Hub HTTP and owned runtime variant via explicit node dispatch", async () => {
   const { openVettedOpenCodeCopresence } = await import("../../agent-node/src/runtime/opencode-copresence/runtime.js");
   const { OPENCODE_V2_BACKEND } = await import("../../agent-node/src/runtime/opencode-backend.js");
   const { applyVariantConfig } = await import("../../agent-node/src/runtime/opencode-copresence/variant-config-apply.js");

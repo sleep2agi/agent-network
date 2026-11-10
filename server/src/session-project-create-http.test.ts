@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, setSystemTime, test } from "bun:test";
+import { testWorkRoot } from "./test-work-root";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import { createSourceDirectoryReader } from "../../agent-node/src/runtime/sessio
 import { createSessionControlPin } from "../../agent-node/src/runtime/session-control-bridge";
 import { createSessionSourceTransportWorker } from "../../agent-node/src/runtime/session-source-transport";
 
-const root = mkdtempSync(join(tmpdir(), "project-create-http-")); process.env.COMMHUB_DB ||= join(root, "hub.db");
+const root = mkdtempSync(join(testWorkRoot(), "project-create-http-")); process.env.COMMHUB_DB ||= join(root, "hub.db");
 const gates = ["COMMHUB_SOURCE_DIRECTORY_PREVIEW", "COMMHUB_PROJECT_NEW_SESSION_PREVIEW", "COMMHUB_SESSION_ATTACH_PREVIEW"];
 const previous = gates.map(g => process.env[g]);
 const D = "/api/node-session-control/source/directory", serverId = `osrv_${randomUUID()}`;
@@ -268,7 +269,7 @@ test("actual HTTP directory -> project intent -> one native empty create -> exac
 }, 15000);
 for (const operation of ["new", "manual", "delegated"]) test(`${operation} HTTP chain uses actual anet CLI -> paired agent-node CLI -> exact shared resume -> actual Hub registration with synthetic native package`, async () => {
   const attach = operation !== "new";
-  await worker.stop(); const prefix = mkdtempSync("/work/project-cli-fixture-"); cliFixtureRoot = prefix;
+  await worker.stop(); const prefix = mkdtempSync(join(testWorkRoot(), "project-cli-fixture-")); cliFixtureRoot = prefix;
   const pkg = join(prefix, "node_modules", "@opencode", "cli"); mkdirSync(join(pkg, "bin"), { recursive: true, mode: 0o700 });
   mkdirSync(join(prefix, "bin"), { mode: 0o700 }); mkdirSync(join(prefix, "safe"), { mode: 0o700 });
   writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@opencode/cli", version: "2.0.22", bin: { opencode: "bin/opencode.exe" } }));

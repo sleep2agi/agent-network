@@ -1,7 +1,9 @@
+import { tmpdir } from "node:os";
 // Opt-in Docker-only acceptance against the SHA-verified real TEST-ONLY ELF.
 // No native protocol mock/fake executable or external provider/npm. Fork fixture
 // may use a deterministic loopback OpenAI-compatible provider via REAL prompt.
 import { test, expect } from "bun:test";
+import { testWorkRoot } from "./test-work-root";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -15,7 +17,7 @@ import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-deliv
 
 const forkMode = process.env.TEST4150_NATIVE_FORK === "1";
 test.skipIf(!process.env.TEST4150_NATIVE_BINARY)(forkMode ? "real patched ELF managed live-source fork, attach refusal and negative-only cleanup" : "real patched 2.0.22 ELF: directory -> project-new -> actual CLI exact child -> native SSE and real Hub registration", async () => {
-  const root = mkdtempSync("/work/native-project-"), home = join(root, "home"), project = join(root, "project"), daemonDir = join(root, "daemon");
+  const root = mkdtempSync(join(testWorkRoot(), "native-project-")), home = join(root, "home"), project = join(root, "project"), daemonDir = join(root, "daemon");
   for (const d of [home, project, daemonDir, join(home, ".anet"), join(daemonDir, ".anet"), join(project, ".anet"), join(project, ".anet", "nodes")]) mkdirSync(d, { mode: 0o700 });
   process.env.COMMHUB_DB = join(root, "hub.db"); process.env.COMMHUB_SOURCE_DIRECTORY_PREVIEW = "1"; process.env.COMMHUB_PROJECT_NEW_SESSION_PREVIEW = "1";
   if (forkMode) process.env.COMMHUB_SOURCE_FORK_PREVIEW = "1";

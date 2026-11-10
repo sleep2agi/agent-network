@@ -3162,17 +3162,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // 是最大的一格：每次轮询都拉全量再自己筛。给它一个「只要这之后创建的」，
       // 空窗口就回极短体，比任何提示词都省（提示词只能劝，改不了接口成本）。
       created_since: z.string().max(64).optional()
-        .describe("Only tasks created after this (ISO 8601 or 'YYYY-MM-DD HH:MM:SS'); pass previous server_time."),
+        .describe("Only tasks created after this (ISO 8601 / 'YYYY-MM-DD HH:MM:SS'), e.g. previous server_time."),
       // #3119 —— stats 是全表 GROUP BY：轮询时它比任务列表本身还贵。
       // #3119 —— 不给 `.default(false)`：要能区分「没传」与「显式传 false」。
       // 节点令牌没传时默认省略 stats（它是给「看图的人」用的计数，轮询的节点不读它）；
       // 显式传 false 仍然可以要回来。用户令牌保持旧行为（默认返回 stats）。
       omit_stats: z.boolean().optional()
-        .describe("Skip per-status counts (they scan every task in scope). Default true for node tokens."),
+        .describe("Skip per-status counts (full scan). Default true for node tokens."),
       // #3943 —— 服务端水位。调用方不传时间，Hub 用「上次给这个调用者返回的时刻」当下界，
       // 返回后把水位推到本次的 server_time。客户端连时钟都不用记（也就不会因两边差几秒漏活）。
       since_last: z.boolean().optional().default(false)
-        .describe("Only tasks created since this caller's previous list_tasks (watermark kept server-side)."),
+        .describe("Only tasks created since this caller's previous list_tasks (server-side watermark)."),
     },
     async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit, created_since, omit_stats, since_last }) => {
       const readScope = resolveReadScope(netId);
@@ -7124,7 +7124,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "read_opencode_catalog",
     {
-      description: "Queue an owned child’s native V2 catalog read. pending means authorized and stored in memory, not a snapshot or proof of daemon receipt. Does not start a server. URL, authorization, directory, settings, headers and body are rejected.",
+      description: "Queue an owned child’s V2 catalog read. pending = authorized and held in memory, not a snapshot or daemon receipt. Starts no server. URL/auth/directory/settings/headers/body rejected.",
       inputSchema: z.object({
         daemon_node_id: z.string().min(1).max(200),
         node_id: z.string().min(1).max(200),
@@ -7182,7 +7182,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "ack_opencode_catalog",
     {
-      description: "Daemon stores a whitelisted V2 catalog snapshot or error code. Extra fields are rejected; stored failure means status failed, not a transport error.",
+      description: "Daemon stores a whitelisted V2 catalog snapshot or error code. Extra fields rejected; a stored failure is status failed, not a transport error.",
       inputSchema: opencodeCatalogAckSchema as any,
     },
     async (args: unknown) => {
@@ -7270,19 +7270,19 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     parent_id: z.string().max(200).optional().describe("children of this requirement ('none' = top level)"),
     department_id: z.string().max(64).optional().describe("owner (or its Agent's owner) in this department or below"),
     top_level: z.boolean().optional(), q: z.string().max(200).optional(),
-    overdue: z.boolean().optional().describe("true = open tasks past due (date-only: before today, Asia/Shanghai); false = rest"),
-    due_within_days: z.number().int().min(0).max(365).optional().describe("open tasks not yet overdue, due by the end of today + N days (0 = later today)"),
+    overdue: z.boolean().optional().describe("true = open and past due (before today, Asia/Shanghai); false = the rest"),
+    due_within_days: z.number().int().min(0).max(365).optional().describe("open, not overdue, due by end of today + N days (0 = today)"),
     limit: z.number().int().min(1).max(1000).optional().describe(`page size, default ${REQ_LIST_MCP_DEFAULT_LIMIT}`),
     cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
-    view: z.enum(["full", "summary"]).optional().describe("default summary (no bodies; has_description/checklist_count); full = everything"),
-    changes: z.boolean().optional().describe("with updated_since: only tasks changed since then (+deleted ids +server_time; with include_last_event also newer events)"),
-    include_last_event: z.boolean().optional().describe("default false; true adds last_event per row (~150 B: type/field/actor/at/summary; null if none)"),
+    view: z.enum(["full", "summary"]).optional().describe("summary (default; no bodies) or full"),
+    changes: z.boolean().optional().describe("with updated_since: tasks changed since then, +deleted ids, +server_time (+newer events with include_last_event)"),
+    include_last_event: z.boolean().optional().describe("true adds last_event per row (~150 B: type/field/actor/at/summary; null if none)"),
   };
   const reqListKeys = Object.keys(reqListShape);
   server.registerTool(
     "requirements_list",
     {
-      description: `List network tasks, newest first. MCP default: ${REQ_LIST_MCP_DEFAULT_LIMIT}/page, view=summary (no description/checklist bodies; has_description, checklist_count; ~0.5 KB/task). If has_more, pass next_cursor as cursor. Full text: requirements_get or view=full (limit ≤1000). Filters: seq (#N), status, project_id ('none'), owner/agent_owner ('user:<id>'/'node:<id>'/'none'), exact tag, ISO updated_since, overdue/due_within_days (open only), external_ref, parent_id/top_level, department_id (owner in it or below), include_archived. q AND-searches title/description/people/project/tags. Rows: children {total,done}; include_last_event adds newest event incl. comments. changes=true with updated_since returns changed tasks incl. archived, deleted ids, and server_time for next updated_since. Unknown parameters rejected (-32602).`,
+      description: `Tasks, newest first. Default ${REQ_LIST_MCP_DEFAULT_LIMIT}/page, view=summary (no bodies; has_description, checklist_count; ~0.5 KB/task); has_more ⇒ cursor=next_cursor. Full text: requirements_get or view=full (limit ≤1000). Filters: seq (#N), status, project_id ('none'), owner/agent_owner ('user:<id>'/'node:<id>'/'none'), tag, ISO updated_since, overdue/due_within_days (open), external_ref, parent_id/top_level, department_id (incl. sub-depts), include_archived. q: AND over title/description/people/project/tags. Rows have children {total,done}; include_last_event adds the newest event. changes=true + updated_since: changed tasks incl. archived, deleted ids, server_time. Unknown params → -32602.`,
       // Strict: registerTool honours a constructed object's unknownKeys (server.tool() would strip them silently).
       inputSchema: z.strictObject(reqListShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
@@ -7309,7 +7309,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // #473 —— Agent 查人:紧凑通讯录(requirements-people.ts)。严格参数,同 requirements_list(#471)。
   const reqPeopleShape = {
     network_id: z.string().max(200).optional(),
-    q: z.string().min(1).max(100).optional().describe("case-insensitive substring of username, display name, department or Agent alias"),
+    q: z.string().min(1).max(100).optional().describe("case-insensitive substring: username, display name, department, alias"),
     limit: z.number().int().min(1).max(200).optional().describe("people per page, default 50"),
     offset: z.number().int().min(0).optional().describe("next_offset from the previous page"),
   };
@@ -7317,7 +7317,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_people",
     {
-      description: "Find network people and their Agents for task fields. Rows: user_id, username, display_name (\"\" if unset), role, department {id,name} or null, agents [{node_id,alias}]. agents_without_owner: first page only. q: case-insensitive substring of username/display name/department/Agent alias. Default 50/page, limit ≤200; pass next_offset when has_more. Ungranted Agents omitted. Task person fields accept these IDs or {kind:'user',username}/{kind:'node',alias}.",
+      description: "People and their Agents, for task fields. Rows: user_id, username, display_name (\"\" if unset), role, department {id,name}|null, agents [{node_id,alias}]; agents_without_owner on the first page only. q: case-insensitive substring of username/display name/department/alias. 50/page, limit ≤200; has_more ⇒ next_offset. Ungranted Agents omitted. Person fields take these IDs or {kind:'user',username}/{kind:'node',alias}.",
       inputSchema: z.strictObject(reqPeopleShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
           ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqPeopleKeys.join(", ")}`
@@ -7444,7 +7444,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.registerTool(
     "requirements_events",
     {
-      description: `Task activity (动态), newest first: field changes (who, when, old → new) and comments (kind=comment, new.text; add via requirements_comment). With requirement_id (req_… or #N), default limit 200; otherwise network-wide, default ${REQ_EVENTS_NETWORK_DEFAULT_LIMIT}. limit ≤500; pass next_cursor as cursor for older events, server_time as next since. Visibility as requirements_list. Unknown parameters rejected (-32602).`,
+      description: `Task activity (动态), newest first: field changes (who, when, old → new) and comments (kind=comment, new.text; add via requirements_comment). requirement_id (req_… or #N): default 200; network-wide: default ${REQ_EVENTS_NETWORK_DEFAULT_LIMIT}. limit ≤500; older: cursor=next_cursor; next since=server_time. Visibility as requirements_list. Unknown params → -32602.`,
       inputSchema: z.strictObject(reqEventsShape, {
         error: (iss: any) => iss.code === "unrecognized_keys"
           ? `unknown parameter(s): ${(iss.keys ?? []).join(", ")}; valid parameters: ${reqEventsKeys.join(", ")}`
