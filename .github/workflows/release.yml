@@ -829,10 +829,17 @@ jobs:
       - name: 收口 dist-tag:preview(显式设置 + 回读 registry)
         if: always()
         env:
-          PKG: ${{ needs.build-tarball.outputs.package }}
           EXPECTED: ${{ needs.build-tarball.outputs.version }}
           TAG_ROLLOUT_TIMEOUT_S: '120'
-        run: bash .github/scripts/set-preview-tag.sh
+        run: |
+          set -euo pipefail
+          # 🔴 包名必须从 **tarball 的 package.json** 取（`@sleep2agi/agent-node`），
+          #    不能用 needs.build-tarball.outputs.package —— 那是短名 `agent-node`。
+          #    2026-11-10 实测过后果：脚本拼出 GET registry.npmjs.org/agent-node/<ver>
+          #    → 404 → 这一步把一次**已经成功**的发布判红（publish 与核对都过了）。
+          n=$(tar -xzOf "$TARBALL" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).name))')
+          echo "dist-tag 收口目标包名: $n"
+          PKG="$n" bash .github/scripts/set-preview-tag.sh
 
       # RFC-029 published-pair guard (#1811): the tree keeps the two versions in
       # lockstep, but a release can still leave a HALF pair on npm — 2026-10-19
