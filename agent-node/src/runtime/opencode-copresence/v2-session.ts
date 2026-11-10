@@ -34,6 +34,7 @@
 import { spawn } from "child_process";
 import { randomBytes } from "crypto";
 import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-health";
+import { waitUntilIdle } from "../idle-wait";
 import { rmSync } from "fs";
 import { join } from "path";
 import {
@@ -691,6 +692,8 @@ export async function openVettedOpenCodeV2Copresence(
     // Turns accepted but not yet settled. A variant applies to the NEXT turn, so writing
     // it while a turn of ours is queued/running would silently change that turn.
     let inFlight = 0;
+    /** 客户端 MODEL_SWITCH_DEADLINE_MS=45s；等待留给写入 + 回读 10s 余量。 */
+    const VARIANT_IDLE_WAIT_MS = 35_000;
     const session: OpenCodeCopresenceSession = {
       url,
       sessionId,
@@ -824,7 +827,19 @@ export async function openVettedOpenCodeV2Copresence(
        */
       async setSelectedVariant(variant: string | null) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
-        if (inFlight > 0) throw new Error("variant_busy");
+        if (inFlight > 0) {
+          // 有轮次在飞时**等它结束**，而不是立刻拒绝。理由（2026-11-10 实测）：
+          // 一台正常在干活的节点几乎总是有轮次在飞 —— 连续 14 次写入全被拒，只有重启后到
+          // 下一轮开始前那几秒能落进去。对用户来说「点档位 → 被拒 → 自己再试」不可接受。
+          // 等待有上界：客户端的 applied 预算是 45 秒（MODEL_SWITCH_DEADLINE_MS），这里等
+          // 35 秒，留出写入 + 回读的余量。等到就照常写（applied 仍然只表示真的变了），
+          // 等不到仍然诚实地说 busy。
+          const idle = await waitUntilIdle({
+            isBusy: () => inFlight > 0 || !session.isRunning,
+            budgetMs: VARIANT_IDLE_WAIT_MS,
+          });
+          if (!idle) throw new Error("variant_busy");
+        }
         const body = await scopedRequest(`/api/session/${sessionId}`);
         const current = readV2ModelSelection(body);
         if (!current) throw new Error("OpenCode v2 session scope unavailable");
