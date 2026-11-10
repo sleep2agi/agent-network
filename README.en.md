@@ -1,22 +1,18 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/anet-mark-dark.svg">
-  <img src="docs/assets/readme/anet-mark-light.svg" width="96" height="96" alt="Agent Network logo">
-</picture>
+<a href="https://anet.sh/en/"><img src="docs/assets/readme/hero-en.jpg" alt="Agent Network: one person, a whole agent team. Chat with Claude, Codex, Grok and OpenCode nodes like teammates" width="100%"></a>
 
-# Agent Network
+<p>
+<a href="https://www.anet.sh/en/download"><img alt="Desktop" src="https://img.shields.io/github/v/release/sleep2agi/agent-network-app?display_name=release&label=download&color=1b65db&style=for-the-badge&labelColor=0b1220"></a>
+<a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img alt="npm" src="https://img.shields.io/npm/v/@sleep2agi/agent-network/preview?label=npm&color=1b65db&style=for-the-badge&labelColor=0b1220"></a>
+<a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-38c8e0?style=for-the-badge&labelColor=0b1220"></a>
+<a href="https://github.com/sleep2agi/agent-network/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/sleep2agi/agent-network?color=38c8e0&style=for-the-badge&labelColor=0b1220"></a>
+<a href="https://anet.sh/en/"><img alt="Docs" src="https://img.shields.io/badge/docs-anet.sh-38c8e0?style=for-the-badge&labelColor=0b1220"></a>
+</p>
 
-**Turn Claude Code, Codex, Grok and OpenCode on many machines into one legion of agents — and run it from a single desktop app.**
+**[🌐 Website](https://anet.sh/en/) · [⬇️ Download the desktop app](https://www.anet.sh/en/download) · [🚀 Get started](https://anet.sh/en/guide/getting-started) · [▶️ 48-second intro video](https://anet.sh/en/) · [中文](./README.md) · English**
 
-[![npm](https://img.shields.io/npm/v/@sleep2agi/agent-network/preview?label=npm&color=009e7e)](https://www.npmjs.com/package/@sleep2agi/agent-network)
-[![Desktop](https://img.shields.io/github/v/release/sleep2agi/agent-network-app?display_name=release&label=download&color=2f6feb)](https://www.anet.sh/en/download)
-[![QA](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml/badge.svg?branch=main)](https://github.com/sleep2agi/agent-network/actions/workflows/qa.yml)
-[![Docs](https://img.shields.io/badge/docs-anet.sh-009e7e)](https://anet.sh/en/)
-[![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
-[![Stars](https://img.shields.io/github/stars/sleep2agi/agent-network?style=flat&color=yellow)](https://github.com/sleep2agi/agent-network/stargazers)
-
-[Docs](https://anet.sh/en/) · [Download the desktop app](https://github.com/sleep2agi/agent-network-app/releases/latest) · [Get started](https://anet.sh/en/guide/getting-started) · [中文](./README.md) · **English**
+Turn Claude Code, Codex, Grok and OpenCode on many machines into one legion of agents — and run it from a single desktop app.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp">
