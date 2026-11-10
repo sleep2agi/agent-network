@@ -54,7 +54,7 @@ import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from 
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, newMemberTaskAccess } from "./task-access.js";
 import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup, listDepartmentGrants, departmentCoverage } from "./agent-access.js";
-import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
+import { broadcastVerdict, dispatchVerdict, filterBroadcastByInbox, humanOnlyVerdict, inboxDenied, inboxSenderFromAuth, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type InboxSender, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
@@ -216,7 +216,9 @@ const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 // PUT /api/nodes/:id/permission-mode 与 GET /api/networks/:id/node-permission-report 可用(RFC-041 第一阶段)。
 // chat_groups(RFC-042,#457):部门群可用 —— …/departments/:dept/group、…/chat-groups(资料 / 成员 / 消息 / 已读)、
 // GET /api/dm/threads 的 group_threads;群对象带 viewer_can {manage, post},会话行带 last_message 预览,成员带 username / display_name。
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups"] as const;
+// node_inbox_allowlist:收件白名单可用 —— PUT /api/nodes/:id/inbox-allowlist { senders },GET /api/nodes 每行带 inbox_allowlist,
+// 被挡的派活回 reason=sender_not_allowed,广播回 inbox_skipped。
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here
@@ -477,6 +479,13 @@ function restNodeDenied(req: Request, restAuth: { networkId: string | null; toke
   if (!id) return null;
   const verdict = verdictOf(id);
   return nodeDecide(id, route, verdict) ? withCors(req, Response.json(nodePermissionDeniedBody(verdict!.reason, route), { status: 403 })) : null;
+}
+/** 收件白名单的发件人：网络绑定令牌 = 节点；用户令牌 = 人；没有身份 = legacy。 */
+function restInboxSender(_req: Request, restAuth: { networkId: string | null; tokenId: string | null; userId?: string | null; username?: string | null } | null): InboxSender {
+  return inboxSenderFromAuth({
+    isNodeToken: !!restAuth?.networkId, tokenId: restAuth?.tokenId ?? null, boundNetworkId: restAuth?.networkId ?? null,
+    userId: restAuth?.userId ?? null, username: restAuth?.username ?? null,
+  });
 }
 /** 写别的节点 = 只有人能做;写自己 = 只看模式。 */
 const nodeTargetVerdict = (targetNodeId: string) => (id: NodeIdentity): Verdict =>
@@ -4352,6 +4361,45 @@ return Bun.serve({
       logAudit(restAuth.userId, restAuth.username, "node_peer_allowlist_changed", "node", node2.node_id, JSON.stringify({ from: node2.peer_allowlist, to: nextValue }), getClientIP(req), node2.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node2.node_id, peers: peers.length ? peers : null }));
     }
+    // 收件白名单：PUT /api/nodes/:id/inbox-allowlist { senders: string[] | null }
+    // 与 peer-allowlist 同一套授权、审计与空数组语义（拒收 []，清空请传 null）。
+    // 条目语法与发件人匹配规则见 node-permissions.ts「收件白名单」。
+    const inboxAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/inbox-allowlist$/);
+    if (inboxAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawSenders = body?.senders;
+      if (rawSenders !== null && rawSenders !== undefined && !Array.isArray(rawSenders)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_senders", message: "senders must be an array of alias / node_id / user:<username> strings, or null" }, { status: 400 }));
+      }
+      const senders = Array.isArray(rawSenders)
+        ? rawSenders.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      if (Array.isArray(rawSenders) && senders.length === 0) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "empty_allowlist_ambiguous",
+          message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected",
+        }, { status: 400 }));
+      }
+      if (senders.length > 200) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_senders", message: "at most 200 entries" }, { status: 400 }));
+      }
+      const nodeRef5 = decodeURIComponent(inboxAllowMatch[1]);
+      const node5 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; inbox_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, inbox_allowlist FROM nodes WHERE node_id = ?1", nodeRef5);
+      const role5 = node5?.network_id ? getUserNetworkRole(restAuth.userId, node5.network_id) : null;
+      if (!node5 || !node5.network_id || (!role5 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!canRestWriteNodeSecurity(restAuth, node5.owner_user_id, role5, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its inbox allowlist" }, { status: 403 }));
+      }
+      const nextSenders = senders.length ? JSON.stringify(senders) : null;
+      db.run("UPDATE nodes SET inbox_allowlist = ?1 WHERE node_id = ?2", [nextSenders, node5.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_inbox_allowlist_changed", "node", node5.node_id, JSON.stringify({ from: node5.inbox_allowlist, to: nextSenders }), getClientIP(req), node5.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node5.node_id, senders: senders.length ? senders : null }));
+    }
     const permReportMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/node-permission-report$/);
     if (permReportMatch && req.method === "GET") {
       if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
@@ -5766,6 +5814,8 @@ return Bun.serve({
           ...(canonical.renamed ? { renamed_from: body.alias, renamed_to: targetAlias } : {}),
         }, { status: 404 })));
       }
+      const inboxRefused = inboxDenied(taskNetId ?? null, { alias: targetAlias, nodeId: target.session?.node_id ?? null }, restInboxSender(req, restAuth), "POST /api/task");
+      if (inboxRefused) return reject(withCors(req, Response.json(inboxRefused, { status: 403 })));
       // Identity binding, mirroring the MCP transport (tools.ts defaultFrom /
       // fromIdentityMismatchReply). Both transports resolve the same
       // api_tokens row through resolveToken, and auth.ts already documents the
@@ -6025,14 +6075,15 @@ return Bun.serve({
       sql = addNetworkScope(sql, params, restScope);
       if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
-      const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
+      const allTargets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
+      const { allowed: targets, skipped: inboxSkipped } = filterBroadcastByInbox(allTargets, restScope.networkId ?? null, restInboxSender(req, restAuth), "POST /api/broadcast");
       // #2721 —— 与 MCP broadcast 同一条分批路径（reason 见 broadcast-fanout.ts 顶部）。
       const { ids } = await enqueueBroadcast(targets, body.message, "api", null, {
         // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site 2/2).
         isActive: (alias, netId) => assertNodeActive(alias, netId).ok,
         notify: (alias, netId) => pushEvent(alias, { type: "broadcast", inbox_count: pendingInboxCount(alias, netId) }, netId),
       });
-      return withCors(req, Response.json({ ok: true, recipients: ids.length, message_ids: ids }));
+      return withCors(req, Response.json({ ok: true, recipients: ids.length, message_ids: ids, inbox_skipped: inboxSkipped }));
     }
 
     // ── REST: tmux capture-pane ──
@@ -6944,7 +6995,7 @@ return Bun.serve({
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
                         display_name, team, tags, attrs_revision, permission_mode, owner_user_id,
-                        department_id, peer_allowlist, tool_allowlist, rest_allowlist
+                        department_id, peer_allowlist, tool_allowlist, rest_allowlist, inbox_allowlist
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
@@ -7161,7 +7212,7 @@ return Bun.serve({
         }
         // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
         // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
-        const { config_snapshot, owner_user_id, peer_allowlist, tool_allowlist, rest_allowlist, ...rest } = r;
+        const { config_snapshot, owner_user_id, peer_allowlist, tool_allowlist, rest_allowlist, inbox_allowlist, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
@@ -7195,6 +7246,8 @@ return Bun.serve({
           tool_allowlist: normalizeToolAllowlist(tool_allowlist),
           // #2969 续 —— REST 写接口白名单（形如 "POST /api/task"）。null = 不限制。
           rest_allowlist: normalizePeerAllowlist(rest_allowlist),
+          // 收件白名单（谁能给这个节点派活 / 发消息）。null = 谁都能发。
+          inbox_allowlist: normalizePeerAllowlist(inbox_allowlist),
           // #1510 —— 管理员要能看出「谁的 transport 未知」才敢打开 strict。
           // 这一格**只读**，不参与任何判定（判定在 env-transport-policy.ts）。
           env_transport: envTransportOf(r.node_id, r.alias, r.network_id),
