@@ -132,6 +132,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       package: ${{ steps.resolve.outputs.package }}
+      # registry 上的完整包名(@sleep2agi/…)。`package` 是短名,拼不出 registry URL。
+      npm_name: ${{ steps.resolve.outputs.npm_name }}
       version: ${{ steps.resolve.outputs.version }}
       dir: ${{ steps.resolve.outputs.dir }}
       tarball: ${{ steps.pack.outputs.tarball }}
@@ -184,7 +186,9 @@ jobs:
             *)              dir="$pkg" ;;
           esac
           [ -f "$dir/package.json" ] || { echo "::error::resolved dir '$dir' has no package.json (pkg=$pkg)"; exit 1; }
+          npm_name=$(node -p "require('./$dir/package.json').name")
           echo "package=$pkg" >> "$GITHUB_OUTPUT"
+          echo "npm_name=$npm_name" >> "$GITHUB_OUTPUT"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "Gating $pkg @ $ver (dir=$dir)"
@@ -896,13 +900,15 @@ jobs:
       - name: 核实版本是否真的出现在 registry 上
         if: needs.publish.result != 'skipped'
         env:
-          PKG: ${{ needs.build-tarball.outputs.package }}
+          # 🔴 必须是完整包名。2026-11-10 run 42743119409:这里曾传短名 `agent-network`,
+          #    脚本 GET registry.npmjs.org/agent-network/<ver> 永远 404 ——
+          #    publish 里已核实可见的版本,在这里白等 15 分钟后被判「没落地」。
+          PKG: ${{ needs.build-tarball.outputs.npm_name }}
           EXPECTED: ${{ needs.build-tarball.outputs.version }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
-          # 默认 15 分钟、每 30s 一次。预算比 publish 里那一步(45 分钟)短是**故意**的:
-          # 那一步断言的是「字节也对」(要等 dist.shasum),这里断言的是更早的里程碑
-          # 「版本存在」—— 15 分钟还看不到,就已经足够说明「接受 ≠ 可见」,该红给人看,
-          # 而不是再把 45 分钟花在一个已经绿了两次的结论上。
-          LANDED_TIMEOUT_MIN: '15'
+          # 5 分钟、每 30s 一次。publish 里「发后核实」已经轮询过(最长 45 分钟):
+          #   · 那一步过了 ⇒ 版本已可见,这里第一次就命中;
+          #   · 那一步超时或 publish 早早失败 ⇒ 再等 15 分钟不会改变结论,只是拖长 preview 发布。
+          LANDED_TIMEOUT_MIN: '5'
           LANDED_INTERVAL_S: '30'
         run: bash .github/scripts/verify-npm-release-landed.sh

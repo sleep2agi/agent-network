@@ -147,6 +147,10 @@ out=$(PKG=@x/pkg EXPECTED="$STUB_VERSION" PUBLISH_RESULT=maybe bash "$VERIFY" 2>
 [ "$rc" = 2 ] && ok "unknown PUBLISH_RESULT → rc 2 (usage)" || bad "unknown PUBLISH_RESULT rc=$rc"
 out=$(EXPECTED="$STUB_VERSION" PUBLISH_RESULT=success bash "$VERIFY" 2>&1) && rc=0 || rc=$?
 [ "$rc" = 2 ] && ok "missing PKG → rc 2 (usage)" || bad "missing PKG rc=$rc"
+# run 42743119409:workflow 传了目录短名,URL 恒 404,一次已落地的发布等满 15 分钟后被判红
+out=$(PKG=agent-network EXPECTED="$STUB_VERSION" PUBLISH_RESULT=success LANDED_TIMEOUT_S=60 bash "$VERIFY" 2>&1) && rc=0 || rc=$?
+[ "$rc" = 2 ] && ok "unscoped PKG → rc 2 (usage), not a 60s wait" || bad "unscoped PKG rc=$rc"
+printf '%s' "$out" | grep -Fq '不是作用域包名' && ok "unscoped PKG wording names the cause" || bad "unscoped PKG wording missing: $out"
 [ "$(calls ver)" = 0 ] && ok "usage errors never hit the registry" || bad "usage error ver checks=$(calls ver)"
 
 echo "PASS=$PASS FAIL=$FAILN"
