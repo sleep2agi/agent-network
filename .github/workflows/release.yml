@@ -814,6 +814,26 @@ jobs:
           echo "✅ $n@${{ inputs.version }} 已发布到 preview 通道"
           echo "下一步(人工):至少 30 分钟真实环境烟测 + owner ACK 后,用 promote-latest 升 latest"
 
+      # ── 显式收口 dist-tag:preview ───────────────────────────────────────────
+      #
+      # 🔴 不依赖 `npm publish --tag preview` 的副作用(2026-11-10 实测):
+      #    225 已经是 200 可见、tarball 也能下、shasum 与 CI 一致,
+      #    而 `dist-tags.preview` 仍停在 224。
+      #    ⇒ `npm i -g @sleep2agi/agent-network@preview` 装到 224,
+      #      但 agent-node 的 preview 已经是 194 —— **按 tag 装出来是半对**,
+      #      CLI 会 `Incompatible agent-node for opencode-cli` 直接拒启。
+      #    「发出去没有」是另一个结论(verify 那步 / landed job),这里只负责
+      #    「@preview 到底装哪个版本」这一格,并且回读 registry 才算数。
+      #    if: always() 是因为 verify 那步超时(尚未核实)时,版本可能已经可见,
+      #    那更需要把 tag 收口 —— 脚本自己会先确认版本可见,不可见就红。
+      - name: 收口 dist-tag:preview(显式设置 + 回读 registry)
+        if: always()
+        env:
+          PKG: ${{ needs.build-tarball.outputs.package }}
+          EXPECTED: ${{ needs.build-tarball.outputs.version }}
+          TAG_ROLLOUT_TIMEOUT_S: '120'
+        run: bash .github/scripts/set-preview-tag.sh
+
       # RFC-029 published-pair guard (#1811): the tree keeps the two versions in
       # lockstep, but a release can still leave a HALF pair on npm — 2026-10-19
       # shipped agent-node .150 while the CLI that declares it was only staged.
