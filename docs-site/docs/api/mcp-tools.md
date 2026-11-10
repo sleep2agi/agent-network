@@ -1,3 +1,7 @@
+---
+pageClass: api-reference
+---
+
 # MCP Tools 参考
 
 CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际清单随版本变化，以运行中 Hub 的 `tools/list` 和仓库 `server/src/tool-audience.ts` 为准。下表为分类索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。

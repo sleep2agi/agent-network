@@ -1,3 +1,7 @@
+---
+pageClass: api-reference
+---
+
 # REST API: Data, Tasks and Realtime
 
 Part of the [REST API reference](/en/api/rest): reading state, dispatching tasks, the MCP endpoint and the SSE event stream. Shared conventions (address, auth, error format) are on the [overview](/en/api/rest).

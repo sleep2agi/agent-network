@@ -1699,6 +1699,49 @@
 }
 
 
+/* ───────────── API reference pages (pageClass: api-reference) ─────────────
+   Dense tables of code identifiers wrapped into tall, hard-to-scan cells in the
+   default ~690px column. Widen the column, keep identifiers on one line (tables
+   scroll horizontally instead), and give endpoints a method badge. */
+@media (min-width: 1280px) {
+  .api-reference .VPDoc.has-aside .content-container { max-width: 980px !important; }
+  .api-reference .VPDoc:not(.has-sidebar) .container { max-width: 1280px; }
+}
+.api-reference .vp-doc table { font-size: 14px; line-height: 1.55; }
+.api-reference .vp-doc th { white-space: nowrap; font-weight: 600; background: var(--vp-c-bg-soft); }
+.api-reference .vp-doc td, .api-reference .vp-doc th { padding: 8px 12px; vertical-align: top; }
+.api-reference .vp-doc td code, .api-reference .vp-doc th code { white-space: nowrap; font-size: 0.86em; padding: 1px 5px; }
+.api-reference .vp-doc td:first-child { white-space: nowrap; }
+.api-reference .vp-doc tr:nth-child(2n) { background: color-mix(in srgb, var(--vp-c-bg-soft) 55%, transparent); }
+
+/* Endpoint headings: badge + path, with a hairline above to separate endpoints */
+.api-reference .vp-doc h3.http-endpoint, .api-reference .vp-doc h2.http-endpoint {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 40px; padding-top: 22px; border-top: 1px solid var(--vp-c-divider);
+}
+.api-reference .vp-doc .http-endpoint .http-path {
+  font-size: 0.92em; font-weight: 600; background: transparent; padding: 0; color: var(--vp-c-text-1);
+  min-width: 0; overflow-wrap: anywhere;
+}
+.http-method {
+  display: inline-block; min-width: 58px; text-align: center; font: 700 12px/1 var(--vp-font-family-mono);
+  letter-spacing: .04em; padding: 6px 8px; border-radius: 6px; color: #fff;
+}
+.http-get    { background: #0f9d58; }
+.http-post   { background: #2563eb; }
+.http-put    { background: #b45309; }
+.http-patch  { background: #7c3aed; }
+.http-delete { background: #dc2626; }
+.dark .http-get    { background: #15803d; }
+.dark .http-post   { background: #1d4ed8; }
+
+/* Code blocks in reference pages: slightly tighter so request/response pairs fit */
+.api-reference .vp-doc div[class*='language-'] { margin: 12px 0; }
+.api-reference .vp-doc div[class*='language-'] code { font-size: 13px; }
+@media (max-width: 640px) {
+  .api-reference .vp-doc table { font-size: 13px; }
+  .http-method { min-width: 50px; padding: 5px 6px; }
+
 /* ---------- 2026-11-10 首页动效（admin：炫酷一点）: 标题流光、Runtime 网络图、介绍视频、滚动出现与截图倾斜 ---------- */
 /* 只加动效与两个内容区块；不引入任何实时数字。全部遵守 prefers-reduced-motion。 */
 .VPHero .name .clip {

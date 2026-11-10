@@ -1,3 +1,7 @@
+---
+pageClass: api-reference
+---
+
 <script setup>
 // Old deep links (/api/rest#<anchor>) whose section moved to a sub-page when the
 // REST reference was split (docs slimming, 2026-09-25): forward them.
