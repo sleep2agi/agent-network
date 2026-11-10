@@ -9,6 +9,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { db } from './db';
 import { adoptedCloneSourceRow } from './node-daemon-bindings';
 import { finalizeCreateOnFirstRegister } from './create-node';
+import { factsFromRows } from './clone-node';
 
 const NET = 'net_clone_adopted';
 const DAEMON = 'node_daemon_clone_adopted';
@@ -62,4 +63,16 @@ test('a clone inherits the source department on first register; explicit placeme
   expect(dept('n_placed')).toBe('dept_elsewhere');
   // An ordinary create (no clone_json) is untouched.
   expect(dept('n_plain')).toBeNull();
+});
+
+test('an OpenCode node reporting the "opencode-sdk" label clones as opencode-cli (vdev 2026-11-11)', () => {
+  const facts = (runtime: string | null, snapRuntime?: string) => factsFromRows({
+    node: { node_id: 'n_oc', alias: 'n_oc', runtime, config_snapshot: snapRuntime ? JSON.stringify({ runtime: snapRuntime }) : null },
+    createRow: null, existingNames: [], inflightNames: [],
+  }).runtime;
+  expect(facts('opencode-sdk')).toBe('opencode-cli');
+  expect(facts('opencode')).toBe('opencode-cli');
+  expect(facts(null, 'opencode-sdk')).toBe('opencode-cli');
+  expect(facts('opencode-cli')).toBe('opencode-cli');
+  expect(facts('claude-code-cli')).toBe('claude-code-cli');
 });

@@ -201,8 +201,12 @@ export function factsFromRows(input: {
   const snapFlags = snap.flags && typeof snap.flags === "object" && !Array.isArray(snap.flags)
     ? snap.flags as Record<string, unknown>
     : {};
-  const runtime = (typeof snap.runtime === "string" && snap.runtime) ? snap.runtime
+  const reported = (typeof snap.runtime === "string" && snap.runtime) ? snap.runtime
     : (input.node.runtime || input.createRow?.runtime || null);
+  // nodes.runtime 是运行中节点自报的**标签**：OpenCode 节点报 "opencode-sdk" / "opencode"，
+  // 而 daemon 能创建的 runtime 只有 "opencode-cli"（daemon 实际照磁盘上源节点 config 的 runtime 写）。
+  // 不归一就会把收编来的 OpenCode 节点一律拒成 runtime_invalid（vdev 2026-11-11 实测）。
+  const runtime = reported === "opencode-sdk" || reported === "opencode" ? "opencode-cli" : reported;
   const model = (typeof snap.model === "string" || snap.model === null) ? (snap.model as string | null)
     : (input.node.model ?? input.createRow?.model ?? null);
   const channels = Array.isArray(snap.channels) ? snap.channels
