@@ -30,6 +30,8 @@ const rpcLog = join(root, "rpc.log");
 const launches = join(root, "appsrv-launches");
 const hub = `http://127.0.0.1:${port}`;
 const TIMEOUT = Number(process.env.ANET_TESTWD_TIMEOUT_MS || "40000");
+const fakeProviderValue = `fake-provider-source-${runId}`;
+const fakeProxyValue = "http://proxy.invalid:3128";
 // #465 —— "hung":app-server 活着但卡死(close1006 / silent 两种),验证核对身份后杀掉重拉;以及外来进程绝不杀。
 const SCENARIO = process.env.ANET_TESTWD_SCENARIO || "dead";
 const modeFile = join(root, "hung-mode");
@@ -50,6 +52,9 @@ if [ "$1" = "app-server" ]; then
   n=$(cat ${JSON.stringify(launches)} 2>/dev/null || echo 0)
   echo $((n + 1)) > ${JSON.stringify(launches)}
   if [ "$n" -ge 1 ]; then sleep "\${ANET_TESTWD_RELAUNCH_DELAY_S:-4}"; fi
+  if [ -n "\${DEEPSEEK_KEY:-}" ]; then deepseek=present; else deepseek=missing; fi
+  if [ -n "\${HTTPS_PROXY:-}" ]; then proxy=present; else proxy=missing; fi
+  echo "appsrv-env:deepseek=\${deepseek} proxy=\${proxy}" >>"$ANET_TEST751_RPC_LOG"
   if [ ${JSON.stringify(SCENARIO)} = hung ]; then
     # 本进程(bash,pane 进程)保留原 argv;真正的假 app-server 绑在 port+1,前面挂一个可切换「卡死」的转发。
     echo "wrapper-invoke:$*" >>"$ANET_TEST751_RPC_LOG"; echo "wrapper-home:$CODEX_HOME" >>"$ANET_TEST751_RPC_LOG"
@@ -85,6 +90,7 @@ const env = {
   LC_ALL: "C.utf8",
   PATH: `${bin}:${process.env.PATH}`,
   ANET_TEST751_RPC_LOG: rpcLog,
+  TESTWD_PROVIDER_SOURCE: fakeProviderValue,
   ANET_AGENT_NODE_BIN: exactNodeEntrypoint,
   ANET_CODEX_HEALTH_INTERVAL_MS: "1000",
   ANET_CODEX_APPSERVER_RESTART_MAX: SCENARIO === "hung" ? "3" : "2",
@@ -144,6 +150,22 @@ const appServerPids = () => {
 // ── #465 hung scenario ─────────────────────────────────────────────────────────────────────────
 const wrapperInvokes = () => [...wire().matchAll(/^wrapper-invoke:(.*)$/gm)].map((m) => m[1]);
 const wrapperHomes = () => [...wire().matchAll(/^wrapper-home:(.*)$/gm)].map((m) => m[1].trim());
+const appServerEnvMarks = () => [...wire().matchAll(/^appsrv-env:deepseek=(present|missing) proxy=(present|missing)$/gm)]
+  .map((m) => ({ deepseek: m[1], proxy: m[2] }));
+const assertAppServerEnv = (minimum, label) => {
+  const marks = appServerEnvMarks();
+  if (marks.length < minimum) fail(`${label}: expected at least ${minimum} app-server env observations, saw ${marks.length}`);
+  const bad = marks.slice(0, minimum).find((m) => m.deepseek !== "present" || m.proxy !== "present");
+  if (bad) fail(`${label}: config.env did not survive the watchdog relaunch: ${JSON.stringify(bad)}`);
+  pass(`${label}: DEEPSEEK_KEY and HTTPS_PROXY present in every observed app-server launch`);
+};
+const assertNoRelaunchEnvLeak = (label) => {
+  const observed = `${wire()}\n${nodeLogText()}\n${bridgeLog()}`;
+  if (observed.includes(fakeProviderValue) || observed.includes(fakeProxyValue)) {
+    fail(`${label}: a config.env value leaked into argv or logs`);
+  }
+  pass(`${label}: config.env values stayed out of argv and logs`);
+};
 const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e?.code === "EPERM"; } };
 const proxyPids = () => {
   try { return execFileSync("pgrep", ["-f", "hung-proxy.mjs"], { encoding: "utf8" }).trim().split("\n").filter(Boolean).map(Number); }
@@ -164,6 +186,7 @@ async function hungScenario({ statusRow, dispatch, appserverReason, appUrl, code
     if (pidsBefore.length !== 1 || !pidAlive(pidsBefore[0])) fail(`${mode}: expected the app-server to be alive while hung`);
     pass(`${mode}: hub degraded while the process is alive — ${counting}`);
     await waitUntil(`${mode}: relaunch #${launchNo}`, () => wrapperInvokes().length === launchNo);
+    assertAppServerEnv(launchNo, `${mode}: relaunch #${launchNo}`);
     const tKilled = Date.now() - t0;
     await waitUntil(`${mode}: hung app-server recovered`, async () => {
       const row = await statusRow();
@@ -235,13 +258,21 @@ try {
   command(["register", "--username", ownerAlias, "--password", "pass123456"]);
   command(["login", "--username", ownerAlias, "--password", "pass123456"]);
   command(["node", "create", alias, "--runtime", "codex-cli", "--hub", hub]);
+  const cfgPath = join(project, ".anet", "nodes", alias, "config.json");
+  const cfgBeforeStart = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfgBeforeStart.env = {
+    ...(cfgBeforeStart.env ?? {}),
+    DEEPSEEK_KEY: { _envRef: "TESTWD_PROVIDER_SOURCE" },
+    HTTPS_PROXY: fakeProxyValue,
+    NO_PROXY: "*",
+  };
+  writeFileSync(cfgPath, JSON.stringify(cfgBeforeStart, null, 2));
   const codexHome = join(project, ".anet", "nodes", alias, "codex-home");
   mkdirSync(codexHome, { recursive: true });
   // #535 — the launcher now refuses a node with no usable login (needs-login) before starting
   // anything; `{}` is "not logged in". A clearly fake API key is a usable login shape.
   writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: `sk-fake-testwd-${runId}` }) + "\n");
   await commandAsync(["node", "start", alias, "--codex-bin", codexWrapper, "--no-inherit-codex-home", "--accept-dev-channels"]);
-  const cfgPath = join(project, ".anet", "nodes", alias, "config.json");
   await waitUntil("thread promoted", () => JSON.parse(readFileSync(cfgPath, "utf8")).codexThreadId === "thread_windows_e2e");
   const appUrl = JSON.parse(readFileSync(cfgPath, "utf8")).codexAppServerUrl;
   await waitUntil("bridge took a launch snapshot", () => nodeLogText().includes("[app-server-watchdog] launch snapshot"));
@@ -296,6 +327,8 @@ try {
   if (!invokesAfter[1].includes(JSON.stringify(appUrl))) fail("relaunch did not listen on the original url");
   const homes = [...wire().matchAll(/^appsrv-home:(.+)$/gm)].map((m) => m[1].trim());
   if (homes.length !== 2 || homes.some((h) => h !== codexHome)) fail(`relaunched CODEX_HOME drifted: ${homes.join(", ")} (want ${codexHome})`);
+  assertAppServerEnv(2, "dead-app-server relaunch");
+  assertNoRelaunchEnvLeak("dead-app-server relaunch");
   const resumesAfter = (wire().match(/^rpc:thread\/resume:thread_windows_e2e$/gm) || []).length;
   if (resumesAfter <= resumesBefore) fail("bridge did not resume the original thread after the relaunch");
   if ((wire().match(/^rpc:thread\/start/gm) || []).length > 0) fail("a new thread was started instead of resuming the original one");
@@ -308,6 +341,7 @@ try {
     const row = await statusRow();
     return (await sleep(0), (wire().match(/^appsrv-home:/gm) || []).length === 3 && row && !row.degraded) ? true : null;
   });
+  assertAppServerEnv(3, "second dead-app-server relaunch");
   pass("second kill: restarted again (2/2)");
   execFileSync("kill", ["-KILL", String(await waitUntil("third app-server pid", () => appServerPids()[0]))]);
   const gaveUp = await waitUntil("hub shows gave up", async () => {
