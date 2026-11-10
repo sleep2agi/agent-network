@@ -248,7 +248,9 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     const tracePath = join(root, "resume-requests.log");
     writeFileSync(passwordFile, password, { mode: 0o600 });
     const server = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-      cwd: root, env: { ...process.env, OPENCODE_SERVER_PASSWORD: password, TEST832_TRACE: tracePath }, stdio: "ignore",
+      // detached: the serve leads its own process group, as in production; inside a container the
+      // test process sits in group 1, which the shared-bridge identity check rightly refuses.
+      cwd: root, env: { ...process.env, OPENCODE_SERVER_PASSWORD: password, TEST832_TRACE: tracePath }, stdio: "ignore", detached: true,
     });
     const firstDir = join(root, "first");
     const secondDir = join(root, "second");

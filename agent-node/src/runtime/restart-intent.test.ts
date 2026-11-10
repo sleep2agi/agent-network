@@ -169,8 +169,11 @@ describe("decideStart", () => {
 //   · 读：consumePlannedRestart（cli.ts:8204 启动路径）
 // 只要有人新增第三个读点并据此重启，标记就从一个「意图」变成了「触发器」——
 // 而两次重启在日志里长得一模一样。
+// The consumer scan needs the whole repo (git ls-files across agent-node / agent-network / server).
+// Unit images copy only agent-node, with no .git; there it skips instead of a false red.
+const inGitCheckout = (() => { try { return require("node:child_process").spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).status === 0; } catch { return false; } })();
 describe("谁可以读 restart-intent（消费者清单）", () => {
-  test("引用点必须与登记表完全一致；新增消费者 = 新增决定，必须改这里", async () => {
+  test.skipIf(!inGitCheckout)("引用点必须与登记表完全一致；新增消费者 = 新增决定，必须改这里", async () => {
     const { execSync } = await import("node:child_process");
     const { readFileSync: rf } = await import("node:fs");
     const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();

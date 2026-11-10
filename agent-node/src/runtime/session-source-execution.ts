@@ -1,5 +1,6 @@
-import { constants, openSync, closeSync, fstatSync, fsyncSync, lstatSync, realpathSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
+import { constants, openSync, closeSync, fstatSync, fsyncSync, lstatSync, realpathSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { randomUUID } from "node:crypto";
 import { isSourceExecutionTask, isSourceExecutionResult, type SourceExecutionTask, type SourceExecutionResult } from "../../../contracts/session-source-execution";
 import type { createSessionSourceEvidenceReader } from "./session-source-evidence";
@@ -51,7 +52,7 @@ export function createSingleClaimSourceOperation<T, R>(options: { journalDirecto
       try {
         const fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
         try { writeFileSync(fd, JSON.stringify(result)); fsyncSync(fd); } finally { closeSync(fd); }
-        renameSync(tmp, path(t)); syncDirectory();
+        renameOverExistingSync(tmp, path(t)); syncDirectory();
       }
       finally { try { unlinkSync(tmp); } catch { /* already renamed */ } }
       return result;
