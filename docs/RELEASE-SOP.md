@@ -949,3 +949,54 @@ curl -sL "$(npm view <pkg>@<ver> dist.tarball)" | tar tzf - | grep -c '^package/
 ```bash
 npm view <pkg>@<version> version      # 出现 = 可见；npm error 404 = 还没到
 ```
+
+## 8. 2026-11-10 桌面发版踩出来的四条（护栏都已落地，别再手工记）
+
+### 8.1 「构建全绿」不等于「发布对」：按 **tag** 核资产
+
+0.2.503 实测：所有 job 绿、版本号也发了，但用户按 tag 打开的是**0 资产的空壳**，真正的资产落在另一个 `untagged-<sha>` 的 release 上。
+
+护栏（`release-desktop-auto-update.yml` 的 verify-draft）：
+
+```text
+Assert the verified release is the one users will open
+  1  release.tag_name == desktop-v<version>      ← 校验对象 = 用户打开的对象
+  2  assets >= 6
+  3  不存在 untagged-* / draft=false / target_commitish == 本次 commit 的 release
+```
+
+🔴 写这条断言时**别用 `GET /releases/tags/<tag>`**：它在发布前跑，而草稿不可用 tag 端点检索
+（实测直接 404）。要用 prepare-release 已经产出的 `release_id`，再断言它的 `tag_name`。
+
+后果不止 GitHub 发布页：镜像同步按 tag 找资产，空壳会让国内镜像停在上一版（0.2.503 就是这样）。
+
+### 8.2 每次发版都在重编 Rust：**别给 cache key 加版本相关哈希**
+
+`swatinem/rust-cache` 默认把 `Cargo.toml/Cargo.lock` 的哈希算进 key，而每次 bump 都会改这两个文件里的 `version`
+⇒ 每版都是全新 key ⇒ Rust 全量重编。同一次发版的冷/热对照：
+
+```text
+冷   rust-cache 1s    Check Rust 175s(win)/90s(mac)   credential-store 202s/108s
+热   rust-cache 47s/21s   Check Rust 56s/16s          credential-store 20s/18s
+```
+
+所以：所有用 rust-cache 的 workflow 都带上 `add-rust-environment-hash-key: false`（本仓共 6 处）。
+另外仓库 cache 总量上限 10 GB，超了会驱逐旧 cache —— 清过之后从 11.51 GB 回到 2.19 GB。
+
+### 8.3 镜像的 30 分钟 cron **不可依赖**（实测被节流）
+
+最近 40 次 `modelscope-mirror` run 里 schedule 只触发 16 次，时刻散落（01:55 / 05:52 / 10:23 / 18:11 …），
+其中 `10:23 → 18:11` 有 **7.8 小时空窗**（按配置本应 ~15 次）。所以：
+
+```text
+主路径  release: published 触发的那一次（0.2.504 靠它一次成功）
+兜底    收口脚本对账：先读镜像 latest；已齐平则 no-op；不齐平才 dispatch 并回读
+```
+
+### 8.4 `cancelled` 不是 `failure`（但也不能全局忽略）
+
+`ios-pods-check` 的 `pods` job 会被取消：成功时 87–131s 跑完 11 个 step，
+被取消那次是 **931s 且 0 个 step**（从没拿到 macos-15 runner）。两条 bump PR 同时开时更容易撞上。
+
+处理：`ios-pods-autoretry.yml` 只在 `conclusion == cancelled` 时重跑，最多到第 3 次。
+**不要**把 cancelled 全局当绿——真失败必须保持红。
