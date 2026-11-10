@@ -5,6 +5,7 @@ ENV PATH="/root/.bun/bin:${PATH}"
 WORKDIR /app
 ARG TEST681_SOURCE_COMMIT=red
 ENV TEST681_SOURCE_COMMIT=${TEST681_SOURCE_COMMIT}
+COPY contracts /app/contracts
 COPY agent-node/package.json /app/agent-node/package.json
 RUN cd /app/agent-node && bun install --silent
 COPY agent-node /app/agent-node

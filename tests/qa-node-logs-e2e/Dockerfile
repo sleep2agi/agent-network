@@ -19,6 +19,7 @@ ENV PATH="/root/.bun/bin:${PATH}"
 ARG QA_NODE_LOGS_SOURCE_COMMIT=unknown
 ENV QA_NODE_LOGS_SOURCE_COMMIT=${QA_NODE_LOGS_SOURCE_COMMIT}
 
+COPY contracts /app/contracts
 COPY server /app/server
 COPY agent-node /app/agent-node
 RUN cd /app/server && bun install --silent

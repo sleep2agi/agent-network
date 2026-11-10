@@ -186,8 +186,13 @@ describe("visibleAgents batched = reference, on randomized fixtures", () => {
     db.get = (...a: any[]) => { calls.get++; return get(...a); };
     try { visibleAgents(user, net); } finally { db.all = all; db.get = get; }
     // direct grants + group grants + ceil(nodes / chunk) alias reads
-    expect(calls.all + calls.get).toBeLessThanOrEqual(2 + Math.ceil(grants / CHUNK));
-    expect(calls.all + calls.get).toBeLessThanOrEqual(3);
+    // 2026-11-06 —— 上限 +1：#3432（部门维度授权）在 visibleAgents 里多了一条
+    // **与节点数无关**的查询（network_departments + nodes.department_id）。
+    // 这条测试的意图是「固定次数，不是 per-grant」——多加一个常量查询仍是固定次数，
+    // 但数字必须跟着改，且要改在**两处**（本文件 + agent-groups-perf.test.ts），
+    // 否则另一处会以「预算超了」的措辞红，看起来像实现回归。
+    expect(calls.all + calls.get).toBeLessThanOrEqual(3 + Math.ceil(grants / CHUNK));
+    expect(calls.all + calls.get).toBeLessThanOrEqual(4);
   }, 60_000);
 
   test("more granted nodes than one chunk: same output across the chunk boundary", () => {

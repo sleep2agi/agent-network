@@ -96,6 +96,7 @@ export const opencodeCatalogSnapshotSchema = z.object({
   models: z.array(z.object({
     providerId: identifier,
     id: identifier,
+    variants: z.array(identifier).max(200).refine(values => new Set(values).size === values.length).optional(),
   }).strict()).max(20_000),
   defaultModel: z.object({ providerId: identifier, id: identifier }).strict().nullable(),
 }).strict();

@@ -1,6 +1,7 @@
 FROM oven/bun:1
 WORKDIR /app
 RUN apt-get update && apt-get install -y curl python3 && rm -rf /var/lib/apt/lists/*
+COPY contracts /app/contracts
 COPY server/ server/
 RUN cd server && bun install
 COPY tests/test24-codex-commander/run.sh /app/run.sh

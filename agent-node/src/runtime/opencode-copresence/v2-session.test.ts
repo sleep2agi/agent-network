@@ -167,6 +167,22 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     expect(existsSync(join(root!, "opencode-attach.sh"))).toBe(false);
   });
 
+  test("TEST-ONLY opt-in never trusts a fake server with the exact patch version", async () => {
+    await expect(open({ ANET_VARIANT_TEST_ONLY: "1", TEST_INFO_VERSION: "2.0.22-anet-test.29040e2" })).rejects.toThrow(/server version/);
+  });
+
+  test("stock server: variant writes go through the idle-gated writer, not the test controller", async () => {
+    const { session } = await open({ ANET_VARIANT_TEST_ONLY: "1" });
+    // The atomic-league controller still never exists on a stock server...
+    expect(await session.selectSessionModel!(session.sessionId, { providerID: "stub", id: "stub-model", variant: "high" }))
+      .toEqual({ status: "rejected", reason: "unsupported" });
+    // ...but a narrower writer does: it refuses while one of our turns is in flight and
+    // verifies the readback. OpenCode exposes no session busy flag, so a human turn in
+    // the TUI started at the same instant is NOT detectable — documented trade-off.
+    expect(session.variantConfigCapable).toBe(true);
+    expect(typeof session.setSelectedVariant).toBe("function");
+  });
+
   test("MCP observation precedes session and ready launcher; close reaps serve", async () => {
     const traceRoot = mkdtempSync(join(tmpdir(), "anet-832-order-"));
     const trace = join(traceRoot, "requests");
@@ -197,6 +213,7 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     const { session } = await open();
     const state = await (await fake("/test/state")).json() as any;
     expect(state[session.sessionId].location).toEqual({ directory: resolve(root!) });
+    expect(session.forkSession).toBeUndefined();
     expect(session.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(session.sessionId).toMatch(/^ses_/);
     expect(statSync(session.attachScriptPath).mode & 0o777).toBe(0o700);
@@ -228,9 +245,10 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     const url = `http://127.0.0.1:${port}`;
     const password = "test-only";
     const passwordFile = join(root, "server-password");
+    const tracePath = join(root, "resume-requests.log");
     writeFileSync(passwordFile, password, { mode: 0o600 });
     const server = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-      cwd: root, env: { ...process.env, OPENCODE_SERVER_PASSWORD: password }, stdio: "ignore",
+      cwd: root, env: { ...process.env, OPENCODE_SERVER_PASSWORD: password, TEST832_TRACE: tracePath }, stdio: "ignore",
     });
     const firstDir = join(root, "first");
     const secondDir = join(root, "second");
@@ -247,19 +265,55 @@ describe("V2 core against a protocol-shaped fake serve", () => {
       second = await openShared(secondDir);
       const firstId = first.sessionId;
       expect(first.sessionId).not.toBe(second.sessionId);
+      const initialModel = await first.selectedModel!();
+      const candidate = { providerID: "stub", id: "other", variant: "high" };
+      expect(await first.selectSessionModel!(second.sessionId, candidate)).toEqual({ status: "rejected", reason: "scope" });
+      expect(await first.selectSessionModel!(firstId, candidate)).toEqual({ status: "rejected", reason: "unsupported" });
+      expect(await first.selectedModel!()).toBe(initialModel);
       await expect(openShared(firstDir, "ses_MissingHistory")).rejects.toThrow(/refusing to create a new session/);
       const sessionsAfterMissing = await (await fetch(`${url}/test/state`, {
         headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
       })).json() as Record<string, unknown>;
       expect(Object.keys(sessionsAfterMissing)).toHaveLength(2);
+      const requestsBefore = readFileSync(tracePath, "utf8").split("\n").filter(line => / \/api\/session(?:$|\/[^/]+\/model$)/.test(line));
+      await expect(openShared(firstDir, "", "stub/new-model", true)).rejects.toThrow(/Invalid OpenCode v2 session id to resume/);
+      await expect(openShared(firstDir, "ses_FixtureWrongResume", "stub/new-model", true)).rejects.toThrow(/does not match the requested session/);
+      await expect(openShared(firstDir, "ses_FixtureNullResume", "stub/new-model", true)).rejects.toThrow(/session resume response returned an invalid session id/);
+      await expect(openShared(firstDir, "ses_FixtureNoDataResume", "stub/new-model", true)).rejects.toThrow(/session resume response returned an invalid session id/);
+      await expect(openShared(firstDir, "ses_FixtureEmptyResume", "stub/new-model", true)).rejects.toThrow();
+      await expect(openShared(firstDir, "ses_FixtureErrorResume", "stub/new-model", true)).rejects.toThrow(/HTTP 503/);
+      await expect(openShared(firstDir, "ses_FixtureTimeoutResume", "stub/new-model", true)).rejects.toThrow();
+      await expect(openShared(secondDir, firstId, "stub/new-model", true)).rejects.toThrow(/directory does not match/);
+      const requestsAfter = readFileSync(tracePath, "utf8").split("\n").filter(line => / \/api\/session(?:$|\/[^/]+\/model$)/.test(line));
+      expect(requestsAfter).toEqual(requestsBefore);
+      expect(await first.forkSession?.(second.sessionId)).toEqual({ status: "rejected", reason: "scope" });
+      const forked = await first.forkSession?.(firstId);
+      expect(forked?.status).toBe("forked");
+      if (!forked || forked.status !== "forked") throw new Error("expected fork");
+      expect(forked.sessionId).not.toBe(firstId);
       expect(existsSync(first.attachScriptPath)).toBe(true);
       expect(readOpenCodeV2CatalogEndpoint(firstDir)?.directory).toBe(resolve(firstDir));
       const launcher = readFileSync(first.attachScriptPath, "utf8");
       expect(launcher).not.toContain(password);
       expect(launcher).toContain(passwordFile);
       await first.close();
+      expect(await first.forkSession?.(firstId)).toEqual({ status: "rejected", reason: "scope" });
       first = undefined;
       expect(server.exitCode).toBeNull();
+      first = await openShared(firstDir, forked.sessionId);
+      expect(first.sessionId).toBe(forked.sessionId);
+      await expect(openShared(firstDir, forked.sessionId)).rejects.toThrow("source_resume_bridge_claimed");
+      const { claimSharedSessionBridge } = await import("../source-resume-launcher");
+      expect(() => claimSharedSessionBridge({ project: firstDir, url, serverPid: server.pid!, sessionId: forked.sessionId,
+        workDir: join(firstDir, ".anet", "nodes", "competing-attach"), requestId: "competing-attach" })).toThrow("source_resume_bridge_claimed");
+      expect(await first.selectSessionModel!(first.sessionId, candidate)).toEqual({ status: "rejected", reason: "unsupported" });
+      const sessionsAfterChildResume = await (await fetch(`${url}/test/state`, {
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
+      })).json() as Record<string, unknown>;
+      expect(Object.keys(sessionsAfterChildResume)).toHaveLength(3);
+      expect(sessionsAfterChildResume[firstId]).toBeDefined();
+      await first.close();
+      first = undefined;
       const resumed = await openShared(firstDir, firstId);
       first = resumed;
       expect(resumed.sessionId).toBe(firstId);
@@ -295,7 +349,7 @@ describe("V2 core against a protocol-shaped fake serve", () => {
       await second?.close();
       server.kill("SIGTERM");
     }
-  });
+  }, 15_000);
 
   test("shared server waits for workspace MCP and registered tools", async () => {
     root = mkdtempSync(join(tmpdir(), "anet-543-shared-ready-"));

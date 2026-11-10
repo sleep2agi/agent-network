@@ -11,6 +11,7 @@ WORKDIR /app
 ARG QA_BOARD673_SOURCE_COMMIT=unknown
 ENV QA_BOARD673_SOURCE_COMMIT=${QA_BOARD673_SOURCE_COMMIT}
 
+COPY contracts /app/contracts
 COPY server /app/server
 COPY agent-node /app/agent-node
 COPY tests/lib /app/tests/lib

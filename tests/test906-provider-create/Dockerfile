@@ -5,6 +5,7 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /work
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && npm ci --ignore-scripts --no-audit --no-fund
+COPY contracts /work/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 RUN cd agent-node && npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-network ./agent-network

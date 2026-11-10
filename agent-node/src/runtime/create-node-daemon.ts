@@ -585,6 +585,10 @@ export const DAEMON_CHILD_INHERITED_ENV_KEYS = [
   "all_proxy",
   "NO_PROXY",
   "no_proxy",
+  // Node's built-in fetch ignores the *_PROXY variables unless this is set, so a
+  // child forked by a daemon behind a proxy could not reach the Hub (2026-11-09:
+  // vdev fork child "fetch failed" → exit 1 while the daemon itself worked).
+  "NODE_USE_ENV_PROXY",
 ] as const;
 
 export function minimalEnv(
@@ -829,7 +833,14 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
   return { flags, ...codexExtras };
 }
 
+function hasSessionSourceReference(value: unknown): boolean {
+  return !!value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "source_ref");
+}
+
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
+  if (hasSessionSourceReference(spec) || hasSessionSourceReference(spec.flags)) {
+    throw new Error("session_source_unsupported");
+  }
   for (const field of ["opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer"]) {
     if (Object.prototype.hasOwnProperty.call(spec, field)) throw new Error(`flag_location_invalid:${field}:use node_spec.flags`);
   }
@@ -1065,6 +1076,17 @@ export async function handleCreateNodeDoorbell(
     deps.warn(`[create-node] get_create_request failed: ${req?.error || "unknown"}`);
     await deps.callCommHub("ack_create_request", {
       request_id, status: "failed", error: req?.error || "get_failed",
+    }).catch(() => {});
+    return;
+  }
+
+  // #4150: until authenticated source grants are wired, never reinterpret a
+  // source operation as ordinary creation, including null/empty placeholders.
+  // This precedes CLI probes, directory preparation, config writes and spawn.
+  if (hasSessionSourceReference(req) || hasSessionSourceReference(req.node_spec)
+    || hasSessionSourceReference(req.node_spec.flags)) {
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "rejected", error: "session_source_unsupported",
     }).catch(() => {});
     return;
   }

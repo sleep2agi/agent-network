@@ -378,7 +378,10 @@ describe("update_node_config 响应键集（exact key set）", () => {
       const r = await tool(adminToken, "list_tasks", { network_id: NET });
       // ⚠️ 我从源码里读到的形状（capability / next_terminal_seq）与实际返回不同 ——
       //    这一条断言当场纠正了我：**读码得到的形状必须由一次真实调用确认**。
-      expect(Object.keys(r).sort()).toEqual(["count", "next_cursor", "ok", "stats", "tasks"]);
+      // 🔴 2026-11-06（#3119 since_last 水位）—— 多了 `server_time`：它是下一次增量的入参，
+      //    所以这里「键集变了」等于「契约变了」，不是措辞变化。同一改动会同时打到
+      //    task-not-found-error-domain.test.ts 的那一格（两处都钉了键集，本来就该一起改）。
+      expect(Object.keys(r).sort()).toEqual(["count", "next_cursor", "ok", "server_time", "stats", "tasks"]);
       expect(Array.isArray(r.tasks)).toBe(true);
       expect(r.count).toBe(r.tasks.length);            // 计数与数组同源
     });

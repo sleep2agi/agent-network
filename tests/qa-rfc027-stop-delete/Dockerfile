@@ -19,6 +19,7 @@ ENV PATH="/root/.bun/bin:${PATH}"
 
 WORKDIR /app
 
+COPY contracts /app/contracts
 COPY server /app/server
 COPY agent-node /app/agent-node
 COPY agent-network /app/agent-network

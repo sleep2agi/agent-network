@@ -29,15 +29,18 @@
 |---|---|---|---|---|---|
 | Developer ID Application（mac 签名证书） | （待填：`security find-identity` 的 SHA-1） | （待填） | mac 包签名 | （待填） | （待填） |
 | App Store Connect API Key（公证） | （待填：KeyID，10 位） | （待填） | 公证 / 提交 | （待填） | （待填） |
-| CI secret ①（npm 发布令牌） | （待填：名称即可，不写值） | （待填） | `release.yml` 发布 | （待填） | （待填） |
-| CI secret ②（Hub 部署令牌） | （待填：名称即可） | （待填） | 部署 hub 运行时 | （待填） | （待填） |
-| CI secret ③（GitHub token / App 私钥） | （待填：名称即可） | （待填） | 开 PR / 读仓库 | （待填） | （待填） |
-| 本地副本位置 | （待填：目录，不含文件名里的密钥） | （待填） | 离线备份 | （待填） | （待填） |
+| CI secret ①（npm 发布令牌） | `secrets.NPM_TOKEN` | （待填：admin） | `release.yml` 发布 / `promote-latest.yml` 升 latest | （待填：admin） | 两个 workflow 各有一条引用；另有 `NPM_TRUSTED_PUBLISHING=true` 时改走 OIDC 不读本 secret ⇒ 换 key 时先确认 OIDC 通道是否已启用 |
+| CI secret ②（Vercel 部署令牌） | `secrets.VERCEL_TOKEN` + `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID` | （待填：admin） | `deploy-anet-sh.yml` 部署官网 | （待填：admin） | 换 token 时**三项要一起换**（org/project id 与 token 必须同属一个账号；只换 token 会 403 且报错不指向权限） |
+| CI secret ③（Codex 登录态 + GitHub token） | `secrets.CODEX_AUTH_JSON` · `secrets.GITHUB_TOKEN`（内置） | （待填：admin） | `windows-real-codex-gate.yml` 用 Codex 登录态；`release.yml` 用内置 GITHUB_TOKEN | （待填：admin） | `CODEX_AUTH_JSON` 是账号级登录态 ⇒ 撤销 = 重新登录并把新 JSON 写回 secret；`GITHUB_TOKEN` 由 GitHub 每次运行现签，无需撤销，但要查 `permissions:` 是否被放宽 |
+| 本地副本位置 | 路径即可：`~/.npmrc`（npm token）· `~/.config/gh/hosts.yml`（GitHub oauth_token）· `~/.anet/nodes/*/config.json`（node token）· `~/.anet/nodes/*/secrets.env`（若存在） | （待填：admin） | 离线/本机使用 | （待填：admin） | 撤销 = 删/替换上述文件；`config.json` 里的 node token 还要在 Hub 侧作废（否则删文件不等于吊销） |
 
 ## 读数（本行必须随表一起更新）
 
 ```text
 已填 0 行 / 待填 6 行
+
+（逐行进度：**名称 / 用途 / 撤销改点已填 4 行**，其中 3 行是 CI secret、1 行是本机副本位置；
+「持有人」与「最近一次使用」两列**仍需 admin**，所以上面的计数仍按整行算。）
 最后更新：2026-11-01（#3306 建表；数据待 #3307）
 ```
 

@@ -1,6 +1,7 @@
 FROM oven/bun:1
 
 WORKDIR /app
+COPY contracts /app/contracts
 COPY server/package.json server/package.json
 COPY server/src/password-dict.ts server/src/password-dict.ts
 COPY server/src/password-dict.test.ts server/src/password-dict.test.ts

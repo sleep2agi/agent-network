@@ -53,7 +53,7 @@ import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./r
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, newMemberTaskAccess } from "./task-access.js";
-import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
+import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup, listDepartmentGrants, departmentCoverage } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -108,6 +108,7 @@ import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
+import { readTokenUsage, tokenUsageCoverage } from "./node-token-usage.js";
 import { readBuildInfo } from "./build-info.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
@@ -116,6 +117,7 @@ import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAl
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
+import { createSessionSourceTransport } from "./session-source-transport.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
@@ -2031,6 +2033,8 @@ function patrolDeliveredStaleTasks(): void {
 // would swallow a legitimate `0`. Same for hostname.
 export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
 const nodeSessionControl = createNodeSessionControlRelay();
+const sessionSourceTransport = createSessionSourceTransport({ enabled: process.env.COMMHUB_SOURCE_FORK_PREVIEW === "1",
+  directoryEnabled: process.env.COMMHUB_SOURCE_DIRECTORY_PREVIEW === "1", projectEnabled: process.env.COMMHUB_PROJECT_NEW_SESSION_PREVIEW === "1" });
 return Bun.serve({
   port: opts?.port ?? PORT,
   hostname: opts?.hostname ?? HOST,
@@ -3050,6 +3054,11 @@ return Bun.serve({
           restricted: isAgentRestricted(targetUid, netId),
           grants: listAgentGrants(netId, targetUid),
           group_grants: listGroupGrants(netId, targetUid),
+          // 部门维度授权(admin 2026-11-05)：与组授权同构，展开源是部门子树。
+          department_grants: listDepartmentGrants(netId, targetUid),
+          // 覆盖率必须一起给：没填 department_id 的节点永远不可能被部门授权覆盖，
+          // 否则用户会以为「授权了就该全看见」，然后在界面上找不到人。
+          department_coverage: departmentCoverage(netId),
         }));
       }
       // 网络 admin 不能改 owner / 其他 admin 的授权(对他们本来也不生效,但别让 admin 去碰平级)。
@@ -3059,7 +3068,8 @@ return Bun.serve({
       let body: any;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
       if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
-      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined && body.group_grants === undefined) {
+      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined
+        && body.group_grants === undefined && body.department_grants === undefined) {
         return withCors(req, Response.json({ ok: false, error: "grants or agent_access required" }, { status: 400 }));
       }
       const result = replaceAgentGrants({
@@ -3068,13 +3078,14 @@ return Bun.serve({
         grants: body.grants ?? body.node_ids,
         agentAccess: body.agent_access,
         groupGrants: body.group_grants,
+        departmentGrants: body.department_grants,
         actorUserId: resolved.user.user_id,
       });
       if (!result.ok) {
         return withCors(req, Response.json({ ok: false, error: result.error, ...(result.detail ? { detail: result.detail } : {}) }, { status: result.status }));
       }
       logAudit(resolved.user.user_id, resolved.user.username, "member_agent_grants_changed", "network", netId,
-        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })), group_grants: result.group_grants.map((g) => ({ group_id: g.group_id, can_message: g.can_message })) }).slice(0, 4000),
+        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })), group_grants: result.group_grants.map((g) => ({ group_id: g.group_id, can_message: g.can_message })), department_grants: result.department_grants.map((g) => ({ department_id: g.department_id, can_message: g.can_message })) }).slice(0, 4000),
         undefined, netId);
       // 已连着的观察流 / 用户流按旧权限鉴权过,断开让它按新权限重连。
       closeUserStreamsInNetwork(netId, targetUid);
@@ -4043,6 +4054,8 @@ return Bun.serve({
     });
     if (externalScheduleEditResponse) return withCors(req, externalScheduleEditResponse);
 
+    const sourceResponse = await sessionSourceTransport(req, url);
+    if (sourceResponse) return withCors(req, sourceResponse);
     const sessionControlResponse = await nodeSessionControl(req, url);
     if (sessionControlResponse) return withCors(req, sessionControlResponse);
 
@@ -4891,6 +4904,26 @@ return Bun.serve({
           return new Map<string, number>();
         }
       })();
+      // The node 密钥 page gates on node_secrets_capable, which nodes report in
+      // nodes.config_snapshot (not a sessions column). Without projecting it here the
+      // app never saw it and fell back to the runtime version — null for claude-code
+      // nodes — so a capable node (e.g. claude-code-cli on agent-network ≥ .219) was
+      // shown "upgrade required". Only emitted when true: other rows keep their bytes.
+      const nodeSecretsCapable = (() => {
+        const ids = isLight ? [] : [...new Set(rows.map((r: any) => r.node_id).filter((v: unknown): v is string => typeof v === "string" && v.length > 0))];
+        const out = new Set<string>();
+        for (let i = 0; i < ids.length; i += 500) {
+          const chunk = ids.slice(i, i + 500);
+          try {
+            const found = db.all<{ node_id: string; config_snapshot: string | null }>(
+              `SELECT node_id, config_snapshot FROM nodes WHERE node_id IN (${chunk.map((_, j) => `?${j + 1}`).join(",")})`, ...chunk);
+            for (const r of found) {
+              try { if (JSON.parse(r.config_snapshot || "{}")?.node_secrets_capable === true) out.add(r.node_id); } catch { /* malformed snapshot: not capable */ }
+            }
+          } catch { /* projection is best-effort; never fail /api/status */ }
+        }
+        return out;
+      })();
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
@@ -4947,6 +4980,7 @@ return Bun.serve({
           skills_capable: s.skills_capable === 1,
           files_capable: s.files_capable === 1,
           logs_capable: s.logs_capable === 1,
+          ...(s.node_id && nodeSecretsCapable.has(s.node_id) ? { node_secrets_capable: true } : {}),
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {
@@ -6386,6 +6420,57 @@ return Bun.serve({
     // {model, flags, config_revision} the node last posted via
     // report_status (B6). NEVER reads per-node files. Network-scoped
     // via addNetworkScope so a netA viewer can't read a netB node.
+    // ── #3952 Token 审计（admin 2026-11-05）──
+    // GET /api/token-usage?network_id=…&since_hours=24
+    //   人（成员/owner/admin）读本网络各节点的 LLM token 计数聚合；节点令牌不给（user_token_required）。
+    // 为什么走 REST 而不是 MCP 工具：tools/list 的 user 预算只剩 ~500 B，
+    // 而一个带 schema 的新工具要 ~900 B —— 审计页本来就是人看的表，REST 更合适。
+    // 只回计数：没有 prompt、没有消息 id、没有凭据（表形状决定的）。
+    if (url.pathname === "/api/token-usage" && req.method === "GET") {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (isNodeCredential(resolved)) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      // 作用域用 handler 顶部已解析的 restScope —— 它已经做过「是不是这个网络的成员」，
+      // 且 denied 分支在上面统一 return 403。**不要**再在这里自己查一次网络：
+      // 上一版调了一个本文件里不存在的 `getNetworkId()` ⇒ 这个端点自 .273 上线起一直 500，
+      // 而所有人都只会看到「空了」，不会看到「坏了」。（#3951 由 HTTP 测试抓出）
+      // 与 catalog 端点（/api/providers 等）**同一口径**：显式给了就用，没给就回退到
+      // 「唯一所属网络」，多个/零个才 400。上一版只认 restScope.networkId，
+      // 于是一个只属于一个网络的用户在这里拿到 400、在同一页的 /api/providers 上拿到 200 ——
+      // 相邻两个端点对同一用户给不同答案，客户端被迫多写一条分支。
+      // 三档，按"信息量从高到低"取：
+      //   ① restScope.networkId   —— 显式参数 / 节点绑定 / 管理员指定
+      //   ② restScope.networkIds 长度==1 —— 普通用户只属于一个网络
+      //   ③ 以上都拿不到时，退回「这个**人**自己所属的网络」再判一次唯一性
+      // 为什么需要 ③：authCtx 为 null（无鉴权/遗留全局模式）时 resolveRestNetworkScope
+      // 会返回 {networkId: requested||null, networkIds: null} —— 那不是「属于所有网络」，
+      // 而是「这份 scope 没带成员信息」。此时若直接 400，唯一所属网络的用户会被拒，
+      // 而同一页的 /api/providers 却放行。
+      const scopeIds = restScope.networkIds ?? (restScope.networkId ? null : getUserNetworkIds(resolved.user.user_id));
+      const netId = restScope.networkId ?? (scopeIds && scopeIds.length === 1 ? scopeIds[0] : null);
+      if (!netId) return withCors(req, Response.json({ ok: false, error: "network_required" }, { status: 400 }));
+      const raw = Number(url.searchParams.get("since_hours") ?? 24);
+      const sinceHours = Number.isFinite(raw) ? Math.max(1, Math.min(24 * 90, Math.floor(raw))) : 24;
+      const nodes = readTokenUsage(netId, sinceHours);
+      const totals = nodes.reduce((acc, r) => ({
+        input_tokens: acc.input_tokens + r.input_tokens,
+        output_tokens: acc.output_tokens + r.output_tokens,
+        // cache 单列：它可能是 total 的几百倍，绝不能加进 total
+        cache_read_tokens: acc.cache_read_tokens + r.cache_read_tokens,
+        total_tokens: acc.total_tokens + r.total_tokens,
+        cost_usd: Number((acc.cost_usd + r.cost_usd).toFixed(6)),
+      }), { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, total_tokens: 0, cost_usd: 0 });
+      return withCors(req, Response.json({
+        ok: true, network_id: netId, since_hours: sinceHours,
+        // 空表也要说清口径：0 行可能因为「没人上报」，也可能因为「窗口里没用量」。
+        note: nodes.length ? undefined : "这个窗口里没有任何节点上报过 token 用量（不是「用量为 0」）",
+        nodes, totals,
+        // #3950 —— 分母。只有 1 行时，读表的人必须能分清「只有 1 台在干活」还是「只有 1 台有这能力」。
+        coverage: tokenUsageCoverage(netId, nodes.length, (sql: string, ...params: any[]) => db.all(sql, ...params)),
+      }));
+    }
+
     const nodeConfigMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/config$/);
     if (nodeConfigMatch && req.method === "GET") {
       const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
@@ -6416,6 +6501,14 @@ return Bun.serve({
         network_id: node.network_id,
         config_revision: node.config_revision || 0,
         model: snapshot.model ?? null,
+        ...(typeof snapshot.model_effective === "string" ? { model_effective: snapshot.model_effective } : {}),
+        ...(Object.prototype.hasOwnProperty.call(snapshot, "modelVariant") ? { modelVariant: snapshot.modelVariant } : {}),
+        // Agent (Build): the live session's agent, plus whether this node can
+        // switch it at all. Absent key = node never reported (not "build").
+        opencode_agent_config_capable: snapshot.opencode_agent_config_capable === true,
+        ...(typeof snapshot.opencode_agent_current === "string" ? { agent: snapshot.opencode_agent_current } : {}),
+        ...(Array.isArray(snapshot.opencode_agents) ? { agents: snapshot.opencode_agents } : {}),
+        opencode_variant_config_capable: snapshot.opencode_variant_config_capable === true,
         flags: snapshot.flags ?? {},
         config_update_capable: snapshot.config_update_capable ?? false,
         // null = 这个节点从来没有被下发过配置（与「下发过但还没终局」是两件事）
@@ -7008,7 +7101,21 @@ return Bun.serve({
         let opencodeGeneration: "v1" | "v2" | null = null;
         let opencodeMode: string | null = null;
         let opencodeServer: string | null = null;
+        // 2026-11-10 —— 起这台节点的 anet CLI 版本。**声明在 `if (snap)` 外面**：
+        // 下面的投影对每一行都会求值，块内 `let` 会让部署后的 /api/nodes 直接抛
+        // "launchedByCliVersion is not defined"（#4150-Build 的 opencodeAgents 踩过同一次）。
+        // null = 节点没报（老节点 / 不是 CLI 起的，如 daemon adopt 出来的子节点）。
+        let launchedByCliVersion: string | null = null;
         const snap = r.config_snapshot;
+        // #4150-Build — declared outside the `if (snap)` block: the projection below is
+        // evaluated for every row, and a block-scoped `let` here made /api/nodes throw
+        // "opencodeAgents is not defined" on the deployed hub.
+        let opencodeAgents: string[] | null = null;
+        let opencodeAgentsSeenAt: string | null = null;
+        let opencodeAgentCurrent: string | null = null;
+        // 与 GET /api/nodes/:id/config 保持同一口径：列表里也要能读到「能不能切 agent」，
+        // 否则两个端点对同一台节点会给出不一致的能力结论。
+        let opencodeAgentConfigCapable = false;
         if (snap) {
           let parsed: any = null;
           try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
@@ -7029,10 +7136,28 @@ return Bun.serve({
           // PR #1092 之前从 `node.config_snapshot` 读，但这个端点**刻意不带整个快照**
           // （见上方 #312 注释）⇒ 真机上两行是空的/整行不出现。这里只放三个标量出来，
           // 仍不暴露 flags 里的其它内容，更不暴露任何凭据。
+          // #4150-Build — agents this node's server exposes; [] means none configured.
+          const rawAgents = parsed?.opencode_agents;
+          if (Array.isArray(rawAgents) && rawAgents.every((a: unknown) => typeof a === "string" && a.length <= 200)) {
+            opencodeAgents = rawAgents.slice(0, 200);
+            const seenAgents = parsed?.opencode_agents_seen_at;
+            opencodeAgentsSeenAt = typeof seenAgents === "string" && seenAgents.length > 0 && seenAgents.length <= 40 ? seenAgents : null;
+          }
+          const rawAgentCurrent = parsed?.opencode_agent_current;
+          if (typeof rawAgentCurrent === "string" && rawAgentCurrent.length > 0 && rawAgentCurrent.length <= 200) {
+            opencodeAgentCurrent = rawAgentCurrent;
+          }
+          opencodeAgentConfigCapable = parsed?.opencode_agent_config_capable === true;
           const flags = parsed?.flags;
           if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
           if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
+          // 2026-11-10 —— 只做投影：节点报了就给出来，没报就是 null（两种成因见上面的注释）。
+          // 形状再校验一遍：schema 那层已经限了 64 字符，但库里的历史行不受 schema 管。
+          const rawLaunchedBy = parsed?.launched_by_cli_version;
+          if (typeof rawLaunchedBy === "string" && rawLaunchedBy.length > 0 && rawLaunchedBy.length <= 64) {
+            launchedByCliVersion = rawLaunchedBy;
+          }
         }
         // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
         // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
@@ -7051,11 +7176,16 @@ return Bun.serve({
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
           opencode_catalog: opencodeCatalog,
+          opencode_agents: opencodeAgents,
+          opencode_agent_current: opencodeAgentCurrent,
+          opencode_agent_config_capable: opencodeAgentConfigCapable,
+          opencode_agents_seen_at: opencodeAgentsSeenAt,
           // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
           opencode_catalog_seen_at: opencodeCatalogSeenAt,
           opencode_generation: opencodeGeneration,
           opencode_mode: opencodeMode,
           opencode_server: opencodeServer,
+          launched_by_cli_version: launchedByCliVersion,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
@@ -7659,6 +7789,3 @@ export function hostDiskState(): { path: string; total_gb: number; used_gb: numb
     return null;
   }
 }
-
-
-

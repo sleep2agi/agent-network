@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash curl jq ca-certificates procps && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo
+COPY contracts /repo/contracts
 COPY agent-node/package.json /repo/agent-node/package.json
 RUN cd /repo/agent-node && bun install && bun add --no-save typescript@5.9.3
 COPY agent-node /repo/agent-node

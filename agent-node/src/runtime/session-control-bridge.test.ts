@@ -4,13 +4,19 @@ import { createNodeSessionControlBridge, createSessionControlPin } from "./sessi
 import { SessionBackgroundError, type SessionControlPermit } from "./opencode-copresence/session-background";
 
 function harness(mode = "ready") {
-  const id = `bg_${Date.now()}_bridge2014`, calls: Array<{ path: string; body: any }> = [], warnings: string[] = [];
+  const id = `${mode.startsWith("fork") ? "fk" : "bg"}_${Date.now()}_bridge2014`, calls: Array<{ path: string; body: any }> = [], warnings: string[] = [];
   let writes = 0, claimed = false, revoked = false, registrations = 0;
   const abort = new AbortController();
   const revoke = () => { revoked = true; abort.abort(); };
   const checkpoint = () => { if (revoked) throw new SessionBackgroundError("session_control_changed"); };
   const state = { session_id: "ses_Bridge2014", binding_id: "generation2014", supported: true, active: true, can_request_background: true, observed_at: Date.now() };
-  const session = { isRunning: true, sessionId: state.session_id, backgroundControl: {
+  const session = { isRunning: true, sessionId: state.session_id,
+    ...(mode === "fork-no-runtime" ? {} : { forkSession: async (source: string) => {
+      expect(source).toBe(state.session_id); writes++;
+      if (mode === "fork-throw") throw Error("private runtime failure");
+      if (mode === "fork-unknown") return { status: "unknown" as const, reason: "verification_failed" as const };
+      return { status: "forked" as const, sessionId: "ses_Child" };
+    } }), backgroundControl: {
     state: async () => state,
     background: async (_intent: unknown, permit?: SessionControlPermit) => {
       expect(permit).toBeDefined(); permit!.checkpoint();
@@ -25,15 +31,15 @@ function harness(mode = "ready") {
       claimed = true;
       if (mode === "changed") live = null;
       if (mode === "revoked-pull") revoke();
-      return { ok: true, request: { request_id: id, operation: mode === "bad-op" ? "keys" : "background",
+      return { ok: true, request: { request_id: id, operation: mode.startsWith("fork") ? "fork" : mode === "bad-op" ? "keys" : "background",
         session_id: mode === "wrong-session" ? "ses_Peer2014" : state.session_id, binding_id: state.binding_id,
         expires_at: mode === "expired" ? Date.now() - 1 : Date.now() + 15_000 } };
     }
-    if (path.endsWith("/ack") && mode === "ack-lost") throw Error("private ACK failure");
+    if (path.endsWith("/ack") && (mode === "ack-lost" || mode === "fork-ack-lost")) throw Error("private ACK failure");
     if (path.endsWith("/bridge")) registrations++;
-    return { ok: true, ...(mode === "old-hub" ? {} : { identity: {
-      node_id: mode === "wrong-node" ? "n_peer" : "n_local",
-      network_id: mode === "wrong-network" ? "net_peer" : "net_local", token_id: mode === "changed-token-id" && registrations > 1 ? "tok_other" : "tok_initial",
+    return { ok: true, ...(mode.startsWith("fork") && mode !== "fork-legacy" ? { fork_supported: true } : {}), ...(mode === "old-hub" ? {} : { identity: {
+      node_id: mode === "wrong-node" || (mode === "fork-wrong-node" && registrations > 1) ? "n_peer" : "n_local",
+      network_id: mode === "wrong-network" || (mode === "fork-wrong-network" && registrations > 1) ? "net_peer" : "net_local", token_id: (mode === "changed-token-id" || mode === "fork-wrong-token") && registrations > 1 ? "tok_other" : "tok_initial",
     } }) };
   };
   const identity = { expected: { node_id: "n_local", network_id: "net_local" }, signal: abort.signal, checkpoint, invalidate: revoke, post };
@@ -54,6 +60,37 @@ for (const mode of ["changed", "wrong-session", "expired", "bad-op"]) test(`#201
 test("#2014 lost ACK is not a reason to replay the operation", async () => {
   const h = harness("ack-lost"); await h.bridge.register(); await h.bridge.trigger(); await h.bridge.trigger();
   expect(h.writes).toBe(1); expect(h.warnings).toEqual(["[session-control] transport unavailable; operation was not replayed"]);
+});
+
+test("fork bridge negotiates twice and preserves outcomes without replaying ACK loss", async () => {
+  for (const mode of ["fork-ready", "fork-unknown", "fork-throw", "fork-ack-lost"]) {
+    const h = harness(mode); expect(await h.bridge.register()).toBe(true);
+    await Promise.all([h.bridge.trigger(), h.bridge.trigger()]); await h.bridge.trigger();
+    expect(h.writes).toBe(1);
+    expect(h.calls.find(c => c.path.endsWith("/ack"))?.body).toMatchObject(["fork-ready", "fork-ack-lost"].includes(mode)
+      ? { status: "done", result: { session_id: "ses_Child" } }
+      : { status: "unknown", error: "session_fork_outcome_unknown" });
+    expect(JSON.stringify(h.calls)).not.toContain("private runtime failure");
+    const registrations = h.calls.filter(c => c.path.endsWith("/bridge"));
+    expect(registrations).toHaveLength(2);
+    expect(registrations[0].body.fork_supported).toBeUndefined();
+    expect(registrations[1].body.fork_supported).toBe(true);
+    if (mode === "fork-ack-lost") expect(h.warnings).toEqual(["[session-control] transport unavailable; operation was not replayed"]);
+  }
+});
+test("fork bridge requires both negotiated Hub support and runtime support", async () => {
+  for (const mode of ["fork-legacy", "fork-no-runtime"]) {
+    const h = harness(mode); expect(await h.bridge.register()).toBe(true); await h.bridge.trigger();
+    expect(h.writes).toBe(0);
+    expect(h.calls.find(c => c.path.endsWith("/ack"))?.body).toMatchObject({ status: "failed", error: "session_control_unsupported" });
+    expect(h.calls.filter(c => c.path.endsWith("/bridge"))).toHaveLength(1);
+  }
+});
+test("fork bridge refuses a changed identity during the second negotiation", async () => {
+  for (const mode of ["fork-wrong-node", "fork-wrong-network", "fork-wrong-token"]) {
+    const h = harness(mode); expect(await h.bridge.register()).toBe(false); await h.bridge.trigger();
+    expect(h.writes).toBe(0); expect(h.calls.some(c => c.path.endsWith("/pull"))).toBe(false);
+  }
 });
 
 for (const mode of ["old-hub", "wrong-node", "wrong-network"]) test(`#2014 authority reply ${mode} never enables claims`, async () => {

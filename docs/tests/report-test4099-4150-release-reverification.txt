@@ -1,0 +1,31 @@
+# Backend release input re-verification
+
+Source: `7c12d59cfebc32fad2605f3f6d01e8fa8f406842`, clean release worktree `/tmp/opencode/anet-4099-4150-release`. Synthetic credentials and isolated data only; Docker `--network none`. No production changes or publication.
+
+Input ELF version `2.0.22-anet-test.29040e2`, SHA-256 `1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786`. Docker base `anet-4150-native-project:local@sha256:dc86c5e20b7ac9d8ce86168d285b74bf3181f3688f321837cf9e9122ebc750c5`.
+
+## Create and same-child variant
+
+Image built with `sg docker -c 'docker build --network none -t anet-release-4099-variant-check:local -f tests/test-shared-variant/Dockerfile .'`; build manifest list `sha256:d7d2adf3ff2f3451f2e795d4b1f43827b8602ca408137cc825d2f50385346d36`.
+
+```
+sg docker -c 'docker run --rm --init --network none --user 0 -e HOME=/work/test-home -e XDG_CONFIG_HOME=/work/test-config -e XDG_DATA_HOME=/work/test-data -e XDG_CACHE_HOME=/work/test-cache -e XDG_STATE_HOME=/work/test-state --mount type=bind,src=/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode,dst=/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode,readonly anet-release-4099-variant-check:local tests/test-shared-variant/create-chain.test.ts'
+```
+
+`sh_1b8786b2a001PKge2MDKxymHce`: exit 0; 1 pass, 0 fail, 82 expect calls. Real registration ACK 200; same created child; matching heartbeat pending before ACK; high, omitted and clear applied; busy rejected; no identity overlay. This is not native desktop acceptance.
+
+## Managed fork
+
+Image built from `tests/test-shared-fork/Dockerfile` as `anet-release-4099-4150-check:local`; build manifest list `sha256:4141d37d6cccd3049e5273de535a0ecd55058fa39f064bc5272c7b5cc16365d3`.
+
+```
+sg docker -c 'docker run --rm --init --network none --user 0 -e HOME=/state/test-home -e XDG_CONFIG_HOME=/state/test-config -e XDG_DATA_HOME=/state/test-data -e XDG_CACHE_HOME=/state/test-cache -e XDG_STATE_HOME=/state/test-state --mount type=bind,src=/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode,dst=/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode,readonly anet-release-4099-4150-check:local tests/test-shared-fork/chain.test.ts'
+```
+
+`sh_1b8781971001e5YNVX5x91g4FO`: exit 1; 0 pass, 1 fail, 2 expect calls. First failure `fork_unknown_rotation_required`: evidence and recheck ACK 200, execute ACK session_ready, native fork HTTP 200; delivery ACK `refused`, no fork-child registration; only source launcher recorded. Sanitized trace does not establish a more precise cause. No replay of unknown; no second run. Prior candidate success does not override this result.
+
+## Bundle and publication
+
+`/tmp/opencode/anet-4099-4150-backend-7c12d59.bundle`, SHA-256 `abf90817436ab82c29fe8388d4702ee4d1824d57e2fbb8d39cf1ac800bcaf9e5`; `git bundle verify` passes, reports complete history, ref `refs/heads/release/4099-4150-backend-local` at source SHA. Bundle is source history, not ELF distribution.
+
+No named authorized publisher was established. Workflow OIDC metadata alone does not verify a person's dispatch rights or npm trusted-publisher configuration. No push or publish performed. Existing inherited typecheck errors remain unwaived.

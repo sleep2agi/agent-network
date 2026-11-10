@@ -233,3 +233,40 @@ describe("#1545 report_status 子对象的 strict 分布(注释里那张表的�
     expect(results.filter(r => r === "rejected").length).toBeGreaterThan(0);
   });
 });
+
+/** #4150 — the source directory/attach/fork previews read these four capability
+ *  literals off this same snapshot. zod objects here are non-strict, so a field
+ *  missing from the schema is dropped silently and the transport answers 403
+ *  forever (observed on the upgraded production hub). */
+describe("#4150 source direct/attach/fork capabilities survive report_status", () => {
+  const caps = () => schemas.report_status.config_snapshot;
+
+  test("the four transport capabilities are preserved verbatim", () => {
+    const parsed = caps().parse({
+      flags: {}, config_update_capable: false, peer_reply_inbox_capable: true,
+      daemon_capabilities: {
+        source_directory_read: "source-directory-read-v1-opencode-2.0.22",
+        project_new_session: "project-new-session-v1-opencode-2.0.22",
+        session_attach: "existing-session-attach-v1-opencode-2.0.22",
+        source_fork_transport: "source-fork-transport-v1-opencode-2.0.22",
+      },
+    });
+    expect(parsed.daemon_capabilities.source_directory_read).toBe("source-directory-read-v1-opencode-2.0.22");
+    expect(parsed.daemon_capabilities.project_new_session).toBe("project-new-session-v1-opencode-2.0.22");
+    expect(parsed.daemon_capabilities.session_attach).toBe("existing-session-attach-v1-opencode-2.0.22");
+    expect(parsed.daemon_capabilities.source_fork_transport).toBe("source-fork-transport-v1-opencode-2.0.22");
+  });
+
+  test("an older or mismatched value degrades to absent, never rejecting the report", () => {
+    const parsed = caps().parse({
+      flags: {}, config_update_capable: false, peer_reply_inbox_capable: true,
+      daemon_capabilities: {
+        source_directory_read: "source-directory-read-v0-old",
+        source_fork_transport: 42, can_create_nodes: true,
+      },
+    });
+    expect(parsed.daemon_capabilities.source_directory_read).toBeUndefined();
+    expect(parsed.daemon_capabilities.source_fork_transport).toBeUndefined();
+    expect(parsed.daemon_capabilities.can_create_nodes).toBe(true);
+  });
+});

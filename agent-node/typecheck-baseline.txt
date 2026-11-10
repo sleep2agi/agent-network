@@ -39,6 +39,6 @@ agent-node/src/runtime/opencode-acp/child-env.ts|TS2365|Operator '-' cannot be a
 agent-node/src/runtime/opencode-acp/events.ts|TS18048|'update' is possibly 'undefined'.	2
 agent-node/src/runtime/probe-daemon.ts|TS2345|Argument of type 'ProbeAckPayload' is not assignable to parameter of type 'Record<string, unknown>'.	1
 agent-node/src/runtime/probe-daemon.ts|TS2454|Variable 'result' is used before being assigned.	1
-agent-node/src/runtime/side-thread/domain.ts|TS2367|This comparison appears to be unintentional because the types '"running" | "failed" | "completed" | "cancelled" | "ready"' and '"purged"' have no overlap.	1
+agent-node/src/runtime/side-thread/domain.ts|TS2367|This comparison appears to be unintentional because the types '"running" | "failed" | "ready" | "completed" | "cancelled"' and '"purged"' have no overlap.	1
 agent-node/src/runtime/side-thread/fork-process-race-worker.ts|TS2868|Cannot find name 'Bun'. Do you need to install type definitions for Bun? Try `npm i --save-dev @types/bun` and then add 'bun' to the types field in your tsconfig.	1
 agent-node/src/runtime/side-thread/operation-ledger.ts|TS2345|Argument of type 'OperationState' is not assignable to parameter of type 'never'.	1

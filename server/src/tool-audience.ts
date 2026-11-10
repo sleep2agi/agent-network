@@ -44,12 +44,15 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   get_opencode_catalog_request: "protocol", ack_opencode_catalog: "protocol",
   // ── 人:节点令牌一律 user_token_required(项目管理)/ node_token_cannot_browse_files / node_token_cannot_read_logs ──
   projects_create: "user", projects_update: "user", requirement_tags: "both",
-  read_opencode_catalog: "user", get_opencode_catalog: "user",
+  read_opencode_catalog: "user", get_opencode_catalog: "user", select_opencode_session_model: "user",
   list_node_files: "user", read_node_file: "user", tail_node_logs: "user",
   // ── 两边都能调 ──
   submit_skill: "both", list_skills: "both", get_skill: "both", review_skill: "both",
   report_completion: "both", get_inbox: "both", ack_inbox: "both",
   get_all_status: "both", get_session_status: "both",
+  // #3952 —— Token 审计：节点上报走 protocol（默认不列，agent-node 按名直调）；
+  // 人的审计视图走 REST `/api/nodes/token-usage`，**不占 tools/list 预算**。
+  report_token_usage: "protocol",
   send_task: "both", send_message: "both", send_reply: "both", send_peer_reply: "both", send_ack: "both",
   retry_task: "both", get_task: "both", list_tasks: "both", cancel_task: "both", reassign_task: "both",
   send_desktop_message: "both", broadcast: "both", get_completions: "both",

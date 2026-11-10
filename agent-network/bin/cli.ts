@@ -86,7 +86,7 @@ import { OPENCODE_KEYLESS_FREE_MODEL_NOTE, opencodeFreeTierSafePresetWarning } f
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
-import { mergeProfilePatch } from "../src/profile-merge";
+import { mergeProfilePatch, droppedProfileKeys } from "../src/profile-merge";
 import { backfillOpencodeGeneration, stampOpencodeGeneration } from "../src/opencode-generation-record";
 import {
   applyOpencodeGenerationCreateOption,
@@ -108,11 +108,13 @@ import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
 import {
   OPENCODE_AGENT_NODE_SPEC,
   OPENCODE_AGENT_NODE_VERSION,
+  PAIRED_AGENT_NETWORK_VERSION,
   PAIRED_AGENT_NODE_SPEC,
   PAIRED_AGENT_NODE_VERSION,
   agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairInfo,
   pairedAgentNodeResolution,
   pairedAgentNodeResolveTimeoutMs,
   pairedAgentNodeResolveError,
@@ -3265,6 +3267,13 @@ function saveProfile(id: string, profile: Profile) {
   // #542 — an OpenCode node records its generation (absent → "v1"; never overwritten).
   const normalized = normalizeStoredProfile(id, isOpencode ? stampOpencodeGeneration(profile) : profile);
   const toSave = serializeProfileForConfigJson(normalized, profile);
+  // #3418 —— 白名单之外的键会静默消失。生产上就丢过 opencodeConfiguredModelAtLastOpen，
+  // 表现成「下游读到 null、判据永远 false」，查了三轮才找到。丢掉要出声。
+  try {
+    const onDisk = JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"));
+    const dropped = droppedProfileKeys(onDisk, toSave);
+    if (dropped.length) console.warn(`[anet] ⚠ profile 保存会丢掉这些键（不在白名单里）: ${dropped.join(", ")}`);
+  } catch {}
   const body = JSON.stringify(toSave, null, 2) + "\n";
   if (isOpencode) {
     // The profile contains the node ntok_. Never replace through a
@@ -3380,6 +3389,22 @@ function getAnetVersion(): string {
   if (embedded) return embedded;
   try { return JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version || ""; }
   catch { return ""; }
+}
+
+// 2026-11-10 —— 让 agent-node 自报「起它的是哪个 anet CLI」用的环境变量片段。
+//
+// 为什么需要它：`config_snapshot.anet_version` 是静态占位值（写死 0.1.0），客户端因此
+// 给不出这台机器「该装哪一对包」，只能建议 `agent-node@preview` —— 装完很可能与本地
+// CLI 不成对，CLI 拒绝启动（`Incompatible agent-node for opencode-cli`），节点离线。
+//
+// 形状不认就返回**空对象**：宁可「没报」也不要报一个假版本（假版本正是上面那个 bug 的成因）。
+// 🔴 只用于**真正 spawn agent-node 子进程**的 env，不要塞进 `AgentNodeLaunchPlan.probeEnv` ——
+//    那个对象还要拿去跑 `agent-node --help` 探测，混入启动侧的东西会让探测环境与启动环境不一致。
+function launchedByCliVersionEnv(): Record<string, string> {
+  const v = getAnetVersion();
+  return /^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$/.test(v) && v.length <= 64
+    ? { ANET_LAUNCHED_BY_CLI_VERSION: v }
+    : {};
 }
 
 /** POST /api/auth/login|register 的 client_label:这条登录在 app「登录设备」里叫什么(见 src/login-client-label.ts)。 */
@@ -4848,6 +4873,7 @@ async function skillCommand() {
 function printHelp() {
   console.log(`
 anet — AI Agent Network CLI (V2)
+Capabilities: ANET_CAPABILITY_SOURCE_RESUME_V1
 
 Quick start:
   anet hub start             Start local hub
@@ -7878,6 +7904,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       childEnv.ANET_CONFIG_UPDATE_CAPABLE = "0";
     }
 
+    // 2026-11-10 —— 让子进程如实知道「起它的是哪个 anet CLI」（见 launchedByCliVersionEnv）。
+    // 只写在这里（childEnv = 真实启动环境），不写进 AgentNodeLaunchPlan.probeEnv。
+    Object.assign(childEnv, launchedByCliVersionEnv());
+
     // #1353 —— 把 daemon 的 anet 二进制 pin 传给子进程。
     //
     // 🔴 这是我 #1299 那次改动的一个错误假设的修正。当时我在 `prepareDaemonAnetBin()`
@@ -8832,6 +8862,59 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  // Private source delivery never enters ordinary orchestration (which replaces
+  // alias tmux sessions) or the restart supervisor. No public dispatch enables it.
+  if ((resolvedForCopresence?.profile as any)?.sourceDelivery !== undefined) {
+    const configPath = join(nodesDir(), resolvedForCopresence!.id, "config.json");
+    // A profile that requests source delivery always has a private config.json;
+    // a missing file is a refusal for this route, never a fallback to defaults.
+    const rawProfile = readOpencodePrivateProfileFile(dirname(configPath), "config.json");
+    if (rawProfile === undefined) throw Error("source_resume_cli_refused");
+    const p = JSON.parse(rawProfile);
+    const nonce = process.env.ANET_SOURCE_RESUME_NONCE;
+    // Route only: profile data is NOT authority. The source launcher and actual
+    // runtime independently re-read operator policy/registry + OS/native identity.
+    const sharedTest = p.sourceDelivery?.expected_version === "2.0.22-anet-test.29040e2" && !!p.sharedVariantAuthority;
+    if (process.env.ANET_SOURCE_RESUME_CONFIG !== configPath || !nonce || !/^[a-f0-9-]{36}$/.test(nonce)
+      || Object.keys(opts).some(k => k !== "_channels" && k !== "_envs") || opts._channels.length || opts._envs.length
+      || forceNewSession || p.runtime !== "opencode-cli" || p.opencodeGeneration !== "v2"
+      || p.sourceDelivery?.resume_only !== true || (p.sourceDelivery.expected_version !== "2.0.22" && !sharedTest)
+      || Date.now() >= p.sourceDelivery.expires_at || !/^ses_[A-Za-z0-9]+$/.test(p.sessionId)
+      || liveNodePidFromPidfile(resolvedForCopresence!.id) !== null) throw Error("source_resume_cli_refused");
+    checkRuntimeDependency("opencode-cli", "start");
+    if (p.flags?.opencodeUnsafeTools !== true) throw Error("source_resume_existing_policy_opt_in_required");
+    const checked = sharedTest ? (() => {
+      const binary = "/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode";
+      if (process.platform !== "linux" || realpathSync(binary) !== binary
+        || createHash("sha256").update(readFileSync(binary)).digest("hex") !== "1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786"
+        || !/^(?:opencode v)?2\.0\.22-anet-test\.29040e2$/.test(execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }).trim())) throw Error("source_resume_cli_version_refused");
+      return { ok: true, binary, version: "2.0.22-anet-test.29040e2" };
+    })() : checkOpencodeGenerationBinary("v2");
+    if (!checked.ok || checked.version !== p.sourceDelivery.expected_version) throw Error("source_resume_cli_version_refused");
+    opencodeLaunchIdentity = { binary: checked.binary, version: checked.version };
+    const plan = resolveOpencodeAgentNodeLaunchPlan();
+    const sourceHelp = execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
+      env: plan.probeEnv, timeout: 5000, maxBuffer: 131072, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (!sourceHelp.includes("ANET_CAPABILITY_SOURCE_RESUME_V1")) throw Error("source_resume_runtime_capability_required");
+    const env = { ...hardenOpencodeAgentNodeEnv(process.env, process.env.PATH),
+      ANET_OPENCODE_BIN: opencodeLaunchIdentity.binary, ANET_OPENCODE_VERSION: checked.version,
+      ANET_OPENCODE_MODE: "copresence", ANET_CONFIG_UPDATE_CAPABLE: "0",
+      ...launchedByCliVersionEnv(), // 2026-11-10 —— 这条私有 route 也是 CLI 起 agent-node
+      ANET_SOURCE_RESUME_NONCE: nonce, ANET_SOURCE_RESUME_CONFIG: configPath };
+    const child = spawn(plan.command, [...plan.argsPrefix, "--config", configPath,
+      "--alias", p.alias, "--runtime", "opencode-cli", "--session", p.sessionId],
+      { cwd: process.cwd(), env, stdio: "inherit", shell: false });
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => { child.kill("SIGTERM"); killTimer ??= setTimeout(() => child.kill("SIGKILL"), 1000); };
+    process.on("SIGTERM", stop); process.on("SIGINT", stop);
+    const code = await new Promise<number>(resolve => {
+      child.once("error", () => resolve(1)); child.once("exit", code => resolve(code ?? 1));
+    });
+    process.removeListener("SIGTERM", stop); process.removeListener("SIGINT", stop);
+    if (killTimer) clearTimeout(killTimer);
+    process.exit(code); // one generation only, including exit 75
+  }
   // #1353 —— daemon 被 `node start` / `project up`(开机 sweep)/ `node restart` 拉起时,
   //         pin 与 `anet daemon start` 同源同规则,不再在这些起法下丢失。
   if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
@@ -14922,7 +15005,8 @@ async function opencodeBorrowedAttachCommand(ref?: string) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("borrowed V1 TUI requires an interactive terminal");
   const child=spawn(plan.command,[...plan.argsPrefix,"--opencode-borrowed-attach",cfg],{
     cwd:process.cwd(),stdio:"inherit",env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
-      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version},
+      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version,
+      ...launchedByCliVersionEnv()}, // 2026-11-10 —— 这条 attach 也是 CLI 起 agent-node
   });
   const stop=()=>{try{child.kill("SIGTERM");}catch{}};
   const signals=["SIGINT","SIGTERM","SIGHUP"] as const;
@@ -15380,6 +15464,26 @@ async function smokeOpencodeAcp(
     };
   }
   return result;
+}
+
+/**
+ * `anet pair` —— 精确配对的唯一答案。
+ *
+ * opencode-cli 这条路径**禁用了自动 npx**，目标机上必须有精确版本的全局 agent-node；
+ * 而两个包的 preview tag 是**先后**移动的（node 先发、声明它的 CLI 后发），
+ * 所以 `@preview` 在窗口期里不自洽。把本包里的常量打印出来，是唯一不用猜的答案 ——
+ * 客户端和文档都应当显示这条命令，而不是自己拼版本号。
+ */
+function pairCommand(): void {
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({
+      cli: `@sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`,
+      agentNode: `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`,
+      install: opencodeExactPairInstallCommand(),
+    }, null, 2));
+    return;
+  }
+  console.log(pairInfo());
 }
 
 async function upgradeCommand() {
@@ -20111,6 +20215,7 @@ switch (command) {
   case "channel": await channelCommand(); break;
   case "setup": await setupCommand(); break;
   case "upgrade": await upgradeCommand(); break;
+  case "pair": pairCommand(); break; // 精确配对的唯一答案：打印本包常量生成的安装命令
   case "session": sessionCommand(); break;
   case "skill": await skillCommand(); break;
   case "ls": case "list": await lsCommand(); break;

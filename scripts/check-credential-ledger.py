@@ -90,7 +90,14 @@ def problems(text: str) -> tuple[int, list[str]]:
         out.append("找不到「已填 X 行 / 待填 Y 行」读数 —— 空表与填好的表在报告上同形，这个数必须写")
     else:
         filled, pending = int(m.group(1)), int(m.group(2))
-        actual_filled = sum(1 for c in rows if len(c) == COLUMNS and c[2] and c[2] != PLACEHOLDER)
+        # 「已填」= 这一行**没有任何一格**还是待填。
+        # 2026-11-05 修：原来只判「持有人 != （待填）」，于是把「（待填：admin）」这种
+        # 带注解的占位符算成已填 —— 计数会凭空多出 4 行，而持有人其实一个都不知道。
+        # 占位符是可变的写法，判据必须看「是否含待填标记」，不能看它是否等于某个字面量。
+        actual_filled = sum(
+            1 for c in rows
+            if len(c) == COLUMNS and all(cell and PLACEHOLDER not in cell and "待填" not in cell for cell in c)
+        )
         actual_pending = len(rows) - actual_filled
         if (filled, pending) != (actual_filled, actual_pending):
             out.append(

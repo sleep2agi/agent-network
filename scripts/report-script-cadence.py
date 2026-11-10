@@ -45,6 +45,11 @@ DOC_GLOBS = ["docs/**/*.md", "docs-site/**/*.md", "skills/**/*.md", "README.md",
 # ADHOC 登记表：一次性/人肉工具放这里。**必须**有「谁会发现它烂了」与「什么时候可以删掉这一行」。
 # 空字典是合法的 —— 但它同时意味着「本仓没有一次性工具」。新增一条就是一次显式决定。
 ADHOC: dict[str, tuple[str, str]] = {
+    'bench-list-tasks.py': (
+        '需要一个**活着的 Hub 和一枚节点令牌**才能测（读 /mcp 的 list_tasks 耗时）；'
+        'CI 里没有真 Hub、也不该把令牌放进 CI',
+        '当 Hub 侧有了内建耗时读数（/health 或指标端点）后，本脚本只留本地复核用途 ⇒ 删本行',
+    ),
     'report-model-ref-shape.py': (
         '读生产库 sessions.model 算「能还原 provider 的会话占比」（#3143 ②/#3144 ①）；'
         'CI 的临时库没有真实 runtime 上报',
@@ -58,6 +63,35 @@ ADHOC: dict[str, tuple[str, str]] = {
         '生产机上的巡检包装（每天一行「新建/缺字段」），读生产库 requirements；'
         'CI 的临时库没有真实建卡行为 ⇒ 跑不出读数',
         '并进统一舰队巡检后删本行',
+    ),
+    'hub-node-token-usage.sh': (
+        '[needs-host] 巡检包装：每天一行「多少个节点在报 token 用量 + 合计」；读生产库、写本机日志',
+        '并进统一舰队巡检后删本行',
+    ),
+    'hub-patrol-summary.sh': (
+        '[needs-host] 把本机三条巡检日志压成一行（读 ~/.commhub/*.log，写 summary）；'
+        'CI 里既没有那些日志也没有那些 cron',
+        '并进统一舰队巡检（那套本来就有汇总）后删本行',
+    ),
+    'hub-desktop-release.sh': (
+        '[needs-host] 巡检包装：每天一行「桌面端线上版本/平台数/是否一致」；读的是公网更新源，'
+        '且要写本机日志 —— 这两件事都只能在生产机上做',
+        '并进统一舰队巡检后删本行',
+    ),
+    'check-desktop-release.py': (
+        '[needs-host] 读 https://anet.sh/desktop/update/latest.json 判「线上那一层」版本/平台一致；'
+        'CI 里打外网会变成对第三方站点的依赖，且它不是仓库门',
+        '它进了发布流水线的发后检查（由 release workflow 调用）后删本行',
+    ),
+    'where-is-route.py': (
+        '[interactive] 交互式排障助手：给一个 URL 路径，判断它是本仓的 REST 路由 / MCP 工具 / 不在本仓；'
+        '它不产出可比较的读数，所以没有"被发现"这一说',
+        '若它被并进某条排障 runbook 的固定步骤，删本行',
+    ),
+    'hub-backup.sh': (
+        '生产机上的备份脚本：VACUUM INTO 只读快照 + 完整性自检 + 轮转 + 历史压缩；'
+        '必须跑在**那台机器**上（要真库与真备份目录），CI 里没有',
+        '备份若进了部署流水线的 stage（由编排器调用），删本行',
     ),
     'hub-idle-poll-share.sh': (
         '生产机上的巡检包装（每 6h 记一行「问状态/问活」占比，读的是生产库的 node_tool_calls）；'
@@ -74,6 +108,26 @@ ADHOC: dict[str, tuple[str, str]] = {
         '人肉提交助手：把「先写消息再提交」链上的空消息 / 形状不符 / 标题与 diff 不符三面堵住；'
         '它只在有人真的用它提交时生效，CI 里没有「提交」这个动作可跑',
         '等 commit-msg 钩子能自己安全地生成并校验消息（而不是读一个可能遗留的文件）后，删本行',
+    ),
+    'feishu-provision-node.sh': (
+        '飞书接入的**一次性拓扑**脚本：把凭据换成 tenant_access_token 并写进某台生产机的节点目录；'
+        '它需要真实飞书凭据与那台机器的目录结构，CI 两样都没有',
+        '接入流程被 `anet channel add feishu`（或等价命令）覆盖到 OpenCode V2 后删本行',
+    ),
+    'feishu-allow-user.sh': (
+        '飞书通道的人工运维脚本：在**那台生产机**上把某个飞书用户加进 allowlist 并重启 bridge；'
+        'CI 里既没有 /home/<user>/comm-feishu-ou 这个节点目录，也没有 bridge 进程可重启',
+        '飞书 allowlist 进了 Hub 的节点设置界面（点一下就写，不需要登机器）后删本行',
+    ),
+    'feishu-doctor.sh': (
+        '飞书通道的按需体检：读生产机上某个节点的 channels/feishu 配置与 bridge 日志；'
+        'CI 的 runner 没有那个节点目录，跑起来只能读到「不存在」',
+        '飞书通道有了自动巡检（每天一行 + 退化就报）后删本行',
+    ),
+    'feishu-first-contact.sh': (
+        '飞书通道首次接入的人肉引导：改生产机上那台节点的 config 并发一条试探消息；'
+        '它是拓扑安装动作，不是可重复的读数 ⇒ CI 里没有「第一次接入」这个动作',
+        '接入流程被 `anet node create --feishu` 之类的一条命令接管后删本行',
     ),
     'report-idle-poll-share.py': (
         '读生产库的 node_tool_calls 算「问状态/问活」占比（#3119）；CI 的临时库没有这些行 ⇒ 跑不出比例',

@@ -814,6 +814,26 @@ jobs:
           echo "✅ $n@${{ inputs.version }} 已发布到 preview 通道"
           echo "下一步(人工):至少 30 分钟真实环境烟测 + owner ACK 后,用 promote-latest 升 latest"
 
+      # ── 显式收口 dist-tag:preview ───────────────────────────────────────────
+      #
+      # 🔴 不依赖 `npm publish --tag preview` 的副作用(2026-11-10 实测):
+      #    225 已经是 200 可见、tarball 也能下、shasum 与 CI 一致,
+      #    而 `dist-tags.preview` 仍停在 224。
+      #    ⇒ `npm i -g @sleep2agi/agent-network@preview` 装到 224,
+      #      但 agent-node 的 preview 已经是 194 —— **按 tag 装出来是半对**,
+      #      CLI 会 `Incompatible agent-node for opencode-cli` 直接拒启。
+      #    「发出去没有」是另一个结论(verify 那步 / landed job),这里只负责
+      #    「@preview 到底装哪个版本」这一格,并且回读 registry 才算数。
+      #    if: always() 是因为 verify 那步超时(尚未核实)时,版本可能已经可见,
+      #    那更需要把 tag 收口 —— 脚本自己会先确认版本可见,不可见就红。
+      - name: 收口 dist-tag:preview(显式设置 + 回读 registry)
+        if: always()
+        env:
+          PKG: ${{ needs.build-tarball.outputs.package }}
+          EXPECTED: ${{ needs.build-tarball.outputs.version }}
+          TAG_ROLLOUT_TIMEOUT_S: '120'
+        run: bash .github/scripts/set-preview-tag.sh
+
       # RFC-029 published-pair guard (#1811): the tree keeps the two versions in
       # lockstep, but a release can still leave a HALF pair on npm — 2026-10-19
       # shipped agent-node .150 while the CLI that declares it was only staged.
@@ -821,3 +841,61 @@ jobs:
       - name: 配对断言(agent-node 发布后 CLI 也必须在 npm 上)
         if: inputs.package == 'agent-node'
         run: node scripts/check-pair-published.mjs
+
+  # ── landed (registry truth) ────────────────────────────────────────────────
+  #
+  # 🔴 为什么要有这个 job(2026-11-10,run 42731348173,agent-network 2.3.0-preview.225):
+  #   那次 run 同时成立的是:
+  #     · publish 第 9 步 `npm publish --tag preview`        → success
+  #     · publish 第 10 步「发后核实(看 registry 不看退出码)」→ in_progress,22 分钟以上没结束
+  #     · verdict (aggregate)                                → success
+  #   而同一时刻 `GET https://registry.npmjs.org/@sleep2agi%2Fagent-network/2.3.0-preview.225`
+  #   是 **404**,`dist-tags.preview` 还停在 2.3.0-preview.224。
+  #   ⇒ 人和 agent 读这次 run 的绿勾,会得出「已发布」;实际什么都没落地。
+  #
+  #   两个空洞一起造成的:verdict 只聚合四道门(它是 report-only,`if: always()` + 失败也
+  #   exit 0),它**不会**替 publish 说话;而「发后核实」是一个 in_progress 的**步骤** ——
+  #   一个还在跑的步骤和一个已经成功的发布,在检查列表里都不是红色的。
+  #
+  #   所以这里加一个**独立**的、名字就叫结论的 job:它只回答一个问题 ——
+  #   「被请求的那个版本,现在能不能在 npm 上取到?」
+  #   🔴 不要把它并进 verdict。verdict 的 report-only 是刻意的设计(见文件头与 verdict 上方),
+  #      把 publish 挂到 verdict 后面 = 把「打印检查结果」当成「拿它当判据」。
+  #
+  #   needs 里同时有 publish 和 build-tarball:
+  #     · publish       → 判断「失败」和「成功但没变可见」是两件不同的事(措辞必须区分)
+  #     · build-tarball → 包名和版本取它解析出来的,不取 inputs(后者是人打的)
+  landed:
+    name: landed (registry truth)
+    needs: [publish, build-tarball]
+    runs-on: ubuntu-latest
+    # publish 被跳过时(门红了 / 这次 dispatch 没勾 publish)也要跑,好明确打印
+    # 「无事可做」而不是静默地什么都看不见 —— 但那时它必须判绿,因为没安排发布。
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.publish
+    timeout-minutes: 20
+    steps:
+      - name: 没有发布计划 → 跳过(成功)
+        if: needs.publish.result == 'skipped'
+        run: |
+          echo "publish job result: skipped —— 这次 run 没有安排发布(四道门有红的,或 dispatch 没勾 publish)。"
+          echo "没有需要核实的版本,所以本 job 判 success。"
+          echo "🔴 注意:这里的绿是「无事可做」,不是「已发布」。"
+
+      - uses: actions/checkout@v4
+        if: needs.publish.result != 'skipped'
+        with:
+          ref: ${{ needs.build-tarball.outputs.commit }}
+
+      - name: 核实版本是否真的出现在 registry 上
+        if: needs.publish.result != 'skipped'
+        env:
+          PKG: ${{ needs.build-tarball.outputs.package }}
+          EXPECTED: ${{ needs.build-tarball.outputs.version }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          # 默认 15 分钟、每 30s 一次。预算比 publish 里那一步(45 分钟)短是**故意**的:
+          # 那一步断言的是「字节也对」(要等 dist.shasum),这里断言的是更早的里程碑
+          # 「版本存在」—— 15 分钟还看不到,就已经足够说明「接受 ≠ 可见」,该红给人看,
+          # 而不是再把 45 分钟花在一个已经绿了两次的结论上。
+          LANDED_TIMEOUT_MIN: '15'
+          LANDED_INTERVAL_S: '30'
+        run: bash .github/scripts/verify-npm-release-landed.sh

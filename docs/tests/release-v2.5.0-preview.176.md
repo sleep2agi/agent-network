@@ -1,5 +1,6 @@
 # @sleep2agi/agent-node 2.5.0-preview.176
 
+<<<<<<< HEAD
 Since `.175`: 飞书渠道模式的三件东西一起进运行时 —— **角色闸门、聊天上下文、跨机凭据**。
 
 ## Why
@@ -34,10 +35,39 @@ Since `.175`: 飞书渠道模式的三件东西一起进运行时 —— **角�
          对远端试点尤其重要：加 channels 与把文件送到那台机器是两件事，
          顺序稍有错位节点就会整段离线，看起来像"加个渠道把节点搞挂了"。
 ```
+=======
+Since `.175`: 会话模型漂出配置后**武装一次对账**，下一次启动自愈。
+
+## Why
+
+判据读错了对象（生产实测，通信欧 `n_28e6b2c2`）：
+
+```text
+config.json  model = xai/grok-4.7
+             opencodeConfiguredModelAtLastOpen = xai/grok-4.7   ← 相等
+sessions     model = deepseek/deepseek-flash                    ← 实际在跑的
+
+shouldReconcileOpencodeSessionModel(config, MODEL)
+  = marker 存在 && marker !== MODEL  =  false
+⇒ 走 else：keeping the resumed session's selected model
+⇒ 配置说 xai、会话跑 deepseek，判据认为「一致」，永远不会自愈，也没有声音
+```
+
+根因：marker 记的是「上次打开时的**配置**」，判据却把它当成「上次打开时的**会话**」。
+
+## What changed
+
+- `profile-state.ts` 新增 `armModelReconcile(configPath)`：把 marker 清空。
+  空串一定不等于任何真实模型名 ⇒ 下一次启动 `shouldReconcile` 必为真 ⇒ 强制对账一次。
+  已经为空时返回 `false`（心跳不该整天改 config.json）；旧节点从未写过 marker 时不凭空造一个。
+- `cli.ts` 的 `pollOpencodeSessionModel`：一旦观察到 `next !== MODEL`，
+  且这还是一句「假话」（marker 非空），就清空 marker 并打一行 warn。
+>>>>>>> 12e3a656 (fix(#3418): 会话漂出配置后武装一次对账，下一次启动自愈)
 
 ## Verification
 
 ```text
+<<<<<<< HEAD
 feishu-role.test.ts                21 pass（角色闭集 / fail-closed / permission 只放行一次）
 opencode-catalog-report.test.ts     9 pass
 report-status-catalog-seen-at.test.ts 5 pass
@@ -49,14 +79,30 @@ witness（每个都能单独红）：
   · 把 catch 改回 return undefined        ⇒ 读失败沿用那 1 例红
   · 把 env 优先                          ⇒ "两边都有以 .env 为准" 1 例红
   · 改回 process.exit(1)                 ⇒ failsoft 2 例红（连坐）
+=======
+profile-state.test.ts  10 pass
+  · 清空 marker ⇒ 下一次启动必判差异
+  · 已为空 ⇒ 返回 false（幂等，不重复写盘）
+  · 镜像否定：旧节点没有 marker ⇒ 不凭空造
+  · 接线：armModelReconcile 必须挂在 `next !== MODEL` 的条件里（守卫位置判据）
+witness：把 armModelReconcile 改成什么都不做 ⇒ 2 例红（同一 marker 的两种断言，连坐）
+>>>>>>> 12e3a656 (fix(#3418): 会话漂出配置后武装一次对账，下一次启动自愈)
 ```
 
 ## What it does not do
 
+<<<<<<< HEAD
 - 不实现 V2 的 permission 应答循环（策略已钉成纯函数：member/admin ⇒ once，
   guest/认不出 ⇒ reject，**永不 always**；循环与回合绑定还没接）。
 - 不做「一个机器人 → 多个节点」的路由：bridge 的目标 alias 仍是它自己。
 - guest 在 V2 上仍被拒绝 —— 要等 permission 应答接上才放开。
+=======
+- **不改变**「TUI 里手动切的模型在重启后仍保留」这条既有语义（`v2-session.test.ts` 钉着）：
+  手动切之后 session 会漂离配置 ⇒ 现在会武装对账 ⇒ 下次启动**回到配置**。
+  ⚠️ 这与旧语义相反，是本版唯一的行为变化，写在这里而不是埋在 diff 里。
+- 不决定「配置 vs 会话」谁更高；它只是在发现两者不一致时，让下一次启动按配置执行。
+- 生效需要一次节点重启（启动时才会读 marker）。
+>>>>>>> 12e3a656 (fix(#3418): 会话漂出配置后武装一次对账，下一次启动自愈)
 
 ## Install
 

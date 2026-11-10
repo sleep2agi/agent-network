@@ -1,6 +1,7 @@
 name: OpenCode shared create native
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '.github/workflows/opencode-shared-create-native.yml'
       - 'tests/test1327-shared-create-native/**'
@@ -8,15 +9,11 @@ on:
       - 'agent-node/**'
       - 'agent-network/**'
       - 'server/**'
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/opencode-shared-create-native.yml'
-      - 'tests/test1327-shared-create-native/**'
-      - 'tests/test543-opencode-v2-copresence/stub-model.py'
-      - 'agent-node/**'
-      - 'agent-network/**'
-      - 'server/**'
+  # Tier 3: heavy Docker suite. Runs nightly on main, on demand, or on PRs labelled full-qa.
+  # It no longer runs on every merge to main (2 runners; it queued PR feedback).
+  schedule:
+    - cron: '40 18 * * *'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -24,6 +21,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   native-create:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     name: shared create native (Docker)
     runs-on: ubuntu-latest
     timeout-minutes: 20

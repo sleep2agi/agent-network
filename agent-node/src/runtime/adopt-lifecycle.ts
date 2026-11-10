@@ -50,6 +50,9 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
   return true;
 }
 async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: AdoptDaemonDeps, bindingRequestId: unknown): Promise<Record<string, unknown>> {
+  // OpenCode V2 co-presence is registered for source reads only; a daemon start/stop
+  // would have to rebuild the human TUI + shared serve topology. Refuse explicitly.
+  if (entry.opencode_v2) throw Error("adopt_opencode_lifecycle_unsupported");
   const identity = verifyAdoptionLocalIdentity({ node_id: entry.node_id, alias: req.child_alias, network_id: deps.networkId, workdir: entry.workdir }, {...deps, allowCodexV2: !!entry.codex_v2});
   if (identity.nodeDir !== entry.nodeDir) throw Error("adopt_registry_identity_mismatch");
   if (entry.codex_v2) {

@@ -34,8 +34,17 @@ const EXACT_NAMES = new Set([
   "CLAUDE_PLUGIN_DATA",
   "TMUX",
   "TMUX_PANE",
+  // 2026-11-06 —— 与 hub-daemon.sh 的差异补齐（lockstep 测试逐条比对出来的）：
+  // 这几个名字 shell 侧清了、这里没清 ⇒ 经 `anet node start` 拉起的 daemon
+  // 仍会把它们带进自己的长期 environ。
+  // 安全性：daemon 派生的子进程走 minimalEnv()（只给 PATH/HOME/LANG），
+  // 所以清掉它们**不影响**子进程；而 provider key 是**故意保留**的（见测试里的 MUST_KEEP）。
+  "AGENT",
+  "AI_AGENT",
+  "OPENCODE",
+  "COMMHUB_SESSION_ID",
 ]);
-const PREFIXES = ["CLAUDE_CODE_", "CODEX_", "GROK_"];
+const PREFIXES = ["CLAUDE_CODE_", "CODEX_", "GROK_", "OPENCODE_"];
 
 export function isInheritedSessionIdentityEnvName(name: string): boolean {
   return EXACT_NAMES.has(name) || PREFIXES.some((p) => name.startsWith(p));

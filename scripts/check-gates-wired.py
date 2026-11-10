@@ -55,8 +55,11 @@ UNWIRED_EXIT_WHEN: dict[str, str] = {
     "scripts/check-control-run.sh": "CI 里有干净的 git worktree 副本可供它跑 ⇒ 移出本表",
     "scripts/report-parent-source-coverage.py": "这条不变式进了 DB 约束、或成为部署脚本的一个 stage ⇒ 移出本表",
     "scripts/report-idle-poll-share.py": "它进了巡检（定时跑、退化就报）⇒ 移出本表",
+    "scripts/report-node-token-usage.py": "它进了巡检（每天一行）或客户端有了等价读接口 ⇒ 移出本表",
     "scripts/report-requirement-field-gaps.py": "它进了每日巡检（每天一行）⇒ 移出本表",
     "scripts/report-model-ref-shape.py": "它进了巡检（退化就报）或 provider 覆盖率进了 CI 固定套件 ⇒ 移出本表",
+    "scripts/bench-list-tasks.py": "Hub 侧有内建耗时读数后删本脚本 ⇒ 一并移出本表",
+    "scripts/check-desktop-release.py": "它进了 release workflow 的发后检查 ⇒ 移出本表",
     "scripts/check-diff-shape.sh": "提交形状检查改由 CI（而不是本地钩子）承担 ⇒ 移出本表",
     "scripts/report-process-artifact-drift.py": "出现固定读者（人或门）⇒ 移出本表并接线",
     "scripts/report-code-producers.py": "出现固定读者 ⇒ 移出本表并接进巡检",
@@ -95,8 +98,11 @@ KNOWN_UNWIRED: dict[str, str] = {
     # 所以它只能是「人在快照上跑一次」。「未接线」在这里不是欠账，是它的输入位置决定的。
     # #3119 的读数：读**生产库**的 node_tool_calls（CI 的临时库没有这些行，跑不出比例）
     "scripts/report-idle-poll-share.py": "[report-only] 读生产库算「问状态/问活」占比；CI 无历史数据",
+    "scripts/report-node-token-usage.py": "[report-only] 读生产库算「各节点 token 用量排行」；CI 没有这些行",
     "scripts/report-requirement-field-gaps.py": "[report-only] 读生产库算「新建卡缺字段占比」；CI 无真实建卡行为",
     "scripts/report-model-ref-shape.py": "[report-only] 读生产库算「model 引用能否还原 provider」；CI 无真实 runtime 上报",
+    "scripts/bench-list-tasks.py": "[needs-host] 打活 Hub 的 /mcp 量 list_tasks 耗时；CI 无真 Hub 也无令牌",
+    "scripts/check-desktop-release.py": "[needs-host] 读线上更新源判版本/平台一致；CI 不该依赖第三方站点",
     "scripts/report-parent-source-coverage.py": "[report-only] 读生产库回答「父有值但来源缺失」这一格；CI 的临时库没有历史，跑不出缺口",
     "scripts/check-control-run.sh": "[needs-host] 本地对照运行工具（需要 git worktree），CI 里没有干净副本的意义",
     "scripts/check-diff-shape.sh": "[interactive] 提交时用（配合 install-diff-shape-hook.sh），不是 CI 门",

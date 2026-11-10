@@ -1,0 +1,64 @@
+# Delivery diagnostic audit and offline native handoff
+
+This evidence-only supplement does not change product or amend the old results.
+The exact generator and command, base image digest, input commit and final
+results are in report-test4099-4150-delivery-diagnostic.txt. Diagnostic patch:
+tests/test-shared-fork/diagnose-delivery.py, SHA-256
+4b7fb230d3d51a0e4ff6a2ebe54c3cbe1b1b617aa433336c106b0515e6cc5597.
+Unmodified input session-source-evidence.ts SHA-256
+e069980d00169a66c137936ec7de2726d9aae0cdc9fbdffe2311f0ccda786b48;
+temporary generated overlay SHA-256
+cda3393adddd8fcf1efe80e22fc905168bc7fa3372ed52fc1a936f7d55471a27.
+Overlay adds fixed category logs plus lease presence/remaining time only; it
+does not output secrets or change conditional predicates, results or authority.
+It is not a product logging facility. Fresh isolated run
+sh_1b88fd9a7001k2R8P7vXFosnPp exited 0, 1 pass / 32 expect, real fork 200,
+child registration 200, high and clear applied; no diagnostic refusal fired.
+
+Prior uninstrumented sh_1b8781971001e5YNVX5x91g4FO exited 1 after native fork
+200, delivery refused and unknown_rotation_required. Its precise refusal is
+unknown; a timing explanation or race is not established. Do not replay unknown
+or delete its claim. Later success does not resolve or overwrite that failure.
+The original report's 7c12 bundle and later d358 bundle are distinct; their
+paths and hashes are recorded in report-test4099-4150-delivery-diagnostic.txt.
+
+Static candidate points for future isolated pure/controlled tests, not findings:
+* session-source-delivery.ts:28-30 payload/capability/name gate; :32/:80 maps
+  a reader null before work began to refused.
+* session-source-evidence.ts:169-174 payload/deadline and lease binding; inject
+  clock, lease and sameSourceEvidence inputs for each mismatch independently.
+* :175-181 duplicate delivery, probe fingerprint and explicit unsafe-tools flag;
+  inject local state/probe results, without weakening any check.
+* :182-189 live bridge and malformed/occupied active map; inject process
+  observation and native JSON while retaining real claim semantics.
+* :190-207 exact child resume, recheck/deadlines, default catalog/model and
+  caught exceptions; inject read/recheck/catalog outcomes individually. An
+  exception from work after beginning has different unknown semantics and must
+  not be mislabeled a pre-work refusal.
+No predicate here is proven responsible for the original failure.
+
+Offline TEST_ONLY native handoff inventory (not a publish approval):
+* Exact version 2.0.22-anet-test.29040e2; Linux ELF SHA-256
+  1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786;
+  observed size 178218464 bytes; unsigned.
+* Local source HEAD 29040e240ecf238c84ab63a7f9e2420e4c3479d6; source remote
+  metadata https://github.com/anomalyco/opencode.git. Availability of that
+  particular commit from the public remote has not been established; preserve
+  an immutable source archive or bundle, patch lineage, bun.lock and full build
+  inputs rather than promising a local path is recoverable.
+* Prior local acceptance report records Bun 1.4.2 tool SHA-256
+  a83d263767d839e4d2649ca8e35d07159c7afc99afdc96d731ced29e056dda0c and
+  `bun run script/build.ts --single --skip-install --skip-web-ui --outdir=/out/cli`
+  with channel anet-test-only, release false, network disabled. It does not
+  establish reproducible clean-host builds; preserve exact environment, cached
+  dependencies and toolchain provenance and independently verify restoration.
+* Local source root LICENSE is MIT, copyright 2025 opencode; retain the complete
+  license notice and audit bundled third-party licenses before distribution.
+  Root LICENSE alone is not a completed dependency-license review.
+* Before distributing, designate and verify trusted immutable storage for ELF,
+  source, manifest, SHA-256, license notices and build recipe; document install,
+  verification, authorized private registry/grant placeholders and rollback per
+  docs/runbooks/shared-variant-test-only.md and shared-managed-fork-test-only.md.
+  No current public artifact, signature, clean restore, Mac/Windows build or
+  verified publisher is claimed. Original fork unknown remains an explicit
+  experimental limitation for the user, not a fixed bug.

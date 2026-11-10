@@ -16,7 +16,7 @@ set -uo pipefail
 
 MAX_BYTES=$((100 * 1024 * 1024))   # 100 MB
 KEEP_BYTES=$((2 * 1024 * 1024))    # 截断后保留尾部 2 MB
-LOG_DIR="/home/vansin/.commhub"
+LOG_DIR="$HOME/.commhub"
 STATE="$LOG_DIR/log-rotate.log"
 
 rotate_one() {
@@ -41,7 +41,7 @@ rotate_one() {
 #  且名字是 `-error.log` 不是 `-err.log`）。同时最大的那个 84M 的
 # `weixin-listen-out.log` 完全不在名单里 —— 名单写死了，世界变了，而它不报错。
 # 改成**按目录遍历**：任何超过阈值的 *.log 都轮转。
-for d in "$LOG_DIR" "${HOME:-/home/vansin}/.pm2/logs"; do
+for d in "$LOG_DIR" "$HOME/.pm2/logs"; do
   [ -d "$d" ] || continue
   for f in "$d"/*.log; do
     [ -f "$f" ] || continue

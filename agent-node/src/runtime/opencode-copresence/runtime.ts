@@ -198,12 +198,29 @@ export interface OpenCodeCopresenceSession {
   readonly sessionId: string;
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
+  readonly variantConfigCapable?: boolean;
+  readonly variantConfigTestOwned?: boolean;
+  variantConfigReadback?(): Promise<import("./v2-model-selection").V2ModelSelection | undefined>;
   /** #2014, V2 only: semantic Ctrl+B, bound to this live handle generation. */
   readonly backgroundControl?: SessionBackgroundControl;
   /** V2 only. The model the TUI session is running, `provider/id`. Read-only. */
   selectedModel?(): Promise<string | undefined>;
+  /** Read the native model reference only from this handle's bound V2 session. */
+  selectedSessionModel?(sessionId: string): Promise<import("./v2-model-selection").V2ModelSelection | undefined>;
+  /** Internal V2 fork primitive only; callers must authorize the source and target. */
+  forkSession?(sourceSessionId: string): Promise<import("./v2-fork").V2ForkResult>;
+  /** #4099: bound to this exact live session; unavailable if no atomic idle gate. */
+  selectSessionModel?(sessionId: string, model: import("./v2-model-selection").V2ModelSelection): Promise<import("./v2-model-selection").V2SelectionResult>;
+  /** V2 only. The agent the bound session is running ("build"/"plan"/...). Read-only. */
+  selectedSessionAgent?(sessionId: string): Promise<string | undefined>;
+  /** V2 only. Switch the bound session's agent (POST /api/session/<id>/agent). */
+  selectSessionAgent?(sessionId: string, agent: string): Promise<import("./agent-config-apply").V2AgentResult>;
+  /** #3952 —— 会话累计用量（调用方转增量后再上报）。 */
+  usageSnapshot?(): Promise<{ input?: number; output?: number; cache?: { read?: number } } | undefined>;
   /** V2 only. Switch the live session. The caller writes node config. */
   setSelectedModel?(model: string): Promise<void>;
+  /** V2 only, stock builds: idle-gated thinking-level write with readback. */
+  setSelectedVariant?(variant: string | null): Promise<import("./v2-model-selection").V2ModelSelection>;
   /** V2 only. 把一条新指令**并进正在跑的那一轮**（delivery:"steer"），不进队列。
    *  必须是显式动作：steer 会改写进行中的回合，半新半旧比排队更糟。 */
   steer?(prompt: string): Promise<void>;
@@ -1263,7 +1280,17 @@ export function wrapSharedCopresenceSession(
     get isRunning() { return core.isRunning; },
     get backgroundControl() { return core.backgroundControl; },
     ...(core.selectedModel ? { selectedModel: () => core.selectedModel!() } : {}),
+    get variantConfigCapable() { return core.variantConfigCapable === true && core.isRunning; },
+    get variantConfigTestOwned() { return core.variantConfigTestOwned === true; },
+    ...(core.variantConfigReadback ? { variantConfigReadback: () => core.variantConfigReadback!() } : {}),
+    ...(core.forkSession ? { forkSession: (sessionId: string) => core.forkSession!(sessionId) } : {}),
+    ...(core.selectSessionModel ? { selectSessionModel: (sessionId: string, model: import("./v2-model-selection").V2ModelSelection) => core.selectSessionModel!(sessionId, model) } : {}),
+    ...(core.selectedSessionAgent ? { selectedSessionAgent: (id: string) => core.selectedSessionAgent!(id) } : {}),
+    ...(core.selectSessionAgent ? { selectSessionAgent: (id: string, agent: string) => core.selectSessionAgent!(id, agent) } : {}),
+    ...(core.usageSnapshot ? { usageSnapshot: () => core.usageSnapshot!() } : {}),
     ...(core.setSelectedModel ? { setSelectedModel: (model: string) => core.setSelectedModel!(model) } : {}),
+    ...(core.setSelectedVariant ? { setSelectedVariant: (variant: string | null) => core.setSelectedVariant!(variant) } : {}),
+    ...(core.selectedSessionModel ? { selectedSessionModel: (id: string) => core.selectedSessionModel!(id) } : {}),
     ...(core.steer ? { steer: (prompt: string) => core.steer!(prompt) } : {}),
     notify: (message, timeoutMs, sender) => core.notify(message, timeoutMs, sender),
     submit: (prompt, timeoutMs, sender, evidence) => core.submit(prompt, timeoutMs, sender, evidence),
@@ -1325,6 +1352,7 @@ export async function openOpenCodeCopresenceRuntime(
     }
   }
   if (!binaryAttestation) throw new Error("opencode copresence version probe returned no accepted binary");
+  if (binaryAttestation.provenance === "anet-test-only-artifact" && opts.sharedServer) throw new Error("TEST-ONLY artifact requires owned server");
 
   const childEnv = backend.buildChildEnv({
     workDir,
@@ -1334,6 +1362,7 @@ export async function openOpenCodeCopresenceRuntime(
     credentialMode: "runtime",
     persistAuth: backend.generation === "v1",
   });
+  if (binaryAttestation.provenance === "anet-test-only-artifact") childEnv.ANET_VARIANT_TEST_ONLY = "1";
   let core: OpenCodeCopresenceSession | undefined;
   let cleaned = false;
   let instructions: OpenCodeCommhubInstructionsHandle | undefined;

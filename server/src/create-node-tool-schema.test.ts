@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
+import { z } from "zod";
 
 type ToolHandler = (args: any) => Promise<any> | any;
 
@@ -17,6 +18,15 @@ function captureSchemas(): Record<string, Record<string, any>> {
 }
 
 describe("create_node MCP schema", () => {
+  test("source_ref is rejected instead of stripped into ordinary creation", () => {
+    const schema = z.object(captureSchemas().create_node);
+    const base = { daemon_node_id: "daemon_fixture", node_spec: { name: "source-node", runtime: "opencode-cli" } };
+    for (const source_ref of ["src_fixture", null, "", {}]) {
+      expect(schema.safeParse({ ...base, source_ref }).success).toBe(false);
+      expect(schema.safeParse({ ...base, node_spec: { ...base.node_spec, source_ref } }).success).toBe(false);
+    }
+    expect(schema.safeParse(base).success).toBe(true);
+  });
   test("#829 rejects misplaced V2 controls instead of stripping them", () => {
     const nodeSpec = captureSchemas().create_node.node_spec;
     const base = { name: "v2-node", runtime: "opencode-cli" };

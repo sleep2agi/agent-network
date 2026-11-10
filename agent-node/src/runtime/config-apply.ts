@@ -115,6 +115,12 @@ export type ApplyMode = "hot" | "restart" | "restart_only";
 
 export interface ConfigPatch {
   model?: string;
+  /** Missing preserves; null clears; string selects a native model variant. */
+  modelVariant?: string | null;
+  /** Missing preserves; string selects an OpenCode V2 agent (POST
+   *  /api/session/<id>/agent). Verified hot on a real server: 204 plus a
+   *  readback that actually reports the new agent. */
+  agent?: string | null;
   flags?: Record<string, unknown>;
   /** #260 P5 — dashboard-driven channel enable/disable. Restart-tier
    *  (agent-node boot forks channel workers from config.channels).
@@ -137,6 +143,16 @@ export function validateLocalPatch(
   patch: ConfigPatch,
   opts?: { runtime?: string | null },
 ): ValidationResult {
+  if (patch.modelVariant !== undefined) {
+    if (opts?.runtime !== "opencode" && opts?.runtime !== "opencode-cli") return { field: "modelVariant", reason: "requires OpenCode V2" };
+    if (patch.modelVariant !== null && (typeof patch.modelVariant !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}$/.test(patch.modelVariant))) return { field: "modelVariant", reason: "invalid variant" };
+    if (patch.channels !== undefined || Object.keys(patch.flags ?? {}).length) return { field: "modelVariant", reason: "must not be combined with flags or channels" };
+  }
+  if (patch.agent !== undefined) {
+    if (opts?.runtime !== "opencode" && opts?.runtime !== "opencode-cli") return { field: "agent", reason: "requires OpenCode V2" };
+    if (patch.agent !== null && (typeof patch.agent !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}$/.test(patch.agent))) return { field: "agent", reason: "invalid agent" };
+    if (patch.channels !== undefined || Object.keys(patch.flags ?? {}).length) return { field: "agent", reason: "must not be combined with flags or channels" };
+  }
   if (patch.model !== undefined) {
     if (typeof patch.model !== "string" || patch.model.length === 0 || patch.model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
@@ -211,6 +227,11 @@ export function computeApplyMode(patch: ConfigPatch, opts?: {
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
   const hasChannels = patch.channels !== undefined;
+  if (patch.modelVariant !== undefined) return "hot";
+  // Agent selection is a hot session-level write (verified: POST
+  // /api/session/<id>/agent → 204 + readback). Same reasoning as modelVariant:
+  // a restart would reopen the previous agent.
+  if (patch.agent !== undefined) return "hot";
   if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
   // OpenCode V2 switches the live TUI session and writes config.model so the
   // dashboard poll can finish. A restart would reopen the old session model.

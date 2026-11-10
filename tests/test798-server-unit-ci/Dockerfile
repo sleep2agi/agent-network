@@ -21,6 +21,7 @@ RUN curl --fail --silent --show-error --location \
   && rm -f /tmp/bun-linux-x64.zip
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY server/package.json server/package-lock.json ./server/
 # 🔴 npm ci 而不是 npm install:ci 严格按 lockfile 装,install 会按 caret 解析
 # 「当下最新的兼容版本」。后者意味着同一个 commit 在不同时间构建出不同依赖图 ——
@@ -28,7 +29,6 @@ COPY server/package.json server/package-lock.json ./server/
 RUN cd server && npm ci
 
 COPY server ./server
-COPY contracts/side-thread/v1 ./contracts/side-thread/v1
 # RFC-026 G9 / RFC-028 P1 的漂移门比对 hub 与 daemon 的同名共享源码,
 # 要读同级 agent-node/src/shared。只带这个目录,不带整个包。
 # 若干 server 测试跨包 import agent-node 的源码(hub↔daemon 漂移门比对

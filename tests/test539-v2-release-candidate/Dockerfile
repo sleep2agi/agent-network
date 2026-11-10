@@ -5,7 +5,11 @@ FROM ${DEPENDENCY_IMAGE}
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 COPY agent-network /workspace/agent-network
+COPY contracts /opt/node_modules/@sleep2agi/contracts
+# contracts/*.ts re-export ../server/src/contracts/*: ship that next to the copied contracts
+COPY server/src/contracts /opt/node_modules/@sleep2agi/server/src/contracts
 COPY agent-node /opt/node_modules/@sleep2agi/agent-node
+COPY contracts /workspace/contracts
 COPY server /workspace/server
 COPY scripts /workspace/scripts
 COPY docs /workspace/docs

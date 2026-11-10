@@ -4,6 +4,7 @@ FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472
 RUN npm install -g @opencode/cli@2.0.22
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/src/runtime/opencode-v2-catalog* agent-node/src/runtime/
 # Doorbell tests import child-workdir, which loads config-apply and the adopt
 # registry. cli.ts is read, not imported. The glob above stays narrow so this

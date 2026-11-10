@@ -3,6 +3,7 @@ FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf100
 RUN apt-get update && apt-get install -y --no-install-recommends bash curl ca-certificates jq && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/server
+COPY contracts /app/contracts
 COPY server/package.json server/package-lock.json ./
 RUN bun install --frozen-lockfile
 COPY server/src ./src

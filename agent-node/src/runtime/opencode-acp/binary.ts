@@ -118,13 +118,36 @@ interface FileAttestation {
 
 export interface PinnedOpencodeBinaryAttestation {
   binary: string;
-  packageJson: string;
+  packageJson?: string;
   expectedVersion: string;
   /** #543 — present only for a non-V1 generation (V1 attestations keep their
    *  pre-#543 shape). Revalidation re-checks the same package identity. */
   generation?: OpencodeGeneration;
   binaryFile: FileAttestation;
-  packageJsonFile: FileAttestation;
+  packageJsonFile?: FileAttestation;
+  /** Independent local test artifact; never an npm package identity. */
+  provenance?: "anet-test-only-artifact";
+}
+
+const TEST_ARTIFACT = "/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode";
+const TEST_SHA256 = "1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786";
+const TEST_VERSION = "2.0.22-anet-test.29040e2";
+
+function attestTestArtifact(path: string, forbiddenRoots: string[]): FileAttestation {
+  if (process.platform !== "linux" || process.env.ANET_VARIANT_TEST_ONLY !== "1" || path !== TEST_ARTIFACT || realpathSync(path) !== path)
+    throw new Error("TEST-ONLY artifact path or opt-in rejected");
+  for (const root of forbiddenRoots) {
+    if (!root) continue;
+    const forbidden = canonicalPathIfPresent(root);
+    if (pathIsWithin(forbidden, path) || pathIsWithin(dirname(path), forbidden)) throw new Error("TEST-ONLY artifact overlaps forbidden root");
+  }
+  assertSafeDirectoryChain(dirname(path));
+  const stat = lstatSync(path);
+  if (stat.uid !== process.getuid?.() || !opencodeOwnedPathModeIsSafe(stat) || (stat.mode & 0o111) === 0)
+    throw new Error("TEST-ONLY artifact owner or mode rejected");
+  const file = attestRegularFile(path, "TEST-ONLY artifact");
+  if (file.sha256 !== TEST_SHA256) throw new Error("TEST-ONLY artifact hash rejected");
+  return file;
 }
 
 interface OpencodePackageManifest {
@@ -406,6 +429,12 @@ export function resolvePinnedOpencodeBinaryAttestation(
   opts: ResolvePinnedOpencodeBinaryOptions = {},
 ): PinnedOpencodeBinaryAttestation {
   const generation = opts.generation ?? "v1";
+  if (generation === "v2" && process.env.ANET_VARIANT_TEST_ONLY === "1" && opts.requestedBinary === TEST_ARTIFACT && opts.expectedVersion === undefined) {
+    const file = attestTestArtifact(opts.requestedBinary, opts.forbiddenRoots ?? []);
+    const raw = execFileSync(TEST_ARTIFACT, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 5000, env: opts.probeEnv, cwd: opts.probeCwd }).trim();
+    if (raw !== TEST_VERSION && raw !== `opencode v${TEST_VERSION}`) throw new Error("TEST-ONLY artifact version rejected");
+    return { binary: TEST_ARTIFACT, expectedVersion: TEST_VERSION, generation: "v2", provenance: "anet-test-only-artifact", binaryFile: file };
+  }
   if (opts.expectedVersion === undefined) {
     // No launcher-selected version (direct agent-node start): admit the
     // release pin, else a transition version, each through the full gate.
@@ -497,6 +526,12 @@ export function revalidatePinnedOpencodeBinary(
 ): string {
   const expectedVersion = opts.expectedVersion ?? attestation.expectedVersion;
   const generation = attestation.generation ?? "v1";
+  if (attestation.provenance === "anet-test-only-artifact") {
+    if (generation !== "v2" || expectedVersion !== TEST_VERSION || attestation.expectedVersion !== TEST_VERSION) throw new Error("TEST-ONLY artifact identity changed");
+    const current = attestTestArtifact(attestation.binary, opts.forbiddenRoots ?? []);
+    if (!sameFileAttestation(attestation.binaryFile, current)) throw new Error("TEST-ONLY artifact changed after probe");
+    return attestation.binary;
+  }
   if (!isAcceptedVersionForGeneration(generation, expectedVersion)) {
     throw unsupportedVersionForGeneration(generation, expectedVersion);
   }
@@ -517,6 +552,7 @@ export function revalidatePinnedOpencodeBinary(
     opencodeGenerationSupport(generation).packageName,
   );
   const currentBinary = attestRegularFile(canonical, "binary");
+  if (!attestation.packageJson || !attestation.packageJsonFile) throw new Error("resolved opencode package identity is missing");
   const currentPackageJson = attestRegularFile(attestation.packageJson, "package.json");
   if (!sameFileAttestation(attestation.binaryFile, currentBinary)
     || !sameFileAttestation(attestation.packageJsonFile, currentPackageJson)) {

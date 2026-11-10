@@ -821,7 +821,7 @@ def main() -> int:
             },
             "invalidates_on": INVALIDATES,
             "consumers": [
-                ".github/workflows/keyset-join.yml（门本身）",
+                ".github/workflows/lint.yml（门本身，步骤 [keyset-join]）",
                 "scripts/check-scope-json.py（结构消费者：缺键/缺 env/缺 check 都会红）",
                 "卡评论里「0 阻塞」的引文（人工）",
             ],
@@ -916,7 +916,7 @@ def main() -> int:
           f" ｜ env: python {_sys.version.split()[0]} / {_pf.system()} / PyYAML {_yaml_v}")
     print("                   ⇒ 只引 sha 不引 env 时，同一个数可能来自两把不同的尺子")
     # 2026-10-31 —— 第三件：**谁在用**。作废的影响面只由它决定。
-    print("  consumers      : .github/workflows/keyset-join.yml（红即阻塞）")
+    print("  consumers      : .github/workflows/lint.yml [keyset-join]（红即阻塞）")
     print("                   ｜scripts/check-scope-json.py（自动消费者：本 JSON 缺键/缺 env/缺 check ⇒ 红）")
     print("                   ｜卡评论里「0 阻塞」这个引文（人工）")
     print("                   ⇒ 这一栏为空时要读作「我们不知道有没有人用」，不是「没人用」")

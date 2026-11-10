@@ -19,6 +19,7 @@ WORKDIR /app
 ARG TEST673_SOURCE_COMMIT=unknown
 ENV TEST673_SOURCE_COMMIT=${TEST673_SOURCE_COMMIT}
 
+COPY contracts /app/contracts
 COPY server /app/server
 COPY agent-node /app/agent-node
 COPY tests/lib /app/tests/lib

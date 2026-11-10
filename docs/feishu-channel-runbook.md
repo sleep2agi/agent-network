@@ -122,6 +122,28 @@ V2 的工具在 opencode server 里执行，根本不过那里。
 为什么把 steer 做成显式命令：它会把新指令并进**正在改文件的那一轮**。
 自动 steer 等于让一句补话改写一项进行中的任务 —— 那比排队危险得多。
 
+## 3.6 V2 上的工具权限（未接线，先把设计写清）
+
+V2 只在 `flags.opencodeUnsafeTools=true` 时启动：它忽略 node 安全策略、所有本地工具默认启用。
+而飞书的工具闸门（layer B）实现为 claude 的 `PreToolUse` hook —— V2 的工具在 opencode
+server 里执行，**那一层一次都不会触发**。所以 V2 上「guest 只读」目前是 fail-closed 拒绝。
+
+真解是 V2 自己的 permission 请求（`POST /api/session/:id/prompt` 之外的那套）：
+
+```text
+① 启动时把 bash/edit/write/patch 设成 ask，read/glob/grep 显式 allow
+   （只读也设 ask 会让每轮多几十次往返 —— 节点"变慢"却无法归因）
+② 订阅 GET /api/permission/request，按**当前回合发起人**的角色应答：
+     member/admin ⇒ once（只放行这一次；永不 always —— 它会把授权持久化成跨身份规则）
+     guest        ⇒ reject
+     认不出       ⇒ reject（fail-closed）
+③ **先 observe 再 enforce**：observe 下规则同样设 ask，但一律放行并记录"本该拒绝什么"。
+   反过来做的话，拦截逻辑的 bug 会把节点卡死，而"卡死"和"模型慢"在现场分不出来。
+```
+
+已落地的纯逻辑：`agent-node/src/feishu-permission-rules.ts`（规则表 / 分类 / 观测判定，9 个测试）。
+**应答循环与接线未做** —— 它要在测试节点上先跑 observe 拿数据，不能拿生产节点试。
+
 ## 4. 聊天上下文
 
 桥在转投前拉该会话最近 8 条，并在 agent-node 侧拼到正文**之前**。三条边界：
@@ -181,3 +203,16 @@ tenant_access_token  600–690ms ；发消息 648–680ms
 3. 文件名带中文/空格时 curl 上传要加 `--form "file=@\"$f\""`，否则 @ 后面被截断。
 4. 机器人不在任何群里时，`GET /im/v1/chats` 返回空 —— 不是没权限，是确实没有。
 5. 自测群只有机器人自己时，发出去的消息**不会**再回来当事件。
+6. **日志文件按 UTC 日期命名，行内时间戳却是本地时间** —— `cli.ts` 用
+   `new Date().toISOString().slice(0,10)` 取文件名、`toTimeString()` 取行首。
+   所以在北京时间 08:00 之前，**「今天」的日志写在昨天的文件里**：
+
+   ```text
+   $ date                                   # 2026-11-09 03:11 CST
+   $ tail -1 logs/2026-11-08.log
+   [03:11:20] [INFO ] [通信飞书欧] ...       # 行首本地时间，文件是 UTC 日期
+   ```
+
+   判读陷阱：凌晨查 `logs/$(date +%F).log` 得空 ⇒ 误判"今天没有活动"。
+   正确做法是按 mtime 找最新文件（`ls -t logs | head -1`），或直接
+   `grep -ah feishu logs/2026-11-0*.log` 全覆盖。

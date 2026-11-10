@@ -29,9 +29,9 @@ set -uo pipefail
 # pm2 守护进程 ⇒ 下面所有 `$HOME/...` 全部解析到「节点的家」⇒ hub 起不来，
 # 生产停了约 40 秒（95+ 个 agent 的 SSE 全断）。
 #
-# ⇒ 路径基准不再用 `$HOME`，而用 `HUB_HOME`（默认 /home/vansin）。
+# ⇒ 路径基准不再用 `$HOME`，而用 `HUB_HOME`（默认 $HOME）。
 #    调用者的 HOME 只作为**诊断信息**保留，不再参与路径解析。
-HUB_HOME="${HUB_HOME:-/home/vansin}"
+HUB_HOME="${HUB_HOME:-$HOME}"
 CALLER_HOME="${HOME:-（未设置）}"
 
 # 版本切换点。回滚就是把这一行指回上一个 runtime-vNN 目录并重启 —— 旧目录保留不删。
