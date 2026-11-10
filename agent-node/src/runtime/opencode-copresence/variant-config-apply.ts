@@ -13,6 +13,21 @@ export async function applyVariantConfig(
   patch: { model?: string; modelVariant: string | null },
 ): Promise<V2SelectionResult> {
   if (!session?.isRunning) return { status: "rejected", reason: "unsupported" };
+  // Presence of the controller methods is NOT evidence they work: on a stock build
+  // they exist but the controller denies (no test-build idle lease). Prefer the
+  // narrower writer there, and fall back to it if the controller says unsupported.
+  if (!session.variantConfigTestOwned && session.setSelectedVariant) {
+    if (patch.model !== undefined) return { status: "rejected", reason: "unsupported" };
+    let applied: V2ModelSelection;
+    try { applied = await session.setSelectedVariant(patch.modelVariant); }
+    catch (error: any) {
+      const message = String(error?.message ?? "");
+      if (message.includes("variant_busy")) return { status: "rejected", reason: "busy" };
+      if (message.includes("scope")) return { status: "rejected", reason: "scope" };
+      return { status: "unknown" };
+    }
+    return { status: "applied", model: applied };
+  }
   if (!session.selectedSessionModel || !session.selectSessionModel) {
     // Stock builds have no atomic idle lease shared with the human TUI. They get a
     // narrower writer that refuses while one of our turns is in flight and verifies
