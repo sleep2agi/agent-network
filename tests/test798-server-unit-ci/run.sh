@@ -91,6 +91,11 @@ while IFS= read -r f; do
     ran=$((ran+1)); failed=$((failed+1)); failed_names="$failed_names $name"
     echo "--- FAILED: $rel ---"
     tail -25 "/tmp/test798-$name.log"
+    # 2026-11-10 —— tail -25 只剩一串用例名；失败**原因**（error/Expected/Received 与其上下文）
+    # 在更前面。把每条失败的原因块也打出来（有上限），否则 CI 独有的红只能猜。
+    echo "--- FAILURE CAUSES: $rel (first 160 lines) ---"
+    grep -n -B6 -A4 -E '^error:|Expected|Received|ENOENT|EACCES|source_[a-z_]+_refused|unknown_rotation_required' \
+      "/tmp/test798-$name.log" | grep -vE '^[0-9]+-\(pass\)' | head -160 || true
     # 2026-10-31 —— **红在哪一档**比「红了几条」可行动。
     # 用 scripts/report-server-test-triage.py（同一个分档器），把这一条的失败块喂给它：
     # 前面的汇总行是它认文件用的，真正的失败原因在后面的原日志里。
