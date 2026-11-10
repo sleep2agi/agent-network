@@ -311,6 +311,13 @@ Import sessions from CommHub into local node configs.`,
   "doctor": `Usage: anet doctor [--fix]
 
 System diagnostic check (runtimes, Hub, config, permissions).`,
+  "pair": `Usage: anet pair [--json]
+
+Print the exact agent-network + agent-node pair this CLI was released with,
+and the one install command for it.
+
+Options:
+  --json   machine-readable output (cli, agentNode, install)`,
   "license": `Usage: anet license
 
 Show license status and limits.`,
