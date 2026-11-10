@@ -58,6 +58,11 @@ RUN cd agent-network && bun install --ignore-scripts \
 # scheduled-tasks-http.test.ts 起两个真 Hub 进程抢同一个 occurrence,
 # worker 脚本在 tests/test601-hub-scheduled-tasks 下,按仓根相对路径 import。
 COPY tests/test601-hub-scheduled-tasks ./tests/test601-hub-scheduled-tasks
+# Repo files that server tests read outside server/ (2026-11-10: both were ENOENT in this image):
+#   health-redaction #473 inventory -> docs/rest-route-table.json
+#   hub-catalog-read-http provider selection states -> prototype client api.ts
+COPY docs/rest-route-table.json ./docs/rest-route-table.json
+COPY prototype/anet-client-app/src/api.ts ./prototype/anet-client-app/src/api.ts
 # 2026-10-31 —— 失败分档（scripts/report-server-test-triage.py）在容器里跑，
 # 所以脚本本身必须进镜像。原来镜像里没有任何 scripts/ ⇒ 分档会「跳过」。
 COPY scripts/report-server-test-triage.py ./scripts/report-server-test-triage.py
