@@ -35,6 +35,7 @@ import { spawn } from "child_process";
 import { randomBytes } from "crypto";
 import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-health";
 import { waitUntilIdle } from "../idle-wait";
+import { QUEUED_VARIANT_TTL_MS, shouldApplyQueuedVariant } from "./queued-variant";
 import { rmSync } from "fs";
 import { join } from "path";
 import {
@@ -838,7 +839,15 @@ export async function openVettedOpenCodeV2Copresence(
             isBusy: () => inFlight > 0 || !session.isRunning,
             budgetMs: VARIANT_IDLE_WAIT_MS,
           });
-          if (!idle) throw new Error("variant_busy");
+          if (!idle) {
+            // 等不到就**排队**，但绝不谎报 applied：
+            //   · ack 仍然是 rejected/busy（现在确实没生效）；
+            //   · 同时记下意图，这一轮结束（inFlight→0）时应用一次。
+            // 这样客户端那句「档位会对下一轮生效 —— 跑完再切」就是事实，而不是安慰。
+            queuedVariant = variant === "default" ? null : variant;
+            queuedVariantAt = Date.now();
+            throw new Error("variant_busy");
+          }
         }
         const body = await scopedRequest(`/api/session/${sessionId}`);
         const current = readV2ModelSelection(body);
@@ -1037,7 +1046,23 @@ export async function openVettedOpenCodeV2Copresence(
           throw error;
         });
         queue = observed.then(() => undefined, () => undefined);
-        void observed.finally(() => { inFlight = Math.max(0, inFlight - 1); }).catch(() => {});
+        void observed.finally(() => {
+          inFlight = Math.max(0, inFlight - 1);
+          // 这一轮结束了：如果期间用户点过档位，就在这里应用一次；只在**恰好归零**时做。
+          if (inFlight === 0 && queuedVariant !== undefined) {
+            const pending = queuedVariant;
+            const queuedAt = queuedVariantAt;
+            queuedVariant = undefined;
+            // 判据抽在 queued-variant.ts（纯函数、有单测）：这一轮**恰好归零**且未过期才应用。
+            if (shouldApplyQueuedVariant({ hasQueued: true, inFlight, queuedAt, now: Date.now() })) {
+              void session.setSelectedVariant(pending).catch((error) => {
+                warn(`[variant] queued apply failed: ${String((error as any)?.message ?? error)}`);
+              });
+            } else {
+              warn(`[variant] queued apply dropped after ${Math.round((Date.now() - queuedAt) / 1000)}s (ttl ${QUEUED_VARIANT_TTL_MS / 60000}min)`);
+            }
+          }
+        }).catch(() => {});
         return observed;
       },
       async close(mode?: { restart?: boolean }) {
