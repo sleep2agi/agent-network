@@ -94,6 +94,11 @@ export function createSessionSourceDeliveryQueue(executions: ReturnType<typeof c
       return db.transaction(() => {
         if (db.run("UPDATE session_source_node_deliveries SET state='registered' WHERE delivery_id=?1 AND state='delivered'", [id]).changes !== 1) return false;
         db.run("UPDATE api_tokens SET expires_at=NULL WHERE token_id=?1 AND revoked_at IS NULL", [r.token_id]);
+        // admin 2026-11-10「fork 开来的节点就是要继承之前的部门的」: the child takes the
+        // source node's department, unless someone already placed it explicitly.
+        db.run(`UPDATE nodes SET department_id = (SELECT s.department_id FROM nodes s WHERE s.node_id = ?2 AND s.network_id = ?3)
+          WHERE node_id = ?1 AND network_id = ?3 AND (department_id IS NULL OR department_id = '')`,
+          [r.child_node_id, t.evidence.request.source_node_id, caller.networkId]);
         return true;
       });
     },
