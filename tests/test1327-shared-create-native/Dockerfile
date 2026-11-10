@@ -8,9 +8,13 @@ RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx && apt-get update && \
 RUN npm install -g @opencode/cli@2.0.22 && test "$(opencode --version)" = 'opencode v2.0.22'
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package*.json ./server/
 COPY agent-network/package*.json ./agent-network/
 COPY contracts /opt/node_modules/@sleep2agi/contracts
+# contracts/*.ts re-export ../server/src/contracts/*: ship that next to the copied contracts
+COPY server/src/contracts /opt/node_modules/@sleep2agi/server/src/contracts
 COPY agent-node/package*.json /opt/node_modules/@sleep2agi/agent-node/
 RUN cd server && npm ci --ignore-scripts && \
     cd ../agent-network && npm ci --ignore-scripts && \

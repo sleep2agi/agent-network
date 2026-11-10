@@ -108,11 +108,13 @@ import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
 import {
   OPENCODE_AGENT_NODE_SPEC,
   OPENCODE_AGENT_NODE_VERSION,
+  PAIRED_AGENT_NETWORK_VERSION,
   PAIRED_AGENT_NODE_SPEC,
   PAIRED_AGENT_NODE_VERSION,
   agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairInfo,
   pairedAgentNodeResolution,
   pairedAgentNodeResolveTimeoutMs,
   pairedAgentNodeResolveError,
@@ -3387,6 +3389,22 @@ function getAnetVersion(): string {
   if (embedded) return embedded;
   try { return JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version || ""; }
   catch { return ""; }
+}
+
+// 2026-11-10 —— 让 agent-node 自报「起它的是哪个 anet CLI」用的环境变量片段。
+//
+// 为什么需要它：`config_snapshot.anet_version` 是静态占位值（写死 0.1.0），客户端因此
+// 给不出这台机器「该装哪一对包」，只能建议 `agent-node@preview` —— 装完很可能与本地
+// CLI 不成对，CLI 拒绝启动（`Incompatible agent-node for opencode-cli`），节点离线。
+//
+// 形状不认就返回**空对象**：宁可「没报」也不要报一个假版本（假版本正是上面那个 bug 的成因）。
+// 🔴 只用于**真正 spawn agent-node 子进程**的 env，不要塞进 `AgentNodeLaunchPlan.probeEnv` ——
+//    那个对象还要拿去跑 `agent-node --help` 探测，混入启动侧的东西会让探测环境与启动环境不一致。
+function launchedByCliVersionEnv(): Record<string, string> {
+  const v = getAnetVersion();
+  return /^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$/.test(v) && v.length <= 64
+    ? { ANET_LAUNCHED_BY_CLI_VERSION: v }
+    : {};
 }
 
 /** POST /api/auth/login|register 的 client_label:这条登录在 app「登录设备」里叫什么(见 src/login-client-label.ts)。 */
@@ -7886,6 +7904,10 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       childEnv.ANET_CONFIG_UPDATE_CAPABLE = "0";
     }
 
+    // 2026-11-10 —— 让子进程如实知道「起它的是哪个 anet CLI」（见 launchedByCliVersionEnv）。
+    // 只写在这里（childEnv = 真实启动环境），不写进 AgentNodeLaunchPlan.probeEnv。
+    Object.assign(childEnv, launchedByCliVersionEnv());
+
     // #1353 —— 把 daemon 的 anet 二进制 pin 传给子进程。
     //
     // 🔴 这是我 #1299 那次改动的一个错误假设的修正。当时我在 `prepareDaemonAnetBin()`
@@ -8878,6 +8900,7 @@ async function startCommand() {
     const env = { ...hardenOpencodeAgentNodeEnv(process.env, process.env.PATH),
       ANET_OPENCODE_BIN: opencodeLaunchIdentity.binary, ANET_OPENCODE_VERSION: checked.version,
       ANET_OPENCODE_MODE: "copresence", ANET_CONFIG_UPDATE_CAPABLE: "0",
+      ...launchedByCliVersionEnv(), // 2026-11-10 —— 这条私有 route 也是 CLI 起 agent-node
       ANET_SOURCE_RESUME_NONCE: nonce, ANET_SOURCE_RESUME_CONFIG: configPath };
     const child = spawn(plan.command, [...plan.argsPrefix, "--config", configPath,
       "--alias", p.alias, "--runtime", "opencode-cli", "--session", p.sessionId],
@@ -14982,7 +15005,8 @@ async function opencodeBorrowedAttachCommand(ref?: string) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("borrowed V1 TUI requires an interactive terminal");
   const child=spawn(plan.command,[...plan.argsPrefix,"--opencode-borrowed-attach",cfg],{
     cwd:process.cwd(),stdio:"inherit",env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
-      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version},
+      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version,
+      ...launchedByCliVersionEnv()}, // 2026-11-10 —— 这条 attach 也是 CLI 起 agent-node
   });
   const stop=()=>{try{child.kill("SIGTERM");}catch{}};
   const signals=["SIGINT","SIGTERM","SIGHUP"] as const;
@@ -15440,6 +15464,26 @@ async function smokeOpencodeAcp(
     };
   }
   return result;
+}
+
+/**
+ * `anet pair` —— 精确配对的唯一答案。
+ *
+ * opencode-cli 这条路径**禁用了自动 npx**，目标机上必须有精确版本的全局 agent-node；
+ * 而两个包的 preview tag 是**先后**移动的（node 先发、声明它的 CLI 后发），
+ * 所以 `@preview` 在窗口期里不自洽。把本包里的常量打印出来，是唯一不用猜的答案 ——
+ * 客户端和文档都应当显示这条命令，而不是自己拼版本号。
+ */
+function pairCommand(): void {
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({
+      cli: `@sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`,
+      agentNode: `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`,
+      install: opencodeExactPairInstallCommand(),
+    }, null, 2));
+    return;
+  }
+  console.log(pairInfo());
 }
 
 async function upgradeCommand() {
@@ -20171,6 +20215,7 @@ switch (command) {
   case "channel": await channelCommand(); break;
   case "setup": await setupCommand(); break;
   case "upgrade": await upgradeCommand(); break;
+  case "pair": pairCommand(); break; // 精确配对的唯一答案：打印本包常量生成的安装命令
   case "session": sessionCommand(); break;
   case "skill": await skillCommand(); break;
   case "ls": case "list": await lsCommand(); break;

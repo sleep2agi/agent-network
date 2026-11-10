@@ -10,6 +10,8 @@ RUN apt-get update \
 COPY docs-site/package*.json docs-site/
 RUN npm ci --prefix docs-site --ignore-scripts
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/src/tools.ts server/src/tools.ts
 COPY docs-site docs-site
 COPY tests/test520-ack-inbox-docs/run.sh tests/test520-ack-inbox-docs/run.sh

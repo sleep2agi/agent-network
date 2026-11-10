@@ -4,6 +4,7 @@ import HeroBackdrop from './components/HeroBackdrop.vue'
 import HeroLive from './components/HeroLive.vue'
 import { useData } from 'vitepress'
 import SelectionReporter from './SelectionReporter.vue'
+import HomeFx from './components/HomeFx.vue'
 
 const { Layout } = DefaultTheme
 const { lang } = useData()
@@ -22,6 +23,7 @@ const { lang } = useData()
         <a :href="lang.startsWith('en') ? '/en/download' : '/download'">{{ lang.startsWith('en') ? 'Download the app' : '下载客户端' }}</a>
       </p>
       <SelectionReporter />
+      <ClientOnly><HomeFx /></ClientOnly>
     </template>
   </Layout>
 </template>

@@ -26,6 +26,8 @@ RUN chown node:node /workspace
 USER node
 COPY --chown=node:node agent-network/src/tmux.ts ./agent-network/src/tmux.ts
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY --chown=node:node agent-node/src/tmux.ts ./agent-node/src/tmux.ts
 COPY --chown=node:node tests/test505-tmux-socket-isolation ./tests/test505-tmux-socket-isolation
 

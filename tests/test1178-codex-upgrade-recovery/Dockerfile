@@ -18,6 +18,8 @@ RUN cd agent-network && bun install --frozen-lockfile
 COPY agent-network ./agent-network
 RUN cd agent-network && bun build src/codex-copresence-rpc.ts --target node --format esm --outfile /repo/agent-network/.test-codex-copresence-rpc.mjs
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 RUN cd agent-node && bun install --frozen-lockfile
 COPY agent-node ./agent-node

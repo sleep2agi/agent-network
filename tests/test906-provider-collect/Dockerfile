@@ -8,6 +8,8 @@ RUN cd agent-network && npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-network/src ./agent-network/src
 COPY agent-network/bin ./agent-network/bin
 COPY contracts /work/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /work/server/src/contracts
 COPY agent-node/src ./agent-node/src
 RUN cd agent-network && ./node_modules/.bin/tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution bundler src/daemon-provider-collect.ts src/daemon-provider-command.ts
 RUN cd agent-network && bun build bin/cli.ts --target node --outfile dist/bin/cli.js --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*'

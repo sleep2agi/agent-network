@@ -4,6 +4,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY server/package.json server/package-lock.json ./server/
 RUN cd server && bun install --frozen-lockfile
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/

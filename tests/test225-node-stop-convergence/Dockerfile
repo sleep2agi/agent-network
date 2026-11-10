@@ -3,6 +3,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ procps tmux && rm -rf /var/lib/apt/lists/*
 COPY agent-network/ agent-network/
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY agent-node/ agent-node/
 RUN cd agent-node && bun install --ignore-scripts && bun run build && ln -s /app/agent-node/dist/cli.js /usr/local/bin/agent-node
 RUN cd agent-network && bun install --ignore-scripts && bun run build && ln -s /app/agent-network/bin/anet.cjs /usr/local/bin/anet

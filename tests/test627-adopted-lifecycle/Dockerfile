@@ -6,6 +6,8 @@ COPY --from=bun /usr/local/bin/bun /root/.bun/bin/bun
 ENV PATH="/root/.bun/bin:${PATH}"
 WORKDIR /app
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY server ./server
 COPY agent-node ./agent-node
 COPY agent-network ./agent-network

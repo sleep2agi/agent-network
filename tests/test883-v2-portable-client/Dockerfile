@@ -20,9 +20,13 @@ COPY tests/test883-v2-portable-client/tools/package*.json ./
 RUN npm ci && ln -s /qa-tools/node_modules/.bin/opencode /usr/local/bin/opencode && test "$(opencode --version)" = 'opencode v2.0.22'
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package*.json ./server/
 COPY agent-network/package*.json ./agent-network/
 COPY contracts /opt/node_modules/@sleep2agi/contracts
+# contracts/*.ts re-export ../server/src/contracts/*: ship that next to the copied contracts
+COPY server/src/contracts /opt/node_modules/@sleep2agi/server/src/contracts
 COPY agent-node/package*.json /opt/node_modules/@sleep2agi/agent-node/
 RUN cd server && npm ci --ignore-scripts && cd ../agent-network && npm ci --ignore-scripts && cd /opt/node_modules/@sleep2agi/agent-node && npm ci --ignore-scripts
 COPY server ./server

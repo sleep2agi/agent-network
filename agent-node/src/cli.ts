@@ -11,6 +11,8 @@
  * 配置加载: --config > CLI args > env > .anet/nodes/<name>/config.json > ~/.anet/config.json > defaults
  */
 
+import { opencodeModelEffectiveSnapshot } from "./opencode-model-effective";
+import { launchedByCliVersionField, readLaunchedByCliVersion } from "./launched-by-cli-version";
 import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copresence/late-reply-recover.js";
 import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
@@ -380,6 +382,10 @@ const INITIAL_OPENCODE_BIN = process.env.ANET_OPENCODE_BIN;
 const INITIAL_OPENCODE_VERSION = process.env.ANET_OPENCODE_VERSION;
 const INITIAL_LAUNCH_PATH = process.env.PATH || "";
 const INITIAL_OPENCODE_SAFE_BASE = process.env.ANET_OPENCODE_SAFE_BASE;
+// 2026-11-10 —— 与上面几格同理：这是**启动者边界**，必须在 config.json 的 `env` 合并
+// 之前读一次。profile 里的 env 不该能改「我是被哪个 anet CLI 起的」这句话的真假。
+// 形状不对/没有 ⇒ undefined ⇒ 心跳里**完全不出现**这一格（见 launched-by-cli-version.ts）。
+const INITIAL_LAUNCHED_BY_CLI_VERSION = readLaunchedByCliVersion(process.env);
 
 // ── 参数解析 ──
 const argv = process.argv.slice(2);
@@ -2140,10 +2146,12 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
         && opencodeCopresenceSession?.isRunning === true
         && typeof opencodeCopresenceSession.selectSessionAgent === "function"
         ? { opencode_agent_config_capable: true } : {}),
-      ...(variantReadback && variantSession?.isRunning ? {
-        model_effective: `${variantReadback.providerID}/${variantReadback.id}`,
-        modelVariant: variantReadback.variant === "default" ? null : variantReadback.variant ?? null,
-      } : {}),
+      ...(RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" ? opencodeModelEffectiveSnapshot({
+        variantReadback,
+        variantRunning: variantSession?.isRunning === true,
+        sessionModel: opencodeEffectiveModel,
+        sessionRunning: opencodeCopresenceSession?.isRunning === true,
+      }) : {}),
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
       ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
         sourceForkSnapshot(buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability())),
@@ -2166,6 +2174,10 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
         opencode_catalog: reportedCatalog.models,
         ...(reportedCatalog.seenAt ? { opencode_catalog_seen_at: reportedCatalog.seenAt } : {}),
       } : {}),
+      // 2026-11-10 —— 起这份 agent-node 的 anet CLI 版本（启动时抓的，见
+      // INITIAL_LAUNCHED_BY_CLI_VERSION）。没有/形状不对 ⇒ 摊进来是空对象，
+      // 快照与改动前逐字节相同。**不要**塞进 `anet_version`（那是另一码事，且是静态占位值）。
+      ...launchedByCliVersionField(INITIAL_LAUNCHED_BY_CLI_VERSION),
       // #4150-Build — agents the server exposes; empty array means "none configured".
       ...(reportedAgents ? {
         opencode_agents: reportedAgents.agents,

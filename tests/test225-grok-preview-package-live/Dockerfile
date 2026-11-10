@@ -17,6 +17,8 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin"
 
 WORKDIR /build
 COPY contracts /build/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /build/server/src/contracts
 COPY agent-node/package.json ./agent-node/package.json
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-node && bun install \

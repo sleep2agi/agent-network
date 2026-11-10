@@ -9,6 +9,8 @@ COPY agent-network/bin ./agent-network/bin
 #     error: Could not resolve: "../package.json"
 #   本仓 16 个会构建 cli.ts 的镜像里，14 个本来就拷了它，这是补齐剩下的。
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/package.json ./agent-node/package.json
 COPY agent-node/src ./agent-node/src
 COPY tests/test646-config-node-id-precedence/run.sh /run.sh

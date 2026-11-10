@@ -1010,6 +1010,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // #2293 —— 这台机器上 OpenCode serve 的 loopback 端点（`http://127.0.0.1:PORT`）。
         // 客户端「OpenCode Server」行此前只能写「端口未上报」。只收 loopback URL，不收密码。
         opencode_server: z.string().max(200).optional().catch(undefined),
+        // 2026-11-10 —— 起这份 agent-node 的 **anet CLI 版本**（`2.3.0-preview.226` 这种形态）。
+        // 🔴 这一格必须写进 schema：zod 的 object 默认**丢掉未知键** ⇒ 不写在这里，节点
+        //    报上来也会被静默剥掉，而 /api/nodes 的投影读到的永远是 null。这个坑在本仓库
+        //    已经吃过两次（#3294 的 build_commit、#2293 的 opencode_catalog），都是
+        //    「字段明明发了、hub 上永远是 null」。`.catch(undefined)` 与邻居一致：
+        //    形状不对只丢这一格，绝不拒掉整份心跳。
+        // ⚠️ 不要复用 `anet_version`：那是节点自身配置里的静态占位值，含义不同、还有别的代码在读。
+        launched_by_cli_version: z.string().max(64).optional().catch(undefined),
         config_update_capable: z.boolean().optional(),
         peer_reply_inbox_capable: z.literal(true).optional(),
         side_thread_capability: z.object({

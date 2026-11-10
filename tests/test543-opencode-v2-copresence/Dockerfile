@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     { [ "$v" = "opencode v${OPENCODE_V2_VERSION}" ] || { echo "expected opencode v${OPENCODE_V2_VERSION}, got: $v" >&2; exit 1; }; }
 
 COPY contracts /contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts //server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json /agent-node-src/
 RUN cd /agent-node-src && npm ci --ignore-scripts --no-audit --no-fund --silent
 COPY agent-node /agent-node-src

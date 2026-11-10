@@ -8,6 +8,8 @@ COPY server/src/side-thread.ts /app/server/src/side-thread.ts
 COPY server/src/side-thread-http.ts /app/server/src/side-thread-http.ts
 COPY server/src/side-thread.test.ts /app/server/src/side-thread.test.ts
 COPY contracts /app/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /app/server/src/contracts
 COPY tests/test1195-side-thread-hub-contract/run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 

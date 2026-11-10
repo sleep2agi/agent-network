@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { applyVariantConfig } from "./variant-config-apply";
 import { validateLocalPatch, computeApplyMode } from "../config-apply";
 
@@ -25,4 +25,74 @@ test("old capability, scope, busy, and ambiguous writes fail closed", async () =
   expect(await applyVariantConfig(session, { modelVariant: "x" })).toEqual({ status: "rejected", reason: "busy" });
   expect(await applyVariantConfig({ ...session, selectedSessionModel: async () => undefined }, { modelVariant: "x" })).toEqual({ status: "rejected", reason: "scope" });
   expect(await applyVariantConfig({ ...session, selectSessionModel: async () => { throw Error("timeout"); } }, { modelVariant: "x" })).toEqual({ status: "unknown" });
+});
+
+
+// Stock (non-test) builds have no atomic idle lease shared with the human TUI, so they
+// use the narrower setSelectedVariant writer. These pin its contract: refuse while one
+// of our turns is in flight, apply with the real readback, and never report "applied"
+// for a write that did not take effect.
+describe("applyVariantConfig — stock-build writer", () => {
+  const session = (overrides: Record<string, unknown> = {}) => ({
+    isRunning: true,
+    sessionId: "ses_prod",
+    setSelectedVariant: async (variant: string | null) => ({ providerID: "deepseek", id: "deepseek-flash",
+      ...(variant === null ? {} : { variant }) }),
+    ...overrides,
+  });
+
+  test("applies and returns the real readback selection", async () => {
+    expect(await applyVariantConfig(session() as any, { modelVariant: "high" }))
+      .toEqual({ status: "applied", model: { providerID: "deepseek", id: "deepseek-flash", variant: "high" } });
+  });
+  test("in-flight turn is rejected as busy", async () => {
+    expect(await applyVariantConfig(session({ setSelectedVariant: async () => { throw new Error("variant_busy"); } }) as any, { modelVariant: "high" }))
+      .toEqual({ status: "rejected", reason: "busy" });
+  });
+  test("readback mismatch is unknown, never applied", async () => {
+    expect(await applyVariantConfig(session({ setSelectedVariant: async () => { throw new Error("variant did not change"); } }) as any, { modelVariant: "high" }))
+      .toEqual({ status: "unknown" });
+  });
+  test("model+variant in one patch stays unsupported on stock builds", async () => {
+    expect(await applyVariantConfig(session() as any, { model: "deepseek/deepseek-flash", modelVariant: "high" }))
+      .toEqual({ status: "rejected", reason: "unsupported" });
+  });
+});
+
+
+// The bug this pins: `applyVariantConfig` used to pick its path by asking whether the
+// controller methods EXIST. On a stock build they do (the test-build controller provides
+// them) and only deny when called, so the idle-gated writer was never reached and every
+// variant write came back `variant_unsupported`.
+describe("applyVariantConfig — stock build keeps the controller methods but they deny", () => {
+  test("falls through to the idle-gated writer instead of reporting unsupported", async () => {
+    const calls: string[] = [];
+    const session = {
+      isRunning: true,
+      sessionId: "ses_stock",
+      variantConfigTestOwned: false,
+      // present, exactly like a stock build - and they answer unsupported
+      selectedSessionModel: async () => { calls.push("controller-read"); return { providerID: "deepseek", id: "deepseek-flash" }; },
+      selectSessionModel: async () => { calls.push("controller-write"); return { status: "rejected" as const, reason: "unsupported" as const }; },
+      setSelectedVariant: async (variant: string | null) => { calls.push("stock-write"); return { providerID: "deepseek", id: "deepseek-flash", ...(variant === null ? {} : { variant }) }; },
+    };
+    const result = await applyVariantConfig(session as any, { modelVariant: "low" });
+    expect(result).toEqual({ status: "applied", model: { providerID: "deepseek", id: "deepseek-flash", variant: "low" } });
+    expect(calls).toEqual(["stock-write"]);
+  });
+
+  test("test build still uses the identity-pinned controller", async () => {
+    const calls: string[] = [];
+    const session = {
+      isRunning: true,
+      sessionId: "ses_test",
+      variantConfigTestOwned: true,
+      selectedSessionModel: async () => { calls.push("controller-read"); return { providerID: "deepseek", id: "deepseek-flash" }; },
+      selectSessionModel: async () => { calls.push("controller-write"); return { status: "applied" as const, model: { providerID: "deepseek", id: "deepseek-flash", variant: "low" } }; },
+      setSelectedVariant: async () => { calls.push("stock-write"); throw new Error("must not be used on a test build"); },
+    };
+    const result = await applyVariantConfig(session as any, { modelVariant: "low" });
+    expect(result.status).toBe("applied");
+    expect(calls).toEqual(["controller-read", "controller-write"]);
+  });
 });

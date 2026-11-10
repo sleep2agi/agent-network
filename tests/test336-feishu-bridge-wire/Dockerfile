@@ -6,6 +6,8 @@ ENV TEST336_SOURCE_COMMIT=$TEST336_SOURCE_COMMIT
 
 COPY agent-network/package.json /repo/agent-network/package.json
 COPY contracts /repo/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /repo/server/src/contracts
 COPY agent-node/package.json /repo/agent-node/package.json
 # This suite imports the Feishu bridge + a pure agent-node helper only. Avoid
 # running node-pty's unrelated native postinstall (which would add Python/gyp

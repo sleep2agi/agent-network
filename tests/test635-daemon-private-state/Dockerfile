@@ -2,6 +2,8 @@ FROM oven/bun:1.3.14
 
 WORKDIR /work
 COPY contracts /work/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /work/server/src/contracts
 COPY agent-node/src ./agent-node/src
 COPY tests/test635-daemon-private-state/run.sh /run.sh
 

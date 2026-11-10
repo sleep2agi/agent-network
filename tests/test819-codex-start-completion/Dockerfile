@@ -3,6 +3,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends procps \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /work
 COPY contracts /work/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /work/server/src/contracts
 COPY server/package.json server/package-lock.json ./server/
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 RUN cd server && bun install --frozen-lockfile --ignore-scripts \

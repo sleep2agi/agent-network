@@ -22,6 +22,8 @@ RUN curl --fail --silent --show-error --location \
 
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 # 🔴 两边都用 npm ci。原来 agent-node 走的是 npm install —— 而它旁边的

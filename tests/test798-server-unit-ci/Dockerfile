@@ -22,6 +22,8 @@ RUN curl --fail --silent --show-error --location \
 
 WORKDIR /workspace
 COPY contracts /workspace/contracts
+# contracts/*.ts re-export ../server/src/contracts/*
+COPY server/src/contracts /workspace/server/src/contracts
 COPY server/package.json server/package-lock.json ./server/
 # 🔴 npm ci 而不是 npm install:ci 严格按 lockfile 装,install 会按 caret 解析
 # 「当下最新的兼容版本」。后者意味着同一个 commit 在不同时间构建出不同依赖图 ——
