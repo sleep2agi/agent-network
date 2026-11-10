@@ -299,7 +299,13 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   两页都没有 #L 源码行号 pin(grep 计数 #L → 0 / 0)。
 #   本地 checker:scanned_doc_files=132,unique_pins=2,pin_occurrences=10,broken_pins=0。
 #   CI 先红("预期扫 130 …,实际 132")才来抬。
-[[ "$files" -eq 132 ]] || fail "预期扫 132 个文档文件(= git ls-files 的结果),实际 $files"
+# 2026-11-10:132 → 134。新首页的两个主题组件(#3453):
+#     docs-site/docs/.vitepress/theme/components/HomeFx.vue
+#     docs-site/docs/.vitepress/theme/components/HomeRuntimes.vue
+#   两个文件都没有 #L 源码行号 pin(grep -c '#L[0-9]' → 0 / 0)。
+#   本地 checker:scanned_doc_files=134,unique_pins=4,broken_pins=0。
+#   CI 先红("预期扫 132 …,实际 134")才来抬。
+[[ "$files" -eq 134 ]] || fail "预期扫 134 个文档文件(= git ls-files 的结果),实际 $files"
 # #2097: dashboard.md 中英两处 logAudit 行号链接改为文件 + 函数定位。
 # 同一个 db.ts pin 减 1，两处引用减 2；没有减少扫描文件或放宽基线。
 # 登录会话 PR:api/rest.md 中英两处 `auth.ts:209-199`(#L209)行号链接改为 `auth.ts login()` 函数定位 ——
