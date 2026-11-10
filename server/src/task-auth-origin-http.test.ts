@@ -9,6 +9,7 @@ const PRIVATE_DB_DIR = mkdtempSync(join(tmpdir(), "anet-auth-origin-http-"));
 let server: any;
 let base = "";
 let userToken = "";
+let userName = "";
 let nodeToken = "";
 let networkId = "";
 const TARGET = `auth-origin-http-target-${process.pid}`;
@@ -22,6 +23,7 @@ const TARGET_RESUME_ID = `resume_auth_origin_target_${process.pid}`;
 beforeAll(async () => {
   process.env.COMMHUB_DB = process.env.COMMHUB_DB || join(PRIVATE_DB_DIR, "hub.db");
   const username = `auth_origin_${Date.now()}`;
+  userName = username;
   const registered = register(username, "AuthOriginTest123!", undefined, "seed");
   expect(registered.ok).toBe(true);
   userToken = registered.token!;
@@ -80,7 +82,7 @@ async function postTask(token: string, from: string, marker: string) {
 
 describe("POST /api/task server-authenticated origin", () => {
   test("user token stamps user even when the client supplied another fact", async () => {
-    const meta = await postTask(userToken, "dashboard-user", "origin-user");
+    const meta = await postTask(userToken, userName, "origin-user");
     expect(meta.auth_origin).toBe("user");
   });
 

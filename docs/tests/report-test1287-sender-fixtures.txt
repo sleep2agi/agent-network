@@ -1,0 +1,201 @@
+TEST-ONLY — CommHub #1287, two original human-sender fixtures under #1268
+
+Source PR https://github.com/sleep2agi/agent-network/pull/2770
+Exact source head edf76f56a986b063ddeb2f02793aed42d2b8d4b1
+Ordinary source main 1b973eecd95855edab1779a35c2463f1f782e695, merged 2026-10-14T21:03:29Z
+Actual CI checkout 416809d65e3d0a77680f73d288dc758cb761d3e0
+Head / CI / source-main tree 1847a05d9a5c88688e619355eb325df7dcd3fa44
+Fresh main verifies source head as ancestor; virtual CI merge is an equal-tree
+checkout only, not claimed as a main ancestor. No package/executable release.
+
+Independent pinned Node22/Bun1.3.14 actual original scripts:
+run38636579391/job116101172722 SUCCESS on this final exact head.
+Original test8-runtime reports15PASS/0FAIL, including its pre-existing designed
+Codex-binary-absent startup skip. Real Claude SDK runtime registration uses a
+mock key; no real model/authentication or all-runtime qualification is claimed.
+Original qa-hub-10 baseline passes user/network resolution, authenticated sender,
+forged human/node sender refusal without task/SSE writes, same-alias A/B scoped
+SSE and task pushes, and broadcast isolation. No invented numeric denominator
+for that shell suite; two original baseline suites pass.
+Two original malformed positive senders are restored in fresh containers:
+from_session=test8 returns exact user identity mismatch and the original SSE
+assertion fails (13PASS/2FAIL in the strengthened script). alice-dashboard
+returns exact identity mismatch and its original positive dispatch assertion
+fails. Those are two witnessed-red controls, not extra green tests. Scripts are
+restored byte-for-byte; the wrapper rejects a false-green control. The later
+parsing traceback is on the refused mutant path, not a baseline failure.
+
+Artifact11929370220 ZIP SHA256
+ dab96e2d12f7779e781491f0727f7a586e9c45ed7a67a13fc2a6d79e68d9fee1
+Complete original raw report 5824 B, SHA256
+ 79d95b42d6657861a930fb90542101f755ca82bc2744eb55cbd4e45e203d1cf3.
+Read in full and preserved unchanged below. Before ordinary merge, exact head,
+all ten protected checks and independent original baselines/controls passed.
+First post-merge broad rollup: {('IN_PROGRESS', ''): 10, ('COMPLETED', 'SUCCESS'): 74, ('COMPLETED', 'FAILURE'): 1, ('QUEUED', ''): 83}.
+Queued/in-progress jobs are not passes; no whole-repository green claim.
+
+Only fixtures/workflows/docs changed. Product server/agent-node/agent-network
+source and all three package/lock inputs have zero diff from parent fc3a762c.
+This validates the sender input correction, not an independent old full-base
+experiment or zero impact on all unrelated QA. Parent #1268 retains docs
+upgrade-v2.md ENOENT, TTL/lifecycle failures and detached-cap mutation false-green
+as separate unresolved items. Earlier #1282 hono build integrity and #1285
+Windows PowerShell birth-query timeout failures remain recorded. Old failure
+receipts are not rewritten as green.
+
+Local preview was based on fc3a762c with working-tree edits, not an exact source
+certificate. Cold image preparation/export and a partial baseline command hit
+the110s limit; no command was allowed beyond two minutes. Initial combined
+negative verification did not pass. Exact nested MCP JSON parsing and fresh
+baseline/negative containers produced final complete local green baselines and
+both original identity errors. Those repeats are not additional independent
+coverage. Final CI above is the exact-head certificate.
+
+No production Hub/Node, original credentials/login/thread/model/frequency or
+real task replay was changed. No product guard or network/SSE assertion was
+relaxed. qa-hub-10 uses its own disposable COMMHUB_DB directory and existing
+safe-rm guard; system HOME is not redefined. Real CLI bundles from locked source
+are launched inside Docker, not stub binaries or host global npm packages.
+Recovery answers: tests/test1287-sender-fixtures/README.md. Existing production
+entrypoints/proxy/ports/secret sources and software rollback remain authoritative;
+Git restores software/fixtures, not actual identities/history/backup contents.
+No full production recovery, live adoption or real LLM proof is certified.
+
+Post-cutoff failure retained under existing dependency-input ledger #1282:
+recovered suites run38636579274/job116101452708 FAILURE at21:02:21Z.
+The failing build is tests/qa-daemon-lifecycle-e2e/Dockerfile:45:
+agent-network bun install --silent && bun run build stops while unpacking
+@types/node with ZlibError, before that lifecycle script runs. Other suites
+had already executed in this batch. This is not a sender baseline failure;
+no shared cause with earlier hono integrity failure is established.
+Complete job log154224B SHA256
+ 74a312afd5626c0a4c0bb4586bf8610a4fbc0ff5fcebb7ee86bfd6893ff0a509.
+Artifact11929285565; no checksum relaxation, retry-green or independent old-base
+zero-impact claim. The dependency diagnosis remains open.
+
+----- COMPLETE ORIGINAL INDEPENDENT CI REPORT (5824 bytes) -----
+TEST-ONLY source=416809d65e3d0a77680f73d288dc758cb761d3e0 scope=original sender fixtures case=baseline
+source_commit=416809d65e3d0a77680f73d288dc758cb761d3e0
+
+═══ Test 8: Runtime + SSE Smoke ═══
+
+1. Server health
+  ✅ server started
+  ✅ streamable HTTP enabled
+
+2. agent-node binary
+  ✅ agent-node installed
+
+2.5 admin utok_ + master-token 废弃边界
+  ✅ network_id resolved (net_01a79b2ca268)
+  ✅ node token (ntok_) minted for test8-http
+  ✅ admin utok_ obtained
+  ✅ master token rejected on write (deprecated)
+
+3. codex-sdk runtime startup
+  ✅ codex binary absent, codex-sdk startup skipped by design
+
+4. claude-agent-sdk runtime startup
+  ✅ claude-agent-sdk runtime registered with mock key
+
+5. SSE connect
+  ✅ SSE connected
+
+6. send_task push
+  ✅ forged human sender rejected without task writes
+  ✅ task sender is the authenticated username
+  ✅ send_task triggered SSE new_task
+
+7. report_status visibility
+  ✅ report_status via utok_ is rejected (network_token_required)
+  ✅ report_status visible in /api/status
+
+═══════════════════════════════════
+  Test 8 Result: 15 passed, 0 failed
+═══════════════════════════════════
+
+source_commit=416809d65e3d0a77680f73d288dc758cb761d3e0
+[0] start local hub from repository source
+[1] register two users with separate default networks
+[2] same alias reports status in both networks
+[3] single-network utok send_task auto-resolves the network (#517)
+PASS forged human sender refused without writes
+PASS authenticated canonical user sender
+[4] connect two SSE subscribers for same alias in different networks
+[5] task push in network A must not leak to network B
+PASS forged node sender refused without task/SSE writes
+[6] task push in network B must not leak to network A
+[7] broadcast in network A must not push to network B
+PASS qa-hub-10 network scope regressions (#67 message ✓ / #54 SSE isolation ✓)
+RESULT: PASS original runtime and network-scope baselines
+TEST-ONLY source=416809d65e3d0a77680f73d288dc758cb761d3e0 scope=original sender fixtures case=mutant-runtime
+source_commit=416809d65e3d0a77680f73d288dc758cb761d3e0
+
+═══ Test 8: Runtime + SSE Smoke ═══
+
+1. Server health
+  ✅ server started
+  ✅ streamable HTTP enabled
+
+2. agent-node binary
+  ✅ agent-node installed
+
+2.5 admin utok_ + master-token 废弃边界
+  ✅ network_id resolved (net_1fcf63e2a48a)
+  ✅ node token (ntok_) minted for test8-http
+  ✅ admin utok_ obtained
+  ✅ master token rejected on write (deprecated)
+
+3. codex-sdk runtime startup
+  ✅ codex binary absent, codex-sdk startup skipped by design
+
+4. claude-agent-sdk runtime startup
+  ✅ claude-agent-sdk runtime registered with mock key
+
+5. SSE connect
+  ✅ SSE connected
+
+6. send_task push
+  ✅ forged human sender rejected without task writes
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/usr/lib/python3.11/json/__init__.py", line 293, in load
+    return loads(fp.read(),
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+  ❌ task sender must be canonical authenticated username
+event: message
+data: {"result":{"content":[{"type":"text","text":"{\"ok\":false,\"error\":\"from_session_identity_mismatch\",\"message\":\"user token task sender must match the authenticated username\",\"token_alias\":\"test8admin\",\"requested_from_session\":\"test8\"}"}]},"jsonrpc":"2.0","id":"t"}
+data: {"type":"connected","session":"test8-http","network_id":"net_1fcf63e2a48a"}
+
+data: {"type":"status_update","alias":"test8-http","status":"offline","progress":null,"host":{"hostname":"90c477402383","ip":"127.0.0.1","cpu_load_1min":1.76,"cpu_cores":4,"mem_total_gb":15.6,"mem_used_gb":1.6,"mem_avail_gb":14,"disk_total_gb":144.3,"disk_used_gb":60.4,"disk_avail_gb":83.8},"process_telemetry":{"rss_bytes":87441408,"rss_mb":83.4,"cpu_pct":1.2,"uptime_seconds":8,"in_flight_count":0}}
+
+  ❌ send_task did not reach SSE subscriber
+
+7. report_status visibility
+  ✅ report_status via utok_ is rejected (network_token_required)
+  ✅ report_status visible in /api/status
+
+═══════════════════════════════════
+  Test 8 Result: 13 passed, 2 failed
+═══════════════════════════════════
+
+EXPECTED_RED: original test8 spoofed sender; restored bytes
+TEST-ONLY source=416809d65e3d0a77680f73d288dc758cb761d3e0 scope=original sender fixtures case=mutant-scope
+source_commit=416809d65e3d0a77680f73d288dc758cb761d3e0
+[0] start local hub from repository source
+[1] register two users with separate default networks
+[2] same alias reports status in both networks
+[3] single-network utok send_task auto-resolves the network (#517)
+PASS forged human sender refused without writes
+FAIL: single-network utok should auto-resolve and deliver, got: {"ok":false,"error":"from_session_identity_mismatch","message":"user token task sender must match the authenticated username","token_alias":"aliceA","requested_from_session":"alice-dashboard"}
+EXPECTED_RED: original scope spoofed sender; restored bytes
+RESULT: PASS; both original baselines and both exact witnessed-red sender regressions

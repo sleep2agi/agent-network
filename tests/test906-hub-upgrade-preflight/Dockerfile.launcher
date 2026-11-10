@@ -1,0 +1,5 @@
+FROM node:22.22.2-bookworm-slim@sha256:9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e
+WORKDIR /repo
+COPY deploy/hub/hub-daemon.sh deploy/hub/hub-provider906.sh /repo/deploy/hub/
+COPY tests/test906-hub-upgrade-preflight/launcher.mjs /check/launcher.mjs
+CMD ["node", "/check/launcher.mjs"]

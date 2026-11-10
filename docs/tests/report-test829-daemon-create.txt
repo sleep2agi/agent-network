@@ -1,0 +1,584 @@
+#829 remote V2 creation: parameter + persistence slice
+2026-10-09 14:15 CST (Asia/Shanghai)
+TEST ONLY / DRAFT / NOT MERGED / NOT RELEASED
+
+Exact tested source: 30bf969f4f324613643c999e07d1d61ba7dba0b6
+Docker image: anet-test829:create-contract-30bf
+Image index: sha256:6e6bb82a3701ec213c0eb7251c8812fc216b5940fa9f4ddf5a3f13a741710a54
+Container: anet-test829-contract-30bf, exit 0
+Node 22.23.3 / Bun 1.3.14 / @opencode/cli 2.0.22
+No source mounts; network none; /tmp tmpfs 256 MiB (test database only).
+Raw stdout retained in Docker logs; /tmp/art itself disappears on container stop.
+
+Changes
+- Strict flag envelope: explicit v1/v2 and boolean unsafe acknowledgement.
+- Hub and daemon independently reject invalid types, runtime, missing/false
+  V2 unsafe opt-in, and misplaced top-level controls.
+- Existing omitted generation remains legacy V1; no existing config migration.
+- Hub request storage/pull preserve flags.
+- Daemon actual JSON writer persists generation/mode at top level and unsafe in
+  flags. Rejected opt-in is tested before token mint (Hub), write/spawn (daemon);
+  existing sentinel config unchanged.
+- QA push/pull paths and matrix now include test829; runbook boundary updated.
+
+Green staged results (previous stage must pass)
+1 contract parity: 18 pass / 50 assertions.
+2 actual MCP schema + Hub validators: 47 pass / 185 assertions.
+3 Hub create handler -> persisted request -> daemon pull: 47 pass / 68 assertions.
+4 daemon regressions/private writers: 84 pass / 213 assertions.
+5 real daemon handler configuration writes/name regressions: 18 pass / 101 assertions.
+Total: 214 pass, 0 fail, 617 assertions.
+
+Scope / limitations
+- Hub tests call real registered handlers with isolated database/auth fixtures;
+  this is NOT the actual network/MCP transport E2E.
+- daemon persistence test substitutes spawnChild with owned sleep processes.
+  Real OpenCode --version is used but NO actual V2 TUI/session was launched.
+- Existing node-name stop/delete tests logged "pgrep: not found". They still
+  passed their fixture assertions; this is NOT evidence of real process discovery,
+  stop semantics, or platform lifecycle acceptance. Add procps and verify the
+  environment before extending this image to a native lifecycle gate.
+- Exact runtime readiness, real daemon/Hub/V2 create+register+task+stop/restart,
+  model readback and client UI remain open. No safe V2 preset is claimed.
+- Current branch does not contain the pending registry-readiness/CLI-stop PRs.
+  Integrated main-SHA E2E must be rerun after all required changes merge.
+
+Negative control
+Image anet-test832:close-drain, embedded source
+643ab39c3cb24b4aa0a72599add62ce932814ca9 (old create implementation).
+Overlay ONLY current test829 contract.test.ts, plus test-directory symlink.
+Container anet-test829-old-contract-red: exit 1; 6 pass / 12 fail / 41 assertions.
+Fails on misplaced-field silent drop, rejected new valid flags, and generation
+remaining under flags; validates tests detect the changed contract.
+Initial docker cp failed because /workspace/tests did not exist. No test ran
+on that attempt; created the container-only directory then copied and ran.
+This is a test overlay control, NOT a source-identical rebuild or release artifact.
+
+Other attempts / disk handling
+An initial image had an incorrect short SOURCE_COMMIT build argument. It was
+never executed as acceptance; rebuilt exact 30bf... with full SHA as above.
+Removed that obsolete image after successful exact build.
+Disk reached 0 available and git status failed creating its index.lock.
+No broad pruning: identified 18 cache records from THIS round's two builds by
+creation timestamp, operation description and parent chain, then pruned exact
+IDs only. No production containers/data/images or other worktree changes removed.
+Final free space after cleanup ~1.7 GiB; current tested image and containers kept.
+Do not start another large build without headroom. Cache can be rebuilt from Git.
+
+Replay (all Docker commands via sg docker -c):
+- git archive exact source and docker build with
+  --build-arg SOURCE_COMMIT=30bf969f4f324613643c999e07d1d61ba7dba0b6
+  -f tests/test829-opencode-create/Dockerfile
+- docker run --network none --tmpfs /tmp:rw,size=256m
+  -e EXPECTED_SOURCE_COMMIT=30bf969f4f324613643c999e07d1d61ba7dba0b6
+  anet-test829:create-contract-30bf
+- Retain stdout using docker logs. If retaining ARTIFACT_DIR after stop, use
+  a non-tmpfs artifact directory; never put real credentials into it.
+
+Recovery: no service/port/proxy/key source/schema/data migration changed.
+See docs/runbooks/opencode-tui-copresence.md for candidate and rollback boundary.
+No production node was restarted; no release or disaster-recovery claim.
+
+=== GREEN RAW LOG ===
+v22.23.3
+1.3.14
+bun test v1.3.14 (0d9b296a)
+
+tests/test829-opencode-create/contract.test.ts:
+(pass) misplaced controls fail even on a direct daemon request [6.20ms]
+(pass) Hub and daemon produce identical CLI-compatible V2 argv [2.71ms]
+(pass) both validators reject {"opencodeGeneration":"v3"} [0.47ms]
+(pass) both validators reject {"opencodeGeneration":null} [0.08ms]
+(pass) both validators reject {"opencodeGeneration":"v2"} [0.07ms]
+(pass) both validators reject {"opencodeGeneration":"v2","opencodeUnsafeTools":false} [0.06ms]
+(pass) both validators reject {"opencodeGeneration":"v2","opencodeUnsafeTools":"true"} [0.06ms]
+(pass) both validators reject {"opencodeGeneration":"v1","opencodeUnsafeTools":true} [0.05ms]
+(pass) both validators reject {"opencodeGeneration":"v1","opencodeUnsafeTools":false} [0.05ms]
+(pass) both validators reject {"opencodeUnsafeTools":true} [0.05ms]
+(pass) both validators reject {"opencodeUnsafeTools":false} [0.05ms]
+(pass) generation controls never leak to claude-agent-sdk [0.34ms]
+(pass) generation controls never leak to claude-code-cli [0.08ms]
+(pass) generation controls never leak to codex-sdk [0.06ms]
+(pass) generation controls never leak to codex-app-server [0.08ms]
+(pass) generation controls never leak to grok-build-acp [0.08ms]
+(pass) generation controls never leak to grok-build-cli [0.06ms]
+(pass) legacy omission and explicit V1 remain safe and do not mutate the spec [0.99ms]
+
+ 18 pass
+ 0 fail
+ 50 expect() calls
+Ran 18 tests across 1 file. [96.00ms]
+bun test v1.3.14 (0d9b296a)
+
+src/create-node-tool-schema.test.ts:
+[commhub] database: /tmp/test829-hub.db
+[commhub] 🎉 14-day free trial started!
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) create_node MCP schema > #829 rejects misplaced V2 controls instead of stripping them [73.91ms]
+(pass) create_node MCP schema > model is optional on daemon create specs but empty strings stay invalid [28.55ms]
+
+src/create-node-validate.test.ts:
+(pass) validateName (§4.2.2, #652 Unicode names) > good names — incl. Chinese, upper case, digits first [2.75ms]
+(pass) validateName (§4.2.2, #652 Unicode names) > returns the trimmed name [0.07ms]
+(pass) validateName (§4.2.2, #652 Unicode names) > rejects shell-injection-like and path-like names with a reason [2.68ms]
+(pass) validateName (§4.2.2, #652 Unicode names) > error carries reason + offending char + a readable message [0.22ms]
+(pass) validateRuntime / validateModel (§4.2.2) > runtime enum [1.34ms]
+(pass) validateRuntime / validateModel (§4.2.2) > model with dots, colons, dashes OK; bad chars rejected [1.03ms]
+(pass) validateFlagValue (§4.2.2) > budget decimal allowed [0.28ms]
+(pass) validateFlagValue (§4.2.2) > maxTurns integer 1..9999 [0.19ms]
+(pass) validateFlagValue (§4.2.2) > dangerouslySkipPermissions boolean [0.19ms]
+(pass) validateFlagValue (§4.2.2) > permissionMode enum [0.13ms]
+(pass) validateFlagValue (§4.2.2) > timeout is milliseconds: 0 or 1000..3_600_000 (#605) [0.54ms]
+(pass) validateFlagValue (§4.2.2) > timeout range matches update_node_config's (#605) [0.96ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > good keys resolve [0.58ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G7: PATH rejected (exact denylist) [0.38ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G8: LD_PRELOAD / DYLD_* / BUN_* / NPM_* / NODE_OPTIONS rejected (prefix) [0.24ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G1 bad regex (lowercase / digit-first / too long) [0.19ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G2 duplicate [0.11ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G3 over max count [0.62ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G4 not in vault [0.18ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > G5 not in daemon allowlist [0.13ms]
+(pass) validateEnvRefs (§4.4.7 + B1 G7/G8 sub-cases) > undefined/empty refs is OK (no env at all) [0.08ms]
+(pass) serializeEnvLocal (§4.4.7 G6 — safe escape) > newline in secret value escapes to literal \n, no line pollution [0.22ms]
+(pass) serializeEnvLocal (§4.4.7 G6 — safe escape) > backslash escaped first (so subsequent escapes survive) [0.04ms]
+(pass) serializeEnvLocal (§4.4.7 G6 — safe escape) > multi-key [0.05ms]
+(pass) validateChannelsP1 (§4.2.5 C5) > empty / omitted OK [0.15ms]
+(pass) validateChannelsP1 (§4.2.5 C5) > non-empty rejected (any element) [0.15ms]
+(pass) validateChannelsP1 (§4.2.5 C5) > not-an-array rejected [0.06ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > happy path [0.62ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > permissionMode kebab-case [0.12ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > omitted model is allowed and does not emit --model [0.08ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > empty model is still rejected [0.10ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > rejects bad name with shell metachar [0.11ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > rejects bad flag key [0.26ms]
+(pass) buildAnetArgs (§4.2.2 F2 — fully validated argv) > rejects channels at build time too (E end-to-end injection) [0.10ms]
+(pass) validateRuntime — 报错要可操作 > 非法 runtime 的报错带上允许集合 [0.36ms]
+(pass) validateRuntime — 报错要可操作 > 报错带上一条出路提示 [0.16ms]
+(pass) validateRuntime — 报错要可操作 > 仍然回报用户传进来的那个值（便于识别是不是打错了） [0.09ms]
+(pass) validateRuntime — 报错要可操作 > 🔴 合法 runtime 一个都不能被这次改动误伤 [0.25ms]
+(pass) #1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致 > 三个共存 runtime 不再被拒 [0.14ms]
+(pass) #1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致 > 原有四个仍然放行（放开不该顺手改坏别的） [0.15ms]
+(pass) #1298 RUNTIMES —— 七个都放行，且与 CLI 侧一致 > 🔴 恰好七个 —— 多一个少一个都要有人解释 [0.18ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > is a known flag key and must be boolean [0.30ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > only codex-app-server accepts it — elsewhere it would be swallowed silently [0.51ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > buildAnetArgs emits the CLI's boolean `--copresence` (no value), and nothing for false [0.30ms]
+(pass) #584 flags.copresence —— 建节点时的共存开关 > the old request shape (no flag) is unchanged [0.12ms]
+
+ 47 pass
+ 0 fail
+ 185 expect() calls
+Ran 47 tests across 2 files. [639.00ms]
+bun test v1.3.14 (0d9b296a)
+
+src/create-node-workdir.test.ts:
+[commhub] database: /tmp/test829-hub.db
+[commhub] node_id backfill: inbox=0, tasks.to=0, tasks.from=0, total=0
+(pass) validateWorkdir — shape only > accepts "/home/user/proj" [0.91ms]
+(pass) validateWorkdir — shape only > accepts "/srv/x" [0.32ms]
+(pass) validateWorkdir — shape only > accepts "~" [0.21ms]
+(pass) validateWorkdir — shape only > accepts "~/proj" [0.41ms]
+(pass) validateWorkdir — shape only > accepts "C:\\Users\\alice\\proj" [0.20ms]
+(pass) validateWorkdir — shape only > accepts "D:/work" [0.19ms]
+(pass) validateWorkdir — shape only > accepts "  /padded  " [0.17ms]
+(pass) validateWorkdir — shape only > accepts undefined / null (field omitted) [6.40ms]
+(pass) validateWorkdir — shape only > rejects "" [0.66ms]
+(pass) validateWorkdir — shape only > rejects "   " [0.23ms]
+(pass) validateWorkdir — shape only > rejects "proj" [0.19ms]
+(pass) validateWorkdir — shape only > rejects "./proj" [0.93ms]
+(pass) validateWorkdir — shape only > rejects "../x" [0.24ms]
+(pass) validateWorkdir — shape only > rejects "~alice/x" [0.17ms]
+(pass) validateWorkdir — shape only > rejects "C:proj" [0.19ms]
+(pass) validateWorkdir — shape only > rejects "/a\nb" [0.18ms]
+(pass) validateWorkdir — shape only > rejects "/a\u0000b" [0.24ms]
+(pass) validateWorkdir — shape only > rejects "xxxxxxxxxx/" [0.21ms]
+(pass) validateWorkdir — shape only > rejects "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa [0.15ms]
+(pass) validateWorkdir — shape only > rejects 42 [0.16ms]
+(pass) validateWorkdir — shape only > rejects {} [0.15ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > absolute posix root passes through [0.47ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > windows root passes through [0.30ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > object snapshot (not string) also accepted [0.26ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed undefined → null [0.27ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed null → null [0.23ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed "" → null [0.13ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed "relative" → null [0.16ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed "~/x" → null [0.14ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed 7 → null [0.14ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed "/a\nb" → null [0.15ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > not reported / malformed "/aaaaaaaaaaaaaaaaaaaaaaaaaaaa → null [0.21ms]
+(pass) daemonDefaultWorkdirRoot — sanitize the self-report > null / garbage snapshot → null [0.30ms]
+(pass) create_node + workdir > #829 V2 flags survive Hub storage and daemon pull [76.11ms]
+(pass) create_node + workdir > #829 missing opt-in rejected before request or child token mint [21.90ms]
+(pass) create_node + workdir > 🔴 old daemon (no default_workdir_root) + workdir → workdir_not_supported_by_daemon, NO row [19.31ms]
+(pass) create_node + workdir > old daemon WITHOUT workdir still dispatches (no regression for existing callers) [17.61ms]
+(pass) create_node + workdir > bad shape rejected before dispatch → workdir_invalid, NO row [20.63ms]
+(pass) create_node + workdir > new daemon + workdir → row stores it and get_create_request hands it to the daemon [35.49ms]
+(pass) create_node + workdir > workdir is trimmed before storage [25.98ms]
+(pass) create_node + workdir > new daemon WITHOUT workdir → get_create_request node_spec has NO workdir key (daemon keeps legacy layout) [29.65ms]
+(pass) create_node + workdir > audit detail records the requested workdir [15.02ms]
+(pass) create_node + workdir > list_host_supervisors (MCP) surfaces default_workdir_root for admin [16.85ms]
+(pass) create_node + workdir > list_host_supervisors (MCP) omits the key for an old daemon [14.94ms]
+(pass) /api/host-supervisors — default_workdir_root visibility > owner sees default_workdir_root on the new daemon [64.85ms]
+(pass) /api/host-supervisors — default_workdir_root visibility > old daemon row has NO default_workdir_root key (app hides the row) [2.83ms]
+(pass) /api/host-supervisors — default_workdir_root visibility > 🔴 member does NOT see the host's home path [2.78ms]
+
+ 47 pass
+ 0 fail
+ 68 expect() calls
+Ran 47 tests across 1 file. [1199.00ms]
+bun test v1.3.14 (0d9b296a)
+
+src/runtime/create-node-daemon.test.ts:
+(pass) create_node pending reconciliation after SSE connect > pulls and handles pending requests that arrived while SSE was disconnected [1.18ms]
+(pass) create_node pending reconciliation after SSE connect > deduplicates request_ids already handled from the live SSE doorbell path [0.34ms]
+(pass) #633 daemon private state > global config repair and replacement converge to private state [1.75ms]
+(pass) #633 daemon private state > global config read refuses a symlink without touching its target [0.62ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > permissionMode enum [0.34ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > dangerouslySkipPermissions boolean (string 'true' must be rejected) [0.14ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > maxTurns integer range — 'DROP TABLE' / float / out-of-range rejected [0.27ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > budget number with decimals allowed; out-of-range rejected [0.26ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > timeout is milliseconds: 0 or 1000..3_600_000 (#605) [0.49ms]
+(pass) §4.2.2 daemon-side flag VALUE validator (BLOCKER #2 — defense in depth) > unknown key rejected [0.09ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > happy path with mixed flags [1.63ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > omitted model is allowed and does not emit --model [0.13ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > empty model is still rejected [0.13ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > provider/model (OpenCode co-presence) passes; two slashes, edge slashes and dot-only segments are rejected [0.26ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > smuggled string maxTurns rejected by daemon even if hub missed [0.36ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > smuggled string dangerouslySkipPermissions rejected [0.14ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > name shell-metachar still rejected (existing validateName, F2) [1.38ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > runtime enum still enforced [0.10ms]
+(pass) buildAnetArgsDaemon now reaches flag value validation > channels non-empty rejected (P1 fail-closed) [0.15ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > happy path with hash witness [1.63ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: no ANET_BIN_ABS at all [0.31ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > anet_bin_source 的修复命令必须可执行：sudo 盖住建目录 + 无 $( " ) 语法错误 (#1353) [0.35ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > anet_bin_source (no pin at all) 必须同时给出不需要 root 的那条路 (#1353) [0.19ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: ANET_BIN_ABS env fallback without explicit opt-in [0.43ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > ACCEPT: ANET_BIN_ABS env fallback when explicitly opted in [0.39ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > path.conf wins over ANET_BIN_ABS env fallback [1.40ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: relative path [0.22ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: symlink (contains symlink component) [0.50ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: non-anet absolute path is not chmodded [0.49ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: forged agent-network package bin is not chmodded [0.50ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: world-writable (mode 0o777) without chmodding [0.44ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: group-writable (mode 0o775) without chmodding [0.34ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: not executable (mode 0o644) [0.53ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > ACCEPT: owner not root by default for nvm/homebrew/user installs [0.43ms]
+(pass) §4.2.6 B2 loadAndVerifyAnetBin — install-time pin 5-check (BLOCKER #3 hardened) > REJECT: sha256 mismatch with install witness [0.56ms]
+(pass) #1290 loadAndVerifyAnetBin — cross-platform path/mode checks > 🔴 witnessed-red for the reported #1290 symptom: a Windows drive-letter path is accepted [0.09ms]
+(pass) #1290 loadAndVerifyAnetBin — cross-platform path/mode checks > Windows path with `platform: 'win32'` param skips POSIX-mode gates + prints the one-time warn [0.83ms]
+(pass) #1290 loadAndVerifyAnetBin — cross-platform path/mode checks > Windows-skip warn is once per process (subsequent calls do not re-warn) [0.61ms]
+(pass) #1290 loadAndVerifyAnetBin — cross-platform path/mode checks > POSIX platform (default) STILL rejects group/other-writable modes — Windows skip must not leak [0.47ms]
+(pass) #1290 loadAndVerifyAnetBin — cross-platform path/mode checks > realpath equivalence: POSIX byte-exact, Windows case-insensitive normalize [0.38ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > happy path: no extra → PATH includes daemon's own node bin dir + SAFE_PATH (issue #301 nvm fix) [1.09ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > legitimate extra key passes + fixed PATH keeps execPath prepend (issue #301) [0.19ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > THROWS on reserved key in extra (LD_PRELOAD smuggled by attacker) [0.26ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > THROWS on fixed key in extra (PATH smuggled — caller cannot override the trust-root execPath prepend) [0.12ms]
+(pass) minimalEnv defensive compose (BLOCKER #1+#2 lineage — kept stable) > C1 invariant — issue #301 fix does NOT widen attacker surface: PATH source is process.execPath (daemon's already-resolved node), NOT env.PATH (attacker C1 surface) [1.16ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > 🔴 witnessed-red: Windows parent env with USERPROFILE only → child HOME = USERPROFILE [0.15ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > Windows: HOMEDRIVE+HOMEPATH-only parent env resolves via that cascade branch [0.09ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > Windows: stripped env (no USERPROFILE / HOME / HOMEDRIVE) THROWS with a diagnostic message [0.12ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > POSIX (explicit 'linux'): env.HOME resolution unchanged, no Windows-only keys leak [0.08ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > POSIX (explicit 'linux'): missing env.HOME THROWS (fail-closed, not undefined-passthrough) [0.10ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > Windows: USERPROFILE is a fixed key on that platform — smuggling it in extra THROWS [0.11ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > POSIX (explicit 'linux'): USERPROFILE is NOT fixed there — passes through as ordinary extra [0.09ms]
+(pass) #1490 minimalEnv — cross-platform HOME resolution > resolveChildHome: Windows cascade priority USERPROFILE > HOME > HOMEDRIVE+HOMEPATH [0.08ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > 🔴 witnessed-red: Windows default is under %ProgramData%, NOT /etc/ [0.07ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > Windows: PROGRAMDATA unset falls back to C:\ProgramData [0.06ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > Windows: non-default PROGRAMDATA is honored (Server Core / relocated system drive) [0.04ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > POSIX (explicit 'linux'): default is /etc/anet-daemon/path.conf (unchanged from pre-#1491) [0.05ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > POSIX (explicit 'darwin'): default is /etc/anet-daemon/path.conf (unchanged) [0.03ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > loadAndVerifyAnetBin: Windows error mentions the %ProgramData% trust root, NOT /etc/ [0.23ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > loadAndVerifyAnetBin: POSIX error still mentions /etc/anet-daemon (unchanged) [0.17ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > loadAndVerifyAnetBin: Windows Fix command uses PowerShell (Set-Content), NOT sudo/tee [0.17ms]
+(pass) #1491 defaultPathConf — platform-aware ANET path.conf trust root > loadAndVerifyAnetBin: POSIX Fix command is unchanged sudo/tee shell recipe [0.14ms]
+(pass) FAIL_FAST_MS primitive — real subprocess kill-0 lifecycle > child that exits within window → process.kill(pid, 0) raises ESRCH after wait [504.76ms]
+(pass) FAIL_FAST_MS primitive — real subprocess kill-0 lifecycle > child that survives window → process.kill(pid, 0) succeeds [203.22ms]
+(pass) RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node_id > derive key from request_id, not alias [0.18ms]
+(pass) RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node_id > #1293 forgetSpawnedChild undoes an early record (capability-fail rollback) [21.35ms]
+(pass) RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node_id > #1293 recordSpawnedChild is invoked BEFORE the FAIL_FAST capability wait [0.53ms]
+(pass) RFC-027 BLOCKER-1 — childrenMap key shape matches hub canonical node_id > recordSpawnedChild end-to-end with the canonical key — stop-daemon can find it [0.31ms]
+(pass) #1545 probeAnetBinReadiness —— 不抛异常地回答「现在能不能起节点」 > READY: 合法 pin 下返回 state=ready 且带出解析到的绝对路径 [0.95ms]
+(pass) #1545 probeAnetBinReadiness —— 不抛异常地回答「现在能不能起节点」 > BLOCKED: env 兜底未显式开启 → code=anet_bin_source,detail 里带得出修法 [0.38ms]
+(pass) #1545 probeAnetBinReadiness —— 不抛异常地回答「现在能不能起节点」 > BLOCKED: 完全没有 ANET_BIN_ABS —— 探针照样返回值而不是抛 [0.14ms]
+(pass) #1545 probeAnetBinReadiness —— 不抛异常地回答「现在能不能起节点」 > BLOCKED: sha256 不匹配 → 目前无类别可挂,如实报 anet_bin_unknown [0.60ms]
+(pass) #1545 probeAnetBinReadiness —— 不抛异常地回答「现在能不能起节点」 > PARITY: probe 的 blocked ⟺ loadAndVerifyAnetBin 抛异常(同一份 env) [0.86ms]
+(pass) #584 flags.copresence → child config codexCopresence > codex-app-server + copresence:true → codexCopresence:true, switch removed from flags [0.17ms]
+(pass) #584 flags.copresence → child config codexCopresence > copresence:false / absent → no codexCopresence (headless stays creatable; old request shape unchanged) [0.11ms]
+(pass) #584 flags.copresence → child config codexCopresence > does not mutate the request's flags object [0.07ms]
+(pass) #584 flags.copresence → child config codexCopresence > buildAnetArgsDaemon accepts it for codex-app-server, as the CLI's bare --copresence [0.15ms]
+(pass) #584 flags.copresence → child config codexCopresence > rejected on other runtimes and for non-boolean values [0.31ms]
+(pass) #603 computeChildPath — per-platform child PATH > 🔴 witnessed-red: darwin → execDir, then Homebrew, then system dirs [0.09ms]
+(pass) #603 computeChildPath — per-platform child PATH > 🔴 witnessed-red: darwin, node from Homebrew → no duplicate execDir, Homebrew still first [0.04ms]
+(pass) #603 computeChildPath — per-platform child PATH > 🔴 witnessed-red: minimalEnv(…, 'darwin') children see /opt/homebrew/bin before /usr/bin [0.14ms]
+(pass) #603 computeChildPath — per-platform child PATH > linux unchanged: execDir + SAFE_PATH, no Homebrew [0.11ms]
+(pass) #603 computeChildPath — per-platform child PATH > win32 unchanged: no Homebrew dirs [0.08ms]
+
+src/runtime/create-node-daemon-private-wiring.test.ts:
+(pass) #633 daemon secret writers all use the private atomic choke point [0.42ms]
+
+ 84 pass
+ 0 fail
+ 213 expect() calls
+Ran 84 tests across 2 files. [838.00ms]
+bun test v1.3.14 (0d9b296a)
+
+src/runtime/node-name-652.test.ts:
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > Chinese / upper-case / digit-first names are accepted [3.52ms]
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > every shared vector gets the same verdict as the hub [2.64ms]
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > illegal characters are refused with a reason a human can read [0.85ms]
+(pass) #652 buildAnetArgsDaemon — shared Unicode name rule > a name the hub would have trimmed did not come through a current hub [0.50ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > #829 V2 create writes generation/mode into actual child config, not flags [290.45ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > #829 unsafe opt-in is required before write or spawn; existing config unchanged [1.37ms]
+/bin/sh: 1: pgrep: not found
+(pass) #652 create doorbell — Chinese name, ASCII directories > 「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels [117.89ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > full-path edit to a non-folder-shaped last segment falls back to node-<hash> [106.39ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > folder already holding ANOTHER node → refused (workdir_has_other_node), nothing written [2.11ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > 「测试」 without a workdir (daemon cwd): node dir is ASCII too [105.17ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > legacy name keeps its old directory (= the name) [104.65ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > derived directory already holding ANOTHER alias → rejected, nothing overwritten, no spawn [2.00ms]
+(pass) #652 create doorbell — Chinese name, ASCII directories > illegal name is refused by the daemon before anything touches disk [0.83ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > resolveChildDirName never lands on a directory whose config names another alias [0.93ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > resolveChildDirName: legacy alias dir first, else derived; invalid alias → null [0.93ms]
+(pass) #652 start / stop / delete find the ASCII directory from the alias > start: verifyStoppedChildConfig resolves 「测试」 to node-<hash>/config.json [1.22ms]
+/bin/sh: 1: pgrep: not found
+(pass) #652 start / stop / delete find the ASCII directory from the alias > stop without a map entry: a local record under node-<hash> counts as mine [3.48ms]
+/bin/sh: 1: pgrep: not found
+(pass) #652 start / stop / delete find the ASCII directory from the alias > delete moves node-<hash> to the trash (ASCII backup name), config gone [3.06ms]
+
+ 18 pass
+ 0 fail
+ 101 expect() calls
+Ran 18 tests across 1 file. [825.00ms]
+PASS test829 contract/persistence slice; real runtime startup and client UI NOT covered
+
+=== NEGATIVE CONTROL RAW LOG ===
+bun test v1.3.14 (0d9b296a)
+
+tests/test829-opencode-create/contract.test.ts:
+ 5 | const spec = { name: "v2-child", runtime: "opencode-cli" as const, model: "stub/model" };
+ 6 | const valid = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
+ 7 |
+ 8 | test("misplaced controls fail even on a direct daemon request", () => {
+ 9 |   for (const fields of [{ opencodeGeneration: "v2" }, { opencodeUnsafeTools: true }]) {
+10 |     expect(() => buildAnetArgs({ ...spec, ...fields })).toThrow("flag_location_invalid");
+                                                             ^
+error: expect(received).toThrow(expected)
+
+Expected substring: "flag_location_invalid"
+
+Received function did not throw
+Received value: [ "node", "create", "v2-child", "--runtime", "opencode-cli", "--model",
+  "stub/model"
+]
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:10:57)
+(fail) misplaced controls fail even on a direct daemon request [4.41ms]
+326 |   const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
+327 |   if (spec.model) args.push("--model", spec.model);
+328 |   if (spec.flags && typeof spec.flags === "object") {
+329 |     for (const [k, v] of Object.entries(spec.flags)) {
+330 |       if (!(FLAG_KEYS as readonly string[]).includes(k)) {
+331 |         throw new ValidationError("flag_key_unknown", { field: k });
+                                                                        ^
+ValidationError: flag_key_unknown {"field":"opencodeGeneration"}
+      at buildAnetArgs (/workspace/server/src/create-node-validate.ts:331:67)
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:17:10)
+(fail) Hub and daemon produce identical CLI-compatible V2 argv [0.54ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeGeneration: "v3",
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeGeneration":"v3"} [0.83ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeGeneration: null,
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeGeneration":null} [0.27ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeGeneration: "v2",
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeGeneration":"v2"} [0.14ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeGeneration: "v2",
+    opencodeUnsafeTools: false,
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeGeneration":"v2","opencodeUnsafeTools":false} [0.09ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeGeneration: "v2",
+    opencodeUnsafeTools: "true",
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeGeneration":"v2","opencodeUnsafeTools":"true"} [0.08ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeGeneration: "v1",
+    opencodeUnsafeTools: true,
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeGeneration":"v1","opencodeUnsafeTools":true} [0.10ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeGeneration: "v1",
+    opencodeUnsafeTools: false,
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeGeneration":"v1","opencodeUnsafeTools":false} [0.14ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeUnsafeTools: true,
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeUnsafeTools":true} [0.10ms]
+27 |   { opencodeUnsafeTools: true }, { opencodeUnsafeTools: false },
+28 | ]) {
+29 |   test("both validators reject " + JSON.stringify(flags), () => {
+30 |     expect(() => buildAnetArgs({ ...spec, flags })).toThrow();
+31 |     expect(() => buildAnetArgsDaemon({ ...spec, flags })).toThrow();
+32 |     expect(() => childConfigFieldsFromSpec({ ...spec, flags })).toThrow();
+                                                                     ^
+error: expect(received).toThrow()
+
+Received function did not throw
+Received value: {
+  flags: {
+    opencodeUnsafeTools: false,
+  },
+}
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:32:65)
+(fail) both validators reject {"opencodeUnsafeTools":false} [0.09ms]
+(pass) generation controls never leak to claude-agent-sdk [0.18ms]
+(pass) generation controls never leak to claude-code-cli [0.03ms]
+(pass) generation controls never leak to codex-sdk [0.02ms]
+(pass) generation controls never leak to codex-app-server [0.04ms]
+(pass) generation controls never leak to grok-build-acp [0.03ms]
+(pass) generation controls never leak to grok-build-cli [0.02ms]
+38 |     expect(() => buildAnetArgsDaemon({ ...spec, runtime, flags: valid })).toThrow();
+39 |   });
+40 | }
+41 | test("legacy omission and explicit V1 remain safe and do not mutate the spec", () => {
+42 |   const flags = Object.freeze({ opencodeGeneration: "v1", timeout: 600000 });
+43 |   expect(childConfigFieldsFromSpec({ ...spec, flags })).toEqual({ opencodeGeneration: "v1", flags: { timeout: 600000 } });
+                                                             ^
+error: expect(received).toEqual(expected)
+
+  {
+    "flags": {
++     "opencodeGeneration": "v1",
+      "timeout": 600000,
+    },
+-   "opencodeGeneration": "v1",
+  }
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/workspace/tests/test829-opencode-create/contract.test.ts:43:57)
+(fail) legacy omission and explicit V1 remain safe and do not mutate the spec [0.27ms]
+
+ 6 pass
+ 12 fail
+ 41 expect() calls
+Ran 18 tests across 1 file. [67.00ms]

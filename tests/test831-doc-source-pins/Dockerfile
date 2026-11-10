@@ -23,8 +23,12 @@ ENV TEST831_RUNSH_BLOB=$TEST831_RUNSH_BLOB
 COPY docs-site /repo/docs-site
 # pin 指向的源码树 —— 不 COPY 的话每个 pin 都会被判成 missing-file,
 # 门会红在一个纯粹是镜像装配错误的原因上。
+COPY contracts /repo/contracts
 COPY server /repo/server
 COPY agent-network /repo/agent-network
+# #1720 —— 文档里开始有指向 agent-node 源码的 pin（node-secrets.ts 的优先级实现）。
+# 与上面同理：不 COPY 就会全部判成 missing-file。只带源码，不带它的 node_modules。
+COPY agent-node /repo/agent-node
 COPY docs/doc-source-pins-baseline.txt /repo/docs/doc-source-pins-baseline.txt
 COPY scripts/check-doc-source-pins.py /repo/scripts/check-doc-source-pins.py
 COPY scripts/check-mcp-tool-anchor-sections.py /repo/scripts/check-mcp-tool-anchor-sections.py

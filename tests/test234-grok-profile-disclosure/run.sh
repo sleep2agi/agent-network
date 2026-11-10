@@ -27,7 +27,8 @@ run cli-build bun build /workspace/agent-network/bin/cli.ts \
   --external @inquirer/prompts \
   --external @sleep2agi/commhub-server \
   --external bun:sqlite --external node-pty \
-  --external '../../server/*'
+  --external '../../server/*' \
+  --external smol-toml
 
 run runbook-session-pin bash -ceu '
   doc=/workspace/docs/grok-build-cli-preview.md

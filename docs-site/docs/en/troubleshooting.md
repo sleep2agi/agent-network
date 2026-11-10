@@ -152,7 +152,6 @@ See [Tokens and permissions](/en/guide/account-system#tokens), [Roles](/en/guide
 | `network name already exists` | Inspect current networks and choose another name; do not edit the database |
 | `network has N active session(s)` | Use `anet status`, stop the nodes normally, then retry network deletion |
 | `quota exceeded` | Use `anet network ls` and remove unused networks. There is currently no public CLI for changing a user plan/global role; contact the Hub operator and do not promote the user to global admin as a shortcut |
-| `license_expired` | If it remains after `anet license` and an upgrade, contact the Hub operator. There is no safe public CLI for cleaning legacy rows; stop the Hub, back up the database, and file a redacted diagnostic instead of deleting `licenses` rows online |
 
 Direct database writes bypass API authorization, auditing, and consistency checks and can corrupt related license or identity state, so this guide does not provide SQL “fixes.”
 
@@ -228,7 +227,7 @@ anet upgrade --dry-run
 | Long Grok ACP task times out | Check `flags.grokAcpTimeoutMs` / `GROK_ACP_TIMEOUT_MS` in the runtime guide |
 | Codex co-presence loses history after restart | Upgrade to preview.43+; plain `anet node start <alias>` reads the saved `codexThreadId` and performs `thread/resume`. If an old bridge survives, first run `anet node stop <alias>` from an external terminal |
 
-OpenCode is currently a task runtime, not a shared TUI. Shared Grok TUI support has not shipped. Follow [Runtimes](/en/guide/runtimes), not old versions or historical changelog commands.
+`opencode-cli` can share a TUI: V1 can also run headless, V2 is co-presence only, and V2 is still preview. Steps: [OpenCode V2](/en/guide/opencode). The shared Grok TUI is experimental; see [Grok nodes](/en/guide/grok). Follow [Runtimes](/en/guide/runtimes), not old versions or historical changelog commands.
 
 ## Logs
 

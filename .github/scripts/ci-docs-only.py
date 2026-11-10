@@ -81,6 +81,7 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "server-unit": {"test798-server-unit-ci"},
     "agent-node-unit": {"test725-agent-node-unit-ci", "test556-node-tmux-format-locale"},
     "test1755-rules-file-e2e": {"test1755-rules-file-e2e"},
+    "test9763-team-skills-e2e": {"test9763-team-skills-e2e"},
     "qa-node-logs-e2e": {"qa-node-logs-e2e"},
     "qa-board673-claude-process-auth": {"qa-board673-claude-process-auth"},
     "qa-create-node-workdir": {"qa-create-node-workdir"},
@@ -90,11 +91,12 @@ SKIPPABLE_JOBS: dict[str, set[str]] = {
     "qa-codex-copresence-stop-start": {"qa-codex-copresence-stop-start"},
     "test562b-node-remote": {"test562b-node-remote"},
     "test571-lifecycle-safety": {"test571-lifecycle-safety"},
-    "recovered-suites": {
-        "test597-dashboard-slash-namespace", "test679-task-trace",
-        "qa-daemon-lifecycle-e2e", "qa-rfc024-config-apply",
-        "qa-rfc027-stop-delete", "test224-grok-preview-security",
-    },
+    # #2860 —— 一个 job 拆成 4 个（并行），跳过键随之拆开：一个 key 对应一个 job，
+    # 保持 verify() 的「一 key 一 job」不变量；docs-only PR 仍然 4 个全跳。
+    "recovered-suites-a": {"test597-dashboard-slash-namespace", "test679-task-trace"},
+    "recovered-suites-b": {"qa-daemon-lifecycle-e2e", "qa-rfc024-config-apply"},
+    "recovered-suites-c": {"qa-rfc027-stop-delete"},
+    "recovered-suites-security": {"test224-grok-preview-security"},
     "test225-known-failures": {"test225-grok-preview-package-live"},
     "hub-daemon-gate": {"test735-hub-daemon-rebuild", "test2124-hub-launcher-env-scrub"},
     "private-config-gates": {
@@ -284,6 +286,41 @@ def l1_suites(root: Path) -> list[str]:
     return names
 
 
+
+def tests_only_suite_skips(root: Path, paths: list[str]) -> list[str]:
+    """#2136 A-2a：只改 tests/<suite>/** 的 PR 可以跳过其它 Docker 套件。
+
+    三条前提，缺一就返回 []（=全跑，朝安全方向错）：
+      ① 改动非空，且**每一条**都在 tests/<本仓已登记套件>/ 下；
+      ② 共享面（server/、agent-node/、agent-network/、tests/lib/、tests/Dockerfile、
+         tests/test-all.sh、scripts/qa.sh、.github/）一条都没碰；
+      ③ 判据来自 scripts/qa-suite-scope-report.py 的 decide()，不在这里重写。
+    返回的是 qa.yml 矩阵 `if:` 里用的 `"suite:<name>"` token 列表。
+    """
+    if not paths:
+        return []
+    # ① 最严的一条：**每一条**路径都必须落在 tests/<某个套件>/ 下。
+    #    任何一条在外（docs-site/、docs/、README…）都不收窄 —— 那些可能被套件镜像
+    #    拷进去，是不是"与之无关"要靠 suite_sees_docs 逐条判断，不在这一步赌。
+    if not all(p.startswith("tests/") for p in paths):
+        return []
+    try:
+        sys.path.insert(0, str(root / "scripts"))
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("qa_scope_report", root / "scripts" / "qa-suite-scope-report.py")
+        if spec is None or spec.loader is None:
+            return []
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        suites = mod.suite_list()
+        run, skip, shared = mod.decide(paths, suites)
+    except Exception as e:  # noqa: BLE001 —— 判据加载失败一律全跑
+        print(f"tests-only 判据不可用({e}) → 全跑", file=sys.stderr)
+        return []
+    if shared or len(run) == 0 or len(skip) == 0:
+        return []
+    return [f'"suite:{s}"' for s in skip]
+
 def plan(root: Path) -> dict[str, str]:
     event = os.environ.get("GITHUB_EVENT_NAME", "")
     try:
@@ -299,7 +336,13 @@ def plan(root: Path) -> dict[str, str]:
         print(f"  {p}", file=sys.stderr)
     print(f"结论: docs_only={str(docs_only).lower()} —— {why}", file=sys.stderr)
     if not docs_only:
-        return {"docs_only": "false", "skip": "", "l1_only": ""}
+        # #2136 A-2a：**只改某个 tests/<suite>/** 的 PR** 也走收窄（其余套件的代码与镜像都没变）。
+        # 判据直接复用 scripts/qa-suite-scope-report.py 的 decide()：共享面(server/、agent-node/、
+        # agent-network/、tests/lib/、tests/Dockerfile、tests/test-all.sh、scripts/qa.sh、.github/)
+        # 命中就全跑；看不清(空清单)也全跑。**不复制规则**，避免两处判据漂移。
+        suite_skips = tests_only_suite_skips(root, paths)
+        print(f"tests-only 收窄: 跳过 {len(suite_skips)} 个套件", file=sys.stderr)
+        return {"docs_only": "false", "skip": " ".join(suite_skips), "l1_only": ""}
     skip = [_job_token(j) for j in SKIPPABLE_JOBS]
     for jid, suites in matrix_suites(root).items():
         for s in suites:
@@ -376,6 +419,18 @@ def selftest() -> int:
     check("判据: .. 逃逸 → 全量", not classify(["docs-site/../server/x.ts"])[0])
     check("判据: docs/ 不在白名单 → 全量", not classify(["docs/qa/strategy.md"])[0])
     check("判据: .github 改动 → 全量", not classify([".github/workflows/qa.yml"])[0])
+
+    # #2136 A-2a：只改 tests/<suite>/** 的 PR 才收窄（复用 qa-suite-scope-report.decide）
+    root = Path(__file__).resolve().parents[2]
+    only_one = tests_only_suite_skips(root, ["tests/test738-codex-fork-on-resume-failure/run.sh"])
+    check("tests-only: 单套件改动 → 有跳过", len(only_one) > 0)
+    check("tests-only: 不跳过被改的那个套件", all('test738-codex-fork-on-resume-failure' not in t for t in only_one))
+    check("tests-only: 共享面 server/ → 全跑", tests_only_suite_skips(root, ["server/src/x.ts"]) == [])
+    check("tests-only: 混合(套件 + docs-site) → 全跑",
+          tests_only_suite_skips(root, ["tests/test738-codex-fork-on-resume-failure/run.sh", "docs-site/a.md"]) == [])
+    check("tests-only: 空清单 → 全跑", tests_only_suite_skips(root, []) == [])
+    check("tests-only: tests/lib 共享库 → 全跑", tests_only_suite_skips(root, ["tests/lib/x.sh"]) == [])
+    check("tests-only: .github 改动 → 全跑", tests_only_suite_skips(root, [".github/workflows/qa.yml"]) == [])
 
     # Dockerfile 判据
     sees = lambda t: dockerfile_sees_docs(t)[0]  # noqa: E731

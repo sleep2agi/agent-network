@@ -47,6 +47,7 @@
 // sweep timer; this module exports the once-pass for test injection.
 
 import { mkdirSync, statSync, writeFileSync, chmodSync, readdirSync, rmSync, existsSync, createWriteStream, lstatSync, realpathSync } from "node:fs";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { join, extname, dirname, isAbsolute, relative, sep } from "node:path";
 
 export const DEFAULT_MAX_BYTES = (() => {
@@ -281,7 +282,7 @@ async function fetchAndCache(
   // Atomic publish — rename within same dir.
   try {
     const { renameSync } = await import("node:fs");
-    renameSync(tmpPath, localPath);
+    renameOverExistingSync(tmpPath, localPath);
   } catch (e: any) {
     try { rmSync(tmpPath, { force: true }); } catch { /* ok */ }
     return { ok: false, code: "write_failed", error: `rename failed: ${e?.message || e}` };

@@ -1,0 +1,62 @@
+#1075 Hub128 deployment profile — source preparation only
+Observed: 2026-10-12 16:55+08.
+
+Software main e83cfc7d3b949a8751c43ee2f1c0614a2315dcf4;
+release38225130040 complete SUCCESS including build, four gates, npm readback.
+Anonymous whole tarball matches the gated main artifact:
+1233005B SHA256 b75ebaa668249148dfa26c4fc8c93d87bc8bfb34ee2fd163fe497b1dd8a096c1.
+Dependencies unchanged; actual public version/URL/SRI only in deployment lock.
+Git source127->128 DB/schema/migration diff is empty; no added database migration.
+
+Current production read-only health remains Hub127, secured,330sessions.
+This change selects sibling v111/128 and explicit rollback v110/127 in the
+existing Git launcher. PM2/ports/tunnels/base launcher/key sources unchanged.
+Actions Docker existing launcher check is pending on source push; fake Bun/ss
+only, not real DB recovery or deployment acceptance. Original test1075 and formal
+package install gates are reused; no local product tests or extra matrix.
+
+No production restart/install, credential read/rotation, global npm update or
+business-node change. The profile must normally merge main before deployment.
+Six recovery boundaries and consistent-backup/rollback instructions are recorded
+in deploy/hub/README.md; off-machine vault backup inventory gap remains explicit.
+
+## Actual activation — 2026-10-12 17:02:34+08
+
+Preparation above is a historical source-stage snapshot, not current production.
+PR2649 exact5f5912f1e2f3db804a940a03ade480715ed36291 passed ten required
+checks and Actions Docker Hub deployment profile38226606913/job114735550534;
+normal SHA-lock merge1224c5e194cd7c9acf91c6a592655d034462b5bb at16:57:40+08.
+No bypass/admin/rule changes. Software source remains main e83cfc7d, not this
+deployment-only commit. Verified both main ancestors before using the files.
+
+Private sibling v111/128 installed100 packages with exact lock, ignore-scripts;
+no global npm mutation. Old running v110/127 retained. Original profile/base
+backups and current consistent VACUUM snapshot are in owner-private
+~/.commhub/backups/node-secrets1075-p128.uXNwN6/.
+Snapshot756965376B/mode600, integrity ok,330sessions/79568tasks. No credential
+values read or copied, no database/key contents uploaded to Git or Actions.
+Initial diagnostic guessed default PM2 log filenames and found ENOENT; actual
+paths were resolved from selected PM2 metadata before activation, not guessed.
+
+Atomically installed the Gitmain profile mode700, cmp exact. Base launcher,
+hub.env/key source/port9200/PM2/tunnel/live database unchanged. Only
+pm2 restart commhub-hub, no --update-env. Actual Bun PID3775153->4014410;
+command selects runtime-v111-preview128, executable is the existing Bun1.4.0
+installation. Repeated /health200 returns128/secured/330sessions; PM2 restart
+count85->86 reflects this manual operation, with no extra restart observed.
+At17:03:24 health126SSE and eight selected node heartbeats after activation;
+no inference, task injection or vendor login was used as a production probe.
+Original TMAI负责人 identity-auth HOLD is independent and not cleared by heartbeat.
+
+Same log inodes: stdout287574, before offset1163239257; stderr322373, before
+offset2916510. The newly appended intervals have a definite128 startup marker
+and zero vault_master_key_missing/panic/segfault matches. Counts are limited to
+these intervals, not a historical all-logs claim. Dedicated task.ack/SSE protocol,
+live secret-write/model/OAuth acceptance NOT_EXECUTED; do not label them PASS.
+Old127 profile can be restored mode700 and only Hub restarted; retain live DB,
+both installs and existing sessions. This is software activation, not DR proof.
+
+Client PR898 main9062dcc7cadbcffe9b5a10b6e7345da6f227b11a merged17:01:21;
+desktop38227265822 and Android38227269713 use that exact main source, Linuxfalse.
+They are building, NOT published. Unbound target通信欧2号 remains runtime118;
+its software update is still required. No node config/identity/account changed.

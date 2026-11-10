@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="docs/assets/readme/logo.png" width="96" height="96" alt="Agent Network logo">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/anet-mark-dark.svg">
+  <img src="docs/assets/readme/anet-mark-light.svg" width="96" height="96" alt="Agent Network logo">
+</picture>
 
 # Agent Network
 
@@ -80,20 +83,17 @@ Each node is an `agent-node` process wrapping one agent runtime. It calls the Hu
 | `codex-app-server` | Codex TUI co-presence (shown as `codex-cli` in the wizard) | Reuses `codex login` | ✅ |
 | `grok-build-acp` | xAI Grok Build | Reuses `grok login` | — |
 | `grok-build-cli` | Grok Build TUI co-presence (experimental preview, trusted tasks only) | Reuses `grok login` | ✅ |
-| `opencode-cli` | OpenCode (Anthropic / OpenAI presets, preview) | Provider API key | ✅ (Linux / macOS) |
-
+| `opencode-cli` | OpenCode. Default is V1 (`opencode-ai`, Anthropic / OpenAI presets, preview). V2 is co-presence on the same runtime: `@opencode/cli@2.0.22`, `anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools`, every local tool enabled, trusted tasks only. npm `latest` does not have this flag yet. See [OpenCode V2](https://anet.sh/en/guide/opencode) | V1: provider API key. V2: copies the `provider/model` already in OpenCode on this machine | V1 ✅ (Linux / macOS). V2 co-presence evidence that exists today is Linux |
 Per-runtime capabilities and platforms: [Runtimes](https://anet.sh/en/guide/runtimes) and the [support matrix](https://anet.sh/en/guide/support-matrix).
 
 ## Documentation
 
-[Getting started](https://anet.sh/en/guide/getting-started) · [Desktop app](https://anet.sh/en/guide/desktop-app) · [Task API](https://anet.sh/en/api/mcp-tools) · [Architecture](https://anet.sh/en/guide/architecture) · [CLI](https://anet.sh/en/guide/cli) · [Production](https://anet.sh/en/deploy/production) · [Upgrade channel](https://anet.sh/en/guide/upgrade) · [Changelog](https://anet.sh/en/changelog)
+[Getting started](https://anet.sh/en/guide/getting-started) · [OpenCode V2](https://anet.sh/en/guide/opencode) · [Desktop app](https://anet.sh/en/guide/desktop-app) · [Task API](https://anet.sh/en/api/mcp-tools) · [Architecture](https://anet.sh/en/guide/architecture) · [CLI](https://anet.sh/en/guide/cli) · [Production](https://anet.sh/en/deploy/production) · [Upgrade channel](https://anet.sh/en/guide/upgrade) · [Changelog](https://anet.sh/en/changelog)
 
 ## Contributing and community
 
 Contributions are welcome! Read [CONTRIBUTING.md](./CONTRIBUTING.md) and the [Code of Conduct](./CODE_OF_CONDUCT.md) first; report security issues privately as described in [SECURITY.md](./SECURITY.md). Questions and feedback: [Issues](https://github.com/sleep2agi/agent-network/issues) · [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [Community](https://anet.sh/en/community).
 
 <a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
-
 ## License
-
 [Apache License 2.0](./LICENSE). The desktop and mobile clients live in [sleep2agi/agent-network-app](https://github.com/sleep2agi/agent-network-app) (MIT).

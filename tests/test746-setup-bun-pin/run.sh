@@ -57,8 +57,11 @@ print(f"setup_bun_occurrences={len(found)} expected_version={expected}")
 for path, version in found:
     print(f"{path} bun-version={version}")
 
-if len(found) != 5:
-    print(f"FAIL: expected exactly 5 setup-bun occurrences, found {len(found)}", file=sys.stderr)
+# 2026-10-11: 5 → 6. cli-binary.yml adds one setup-bun step at bun-version
+# 1.3.14, same action SHA as release.yml. CI went red first
+# ("expected exactly 5 setup-bun occurrences, found 6").
+if len(found) != 6:
+    print(f"FAIL: expected exactly 6 setup-bun occurrences, found {len(found)}", file=sys.stderr)
     sys.exit(1)
 if bad:
     for path, version in bad:
@@ -70,7 +73,7 @@ PY
 BASELINE_LOG=/tmp/test746-baseline.log
 assert_setup_bun_pins "$WORKFLOWS" "$BASELINE_LOG"
 cat "$BASELINE_LOG"
-grep -Fxq 'setup_bun_occurrences=5 expected_version=1.3.14' "$BASELINE_LOG"
+grep -Fxq 'setup_bun_occurrences=6 expected_version=1.3.14' "$BASELINE_LOG"
 echo 'L1 SETUP_BUN_PIN_PASS'
 
 MUTANT_ROOT=/tmp/test746-mutant

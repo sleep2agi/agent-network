@@ -1,0 +1,69 @@
+test827 — OpenCode V2 full CLI / Hub / runtime / TUI chain
+Date: 2026-10-09 11:31 Asia/Shanghai
+Scope: Hub #539 / child #827 / GitHub sleep2agi/agent-network#2544
+Baseline: 3b5bf7976644e960f99610a0e7430398bc162230 plus this change
+Clean-image replay: source c2d9557515e68daf874f50bf889d858ccbaff0f8,
+2026-10-09 11:35–11:36 Asia/Shanghai, container anet-test827-exact,
+no source mounts, --network none, EXPECTED_SOURCE_COMMIT matched: exit 0.
+44 CLI + 35 runtime unit tests and all L0–L7 checks passed again.
+Image manifest: sha256:430f245b9944f2ecb6ad91ff888895268421c7b6fc2589aa1680d5a95a1a5664.
+Review follow-up 2026-10-09 11:42 Asia/Shanghai:
+  PR review 4226394767 correctly identified that bare NET827A/HUMAN827 pane
+  checks could match echoed user prompts. The stub now optionally prefixes its
+  assistant response with ANSWER827_; test827 requires this response-only marker
+  in the TUI, while submitted prompts never contain it. Shared test543 default
+  remains unchanged (empty prefix).
+  Container anet-test827-review: exact image above + two read-only test-file
+  mounts, --network none, exit 0; 44 CLI + 35 runtime tests and L0-L7 passed.
+  This is a mounted-test replay, not a new immutable source image. The earlier
+  clean-image pass alone did not establish assistant-specific TUI rendering.
+  Negative control 11:43-11:44: anet-test827-no-assistant-r2 mechanically strips
+  only ANSWER827_ from captured pane text, leaving prompt echoes and Hub receipt
+  intact. L0-L2 and the exact Hub reply passed; L3 failed at "assistant network
+  reply visible in human TUI", exit 1, as intended. No repository code mutated.
+  Initial control launcher could not import a long data URL in Bun; rerun used
+  Bun stdin, and only the second container is behavioral evidence.
+  Isolated HTTP probe: shared stub default returns TOKEN; explicit prefix returns
+  ANSWER827_TOKEN. Both passed; existing #543 default behavior is preserved.
+Environment: Docker, Node 22, Bun 1.3.14, real @opencode/cli@2.0.22,
+real source-built and exact-pair-validated agent-node, real CommHub server,
+private tmux socket /run/test827-tmux.sock. Docker runtime --network none;
+only the model is a deterministic loopback stub. No production changes.
+
+Layered result (container anet-test827-r5, exit 0):
+  CLI unit regression: 44 passed, 0 failed, 4 files.
+  Runtime unit regression + unchanged V1 spawn golden: 35 passed, 0 failed, 4 files.
+  L0 exact upstream package, isolated Hub, model service: PASS.
+  L1 unauthenticated dispatch rejected; real CLI init/register/login/create: PASS.
+  L2 real CLI node start --copresence, bridge + rendered native TUI: PASS.
+  L3 Hub task id -> terminal replied + exact sender envelope -> same TUI: PASS.
+  L4 human TUI turn starts first; queued Hub task returns its own answer: PASS.
+  L5 upstream provider error -> failed (not replied); next task succeeds: PASS.
+  L6 invalid V2 restart policy refuses without replacing live TUI or rewriting
+     config; existing bridge still completes another task: PASS.
+  L7 real CLI stop removes both tmux sessions and all OpenCode/bridge processes;
+     cold default-safe start refuses with full actionable message, no false
+     launcher timeout, no tmux session left behind: PASS.
+
+Witnessed red:
+  Original baseline + new create-output assertion (anet-test827-witness): exit 1,
+  FAIL V2 create names its exact package, not V1. It told the user to install
+  opencode-ai@1.18.34 and printed Claude/ACP tool policy for a V2 node.
+  After create-message fix but before early start policy guard (anet-test827-r3):
+  exit 1 at default-safe refusal assertion. The bridge refused correctly, but
+  CLI wrapped it as a 30s launcher timeout and truncated flags.opencodeUnsafeTools.
+  After early guard (r4) and extended human/preservation coverage (r5): exit 0.
+
+Reproduce from repository root (Docker only):
+  sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -t anet-test827:dev -f tests/test827-opencode-v2-hub/Dockerfile .'
+  sg docker -c 'docker run --name anet-test827-run --network none -e ARTIFACT_DIR=/artifacts anet-test827:dev'
+  sg docker -c 'docker cp anet-test827-run:/artifacts/. /tmp/anet-test827-artifacts/'
+The runner stops at the first failed layer and writes report-test827.txt,
+stub.log, tui-live.txt, bridge.log, hub.log under ARTIFACT_DIR. Do not publish
+node config, auth files, or generated attach launchers (they contain secrets).
+QA matrix and both path filters include test827-opencode-v2-hub.
+
+Limits: only Linux x64 exercised. Model is a stub; this does not verify a real
+model selecting/executing CommHub tools. No daemon/client create UI coverage,
+no V2 native safe-policy support, no claim of TUI toast delivery. V2 remains
+explicit unsafe-tools preview. This report is not a release or production UAT.

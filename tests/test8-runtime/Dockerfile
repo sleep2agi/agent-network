@@ -10,13 +10,21 @@ RUN apt-get update && apt-get install -y curl python3 make g++ && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# #2846 —— 依赖安装层必须只依赖 lockfile,否则任何源码改动都会击穿它。
+# 🔴 只 COPY **git 里有的** 文件:server/bun.lock 在 .gitignore 里(本地有、CI checkout 里没有),
+#    把它写进 COPY 会让 CI 在 1 秒内 build fail —— 本地因为文件在磁盘上所以看不出来。
+#    原来那段 `COPY server/ server/` 在 CI 里同样拿不到 bun.lock,所以这里去掉它不改变任何行为。
+COPY contracts /app/contracts
+COPY server/package.json server/package-lock.json server/
+RUN cd server && bun install
+COPY agent-network/package.json agent-network/package-lock.json agent-network/
+RUN cd agent-network && npm install --ignore-scripts 2>/dev/null || true
+COPY agent-node/package.json agent-node/package-lock.json agent-node/
+RUN cd agent-node && npm install --ignore-scripts 2>/dev/null || true
+
 COPY server/ server/
 COPY agent-network/ agent-network/
 COPY agent-node/ agent-node/
-
-RUN cd server && bun install
-RUN cd agent-network && npm install --ignore-scripts 2>/dev/null || true
-RUN cd agent-node && npm install --ignore-scripts 2>/dev/null || true
 RUN cd agent-network && npm run build && npm install -g .
 RUN cd agent-node && npm run build && npm link
 RUN cd agent-node && npm install @openai/codex-sdk 2>/dev/null || true

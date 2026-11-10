@@ -278,3 +278,35 @@ describe("runCodexWakeForGoal — DI plumbing", () => {
     expect(r.failed).toBe(false);
   });
 });
+
+describe("runCodexWakeForGoal — board #734 resume guard", () => {
+  test("a refusal fails the wake, keeps the thread id, and neither resumes nor starts a thread", async () => {
+    let resumed = 0;
+    let started = 0;
+    const client: CodexClientFake = {
+      startThread: () => { started++; return fakeThread({ id: "new" }); },
+      resumeThread: (id) => { resumed++; return fakeThread({ id }); },
+    };
+    const seen: string[] = [];
+    const r = await runCodexWakeForGoal(makeGoal({ codex_thread_id: "thr-paginated" }), "wake", {
+      ...deps(client),
+      guardResume: (id) => { seen.push(id); return "执行出错: refused (board #734)"; },
+    });
+    expect(seen).toEqual(["thr-paginated"]);
+    expect(r.failed).toBe(true);
+    expect(r.text).toContain("board #734");
+    expect(r.threadId).toBe("thr-paginated");
+    expect(r.threadRebuilt).toBe(false);
+    expect(resumed).toBe(0);
+    expect(started).toBe(0);
+  });
+
+  test("null from the guard resumes as before", async () => {
+    const r = await runCodexWakeForGoal(makeGoal({ codex_thread_id: "thr-ok" }), "wake", {
+      ...deps(fakeClient({})),
+      guardResume: () => null,
+    });
+    expect(r.failed).toBe(false);
+    expect(r.threadId).toBe("thr-ok");
+  });
+});

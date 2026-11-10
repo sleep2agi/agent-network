@@ -1,0 +1,41 @@
+TEST-ONLY #906 existing Codex discovery core
+Observed: 2026-10-11T09:14:25Z (17:14:25 UTC+8)
+Base: 6bdd277c39e51def11a37df346ab3a975b810b8e
+Scope: existing readback chain only; no adoption, account login or inference.
+
+Reproduce from this checkout:
+sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.discovery -t anet-provider:test906-existing-discovery .'
+sg docker -c 'docker run --init --rm --network none anet-provider:test906-existing-discovery'
+
+Local built image:
+sha256:abb156f944a6f4ff4cb03e6b1c8473f3f0ff6fac2e41f32263216bbb65503c04
+Locked Bun 1.3.14 / Node 22.22.2 bases, package lockfiles; non-root runner.
+CLI changed modules strict TypeScript check PASS; real CLI bundle PASS.
+Runtime snapshot handler Bun compilation PASS (not a runtime typecheck claim).
+Latest changed test source was bind-mounted read-only over the built image.
+Committed Dockerfile copies that same source when rebuilt in CI.
+
+Results:
+- CLI inventory: 3/3 tests PASS, 29 assertions.
+- Authenticated HTTP -> Hub -> Daemon -> compiled CLI -> receipt:
+  1/1 selected test PASS, 34 assertions; 14 unrelated tests filtered out.
+- Private legacy 0775 nodes tree remains readable under private same-owner
+  ancestors; unprotected tree denied. Mutation resolver remains strict.
+- Registered local/child-workdir Codex metadata readable without adoption.
+- Other-network / other-Daemon / unregistered identities excluded.
+- Unbound rows have no mutation revision; apply remains denied.
+- Default projection excludes additive discovery for old strict clients.
+- Server, runtime and client inventory validators compared byte-identical.
+
+Corrections during this run:
+1. First Docker build referenced a runtime compiler not present in that package;
+   changed the build step to the actual Bun handler compilation.
+2. Initial unsafe-tree fixture still had a private temporary ancestor, so its
+   denial expectation was wrong. Made that synthetic root non-private too;
+   kept product permission checks and the denial assertion unchanged.
+
+Cleanup: all test containers used --rm; no new running test container remains.
+Images retained for reproducibility; synthetic files existed only in containers.
+No production permissions, config, credentials, daemon or business process changed.
+No native OAuth, real model entitlement, inference or packaged desktop claim.
+This source slice is not merged or publicly released at the observation time.

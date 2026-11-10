@@ -438,6 +438,45 @@ describe("opencode pin transition (#541)", () => {
     }
   });
 
+  // #1611 — 同机并存 V1/V2 时，PATH 第一命中可能是另一代；按顺序继续扫，命中期望版本为止。
+  test("#1611 skips a first PATH hit of another generation and attests the later accepted one", () => {
+    const otherRoot = makeTrustedRoot("opencode-bin-scan-other");
+    const wantedRoot = makeTrustedRoot("opencode-bin-scan-wanted");
+    try {
+      const other = packageStub(otherRoot, "opencode-ai", { manifestVersion: "1.18.1" });
+      const wanted = packageStub(wantedRoot, "opencode-ai", { manifestVersion: PIN });
+      const searchPath = `${pathShim(otherRoot, other.binary)}:${pathShim(wantedRoot, wanted.binary)}`;
+      const resolved = resolvePinnedOpencodeBinaryAttestation({
+        searchPath,
+        expectedVersion: PIN,
+        probeEnv: process.env,
+      });
+      expect(resolved.binary).toBe(wanted.binary);
+      expect(resolved.expectedVersion).toBe(PIN);
+    } finally {
+      rmSync(otherRoot, { recursive: true, force: true });
+      rmSync(wantedRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("#1611 keeps the first candidate's error when no PATH candidate matches the requested version", () => {
+    const otherRoot = makeTrustedRoot("opencode-bin-scan-none-other");
+    const wantedRoot = makeTrustedRoot("opencode-bin-scan-none-wanted");
+    try {
+      const other = packageStub(otherRoot, "opencode-ai", { manifestVersion: "1.18.1" });
+      const wanted = packageStub(wantedRoot, "opencode-ai", { manifestVersion: "1.18.2" });
+      const searchPath = `${pathShim(otherRoot, other.binary)}:${pathShim(wantedRoot, wanted.binary)}`;
+      expect(() => resolvePinnedOpencodeBinaryAttestation({
+        searchPath,
+        expectedVersion: PIN,
+        probeEnv: process.env,
+      })).toThrow(`not opencode-ai@${PIN}`);
+    } finally {
+      rmSync(otherRoot, { recursive: true, force: true });
+      rmSync(wantedRoot, { recursive: true, force: true });
+    }
+  });
+
   test("a package whose manifest says 1.18.1 but reports another version is rejected", () => {
     const root = makeTrustedRoot("opencode-bin-transition-lie");
     try {

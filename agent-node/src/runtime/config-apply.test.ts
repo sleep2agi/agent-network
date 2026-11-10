@@ -72,6 +72,11 @@ describe("validateLocalPatch — defense-in-depth", () => {
     const r = validateLocalPatch({ flags: { godmode: true } as any });
     expect(r?.field).toBe("flags.godmode");
   });
+  test("OpenCode generation and unsafe consent are not editable flags", () => {
+    expect(validateLocalPatch({ flags: { opencodeGeneration: "v2" } as any })?.field).toBe("flags.opencodeGeneration");
+    expect(validateLocalPatch({ flags: { opencodeUnsafeTools: true } as any })?.field).toBe("flags.opencodeUnsafeTools");
+    expect(validateLocalPatch({ flags: { opencodeMode: "copresence" } as any })?.field).toBe("flags.opencodeMode");
+  });
   test("permissionMode invalid enum rejected", () => {
     const r = validateLocalPatch({ flags: { permissionMode: "leetmode" } as any });
     expect(r?.field).toBe("flags.permissionMode");
@@ -105,11 +110,40 @@ describe("validateLocalPatch — defense-in-depth", () => {
 });
 
 describe("computeApplyMode — tier classifier", () => {
+  test("V2 without a live hot-switch capability honors an explicit Hub restart", () => {
+    expect(computeApplyMode({ model: "stub/stub-model-next" }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "restart", hotModelSwitchAvailable: false,
+    })).toBe("restart");
+  });
+  test("V2 with a live hot-switch capability keeps the existing hot path", () => {
+    expect(computeApplyMode({ model: "stub/stub-model-next" }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "restart", hotModelSwitchAvailable: true,
+    })).toBe("hot");
+  });
+  test("missing capability does not invent restart authority from a hot request", () => {
+    expect(computeApplyMode({ model: "stub/stub-model-next" }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "hot", hotModelSwitchAvailable: false,
+    })).toBe("hot");
+  });
+  test("missing model-switch capability does not restart unrelated hot flags", () => {
+    expect(computeApplyMode({ flags: { maxTurns: 5 } }, {
+      runtime: "opencode-cli", opencodeGeneration: "v2",
+      requestedMode: "restart", hotModelSwitchAvailable: false,
+    })).toBe("hot");
+  });
   test("empty patch → restart_only (restart_node)", () => {
     expect(computeApplyMode({})).toBe("restart_only");
   });
   test("model only → restart", () => {
     expect(computeApplyMode({ model: "claude-opus-4" })).toBe("restart");
+  });
+  test("OpenCode V2 model only → hot (live session switch, no restart)", () => {
+    expect(computeApplyMode({ model: "deepseek/deepseek-flash" }, { runtime: "opencode-cli", opencodeGeneration: "v2" })).toBe("hot");
+    expect(computeApplyMode({ model: "deepseek/deepseek-flash" }, { runtime: "opencode-cli", opencodeGeneration: "v1" })).toBe("restart");
+    expect(computeApplyMode({ model: "deepseek/deepseek-flash", flags: { timeout: 60000 } }, { runtime: "opencode-cli", opencodeGeneration: "v2" })).toBe("restart");
   });
   test("permissionMode → restart", () => {
     expect(computeApplyMode({ flags: { permissionMode: "auto" } })).toBe("restart");
@@ -133,6 +167,7 @@ describe("computeApplyMode — tier classifier", () => {
   });
   test("mixed (model + maxTurns) → restart (strictest wins)", () => {
     expect(computeApplyMode({ model: "x", flags: { maxTurns: 50 } })).toBe("restart");
+    expect(computeApplyMode({ flags: { modelReasoningEffort: "medium" } })).toBe("restart");
   });
 });
 
@@ -326,6 +361,23 @@ describe("buildConfigSnapshot — pure helper contract (#290 final, drain-omit g
   // and the caller is the only place that decides whether to send
   // it. If anyone tries to fold drain detection into the builder, the
   // pure-helper signature changes and this test forces a re-think.
+  // 2026-10-31 —— 实例身份是**内核口径**，不是自报值。
+  // 判据：同一进程内两次构建，三者必须全同；pid 必须是本进程；
+  //       starttime 若是数字则必须非负（Linux 上应可读；其他平台允许 null）。
+  test("carries kernel-level instance identity (boot_id / pid / starttime) as boot snapshots", () => {
+    const a = buildConfigSnapshot({ model: "m" }, true, 1);
+    const b = buildConfigSnapshot({ model: "m" }, true, 1);
+    expect(a.pid).toBe(process.pid);
+    // 进程内不可能变 ⇒ 两次必须逐值相同（否则「它重启过」这个判据会自己假阳性）
+    expect(a.boot_id).toBe(b.boot_id);
+    expect(a.proc_starttime_ticks).toBe(b.proc_starttime_ticks);
+    // 形态约束：boot_id 要么是 null，要么是 uuid 形态；starttime 要么 null，要么 ≥ 0
+    if (a.boot_id !== null && a.boot_id !== undefined) expect(a.boot_id).toMatch(/^[0-9a-f-]{16,64}$/i);
+    if (a.proc_starttime_ticks !== null && a.proc_starttime_ticks !== undefined) {
+      expect(a.proc_starttime_ticks).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   test("buildConfigSnapshot returns a valid snapshot regardless of caller drain state (pure)", () => {
     const s = buildConfigSnapshot(
       { model: "m", flags: { maxTurns: 50 } },
@@ -379,6 +431,31 @@ describe("buildConfigSnapshot — masked report (no secrets)", () => {
     // Critical: no env / token leak.
     expect("env" in snap).toBe(false);
     expect("token" in snap).toBe(false);
+  });
+
+  test("opencode-cli echoes generation, mode and unsafe consent without making them editable", () => {
+    const snap = buildConfigSnapshot({
+      runtime: "opencode-cli",
+      model: "stub/model",
+      opencodeGeneration: "v2",
+      opencodeMode: "copresence",
+      flags: { opencodeUnsafeTools: true, timeout: 600000, mysteryFlag: "x" },
+    }, true, 4);
+    expect(snap.flags.opencodeGeneration).toBe("v2");
+    expect(snap.flags.opencodeMode).toBe("copresence");
+    expect(snap.flags.opencodeUnsafeTools).toBe(true);
+    expect(snap.flags.timeout).toBe(600000);
+    expect("mysteryFlag" in snap.flags).toBe(false);
+    const other = buildConfigSnapshot({
+      runtime: "codex-app-server",
+      opencodeGeneration: "v2",
+      opencodeMode: "copresence",
+      flags: { opencodeUnsafeTools: true, mysteryFlag: "x" },
+    }, false, 0);
+    expect(other.flags.opencodeGeneration).toBeUndefined();
+    expect(other.flags.opencodeMode).toBeUndefined();
+    expect(other.flags.opencodeUnsafeTools).toBeUndefined();
+    expect("mysteryFlag" in other.flags).toBe(false);
   });
 
   test("missing model → null (not undefined, dashboard renders explicitly)", () => {

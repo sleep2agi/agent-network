@@ -135,4 +135,5 @@ agent-node ≥ `2.5.0-preview.57` 时，`blocked` 表示 TUI 子进程、compose
 
 - [节点 Runtime](/guide/runtimes)
 - [Codex TUI 人机共存](/guide/codex-copresence)
+- [OpenCode V2](/guide/opencode)
 - [完整 Grok Build Runtime 说明](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)（实现、安全边界与 Docker 验证）

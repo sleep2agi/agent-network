@@ -1,0 +1,63 @@
+#1168 — public Windows co-presence health software
+Final registry verification: 2026-10-13T20:18:05.355496+00:00. Software publication is not live adoption.
+
+Source PR2715 head4e2cfcfc09909f26d2a73c6c00da41ff6002528b;
+Windows-tested CI merge6aa47248804bb48e7924609fb220ef3a2457aacc;
+merged main d52418e614301143771f9ad40f7c40afd3777b1c (19:51:54Z).
+All three trees5e0e706b07e389c4950b8250bda6ce242403ecd6 match.
+10required+7selected SUCCESS, including Windows-native normal/high same-turn
+steering, individual receipts, shared remote/thread/HOME and single bridge.
+Native25PASS68 + health33PASS88; Docker real Hub/runtime50PASS156,
+pair6PASS23; restoring old platform selection gives32PASS/1 named assertion FAIL.
+Original old-head409/session-missing and later different-head timing-dependent
+pass remain recorded; exact original status-report ordering is unknown.
+
+Windows native bridge previously used alias as a tmux session. Quiet first
+callback did not remove the failed health snapshot from later reportStatus.
+Platform-correct selection leaves ongoing native tui UNKNOWN, never fabricated
+healthy; actual app-server/login degradation still reaches unchanged Hub guard.
+
+Node2.5.0-preview.144 formal38458335261: all four gates, publish step and whole
+workflow SUCCESS. Complete npm archive matches gated main and official GH:
+600329bytes SHA256d5f93a7ba7945585b37bc85f6ad61e46b0df60a4207a836fcaa47ef73c43e82b.
+preview144/latest58. Registry gitHead omitted; do not invent a registry SHA.
+Main provenance comes from explicit workflow source, ancestry and complete bytes.
+
+CLI2.3.0-preview.178 formal38458339458: all four gates and publish step SUCCESS;
+postverification timed out after15minutes (workflowFAIL; npm stepSUCCESS).
+Later full npm archive verified, preview178/latest76, same exact gated/GH bytes;
+registry gitHead omitted. This does not relabel the original workflow SUCCESS.
+Official GH matches gated main:2127298bytes
+SHA256779fe7d35cdf17735bf007643107abdd7512cda9d32fe31410c4c4af976dd072.
+Do not republish this immutable version to solve registry propagation.
+
+Official prerelease:
+https://github.com/sleep2agi/agent-network/releases/tag/cli-v2.3.0-preview.178
+Tag exact main d52418e6, latest=false. Both full archives were anonymously
+downloaded and byte-compared with gated artifacts. SHA256SUMS and immutable
+release-manifest.json included; manifest records its initial registry checkpoint.
+Later verification belongs in this report/body, not replacement assets. These
+are npm archives, not standalone native installers. Existing Hub139 reused.
+
+Initial private package check incorrectly expected unminified source identifiers;
+the formal build minifies them. Corrected transport-structure inspection and
+complete byte comparison verified the archive, with no rebuild or gate weakening.
+Package string/structure presence does not prove native execution or adoption.
+
+Broad QA remains separate: snapshot19/138 completed without FAIL; remaining
+duplicate merged-PR matrix cancelled after preserving status, main QA continues.
+No full-matrix PASS claim. Original device/model, live adoption and continuous
+native TUI health remain unverified. For source/tests see
+report-test1168-windows-health.txt; install/upgrade/rollback see
+release-v2.5.0-preview.144.md and release-v2.3.0-preview.178.md.
+Existing deploy/hub and deploy/fleet runbooks retain launch/ports/proxy/secure
+environment sources. Preserve original node/thread/cwd/model/login through the
+original owner's maintenance window. Rollback177/143 needs compatible V2 private
+receipts and restores the false-tmux gap. Git restores software/locks/schema only;
+login/tasks/receipts need authorized private backups. Hub vault NOT COVERED.
+No live restart, fork, config/provider/model change or credential copy occurred.
+
+Retained docs-PR broad server unit failure: same three cases already recorded
+for PR2711: legacy null-network heartbeat, observer dispatch health response,
+and requirements fixed-date fixture. Executable/source/workflow directories
+byte-identical to d524; no baselines weakened or tests rewritten.

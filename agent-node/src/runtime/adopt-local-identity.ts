@@ -17,6 +17,8 @@ export interface AdoptionIdentityOptions {
   uid: number;
   daemonEnv: NodeJS.ProcessEnv;
   allowCodexV2?: boolean;
+  /** Opt-in: OpenCode V2 co-presence (TUI + bridge + shared serve). Registration only; see adopt-opencode-v2.ts. */
+  allowOpenCodeV2?: boolean;
 }
 export interface AdoptionLocalIdentity {
   workdir: string;
@@ -31,11 +33,13 @@ function under(child: string, parent: string): boolean {
   const rel = relative(parent, child);
   return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
-function secure(path: string, uid: number, directory: boolean): void {
+// stickyWorkdir: ONLY the workdir itself may be group/other-writable, and only with the sticky
+// bit (S_ISVTX) on a daemon-owned directory, so others can't rename/delete its .anet (#747).
+function secure(path: string, uid: number, directory: boolean, stickyWorkdir = false): void {
   const st = lstatSync(path);
   if (st.isSymbolicLink() || (directory ? !st.isDirectory() : !st.isFile())) refuse("adopt_path_not_regular");
   if (st.uid !== uid) refuse("adopt_path_owner_mismatch");
-  if (st.mode & 0o022) refuse("adopt_path_writable_by_others");
+  if ((st.mode & 0o022) && !(stickyWorkdir && directory && (st.mode & 0o1000))) refuse("adopt_path_writable_by_others");
 }
 function canonicalHub(raw: unknown): string {
   if (typeof raw !== "string") return refuse("adopt_hub_missing");
@@ -54,7 +58,7 @@ export function verifyAdoptionLocalIdentity(req: AdoptionIdentityRequest, opts: 
   const home = realpathSync(opts.home);
   assertWorkdirAllowed(workdir, { home });
   if (!opts.adoptRoots.some(root => isAbsolute(root) && under(workdir, realpathSync(root)))) refuse("adopt_workdir_outside_roots");
-  secure(workdir, opts.uid, true);
+  secure(workdir, opts.uid, true, true);
   const anet = join(workdir, ".anet");
   const nodes = join(anet, "nodes");
   secure(anet, opts.uid, true);
@@ -79,7 +83,9 @@ export function verifyAdoptionLocalIdentity(req: AdoptionIdentityRequest, opts: 
     if (config.role === "host_supervisor") refuse("cannot_adopt_daemon");
     if (config.network_id !== req.network_id) refuse("adopt_config_network_mismatch");
     if (canonicalHub(config.hub) !== canonicalHub(opts.hubUrl)) refuse("adopt_hub_mismatch");
-    if (config.grokCopresence || config.grokCopresenceAuto || config.opencodeMode === "copresence" ||
+    const openCodeV2 = config.opencodeMode === "copresence" && config.runtime === "opencode-cli" && config.opencodeGeneration === "v2";
+    if (config.grokCopresence || config.grokCopresenceAuto ||
+        (config.opencodeMode === "copresence" && !(opts.allowOpenCodeV2 && openCodeV2)) ||
         (config.codexCopresence && !(opts.allowCodexV2 && config.runtime === "codex-app-server"))) refuse("copresence_adopt_v2");
     matches.push({ workdir, nodeDir, configPath, nodeId: req.node_id, alias: req.alias, config });
   }

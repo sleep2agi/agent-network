@@ -21,6 +21,8 @@ export const SESSION_REST_COLUMNS = [
   "node_id", "session_id", "config_path", "channels", "last_seen_at", "model",
   "external_schedules", "rules_file_capable", "skills_capable", "files_capable",
   "logs_capable",
+  // #2211 — the node's last team-rules outcome (see team-rules-status.ts).
+  "team_rules_revision", "team_rules_status", "team_rules_at", "team_rules_reason",
 ] as const;
 
 export const AUDIT_LOG_REST_COLUMNS = [
@@ -49,10 +51,12 @@ export const COMPLETION_REST_COLUMNS = [
 // `schedule_json` are intentionally selected for server-side auth/decoding,
 // then removed by decodeRow before the REST response is serialized.
 export const SCHEDULED_TASK_STORAGE_COLUMNS = [
-  "schedule_id", "network_id", "created_by", "name", "target_node_id",
+  "schedule_id", "network_id", "created_by", "created_by_node_id", "name", "target_node_id",
   "target_alias", "task_content", "priority", "schedule_type", "schedule_json",
   "timezone", "overlap_policy", "misfire_policy", "status", "next_run_at",
   "last_run_at", "revision", "created_at", "updated_at",
+  "no_change_backoff", "backoff_streak", "backoff_effective_seconds", "backoff_last_run_id",
+  "requirement_wake_json", "requirement_wake_cursor", "requirement_wake_last_event_id",
 ] as const;
 
 export function sqlColumns(columns: readonly string[], qualifier?: string): string {

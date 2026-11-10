@@ -1,0 +1,84 @@
+#906 V1 private session checkpoint core — main source, NATIVE CORE PASS / NOT RELEASED
+SOURCE_BASE=e269eb5d80adfb2eccdb859f20c3e8e99e106adc
+OBSERVED_AT=2026-10-12T12:05:00Z
+
+Latest result (2026-10-12T12:23:13Z; supersedes pending observations below):
+- PR2652 exact head 45bd04aad7bdea5f06847eac427fe3c3351eba72.
+- Actions run38248290924 SUCCESS for both actual pinned V1 versions:
+  1.18.1 job114807656132 completed core at12:22:37Z;
+  1.18.34 job114807656526 completed core at12:21:08Z.
+- Tested merge 64439399f40a5fbec01722477605e7ad64e0a215.
+- Each version: 5 unit cases / 13 assertions; native fixture save, normal
+  close, local import into a fresh launch, same session and preserved history,
+  a subsequent fixture model turn, wrong-owner non-overwrite, and cleanup.
+- Native forged old session permission/share were not inherited. External
+  file references (including tool attachments) are rejected, not migrated.
+- Actual 10 required GitHub checks all SUCCESS. Normal SHA-locked squash
+  merged20:23:12+08 to main18697437e7373f236803da2ff039f67f55e75d09.
+- Main tree and tested merge tree both40fa05e8a66e6552910bbc53a7c0c0dedd8a45e8.
+- No admin/bypass or guard/permission changes. Other optional CI was still
+  running/queued, not counted as all-green. This proves the scoped core only.
+- TEST-ONLY log artifacts (ZIP digests, NOT binary/package digests):
+  11747870176, v1181,719B,
+    sha256:dd78fe0be7be822e5e9fd4de3745653eb7248ace57729be7bf96b55cc373ae1e;
+  11746544877, v11834,718B,
+    sha256:5e1f2cb9bda7cf7c07e0ce0b7e050599599d7698e3b8547ac9315f16e9f3abb1.
+- No new npm/binary release or installed native app claim. The old .118 node
+  was NOT restarted; first legacy snapshot export/migration remains a gap.
+- No local product test, real credential/OAuth/vendor-model, production
+  process/config/account change. Source worktrees retained; no local process
+  or container created by this iteration remains to clean up.
+
+--- Historical implementation plan and CI observations, preserved ---
+
+Implementation scope:
+- Immutable node/network-bound 0600 JSON checkpoint; no persistent DB reuse.
+- Exact vetted V1 local import into fresh launch data, followed by session and
+  message/part verification. Import/identity failure does not create a new session.
+- Startup, completed network turn and graceful stop update the checkpoint.
+- Unclean/final-save failure recovery is explicitly last-checkpoint-only.
+- Legacy nodes lacking a snapshot keep the previous new-session behavior with
+  an explicit warning. First legacy history export/migration is NOT IMPLEMENTED.
+- --new-session intentionally ignores the prior snapshot; V2/ACP unchanged.
+
+Validation planned, Actions only:
+- tests/test906-v1-checkpoint/Dockerfile targets v1181 and v11834;
+  opencode-ai fixed at 1.18.1 and 1.18.34, fixture-only model/auth/history.
+- Four checkpoint unit cases: owned roundtrip, wrong identity/history, failed
+  write keeps previous bytes, and symlink refusal.
+- Actual production native entry: save a fixture turn, close, create fresh
+  launch data, import same session, verify history and submit one new turn.
+- Source SHA binding, non-root container, network none at runtime, cleanup.
+- No current PASS, native installation, production upgrade or release claim.
+- No local product suite, no credentials or real conversation read, no live
+  model call, no production process/config/account/model change.
+
+First Actions observation (not inherited by a later head):
+- PR2652 head 5fba34b0f4fb8252d66e47a871708a059f486101;
+  tested merge 164fa44b526808b9f86fdf43b0161cc1e3f91944.
+- Run38247048386/job114803438245 native1.18.34: four unit tests / 11
+  assertions passed. Native production entry then failed its environment
+  preflight because the new fixture lacked /run/user/1000. No native
+  save/import/model turn reached. Native1.18.1 job was still queued.
+- Fixture now creates the same owned 0700 runtime base as test894; no
+  runtime preflight or isolation check changed.
+- qa-trigger-coverage run38247048125 failed the new suite's missing QA
+  trigger registration; pull_request/push paths now both include the suite.
+- No product assertion, baseline, threshold or permission check relaxed.
+
+Second head a5240092735421182482674bb190c83b2d731fe2:
+- Run38247500565/job114804977727 native1.18.1 and job114804977883
+  native1.18.34 both SUCCESS; tested merge ffe610ca9a77b5fecef174bc5957e7ee33610ca3.
+- Each: 4 unit cases / 11 assertions; actual native same-session/history
+  import, wrong-identity rejection, a new resumed fixture model turn, cleanup.
+- Pre-merge review added removal of imported session permission/share metadata
+  and rejection of external file parts, preserving the current launch policy.
+  Native probes now verify forged old authorization/sharing is not inherited;
+  one focused external-file unit case added. This new head must pass the same
+  two native core jobs; old-head PASS is not inherited. No wider matrix added.
+
+Authoritative upstream source reviewed in preceding scope inspection:
+- v1.18.1 source 99f638d8293f6985726ba509da602296c4963497
+- v1.18.34 source aec0b9a6d8898f68f923aaf08b7306d931fd9d76
+- packages/opencode/src/cli/cmd/import.ts preserves session/message/part IDs;
+  import rebinds project/directory. Source review is not native package PASS.

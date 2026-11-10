@@ -6,6 +6,13 @@
 // caller identity, role gates).
 
 import { isValidTimeoutMs, TIMEOUT_MS_REASON } from "./create-node-validate.js";
+import {
+  REASONING_EFFORT_VALUES,
+  validateCodexConfigFlag,
+  type ModelReasoningEffort,
+} from "./codex-config-flags.js";
+
+export { REASONING_EFFORT_VALUES, type ModelReasoningEffort } from "./codex-config-flags.js";
 
 /**
  * Fields the dashboard may change. Anything not in this list is rejected
@@ -18,6 +25,12 @@ export const ALLOWED_FLAGS = new Set<string>([
   "maxTurns",
   "budget",
   "timeout",
+  // Codex (#815 / client): posture + co-presence grant + thinking level
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 // NB on teammateMode (dropped from P1 scope per #290 cross-agent
 // review): teammateMode is consumed ONLY by the claude-code-cli
@@ -45,6 +58,9 @@ export const ALLOWED_FLAGS = new Set<string>([
 export const SECURITY_SENSITIVE_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
+  "approvalPolicy",
+  "sandboxMode",
+  "copresenceFullAccess",
 ]);
 
 /**
@@ -57,6 +73,11 @@ export const RESTART_REQUIRED_FLAGS = new Set<string>([
   "permissionMode",
   "dangerouslySkipPermissions",
   "timeout",
+  "approvalPolicy",
+  "sandboxMode",
+  "skipGitRepoCheck",
+  "copresenceFullAccess",
+  "modelReasoningEffort",
 ]);
 
 /**
@@ -129,6 +150,182 @@ export function isAllowedToChangeFlag(
 }
 
 /**
+ * Runtime families the hub treats as "OpenCode". `nodes.runtime` is
+ * written from report_status and carries the legacy `-sdk` bucket
+ * (`opencode-sdk`) for older CLI builds, while newer callers pass the
+ * config-level spelling (`opencode-cli` / `opencode`). All three mean
+ * the same agent-node runtime, so the hot-model-switch gate below must
+ * accept every spelling — otherwise the same node flips between hot
+ * and restart depending on which build reported last.
+ */
+const OPENCODE_RUNTIME_LABELS = new Set<string>(["opencode-sdk", "opencode-cli", "opencode"]);
+
+/** Reported runtime family + explicit mode only; never local ownership proof. */
+export function isOpenCodeV2CopresenceRuntime(runtime: string | null | undefined,
+  generation: "v1" | "v2" | null, mode: string | null): boolean {
+  return !!runtime && OPENCODE_RUNTIME_LABELS.has(runtime) && generation === "v2" && mode === "copresence";
+}
+
+/**
+ * Read the OpenCode knobs the hub persists in `nodes.config_snapshot`.
+ * Both are reported by agent-node (see buildConfigSnapshot in
+ * agent-node/src/runtime/config-apply.ts) and are the only two fields
+ * the apply-mode decision needs.
+ *
+ * Snapshot is stored as text but older rows hold objects; a parse
+ * failure means "this cell is empty" (never an exception) — same
+ * fail-shape as the api-nodes projection.
+ */
+export function readOpencodeSnapshotFlags(configSnapshot: unknown): {
+  opencodeGeneration: "v1" | "v2" | null;
+  opencodeMode: string | null;
+} {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    parsed = null;
+  }
+  const flags = parsed?.flags;
+  const generation = flags?.opencodeGeneration;
+  const mode = flags?.opencodeMode;
+  return {
+    opencodeGeneration: generation === "v1" || generation === "v2" ? generation : null,
+    opencodeMode: typeof mode === "string" && mode.length <= 32 ? mode : null,
+  };
+}
+
+/**
+ * True when the node can swap the live model without a process restart.
+ *
+ * Mirrors `computeApplyMode` in agent-node/src/runtime/config-apply.ts
+ * (#3146). The node has been able to do this since OpenCode V2
+ * co-presence shipped, but the hub classified every `model` patch as
+ * `restart`, so the client showed "restarting" and waited for a
+ * restart that the node deliberately never performed. Hub and node now
+ * agree on the same three conditions:
+ *
+ *   runtime ∈ OpenCode   ·   opencodeGeneration === "v2"   ·   mode === "copresence"
+ *
+ * `copresence` is required because the hot switch drives the running
+ * TUI session (`opencodeCopresenceSession.setSelectedModel`); a
+ * headless V2 node has no such session and must restart. Only a
+ * model-ONLY patch qualifies — adding flags or channels drags in
+ * restart-tier fields, and the node would restart anyway.
+ */
+export function isHotModelSwitchSupported(
+  model: string | undefined,
+  flags: Record<string, unknown>,
+  channels: string[] | undefined,
+  runtime: string | null | undefined,
+  opencodeGeneration: "v1" | "v2" | null,
+  opencodeMode: string | null,
+): boolean {
+  if (model === undefined) return false;
+  if (Object.keys(flags).length !== 0) return false;
+  if (channels !== undefined) return false;
+  return isOpenCodeV2CopresenceRuntime(runtime, opencodeGeneration, opencodeMode);
+}
+
+/**
+ * Read `config_update_capable` from `nodes.config_snapshot`.
+ *
+ * agent-node reports this as "this process runs under a supervisor wrapper that
+ * honours the sentinel-75 restart path" (agent-node/src/cli.ts report_status).
+ * A bare-spawn node (`nohup node cli.js …`, no pm2/anet wrapper) reports
+ * `false` — and a restart-tier patch on such a node writes the config, acks
+ * `restarting`, exits 75, and **nothing respawns it**. The update then sits in
+ * `pending`/`restarting` until the 60s reaper marks it `timeout`, so the caller
+ * only ever sees "timed out" and never learns that the node is now down.
+ *
+ * Absent/unparseable snapshot → `null` ("unknown"), never `false`: we must not
+ * warn on nodes that simply haven't reported it yet.
+ */
+export function readConfigUpdateCapable(configSnapshot: unknown): boolean | null {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    return null;
+  }
+  // 优先读更具名的 `restart_supervised`（agent-node 同时上报，永远同值）；
+  // 旧客户端只报 config_update_capable，回退读它。
+  const named = parsed?.restart_supervised;
+  if (typeof named === "boolean") return named;
+  const value = parsed?.config_update_capable;
+  return typeof value === "boolean" ? value : null;
+}
+
+/**
+ * 2026-10-31 —— 双写字段的**分歧**本身是一条读数，而今天它是静默的。
+ *
+ * `readConfigUpdateCapable` 在两个字段都在时优先读 `restart_supervised`，
+ * 文档说它们「永远同值」。所以「不同值」不是噪声，是一个真实信号：
+ * 半升级（wrapper 转发了一路、漏了另一路）、旧节点、或有人手改了快照。
+ *
+ * 🔴 为什么值得单独一个函数：
+ *    两个生产者的字段，只要**允许一个遮住另一个**，那个被遮住的值就再也读不到了 ——
+ *    而“读不到”与“两个一致”在调用方看来完全一样。这正是隐性回退的通用形状：
+ *    值从一个隐式来源解析出来，解析过程不留痕。
+ *
+ * 返回值：只在**两个都是布尔且不同**时给出两份值；其余一律 null（没有分歧可报）。
+ * 调用方负责把 `restart_supervision_flag_divergence` 放进 warnings —— 本函数不改判据。
+ */
+export function configUpdateCapabilityDivergence(
+  configSnapshot: unknown,
+): { named: boolean; legacy: boolean } | null {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    return null;
+  }
+  const named = parsed?.restart_supervised;
+  const legacy = parsed?.config_update_capable;
+  if (typeof named !== "boolean" || typeof legacy !== "boolean") return null;
+  return named === legacy ? null : { named, legacy };
+}
+
+/**
+ * 2026-10-31 —— 用节点**自己**报的托管判定取代「没有声明」（#3168 的自然下一步）。
+ *
+ * `config_update_capable=false` 只说明「没有声明 sentinel-75 重启包装」，
+ * 而 systemd/pm2 托管的节点也可能报 false（它们不走那套包装）⇒ 于是只能写成
+ * 「does not advertise」，把判断交给调用方 —— 那是对的，但不够具体。
+ *
+ * 节点现在会上报三态 `systemd_supervision`（supervised / not_supervised / unknown），
+ * 于是「它自己说没人拉它」与「它自己说有人拉它」可以被分开讲：
+ *
+ *   not_supervised ⇒ 明确后果：exit 75 之后**没有东西会把它拉起来**
+ *   supervised     ⇒ 不做警告（具名判定优先，胜过 legacy 布尔）
+ *   unknown/缺失   ⇒ 退回旧口径（「没有声明」），因为「不知道」不能当成「没人拉」
+ *
+ * 🔴 三态而不是布尔：`unknown` 与 `not_supervised` 在处置上完全相反 ——
+ *    前者要人去看，后者要人别发这类变更。
+ */
+export function readSystemdSupervision(
+  configSnapshot: unknown,
+): "supervised" | "not_supervised" | "unknown" | null {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    return null;
+  }
+  const v = parsed?.systemd_supervision;
+  if (v === "supervised" || v === "not_supervised" || v === "unknown") return v;
+  return null; // 老节点没有这个字段：**缺失 ≠ unknown**，缺失是「这一版还不会报」
+}
+
+/**
  * Classify the patch's required apply mode. Empty patch (model + flags
  * both empty, no channels) → "restart_only" (used by restart_node tool).
  * Any restart-required field present, OR a channels change → "restart"
@@ -136,15 +333,34 @@ export function isAllowedToChangeFlag(
  * once at boot in agent-node/src/cli.ts and forks per-channel workers
  * from it, so a channel enable/disable takes effect on process restart
  * only — see #260 P5 wire discipline). Otherwise → "hot".
+ *
+ * `opts` carries the target node's runtime identity. Callers that omit
+ * it get the pre-#3146 behaviour (model ⇒ restart), which is the safe
+ * answer for any node we know nothing about.
  */
 export function computeApplyMode(
   model: string | undefined,
   flags: Record<string, unknown>,
   channels?: string[] | undefined,
+  opts?: {
+    runtime?: string | null;
+    opencodeGeneration?: "v1" | "v2" | null;
+    opencodeMode?: string | null;
+  },
 ): "hot" | "restart" | "restart_only" {
   const fieldCount = (model !== undefined ? 1 : 0) + Object.keys(flags).length + (channels !== undefined ? 1 : 0);
   if (fieldCount === 0) return "restart_only";
-  if (model !== undefined) return "restart";
+  if (model !== undefined) {
+    if (isHotModelSwitchSupported(
+      model,
+      flags,
+      channels,
+      opts?.runtime,
+      opts?.opencodeGeneration ?? null,
+      opts?.opencodeMode ?? null,
+    )) return "hot";
+    return "restart";
+  }
   if (channels !== undefined) return "restart";
   for (const key of Object.keys(flags)) {
     if (RESTART_REQUIRED_FLAGS.has(key)) return "restart";
@@ -186,6 +402,7 @@ export function validatePatch(
   model: string | undefined,
   flags: Record<string, unknown>,
   channels?: string[] | undefined,
+  nodeRuntime?: string | null,
 ): { field: string; reason: string } | null {
   if (model !== undefined) {
     if (typeof model !== "string" || model.length === 0 || model.length > 200) {
@@ -213,6 +430,8 @@ export function validatePatch(
     if (!ALLOWED_FLAGS.has(key)) {
       return { field: `flags.${key}`, reason: "not in allowlist" };
     }
+    const codexFail = validateCodexConfigFlag(key, val, nodeRuntime ?? null);
+    if (codexFail) return codexFail;
     switch (key) {
       case "permissionMode":
         if (

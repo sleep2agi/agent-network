@@ -1,0 +1,50 @@
+TEST-ONLY #1219 — borrowed V1 native turn ownership and timeout gate
+Source PR https://github.com/sleep2agi/agent-network/pull/2742
+Base bcb83236d1eb3d7a491b849af7d6fb23cce71730
+Fixed head 1450174659f778651f646de24c6e0f2b99d82eca
+CI checkout a3ba487e32817efcf2dc040ae0ac58b1178b4c4a
+
+Concrete defect and behavior:
+Both exact native versions store an assistant placeholder with own parentID and time.created before the model completes. The previous timeout classifier treated that placeholder as an answer, leaving a provably own live turn running; a pending earlier human assistant could also be mistaken for completed. The classifier now ignores native unfinished assistant records and completed tool-call intermediate steps when finding unanswered users. Legacy owned records without native time metadata keep their existing representation. Existing human lead/tail, summary, textless queued-user and unreadable-history checks remain.
+
+Pinned isolated reconstruction:
+OpenCode1.18.1/1.18.34 wrapper and native SRI use tests/test1194-v1-shared-feasibility/package-integrity.json. Bun1.3.14 image digest e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4; npm ci lockfile. Each suite has its own Dockerfile/run.sh. Actual source commit assertions, non-root bun, --init --network none, synthetic loopback Hub/model; no live credentials, default tmux, external model vendor or production app.
+
+New native turn gate run38537603904:
+1.18.1 job115764198440 SUCCESS artifact11880489123 sha256:4482ba4551aee861e748180344b9a759656ee5e889269358a9d2c3b0fb503059
+1.18.34 job115764198668 SUCCESS artifact11880633651 sha256:ca3ae622d1f96ec35a79b3ccac75f482e0b98e1b601d5199ef4c659c5165e6ad
+Both actual artifacts independently read, 9 native checks each:
+- FIFO and causal parentID with simultaneous scoped sibling model/MCP reply.
+- Landed own native deadline performs only exact own session abort, then runtime can submit again.
+- Completed native tool-call step plus paused continuation is still our live turn and only own abort is issued.
+- Explicitly injected undelivered POST reaches own deadline; actual native history stays empty, no abort, next turn reusable.
+- Actual landed native turn with injected history503 retains unknown controls with no abort/replay.
+- Actual own native turn with injected abort503 gives truthful failure receipt and retains recovery.
+- External human REST submit wins idle-to-POST race; network timeout never aborts human, recovery retained.
+- Human REST submit queued after network prompt prevents session-scoped abort/replay.
+- Shared Host and independent sibling remain live through all cases.
+Transport omissions/history503/abort503 are explicitly injected network faults, not alleged native backend transport bugs. Native sessions, execution, queues and parent IDs are actual.
+
+Existing backend regression run38537603909:
+1.18.1 job115764199098 SUCCESS artifact11880344009 sha256:0d6711defc8554a15a624ee2b2d79b46aac0978a04dd159d3777ea3cd18a9514
+1.18.34 job115764199522 SUCCESS artifact11881107250 sha256:2d591077801abab693217f6ef338fcb9d300385767d76b02340d8ae55130aecc
+Both actual artifacts independently read: 8 native checks each, preserving scope/foreign200/missing404/no owned spawn/env/attach/FIFO/config rollback/only own MCP/in-flight drift/busy close/Host+B.
+Every one of these four reports also has 61 unit PASS/0 FAIL (57 existing +4 direct completion regressions), original test651 production runtime positives6 plus ownership positives13 (old9+4), three original mutation RED controls and OVERALL PASS. Repeated unit runs are not counted as distinct new cases.
+
+Earlier failures retained:
+212f900d4a48188515b572cd105caa319e54e277 / run38536277074 / jobs115759812719,115759812977 RED after FIFO PASS. 1500ms expired in admission before native POST. Corrected fixture uses10000ms deadline plus synthetic15s hold, preserving landed/abort expectation.
+1117f501e842a82403d27fca649210f9ab88665d / run38536643381 / jobs115761017266,115761017245 RED: actual reply-phase own timeout, aborted=false.
+0f63c817f3d7467512a43735246c1ca48a942bc7 / run38537083369 / jobs115762468050,115762468628 RED with immediate actual native history: user plus own-parent assistant time.created, no time.completed; zero abort calls. This pins the actual placeholder cause before production fix.
+Not-landed injection additionally asserts it actually intercepted POST; fixture human requests allow bounded queued holds. New native fixture has420s cloud bound; no local tests were run.
+
+Limits and remaining gates:
+Borrowed API behavior on cooperative same-UID/cohort/shared-Host authority only. Human race fixture uses raw native REST, not interactive TUI. Native abort endpoint is session-scoped, not atomic per-message conditional cancellation; tested history ownership checks do not establish an OS tenant boundary or arbitrary concurrent-client atomicity. CLI explicit opt-in remains child1224; interactive TUI/adoption and1196 full migration/checkpoint rollback/native original-device windows remain separate. No production adoption or package/installer release. Parent1195 stays incomplete.
+
+Recovery questions:
+Suite Dockerfile/run.sh reconstructs synthetic Host/model/Hub and the versioned deploy/node/opencode-v1-host launcher owns Host lifecycle. No reverse proxy/tunnel needed in fixture; loopback ports are fixture-owned. Secrets are synthetic fixture-only; real node/Host credential sources are not read or changed. Exact source/version/SRI assertions establish test inputs; rollback checks out prior source, and existing config byte preservation remains qualified. Unknown node leases/backups are retained rather than automatically replayed/reopened; only fixture owner disposes the isolated Host. Git restores software, not production session/database state, which requires the original Owner's encrypted backup and migration window.
+
+Final source/main qualification:
+Ordinary exact-head merge at2026-10-14T08:59:12Z into main50a975f05ea3b8488c027610361792229de6ae85; sourcehead fresh-main ancestor. Exact CI-checkout/main trees BOTH f0d7c4dedbcff17b98acb056231a1b87b680f0a7, compared via GitHub git/commits for ephemeral PR test-merge (not present in local checkout).
+PR rollup70 SUCCESS /108 CANCELLED, no pending/failure. Ten protected gates, four targeted native jobs, full E2E and renameGhost explicitly SUCCESS. Own broad QA38537604049 and obsolete212f/1117/0f63 rounds cancelled; not whole-QA PASS.
+Full E2E38537604161/job115764199997 SUCCESS; renameGhost115764200406 SUCCESS. Artifact11880918890 e2e-suite-logs-1 sha256:a645d5b2c286c77a66e7f43243fbb5414212c504d6e5234dd44ab0d9605da8f8; all8 logs independently read,7 actual groups289/0: Base139/Auth25/Network28/Config16/LoopRuntime22/LoopPack12/LoopSelf47; no skipped/zero group. Existing duplicate-listen diagnostics remain historical output, not failed hard-gated groups.
+Final facts report is a separate docs-only ordinary PR from source-main; no healthy native suite rerun required for report-only change. Main duplicate E2E is metadata-only unless a new failure appears. No package or production adoption claim.

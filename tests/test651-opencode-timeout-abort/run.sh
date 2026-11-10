@@ -15,7 +15,7 @@ mkdir -p "$(dirname "$REPORT")"
 
 SRC=src/runtime/opencode-copresence/runtime.ts
 OWN=src/runtime/opencode-copresence/reply-ownership.ts
-ANCHOR='const aborted = await abortOpenCodeSession(url, password, created.id, warn);'
+ANCHOR='const aborted = await abortOwnTurn(created.id);'
 ANCHOR_UNREADABLE='if (!Array.isArray(history)) return "leave_running";'
 ANCHOR_LIVE='if (liveId !== submittedId) return "leave_running";'
 

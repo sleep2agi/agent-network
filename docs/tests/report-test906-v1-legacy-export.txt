@@ -1,0 +1,47 @@
+#906 V1 first legacy export — NATIVE CORE PASS / MAIN / NOT RELEASED
+
+Observed 2026-10-12 20:45+08:
+- PR2654 head dd0111eb5ddf5485902a9aaa4fad5886abfbeeb9.
+- Actions run38250520956 completed SUCCESS; exact tested merge
+  f87296fe7dbca7df839020126333e9d05189837d.
+- Native1.18.1 job114815300941 completed12:42:28Z (20:42:28+08).
+- Native1.18.34 job114815302477 completed12:44:16Z (20:44:16+08).
+- Each job: 6 checkpoint unit cases / 15 assertions, zero failures; actual
+  pinned native legacy runtime without snapshot -> owned GET-only export ->
+  fresh native same-session/history import -> new synthetic model turn.
+- Wrong PID/session, existing snapshot overwrite and wrong checkpoint owner
+  refused. Original live process/config retained through export. Imported
+  permission/share not inherited; owned processes/fixture data cleaned.
+- Both completed job logs personally read via exact job logs endpoint.
+- Ten current required merge contexts SUCCESS. Ordinary head-locked squash,
+  no admin/bypass or repository/runner budget changes. Optional broad checks
+  not all terminal; their pending state is NOT full-CI PASS.
+- Merged12:45:12Z (20:45:12+08), exact main source
+  8096c58d3b530f0e1ea8e45b86a02e61364a169e.
+- Main and tested merge trees equal:
+  c9457da2f41bacccebc71638c73e275bbc5cd6cf.
+- No new formal package; public runtime137 does NOT include this source.
+- Old .118 node not exported/restarted/upgraded. No real credentials, history,
+  vendor inference, TUI UI, full machine recovery or production acceptance.
+- No local product test or container created; source worktrees retained.
+- Local skill updated with first-export/quiet-window boundaries, not used as
+  the sole restoration source. No production config/account/model changed.
+
+--- Original candidate plan, retained as historical ---
+
+Source entry: deploy/node/export-opencode-v1-session.ts, Linux only.
+GET-only existing owned bridge/server; explicit PIDs and private config identity.
+No Hub writes, stops, model calls, account files or credential copying.
+Idle/stable double capture + final process/config check; exclusive 0600 save.
+Live capture is unclean, NOT a lease against later human TUI input.
+Operator must arrange a quiet window before capture and old-bridge stop.
+
+Actions: reuse test906-v1-checkpoint only, pinned native 1.18.1 / 1.18.34.
+Non-root Docker, --network none, local synthetic model/history only.
+Core: legacy runtime without snapshot -> owned export -> fresh native import
+same session/history -> one new synthetic turn -> cleanup.
+Wrong PID/session and existing snapshot rejection; original config/processes
+retained. Six focused checkpoint unit cases; no wider suite added.
+No local product test; no production capture/upgrade/restart or actual model.
+No CI PASS, package/publication, TUI UI or disaster-recovery claim yet.
+Previous PR2652 native checkpoint success is separate, not new export proof.

@@ -40,7 +40,17 @@ const NAME_MAX = 40;
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 type DeptRow = { network_id: string; department_id: string; name: string; parent_id: string | null; leader_user_id: string | null; sort: number; created_at: string; updated_at: string };
-export type Department = { id: string; name: string; parent_id: string | null; leader_user_id: string | null; sort: number; member_count: number; created_at: string; updated_at: string };
+/**
+ * 部门（轴1 = 人）。
+ *
+ * `member_count` 是**直属人数**（不含子树）。
+ * `agent_count` 是**轴2**：Agent 显式归属 `nodes.department_id` 指向本部门的数量，
+ *   与「成员的 Agent」无关（RFC-040 / #1976：Agent 部门只由显式设置决定，不再按负责人推断）。
+ *   没有这一格时，任何客户端想画「部门 → Agent 数」都得自己拉全量
+ *   `people/directory` 再去重，各端口径必然分叉（#2822：Dashboard 105/TMAI 1
+ *   vs 客户端 TMWork 15/TM智能体空间 2）。
+ */
+export type Department = { id: string; name: string; parent_id: string | null; leader_user_id: string | null; sort: number; member_count: number; agent_count: number; created_at: string; updated_at: string };
 
 type Fail = { ok: false; status: number; error: string };
 type Ok<T> = { ok: true } & T;
@@ -64,7 +74,12 @@ function isMember(networkId: string, userId: string): boolean {
 }
 
 /** 读:部门(带直属人数)+ 每个成员在哪个部门。负责人不在本网络了 → null。 */
-export function listDepartments(networkId: string): { departments: Department[]; members: Array<{ user_id: string; department_id: string | null }> } {
+export function listDepartments(networkId: string): {
+  departments: Department[];
+  members: Array<{ user_id: string; department_id: string | null }>;
+  /// 轴2 里没有显式归属的 Agent 数（Dashboard 的「未分组」不该拿人的未分配去填）。
+  agents_unassigned: number;
+} {
   const members = db.all<{ user_id: string; department_id: string | null }>(
     "SELECT user_id, department_id FROM network_members WHERE network_id = ?1 ORDER BY joined_at, user_id",
     networkId,
@@ -76,6 +91,28 @@ export function listDepartments(networkId: string): { departments: Department[];
   const placed = members.map((m) => ({ user_id: m.user_id, department_id: m.department_id && ids.has(m.department_id) ? m.department_id : null }));
   const counts = new Map<string, number>();
   for (const m of placed) if (m.department_id) counts.set(m.department_id, (counts.get(m.department_id) ?? 0) + 1);
+  // ── 轴2：Agent 的显式部门（nodes.department_id）────────────────────────────
+  // 去重口径与 #2596 一致：同一个 alias 只算一个 Agent，保留 updated_at 最新的那一行，
+  // 它落在哪个部门就计入哪个部门（没有 alias 的用 node_id 当键）。
+  // 不在这里做「近 7 天」过滤：那是展示策略，接口只给事实。
+  const agentRows = db.all<{ department_id: string; alias: string | null; node_id: string; updated_at: string | null }>(
+    "SELECT department_id, alias, node_id, updated_at FROM nodes WHERE network_id = ?1 AND department_id IS NOT NULL AND department_id != ''",
+    networkId,
+  );
+  const newestByKey = new Map<string, { department_id: string; updated_at: string | null }>();
+  for (const n of agentRows) {
+    const key = n.alias || n.node_id;
+    const prev = newestByKey.get(key);
+    if (!prev || (n.updated_at ?? "") > (prev.updated_at ?? "")) {
+      newestByKey.set(key, { department_id: n.department_id, updated_at: n.updated_at });
+    }
+  }
+  const agentCounts = new Map<string, number>();
+  for (const v of newestByKey.values()) agentCounts.set(v.department_id, (agentCounts.get(v.department_id) ?? 0) + 1);
+  const unassigned = db.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM nodes WHERE network_id = ?1 AND (department_id IS NULL OR department_id = '')",
+    networkId,
+  )?.n ?? 0;
   return {
     departments: all.map((d) => ({
       id: d.department_id,
@@ -84,10 +121,12 @@ export function listDepartments(networkId: string): { departments: Department[];
       leader_user_id: d.leader_user_id && memberIds.has(d.leader_user_id) ? d.leader_user_id : null,
       sort: d.sort,
       member_count: counts.get(d.department_id) ?? 0,
+      agent_count: agentCounts.get(d.department_id) ?? 0,
       created_at: d.created_at,
       updated_at: d.updated_at,
     })),
     members: placed,
+    agents_unassigned: unassigned,
   };
 }
 
@@ -218,11 +257,14 @@ export function updateDepartment(networkId: string, id: string, body: Record<str
 }
 
 /** 只删空部门:有子部门 / 有成员 → 409(带数字,界面照着说)。 */
-export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: string }> | (Fail & { children?: number; members?: number }) {
+export function deleteDepartment(networkId: string, id: string): Ok<{ deleted: string }> | (Fail & { children?: number; members?: number; agents?: number }) {
   if (!one(networkId, id)) return fail(404, "department_not_found");
   const children = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_departments WHERE network_id = ?1 AND parent_id = ?2", networkId, id)?.n ?? 0;
   const members = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_members WHERE network_id = ?1 AND department_id = ?2", networkId, id)?.n ?? 0;
-  if (children || members) return { ...fail(409, "department_not_empty"), children, members };
+  // #1894 —— Agent 的部门归属是 nodes.department_id（显式归属线）。以前只数人类成员，
+  // 于是「部门里还有 300 个 Agent」也能被删掉，留下指向不存在部门的悬空归属。
+  const agents = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM nodes WHERE network_id = ?1 AND department_id = ?2", networkId, id)?.n ?? 0;
+  if (children || members || agents) return { ...fail(409, "department_not_empty"), children, members, agents };
   // RFC-040:部门的项目授权(network_department_project_grants)和部门同一事务删掉。
   groupTx(() => {
     db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [networkId, id]);
@@ -246,6 +288,22 @@ export function setMemberDepartment(networkId: string, userId: string, departmen
     syncDepartmentGroups(networkId);
   });
   return { ok: true, user_id: userId, department_id: dept as string | null };
+}
+
+/** Agent(节点)显式归属部门。`null` / "" = 清掉,回到「按负责人的部门推断」。 */
+export function setAgentDepartment(
+  networkId: string,
+  nodeId: string,
+  departmentId: unknown,
+): Ok<{ node_id: string; department_id: string | null }> | Fail {
+  const node = db.get<{ node_id: string }>("SELECT node_id FROM nodes WHERE network_id = ?1 AND node_id = ?2", networkId, nodeId);
+  if (!node) return fail(404, "node_not_found");
+  const dept = departmentId === null || departmentId === "" ? null : departmentId;
+  if (dept !== null && (typeof dept !== "string" || !one(networkId, dept))) return fail(400, "department_not_found");
+  db.run("UPDATE nodes SET department_id = ?3, updated_at = datetime('now') WHERE network_id = ?1 AND node_id = ?2", [networkId, nodeId, dept]);
+  // 部门群(RFC-042)按成员归属同步:Agent 不是群成员,这里只保证不把群带歪。
+  syncDepartmentGroups(networkId);
+  return { ok: true, node_id: nodeId, department_id: dept as string | null };
 }
 
 /** 网络删掉时一起清(和项目授权同一时机调用)。 */

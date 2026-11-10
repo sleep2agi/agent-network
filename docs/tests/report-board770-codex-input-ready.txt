@@ -1,0 +1,51 @@
+# board #770 — Codex TUI first-message readiness gate
+
+Date: 2026-10-08
+Base: origin/main ccab0d0a951803a19a2ae57590cc3c608e98f361
+
+Scope
+- Require the current Codex TUI screen to show the message composer before the
+  co-presence launcher reports the node usable.
+- Unknown startup surfaces fail closed. This change sends no keys and does not
+  dismiss any popup; known-popup handling remains board #771.
+
+Docker evidence
+- Image: tests/test750-codex-copresence-onecommand/Dockerfile
+- Runtime: --network none --cpus=2
+- Result: rc=0; 11 groups passed, 0 failed.
+- Decision tests: 83 passed.
+- Mutation: removing the current-composer gate failed the named
+  "painted TUI without the current composer" assertion, rc=1.
+
+Static evidence
+- git diff --check: rc=0
+- python3 scripts/check-mutation-pins.py: rc=0; 688 checked anchors,
+  4 existing unchecked anchors (baseline 4).
+
+CI compatibility follow-up
+- The first CI run exposed a real Codex 0.147 empty-thread composer whose
+  suggested prompt rotates (`Explain this codebase`, `Use /skills …`, …),
+  instead of using the newer `Ask Codex to do anything` placeholder.
+- Reproduced with the pinned 0.147 Docker E2E. Its stable empty-thread heading
+  is now a second accepted marker; arbitrary `›` glyphs remain rejected.
+- The same run showed that 0.147 paints its banner one frame before the
+  composer. Readiness now waits through a bounded 5-second settle window and
+  requires 800ms of stable composer visibility; known blockers still return
+  immediately and an unknown surface still fails closed.
+- Re-run: `qa-codex-copresence-stop-start` with real Codex 0.147, private tmux,
+  isolated Hub, `--network none --cpus=2`: rc=0, PASS=35, FAIL=0.
+- Focused Docker unit: 23 passed, 0 failed, 36 assertions.
+
+Fake-TUI contract follow-up
+- The next CI run exposed three existing integration fixtures that painted only
+  a banner and `FAKE_CODEX_TUI_RESUMED`, but never painted an input composer.
+  The new production gate correctly refused those synthetic panes.
+- Fixed the shared fake Codex TUI to model the real current input surface with
+  `Ask Codex to do anything`; the product gate was not weakened.
+- Docker `--cpus=2` reruns:
+  - test1191-windows-steer-contract: rc=0, RESULT: PASS; Linux real Hub path
+    and all three witnessed-red checks passed.
+  - test-codex-appserver-watchdog: rc=0, TESTWD PASS; normal exit, hung process,
+    delayed TUI connection, foreign-marker safety, and witnessed-red checks passed.
+  - test-codex-copresence-first-start: rc=0, T535 PASS; the original 30-second
+    first-fetch path reached ready in 33.7 seconds and every mutation was red.

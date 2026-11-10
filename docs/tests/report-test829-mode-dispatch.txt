@@ -1,0 +1,85 @@
+test829 — stored V2 co-presence dispatch and native daemon verdict
+Date: 2026-10-09, Asia/Shanghai
+Scope: Hub #539 / #829, Issue sleep2agi/agent-network#2544, draft PR #2551.
+No production changes, merge, npm release, client release or TestFlight submission.
+
+Product candidate tested: a8909aab1ab7c0b44cfa0ebc93a834b4820574db.
+Changes: ordinary start selects co-presence for stored opencode-cli/V2/mode;
+internal bridge exports ANET_COPRESENCE_BRIDGE=1 to avoid recursion;
+unsafe-tools preflight remains before profile write/session replacement.
+V1 ordinary-start behavior is unchanged. No authentication bypass.
+
+Targeted non-root Docker regression, no vendor CLI on PATH, network none:
+image anet-test829:mode-a890
+sha256:6e11ac9127339f2b9a12293a10312f51fec4c750105264db20f7116e03f40e66
+container anet-test829-mode-a890: exit 0, 107 tests / 661 assertions PASS.
+  profile/writer 30/132; mirrored security parity 4/4;
+  CLI wiring/mode 14/45; HTTP audience 12/295; schemas/validation 47/185.
+This is not the complete CI suite or a native lifecycle gate.
+
+Native integration includes unmerged sibling PR #2550 and earlier CLI chain.
+Integration source: 6f02982e8b9276a11cf62259301e24a9b34e69e1.
+Image anet-test829:native-mode-6f02
+sha256:1deb1536b1a6d451808ec24f09f59b6852016cc4a24957b90cb789a02a8246a3
+Dependency base: anet-test827:close-drain
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac
+Source copied from exact git archive; bundles built inside isolated container.
+Exploratory integration only, not an immutable dependency/release gate.
+Real OpenCode @opencode/cli 2.0.22; real Hub/daemon/CLI; loopback model stub;
+network none; private HOME/SQLite/tmux; no production credentials.
+
+Fixture correction: daemon minimalEnv intentionally strips ANET_TMUX_SOCKET.
+A dangling default-socket symlink was replaced by tmux, so earlier test watched
+the wrong socket. Start the private endpoint first, then alias it; align HOME.
+The cc38ac53d8abefb3a07a30e7bec21c4b40d0b3a3 attempt's missing TUI assertion
+cannot by itself prove a product TUI failure. e727dfaf image was built, not run.
+
+Container anet-test829-native-mode-6f02, exit 1:
+PASS environment/authentication/unsafe-opt-in refusal/real remote create.
+PASS persisted V2 mode and rendered native TUI (ctrl+p).
+PASS network task accepted; FAIL task terminal receipt.
+Request cr_59863e22-7703-4330-b8e9-5cea1a4d00d0:
+  06:55:18Z daemon spawned launcher pid 219.
+  06:55:19Z child registered; Hub marked succeeded.
+  06:55:20Z daemon recovery discovered actual child pid 273.
+  06:55:22Z bridge V2 ready, SSE connected.
+  06:55:23Z +5s kill-0 on exited launcher returned ESRCH;
+             daemon acked runtime_capability_check_failed and removed map entry.
+  06:55:31Z onward get_inbox HTTP 401 after 3 retries.
+Read-only SQLite diagnostic in another isolated container confirmed:
+  request.status=succeeded; child token revoked_at=2026-10-09 06:55:23.
+The Hub failure ack revokes the token even when its guarded request update
+does not change already-succeeded status. Do not report this node as usable.
+
+Negative control: same image, change only opencode-start-mode.ts inside the
+container to return false, rebuild via native-overlay.sh. Container
+anet-test829-native-negative-6f02: exit 1 at native TUI rendered; no task layer.
+This is an explicitly mutated test copy, NOT an unmodified-SHA pass claim.
+
+Strengthened layered gate source: 2d3054361e99b44807db1d5bd299b3c0ab14064b.
+Image anet-test829:native-verdict-2d30
+sha256:798e650aebc4f0403c99b88ebb7d7aa662996ddd3a4a2e0ba7c474865d1095c1
+Container anet-test829-native-verdict-2d30: exit 1, expected product failure.
+PASS native TUI rendered and daemon post-start verdict observed.
+post-start identity: {status:succeeded, tokenRevoked:true}.
+FAIL daemon did not reject the runtime after registration. Stops before task.
+New gate waits for the actual daemon capability verdict, not a fixed sleep.
+
+Artifacts remain in named containers /artifacts (redacted report/Hub/daemon/
+bridge logs and TUI); raw isolated config/DB contain fixture tokens, not for
+publication. Repro: git archive <native SHA> | sg docker -c 'docker build
+ -f tests/test829-opencode-create/Dockerfile.native-cached
+ --build-arg SOURCE_COMMIT=<native SHA> -t <test-image> -'; then docker run
+ --network none -e EXPECTED_SOURCE_COMMIT=<native SHA> <test-image>.
+
+CI follow-up: a890's doc-symbol-pins failed on two CLI line anchors shifted
+by this change. Corrected docs/architecture.md anchors to 10492 and 3115.
+Docker read-only source + Git metadata validation: 17 pins scanned, 9 judged,
+8 skipped, 0 inaccessible refs, 0 drift. Skipped pins are not validated.
+Full CI remains separately tracked; no all-green claim.
+
+Next slice: identity-checked live generation evidence for successful launcher
+exit; remove only matching dead launcher PID (preserve recovered live child);
+negative tests for nonzero exit, stale/missing identity, dead bridge/TUI and
+revoked auth; rerun real remote create/task before stop/restart/model/UI gates.
+Do not treat exit 0 or marker-file existence alone as actual runtime health.

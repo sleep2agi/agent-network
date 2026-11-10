@@ -1,0 +1,37 @@
+Board #785: test668 heartbeat mutation attribution
+Base: main 67c92ddbb801eb488f22bd4f432f07b0725ec896.
+
+Two CI attempts for PR #2517 failed with WRONG_FAILURE: FAIL: later message
+inside the idle-heartbeat mutation. Normal product behavior passed. An idle
+report already on the wire can reach the Hub after SIGSTOP, so dispatch then
+correctly updates the idle session preview. The test blamed dispatch first.
+
+Only scenario.ts changes: check status on the same post-dispatch snapshot before
+checking its preview. Idle is attributed to heartbeat-idle. When working, the
+original later-message assertion still catches bad dispatch behavior. No new
+timeout, no accepted alternate error, no mutation removed, no product changes.
+
+Docker image built from this tree with the existing test668 Dockerfile, rc=0.
+TEST668_SOURCE_COMMIT identifies the base above; scenario.ts is the local patch.
+Final scenario was copied from a read-only mount into the disposable image.
+docker run --rm --cpus=2 ... bash tests/test668-grok-working-status/run.sh
+Result: rc=0, normal Grok and Claude held-turn scenarios pass. Seven mutations
+remain red at their named assertions: started, heartbeat-idle, later message,
+claude-started, session-preview, parent-running, parent-delivered.
+
+Deterministic oracle replay, same image and --cpus=2:
+After the scenario's post-SIGSTOP await sleep(300), write the observed in-flight
+report's state with a temporary fixture-only query:
+  UPDATE sessions SET status = 'idle' WHERE alias = 'demo-node'
+Run a temporary scenario copy with the new status assertion removed:
+  rc=1, first failure FAIL: later message (old wrong attribution).
+Run the final scenario with the identical injection:
+  rc=1, first failure FAIL: heartbeat-idle (correct attribution).
+The replay checker requires exactly those exit codes and first failure lines;
+checker rc=0. This simulates the recorded Hub state, not a product mutation.
+The suite's separate actual idle-heartbeat mutation above also remains red.
+
+An initial docker run was attempted before image export finished: rc=125,
+image not found, no test executed. After build completion, the tests above ran.
+git diff --check rc=0. No unrelated full-suite rerun or production operation.
+No service, proxy, secret, deployment, rollback or persisted schema changes.

@@ -3,6 +3,7 @@ import { getUserNetworkRole } from "./auth.js";
 import { pushEvent } from "./push.js";
 import { canRestWriteNetwork } from "./network-scope.js";
 import { parseDbTimestampMs } from "./db-timestamp.js";
+import { activeNodeTokenIds } from "./node-token-identity.js";
 
 type Node = { node_id: string; alias: string; network_id: string; owner_user_id: string | null; hostname: string | null; config_snapshot: string | null };
 type Binding = { request_id: string; network_id: string; node_id: string; daemon_node_id: string; workdir: string; requested_by: string; status: string; error: string | null };
@@ -41,11 +42,15 @@ function daemonReady(daemon: Node | null, node: Node): string | null {
   const snap = snapshot(daemon);
   if (snap.role !== "host_supervisor" || snap.daemon_capabilities?.adopt_capable !== true) return "daemon_not_adopt_capable";
   if (!node.hostname || daemon.hostname !== node.hostname) return "hostname_mismatch";
-  const session = db.get<{ last_seen_at: string }>(`SELECT last_seen_at FROM sessions WHERE alias=?1 AND network_id=?2`, daemon.alias, daemon.network_id);
+  const session = db.get<{ last_seen_at: string }>(
+    `SELECT last_seen_at FROM sessions WHERE alias=?1 AND network_id=?2
+       AND (node_id=?3 OR (node_id IS NULL AND NOT EXISTS (
+         SELECT 1 FROM nodes n WHERE n.network_id=?2 AND n.alias=?1 AND n.node_id!=?3)))`,
+    daemon.alias, daemon.network_id, daemon.node_id,
+  );
   const seen = parseDbTimestampMs(session?.last_seen_at ?? "");
   if (!Number.isFinite(seen) || Date.now() - seen > 300_000) return "daemon_offline";
-  const token = db.get(`SELECT token_id FROM api_tokens WHERE name=?1 AND network_id=?2 AND revoked_at IS NULL`, `node:${daemon.alias}`, daemon.network_id);
-  return token ? null : "daemon_offline";
+  return activeNodeTokenIds(daemon.node_id, daemon.network_id).length ? null : "daemon_offline";
 }
 
 export function requestAdopt(ctx: Human, args: { node_id: string; daemon_node_id: string; workdir: string }) {

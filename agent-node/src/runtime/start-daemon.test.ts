@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
 import { _resetChildrenMapForTest, getChildrenSnapshot } from "./stop-daemon";
 import { handleStartDoorbell, verifyStoppedChildConfig } from "./start-daemon";
 
@@ -30,6 +32,95 @@ describe("verifyStoppedChildConfig", () => {
   test("rejects group-writable config", () => {
     const p = writeConfig(); chmodSync(p, 0o660);
     expect(() => verifyStoppedChildConfig(root, "node_child_a", "child-a")).toThrow("writable_by_group");
+  });
+});
+
+describe("Codex finite launcher completion (#819)", () => {
+  function fixture() {
+    const path = writeConfig();
+    writeFileSync(path, JSON.stringify({ node_id: "node_child_a", alias: "child-a", codexCopresence: true }), { mode: 0o600 });
+    const child = Object.assign(new EventEmitter(), { pid: 4242, unref() {} });
+    const acks: any[] = [];
+    let spawns = 0;
+    const deps: any = {
+      workDir: root, nodesRoot: root, anetBin: () => "/trusted/anet",
+      spawnChild: () => { spawns++; return child; },
+      log: () => {}, warn: () => {}, signalProcess: () => {},
+      callCommHub: async (tool: string, args: any) => {
+        if (tool === "get_start_request") return { ok: true, child_node_id: "node_child_a", child_alias: "child-a", start_completion_capable: true };
+        acks.push(args);
+        return { ok: true, status: args.status };
+      },
+    };
+    return { child, acks, deps, spawns: () => spawns };
+  }
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+  test("waits for exit 0; simultaneous replay shares the launcher and drops its dead PID", async () => {
+    const f = fixture();
+    const first = handleStartDoorbell({ request_id: "str_wait" }, f.deps);
+    await tick();
+    const second = handleStartDoorbell({ request_id: "str_wait" }, f.deps);
+    await tick();
+    expect(f.spawns()).toBe(1);
+    expect(f.acks.map(a => a.status)).toEqual(["starting"]);
+    expect(getChildrenSnapshot()[0].pid).toBe(4242);
+    f.child.emit("exit", 0, null);
+    await Promise.all([first, second]);
+    expect(f.acks.at(-1)).toMatchObject({ status: "started", child_pid: 4242 });
+    expect(getChildrenSnapshot()).toEqual([]);
+  });
+
+  test.each([[1, null], [null, "SIGTERM"]])("exit %s / %s never reports started", async (code, signal) => {
+    const f = fixture();
+    const pending = handleStartDoorbell({ request_id: "str_fail" }, f.deps);
+    await tick(); f.child.emit("exit", code, signal); await pending;
+    expect(f.acks.map(a => a.status)).toEqual(["starting", "start_failed"]);
+    expect(f.acks.at(-1).error).toBe(`codex_launcher_exit:${signal || code}`);
+    expect(getChildrenSnapshot()).toEqual([]);
+  });
+
+  test("async spawn error is handled and acknowledged as failure", async () => {
+    const f = fixture();
+    const pending = handleStartDoorbell({ request_id: "str_error" }, f.deps);
+    await tick(); f.child.emit("error", new Error("ENOENT")); await pending;
+    expect(f.acks.at(-1)).toMatchObject({ status: "start_failed", error: "codex_launcher_spawn_failed" });
+    expect(getChildrenSnapshot()).toEqual([]);
+  });
+
+  test("lost terminal ack replays the result without spawning again", async () => {
+    const f = fixture(); const call = f.deps.callCommHub; let lost = true;
+    f.deps.callCommHub = async (tool: string, args: any) => {
+      if (tool === "ack_start_request" && args.status === "started" && lost) { lost = false; throw Error("offline"); }
+      return call(tool, args);
+    };
+    const pending = handleStartDoorbell({ request_id: "str_lost" }, f.deps);
+    const rejected = pending.then(() => null, error => error);
+    await tick(); f.child.emit("exit", 0, null);
+    expect((await rejected)?.message).toBe("offline");
+    await handleStartDoorbell({ request_id: "str_lost" }, f.deps);
+    expect(f.spawns()).toBe(1);
+    expect(f.acks.at(-1).status).toBe("started");
+  });
+
+  test("old Hub retains legacy dispatch behavior (no unsupported progress ack)", async () => {
+    const f = fixture(); const call = f.deps.callCommHub;
+    f.deps.callCommHub = async (tool: string, args: any) => {
+      const r = await call(tool, args); delete r.start_completion_capable; return r;
+    };
+    await handleStartDoorbell({ request_id: "str_old" }, f.deps);
+    expect(f.acks.map(a => a.status)).toEqual(["started"]);
+    f.child.emit("exit", 0, null);
+  });
+
+  test("real child process exits nonzero after spawn: never a successful start", async () => {
+    const f = fixture();
+    f.deps.spawnChild = (_bin: string, _args: string[], options: any) =>
+      spawn(process.execPath, ["-e", "setTimeout(() => process.exit(7), 25)"], options);
+    await handleStartDoorbell({ request_id: "str_real" }, f.deps);
+    expect(f.acks.map(a => a.status)).toEqual(["starting", "start_failed"]);
+    expect(f.acks.at(-1).error).toBe("codex_launcher_exit:7");
+    expect(getChildrenSnapshot()).toEqual([]);
   });
 });
 

@@ -78,6 +78,19 @@ describe("GET /api/node-create-requests?request_id=", () => {
     const { body } = await get("/api/node-create-requests?request_id=cr_b_pending", bToken);
     expect(body.request.status).toBe("pending");
     expect(body.request.error).toBeNull();
+    expect(body.request.child_node_id).toBeNull();
+    expect(body.request.launch_verified_at).toBeNull();
+  });
+  test("registration timestamp is not launch proof; explicit proof and identity round-trip", async () => {
+    const { db } = await import('./db.js');
+    db.run(`UPDATE node_create_requests SET status='succeeded', child_node_id='node_verified', acked_at=1234 WHERE request_id='cr_b_pending'`);
+    const registered = await get('/api/node-create-requests?request_id=cr_b_pending', bToken);
+    expect(registered.body.request.acked_at).toBe(1234);
+    expect(registered.body.request.launch_verified_at).toBeNull();
+    db.run(`UPDATE node_create_requests SET launch_verified_at=5678 WHERE request_id='cr_b_pending'`);
+    const verified = await get('/api/node-create-requests?request_id=cr_b_pending', bToken);
+    expect(verified.body.request).toMatchObject({ child_node_id: 'node_verified', launch_verified_at: 5678 });
+    expect((await get('/api/node-create-requests?request_id=cr_b_pending', aToken)).status).toBe(404);
   });
   test("missing request_id → 400", async () => {
     const { status, body } = await get("/api/node-create-requests", aToken);

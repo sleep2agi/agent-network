@@ -33,6 +33,8 @@ IDENTITY_VARS=(
   CODEX_HOME CODEX_SANDBOX
   GROK_BINARY GROK_SESSION
   TMUX TMUX_PANE
+  # 2026-10-31 —— #3159：provider 的 key 同样不该继承（hub 源码里没有任何 process.env 读取）
+  OPENAI_API_KEY MINIMAX_CODING_API_KEY WEREAD_API_KEY DEEPSEEK_API_KEY
 )
 # hub 真读的配置 → 必须保留（继承值）
 KEEP_VARS=(
@@ -52,6 +54,7 @@ new_fixture() {
 ANET_HUB_SECRET_VAULT_KEY=test-fixture-only
 COMMHUB_DUE_REMINDERS=from-hub-env
 GROK_FROM_HUB_ENV=explicit-config-wins
+PROVIDER_FROM_HUB_ENV_API_KEY=explicit-provider-config-wins
 ENVEOF
   cat > "$dir/fake-bin/bun" <<'BUNEOF'
 #!/bin/bash
@@ -101,8 +104,10 @@ check() {
   grep -qx "ANET_HUB_SECRET_VAULT_KEY=test-fixture-only" "$dir/env.dump" || { echo "  [$label] vault key from hub.env missing"; fails=$((fails+1)); }
   grep -qx "COMMHUB_DUE_REMINDERS=from-hub-env" "$dir/env.dump" || { echo "  [$label] hub.env did not win over inherited value"; fails=$((fails+1)); }
   grep -qx "GROK_FROM_HUB_ENV=explicit-config-wins" "$dir/env.dump" || { echo "  [$label] hub.env-set denylisted-prefix var was scrubbed (scrub ran after source)"; fails=$((fails+1)); }
+  # #3159：`*_API_KEY` 被清，但 **hub.env 里显式声明的**照样生效（否则就等于把出口也堵了）
+  grep -qx "PROVIDER_FROM_HUB_ENV_API_KEY=explicit-provider-config-wins" "$dir/env.dump" || { echo "  [$label] hub.env-declared provider key was scrubbed"; fails=$((fails+1)); }
   if grep -q 'SECRETVAL-' "$dir/output.log"; then echo "  [$label] launcher log printed a value"; fails=$((fails+1)); fi
-  for n in COMMHUB_TOKEN ANET_NODE_MARKER CLAUDE_CODE_ENTRYPOINT CODEX_HOME GROK_BINARY TMUX_PANE; do
+  for n in COMMHUB_TOKEN ANET_NODE_MARKER CLAUDE_CODE_ENTRYPOINT CODEX_HOME GROK_BINARY TMUX_PANE OPENAI_API_KEY; do
     if ! grep -qw "$n" "$dir/output.log"; then echo "  [$label] scrub log line does not name $n"; fails=$((fails+1)); fi
   done
   [ "$fails" -eq 0 ]

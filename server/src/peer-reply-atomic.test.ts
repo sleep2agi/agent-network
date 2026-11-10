@@ -123,6 +123,11 @@ describe("#698 atomic peer reply", () => {
     const result = await call(toolsFor(B).send_peer_reply, {
       alias: A, text: "bound-token wins", in_reply_to: taskId, status: "replied",
     });
+    // 2026-10-31 —— #3275：send_peer_reply 的形状（此前只断言 ok）。
+    // 三键各有用处：message_id 是这条回复的收据；session_status 让调用方不必再查一次
+    // 「我这边的会话现在是什么状态」——原子性就体现在这里：回复落库与会话状态是同一次写。
+    expect(Object.keys(result).sort()).toEqual(["message_id", "ok", "session_status"]);
+    expect(result.session_status).toBe("idle");
     expect(result.ok).toBe(true);
     expect(task(taskId).status).toBe("replied");
   });
@@ -358,6 +363,8 @@ describe("#698 atomic peer reply", () => {
     expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id = ?1", taskId)?.n).toBe(0);
   });
 
+  // #3259 收口 —— 迟到通道只对「终态但没成功交付过回复」的任务开放；
+  // `replied` 的任务再补就是重复投递，仍然必须以 reply_task_terminal 拒绝。
   test("terminal replay is rejected and cannot deliver twice", async () => {
     const taskId = await dispatch(A, B, "idempotent work");
     const handler = toolsFor(B).send_peer_reply;

@@ -1,0 +1,68 @@
+Requirement #690 — Hub133 activation evidence
+
+Source PR2677 head15aac0fbd981fdddec53badd5da970cbb94796f2.
+Source/release main:65923509c55f54e14082ac3804ae883d37723f44
+Tested PR merge2de847cb73e4690b0b53394e7e01d90db88cec8d has the same tree.
+Caller core38338314085:108 real HTTP,34 assertion witness runs,103 existing
+ACK/write-scope/adoption/stop-delete regressions and1 tools-byte ceiling PASS.
+Sender core38338314269:64 HTTP,10 witnesses,25 transport/origin regressions
+PASS. Ten required checks and actual .110/.121 client compatibility PASS.
+Previous run38337797340 had one older lifecycle fixture claiming another
+sender; the input was corrected while retaining node_not_active/no-enqueue
+assertions. Its failure log is preserved; it is not reported as a green run.
+The earlier PG heartbeat mutation needed an explicitly typed parameter;
+its transport/type error was not accepted as an assertion witness. All14
+new local witness runs ultimately passed. Mutation baseline4 is unchanged.
+Completed related results were preserved before redundant superseded and
+merged-PR matrices were cancelled. Main/formal validation was retained; a
+cancelled whole matrix is not a successful whole matrix.
+
+Formal release38338523163:all7 jobs SUCCESS (build, four gates, aggregate,
+preview publication and registry verification). Public preview.133 package:
+bytes=1243157
+sha256=70b0b96fb95ec68ddfb55eafb6f2715a948fac0b9b7b36e026a82f3bfdd93ad6
+SRI=sha512-KbuJw1nwzmhtudWQmFUWzPaBOHk3/cOCgwSHlyKb1P+vcBgMqaJJsLK3Nr5FhzxiNXzgibZScQCI1orQDnxCsA==
+Whole public bytes equal the exact-main gated artifact; all346 installed
+package files match. preview133, latest remains preview30.
+
+Deployment PR2678 head55741ab84917db8493e30136d205acde699ed6a8.
+Deployment main:446fa719a0e6542396ca5f66079d03c7028f5ec2
+Entire server tree unchanged relative to source-main. Profile Docker38338940854,
+ten required checks and corrected source-symbol checks38338941106 PASS.
+Chinese/English renamedEvent pins point at the actual definition219.
+Every transitive lock entry remains unchanged. Profile selects runtime-v116-
+preview133, retaining runtime-v115-preview132 for rollback.
+
+A stale operator-script baseline131 assertion stopped before backup; the actual
+baseline132 was verified and the existing inactive install was fully compared
+before resuming. The first offline invocation could not find its disposable
+Docker image, so it did not run migrations. The image was rebuilt from exact
+main Dockerfile/drive authority under an owned test-only tag, and the existing
+consistent private backup was reused. Neither interruption changed production.
+No failed/suspended stage was promoted to a successful preflight.
+
+Private owner-only VACUUM INTO backup integrity=ok, bytes=743596032.
+Offline Bun1.4 schema/migration probe PASS; preserved counts:
+{"sessions": 331, "tasks": 81483, "nodes": 302, "networks": 7, "requirements": 1110, "api_tokens": 641, "user_inbox": 2687}
+Provider snapshot/write/application/login/config/binding counts also preserved.
+Production data and credential values were not uploaded to CI or this report.
+
+Activation started:2026-10-13T03:04:22.098138+00:00
+Activation confirmed:2026-10-13T03:04:28.947769+00:00
+Only commhub-hub restarted:PID548351 ->584652, restart90 ->91.
+Actual entrypoint:$HOME/.commhub/runtime-v116-preview133/node_modules/@sleep2agi/commhub-server/bin/commhub.ts
+Installed profile equals exact deployment-main authority. Base launcher SHA256
+4a16946c9e8687940110364e68fc8cc20e51fa3c7de0af2c047effb0b78993d8
+and owner-only hub.env inode/size/mtime/permissions are preserved. Original
+Bun/environment/key sources, provider/login/model, ports/proxy and business
+node processes were not changed by this activation. No latest promotion.
+
+Observation:2026-10-13T03:05:06.413135+00:00
+PID584652/restart91 stable, secured health133, SSE127,
+fresh heartbeats94; natural task events:[{"event_type": "task.replied", "to_status": "replied", "n": 1}, {"event_type": "task.send.delivered", "to_status": "delivered", "n": 2}, {"event_type": "task.warning.delivered_stale_60s", "to_status": "delivered", "n": 1}]
+Appended vault_master_key_missing/panic/segfault markers=0. Stale-delivery
+warnings can still occur; no claim of fleet-wide ACK/model execution, long-term
+stability or data disaster recovery. Recovery follows deploy/hub/README.md;
+private data and original key sources remain required, and the named external
+key record remains NOT COVERED. Daemon listing identity display is tracked
+separately after P0, without extending this source change to the UI.

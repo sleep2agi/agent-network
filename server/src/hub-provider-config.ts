@@ -1,0 +1,202 @@
+// #907: real network-scoped catalog + explicit dispatch; not a Provider proxy.
+import { createHash } from 'node:crypto';
+import { db } from './db';
+import { getUserNetworkRole } from './auth';
+import { vaultUpsert, vaultGet, vaultListKeys, VaultError } from './vault';
+import { requestProviderWrite } from './daemon-provider-snapshots';
+type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
+type Config = { id: string; label: string; enabled: boolean; protocol: 'openai-responses' | 'openai-chat-completions' | 'anthropic-messages'; baseUrl: string; models: string[] };
+const denied = (error: string) => ({ ok: false as const, error });
+
+/**
+ * 2026-10-31 —— **写侧错误的 HTTP 状态必须是穷尽表**（外部复核：三元式默认分支
+ * = 未映射与某个真实含义同值 ⇒ 口令字段；应改成 `Record<Code, number>`）。
+ *
+ * 原来 REST 路由里写的是：
+ *   provider_owner_required ? 403 : revision_conflict ? 409 : access_denied ? 403 : 400
+ * ⇒ 新增一个错误码时它会**默认落到 400**，而 400 对某些码是错的（例如 vault 缺失应是 409/503）。
+ *
+ * 这里的码集合来自本文件里所有 `denied('...')` 与 VaultError 的 code；
+ * 测试会断言「映射键 == 码清单」，并且**码清单必须能在源码里逐个找到**（跨源，不是自说自话）。
+ */
+export const PROVIDER_WRITE_ERROR_CODES = [
+  "user_token_required",
+  "provider_owner_required",
+  "provider_access_denied",
+  "invalid_revision",
+  "invalid_hub_provider",
+  "invalid_provider_key",
+  "invalid_provider_secret_reference",
+  "provider_secret_reference_missing",
+  "provider_key_required",
+  "hub_provider_revision_conflict",
+  "hub_provider_disabled",
+  "hub_provider_save_failed",
+  "vault_unavailable",
+] as const;
+export type ProviderWriteErrorCode = (typeof PROVIDER_WRITE_ERROR_CODES)[number];
+export const PROVIDER_WRITE_STATUS: Record<ProviderWriteErrorCode, number> = {
+  user_token_required: 401,
+  provider_owner_required: 403,
+  provider_access_denied: 403,
+  invalid_revision: 400,
+  invalid_hub_provider: 400,
+  invalid_provider_key: 400,
+  invalid_provider_secret_reference: 400,
+  provider_secret_reference_missing: 400,
+  provider_key_required: 400,
+  hub_provider_revision_conflict: 409,
+  hub_provider_disabled: 409,
+  hub_provider_save_failed: 500,
+  vault_unavailable: 503,
+};
+/**
+ * 码 → HTTP 状态。
+ *
+ * 2026-10-31 —— 参数类型从 `string` 收紧到 `ProviderWriteErrorCode`：
+ * 之前签名收 `string`，于是「表里加码、忘了加状态」在**调用点**不会被类型拦住
+ * （编译器只看见一个字符串）。而 `Record<ProviderWriteErrorCode, number>` 只在
+ * 「用类型化的键去索引」时才保证穷尽 —— 签名放宽就等于把穷尽性丢了。
+ *
+ * 兜底也改了方向：`?? 400` 会告诉客户端「你的请求不对」，而表里查不到的码是**我们**的缺陷
+ * ⇒ 归因指向了错误的行动方。现在兜底返回 500（服务端错误），并让测试断言它不被 400 顶替。
+ */
+export function providerWriteStatus(code: ProviderWriteErrorCode): number {
+  return PROVIDER_WRITE_STATUS[code] ?? 500;
+}
+const idValid = (id: unknown) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id);
+function auth(h: Human, write: boolean, owner = false) {
+  if (h.isNode || !h.userId || !h.networkId) return denied('user_token_required');
+  const role = getUserNetworkRole(h.userId, h.networkId);
+  if (!role || (owner && role !== 'owner') || (write && !['owner', 'admin'].includes(role))) return denied(owner ? 'provider_owner_required' : 'provider_access_denied');
+  return null;
+}
+function validConfig(value: any): value is Config {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some(k => !['id', 'label', 'enabled', 'protocol', 'baseUrl', 'models', 'key', 'secretKeyRef'].includes(k))
+    || !idValid(value.id) || typeof value.label !== 'string' || !value.label.trim() || value.label.length > 100
+    || /[\x00-\x1f\x7f]/.test(value.label) || typeof value.enabled !== 'boolean'
+    || !['openai-responses', 'openai-chat-completions', 'anthropic-messages'].includes(value.protocol)
+    || typeof value.baseUrl !== 'string' || value.baseUrl.length > 2048
+    || !Array.isArray(value.models) || !value.models.length || value.models.length > 200
+    || new Set(value.models).size !== value.models.length
+    || value.models.some((m: unknown) => typeof m !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(m))) return false;
+  try { const u = new URL(value.baseUrl); return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; }
+  catch { return false; }
+}
+type Row = { revision: number; config_json: string; secret_key_ref: string; updated_at: number };
+function row(networkId: string, id: string) {
+  return db.get<Row>('SELECT revision,config_json,secret_key_ref,updated_at FROM hub_provider_configs WHERE network_id=?1 AND provider_id=?2', networkId, id);
+}
+function publicRow(networkId: string, stored: Row, exposeRef = false) {
+  const config = JSON.parse(stored.config_json) as Config;
+  return { ...config, ...(exposeRef ? { secret_key_ref: stored.secret_key_ref } : {}), revision: stored.revision, updated_at: stored.updated_at, source: 'hub',
+    credential_present: vaultListKeys(networkId).includes(stored.secret_key_ref), verification: 'not_checked',
+    compatible_runtimes: config.protocol === 'openai-responses' ? ['codex-tui'] : [] };
+}
+export function readHubProviders(h: Human, exposeRefs = false) {
+  const refusal = auth(h, false); if (refusal) return refusal;
+  const rows = db.all<Row>('SELECT revision,config_json,secret_key_ref,updated_at FROM hub_provider_configs WHERE network_id=?1 ORDER BY provider_id', h.networkId!);
+  // 2026-10-31 —— **这个端点的空数组也必须自报家门**（与 MCP list_providers 同一课）。
+  // 关键事实：两条「providers」读的是**不同的表** ——
+  //   GET /api/providers  → hub_provider_configs（网络自有的 provider 配置，本函数）
+  //   MCP list_providers  → providers / provider_models
+  // 于是「客户端没有可选模型」既可能是「这张表空」，也可能是「另一张表空」，
+  // 而两者在载荷里长得一模一样。⇒ 在 source 之外再说清 state 与「另一处叫什么」。
+  const otherSource = db.get<{ cnt: number }>(
+    'SELECT COUNT(*) AS cnt FROM providers WHERE network_id=?1 AND enabled=1', h.networkId!);
+  const otherCount = otherSource?.cnt ?? 0;
+  // 2026-10-31 —— **闭集不许有死成员**：客户端 union 里写着
+  // "configured" | "unconfigured" | "all_disabled"，而这个端点原来只产出前两个
+  // ⇒ all_disabled 是一格永远不会出现的状态，界面里那条分支也就永远跑不到
+  // （实测：本地 hub 建了一行 enabled:true 的 provider 之后，state 仍是 configured／空表是 unconfigured，
+  //   把 enabled 改成 false 依旧是 configured ⇒ 读的人会把「全都关了」看成「配置好了」）。
+  // 现在三态都可产出，并把「哪些算可用」用计数说清（客户端不必自己再数一遍）。
+  const parsed = rows.map(r => JSON.parse(r.config_json) as { enabled?: boolean; models?: string[] });
+  const enabledRows = parsed.filter(c => c.enabled === true);
+  const state = rows.length === 0 ? 'unconfigured' as const
+    : enabledRows.length === 0 ? 'all_disabled' as const
+    : 'configured' as const;
+  return { ok: true as const, network_id: h.networkId!, source: 'hub' as const,
+    // 读的是哪张表 —— 名字直接写出来，避免下一个人拿这个结果去解释另一个接口
+    source_table: 'hub_provider_configs' as const,
+    state,
+    counts: {
+      providers: rows.length,
+      providers_enabled: enabledRows.length,
+      providers_disabled: rows.length - enabledRows.length,
+      models_enabled: enabledRows.reduce((n, c) => n + (Array.isArray(c.models) ? c.models.length : 0), 0),
+      providers_without_models: enabledRows.filter(c => !Array.isArray(c.models) || c.models.length === 0).length,
+      providers_in_cli_registry: otherCount,
+    },
+    ...(state === 'all_disabled' ? {
+      hint: '这个网络里配置了 ' + rows.length + ' 个 provider，但**全部被禁用** ⇒ 客户端仍然没有可选模型。'
+        + '这不是「还没配置」，要做的是启用其中一个（或在确认无用后删除）。',
+    } : {}),
+    ...(state === 'unconfigured' ? {
+      hint: otherCount > 0
+        ? '本端点读 hub_provider_configs（网络自有 provider 配置），此处为空；但要给客户端选模型，还需要这里至少一行 —— CLI 注册表里的 ' + otherCount + ' 条不会自动出现在本端点。'
+        : '本端点读 hub_provider_configs，此处为空，且 CLI 注册表（providers）也是 0 条 ⇒ 客户端没有任何可选模型；需要管理员先录入第一行。',
+    } : {}),
+    ...(exposeRefs ? { secret_reference_supported: true } : {}), providers: rows.map(r => publicRow(h.networkId!, r, exposeRefs)) };
+}
+export function putHubProvider(h: Human, revision: number, input: unknown) {
+  // This operation stores/rotates a shared secret: same OWNER boundary as vault writes.
+  const refusal = auth(h, true, true); if (refusal) return refusal;
+  if (!Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) return denied('invalid_revision');
+  if (!validConfig(input)) return denied('invalid_hub_provider');
+  const value = input as Config & { key?: string; secretKeyRef?: string };
+  if (value.key !== undefined && (typeof value.key !== 'string' || !value.key || value.key.length > 8192 || /[\s\x00-\x1f\x7f]/.test(value.key))) return denied('invalid_provider_key');
+  if (value.secretKeyRef !== undefined && (typeof value.secretKeyRef !== 'string' || !/^[A-Z][A-Z0-9_]{0,63}$/.test(value.secretKeyRef)
+    || value.key !== undefined)) return denied('invalid_provider_secret_reference');
+  if (value.secretKeyRef && !vaultListKeys(h.networkId!).includes(value.secretKeyRef)) return denied('provider_secret_reference_missing');
+  const old = row(h.networkId!, value.id);
+  if ((old?.revision ?? 0) !== revision) return denied('hub_provider_revision_conflict');
+  const previous = old ? JSON.parse(old.config_json) as Config : null;
+  if (!value.key && !value.secretKeyRef && (!old || previous?.baseUrl !== value.baseUrl || previous?.protocol !== value.protocol)) return denied('provider_key_required');
+  // A new plaintext key belongs to this Provider. Never overwrite a separately
+  // named shared key merely because the previous config referenced it.
+  const privateRef = `HUB_PROVIDER_${createHash('sha256').update(JSON.stringify([h.networkId, value.id])).digest('hex').slice(0, 32).toUpperCase()}`;
+  const ref = value.secretKeyRef ?? (value.key ? privateRef : old!.secret_key_ref);
+  const { key, secretKeyRef, ...config } = value;
+  try {
+    db.transaction(() => {
+      if ((row(h.networkId!, value.id)?.revision ?? 0) !== revision) throw new Error('hub_provider_revision_conflict');
+      if (key) vaultUpsert(h.networkId!, ref, key);
+      db.run(`INSERT INTO hub_provider_configs(network_id,provider_id,revision,config_json,secret_key_ref,updated_at) VALUES(?1,?2,?3,?4,?5,?6)
+        ON CONFLICT(network_id,provider_id) DO UPDATE SET revision=excluded.revision,config_json=excluded.config_json,secret_key_ref=excluded.secret_key_ref,updated_at=excluded.updated_at`,
+        [h.networkId!, value.id, revision + 1, JSON.stringify(config), ref, Date.now()]);
+      // Cancel still-pending dispatches when the source is edited/rotated/disabled.
+      // Already installed copies are NOT remotely revoked by this change.
+      db.run(`UPDATE daemon_provider_snapshots SET status='failed',error='hub_provider_source_changed'
+        WHERE status='pending' AND request_id IN (SELECT request_id FROM hub_provider_bindings WHERE network_id=?1 AND provider_id=?2)`, [h.networkId!, value.id]);
+      db.run(`DELETE FROM daemon_provider_writes WHERE request_id IN (SELECT b.request_id FROM hub_provider_bindings b
+        JOIN daemon_provider_snapshots s ON s.request_id=b.request_id WHERE b.network_id=?1 AND b.provider_id=?2 AND s.status!='pending')`, [h.networkId!, value.id]);
+    });
+    return { ok: true as const, network_id: h.networkId!, provider: publicRow(h.networkId!, row(h.networkId!, value.id)!, secretKeyRef !== undefined) };
+  } catch (error) { return denied(error instanceof VaultError ? error.code : 'hub_provider_save_failed'); }
+}
+export function bindHubProvider(h: Human, input: { id: string; revision: number; daemon_node_id: string; daemon_revision: number; confirm: boolean }) {
+  const refusal = auth(h, true); if (refusal) return refusal;
+  if (!input || !idValid(input.id) || input.confirm !== true || !Number.isSafeInteger(input.revision)
+    || !Number.isSafeInteger(input.daemon_revision) || input.daemon_revision < 0) return denied('invalid_hub_provider_binding');
+  const stored = row(h.networkId!, input.id);
+  if (!stored || stored.revision !== input.revision) return denied('hub_provider_revision_conflict');
+  const config = JSON.parse(stored.config_json) as Config;
+  if (!config.enabled) return denied('hub_provider_disabled');
+  // Never silently treat Chat Completions/Anthropic as Codex Responses.
+  if (config.protocol !== 'openai-responses') return denied('runtime_protocol_not_supported');
+  const targetId = `hub_${createHash('sha256').update(JSON.stringify([h.networkId, input.id])).digest('hex').slice(0, 24)}`;
+  try {
+    const key = vaultGet(h.networkId!, stored.secret_key_ref); if (!key) return denied('provider_key_missing');
+    const queued = requestProviderWrite(h, input.daemon_node_id, input.daemon_revision, { id: targetId,
+      label: `Hub · ${config.label}`.slice(0, 100), enabled: true, runtimes: [{ runtime: 'codex-tui', auth: [
+        { id: 'hub_key', kind: 'api_key', models: config.models, baseUrl: config.baseUrl, key },
+      ] }] });
+    if (!queued.ok) return queued;
+    db.run(`INSERT INTO hub_provider_bindings(request_id,network_id,provider_id,provider_revision,daemon_node_id,daemon_provider_id,created_at)
+      VALUES(?1,?2,?3,?4,?5,?6,?7)`, [queued.request_id, h.networkId!, input.id, input.revision, input.daemon_node_id, targetId, Date.now()]);
+    return { ...queued, daemon_node_id: input.daemon_node_id,
+      provider_reference: { network_id: h.networkId!, id: input.id, revision: input.revision, daemon_provider_id: targetId } };
+  } catch (error) { return denied(error instanceof VaultError ? error.code : 'hub_provider_binding_failed'); }
+}

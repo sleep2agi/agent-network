@@ -11,6 +11,7 @@
 // 成员资格仍由调用方原有的 getUserNetworkRole 判定。两件事分开,别合并成一个判据。
 
 import { db } from "./db.js";
+import { departmentSubtree } from "./department-heads.js";
 
 const UNRESTRICTED_ROLES = new Set(["owner", "admin"]);
 
@@ -98,7 +99,7 @@ export function visibleAgents(userId: string, networkId: string): VisibleAgents 
   const messageNodeIds = new Set<string>();
   // RFC-038 §8:组授权展开成「该组此刻的成员节点」—— 每次现算,组里新加的节点下一次请求就可见。
   // 只并同网络、且 nodes 表里还在的节点;可对话取并集(直接授权或任一组给了就算)。
-  const grants: AgentGrant[] = [...listAgentGrants(networkId, userId), ...groupGrantNodes(networkId, userId)];
+  const grants: AgentGrant[] = [...listAgentGrants(networkId, userId), ...groupGrantNodes(networkId, userId), ...departmentGrantNodes(networkId, userId)];
   // #2133:所有授权节点的 alias 一次查完(原来每个节点单独查一次 nodes ∪ sessions:300 条授权 ≈ 300 次查询,
   // 而受限成员的每次 /api/status 轮询都走这里)。结果与原实现逐字一致:授权按上面数组的顺序,
   // 同一节点内的 alias 按 UNION 的去重升序 —— agent-access-batch.test.ts 在随机夹具上逐字比对。
@@ -166,6 +167,68 @@ export function listGroupGrants(networkId: string, userId: string): AgentGroupGr
       WHERE g.network_id = ?1 AND g.user_id = ?2 ORDER BY ag.name`,
     networkId, userId,
   ).map((row) => ({ group_id: row.group_id, name: row.name, can_message: row.can_message === 1 }));
+}
+
+// ══════════════ 部门维度授权(admin 2026-11-05) ══════════════
+//
+// 用户问的是「给某个用户授权,让他看到**某个组织架构下**的所有节点」。
+// Agent 组授权(RFC-038 §8)回答的是 Agent 侧的树;人的组织架构是另一条轴
+// (network_departments + nodes.department_id),此前**没有**这一档。
+//
+// 语义与组授权完全同构,只有展开源不同:
+//   组  ⇒ agent_group_members
+//   部门 ⇒ departmentSubtree(dept) 里的所有部门 → nodes.department_id ∈ 该集合
+// 同样是**每次现算**:部门里新挂的节点,下一次请求就可见,不需要重新授权。
+//
+// 已知边界(必须让调用方看见,否则会静默少人):
+//   没有填 department_id 的节点**永远**不会因为部门授权而可见。
+//   ⇒ 接口把它作为 `coverage` 一起返回,而不是让人以为「授权了就应该全看见」。
+
+export type DepartmentGrant = { department_id: string; name: string; can_message: boolean };
+
+export function departmentGrantNodes(networkId: string, userId: string): AgentGrant[] {
+  const rows = db.all<{ department_id: string; can_message: number }>(
+    "SELECT department_id, can_message FROM network_member_department_grants WHERE network_id = ?1 AND user_id = ?2",
+    networkId, userId,
+  );
+  if (rows.length === 0) return [];
+  const canMessage = new Map<string, boolean>();
+  for (const row of rows) {
+    for (const deptId of departmentSubtree(networkId, row.department_id)) {
+      // 任一授权允许对话即允许(与组授权「取并集」一致)。
+      canMessage.set(deptId, (canMessage.get(deptId) ?? false) || row.can_message === 1);
+    }
+  }
+  if (canMessage.size === 0) return [];
+  const deptIds = [...canMessage.keys()];
+  const inList = deptIds.map((_, i) => `?${i + 2}`).join(", ");
+  return db.all<{ node_id: string; department_id: string }>(
+    `SELECT node_id, department_id FROM nodes WHERE network_id = ?1 AND department_id IN (${inList}) ORDER BY node_id`,
+    networkId, ...deptIds,
+  ).map((row) => ({ node_id: row.node_id, alias: null, can_message: canMessage.get(row.department_id) === true }));
+}
+
+export function listDepartmentGrants(networkId: string, userId: string): DepartmentGrant[] {
+  return db.all<{ department_id: string; name: string | null; can_message: number }>(
+    `SELECT g.department_id, d.name, g.can_message
+       FROM network_member_department_grants g
+       LEFT JOIN network_departments d ON d.department_id = g.department_id AND d.network_id = g.network_id
+      WHERE g.network_id = ?1 AND g.user_id = ?2 ORDER BY d.name, g.department_id`,
+    networkId, userId,
+  ).map((row) => ({ department_id: row.department_id, name: row.name ?? row.department_id, can_message: row.can_message === 1 }));
+}
+
+/** 覆盖率:网络里有多少节点填了部门、有多少没填(没填的永远不可能被部门授权覆盖)。 */
+export function departmentCoverage(networkId: string): { nodes_total: number; nodes_with_department: number; nodes_without_department: number } {
+  const row = db.get<{ total: number; with_dept: number }>(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN department_id IS NOT NULL AND department_id <> '' THEN 1 ELSE 0 END) AS with_dept
+       FROM nodes WHERE network_id = ?1`,
+    networkId,
+  );
+  const total = row?.total ?? 0;
+  const withDept = row?.with_dept ?? 0;
+  return { nodes_total: total, nodes_with_department: withDept, nodes_without_department: total - withDept };
 }
 
 export function listAgentGroups(networkId: string): AgentGroup[] {
@@ -331,7 +394,7 @@ export function canMessageAgent(userId: string, networkId: string | null | undef
 export type AgentGrantInput = { node_id?: unknown; alias?: unknown; can_message?: unknown };
 
 export type ReplaceGrantsResult =
-  | { ok: true; agent_access: AgentAccessMode; grants: AgentGrant[]; group_grants: AgentGroupGrant[] }
+  | { ok: true; agent_access: AgentAccessMode; grants: AgentGrant[]; group_grants: AgentGroupGrant[]; department_grants: DepartmentGrant[] }
   | { ok: false; error: string; status: number; detail?: unknown };
 
 const MAX_GRANTS = 1000;
@@ -347,6 +410,8 @@ export function replaceAgentGrants(input: {
   agentAccess?: unknown;
   /** RFC-038 §8:组授权。undefined = 保持原样(旧 app 的 PUT 不带它,不能把组授权清掉)。 */
   groupGrants?: unknown;
+  /** 部门维度授权。undefined = 保持原样（旧客户端的 PUT 不带它，不能把部门授权清掉）。 */
+  departmentGrants?: unknown;
   actorUserId: string;
 }): ReplaceGrantsResult {
   const member = db.get<{ role: string }>(
@@ -415,7 +480,38 @@ export function replaceAgentGrants(input: {
     }
   }
 
+  let departmentRows: Array<{ department_id: string; can_message: number }> | undefined;
+  if (input.departmentGrants !== undefined) {
+    if (!Array.isArray(input.departmentGrants)) return { ok: false, error: "department_grants_must_be_array", status: 400 };
+    if (input.departmentGrants.length > MAX_GRANTS) return { ok: false, error: "too_many_grants", status: 400, detail: { limit: MAX_GRANTS } };
+    const seenDepts = new Set<string>();
+    departmentRows = [];
+    for (const [index, raw] of input.departmentGrants.entries()) {
+      const item = typeof raw === "string" ? { department_id: raw } : (raw && typeof raw === "object" && !Array.isArray(raw) ? raw as { department_id?: unknown; can_message?: unknown } : {});
+      const deptId = typeof item.department_id === "string" ? item.department_id.trim() : "";
+      if (!deptId) return { ok: false, error: "department_grant_needs_department_id", status: 400, detail: { index } };
+      if (item.can_message !== undefined && typeof item.can_message !== "boolean") {
+        return { ok: false, error: "can_message_must_be_boolean", status: 400, detail: { index } };
+      }
+      if (!db.get("SELECT 1 FROM network_departments WHERE department_id = ?1 AND network_id = ?2", deptId, input.networkId)) {
+        return { ok: false, error: "department_not_in_network", status: 400, detail: { index, department_id: deptId } };
+      }
+      if (seenDepts.has(deptId)) continue;
+      seenDepts.add(deptId);
+      departmentRows.push({ department_id: deptId, can_message: item.can_message === false ? 0 : 1 });
+    }
+  }
+
   db.transaction(() => {
+    if (departmentRows) {
+      db.run("DELETE FROM network_member_department_grants WHERE network_id = ?1 AND user_id = ?2", [input.networkId, input.userId]);
+      for (const row of departmentRows) {
+        db.run(
+          `INSERT INTO network_member_department_grants (network_id, user_id, department_id, can_message, created_by) VALUES (?1, ?2, ?3, ?4, ?5)`,
+          [input.networkId, input.userId, row.department_id, row.can_message, input.actorUserId],
+        );
+      }
+    }
     if (groupRows) {
       db.run("DELETE FROM network_member_group_grants WHERE network_id = ?1 AND user_id = ?2", [input.networkId, input.userId]);
       for (const row of groupRows) {
@@ -445,6 +541,7 @@ export function replaceAgentGrants(input: {
     agent_access: getAgentAccessMode(input.networkId, input.userId) ?? "granted",
     grants: listAgentGrants(input.networkId, input.userId),
     group_grants: listGroupGrants(input.networkId, input.userId),
+    department_grants: listDepartmentGrants(input.networkId, input.userId),
   };
 }
 
@@ -452,6 +549,7 @@ export function replaceAgentGrants(input: {
 export function deleteAgentGrants(networkId: string, userId: string): void {
   db.run("DELETE FROM network_member_agent_grants WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
   db.run("DELETE FROM network_member_group_grants WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
+  db.run("DELETE FROM network_member_department_grants WHERE network_id = ?1 AND user_id = ?2", [networkId, userId]);
 }
 
 // 多用户 Agent 权限 —— 受限成员(只看授权 Agent 的成员)能调的 MCP 工具。每一个都逐条审过:

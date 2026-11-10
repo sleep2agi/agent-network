@@ -1,0 +1,116 @@
+Hub #539 / #832: CLI + MCP + final-registry integrated candidate
+2026-10-09, Asia/Shanghai. TEST-ONLY BRANCH; no merge/release/deployment.
+
+Inputs
+- PR2545 CLI/Hub/TUI: eb38c8a241254ebd28f4ddd395abdc0a96f989fa
+- PR2547 MCP: 2880ae11ef444b413f5d21c9b026f935f33d9e0c
+- PR2549 registry product: c945bb44c2d7652c5fca90f7b3c047a6e1ecf463
+  (report-only head ad10f1007e609dbe1c817f90e9e600a7de17a77c)
+- Integrated baseline: 5da6f7023937e12c84a8d9d283f42d9e9c09db51
+- Enhanced lifecycle test: 2a7556f16d92229313260076e5c0c20ddc23d0dc
+- Drain fix candidate: ae3a85d515ed713ef6261bf305b8aa08564e9906
+
+Isolation
+All builds/tests in Docker via sg docker; test runs --network none, no source
+mounts. Private tmux /run/test827-tmux.sock, unset TMUX/TMUX_PANE; no kill-server.
+Pinned @opencode/cli 2.0.22, Node22/Bun1.3.14 image digests in Dockerfiles,
+repository lockfiles. Local deterministic model stub, isolated Hub/database
+and fresh test credentials; no paid model or production credentials.
+
+Witnessed failure (retained; not replaced by a later green run)
+Container anet-test827-integrated-exact, source 2a7556f1..., exit 1.
+Image index sha256:51eb42d921a2ee047c664b47ddc1220fe1d4638e63d0a0354a623be28febd41e
+Manifest sha256:86fa20240d536f04eeb987cf6ab5a3700cfe883d5f26dcc68635e98105426012
+This pre-fix run had 44 CLI tests, 189 assertions; 69 runtime tests,
+336 assertions. Generated registry observer installed from bundled source,
+private directory checks passed. CLI create/start, authenticated Hub task and
+response-only assistant marker in the same native TUI passed. Real human
+turn reached the model before a queued network turn; answers stayed separate.
+Provider failure was failed (not replied), and subsequent task recovered.
+Unsafe-opt-in refusal preserved the live TUI pid/profile/working bridge.
+CLI stop returned 0, both tmux sessions gone, OpenCode/bridge processes gone.
+FAIL: stop removes generated registry observer and launcher.
+The launcher had disappeared, but launch-root data/anet-commhub-registry-*
+remained. Thus process absence and helper cleanup unit tests did NOT prove
+real CLI lifecycle cleanup. Later cold-safe-mode assertions were not run.
+Artifacts retained in /artifacts/report-test827.txt, bridge.log, tui-live.txt,
+tui.txt within the named container; no launcher or credentials copied to Git.
+
+Fix scope
+Linux marker-less opencode-cli copresence only: signal frozen role=agent
+identities after revalidating birth, permit up to 10s for graceful shutdown
+before closing tmux. Existing identity-gated marker teardown is unchanged;
+existing residual reaper still decides whether offline may be reported.
+No broad directory deletion, alias-based new kill authority, or permission
+relaxation. runbook updated with stop order and generated-file verification.
+
+Final exact-candidate results
+Source ae3a85d515ed713ef6261bf305b8aa08564e9906:
+test827 container anet-test827-drain-exact exited0.
+Image index sha256:af70a5e508dde6e104e20f68d30b36b0fb28c40ae0dee47022534064d8d67666
+Manifest sha256:f798011efd01bbc04ab3ec54639007d331872aa23ca2fbd5c721ec69bc68d787
+45 CLI tests /198 assertions and 69 runtime tests /336 assertions passed.
+All real CLI/Hub/TUI layers passed, including the previously failing stop
+observer/launcher cleanup assertion and subsequent cold safe-mode refusal.
+docker diff after completion had no added .anet-opencode-launch-* paths.
+Network reply task a6fdf88d-9b5d-4bb4-abcc-18effa189255;
+human-queued task bd77291a-65fe-46cf-b29a-7fbb21ee5fd0;
+provider failure 96805f74-73c6-4d16-9846-53c36b9c709b;
+recovered task 17dfef5b-af53-4616-8d26-84f768009a64.
+Same-image CPU1 repetition anet-test827-drain-cpu1 also exited0: all unit
+and native CLI/TUI layers including stop cleanup passed (2/2, not a general
+reliability guarantee).
+test832 container anet-test832-drain-exact exited0, same source ae3a85d5... .
+Image index sha256:4aa3a97bdd3887db324d10a4e4c73a37c3edeed7e5df836339c6960262a80018
+Manifest sha256:d13148bda43db263e6de528ac0492da7793874311ef9208fb132ebf2789b8932
+69 tests /336 assertions; package bundle includes registry observer.
+Three fresh native V2 first-turn MCP dispatch/identity/receipt cases passed:
+delay0 task 8efc05fe-ce2b-4a64-81f2-7a6b774e8b85;
+delay1200 task eec78a21-3450-4511-964f-332b4eceaced;
+delay3500 task c265d04b-79ea-4f5a-a9a3-154b005bd1ae.
+Each checked persisted network and stable sender/recipient node identities,
+same task terminal receipt, explicit sender-spoof rejection without a write,
+unauthenticated observer RPC401. Wrong valid node token was witnessed-red
+at identity assertion. Missing final tool, MCP auth rejection and delayed
+handshake beyond deadline were all refused before a model call. No warmup.
+
+Reproduction (clean checkout at full source SHA; no production mounts)
+  sg docker -c 'docker build --build-arg SOURCE_COMMIT=ae3a85d515ed713ef6261bf305b8aa08564e9906 -f tests/test827-opencode-v2-hub/Dockerfile -t test827-drain .'
+  sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=ae3a85d515ed713ef6261bf305b8aa08564e9906 test827-drain'
+  sg docker -c 'docker build --build-arg SOURCE_COMMIT=ae3a85d515ed713ef6261bf305b8aa08564e9906 -f tests/test832-opencode-v2-registry/Dockerfile -t test832-drain .'
+  sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=ae3a85d515ed713ef6261bf305b8aa08564e9906 test832-drain'
+Raw reports and redacted harness outputs remain under /artifacts in named
+containers. Repository inputs suffice to reproduce; local containers are
+not a deployment dependency. This report/runbook-only commit is NOT the
+tested source SHA; the full product/test source is the ae3a85d5 SHA above.
+
+CI triage (not waivers)
+PR2547: all 158 checks successful as of 13:25 CST, still OPEN.
+PR2545: original run37884140154/job113671550168 failed in PostgreSQL negative
+control setup, before its intended assertion: database worker signalled
+without a reply. Exact failed merge ab2c56040424248ea85c93ee0db36969dd2068fc
+was rebuilt with tests/test-agent-team-whoami/Dockerfile. Two isolated runs
+anet-pg-ci-ab2-r1 and anet-pg-ci-ab2-r2 (--cpus=1) exited0: SQLite and PG green
+6 tests/46 assertions each, plus all four negative mutations witnessed-red
+for each DB. NOT reproduced; no database fix claimed. One CI job rerun only,
+attempt2 was in_progress at 13:26 CST.
+PG image index sha256:53cb8fbd9fdf15e89e20bedb30ebda621920f10da2f750b00ac0a20c23833bdb
+Evidence comment: https://github.com/sleep2agi/agent-network/pull/2545#issuecomment-6074822521
+PR2549 Windows smoke run37887481212/job113680623598 failed during restart:
+EPERM rename temporary private-state file to windows-copresence.json.
+The relevant Windows files do not differ from PR2547, but this does not prove
+root cause or authorize a waiver. No Windows fix, repeated rerun or bypass.
+Evidence comment: https://github.com/sleep2agi/agent-network/pull/2549#issuecomment-6074796427
+
+Limits
+Explicit unsafe-tools preview remains required; no safe-mode support claim.
+No paid-model autonomous-tool-choice, native macOS/Windows, client/daemon UI
+or post-start outage recovery claim. No production node restart or release.
+Only a fully validated exact main ancestor SHA may enter formal publication.
+Recovery references: docs/runbooks/opencode-tui-copresence.md and
+docs/runbooks/opencode-v2-registry-readiness.md. No full data-restore exercise.
+
+Ops snapshot 13:26 CST: TMA云盘牛/TMAI负责人/TMAI狗/TMA客户端牛 have recent
+heartbeats. TMA云牛 remains offline; no recovery claimed. Respect existing
+TMA客户端牛 HOLD. Skill lesson added to anet-opencode-v2-delivery and validated
+in Docker with skill-creator quick_validate.py + PyYAML6.0.3 (PASS).

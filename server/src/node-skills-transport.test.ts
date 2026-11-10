@@ -148,6 +148,9 @@ describe("list / read by alias reach a session with no nodes row", () => {
     try {
       const enq = await u.call("read_node_skill", { alias: SESSION_ALIAS, name: "ship" });
       expect(enq).toMatchObject({ ok: true, op: "skill_read" });
+      // 2026-10-31 —— **精确键集**（#3171）：此前只 matchObject 了两个字段。
+      // 这条响应是「入队回执」，多一个键就意味着回执开始夹带请求内容（那是另一条通道）。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       const pulled = await s.call("get_rules_file_request", {});
       expect(pulled.request).toEqual({ request_id: enq.request_id, op: "skill_read", content: "ship" });
       const payload = JSON.stringify({ name: "ship", scope: "project", path_rel: ".claude/skills/ship/SKILL.md", description: "d", content: "# ship" });

@@ -1,0 +1,12 @@
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+RUN apk add --no-cache python3 git
+WORKDIR /repo
+COPY docs ./docs
+COPY scripts ./scripts
+COPY .github ./.github
+COPY tests ./tests
+COPY agent-network ./agent-network
+COPY contracts /repo/contracts
+COPY agent-node ./agent-node
+COPY server ./server
+CMD ["sh", "-c", "python3 scripts/check-doc-symbol-pins.py . && python3 .github/scripts/check-qa-trigger-coverage.py"]

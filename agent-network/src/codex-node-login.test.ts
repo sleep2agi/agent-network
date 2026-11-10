@@ -250,7 +250,10 @@ describe("#529 real CLI (Docker only)", () => {
     const r = await runCli(w, ["node", "create", "fresh-tui", "--runtime", "codex-app-server", "--copresence"]);
     expect(r.code).toBe(0);
     const ch = join(w.ws, ".anet", "nodes", "fresh-tui", "codex-home");
-    expect(r.out).toContain(`mkdir -p -m 700 ${ch} && CODEX_HOME=${ch} codex login\n`);
+    // co-presence create seeds yolo config.toml (dir exists) — login hint skips mkdir.
+    expect(r.out).toContain(`CODEX_HOME=${ch} codex login\n`);
+    expect(existsSync(join(ch, "config.toml"))).toBe(true);
+    expect(readFileSync(join(ch, "config.toml"), "utf8")).toContain('approval_policy = "never"');
     expect(existsSync(join(ch, "auth.json"))).toBe(false);
     expect(leaked(r.all)).toEqual([]);
   }, 90_000);

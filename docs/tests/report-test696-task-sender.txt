@@ -1,0 +1,20 @@
+Task sender HTTP contract validation (test artifacts only)
+Observed: 2026-10-13 08:49 Asia/Shanghai
+Tested commit: 007daaa25a17a037a7f68a4134cf3b42ba369289
+Container: pinned Bun 1.3.14; isolated SQLite and PostgreSQL; network none.
+
+SQLite: 32 passed, 0 failed.
+PostgreSQL: 32 passed, 0 failed.
+Five targeted assertion witnesses per backend: 12 + 6 + 6 + 1 + 1 failures
+under the corresponding altered contract, followed by source restoration.
+Total: 64 passing HTTP cases; 10 witnessed mutations / 52 failed assertions.
+Final local build + both backend runs: 25.5 seconds.
+
+Contracts: authenticated user attribution, optional own-name claim,
+node credential attribution, viewer/network permissions, same-name legacy
+rows, preservation through node-ID backfill, and zero delivery writes on denial.
+
+This report is source validation. It does not assert a main merge,
+registry publication, production activation, or third-party runtime testing.
+GitHub workflow task-sender-core runs the final PR checkout and the existing
+REST identity, authenticated origin, and network resolution contracts.

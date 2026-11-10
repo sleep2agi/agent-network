@@ -65,3 +65,30 @@ describe("#1756 tools/list", () => {
     } finally { await close(); }
   }, 20_000);
 });
+
+// #1075 / #2662 —— `node_secrets_capable` 是**节点自述**的一格，运行时把它放在
+// `config_snapshot` 里（agent-node/src/cli.ts:1894）。而 zod 对象默认**丢掉未声明
+// 的键**：只要 `config_snapshot` 的形状里没有这一条，节点上报得再好，到 Hub 也被
+// 静默剥掉 → 客户端「保存密钥」永远是灰的，日志里一个字都不会说。
+//
+// 所以钉在这里：`report_status.config_snapshot` 的形状里**必须有**这一格。
+// 剥掉它的方式有很多种（重写对象、加 .strict()、换 z.record），这条断言对它们都红。
+describe("#1075 node_secrets_capable survives report_status", () => {
+  test("config_snapshot's shape declares node_secrets_capable", async () => {
+    const { server, close } = await connect();
+    try {
+      const reg: Record<string, any> = (server as any)._registeredTools;
+      const shape = reg["report_status"]?.inputSchema?.shape ?? {};
+      const snapshotField = shape["config_snapshot"];
+      expect(snapshotField).toBeTruthy();
+      // config_snapshot 是 ZodOptional 包着 ZodObject：.unwrap() 之后才有 shape。
+      const unwrapped = (snapshotField as any)?.unwrap ? (snapshotField as any).unwrap() : snapshotField;
+      const inner = (unwrapped as any)?.shape ?? {};
+      expect(Object.keys(inner)).toContain("node_secrets_capable");
+      // 同族的另一格（daemon 级能力）也在这份形状里，顺手一起钉住。
+      expect(Object.keys(inner)).toContain("daemon_capabilities");
+    } finally {
+      await close();
+    }
+  });
+});

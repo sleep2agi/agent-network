@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec node /repo/agent-network/dist/bin/cli.js "$@"

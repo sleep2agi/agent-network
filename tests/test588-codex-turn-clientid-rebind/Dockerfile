@@ -5,6 +5,7 @@ LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
 ENV ANET_TEST_SOURCE_COMMIT=$SOURCE_COMMIT
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/package.json
 RUN cd agent-node && bun install --ignore-scripts
 COPY agent-node/src ./agent-node/src

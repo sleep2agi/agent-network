@@ -108,6 +108,12 @@ describe("send_task durable idempotency", () => {
     const replay = await call(handler, args);
 
     expect(first.ok).toBe(true);
+    // #3309 分支 —— send_task 的**第二个出口**（幂等重放）此前只有 toEqual 整体比较，
+    // 而工具名不在那一行（`call(handler, args)`）⇒ 归因不到。补一条同变量键集：
+    // 重放回执比新派单少 actual_to 之外的队列建议，多 idempotent_replay / task_status。
+    expect(Object.keys(replay).sort()).toEqual([
+      "actual_to", "idempotent_replay", "message_id", "ok", "task_id", "task_status",
+    ]);
     expect(replay).toEqual({
       ok: true,
       message_id: first.message_id,

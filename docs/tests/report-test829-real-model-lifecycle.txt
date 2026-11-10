@@ -1,0 +1,87 @@
+Hub #539 / #829 — rendered V2 model and lifecycle / real Hub
+Date: 2026-10-09 (Asia/Shanghai)
+Status: exploratory Docker acceptance; not native package or production rollout.
+
+Exact inputs
+- Product: f4bf739a96bf7a9f89504e0796922c5ba25de6d3.
+  git diff against released main 34a97a1e095f72b06d66429691fa46d4a1be67fd
+  for agent-node/, agent-network/, server/ is empty.
+- Actual client export: agent-network-app
+  4500c233e38fbdc2db5932f5edbe92f4fdd1ab9c (PR787 merged into main).
+- Probe: agent-network 4f47f67f7b5b7fe3ea9187204e300ba7db29acc9,
+  branch test/opencode-v2-package-install; test-only, not a release source.
+- Dependency image anet-test539:release-f4bf:
+  sha256:d17e9af239ea9c4b3092bb65da3e117b1b0639c0f6459e40ba24e0094e452d26
+- Client image anet-model-ui:deadline-4500:
+  sha256:871fcfd362c85d3b1d5061202e43a6c9ef7d661bdde57e7fd6dd13b501e7a57d
+- Final image anet-model-real:4f47:
+  sha256:411c391dc6f9dc1abd640dd0c1c2371a148959d861d1d4fb5aec8322e79c18fb
+  config sha256:01fcc9aaa207d144290194c16b00713d6984961a7036ff421a6acfacee00ca39
+
+Scope and isolation
+- Docker --network none, non-root UID/GID 1000, owned private tmux socket.
+- Real Hub, CLI, daemon, OpenCode @opencode/cli 2.0.22, native V2 TUI.
+- Real exported client and Chromium, with a narrow Tauri IPC transport adapter
+  forwarding HTTP to the loopback Hub. Only login bootstrap/OS transport and
+  screen navigation are adapted. No fake Hub/node/status/model responses.
+- Local OpenAI-compatible provider fixture, no vendor account or credentials.
+- Existing product/client images were reused by digest; this is NOT a fresh
+  public-npm installation E2E or a clean-machine reconstruction exercise.
+- Probe remains outside CI; NOT-IN-CI.md records its local-image dependency.
+
+Ladder and observed result
+1. Environment and health PASS. Unauthenticated dispatch is 401.
+2. V2 without explicit unsafe opt-in is refused before node/create side effects.
+3. Rendered client wizard creates V2; exact model, generation, unsafe consent,
+   daemon target checked. Hub returns matching identity and verified launch.
+4. First task gets response-only ANSWER829_REMOTE829 in receipt and same TUI.
+5. Model settings tab, input and button execute one real update_node_config
+   with exact node/network/base_revision/model. UI displays applied only after
+   matching config readback. Revision changes 0 -> 1, native bridge generation
+   changes, TUI renders, new task receives ANSWER829_MODEL829 in receipt/TUI.
+   Provider log proves original request model=stub-model and every request for
+   MODEL829 uses stub-model-next. Configuration text alone is not the oracle.
+6. Actual client stop button + confirmation: Hub request becomes stopped.
+   Old bridge/serve/TUI identities are reaped; both owned sessions disappear;
+   config remains.
+7. Actual client start button + confirmation: UI says node online, Hub request
+   becomes started, fresh launch proof/TUI exist; RESTART829 task exact reply
+   is present in the same TUI.
+8. Owned harness process cleanup PASS.
+
+Positive container anet-model-real-4f47:
+- 20:35:27 -> 20:36:11 CST, exit 0.
+- create cr_b3c4e514-5824-438a-b9e8-fd6f095915c4
+- stop sr_5975f6af8857; start str_a949953c92f8.
+Negative container anet-model-real-4f47-negative:
+- Same image, TEST829_WRONG_PROVIDER_EXPECTATION=1.
+- 20:35:46 -> 20:36:15 CST, exit 1 at the provider-model assertion as intended.
+- Earlier environment/auth/create/model/UI/task stages pass; lifecycle layer
+  is not run after the failed assertion. Cleanup passes.
+- This is an oracle sensitivity check, not an additional security proof.
+
+Reproduction (requires the two exact dependency images above)
+Checkout the exact probe commit from GitHub, then:
+sg docker -c 'docker build -f tests/test829-model-change-probe/Dockerfile --build-arg PROBE_COMMIT=4f47f67f7b5b7fe3ea9187204e300ba7db29acc9 -t anet-model-real:4f47 .'
+sg docker -c 'docker run --name model829-positive --init --network none -e TEST829_LIFECYCLE=1 -e EXPECTED_SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3 -e EXPECTED_CLIENT_SOURCE_COMMIT=4500c233e38fbdc2db5932f5edbe92f4fdd1ab9c anet-model-real:4f47'
+For the intended red, use a different container name and replace
+TEST829_LIFECYCLE=1 with TEST829_WRONG_PROVIDER_EXPECTATION=1; require exit 1
+AND the exact provider-model assertion failure, not an arbitrary failure.
+
+Artifacts and boundaries
+- Retained container /artifacts: report-test829-native.txt, stub.log, tui.txt,
+  model-client-success.png, client-stop-success.png, client-start-success.png,
+  client-success.png and redacted service logs.
+- Model and start screenshots were inspected. Model section immediately shows
+  the new model while header/runtime summary still shows the old heartbeat
+  snapshot in that frame; after subsequent restart the header shows the new
+  model. No claim of immediate consistency across all summary fields.
+- Desktop-sized rendered export only; native Tauri IPC, signed installers,
+  phone transport, real-provider credentials and physical devices remain
+  unverified. #829 and #539 remain doing pending delivery/acceptance decisions.
+- V2 default safe mode stays unsupported; explicit unsafe opt-in is required.
+- No production restart/config/data change, public release or latest promotion.
+  No persistent schema/topology/secret-source change in this test-only work;
+  current startup/upgrade/rollback/backup procedures are unchanged.
+- Replacing local dependency images with fully rebuildable registered fixtures
+  is still required before claiming portable CI or disaster recovery readiness.

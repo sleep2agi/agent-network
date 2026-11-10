@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl jq procps 
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 ENV npm_config_audit=false npm_config_fund=false npm_config_update_notifier=false
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY server/package.json server/package-lock.json ./server/
 RUN cd server && bun install --frozen-lockfile --ignore-scripts
 COPY server ./server

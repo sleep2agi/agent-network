@@ -1,0 +1,58 @@
+#1120 / #1130 V1 login persistence: exact main and public bytes — 2026-10-13
+
+Implementation main299cd2273033c33026de397c206843440b7ba96c, PR2693.
+Formal source mainb4cd36f7a31385af0765533b1a8edf397841d19a, PR2694;
+agent-node/agent-network source trees equal implementation main. Current-main
+ancestry checked before dispatch, by formal publisher, and before public-byte
+verification. No PR/feature-branch public build. Stable dist-tags retained.
+
+Source proof: final auth Docker38360079942 28PASS/0FAIL + 1 production-wiring
+ASSERTION RED; native38360079851 both V1 pins passed, pair38360080013,
+typecheck38360080010 and 10 required checks passed. No local functional suite.
+
+Node140:
+- First formal38360431958 FAILURE: Gate3 found no notes under docs/tests;
+  build/install/pins/doc-claims passed, publish SKIPPED, no npm staged package.
+  Root notes were moved and Install/Upgrade sections added via PR2694.
+- Corrected formal38361670496 SUCCESS (all seven jobs).
+- Actual build job115177079178 checked out mainb4cd36f7; source guard successful.
+- Anonymous npm full tarball equals original gated artifact: 594492 bytes;
+  SHA256 98c941aaa6b7acda8b35d64578e6731a13ec5165475cc69003cfb1899143177c
+  SHA1 605023775ad13d256d48bc6b7bc6f92cc0cc0656
+  SRI sha512-qF9UCnYcMkVg08OxA0i2ElYVY+7ait4tymn4BGYUvVcbIf4g58XAAWGMDuTP2xztaMlt19z91j5QrqNO/iBjPQ==
+- Observed 2026-10-13T07:29:24.207621Z: preview140/latest58 unchanged stable.
+
+CLI174:
+- Formal38362063112 built from same mainb4cd36f7, build job115178350613.
+  Four gates SUCCESS and npm publish step SUCCESS; registry verification was
+  still running at 07:35Z and later timed out. Overall formal38362063112 is
+  FAILURE, retained as a registry-wait failure; it is not rewritten SUCCESS.
+- Existing official gated-download workflow38363323117 SUCCESS: independently
+  authenticates original run/build log/source guard/four gates and inner digest,
+  rechecks current-main ancestry and publishes those same bytes without npm retry.
+- Immutable cli-v2.3.0-preview.174 tag points to mainb4cd36f7.
+- Anonymous full GitHub asset at 07:34:33.715708Z equals gated artifact:
+  2115331 bytes;
+  SHA256 e1de574a683caefa25995e05eaefa852a43c6b1c1b518d9ffa89c2bdf0fdb402
+  SHA1 218850927026ff0d54441adf8dec2c5fc9b843ff
+  SRI sha512-xxZx7a9D0Z8iMpWXG4EevpzuKM32XObdfRZK62JZw3N6J7xtM1bSyTThC2ZGWu92Edu/9boXNGRbYxMwg+nnQQ==
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz
+
+- Late npm readback at 2026-10-13T07:47:34.226419Z: version174 metadata and
+  complete tarball became available. Anonymous full bytes, SHA1/SHA256/SRI
+  equal both the original gated artifact and official GitHub asset above.
+  preview174/latest76 retained; original38362063112 FAILURE is preserved.
+  No npm republish, tag reset or software activation performed for this readback.
+
+Delivery boundary: original nodes were not restarted or switched, and no real
+account auth content was read. #1120 remains 2/3 for original-user login → normal
+restart → still logged in and cleanup feedback. Session-history recovery and
+crash/SIGKILL updates remain separate. #1113/#1105 actual139 pulse remains open;
+the selected legacy shared client is still153/121, not upgraded by publication.
+
+Recovery: normal lifecycle/ports/proxy/credential source unchanged. Node-private
+0600 auth data needs the existing controlled encrypted backup; Git contains no
+accounts. Restore software from exact public artifacts, retain old pair/current
+config for rollback. Whole credential/session disaster recovery NOT_COVERED.
+Historical failed builds/gates retained. Only owned superseded/merged-PR optional
+CI cancelled after dedicated/required pass; no current main/formal/peer runs.

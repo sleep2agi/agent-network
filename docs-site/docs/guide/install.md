@@ -3,7 +3,11 @@
 这一页只做一件事：把 `anet` 装好。装好后按 [10 分钟跑通第一个节点](/guide/getting-started) 继续。已经装过的，走[升级指南](/guide/upgrade)。
 
 ::: tip 不想用命令行？
-[桌面应用](/guide/desktop-app)（macOS / Windows）自带本地 Hub，下载安装即可用，也能一键装好本机 daemon。下载入口在[首页](/#desktop-download-title)。
+[桌面应用](/guide/desktop-app)（macOS / Windows / Linux）自带本地 Hub，下载安装即可用，也能一键装好本机 daemon。安装包在[下载页](/download)。
+:::
+
+::: tip 没有 Node 的机器
+单文件 `anet` 是另一条安装路径，不替代上面的 npm 安装。构建方式、做不到的事、以及为什么现在还没有公开下载，见[单文件可执行文件](/guide/standalone-binary)。
 :::
 
 ## 前置：Node.js 和 Bun {#prerequisites}
@@ -79,11 +83,25 @@ Windows 上的常见问题：
 
 ## 发布通道
 
-默认安装的是稳定通道 `latest`。想提前试新功能，装 `preview`：
+默认安装的是稳定通道 `latest`。想提前试新功能，装 `preview` —— 但**只装 CLI**，再用 `anet pair` 拿 agent-node 的精确版本：
 
 ```bash
-npm install -g @sleep2agi/agent-network@preview @sleep2agi/agent-node@preview
+npm install -g @sleep2agi/agent-network@preview
+anet pair
+# 照它打印的那一行装 agent-node，例如：
+#   npm install -g @sleep2agi/agent-network@2.3.0-preview.226 @sleep2agi/agent-node@2.5.0-preview.194
 ```
+
+::: warning 为什么不能两边都写 `@preview`
+
+两个包的 `preview` 标签是**先后**移动的（先发 agent-node，再发声明它的 CLI）。所以「两边都用 `@preview`」
+在窗口期里会装出**不配对的一半**：CLI 认不出那个 agent-node，`anet` 直接
+`Incompatible agent-node for opencode-cli` 拒绝启动，节点掉线。
+
+配对判据是 **CLI 包里的常量**，不是 tag —— `anet pair` 就是把那个常量打印出来。
+另外 `opencode-cli` 这条路径**禁用了自动 npx**，所以目标机上必须有一份精确版本的全局 agent-node，
+它不会被自动替代。
+:::
 
 两个通道的区别和切换方法见[升级指南：发布通道](/guide/upgrade#channels)。
 

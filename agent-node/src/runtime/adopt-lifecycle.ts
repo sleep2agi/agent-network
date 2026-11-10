@@ -11,9 +11,11 @@ import { verifyAdoptionLocalIdentity, verifyAdoptionProcess } from "./adopt-loca
 import { readAdoptionPid, readAdoptionProc } from "./adopt-proc.js";
 import { processStamp, stopVerifiedTree } from "./adopt-process-tree.js";
 import { captureLaunchEvidence, configHash, privateSocket } from "./adopt-launch-evidence.js";
-import { readCodexScope } from "./adopt-codex-scope.js";
+import { readCodexScope, readCodexStopScope } from "./adopt-codex-scope.js";
+import { assertCodexAbsentAfterReboot } from "./adopt-codex-reboot.js";
 import { assertCodexStopped, stopCodexStages } from "./adopt-codex-stop.js";
 import { preflightCodexStart } from "./adopt-codex-start-preflight.js";
+import { startAdoptedNativeCodex } from "./adopt-codex-start.js";
 
 export interface AdoptLifecycleRequest { request_id: string; child_node_id: string; child_alias: string; action: "start" | "stop" | "delete"; }
 const queues = new Map<string, Promise<unknown>>();
@@ -40,7 +42,7 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
     result = await operate(req, entry, deps, bindingRequestId);
   } catch (e: any) {
     result = { status: req.action === "start" ? "start_failed" : "stop_failed",
-      error: /^adopt_[a-z_]+$/.test(e?.message ?? "") ? e.message : "adopt_lifecycle_verification_failed" };
+      error: e?.message === "adopted_node_delete_unsupported" || /^adopt_[a-z_]+$/.test(e?.message ?? "") ? e.message : "adopt_lifecycle_verification_failed" };
   }
   // Ack transport failure is not an operation failure. Preserve local evidence
   // and let the request replay against PID/marker state rather than send a lie.
@@ -48,29 +50,38 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
   return true;
 }
 async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: AdoptDaemonDeps, bindingRequestId: unknown): Promise<Record<string, unknown>> {
+  // OpenCode V2 co-presence is registered for source reads only; a daemon start/stop
+  // would have to rebuild the human TUI + shared serve topology. Refuse explicitly.
+  if (entry.opencode_v2) throw Error("adopt_opencode_lifecycle_unsupported");
   const identity = verifyAdoptionLocalIdentity({ node_id: entry.node_id, alias: req.child_alias, network_id: deps.networkId, workdir: entry.workdir }, {...deps, allowCodexV2: !!entry.codex_v2});
   if (identity.nodeDir !== entry.nodeDir) throw Error("adopt_registry_identity_mismatch");
   if (entry.codex_v2) {
     if (!identity.config.codexCopresence || entry.codex_v2.version !== 1 || configHash(identity) !== entry.codex_v2.config_hash)
       throw Error("adopt_codex_binding_changed");
-    const scope = readCodexScope(identity, deps.uid);
+    const {scope, previousBoot} = req.action === "stop" ? readCodexStopScope(identity, deps.uid)
+      : {scope: readCodexScope(identity, deps.uid), previousBoot: false};
     if (scope.marker !== entry.codex_v2.marker) throw Error("adopt_codex_readopt_required");
     if (scope.socket !== entry.codex_v2.socket || scope.layout !== entry.codex_v2.layout) throw Error("adopt_codex_binding_changed");
     if (req.action === "start") {
       await preflightCodexStart(entry, identity, scope, bindingRequestId,
         () => adoptedChild(deps.workDir, req.child_alias)?.request_id === entry.request_id);
-      // Board #659 A only. A successful preflight is NOT a successful start.
-      throw Error("adopt_codex_start_not_available");
+      // external-appserver's launcher does not publish ANET_NODE_MARKER.
+      if (scope.layout !== "native") throw Error("adopt_codex_external_start_unproven");
+      return startAdoptedNativeCodex({ req, entry, identity, scope, deps,
+        stillCurrent: () => adoptedChild(deps.workDir, req.child_alias)?.request_id === entry.request_id });
     }
     const stoppedMarker = join(identity.nodeDir, ".hub-stopped");
+    const receiptBefore = stoppedReceipt(stoppedMarker, deps.uid);
     if (existsSync(stoppedMarker)) {
       const st=lstatSync(stoppedMarker);
       if (!st.isFile() || st.isSymbolicLink() || st.uid!==deps.uid || (st.mode&0o022)) throw Error("adopt_codex_marker_unsafe");
       // A receipt is never process authority. Revalidate live/missing stages on
       // every replay, including a manual restart under the same marker.
     }
-    await stopCodexStages(scope);
+    if (previousBoot) assertCodexAbsentAfterReboot(scope);
+    else await stopCodexStages(scope);
     if (adoptedChild(deps.workDir, req.child_alias)?.request_id !== entry.request_id) throw Error("adopt_binding_revoked_during_stop");
+    if (stoppedReceipt(stoppedMarker, deps.uid) !== receiptBefore) throw Error("adopt_stop_receipt_changed");
     atomicWriteJson(join(identity.nodeDir, ".hub-stopped"), {request_id:req.request_id, binding_request_id:entry.request_id, marker:scope.marker, node_id:entry.node_id, stopped:true});
     return {status:"stopped"};
   }
@@ -150,4 +161,12 @@ async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: Ad
       atomicWriteJson(marker, { node_id: entry.node_id, start_failed: true });
     throw e;
   }
+}
+
+function stoppedReceipt(path: string, uid: number): string | null {
+  try {
+    const st = lstatSync(path);
+    if (!st.isFile() || st.isSymbolicLink() || st.uid !== uid || (st.mode & 0o022)) throw Error("adopt_codex_marker_unsafe");
+    return `${st.dev}:${st.ino}:${st.ctimeMs}:${st.mtimeMs}:${readFileSync(path, "utf8")}`;
+  } catch (e: any) { if (e.code === "ENOENT") return null; throw e; }
 }

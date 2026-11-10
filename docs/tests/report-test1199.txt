@@ -1,0 +1,33 @@
+test1199 BTW cross-layer contract E2E
+Date: 2026-08-26 Asia/Shanghai
+
+Scope
+- App PR #177 create/action fixture bytes -> real Hub HTTP handler
+- durable SideThreadCoordinator -> dedicated fake Codex execution port
+- identity-bound terminal event -> real Hub GET/list hydration projection
+- two side threads completing out of order
+- per-side-thread cancel with the source/main turn untouched
+- start ACK loss, coordinator restart, authoritative terminal reconciliation
+- attachment reference preservation and authorization
+- completed-only, destination-bound exactly-once bring-back
+
+Evidence
+- App PR #177 fixture head: ceae98f213f421902635e22ef597dc0f099fdfaa
+- golden SHA-256: de2387b61d2aab52cfe537ae38bd2671b31ddcadc33d87623f55ffafdd0e975b
+- schema SHA-256: 0a520e7173727bbcdf7b9220b114a42b41ebb6db0cfc73828bef9888473882ff
+- Docker image: oven/bun:1.3.14-debian (digest resolved by Docker build)
+- Result: 4 pass, 0 fail, 48 assertions
+
+Command
+sg docker -c 'docker build -f tests/test1199-btw-cross-layer-contract/Dockerfile -t anet-test1199 . && docker run --rm anet-test1199'
+
+Important boundary
+This is an executable contract E2E using a dedicated fake execution port. It
+does not prove the still-unwired production Hub<->node command transport, real
+Codex binary, attachment grant materialization, or native journaled bring-back.
+Those paths must replace the fake port before live support can be claimed.
+
+Stack prerequisite
+PR2 must be rebuilt on PR1 head d033e606154800a38b4969a49c3a608e9b142960
+or a descendant
+or a descendant, because the former PR2 head omitted PR1 crash-safety commits.

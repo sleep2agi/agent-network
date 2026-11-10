@@ -12,6 +12,15 @@ const withHome = (fn: (d: string) => void) => {
 const auth = (d: string, v: unknown) => writeFileSync(join(d, "auth.json"), typeof v === "string" ? v : JSON.stringify(v));
 
 describe("#535 codex co-presence login gate (judged by the #529 helper)", () => {
+  test('selected custom env_key permits launch without copying ChatGPT auth', () => withHome(d => {
+    writeFileSync(join(d, 'config.toml'), 'model_provider="custom"\n[model_providers.custom]\nenv_key="DAEMON_PROVIDER_API_KEY"\n');
+    expect(codexHomeLoginState(d, {}).state).toBe('needs-login');
+    const verdict = codexHomeLoginState(d, { DAEMON_PROVIDER_API_KEY: 'TEST-ONLY-secret' });
+    expect(verdict.state).toBe('unknown'); expect(JSON.stringify(verdict)).not.toContain('TEST-ONLY-secret');
+    expect(codexHomeLoginState(d, { OTHER_KEY: 'TEST-ONLY-secret' }).state).toBe('needs-login');
+    writeFileSync(join(d, 'config.toml'), 'model_provider="custom"\n[model_providers.custom]\nenv_key="DAEMON_PROVIDER_API_KEY"\nrequires_openai_auth=true\n');
+    expect(codexHomeLoginState(d, { DAEMON_PROVIDER_API_KEY: 'TEST-ONLY-secret' }).state).toBe('needs-login');
+  }));
   test("agrees with codexLoginFactsOfHome on every auth.json shape", () => {
     const shapes: unknown[] = [
       { tokens: { refresh_token: "r-fake" } }, { tokens: { access_token: "a-fake" } }, { OPENAI_API_KEY: "sk-fake" },

@@ -1,0 +1,41 @@
+TEST-ONLY #1224 — actual built CLI explicit borrowed V1 selection
+Source PR https://github.com/sleep2agi/agent-network/pull/2744
+Base1e124c5157c8669296e7660fb790b10ef6c3d7dc
+Final head e09bb64f3073bc0b386779123c3203b96ce1ff80
+CI checkout d57e381cc3054d58ac36a8329d5b3087313d8431
+
+Behavior:
+Explicit private node config selection connects existing built agent-node CLI co-presence startup to borrowed V1 API. Current node/network/canonical cwd/original session/model and independently selected Host incarnation/cohort are frozen, and private config is reread per guarded request. Original node-config token must match the CLI credential; global token fallback cannot satisfy borrowed admission. No owned checkpoint/import/session writeback/provider environment/MCP credential options are passed to borrowed native runtime. Unsafe/headless/new-session/V2/mismatched selection/unknown fields refuse.
+A private non-secret opencode-borrowed-v1-selection.json intent record persists through clean close/config self-heal, blocking implicit owned fallback and changed Host expectations. Unavailable borrowed runtime retains original handle/recovery and refuses automatic reopen. Shutdown closes only own scoped MCP/config, never shared Host/human TUI. Default owned startup stays its existing path when selection/intent absent.
+
+Pinned reconstruction:
+Independent tests/test1224-v1-borrowed-cli/Dockerfile/run.sh. Locked agent-node dependencies and actual package npm run build, then real Node CLI child processes. OpenCode1.18.1/1.18.34 wrapper/native SRI from existing test1194 manifest; Bun1.3.14 image digest e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4. Non-root bun, --init --network none, canonical Unicode projects, independent native Host plus synthetic loopback Hub/model and private synthetic node logins/bindings. No live credentials, external vendor, local environment, default tmux or production app touched.
+
+Native CLI qualification run38544231879:
+1.18.1 job115786191968 SUCCESS artifact11884076921 sha256:fe3773ad9534235c33f0cf7ddeffba126cdd51da2da047097354a4e90bd56249
+1.18.34 job115786191678 SUCCESS artifact11884465038 sha256:8f0efd0768ebc4efe412fc936fd165679b72d461954ccd48b5fb4ba70584df10
+Both artifacts independently read. Each actual built CLI has 5 native gates:
+1 Seven refusal kinds: wrong network, directory, Host incarnation, headless, secret field, new-session, V2; native project config and Host survive, error does not echo supplied secret sentinel.
+2 Two actual Node CLI processes read their private config/inbox, execute exact native model/scoped original-node MCP and reply to original task_id. Same-node FIFO/causal assistant parent IDs, sender provenance, node report identity, byte-identical saved config and absent owned attach launcher verified.
+3 SIGTERM A restores only A project config/MCP; selected intent persists. Shared Host registry bytes remain, B native task produces original B identity.
+4 Removing explicit selection after clean close refuses owned fallback; restoring exact selection restarts borrowed CLI with identical existing history/session.
+5 Actual in-flight private config identity drift yields unprovable completion and retained own recovery. Even restored config plus a new task cannot reopen/replay or add a native user message. Host survives, unknown lease remains.
+Each report also66 PASS/0FAIL:61 existing owned spawn/runtime/reply-ownership tests plus5 selection suites. Repeated matrix unit execution is not counted as distinct new cases.
+
+Typecheck ratchet38544231742/job115786190976 SUCCESS:
+Actual81 existing diagnostics /baseline81; unchanged ratchet and selftest PASS. This is no increase, not zero TypeScript errors.
+
+Earlier red rounds preserved:
+Initial a2f7a585bc651c4f984d9e975f1aaf86a984c811/typecheck38542754830/job115781295948: two new TS2345 UID diagnostics; arrow never refusal did not narrow optional UID. Fixed to explicit never function declaration in72f78dc27d2677dbe7713617649279bea67f54d6, runtime checks retained; baseline unchanged.
+Initial native38542755012/jobs115781297335,115781297445: seven refusal kinds and actual two-node task chain/FIFO/parent/config preservation PASS; fixture Bun default10s idleTimeout closed SSE controller before sibling doorbell, then ERR_INVALID_STATE. Synthetic Hub changed to idleTimeout0 and removes cancelled controllers; original assertions retained. The72f78 native round38543089243/jobs115782381786,115782382300 still used this old fixture and also RED.
+253a2f6fcc3452906ca68925e538ac3b63799409/native38543427043/jobs115783506174,115783506021: initial real chain PASS, sibling task queued but fixture sent informational new_message. Actual co-presence CLI correctly only scheduled informational lane; task reply timed out. Final fixture uses actual new_task doorbell for model work, preserving production event handling and sibling/reply assertions. Earlier failures are not relabelled green or attributed to production without evidence.
+Author report-verifier initially expected phrase 'no automatic' although successful gate says 'cannot reopen or replay'; corrected observer-only phrase assertion, native CI rerun not needed.
+
+Boundaries and recovery:
+Cooperative same-UID/cohort/shared native Host authority only. This qualifies standalone built Node CLI with synthetic Hub/model plus real native backend, not actual production Hub ACL, interactive TUI, normal launcher start-completion UI or original-device adoption. Parent1195 stays incomplete; normal launcher/TUI is a next slice,1196 full migration/rollback/data restore and real original Owner windows remain separate. No new public alias/runtime bucket/environment switch, package or installer release.
+Software launcher, ports/proxy, private credential source, version verification, rollback and data backup questions are versioned in docs/design/opencode-v1-borrowed-cli.md. Persistent intent/session/config/unknown lease data is not restored by Git clone. Older installed CLI does not consume the new selection/intent schema; use matching exact source before configuring it and qualify migration before software downgrade.
+
+Final source/main qualification:
+Ordinary exact-head source2744 merged at2026-10-14T09:57:32Z into main491a906dbfe1ed2fbe7a8c97dfbc5d19201104c2. Head is fresh-main ancestor; CI-checkout/main trees both940cd86871b27b9f074557fed39cd8d3d49c2dc0 (GitHub git/commits vs actual main). Source rollup97SUCCESS/93CANCELLED/1SKIPPED, zero pending/red. Ten protected, two exact CLI native jobs, typecheck ratchet, full E2E and renameGhost all explicitly SUCCESS. Own broad QA38544231721 cancelled after meaningful qualification; not whole-QA PASS.
+FullE2E38544231831/job115786192002 SUCCESS (completed09:52:27Z), renameGhost115786192140 SUCCESS. Artifact11883958372/e2e-suite-logs-1 sha256:05ee4a71cb7d3f61ed4a6bed5811a244dd4727600a5faaa61894dd0f2a50bd69; independently read all8 logs/7 actual groups289/0: Base139/Auth25/Network28/Config16/LoopRuntime22/LoopPack12/LoopSelf47, no zero/skipped group.
+Final report/contract clarification is a docs-only ordinary PR from source-main, healthy native tests not repeated. Main automatic duplicate E2E gets metadata-only read unless a new failure appears. No package, production adoption or original recovery claim.

@@ -1,0 +1,121 @@
+CommHub #2017: original node-session control relay
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+Author-run isolated, non-root Docker; no production connection or runtime/client edits.
+
+Reproduction (repo root):
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -t anet-session-control -f tests/test2017-node-session-control/Dockerfile . && docker run --rm --init --cpus=2 --network none anet-session-control'
+
+Pre-report receipt at e589799717255113c4e9f65afb551b3e591be024:
+15 pass / 0 fail / 82 assertions, 1.84s.
+The dedicated Node session control relay workflow runs the final PR checkout;
+the earlier source receipt is not a substitute for that final-head CI result.
+
+Actual HTTP witnesses: state and background receipt, exact SSE doorbell, user
+owner/admin vs node/member/anonymous/master/dev-open denial, cross-network and
+wrong session/handle rejection, real unbound legacy credential denial, peer
+token denial, concurrent claim-once/no replay, request expiry and lost ACK,
+retired-generation registration denial, post-claim generation change, requester
+permission loss, target-token revocation, malformed reply/raw-error redaction,
+known runtime refusal, already_idle, Bridge lease expiry and fresh-Hub 404.
+
+Initial receipt e51c58fb26d664c40a4739006bd6e9d13e9cf00f: 14 pass/1 fail.
+The failing fixture used same-holder token refresh, which now creates an
+immutable binding. Fixed the fixture to construct and assert an actual unbound
+credential, retaining the production rejection. No guard was weakened.
+
+Docker TypeScript 5.9.3 whole-project tsc was also attempted. It is not green:
+there are errors in the wider imported graph (including missing cross-package
+fixture dependencies). One new test-file typing error (generic call on any)
+was corrected. Do not interpret selective file diagnostics as whole-project
+typecheck success or as attribution/waiver for unrelated CI failures.
+
+Source-pins: broken_pins=0; test-suite registration: new orphan=0;
+L1 paths sync: pass; mutation-pins: GREEN, unchecked 4 <= baseline 4.
+
+Limits: one-process bounded memory queue, 15s request / 75s Bridge lease,
+restart => unavailable/unknown (no replay), no multi-worker durability claim.
+No runtime capability, real tool background execution, client UI, release,
+deployment, node restart or lifecycle authority is established by this suite.
+
+2026-10-22 #2016 P1 identity contract increment (authorized by 8a0381e7):
+Product/test source: 59f5a3bfc9c971622c45d1e4ec215608062fc1e2.
+Executed only the new HTTP identity witnesses, not the original 15 or the
+separate 13-layer integration. Non-root Docker, no network outside loopback:
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) -t anet-session-identity -f tests/test2017-node-session-control/Dockerfile . && docker run --rm --init --cpus=2 --network none --entrypoint bash anet-session-identity /work/run.sh --test-name-pattern "2017 identity"'
+RESULT: 3 pass / 15 filtered out / 0 fail / 25 assertions, 1.52s.
+  - absent/malformed expected => 400 request_invalid, no compatibility fallback;
+  - A credential expected B (same network or wrong network) => 409 changed;
+    clock beyond request deadline exposes any premature sweep; restoring only
+    the clock proves the original request remains pending and binding remains
+    claimable/not retired; token/node identity columns remain unchanged;
+  - correct expected => identity {node_id,network_id,token_id} matches the real
+    authenticated credential row, with no bearer credential in the response.
+Only /bridge adds required expected and the successful identity receipt. The
+other endpoints keep their fields. The consumer PIN/epoch/write permit remains
+owned by runtime PR2889. The report-only successor to the tested source does not
+claim a new run of the original HTTP/integration suite or complete CI success.
+
+2026-10-23 fresh-main refresh (CommHub #2017):
+Merged current main 111be9430ca2cc469d05684388ec07e33563008b without conflicts.
+Tested product source: 803f28d61551bcacaabd872a0eaa6ad6ea5d20fb (the merge).
+Author-run existing anet-test2017-identity image, Bun 1.3.14, non-root Docker,
+network none, two CPUs / 1 GiB, current server/src + agent-node/src +
+agent-network/src mounted read-only at their /work paths; SOURCE_COMMIT set to
+that merge SHA. Container command: the image's existing /work/run.sh, no filter.
+Result: 18 pass / 0 fail / 107 assertions, 1.84s. This reuses cached dependencies;
+it is not a fresh image-build receipt. The following report-only commit is not
+represented as another execution of this suite.
+
+Old-head failure retained, not waived: real-client run 39711905520 /
+job 119604945788, artifact 12397769298, source 0aceb162632943a1398a93ce3a0b1bb78e5ffa6c.
+Its Bridge log records config_update mode=restart followed by local=hot mismatch;
+test883 model-client.mjs:88 then times out at the unchanged 95000ms assertion.
+That artifact lacks update.error, so it alone does not prove an exact reject path.
+The refreshed main includes 2882c4add318e01d9714caa0c5096dc27230f0bf (#2050/#2895),
+which restores Hub-requested V2 model restart when hot capability is missing.
+No extra product patch, timeout change, UI-string change or assertion weakening
+is added here. Final-head natural real-client and complete CI results must be
+recorded separately; neither older green runs nor the local HTTP receipt count
+as fresh-head real-client success. Runtime PR2889 / client integration remains a
+separate acceptance step and is not claimed by this refresh.
+
+2026-10-23 review findings correction (CommHub task 810c32bd):
+Starting PR head was verified unchanged at c09c328a50dcc65303a354719faf2f495d6efc77.
+Only the two active findings are changed: discussion_r4343702878 and
+4343702883. The old report thread 4343702896 was verified outdated and this
+report already existed; no thread was resolved or represented as resolved.
+
+Red source: 8d7c5cb14120b91709e3e63353ff9aee5d198ffb (new tests, old product).
+Existing non-root Docker suite, --test-name-pattern '2017 review':
+0 pass / 5 fail / 18 filtered / 14 assertions, 1.54s. The decisive old behaviors
+were already_idle active=true returning 200 instead of 400 and a valid legacy
+user token returning 401 instead of 200. The other red cases also expose status
+classification differences; they are not five separate authorization bypasses.
+An initial Docker invocation omitted the explicit /work/run.sh entrypoint and
+failed before running tests ('Script not found'); it is not counted as a witness.
+
+Green product/test source: a6625ce3ec62029a9cddf42c7f08a00b366ea18f.
+Complete suite: 23 pass / 0 fail / 176 assertions, 2.00s, Bun 1.3.14.
+Reproduction of the author run (repository /home/user/comm-niu/.runs/2017-hub-relay):
+sg docker -c 'docker run --rm --init --cpus=2 --memory=1g --network none -v /home/user/comm-niu/.runs/2017-hub-relay/server/src:/work/server/src:ro -v /home/user/comm-niu/.runs/2017-hub-relay/agent-node/src:/work/agent-node/src:ro -v /home/user/comm-niu/.runs/2017-hub-relay/agent-network/src:/work/agent-network/src:ro -e SOURCE_COMMIT=$(git rev-parse HEAD) --entrypoint bash anet-test2017-identity:latest /work/run.sh'
+Cached image dependencies, current source mounted read-only, temporary isolated
+DB, no external network. Not a cold-image build or fresh-head Actions receipt.
+For a clean build use the suite Dockerfile command at the start of this report.
+The following report/wording-only commit does not claim another suite execution.
+
+New witnesses cover contradictory already_idle active/capability combinations;
+real atok hashes with historical global scope=user for owner/admin create+read;
+legacy issuer's actual global scope=full; wrong-network/non-owner rejection;
+user/unbound-network atok denial on Bridge/pull/ACK without changing the binding;
+unknown, revoked, expired and unsupported-scope credentials refused. Legacy user
+fixtures use the real createToken issuer and change scope only in the test DB.
+No bearer token is printed. Master/dev-open fallback stays refused.
+Credential classification comes from persisted scope/network/binding, never the
+raw prefix. All existing current-row membership, ownership, exact node identity,
+Bridge expected proof, one-shot claim, TTL, unknown/no replay and result field
+checks remain. request_processed may still return an active state; already_idle
+must have active=false and can_request_background=false.
+
+No runtime/client changes, main merge, deploy, release, restart, production DB,
+production configuration or credential changes. Fresh-head CI and review are
+separate gates; the previous c09c328a receipt is not inherited by this revision.

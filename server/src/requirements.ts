@@ -1,12 +1,15 @@
 // 需求池。长期卡片，存在 Hub 上，手机和电脑读同一份。
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { errorBody, errorFrom, RequirementFieldError, type ErrorContext } from "./requirements-errors.js";
+import { clipSafe } from "./clip.js";
 import { createHash } from "node:crypto";
 import { parsePeopleQuery, peopleDirectory, resolvePersonName } from "./requirements-people.js";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
+import { resolveNodeCaller } from "./create-node.js";
 import { markGzipReusable } from "./http-gzip.js";
 import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from "./requirement-tags.js";
+import { buildTagNodes, isDescendant, MAX_TAG_DEPTH, parseCreateTag, TAG_TREE_CAPABILITY, tagDepth, tagSubtreeHeight, type TagNodeRow } from "./requirement-tag-tree.js";
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
@@ -19,17 +22,19 @@ import { notifyLeaderDeleted, notifyParticipantChange } from "./requirement-noti
 import { departmentCardsFor, departmentSubtree } from "./department-heads.js";
 import { dueReminderTimezone, dueWithinSql, ensureDueReminders, overdueSql } from "./requirement-due-reminders.js";
 import { diffRequirement, ensureRequirementEvents, eventPublic, recordRequirementEvents, type EventRow } from "./requirement-events.js";
-import { ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
+import { ensureNetworkTagNodes, ensureNetworkTags, ensureRequirementCompletedAt, ensureRequirementIndexes, ensureRequirementProjects, ensureRequirementSeq, ensureRequirementTombstones, migrateRequirementAgentOwners, migrateRequirementColumnCheck, migrateRequirementPriorityCheck, nextRequirementSeq } from "./requirements-migrate.js";
 
 // 启动迁移:旧库里节点当负责人的卡,节点挪到 agent_owner(列由 db.ts 的加列循环加上)。
 // 放在这里而不是 db.ts:db.ts 每多一行,文档里钉着的行号就漂一次。
 migrateRequirementPriorityCheck(db);
+migrateRequirementColumnCheck(db);
 migrateRequirementAgentOwners(db);
 ensureRequirementProjects(db);
 ensureRequirementIndexes(db);
 ensureRequirementSeq(db);
 ensureRequirementCompletedAt(db);
 ensureNetworkTags(db);
+ensureNetworkTagNodes(db);
 ensureRequirementTombstones(db);
 ensureRequirementEvents(db);
 ensureDueReminders(db);
@@ -51,7 +56,36 @@ export type RequirementsRequestContext = {
   strictOwner?: boolean;
 };
 
-const COLUMNS = new Set(["pool", "doing", "done"]);
+const COLUMNS = new Set(["pool", "doing", "done", "abandoned"]);
+/**
+ * 废弃(abandoned):和 done 一样是关闭态 —— 不算开着、不算逾期、不发到期提醒,不记完成时间;能改回 pool / doing。
+ * 旧客户端(desktop ≤ 0.2.220)只认 pool / doing / done,不认识的值一律当成 pool(会把废弃的卡摆回需求池、还标逾期)。
+ * 所以客户端没声明认识它时,响应里把 abandoned 投影成 done;声明方式二选一:
+ *   请求头 `X-Anet-Accept-Columns: abandoned`,或查询参数 `accept_columns=abandoned`。
+ * MCP(tools.ts)总是声明。文档:docs-site/docs/api/mcp-tools.md「需求池 / 任务看板」的 column 字段。
+ */
+const ACCEPT_COLUMNS_HEADER = "x-anet-accept-columns";
+function knowsAbandoned(ctx: RequirementsRequestContext): boolean {
+  const raw = `${ctx.req.headers.get(ACCEPT_COLUMNS_HEADER) ?? ""},${ctx.url.searchParams.get("accept_columns") ?? ""}`;
+  return raw.split(",").some(v => v.trim() === "abandoned");
+}
+/**
+ * 动态的旧客户端视图:column 改动的 old / new、created 的 new.column 都投影;投影后前后一样(done ↔ abandoned)= null(不回)。
+ */
+function projectEvent<T extends { kind: string; field: string | null; old: unknown; new: unknown }>(ev: T, aware: boolean): T | null {
+  if (aware) return ev;
+  if (ev.kind === "created" && ev.new && typeof ev.new === "object" && typeof (ev.new as any).column === "string") {
+    return { ...ev, new: { ...(ev.new as object), column: projectColumn((ev.new as any).column, false) } };
+  }
+  if (ev.field !== "column") return ev;
+  const old = typeof ev.old === "string" ? projectColumn(ev.old, false) : ev.old;
+  const neu = typeof ev.new === "string" ? projectColumn(ev.new, false) : ev.new;
+  return old === neu ? null : { ...ev, old, new: neu };
+}
+/** 旧客户端看到的状态:abandoned → done,其余原样。 */
+export function projectColumn(column: string, aware: boolean): string {
+  return column === "abandoned" && !aware ? "done" : column;
+}
 // 界面上 P0–P3:high=P0 最高、normal=P1 普通、low=P2 低、lowest=P3 极低。存的值不变,旧客户端照常读写前三个。
 const PRIORITIES = new Set(["high", "normal", "low", "lowest"]);
 const DUE = /^\d{4}-\d{2}-\d{2}$/;
@@ -72,6 +106,7 @@ type Row = {
   parent_id: string | null;
   children_total: number | null;
   children_done: number | null;
+  children_abandoned?: number | null;
   participants_json: string;
   requirement_id: string;
   network_id: string;
@@ -222,7 +257,8 @@ const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/issues\/(\d+)\/?$/;
 
 function clipTitle(value: unknown): string {
-  return typeof value === "string" ? value.replace(/[\r\n\t]/g, " ").trim().slice(0, 120) : "";
+  // 120 是**渲染上限**；clipSafe 保证截断不产生孤立代理（否则该标题在 JSON 里「合法」、在 UTF-8 里非法）
+  return typeof value === "string" ? clipSafe(value.replace(/[\r\n\t]/g, " ").trim(), 120) : "";
 }
 
 function issueFromParts(repo: string, number: number, title: string) {
@@ -314,11 +350,13 @@ function storedChecklist(raw: string | null): ChecklistItem[] {
 // ── 项目 ──
 // 按网络隔离;名字 1–40 字,同一网络里未归档的项目不重名;颜色 #RRGGBB;sort 越小越靠前。
 // 删除 = 删项目行 + 把引用它的卡片 project_id 置空(卡片本身不动);归档 = 保留引用,只是不能再被选。
-type ProjectRow = { project_id: string; network_id: string; name: string; color: string; sort: number; archived: number; created_at: string };
+type ProjectRow = { project_id: string; network_id: string; name: string; color: string; sort: number; archived: number; created_at: string; parent_id: string | null };
 const PROJECT_COLOR = /^#[0-9a-fA-F]{6}$/;
 const PROJECT_PALETTE = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#4b5563"];
-const PROJECT_SELECT = "project_id, network_id, name, color, sort, archived, created_at";
-const projectPublic = (row: ProjectRow) => ({ id: row.project_id, name: row.name, color: row.color, sort: row.sort, archived: !!row.archived, createdAt: row.created_at });
+const PROJECT_SELECT = "project_id, network_id, name, color, sort, archived, created_at, parent_id";
+/** 子项目最多 3 层（顶层=1）。再深的话「项目」这个词就没有意义了，也没人能在选择器里点对。 */
+const PROJECT_MAX_DEPTH = 3;
+const projectPublic = (row: ProjectRow) => ({ id: row.project_id, name: row.name, color: row.color, sort: row.sort, archived: !!row.archived, createdAt: row.created_at, parentId: row.parent_id ?? null });
 const projectName = (raw: unknown): string | null => {
   if (typeof raw !== "string") return null;
   const name = raw.replace(/[\r\n\t]+/g, " ").trim();
@@ -327,6 +365,50 @@ const projectName = (raw: unknown): string | null => {
 function projectNameTaken(networkId: string, name: string, except?: string): boolean {
   return !!db.get("SELECT 1 FROM requirement_projects WHERE network_id = ?1 AND name = ?2 AND archived = 0 AND project_id != ?3", networkId, name, except ?? "");
 }
+/** 这个项目往上数有几层（自己算第一层）。用于深度上限与环路判断。 */
+function projectDepth(projectId: string): number {
+  let depth = 0;
+  let cur: string | null = projectId;
+  const seen = new Set<string>();
+  while (cur && depth < 64) {
+    if (seen.has(cur)) return Number.POSITIVE_INFINITY;  // 循环：当成超深，调用方会拒绝
+    seen.add(cur);
+    depth++;
+    const row: { parent_id: string | null } | null = db.get("SELECT parent_id FROM requirement_projects WHERE project_id = ?1", cur);
+    cur = row?.parent_id ?? null;
+  }
+  return depth;
+}
+
+/**
+ * 校验 parent_id（新项目或搬家时）。返回 { parent } 或错误码。
+ * 规则：同一网络、存在、未归档、不是自己或自己的后代、加进来后不超过 PROJECT_MAX_DEPTH。
+ */
+function validateProjectParent(
+  networkId: string, parentId: string, selfId: string | null,
+): { ok: true; parent: ProjectRow } | { ok: false; error: string } {
+  const parent = db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, parentId);
+  if (!parent || parent.network_id !== networkId) return { ok: false, error: "project_parent_not_found" };
+  if (parent.archived) return { ok: false, error: "project_parent_archived" };
+  if (selfId) {
+    if (parent.project_id === selfId) return { ok: false, error: "project_parent_cycle" };
+    // 把 A 挂到 A 的后代下面 = 环。沿 parent 链往上走，遇到自己就拒绝。
+    let cur: string | null = parent.parent_id ?? null;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      if (cur === selfId) return { ok: false, error: "project_parent_cycle" };
+      seen.add(cur);
+      cur = db.get<{ parent_id: string | null }>("SELECT parent_id FROM requirement_projects WHERE project_id = ?1", cur)?.parent_id ?? null;
+    }
+    if (projectDepth(selfId) + projectDepth(parent.project_id) > PROJECT_MAX_DEPTH) {
+      return { ok: false, error: "project_parent_too_deep" };
+    }
+  } else if (projectDepth(parent.project_id) + 1 > PROJECT_MAX_DEPTH) {
+    return { ok: false, error: "project_parent_too_deep" };
+  }
+  return { ok: true, parent };
+}
+
 /** 卡片上的 project_id:null 清空;字符串必须是同一网络、未归档的项目。 */
 function projectRef(value: unknown, networkId: string): string | null {
   if (value === null) return null;
@@ -351,7 +433,22 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     // (canWrite + projectRef 拒归档 + canUseProject)。只加字段;客户端据此只列能编辑的项目(app 任务页审计 L13)。
     const writable = canWrite(ctx, networkId);
     const canUse = projectUseResolver(taskCaller(ctx), networkId);
-    return Response.json({ ok: true, projects: rows.map((row) => ({ ...projectPublic(row), viewer_can: { edit: writable && !row.archived && canUse(row.project_id) } })) });
+    // #2899 —— 回显**实际使用的** network_id。
+    //
+    // 现场（2026-10-30，两个独立复核）：
+    //   ① 用户令牌 + 非成员 network_id → 200 + 空数组
+    //   ② 用户令牌属于多网络、不带 network_id → 400 network_id_required（这才是当时那个 400）
+    //   ③ 网络作用域节点令牌 + 任意 network_id → 200 + **它自己网络的数据**
+    // 三条共同点：响应码不携带「你问的是不是这个网络」。
+    // ③ 尤其危险 —— 客户端以为在看 A 的项目，实际拿到的是 B 的（自己的）。
+    //
+    // 只加一个回显字段：不改鉴权、不改返回内容、不引入新的 4xx。
+    // 调用方（dashboard / MCP）可以据此判定「拿到的到底是谁的网络」。
+    return Response.json({
+      ok: true,
+      network_id: networkId,
+      projects: rows.map((row) => ({ ...projectPublic(row), viewer_can: { edit: writable && !row.archived && canUse(row.project_id) } })),
+    });
   }
   if (!canWrite(ctx, networkId)) return jsonError("permission_denied", 403);
   // 项目管理(建 / 改名 / 归档 / 删)只给不受任务范围限制的人。
@@ -371,13 +468,24 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     const sort = body.sort === undefined ? count : body.sort;
     if (!Number.isInteger(sort)) return jsonError("invalid_project_sort", 400);
     const id = `proj_${crypto.randomUUID()}`;
-    db.run(`INSERT INTO requirement_projects (${PROJECT_SELECT}) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)`, [id, networkId, name, color, sort, new Date().toISOString()]);
+    // 子项目：parent_id 可选；null/缺省 = 顶层。
+    let parentId: string | null = null;
+    if (body.parent_id !== undefined && body.parent_id !== null && body.parent_id !== "") {
+      if (typeof body.parent_id !== "string") return jsonError("invalid_project_parent", 400);
+      const check = validateProjectParent(networkId, body.parent_id, null);
+      if (!check.ok) return jsonError(check.error, check.error === "project_parent_not_found" ? 404 : 400);
+      parentId = check.parent.project_id;
+    }
+    db.run(`INSERT INTO requirement_projects (${PROJECT_SELECT}) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)`, [id, networkId, name, color, sort, new Date().toISOString(), parentId]);
     return Response.json({ ok: true, project: projectPublic(db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, id)!) }, { status: 201 });
   }
   if (!one) return jsonError("not_found", 404);
   const current = db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, decodeURIComponent(one[1]));
   if (!current || current.network_id !== networkId) return jsonError("project_not_found", 404);
   if (req.method === "DELETE") {
+    // 子项目不能凭空变孤儿：先搬走或删掉它们（明确拒绝，不偷偷改层级）。
+    const kids = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM requirement_projects WHERE parent_id = ?1", current.project_id)?.n ?? 0;
+    if (kids > 0) return jsonError("project_has_children", 409);
     // 先把卡片上的引用置空,再删项目:卡片一张不少。
     // updated_at 跟着动:按 updated_since 增量同步的客户端要看得见「项目被清空」这一改动。
     // 每张被清空项目的卡记一条「项目 X → 无」(与清空同一个事务)。
@@ -411,8 +519,20 @@ async function handleProjects(ctx: RequirementsRequestContext): Promise<Response
     if (typeof body.archived !== "boolean") return jsonError("invalid_project_archived", 400);
     archived = body.archived ? 1 : 0;
   }
+  let parentId: string | null = current.parent_id ?? null;
+  if ("parent_id" in body) {
+    if (body.parent_id === null || body.parent_id === "") {
+      parentId = null;                                    // 变成顶层
+    } else if (typeof body.parent_id !== "string") {
+      return jsonError("invalid_project_parent", 400);
+    } else {
+      const check = validateProjectParent(networkId, body.parent_id, current.project_id);
+      if (!check.ok) return jsonError(check.error, check.error === "project_parent_not_found" ? 404 : 400);
+      parentId = check.parent.project_id;
+    }
+  }
   if (!archived && projectNameTaken(networkId, name, current.project_id)) return jsonError("project_name_taken", 409);
-  db.run("UPDATE requirement_projects SET name = ?1, color = ?2, sort = ?3, archived = ?4 WHERE project_id = ?5", [name, color, sort, archived, current.project_id]);
+  db.run("UPDATE requirement_projects SET name = ?1, color = ?2, sort = ?3, archived = ?4, parent_id = ?6 WHERE project_id = ?5", [name, color, sort, archived, current.project_id, parentId]);
   return Response.json({ ok: true, project: projectPublic(db.get<ProjectRow>(`SELECT ${PROJECT_SELECT} FROM requirement_projects WHERE project_id = ?1`, current.project_id)!) });
 }
 
@@ -442,12 +562,38 @@ async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
     );
     const colorOf = (name: string) => db.get<{ color: string }>("SELECT color FROM network_tags WHERE network_id = ?1 AND name = ?2", networkId, name)?.color ?? null;
     const sources = op.op === "rename" ? [op.from] : op.op === "merge" ? op.from : [op.tag];
-    const known = cards.some(card => storedTags(card.tags_json).some(tag => sources.includes(tag))) || sources.some(tag => colorOf(tag) !== null);
+    // 「存在」= 有卡片在用 / 有颜色行 / 是登记过的树节点。最后一种让 0 任务的标签也能改名、合并、删除、上色。
+    const nodeExists = (name: string) => !!db.get<{ x: number }>("SELECT 1 AS x FROM network_tag_nodes WHERE network_id = ?1 AND name = ?2", networkId, name);
+    // 「存在」的三种形态(卡片在用 / 有颜色行 / 登记过的树节点),reparent 判父存在时用的是同一个口径。
+    const tagExists = (name: string) => cards.some(card => storedTags(card.tags_json).includes(name)) || colorOf(name) !== null || nodeExists(name);
+    const known = sources.some(tagExists);
     if (!known) return null;
     if (op.op === "color") {
       if (op.color === null) db.run("DELETE FROM network_tags WHERE network_id = ?1 AND name = ?2", [networkId, op.tag]);
       else db.run("INSERT INTO network_tags (network_id, name, color, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (network_id, name) DO UPDATE SET color = excluded.color, updated_at = excluded.updated_at", [networkId, op.tag, op.color, now]);
       return { affected: 0 };
+    }
+    // 改父级:只动标签树,不动任何卡片(标签仍然是卡片 tags_json 里的字符串)。
+    // 三条规则都明确拒绝而不是静默纠正:父必须存在、不许成环、搬完最深不超过 MAX_TAG_DEPTH。
+    if (op.op === "reparent") {
+      const nodes = db.all<TagNodeRow>("SELECT name, parent_name FROM network_tag_nodes WHERE network_id = ?1", networkId);
+      const parentOf = new Map(nodes.map(row => [row.name, row.parent_name ?? null]));
+      // 只在卡片上出现过的老标签没有行可改,要登记成顶层节点(这不是把它降级,它本来就没有父)。
+      // ⚠ 先**在虚拟树上**判环与深度,判过了再写:事务返回 {error} 是提交而不是回滚,
+      //   如果先 INSERT 登记再返回错误,调用方看到的是"被拒绝了",库里却多了一行 —— 树被静默改过。
+      const virtual = new Map(parentOf);
+      if (!virtual.has(op.tag)) virtual.set(op.tag, null);
+      if (op.parent) {
+        if (!tagExists(op.parent)) return { error: "tag_parent_not_found" };
+        if (!virtual.has(op.parent)) virtual.set(op.parent, null);
+        // 环:父是自己(parse 已挡)或自己的子孙(这里挡)。深度:新父的深度 + 自己这棵子树的高度。
+        if (isDescendant(op.parent, op.tag, virtual)) return { error: "tag_parent_cycle" };
+        if (tagDepth(op.parent, virtual) + tagSubtreeHeight(op.tag, virtual) > MAX_TAG_DEPTH) return { error: "tag_depth_exceeded" };
+      }
+      if (!parentOf.has(op.tag)) db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.tag, now, actor]);
+      if (op.parent && !parentOf.has(op.parent)) db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, op.parent, now, actor]);
+      db.run("UPDATE network_tag_nodes SET parent_name = ?1, updated_at = ?2 WHERE network_id = ?3 AND name = ?4", [op.parent, now, networkId, op.tag]);
+      return { affected: 0, reparented: 1 };
     }
     let affected = 0;
     for (const card of cards) {
@@ -458,22 +604,153 @@ async function handleTagOp(ctx: RequirementsRequestContext): Promise<Response> {
       affected++;
     }
     moveTagColors(networkId, op, colorOf, now);
-    return { affected };
+    const reparented = maintainTagTree(networkId, op, now);
+    return { affected, reparented };
   });
   if (!result) return jsonError("tag_not_found", 404);
+  if ("error" in result) return jsonError(result.error, result.error === "tag_parent_not_found" ? 404 : 400);
   if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, `requirement_tag_${op.op}`, "requirement_tag", op.op === "rename" || op.op === "merge" ? op.to : op.tag, JSON.stringify({ ...op, affected: result.affected }).slice(0, 1000), undefined, networkId);
-  return Response.json({ ok: true, op: op.op, affected: result.affected });
+  return Response.json({ ok: true, op: op.op, affected: result.affected, reparented: result.reparented });
 }
 
 /** 改名 / 合并:目标没有颜色就继承第一个有颜色的来源;来源的颜色行删掉。删除:删颜色行。 */
 function moveTagColors(networkId: string, op: TagOp, colorOf: (name: string) => string | null, now: string): void {
-  if (op.op === "color") return;
+  if (op.op === "color" || op.op === "reparent") return;
   const sources = op.op === "rename" ? [op.from] : op.op === "merge" ? op.from : [op.tag];
   if (op.op !== "delete" && colorOf(op.to) === null) {
     const inherited = sources.map(colorOf).find(color => color !== null);
     if (inherited) db.run("INSERT INTO network_tags (network_id, name, color, updated_at) VALUES (?1, ?2, ?3, ?4)", [networkId, op.to, inherited, now]);
   }
   for (const tag of sources) db.run("DELETE FROM network_tags WHERE network_id = ?1 AND name = ?2", [networkId, tag]);
+}
+
+/**
+ * 标签改名 / 合并 / 删除时让树跟着动(与卡片改写同一个事务):
+ *   rename —— 节点改名,子节点的 parent_name 一起改;目标已有节点时按合并处理(并把「目标自己是来源的子节点」这种情况挂到来源的父上,避免自环)。
+ *   merge  —— 来源节点的子节点挂到目标,来源节点删掉。
+ *   delete —— 被删节点的子节点挂到它的父(没有父就成根);不删子节点、不丢层级。
+ * 返回被改挂的节点数(客户端能报「N 个子标签已上移」)。
+ */
+function maintainTagTree(networkId: string, op: TagOp, now: string): number {
+  if (op.op === "color" || op.op === "reparent") return 0;
+  const rows = db.all<TagNodeRow>("SELECT name, parent_name FROM network_tag_nodes WHERE network_id = ?1", networkId);
+  if (!rows.length) return 0;
+  const parentOf = new Map(rows.map(row => [row.name, row.parent_name ?? null]));
+  if (op.op === "rename") {
+    if (!parentOf.has(op.from)) return 0;
+    const fromParent = parentOf.get(op.from) ?? null;
+    if (!parentOf.has(op.to)) {
+      db.run("UPDATE network_tag_nodes SET name = ?1, updated_at = ?2 WHERE network_id = ?3 AND name = ?4", [op.to, now, networkId, op.from]);
+      const moved = db.run("UPDATE network_tag_nodes SET parent_name = ?1, updated_at = ?2 WHERE network_id = ?3 AND parent_name = ?4", [op.to, now, networkId, op.from]);
+      return moved.changes ?? 0;
+    }
+    // 目标已有节点 —— 合并。目标若正好是来源的子孙,直接挂过去会自环,改挂到来源的父。
+    let moved = 0;
+    for (const row of rows) {
+      if (row.parent_name !== op.from) continue;
+      const nextParent = row.name === op.to ? fromParent : op.to;
+      db.run("UPDATE network_tag_nodes SET parent_name = ?1, updated_at = ?2 WHERE network_id = ?3 AND name = ?4", [nextParent, now, networkId, row.name]);
+      moved++;
+    }
+    db.run("DELETE FROM network_tag_nodes WHERE network_id = ?1 AND name = ?2", [networkId, op.from]);
+    return moved;
+  }
+  if (op.op === "merge") {
+    let moved = 0;
+    for (const source of op.from) {
+      if (!parentOf.has(source)) continue;
+      const children = rows.filter(row => row.parent_name === source);
+      const res = db.run("UPDATE network_tag_nodes SET parent_name = ?1, updated_at = ?2 WHERE network_id = ?3 AND parent_name = ?4", [op.to, now, networkId, source]);
+      moved += res.changes ?? children.length;
+      db.run("DELETE FROM network_tag_nodes WHERE network_id = ?1 AND name = ?2", [networkId, source]);
+    }
+    return moved;
+  }
+  // delete
+  const row = parentOf.has(op.tag) ? rows.find(item => item.name === op.tag)! : null;
+  if (!row) return 0;
+  const res = db.run("UPDATE network_tag_nodes SET parent_name = ?1, updated_at = ?2 WHERE network_id = ?3 AND parent_name = ?4", [row.parent_name ?? null, now, networkId, op.tag]);
+  db.run("DELETE FROM network_tag_nodes WHERE network_id = ?1 AND name = ?2", [networkId, op.tag]);
+  return res.changes ?? 0;
+}
+
+/** 网络里所有卡片上出现过的标签(**不分可见范围**)。写操作按整个网络判重,否则同名标签会被拆成两半。 */
+function networkTagNames(networkId: string): Set<string> {
+  const names = new Set<string>();
+  for (const row of db.all<{ tags_json: string | null }>(
+    "SELECT tags_json FROM requirements WHERE network_id = ?1 AND tags_json IS NOT NULL AND tags_json <> '[]'", networkId,
+  )) {
+    for (const tag of storedTags(row.tags_json)) names.add(tag);
+  }
+  return names;
+}
+
+/**
+ * 2026-10-31 —— **状态码是 code 的函数，映射表必须穷尽**（外部复核 (c)：
+ * 「三元式默认分支 = 未映射与某个真实含义同值 ⇒ 口令字段；应改成
+ *  `Record<ErrorCode, number>` 由 tsc 报红」）。
+ *
+ * 原来是 `code === "tag_exists" ? 409 : code === "tag_parent_not_found" ? 404 : 400`：
+ * 新增一个错误码时它**默认落到 400**，而有些码 400 是错的（冲突应是 409），且没人会提醒你。
+ * 改成穷尽表之后，漏一个码 = tsc 红。
+ */
+// 2026-10-31 —— **本仓 server 没有 tsc 门**（只有 agent-network 在 e2e-docker 里 typecheck），
+// 所以「漏一个码 = tsc 红」在这里是空头支票。⇒ 用运行时钉住：
+//   码集合由这个数组当**唯一来源**，测试断言映射表的键与它逐字相等。
+// 这样新增一个码只改一处（数组），而「忘了加 status」会红在测试里，不依赖编辑器。
+export const TAG_CREATE_ERRORS = ["tag_exists", "tag_parent_not_found", "tag_depth_exceeded"] as const;
+export type TagCreateError = (typeof TAG_CREATE_ERRORS)[number];
+export const TAG_CREATE_STATUS: Record<TagCreateError, number> = {
+  tag_exists: 409,
+  tag_parent_not_found: 404,
+  tag_depth_exceeded: 400,
+};
+
+type CreateTagOutcome =
+  | { error: TagCreateError }
+  | { name: string; parent: string | null; depth: number; parentRegistered: boolean };
+
+/** POST /api/requirements/tags/create —— 建标签(可带父)。原子、整网络判重、父不存在就报错。 */
+async function handleTagCreate(ctx: RequirementsRequestContext): Promise<Response> {
+  const networkId = resolveRestWriteNetworkId(ctx.scope, ctx.auth, ctx.isAdmin);
+  if (!networkId) return jsonError("network_id_required", 400);
+  // 与改名 / 合并 / 删除同一把锁:整网写,只给不受任务范围限制的人。
+  if (!canManageTags(ctx, networkId)) return jsonError("permission_denied", 403);
+  let body: Record<string, unknown>;
+  try { body = await bodyObject(ctx.req); } catch { return jsonError("invalid_json", 400); }
+  const input = parseCreateTag(body);
+  if ("error" in input) return jsonError(input.error, 400);
+  const now = new Date().toISOString();
+  const actor = JSON.stringify(actorOf(ctx));
+  const result = db.transaction<CreateTagOutcome>(() => {
+    const nodes = db.all<TagNodeRow>("SELECT name, parent_name FROM network_tag_nodes WHERE network_id = ?1", networkId);
+    const parentOf = new Map(nodes.map(row => [row.name, row.parent_name ?? null]));
+    const used = networkTagNames(networkId);
+    const hasColor = (name: string) => !!db.get<{ x: number }>("SELECT 1 AS x FROM network_tags WHERE network_id = ?1 AND name = ?2", networkId, name);
+    const exists = (name: string) => parentOf.has(name) || used.has(name) || hasColor(name);
+    // 重名 = 409:不「复用」已有标签(复用会让 UI 以为新建成功,实际改了别的分支的标签)。
+    if (exists(input.name)) return { error: "tag_exists" };
+    let parentRegistered = false;
+    if (input.parent) {
+      // 父不存在 = 404。**不**把子标签建到根上:客户端预选了父,存成根会让回读的层级和表单不一致。
+      if (!exists(input.parent)) return { error: "tag_parent_not_found" };
+      if (!parentOf.has(input.parent)) {
+        // 父此前只在卡片上出现过(老数据):登记成顶层节点。父本来就没有父,这不是把子标签降级到根。
+        db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, NULL, ?3, ?3, ?4)", [networkId, input.parent, now, actor]);
+        parentOf.set(input.parent, null);
+        parentRegistered = true;
+      }
+      if (tagDepth(input.parent, parentOf) + 1 > MAX_TAG_DEPTH) return { error: "tag_depth_exceeded" };
+    }
+    db.run("INSERT INTO network_tag_nodes (network_id, name, parent_name, created_at, updated_at, created_by_json) VALUES (?1, ?2, ?3, ?4, ?4, ?5)", [networkId, input.name, input.parent, now, actor]);
+    parentOf.set(input.name, input.parent);
+    return { name: input.name, parent: input.parent, depth: tagDepth(input.name, parentOf), parentRegistered };
+  });
+  if ("error" in result) {
+    return jsonError(result.error, TAG_CREATE_STATUS[result.error]);
+  }
+  if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_tag_create", "requirement_tag", result.name, JSON.stringify({ parent_id: result.parent, depth: result.depth }).slice(0, 1000), undefined, networkId);
+  return Response.json({ ok: true, tag: { name: result.name, parent_id: result.parent, depth: result.depth }, parent_registered: result.parentRegistered }, { status: 201 });
 }
 
 function toPublic(row: Row) {
@@ -492,7 +769,8 @@ function toPublic(row: Row) {
     seq: row.seq == null ? null : Number(row.seq),
     name: row.title,
     priority: row.priority,
-    assignee: row.assignee || "",
+    // 引用优先：owner/agent_owner 在写入时被校验过；assignee 可能停在旧值（见 displayAssignee）
+    assignee: displayAssignee(row as any),
     due: row.due_on || "",
     // 开始(可空,甘特图用)。形状同 due;没设 = ""。旧 App 不认识这个字段,忽略即可。
     start: row.start_on || "",
@@ -510,7 +788,8 @@ function toPublic(row: Row) {
     updated_by: row.updated_by_json ? JSON.parse(row.updated_by_json) : null,
     // 子需求:parent_id(可空)和父卡上的子需求进度(未归档的子需求数 / 其中完成的)。
     parent_id: row.parent_id || null,
-    children: { total: Number(row.children_total ?? 0), done: Number(row.children_done ?? 0) },
+    // 废弃的子需求不算进度(total 里减掉);旧客户端眼里它是 done,见 toPublicFor。
+    children: { total: Number(row.children_total ?? 0) - Number(row.children_abandoned ?? 0), done: Number(row.children_done ?? 0) },
     // 完成时间:进「完成」列的时刻,移出清空(不在「完成」列 = null)。completedAtApprox = 升级前就完成的卡,
     // 时刻是按 updated_at 补的近似值。completedBy = 谁移进「完成」的(近似值的卡为 null)。旧 App 忽略这三个字段。
     completedAt: row.completed_at || null,
@@ -550,6 +829,34 @@ function hiddenNodeFilter(ctx: RequirementsRequestContext, networkId: string): H
   const visible = new Set(visibleAgents(ctx.auth.userId, networkId).nodeIds);
   return (nodeId: string) => !visible.has(nodeId);
 }
+/**
+ * 2026-10-31 —— **派生展示字段绕过了引用抹除**（#3285 的另一半）。
+ *
+ * `owner` / `agent_owner` / `participants` 都是 `{kind:"node", id}` 引用，所以能被
+ * `isHiddenRef` 判定并抹掉。而 `assignee` 与事件里的同名字段存的是**别名字符串** ——
+ * 没有任何 {kind,id} 可判 ⇒ 受限成员在**卡片列表**上（比事件列表常用得多）直接读到
+ * 一个他看不见的 Agent 的名字。
+ *
+ * 只能在「别名集合」这一层判：把该网络里受限成员看不见的节点的别名收成一个集合。
+ * 方向写死：**命中就抹**（宁可少显示一个名字，也不多露一个）。
+ */
+const aliasSetByCtx = new WeakMap<RequirementsRequestContext, Map<string, Set<string>>>();
+export function hiddenNodeAliases(ctx: RequirementsRequestContext, networkId: string): Set<string> {
+  const hidden = hiddenNodeFilter(ctx, networkId);
+  if (!hidden) return EMPTY_ALIAS_SET;
+  let perNet = aliasSetByCtx.get(ctx);
+  if (!perNet) aliasSetByCtx.set(ctx, perNet = new Map());
+  let set = perNet.get(networkId);
+  if (!set) {
+    const rows = db.all<{ node_id: string; alias: string | null }>(
+      "SELECT node_id, alias FROM nodes WHERE network_id = ?1", networkId);
+    set = new Set(rows.filter(r => r.alias && hidden(r.node_id)).map(r => r.alias as string));
+    perNet.set(networkId, set);
+  }
+  return set;
+}
+const EMPTY_ALIAS_SET: Set<string> = new Set();
+
 function isHiddenRef(ref: unknown, hidden: HiddenNode): boolean {
   if (!hidden || !ref || typeof ref !== "object") return false;
   const r = ref as { kind?: unknown; id?: unknown };
@@ -562,11 +869,21 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
   if (!perms) permsByCtx.set(ctx, perms = taskPermissionsResolver(taskCaller(ctx)));
   // viewer_can:只对「只看相关任务」的调用者出现,客户端据此画只读锁、藏删除;不出现 = 与今天一样全能(旧 Hub 也不出现)。
   const can = perms(row);
-  const pub = can ? { ...toPublic(row), viewer_can: can } : toPublic(row);
+  const base = toPublic(row);
+  if (!knowsAbandoned(ctx)) {
+    base.column = projectColumn(base.column, false);
+    // 旧客户端把废弃的子需求当 done 列出来:进度也按「算进总数、算作完成」给,和它看到的子需求列表对得上。
+    const abandoned = Number(row.children_abandoned ?? 0);
+    base.children = { total: base.children.total + abandoned, done: base.children.done + abandoned };
+  }
+  const pub = can ? { ...base, viewer_can: can } : base;
   const hidden = hiddenNodeFilter(ctx, row.network_id);
   if (!hidden) return pub;
+  const hiddenAliases = hiddenNodeAliases(ctx, row.network_id);
   return {
     ...pub,
+    // 别名不是引用 ⇒ 单列一条（见 hiddenNodeAliases 的长注释）
+    assignee: hiddenAliases.has(pub.assignee) ? null : pub.assignee,
     owner: isHiddenRef(pub.owner, hidden) ? null : pub.owner,
     agent_owner: isHiddenRef(pub.agent_owner, hidden) ? null : pub.agent_owner,
     participants: Array.isArray(pub.participants) ? pub.participants.filter((ref: unknown) => !isHiddenRef(ref, hidden)) : pub.participants,
@@ -578,6 +895,7 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
 
 const SELECT = "requirement_id, network_id, title, column_name, priority, due_on, assignee, issues_json, tags_json, created_at, owner_json, participants_json, agent_owner_json, description, checklist_json, project_id, external_ref, external_url, archived, created_by, created_by_json, updated_by_json, updated_at, parent_id, start_on, seq, completed_at, completed_by_json, completed_at_approx, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0) AS children_total, " +
+  "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'abandoned') AS children_abandoned, " +
   "(SELECT COUNT(*) FROM requirements c WHERE c.parent_id = requirements.requirement_id AND COALESCE(c.archived, 0) = 0 AND c.column_name = 'done') AS children_done";
 
 type PersonRef = { kind: 'user' | 'node'; id: string };
@@ -685,7 +1003,7 @@ export const COMMENT_MAX_CHARS = 4000;
 const NODE_TOKEN_OPERATIONS: ReadonlySet<string> = new Set<string>(["read", "create", "patch", "checklist_item", "comment", "upsert", "projects_read"]);
 function operationOf(req: Request, url: URL): string {
   if (/^\/api\/requirements\/projects(\/|$)/.test(url.pathname)) return req.method === "GET" ? "projects_read" : "projects_write";
-  if (url.pathname === "/api/requirements/tags/ops") return "tags_write";
+  if (url.pathname === "/api/requirements/tags/ops" || url.pathname === "/api/requirements/tags/create") return "tags_write";
   if (req.method === "GET") return "read";
   if (/^\/api\/requirements\/[^/]+\/checklist\/[^/]+$/.test(url.pathname)) return "checklist_item";
   if (/^\/api\/requirements\/[^/]+\/comments$/.test(url.pathname)) return "comment";
@@ -729,7 +1047,7 @@ function ifNoneMatchHits(header: string | null, etag: string): boolean {
 // list_summary:GET 认 view=summary(不带描述正文与子任务条目,见 toSummary);changes:GET 认 changes=1 + updated_since
 // (改过的卡含归档的,加上 deleted 墓碑与 server_time,见 listChanges)。
 // events:GET /api/requirements/events —— 字段级的改动流水(谁、何时、旧值 → 新值,requirement-events.ts)。
-export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_ops", "list_summary", "changes", "events", "last_event"] as const;
+export const REQUIREMENT_CAPABILITIES = ["agent_owner", "description", "checklist", "projects", "due_datetime", "external_ref", "archived", "agent_api", "sub_requirements", "tags", "priority_lowest", "start_date", "requirement_seq", "search", "paging", "completed_at", "stats", "tag_status_snapshot", "tag_ops", TAG_TREE_CAPABILITY, "list_summary", "changes", "events", "last_event", "column_abandoned"] as const;
 
 // ── 子需求 ──
 // parent_id:同一网络里的另一张卡;不能成环;最多 5 层(顶层是第 1 层)。删父卡 = 子卡保留、parent_id 置空。
@@ -795,13 +1113,8 @@ function actorOf(ctx: RequirementsRequestContext): Actor | null {
   if (!ctx.auth) return null;
   if (!ctx.isNodeToken) return { kind: "user", id: ctx.auth.userId };
   const tokenId = ctx.auth.tokenId ?? null;
-  const bound = tokenId ? db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", tokenId)?.bound_node_id : null;
-  if (bound) return { kind: "node", id: bound };
-  const alias = ctx.auth.tokenName?.startsWith("node:") ? ctx.auth.tokenName.slice(5) : null;
-  if (alias && ctx.auth.networkId) {
-    const node = db.get<{ node_id: string }>("SELECT node_id FROM nodes WHERE network_id = ?1 AND alias = ?2", ctx.auth.networkId, alias);
-    if (node) return { kind: "node", id: node.node_id };
-  }
+  const resolved = tokenId ? resolveNodeCaller(tokenId) : null;
+  if (resolved?.ok && resolved.kind === "node") return { kind: "node", id: resolved.nodeId };
   return { kind: "node", id: `token:${tokenId ?? "unknown"}` };
 }
 
@@ -974,6 +1287,18 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   }
   let people;
   try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id), ctx.strictOwner === true); } catch (e) { return errorFrom(e); }
+
+  // 2026-10-31 —— **写侧对账**（#3270 的另一半）：
+  // 读侧已经以 owner/agent_owner 为准（displayAssignee），但库里那一列仍会停在旧值。
+  // 一个派生字段只要有第二个写入路径，就迟早会与事实分叉；同一次写入里把它对齐，分叉就不会累积。
+  // 规则：调用方**没有显式给 assignee** 时，用本次写入后的引用回填；显式给了就以调用方为准
+  // （那可能是系统外的人，例如「王工」—— 用引用覆盖它等于丢信息）。
+  if (!has("assignee") && (has("owner") || has("agent_owner"))) {
+    // 用 refDisplayName（把 {kind,id} 换回人名），**不是** displayAssignee
+    // （后者只回显存下来的自由文本 —— 这里正是要从引用推）。
+    const fromRef = refDisplayName(people.agentOwnerJson) || refDisplayName(people.ownerJson);
+    if (fromRef) assignee = fromRef.slice(0, 80);
+  }
   // RFC-040:只凭负责人身份改这张卡时,负责人 / 负责 Agent 只能交给本部门的人(或自己)/ 本部门成员的 Agent,
   // 不能把卡推出本部门(推出去等于替别的部门派活)。清空(null)不限制。
   const headOnly = (has("owner") || has("agent_owner")) ? headOnlyEditScope(caller, row) : null;
@@ -1021,7 +1346,10 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
     archived = body.archived ? 1 : 0;
   }
   const updatedAt = new Date().toISOString();
-  const column = has("column") ? String(body.column) : row.column_name;
+  // 旧客户端眼里废弃的卡是 done:它回传 column=done 不是「改成完成」,保持废弃。
+  const column = !has("column") ? row.column_name
+    : row.column_name === "abandoned" && body.column === "done" && !knowsAbandoned(ctx) ? "abandoned"
+    : String(body.column);
   const actor = JSON.stringify(actorOf(ctx));
   // 完成时间:移进「完成」= 此刻 + 这次的操作者;移出 = 清空;留在「完成」(done → done、改别的字段)= 原样不动。
   const completed = column !== "done" ? { at: null, by: null, approx: 0 }
@@ -1087,7 +1415,9 @@ function listFilters(url: URL, sql: string, params: unknown[], ctx?: Requirement
   const status = q.get("status");
   if (status !== null) {
     if (!COLUMNS.has(status)) return jsonError("invalid_status", 400);
-    sql += ` AND column_name = ?${params.push(status)}`;
+    // 旧客户端把废弃的卡看成 done:它按 done 筛时也要带上废弃的,否则同一张卡在列表里有、筛出来没有。
+    if (status === "done" && ctx && !knowsAbandoned(ctx)) sql += " AND column_name IN ('done', 'abandoned')";
+    else sql += ` AND column_name = ?${params.push(status)}`;
   }
   const project = q.get("project_id");
   if (project !== null) sql += project === "none" ? " AND project_id IS NULL" : ` AND project_id = ?${params.push(project)}`;
@@ -1171,6 +1501,89 @@ function departmentNetworks(ctx: RequirementsRequestContext, deptId: string): st
 
 const LIST_ORDER = " ORDER BY created_at DESC, requirement_id DESC";
 type LightRow = { requirement_id: string; seq?: number | null; network_id: string; created_at: string; title: string; description: string | null; assignee: string | null; tags_json: string | null; project_id: string | null; owner_json: string | null; agent_owner_json: string | null; participants_json: string | null };
+/**
+ * 2026-10-31 —— `assignee` 是**派生展示字段**，但它有自己的旧写入路径，会停在旧值。
+ *
+ * 实测（ANet 项目 archived=0，1105 张）：25 张与 owner/agent_owner 不一致，
+ * 其中 22 张「有 assignee 但既无 owner 也无 agent_owner」。读的人看的是 assignee，
+ * 于是「有人负责」这句话可以比事实晚很久。
+ *
+ * 判据：**owner / agent_owner 是写入时被校验过的引用**（owner 必须是本网络 user，
+ * agent_owner 必须是本网络 node），而 assignee 是自由文本。两者冲突时，读一侧应以引用为准。
+ * 没有引用时保留自由文本 —— 它可能是系统外的人（例如「王工」），删掉就等于丢信息。
+ */
+/**
+ * 2026-10-31 —— **删节点时要清掉指向它的卡引用**（#3277，实测 31 条悬空）。
+ *
+ * 实测：三个已删除的 node id 仍被 27 张卡引用，其中两个 id 在 api_tokens 里还有绑定行
+ * ⇒ 悬空不是录入错误，是**删除路径的缺口**；而读侧把它显示成「负责人是 n_xxxx」。
+ *
+ * 处理：
+ *   · agent_owner 指向该节点 ⇒ 置空（卡本身不动，它是正确的）
+ *   · participants 含该节点     ⇒ 从列表里摘掉
+ *   · owner 是**人**，删节点不影响它 ⇒ 不动
+ * 返回 { agentOwnerCleared, participantsTouched }，供删除路径写进审计。
+ */
+export function clearNodeFromRequirements(nodeId: string): { agentOwnerCleared: number; participantsTouched: number } {
+  const needle = `"id":"${nodeId}"`;
+  let agentOwnerCleared = 0;
+  const owners = db.all<{ requirement_id: string }>(
+    "SELECT requirement_id FROM requirements WHERE agent_owner_json LIKE ?1", `%${needle}%`);
+  for (const row of owners) {
+    db.run("UPDATE requirements SET agent_owner_json = NULL, updated_at = ?2 WHERE requirement_id = ?1",
+      [row.requirement_id, new Date().toISOString()]);
+    agentOwnerCleared += 1;
+  }
+  let participantsTouched = 0;
+  const parts = db.all<{ requirement_id: string; participants_json: string | null }>(
+    "SELECT requirement_id, participants_json FROM requirements WHERE participants_json LIKE ?1", `%${needle}%`);
+  for (const row of parts) {
+    let list: Array<{ kind?: string; id?: string }> = [];
+    try { list = JSON.parse(row.participants_json || "[]") as any[]; } catch { continue; }
+    const next = (list || []).filter((ref) => !(ref?.kind === "node" && ref?.id === nodeId));
+    if (next.length !== (list || []).length) {
+      db.run("UPDATE requirements SET participants_json = ?2, updated_at = ?3 WHERE requirement_id = ?1",
+        [row.requirement_id, JSON.stringify(next), new Date().toISOString()]);
+      participantsTouched += 1;
+    }
+  }
+  return { agentOwnerCleared, participantsTouched };
+}
+
+export function refDisplayName(json: string | null | undefined): string {
+  /**
+   * 把写入侧的引用 `{kind,id}` 换回**给人看的名字**（node → nodes.alias，user → users.username）。
+   * 只给**写侧回填**用：读侧不再由它推导 assignee（见 displayAssignee 的注释）。
+   */
+  let ref: { kind?: string; id?: string; alias?: string; username?: string } | null = null;
+  try { ref = json ? JSON.parse(json) : null; } catch { return ""; }
+  if (!ref) return "";
+  const inline = String(ref.alias || ref.username || "").trim();
+  if (inline) return inline;
+  if (!ref.id) return "";
+  try {
+    if (ref.kind === "node") {
+      const r = db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE node_id = ?1", ref.id);
+      if (r?.alias) return String(r.alias);
+    } else if (ref.kind === "user") {
+      const r = db.get<{ username: string | null }>("SELECT username FROM users WHERE user_id = ?1", ref.id);
+      if (r?.username) return String(r.username);
+    }
+  } catch { /* 读不到就退回 id */ }
+  return String(ref.id);
+}
+
+export function displayAssignee(row: { assignee?: string | null }): string {
+  /**
+   * 2026-10-31 —— **只回显存下来的值，不从引用推导**（两次实测把方向改对了）：
+   *   · 契约要求「显式 assignee 不被引用覆盖」（requirements-http 老测试）
+   *   · 契约也要求「显式清空后就是空」（同文件的 cleared 用例）
+   * 两者合起来意味着：读侧无法区分「从没设过」与「显式清空」⇒ 推导就会猜错其中一边。
+   * ⇒ 漂移的修法放在**写侧回填**（设引用且没显式给 assignee 时），读侧只负责如实显示。
+   */
+  return String(row.assignee || "").trim();
+}
+
 const parseRef = (json: string | null) => { try { return json ? JSON.parse(json) : null; } catch { return null; } };
 
 /**
@@ -1195,7 +1608,7 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
     for (const r of light) {
       let m = maps.get(r.network_id);
       if (!m) maps.set(r.network_id, m = searchNameMaps(ctx, r.network_id));
-      const row = { name: r.title, description: r.description || "", assignee: r.assignee || "", tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
+      const row = { name: r.title, description: r.description || "", assignee: displayAssignee(r), tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
       // #471 —— tag= 在这里按存好的标签数组精确比(JSON 列,SQLite / PostgreSQL 写法不同,所以不进 SQL)。
       if (lq.tag !== null && !row.tags.includes(lq.tag)) continue;
       if (!lq.terms.length || matchesTaskId(r, lq.idQuery) || matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
@@ -1323,7 +1736,9 @@ function lastEventsFor(ctx: RequirementsRequestContext, rows: readonly Row[]): M
     ...ids,
   );
   if (!events.length) return out;
-  const pubs = events.map(eventPublic);
+  const aware = knowsAbandoned(ctx);
+  // 投影后成了 done → done 的那条:当作没有可展示的字段(同下面隐去节点的处理)。
+  const pubs = events.map(e => { const ev = eventPublic(e); return projectEvent(ev, aware) ?? { ...ev, field: null, old: null, new: null }; });
   const userIds = new Set<string>(), nodeIds = new Set<string>();
   for (const ev of pubs) if (isRef(ev.actor)) (ev.actor.kind === "user" ? userIds : nodeIds).add(ev.actor.id);
   // 名字规则同 GET /api/requirements/people 的 name(没设显示名 → 用户名 / alias / node_name)。
@@ -1388,6 +1803,16 @@ function listEvents(ctx: RequirementsRequestContext): Response {
   const serverTime = new Date().toISOString();
   const caller = taskCaller(ctx);
   const hidden = hiddenNodeFilter(ctx, networkId);
+  // 2026-10-31 —— `assignee` 是**派生展示字段**，存的是**别名字符串**，不是 {kind,id} 引用。
+  // 于是它绕过了 isHiddenRef：受限成员会在事件里读到「某个他看不见的 Agent 的名字」。
+  // 实测（本仓）：把 agent_owner 设成一个受限成员看不见的节点后，事件列表里多出
+  //   { field:"assignee", old:null, new:"<那个节点的别名>" }
+  // 而同一张卡的 agent_owner 事件已被正确抹掉 ⇒ 名字从旁边漏了出去。
+  // 修法：按「隐藏节点的别名集合」判，命中就抹成 null；随后「抹后 old==new」的规则会把整条丢弃。
+  // 方向选择：宁可多抹（隐藏）也不多露 —— 别名与人名冲突时，少显示一个名字的代价小于多露一个。
+  const aliasSet = hiddenNodeAliases(ctx, networkId);
+  const hiddenAlias = (v: unknown): boolean => !!hidden && typeof v === "string" && v !== "" && aliasSet.has(v);
+  const aware = knowsAbandoned(ctx);
   const seen = new Map<string, boolean>();
   const canSee = (id: string): boolean => {
     if (!caller) return true;
@@ -1403,11 +1828,17 @@ function listEvents(ctx: RequirementsRequestContext): Response {
   };
   const shown = (row: EventRow) => {
     if (!canSee(row.requirement_id)) return null;
-    const ev = eventPublic(row);
+    const ev = projectEvent(eventPublic(row), aware);
+    if (!ev) return null;
     if (!hidden) return ev;
     const mask = (ref: unknown) => (isHiddenRef(ref, hidden) ? null : ref);
     const masked = { ...ev, actor: mask(ev.actor) };
     if (ev.field === "owner" || ev.field === "agent_owner") { masked.old = mask(ev.old); masked.new = mask(ev.new); }
+    if (ev.field === "assignee") {
+      // 见上：别名字符串同样要按隐藏节点判定
+      masked.old = hiddenAlias(ev.old) ? null : ev.old;
+      masked.new = hiddenAlias(ev.new) ? null : ev.new;
+    }
     if (ev.field === "participants") {
       masked.old = Array.isArray(ev.old) ? ev.old.filter(ref => !isHiddenRef(ref, hidden)) : ev.old;
       masked.new = Array.isArray(ev.new) ? ev.new.filter(ref => !isHiddenRef(ref, hidden)) : ev.new;
@@ -1483,7 +1914,7 @@ function listCacheAcl(ctx: RequirementsRequestContext): string | null {
 
 function listCacheKey(ctx: RequirementsRequestContext): string {
   const sorted = [...ctx.url.searchParams.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify({ u: ctx.auth?.userId ?? null, n: ctx.auth?.networkId ?? null, a: ctx.isAdmin, t: ctx.isNodeToken, s: ctx.scope, q: sorted });
+  return JSON.stringify({ u: ctx.auth?.userId ?? null, n: ctx.auth?.networkId ?? null, a: ctx.isAdmin, t: ctx.isNodeToken, s: ctx.scope, q: sorted, c: knowsAbandoned(ctx) });
 }
 
 /** Test-only. */
@@ -1514,20 +1945,33 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const tagSql = addTaskVisibilityScope("SELECT tags_json FROM requirements WHERE network_id=?1", tagParams, taskCaller(ctx));
     const rows = db.all<{ tags_json: string | null }>(tagSql, ...tagParams);
     // counts:调用者看得见的卡里(含归档)每个标签用了几张;colors:只回这些标签的颜色(看不见的卡上的标签不外泄)。
-    // can_manage:这个调用者能不能用 /tags/ops。旧 App 只读 tags,多出的字段忽略。
+    // can_manage:这个调用者能不能用 /tags/ops /tags/create。旧 App 只读 tags,多出的字段忽略。
     const counts: Record<string, number> = {};
     for (const row of rows) for (const tag of storedTags(row.tags_json)) counts[tag] = (counts[tag] ?? 0) + 1;
     const tags = Object.keys(counts).sort();
+    const manageable = canManageTags(ctx, networkId);
+    // nodes:标签树。登记过的节点(create 建的,含 0 任务)∪ 调用者看得见的在用标签。
+    // 受限成员只拿得到「看得见的名字」:登记过但一张可见卡都没有的标签不外泄(与 counts / colors 同一口径)。
+    const registeredRows = db.all<TagNodeRow>("SELECT name, parent_name FROM network_tag_nodes WHERE network_id = ?1", networkId);
+    const visibleRegistered = manageable ? registeredRows : registeredRows.filter(row => counts[row.name] > 0);
+    const nodeNames = new Set([...registeredRows.map(row => row.name), ...tags]);
     const colors: Record<string, string> = {};
     for (const row of db.all<{ name: string; color: string }>("SELECT name, color FROM network_tags WHERE network_id = ?1", networkId)) {
-      if (counts[row.name]) colors[row.name] = row.color;
+      if (counts[row.name] || (manageable && nodeNames.has(row.name))) colors[row.name] = row.color;
     }
-    return Response.json({ ok: true, networkId, tags, counts, colors, can_manage: canManageTags(ctx, networkId) });
+    const nodes = buildTagNodes(visibleRegistered, tags).map(node => ({ ...node, count: counts[node.name] ?? 0, color: colors[node.name] ?? null }));
+    return Response.json({ ok: true, networkId, tags, counts, colors, nodes, can_manage: manageable });
   }
 
   if (url.pathname === "/api/requirements/tags/ops") {
     if (req.method !== "POST") return jsonError("not_found", 404);
     return handleTagOp(ctx);
+  }
+
+  // 建标签(可带 parent_id)。原子:节点 + 审计在一个事务里;父不存在 404,绝不安静建到根上。
+  if (url.pathname === "/api/requirements/tags/create") {
+    if (req.method !== "POST") return jsonError("not_found", 404);
+    return handleTagCreate(ctx);
   }
 
   // 仪表盘聚合(requirements-stats.ts):一个网络、调用者看得见的卡(与列表同一个可见范围),含归档的卡 ——
@@ -1539,7 +1983,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if ("error" in sq) return jsonError(sq.error, 400);
     const statsParams: unknown[] = [networkId];
     const statsSql = addTaskVisibilityScope(
-      "SELECT requirement_id, seq, title, project_id, column_name, archived, created_at, completed_at, completed_at_approx, completed_by_json FROM requirements WHERE network_id = ?1",
+      "SELECT requirement_id, seq, title, project_id, column_name, archived, created_at, completed_at, completed_at_approx, completed_by_json, tags_json FROM requirements WHERE network_id = ?1",
       statsParams, taskCaller(ctx),
     );
     const rows = db.all<StatsRow>(statsSql, ...statsParams);
@@ -1696,7 +2140,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const row = scopedRow(ctx, decodeURIComponent(itemMatch[1]));
     if (row instanceof Response) return row;
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
-    const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id/checklist/:item", row);
+    const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id/checklist/:id", row);
     if (nodeDenied) return nodeDenied;
     if (!canEditTask(taskCaller(ctx), row) && !canParticipantEditTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_read_only");
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。

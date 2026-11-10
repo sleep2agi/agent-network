@@ -107,10 +107,16 @@ describe("#473 requirements_people", () => {
   test("compact rows: username, display_name, role, department, owned agents; unowned agents listed once", async () => {
     const r = await asBoss.call("requirements_people", { network_id: netA, q: "alice" });
     expect(r.ok).toBe(true);
-    expect(r.people).toEqual([{
+    // #2596 —— Agent 行新增 updated_at / lifecycle_state（客户端用它做 alias 去重与“近 7 天”过滤）。
+    // 形状断言改为「关键字段匹配 + 允许新增键」，而不是整行严格相等。
+    expect(r.people).toHaveLength(1);
+    expect(r.people[0]).toMatchObject({
       user_id: alice.id, username: alice.username, display_name: "爱丽丝", role: "member",
-      department: { id: deptId, name: `研发部${stamp % 1000}` }, agents: [{ node_id: node("alice"), alias: ALIAS.alice }],
-    }]);
+      department: { id: deptId, name: `研发部${stamp % 1000}` },
+    });
+    expect(r.people[0].agents).toHaveLength(1);
+    expect(r.people[0].agents[0]).toMatchObject({ node_id: node("alice"), alias: ALIAS.alice });
+    expect(r.people[0].agents[0]).toHaveProperty("updated_at");
     const all = await asBoss.call("requirements_people", { network_id: netA, q: String(stamp) });
     expect(all.agents_without_owner.map((a: any) => a.alias).sort()).toEqual([ALIAS.dup, ALIAS.dup, ALIAS.free].sort());
     const bossRow = (await asBoss.call("requirements_people", { network_id: netA, q: boss.username })).people[0];

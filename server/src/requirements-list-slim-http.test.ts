@@ -125,8 +125,8 @@ describe("view=summary", () => {
     const one = await send(admin.token, "GET", `/api/requirements/${card.id}?network_id=${NET}`);
     expect(one.body.requirement.description).toBe(f.description);
     // 比的是 summary 省掉的那部分(正文 / 子任务):两边一样多的 last_event(#506,每行约 150 B)不算,
-    // 否则这张只有几行的小表上,固定开销会把比例拉过一半。
-    const bare = (body: any) => JSON.stringify({ ...body, requirements: body.requirements.map(({ last_event: _l, ...r }: any) => r) }).length;
+    // 否则这张只有几行的小表上,固定开销会把比例拉过一半。capabilities 同理:两边一样、每加一个能力就长一截。
+    const bare = (body: any) => JSON.stringify({ ...body, capabilities: [], requirements: body.requirements.map(({ last_event: _l, ...r }: any) => r) }).length;
     expect(summary.body.requirements.every((r: any) => "last_event" in r)).toBe(true);
     expect(bare(summary.body)).toBeLessThan(bare(full.body) / 2);
   });
@@ -174,9 +174,14 @@ describe("changes=1", () => {
     expect(Date.parse(delta.body.tombstones_since)).toBeLessThan(Date.parse(t0));
 
     // 接着读:什么都没变就是空的
+    // 🔴 server_time 的语义是「>= 会重复回一次，客户端按 id 覆盖」（见 requirements.ts 的注释）。
+    // 早先这里断言 deleted 必须为空 —— 一旦删除恰好落在 server_time 的同一秒，
+    // 边界那条会被重复下发，测试就红（与顺序无关，是**与时间赛跑**的偶发）。
+    // 按契约断言：允许重复，但不许出现边界之后的新内容。
     const again = await list(admin.token, `&changes=1&updated_since=${encodeURIComponent(delta.body.server_time)}`);
-    expect(again.body.requirements).toEqual([]);
-    expect(again.body.deleted).toEqual([]);
+    expect([...new Set(again.body.requirements.map((r: any) => r.id))]).toEqual([]);
+    // 允许：空（边界已过去）或重复下发 gone（同一秒边界）；不允许：别的东西冒出来
+    expect([...new Set(again.body.deleted)].every((id: string) => id === gone.id)).toBe(true);
 
     // 与 view=summary 组合
     const slim = await list(admin.token, `&changes=1&view=summary&updated_since=${encodeURIComponent(t0)}`);

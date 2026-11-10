@@ -12,7 +12,7 @@ import { isParticipant } from "./task-access.js";
 import { rewriteUnreadNoticeDm, sendNoticeDm } from "./human-dm.js";
 
 export const COALESCE_WINDOW_MS = 60_000;
-const COLUMN_LABEL: Record<string, string> = { pool: "需求池", doing: "进行中", done: "完成" };
+const COLUMN_LABEL: Record<string, string> = { pool: "需求池", doing: "进行中", done: "完成", abandoned: "废弃" };
 const MAX_LINES = 20;
 const MAX_ITEM_CHARS = 40;
 

@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+COPY contracts /app/contracts
 COPY server /app/server
 COPY prototype/anet-client-app /app/prototype/anet-client-app
 COPY tests/test1280-desktop-user-push/run.sh /app/tests/test1280-desktop-user-push/run.sh

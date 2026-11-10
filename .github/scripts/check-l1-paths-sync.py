@@ -28,6 +28,7 @@ clean run — exit 2 rather than reporting success over an empty denominator.
 import fnmatch
 import re
 import sys
+from pathlib import Path
 
 try:
     import yaml
@@ -62,12 +63,27 @@ def _strip_comments(text: str) -> str:
     return "\n".join(line.split("#", 1)[0] for line in text.split("\n"))
 
 
-def l1_suites(text: str) -> list[str]:
-    """Suite names from qa.sh's L1_TESTS array."""
+def l1_suites_from_array(text: str) -> list[str]:
+    """旧形态：qa.sh 里 `L1_TESTS=(...)` 的套件名（回滚/过渡期）。"""
     m = re.search(r"L1_TESTS=\(([^)]*)\)", _strip_comments(text), re.S)
     if not m:
         return []
     return re.findall(r'"([^"]+)"', m.group(1))
+
+
+def l1_suites_from_markers(root: Path) -> list[str]:
+    """新形态（#675）：每个进 L1 的套件自带 `tests/<name>/qa.l1` 标记，按名字排序。"""
+    return sorted(p.parent.name for p in (root / "tests").glob("*/qa.l1"))
+
+
+def l1_suites(text: str, tests_dir: Path | None = None) -> list[str]:
+    """L1 套件名。优先读标记文件；一个都没有时退回 `L1_TESTS` 数组。
+
+    两边都空 ⇒ 返回 []，调用方按「解析失败」处理（exit 2），不让空分母被当成“全都对得上”。
+    """
+    root = tests_dir or Path(__file__).resolve().parent.parent.parent
+    markers = l1_suites_from_markers(root)
+    return markers if markers else l1_suites_from_array(text)
 
 
 def pr_paths(doc: dict) -> list[str]:
@@ -126,6 +142,19 @@ def main() -> int:
     return 0
 
 
+def _marker_case(markers: list[tuple[str, int]], sh: str) -> list[str]:
+    """临时造一份 tests/ 目录，验证标记文件收集与退回数组的分支。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "tests").mkdir()
+        for name, _ in markers:
+            (root / "tests" / name).mkdir()
+            (root / "tests" / name / "qa.l1").write_text("")
+        return l1_suites(sh, tests_dir=root)
+
+
 def selftest() -> int:
     """Pin the two parsers, because that is where this gate would go blind.
 
@@ -138,20 +167,23 @@ def selftest() -> int:
         "on": {"pull_request": {"paths": ["tests/qa-*/**", "tests/test-b/**", "scripts/qa.sh"]}},
     }
     cases = [
-        ("L1_TESTS parsed in full", l1_suites(sh) == ["qa-a", "test-b"]),
+        ("L1_TESTS parsed in full", l1_suites_from_array(sh) == ["qa-a", "test-b"]),
         # 🔴 见 _strip_comments:数组里一条**含右括号的注释**会让 `[^)]*` 提前截断,
         # 捕获内容里一个套件名都没有。这条夹具照着实际撞红的那次写(#835 往
         # L1_TESTS 里加了一行「(注册这一步不是可选的 …)」)。
         (
             "注释里的 ) 不截断数组",
-            l1_suites('L1_TESTS=(\n  # (注册不是可选的)\n  "qa-a"\n  "test-b"\n)\n')
+            l1_suites_from_array('L1_TESTS=(\n  # (注册不是可选的)\n  "qa-a"\n  "test-b"\n)\n')
             == ["qa-a", "test-b"],
         ),
         (
             "数组后面别处的 ) 不影响",
-            l1_suites('L1_TESTS=(\n  "qa-a"\n)\nfoo() { :; }\n') == ["qa-a"],
+            l1_suites_from_array('L1_TESTS=(\n  "qa-a"\n)\nfoo() { :; }\n') == ["qa-a"],
         ),
-        ("missing array yields empty (→ exit 2 upstream)", l1_suites("no array here") == []),
+        ("missing array yields empty (→ exit 2 upstream)", l1_suites_from_array("no array here") == []),
+        # #675: 标记文件是新的唯一来源；没有标记时才允许退回数组。
+        ("标记文件按名字排序收集", _marker_case([("test-z", 1), ("qa-a", 1)], sh) == ["qa-a", "test-z"]),
+        ("没有标记文件时退回 L1_TESTS 数组", _marker_case([], sh) == ["qa-a", "test-b"]),
         ("paths read from on.pull_request", len(pr_paths(yml)) == 3),
         ("bare `on:` parsed as True still works", len(pr_paths({True: yml["on"]})) == 3),
         ("glob pattern covers a suite", covered("qa-a", pr_paths(yml))),

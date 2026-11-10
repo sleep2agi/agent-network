@@ -1,0 +1,180 @@
+// #829: a tmux launcher exits successfully while its runtime remains alive.
+// Linux-only evidence for daemon create, not a general readiness/security API.
+import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
+import { hasBorrowedV1Intent, inspectBorrowedLaunchHealth } from "../../shared/opencode-borrowed-launch-health";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+
+export const LAUNCH_HEALTH_FILE = "opencode-launch-health.json";
+export interface LiveProcess { pid: number; ticks: string; parent: number; state: string }
+export function readLiveProcess(pid: number): LiveProcess | undefined {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+    if (!/^\d+$/.test(fields[19] ?? "") || ["Z", "X", "x"].includes(fields[0])) return;
+    return { pid, ticks: fields[19], parent: Number(fields[1]), state: fields[0] };
+  } catch { return; }
+}
+export interface LaunchHealth {
+  version: 1; generation: string; writtenAt: number;
+  bridge: LiveProcess; serve: LiveProcess;
+  serveOwnership?: "shared";
+}
+function readRecord(path: string): any {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1 || (st.mode & 0o022) !== 0
+      || (process.getuid && st.uid !== process.getuid()) || st.size > 16384) throw new Error("unsafe health record");
+    return JSON.parse(readFileSync(fd, "utf8"));
+  } finally { closeSync(fd); }
+}
+
+/** No tokens/ports in this record. Stale records alone can never pass. */
+export function publishLaunchHealth(dir: string, generation: string, servePid: number): () => void {
+  return publishOpenCodeLaunchHealth(dir, generation, servePid, false);
+}
+
+export function publishSharedLaunchHealth(dir: string, generation: string, servePid: number): () => void {
+  return publishOpenCodeLaunchHealth(dir, generation, servePid, true);
+}
+
+function publishOpenCodeLaunchHealth(dir: string, generation: string, servePid: number, shared: boolean): () => void {
+  if (process.platform !== "linux") return () => {};
+  const bridge = readLiveProcess(process.pid), serve = readLiveProcess(servePid);
+  if (!bridge || !serve || (!shared && serve.parent !== bridge.pid)) throw new Error("OpenCode launch process identity unavailable");
+  const record: LaunchHealth = { version: 1, generation, writtenAt: Date.now(), bridge, serve,
+    ...(shared ? { serveOwnership: "shared" as const } : {}) };
+  const path = join(dir, LAUNCH_HEALTH_FILE), tmp = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+    renameOverExistingSync(tmp, path);
+  } finally { rmSync(tmp, { force: true }); }
+  return () => {
+    try {
+      const current = readRecord(path);
+      if (current.generation === generation && current.bridge?.pid === bridge.pid
+        && current.bridge?.ticks === bridge.ticks) rmSync(path);
+    } catch { /* gone, unsafe, or replaced: never remove another generation */ }
+  };
+}
+
+export interface HealthProbe {
+  process: (pid: number) => LiveProcess | undefined;
+  argv: (pid: number) => string[];
+}
+export function successfulLauncherExit(exit: { code: number | null; signal: string | null } | null): boolean {
+  return exit?.code === 0 && exit.signal === null;
+}
+const procProbe: HealthProbe = {
+  process: readLiveProcess,
+  argv: (pid) => readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean),
+};
+export function validateLaunchHealth(
+  record: LaunchHealth, attach: any, configPath: string, launchedAt: number,
+  probe: HealthProbe = procProbe,
+): { ok: true; bridgePid: number } | { ok: false; reason: string } {
+  try {
+    if (record?.version !== 1 || !Number.isFinite(record.writtenAt) || record.writtenAt < launchedAt
+      || !/^ses_[A-Za-z0-9]+$/.test(record.generation) || attach?.gen !== record.generation) throw new Error("stale or mismatched generation");
+    const identities = [record.bridge, record.serve, { pid: attach.pid, ticks: String(attach.startTicks) }];
+    if (new Set(identities.map(p => p.pid)).size !== 3) throw new Error("overlapping process identities");
+    for (const expected of identities) {
+      const live = probe.process(expected.pid);
+      if (!live || !/^\d+$/.test(expected.ticks) || live.ticks !== expected.ticks) throw new Error("dead or reused process identity");
+    }
+    if (record.serveOwnership !== undefined && record.serveOwnership !== "shared") throw new Error("unknown serve ownership");
+    if (record.serveOwnership !== "shared" && probe.process(record.serve.pid)?.parent !== record.bridge.pid) throw new Error("serve parent mismatch");
+    const bridgeArgs = probe.argv(record.bridge.pid);
+    if (!bridgeArgs.some((v, i) => v === "--config" && bridgeArgs[i + 1] === configPath)) throw new Error("bridge config mismatch");
+    const tuiArgs = probe.argv(attach.pid);
+    if (classifyTuiArgv(tuiArgs, record.generation) !== "match") throw new Error("TUI session mismatch");
+    return { ok: true, bridgePid: record.bridge.pid };
+  } catch (e) { return { ok: false, reason: e instanceof Error ? e.message : "health unavailable" }; }
+}
+/** `--session <id>` is two argv elements after exec. The attach shell publishes
+ * its pid before that exec, so a missing flag is the pre-exec window, not a
+ * different generation. An equals-form flag is not this contract. */
+export function classifyTuiArgv(args: string[], generation: string): "match" | "pre_exec" | "wrong_session" {
+  if (!Array.isArray(args)) return "pre_exec";
+  let sawSession = false;
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i] ?? "";
+    if (token === "--session") {
+      sawSession = true;
+      if (args[i + 1] === generation) return "match";
+    } else if (token.startsWith("--session=")) sawSession = true;
+  }
+  return sawSession ? "wrong_session" : "pre_exec";
+}
+
+/** #1625 — what a *failed* create would leave behind.
+ *
+ *  `inspectLaunchHealth` answers "is this a healthy generation?"; the reaper needs
+ *  the other half: "which processes of the generation I just launched are still
+ *  alive?", answered **only** from the records this generation wrote and only when
+ *  the pid's start ticks still match. No records (the launcher died before it
+ *  wrote any) = nothing proven alive, and nothing to signal.
+ *
+ *  A borrowed V1 host generation is reported as `borrowed` and never enumerated:
+ *  its server belongs to the host, so the only honest outcome is handing it back. */
+export interface LaunchResidue {
+  borrowed: boolean;
+  alive: Array<{ pid: number; role: "bridge" | "serve" | "tui"; ticks: string }>;
+}
+
+export function liveLaunchResidue(dir: string, configPath: string): LaunchResidue {
+  let borrowed = false;
+  try { borrowed = hasBorrowedV1Intent(dir, readRecord(configPath)); } catch { /* no config yet */ }
+  if (borrowed) return { borrowed, alive: [] };
+  const alive: LaunchResidue["alive"] = [];
+  const add = (raw: any, role: "bridge" | "serve" | "tui") => {
+    const pid = Number(raw?.pid);
+    const live = Number.isSafeInteger(pid) && pid > 1 ? readLiveProcess(pid) : undefined;
+    if (live && live.ticks === String(raw?.ticks)) alive.push({ pid, role, ticks: live.ticks });
+  };
+  try {
+    const record = readRecord(join(dir, LAUNCH_HEALTH_FILE));
+    add(record?.bridge, "bridge");
+    add(record?.serve, "serve");
+    const attach = readRecord(join(dir, "opencode-attach.json"));
+    add({ pid: attach?.pid, ticks: String(attach?.startTicks) }, "tui");
+  } catch { /* unreadable/missing record: nothing provable */ }
+  return { borrowed, alive };
+}
+
+export function inspectLaunchHealth(dir: string, configPath: string, launchedAt: number) {
+  if (process.platform !== "linux") return { ok: false as const, reason: "daemon V2 launch health requires Linux process identity" };
+  try {
+    if (hasBorrowedV1Intent(dir,readRecord(configPath))) {
+      return inspectBorrowedLaunchHealth(configPath,launchedAt);
+    }
+    return validateLaunchHealth(readRecord(join(dir, LAUNCH_HEALTH_FILE)),
+      readRecord(join(dir, "opencode-attach.json")), configPath, launchedAt);
+  } catch { return { ok: false as const, reason: "missing or unsafe launch/attach record" }; }
+}
+
+/** The attach shell publishes its PID before exec. A zero-exit launcher can
+ * therefore precede matching TUI argv. Recheck the SAME full guard only within
+ * the caller's existing deadline; missing or foreign identities never pass. */
+export async function waitForLaunchHealth(
+  dir: string, configPath: string, launchedAt: number, deadline: number,
+  deps: {
+    inspect?: typeof inspectLaunchHealth;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+) {
+  const inspect = deps.inspect ?? inspectLaunchHealth;
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  let health = inspect(dir, configPath, launchedAt);
+  while (!health.ok && now() < deadline) {
+    await sleep(Math.min(50, Math.max(0, deadline - now())));
+    health = inspect(dir, configPath, launchedAt);
+    if (now() >= deadline) break;
+  }
+  return health;
+}

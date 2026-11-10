@@ -11,11 +11,14 @@ name: anet QA (v0)
 
 on:
   pull_request:
+    # labeled：给 PR 打上 `full-qa` 标签即触发一次全量矩阵（见 changes.full）。
+    types: [opened, synchronize, reopened, labeled]
     paths:
+      - 'tests/**'
+      - 'server/src/human-inbox.ts'
       - 'server/**'
       - 'docs/stale-issue-review.md'
       - 'scripts/check-doc-claims.py'
-      - 'tests/test846-doc-claims/**'
       - 'agent-network/**'
       - 'agent-node/**'
       # deploy/ 曾不在此列 —— 只改部署配置的 PR 因此绕过整个 QA 套件,
@@ -23,33 +26,14 @@ on:
       - 'deploy/**'
       - 'tests/qa-*/**'
       - 'scripts/qa.sh'
+      - 'scripts/check-test-margin.py'
       - 'scripts/sync-pinned-versions.sh'
       - 'docs/qa/**'
       - '.github/workflows/qa.yml'
-      - 'tests/test725-agent-node-unit-ci/**'
-      - 'tests/test556-node-tmux-format-locale/**'
-      - 'tests/test1755-rules-file-e2e/**'
-      - 'tests/test745-agent-network-unit-ci/**'
-      - 'tests/test505-tmux-socket-isolation/**'
-      - 'tests/test533-tmux-format-locale/**'
-      - 'tests/test746-setup-bun-pin/**'
-      - 'tests/test751-codex-copresence-windows/**'
-      - 'tests/test1212-windows-real-codex-gate/**'
       - '.github/workflows/windows-real-codex-gate.yml'
-      - 'tests/test1191-windows-steer-contract/**'
-      - 'tests/test1220-codex-tui-client-health/**'
-      - 'tests/test-codex-appserver-watchdog/**'
-      - 'tests/test-codex-copresence-first-start/**'
-      - 'tests/test1183-sync-pinned-dryrun/**'
-      - 'tests/test1193-side-thread-contract/**'
-      - 'tests/test1195-side-thread-hub-contract/**'
-      - 'tests/test1195-side-thread-hub-security/**'
-      - 'tests/test1195-side-thread-hub-race/**'
-      - 'tests/test1200-side-thread-command-transport/**'
-      - 'tests/test1203-btw-production-e2e/**'
-      - 'tests/test1181-codex-durable-poll/**'
-      - 'tests/test1204-btw-production-wiring/**'
-      - 'tests/test1271-daemon-start-node/**'
+      # test812 从 docs/node-liveness-criterion.md 抽出 tmux 命令实跑。
+      # 只改那份文档也必须重跑这道门。
+      - 'docs/node-liveness-criterion.md'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -57,400 +41,66 @@ on:
       # would only look like coverage.
       - 'tests/qa-ut-01-auth-tokens/**'
       - 'tests/qa-ut-02-password-dict/**'
-      - 'tests/test292-e2e-ok-assertions/**'
-      - 'tests/test520-dashboard-attachment-read/**'
-      - 'tests/test584-dashboard-codex-delivery/**'
-      - 'tests/test-goal-cli/**'
-      - 'tests/test652-admin-network-list/**'
-      - 'tests/test653-batch-workdir/**'
-      - 'tests/test696-human-low-value-reply/**'
-      - 'tests/test702-primary-network/**'
-      - 'tests/test647-rest-explicit-columns/**'
-      - 'tests/test230-opencode-sender-label/**'
-      - 'tests/test228-opencode-inbox-concurrency/**'
-      - 'tests/test651-opencode-timeout-abort/**'
-      - 'tests/test656-capacity-retry/**'
-      - 'tests/test667-project-dir-warn/**'
-      - 'tests/test668-grok-working-status/**'
-      - 'tests/test672-claude-auth-abort/**'
-      - 'tests/test612-start-admission/**'
       - 'tests/qa-board673-claude-process-auth/**'
-      - 'tests/test198-from-alias/**'
-      - 'tests/test8-runtime/**'
-      - 'tests/test17-user-journey/**'
-      - 'tests/test12-claude-channel/**'
-      - 'tests/test11-lifecycle/**'
-      - 'tests/test-npm-security/**'
-      - 'tests/test648-probe-ip-pin/**'
+      - 'tests/qa-hub-10-network-scope-regressions/**'
+      - '.github/workflows/human-sender-fixtures.yml'
+      - '.github/workflows/frontdoor-docs-fixtures.yml'
       - 'tests/qa-frontdoor-docs/**'
-      - 'tests/test13-multi-channel/**'
       - 'tests/qa-517-mcp-write-scope/**'
-      - 'tests/test203-alias-crossover-repro/**'
-      - 'tests/test583-dashboard-chat-idempotency/**'
-      - 'tests/test573-codex-turn-reconcile/**'
-      - 'tests/test520-ack-inbox-docs/**'
-      - 'tests/test199-agent-node-from-session/**'
       - 'tests/qa-ut-03-auth-validate/**'
-      - 'tests/test656-claude-sdk-tool-aliases/**'
-      - 'tests/test654-dashboard-managed-launch/**'
-      - 'tests/test657-claude-native-version-pin/**'
-      - 'tests/test236-dashboard-codex-goal/**'
-      - 'tests/test292-e2e-hard-gate/**'
-      - 'tests/test686-rest-shape-golden/**'
-      - 'tests/test765-batch-runtime-gate/**'
-      - 'tests/test766-bunx-preflight/**'
-      - 'tests/test1241-feishu-commhub-routing/**'
-      - 'tests/test1362-create-node-pending/**'
       # test823 是这道 L1 并发闸门自己的回归,跑的是真的 scripts/qa.sh
       # (把 docker/npm 换成 PATH 上的桩)。改它必须能重跑跑它的 workflow。
-      - 'tests/test823-l1-concurrency-cap/**'
-      - 'tests/test798-server-unit-ci/**'
       # test798 的镜像 COPY 了 test601 的 race-worker.ts,
       # 且 server/src/scheduled-tasks-http.test.ts 会执行它做「两个真 Hub 抢同一 occurrence」——
       # 只改那个 worker 的 PR 不该跳过这道门(codex P2,核过属实)
-      - 'tests/test601-hub-scheduled-tasks/**'
-      - 'tests/test224-grok-preview-security/**'
-      - 'tests/test597-dashboard-slash-namespace/**'
-      - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-create-node-workdir/**'
       - 'tests/qa-runtime-readiness/**'
-      - 'tests/test571-lifecycle-safety/**'
-      - 'tests/test626-daemon-adoption/**'
-      - 'tests/test627-adopted-lifecycle/**'
-      - 'tests/test658-codex-adopt-stop/**'
-      - 'tests/test629-lifecycle-read/**'
+      - 'tests/node-caller-identity/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
       - 'docs-site/**'
       - 'docs/doc-source-pins-baseline.txt'
       - 'scripts/check-doc-source-pins.py'
-      - 'tests/test831-doc-source-pins/**'
-      - 'tests/test813-grok-mcp-readiness/**'
       # 🔴 加这一条的直接原因:#1017 改了 test225 的夹具,27 个 check 全绿,
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
-      - 'tests/test225-grok-preview-package-live/**'
-      - 'tests/test225-node-stop-convergence/**'
-      - 'tests/test233-grok-main-integration/**'
-      - 'tests/test234-grok-profile-disclosure/**'
-      - 'tests/test235-grok-mcp-outbound-only/**'
-      - 'tests/test219-grok-copresence/**'
-      - 'tests/test605-grok-startup-model-label/**'
-      - 'tests/test735-hub-daemon-rebuild/**'
-      - 'tests/test2124-hub-launcher-env-scrub/**'
-      - 'tests/test660-explicit-prod-db-optin/**'
-      - 'tests/test661-explicit-bootstrap-db/**'
-      - 'tests/test683-hub-lifecycle-watcher/**'
       - 'tests/qa-hub-17-rename-canonicalization/**'
-      - 'tests/test1210-actual-target-contract/**'
       - 'tests/qa-hub-19-login-guard/**'
-      - 'tests/test635-daemon-private-state/**'
-      - 'tests/test643-transient-hub-legacy-repair/**'
-      - 'tests/test671-task-runtime-evidence-hub/**'
-      - 'tests/test688-owner-gated-schedule-hub/**'
-      - 'tests/test629-mcp-schema-policy/**'
-      - 'tests/test1280-desktop-user-push/**'
       - 'tests/qa-anet-daemon-cmd/**'
       - 'tests/qa-hub-16-rest-task-api/**'
       - 'tests/qa-node-04-codex-app-server-reply-routing/**'
-      - 'tests/test599-skillhub/**'
-      - 'tests/test600-public-skillhub/**'
-      - 'tests/test659-codex-appserver-activity-timeout/**'
-      - 'tests/test3-security/**'
-      - 'tests/test336-feishu-bridge-wire/**'
-      - 'tests/test344-ack-transport-zod/**'
-      - 'tests/test467-headless-bootstrap/**'
-      - 'tests/test527-ext-validator-dedup/**'
-      - 'tests/test602-scheduled-misfire/**'
-      - 'tests/test604-scheduled-task-edit/**'
-      - 'tests/test606-node-start-help/**'
-      - 'tests/test607-health-upload-limits/**'
-      - 'tests/test609-dashboard-chat-doc-path/**'
-      - 'tests/test637-database-url-guard/**'
-      - 'tests/test2123-hub-postgres-ladder/**'
-      - 'tests/test-status-read-cache/**'
-      - 'tests/test649-token-cli/**'
-      - 'tests/test651-init-no-token-prompt/**'
-      - 'tests/test5-auth/**'
-      - 'tests/test610-opencode-clean-test-workspace/**'
-      - 'tests/test611-cli-boolean-flags/**'
-      - 'tests/test612-visible-inbox-skip/**'
-      - 'tests/test613-codex-dead-endpoint/**'
-      - 'tests/test614-rest-single-network/**'
-      - 'tests/test615-network-name/**'
-      - 'tests/test617-feishu-ws-readiness/**'
-      - 'tests/test618-claude-vendor-env/**'
-      - 'tests/test509-node-clone/**'
-      - 'tests/test621-test384-layer-isolation/**'
-      - 'tests/test624-task-cursor-pagination/**'
-      - 'tests/test625-explicit-env-crlf/**'
-      - 'tests/test632-honest-sse-recovery/**'
-      - 'tests/test633-doctor-locale/**'
-      - 'tests/test166-task-diagnostics/**'
-      - 'tests/test365-nonimage-read-attachments/**'
-      - 'tests/test585-codex-runtime-singleflight/**'
-      - 'tests/test586-codex-successor-reconcile/**'
-      - 'tests/test596-goal-loop-docs/**'
-      - 'tests/test638-server-aggregate-isolation/**'
-      - 'tests/test681-explicit-lifecycle/**'
-      - 'tests/test689-owner-schedule-agent/**'
-      - 'tests/test690-scheduled-run-terminal/**'
-      - 'tests/test693-agent-local-upload/**'
-      - 'tests/test697-codex-default-model/**'
-      - 'tests/test698-atomic-peer-reply/**'
-      - 'tests/test519-claude-code-peer-reply/**'
-      - 'tests/test750-codex-copresence-onecommand/**'
-      - 'tests/test-codex-external-appserver/**'
-      - 'tests/test1225-opencode-copresence-onecommand/**'
-      - 'tests/test543-opencode-v2-copresence/**'
-      - 'tests/test1178-codex-upgrade-recovery/**'
-      - 'tests/test736-pm2-fleet-rebuild/**'
-      - 'tests/test185-external-schedules/**'
-      - 'tests/test594-codex-login-health/**'
-      - 'tests/test631-private-config-permissions/**'
-      - 'tests/test646-config-node-id-precedence/**'
+      - '.github/workflows/scheduled-work-outcome.yml'
+      - '.github/workflows/scheduled-backoff.yml'
+      - '.github/workflows/scheduled-requirement-wake.yml'
+      - '.github/workflows/scheduled-outcome-guidance.yml'
+      - 'agent-node/src/runtime/opencode-copresence/v1-safe-retention-request.ts'
+      - '.github/workflows/v1-safe-retention-request.yml'
+      - '.github/workflows/v1-safe-topology.yml'
+      - '.github/workflows/v1-safe-dual-directory.yml'
+      - '.github/workflows/v1-migration-plan.yml'
+      - '.github/workflows/v1-shared-capture.yml'
+      - '.github/workflows/v1-borrowed-tui.yml'
+      - '.github/workflows/v1-borrowed-launch.yml'
+      - '.github/workflows/v1-borrowed-cli.yml'
+      - '.github/workflows/v1-borrowed-native-turns.yml'
+      - '.github/workflows/v1-borrowed-backend-core.yml'
       - 'agent-node/src/cli.ts'
-      - 'tests/test630-file-download-header-auth/**'
-      - 'tests/test634-windows-secret-guidance/**'
-      - 'tests/test516-anet-secret-masking/**'
-      - 'tests/test516-node-delete-hub-row/**'
-      - 'tests/test522-node-delete-locate-stop/**'
-      - 'tests/test528-codex-adopt/**'
-      - 'tests/test532-codex-menu/**'
-      - 'tests/test561-node-menu/**'
-      - 'tests/test562-node-ls-all/**'
-      - 'tests/test562b-node-remote/**'
-      - 'tests/test536-codex-resume/**'
-      - 'tests/test623-feishu-scrub-health/**'
-      - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
-      - 'tests/test626-grok-model-switch-fallback/**'
       - '.github/scripts/ci-docs-only.py'
-  push:
-    branches: [main]
-    paths:
-      - 'server/**'
-      - 'docs/stale-issue-review.md'
-      - 'scripts/check-doc-claims.py'
-      - 'tests/test846-doc-claims/**'
-      - 'agent-network/**'
-      - 'agent-node/**'
-      - 'deploy/**'
-      - 'tests/qa-*/**'
-      - 'scripts/qa.sh'
-      - '.github/workflows/qa.yml'
-      - 'tests/test725-agent-node-unit-ci/**'
-      - 'tests/test556-node-tmux-format-locale/**'
-      - 'tests/test1755-rules-file-e2e/**'
-      - 'tests/test745-agent-network-unit-ci/**'
-      - 'tests/test505-tmux-socket-isolation/**'
-      - 'tests/test533-tmux-format-locale/**'
-      - 'tests/test746-setup-bun-pin/**'
-      - 'tests/test751-codex-copresence-windows/**'
-      - 'tests/test1212-windows-real-codex-gate/**'
-      - '.github/workflows/windows-real-codex-gate.yml'
-      - 'tests/test1191-windows-steer-contract/**'
-      - 'tests/test1220-codex-tui-client-health/**'
-      - 'tests/test-codex-appserver-watchdog/**'
-      - 'tests/test-codex-copresence-first-start/**'
-      - 'tests/test1271-daemon-start-node/**'
-      # A test directory belongs here exactly when CI executes it — otherwise
-      # editing the test cannot re-run the gate that runs it. The four below are
-      # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
-      # ~160 dirs under tests/ are not run by any workflow, so listing them
-      # would only look like coverage.
-      - 'tests/qa-ut-01-auth-tokens/**'
-      - 'tests/qa-ut-02-password-dict/**'
-      - 'tests/test292-e2e-ok-assertions/**'
-      - 'tests/test520-dashboard-attachment-read/**'
-      - 'tests/test584-dashboard-codex-delivery/**'
-      - 'tests/test-goal-cli/**'
-      - 'tests/test652-admin-network-list/**'
-      - 'tests/test653-batch-workdir/**'
-      - 'tests/test696-human-low-value-reply/**'
-      - 'tests/test702-primary-network/**'
-      - 'tests/test647-rest-explicit-columns/**'
-      - 'tests/test230-opencode-sender-label/**'
-      - 'tests/test228-opencode-inbox-concurrency/**'
-      - 'tests/test651-opencode-timeout-abort/**'
-      - 'tests/test656-capacity-retry/**'
-      - 'tests/test667-project-dir-warn/**'
-      - 'tests/test668-grok-working-status/**'
-      - 'tests/test672-claude-auth-abort/**'
-      - 'tests/test612-start-admission/**'
-      - 'tests/qa-board673-claude-process-auth/**'
-      - 'tests/test198-from-alias/**'
-      - 'tests/test8-runtime/**'
-      - 'tests/test17-user-journey/**'
-      - 'tests/test12-claude-channel/**'
-      - 'tests/test11-lifecycle/**'
-      - 'tests/test-npm-security/**'
-      - 'tests/test648-probe-ip-pin/**'
-      - 'tests/qa-frontdoor-docs/**'
-      - 'tests/test13-multi-channel/**'
-      - 'tests/qa-517-mcp-write-scope/**'
-      - 'tests/test203-alias-crossover-repro/**'
-      - 'tests/test583-dashboard-chat-idempotency/**'
-      - 'tests/test573-codex-turn-reconcile/**'
-      - 'tests/test520-ack-inbox-docs/**'
-      - 'tests/test199-agent-node-from-session/**'
-      - 'tests/qa-ut-03-auth-validate/**'
-      - 'tests/test656-claude-sdk-tool-aliases/**'
-      - 'tests/test654-dashboard-managed-launch/**'
-      - 'tests/test657-claude-native-version-pin/**'
-      - 'tests/test236-dashboard-codex-goal/**'
-      - 'tests/test292-e2e-hard-gate/**'
-      - 'tests/test686-rest-shape-golden/**'
-      - 'tests/test765-batch-runtime-gate/**'
-      - 'tests/test766-bunx-preflight/**'
-      - 'tests/test1241-feishu-commhub-routing/**'
-      - 'tests/test1362-create-node-pending/**'
-      # test823 是这道 L1 并发闸门自己的回归,跑的是真的 scripts/qa.sh
-      # (把 docker/npm 换成 PATH 上的桩)。改它必须能重跑跑它的 workflow。
-      - 'tests/test823-l1-concurrency-cap/**'
-      - 'tests/test798-server-unit-ci/**'
-      # test798 的镜像 COPY 了 test601 的 race-worker.ts,
-      # 且 server/src/scheduled-tasks-http.test.ts 会执行它做「两个真 Hub 抢同一 occurrence」——
-      # 只改那个 worker 的 PR 不该跳过这道门(codex P2,核过属实)
-      - 'tests/test601-hub-scheduled-tasks/**'
-      - 'tests/test224-grok-preview-security/**'
-      - 'tests/test597-dashboard-slash-namespace/**'
-      - 'tests/test679-task-trace/**'
-      - 'tests/qa-daemon-lifecycle-e2e/**'
-      - 'tests/qa-create-node-workdir/**'
-      - 'tests/qa-runtime-readiness/**'
-      - 'tests/test571-lifecycle-safety/**'
-      - 'tests/test626-daemon-adoption/**'
-      - 'tests/test627-adopted-lifecycle/**'
-      - 'tests/test658-codex-adopt-stop/**'
-      - 'tests/test629-lifecycle-read/**'
-      - 'tests/qa-rfc024-config-apply/**'
-      - 'tests/qa-rfc027-stop-delete/**'
-      - 'tests/lib/**'
-      - 'docs-site/**'
-      - 'docs/doc-source-pins-baseline.txt'
-      - 'scripts/check-doc-source-pins.py'
-      - 'tests/test831-doc-source-pins/**'
-      - 'tests/test813-grok-mcp-readiness/**'
-      # 🔴 加这一条的直接原因:#1017 改了 test225 的夹具,27 个 check 全绿,
-      #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
-      #    漏的就是第三件。
-      - 'tests/test225-grok-preview-package-live/**'
-      - 'tests/test225-node-stop-convergence/**'
-      - 'tests/test233-grok-main-integration/**'
-      - 'tests/test234-grok-profile-disclosure/**'
-      - 'tests/test235-grok-mcp-outbound-only/**'
-      - 'tests/test219-grok-copresence/**'
-      - 'tests/test605-grok-startup-model-label/**'
-      - 'tests/test735-hub-daemon-rebuild/**'
-      - 'tests/test2124-hub-launcher-env-scrub/**'
-      - 'tests/test660-explicit-prod-db-optin/**'
-      - 'tests/test661-explicit-bootstrap-db/**'
-      - 'tests/test683-hub-lifecycle-watcher/**'
-      - 'tests/qa-hub-17-rename-canonicalization/**'
-      - 'tests/qa-hub-19-login-guard/**'
-      - 'tests/test635-daemon-private-state/**'
-      - 'tests/test643-transient-hub-legacy-repair/**'
-      - 'tests/test671-task-runtime-evidence-hub/**'
-      - 'tests/test688-owner-gated-schedule-hub/**'
-      - 'tests/test629-mcp-schema-policy/**'
-      - 'tests/test1280-desktop-user-push/**'
-      - 'tests/qa-anet-daemon-cmd/**'
-      - 'tests/qa-hub-16-rest-task-api/**'
-      - 'tests/qa-node-04-codex-app-server-reply-routing/**'
-      - 'tests/test599-skillhub/**'
-      - 'tests/test600-public-skillhub/**'
-      - 'tests/test659-codex-appserver-activity-timeout/**'
-      - 'tests/test3-security/**'
-      - 'tests/test336-feishu-bridge-wire/**'
-      - 'tests/test344-ack-transport-zod/**'
-      - 'tests/test467-headless-bootstrap/**'
-      - 'tests/test527-ext-validator-dedup/**'
-      - 'tests/test602-scheduled-misfire/**'
-      - 'tests/test604-scheduled-task-edit/**'
-      - 'tests/test606-node-start-help/**'
-      - 'tests/test607-health-upload-limits/**'
-      - 'tests/test609-dashboard-chat-doc-path/**'
-      - 'tests/test637-database-url-guard/**'
-      - 'tests/test2123-hub-postgres-ladder/**'
-      - 'tests/test-status-read-cache/**'
-      - 'tests/test649-token-cli/**'
-      - 'tests/test651-init-no-token-prompt/**'
-      - 'tests/test5-auth/**'
-      - 'tests/test610-opencode-clean-test-workspace/**'
-      - 'tests/test611-cli-boolean-flags/**'
-      - 'tests/test612-visible-inbox-skip/**'
-      - 'tests/test613-codex-dead-endpoint/**'
-      - 'tests/test614-rest-single-network/**'
-      - 'tests/test615-network-name/**'
-      - 'tests/test617-feishu-ws-readiness/**'
-      - 'tests/test618-claude-vendor-env/**'
-      - 'tests/test509-node-clone/**'
-      - 'tests/test621-test384-layer-isolation/**'
-      - 'tests/test624-task-cursor-pagination/**'
-      - 'tests/test625-explicit-env-crlf/**'
-      - 'tests/test632-honest-sse-recovery/**'
-      - 'tests/test633-doctor-locale/**'
-      - 'tests/test166-task-diagnostics/**'
-      - 'tests/test365-nonimage-read-attachments/**'
-      - 'tests/test585-codex-runtime-singleflight/**'
-      - 'tests/test586-codex-successor-reconcile/**'
-      - 'tests/test596-goal-loop-docs/**'
-      - 'tests/test638-server-aggregate-isolation/**'
-      - 'tests/test681-explicit-lifecycle/**'
-      - 'tests/test689-owner-schedule-agent/**'
-      - 'tests/test690-scheduled-run-terminal/**'
-      - 'tests/test693-agent-local-upload/**'
-      - 'tests/test697-codex-default-model/**'
-      - 'tests/test698-atomic-peer-reply/**'
-      - 'tests/test519-claude-code-peer-reply/**'
-      - 'tests/test750-codex-copresence-onecommand/**'
-      - 'tests/test-codex-external-appserver/**'
-      - 'tests/test1225-opencode-copresence-onecommand/**'
-      - 'tests/test543-opencode-v2-copresence/**'
-      - 'tests/test1178-codex-upgrade-recovery/**'
-      - 'tests/test736-pm2-fleet-rebuild/**'
-      - 'tests/test185-external-schedules/**'
-      - 'tests/test594-codex-login-health/**'
-      - 'tests/test631-private-config-permissions/**'
-      - 'tests/test646-config-node-id-precedence/**'
-      - 'agent-node/src/cli.ts'
-      - 'tests/test630-file-download-header-auth/**'
-      - 'tests/test634-windows-secret-guidance/**'
-      - 'tests/test516-anet-secret-masking/**'
-      - 'tests/test516-node-delete-hub-row/**'
-      - 'tests/test522-node-delete-locate-stop/**'
-      - 'tests/test528-codex-adopt/**'
-      - 'tests/test532-codex-menu/**'
-      - 'tests/test561-node-menu/**'
-      - 'tests/test562-node-ls-all/**'
-      - 'tests/test562b-node-remote/**'
-      - 'tests/test536-codex-resume/**'
-      - 'tests/test623-feishu-scrub-health/**'
-      - 'tests/test30-v0.8-auth-deprecation/**'
-      - 'deploy/hub/hub-daemon.sh'
-      - 'tests/test626-grok-model-switch-fallback/**'
-      # 🔴 以下条目此前只在 pull_request 段登记(#1062 普查,2026-08-27):
-      # 新增条目时只加 PR 段的系统性习惯 —— 改动这些目标在 PR 上会触发门、
-      # 合进 main 后不触发,main 上那道门失明(#1243 同形状)。两段必须同步增删。
-      - 'scripts/sync-pinned-versions.sh'
-      - 'docs/qa/**'
-      - 'tests/test1183-sync-pinned-dryrun/**'
-      - 'tests/test1193-side-thread-contract/**'
-      - 'tests/test1195-side-thread-hub-contract/**'
-      - 'tests/test1195-side-thread-hub-security/**'
-      - 'tests/test1195-side-thread-hub-race/**'
-      - 'tests/test1200-side-thread-command-transport/**'
-      - 'tests/test1203-btw-production-e2e/**'
-      - 'tests/test1181-codex-durable-poll/**'
-      - 'tests/test1204-btw-production-wiring/**'
-      - 'tests/test1210-actual-target-contract/**'
-      - '.github/scripts/ci-docs-only.py'
+  # #2967 —— 主干**不再**重复跑整套矩阵：
+  # squash 合并的树和刚跑绿的 PR head 是同一份内容，146 个 job 在 10 分钟前已经知道结果。
+  # 实测（2026-10-29）：PR 146 job / 274 runner-min，合并后主干又把同样的 146 job 跑了 278 runner-min，
+  # 而 release-gate 排在这套矩阵后面，发版门因此等过 20 分钟。
+  # 完整矩阵留给：PR（必须）+ 夜间 schedule（兜「两个 PR 单看都绿、合起来坏」的组合问题）。
+  schedule:
+    # 每天 19:00 UTC = 03:00 CST，夜间低峰
+    - cron: '0 19 * * *'
+  # 需要时手动跑一次全量（发版前怀疑主干状态、或夜间那次失败后要复现）
+  workflow_dispatch:
 
-# Older runs on the same ref get cancelled — saves minutes when a PR is
-# updated rapidly. main pushes run independently.
+# 并发：同一 PR 反复 push 时取消上一轮还在排队的运行（主干不取消 —— 那是发布/部署门）。
 concurrency:
   group: qa-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -465,9 +115,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      # #2800 —— `hub-orphan-gates` 的收窄结果（脚本失败时保持「全跑」的保守默认）
+      suite_count: ${{ steps.scope.outputs.suite_count }}
+      suite_skip: ${{ steps.scope.outputs.suite_skip }}
       docs_only: ${{ steps.plan.outputs.docs_only }}
       skip: ${{ steps.plan.outputs.skip }}
+      full: ${{ steps.full.outputs.full }}
       l1_only: ${{ steps.plan.outputs.l1_only }}
+      # #2800 —— 「发版提交」在 main 上不再触发重型矩阵。
+      # 现场（2026-10-27 23:45）：一条只改版本号+发布说明的 chore(release) 提交
+      # 触发了 176 个 job，把 runner 池占满，导致**发版门自己排了 6 分钟没动**。
+      # 判据只看提交信息（chore(release)），不看 diff —— diff 判据会把“改了依赖的
+      # 版本号”和“改了代码”混在一起，误判代价比多跑一轮 CI 高得多。
+      release_only: ${{ steps.release.outputs.release_only }}
     steps:
       # depth 2:pull_request 检出的是 refs/pull/N/merge,要拿到它的第一个父提交(base 尖)。
       - uses: actions/checkout@v4
@@ -483,12 +143,76 @@ jobs:
         id: plan
         run: python3 .github/scripts/ci-docs-only.py plan >> "$GITHUB_OUTPUT"
 
+      # #2800 —— 发版提交识别（只看 push 到 main 的提交信息首行）。
+      # PR 上永远为空：PR 的改动必须跑全套，这条只用来避免“发版提交把自己的发版门堵住”。
+      - name: Release-commit classifier
+        id: release
+        env:
+          # 用 env 传，不要拼进 run: 的 shell 字符串 —— 提交信息里的引号会打断脚本。
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          first=$(printf '%s' "${COMMIT_MSG:-}" | head -n1)
+          case "$first" in
+            "chore(release):"*) echo "release_only=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "release_only=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+      # #2136 第二步：**只报告**，不改变任何 job 的跑/不跑。
+      # 目的：先积累"如果按套件子树收窄，会跳过哪些套件"的真实数据（每个 PR 的 job summary 里），
+      # 人肉确认没漏跑之后，才谈把它接进 if:。判据在 scripts/qa-suite-scope-report.py 文件头。
+      # #2800 —— 把「按子树收窄」从观测器接成真正的门（#2136 第二步）。
+      # 判据复用 scripts/qa-suite-scope-report.py 的 decide()：只有「本次改动没碰任何共享面、
+      # 也没碰该套件自己」才跳过；看不清（无 diff / 取不到 PR 文件 / 超过 3000 文件）一律全跑。
+      # 20 个已合并 PR 的回放：可省 40% 分片次，『碰了共享面却跳过分片』0 次。
+      - name: Suite scope plan (narrows hub-orphan-gates; falls back to RUN ALL)
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # 保守默认先落盘：下面即使失败，也保持「全跑」而不是「跑 0 个」。
+          total=$(python3 scripts/qa-suite-scope-plan.py --total-only)
+          echo "suite_count=${total}" >> "$GITHUB_OUTPUT"
+          echo "suite_skip=[]" >> "$GITHUB_OUTPUT"
+          python3 scripts/qa-suite-scope-plan.py --event "${{ github.event_name }}"
+
+      - name: Suite scope report (observability only — never skips a suite)
+        run: |
+          set -euo pipefail
+          git diff --name-only --no-renames HEAD^1 HEAD > /tmp/changed.txt || true
+          {
+            echo '### qa suite scope (report only)'
+            echo '```'
+            python3 scripts/qa-suite-scope-report.py --stdin < /tmp/changed.txt
+            echo '```'
+            echo '> 这一段**不改变任何套件的执行**；它只是把"按子树收窄会跳多少"记录下来供复核（#2136）。'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   release-sync-dry-run:
     name: release version sync dry-run (Docker)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # 2026-11-09 —— PR 分层（admin 拍板「砍」）：
+      # 一个只改 1 个文件的 PR 曾挂 185 个 check、QA 单次 ~29 分钟，排队拖慢整个迭代。
+      # 普通 PR 只跑快速层（三套 unit + doc claims/pins + release-sync dry run + test-lib-meta）；
+      # 重型矩阵（hub semantics 95 分片、Docker e2e、copresence/lifecycle 等）只在下面三种情况跑：
+      #   · 夜间 schedule / workflow_dispatch（非 pull_request 事件）
+      #   · PR 带 `full-qa` 标签（打标签即触发）
+      # 被跳过的 job 显示为 skipped，不占 runner。
+      - id: full
+        name: Full-matrix switch (non-PR event or `full-qa` label)
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$EVENT" != "pull_request" ] || printf '%s' "$LABELS" | grep -q '"full-qa"'; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build + run test1183-sync-pinned-dryrun
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
@@ -626,7 +350,7 @@ jobs:
     # bun install,不进 L1 的 5 分钟预算,独立 job(同 server unit 的形状)。
     name: rules-file e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test1755-rules-file-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test1755-rules-file-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -642,6 +366,28 @@ jobs:
       - name: Run rules-file e2e
         run: docker run --rm anet-test1755-rules-file-e2e
 
+  test9763-team-skills-e2e:
+    # 团队技能:启动时把 ~/.anet/skills/<name> 链进该运行时的用户级目录。
+    # 真 hub + 真 agent-node。验 skills_list 的 origin、日志里的「全机生效」、
+    # 已有同名目录不覆盖、两个 codex home 各链各的,以及拿掉安装调用后链接不再出现。
+    name: team skills e2e (Docker, real hub + agent-node)
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test9763-team-skills-e2e"')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact team-skills e2e image
+        run: |
+          docker build \
+            --build-arg TEST9763_SOURCE_COMMIT="$GITHUB_SHA" \
+            -t anet-test9763-team-skills-e2e \
+            -f tests/test9763-team-skills-e2e/Dockerfile .
+
+      - name: Run team-skills e2e
+        run: docker run --rm --init --cpus=2 anet-test9763-team-skills-e2e
+
   qa-node-logs-e2e:
     # 节点运行日志(tail_node_logs)端到端:真 hub + 真 agent-node 同镜像。验单测验不了的那几条:
     # 种进节点日志的 token / Bearer / KEY= / 只在节点 env 里的凭据值经真实链路回来时一个不剩、
@@ -649,7 +395,7 @@ jobs:
     # 后断言必红)。冷构建含两次 bun install,不进 L1 的 5 分钟预算,独立 job(同 test1755 的形状)。
     name: node run-log e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-node-logs-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-node-logs-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -666,6 +412,8 @@ jobs:
         run: docker run --rm anet-qa-node-logs-e2e
 
   qa-claude-code-node-id:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     # claude-code-cli 节点的 MCP 通道(.anet/node-server.js)report_status 要带配置里的
     # node_id —— 不带,hub 的 nodes 表就没有这个节点,定时任务 / 桌面端选择器选不到它。
     # 真 hub + 与 dist 同一条 bun build 的 node-server 产物,含「修复前产物」正控。
@@ -692,7 +440,7 @@ jobs:
     # the 5-minute L1 job. Docs-only PRs skip it.
     name: claude processWithClaude auth (Docker, real hub)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-board673-claude-process-auth"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-board673-claude-process-auth"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -715,7 +463,7 @@ jobs:
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: create-node workdir e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-workdir"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-workdir"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -739,7 +487,7 @@ jobs:
     # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
     name: codex co-presence stop → start e2e (Docker, real hub + tmux + codex)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-codex-copresence-stop-start"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-codex-copresence-stop-start"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -762,7 +510,7 @@ jobs:
     # 共存路径的依赖预检输出就是「走了共存」的证据。冷构建同 qa-create-node-workdir(~4 分钟)—— 独立 job。
     name: create-node codex co-presence e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-codex-copresence"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-codex-copresence"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -787,7 +535,7 @@ jobs:
     # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
     name: daemon stop/delete codex co-presence e2e (Docker, real hub + daemon + tmux)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-daemon-stop-codex-copresence"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-daemon-stop-codex-copresence"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -809,7 +557,7 @@ jobs:
     # 并被 agent-node 的解析器读成 600000ms、0 收、3600001 拒。冷构建同 qa-create-node-codex-copresence —— 独立 job。
     name: create-node timeout unit e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-timeout-ms"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-timeout-ms"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -833,7 +581,7 @@ jobs:
     # --network none:网络探测只经容器内假 CONNECT 代理。冷构建同 qa-create-node-workdir —— 独立 job。
     name: daemon runtime readiness e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-runtime-readiness"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-runtime-readiness"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -861,7 +609,7 @@ jobs:
     # 冷构建含三次 bun install + 两次 npm pack(同 qa-create-node-workdir 的形状),进不了 L1 —— 独立 job。
     name: node --remote e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test562b-node-remote"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test562b-node-remote"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -881,6 +629,8 @@ jobs:
           docker rm -f "run-anet-test562b" >/dev/null 2>&1 || true
           exit $rc
   test626-daemon-adoption:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: daemon adoption (Docker, real Hub + manual node)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -895,7 +645,75 @@ jobs:
           docker build -t anet-test626-e2e -f tests/test626-daemon-adoption/Dockerfile.e2e .
           docker run --rm --init --network none anet-test626-e2e
 
+  test674-binding-generation:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
+    name: Binding generation (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test674 -f tests/test674-binding-generation/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test674
+
+  test-agent-team-whoami:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
+    name: Agent team identity (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-team-whoami -f tests/test-agent-team-whoami/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-team-whoami
+
+  test678-daemon-token-owner:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
+    name: Daemon token ownership (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test678 -f tests/test678-daemon-token-owner/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test678
+
+  test710-late-task-replies:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
+    name: Late task replies (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test710 -f tests/test710-late-task-replies/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test710
+
+  node-caller-identity:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
+    name: Node caller identity (Docker, SQLite + PostgreSQL HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-node-caller-identity -f tests/node-caller-identity/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity
+
+  node-caller-identity-compat:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
+    name: Node caller identity compat (Docker, agent-node .110 and .121)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-node-caller-identity-compat -f tests/node-caller-identity/Dockerfile.compat .
+      - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity-compat
+
   test658-codex-adopt-stop:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Codex adoption and stop (Docker, two layouts)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -906,7 +724,20 @@ jobs:
       - run: docker build -t anet-test658-http -f tests/test658-codex-adopt-stop/Dockerfile.e2e .
       - run: docker run --rm --init --cpus=2 --network none anet-test658-http
 
+  test703-codex-turn-receipts:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
+    name: Codex interrupted-turn receipts (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t anet-test703 -f tests/test703-codex-turn-receipts/Dockerfile .
+      - run: docker run --rm --init --cpus=2 --network none anet-test703
+
   test627-adopted-lifecycle:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: adopted lifecycle (Docker, real Hub + private tmux)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -916,6 +747,8 @@ jobs:
       - run: docker run --rm --init --network none anet-test627
 
   test629-lifecycle-read:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: lifecycle read permissions (Docker, real HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -933,7 +766,7 @@ jobs:
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: lifecycle safety e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test571-lifecycle-safety"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test571-lifecycle-safety"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -977,65 +810,81 @@ jobs:
           done
           exit $rc
 
-  recovered-suites:
-    name: recovered suites (Docker)
+  # #2860 —— 6 组 Build+Run 彼此完全独立，拆成 4 个 job 并行（原来一个 job 里 12 步串行）。
+  #
+  # 🔴 顺序不变量保住了：安全套件 test224 单独一个 job，并 `needs` 其余三个。
+  #    CLAUDE.md 的测试规则是「前一层不过就不跑后面的」——底层套件先红时，
+  #    不该已经产出一份安全证据，因为那份证据的前提根本没成立。
+  #    拆并行如果让 test224 和别的套件同时跑，这条不变量就悄悄丢了。
+  #
+  # 更早的一版（#2800）已经把 6 个镜像的构建并发化；这里拆的是**运行**那一半。
+
+  recovered-suites-a:
+    name: recovered suites A (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-a"')) }}
     runs-on: ubuntu-latest
-    # 2026-09-16:这个 job 正常 7.3–8.8 min(12 次抽样),但同一天两次在第 12 分钟被 timeout 取消 ——
-    # 步骤全绿、只是 Docker 构建慢了几十秒。12 太贴身,放到 16;真挂死仍会在 16 分钟被杀。
-    timeout-minutes: 16
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
-      # 🔴 顺序不是随意的。CLAUDE.md 的测试规则写明:
-      #    「分层测试,从简单到复杂:环境→认证→单点通信→完整流程→多用户→安全」
-      #    「前一层不过就不跑后面的」
-      #    所以安全套件(test224)放在最后 —— 底层套件先红时,不该已经产出
-      #    一份安全证据,因为那份证据的前提根本没成立。
-      #    第一版我把 test224 放在最前,正好把这条规则倒过来了。
-
-      - name: Build test597-dashboard-slash-namespace
+      - name: Build images (parallel within this job)
         run: |
-          docker build \
-            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test597-dashboard-slash-namespace \
-            -f tests/test597-dashboard-slash-namespace/Dockerfile .
+          set -uo pipefail
+          pids=()
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test597-dashboard-slash-namespace -f tests/test597-dashboard-slash-namespace/Dockerfile . ) & pids+=($!)
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" -t anet-test679-task-trace -f tests/test679-task-trace/Dockerfile . ) & pids+=($!)
+          rc=0
+          for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+          exit $rc
 
       - name: Run test597-dashboard-slash-namespace
         run: |
-          set -o pipefail   # 🔴 不加它,tee 的 0 会盖掉套件的非零退出
+          set -o pipefail
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-test597-dashboard-slash-namespace \
-            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test597.log"
-
-      - name: Build test679-task-trace
-        run: |
-          docker build \
-            --build-arg TEST679_SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test679-task-trace \
-            -f tests/test679-task-trace/Dockerfile .
+            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test597-dashboard-slash-namespace.log"
 
       - name: Run test679-task-trace
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
           docker run --rm anet-test679-task-trace \
-            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test679.log"
+            2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test679-task-trace.log"
 
-      # daemon full-chain lifecycle. Sits here, not in qa.sh's L1_TESTS:
-      # the suite RUNS in 11s but COLD-BUILDS in ~244s (three bun installs
-      # + obfuscated build + two npm packs), and qa.sh builds L1 serially
-      # inside a 5-minute job that already spends 141-148s. Measuring only
-      # the run time is measuring the wrong half.
-      # Placed before test224 so the security suite remains last.
-      - name: Build qa-daemon-lifecycle-e2e
+      # root 容器写进 bind mount 的产物属主是 root/mode 0600，upload-artifact 会 EACCES。
+      - name: Normalize artifact permissions
+        if: always()
         run: |
-          docker build \
-            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" \
-            -t anet-qa-daemon-lifecycle-e2e \
-            -f tests/qa-daemon-lifecycle-e2e/Dockerfile .
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
+          chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-suite-artifacts-a
+          path: ${{ runner.temp }}/suite-artifacts
+          if-no-files-found: warn
+
+  recovered-suites-b:
+    name: recovered suites B (Docker)
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-b"')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images (parallel within this job)
+        run: |
+          set -uo pipefail
+          pids=()
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" --build-arg RUNSH_BLOB="$(git rev-parse HEAD:tests/qa-daemon-lifecycle-e2e/run.sh)" -t anet-qa-daemon-lifecycle-e2e -f tests/qa-daemon-lifecycle-e2e/Dockerfile . ) & pids+=($!)
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-qa-rfc024-config-apply -f tests/qa-rfc024-config-apply/Dockerfile . ) & pids+=($!)
+          rc=0
+          for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+          exit $rc
 
       - name: Run qa-daemon-lifecycle-e2e
         run: |
@@ -1044,19 +893,6 @@ jobs:
           docker run --rm anet-qa-daemon-lifecycle-e2e \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-daemon-lifecycle-e2e.log"
 
-      # RFC-024 config-apply contract. Was an orphan (no CI reference at all)
-      # and could not have been added as-is: its EXIT trap ran
-      # `kill "${HUB_PID:-0}" "${NODE_PID:-0}"`, and NODE_PID is never assigned
-      # anywhere in that file — so `kill 0` signalled the whole process group,
-      # the script SIGTERM'd itself, and the exit code was 143 REGARDLESS of
-      # FAIL. Fixed in the same PR; witnessed both ways (FAIL=0 → rc=0,
-      # one injected failure → rc=1) before wiring it here.
-      - name: Build qa-rfc024-config-apply
-        run: |
-          docker build \
-            -t anet-qa-rfc024-config-apply \
-            -f tests/qa-rfc024-config-apply/Dockerfile .
-
       - name: Run qa-rfc024-config-apply
         run: |
           set -o pipefail
@@ -1064,20 +900,38 @@ jobs:
           docker run --rm anet-qa-rfc024-config-apply \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-rfc024-config-apply.log"
 
-      # RFC-027 stop/delete lifecycle. Was an orphan; 59 assertions, all green
-      # on today's main — no bit-rot. Wired here rather than left unrun because
-      # it already covers two things that were about to be written from scratch:
-      # sibling isolation asserted down to the grandchild PID (each child is
-      # detached:true, so the stop's pgid scope is the wrapper's, not the
-      # daemon's), and cross-tenant refusal (forbidden_cross_tenant /
-      # daemon_not_resolvable / per-network list_my_children).
-      # Exit-code semantics verified by mutation, not by reading: injecting one
-      # `bad` turns rc 0 -> 1.
-      - name: Build qa-rfc027-stop-delete
+      # root 容器写进 bind mount 的产物属主是 root/mode 0600，upload-artifact 会 EACCES。
+      - name: Normalize artifact permissions
+        if: always()
         run: |
-          docker build \
-            -t anet-qa-rfc027-stop-delete \
-            -f tests/qa-rfc027-stop-delete/Dockerfile .
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
+          chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-suite-artifacts-b
+          path: ${{ runner.temp }}/suite-artifacts
+          if-no-files-found: warn
+
+  recovered-suites-c:
+    name: recovered suites C (Docker)
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-c"')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images (parallel within this job)
+        run: |
+          set -uo pipefail
+          pids=()
+          ( docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-qa-rfc027-stop-delete -f tests/qa-rfc027-stop-delete/Dockerfile . ) & pids+=($!)
+          rc=0
+          for pid in "${pids[@]}"; do wait "$pid" || rc=1; done
+          exit $rc
 
       - name: Run qa-rfc027-stop-delete
         run: |
@@ -1086,21 +940,39 @@ jobs:
           docker run --rm anet-qa-rfc027-stop-delete \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/qa-rfc027-stop-delete.log"
 
-      - name: Build test224-grok-preview-security
+      # root 容器写进 bind mount 的产物属主是 root/mode 0600，upload-artifact 会 EACCES。
+      - name: Normalize artifact permissions
+        if: always()
         run: |
-          docker build \
-            --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
-            -t anet-test224-grok-preview-security \
-            -f tests/test224-grok-preview-security/Dockerfile .
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
+          chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-suite-artifacts-c
+          path: ${{ runner.temp }}/suite-artifacts
+          if-no-files-found: warn
+
+  # 安全套件：单独一个 job，且 `needs` 其余三个 —— 顺序不变量见本段开头的注释。
+  recovered-suites-security:
+    name: recovered suites · security last (Docker)
+    needs: [changes, recovered-suites-a, recovered-suites-b, recovered-suites-c]
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-security"')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test224 image
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-test224-grok-preview-security -f tests/test224-grok-preview-security/Dockerfile .
 
       - name: Run test224-grok-preview-security
-        # 🔴 --network none 不是可选项:tests/test224-.../Dockerfile 第 13 行明写
-        # 「the actual gate is run with --network none」,而 run.sh 会打印
-        # 「runtime executed with network disabled」。不带这个 flag,那句话就是假的 ——
-        # 实测两种跑法都 PASS 且都打印同一句,套件自己不会拦住这个错误。
-        #
-        # /artifacts 挂出来:该套件把 report-test224.txt 写在容器内 /artifacts 下,
-        # 而 --rm 会把那个文件系统删掉 —— 跑完什么都不留,门每次都真跑却无证据可查。
+        # 🔴 --network none 不是可选项：tests/test224-.../Dockerfile 第 13 行明写
+        #    「the actual gate is run with --network none」，不带这个 flag，那句声明就是假的。
+        # /artifacts 挂出来：该套件把 report-test224.txt 写在容器内 /artifacts 下，--rm 会删掉它。
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/suite-artifacts"
@@ -1109,31 +981,33 @@ jobs:
             anet-test224-grok-preview-security \
             2>&1 | tee "$RUNNER_TEMP/suite-artifacts/test224.log"
 
-      # 三个 suite 都是 root 容器写进 bind mount 的,产物属主 root、mode 0600。
-      # upload-artifact 以 runner 用户打包 → EACCES: permission denied,
-      # 于是「门全绿但 job 判红」,而且证据也归档不了。实测报错:
-      #   Error: EACCES: permission denied, open '.../suite-artifacts/report-test224.txt'
-      # if: always() —— 前面步骤红时更需要把证据传出来。
-      - name: Normalize recovered-suite artifact permissions
+      - name: Normalize artifact permissions
         if: always()
         run: |
           sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/suite-artifacts"
           chmod -R u+rw "$RUNNER_TEMP/suite-artifacts"
 
-      - name: Upload recovered-suite artifacts
-        # if: always() —— 套件红了才最需要看它的输出
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recovered-suite-artifacts
+          name: recovered-suite-artifacts-security
           path: ${{ runner.temp }}/suite-artifacts
           if-no-files-found: warn
 
   qa:
-    name: L0 + L1 (report-only)
+    name: ${{ matrix.shard == '' && 'L0 (report-only)' || format('L1 (report-only, shard {0})', matrix.shard) }}
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
+    # #2800 —— 墙钟地板是「L0+L1 单 job 串行 87 个套件 ≈25.8 分钟」，并行度再高也压不下去。
+    # 拆成 1 个 L0 + 3 个 L1 分片：qa.sh 的 QA_L1_SHARD 按索引取模切片，
+    # 三片互不相交且并集等于全集（本地用 --list 的 87 个套件验证过：29/29/29）。
+    # 判据没有减少：每片都跑它那一份，--list 仍是完整清单。
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['', '1/3', '2/3', '3/3']
     # 🔴 2026-08-19：5 → 10。实测（同一个 job，两次 PR）：
     #     L1 = 24 条（含 test657）  3.50 分钟  success
     #     L1 = 25 条（加 test654）  5.32 分钟  **cancelled** ← 撞上原来的 5 分钟
@@ -1169,6 +1043,7 @@ jobs:
       # 测试碰巧只走到零依赖的模块;import 链一长(#2247:db.ts 引入 node-health-store → zod/v4)
       # 就在「任何测试开始之前」红,而 main 上恰好是绿的。依赖照 lockfile 装,不靠运气。
       - name: Install server dependencies (L0 imports server/src)
+        if: ${{ matrix.shard == '' }}
         working-directory: server
         run: bun install --frozen-lockfile
 
@@ -1176,12 +1051,29 @@ jobs:
         run: bash scripts/qa.sh --list
 
       - name: Run L0 (bun test, ms-budget)
+        if: ${{ matrix.shard == '' }}
         run: bash scripts/qa.sh --l0
+
+      # #2846 —— L1 的 docker build 原本没有跨运行缓存:每次 CI 都从零重建全部镜像。
+      # 实测(L1-TIMING total=1012s, 29 suites):588s(58%) 花在两个镜像上
+      #   test8-runtime 282s · test1203-btw-production-e2e 306s,其余 27 个 build 只有 2–13s。
+      # setup-buildx + gha 层缓存让这两个命中缓存;不命中时退化成全量构建,判据不变。
+      - name: Setup Docker buildx (L1 layer cache)
+        if: ${{ matrix.shard != '' }}
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Run L1 (Docker contract tests, ~16s parallel)
         # docs-only PR 时只跑镜像里有 docs-site 的 L1 套件;其他 PR 这里是空串 = 全部。
+        if: ${{ matrix.shard != '' }}
         env:
           QA_L1_ONLY: ${{ needs.changes.outputs.l1_only }}
+          QA_L1_SHARD: ${{ matrix.shard }}
+          # 只在 CI 打开:本地默认仍走 plain `docker build`(buildx 的 gha 缓存在本机不适用)。
+          QA_BUILDX_CACHE: '1'
+          # #2871 —— build 占了 L1 墙钟的 90%（实测 shard1 344/384s、shard2 496/549s），
+          # 而它是串行 for 循环。这里开 4 路并行预构建；失败会退回主循环串行重试，
+          # 所以最坏情况退化成「和没有这个开关时一样」，不会少报错。
+          QA_L1_BUILD_PAR: '4'
         run: bash scripts/qa.sh --l1
 
       - name: Dump test logs on failure
@@ -1222,7 +1114,9 @@ jobs:
       #    读者点进去连怀疑都不会产生。四处已在同一个 PR 里改对,这一步因此起点是绿的。
       #    它同时打印**跳过了多少** —— 一个只说「0 处漂移」不说「跳过 10 处」的门,
       #    读起来像「全都查过了」。
-      # 🔴 这一步已搬到 .github/workflows/doc-symbol-pins.yml（无 paths 过滤）。
+      # 🔴 这一步已搬到 .github/workflows/lint-consolidated-2.yml（#2136 A-1 第二批把
+      #    doc-symbol-pins / docs-integrity 等 10 个非 required 的 lint 门并成 1 个 job；
+      #    该 job 无 paths 过滤，所以它永远会跑）。
       #    留在这里跑不到该跑的时候：qa.yml 的 paths 里没有 docs/architecture.md，
       #    而那正是行号漂得最多的文件（#1001 一次抓到三处）。
       # test813 —— #825 加的 Grok CommHub MCP 就绪门。接进来的理由很直接：
@@ -1254,7 +1148,7 @@ jobs:
   test225-known-failures:
     name: test225 known-failure ratchet (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test225-known-failures"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test225-known-failures"')) }}
     runs-on: ubuntu-latest
     # 完整跑一次 ~8 分钟(装依赖 + 起容器内 Hub + 真 tmux attach)。
     timeout-minutes: 25
@@ -1334,7 +1228,7 @@ jobs:
   grok-green-suites:
     name: grok suites (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # 🔴 改成矩阵的理由是量出来的，不是「应该更快」。
@@ -1354,6 +1248,12 @@ jobs:
           - test235-grok-mcp-outbound-only
           - test219-grok-copresence
           - test605-grok-startup-model-label
+          # #677 —— 套件本来就在仓里、四个变异锚点也都还在代码里
+          # （board668-inflight-task / keep-working / session-preview / parent-delivered-only），
+          # 但它只出现在 paths 过滤器里、从不是任何 matrix 条目 ⇒ 最近 8 条 run 里
+          # 含 test668 的 job 数 = 0。也就是说「它偶发失败」这件事今天既无法复现也无法验证。
+          # 这里把它接回矩阵恢复覆盖；若跑起来确实不稳定，再按 #677 处置（而不是继续不跑）。
+          - test668-grok-working-status
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
@@ -1363,9 +1263,19 @@ jobs:
       - name: Build + run ${{ matrix.suite }}
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
         run: |
-          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+          # 从 Dockerfile 里读 provenance ARG 名，不硬编码。
+          # 硬编码 --build-arg SOURCE_COMMIT 时，用别的名字的套件会拿到空值，然后被自己的
+          # SHA 校验拒绝启动（test668 就是这样：它要 TEST668_SOURCE_COMMIT，0.4 分钟即报
+          # FAIL: TEST668_SOURCE_COMMIT must be one full lowercase Git SHA）。
+          DF="tests/${{ matrix.suite }}/Dockerfile"
+          BUILD_ARGS=()
+          while read -r name; do
+            [ -n "$name" ] && BUILD_ARGS+=(--build-arg "$name=$GITHUB_SHA")
+          done < <(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' "$DF" | awk '{print $2}')
+          echo "detected build args: ${BUILD_ARGS[*]:-(none)}"
+          docker build "${BUILD_ARGS[@]}" \
             -t anet-${{ matrix.suite }} \
-            -f tests/${{ matrix.suite }}/Dockerfile .
+            -f "$DF" .
           # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
           #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
           #        所以先把退出码收进 rc,取完再原样退出。
@@ -1397,7 +1307,7 @@ jobs:
     #    （改已有 job 的名字会动分支保护里的 required check，风险更高，所以新开。）
     name: hub daemon fail-closed (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:hub-daemon-gate"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:hub-daemon-gate"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1471,7 +1381,7 @@ jobs:
     # 名字必须说得出它管什么。
     name: private config write boundary (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:private-config-gates"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:private-config-gates"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1534,7 +1444,7 @@ jobs:
     # 名字说得出它管什么：这四个套件守的是**鉴权 / 凭据下发 / 泄漏清洗**这一族。
     name: auth + secret hygiene (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:security-orphan-gates"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:security-orphan-gates"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1765,7 +1675,7 @@ jobs:
     # 名字说得出它管什么：这三条守的是**生产 DB 边界与 hub 生命周期**。
     name: prod-db boundary + hub lifecycle (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -1826,13 +1736,37 @@ jobs:
     # 名字说得出它管什么：改名规范化 / 登录闸 / daemon 私有状态 / 遗留修复 / 任务证据 / owner 门控调度。
     name: hub semantics + guards (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    # #2800 —— 发版提交（只改版本号/发布说明/verify 锚点）在 main 上跳过这 95 个分片：
+    # 它们的代码内容在上一个 PR 里已经跑过同一套矩阵；再跑一遍只会把 runner 池占满，
+    # 让 release-gate 排在后面（2026-10-27 实测卡了 6 分钟）。
+    # #2800 —— 本次改动与 hub 套件全不相干时整块跳过（否则空矩阵会让 GitHub 报错）。
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && needs.changes.outputs.release_only != 'true' && needs.changes.outputs.suite_count != '0') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        # #2800 —— 按改动范围排除无关套件；exclude 由 changes job 算好（看不清就是 []）。
+        exclude: ${{ fromJSON(needs.changes.outputs.suite_skip) }}
         suite:
+          # ⏱ #2136（2026-10-25）：这三个套件要装两个 ~150 MB 的 codex 二进制、各自跑 15–20 分钟,
+          # 排到矩阵末尾时它们就是整条 PR 的**唯一长尾**（实测 #2994/#2998/#3000/#3002 都是最后一条）。
+          # 只改**顺序**、不改任何判据与命令:提前开始 = 提前结束,PR 墙钟时间少 15 分钟左右。
+          # 注意 GitHub 的矩阵是并发调度的,这里的顺序只是"先启动"的提示,不构成门。
+          # board #734: refuse codex < 0.145 on a paginated rollout (real 0.133.0 / 0.159.2 --version,
+          # agent-node owned app-server, real `anet node start` launcher), 300 MB bounded first-line
+          # read, diagnosis on the real 0.159.2 "missing an ordinal" failure; mutations M1-M4.
+          # Not L1: the image installs two ~150 MB codex binaries (same as test720).
+          - test734-codex-paginated-rollout-guard
+          # board #738: `anet node start --fork-on-resume-failure` — real 0.159.2 writes a thread,
+          # real 0.133.0 appends to it ("missing an ordinal"); the real launcher forks only on that
+          # error and only after y / --yes; original unchanged, r/o snapshot, mapping recorded.
+          # Mutations M1-M4. Not L1: the image installs two ~150 MB codex binaries (same as test734).
+          - test738-codex-fork-on-resume-failure
+          # board #739: per-node codex pin — config.json codexBin is what the launch and the #734
+          # probe run (0.133 first on PATH), codexVersion mismatch refuses before anything starts.
+          # Mutations M1-M4. Not L1: two ~150 MB codex binaries (same as test738).
+          - test739-codex-bin-pin
           - qa-hub-17-rename-canonicalization
           - test1210-actual-target-contract
           - qa-hub-19-login-guard
@@ -1866,6 +1800,7 @@ jobs:
           - test637-database-url-guard
           - test2123-hub-postgres-ladder
           - test-status-read-cache
+          - test-req-abandoned-column
           - test649-token-cli
           - test651-init-no-token-prompt
           - test5-auth
@@ -1907,12 +1842,28 @@ jobs:
           # loopback stub model, private tmux socket. Not L1: the image installs a ~200 MB
           # native binary and the run drives a real TUI (~40 s).
           - test543-opencode-v2-copresence
+          # Hub #827 / #539: real CLI -> Hub -> packaged runtime -> V2 TUI,
+          # deterministic loopback model, private tmux; no paid credentials.
+          - test827-opencode-v2-hub
+          - test828-opencode-v2-mcp
+          - test829-opencode-create
+          - test894-launch-window
+          - test894-v1-runtime
+          - test906-daemon-catalog
+          - test832-opencode-v2-registry
+          - test1324-host-shared-generation
+          - test1326-host-shared-create
+          - test1293-opencode-server-reuse
+          - test1313-host-shared-observer
+          - test828-opencode-v2-policy
+          - test833-user-avatar
           - test1191-windows-steer-contract
           - test1220-codex-tui-client-health
           - test-codex-appserver-watchdog
           # #535: first co-presence start with a slow agent-node fetch, bridge failure tail,
           # needs-login, single-node verify. Real Hub + tmux + 30 s fake npx (x2 with its witnessed red).
           - test-codex-copresence-first-start
+          - test812-paired-resolve-timeout
           - test1271-daemon-start-node
           - test1178-codex-upgrade-recovery
           - test736-pm2-fleet-rebuild
@@ -1924,11 +1875,22 @@ jobs:
           # health.codex_login (fingerprint + shared_with), with an in-suite witnessed red.
           # Not L1: two bun installs + three node processes; same budget reasoning as test185.
           - test594-codex-login-health
+          # #720: real codex 0.133.0 + 0.159.2 app-server with anet's commhub -c overrides —
+          # first commhub tool call (and again after restart) runs with no 「Allow the commhub
+          # MCP server to run tool」 prompt; control without the setting prompts/declines;
+          # in-suite mutations M1-M5. Not L1: the image installs two ~150 MB codex binaries.
+          - test720-codex-commhub-tool-approval
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
 
-      # 🔴 **从 Dockerfile 里读 ARG 名，不硬编码**。这六个套件有四种形状：
+      # #2800 P1 —— 95 个分片每次运行都全新 `docker build`；三个 codex 套件各装两个
+      # ~150 MB 二进制，冷构建就是 2–14 分钟，它们现在是 PR 墙钟的地板（实测 test738 = 14.1 分钟）。
+      # 改用 buildx 的 GitHub Actions 层缓存：Dockerfile 不变就命中，只有真正变了的层才重建。
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
+
+      # 🔴 **从 Dockerfile 里读 provenance ARG 名，不硬编码**。这六个套件有四种形状：
       #     qa-hub-17 / qa-hub-19        无 ARG
       #     test643 / test688            SOURCE_COMMIT
       #     test635                      TEST635_SOURCE_COMMIT
@@ -1948,9 +1910,18 @@ jobs:
           BUILD_ARGS=()
           while read -r name; do
             [ -n "$name" ] && BUILD_ARGS+=(--build-arg "$name=$GITHUB_SHA")
-          done < <(grep -oE '^ARG [A-Z0-9_]+' "$DF" | awk '{print $2}')
+          # Only provenance args receive GITHUB_SHA. Dockerfiles may also expose
+          # real build inputs such as BUN_VERSION or a checksum; treating every
+          # ARG as a source pin silently replaces those values with a git SHA.
+          done < <(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' "$DF" | awk '{print $2}')
           echo "detected build args: ${BUILD_ARGS[*]:-(none)}"
-          docker build "${BUILD_ARGS[@]}" -t "anet-${{ matrix.suite }}" -f "$DF" .
+          # #2800 P1 —— 层缓存按 suite 分 scope；mode=min 只缓存最终层，
+          # 避免 95 个套件把仓库 10 GB 的 Actions 缓存预算挤爆（LRU 淘汰会掉命中率）。
+          docker buildx build "${BUILD_ARGS[@]}" \
+            --load \
+            --cache-from type=gha,scope=${{ matrix.suite }} \
+            --cache-to type=gha,mode=min,scope=${{ matrix.suite }} \
+            -t "anet-${{ matrix.suite }}" -f "$DF" .
           # #1324: ARTIFACT_DIR 一直传进来,但容器带 --rm 直接删掉,套件写的报告
           # 从没被取出过 —— 全仓只有 test225 那一处有 docker cp。这里补上取出。
           #
@@ -1980,9 +1951,16 @@ jobs:
           if-no-files-found: ignore
 
   windows-codex-copresence:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Windows Codex co-presence native smoke
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      # #1321 diagnostics: opt-in and default OFF in code; the workflow only
+      # forwards a repository Variable, so an admin can turn the sample on for the
+      # next reproducing run WITHOUT a code change, and nothing prints by default.
+      ANET_DIAG_WINDOWS_TUI_HEALTH: ${{ vars.ANET_DIAG_WINDOWS_TUI_HEALTH }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify protected real-Codex gate trust boundary

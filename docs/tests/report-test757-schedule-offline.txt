@@ -1,0 +1,44 @@
+board #757 — scheduled target offline
+Date: 2026-10-08
+
+Scope
+- A scheduled occurrence whose exact target session is offline or older than
+  the existing five-minute freshness cutoff is recorded as
+  skipped(target_offline); no tasks/inbox task row is created.
+- The human creator receives one user_inbox warning, or the Agent creator
+  receives one ordinary inbox warning, per continuous offline episode.
+- One observed online occurrence clears the durable episode marker and is
+  dispatched through the existing path.
+
+SQLite targeted/regression (Docker, --cpus=2)
+- scheduled-offline.test.ts: 4 pass, 0 fail, 22 expect, rc=0
+- fresh timestamps in SQLite UTC format, ISO Z format, and ISO Z with
+  milliseconds all keep the idle target online.
+- scheduler regression group: 53 pass, 0 fail, 518 expect, rc=0
+
+Witnessed-red mutation
+- Replaced the target-offline branch condition with false.
+- scheduled-offline.test.ts: 0 pass, 3 fail, rc=1; failures were assertion
+  mismatches (queued/delivered instead of skipped), not environment errors.
+- Restored the production condition before the green runs below.
+- Replaced parseDbTimestampMs with the previous hand-written append-Z parser.
+- scheduled-offline.test.ts: 3 pass, 1 fail, rc=1; the ISO Z timestamp was
+  misclassified as offline on an assertion mismatch, not an environment error.
+- Restored parseDbTimestampMs before the final green run.
+
+PostgreSQL ladder (Docker, --cpus=2)
+- scheduled-offline.test.ts: 3 pass, 0 fail, rc=0
+- feature tests: no failure
+- migration verification: MIGRATE_FAILED=0
+- PG_LADDER level=6 floor=6 first_fail=none, rc=0
+
+Full server aggregate (Docker, --cpus=2)
+- files=210, pass=2378, fail=0, skip=0, expects=14113, rc=0
+
+Static checks
+- check-doc-symbol-pins.py: rc=0
+- check-doc-source-pins.py: broken_pins=0, rc=0
+
+Safety
+- No production Hub, production database, production node, or port 9200 was
+  accessed. All databases and services were disposable Docker fixtures.

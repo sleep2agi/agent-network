@@ -1,0 +1,52 @@
+name: Original human sender fixtures
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'tests/test8-runtime/**'
+      - 'tests/qa-hub-10-network-scope-regressions/**'
+      - 'tests/test1287-sender-fixtures/**'
+      - 'tests/lib/safe-rm.sh'
+      - 'server/src/tools.ts'
+      - 'server/src/rest-identity.ts'
+      - 'server/src/server.ts'
+      - 'server/src/auth.ts'
+      - 'server/src/db.ts'
+      - 'server/package*.json'
+      - 'agent-node/**'
+      - 'agent-network/**'
+      - '.github/workflows/human-sender-fixtures.yml'
+  schedule:
+    - cron: '20 19 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+# #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
+# 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
+# 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
+# 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  sender-fixtures:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build locked source with pinned Node and Bun
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -f tests/test1287-sender-fixtures/Dockerfile -t human-sender-fixture-test .
+      - name: Original runtime SSE and two-network baselines with witnessed-red senders
+        shell: bash
+        run: |
+          set -euo pipefail
+          for fixture_case in baseline mutant-runtime mutant-scope; do
+            docker run --rm --init --network none -e FIXTURE_CASE="$fixture_case" -e EXPECTED_SOURCE_COMMIT=${{ github.sha }} human-sender-fixture-test 2>&1 | tee -a report-test1287.txt
+          done
+          echo 'RESULT: PASS; both original baselines and both exact witnessed-red sender regressions' | tee -a report-test1287.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-human-sender-fixtures-${{ github.sha }}
+          path: report-test1287.txt

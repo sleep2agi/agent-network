@@ -5,6 +5,8 @@
 // 2026-10-01 —— 原来是 4096 条样本的环:生产上 212 s 就写满,?minutes=10 实际只覆盖三分半钟。
 // 改成按分钟分桶的累计器:每个桶里每个路由一行(次数 / 总耗时 / 最大值 / 字节 / 5xx / 耗时直方图),
 // 保留 ROUTE_BUCKET_RETENTION 个桶(24 小时),窗口多长就真覆盖多长。p95 从直方图取(桶上沿,不超过 max)。
+import { noteRequestServed } from "./event-loop-lag.js";
+
 export const ROUTE_BUCKET_MS = 60_000;
 export const ROUTE_BUCKET_RETENTION = 1440;
 /** 每个分钟桶里最多这么多个不同的路由;再多的记到 ROUTE_OVERFLOW_KEY,防止怪路径 / 怪工具名把内存撑大。 */
@@ -142,6 +144,8 @@ export function recordRouteTiming<T extends Response | undefined>(req: Request, 
   const length = Number(res.headers.get("content-length"));
   const bytes = Number.isFinite(length) && res.headers.has("content-length") ? length : 0;
   addSample(route, performance.now() - started, res.status, bytes, now, callerClass(req));
+  // #2614 —— 让停顿监测能区分「循环被阻塞」与「timer 被饿住」：见 event-loop-lag.ts 顶部说明。
+  noteRequestServed();
   return res;
 }
 

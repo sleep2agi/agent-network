@@ -1,0 +1,46 @@
+#1302 (parent #1293) — explicit new Server with invalid shared registration
+
+Input: PR2776 head 2c44c54b2abf36071724f8410c53bcc8605f8323.
+Scope: daemon create config wiring; no production changes or credentials.
+
+Defect:
+  opencodeNewServer=true still reads the optional host shared registration to
+  select a registered V2 client. A malformed registration or missing shared
+  password file rejects the entire request before ordinary CLI qualification.
+  CLI's explicit new-server option already skips shared service selection.
+
+Change:
+  Preserve registered V2 client selection when registration is valid.
+  On invalid registration only an explicit new-server request continues with
+  the ordinary child PATH and existing runtime/generation/model/unsafe gates.
+  Default shared creation still rejects invalid registration before child writes.
+
+Negative control:
+  Run the two added table cases against unchanged PR2776 production code:
+    0 pass, 2 fail, 27 filtered; both fail at the expected readiness result:
+    expected runtime_capability_check_failed, received rejected.
+  Cases: malformed JSON and a missing shared password file.
+
+Fixed:
+  Docker oven/bun:1.3.14, --network none, read-only source/dependency mounts:
+    bun test src/runtime/node-name-652.test.ts
+             src/runtime/create-node-daemon.test.ts
+             src/runtime/opencode-shared-server-registry.test.ts
+    130 pass, 0 fail, 437 assertions, 2.40 seconds.
+  Existing registered-client PATH assertion for explicit new-server is unchanged.
+  Both new cases also assert default shared refusal, no spawn/child writes,
+  V2/unsafe configuration retention, and absence of shared credential fields.
+
+Limits:
+  Dependency mounts came from existing local package installations; this is a
+  focused Docker check, not a clean install/release qualification. The minimal
+  image lacks pgrep (some unrelated existing tests emit diagnostics). The new
+  cases use a version fixture and a sleep child: they prove config persistence,
+  explicitly require native readiness failure, and do not prove native startup,
+  server sharing, TUI, process discovery or lifecycle cleanup. Existing test829
+  Docker CI includes node-name-652.test.ts and remains the clean-image gate.
+
+Release status observed 2026-10-15 13:29 UTC:
+  PR2776 OPEN; npm preview CLI .179 / agent-node .145.
+  This patch is stacked on PR2776 and must be rebased after it lands. It is
+  not a release, and does not complete #1293 or the V1 custody migration.

@@ -136,8 +136,8 @@ cd <ws> && anet node stop <别名> && anet node start <别名>   # 原来用 --t
 - 只有 **available ≥ 10 GB 且 1 分钟负载 < CPU 核数**(`nproc`)时才继续下一批,否则等。
 
 **启动前资源闸**(#612;下面列的路径走同一个函数。首个包含它的版本以发版说明为准,.112 **没有**):
-即将 exec 重进程之前,同时读 cgroup 内存和 `/proc/meminfo`,取较小的可用值(容器里 `/proc/meminfo` 仍是宿主机的数)。没有 cgroup 上限时只看 `MemAvailable`。门槛和可用量用同一个口径:有 cgroup 上限时,门槛是 `min(4 GiB, min(MemTotal, cgroup 上限) 的 15%)`,不是宿主机 MemTotal 的 15%。cgroup 用量要减掉可回收页缓存(`memory.stat` 的 `inactive_file`;cgroup v1 优先 `total_inactive_file`,没有再退回 `inactive_file`)。1 分钟负载高于 `2 × CPU 核数` 也等。
-不够就等,大约每 15 秒重查一次(带抖动)。自有拓扑在 Hub 上把状态报成 `blocked`,正文固定「等待内存」。anet 拉 `-appsrv` 时桥还没起来,没有 Hub 会话,同一句打在 stdout。
+即将 exec 重进程之前,同时读 cgroup 内存和 `/proc/meminfo`,取较小的可用值(容器里 `/proc/meminfo` 仍是宿主机的数)。没有 cgroup 上限时只看 `MemAvailable`。门槛和可用量用同一个口径:有 cgroup 上限时,门槛是 `min(4 GiB, min(MemTotal, cgroup 上限) 的 15%)`,不是宿主机 MemTotal 的 15%。cgroup 用量要减掉可回收页缓存(`memory.stat` 的 `inactive_file`;cgroup v1 优先 `total_inactive_file`,没有再退回 `inactive_file`)。1 分钟负载高于 `4 × CPU 核数` 也等。
+不够就等,大约每 15 秒重查一次(带抖动)。自有拓扑在 Hub 上把状态报成 `blocked`,正文按实际原因区分「等待内存」「等待负载」「等待内存和负载」「等待资源探测」。anet 拉 `-appsrv` 时桥还没起来,没有 Hub 会话,同一句打在 stdout。
 主机上同时处于启动中的重进程默认最多 2 个。租约在 `~/.anet/run/start-slots/`,按 node_id。租约和锁都记 pid,加上 `/proc/<pid>/stat` 第 22 列的进程启动时间,避免 pid 被复用后误判成还活着。租约默认 10 分钟过期,过期就删。释放时如果锁被占,会重试,进程退出时再试一次。
 等满上限后**不**整批放行:先降为单路,强制并发 = 1,日志和状态写「已超时，按单路放行」。单路**不会**因为再等满一段时间就绕过租约。只有当前持有者确实卡死(租约过期,或者 pid 与启动时间对不上)时,才由一个等待者接管,接管是原子的,一次只放一个,日志写「接管卡死租约」。正常推进的单路就是一个接一个。目录锁里同样记着 pid 和启动时间:pid 还活着但启动时间对不上,立刻回收;pid 还活着、启动时间也对得上、但锁文件已经超过 60 秒,按孤儿锁回收(临界区是同步的,不该占这么久)。
 `ANET_START_MEM_GATE=0` 整道关掉。非 Linux 不生效。`--force` 不跳过这道闸。
@@ -146,8 +146,8 @@ cd <ws> && anet node stop <别名> && anet node start <别名>   # 原来用 --t
 |---|---|---|
 | `ANET_START_MEM_GATE` | 开 | 设为 `0` 关闭整道闸 |
 | `ANET_START_MIN_MEM_MB` | `min(4096, min(MemTotal, cgroup 上限) 的 15%)` | 设了就取代算出来的门槛(MiB) |
-| `ANET_START_MAX_LOAD_PER_CPU` | `2` | 1 分钟负载高于 `这个值 × CPU 核数` 就等 |
-| `ANET_START_GATE_MAX_WAIT_SEC` | `600` | 等满之后改为单路放行,不再整批启动 |
+| `ANET_START_MAX_LOAD_PER_CPU` | `4` | 1 分钟负载高于 `这个值 × CPU 核数` 就等；16 核 TM 主机若要恢复旧的严格门槛，可显式设为 `2`（门槛为 load1 32） |
+| `ANET_START_GATE_MAX_WAIT_SEC` | `600` | 等满之后改为单路放行,不是总等待上限；单路仍要等启动租约 |
 | `ANET_START_MAX_CONCURRENT` | `2` | 没超时时同时启动的上限;超时后强制为 1 |
 | `ANET_START_LEASE_TTL_SEC` | `600` | 启动租约最长存活秒数,过期视为无效 |
 

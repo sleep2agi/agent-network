@@ -1,0 +1,21 @@
+# CommHub task 1344 — offline MCP Accept contract
+Base: 49fc3b8ad785e46a799042d84911f5037f542eaa
+Tested patched CLI Git blob: c780b0a23b97f1f3ee75f503374ed14534fc4517
+Business delta: notifyServerOffline's two POST Accept values only.
+Fixture: real @modelcontextprotocol/sdk 1.32.0 WebStandardStreamableHTTPServerTransport.
+
+Docker, network disabled, actual CLI private function extracted from the source:
+Before: HTTP [406, 406]; report_status handler received 0 requests.
+Error: Client must accept both application/json and text/event-stream.
+After: HTTP [200, 200]; handler received exactly:
+report_status {resume_id: sdk-n_fixture, alias: offline-fixture, status: offline}.
+
+Committed regression in existing windows-stop-identity.test.ts:
+Original CLI + new regression: FAIL, expected [200, 200], received [406, 406].
+Patched CLI + full file: 23 pass / 2 Windows-only skip / 0 fail (126ms).
+Run in cached Debian 12 Docker image with SDK dependencies copied from pinned cache.
+No network, host services, model session, production credentials or node were used.
+
+This is transport-contract evidence, not a full Hub authorization or real CLI E2E result.
+PR #2797 / CommHub task 1337 still must require successful target-bound Hub responses.
+No version, installation, deployment or release was performed.

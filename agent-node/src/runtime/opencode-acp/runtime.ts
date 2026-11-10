@@ -133,6 +133,9 @@ export async function openOpencodeRuntime(opts: {
   workDir: string;
   /** Explicit trusted-task opt-in. Safe mode is the default. */
   unsafeTools?: boolean;
+  /** Exact OpenCode provider/model ID selected by the node. When supplied,
+   * session/set_model must succeed before the session can receive a task. */
+  model?: string;
   sessionId?: string;
   onSession?: (sessionId: string) => void | Promise<void>;
   /** Called synchronously immediately after spawn, before any handshake await. */
@@ -157,6 +160,9 @@ export async function openOpencodeRuntime(opts: {
   const workDir = resolve(opts.workDir);
   const projectCwd = resolve(opts.cwd);
   const unsafeTools = opts.unsafeTools === true;
+  if (opts.model !== undefined && (!opts.model.trim() || opts.model !== opts.model.trim())) {
+    throw new Error("opencode selected model must be non-empty and have no surrounding whitespace");
+  }
   if (unsafeTools) {
     warn(
       "[opencode] UNSAFE local tools enabled by flags.opencodeUnsafeTools=true; " +
@@ -311,6 +317,19 @@ export async function openOpencodeRuntime(opts: {
       log(`[opencode-acp] session/new — ${sessionId.slice(0, 12)}...`);
     }
 
+    // Apply after BOTH new and load, outside the load fallback catch. An
+    // unavailable/unsupported selection must never silently use a default or
+    // resume the previous model. Upstream owns Provider/model validation.
+    if (opts.model !== undefined) {
+      try {
+        await client.request("session/set_model", {
+          sessionId,
+          modelId: opts.model,
+        }, 20_000);
+      } catch (error: any) {
+        throw new Error(`opencode selected model ${JSON.stringify(opts.model)} could not be applied; refusing default-model fallback: ${error?.message ?? error}`);
+      }
+    }
     if (opts.onSession) await opts.onSession(sessionId);
     return { client, sessionId };
   } catch (error) {

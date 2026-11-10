@@ -16,6 +16,7 @@ if (!bundle) throw new Error("CHANNEL_BUNDLE is required");
 const work = mkdtempSync(join(tmpdir(), "test519-"));
 const dbPath = `${work}/hub.db`;
 const adminToken = "test519-admin-token";
+const ownerAlias = "test519-owner";
 
 const failures: string[] = [];
 const passes: string[] = [];
@@ -157,7 +158,7 @@ try {
   }));
   await until(async () => (await fetch(`${hub}/health`).catch(() => null))?.ok === true, "hub health", 30_000);
 
-  const reg = await rest("/api/auth/register", { method: "POST", headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" }, body: JSON.stringify({ username: "test519-owner", password: "pass123456" }) });
+  const reg = await rest("/api/auth/register", { method: "POST", headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" }, body: JSON.stringify({ username: ownerAlias, password: "pass123456" }) });
   const auth = { authorization: `Bearer ${reg.token}`, "content-type": "application/json" };
   const net = (await rest("/api/networks", { method: "POST", headers: auth, body: JSON.stringify({ name: "test519-net" }) })).network_id;
   const direct = new Database(dbPath); direct.exec("PRAGMA busy_timeout=5000");
@@ -226,7 +227,7 @@ try {
   check(legacyEvents.some((e) => e.type === "new_task"), "S2 legacy peer received new_task SSE");
 
   // S3 — Dashboard/human origin: terminal reply only, no task sent to the user.
-  const d3 = await hubMcp(reg.token, "send_task", { alias: "receiver", task: "s3 dashboard question", from_session: "admin", network_id: net });
+  const d3 = await hubMcp(reg.token, "send_task", { alias: "receiver", task: "s3 dashboard question", from_session: ownerAlias, network_id: net });
   const t3 = String(d3.task_id || d3.message_id);
   check(direct.query<{ from_node_id: string | null }, [string]>("SELECT from_node_id FROM tasks WHERE task_id=?1").get(t3)?.from_node_id === null, "S3 fixture: human-origin task has no from_node_id");
   const n3 = await injected("s3 dashboard question");
@@ -234,7 +235,7 @@ try {
   const r3 = await tool("commhub_send_peer_reply", { task_id: n3.meta.task_id, text: "s3 answer" });
   check(r3.body.ok === true && r3.body.route === "reply-only", "S3 human origin → reply-only", r3.body);
   check(status(t3) === "replied", "S3 original task is terminal", status(t3));
-  check(direct.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM tasks WHERE from_name='receiver' AND to_name='admin'").get()!.n === 0, "S3 no task sent to the human");
+  check(direct.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM tasks WHERE from_name='receiver' AND to_name=?1").get(ownerAlias)!.n === 0, "S3 no task sent to the human");
 
   // S4 — wake fails (peer's session deleted): the original must stay open.
   const t4 = await send(gone.token, "gone", "s4 question from a peer that disappears");

@@ -1,0 +1,140 @@
+Board #671 — stopped receipts, reboot recovery, delete refusal
+Date: 2026-10-07
+
+Scope and safety
+- Started from main aa886493, then rebased without conflicts onto 03710452
+  (agent-node .120 release). The two original commits range-diff as '='.
+- No version changes, production writes, host tmux, real nodes or model calls.
+- Every test execution below used Docker --init --cpus=2 --network none.
+  Dependency installation happened only in image builds. Fixture tests use
+  fixture-tmux private sockets and clean up only their own captured pane IDs.
+- Across a boot mismatch: no stored PID or old marker grants signal authority.
+  Only an absence check may acknowledge stopped. Matching sessions or any
+  same-UID process using the old marker / same CODEX_HOME requires re-adoption.
+- Successful manual startup records .hub-resumed against the exact old receipt
+  fingerprint. No check-then-unlink: even a late certificate cannot suppress a
+  concurrent new receipt. CLI and fleet boot probe share the tested wire format.
+- Delete stays unsupported. Its fixed code survives the daemon ack and the
+  user read projection; three exact public codes added, never free-form errors.
+
+Layered checks
+1. test658 Dockerfile + run.sh, rc=0, twice including rebased 8d034988 snapshot:
+   fixture safety 2/2; new recovery 4/4 (63 assertions); listing race 7/7;
+   existing stop/evidence 15/15; start input/preflight 8/8.
+   remain-on-exit repetition 20/20. All 17 mutation probes assertion-red;
+   mutation drivers restore source and return rc=0.
+   New five: delete reason, old-boot no-signal gate, concurrent stop receipt,
+   exact resume certificate, manual-start supersession. Each mutation rc=1.
+   An old stale-receipt mutation anchor moved with the new else branch; it was
+   re-pointed without changing the assertion or weakening a baseline.
+2. test629-lifecycle-read Dockerfile + run.sh: rc=0.
+   Real port-0 temporary Hub HTTP: 13/13, 233 assertions; original three
+   isolation/redaction/recorded-child mutations red, restored green.
+3. test658 Dockerfile.e2e + http-e2e.ts at c04fce18 product/test content: rc=0.
+   13 checks: real Hub registration and real built daemon adoption/stop;
+   marker before ack, three original processes gone, unrelated decoy intact;
+   fake manual three-stage start using the exact CLI receipt callback;
+   no re-adoption, same old Hub binding, new marker rejected through real
+   HTTP with adopt_codex_readopt_required, new stages untouched;
+   after simulated reboot both boot readers allow recovery; new stop wins.
+   This simulates process disappearance, NOT a real machine/kernel reboot.
+   It does NOT run a real Codex TUI/model or the complete provider login flow.
+4. test571-lifecycle-safety Dockerfile + run.sh: rc=0, 62 pass / 0 fail.
+   Real built CLI/Hub/daemon stop isolation, project-up PID preservation,
+   legacy/empty stop marker preservation and actual boot-script sweep.
+5. test745-agent-network-unit-ci Dockerfile + run.sh: rc=0.
+   Non-root source suite: 1931 pass / 9 platform skips / 0 fail,
+   5904 assertions across 188 files. tests directory: 19/19 files, 0 failures.
+   Help mutation rc=1; driver rc=0. Build/type declaration generation also
+   passed in test571. These broad runs used cd9580bd before the pure rebase;
+   they were not rerun after the .120 version-only base change.
+6. Docker static gates: rc=0. Registration, file coverage, home-path baseline,
+   L1 SHA binding and mutation pins (69/69 selftest, 585 anchors) green.
+   No baseline/exemption increases. test831's own Dockerfile: L0-L8 PASS,
+   123 doc files / 6 unique pins / 18 occurrences; no added broken pins.
+   Symbol gate with read-only Git history: docs-site 16 checked / 2 skipped,
+   docs 9 checked / 8 skipped, missing refs 0, drift 0. Skips are NOT checks.
+   Fixed the two docs/architecture.md CLI line pins reported by the gate.
+
+Reproduction: build each named Dockerfile from the repository root, then run
+the resulting image with --rm --init --cpus=2 --network none. Pass full
+SOURCE_COMMIT to test658, test571 and test745. test831 uses TEST831_SOURCE_COMMIT
+and TEST831_RUNSH_BLOB (Git blob of its run.sh). Do not execute tmux suites on
+the host. The static symbol gate needs Git history to check immutable refs.
+
+Limits: no full server-wide or agent-node-wide unit run in this change; the
+focused runtime suite, real daemon build and real HTTP paths are listed above.
+No merge/release/deploy. Fleet script and CLI must be upgraded together; older
+scanners conservatively retain the stop. Restored-file identity mismatch also
+retains stop. No remote three-stage start implementation (board #659 B).
+
+Latest-main integration (2026-10-07):
+- PR was already published as draft; merged b56f8dd0 without rewriting history.
+- Merge commit: 63cdd08a19eb48cf58b0761674bae26a583e06ac.
+- range-diff of the four original commits is all '='. This does not examine
+  merge resolutions: separately checked unchanged recovery product blobs and
+  identical CLI added/removed lines. Main's start-admission wiring is retained.
+- Only conflict was architecture.md CLI pins. Checker reported definitions at
+  10312 and 2976; updated those two anchors, no whole-file conflict replacement.
+- Against origin/main, qa.yml and scripts/qa.sh have no delta.
+- Docker --cpus=2, network none, full merge SHA: test658 rc=0; recovery 4/4,
+  63 assertions; remain-on-exit 20/20; all 17 mutation checks assertion-red.
+- test745 rc=0: 1936 pass, 9 platform skips, 0 fail; 5922 assertions across
+  189 src files; tests directory 19/19; help mutation rc=1. First launch had
+  rejected a short SOURCE_COMMIT before tests; rerun used the full merge SHA.
+- Docker static gates rc=0, mutation pins 588 checked, 4 unchanged baseline
+  exceptions. Root and docs-site symbol checks rc=0, no missing refs or drift;
+  respectively 8 and 2 explicitly skipped pins are not counted as passes.
+- Real Hub HTTP and test571 results above were not rerun for this merge.
+  Only document pins and this report changed after the tested product snapshot.
+
+Independent-review fixes (2026-10-07), based on published head 543e9534:
+- Tested product commit 2af308897c165a35c3f2160f1b423894382af440.
+- B1: both layouts now remove the saved .pid while a new-marker process uses
+  the same CODEX_HOME. Stop refuses with adopt_codex_readopt_required, emits
+  zero signals and leaves that pane alive. The inserted missing-PID early
+  return mutant is assertion-red (rc=1), not merely a compile failure.
+- B2: boot probe releases only with reserved exit 42; all other outcomes hold.
+  Test executes the actual shell function with a top-level throw and syntax
+  error; both hold a valid stop. A valid resume still releases. A mutant that
+  also treats exit 1 as release is assertion-red (rc=1).
+- CLI and fleet fingerprint both omit dev and retain inode/ctime/content hash.
+  An exact fingerprint assertion pins this format; identical-JSON replacement,
+  late certificate and same-inode rewrite tests continue to hold newer stops.
+  Older device-bearing certificates fail closed until explicit manual start.
+- Docker --init --cpus=2 --network none: complete test658 rc=0: safety 2/2,
+  recovery 5/5 (76 assertions), listing 7/7, stop/evidence 15/15, preflight 8/8,
+  repeated exit-race 20/20; all 19 mutation checks red, suite rc=0.
+- Rebuilt real Hub + daemon Docker E2E: 13/13, rc=0, including new exit-42
+  reader parity, manual resume, new-generation refusal and newer stop priority.
+- Docker static gates rc=0, 590 mutation anchors, unchanged 4 exceptions;
+  both symbol-pin scopes rc=0 with no missing refs/drift (existing skips remain).
+- Broad CLI, server and test571 suites not rerun in this review-fix increment.
+- Bilingual operator deployment instructions added: record installed entrypoint,
+  review installed drift, deploy CLI and boot script from merged release inputs
+  together, verify version/hash and isolated behavior, roll back both together.
+  No installed script, real node, production service or deployment was touched.
+
+CI preflight investigation (2026-10-07):
+- Read job 112549571794 of run 37545143746 via the job-log API. Original CI
+  only printed expected adopted / received refused; no reason code was saved.
+  Its exact cause cannot retrospectively be proven from that log.
+- The failure is handleAdoptDoorbell -> collectCodexPanes, before preflight;
+  this path does not call holdAppServerStart or the CLI external startup path.
+  No memory-gate hook was injected and no false gate-coverage claim is made.
+- Added full fixture ack logging. Original fixture plus logging, Docker
+  --cpus=2 --memory=512m: 20 iterations, both layouts pass (0/40 failures).
+- Controlled reproducer: delaying shell exec by 200ms before the marker/home
+  environment was installed gave refused/adopt_codex_identity_unproven in
+  both layouts (2/2 failures, rc=1). This proves a fixture-readiness race,
+  not that CI's unrecorded refusal must have had the same reason.
+- Fix is test-only: gate fake processes until released, then bounded polling
+  verifies captured pane IDs have final sleep argv, marker, CODEX_HOME, UID
+  and cwd. Only then call adoption once. No production refusals are retried.
+- Tested commit 40eca2d7c22feae95804082b72d18f1149ba2d1b: Docker --init
+  --cpus=2 --memory=512m --network none: 20/20 iterations, both layouts green;
+  then complete test658 rc=0, all 20 mutation checks assertion-red, including
+  removal of fixture readiness. Existing remain-on-exit repeat also 20/20.
+- Static Docker gates rc=0 (591 anchors, 4 existing unchecked exceptions).
+  No product/Hub/CLI/fleet code changed in this increment; broad suites and
+  real HTTP E2E were not rerun. Only this record follows the tested commit.

@@ -109,6 +109,8 @@ export interface CodexAppServerClientOptions {
   clientLabel?: string;
   /** @internal Deterministic constructor seam for transport failure tests. */
   webSocketCtor?: any;
+  /** Finite receive ceiling for large persisted thread/resume responses. */
+  maxPayloadBytes?: number;
 }
 
 function safeWebSocketEndpoint(rawUrl: string): string {
@@ -233,11 +235,19 @@ export class CodexAppServerClient extends EventEmitter {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return new Promise<void>((resolve, reject) => {
       try {
-        const WS: any = this.opts.webSocketCtor ?? resolveWebSocketCtor();
+        // Computed runtime load keeps source-only smoke bundles independent of
+        // node_modules; the published package declares `ws` directly.
+        const WS: any = this.opts.webSocketCtor ?? (this.opts.maxPayloadBytes
+          ? require(["w", "s"].join("")).WebSocket
+          : resolveWebSocketCtor());
+        const transportOptions = {
+          ...(headers.Authorization ? { headers } : {}),
+          ...(this.opts.maxPayloadBytes ? { maxPayload: this.opts.maxPayloadBytes, perMessageDeflate: false } : {}),
+        };
         this.ws = new WS(
           this.opts.url,
           undefined,
-          headers.Authorization ? { headers } : undefined,
+          Object.keys(transportOptions).length ? transportOptions : undefined,
         );
       } catch (cause) {
         reject(
@@ -280,14 +290,14 @@ export class CodexAppServerClient extends EventEmitter {
         this.pending.clear();
       });
       this.ws!.addEventListener("error", (ev: Event) => {
-        this.emit(
-          "error",
-          codexAppServerConnectionError(
+        const error = codexAppServerConnectionError(
             this.opts.url,
             extractError(ev, "ws steady-state"),
             this.opts.authToken ? [this.opts.authToken] : [],
-          ),
-        );
+          );
+        this.emit("error", error);
+        for (const [, pending] of this.pending) pending.reject(error);
+        this.pending.clear();
       });
     });
   }

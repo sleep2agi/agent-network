@@ -12,11 +12,13 @@
 // Docker image that copies only agent-network/ can still resolve the import.
 //
 // While MemAvailable (the smaller of /proc and a real cgroup limit) or load
-// is short, wait and report 「等待内存」. The floor uses the same cgroup limit
+// is short, wait and report the resource that is short. The floor uses the same cgroup limit
 // as the free-memory reading: min(4 GiB, 15% of min(MemTotal, cgroup limit)).
 // Page cache (inactive_file) is not usage. Leases live in
 // ~/.anet/run/start-slots/ keyed by node id. A lease records pid plus the
-// process start time from /proc/<pid>/stat field 22, and it expires.
+// process start time from /proc/<pid>/stat field 22. A live holder renews its
+// expiry while the caller holds the returned lease; expiry is only a crash
+// recovery boundary, never a maximum duration for healthy work.
 // After the max wait, concurrency drops to 1 and the log/status say
 // 「已超时，按单路放行」. That wait never skips the lease. One waiter takes
 // the slot only when the holder is actually stuck (the lease expired, or its
@@ -50,19 +52,33 @@ import { dirname, join } from "path";
 
 export const START_GATE_DEFAULT_MIN_MEM_MB = 4096;
 export const START_GATE_DEFAULT_MEM_FRACTION = 0.15;
-export const START_GATE_DEFAULT_MAX_LOAD_PER_CPU = 2;
+export const START_GATE_DEFAULT_MAX_LOAD_PER_CPU = 4;
 export const START_GATE_DEFAULT_MAX_WAIT_SEC = 600;
 export const START_GATE_DEFAULT_MAX_CONCURRENT = 2;
 export const START_GATE_SINGLE_LANE_CONCURRENT = 1;
 export const START_GATE_RECHECK_MS = 15_000;
 /** Jitter added to each re-check while still inside the max wait: uniform [0, RECHECK_JITTER_MS). */
 export const START_GATE_RECHECK_JITTER_MS = 5_000;
-export const START_GATE_WAITING_STATUS = "等待内存";
+export const START_GATE_WAITING_MEMORY_STATUS = "等待内存";
+export const START_GATE_WAITING_LOAD_STATUS = "等待负载";
+export const START_GATE_WAITING_BOTH_STATUS = "等待内存和负载";
+export const START_GATE_WAITING_PROBE_STATUS = "等待资源探测";
+/** #686 compatibility alias for callers that used the original memory-only status. */
+export const START_GATE_WAITING_STATUS = START_GATE_WAITING_MEMORY_STATUS;
 export const START_GATE_SINGLE_LANE_STATUS = "已超时，按单路放行";
+const START_GATE_BLOCKED_STATUSES = new Set<string>([
+  START_GATE_WAITING_MEMORY_STATUS,
+  START_GATE_WAITING_LOAD_STATUS,
+  START_GATE_WAITING_BOTH_STATUS,
+  START_GATE_WAITING_PROBE_STATUS,
+  START_GATE_SINGLE_LANE_STATUS,
+]);
 /** Logged when one waiter atomically replaces a stuck lease. The wait cap must not admit without this. */
 export const START_GATE_TAKEOVER_STATUS = "接管卡死租约";
 /** Startup leases older than this are not live. ANET_START_LEASE_TTL_SEC overrides it. */
 export const START_GATE_LEASE_TTL_MS = 10 * 60 * 1000;
+/** A healthy holder renews well before the default lease expiry. */
+export const START_GATE_LEASE_HEARTBEAT_MS = 30_000;
 /** An empty or unreadable lock younger than this is still being published, not dead. */
 export const START_GATE_LOCK_STALE_MS = 30_000;
 /**
@@ -105,6 +121,8 @@ export interface StartGateDeps {
   jitterMs?: number;
   /** Lease lifetime. Default 10 minutes, or ANET_START_LEASE_TTL_SEC. */
   leaseTtlMs?: number;
+  /** @internal deterministic short-TTL seam. Defaults to min(30s, TTL/3). */
+  leaseHeartbeatMs?: number;
   /** Empty/unreadable locks younger than this are held, not dead. */
   lockStaleMs?: number;
   /** A live matching lock older than this is an orphan. Default 60s. */
@@ -139,6 +157,27 @@ export interface HostSample {
   memTotalMb: number;
   load1: number;
   cpuCount: number;
+}
+
+export interface StartGateStatusSnapshot {
+  status: string;
+  task?: string;
+}
+
+/** True only for blocked text owned by this gate, including single-lane wait. */
+export function isStartGateBlockedStatus(task: string | undefined): boolean {
+  return typeof task === "string" && START_GATE_BLOCKED_STATUSES.has(task);
+}
+
+/**
+ * Once admission returns, restore the pre-gate status only if the live status
+ * is still ours. A concurrent task/status update must win over stale restore.
+ */
+export function startGateStatusToRestore(
+  live: StartGateStatusSnapshot,
+  previous: StartGateStatusSnapshot,
+): StartGateStatusSnapshot | null {
+  return live.status === "blocked" && isStartGateBlockedStatus(live.task) ? previous : null;
 }
 
 interface HolderRecord {
@@ -276,6 +315,17 @@ export function startGateReasons(s: HostSample, minMemMb: number, maxLoadPerCpu:
     reasons.push(`load1 ${s.load1.toFixed(2)} > ${maxLoad} (${maxLoadPerCpu} x ${s.cpuCount} CPUs, ANET_START_MAX_LOAD_PER_CPU)`);
   }
   return reasons;
+}
+
+/** User-facing blocked status. Keep this structured instead of parsing the diagnostic reasons. */
+export function startGateWaitingStatus(s: HostSample | null, minMemMb: number, maxLoadPerCpu: number): string | null {
+  if (!s) return START_GATE_WAITING_PROBE_STATUS;
+  const memoryLow = s.memAvailableMb < minMemMb;
+  const loadHigh = s.load1 > maxLoadPerCpu * s.cpuCount;
+  if (memoryLow && loadHigh) return START_GATE_WAITING_BOTH_STATUS;
+  if (memoryLow) return START_GATE_WAITING_MEMORY_STATUS;
+  if (loadHigh) return START_GATE_WAITING_LOAD_STATUS;
+  return null;
 }
 
 function cgroupMemoryFiles(text: string): { maxPath: string; currentPath: string; statPath: string; v1: boolean } | null {
@@ -716,6 +766,45 @@ function acquireLease(
   }
 }
 
+type RefreshKind = "renewed" | "busy" | "lost";
+
+/** Extend only the exact lease still owned by this pid generation. The global
+ * file lock prevents a heartbeat racing a takeover from resurrecting the old
+ * holder after another process has acquired the slot. */
+function refreshLease(
+  dir: string,
+  key: string,
+  holderPid: number,
+  selfStart: string | null,
+  ttlMs: number,
+  now: () => number,
+  isPidAlive: (pid: number) => boolean,
+  readStart: (pid: number) => string | null,
+  staleMs: number,
+  orphanMs: number,
+  monotonicNow: () => number | null,
+  warn: (m: string) => void,
+): RefreshKind {
+  const token = takeFileLock(
+    dir, holderPid, selfStart, isPidAlive, readStart, now, monotonicNow, staleMs, orphanMs, warn,
+  );
+  if (token === null) return "busy";
+  const still = () => lockStillOurs(dir, holderPid, selfStart, token);
+  try {
+    if (!still()) return "busy";
+    const path = join(dir, key);
+    const rec = readRecord(path);
+    const ours = rec.pid === holderPid
+      && (rec.start === null || selfStart === null || rec.start === selfStart);
+    if (!ours) return "lost";
+    writeFileSync(path, `${holderPid} ${selfStart ?? "-"} ${now() + ttlMs}\n`, { mode: 0o600 });
+    try { chmodSync(path, 0o600); } catch { /* best effort */ }
+    return still() ? "renewed" : "lost";
+  } finally {
+    releaseFileLock(dir, holderPid, selfStart, token);
+  }
+}
+
 function tryDropLease(
   dir: string,
   key: string,
@@ -881,6 +970,8 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   const recheckMs = deps.recheckMs ?? START_GATE_RECHECK_MS;
   const jitterSpan = deps.jitterMs ?? START_GATE_RECHECK_JITTER_MS;
   const leaseTtlMs = deps.leaseTtlMs ?? positiveNumberEnv(env, "ANET_START_LEASE_TTL_SEC", START_GATE_LEASE_TTL_MS / 1000, warn) * 1000;
+  const leaseHeartbeatMs = deps.leaseHeartbeatMs
+    ?? Math.max(10, Math.min(START_GATE_LEASE_HEARTBEAT_MS, Math.floor(leaseTtlMs / 3)));
   const lockStaleMs = deps.lockStaleMs ?? START_GATE_LOCK_STALE_MS;
   const lockOrphanMs = deps.lockOrphanMs ?? START_GATE_LOCK_ORPHAN_MS;
   const monotonicNow = deps.monotonicNow ?? defaultMonotonicNow;
@@ -926,16 +1017,33 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   };
 
   let releaseImpl = noopRelease;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let released = false;
   const release = () => {
     if (released) return;
     released = true;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
     try { releaseImpl(); } catch { /* a leaked lease expires, and the next admit reaps it */ }
   };
   const ownLease = () => {
     releaseImpl = () => scheduleDrop(
       slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart, lockStaleMs, lockOrphanMs, monotonicNow, warn,
     );
+    heartbeatTimer = setInterval(() => {
+      void enqueueSlot(slotsDir, () => released ? "lost" : refreshLease(
+        slotsDir, key, holderPid, selfStart, leaseTtlMs, now, isPidAlive, readStart,
+        lockStaleMs, lockOrphanMs, monotonicNow, warn,
+      )).then((result) => {
+        if (result !== "lost" || released) return;
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+        warn(`[start-gate] start slot ${key} was lost while its holder was alive; renewal stopped`);
+      }, (e) => {
+        warn(`[start-gate] could not renew start slot ${key}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }, leaseHeartbeatMs);
+    heartbeatTimer.unref();
   };
 
   const tryAcquire = (cap: number): Promise<AcquireKind> =>
@@ -954,7 +1062,7 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
   let checks = 0;
   let lastShortageLogAt = -Infinity;
   let lastSlotLogAt = -Infinity;
-  let reportedWaiting = false;
+  let reportedWaitingStatus: string | null = null;
   let announcedSingleLane = false;
 
   const slotSleepMs = (waitedMs: number, capToMaxWait: boolean): number => {
@@ -970,8 +1078,10 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
       checks++;
       const waitedMs = now() - started;
       const timedOut = waitedMs >= maxWaitMs;
-      const reasons = s ? startGateReasons(s, minMemFor(s), maxLoadPerCpu) : ["/proc unreadable"];
+      const minMemMb = s ? minMemFor(s) : START_GATE_DEFAULT_MIN_MEM_MB;
+      const reasons = s ? startGateReasons(s, minMemMb, maxLoadPerCpu) : ["/proc unreadable"];
       const shortage = reasons.length > 0;
+      const waitingStatus = startGateWaitingStatus(s, minMemMb, maxLoadPerCpu);
 
       if (timedOut && !announcedSingleLane) {
         announcedSingleLane = true;
@@ -979,13 +1089,18 @@ export async function waitForStartResources(label: string, deps: StartGateDeps =
         warn(
           `[start-gate] ${label}: ${START_GATE_SINGLE_LANE_STATUS} after ${Math.round(waitedMs / 1000)}s (${why}); concurrency forced to 1 until this start finishes or fails (ANET_START_GATE_MAX_WAIT_SEC=${maxWaitMs / 1000})`,
         );
+        if (shortage) {
+          const available = s ? `${Math.round(s.memAvailableMb)} MiB` : "unknown";
+          const required = `${Math.round(minMemMb)} MiB`;
+          warn(`[start-gate] ${label}: resource requirement remains unmet after the wait cap (available ${available}, required ${required}); continuing in the single recovery lane may still hit OOM`);
+        }
         safeReport(deps.report, START_GATE_SINGLE_LANE_STATUS, warn);
       }
 
       if (!timedOut && shortage) {
-        if (!reportedWaiting) {
-          reportedWaiting = true;
-          safeReport(deps.report, START_GATE_WAITING_STATUS, warn);
+        if (waitingStatus && waitingStatus !== reportedWaitingStatus) {
+          reportedWaitingStatus = waitingStatus;
+          safeReport(deps.report, waitingStatus, warn);
         }
         if (checks === 1 || waitedMs - lastShortageLogAt >= 60_000) {
           lastShortageLogAt = waitedMs;

@@ -24,6 +24,7 @@ import { connect as netConnect } from "node:net";
 import { join, delimiter as pathDelimiter } from "node:path";
 import { connect as tlsConnect } from "node:tls";
 import { codexFingerprintIndexDir, fingerprintRefreshToken } from "../codex-auth-fingerprint.js";
+import { isAcceptedOpencodeVersionFor, opencodeGenerationSupport } from "./opencode-versions.js";
 
 export type ReadinessState = "ready" | "missing_cli" | "not_logged_in" | "no_network" | "unknown";
 export type NetworkVerdict = "reachable" | "unreachable" | "skipped";
@@ -45,6 +46,10 @@ export interface RuntimeReadiness {
   network?: NetworkVerdict;
   /** codex 专属:本机已有多少个**别的**节点在用同一条 codex 登录(刷新链)。 */
   shared_login_count?: number;
+  /** opencode-cli only. Accepted pin of that generation, not an authorization to create. */
+  generation?: "v1" | "v2";
+  /** True only when `version` is an accepted pin for `generation`. */
+  accepted?: boolean;
 }
 
 export type ExecResult =
@@ -182,25 +187,92 @@ function withDeadline<T>(p: Promise<T>, ms: number): Promise<T | typeof DEADLINE
   });
 }
 
+/** PATH 上所有同名可执行文件，按 PATH 顺序。显式代际时不能用「第一个命中」就收工：
+ *  同一台机器可能同时装着 V1(1.18.x) 与 V2(2.0.22)，第一命中未必是请求的那一代。 */
+export function cliCandidatesOnPath(command: string, pathValue: string): string[] {
+  const dirs = pathValue.split(pathDelimiter);
+  const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+  const out: string[] = [];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const candidate = join(dir, command + ext);
+      try {
+        const stat = statSync(candidate);
+        if (stat.isFile() && (process.platform === "win32" || (stat.mode & 0o111) !== 0)) {
+          if (!out.includes(candidate)) out.push(candidate);
+          break;
+        }
+      } catch {
+        // 并发被删掉的 PATH 目录项，直接跳过。
+      }
+    }
+  }
+  return out;
+}
+
 /** 某个 runtime 的必选 CLI 在子进程 PATH 上的结论。没有必选 CLI 时是 `not_required`。
  *  `missing` 与就绪状态 `missing_cli` 是同一条判据(找不到,或 `--version` 失败)。
- *  `--version` 超时是 `unknown`,不是 missing。建节点拒绝与自检必须走这里,避免两套结论。 */
+ *  `--version` 超时是 `unknown`,不是 missing。建节点拒绝与自检必须走这里,避免两套结论。
+ *
+ *  `acceptVersion`(#1611):显式代际(v1/v2)时按 PATH 顺序继续扫，取第一个版本被该代际
+ *  接受的候选；都不接受则回落成第一命中的结论(错误信息保持不变)。缺省时行为与之前逐字相同。 */
 export async function requiredCliStatus(
   runtime: string,
   pathValue: string,
   childEnv: Record<string, string | undefined>,
-  io: Pick<ReadinessDeps, "resolveOnPath" | "execVersion">,
+  io: Pick<ReadinessDeps, "resolveOnPath" | "execVersion"> & {
+    candidatesOnPath?: (command: string, pathValue: string) => string[];
+  },
   stepTimeoutMs: number,
+  acceptVersion?: (version: string | undefined) => boolean,
 ): Promise<{ cli: "found" | "missing" | "unknown" | "not_required"; command?: string; version?: string }> {
   const spec = SPECS[runtime];
   if (!spec?.cli) return { cli: "not_required" };
   const command = spec.cli;
-  const abs = io.resolveOnPath(command, pathValue);
-  if (!abs) return { cli: "missing", command };
-  const r = await io.execVersion(abs, childEnv, stepTimeoutMs);
-  if (r.kind === "ok") return { cli: "found", command, version: extractVersion(r.stdout) };
-  if (r.kind === "error") return { cli: "missing", command };
-  return { cli: "unknown", command };
+  if (!acceptVersion) {
+    const abs = io.resolveOnPath(command, pathValue);
+    if (!abs) return { cli: "missing", command };
+    const r = await io.execVersion(abs, childEnv, stepTimeoutMs);
+    if (r.kind === "ok") return { cli: "found", command, version: extractVersion(r.stdout) };
+    if (r.kind === "error") return { cli: "missing", command };
+    return { cli: "unknown", command };
+  }
+  const candidates = (io.candidatesOnPath ?? cliCandidatesOnPath)(command, pathValue);
+  if (candidates.length === 0) return { cli: "missing", command };
+  let first: { kind: ExecResult["kind"]; version?: string } | undefined;
+  for (const abs of candidates) {
+    const r = await io.execVersion(abs, childEnv, stepTimeoutMs);
+    const version = r.kind === "ok" ? extractVersion(r.stdout) : undefined;
+    if (r.kind === "ok" && acceptVersion(version)) return { cli: "found", command, version };
+    first ??= { kind: r.kind, version };
+    // 超时说明这台机器跑不动这个候选，继续扫也只会再等一轮，直接按 unknown 收口。
+    if (r.kind === "timeout") break;
+  }
+  if (first?.kind === "error") return { cli: "missing", command };
+  if (first?.kind === "timeout") return { cli: "unknown", command };
+  // 找到了但不被该代际接受：把第一命中的版本交给 opencodeExplicitGenerationMismatch 报错。
+  return { cli: "found", command, version: first?.version };
+}
+
+/**
+ * Explicit create generation vs the installed `opencode --version`.
+ * Returns null unless the request names v1 or v2 AND the CLI was found.
+ * A missing or unparsed version on an explicit request is a mismatch.
+ * Omitted generation (legacy V1) and cli timeout/missing do not mismatch.
+ */
+export function opencodeExplicitGenerationMismatch(
+  requested: unknown,
+  cli: { cli: string; version?: string },
+): string | null {
+  if (requested !== "v1" && requested !== "v2") return null;
+  if (cli.cli !== "found") return null;
+  if (cli.version && isAcceptedOpencodeVersionFor(requested, cli.version)) return null;
+  const support = opencodeGenerationSupport(requested);
+  const pin = support.pin ?? "none";
+  const accepted = support.acceptedVersions.join(", ") || "none";
+  const seen = cli.version ?? "(unparsed)";
+  return `opencode_generation_mismatch: installed opencode ${seen} is not an accepted ${requested} of ${support.packageName}@${pin} (accepted: ${accepted}). Provider and model stay in OpenCode's own config; this check does not apply an anet provider preset.`;
 }
 
 async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: number): Promise<RuntimeReadiness> {
@@ -238,6 +310,25 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
         }
       }
     }
+  }
+
+  // V2 chooses its provider/model in the node's own configuration. The V1
+  // Zen endpoint and auth-file probes cannot establish V2 readiness: an
+  // offline/LAN provider can work while opencode.ai is unreachable, and a
+  // reachable website does not prove model authentication. Keep this unknown,
+  // not ready. `accepted` only classifies the --version token against the pin
+  // table; create re-checks before writing a node.
+  if (runtime === "opencode-cli" && out.cli === "found" && /^2\./.test(out.version ?? "")) {
+    out.auth = "unknown";
+    out.network = "skipped";
+    out.generation = "v2";
+    const support = opencodeGenerationSupport("v2");
+    const accepted = !!out.version && isAcceptedOpencodeVersionFor("v2", out.version);
+    out.accepted = accepted;
+    out.reason = accepted
+      ? "检测到 OpenCode V2;provider、模型和登录取决于目标节点配置,不能用 opencode.ai 的连通性确认。创建时仍需校验准确版本、显式工具授权和启动结果"
+      : `检测到 OpenCode 2.x（${out.version ?? "未解析"}），不是本发行接受的 ${support.packageName}@${support.pin}；显式创建 v2 会被拒绝。provider 与模型仍用 OpenCode 自己的配置，本检查不套用 anet provider 预设`;
+    return out;
   }
 
   // ── 2. 登录(只看存在性)──
@@ -305,6 +396,10 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
       parts.push(`本机已有 ${out.shared_login_count} 个节点共用这个 codex 登录,新节点会加入同一条刷新链,其中一个刷新后其余可能被顶掉登录;建好后可用 \`anet node codex login-status\` 查看,并为新节点单独执行 codex login`);
     }
     out.reason = parts.length > 0 ? `可以创建。${parts.join(";")}` : "可以创建";
+  }
+  if (runtime === "opencode-cli" && out.cli === "found" && out.version && isAcceptedOpencodeVersionFor("v1", out.version)) {
+    out.generation = "v1";
+    out.accepted = true;
   }
   return out;
 }

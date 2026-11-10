@@ -1,0 +1,28 @@
+Hub125 version-only release preparation — TEST ONLY
+OBSERVED_AT=2026-10-11T15:06:03Z (23:06 Asia/Shanghai)
+Base feature49988af17647606136af52b1b703d6c681bb13fe, original PR2607.
+
+Changes only server/package.json, package-lock root and package-root versions,
+plus the exact Install/Upgrade release notes. Dependencies and CLI installation
+pin unchanged. Registry125 metadata HTTP404 and no125 tag observed before prep;
+this is not publication, nor permission to overwrite an existing future version.
+
+Independent existing Dockerfile:
+tests/test906-daemon-provider-management/Dockerfile.native; built image
+sha256:0db463cf7419991356bd3aa6308dd1d33c6ed499042b1c065075d2574b9073f2.
+Candidate tree mounted readonly at /src; node built-in fs/assert entrypoint,
+--rm --init --network none.10 metadata/name/dependency/note/pin assertions PASS,
+exit0. Native feature E2E remains separately recorded in report-test1020-hub-provider-ref.txt;
+this preflight does not rerun it or prove a packaged125 installation.
+
+Cleanup: container removed, no host/global package changes or production actions.
+Source and version still require ordinary main merge and the exact full40 formal
+release.yml package/install/notes/pin gates; branch artifacts are test-only.
+Activation, encrypted backup and rollback remain a distinct deployed-main change.
+
+Increment 2026-10-11T15:07:57Z: implementation PR2607 ordinarily merged main
+debef8033b37c488ca475bf77e38d3123535cca1 after required guards and native core.
+Cloud run38149405097/job114499511182 tested merge
+88f0b373f90c5d395a22ec3f9191ef1837287a4f (head49988af17):6/6,43 assertions,
+audience12/12,320 assertions and native same-thread reference/apply all PASS.
+Version-only commit restacked onto merged main; no feature code changed by prep.

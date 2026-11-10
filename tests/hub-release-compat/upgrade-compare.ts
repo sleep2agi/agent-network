@@ -32,7 +32,12 @@ check(c.health === 200 && sameIds(a, c), `rollback: ${O} on the ${N}-migrated da
 superset(a, c, `rollback ${N} → ${O} (vs original ${O} view)`);
 check(d.health === 200 && sameIds(b, d), `re-upgrade ${O} → ${N} again: same cards`);
 superset(b, d, `re-upgrade (vs first ${N} view)`);
-check(late.add_status === 200 && late.task_access === "all" && late.visible === late.of, `member added after the upgrade via the old-app request (no task_access): task_access=${late.task_access}, sees ${late.visible} of ${late.of} cards`);
+// .116 intentionally defaults NEW members to related-only (#2515). Existing
+// members must still retain their exact visibility in the checks above.
+const newMemberAccess = process.env.NEW_MEMBER_TASK_ACCESS ?? "all";
+check(newMemberAccess === "all" || newMemberAccess === "scoped", "new-member expectation is an explicit supported policy");
+const expectedVisible = newMemberAccess === "scoped" ? 0 : late.of;
+check(late.add_status === 200 && late.task_access === newMemberAccess && late.of === 3 && late.visible === expectedVisible, `member added after the upgrade via the old-app request (no task_access): expected=${newMemberAccess}, task_access=${late.task_access}, sees ${late.visible} of ${late.of} unrelated cards`);
 if (process.env.CHECK_BYTES === "1") {
   const same = a.list_sha_member === b.list_sha_member && a.list_sha_admin === b.list_sha_admin;
   check(same || (a.list_nocaps_member === b.list_nocaps_member && a.list_nocaps_admin === b.list_nocaps_admin && b.caps_added_ok),

@@ -43,6 +43,8 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   mark_tasks_consumed: { task_ids: ["task_probe"] },
   upsert_network_secret: { key: "PROBE_KEY" },
   update_provider: { provider_id: "prov_probe" },
+  schedule_batch_interval: { schedule_ids: ["sched_probe"], every_seconds: 60 },
+  select_opencode_session_model: { session_id: "ses_probe", model: { providerID: "stub", id: "model" } },
 };
 function fill(schema: any, key: string, ctx: Record<string, unknown>): unknown {
   if (!schema) return "probe";
@@ -118,6 +120,23 @@ describe("every tool is classified", () => {
   });
 });
 
+test("create_node source_ref fails MCP validation without minting or enqueueing", async () => {
+  const count = (table: string) => db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`)!.n;
+  const before = [count("node_create_requests"), count("api_tokens")];
+  const base = { daemon_node_id: "daemon_source_fixture", network_id: NET,
+    node_spec: { name: "source-fixture", runtime: "opencode-cli" } };
+  for (const source_ref of ["src_fixture", null, "", {}]) {
+    for (const args of [{ ...base, source_ref }, { ...base, node_spec: { ...base.node_spec, source_ref } }]) {
+      const { json } = await rpc(T.owner, "tools/call", { name: "create_node", arguments: args });
+      const text = String(json.result?.content?.[0]?.text ?? "");
+      expect(json.error?.code === -32602 || /^MCP error -32602/.test(text)).toBe(true);
+    }
+  }
+  expect([count("node_create_requests"), count("api_tokens")]).toEqual(before);
+  const ordinary = await rpc(T.owner, "tools/call", { name: "create_node", arguments: base });
+  expect(JSON.parse(ordinary.json.result.content[0].text).error).toBe("daemon_not_found");
+});
+
 describe("compat replay: nothing callable today disappears from the list", () => {
   const cases: Array<[string, string, string | null]> = [
     ["node (normal, log)", "node_normal", null], ["node (readonly)", "node_readonly", null], ["node (restricted)", "node_restricted", null],
@@ -162,7 +181,7 @@ describe("what each caller sees", () => {
 
   test("node modes: readonly / restricted drop broadcast + node writes + human-only; enforce drops human-only for normal nodes", async () => {
     const ro = new Set((await listTools(T.node_readonly)).names);
-    for (const n of ["broadcast", "update_node_config", "create_node", "upsert_provider"]) expect([n, ro.has(n)]).toEqual([n, false]);
+    for (const n of ["broadcast", "update_node_config", "create_node", "clone_node", "upsert_provider"]) expect([n, ro.has(n)]).toEqual([n, false]);
     for (const n of ["send_task", "requirements_update", "report_status", "get_all_status"]) expect([n, ro.has(n)]).toEqual([n, true]); // 看参数才拒的照列
     expect(new Set((await listTools(T.node_normal)).names).has("upsert_provider")).toBe(true); // log 模式:调得通,照列
     process.env.COMMHUB_NODE_PERMISSIONS = "enforce";
@@ -184,7 +203,48 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // 量出来(#478 合入时):全部 74 个工具 71,559 B;节点 52 个 57,632 B(−19%);人 56 个 54,780 B(−23%)。留 ~1.5 KB 余量。
   // Board #625 adds 2 human tools + 2 hidden daemon protocol tools. Measured:
   // all 78 / 73,969 B; user 58 / 56,615 B; node remains 52 / 58,320 B.
-  const CEILINGS = { node: 59_000, user: 57_500, all: 75_000 } as const;
+  // Board #733 adds 7 node-only schedule_* tools (user list unchanged). Measured before → after on the same run:
+  // node 52 / 58,836 B → 59 / 61,607 B (+2,771 B, ~396 B per tool of which ~180 B is SDK per-tool overhead —
+  // $schema + execution — after trimming schemas to bare field names; values are validated server-side);
+  // all 78 / 74,485 B → 85 / 77,256 B; user 58 / 56,834 B → 58 / 56,834 B. main had 164 B node headroom left,
+  // so any new node tool needs this; ceilings keep the same ~400–750 B margin.
+  // Review follow-up: descriptions / schemas cut further → node 59 / 61,100 B, all 85 / 76,749 B (−507 B each),
+  // leaving ≥ 700 B node margin even with #2488 (+116 B) merged.
+  // Board #822 adds confirmed fork fields, not tools. Same-image main 102dd0f2 → candidate:
+  // all 87 / 77,646 B → 78,976 B (+1,330); node 61 / 61,986 B → 62,368 B (+382);
+  // user 58 / 56,950 B → 57,163 B (+213). start_node adds 213 B, report_status 169 B;
+  // hidden pull/ack schemas account for the remaining 948 B. Keep strict receipt validation
+  // and unchanged audiences; budget only this measured addition (~130/520 B node/all margin).
+  // Board #654 adds report_status adoption_candidates (node-only schema, no new tool).
+  // Same tree, field removed → restored: all 87 / 79,078 B → 79,591 B (+513);
+  // node 61 / 62,433 B → 62,946 B (+513); user 58 / 57,228 B unchanged
+  // (report_status is not on the user list). Budget only this measured addition
+  // (~154/509 B node/all margin).
+  // #906 plus Hub #938 clone_node (all 91 / 81,228 B; node 62 / 63,281 B;
+  // user 60 / 58,169 B). OpenCode V2 catalog adds 2 user tools and 2 protocol
+  // tools. Measured on this combined tree: all 95 / 85,069 B; node 62 / 63,281 B
+  // unchanged (protocol tools stay off the node list); user 62 / 59,409 B.
+  // Ceilings keep about 400 B and nothing else.
+  // #1894（2026-10-23）：新增一个 `departments` MCP 工具（list/create/update/delete/
+  // assign_agent 合并成一个，尽量小）。实测 node 64,112 B / user 60,117 B，比原上限
+  // 分别高 412 / 279 B —— 这是有意的功能增长（组织架构可由 Agent 直接调），不是文案偷偷变长。
+  // 留约 400 B 余量；再要加工具时请先合并动作或砍描述，别连续抬上限。
+  // #2204（2026-10-25）：标签管理给 MCP。为了**不抬上限**，做了两件事：
+  //   ① 合并成一个工具 `requirement_tags`（action 分派 list/rename/merge/delete/color/reparent），
+  //      而不是 list + op 两个（照 #1894 `departments` 的先例）；
+  //   ② 砍掉一批冗长描述里重复的解释性从句（每条约 20–100 B，信息点全部保留）。
+  // 实测（含新工具）：all 97 / 86,020 B；node 64 / 64,464 B；user 64 / 59,680 B —— 三个上限**一个都没动**。
+  // 下次再加工具，请先合并动作或砍描述，不要直接改这三个数。
+  //
+  // #3294（2026-10-31）：report_status 新增 `build_commit`（节点侧的字节标识）。
+  // 第一次跑就撞上限：node 64,540 > 64,500（+40 B，全部来自那一句 describe）。
+  // 按上面那条规矩**不抬上限**，把描述从
+  //   "Build commit (hex, 7–40), from the packaged build-info.json"（63 字符）
+  // 压到 "Build commit (hex)"（19 字符）⇒ node 64,497 B，余量 **3 B**。
+  // ⚠️ 3 B 不是「刚好」，是**陷阱**：下一个人加一个字段名就会撞墙，而这条测试的失败会
+  //    读成「谁又把描述写长了」。所以下面把余量打出来，余量低于 100 B 时大声说一句。
+  const CEILINGS = { node: 64_500, user: 60_500, all: 86_500 } as const;
+  const MARGIN_FLOOR = 100;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);
@@ -193,5 +253,14 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
     expect(node.bytes).toBeLessThanOrEqual(CEILINGS.node);
     expect(user.bytes).toBeLessThanOrEqual(CEILINGS.user);
     expect(all.bytes).toBeLessThanOrEqual(CEILINGS.all);
+    // 余量也是读数：只报「没超」时，余量从 400 B 掉到 3 B 这件事是看不见的，
+    // 下一个人撞墙时才知道上限早就被吃干了。
+    const margins = { node: CEILINGS.node - node.bytes, user: CEILINGS.user - user.bytes, all: CEILINGS.all - all.bytes };
+    console.log(`margin B — node ${margins.node}; user ${margins.user}; all ${margins.all}`);
+    for (const [role, m] of Object.entries(margins)) {
+      if (m < MARGIN_FLOOR) {
+        console.log(`::warning::${role} 的 tools/list 余量只剩 ${m} B（< ${MARGIN_FLOOR}）—— 下一次加字段会先撞这里，请先砍描述或合并动作`);
+      }
+    }
   });
 });

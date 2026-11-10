@@ -38,7 +38,7 @@
 会坏，这正是 preview 通道存在的意义。
 
 - **codex-app-server**（RFC-030，Phase 0A）：刚修完一簇 Windows/派发 bug（#446/#447）；共存在真 Windows 验证过一轮——还没泡
-- **opencode-cli**（RFC-029）：仅 preview，`opencode-ai` 精确 pin
+- **opencode-cli**（RFC-029）：runtime 仍是 preview。默认代际是 V1（`opencode-ai` 精确 pin）。V2 创建路径在 preview 通道是真的（`@opencode/cli@2.0.22`，仅共存，必须 `--opencode-unsafe-tools`）；2026-10-11 的 npm `latest`（`2.3.0-preview.76`）还没有这条标志。#2574 的目录读取器未接到 daemon / Hub / 客户端。见 `docs/runbooks/opencode-tui-copresence.md` 与 [OpenCode V2](https://anet.sh/guide/opencode)
 - **grok-build-cli 共存**：preview
 - **Windows 支持整体**：修复只在 preview；`latest` 2.2.21 跨盘仍崩，等 2.2.22
 - Dashboard 聊天基础之外的面板（org 视图、配置编辑、M2+ 交互）

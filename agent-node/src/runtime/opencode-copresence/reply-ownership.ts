@@ -19,7 +19,7 @@
  * `text` part. Summary/compaction continuations are transparent links.
  */
 export interface OwnershipMessage {
-  info?: { id?: string; role?: string; parentID?: string; summary?: boolean };
+  info?: { id?: string; role?: string; parentID?: string; summary?: boolean; time?: { created?: number; completed?: number }; finish?: string };
   parts?: Array<{ type?: string; text?: string }>;
 }
 
@@ -95,6 +95,12 @@ export interface UnverifiedReplyError extends Error {
 function assistantReachesUser(history: OwnershipMessage[], userId: string): boolean {
   for (const message of history) {
     if (message?.info?.role !== "assistant") continue;
+    // Native V1 stores an assistant placeholder before the model replies.
+    // Its parent proves ancestry, not completion. A completed tool-call
+    // step also leaves this user turn running. Legacy owned fixtures without
+    // native time metadata retain their existing reply representation.
+    if (message.info.time && typeof message.info.time.completed !== "number") continue;
+    if (message.info.finish === "tool-calls") continue;
     if (ownershipChainVerdict(history, userId, message.info.parentID).accepted) return true;
   }
   return false;

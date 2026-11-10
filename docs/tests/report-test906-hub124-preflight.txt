@@ -1,0 +1,74 @@
+#906 / #907 Hub .124 activation preflight
+OBSERVED_AT=2026-10-11T13:37:18Z
+
+Software provenance
+- Published from main ad381202cbba00c80efc30522801dedd810fbbea.
+- Formal run https://github.com/sleep2agi/agent-network/actions/runs/38142238557
+  completed SUCCESS, including build, four gates, publish and registry verification.
+- Anonymous registry tarball equals formal artifact inner tarball byte for byte.
+- 1228117 bytes; SHA256 e4391276facfcd5908c9e773ee6e0898ce14402247458ca068e8ce4e6b1d9748.
+- Exact package and transitive dependency inputs are in deploy/hub/provider906/package*.json.
+
+Production preparation, not tests on production
+- Read-only health reports .122; PM2 commhub-hub PID 2824768 remains online.
+- Consistent SQLite VACUUM INTO backup: owner-only directory
+  $HOME/.commhub/backups/provider906-p124-s7X783/before.db, mode0600,
+  719638528 bytes, SHA256 e11023e42cb75ff9818aef127844aea04b8576f7ec932d1ab9cf55d949a79867.
+- Existing live vault key format checked boolean-only: valid 64-character hex.
+  No secret was printed, copied to tests or replaced; this is not vault decryption proof.
+- New inactive sibling $HOME/.commhub/runtime-v107-preview124 installed with
+  the exact lock using npm ci --ignore-scripts in pinned Docker, UID1000.
+  100 packages installed; previous runtime-v106-preview122 remains untouched.
+  No global npm changes, deployed launcher changes or PM2 restart in this preflight.
+
+Docker checks, simple to complex; all exits zero
+- Pinned node22.22.2-bookworm-slim digest
+  9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e.
+- Actual production Bun1.4.0 binary supplied read-only, SHA256
+  33d56b070be6a9e3da0ab013038b43d1645d0534ca811ecdba4472599117eb4b.
+- Offline zod4.6.5 supplied with original suite SHA512 assertion unchanged.
+- Launcher image ae53b4e9641e1f6316e190499666e0bf3ebb37540e6affbc7a5298eead791b44:
+  default .124, explicit .122 rollback and explicit side-thread=0 PASS.
+  Fake executor only; no Hub started in launcher check.
+- Schema image 53578b132e669de94176de30280dc60062f07ae7fa8490c91c8cdda6f35bfb58:
+  formal tarball SHA512, backup before/after integrity and row preservation PASS.
+  sessions320, tasks76490, nodes290, networks7, requirements1013,
+  api_tokens593, user_inbox2302 preserved.
+  Provider tables snapshots9, writes0, applications0, logins0,
+  hub_provider_configs0, hub_provider_bindings0 preserved; clone_json exists.
+  Existing login rows are now preserved against their before count rather than
+  assuming zero; all six Provider table counts are compared, not reset.
+- HTTP image 9ccd86b20f6400c4d4653ae0f0ff07c4a44d9eaa9de6cf4e92e5cbd72ec181d8:
+  installed .124 boots; anonymous401; disposable synthetic atok authenticated200;
+  all320 backup network session rows returned. No actual token or hub.env mounted.
+- Schema and HTTP have --network none, --read-only, tmpfs writable state;
+  no live database mount or exposed host port. HTTP exact child PID stopped;
+  all Docker checks used --rm, no persistent test process.
+
+Boundaries / next step
+- This is deployment-input validation, not actual production .124 activation.
+- Merge the profile/runbook through normal main review, deploy exact Git launchers,
+  retain old entry backups, then targeted commhub-hub restart and fresh health/fleet
+  receipts. No business-node restarts, model calls or production test dispatch.
+- Real vault use, OAuth entitlement, native installer and disaster recovery not proven here.
+
+Actual cutover increment, OBSERVED_AT=2026-10-11T13:42Z
+- PR2604 merged13:40:32Z, exact main fb2e5c81ac361d5554530af1925dae41542b5039;
+  required10/10 PASS and Hub deployment profile (Docker) PASS.
+- Exact main launcher copies installed0700 and cmp-equal to Git. Original entry
+  backups retained in the above owner-only backup directory; old v106122 retained.
+- At13:40:50Z only commhub-hub restarted, no --update-env. Actual listener9200
+  Bun PID3094572, PPID1613 existing PM2, cmdline selects runtime-v107-preview124.
+  Health .124, secured, sessions320; SSE113 after41seconds.
+- Fresh natural heartbeat receipts: daemon-dev13:41:42, daemon-vdev13:41:01,
+  storage13:41:00, TMAI dog13:41:02, client13:41:35, HR13:41:00 UTC.
+  Their runtime versions/inflight/queue remain independently reported; no business
+  process was restarted. Pre-existing TMAI owner offline since07:11:49 remains so.
+- Read-only task_events after cutover: two task.send.delivered and two task.started,
+  latest13:41:48. No new task.ack yet; not replaced with a production fixture.
+- Bounded latest200-line out/err windows: vault-key-missing/invalid and
+  panic/segfault/port-in-use match counts zero. No entire large log read is used
+  as evidence. No secret values output, no production model/Provider write test.
+- Initial observability attempts used a nonexistent tasks.acked_at column and
+  attempted whole-log string read: both failed read-only and changed no state.
+  Corrected to task_events and bounded tail; those failed reads are not PASS checks.

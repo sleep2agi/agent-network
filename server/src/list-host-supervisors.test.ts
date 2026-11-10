@@ -40,6 +40,7 @@ function cleanup() {
   try { db.run("DELETE FROM users WHERE user_id LIKE 'u_lhs_%'"); } catch {}
 }
 
+// Each case starts empty; plain INSERT keeps these fixtures portable to PostgreSQL.
 beforeEach(cleanup);
 afterAll(cleanup);
 
@@ -52,7 +53,7 @@ function seedUser(user_id: string) {
 }
 function seedNetwork(net_id: string, owner_id = "u_lhs_owner") {
   db.run(
-    `INSERT OR REPLACE INTO networks (network_id, network_name, owner_id, created_at)
+    `INSERT INTO networks (network_id, network_name, owner_id, created_at)
      VALUES (?1, ?2, ?3, datetime('now'))`,
     [net_id, net_id, owner_id],
   );
@@ -81,7 +82,7 @@ function seedDaemon(opts: {
     allowed_secret_keys: opts.secrets ?? [],
   });
   db.run(
-    `INSERT OR REPLACE INTO nodes (
+    `INSERT INTO nodes (
       node_id, node_name, alias, network_id,
       runtimes_supported, allowed_secret_keys,
       config_snapshot, hostname,
@@ -95,14 +96,14 @@ function seedDaemon(opts: {
   if (opts.sessionAgeMs !== undefined) {
     const ts = new Date(Date.now() - opts.sessionAgeMs).toISOString().replace("T", " ").replace(/\..+/, "");
     db.run(
-      `INSERT OR REPLACE INTO sessions (resume_id, alias, network_id, last_seen_at, status, cpu_cores, mem_total_gb, ip)
+      `INSERT INTO sessions (resume_id, alias, network_id, last_seen_at, status, cpu_cores, mem_total_gb, ip)
        VALUES (?1, ?2, ?3, ?4, 'idle', 8, 16, '10.0.0.5')`,
       [`s_${node_id}`, opts.alias, opts.network_id, ts],
     );
   }
   if (opts.mintToken !== false && !opts.tokenDeleted) {
     db.run(
-      `INSERT OR REPLACE INTO api_tokens (token_id, user_id, network_id, scope, name, token_hash, expires_at, revoked_at)
+      `INSERT INTO api_tokens (token_id, user_id, network_id, scope, name, token_hash, expires_at, revoked_at)
        VALUES (?1, ?2, ?3, 'network', ?4, ?5, NULL, ?6)`,
       [`tok_${node_id}`, `u_seed_${node_id}`, opts.network_id, `node:${opts.alias}`,
        `hash_${node_id}`,
@@ -180,6 +181,16 @@ describe("list_host_supervisors HANDLER tests (RFC-026 §9.2, PR2 v2)", () => {
     const handler = buildToolHandler(userA);
     const reply = await callList(handler, { network_id: NET_ALPHA });
     expect(reply.ok).toBe(true);
+    // 2026-10-31 —— **精确键集**（#3171）：这条响应此前只断言了 daemons[].alias，
+    // 于是「多给一个顶层键」不会被发现 —— 而这是个按网络隔离的列表，多给一格就是泄露。
+    // 实际三键（我第一版漏了 count —— 断言当场纠正）。
+    // ⚠️ 这条预期值来自**实现**（读实际响应），不是来自规格 —— 它是变更探测器，不是契约。
+    //    契约来源是 RFC-026 §P2-A 的验收行（`count=2`）与它的示例；
+    //    2026-10-31 实测发现**两份不一致**（示例漏了 count），已把示例补上。
+    //    ⇒ 判据：一条键集断言的依据必须能指到「哪一份规格/哪一次观测」；
+    //      指不到，它只能防变化，不能证明正确。
+    expect(Object.keys(reply).sort()).toEqual(["count", "daemons", "ok"]);
+    expect((reply as any).count).toBe(2);        // 与 RFC §P2-A 的验收行同值
     const aliases = (reply.daemons ?? []).map(d => d.alias).sort();
     expect(aliases).toEqual(["alpha-daemon-1", "alpha-daemon-2"]);
   });

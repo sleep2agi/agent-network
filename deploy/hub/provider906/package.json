@@ -1,0 +1,8 @@
+{
+  "name": "commhub-runtime-provider906",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@sleep2agi/commhub-server": "0.9.0-preview.137"
+  }
+}

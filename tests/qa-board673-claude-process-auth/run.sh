@@ -11,7 +11,10 @@
 # continue-before-abort, continue-before-catch, and a /* */ around the
 # abort branch leave the pinned text in place. m8 gates that if with
 # false. abort-first moves the attempt threshold in claude-auth-retry.ts.
-# All five still change what the user is told.
+# retry-first lets the outer retry loop run before the auth stop, so a
+# 403 is asked again. drop-login-dead still returns the login sentence
+# but never sticks the idle hint. All seven change what the user is told
+# or what the node reports.
 set -uo pipefail
 
 # Mutations rewrite cli.ts in the tree. A killed host run would leave
@@ -287,14 +290,16 @@ assert_query_once() {
   fi
 }
 
-assert_upstream_cap() {
+assert_auth_upstream() {
   local label="$1" n
   n=$(capture_count upstream)
   n=${n:-0}
-  if [[ "$n" -le 3 ]]; then
+  # Two 401s, then the abort returns. The third upstream is the request
+  # the product must not let through. <=3 hid that.
+  if [[ "$n" == "2" ]]; then
     ok "$label upstream requests=$n"
   else
-    bad "$label upstream requests=$n want <= 3"
+    bad "$label upstream requests=$n want 2"
     cat "$CAPTURE" >&2 || true
   fi
 }
@@ -355,7 +360,7 @@ if run_turn auth "board673 auth $(date +%s%N)"; then
     tail -40 "$NODE_LOG" >&2 || true
   fi
   assert_query_once auth
-  assert_upstream_cap auth
+  assert_auth_upstream auth
   assert_fast auth
   assert_login_dead
 else
@@ -423,6 +428,18 @@ anchors_for() {
         && ! grep -F 'if (attempt >= 2) {' "$HELPER" >/dev/null \
         && anchors_still_present
       ;;
+    retry-first)
+      grep -F 'if (thrown.action === "stop" && attempt >= CLAUDE_MAX_RETRIES) {' "$CLI" >/dev/null \
+        && [[ "$(grep -cF 'if (thrown.action === "stop") {' "$CLI")" -eq 0 ]] \
+        && grep -F 'if (authDecision.action === "abort") {' "$CLI" >/dev/null \
+        && grep -F 'authAbortedThisAttempt = true;' "$CLI" >/dev/null
+      ;;
+    drop-login-dead)
+      anchors_still_present \
+        && grep -F 'aborting the attempt' "$CLI" >/dev/null \
+        && [[ "$(grep -cF 'markClaudeLoginDead();' "$CLI")" -eq 1 ]] \
+        && grep -F 'if (thrown.markLoginDead) markClaudeLoginDead();' "$CLI" >/dev/null
+      ;;
     *)
       anchors_still_present
       ;;
@@ -430,7 +447,7 @@ anchors_for() {
 }
 
 witness_red() {
-  local mode="$1" file="$2" scenario="$3" label="$4" rc=0 got
+  local mode="$1" file="$2" scenario="$3" label="$4" settle="${5:-0}" rc=0 got
   note "RED $mode"
   restore_product
   if ! bun "$TEST_DIR/mutate.mjs" "$file" "$mode"; then
@@ -444,7 +461,7 @@ witness_red() {
     return
   fi
   ok "$mode left the pinned decision in place"
-  run_turn "$scenario" "board673 $mode $(date +%s%N)" 0 || rc=$?
+  run_turn "$scenario" "board673 $mode $(date +%s%N)" "$settle" || rc=$?
   got=$(read_reply)
   if [[ "$rc" -eq 10 || "$rc" -eq 11 ]]; then
     bad "$mode node never took the task (rc=$rc) — not a behavior miss"
@@ -454,6 +471,19 @@ witness_red() {
       ok "witnessed red — $mode did not deliver the login sentence (rc=$rc)"
     else
       bad "$mode stayed green: $got"
+    fi
+  elif [[ "$label" == "login-dead" ]]; then
+    local status task
+    status=$(jq -r '.status // empty' "$WORK/status.json" 2>/dev/null || true)
+    task=$(jq -r '.task // empty' "$WORK/status.json" 2>/dev/null || true)
+    if [[ "$rc" -ne 0 || "$got" != *"$LOGIN_TEXT"* ]]; then
+      bad "$mode did not finish the auth reply (rc=$rc): ${got:-<none>}"
+    elif [[ "$status" == "error" && "$task" == *"$LOGIN_HINT"* ]]; then
+      bad "$mode stayed green: status still login-dead"
+    elif [[ "$status" == "idle" && "$task" != *"$LOGIN_HINT"* ]]; then
+      ok "witnessed red — $mode did not stick the login-dead status (status=$status)"
+    else
+      bad "$mode status was not a clean miss: status=${status:-empty} task=${task:-empty}"
     fi
   elif [[ "$label" == "recover" ]]; then
     if [[ "$rc" -ne 0 || "$got" != *BOARD673_RECOVERED_OK* || "$got" == *"$LOGIN_TEXT"* ]]; then
@@ -476,6 +506,8 @@ witness_red continue-catch "$CLI" region region
 witness_red comment-abort "$CLI" auth auth
 witness_red m8 "$CLI" auth auth
 witness_red abort-first "$HELPER" recover recover
+witness_red retry-first "$CLI" region region
+witness_red drop-login-dead "$CLI" auth login-dead 1
 
 if ! cmp -s "$WORK/cli.ts.orig" "$CLI" || ! cmp -s "$WORK/retry.ts.orig" "$HELPER"; then
   bad "product sources were not restored"

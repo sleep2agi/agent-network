@@ -9,6 +9,8 @@
 
 import { isReservedEnvKey } from "./shared/reserved-env.js";
 import { checkNodeName } from "./shared/node-name.js";
+import { CODEX_CONFIG_ONLY_FLAG_KEYS, validateCodexConfigFlag } from "./codex-config-flags.js";
+import { validProviderInitialization } from './shared/provider-initialization.js';
 
 export class ValidationError extends Error {
   constructor(public code: string, public detail?: Record<string, unknown>) {
@@ -52,7 +54,12 @@ export type Runtime = typeof RUNTIMES[number];
 // 🔴 故意放在 flags 里而不是 node_spec 顶层:老 hub 的 zod 会静默丢弃未知顶层字段、老 daemon 也静默忽略
 //    —— 那正是 #584 的形状(用户选了共存,拿到无头节点,没有任何报错)。flags 的未知键在老 hub(这份
 //    FLAG_KEYS)和老 daemon(buildAnetArgsDaemon)都**拒绝**,新 app 撞到老组件得到的是一条报错。
-export const FLAG_KEYS = ["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence"] as const;
+export const FLAG_KEYS = [
+  "permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout",
+  "copresence", "opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer",
+  "approvalPolicy", "sandboxMode", "skipGitRepoCheck", "copresenceFullAccess", "modelReasoningEffort",
+  "daemonProvider",
+] as const;
 
 /** #584 —— 只有这些 runtime 认 `flags.copresence`。目前只有 codex-app-server 的共存靠 config 字段
  *  (`codexCopresence`)决定;grok-build-cli / opencode-cli 各有自己的字段,接进来之前一律拒,不静默吞。 */
@@ -137,6 +144,16 @@ export function isValidTimeoutMs(v: unknown): v is number {
 
 export function validateFlagValue(k: string, v: unknown): void {
   switch (k) {
+    case 'daemonProvider':
+      if (!validProviderInitialization(v)) throw new ValidationError('flag_value_invalid', { field: k });
+      return;
+    case "opencodeGeneration":
+      if (v !== "v1" && v !== "v2") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be v1 or v2" });
+      return;
+    case "opencodeUnsafeTools":
+    case "opencodeNewServer":
+      if (typeof v !== "boolean") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be boolean" });
+      return;
     case "permissionMode":
       if (typeof v !== "string" || !(PERMISSION_MODES as readonly string[]).includes(v)) {
         throw new ValidationError("flag_value_invalid", { field: k, reason: "must be one of default/acceptEdits/plan/bypassPermissions" });
@@ -164,6 +181,11 @@ export function validateFlagValue(k: string, v: unknown): void {
       if (typeof v !== "boolean") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be boolean" });
       return;
     default:
+      if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) {
+        const fail = validateCodexConfigFlag(k, v, null);
+        if (fail) throw new ValidationError("flag_value_invalid", { field: k, reason: fail.reason });
+        return;
+      }
       throw new ValidationError("flag_key_unknown", { field: k });
   }
 }
@@ -171,10 +193,61 @@ export function validateFlagValue(k: string, v: unknown): void {
 /** #584 —— 逐键校验之外的跨字段一条:`copresence` 只对 COPRESENCE_FLAG_RUNTIMES 有意义。
  *  在别的 runtime 上收下它而什么都不做,就是又一个「选了共存、拿到无头」。 */
 export function validateFlagsForRuntime(runtime: string, flags: Record<string, unknown> | undefined | null): void {
-  if (!flags || !Object.prototype.hasOwnProperty.call(flags, "copresence")) return;
-  if (!(COPRESENCE_FLAG_RUNTIMES as readonly string[]).includes(runtime)) {
+  if (!flags) return;
+  if (flags.daemonProvider !== undefined && (runtime !== 'codex-app-server' || flags.copresence !== true)) {
+    throw new ValidationError('flag_not_applicable_to_runtime', { field: 'daemonProvider', runtime, applicable: ['codex-app-server copresence'] });
+  }
+  // Strict flags envelope: old Hub/daemon reject these keys rather than dropping
+  // unknown node_spec fields. Opt-in must be explicit on this create request.
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer"]) {
+    if (!Object.prototype.hasOwnProperty.call(flags, field)) continue;
+    validateFlagValue(field, flags[field]);
+    if (runtime !== "opencode-cli") throw new ValidationError("flag_not_applicable_to_runtime", { field, runtime, applicable: ["opencode-cli"] });
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "opencodeUnsafeTools") && flags.opencodeGeneration !== "v2") {
+    throw new ValidationError("opencode_unsafe_requires_v2", { reason: "opencodeUnsafeTools requires explicit opencodeGeneration=v2" });
+  }
+  if (flags.opencodeGeneration === "v2" && flags.opencodeUnsafeTools !== true) {
+    throw new ValidationError("opencode_v2_requires_unsafe_opt_in", { reason: "V2 preview enables every local tool; trusted tasks only. Explicit opencodeUnsafeTools=true required." });
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "opencodeNewServer") && flags.opencodeGeneration !== "v2") {
+    throw new ValidationError("opencode_new_server_requires_v2", { reason: "opencodeNewServer requires explicit opencodeGeneration=v2" });
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "copresence") && !(COPRESENCE_FLAG_RUNTIMES as readonly string[]).includes(runtime)) {
     throw new ValidationError("flag_not_applicable_to_runtime", {
       field: "copresence", runtime, applicable: [...COPRESENCE_FLAG_RUNTIMES],
+    });
+  }
+  for (const [k, v] of Object.entries(flags)) {
+    if (!CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
+    const fail = validateCodexConfigFlag(k, v, runtime);
+    if (fail) throw new ValidationError("flag_value_invalid", { field: k, reason: fail.reason });
+  }
+}
+
+/**
+ * V2 co-presence start requires OpenCode's own `provider/model`.
+ * Call only after the unsafe-opt-in check: a missing opt-in stays
+ * `opencode_v2_requires_unsafe_opt_in`. This API does not take an anet
+ * provider preset or a vault key (#2565 owns presets).
+ */
+export function validateOpenCodeV2ProviderModel(
+  runtime: string,
+  model: unknown,
+  flags: Record<string, unknown> | undefined | null,
+): void {
+  if (runtime !== "opencode-cli" || !flags || typeof flags !== "object") return;
+  if (flags.opencodeGeneration !== "v2" || flags.opencodeUnsafeTools !== true) return;
+  const native = typeof model === "string"
+    && model.length > 0
+    && model.length <= 100
+    && MODEL_RE.test(model)
+    && !MODEL_DOT_ONLY_SEGMENT.test(model)
+    && model.includes("/")
+    && model.indexOf("/") === model.lastIndexOf("/");
+  if (!native) {
+    throw new ValidationError("opencode_v2_requires_provider_model", {
+      reason: "OpenCode V2 uses the installed OpenCode provider/model (exactly one slash, for example provider/model). This API does not take an anet provider preset.",
     });
   }
 }
@@ -318,10 +391,15 @@ function kebab(k: string): string {
 // shell, no string concat). Each value has already passed type/enum
 // validation, so String() coercion is safe.
 export function buildAnetArgs(spec: NodeSpec): string[] {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+    if (Object.prototype.hasOwnProperty.call(spec, field)) throw new ValidationError("flag_location_invalid", { field, reason: "use node_spec.flags" });
+  }
   validateName(spec.name);
   validateRuntime(spec.runtime);
   validateModel(spec.model);
   validateChannelsP1(spec.channels);
+  if (spec.flags?.daemonProvider !== undefined && (!validProviderInitialization(spec.flags.daemonProvider)
+    || spec.model !== spec.flags.daemonProvider.model)) throw new ValidationError('provider_create_model_mismatch');
 
   const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
   if (spec.model) args.push("--model", spec.model);
@@ -333,9 +411,13 @@ export function buildAnetArgs(spec: NodeSpec): string[] {
       validateFlagValue(k, v);
       // `anet node create --copresence` 是布尔开关,不吃值。
       if (k === "copresence") { if (v === true) args.push("--copresence"); continue; }
+      if (k === "opencodeUnsafeTools") { if (v === true) args.push("--opencode-unsafe-tools"); continue; }
+      if (k === "opencodeNewServer") { if (v === true) args.push("--opencode-new-server"); continue; }
+      if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k) || k === 'daemonProvider') continue;
       args.push(`--${kebab(k)}`, String(v));
     }
     validateFlagsForRuntime(spec.runtime, spec.flags);
   }
+  validateOpenCodeV2ProviderModel(spec.runtime, spec.model, spec.flags);
   return args;
 }

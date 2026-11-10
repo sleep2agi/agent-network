@@ -1,0 +1,68 @@
+Hub #539 / #832: registry and close-cleanup stack after main CLI landing
+2026-10-09 17:01 CST (UTC+08:00). Test evidence, NOT a release/deployment.
+
+Exact tested source: 8bb8407d49c840dab85d37eebfc1ddf48ec79461.
+Merged main 402b796ba3a6d966ace02e189a8784271c7fd24c into PR #2550.
+Only qa.yml conflicted: retained test827/test828/test832 in both trigger paths
+and matrix. Relative to prior head54dac560 only workflow ordering and main's
+test827 report changed. Relative to main, CLI graceful drain remains additional
+product code, so registry/helper tests alone cannot accept the whole stack.
+
+Fresh test832 Docker build: tests/test832-opencode-v2-registry/Dockerfile
+SOURCE_COMMIT and EXPECTED_SOURCE_COMMIT = full tested SHA above.
+Image anet-test832:restack-8bb
+sha256:e15b53b6fb631ec4f1e2b98020d5ae693442b6b42efa9e87e3e6c42b1d0b1af4
+Container anet-test832-restack-8bb, --network none, no source mounts, exit0.
+69 tests /336 assertions, package build, three cold first-turn MCP dispatch /
+stable sender-recipient identity / terminal receipt cases (0/1200/3500ms).
+Wrong-node token witnessed-red; sender spoof refused without write. Missing
+tool, MCP auth refusal and deadline negatives stop before model usage.
+Raw /artifacts/report-test832-runtime.txt plus per-case artifacts and logs.
+
+Fresh test827 Docker build: tests/test827-opencode-v2-hub/Dockerfile
+SOURCE_COMMIT and EXPECTED_SOURCE_COMMIT = full tested SHA above.
+Image anet-test827:restack-8bb
+sha256:03a0f9be0d52010d2f776f6fd4086815e7afef469736d1ca0dcc672ebfa0a238
+Container anet-test827-restack-8bb, --network none, no source mounts, exit0.
+45 CLI tests /198 assertions;69 runtime tests /336 assertions.
+All native CLI/Hub/TUI layers pass: response-only TUI marker, human ordering,
+provider error/recovery, unauthorized restart preserves live generation,
+stop removes processes/observer/launcher, cold safe-mode refusal.
+Post-exit docker diff contains no .anet-opencode-launch entry.
+Raw /artifacts/report-test827.txt and redacted TUI/bridge logs retained.
+
+CPU1 test543: source-overlay verification, NOT a fresh built image.
+Fresh build was deliberately cancelled during export (exit130) when shared
+disk space fell below3GB. It never ran tests; not a product failure or pass.
+Existing dependency image pinned to
+sha256:4c814b569352a163c810e14678e89b33fada50f803e8c381b85affe4c09da8e9;
+read-only clean tested checkout mounted /source, full agent-node and test543
+source copied inside container over dependency image. No host source edits.
+Container anet-test543-restack-8bb-overlay-cpu1, --cpus1 --network none, exit0.
+41 tests /153 assertions and all native layers pass, including draining
+descendant and removal of tracked private launch root/registry observer.
+Post-exit docker diff contains no .anet-opencode-launch entry.
+Raw /tmp/art/report-test543.txt and container logs retained. This does not
+substitute for final-head CI's clean test543 Docker build.
+
+Resource protection: shared disk reached418MB free after concurrent builds.
+Only seven explicitly resolved, reclaimable, unshared records from this
+cancelled test543 build were removed: jj0rnbxzj2xaerlvu49fbdmsw,
+wj0zeo2jctwpekmlogpo04is3, qp7ny81bulj1gkuj2clqxllwh,
+kmklrhd6ohqwu6lrqbqy80buy, 70bru40p6gxfzs53xhrxy8vs4,
+3c8828ej1fybh4uuujx471zvo, j7zmul6xdvyqoivsrtkok3stu.
+Docker reports2.719GB reclaimed; disk returned to3GB free. No broad prune,
+test container/image deletion, user-data deletion or production restart.
+Cancelled build caches are reproducible from its repository Dockerfile.
+
+Registry PR #2549 landed at17:00:41 CST after161 successful checks, merge
+9507196b2b8ed851630f4facb960738b97e90d68; fetched-main ancestry verified for
+head ffab30867860f3164f451854a77949a50751550c. Its standalone close-cleanup
+gap remains a release gate until companion PR #2550 lands. #2550 final-head
+CI and main-base review remain required. Client #785 has17 successful checks
+and1 skipped; no native desktop acceptance inferred.
+
+Explicit unsafe-tools preview only; loopback deterministic model, not paid
+provider quality or native Windows/macOS acceptance. Recovery authority:
+docs/runbooks/opencode-tui-copresence.md and opencode-v2-registry-readiness.md.
+No new service/port/proxy/secret/data change or full backup-restore claim.

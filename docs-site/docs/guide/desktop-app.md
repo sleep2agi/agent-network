@@ -2,7 +2,7 @@
 
 Agent Network 桌面应用(macOS / Windows)是给**人**用的那一端:登录一个 Hub,看到网络里所有 Agent,像聊天一样派任务、收回复、传文件。它和手机端是同一份源码,连的是同一个 Hub。
 
-下载与版本说明见[首页](/);本页只讲怎么用。
+下载与版本说明见[下载页](/download);本页只讲怎么用。
 
 ## 账号与 Hub
 
@@ -48,17 +48,17 @@ macOS / Windows 上,点「设置」,或按 macOS 的 ⌘, / Windows 的 Ctrl+,,�
 
 ## 手机应用，以及浏览器里的 Dashboard {#dashboard-shells}
 
-桌面和 Android 是同一份 Agent Network 应用,连的是同一个 Hub。Android 安装包从[首页](/)下载(线路一是国内 ModelScope,线路二是 GitHub)。iOS 只走 TestFlight,公开链接还没开;审计用的 `.ipa` 不能直接侧载。
+桌面和 Android 是同一份 Agent Network 应用,连的是同一个 Hub。Android 安装包从[下载页](/download)获取(线路一是国内 ModelScope,线路二是 GitHub)。iOS 只走 TestFlight,公开链接还没开;审计用的 `.ipa` 不能直接侧载。
 
 不装这个应用,也可以用浏览器打开 [Dashboard](/guide/dashboard)。
 
-Dashboard 仓库里还有几种**薄壳**(源码在 [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard),权威文档是那个仓的 `docs/mobile-app.md`)。它们包的是 Dashboard 网页,不是首页提供的桌面或 Android 安装包,也不重新实现认证、数据和实时推送,所以要先有一个手机够得到的 Dashboard 地址。
+Dashboard 仓库里还有几种**薄壳**(源码在 [sleep2agi/agent-network-dashboard](https://github.com/sleep2agi/agent-network-dashboard),权威文档是那个仓的 `docs/mobile-app.md`)。它们包的是 Dashboard 网页,不是[下载页](/download)提供的桌面或 Android 安装包,也不重新实现认证、数据和实时推送,所以要先有一个手机够得到的 Dashboard 地址。
 
 - **PWA**:用 **HTTPS** 打开 Dashboard,浏览器会提供「安装到主屏 / 安装为应用」。HTTP 不行(PWA 需要安全上下文),`http://127.0.0.1` 本机调试除外。
 - **自己编译的 Capacitor 壳**:WebView,需要 Xcode 或 Android Studio。手机到不了电脑的回环地址,要显式给一个它够得到的 HTTPS 地址:`export ANET_DASHBOARD_URL="https://your-dashboard.example.com"`。
 - **Electron 桌面壳**:在 dashboard 仓里 `npm run app:desktop`。它和本页的桌面应用不是一回事。
 
-怎么选:日常使用 → 首页的桌面或 Android 安装包;只在浏览器里看 Dashboard → PWA;要自己包一层网页壳 → dashboard 仓的 Capacitor 或 Electron。
+怎么选:日常使用 → [下载页](/download)的桌面或 Android 安装包;只在浏览器里看 Dashboard → PWA;要自己包一层网页壳 → dashboard 仓的 Capacitor 或 Electron。
 
 ## 相关
 

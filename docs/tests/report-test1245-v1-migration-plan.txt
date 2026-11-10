@@ -1,0 +1,150 @@
+TEST-ONLY: #1245 readonly V1 migration review plan; necessary CI fixture corrections
+Date: 2026-10-14
+
+Scope
+-----
+Readonly API proposal for an independently selected original owned V1 config,
+checkpoint, native version and full identity, and independently selected target
+Host/cohort/model/directory/session/history. No config/intent commit, live import,
+final checkpoint, writer exclusion, real credential copy or public CLI migration.
+The owned core fixture explicitly uses a persistent private directory and denied
+built-ins. It does not qualify default owned SAFE-wrapper migration: that wrapper
+uses an external temporary workspace and filters custom provider package/baseURL.
+Directory mismatch refuses; no unsafe flag or implicit remapping bypass.
+
+Source provenance
+-----------------
+Source PR: https://github.com/sleep2agi/agent-network/pull/2752
+Final head: 43c1f9efcd5ec92569ef8a41fba783b4230ac1c5
+CI checkout: a1dd49e6b7311b7cccfe895e31c332de14ffbe26
+CI tree: 1635472504d07cd8f8113c283716b8800751a251
+Ordinary source main: 5ec1f0d385f60251cb2c1735c78ab2c11ba339b9
+Merged: 2026-10-14T14:59:12Z; fresh main ancestry verified.
+Actual main tree equals the CI tree above.
+Final PR rollup: 3 CANCELLED / 1 FAILURE / 173 SUCCESS. All ten protected checks PASS.
+Only after all relevant gates passed, the three remaining broad report-only
+jobs in this own PR/head were cancelled; cancellation is not a PASS.
+The unrelated launch-window report gate remains FAILURE (see below).
+Exact native wrapper/platform SRIs: tests/test1194-v1-shared-feasibility/package-integrity.json
+Pinned Bun 1.3.14/non-root Docker; native fixture runtime network disabled,
+synthetic loopback model only. No local tests, real nodes, login or live history.
+
+Dual native qualification
+-------------------------
+Run 38583114774: SUCCESS at final head; both complete artifacts read.
+1.18.1 job 115917916196: SUCCESS, 14 inherited unit / 0 fail, 6 native checks.
+Artifact 11903982900 SHA256 5388dc74f278a1adb6896ea03bda7dd62fc69669033b148a96b26125d4bd44f7
+1.18.34 job 115917916322: SUCCESS, 14 inherited unit / 0 fail, 6 native checks.
+Artifact 11903673005 SHA256 98ae468af2931154740d033cde89d9769f1a1b18ee28da6f57ea31b799246306
+Both reports stamp the exact CI checkout above and six-check JSON PASS.
+The unit set is eight existing shared-capture plus six existing checkpoint cases,
+not fourteen new isolated plan tests. Six actual native checks per version:
+1. Owned core explicit safe persistent directory produces exact native session
+   and a nonfinal checkpoint from an actual synthetic model reply.
+2. Fresh offline target import before its Server starts, exact native history
+   readback and readonly plan retaining original identity/model/version.
+3. Independent source identity fields, wrong cohort/requested SHA/cross-version
+   and extra credential-like source/Host metadata refuse.
+4. Borrowed selection/readiness/TUI intents and unknown lease residues refuse
+   and remain intact; the API never clears them.
+5. Controlled source config change, target history/policy and unknown MCP refuse.
+   Intercepted negative responses are not real native concurrent human races.
+6. Original config/checkpoint, target registry/password and project bytes stay
+   exact; original owned session and selected Host/B still produce model replies.
+The result has proposal-only state, finalCheckpointProven=false and
+writerExclusionProven=false. Requested software SHA is not a main/installed proof.
+
+Complete regression and ratchet
+-------------------------------
+Final43c QA38583114561/job115918910227 SUCCESS:2917 pass/2skip/0fail,
+2919 tests across231files,218.53s; auxiliary66/0 and five runner groups/0.
+Typecheck38583114449/job115917916652 ratchetSUCCESS:81 existing/81 baseline,
+actual tsc exit2. Mutation pins38583114406/job115917915563 SUCCESS.
+E2E38583114770/job115917917171 and rename115917917980 SUCCESS.
+Artifact11904981192 SHA2566fec20e7d2c54f9990deb343141d55eb6767a51c6aca128b643f1dd3a94ebd99.
+All eight full logs read; seven groups139+25+28+16+22+12+47=289/0.
+Aggregate test-all.log is not a separate eighth group.
+Previous head 8b2cd930a664edeb951d08a1203ccaaa63c8d07d separately passed:
+QA 38577723136 original attempt1 job 115900030249: 2917 pass/2 skip/0 fail,
+2919 tests across 231 files, 218.30s; auxiliary 66/0 and five runner groups/0.
+E2E 38577723244/job115899136222 and rename companion115899135767 SUCCESS;
+eight downloaded logs, seven groups 139+25+28+16+22+12+47=289/0. Aggregate
+test-all.log is not an eighth group. These are previous-head evidence only.
+Typecheck38577723189/job115899149807: ratchet81 existing/81 baseline,
+actual tsc exit2. Success does not mean zero TypeScript diagnostics.
+
+Necessary legacy CI fixture corrections (#1247, #1249)
+------------------------------------------------------
+No production sender/auth/reply/steer/watchdog guard changes. Four fixtures used
+user tokens from registered users while declaring another Dashboard sender.
+519/698 now share the registered Owner alias with send_task/reply-inbox and
+zero-new-task assertions. Historical NULL-target/admin seed semantics remain.
+1191/watchdog register/login/send using the same run-specific Owner alias.
+Baseline and witnessed mutation expectations are unchanged.
+Final43c QA38583114561 actual baseline + original mutation gates:
+519 job115918916498 SUCCESS, five mutation REDs and RESULT:PASS.
+698 job115918916510 SUCCESS,28 mutation REDs and RESULT:PASS.
+1191 job115918924009 SUCCESS, four mutation REDs and RESULT:PASS;
+Linux real Hub+built agent-node+fake Codex steers normal/high into one human
+turn with zero extra turn/start and one HOME/remote/thread. Not real Windows.
+Watchdog job115918924004 SUCCESS, nine mutation REDs and TESTWD PASS;
+actual Linux Hub/CLI/built node with fake Codex, bounded restart/degradation,
+hung/foreign-process and recovery cases. Not a user-machine restart test.
+Earlier35bef903b QA38575067819:519/job115890726334 and698/job115890726312
+failed from_session_identity_mismatch (test519-owner/test698-owner vs admin).
+Candidate/base server/src/tools.ts matched blob237d83458caff660957df67b6622b267a94e4f49;
+no separate baseline CI run was performed, so no claimed independent base PASS.
+Head8b:519/job115900038322 actually completed SUCCESS around cancellation:
+baseline and five witnessed mutation REDs. Do not rerun a healthy gate.
+698/job115900038300 cancelled before execution; job-specific rerun created
+attempt2, whose actual fanout included other jobs. New43c push superseded it
+under existing workflow concurrency. Neither cancelled attempt is a PASS.
+Head8b1191/job115900046358 FAILURE: registeredt1191baseline vs t1191-linux.
+Watchdog/job115900046569 overallCANCELLED but build stepFAILURE:
+registeredtwdbaseline vs twd. Preserve the failure inside the cancelled job.
+
+Earlier native REDs and topology gap
+------------------------------------
+72b6053a native38573453123/jobs115884338759,115884339068:14unit/0fail each,
+then fixture lacked /run/user/1000 for owned safe-runtime roots; no plan executed.
+6221fc600 native38573670294/jobs115885084478,115885085204 remained RED.
+0cc833db native38573913743/jobs115885915192,115885915711: roots corrected,
+then first normal SAFE-wrapper synthetic model POST returned HTTP500 before plan.
+No precise native error body was obtained. Source review demonstrated external
+temporary workspace and provider npm/baseURL filtering; do not claim the HTTP500
+body's exact cause or qualify normal CLI migration from a different core fixture.
+35bef903b native38575067920 and8b native38577723048 passed both API-core versions;
+final43c was separately qualified above. No healthy native run manually rerun.
+
+Separate existing launch-window red (#1250)
+------------------------------------------
+QA38583114561/job115918923788 FAILURE at final43c. Artifact11904224309
+SHA2564864b06869897c996993a2f46169eda568d25306661ba5d504eea3f82b81b60d.
+probe44 expected TUI session mismatch, got missing or unsafe launch/attach record.
+Readonly code shows inspectLaunchHealth reads private config before guard;
+probe/bridge never write that config. This is an inferred fixture contract gap,
+not separately reproduced baseline/native diagnosis. Current and base0c3
+launcher-health/probe/bridge/Docker/run.sh blobs are identical; no production
+launcher changes in this PR and the new plan does not call that legacy guard.
+Do not weaken the guard or accept generic missing-record failure as readiness.
+Keep this independent follow-up open (5-10min active fix/diagnosis plus CI).
+Not all broad QA passed.
+
+Reconstruction and remaining work
+---------------------------------
+API: agent-node/src/runtime/opencode-copresence/v1-migration-plan.ts.
+Target Owner startup: deploy/node/opencode-v1-host; ports remain registry-selected
+loopback authority. Original config/checkpoint and Host password remain private,
+independent Owner sources. Six recovery answers: docs/design/opencode-v1-migration-plan.md.
+Git restores software/templates, not original histories/Hub identity/provider or
+login, leases, encrypted backup locations, retention or restore permission.
+The plan changes no binding to roll back. Keep both stores/exact software and
+unknown intent/lease state; never auto-clear or replay as recovery.
+#1246 must resolve original default SAFE topology/provider/directory contract.
+#1238 still needs durable config+intent journal, all matching launcher/runtime
+pending-state refusal and real fault injection. One file rename is not an atomic
+multi-file transaction. #1239 needs final shared-turn capture/owned lossless
+restore. Original Owner named node/idle window/writer exclusion and backup
+authority remain separate. Contract slice20-30min active work; further source
+slices30-60min each after inputs; CI/permissions/window waiting unknown.
+No public npm, installer, signing, deployment or original-node adoption.

@@ -58,6 +58,8 @@ beforeAll(async () => {
   const mk = async (username: string, role: string) => {
     expect((await rest(U.owner.token, "POST", "/api/admin/users", { username, password: PW, network_id: NET, role })).status).toBe(200);
     const login = await rest("", "POST", "/api/auth/login", { username, password: PW });
+    // #746 起新成员默认 scoped;这里的 member / viewer 模拟老成员('all'),scoped 那位下面再收窄。
+    expect((await rest(U.owner.token, "PUT", `/api/networks/${NET}/members/${login.body.user.user_id}/task-grants`, { task_access: "all" })).status).toBe(200);
     return { token: login.body.token as string, id: login.body.user.user_id as string };
   };
   const stamp = Date.now();
@@ -80,6 +82,13 @@ describe("requirements_comment", () => {
     const before = cardRow(card.id);
     const r = await mcp(U.nodeA.token, "requirements_comment", { id: `#${card.seq}`, text: "进展:示例草稿已写完,等人看。" });
     expect(r.ok).toBe(true);
+    // 2026-10-31 —— #3275：requirements_comment 的形状（此前只有值断言）。
+    // 事件对象的键集由真实调用给出；`old`/`field` 对 comment 是**空占位**（注释不是字段改动），
+    // 但它们在键集里 ⇒ 客户端可以统一用「字段改动」的渲染器读注释事件。
+    expect(Object.keys(r).sort()).toEqual(["event", "ok"]);
+    expect(Object.keys(r.event).sort()).toEqual([
+      "actor", "at", "field", "id", "kind", "new", "old", "requirement_id", "seq", "title",
+    ]);
     expect(r.event.kind).toBe("comment");
     expect(r.event.field).toBeNull();
     expect(r.event.new).toEqual({ text: "进展:示例草稿已写完,等人看。" });

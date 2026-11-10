@@ -1,0 +1,56 @@
+#1045 HTTP Provider matching release preparation — NOT PUBLISHED
+OBSERVED_AT=2026-10-12 08:01+08
+
+Source and scope
+- Behavior PR2635 normal merged to main cfff59eaefa907c9b2fc65ab6a18d240afd4bbfe.
+- Candidate branch release/provider-http-pair starts from that exact main.
+- Tested candidate tree before this report: dcffb7841c18ba9c0701cd282c78811f5b036085.
+- Hub 0.9.0-preview.127 / runtime 2.5.0-preview.135 /
+  CLI 2.3.0-preview.169 candidate metadata and lockstep pair, three notes,
+  bilingual getting-started candidate stamps only. No product behavior change.
+- All three anonymous npm version endpoints returned404 at07:58+08.
+- PINNED_SERVER_VERSION remains the existing minimum .47; current Hub startup
+  resolves the preview dist-tag above that minimum. Do not rewrite the floor
+  into an unpublished version or confuse it with the selected deployment.
+- Existing Hub launcher/profile unchanged. No service activation authorized
+  or claimed by these metadata changes; no production token/model operation.
+
+Narrow Docker checks
+- Existing tests/test894-launch-window/Dockerfile cached image
+  anet:test894-restack-core,
+  sha256:c2f501786217b1ef04b09d9615a69a1eae581680db5f75b9fb7f621baa476887.
+- Candidate /candidate read-only, network none, non-root bun,
+  private /run/user tmpfs uid/gid1000 mode0700; older image source not used.
+- CLI/runtime/Hub package-version tests + exact-pair resolver:
+  12 PASS /0 FAIL /29 expectations across4 files,124ms.
+- Three release notes checked for Install, Upgrade and each exact package
+  version in the Install block:3/3 PASS, separate offline Docker invocation.
+- Unchanged check-doc-version-claims.py run function in disposable
+  node20-alpine Docker, candidate read-only, python installed only in container:
+  actual npm latest CLI2.3.0-preview.76;4 stamps/2 docs PASS for CLI .169.
+- Behavior/core HTTP tests remain report-test1045-provider-http.txt; no
+  redundant OAuth/model/native full-suite rerun for unchanged metadata.
+
+Remaining gates and recovery
+- Normal PR checks/merge to main, then full40-SHA formal release.yml builds
+  and install/pin/notes/doc gates remain. Publish Hub127, runtime135, then CLI169.
+- Anonymous package readback and byte checks precede deployment; do not
+  republish a version when npm visibility lags.
+- AppHTTP PR882 is main5ea332d09803b7140396efd3a74a408350ff27e1.
+  Reauth continuation PR883 main d3705a8ca7f8d738cf399e1666ae574b38b176ae.
+  Neither a source merge nor this metadata check is a public client release.
+- Matching client native installer still needs published immutable package
+  integrity pins; existing client248 predates HTTP/reauth continuation.
+- Authority: docs/RELEASE-SOP.md, .github/workflows/release.yml,
+  deploy/hub/README.md, deploy/daemon/ and docs-site/docs/deploy/daemon.md.
+- Existing startup, port/proxy/tunnel, vault key source and schema unchanged.
+  Retain old Hub126, CLI168/runtime134 pair and identity-matched configuration.
+  Backups must include database/vault key/private state as documented;
+  Git recreates software, not accounts, keys, sessions or production data.
+- Older software may reject stored HTTP profiles: retain data, do not delete
+  it as a rollback shortcut. No empty-machine recovery claim is added.
+
+Cleanup
+- Docker containers --rm, private tmpfs/npm cache/python discarded.
+- Owned worktree, test images and report retained. No global npm installation,
+  live login, credential replacement, business node restart or data mutation.

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 echo "TEST1191 source=${TEST1191_SOURCE_COMMIT:-unknown}"
 
@@ -45,7 +48,7 @@ cp /tmp/agent-node-cli.ts agent-node/src/cli.ts
 
 cp agent-network/bin/cli.ts /tmp/agent-network-cli.ts
 bun /mutate.ts agent-network/bin/cli.ts \
-  'if (!await waitForFileText(bridgeLog, bridgeReceipt, 25_000)) {' \
+  'if (!await waitForFileText(bridgeLog, bridgeReceipt, bridgeAttachTimeoutMs)) {' \
   'if (false) {'
 expect_red tui-cannot-open-before-bridge-ready bun test agent-network/src/windows-codex-copresence.test.ts
 cp /tmp/agent-network-cli.ts agent-network/bin/cli.ts

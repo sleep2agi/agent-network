@@ -1,0 +1,67 @@
+#906 selected Daemon recovery / software receipt
+OBSERVED_AT=2026-10-11T08:48:00Z (16:48 Asia/Shanghai)
+This is an operational receipt and Docker installation check, not a new
+production inference/OAuth test or a client release declaration.
+
+Target: daemon-dev / node_daemon_39bd1eeae3ee, original host and identity.
+Cause observed: original log ended in stdout write EIO, recorded runtime PID
+2555920 no longer existed. No live Daemon process was killed.
+
+Exact public inputs (all released from merged main):
+CLI main bbc7035155c8b49bc977cf7f103bd1ecdddaa78f / run38124619816
+https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.164/sleep2agi-agent-network-2.3.0-preview.164.tgz
+SHA256 2c0d292b095005f35e28d1bde77ac23ee502c4d80a299729ab9e8e075a570453
+Runtime main 231bf8c9711aacd9b2f78afce7c58a1873f3d280 / run38123037968
+https://github.com/sleep2agi/agent-network/releases/download/agent-node-v2.5.0-preview.130/sleep2agi-agent-node-2.5.0-preview.130.tgz
+SHA256 4160d36aab60d379c6236bb6515d69811b3f63ca9951461f10c59ff224f73f80
+
+Installation: new private provider906-cli164-runtime130 prefix, not global npm.
+Verified public archives copied into that prefix. npm install ran inside the
+existing Node22 Docker image as uid1000, umask077, with only this prefix mounted.
+248 dependencies installed; container exited0 and was removed. The first
+attempt selected a Rust-only image without npm, exited127 before installation;
+it was corrected to the existing Node22 image. This is not a product failure.
+Authoritative descriptor/lock: deploy/daemon/provider906-164-130/.
+No package archives or secrets are checked into Git.
+
+Actual activation: daemon-dev-only tmux, cwd at its original config root;
+exec the private agent-network/dist/bin/anet.cjs daemon start daemon-dev using
+Node24.19.0. Redirect both output streams to a normal private log file, not a
+terminal that can vanish. This follows docs-site/docs/deploy/daemon.md
+keep-daemon-alive; no direct agent-node launch bypassing ANET_BIN pinning.
+CLI PID2843800 / runtime PID2843964. Both point at the new private prefix.
+Hub fresh heartbeat preserved node_id and reported runtime130 idle/queue0;
+SSE connected and create capability ready. Read-only provider list:
+ok=true, revision=0, source=daemon, providers=[]. Empty does NOT verify a
+real login, model entitlement, paid provider or production inference.
+
+Config preserved, backup mode0600; both SHA256:
+4cf8ee102c780bb75d992b1c6b6c32d56f49015fe62cf933c54afd733d4564bc.
+46 pre-existing runtime/Codex/Grok process PID+birth pairs unchanged. Only the
+selected daemon runtime was added. No business Agent upgrade/restart, no auth
+copy, no token replacement, no model request. Existing skill shadow warnings
+were not expanded into unrelated cleanup. Downloaded formal archives retained
+as recovery inputs in the private prefix; no extra Docker processes remain.
+
+Reconstruction / rollback boundaries:
+1. Software: clone main, copy the descriptor+lock to a mode0700 private prefix,
+   download the above named archives, verify both hashes, npm ci in Docker.
+   Start the CLI via the documented background daemon command at the original
+   config root, using the original named daemon and normal file output.
+2. Ports/proxy: original Hub loopback9200, unchanged. See deploy/hub/README.md
+   for host topology; this operation did not change routes.
+3. Secrets: original mode0600 Daemon config and credentials from the operator's
+   secure backup. Git does not contain or regenerate the node token/OAuth.
+4. Verify: actual process paths/version, fresh original-id Hub heartbeat, SSE,
+   create-capability pin and read-only Provider result, not startup banner alone.
+5. Rollback: stop ONLY the selected daemon using documented CLI lifecycle;
+   start its retained provider906-cli163 pair (CLI163/runtime129) against the
+   unchanged original config, with file output. Keep the new prefix for audit.
+6. Data: original node config/identity and business sessions require secure
+   data backups; do not restore by creating a new identity or copying another
+   node's credentials. This receipt is not a full empty-host DR certification.
+
+Other target: TMHR task6b7f695e-914c-4700-9af4-4e4045e5639d upgraded
+daemon-vdev to the same pair, PID3737501/3737792. Independently fresh Hub
+readback confirmed original id/runtime130. Do not repeat either upgrade.
+Client0.2.238 remained in formal platform builds at this observation time.

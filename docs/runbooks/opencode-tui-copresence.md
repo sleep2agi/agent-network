@@ -1,10 +1,166 @@
 # OpenCode TUI 共存运行手册
 
-状态：候选已实现并通过 Docker + 实机验收，尚未合并或发布。已发布的 npm `latest` 不含本功能；当前 preview 包也要等本候选正式发布后才可使用以下一等命令。
+用户向导（anet.sh，中英）在 `docs-site/docs/guide/opencode.md`。本手册保留操作边界和尚未验收的部分，不把向导里的创建命令再抄成第二套。
 
-## 用户操作
+## V2 共享 Server 迁移候选（PR #2645，未发布）
 
-发布后创建并启动：
+同一台受信主机可让多个 V2 节点复用一个持久、仅监听 `127.0.0.1` 的 OpenCode Server。各节点仍有独立工作目录、Hub 身份、Bridge、TUI 和 `ses_` 会话；不能用同一个 session ID 代表多个节点。Server 的认证密码不是 Hub 节点令牌。共享 Server 的项目配置通过节点自有的短期 loopback MCP 代理连接 Hub，Hub 令牌只在 Bridge 内持有；Server 不得继承其他节点的令牌环境。
+
+创建时可显式提供 `--opencode-shared-server-url http://127.0.0.1:<port>` 和 `--opencode-shared-server-password-file <绝对路径>`。也可在主机用户的私有 `~/.anet/opencode-shared-server.json` 中登记 `{ "url": "http://127.0.0.1:<port>", "passwordFile": "<绝对路径>", "clientBinDir": "<V2 私有安装的 bin 绝对目录>" }`，之后新建 V2 节点默认复用它。`clientBinDir` 可省略；当 daemon 的默认 PATH 优先找到 V1 时须填写，仅为 V2 子节点的创建与启动临时优先选用，不改 daemon 的全局 PATH。显式 `--opencode-new-server` 则创建节点自有 Server，仍可使用登记的 V2 客户端目录，但不会继承共享 Server URL/密码文件；它不能和显式共享参数同时使用。密码文件须为私有普通文件，不应把密码写进命令行、URL、日志或项目 Git。上述选项只有该 PR 合并并发布对应 CLI/runtime 后才可作为正式命令使用；旧版本不能靠手改配置冒充支持。
+
+### 源码中的 daemon 创建准入（#1326，父 #1302）
+
+本节描述源码实现，不代表对应 npm 包已发布或现役 daemon 已采用。主机登记仍由受信拥有者维护；它只提供连接候选，不提供进程身份或代际证明。
+
+- daemon 创建 V2 copresence 子节点时，`opencode-host-shared-create.ts` 先用既有 `/proc` observer 取真实 `pid/uid/startTicks/listenInode`，再经 `opencode-host-shared-generation.ts` 绑定实际 exe 与受支持 V2 包的精确文件身份。版本探测复用独立 HOME/XDG/cwd 的 `credentialMode=probe`，不继承 provider/Hub 凭据。
+- 返回前重新观察监听归属、二读 exe/ticks，再由 `opencode-server-reuse.ts` 核字面 `127.0.0.1`、同 uid、已证 V2 与真实存活。只有准入后才把共享 URL/密码文件路径写进子节点配置；不读取密码值。观测或绑定失败则不写共享字段，回退节点自有 Server。
+- 观察提供者仅支持 Linux；非 Linux、权限不足或监听归属歧义均回退自建。显式 `opencodeNewServer=true` 跳过共享准入；V1 创建不使用 V2 登记。同主机的新 B/C 节点无需与持有共享 Server 的 A 具有相同 node_id/alias；各自仍使用独立 Hub token、MCP 与 session。
+- 审计日志记录 decision/reason、已观测的 pid/port，不输出密码或密码文件路径。CLI 直接创建及显式共享连接仍沿其既有入口，本节不代替这些入口的准入验收，也不代表完整 CLI/Hub/TUI 创建、发布或现役采用已完成。
+
+共享 Server 的数据库应放在持久磁盘。OpenCode V2 默认使用 `~/.local/share/opencode/opencode.db`，`OPENCODE_DB` 可覆盖位置；先核实际进程环境、数据库路径、文件系统和备份，再停旧实例迁移。不得在活动写入期间直接复制数据库，不得把临时目录当作持久目录。原节点可以保留各自工作区并换用新 session，但这不自动迁移旧对话历史；要保留历史须单独验证数据库迁移和会话归属。共享 Server 关闭或重启不应被单个节点的 stop/close 连带终止。
+
+候选的停服备份、恢复、逐节点验收和数据回滚边界见 [共享 Server 恢复合同](opencode-v2-shared-server-recovery.md)；它尚未替代主机实际启动器和演练记录。
+
+权限不是由不同 session 自动隔离。Server 的全局配置影响全部接入者，项目 `opencode.json` 按工作区加载，session 只保存该会话状态及待批权限请求。高权限 opt-in 仍需对每个 V2 节点显式授权；不要为一个节点的 YOLO 需求扩大共享 Server 的全局权限。不同工作区不等于不同操作系统安全身份；需要强隔离时使用独立运行用户或独立 Server。
+
+启动验收依次核：受认证 `/api/info` 的版本和 PID、Server 独立持久进程、项目配置和工作区匹配、该工作区 `/api/mcp` 的 `commhub=connected`、只读插件 RPC 确认 `commhub_send_task`/`commhub_get_task` 已注册、Bridge 与 TUI 的真实 PID/配置路径/完整 session、Hub 固定 `from_name/from_node_id` 出站和接收 ACK。只看到 `connected` 或 Hub 在线不算工具就绪。旧 session 复用时先核工作区，再读 session 实际模型；首次接管保留 TUI 已选模型，不因节点配置与其不同而改写。运行态记录上次启动时的配置模型；此后明确修改节点配置模型，才在原 session 内切换并回读，失败则停止启动。Hub 配置模型标签不能代替实际 session 模型读数。每个节点的回滚只恢复它自己的 Bridge/TUI、项目配置备份与旧启动路径；共享 Server/数据库的回滚必须作为单独变更，不能因单节点失败而重启全体。
+
+截至本节编写时，PR #2645 的共享运行态和测试仍在审查，现有节点的上线证据不能替代正式发布与逐节点验收。以下旧章节描述此前的逐节点 V2 Server 路径；其中“没有新增常驻服务”仅适用于旧切片，不适用于本共享 Server 候选。
+
+## 本地创建、远程切片、目录读取，三件不同的事
+
+**本地 CLI 创建是当前操作入口。** `anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools` 会写下 `opencodeGeneration: "v2"`、`opencodeMode: "copresence"`、`flags.opencodeUnsafeTools: true`。不带 `--opencode-unsafe-tools` 时创建和启动都拒绝。不带 `--opencode-generation` 仍是 V1。这条路径随 preview 线发布（自 `agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107`）。2026-10-11 量到 npm `preview` = `2.3.0-preview.162`、`latest` = `2.3.0-preview.76`；`.76` 没有这条标志。dist-tag 会动，以 `anet -v` 为准。成熟度仍是 preview：没有 V2 安全预设。
+
+**Hub/daemon 的 flag 切片已经在仓库里，但不是桌面客户端入口，也不是完整生命周期验收**（#829 / #539 仍开着）。字段必须在 `node_spec.flags`。下面几段写的是这层代码拒绝什么、落盘什么。Hub 首次注册的 `succeeded` 或启动器退出 0 单独都不算健康。
+
+**目录读取（#2574）是第三件。** `agent-node/src/runtime/opencode-v2-catalog.ts` 的 `readOpenCodeCatalog` 只读调用方已经持有的 loopback V2 server（`/api/provider`、`/api/model`、`/api/model/default`）。快照 `invocationVerified` 恒为 false，`completeness` 为 `unknown`。它还没接到 daemon 派发、Hub 授权、心跳或客户端选模型，也不是用户命令，并且不在上面的已发布 preview 包里。创建节点仍然复制本机 `opencode.json`，不调用这个读取器。详见 [opencode-v2-registry-readiness.md](opencode-v2-registry-readiness.md) 的目录一节。
+
+daemon 发现 `opencode --version` 为 V2 时，通用 runtime-readiness 只报告
+`unknown`（CLI 已发现，provider/auth 尚未确认），不把 V1 的 opencode.ai HEAD
+结果当成所有 V2 provider 的结论。本地/局域网 provider 不依赖该站点；反之，
+站点可达也不证明选定模型可用。客户端显示未检测仍允许配置。显式 `opencodeGeneration` 为 `v1` 或 `v2` 时，daemon 在写子节点配置之前拒绝与该代际已接受版本不符的安装（`opencode_generation_mismatch`；V2 接受 `@opencode/cli@2.0.22`）。省略代际仍是 V1，不因 PATH 上是 V2 二进制而拒绝。`--version` 超时不在这一步拒绝。V2 还要求 `model` 为 OpenCode 自己的 `provider/model`（恰好一个斜杠，`opencode_v2_requires_provider_model`）；本接口不套用 anet provider 预设。就绪结果对 `opencode-cli` 可带 `generation` 与 `accepted`，V2 的 `state` 仍是 `unknown`。配置快照 `flags` 回显代际、模式和 unsafe 同意，只读，不能用 `update_node_config` 修改。显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、其他 runtime 的认证/网络判据不因此放宽。`--version` 文本不是包文件身份。
+
+新接口沿用 runtime `opencode-cli`，在 `node_spec.flags` 里显式传
+`opencodeGeneration: "v2"` 和 `opencodeUnsafeTools: true`。
+V2 仍是高风险 preview：所有本地工具可用，只能用于可信任务，不能默认勾选、
+从其它 runtime/模板继承授权，或把无授权拒绝改成自动重试。
+Hub 与 daemon 都校验类型、runtime 和 opt-in；这两个字段误放顶层会被拒绝。
+旧 Hub/daemon 不认识 flags 中的字段时应明确拒绝，不能偷偷退回 V1。
+
+daemon 直接写子节点配置（不调用 CLI create）：代际写到顶层
+`opencodeGeneration`，V2 模式写为 `opencodeMode: "copresence"`；
+权限保留在 `flags.opencodeUnsafeTools`。省略代际保持旧 V1 行为，
+显式 V1 不接受这条新建接口的 unsafe 开关。已有节点不迁移。
+
+候选 V2 配置的 `opencodeMode: "copresence"` 使普通 `anet node start`
+进入 TUI/桥编排；内部桥使用 `ANET_COPRESENCE_BRIDGE=1` 防止递归启动。
+此选择不授予 unsafe 权限，V1 仍保持下文显式 `--copresence` 行为。
+daemon 对编排启动器的完成判定、远程停止/重启仍须独立验证，不代表已发布。
+
+Linux 候选实现会在原生 V2 就绪后写节点目录内的
+`opencode-launch-health.json`（0600，无凭据）。daemon 接受正常退出的
+共存启动器前，核对本轮写入时间、bridge/serve/TUI 的 PID 与启动 ticks、
+serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 复用、
+死进程或非零退出不放行。attach 脚本在 `exec` 之前就用自己的 PID 写下
+`opencode-attach.json`，所以启动器退出 0 的瞬间 `/proc` 里可能还是 shell，
+没有 `--session <generation>` 这两个参数。这个窗口的判据仍是
+`TUI session mismatch`，它不是另一条 session。创建和远程 start/restart
+只在原有截止时间（默认 35 秒，从本次启动起算，不是退出后再加一段）内
+重复同一套检查，等到 exec 之后的 argv；错 session、复用 PID、非零退出
+不会因为等到超时而通过。远程 start 若最终仍是这条 mismatch，回执错误码是
+`opencode_tui_session_mismatch`，生命周期读接口原样返回该码；带路径的
+daemon 原文仍然折叠成 `lifecycle_error`。运行代际关闭/serve 退出时清理自己的记录。
+此文件是可重建的运行证据，不是需要从备份恢复的数据，不能复制旧记录
+冒充就绪。Linux daemon 创建和远程 start 完成判定使用此证据路径，其他平台未验收。
+不要把 Hub 首次注册的 `succeeded` 或 launcher 的退出 0 单独当作健康；
+应等 daemon 延迟检查结束，验证 token 仍有效，再验真实任务终态。
+没有新增常驻服务、端口、环境变量或密钥来源；既有升级/回滚流程不变。
+
+候选 Hub 为新建请求增加可空 `launch_verified_at` 列（自动加列，不回填旧数据）。
+只有绑定 daemon 在启动器退出及本轮三进程检查通过后，以真实 bridge PID
+回报 `launch_verified: true` 才记录；失败清除此证据，迟到成功不能复活失败。
+GET `/api/node-create-requests` 按原网络权限返回该列和 `child_node_id`。
+客户端必须检查本次请求、失败状态、精确节点身份及在线状态；V2 还必须
+等明确启动证据，不能从 `acked_at` 推断。V2 在旧 Hub/daemon 缺证据时仅显示尚未确认。
+客户端依据实际提交的代际启用此门；旧 V1 不要求它不提供的 V2 证据。
+该时间是一次启动检查记录，不是持续健康保证。升级/回滚仍用 main SHA 门禁，
+旧程序可忽略新增可空列；请求历史随原 Hub 数据库加密备份恢复，不伪造确认时间。
+
+远程 `start_node` 的 V2 共存候选先回报 `starting`，有界等待启动器退出，
+再验证本次三进程身份，成功后以真实 bridge PID 回报 `started`。失败、信号、
+超时或证据不匹配回报 `start_failed`，不能以启动器 kill-0 成功替代就绪。
+旧 Hub 若未声明完成回执能力，明确返回 `opencode_start_completion_unsupported`，
+应按正式升级流程升级 Hub/daemon，而非绕过判定。同一 daemon 生命周期内同请求
+重放不重复启动；不保证 daemon 重启后的持久去重。35 秒启动器超时只向本次
+持有的启动器发送 SIGTERM，不按名称清扫。失败后应检查残留，不代表完整子树
+已停止；使用已有身份校验的停止流程，禁止盲删状态文件。
+
+daemon 新建 OpenCode 节点时，先复用 CLI 的 no-follow 私密目录与 Git
+未跟踪校验，再在同一运行用户的 `HOME/.anet/opencode-runtime-bindings/`
+建立外部身份记录，最后原子写入含 token 的 0600 配置。不能只复制项目
+目录后补造绑定；已有配置只有相同 create request/node_id、alias 且绑定
+完整时才允许重试。绑定或私密路径被篡改时应调查并走显式重建，不能删除
+身份记录来绕过拒绝。CLI 与 daemon 的四个安全模块为字节一致镜像，
+由 `opencode-create-security-parity.test.ts` 阻止单边修改。
+恢复时节点私密配置及上述 HOME 绑定属于加密备份数据，不属于 Git 源码；
+必须恢复至匹配的规范项目路径，否则重新注册/创建。此补丁不改端口、
+代理、常驻服务入口、凭据来源或正式发布流程，也未完成整机恢复演练。
+
+验证入口为 `tests/test829-opencode-create/Dockerfile`，绑定完整源码 SHA，
+运行时传同一 `EXPECTED_SOURCE_COMMIT`，报告在容器
+`/tmp/art/report-test829.txt`。目前测试真实 Hub handler 存取与 daemon 写盘，
+启动进程是测试替身；不据此宣称真实 V2 上线成功。下一门需要精确版本就绪、
+真 daemon/Hub/V2 注册和任务回执、停止/再启动及客户端 UI 回读。
+
+此切片不新增常驻服务、端口、代理或密钥来源；新增可空证据列如上。仍用本文的启动流程，
+凭据由已有 Hub/节点密钥流程提供，不写入测试报告。正式升级只从经过门禁的
+main 完整 SHA 构建；回滚须回到已验证版本，先停止新增 V2 节点，不能让旧版本
+静默接管 V2 配置。数据库/节点数据来自原有备份，clone 不包含这些数据；
+本切片测试不构成灾难恢复演练证明。
+
+状态：共存功能在 preview 通道。V2 受限预览由 PR #2380 引入，首次随
+`agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107` 发布；
+这不是当前通道版本声明。升级时使用仓库版本配对表指定的精确 CLI/runtime，
+不要混用不同批次，也不要把 V1 的安全保证套到 V2。
+
+## 先选择代际
+
+| 代际 | 上游包 / 固定版本 | 模式 | 安全边界 |
+| --- | --- | --- | --- |
+| V1（默认） | `opencode-ai@1.18.34`，过渡兼容 `1.18.1` | headless / copresence | 原有逐项 deny 安全预设 |
+| V2（受限 preview） | `@opencode/cli@2.0.22` | 仅 copresence | 必须显式确认 `flags.opencodeUnsafeTools=true`；默认拒绝 |
+
+两个上游包都安装名为 `opencode` 的命令，**不能装进同一个 npm prefix**。
+V2 应安装在独立、所有者可信且不可组写的前缀，再让启动命令的 PATH 优先指向它。
+不要通过覆盖生产全局 V1 来试用 V2。切回 V1 使用独立 V1 节点和对应 PATH；
+V2 session 没有承诺可降级为 V1 session。
+
+V2 创建命令（仅用于可信工作区和可信任务，先理解工具权限风险）。
+
+模型和 Provider 必须已经写在这台机器的 OpenCode 配置里（全局 `~/.config/opencode/opencode.json`，或项目 `opencode.json` / `.opencode/opencode.json`，后写的覆盖先写的；`.opencode` 覆盖同目录的直接文件）。`model` 是 OpenCode 自己的 `provider/model` 字符串。有对应的 `providers.<id>` 时，创建会把这一条原样复制进节点，不另造一套 provider 结构。`--model` 或 `--provider` 与这份配置不一致时，创建拒绝并写出请求值和本机值。没有配置 `model` 时同样拒绝，不会退回 anthropic 或预设默认模型。
+
+```bash
+anet node create opencode-v2 \
+  --runtime opencode-cli \
+  --opencode-generation v2 \
+  --opencode-unsafe-tools \
+  --model '<与本机 OpenCode 相同的 provider/model>'
+anet node start opencode-v2 --copresence
+tmux attach -t '=opencode-v2'
+anet node stop opencode-v2
+```
+
+V2 忽略 V1 的 `OPENCODE_PERMISSION` 等环境开关。没有显式 opt-in 时应看到
+拒绝提示，而不是删除校验或把安全模式改成宽松模式。上面的 CLI 是本地创建路径，不代表桌面客户端、目录选模型或「模型主动调用 CommHub 工具」已经验收。原生 V2 安全策略、客户端 V2 创建入口和模型主动调用工具的完整验收仍由 Hub #539 / GitHub #2544 跟踪。
+
+V2 使用 `opencode --server <url> --session <id>`，不是 V1 的 `attach`。
+网络任务经 `/api/session/:id/prompt`、`delivery=queue` 提交，在消息历史中
+确认任务归属和终态后才回执。普通通知暂时只记日志并 ack，**不在 V2 TUI 弹 toast**；
+不要据此判断用户已看到通知，也不要通过伪造 user turn 来补 toast。
+
+## V1 用户操作
+
+创建并启动：
 
 ```bash
 anet node create opencode-指挥狗 \
@@ -33,7 +189,8 @@ tmux attach -t '=opencode-指挥狗'
 anet node stop opencode-指挥狗
 ```
 
-恢复时必须继续使用 `--copresence`；普通 `anet node start` 只启动任务 runtime，不会创建可进入的 TUI：
+重新启动 TUI 拓扑时继续使用 `--copresence`；这不是恢复原 session。
+普通 `anet node start` 不保证创建可进入的 TUI：
 
 ```bash
 anet node start opencode-指挥狗 --copresence
@@ -53,7 +210,123 @@ TUI 已退出但桥仍在线，`tmux attach -t <alias>` 会把 `<alias>` 模糊�
 TUI 不存在，可重新执行 `anet node start <alias> --copresence` 重建桥和 TUI；
 不要用 `pkill -f`、`killall` 或模糊 tmux 匹配停止节点。
 
-## 实现拓扑
+<a id="v1-restart-and-upgrade"></a>
+
+### V1 重启与软件升级：当前不恢复原 session
+
+#### #1120 V1 登录态持久化（CLI174 / runtime140 已公开，原机另验）
+
+源码 PR2693/main `299cd2273033c33026de397c206843440b7ba96c`；正式构建源
+PR2694/main `b4cd36f7a31385af0765533b1a8edf397841d19a`，两 package 源码树相同。
+runtime140 正式发行与完整 npm 包已核；CLI174 四门通过、npm publish 步骤成功，
+原 formal 因 registry 核验等待超时而 FAILURE，已有同一原门控包的
+[官方固定下载](https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz)。
+15:47:34+08 的迟到 npm 回读也已核对完整原包 byte/SRI，相同公开包的
+npm 与固定下载均可用；原 formal 超时 FAILURE 保留，不补写 green。
+完整来源、摘要及原失败见 [发布记录](../tests/report-test1120-publication.txt)。
+
+V1 共存 runtime 的 `persistAuth` 路径将节点私有
+`.local/share/opencode/auth.json` 中的 Auth.Info 数据暂存到本次隔离运行目录，
+覆盖 API、OAuth（含 accountId/enterpriseUrl）和 wellknown 登录数据。
+数据结构按 [上游 V1 Auth.Info](https://github.com/anomalyco/opencode/blob/v1.18.1/packages/opencode/src/auth/index.ts)
+筛选；不复制 MCP、插件、任意配置字段或数据库。普通 headless ACP 继续使用
+原 API-only 暂存，版本探针既不读入此登录数据也不回写。
+
+正常停止时，先停止 attach TUI/server，并确认没有存活进程引用该运行目录，
+再把本次 TUI 登录、OAuth 刷新或退出产生的 auth 变动原子回写到同一节点的
+0600 文件，随后清理本次目录。持久文件在启动后被另一维护入口修改时，
+拒绝覆盖并保留运行目录供原 Owner 检查；损坏 JSON、symlink/hardlink、
+身份变化同样不写回，错误不输出 credential 值。启动前未获准执行的探针或
+discard 路径不会保存 auth。
+
+此片只涵盖正常停止/重启，不能找回已经删除的登录数据，尚未证明崩溃/
+强制 SIGKILL 后保存本次更新。会话历史仍走下方已有快照合同，不能用 auth
+回写代签历史恢复。真实账号「登录→正常重启→仍登录」需用合入 main 并正式
+公开的配对在原节点另验；本轮不读现场 auth 内容，不重启现役节点。
+
+没有新增服务、端口、反代、环境变量或凭据来源；原节点 owner-only auth
+文件是运行数据，需原受控加密备份恢复，不能从 Git 重建账号。软件回滚仍
+保留旧私有配对和当前配置；旧版共存不带回写能力，回滚不能保证在 TUI 中
+新登录/刷新后的数据继续保存。
+
+截至正式 CLI `2.3.0-preview.171` / runtime `2.5.0-preview.137`，
+V1 共存每次启动通过 `POST /session` 新建会话。配置中的 `session` 虽然会
+写回，但不会作为恢复参数传入共存启动；`node resume --session` 也不能改变
+这条行为。不要把身份和工作目录不变、Hub 心跳恢复，写成原对话已恢复。
+
+还有一层数据边界：`buildOpencodeChildEnv` 为每次启动创建全新的 XDG 数据
+目录，`cleanupOpencodeChildEnv` 在所属进程退出后清理它。`unsafe-tools`
+也不放宽此边界。只补一个 session ID 参数不足以恢复旧目录中的历史；
+不得以复用旧数据库目录或绕过路径校验假装修复。V2 持久 server 候选不是
+已发布的 V1 恢复能力，也不能通过修改节点代际把 V1 会话迁移成 V2。
+
+如果原会话必须继续，先保留现有运行实例；tmux 脱离/再进入不触发升级。
+窄升级需要先有经过验收的原会话恢复方案，否则应明确说明重新开始会话的
+影响，不能无提示切换。正常停止会关闭本节点拥有的 attach TUI 和 server；
+进程记录只授予该节点的停止权，不得按名字清扫其他节点。
+
+本段是源码盘点及操作限制说明，没有新增服务、端口、代理、环境变量或
+凭据来源，也没有改变升级和回滚程序。正式软件仍从经门禁的完整 main SHA
+构建；旧私有安装及原配置应保留用于软件回滚，但回滚软件不能找回已清理的
+一次性会话历史。节点身份/配置及需保留的会话数据属于受控加密备份数据，
+不是 clone 仓库就能恢复；本轮没有验证历史导出/备份恢复或整机重建。
+
+#### #906 V1 快照恢复候选（未发布）
+
+`agent-node/src/runtime/opencode-copresence/v1-checkpoint.ts` 的候选实现将
+当前节点的 session 信息和消息保存为节点私有目录中的
+`opencode-v1-session.json`（0600，节点/网络/session 身份校验）。下次启动在
+新的运行数据目录内调用已校验 V1 二进制的本地 `import`，再从认证 server
+核对原 session 和历史；导入或核对失败不会静默新建 session。原数据库树、
+账号文件及其他节点目录不复制。只有明确 `--new-session` 才忽略旧快照。
+旧 session 的工具授权及分享状态不导入，继续使用当前启动规则；历史中的
+本地/远程文件引用暂不支持迁移，明确拒绝，不在新环境自动读取原路径。
+内嵌 data URL 媒体不需要读取外部文件，可随快照保存。
+
+这是正常重启/已保存检查点的恢复，不保证强杀或崩溃前最后一条人类输入已
+持久化。候选会在启动、网络轮完成及正常停止前保存；异常退出或最后保存
+失败时只保留最近成功的快照，恢复会提示该限制。旧版节点没有这个文件时
+保留原先的新建行为并明确警告，不能据此称旧会话已迁移；首次旧版升级的
+受控历史导出使用下述候选入口，不应直接重启生产节点来验证。
+
+#### 首次旧版 V1 导出入口（源码候选，未发布／未操作生产）
+
+权威入口为 `deploy/node/export-opencode-v1-session.ts`，在 Linux 节点所属
+用户下，用已校验的仓库精确源码和 Bun 执行：
+
+```bash
+bun deploy/node/export-opencode-v1-session.ts \
+  --node-dir '<原节点的规范私有目录>' \
+  --bridge-pid '<已核实的原桥 PID>' --server-pid '<该桥所属 V1 serve PID>'
+```
+
+操作者先确认节点无在途/排队任务，并协调人类暂停 TUI 输入直到导出后安全
+停旧桥。脚本只 GET 本机原 server：要求同 UID、原 `--config`、父子进程、
+loopback 地址、V1 固定版本、原 node/network/session 和连续两次稳定历史。
+从该 server 的既有进程环境只在内存取本次 Basic Auth，不读登录账号文件，
+不显示对话/凭据。导出后回读 PID 启动时间和配置未变，独占创建 0600
+快照；已有快照明确拒绝、不覆盖。成功输出仅身份、版本、消息数和文件 SHA。
+外部文件引用按上述规则拒绝，不能删历史来绕过。
+
+这是 live capture，标记 `cleanShutdown=false`，不是写锁/完整 TUI 冻结：
+导出后继续发生的输入不会自动补入快照。若无可信空闲窗口，保持旧桥，先
+协调窗口，不直接切换。脚本不停止/启动桥，不改配置、模型、账号或身份。
+旧 native server 已退出、历史不稳定或目录/PID不匹配时明确失败，不猜目标。
+
+常驻启动、端口/反代和环境变量来源均不变；软件仍从 main 完整 SHA 正式
+包窄升级，并回读原 session/history。回滚保留原安装与配置，不覆写快照。
+历史快照和原节点私有配置需要所有者已有加密备份，Git 不含生产数据；
+尚未验证整机/异机恢复，不宣称可灾难恢复。
+
+启动器、loopback 端口和凭据来源均不变；没有新环境变量或常驻服务。
+软件升级仍需完整 main SHA 正式包，核对实际版本、原 session 及历史后才算
+生效；回滚保留旧安装/配置且不修改快照。快照含对话敏感数据，不能上传
+公开 CI/Issue，需纳入所有者已有加密数据备份；目前没有新增或验证异机
+备份来源，软件回滚不承诺找回未保存历史。clone 不包含这些数据。
+Docker 核心入口为 `tests/test906-v1-checkpoint/Dockerfile`，两个固定 V1
+版本只使用合成模型和会话，不访问生产 Hub、真实凭据或供应商。
+
+## V1 实现拓扑
 
 `opencode-cli` 仍是一个 runtime，通过 `config.json` 的 `opencodeMode` 分派：
 
@@ -92,13 +365,14 @@ OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可�
 
 ## 安全与生命周期
 
-- OpenCode 版本严格固定为 `opencode-ai@1.18.34`(#541 从 `1.18.1` 升上来)。过渡期内已装 `1.18.1` 的主机仍可启动,启动时打印一行升级提示;升级命令 `anet opencode upgrade-pin 1.18.34`(或 `npm install -g opencode-ai@1.18.34`),装好后下次 start 自动用新版本。其他任何版本(含 OpenCode 2 `@opencode/cli`)一律拒绝。
+- V1 严格固定为 `opencode-ai@1.18.34`（#541 从 `1.18.1` 升上来）。过渡期已装 `1.18.1` 的主机仍可启动并提示升级；其他 V1 版本拒绝。V2 必须显式选择代际并满足上表中的包身份、版本和风险确认条件，不能当成 V1 的原位升级。
 - 版本探针不接触 vendor credential；通过包身份校验后才生成一次性运行环境。
 - TUI launcher 位于节点私有目录，mode 必须为 `0700`；它包含本次启动的 loopback 密码和 CommHub token export，不得复制、打印或提交。serve/attach 子进程也通过环境变量持有这些 secret；同 UID 用户与 root 可经 `/proc/<pid>/environ` 或进程环境读取，因此安全边界是“同 UID + 私有目录”，不是 secret 不进入 `/proc`/tmux 环境。
 - CommHub token 只通过每节点私有环境变量交给 OpenCode；MCP 配置正文只保存 `{env:...}` 引用，不内嵌 token。每个节点必须独占自己的启动环境，不能共用 attach launcher 或 server。
 - 安全模式固定 OpenCode 1.18.34(过渡期兼容 1.18.1)，并对该版本全部内建工具逐项 deny；动态工具只放行 `commhub_*`。OpenCode 会把对象形式 wildcard 规则移到最后，因此不能用尾部 `* = deny` 再期待较早的 MCP allow 生效。若未来放宽版本 pin，必须同时重新验证 wildcard 优先级并恢复可证明的默认 deny（或重新生成完整内建 deny 列表），不得直接沿用当前逐项列表。1.18.1 → 1.18.34 已按源码逐项比对(#541):环境变量开关、config 路径/managed config/指令发现、permission 模块、内建工具集合、serve/attach 参数与 session REST 路由均未变,逐项 deny 列表可沿用。
 - server 使用 detached process group；停止前复核 PID、PGRP、Linux start ticks，身份漂移时拒绝误杀。
 - `SIGINT`、`SIGTERM` 和 tmux 关闭 pane 使用的 `SIGHUP` 全部进入同一 cleanup；少了 `SIGHUP` 会在 `tmux kill-session` 后遗留 detached server。
+- Linux OpenCode 共存的正常 `node stop` 应先给已记录且 birth 匹配的 agent 最多 10 秒完成清理，再关闭终端并审计残留进程；不要以直接关闭 tmux 替代正常停止。`test827` 同时检查生成的 registry observer 和 attach launcher 已消失，因为进程退出不代表私有启动文件清理完成。这一停止顺序修复仍须经过 main 合并/正式制品门，分支测试不代表已部署。
 - 启动桥时显式传递 PATH、`ANET_AGENT_NODE_BIN` 和可选 `ANET_OPENCODE_SAFE_BASE`，不能依赖长期 tmux server 的陈旧环境。
 - 节点模型必须以非空 `provider/model` 形式传入 REST message body；copresence 启动会拒绝空值或非法形式。只写顶层 anet config、却不传 REST model，会让 OpenCode 回退到 preset 默认模型，因此禁止静默回落。
 
@@ -108,6 +382,10 @@ OpenCode 1.18.1 仍没有原子“空闲检查并认领”API，因此人类可�
 并发/生命周期窄套件：`tests/test228-opencode-inbox-concurrency/`。
 发送者可见性窄套件：`tests/test230-opencode-sender-label/`。
 回复超时中止窄套件：`tests/test651-opencode-timeout-abort/`。
+V2 后端及真实 TUI 窄套件：`tests/test543-opencode-v2-copresence/`。
+V2 完整 CLI/Hub/打包 runtime/TUI 链路：`tests/test827-opencode-v2-hub/`。
+后者只替换模型为 loopback stub，不替换 OpenCode、Hub 或 agent-node；
+它不证明真实模型的工具选择，也不证明客户端/daemon 创建入口。
 
 ```bash
 sg docker -c 'docker build -t anet-test227:dev \

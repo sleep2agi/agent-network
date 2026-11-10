@@ -17,7 +17,24 @@ type HiddenNode = ((nodeId: string) => boolean) | null;
 export const PEOPLE_DEFAULT_LIMIT = 50;
 export const PEOPLE_MAX_LIMIT = 200;
 
-export type DirectoryAgent = { node_id: string; alias: string };
+/** `department_id`: Agent 的**显式**部门归属(可空)。空 = 仍按「负责人在哪个部门」推断,
+ *  客户端据此把 Agent 放对格子 —— 2026-10-19 前没有这一列,328 个 Agent 只能全算「未归属」。 */
+export type DirectoryAgent = {
+  node_id: string;
+  alias: string;
+  department_id?: string | null;
+  /**
+   * #2596 —— 这一行“最后一次被 Hub 看到”的时间（`nodes.updated_at`），以及生命周期状态。
+   *
+   * 为什么加：组织架构页把 368 个 agent 全塞进「未归属」，其中 125 个是 5–8 月的历史残留
+   * （如 `海报设计师1–5号` 注册于 2026-05-17、早已 offline）。客户端要能“默认只显示近 7 天活跃”
+   * 与“同一 alias 只保留最新的那条”，就必须拿到时间轴——否则只能靠 node_id 猜。
+   *
+   * 只增不改：老客户端忽略未知键，形状断言已在同批测试里放宽。
+   */
+  updated_at?: string | null;
+  lifecycle_state?: string | null;
+};
 export type DirectoryPerson = {
   user_id: string;
   username: string;
@@ -62,15 +79,61 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
       ORDER BY u.username, u.user_id`,
     networkId,
   );
-  const nodes = db.all<{ node_id: string; alias: string | null; node_name: string; owner_user_id: string | null }>(
-    "SELECT node_id, alias, node_name, owner_user_id FROM nodes WHERE network_id = ?1 ORDER BY COALESCE(alias, node_name), node_id",
+  const nodes = db.all<{ node_id: string; alias: string | null; node_name: string; owner_user_id: string | null; department_id: string | null; updated_at: string | null; lifecycle_state: string | null }>(
+    "SELECT node_id, alias, node_name, owner_user_id, department_id, updated_at, lifecycle_state FROM nodes WHERE network_id = ?1 ORDER BY COALESCE(alias, node_name), node_id",
     networkId,
   ).filter(n => !hidden?.(n.node_id));
+  // #2965 —— 同 alias 多 node 行时**不删行**（保持既有契约：重复项照样列出，客户端去重），
+  // 只额外给一个确定性的「该保留哪条」：其余行带 `duplicate_of = <首选 node_id>`。
+  //
+  // 为什么必须由 hub 判：客户端只看得到 updated_at，而重复注册常发生在同一秒 ——
+  // 实测 TM客户端基建牛 三条 updated_at 完全相同（2026-10-26 12:26:22），
+  // 按「保留最新」会随机留一条，而真正在跑的是**有会话**的那条（客户端看不到会话）。
+  //
+  // 规则：有会话 > updated_at 新 > node_id 字典序（最后一条只为让结果稳定）。
+  const liveNodeIds = new Set(
+    db.all<{ node_id: string | null }>("SELECT DISTINCT node_id FROM sessions WHERE network_id = ?1", networkId)
+      .map(r => r.node_id).filter((x): x is string => !!x),
+  );
+  const byAliasForRank = new Map<string, typeof nodes>();
+  for (const n of nodes) {
+    const key = n.alias || n.node_name;
+    const bucket = byAliasForRank.get(key);
+    if (bucket) bucket.push(n); else byAliasForRank.set(key, [n]);
+  }
+  const preferredByAlias = new Map<string, string>();
+  for (const [key, bucket] of byAliasForRank) {
+    if (bucket.length < 2) continue;
+    const ranked = [...bucket].sort((a, b) => {
+      const alive = Number(liveNodeIds.has(b.node_id)) - Number(liveNodeIds.has(a.node_id));
+      if (alive !== 0) return alive;
+      const t = String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""));
+      if (t !== 0) return t;
+      return a.node_id.localeCompare(b.node_id);
+    });
+    preferredByAlias.set(key, ranked[0].node_id);
+  }
   const memberIds = new Set(members.map(m => m.user_id));
   const byOwner = new Map<string, DirectoryAgent[]>();
   const unowned: DirectoryAgent[] = [];
   for (const n of nodes) {
-    const agent = { node_id: n.node_id, alias: n.alias || n.node_name };
+    // 只在**显式**归属时带这一格:没设 = 没有显式归属(顶层 agent_department_supported 告诉
+    // 客户端这一点)。行形状保持不变 —— 旧客户端拿到的行还是老样子(多一个键会让严格要求
+    // 形状的测试/客户端意外),只是新客户端不再把「负责人在哪个部门」当成 Agent 的部门。
+    const agent = {
+      node_id: n.node_id,
+      alias: n.alias || n.node_name,
+      ...(n.department_id ? { department_id: n.department_id } : {}),
+      // #2596 —— 客户端据此做「按 alias 去重（保留最新）」与「默认只看近 7 天」。
+      updated_at: n.updated_at ?? null,
+      lifecycle_state: n.lifecycle_state ?? null,
+      // #2965 —— 同 alias 的重复行：这一格指向「首选 node_id」，没有重复时不出现。
+      // 客户端可以据此只显示首选那条；也可以像以前一样自己按 updated_at 去重（行为不变）。
+      ...(() => {
+        const pref = preferredByAlias.get(n.alias || n.node_name);
+        return pref && pref !== n.node_id ? { duplicate_of: pref } : {};
+      })(),
+    };
     if (n.owner_user_id && memberIds.has(n.owner_user_id)) {
       const list = byOwner.get(n.owner_user_id) ?? [];
       list.push(agent);
@@ -100,6 +163,12 @@ export function peopleDirectory(networkId: string, hidden: HiddenNode, query: { 
     network_id: networkId,
     total: people.length,
     people: page,
+    // #1976 —— 「Agent 归属」与「人类部门」是两个独立的结构。
+    // Agent 放哪个部门,只由**显式**设置(nodes.department_id)决定;**不再**从「负责人在哪个部门」推断。
+    // 这一格告诉客户端「这个 Hub 支持显式 Agent 部门」:客户端据此把「没有 department_id 这一行」
+    // 读成「没有显式归属 ⇒ 未归属」,而不是「按负责人部门推断」。
+    // 老 Hub 没有这一格 ⇒ 客户端保留旧的推断口径,行为不变。
+    agent_department_supported: true,
     ...(query.offset === 0 ? { agents_without_owner: unowned.filter(a => hit(a.alias)) } : {}),
     has_more: hasMore,
     next_offset: hasMore ? query.offset + query.limit : null,

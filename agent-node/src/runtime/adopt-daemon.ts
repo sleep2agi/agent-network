@@ -10,7 +10,23 @@ import { adoptedChild, forgetAdoptedChild, readWorkdirRegistry, writeAdoptedChil
 import { readCodexScope } from "./adopt-codex-scope.js";
 import { collectCodexPanes } from "./adopt-codex-tmux.js";
 import { configHash } from "./adopt-launch-evidence.js";
+import { readOpenCodeBridgePid, verifyOpenCodeBridge } from "./adopt-opencode-v2.js";
 import { optionalCodexStartInputs } from "./adopt-codex-start-inputs.js";
+
+/**
+ * 把内部拒绝原因折成**可以回给 Hub** 的短码（见 #1987）。
+ *
+ * 规则：只放行 `adopt_* / daemon_has_* / copresence_* / cannot_adopt_* / workdir_*`，
+ * 基段允许小写字母、数字与下划线（`copresence_adopt_v2` 属于这一类），
+ * 冒号后只允许大写字母、数字、下划线、逗号（用于 `adopt_env_not_reproducible:HOME,TMUX`）。
+ * 其它一律折叠成 `adopt_local_verification_failed` —— 绝不把路径或 OS 错误原文带出去。
+ */
+export function publicAdoptError(message: unknown): string {
+  return typeof message === "string"
+    && /^(adopt_|daemon_has_|copresence_|cannot_adopt_|workdir_)[a-z0-9_]+(:[A-Z0-9_,]+)?$/.test(message)
+    ? message
+    : "adopt_local_verification_failed";
+}
 
 export interface AdoptDaemonDeps extends AdoptionIdentityOptions {
   workDir: string;
@@ -63,9 +79,22 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
   try {
     if (process.platform !== "linux") throw Error("adopt_platform_unsupported");
     if (req.request_id !== requestId) throw Error("adopt_request_mismatch");
-    const identity = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true });
+    const identity = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true, allowOpenCodeV2: true });
     alias = identity.alias;
-    if (identity.config.codexCopresence) {
+    if (identity.config.opencodeMode === "copresence") {
+      // Phase 1: registration only (source reads / fork). No signal, spawn or config write.
+      const readProc = deps.readProc ?? readAdoptionProc;
+      const pid = readOpenCodeBridgePid(identity.nodeDir, deps.uid);
+      const before = readProc(pid);
+      verifyOpenCodeBridge(identity, before, deps.uid);
+      // No await between final verification and atomic registry persistence.
+      const checked = verifyAdoptionLocalIdentity(req, { ...deps, allowOpenCodeV2: true });
+      if (!isDeepStrictEqual(identity, checked) || readOpenCodeBridgePid(identity.nodeDir, deps.uid) !== pid) throw Error("adopt_identity_changed");
+      if (!isDeepStrictEqual(before, readProc(pid))) throw Error("adopt_process_changed");
+      writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, node_id: identity.nodeId,
+        nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: "tmux",
+        opencode_v2: { version: 1, config_hash: configHash(identity) } });
+    } else if (identity.config.codexCopresence) {
       const scope = readCodexScope(identity, deps.uid);
       collectCodexPanes(scope);
       const checked = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true });
@@ -100,8 +129,10 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
     registered = true;
   } catch (e: any) {
     // Do not expose filesystem paths or secrets from parser/OS error messages.
-    const message = typeof e?.message === "string" && /^(adopt_|daemon_has_|copresence_|cannot_adopt_|workdir_)[a-z_]+(:[A-Z0-9_,]+)?$/.test(e.message)
-      ? e.message : "adopt_local_verification_failed";
+    // #1987 —— 白名单的基段必须允许**数字**：`copresence_adopt_v2` 就是最常见的一条拒绝原因，
+    // 而旧正则 `[a-z_]+` 不匹配末尾的 `2` ⇒ 真实原因被吞掉、只剩通用码
+    // `adopt_local_verification_failed`，运维只能靠猜（2026-10-27 实测就是这样）。
+    const message = publicAdoptError(e?.message);
     await deps.callCommHub("ack_adopt_request", { request_id: requestId, status: "refused", error: message });
     return;
   }

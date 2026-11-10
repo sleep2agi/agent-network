@@ -1,0 +1,33 @@
+# test2028 — vendor 重放门与接线的承重证据（#2028 首片）
+
+Observed: 2026-10-23 05:2x Asia/Shanghai
+Source: 07fc08aa60c70c2563abfaca79102962f1df4b71（PR2903 branch fix/2028-no-vendor-replay，含本套件）
+Image: anet-test2028（FROM oven/bun:1.3.14@sha256:e10577f0…，--network none）
+Commands:
+  docker build -f tests/test2028-vendor-replay-gate/Dockerfile -t anet-test2028 .
+  docker run --rm --network none -e TEST2028_SOURCE_COMMIT=07fc08aa… anet-test2028
+Result: build exit 0 / run exit 0
+
+## green（门 + 接线）
+src/vendor-error-replay-gate.test.ts    8 pass / 0 fail   31 expect
+  - known OpenCode runtime codes are non-replayable（timeout / owner_left / provider / v1 refusals）
+  - unknown / missing codes keep the existing vendor policy
+  - vendor-ish 文本单独出现时仍走原重试（基线，防「一刀切禁重放」）
+  - 结构化码命中时不再重放
+  - 401 / quota / 429 排除不变
+  - cli.ts 接线：runtimeFailureCode 三处赋值 + 三参调用 + 禁止回退两参
+
+## mutation A（去掉结构化码门）
+删掉 vendor-error.ts 里的 `if (isNonReplayableRuntimeFailure(runtimeCode)) return false;`
+→ 用例 `a structured OpenCode failure suppresses the vendor replay` 变红：MUTATION_RED(gate-removed) rc=1
+
+## mutation B（接线退回两参）
+把 cli.ts 的 `isTransientVendorError(text, failed, runtimeFailureCode)` 改成两参
+→ 用例 `the vendor retry asks the gate with the structured code` 变红：MUTATION_RED(wiring-two-args) rc=1
+
+## restored
+恢复后再次 8 pass / 0 fail。RESULT: PASS（门与接线都是承重的）
+
+## 边界（不夸大）
+本套件证明的是「结构化码门 + cli 接线」承重，**不是**起真实 runtime 跑完整
+processTask 的重放实证；后者需要 fake opencode server + 真 Hub，另见 #2028 说明。

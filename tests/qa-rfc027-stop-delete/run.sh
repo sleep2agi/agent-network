@@ -707,21 +707,20 @@ DAEMON_NETB_NTOK=$(echo "$DAEMON_NETB_NTOK_RESP" | jq -r .token)
 [[ "$DAEMON_NETB_NTOK" == ntok_* ]] && ok "stranger-network daemon ntok minted" \
   || { bad "stranger daemon ntok mint failed: $DAEMON_NETB_NTOK_RESP"; }
 
-# list_my_children needs a nodes row matching the token's alias +
-# network (resolveCallerDaemonTokenBound joins nodes BY alias). The
-# daemon's register flow would create that row; here we INSERT it
-# directly so we don't need to spin up a second daemon process just
-# to exercise the cross-tenant filter.
+# Register like a real new daemon: mint first, then report_status binds the
+# credential to its node ID. A direct ownerless INSERT bypasses that proof and
+# is intentionally not sufficient for a newly issued credential (#678).
 DAEMON_NETB_NODE_ID="node_daemon_netb_$(date +%s%N | sha256sum | head -c 12)"
-# nodes table has no `status` column — only the columns from the CREATE
-# (node_id, node_name, alias, runtime, model, ...) + a V3 ALTER for
-# network_id. We just need the row to exist for resolveCallerDaemonTokenBound's
-# JOIN (it filters on alias + network_id only).
-sqlite3 "$HUB_DB" "INSERT INTO nodes (node_id, node_name, alias, network_id, runtime, model) VALUES (
-  '$DAEMON_NETB_NODE_ID', '$DAEMON_NAME_NETB', '$DAEMON_NAME_NETB', '$STRANGER_NET_ID',
-  'claude-agent-sdk', 'claude-opus-original'
-);"
 mcp_init_once "$DAEMON_NETB_NTOK"
+BODY=$(jq -nc --arg alias "$DAEMON_NAME_NETB" --arg node "$DAEMON_NETB_NODE_ID" \
+  '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"report_status",arguments:{alias:$alias,node_id:$node,resume_id:$node,status:"idle",agent:"daemon"}}}')
+RESP=$(mcp_call "$DAEMON_NETB_NTOK" "$BODY")
+if [[ "$(echo "$RESP" | jq -r .ok)" == "true" ]] && \
+   [[ "$(sqlite3 "$HUB_DB" "SELECT count(*) FROM api_tokens t JOIN nodes n ON n.node_id=t.bound_node_id AND n.network_id=t.network_id WHERE n.node_id='$DAEMON_NETB_NODE_ID' AND n.owner_user_id IS NULL AND t.node_identity_epoch=2 AND t.revoked_at IS NULL;")" == "1" ]]; then
+  ok "stranger daemon registered via HTTP with precise token binding and NULL owner"
+else
+  bad "stranger daemon registration or token binding failed: $RESP"
+fi
 BODY=$(build_list_my_children_body)
 RESP=$(mcp_call "$DAEMON_NETB_NTOK" "$BODY")
 CN_OK=$(echo "$RESP" | jq -r .ok 2>/dev/null)

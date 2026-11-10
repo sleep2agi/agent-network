@@ -6,6 +6,7 @@ You just got hold of a **brand-new Ubuntu / Debian server** (cloud VM, local VM,
 Every step has a verify command, and the end of the page has a common-error lookup ([troubleshooting table](#troubleshooting-table)).
 
 It is not for users who already have anet installed; that's [Getting Started](/en/guide/getting-started) or [Upgrade Guide](/en/guide/upgrade).
+To move an existing Hub to another machine, follow [Moving the Hub](/en/deploy/hub-migration); a fresh deployment does not restore its data.
 :::
 
 ## 0. Prerequisites

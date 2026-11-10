@@ -19,12 +19,14 @@ import { codexTimeoutDetail } from "./runtime/sdk-timeout-detail";
 export const CODEX_SDK_DEFAULT_APPROVAL_POLICY = "never";
 export const CODEX_SDK_DEFAULT_SANDBOX_MODE = "danger-full-access";
 
+import { isModelReasoningEffort } from "./runtime/codex-config-flags.js";
+
 export interface CodexSdkThreadOptions {
   skipGitRepoCheck: boolean;
   approvalPolicy: any;
   model: string;
   sandboxMode: any;
-  modelReasoningEffort: "low";
+  modelReasoningEffort: string;
 }
 
 export function buildCodexSdkThreadOptions(flags: unknown, model: string): CodexSdkThreadOptions {
@@ -34,7 +36,7 @@ export function buildCodexSdkThreadOptions(flags: unknown, model: string): Codex
     approvalPolicy: typeof cfgFlags.approvalPolicy === "string" ? cfgFlags.approvalPolicy : CODEX_SDK_DEFAULT_APPROVAL_POLICY,
     model,
     sandboxMode: typeof cfgFlags.sandboxMode === "string" ? cfgFlags.sandboxMode : CODEX_SDK_DEFAULT_SANDBOX_MODE,
-    modelReasoningEffort: "low" as const,
+    modelReasoningEffort: isModelReasoningEffort(cfgFlags.modelReasoningEffort) ? cfgFlags.modelReasoningEffort : "low",
   };
 }
 

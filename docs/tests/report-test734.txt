@@ -1,0 +1,67 @@
+test734 — board #734 codex paginated-rollout guard (review round 2). Docker --cpus=2, 2026-10-08 06:51 CST, image built from this branch (codex 0.133.0 + 0.159.2 real binaries).
+agent-node typecheck: 81 errors (= baseline 81). agent-network bun tsc --noEmit: rc=0. check-mutation-pins rc=0, check-doc-symbol-pins rc=0 (both doc roots), test-suite-registration rc=0.
+Launch commands: git diff origin/main on agent-network/bin/cli.ts + src/codex-external-appserver.ts removes 0 lines (additions only).
+
+T734 source=local
+── L1 unit
+src/runtime/codex-rollout-history-guard.test.ts:
+src/goals/codex-wake.test.ts:
+src/codex-copresence-rollout-guard.test.ts:
+PASS L1 unit
+── L2 guard × real codex --version
+PASS L2 0.133 on paginated → blocked
+PASS L2 0.159.2 on paginated → allowed
+PASS L2 0.133 on legacy → allowed
+PASS L2 0.133, rollout missing → allowed
+PASS L2 wrapper 'nvm 0.39.7' + real 0.159.2 on paginated → allowed
+PASS L2 wrapper with no codex version line on paginated (unknown → warn, allow) → allowed
+PASS L2 block message explains the consequence
+── L3 bounded first-line read on a 300 MB rollout
+   size=314573800 bytes
+   {"ok":true,"reportedBytes":65536,"kernelReadBytes":131171,"ms":1,"verdict":"block"}
+PASS L3 reads < 1 MiB of a 300 MB file and still blocks
+── L4 agent-node owned app-server (real binaries)
+PASS L4 0.133 on paginated: refused before spawning app-server
+PASS L4 rollout untouched
+PASS L4 real 0.159.2 resume of a mixed rollout fails closed with the diagnosis
+PASS L4 mixed rollout untouched
+── L5 the REAL POSIX launcher: anet node start (co-presence)
+PASS L5 launcher refuses codex 0.133 on a paginated thread; no app-server started
+PASS L5 rollout untouched
+PASS L5 launcher lets codex 0.159.2 start the app-server
+PASS L5 launcher lets codex 0.133 start on a legacy thread
+PASS L5 launcher + real codex 0.159.2 on the mixed rollout: fail-closed with the diagnosis
+PASS L5 mixed rollout untouched
+   --- diagnosis as printed by the launcher ---
+   [anet] [codex] ❌ thread 01a11846-d796-72f1-af68-8d9215a65dc8 cannot be resumed: its rollout mixes codex versions (board #734).
+   [anet] [codex]    Cause: the thread was written by codex >= 0.145.0 ("paginated" history, every line has an ordinal),
+   [anet] [codex]    then an older codex (< 0.145.0) appended lines without one. codex >= 0.145.0 rejects that file.
+   [anet] [codex]    The original file is untouched: /root/t734-work.iJiOHF/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl
+   [anet] [codex]    Safe options: wait for fork recovery (board #734), or — after a human decides the history may be left behind —
+   [anet] [codex]    start a fresh thread (anet node start <node> --new-session). Do not edit or delete the rollout.
+   [anet] [codex]    Read-only check: head -n 1 '/root/t734-work.iJiOHF/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl' | grep -o '"history_mode":"[a-z]*"'; tail -n 1 '/root/t734-work.iJiOHF/.anet/nodes/t734n4/codex-home/sessions/2026/10/07/rollout-2026-10-07T21-30-58-01a11846-d796-72f1-af68-8d9215a65dc8.jsonl' | grep -c '"ordinal"'
+   [anet] [codex]      (paginated + last line count 0 = this failure)
+PASS L5 anet PATH=0.133, login PATH=0.159.2: probes and launches 0.159.2
+PASS L5 anet PATH=0.159.2, login PATH=0.133: refused (0.133 is what would launch)
+PASS L5 --new-session: codex 0.133 starts (guard bypassed)
+PASS L5 --new-session on the mixed rollout: fresh thread, old thread not resumed
+PASS L5 --new-session left the rollout untouched
+── L6 external app-server node (#630): the workspace .env sets PATH
+   appsrv pane: bash -c "set -a; if [ -f '/root/t734-ext.gXn2Sm/.env' ]; then . '/root/t734-ext.gXn2Sm/.env'; fi; set +a; export NO_PROXY=\"\${NO_PROXY:+\$NO_PROXY,}127.0.0.1,localhost\" no_proxy=\"\${no_proxy:+\$no_proxy,}127.0.0.1,localhost\"; export CODEX_HOME='/root/t734-ext.gXn2Sm/.anet/nodes/t734x1/codex-home'; ANET_CODEX_COMMHUB_TOKEN=\"$(ANET_EXTAPP_CONFIG='/root/t734-ext.gXn2Sm/.anet/nodes/t734x1/config.json' '/usr/local/bin/bun' -e 'const c=JSON.parse(require(\"fs\").readFileSync(process.env.ANET_EXTAPP_CONFIG,\"utf8\"));process.stdout.write(typeof c.token===\"string\"?c.token:\"\")')\"; export ANET_CODEX_COMMHUB_TOKEN; if [ -z \"\$ANET_CODEX_COMMHUB_TOKEN\" ]; then echo \"[anet] warning: config.json has no token; the app-server's commhub MCP will not authenticate\" >&2; fi; mkdir -p '/root/t734-ext.gXn2Sm/.anet/nodes/t734x1/logs'; 'codex' -C '/root/t734-ext.gXn2Sm' app-server --listen 'ws://127.0.0.1:9401' 2>&1 | tee -a '/root/t734-ext.gXn2Sm/.anet/nodes/t734x1/logs/tmux-appserver.log'"
+PASS L6 .env PATH=0.159.2, anet PATH=0.133: probe sees 0.159.2, pane runs 0.159.2
+PASS L6 launch command still runs the bare configured 'codex' (no substituted path)
+PASS L6 .env PATH=0.133, anet PATH=0.159.2: refused, nothing started
+PASS L6 legacy thread: the .env binary (0.133) runs, as before #734
+── mutations of the shipped source (each must go red)
+PASS mutation M1-drop-version-compare → red (l2-block)
+   {"ok":true,"reportedBytes":412,"kernelReadBytes":629147699,"ms":457,"verdict":"block"}
+PASS mutation M2-read-whole-file → red (l3)
+PASS mutation M3-launcher-guard-not-wired → red (l5-block)
+PASS mutation M4-launcher-ignores-block → red (l5-block)
+PASS mutation M5-launcher-ignores-new-session → red (l5-newsession)
+PASS mutation M6-first-semver-wins → red (l2-wrapper)
+PASS mutation M7-probe-anet-path-not-login-path → red (l5-twopath)
+PASS mutation M8-archived-before-sessions → red (unit-node)
+PASS mutation M10-probe-skips-dotenv → red (l6-env)
+PASS mutation M9-goal-wake-unguarded → red (unit-node)
+T734 PASS=38 FAIL=0

@@ -92,13 +92,40 @@ describe("#620 scrubInheritedSessionIdentityEnv", () => {
     const start = sh.indexOf("_scrub_node_identity_env() {");
     const end = sh.indexOf("esac", start);
     expect(start).toBeGreaterThan(0);
-    const patterns = sh.slice(start, end).match(/[A-Z][A-Z0-9_]*\*?(?=[|)\\\s])/g) ?? [];
+    // 抽 pattern：按 `|` 切开再逐个清洗。旧写法用一条正则扫全文，
+    // 于是 `*_API_KEY` 被切成 `API_KEY` —— 抽取器的形状决定了比对的可信度，
+    // 而"切错"与"真差异"在断言里长得一样。
+    // 抽 pattern：去掉续行反斜杠后按 `|` 切开，逐 token 清洗。
+    // 旧写法用一条正则扫全文，`*_API_KEY` 会被切成 `API_KEY` —— 抽取器的形状
+    // 决定了比对的可信度，而「切错」与「真差异」在断言里长得一样。
+    const patterns = sh
+      .slice(start, end)
+      .replace(/\\\n/g, " ")
+      .split("|")
+      .map((t) => t.trim().replace(/^[\s"']+|[\s"')]+$/g, ""))
+      .filter((t) => /^\*?[A-Z][A-Z0-9_]*(_\*)?\*?$/.test(t));
+    expect(patterns.length).toBeGreaterThan(10);
     const names = patterns.filter((p) => /^[A-Z]/.test(p) && p !== "_scrub_node_identity_env");
     expect(names.length).toBeGreaterThan(10);
+
+    // 2026-11-06 —— 两边**故意**不一致的一格：provider 凭据。
+    //   hub-daemon.sh 清 `*_API_KEY` / `*_API_KEY_*`（它自己注入了 provider 配置，不需要继承）；
+    //   而 TS 路径（`anet node start`）要**保留**它们 —— 见 MUST_KEEP 里的 OPENAI_API_KEY。
+    // 两条断言在同一次运行里互相矛盾（一条要求清、一条要求留），所以必须把差异写成数据，
+    // 而不是让其中一条悄悄赢。差异集合一旦增长，这里会红。
+    const SHELL_ONLY = new Set(["*_API_KEY", "*_API_KEY_*"]);
+    const unexpected: string[] = [];
     for (const p of names) {
       const probe = p.endsWith("*") ? `${p.slice(0, -1)}X` : p;
-      expect({ p, scrubbed: isInheritedSessionIdentityEnvName(probe) }).toEqual({ p, scrubbed: true });
+      const scrubbed = isInheritedSessionIdentityEnvName(probe);
+      if (SHELL_ONLY.has(p)) {
+        // 例外方向也要钉住：TS 确实**不**清它（否则这条注释就是假的）
+        if (scrubbed) unexpected.push(`${p}（登记为例外，但 TS 也清了）`);
+        continue;
+      }
+      if (!scrubbed) unexpected.push(`${p}（shell 清了，TS 没清）`);
     }
+    expect(unexpected).toEqual([]);
   });
 });
 

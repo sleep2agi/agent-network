@@ -15,9 +15,11 @@ import {
   createRuntimeReadinessMonitor,
   extractVersion,
   httpHeadReal,
+  opencodeExplicitGenerationMismatch,
   probeRuntimeReadiness,
   proxyFor,
   realReadinessDeps,
+  requiredCliStatus,
   type ExecResult,
   type ReadinessDeps,
 } from "./runtime-readiness.js";
@@ -170,6 +172,67 @@ describe("#622 probeRuntimeReadiness —— 状态判定", () => {
     const e = (await probeRuntimeReadiness(["opencode-cli"], d))["opencode-cli"];
     expect(e.state).toBe("ready");
     expect(e.auth).toBe("not_required");
+    expect(e.generation).toBeUndefined();
+    expect(e.accepted).toBeUndefined();
+  });
+
+  test("V2 provider is node-specific: neither Zen connectivity nor V1 auth proves readiness", async () => {
+    for (const verdict of ["reachable", "unreachable", "hang"] as const) {
+      const d = deps({ bins: { opencode: OK("opencode v2.0.22") },
+        files: [".local/share/opencode/auth.json"], net: { "opencode.ai": verdict } });
+      const e = (await probeRuntimeReadiness(["opencode-cli"], d))["opencode-cli"];
+      expect(e.state).toBe("unknown");
+      expect(e.ok).toBe(false);
+      expect(e.cli).toBe("found");
+      expect(e.version).toBe("2.0.22");
+      expect(e.auth).toBe("unknown");
+      expect(e.network).toBe("skipped");
+      expect(e.reason).toContain("目标节点配置");
+      expect(e.generation).toBe("v2");
+      expect(e.accepted).toBe(true);
+      expect(d.calls.head).toEqual([]);
+    }
+  });
+
+  test("unaccepted OpenCode 2.x stays unknown and names the accepted pin", async () => {
+    const d = deps({ bins: { opencode: OK("opencode v2.0.99") }, net: { "opencode.ai": "reachable" } });
+    const e = (await probeRuntimeReadiness(["opencode-cli"], d))["opencode-cli"];
+    expect(e.state).toBe("unknown");
+    expect(e.ok).toBe(false);
+    expect(e.generation).toBe("v2");
+    expect(e.accepted).toBe(false);
+    expect(e.network).toBe("skipped");
+    expect(e.reason).toContain("@opencode/cli@2.0.22");
+    expect(e.reason).toContain("会被拒绝");
+    expect(d.calls.head).toEqual([]);
+  });
+
+  test("V1 Zen failure and missing OpenCode CLI remain blocking", async () => {
+    const v1 = deps({ bins: { opencode: OK("1.18.34") }, net: { "opencode.ai": "unreachable" } });
+    const v1entry = (await probeRuntimeReadiness(["opencode-cli"], v1))["opencode-cli"];
+    expect(v1entry.state).toBe("no_network");
+    expect(v1entry.generation).toBe("v1");
+    expect(v1entry.accepted).toBe(true);
+    expect(v1.calls.head).toEqual(["https://opencode.ai"]);
+    const missing = deps();
+    expect((await probeRuntimeReadiness(["opencode-cli"], missing))["opencode-cli"].state).toBe("missing_cli");
+    expect(missing.calls.head).toEqual([]);
+  });
+
+  test("explicit generation mismatches only a found CLI", () => {
+    expect(opencodeExplicitGenerationMismatch(undefined, { cli: "found", version: "2.0.22" })).toBeNull();
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "unknown" })).toBeNull();
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "missing" })).toBeNull();
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "found", version: "2.0.22" })).toBeNull();
+    const wrongGen = opencodeExplicitGenerationMismatch("v2", { cli: "found", version: "1.18.34" });
+    expect(wrongGen).toMatch(/^opencode_generation_mismatch/);
+    expect(wrongGen).toContain("@opencode/cli@2.0.22");
+    expect(wrongGen).toContain("OpenCode's own config");
+    expect(wrongGen).toContain("anet provider preset");
+    expect(wrongGen).not.toContain("/home/");
+    const wrongV1 = opencodeExplicitGenerationMismatch("v1", { cli: "found", version: "2.0.22" });
+    expect(wrongV1).toContain("opencode-ai@1.18.34");
+    expect(opencodeExplicitGenerationMismatch("v2", { cli: "found" })).toMatch(/^opencode_generation_mismatch/);
   });
 
   test("codex 共享登录:只报个数,ready 时 reason 提示", async () => {
@@ -264,6 +327,25 @@ describe("#622 网络 HEAD 与代理", () => {
     expect(proxyFor("api.x.ai", {})).toBeUndefined();
   });
 
+  // 2026-10-31 —— 同族匹配必须是**点边界**匹配，不能是裸后缀。
+  //
+  // 这条单独钉住，因为它是「同族 vs 外族」这一整类判断的最常见写法错误：
+  //   host.endsWith("x.ai")            ⇒ "evx.ai" / "attackx.ai" 都命中 ⇒ 绕过
+  //   host.endsWith("." + bare)        ⇒ 只有 "api.x.ai" 这种真子域命中
+  //
+  // 对应的线上形状：一个 origin/CSRF 闸如果用裸后缀，那么任意同族域都能过；
+  // 而用一个**同族**值去探测这种闸，会得到“放行”，看起来像“闸门正常”。
+  // 所以探针必须同时打一个外族值（evil.example）——它必然被拒，
+  // 只有它才能区分「精确匹配」与「后缀匹配」。判据在测试里钉住，防止实现被改回去。
+  test("proxyFor 的 NO_PROXY 后缀必须带点边界（裸后缀会被 evx.ai 绕过）", () => {
+    const env = { HTTPS_PROXY: "http://p:3128", NO_PROXY: "x.ai" };
+    expect(proxyFor("x.ai", env)).toBeUndefined();          // 精确主机照样命中
+    expect(proxyFor("api.x.ai", env)).toBeUndefined();      // 真子域命中
+    expect(proxyFor("evx.ai", env)).toBe("http://p:3128");  // 🔴 裸后缀会在这里误判为直连
+    expect(proxyFor("attackx.ai", env)).toBe("http://p:3128");
+    expect(proxyFor("x.ai.evil.example", env)).toBe("http://p:3128"); // 反向拼接也不能命中
+  });
+
   async function fakeProxy(reply: (line: string) => string | null): Promise<{ server: Server; port: number; seen: string[] }> {
     const seen: string[] = [];
     const server = createServer((sock) => {
@@ -338,5 +420,37 @@ describe("#622 调度与上报", () => {
     expect(out.daemon_capabilities?.runtime_readiness?.["opencode-cli"].state).toBe("ready");
     // 首轮未完成 / 非 daemon:逐字不变。
     expect(attachRuntimeReadiness(snap, undefined)).toBe(snap);
+  });
+});
+
+// #1611 — 显式代际建节点：PATH 第一命中可能是另一代 opencode，必须按顺序扫到被接受的那份。
+describe("#1611 显式代际按 PATH 顺序取可接受候选", () => {
+  const CHILD = { PATH: "/opt/v1/bin:/opt/v2/bin", HOME, LANG: "C.UTF-8" };
+  const io = {
+    resolveOnPath: () => "/opt/v1/bin/opencode",
+    candidatesOnPath: () => ["/opt/v1/bin/opencode", "/opt/v2/bin/opencode"],
+    execVersion: async (bin: string): Promise<ExecResult> => ({
+      kind: "ok",
+      stdout: bin.includes("/v2/") ? "opencode v2.0.22" : "1.18.1",
+    }),
+  };
+
+  test("v2 请求跳过第一命中的 1.18.1，命中后面的 2.0.22", async () => {
+    const st = await requiredCliStatus("opencode-cli", CHILD.PATH, CHILD, io, 1_000,
+      (v) => v === "2.0.22");
+    expect(st).toEqual({ cli: "found", command: "opencode", version: "2.0.22" });
+  });
+
+  test("没有候选被接受时回落成第一命中版本，交给 mismatch 报错", async () => {
+    const st = await requiredCliStatus("opencode-cli", CHILD.PATH, CHILD, io, 1_000,
+      (v) => v === "1.18.34");
+    expect(st).toEqual({ cli: "found", command: "opencode", version: "1.18.1" });
+    const m = opencodeExplicitGenerationMismatch("v2", st as any);
+    expect(m).toContain("opencode_generation_mismatch");
+  });
+
+  test("缺省 acceptVersion 时行为与之前一致（只看第一命中）", async () => {
+    const st = await requiredCliStatus("opencode-cli", CHILD.PATH, CHILD, io, 1_000);
+    expect(st).toEqual({ cli: "found", command: "opencode", version: "1.18.1" });
   });
 });

@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "generation": "v1",
+  "packageName": "opencode-ai",
+  "version": "1.18.34",
+  "hostId": "REPLACE_HOST_ID",
+  "instanceId": "REPLACE_WITH_32_LOWERCASE_HEX_PER_SERVER_START",
+  "cohortId": "REPLACE_OWNER_SELECTED_COHORT",
+  "binary": "REPLACE_ATTESTED_CANONICAL_PACKAGE_ENTRYPOINT",
+  "url": "http://127.0.0.1:19208",
+  "passwordFile": "REPLACE_PRIVATE_HOST_ROOT/server.password",
+  "roots": {
+    "home": "REPLACE_PRIVATE_HOST_ROOT/home",
+    "config": "REPLACE_PRIVATE_HOST_ROOT/config",
+    "data": "REPLACE_PRIVATE_HOST_ROOT/data",
+    "cache": "REPLACE_PRIVATE_HOST_ROOT/cache",
+    "state": "REPLACE_PRIVATE_HOST_ROOT/state",
+    "managed": "REPLACE_PRIVATE_HOST_ROOT/managed",
+    "runtime": "REPLACE_PRIVATE_HOST_ROOT/runtime"
+  }
+}

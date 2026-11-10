@@ -22,8 +22,10 @@ if (!bundlePath) fail('usage: node scripts/import-public-skill-bundle.mjs <bundl
 
 let bundle
 try { bundle = JSON.parse(await readFile(bundlePath, 'utf8')) } catch { fail('bundle is missing or invalid JSON') }
-const bundleKeys = Object.keys(bundle || {}).sort().join(',')
-if (bundleKeys !== 'content,content_sha256,metadata,schema_version' || bundle.schema_version !== 1) fail('bundle shape or schema_version is invalid')
+// 🔴 键集比较用 JSON.stringify：键名可以含逗号/空格，join 出来的字符串会碰撞，
+//    而碰撞的方向是「多一个键」被读成「正好这几个键」——静默放行。
+const bundleKeys = JSON.stringify(Object.keys(bundle || {}).sort())
+if (bundleKeys !== '["content","content_sha256","metadata","schema_version"]' || bundle.schema_version !== 1) fail('bundle shape or schema_version is invalid')
 if (typeof bundle.content !== 'string' || !bundle.content) fail('bundle content must be non-empty text')
 if (!bundle.metadata || typeof bundle.metadata !== 'object' || Array.isArray(bundle.metadata)) fail('bundle metadata is invalid')
 if (Object.keys(bundle.metadata).some(key => !metadataKeys.has(key))) fail('bundle metadata contains an unknown field')

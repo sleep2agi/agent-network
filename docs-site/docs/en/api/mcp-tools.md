@@ -12,13 +12,38 @@ CommHub Server registers **74** MCP Tools, all called through `POST /mcp` (Strea
 | Node token (agent) | Protocol tools: `get_*_request` / `ack_*_request` (config, rules file, create / stop / start node, probe), `get_config_update`, `ack_config_update`, `list_my_pending_*`, `list_my_children`, `mark_tasks_*` | agent-node and the daemon call these by name; a model does not need them. They are listed when the request carries `X-Anet-Tools: all` (or `/mcp?tools=all`) |
 | Node token in read-only / restricted mode | Also `broadcast`, the node / skill / probe write tools, and the people-only tools | Always refused in those modes |
 | Node token with `COMMHUB_NODE_PERMISSIONS=enforce` | Also the people-only tools (`upsert_provider`, `update_provider`, `upsert_network_secret`, `review_skill`) | Refused once the switch is on; in the default `log` mode they still work, so they stay listed |
-| User token (person) | `report_status` and all protocol tools | A user token is always refused these (`network_token_required` / `caller_not_a_daemon`) |
+| User token (person) | `report_status`, `org_whoami`, `schedule_*` and all protocol tools | A user token is always refused these (`network_token_required` / `caller_not_a_daemon`) |
 
 Only tools that are refused regardless of arguments are hidden. Anything that depends on the arguments (who a task goes to, which network) stays listed, and so does everything for restricted members (members who see only granted agents), since they may be allowed in another network. Each tool's class is in `server/src/tool-audience.ts`; a new tool must be classified or the test fails.
 
 Measured with 74 tools: all tools 71,559 B; node 52 tools 57,632 B (−19%); user 56 tools 54,780 B (−23%).
 
+## org_whoami: my Agent team
+
+Read-only, no arguments, and available only to node tokens with a resolved node identity. User tokens receive `network_token_required`; unbound identities receive `node_identity_unbound`. Caller-supplied aliases, node IDs or network IDs cannot select another identity.
+
+Returns `node_id`, `source` (`node` / `none`), `team {id,name}`, nearest-first `ancestors`, Agent `lead`, human `owner`, same-team `agents` (including self, capped at 50), and `truncated`. This reads the independent Agent team tree, never the owner's human department. Unassigned nodes receive empty relationships. All references are network-scoped; human owners expose their ID and display name, not username. Membership is re-read on each call and grants no extra permissions.
+
 ## Complete tool index
+
+**Daemon Provider management (#906, development / not released)**
+
+| Tool | What it does |
+|------|------|
+| `daemon_provider_snapshot` | Network owner/admin requests scoped `refresh`, reads a request with `read`, saves a versioned Provider with `put`, or explicitly confirms single-node `apply`. Every call specifies `network_id`; `id` is the daemon ID for mutations and the request ID for readback. Secrets are never returned. |
+| `pull_daemon_provider_snapshots` | Only the token-bound target daemon pulls its pending requests. Writes and applications require explicit `accept_writes` / `accept_applications` capabilities. Internal protocol, not listed to models by default. |
+| `ack_daemon_provider_snapshot` | Target daemon submits a validated scoped snapshot or exact application receipt, or a fixed failure. Wrong scope, secret-bearing payloads and expired acknowledgments cannot overwrite the result. |
+
+An application receipt is distinct from a saved configuration. The first slice supports
+API-key selection for one existing managed Codex TUI co-presence node, preserving its
+thread. Official account switching is not implemented by this path. Disconnecting the
+client stops observation, not the remote operation; a timeout does not mean rollback.
+
+**Agent teams**
+
+| Tool | What it does |
+|------|------|
+| `org_whoami` | Read the authenticated node's team, ancestors, lead, owner and teammates |
 
 **Collaboration — detailed below** · 17
 
@@ -85,18 +110,34 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `get_skill` | Read one SKILL.md (pending content is owner/admin only) |
 | `review_skill` | Publish or reject a pending submission (owner/admin) |
 
-**Node lifecycle — driven by the `anet` CLI / Dashboard** · 6
+**Schedules (an Agent's own, #733)** · 8
+
+| Tool | What it does |
+|------|------|
+| `schedule_list` | List schedules in this network that target you or that you created |
+| `schedule_get` | Read one of them |
+| `schedule_create` | Create one; `target_node_id` defaults to you, another target needs `send_task` access to it right now; at most 20 open per node |
+| `schedule_update` | Change task / timing / target, pause or resume via `status`; edit, cancel and run only your own |
+| `schedule_batch_interval` | Change the interval of multiple self-created interval schedules, with per-ID results |
+| `schedule_cancel` | Cancel |
+| `schedule_run_now` | Run once now |
+| `schedule_runs` | Recent runs |
+
+Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and quota: [Schedules](/en/guide/schedules#agent-managed).
+
+**Node lifecycle — driven by the `anet` CLI / Dashboard** · 7
 
 | Tool | What it does |
 |------|------|
 | `create_node` | Create and start a node on a host daemon |
+| `clone_node` | Clone an existing daemon child into a new node on that same daemon: new alias, new ntok_, source token not copied |
 | `delete_node` | Stop child, revoke ntok, delete the hub row (config backed up by default) |
 | `stop_node` | Stop the agent-node child, keep the config dir |
 | `start_node` | Start a stopped child node through its host daemon |
 | `restart_node` | Restart a node without changing its config |
 | `update_node_config` | Set a node's desired config (model + flags) and ring its doorbell |
 
-**Host-daemon protocol — internal, called by nodes and daemons** · 12
+**Host-daemon protocol — internal, called by nodes and daemons** · 13
 
 | Tool | What it does |
 |------|------|
@@ -126,6 +167,7 @@ against each other and a mismatch is rejected. You normally do not pass `network
 | `get_adopt_request` | Only the target daemon's node token may pull the pending request; the daemon performs local path/process verification |
 | `ack_adopt_request` | Target daemon reports `adopted` / `refused`, optionally `error`. Only acknowledgement activates a binding; revoked requests cannot reactivate |
 | `unadopt_node` | Owner or network owner/admin revokes pending/active authority without stopping the node. Refused while stop/start is in flight; retry after completion |
+| `report_token_usage` | Nodes add their own LLM usage into **UTC hour buckets per model** (`input` / `output` / `cache_read` kept apart — `cache` never folds into `total`). Counts only: no prompt, no message id, no credential. Lands in `node_token_usage`; humans read `GET /api/token-usage` |
 
 Adopted children appear in `list_my_children` with `managed: "adopted"`, including stopped children.
 They cannot be deleted (`adopted_node_delete_unsupported`). Stop/start require a creation record or active binding;
@@ -153,6 +195,15 @@ before controlling a process; a restored Hub row alone is insufficient.
 | `ack_probe_request` | Daemon reports a probe result (strict whitelist: exactly 4 fields, any extra one is `-32602`) |
 | `get_probe_results` | Query probe history, optionally filtered by provider/model/daemon |
 
+**OpenCode V2 catalog (network members)** · 4
+
+| Tool | What it does |
+|------|------|
+| `read_opencode_catalog` | Queue a native catalog read for one owned OpenCode V2 child. `ok` with `status: pending` means authorized and stored in memory. It is not a snapshot and does not mean a daemon received the doorbell. Does not start a server. Rejects url, authorization, directory, settings, headers, and body |
+| `get_opencode_catalog` | Poll that read. `pending` is not a snapshot. Only `ready` returns a whitelist snapshot, still completeness unknown and invocationVerified false |
+| `get_opencode_catalog_request` | Daemon pulls one authorized read. Scope only: no URL, authorization, settings, headers, or body |
+| `ack_opencode_catalog` | Daemon stores a whitelist snapshot or a closed error code. Extra fields are rejected. A stored failure is status failed, not a transport error |
+
 **Internal signals — called by agent-node** · 3
 
 | Tool | What it does |
@@ -173,9 +224,11 @@ before controlling a process; a restored Hub row alone is insufficient.
 | `requirements_update` | Patch a task, omitted fields kept; `status` = `column` (as above). **`participants` replaces the whole list** (anyone left out is removed, `[]` clears it); to add / remove a few people use `participants_add` / `participants_remove`: applied to the current list without touching anyone else, adding someone already there or removing someone absent changes nothing; cannot be combined with `participants` (400 `participants_conflict`), the same person in both → 400 `participants_add_remove_overlap`; `archived: true` archives it (agents cannot delete) |
 | `requirements_checklist_toggle` | Set one checklist item done / not done; only that item is written |
 | `requirements_upsert_by_external_ref` | Idempotent sync by `external_ref` (e.g. `github:owner/repo#123`): create if missing, patch if present; also accepts the `status` alias |
+| `departments` | Read and write the org structure (department tree): `action: "list"` returns the tree (each department with its agent count and children); `create` / `update` / `delete` manage departments (name, parent, head, sort); `assign_agent` moves one Agent into a department (`department_id: null` removes it). **Writes are limited to the network owner/admin** (a plain member gets `forbidden`); every write is audited. Departments are **shared network-wide**, not per person |
 | `projects_list` | List the network's projects (id, name, color, sort, archived). Node (agent) tokens can **only read** projects |
 | `projects_create` | Create a project (name 1–40 characters, unique in the network; optional color / sort), same as the app's 管理项目 → 新建; needs a person's token: node (agent) tokens can only read projects and get 403 `user_token_required` here; task-scoped members and viewers get 403 too |
 | `projects_update` | Rename / recolour / reorder a project, or `archived: true / false` to archive / unarchive; only the fields you pass change; same permissions |
+| `requirement_tags` | Tags of this network. `action: "list"` returns the tree: `name`, `parent_id` (`null` = root), `depth`, colour, usage counts, `can_manage`. The same tool writes (`rename` / `merge` / `delete` / `color` / `reparent`) and **only the owner/admin may**; a node token calling a write gets 403. `reparent` only moves the tree edge (no card changes, no renames): unknown parent → 404 `tag_parent_not_found`; a cycle → 400 `tag_parent_cycle`; deeper than 4 after the move (the check is the new parent depth plus the tag's own subtree height) → 400 `tag_depth_exceeded`; **omitting the `parent` key → 400**, while `null` / `""` moves it to the top level. A refusal changes nothing in the database. Hub ≥ preview.156 |
 | `requirements_events` | Read the task activity timeline (field-level changes: who, when, old → new; and comments, `kind: "comment"` with the text in `new.text`; newest first); `requirement_id` (`req_…` or `"#N"`) for one task (`limit` default 200); **without `requirement_id` it is the whole network, 50 per page by default on MCP**, pass `next_cursor` as `cursor` for older events (`limit` ≤ 500; the REST default is still 200); `since` for only newer ones; same visibility as `requirements_list`; strict parameters (unknown ones → `-32602`) |
 | `requirements_comment` | Add a comment / progress note to a task (`{id, text}`, markdown, 1–4000 characters): **append-only**, never rewrites the description, shows in the timeline (`kind: "comment"`) under the caller (person or agent). Anyone who can see the task and is not read-only in the network may comment; can't see it → 404, viewer → 403. Hub ≥ preview.90 |
 
@@ -924,7 +977,7 @@ Tasks (requirement cards) live on the Hub; the app's 任务 page and agents read
 - **Delete is human-only** (REST `DELETE /api/requirements/{id}`; node tokens get 403 `user_token_required`); agents archive with `archived: true`. Creating / editing / deleting projects is human-only too.
 - Every task records `created_by` / `updated_by`: `{kind: "user" | "node", id}`; a node token is recorded as its bound `node_id`.
 
-**Fields**: `name`, `column` (pool / doing / done), `priority` (high / normal / low / lowest, shown in the app as P0 highest / P1 normal / P2 low / P3 lowest; `lowest` is supported by hubs whose list response `capabilities` include `priority_lowest`, older hubs answer 400 `invalid_priority`), `due` (`YYYY-MM-DD` all day, or an ISO instant with `Z` / `±HH:MM`, stored as UTC seconds), `start` (optional start, same shapes as `due`, used by the Gantt view; supported by hubs whose list `capabilities` include `start_date`, invalid values are 400 `invalid_start`; older hubs ignore it), `description` (markdown, ≤ 20000 chars), `checklist` (`[{id, text, done}]`, ≤ 100 items; replaced as a whole), `owner` (负责人, `{kind:"user"}` only, written as `{kind:"user", id}` or `{kind:"user", username}`; for old clients a node `owner` sent without `agent_owner` is stored as `agent_owner` and the response carries `owner_coerced_to_agent_owner: true`), `agent_owner` (负责 Agent, `{kind:"node"}` only, written as `{kind:"node", id}` or `{kind:"node", alias}`), `participants` (either kind, also by name; names are resolved only in the task's own network and stored as `{kind, id}`, and an `id`, when given, wins; an unknown name is 400 `person_not_in_network`, an alias matching several Agents is 400 `person_ambiguous`, both with `field` and a `hint` pointing at `requirements_people`), `project_id`, `parent_id` (sub-requirements: same network, no cycles, at most 5 levels; a parent returns `children: {total, done}`; deleting a parent keeps its children and makes them top level), `external_ref` (unique per network, e.g. `github:owner/repo#123`), `external_url` (http(s) link), `archived`, `tags` (string array, at most 10, each at most 20 Unicode characters; omit to keep, `[]` to clear; invalid values are 400 `invalid_tags`).
+**Fields**: `name`, `column` (pool / doing / done / abandoned. `abandoned` = 废弃, a closed state like done: not open, never overdue, no due reminders, no completion time; it can be moved back to pool / doing; supported by hubs whose list `capabilities` include `column_abandoned`, older hubs answer 400 `invalid_column`. **Old-client compatibility**: a REST caller that does not declare it gets `abandoned` projected to `done` in responses (desktop ≤ 0.2.220 files unknown values under pool), `status=done` also matches abandoned cards, and echoing `column: "done"` back does not turn an abandoned card into a done one; declare with the header `X-Anet-Accept-Columns: abandoned` or the query parameter `accept_columns=abandoned`; MCP always gets the real value. The event log records the real value), `priority` (high / normal / low / lowest, shown in the app as P0 highest / P1 normal / P2 low / P3 lowest; `lowest` is supported by hubs whose list response `capabilities` include `priority_lowest`, older hubs answer 400 `invalid_priority`), `due` (`YYYY-MM-DD` all day, or an ISO instant with `Z` / `±HH:MM`, stored as UTC seconds), `start` (optional start, same shapes as `due`, used by the Gantt view; supported by hubs whose list `capabilities` include `start_date`, invalid values are 400 `invalid_start`; older hubs ignore it), `description` (markdown, ≤ 20000 chars), `checklist` (`[{id, text, done}]`, ≤ 100 items; replaced as a whole), `owner` (负责人, `{kind:"user"}` only, written as `{kind:"user", id}` or `{kind:"user", username}`; for old clients a node `owner` sent without `agent_owner` is stored as `agent_owner` and the response carries `owner_coerced_to_agent_owner: true`), `agent_owner` (负责 Agent, `{kind:"node"}` only, written as `{kind:"node", id}` or `{kind:"node", alias}`), `participants` (either kind, also by name; names are resolved only in the task's own network and stored as `{kind, id}`, and an `id`, when given, wins; an unknown name is 400 `person_not_in_network`, an alias matching several Agents is 400 `person_ambiguous`, both with `field` and a `hint` pointing at `requirements_people`), `project_id`, `parent_id` (sub-requirements: same network, no cycles, at most 5 levels; a parent returns `children: {total, done}`; deleting a parent keeps its children and makes them top level), `external_ref` (unique per network, e.g. `github:owner/repo#123`), `external_url` (http(s) link), `archived`, `tags` (string array, at most 10, each at most 20 Unicode characters; omit to keep, `[]` to clear; invalid values are 400 `invalid_tags`).
 
 **Short number `seq` (task ID `#N`)**: besides its primary key `id` (`req_<uuid>`) every task has a read-only `seq` — counted from 1 per network and shown in the app as `#N`. The Hub assigns it inside the create transaction (concurrent creates never share a number); it never changes afterwards, and **numbers of deleted or archived tasks are never reused**. Tasks created before the upgrade are numbered per network at Hub startup in `created_at` order (then `id`). Supported by hubs whose list `capabilities` include `requirement_seq`; older hubs have no such field and older apps ignore it.
 
@@ -943,8 +996,9 @@ Everywhere an `{id}` is accepted (REST `GET` / `PATCH` / `DELETE` / checklist to
 | POST | `/api/requirements/{id}/comments` | `{text}` (1–4000 characters, trimmed) adds one comment, append-only; returns 201 `{event}` (`kind: "comment"`, `new.text`). Empty → 400 `invalid_comment`, too long → 400 `comment_too_long`; there is no route to edit or delete a comment. Comments are kept 180 days, like field changes |
 | DELETE | `/api/requirements/{id}` | Delete (humans only); children are kept and detached |
 | GET | `/api/requirements/projects` | Projects (creating / editing / deleting projects is human-only) |
-| GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them. A Hub with the `tag_ops` capability also returns `counts` / `colors` / `can_manage` |
+| GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them. A Hub with the `tag_ops` capability also returns `counts` / `colors` / `can_manage`; a Hub with `tag_tree` also returns `nodes` (the tag tree, zero-task tags included — see [Task tags](/en/guide/task-tags#creating-tags-and-parent-child-levels)) |
 | POST | `/api/requirements/tags/ops` | Rename / merge / delete a tag across the network, or set its color (humans only; scoped members get 403). See [Task tags](/en/guide/task-tags#managing-tags) |
+| POST | `/api/requirements/tags/create` | Create a tag, optionally with `parent_id` (at most 4 levels); a duplicate returns 409 `tag_exists`, a missing parent 404 `tag_parent_not_found` (never falls back to the root). See [Task tags](/en/guide/task-tags#creating-tags-and-parent-child-levels) |
 
 **Sync example (GitHub issues → tasks)**: call `requirements_upsert_by_external_ref` once per issue with `external_ref` = `github:<owner>/<repo>#<number>` and `external_url` = the issue link; re-syncing updates the same task instead of creating a duplicate. Use `updated_since` on `requirements_list` for incremental sync.
 

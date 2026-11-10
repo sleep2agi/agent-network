@@ -151,7 +151,7 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet node start <name> --tmux` | 在 tmux 中启动或连接节点 |
 | `anet node stop <name>` | 停止节点及其同名 tmux session |
 | `anet node restart <name>` | 停止后重新启动单个节点 |
-| `anet node resume <name> [--session <id>]` | 使用保存的会话或指定会话恢复 |
+| `anet node resume <name> [--session <id>]` | 请求恢复保存或指定的会话；能否恢复取决于 runtime，下方说明 V1 共存限制 |
 | `anet node delete <name> --force` | 删除本地节点配置，并删掉它在 Hub 上的那一行 |
 | `anet node rename <ref> <new>` | 重命名已在 Hub 注册的节点 |
 | `anet node clone <src> <new>` | 复制节点设置，生成一个**新身份**的节点（见下文「复制节点」） |
@@ -163,6 +163,16 @@ codex 节点不想记命令：在节点目录里敲 `anet node codex`，选节�
 | `anet info <name>` | 显示节点配置、进程和近期任务 |
 | `anet logs <name> [--follow]` | 查看或追踪节点日志 |
 | `anet node migrate-token-to-envref <name>` | 将配置中的明文 secret 改为 envRef，并先生成备份 |
+
+**OpenCode V1 共存恢复需要该节点的有效历史快照。** 旧 CLI `2.3.0-preview.171` /
+runtime `2.5.0-preview.137` 不恢复旧 session。新配对候选 CLI
+`2.3.0-preview.172` / runtime `2.5.0-preview.138` 支持在新的运行数据目录
+导入节点私有快照并核对原 session/history；导入失败不静默新建。没有快照的
+旧节点仍会新建会话，不能直接重启试探恢复：首次升级前需要按手册在原桥
+运行且任务/TUI空闲的窗口导出。崩溃恢复只保证最近成功保存的快照；外部
+文件引用暂不支持迁移。候选通过 main 正式发布门前不是可下载版本。
+完整边界见仓库运行手册
+[V1 重启与软件升级](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md#v1-restart-and-upgrade)。
 
 `anet node ls --all` 不看当前目录，而是用你 `anet login` 的身份读 Hub（`/api/status` + `/api/host-supervisors`），
 把当前 Network（或 `--network <id|name>` 指定的那个，按 id、名字或唯一 id 前缀匹配）里的节点按机器分组列出：
@@ -438,12 +448,48 @@ anet daemon unadopt demo --yes
 仅支持 bare / 默认 tmux socket；co-presence 或无法重建的环境会拒绝，错误只列环境键名。
 从 daemon 工作目录运行 `anet daemon adopted`，列出同时具有本机登记和 Hub 有效绑定的节点。
 
+`adopt_path_writable_by_others`：工作目录、`.anet`、`.anet/nodes`、节点目录或 `config.json`
+对组 / 其他用户可写。修法是对报出的路径 `chmod go-w`。共享团队目录（如 `2775`）不想去掉组写时，
+**仅工作目录本身**可改为加粘滞位：目录属 daemon 用户且 `chmod +t <workdir>`（如 `drwxrwsr-t`）也被接受，
+因为粘滞位下其他用户无法改名或删除其中属 daemon 的 `.anet`；`.anet` 及以下仍必须 `go-w`。
+
 此增量只完成收编协议，收编节点的远程停启需后续 board #627；当前会明确拒绝，
 不会落入旧 daemon 子进程清理路径。登记文件是 daemon 工作目录下
 `.anet/child-workdirs.json`，节点配置及密钥仍在原目录。空机恢复需恢复这些私有文件和
 Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销绑定不删除工作目录。
 
 ## Preview 专属能力
+
+**开发中、尚未发布（#1053）**：Daemon/节点环境密钥管理不再只依赖演示表单。
+
+### 节点环境密钥：`anet node secret`
+
+```bash
+anet node secret list  <node> [--json]
+anet node secret set   <node> <KEY> [--from-env VAR]
+anet node secret unset <node> <KEY>
+```
+
+写 `nodes/<node>/secrets.env`（0600、原子替换、拒符号链接），只列 key 名；
+值只从 `--from-env` 或 stdin 来，**不接受命令行参数直接给值**。
+
+### Daemon 下发密钥：`anet daemon secret`
+
+```bash
+anet daemon secret list  <daemon> [--node <alias>] [--json]
+anet daemon secret set   <daemon> <KEY> --from-env VAR (--node <alias> | --all)
+anet daemon secret unset <daemon> <KEY> (--node <alias> | --all)
+```
+
+管理 `daemon 目录/scoped-secrets.json`（0600、revision CAS、目标必须已绑定）。
+`set`/`unset` **必须**带 `--node` 或 `--all`：不带范围的写会下发给每个子节点，
+属于权限决定，不能靠手滑。回执与 `list` 只出 key 名与来源（`daemon`/`node`）。
+
+底层仍是 `daemon_provider_snapshot` 的 `secret_*` 管理动作；CLI 只是同一套读写的入口，
+不新增第二条路径。Daemon 默认值由节点继承，节点同名值优先；已有显式进程/config/Provider 配置保持优先。
+值在节点下次**完整启动**时加载，单独重启 Bridge 不等于原生 TUI/server 已更新。
+Hub 令牌页上的金库名字不会自动进这个进程；启动优先级见 [节点文件](/guide/agent-node#启动时的环境变量优先级)。
+完整契约与恢复边界见仓库 `docs/scoped-secrets.md`；0.2.248 演示入口不能计为已支持。
 
 以下能力存在于当前 preview，不应写成 stable 已支持：
 
@@ -453,6 +499,27 @@ Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销
 | `anet daemon init <name>` / `start <name>` / `restart <name>` / `list` | 管理本机 daemon（版本要求同上；`restart` 另见 [daemon 页](/deploy/daemon)） |
 | `anet node start <name> --copresence` | 启动 Codex app-server、桥和共享 TUI |
 | `anet opencode ...` | 管理 OpenCode preview 集成 |
+
+### OpenCode V2 共享 Server：创建时的复用与逃生门
+
+创建 `opencode-cli` **V2** 节点时，除代际与 unsafe 授权外，还有三个与「主机共享 Server」相关的源码选项；对应版本须实际发布后才可使用。细节、凭据与迁移边界见[运行手册](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md)：
+
+| 开关 | 作用 |
+|---|---|
+| `--opencode-shared-server-url <字面量 http://127.0.0.1:<port>>` | 显式指定复用哪个 loopback Server（与下面那项必须成对） |
+| `--opencode-shared-server-password-file <绝对路径>` | 该 Server 的私有密码文件路径；文件须为私有普通文件，**密码值**不得写进命令行/URL/日志 |
+| `--opencode-new-server` | 显式让新节点**自建** Server，不用共享；可与 `clientBinDir` 并用，但不会继承共享 URL/密码文件 |
+
+主机用户也可以在私有 `~/.anet/opencode-shared-server.json` 里登记 `{ "url": ..., "passwordFile": ..., "clientBinDir": ... }`，此后新建 V2 节点**默认复用**它。
+
+**源码状态（daemon 创建准入，父 #1302 / #1326）**：登记是**操作者维护的候选登记**——它只提供连接候选，不提供进程身份或代际证明。daemon 创建 V2 节点时按「**观察 → 代际绑定 → 准入通过**」三步判定，**三步都过才复用**：进程观察（同 uid、真实 pid/startTicks、监听绑定复核）→ 与既有包/文件 attestation 绑定代际 → 准入放行；任何一步拒绝（登记陈旧、进程已死、他人 uid、无法完整观察、代际不可证）都**回退为节点自有 Server**，不写共享 URL/密码文件。`--opencode-new-server` 的显式逃生门仍然有效。上述均为**源码实现**：不代表 npm 已发布或现役 daemon 已采用（**完整原生启动验收已于 PR #2790 通过**：exact-head 收据 = Actions run `38809788212` / job `116679815373`，产物 `source=506902c4…`，合并提交 `079daa31`）；**CLI 直接创建/显式连接须单独核对，不能用 daemon 接线代替其验收**；命令可用性以本机 `anet -v`、`anet node create --help` 与对应发布说明为准。
+
+**开发中、尚未发布（#906）**：`anet daemon provider list <daemon>` 回读该 daemon 的脱敏
+Provider → Runtime → 认证方式 → 模型配置；`anet daemon provider put <daemon> --revision N`
+从 stdin 保存私有 JSON，key 不接受命令行参数。配置成功不等于登录、模型请求或节点切换成功。
+源码已接入受权限保护的配置保存/回读；`anet daemon provider scan <daemon>` 从 stdin
+读取 Hub 归属清单（node_id/alias），只读扫描已有 Codex 配置与脱敏认证信息。客户端在同一管理页展示，
+扫描不复制登录文件、不改节点、不触发模型调用；账号/节点实际切换仍在接入，不代表现有安装包已有此能力。
 
 🔴 **停 / 删 / 看没有 daemon 版。** daemon 就是一个 `role=host_supervisor` 的 agent-node,
 所以用 node 级命令:`anet node stop <name>` 停、`anet node delete <name>` 删、
@@ -470,11 +537,11 @@ token**，且改完要重启该 daemon 才生效）。
 比别人少。`anet daemon list` 发现这种情况时会直接打出缺哪几个和回填命令。
 :::
 
-`--copresence` 只适用于 `runtime=codex-app-server`。默认沙箱为只读；开启完整文件系统和网络访问需要 `--dangerously-allow-full-access`。TTY 会要求输入 `yes`，非 TTY 还必须同时提供 `--yes-danger-full-access`。
+Codex 的 `--copresence` 用于 `runtime=codex-app-server`。其默认沙箱为只读；开启完整文件系统和网络访问需要 `--dangerously-allow-full-access`。TTY 会要求输入 `yes`，非 TTY 还必须同时提供 `--yes-danger-full-access`。
 
 恢复共存节点时仍应使用 `anet node start <name> --copresence`，不能改用普通 `node start`。
 
-`opencode-cli` 当前是由 agent-node 管理的任务 runtime，不是可 attach 的共享 OpenCode TUI。`grok-build-cli` 共享 Grok TUI 也未进入当前 preview 包；当前可用的 `grok-build-acp` 不支持 attach。
+`opencode-cli` 的 V2 TUI 共存与共享 Server 是上文说明的独立预览路径，要求显式 unsafe 授权；不能套用 Codex 的只读沙箱说明，发布状态须按实际版本核对。`grok-build-cli` 共享 Grok TUI 也未进入当前 preview 包；当前可用的 `grok-build-acp` 不支持 attach。
 
 <a id="其他"></a>
 
@@ -550,6 +617,9 @@ token**，且改完要重启该 daemon 才生效）。
 | `COMMHUB_ALIAS` | 节点 alias |
 | `COMMHUB_TOKEN` | 认证 token；节点配置中的 token 优先级更高 |
 | `COMMHUB_AUTH_TOKEN` | legacy Hub master-token 兼容入口；新部署使用用户和节点 token |
+| `ANET_CODEX_RESUME_TIMEOUT_MS` | `anet node start --copresence` 恢复 Codex 会话的超时（整数毫秒，最大 900000）；未设置时从 300 秒起，按 rollout 每开始 1 GiB 增加 120 秒，最高 15 分钟；超时会报告实际等待时间和 rollout 大小 |
+
+Codex 共存启动会在旧进程停止后先创建私有恢复点；备份失败时默认拒绝启动，并清掉半成品。只有操作员明确接受无法安全回滚时，才可使用 `--skip-recovery-backup` 跳过；命令会打印醒目的风险警告，且不会把旧恢复点冒充成这次启动的新备份。
 | `ANTHROPIC_BASE_URL` | Anthropic 兼容模型端点 |
 | `ANTHROPIC_AUTH_TOKEN` | 第三方 Anthropic 兼容端点凭据 |
 | `ANTHROPIC_API_KEY` | Anthropic 官方端点凭据 |

@@ -1,0 +1,75 @@
+TEST-ONLY #1226 exact native human TUI — source qualification
+Observed 2026-10-14; no production/original-machine actions or package publication.
+
+Source PR2748 https://github.com/sleep2agi/agent-network/pull/2748
+  exact head a09426627d68556df891c0526cce3f8907e2010b
+  CI checkout d78a53aa8d24aad65505897813d14e613a7834c3
+  ordinary main 440455d3c6e5239f964772bf71a4ce9154228c2c (12:30:29Z)
+  CI/main tree a0ebcdaca1677cf7951711b1f795947a6db0cd1c
+  fresh main ancestry and equal trees checked after ordinary SHA-locked merge.
+  rollup 115 SUCCESS / 79 CANCELLED / 1 SKIPPED, no pending/failure.
+  Broad report-only QA remainder cancelled after actual native/unit qualification;
+  cancellation is not a passing QA result. Ten protected checks passed.
+
+Actual fixture: built anet and exact paired agent-node, pinned upstream binaries,
+non-root Linux Docker --init --network none, private explicit tmux socket, synthetic
+Hub/model, original independently owned Host and Unicode directory/session bindings.
+Node 22 bookworm image c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392;
+Bun 1.3.14 image e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4.
+Native package SRIs checked against test1194/package-integrity.json during build.
+
+Native run38562739064 https://github.com/sleep2agi/agent-network/actions/runs/38562739064
+  1.18.1 job115847623459 SUCCESS, five full gates
+    artifact11892758167
+    sha256:28f0fc6dabecbfdb5659e3170d794c343e54b83c534162ba0d0158e6949524f3
+  1.18.34 job115847622889 SUCCESS, five full gates
+    artifact11892408649
+    sha256:4979bd3a34c5b0c8e007f886cf0bd443531063492fa767460057c811e2c4e4e3
+Both reports downloaded/read; their exact CI source, PASS and five checks verified.
+1. Built attach refuses non-TTY and foreign session/private readiness without
+   Host/session mutation. Explicit own-bridge restart preserves native history.
+2. Two full native TUIs render (ctrl+p prompt), attach original Host/directory/SID,
+   retain original model/config, and keyboard prompts obtain their own NODE_A/B
+   scoped MCP replies and exact completed assistant parent chains. Native argv/cwd
+   and environment inspected without printing credentials; no Hub tokens/Host HOME
+   in TUI environment or new/fork sessions. Actual built node ls in both projects
+   preserves original bridge receipts, TUI nonces and live terminals before input.
+3. Duplicate/unknown TUI ownership refuses; original nonce is retained.
+4. Closing only A TUI keeps Host, both bridges, B TUI and private Owner terminals
+   alive. Later Agent A inbox and second Human B parent-owned native reply succeed.
+5. Explicit original bridge A close withdraws only its guarded TUI; Host/B survive,
+   original A config restores, and absent readiness refuses reopening. Own B closes
+   preserve the Host and Owner terminals. No shared/foreign tmux teardown.
+
+Typecheck run38562738621/job115847618471 SUCCESS: 81 existing errors / baseline81,
+tsc exit2 measured correctly; this is not zero TypeScript errors.
+Agent-network unit job115848544932 SUCCESS (QA run38562739402): 2133 pass / 11 skip /
+0 fail, 214 files. Real tmux unit24/0, six runner groups0fail. test505 mutation's four
+failed assertions are expected RED (not four distinct mutations); test533 no-u and
+stale-config-help negative controls also witnessed RED.
+Full Docker E2E run38562738631/job115847618836 SUCCESS; rename115847618594 SUCCESS.
+  seven nonzero groups: 139 + 25 + 28 + 16 + 22 + 12 + 47 = 289 pass / 0 fail.
+  artifact11892504602
+  sha256:38984f50d8d7808ef4a58f3d9145bdf6659abbb560b675a45ad13bc4d1c958bb
+All eight logs, including summary, downloaded/read; no zero-run group accepted.
+
+Retained actual failures (not healthy manual reruns):
+  39c632cd /38556593237: fixture tmux set-option window target missing before TUI gate.
+  08762863 /38557138825 and 338ad939 /38557791203: correct attach refused readiness;
+  9f4b84de /38558208657 exposed original bridge not proven ready. Ordinary profile
+    chmod changed ctime; strict receipt guard correctly refused. Final attach uses
+    read-only resolution, and correct 0600 profile repair no longer changes ctime.
+  922928ce /38559052105: fixture compared the pre-restart MCP lease bytes against
+    a legitimately new lease. Freeze the current admitted bytes after explicit restart.
+  bcb3cbaa /38559424885: 1.18.1 all five passed; 1.18.34 passed exact human/MCP gate
+    but duplicate refusal exceeded15s. Pre-existing TUI record now refuses before
+    native probes, with final exclusive create still enforcing concurrent ownership.
+  3b9d0bcd /job115840206087: unit2132/11skip/1fail, missing attach --help/-h entry;
+    existing command help table fixed, final unit2133/11skip/0fail.
+
+Scope: source/isolated native qualification, cooperative same-UID/policy/provider
+cohort. Original WinMac/native adoption, public installers and #1196 migration,
+last checkpoints and rollback remain separate gates. Native manual UI actions are
+not fenced per HTTP request; no hostile tenant/provider-credential isolation claim.
+Wrapper signals only its own child and issues no session abort; fixture TUI close
+is after completed human turns, not an active-human-terminal-close qualification.

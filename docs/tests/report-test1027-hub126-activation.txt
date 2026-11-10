@@ -1,0 +1,131 @@
+#1027 formal publication and Hub126 activation receipt
+OBSERVED_AT=2026-10-11T19:13:44Z / 2026-10-12 03:13:44 Asia/Shanghai
+UPDATED_AT=2026-10-11T19:16:38Z / 2026-10-12 03:16:38 Asia/Shanghai
+Scope: original #1027/#906 software line; no new product ticket.
+
+FORMAL SOURCES / PACKAGES
+All three package release workflows use exact main
+42fcf114a77b7862c55ec32328923eced9b43f22; current-main ancestry checked.
+Hub126 run38165547126 and runtime133 run38166071109 SUCCESS, including
+four formal gates, publication and registry verification. Anonymous Docker
+public downloads matched entire formal gated artifacts, not ZIP digests.
+Hub126:1230017B SHA256
+9ab55f1ff33c1802749ee647998d7d016fc04e81fe0112df282c595436cb3817.
+Runtime133:589741B SHA256
+fdebf0c9175f7f665ac35a8d18264be9b0bc9831809655cbee990580a184156f.
+CLI167 run38166313574: four gates and npm publish SUCCESS; registry visibility
+step still IN_PROGRESS at03:13. No repeat publication or claim of npm download.
+Official prerelease cli-v2.3.0-preview.167 targets the same full main SHA:
+https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.167/sleep2agi-agent-network-2.3.0-preview.167.tgz
+2123746B SHA256
+e1b2867b59dbc1a78f7451f9296dd25e9f638fe8da96b7100f9d34deb8f8225f.
+Anonymous Docker entire GitHub tarball equality PASS. No latest promotion,
+branch artifact publication or unsigned native installer claim.
+
+GIT DEPLOYMENT INPUT / FRESH BACKUP
+PR2627 normally merged main b63b844e5766c2fc012757689b62863a83a89977.
+At merge 10 required checks PASS,49SUCCESS/18RUNNING/96QUEUED/0FAILURE;
+not an early all-CI-green claim or administrator bypass.
+Clean detached exact main source and fresh origin/main ancestor check before
+activation. Git profile/lock select runtime-v109-preview126; old125 retained.
+Inactive installation copied the previously Docker npm-ci exact lock install;
+both package.json and lock cmp equal Git authority. No global npm changes.
+Fresh live-DB consistent VACUUM INTO backup, not ordinary WAL-file copy:
+${USER_ROOT}/.commhub/backups/create1027-p126-YGAMoP/before.db
+697991168B,0600; directory0700; SHA256
+4021b6e2258eb68f4008fb01deb54de7f371a96e08974dfefe22f9d85c65e20f.
+Original profile/base launcher saved0600 in the same protected directory.
+Original vault source not read/copied/replaced. This backup contains private
+data and is not committed to Git or attached to a public artifact.
+
+CORE CHECKS ON THE NEW OFFLINE SNAPSHOT
+No old runtime51 or old-backup success counted as a new test.
+1. Docker schema/integrity before and after PASS; exact126 package/Bun1.4.0.
+Preserved sessions323/tasks77365/nodes293/networks7/requirements1037/
+api_tokens613/user_inbox2351; Provider counts9/0/0/0/0/0, logins/clone retained.
+2. Only after schema PASS: actual inactive installed package HTTP startup,
+anonymous401 / synthetic temporary atok200 /323 backup-network rows PASS.
+First HTTP invocation mistyped a local image tag and failed before any test;
+building the unchanged Dockerfile.http under the explicit tag passed. No
+source or guard was relaxed; this invocation error is not a product failure.
+Tests use sg docker; independent suite Dockerfiles in
+tests/test906-hub-upgrade-preflight/. Network none/read-only/tmpfs/--rm,
+only offline backup/runtime and actual Bun binary mounted read-only; no
+live DB, hub.env or real production token. Temporary HTTP child terminated.
+
+ACTUAL ACTIVATION / INITIAL OBSERVATION
+03:12:33+08 installed Git base/profile0700 and cmp verified both deployment
+copies; only pm2 restart commhub-hub, without --update-env.
+Initial five quick curl retries ended before startup completed; subsequent
+03:12:44 health succeeded126. This is a startup delay, not a passed probe.
+Actual listener PID3381400/PPID1613, Bun1.4.0, entry
+${USER_ROOT}/.commhub/runtime-v109-preview126/node_modules/@sleep2agi/commhub-server/bin/commhub.ts.
+03:13:44 health126/secured/sessions323/SSE114/uptime70 seconds.
+PM2 restart count83->84 exactly this manual action; no additional restart.
+New error bytes0, new stdout62891B at initial observation; vault missing0,
+panic0, independent task.ack0. Observe natural receipts, do not inject tasks.
+TMA cloud/storage/client, TMAI dog, TMHR and both old Daemons had natural
+heartbeats after activation. Heartbeats do not prove external model login.
+
+DAEMON FOLLOW-UP / NON-CLAIMS
+TMHR prepared vdev167/133 inactive; initial report lacked Docker permissions.
+Sent actual Hub126 receipt and original-line continuation; old166/132 remains
+until safe idle cutover and actual process/new-heartbeat receipt arrive.
+daemon-dev concurrent original Owner process detected with cwd comm-ou and
+directory mismatch warning; coordination requested, no blind kill or duplicate
+start. Do not call its reported133 a verified formal private-pair upgrade.
+Separate formal pair prepared inactive at
+${USER_ROOT}/.anet-bin/provider906-cli167-runtime133 (0700),248 dependencies,
+Docker npm installation from the two byte-verified published tarballs. Offline
+Docker owning UID1000 verified both actual package-declared bin help paths.
+Initial wrong image entrypoint and an obsolete CLI bin path failed before the
+successful corrected invocation; no product source/permissions/guards changed.
+Generated private package/lock retained. No selected live Daemon switched by
+this operator while original Owner's concurrent process awaits coordination.
+Original card still4/5; three runtime children each >=5min acceptance pending.
+No real OAuth, model inference, vault decryption, Linux/mobile installer or
+full #906/#907 completion claimed by this receipt.
+
+DAEMON CUTOVER INCREMENT (supersedes earlier pending observation)
+TMHR original-line reply407f22ba-9868-43f7-b755-c58dc70976f9 at19:14:56Z:
+vdev actual CLI167 PID2242603/runtime133 PID2242710, same identity/cwd/config,
+Hub new heartbeat/SSE and redacted Provider read PASS; old166/132/0600 backup
+retained. Local Docker NOT RUN due permissions, no socket/group changes.
+Independent Hub read corroborated133/idle/inflight0/queue0. Formal Docker
+publication gates are separate evidence, not a claimed local Docker execution.
+
+daemon-dev original Owner's temporary process subsequently exited/offline;
+03:15 fresh check found no matching live process and no daemon-dev tmux.
+Owner notified to avoid another bare-runtime concurrent start. No other-owned
+process was killed. Protected config backup before restoring via official CLI:
+${USER_ROOT}/.anet/nodes/daemon-dev/config.json.pre-cli167-runtime133-20261012
+0600; config unchanged SHA256
+4cf8ee102c780bb75d992b1c6b6c32d56f49015fe62cf933c54afd733d4564bc.
+03:16:12 original-name tmux started public CLI daemon start daemon-dev, Node24,
+explicit ANET_AGENT_NODE_BIN pointing to new private133. Product CLI selects
+its same-install private runtime and suppresses inherited session identity.
+CLI167 PID3384613/runtime133 PID3384789, both actual cwd=${USER_ROOT}.
+03:16:19 registration/SSE/create capability ready (anet bin pin verified).
+Rebuild5/5 existing processes recovered, missing0; no business process restart.
+Independent Hub19:16:21 same node_id/node_daemon_39bd1eeae3ee,133, original
+project_dir=${USER_ROOT},idle/inflight0/queue0; directory warning cleared.
+Provider read: ok=true/revision0/source=daemon/providersCount0. Empty catalog
+is read capability only, not actual Provider/model or account entitlement.
+Sample business/AppServer/TUI PIDs2792940/2793542/515201/3199979 unchanged.
+No global npm, credential/account/model/session or node config changes.
+Rollback: at idle stop only verified new daemon pair; use preserved166/132
+public CLI and old runtime with original cwd/PATH, repeat actual-state checks.
+Private generated package/lock and backups retained. Existing fleet PATH boot
+pin and off-host backup archive inventory gaps are not fixed by this narrow
+operation; no unversioned custom production launcher created.
+
+RECOVERY / CLEANUP
+Service startup/profile/lock authority deploy/hub in Git; PM2 definition,
+9200/old proxy/tunnel and hub.env sources unchanged. Restore old saved profile
+and base, only restart Hub to rollback125; old runtime and all backups remain.
+Software rollback does not rewind sessions/Provider writes or restore DB data.
+Private DB, original vault key and accounts require approved encrypted backup
+or original administrator authentication, not clone. Vault off-host backup
+record inventory gap remains; no complete empty-machine recovery claim.
+Docker containers removed. Fresh backup/new installation/old125 intentionally
+retained; transient formal tarball staging retained for pending Daemon work.

@@ -635,4 +635,45 @@ describe("Hub scheduled task API and dispatcher", () => {
     const runs = await api(ownerToken, `/api/scheduled-tasks/${scheduleId}/runs?network_id=${encodeURIComponent(networkId)}`);
     expect(runs.body.runs.length).toBeGreaterThanOrEqual(4);
   });
+
+  test("a watcher can edit the schedule but cannot cancel it or change watchers", async () => {
+    const viewerId = db.get<{ user_id: string }>("SELECT user_id FROM network_members WHERE network_id = ?1 AND role = 'viewer'", networkId)!.user_id;
+    const schedule = await createSchedule(`watchers-${Date.now()}`);
+    const bound = await api(ownerToken, `/api/scheduled-tasks/${schedule.schedule_id}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ revision: schedule.revision, watchers: [viewerId] }),
+    });
+    expect(bound.status).toBe(200);
+    expect(bound.body.schedule.watchers.map((w: { user_id: string }) => w.user_id)).toEqual([viewerId]);
+    expect(bound.body.schedule.can_manage_watchers).toBe(true);
+
+    const listed = await api(viewerToken, `/api/scheduled-tasks?network_id=${encodeURIComponent(networkId)}`);
+    const row = listed.body.schedules.find((item: { schedule_id: string }) => item.schedule_id === schedule.schedule_id);
+    expect(row?.is_watcher).toBe(true);
+    expect(row?.can_edit).toBe(true);
+    expect(row?.can_manage_watchers).toBe(false);
+
+    const edited = await api(viewerToken, `/api/scheduled-tasks/${schedule.schedule_id}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ revision: row.revision, name: "edited by watcher" }),
+    });
+    expect(edited.status).toBe(200);
+    expect(edited.body.schedule.name).toBe("edited by watcher");
+
+    const manage = await api(viewerToken, `/api/scheduled-tasks/${schedule.schedule_id}?network_id=${encodeURIComponent(networkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ revision: edited.body.schedule.revision, watchers: [] }),
+    });
+    expect(manage.status).toBe(403);
+    expect(manage.body.error).toBe("watcher_cannot_manage_watchers");
+
+    const cancel = await api(viewerToken, `/api/scheduled-tasks/${schedule.schedule_id}/cancel?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
+    expect(cancel.status).toBe(403);
+    expect(cancel.body.error).toBe("watcher_cannot_cancel");
+
+    const runNow = await api(viewerToken, `/api/scheduled-tasks/${schedule.schedule_id}/run-now?network_id=${encodeURIComponent(networkId)}`, { method: "POST", body: "{}" });
+    expect(runNow.status).toBe(403);
+    expect(runNow.body.error).toBe("watcher_cannot_run");
+  });
+
 });

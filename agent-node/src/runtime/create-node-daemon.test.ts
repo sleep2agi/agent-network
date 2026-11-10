@@ -4,6 +4,7 @@ import {
   buildAnetArgsDaemon,
   childConfigFieldsFromSpec,
   minimalEnv,
+  DAEMON_CHILD_INHERITED_ENV_KEYS,
   computeChildPath,
   loadAndVerifyAnetBin,
   probeAnetBinReadiness,
@@ -178,6 +179,28 @@ describe("buildAnetArgsDaemon now reaches flag value validation", () => {
     expect(() => buildAnetArgsDaemon({
       name: "x", runtime: "claude-agent-sdk", model: "",
     })).toThrow(/model_invalid/);
+  });
+  test("OpenCode V2 requires a native provider/model after the unsafe opt-in", () => {
+    expect(() => buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2" },
+    })).toThrow(/opencode_v2_requires_unsafe_opt_in/);
+    expect(() => buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    })).toThrow(/opencode_v2_requires_provider_model/);
+    expect(() => buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli", model: "opencode",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    })).toThrow(/opencode_v2_requires_provider_model/);
+    const args = buildAnetArgsDaemon({
+      name: "v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    });
+    expect(args).toContain("--model");
+    expect(args).toContain("stub/model");
+    expect(args).toContain("--opencode-generation");
+    expect(args).toContain("--opencode-unsafe-tools");
   });
   test("provider/model (OpenCode co-presence) passes; two slashes, edge slashes and dot-only segments are rejected", () => {
     const args = buildAnetArgsDaemon({ name: "x", runtime: "opencode-cli", model: "opencode/mimo-v2.5-free" });
@@ -781,6 +804,83 @@ describe("#1490 minimalEnv — cross-platform HOME resolution", () => {
   });
 });
 
+// Desktop local daemon on macOS: every claude-agent-sdk child failed its first
+// turn with "Not logged in · Please run /login" (Claude Code reads its macOS
+// Keychain item by account = $USER), and behind a local proxy the same child
+// got "403 Request not allowed" because HTTPS_PROXY never reached it. Only
+// USER + proxy together made `claude -p` answer under the child env.
+describe("minimalEnv — daemon identity + proxy passthrough", () => {
+  const parentEnv = {
+    HOME: "/Users/a",
+    USER: "a",
+    LOGNAME: "a",
+    HTTPS_PROXY: "http://127.0.0.1:7897",
+    https_proxy: "http://127.0.0.1:7897",
+    HTTP_PROXY: "http://127.0.0.1:7897",
+    http_proxy: "http://127.0.0.1:7897",
+    ALL_PROXY: "socks5://127.0.0.1:7897",
+    all_proxy: "socks5://127.0.0.1:7897",
+    NO_PROXY: "localhost,127.0.0.1",
+    no_proxy: "localhost,127.0.0.1",
+    NODE_USE_ENV_PROXY: "1",
+  };
+
+  test("🔴 witnessed-red: darwin child keeps USER / LOGNAME (Keychain login lookup)", () => {
+    const env = minimalEnv({}, "darwin", parentEnv);
+    expect(env.USER).toBe("a");
+    expect(env.LOGNAME).toBe("a");
+  });
+
+  test("🔴 witnessed-red: proxy variables reach the child in both spellings", () => {
+    const env = minimalEnv({}, "darwin", parentEnv);
+    for (const k of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"]) {
+      expect(env[k]).toBe(parentEnv[k as keyof typeof parentEnv]);
+    }
+  });
+
+  test("🔴 witnessed-red: NODE_USE_ENV_PROXY reaches the child (Node fetch ignores *_PROXY without it)", () => {
+    const env = minimalEnv({}, "linux", parentEnv);
+    expect(env.NODE_USE_ENV_PROXY).toBe("1");
+  });
+
+  test("still an allowlist: credentials and runtime-config keys in the daemon env do not leak", () => {
+    const env = minimalEnv({}, "linux", {
+      ...parentEnv,
+      COMMHUB_TOKEN: "ntok_secret",
+      ANTHROPIC_API_KEY: "sk-ant",
+      OPENAI_API_KEY: "sk-oai",
+      NODE_OPTIONS: "--require /tmp/evil.js",
+      SHELL: "/bin/zsh",
+      TMPDIR: "/tmp/x",
+    });
+    expect(Object.keys(env).sort()).toEqual([...DAEMON_CHILD_INHERITED_ENV_KEYS, "PATH", "HOME", "LANG"].sort());
+  });
+
+  test("unset or empty parent values are omitted, not passed as empty strings", () => {
+    const env = minimalEnv({}, "darwin", { HOME: "/Users/a", USER: "", HTTPS_PROXY: undefined });
+    expect("USER" in env).toBe(false);
+    expect("HTTPS_PROXY" in env).toBe(false);
+  });
+
+  test("an explicit extra proxy value wins over the inherited one", () => {
+    const env = minimalEnv({ HTTPS_PROXY: "http://node-proxy:3128" }, "darwin", parentEnv);
+    expect(env.HTTPS_PROXY).toBe("http://node-proxy:3128");
+  });
+
+  test("USER stays reserved for callers: only the daemon's own value can set it", () => {
+    expect(() => minimalEnv({ USER: "root" }, "darwin", parentEnv)).toThrow(/reserved env key/);
+  });
+
+  test("inherited key set is exactly identity + proxy (additions need review)", () => {
+    expect(new Set(DAEMON_CHILD_INHERITED_ENV_KEYS)).toEqual(new Set([
+      "USER", "LOGNAME",
+      "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+      "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
+      "NODE_USE_ENV_PROXY",
+    ]));
+  });
+});
+
 // #1491 — Windows daemon default ANET_DAEMON_PATH_CONF was
 // `/etc/anet-daemon/path.conf` — a POSIX-only path that never resolves
 // on Windows filesystems, so the default silently failed and users
@@ -1127,9 +1227,45 @@ describe("#1545 probeAnetBinReadiness —— 不抛异常地回答「现在能�
 // #584 —— daemon 不跑 `anet node create`,直接写子节点 config;`anet node start` 只认 config 顶层的
 // codexCopresence。flags.copresence 必须在这里变成那个字段,否则「Codex（TUI 共存）」起来是无头的。
 describe("#584 flags.copresence → child config codexCopresence", () => {
-  test("codex-app-server + copresence:true → codexCopresence:true, switch removed from flags", () => {
+  test("codex-app-server + copresence:true → codexCopresence + yolo defaults", () => {
     expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { permissionMode: "default", copresence: true } }))
-      .toEqual({ flags: { permissionMode: "default" }, codexCopresence: true });
+      .toEqual({
+        flags: {
+          permissionMode: "default",
+          approvalPolicy: "never",
+          sandboxMode: "danger-full-access",
+          skipGitRepoCheck: true,
+        },
+        codexCopresence: true,
+        codexCopresenceFullAccess: true,
+      });
+  });
+  test("copresence without copresenceFullAccess:false keeps yolo; explicit false opts out of full access grant", () => {
+    expect(childConfigFieldsFromSpec({
+      runtime: "codex-app-server",
+      flags: { copresence: true, copresenceFullAccess: false, approvalPolicy: "on-request" },
+    })).toEqual({
+      flags: {
+        approvalPolicy: "on-request",
+        sandboxMode: "danger-full-access",
+        skipGitRepoCheck: true,
+      },
+      codexCopresence: true,
+    });
+  });
+  test("copresenceFullAccess:true without copresence still maps full access when paired with copresence flag", () => {
+    expect(childConfigFieldsFromSpec({
+      runtime: "codex-app-server",
+      flags: { copresence: true, copresenceFullAccess: true, approvalPolicy: "never" },
+    })).toEqual({
+      flags: {
+        approvalPolicy: "never",
+        sandboxMode: "danger-full-access",
+        skipGitRepoCheck: true,
+      },
+      codexCopresence: true,
+      codexCopresenceFullAccess: true,
+    });
   });
   test("copresence:false / absent → no codexCopresence (headless stays creatable; old request shape unchanged)", () => {
     expect(childConfigFieldsFromSpec({ runtime: "codex-app-server", flags: { copresence: false } })).toEqual({ flags: {} });
@@ -1153,6 +1289,37 @@ describe("#584 flags.copresence → child config codexCopresence", () => {
       .toThrow(/flag_not_applicable_to_runtime:copresence:codex-sdk/);
     expect(() => buildAnetArgsDaemon({ name: "cx", runtime: "codex-app-server", flags: { copresence: "yes" } }))
       .toThrow(/flag_value_invalid:copresence/);
+  });
+});
+
+// #1027 — opencode-cli 缺省写 opencodeGeneration=v1,否则 anet node start 因
+// 「OpenCode runtime binding is missing」拒绝启动 → daemon 记 ESRCH → hub 撤 token。
+// 默认发生在 handleCreateNodeDoorbell 的 childCfg 组装层(childConfigFieldsFromSpec
+// 本身不注入,以便显式 v2 能覆盖)。
+describe("#1027 opencode-cli generation handling", () => {
+  test("childConfigFieldsFromSpec does NOT inject a default (v1 default lives in childCfg assembly)", () => {
+    expect(childConfigFieldsFromSpec({ runtime: "opencode-cli", flags: {} }))
+      .toEqual({ flags: {} });
+  });
+  test("explicit v1 passes through", () => {
+    expect(childConfigFieldsFromSpec({ runtime: "opencode-cli", flags: { opencodeGeneration: "v1" } }))
+      .toEqual({ flags: {}, opencodeGeneration: "v1" });
+  });
+  test("explicit v2 implies copresence mode", () => {
+    expect(childConfigFieldsFromSpec({
+      runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    })).toEqual({ flags: { opencodeUnsafeTools: true }, opencodeGeneration: "v2", opencodeMode: "copresence" });
+  });
+  test("explicit V2 new-Server opt-out is creation-only", () => {
+    const spec = { name: "v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } };
+    expect(buildAnetArgsDaemon(spec)).toContain("--opencode-new-server");
+    expect(childConfigFieldsFromSpec(spec)).toEqual({
+      flags: { opencodeUnsafeTools: true }, opencodeGeneration: "v2", opencodeMode: "copresence",
+    });
+    expect(() => buildAnetArgsDaemon({ name: "v1", runtime: "opencode-cli",
+      flags: { opencodeNewServer: true } })).toThrow(/opencode_new_server_requires_v2/);
   });
 });
 

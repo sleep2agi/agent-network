@@ -1,0 +1,102 @@
+TEST-ONLY: #1246 default owned SAFE topology and V1 migration admission
+Date: 2026-10-15 Asia/Shanghai (CI timestamps below are UTC 2026-10-14)
+
+Scope and decision
+------------------
+Actual default openOpenCodeCopresenceRuntime wrapper, not the persistent-directory
+core fixture from #1245. Both native versions use an empty synthetic session;
+no model prompt, paid provider, nonempty history restore, directory rewrite,
+unsafe override, atomic migration or original-node adoption was performed.
+Default SAFE topology cannot enter a cutover through the current single-directory
+review plan. This is an admission decision, not a claim that every proposal API
+invocation throws: config without workdir plus a caller-selected native path can
+satisfy readonly checks without proving requested-project/native identity.
+Requested project and native workspace must be separate independent inputs.
+Native workspace retention/custody must precede any config+intent transaction.
+
+Source and reproducible inputs
+-----------------------------
+Source PR: https://github.com/sleep2agi/agent-network/pull/2756
+Exact head: b736aa0a91220cce3478a4320271d709d0994957
+CI checkout: 8f363f498b786663d554fe9232ed5bb15852ecd7
+CI/head tree: 62a2d1d9ebcef41e24a9e31ff82d522687f2caad
+Ordinary SHA-locked source main: 270916718c8ba47a6589d960dae3735f649a85e8
+Merged 2026-10-14T16:07:14Z; fetched main ancestry verified, main tree matches CI.
+Six changed files: independent fixture Dockerfile/probe/run.sh, native workflow,
+QA trigger coverage, and admission contract. No production runtime code changed.
+Bun 1.3.14 image pinned by digest in Dockerfile; native wrapper/platform packages
+1.18.1 and 1.18.34 verified against the committed package-integrity.json from
+tests/test1194-v1-shared-feasibility. Node dependencies use package-lock/npm ci.
+Runtime Docker: non-root bun uid1000, --init --network none, exact SOURCE_COMMIT
+equals EXPECTED_SOURCE_COMMIT. Fixture private base /run/user/1000 is0700;
+synthetic node/project/launch/configs stay under its fresh fixture-owned root.
+Build requires public package/debian access; runtime uses fixture-only loopback.
+Original logins, credentials, full configs, histories and production were not read.
+Generated fixture-only transport authentication was used without logging it.
+No local tests or global package changes; all qualification ran in Actions Docker.
+
+Dual native evidence
+--------------------
+Run 38594880331: SUCCESS, exact head and CI checkout above.
+1.18.1 job115958921900: SUCCESS, four native observations, zero failure.
+Artifact11908513966 SHA256
+2bc3160b9a5fddc41e3c77e1913baae489511e97082f83235df61c00ffed3408
+1.18.34 job115958921892: SUCCESS, four native observations, zero failure.
+Artifact11909662046 SHA256
+5a4459c757a763b1dc868aefc02c0349fa66cfdbe939e760b7115ff20edc7aa4
+Both complete reports downloaded/read; archive hashes match API digests.
+Both stamp exact checkout/version and four-check JSON PASS:
+1. Actual default SAFE wrapper opens an exact empty session/checkpoint with
+   cleanShutdown=false in a fresh native directory disjoint from user project.
+2. Actual native /config retains declared model and denied wildcard/external
+   directory policy with bash disabled; custom provider package/baseURL absent.
+   A retained declared model is not successful model execution or authorization.
+3. Fixture-owned close removes its launch/data root when actual cleanup permits;
+   exact empty checkpoint/directory and original private config/project survive.
+   This controlled empty case does not prove arbitrary shutdown always cleans:
+   unknown/live process references defer cleanup in production source.
+4. Same node/project allocates a different unspawned SAFE native directory,
+   then discards only that allocation; original checkpoint directory unchanged.
+   This is not a second native resume, restored history or a concurrent TUI race.
+
+Earlier REDs retained
+---------------------
+4dbe3820e6b991d37e0e1d8f539ebcad62ef897a run38593603054:
+1.18.1/job115954519921 and1.18.34/job115954519700 FAILURE.
+1f56ea9f06c47767853f66c847edf3979983e4a2 run38594252999:
+1.18.1/job115956777478 and1.18.34/job115956778121 FAILURE.
+All four actual logs show original SAFE guard refusal: runtime-base ancestor
+/tmp group/other writable. No native session opened. The intermediate commit
+clarified docs and workflow triggers and did not fix that fixture input.
+Final b736 changes only fixture root to already-created private /run/user/1000;
+production ancestor/owner/mode guards remain intact. No blind or healthy reruns.
+
+Checks at source merge
+----------------------
+All ten protected checks SUCCESS. Source merge snapshot:49 SUCCESS/120 pending,
+zero observed failed rollup checks; this is not a claim that all broad QA passed.
+Dedicated native Docker end-to-end observation above qualified the changed scope.
+Automatic full regression run38594880612 was still in_progress at source merge,
+as was broad QA; later outcomes must be recorded as later evidence, not backdated.
+Existing independent Windows picker taskkill RED is retained in #1262; this
+fixture does not change Windows stop/harness or diagnose its exact root cause.
+
+Reconstruction and remaining gates
+----------------------------------
+Six recovery answers: docs/design/opencode-v1-safe-migration-topology.md.
+Existing runtime startup remains authoritative; Dockerfile/run.sh reproduces
+this observation, not a new daemon/deployment. No proxy/tunnel/ports changed;
+fixture loopback uses independently generated private transport authentication.
+Git restores software/templates, not original identities/logins/native histories
+or encrypted backup locations/retention/restore authority. Reverting this contract
+changes no original binding. Preserve original stores/config/unknown state.
+#1264 now tracks independently bound project/native directory and actual custody
+support/qualification before #1238 journal. It cannot rewrite checkpoint identity,
+use unsafe/newSession, treat process scans as transfer leases or suppress credential
+cleanup to claim migration. #1238 still needs atomic durable config+intent journal,
+matching launchers' pending refusal and fault recovery; #1239 still needs new shared
+turns/final capture and lossless owned restore. Mother #1196 remains incomplete.
+Original Owner exact node/idle window, every writer exclusion, selected target/main
+software and backup/restore permissions remain separate. No original operation is
+authorized by this fixture/contract. Next narrow source slice30-60min active after
+inputs; CI/permission/window waits unknown. No npm/installer publication or adoption.

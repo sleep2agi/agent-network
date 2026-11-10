@@ -1,0 +1,100 @@
+Test 883 — source-rebuildable OpenCode V2 real-client regression
+2026-10-09 22:28 CST (Asia/Shanghai)
+
+Exact tested product + harness source:
+7c9702b33bd2325c8523d31dc9b1c9e5c9ca7d21
+Product base main: a2b04c17960d746133f5a05854d9455eb6b9355e
+Actual App Web source: 4500c233e38fbdc2db5932f5edbe92f4fdd1ab9c
+Docker image index: sha256:aa49f23639ad8838c185ddef886d100207294e10ca7492551f779e6593c408e3
+Docker image config: sha256:fccabb9e5bf905bccf5feb6a7c9cba17be7ca63520c30c223054d7ea082ea49c
+
+Command (from the exact checked-out commit):
+sg docker -c 'ARTIFACT_DIR=/tmp/anet-test883-model-log bash tests/test883-v2-portable-client/ci.sh'
+
+Result: orchestrator exit 0. Positive container exit 0. Wrong-model negative
+container exit 1 specifically at "post-change task reached new provider model
+only". No later stop/start layer in that negative. Both owned process cleanups
+PASS. No host network, ports, credentials or filesystem mounts in test runs;
+uid/gid 1000, safe private runtime directory and private tmux server, Docker init.
+
+Source rebuild:
+- git archive full HEAD supplies tracked product/harness bytes (not worktree).
+- Docker fetches and verifies full App SHA, installs its locked dependencies,
+  typechecks and exports the actual client. CLI and agent-node build from source.
+- Node/Bun public base images pinned by digest. OpenCode 2.0.22 and Playwright
+  1.58.2 install with committed integrity lock; product/App use own npm locks.
+- First candidate a54c84047a429e8f3a25d954c4992421cd8850b3 downloaded/compiled
+  dependencies from public sources, without local ANet parent images. Later
+  harness/path/log corrections reuse those Docker build layers. This does NOT
+  claim a wiped Docker daemon, bit-identical images or a successful GitHub run.
+- Debian apt package versions are not snapshot-pinned. Public package/network
+  availability is required. No anet-test539/anet-model-ui image is a build input.
+
+Positive layers:
+L0 exact OpenCode version, owned 0700 runtime directory, Hub/provider health.
+L1 unauthenticated dispatch rejected; real CLI account and daemon registration.
+L2 V2 missing explicit unsafe opt-in rejected without create-row/config effects.
+L3 actual rendered wizard -> authenticated Hub -> daemon -> native V2 TUI;
+   exact request/child identity, delayed daemon verdict, token remains active,
+   launch_verified_at returned through the real REST endpoint.
+L4 task response exactly ANSWER829_REMOTE829, visible in the same TUI.
+L5 rendered model switch, higher config revision, new process identity, exact
+   MODEL829 task response; provider records original stub-model and then only
+   stub-model-next. UI notification alone is not considered model evidence.
+L5 lifecycle: rendered stop, completed stop row, original bridge/serve/TUI
+   identities reaped and sessions absent, config preserved; rendered start,
+   new launch evidence, new TUI, exact RESTART829 response and started row.
+Provider log also records stub-model-next for the post-start request.
+
+Failure and negative evidence:
+1. a54c8404 and 3e0d378c candidates failed original-model assertion because main's
+   shared stub did not log body.model (the exploratory branch did). Later layers
+   were not run. Added model to fixture log without changing provider responses
+   or weakening assertions. Failed runs remain in sibling test artifact dirs.
+2. Final wrong-model expectation deliberately checks deliberately-wrong-model
+   instead of stub-model-next. It fails the exact intended assertion, never
+   enters lifecycle, and cleans up. Timeout/other failures are not accepted.
+
+Docker guard run on final source: bash syntax, home-path baseline and test-suite
+registration PASS: 3715 files; 238 existing home matches/77 files, no increase;
+309 suites, 235 registered, 18 exempt, 56 existing orphans, zero new orphans.
+An earlier guard container lacked git (exit127); reran in the Docker image
+containing git/python, rather than treating the missing-tool run as validation.
+
+Integration/recovery:
+.github/workflows/v2-portable-client.yml runs exact-head source on matching PRs,
+main pushes and manual dispatch; uploads test-only logs/screenshots for 7 days.
+CI itself is pending at report time. Rebuild/startup/ports/secrets/version,
+rollback and synthetic-data boundaries are in the suite README. Production
+launchers, routing, secret stores, data and public releases are unchanged.
+
+Limits: in-browser Tauri IPC adaptation, not real native IPC; local synthetic
+provider, not live vendor credentials; no signed desktop/mobile installer,
+multi-user or production acceptance. This closes the local-image dependency
+gap at local Docker level, not all of #829/#539 and not a release claim.
+
+2026-10-09 22:33 CST — CI integration corrections and repeated acceptance
+Tested source: 0337454f6ac678dbf3c81e88d9ba74ee73f22e3b
+PR: https://github.com/sleep2agi/agent-network/pull/2558
+The preceding PR head failed three repository integration checks. Fixed:
+- Base-image guard recognizes previously declared build stages, but still
+  rejects floating ancestors, unknown and forward stage references. Added
+  six self-tests; no baseline increase.
+- Registered the suite in both central QA push/PR trigger path lists.
+- Extracted the read-only /proc process-generation observer from the mutating
+  harness. Exact PID/start-tick/reaping semantics remain unchanged; mutation
+  detection guard and its baseline are unchanged.
+Docker guard run: base-image self-tests 21/21; 344 Dockerfiles, 3 existing
+baseline offenders; QA coverage 255 directories / 101 executed / 186 filtered;
+mutation pins 367 shell + 140 script mutators, 693 anchors, unchecked 4 <= 4.
+All three commands exit 0 in the isolated container.
+
+Repeated command:
+sg docker -c 'ARTIFACT_DIR=/tmp/anet-test883-ci-integrated bash tests/test883-v2-portable-client/ci.sh'
+Image ID: sha256:0ff8138fbf720d635a3149d322658fc7aece1b0cb7e1c954dacb45da061c4e77
+Orchestrator exit 0; positive exit 0 including original identities reaped,
+configuration retained and new task after restart. Wrong-model exit 1 only at
+the expected post-change provider-model assertion, with no later lifecycle
+layer. Both owned-process cleanups pass. This rerun reuses build cache; it is
+not a claim of a wiped builder. Full GitHub exact-head CI is pending; no merge
+or public release is asserted by this report.

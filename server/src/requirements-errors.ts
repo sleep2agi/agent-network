@@ -34,6 +34,21 @@ const ENTRIES: Record<string, Entry> = {
   not_found: { message: 'No such task, project or route.', hint: 'Check the id; requirements_list / projects_list return the ids you can use.' },
   project_not_found: { field: 'id', message: 'No project with that id in this network.', hint: 'Call projects_list to get project ids (proj_…).' },
   tag_not_found: { field: 'tag', message: 'No task in this network carries that tag.', hint: 'Tags are free text on tasks; list the ones in use from requirements_list (view=summary shows each task’s tags).' },
+  // 标签树(POST /api/requirements/tags/create):父标签是**标签名**不是 req_… id,所以用自己的错误码,
+  // 不借用任务父需求的 parent_not_found / invalid_parent_id(那两句文案会让调用方去查 req id)。
+  tag_exists: { field: 'name', message: 'This network already has a tag with that name (on a task, with a colour, or as a registered node).', hint: 'Pick another name, or rename / merge the existing tag with POST /api/requirements/tags/ops.' },
+  tag_parent_not_found: { field: 'parent_id', message: 'No tag named that in this network.', hint: 'Create the parent first (parent_id: null), or read GET /api/requirements/tags → nodes for the names that exist.' },
+  invalid_tag_parent_id: { field: 'parent_id', message: 'parent_id must be a tag name in this network, or null for the root.', hint: 'Tag names are 1–20 characters; read GET /api/requirements/tags → nodes for the names that exist.' },
+  tag_parent_cycle: { field: 'parent_id', message: 'A tag cannot be its own parent.', hint: 'Pass a different parent, or null for the root.' },
+  // 子项目（admin 2026-10-24）：项目也能成层级，错误码与标签那几条**分开**，文案指向 proj_… 而不是标签名。
+  invalid_project_parent: { field: 'parent_id', message: 'parent_id must be a project id (proj_…) or null for a top-level project.', hint: 'Call projects_list to get project ids.' },
+  project_parent_not_found: { field: 'parent_id', message: 'No project with that id in this network (or it was deleted).', hint: 'Call projects_list to get the ids that exist.' },
+  project_parent_archived: { field: 'parent_id', message: 'That parent project is archived, so it cannot take children.', hint: 'Unarchive it first, or pick an active project.' },
+  project_parent_cycle: { field: 'parent_id', message: 'That parent would make the project its own ancestor.', hint: 'Pick a project that is not this one or one of its children.' },
+  project_parent_too_deep: { field: 'parent_id', message: 'Projects nest at most 3 levels (a top-level project counts as level 1).', hint: 'Attach it to a higher-level project.' },
+  project_has_children: { message: 'This project still has sub-projects, so it cannot be deleted.', hint: 'Move or delete the sub-projects first (a parent is never silently orphaned).' },
+  tag_depth_exceeded: { field: 'parent_id', message: 'Tags nest at most 4 levels (the root counts as level 1).', hint: 'Attach the tag to a higher-level tag.' },
+  invalid_tag: { field: 'name', message: 'Tag names are 1–20 characters after trimming, with no control characters.', hint: 'Shorten the name, or remove line breaks.' },
   checklist_item_not_found: { field: 'item_id', message: 'This task has no checklist item with that id.', hint: 'Item ids (ck_…) are in requirements_get → checklist[].id.' },
   // ── 权限 ──
   user_token_required: { message: 'This operation is for people only: a node token can read projects and read / create / update tasks, but cannot manage projects or delete tasks.', hint: 'Use an existing project (projects_list), or ask a person to create / change the project in the app (任务 → 管理项目).' },
@@ -54,7 +69,7 @@ const ENTRIES: Record<string, Entry> = {
   participants_conflict: { field: 'participants', message: 'participants (replace the whole list) cannot be combined with participants_add / participants_remove.', hint: 'Use participants_add / participants_remove to change a few people, or participants alone to replace the list.' },
   participants_add_remove_overlap: { field: 'participants_remove', message: 'The same person is in both participants_add and participants_remove.', hint: 'Send each person in only one of the two lists.' },
   too_many_participants: { field: 'participants_add', message: 'A task can have at most 100 participants.', hint: 'Remove some with participants_remove first.' },
-  status_conflicts_with_column: { field: 'status', message: 'status is an alias of column, and the two values sent differ.', hint: 'Send only one of them (pool, doing or done).' },
+  status_conflicts_with_column: { field: 'status', message: 'status is an alias of column, and the two values sent differ.', hint: 'Send only one of them (pool, doing, done or abandoned).' },
   invalid_assignee: { field: 'assignee', message: 'assignee must be a string (legacy free-text field).', hint: 'Prefer owner / agent_owner.' },
   // ── 项目 ──
   invalid_project: { field: 'project_id', message: 'project_id must be a project id string or null.', hint: 'Call projects_list to get project ids (proj_…); null removes the task from its project.' },
@@ -77,14 +92,14 @@ const ENTRIES: Record<string, Entry> = {
   empty_patch: (ctx) => {
     const sent = ctx.sent ?? [];
     const writable = ctx.writable?.length ? ctx.writable.join(', ') : 'name, column, priority, due, start, description, checklist, tags, owner, agent_owner, participants, project_id, parent_id, external_ref, external_url, archived';
-    const statusHint = sent.includes('status') ? 'To move a task between pool / doing / done, use column (status is the name of the list filter). ' : '';
+    const statusHint = sent.includes('status') ? 'To move a task between pool / doing / done / abandoned, use column (status is the name of the list filter). ' : '';
     return { message: sent.length ? `None of the keys sent (${sent.join(', ')}) is a writable field.` : 'The patch changes nothing.', hint: `${statusHint}Writable fields: ${writable}.` };
   },
   invalid_json: { message: 'The request body must be a JSON object.' },
   invalid_name: { field: 'name', message: 'name must be 1–80 characters.' },
   invalid_description: { field: 'description', message: 'description must be a string (markdown) of at most 20 000 characters.' },
-  invalid_column: { field: 'column', message: 'column must be pool, doing or done.' },
-  invalid_status: { field: 'status', message: 'status (list filter) must be pool, doing or done.' },
+  invalid_column: { field: 'column', message: 'column must be pool, doing, done or abandoned.' },
+  invalid_status: { field: 'status', message: 'status (list filter) must be pool, doing, done or abandoned.' },
   invalid_priority: { field: 'priority', message: 'priority must be high (P0), normal (P1), low (P2) or lowest (P3).' },
   invalid_due: { field: 'due', message: 'due is not a date this hub understands.', hint: `Use ${DUE_FORMATS}.` },
   invalid_start: { field: 'start', message: 'start is not a date this hub understands.', hint: `Use ${DUE_FORMATS}.` },

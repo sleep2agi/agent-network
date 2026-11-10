@@ -4,15 +4,19 @@
 // stub model); here a protocol-shaped fake (fixtures/fake-opencode-v2.ts)
 // stands in for `opencode serve`.
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "fs";
+import { spawn } from "child_process";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
+import { readOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 import { OPENCODE_V2_BACKEND } from "../opencode-backend";
+import { openSharedV2CommhubMcp } from "./shared-v2-mcp";
 import { OpenCodeProviderError } from "../opencode-provider-error";
-import { OpenCodeCopresenceTimeoutError, openVettedOpenCodeCopresence, type OpenCodeCopresenceSession } from "./runtime";
+import { OpenCodeCopresenceTimeoutError, openVettedOpenCodeCopresence, reserveLoopbackPort, type OpenCodeCopresenceSession } from "./runtime";
 import {
   openCodeV2Outcome,
   openCodeV2ReplyText,
+  openCodeV2SessionModelRef,
   openCodeV2TurnVerdict,
   wireOpenCodeV2CommhubMcp,
   type OpenCodeV2Entry,
@@ -20,6 +24,16 @@ import {
 
 const FAKE = join(import.meta.dir, "fixtures", "fake-opencode-v2.ts");
 const noTmux = () => { throw new Error("tmux must not be touched by this test"); };
+
+describe("session model ref (pure)", () => {
+  test("providerID + id, nothing else", () => {
+    expect(openCodeV2SessionModelRef({ data: { model: { providerID: "deepseek", id: "deepseek-flash" } } })).toBe("deepseek/deepseek-flash");
+    expect(openCodeV2SessionModelRef({ data: { model: { providerID: "deepseek" } } })).toBeUndefined();
+    expect(openCodeV2SessionModelRef({ data: { model: { providerID: "a/b", id: "c" } } })).toBeUndefined();
+    expect(openCodeV2SessionModelRef({ model: { providerID: "deepseek", id: "flash" } })).toBeUndefined();
+    expect(openCodeV2SessionModelRef(null)).toBeUndefined();
+  });
+});
 
 describe("turn verdict (pure)", () => {
   test("pending until an idle marker or the next user entry", () => {
@@ -79,7 +93,7 @@ describe("CommHub MCP wiring (V2 native mcp.servers shape)", () => {
   test("adds mcp.servers.commhub with an {env:} bearer and the instructions file; keeps the policy", () => {
     const root = mkdtempSync(join(tmpdir(), "anet-543-mcp-"));
     try {
-      const env: NodeJS.ProcessEnv = { PWD: root, OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { "*": "allow" }, model: "p/m" }) };
+      const env: NodeJS.ProcessEnv = { PWD: root, XDG_DATA_HOME: root, OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { "*": "allow" }, model: "p/m" }) };
       const handle = wireOpenCodeV2CommhubMcp(env, { url: "http://127.0.0.1:9/mcp", token: "ntok_x", alias: "a" });
       const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
       expect(config.mcp.servers.commhub).toEqual({
@@ -89,6 +103,9 @@ describe("CommHub MCP wiring (V2 native mcp.servers shape)", () => {
       expect(config.permission).toEqual({ "*": "allow" });
       expect(config.model).toBe("p/m");
       expect(config.instructions).toEqual([handle.path]);
+      expect(config.plugins).toHaveLength(1);
+      expect(readFileSync(join(config.plugins[0].package, "index.js"), "utf8")).toContain("ctx.tool.list()");
+      expect(statSync(config.plugins[0].package).mode & 0o777).toBe(0o700);
       expect(env.ANET_OPENCODE_COMMHUB_TOKEN).toBe("ntok_x");
       expect(JSON.stringify(config)).not.toContain("ntok_x");
       expect(() => wireOpenCodeV2CommhubMcp({ ...env }, { url: "http://u:p@127.0.0.1/mcp", token: "t" })).toThrow(/credential-free/);
@@ -108,24 +125,80 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     root = undefined;
   });
 
-  async function open() {
+  async function open(extraEnv: NodeJS.ProcessEnv = {}, startupTimeoutMs = 10_000) {
     root = mkdtempSync(join(tmpdir(), "anet-543-core-"));
-    chmodSync(FAKE, 0o755);
+    const binary = join(root, "fake-opencode-v2.ts");
+    copyFileSync(FAKE, binary);
+    chmodSync(binary, 0o755);
     const warnings: string[] = [];
     session = await openVettedOpenCodeCopresence({
       backend: OPENCODE_V2_BACKEND,
-      binary: FAKE,
-      env: { PATH: process.env.PATH ?? "", HOME: root },
+      binary,
+      env: { PATH: process.env.PATH ?? "", HOME: root, ...extraEnv },
       cwd: root,
       workDir: root,
       model: "stub/stub-model",
-      startupTimeoutMs: 10_000,
+      startupTimeoutMs,
       tmuxRunner: noTmux,
       tmuxRespawn: noTmux,
       warn: (m) => warnings.push(m),
     });
     return { session, warnings };
   }
+
+  test("MCP readiness failure creates no session/attach script and reaps serve", async () => {
+    const traceRoot = mkdtempSync(join(tmpdir(), "anet-832-trace-"));
+    const trace = join(traceRoot, "requests");
+    try {
+      await expect(open({ TEST832_TRACE: trace, TEST832_MISSING: "1",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp: { servers: { commhub: {} } } }) }, 250)).rejects.toThrow("readiness timed out");
+      expect(existsSync(join(root!, "opencode-attach.sh"))).toBe(false);
+      const requests = readFileSync(trace, "utf8");
+      expect(requests).toContain("/api/rpc/anet.commhub-readiness/ready");
+      expect(requests).not.toContain("/api/session");
+      expect(existsSync(join(root!, "opencode-v2-catalog-endpoint.json"))).toBe(false);
+      const pid = Number(requests.split(" ")[0]);
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally { rmSync(traceRoot, { recursive: true, force: true }); }
+  });
+
+  test("rejects an unsupported server before creating a session", async () => {
+    await expect(open({ TEST_INFO_VERSION: "2.0.99" })).rejects.toThrow(/server version 2\.0\.99/);
+    expect(existsSync(join(root!, "opencode-attach.sh"))).toBe(false);
+  });
+
+  test("TEST-ONLY opt-in never trusts a fake server with the exact patch version", async () => {
+    await expect(open({ ANET_VARIANT_TEST_ONLY: "1", TEST_INFO_VERSION: "2.0.22-anet-test.29040e2" })).rejects.toThrow(/server version/);
+  });
+
+  test("stock server: variant writes go through the idle-gated writer, not the test controller", async () => {
+    const { session } = await open({ ANET_VARIANT_TEST_ONLY: "1" });
+    // The atomic-league controller still never exists on a stock server...
+    expect(await session.selectSessionModel!(session.sessionId, { providerID: "stub", id: "stub-model", variant: "high" }))
+      .toEqual({ status: "rejected", reason: "unsupported" });
+    // ...but a narrower writer does: it refuses while one of our turns is in flight and
+    // verifies the readback. OpenCode exposes no session busy flag, so a human turn in
+    // the TUI started at the same instant is NOT detectable — documented trade-off.
+    expect(session.variantConfigCapable).toBe(true);
+    expect(typeof session.setSelectedVariant).toBe("function");
+  });
+
+  test("MCP observation precedes session and ready launcher; close reaps serve", async () => {
+    const traceRoot = mkdtempSync(join(tmpdir(), "anet-832-order-"));
+    const trace = join(traceRoot, "requests");
+    try {
+      const { session } = await open({ TEST832_TRACE: trace,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp: { servers: { commhub: {} } } }) });
+      const requests = readFileSync(trace, "utf8");
+      expect(requests.indexOf("/api/rpc/anet.commhub-readiness/ready")).toBeLessThan(requests.indexOf("/api/session"));
+      expect(existsSync(session.attachScriptPath)).toBe(true);
+      expect(existsSync(join(root!, "opencode-v2-catalog-endpoint.json"))).toBe(true);
+      await session.close();
+      expect(existsSync(session.attachScriptPath)).toBe(false);
+      expect(existsSync(join(root!, "opencode-v2-catalog-endpoint.json"))).toBe(false);
+      expect(() => process.kill(Number(requests.split(" ")[0]), 0)).toThrow();
+    } finally { rmSync(traceRoot, { recursive: true, force: true }); }
+  });
 
   async function fake(path: string, init: RequestInit = {}) {
     const launcher = readFileSync(session!.attachScriptPath, "utf8");
@@ -138,6 +211,9 @@ describe("V2 core against a protocol-shaped fake serve", () => {
 
   test("ready: loopback, ses_ id, 0700 launcher that joins with --server/--session (no attach, no --pure)", async () => {
     const { session } = await open();
+    const state = await (await fake("/test/state")).json() as any;
+    expect(state[session.sessionId].location).toEqual({ directory: resolve(root!) });
+    expect(session.forkSession).toBeUndefined();
     expect(session.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(session.sessionId).toMatch(/^ses_/);
     expect(statSync(session.attachScriptPath).mode & 0o777).toBe(0o700);
@@ -145,6 +221,161 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     expect(launcher).toContain(`--server '${session.url}' --session '${session.sessionId}'`);
     expect(launcher).not.toContain(" attach ");
     expect(launcher).not.toContain("--pure");
+    const endpoint = readOpenCodeV2CatalogEndpoint(root!);
+    const password = /OPENCODE_SERVER_PASSWORD='([^']+)'/.exec(launcher)![1]!;
+    expect(statSync(join(root!, "opencode-v2-catalog-endpoint.json")).mode & 0o777).toBe(0o600);
+    expect(endpoint?.url).toBe(session.url);
+    expect(endpoint?.directory).toBe(resolve(root!));
+    expect(endpoint?.authorization).toBe(`Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`);
+    expect(JSON.stringify(endpoint)).not.toContain(password);
+  });
+
+  test("refuses a session created in a different workspace", async () => {
+    await expect(open({ TEST_WRONG_LOCATION: "1" })).rejects.toThrow(/session directory does not match/);
+    expect(existsSync(join(root!, "opencode-attach.sh"))).toBe(false);
+    expect(existsSync(join(root!, "opencode-v2-catalog-endpoint.json"))).toBe(false);
+  });
+
+  test("two workspaces share one server but keep separate sessions; closing one leaves the server alive", async () => {
+    root = mkdtempSync(join(tmpdir(), "anet-543-shared-"));
+    const binary = join(root, "fake-opencode-v2.ts");
+    copyFileSync(FAKE, binary);
+    chmodSync(binary, 0o755);
+    const port = await reserveLoopbackPort();
+    const url = `http://127.0.0.1:${port}`;
+    const password = "test-only";
+    const passwordFile = join(root, "server-password");
+    const tracePath = join(root, "resume-requests.log");
+    writeFileSync(passwordFile, password, { mode: 0o600 });
+    const server = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
+      cwd: root, env: { ...process.env, OPENCODE_SERVER_PASSWORD: password, TEST832_TRACE: tracePath }, stdio: "ignore",
+    });
+    const firstDir = join(root, "first");
+    const secondDir = join(root, "second");
+    mkdirSync(firstDir); mkdirSync(secondDir);
+    let first: OpenCodeCopresenceSession | undefined;
+    let second: OpenCodeCopresenceSession | undefined;
+    try {
+      const openShared = (cwd: string, resumeSessionId?: string, model = "stub/stub-model", reconcileResumedModel = false) => openVettedOpenCodeCopresence({
+        backend: OPENCODE_V2_BACKEND, binary, env: { PATH: process.env.PATH ?? "", HOME: root },
+        cwd, workDir: cwd, model, sharedServer: { url, password, passwordFile }, resumeSessionId, reconcileResumedModel,
+        tmuxRunner: noTmux, tmuxRespawn: noTmux,
+      });
+      first = await openShared(firstDir);
+      second = await openShared(secondDir);
+      const firstId = first.sessionId;
+      expect(first.sessionId).not.toBe(second.sessionId);
+      const initialModel = await first.selectedModel!();
+      const candidate = { providerID: "stub", id: "other", variant: "high" };
+      expect(await first.selectSessionModel!(second.sessionId, candidate)).toEqual({ status: "rejected", reason: "scope" });
+      expect(await first.selectSessionModel!(firstId, candidate)).toEqual({ status: "rejected", reason: "unsupported" });
+      expect(await first.selectedModel!()).toBe(initialModel);
+      await expect(openShared(firstDir, "ses_MissingHistory")).rejects.toThrow(/refusing to create a new session/);
+      const sessionsAfterMissing = await (await fetch(`${url}/test/state`, {
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
+      })).json() as Record<string, unknown>;
+      expect(Object.keys(sessionsAfterMissing)).toHaveLength(2);
+      const requestsBefore = readFileSync(tracePath, "utf8").split("\n").filter(line => / \/api\/session(?:$|\/[^/]+\/model$)/.test(line));
+      await expect(openShared(firstDir, "", "stub/new-model", true)).rejects.toThrow(/Invalid OpenCode v2 session id to resume/);
+      await expect(openShared(firstDir, "ses_FixtureWrongResume", "stub/new-model", true)).rejects.toThrow(/does not match the requested session/);
+      await expect(openShared(firstDir, "ses_FixtureNullResume", "stub/new-model", true)).rejects.toThrow(/session resume response returned an invalid session id/);
+      await expect(openShared(firstDir, "ses_FixtureNoDataResume", "stub/new-model", true)).rejects.toThrow(/session resume response returned an invalid session id/);
+      await expect(openShared(firstDir, "ses_FixtureEmptyResume", "stub/new-model", true)).rejects.toThrow();
+      await expect(openShared(firstDir, "ses_FixtureErrorResume", "stub/new-model", true)).rejects.toThrow(/HTTP 503/);
+      await expect(openShared(firstDir, "ses_FixtureTimeoutResume", "stub/new-model", true)).rejects.toThrow();
+      await expect(openShared(secondDir, firstId, "stub/new-model", true)).rejects.toThrow(/directory does not match/);
+      const requestsAfter = readFileSync(tracePath, "utf8").split("\n").filter(line => / \/api\/session(?:$|\/[^/]+\/model$)/.test(line));
+      expect(requestsAfter).toEqual(requestsBefore);
+      expect(await first.forkSession?.(second.sessionId)).toEqual({ status: "rejected", reason: "scope" });
+      const forked = await first.forkSession?.(firstId);
+      expect(forked?.status).toBe("forked");
+      if (!forked || forked.status !== "forked") throw new Error("expected fork");
+      expect(forked.sessionId).not.toBe(firstId);
+      expect(existsSync(first.attachScriptPath)).toBe(true);
+      expect(readOpenCodeV2CatalogEndpoint(firstDir)?.directory).toBe(resolve(firstDir));
+      const launcher = readFileSync(first.attachScriptPath, "utf8");
+      expect(launcher).not.toContain(password);
+      expect(launcher).toContain(passwordFile);
+      await first.close();
+      expect(await first.forkSession?.(firstId)).toEqual({ status: "rejected", reason: "scope" });
+      first = undefined;
+      expect(server.exitCode).toBeNull();
+      first = await openShared(firstDir, forked.sessionId);
+      expect(first.sessionId).toBe(forked.sessionId);
+      await expect(openShared(firstDir, forked.sessionId)).rejects.toThrow("source_resume_bridge_claimed");
+      const { claimSharedSessionBridge } = await import("../source-resume-launcher");
+      expect(() => claimSharedSessionBridge({ project: firstDir, url, serverPid: server.pid!, sessionId: forked.sessionId,
+        workDir: join(firstDir, ".anet", "nodes", "competing-attach"), requestId: "competing-attach" })).toThrow("source_resume_bridge_claimed");
+      expect(await first.selectSessionModel!(first.sessionId, candidate)).toEqual({ status: "rejected", reason: "unsupported" });
+      const sessionsAfterChildResume = await (await fetch(`${url}/test/state`, {
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
+      })).json() as Record<string, unknown>;
+      expect(Object.keys(sessionsAfterChildResume)).toHaveLength(3);
+      expect(sessionsAfterChildResume[firstId]).toBeDefined();
+      await first.close();
+      first = undefined;
+      const resumed = await openShared(firstDir, firstId);
+      first = resumed;
+      expect(resumed.sessionId).toBe(firstId);
+      await first.close();
+      await fetch(`${url}/api/session/${firstId}/model`, {
+        method: "POST",
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: { providerID: "stub", id: "tui-selected-model" } }),
+      });
+      first = await openShared(firstDir, firstId);
+      expect(first.sessionId).toBe(firstId);
+      expect(await first.selectedModel?.()).toBe("stub/tui-selected-model");
+      await first.setSelectedModel?.("stub/client-selected");
+      expect(await first.selectedModel?.()).toBe("stub/client-selected");
+      let state = await (await fetch(`${url}/test/state`, {
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
+      })).json() as any;
+      // #2827: a client model edit *switches the live session* (the commit that added
+      // setSelectedModel says so, and `selectedModel()` above already reads back
+      // client-selected). This assertion used to expect the pre-#2827 behaviour
+      // (client edit stays local, TUI choice survives), which contradicts the line
+      // three above it — that is why it has been red since #2827 landed.
+      expect(state[firstId].model).toEqual({ providerID: "stub", id: "client-selected" });
+      await first.close();
+      first = await openShared(firstDir, firstId, "stub/new-model", true);
+      expect(first.sessionId).toBe(firstId);
+      state = await (await fetch(`${url}/test/state`, {
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
+      })).json() as any;
+      expect(state[firstId].model).toEqual({ providerID: "stub", id: "new-model" });
+    } finally {
+      await first?.close();
+      await second?.close();
+      server.kill("SIGTERM");
+    }
+  }, 15_000);
+
+  test("shared server waits for workspace MCP and registered tools", async () => {
+    root = mkdtempSync(join(tmpdir(), "anet-543-shared-ready-"));
+    const binary = join(root, "fake-opencode-v2.ts");
+    copyFileSync(FAKE, binary); chmodSync(binary, 0o755);
+    const port = await reserveLoopbackPort();
+    const url = `http://127.0.0.1:${port}`;
+    const password = "test-only";
+    const server = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
+      cwd: root, env: { ...process.env, OPENCODE_SERVER_PASSWORD: password, TEST_REQUIRE_PROJECT_PLUGIN: "1" }, stdio: "ignore",
+    });
+    const cwd = join(root, "project"); mkdirSync(cwd);
+    const workDir = join(root, "node-private"); mkdirSync(workDir, { mode: 0o700 });
+    const proxy = await openSharedV2CommhubMcp(cwd, workDir, "http://127.0.0.1:9999/mcp", "test-node-token", join(cwd, "ANET-COMMHUB.md"));
+    try {
+      session = await openVettedOpenCodeCopresence({
+        backend: OPENCODE_V2_BACKEND, binary, env: { PATH: process.env.PATH ?? "", HOME: root },
+        cwd, workDir, model: "stub/stub-model", sharedServer: { url, password }, sharedMcpUrl: proxy.url,
+        tmuxRunner: noTmux, tmuxRespawn: noTmux,
+      });
+      expect(session.sessionId).toMatch(/^ses_/);
+    } finally {
+      await session?.close(); session = undefined;
+      await proxy.close();
+      server.kill("SIGTERM");
+    }
   });
 
   test("a network task gets its own reply, with sender provenance in the visible turn", async () => {
@@ -234,5 +465,30 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     expect(s.isRunning).toBe(false);
     expect(existsSync(launcher)).toBe(false);
     session = undefined;
+  });
+});
+
+
+// 2026-10-31 —— `ended_by`：谁结束了这次等待。
+// 没有它时，「我方到点」与「别人中止」被抹成同一个 name，
+// 于是任何「谁违约」的统计都会系统性偏向一方，而偏向方向由实现决定、不由事实决定。
+describe("OpenCodeCopresenceTimeoutError.endedBy", () => {
+  test("defaults to local（我方到点）；显式传 remote / unknown 时照原样保留", async () => {
+    const { OpenCodeCopresenceTimeoutError } = await import("./runtime.js");
+    const dflt = new OpenCodeCopresenceTimeoutError("reply", 1000);
+    expect(dflt.endedBy).toBe("local");
+    const remote = new OpenCodeCopresenceTimeoutError("reply", 1000, "running", "remote");
+    expect(remote.endedBy).toBe("remote");
+    const unk = new OpenCodeCopresenceTimeoutError("admission", 1000, "running", "unknown");
+    expect(unk.endedBy).toBe("unknown");
+  });
+
+  test("endedBy 不改变既有判据（phase / aborted / timeoutMs 与之前一致）", async () => {
+    const { OpenCodeCopresenceTimeoutError } = await import("./runtime.js");
+    const e = new OpenCodeCopresenceTimeoutError("reply", 2500, "aborted", "remote");
+    expect(e.phase).toBe("reply");
+    expect(e.aborted).toBe(true);
+    expect(e.timeoutMs).toBe(2500);
+    expect(e.endedBy).toBe("remote");
   });
 });

@@ -17,6 +17,8 @@
 //     fork, fixed argv, no shell, cwd = the child's workdir. That command
 //     only reaps processes carrying the node's ANET_NODE_MARKER; see
 //     copresenceTeardownFor below for why pid signals cannot reach them.
+//     OpenCode co-presence also uses that pinned CLI: its existing stop path
+//     freezes process ownership, drains the bridge, then verifies tmux cleanup.
 //   - backup_path naming = `<Date.now()>-<alias>` so the same alias can
 //     be deleted-and-recreated without collision (scenario K).
 //   - chmod 700 immediately after rename, even if source dir was looser
@@ -25,7 +27,7 @@
 //     before rebuildChildrenMapOnBoot lands is the common cause. Hub-side
 //     sweeper / reconciliation picks up the row eventually.
 
-import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -121,6 +123,9 @@ export interface StopDoorbellDeps {
   // in the child's workdir). Injectable for tests; default forks the pinned
   // anet binary (see the header exception).
   stopCopresenceNode?: (alias: string, childWorkDir: string) => Promise<CopresenceTeardownResult>;
+  // Tests inject this so delete can prove it waits out a still-exiting
+  // grandchild before rename. Production lists via pgrep + /proc cmdline.
+  listMatchingChildPids?: (alias: string, configPaths: string[]) => Promise<number[]>;
 }
 
 export interface CopresenceTeardownResult { ok: boolean; detail: string }
@@ -234,7 +239,12 @@ function hasLocalChildRecord(workdirRoot: string, alias: string, child_node_id: 
   return true;
 }
 
-/** #596 — 这个 child 是不是一个**正在占着身份标记**的 Codex TUI 共存节点。
+/** Whether a locally managed co-presence child needs the complete CLI stop.
+ * OpenCode uses its matching local node_id + runtime/mode; the CLI owns the
+ * process-generation and terminal cleanup. Codex retains the marker gate
+ * below (a missing Codex marker must never become permission to kill by name).
+ *
+ * #596 — 这个 child 是不是一个**正在占着身份标记**的 Codex TUI 共存节点。
  *
  *  共存节点的 `anet node start` 只是启动器:它把 app-server / 桥 / TUI 起在三个 tmux
  *  会话里(`<alias>-appsrv` / `<alias>-桥` / `<alias>`),写下
@@ -247,14 +257,25 @@ function hasLocalChildRecord(workdirRoot: string, alias: string, child_node_id: 
  *  🔴 标记文件不在就**不**交给 `anet node stop`:那条命令在没有标记时会退回按 tmux 会话名
  *     清扫(legacy 路径)—— 那正是「只凭 alias 杀进程」。标记在启动器起任何会话**之前**就落盘
  *     (agent-network/bin/cli.ts「marker file is written now」),所以没有标记 = 没有本节点的会话。 */
+function managedOpenCodeCopresence(workdirRoot: string, alias: string, child_node_id: string): boolean {
+  const [path] = expectedChildConfigPaths(workdirRoot, alias);
+  if (!path) return false;
+  try {
+    if (!lstatSync(path).isFile()) return false;
+    const cfg = JSON.parse(readFileSync(path, "utf8"));
+    return cfg?.node_id === child_node_id && cfg?.runtime === "opencode-cli" && cfg?.opencodeMode === "copresence";
+  } catch { return false; }
+}
+
 export function copresenceTeardownFor(workdirRoot: string, alias: string, child_node_id: string): boolean {
+  if (managedOpenCodeCopresence(workdirRoot, alias, child_node_id)) return true;
   const [cfgPath] = expectedChildConfigPaths(workdirRoot, alias);
   if (!cfgPath) return false;
   try {
     if (!lstatSync(cfgPath).isFile()) return false;
     const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-    if (cfg?.codexCopresence !== true) return false;
     if (cfg?.node_id !== child_node_id) return false;
+    if (cfg?.codexCopresence !== true) return false;
   } catch { return false; }
   try { lstatSync(join(workdirRoot, alias, "copresence-identity.json")); }
   catch { return false; }
@@ -266,7 +287,10 @@ function tailText(s: unknown, n = 600): string {
   return t.length > n ? `…${t.slice(-n)}` : t;
 }
 
-async function defaultStopCopresenceNode(alias: string, childWorkDir: string): Promise<CopresenceTeardownResult> {
+/** `anet node stop <alias>` with the pinned binary and the daemon's minimal env.
+ *  Exported (#1625) so a failed create runs the *same* stop authority as the stop
+ *  doorbell instead of inventing a second, weaker one. */
+export async function stopCopresenceChild(alias: string, childWorkDir: string): Promise<CopresenceTeardownResult> {
   const { getAnetBinAbs, minimalEnv } = await import("./create-node-daemon.js");
   let bin: string;
   try { bin = getAnetBinAbs(); }
@@ -296,8 +320,8 @@ async function teardownCopresenceIfAny(
   if (!alias || !copresenceTeardownFor(workdirRoot, alias, child_node_id)) return null;
   // workdirRoot = <childWorkDir>/.anet/nodes —— `anet node stop` 按 cwd 解析 .anet/nodes。
   const childWorkDir = dirname(dirname(workdirRoot));
-  deps.log(`[stop-daemon] codex co-presence child ${alias}: identity marker present → \`anet node stop ${alias}\` in ${childWorkDir}`);
-  const run = deps.stopCopresenceNode ?? defaultStopCopresenceNode;
+  deps.log(`[stop-daemon] co-presence child ${alias}: managed local config → pinned \`anet node stop ${alias}\` in ${childWorkDir}`);
+  const run = deps.stopCopresenceNode ?? stopCopresenceChild;
   let r: CopresenceTeardownResult;
   try { r = await run(alias, childWorkDir); }
   catch (e: any) { r = { ok: false, detail: String(e?.message || e) }; }
@@ -403,13 +427,21 @@ export async function handleStopDoorbell(
         .catch((e: any) => { deps.warn(`[stop-daemon] ack failed: ${e?.message || e}`); });
       return;
     }
-    if (child_alias) {
+    if (child_alias && action === "delete" && delete_config && childDirName) {
+      // Same race as the hit path: a grandchild still inside its exit hook
+      // recreates the directory if we rename first. Wait it out, then move.
+      await quiesceMatchingChildren(child_alias, expectedChildConfigPaths(workdirRoot, childDirName), signalProcess, deps, sleep, now, `${action} without map entry`);
+    } else if (child_alias) {
       await sweepOrphansForChild(child_alias, expectedChildConfigPaths(workdirRoot, childDirName!), signalProcess, deps, `${action} without map entry`);
     }
     const backup = (action === "delete" && delete_config && childDirName)
       ? moveWorkdirToTrash(childDirName, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
       : null;
     forgetIfDeleted(backup);
+    if (backup && childDirName) {
+      await quiesceMatchingChildren(child_alias || "", expectedChildConfigPaths(workdirRoot, childDirName), signalProcess, deps, sleep, now, "delete after backup mv");
+      dropResurrectedWorkdir(workdirRoot, childDirName, deps);
+    }
     // Ack `stopped` either way: the child is not running (swept) and — for
     // delete — its config is not in place, which IS each action's end state,
     // so the hub must converge (stop→stopped / delete→row gone + ntok revoked).
@@ -481,8 +513,18 @@ export async function handleStopDoorbell(
     }
   };
   let exit_signal: string = "UNKNOWN";
+  const fullOpenCodeStop = managedOpenCodeCopresence(workdirRoot, entryDirName, child_node_id);
   try {
-    if (isAlive(entry.pid, signalProcess)) {
+    if (fullOpenCodeStop) {
+      // The map can still hold the PRE-model-restart launcher. Do not sweep
+      // its current bridge first: that discards the parent/child identities
+      // before CLI can freeze and drain them. Full CLI stop owns all teardown.
+      const why = await teardownCopresenceIfAny(entryDirName, child_node_id, workdirRoot, deps);
+      if (why) {
+        await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: why }).catch(() => {});
+        return;
+      }
+    } else if (isAlive(entry.pid, signalProcess)) {
       sendGroupSignal(entry.pid, "SIGTERM");
       exit_signal = "SIGTERM";
       deps.log(`[stop-daemon] sent SIGTERM to pgid=${resolvePgid(entry.pid)} (from recorded pid=${entry.pid}) alias=${entry.alias} grace=${grace_seconds}s (covers wrapper + agent-node grandchild)`);
@@ -518,7 +560,7 @@ export async function handleStopDoorbell(
   // #596 — the recorded pid is the co-presence launcher; its process group
   // never contained the tmux sessions. Signal first (a launcher still mid-start
   // stops creating sessions), then reap the generation by its identity marker.
-  const cpErrHit = await teardownCopresenceIfAny(entryDirName, child_node_id, workdirRoot, deps);
+  const cpErrHit = fullOpenCodeStop ? null : await teardownCopresenceIfAny(entryDirName, child_node_id, workdirRoot, deps);
   if (cpErrHit) {
     await deps.callCommHub("ack_stop_request", {
       request_id, status: "stop_failed", exit_signal, error: cpErrHit,
@@ -531,6 +573,16 @@ export async function handleStopDoorbell(
   // (~/.anet/deleted) and the moved dir so secrets don't leak.
   // Shared with the no-map-entry delete branch above so the two paths cannot
   // drift on "what happens when the move fails".
+  //
+  // qa-rfc027 A.5: the recorded pid is the `anet node start` wrapper. The
+  // supervised agent-node grandchild can still be inside its exit hook after
+  // the wrapper is gone. That hook mkdirSync's `<node>/logs`
+  // (process-survival-log's `exit` listener). Rename-then-exit recreates
+  // `<nodes>/<alias>` next to the backup. Wait until no matching grandchild
+  // remains, then move.
+  if (action === "delete" && delete_config && child_alias && childDirName) {
+    await quiesceMatchingChildren(entry.alias, childConfigPaths, signalProcess, deps, sleep, now, "delete before backup mv");
+  }
   const backup_path: string | null = (action === "delete" && delete_config && childDirName)
     ? moveWorkdirToTrash(childDirName, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir)
     : null;
@@ -550,6 +602,13 @@ export async function handleStopDoorbell(
   deps.log(`[stop-daemon] entering residual sweep alias=${entry.alias}`);
   await sweepOrphansForChild(entry.alias, childConfigPaths, signalProcess, deps, "post-pgid-signal residual sweep");
   deps.log(`[stop-daemon] residual sweep returned alias=${entry.alias}`);
+  // A grandchild that slipped the pre-move wait (exit hook vs pgrep) recreates
+  // the directory with logs only — no config.json. Reap it, then drop that
+  // residue. A directory that already has config.json is a newer create; leave it.
+  if (backup_path && childDirName) {
+    await quiesceMatchingChildren(entry.alias, childConfigPaths, signalProcess, deps, sleep, now, "delete after backup mv");
+    dropResurrectedWorkdir(workdirRoot, childDirName, deps);
+  }
 
   childrenMap.delete(child_node_id);
   deps.log(`[stop-daemon] dropped from children map child_node_id=${child_node_id}, sending ack action=${action}`);
@@ -578,28 +637,16 @@ export async function handleStopDoorbell(
  * ever calls this with the daemon's own alias by mistake, the
  * self-pid guard keeps it harmless.
  */
-async function sweepOrphansForChild(
+async function listMatchingChildPids(
   alias: string,
   configPaths: string[],
-  signalProcess: (pid: number, sig: NodeJS.Signals | 0) => void,
   deps: StopDoorbellDeps,
-  reason: string,
-): Promise<void> {
-  // #571 — 没有可认的 config 路径就不清扫:只凭 alias 会杀到别的工作目录里的同名节点。
-  if (configPaths.length === 0) {
-    deps.warn(`[stop-daemon] orphan sweep skipped (${reason}): no child config path to match for alias=${alias}`);
-    return;
-  }
+): Promise<number[]> {
+  if (configPaths.length === 0) return [];
+  if (deps.listMatchingChildPids) return deps.listMatchingChildPids(alias, configPaths);
   try {
-    // SHOULD-FIX nit (PR #349 ack): drop the unused `readFileSync` from
-    // this destructure — it's exported by node:fs, not node:child_process,
-    // and the actual reads go through `fs.readFileSync` from the
-    // separate import on the next line. Was a copy-paste leftover.
     const { execSync } = await import("node:child_process") as any as { execSync: (cmd: string, opts: any) => string };
     const fs = await import("node:fs");
-    // PR1.1 cmdlineMatchesAlias-style verification: regex pgrep first
-    // (cheap shortlist), then /proc/<pid>/cmdline argv-adjacency
-    // check to filter substring-collision false positives.
     let out: string;
     try {
       // #1286 —— 🔴 这个 execSync 原来既没有 timeout 也没有 maxBuffer,而它坐在
@@ -614,21 +661,113 @@ async function sweepOrphansForChild(
       //    daemon 关键路径上不该有无上限的同步子进程调用。
       out = execSync(`pgrep -af 'agent-node' || true`, { encoding: "utf8", timeout: 10_000, maxBuffer: 32 * 1024 * 1024 });
     } catch {
-      return;
+      return [];
     }
     const candidates = out.split(/\r?\n/)
       .map(l => parseInt(l.trim().split(/\s+/)[0] || "0", 10))
       .filter(p => Number.isFinite(p) && p > 0 && p !== process.pid);
+    const matched: number[] = [];
     for (const p of candidates) {
       let cmdline: string | null = null;
       try { cmdline = fs.readFileSync(`/proc/${p}/cmdline`, "utf8"); } catch { continue; }
       if (!cmdlineMatchesChild(cmdline, alias, configPaths)) continue;
-      deps.warn(`[stop-daemon] sweeping orphan pid=${p} alias=${alias} (${reason})`);
-      try { signalProcess(p, "SIGTERM"); } catch { /* may already be dead */ }
+      matched.push(p);
     }
+    return matched;
   } catch (e: any) {
-    deps.warn(`[stop-daemon] orphan sweep skipped (${reason}): ${e?.message || e}`);
+    deps.warn(`[stop-daemon] orphan sweep skipped: ${e?.message || e}`);
+    return [];
   }
+}
+
+async function signalMatchingChildren(
+  alias: string,
+  configPaths: string[],
+  signalProcess: (pid: number, sig: NodeJS.Signals | 0) => void,
+  deps: StopDoorbellDeps,
+  sig: NodeJS.Signals,
+  reason: string,
+): Promise<number> {
+  const pids = await listMatchingChildPids(alias, configPaths, deps);
+  for (const p of pids) {
+    deps.warn(`[stop-daemon] sweeping orphan pid=${p} alias=${alias} (${reason})`);
+    try { signalProcess(p, sig); } catch { /* may already be dead */ }
+  }
+  return pids.length;
+}
+
+/** SIGTERM matching grandchildren, then SIGKILL, until none remain or the
+ *  budget is spent. Delete must call this before rename: the grandchild's
+ *  exit hook recreates the node directory if the rename wins the race. */
+async function quiesceMatchingChildren(
+  alias: string,
+  configPaths: string[],
+  signalProcess: (pid: number, sig: NodeJS.Signals | 0) => void,
+  deps: StopDoorbellDeps,
+  sleep: (ms: number) => Promise<void>,
+  now: () => number,
+  reason: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  if (configPaths.length === 0) {
+    deps.warn(`[stop-daemon] orphan sweep skipped (${reason}): no child config path to match for alias=${alias}`);
+    return;
+  }
+  const deadline = now() + timeoutMs;
+  let sig: NodeJS.Signals = "SIGTERM";
+  while (true) {
+    const n = await signalMatchingChildren(alias, configPaths, signalProcess, deps, sig, reason);
+    if (n === 0) return;
+    if (now() >= deadline) {
+      deps.warn(`[stop-daemon] child still alive after ${timeoutMs}ms alias=${alias} (${reason})`);
+      return;
+    }
+    await sleep(200);
+    sig = "SIGKILL";
+  }
+}
+
+/** Exit-hook residue after a successful backup mv: `<node>/logs` and nothing
+ *  else. A directory that already holds config.json is a newer create. */
+function dropResurrectedWorkdir(workdirRoot: string, childDirName: string, deps: StopDoorbellDeps): void {
+  if (!childDirName || childDirName === "." || childDirName === ".." || /[\/\0]/.test(childDirName)) return;
+  const src = join(workdirRoot, childDirName);
+  let st;
+  try { st = lstatSync(src); }
+  catch (e: any) {
+    if (e?.code === "ENOENT") return;
+    deps.warn(`[stop-daemon] resurrected workdir stat failed for ${src}: ${e?.message || e}`);
+    return;
+  }
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    deps.warn(`[stop-daemon] refusing to remove non-directory at ${src} after backup mv`);
+    return;
+  }
+  if (existsSync(join(src, "config.json"))) {
+    deps.warn(`[stop-daemon] recreated workdir ${src} has config.json; leaving it`);
+    return;
+  }
+  try {
+    rmSync(src, { recursive: true, force: true });
+    deps.warn(`[stop-daemon] removed workdir recreated after backup mv: ${src}`);
+  } catch (e: any) {
+    deps.warn(`[stop-daemon] failed to remove recreated workdir ${src}: ${e?.message || e}`);
+  }
+}
+
+async function sweepOrphansForChild(
+  alias: string,
+  configPaths: string[],
+  signalProcess: (pid: number, sig: NodeJS.Signals | 0) => void,
+  deps: StopDoorbellDeps,
+  reason: string,
+): Promise<void> {
+  // #571 — 没有可认的 config 路径就不清扫:只凭 alias 会杀到别的工作目录里的同名节点。
+  if (configPaths.length === 0) {
+    deps.warn(`[stop-daemon] orphan sweep skipped (${reason}): no child config path to match for alias=${alias}`);
+    return;
+  }
+  await signalMatchingChildren(alias, configPaths, signalProcess, deps, "SIGTERM", reason);
 }
 
 // ─── RFC-027 PR1.1 — rebuildChildrenMapOnBoot ─────────────────────────

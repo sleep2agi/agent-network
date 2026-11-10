@@ -1,0 +1,112 @@
+Test1036: client 0.2.244 formal delivery receipt (PASS)
+Observed: 2026-10-12 01:59 Asia/Shanghai (2026-10-11T17:59Z)
+Original requirement: CommHub #1036 / agent-network-app issue #867
+
+SOURCE AND MERGE
+Installer implementation PR868 head:
+66f116eac3c063f64db904b8b858d774a61396fa.
+Complete release candidate PR869 head:
+125d564675190ba21edf03636805ff989fb4145e.
+Exact main release source:
+6763765909d0c7a50dbd9c595e14d294fd0e99b8.
+Verified installer-head -> complete candidate -> main ancestry and version
+0.2.244 / Android versionCode2244 before dispatch. Candidate's own checks
+all terminal: 32 SUCCESS / 1 SKIPPED. Normal merge at 17:33:57Z, no bypass.
+GitHub subsequently marked the included installer PR merged. Its obsolete
+standalone Mac job was not a PASS; cancellation requested after inclusion
+and complete-candidate gate success were confirmed.
+
+REUSED AFFECTED EVIDENCE
+Installer resources/vendor-template compilation and identity checks:
+app docs/tests/report-test1036-windows-installer-brand.txt.
+Corrected prelogin-update screenshot click fixture and missed-click negative:
+app docs/tests/report-test1036-native-click-correction.txt.
+Exact release metadata Docker checks:
+app docs/tests/report-test1036-client244-release-preflight.txt.
+These are branch development/test evidence, not public binary provenance.
+
+FORMAL BUILDS AND PUBLICATION
+Desktop run38160214929, dispatched main at 17:34:26Z with the full source
+SHA above; include_linux=false. macOS app/dmg and Windows nsis/msi actual
+jobs and verify-draft all completed SUCCESS. Source-membership, npm ci,
+tests, typecheck, signing/notarization, packaging, packaged Hub smoke and
+selected-platform uninstall/reinstall retention checks passed. Normal
+signing-environment approval used only after
+confirming run head/branch/source. No certificate or key material read.
+Android run38160216785, dispatched main at 17:34:27Z with the same full
+source SHA, completed SUCCESS at 17:46:21Z, including final APK verification.
+Verified its workflow path, successful conclusion, main branch and exact
+source again; refreshed origin/main and rechecked ancestry. No competing
+Android channel publication was active. Dispatched the normal main-only
+channel publisher run38161121848 at 17:47:37Z with the same full source
+and successful build run ID. Publisher completed SUCCESS, including its
+anonymous version/notes/checksum/artifact readback.
+Build log confirms versionName0.2.244/versionCode2244, unchanged signer
+SHA256 fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+Actions artifact11709991434 archive SHA256
+1ac89b6dadb886dae5c51004ad2f0397c93de109fa172a930f201e13652fd804;
+this archive checksum is not an APK checksum.
+After refreshing main membership, isolated Docker draft audit passed:
+exact source, all8 selected assets/digests/sizes, updater URLs/signatures,
+no Linux. That review used a notes preview; the complete deployed manifest
+was checked independently below. Release409824366 / desktop-v0.2.244 was
+published as Latest at 17:54:52Z. New tag resolves to the exact main source.
+No branch artifact reused publicly. No Linux or iOS formal build dispatched.
+
+CORE PUBLIC CHANNEL CHECKS (DOCKER ONLY)
+Cached image anet-app:test1020-provider-ref-core-next, immutable image ID:
+3f880e03f85f8dd15f65ace8e0e62c6950b6099bc35937378f8f46868b712b97.
+Docker via sg docker; --rm, read-only filesystem/scripts mount, tmpfs /tmp,
+cap-drop ALL/no-new-privileges, bridge networking, no credentials/host ports.
+PASS public www.anet.sh/desktop/update/latest.json: HTTP200, JSON/no-store,
+version0.2.244, complete canonical comparison with unique release asset API
+to browser URL mapping, all notes/signatures unchanged, no Linux entries.
+PASS full anonymous GitHub DMG38952230B:
+sha256 ca04fcdd8ee3005c41c3358eba7c8037722d5752fce5efcab85768810464b9cf.
+PASS full anonymous GitHub Windows NSIS37316776B:
+sha256 18c18d5fd27e2c97f257805422639f0bc464285212ee0d3d70445b72d167c45f.
+PASS anonymous Android latest/VERSION0.2.244, version-specific notes,
+checksum file and full APK83773677B:
+sha256 e2f9b0522ffdb91926960b23283f236617d3cd1622410dd4b9ba75d6a8ee2db4.
+ModelScope base: datasets/SmartFlowAI/agent-network-releases/resolve/master;
+Android paths android/latest/VERSION, android/0.2.244/notes.md,
+android/agent-network-0.2.244.apk and its .sha256 file.
+Independent manifest drift run38161634018 SUCCESS.
+
+DESKTOP DOMESTIC MIRROR (PASS)
+Manual main mirror run38161631918 dispatched for desktop-v0.2.244.
+Completed SUCCESS, including anonymous verification, by 17:57:54Z.
+Independent isolated Docker audit completed exit0: latest/VERSION0.2.244,
+complete canonical mirror URL/notes/signature mapping and all8 versioned
+SHA256SUMS entries agree with the GitHub release asset digests.
+Full anonymous desktop/latest/Agent.Network_aarch64.dmg alias38952230B:
+sha256 ca04fcdd8ee3005c41c3358eba7c8037722d5752fce5efcab85768810464b9cf.
+Full anonymous desktop/latest/Agent.Network_x64-setup.exe alias37316776B:
+sha256 18c18d5fd27e2c97f257805422639f0bc464285212ee0d3d70445b72d167c45f.
+Automatic same-source release run38161619324 was CANCELLED after
+verifying exact run/source/tag/event. That path waits30 minutes for an APK
+attachment; Android uses the independent successfully published channel.
+Only this owned duplicate was cancelled; no unrelated jobs were touched.
+
+DELIVERY HANDOFF
+Formal release: https://github.com/sleep2agi/agent-network-app/releases/tag/desktop-v0.2.244
+Primary macOS/Windows/Android channels are published and the independent
+anonymous core download checks above passed. Original #1036 may close its
+delivery checklist; broader Provider/node-creation parent cards remain open.
+Public release time01:54:52+08; domestic mirror verified by01:59+08, within
+the previously conditional01:55-02:15+08 delivery window.
+This is packaging/channel evidence, not an interactive Windows appearance
+screenshot or proof of real OAuth/model entitlement.
+
+BOUNDARIES / CLEANUP
+This slice changes Windows installer branding, not Provider selection,
+real account/model entitlement or the separate #1027 child-config fix.
+Installation identity, existing account/data paths and runtime settings are
+unchanged by this slice. No global npm update, business-node restart,
+production fixture, credential copy, or new model inference was performed.
+Reused prior isolated Docker positives; no new product test suite added.
+Temporary skill-format validation container auto-removed. Formal CI owns
+its build workspaces; downloaded earlier test artifacts remain TEST ONLY.
+Recovery/publication authority remains app docs/desktop-release-sop.md and
+the checked-in workflows, not personal paths or chat memory. Existing user
+changes and other owners' worktrees were preserved.

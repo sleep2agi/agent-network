@@ -1,5 +1,96 @@
 # 更新日志
 
+## 2026-10-14 Windows native TUI health alpha
+
+Published software alpha CLI2.3.0-preview.179 / Node2.5.0-preview.145: ongoing Windows co-presence health verifies the exact launch generation and owned loopback connection. Missing evidence remains unknown; proven exit or lost connection uses the existing Hub degradation guard. Source/native fake-Codex CI and exact-main formal publication are recorded in `report-test1175-windows-tui-health.txt` and `report-test1175-public.txt`. Both full npm and official GitHub archives are verified; the initial CLI registry-timeout workflow failure remains recorded. Original-device/model acceptance remains pending.
+
+## 软件 alpha 已公开：Windows 共存健康探针对齐原生进程（2026-10-14）
+
+- 配套 CLI 2.3.0-preview.178 / Node 2.5.0-preview.144，沿用 Hub 0.9.0-preview.139。两包从精确 main 通过四道发布门，官方 GitHub 完整包已匿名核对；两包 npm 完整包也已匹配；CLI 首次传播核验超时失败保留，随后完整回下载确认。原机采用另验。
+- Windows 共存节点不再用 tmux 会话缺失判断原生 TUI。持续原生 TUI 健康仍为未知；App Server 断连和登录失效仍由原健康门拒绝投递。
+- Windows CI 在 PID/出生时间/连接归属及 Hub 新鲜健康快照后，验证普通和高优先级消息接续同一回合。CI 不代替原机反馈或现役采用。
+
+## 软件配套已公开：深层人类收件与已有回合接续（2026-10-14）
+
+- 配套版本：CLI 2.3.0-preview.177 / Node 2.5.0-preview.143 / Hub 0.9.0-preview.139。Node/Hub 的 npm 完整包与四门通过包匹配；CLI 四门通过的同一 tarball 已在官方 GitHub 下载页公开，npm 完整包传播后验也已匹配；首次超时失败保留。软件公开不代表现役采用。
+- 人类 Dashboard 消息可越过前 20 条未 ACK 积压进入接续仲裁。Hub 全深度分页扫描类型和元数据，单次正文仍最多 20 条；节点保留总 20 槽位、已领任务和去重。旧 Hub 保持原取件行为，节点提示其全深度能力尚不可用。
+- 纳入已合入的 owned follow-up 控制器：验证当前已归属回合后只注入一次，持久化 nonce/hash；独立回答属于原任务，未知接纳、取消、恢复和容量失败不重新执行动作。源码/协议测试通过不代表现役节点或原机已采用。
+
+## 未发布：单文件 anet 可执行文件（只构建，不发布）（2026-10-11）
+
+- 新增统一入口 `agent-network/bin/anet-bin.ts`。`bun build --compile` 把它打成一个可执行文件：默认走 CLI，`__hub` 走内嵌的 Hub，`__node` 走内嵌的 agent-node。npm 的 `bin` 仍是 `dist/bin/anet.cjs`。`release.yml` 的 npm 发布没有改。
+- 编译时写入 agent-network、agent-node、commhub-server 三个包的版本。`anet --version` 打印这三个版本，并另起一行报告本次构建的 bundle 版本。用 npm / node 跑时，版本仍从磁盘上的 package.json 读取，自启动参数与原来一致。
+- 编译后的二进制里，Hub 用 `anet __hub` 启动，不再调用 `bunx`。agent-node 用 `anet __node`。claude-agent-sdk、Codex SDK 和 node-pty 不打进这个文件。
+- GitHub Actions 工作流 `cli-binary.yml` 可手动构建 linux-x64 与 darwin-arm64。`publish` 默认关闭。只有显式打开才会上传到 GitHub release `cli-bin-v<version>`。这次变更不触发发布。macOS 产物未签名，不能当安装包分发。
+
+## 未发布：Hub 可排队读取已归属的 OpenCode V2 目录（2026-10-11）
+
+- 网络成员可以用 `read_opencode_catalog` 让 host_supervisor daemon 读取它已经在跑的 OpenCode V2 回环目录。`ok` 且 `status: pending` 只表示 Hub 已授权并记在内存里。门铃是尽力推送：没有订阅者就不会送达。只有 `get_opencode_catalog` 的 `status: ready` 才是快照，而且 completeness 仍是 unknown、invocationVerified 仍是 false。
+- 这条路径不启动 OpenCode、不提示输入、不跟随重定向。身份和代际只来自 Hub 里已有的创建记录。请求不能带 url、authorization、directory、settings、headers 或 body。
+- 没有客户端挑选界面，也不是 npm 发布。收编节点不在这一片。创建记录没有 workdir 时，目录由 daemon 绑定到它已经拥有的项目目录，Hub 看不到那台机器的文件系统。
+- 确认快照里的目录按路径自己的格式判断是不是绝对路径。Hub 在 POSIX 上也不会把 daemon 的 `C:\project` 当成相对路径丢掉。`C:/project` 与 `C:\project` 视为同一目录。创建记录里的 `~/…` 由 daemon 展开后再和回环目录比较；Hub 不展开别人的家目录。软链工作目录在快照里仍用创建记录里的那条绝对路径。
+
+## 未发布：daemon 删除节点后会话一并清掉（2026-10-11）
+
+- 经 daemon 删除的节点，Hub 在收尾时只删了 `nodes` 行，`sessions` 行留成 `offline`。`/api/status` 和基于它的客户端列表因此一直显示已删除的节点（桌面端停在「删除请求已提交」）。现在收尾时按 `node_id` 一并删除该节点的会话，与 REST `DELETE /api/nodes/:id` 一致。按 `node_id` 而非别名删，删除收尾前用同名重建的节点不受影响。之前已残留的离线会话不会自动清除。
+
+## 未发布：daemon 创建的子节点保留 USER 与代理变量（2026-10-11）
+
+- daemon 拉起子节点时，除 `PATH`、`HOME`、`LANG` 外，还从 daemon 自己的环境复制 `USER`、`LOGNAME` 和 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY`（大小写两种写法）。没设或为空的不复制。
+- 之前在 macOS 上，daemon 创建的 `claude-agent-sdk` 节点每个任务都回「Not logged in · Please run /login」：Claude Code 按 `$USER` 去钥匙串读登录。需要代理才能出网的机器上，子节点直连被 Anthropic 拒绝（`403 Request not allowed`），而 runtime 就绪检查用的是 daemon 的环境，照样报可达。
+- 仍是白名单：token、API key、`NODE_OPTIONS` 等不会传给子节点。`USER` / `LOGNAME` 仍在保留键里，Hub 下发的 env 不能设置它们。
+
+## 未发布：同一 daemon 上克隆子节点（2026-10-11）
+
+- 新 Hub 工具 `clone_node`：把已经由这台 daemon 创建的子节点，在同一台 daemon 上做成一个新节点。新别名、新 `ntok_`。源节点的 token、`secrets.env`、`auth.json` 不复制。非 commhub 频道（常带机器人凭据）不复制。
+- `workdir_policy` 默认 `new_empty`：在源工作目录的同一父目录下新建空目录，不复制源目录里的文件。源节点没有自己的项目目录、就住在 daemon 的当前目录时，新目录放在 `<daemon cwd>/clone-work/<文件夹>`。`share_source` 是显式选项，两个节点共用源工作目录，token 仍然是新的。
+- `copy_session` 默认 true。Claude、Codex、Grok 只在本机真有会话文件时连同会话 id 一起复制；没有文件就不写 id。OpenCode 的会话在它自己的服务里，只能复制 id，两边指向同一份服务端记录，不是私有副本。本机 `anet node clone` 仍然不复制会话。
+- 指定另一台 daemon 会被拒绝（`cross_daemon_refused`）。`ok: true` 只表示请求已入队并尝试门铃，不表示子节点已经注册，也不表示会话文件已经复制。这不是 npm 发布。Hub 请求 #938。
+
+## 未发布：OpenCode V2 用户指南（2026-10-11）
+
+- anet.sh 增加 [OpenCode V2](/guide/opencode)（中英），侧栏放在 Grok 旁边。它说明 `opencode-cli` 的 V2 创建、共存启动、Hub 对话和 daemon 约束。
+- 创建路径按已发布的 preview 通道写。模型目录读取器（#2574）写明只在 main 上，尚未接到 daemon、Hub 或客户端，也不是一条用户命令。npm `latest` 仍没有 `--opencode-generation`。
+
+## 未发布：OpenCode V2 共存创建对齐本机 Provider（2026-10-10）
+
+- 创建 OpenCode V2 共存节点时，模型和 Provider 取自这台机器上 OpenCode 自己的 `opencode.json`（`model` 与 `providers`）。请求里的模型或 `--provider` 若与之不一致，创建直接拒绝并写明两边的值，不会改用预设默认模型，也不会退回 anthropic。
+- 本机配置里该 provider 的 `providers` 条目会原样写入节点的 `opencode.json`。OpenCode 仍在读的 `provider` 条目同样原样写入。`--base-url` / `--api-key-env` 不能在这条路径上改写它。Codex 的 `--provider` 预设不变。
+- 这不包含 Hub `create_node` 的「必须带一个斜杠」格式闸（另一项变更）。格式对了但和本机 OpenCode 不一致，仍然拒绝。
+
+## 未发布：daemon 可远程启动已收编的 Codex 原生三段（2026-10-10）
+
+- 已收编的 Codex 原生布局，启动前检查通过后，daemon 调用受信任的 `anet node start`。新的 marker、三段进程和保存的回环端口都对上，才向 Hub 确认已启动。`external-appserver` 布局的远程启动仍然拒绝。不证明 Codex 程序版本或 rollout，收编节点的一键重启也仍然拒绝（先停止再启动）。
+
+## 未发布：OpenCode V2 创建要对上已接受的安装（2026-10-10）
+
+- `create_node` 显式指定 `flags.opencodeGeneration` 为 `v1` 或 `v2` 时，daemon 在写节点配置之前核对 PATH 上的 `opencode --version` 是否属于该代际已接受的安装（V2 为 `@opencode/cli@2.0.22`）。对不上则拒绝，错误码 `opencode_generation_mismatch`。省略代际仍按 V1 创建。`--version` 超时不在这一步拒绝。
+- V2 的 `model` 必须是 OpenCode 自己的 `provider/model`（恰好一个斜杠）。这个接口不接收另一套 provider 预设，密钥留在目标节点已有的 OpenCode 配置里。缺模型时错误码是 `opencode_v2_requires_provider_model`，且仍先要求 `opencodeUnsafeTools: true`。
+- `opencode-cli` 的就绪结果可带 `generation` 与 `accepted`。V2 的 `state` 仍是 `unknown`，不因网站可达变成 `ready`。节点配置快照的 `flags` 会回显代际、模式和 unsafe 同意；这三项不能用 `update_node_config` 修改。
+- 这不是 npm 包发布。参见 #2544。
+
+## 未发布：Codex 与 OpenCode V2 的 provider（2026-10-10）
+
+- `anet node create` / `anet node edit` 增加 `--provider`、`--base-url`、`--api-key-env`。本版只接 Codex（`codex-sdk`、`codex-app-server`）和 OpenCode V2（`opencode-cli --opencode-generation v2 --opencode-unsafe-tools`）。预设是 `deepseek`、`minimax`、`custom-openai-compat`。
+- Codex 写入节点 `config.toml` 的 `[model_providers.*]`，`wire_api` 为 `responses`，密钥只记环境变量名。OpenCode V2 共存创建不再用这组预设覆盖本机 OpenCode 配置，规则见「OpenCode V2 共存创建对齐本机 Provider」。密钥不进命令行、不进 `config.json`。
+- Claude、OpenCode V1、Hub vault / `create_node` 不在这版。
+
+## 未发布：收编候选发现（2026-10-10）
+
+- 配了 `adopt_roots` 的 Linux daemon 在心跳里上报本机可收编的手工节点。Hub 用用户 token 的 `GET /api/adoption-candidates` 列出；`GET /api/host-supervisors` 只多一个 `adoption_discovery` 布尔值，不带工作目录。缺这个字段不等于「没有可收编节点」。这一步不收编、不发信号、不启停，也不列出共存 / 三阶段节点。
+
+## 未发布：客户端下载页（2026-10-10）
+
+- anet.sh 新增[下载页](/download)。macOS、Windows、Linux、Android 的安装包来自最新已发布的桌面端 release（与应用内更新同一选择）；某一平台这次没有产物时，该栏说明缺失，不继续指向旧文件。首页、导航和安装文档改指向这一页。
+
+## 未发布：OpenCode 启动要等到 TUI 进程替换完成（2026-10-10）
+
+- Linux 上，OpenCode 共存启动器退出 0 时，attach 进程可能还是写记录的 shell，命令行里还没有 `--session`。创建和远程 start/restart 会在原有截止时间内重复检查，等到同一个进程 exec 之后；错 session 或非零退出仍然失败。远程 start 若仍不匹配，错误码是 `opencode_tui_session_mismatch`。这不是原生安装包或客户端界面验收。
+
+## 未发布：Codex fork 请求关联（2026-10-09）
+
+- 共存节点单次启动新增可选 `--fork-recovery-request-id`，在已确认的 fork 映射中记录请求 ID，保留旧历史。它不代表完整启动成功；Hub/daemon 传参与客户端恢复按钮尚未接入。见 [恢复说明](./guide/codex-copresence.md#fork-on-resume-failure)。
+
 按时间倒序列出面向用户的变化。查通道此刻指向哪个版本：`npm view @sleep2agi/agent-network dist-tags`（`agent-node`、`commhub-server` 同理）；每一版 npm 包的完整发布说明在仓库的 [`docs/tests/release-v<版本号>.md`](https://github.com/sleep2agi/agent-network/tree/main/docs/tests)，桌面端见 [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)。
 
 ## 节点可见性：规则文件、技能、项目文件夹——preview（2026-09-23 至 09-25）

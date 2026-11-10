@@ -56,8 +56,20 @@ VISIBLE_RE = re.compile(r"source_commit", re.I)
 DECLARE_RE = re.compile(r"^\s*(ARG|ENV|LABEL)\b.*SOURCE_COMMIT.*$", re.M | re.I)
 
 
-def l1_suites(qa_sh_text: str) -> list[str]:
+def l1_suites_from_markers(tests_dir: pathlib.Path = pathlib.Path("tests")) -> list[str]:
+    """#675 之后 L1 的真实来源：每个套件目录里的 `qa.l1` 标记，按名字排序。"""
+    return sorted(p.parent.name for p in tests_dir.glob("*/qa.l1"))
+
+
+def l1_suites(qa_sh_text: str, tests_dir: pathlib.Path | None = None) -> list[str]:
+    """L1 套件名。优先读标记文件；没有标记时才退回 `L1_TESTS` 数组。
+
+    取不到就返回 []，main 会据此退 2 —— 取集塌了不能被当成通过。
+    """
     """从 qa.sh 里取 L1_TESTS。可注入，selftest 用它验取集层本身。"""
+    markers = l1_suites_from_markers(tests_dir or pathlib.Path("tests"))
+    if markers:
+        return markers
     m = re.search(r"L1_TESTS=\((.*?)\n\)", qa_sh_text, re.S)
     if not m:
         return []
@@ -164,6 +176,24 @@ def main() -> int:
     return 0
 
 
+def _empty_dir() -> pathlib.Path:
+    """一个没有 tests/*/qa.l1 的目录，用于验「退回数组」的分支。"""
+    import tempfile
+
+    return pathlib.Path(tempfile.mkdtemp())
+
+
+def _marker_dir(names: list[str]) -> pathlib.Path:
+    """造一份带 tests/<name>/qa.l1 的临时目录。"""
+    import tempfile
+
+    root = pathlib.Path(tempfile.mkdtemp())
+    for n in names:
+        (root / "tests" / n).mkdir(parents=True)
+        (root / "tests" / n / "qa.l1").write_text("")
+    return root / "tests"
+
+
 def selftest() -> int:
     """🔴 这两条夹具对应我自己踩过的两个取集错，不是装饰。"""
     import tempfile
@@ -216,8 +246,13 @@ def selftest() -> int:
     # 🔴 存量清零那天，这道门必须安静通过，而不是 rc=2。
     cases += [
         ("基线文件不存在 → None（main 据此退 2）", read_baseline.__doc__ is not None),
-        ("解析出 L1_TESTS", l1_suites('L1_TESTS=(\n  "a"\n  # 注释\n  "b"\n)\n') == ["a", "b"]),
-        ("没有 L1_TESTS 时返回空（main 会据此退 2）", l1_suites("nothing here") == []),
+        # 这两条验的是**数组**取集分支，必须给一个没有标记文件的目录，
+        # 否则会读到仓库里真实的 tests/*/qa.l1。
+        ("解析出 L1_TESTS", l1_suites('L1_TESTS=(\n  "a"\n  # 注释\n  "b"\n)\n', _empty_dir()) == ["a", "b"]),
+        ("没有 L1_TESTS 时返回空（main 会据此退 2）", l1_suites("nothing here", _empty_dir()) == []),
+        # #675：标记文件是新的唯一来源。
+        ("标记文件按名字排序收集", l1_suites("", _marker_dir(["test-z", "qa-a"])) == ["qa-a", "test-z"]),
+        ("没有标记时退回数组", l1_suites('L1_TESTS=(\n  "a"\n)\n', _empty_dir()) == ["a"]),
     ]
 
     bad = [n for n, ok in cases if not ok]

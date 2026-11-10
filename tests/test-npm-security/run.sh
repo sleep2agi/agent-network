@@ -128,9 +128,12 @@ echo "$TOO_LONG" | grep -q '"ok":false' && echo "$TOO_LONG" | grep -q 'too long'
 echo ""
 
 echo "9. License activation..."
-LICENSE=$(curl -s -X POST http://127.0.0.1:9200/api/license/activate \
-  -H "Content-Type: application/json" \
-  -d '{"key":"anet-TEST-1234-5678-ABCD"}')
+# 🔴 2026-10-29（PR #3200 之后）——**这一条不改**，原因在本套件的第 63 行：
+#    它 npm install 的是**固定旧版本**（commhub-server@0.5.0-preview.28），
+#    那个版本里 license 本来就存在。断言「端点已删除」在这里是错的假设：
+#    实测返回 200（旧包的正常行为），而我第一版把它改成了「必须不可达」，于是本套件红。
+#    这一条测的是「旧发布包的能力边界」，与源码树是否删了功能无关。
+LICENSE=$(curl -s -X POST http://127.0.0.1:9200/api/license/activate -H "Content-Type: application/json" -d '{"key":"anet-TEST-1234-5678-ABCD"}')
 echo "$LICENSE" | grep -q '"ok":true' && pass "license activation succeeded" || { echo "$LICENSE"; fail "license activation failed"; }
 echo "$LICENSE" | grep -q '"pro"' && pass "license upgraded to pro" || fail "license not upgraded"
 echo ""

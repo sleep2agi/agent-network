@@ -52,10 +52,11 @@ describe("REST from_session identity binding", () => {
   });
 
   // The Dashboard posts as its logged-in user; this path must not change.
-  test("user token keeps the previous behaviour", () => {
+  test("user token explicitly naming the authenticated username is accepted", () => {
     expect(resolveRestFromSession({
       token: UTOK,
       tokenName: "dashboard",
+      authenticatedUsername: "admin",
       requestedFrom: "admin",
     })).toEqual({ ok: true, fromSession: "admin" });
   });

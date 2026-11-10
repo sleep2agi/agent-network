@@ -237,6 +237,45 @@ describe("CodexAppServerClient — dispatch correctness (RFC-030 §7 + bug fix)"
   });
 });
 
+describe("CodexAppServerClient — bounded large-frame transport", () => {
+  test("passes a finite maxPayload to the bridge transport", async () => {
+    let options: Record<string, unknown> | undefined;
+    class CapturingSocket extends EventTarget {
+      constructor(_url: string, _protocols: unknown, received: Record<string, unknown>) {
+        super(); options = received;
+        queueMicrotask(() => this.dispatchEvent(new Event("open")));
+      }
+      send() {}
+      close() { this.dispatchEvent(new Event("close")); }
+    }
+    const client = new CodexAppServerClient({
+      url: "ws://127.0.0.1:1",
+      maxPayloadBytes: 1068 * 1024 ** 2,
+      webSocketCtor: CapturingSocket,
+    });
+    await client.connect();
+    expect(options).toMatchObject({ maxPayload: 1068 * 1024 ** 2, perMessageDeflate: false });
+    await client.close();
+  });
+
+  test("a transport error rejects an in-flight request immediately", async () => {
+    let socket: EventTarget;
+    class BrokenSocket extends EventTarget {
+      constructor() { super(); socket = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+      send() {}
+      close() {}
+    }
+    const client = new CodexAppServerClient({ url: "ws://127.0.0.1:1", webSocketCtor: BrokenSocket });
+    client.on("error", () => {});
+    await client.connect();
+    const pending = client.request("thread/resume", {}, 10_000);
+    const failure = new Event("error") as Event & { error?: Error };
+    failure.error = new Error("Max payload size exceeded");
+    socket!.dispatchEvent(failure);
+    await expect(pending).rejects.toThrow("Max payload size exceeded");
+  });
+});
+
 describe("CodexAppServerClient — dead shared endpoint diagnostics (#455)", () => {
   test("wraps an empty TypeError with endpoint and remediation", () => {
     const err = codexAppServerConnectionError(

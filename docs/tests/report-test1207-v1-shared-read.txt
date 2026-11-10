@@ -1,0 +1,56 @@
+#1207 — V1 shared Server directory/binding primitive (parent #1195)
+
+This slice extracts the existing owned HTTP implementation without changing its
+signature/default behavior, and adds a read-only shared client. Its independently
+selected binding must match the persisted network/node/host-generation identity/
+canonical directory/exact session. Every request carries the encoded directory;
+health/version, returned session ID/directory and history session IDs are checked.
+Foreign HTTP200, missing session and mismatch refuse; no latest/create/fork,
+prompt, abort, process teardown or configuration rewrite is exposed.
+
+The caller must supply an independently attested generation-specific host
+identity. HTTP health does not prove that identity, and possession of the common
+password is a cooperative trust cohort, not malicious-tenant authorization.
+This primitive is not wired as a selectable shared runtime yet. Parent #1195's
+registry/launcher, scoped MCP proxy, borrowed lifecycle and ready/turn handling
+remain required; #1196 migration/recovery and original-node adoption remain open.
+
+Verified before ordinary main merge (2026-10-14): PR2727 exact head
+f335b764ae6fc76fb3fbd3b1b69635c51e3e6953 -> main
+93a522db9cca87ad3d3d148c7034bcc10ea5e6f7, merged 04:42:24Z; fresh main
+ancestor check passed. Ten required guards and all four selected Docker jobs
+passed before merge. CI tested merge 0f49115e02ebbbc460367c0411db15aa505f62cc.
+
+Shared read core run 38512468610 SUCCESS:
+- job115683853225, native1.18.1, artifact11870278306;
+- job115683853427, native1.18.34, artifact11870607048.
+Both artifacts independently downloaded/read: each has one HTTP boundary test
+PASS/0fail (complete mismatch fields, immutable snapshots, Unicode header,
+redirect/version/foreign history refusal and unchanged owned unscoped HTTP),
+then three native checkpoints PASS: both Unicode directory exact sessions and
+empty history, native foreign HTTP200 refused before history, missing session
+404 without changing the listed sessions. Native histories here are empty;
+nonempty foreign history is a synthetic HTTP case, not a real model call.
+The 1.18.34 job additionally passed 37 owned runtime/spawn tests across two
+files, 0fail, 22.54s; this protects the extracted owned HTTP behavior.
+
+Checkpoint core38512468580 SUCCESS, jobs115683853082/115683853347:
+each exact V1 independently downloaded report has 6 unit tests/0fail plus seven
+native checkpoints PASS (owned legacy capture/fresh import/same history/resume
+and cleanup). This is owned regression evidence, not shared migration completion.
+
+Own source broad QA38512469350 and own main duplicate38512775599 were cancelled
+after the four affected Docker contracts and required guards passed. Neither is
+whole-matrix success. No other owner's workflow/node/line was interrupted.
+No original node/credentials/data/process is read or changed.
+
+Rebuild: workflow v1-shared-read-core.yml and test1207 Dockerfile pin Bun digest,
+server-independent source SHA, npm lock and exact wrapper/native integrity from
+test1194/package-integrity.json. Build-time install only; run as bun/network none
+with synthetic password and temporary HOME/XDG roots. Fixture owns and stops
+only its child Server; no tmux, production proxy/tunnel or resident service is
+changed. Secrets remain actual Owner's private sources; templates contain none.
+Switch validation source through ordinary exact main checkout and compare CI
+report SHA/package version. Roll back by reverting this source slice on main;
+owned mode remains default. Real histories, provider auth and Hub identities
+require encrypted private backups or registration. Full shared DR is not claimed.

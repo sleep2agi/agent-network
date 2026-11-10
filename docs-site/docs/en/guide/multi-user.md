@@ -10,6 +10,12 @@ A member or viewer added from this version on has `agent_access` `granted` by de
 
 The network owner or admin, or a Hub admin, replaces the grant list through the API. A grant means the person can see that Agent and talk to it. It does not let them change its config, rules, or logs. Anyone who can see an Agent sees its full chat history: different people opening the same node see the same messages, including messages the owner and other members sent it and history from before the grant. The rule and the fields are in [Users & Agent Access Endpoints](/en/api/rest-admin#users-agent-access-endpoints).
 
+## Which tasks a member can see
+
+A member or viewer added from this version on has task access (`task_access`) `scoped` by default, meaning related tasks only: cards they own, participate in, or created, plus cards in projects granted to them (a viewer sees only granted projects). Admin-created accounts, `POST /api/networks/{id}/members`, and invite-code joins all use this default. Members who were already in the network before the upgrade stay on `all`, so the upgrade does not change what they can see. Owners, admins, and Hub admins are not limited by this rule; a newly added admin is still stored as `all`.
+
+To let a member see every task, the network owner or admin, or a Hub admin, calls `PUT /api/networks/{id}/members/{user_id}/task-grants` with `{"task_access": "all"}`; passing `project_grants` replaces their project grants. You can also pass `"task_access": "all"` directly in `POST /api/networks/{id}/members` when adding the member.
+
 ## Human-to-human messages
 
 Two users in the same network can message each other with these endpoints. User tokens only:
@@ -52,7 +58,7 @@ Endpoints:
 | Endpoint | What it does |
 |---|---|
 | `GET /api/auth/me` | `networks[].managed_department_ids`: the departments you manage, sub-departments included; an empty array means you are not a head |
-| `GET /api/networks/{id}/departments` | Each department gets `viewer_can: {manage, create_child}`; owners and admins also get `project_grants` |
+| `GET /api/networks/{id}/departments` | Each department gets `viewer_can: {manage, create_child}`; owners and admins also get `project_grants`. **The two department axes are reported separately**: `member_count` is the direct human headcount (people axis, `network_members.department_id`), while `agent_count` is the number of Agents explicitly assigned to that department (Agent axis, `nodes.department_id`, one entry per alias keeping the newest `updated_at`); `agents_unassigned` is the number of Agents with no explicit department. Agent placement is never inferred from "which department the owner sits in" (#1976 / #2822) |
 | `POST / PATCH / DELETE /api/networks/{id}/departments[/{dept}]`, `PUT /api/networks/{id}/members/{uid}/department` | Owners and admins, or a head inside their department |
 | `GET / PUT /api/networks/{id}/departments/{dept}/project-grants` | Department project grants. `PUT` replaces the whole list `{project_grants: [{project_id, can_edit}]}`. Owners and admins only; if any project is not in the network, nothing is written and it returns 400 |
 | `GET /api/networks/{id}/departments/{dept}/nodes` | Nodes owned by members of the department and its sub-departments: alias, status, health, owner. Read-only. Heads, owners, and admins |
@@ -116,12 +122,138 @@ A refusal is a 403 over REST; MCP returns the same body:
 GET /api/networks/{id}/node-permission-report?since=<ISO time>
 ```
 
-The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
+The response is `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}], tool_calls: [{tool, hits}], tool_calls_total}], tool_calls: {total, by_tool: [{tool, hits}]}}`. `mode` is the current switch. Log rows are kept for 30 days, up to 20,000 rows. Once that cap is reached, only existing rows have their counts incremented.
+
+`total` and `nodes[]` count only would-have-been blocks; `tool_calls` is the denominator: how many times restricted tools were actually called (merged per hour). The two live in separate tables, so allowed calls never inflate the denial statistics. Without a denominator, "zero blocks" cannot be told apart from "nobody touched these tools" - and those two readings lead to opposite decisions.
 
 See RFC-041 for the design and trade-offs.
+
+**`enforce_impact` — how much switching to enforce actually changes** (a measurement gap found by the `#2970` drill):
+
+Row counts in `node_permission_log` are "this layer would have refused", which is **not** the same as "behaviour changes once enforce is on". In the drill, `projects_create` was already refused in log mode by the handler's own humans-only check (`user_token_required`), and yet still logged a `human_only` row. So the report buckets reasons in three layers:
+
+| Layer | Meaning | Changes under enforce? |
+|---|---|---|
+| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` | **No** — independent of the switch, always refused |
+| `likely_already_blocked` | `human_only` | most write routes carry their own humans-only check, so the caller was already refused — usually not a delta |
+| `changes_behavior` | `beyond_owner_visibility` / `agent_not_granted_to_owner` / `owner_unknown` / `unbound_token` | **Yes** — this is the real impact |
+
+Estimate impact from `enforce_impact.changes_behavior`, never from `total`.
+
+
+If an entry in `nodes[]` carries `unbound_token: true`, it is an **unbound node token** (its `node_id` looks like `token:<token_id>`), and the same entry carries `unbound_token_name` (the token's name, usually `node:<alias>`). The ledger keeps the legacy per-token key, and such a token has no `nodes` row — so **neither allowlist can restrict it**. It is surfaced here so an admin does not conclude that nobody outside the list is dispatching; **Write-class calls** from such a token (dispatch / broadcast / create project …) record an `unbound_token` hit in the permission report: in the default `log` mode it only records, and only `enforce` refuses them. That is the evidence for deciding whether binding should be mandatory — count first, decide after. **The usual cause is a renamed node whose token was not renamed** — the alias inside the token name no longer exists in `nodes`, so it resolves as unregistered. Rename the token to the current alias, or bind it to the node.
+
+**Per-node detail (`nodes[].tool_calls`)**: look at what a node *actually* called before writing its allowlist — otherwise the list is guesswork and the first deploy blocks something in use. Two things it fixes: (1) a node that never oversteps but works all day used to be missing from this report, because `nodes[]` was aggregated only from denial rows — exactly the node whose allowlist you most need to get right; (2) `nodes[]` is now sorted by `tool_calls_total` descending, busiest first.
+
+### REST write allowlist: only these write routes
+
+Besides MCP tools, a node token can also hit REST write endpoints directly (dispatch, broadcast,
+edit requirements, edit node attributes…). `tool_allowlist` does not cover that surface, so there is
+a separate `rest_allowlist`:
+
+```
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": ["POST /api/task", "PATCH /api/requirements/:id"]}
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": null}     // clear = no restriction
+```
+
+Each row of `GET /api/nodes` carries `rest_allowlist` (`null` = no restriction). Clearing takes `null`
+only; an empty array is rejected.
+
+**The check runs at a single choke point** at the request entry, because a node token's REST write
+surface is spread over two existing gates (`restNodeDenied` in `server.ts` and `nodeTaskGate` in
+`requirements.ts`). Adding a check per route would create a third rule set, and missing any one site
+would leave a half-installed safety switch — worse than none, because it reads as tightened.
+
+Three boundaries:
+
+| Boundary | Meaning |
+|---|---|
+| **node tokens only** | user and daemon tokens are unaffected |
+| **write methods only** | `GET` / `HEAD` / `SSE` never pass through it — blocking SSE makes a node deaf (it stops receiving dispatched work), which looks like silent loss, not an error |
+| **only when set** | default `NULL` = no restriction, same shape as the MCP tool allowlist |
+
+A refusal returns `node_permission_denied` / `reason=rest_not_allowed`, and `route` in the body is the
+**label that was actually computed** — add that to the list. Labels are normalised
+(`/api/nodes/n_abc123/attrs` → `PUT /api/nodes/:id/attrs`), so the list survives moving to another node.
+
+A node can currently be blocked on exactly 9 REST write routes (2 more SSE streams are not write methods):
+
+```
+POST   /api/task
+POST   /api/broadcast
+DELETE /api/nodes/:id
+PUT    /api/nodes/:id/attrs
+PUT    /api/nodes/:id/avatar
+POST   /api/requirements
+POST   /api/requirements/:id/comments
+PATCH  /api/requirements/:id
+PATCH  /api/requirements/:id/checklist/:id
+```
+
+### Secret transport gate (admin switch)
+
+Forwarding a secret from Hub to a node over plaintext public network is a plaintext secret. The gate looks at the node's **last reported** `env_transport`, and only guards `put` (`list` / `delete` carry no secret):
+
+| Reported transport | Verdict |
+|---|---|
+| `loopback` / `https` | allowed |
+| `plain` | refused, `secret_transport_plain` |
+| not reported (`NULL`) | **allowed by default**; refused only when strict is on, `secret_transport_unknown` |
+
+```
+ANET_SECRET_TRANSPORT_GATE=off | log | enforce     # default log: record, refuse nothing
+ANET_SECRET_TRANSPORT_GATE_STRICT=1                # default off: also refuse "not reported"
+```
+
+**Why "not reported" is allowed by default**: read-only count on 2026-10-29 — of 373 sessions, 332 (89%) had never reported a transport. Making "unknown means refuse" the default would block ~9 nodes in 10 the day `enforce` is switched on. That is not tightening; it is an unplanned outage.
+
+Keep the two reasons apart: `secret_transport_plain` means someone must look at that machine's network path; `secret_transport_unknown` means someone must **make the node report**. Different people, different machines.
+
+`log` mode records to `GET /api/networks/{id}/env-transport-log` (network owner / admin), aggregated by hour, and answers "if enforce were on right now, which puts would be refused and why".
+
+## Agent teams
+
+Agents (nodes) have their own org tree, "agent teams", separate from the human department tree. Teams can nest, sibling names are unique, and an agent belongs to at most one team (none = unassigned). Teams only organise agents and grant nobody anything: who can see or message an agent is still decided by agent grants.
+
+- Read: `GET /api/networks/{id}/agent-teams` returns the whole tree; each team carries `members` (`node_id`, `alias`, `display_name`), `lead` (the lead agent) and `owner` (`user_id` and display name). Any network member and this network's node tokens can read it; a member restricted to granted agents only sees those agents.
+- Create, edit, delete: `POST /api/networks/{id}/agent-teams` `{name, parent_id?}`; `PATCH …/agent-teams/{team_id}` `{name?, parent_id?, sort?, lead_node_id?, owner_user_id?}` (no cycles; `lead_node_id` must be a node in this network, `owner_user_id` a member of it); `DELETE …/agent-teams/{team_id}` only for a team without child teams, and its agents become unassigned.
+- Assign: `PUT /api/networks/{id}/nodes/{node_id}/agent-team` `{"team_id": "<team id>"}`, or `null` to unassign.
+- Who can write: network owner / admin can do everything. A team's owner manages that team's subtree (rename, create child teams, move within the subtree, put agents in or take them out of the subtree, set the lead) but cannot change their own team's owner, move it out or delete it. Other members and node tokens are read-only; writes return 403 `agent_team_scope_denied`.
+- Deleting a node removes its team membership, and a team whose lead was that node gets no lead.
 
 ## See also
 
 - [Accounts, Tokens & Roles](/en/guide/account-system)
 - [REST: Administration](/en/api/rest-admin)
 - [REST API reference](/en/api/rest)
+
+### Per-node allowlists: who it may reach, which tools it may call
+
+`readonly` / `restricted` are coarse modes. For finer control use the two allowlists. Both are **set by the owner** and take effect immediately, independent of `COMMHUB_NODE_PERMISSIONS` (their reasons `peer_not_allowed` / `tool_not_allowed` are explicit).
+
+```
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": ["alice", "n_xxx"]}   // alias or node_id
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": null}                  // clear
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": ["send_task", "requirements_comment"]}
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // clear
+```
+
+**Clearing takes `null` only. An empty array `[]` is rejected (400 `empty_allowlist_ambiguous`)** because it is ambiguous:
+some read it as "no restriction", some as "nothing allowed". That divergence actually happened — a client rendered `[]`
+as "no tools allowed" while the Hub normalised `[]` to `null`, i.e. everything allowed: the UI said tightened, the system
+said open. Rather than guess, reject it. `GET /api/nodes` returns either `null` or a non-empty array, never `[]`.
+
+Same authorization as `permission-mode` (user token + node owner / network owner·admin / hub admin); audits are `node_peer_allowlist_changed` and `node_tool_allowlist_changed`.
+
+| Allowlist | Covers | Enforced in |
+|---|---|---|
+| `peers` | targets of `send_task` / `send_message` / `retry_task` / `reassign_task` / `cancel_task`; sending to its own alias / node_id is always allowed | `dispatchVerdict` |
+| `peers` (second rule) | a node with a non-empty `peers` list **cannot broadcast** — broadcast reaches arbitrary peers | `broadcastVerdict` |
+| `tools` | MCP tool names; anything else returns `tool_not_allowed` | MCP tool wrapper |
+
+**Two properties that must hold:**
+
+1. **`always`-class tools are always allowed** (`get_inbox`, `ack_inbox`, `send_reply`, `report_status`, …). Blocking them leaves a node unable to work *and* unable to report that it cannot — a fake-alive node that is harder to spot than an unrestricted one.
+2. **Default `NULL` = unrestricted.** With both allowlists empty, behaviour is identical to not having these fields.
+
+> `tools` currently covers MCP tools only; REST-route allowlisting is not provided yet.

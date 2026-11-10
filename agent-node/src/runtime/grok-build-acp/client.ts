@@ -362,12 +362,45 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
 }
 
+/**
+ * #1976 —— 402 额度耗尽要说人话。
+ *
+ * 现象(2026-10-21,#1941):grok 账号的额度用完之后,每一轮任务都以
+ *   grok ACP error -32603: Internal error data={"message":"API error (status 402 Payment Required): Grok Build usage balance exhausted","http_status":402}
+ * 结束。界面上只有一串 JSON,看的人得自己去查「402 是什么」—— 而这一查就是半天:
+ * 有人先怀疑网络、有人先怀疑模型漂移、有人先怀疑节点挂了,最后才发现是**账号没额度了**。
+ *
+ * 这里把已知的两种形态认出来,直接在错误里写清楚「这是账号额度,不是网络/模型/节点」:
+ *   ① data 里有 http_status 402,或消息里有 402 Payment Required / usage balance exhausted;
+ *   ② data 是字符串形态的 402(同上,只是形状不同)。
+ * 认不出来就照旧输出原文 —— 宁可少说,不可乱说。
+ */
+const GROK_BALANCE_HINT =
+  "grok 账号额度耗尽(402 Grok Build usage balance exhausted):充值或换一个还有额度的账号;这不是网络、模型或节点的问题";
+
+function looksLikeGrokBalanceExhausted(message: string, data: unknown): boolean {
+  if (typeof message === "string" && /402\s*Payment\s*Required|usage balance exhausted/i.test(message)) return true;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const record = data as Record<string, unknown>;
+    if (record.http_status === 402 || record.status_code === 402) return true;
+    const nested = record.message;
+    if (typeof nested === "string" && /402\s*Payment\s*Required|usage balance exhausted/i.test(nested)) return true;
+    return false;
+  }
+  if (typeof data === "string" && /402\s*Payment\s*Required|usage balance exhausted/i.test(data)) return true;
+  return false;
+}
+
+/** Test-only export: the error text the ACP produces (see the 402 hint above). */
+export const formatJsonRpcErrorForTest = formatJsonRpcError;
+
 function formatJsonRpcError(error: JsonRpcError["error"]): string {
   const base = `grok ACP error ${error.code}: ${error.message}`;
-  if (error.data === undefined) return base;
+  const balance = looksLikeGrokBalanceExhausted(error.message ?? "", error.data);
+  if (error.data === undefined) return balance ? `${base} — ${GROK_BALANCE_HINT}` : base;
   let data: string;
   try { data = JSON.stringify(error.data); }
   catch { data = String(error.data); }
   if (data.length > 1000) data = `${data.slice(0, 1000)}...`;
-  return `${base} data=${data}`;
+  return balance ? `${base} data=${data} — ${GROK_BALANCE_HINT}` : `${base} data=${data}`;
 }

@@ -1,9 +1,7 @@
 ARG SOURCE_COMMIT
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS build
 # 与 test750 同理:npm 只装依赖,audit/fund 端点挂起会把构建拖到超时守卫。
 ENV npm_config_audit=false npm_config_fund=false
-ARG SOURCE_COMMIT
-ENV TEST_EXTAPP_SOURCE_COMMIT=$SOURCE_COMMIT
 # Pinned bun, per the ratchet in .github/scripts/check-bun-install-pin.py.
 # Version + checksum copied from tests/test750-codex-copresence-onecommand/Dockerfile.
 # ENV, not ARG: the suite runner passes --build-arg NAME=$GITHUB_SHA for every ARG.
@@ -37,4 +35,10 @@ RUN chmod 0755 /usr/local/bin/codex
 COPY . /workspace
 RUN rm -rf /workspace/.git /workspace/.anet
 
+# 🔴 溯源单独一层 stage（缓存关键）。
+# `ARG SOURCE_COMMIT` 在 stage 内声明会让它之后每一层进入该 ARG 的缓存键；
+# 每次构建的 $GITHUB_SHA 都不同 ⇒ apt / bun / 二进制安装层永远 miss。
+FROM build
+ARG SOURCE_COMMIT
+ENV TEST_EXTAPP_SOURCE_COMMIT=$SOURCE_COMMIT
 ENTRYPOINT ["bash", "tests/test-codex-external-appserver/run.sh"]

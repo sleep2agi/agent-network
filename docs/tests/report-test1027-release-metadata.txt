@@ -1,0 +1,53 @@
+Test1027 release preparation: metadata only, NOT RELEASED
+Observed: 2026-10-12 02:30 Asia/Shanghai (2026-10-11T18:30Z)
+Original CommHub #1027; no duplicate implementation requirement.
+
+Candidate versions: Hub0.9.0-preview.126, runtime2.5.0-preview.133,
+CLI2.3.0-preview.167. Registry read before preparation still showed published
+preview125/132/166; latest30/58/76 respectively. No dist-tag changed.
+Base main dde6540cfc45f92b765c1948dcdfb7eb73c880f9 includes Hub PR2623.
+Runtime PR2619 exact fa4d5363b91f1fbf81cd581987f1dc31bc612b68 is locally
+merged for isolated candidate preparation, NOT thereby merged into main.
+At18:30Z its original CI was167SUCCESS/1IN_PROGRESS (test738), zeroFAILURE.
+Normal merge and exact-main formal release gates still must complete.
+
+Checks ran once inside an isolated existing release-metadata image:
+sha256:aea73fb9db4ac5fa7d5f8d442fa1f7f517d549bb6340774b0f00afa574b866d1
+sg docker -c 'docker run --rm --network none --read-only --cap-drop ALL
+  --security-opt no-new-privileges
+  --mount type=bind,src=<candidate-worktree>,dst=/work,readonly
+  --workdir /work --entrypoint node <image-id> -e <metadata-check>'
+The node check reads JSON/source/notes only and fails via assert.ok.
+
+PASS agent-network candidate version
+PASS agent-network lock version (top-level and packages empty-key)
+PASS agent-network release notes (Install, Upgrade, @version, NOT PUBLISHED)
+PASS agent-node candidate version
+PASS agent-node lock version (top-level and packages empty-key)
+PASS agent-node release notes (Install, Upgrade, @version, NOT PUBLISHED)
+PASS server candidate version
+PASS server lock version (top-level and packages empty-key)
+PASS server release notes (Install, Upgrade, @version, NOT PUBLISHED)
+PASS exact CLI/runtime pair (.167/.133)
+PASS Chinese getting-started preview stamp/prose (.167, no stale.166)
+PASS English getting-started preview stamp/prose (.167, no stale.166)
+PASS Hub network response retained
+PASS child configuration fix retained
+14 metadata assertions, zero failure; exit0. Container removed by --rm.
+git diff --check passed. No new product/runtime sample was run.
+
+Scope: package+lock versions, exact pair, candidate installation/upgrade and
+recovery notes, compatibility candidate row, stamped preview prose only.
+Hub PINNED_SERVER_VERSION remains the existing compatibility floor .47;
+deploy/hub/provider906 remains the existing installed .125 profile. They are
+not claims that an old Hub contains the new creation fix. The notes explicitly
+require Hub126 and a selected .167/.133 Daemon for this feature. A production
+profile change must be recorded separately when verified bytes are available.
+No launcher/profile, port, credentials, database, business node, production
+process or global npm installation was changed by this preparation.
+
+Publish order after normal merge: Hub126 -> runtime133 -> CLI167, each bound
+to full40 main source through release.yml; rebuild there, do not reuse branch
+artifacts. Anonymous package-byte verification and selected-Daemon activation
+remain pending. The original three-runtime5-minute regression is not replaced
+by this14-assertion metadata check or the prior nativeV2/WebIPC core proof.

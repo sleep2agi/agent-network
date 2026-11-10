@@ -27,6 +27,7 @@ const RESTRICTED_FLAGS = {
   sandboxMode: "read-only",
   approvalPolicy: "on-request",
   skipGitRepoCheck: false,
+  modelReasoningEffort: "high",
 };
 
 function recordingCodex() {
@@ -76,7 +77,7 @@ describe("#534 buildCodexSdkThreadOptions", () => {
       approvalPolicy: "on-request",
       model: "o3",
       sandboxMode: "read-only",
-      modelReasoningEffort: "low",
+      modelReasoningEffort: "high",
     });
   });
 });

@@ -146,3 +146,9 @@ license to weaken the database evidence: a toast or log line is not
 7. Exact Codex context must survive REST/MCP projection, while a user token,
    foreign node, submitted-only report, sibling turn, or unrequested task ID
    must never write or replace it.
+
+## Exact original-turn activity lease (#1113)
+
+`mark_tasks_consumed(activity_only:true)` is additive and keeps `consumed_at` write-once. Each requested task requires an exact context, immutable target node, original consumed thread/turn and an open status. The authenticated credential is resolved inside the atomic batch transaction; no alias/session/content inference is allowed. The server stamps nullable `last_activity_at` using its clock, leaves task lifecycle/evidence/context unchanged, and refuses terminal or unconsumed tasks. Legacy NULL-node rows keep the old consumption/start/create fallback. Valid activity renews only the scheduler idle budget, never the creation-based total cap. Duplicate ordinary consumption does not renew.
+
+Codex owned-turn task events supply the task ID and vendor context; the lifetime reporter gates30seconds and one in-flight request, orders activity after consumption completion and performs no model retry or context reset. Old Hub refusal and transient failures stay nonblocking. Other runtime families without exact turn activity retain the old budget. This is not proof of whole-fleet adoption; exact-main packages and actual authorized runtime activation are separate deployment gates.

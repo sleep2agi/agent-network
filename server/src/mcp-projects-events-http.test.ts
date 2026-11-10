@@ -90,10 +90,16 @@ describe("discoverable", () => {
 describe("projects_create / projects_update", () => {
   test("owner: create, rename, recolour, archive, unarchive — same rows the app sees", async () => {
     const created = await mcp(U.owner.token, "projects_create", { network_id: NET, name: "mpe-项目甲" });
+    // #3275 批次 4 —— projects_create 与 projects_update 同形（{ok, project}）：
+    // 「写项目」这一族回**实体**，不回集合。两个工具各自钉，不互相代言。
+    expect(Object.keys(created).sort()).toEqual(["ok", "project"]);
     expect(created.ok).toBe(true);
     const id = created.project.id as string;
     expect(created.project.name).toBe("mpe-项目甲");
     const renamed = await mcp(U.owner.token, "projects_update", { network_id: NET, id, name: "mpe-项目乙", color: "#16a34a" });
+    // 2026-10-31 —— **精确键集**（#3171）：项目更新回执是 `{ok, project}` 两键；
+    // 多给一格（比如回显整个项目集合）会让「一次更新」变成「一次列表」。
+    expect(Object.keys(renamed).sort()).toEqual(["ok", "project"]);
     expect(renamed.project.name).toBe("mpe-项目乙");
     expect(renamed.project.color).toBe("#16a34a");
     expect((await mcp(U.owner.token, "projects_update", { network_id: NET, id, archived: true })).project.archived).toBe(true);

@@ -9,16 +9,20 @@ import { CodexAppServerBridge, CodexResumeTimeoutError } from "../codex-app-serv
 import { openCodexAppServerRuntime } from "./runtime";
 import {
   DEFAULT_RESUME_TIMEOUT_MS,
+  RECOVERY_MAX_PAYLOAD_BYTES,
+  RECOVERY_MAX_PAYLOAD_ENV,
   RESUME_TIMEOUT_ENV,
+  boundedRecoveryPayloadBytes,
   resetResumeTimeoutWarnings,
   resolveResumeTimeoutMs,
+  resolveRecoveryMaxPayloadBytes,
 } from "./resume-timeout";
 
 type Msg = { id: number; method: string; params?: unknown };
 type Respond = (r: { result?: unknown; error?: { code: number; message: string } }) => void;
 
 /** Minimal fake `codex app-server`; `resume(n, respond)` decides the n-th thread/resume. */
-function fakeApp(resume: (n: number, respond: Respond) => void) {
+function fakeApp(resume: (n: number, respond: Respond, close: () => void) => void) {
   const methods: string[] = [];
   let resumes = 0;
   const server = Bun.serve({
@@ -34,14 +38,20 @@ function fakeApp(resume: (n: number, respond: Respond) => void) {
         methods.push(msg.method);
         const respond: Respond = (r) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, ...r }));
         if (msg.method === "initialize") return respond({ result: {} });
-        if (msg.method === "thread/resume") return resume(++resumes, respond);
+        if (msg.method === "thread/resume") return resume(++resumes, respond, () => ws.close(1011, "payload transport closed"));
         if (msg.method === "thread/start") return respond({ result: { threadId: "thread_NEW" } });
         if (msg.method === "thread/read") return respond({ result: { thread: { id: "thread_OLD", turns: [] } } });
         respond({ result: {} });
       },
     },
   });
-  return { url: `ws://127.0.0.1:${server.port}`, methods, stop: () => server.stop(true) };
+  return {
+    url: `ws://127.0.0.1:${server.port}`,
+    methods,
+    // Bun may keep the stop promise pending after the peer initiated close;
+    // force the fixture down without making afterEach wait on that second close.
+    stop: () => { void server.stop(true); },
+  };
 }
 
 const cleanups: Array<() => unknown> = [];
@@ -103,7 +113,7 @@ describe("startup thread/resume deadline", () => {
     expect(bridge.currentStatus()).not.toBe("idle");
   });
 
-  test("the bridge default is 120 s, not the client's generic 30 s", async () => {
+  test("the bridge default is 300 s, not the client's generic 30 s", async () => {
     const app = fakeApp((_n, respond) => respond({ result: {} }));
     cleanups.push(app.stop);
     const { client, bridge } = await bridgeFor(app.url);
@@ -115,7 +125,7 @@ describe("startup thread/resume deadline", () => {
     }) as typeof client.request;
     await bridge.bootstrap();
     expect(timeouts).toEqual([DEFAULT_RESUME_TIMEOUT_MS]);
-    expect(DEFAULT_RESUME_TIMEOUT_MS).toBe(120_000);
+    expect(DEFAULT_RESUME_TIMEOUT_MS).toBe(300_000);
   });
 
   test("non-timeout resume errors are not retried", async () => {
@@ -126,6 +136,21 @@ describe("startup thread/resume deadline", () => {
     expect(err).not.toBeInstanceOf(CodexResumeTimeoutError);
     expect(events).toEqual([]);
     expect(app.methods.filter((m) => m === "thread/resume").length).toBe(1);
+    expect(app.methods).not.toContain("thread/start");
+  });
+
+  test("a transport close during resume fails closed and never starts a replacement thread", async () => {
+    const app = fakeApp((_n, _respond, close) => close());
+    cleanups.push(app.stop);
+    const { bridge } = await bridgeFor(app.url, { resumeTimeoutMs: 2_000 });
+    const startedAt = Date.now();
+    const err = await bridge.bootstrap().then(() => null, (e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err.message)).toContain("closed");
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(app.methods.filter((m) => m === "thread/resume")).toHaveLength(1);
+    expect(app.methods).not.toContain("thread/start");
+    expect(bridge.currentStatus()).not.toBe("idle");
   });
 });
 
@@ -169,6 +194,37 @@ describe("resolveResumeTimeoutMs", () => {
     }
     expect(warns.length).toBe(7);
     expect(warns[0]).toContain(`${RESUME_TIMEOUT_ENV}="abc"`);
+  });
+});
+
+describe("resolveRecoveryMaxPayloadBytes", () => {
+  test("rollout-derived payload sizing is finite and capped", () => {
+    expect(boundedRecoveryPayloadBytes(0)).toBe(128 * 1024 ** 2);
+    expect(boundedRecoveryPayloadBytes(500 * 1024 ** 2)).toBe(1064 * 1024 ** 2);
+    expect(boundedRecoveryPayloadBytes(10 * 1024 ** 3)).toBe(RECOVERY_MAX_PAYLOAD_BYTES);
+    expect(RECOVERY_MAX_PAYLOAD_BYTES).toBe(1536 * 1024 ** 2);
+  });
+
+  test("uses a finite launcher ceiling and rejects unlimited or oversized values", () => {
+    expect(resolveRecoveryMaxPayloadBytes("missing", { [RECOVERY_MAX_PAYLOAD_ENV]: String(1068 * 1024 ** 2) })).toBe(1068 * 1024 ** 2);
+    expect(resolveRecoveryMaxPayloadBytes("missing", { [RECOVERY_MAX_PAYLOAD_ENV]: "0" })).toBe(128 * 1024 ** 2);
+    expect(resolveRecoveryMaxPayloadBytes("missing", { [RECOVERY_MAX_PAYLOAD_ENV]: String(RECOVERY_MAX_PAYLOAD_BYTES + 1) })).toBe(128 * 1024 ** 2);
+  });
+
+  test("runtime gives the bridge the bounded payload option", () => {
+    const runtimeSource = readFileSync(join(import.meta.dir, "runtime.ts"), "utf8");
+    expect(runtimeSource).toContain("maxPayloadBytes: resolveRecoveryMaxPayloadBytes");
+  });
+});
+
+describe("co-presence materialization deadline wiring", () => {
+  const runtimeSource = readFileSync(join(import.meta.dir, "runtime.ts"), "utf8");
+
+  test("one ANET_CODEX_RESUME_TIMEOUT_MS-derived value governs resume and fresh-thread materialization", () => {
+    expect(runtimeSource).toContain("const resumeTimeoutMs = resolveResumeTimeoutMs(process.env, warn)");
+    expect(runtimeSource).toContain("resumeTimeoutMs,\n      deferredThreadTimeoutMs: resumeTimeoutMs,");
+    expect(runtimeSource).toContain("isDeferredThreadMaterialized:");
+    expect(runtimeSource).toContain("findCodexRolloutFile(codexSessionsRoot(");
   });
 });
 

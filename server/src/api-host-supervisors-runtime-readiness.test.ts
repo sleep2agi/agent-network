@@ -104,6 +104,19 @@ describe("#622 sanitizeRuntimeReadiness(读取侧)", () => {
     expect(s.a.network).toBeUndefined();
     expect(s.a.auth).toBe("present");
   });
+  test("generation and accepted stay only on opencode-cli", () => {
+    const s = sanitizeRuntimeReadiness({
+      "opencode-cli": { ...READY, state: "unknown", ok: false, generation: "v2", accepted: false },
+      "claude-code-cli": { ...READY, generation: "v2", accepted: true },
+    })!;
+    expect(s["opencode-cli"].generation).toBe("v2");
+    expect(s["opencode-cli"].accepted).toBe(false);
+    expect(s["claude-code-cli"].generation).toBeUndefined();
+    expect(s["claude-code-cli"].accepted).toBeUndefined();
+    const lone = sanitizeRuntimeReadiness({ "opencode-cli": { ...READY, accepted: true, generation: "nope" } })!;
+    expect(lone["opencode-cli"].generation).toBeUndefined();
+    expect(lone["opencode-cli"].accepted).toBeUndefined();
+  });
 });
 
 let BASE = "";

@@ -28,11 +28,18 @@ export function toolsSelftest(): number {
     ["new REQUIRED param on an existing tool (requirements_list.view)", (c) => { const s = tool(c, "requirements_list").inputSchema!; s.required = [...(s.required ?? []), "view"]; }],
     ["tool removed (tail_node_logs)", (c) => { c.splice(c.findIndex((t) => t.name === "tail_node_logs"), 1); }],
     ["additionalProperties flipped (requirements_list)", (c) => { const s = tool(c, "requirements_list").inputSchema!; s.additionalProperties = !s.additionalProperties; }],
+    // An enum may only widen: dropping a value breaks callers that send it.
+    ["enum value removed (requirements_list.status: done dropped)", (c) => { const p = tool(c, "requirements_list").inputSchema!.properties; p.status = { ...p.status, enum: p.status.enum.filter((x: string) => x !== "done") }; }],
+    ["enum widened AND type changed (requirements_list.status)", (c) => { const p = tool(c, "requirements_list").inputSchema!.properties; p.status = { ...p.status, type: "number", enum: [...p.status.enum, "abandoned"] }; }],
   ];
   for (const [what, fn] of controls) {
     const r = mutate(fn);
     check(r.incompatible.length > 0, `control red: ${what} → ${r.incompatible[0] ?? "NOT DETECTED"}`);
   }
+  // Positive control: widening an input enum (abandoned column) is additive, not red.
+  const wide = mutate((c) => { const p = tool(c, "requirements_list").inputSchema!.properties; p.status = { ...p.status, enum: [...p.status.enum, "abandoned"] }; });
+  check(wide.incompatible.length === 0 && wide.added.includes("requirements_list.status enum+[abandoned]"),
+    `enum widened (requirements_list.status +abandoned) is additive (${wide.incompatible.join("; ") || wide.added.filter((x) => x.includes("enum")).join(",")})`);
   return fails;
 }
 

@@ -1,0 +1,43 @@
+Hub .117 release preparation — board #782
+Date: 2026-10-08
+Feature source: bfbaa9350216d5a61a4b00a36098821d6eefde94
+Merged main: a625706e1365a65255ab36739ed8f8147fc7f495
+Direct git diff between those server/ trees: empty.
+Baseline: npm @sleep2agi/commhub-server@0.9.0-preview.116
+Existing published desktop client: desktop-v0.2.224
+
+Reused tests/hub-release-compat; no new framework or product implementation.
+Docker via docker group, --cpus=2, container-only ports/data; no production.
+Parameters: BASE_VERSION=0.9.0-preview.116 APP_TAGS=desktop-v0.2.224
+SCHED_BASELINE=counted EXPECT_BACKFILL=0 NEW_MEMBER_TASK_ACCESS=scoped
+OLD_LABEL=.116 NEW_LABEL=team-whoami
+
+API replay: A1 and A2 each rc=0, steps=62, unexpected=0, check_failures=0.
+These replay existing App REST/MCP adapters, not native-device UI.
+
+Initial database replay: B rc=1, upgrade_check_failures=7.
+The first assertion already failed on baseline .116: the seeded member saw
+zero of three unrelated cards. .116 intentionally changed newly added member
+defaults to scoped access; the old seed omitted task_access but expected all.
+The dependent visibility/field assertions consequently failed on both versions.
+
+Narrow fixture correction: explicitly create the existing full-access member
+with task_access=all. Do not alter comparison assertions. The independent
+new-member probe still omits task_access and requires scoped access with zero
+of three unrelated cards. This is test setup only, not a permissions change.
+
+Rerun only database replay with corrected upgrade.ts mounted read-only into
+the same candidate image; --cpus=2 --network=none, CHECK_BYTES=1:
+  old -> new -> rollback -> re-upgrade: rc=0, upgrade_check_failures=0.
+  Existing member sees the same three cards; all field values retained.
+  Full list bytes identical across upgrade, rollback and re-upgrade.
+  Newly added member still sees zero unrelated cards, task_access=scoped.
+
+Version metadata after bump: Docker rc=0, 3/3 (package, lockfile root and package).
+The replay exercised the exact merged feature code before the version-only bump.
+No redundant local server-wide suite. Feature #2525 passed all 157 CI checks;
+this version PR must independently pass CI and assert-pr-mergeable.
+
+Not done by these results: npm publication, fresh npm package smoke,
+production upgrade, or a user-device acceptance test. Publication remains
+main-only at a verified full SHA; post-publication smoke is a separate step.

@@ -122,8 +122,8 @@ cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridg
 
 cp agent-node/src/runtime/codex-app-server-bridge.ts /tmp/codex-app-server-bridge.ts
 bun /harness/mutate.ts agent-node/src/runtime/codex-app-server-bridge.ts \
-  $'    if (this.turnClaimed || this.activeTurnId) {\n      this.taskQueue.push(input);' \
-  $'    if (false) {\n      this.taskQueue.push(input);'
+  $'    if (this.turnClaimed || this.activeTurnId || this.draining) {\n      this.enqueueWaitingTask(input);' \
+  $'    if (false) {\n      this.enqueueWaitingTask(input);'
 expect_red network-task-b-cannot-start-before-a-terminal bun test agent-node/src/runtime/codex-app-server-bridge.test.ts
 cp /tmp/codex-app-server-bridge.ts agent-node/src/runtime/codex-app-server-bridge.ts
 
@@ -151,8 +151,8 @@ cp /tmp/server-tools.ts server/src/tools.ts
 
 cp server/src/server.ts /tmp/server-server.ts
 bun /harness/mutate.ts server/src/server.ts \
-  'normalizeMetaJson(stampTaskAuthOrigin(mergedMeta, authOrigin))' \
-  'normalizeMetaJson(mergedMeta)'
+  'normalizeMetaJson(stampTaskAuthOrigin(metaWithParent, authOrigin))' \
+  'normalizeMetaJson(metaWithParent)'
 export COMMHUB_DB=/tmp/test584-mutation-rest.db
 expect_red rest-node-cannot-forge-user-origin bun test server/src/task-auth-origin-http.test.ts
 cp /tmp/server-server.ts server/src/server.ts

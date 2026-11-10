@@ -21,6 +21,20 @@ Reading version numbers:
 - Tags such as `v0.10.x` in the main repo's [GitHub releases](https://github.com/sleep2agi/agent-network/releases) are pre-2026-06 "bundle releases"; the last one is `v2.2.15` from 2026-06-17 and does not reflect current versions. See the [Changelog](/en/changelog) for changes; desktop installers are at [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases).
 - The package-to-bundle version matrix is in [docs/version/](https://github.com/sleep2agi/agent-network/blob/main/docs/version/README.md).
 
+### CLI and agent-node must be installed together
+
+`agent-network` (the CLI) and `agent-node` are **two halves of one release train**: the CLI pins the exact
+`agent-node` version it accepts, and codex co-presence / `opencode-cli` nodes refuse a mismatch. Upgrading
+just one of them can leave a **half pair** — the CLI is visible while its `agent-node` is not, or the reverse.
+
+Always use the paired command from the same release notes. A half pair shows up as a pairing mismatch and a
+co-presence node that will not start. To check that both halves the tree declares are actually published, run
+inside the repository:
+
+```bash
+node scripts/check-pair-published.mjs
+```
+
 ## 1. Inspect the plan
 
 ```bash

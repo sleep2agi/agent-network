@@ -16,7 +16,7 @@ async function runMutation(label: string, file: string, from: string, to: string
 }
 await runMutation("extra-stage census", "agent-node/src/runtime/adopt-codex-tmux.ts", "  assertNoEscapedCodexProcesses(scope,result);", "  // mutation: census removed");
 await runMutation("partial stop", "agent-node/src/runtime/adopt-codex-stop.ts", "  collectCodexPanes(scope,CODEX_STOP_ORDER,true);", "  collectCodexPanes(scope);");
-await runMutation("stale receipt", "agent-node/src/runtime/adopt-lifecycle.ts", "    await stopCodexStages(scope);", "    if (existsSync(stoppedMarker)) assertCodexStopped(scope);\n    await stopCodexStages(scope);");
+await runMutation("stale receipt", "agent-node/src/runtime/adopt-lifecycle.ts", "    else await stopCodexStages(scope);", "    else { if (existsSync(stoppedMarker)) assertCodexStopped(scope); await stopCodexStages(scope); }");
 await runMutation("raw marker prefilter", "agent-node/src/runtime/adopt-proc.ts", "export function hasAdoptionMarker(pid: number, marker: string): boolean {", "export function hasAdoptionMarker(pid: number, marker: string): boolean { return true;");
 await runMutation("final liveness", "agent-node/src/runtime/adopt-codex-stop.ts", "export function assertCodexStopped(scope: CodexAdoptionScope): void {", "export function assertCodexStopped(scope: CodexAdoptionScope): void { return;");
 await runMutation("signal marker", "agent-node/src/runtime/adopt-codex-stop.ts", "proc.env.ANET_NODE_MARKER !== scope.marker || ", "");

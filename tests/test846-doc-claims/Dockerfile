@@ -20,6 +20,7 @@ ENV TEST846_RUNSH_BLOB=$TEST846_RUNSH_BLOB
 COPY docs/stale-issue-review.md /repo/docs/stale-issue-review.md
 # 清单指向的源码树 —— 不 COPY 的话每条都会红在 missing-file 上,
 # 而那是镜像装配错误,不是文档漂移。
+COPY contracts /repo/contracts
 COPY server /repo/server
 COPY agent-node /repo/agent-node
 COPY agent-network /repo/agent-network

@@ -1,0 +1,55 @@
+Board #821 / core Issue #2539 — CLI fork request correlation
+Date: 2026-10-09 CST
+Base main: 9f407449fc28c5da6334b33056fc93f5fb66ea2f
+Candidate: the commit containing this report; no npm publication or production deployment.
+
+Scope
+- Optional --fork-recovery-request-id str_... passes through shared co-presence
+  options to a requestId field on the newly appended mapping only.
+- Existing history, missing-ordinal classification and explicit confirmation remain.
+- Correlation is not authorization, confirmation, idempotency or startup completion.
+- No Hub API/daemon forwarding/client button in this slice.
+
+L1 — Docker helper/argv contracts (Bun 1.3.14, network disabled)
+sg docker -c 'docker run --rm --network none -v "$PWD/agent-network:/candidate/agent-network:ro" -w /candidate/agent-network anet-test819:start-completion bun test src/codex-fork-recovery.test.ts src/cli-args.test.ts'
+48 pass, 0 fail, 149 expect() calls.
+Confirmed mapping ID + unchanged unkeyed/other-request history; invalid ID stops
+before resume; no confirmation/no matching error does not fork; normal resume;
+no-ID mapping has no new property; argv value does not consume the node alias.
+
+L2 — CLI build / argument rejection / typecheck (Docker, network disabled)
+Reused anet-test625:env-completion dependency image with --entrypoint bash;
+copied candidate agent-network/bin, src and tsconfig into disposable container.
+bun build bin/cli.ts --target=bun --outfile=/tmp/anet-cli.js
+PASS: 214 modules bundled. node start --help lists correlation flag.
+PASS: missing flag value rejected with requires a Hub start request ID.
+PASS: --all + request ID rejected with for one node start, not --all.
+bun node_modules/typescript/bin/tsc --noEmit: exit 0.
+bash -n tests/test738-codex-fork-on-resume-failure/run.sh: exit 0.
+
+Harness notes: first image invocation omitted its entrypoint override, started
+the old image runner and was stopped; it is not candidate evidence. A direct
+tsc invocation found no node executable in that Bun image; rerun via Bun passed.
+No host package changes or live nodes used.
+
+L3 — real Codex E2E: PENDING CI, not claimed locally
+Extended existing tests/test738-codex-fork-on-resume-failure/run.sh:
+- Real --yes fork must record exact request ID.
+- Existing interactive confirmed fork must omit requestId when not supplied.
+Uses its existing dedicated Dockerfile and QA hub-orphan-gates registration;
+no additional suite/matrix added. Real-Codex Docker E2E must pass before merge.
+
+Recovery docs: bilingual co-presence guide distinguishes fork side effects from
+later startup failure, forbids timestamp/latest-record inference, and describes
+existing state backups and rollback limitations. No new service/port/secret.
+
+2026-10-09 09:28 CST — first CI failure and narrow correction
+doc-symbol-pins run 37869596998 reported two main-branch CLI line anchors in
+docs/architecture.md shifted by the added source lines. Updated dashboard branch
+10465 -> 10476 and dashboardReleaseTag definition 3095 -> 3100; no runtime edit.
+Docker (anet-test225:completion-packer, network disabled, read-only source and Git):
+python3 scripts/check-doc-symbol-pins.py .
+  OK: 17 scanned, 9 judged, 8 skipped, 0 unresolved refs, 0 drift.
+python3 scripts/check-doc-symbol-pins.py . --doc-root docs-site
+  OK: 18 scanned, 16 judged, 2 skipped, 0 unresolved refs, 0 drift.
+Skipped pins are not verified pins. Full CI / real Codex E2E still pending.

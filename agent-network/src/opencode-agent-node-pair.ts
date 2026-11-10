@@ -18,8 +18,8 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } fro
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 import { describeUnsafeDirectory, describeUnsafePath } from "./unsafe-package-path-reason";
 
-export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.152";
-export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.120";
+export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.227";
+export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.195";
 export const PAIRED_AGENT_NODE_SPEC = `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`;
 // Backward-compatible names for the first consumer of the shared pair.
 export const OPENCODE_AGENT_NETWORK_VERSION = PAIRED_AGENT_NETWORK_VERSION;
@@ -39,6 +39,25 @@ export function pairedAgentNodeResolution(): PairedAgentNodeResolution {
     args: ["-y", PAIRED_AGENT_NODE_SPEC, "--print-entrypoint"],
     allowPathGlobal: false,
   };
+}
+
+/** Cold npm downloads get their own budget, separate from bridge attachment. */
+export function pairedAgentNodeResolveTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.ANET_AGENT_NODE_RESOLVE_TIMEOUT_MS;
+  if (!raw?.trim()) return 300_000;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 2_147_483_647) {
+    throw new Error("ANET_AGENT_NODE_RESOLVE_TIMEOUT_MS must be an integer from 1 to 2147483647 (milliseconds)");
+  }
+  return value;
+}
+
+export function pairedAgentNodeResolveError(error: any, timeoutMs: number): string {
+  const detail = error?.stderr || error?.message || String(error);
+  if (error?.code !== "ETIMEDOUT") return `could not resolve exact paired package: ${detail}`;
+  return `could not resolve exact paired package: npx timed out after ${timeoutMs}ms` +
+    `\nIncrease ANET_AGENT_NODE_RESOLVE_TIMEOUT_MS for a slow network.` +
+    `\nPre-fetch the exact package, then retry node start:\n  npx -y ${PAIRED_AGENT_NODE_SPEC} --print-entrypoint`;
 }
 
 export function agentNodeHelpSupportsCodexAppServer(help: string): boolean {
@@ -215,4 +234,37 @@ export function resolveAgentNodePackageEntrypointFromPath(
     `no exact trusted ${packageSpec} package entrypoint found on PATH` +
     (errors[0] ? `; first rejected candidate: ${errors[0]}` : ""),
   );
+}
+
+/**
+ * `anet pair` 的内容。为什么要有这个命令：
+ *
+ * 客户端/文档过去写的是 `npm i -g @sleep2agi/agent-node@preview` 这种**单边**提示。
+ * 但 opencode-cli 这条路径**禁用了自动 npx**（见 resolveOpencodeAgentNodeLaunchPlan：
+ * "automatic npx execution is disabled for opencode-cli"），所以目标机上必须有一份
+ * **精确版本**的全局 agent-node；单边装一个 @preview 很容易装成**半对**，
+ * CLI 随即 `Incompatible agent-node for opencode-cli` 拒绝启动，节点掉线。
+ *
+ * 更糟的是两个包的 preview tag 会**先后**移动（node 先发、声明它的 CLI 后发），
+ * 所以「两边都用 @preview」本身也有窗口期不自洽 —— tag 不是配对判据，
+ * **本包里的常量才是**。把常量打印出来，是唯一不用猜的答案。
+ */
+export function pairInfo(includeOpenCodeConstraints = true): string {
+  const lines = [
+    `CLI:        @sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`,
+    `agent-node: ${PAIRED_AGENT_NODE_SPEC}   (精确配对，不接受其它版本)`,
+    ``,
+    `安装这对精确版本:`,
+    `  ${opencodeExactPairInstallCommand()}`,
+  ];
+  if (includeOpenCodeConstraints) {
+    lines.push(
+      ``,
+      `opencode-cli / OpenCode V2 的额外约束:`,
+      `  · 自动 npx 已被禁用 —— 目标机上必须有上面那个**精确版本**的全局 agent-node`,
+      `  · 用别的版本会直接拒启: Incompatible agent-node for opencode-cli`,
+      `  · 别用 @preview 猜: 两个包的 preview tag 会先后移动，tag 不是配对判据`,
+    );
+  }
+  return lines.join("\n");
 }

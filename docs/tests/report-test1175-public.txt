@@ -1,0 +1,48 @@
+# test1175 — immutable main native Windows TUI health publication
+Final full npm verification checkpoint 2026-10-13T21:34:55.293656+00:00
+Source main2793c6a18be3dd111477f0686bd89a4140b072eb; ordinary PR2717 merged
+21:06:48Z. Source head717ca3c1956f84555ee21e2e4e2e7831c46e8d48 and CI merge
+9cb7dfdc033e7b108c11ff56ee44ce25e5bd398d have the same tree as published main:
+ef854bd6b257147afa799c2533434cec536fc4e9. Source remains a main ancestor.
+10required+7selected SUCCESS; native25PASS68 and38PASS116, plus two same-turn
+Dashboard tasks/individual receipts/no duplication. See native test report.
+
+Node145 formal38468141717: all4 gates and workflow SUCCESS. Complete npm
+verified at 2026-10-13T21:34:54.320360+00:00, 601333B; SHA256 e1d6d3382ec1655dea6881927da83570a84be942faf97c2e49103e4f161e2804.
+SHA1 and SHA512 match registry metadata; complete bytes equal main-gated archive.
+preview145/latest58. Registry gitHead absent/null; source provenance is the
+explicit main input, ancestry and byte-identical formal artifact, not gitHead.
+
+CLI179 formal38468145147: all4 gates SUCCESS. npm publish returned success,
+but post-publish registry verification timed out after900s at21:30:24Z;
+workflow FAILURE remains recorded. The last attempt saw preview178 and no179
+shasum. This was not proof that npm rejected publication; no rerun or republish.
+Later independent COMPLETE npm download verified at 2026-10-13T21:34:55.293656+00:00:
+2127323B; SHA256 b7264ef5bc621d7fc973da66d1b84cec1b5382d960a35bd8ab5f65c70401c386.
+SHA1 66b71fa32cc2409ed243d51e831bdd331019d1f0 matches both the original expected hash and registry;
+SHA512 integrity also matches. Full bytes equal the formal gated archive and
+verified official GitHub archive. preview179/latest76. Registry gitHead absent,
+so main input/ancestry/gated byte equality are the provenance evidence.
+Read-only GitHub jobs100 queries returned502; jobs20 supplied actual gate results.
+No workflow republish/retag/rebuild was triggered for either immutable version.
+Both npm packages are fully verified; no all-workflow/all-matrix PASS claim.
+
+Official prerelease cli-v2.3.0-preview.179 exact tag/main verified.
+At 2026-10-13T21:17:54.747140+00:00, both full archives plus SHA256SUMS and manifest were
+anonymously downloaded and byte-compared with formal artifacts:
+Node145601333B SHA256e1d6d3382ec1655dea6881927da83570a84be942faf97c2e49103e4f161e2804
+CLI1792127323B SHA256b7264ef5bc621d7fc973da66d1b84cec1b5382d960a35bd8ab5f65c70401c386
+These are npm tarballs, not native exe/dmg/app installers. Immutable manifest
+records asset-creation checkpoint Node registry=true, CLI=false; later registry
+facts go into release body/repository report, never overwrite version/assets.
+Stable/latest not promoted. Existing Hub139 is reused, not rebuilt/republished.
+
+Recovery: use deploy/hub and deploy/fleet startup/ports/proxy/security runbooks.
+Adoption requires the original owner to preserve original node/thread/cwd/model/
+provider/login and verify actual entrypoints/current health/real Dashboard flow.
+No running node was restarted, upgraded, forked or reset. Rollback178/144 retains
+compatible private state and native ongoing health becomes unknown. Git rebuilds
+software, not private login/task/receipt data, which require authorized backups.
+Hub vault recovery is NOT COVERED; no original-device/model or production restore
+claim. A first native Hub wait FAIL and corrected identity writer are preserved
+in report-test1175-windows-tui-health.txt. Broad matrix is not declared PASS.

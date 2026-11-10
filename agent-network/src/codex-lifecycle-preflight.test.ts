@@ -33,6 +33,16 @@ describe("① identity", () => {
   });
 });
 describe("② home isolation", () => {
+  test('custom key attestation replaces absent auth only, never home/token/file isolation', () => {
+    const g = good();
+    const h = { ...g.home, authMode: null, authBytes: null, providerEnvAttested: true };
+    expect(status(checkHome({ ...g, home: h }))).toBe('pass');
+    expect(status(checkHome({ ...g, home: { ...h, providerEnvAttested: false } }))).toBe('fail');
+    expect(status(checkHome({ ...g, home: { ...h, dirMode: 0o750 } }))).toBe('fail');
+    expect(status(checkHome({ ...g, home: { ...h, authMode: 0o640, authBytes: 5 } }))).toBe('fail');
+    expect(status(checkHome({ ...g, home: { ...h, authMode: 0o600, authBytes: 0 } }))).toBe('fail');
+    expect(status(checkHome({ ...g, home: { ...h, envFileTokenFingerprint: 'other' } }))).toBe('fail');
+  });
   test("0700 dir + 0600 auth + matching token fp → pass", () => { expect(status(checkHome(good()))).toBe("pass"); });
   test("group-readable dir / auth, empty auth, token mismatch → fail", () => {
     const g = good();

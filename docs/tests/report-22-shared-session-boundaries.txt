@@ -1,0 +1,80 @@
+# CommHub #22 / #1879 / #1566 — shared-session documentation boundaries
+Date: 2026-10-22
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+Scope: documentation only; no runtime or production configuration changed.
+
+Corrected claims:
+- agent-node .153 additions are wired into the V1 admission path.
+- A session-query 404 is not evidence that the TUI owner left.
+- Missing-session counters are not reset on every outer status error/busy path.
+- V2, submitted-turn recovery and fleet activation are not established by this release.
+- CLI installability requires exact npm visibility, not just publish-step success.
+
+Docker checks:
+1. python:3.12-slim, read-only repository mount, network none:
+   scripts/check-doc-version-claims.py selftest + run(agent-network, .190)
+   PASS: 19 selftests; bilingual preview stamps/body match .190.
+2. tests/qa-core-docs/Dockerfile -> anet-docs-22-boundaries:
+   npm run build in /workspace/docs-site
+   PASS: VitePress production bundles and page rendering, 45.26s.
+   Warning: some minified chunks exceed 500 kB; not a build failure.
+3. qa-core-docs/run.mjs:
+   FAIL (2): Chinese sidebar >30 links; English sidebar >30 links.
+   Main control: same image with base docs tree mounted read-only gives the
+   identical two failures. No sidebar or checker files changed in this patch.
+   This is a baseline comparison, not permission to bypass required CI checks.
+
+Evidence logs (local; summarized here so results are preserved in Git):
+/tmp/opencode/docs-22-claims.log
+/tmp/opencode/docs-22-vitepress.log
+/tmp/opencode/docs-22-docker.log
+/tmp/opencode/docs-22-core-main.log
+
+Limits of the original checks: no live owner-close experiment; no existing node
+restart/adoption; no V2 parity claim; npm visibility was not asserted then.
+Runtime counter fix and HTTP negative controls tracked separately in #2011.
+
+2026-10-22 factual review follow-up (documentation only):
+- Correct CLI-vs-node ownership of the five inherited .152 fixes; installing
+  the CLI is not activation of an existing runtime.
+- Bilingual getting-started now records .190/.153 as published exact versions,
+  without claiming current dist-tags or fleet activation. Registry exact-version
+  GETs succeeded for both packages in this round; dist-tags requests timed out,
+  so the previous latest stamp is not presented as a fresh tag observation.
+- Point counter follow-up to #2011 / PR2886, retaining parent#1879. A later
+  source fix is explicitly not part of the published .153 package.
+- Sidebar budget failures above remain unresolved; this is NOT a landing gate
+  waiver. No sidebar, checker, runtime, package version or release script edits.
+- Only the changed bilingual version-claim check is rerun for this follow-up;
+  old VitePress/Docker outcomes remain original-snapshot evidence.
+  PASS: four stamps across two documents for agent-network .190, non-root
+  read-only/network-none Docker; log /tmp/opencode/22-doc-review-claims.log.
+  Initial container lacked worktree Git metadata and refused to run; mounting
+  the metadata read-only allowed the check. No claim of fresh latest-tag truth,
+   native install/bin smoke, or revalidation of the known sidebar failures.
+
+2026-10-22 sidebar budget fix (source a26670bff213acbc30b4e3dd7711a319b797c610):
+- Both languages had 41 sidebar links against the existing <=30 assertion.
+  Remove duplicate download/changelog sidebar entries (top navigation retained)
+  and move nine detailed guides behind their existing sidebar topic pages.
+  Seven detail links already existed; add only bilingual DSH-plugin and Hub
+  migration links. No document/URL is removed; DSH is explicitly not another
+  built-in runtime, and fresh deployment does not claim data restoration.
+- Budget/checker/fixtures/package versions unchanged. This is a content/layout
+  fix for the two failures above, not a threshold increase or baseline waiver.
+- Non-root read-only/network-none python:3.12-slim Docker: both sidebars exactly
+  30 existing page targets; all nine detail pages reachable from sidebar parents
+  in their own language; download/changelog retained in top navigation. PASS.
+  Local log: /tmp/opencode/22-sidebar-discovery.log.
+- Existing qa-core-docs/Dockerfile rebuilt once with the source tree, original
+  CMD node tests/qa-core-docs/run.mjs, --init --cpus=2. PASS all original gates:
+  four concise bilingual pages, witnessed-red claims, install/version/loopback,
+  both sidebars <=30, five external destinations, and VitePress production build
+  (48.05s). Local log: /tmp/opencode/22-sidebar-qa.log.
+  Image config sha256:ba54d54d10e035363ff0385677abaa3d959763e7cc71649424d4965f387e8997.
+  VitePress still warns about chunks >500kB; no bundle-budget claim or change.
+- Unlike the earlier non-root read-only discovery probe, the original qa-core
+  suite runs as its Dockerfile default user and uses network for external URLs.
+- The report-only successor does not claim a new execution. No all-suite,
+  cross-platform or performance matrix. Exact-head required CI/independent
+  review and ordinary PR merge are still required; no deployment was performed.

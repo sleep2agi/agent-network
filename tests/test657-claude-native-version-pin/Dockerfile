@@ -1,6 +1,7 @@
 FROM oven/bun:1.3.14
 
 WORKDIR /repo
+COPY contracts /repo/contracts
 COPY agent-node/package.json /repo/agent-node/package.json
 RUN cd /repo/agent-node && bun install
 COPY agent-node /repo/agent-node

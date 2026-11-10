@@ -31,7 +31,7 @@
 | Helpers | 通信工程马（cli.ts implementer eval + Option 2 architecture choice） |
 | 关联 issue | [#18](https://github.com/sleep2agi/agent-network/issues/18) SDK research loop |
 | 关联 RFC | RFC-002 channel-bind-cli / RFC-003 node telemetry / **RFC-005 superseded** |
-| 关联 doc | [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) Path B 深度调研 / [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) Path C 深度调研 (Phase 2 backup) / [commit 6429bc0](https://github.com/sleep2agi/agent-network/commit/6429bc0) codex CLI 直接通信研究 / [commit 24b744e](https://github.com/sleep2agi/agent-network/commit/24b744e) 通信龙 deep design |
+| 关联 doc | [`docs/anet-codex-remote-control-plan.md`](../plans/anet-codex-remote-control-plan.md) Path B 深度调研 / [`docs/anet-codex-mcp-server-plan.md`](../plans/anet-codex-mcp-server-plan.md) Path C 深度调研 (Phase 2 backup) / [commit 6429bc0](https://github.com/sleep2agi/agent-network/commit/6429bc0) codex CLI 直接通信研究 / [commit 24b744e](https://github.com/sleep2agi/agent-network/commit/24b744e) 通信龙 deep design |
 | 目标版本 | agent-network v2.1.8（Phase 1 大 feature）+ agent-node v2.5 |
 | 实施人 | 通信工程马（agent-node runtime adapter + cli.ts delegate） |
 
@@ -97,7 +97,7 @@ RFC-006 经历了 5 次 architectural pivot:
 
 ### 1.4 codex remote-control ws daemon 实测 evidence (Path B)
 
-详细实测内容已在 [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) (commit 093d76a, 544 行) 覆盖。本 RFC §3-§4 主要 design 基于该 doc。Key facts:
+详细实测内容已在 [`docs/anet-codex-remote-control-plan.md`](../plans/anet-codex-remote-control-plan.md) (commit 093d76a, 544 行) 覆盖。本 RFC §3-§4 主要 design 基于该 doc。Key facts:
 
 - `codex --enable remote_control app-server --listen ws://127.0.0.1:<port>` 起 ws server (实测 :18765 / :18766 / :18778 都 OK)
 - WebSocket handshake: `HTTP/1.1 101 Switching Protocols` ✅ (with bearer) / `HTTP/1.1 401 Unauthorized` (without)
@@ -388,7 +388,7 @@ export class CodexCliRemoteControlRuntime {
 
 ### 4.2 ServerNotification 流 (anet bridge → commhub report_progress)
 
-per [/tmp/codex-schema/ServerNotification.json](实测 dump) 63 events, anet bridge 关注 mapping:
+per `/tmp/codex-schema/ServerNotification.json`（实测 dump）63 events, anet bridge 关注 mapping:
 
 | codex ServerNotification | RFC-003 NodeEvent.kind |
 |---|---|
@@ -674,7 +674,7 @@ per Vincent 4108-4110 acceptance:
 - 用户根据 use case 选:
   - `codex-cli-remote-control` — 想 user TUI attach / mid-turn steer / 复杂控制
   - `codex-code-cli-mcp` — 想简单 SYNC return / 不需要 user attach / 最低资源占用
-- Path C 实施 spec 见 [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) (通信龙 commit 98b6728, 已 ship doc 作 backup blueprint)
+- Path C 实施 spec 见 [`docs/anet-codex-mcp-server-plan.md`](../plans/anet-codex-mcp-server-plan.md) (通信龙 commit 98b6728, 已 ship doc 作 backup blueprint)
 
 ### 10.3 Optional: anet codex-setup user-mode 命令 (per 通信龙 mcp-server plan §8 🥉)
 
@@ -712,8 +712,8 @@ Phase 1 不 ship, Phase 2 也不 ship. 用户直接跑 `codex` (默认 TUI) + �
 **Day 1 (today 2026-05-13)**:
 - ✅ 通信龙 deep design doc 24b744e
 - ✅ Path A/B/C 三路径研究 (RFC-006 §1.3)
-- ✅ Path B 深度调研 doc [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) (通信SDK马 093d76a)
-- ✅ Path C 深度调研 doc [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) (通信龙 98b6728)
+- ✅ Path B 深度调研 doc [`docs/anet-codex-remote-control-plan.md`](../plans/anet-codex-remote-control-plan.md) (通信SDK马 093d76a)
+- ✅ Path C 深度调研 doc [`docs/anet-codex-mcp-server-plan.md`](../plans/anet-codex-mcp-server-plan.md) (通信龙 98b6728)
 - ✅ RFC-006 主体 ship (Path C primary) + amend narrow single runtime
 - ✅ Vincent 4108+4110 pivot Phase 1 → Path B (ws daemon)
 - ⏳ RFC-006 amend (本 commit, Path B primary, Path C demoted Phase 2 backup)

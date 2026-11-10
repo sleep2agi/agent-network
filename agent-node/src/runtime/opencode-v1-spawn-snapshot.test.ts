@@ -247,6 +247,43 @@ async function copresenceSnapshot(unsafeTools: boolean) {
 }
 
 describe("OpenCode V1 spawn snapshot (#542 — backend refactor changes nothing)", () => {
+  test("production co-presence entry saves TUI OAuth login and restores it on a fresh server", async () => {
+    const root = mkdtempSync(join(tmpdir(), "opencode-auth-production-"));
+    const launchBase = makeLaunchBase("auth-production");
+    const workDir = join(root, "node");
+    const projectDir = join(root, "project");
+    const capture = join(root, "capture.jsonl");
+    const binary = makePackageBinary(launchBase, stub(capture));
+    let session: Awaited<ReturnType<typeof openOpenCodeCopresenceRuntime>> | undefined;
+    const open = () => openOpenCodeCopresenceRuntime({
+      cwd: projectDir, workDir, binary, launchBase, model: "opencode/fake",
+      startupTimeoutMs: 10000,
+      tmuxRunner: () => { throw new Error("auth fixture must not reach tmux"); },
+      tmuxRespawn: () => { throw new Error("auth fixture must not reach tmux"); },
+    });
+    try {
+      mkdirSync(workDir, { mode: 0o700 }); mkdirSync(projectDir, { mode: 0o700 });
+      session = await open();
+      const first = readCaptures(capture).find(c => c.argv[0] === "serve")!;
+      const auth = { openai: { type: "oauth", access: "fixture-access", refresh: "fixture-refresh",
+        expires: 0, accountId: "fixture-account" } };
+      writeFileSync(join(first.env.XDG_DATA_HOME, "opencode/auth.json"), JSON.stringify(auth), { mode: 0o600 });
+      await session.close(); session = undefined;
+      expect(existsSync(join(workDir, ".local/share/opencode/auth.json"))).toBe(true);
+      expect(JSON.parse(readFileSync(join(workDir, ".local/share/opencode/auth.json"), "utf8"))).toEqual(auth);
+      expect(existsSync(first.env.XDG_DATA_HOME)).toBe(false);
+      session = await open();
+      const second = readCaptures(capture).filter(c => c.argv[0] === "serve").at(-1)!;
+      expect(second.env.XDG_DATA_HOME).not.toBe(first.env.XDG_DATA_HOME);
+      expect(JSON.parse(readFileSync(join(second.env.XDG_DATA_HOME, "opencode/auth.json"), "utf8"))).toEqual(auth);
+      await session.close(); session = undefined;
+      expect(existsSync(second.env.XDG_DATA_HOME)).toBe(false);
+    } finally {
+      await session?.close(); rmSync(launchBase, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30000);
+
   test("argv, cwd, env and attach launcher are byte-identical to the pre-refactor golden", async () => {
     const actual = await withFixedHostEnv(async () => ({
       acpSafe: await acpSnapshot(false),

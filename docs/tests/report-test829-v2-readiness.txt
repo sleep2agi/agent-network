@@ -1,0 +1,46 @@
+Test829 follow-up: V2 provider-specific readiness
+2026-10-09 16:36 CST (UTC+08:00). Hub #539 / #829, PR #2551.
+Candidate only; NOT merged, deployed or published.
+
+Finding from actual exported client -> authenticated Hub -> real daemon:
+OpenCode V2 was disabled when opencode.ai was unreachable, although the node
+used a loopback provider. The generic V1 Zen/auth probe is not V2 provider
+readiness. A reachable website is not model authentication either.
+Negative evidence: container anet-test829-client-c4f, screenshot and path/status
+trace in /artifacts; real vendor 2.0.22, --network none. No forced UI click.
+
+Fix: 963573cce9b47b70a8bd196f4e71c9b180d4c27d.
+Tested product/docs SHA: 3f26fa2a391338a94f716135b17daf8fc8b0d2cd.
+After successful CLI observation, major V2 returns state=unknown, ok=false,
+auth=unknown, network=skipped. This is not ready or authorization. Exact package
+identity, explicit unsafe consent and actual generation startup checks remain
+on create/start. V1 behavior and missing-CLI refusal are unchanged.
+Runbook updated in the same candidate; no service/port/proxy/config/secret/
+schema changes. Existing release/rollback and backup sources remain unchanged.
+
+Docker non-root verification, UID 1000, --network none, no host source mounts:
+Dockerfile tests/test829-opencode-create/Dockerfile.ci-regression
+Build SOURCE_COMMIT and run EXPECTED_SOURCE_COMMIT = full tested SHA above.
+Image anet-test829:readiness-3f2
+sha256:a696dfabfb05e20b1838edc12a7122b3d413e1f05b1e7adb532365f16451cffa
+Dependency input anet-test827:close-drain
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac
+All relevant source copied; vendor binary removed from PATH for regression.
+
+Container anet-test829-readiness-3f2: PASS 181 tests / 923 assertions, exit 0.
+Container anet-test829-readiness-unit-3f2: PASS 27 tests / 106 assertions, exit 0.
+The latter overrides entrypoint to bun test
+/opt/node_modules/@sleep2agi/agent-node/src/runtime/runtime-readiness.test.ts.
+Cases include V2 reachable/unreachable/hanging website (no HEAD calls), V1
+unreachable website remains no_network, and absent CLI remains missing_cli.
+Raw outputs retained in named container logs; regression also stores
+/tmp/test829-ci-art/report.txt. Neither suite proves native client acceptance.
+
+Real client integration continues separately on the stacked integration branch:
+after this fix, a harness HOME under /run was correctly refused by workdir
+protection. Moving the owned Docker HOME to /home and using the client's actual
+advertised default child directory preserved that protection. Native daemon
+then verified bridge/serve/TUI and persisted launch_verified_at, but the client
+still timed out because its unfiltered light status read omitted node_id.
+That separate client fix belongs to app PR #785; no identity gate was weakened.
+See the integration report for exact client/runtime SHAs and final result.

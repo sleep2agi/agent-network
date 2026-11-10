@@ -1,0 +1,67 @@
+#1210 — Independent V1 Host Owner launcher / instance publication
+
+Completed scope: independent Linux Host supervisor API, foreground entry and
+systemd template. Credential-free package/executable attestation, canonical
+private persistent roots, exclusive ownership lock and stable Host/cohort/version
+settings precede start. Each owned Server gets a random instance/password;
+authenticated exact-version health precedes exclusive registry publication.
+Duplicate controls/settings or occupied port refuse without takeover, overwrite,
+alternate port or automatic restart. Shutdown checks the recorded Linux process
+identity, confirms the owned group has no live members, and withdraws only exact
+unchanged control files. Persistent settings/history remain. Unverifiable group
+exit or changed controls retains controls and reports failure; it never signals
+an unverified/reused group. Startup SIGTERM cancels before publication and uses
+the same cleanup; cleanup failure is not hidden as successful cancellation.
+
+Source PR: https://github.com/sleep2agi/agent-network/pull/2731
+Exact final head: 036c29aa2f3303015dfc5d4079afcf8b59776f3e
+Ordinary merge: a2381d2193c705c62a32c5c6f9a5fcd1a69f7f3c
+Merged: 2026-10-14T05:36:46Z. Fresh main ancestry verified.
+10 protected required checks and all six focused Docker jobs SUCCESS before merge.
+CI checkout/test merge: 9bd8561122eb78b0509058ff3581d28c2d8c7700.
+Artifact source labels refer to this checkout, not a released package.
+
+Native Docker evidence, downloaded and independently read for BOTH exact V1
+versions 1.18.1 and 1.18.34, non-root/network none, synthetic local model/auth:
+- Launcher run 38517262094, jobs 115698748722 / 115698748955 SUCCESS.
+  Artifacts 11872204891 / 11871458901, each seven PASS checkpoints:
+  foreground entry emits independent ready identity without password;
+  real foreground SIGTERM during startup leaves controls absent and port free;
+  duplicate and occupied-port refusal preserves existing controls;
+  actual owned Host stores two Unicode directory sessions/nonempty histories;
+  concurrent idempotent close A retains data and independent Host B stays healthy;
+  actual restart changes instance/password, refuses old binding, preserves both
+  exact complete histories; residual lock remains without PID-based takeover.
+- Input admission run 38517262006, jobs 115698748469 / 115698748130 SUCCESS.
+  Artifacts 11871778668 / 11872471646, each 29 refusals plus immutable private
+  descriptor -> native exact session PASS. This is an input-snapshot regression,
+  not proof of live process identity or credential/policy isolation.
+- Owned checkpoint run 38517262255, jobs 115698749051 / 115698749344 SUCCESS.
+  Artifacts 11872516450 / 11872239976, each six unit tests/zero failures and
+  seven native PASS points; existing owned-mode regression, not shared migration.
+
+Initial head 5da22b9ebeba38f0f4a24c04692416960768cefe had six focused jobs PASS.
+Review found foreground signal handlers were registered only after readiness;
+new startup cancellation/typed error and group-before-withdraw checks were added,
+then all six jobs passed on the final exact head above. Earlier positive runs
+are baseline only, not the final-head qualification. Own broad QA runs
+38516515660 / 38516894447 / 38516998652 were superseded/cancelled; final broad
+QA 38517262278 was cancelled after focused/required qualification. No full broad
+QA pass is claimed. Facts-only follow-up does not rerun healthy native suites.
+
+Rebuild: tests/test1210-v1-host-launcher/Dockerfile and
+.github/workflows/v1-host-launcher-core.yml pin Bun 1.3.14 image digest, source
+SHA and exact wrapper/platform integrity from test1194. Native packages install
+inside disposable Docker only. Production startup/loopback mapping/private roots,
+secret sources/version validation/rollback/encrypted-data backup boundaries are
+versioned in deploy/node/opencode-v1-host/README.md, start.ts and
+supervisor.service.template. Git stores software and structure, not real data.
+
+Limits: Host A/B are independent Servers; this does not prove shared Node A stop
+leaves Node B. Scoped per-node MCP proxy, borrowed runtime/ready-turn, unique
+project directory/policy/provider trust cohort and actual Node opt-in remain
+#1195. Shared migration, atomic binding/final-checkpoint rollback and full data
+recovery remain #1196 and a named original Owner window. Linux Host Owner entry
+only; native Mac/Windows/original Hub/vendor/account use was not exercised.
+No production service installation, existing node/process/thread/model/login or
+real credentials/history changes, global package change or public package release.

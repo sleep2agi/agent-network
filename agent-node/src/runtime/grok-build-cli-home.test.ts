@@ -1282,7 +1282,7 @@ describe("prepareGrokCliHome", () => {
     };
     expect(Object.keys(parsed)).toEqual(["folders"]);
     expect(Object.keys(parsed.folders)).toEqual([nested]);
-    expect(Object.keys(parsed.folders[nested]!)).toEqual(["trusted", "decided_at"]);
+    expect(Object.keys(parsed.folders[nested]!).sort()).toEqual(["decided_at", "trusted"]);
     expect(parsed.folders[nested]!.trusted).toBe(true);
     expect(Number.isSafeInteger(parsed.folders[nested]!.decided_at)).toBe(true);
     expect(trust).not.toContain("quoted-\"line\napp");

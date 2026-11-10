@@ -1,0 +1,250 @@
+// #906/#901: read the native V2 API, never synthesize a provider preset list.
+// The caller owns the authenticated loopback server and the daemon/network scope.
+// A native model snapshot can precede plugin settlement: it is NOT a successful
+// model invocation, credential verification, or proof that the catalog is complete.
+export interface OpenCodeCatalogScope {
+  networkId: string;
+  daemonId: string;
+  directory: string;
+}
+
+export interface OpenCodeCatalogSnapshot {
+  scope: OpenCodeCatalogScope;
+  source: "opencode-v2-api";
+  state: "snapshot";
+  invocationVerified: false;
+  completeness: "unknown";
+  observedAt: string;
+  providers: Array<{ id: string; activation: "auto" | "enabled" | "disabled" }>;
+  models: Array<{ providerId: string; id: string; variants?: string[] }>;
+  defaultModel: { providerId: string; id: string } | null;
+}
+
+// 2026-10-31 —— 兜底落点补一格。
+//
+// "unavailable" 是一个**指名道姓的结论**（服务不可用）；
+// 而「抓到我没预料到的异常」不等于服务不可用 —— 它可能是个 bug。
+// 两者混用会把排查方向指向错误的一层，而且**不会喊**（这正是它难查的原因）。
+//
+// 🔴 同一条不变式在 server 侧也有一份（server/src/opencode-v2-catalog.ts 的
+//    CATALOG_ERROR_CODES）。两份手工同步的联合类型，本身就有一条「两副本」风险：
+//    加码时只改一侧 ⇒ 另一侧会静默落到自己的兜底。
+export type CatalogError = "invalid_target" | "unauthorized" | "unavailable" | "invalid_response" | "scope_mismatch" | "too_large" | "unexpected" | "directory_not_ascii";
+export class OpenCodeCatalogError extends Error {
+  constructor(readonly code: CatalogError) { super(`opencode_catalog_${code}`); }
+}
+
+const MAX_BODY = 2 * 1024 * 1024;
+const MAX_ROWS = 20_000;
+const SECRET = /^(sk-|gh[pousr]_|github_pat_|xox[baprs]-|AKIA|AIza|ya29\.|glpat-)/i;
+const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+// Preserve upstream IDs, including nested slashes in model IDs. Do not copy
+// names/settings/headers/body/endpoint URLs: those may contain credential values.
+function identifier(value: unknown): string {
+  if (typeof value !== "string" || !value || value.length > 512 || /[\s\u0000-\u001f\u007f]/.test(value) || SECRET.test(value)) {
+    throw new OpenCodeCatalogError("invalid_response");
+  }
+  return value;
+}
+
+function dataAt(value: unknown, directory: string): unknown {
+  if (!record(value) || !record(value.location)) throw new OpenCodeCatalogError("invalid_response");
+  if (value.location.directory !== directory) throw new OpenCodeCatalogError("scope_mismatch");
+  return value.data;
+}
+
+/** Whitelist only public identity fields; reject partial/malformed snapshots. */
+export function normalizeOpenCodeCatalog(
+  scope: OpenCodeCatalogScope, providerResponse: unknown, modelResponse: unknown, defaultResponse: unknown,
+  observedAt: string,
+): OpenCodeCatalogSnapshot {
+  const rawProviders = dataAt(providerResponse, scope.directory);
+  const rawModels = dataAt(modelResponse, scope.directory);
+  const rawDefault = dataAt(defaultResponse, scope.directory);
+  if (!Array.isArray(rawProviders) || !Array.isArray(rawModels)) throw new OpenCodeCatalogError("invalid_response");
+  if (rawProviders.length > MAX_ROWS || rawModels.length > MAX_ROWS) throw new OpenCodeCatalogError("too_large");
+  const providers = new Map<string, OpenCodeCatalogSnapshot["providers"][number]>();
+  for (const row of rawProviders) {
+    if (!record(row) || !["auto", "enabled", "disabled"].includes(String(row.activation))) throw new OpenCodeCatalogError("invalid_response");
+    const id = identifier(row.id);
+    if (providers.has(id)) throw new OpenCodeCatalogError("invalid_response");
+    providers.set(id, { id, activation: row.activation as "auto" | "enabled" | "disabled" });
+  }
+  const models = new Map<string, OpenCodeCatalogSnapshot["models"][number]>();
+  for (const row of rawModels) {
+    if (!record(row)) throw new OpenCodeCatalogError("invalid_response");
+    const providerId = identifier(row.providerID), id = identifier(row.id);
+    // A provider change between requests is not a consistent snapshot. Retry
+    // at the caller; do not silently drop a model and report a complete list.
+    if (!providers.has(providerId)) throw new OpenCodeCatalogError("invalid_response");
+    const key = JSON.stringify([providerId, id]);
+    if (models.has(key)) throw new OpenCodeCatalogError("invalid_response");
+    let variants: string[] | undefined;
+    if (row.variants !== undefined) {
+      if (!Array.isArray(row.variants) || row.variants.length > 200) throw new OpenCodeCatalogError("invalid_response");
+      variants = row.variants.map((v: unknown) => {
+        if (!record(v)) throw new OpenCodeCatalogError("invalid_response");
+        return identifier(v.id);
+      });
+      if (new Set(variants).size !== variants.length) throw new OpenCodeCatalogError("invalid_response");
+    }
+    models.set(key, { providerId, id, ...(variants === undefined ? {} : { variants }) });
+  }
+  let defaultModel: OpenCodeCatalogSnapshot["defaultModel"] = null;
+  if (rawDefault !== undefined && rawDefault !== null) {
+    if (!record(rawDefault)) throw new OpenCodeCatalogError("invalid_response");
+    const providerId = identifier(rawDefault.providerID), id = identifier(rawDefault.id);
+    if (!models.has(JSON.stringify([providerId, id]))) throw new OpenCodeCatalogError("invalid_response");
+    defaultModel = { providerId, id };
+  }
+  return { scope: { ...scope }, source: "opencode-v2-api", state: "snapshot", invocationVerified: false,
+    completeness: "unknown", observedAt, providers: [...providers.values()], models: [...models.values()], defaultModel };
+}
+
+/** Read only an already-owned loopback server. Does not start/reload a server,
+ * read auth.json, send a prompt, or make a paid model probe. No raw errors escape. */
+export async function readOpenCodeCatalog(opts: {
+  scope: OpenCodeCatalogScope;
+  url: string;
+  authorization: string;
+  timeoutMs?: number;
+}): Promise<OpenCodeCatalogSnapshot> {
+  let base: URL;
+  try { base = new URL(opts.url); } catch { throw new OpenCodeCatalogError("invalid_target"); }
+  if (!['127.0.0.1', '[::1]'].includes(base.hostname) || base.protocol !== 'http:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
+    throw new OpenCodeCatalogError("invalid_target");
+  }
+  if (!opts.scope.networkId || !opts.scope.daemonId || !opts.scope.directory || !opts.authorization || /[\r\n]/.test(opts.authorization)) throw new OpenCodeCatalogError("invalid_target");
+  // 2026-10-31 —— 非 ASCII 目录**在这一层就报真因**，别让它变成一次 TypeError。
+  //
+  // 事实：OpenCode 只认 `x-opencode-directory` 这个**头**（注释里写明 query 参数被忽略），
+  // 而 fetch/undici 对非 ASCII 的 header 值直接抛
+  //   TypeError: Header 'x-opencode-directory' has invalid value: …
+  // ⇒ 任何 workdir 里含中文等字符的节点都读不到 catalog，
+  //   而这个 TypeError 在调用方原来被兜底成 "unavailable"（**指名道姓的错因**）：
+  //   排查会照着“服务不可用”走，而真相是“这个值这个通道运不了”。
+  //
+  // 我们的节点目录本身就长这样（`.anet/nodes/<中文别名>`），所以这条不是理论边角。
+  // 不能改成 query 参数（原生服务忽略它）⇒ 这是**传输层的结构性限制**，
+  // 唯一诚实的做法是：给出它自己的码，让人一眼看见限制在哪一层。
+  if (!/^[\x20-\x7e]*$/.test(opts.scope.directory)) throw new OpenCodeCatalogError("directory_not_ascii");
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new OpenCodeCatalogError("invalid_target");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const read = async (path: string): Promise<unknown> => {
+    const url = new URL(path, base);
+    // OpenCode selects the project from this header. A `directory` query
+    // parameter is ignored by the native server, which then reports the
+    // process-global directory and makes every catalog read look out of scope.
+    const response = await fetch(url, { headers: {
+      authorization: opts.authorization,
+      "x-opencode-directory": opts.scope.directory,
+    }, redirect: "error", signal: controller.signal });
+    if (response.status === 401 || response.status === 403) throw new OpenCodeCatalogError("unauthorized");
+    if (!response.ok) throw new OpenCodeCatalogError("unavailable");
+    if (!response.body) throw new OpenCodeCatalogError("invalid_response");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = []; let size = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.length;
+        if (size > MAX_BODY) throw new OpenCodeCatalogError("too_large");
+        chunks.push(chunk.value);
+      }
+      try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+      catch { throw new OpenCodeCatalogError("invalid_response"); }
+    } finally { await reader.cancel().catch(() => {}); }
+  };
+  try {
+    const [providers, models, defaultModel] = await Promise.all([
+      read("/api/provider"), read("/api/model"), read("/api/model/default"),
+    ]);
+    return normalizeOpenCodeCatalog(opts.scope, providers, models, defaultModel, new Date().toISOString());
+  } catch (error) {
+    throw error instanceof OpenCodeCatalogError ? error : new OpenCodeCatalogError("unavailable");
+  } finally { clearTimeout(timer); controller.abort(); }
+}
+
+/** Read the agents the node's OpenCode V2 server exposes (`GET /api/agent`).
+ *  The shape is `{location:{directory}, data:[{id|name, ...}]}`; only public
+ *  identifiers are kept and nothing else is copied. An empty list is a valid
+ *  answer (this node simply defines no agents) and must not be invented into a
+ *  default "Build" entry on the client. */
+export async function readOpenCodeAgents(opts: {
+  scope: OpenCodeCatalogScope;
+  url: string;
+  authorization: string;
+  timeoutMs?: number;
+}): Promise<{ agents: string[]; observedAt: string }> {
+  const snapshot = await readOpenCodeRaw(opts, "/api/agent");
+  const rows = dataAt(snapshot, opts.scope.directory);
+  if (!Array.isArray(rows)) throw new OpenCodeCatalogError("invalid_response");
+  if (rows.length > MAX_ROWS) throw new OpenCodeCatalogError("too_large");
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!record(row)) throw new OpenCodeCatalogError("invalid_response");
+    const id = row.id ?? row.name;
+    seen.add(identifier(id));
+  }
+  return { agents: [...seen], observedAt: new Date().toISOString() };
+}
+
+/** Shared guarded fetch: loopback only, same header contract as the catalog. */
+async function readOpenCodeRaw(opts: { scope: OpenCodeCatalogScope; url: string; authorization: string; timeoutMs?: number }, path: string): Promise<unknown> {
+  let base: URL;
+  try { base = new URL(opts.url); } catch { throw new OpenCodeCatalogError("invalid_target"); }
+  if (!['127.0.0.1', '[::1]'].includes(base.hostname) || base.protocol !== 'http:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
+    throw new OpenCodeCatalogError("invalid_target");
+  }
+  if (!opts.scope.directory || !opts.authorization || /[\r\n]/.test(opts.authorization)) throw new OpenCodeCatalogError("invalid_target");
+  if (!/^[\x20-\x7e]*$/.test(opts.scope.directory)) throw new OpenCodeCatalogError("directory_not_ascii");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000);
+  try {
+    const response = await fetch(new URL(path, base), { headers: {
+      authorization: opts.authorization, "x-opencode-directory": opts.scope.directory,
+    }, redirect: "error", signal: controller.signal });
+    if (response.status === 401 || response.status === 403) throw new OpenCodeCatalogError("unauthorized");
+    if (!response.ok) throw new OpenCodeCatalogError("unavailable");
+    if (!response.body) throw new OpenCodeCatalogError("invalid_response");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = []; let size = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > MAX_BODY) throw new OpenCodeCatalogError("too_large");
+        chunks.push(chunk.value);
+      }
+    } finally { await reader.cancel().catch(() => {}); }
+    try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new OpenCodeCatalogError("invalid_response"); }
+  } catch (error) {
+    throw error instanceof OpenCodeCatalogError ? error : new OpenCodeCatalogError("unavailable");
+  } finally { clearTimeout(timer); controller.abort(); }
+}
+
+/** The agent a specific native session is currently bound to (`session.agent`).
+ *  The client cannot read the node's loopback server, so this is reported with
+ *  the catalogue. Returns undefined when the session is unknown or the field is
+ *  absent - never a guessed default. */
+export async function readOpenCodeSessionAgent(opts: {
+  scope: OpenCodeCatalogScope;
+  url: string;
+  authorization: string;
+  sessionId?: string;
+  timeoutMs?: number;
+}): Promise<{ agent: string; sessionId: string } | undefined> {
+  if (!opts.sessionId || !/^ses_[A-Za-z0-9]{1,190}$/.test(opts.sessionId)) return undefined;
+  const response = await readOpenCodeRaw(opts, `/api/session/${encodeURIComponent(opts.sessionId)}`);
+  if (!record(response) || !record(response.data)) throw new OpenCodeCatalogError("invalid_response");
+  const data = response.data as Record<string, unknown>;
+  if (data.id !== opts.sessionId) throw new OpenCodeCatalogError("scope_mismatch");
+  const agent = data.agent;
+  if (agent === undefined || agent === null) return undefined;
+  return { agent: identifier(agent), sessionId: opts.sessionId };
+}

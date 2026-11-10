@@ -1,0 +1,55 @@
+#894 — ACP CI trigger correction and exact-head failure audit
+Observed: 2026-10-10 05:38–05:40 CST.
+Head audited: 380a2bf709882792eefa34b54fbb9fc02aeb4951, PR2559.
+GitHub tested merge for safe-v1-acp/trigger jobs:
+77b8246773356dae14f917cc34822676a019c49a.
+Rollup: 29 SUCCESS / 139 FAILURE (all terminal).
+
+Product-independent configuration gap:
+qa-trigger-coverage job114035633847/run37994122717 identified the new
+test894-v1-acp-session directory missing from both qa.yml path filters.
+Its dedicated workflow was present but repository policy also requires the
+shared QA trigger. Corrected only those two entries; no guard/baseline relaxed.
+No runtime/product edits and no production/deployment/credentials changes.
+
+Docker verification, cached anet-v1-label:21ffed1, network none, source mounted
+read-only, --rm:
+PASS: check-qa-trigger-coverage.py: 103 executed directories, 189 covered paths.
+PASS: check-test-suite-registration.py: 312 suites, 238 registered, new=0.
+PASS: real YAML parser: exactly one ACP path in EACH push and pull_request.
+PASS: in-memory negative removes only the two ACP path entries, invokes the
+unchanged guard, and requires exit1 with exactly the single ACP coverage gap.
+No host files modified by the negative. Existing guard notes retained.
+Prior ACP initialize/session sample was NOT rerun and is not counted as new.
+
+Failure audit: all 139 failed job logs queried separately; categorization uses
+each job's first matching fatal dependency diagnostic, not a claim that every
+possible later test failure is excluded:
+100 jobs Docker Hub OAuth endpoint HTTP504:
+114035634647, 114035634395, 114035635529, 114035635230, 114035635382, 114035635546, 114035635514, 114035635677, 114035635617, 114035635666, 114035771174, 114035771253, 114035771228, 114035771148, 114035771579, 114035771726, 114035771710, 114035771621, 114035771891, 114035772046, 114035772148, 114035771686, 114035771775, 114035772042, 114035771689, 114035772018, 114035772079, 114035771870, 114035772082, 114035775195, 114035775086, 114035775064, 114035775119, 114035775077, 114035775235, 114035775234, 114035775191, 114035775226, 114035775171, 114035775111, 114035775136, 114035775286, 114035775153, 114035775236, 114035775279, 114035775179, 114035775249, 114035775159, 114035775239, 114035775167, 114035775158, 114035775241, 114035775186, 114035775253, 114035775467, 114035775182, 114035775458, 114035775370, 114035775359, 114035775376, 114035775369, 114035775355, 114035775368, 114035775304, 114035775480, 114035775382, 114035775426, 114035775386, 114035775416, 114035775443, 114035775589, 114035775451, 114035775431, 114035775503, 114035775504, 114035775626, 114035775556, 114035775902, 114035775644, 114035775571, 114035775541, 114035775681, 114035779284, 114035779213, 114035779232, 114035779530, 114035779514, 114035779472, 114035779383, 114035779486, 114035779437, 114035779346, 114035779395, 114035779411, 114035779525, 114035779799, 114035779417, 114035779481, 114035779406, 114035779588
+37 jobs Docker Hub manifest/pull quota HTTP429:
+114035635035, 114035635351, 114035635663, 114035635662, 114035635607, 114035635657, 114035635750, 114035635556, 114035771291, 114035771295, 114035771650, 114035772058, 114035771709, 114035772116, 114035772052, 114035771756, 114035772109, 114035772075, 114035775087, 114035775197, 114035775078, 114035775101, 114035775405, 114035775366, 114035775380, 114035775430, 114035775529, 114035775991, 114035775528, 114035779446, 114035779367, 114035779399, 114035779306, 114035779364, 114035779410, 114035779482, 114035779531
+1 trigger-coverage gap: 114035633847 (fixed above).
+1 mixed report-only L0+L1: 114035771690; separately inspected aggregate log,
+many dependency builds return 429 and some OAuth504. Individual subtests are
+not claimed passed or fully classified. No conclusion is drawn about unrun code.
+safe-v1-acp job114035634647/run37994122804 failed before suite execution on
+Bun OAuth504. This is distinct from the successful prior local cached ACP gate.
+real-client job114035634395/run37994122690 similarly failed on dependency504.
+No workflow/job rerun or registry substitution was performed this iteration.
+
+App PR795 head3cf50cf70a02390e003914a3fa8c9a055648ff11:
+15 SUCCESS / 13 FAILURE / 1 SKIPPED, terminal. Its 13 job failures were individually
+classified in report-test894-v1-acp-session.txt (8 quota, 5 OAuth504); no new
+native artifact or native acceptance claimed.
+
+Next model layer remains pending. Source inspection confirms safe-mode config
+intentionally strips custom providers/baseURL/packages/headers. Do NOT use an
+unsafeTools opt-in merely to make a loopback model fixture pass and then call it
+safe-mode acceptance. The next fixture must retain this policy and separately
+prove transport authentication, exact model selection, final response and cleanup;
+any controlled provider response must be explicitly identified as a fixture.
+No real vendor credentials or model request used this iteration.
+#894=1/3; #829=2/3; #539 in progress; #895's old exact-package acceptance independent.
+Next checkpoint: 2026-10-10 05:50 CST, not a release commitment.
+

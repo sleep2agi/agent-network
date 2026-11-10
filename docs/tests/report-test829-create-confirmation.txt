@@ -1,0 +1,73 @@
+Test829: request-bound daemon launch confirmation
+2026-10-09 15:57 CST (UTC+08:00)
+Hub #539 / #829; candidate only, NOT merged or published.
+
+Finding
+The app checked the roster alias before the create request. Early registration
+or an old same-named node could hide a late daemon failure. Hub acked_at is also
+written by registration, so it cannot serve as daemon completion evidence.
+
+Product source: 3404dd2083a8a5e2066f79da06340c98b9f52208 (PR #2551)
+New nullable launch_verified_at, no backfill. Bound daemon reports explicit
+launch_verified with positive child PID only after the V2 finite launcher and
+live generation checks. Success preserves either event ordering and is
+idempotent. Failure clears proof; late success cannot revive failed requests.
+Scoped REST exposes proof and child_node_id. Legacy started does not mint proof.
+Migration follows the legacy model-nullability rebuild. Existing token rules
+unchanged. This is a one-time check, not continuous health monitoring.
+
+Docker regression: PASS, 181 tests / 923 assertions, exit 0
+container anet-test829-create-proof
+image anet-test829:create-proof
+sha256:003ba321495ec378bd0eca99079b0393d7666f0fa9064b0052b99febd6725dd8
+Dependency image anet-test827:close-drain
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac
+Dockerfile tests/test829-opencode-create/Dockerfile.ci-regression
+Build SOURCE_COMMIT and run EXPECTED_SOURCE_COMMIT both equal product SHA above.
+Non-root UID 1000, isolated HOME/SQLite, no vendor OpenCode on PATH.
+Raw output: container /tmp/test829-ci-art/report.txt and docker logs.
+  profile/writer                         30 / 132
+  launch health + V2 core                 24 / 81
+  start completion + legacy/Codex start   24 / 71
+  mirrored-source parity                  4 / 4
+  CLI/mode                               14 / 45
+  real HTTP audience                     12 / 295
+  schemas                                47 / 185
+  ack handler + real MCP transport        20 / 92
+  REST status/auth/network isolation       6 / 18
+
+Native exploratory integration: PASS, exit 0
+source 504bfe6bb1434aa5ad41bf9582fea9b1fee153f5
+branch test/opencode-v2-daemon-e2e, includes unmerged siblings #2545/#2550;
+not proof that standalone #2551 or main passes native integration.
+image anet-test829:native-create-proof-504b
+sha256:b43d82cc8f47e7f16305ad3bf1bddce67238606205569ff2f01625555c04911f
+container anet-test829-native-create-proof-504b
+Dockerfile tests/test829-opencode-create/Dockerfile.native-cached
+Same dependency base, copied clean committed source; no runtime source mounts.
+Run --network none, EXPECTED_SOURCE_COMMIT=<native SHA>, TEST829_LIFECYCLE=1.
+Container wrapper uses root; do not claim native non-root acceptance from this
+run (the separate regression suite above is non-root).
+Real @opencode/cli 2.0.22, private tmux, isolated DB/HOME, loopback model fixture.
+L0 environment -> L1 auth -> L2 no-opt-in refusal -> L3 real daemon create.
+REST returned exact child ID and launch_verified_at=1791532461850 after
+registration acked_at=1791532458088; child token stayed active.
+create cr_8b8e6639-cbdf-4240-af41-ba46948d5f7c
+L4 exact task answer visible in same native TUI.
+L5 stop sr_3502b845aa39 reaped old bridge/serve/TUI identities, config preserved;
+start str_eef247d96675 generated new live evidence and exact new task/TUI reply.
+Raw output /artifacts/report-test829-native.txt and docker logs.
+
+Client candidate (separate repo PR #785)
+source 78958f25530c28112d54a14b9597b6a55ef17700
+157 pure/source-wiring checks plus Docker typecheck passed; see app report.
+Checks exact request/runtime/name/node ID and idle/busy, prioritizes failure,
+re-reads request after roster await, invalidates exited effects/timers.
+V2 requirement comes from submitted flags, NOT current selection/old Hub fields.
+V1 does not require V2 proof. Missing legacy child ID remains unconfirmed.
+
+Remaining gates
+No V2 generation selector or model-switch implementation in this slice.
+No rendered-client E2E/native app UAT, macOS/Windows acceptance, production
+changes, version bump, merge, npm release or TestFlight submission.
+Both PRs stay draft; formal release must rebuild an accepted exact main SHA.

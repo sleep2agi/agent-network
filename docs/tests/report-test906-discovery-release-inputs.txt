@@ -1,0 +1,15 @@
+TEST-ONLY #906 discovery release input consistency
+Observed 2026-10-11T09:18Z (17:18 UTC+8).
+Candidate versions: Hub .123 / runtime .131 / CLI .165.
+Not yet merged or published; original source slice is PR2592.
+
+Docker: used the existing locked, non-root discovery image with this candidate
+checkout mounted read-only at /source, --init --rm --network none.
+Node read package.json and package-lock.json for all three packages; verified
+top-level and root-entry versions, both exact CLI/runtime pairing constants,
+and Install/Upgrade sections in all three new candidate release notes.
+Result: PASS consistency. No dependency updates, install or global mutation.
+Original core evidence remains report-test906-existing-codex-discovery.txt;
+this metadata-only check is not a new core/native/OAuth/model test.
+No formal artifact, registry publication, runtime activation or update-channel
+change was performed. New formal builds must come from exact merged main SHA.

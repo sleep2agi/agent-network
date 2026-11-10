@@ -1,0 +1,58 @@
+name: V1 safe ACP session atomic gate
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/test894-v1-acp-session.yml'
+      - 'tests/test894-v1-acp-session/**'
+      - 'tests/test894-v1-runtime/Dockerfile'
+      - 'agent-node/package*.json'
+      - 'agent-node/src/cli.ts'
+      - 'agent-node/src/runtime/opencode-acp/**'
+      - 'agent-node/src/runtime/opencode-backend.ts'
+  # Tier 3: heavy Docker suite. Runs nightly on main, on demand, or on PRs labelled full-qa.
+  # It no longer runs on every merge to main (2 runners; it queued PR feedback).
+  schedule:
+    - cron: '40 18 * * *'
+permissions:
+  contents: read
+# #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
+# 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
+# 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
+# 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  safe-v1-acp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned dependency fixture and current source
+        run: |
+          docker build -f tests/test894-v1-runtime/Dockerfile --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-v1-deps:test .
+          docker build --network none -f tests/test894-v1-acp-session/Dockerfile --build-arg RUNTIME_IMAGE=anet-v1-deps:test --build-arg SOURCE_COMMIT="$GITHUB_SHA" -t anet-v1-acp:test .
+      - name: ACP protocol, lifecycle and selected-model regression
+        run: |
+          set -euo pipefail
+          docker run --rm --network none anet-v1-acp:test bun test src/runtime/opencode-acp 2>&1 | tee report-test894-v1-acp-unit.txt
+      - name: Real safe ACP initialization and exact wrong-session negative
+        run: |
+          set -euo pipefail
+          docker image inspect anet-v1-deps:test anet-v1-acp:test --format '{{.Id}}' | tee test894-images.txt
+          docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" anet-v1-acp:test 2>&1 | tee report-test894-v1-acp-session.txt
+      - name: Safe ACP model transport with isolated TLS fixture (not live vendor)
+        run: |
+          set -euo pipefail
+          docker run --rm --network none -e EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" anet-v1-acp:test bash /fixture-acp/run-model.sh 2>&1 | tee report-test894-v1-acp-model.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TEST-ONLY-v1-acp-session-${{ github.sha }}
+          path: |
+            test894-images.txt
+            report-test894-v1-acp-unit.txt
+            report-test894-v1-acp-session.txt
+            report-test894-v1-acp-model.txt
+          if-no-files-found: warn

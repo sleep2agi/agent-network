@@ -1,0 +1,67 @@
+# test1162 — production owned follow-up controller
+
+Baseline main bf2b8c93a828c5a68bc18a9ca24e217d3fa3b13e (PR2709).
+Source scope: production CLI adapter, bridge/runtime once-only owned steering,
+independent same-thread/same-task answer, durable answer intent, exact identity
+restart/transport reconciliation, capacity no-replay, bounded reply recovery,
+physical ACK/local dedup and opt-in one trusted slot within 20 total handlers.
+No current node/thread/model/login/provider/credential is changed by testing.
+
+Rebuild:
+  docker build --build-arg SOURCE_COMMIT=<exact-source-sha> \
+    -f tests/test1162-owned-followup-controller/Dockerfile -t owned-controller .
+  docker run --rm --network none owned-controller
+  docker build --build-arg SOURCE_COMMIT=<exact-source-sha> \
+    -f tests/test1156-owned-followup-hub/Dockerfile -t owned-wire .
+  docker run --rm --network none owned-wire
+Pinned Bun 1.3.14 digest + frozen package-lock; each local command <=110s.
+Candidate source was copied from read-only mounts into isolated containers;
+mutations do not write the checkout or a live node. No real shared tmux used.
+
+Local results (2026-10-13 UTC / Oct14 +08):
+- Controller 10 PASS / 0 FAIL, 66 initial assertions (final adds an explicit
+  no-consumption check for unproved input, 67 assertions); 4 production mutations witness
+  ASSERTION RED: answer body replay, missing input proof, accepted-input
+  capacity retry, explicit-reply settlement.
+- Hub/SQLite + real WS + production CLI factory 3 PASS / 0 FAIL, 56 assertions;
+  companion node receipt/recovery core 40 PASS, 255 assertions, 4 old production
+  mutation witnesses retained. Joint fixture total 43 PASS / 311 assertions.
+- Existing human queue core 138 PASS / 0 FAIL, 505 assertions /21.36s;
+  all 4 original priority mutation witnesses retained.
+
+Initial failures retained: queue 136/138 (legacy function extraction included
+a second runtime import; single-concurrency fixture hit new reserved-slot
+validation); controller fixture parse error (missing closing brace); joint
+fixture reused another case's body and hit real Hub dedup; old V2 admission
+fixture parsed a new return at module top level. Fix source boundaries,
+parameterize the private recovery Symbol, keep max=1 reserve=0, use unique
+fixture text and compile the actual admission block inside an async function.
+First CI also found one new return-shape type error (82 versus baseline81)
+and five old mutation anchors changed/duplicated by integration. Preserve the
+baseline and existing assertions: restore the old ordinary guard boundaries,
+build owned RPC parameters separately, keep the old CLI reply mutation on the
+ordinary path, and type the resume result explicitly. Final CI must pass.
+Original counts/assertions, authentication, dedup and mutation baselines were
+not disabled. Stronger explicit delegation assertions were added.
+
+Real wire path proves actual production preparation/acceptance/answer binding
+through the CLI adapter. The same node first consumes a follow-up on owner
+turn, steers once, receives owner-only final, automatically starts its own
+answer client id without the original action body, then replies by its own Hub
+task id. Consumed context remains owner turn and is reported exactly once.
+
+V2 answer_intent is durable before RPC; loss never triggers a second answer.
+Pure receipt recovery does not read owner final text for this phase. Verified
+same-thread client identity may adopt/recover an existing answer. Ambiguous or
+unknown identity remains unresolved under finite timeouts. Explicit terminal
+status prevents another action/reply, cancellation never interrupts owner,
+and accepted input/answer capacity errors never repeat action input.
+
+The answer prompt instructs no new actions/tools; native model/tool isolation
+and original-device adoption are not tested by synthetic fixtures. Old Hub
+first-20 inbox selection can still hide deeper human rows before the local
+reserved slot; separate P0 inlet work is required. Package/public adoption
+must be gated separately on exact merged main; this report claims source/core.
+Upgrade/rollback/private data and six recovery boundaries are documented in
+docs/design/730-owned-turn-human-steering.md. Required/type/native receipt/docs
+and mutation-pin CI must pass for the final candidate before merge.

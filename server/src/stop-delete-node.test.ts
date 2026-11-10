@@ -419,6 +419,46 @@ describe("get_stop_request + ack_stop_request — daemon flow", () => {
     expect(JSON.parse(audits[0].detail).backup_path).toBe("/home/u/.anet/deleted/1719647200000-sd-child-a");
   });
 
+  // Daemon-mediated delete used to drop only the nodes row. The child's sessions
+  // row stayed behind as "offline", so /api/status — and every client list built
+  // on it — kept showing the deleted node forever (desktop: the node stays put
+  // under 「删除请求已提交」). REST DELETE /api/nodes/:id already drops both.
+  test("daemon ack 'stopped' on delete branch → the child's session row is gone too", async () => {
+    setupAlphaNetwork();
+    db.run(
+      "INSERT INTO sessions (resume_id, alias, node_id, network_id, status) VALUES (?1, ?2, ?3, ?4, 'idle')",
+      ["resume-sd-child-a", CHILD_A_ALIAS, CHILD_A_ID, NET_A],
+    );
+    const userTools = buildHandlers(USER_A_ID);
+    const dispatch = await call(userTools.delete_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A, confirm_alias: CHILD_A_ALIAS,
+    });
+    expect(dispatch.ok).toBe(true);
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    await call(daemonTools.ack_stop_request, { request_id: dispatch.request_id as string, status: "stopped", exit_signal: "SIGTERM" });
+    const left = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM sessions WHERE node_id = ?1", CHILD_A_ID);
+    expect(Number(left?.n ?? 0)).toBe(0);
+  });
+
+  test("delete finalize drops the session by node_id, sparing a same-alias rebuilt node", async () => {
+    setupAlphaNetwork();
+    const userTools = buildHandlers(USER_A_ID);
+    const dispatch = await call(userTools.delete_node, {
+      child_node_id: CHILD_A_ID, daemon_node_id: DAEMON_A_ID, network_id: NET_A, confirm_alias: CHILD_A_ALIAS,
+    });
+    expect(dispatch.ok).toBe(true);
+    // Before the ack lands, a new node takes the same alias and registers.
+    const REBUILT_ID = "node_sd_child_a_rebuilt";
+    db.run(
+      "INSERT INTO sessions (resume_id, alias, node_id, network_id, status) VALUES (?1, ?2, ?3, ?4, 'idle')",
+      ["resume-sd-child-a-rebuilt", CHILD_A_ALIAS, REBUILT_ID, NET_A],
+    );
+    const daemonTools = buildHandlers(USER_A_ID, true, DAEMON_A_TOK, NET_A);
+    await call(daemonTools.ack_stop_request, { request_id: dispatch.request_id as string, status: "stopped", exit_signal: "SIGTERM" });
+    const rebuilt = db.get<{ status: string }>("SELECT status FROM sessions WHERE node_id = ?1", REBUILT_ID);
+    expect(rebuilt?.status).toBe("idle");
+  });
+
   // #1448 finding-4 — stop/delete 必须校验 daemon 是 child 的权威创建者(镜像 start)。
   // 改前只校验 daemon 存在+同网 → 同网调用方传错 daemon_node_id,门铃路由到错 daemon。
   // f3 合入后错 daemon 会 sweep 空 + ack stopped → hub 假收敛 stopped 而 child 仍在跑。
@@ -702,7 +742,6 @@ describe("inbox-enqueue lifecycle_state guard (RFC-027 §2.3 race-free)", () => 
     const r = await call(tools.send_task, {
       alias: CHILD_A_ALIAS,
       task: "racey post-SIGTERM task",
-      from_session: "sender-x",
       network_id: NET_A,
     });
     expect(r.ok).toBe(false);
@@ -918,6 +957,65 @@ describe("RFC-027 PR1.2a — restart_node resets lifecycle_state to 'active'", (
     const tools = buildHandlers(USER_A_ID);
     const r = await call(tools.restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
     expect(r.ok).toBe(true);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+  });
+});
+
+// ── #1511 — restart_node 在途任务默认拒绝（只提示，不自动重启） ──────
+//
+// 节点侧 exit-75 的 drain 只等 60 秒，超时会硬打断当前回合；所以「正在跑
+// 任务」时 Hub 端在派发前就拒绝，计数规则与 stop_node 完全同一份
+// （#2022/#2029 修订版，实现在 countInFlightTasks）。客户端语义：保存密钥
+// 后若节点忙，不安排重启，只提示等任务完成或去节点机器上手动重启。
+describe("restart_node — in-flight default-refuse (#1511)", () => {
+  test("live task row → node_busy_in_flight, no dispatch row, state untouched", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_1511_live", status: "delivered" });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(1);
+    expect(typeof r.hint).toBe("string");
+    const rows = db.all<{ update_id: string }>(`SELECT update_id FROM node_config_updates WHERE node_id = ?1`, [CHILD_A_ID]);
+    expect(rows.length).toBe(0);
+    expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
+  });
+
+  test("unacked legacy inbox rows count too — same rule as stop", async () => {
+    setupAlphaNetwork();
+    seedInbox(NET_A, CHILD_A_ALIAS, 2);
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+    expect(r.in_flight_count).toBe(2);
+  });
+
+  test("terminal-only rows → restart dispatches (parity with #2022 stop rule)", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_1511_replied", status: "replied" });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(true);
+    expect(r.apply_mode).toBe("restart_only");
+  });
+
+  test("2h-old live task is never aged out — status wins over age (same as stop)", async () => {
+    setupAlphaNetwork();
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, {
+      task_id: "task_1511_running_120m", status: "running",
+      task_age: "-120 minutes", inbox_age: "-120 minutes", expires_in: "-60 minutes",
+    });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("node_busy_in_flight");
+  });
+
+  test("stopped node + live-row corpse → restart still dispatches (un-stop must not be blocked)", async () => {
+    setupAlphaNetwork();
+    db.run(`UPDATE nodes SET lifecycle_state = 'stopped' WHERE node_id = ?1`, [CHILD_A_ID]);
+    seedTaskWithInbox(NET_A, CHILD_A_ALIAS, { task_id: "task_1511_corpse", status: "delivered" });
+    const r = await call(buildHandlers(USER_A_ID).restart_node, { node_id: CHILD_A_ID, network_id: NET_A });
+    expect(r.ok).toBe(true);
+    expect(r.apply_mode).toBe("restart_only");
     expect(readNode(CHILD_A_ID)?.lifecycle_state).toBe("active");
   });
 });

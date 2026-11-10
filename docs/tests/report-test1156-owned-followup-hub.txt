@@ -1,0 +1,68 @@
+# test1156 — owned follow-up Hub reply reconciliation
+
+Baseline main: 3cc104c43cc61558fb7b11c565f615e2a6766a9c (PR2708).
+Scope: production V2 recovery/retry terminal reconciliation and a real Hub
+handler + SQLite + real WebSocket/client/bridge/receipt two-turn protocol proof.
+This is not production owned steering or automatic answer-only admission.
+
+Rebuild:
+  docker build --build-arg SOURCE_COMMIT=<exact-source-sha> \
+    -f tests/test1156-owned-followup-hub/Dockerfile -t owned-followup-hub .
+  docker run --rm --network none owned-followup-hub
+Pinned Bun 1.3.14 image digest and frozen server/agent-node package-lock inputs.
+Local build/test commands were each bounded to 110 seconds. No host daemon,
+shared tmux, live node, Hub credentials or installed package was changed.
+
+2026-10-13 local results:
+- Initial joint test: 1 PASS / 1 FAIL, 22 assertions. The isolated fixture
+  token name lacked the production node: prefix; real activity authentication
+  correctly refused it before reaching the intended context conflict assertion.
+  Corrected fixture token names; no production authentication was weakened.
+- Protocol + new reconciliation prototype: 6 PASS / 0 FAIL, 87 assertions.
+- Moving the joint fixture out of the general server test directory first
+  exposed a fixture dependency lookup error (0 PASS / 1 FAIL / 1 error).
+  Added a container-only link to the frozen server node_modules; the final
+  independent-directory fixture must pass after that correction. General
+  server-only test images need not import agent-node or this joint fixture.
+- Final full core: Hub 2 PASS / 0 FAIL, 36 assertions; node 40 PASS / 0 FAIL,
+  254 assertions across 6 files. Total 42 PASS, 290 assertions.
+- Four production mutations witnessed ASSERTION RED: immutable receiver check,
+  explicit terminal cleanup, unknown-Hub recovery hold, retry terminal skip.
+  No test baseline/count or assertion was removed to get a green result.
+- Existing authenticated human queue Docker core: 138 PASS / 0 FAIL,
+  505 assertions, 21.47 seconds; all 4 original production priority mutations
+  witnessed ASSERTION RED.
+- First PR CI at source f1667fb8044fc93c423e89b730b6405f591584ee:
+  new joint core, queue core and typecheck passed. The old receipt mutation
+  witness rejected the changed async matcher output despite its green core;
+  the mutation-pin ratchet also rejected a dynamic destructured mutation table.
+  Retained both failures. Use equivalent explicit Error assertions and literal
+  target/anchor mutations; keep the original 5 receipt witnesses, new 4
+  witnesses and the static ratchet baseline unchanged. Final CI must pass.
+
+The real Hub rejects second consumed bindings and answer-turn activity for an
+input consumed on owner-turn. The existing authenticated node reply route can
+reply to the follow-up task by its own id while preserving original context.
+Original and follow-up results stay separate. Other nodes, duplicate replies,
+and new-turn late replies after cancel/expiry are rejected; task terminal rows
+and late-receipt tables remain unchanged on rejected calls.
+
+The production recovery body itself is executed by the fixture with injected
+read/delivery seams: explicit replied/failed/cancelled/expired entries settle
+without opening a runtime or reading model history; unknown/foreign-context
+reads retain the receipt without inspection/delivery; only the follow-up's
+distinct answer-turn plus exact persisted client identity can recover its text.
+The production retry admission body skips authoritative terminal V2 requests
+and still refuses live/unknown V2 action replay before runtime import.
+
+Production prepareFollowUp/owned steering/nonce echo reconciliation/automatic
+answer-only admission, accepted-action retry and owner-terminal race handling
+remain #1156/#1151 gates. The fixture explicitly starts the answer turn. No
+new npm version, public runtime adoption, native model or device acceptance is
+claimed. Existing V1 and external-human policies are retained.
+
+Required CI, receipt compatibility, queue core, typecheck, legacy native receipt
+gate and docs checks must be read back for the final PR source before merging.
+CI emits its exact source commit; broad QA is not claimed complete by this
+local core report. Recovery/rollback/data boundaries are documented in
+docs/design/730-owned-turn-human-steering.md.

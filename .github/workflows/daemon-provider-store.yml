@@ -1,0 +1,79 @@
+name: Daemon Provider persistence
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'agent-network/**'
+      - 'agent-node/src/**'
+      - 'server/**'
+      - 'tests/test906-daemon-provider-management/**'
+      - '.github/workflows/daemon-provider-store.yml'
+  # Tier 3: heavy Docker suite. Runs nightly on main, on demand, or on PRs labelled full-qa.
+  # It no longer runs on every merge to main (2 runners; it queued PR feedback).
+  schedule:
+    - cron: '40 18 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+# #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
+# 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
+# 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
+# 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  existing-discovery:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
+    name: daemon-existing-codex-discovery (Docker, read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Private legacy layout and HTTP daemon discovery core
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.discovery -t anet-provider-management:test906-discovery .'
+          sg docker -c 'docker run --init --rm --network none anet-provider-management:test906-discovery'
+  managed-login:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
+    name: daemon-managed-login (Docker, no account sign-in)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login lifecycle and native empty-account protocol (offline)
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.login -t anet-provider-management:test906-login .'
+          sg docker -c 'docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1 anet-provider-management:test906-login'
+  store:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
+    name: daemon-provider-store (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Private daemon configuration and isolation tests
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile -t anet-provider-management:test906 .'
+          sg docker -c 'docker run --rm anet-provider-management:test906'
+      - name: Compiled CLI roundtrip (offline)
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.cli -t anet-provider-management:test906-cli .'
+          sg docker -c 'docker run --rm --network none anet-provider-management:test906-cli'
+      - name: Hub and daemon scoped readback (offline)
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.transport -t anet-provider-management:test906-transport .'
+          sg docker -c 'docker run --rm --network none anet-provider-management:test906-transport'
+  native-application:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
+    name: daemon-provider-native-application (Docker)
+    needs: store
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Same-thread native Codex provider application (offline, TEST-ONLY)
+        run: |
+          sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.native -t anet-provider-management:test906-native .'
+          # A real init reaps the detached tmux grandchildren; Bun PID 1 does not.
+          sg docker -c 'docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1 anet-provider-management:test906-native'

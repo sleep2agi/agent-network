@@ -178,6 +178,27 @@ await call("node-create-requests", "GET", `/api/node-create-requests?request_id=
 await call("files.missing", "GET", "/api/files/f_does_not_exist", t);
 await sse("events.users.me", `/events/users/me?network_id=${nid}`, t);
 await sse("events.network", `/events/network/${nid}`, t);
+// 任务状态「废弃」(abandoned):新客户端带 X-Anet-Accept-Columns: abandoned 设置;旧 App 不带这个头读。
+// newparam.* 不参与逐步比较(基线没有这个状态,设置会 400);compare.ts 在 CHECK_ABANDONED=1 时按值核对,
+// 并把旧客户端读到的那一行喂给每个 app tag 自己的 requirementFromHub。
+{
+  const aware = { "X-Anet-Accept-Columns": "abandoned" };
+  const c = await call("newparam.abandoned_create", "POST", "/api/requirements", t, { name: "compat abandoned", priority: "normal", network_id: nid, due: "2020-01-01", column: "doing" });
+  const id = c?.requirement?.id ?? "x";
+  const set = await call("newparam.abandoned_set", "PATCH", `/api/requirements/${id}?network_id=${nid}`, t, { column: "abandoned" }, aware);
+  const legacyGet = await call("newparam.abandoned_get_legacy", "GET", `/api/requirements/${id}?network_id=${nid}`, t);
+  const awareGet = await call("newparam.abandoned_get_aware", "GET", `/api/requirements/${id}?network_id=${nid}`, t, undefined, aware);
+  const legacyList = await call("newparam.abandoned_list_legacy", "GET", `/api/requirements?network_id=${nid}`, t);
+  const overdue = await call("newparam.abandoned_overdue", "GET", `/api/requirements?network_id=${nid}&overdue=1`, t);
+  out["newparam.abandoned_values"] = { status: out["newparam.abandoned_set"].status, shape: {
+    set: set?.requirement?.column ?? null,
+    legacy_get: legacyGet?.requirement?.column ?? null,
+    aware_get: awareGet?.requirement?.column ?? null,
+    legacy_row: (legacyList?.requirements ?? []).find((r: any) => r.id === id) ?? null,
+    aware_row: awareGet?.requirement ?? null,
+    overdue_has_it: (overdue?.requirements ?? []).some((r: any) => r.id === id),
+  } };
+}
 // MCP tools the app calls: compare their input schemas.
 // #478 起 tools/list 按调用者给:节点令牌看不到只有人能用的工具、默认也不列协议工具(带 X-Anet-Tools: all 才列),
 // 人看不到节点 / 协议工具。兼容要回答的是「有没有哪个调用者丢了工具」,所以比的是两边的并集:

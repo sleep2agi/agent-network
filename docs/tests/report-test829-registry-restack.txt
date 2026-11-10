@@ -1,0 +1,39 @@
+Hub #539/#829: remote-create candidate after registry main landing
+2026-10-09 17:10 CST (UTC+08:00). Candidate only; no release/deployment.
+
+Main input: 9507196b2b8ed851630f4facb960738b97e90d68 (registry PR2549).
+Merge bb76ca876c8a7552377690aa15d5e7dd5e7a6498 resolves two conflicts:
+qa.yml retains both test829/test832 trigger paths and matrix entries;
+v2-session.test keeps its non-root-owned executable copy AND extraEnv from
+main's registry failure injection. Product registry changes auto-merged with
+daemon launch proof; neither gate was removed.
+
+Initial merge regression passed184 tests/939 assertions. Additional registry
+and runtime readiness invocation failed:58 pass/1 fail, EACCES mkdir /run/user
+in generated-plugin cleanup fixture. Container anet-test829-registry-unit-bb7,
+exit1. This is missing logind-style test environment, not a waived product test.
+
+Correction/tested SHA:604676e75778ca64b14e450ec32713cbceb0f1b3.
+Docker build provisions /run/user/1000 owned node:node, mode0700 before USER
+node. Runtime environment assertions verify ownership/mode; registry and
+runtime readiness now run inside the fail-fast regression script.
+No product path/ownership guard weakened; no source change after the merge.
+
+Dockerfile tests/test829-opencode-create/Dockerfile.ci-regression
+Dependency image anet-test827:close-drain verified exact ID
+sha256:5f6afbdfbc9c7968065fac46d1030d62790bab5f6eabdcebaa441e929c0ba6ac.
+Relevant repository sources fully replaced; no runtime source mounts.
+Build SOURCE_COMMIT and run EXPECTED_SOURCE_COMMIT = full tested SHA above.
+Image anet-test829:registry-restack-604
+sha256:da96e6c2e5e9c90316a5050f8ca87408b35eacf9175a5db9e9e3b439a28d09b9.
+Container anet-test829-registry-restack-604, --network none, UID1000,
+no vendor OpenCode on PATH:243 pass/0 fail,1238 assertions,exit0.
+Raw container logs and /tmp/test829-ci-art/report.txt retained.
+
+Targeted regression only; protocol fake is not native lifecycle acceptance.
+Prior native client/daemon evidence stays tied to its own stacked SHA.
+Companion close cleanup PR2550 is not yet merged. Final-head CI must rerun
+after push; no transfer of old-head green, no release artifact produced.
+Service, port, proxy, credentials, database and restore paths unchanged;
+authoritative runbooks remain docs/runbooks/opencode-tui-copresence.md and
+opencode-v2-registry-readiness.md.

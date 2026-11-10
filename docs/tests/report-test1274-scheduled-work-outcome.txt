@@ -1,0 +1,126 @@
+TEST-ONLY — P0 CommHub #1274, first slice of #756
+Observed 2026-10-14 UTC; source/isolated qualification, no public release.
+
+SOURCE / ORDINARY MAIN
+PR https://github.com/sleep2agi/agent-network/pull/2762
+Final source head f3fa7719d39927c065a107a531f6508bb509a0f1
+Base c98b34023e77f5cc53cee5d717e53bcbe92214ac
+Ordinary main merge 101c62312508fe43eab3683951fa94cb54c48aad
+Merged at 2026-10-14T18:14:22Z; source head verified fresh main ancestor.
+Actual PR CI checkout 745e62667866a41a2122f6610a74a40ad93f4762
+Source/CI/main tree b45a5afc007a20cf26d28470e725402de7009064
+CI/main parents independently checked: exact stated base and source head.
+No --admin, merge bypass, production deployment, version bump or public package.
+
+NEW REAL HTTP/MCP SQLITE DOCKER E2E
+Run https://github.com/sleep2agi/agent-network/actions/runs/38612606000
+Job 116019508756 work-outcome: SUCCESS
+13 new cases / 0 failed, 9 inherited terminal / 0 failed, 15 inherited
+scheduled HTTP / 0 failed = 37 pass / 0 fail across three isolated DB suites.
+Do not add these to overlapping older core suites as unique independent cases.
+Server bundle build passed before tests. Fixture has its own Dockerfile:
+tests/test1274-scheduled-work-outcome/, workflow scheduled-work-outcome.yml,
+digest-pinned Bun1.3.14, lockfile, actual disposable loopback HTTP/MCP.
+Docker --init --network none; synthetic accounts/tokens only, no paid model,
+tmux, original Node/thread/login/model/config/DB or production frequency.
+
+Exact artifact 11918212599, complete report-test1274.txt 10050 bytes,
+ZIP SHA-256 2167bcfb50d0bc059ee2db90c666926d91e8819740c9c8799ee4e2fcd1b5ba31
+was fully downloaded, matched to GitHub digest and all case/result lines read.
+
+ACTUAL NEW CASES
+1 no_changes saves with successful task/run/reporter, reads through scoped
+  REST run history, and leaves schedule next-run/configured cadence unchanged.
+2 changed remains changed even with no-changes-looking reply text.
+3 legacy/no-field success stays NULL/unknown, no new response field.
+4 malformed/null/failed/cancelled signal refuses without writes; ordinary
+  replies still terminalize correctly with unknown work classification.
+5 sibling node and human token cannot classify the assignee's run.
+6 foreign network token cannot classify or terminalize it.
+7 legacy unbound node token cannot report a classification but can reply normally.
+8 forged schedule metadata on an ordinary task cannot create a run binding.
+9 multiple authoritative bindings refuse without fan-out/terminalization.
+10 expired/late signal refuses; ordinary late receipt retains original expiry
+   and never becomes a successful-empty run.
+11 normal success is not retryable. Fixture-only stale terminal injection
+   allows the legitimate retry branch to demonstrate clearing classification
+   and reporter; subsequent failed reply stays unknown. Not a successful-task
+   retry feature or an original task replay.
+12 injected SQLite outcome-write failure rolls task/inbox/run back together;
+   fixture-only trigger removal then permits a proper changed reply.
+13 later schedule edit cannot relabel original dispatch revision; old-revision
+   historical no_changes is not backoff authority and cadence is not changed.
+
+INHERITED SCHEDULE / ACTIVITY QUALIFICATION — COMPLETED BEFORE SOURCE MERGE
+Scheduled execution run38612606225 / job116019511496 SUCCESS:
+SQLite41 pass/0 fail, experimental PG32 pass/0 fail; two clock mutations per
+backend (creation/total cap) each witnessed assertion-red, restored green.
+Activity run38612605977 / job116019510078 SUCCESS:
+SQLite130 pass/0 fail, experimental PG121 pass/0 fail, runtime52 pass/0 fail;
+five mutations per backend (context/terminal/owner/idle/cap) plus runtime
+reporter mutation each witnessed assertion-red; final all PASS.
+Complete respective job logs downloaded/read (84783 / 141508 bytes).
+These exercise inherited lifecycle paths and additive schema compatibility,
+not the new explicit outcome API on PostgreSQL; that new API is only qualified
+on SQLite in this fixture. Existing backend capability restrictions stay.
+No new PG support/current-production adoption claim.
+
+INITIAL RUN / REPAIR
+Initial source4920d783c54fbd111b671e0b032b0fad2fb78248 also passed independent
+outcome run38612259399/job116018327351: same 13+9+15 =37/0, CIcheckout
+753a9cf8f76567ade267b75b9455b1b547608373. Artifact11918376946 ZIP SHA
+af375ba31366e76af6d2d2e57f73a71666bd290074d6c891a1f9146bcd1124d1
+fully downloaded/digest-matched/read; not added again to final 37.
+Initial doc-symbol-pins38612258738/job116018325139 FAILED: two old
+docs/message-lifecycle.md links pointed to shifted tools.ts lines. Corrected
+actual send_reply/send_ack declarations to2662/2676; final doc-symbol-pins
+38612606300/job116019510894 SUCCESS. Not an initial all-green claim.
+One superseded source-head full-E2E run38612258691 received a cancellation
+request; cancelled/pending is never treated as pass. Final-head tests remain.
+
+ORDINARY GATES / LATER AUTOMATIC RESULTS
+All10 protected contexts passed before source ordinary merge:
+no hardcoded from_session, action-pins, copresence-profile-pin,
+doc-symbol-anchors, home-path-baseline, l1-paths-sync, qa-trigger-coverage,
+no internal [[feedback_*]] slug references, public-script-safety,
+query-token-ratchet. No rules/permissions/approvals changed.
+Source-head QA run38612605907 server-unit job116020315431 subsequently
+completed SUCCESS (actual RESULT at18:14:59Z, after source merge):
+executed_files226/discovered_files226/failed_files0, non-root uid1000,
+one DB each; registration-password-floor mutation witnessed-red rc1.
+Complete log82857 bytes read; no fabricated individual test aggregate count.
+Full final-head E2E38612606230 and other broad QA remain pending at this
+report cutoff; not counted as passed. Existing historical Windows stop and
+L0 failures remain #1262/#1268; no all-repository CI-green claim.
+
+LATER COMPLETE NODE / FULL E2E RESULTS (NOT BACKDATED TO SOURCE MERGE)
+Source QA38612605907/job116020315185 agent-node unit SUCCESS:
+2917 pass / 2 skip / 0 fail, 2919 tests/231 files/218.30s;
+auxiliary66/0 and five runner groups/0. Full571041-byte job log read;
+actual terminal results18:16:19Z/18:16:28Z follow18:14:22Z source merge.
+Full E2E38612606230 jobs116019510526/116019510819 SUCCESS.
+Artifact11919146831 e2e-suite-logs-1 complete ZIP SHA-256
+cc9275a3f4a39e18c4f03bf3e6a649221d51016d2595142233ff1a9e8c57c945
+matched published digest; all8 complete logs were downloaded/read.
+Seven suites139+25+28+16+22+12+47 =289 pass/0 fail; test-all.log agrees
+and is not counted as an eighth independent suite. The npm-pack fixture
+is not a public package release. These are later automatic results,
+not passed at source merge. Other broad QA still incomplete at this cutoff;
+existing Windows/L0 issues remain independent and no all-CI-green claim.
+
+PRODUCT / ADOPTION / RECOVERY LIMITS
+New field is an authenticated self-report, not independent domain-completeness
+evidence. Producer annotations are opt-in; no runtime automatically marks
+empty or infers it from text. Task/inbox/run/classification atomicity and
+exact current token-bound assignee storage are qualified; no automatic
+interval/counter/backoff, new domain-event wake/reset, policy UI or actual
+current-software adoption. Reassignment/old revision history cannot by
+itself authorize changing current cadence. Parent #756 remains incomplete;
+next P0 source slice is durable backoff/wake with independent Owner/domain
+and generation qualifications. No actual production schedule was edited.
+Legacy/no-field behavior stays unknown; retry/non-success clear stale signal.
+New nullable schema fields are ignored by rollback software.
+Rebuild contract/six recovery answers: docs/design/scheduled-work-outcome.md.
+Git reconstructs software/schema, not production DB/history/tokens/backups;
+original encrypted backup/key/location/retention/restore and Owner window
+remain independent. No complete production disaster recovery certified.

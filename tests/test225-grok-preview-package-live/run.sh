@@ -1740,7 +1740,11 @@ start_attach() {
 }
 
 start_fake_node "$START_LOG"
-wait_file "$ATTACH_SOCKET" 600 \
+# Cold npx is allowed 120s (resolvePreviewAgentNodeEntrypoint) and the leader
+# socket another 10s before the attach socket exists. A 60s wait expired on
+# 2026-10-10 while START_LOG was still only the pre-npx preamble: 1283 bytes,
+# fetching line present, the Token line that follows npx not printed yet.
+wait_file "$ATTACH_SOCKET" 1500 \
   || fail_with_private_log "attach socket did not appear through npx preview fallback" "$START_LOG"
 grep -Fq 'agent-node is not installed globally; fetching @sleep2agi/agent-node@preview' "$START_LOG" \
   || fail "clean start did not exercise the documented npx preview fallback"

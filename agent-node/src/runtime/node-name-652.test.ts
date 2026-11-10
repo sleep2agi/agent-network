@@ -11,20 +11,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import {
   _resetAnetBinAbsForTest,
+  _resetDaemonExtraPathForTest,
+  applyDaemonExtraPath,
   buildAnetArgsDaemon,
+  computeChildPath,
   handleCreateNodeDoorbell,
   serializeEnvLocalDaemon,
 } from "./create-node-daemon.js";
+import { cliCandidatesOnPath, resolveOnPathReal } from "./runtime-readiness.js";
 import { verifyStoppedChildConfig } from "./start-daemon.js";
 import { _resetChildrenMapForTest, handleStopDoorbell } from "./stop-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
 import { NODE_NAME_CASES, nodeFolderSlug } from "../shared/node-name.js";
+import { readOpencodeRuntimeBinding } from "../shared/opencode-runtime-binding.js";
+import { readScopedNodeEnv } from "../shared/scoped-secret-env.js";
+import type { CreateNodeDeps } from "./create-node-daemon.js";
 
 const CN = "测试";
 const CN_DIR = nodeFolderSlug(CN);   // node-<6 hex>
@@ -61,16 +68,18 @@ let workDir = "";
 let pinRoot = "";
 const killPids: number[] = [];
 const savedEnv: Record<string, string | undefined> = {};
-const ENV_KEYS = ["HOME", "ANET_BIN_ABS", "ANET_DAEMON_ALLOW_ENV_BIN", "ANET_BIN_SHA256", "ANET_DAEMON_PATH_CONF", "ANET_DAEMON_STRICT_ROOT_BIN"];
+const ENV_KEYS = ["HOME", "XDG_CONFIG_HOME", "ANET_BIN_ABS", "ANET_DAEMON_ALLOW_ENV_BIN", "ANET_BIN_SHA256", "ANET_DAEMON_PATH_CONF", "ANET_DAEMON_STRICT_ROOT_BIN"];
 
 beforeEach(() => {
   _resetChildrenMapForTest();
+  _resetDaemonExtraPathForTest();
   home = realpathSync(mkdtempSync(join(tmpdir(), "t652-home-")));
   workDir = join(home, "daemon");
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
   pinRoot = mkdtempSync(join(tmpdir(), "t652-pin-"));
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
   process.env.HOME = home;
+  delete process.env.XDG_CONFIG_HOME;
   process.env.ANET_DAEMON_PATH_CONF = join(pinRoot, "missing-path.conf");
   process.env.ANET_DAEMON_ALLOW_ENV_BIN = "1";
   process.env.ANET_BIN_ABS = writeFakeAnet(pinRoot);
@@ -79,13 +88,88 @@ beforeEach(() => {
   _resetAnetBinAbsForTest();
 });
 
+/**
+ * Fixture placed ahead of every vendor `opencode` on the fixed child PATH.
+ *
+ * #1611 makes the generation gate scan **all** candidates and take the first one the
+ * requested generation accepts. Shadowing only the first hit is therefore not enough:
+ * test829's image installs `@opencode/cli@2.0.22` into /usr/local/bin, so a scenario
+ * that means "this machine only has v1" still finds a real v2 further along PATH and
+ * legitimately passes the generation gate (then fails on the V2 model config, which
+ * is what made `#829 explicit generation must match an accepted install` red).
+ *
+ * So the fixture hides **every** candidate and restores them all afterwards.
+ */
+let shadowedOpencode: Array<{ target: string; backup: string | null }> = [];
+
+function restoreShadowedOpencode() {
+  const shadowed = shadowedOpencode;
+  shadowedOpencode = [];
+  for (const one of shadowed) {
+    rmSync(one.target, { force: true });
+    if (one.backup) renameSync(one.backup, one.target);
+  }
+}
+
 afterEach(() => {
+  restoreShadowedOpencode();
   for (const pid of killPids.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } }
   for (const k of ENV_KEYS) { if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k]; }
   _resetAnetBinAbsForTest();
+  _resetDaemonExtraPathForTest();
   rmSync(home, { recursive: true, force: true });
   rmSync(pinRoot, { recursive: true, force: true });
 });
+
+function plantOpencode(stdout: string) {
+  restoreShadowedOpencode();
+  const fixtureBin = join(pinRoot, "probe-bin");
+  mkdirSync(fixtureBin, { recursive: true, mode: 0o700 });
+  const script = `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stdout)}\n`;
+  writeFileSync(join(fixtureBin, "opencode"), script, { mode: 0o755 });
+  applyDaemonExtraPath([fixtureBin]);
+  // daemonExtraPath is appended after the fixed child PATH, so it cannot hide
+  // a vendor binary already there. test829's image installs
+  // @opencode/cli@2.0.22 onto that PATH; the generation gate runs whichever
+  // `opencode` resolveOnPath finds first. Put this fixture in the first
+  // fixed-PATH directory when one is already present, and put the original back
+  // afterwards. Production PATH order stays append-only.
+  const fixed = computeChildPath();
+  const fixedHit = resolveOnPathReal("opencode", fixed);
+  if (!fixedHit) return;
+  const firstDir = fixed.split(":").find(Boolean);
+  if (!firstDir) return;
+  const target = join(firstDir, "opencode");
+  const backup = existsSync(target) ? `${target}.t652-bak` : null;
+  if (backup) {
+    if (existsSync(backup)) throw new Error(`plantOpencode: refusing to clobber ${backup}`);
+    renameSync(target, backup);
+  }
+  try {
+    writeFileSync(target, script, { mode: 0o755 });
+    chmodSync(target, 0o755);
+  } catch (e) {
+    if (backup) renameSync(backup, target);
+    else rmSync(target, { force: true });
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(`plantOpencode: fixed PATH already has ${fixedHit}; cannot place the fixture at ${target}: ${detail}`);
+  }
+  // Hide the remaining vendor candidates too: "only v1" has to mean only v1.
+  for (const other of (cliCandidatesOnPath("opencode", fixed) ?? [])) {
+    if (other === target) continue;
+    const otherBackup = `${other}.t652-bak`;
+    if (existsSync(otherBackup)) throw new Error(`plantOpencode: refusing to clobber ${otherBackup}`);
+    const hadFile = existsSync(other);
+    if (hadFile) renameSync(other, otherBackup);
+    shadowedOpencode.push({ target: other, backup: hadFile ? otherBackup : null });
+  }
+  shadowedOpencode.push({ target, backup });
+  const hit = resolveOnPathReal("opencode", fixed);
+  if (hit !== target) {
+    restoreShadowedOpencode();
+    throw new Error(`plantOpencode: generation gate would run ${hit ?? "(none)"}, not the fixture at ${target}`);
+  }
+}
 
 function writeFakeAnet(root: string): string {
   const pkg = join(root, "pkg");
@@ -98,29 +182,31 @@ function writeFakeAnet(root: string): string {
   return realpathSync(abs);
 }
 
-interface Spawned { bin: string; args: string[]; cwd: string }
+interface Spawned { bin: string; args: string[]; cwd: string; path?: string; pid?: number }
 
-async function runCreate(spec: Record<string, unknown>, requestId: string) {
+async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>, providerScope?: CreateNodeDeps['providerScope']) {
   const acks: Record<string, any>[] = [];
   const spawned: Spawned[] = [];
   await handleCreateNodeDoorbell({ request_id: requestId }, {
     callCommHub: async (tool: string, args: Record<string, unknown>) => {
       if (tool === "get_create_request") {
-        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652" };
+        return { ok: true, request_id: requestId, node_spec: spec, child_token: "ntok_placeholder_652", ...(envBlob ? { env_blob: envBlob } : {}), ...(providerScope ? {network_id:'net_legacy_1053'} : {}) };
       }
       if (tool === "ack_create_request") { acks.push(args); return { ok: true }; }
       throw new Error(`unexpected tool ${tool}`);
     },
     workDir,
     hubUrl: "http://127.0.0.1:9",
+    ...(providerScope ? {providerScope} : {}),
     log: () => {},
     warn: () => {},
     serializeEnvLocal: serializeEnvLocalDaemon,
     capabilityCheckMs: 100,
     spawnChild: (bin, args, opts) => {
-      spawned.push({ bin, args, cwd: opts.cwd });
+      spawned.push({ bin, args, cwd: opts.cwd, path: opts.env.PATH });
       const child = spawn("sleep", ["30"], { stdio: "ignore", detached: true });
       if (child.pid) killPids.push(child.pid);
+      spawned.at(-1)!.pid = child.pid ?? undefined;
       return child;
     },
   });
@@ -143,6 +229,262 @@ function walk(root: string): string[] {
 const isAscii = (s: string) => /^[\x20-\x7e]*$/.test(s);
 
 describe("#652 create doorbell — Chinese name, ASCII directories", () => {
+  test("#1053 legacy Daemon source marker uses the Hub-bound request network", async () => {
+    const {acks, spawned} = await runCreate({name:'legacy-secret-child',runtime:'claude-agent-sdk'},
+      'cr_legacysecret1053', undefined, {alias:'legacy-daemon',networkId:'',daemonId:'node_legacy_daemon'});
+    expect(acks.map(a=>a.status)).toEqual(['started']);
+    expect(spawned).toHaveLength(1);
+    const dir=join(workDir,'.anet','nodes','legacy-secret-child');
+    expect(JSON.parse(readFileSync(join(dir,'secrets-source.json'),'utf8')).network_id).toBe('net_legacy_1053');
+    // No private store means no inherited values; do not require migration of
+    // the legacy parent's config to start the otherwise unchanged child.
+    expect(readScopedNodeEnv(dir)).toEqual({});
+  });
+
+  function plantMachineModel(body: Record<string, unknown>): void {
+    const dir = join(home, ".config", "opencode");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(dir, "opencode.json"), `${JSON.stringify(body)}\n`, { mode: 0o600 });
+  }
+
+  test("#829 V2 create writes generation/mode into actual child config, not flags", async () => {
+    // Config write, not native OpenCode startup. plantOpencode is the version
+    // the gate must see, including when this image already has @opencode/cli
+    // on the fixed child PATH. The model must already be the machine's OpenCode
+    // model; create copies it.
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({ $schema: "https://opencode.ai/config.json", model: "stub/model" });
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 };
+    const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2persist");
+    // sleep is deliberately NOT a healthy V2 generation. This test proves
+    // persistence, not runtime readiness, and must not produce a started ack.
+    expect(acks.map(a => a.status)).toEqual(["runtime_capability_check_failed"]);
+    expect(spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBe("v2");
+    expect(cfg.opencodeMode).toBe("copresence");
+    expect(cfg.model).toBe("stub/model");
+    expect(cfg.flags).toEqual({ opencodeUnsafeTools: true, timeout: 600000 });
+    const native = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", ".config", "opencode", "opencode.json"), "utf8"));
+    expect(native.model).toBe("stub/model");
+    expect(native.providers).toBeUndefined();
+    expect(readOpencodeRuntimeBinding(join(workDir, ".anet", "nodes", "v2-child"), home))
+      .toEqual({ schemaVersion: 1, runtime: "opencode-cli", projectRoot: workDir, nodeId: "v2-child" });
+    expect(flags.opencodeGeneration).toBe("v2");
+  });
+
+  test("V2 create keeps the host client PATH but falls back without a live shared listener", async () => {
+    plantOpencode("opencode v1.18.34");
+    plantMachineModel({ model: "stub/model" });
+    const clientBinDir = join(home, "v2-bin");
+    mkdirSync(clientBinDir, { mode: 0o700 });
+    writeFileSync(join(clientBinDir, "opencode"), "#!/bin/sh\necho 'opencode v2.0.22'\n", { mode: 0o755 });
+    const passwordFile = join(home, "shared-password");
+    writeFileSync(passwordFile, "test-only", { mode: 0o600 });
+    mkdirSync(join(home, ".anet"), { mode: 0o700 });
+    writeFileSync(join(home, ".anet", "opencode-shared-server.json"), JSON.stringify({
+      url: "http://127.0.0.1:4097", passwordFile, clientBinDir,
+    }), { mode: 0o600 });
+    const { acks, spawned } = await runCreate({ name: "shared-v2", runtime: "opencode-cli",
+      model: "stub/model", flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } }, "cr_sharedv2client");
+    expect(acks[0].status).toBe("runtime_capability_check_failed");
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].path?.split(":")[0]).toBe(clientBinDir);
+    expect(computeChildPath().split(":")[0]).not.toBe(clientBinDir);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "shared-v2", "config.json"), "utf8"));
+    // This fixture supplies a version-only shell stub and a disk record, not a
+    // real listener. test1326 supplies the independent real-V2 reuse positive.
+    expect(cfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(cfg.opencodeSharedServerPasswordFile).toBeUndefined();
+    expect(cfg.clientBinDir).toBeUndefined();
+    const owned = await runCreate({ name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } }, "cr_ownedv2client");
+    expect(owned.acks[0].status).toBe("runtime_capability_check_failed");
+    expect(owned.spawned[0].path?.split(":")[0]).toBe(clientBinDir);
+    const ownedCfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "owned-v2", "config.json"), "utf8"));
+    expect(ownedCfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(ownedCfg.opencodeSharedServerPasswordFile).toBeUndefined();
+  });
+
+  test.each(["malformed", "missing-password"])("explicit V2 new Server survives a %s shared registry", async (fault) => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({ model: "stub/model" });
+    mkdirSync(join(home, ".anet"), { mode: 0o700 });
+    writeFileSync(join(home, ".anet", "opencode-shared-server.json"), fault === "malformed"
+      ? "{broken"
+      : JSON.stringify({ url: "http://127.0.0.1:4097", passwordFile: join(home, "missing-password") }),
+    { mode: 0o600 });
+    const spec = { name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } };
+
+    // Default reuse must still reject the broken registration before writing
+    // a child or spawning anything. Explicit new-Server takes the owned path.
+    const shared = await runCreate(spec, "cr_brokenshared");
+    expect(shared.acks[0].status).toBe("rejected");
+    expect(shared.acks[0].error).toStartWith("shared_opencode_registry:");
+    expect(shared.spawned).toHaveLength(0);
+    const dir = join(workDir, ".anet", "nodes", "owned-v2");
+    expect(existsSync(dir)).toBe(false);
+
+    const owned = await runCreate({ ...spec, flags: { ...spec.flags, opencodeNewServer: true } }, "cr_ownedfallback");
+    // sleep proves config wiring only and must still fail native readiness.
+    expect(owned.acks[0].status).toBe("runtime_capability_check_failed");
+    expect(owned.spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBe("v2");
+    expect(cfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(cfg.opencodeSharedServerPasswordFile).toBeUndefined();
+    expect(cfg.flags.opencodeUnsafeTools).toBe(true);
+    expect(cfg.flags.opencodeNewServer).toBeUndefined();
+  });
+
+  test("#829 unsafe opt-in is required before write or spawn; existing config unchanged", async () => {
+    const dir = join(workDir, ".anet", "nodes", "v2-child");
+    mkdirSync(dir, { recursive: true });
+    const original = JSON.stringify({ alias: "v2-child", opencodeGeneration: "v1" });
+    writeFileSync(join(dir, "config.json"), original);
+    const { acks, spawned } = await runCreate({ name: "v2-child", runtime: "opencode-cli", flags: { opencodeGeneration: "v2" } }, "cr_v2refuse");
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_requires_unsafe_opt_in");
+    expect(spawned).toHaveLength(0);
+    expect(readFileSync(join(dir, "config.json"), "utf8")).toBe(original);
+  });
+
+  test("#829 explicit generation must match an accepted install before write", async () => {
+    plantOpencode("opencode v1.18.34");
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
+    const v1bin = await runCreate({ name: "v2-on-v1", runtime: "opencode-cli", model: "stub/model", flags }, "cr_v2onv1");
+    expect(v1bin.acks[0].status).toBe("rejected");
+    expect(v1bin.acks[0].error).toMatch(/^opencode_generation_mismatch/);
+    expect(v1bin.acks[0].error).toContain("installed opencode 1.18.34");
+    expect(v1bin.acks[0].error).toContain("@opencode/cli@2.0.22");
+    expect(v1bin.spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-on-v1", "config.json"))).toBe(false);
+
+    plantOpencode("opencode v2.0.22");
+    const v2bin = await runCreate({
+      name: "v1-on-v2", runtime: "opencode-cli", model: "opencode/mimo",
+      flags: { opencodeGeneration: "v1" },
+    }, "cr_v1onv2");
+    expect(v2bin.acks[0].status).toBe("rejected");
+    expect(v2bin.acks[0].error).toContain("opencode_generation_mismatch");
+    expect(v2bin.acks[0].error).toContain("installed opencode 2.0.22");
+    expect(v2bin.acks[0].error).toContain("opencode-ai@1.18.34");
+    expect(v2bin.spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v1-on-v2", "config.json"))).toBe(false);
+
+    plantOpencode("no-version-here");
+    const unparsed = await runCreate({
+      name: "v2-unparsed", runtime: "opencode-cli", model: "stub/model", flags,
+    }, "cr_v2unparsed");
+    expect(unparsed.acks[0].status).toBe("rejected");
+    expect(unparsed.acks[0].error).toContain("opencode_generation_mismatch");
+    expect(unparsed.acks[0].error).toContain("installed opencode (unparsed)");
+    expect(unparsed.spawned).toHaveLength(0);
+  });
+
+  test("#829 omitted generation stays legacy V1 even when the binary is V2", async () => {
+    plantOpencode("opencode v2.0.22");
+    const { acks, spawned } = await runCreate({
+      name: "legacy-v1", runtime: "opencode-cli", model: "opencode/mimo",
+    }, "cr_v2legacy");
+    expect(acks[0].status).toBe("started");
+    expect(String(acks[0].error ?? "")).not.toContain("opencode_generation_mismatch");
+    expect(spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "legacy-v1", "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBe("v1");
+    expect(cfg.runtime).toBe("opencode-cli");
+  });
+
+  test("#829 V2 without provider/model is rejected before write", async () => {
+    const flags = { opencodeGeneration: "v2", opencodeUnsafeTools: true };
+    const missing = await runCreate({ name: "v2-nomodel", runtime: "opencode-cli", flags }, "cr_v2nomodel");
+    expect(missing.acks[0].status).toBe("rejected");
+    expect(missing.acks[0].error).toContain("opencode_v2_requires_provider_model");
+    expect(missing.spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-nomodel", "config.json"))).toBe(false);
+    const bare = await runCreate({
+      name: "v2-bare", runtime: "opencode-cli", model: "opencode", flags,
+    }, "cr_v2bare");
+    expect(bare.acks[0].status).toBe("rejected");
+    expect(bare.acks[0].error).toContain("opencode_v2_requires_provider_model");
+    expect(bare.spawned).toHaveLength(0);
+  });
+
+  test("V2 create rejects a model that is not the machine OpenCode model, before write or spawn", async () => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({
+      model: "deepseek/deepseek-v4-flash",
+      providers: { deepseek: { name: "DeepSeek", env: ["DEEPSEEK_API_KEY"], models: { "deepseek-v4-flash": { name: "flash" } } } },
+    });
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2mismatch", { DEEPSEEK_API_KEY: "sk-test-not-a-real-key" });
+    expect(acks).toHaveLength(1);
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_model_mismatch");
+    expect(acks[0].error).toContain("stub/model");
+    expect(acks[0].error).toContain("deepseek/deepseek-v4-flash");
+    expect(acks[0].error).not.toContain("sk-test-not-a-real-key");
+    expect(spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"))).toBe(false);
+  });
+
+  test("V2 create with no machine model is a missing-config refusal, not a started node", async () => {
+    plantOpencode("opencode v2.0.22");
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2missing");
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_configured_model_missing");
+    expect(spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"))).toBe(false);
+  });
+
+  test("V2 create copies the machine provider when the requested model matches", async () => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({
+      model: "deepseek/deepseek-v4-flash",
+      providers: { deepseek: { name: "DeepSeek", env: ["DEEPSEEK_API_KEY"], models: { "deepseek-v4-flash": { name: "flash" } } } },
+    });
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      model: "deepseek/deepseek-v4-flash",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2match", { DEEPSEEK_API_KEY: "sk-test-not-a-real-key" });
+    expect(acks.map((ack) => ack.status)).toEqual(["runtime_capability_check_failed"]);
+    expect(spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"), "utf8"));
+    expect(cfg.model).toBe("deepseek/deepseek-v4-flash");
+    expect(cfg.env.DEEPSEEK_API_KEY).toEqual({ _envRef: "DEEPSEEK_API_KEY" });
+    expect(JSON.stringify(cfg)).not.toContain("sk-test-not-a-real-key");
+    const native = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "v2-child", ".config", "opencode", "opencode.json"), "utf8"));
+    expect(native.model).toBe("deepseek/deepseek-v4-flash");
+    expect(native.providers.deepseek.env).toEqual(["DEEPSEEK_API_KEY"]);
+    expect(JSON.stringify(native)).not.toContain("sk-test-not-a-real-key");
+  });
+
+  test("V2 create does not adopt a machine model when the request omits one", async () => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({ model: "deepseek/deepseek-v4-flash" });
+    const { acks, spawned } = await runCreate({
+      name: "v2-child",
+      runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    }, "cr_v2omit");
+    expect(acks[0].status).toBe("rejected");
+    expect(acks[0].error).toContain("opencode_v2_requires_provider_model");
+    expect(spawned).toHaveLength(0);
+    expect(existsSync(join(workDir, ".anet", "nodes", "v2-child", "config.json"))).toBe(false);
+  });
+
   test("「测试」 with the app's ~/<folder> workdir: the folder the wizard shows is the folder on disk, at both levels", async () => {
     // The app shows 「文件夹：ceshi」 for 测试 and sends workdir `<default_workdir_root>/ceshi`
     // (sleep2agi/agent-network-app create-node-workdir.ts). That folder must be what lands on disk.
@@ -310,5 +652,33 @@ describe("#652 start / stop / delete find the ASCII directory from the alias", (
     const entries = readdirSync(trash);
     expect(entries.some(n => n.endsWith(`-${CN_DIR}`))).toBe(true);
     expect(entries.filter(n => !isAscii(n))).toEqual([]);
+  });
+});
+
+// ── #1625 — a failed post-spawn validation owns the generation it spawned ──
+describe("#1625 failed V2 create reaps what it spawned", () => {
+  const pidAlive = (pid: number): boolean => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  };
+
+  test("runtime_capability_check_failed leaves no live launcher and says so in the ack", async () => {
+    plantOpencode("opencode v2.0.22");
+    const cfgDir = join(home, ".config", "opencode");
+    mkdirSync(cfgDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(cfgDir, "opencode.json"), `${JSON.stringify({ model: "stub/model" })}\n`, { mode: 0o600 });
+
+    const { acks, spawned } = await runCreate({
+      name: "v2-orphan", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 },
+    }, "cr_v2orphan1625");
+
+    expect(acks.map(a => a.status)).toEqual(["runtime_capability_check_failed"]);
+    expect(String(acks[0].error)).toContain("cleanup=");
+    expect(String(acks[0].error)).not.toContain("cleanup=residue");
+
+    const pid = spawned[0]?.pid;
+    expect(pid).toBeGreaterThan(0);
+    for (let i = 0; i < 60 && pidAlive(pid!); i++) await new Promise(r => setTimeout(r, 50));
+    expect(pidAlive(pid!)).toBe(false);
   });
 });

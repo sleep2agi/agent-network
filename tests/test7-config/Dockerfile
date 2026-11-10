@@ -1,6 +1,7 @@
 FROM oven/bun:1
 WORKDIR /app
 RUN apt-get update && apt-get install -y curl python3 && rm -rf /var/lib/apt/lists/*
+COPY contracts /app/contracts
 COPY server/ server/
 RUN cd server && bun install
 COPY agent-network/package.json agent-network/package-lock.json agent-network/

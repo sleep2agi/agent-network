@@ -19,6 +19,8 @@
 
 import { db, setScheduledRunTerminalHook } from "./db.js";
 import { sendAgentNotice } from "./agent-notice.js";
+import { parseHubTimestamp } from "./hub-timestamp.js";
+import { busyElapsedNote } from "./scheduled-failure-code.js";
 
 export const SCHEDULE_FAILING_NOTICE_KIND = "schedule_failing";
 const ERROR_PREVIEW_CHARS = 300;
@@ -72,8 +74,12 @@ export type FailureNotice = {
 };
 
 function latestFailure(scheduleId: string): { error_code: string | null; error_message: string | null } {
-  const row = db.get<{ error_code: string | null; error_message: string | null; result: string | null }>(
-    `SELECT r.error_code, r.error_message, t.result
+  const row = db.get<{
+    error_code: string | null; error_message: string | null; result: string | null;
+    task_created_at: string | null; task_started_at: string | null; task_completed_at: string | null;
+  }>(
+    `SELECT r.error_code, r.error_message, t.result,
+            t.created_at AS task_created_at, t.started_at AS task_started_at, t.completed_at AS task_completed_at
        FROM scheduled_task_runs r
        LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
       WHERE r.schedule_id = ?1 AND r.status = 'failed'
@@ -81,7 +87,15 @@ function latestFailure(scheduleId: string): { error_code: string | null; error_m
     scheduleId,
   );
   // 任务以 failed 结束时 run.error_message 为空,原因在任务的回复正文里。
-  return { error_code: row?.error_code ?? null, error_message: row?.error_message || row?.result || null };
+  // #2884 —— 共享会话忙的那一类，再把「排队 / 会话等待」两段实测补在后面：
+  // 只读拼接，不改写入路径，所以节点原文不会被覆盖。
+  const base = row?.error_message || row?.result || null;
+  if (row?.error_code !== "task_failed_busy") return { error_code: row?.error_code ?? null, error_message: base };
+  const note = busyElapsedNote(row?.task_created_at, row?.task_started_at, row?.task_completed_at);
+  return {
+    error_code: row?.error_code ?? null,
+    error_message: note ? [base, note].filter(Boolean).join(" ") : base,
+  };
 }
 
 function truncate(s: string, max: number): string {
@@ -167,6 +181,213 @@ export function evaluateScheduleFailures(scheduleId: string, now = new Date()): 
   return notice;
 }
 
+/**
+ * #2622 —— 失败退避：连续失败达到 N 次后把**间隔翻倍**（上限 1 小时），成功一次立刻恢复原节奏。
+ *
+ * 为什么不是「暂停」：`#523` 已经有 `COMMHUB_SCHEDULE_FAILURE_AUTO_PAUSE_RUNS`（默认关），
+ * 但它会把排程**停下来**，需要人来恢复。对“上游额度暂时打满”这类外部原因，暂停太久同样是损失；
+ * 退避只是**放慢重试**，外部原因一恢复就会自己跑回原节奏。
+ *
+ * 现场（2026-10-27 生产 24h）：一个 `every_seconds=180` 的排程失败 351 次、成功 24 次 ——
+ * 失败与成功交替出现，所以“连续失败”很少攒到暂停阈值，而**每次失败都在按 3 分钟原速重试**。
+ *
+ * 存储复用 `backoff_effective_seconds`（派发时按 `max(every_seconds, backoff_effective_seconds)` 生效），
+ * 与 `no_change_backoff` 互斥：那套逻辑自己会写这一列，这里只在 `no_change_backoff = 0` 时介入。
+ *
+ * 环境变量：`COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS`（默认 6；0 = 关闭）。
+ */
+export function failureBackoffRuns(): number { return envInt("COMMHUB_SCHEDULE_FAILURE_BACKOFF_RUNS", 6, 0); }
+
+const FAILURE_BACKOFF_CAP_SECONDS = 3600;
+
+export function applyFailureBackoff(scheduleId: string, now = new Date()): { streak: number; effective_seconds: number | null } | null {
+  const from = failureBackoffRuns();
+  if (from <= 0) return null;
+  const row = db.get<any>(
+    `SELECT schedule_id, revision, status, schedule_type, schedule_json, no_change_backoff,
+            backoff_effective_seconds, next_run_at
+       FROM scheduled_tasks WHERE schedule_id = ?1`,
+    scheduleId,
+  );
+  if (!row || row.status !== "active" || row.no_change_backoff === 1) return null;
+  if (row.schedule_type !== "interval") return null;
+  let spec: any = null;
+  try { spec = JSON.parse(row.schedule_json || "{}"); } catch { spec = null; }
+  const base = spec && spec.type === "interval" ? Number(spec.every_seconds) : NaN;
+  if (!Number.isFinite(base) || base <= 0) return null;
+
+  const streak = failureStreak(scheduleId).consecutiveFailures;
+  const effective = streak >= from
+    ? Math.min(FAILURE_BACKOFF_CAP_SECONDS, base * 2 ** Math.min(streak - from + 1, 6))
+    : null;
+  const target = effective ?? base;
+  const previous = row.backoff_effective_seconds ?? base;
+  let next = row.next_run_at;
+  if (target !== previous && next) {
+    // 放大：至少推到 now + target（不把已经更远的 next 拉近）；
+    // 恢复：至少拉回 now + target（不把已经更近的 next 推远）。
+    const candidate = new Date(now.getTime() + target * 1000).toISOString();
+    const existing = Date.parse(next);
+    if (Number.isFinite(existing)) {
+      next = new Date(target > previous ? Math.max(existing, Date.parse(candidate)) : Math.min(existing, Date.parse(candidate))).toISOString();
+    }
+  }
+  db.run(
+    `UPDATE scheduled_tasks SET backoff_streak = ?1, backoff_effective_seconds = ?2, next_run_at = ?3,
+       updated_at = datetime('now') WHERE schedule_id = ?4 AND revision = ?5 AND status = 'active'`,
+    [streak, effective, next, scheduleId, row.revision],
+  );
+  return { streak, effective_seconds: effective };
+}
+
+/**
+ * #2622（第二轮）—— 「跑不起来」的两类跳过也要退避。
+ *
+ * 生产 24h（2026-10-27）：`previous_run_active` 2286 条、`target_offline` 1951 条，
+ * 而 `failureStreak()` 只数 `status='failed'`，**skipped 完全不计**，
+ * 于是一个 `every_seconds=180` 的排程可以在目标永久离线的状态下每 3 分钟写一行 skip，
+ * 一天 470 条，永不减速。
+ *
+ * 这里只做「放慢」，不改变派发语义：
+ *   · 同一 error_code 连续出现 ≥ N（默认 3）⇒ 间隔按 2 倍放大，上限 1800 秒；
+ *   · `target_offline` 的链用更长的上限（7200 秒 = 2 小时）——目标不在时没有理由每 3 分钟试一次；
+ *   · 换链（原因变了）或出现成功 ⇒ 立刻回到原间隔；
+ *   · 与 `no_change_backoff=1` 的排程互斥（那套逻辑自己拥有 backoff_* 三列）。
+ */
+const NO_PROGRESS_CODES = ["previous_run_active", "target_offline"] as const;
+
+/**
+ * #2935 —— 「目标根本不会接活」的**失败**码，也要按 no-progress 退避，而不是普通失败退避。
+ *
+ * 生产实测（2026-10-30，近 7 天）：
+ *
+ *     failed node_degraded          2391    其中 TMA云盘鲸 1388 · TMA云鲸 981
+ *          「节点 X 处于降级状态(TUI 会话不在),任务不会被执行,已拒绝派发」
+ *     failed target_node_not_found  1166    「The bound node no longer exists in this network」
+ *
+ * 这两类不是「上游额度打满」那种会自愈的失败：
+ *   · `node_degraded` 的节点已经离线好几天（TMA云盘鲸/云鲸 自 10-27 起没心跳），
+ *     它的恢复时间是「小时/天」级，不是「下一次 180 秒」级；
+ *   · `target_node_not_found` 更彻底 —— 目标行已经不存在，**永远不可能成功**。
+ *
+ * 而它们走的是 `applyFailureBackoff`（上限 1 小时、且要求「连续」失败，被任何一次成功打断就清零），
+ * 于是 `every=180` 的排程在目标永久不可用的情况下依然每小时烧掉 20 次派发。
+ *
+ * 这里只把它们并进「无进展」链（上限 2 小时），**不暂停、不改谁来决定暂停**。
+ */
+const NO_PROGRESS_FAILED_CODES = ["node_degraded", "target_node_not_found"] as const;
+/** 统计窗口：看最近多少次 run 里同因跳过出现了几次（默认 10）。 */
+const NO_PROGRESS_WINDOW = 10;
+export type NoProgressCause = (typeof NO_PROGRESS_CODES)[number] | (typeof NO_PROGRESS_FAILED_CODES)[number];
+
+function noProgressFromRuns(runs: Array<{ status: string; error_code: string | null }>): { cause: NoProgressCause | null; streak: number } {
+  const first = runs[0];
+  if (!first) return { cause: null, streak: 0 };
+  let cause: NoProgressCause | null = null;
+  if (first.status === "failed") {
+    // 默认交给 applyFailureBackoff；但「目标根本不会接活」的两类并进来（见上面注释）。
+    const code = first.error_code ?? "";
+    cause = (NO_PROGRESS_FAILED_CODES as readonly string[]).includes(code) ? (code as unknown as NoProgressCause) : null;
+  }
+  else if (first.status === "skipped" && (NO_PROGRESS_CODES as readonly string[]).includes(first.error_code ?? "")) {
+    cause = first.error_code as NoProgressCause;
+  }
+  if (!cause) return { cause: null, streak: 0 };
+  // #2622（实测修正）—— **按窗口计数，不按连续链**。
+  // 生产 4.3 小时实测：一批排程的模式是「跳过 → 跳过 → 成功 → 跳过…」，
+  // 成功会把连续链打断，于是 streak 永远攒不到阈值，退避一次都没触发
+  // （previous_run_active 24h 从 2397/天 只降到 2258/天）。
+  // 改成「最近 N 次里同因跳过出现几次」：仍然要求最新一次是同因跳过（不干扰成功后的恢复），
+  // 但如果它在这 N 次里反复出现，就按窗口值放慢。
+  const window = runs.slice(0, NO_PROGRESS_WINDOW);
+  let streak = 0;
+  for (const r of window) {
+    // #2935 —— failed 也计入：node_degraded / target_node_not_found 的 run 状态是 `failed`，
+    // 只数 `skipped` 会让它们永远攒不到阈值（改了分类却没改计数口径 = 等于没改）。
+    if ((r.status === "skipped" || r.status === "failed") && r.error_code === cause) streak++;
+  }
+  return { cause, streak };
+}
+
+export function noProgressBackoffRuns(): number {
+  return envInt("COMMHUB_SCHEDULE_NO_PROGRESS_BACKOFF_RUNS", 3, 1);
+}
+
+export function applyNoProgressBackoff(scheduleId: string, now = new Date()): { streak: number; effective_seconds: number | null; cause: NoProgressCause } | null {
+  const from = noProgressBackoffRuns();
+  if (from <= 0) return null;
+  const row = db.get<any>(
+    `SELECT schedule_id, revision, status, schedule_type, schedule_json, no_change_backoff,
+            backoff_effective_seconds, next_run_at
+       FROM scheduled_tasks WHERE schedule_id = ?1`,
+    scheduleId,
+  );
+  if (!row || row.status !== "active" || row.no_change_backoff === 1) return null;
+  if (row.schedule_type !== "interval") return null;
+  let spec: any = null;
+  try { spec = JSON.parse(row.schedule_json || "{}"); } catch { spec = null; }
+  const base = spec && spec.type === "interval" ? Number(spec.every_seconds) : NaN;
+  if (!Number.isFinite(base) || base <= 0) return null;
+
+  const runs = db.all<{ status: string; error_code: string | null }>(
+    `SELECT status, error_code FROM scheduled_task_runs
+      WHERE schedule_id = ?1 ORDER BY scheduled_for DESC, created_at DESC LIMIT 12`,
+    scheduleId,
+  );
+  const { cause, streak } = noProgressFromRuns(runs);
+
+  // 回到原间隔（成功 / 换链 / 未达阈值都走这里；只在真的退避过时才写）
+  const restore = () => {
+    if ((row.backoff_streak ?? 0) === 0 && row.backoff_effective_seconds == null) return;
+    // next_run_at 是 hub 的 TEXT UTC（无时区标记），必须走 parseHubTimestamp
+    const cur = parseHubTimestamp(row.next_run_at);
+    const next = cur === null
+      ? row.next_run_at
+      : new Date(Math.min(cur, now.getTime() + base * 1000)).toISOString();
+    db.run(
+      `UPDATE scheduled_tasks SET backoff_streak = 0, backoff_effective_seconds = NULL, next_run_at = ?1,
+         updated_at = datetime('now') WHERE schedule_id = ?2 AND revision = ?3 AND status = 'active'`,
+      [next, scheduleId, row.revision],
+    );
+  };
+
+  if (!cause) { restore(); return null; }
+
+  // 上限按原因分开：
+  //   previous_run_active —— 上一次还在跑，30 分钟足够等到它结束；
+  //   target_offline      —— 目标连续 6 次不在（按 180s 基底已是 18 分钟），
+  //                          再用 3 分钟一次的节奏去敲没有意义；2 小时一次仍能及时接住它回来。
+  // 判据：#2622「同类原因日增量 ≤20」——180s 基底配 2 小时上限 ⇒ 12 次/天。
+  // target_offline / node_degraded / target_node_not_found 都是「目标不接活」的形状，
+  // 恢复是小时/天级 ⇒ 统一用 2 小时上限。previous_run_active 仍用 30 分钟。
+  const cap = cause === "previous_run_active" ? 1800 : 7200;
+  if (streak < from) { restore(); return null; }
+
+  const effective = Math.min(cap, base * 2 ** Math.min(streak - from + 1, 5));
+  const previous = row.backoff_effective_seconds ?? base;
+  let next = row.next_run_at;
+  // 🔴 生产实测（2026-10-28，`.181` 的两行日志）：
+  //   offline-backoff        effective=5760s next_before=+180s   ← 退避值没推进去
+  //   offline-backoff-final  next_after=+360s                    ← 二次 advance 又加了一个 base
+  // 根因就在这里：原来用 `effective !== previous` 做守卫，退避一旦进入**稳态**（例如已是 5760），
+  // 这个条件恒为 false ⇒ 不再推 next_run_at；而调用方在此之前刚 `advance()` 把 next 重置成 +base。
+  // 于是「退避值写着 5760，实际每 360s 跳一次」，且永远不会自愈。
+  // 正确语义：只要这一步是「同因跳过」，next_run_at 至少要 ≥ now + effective（只能往后推，不往前拉）。
+  if (next) {
+    const candidate = now.getTime() + effective * 1000;
+    const existing = parseHubTimestamp(next);
+    if (existing !== null) {
+      next = new Date(Math.max(existing, candidate)).toISOString();
+    }
+  }
+  db.run(
+    `UPDATE scheduled_tasks SET backoff_streak = ?1, backoff_effective_seconds = ?2, next_run_at = ?3,
+       updated_at = datetime('now') WHERE schedule_id = ?4 AND revision = ?5 AND status = 'active'`,
+    [streak, effective, next, scheduleId, row.revision],
+  );
+  return { streak, effective_seconds: effective, cause };
+}
+
 /** GET /runs 的附加字段。 */
 export function failureSummary(scheduleId: string): { consecutive_failures: number; failure_alert_threshold: number; last_failure_alert_at: string | null } {
   const streak = failureStreak(scheduleId);
@@ -176,4 +397,29 @@ export function failureSummary(scheduleId: string): { consecutive_failures: numb
 
 setScheduledRunTerminalHook((scheduleId, status) => {
   if (status === "failed") evaluateScheduleFailures(scheduleId);
+  // #2622 —— 成功一次就把间隔恢复原样；失败则按连续失败次数放大间隔。
+  //
+  // #2935 —— 但「目标根本不会接活」的失败码（node_degraded / target_node_not_found）
+  // 不走失败退避：它们的恢复是小时/天级，用 1 小时上限 + 「连续失败」判据等于每 3 分钟继续烧。
+  // 这两类改走 no-progress 链（2 小时上限），与 skipped 的 target_offline 同一形状。
+  try {
+    if (isNoProgressFailedCode(lastRunErrorCode(scheduleId))) applyNoProgressBackoff(scheduleId);
+    else applyFailureBackoff(scheduleId);
+  } catch (e: any) {
+    console.error(`[scheduled-tasks] failure backoff failed schedule=${scheduleId}: ${e?.message || e}`);
+  }
 });
+
+function isNoProgressFailedCode(code: string | null): boolean {
+  return !!code && (NO_PROGRESS_FAILED_CODES as readonly string[]).includes(code);
+}
+
+/** 最近一条 run 的 error_code（终态 hook 里用它判断走哪条退避链）。 */
+function lastRunErrorCode(scheduleId: string): string | null {
+  const row = db.get<{ error_code: string | null }>(
+    `SELECT error_code FROM scheduled_task_runs WHERE schedule_id = ?1
+      ORDER BY created_at DESC, run_id DESC LIMIT 1`,
+    scheduleId,
+  );
+  return row?.error_code ?? null;
+}

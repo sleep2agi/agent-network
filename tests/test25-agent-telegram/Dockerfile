@@ -8,6 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y curl python3 openssl make g++ && \
     rm -rf /var/lib/apt/lists/*
 
+COPY contracts /app/contracts
 COPY server/ server/
 COPY agent-network/ agent-network/
 COPY agent-node/ agent-node/

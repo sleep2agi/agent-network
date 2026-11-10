@@ -62,6 +62,29 @@ function fakePrims(overrides: Partial<FactPrimitives> = {}): FactPrimitives {
 }
 
 describe("process tree + gather", () => {
+  test('custom key requires selected provider and matching owned TUI/app-server environments; never exposes secret', async () => {
+    const h = home();
+    const toml = 'model_provider="custom"\n[model_providers.custom]\nenv_key="PROVIDER_TEST_KEY"\n';
+    writeFileSync(join(h, 'config.toml'), toml);
+    const input = { alias: 'x', nodeId: 'n_1', nodeDir: '/n', codexHome: h, configToken: 'ntok_a',
+      codexProjectDir: '/w', codexThreadId: T, codexAppServerUrl: 'ws://127.0.0.1:24703',
+      sessions: { appsrv: 'x-appsrv', bridge: 'x-桥', tui: 'x' }, recordedPids: { appsrv: 10, bridge: 30, tui: 20 }, markerUuid: 'm-1' };
+    const gather = (change: (pid: number, env: Record<string, string>) => Record<string, string> = (_, env) => env) =>
+      gatherCodexFacts(fakePrims({ procEnviron: pid => change(pid, {
+        CODEX_HOME: h, ANET_NODE_MARKER: 'm-1', PROVIDER_TEST_KEY: 'fixture-key-no-leak',
+      }) }), input);
+    const good = await gather();
+    expect(good.home.providerEnvAttested).toBe(true);
+    expect(JSON.stringify(good)).not.toContain('fixture-key-no-leak');
+    expect((await gather((pid, env) => pid === 21 ? { ...env, PROVIDER_TEST_KEY: '' } : env)).home.providerEnvAttested).toBe(false);
+    expect((await gather((pid, env) => pid === 12 ? { ...env, PROVIDER_TEST_KEY: 'other' } : env)).home.providerEnvAttested).toBe(false);
+    expect((await gather((pid, env) => pid === 12 ? { ...env, ANET_NODE_MARKER: 'foreign' } : env)).home.providerEnvAttested).toBe(false);
+    expect((await gather((pid, env) => pid === 21 ? { ...env, CODEX_HOME: '/foreign' } : env)).home.providerEnvAttested).toBe(false);
+    writeFileSync(join(h, 'config.toml'), toml + 'requires_openai_auth=true\n');
+    expect((await gather()).home.providerEnvAttested).toBe(false);
+    writeFileSync(join(h, 'config.toml'), toml.replace('model_provider="custom"', 'model_provider="openai"'));
+    expect((await gather()).home.providerEnvAttested).toBe(false);
+  });
   test("descendants walks the whole subtree", () => {
     expect(descendants(fakePrims(), 10)).toEqual([10, 11, 12]);
   });

@@ -46,6 +46,11 @@ checked=0; bad=0
 if [ "${#SRC[@]}" -eq 0 ]; then
   echo "== 核对了 0 个 pin(源码侧共 0 个)=="
   echo "::error::零覆盖 —— 源码里一个 pin 都没抽到(文件路径变了?)。拒绝通过。"
+  # 2026-10-31 —— 退出码 3 必须点名「哪个前提没满足」（外部复核 ②：
+  # 「不带前提的 n/a 会被人当成『再试一次』」）。premise 是给消费者分支用的机器契约，
+  # 上面那行散文是给人看的 —— 两者不能互相替代。
+  echo "verdict=not-applicable"
+  echo "premise=zero_coverage_source"
   exit 3
 fi
 for k in "${!SRC[@]}"; do
@@ -78,6 +83,8 @@ done
 echo "== 核对了 $checked 个 pin(源码侧共 ${#SRC[@]} 个)=="
 if [ "$checked" -eq 0 ]; then
   echo "::error::零覆盖 —— 一个 pin 都没核对到。零覆盖的检查与坏掉的检查无法区分,拒绝通过。"
+  echo "verdict=not-applicable"
+  echo "premise=zero_coverage_checked"
   exit 3
 fi
 [ "$bad" -eq 0 ] || { echo "::error::$bad 个 pin 与已发布产物不一致 —— main 修了但用户装到的包没修"; exit 1; }

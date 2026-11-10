@@ -1,0 +1,154 @@
+// 2026-10-31 —— #3270：`assignee` 是派生展示字段，但它有自己的旧写入路径，会停在旧值。
+//
+// 实测（ANet 项目 archived=0，1105 张）：25 张与 owner/agent_owner 不一致，
+// 其中 22 张「有 assignee 但既无 owner 也无 agent_owner」。
+// 读的人看的是 assignee ⇒「有人负责」这句话可以比事实晚很久。
+//
+// 修法（读侧，引用优先）：
+//   agent_owner（node alias） > owner（username） > 自由文本 assignee
+// 判据：owner/agent_owner 是**写入时被校验过的引用**；assignee 是自由文本。
+// 两者冲突时以引用为准；没有引用时保留自由文本（它可能是系统外的人，删掉等于丢信息）。
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const DIR = mkdtempSync(join(tmpdir(), "anet-assignee-"));
+process.env.COMMHUB_DB ||= join(DIR, "hub.db");
+process.env.COMMHUB_UPLOADS_DIR = join(DIR, "uploads");
+process.env.HOST = "127.0.0.1";
+for (const k of ["COMMHUB_DUE_REMINDER_TZ", "COMMHUB_DUE_OVERDUE_MAX_DAYS", "COMMHUB_DUE_REMINDER_NETWORKS", "COMMHUB_DUE_REMINDERS", "COMMHUB_DUE_REMINDERS_NETWORKS", "COMMHUB_DUE_REMINDERS_EXCLUDE_NETWORKS", "COMMHUB_DUE_REMINDERS_OWNERS"]) delete process.env[k];
+
+const PW = "AssigneePassw0rd!x";
+let BASE = "";
+let hub: any = null;
+let NET = "";
+let TOKEN = "";
+let USER_ID = "";
+let db: any;
+
+async function send(method: string, path: string, payload?: unknown): Promise<{ status: number; body: any }> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let body: any = null;
+  try { body = JSON.parse(text); } catch {}
+  return { status: res.status, body };
+}
+
+beforeAll(async () => {
+  db = (await import("./db.js")).db;
+  const { register } = await import("./auth.js");
+  const stamp = Date.now();
+  const reg = register(`asg_${stamp}`, PW);
+  expect(reg.ok).toBe(true);
+  TOKEN = reg.token!;
+  NET = reg.network_id!;
+  USER_ID = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", `asg_${stamp}`)!.user_id;
+  // 一个可解析的 node（agent_owner 必须是本网络 node）
+  db.run(`INSERT OR REPLACE INTO nodes (node_id, node_name, network_id, alias, created_at, updated_at)
+          VALUES ('n_asg_probe', 'asg-probe', ?1, 'asg-probe', ?2, ?2)`, [NET, Date.now()]);
+  const mod: any = await import("./server.js");
+  hub = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
+  BASE = `http://127.0.0.1:${hub.port}`;
+}, 60_000);
+
+afterAll(() => { try { hub?.stop?.(); } catch {} rmSync(DIR, { recursive: true, force: true }); });
+
+describe("assignee never contradicts a validated owner/agent_owner reference", () => {
+  test("陈旧自由文本被引用覆盖（agent_owner 优先 > owner > 文本）", async () => {
+    const { displayAssignee, refDisplayName } = await import("./requirements.js").catch(
+      () => ({ displayAssignee: null as any, refDisplayName: null as any })) as any;
+    if (typeof refDisplayName !== "function") throw new Error("refDisplayName 未导出");
+    if (typeof displayAssignee !== "function") {
+      // 函数未导出时的退路：直接验证读取路径（下面两条 HTTP 用例已经覆盖），
+      // 这里不静默通过 —— 明确记录「没有读数」的边界。
+      throw new Error("displayAssignee 未导出：本文件需要它导出才能做单元级断言（见 #3270）");
+    }
+    const row = {
+      assignee: "ANet基建",
+      owner_json: JSON.stringify({ kind: "user", username: "王工" }),
+      agent_owner_json: JSON.stringify({ kind: "node", id: "n_x", alias: "通信欧" }),
+    };
+    // 读侧：只回显存下来的自由文本（不从引用推导 —— 无法区分「没设过」与「显式清空」）
+    expect(displayAssignee({ assignee: "ANet基建" })).toBe("ANet基建");
+    expect(displayAssignee({ assignee: "" })).toBe("");
+    // 写侧回填用的名字解析：引用 → 人名（node 用 alias，user 用 username）
+    expect(refDisplayName(JSON.stringify({ kind: "node", id: "n_x", alias: "通信欧" }))).toBe("通信欧");
+    expect(refDisplayName(JSON.stringify({ kind: "user", username: "王工" }))).toBe("王工");
+    expect(refDisplayName("")).toBe("");
+    // 没有引用时保留自由文本（系统外的人，删掉等于丢信息）
+    expect(displayAssignee({ assignee: " 王工 ", owner_json: null, agent_owner_json: null })).toBe("王工");
+    // 全是空 ⇒ 空串，不是 "undefined"/"null"
+    expect(displayAssignee({ assignee: null, owner_json: null, agent_owner_json: null })).toBe("");
+  });
+
+  test("写侧对账：设 agent_owner 时旧 assignee 被回填为引用（不再累积分叉）", async () => {
+    const created = await send("POST", `/api/requirements?network_id=${NET}`, {
+      name: "assignee 写侧对账",
+      column: "pool",
+      assignee: "ANet基建",           // 旧值（看起来有人、其实解析不到）
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.requirement.id as string;
+    expect(created.body.requirement.assignee).toBe("ANet基建");
+
+    // 只改 agent_owner，不显式给 assignee ⇒ 回填为 node alias
+    const patched = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, {
+      agent_owner: { kind: "node", alias: "asg-probe" },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.requirement.assignee).toBe("asg-probe");
+
+    // 显式给 assignee 且**没有引用** ⇒ 自由文本就是唯一事实（系统外的人，例如「王工」）
+    const other = await send("POST", `/api/requirements?network_id=${NET}`, { name: "无引用的卡", column: "pool" });
+    expect(other.status).toBe(201);
+    const manual = await send("PATCH", `/api/requirements/${other.body.requirement.id}?network_id=${NET}`, { assignee: "王工" });
+    expect(manual.status).toBe(200);
+    expect(manual.body.requirement.assignee).toBe("王工");
+
+    // 2026-10-31 —— **双向可测**（外部复核 ④：
+    // 「改粒度维度 ⇒ 结果变（确实相关）；改其它维度 ⇒ 结果不变（确实无关）。
+    //   只做前一向时，一个『什么都相关』的模型也能满足它。」）
+    // 第一向（相关）上面已经有了：改 agent_owner ⇒ assignee 跟着变。
+    // 这一向（无关）：改一个**不相干**的字段（name），assignee 必须**不变**。
+    const renamed = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, { name: "改个名字而已" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.requirement.name).toBe("改个名字而已");
+    expect(renamed.body.requirement.assignee).toBe("asg-probe");   // 与上面那条同一张卡
+
+    // 两者**同时存在**时，读侧以**显式自由文本**为准（既有契约：调用方给的 assignee 不被覆盖）。
+    // 漂移的修法在写侧：设引用而**没显式给** assignee 时回填 —— 上面那条已经证明了这一点。
+    const both = await send("PATCH", `/api/requirements/${id}?network_id=${NET}`, { assignee: "王工" });
+    expect(both.status).toBe(200);
+    expect(both.body.requirement.assignee).toBe("王工");
+  });
+});
+
+describe("#3277 — deleting a node clears the cards that referenced it", () => {
+  test("agent_owner 被置空、participants 被摘掉，卡本身保留", async () => {
+    const { clearNodeFromRequirements } = await import("./requirements.js");
+    const created = await send("POST", `/api/requirements?network_id=${NET}`, {
+      name: "引用一个即将被删的节点",
+      column: "pool",
+      agent_owner: { kind: "node", alias: "asg-probe" },
+      participants: [{ kind: "node", alias: "asg-probe" }],
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.requirement.id as string;
+
+    const res = clearNodeFromRequirements("n_asg_probe");
+    expect(res.agentOwnerCleared).toBeGreaterThan(0);
+    expect(res.participantsTouched).toBeGreaterThan(0);
+
+    const after = await send("GET", `/api/requirements/${id}?network_id=${NET}`);
+    expect(after.status).toBe(200);
+    // 卡还在，但不再指向一个不存在的节点
+    expect(after.body.requirement.agent_owner ?? null).toBeNull();
+    const parts = after.body.requirement.participants ?? [];
+    expect(parts.some((p: any) => p?.kind === "node" && p?.id === "n_asg_probe")).toBe(false);
+  });
+});

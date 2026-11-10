@@ -86,6 +86,13 @@ describe("sandbox posture", () => {
     expect(p.grantedFromProfile).toBe(true);
   });
 
+  test("a co-presence node on the profile opens full access without extra flags", () => {
+    const p = codexCopresencePosture(false, { runtime: CODEX_COPRESENCE_RUNTIME, codexCopresence: true });
+    expect(p.sandboxMode).toBe("danger-full-access");
+    expect(p.approvalPolicy).toBe("never");
+    expect(p.grantedFromProfile).toBe(true);
+  });
+
   test("approvalPolicy and sandboxMode never disagree", () => {
     // They are two halves of one posture; a pair like read-only + never would
     // let a turn be auto-approved and then fail on every write.
@@ -108,8 +115,14 @@ describe("sandbox posture", () => {
 
 describe("what create records", () => {
   test("records co-presence when it was asked for", () => {
-    expect(codexCopresenceCreateFields("codex-app-server", "true")).toEqual({ codexCopresence: true });
-    expect(codexCopresenceCreateFields("codex-app-server", true)).toEqual({ codexCopresence: true });
+    expect(codexCopresenceCreateFields("codex-app-server", "true")).toEqual({
+      codexCopresence: true,
+      codexCopresenceFullAccess: true,
+    });
+    expect(codexCopresenceCreateFields("codex-app-server", true)).toEqual({
+      codexCopresence: true,
+      codexCopresenceFullAccess: true,
+    });
   });
 
   test("records nothing otherwise — headless stays the default, as for opencode", () => {

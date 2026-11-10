@@ -1,0 +1,178 @@
+#2014 / #2016 semantic Ctrl+B runtime and Bridge first slice
+Base: d8bb4d154bb9d102b10a7ae25576f6b91831fb91
+
+Delivered source
+- V2 copresence exposes backgroundControl on the existing session handle.
+- Read actual /openapi.json, exact session id and directory, and /api/session/active.
+- Only POST /api/session/<bound session>/background; never terminal keys, shell,
+  prompt replay, abort, session recreation, process restart or server ownership.
+- Per-handle binding_id plus timestamped intent IDs reject stale generations and
+  expired requests. Repeat/unknown receipt does not resend an upstream mutation.
+- Upstream 204 => request_processed, not proof any tool moved to the background.
+  Idle is already_idle, not a successful background transition.
+- CLI: bound ntok, V2 copresence only, independent session_control SSE lane,
+  authoritative REST pull/ACK, singleflight drain and 30s binding refresh.
+  This does not wait for a model turn or change its timeout budget.
+
+Necessary targeted verification
+Command (from repo root):
+  sg docker -c 'docker build -f tests/test2014-session-background/Dockerfile \
+    -t anet-test2014-session-background . && \
+    docker run --rm --network none anet-test2014-session-background'
+
+Final result, Bun1.3.14, non-root USER bun, network none:
+  20 pass / 0 fail / 49 expect() calls / 3 files
+  - session-background.test.ts: 13 tests (normal, no-op, unsupported, exact
+    session/directory/handle, malformed/closed, unknown ACK dedup, expired intent,
+    dispatch deadline expiring during the preflight reads without a write)
+  - session-background-http.test.ts: 1 real loopback HTTP fixture, Basic auth,
+    only bound-session write, active peer untouched, no replay on repeat.
+  - session-control-bridge.test.ts: 6 tests (independent singleflight lane,
+    stale/foreign/expired/invalid operations rejected, lost ACK not replayed).
+  V2 core syntax/dependency-graph bundle: PASS (packages external)
+  CLI syntax/dependency-graph bundle: PASS (packages external)
+  These bundles are not release packages or a TypeScript typecheck.
+
+Local final log: /tmp/opencode/2014-session-control-deadline.log
+Earlier runs were development increments on this same small slice, not a full
+matrix. One intermediate Bun bare-filename filter discovered both copied paths;
+its 26 executions were 13 unique tests, not 26 distinct cases. Docker CMD now uses
+three explicit ./src paths; the final denominator above is not doubled.
+
+Remaining delivery gates (not claimed complete)
+- Hub authorized relay is independent #2017/PR2890; it must land normally.
+- Client status/button PR1016 must land normally; native authorization acceptance pending.
+- Real installed OpenCode/runtime versions and exact native session behavior have
+  not been accepted on a production node; this suite uses HTTP/model-free fixtures.
+- Required CI, main merge, paired release and authorized node activation separate.
+- No full suite, performance, compatibility or unrelated Docker sweep was run.
+- No production config, credentials, identities, databases or live sessions changed.
+
+2026-10-22 composition verification (one minimal run, not a full suite)
+Inputs:
+  Runtime/Bridge PR2889: 2f3a7158d358c6a6fe52f83b0c5130eaf9c1df12
+  Hub relay PR2890: 2255e25f5213891706a23ea81c550298cfef013c
+  Client adapter PR1016: 9d9ac82d32116fc0971fb335d26d89bc960c1a73
+Local-only composed worktree: /tmp/opencode/anet-2014-control-integration
+  78cb70ffa (runtime plus four Hub commits cherry-picked, no main merge/push).
+  It was built with the integration files now tracked beside this report.
+
+Opt-in reproduction (compose the above source refs first, no production secrets):
+  sg docker -c 'docker build --build-context app-src=<client-checkout> \
+    -f tests/test2014-session-background/integration/Dockerfile \
+    -t anet-test2014-control-integration .'
+  sg docker -c 'timeout 90s docker run --rm --network none anet-test2014-control-integration'
+The composition Dockerfile deliberately requires server/src from the Hub relay
+source; the ordinary runtime-only Dockerfile/test remains independent. Build
+context app-src supplies the exact unmodified client adapter/app-fetch/deadline.
+
+RESULT PASS 13 assertions, Bun1.3.14, USER bun, --network none:
+  Actual client adapter -> real Hub HTTP, SQLite, human/node credentials and
+  scoped SSE -> actual Bridge pull/ACK -> actual runtime HTTP adapter -> Basic
+  authenticated synthetic OpenCode HTTP server. Exact wire compatibility proved.
+  Positive state; one original-session 204 write => request_processed; peer and
+  prompt/keys untouched; real Hub409 expected-binding refusal -> client changed;
+  idle no-op; missing actual API capability disables control; dropped ACK followed
+  by generation change -> client unknown; repeated pulls never replay; SSE only
+  doorbell fields. These are product adapters, not mocks between those layers.
+
+Image id: sha256:ebabd0066419315ce1d7bbe899999b07beb1aa01b896b548b439c2d7682da028
+Local-only composition log: see the submitting node's private shell artifact;
+the reproducible inputs and commands are recorded above, not a home path.
+
+2026-10-22 CI follow-up (four-file delta from 32dbdb3d):
+- Register the existing runtime-only Docker CMD suite in scripts/qa.sh L1_TESTS
+  and both qa.yml path filters. The opt-in cross-PR composition is not run by L1.
+- Replace the local home log path above; do not add a home-path baseline entry.
+- Explicitly return the existing never-returning fail() in two unknown-outcome
+  catches and the invalid-ID guard, so TypeScript proves return/narrowing.
+  No changed error, request order, retry, deadline, binding or deduplication rule.
+- CI old head: 84 diagnostics versus baseline81; three new diagnostics all in
+  session-background.ts (TS2366, TS18047, TS7053). Baseline remains unchanged.
+- Local non-root Docker TS5.9.3 reproduction using existing installed deps:
+  86 diagnostics before, 83 after; exactly those three removed, none added.
+  Existing container dependencies differ from CI (two extra create-node-daemon
+  diagnostics); tsc still exits2, so this is NOT a green CI-ratchet claim.
+- Changed-source regression only: session-background.test.ts and
+  session-background-http.test.ts, Bun1.3.14, uid1000, read-only source/rootfs,
+  --network none: 14 pass / 0 fail / 36 expects / 112ms. No Bridge or 13-case
+  composition rerun, no full suite.
+- Docker static checks: suite registration PASS (new0), home-path PASS,
+  path symmetry PASS (301/301), L1 path sync PASS, trigger coverage PASS154/154.
+  First static container lacked worktree git metadata and PyYAML; those two
+  checks refused to measure, then passed after read-only metadata/module mounts.
+- Logs: /tmp/opencode/2014-tsc-{red,fixed}.log,
+  /tmp/opencode/2014-ci-gates-{fixed,rest-fixed}.log,
+  /tmp/opencode/2014-narrowing-regression.log. New-head normal CI/review pending.
+
+Independent review follow-up: redirect trust boundary (P1, separate from CI).
+- Old source plus two new authenticated HTTP 307/308 peer-session redirect
+  regressions: 0 pass / 2 fail (expected unknown rejection, got resolved), 2 expects.
+- Control-only read requests and the semantic POST now set redirect:error.
+  The shared HTTP helper is unchanged. Transport rejection keeps unknown and
+  the same ID retains its rejected receipt, never retrying or following a peer.
+- Same non-root/Bun1.3.14/no-network/read-only container, HTTP adapter file only:
+  3 pass / 0 fail / 9 expects / 70ms. Both redirect cases assert that the only
+  POST is the original bound session's request, including after a duplicate ID.
+- Logs: /tmp/opencode/2014-redirect-{red,green}.log. No full suite or integration
+  rerun. Independent P1 about mutable Bridge token identity is NOT fixed here;
+  the PR remains blocked from landing/release/activation pending that fix/review.
+
+Identity P1 implementation, slice1 (process-local runtime permit only):
+- Optional in-process permit/checkpoint + AbortSignal is a separate argument,
+  never part of Hub intent/wire. The Bridge will supply the pinned authority.
+- Recheck on both sides of every preflight read, after freshness, immediately
+  before POST without an intervening await, and before reporting processed.
+- Revocation during preflight yields changed and zero POSTs. Revocation after
+  send yields unknown, not a claim that the write was recalled; same intent
+  returns its cached rejection and never replays.
+- Non-root read-only/network-none Bun1.3.14 Docker, two added cases only:
+  old product 0pass/2fail; fixed 2pass/0fail/6expects/42ms.
+  Logs /tmp/opencode/2014-permit-{red,green}.log. No full suite rerun.
+- This slice alone is not a fix for mutable CLI identity; Bridge PIN/epoch and
+  signal-composing HTTP transport are still required before closing that P1.
+
+Identity slice2 (control-only HTTP adapter):
+- New fetchOpenCodeSessionControlJson composes the local permit AbortSignal
+  with a five-second deadline, forbids redirect, then calls the unchanged
+  generic fetch helper with timeoutMs0 so that it cannot overwrite the signal.
+  V2 background control uses this adapter; other OpenCode calls are unchanged.
+- Real local HTTP handler is held pending until the test releases it. Aborting
+  the caller must reject before a 500ms test guard, not wait for the 5s deadline.
+- Same non-root/network-none/read-only Bun1.3.14 Docker, new cancellation case
+  only: 1pass/0fail/1expect/50ms, /tmp/opencode/2014-control-cancel-green.log.
+  No claim that transport cancellation recalls a request already delivered.
+
+Identity slice3 (startup PIN, sticky epoch and Bridge authority gate):
+- CLI captures its startup token before reloadNodeToken can publish replacements.
+  It increments the credential epoch and aborts the control lifetime BEFORE
+  assigning a different hot token. A->B->A never revives the lane; the model
+  session and ordinary token reload behavior are not restarted or replaced.
+- Control transport snapshots Hub URL/token/node/network, checks epoch/token
+  before fetch and after headers/body, forbids redirects and composes cancellation
+  with its deadline. It does not use the mutable ordinary HTTP transport.
+- Only /bridge adds expected:{node_id,network_id}; a successful reply must include
+  matching identity:{node_id,network_id,token_id}. Pin the first token_id and reject
+  missing/mismatched/changed identity permanently. No old-Hub fallback. Pull/ACK
+  and human request fields are unchanged. Trigger before registration does nothing.
+- Bridge supplies the in-process permit to background(), checks it after claim
+  and before ACK. Revocation cannot emit a successful ACK on a replacement token.
+  The old three-layer fixture is adapted to this protocol, NOT rerun or accepted
+  as evidence for the new head; matching Hub implementation remains separate.
+- Five new authority/claim cases against pre-fix product: 0pass/5fail, 5expects,
+  /tmp/opencode/2014-identity-bridge-red.log. New product three affected files only:
+  34pass/0fail/94expects/96ms in the same non-root/read-only/network-none Bun1.3.14
+  Docker. /tmp/opencode/2014-identity-targeted-final.log. Includes runtime permit,
+  real local HTTP redirect/cancellation, Bridge claims and CLI source wiring.
+  The CLI source assertion is NOT a launched real node/token-rotation acceptance.
+- V2+CLI Bun builds pass. Same existing TS5.9.3 dependency container remains exit2,
+  83 diagnostics ->83 with no added diagnostic after excluding line shifts versus
+  /tmp/opencode/2014-tsc-fixed.log. This is NOT the CI baseline81 gate passing.
+- No full/13-case integration rerun, no npm/release/deploy/restart/real session write.
+  Code still needs independent review, exact-head required CI and matching Hub
+  identity safety evidence; #2014 remains blocked-doing, not a delivered feature.
+All credentials are generated in the disposable container; the legacy literal
+is a fixture and is not used to authorize control. No production DB/keys/session.
+This is NOT a real installed OpenCode/TUI/model, real native UI, release artifact,
+multi-worker Hub, original screenshot node or production activation acceptance.
+No full suite, compatibility or performance sweep was added.

@@ -93,6 +93,15 @@ export function hubErrorText(res: unknown): string {
   return errorText(res);
 }
 
+/** Doctor must not suggest retrying an implicit ownership claim. */
+export function nodeTokenReissueError(res: unknown): string {
+  const code = hubErrorText(res);
+  if (code === "node_owner_unclaimed") return `${code}: 这个节点没有归属，请联系管理员认领（#682）`;
+  // This code also covers another owner's node; do not assert NULL ownership.
+  if (code === "node_owner_mismatch") return `${code}: 无法确认节点归属；如果这个节点没有归属，请联系管理员认领（#682）。不会自动认领或覆盖令牌。`;
+  return code;
+}
+
 // ── 顶层报错分类 ────────────────────────────────────────────────────────────
 
 export interface CliErrorReport {

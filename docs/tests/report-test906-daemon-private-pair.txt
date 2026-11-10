@@ -1,0 +1,34 @@
+Observed 2026-10-11 12:40 +08
+Scope: own-daemon operator upgrade; not public desktop publication.
+Formal main CLI .163 input SHA256:
+15f498ac22663bb948743fefbc93906751e4aaf493990a484e799a38a5837c58
+Paired installed runtime .129 SRI matches published expected value.
+Installed private pair package-lock SHA256:
+a3b94d364d655c03462815f6632ac5a83ca547d967be0cdf162a5b2f388fa664
+
+Docker: tests/test906-daemon-provider-management/Dockerfile.private-pair, pinned Node22.22.2.
+Image anet-provider:test906-private-pair.
+Run --rm --network none --read-only --tmpfs /tmp; installed pair mount read-only.
+PASS CLI actual entrypoint reports 2.3.0-preview.163.
+PASS agent-node actual entrypoint reports 2.5.0-preview.129.
+PASS executable not group/other writable.
+PASS daemon start resolves trusted exact CLI then refuses nonexistent profile.
+No live credentials, Hub calls, node starts or inference inside test.
+Container exit 0; removed automatically.
+12:41 +08 production operation (not a production test): own daemon restart complete.
+Old PID 1966499 gone, new PID 2555920; Node22.22.2, new private .129 entry,
+exact .163 ANET_BIN_ABS. Original workdir and config bytes unchanged.
+Hub same node_daemon_39bd1eeae3ee online, version .129, idle, queue 0.
+Read-only requested inventory operation: empty managed store revision0; own-node
+Codex scan unavailable (no local binding, legacy config/scope gaps).
+Do NOT claim scan/account/model switching works merely from version/online status.
+
+12:46 +08 CLI publication operation:
+Detached checkout b4413131b73c52c286beec46509773716698d89f and the original
+verify-release-main.sh passed against freshly fetched main before publication.
+Formal run38106199041 artifact11689412711 head b441, build and all four gates SUCCESS.
+Created prerelease cli-v2.3.0-preview.163, latest=false, exact target b441.
+Uploaded original gated tarball and checksum, downloaded draft back and matched hash,
+then published. Anonymous HTTPS full download matched the same SHA256.
+Public tag API independently resolves b441; 2 assets, CLI archive 2083815 bytes.
+No npm republish, floating tag move, branch artifact or desktop publication.

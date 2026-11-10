@@ -1,0 +1,54 @@
+#1109 Hub137 publication and bounded selected-Hub activation
+
+Source PR2696/main36ed82249f661eb593375e72e375e59472bd41c7, merged08:23:01Z.
+Actual tested merge e2e742eae6b613c27854cb15449dfec222b72800 has the same full
+source tree. Docker38368490408: SQLite123 + PostgreSQL123 =246 normal,
+6 assertion-red witnesses;10 required checks and mutation-pin CI passed.
+Earlier fixture-only failures and their fixes remain in the source report.
+
+Formal main release38368892713 SUCCESS: exact authenticated build checkout
+36ed82249, build job115200652987, four gates, npm upload and post-publish registry
+verification succeeded. No alternate package build/tag overwrite/npm retry.
+Independent anonymous download 2026-10-13T08:29:45.520763+00:00 equals gated tarball:
+1253469 bytes; SHA1 1b65b6adc14aff8c179ef1fe9f9947b6fc888ae8;
+SHA256 6349cc906aa7d8c5ef603beea69117073d769703d2ec29fa4d9354c57720219a;
+sha512-K5Bgi9Jf6MfO+AmijS5hScxv92s3OI9/l0h64jmWUjWs03Fq9NbjkDWl15V3fb4kWirF/KCccMyEOCwf8ZzZaA==.
+URL https://registry.npmjs.org/@sleep2agi/commhub-server/-/commhub-server-0.9.0-preview.137.tgz
+preview137; stable latest30 unchanged. Source remains a current main ancestor.
+
+Deployment PR2697/main62edb5e34b9958ff5443b728202cb456aca4cb96:
+exact137 manifest/lock/SRI, previous136 prefix kept; Docker profile38369437748,
+identity38369437789 and10required passed. Private inactive install350 files
+matched the original public package. No global CLI/Node package change.
+
+Private consistent VACUUM backup $HOME/.commhub/backups/supervisor1109-p137-tpzywmz3/hub-before.db
+748273664 bytes, directory700/file600, integrity_check ok.
+First offline invocation did not run because the old cached image was missing.
+Rebuilt from Git tests/test906-hub-upgrade-preflight/Dockerfile and immutable
+Node22.22.2 base; network-none read-only-input Docker/Bun1.4.0 preflight PASS:
+{"api_tokens": 642, "networks": 7, "nodes": 303, "requirements": 1133, "sessions": 332, "tasks": 81976, "user_inbox": 2803}
+Counts preserved, no production data uploaded. This checks offline schema and
+preservation, not whole key/session disaster recovery; original secrets and data
+require their independent private sources. Full credential recovery NOT_COVERED.
+
+Only commhub-hub activated 2026-10-13T08:34:49.222471+00:00:
+PID712535 -> 828760; restart94 -> 95; secured137;
+entry $HOME/.commhub/runtime-v120-preview137/node_modules/@sleep2agi/commhub-server/bin/commhub.ts.
+Installed profile equals deployment main; base hash and hub.env metadata stayed
+unchanged; no --update-env. Software rollback is previous runtime-v119-preview136
+and its original main1a5b1a69e07902eef489342ca573fd7851889a55 profile/lock.
+
+Actual MCP list08:35:15Z:7 unique daemons,4online/3offline; original task67373dc5
+still running with08:00:23 consume and original thread/turn intact. Docker covers
+REST/MCP behavioral identity boundaries; no synthetic production token/heartbeat
+cases were inserted. Bounded natural observation 2026-10-13T08:36:28.469920+00:00:
+113 fresh heartbeats since activation; 128 SSE;
+[{"event_type": "task.replied", "n": 2, "to_status": "replied"}, {"event_type": "task.send.delivered", "n": 2, "to_status": "delivered"}, {"event_type": "task.started", "n": 2, "to_status": "running"}, {"event_type": "task.warning.delivered_stale_30s", "n": 2, "to_status": "delivered"}]
+Same PID/restart count,0 new vault-key/panic/segfault errors. Five-minute baseline
+was115 heartbeats/138SSE: different windows cannot establish whole-fleet or
+long-term equivalence. No claim that every node has been restored/upgraded.
+
+Original Node139 activity canary#1113/#1105 remains open; current shared client
+still Node121, last_activity NULL. OpenCode original-account normal restart#1120
+remains open; actual peer nodes were last observed Node118. Published CLI174/
+Node140 auth fix does not recover deleted logins or separately persist history.

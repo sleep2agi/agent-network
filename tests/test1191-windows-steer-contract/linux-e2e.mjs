@@ -12,6 +12,7 @@ const repo = "/workspace";
 // 是同一个事实被抄了第三份。真实安装出来的包版本就等于 package.json 里那个。
 const pairedVersion = JSON.parse(readFileSync(join(repo, "agent-node", "package.json"), "utf8")).version;
 const runId = process.env.ANET_TEST1191_RUN_ID || "baseline";
+const ownerAlias = `t1191${runId}`;
 const port = Number(process.env.ANET_TEST1191_HUB_PORT || "19352");
 const alias = `linux-steer-${runId}`;
 const root = `/tmp/test1191-linux-${runId}`;
@@ -94,8 +95,8 @@ const wire = () => existsSync(rpcLog) ? readFileSync(rpcLog, "utf8") : "";
 
 let hubProcess;
 try {
-  command(["register", "--username", `t1191${runId}`, "--password", "pass123456"]);
-  command(["login", "--username", `t1191${runId}`, "--password", "pass123456"]);
+  command(["register", "--username", ownerAlias, "--password", "pass123456"]);
+  command(["login", "--username", ownerAlias, "--password", "pass123456"]);
   command(["node", "create", alias, "--runtime", "codex-cli", "--hub", hub]);
   const codexHome = join(project, ".anet", "nodes", alias, "codex-home");
   mkdirSync(codexHome, { recursive: true });
@@ -130,7 +131,7 @@ try {
       method: "POST",
       headers: { Authorization: `Bearer ${userToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        alias, from: "t1191-linux", network_id: networkId, priority,
+        alias, from: ownerAlias, network_id: networkId, priority,
         task: `linux-${priority}-during-long-turn`,
         meta: { source: "dashboard-chat", client_request_id: `dreq_${suffix.repeat(32)}` },
       }),

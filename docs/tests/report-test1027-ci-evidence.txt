@@ -1,0 +1,87 @@
+Test1027: exact-source incremental CI evidence (PARTIAL; NOT RELEASED)
+Observed: 2026-10-12 02:17 Asia/Shanghai (2026-10-11T18:17Z)
+Original CommHub #1027, implementation owner n_ce2a4dce / communication-ou.
+This receipt reuses the original Docker CI. No new product test or production
+probe was run by the recorder; no duplicated requirement was created.
+
+HUB PATCH / MAIN
+PR https://github.com/sleep2agi/agent-network/pull/2623
+Exact head 5c1f3b37004cd6dc381cd15969d70c15e1ab5cb8.
+167 SUCCESS, zero unfinished or failed checks before normal merge.
+Merged 2026-10-11T18:16:09Z (02:16:09+08), main merge:
+23e2e7598ad41455b614258f89bbef28067dba30.
+Refreshed origin/main and verified the exact patch is its ancestor.
+No administrator bypass, no production Hub restart/deployment in this round.
+Product delta: get_create_request adds row.network_id to its response;
+the paired runtime can persist that scope in the child config.
+
+RUNTIME PATCH / INCREMENTAL HEAD
+PR https://github.com/sleep2agi/agent-network/pull/2619
+Previous head 5efb68157cc97fb8df6a93b90940eb41916393bb:
+165 SUCCESS / 3 FAILURE. Two failure classes, not three independent roots:
+node-name-652.test.ts:293 failed in unit and test829, and real-client's
+old TUI/bridge sessions jointly-absent assertion failed separately.
+New head fa4d5363b91f1fbf81cd581987f1dc31bc612b68:
+one test assertion changed undefined -> explicit v1, one addition/deletion;
+the production fix (network_id + omitted OpenCode generation default V1)
+is unchanged. No implicit V2/unsafe opt-in or cleanup assertion was removed.
+Latest rollup read 2026-10-11T18:16:47Z: 147 SUCCESS / 21 unfinished,
+zero new-head FAILURE. The PR remains OPEN, not merged or publicly released.
+Do not inherit any old-head success/failure as this head's terminal verdict.
+
+CORE L0/L1/CREATE/MODEL/LIFECYCLE: PASS
+real-client run38162501622, job114538176501:
+https://github.com/sleep2agi/agent-network/actions/runs/38162501622/job/114538176501
+Completed SUCCESS 2026-10-11T18:11:15Z.
+Actual harness source fa4d5363b91f1fbf81cd581987f1dc31bc612b68;
+actual client source 4500c233e38fbdc2db5932f5edbe92f4fdd1ab9c;
+uid/gid1000; Docker-owned isolated runtime, no vendor credentials.
+Positive: 51 PASS assertions, zero FAIL. Real Hub registration/authentication,
+actual daemon create -> native OpenCode V2 TUI, active child-token verdict,
+rendered client model change -> exact provider model -> exact task answer,
+actual daemon stop/start -> fresh native generation -> exact task reply.
+Both distinct cleanup assertions passed on this head:
+  PASS old bridge serve TUI identities reaped
+  PASS old TUI and bridge sessions absent
+Negative: deliberately wrong model expectation failed at the precise
+post-change-provider-model assertion; the workflow required that failure and
+then printed PASS test883 cold-source build, real-client lifecycle,
+wrong-model negative control. This expected FAIL is not a job failure.
+This is real native V2 plus rendered Web IPC/client adaptation, not a tested
+macOS/Windows/Android installation package or real model-account entitlement.
+The old cleanup failure did not reproduce here. Its cause is not proven;
+do not attribute it to environment or claim a dedicated product cleanup fix.
+
+UNIT: PASS ON ITS ACTUAL TESTED MERGE
+agent-node unit job114538300113, run38162501650:
+https://github.com/sleep2agi/agent-network/actions/runs/38162501650/job/114538300113
+Completed SUCCESS 2026-10-11T18:13:42Z.
+Checkout log SHA 5dae95917b4bad72803c4ca48c1f660e415ddebc.
+2807 pass / 1 skip / 0 fail, 2808 tests across218 files, 10295 expect calls;
+separate following group65 pass / 0 fail, 3files, 171 expect calls.
+The owner's local22 pass / 3 fail run is NOT counted as this Docker evidence.
+
+PENDING / DELIVERY BOUNDARY
+test829 job114538304727 and other existing checks remain unfinished at the
+rollup above. Original fix+publication and three-runtime5-minute regression
+checklist items remain incomplete. A positive V2 lifecycle does not prove
+the separate omitted-generation V1 or Claude/Grok production acceptance.
+Normal runtime merge requires its remaining gate results; any public package
+must be rebuilt from a full40 exact main ancestor, never these branch artifacts.
+Current main package metadata still names runtime2.5.0-preview.132,
+CLI2.3.0-preview.166 and Hub0.9.0-preview.125; those versions are not relabelled
+as containing this new runtime patch. No dist-tag, version, installer or
+production configuration was changed by this evidence work.
+Next evidence checkpoint02:20+08. Conditional runtime CI terminal estimate
+02:25-02:40+08 if no new failure; this is not a production publication promise.
+
+CLEANUP / AUTHORITY
+Read only scoped GitHub source/log/metadata and original task updates.
+No new local Docker product execution, shared tmux operation, credential
+copy, business-node restart, global npm modification or model inference.
+Existing user changes and the implementation owner's worktrees preserved.
+Tests retain their own original Docker artifacts and cleanup receipts.
+Authority: tracked workflows and source, this Git receipt, and original
+CommHub#1027. A chat message or personal machine copy is not sole recovery
+authority. Formal publication/deployment and data-backup restore remain
+separate operations; this receipt does not claim production disaster recovery.

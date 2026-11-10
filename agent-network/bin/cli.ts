@@ -10,9 +10,17 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
+import { constants, openSync, closeSync, fstatSync, chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
+import { formatBuildLine, readPackageBuildInfo } from "../src/build-info";
+import { hasBorrowedV1Intent, readBorrowedLaunchConfig, waitForBorrowedLaunchHealth } from "../src/shared/opencode-borrowed-launch-health";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
+import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
+import { runDaemonSecret, runDaemonSecretCli } from '../src/scoped-secrets.js';
+import { readScopedNodeEnv } from '../src/shared/scoped-secret-env.js';
+import { runDaemonProviderApply } from '../src/daemon-provider-apply-command.js';
+import { runDaemonProviderInitialize } from '../src/daemon-provider-initialize.js';
+import { stoppedReceiptAtStart, isHubStopped } from "../src/stopped-receipt.js";
 import { formatScrubbedEnvLine, scrubInheritedSessionIdentityEnv } from "../src/daemon-inherited-env.js";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -45,6 +53,7 @@ import { evaluateCodexPreflight, evaluateCodexVerify, checkIdentity, checkHome, 
 import { NODE_CLONE_USAGE, formatCloneSummary, parseCloneArgs, realpathLoose, runNodeClone } from "../src/node-clone";
 import { FORK_HOME_COPY, checkForkIsolation, ensureForkWorkdir, forkGapsCheck, forkRolloutPath, readLastTurnContextModel, rewriteRollout, rewriteTrustedProjects, uuidV7 } from "../src/codex-lifecycle-fork";
 import { formatThreadList, listExternalThreads, resolveExternalThread } from "../src/codex-adopt";
+import { codexCommhubMcpOverrides, codexWindowsAppServerArgs } from "../src/codex-commhub-mcp";
 import { formatCanarySummary, runCanary } from "../src/codex-lifecycle-canary";
 import { accountFingerprint, backupPathFor, backupRefFor, classifyProbe, credentialRefFor, hostIdOf, parseSourceRef, readRegistry, resolveProfile, runAccountInstall, runRollback, writeRegistry, type ProbeStatus, type RegistryEntry } from "../src/codex-lifecycle-account";
 import { gatherCodexFacts, realPrimitives, findRollouts, processFact, goalsFileState } from "../src/codex-lifecycle-facts";
@@ -77,6 +86,7 @@ import { OPENCODE_KEYLESS_FREE_MODEL_NOTE, opencodeFreeTierSafePresetWarning } f
 import { resolveRuntimeForResume } from "../src/resume-runtime-infer";
 import { isSameIncarnation, processVanished, resolveOwnedRoots, type OwnedRootCandidate } from "../src/owned-roots";
 import { serializeProfileForConfigJson } from "../src/profile-serialize";
+import { mergeProfilePatch, droppedProfileKeys } from "../src/profile-merge";
 import { backfillOpencodeGeneration, stampOpencodeGeneration } from "../src/opencode-generation-record";
 import {
   applyOpencodeGenerationCreateOption,
@@ -84,6 +94,9 @@ import {
   opencodeStartGenerationRefusal,
 } from "../src/opencode-generation-create";
 import { opencodeGenerationOfConfig, opencodeGenerationSupport } from "../src/opencode-versions";
+import { planOpencodeV2Create } from "../src/opencode-v2-create-align";
+import { resolveSharedOpenCodeServer } from "../src/opencode-shared-server-create";
+import { OpenCodeV2AlignError } from "../src/opencode-v2-configured-model";
 import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
@@ -95,12 +108,16 @@ import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
 import {
   OPENCODE_AGENT_NODE_SPEC,
   OPENCODE_AGENT_NODE_VERSION,
+  PAIRED_AGENT_NETWORK_VERSION,
   PAIRED_AGENT_NODE_SPEC,
   PAIRED_AGENT_NODE_VERSION,
   agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairInfo,
   pairedAgentNodeResolution,
+  pairedAgentNodeResolveTimeoutMs,
+  pairedAgentNodeResolveError,
   resolveAgentNodePackageEntrypointFromPath,
   validateAgentNodePackageEntrypoint,
 } from "../src/opencode-agent-node-pair";
@@ -111,9 +128,18 @@ import {
   findOpencodePreset,
   prepareOpencodeNodeForProfileWrite,
   readOpencodePrivateProfileFile,
+  readPresetKeyFromEnv,
+  replaceOpencodeConfigJson,
   writeOpencodeAuthJson,
+  writeOpencodeConfigJson,
   writeOpencodePrivateProfileFile,
 } from "../src/opencode-preset";
+import {
+  applyStagedProviderToProfile,
+  materializeStagedProvider,
+  stageProviderRequest,
+  type StagedProvider,
+} from "../src/provider-apply";
 import {
   buildOpencodeAuthLoginArgs,
   readOpencodeAuthLoginCredential,
@@ -138,7 +164,22 @@ import {
 } from "../src/opencode-runtime-binding";
 import { connectGrokAttach } from "../src/grok-attach-client";
 import { ambientTypeScriptTranspiler, nodeServerPayloadFor } from "../src/node-server-payload";
+import { installTeamSkills } from "../src/node-skills";
 import { applyNodeServerPayload } from "../src/node-server-version";
+import {
+  STANDALONE_BUILD_STAMP,
+  STANDALONE_HUB_ARG,
+  anetVersionFromStamp,
+  applyStandaloneDetectedVersions,
+  cliReinvokeArgs,
+  cliReinvokeShell,
+  formatAnetVersionBanner,
+  isStandaloneBuild,
+  standaloneBundleVersion,
+  standaloneHubLaunch,
+  standaloneNodeArgs,
+  standaloneNodeServerJs,
+} from "../src/standalone-bin";
 import {
   agentNodeHelpSupportsGrokCopresence,
   buildGrokAgentNodeEnv,
@@ -149,16 +190,20 @@ import {
   grokCopresenceSocketPaths,
 } from "../src/grok-copresence-profile";
 import { canonicalSocketsForProfile, planReapableSockets, reapStaleSocket, unixSocketPathInUse } from "../src/stale-socket";
+import { opencodeV2CopresenceRequested } from "../src/opencode-start-mode";
 import {
   codexCopresencePosture,
   codexCopresenceCreateFields,
   codexCopresenceCreateHint,
   codexCopresenceRequested,
+  CODEX_COPRESENCE_RUNTIME,
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
 } from "../src/codex-copresence-profile";
+import { writeCopresenceYoloToCodexHome } from "../src/codex-copresence-yolo";
 import {
   codexHomeStagePlan,
+  codexKnownStartupPromptAction,
   codexTuiPaneState,
   describeCodexTuiBlocker,
   describeCodexTuiNotPainted,
@@ -243,6 +288,7 @@ import {
   resumedThreadVerdict,
   sessionsAlreadyPresent,
   tuiShellCommand,
+  versionProbeShellCommand,
   waitForReadyz,
   type ExternalAppserverPlan,
 } from "../src/codex-external-appserver";
@@ -265,15 +311,18 @@ import {
   probeWindowsCreationDate,
   probeWindowsOwnedLoopbackConnection,
   readWindowsCopresenceRecord,
+  orchestrateWindowsManagedStop,
+  settleWindowsManagedStop,
   taskkillWindowsProcessTree,
   windowsCopresenceLogPath,
   windowsCopresenceRecordPath,
   writeWindowsCopresenceRecord,
   decideWindowsManagedStop,
+  type WindowsManagedIdentity,
   type WindowsManagedProcess,
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
-import { copresenceThreadPlan } from "../src/codex-copresence-thread";
+import { createCodexCopresenceThread, SAFE_CODEX_THREAD_ID } from "../src/codex-copresence-rpc";
 import {
   bridgeClientHealthReceipt,
   assertPendingServerQuiesced,
@@ -281,16 +330,22 @@ import {
   migrateCodexPendingThread,
   requirePromotedCodexPendingThread,
 } from "../src/codex-tui-client-health";
-import { decidePendingThreadAtStart, findThreadRollouts } from "../src/codex-pending-thread-restart";
-import { POSIX_TUI_ATTRIBUTION_MS, probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
+import { findThreadRollouts, reconcilePendingThreadAtStart } from "../src/codex-pending-thread-restart";
+import { copresenceRolloutGuard, copresenceVersionProbeScript, probeCodexVersionViaShell } from "../src/codex-copresence-rollout-guard";
+import { describeMissingOrdinalFailure, probeCodexVersionCached } from "../src/codex-rollout-history-guard";
+import { codexVersionPinMismatch, configuredCodexBin, configuredCodexVersion, resolveCopresenceCodexBin } from "../src/codex-bin-pin";
+import { parseForkRecoveryRequestId, resumeOrForkOnMissingOrdinal, type ForkRecoveryOptions } from "../src/codex-fork-recovery";
+import { probePosixOwnedLoopbackConnection, waitForPosixOwnedLoopbackConnection } from "../src/posix-codex-copresence";
 import {
   backupCodexRecoveryState,
   codexTopologyAudit,
   quiesceThenSnapshot,
-  resumeAndVerifyCodexThread,
-  verifyCodexThreadHistory,
   type CodexRecoveryVerification,
 } from "../src/codex-copresence-recovery";
+import { codexThreadIdForStart, formatCopresenceRolloutSize, resolveCopresenceBridgeAttachTimeoutMs, resolveCopresenceMaxPayloadBytes, resolveCopresenceResumeBudget } from "../src/codex-copresence-resume-timeout";
+import { waitForCodexRecoveryResources } from "../src/codex-recovery-resource-gate";
+import { createRecoveryLeaseHolder, launchCopresencePiecesReleasingRecovery } from "../src/codex-recovery-lease";
+import { codexCopresenceEnvFileText, codexCopresenceStageEnv } from "../src/codex-copresence-env";
 import { loadMockLlmRules, resolveMockLlmReply } from "../src/mock-llm";
 import {
   decideDashboardListener,
@@ -308,6 +363,11 @@ import {
   defaultCodexModelForRuntime,
 } from "../src/codex-model-default";
 import { describeCodexModelSource, resolveCodexCopresenceModel } from "../src/codex-copresence-model";
+import {
+  codexReasoningEffortConfigOverride,
+  isReasoningEffortValue,
+  writeReasoningEffortToCodexHome,
+} from "../src/codex-reasoning-effort";
 import { resolvePrimaryNetwork } from "../src/primary-network";
 
 const args = process.argv.slice(2);
@@ -324,6 +384,33 @@ function dashboardLaunchRecordPath(port: string | number) { return join(home, ".
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function skillCachePath() { return join(home, ".anet", "skillhub", "catalog-cache.json"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+
+function standaloneNow(): boolean {
+  return isStandaloneBuild(STANDALONE_BUILD_STAMP);
+}
+
+/** Re-invoke this CLI. npm/node keeps script path + execArgv; the compiled binary does not. */
+function reinvokeArgv(cliArgs: string[], includeExecArgv: boolean, scriptPath?: string): string[] {
+  return cliReinvokeArgs({
+    standalone: standaloneNow(),
+    execArgv: process.execArgv,
+    scriptPath: scriptPath ?? (process.argv[1] ?? ""),
+    cliArgs,
+    includeExecArgv,
+  });
+}
+
+function reinvokeShell(cliArgs: string[], includeExecArgv: boolean, scriptPath?: string): string {
+  return cliReinvokeShell({
+    standalone: standaloneNow(),
+    execPath: process.execPath,
+    execArgv: process.execArgv,
+    scriptPath: scriptPath ?? (process.argv[1] ?? ""),
+    cliArgs,
+    includeExecArgv,
+    quote: shellQuote,
+  });
+}
 /**
  * Pane target (`<session>:<window>.<pane>`) for a session, or null.
  *
@@ -509,6 +596,12 @@ function waitForTmuxPaneText(sessionName: string, needle: string, timeoutMs: num
         //    Reproduced every time in a clean container; instrumented to
         //    confirm this exact branch.
         if (!paneTarget) {
+          // `new-session` already returned before this waiter starts. If the
+          // exact session is now gone, the bridge exited; a larger recovery
+          // budget must not turn that terminal failure into minutes of
+          // misleading "still attaching" time. A live session whose pane is
+          // not listable yet keeps polling as before.
+          if (!tmuxSessionRunning(sessionName)) { resolve(false); return; }
           if (Date.now() >= deadline) { resolve(false); return; }
           setTimeout(poll, 400);
           return;
@@ -560,110 +653,92 @@ function capturePane(sessionName: string, scrollbackLines?: number): string | nu
  */
 async function codexTuiStateAfterRender(sessionName: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
+  // A banner paints before the empty-thread composer on real Codex 0.147.
+  // Returning on that first painted frame turned the new fail-closed gate into
+  // a false refusal. Give the current screen a short, bounded settle window and
+  // require the composer to remain visible across multiple polls. Known
+  // blockers still return immediately; an unknown surface remains fail-closed.
+  const inputSettleMs = Math.min(timeoutMs, 5_000);
+  const stableComposerMs = 800;
+  const stableKnownPromptMs = 800;
+  let paintedAt: number | null = null;
+  let composerSeenAt: number | null = null;
+  let knownPromptSeenAt: number | null = null;
+  let handledKnownPrompt = false;
   for (;;) {
     const onScreen = capturePane(sessionName);
     if (onScreen !== null) {
+      const knownAction = handledKnownPrompt ? null : codexKnownStartupPromptAction(onScreen);
+      if (knownAction) {
+        knownPromptSeenAt ??= Date.now();
+        if (Date.now() - knownPromptSeenAt >= stableKnownPromptMs) {
+          // The migration picker is rendered before the main Codex banner, so
+          // this exact-current-screen action must precede generic paint
+          // classification. Re-read immediately before the one permitted key:
+          // stale scrollback or an earlier frame must never authorise input.
+          const freshScreen = capturePane(sessionName);
+          const freshAction = freshScreen === null ? null : codexKnownStartupPromptAction(freshScreen);
+          const paneTarget = freshAction?.key === knownAction.key ? tmuxPaneTarget(sessionName) : null;
+          if (paneTarget) {
+            try {
+              execTmux(["send-keys", "-t", paneTarget, "-l", knownAction.key], { stdio: "ignore" });
+              handledKnownPrompt = true;
+              knownPromptSeenAt = null;
+              console.log("[anet] acknowledged the known Codex model migration prompt; keeping the existing model");
+              await new Promise((r) => setTimeout(r, 400));
+              continue;
+            } catch {
+              // The pane changed between the final read and send. Keep the
+              // readiness gate fail-closed; the next poll must prove the
+              // current screen again before any further action is allowed.
+              knownPromptSeenAt = null;
+            }
+          }
+        }
+      } else {
+        knownPromptSeenAt = null;
+      }
       const everSeen = capturePane(sessionName, 400) ?? onScreen;
       const state = codexTuiPaneState(onScreen, everSeen);
-      if (state !== "not-painted") return state;
+      if (state === "usable") {
+        composerSeenAt ??= Date.now();
+        if (Date.now() - composerSeenAt >= stableComposerMs) return state;
+      } else {
+        composerSeenAt = null;
+        if (state !== "not-painted") {
+          if (state !== "input-not-ready") return state;
+          paintedAt ??= Date.now();
+          if (Date.now() - paintedAt >= inputSettleMs) return state;
+        }
+      }
     }
-    if (Date.now() >= deadline) return "not-painted" as const;
+    if (Date.now() >= deadline) return paintedAt === null ? "not-painted" as const : "input-not-ready" as const;
     await new Promise((r) => setTimeout(r, 400));
   }
 }
 
-async function resolveCopresenceWebSocketCtor(): Promise<any> {
-  const g = (globalThis as any).WebSocket;
-  if (typeof g === "function") return g;
-  try {
-    const undici = await import("undici");
-    if (typeof (undici as any).WebSocket === "function") return (undici as any).WebSocket;
-  } catch { /* fall through */ }
-  throw new Error(
-    "no WebSocket available — need Bun / Node 22+ (global WebSocket) or `undici` in node_modules",
-  );
-}
-
-// Minimal WebSocket JSON-RPC thread creator against a running `codex
-// app-server`. Mirrors agent-node/tests/rfc-030-create-thread.ts but inlined
-// so the shipped CLI can call it (tests/ is not published).
-async function createCodexCopresenceThread(
-  ws: string,
-  timeoutMs = 60_000,
-  resumeThreadId?: string,
-  model?: string,
-): Promise<{ threadId: string; verification?: CodexRecoveryVerification; freshDeferred: boolean; resumedModel?: string }> {
-  const WsCtor = await resolveCopresenceWebSocketCtor();
-  const socket = new WsCtor(ws);
-  const deadline = Date.now() + timeoutMs;
-  await new Promise<void>((resolve, reject) => {
-    const to = setTimeout(() => reject(new Error(`ws open timeout on ${ws}`)), Math.max(1000, deadline - Date.now()));
-    socket.addEventListener("open", () => { clearTimeout(to); resolve(); }, { once: true });
-    socket.addEventListener("error", (e: any) => { clearTimeout(to); reject(new Error(`ws error: ${e?.message || e}`)); }, { once: true });
-  });
-  let nextId = 1;
-  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
-  socket.addEventListener("message", (ev: any) => {
-    let msg: any;
-    try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : ev.data.toString()); } catch { return; }
-    if (typeof msg?.id === "number" && !msg.method) {
-      const p = pending.get(msg.id);
-      if (!p) return;
-      pending.delete(msg.id);
-      if (msg.error) {
-        // #P2fix复审顺手4 — attach .code so isAlreadyInitializedError's
-        // code-based branch is live (mirrors codex-app-server-client.ts
-        // where the shared client attaches err.error.code).
-        const rpcErr = new Error(`${msg.error.code}: ${msg.error.message}`);
-        (rpcErr as Error & { code?: number }).code = msg.error.code;
-        p.reject(rpcErr);
-      } else p.resolve(msg.result);
-    }
-  });
-  const request = (method: string, params: any, timeoutMsInner: number) => new Promise<any>((resolve, reject) => {
-    const id = nextId++;
-    const to = setTimeout(() => { pending.delete(id); reject(new Error(`request ${method} timeout`)); }, timeoutMsInner);
-    pending.set(id, {
-      resolve: (v) => { clearTimeout(to); resolve(v); },
-      reject: (e) => { clearTimeout(to); reject(e); },
-    });
-    socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-  });
-  const notify = (method: string, params: any) =>
-    socket.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
-  try {
-    try {
-      await request("initialize", {
-        clientInfo: { name: "anet-copresence-creator", title: "creator", version: "0.0.1" },
-      }, 10_000);
-      notify("initialized", {});
-    } catch (e) {
-      // #P2fix顺手4 — only swallow "already initialized" on the shared
-      // server path; every other initialize failure is real.
-      if (!isAlreadyInitializedError(e)) throw e;
-    }
-    const plan = copresenceThreadPlan(resumeThreadId);
-    if (plan.method === "thread/resume") {
-      if (!SAFE_THREAD_ID.test(plan.params.threadId)) throw new Error("stored threadId has unexpected shape");
-      // #512 — the resolved model rides on thread/resume; without it codex resumes
-      // on the rollout's recorded model and ignores the app-server's -c model=.
-      const { resumedModel, ...verification } = await resumeAndVerifyCodexThread(
-          plan.params.threadId,
-          (method, params) => request(method, params, 15_000),
-          model,
-        );
-      return { threadId: plan.params.threadId, verification, freshDeferred: false, resumedModel };
-    }
-    // A fresh Codex 0.148 thread cannot be resumed by a second client until
-    // the human TUI owns/materializes it. Do not create or mutate a thread:
-    // the deferred bridge observes the TUI's unique thread/started event.
-    return { threadId: "", freshDeferred: true };
-  } finally {
-    try { socket.close(); } catch { /* ignore */ }
-  }
+/** Board #738 — options for resumeOrForkOnMissingOrdinal from one co-presence start. */
+function forkRecoveryOptions(nodeId: string, displayName: string, opts: CopresenceOptions, threadId: string | undefined): ForkRecoveryOptions {
+  return {
+    enabled: opts.forkOnResumeFailure === true, yes: opts.yes === true, interactive: process.stdin.isTTY === true,
+    requestId: opts.forkRecoveryRequestId,
+    threadId, codexHome: opts.codexHome, nodeDir: join(nodesDir(), nodeId), node: displayName,
+    confirm: async (prompt) => {
+      const rl = getRL();
+      const answer = await new Promise<string>((resolve) => rl.question(prompt, (a) => resolve(a)));
+      closeRL();
+      return /^y(es)?$/i.test(answer.trim());
+    },
+  };
 }
 
 async function askTypedConfirmation(prompt: string, expected: string): Promise<boolean> {
+  // 同 #2293：打字确认在非 TTY 里等价于「永远等一个不会来的回答」⇒ 直接判否。
+  // 判否是安全的那一侧：确认类问题唯一的危险答案是被当成「是」。
+  if (!process.stdin.isTTY) {
+    process.stderr.write(`[anet] 非交互环境：跳过打字确认（视为「否」）—— ${prompt.replace(/\n/g, " ").slice(0, 120)}\n`);
+    return false;
+  }
   const rl = getRL();
   const answer = await new Promise<string>((resolve) => rl.question(prompt, (s) => resolve(s)));
   closeRL();
@@ -697,13 +772,14 @@ function assertSafeHubUrl(hub: string): void {
   }
 }
 
-// #P2fix必修1 — token must NOT appear in argv or tmux pane_start_command.
-// Writes ANET_CODEX_COMMHUB_TOKEN to a 0600 file inside <codexHome> (0700);
-// the tmux child sources then removes it before exec'ing codex, so the
-// value never reaches /proc/*/cmdline nor tmux's pane_start_command.
+// #P2fix必修1 — secrets must NOT appear in argv or tmux pane_start_command.
+// Writes the stage's resolved config.env plus its required launcher values to
+// one 0600 file inside <codexHome> (0700); each tmux child sources then removes
+// it before exec. The fixed name is safely reused only after the previous stage
+// has proved ready (and therefore has already sourced + removed its copy).
 // Do NOT use `tmux new-session -e KEY=VAL` (env pairs are argv) or
 // `tmux send-keys` (writes into pane history).
-function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
+function writeCodexCopresenceEnvFile(codexHome: string, env: Readonly<Record<string, string>>): string {
   const envPath = join(codexHome, ".anet-copresence.env");
   // #P2fix复审必修 — TOCTOU + symlink-follow attack surface.
   // Without pre-unlink, a pre-existing symlink at envPath would be followed
@@ -712,32 +788,19 @@ function writeCodexCopresenceEnvFile(codexHome: string, token: string): string {
   // the file at umask default (typically 0644) and the chmod-to-0600 race is
   // observable to any world-readable scan.
   try { unlinkSync(envPath); } catch (err: any) { if (err?.code !== "ENOENT") throw err; }
-  writeFileSync(envPath, `export ANET_CODEX_COMMHUB_TOKEN=${shellQuote(token)}\n`, { mode: 0o600, flag: "wx" });
+  writeFileSync(envPath, codexCopresenceEnvFileText(env), { mode: 0o600, flag: "wx" });
   chmodIfPosix(envPath, 0o600);  // belt-and-suspenders in case older node ignores mode option
   return envPath;
 }
 
-// #P2fix顺手3 — threadId comes from our own JSON-RPC thread/start response
-// (server-generated UUID / ULID / opaque token), but we interpolate it into
-// a bash string, so a strict-shape check is cheap defense-in-depth against
-// a protocol change or a compromised app-server.
-const SAFE_THREAD_ID = /^[A-Za-z0-9_-]+$/;
-
-// #P2fix顺手4 — mirrors codex-app-server-bridge.ts:isAlreadyInitialized.
-// Only "already initialized" (code -32600 or matching message) is expected
-// on the shared-server bootstrap path; every other initialize failure is
-// real and must re-throw. Inline copy — cli.ts stays package-boundary-free.
-function isAlreadyInitializedError(e: unknown): boolean {
-  const code = (e as { code?: unknown })?.code;
-  if (code === -32600) return true;
-  const msg = (e as { message?: unknown })?.message;
-  return typeof msg === "string" && /already initialized/i.test(msg);
-}
-
 interface CopresenceOptions {
   codexBin: string;
+  /** Board #739 — config.json codexVersion: the codex at codexBin must report exactly this. */
+  codexVersion?: string;
   codexHome: string;
   model?: string;
+  /** Non-persisted explicit provider override for exact-session recovery. */
+  modelProvider?: string;
   port?: number;
   dangerFullAccess: boolean;
   yesDangerFullAccess: boolean;
@@ -749,16 +812,43 @@ interface CopresenceOptions {
   tuiFirst?: boolean;
   /** #514: --allow-shared-codex-login — stage a login another node already uses (unsafe). */
   allowSharedCodexLogin?: boolean;
+  /** Explicit fresh conversation: do not resume codexThreadId or a pending candidate. */
+  newSession?: boolean;
+  /** Explicitly accept starting without a recovery-point backup. */
+  skipRecoveryBackup?: boolean;
+  /** Board #738: fork the thread when resume fails with "missing an ordinal" (after a human's yes). */
+  forkOnResumeFailure?: boolean;
+  /** Optional Hub start request correlation, not permission to fork. */
+  forkRecoveryRequestId?: string;
+  /** --yes: confirms the fork when there is no terminal to ask. */
+  yes?: boolean;
+  /** Resolved config.env values. Each native stage receives the same set. */
+  configEnv: Record<string, string>;
 }
 
 /** True once `${hub}/health` answers. Unauthenticated on purpose: we only need
- *  to know something is listening, not to read anything from it. */
+ *  to know something is listening, not to read anything from it.
+ *
+ *  2026-10-31 —— 但「答了」不等于「健康」，而这正是 /health 新增 status 字段的理由。
+ *  加了字段却没人读，它就是一个被记录下来的判定（今晚反复出现的那一格）。
+ *  ⇒ 这里做它的第一个读者：**只告警、不阻断**（阻断会让一个降级 hub 变成起不来的节点）。
+ */
 async function hubAnswersHealth(hub: string, timeoutMs = hubHealthTimeoutMs(hub)): Promise<boolean> {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     const res = await fetch(`${hub}/health`, { signal: ctl.signal });
     clearTimeout(t);
+    if (res.ok) {
+      // 读 body 只为看 status；解析失败不影响「答了」这个结论。
+      try {
+        const body = await res.json() as { status?: string; status_reasons?: unknown };
+        if (body?.status === "degraded") {
+          const why = Array.isArray(body.status_reasons) ? body.status_reasons.join(", ") : "unknown";
+          console.error(`[anet] ⚠ ${hub} answers /health but reports status=degraded (${why}) — continuing`);
+        }
+      } catch { /* body 不可解析 ⇒ 仍然算「答了」 */ }
+    }
     return res.ok || res.status === 401;   // 401 = up, just gated
   } catch { return false; }
 }
@@ -795,7 +885,7 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
     const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
     const fd = openPrivateAppendLog(hubLog);
     try {
-      const child = spawn(process.execPath, [process.argv[1] ?? "", "hub", "start", "--port", hubPort], {
+      const child = spawn(process.execPath, reinvokeArgv(["hub", "start", "--port", hubPort], false), {
         cwd: process.cwd(), detached: true, windowsHide: true,
         stdio: ["ignore", fd, fd], env: { ...process.env },
       });
@@ -831,8 +921,7 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
       //    wait below times out against a perfectly healthy server. Observed:
       //    node on 9299, "Server: http://127.0.0.1:9200", 60s timeout.
       const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
-      const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`
-        + ` hub start --port ${shellQuote(hubPort)}`;
+      const selfCmd = reinvokeShell(["hub", "start", "--port", hubPort], false);
       // 🔴 tmux does NOT hand a new session this process's environment — the
       //    child inherits the tmux SERVER's, which was frozen whenever that
       //    server started. Without forwarding it, an operator who set
@@ -1037,7 +1126,11 @@ function checkCodexCredentialSharingForNode(
   });
 }
 
-function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string): void {
+function persistCodexRecoveryPoint(resolved: NonNullable<ReturnType<typeof resolveNodeRef>>, codexHome: string, skip: boolean): void {
+  if (skip) {
+    console.error("[anet] ⚠ --skip-recovery-backup: STARTING WITHOUT A CODEX RECOVERY POINT; CODEX_HOME may be modified and this launch cannot be rolled back safely.");
+    return;
+  }
   const nodeDir = join(nodesDir(), resolved.id);
   const backup = backupCodexRecoveryState({ nodeDir, codexHome });
   const cfgPath = join(nodeDir, "config.json");
@@ -1066,6 +1159,14 @@ async function holdAppServerStart(nodeId: string): Promise<{ release: () => void
   });
 }
 
+async function holdCodexRecovery(nodeId: string, rolloutBytes: number | null): Promise<{ release: () => void }> {
+  return waitForCodexRecoveryResources(nodeId, rolloutBytes, {
+    log: (m) => console.log(`[anet] ${m}`),
+    warn: (m) => console.warn(`[anet] ${m}`),
+    report: (text) => console.log(`[anet] [recovery-gate] blocked ${text}`),
+  });
+}
+
 async function startWindowsCodexCopresence(
   resolved: NonNullable<ReturnType<typeof resolveNodeRef>>,
   displayName: string,
@@ -1079,21 +1180,33 @@ async function startWindowsCodexCopresence(
   if (unsafeCmd.test(opts.codexBin) || unsafeCmd.test(model)) {
     throw new Error("Windows codex command/model contains cmd.exe metacharacters");
   }
-  const recoveryCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  const recoveryCfgPath = join(nodesDir(), resolved.id, "config.json");
+  let recoveryCfg = JSON.parse(readFileSync(recoveryCfgPath, "utf-8"));
   const priorWindowsRecord = readWindowsCopresenceRecord(nodesDir(), resolved.id);
   let authoritativeOldPendingMarker: string | undefined;
-  if (recoveryCfg.codexPendingThread !== undefined) {
-    if (priorWindowsRecord?.version !== 2 || !priorWindowsRecord.marker
-      || recoveryCfg.codexPendingThread?.marker !== priorWindowsRecord.marker) {
-      throw new Error("pending Codex thread is not bound to the exact private previous-generation Windows record");
+  if (!opts.newSession && recoveryCfg.codexPendingThread !== undefined) {
+    const pendingDecision = reconcilePendingThreadAtStart(
+      recoveryCfg,
+      priorWindowsRecord?.version === 2 && priorWindowsRecord.marker
+        ? { kind: "ok", marker: priorWindowsRecord.marker }
+        : { kind: "missing" },
+      (tid) => findThreadRollouts(opts.codexHome, tid),
+    );
+    if (pendingDecision.kind === "migrate") {
+      authoritativeOldPendingMarker = pendingDecision.oldMarker;
+    } else if (pendingDecision.kind === "drop-unmaterialized") {
+      recoveryCfg = pendingDecision.config;
+      atomicWritePrivateJson(recoveryCfgPath, recoveryCfg);
+      console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped Windows generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
+    } else if (pendingDecision.kind === "refuse") {
+      throw new Error(`pending Codex thread is not bound to the exact private previous-generation Windows record: ${pendingDecision.reason}`);
     }
-    authoritativeOldPendingMarker = priorWindowsRecord.marker;
   }
   // Authoritative snapshot only after all prior writers have been reaped.
   // Failure aborts before any replacement app-server can start.
   await quiesceThenSnapshot(
     () => stopPriorWindowsCopresence(resolved.id),
-    () => persistCodexRecoveryPoint(resolved, opts.codexHome),
+    () => persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true),
   );
   if (authoritativeOldPendingMarker) {
     await assertPendingServerQuiesced(recoveryCfg.codexAppServerUrl, (oldPort) => waitForLoopbackPort(oldPort, 750));
@@ -1107,27 +1220,22 @@ async function startWindowsCodexCopresence(
   const bridgeLog = windowsCopresenceLogPath(nodesDir(), resolved.id, "bridge");
   rmSync(appLog, { force: true });
   rmSync(bridgeLog, { force: true });
-  const hubMcpUrlToml = `mcp_servers.commhub.url=${opts.hub}/mcp`;
-  const bearerTomlLiteral = `mcp_servers.commhub.bearer_token_env_var=ANET_CODEX_COMMHUB_TOKEN`;
   const appEnv = {
     ...process.env,
-    CODEX_HOME: opts.codexHome,
-    ANET_NODE_MARKER: marker,
-    ANET_CODEX_COMMHUB_TOKEN: opts.token,
+    ...codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: marker,
+      ANET_CODEX_COMMHUB_TOKEN: opts.token,
+    }),
   };
   const admission = await holdAppServerStart(resolved.id);
   const managed: WindowsManagedProcess[] = [];
+  let recoveryAdmission: { release: () => void } | undefined;
   try {
     try {
-    managed.push(await windowsManagedProcess("appsrv", opts.codexBin, [
-      "app-server",
-      "-c", `approval_policy=${posture.approvalPolicy}`,
-      "-c", `sandbox_mode=${posture.sandboxMode}`,
-      "-c", `model=${model}`,
-      "-c", hubMcpUrlToml,
-      "-c", bearerTomlLiteral,
-      "--listen", wsUrl,
-    ], appEnv, appLog, true));
+    managed.push(await windowsManagedProcess("appsrv", opts.codexBin, codexWindowsAppServerArgs({
+      approvalPolicy: posture.approvalPolicy, sandboxMode: posture.sandboxMode, model, hub: opts.hub, wsUrl,
+    }), appEnv, appLog, true));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed, marker);
     console.log(`[anet] ① app-server pid=${managed[0].pid} listening ${wsUrl} (sandbox=${posture.sandboxMode})…`);
     // npm installs Codex as codex.cmd. Its cmd.exe grandchild does not
@@ -1146,13 +1254,21 @@ async function startWindowsCodexCopresence(
     } finally {
       admission.release();
     }
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, resolved.profile.codexThreadId, model);
+    const requestedThreadId = codexThreadIdForStart(resolved.profile.codexThreadId, opts.newSession === true);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
+    console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    recoveryAdmission = await holdCodexRecovery(resolved.id, resumeBudget.rolloutBytes);
+    const thread = await resumeOrForkOnMissingOrdinal(
+      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst, modelProvider: opts.modelProvider ?? resolved.profile.codexModelProvider }),
+      forkRecoveryOptions(resolved.id, displayName, opts, requestedThreadId),
+    );
     reportResumedCodexModel(model, thread.resumedModel);
     let threadId = thread.threadId;
     let freshDeferred = thread.freshDeferred;
-    if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
+    if (!freshDeferred && !SAFE_CODEX_THREAD_ID.test(threadId)) throw new Error("unexpected threadId shape");
     const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
     const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+    if (opts.newSession) delete rawCfg.codexPendingThread;
     let pendingRecoveryId: string | undefined;
     if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
       const migrated = migrateCodexPendingThread(
@@ -1174,22 +1290,27 @@ async function startWindowsCodexCopresence(
 
     const bridgeEnv: NodeJS.ProcessEnv = {
       ...process.env,
-      CODEX_HOME: opts.codexHome,
-      ANET_NODE_MARKER: marker,
-      ANET_COPRESENCE_BRIDGE: "1",
+      ...codexCopresenceStageEnv(opts.configEnv, {
+        CODEX_HOME: opts.codexHome,
+        ANET_NODE_MARKER: marker,
+        ANET_COPRESENCE_BRIDGE: "1",
+        ANET_CODEX_RESUME_TIMEOUT_MS: String(resumeBudget.timeoutMs),
+        ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES: String(resolveCopresenceMaxPayloadBytes(resumeBudget.rolloutBytes)),
+      }),
     };
     delete bridgeEnv.COMMHUB_TOKEN;
     delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
-    managed.push(await windowsManagedProcess("bridge", process.execPath, [
-      process.argv[1] ?? "", "node", "start", displayName,
-    ], bridgeEnv, bridgeLog));
+    managed.push(await windowsManagedProcess("bridge", process.execPath, reinvokeArgv([
+      "node", "start", displayName,
+    ], false), bridgeEnv, bridgeLog));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed, marker);
     const bridgeReceipt = pendingRecoveryId
       ? bridgeClientHealthReceipt(wsUrl, pendingRecoveryId)
       : freshDeferred
         ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
         : bridgeClientHealthReceipt(wsUrl, threadId);
-    if (!await waitForFileText(bridgeLog, bridgeReceipt, 25_000)) {
+    const bridgeAttachTimeoutMs = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);
+    if (!await waitForFileText(bridgeLog, bridgeReceipt, bridgeAttachTimeoutMs)) {
       throw new Error(`bridge did not attach to the shared app-server before TUI launch; log=${bridgeLog}`);
     }
     if (!probeWindowsCreationDate(managed[1].pid)) throw new Error(`bridge exited during startup; log=${bridgeLog}`);
@@ -1202,9 +1323,12 @@ async function startWindowsCodexCopresence(
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
     console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId || "pending-user-thread"})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgs = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tui = spawn(opts.codexBin, tuiArgs, {
-      cwd: process.cwd(), env: { ...process.env, CODEX_HOME: opts.codexHome },
+      cwd: process.cwd(),
+      env: { ...process.env, ...codexCopresenceStageEnv(opts.configEnv, { CODEX_HOME: opts.codexHome, ANET_NODE_MARKER: marker }) },
       stdio: "inherit", windowsHide: false, shell: true,
     });
     await new Promise<void>((resolve, reject) => {
@@ -1225,7 +1349,10 @@ async function startWindowsCodexCopresence(
     //
     // 并且原文案不说它找的是什么 —— pid / birth / port 一个都没有。
     // 一条只报结论、不报「比对的那两样东西」的报错,只能靠从头复现来查。
-    const TUI_HEALTH_MS = 25_000;
+    // Old Codex releases hydrate the same large rollout again when the TUI
+    // connects. Give that second client the same size-aware recovery budget;
+    // a fixed 25s window reported a healthy, still-loading TUI as dead.
+    const TUI_HEALTH_MS = resolveCopresenceBridgeAttachTimeoutMs(resumeBudget.timeoutMs);
     const tuiHealthStart = Date.now();
     const tuiHealthDeadline = tuiHealthStart + TUI_HEALTH_MS;
     let tuiConnected = false;
@@ -1287,11 +1414,18 @@ async function startWindowsCodexCopresence(
     //    ⚠️ `connection=pid-attributed` 这个子串**不能动**:
     //    windows-codex-copresence.test.ts 用 indexOf 钉它的出现顺序。追加在其后是安全的。
     console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed probes=${tuiProbes} probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`);
+    atomicWritePrivateJson(join(nodesDir(), resolved.id, "windows-tui-health.json"), {
+      version: 1, nodeId: rawCfg.node_id, marker, remote: wsUrl,
+      pid: tui.pid, creationDate: tuiCreationDate,
+    });
+    recoveryAdmission.release();
+    recoveryAdmission = undefined;
     const code = await new Promise<number>((resolve, reject) => {
       tui.once("exit", (c) => resolve(c ?? 1));
     });
     if (code !== 0) throw new Error(`Codex TUI exited with code ${code}`);
   } catch (e) {
+    recoveryAdmission?.release();
     for (const process of [...managed].reverse()) {
       if (probeWindowsCreationDate(process.pid) === process.creationDate) {
         try { taskkillWindowsProcessTree(process.pid); } catch {}
@@ -1361,7 +1495,7 @@ async function startGrokCopresenceOrchestration(
       process.exit(1);
     }
   }
-  const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`;
+  const selfCmd = reinvokeShell([], false);
 
   // ── piece ① the node (owns the grok leader and the attach socket) ────────
   // GROK_COPRESENCE_CHILD_ENV keeps this inner start from re-entering the
@@ -1459,6 +1593,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   }
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   const profile = resolved.profile;
+  const requestedThreadId = codexThreadIdForStart(profile.codexThreadId, opts.newSession === true);
   // Resolve once for both platform backends. Keeping a second default inside
   // the Windows branch lets Windows and POSIX silently drift.
   // #512 — `opts.model` is ONLY the --model flag. The node's own config `model`
@@ -1483,6 +1618,24 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   if (missingDeps.length > 0) {
     console.error(describeMissingDeps(missingDeps, displayName));
     process.exit(1);
+  }
+  // Board #734/#739 — the ONE way this start reads `<codexBin> --version`: the POSIX launch
+  // runs `bash -lc "export CODEX_HOME=…; …; exec <codexBin> app-server"`, so probe through
+  // that same login shell (a bare `codex` resolves the same way); Windows spawns codexBin
+  // directly. Used by the version pin below and the paginated-rollout guard further down.
+  const probeLaunchCodexVersion = (bin: string): string | null => process.platform === "win32"
+    ? probeCodexVersionCached(bin)
+    : probeCodexVersionViaShell(copresenceVersionProbeScript(opts.codexHome, bin), { loginShell: true });
+  // Board #739 — config.json codexVersion: refuse before anything is started or touched.
+  if (opts.codexVersion) {
+    const pinned = codexVersionPinMismatch({
+      expected: opts.codexVersion, actual: probeLaunchCodexVersion(opts.codexBin), codexBin: opts.codexBin, displayName,
+    });
+    if (pinned) {
+      for (const line of pinned) console.error(`[anet] ${line}`);
+      process.exit(1);
+    }
+    console.log(`[anet] codex: ${opts.codexBin} = ${opts.codexVersion} (pinned in config.json)`);
   }
   if (!opts.token || !opts.token.startsWith("ntok_")) {
     console.error(`[anet] ❌ node token is missing or not an ntok_ (co-presence bridge requires network-scoped ntok_).`);
@@ -1588,7 +1741,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         try { chmodIfPosix(step.dst, step.mode); } catch { /* best effort */ }
         console.log(`[anet] staged ${step.name} into the node CODEX_HOME (${step.reason}) — ${step.because}`);
       }
-    } else if (!existsSync(join(opts.codexHome, "auth.json"))) {
+    } else if (!existsSync(join(opts.codexHome, "auth.json"))
+      && codexHomeLoginState(opts.codexHome, { ...process.env, ...opts.configEnv }).state === 'needs-login') {
       console.error(`[anet] ⚠ --no-inherit-codex-home, and ${join(opts.codexHome, "auth.json")} does not exist.`);
       console.error(`[anet]   codex TUI 会停在登录选择页，且不会说明原因（#853）。先在该 HOME 下登录一次。`);
     }
@@ -1609,12 +1763,40 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // bridge died 120 s later waiting for a thread nobody could create. Decide BEFORE any session starts.
   // Judged by the #529 helper (codexLoginFactsOfHome) on opts.codexHome: the home THIS launch hands to all
   // three sessions (--codex-home > config.codexHome > <node>/codex-home), after host-login staging above.
-  const loginGate = codexHomeLoginState(opts.codexHome);
+  const loginGate = codexHomeLoginState(opts.codexHome, { ...process.env, ...opts.configEnv });
   if (loginGate.state === "needs-login") {
     for (const line of describeCodexNeedsLogin({ alias: displayName, codexHome: opts.codexHome, reason: loginGate.reason })) console.error(line);
     process.exit(NEEDS_LOGIN_EXIT_CODE);
   }
   if (loginGate.state === "unknown") console.log(`[anet] codex login: ${loginGate.reason}`);
+
+  // Validate config.env before either platform quiesces the current
+  // generation.  A reserved loader key is a configuration refusal, not a
+  // reason to stop a healthy app-server / bridge / TUI and leave the node
+  // down.  Stage-specific required values are merged later as before.
+  codexCopresenceStageEnv(opts.configEnv, {});
+
+  // Board #734 — before anything is quiesced on either platform: an older codex
+  // (< 0.145) must never append to a thread a newer codex wrote in "paginated"
+  // mode; the thread would become permanently unresumable. Read-only; anything
+  // undeterminable only warns.
+  {
+    const pending = (profile as { codexPendingThread?: { threadId?: unknown } }).codexPendingThread;
+    const guard = copresenceRolloutGuard({
+      codexHome: opts.codexHome,
+      threadIds: opts.newSession ? [] : [requestedThreadId, typeof pending?.threadId === "string" ? pending.threadId : undefined],
+      codexBin: opts.codexBin,
+      displayName,
+      // Same probe as the #739 pin above (login shell on POSIX, like the launch). The
+      // launch command is not touched. (config.env cannot set PATH: it is a reserved key.)
+      probeVersion: probeLaunchCodexVersion,
+    });
+    for (const line of guard.warnings) console.warn(`[anet] ${line}`);
+    if (guard.block) {
+      for (const line of guard.block) console.error(`[anet] ${line}`);
+      process.exit(1);
+    }
+  }
 
   if (process.platform === "win32") {
     try {
@@ -1622,6 +1804,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       return;
     } catch (e) {
       console.error(`[anet] ❌ Windows Codex co-presence failed: ${(e as Error).message}`);
+      for (const line of describeMissingOrdinalFailure(String((e as Error)?.message ?? e), { threadId: requestedThreadId })) console.error(`[anet] ${line}`);
       console.error(`[anet]    Cleanup: anet node stop ${displayName}`);
       process.exit(1);
     }
@@ -1659,14 +1842,15 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // never matched what was on disk, and nothing was ever killed while the
   // code reported success). See docs of writeMarker() in copresence-identity.ts.
   const identityMarker = randomUUID();
-  const prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  let prelaunchCfg = JSON.parse(readFileSync(join(nodesDir(), resolved.id, "config.json"), "utf-8"));
+  const clearOldStoppedReceipt = stoppedReceiptAtStart(join(nodesDir(), resolved.id), prelaunchCfg.node_id);
   let authoritativeOldPendingMarker: string | undefined;
-  if (prelaunchCfg.codexPendingThread !== undefined) {
+  if (!opts.newSession && prelaunchCfg.codexPendingThread !== undefined) {
     const oldIdentity = readCopresenceMarker(nodesDir(), resolved.id);
     // #602 — a clean `anet node stop` removes the marker but leaves the candidate; when its thread
     // never got a rollout there is nothing to carry over, so it is dropped instead of refusing forever.
-    const pendingDecision = decidePendingThreadAtStart(
-      prelaunchCfg.codexPendingThread,
+    const pendingDecision = reconcilePendingThreadAtStart(
+      prelaunchCfg,
       oldIdentity.kind === "ok" ? { kind: "ok", marker: oldIdentity.marker.marker }
         : oldIdentity.cause === "MISSING" ? { kind: "missing" }
         : { kind: "unreadable", cause: oldIdentity.cause },
@@ -1675,7 +1859,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     if (pendingDecision.kind === "migrate") {
       authoritativeOldPendingMarker = pendingDecision.oldMarker;
     } else if (pendingDecision.kind === "drop-unmaterialized") {
-      delete prelaunchCfg.codexPendingThread;
+      prelaunchCfg = pendingDecision.config;
       atomicWritePrivateJson(join(nodesDir(), resolved.id, "config.json"), prelaunchCfg);
       console.log(`[anet] dropped the pending Codex thread ${pendingDecision.threadId} of the stopped generation: it never had a conversation (no rollout in CODEX_HOME), so there is nothing to resume — starting a fresh thread`);
     } else if (pendingDecision.kind === "refuse") {
@@ -1738,7 +1922,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         }
       }
       await new Promise((r) => setTimeout(r, 500));
-    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome));
+    }, () => persistCodexRecoveryPoint(resolved, opts.codexHome, opts.skipRecoveryBackup === true));
   } catch (e) {
     console.error(`[anet] ❌ cannot create quiesced Codex recovery point: ${(e as Error).message}`);
     process.exit(1);
@@ -1771,23 +1955,32 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── piece ① codex app-server (loopback WS + commhub MCP) ──────────────
   // #P2fix必修1 — token to 0600 file, sourced-then-removed inside the tmux
   // child. Never appears in argv / /proc/*/cmdline / tmux pane_start_command.
-  const envFilePath = writeCodexCopresenceEnvFile(opts.codexHome, opts.token);
+  const envFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+    CODEX_HOME: opts.codexHome,
+    ANET_NODE_MARKER: identityMarker,
+    ANET_CODEX_COMMHUB_TOKEN: opts.token,
+  }));
   // #P2fix必修2 — shellQuote every `-c` TOML fragment (including the hub
   // URL fragment). assertSafeHubUrl was called above; shellQuote guards
   // even in the face of a validator regression.
-  const hubMcpUrlToml = `mcp_servers.commhub.url="${opts.hub}/mcp"`;
-  const bearerTomlLiteral = `mcp_servers.commhub.bearer_token_env_var="ANET_CODEX_COMMHUB_TOKEN"`;
+  // #720 — url + bearer + `default_tools_approval_mode="approve"` for commhub only, so the
+  //   first commhub tool call does not stop on an approval prompt nobody will answer.
+  const commhubMcpOverrides = codexCommhubMcpOverrides(opts.hub, "quoted");
+  const profileReasoning = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+  const reasoningEffortOverride = isReasoningEffortValue(profileReasoning)
+    ? ` -c ${shellQuote(codexReasoningEffortConfigOverride(profileReasoning))}`
+    : "";
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     `. ${shellQuote(envFilePath)}`,
-    `rm -f ${shellQuote(envFilePath)}`,
+    `/bin/rm -f ${shellQuote(envFilePath)}`,
     `clear`,
     `exec ${shellQuote(opts.codexBin)} app-server`
       + ` -c approval_policy=${approvalPolicy}`
       + ` -c sandbox_mode=${sandboxMode}`
       + ` -c model=${shellQuote(model)}`
-      + ` -c ${shellQuote(hubMcpUrlToml)}`
-      + ` -c ${shellQuote(bearerTomlLiteral)}`
+      + reasoningEffortOverride
+      + commhubMcpOverrides.map((o) => ` -c ${shellQuote(o)}`).join("")
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
   // #612 — admit before the heavy app-server. Release once it binds or the
@@ -1866,15 +2059,30 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // ── create fresh thread + persist config ──────────────────────────────
   let threadId: string;
   let freshDeferred = false;
+  let recoveryTimeoutMs = 300_000;
+  let recoveryRolloutBytes: number | null = null;
+  // #762 — released as soon as the bridge and TUI are ready, on every failure
+  // (process.exit included), and never left renewing behind a foreground launcher.
+  const recoveryAdmission = createRecoveryLeaseHolder({ log: (m) => console.log(`[anet] ${m}`) });
   try {
-    const thread = await createCodexCopresenceThread(wsUrl, 60_000, profile.codexThreadId, model);
+    const resumeBudget = resolveCopresenceResumeBudget(opts.codexHome, requestedThreadId);
+    recoveryTimeoutMs = resumeBudget.timeoutMs;
+    recoveryRolloutBytes = resumeBudget.rolloutBytes;
+    console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
+    recoveryAdmission.hold(await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes));
+    const thread = await resumeOrForkOnMissingOrdinal(
+      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst, modelProvider: opts.modelProvider ?? profile.codexModelProvider }),
+      forkRecoveryOptions(resolved.id, displayName, opts, requestedThreadId),
+    );
     reportResumedCodexModel(model, thread.resumedModel);
     threadId = thread.threadId;
     freshDeferred = thread.freshDeferred;
     profile.codexRecoveryVerification = thread.verification;
   } catch (e: any) {
+    recoveryAdmission.release();
     console.error(`[anet] ❌ Codex thread recovery verification failed: ${e?.message || e}`);
     console.error(`[anet]    Fail-closed: no bridge/TUI was started and thread/start was not used as a fallback.`);
+    for (const line of describeMissingOrdinalFailure(String(e?.message || e), { threadId: requestedThreadId })) console.error(`[anet] ${line}`);
     console.error(`[anet]    Debug:   tmux attach -t ${shellQuote(`=${appsrvSession}`)}`);
     killTmuxSession(appsrvSession);
     console.error(`[anet]    Rolled back the replacement app-server; existing CODEX_HOME and stored thread remain unchanged.`);
@@ -1885,7 +2093,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #P2fix顺手3 — defense-in-depth shape check before threadId flows into
   // a bash-string interpolation. Server-generated ids match; anything else
   // means either a protocol drift or a compromised app-server.
-  if (!freshDeferred && !SAFE_THREAD_ID.test(threadId)) {
+  if (!freshDeferred && !SAFE_CODEX_THREAD_ID.test(threadId)) {
     console.error(`[anet] internal error: unexpected threadId shape (rejected before shell interpolation)`);
     console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
     // #P2fix复审顺手3 — defense-in-depth env-file cleanup (see :431).
@@ -1896,6 +2104,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
 
   const rawCfgPath = join(nodesDir(), resolved.id, "config.json");
   const rawCfg = JSON.parse(readFileSync(rawCfgPath, "utf-8"));
+  if (opts.newSession) delete rawCfg.codexPendingThread;
   let pendingRecoveryId: string | undefined;
   if (freshDeferred && rawCfg.codexPendingThread !== undefined) {
     try {
@@ -1943,14 +2152,24 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // codepath as the non-copresence case — no fork of the bridge dispatch.
     // #1856 PR-D — 桥再入用**当前这份 anet**(execPath + execArgv + argv[1]),不用 PATH 上的 `anet`:
     // 真机上 PATH 里是另一个版本,它不认这份 profile,把桥当成 claude-code-cli 起了;沿用 PATH 等于让桥的运行时取决于环境。
-    const selfInvoke = [process.execPath, ...process.execArgv, process.argv[1]].map(shellQuote).join(" ");
+    const selfInvoke = reinvokeShell([], true);
     // #535 (audit P1-2) — when the bridge died its tmux session went with it, and the printed
     // `tmux attach` pointed at nothing: the real error was gone. Its output now also goes to
     // <node>/codex-bridge.log (0600, truncated each start, capped), and a failure prints the tail.
     const bridgeLog = join(nodesDir(), resolved.id, CODEX_BRIDGE_LOG_NAME);
     try { writeFileSync(bridgeLog, "", { mode: 0o600 }); chmodIfPosix(bridgeLog, 0o600); } catch { /* best-effort: the tee still creates it */ }
+    const bridgeEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: identityMarker,
+      ANET_COPRESENCE_BRIDGE: "1",
+      ANET_CODEX_RESUME_TIMEOUT_MS: String(recoveryTimeoutMs),
+      ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES: String(resolveCopresenceMaxPayloadBytes(recoveryRolloutBytes)),
+      ANET_CODEX_TUI_SESSION: tuiSession,
+      ...(pairedAgentNodeEntrypoint ? { ANET_CODEX_PAIRED_AGENT_NODE: pairedAgentNodeEntrypoint } : {}),
+    }));
     const bridgeCmd = [
-      `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+      `. ${shellQuote(bridgeEnvFilePath)}`,
+      `/bin/rm -f ${shellQuote(bridgeEnvFilePath)}`,
       `unset COMMHUB_TOKEN ANET_CODEX_COMMHUB_TOKEN`,
       codexBridgeTeeCommand(shellQuote(bridgeLog)),
       `exec ${selfInvoke} node start ${shellQuote(displayName)}`,
@@ -1963,12 +2182,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         "-e", `CODEX_HOME=${opts.codexHome}`,
         // #448 — health.tui probes this exact session name.
         "-e", `ANET_CODEX_TUI_SESSION=${tuiSession}`,
-        // #535 — the entrypoint ⓪ already resolved and validated; the bridge re-validates it, no npx.
-        ...(pairedAgentNodeEntrypoint ? ["-e", `ANET_CODEX_PAIRED_AGENT_NODE=${pairedAgentNodeEntrypoint}`] : []),
         "bash", "-lc", bridgeCmd,
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${bridgeSession} failed: ${e?.message || e}`);
+      try { rmSync(bridgeEnvFilePath, { force: true }); } catch { /* best-effort */ }
       console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
       process.exit(1);
     }
@@ -1978,10 +2196,11 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       : freshDeferred
         ? "[codex-app-server] client-health role=bridge state=waiting-for-tui-thread"
         : bridgeClientHealthReceipt(wsUrl, threadId);
+    const bridgeAttachTimeoutMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
     const bridgeReady = await waitForTmuxPaneText(
       bridgeSession,
       bridgeReceipt,
-      25_000,
+      bridgeAttachTimeoutMs,
     );
     if (!bridgeReady) {
       await new Promise((r) => setTimeout(r, 300)); // let tee flush the last lines
@@ -1990,7 +2209,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       for (const line of bridgeLaunchFailureLines({
         bridgeAlive: tmuxSessionRunning(bridgeSession),
         attachCommand: `tmux attach -t ${shellQuote(`=${bridgeSession}`)}`,
-        logPath: bridgeLog, logText, waitedSeconds: 25,
+        logPath: bridgeLog, logText, waitedSeconds: Math.ceil(bridgeAttachTimeoutMs / 1000),
         cleanupCommand: `anet node stop ${shellQuote(displayName)}`,
       })) console.error(line);
       process.exit(1);
@@ -2012,10 +2231,17 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   };
   const launchTui = () => {
     // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
-    const tuiArgv = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgv = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tuiInvocation = `exec ${shellQuote(opts.codexBin)} ${tuiArgv.map(shellQuote).join(" ")}`;
+    const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
+      CODEX_HOME: opts.codexHome,
+      ANET_NODE_MARKER: identityMarker,
+    }));
     const tuiCmd = [
-      `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
+      `. ${shellQuote(tuiEnvFilePath)}`,
+      `/bin/rm -f ${shellQuote(tuiEnvFilePath)}`,
       tuiInvocation,
     ].join(" ; ");
     try {
@@ -2027,6 +2253,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${tuiSession} failed: ${e?.message || e}`);
+      try { rmSync(tuiEnvFilePath, { force: true }); } catch { /* best-effort */ }
       console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
       process.exit(1);
     }
@@ -2043,7 +2270,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.log(`[anet] ③ TUI tmux=${tuiSession} ready to attach`);
   };
   const requireTuiPainted = async () => {
-    const TUI_PAINT_TIMEOUT_MS = 40_000;
+    // Codex 0.133 can spend longer than 40s hydrating a large resumed rollout
+    // before its first paint. This is the same bounded recovery operation, so
+    // use the launcher's finite size-aware budget rather than a fixed window.
+    const TUI_PAINT_TIMEOUT_MS = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
     const tuiState = await codexTuiStateAfterRender(tuiSession, TUI_PAINT_TIMEOUT_MS);
     if (tuiState !== "usable") {
       console.error("");
@@ -2054,81 +2284,86 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       process.exit(1);
     }
   };
-  if (tuiFirst) {
-    launchTui();
-    await requireTuiPainted();
-    console.log(`[anet] ③→② TUI restored on the exact session; attaching the bridge now (--tui-first)`);
-    await launchBridge();
-  } else {
-    await launchBridge();
-    launchTui();
-  }
+  const afterLaunch = () => {
+    // #P3fix复审 finding #5 — best-effort marker-file update with bridge/tui
+    // observability hints now that both sessions are up. Marker file was
+    // already written after appsrv (see above) with just appsrv's hint —
+    // reap identity is unchanged (still environ scan for uuid). This write
+    // is purely for post-mortem debugging so operators can `cat` the marker
+    // file and see all three pane pids. Best-effort: if the rewrite fails,
+    // the appsrv-only marker still works for reap.
+    try {
+      writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
+        appsrv: harvestSession(appsrvSession),
+        bridge: harvestSession(bridgeSession),
+        tui:    harvestSession(tuiSession),
+      });
+    } catch { /* best-effort observability update; appsrv-only marker still governs reap */ }
 
-  // #P3fix复审 finding #5 — best-effort marker-file update with bridge/tui
-  // observability hints now that both sessions are up. Marker file was
-  // already written after appsrv (see above) with just appsrv's hint —
-  // reap identity is unchanged (still environ scan for uuid). This write
-  // is purely for post-mortem debugging so operators can `cat` the marker
-  // file and see all three pane pids. Best-effort: if the rewrite fails,
-  // the appsrv-only marker still works for reap.
-  try {
-    writeCopresenceMarker(nodesDir(), resolved.id, identityMarker, {
-      appsrv: harvestSession(appsrvSession),
-      bridge: harvestSession(bridgeSession),
-      tui:    harvestSession(tuiSession),
+    // 就绪 covers three tmux sessions, so it has to be true of all three at the
+    // moment it is printed — ① proved itself by its listening line, but that was
+    // several seconds and two spawns ago.
+    const dead = [appsrvSession, bridgeSession, tuiSession].filter(s => !tmuxSessionRunning(s));
+    if (dead.length > 0) {
+      console.error(`[anet] ❌ 共存节点 ${displayName} 没起来 — 这些 tmux 会话已经不在了: ${dead.join(", ")}`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+  };
+
+  // Paint can precede the TUI WebSocket. Keep cap 1 until the existing exact
+  // process/port attribution succeeds; an error still releases via the exit hook.
+  const requireTuiConnected = async () => {
+    assertCopresenceSessionsCodexHome([appsrvSession, bridgeSession, tuiSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
+
+    // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
+    //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
+    //   !probePosixOwned…       → pid 拿到了,但没有一条回环连接能归属到它
+    // 前者要去看 tmux 会话,后者才该去看 CODEX_HOME / 端口。指错方向的代价是整整一轮排查。
+    const tuiIdentity = harvestSession(tuiSession);
+    if (!tuiIdentity) {
+      console.error(`[anet] ❌ TUI second-client health failed: 拿不到 TUI 会话 ${tuiSession} 的进程身份(pid)。`);
+      console.error(`[anet]    这不是"连不上",是**根本没找到那个 TUI** —— 先看 tmux 会话在不在、名字对不对,`);
+      console.error(`[anet]    不要去查 CODEX_HOME / 端口。`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+    // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
+    // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
+    const posixTuiAttributionMs = resolveCopresenceBridgeAttachTimeoutMs(recoveryTimeoutMs);
+    const attribution = await waitForPosixOwnedLoopbackConnection({
+      rootPid: tuiIdentity.pid, port, deadlineMs: posixTuiAttributionMs,
+      probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
+      alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
     });
-  } catch { /* best-effort observability update; appsrv-only marker still governs reap */ }
-
-  // 就绪 covers three tmux sessions, so it has to be true of all three at the
-  // moment it is printed — ① proved itself by its listening line, but that was
-  // several seconds and two spawns ago.
-  const dead = [appsrvSession, bridgeSession, tuiSession].filter(s => !tmuxSessionRunning(s));
-  if (dead.length > 0) {
-    console.error(`[anet] ❌ 共存节点 ${displayName} 没起来 — 这些 tmux 会话已经不在了: ${dead.join(", ")}`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
-
-  // 就绪 has to mean "can take a task", not "three sessions exist". Both times
-  // a node was unusable on 2026-08-20 the ✅ had already been printed over a
-  // TUI parked on an interactive prompt.
-  if (!tuiFirst) await requireTuiPainted();
-  assertCopresenceSessionsCodexHome([appsrvSession, bridgeSession, tuiSession], opts.codexHome, displayName, [appsrvSession, bridgeSession, tuiSession]);
-
-  // #1342 同族副本:这里原本也把**两种处境**折叠成同一句。
-  //   !tuiIdentity            → 连 TUI 的 pid 都没拿到(会话名对不上 / 会话刚没了)
-  //   !probePosixOwned…       → pid 拿到了,但没有一条回环连接能归属到它
-  // 前者要去看 tmux 会话,后者才该去看 CODEX_HOME / 端口。指错方向的代价是整整一轮排查。
-  const tuiIdentity = harvestSession(tuiSession);
-  if (!tuiIdentity) {
-    console.error(`[anet] ❌ TUI second-client health failed: 拿不到 TUI 会话 ${tuiSession} 的进程身份(pid)。`);
-    console.error(`[anet]    这不是"连不上",是**根本没找到那个 TUI** —— 先看 tmux 会话在不在、名字对不对,`);
-    console.error(`[anet]    不要去查 CODEX_HOME / 端口。`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
-  // #2255 —— 「画出来了」不等于「连上了」:真 codex 0.155.1 先画 banner(~170 ms)后建 ws(~221 ms)。只探一次,
-  // 忙的机器上就会把好好的节点判成失败。跟 Windows 路径一样轮询(posix-codex-copresence.ts),TUI 退了就不再等。
-  const attribution = await waitForPosixOwnedLoopbackConnection({
-    rootPid: tuiIdentity.pid, port, deadlineMs: POSIX_TUI_ATTRIBUTION_MS,
-    probe: () => probePosixOwnedLoopbackConnection(tuiIdentity.pid, port),
-    alive: () => tmuxSessionRunning(tuiSession) && pidAlive(tuiIdentity.pid),
+    if (attribution.outcome !== "connected") {
+      console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
+      console.error(`[anet]    找的是: pid=${tuiIdentity.pid} port=${port} session=${tuiSession}`);
+      console.error(attribution.outcome === "tui-exited"
+        ? `[anet]    TUI 在等连接期间退出了(探了 ${attribution.probes} 次,${attribution.waitedMs} ms)—— 先看 TUI 会话里它为什么退。`
+        : `[anet]    等了 ${attribution.waitedMs} ms、探了 ${attribution.probes} 次,TUI 一直没有连到这个端口。`);
+      console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
+      console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
+      process.exit(1);
+    }
+  };
+  await launchCopresencePiecesReleasingRecovery({
+    tuiFirst,
+    launchBridge,
+    launchTui,
+    requireTuiPainted,
+    requireTuiConnected,
+    afterLaunch,
+    announceTuiFirst: () => console.log(`[anet] ③→② TUI restored on the exact session; attaching the bridge now (--tui-first)`),
+    lease: recoveryAdmission,
   });
-  if (attribution.outcome !== "connected") {
-    console.error(`[anet] ❌ TUI second-client health failed: managed TUI tree has no attributable connection to the exact app-server.`);
-    console.error(`[anet]    找的是: pid=${tuiIdentity.pid} port=${port} session=${tuiSession}`);
-    console.error(attribution.outcome === "tui-exited"
-      ? `[anet]    TUI 在等连接期间退出了(探了 ${attribution.probes} 次,${attribution.waitedMs} ms)—— 先看 TUI 会话里它为什么退。`
-      : `[anet]    等了 ${attribution.waitedMs} ms、探了 ${attribution.probes} 次,TUI 一直没有连到这个端口。`);
-    console.error(`[anet]    CODEX_HOME/remote mismatch is possible; refusing to print success.`);
-    console.error(`[anet]    Cleanup: anet node stop ${shellQuote(displayName)}`);
-    process.exit(1);
-  }
   console.log(freshDeferred
     ? `[anet] client-health role=bridge state=waiting-for-tui-thread`
     : `[anet] client-health role=bridge remote=exact thread=exact`);
   console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed`);
+  recoveryAdmission.release(); // idempotent: already released once the bridge and TUI were ready
 
+  clearOldStoppedReceipt(); // Successful manual start, not a failed/partial attempt.
   const hubBase = opts.hub.replace(/\/+$/, "");
   console.log("");
   console.log(`[anet] ✅ 共存节点 ${displayName} 就绪`);
@@ -2151,13 +2386,40 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     console.error(`[anet] ❌ OpenCode --copresence requires runtime=opencode-cli (node "${displayName}" is runtime=${runtime}).`);
     process.exit(1);
   }
+  // Refuse before saving the profile or replacing an existing bridge/TUI.
+  // Otherwise the actionable V2 policy error is buried/truncated in the
+  // bridge tail and misreported as a 30-second launcher timeout (#827).
+  const generationRefusal = opencodeStartGenerationRefusal(resolved.profile, {
+    copresence: true,
+    configFile: join(nodesDir(), resolved.id, "config.json"),
+  });
+  if (generationRefusal) {
+    console.error(`[anet] ❌ ${generationRefusal}`);
+    process.exit(1);
+  }
+  if (resolved.profile.opencodeSharedServerUrl || resolved.profile.opencodeSharedServerPasswordFile) {
+    const url = resolved.profile.opencodeSharedServerUrl;
+    const passwordFile = resolved.profile.opencodeSharedServerPasswordFile;
+    if (resolved.profile.opencodeGeneration !== "v2" || !url || !/^http:\/\/127\.0\.0\.1:\d+$/.test(url)
+      || !passwordFile || !isAbsolute(passwordFile) || !existsSync(passwordFile)) {
+      console.error("[anet] ❌ Shared OpenCode Server config requires V2, loopback URL and existing absolute password file; no sessions were stopped.");
+      process.exit(1);
+    }
+    const passwordStat = statSync(passwordFile);
+    if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
+      console.error("[anet] ❌ Shared OpenCode Server password file must be a private regular file; no sessions were stopped.");
+      process.exit(1);
+    }
+  }
   if (!tmuxAvailable()) {
     console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
     process.exit(1);
   }
 
+  // #3418 —— 这里只想记一格 opencodeMode。原来用内存里的 resolved.profile 整份回写，
+  // 会把启动之后 Hub 改过的 model 一起覆盖掉（生产实测丢过一次）。
   const profile: Profile = { ...resolved.profile, opencodeMode: "copresence" };
-  saveProfile(resolved.id, profile);
+  patchProfileFields(resolved.id, { opencodeMode: "copresence" } as Partial<Profile>);
   const bridgeSession = `${displayName}-桥`;
   const tuiSession = displayName;
   const attachScript = join(nodesDir(), resolved.id, "opencode-attach.sh");
@@ -2174,7 +2436,8 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   rmSync(attachScript, { force: true });
   rmSync(bridgeLog, { force: true });
 
-  const cliEntry = resolve(process.argv[1]);
+  const cliEntry = standaloneNow() ? (process.argv[1] ?? "") : resolve(process.argv[1]);
+  const cliPrefix = reinvokeShell([], false, cliEntry);
   const bridgeCommand = [
     `export PATH=${shellQuote(process.env.PATH ?? "")}`,
     ...(process.env.ANET_AGENT_NODE_BIN
@@ -2184,8 +2447,11 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
       ? [`export ANET_OPENCODE_SAFE_BASE=${shellQuote(process.env.ANET_OPENCODE_SAFE_BASE)}`]
       : []),
     `export ANET_OPENCODE_MODE=copresence`,
+    // Ordinary V2 starts now select orchestration from the persisted profile.
+    // This internal start owns the runtime, not a second TUI/bridge pair.
+    `export ANET_COPRESENCE_BRIDGE=1`,
     `exec > >(tee -a ${shellQuote(bridgeLog)}) 2>&1`,
-    `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
+    `exec ${cliPrefix} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
   ].join(" ; ");
   execTmux([
@@ -2237,7 +2503,48 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   console.log(`[anet]    attach:  tmux attach -t ${shellQuote(`=${displayName}`)}`);
   console.log(`[anet]    stop:    anet node stop ${shellQuote(displayName)}`);
   console.log(`[anet]    bridge:  ${bridgeSession}`);
-  console.log(`[anet]    mode:    opencode-cli copresence (native serve + full attach TUI)`);
+  console.log(`[anet]    mode:    opencode-cli copresence (${profile.opencodeSharedServerUrl ? "existing shared server" : "node-owned server"} + full attach TUI)`);
+}
+
+// Borrow an existing Host/session; this launcher owns only its detached bridge.
+// It never creates, replaces, attaches or tears down the Owner's human TUI.
+async function startBorrowedV1Bridge(resolved: {id: string; profile: Profile}, opts: Record<string,string>) {
+  const nodeDir = join(nodesDir(),resolved.id), configPath = join(nodeDir,"config.json");
+  const selected = readBorrowedLaunchConfig(configPath,process.cwd());
+  if (opts["new-session"] || opts.hub || opts["accept-dev-channels"] || opts.tmux
+    || selected.selection.binding.nodeId !== resolved.profile.node_id
+    || selected.alias !== nodeDisplayName(resolved.id,resolved.profile)) {
+    throw new Error("borrowed V1 start requires the original config, directory and existing session");
+  }
+  if (liveNodePidFromPidfile(resolved.id) !== null) throw new Error("borrowed V1 node already running; retain its existing bridge");
+  resolveStartProfile(resolved.id,resolved.profile);
+  checkRuntimeDependency("opencode-cli","start");
+  assertStartCompatibility("opencode-cli",resolved.profile,resolved.id);
+  if (opencodeLaunchIdentity?.version !== selected.selection.expectedHost.version) throw new Error("borrowed V1 launch version differs from selected Host");
+  const logPath = join(nodeDir,"opencode-borrowed-v1-bridge.log");
+  const fd = openSync(logPath,constants.O_WRONLY|constants.O_CREAT|constants.O_APPEND|constants.O_NOFOLLOW|constants.O_NONBLOCK,0o600);
+  let child: ReturnType<typeof spawn>;
+  const nonce = randomUUID(), launchedAt = Date.now();
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.uid !== process.getuid?.() || st.nlink !== 1 || (st.mode & 0o7777) !== 0o600) throw new Error("unsafe borrowed bridge log");
+    child = spawn(process.execPath,reinvokeArgv(["node","start",resolved.id],true),{
+      cwd:process.cwd(),env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
+        ANET_BORROWED_V1_BRIDGE:"1",ANET_BORROWED_V1_LAUNCH_ID:nonce},
+      detached:true,stdio:["ignore",fd,fd],
+    });
+  } finally { closeSync(fd); }
+  let failed = false;
+  child.on("error",() => { failed = true; });
+  child.unref();
+  const health = await waitForBorrowedLaunchHealth(configPath,launchedAt,launchedAt+30_000,nonce);
+  if (failed || child.exitCode !== null || child.signalCode !== null || !health.ok) {
+    // An uncertain admission can retain a lease. A timeout never authorizes
+    // automatic close/reopen, Host signals or cleanup of recovery state.
+    throw new Error(`borrowed V1 start not proven; retain binding/recovery and inspect ${logPath}`);
+  }
+  console.log(`[anet] ✅ borrowed V1 bridge ready: ${selected.alias} (pid ${health.bridgePid})`);
+  console.log(`[anet]    human TUI remains with its Owner; log: ${logPath}`);
 }
 
 // Minimum commhub-server this CLI is known to work with (#511: a FLOOR, not
@@ -2330,6 +2637,10 @@ function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
     sandboxMode: "danger-full-access",
     skipGitRepoCheck: true,
   };
+}
+
+function copresenceCreateOptTruthy(v: string | boolean | undefined): boolean {
+  return v === true || v === "true";
 }
 
 // Scan ~/.claude/projects/<cwd-key>/*.jsonl — the Claude Code sessions that
@@ -2512,24 +2823,33 @@ function findBundledNodeServerJs(): string | null {
   return null;
 }
 
+/** Disk candidate, or the prebundled payload stamped into the standalone binary. */
+function readNodeServerBundle(): { text: string; filename: string } | null {
+  const src = findBundledNodeServerJs();
+  if (src) return { text: readFileSync(src, "utf-8"), filename: src };
+  const embedded = standaloneNodeServerJs(STANDALONE_BUILD_STAMP);
+  if (!embedded) return null;
+  return { text: embedded, filename: "node-server.js" };
+}
+
 function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean }): "wrote" | "exists" | "no-source" | "kept-newer" {
   const exists = existsSync(targetPath);
   if (exists && !opts.overwrite) return "exists";
-  const src = findBundledNodeServerJs();
-  if (!src) return "no-source";
+  const bundled = readNodeServerBundle();
+  if (!bundled) return "no-source";
   // The target is always `.js` — agent-node's spawn gate pins the CommHub MCP
   // payload to exactly `<project>/.anet/node-server.js` — so a `.ts` source
   // must be transpiled on the way, not copied verbatim. See issue #1216: the
   // verbatim copy produced a file that could not be parsed, and the failure
   // surfaced three layers away as "CommHub MCP readiness preflight failed (1)".
   const payload = nodeServerPayloadFor(
-    readFileSync(src, "utf-8"),
-    src,
+    bundled.text,
+    bundled.filename,
     ambientTypeScriptTranspiler(),
   );
   // #549 — never downgrade a newer existing file (an older anet resuming a
   // node used to strip rules-file support and node_id reporting this way).
-  const applied = applyNodeServerPayload(targetPath, payload, src);
+  const applied = applyNodeServerPayload(targetPath, payload, bundled.filename);
   return applied === "kept-newer" ? "kept-newer" : "wrote";
 }
 
@@ -2574,6 +2894,7 @@ interface Profile {
   codexRuntime?: string;
   codexAppServerUrl?: string;  // RFC-030 — shared codex app-server URL (co-presence)
   codexThreadId?: string;      // RFC-030 — codex thread to adopt
+  codexModelProvider?: string; // #906 explicit provider when resuming an existing thread
   codexRecoveryVerification?: CodexRecoveryVerification;
   codexRecoveryBackup?: { createdAt: string; stateFiles: string[]; path: string };
   // Remembered so `anet node start <name>` alone brings up the co-presence
@@ -2588,11 +2909,15 @@ interface Profile {
   codexProjectDir?: string;
   /** #1969 — codex-sdk runtime: explicit codex binary (agent-node passes it as codexPathOverride). */
   codexBin?: string;
+  /** #739 — co-presence: the version codexBin must report at start (e.g. "0.159.2"). */
+  codexVersion?: string;
   /** #448 — explicit `--codex-home` override, persisted so every respawn recomputes it from config, not env. */
   codexHome?: string;
   opencodeMode?: "headless" | "copresence";
   /** #542/#543 — OpenCode generation ("v1" when absent; "v2" = preview). */
   opencodeGeneration?: string;
+  opencodeSharedServerUrl?: string;
+  opencodeSharedServerPasswordFile?: string;
   model?: string;
   channels: string[];
   env: Record<string, string>;
@@ -2639,7 +2964,8 @@ import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCu
 import { finalExitCode, markFailed, markUsageError } from "../src/cli-exit";
 import { describeHubRemoval, removeNodeFromHub } from "../src/node-delete-hub";
 import { COMMAND_HELP, NODE_DELETE_USAGE, lookupCommandHelp } from "../src/cli-help";
-import { errorText, formatTopLevelError, hubErrorText, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
+import { nodeSecretFileModeWarning, nodeSecretFilePath, readNodeSecretKeys, removeNodeSecret, writeNodeSecret } from "../src/node-secret-file";
+import { errorText, formatTopLevelError, hubErrorText, nodeTokenReissueError, hubReachReason, isNetworkError, maskSecret, redactSecretFields, redactSecrets } from "../src/cli-errors";
 import { defaultHubStopProbes, resolveHubListener, stopHub, type HubPidRecord } from "../src/hub-stop";
 export { normalizeRuntime, type RuntimeName };
 
@@ -2692,6 +3018,100 @@ function normalizeStoredProfile(id: string, project: Record<string, any>, global
     env: project.env && typeof project.env === "object" ? { ...project.env } : {},
     flags: project.flags && typeof project.flags === "object" ? { ...project.flags } : {},
   };
+}
+
+// #2056 (#909) — `anet node secret list <node>`: show the KEY NAMES the node's
+// own secrets.env will load. Values are never read out of that file, so there is
+// nothing here that could print one.
+//   * list  — names only, one per line (or --json)
+//   * no secrets.env  — a normal state, exit 0
+//   * symlink / unreadable / non-regular — error, exit 1 (do not guess)
+/** 读 stdin 到 EOF。值不回显、不进 argv、不进日志。 */
+async function readAllStdin(): Promise<string> {
+  if (process.stdin.isTTY) process.stdin.setRawMode?.(false);
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function nodeSecretCommand(argv: string[]) {
+  const usage = `Usage: anet node secret list  <node> [--json]
+       anet node secret set   <node> <KEY> [--from-env VAR]     (value on stdin)
+       anet node secret unset <node> <KEY>
+
+Manage <node>/secrets.env — the file the node loads at startup (0600, one
+KEY=VALUE per line; reserved keys like PATH/LD_* are ignored).
+
+"list" prints key NAMES only; values are never printed by any verb.
+"set" reads the value from stdin (one line) or from an existing env var with
+--from-env, never from argv — the value must not land in shell history or ps.`;
+  const verb = argv[0];
+  if (!verb || verb === "--help" || verb === "-h") { console.log(usage); return; }
+  if (verb !== "list" && verb !== "set" && verb !== "unset") {
+    console.error(`Unknown: anet node secret ${verb}\n\n${usage}`);
+    process.exit(2);
+  }
+  const asJson = argv.includes("--json");
+  const ref = argv.slice(1).find(a => !a.startsWith("-"));
+  if (!ref) { console.error(usage); process.exit(2); }
+  const resolved = resolveNodeRef(ref);
+  if (!resolved) { console.error(nodeNotFound(ref)); process.exit(1); }
+  const nodeDir = join(nodesDir(), resolved.id);
+  const display = resolved.profile.node_name || resolved.profile.name || resolved.profile.alias || resolved.id;
+
+  if (verb === "set" || verb === "unset") {
+    const key = argv.slice(1).find(a => !a.startsWith("-") && a !== ref);
+    if (!key) { console.error(`缺少 KEY。\n\n${usage}`); process.exit(2); }
+    if (verb === "unset") {
+      const r = removeNodeSecret(nodeDir, key);
+      if (r.kind === "rejected") { console.error(`[anet] ${display}: ${r.reason}`); process.exit(1); }
+      console.log(r.changed ? `[anet] ${display}: 已删除 ${key}` : `[anet] ${display}: 没有 ${key}（未改动）`);
+      return;
+    }
+    // set：值只从 stdin 或既有 env 变量来，绝不从 argv。
+    const fromEnvIdx = argv.indexOf("--from-env");
+    let value: string;
+    if (fromEnvIdx >= 0) {
+      const name = argv[fromEnvIdx + 1];
+      if (!name) { console.error(`--from-env 需要变量名。\n\n${usage}`); process.exit(2); }
+      const v = process.env[name];
+      if (v === undefined) { console.error(`[anet] 环境变量 ${name} 不存在（未改动）`); process.exit(1); }
+      value = v;
+    } else {
+      if (process.stdin.isTTY) {
+        console.error(`[anet] 从 stdin 读取 ${key} 的值（不会回显，Ctrl-D 结束）。\n[anet] 也可以: ... set ${ref} ${key} --from-env VAR`);
+      }
+      value = (await readAllStdin()).replace(/\r?\n$/, "");
+      if (value === "") { console.error(`[anet] 没有从 stdin 读到值（未改动）`); process.exit(1); }
+    }
+    const r = writeNodeSecret(nodeDir, key, value);
+    if (r.kind === "rejected") { console.error(`[anet] ${display}: ${r.reason}`); process.exit(1); }
+    console.log(`[anet] ${display}: 已写入 ${key}（值不显示）。节点需要重启才会加载。`);
+    return;
+  }
+
+  const r = readNodeSecretKeys(nodeDir);
+  if (r.kind === "unsafe") {
+    console.error(`[anet] ${display}: ${r.reason}\n[anet] path: ${nodeSecretFilePath(nodeDir)}`);
+    process.exit(1);
+  }
+  if (r.kind === "missing") {
+    if (asJson) console.log(JSON.stringify({ ok: true, node: display, path: nodeSecretFilePath(nodeDir), keys: [], present: false }, null, 2));
+    else console.log(`[anet] ${display}: 没有 secrets.env（没有配置任何密钥）`);
+    return;
+  }
+  const warning = nodeSecretFileModeWarning(nodeDir);
+  if (warning) console.error(`[anet] ⚠ ${display}: ${warning}`);
+  if (asJson) {
+    console.log(JSON.stringify({ ok: true, node: display, path: nodeSecretFilePath(nodeDir), keys: r.keys, present: true }, null, 2));
+    return;
+  }
+  if (r.keys.length === 0) {
+    console.log(`[anet] ${display}: secrets.env 存在，但没有可加载的 key 名`);
+    return;
+  }
+  console.log(`[anet] ${display}: ${r.keys.length} 个 key（只有名字，值不显示）`);
+  for (const k of r.keys) console.log(`  ${k}`);
 }
 
 function resolveNodeRef(ref: string): { id: string; profile: Profile } | null {
@@ -2808,6 +3228,26 @@ function resolveStartProfile(
   return { profile, runtime };
 }
 
+/**
+ * #3418 —— 只往 config.json 里写声明的那几格：以**磁盘当前内容**打底，patch 覆盖它。
+ *
+ * 为什么不是 `saveProfile(id, { ...profile, x: 1 })`：`profile` 是进程启动时读到的快照，
+ * 长命进程（共存桥）握着它很久；期间 Hub 可能已经把 model 改掉（并 applied 了）。
+ * 用旧快照整份回写，就把那次改动悄悄抹掉了 —— 生产上就是这样丢的（见 profile-merge.ts）。
+ *
+ * 读不到磁盘就不写：宁可少记一格，也不要用读不懂的旧值覆盖整份文件。
+ * 返回是否真的写了（便于调用方打日志，不用于控制流）。
+ */
+function patchProfileFields(id: string, patch: Partial<Profile>): boolean {
+  let onDisk: Profile;
+  try {
+    onDisk = JSON.parse(readFileSync(join(nodesDir(), id, "config.json"), "utf-8")) as Profile;
+  } catch {
+    return false;
+  }
+  saveProfile(id, mergeProfilePatch(onDisk as unknown as Record<string, unknown>, patch as unknown as Record<string, unknown>) as unknown as Profile);
+  return true;
+}
 function saveProfile(id: string, profile: Profile) {
   const dir = join(nodesDir(), id);
   const isOpencode = normalizeRuntime(profile) === "opencode-cli";
@@ -2827,6 +3267,13 @@ function saveProfile(id: string, profile: Profile) {
   // #542 — an OpenCode node records its generation (absent → "v1"; never overwritten).
   const normalized = normalizeStoredProfile(id, isOpencode ? stampOpencodeGeneration(profile) : profile);
   const toSave = serializeProfileForConfigJson(normalized, profile);
+  // #3418 —— 白名单之外的键会静默消失。生产上就丢过 opencodeConfiguredModelAtLastOpen，
+  // 表现成「下游读到 null、判据永远 false」，查了三轮才找到。丢掉要出声。
+  try {
+    const onDisk = JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"));
+    const dropped = droppedProfileKeys(onDisk, toSave);
+    if (dropped.length) console.warn(`[anet] ⚠ profile 保存会丢掉这些键（不在白名单里）: ${dropped.join(", ")}`);
+  } catch {}
   const body = JSON.stringify(toSave, null, 2) + "\n";
   if (isOpencode) {
     // The profile contains the node ntok_. Never replace through a
@@ -2936,8 +3383,28 @@ function packageJsonPath() {
 }
 
 function getAnetVersion(): string {
+  // Compiled binaries see import.meta.url under /$bunfs and have no package.json
+  // on that virtual path. The stamp is null for npm/node, so this stays a disk read.
+  const embedded = anetVersionFromStamp(STANDALONE_BUILD_STAMP);
+  if (embedded) return embedded;
   try { return JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version || ""; }
   catch { return ""; }
+}
+
+// 2026-11-10 —— 让 agent-node 自报「起它的是哪个 anet CLI」用的环境变量片段。
+//
+// 为什么需要它：`config_snapshot.anet_version` 是静态占位值（写死 0.1.0），客户端因此
+// 给不出这台机器「该装哪一对包」，只能建议 `agent-node@preview` —— 装完很可能与本地
+// CLI 不成对，CLI 拒绝启动（`Incompatible agent-node for opencode-cli`），节点离线。
+//
+// 形状不认就返回**空对象**：宁可「没报」也不要报一个假版本（假版本正是上面那个 bug 的成因）。
+// 🔴 只用于**真正 spawn agent-node 子进程**的 env，不要塞进 `AgentNodeLaunchPlan.probeEnv` ——
+//    那个对象还要拿去跑 `agent-node --help` 探测，混入启动侧的东西会让探测环境与启动环境不一致。
+function launchedByCliVersionEnv(): Record<string, string> {
+  const v = getAnetVersion();
+  return /^[0-9]+\.[0-9]+\.[0-9]+(-preview\.[0-9]+)?$/.test(v) && v.length <= 64
+    ? { ANET_LAUNCHED_BY_CLI_VERSION: v }
+    : {};
 }
 
 /** POST /api/auth/login|register 的 client_label:这条登录在 app「登录设备」里叫什么(见 src/login-client-label.ts)。 */
@@ -3197,12 +3664,14 @@ function detectGlobalNpmPackage(pkgName: string, displayName: string, source = "
 }
 
 function detectInstalledPackages() {
-  const pkg = JSON.parse(readFileSync(packageJsonPath(), "utf-8"));
+  // Standalone: do not touch /$bunfs package.json. npm/node: same read as before.
+  const embeddedAnet = anetVersionFromStamp(STANDALONE_BUILD_STAMP);
+  const pkgVersion = embeddedAnet ?? (JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version as string);
   const versions = {
     anet: {
       name: "anet",
       displayName: "anet",
-      version: pkg.version as string,
+      version: pkgVersion,
       state: "ok" as VersionState,
     },
     agentNode: detectCommandVersion("agent-node", "agent-node", "global"),
@@ -3237,7 +3706,7 @@ function detectInstalledPackages() {
     versions.commhubServer = detectGlobalNpmPackage("@sleep2agi/commhub-server", "commhub-server", "global");
   }
 
-  return versions;
+  return applyStandaloneDetectedVersions(versions, STANDALONE_BUILD_STAMP);
 }
 
 function formatDetectedVersion(pkg: DetectedVersion): string {
@@ -3293,7 +3762,14 @@ function detectAgentNodeSubDeps(): { claudeAgentSdk: string | null; codexSdk: st
 
 function printVersionReport() {
   const versions = detectInstalledPackages();
-  console.log(`anet v${versions.anet.version}\n`);
+  process.stdout.write(formatAnetVersionBanner(versions.anet.version, standaloneBundleVersion(STANDALONE_BUILD_STAMP)));
+  // 2026-10-31 —— #3294：版本标签之外还要有**字节标识**。
+  // 「同一版本号、不同字节」在只有标签时不可分辨；而 absent 与 invalid 也必须分开说
+  // （前者是源码检出的正常状态，后者是注入写坏了）。
+  {
+    const r = readPackageBuildInfo();
+    console.log(`  ${formatBuildLine(r)}`);
+  }
 
   console.log("Components (auto-fetched on first use, you don't need to install them manually):");
   console.log(`  ${formatLazyComponent(versions.agentNode)}`);
@@ -3585,7 +4061,7 @@ function opencodeUsePinSource(): string {
 type AgentNodeLaunchPlan = {
   command: string;
   argsPrefix: string[];
-  source: "explicit" | "sibling" | "global" | "preview" | "paired";
+  source: "explicit" | "sibling" | "global" | "preview" | "paired" | "bundled";
   probeEnv: NodeJS.ProcessEnv;
 };
 
@@ -3619,7 +4095,9 @@ function agentNodeHelp(plan: AgentNodeLaunchPlan): string {
   return execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000 : 5_000,
+    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000
+      : plan.source === "bundled" ? 60_000
+      : 5_000,
     env: plan.probeEnv,
   });
 }
@@ -3655,9 +4133,26 @@ function opencodeAgentNodeError(detail: string): Error {
  * A merely capable older preview is insufficient: historical builds could
  * advertise opencode-cli without this release's isolation guarantees.
  */
+function bundledAgentNodeLaunchPlan(probeEnv: NodeJS.ProcessEnv): AgentNodeLaunchPlan {
+  return {
+    command: process.execPath,
+    argsPrefix: standaloneNodeArgs([]),
+    source: "bundled",
+    probeEnv,
+  };
+}
+
 function resolveOpencodeAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (opencodeAgentNodeLaunchPlan) return opencodeAgentNodeLaunchPlan;
   const probeEnv = hardenOpencodeAgentNodeEnv(process.env, process.env.PATH);
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(probeEnv);
+    if (!planSupportsOpencode(plan)) {
+      throw opencodeAgentNodeError("embedded agent-node lacks opencode-cli");
+    }
+    opencodeAgentNodeLaunchPlan = plan;
+    return plan;
+  }
   const forbiddenRoots = discoverOpencodeForbiddenRoots();
   const explicit = process.env.ANET_AGENT_NODE_BIN;
 
@@ -3723,6 +4218,12 @@ function resolveOpencodeAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
 }
 
 function revalidateOpencodeAgentNodeLaunchPlan(plan: AgentNodeLaunchPlan): AgentNodeLaunchPlan {
+  if (plan.source === "bundled") {
+    if (!planSupportsOpencode(plan)) {
+      throw opencodeAgentNodeError("embedded agent-node no longer advertises opencode-cli");
+    }
+    return plan;
+  }
   const entrypoint = validateAgentNodePackageEntrypoint(
     plan.argsPrefix[0],
     OPENCODE_AGENT_NODE_SPEC,
@@ -3745,6 +4246,14 @@ function pairedAgentNodeError(detail: string): Error {
 function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (codexAgentNodeLaunchPlan) return codexAgentNodeLaunchPlan;
   const probeEnv = { ...process.env };
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(probeEnv);
+    if (!agentNodeHelpSupportsCodexAppServer(agentNodeHelp(plan))) {
+      throw pairedAgentNodeError("embedded agent-node lacks codex-app-server capability");
+    }
+    codexAgentNodeLaunchPlan = plan;
+    return plan;
+  }
   const forbiddenRoots = discoverOpencodeForbiddenRoots();
   const explicit = process.env.ANET_AGENT_NODE_BIN;
   let rawEntrypoint: string;
@@ -3764,13 +4273,14 @@ function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
     source = "paired";
   } else {
     let output: string;
+    const resolveTimeoutMs = pairedAgentNodeResolveTimeoutMs(probeEnv);
     try {
       const resolution = pairedAgentNodeResolution();
       output = execFileSync("npx", resolution.args, {
-        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000, env: probeEnv,
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: resolveTimeoutMs, env: probeEnv,
       });
     } catch (error: any) {
-      throw pairedAgentNodeError(`could not resolve exact paired package: ${error?.stderr || error?.message || error}`);
+      throw pairedAgentNodeError(pairedAgentNodeResolveError(error, resolveTimeoutMs));
     }
     const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (lines.length !== 1 || !isAbsolute(lines[0])) {
@@ -3882,6 +4392,14 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (grokAgentNodeLaunchPlan) return grokAgentNodeLaunchPlan;
   prepareGrokPreviewResolverConfigs(home);
   const resolverEnv = buildGrokPreviewResolverEnv(process.env, home);
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(resolverEnv);
+    if (!planSupportsRuntime(plan, "grok-build-cli")) {
+      throw new Error("embedded agent-node lacks the required Grok co-presence capability");
+    }
+    grokAgentNodeLaunchPlan = plan;
+    return plan;
+  }
 
   const explicit = process.env.ANET_AGENT_NODE_BIN;
   if (explicit) {
@@ -4355,6 +4873,7 @@ async function skillCommand() {
 function printHelp() {
   console.log(`
 anet — AI Agent Network CLI (V2)
+Capabilities: ANET_CAPABILITY_SOURCE_RESUME_V1
 
 Quick start:
   anet hub start             Start local hub
@@ -4381,6 +4900,7 @@ Node Management:
   anet node stop <name> --remote Act on a node on another machine via its daemon (also start / restart) [--yes] [--wait <s>]
   anet node edit <n> --remote   Switch a node on another machine to --model <id>
   anet node codex <verb> <ref>  Codex TUI co-presence lifecycle: preflight|verify|canary|start|restart|resume|fork|account|rollback
+  anet node secret <verb> <ref> Daemon-issued node secret: list|set|unset (owner/admin; the value never leaves the hub)
   anet attach <name>            Attach the node's exact tmux TUI session
   anet info <name>              Detailed node info + server status
   anet status                   Network overview (agents + tasks)
@@ -4453,7 +4973,11 @@ Grok co-presence (EXPERIMENTAL — shared human + network TUI; opt in explicitly
 
 Channel:
   anet channel add telegram <name> --bot-token <tok> --allow <uid>
+  anet channel add feishu <name> --app-id <id> --app-secret <secret> --allow <open_id>
+                                [--allow-chat <chat_id>]  Feishu bot (long connection)
   anet channel ls [name]  List channels
+  Note: a channel is an extra inbox next to the Hub one; the node's turn pipeline is
+        the same, so the runtime does not change (grok-build-cli is refused for now).
 
 Setup:
   anet init [--hub <url>]                                 Configure hub URL (global; no token prompt)
@@ -4472,6 +4996,8 @@ Daemon (host_supervisor — required by the dashboard's node-creation wizard):
   anet daemon init <name>                                 Create a host_supervisor node config
   anet daemon start <name>                                Start an existing daemon
   anet daemon list                                        List locally-configured daemons
+  anet daemon provider list <name>                        Read daemon-scoped Provider configuration (no secrets)
+  anet daemon provider put <name> --revision N            Save private Provider JSON from stdin (not runtime apply)
 
 Config & tokens:
   anet config [path|json]      Show config summary, path, or raw JSON
@@ -4489,7 +5015,7 @@ Other:
   anet login                  Login (username + password)
   anet login --token <tok>    Login with API token
   anet logout                 Revoke this login on the Hub, then remove the saved token
-  anet passwd                 Change password
+  anet passwd                 Change password (keeps your CLI/script tokens; --revoke-cli-tokens revokes them too)
   anet whoami                 Show current user + networks
   anet network ls             List my networks
   anet network create <name>  Create a network
@@ -4563,6 +5089,13 @@ Usage: anet node start <name> [options]
 Options:
   --tmux                       Start in a tmux session
   --new-session               Start with a fresh model session
+  --skip-recovery-backup      DANGEROUS: start without a Codex recovery-point backup
+  --fork-on-resume-failure    codex: if the thread cannot be resumed ("missing an
+                              ordinal"), ask, then fork it into a new thread
+                              (non-interactive: also pass --yes)
+  --fork-recovery-request-id <str_…>
+                              Correlate a codex fork mapping with a Hub start
+                              request (not confirmation or startup success)
   --copresence                Start a shared human + agent TUI\n                              (codex-app-server | opencode-cli | grok-build-cli)
                               (codex: recorded on the node, so the next start
                               needs no flag — plain 'anet node start <name>')
@@ -4600,6 +5133,11 @@ async function initGlobal() {
   let hub = opts.hub;
 
   if (!hub) {
+    // #2293：具体到「该传什么」，而不是让通用错误去兜。
+    if (!process.stdin.isTTY) {
+      console.error("Error: 没有给 --hub，且 stdin 不是终端 ⇒ 不会提问。用法: anet init --hub http://YOUR_IP:9200");
+      process.exit(1);
+    }
     hub = await ask("CommHub URL (e.g. http://YOUR_IP:9200)");
   }
 
@@ -4872,6 +5410,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
+      ...(runtime === "codex-app-server" && copresenceCreateOptTruthy(opts.copresence)
+        ? codexSdkYoloFlags(opts["no-yolo"] === "true")
+        : {}),
     },
     ...(runtime === "codex-app-server" && opts["codex-app-server-url"]
       ? { codexAppServerUrl: opts["codex-app-server-url"] }
@@ -4902,6 +5443,18 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     console.error(`[anet] ❌ ${generationApplied.refusal}`);
     process.exit(1);
   }
+  if (opts["opencode-generation"] === "v2") {
+    try {
+      const shared = resolveSharedOpenCodeServer(opts, join(home, ".anet", "opencode-shared-server.json"));
+      if (shared) return { ...generationApplied.profile, opencodeSharedServerUrl: shared.url, opencodeSharedServerPasswordFile: shared.passwordFile };
+    } catch (error) {
+      console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  } else if (opts["opencode-shared-server-url"] !== undefined || opts["opencode-shared-server-password-file"] !== undefined || opts["opencode-new-server"] !== undefined) {
+    console.error("[anet] ❌ Shared OpenCode Server options require --opencode-generation v2.");
+    process.exit(1);
+  }
   return generationApplied.profile;
 }
 
@@ -4913,8 +5466,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
 // process.env and FATAL-fails the parent CLI when the referenced var is
 // missing — same UX as agent-node's own resolver, just earlier in the chain
 // so we don't fork into a crashing child.
-function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string, dotenvMap?: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
+function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: string, dotenvMap?: Record<string, string>, scopedEnv?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = Object.fromEntries(Object.entries(scopedEnv ?? {})
+    .filter(([key]) => !Object.hasOwn(process.env, key)));
   if (!profileEnv || typeof profileEnv !== "object") return out;
   for (const [k, v] of Object.entries(profileEnv)) {
     if (typeof v === "string") {
@@ -4947,12 +5501,13 @@ function resolveProfileEnv(profileEnv: Record<string, any> | undefined, home: st
 // per line, no quotes, no shell expansion. Returns {} if the file is missing
 // or unreadable. Caller logs the *key count* — never the values.
 function loadNodeDotenv(nodeId: string): Record<string, string> {
+  const scoped = readScopedNodeEnv(join(nodesDir(), nodeId));
   const path = join(nodesDir(), nodeId, ".env");
   repairPrivateFilePermissions(path);
-  if (!existsSync(path)) return {};
+  if (!existsSync(path)) return scoped;
   try {
-    return parseNodeDotenv(readFileSync(path, "utf-8"));
-  } catch { return {}; }
+    return { ...scoped, ...parseNodeDotenv(readFileSync(path, "utf-8")) };
+  } catch { return scoped; }
 }
 
 function parseNodeDotenv(raw: string): Record<string, string> {
@@ -4970,8 +5525,18 @@ function parseNodeDotenv(raw: string): Record<string, string> {
 }
 
 function loadOpencodeNodeDotenv(nodeId: string): Record<string, string> {
+  const scoped = readScopedNodeEnv(join(nodesDir(), nodeId));
   const raw = readOpencodePrivateProfileFile(join(nodesDir(), nodeId), ".env");
-  return raw === undefined ? {} : parseNodeDotenv(raw);
+  return { ...scoped, ...(raw === undefined ? {} : parseNodeDotenv(raw)) };
+}
+
+// OpenCode stores the node secret file through the private-profile reader.
+// The runtime id stays in this helper: nodeEditCommand must not grow its own
+// runtime-id literals (#1698 scans that function body).
+function loadNodeDotenvForProfile(nodeId: string, profile: Profile): Record<string, string> {
+  return normalizeRuntime(profile) === "opencode-cli"
+    ? loadOpencodeNodeDotenv(nodeId)
+    : loadNodeDotenv(nodeId);
 }
 
 // #193 envRef Option A — ensure the user's project-level `.anet/.gitignore`
@@ -5038,6 +5603,9 @@ function saveCreatedNode(id: string, profile: Profile) {
   rewritePlainSecretsToEnvRef(id, profile);
   writeLegacyProjectAlias(profile.node_name || id);
   saveProfile(id, profile);
+  if ((profile as { codexCopresence?: boolean }).codexCopresence === true) {
+    writeCopresenceYoloToCodexHome(join(nodesDir(), id, "codex-home"));
+  }
 }
 
 // #125 — extracted helper so create + migrate-token-to-envref + (future)
@@ -5149,13 +5717,55 @@ async function ensureNodeToken(profile: Profile, id: string): Promise<Profile> {
 // 0o600 by writeOpencodeAuthJson. If the env key is missing we emit
 // a node-scoped upstream login command rather than suggesting a second create
 // of an alias that now already exists.
+function alignOpencodeV2CreateOrExit(profile: Profile, opts: Record<string, any>): void {
+  if (normalizeRuntime(profile) !== "opencode-cli" || opencodeGenerationOfConfig(profile) !== "v2") return;
+  try {
+    const requestedModel = typeof opts.model === "string" && opts.model !== "true" ? opts.model : undefined;
+    const planned = planOpencodeV2Create({
+      projectDir: process.cwd(),
+      homeDir: opencodeBindingHome(),
+      xdgConfigHome: process.env.XDG_CONFIG_HOME,
+      requestedModel,
+      requestedProvider: typeof opts.provider === "string" ? opts.provider : undefined,
+      requestedBaseUrl: typeof opts["base-url"] === "string" ? opts["base-url"] : undefined,
+      requestedApiKeyEnv: typeof opts["api-key-env"] === "string" ? opts["api-key-env"] : undefined,
+      argv: process.argv,
+      env: process.env,
+    });
+    profile.model = planned.selection.model;
+    opts._opencodeV2AlignedJson = planned.opencodeJson;
+    const env = { ...(profile.env ?? {}) };
+    for (const name of planned.credentialEnv) {
+      const value = process.env[name];
+      if (typeof value !== "string" || value.length === 0) {
+        throw new OpenCodeV2AlignError(
+          "opencode_v2_provider_credential_missing",
+          `OpenCode provider ${JSON.stringify(planned.selection.providerId)} requires ${name}, which is not set.`,
+        );
+      }
+      env[name] = value;
+    }
+    profile.env = env;
+    console.log(`[anet] OpenCode V2 model ${planned.selection.model} (provider ${planned.selection.providerId}) matches this machine's OpenCode config.`);
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
 function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts: Record<string, any>): void {
   if (normalizeRuntime(profile) !== "opencode-cli") return;
+  if (opencodeGenerationOfConfig(profile) === "v2") {
+    const body = wizardOpts._opencodeV2AlignedJson;
+    if (typeof body !== "string" || !body.includes(`"model"`)) {
+      console.error("[anet] ❌ OpenCode V2 create has no aligned provider/model. Refusing to write a fallback preset.");
+      process.exit(1);
+    }
+    const configPath = replaceOpencodeConfigJson(join(nodesDir(), id), body);
+    console.log(`[anet] OpenCode V2 config copied from this machine's OpenCode config: ${configPath}`);
+    return;
+  }
   const presetId = wizardOpts._opencodePreset || "anthropic";
-  const { findOpencodePreset, readPresetKeyFromEnv, writeOpencodeAuthJson, writeOpencodeConfigJson } =
-    // Lazy-loaded so a create wizard for another runtime doesn't
-    // pay the import cost.
-    require("../src/opencode-preset") as typeof import("../src/opencode-preset");
   const preset = findOpencodePreset(presetId);
   if (!preset) {
     console.warn(`[anet] ⚠ unknown opencode preset '${presetId}' — skipping auth.json write.`);
@@ -5191,6 +5801,60 @@ function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts
   console.log(`[anet]   Code tools require flags.opencodeUnsafeTools=true for trusted tasks; use Docker/VM for isolation.`);
 }
 
+function providerStdinLine(): string | undefined {
+  if (process.stdin.isTTY) return undefined;
+  const text = readFileSync(0, "utf8");
+  return text.split(/\r?\n/, 1)[0] ?? "";
+}
+
+/** Validate --provider before the node is written. The secret lands in
+ * profile.env so the existing envRef rewrite stores it; the runtime file is
+ * written later by materializeRuntimeProviderOrExit. */
+function stageRuntimeProviderOrExit(
+  profile: Profile,
+  opts: Record<string, any>,
+  dotenv?: Record<string, string>,
+): StagedProvider | null {
+  const provider = typeof opts.provider === "string" ? opts.provider : undefined;
+  const baseUrl = typeof opts["base-url"] === "string" ? opts["base-url"] : undefined;
+  const apiKeyEnv = typeof opts["api-key-env"] === "string" ? opts["api-key-env"] : undefined;
+  if (!provider && !baseUrl && !apiKeyEnv) return null;
+  try {
+    const staged = stageProviderRequest({
+      runtime: normalizeRuntime(profile),
+      opencodeGeneration: typeof profile.opencodeGeneration === "string" ? profile.opencodeGeneration : undefined,
+      opencodeUnsafeTools: profile.flags?.opencodeUnsafeTools === true,
+      provider,
+      baseUrl,
+      apiKeyEnv,
+      model: typeof opts.model === "string" && opts.model !== "true" ? opts.model : undefined,
+      argv: process.argv,
+      shellEnv: process.env,
+      dotenv,
+      readStdin: providerStdinLine,
+    });
+    if (staged) applyStagedProviderToProfile(profile, staged);
+    return staged;
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
+function materializeRuntimeProviderOrExit(id: string, staged: StagedProvider | null): void {
+  if (!staged) return;
+  try {
+    materializeStagedProvider(join(nodesDir(), id), staged.resolved);
+    const where = staged.resolved.family === "codex"
+      ? "codex-home/config.toml [model_providers.*]"
+      : "opencode.json providers";
+    console.log(`[anet] provider ${staged.resolved.presetId} written to ${where} (credential env ${staged.resolved.envKey}; value not printed)`);
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
 function printOpencodeCreationSecurityDisclosure(id: string, profile: Profile): void {
   const unsafeTools = profile.flags?.opencodeUnsafeTools === true;
   // #540 — a Zen free model under the safe preset fails every task upstream.
@@ -5200,6 +5864,15 @@ function printOpencodeCreationSecurityDisclosure(id: string, profile: Profile): 
     unsafeTools,
     configFile: join(nodesDir(), id, "config.json"),
   })) console.warn(line);
+  if (opencodeGenerationOfConfig(profile) === "v2") {
+    console.log(`\n[anet] ⚠ OpenCode V2 co-presence PREVIEW:`);
+    console.log(`[anet]    HIGH RISK: flags.opencodeUnsafeTools=true enables every local tool; trusted tasks only.`);
+    console.log(`[anet]    V1 permission environment switches do not enforce the V2 safety policy.`);
+    console.log(`[anet]    Cwd: project cwd. Use Docker/VM for process and filesystem isolation.`);
+    console.log(`[anet]    CommHub: agent-node receives tasks and publishes final text; a node-scoped MCP is configured.`);
+    console.log(`[anet]    Model-driven MCP tool calls require separate verification; plain messages are logged, not shown as TUI toasts.`);
+    return;
+  }
   console.log(`\n[anet] ${unsafeTools ? "⚠" : "🛡"} OpenCode tool/cwd policy:`);
   if (unsafeTools) {
     console.log(`[anet]    Built-in: bash / read / glob / grep / edit / write / list / task / skill ENABLED`);
@@ -5223,9 +5896,17 @@ async function configureOpencodeRuntime(
   interactive = Boolean(process.stdin.isTTY),
 ): Promise<void> {
   wizardOpts.runtime = "opencode-cli";
-  const currentPin = readEffectivePin();
-  console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
-  console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+  if (wizardOpts["opencode-generation"] === "v2") {
+    console.log(`[anet] 请确保已安装 OpenCode V2 (exact): ${opencodeGenerationInstallCommand("v2")}`);
+    console.log(`[anet]   V1 and V2 both install 'opencode': use separate npm prefixes and select the V2 prefix on PATH.`);
+    console.log(`[anet]   V2 co-presence uses the model and provider already in this machine's OpenCode config.`);
+    console.log(`[anet]   A different --model or --provider is refused. There is no fallback provider.`);
+    return;
+  } else {
+    const currentPin = readEffectivePin();
+    console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
+    console.log(`[anet]   pin source: ${currentPin.source === "override-file" ? `~/.anet/opencode-pin.json (smoke ${currentPin.smokePassedAt})` : "built-in default"}`);
+  }
 
   if (!interactive) {
     wizardOpts._opencodePreset ||= "anthropic";
@@ -5828,6 +6509,8 @@ API key:
   }
 
   const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
+  alignOpencodeV2CreateOrExit(profile, opts);
+  const stagedProvider = opencodeGenerationOfConfig(profile) === "v2" ? null : stageRuntimeProviderOrExit(profile, opts);
 
   // #138 fix — @inquirer/prompts select() cleanup leaves process.stdin in a
   // state where the subsequent readline `ask()` doesn't keep the event loop
@@ -5879,6 +6562,7 @@ Telegram setup:
     writeTelegramChannelConfig(id, telegramConfig.botToken, telegramConfig.allowId);
   }
   writeOpencodePresetIfRequested(id, profile, opts);
+  materializeRuntimeProviderOrExit(id, stagedProvider);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
@@ -6265,6 +6949,8 @@ async function createCommand(idOverride?: string) {
   }
 
   const profile = createProfileFromOpts(id, opts);
+  alignOpencodeV2CreateOrExit(profile, opts);
+  const stagedProvider = opencodeGenerationOfConfig(profile) === "v2" ? null : stageRuntimeProviderOrExit(profile, opts);
 
   // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
   // No silent fallback to utok_; that just defers the failure to runtime.
@@ -6300,6 +6986,7 @@ async function createCommand(idOverride?: string) {
 
   saveCreatedNode(id, profile);
   writeOpencodePresetIfRequested(id, profile, opts);
+  materializeRuntimeProviderOrExit(id, stagedProvider);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   const netLabel = gc.network_name || gc.network_id || "global";
@@ -6318,6 +7005,10 @@ async function createCommand(idOverride?: string) {
   }
   if (normalizeRuntime(profile) === "opencode-cli") {
     printOpencodeCreationSecurityDisclosure(id, profile);
+    console.log(`\nStart: anet node start ${id}${profile.opencodeMode === "copresence" ? " --copresence" : ""}`);
+    closeRL();
+    if (process.env.ANET_INTERNAL_KEEP_PROCESS !== "1") process.exit(0);
+    return;
   } else if (profile.grokCopresence === true) {
     printGrokCopresenceWarning(id, profile.tools, "configured");
     console.log(`[anet]   One command brings up the node and its shared TUI together.`);
@@ -6365,7 +7056,27 @@ function getRL() {
 }
 function closeRL() { if (_rl) { _rl.close(); _rl = null; } }
 
+// 2026-10-31 —— #2293：**非 TTY 下绝不等待输入**。
+//
+// 缺陷形状（实测，不是推理）：客户端把 CLI 当子进程拉起时，stdin 是一条**一直被握着的管道**
+// （不是 /dev/null）。`rl.question` 于是永远等不到 EOF：
+//   spawn("anet init", stdio:["pipe",...]) → 6 秒后仍未退出，stdout 只有一行提示串
+//   ⇒ 客户端那边看到的是「卡住」，而且**没有任何可读的原因**（提示串看起来像还在正常工作）。
+// 修复不是「更快地等待」，而是**这类环境里根本不发起提问**：
+//   有默认值 ⇒ 用默认值并说明（stderr，不改 stdout 的机器可读面）
+//   没有默认值 ⇒ 抛出 `non_interactive_prompt`，带上「该传什么」的下一步
 function ask(question: string, defaultVal?: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    if (defaultVal !== undefined) {
+      process.stderr.write(`[anet] 非交互环境（stdin 不是终端）：${question} → 采用默认值 ${JSON.stringify(defaultVal)}\n`);
+      return Promise.resolve(defaultVal);
+    }
+    // 单行：顶层 catch 只印第一行（实测多行提示会被吞掉，只有第一行到得了用户眼里）。
+    return Promise.reject(new Error(
+      `non_interactive_prompt: ${question} —— stdin 不是终端（客户端/管道/CI），这一问不会有人回答；`
+      + `用命令行参数或环境变量给出该值后重跑。`,
+    ));
+  }
   const suffix = defaultVal ? ` [${defaultVal}]` : "";
   return new Promise(resolve => {
     getRL().question(`${question}${suffix}: `, (answer) => {
@@ -6514,6 +7225,16 @@ function ensureMcpJson(profile: Profile) {
       }
       found = true;
       break;
+    }
+  }
+  if (!found) {
+    const embedded = standaloneNodeServerJs(STANDALONE_BUILD_STAMP);
+    if (embedded) {
+      mkdirSync(anetDir, { recursive: true });
+      if (applyNodeServerPayload(serverTs, embedded, "node-server.js") === "wrote") {
+        console.log(`[anet] Updated .anet/node-server.js`);
+      }
+      found = true;
     }
   }
   if (!found && !existsSync(serverTs)) {
@@ -7092,7 +7813,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     if (Object.keys(_dotenvSDK).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvSDK).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
-    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK));
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvSDK, readScopedNodeEnv(join(nodesDir(), nodeId))));
 
     // #448 — CODEX_HOME for codex runtimes comes from this node's own config/dir,
     // never from the launching env (a tmux server or daemon env can carry another
@@ -7128,7 +7849,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
     let commandArgs = agentArgs;
-    if (runtime === "opencode-cli") {
+    if (standaloneNow()) {
+      cmd = process.execPath;
+      commandArgs = standaloneNodeArgs(agentArgs);
+      console.log("[anet] using the agent-node embedded in this standalone binary");
+    } else if (runtime === "opencode-cli") {
       const plan = resolveOpencodeAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
@@ -7173,6 +7898,15 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       : runtime === "grok-build-cli"
       ? buildGrokAgentNodeEnv(env)
       : { ...env, ANET_CONFIG_UPDATE_CAPABLE: "1" };
+    if (runtime === "opencode-cli" && (profile as any).opencodeBorrowedV1 !== undefined) {
+      // Profile env must not replace the caller's one-shot launch nonce.
+      (childEnv as NodeJS.ProcessEnv).ANET_BORROWED_V1_LAUNCH_ID = process.env.ANET_BORROWED_V1_LAUNCH_ID;
+      childEnv.ANET_CONFIG_UPDATE_CAPABLE = "0";
+    }
+
+    // 2026-11-10 —— 让子进程如实知道「起它的是哪个 anet CLI」（见 launchedByCliVersionEnv）。
+    // 只写在这里（childEnv = 真实启动环境），不写进 AgentNodeLaunchPlan.probeEnv。
+    Object.assign(childEnv, launchedByCliVersionEnv());
 
     // #1353 —— 把 daemon 的 anet 二进制 pin 传给子进程。
     //
@@ -7260,7 +7994,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         const child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn(runCommand, runCommandArgs, {
           env: childEnv,
           stdio: "inherit",
-          shell: runtime === "opencode-cli" ? false : process.platform === "win32",
+          shell: standaloneNow() ? false : runtime === "opencode-cli" ? false : process.platform === "win32",
         }));
         if (runtime === "opencode-cli") activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
@@ -7303,6 +8037,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         try { rmSync(pidFile, { force: true }); } catch {}
 
         if (exitInfo.code === RESTART_SENTINEL) {
+          if ((profile as any).opencodeBorrowedV1 !== undefined) {
+            console.error("[anet] borrowed V1 restart requires explicit Owner migration; original binding/recovery retained");
+            lastNonRestartCode = 1;
+            return;
+          }
           console.log(
             `[anet] agent-node requested restart (exit ${RESTART_SENTINEL}); re-spawning`,
           );
@@ -7357,7 +8096,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     if (Object.keys(_dotenvCC).length > 0) {
       console.log(`[anet] loaded ${Object.keys(_dotenvCC).length} key(s) from .anet/nodes/${nodeId}/.env`);
     }
-    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC));
+    Object.assign(env, resolveProfileEnv(profile.env as any, home, _dotenvCC, readScopedNodeEnv(join(nodesDir(), nodeId))));
     // Fix 1 (#146 / RFC-018) — pin the commhub MCP server's resume_id to a
     // stable per-node value (node-server.ts:75 otherwise falls through to
     // randomUUID() at every start, orphaning the old session row on any
@@ -7516,6 +8255,14 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // forgiving and the bug usually only manifests as a missing session
     // banner. Fix: await child exit so parent stays alive while child holds
     // the TTY; main() unwinds naturally only after claude actually exits.
+    try {
+      await installTeamSkills("claude", { workDir: process.cwd() }, {
+        log: (message) => console.log(`[anet] ${message}`),
+        warn: (message) => console.warn(`[anet] ${message}`),
+      });
+    } catch (err: any) {
+      console.warn(`[anet] 团队技能安装失败：${err?.message || err}`);
+    }
     await new Promise<void>(async (resolve) => {
       let child: ReturnType<typeof spawn>;
       try {
@@ -7903,6 +8650,18 @@ async function startExternalAppserverNode(
     console.error(`[anet] ❌ CODEX_HOME ${plan.codexHome} does not exist — this node's codex login and sessions live there.`);
     return 1;
   }
+  // Board #734 — same pre-start guard as the managed co-presence launchers. The version
+  // probe runs with the app-server pane's own preamble (workspace .env sourced, `bash -c`),
+  // so it sees the binary that pane will run; the launch command is unchanged.
+  const rolloutGuard = copresenceRolloutGuard({
+    codexHome: plan.codexHome, threadIds: [plan.threadId], codexBin: plan.codexBin, displayName: plan.alias,
+    probeVersion: () => probeCodexVersionViaShell(versionProbeShellCommand(plan), { loginShell: false, env: { ...process.env, CODEX_HOME: plan.codexHome } }),
+  });
+  for (const line of rolloutGuard.warnings) console.warn(`[anet] ${line}`);
+  if (rolloutGuard.block) {
+    for (const line of rolloutGuard.block) console.error(`[anet] ${line}`);
+    return 1;
+  }
   if (!existsSync(plan.projectDir)) {
     console.error(`[anet] ❌ project dir ${plan.projectDir} does not exist.`);
     return 1;
@@ -7923,6 +8682,7 @@ async function startExternalAppserverNode(
   }
   const launch = resolveExternalAppserverBridgeOrExit();
   const logOffset = fileSize(bridgeLogPath(plan));
+  const clearOldStoppedReceipt = stoppedReceiptAtStart(plan.nodeDir, JSON.parse(readFileSync(join(plan.nodeDir, "config.json"), "utf8")).node_id);
 
   const codexEnv = ["-e", `CODEX_HOME=${plan.codexHome}`, "-e", `LANG=${process.env.LANG || "C.UTF-8"}`];
   const admission = await holdAppServerStart(resolved.id);
@@ -7930,7 +8690,7 @@ async function startExternalAppserverNode(
     try {
       execTmux([
         "new-session", "-d", "-s", plan.sessions.appsrv, "-c", plan.nodeDir, ...codexEnv,
-        "bash", "-c", appserverShellCommand(plan, process.execPath),
+        "bash", "-c", appserverShellCommand(plan, process.execPath, standaloneNow() ? "standalone-bin" : "js-eval"),
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${plan.sessions.appsrv} failed: ${e?.message || e}`);
@@ -7973,6 +8733,7 @@ async function startExternalAppserverNode(
     return 1;
   }
   const rc = await verifyExternalAppserverResume(plan, logOffset, verifyTimeoutSec(opts));
+  if (rc === 0) clearOldStoppedReceipt();
   console.log(`[anet] sessions: ${wanted.filter((n) => plan.tui || n !== plan.sessions.tui).join(", ")}   (attach: tmux attach -t ${shellQuote(plan.sessions.tui)})`);
   return rc;
 }
@@ -8060,6 +8821,11 @@ async function maybeExternalAppserverLifecycle(verb: "start" | "stop" | "restart
 
 async function startCommand() {
   const startInvokedAt = Date.now();
+  const opts = parseOpts();
+  const forkRecoveryRequestId = parseForkRecoveryRequestId(opts["fork-recovery-request-id"]);
+  if (forkRecoveryRequestId !== undefined && args.includes("--all")) {
+    throw new Error("--fork-recovery-request-id is for one node start, not --all");
+  }
   // #173 — `anet node start --all` starts every node under cwd's .anet/nodes/
   // (skip already-running, staggered, auto-resume). It delegates to the
   // `anet project up` implementation (projectUp) so the two stay in lockstep
@@ -8083,7 +8849,6 @@ async function startCommand() {
   const startPositionals = positionalArgs(args.slice(1));
   const id = startPositionals[0];
   if (!id) { showProfiles("start"); return; }
-  const opts = parseOpts();
   const forceNewSession = !!opts["new-session"];
 
   // RFC-030 P2 — `anet node start <alias> --copresence` spawns the 3-piece
@@ -8097,6 +8862,59 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  // Private source delivery never enters ordinary orchestration (which replaces
+  // alias tmux sessions) or the restart supervisor. No public dispatch enables it.
+  if ((resolvedForCopresence?.profile as any)?.sourceDelivery !== undefined) {
+    const configPath = join(nodesDir(), resolvedForCopresence!.id, "config.json");
+    // A profile that requests source delivery always has a private config.json;
+    // a missing file is a refusal for this route, never a fallback to defaults.
+    const rawProfile = readOpencodePrivateProfileFile(dirname(configPath), "config.json");
+    if (rawProfile === undefined) throw Error("source_resume_cli_refused");
+    const p = JSON.parse(rawProfile);
+    const nonce = process.env.ANET_SOURCE_RESUME_NONCE;
+    // Route only: profile data is NOT authority. The source launcher and actual
+    // runtime independently re-read operator policy/registry + OS/native identity.
+    const sharedTest = p.sourceDelivery?.expected_version === "2.0.22-anet-test.29040e2" && !!p.sharedVariantAuthority;
+    if (process.env.ANET_SOURCE_RESUME_CONFIG !== configPath || !nonce || !/^[a-f0-9-]{36}$/.test(nonce)
+      || Object.keys(opts).some(k => k !== "_channels" && k !== "_envs") || opts._channels.length || opts._envs.length
+      || forceNewSession || p.runtime !== "opencode-cli" || p.opencodeGeneration !== "v2"
+      || p.sourceDelivery?.resume_only !== true || (p.sourceDelivery.expected_version !== "2.0.22" && !sharedTest)
+      || Date.now() >= p.sourceDelivery.expires_at || !/^ses_[A-Za-z0-9]+$/.test(p.sessionId)
+      || liveNodePidFromPidfile(resolvedForCopresence!.id) !== null) throw Error("source_resume_cli_refused");
+    checkRuntimeDependency("opencode-cli", "start");
+    if (p.flags?.opencodeUnsafeTools !== true) throw Error("source_resume_existing_policy_opt_in_required");
+    const checked = sharedTest ? (() => {
+      const binary = "/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode";
+      if (process.platform !== "linux" || realpathSync(binary) !== binary
+        || createHash("sha256").update(readFileSync(binary)).digest("hex") !== "1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786"
+        || !/^(?:opencode v)?2\.0\.22-anet-test\.29040e2$/.test(execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }).trim())) throw Error("source_resume_cli_version_refused");
+      return { ok: true, binary, version: "2.0.22-anet-test.29040e2" };
+    })() : checkOpencodeGenerationBinary("v2");
+    if (!checked.ok || checked.version !== p.sourceDelivery.expected_version) throw Error("source_resume_cli_version_refused");
+    opencodeLaunchIdentity = { binary: checked.binary, version: checked.version };
+    const plan = resolveOpencodeAgentNodeLaunchPlan();
+    const sourceHelp = execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
+      env: plan.probeEnv, timeout: 5000, maxBuffer: 131072, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (!sourceHelp.includes("ANET_CAPABILITY_SOURCE_RESUME_V1")) throw Error("source_resume_runtime_capability_required");
+    const env = { ...hardenOpencodeAgentNodeEnv(process.env, process.env.PATH),
+      ANET_OPENCODE_BIN: opencodeLaunchIdentity.binary, ANET_OPENCODE_VERSION: checked.version,
+      ANET_OPENCODE_MODE: "copresence", ANET_CONFIG_UPDATE_CAPABLE: "0",
+      ...launchedByCliVersionEnv(), // 2026-11-10 —— 这条私有 route 也是 CLI 起 agent-node
+      ANET_SOURCE_RESUME_NONCE: nonce, ANET_SOURCE_RESUME_CONFIG: configPath };
+    const child = spawn(plan.command, [...plan.argsPrefix, "--config", configPath,
+      "--alias", p.alias, "--runtime", "opencode-cli", "--session", p.sessionId],
+      { cwd: process.cwd(), env, stdio: "inherit", shell: false });
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => { child.kill("SIGTERM"); killTimer ??= setTimeout(() => child.kill("SIGKILL"), 1000); };
+    process.on("SIGTERM", stop); process.on("SIGINT", stop);
+    const code = await new Promise<number>(resolve => {
+      child.once("error", () => resolve(1)); child.once("exit", code => resolve(code ?? 1));
+    });
+    process.removeListener("SIGTERM", stop); process.removeListener("SIGINT", stop);
+    if (killTimer) clearTimeout(killTimer);
+    process.exit(code); // one generation only, including exit 75
+  }
   // #1353 —— daemon 被 `node start` / `project up`(开机 sweep)/ `node restart` 拉起时,
   //         pin 与 `anet daemon start` 同源同规则,不再在这些起法下丢失。
   if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
@@ -8110,6 +8928,17 @@ async function startCommand() {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
   }
+  if (resolvedForCopresence
+    && hasBorrowedV1Intent(join(nodesDir(),resolvedForCopresence.id),resolvedForCopresence.profile)) {
+    if (process.env.ANET_BORROWED_V1_BRIDGE !== "1") {
+      await startBorrowedV1Bridge(resolvedForCopresence,opts);
+      return;
+    }
+    readBorrowedLaunchConfig(join(nodesDir(),resolvedForCopresence.id,"config.json"),process.cwd());
+    if (forceNewSession || copresenceFlagPassed || opts.hub || opts.tmux || opts["accept-dev-channels"]) {
+      throw new Error("borrowed V1 bridge requires the original config and existing session");
+    }
+  }
   if (resolvedForCopresence) {
     try { startGeneration = await admitNodeStart(resolvedForCopresence.id, startInvokedAt); }
     catch (e: any) { console.error(`[anet] ${e?.message || e}`); process.exit(1); }
@@ -8120,7 +8949,8 @@ async function startCommand() {
   //    runtime=codex-app-server". Each lane answers for itself.
   if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
     && (codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
-      || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any))) {
+      || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
+      || opencodeV2CopresenceRequested(resolvedForCopresence.profile))) {
     const copresenceRuntime = runtimeForExecution(
       resolvedForCopresence.profile,
       `start copresence node ${JSON.stringify(id)}`,
@@ -8133,10 +8963,8 @@ async function startCommand() {
       // Record the opt-in BEFORE orchestrating, so a node that comes up shared
       // is never left with a profile claiming the operator never asked.
       if (shouldPersistGrokCopresence(copresenceFlagPassed, resolvedForCopresence.profile as any)) {
-        saveProfile(resolvedForCopresence.id, {
-          ...(resolvedForCopresence.profile as any),
-          grokCopresenceAuto: true,
-        });
+        // #3418 —— 只记这一格，不整份回写。
+        patchProfileFields(resolvedForCopresence.id, { grokCopresenceAuto: true } as any);
         console.log(`[anet] remembered co-presence for this node — next time \`anet node start ${shellQuote(nodeDisplayName(resolvedForCopresence.id, resolvedForCopresence.profile))}\` is enough.`);
       }
       await startGrokCopresenceOrchestration(id, { hub: opts.hub });
@@ -8155,7 +8983,8 @@ async function startCommand() {
     if (shouldPersistCodexCopresence(copresenceFlagPassed, prof)) remember.codexCopresence = true;
     if (shouldPersistCodexFullAccess(danger, prof)) remember.codexCopresenceFullAccess = true;
     if (Object.keys(remember).length > 0) {
-      saveProfile(resolvedForCopresence.id, { ...prof, ...remember });
+      // #3418 —— 只记要记的那几格。
+      patchProfileFields(resolvedForCopresence.id, remember as any);
       if (remember.codexCopresence) {
         console.log(`[anet] remembered co-presence for this node — next time \`anet node start ${shellQuote(displayNameForCopresence)}\` is enough.`);
       }
@@ -8164,10 +8993,13 @@ async function startCommand() {
       }
     }
     await startCopresenceOrchestration(id, {
-      codexBin: opts["codex-bin"] || "codex",
+      // Board #739 — --codex-bin > config.json codexBin > "codex"; codexVersion is checked at start.
+      codexBin: resolveCopresenceCodexBin(opts["codex-bin"], prof),
+      codexVersion: configuredCodexVersion(prof),
       // #448 — absolute, and from the node's own config/dir; never from the environment.
       codexHome: resolve(opts["codex-home"] || (typeof prof.codexHome === "string" && prof.codexHome ? prof.codexHome : codexHomeDefault)),
       model: opts.model,
+      modelProvider: opts['codex-model-provider'],
       port: opts.port ? Number(opts.port) : undefined,
       dangerFullAccess: opts["dangerously-allow-full-access"] === "true",
       inheritCodexHome: opts["no-inherit-codex-home"] !== "true",
@@ -8176,6 +9008,12 @@ async function startCommand() {
       token: profileTok,
       tuiFirst: opts["tui-first"] === "true",
       allowSharedCodexLogin: opts["allow-shared-codex-login"] === "true",
+      newSession: forceNewSession,
+      skipRecoveryBackup: opts["skip-recovery-backup"] === "true",
+      forkOnResumeFailure: opts["fork-on-resume-failure"] === "true",
+      forkRecoveryRequestId,
+      yes: opts.yes === "true",
+      configEnv: resolveProfileEnv(prof.env as any, homedir(), loadNodeDotenv(resolvedForCopresence.id), readScopedNodeEnv(join(nodesDir(), resolvedForCopresence.id))),
     });
     return;
   }
@@ -8585,7 +9423,7 @@ function codexRestartActions(ctx: CodexLifecycleCtx, peer: { id: string; profile
     start: async () => {
       const prof = (loadStoredProfile(resolved.id) ?? profile) as Record<string, any>;
       // execArgv 跟着走:开发态用 tsx 跑 .ts 时子进程也要带 loader;发布态(dist/bin/cli.js)execArgv 为空,行为不变。
-      const argv = [...process.execArgv, process.argv[1], "node", "start", displayName, "--copresence", "--tui-first"];
+      const argv = reinvokeArgv(["node", "start", displayName, "--copresence", "--tui-first"], true);
       if (prof.codexCopresenceFullAccess) argv.push("--dangerously-allow-full-access", "--yes-danger-full-access");
       const env = { ...process.env }; delete env.ANET_COPRESENCE_BRIDGE; delete env.ANET_NODE_MARKER;
       // #448 — the launcher computes CODEX_HOME from the node; do not hand it whatever this shell carries.
@@ -9912,6 +10750,8 @@ async function serverCommand() {
       // bun 单独从来不够。原来的 OR 会让 bun-only 的机器通过前置检查,
       // 然后在 spawn 处失败,并报「it disappeared from PATH」—— 而它从来没在过。
       // 实测:release zip 装的 bun 不带 bunx;只加一条 bunx 软链,hub 立刻起来(#766)。
+      // The standalone executable embeds the Hub and does not take this branch.
+      if (!standaloneNow()) {
       if (!commandExists("bunx")) {
         // bun 在、bunx 不在 —— 这是最常见也最容易被误诊的一种,单独给话术。
         if (commandExists("bun")) {
@@ -9933,6 +10773,7 @@ async function serverCommand() {
         console.error(`\n     More info: https://bun.sh/install\n`);
         process.exit(1);
       }
+      }
       // #511 — resolve which commhub-server to launch, and say where it came from.
       const versionFlag = opts.version ?? opts["hub-version"];
       if (versionFlag === "true" || (versionFlag && versionFlag !== "latest" && versionFlag !== "preview" && !isExactSemver(versionFlag))) {
@@ -9944,7 +10785,42 @@ async function serverCommand() {
         console.error(`\n  ❌ --channel must be "latest" or "preview" (got "${channelFlag}").\n`);
         process.exit(1);
       }
-      const hubVersion = resolveHubServerVersion({
+      const env: Record<string, string> = {
+        ...process.env as any,
+        PORT: port,
+        HOST: host,
+        ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
+      };
+      let hubVersion: ReturnType<typeof resolveHubServerVersion>;
+      if (standaloneNow()) {
+        const explicitVersion = versionFlag && versionFlag !== "true" ? versionFlag : null;
+        const decided = standaloneHubLaunch(STANDALONE_BUILD_STAMP, {
+          explicitVersion,
+          port,
+          host,
+          devOpen,
+        });
+        if (!decided.ok) {
+          console.error(`\n  ❌ ${decided.message}\n`);
+          process.exit(1);
+        }
+        if (channelFlag) {
+          decided.warnings.push(`standalone binary ignores --channel ${channelFlag} and runs the embedded hub`);
+        }
+        hubVersion = {
+          version: decided.version,
+          source: "explicit",
+          channel: null,
+          cached: false,
+          origin: decided.origin,
+          warnings: decided.warnings,
+        };
+        console.log(`  ${formatHubVersionBanner(hubVersion)}`);
+        for (const w of hubVersion.warnings) console.error(`\n  ⚠️  ${w}\n`);
+        console.log(`  Starting embedded CommHub Server on port ${port} (bind ${host})...`);
+        child = spawn(process.execPath, decided.args, { env, stdio: "inherit" });
+      } else {
+      const hubVersionResolved = resolveHubServerVersion({
         explicit: versionFlag || null,
         channelFlag: channelFlag || null,
         anetVersion: getAnetVersion() || "",
@@ -9952,19 +10828,15 @@ async function serverCommand() {
         exec: (cmd, cmdArgs) => runLauncherSync(cmd, cmdArgs, { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "pipe"] }).toString(),
         cacheDir: bunInstallCacheDir(),
       });
+      hubVersion = hubVersionResolved;
       console.log(`  ${formatHubVersionBanner(hubVersion)}`);
       for (const w of hubVersion.warnings) console.error(`\n  ⚠️  ${w}\n`);
       console.log(`  Starting CommHub Server on port ${port} (bind ${host})...`);
-      const env: Record<string, string> = {
-        ...process.env as any,
-        PORT: port,
-        HOST: host,
-        ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
-      };
       // Always an exact version (resolved above) — see PINNED_SERVER_VERSION.
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${hubVersion.version}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawnLauncher("bunx", serverArgs, { env, stdio: "inherit" });
+      }
       // #235 — Belt-and-braces: even with the preflight above, race
       // conditions (PATH being modified mid-process, partial install) can
       // still produce an async ENOENT 'error' event. Without this handler
@@ -9972,11 +10844,15 @@ async function serverCommand() {
       // preflight's UX promise. Log + exit gracefully.
       child.on("error", (err: any) => {
         if (err?.code === "ENOENT") {
+          if (standaloneNow()) {
+            console.error(`\n  ❌ Failed to spawn the embedded hub (${process.execPath} ${STANDALONE_HUB_ARG}).`);
+          } else {
           console.error(`\n  ❌ Failed to spawn bunx.`);
           // 不再说 "disappeared from PATH":那条归因会把人引去查 PATH 与
           // 「谁卸载了 bun」,而绝大多数情况是这台机器从来没有过 bunx(#766)。
           console.error(`     This usually means Bun was uninstalled or PATH changed mid-process.`);
           console.error(`     Try: which bunx && bunx --version`);
+          }
         } else {
           console.error(`\n  ❌ commhub-server spawn error: ${err?.message || err}`);
         }
@@ -9994,6 +10870,12 @@ async function serverCommand() {
         } catch {}
       }
       if (!ready) {
+        if (standaloneNow()) {
+          console.error(`  ❌ Embedded CommHub Server failed to start. Check the output above for the real error.`);
+          child?.kill();
+          markFailed();
+          return;
+        }
         // commhub-server is TypeScript w/ a bun shebang; it requires Bun.
         // Most Node-only systems hit this exact failure.
         let bunInstalled = false;
@@ -10016,7 +10898,8 @@ async function serverCommand() {
       }
       console.log(`  ✅ Server running on ${hubUrl} (commhub-server v${serverVersion || "?"})`);
       if (serverVersion && serverVersion !== hubVersion.version) {
-        console.error(`\n  ⚠️  Asked bunx for commhub-server ${hubVersion.version} but the server reports v${serverVersion}.\n`);
+        const asked = standaloneNow() ? "the embedded hub" : "bunx";
+        console.error(`\n  ⚠️  Asked ${asked} for commhub-server ${hubVersion.version} but the server reports v${serverVersion}.\n`);
       }
       if (devOpen) {
         console.log(`  ⚠️  DEV OPEN MODE`);
@@ -10107,7 +10990,7 @@ async function serverCommand() {
         const reg = await fetch(`${hubUrl}/api/auth/register`, {
           method: "POST",
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
-          body: JSON.stringify({ username: defaultUser, password: defaultPass, client_label: loginClientLabel("hub start") }),
+          body: JSON.stringify({ username: defaultUser, password: defaultPass, client_label: loginClientLabel("hub start"), client_kind: "cli" }),
         }).then(r => r.json() as any);
         if (reg.ok) {
           defaultAccountReady = true;
@@ -10263,7 +11146,7 @@ async function serverCommand() {
       const tokenId = id("tok");
       db.run("UPDATE users SET password_hash = ?1, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(password), user.user_id]);
       const revoked = db.run("DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL", [user.user_id]).changes;
-      db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, NULL, 'admin-reset', 'user')", [tokenId, hashToken(token), user.user_id]);
+      db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, NULL, 'admin-reset', 'user', 1)", [tokenId, hashToken(token), user.user_id]);
       db.run("INSERT INTO audit_log (user_id, username, action, target_type, target_id, detail) VALUES (?1, ?2, 'password_reset_by_admin', 'user', ?3, 'local cli reset-user')", [user.user_id, user.username, user.user_id]);
       console.log(JSON.stringify({ ok: true, username: user.username, user_id: user.user_id, password, token, token_id: tokenId, revoked }));
     `;
@@ -10674,6 +11557,9 @@ Subcommands:
   adopt <alias>        Plan adoption from this workdir (--yes to request; --all supported)
   unadopt <alias>      Plan binding revocation (--yes to apply, never stops node)
   adopted             List active adopted nodes (run from the daemon workdir)
+  provider list <name> Read daemon-scoped Provider configuration (redacted)
+  provider put <name> --revision N
+                      Save private JSON from stdin; does not log in or apply to nodes
 
 Options:
   --force              init only。两种用法:
@@ -10695,8 +11581,29 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
     return;
   }
   switch (sub) {
+    case 'secret': {
+      const secretArgs = args.slice(2);
+      const readPrivate = () => {
+        if (process.stdin.isTTY) throw Error('private stdin required');
+        return readProviderInput();
+      };
+      const code = ['list', 'set', 'unset'].includes(secretArgs[0] ?? '')
+        ? runDaemonSecretCli(secretArgs, { nodesDir: nodesDir(), readInput: readPrivate, print: console.log })
+        : runDaemonSecret(secretArgs, { nodesDir: nodesDir(), readInput: readPrivate, print: console.log });
+      if (code === 2) markUsageError(); else if (code) markFailed();
+      break;
+    }
     case "adopt": case "unadopt": case "adopted": {
       const code = await runDaemonAdopt(sub, args.slice(2), { cwd: process.cwd(), home: homedir(), login: loadGlobal(), fetch, print: console.log });
+      if (code === 2) markUsageError(); else if (code) markFailed();
+      break;
+    }
+    case "provider": {
+      const providerCommand = args[2] === 'apply' ? runDaemonProviderApply : args[2] === 'initialize' ? runDaemonProviderInitialize : runDaemonProvider;
+      const code = await providerCommand(args.slice(2), { nodesDir: nodesDir(), readInput: () => {
+        if (process.stdin.isTTY) throw new Error("private stdin required");
+        return readProviderInput();
+      }, print: console.log });
       if (code === 2) markUsageError(); else if (code) markFailed();
       break;
     }
@@ -11051,8 +11958,23 @@ async function fetchDaemonCapabilities(): Promise<CapabilityFetchResult> {
   const gc = loadGlobal();
   const hub = parseOpts().hub || gc.hub;
   if (!hub) return { ok: false, failure: { why: "no-hub" } };
+  // 🔴 hub 的 /api/host-supervisors 需要 network_id，缺了就是 400 missing_network_id，
+  // 而 400 会被下面归到「hub 那边出事了」——2026-10-20 实测：hub 好得很，是这条请求
+  // 自己少带了参数，`anet daemon list` 因此长期印「创建能力:查不到 —— hub 返回 HTTP 400」。
+  // 网络取自登录态（一次登录可能属于多个网络，但 daemon 只属于当前那个），
+  // 登录态里没有时才去 /api/networks 现取。
+  let netId = String((gc as any).network_id || "");
+  if (!netId) {
+    try {
+      const nets = await fetch(`${hub}/api/networks`, { headers: authHeaders() });
+      const nb = await nets.json() as any;
+      const list = Array.isArray(nb?.networks) ? nb.networks : [];
+      if (list.length === 1) netId = String(list[0]?.network_id || list[0]?.id || "");
+    } catch { /* 取不到就按无 network_id 发,让下面的错误分支说清楚 */ }
+  }
+  const netQ = netId ? `?network_id=${encodeURIComponent(netId)}` : "";
   try {
-    const res = await fetch(`${hub}/api/host-supervisors`, { headers: authHeaders() });
+    const res = await fetch(`${hub}/api/host-supervisors${netQ}`, { headers: authHeaders() });
     if (!res.ok) {
       // 🔴 401/403 单独成一类:它们说的是「凭据」,其余 HTTP 错说的是「hub 那边出事了」。
       const why = (res.status === 401 || res.status === 403) ? "unauthorized" : "http";
@@ -11608,6 +12530,16 @@ async function verifyNodeRestarted(
 // 🔴 空值不当默认：`normalizeRuntimeStrict` 对空串返回 DEFAULT_RUNTIME，
 //    那是给「配置里没写」用的语义。用户显式敲 `--runtime ""` 是打错了，
 //    不该被悄悄解释成 claude-agent-sdk —— 所以这里先自己挡掉空值。
+function applyNodeEditReasoningEffortToml(nodeKey: string, profile: Profile, reasoningIdx: number): void {
+  const re = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+  if (reasoningIdx < 0 || !isReasoningEffortValue(re)) return;
+  const { codexHome } = resolveNodeCodexHome({
+    nodeDir: join(nodesDir(), nodeKey),
+    config: JSON.parse(JSON.stringify(profile)) as Record<string, unknown>,
+  });
+  if (codexHome) writeReasoningEffortToCodexHome(codexHome, re);
+}
+
 async function nodeEditCommand() {
   const ref = args[1];
   const flagIdx = args.indexOf("--runtime");
@@ -11621,19 +12553,43 @@ async function nodeEditCommand() {
   //    与 #1698 里 grok 撞 uid_map 墙时「产品给出的修法产品自己做不到」同形。
   const modelIdx = args.indexOf("--model");
   const rawModel = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
+  const reasoningIdx = args.indexOf("--reasoning-effort");
+  const rawReasoning = reasoningIdx >= 0 ? args[reasoningIdx + 1] : undefined;
   // #1856 —— `--workdir <dir>` 写 codexProjectDir(共存节点的工作目录 = 含 .anet 的目录);preflight 的
   // workdir_consistent 缺它就 fail,而在这之前没有任何命令能给旧节点补上(提示里写的 `config apply` 根本不存在)。
   const workdirIdx = args.indexOf("--workdir");
   const rawWorkdir = workdirIdx >= 0 ? args[workdirIdx + 1] : undefined;
-  if (!ref || (flagIdx < 0 && modelIdx < 0 && workdirIdx < 0)) {
+  const providerFlag = (flag: string): string | undefined => {
+    const i = args.indexOf(flag);
+    if (i < 0) return undefined;
+    const value = args[i + 1];
+    if (value === undefined || value.startsWith("--")) {
+      console.error(`${flag} needs a value`);
+      process.exit(1);
+    }
+    return value;
+  };
+  const providerValue = providerFlag("--provider");
+  const baseUrlValue = providerFlag("--base-url");
+  const apiKeyEnvValue = providerFlag("--api-key-env");
+  if (!ref || (flagIdx < 0 && modelIdx < 0 && reasoningIdx < 0 && workdirIdx < 0 && !providerValue && !baseUrlValue && !apiKeyEnvValue)) {
     console.log(`
-anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <dir>]
+anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-effort <level>] [--workdir <dir>]
+                                   [--provider <id>] [--base-url <url>] [--api-key-env <NAME>]
 
   Change an existing node's runtime, model and/or co-presence workdir. Supported runtime ids:
     ${SUPPORTED_RUNTIME_NAMES.join(", ")}
 
   --model takes any id the runtime accepts; it is validated the same way
   'anet node create --model' validates it (non-empty, no whitespace).
+
+  --reasoning-effort sets Codex thinking level (codex-app-server only): none,
+  minimal, low, medium, high, or xhigh — written to config.json and
+  codex-home/config.toml as model_reasoning_effort.
+
+  --provider is Codex (config.toml [model_providers.*]) or OpenCode V2
+  (native opencode.json providers). The key value is never a flag: export
+  the variable named by --api-key-env (or the preset's default).
 
   Note: the change is written to the node's config; a running node keeps its
   current runtime/model until it is restarted (anet node restart <name>).
@@ -11650,7 +12606,12 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
   if (modelIdx >= 0 && (rawModel === undefined || rawModel.trim() === "" || rawModel.startsWith("--"))) {
     console.error("--model needs a value (an id the runtime accepts).");
     process.exit(1);
-  }  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
+  }
+  if (reasoningIdx >= 0 && (rawReasoning === undefined || rawReasoning.trim() === "" || rawReasoning.startsWith("--"))) {
+    console.error("--reasoning-effort needs a value (none, minimal, low, medium, high, or xhigh).");
+    process.exit(1);
+  }
+  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
     console.error("--workdir needs a value (an existing directory; the one that holds this node's .anet).");
     process.exit(1);
   }
@@ -11698,6 +12659,24 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`model ${currentModel ?? "(unset)"} -> ${nextModel}`);
     }
   }
+  if (reasoningIdx >= 0) {
+    if (normalizeRuntime(profile) !== CODEX_COPRESENCE_RUNTIME) {
+      console.error(`--reasoning-effort only applies to ${CODEX_COPRESENCE_RUNTIME} nodes (this node is ${normalizeRuntime(profile)}).`);
+      process.exit(1);
+    }
+    const nextRe = rawReasoning!.trim() as string;
+    if (!isReasoningEffortValue(nextRe)) {
+      console.error(`--reasoning-effort must be one of: none, minimal, low, medium, high, xhigh`);
+      process.exit(1);
+    }
+    const fl = (profile.flags && typeof profile.flags === "object" ? profile.flags : {}) as Record<string, unknown>;
+    profile.flags = fl;
+    const currentRe = fl.modelReasoningEffort as string | undefined;
+    if (currentRe !== nextRe) {
+      fl.modelReasoningEffort = nextRe;
+      changes.push(`modelReasoningEffort ${currentRe ?? "(unset)"} -> ${nextRe}`);
+    }
+  }
   if (workdirIdx >= 0) {
     let nextDir: string;
     try {
@@ -11713,11 +12692,22 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`workdir ${currentDir ?? "(unset)"} -> ${nextDir}`);
     }
   }
+  const dotenv = loadNodeDotenvForProfile(resolved.id, profile);
+  const stagedProvider = stageRuntimeProviderOrExit(profile, {
+    provider: providerValue,
+    "base-url": baseUrlValue,
+    "api-key-env": apiKeyEnvValue,
+    model: modelIdx >= 0 ? (profile as any).model : undefined,
+  }, dotenv);
+  if (stagedProvider) changes.push(`provider ${stagedProvider.resolved.presetId} via ${stagedProvider.resolved.envKey}`);
   if (changes.length === 0) {
     console.log(`${resolved.id} already matches what you asked for — nothing to change.`);
     return;
   }
+  if (stagedProvider) rewritePlainSecretsToEnvRef(resolved.id, profile);
   saveProfile(resolved.id, profile);
+  materializeRuntimeProviderOrExit(resolved.id, stagedProvider);
+  applyNodeEditReasoningEffortToml(resolved.id, profile, reasoningIdx);
   for (const c of changes) console.log(`${resolved.id}: ${c}`);
   // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
   const running = findNodeStopCandidates(resolved.id);
@@ -12223,7 +13213,7 @@ async function notifyServerOffline(profile: Profile, nodeId: string) {
     // MCP call: report_status offline
     await fetch(`${hub}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json", ...authHeaders(profile.token || gc.token) },
+      headers: { "Content-Type": "application/json", "Accept": "application/json, text/event-stream", ...authHeaders(profile.token || gc.token) },
       body: JSON.stringify({
         jsonrpc: "2.0", id: 1, method: "initialize",
         params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "anet-cli", version: "1.0" } },
@@ -12231,7 +13221,7 @@ async function notifyServerOffline(profile: Profile, nodeId: string) {
     });
     await fetch(`${hub}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json", ...authHeaders(profile.token || gc.token) },
+      headers: { "Content-Type": "application/json", "Accept": "application/json, text/event-stream", ...authHeaders(profile.token || gc.token) },
       body: JSON.stringify({
         jsonrpc: "2.0", id: 2, method: "tools/call",
         params: { name: "report_status", arguments: { resume_id: resumeId, alias: displayName, status: "offline" } },
@@ -12330,6 +13320,7 @@ Stop a running agent node.
  */
 async function stopResolvedNode(resolved: { id: string; profile: Profile }, stopInvokedAt: number = Date.now()) {
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  const borrowedHostSelected = hasBorrowedV1Intent(join(nodesDir(),resolved.id),resolved.profile);
   let stopGeneration = "";
   let stopProcesses: LifecycleProcessIdentity[] = [];
   try {
@@ -12353,6 +13344,7 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
       // while holding stop-intent, then freeze exact identities. Reaping never
       // rescans by alias, so a later same-name generation cannot be adopted.
       if (roots.length === 0) {
+        if (borrowedHostSelected) throw new Error("BORROWED_V1_STOP_OWNER_UNAVAILABLE; no alias or Host/TUI adoption");
         // #1438 — findNodeStopCandidates captures (pid, discoveredBirth) in
         // ONE `ps` snapshot; the (pid, birth) pair has no TOCTOU window
         // between the two fields. resolveOwnedRoots then verifies via
@@ -12402,20 +13394,32 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
         console.error(`[anet] STOP_TIMEOUT: Windows ownership could not be proven; hub was not notified offline.`);
         process.exit(1);
       }
-      for (const managedProcess of [...decision.safe].reverse()) {
-        try { taskkillWindowsProcessTree(managedProcess.pid); }
-        catch (e) {
-          console.error(`[anet] ❌ taskkill failed for ${managedProcess.role} pid=${managedProcess.pid}: ${(e as Error).message}`);
-          process.exit(1);
-        }
-      }
-      const windowsResiduals = decision.safe.filter(p => probeWindowsCreationDate(p.pid) === p.creationDate);
-      if (windowsResiduals.length > 0) {
-        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${windowsResiduals.map(p => `${p.role}:${p.pid}`).join(", ")}`);
+      // #1335 —— 停止编排（CLI 与见证**共用同一份实现**）：
+      // 绑定根身份的取证 → 终止紧前重验 → 按精确身份裁决 gone/alive/unknown。
+      // taskkill 非零**本身**不再判失败（旧代码在此提前 exit(1)，使身份判据不可达）；
+      // `survived`/`unverifiable` 都在删记录与通知 Hub 离线**之前**退出。
+      const stop = orchestrateWindowsManagedStop(
+        decision.safe.map((p) => ({ role: p.role, pid: p.pid, creationDate: p.creationDate })),
+      );
+      for (const diagnostic of stop.verdict.retainedDiagnostics) console.warn(`[anet] ⚠ ${diagnostic}`);
+      if (stop.verdict.kind === "survived") {
+        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${stop.verdict.alive.join(", ")}`);
         process.exit(1);
       }
-      rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
-      const pidResult = await stopNode(resolved.id);
+      if (stop.verdict.kind === "unverifiable") {
+        console.error(`[anet] STOP_TIMEOUT: could not prove Windows managed identity exited: ${stop.verdict.unknown.join(", ")}`);
+        process.exit(1);
+      }
+      // settle 门控记录删除与本地节点停止；Hub 通知仍须下方 pidResult 检查通过。
+      const settle = await settleWindowsManagedStop(stop, {
+        removeRecord: () => rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true }),
+        stopNode: () => stopNode(resolved.id),
+      });
+      if (settle.kept) {
+        console.error(`[anet] STOP_TIMEOUT: Windows managed identity could not be settled; record kept, hub not notified offline.`);
+        process.exit(1);
+      }
+      const pidResult = settle.stopResult!;
       if (pidResult.status === "survived") {
         console.error(`[anet] STOP_TIMEOUT: Windows node pid ${pidResult.pid} survived; hub was not notified offline.`);
         process.exit(1);
@@ -12515,15 +13519,40 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
     process.exit(1);
   }
 
+  // OpenCode's bridge owns its private launch root. Closing tmux first also
+  // kills its tee/foreground wrapper, interrupting asynchronous cleanup even
+  // when every process eventually disappears. Give the frozen agent identity
+  // a bounded graceful shutdown before touching its terminal or descendants.
+  // Never widen marker-authorized teardown or signal an unverified pidfile.
+  if (allowLegacyTmuxNameSweep && process.platform === "linux"
+      && resolved.profile.runtime === "opencode-cli" && resolved.profile.opencodeMode === "copresence") {
+    const agents = stopProcesses.filter(identity => identity.role === "agent");
+    for (const identity of agents) {
+      const current = processIdentitySnapshot(identity.pid);
+      if (current.kind === "live" && current.birth === identity.birth) {
+        try { process.kill(identity.pid, "SIGTERM"); } catch { /* reaper audits below */ }
+      }
+    }
+    const drainDeadline = Date.now() + 10_000;
+    while (Date.now() < drainDeadline && agents.some(identity => {
+      const current = processIdentitySnapshot(identity.pid);
+      return current.kind === "unverifiable" || (current.kind === "live" && current.birth === identity.birth);
+    })) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    // Timeout is not success: the unchanged identity reaper below verifies
+    // remaining descendants and refuses the offline receipt on any residual.
+  }
+
   // RFC-030 P2 legacy path — nodes without an identity marker may own three
   // tmux sessions (`<alias>`, `<alias>-appsrv`, `<alias>-桥`). Sweep those
   // names only when marker absence proves this is the ordinary legacy path.
   // A marker-bearing generation was already handled above by exact identity;
   // name matching after that point would re-open #466's same-name kill race.
   const copresenceSessions = copresenceTmuxSessions(displayName);
-  const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui);
-  const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv);
-  const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge);
+  const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui) && !borrowedHostSelected;
+  const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv) && !borrowedHostSelected;
+  const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge) && !borrowedHostSelected;
   // The three flags above say a session WAS running, which is the condition for
   // trying. Whether the kill landed is a second question, and reporting the
   // first as if it answered the second is how "Stopped X (tmux(tui) killed)"
@@ -13039,7 +14068,7 @@ async function projectUp(invokedAs = "anet project up") {
     // Board #628 — Hub stop writes <nodeDir>/.hub-stopped. Do not start the
     // node and do not delete .pid. A live pid is still preserved below: deleting
     // it is what let `project up` start the second copy (#1332 / #1130).
-    if (existsSync(join(nodesDir(), n.id, ".hub-stopped"))) {
+    if (isHubStopped(join(nodesDir(), n.id), n.profile?.node_id)) {
       console.log(`  ⏭  ${n.alias} — hub-stopped, leaving it down`);
       continue;
     }
@@ -13953,12 +14982,47 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
 }
 
 // RFC-029 — OpenCode lifecycle and pin-management commands.
+async function opencodeBorrowedAttachCommand(ref?: string) {
+  if (!ref) throw new Error("Usage: anet opencode attach <node>");
+  // The ordinary profile resolver can repair permissions and normalize from
+  // global defaults. This entry only reads explicit private selections; no repair or
+  // global profile/token fallback, and ambiguous names never select first.
+  const ids=listProfileIds(), candidates=ids.includes(ref) ? [ref] : ids;
+  const matches=candidates.flatMap(id=>{
+    try {
+      const cfg=join(nodesDir(),id,"config.json"), selected=readBorrowedLaunchConfig(cfg,process.cwd());
+      return ref===id || ref===selected.alias || ref===selected.selection.binding.nodeId ? [{id,cfg,selected}] : [];
+    } catch { return []; }
+  });
+  if(matches.length!==1)throw new Error("borrowed V1 TUI requires one exact existing private node selection");
+  const {cfg,selected}=matches[0];
+  checkRuntimeDependency("opencode-cli","start");
+  assertStartCompatibility("opencode-cli",{runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence"} as Profile,matches[0].id);
+  const plan=revalidateOpencodeAgentNodeLaunchPlan(resolveOpencodeAgentNodeLaunchPlan());
+  if (!agentNodeHelp(plan).includes("ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1")) {
+    throw new Error("exact agent-node lacks borrowed V1 TUI capability; upgrade both precise source builds before attaching");
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("borrowed V1 TUI requires an interactive terminal");
+  const child=spawn(plan.command,[...plan.argsPrefix,"--opencode-borrowed-attach",cfg],{
+    cwd:process.cwd(),stdio:"inherit",env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
+      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version,
+      ...launchedByCliVersionEnv()}, // 2026-11-10 —— 这条 attach 也是 CLI 起 agent-node
+  });
+  const stop=()=>{try{child.kill("SIGTERM");}catch{}};
+  const signals=["SIGINT","SIGTERM","SIGHUP"] as const;
+  for(const s of signals)process.on(s,stop);
+  const code=await new Promise<number>(resolve=>{child.once("error",()=>resolve(1));child.once("exit",code=>resolve(code??1));});
+  for(const s of signals)process.off(s,stop);
+  if(code!==0)process.exit(code);
+}
+
 async function opencodeCommand() {
   const sub = args[1];
   if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
     console.log(`Usage: anet opencode <sub>
 
 Subcommands:
+  attach <node>          Attach the exact ready borrowed V1 session in this terminal.
   upgrade-pin <version>   Reinstall and smoke the exact release pin.
                           Different versions remain rejected until a new
                           maintainer-vetted agent-network preview bumps it.
@@ -13976,6 +15040,11 @@ Examples:
   }
   if (sub === "upgrade-pin") {
     await opencodeUpgradePinCommand(args[2]);
+    return;
+  }
+  if (sub === "attach") {
+    if (args.length!==3) throw new Error("Usage: anet opencode attach <node>");
+    await opencodeBorrowedAttachCommand(args[2]);
     return;
   }
   if (sub === "auth-login") {
@@ -14395,6 +15464,26 @@ async function smokeOpencodeAcp(
     };
   }
   return result;
+}
+
+/**
+ * `anet pair` —— 精确配对的唯一答案。
+ *
+ * opencode-cli 这条路径**禁用了自动 npx**，目标机上必须有精确版本的全局 agent-node；
+ * 而两个包的 preview tag 是**先后**移动的（node 先发、声明它的 CLI 后发），
+ * 所以 `@preview` 在窗口期里不自洽。把本包里的常量打印出来，是唯一不用猜的答案 ——
+ * 客户端和文档都应当显示这条命令，而不是自己拼版本号。
+ */
+function pairCommand(): void {
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({
+      cli: `@sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`,
+      agentNode: `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`,
+      install: opencodeExactPairInstallCommand(),
+    }, null, 2));
+    return;
+  }
+  console.log(pairInfo());
 }
 
 async function upgradeCommand() {
@@ -15329,7 +16418,7 @@ async function registerCommand() {
     const res = await fetch(`${hub}/api/auth/register`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register") }),
+      body: JSON.stringify({ username, password, email: email || undefined, client_label: loginClientLabel("register"), client_kind: "cli" }),
     }).then(r => r.json() as any);
 
     if (!res.ok) { console.error(`Registration failed: ${hubErrorText(res)}`); process.exit(1); }
@@ -15394,7 +16483,7 @@ async function loginCommand() {
     res = await fetch(`${hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, client_label: loginClientLabel("login") }),
+      body: JSON.stringify({ username, password, client_label: loginClientLabel("login"), client_kind: "cli" }),
     }).then(r => r.json() as any);
   } catch (e: any) {
     // Network / DNS / connection error — show the friendly hint, not the
@@ -15890,6 +16979,7 @@ async function passwdCommand() {
   if (!hub || !token) { console.error("Not logged in. Run: anet login"); markFailed(); return; }
 
   const opts = parseOpts();
+  const revokeCli = opts["revoke-cli-tokens"] === "true";
   const oldPw = opts["old-password"] || opts.old || await ask("Current password");
   const scriptedNew = opts["new-password"] || opts["new"];
   const newPw = scriptedNew || await ask("New password (min 8)");
@@ -15909,7 +16999,9 @@ async function passwdCommand() {
     const res = await fetch(`${hub}/api/auth/password`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+      // #711 用户是在自己机器上跑 anet:默认请求 keep_cli_tokens,其他机器的 anet 登录、具名脚本令牌保留;
+      // --revoke-cli-tokens 不带这个字段 = Hub 的默认(撤销全部)。旧 Hub 不认这个字段,也是撤销全部。
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw, ...(revokeCli ? {} : { keep_cli_tokens: true }) }),
     }).then(r => r.json() as any);
 
     if (res.ok) {
@@ -15919,6 +17011,17 @@ async function passwdCommand() {
       }
       console.log("[anet] Password changed successfully.");
       if (res.token) console.log("[anet] Login token rotated and saved.");
+      if (typeof res.revoked_login === "number") {
+        console.log(`[anet] Signed out ${res.revoked_login} other login session(s); revoked ${res.revoked_cli ?? 0} CLI/script token(s).`);
+      }
+      if (Array.isArray(res.kept_cli_tokens)) {
+        const kept = res.kept_cli_tokens as Array<{ token_id: string; name: string; client_label?: string | null; last_used_at?: string | null }>;
+        console.log(`[anet] Kept ${kept.length} CLI/script token(s):`);
+        for (const t of kept) console.log(`  ${t.token_id}  ${t.client_label || t.name}  last used: ${t.last_used_at || "never"}`);
+        if (kept.length > 0) console.log("[anet] Revoke one with: anet token revoke <token_id>  (or pass --revoke-cli-tokens next time)");
+      } else if (!revokeCli) {
+        console.log("[anet] This Hub does not support keeping CLI tokens; all other tokens were revoked.");
+      }
     } else {
       console.error(`[anet] Failed: ${hubErrorText(res)}`); markFailed();
     }
@@ -16095,9 +17198,17 @@ async function demoDebateCommand() {
   }
   if (!topic) { console.error("  ❌ 议题不能为空."); markFailed(); return; }
 
-  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  // 2026-10-31 —— **跨厂商凭据不许回退**（外部复核：「一个初始化里两个不同 process.env.X 即错借」）。
+  // 原来这里是 `opts.key || MINIMAX_KEY || ANTHROPIC_AUTH_TOKEN`：
+  // 后者是**另一家厂商**的凭据；把它发给 MiniMax 只会得到一个难查的 401，
+  // 而失败现场看起来像「MiniMax key 错了」。
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || "";
   if (!minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
+    if (process.env.ANTHROPIC_AUTH_TOKEN) {
+      // 提示而不借用：说清「你设的那个是另一家的」
+      console.error("     （检测到 ANTHROPIC_AUTH_TOKEN —— 那是另一家厂商的凭据，本命令不会用它）");
+    }
     markFailed(); return;
   }
 
@@ -16500,7 +17611,8 @@ async function demoSocialMediaCommand() {
     markUsageError(); return;
   }
 
-  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  // 同 17032 处：跨厂商凭据不回退（ANTHROPIC_AUTH_TOKEN 是另一家的，借来只会得到难查的 401）
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || "";
   if (!minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=...");
     markFailed(); return;
@@ -17011,7 +18123,8 @@ async function demoPrReviewCommand() {
     console.log(`  ⚠️  diff 大小 ${diffKb} KB > 30 KB，可能超 model context。建议用 'gh api -X GET repos/.../files' 先筛关键文件。继续...`);
   }
 
-  const minimaxKey = opts.key || process.env.MINIMAX_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "";
+  // 同 17032 处：跨厂商凭据不回退（ANTHROPIC_AUTH_TOKEN 是另一家的，借来只会得到难查的 401）
+  const minimaxKey = opts.key || process.env.MINIMAX_KEY || "";
   if (!mockMode && !minimaxKey) {
     console.error("  ❌ 需要 MiniMax key. 用 --key 或 export MINIMAX_KEY=sk-cp-...");
     markFailed(); return;
@@ -17412,7 +18525,7 @@ async function demoSciTeamCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team") }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("demo sci-team"), client_kind: "cli" }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);
@@ -17989,7 +19102,7 @@ async function createBatchWizardCommand() {
     const loginRes = await fetch(`${gc.hub}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch") }),
+      body: JSON.stringify({ username: "admin", password: "anethub", client_label: loginClientLabel("node create --batch"), client_kind: "cli" }),
     }).then(r => r.json() as any).catch(() => null);
     if (!loginRes?.ok) {
       console.error(`[anet] 自动登录失败: ${hubErrorText(loginRes)}. 先 'anet register' 创账号。`);
@@ -18139,6 +19252,10 @@ async function infoCommand() {
   console.log(`  model:    ${profile.model || "(default)"}`);
   console.log(`  hub:      ${profile.hub || loadGlobal().hub || "-"}`);
   console.log(`  channels: ${profile.channels?.join(", ") || "(none)"}`);
+  // Board #739 — the node's codex pin, only when set.
+  const pinBin = configuredCodexBin(profile as any), pinVersion = configuredCodexVersion(profile as any);
+  if (pinBin) console.log(`  codexBin: ${pinBin}`);
+  if (pinVersion) console.log(`  codexVersion: ${pinVersion}`);
   // Co-presence reduces config to one of two runtime-owned process profiles;
   // pinned Grok ignores a general --tools allowlist in interactive TUI mode.
   const toolsArr = Array.isArray(profile.tools) ? profile.tools : [];
@@ -18330,6 +19447,11 @@ async function licenseCommand() {
   enforced by the CLI, no telemetry.
 `);
 
+  // 2026-10-29 —— license 功能已移除（Hub 不再提供 /api/license）。
+  // 命令名保留，避免脚本里 `anet license` 变成 unknown command。
+  console.log("\n  license 功能已移除：开源版没有任何许可/额度概念，Hub 也不再提供 /api/license。\n");
+  return;
+  /* eslint-disable no-unreachable */
   const gc = loadGlobal();
   if (!gc.hub) {
     console.log(`  (no hub configured — run 'anet init' to set one if you want hub-side license info)\n`);
@@ -18354,6 +19476,10 @@ async function licenseCommand() {
 }
 
 async function activateCommand() {
+  // 2026-10-29 —— 激活码体系已移除（Hub 不再提供 /api/license/activate）。
+  console.log("\n  activate 已移除：开源版无需激活。\n");
+  return;
+  /* eslint-disable no-unreachable */
   const gc = loadGlobal();
   const hub = gc.hub;
   if (!hub) { console.error("Run 'anet init' first."); markFailed(); return; }
@@ -18782,7 +19908,7 @@ async function doctorCommand() {
             console.log(`     ✅ ${id}: ntok_ re-issued (${maskSecret(body.token)}), session/channels/role preserved`);
             ok++;
           } else {
-            console.log(`     ❌ ${id}: re-issue failed: ${body ? hubErrorText(body) : r.status}`);
+            console.log(`     ❌ ${id}: re-issue failed: ${body ? nodeTokenReissueError(body) : r.status}`);
             fail++;
           }
         } catch (e: any) {
@@ -19033,6 +20159,7 @@ switch (command) {
       case "clone": await nodeCloneCommand(args.slice(2), "clone"); break;
       case "edit": args.splice(0, 1); await nodeEditCommand(); break;
       case "loop": args.splice(0, 1); await nodeLoopCommand(); break;
+      case "secret": await nodeSecretCommand(args.slice(2)); break;
       case "ls": case "list": await lsCommand(); break;
       case "restart": {
         // #173 / F7-03 — node restart = stop + start, alias for symmetry
@@ -19057,7 +20184,7 @@ switch (command) {
       case "codex": args.splice(0, 1); await codexLifecycleCommand(); break; // #1856 —— Codex TUI 共存节点生命周期控制器
       default: {
         const sub = args[1];
-        const nodeUsage = `Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|migrate-token-to-envref> [name]`;
+        const nodeUsage = `Usage: anet node <create|clone|start|stop|restart|resume|delete|ls|rename|edit|loop|codex|secret|migrate-token-to-envref> [name]`;
         // #561 — bare `anet node`: a menu for every runtime (TTY) / table + cheat sheet + usage (piped). src/node-menu.ts
         if (!sub) process.exit(await runNodeMenu(listProfileIds().map((id) => { const p = loadProfile(id); return { id, alias: nodeDisplayName(id, p), profile: p as Record<string, any> | null }; }), { nodesDir: nodesDir(), home, usageLine: nodeUsage }));
         if (sub) {
@@ -19065,7 +20192,7 @@ switch (command) {
           const redirect = nodeSubcommandRedirect(sub, args[2]);
           if (redirect) { for (const line of redirect) console.log(line); }
           else {
-            const suggestion = suggestSimilar(sub, ["create", "clone", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex"]);
+            const suggestion = suggestSimilar(sub, ["create", "clone", "start", "stop", "restart", "resume", "delete", "ls", "rename", "edit", "loop", "codex", "secret"]);
             if (suggestion) console.log(`Unknown node subcommand "${sub}". Did you mean: anet node ${suggestion}?`);
           }
         }
@@ -19088,6 +20215,7 @@ switch (command) {
   case "channel": await channelCommand(); break;
   case "setup": await setupCommand(); break;
   case "upgrade": await upgradeCommand(); break;
+  case "pair": pairCommand(); break; // 精确配对的唯一答案：打印本包常量生成的安装命令
   case "session": sessionCommand(); break;
   case "skill": await skillCommand(); break;
   case "ls": case "list": await lsCommand(); break;

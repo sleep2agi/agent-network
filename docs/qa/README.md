@@ -26,7 +26,7 @@ bash scripts/qa.sh --list    # 列测试名 + 文件路径
 
 ## CI 自动跑
 
-[.github/workflows/qa.yml](../../.github/workflows/qa.yml) — PR / push to main 时自动跑（路径过滤）。
+[.github/workflows/qa.yml](../../.github/workflows/qa.yml) — **PR 时**按路径过滤自动跑；主干不再按 paths 重跑（#2967，改为夜间 schedule 全量 + 需要时 workflow_dispatch）。
 
 ### CI 侧的实测成本（2026-08-18，`L1_TESTS` = 22 个套件）
 
@@ -164,6 +164,10 @@ comm -23 /tmp/b /tmp/d      # build 了但没 done 的 —— 就是它
    - L0：`<module>/src/<file>.test.ts` 旁边
    - L1+：`tests/qa-<id>-<topic>/{Dockerfile,run.sh,README.md}`
 3. 实跑通过：本地 `bun test` 或 `sg docker -c 'docker build ... && docker run ...'`
-4. 把新测试加进 [scripts/qa.sh](../../scripts/qa.sh) 的 `L0_TESTS` / `L1_TESTS` 数组
+4. 登记：
+   - L0：把名字加进 [scripts/qa.sh](../../scripts/qa.sh) 的 `L0_TESTS` 数组
+   - L1：**在你自己的套件目录里放一个空文件 `tests/<套件名>/qa.l1`**（#675 起 L1 按目录登记，
+     qa.sh 用 glob 收齐后按名字排序；不再有共享的 `L1_TESTS` 名单，并行 PR 也就不会为同一行冲突）
+   - 需要在 qa.l1 里写说明就写，那份说明留在套件旁边
 5. 写 [docs/tests/report-<id>.txt](../tests/)：步骤 + 结果 + 抠出的契约
 6. 矩阵 🟡 → ✅，commit + push

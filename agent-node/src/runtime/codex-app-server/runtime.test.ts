@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { EventEmitter } from "events";
+import { createTaskRuntimeEvidenceReporter } from "../../task-runtime-evidence";
 import {
   buildOwnedAppServerArgs,
   COMMHUB_MCP_TOKEN_ENV,
@@ -31,6 +32,12 @@ describe("buildOwnedAppServerArgs", () => {
     ]);
   });
 
+  test("reasoningEffort → model_reasoning_effort -c override", () => {
+    expect(buildOwnedAppServerArgs(URL, { reasoningEffort: "high" })).toEqual([
+      "app-server", "-c", "model_reasoning_effort=high", "--listen", URL,
+    ]);
+  });
+
   test("auto-approve posture (never + danger-full-access) → both overrides, policy first", () => {
     expect(buildOwnedAppServerArgs(URL, { approvalPolicy: "never", sandboxMode: "danger-full-access" })).toEqual([
       "app-server",
@@ -46,8 +53,17 @@ describe("buildOwnedAppServerArgs", () => {
       "app-server",
       "-c", `mcp_servers.commhub.url="http://127.0.0.1:9200"`,
       "-c", `mcp_servers.commhub.bearer_token_env_var="${COMMHUB_MCP_TOKEN_ENV}"`,
+      "-c", `mcp_servers.commhub.default_tools_approval_mode="approve"`,
       "--listen", URL,
     ]);
+  });
+
+  test("#720 — commhub tools are pre-approved; no other MCP server is", () => {
+    const args = buildOwnedAppServerArgs(URL, { commhubMcpUrl: "http://127.0.0.1:9200" });
+    const approvals = args.filter((a) => a.includes("approval_mode"));
+    expect(approvals).toEqual([`mcp_servers.commhub.default_tools_approval_mode="approve"`]);
+    // without a commhub server there is nothing to pre-approve
+    expect(buildOwnedAppServerArgs(URL).some((a) => a.includes("approval_mode"))).toBe(false);
   });
 
   test("the CommHub bearer TOKEN never appears in argv (only the env-var NAME)", () => {
@@ -281,6 +297,18 @@ describe("codexAppServerThink — terminal-event reconciliation watchdog", () =>
       "submitted:task_exact_evidence",
       "consumed:task_exact_evidence",
     ]);
+  });
+
+  test("owned runtime events drive the task lease reporter; other tasks and old turns cannot renew",async()=>{
+    const bridge=new ActivityBridge(),session={bridge} as unknown as CodexAppServerRuntimeSession;
+    const pulses:string[]=[];const reporter=createTaskRuntimeEvidenceReporter({taskId:"lease_runtime",report:async()=>{},reportActivity:async(id)=>{pulses.push(id)}});
+    const thinking=codexAppServerThink(session,{taskId:"lease_runtime",text:"work",timeoutMs:120_000,queueTimeoutMs:500,reconciliationIntervalMs:0,
+      onConsumed:ev=>reporter.consumed({threadId:"thread_owned",turnId:ev.turnId}),
+      onActivity:ev=>reporter.activity({taskId:ev.taskId,threadId:"thread_owned",turnId:ev.turnId})});
+    await advance(30_000);bridge.emit("task_activity",{taskId:"other",turnId:"turn_lease_runtime",kind:"agent_delta"});await flushMicrotasks();expect(pulses).toEqual([]);
+    bridge.emit("task_activity",{taskId:"lease_runtime",turnId:"old",kind:"agent_delta"});await flushMicrotasks();expect(pulses).toEqual([]);
+    bridge.emit("task_activity",{taskId:"lease_runtime",turnId:"turn_lease_runtime",kind:"agent_delta"});await flushMicrotasks();expect(pulses).toEqual(["lease_runtime"]);
+    bridge.emit("task_reply",{taskId:"lease_runtime",text:"done"});await settledNow(thinking);
   });
 
   test("exact task activity resets the response idle deadline for a long-running turn", async () => {

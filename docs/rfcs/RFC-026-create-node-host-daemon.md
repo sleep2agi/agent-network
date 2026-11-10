@@ -953,6 +953,10 @@ P1 contract 已经为多 daemon 留好钩：`create_node.daemon_node_id` 是显�
 // response (text content JSON)
 {
   "ok": true,
+  "count": 2,                       // = daemons.length；2026-10-31 补进示例：
+                                    //   本文件正文里 §P2-A 的验收行早就写了 `count=2`，
+                                    //   但示例漏了它 ⇒ 两份「契约」不一致，实现按验收行走。
+                                    //   （键集断言若照示例写，会把真实字段判成多余。）
   "daemons": [
     {
       "daemon_node_id": "node_daemon_alpha",

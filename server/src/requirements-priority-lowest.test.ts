@@ -68,7 +68,7 @@ describe("P3 lowest priority", () => {
   test("startup rebuilds the legacy CHECK once and keeps every row and index", async () => {
     const sql = db.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'requirements'").sql as string;
     expect(sql).toContain("'lowest'");
-    expect(sql).toContain("CHECK(column_name IN ('pool', 'doing', 'done'))");
+    expect(sql).toContain("CHECK(column_name IN ('pool', 'doing', 'done', 'abandoned'))");
     const rows = db.all("SELECT requirement_id, network_id, title, priority, client_id, description, tags_json FROM requirements WHERE network_id = 'net_legacy' ORDER BY requirement_id") as any[];
     expect(rows.map(r => [r.requirement_id, r.priority])).toEqual([["r_high", "high"], ["r_low", "low"], ["r_normal", "normal"]]);
     for (const r of rows) {

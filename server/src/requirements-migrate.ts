@@ -41,6 +41,9 @@ export function ensureRequirementProjects(database: DbAdapter): void {
     );
     CREATE INDEX IF NOT EXISTS idx_requirement_projects_network ON requirement_projects(network_id, sort);
   `);
+  // 子项目（admin 2026-10-24：管理项目里没有层级）。加法式列，老库用 ALTER 补；重复执行无副作用。
+  // NULL = 顶层项目，所以现有行不需要回填。
+  try { database.exec("ALTER TABLE requirement_projects ADD COLUMN parent_id TEXT"); } catch {}
 }
 
 /**
@@ -56,6 +59,27 @@ export function ensureNetworkTags(database: DbAdapter): void {
       updated_at  TEXT NOT NULL,
       PRIMARY KEY (network_id, name)
     );
+  `);
+}
+
+/**
+ * 标签树(父子标签)。标签名就是 id,parent_name 指向同网络的父标签名;没有 parent 行 = 顶层。
+ * 只存「登记过的节点」:卡片上出现但没登记过的标签(老数据)仍然是平标签,不改写任何 cards_json。
+ * 建标签、改名 / 合并 / 删除时维护这里(见 requirements.ts 的 handleTagCreate / handleTagOp)。
+ * IF NOT EXISTS:重复执行无副作用。
+ */
+export function ensureNetworkTagNodes(database: DbAdapter): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS network_tag_nodes (
+      network_id      TEXT NOT NULL,
+      name            TEXT NOT NULL,
+      parent_name     TEXT,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL,
+      created_by_json TEXT,
+      PRIMARY KEY (network_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_network_tag_nodes_parent ON network_tag_nodes(network_id, parent_name);
   `);
 }
 
@@ -108,6 +132,40 @@ export function migrateRequirementPriorityCheck(database: DbAdapter): { rebuilt:
   const createSql = table.sql
     .replace(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?requirements["`]?/i, "CREATE TABLE requirements_migrated")
     .replace(OLD_PRIORITY_CHECK, PRIORITY_CHECK);
+  database.transaction(() => {
+    database.exec("DROP TABLE IF EXISTS requirements_migrated");
+    database.exec(createSql);
+    database.exec("INSERT INTO requirements_migrated SELECT * FROM requirements");
+    database.exec("DROP TABLE requirements");
+    database.exec("ALTER TABLE requirements_migrated RENAME TO requirements");
+    for (const index of indexes) database.exec(index.sql);
+  });
+  return { rebuilt: true };
+}
+
+/**
+ * 状态加 abandoned(废弃)。同 migrateRequirementPriorityCheck:旧库的 CHECK(column_name IN ('pool', 'doing', 'done'))
+ * SQLite 不能就地改,只重建一次;PostgreSQL 换掉默认名的列约束。已经放开的库什么都不做。存量值不改。
+ */
+const OLD_COLUMN_CHECK = /CHECK\s*\(\s*column_name\s+IN\s*\(\s*'pool'\s*,\s*'doing'\s*,\s*'done'\s*\)\s*\)/i;
+export const COLUMN_CHECK = "CHECK(column_name IN ('pool', 'doing', 'done', 'abandoned'))";
+export function migrateRequirementColumnCheck(database: DbAdapter): { rebuilt: boolean } {
+  if (database.dialect === "postgres") {
+    // 只在约束还不认识 abandoned(或不存在)时动;一条 ALTER TABLE 里先删后加 = 一个语句,原子,
+    // 失败(比如存量里有不合法的值)整条回滚、旧约束原样留着,并且直接抛出 —— 不吞错,启动就该停下来。
+    const def = database.get<{ def: string }>(
+      "SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE t.relname = 'requirements' AND c.conname = 'requirements_column_name_check'",
+    )?.def ?? "";
+    if (def.includes("'abandoned'")) return { rebuilt: false };
+    database.exec(`ALTER TABLE requirements DROP CONSTRAINT IF EXISTS requirements_column_name_check, ADD CONSTRAINT requirements_column_name_check ${COLUMN_CHECK}`);
+    return { rebuilt: true };
+  }
+  const table = database.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'requirements'");
+  if (!table?.sql || !OLD_COLUMN_CHECK.test(table.sql)) return { rebuilt: false };
+  const indexes = database.all<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'requirements' AND sql IS NOT NULL");
+  const createSql = table.sql
+    .replace(/^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?requirements["`]?/i, "CREATE TABLE requirements_migrated")
+    .replace(OLD_COLUMN_CHECK, COLUMN_CHECK);
   database.transaction(() => {
     database.exec("DROP TABLE IF EXISTS requirements_migrated");
     database.exec(createSql);

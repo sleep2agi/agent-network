@@ -109,9 +109,6 @@ export function probePosixOwnedLoopbackConnection(rootPid: number, port: number,
  * 每 intervalMs 探一次,直到:探到(connected)/ TUI 退了(tui-exited,不再白等)/ 到点(deadline)。
  * 判据本身不变:仍是 probePosixOwnedLoopbackConnection 的 fail-closed 归属,只是不再只给一次机会。
  */
-/** 与 Windows 路径的 TUI_HEALTH_MS 同一个预算(cli.ts):TUI 活着却 25 s 都没连上,才判失败。 */
-export const POSIX_TUI_ATTRIBUTION_MS = 25_000;
-
 export type PosixAttributionResult = { outcome: "connected" | "tui-exited" | "deadline"; probes: number; waitedMs: number };
 
 export async function waitForPosixOwnedLoopbackConnection(opts: {

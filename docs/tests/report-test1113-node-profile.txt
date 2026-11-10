@@ -1,0 +1,24 @@
+#1113 / #1128 private CLI 173 / Node 139 preparation — 2026-10-13
+
+Scope: exact private package/lock inputs, installation probe, and per-topology
+activation/rollback guidance. No live node or vendor session is started by CI.
+
+First isolated Docker run: 38356928328 SUCCESS on candidate
+cacc358bbd2f36520608faee5d94b9e5f98a595c. Pinned Node 22.22.2 image; npm ci
+--ignore-scripts installs the locked public pair; docker run --network none
+checks CLI version, Node package-owned entrypoint, package identity/SRI and
+Codex app-server advertised capability. No production workspace/state mounted.
+
+First required qa-trigger-coverage run 38356928250 FAILED: the newly executed
+test1113-node-profile directory was not in the central qa.yml trigger filter.
+Fixed in 8e79f35b8e9902907088abc61c813217926d606d, adding both PR/main filters;
+the package lock and installation probe are unchanged. Failure is retained.
+Local static coverage/symmetry checks passed; no local functional suite ran.
+Final-head Docker and required checks must pass before normal main merge.
+
+Read-only selected-client evidence: current CLI 153 / Node 121; persisted
+codexThreadId equals the original active thread. Shared app-server URL configured,
+co-presence enabled, external-appserver layout absent, no generation marker.
+Only software preparation is covered. Existing app-server/TUI/thread handoff,
+actual adoption of Node 139 and real task last_activity_at samples remain pending
+in #1113 / #1105. This probe cannot certify them or full credential/state recovery.

@@ -40,6 +40,9 @@ export interface RuntimeReadinessOut {
   auth?: string;
   network?: string;
   shared_login_count?: number;
+  /** Copied only for runtime key `opencode-cli`. */
+  generation?: "v1" | "v2";
+  accepted?: boolean;
 }
 
 const ENUMS: Record<string, readonly string[]> = {
@@ -75,6 +78,10 @@ export function sanitizeRuntimeReadiness(raw: unknown): Record<string, RuntimeRe
     if (typeof e.shared_login_count === "number" && Number.isInteger(e.shared_login_count)
         && e.shared_login_count >= 0 && e.shared_login_count <= 100_000) {
       entry.shared_login_count = e.shared_login_count;
+    }
+    if (rt === "opencode-cli" && (e.generation === "v1" || e.generation === "v2")) {
+      entry.generation = e.generation;
+      if (typeof e.accepted === "boolean") entry.accepted = e.accepted;
     }
     out[rt] = entry;
     n++;

@@ -1,0 +1,66 @@
+Hub #828 capability decision — 2026-10-09 20:19 CST
+Documentation source: b32bba34d807c3b0a9c37796a234d61ac708e71b.
+Base main: 34a97a1e095f72b06d66429691fa46d4a1be67fd.
+Only docs/runbooks/opencode-v2-registry-readiness.md changes in that commit.
+No permission policy, runtime version, launcher or production change.
+
+Evidence review
+---------------
+Read report-test828.txt (24 forced native tool cases / six API refusals),
+report-test828-mcp.txt (controlled real Hub dispatch, identity and receipt),
+report-test827-main-restack.txt and report-test832-main-restack.txt (cold
+first-turn checks and stronger stop cleanup). Reviewed runtime refusal before
+probe/spawn in agent-node/src/runtime/opencode-copresence/runtime.ts and
+the existing opencode-backend.test.ts V2 unsafe-tools-only tests.
+The new table states limits alongside each result. Default V2 safe mode is
+unsupported, including no claim of OS sandboxing. Selective MCP policy,
+plugin/local MCP pre-permission execution, global/managed/agent/saved policy,
+reload overrides and filesystem/network/process isolation remain prerequisites
+for a separate future policy change. None was silently marked tested.
+
+Docker document check
+---------------------
+Readonly documentation checkout mounted at /source in the existing
+anet-test539:release-f4bf image, --network none, --cap-drop ALL,
+--security-opt no-new-privileges, entrypoint node.
+Node read the changed runbook, resolved every relative Markdown file link,
+required at least five evidence links, and asserted the explicit unsupported
+default-safe-mode decision and retained unsafe-preview gate text.
+PASS: 5 local evidence links and decision text; exit 0.
+This checks references/text, not the correctness of security conclusions.
+Those conclusions were reviewed against the reports and product guard above.
+
+Unchanged product E2E regression
+-------------------------------
+git diff f4bf739a96bf7a9f89504e0796922c5ba25de6d3 \
+  34a97a1e095f72b06d66429691fa46d4a1be67fd -- agent-node agent-network server
+was empty. Therefore replayed the existing candidate's product image, not a
+claimed fresh build of the documentation commit or public npm installation.
+Image anet-test539:release-f4bf:
+sha256:d17e9af239ea9c4b3092bb65da3e117b1b0639c0f6459e40ba24e0094e452d26
+Client fixture source: e19a4154a3b0c77620e84c7f440a457dca412efd.
+Harness/build provenance: report-test539-release-candidate.txt.
+
+sg docker -c 'docker run --name anet-test539-capability-native-b32 \
+ --user node --network none --cap-drop ALL --security-opt no-new-privileges \
+ -e EXPECTED_SOURCE_COMMIT=f4bf739a96bf7a9f89504e0796922c5ba25de6d3 \
+ -e EXPECTED_CLIENT_SOURCE_COMMIT=e19a4154a3b0c77620e84c7f440a457dca412efd \
+ -e TEST829_LIFECYCLE=1 --entrypoint bash anet-test539:release-f4bf \
+ /workspace/tests/test829-opencode-create/native-nonroot.sh'
+
+Exit 0. Non-root UID/GID1000, private tmux, isolated Hub/model and no network.
+Unauthenticated dispatch and missing unsafe opt-in refused before side effects.
+Rendered browser client created real daemon/V2 node and checked launch proof.
+Create request cr_6fc2d1ba-6409-41f3-b1d8-7b8193ac7e69 succeeded with exact
+child identity; task response appeared in the same TUI.
+Stop sr_1069efa6acb0 completed; bridge/serve/TUI identities and sessions gone,
+config preserved. Start str_f76888794a03 completed with fresh launch evidence,
+rendered TUI and another exact task answer. Owned harness processes exited.
+Raw stdout and /artifacts/report-test829-native.txt retained in named container.
+
+No new native permission experiments were run; do not relabel this lifecycle
+test as selective-policy proof. No updated client model UI/native WebView,
+paid-provider behavior, production deployment, public registry installation,
+Windows/macOS or full disaster-recovery acceptance is inferred.
+Software startup/ports/secrets/rollback/backup sources are unchanged; the
+existing runbook's six recovery steps remain authoritative for this scope.

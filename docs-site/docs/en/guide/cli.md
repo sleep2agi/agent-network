@@ -151,7 +151,7 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet node start <name> --tmux` | Start or attach to a node in tmux |
 | `anet node stop <name>` | Stop the node and its same-name tmux session |
 | `anet node restart <name>` | Stop and start one node |
-| `anet node resume <name> [--session <id>]` | Resume the saved or specified session |
+| `anet node resume <name> [--session <id>]` | Request the saved or specified session; recovery depends on the runtime, including the V1 co-presence limitation below |
 | `anet node delete <name> --force` | Delete the local node configuration and the node's row on the Hub |
 | `anet node rename <ref> <new>` | Rename a node already registered with the Hub |
 | `anet node clone <src> <new>` | Copy a node's settings into a node with a **new identity** (see "Clone a node" below) |
@@ -163,6 +163,18 @@ Codex nodes without memorising commands: run `anet node codex` in the node's dir
 | `anet info <name>` | Show node configuration, process, and recent tasks |
 | `anet logs <name> [--follow]` | Read or follow node logs |
 | `anet node migrate-token-to-envref <name>` | Replace plaintext secrets with envRef after writing a backup |
+
+**OpenCode V1 co-presence recovery requires this node's valid history checkpoint.**
+Old CLI `2.3.0-preview.171` / runtime `2.5.0-preview.137` cannot restore it.
+The new candidate pair CLI `2.3.0-preview.172` / runtime `2.5.0-preview.138`
+imports a private checkpoint into fresh launch data and verifies the original
+session/history; failed import does not silently create a new session. A legacy
+node without a checkpoint still creates a new session: capture its history from
+the running original bridge during a coordinated task/TUI quiet window before
+the first upgrade. Crash recovery covers only the last successful checkpoint;
+external file references are not migrated. Candidates are not downloadable
+until exact-main publication gates pass. See the repository runbook's
+[V1 restart and upgrade boundary](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md#v1-restart-and-upgrade).
 
 `anet node ls --all` ignores the current directory. It reads the Hub as you (your `anet login`) via
 `/api/status` + `/api/host-supervisors` and lists the nodes of the current Network (or the one named by
@@ -441,6 +453,37 @@ it is still there, **send it a task** — `anet status` answers "what it last sa
 about itself", not "whether it is still running".
 
 
+## Node and daemon environment secrets (preview)
+
+### Node env: `anet node secret`
+
+```bash
+anet node secret list  <node> [--json]
+anet node secret set   <node> <KEY> [--from-env VAR]
+anet node secret unset <node> <KEY>
+```
+
+Writes `nodes/<node>/secrets.env` (0600, atomic replace, symlinks refused) and lists key
+names only. Values come from `--from-env` or stdin; a value in argv is a usage error.
+
+### Daemon-scoped: `anet daemon secret`
+
+```bash
+anet daemon secret list  <daemon> [--node <alias>] [--json]
+anet daemon secret set   <daemon> <KEY> --from-env VAR (--node <alias> | --all)
+anet daemon secret unset <daemon> <KEY> (--node <alias> | --all)
+```
+
+Manages `scoped-secrets.json` in the daemon directory (0600, revision CAS, the target must
+already be bound). `set`/`unset` **require** `--node` or `--all`: an unscoped write becomes
+the default for every child, which is a permission decision, never an accident. Receipts and
+`list` show key names and their source (`daemon`/`node`) only.
+
+Both commands are entries into the existing `daemon_provider_snapshot` `secret_*` actions —
+no second read/write path. Values load on the node's next **full** start; restarting the
+bridge alone does not update the native TUI/server. A name on the Hub token page is not
+injected into this process. Precedence: [Environment precedence at startup](/en/guide/agent-node#environment-precedence-at-startup).
+
 ## Adopt manually started nodes (preview source, board #626)
 
 On Linux, configure the daemon's `adopt_roots` with absolute allowed workdirs;
@@ -462,6 +505,13 @@ successful adoption. The daemon checks UID, paths, configuration identity,
 Adoption and revocation never restart or signal the node. Only bare/default-socket tmux
 is supported; co-presence or unreproducible environments are refused (key names, never values).
 Run `anet daemon adopted` from the daemon workdir to list local records with active Hub authority.
+
+`adopt_path_writable_by_others`: the workdir, `.anet`, `.anet/nodes`, the node directory or
+`config.json` is group/other-writable. Fix it with `chmod go-w` on the reported path. For a shared
+team workspace (e.g. `2775`) that must stay group-writable, the **workdir itself only** may instead
+carry the sticky bit: a daemon-owned workdir with `chmod +t <workdir>` (e.g. `drwxrwsr-t`) is accepted,
+because other users then cannot rename or delete the daemon-owned `.anet` inside it. `.anet` and
+everything below it must still be `go-w`.
 
 This increment binds nodes only; remote stop/start for adopted nodes requires
 board #627. Until then it fails explicitly instead of entering legacy child-process cleanup.
@@ -579,6 +629,9 @@ Common environment variables:
 | `COMMHUB_ALIAS` | Node alias |
 | `COMMHUB_TOKEN` | Authentication token; a token in node configuration takes precedence |
 | `COMMHUB_AUTH_TOKEN` | Legacy Hub master-token compatibility path; new deployments use user and node tokens |
+| `ANET_CODEX_RESUME_TIMEOUT_MS` | Codex session-resume deadline for `anet node start --copresence` (whole milliseconds, max 900000); when unset it starts at 300 s and adds 120 s per started GiB of rollout, capped at 15 minutes; timeout errors report elapsed time and rollout size |
+
+Codex co-presence startup creates a private recovery point after quiescing the old processes. A failed backup is fail-closed and its partial directory is removed. Only an operator who explicitly accepts losing safe rollback may pass `--skip-recovery-backup`; the command prints a prominent warning and does not present an older recovery point as the backup for this launch.
 | `ANTHROPIC_BASE_URL` | Anthropic-compatible model endpoint |
 | `ANTHROPIC_AUTH_TOKEN` | Credential for third-party Anthropic-compatible endpoints |
 | `ANTHROPIC_API_KEY` | Credential for Anthropic's official endpoint |

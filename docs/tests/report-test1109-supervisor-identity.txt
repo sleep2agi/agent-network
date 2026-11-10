@@ -1,0 +1,40 @@
+#1109 Daemon list identity
+
+Candidate: immutable node credentials + heartbeat identity shared by MCP/REST.
+Three scoped DB reads independent of daemon count; no token secret fields.
+Legacy unbound ownership/epoch-zero compatibility uses the caller resolver's
+same extracted decision function. NULL-node heartbeat needs a unique alias;
+NULL-network and NULL-node additionally requires a globally unique alias.
+Revoked/deleted/expired/wrong-scope tokens cannot authenticate a list row.
+
+Docker CI: final38368490408 SUCCESS. SQLite/PostgreSQL HTTP + MCP cases and existing caller/
+legacy regressions, with separate token-name and heartbeat-alias red witnesses.
+First run38367661564: Docker build succeeded; SQLite identity17pass/2fail
+because the NULL-network legacy fixtures used a fresh NOT NULL sessions table.
+Fixed with a container-only private fixture preseed of the historical nullable
+sessions schema, preserving both behavior assertions and product schema.
+Initial mutation-pin38367661964 failed due to an extracted resolver anchor and
+dynamic new script anchors. Updated the old anchor, kept its assertion-red
+witness, made new anchors literal: static727 anchors green/unchecked4 unchanged.
+No local functional test, real credential mutation, or production restart.
+Run38368137650: SQLite identity19/legacy9/caller72/daemon23 and three
+assertion-red witnesses passed; PostgreSQL new identity19 passed, but the old
+legacy suite stopped at SQLite-only INSERT OR REPLACE fixture syntax. Those
+four inserts now use portable INSERT (beforeEach cleans the same rows), without
+changing behavioral assertions or product SQL. Full rerun required.
+Final candidate3d43309227913ea6bbe967740dca639b1adee0ea:
+Docker38368490408 SQLite123 + PostgreSQL123 =246 normal, 0 failures;
+token-name, heartbeat-alias and original678 ambiguous assertion-red witnesses
+on both backends =6. Mutation-pin CI38368490487 and10required PASS.
+PR2696 merged2026-10-13T08:23:01Z at main36ed82249f661eb593375e72e375e59472bd41c7.
+Actual tested merge e2e742eae6b613c27854cb15449dfec222b72800 has the same complete
+tree e2ddf91a91674447ef4606ef3c00494d96c21454 as source main.
+Formal main-only Hub137 release38368892713 and selected-Hub activation completed
+with separate evidence in report-test1109-hub137-publication.txt.
+Release/selected-Hub display verification completed; see report-test1109-hub137-publication.txt.
+
+Recovery: unchanged Hub service/ports/secrets/data; software uses Git main and
+the existing locked deployment profile. Existing deploy/hub profile documents
+startup, private secret source, activation/health checks and rollback. This list
+read changes no schema or data; rollback chooses the previous verified Hub
+artifact. Private provider/auth/session data still requires independent backups.

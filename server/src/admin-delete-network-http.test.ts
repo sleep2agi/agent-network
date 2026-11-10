@@ -54,8 +54,9 @@ beforeAll(async () => {
   memberUserId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", `member_delnet_${stamp}`)!.user_id;
   expect(db.get<{ role: string }>("SELECT role FROM users WHERE user_id = ?1", adminUserId)!.role).toBe("admin");
   expect(db.get<{ role: string }>("SELECT role FROM users WHERE user_id = ?1", memberUserId)!.role).not.toBe("admin");
-  // free 档只能拥有 2 个网络;本文件要给它建七八个。plan 只影响配额,不影响任何权限判定。
-  db.run("UPDATE users SET plan = 'pro' WHERE user_id = ?1", [memberUserId]);
+  // 本文件要建七八个网络，而默认每用户上限是 2（#2980 之前靠把 plan 改成 'pro' 绕过）。
+  // 现在没有 plan 概念了：上限由 COMMHUB_MAX_NETWORKS_PER_USER 决定 ⇒ 用它把闸抬高。
+  process.env.COMMHUB_MAX_NETWORKS_PER_USER = "50";
 
   const minted = auth.createNetworkTokenForNode(memberUserId, member.network_id!, "delnet-node");
   expect(minted.ok).toBe(true);

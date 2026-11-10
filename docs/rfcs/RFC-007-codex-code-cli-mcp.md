@@ -25,9 +25,9 @@
 > 10. **Vincent 4175+4176: final STOP** ← current
 >
 > **关联 docs (保留作 codex CLI ecosystem 调研 archive)**:
-> - [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) — 通信龙 Path C 深度调研 (commit 98b6728)
-> - [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) — 通信SDK马 Path B 深度调研 (commit 093d76a)
-> - [`docs/codex-deep-research.md`](../codex-deep-research.md) — 通信SDK马 evidence-based deep dive (commit 96430e6)
+> - [`docs/anet-codex-mcp-server-plan.md`](../plans/anet-codex-mcp-server-plan.md) — 通信龙 Path C 深度调研 (commit 98b6728)
+> - [`docs/anet-codex-remote-control-plan.md`](../plans/anet-codex-remote-control-plan.md) — 通信SDK马 Path B 深度调研 (commit 093d76a)
+> - [`docs/codex-deep-research.md`](../research/codex-deep-research.md) — 通信SDK马 evidence-based deep dive (commit 96430e6)
 > - RFC-006 (codex-cli-remote-control archive)
 > - RFC-005 (codex-code-cli TUI Superseded)
 >
@@ -44,7 +44,7 @@
 | Helpers | Vincent（telegram 4136 final pivot 复位 Path C）, 通信工程马（cli.ts implementer eval + Option 2 architecture choice） |
 | 关联 issue | [#18](https://github.com/sleep2agi/agent-network/issues/18) SDK research loop |
 | 关联 RFC | RFC-002 channel-bind-cli / RFC-003 node telemetry / **RFC-005 superseded** / **RFC-006 superseded (Path B archive)** |
-| 关联 doc | [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) 通信龙 Path C 深度调研 / [`docs/codex-deep-research.md`](../codex-deep-research.md) 通信SDK马 evidence dive / [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) Path B archive (Phase 2 future work) / [commit 6429bc0](https://github.com/sleep2agi/agent-network/commit/6429bc0) codex CLI 直接通信研究 / [commit 24b744e](https://github.com/sleep2agi/agent-network/commit/24b744e) 通信龙 deep design |
+| 关联 doc | [`docs/anet-codex-mcp-server-plan.md`](../plans/anet-codex-mcp-server-plan.md) 通信龙 Path C 深度调研 / [`docs/codex-deep-research.md`](../research/codex-deep-research.md) 通信SDK马 evidence dive / [`docs/anet-codex-remote-control-plan.md`](../plans/anet-codex-remote-control-plan.md) Path B archive (Phase 2 future work) / [commit 6429bc0](https://github.com/sleep2agi/agent-network/commit/6429bc0) codex CLI 直接通信研究 / [commit 24b744e](https://github.com/sleep2agi/agent-network/commit/24b744e) 通信龙 deep design |
 | 目标版本 | agent-network v2.1.8（Phase 1 大 feature）+ agent-node v2.5 |
 | 实施人 | 通信工程马（agent-node runtime adapter + cli.ts delegate） |
 
@@ -1040,9 +1040,9 @@ anet codex-setup --alias my-codex-user-tui --apply
 
 **Day 1 (today 2026-05-13)**:
 - ✅ 通信龙 deep design doc 24b744e (Path B + C 初探)
-- ✅ Path B 深度调研 doc [`docs/anet-codex-remote-control-plan.md`](../anet-codex-remote-control-plan.md) (通信SDK马 093d76a)
-- ✅ Path C 深度调研 doc [`docs/anet-codex-mcp-server-plan.md`](../anet-codex-mcp-server-plan.md) (通信龙 98b6728)
-- ✅ codex 深度调研 doc [`docs/codex-deep-research.md`](../codex-deep-research.md) (通信SDK马 96430e6, evidence multi-client falsify Path B 卖点)
+- ✅ Path B 深度调研 doc [`docs/anet-codex-remote-control-plan.md`](../plans/anet-codex-remote-control-plan.md) (通信SDK马 093d76a)
+- ✅ Path C 深度调研 doc [`docs/anet-codex-mcp-server-plan.md`](../plans/anet-codex-mcp-server-plan.md) (通信龙 98b6728)
+- ✅ codex 深度调研 doc [`docs/codex-deep-research.md`](../research/codex-deep-research.md) (通信SDK马 96430e6, evidence multi-client falsify Path B 卖点)
 - ✅ Vincent 4136 final pivot Path C
 - ⏳ RFC-007 主体 ship (本 commit, Path C clean)
 - ⏳ RFC-006 mark Superseded by RFC-007 (下一 commit)

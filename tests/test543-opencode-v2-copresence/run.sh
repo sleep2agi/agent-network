@@ -2,6 +2,7 @@
 # #543 — OpenCode V2 co-presence preview. Runs only inside its Docker image:
 # private tmux socket (-L test543), throwaway dirs, loopback stub model, no Hub.
 set -Eeuo pipefail
+unset TMUX TMUX_PANE
 
 REPORT="${REPORT:-/tmp/art/report-test543.txt}"
 mkdir -p "$(dirname "$REPORT")"
@@ -18,6 +19,7 @@ echo
 echo "## Layer 0 — unit (V2 core vs protocol fake, package gate, backend + table, V1 golden)"
 l0=0
 (cd /agent-node-src && bun test \
+    src/runtime/opencode-copresence/close-cleanup.test.ts \
     src/runtime/opencode-copresence/v2-session.test.ts \
     src/runtime/opencode-acp/binary-v2.test.ts \
     src/runtime/opencode-backend.test.ts \

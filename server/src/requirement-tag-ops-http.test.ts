@@ -109,6 +109,24 @@ afterAll(() => {
   try { rmSync(DIR, { recursive: true, force: true }); } catch {}
 });
 
+// 2026-10-31 —— **穷尽映射的运行时钉**（外部复核 (c)：「应改成 Record<ErrorCode, number> 由 tsc 报红」）。
+// 本仓 server 没有 tsc 门（只有 agent-network 在 e2e-docker 里 typecheck），
+// 所以那条约束只有写成运行时断言才真的存在：
+//   码集合 = TAG_CREATE_ERRORS（唯一来源）｜映射键必须与它逐字相等｜每个值必须是合法 HTTP 状态
+test("tag create: every error code has a status, and nothing else does", async () => {
+  const { TAG_CREATE_ERRORS, TAG_CREATE_STATUS } = await import("./requirements.js");
+  expect(Object.keys(TAG_CREATE_STATUS).sort()).toEqual([...TAG_CREATE_ERRORS].sort());
+  for (const code of TAG_CREATE_ERRORS) {
+    const status = TAG_CREATE_STATUS[code];
+    expect(Number.isInteger(status)).toBe(true);
+    expect(status).toBeGreaterThanOrEqual(400);
+    expect(status).toBeLessThan(500);
+  }
+  // 反例守卫：默认分支的「未映射 ⇒ 400」不许再出现（那正是被替换掉的那行）
+  const src = await (await import("node:fs")).readFileSync(new URL("./requirements.ts", import.meta.url), "utf8");
+  expect(src).not.toMatch(/result\.error === "tag_exists" \? 409/);
+});
+
 describe("GET /api/requirements/tags", () => {
   test("owner:tags 仍是排序后的字符串数组(旧 App 形状不变),多出 counts / colors / can_manage", async () => {
     const r = await tagsOf(admin.token);
@@ -208,7 +226,7 @@ describe("改名 / 合并 / 删除 / 颜色", () => {
     const t0 = new Date().toISOString();
     const r = await op(admin.token, { op: "rename", from: "UI", to: "界面" });
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ ok: true, op: "rename", affected: 4 });
+    expect(r.body).toEqual({ ok: true, op: "rename", affected: 4, reparented: 0 });
     expect(cardTags("visible")).toEqual(["界面", "交互", "bug"]);
     expect(cardTags("hidden")).toEqual(["界面", "secret"]);
     expect(cardTags("archived")).toEqual(["界面", "旧"]);
@@ -237,7 +255,7 @@ describe("改名 / 合并 / 删除 / 颜色", () => {
   test("合并:多个来源进一个新标签;目标没颜色就继承来源的;来源颜色行删掉", async () => {
     expect((await op(admin.token, { op: "color", tag: "旧", color: "#16a34a" })).status).toBe(200);
     const r = await op(admin.token, { op: "merge", from: ["bug", "旧", "secret", "不存在"], to: "杂项" });
-    expect(r.body).toEqual({ ok: true, op: "merge", affected: 3 });
+    expect(r.body).toEqual({ ok: true, op: "merge", affected: 3, reparented: 0 });
     expect(cardTags("visible")).toEqual(["界面", "杂项"]);
     expect(cardTags("hidden")).toEqual(["界面", "杂项"]);
     expect(cardTags("archived")).toEqual(["界面", "杂项"]);
@@ -253,7 +271,7 @@ describe("改名 / 合并 / 删除 / 颜色", () => {
 
   test("删除:从每张卡上拿掉(卡保留),颜色行删掉,审计带 affected", async () => {
     const r = await op(admin.token, { op: "delete", tag: "界面" });
-    expect(r.body).toEqual({ ok: true, op: "delete", affected: 4 });
+    expect(r.body).toEqual({ ok: true, op: "delete", affected: 4, reparented: 0 });
     expect(cardTags("visible")).toEqual([]);
     expect(cardTags("both")).toEqual(["TMWork"]);
     expect(db.get("SELECT COUNT(*) AS n FROM requirements WHERE network_id = ?1", NET).n).toBe(5);
@@ -262,5 +280,175 @@ describe("改名 / 合并 / 删除 / 颜色", () => {
     expect(JSON.parse(audit.detail)).toEqual({ op: "delete", tag: "界面", affected: 4 });
     expect((await tagsOf(admin.token)).body.tags).toEqual(["TMWork"]);
     expect(cardTags("net2")).toEqual(["UI", "交互"]);
+  });
+});
+
+// ── 改父级(reparent) ──
+// 客户端(0.297+)的「管理标签」里要能改父级;Hub 侧此前只缺这一个 op。
+// 这里只验树:reparent 不给标签改名、不动任何卡片的 tags 数组。
+describe("改父级 reparent", () => {
+  const createTag = (token: string, name: string, parent: string | null = null) =>
+    send(token, "POST", `/api/requirements/tags/create?network_id=${NET}`, { name, parent_id: parent });
+  const nodesOf = async (token: string) =>
+    (await send(token, "GET", `/api/requirements/tags?network_id=${NET}`)).body.nodes as Array<{ name: string; parent_id: string | null; depth: number; registered: boolean }>;
+  const nodeOf = async (token: string, name: string) => (await nodesOf(token)).find(node => node.name === name)!;
+
+  test("搬到另一个标签下面,再搬回顶层:父与深度都跟着变,卡片一张都不动", async () => {
+    expect((await createTag(admin.token, "RP根")).status).toBe(201);
+    expect((await createTag(admin.token, "RP枝")).status).toBe(201);
+    expect((await createTag(admin.token, "RP叶", "RP枝")).status).toBe(201);
+    const before = db.get("SELECT COUNT(*) AS n FROM requirements WHERE network_id = ?1", NET).n;
+
+    const moved = await op(admin.token, { op: "reparent", tag: "RP叶", parent: "RP根" });
+    expect(moved.status).toBe(200);
+    expect(moved.body).toMatchObject({ ok: true, op: "reparent", affected: 0, reparented: 1 });
+    expect(await nodeOf(admin.token, "RP叶")).toMatchObject({ parent_id: "RP根", depth: 2 });
+    // 原来是 RP枝 的子孙,搬走之后 RP枝 下面没有它了
+    expect((await nodesOf(admin.token)).filter(node => node.parent_id === "RP枝")).toEqual([]);
+
+    const back = await op(admin.token, { op: "reparent", tag: "RP叶", parent: null });
+    expect(back.status).toBe(200);
+    expect(await nodeOf(admin.token, "RP叶")).toMatchObject({ parent_id: null, depth: 1 });
+    // 只动树:卡片数与卡的标签都没变
+    expect(db.get("SELECT COUNT(*) AS n FROM requirements WHERE network_id = ?1", NET).n).toBe(before);
+  });
+
+  test("父是自己的子孙 = 环,拒绝(400 tag_parent_cycle),树一个字都不改", async () => {
+    expect((await createTag(admin.token, "RP环甲")).status).toBe(201);
+    expect((await createTag(admin.token, "RP环乙", "RP环甲")).status).toBe(201);
+    const r = await op(admin.token, { op: "reparent", tag: "RP环甲", parent: "RP环乙" });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("tag_parent_cycle");
+    expect(await nodeOf(admin.token, "RP环甲")).toMatchObject({ parent_id: null });
+  });
+
+  test("自己当自己的父:解析阶段就拒(400 tag_parent_cycle)", async () => {
+    const r = await op(admin.token, { op: "reparent", tag: "RP根", parent: "RP根" });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("tag_parent_cycle");
+  });
+
+  test("连子树一起搬:新父深度 + 子树高度 > 4 就拒(400 tag_depth_exceeded)", async () => {
+    expect((await createTag(admin.token, "RPD1")).status).toBe(201);
+    expect((await createTag(admin.token, "RPD2", "RPD1")).status).toBe(201);
+    expect((await createTag(admin.token, "RPD3", "RPD2")).status).toBe(201);     // 3 层:1>2>3
+    expect((await createTag(admin.token, "RPX")).status).toBe(201);
+    expect((await createTag(admin.token, "RPY", "RPX")).status).toBe(201);       // 2 层子树
+    // 把 2 层的 RPX(含 RPY)挂到第 3 层下面 → 最深 5 层 > 4
+    const r = await op(admin.token, { op: "reparent", tag: "RPX", parent: "RPD3" });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("tag_depth_exceeded");
+    expect(await nodeOf(admin.token, "RPX")).toMatchObject({ parent_id: null });
+    // 只搬叶子(高度 1)就正好 4 层,允许
+    const ok = await op(admin.token, { op: "reparent", tag: "RPY", parent: "RPD3" });
+    expect(ok.status).toBe(200);
+    expect(await nodeOf(admin.token, "RPY")).toMatchObject({ parent_id: "RPD3", depth: 4 });
+  });
+
+  test("父不存在 = 404,不静默升到根", async () => {
+    const r = await op(admin.token, { op: "reparent", tag: "RP根", parent: "不存在的父" });
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe("tag_parent_not_found");
+    expect(await nodeOf(admin.token, "RP根")).toMatchObject({ parent_id: null });
+  });
+
+  test("缺 parent 键 = 400(不能用「没传」把标签静默升到根);parent 为空串 = 顶层", async () => {
+    const missing = await op(admin.token, { op: "reparent", tag: "RP根" });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toBe("invalid_tag_parent_id");
+    expect(await nodeOf(admin.token, "RP根")).toMatchObject({ parent_id: null });
+
+    expect((await op(admin.token, { op: "reparent", tag: "RP根", parent: "RPD1" })).status).toBe(200);
+    const root = await op(admin.token, { op: "reparent", tag: "RP根", parent: "" });
+    expect(root.status).toBe(200);
+    expect(await nodeOf(admin.token, "RP根")).toMatchObject({ parent_id: null });
+  });
+
+  test("只在卡片上出现过的老标签也能改父级:先登记成节点,再挂到父下面", async () => {
+    const inUse = (await nodesOf(admin.token)).find(node => node.registered === false);
+    if (!inUse) return;                       // 该网络里没有"未登记但在用"的标签时,这条不适用
+    const r = await op(admin.token, { op: "reparent", tag: inUse.name, parent: "RPD1" });
+    expect(r.status).toBe(200);
+    const after = await nodeOf(admin.token, inUse.name);
+    expect(after).toMatchObject({ parent_id: "RPD1", depth: 2, registered: true });
+    // 卡片上的标签字符串不变(改父级不是改名)
+    const stillUsed = db.all<{ tags_json: string }>("SELECT tags_json FROM requirements WHERE network_id = ?1 AND tags_json LIKE ?2", NET, `%${inUse.name}%`);
+    expect(stillUsed.length).toBeGreaterThan(0);
+  });
+
+  test("reparent 走同一把标签管理锁:节点令牌与 viewer 都拒(403),树不变", async () => {
+    const byNode = await op(nodeToken, { op: "reparent", tag: "RP根", parent: "RPD1" });
+    expect(byNode.status).toBe(403);
+    const byViewer = await op(vic.token, { op: "reparent", tag: "RP根", parent: "RPD1" });
+    expect(byViewer.status).toBe(403);
+    expect(await nodeOf(admin.token, "RP根")).toMatchObject({ parent_id: null });
+  });
+});
+
+describe("改父级 reparent —— 被拒绝时不留副作用", () => {
+  const nodes = async () => (await send(admin.token, "GET", `/api/requirements/tags?network_id=${NET}`)).body.nodes as Array<{ name: string; parent_id: string | null; registered: boolean }>;
+  test("只在卡片上用过的标签,reparent 到不存在的父:404 且**不会**被登记进树", async () => {
+    const before = (await nodes()).filter(node => !node.registered).map(node => node.name);
+    if (!before.length) return;                 // 该网络里没有"未登记但在用"的标签时,这条不适用
+    const name = before[0];
+    const r = await op(admin.token, { op: "reparent", tag: name, parent: "根本没有这个父" });
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe("tag_parent_not_found");
+    // 关键:事务返回错误码是**提交**语义,若先 INSERT 登记再报错,这里就会看到 registered=true
+    const after = (await nodes()).find(node => node.name === name);
+    expect(after?.registered ?? false).toBe(false);
+  });
+});
+
+// ── MCP 面（#2204 缺口 2）──
+// 一个工具(action 分派)而不是 list + op 两个:tools/list 字节预算是硬约束,见 tools.ts 的注释。
+describe("requirement_tags (MCP)", () => {
+  async function mcp(token: string, name: string, args: Record<string, unknown>) {
+    const r = await fetch(`${BASE}/mcp`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
+    const raw = await r.text(), line = raw.split("\n").find(x => x.startsWith("data: "));
+    const envelope = JSON.parse(line ? line.slice(6) : raw);
+    try { return JSON.parse(envelope.result.content[0].text); } catch { return { mcpError: envelope.error ?? envelope.result }; }
+  }
+  const nodes = async (token: string) => (await send(token, "GET", `/api/requirements/tags?network_id=${NET}`)).body.nodes as Array<{ name: string; parent_id: string | null; depth: number; registered: boolean }>;
+
+  test("action=list 返回标签树(含 parent/depth/registered);action=reparent 走同一条 REST 语义", async () => {
+    expect((await send(admin.token, "POST", `/api/requirements/tags/create?network_id=${NET}`, { name: "MCP父", parent_id: null })).status).toBe(201);
+    expect((await send(admin.token, "POST", `/api/requirements/tags/create?network_id=${NET}`, { name: "MCP子", parent_id: null })).status).toBe(201);
+
+    const listed = await mcp(admin.token, "requirement_tags", { action: "list" });
+    // 2026-10-31 —— #3275：requirement_tags 的两个动作形状都由真实调用给出。
+    // list 回 7 键（含 can_manage 与 counts —— 「这一页的树」与「我能不能改」是两件事，
+    // 客户端要同时决定怎么画和要不要画按钮）；每行 6 键。
+    expect(Object.keys(listed).sort()).toEqual([
+      "can_manage", "colors", "counts", "networkId", "nodes", "ok", "tags",
+    ]);
+    expect(Object.keys((listed.nodes as any[])[0]).sort()).toEqual([
+      "color", "count", "depth", "name", "parent_id", "registered",
+    ]);
+    const rows = listed.nodes as Array<{ name: string; parent_id: string | null; depth: number; registered: boolean }>;
+    expect(rows.find(node => node.name === "MCP父")).toMatchObject({ parent_id: null, depth: 1, registered: true });
+    expect(rows.find(node => node.name === "MCP子")).toMatchObject({ parent_id: null, depth: 1 });
+
+    const moved = await mcp(admin.token, "requirement_tags", { action: "reparent", tag: "MCP子", parent: "MCP父" });
+    // reparent 回**四个数/名**，不回整棵树：调用方拿 affected/reparented 就能判断要不要重读。
+    expect(Object.keys(moved).sort()).toEqual(["affected", "ok", "op", "reparented"]);
+    expect(moved).toMatchObject({ ok: true, op: "reparent", affected: 0, reparented: 1 });
+    expect((await nodes(admin.token)).find(node => node.name === "MCP子")).toMatchObject({ parent_id: "MCP父", depth: 2 });
+
+    // 与 REST 同一套错误码:不传 parent 键 ≠ 升到顶层
+    const missing = await mcp(admin.token, "requirement_tags", { action: "reparent", tag: "MCP子" });
+    expect(missing.error).toBe("invalid_tag_parent_id");
+    expect((await nodes(admin.token)).find(node => node.name === "MCP子")).toMatchObject({ parent_id: "MCP父" });
+  });
+
+  test("节点令牌:能 list,但写操作被拒(403 permission_denied),树不变", async () => {
+    const listed = await mcp(nodeToken, "requirement_tags", { action: "list" });
+    expect(Array.isArray(listed.nodes)).toBe(true);
+    const write = await mcp(nodeToken, "requirement_tags", { action: "reparent", tag: "MCP子", parent: null });
+    expect(write.status).toBe(403);
+    // 写操作先过「要人的令牌」这道闸(tags_write),再到 owner/admin 判定;节点令牌停在前一道。
+    expect(["user_token_required", "permission_denied"]).toContain(write.error);
+    expect((await nodes(admin.token)).find(node => node.name === "MCP子")).toMatchObject({ parent_id: "MCP父" });
   });
 });

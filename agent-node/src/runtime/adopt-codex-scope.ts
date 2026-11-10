@@ -4,6 +4,12 @@ import type { AdoptionLocalIdentity } from "./adopt-local-identity.js";
 import type { CodexAdoptionScope } from "./adopt-codex-evidence.js";
 
 export function readCodexScope(identity: AdoptionLocalIdentity, uid: number): CodexAdoptionScope {
+  const result = readCodexStopScope(identity, uid);
+  if (result.previousBoot) throw Error("adopt_codex_readopt_required");
+  return result.scope;
+}
+/** Old-boot evidence is usable ONLY for a no-signal absence check. */
+export function readCodexStopScope(identity: AdoptionLocalIdentity, uid: number): {scope: CodexAdoptionScope; previousBoot: boolean} {
   const rawLayout = identity.config.codexLaunchLayout;
   if (rawLayout !== undefined && rawLayout !== "external-appserver") throw Error("adopt_codex_layout_unsupported");
   const file = join(identity.nodeDir, "copresence-identity.json");
@@ -13,9 +19,10 @@ export function readCodexScope(identity: AdoptionLocalIdentity, uid: number): Co
     throw Error("adopt_codex_marker_unsafe");
   const data = JSON.parse(readFileSync(file, "utf8"));
   if (!data || typeof data.marker !== "string" || !/^[a-f0-9-]{36}$/i.test(data.marker) || data.owner_uid !== uid ||
-      data.boot_id !== readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()) throw Error("adopt_codex_marker_invalid");
+      typeof data.boot_id !== "string" || !/^[a-f0-9-]{36}$/i.test(data.boot_id)) throw Error("adopt_codex_marker_invalid");
+  const previousBoot = data.boot_id !== readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
   const configured = (identity.config.env as Record<string, unknown> | undefined)?.ANET_TMUX_SOCKET;
   if (configured !== undefined && typeof configured !== "string") throw Error("adopt_codex_socket_unproven");
-  return { layout:rawLayout === "external-appserver" ? "external-appserver" : "native", alias: identity.alias, socket: configured as string ?? `/tmp/tmux-${uid}/default`,
-    marker: data.marker, codexHome: home, workdir: identity.workdir, uid };
+  return { previousBoot, scope: { layout:rawLayout === "external-appserver" ? "external-appserver" : "native", alias: identity.alias, socket: configured as string ?? `/tmp/tmux-${uid}/default`,
+    marker: data.marker, codexHome: home, workdir: identity.workdir, uid } };
 }

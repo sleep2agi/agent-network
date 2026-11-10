@@ -1,8 +1,17 @@
 import { db } from "./db.js";
 import { addAgentNetworkScope, type RestNetworkScope } from "./network-scope.js";
+import { forkRecoveryRequestSchema, publicForkResult } from "./codex-fork-contract.js";
 
 // Exact public codes only; daemon exception text must never reach node viewers.
 const publicLifecycleErrors = new Set([
+  "codex_fork_confirmation_invalid", "codex_fork_recovery_unsupported", "codex_fork_cli_unsupported",
+  "codex_fork_result_invalid", "codex_fork_outcome_unknown",
+  "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",
+  "adopt_codex_external_start_unproven", "adopt_codex_launch_failed", "adopt_codex_launch_timeout",
+  "adopt_codex_port_unproven", "adopt_codex_start_superseded", "adopt_codex_binding_generation_unproven",
+  "adopt_codex_start_evidence_missing", "adopt_codex_start_evidence_changed",
+  "adopt_codex_session_conflict", "adopt_codex_port_unavailable", "adopt_codex_stage_still_running",
+  "adopt_codex_identity_unproven",
   "adopt_active_binding_required", "adopt_binding_unavailable",
   "adopt_binding_revoked_during_start", "adopt_explicit_private_socket_required",
   "adopt_start_evidence_missing", "adopt_stop_evidence_missing",
@@ -23,6 +32,12 @@ const publicLifecycleErrors = new Set([
   "adopt_tmux_socket_mismatch", "adopt_pane_invalid", "adopt_pane_unverified",
   "adopt_pane_process_mismatch", "adopt_socket_directory_unsafe", "adopt_socket_unsafe",
   "adopt_pid_changed", "adopt_pid_invalid", "adopt_pidfile_unsafe",
+  "opencode_tui_session_mismatch",
+  // #2012 —— daemon 的 copresence_adopt_v2 拒绝是固定安全码（无路径/无异常文本），
+  // 不放行会让用户投影退化成 lifecycle_error，看不到「为什么被拒绝」。
+  "copresence_adopt_v2",
+  // OpenCode V2 co-presence adoption (registration for fork): bridge must be live; start/stop not yet supported.
+  "adopt_opencode_bridge_not_running", "adopt_opencode_lifecycle_unsupported",
   "adopt_proc_invalid", "adopt_proc_unreadable", "adopt_platform_unsupported",
   "adopt_registry_conflict", "adopt_registry_entry_invalid", "adopt_registry_invalid",
   "adopt_registry_unsafe", "adopt_config_env_invalid", "adopt_env_file_invalid",
@@ -90,9 +105,22 @@ export function lifecycleRequestResponse(url: URL, scope: RestNetworkScope): Res
   const params: any[] = [requestId ?? nodeId];
   const sql = scopeNodes(`SELECT r.request_id,r.${nodeColumn} AS node_id,r.network_id,r.daemon_node_id,
       r.status,r.error,r.created_at,${kind === "adopt" ? "r.updated_at" : "r.acked_at,r.delivered_at"}
+      ${kind === "start" ? ",r.fork_recovery_json,r.fork_result_json" : ""}
     FROM ${table} r JOIN nodes n ON n.node_id=r.${nodeColumn} AND n.network_id=r.network_id
     WHERE r.${requestId ? "request_id" : nodeColumn}=?1${kind === "stop" ? " AND r.action='stop'" : ""}`, params, scope);
   const row = db.get<Record<string, unknown>>(sql + " ORDER BY r.created_at DESC,r.request_id DESC LIMIT 1", ...params);
   if (!row && requestId) return fail("request_not_found", 404);
-  return Response.json({ ok: true, request: row ? { kind, ...row, error: publicLifecycleError(row.error) } : null });
+  if (!row) return Response.json({ ok: true, request: null });
+  const { fork_recovery_json, fork_result_json, ...publicRow } = row;
+  let confirmed: true | null = null;
+  if (kind === "start" && typeof fork_recovery_json === "string") {
+    try {
+      if (forkRecoveryRequestSchema.safeParse(JSON.parse(fork_recovery_json)).success) confirmed = true;
+    } catch { /* damaged confirmation is unknown; keep any independently valid fork evidence */ }
+  }
+  return Response.json({ ok: true, request: { kind, ...publicRow, error: publicLifecycleError(row.error),
+    ...(kind === "start" && fork_recovery_json != null ? { fork_recovery: {
+      requested: confirmed, result: publicForkResult(fork_result_json),
+    } } : {}),
+  } });
 }

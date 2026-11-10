@@ -60,8 +60,8 @@ expect_red exact-owner-no-admin-bypass /tmp/test688-mut-owner.db
 restore server/src/external-schedule-edits.ts
 
 echo "L3 witnessed-red: a legacy NULL owner cannot be first-claimed"
-sed -i 's/if (existing \&\& !existing.owner_user_id) throw new Error("node_owner_unclaimed");/if (false \&\& existing \&\& !existing.owner_user_id) throw new Error("node_owner_unclaimed");/' server/src/auth.ts
-grep -Fq 'if (false && existing && !existing.owner_user_id)' server/src/auth.ts
+sed -i 's/if (existing \&\& !existing.owner_user_id \&\& !legacyNodeHolder(userId, networkId, nodeName, nodeId)) throw new Error("node_owner_unclaimed");/if (false) throw new Error("node_owner_unclaimed");/' server/src/auth.ts
+grep -Fq 'if (false) throw new Error("node_owner_unclaimed");' server/src/auth.ts
 expect_red legacy-owner-read-only /tmp/test688-mut-legacy.db
 restore server/src/auth.ts
 

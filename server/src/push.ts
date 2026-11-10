@@ -59,6 +59,24 @@ function envNum(k: string, fallback: number): number {
  *  half-open consumer that has stopped reading entirely. */
 const MAX_QUEUE_BACKPRESSURE_BYTES = envNum("ANET_SSE_MAX_QUEUE_BYTES", 1_000_000);
 
+/** #2363 —— 订阅者“已经落后多少字节”就不再给它非关键事件。
+ *
+ *  背景（2026-10-26 实测）：150 条慢订阅者 + 30 msg/s 广播，RSS 峰值可到 2 GB；
+ *  每条连接的上限只是 1 MB，但 300 条 × 1 MB 就是 GB 级。与其把上限一路压到底，
+ *  更合理的是：**明显落后的连接直接跳过非关键事件**（keepalive 与 connected 必须保留，
+ *  否则 liveness 探测和重连握手会失效），并计数 `sse_dropped_degraded`。
+ *
+ *  这不是“丢消息”的新语义：SSE 本来就是 best-effort，客户端重连后会拉一次快照；
+ *  真正的问题是把“慢消费者”变成“Hub 的内存账”。 */
+const COALESCE_AT_BYTES = envNum("ANET_SSE_COALESCE_AT_BYTES", 65_536);
+
+/** #2363 —— 所有广播共用同一个 TextEncoder：编码结果只读、不跨事件复用同一 Uint8Array。 */
+const SHARED_ENCODER = new TextEncoder();
+
+/** 被跳过的事件计数（进程内累计，供 /health 与测试读取）。 */
+let droppedDegraded = 0;
+export function sseDegradedDropCount(): number { return droppedDegraded; }
+
 /** How long `desiredSize` can stay negative (i.e. consumer behind HWM)
  *  before we declare the client dead. 60s by default — past 2× the
  *  keepalive interval, so a live-but-slow consumer wouldn't trip it. */
@@ -200,7 +218,7 @@ function closeClient(client: SSEClient, reason: string): void {
 /** Best-effort enqueue with backpressure guard. Returns:
  *    - "ok"    → bytes accepted, queue healthy
  *    - "dead"  → client closed; caller must remove from map */
-function tryEnqueueBytes(client: SSEClient, bytes: Uint8Array): "ok" | "dead" {
+function tryEnqueueBytes(client: SSEClient, bytes: Uint8Array, opts: { critical?: boolean } = {}): "ok" | "dead" {
   if (client.closed) return "dead";
 
   const ctrl = client.controller;
@@ -217,6 +235,14 @@ function tryEnqueueBytes(client: SSEClient, bytes: Uint8Array): "ok" | "dead" {
   if (desired < -MAX_QUEUE_BACKPRESSURE_BYTES) {
     closeClient(client, `queue-overflow-${Math.abs(desired)}b`);
     return "dead";
+  }
+
+  // #2363 —— 落后超过 COALESCE_AT_BYTES 且不是关键帧：跳过，不排队、也不关连接
+  // （上限之上的仍然按硬顶关闭，见上一段）。这样“慢消费者”不再把内存账单放大到
+  // 连接数 × 单连接上限，同时保留原有“彻底读不动就断开回收”的语义。
+  if (!opts.critical && desired < -COALESCE_AT_BYTES) {
+    droppedDegraded += 1;
+    return "ok";
   }
 
   // Track stuck-since-when for the soft timeout below.
@@ -459,6 +485,7 @@ function createStreamForKey(
       tryEnqueueBytes(
         client,
         encoder.encode(`data: ${JSON.stringify(initialEvent)}\n\n`),
+        { critical: true },
       );
 
       // Periodic keepalive doubles as a half-open probe — if the
@@ -469,7 +496,7 @@ function createStreamForKey(
           if (client.keepaliveTimer) clearInterval(client.keepaliveTimer);
           return;
         }
-        const result = tryEnqueueBytes(client, encoder.encode(`: keepalive\n\n`));
+        const result = tryEnqueueBytes(client, encoder.encode(`: keepalive\n\n`), { critical: true });
         if (result === "ok" && isUserStreamClient(client)) touchUserSeen(client.subscriberUserId!);
         if (result === "dead") {
           // closeClient already cleared the timer; just make sure we
@@ -580,6 +607,9 @@ export function pushEvent(sessionName: string, event: Record<string, unknown>, n
   if (!arr || arr.length === 0) return;
 
   const data = `data: ${JSON.stringify(event)}\n\n`;
+  // #2363 —— 一次编码，所有订阅者共用同一份字节：150 条连接 × 每秒几十条事件时，
+  // 每连接重新 encode 一次会产生大量短命 Uint8Array（实测 150×30/s 时 RSS 峰值 2 GB）。
+  const bytes = SHARED_ENCODER.encode(data);
   let needPrune = false;
 
   for (const c of arr) {
@@ -587,7 +617,7 @@ export function pushEvent(sessionName: string, event: Record<string, unknown>, n
       needPrune = true;
       continue;
     }
-    const result = tryEnqueueBytes(c, c.encoder.encode(data));
+    const result = tryEnqueueBytes(c, bytes);
     if (result === "dead") needPrune = true;
   }
 
@@ -614,6 +644,7 @@ export function pushNetworkObserverEvent(
   if (!arr || arr.length === 0) return;
 
   const data = `data: ${JSON.stringify({ ...event, network_id: networkId, scope: "network" })}\n\n`;
+  const bytes = SHARED_ENCODER.encode(data); // #2363：一次编码，所有 observer 共用
   let needPrune = false;
 
   for (const c of arr) {
@@ -626,7 +657,7 @@ export function pushNetworkObserverEvent(
       try { pass = c.eventFilter(event); } catch { pass = false; }
       if (!pass) continue;
     }
-    const result = tryEnqueueBytes(c, c.encoder.encode(data));
+    const result = tryEnqueueBytes(c, bytes);
     if (result === "dead") needPrune = true;
   }
 
@@ -661,6 +692,7 @@ export function pushUserEvent(
   if (!arr || arr.length === 0) return;
 
   const data = `data: ${JSON.stringify({ ...event, network_id: networkId, user_id: userId, scope: "user" })}\n\n`;
+  const bytes = SHARED_ENCODER.encode(data); // #2363 同 pushEvent：一次编码共用
   let needPrune = false;
 
   for (const c of arr) {
@@ -668,7 +700,7 @@ export function pushUserEvent(
       needPrune = true;
       continue;
     }
-    const result = tryEnqueueBytes(c, c.encoder.encode(data));
+    const result = tryEnqueueBytes(c, bytes);
     if (result === "dead") needPrune = true;
   }
 
@@ -797,6 +829,8 @@ export const __SSE_INTERNALS_FOR_TEST = {
   sweepLiveness,
   closeClient,
   MAX_QUEUE_BACKPRESSURE_BYTES,
+  COALESCE_AT_BYTES,
+  degradedDropCount: sseDegradedDropCount,
   STUCK_CLOSE_MS,
   KEEPALIVE_MS,
   LIVENESS_SWEEP_MS,

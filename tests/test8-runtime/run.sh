@@ -50,6 +50,13 @@ mcp_call() {
     -d "{\"jsonrpc\":\"2.0\",\"id\":\"t\",\"method\":\"tools/call\",\"params\":{\"name\":\"${tool}\",\"arguments\":${args}}}" 2>/dev/null || true
 }
 
+mcp_payload() {
+  python3 -c 'import json,sys; raw=sys.stdin.read(); line=next((x[6:] for x in raw.splitlines() if x.startswith("data: ")),raw); envelope=json.loads(line); print(envelope["result"]["content"][0]["text"])'
+}
+task_count() {
+  api_get "${BASE}/api/tasks?network_id=${NET_ID}" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["tasks"]))'
+}
+
 wait_for_status_alias() {
   local alias="$1"
   local timeout_s="${2:-12}"
@@ -165,7 +172,22 @@ grep -q '"type":"connected"' "${TMP}/sse.log" && pass "SSE connected" || fail "S
 echo ""
 
 echo "6. send_task push"
-SEND_RESP=$(mcp_call "send_task" '{"alias":"test8-http","task":"runtime layer2 task","from_session":"test8","priority":"high"}')
+BEFORE=$(task_count)
+SPOOF=$(mcp_call "send_task" '{"alias":"test8-http","task":"sender-spoof-must-not-write","from_session":"test8"}')
+if echo "$SPOOF" | grep -q 'from_session_identity_mismatch' && [ "$(task_count)" = "$BEFORE" ]; then
+  pass "forged human sender rejected without task writes"
+else
+  fail "forged human sender must be refused without writes"
+fi
+# Omitted sender is derived from the authenticated user, never a UI nickname.
+SEND_RESP=$(mcp_call "send_task" '{"alias":"test8-http","task":"runtime layer2 task","priority":"high"}')
+SENT_ID=$(echo "$SEND_RESP" | mcp_payload | python3 -c 'import json,sys; p=json.load(sys.stdin); print(p.get("task_id") or p.get("message_id") or "")')
+DETAIL=$(mcp_call "get_task" "{\"task_id\":\"$SENT_ID\"}" | mcp_payload)
+if echo "$DETAIL" | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["ok"] and p["task"]["from_name"]=="test8admin"'; then
+  pass "task sender is the authenticated username"
+else
+  fail "task sender must be canonical authenticated username"
+fi
 sleep 2
 if grep -q '"type":"new_task"' "${TMP}/sse.log"; then
   pass "send_task triggered SSE new_task"

@@ -1,0 +1,38 @@
+Provider collection transport core — 2026-10-11T10:43Z / 18:43+08
+Task: original #906. TEST-ONLY branch; no public package or production changes.
+Base: 9345483f381c12e7e279840ec44754ba72a7b04d, now merged via PR2598.
+
+Independent pinned Dockerfile reused: tests/test906-daemon-provider-management/Dockerfile.transport
+Image: anet-provider:test906-remote-collect
+Image config SHA256: 84712950aba114a3f0b32862a2d2a330879734bfd4dd7c1befe5aa0f6579cafd
+Build: actual CLI 337 modules/2.67MB, runtime 411 modules/1.62MB, Node transport build PASS.
+All execution offline with --network none, --rm; transport tests ran UID10001.
+
+Core environment/CLI preflight: node /work/node-readback.mjs PASS.
+Collection-only two tests: 2 PASS, 0 FAIL, 21 expectations.
+One bounded backwards-compatible transport regression: 17 PASS, 0 FAIL, 165 expectations.
+Actual registered Hub handlers -> capable daemon reconciler -> pinned compiled CLI -> public readback.
+Coverage: no remote credential/path input, identity/alias binding, old write-only capability exclusion,
+lost-ACK durable replay (revision increments once), source bytes/CAS unchanged, redaction,
+queue cleanup and source binding reassignment refusing pending work.
+Three mirrored collection intent contracts match byte for byte.
+Existing put/apply/login/read/real HTTP authentication tests remain green.
+These fixtures do NOT prove real OAuth, endpoint/model entitlement, or native product UI.
+
+CLI full TypeScript: PASS.
+Server/runtime full TypeScript: FAIL on both candidate and exact base (83 diagnostics each).
+Docker same compiler/dependencies, source-only base substitution, normalized diagnostic delta:
+server added=[]; runtime added=[]. No new type errors, NOT a full typecheck PASS.
+Reproduce with collection-typecheck-delta.cjs, /baseline mounted exact base, --user 0;
+root is only needed to substitute container-owned source, never writes host/production.
+Doc-symbol checker: exit0, 17 pins scanned/8 judged/8 skipped/1 unavailable immutable ref/0 drift.
+Unavailable ref and skipped pins are not checked; CI full history remains authoritative.
+
+Harness corrections (not product failures): an early run preceded Docker image export (exit125);
+Python image default entrypoint started its launcher, corrected with --entrypoint python and
+stopped only our container 9c5dd3d2bfde; initial inline delta script quoting failed, then source
+substitution failed under nonroot. Checked-in delta script + container-only root run succeeded.
+No guard/fixture assertion lowered. No account/identity/session mutation or paid inference.
+Cleanup: disposable containers removed, exclusive test image retained; no new daemon/process.
+Recovery/process/state limitations documented in docs/daemon-provider-collection.md.
+Client collect button/new-node catalog initialization and formal publication remain separate gaps.

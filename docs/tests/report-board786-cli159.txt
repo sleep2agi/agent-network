@@ -1,0 +1,32 @@
+Board #786 — CLI 2.3.0-preview.159 release preparation
+Base: 18a4d8a8d39e021551128f33288ee03e5668ef9a (main, #2517)
+Scope: version metadata, paired CLI constant, current guide stamps, release notes.
+No product behavior, Hub version, agent-node version, workflow or test changes.
+
+Preflight:
+- npm preview = 2.3.0-preview.158; latest = 2.3.0-preview.76 (unchanged).
+- Candidate .159 returned E404; no matching tag or open release PR.
+- Paired agent-node 2.5.0-preview.126 exists on npm.
+- sync-pinned-versions.sh dry-run rc=0; four expected version positions only.
+- Functional base #2517: 155 checks passed, standalone merge gate rc=0.
+
+Focused Docker verification (--cpus=2, source mounted read-only):
+- Reused tests/test1178-codex-upgrade-recovery/Dockerfile image with its
+  installed dependencies; copied the candidate CLI source inside the container.
+- bun test src/package-version-consistency.test.ts src/opencode-agent-node-pair.test.ts:
+  8 pass, 0 fail, 25 expect calls.
+- Initial combined command then stopped because the reused image lacked git,
+  which check-doc-version-claims.py uses to locate the repository. Exit 1 was
+  an environment failure, not a document assertion. Build had not started.
+- Installed git only inside the next disposable container, copied docs/scripts
+  into an isolated git root, and ran the unchanged checker CLI:
+  python3 scripts/check-doc-version-claims.py --package agent-network
+    --version 2.3.0-preview.159 --verify-latest-from-npm
+  PASS: 4 stamps across 2 documents; latest = 2.3.0-preview.76.
+- Candidate bun run build: rc=0; all bundles/declarations/obfuscation completed,
+  node-server stamped with 2.3.0-preview.159. Combined docs/build container rc=0.
+
+No global packages, production Hub, running nodes or real tmux were changed.
+No npm publish performed. A branch build is test-only; release must rebuild
+from the exact merged main SHA through release.yml and verify the published
+tarball. Source merge and preview publication do not constitute deployment.

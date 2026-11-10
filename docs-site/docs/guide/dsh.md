@@ -1,42 +1,67 @@
-# DSH 节点（预览）
+# DSH 节点
 
-::: warning 预览
-`integrations/dsh-commhub` 目前只在仓库里提供，**尚未发布到 npm**。DSH 本身仍是 rc 版本（本插件按 `0.1.5-rc.2` 验证），插件 API 可能在 rc 之间变化。
-:::
+[DSH（DeepSeek Harness）](https://www.npmjs.com/package/@deepseek-ai/dsh) 是插件化的 agent 框架。
+`@sleep2agi/dsh-anet` 把一个或多个 DSH session 变成 Agent Network（CommHub）节点：接任务、回件，
+也可以在 hub 上给其他节点派活。
 
-[DSH（DeepSeek Harness）](https://www.npmjs.com/package/@deepseek-ai/dsh) 是一个插件化的 agent 框架。`dsh-commhub` 插件让一个 DSH agent 以节点身份接入 Agent Network：收任务、回件、给其他节点派活或发消息。
+## 安装
 
-## 它做什么
+```bash
+dsh plugin --profile web add @sleep2agi/dsh-anet
+# 重启 DSH
+```
 
-| 能力 | 说明 |
-|---|---|
-| 收任务 | 订阅 hub 的 SSE 门铃，另有 60 秒兜底轮询 |
-| 回件 | 每个任务一轮 agent，只回一次 `replied` / `failed`；本地账本防重连、重启后重复回件 |
-| 找人、派活 | 工具 `commhub_get_all_status`、`commhub_send_task`、`commhub_send_message`；对方离线时报「已排队」 |
-| 在线状态 | `report_status` 心跳，`agent` 字段为 `dsh` |
+插件已发布到 npm，支持 DSH `0.1.0-rc.6` / `0.2.0-rc.2`。桌面版把同一个包装进
+`$DSH_HOME/profiles/node_modules`，并在 profile 的 `cordis.patch.yml` 里加一条 insert。
 
-## 接入步骤
+## 界面
 
-1. 在 hub 上为节点生成 token（`anet node create` 或桌面端创建节点）。
-2. 安装到 DSH profile：
+侧边栏入口：
 
-   ```bash
-   dsh plugin --profile web add ./integrations/dsh-commhub
-   ```
+![ANet 侧边栏入口](/screenshots/dsh-sidebar.png)
 
-3. 用环境变量启动。token 只能来自环境变量或权限为 `600` 的文件：
+节点面板（节点状态、项目与 Session 切换、账号登录）：
 
-   ```bash
-   export ANET_HUB=http://127.0.0.1:9200
-   export ANET_ALIAS=my-dsh-node
-   export ANET_NODE_TOKEN_FILE=~/.dsh-commhub/my-dsh-node.token
-   dsh web
-   ```
+![ANet 节点面板](/screenshots/dsh-panel.png)
 
-DSH 自己的模型凭据照常配置（DSH Web 的 Models 页，或 DSH 要求的环境变量）。缺凭据时任务会回 `failed`，并附上 DSH 报的原因。
+创建节点（名称、项目目录、Session）：
 
-## 限制
+![创建节点](/screenshots/dsh-create.png)
 
+从 ANet 客户端给节点发消息后，DSH 会话收到任务并执行回复：
+
+![DSH 会话收到 ANet 任务](/screenshots/dsh-receive.png)
+
+
+## 使用
+
+1. 点左侧 **ANet**（或 Settings → Plugins → Plugin configuration → ANet）。
+2. 用 Hub 地址 + 人类账号（用户名/密码）登录。登录状态保存在本机
+   `~/.anet/dsh/account.json`（0600），重启后自动恢复；**退出登录** 会清除。
+3. 创建节点：节点名称（alias）、项目目录、Session（新建或选已有）。可选 **Fork 自** 某个已有节点，复制它的会话上下文；节点 token 由当前登录账号自动签发，创建后立即上线。
+4. 其他人在 hub/看板给该 alias 派任务；任务在节点的 DSH session 里执行，结果自动回 hub。
+5. 可同时运行多个节点；节点卡片里可随时切换 **项目**（切换项目会为该节点新建 session）和 **Session**，**删除** 即下线。
+
+配置在 `~/.anet/dsh/`：`nodes.json`（节点）与 `account.json`（登录态），均为 0600。
+
+## 行为说明
+
+- 每个节点绑定自己的 DSH session，任务在该 session 内连续执行，上下文不丢；可随时切换 session。
+- 每个任务只回一次 `replied` / `failed`；本地账本保证断线重连、进程重启后不重复回件。
+- 失败会回 `failed` 并带上 DSH 的原文（例如缺模型凭据），发件方能看到原因。
+- SSE 门铃（`/events/<alias>`）+ 60 秒兜底轮询；`report_status` 心跳，`agent` 为 `dsh`。
 - 「消息」类（非任务）收件只确认，不交给 agent。
-- 每个任务新开一个 DSH 会话；同一发件人的连续任务不共享上下文。
-- 附件暂不支持。
+- 任务里的图片附件会下载并作为 image block 交给 agent（最多 5 张、单张 ≤10MB）；需要模型支持图片输入，否则该轮会报 `UNSUPPORTED_CONTENT`。其他类型附件暂不处理。
+- 超过 hub 1 万字上限的回件会截断并附说明。
+
+## 可选：脚本引导
+
+已有 hub 用户 token（`utok_`）时，可以用辅助脚本创建首个节点 token 并写一份基础配置，
+插件首次启动会自动迁移成节点：
+
+```bash
+ANET_USER_TOKEN=utok_... node scripts/connect.mjs \
+  --hub https://your-hub.example --alias my-dsh-node --network net_xxxx
+```
+
+脚本不会打印或保存用户 token；加 `--no-verify` 可跳过连通性验证。

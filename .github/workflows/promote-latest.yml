@@ -57,10 +57,19 @@ jobs:
     runs-on: ubuntu-latest
     if: inputs.ack
     steps:
-      - uses: actions/setup-node@v4
+      # 与 release.yml 同一条规矩:OIDC 形态下不能写 .npmrc 的 _authToken(空 token 会撞 401)。
+      - name: setup-node (NPM_TOKEN)
+        if: vars.NPM_TRUSTED_PUBLISHING != 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: setup-node (trusted publishing / OIDC)
+        if: vars.NPM_TRUSTED_PUBLISHING == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: 闸 1 —— 目标版本在 npm 上存在吗
         run: |
@@ -120,9 +129,14 @@ jobs:
       - name: dist-tag add … latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TRUSTED_PUBLISHING: ${{ vars.NPM_TRUSTED_PUBLISHING }}
         run: |
           set -euo pipefail
-          [ -n "${NODE_AUTH_TOKEN:-}" ] || { echo "::error::缺少 secrets.NPM_TOKEN(建议改用 npm trusted publishing/OIDC)"; exit 1; }
+          # dist-tag add 也要写权限,认证形态与 release.yml 保持一致(NPM_TRUSTED_PUBLISHING=true → OIDC)。
+          if [ "${TRUSTED_PUBLISHING:-}" != "true" ] && [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::缺少 secrets.NPM_TOKEN,且未开启 trusted publishing(NPM_TRUSTED_PUBLISHING=true)"
+            exit 1
+          fi
           npm dist-tag add "@sleep2agi/${{ inputs.package }}@${{ inputs.version }}" latest
 
       - name: 核实(看 registry,不看退出码)

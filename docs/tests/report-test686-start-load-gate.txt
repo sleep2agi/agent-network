@@ -1,0 +1,48 @@
+Test report — board #686 start load gate
+
+Implementation commit under test: f5960be347479d58608206ea1c761bc0ffa4c9dc
+
+Scope
+
+- The default one-minute load threshold is 4 x detected CPUs. Memory and load
+  remain independent admission guards.
+- Blocked status distinguishes memory, load, both, and an unreadable resource
+  probe. START_GATE_WAITING_STATUS remains the compatibility alias for memory.
+- Admission completion restores the pre-gate status for all four resource wait
+  texts and the single-lane text, while preserving a concurrent unrelated status.
+- The agent-node and anet copies are byte-identical.
+- ANET_START_GATE_MAX_WAIT_SEC=600 still means transition to single-lane
+  admission, not a total wait limit.
+- This change does not pass through the database.
+
+Docker results (all containers ran with --cpus=2)
+
+1. test612-start-admission, 512 MiB cgroup: rc=0.
+   - real cgroup admission and 14-start single-lane pressure passed;
+   - 16 processes with distinct node ids: OVERLAPS=0;
+   - 16 processes with one shared node id: OVERLAPS=0;
+   - stalled-count and re-entry race witnesses passed;
+   - the 10-06 incident sample (16 CPUs, load1 146, 307 MiB available) was
+     classified as waiting for both memory and load;
+   - changing 4x back to 2x, deleting the memory check, mapping load to the
+     memory status, restoring only memory-wait status, deleting the pre-lease
+     ownership recheck, and deleting the re-entry cancellation each produced
+     the intended assertion failure. The restore mutation failed specifically
+     because the load-wait text was no longer recognized.
+2. test725-agent-node-unit-ci: rc=0.
+   - 2571 pass, 1 skip, 0 fail; 9013 expectations across 195/195 source test
+     files; agent-node/tests 6/6; its witnessed-red mutation passed.
+3. test798-server-unit-ci (SQLite): rc=0.
+   - 204/204 files, 0 failed; password-floor mutation red; RESULT: PASS.
+4. test2123-hub-postgres-ladder (PostgreSQL): rc=0.
+   - PG adapter/features/migration checks passed; ladder level=6, floor=6;
+     RESULT: PASS.
+
+Static gates
+
+- check-doc-symbol-pins: rc=0 (0 drift).
+- check-doc-source-pins: rc=0 (0 broken pins).
+- check-test-suite-registration: rc=0 (0 new orphan suites).
+- git diff --check and byte comparison: rc=0.
+
+No production Hub, node, tmux server, or host load generator was used.

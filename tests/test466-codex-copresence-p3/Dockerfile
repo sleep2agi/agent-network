@@ -15,6 +15,7 @@ RUN npm install -g --no-audit --no-fund @openai/codex@0.147.0
 
 WORKDIR /app
 
+COPY contracts /app/contracts
 COPY server/package.json /app/server/package.json
 COPY agent-network/package.json agent-network/package-lock.json /app/agent-network/
 COPY agent-node/package.json /app/agent-node/package.json

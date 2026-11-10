@@ -1,0 +1,50 @@
+Hub #539/#827 — PR2545 main conflict resolution and exact-SHA replay
+2026-10-09 Asia/Shanghai. NOT a release.
+
+Old PR head eb38c8a241254ebd28f4ddd395abdc0a96f989fa had159 successful
+checks but conflicted after sibling test-only PR2547 entered main.
+Merge tested:6ac9ab7bd162a3833f92d3f212c0d7408d541e40, with parents
+eb38c8a241254ebd28f4ddd395abdc0a96f989fa and
+90589fe7359530391d4b7e739ec18aab31efc932 (fetched origin/main).
+
+Resolution
+Three adjacent-add conflicts in .github/workflows/qa.yml only. Keep both
+test827-opencode-v2-hub and test828-opencode-v2-mcp in push/pull_request
+path filters and hub-orphan-gates matrix. No choosing one side wholesale.
+Docker PyYAML6.0.3 parsing asserts each suite appears exactly once in all
+three locations: PASS. git diff origin/main HEAD --check: PASS.
+The imported upstream test828 report has an existing trailing blank line;
+it was left unchanged rather than editing sibling evidence.
+
+No agent-network/, agent-node/ or server/ difference from the old PR head.
+test827 Dockerfile now pins the same base digests used in the integrated
+candidate and puts SOURCE_COMMIT metadata after install/build inputs. This
+retains metadata verification without reinstalling unchanged dependencies
+for every source SHA. Build reused dependency layers; no registry publication.
+
+Exact replay
+Image anet-test827:main-restack
+sha256:20ea144f3eb79c258e6a511839175a160e05236c215a1fd40b820282b0bcac40
+Container anet-test827-main-restack, exit0 at approximately13:56CST.
+SOURCE_COMMIT and EXPECTED_SOURCE_COMMIT both
+6ac9ab7bd162a3833f92d3f212c0d7408d541e40; no source mounts, --network none.
+Bun1.3.14, Node22.23.3, fixed @opencode/cli2.0.22, private tmux socket,
+isolated real Hub and packaged runtime, loopback model only.
+44 CLI tests/189 assertions and35 runtime tests/131 assertions passed.
+All native layers passed: create/start/register, rendered assistant output,
+human-before-network ordering, provider error/recovery, rejected restart
+preserving profile/live session, exact task receipt, stop and cold safe refusal.
+Raw stdout and /artifacts/report-test827.txt retained in the named container.
+
+Limits
+This is the narrower PR2545 branch, not the integrated registry/close fix.
+Its lifecycle gate asserts sessions/processes gone; it does NOT establish
+the stronger observer/root cleanup added in PR2550. First-turn real MCP and
+direct-close drain evidence remain in that separate exact-source report.
+Old159-success checks are not transferred to this merge SHA. Latest-head CI
+is required before merging. No main merge, release, global npm change or
+production restart was performed by this replay.
+
+Reproduce from a clean checkout at6ac9ab7bd162a3833f92d3f212c0d7408d541e40:
+sg docker -c 'docker build --build-arg SOURCE_COMMIT=6ac9ab7bd162a3833f92d3f212c0d7408d541e40 -f tests/test827-opencode-v2-hub/Dockerfile -t anet-test827:main-restack .'
+sg docker -c 'docker run --network none -e EXPECTED_SOURCE_COMMIT=6ac9ab7bd162a3833f92d3f212c0d7408d541e40 anet-test827:main-restack'

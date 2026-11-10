@@ -1,0 +1,85 @@
+Hub #818 — .118 release preparation (2026-10-09 CST)
+
+Candidate source: e812740fe09715ad3df917674e97843698808081 (main).
+Previous .117 release commit: 67c92ddbb801eb488f22bd4f432f07b0725ec896.
+git log <previous>..<candidate> -- server lists only:
+  e9d148b11025cfb01d634cecc4aaa6298dad71c7 (#2534, batch interval MCP).
+Baseline: actual npm @sleep2agi/commhub-server@0.9.0-preview.117.
+Baseline shasum: 5fb35e3a3068f6982b2423ef405b8b71b01d232c.
+Client adapter: published desktop-v0.2.224 (not a draft release).
+
+Setup: reused tests/hub-release-compat/Dockerfile and scripts, unchanged.
+Copied server/{package.json,src,bin} from the clean candidate main SHA into a
+temporary Docker build context BEFORE the version-only bump. Copied the
+existing compat suite; shallow-cloned desktop-v0.2.224 into compat/apps/.
+Built with BASE_VERSION=0.9.0-preview.117, image anet-hub118-compat:test.
+Image config digest: sha256:9dc9c3a940e8bcb7801fe34d1a9db08230f4f50fd3b86062898d9ed64807ef81.
+Image manifest ID: sha256:8a061b323f76648cbe5d4f3b094d11660cb4b7d1bf9139ab26e61d0ed1a17996.
+No test fixture changes or assertion relaxations were needed.
+
+Docker runs used sg docker, --rm --cpus=2 --network=none, no published ports:
+  APP_TAGS=desktop-v0.2.224 SCHED_BASELINE=counted EXPECT_BACKFILL=0
+  NEW_MEMBER_TASK_ACCESS=scoped OLD_LABEL=.117 NEW_LABEL=.118
+  A1/A2: image default command (bash /compat/run-compat.sh)
+  B: CHECK_BYTES=1, --entrypoint bash, /compat/run-upgrade.sh
+
+A1: rc=0, steps=62 unexpected=0 check_failures=0.
+A2: rc=0, steps=62 unexpected=0 check_failures=0.
+  MCP tools: 86 -> 87, only addition schedule_batch_interval.
+  Existing schemas retained; comparator negative controls passed.
+  Scheduled replies still counted unread for their creator on both versions.
+  Existing App adapter ignores member_presence events. Candidate 5xx: none.
+  Both runtime version labels print .117 because this checks the exact merged
+  feature code before a metadata-only bump; candidate identity is the SHA above,
+  not that old package version string. This is not npm .118 artifact verification.
+
+B: rc=0, upgrade_check_failures=0.
+  .117 -> candidate -> .117 rollback -> candidate re-upgrade all start.
+  Existing all-access member sees the same 3 cards throughout.
+  Every field, exact completedAt, and full-list bytes remain identical.
+  Independently added member defaults to scoped and sees 0 unrelated cards.
+
+Version-only bump: Docker --cpus=1 --network=none, candidate server/ mounted
+read-only. Assert package.json.version, lockfile.version and root-package.version
+all equal 0.9.0-preview.118: PASS 3/3, rc=0. git diff --check: rc=0.
+No CLI pin/runtime change; .118 is an independent Hub release, like .117.
+No redundant local server-wide suite: #2534 already passed 157 CI checks.
+
+Pending: this version PR CI/merge, exact-main-SHA formal release gates,
+registry visibility, tarball integrity and installed-package verification.
+No npm publication or production upgrade is claimed by this report.
+No running nodes, real schedules, global packages, credentials or data changed.
+
+Post-publication acceptance — 2026-10-09 08:18 CST:
+- Version PR #2536: 154/154 CI success, standalone merge gate exit 0.
+- Merged/published SHA: 0193863b1ec79ea931ec283ec5d05167d4eb43c9.
+  Fresh-main ancestry checked; server/ matches the tested PR head exactly.
+- Formal release run 37863666483: all four gates and publication successful.
+  https://github.com/sleep2agi/agent-network/actions/runs/37863666483
+- Registry preview=.118, latest=.30 unchanged. Workflow confirmed visibility
+  at 08:16:18 CST after 101 seconds / 5 attempts; no duplicate publication.
+- Tarball: commhub-server-0.9.0-preview.118.tgz from registry.npmjs.org.
+  SHA-1 ab5576731b99b1091bcbcd971a83a7b0bf3d1148 matches metadata and CI tarball.
+
+Published-package Docker replay (same image, --rm --cpus=2, no host mounts or
+published ports; network enabled only as needed for npm downloads):
+1. Download the actual npm tarball and assert SHA-1 before installation.
+2. In disposable /npm118, bun add /tmp/commhub118.tgz: 96 packages, 8.55s.
+3. Assert installed package.json.version equals 0.9.0-preview.118.
+4. Move cached /cand/server aside inside the container and symlink it to
+   /npm118/node_modules/@sleep2agi/commhub-server. readlink -f confirms the
+   executed bin/commhub.ts belongs to that freshly installed npm package.
+5. Run bash /compat/run-compat.sh once with the same APP_TAGS and policy env
+   parameters as above. No candidate source rebuild or copy-back occurs.
+
+Result: baseline .117, candidate .118; rc=0, steps=62 unexpected=0
+check_failures=0. Existing MCP schemas retained; only schedule_batch_interval
+added (86 -> 87 tools). No candidate 5xx. Existing App adapter and creator
+unread checks passed. Pre-release upgrade/rollback checks were not duplicated.
+An initial shell wrapper quoting error exited before starting the container;
+the corrected wrapper completed the entire download/install/replay above.
+
+Conclusion: #818 preview publication and isolated installed-package acceptance
+complete. Production Hub was NOT upgraded and no real schedule was changed.
+Node edits remain creator-only; #815 / Issue #2533 stay open for the explicit
+human-created-schedule authorization decision. This is not full user rollout.

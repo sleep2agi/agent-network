@@ -138,7 +138,7 @@ describe("#549 cli.ts writers go through the no-downgrade path", () => {
     const start = cli.indexOf("function refreshNodeServerJsAt(");
     const body = cli.slice(start, cli.indexOf("\n}\n", start));
     expect(start).toBeGreaterThan(-1);
-    expect(body).toContain("applyNodeServerPayload(targetPath, payload, src)");
+    expect(body).toContain("applyNodeServerPayload(targetPath, payload, bundled.filename)");
     expect(body).not.toMatch(/writeFileSync\(targetPath/);
   });
 

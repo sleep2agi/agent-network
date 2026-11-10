@@ -3,6 +3,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tmux python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
+COPY contracts /app/contracts
 COPY server/package.json server/package-lock.json ./server/
 RUN cd server && bun install --frozen-lockfile
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
@@ -11,5 +12,8 @@ COPY server ./server
 COPY agent-node ./agent-node
 RUN cd agent-node && bun run build
 COPY tests/test658-codex-adopt-stop ./tests/test658-codex-adopt-stop
+COPY agent-network/src/stopped-receipt.ts ./agent-network/src/stopped-receipt.ts
+COPY deploy/fleet/anet-nodes-boot.sh ./deploy/fleet/anet-nodes-boot.sh
+ENV TEST658_CONTAINER=1
 USER node
 CMD ["bun", "run", "tests/test658-codex-adopt-stop/http-e2e.ts"]

@@ -8,6 +8,7 @@ import { parseTmuxRows, tmuxListArgs } from "./tmux-format";
 import { join } from "path";
 import { shortFingerprint } from "./codex-lifecycle-receipt";
 import type { PreflightFacts, ProcessFact, RolloutFact } from "./codex-lifecycle-preflight";
+import { codexProviderEnvKey } from './codex-copresence-login-gate';
 
 export interface FactPrimitives {
   /** tmux pane pid of a session, or null when the session is not running. */
@@ -202,6 +203,19 @@ export async function gatherCodexFacts(prim: FactPrimitives, input: GatherInput)
   const ownerPid = port ? prim.listeningPid(port) : null;
   // 子进程环境:三段各取「带 CODEX_HOME 的最深进程」;wrapper(tmux 的 shell)没有 CODEX_HOME 就不算证据。
   const children = [...appsrvTree, ...tuiTree, ...bridgeTree].filter((p) => p.codexHome !== null || p.tokenFingerprint !== null);
+  // Custom env_key authentication does not require auth.json. Attest the key
+  // in BOTH actual Codex processes, not in this command's/wrapper's environment.
+  // Only a boolean escapes this block; it does not claim remote authentication.
+  let providerEnvAttested = false;
+  try {
+    const key = codexProviderEnvKey(readFileSync(join(input.codexHome, 'config.toml'), 'utf8'));
+    const app = [...appsrvTree].reverse().find(p => p.argv.some(a => /codex/.test(a)) && p.argv.includes('app-server'));
+    if (key && app && codexTui && input.markerUuid
+      && [app, codexTui].every(p => p.codexHome === safeReal(input.codexHome) && p.markerUuid === input.markerUuid)) {
+      const appKey = prim.procEnviron(app.pid)?.[key], tuiKey = prim.procEnviron(codexTui.pid)?.[key];
+      providerEnvAttested = typeof appKey === 'string' && appKey.trim().length > 0 && appKey === tuiKey;
+    }
+  } catch { /* Missing/unreadable configuration is not evidence. */ }
   return {
     alias: input.alias,
     configNodeId: input.nodeId,
@@ -211,6 +225,7 @@ export async function gatherCodexFacts(prim: FactPrimitives, input: GatherInput)
       dirMode: modeOf(input.codexHome),
       authMode: modeOf(join(input.codexHome, "auth.json")),
       authBytes: bytesOf(join(input.codexHome, "auth.json")),
+      providerEnvAttested,
       configTokenFingerprint,
       envFileTokenFingerprint: envFileTokenFingerprint(input.codexHome),
     },

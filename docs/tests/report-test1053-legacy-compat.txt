@@ -1,0 +1,51 @@
+#1053 legacy startup compatibility correction — TEST ONLY, NOT PUBLISHED
+OBSERVED_AT=2026-10-12 09:33+08
+
+Fresh post-merge evidence, kept separate from earlier core success
+- PR2639@0e8b58aa4113d50cc12af43a46d35927372bc961:
+  agent-node unit job114622711604 and private-state job114622713432 both
+  fail the same create-node-daemon-private-wiring assertion (2 vs3 JSON calls).
+  These are not environment failures. Unit totals2815pass/1skip/1fail;
+  private-state totals204pass/1fail. The new third call writes a private source
+  marker through the existing atomic writer. Guard now pins3 plus that exact
+  marker call; raw-write rejection and permission repair checks remain.
+- lifecycle safety job114622711750:54pass/8fail, created SDK children die
+  before registration; later cross-tenant stop failures cascade from absent
+  rows. Its manually provisioned legacy parent has no network_id and mode644.
+  Source examination reproduces that the new loader validated this inactive
+  parent even when no scoped-secrets.json existed. The failed CI log does not
+  contain a child exception/proc snapshot; don't call the full suite repaired
+  until its actual replay passes.
+- Obtained completed-job logs with the exact jobs/<id>/logs endpoint while the
+  containing QA workflow was still running; gh run log-failed was unavailable.
+
+Narrow correction and Docker evidence
+- Source marker/node scope are still checked. No private store means no
+  inherited values: return empty before opening the legacy parent config.
+  Once any store exists, all directory/owner/private-file/network/Daemon
+  identity and adoption checks remain mandatory. CLI/runtime reader copies
+  changed identically. Existing explicit config/Provider precedence unchanged.
+- Docker non-root reader + writer guard:2pass/0fail/9expectations.
+  Synthetic empty inheritance stays empty; present store rejects unsafe mode,
+  then mismatched network, then valid parent yields exact synthetic value.
+- Because the loader changed, reran only its affected actual startup core in
+  existing independently built anet:test1053-portable, network none:
+  candidate reader files + run.sh read-only, CLI rebuilt344modules; storage
+  1pass/18expects then real Hub→Daemon→compiled CLI→runtime child1pass/16expects.
+  Synthetic values only, no real vendor/OAuth entitlement.
+- Setup attempts: image runner couldn't replace root-owned compiled CLI;
+  next attempt compiled but the older image lacked new run.sh. Neither ran
+  assertions. Disposable container root adjusted only its dist ownership,
+  then runuser returned to runner for build and all actual tests; explicit
+  read-only run.sh mount fixed the older-image layout. No host permission edits.
+- Full test571 legacy Docker E2E and fresh candidate real-client/required CI
+  remain pending; these atomic/core checks are not those full results.
+
+Recovery and cleanup
+- Contract and recovery clarification in docs/scoped-secrets.md. No new ports,
+  proxy/tunnel/launcher, migration or credential source; inactive legacy setup
+  remains compatible without silently migrating identity or private state.
+- Existing main-source merge is not formal package publication. Candidate
+  Hub127/CLI169/runtime135 are not promoted/installed from this branch.
+- --rm containers and fixture temp state removed; source/report/image retained.
+  No production config, account, key, business restart or global npm changes.

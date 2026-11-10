@@ -1,0 +1,70 @@
+name: OpenCode V2 shared candidate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'agent-node/**'
+      - 'agent-network/**'
+      - 'server/src/create-node-tool-schema.test.ts'
+      - 'server/src/create-node-validate*'
+      - 'server/src/tools.ts'
+      - 'tests/test543-opencode-v2-copresence/**'
+      - 'tests/Dockerfile'
+      - 'tests/test-all.sh'
+      - 'tests/lib/**'
+      - '.github/workflows/opencode-v2-shared-candidate.yml'
+  workflow_dispatch:
+
+  # Tier 3: heavy Docker suite. Runs nightly on main, on demand, or on PRs labelled full-qa.
+  # It no longer runs on every merge to main (2 runners; it queued PR feedback).
+  schedule:
+    - cron: '40 18 * * *'
+permissions:
+  contents: read
+
+# #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
+# 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
+# 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
+# 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  shared-core:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated V2 fixture
+        run: docker build -f tests/test543-opencode-v2-copresence/Dockerfile -t anet-v2-shared-candidate .
+      - name: Run existing V2 copresence fixture
+        run: docker run --rm --network none anet-v2-shared-candidate
+      - name: Run shared Server unit and native registry checks
+        run: |
+          docker run --rm --network none anet-v2-shared-candidate \
+            bash -lc 'cd /agent-node-src && ANET_OPENCODE_V2_BIN="$(command -v opencode)" bun test \
+              src/runtime/opencode-shared-server-registry.test.ts \
+              src/runtime/opencode-copresence/shared-v2-mcp.test.ts \
+              src/runtime/opencode-copresence/v2-shared-native.test.ts'
+
+  full-regression:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker E2E image
+        run: docker build -t anet-e2e -f tests/Dockerfile .
+      - name: Verify hard-gate contract
+        run: |
+          docker run --rm -e ROOT=/repo -v "$PWD:/repo:ro" anet-e2e \
+            bash /repo/tests/test292-e2e-hard-gate/run.sh
+      - name: Run full regression
+        run: |
+          bash tests/lib/run-piped-command.sh \
+            /tmp/e2e-output.log /tmp/e2e-exit-code \
+            docker run --rm anet-e2e /app/test-all.sh
+          bash tests/lib/e2e-hard-gate.sh \
+            /tmp/e2e-output.log "$(cat /tmp/e2e-exit-code)"

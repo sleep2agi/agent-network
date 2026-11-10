@@ -15,11 +15,42 @@ function functionBody(name: string): string {
 describe("OpenCode co-presence CLI wiring", () => {
   const body = functionBody("startOpencodeCopresenceOrchestration");
 
+  test("stop drains the frozen OpenCode agent before closing tmux, then retains the residual audit", () => {
+    const stop = functionBody("stopResolvedNode");
+    const drain = stop.indexOf("const drainDeadline");
+    expect(drain).toBeGreaterThan(-1);
+    const guard = stop.slice(stop.indexOf("// OpenCode's bridge owns"), drain);
+    expect(guard).toContain('allowLegacyTmuxNameSweep && process.platform === "linux"');
+    expect(guard).toContain('resolved.profile.runtime === "opencode-cli"');
+    expect(guard).toContain('resolved.profile.opencodeMode === "copresence"');
+    expect(guard).toContain('identity.role === "agent"');
+    expect(guard).toContain('current.kind === "live" && current.birth === identity.birth');
+    expect(stop.indexOf("killTmuxSession(session)")).toBeGreaterThan(drain);
+    expect(stop.indexOf("await reapOwnedGeneration(stopProcesses)")).toBeGreaterThan(drain);
+  });
+
+  test("generation policy is checked before touching profiles or live sessions", () => {
+    const guard = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal(");
+    expect(guard).toBeGreaterThan(-1);
+    // #3418 —— 这里原来整份回写（saveProfile(resolved.id, profile)），现在只记一格
+    // （patchProfileFields）。**不变的是次序**：生成策略的拒绝必须在任何 profile 写入之前。
+    expect(body.indexOf("patchProfileFields(resolved.id")).toBeGreaterThan(guard);
+    expect(body.indexOf("killTmuxSession(")).toBeGreaterThan(guard);
+    expect(body.slice(guard, body.indexOf("patchProfileFields(resolved.id"))).toContain("if (generationRefusal)");
+  });
+
   test("persists copresence mode before launching the bridge", () => {
     const save = body.indexOf('opencodeMode: "copresence"');
     const bridge = body.indexOf('"new-session"');
     expect(save).toBeGreaterThan(-1);
     expect(bridge).toBeGreaterThan(save);
+  });
+
+  test("policy refusal precedes profile writes and session replacement", () => {
+    const refusal = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal");
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(body.indexOf("patchProfileFields(resolved.id"));
+    expect(refusal).toBeLessThan(body.indexOf("killTmuxSession(name)"));
   });
 
   test("starts only exact alias and alias-bridge tmux sessions", () => {
@@ -41,11 +72,16 @@ describe("OpenCode co-presence CLI wiring", () => {
   test("bridge 的输出落到节点日志目录，而不是只留在 tmux pane 里", () => {
     expect(body).toContain("copresence-bridge.log");
     // fd 重定向用不带命令的 `exec`（只改 fd、不替换进程），后面那条
-    // `exec node …` 仍然原样接管 —— 进程身份不变，node stop 的 pgid 语义不受影响。
+    // `exec ${cliPrefix} node start` 才替换进程。cliPrefix 来自 reinvokeShell，
+    // 命令最前是 process.execPath，所以接管的仍是这次 anet。
     const teeAt = body.indexOf("exec > >(tee -a");
-    const execAt = body.indexOf("exec ${shellQuote(process.execPath)}");
+    const execAt = body.indexOf("exec ${cliPrefix} node start");
     expect(teeAt).toBeGreaterThan(-1);
     expect(execAt).toBeGreaterThan(teeAt);
+    expect(body).toContain("const cliPrefix = reinvokeShell([], false, cliEntry)");
+    const reinvokeAt = cli.indexOf("function reinvokeShell(");
+    const reinvokeBody = cli.slice(reinvokeAt, cli.indexOf("\n}\n", reinvokeAt));
+    expect(reinvokeBody).toContain("execPath: process.execPath");
   });
 
   test("超时后的输出交给诊断模块，且区分「桥死了」和「桥还活着」", () => {
@@ -67,6 +103,13 @@ describe("OpenCode co-presence CLI wiring", () => {
     const dispatch = cli.indexOf('if (copresenceRuntime === "opencode-cli")');
     expect(dispatch).toBeGreaterThan(-1);
     expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id, opts.hub)");
+  });
+
+  test("ordinary V2 profile starts select orchestration, but internal bridge starts do not recurse", () => {
+    const start = functionBody("startCommand");
+    expect(start).toContain("opencodeV2CopresenceRequested(resolvedForCopresence.profile)");
+    expect(start).toContain('process.env.ANET_COPRESENCE_BRIDGE !== "1"');
+    expect(body).toContain("export ANET_COPRESENCE_BRIDGE=1");
   });
 
   test("operator help names the create, attach, and stop commands", () => {

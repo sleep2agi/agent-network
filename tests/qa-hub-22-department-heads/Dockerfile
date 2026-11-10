@@ -21,6 +21,7 @@ ENV PATH="/root/.bun/bin:${PATH}"
 ARG SOURCE_COMMIT=unknown
 ENV QA_HUB_22_SOURCE_COMMIT=${SOURCE_COMMIT}
 
+COPY contracts /app/contracts
 COPY server /app/server
 RUN cd /app/server && bun install --silent
 # 套件脚本放在 bun install 之后:改一行 run.sh 不用重装依赖。

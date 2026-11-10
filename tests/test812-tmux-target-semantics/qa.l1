@@ -1,0 +1,2 @@
+812: tmux target 语义。命令从 docs/node-liveness-criterion.md 抽出来实跑,
+容器里现造 session。只依赖 alpine 的 tmux,不碰机群、不碰凭据。

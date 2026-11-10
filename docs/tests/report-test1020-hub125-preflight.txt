@@ -1,0 +1,72 @@
+Hub125 deployment preflight; no production activation yet
+OBSERVED_AT=2026-10-11T15:50:20Z
+Exact package source main519af0236985957bb0ff70685052673bdd0b2373.
+Formal release38151056880 completed SUCCESS: build, four gates, verdict,
+publish and registry readback. Anonymous Docker metadata/tarball download
+matches the exact CI inner tarball, 1229363 bytes:
+SHA256 f289b40562f5f2a87f38cb6cf9dc8a439efb23c7b56930375bcb688dc9fac555
+SRI sha512-fvGb8fLlbsIuXsi8YtocnKGZp0DCgCWsKWa/ott84zsdThB2RdGjcCZBBLlmJohrtvkajmMFO4WZWKz/YLJlKQ==
+Artifact11706134908 archive digest d0d634a279acedd39adae246baf41bf412abd4ab58ff81e1a90f5e3851242342
+is NOT the inner package SHA. First registry read returned404; publication
+was not repeated. Later read matched the actual bytes above.
+
+Package/source preparation: exact URL/integrity updated in provider906
+package/lock, transitive dependency versions unchanged. New inactive sibling
+$HOME/.commhub/runtime-v108-preview125 installed in pinned Node22.22.2 Docker,
+UID1000, npm ci --ignore-scripts:100 packages, exit0. Original124 retained.
+Consistent source-DB read-only VACUUM INTO backup, mode0600:
+$HOME/.commhub/backups/provider1020-p125-SrAkL8/before.db,690573312 bytes,
+SHA256607e329d5616a3993fae3757850ff3605df803f426cc65a78059592c12c5097b.
+No production launcher copy/restart, no business-node restart or credential
+replacement. Backup/install are operations preparation, not tests on live DB.
+
+Docker layering: launcher core previously PASS125/rollback124/side-thread0;
+published-package and offline-schema check then PASS, only then HTTP check.
+Each suite independent Dockerfile, pinned Node22.22.2 base digest
+9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e.
+Actual Bun1.4.0 executable mounted read-only, SHA256
+33d56b070be6a9e3da0ab013038b43d1645d0534ca811ecdba4472599117eb4b.
+Schema image b284c78deca255ae132a12dad07f128d57153425abf0c2fa5eab04f9bbbc41cc;
+HTTP image5a3d53f44dcf5b0ea311b11d80fdd1977fc168056a00544201109746ec4316b1.
+Both --network none/--read-only/tmpfs tmp/--rm/no host port; only offline
+backup and exact published runtime/package mounted, no live DB/hub.env.
+Schema integrity before/after PASS; preserved sessions321/tasks76766/nodes291/
+networks7/requirements1029/api_tokens605/user_inbox2328. Six Provider table
+counts9/0/0/0/0/0 retained; existing login rows and clone_json preserved.
+HTTP published125 startup PASS, anonymous401, temporary synthetic atok200,
+all321 backup-network session rows returned. Exact HTTP child stopped; all
+containers exit0 and removed. No real vault decryption/model/OAuth probe.
+
+Next: ordinary merge of deployment inputs/runbook, install exact main Git
+launchers, retain original entries, narrowly restart commhub-hub and observe
+actual health/process/natural heartbeat+ack. No new schema or child-token401
+fix claimed. Provider reference support and #1027 remain separate.
+
+ACTIVATION RECEIPT OBSERVED_AT=2026-10-11T16:00:07Z (2026-10-12 00:00+08)
+Normal PR2609 merged main30f803318a8bcfc3b3737c2b577d9fe5faee1b40;
+10/10 required checks and affected Hub deployment Docker profile SUCCESS.
+Fresh main fetch/ancestor check, both installed Git launchers cmp equal/mode0700.
+Only pm2 restart commhub-hub, no --update-env; no daemon/business-node action.
+Actual port9200 Bun PID3216148, PPID1613 PM2, cwd original .commhub,
+entry runtime-v108-preview125. Production Bun1.4.0 binary SHA equals preflight
+33d56b070be6a9e3da0ab013038b43d1645d0534ca811ecdba4472599117eb4b.
+Health125/sessions321/security secured; natural SSE113 by uptime28seconds.
+At uptime63 PM2 online/restarts82 (one intentional restart from81), no additional.
+Both daemons/cloud/dog/client/TMHR last_seen newer than activation; ops owner
+still original offline last_seen07:11:49Z, no identity restoration claimed.
+Read only incremental log bytes since restart: vault_master_key_missing0,
+panic0; no new task.ack yet. Keep natural acknowledgement observation pending,
+do not generate live fixture traffic to turn this into PASS.
+Old124 install and same owner-only before.db retained; launcher-124.sh and
+base-launcher.sh backups mode0700 in the same backup directory. Secret/env,
+ports, proxy and data source unchanged. Runtime and launcher sources separate.
+Client243 formal desktop38153297202 and Android38153299528 run from exact
+maina90cfd2d978678ddc3bbd3c497540af46fef4288, not yet published.
+
+NATURAL LIFECYCLE OBSERVED_AT=2026-10-11T16:04:27Z
+Non-mutating operational observation, not a production fixture/test: standalone
+read-only SQLite query (no db.ts import/migration) for this network since
+15:59:02Z gives task.send.delivered15/task.started17/task.replied19; latest
+reply16:04:27Z. Separate task.ack0. No content/auth/token values read, no tasks
+created/replayed and no events altered. Log-only absence did not establish
+absence of persisted start/reply receipts; natural communications continued.

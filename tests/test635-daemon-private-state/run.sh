@@ -64,7 +64,9 @@ set +e
 writer_rc=$?
 set -e
 test "$writer_rc" -ne 0
-grep -Eq 'toBe\(2\)|Expected.*2|expected.*2' /tmp/test635-writer-red.txt
+# The unchanged mutation removes one writer; the source contract now pins
+# three JSON writes (including the private source marker), not the old two.
+grep -Eq 'toBe\(3\)|Expected.*3|expected.*3' /tmp/test635-writer-red.txt
 echo "MUTATION_RED: writer-bypass rc=$writer_rc"
 
 echo "RESULT: PASS"

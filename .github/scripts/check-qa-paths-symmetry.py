@@ -72,10 +72,40 @@ def load_exemptions() -> set[str]:
     return out
 
 
+def push_trigger_retired(qa_text: str) -> bool:
+    """#2967 —— 主干是否已改为「不再按 paths 触发，改夜间全量」。
+
+    判据不是「有没有 push 段」（那可能是删漏），而是**在 on: 段里同时存在**：
+      · 一个 schedule: 块（夜间全量兜底）
+      · 一个 workflow_dispatch:（手动复跑全量的入口）
+    两者都在，才算这是一次有意的架构改变；少任何一个，仍按「解析塌了」处理。
+    """
+    m = re.search(r"^on:\s*$", qa_text, re.M)
+    if not m:
+        return False
+    j = re.search(r"^jobs:\s*$", qa_text[m.end():], re.M)
+    if not j:
+        return False
+    seg = qa_text[m.end():m.end() + j.start()]
+    has_schedule = bool(re.search(r"^  schedule:", seg, re.M))
+    has_dispatch = bool(re.search(r"^  workflow_dispatch:", seg, re.M))
+    return has_schedule and has_dispatch
+
+
 def run(qa_text: str, exemptions: set[str]) -> int:
     secs = parse_sections(qa_text)
     pr = secs.get("pull_request", [])
     push = secs.get("push", [])
+    # #2967 —— 主干改成夜间全量后，push 段不存在是**设计**，不是对称性被破坏：
+    # 对称检查问的是「PR 上会跑、合进 main 后不跑」这件事，而主干现在根本不按 paths 跑。
+    if not push and push_trigger_retired(qa_text):
+        if not pr:
+            print("::error::pull_request 段解析出 0 条 —— 取集坏了，拒绝通过")
+            return 2
+        print(
+            f"note: push 已退役（#2967）：主干改为夜间 schedule 全量，只校验 pull_request={len(pr)} 条段内自洽"
+        )
+        return 0
     # 🔴 零范围 = 解析器坏了或结构变了,不是"没有不对称"。
     if not pr or not push:
         print(
@@ -137,6 +167,27 @@ def selftest() -> int:
         ("豁免后通过", qa(["a/**", "b/**"], ["a/**"]), {"- 'b/**'"}, 0),
         ("过期豁免红", qa(["a/**"], ["a/**"]), {"- 'gone/**'"}, 1),
         ("零范围拒绝", "on:\n  pull_request:\njobs:\n", set(), 2),
+        # #2967 —— push 退役：schedule + workflow_dispatch 同时在 ⇒ 通过（只校验 PR 段非空）
+        (
+            "push 退役且夜间全量存在 → 通过",
+            "on:\n  pull_request:\n    paths:\n      - 'a'\n  schedule:\n    - cron: '0 19 * * *'\n  workflow_dispatch:\njobs:\n",
+            set(),
+            0,
+        ),
+        # 只有 schedule、缺 workflow_dispatch ⇒ 仍按结构损坏处理（防止半吊子改动被放过）
+        (
+            "push 缺失但只有 schedule → 仍拒绝",
+            "on:\n  pull_request:\n    paths:\n      - 'a'\n  schedule:\n    - cron: '0 19 * * *'\njobs:\n",
+            set(),
+            2,
+        ),
+        # PR 段为空 + push 退役 ⇒ 拒绝（分母塌了）
+        (
+            "push 退役但 PR 段为空 → 拒绝",
+            "on:\n  pull_request:\n  schedule:\n    - cron: '0 19 * * *'\n  workflow_dispatch:\njobs:\n",
+            set(),
+            2,
+        ),
     ]
     for name, text, ex, want in cases:
         got = run(text, ex)

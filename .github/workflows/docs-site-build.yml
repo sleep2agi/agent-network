@@ -38,16 +38,42 @@
 name: docs-site build
 
 on:
+  # 2026-11-09 —— PR 分层：上面「每个 PR 都跑」的理由是为了将来设成 required；
+  # 目前它不是 required，而每个 PR 白跑 ~5 分钟占 runner。先加 paths，
+  # 真要设 required 时改成 job 级 if 跳过（skipped 算通过），而不是去掉过滤。
   pull_request:
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/docs-site-build.yml'
   push:
     branches: [main]
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/docs-site-build.yml'
 
+# #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
+# 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
+# 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
+# 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  download-platforms:
+    name: download-platforms-docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core download page in Docker (no accounts or installation)
+        run: |
+          docker build -f tests/test961-download-platforms/Dockerfile -t test961-download-platforms .
+          docker run --rm --init --network none test961-download-platforms
   build:
     # 这个 name 是分支保护里 required check 唯一能写的标识符,必须全仓唯一。
     name: docs-site-build
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +110,10 @@ jobs:
         run: npm run skillhub:check
         working-directory: docs-site
 
+      - name: desktop download catalog and update route
+        run: npm run test:downloads && npm run test:update-route
+        working-directory: docs-site
+
       - name: vitepress build (dead links are fatal by default)
         run: npm run build
         working-directory: docs-site
@@ -93,10 +123,40 @@ jobs:
       # (「CLI 保留全部能力」两张卡片的正文与 curl 命令被裁);修复后 30/30、rc=0。
       # 🔴 那次红里「盒子出界」判据是 0 条 —— 卡片被 .VPHome 的 overflow 兜住、
       #    scrollWidth 也等于视口宽度,只有「文字被裁」那一层抓到了。别删那一层。
-      - name: home page fits phone widths (#568)
+      # #2697 —— 这一步在 2026-10-26/27 一晚挂起三次（13–15 分钟直到 job 超时被 cancelled）：
+      #   `npx playwright install --with-deps chromium` 偶发卡在下载/apt，或浏览器启动无超时。
+      # 处置：① 缓存浏览器；② **给每一步单独的 timeout-minutes** —— 挂起会变成“红”，
+      # 而挂起最坏的地方不是慢，是它让这个 job 变成“薛定谔的红”，人就学会忽略它。
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('docs-site/package-lock.json') }}
+
+      # #2697 —— 2026-10-27 实测：缓存命中（269MB）后 `--with-deps` 仍然 5 分钟超时，
+      # 因为慢的是 **apt-get 装系统依赖**，不是浏览器下载。所以拆成两步、各自计时：
+      # 失败时能一眼看出是“下载”还是“apt”，而不是一个 13 分钟的 job 级 cancelled。
+      - name: Install Playwright browser (#2697)
+        timeout-minutes: 3
+        run: npx playwright install chromium
+        working-directory: docs-site
+
+      # #2697 —— 2026-10-27 连续两次卡在 apt（5 分钟超时）。ubuntu-latest 上 chromium 需要的
+      # 共享库（libnss3 / libatk / libgbm 等）**通常已经存在**，apt 只是保险。
+      # 所以：先探测，缺了才 apt。这样常见路径 0 秒，异常路径仍有兜底。
+      - name: Install Playwright system deps if missing (#2697)
+        timeout-minutes: 6
         run: |
-          npx playwright install --with-deps chromium
-          npm run test:home-mobile
+          if ldconfig -p | grep -q 'libnss3.so'; then
+            echo "system libs already present — skipping apt"
+          else
+            npx playwright install-deps chromium
+          fi
+        working-directory: docs-site
+
+      - name: home page fits phone widths (#568)
+        timeout-minutes: 4
+        run: npm run test:home-mobile
         working-directory: docs-site
 
       # 分母承重:上面那步在 docs/ 被清空时**也会 rc=0** —— 0 个页面、0 条死链,
@@ -104,7 +164,12 @@ jobs:
       - name: rendered-page denominator
         run: |
           set -euo pipefail
-          md=$(git ls-files docs-site/docs | grep -c '\.md$')
+          # 2026-10-31 —— 「空输出 ≠ 干净」：git ls-files 失败时输出也是空，
+          # 而 `grep -c` 无匹配同样输出 0 —— 两者方向相反，不能共用一种写法。
+          #   · git 失败 ⇒ 不可归因，必须 exit 1（并说清楚是哪一步）
+          #   · grep 无匹配 ⇒ 返回 1，是**正常结果**，才用 || true
+          files=$(git ls-files docs-site/docs) || { echo '不可归因：git ls-files 执行失败' >&2; exit 1; }
+          md=$(printf '%s\n' "$files" | grep -c '\.md$') || true
           html=$(find docs-site/docs/.vitepress/dist -name '*.html' | wc -l | tr -d ' ')
           echo "tracked_md=$md rendered_html=$html"
           FLOOR=80

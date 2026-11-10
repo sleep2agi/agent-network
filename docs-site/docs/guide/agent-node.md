@@ -64,6 +64,25 @@ anet node start my-agent --tmux
 | `logs/` | 运行日志。本机看用上面的 `anet logs`；从客户端看见 [节点运行日志](/guide/node-run-logs) |
 | `goals.json` | 本节点的循环任务状态 |
 
+### 启动时的环境变量优先级
+
+`agent-node`（包括直接 `agent-node --config <path>` 启动）按下面的顺序取值，**高者胜**（实现见 [`node-secrets.ts` 的 `loadNodeSecrets`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L155)；文件顶部注释也写着这三层）：
+
+1. **进程启动时已经存在的环境变量**（`KEY=` 空串也算已设置，会被保留）；
+2. `config.json` 的 `env` 里的键（明文或 `_envRef`）；
+3. 节点目录下的 `secrets.env`（`anet node secret set` 写的那份）——**只填空位**，不会覆盖前两层。
+
+`secrets.env` 的约束：必须 0600 的普通文件且属于当前用户；符号链接、非普通文件、权限不对时**整份不生效**（不是部分生效）。保留键（`PATH`、`LD_*`、`NODE_*` 等）会被跳过。文件不存在是正常状态。
+
+Hub 金库**不是**上面的第四层。`list_network_secrets` 和 `GET /api/secrets` 只返回名字；`agent-node --config` 启动时不会向金库要明文。`create_node` 的 `env_refs` 目前也不读金库，所以「令牌页上有这个名字」不等于这个进程里有这个值。
+
+Hub 下发的密钥要先落成本地文件，再在**下次完整启动**时按第 3 层补空位（不会覆盖已经存在的进程环境，也不会覆盖 `config.json` 的 `env`）：
+
+- 节点私有通道写入 `node-secrets.json`；
+- Daemon 范围密钥写入 `scoped-secrets.json`，节点同名值优先；
+- 创建节点时的 `env_blob` 写成 `secrets.env`。
+
+这三份都只在下次完整启动时读入。单独重启 Bridge 不会让 TUI 或 server 看到新值。回执和 `list` 只出 key 名。英文同一节：[Environment precedence at startup](/en/guide/agent-node#environment-precedence-at-startup)。
 全局的用户登录与当前 network 位于 `~/.anet/config.json`。不要提交项目 `.anet`、token 或 `.env`。
 
 envRef 让 `config.json` 只保存环境变量引用；实际值仍可能存入节点的 mode-0600 `.env`。迁移前先检查备份和目标变量：
@@ -73,6 +92,80 @@ anet node migrate-token-to-envref my-agent
 ```
 
 完整 token 边界见 [Token 与权限](/guide/account-system#tokens)，配置安全见[安全设计](/concepts/security)。
+### 密钥文件：谁是权威、怎么备份、怎么轮换
+
+**权威边界**——这三份本地文件是运行时的权威来源，Hub 金库只是**投递通道**：
+
+| 文件 | 位置 | 权威范围 |
+|---|---|---|
+| `secrets.env` | `<节点目录>/secrets.env`（`config.json` 旁边，[`node-secrets.ts:42`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L42) 定义路径） | 该节点自己的环境变量；启动时**只填空位**（[`node-secrets.ts:155`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/node-secrets.ts#L155) `loadNodeSecrets`） |
+| `node-secrets.json` | 节点私有通道写入 | 节点私有密钥（同名时优先于 daemon 范围的值） |
+| `scoped-secrets.json` | daemon 目录（`0600`、revision CAS） | 该 daemon 下的子节点共享值 |
+
+读入规则是**整份生效或整份拒绝**：`secrets.env` 若是指向别处的符号链接、非普通文件、属主不是当前用户、或权限不是 `0600`，**整份不生效**（不是跳过坏行），文件不存在则是正常状态。
+
+**备份**（自己做，产品不会自动备份）：
+- 备份 `secrets.env` / `node-secrets.json` / `scoped-secrets.json` 三个文件，权限保持 `0600`、属主为运行用户；
+- 存到与节点目录**不同的位置**（同盘同目录的副本在磁盘损坏时一起丢），并且不要进 git；
+- 备份里是**明文值**，等同凭据：按密钥对待（不贴聊天、不进工单）。
+
+**恢复**：
+1. 停掉节点/daemon（**完整停止**，不是只重启 bridge）；
+2. 把备份文件放回原路径，`chmod 600`、确认属主；
+3. 完整启动一次——三份文件只在完整启动时读入；
+4. 用 `anet node secret list <node>` 核对**键名**齐全（值不会回显）。
+
+**轮换顺序**（避免中途失效）：
+1. 先写新值（`anet node secret set <node> <KEY>`，值走 stdin 或 `--from-env`，不会进 shell 历史）；
+2. 完整重启节点，确认新值生效；
+3. 再在源头吊销旧值；
+4. 最后更新备份。
+
+**回滚条件**：新值写入后节点无法启动、或任务开始成片失败且错误指向该密钥时，放回上一份备份并完整重启；`scoped-secrets.json` 有 revision CAS，两次写冲突以 CAS 报错为准，不要手改文件。
+
+### 团队规则（可选）：`ANET_TEAM_RULES`
+
+网络 owner/admin 可以在 Hub 上写一份**全网规则**（`GET/PUT /api/networks/:id/rules`）。默认**不会**自动写进节点；要让某个节点采用它，在该节点的环境里设 `ANET_TEAM_RULES=1`，然后**完整重启**：
+
+```bash
+# 先备份（块会加在文件最前面）
+cp AGENTS.md AGENTS.md.bak-$(date +%Y%m%d-%H%M%S)      # claude 节点是 CLAUDE.md
+ANET_TEAM_RULES=1 anet node start <alias>              # 或在你自己的启动器里带这个环境变量
+```
+
+启动日志会有一行 `[team-rules] injected|unchanged|skipped|error …`。文件顶部出现这样的块：
+
+```markdown
+<!-- ANET:TEAM-RULES v3 BEGIN — 由 CommHub 自动维护，块外内容不会被修改 -->
+## 团队规则（CommHub 自动维护）
+### 来源：Hub / 网络 net_xxx（revision 3，更新于 …）
+…Hub 上的正文…
+<!-- ANET:TEAM-RULES v3 END -->
+```
+
+行为约定：
+
+| 情况 | 结果 |
+|---|---|
+| 块外内容 | **逐字节保留**，任何情况下都不改写 |
+| 同一 revision 再次启动 | `unchanged`，文件**字节不变**（不产生 diff） |
+| Hub 不可达 / 非 2xx | 文件**原样** + 告警；**不会删块**，也不阻塞启动 |
+| 文件里标记残缺（只有 BEGIN 或版本不一致） | **拒绝写入**并报原因，文件不动 |
+| 没设 `ANET_TEAM_RULES` | 零行为差异：不发请求、不碰文件 |
+
+关掉它：去掉环境变量后重启即可；**已写入的块不会自动删除**（删块等于静默撤回团队规则），需要时手工删掉标记段或还原备份。
+
+边界：这一版只注入 **Hub 一层**；Daemon 级规则、层间冲突裁决、合并总长上限都还没有实现。规则改动**只在节点下次完整启动时生效**，不做运行中推送，也没有客户端编辑页。
+
+想知道某个已发布版本是否真的具备这个行为，可以跑：
+
+```bash
+bash scripts/verify-team-rules-artifact.sh 2.5.0-preview.156
+```
+
+
+> 待具名确认：**恢复来源**指谁（本机备份 / 外部 KMS / 人工重录）——这一条需要人给一句话才能写成确定流程，本文暂按"本机备份 + 人工重录"描述。
+
 
 ### 不要复制节点身份
 
@@ -96,9 +189,15 @@ CommHub ──SSE task──▶ Agent Node ──▶ Runtime / model
 
 这种区分避免 Agent 因回复彼此触发无限循环。状态转换、父子任务和超时语义见[任务生命周期](/concepts/task-lifecycle)。
 
-`codex-app-server` 节点一次只跑一个 turn，后来的任务排队。排队超过 30 分钟仍未开始的任务会以「在队列中等待 N 分钟仍未开始」失败。要改这个上限，在启动节点的环境里设 `ANET_QUEUE_TIMEOUT_MS`（整数毫秒，例如 6 小时 = `21600000`）；非法值会被忽略并在节点日志里警告一次。
+`codex-app-server` 节点一次只跑一个 turn，后来的任务排队。从 runtime `2.5.0-preview.141` / 配套 CLI `2.3.0-preview.175` 起，经 Hub 认证的 Dashboard 聊天请求默认可在运行时排队最多 4 小时；节点、定时任务、旧来源或未认证请求仍为 30 分钟。Hub 的到期、取消和权限检查仍生效，可能在运行时期限之前拒绝执行。
 
-节点启动时要先恢复（resume）它绑定的线程，才开始接任务。线程很大时（rollout 文件上百 MB）这一步可能要几十秒；每次恢复最多等 120 秒，超时重试一次，仍失败就先向 hub 报离线再退出，不会改用新线程（那会丢掉对话历史）。要改这个上限，设 `ANET_CODEX_RESUME_TIMEOUT_MS`（整数毫秒，规则同上）。
+从 runtime `2.5.0-preview.142` / 配套 CLI `2.3.0-preview.176` 起，认证 Dashboard 消息在收件分发和 bridge 的等待队列中排在机器待办之前，同类请求仍按到达顺序处理。已经执行、领取启动或开始核查 Hub 状态的一项继续运行；分发并发满时要先等一个槽位释放，连续人类消息也可能推迟机器待办，不能承诺立即响应。本片不新增活跃 CommHub 回合注入或队列位置 UI；原有经认证的人类 TUI 回合注入规则不变。
+
+活跃网络回合的人类接续需要独立回执和回复归属；[接续契约与当前回退验证](https://github.com/sleep2agi/agent-network/blob/main/docs/design/730-owned-turn-human-steering.md)已单独记录。当前仍采用上述等待优先规则，契约和测试通过不表示活跃网络回合注入已经实现。
+
+超过相应排队期限仍未开始的任务会以「在队列中等待 N 分钟仍未开始」失败。要显式覆盖这个默认值，在启动节点的环境里设 `ANET_QUEUE_TIMEOUT_MS`（整数毫秒，例如 6 小时 = `21600000`）；该配置对两类请求都优先生效，非法值按对应来源默认值回退并警告一次。排队时间不扣除开始处理后的执行时钟。公开新包不代表已有节点已采用，需要原生命周期管理者在正常空闲窗口确认实际版本。
+
+节点启动时要先恢复（resume）它绑定的线程，才开始接任务。线程很大时（rollout 文件上百 MB）这一步可能要几分钟；默认每次最多等 300 秒，超时重试一次，仍失败就先向 hub 报离线再退出，不会改用新线程（那会丢掉对话历史）。同一期限也用于等待新 TUI 线程真正生成 rollout，避免把尚未落盘的 thread id 写成可恢复会话。要改这个上限，设 `ANET_CODEX_RESUME_TIMEOUT_MS`（整数毫秒，规则同上）。旧版 Codex 会把完整历史生成为一个大响应帧；客户端的有限 `maxPayload` 只限制接收端，不能限制 Codex 生成这段数据时的内存。因此 Linux 上的恢复阶段另有主机级单路闸门：按 rollout 的 9 倍（最低 4 GiB）预留可用内存，余量不足时排队并打印原因，直到 launcher、bridge 和 TUI 都完成精确线程绑定才释放；持有期间会续租，不会因恢复超过 10 分钟而放进第二个节点。等满 600 秒仍不满足内存要求时，为兼容既有启动流程并避免整批节点永久卡住，闸门只允许一个恢复继续，同时明确 WARN 当前可用量、需求量和 OOM 风险。Windows / macOS 没有这道基于 `/proc` 和文件租约的保护，启动日志会明确告警。
 
 `opencode` 节点每个任务默认最多等 30 分钟。共存模式（`opencodeMode: "copresence"`）下这是整个任务的总时长；到点后 bridge 只是停止等待，不会中止共享会话里的这一轮。任务会在节点的 TUI 里继续跑完，发送方收到的回复会写明这一点，但最终结果不会再自动回传。headless 模式下这是「连续没有任何进展输出」的时长，到点会结束 opencode 子进程，这一轮就中止了。要改这个上限，设环境变量 `OPENCODE_TIMEOUT_MS`，或在节点 `config.json` 里设 `flags.timeout` / `flags.opencodeTimeoutMs`（整数毫秒；`0` = 不设上限）。优先级依次是环境变量、`flags.timeout`、`flags.opencodeTimeoutMs`。节点启动时会打印一行 `[opencode] task timeout=… source=…`，写明实际取到的值和来源。
 

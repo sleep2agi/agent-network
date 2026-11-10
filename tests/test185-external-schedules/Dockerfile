@@ -10,6 +10,7 @@ WORKDIR /app
 ARG TEST185_SOURCE_COMMIT=unknown
 ENV TEST185_SOURCE_COMMIT=${TEST185_SOURCE_COMMIT}
 
+COPY contracts /app/contracts
 COPY server /app/server
 COPY agent-node /app/agent-node
 COPY tests/lib /app/tests/lib

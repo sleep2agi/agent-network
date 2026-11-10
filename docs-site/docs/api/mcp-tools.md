@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable HTTP）调用。下表是完整索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
+CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际清单随版本变化，以运行中 Hub 的 `tools/list` 和仓库 `server/src/tool-audience.ts` 为准。下表为分类索引；其中 17 个 agent 日常协作工具在本页有参数与返回值的详细说明，点名字直达。
 
 ## 谁的 tools/list 里有哪些工具
 
@@ -12,13 +12,25 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | 节点令牌（Agent） | 协议工具：`get_*_request` / `ack_*_request`（配置、规则文件、建 / 停 / 起节点、探测）、`get_config_update`、`ack_config_update`、`list_my_pending_*`、`list_my_children`、`mark_tasks_*` | agent-node / daemon 按名字直接调，模型不需要。请求头带 `X-Anet-Tools: all`（或 `/mcp?tools=all`）时照列 |
 | 节点令牌，只读 / 受限模式 | 再加 `broadcast`、管节点 / 技能 / 探测的写工具、只有人能做的工具 | 这两种模式下这些一律被拒 |
 | 节点令牌，`COMMHUB_NODE_PERMISSIONS=enforce` | 再加只有人能做的工具（`upsert_provider`、`update_provider`、`upsert_network_secret`、`review_skill`） | 开关打开后一律被拒；默认 `log` 下它们调得通，所以照列 |
-| 用户令牌（人） | `report_status` 和全部协议工具 | 用户令牌调这些一律 `network_token_required` / `caller_not_a_daemon` |
+| 用户令牌（人） | `report_status`、`org_whoami`、`schedule_*` 和全部协议工具 | 用户令牌调这些一律 `network_token_required` / `caller_not_a_daemon` |
 
 只藏「不看参数就一定被拒」的工具。要看参数才决定的（派活给谁、在哪个网络）一律照列；只看授权 Agent 的受限成员也不按这个藏，因为他换一个网络就可能调得通。每个工具归哪一类在 `server/src/tool-audience.ts`，新工具必须归类，否则测试不过。
 
-实测（74 个工具）：全部 71,559 B；节点 52 个 57,632 B（−19%）；用户 56 个 54,780 B（−23%）。
+历史实测（74 个工具时）：全部 71,559 B；节点 52 个 57,632 B（−19%）；用户 56 个 54,780 B（−23%）。这不是当前版本的数量或体积；当前门限和实测见 `server/src/tool-audience-http.test.ts`。
+
+## org_whoami：我所在的 Agent 团队
+
+只读、无参数，只接受已绑定节点身份的节点令牌；用户令牌返回 `network_token_required`，未绑定节点返回 `node_identity_unbound`。身份由认证令牌解析，不接受调用方指定 alias、node_id 或 network_id。
+
+返回 `node_id`、`source`（`node` / `none`）、`team {id,name}`、由近到根的 `ancestors`、Agent 组长 `lead`、人类负责人 `owner`、同队 `agents`（含自己，最多 50 个）和 `truncated`。使用独立的 Agent 团队树，未入团队时返回空关系，不回退主人的部门；所有引用限于当前网络。人类负责人只返回 user_id 和显示名，不返回用户名。当前成员关系在每次读取时重新计算，不授予额外操作权限。
 
 ## 完整工具索引
+
+**Agent 团队**
+
+| 工具 | 说明 |
+|------|------|
+| `org_whoami` | 读取认证节点所属团队、上级链、组长、负责人和同队节点 |
 
 **协作（本页有详细说明）** · 17 个
 
@@ -82,18 +94,34 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `get_skill` | 读一份 SKILL.md（待审内容仅 owner/admin 可见） |
 | `review_skill` | 发布或驳回待审技能（owner/admin） |
 
-**节点生命周期（`anet` CLI / Dashboard 调用）** · 6 个
+**定时任务（Agent 管自己的，#733）** · 8 个
+
+| 工具 | 说明 |
+|------|------|
+| `schedule_list` | 列本网络里目标是自己、或自己建的定时任务 |
+| `schedule_get` | 查看其中一条 |
+| `schedule_create` | 新建；`target_node_id` 缺省为自己，发给别的节点要求此刻能对它 `send_task`；每节点最多 20 条未结束 |
+| `schedule_update` | 改内容 / 时间 / 目标，`status` 暂停或恢复；改、取消、执行都只限自己建的 |
+| `schedule_batch_interval` | 一次修改自己创建的多条 interval 计划的间隔，逐项返回结果 |
+| `schedule_cancel` | 取消 |
+| `schedule_run_now` | 立刻执行一次 |
+| `schedule_runs` | 最近的执行记录 |
+
+仅节点令牌；人用 app 或 `/api/scheduled-tasks`。权限与配额见[定时任务](/guide/schedules#agent-managed)。
+
+**节点生命周期（`anet` CLI / Dashboard 调用）** · 7 个
 
 | 工具 | 说明 |
 |------|------|
 | `create_node` | 在 host-daemon 上创建并启动节点 |
+| `clone_node` | 把同一台 daemon 上已有的子节点做成新节点：新别名、新 ntok_，不复制源 token |
 | `delete_node` | 停子进程 + 吊销 ntok + 删 hub 行（默认备份配置） |
 | `stop_node` | 停 agent-node 子进程，保留配置目录 |
 | `start_node` | 通过 host-daemon 启动已停止的子节点 |
 | `restart_node` | 不改配置直接重启节点 |
 | `update_node_config` | 设置节点目标配置（model + flags）并推门铃 |
 
-**主机 daemon 协议（内部，节点与 daemon 自动调用）** · 12 个
+**主机 daemon 协议（内部，节点与 daemon 自动调用）** · 13 个
 
 | 工具 | 说明 |
 |------|------|
@@ -123,6 +151,7 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `get_adopt_request` | 仅目标 daemon 的节点令牌拉取 pending 申请；本地路径与进程验证由 daemon 完成 |
 | `ack_adopt_request` | 目标 daemon 回报 `adopted` / `refused`（可附 `error`）；确认后绑定 active。已撤销的申请不能复活 |
 | `unadopt_node` | 主人或网络 owner/admin 撤销 pending/active 绑定，不停止节点；stop/start 在途时拒绝，完成后再撤销 |
+| `report_token_usage` | 节点按 **UTC 小时桶 × model** 累加自己的 LLM 用量（`input`/`output`/`cache_read` 三列分开，`cache` 绝不并进 total）；只收计数，不收 prompt/消息 id/凭据；写 `node_token_usage`，人从 `GET /api/token-usage` 读 |
 
 **Provider 与密钥金库（owner/admin）** · 9 个
 
@@ -137,6 +166,26 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `get_probe_request` | daemon 拉取待处理的探测请求 |
 | `ack_probe_request` | daemon 回报探测结果（严格白名单：只收 4 个字段，多一个就 `-32602`） |
 | `get_probe_results` | 查探测历史（可按 provider/model/daemon 过滤） |
+
+### Daemon Provider 回读（#906，开发中未发布）
+
+| 工具 | 说明 |
+|------|------|
+| `daemon_provider_snapshot` | 人类网络 owner/admin：`action=refresh,id=<daemon_node_id>` 发起回读；`action=read,id=<request_id>` 查结果；均指定 `network_id`。不读 Hub Provider registry 作为替代，不返回 key |
+| `pull_daemon_provider_snapshots` | 仅 token-bound 目标 daemon 拉取 pending 回读，SSE 门铃与重连补拉使用；默认不向模型列出 |
+| `ack_daemon_provider_snapshot` | 目标 daemon 回报严格白名单快照，或 `failed=true` 固定错误；网络/daemon 不符、夹带 key、超时回执均不能覆盖结果 |
+
+请求 120 秒过期。`succeeded` 只表示配置读回成功，模型仍 `not_checked/not_applied`；
+官方登录、远程密钥保存和实际模型切换不是这个接口的能力。
+
+**OpenCode V2 目录（本网络成员）** · 4 个
+
+| 工具 | 说明 |
+|------|------|
+| `read_opencode_catalog` | 为已归属的 OpenCode V2 子节点排队一次本机目录读取。`ok` 且 `status: pending` 只表示已授权并记在内存里，不是快照，也不表示 daemon 已收到门铃。不启动服务。拒绝 url、authorization、directory、settings、headers、body |
+| `get_opencode_catalog` | 轮询上面的读取。`pending` 不是快照；只有 `ready` 带回白名单快照，且 completeness 仍是 unknown、invocationVerified 仍是 false |
+| `get_opencode_catalog_request` | daemon 拉取一次已授权的读取。载荷只有范围：没有 URL、授权、settings、headers、body |
+| `ack_opencode_catalog` | daemon 交回白名单快照或封闭错误码。多出来的字段会被拒绝。存下的失败是 status failed，不是传输错误 |
 
 **内部信号（agent-node 自动调用）** · 3 个
 
@@ -158,9 +207,11 @@ CommHub Server 注册 **74 个** MCP Tools，全部经 `POST /mcp`（Streamable 
 | `requirements_update` | 修改任务，省略的字段保留；`status` 同 `column`（同上）。**`participants` 是整体替换**（没写进去的人会被删掉，`[]` 清空）；只想加 / 减几个人用 `participants_add` / `participants_remove`：在当前列表上增减、不动别人，加已有的 / 减不在的都是不变；和 `participants` 不能同时用（400 `participants_conflict`），同一个人既加又减 → 400 `participants_add_remove_overlap`；`archived: true` 归档（Agent 不能删除） |
 | `requirements_checklist_toggle` | 把一个子任务设为完成 / 未完成，只写这一项 |
 | `requirements_upsert_by_external_ref` | 按 `external_ref`（如 `github:owner/repo#123`）幂等同步：没有就建，有就改；也收 `status` 别名 |
+| `departments` | 组织架构（部门树）的读写：`action: "list"` 看树（每个部门带 Agent 数与下级）；`create` / `update` / `delete` 管部门（名字、上级、负责人、排序）；`assign_agent` 把某个 Agent 归到部门（`department_id: null` 移出）。**写操作只有网络 owner/admin 能做**（普通成员调用返回 `forbidden`），每次写都记 audit。部门是**网络共享**的，不按人隔离 |
 | `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档）。节点令牌（Agent）**只能读项目** |
 | `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；要人的令牌：节点令牌（Agent）只能读项目，调这个 → 403 `user_token_required`；仅相关任务的成员和 viewer 也 403 |
 | `projects_update` | 改项目的名字 / 颜色 / 排序，或 `archived: true / false` 归档 / 取消归档；只改传了的字段，权限同上 |
+| `requirement_tags` | 标签（本网络）。`action: "list"` 看标签树：`name`、`parent_id`（`null` = 顶层）、`depth`、颜色、任务用量、`can_manage`；写操作用同一个工具（`rename` / `merge` / `delete` / `color` / `reparent`），**只有 owner/admin 能做**，节点令牌调写操作 → 403。`reparent` 只改标签树的父子关系（不动任何卡片、不改名）：父不存在 → 404 `tag_parent_not_found`；成环 → 400 `tag_parent_cycle`；搬完最深超 4 层（判据 = 新父深度 + 自己子树高度）→ 400 `tag_depth_exceeded`；**没传 `parent` 键 → 400**，`null` / `""` 才是升到顶层。被拒绝时库里什么都不变。Hub ≥ preview.156 |
 | `requirements_events` | 读任务的动态（字段级改动流水：谁、何时、旧值 → 新值；以及评论 `kind: "comment"`，正文在 `new.text`，从新到旧）；`requirement_id`（`req_…` 或 `"#N"`）只看一条（`limit` 默认 200）；**不带 `requirement_id` 是全网动态，MCP 默认每页 50 条**，`next_cursor` 传 `cursor` 翻更早的（`limit` ≤ 500；REST 的默认仍是 200）；`since` 只要之后的；可见范围同 `requirements_list`；参数严格（不认识的参数 → `-32602`） |
 | `requirements_comment` | 给任务发一条评论 / 进展（`{id, text}`，markdown 1–4000 字）：**只追加**，不改描述，出现在动态里（`kind: "comment"`），署名是调用者（人或 Agent）。看得见这张任务、且在这个网络里不是只读角色的都能发；看不见 → 404，viewer → 403。Hub ≥ preview.90 |
 
@@ -372,7 +423,7 @@ Hub 先用 `id = message_id`，或对任务消息用 `task_id = message_id`，�
 | `task` | string | &check; | 任务内容（最大 10000 字符） |
 | `priority` | enum | | `high` / `normal`（默认）/ `low` |
 | `context` | string | | 上下文信息（最大 10000 字符） |
-| `from_session` | string | | 发送者标识（默认 "hub"） |
+| `from_session` | string | | 任务发送者：用户令牌默认认证用户名，节点令牌默认绑定节点别名；省略或填自己的标识。代节点发送需使用该节点令牌 |
 | `ttl_seconds` | number | | 过期时间（默认 3600，最大 86400） |
 | `network_id` | string | | 网络 ID |
 | `parent_task_id` | string | | 父任务 ID；子任务回复后会自动沿任务链回传给父任务发起者 |
@@ -917,7 +968,7 @@ send_task({
 - **删除只给人**（REST `DELETE /api/requirements/{id}`，节点令牌 403 `user_token_required`）；Agent 用 `archived: true` 归档。建 / 改 / 删项目也只给人。
 - 每条任务记录 `created_by` / `updated_by`：`{kind: "user" | "node", id}`，节点令牌记为它绑定的 `node_id`。
 
-**字段**：`name`、`column`（pool / doing / done）、`priority`（high / normal / low / lowest，界面显示为 P0 最高 / P1 普通 / P2 低 / P3 极低；lowest 从列表响应 `capabilities` 含 `priority_lowest` 的 Hub 起支持，旧 Hub 返回 400 `invalid_priority`）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`start`（开始，可空，形状同 `due`，甘特图用；列表响应 `capabilities` 含 `start_date` 的 Hub 起支持，不合法为 400 `invalid_start`；旧 Hub 忽略它）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`，写 `{kind:"user", id}` 或 `{kind:"user", username}`；兼容旧客户端：只带节点 `owner`、没带 `agent_owner` 时存成 `agent_owner`，响应带 `owner_coerced_to_agent_owner: true`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`，写 `{kind:"node", id}` 或 `{kind:"node", alias}`）、`participants`（两种都行，同样可以按名字写；按名字写时只在任务所在的网络里找、存下来仍是 `{kind, id}`、给了 `id` 就只看 `id`；找不到为 400 `person_not_in_network`，别名对上多个 Agent 为 400 `person_ambiguous`，都带 `field` 和指向 `requirements_people` 的 `hint`）、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`、`tags`（字符串数组，最多 10 个、每个最多 20 个 Unicode 字；省略不改，`[]` 清空；不合法为 400 `invalid_tags`）。
+**字段**：`name`、`column`（pool / doing / done / abandoned。`abandoned` = 废弃，和 done 一样是关闭态：不算开着、不逾期、不发到期提醒、不记完成时间，可改回 pool / doing；列表响应 `capabilities` 含 `column_abandoned` 的 Hub 起支持，旧 Hub 返回 400 `invalid_column`。**旧客户端兼容**：REST 调用者没声明认识它时，响应里的 `abandoned` 投影成 `done`（desktop ≤ 0.2.220 会把不认识的状态当 pool），按 `status=done` 筛也带上废弃的卡，回传 `column: "done"` 不会把废弃改成完成；声明方式是请求头 `X-Anet-Accept-Columns: abandoned` 或查询参数 `accept_columns=abandoned`；MCP 总是拿真值。动态流水里记的是真值）、`priority`（high / normal / low / lowest，界面显示为 P0 最高 / P1 普通 / P2 低 / P3 极低；lowest 从列表响应 `capabilities` 含 `priority_lowest` 的 Hub 起支持，旧 Hub 返回 400 `invalid_priority`）、`due`（`YYYY-MM-DD` 全天，或带 `Z` / `±HH:MM` 的 ISO 时刻，存 UTC 到秒）、`start`（开始，可空，形状同 `due`，甘特图用；列表响应 `capabilities` 含 `start_date` 的 Hub 起支持，不合法为 400 `invalid_start`；旧 Hub 忽略它）、`description`（markdown，≤ 20000 字）、`checklist`（`[{id, text, done}]`，≤ 100 项；整张替换）、`owner`（负责人，只能 `{kind:"user"}`，写 `{kind:"user", id}` 或 `{kind:"user", username}`；兼容旧客户端：只带节点 `owner`、没带 `agent_owner` 时存成 `agent_owner`，响应带 `owner_coerced_to_agent_owner: true`）、`agent_owner`（负责 Agent，只能 `{kind:"node"}`，写 `{kind:"node", id}` 或 `{kind:"node", alias}`）、`participants`（两种都行，同样可以按名字写；按名字写时只在任务所在的网络里找、存下来仍是 `{kind, id}`、给了 `id` 就只看 `id`；找不到为 400 `person_not_in_network`，别名对上多个 Agent 为 400 `person_ambiguous`，都带 `field` 和指向 `requirements_people` 的 `hint`）、`project_id`、`parent_id`（子需求：同一网络、不能成环、最多 5 层；父卡返回 `children: {total, done}`；删父卡时子需求保留并变成顶层）、`external_ref`（同一网络唯一，如 `github:owner/repo#123`）、`external_url`（http(s) 链接）、`archived`、`tags`（字符串数组，最多 10 个、每个最多 20 个 Unicode 字；省略不改，`[]` 清空；不合法为 400 `invalid_tags`）。
 
 **短号 `seq`（任务 ID `#N`）**：每张任务除了主键 `id`（`req_<uuid>`）还有一个只读的 `seq` —— 每个网络各自从 1 起递增，App 显示为 `#N`。建卡时由 Hub 在同一个事务里分配（并发新建不会重号）；之后永不改变，**删除或归档的号也不回收**。升级前的旧卡在 Hub 启动时按 `created_at`（同一时刻按 `id`）逐网络补号。列表响应 `capabilities` 含 `requirement_seq` 的 Hub 起支持；旧 Hub 没有这个字段，旧 App 忽略它。
 
@@ -936,8 +987,9 @@ send_task({
 | POST | `/api/requirements/{id}/comments` | `{text}`（1–4000 字，首尾空白去掉）发一条评论，只追加；回 201 `{event}`（`kind: "comment"`，`new.text`）。空 → 400 `invalid_comment`，超长 → 400 `comment_too_long`；没有改 / 删评论的接口。评论和字段改动一样保留 180 天 |
 | DELETE | `/api/requirements/{id}` | 删除（只有人）；子需求保留并解挂 |
 | GET | `/api/requirements/projects` | 项目列表（建 / 改 / 删项目只有人） |
-| GET | `/api/requirements/tags` | 当前网络里出现过的标签（去重、排序，含归档任务上的）。节点令牌可以读。有 `tag_ops` 能力的 Hub 另带 `counts` / `colors` / `can_manage` |
+| GET | `/api/requirements/tags` | 当前网络里出现过的标签（去重、排序，含归档任务上的）。节点令牌可以读。有 `tag_ops` 能力的 Hub 另带 `counts` / `colors` / `can_manage`；有 `tag_tree` 能力的 Hub 另带 `nodes`（标签树，含 0 任务的标签，见 [任务标签](/guide/task-tags#创建标签与父子层级)） |
 | POST | `/api/requirements/tags/ops` | 标签整网改名 / 合并 / 删除 / 设颜色（只有人，scoped 成员 403），见 [任务标签](/guide/task-tags#管理标签) |
+| POST | `/api/requirements/tags/create` | 新建标签（可带 `parent_id`，最多 4 层）；重名 409 `tag_exists`、父不存在 404 `tag_parent_not_found`（不静默建到根），见 [任务标签](/guide/task-tags#创建标签与父子层级) |
 
 **同步示例（把 GitHub issue 同步成任务）**：对每个 issue 调一次 `requirements_upsert_by_external_ref`，`external_ref` 用 `github:<owner>/<repo>#<number>`、`external_url` 用 issue 链接；重复同步只会更新同一条，不会重复建。增量同步用 `requirements_list` 的 `updated_since`。
 

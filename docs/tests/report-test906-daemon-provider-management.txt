@@ -1,0 +1,288 @@
+#906 — daemon Provider persistence foundation (NOT end-to-end management)
+Observed: 2026-10-11T00:39Z / 08:39 Asia/Shanghai
+Base main: 050b7bc400cde1378b35e27fdc8daa6f17841ca8
+Branch: feat/906-daemon-provider-management
+
+Command (Docker only, non-root UID 10001 inside container):
+  sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile -t anet-provider-management:test906 . && docker run --rm anet-provider-management:test906'
+Base image: oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+Final local image manifest: sha256:8ac1278c600188f3223008a199c51150ede2391f04d59c719d0b074e85acf918
+
+Final results:
+  daemon-provider-store.test.ts: 17 pass / 0 fail / 60 expect calls
+  private-state.test.ts:          8 pass / 0 fail / 18 expect calls
+  Exit 0. Two separate suites, not a runtime/API/network E2E count.
+
+Verified:
+  private persisted API-key configuration and fresh instance readback;
+  Provider -> runtime -> auth -> model shape and unsupported combinations;
+  daemon AND network identity isolation (tested independently);
+  explicit revision conflict and write-lock refusal;
+  no secret in public response or parser errors, bounded input;
+  missing key retains existing key only for same endpoint;
+  endpoint change requires explicit key, no automatic credential forwarding;
+  chmod, symlink, hardlink, root symlink negative controls;
+  local CLI handler save/list/error route, NOT the complete compiled CLI binary.
+
+Earlier attempts retained as facts:
+  First Dockerfile had a malformed copied digest: build failed before tests.
+  Corrected to the existing repository's exact pinned Bun digest.
+  First execution: 10 pass / 1 fail; cross-scope fixture cp produced a nonprivate
+  destination directory, so the permission gate rejected before scope mismatch.
+  Corrected fixture permissions to reach the intended identity negative control;
+  did not relax filesystem checks. Then 15/15, followed by final 17/17 above.
+
+Additional Docker verification (2026-10-11T00:41Z):
+  Dockerfile.cli installs the checked-in npm lockfile with scripts disabled,
+  typechecks the two new production modules with strict tsc (not whole-repo tsc),
+  and bundles the actual agent-network/bin/cli.ts (319 modules).
+  Node 22.22.2, non-root, --network none: compiled CLI save/list in independent
+  processes, another daemon empty, stale revision rejected, malformed JSON
+  redacted. Both CLI build/run attempts exited 0; the second adds strict tsc.
+  Final CLI image manifest:
+  sha256:63a984fcea4f599f170cb323c9823ef90e91fe0620aa68038cc14ae60ff947b5
+  This is local CLI storage E2E, not account login/model invocation E2E.
+
+NOT verified / still required:
+  Whole-repository typecheck, remote Hub authorization/secret delivery,
+  client management UI, official ChatGPT login or switch, node binding and
+  actual model/provider requests, native package acceptance or public release.
+  ChatGPT metadata remains credential_present=false; no fake logged-in state.
+  Configured models/keys remain not_checked/not_applied; do not count as usable.
+
+Cleanup: test containers used --rm; fixture directories removed by afterEach.
+Only this task's two tagged test images remain. No real keys, local accounts, Hub
+state, daemon process, installed npm package or production configuration touched.
+Recovery questions and remaining gaps: docs/design/906-daemon-provider-management.md
+
+Increment: daemon-scoped remote readback (2026-10-11T00:52Z / 08:52 +08)
+Source: this change on 1d3f5bdd; later restack/retest reported separately.
+Docker only, --network none, non-root UID 10001; all identities/keys test-only.
+Command:
+  sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.transport -t anet-provider-management:test906-transport . && docker run --rm --network none anet-provider-management:test906-transport'
+Final pre-restack image manifest:
+  sha256:811916cfeb76f6408410d4e523313367c5a1f07e79df56a8030eaa818bca8595
+Build: checked-in lockfiles; full CLI (319 modules) and agent-node (398 modules)
+bundle. Native Node 22 reader invokes verified source-built anet shim -> real
+private store; save/read redaction and wrong-daemon rejection PASS.
+Hub/daemon tests: 11 pass / 0 fail / 68 expectations. Includes actual local HTTP
+MCP authentication -> daemon handler -> verified CLI -> scoped receipt, plus
+admin/member/anonymous/node/role-revoked controls, scope isolation, timeout,
+duplicate acknowledgements, nested secret/false-verification refusal, lost-ack
+retry and mirrored-contract drift. Live standalone daemon SSE not exercised;
+the actual CLI has both event and reconnect hookups, handler is exercised here.
+Existing full HTTP tool-audience regression: 12 pass / 0 fail / 304 expectations.
+  all 90 tools: 80087 B <= 80100;
+  node 61: 62556 B <= 63100;
+  user 59: 57270 B <= 57500.
+Ceilings unchanged. Consolidated refresh/read into one user tool and condensed
+related daemon/Provider descriptions without changing existing schemas/guards.
+
+Failed attempts (not omitted):
+  First integration harness lacked registerTool: stopped at first auth test;
+  replaced fake registration object with actual McpServer registration.
+  Next: 7 passed, then pinned CLI correctly refused group-writable test shim;
+  fixed Docker COPY permissions and parent dirs, did not relax bin guard.
+  Audience replay passed behavior checks but exceeded original byte ceilings
+  twice (user 58118, then 57714); consolidated/described tools more compactly.
+  After correction all original assertions, including byte limits, passed.
+Doc symbol check in Docker: 17 pins, 8 evaluated, 8 skipped, 1 unavailable
+historical ref, 0 drift. This is NOT full historical-pin coverage.
+QA-trigger check passed with 102 executed test dirs; remote independently fixed
+both trigger lists and the same dashboard pin. Preserve those remote changes.
+
+Still NOT complete: remote secret delivery/write, official account login/switch,
+client management page wiring, actual model invocation, installed native client
+acceptance or release. New protocol transports redacted configuration only.
+No production request/account/daemon/install changes. Test containers --rm,
+fixture dirs deleted, additional transport/guards images retained for diagnosis.
+
+Post-restack verification (2026-10-11T00:53Z):
+  Replayed only this increment onto remote 1582f31820d333e729b837eed85f885da399b111,
+  preserving the other writer's main catalog merge and CI/doc fixes (no force push).
+  Tested source: 59903598afc8896f7582bad8d576783637e81872.
+  Fresh transport image manifest:
+  sha256:3e93cec09a805cd4e1bf6078355c969ea810fff3ba10508cf9571308df09c188
+  Node 22 real reader PASS; Hub suite 11/0 (68 expects); HTTP compatibility
+  12/0 (304 expects); same byte totals and unchanged ceilings; exit 0.
+  Private storage regressions on current mounted source: 17/0 + 8/0.
+  Trigger guard: 102 CI-executed directories covered; doc pin coverage remains
+  explicitly partial as above. No runtime/secret/account application tested.
+
+2026-10-11 09:00 CST incremental core-write verification (user requested core only):
+  Built tests/test906-daemon-provider-management/Dockerfile.transport.
+  Ran ONLY test-name-pattern "write core chain" (11 old tests filtered, not rerun).
+  Result: 1 pass / 0 fail, 14 assertions, exit 0.
+  Source CLI + daemon handler: encrypted Hub request -> target private store ->
+  redacted receipt. Lost ACK replay keeps revision 1; stale revision cannot
+  overwrite. Member write and foreign-daemon read rejected; legacy/insecure
+  pull receives no encrypted-write payload. Secret absent from public receipt,
+  encrypted staging removed after acknowledgment. Fixture secret only.
+  Image manifest e9da34e1ef8ec5796aeca433332986f6b1cb8322f10a4cf756818a901e016420.
+  No actual model call, native client, official login or production deployment
+  covered by this result. Client form implementation proceeds independently.
+  Test container --rm; fixture directories removed; test image retained.
+
+2026-10-11 09:14 CST incremental existing-Codex inventory (core only):
+  Source increment on dedf167634fdca032be06d1dfadb242c1e56c801, before commit.
+  Added read-only CLI scan, local workdir/adoption lookup, Hub-bound identity
+  roster, key-free TOML/auth projection and optional installation version probe.
+  Dockerfile.transport image b8997b523ae188f89016a2f437cc9466de1cc45e77c7247d6f6e95b1adad0fcc.
+  Runtime source/tests mounted READ-ONLY for later incremental assertions;
+  real compiled CLI in the image includes the scanner. No host credentials/data.
+  Strict CLI/scanner TypeScript: PASS.
+  Core tests: 2 pass / 0 fail / 39 assertions; 11 unrelated tests filtered.
+  - actual Node CLI scans existing config without importing/writing;
+  - token/path/foreign neighbour absent from output, foreign network unavailable;
+  - keyring/env-key unknown != logout, symlinked auth unreadable;
+  - real HTTP user authentication -> Hub-bound daemon -> pinned CLI -> receipt;
+  - foreign-daemon node in ACK refused.
+  After adding version probe and exact roster ACK validation, only the affected
+  real HTTP test reran: 1 pass / 0 fail / 26 assertions, exit 0. Not counted as
+  an additional independent feature or a full suite run.
+  No model invocation, account switch, node restart, native install or release.
+  Existing unadopted Codex/process state/profile catalog remain explicit gaps.
+  Fixture directories cleaned, containers --rm, TEST-ONLY image retained.
+
+2026-10-11 09:40 CST: node configuration transaction core, NOT runtime integration.
+  Base 14a8ec2bd628ce98bc1e1778d531e39883a6307d plus working-tree increment.
+  Added private API-key lease and node scoped stop/write/activation/rollback core.
+  Docker image anet-provider:test906-apply-core manifest list:
+    a1aa2da4b453e638831af830bca013efd38d18ba618d5f6193b6e9a1b1f26970
+  Command: sg docker -c 'docker run --rm --network none anet-provider:test906-apply-core'
+  Layers: store 17/17; private filesystem 8/8; new transaction 5/5 (42 assertions).
+  Actual private fixture files exercised; lifecycle is INJECTED, NOT real Codex:
+    exact selection + login file unchanged + secret absent from receipt;
+    wrong-model activation restores exact prior bytes;
+    wrong identity/revision/model stops before mutation;
+    uncertain stop retains recovery journal and refuses replay;
+    external edit prevents unsafe rollback overwrite.
+  This does NOT prove node application, model request, official account switch,
+  native package acceptance, merge or release. No CLI/Hub application is wired.
+  Containers --rm; test-owned directories cleaned by afterEach; image retained.
+
+2026-10-11 09:44 CST: real installed Codex provider resume contract.
+  Added codexModelProvider to managed node config, both launchers pass it to
+  thread/resume; exact returned provider/model mismatch now fails the selected
+  provider path. Old nodes without the field retain existing recovery behavior.
+  Source/docs: https://learn.chatgpt.com/docs/app-server (configuration override
+  and config/read is on-disk effective config, not inference entitlement).
+  Actual pinned Codex 0.159.2 generated ThreadResumeParams/Response schemas
+  confirm modelProvider and model fields. One exploratory schema command also
+  tried a nonexistent standalone Thread.json and exited 1; no test assertion
+  relaxed. Contract probe below passed against actual binary responses.
+  Native contract image manifest list:
+    6e39c74bd36ff8242042f6c5fa8b4d5dbc5c962aea43c2c86bf8ef4e2574f9a6
+  Ran Docker --rm --network none with current agent-network/src and test906 dir
+  read-only mounted into /work. Native Codex creates one thread, completes a
+  local synthetic Responses turn, restarts, resumes through the production
+  helper, then completes a second synthetic turn. Exact endpoint, API-key and
+  model of both requests checked; modified wrong-provider receipt refused.
+  Result PASS; two synthetic turns, zero external inference/account usage.
+  Core replay on current source: transaction 7/7 (48 assertions), including
+  launch metadata changes and lost ACK idempotency; RPC regressions 8/8.
+  CLI bundling PASS; full CLI TypeScript PASS. No Hub-to-daemon application,
+  lifecycle wrapper, native client, official login, merge or release claimed.
+  All spawned fixture Codex children stopped, fixture dirs removed, containers
+  --rm. TEST-ONLY images retained; no production daemon or global package changed.
+
+2026-10-11 09:51 CST: application protocol and scan CAS, not lifecycle completion.
+  Base 52632a394abc414daa817e74d1847a9e460d9933 plus working tree.
+  Docker test-only image b8997b523ae188f89016a2f437cc9466de1cc45e77c7247d6f6e95b1adad0fcc,
+  current source read-only mounted; CLI rebuilt INSIDE disposable container.
+  --network none; no host credentials or production state mounted.
+  Inventory + Hub transport: 15/15 PASS, 126 assertions (4.07 seconds).
+  New protocol test uses a fixture application receipt, not a real restart.
+  Covers confirmation/secret-shape rejection, binding, old-daemon capability
+  isolation, exact receipt, lost ACK evidence retention and reassignment refusal.
+  Deterministic runtime-provider receipt guard added afterward: affected protocol
+  test alone rerun, 1/1 PASS, 19 assertions; not counted as a second full suite.
+  Audience regression 12/12 PASS, 304 assertions; bytes all80432/node62556/user57444.
+  Existing ceiling values unchanged in this increment.
+  Full server TypeScript check FAILED (not claimed clean): errors across several
+  files, plus a new flatMap inference error here. Fixed the new union inference;
+  repeated compiler output contains no daemon-provider/codex-inventory/provider-
+  application diagnostics. Filtered absence is NOT a clean full compiler result.
+  One initial compiler invocation used absent server-local tsc (exit127); corrected
+  to the existing agent-network compiler inside the same isolated image.
+  Containers --rm, private fixtures removed by tests; no native package/release.
+
+2026-10-11 10:00 CST: CLI lifecycle and daemon application wiring (TEST-ONLY).
+  Base 0ea460ebf7b15e1b266a8ff728c60e91a57d8345 plus this working tree.
+  Core Docker --rm --network none, current src readonly-mounted:
+    transaction + command + login gate 12/12 PASS, 105 assertions.
+  Command test uses real local HTTP MCP preflight and private files, but injects
+  lifecycle subprocess outputs; NOT native-process acceptance. Covers one-node
+  argv, no host-login inheritance, exact model/provider readback, busy refusal,
+  lost ACK no restart, explicit original-provider restoration on wrong model.
+  Custom env_key gate checks selected credential presence without returning it;
+  a key merely being present does not establish authentication or inference.
+  Cached transport image, rebuilt current CLI and agent-node inside container:
+    CLI bundle PASS, full CLI TypeScript PASS, agent-node build PASS.
+    Hub transport 13/13 PASS, 108 assertions; existing real HTTP private-store
+    write path remains intact. Application receipt in that test is synthetic.
+  Test command also named a nonexistent node test path; Bun ran the one existing
+  server test file only. No separate node test-suite pass is claimed.
+  Real full application lifecycle with native Codex remains pending; not merged
+  or released. Existing full server TypeScript failure above remains open.
+  Containers --rm, fixtures cleaned by tests, test-only images retained.
+  No real credentials, global install, production daemon or production DB used.
+
+2026-10-11 10:14 CST: native single-node application core PASS (TEST-ONLY).
+  Base 6747be72ce0ae1b7e1bc80241d8d154b62205199 plus this working tree.
+  Docker native image manifest list:
+    cbb056c51d66ea4c4025e59da8b79c65d3f17ca5d6d25bf21f94ac0603e9a876
+  Final run readonly-mounted native-application.ts from this tree (adds the new
+  WebSocket client's thread/resume subscription; no model/provider override).
+  --init --rm --network none, non-root uid10001; synthetic credentials only.
+  Actual Hub HTTP -> production Node reconciliation -> compiled CLI -> real
+  identity-scoped stop/start/verify -> native Codex 0.159.2 same thread -> selected
+  HTTPS Responses endpoint/key/model. Exactly two synthetic model turns (old,
+  then new); second turn has no model override. Application receipt succeeded,
+  native verification PASS, no auth.json copied/created, no journal left.
+  Test-only npx shim resolves the exact source-built agent-node package; no CLI,
+  Hub, lifecycle, Codex or daemon handler process response is mocked.
+  Client UI evidence remains the earlier separate browser fixture, not an actual
+  browser-to-native combined run or a native installer acceptance.
+
+  Failures found and corrected, not hidden:
+  - First fixture lacked bunx, then agent-node dependency resolution; corrected
+    image packaging without changing product launch guards.
+  - Detached child PID remained under Bun as PID1; use Docker --init for normal
+    reaping. Stop guard was NOT relaxed. One --rm run's terminal output was lost;
+    no pass/fail claimed for that unobserved run. Observed rerun progressed.
+  - Actual verify rejected custom env_key without auth.json (home_isolated).
+    Fixed by attesting selected env_key in both owned native processes; token,
+    home and existing auth-file permission guards remain. Failure restored old
+    config but verification failed again, so journal was correctly retained.
+  - After that fix application succeeded but the fixture's new WS client had not
+    subscribed to thread notifications; turn completion observation timed out.
+    Explicit thread/resume without selection overrides fixed the fixture.
+  - Earlier CI doc-symbol-pins had two drifted CLI anchors; updated exact lines.
+    doc source-pin floor L8 lacked three English MCP entries; completed index.
+
+  Narrow validation only:
+    login gate + lifecycle facts/preflight: 34/34 PASS, 139 assertions.
+    full CLI TypeScript: PASS in Docker.
+    MCP index: 90/90 entries in both languages, PASS.
+    symbol pins: 0 drift, 8 checked, 8 skipped, 1 immutable ref unavailable in
+      readonly worktree mount; not a complete immutable-ref verification.
+    QA trigger coverage: PASS, all 102 CI-executed dirs retriggerable.
+  No new broad suite. Earlier full server TypeScript limitation still applies.
+  Final native test exit0 after owned CLI stop and temp state cleanup. Containers
+  removed; one retained failed observation container was inspected exited1 then
+  removed. TEST-ONLY images retained. No production/global packages touched.
+  Not merged, publicly released or installed on the user's daemon yet.
+
+2026-10-11 10:18-10:19 CST: release-pair preparation (not publication).
+  Base 968d613763e36cd4f03cfc496d26e36666b80f1e plus version-only preparation:
+  CLI .163, runtime .129, Hub .121; package locks, exact runtime pair and the
+  test-only resolver shim agree. Existing published Hub startup floor unchanged
+  to avoid pointing the release installation gate at an unpublished dependency.
+  Docker --rm --network none, readonly source/manifest mounts over the retained
+  native test image; no native business sample rerun:
+    package consistency (all three packages) + exact runtime pair = 12/12 PASS,
+    29 assertions, exit0. Container removed; no production or global changes.
+  Added candidate install/upgrade/rollback notes. Client sidecar update must wait
+  for Hub .121's actual published integrity; do not fabricate a lock or package.
+  Main merge, release gates, package publication and client delivery remain pending.

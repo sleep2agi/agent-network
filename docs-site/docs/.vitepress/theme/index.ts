@@ -1,6 +1,7 @@
 import DefaultTheme from 'vitepress/theme'
 import Layout from './Layout.vue'
 import PublicSkillHub from './PublicSkillHub.vue'
+import DownloadCatalog from './components/DownloadCatalog.vue'
 import './custom.css'
 
 export default {
@@ -8,5 +9,6 @@ export default {
   Layout,
   enhanceApp({ app }) {
     app.component('PublicSkillHub', PublicSkillHub)
+    app.component('DownloadCatalog', DownloadCatalog)
   },
 }

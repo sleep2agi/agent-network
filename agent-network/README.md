@@ -21,7 +21,7 @@ Stable releases use npm's `latest` tag. Features that are still being validated 
 anet upgrade --channel preview
 ```
 
-Do not copy fixed package or preview numbers from old issues. Check the [versioning guide](https://anet.sh/guide/versioning) and npm dist-tags for the current release.
+Do not copy fixed package or preview numbers from old issues. Check the [upgrade guide](https://anet.sh/guide/upgrade) and npm dist-tags for the current release.
 
 ## Quick start
 
@@ -49,7 +49,7 @@ The node is ready after its log reports `SSE connected`. Open `http://localhost:
 - Claude Code, Claude Agent SDK, Codex SDK, and Grok Build ACP are the published task-runtime paths.
 - Codex TUI co-presence is preview-only and must be started and recovered with `--copresence`; see the [co-presence guide](https://anet.sh/guide/codex-copresence).
 - OpenCode support is preview-only. Its automatic `npx` fallback is intentionally disabled, so install the documented CLI explicitly.
-- Neither npm `latest` nor `preview` includes a shared Grok TUI. Use `grok-build-acp` for published Grok nodes and follow the [Grok TUI status page](https://anet.sh/guide/grok-copresence).
+- Neither npm `latest` nor `preview` includes a shared Grok TUI. Use `grok-build-acp` for published Grok nodes and follow the [Grok nodes guide](https://anet.sh/guide/grok).
 
 Development branches may contain source-only runtime experiments. They are not supported installation paths until they appear in an npm dist-tag and the runtime guide.
 
@@ -71,7 +71,7 @@ The default Hub is local-only. Before exposing it beyond localhost, change the i
 - [Getting started](https://anet.sh/guide/getting-started)
 - [CLI reference](https://anet.sh/guide/cli)
 - [Runtime guide](https://anet.sh/guide/runtimes)
-- [Tokens and permissions](https://anet.sh/concepts/tokens)
+- [Tokens and permissions](https://anet.sh/concepts/security)
 - [Troubleshooting](https://anet.sh/troubleshooting)
 - [GitHub repository](https://github.com/sleep2agi/agent-network)
 

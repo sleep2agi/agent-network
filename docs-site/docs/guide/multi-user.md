@@ -10,6 +10,12 @@ Hub 0.9.0-preview.68 起，服务器提供两样已经生效的能力：成员�
 
 授权由该网络的 owner / admin，或 Hub 管理员，通过接口整体替换。授权表示能看见、能对话，不是能改这个 Agent 的配置、规则或日志。能看见一个 Agent，就能看到它完整的聊天记录：不同的人打开同一个节点，看到的消息是一样的——包括 owner 和其他成员发给它的消息，以及授权之前的历史。判定和字段见 [用户与 Agent 权限端点](/api/rest-admin#用户与-agent-权限端点)。
 
+## 成员能看哪些任务
+
+新加入的 member / viewer，任务范围（`task_access`）默认是 `scoped`，也就是「只看相关任务」：自己负责的、参与的、自己建的卡，加上授权给他的项目里的卡（viewer 只看授权项目）。管理员建号、`POST /api/networks/{id}/members`、邀请码加入都按这个默认值入库。升级到这一版之前就在网络里的成员仍是 `all`，可见范围不因升级改变。owner、admin 和 Hub 管理员不受这道限制；新加的 admin 照旧存 `all`。
+
+要让某个成员看全部任务，由 owner / admin 或 Hub 管理员调用 `PUT /api/networks/{id}/members/{user_id}/task-grants`，传 `{"task_access": "all"}`；传 `project_grants` 则整体替换他的项目授权。加成员时也可以直接在 `POST /api/networks/{id}/members` 里带 `"task_access": "all"`。
+
 ## 人与人私聊
 
 同一网络里的两个用户可以用这些接口互发私聊，只接受用户令牌：
@@ -52,7 +58,7 @@ Hub 0.9.0-preview.91 起生效；app 从 0.2.196 起有「管理本部门」入�
 | 接口 | 说明 |
 |---|---|
 | `GET /api/auth/me` | `networks[].managed_department_ids`：本部门的部门 id（含下级），空数组表示不是负责人 |
-| `GET /api/networks/{id}/departments` | 每个部门多一个 `viewer_can: {manage, create_child}`；owner / admin 另外拿到 `project_grants` |
+| `GET /api/networks/{id}/departments` | 每个部门多一个 `viewer_can: {manage, create_child}`；owner / admin 另外拿到 `project_grants`。**两个部门轴分开给**：`member_count` 是直属人数（人轴，`network_members.department_id`），`agent_count` 是显式归属这个部门的 Agent 数（Agent 轴，`nodes.department_id`，同 alias 只算一次、保留 `updated_at` 最新的一行）；`agents_unassigned` 是没有显式部门的 Agent 数。不按「负责人在哪个部门」推断 Agent 归属（#1976 / #2822） |
 | `POST / PATCH / DELETE /api/networks/{id}/departments[/{dept}]`、`PUT /api/networks/{id}/members/{uid}/department` | owner / admin，或在本部门范围内的负责人 |
 | `GET / PUT /api/networks/{id}/departments/{dept}/project-grants` | 部门项目授权，`PUT` 整体替换 `{project_grants: [{project_id, can_edit}]}`。只给 owner / admin；有一条项目不属于本网络，整批不写，返回 400 |
 | `GET /api/networks/{id}/departments/{dept}/nodes` | 本部门（含下级）成员拥有的节点：别名、状态、健康、主人，只读。负责人或 owner / admin 可用 |
@@ -96,15 +102,137 @@ PUT /api/nodes/{node_id}/permission-mode   {"mode": "normal" | "readonly" | "res
 {"ok": false, "error": "node_permission_denied", "reason": "mode_readonly", "route": "PATCH /api/requirements/:id", "hint": "…"}
 ```
 
+### 节点级白名单：只能联系谁、只能用哪些工具
+
+`readonly` / `restricted` 是**粗粒度**模式。要更细，用两张白名单——它们都是**主人设的**，设了就立刻生效，与 `COMMHUB_NODE_PERMISSIONS` 无关（原因码 `peer_not_allowed` / `tool_not_allowed` 属于显式原因）。
+
+```
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": ["alice", "n_xxx"]}   // alias 或 node_id
+PUT /api/nodes/{node_id}/peer-allowlist   {"peers": null}                  // 清空
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": ["send_task", "requirements_comment"]}
+PUT /api/nodes/{node_id}/tool-allowlist   {"tools": null}                  // 清空
+```
+
+**清空只能传 `null`。空数组 `[]` 会被拒（400 `empty_allowlist_ambiguous`）** —— 因为它是歧义的：
+有人读成「不限制」，有人读成「一个都不许」。曾经真的出现过这种分歧：客户端把 `[]` 显示成
+「不允许任何工具」，而 Hub 把 `[]` 规范化成 `null` 也就是全放开 —— 界面说收紧了，系统其实放开了。
+与其猜，不如拒收；`GET /api/nodes` 读回来只会是 `null` 或非空数组，永远不会是 `[]`。
+
+授权口径与 `permission-mode` 相同（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员），分别记审计 `node_peer_allowlist_changed` / `node_tool_allowlist_changed`。
+
+| 白名单 | 管什么 | 判在哪 |
+|---|---|---|
+| `peers` | `send_task` / `send_message` / `retry_task` / `reassign_task` / `cancel_task` 的**目标**必须在名单里；发给自己的 alias / node_id 永远允许 | `dispatchVerdict` |
+| `peers`（另一条） | 设了 `peers` 的节点**不能广播**——广播的收件人是任意对端，与白名单语义直接冲突 | `broadcastVerdict` |
+| `tools` | MCP 工具名；名单外返回 `tool_not_allowed` | MCP 工具包装层 |
+
+**两条不能省的性质**：
+
+1. **`always` 类工具永远放行**（`get_inbox` / `ack_inbox` / `send_reply` / `report_status` 等）。挡掉它们，节点既不能干活、也不能报告自己干不了——会变成比「没受限」更隐蔽的假活节点。
+2. **默认 `NULL` = 不限制**。两张白名单为空时，行为与没有这两个字段完全一致。
+
+> 目前 `tools` 只覆盖 MCP 工具；REST 路由的白名单尚未提供。
+
 **报表**：网络 owner / admin（用户令牌）可以看过去一段时间每个节点「本来会被拦」的次数，默认 7 天：
 
 ```
 GET /api/networks/{id}/node-permission-report?since=<ISO 时间>
 ```
 
-返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}]}]}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
+返回 `{ok, network_id, since, mode, total, nodes: [{node_id, alias, permission_mode, total, by_reason, routes: [{route, reason, hits, sample, last_hour}], tool_calls: [{tool, hits}], tool_calls_total}], tool_calls: {total, by_tool: [{tool, hits}]}}`。`mode` 是当前开关。记录保留 30 天，最多 20000 行；满了以后只给已有的行加次数。
+
+`total` 与 `nodes[]` 只数「本来会被拦」的次数；`tool_calls` 是**分母**：受限工具实际被调用了多少次（按小时合并）。两套数字分表存储，放行的调用不会进拒绝统计。没有分母时「0 次拦截」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
 
 设计和取舍见 RFC-041。
+
+**`enforce_impact` —— 切 enforce 到底会影响多少**（`#2970` 演练发现的口径问题）：
+
+`node_permission_log` 的行数是「本层本来会拒」，**不等于**「打开 enforce 后行为会变」。演练实测：`projects_create` 在 log 模式下已被处理函数自己的「只有人能操作」检查拒掉（`user_token_required`），却仍记了一行 `human_only`。所以报表把原因码分三层：
+
+| 层 | 含义 | 打开 enforce 会变吗 |
+|---|---|---|
+| `explicit` | `mode_readonly` / `mode_restricted_not_assigned` / `peer_not_allowed` / `tool_not_allowed` / `rest_not_allowed` | **不会**——这些与开关无关，永远拒 |
+| `likely_already_blocked` | `human_only` | 多数写路由另有一道「只有人能操作」的检查，调用方本来就被拒 ⇒ 通常不是增量 |
+| `changes_behavior` | `beyond_owner_visibility` / `agent_not_granted_to_owner` / `owner_unknown` / `unbound_token` | **会**——这才是真实影响面 |
+
+估算影响时看 `enforce_impact.changes_behavior`，不要看 `total`。
+
+`nodes[]` 里如果出现 `unbound_token: true`，那一项是**未绑定节点的令牌**（`node_id` 形如 `token:<token_id>`），同项还带 `unbound_token_name`（令牌名，通常形如 `node:<alias>`）。账本沿用老路径按令牌记账，而这类令牌没有 `nodes` 行 —— 所以**两张白名单都管不到它们**。报表把它们标出来，是为了不让管理员以为「名单之外没有别人在派活」；这类令牌的**写类调用**（派活 / 广播 / 建项目 …）会记一条 `unbound_token` 到权限报表：默认 `log` 模式只记录不拦，切到 `enforce` 才会拒。这就是「要不要强制要求绑定令牌」的判断依据 —— 先看有多少，再决定。**最常见的原因是节点改过名而令牌没改**——令牌名里的 alias 在 `nodes` 表里已经查不到，于是解析成「未注册」。处理方式是把令牌改名到当前 alias，或把它绑定到节点。
+
+**按节点的明细（`nodes[].tool_calls`）**：设「只能用哪些工具」之前先看这台节点**实际用过哪些**，否则白名单只能凭想象写，第一次上线就拦掉在用的东西。它在两处比网络级合计更有用：① 一台从不越界但天天在用的节点，过去只从「被拒过的行」聚合，在报表里根本不存在，而它恰恰最该出现在名单里；② `nodes[]` 按 `tool_calls_total` 降序，用得最多的排最前。
+
+### REST 写接口白名单：只允许这些写路由
+
+节点令牌除了 MCP 工具，还能直接打 REST 写接口（派活、广播、改需求、改节点属性…）。
+`tool_allowlist` 管不到这一面，所以另有 `rest_allowlist`：
+
+```
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": ["POST /api/task", "PATCH /api/requirements/:id"]}
+PUT /api/nodes/{node_id}/rest-allowlist  {"routes": null}     // 清空 = 不限制
+```
+
+`GET /api/nodes` 的每行带 `rest_allowlist`（`null` = 不限制）。清空只能传 `null`，`[]` 会被拒。
+
+**判定发生在请求入口的唯一 choke point**，因为节点令牌的 REST 写面分散在两套既有判据里
+（`server.ts` 的 `restNodeDenied` 与 `requirements.ts` 的 `nodeTaskGate`）。逐路由各加一次会形成
+第三套规则，而且漏掉任一处就是「装了一半的安全开关」——那比没有更危险。
+
+三条边界：
+
+| 边界 | 说明 |
+|---|---|
+| 只对**节点令牌** | 用户令牌 / daemon 令牌不受影响 |
+| 只对**写方法** | `GET` / `HEAD` / `SSE` 永不经过它——挡掉 SSE，节点会变聋（收不到派活），表现为静默失联而不是报错 |
+| 只在**设置时**生效 | 默认 `NULL` = 不限制，与 MCP 工具白名单同构 |
+
+拒绝时返回 `node_permission_denied` / `reason=rest_not_allowed`，正文里的 `route` 是**实际算出的标签**，
+照着加进清单即可。标签是归一化的（`/api/nodes/n_abc123/attrs` → `PUT /api/nodes/:id/attrs`），
+所以换一台节点不用改清单。
+
+节点目前能被拦到的 REST 写路由一共 9 条（另有 2 条 SSE 不在写方法内）：
+
+```
+POST   /api/task
+POST   /api/broadcast
+DELETE /api/nodes/:id
+PUT    /api/nodes/:id/attrs
+PUT    /api/nodes/:id/avatar
+POST   /api/requirements
+POST   /api/requirements/:id/comments
+PATCH  /api/requirements/:id
+PATCH  /api/requirements/:id/checklist/:id
+```
+
+### 密钥传输闸门（管理员开关）
+
+把密钥从 Hub 转发给节点，走明文公网等于裸奔。闸门按节点**最近一次上报**的 `env_transport` 判，只看 `put`（`list` / `delete` 不带密钥）：
+
+| 节点上报的 transport | 判定 |
+|---|---|
+| `loopback` / `https` | 放行 |
+| `plain` | 拒，`secret_transport_plain` |
+| 未上报（`NULL`） | **默认放行**；显式打开 strict 才拒，`secret_transport_unknown` |
+
+```
+ANET_SECRET_TRANSPORT_GATE=off | log | enforce     # 默认 log：只记不拒
+ANET_SECRET_TRANSPORT_GATE_STRICT=1                # 默认关：连「未上报」一起拒
+```
+
+**为什么「未上报」默认放行**：2026-10-29 生产只读统计，373 个会话里 332 个（89%）从未上报过 transport。把「未知即拒」设成默认，等于打开 `enforce` 当天拦掉近九成节点 —— 那不是收紧，是一次不在计划内的下线。
+
+两个原因码要分开看：`secret_transport_plain` 要去查那台机器的网络链路；`secret_transport_unknown` 要做的是**让节点上报**。不同的人在不同的机器上做。
+
+`log` 模式记在 `GET /api/networks/{id}/env-transport-log`（网络 owner / admin），按小时聚合，回答的是「如果现在打开 enforce，哪几笔会被拒、原因是什么」。
+
+## Agent 团队
+
+Agent（节点）有自己的一棵组织树「Agent 团队」，和人的部门树互不相关。团队可以多层，同一上级下不重名；一个 Agent 最多归一个团队，不归就是「未分配」。团队只用于组织 Agent，不给任何人新权限：谁能看、能对话哪个 Agent，仍按 Agent 授权。
+
+- 读：`GET /api/networks/{id}/agent-teams` 返回整棵树，每个团队带 `members`（`node_id`、`alias`、`display_name`）、`lead`（负责的 Agent）和 `owner`（`user_id` 和显示名）。网络成员和本网络的节点令牌都能读；只看授权 Agent 的成员只看到授权给他的那些。
+- 建、改、删：`POST /api/networks/{id}/agent-teams` `{name, parent_id?}`；`PATCH …/agent-teams/{team_id}` `{name?, parent_id?, sort?, lead_node_id?, owner_user_id?}`（不能挂到自己或下级下面；`lead_node_id` 必须是本网络的节点，`owner_user_id` 必须是本网络成员）；`DELETE …/agent-teams/{team_id}` 只能删没有子团队的团队，里面的 Agent 变回未分配。
+- 归团队：`PUT /api/networks/{id}/nodes/{node_id}/agent-team` `{"team_id": "<团队 id>"}`，传 `null` 表示未分配。
+- 谁能改：owner / admin 全部；团队的 owner 管这个团队的子树（改名、建子团队、在子树里移动、把 Agent 放进或移出子树、设 lead），但不能改自己那个团队的 owner，也不能把它移出去或删掉。其他成员和节点令牌只读，写返回 403 `agent_team_scope_denied`。
+- 删除节点时，它的团队归属一起清掉，以它为 lead 的团队 lead 变成空。
 
 ## 相关
 

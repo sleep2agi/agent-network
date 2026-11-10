@@ -132,28 +132,105 @@ The start output names the value and its source, e.g. `[anet] model: o3 (source:
 
 When the thread was recorded on a different model, **the configured model wins**: measured on codex 0.155, a `thread/resume` without `model` puts the thread back on the model in the rollout's last `turn_context` and ignores the app-server's `-c model=`, and once the first client has loaded the thread a later TUI `resume -m` does not change it. So anet sends the configured model on that first `thread/resume` (#512).
 
-### Check the TUI for a pending approval before the first dispatch
+### commhub tool approval prompts: pre-approved by anet (#720) {#commhub-tool-approval}
 
-::: danger The node can look completely healthy while doing nothing
-Once a TUI attaches, MCP tool calls become interactive. With nobody watching the pane, the node stalls forever on:
+The first time Codex runs each MCP tool it asks:
 
 ```
 Allow the commhub MCP server to run tool "get_task"?
 › 1. Allow   2. Allow for this session   3. Always allow   4. Cancel
 ```
 
-**Every signal the hub exposes still reads healthy**: `status=idle`, SSE connected, `last_seen_at` ticking. A dispatcher sees nothing wrong and assumes the node is simply free.
+On an unattended node nobody answers, the turn blocks and the Hub eventually times the task out, while every hub signal still reads healthy (`status=idle`, SSE connected).
+The prompt is **not governed by `approval_policy` alone**: measured with the co-presence default (read-only + on-request), codex 0.133.0 and 0.159.2 both prompt;
+with never + read-only, 0.133.0 still prompts and 0.159.2 silently declines the call. "Always allow" does not survive a restart either, because anet passes commhub with `-c` at launch, not in config.toml.
 
-**The only way to detect it** (no hub field reveals this):
+**Now** every codex launch anet makes for a node (POSIX / Windows co-presence app-server, agent-node's owned app-server, codex-sdk) carries
+
+```
+-c mcp_servers.commhub.default_tools_approval_mode="approve"
+```
+
+It applies to commhub only; other MCP servers keep Codex's default behaviour. Supported by codex 0.133.0 (values `auto|prompt|approve`) and 0.159.2 (`auto|prompt|writes|approve`);
+measured in `tests/test720-codex-commhub-tool-approval`.
+
+How it interacts with your own `CODEX_HOME/config.toml` (measured by the same suite):
+
+- anet's `-c` **overrides** the `url` and `default_tools_approval_mode` you set under `[mcp_servers.commhub]`.
+- A per-tool `[mcp_servers.commhub.tools.<tool>] approval_mode = "prompt"` you wrote **still wins** for that tool. That per-tool switch is kept on purpose.
+- Per-tool `approval_mode = "approve"` sub-tables that Codex wrote ("Always allow") are unaffected.
+- The external-app-server lane (fixed `codexAppServerUrl`, commhub from your own config.toml) does **not** inject the key, because injecting a lone key for an undefined server makes codex refuse to start with `invalid transport`.
+  Add `default_tools_approval_mode = "approve"` under your own `[mcp_servers.commhub]`.
+
+Nodes started by an older anet can still stall here. To check:
 
 ```bash
 tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 ```
 
-**Fix**: choose `3. Always allow` — the commhub tools are what the node needs to function — or start the app-server with `-c approval_policy=never` so the prompt never appears.
+### One codex version per thread (#734) {#one-codex-version-per-thread}
 
-Measured 2026-07-31: reproduced on a freshly created TUI; pre-existing co-presence nodes on the same host were unaffected because their app-servers were started with `approval_policy=never`. **This is a new-TUI hazard, not a latent fleet problem.**
-:::
+codex ≥ 0.145 writes sessions in "paginated" form: the first rollout line has `payload.history_mode` = `"paginated"`, and every line carries an `ordinal`.
+If a codex **older than 0.145** (for example 0.133 pulled by `npx`) later continues that thread, the lines it appends have no `ordinal`,
+and from then on newer codex refuses to resume the thread, permanently:
+
+```
+final paginated rollout record at <path> is missing an ordinal
+```
+
+So **never mix codex versions on one thread**. anet now checks before starting (co-presence launchers on POSIX and Windows, external app-server nodes, agent-node's own app-server and codex-sdk):
+
+- It finds the rollout the way codex does (newest in `sessions/`, `archived_sessions/` only if none) and reads only its **first line** (bounded: a file of hundreds of MB costs tens of KB).
+- It runs `codex --version` and trusts only a `codex-cli x.y.z` line (a wrapper's own version line does not count; no match = unknown). The version probe runs through the exact shell preamble of the launch (`bash -lc` login shell for co-presence; the workspace `.env` sourced first for external app-server nodes), so the binary checked is the binary started. The launch command itself is unchanged.
+- Paginated thread + codex < 0.145: **refuse to start**. Nothing is started, the rollout is not touched, and the message says how to point the node at a newer codex:
+  `anet node start <node> --codex-bin /path/to/codex` (co-presence nodes), or `codexBin` in config.json / `ANET_CODEX_BIN` (codex-sdk nodes), or make the first `codex` on PATH ≥ 0.145.
+- Rollout not found, first line unreadable, version unknown: warn only, start as before.
+
+A thread that is already mixed: on resume anet explains the cause, says the original file is untouched, and stays fail-closed (no silent fresh thread).
+There are only two safe ways out: fork recovery (next section), or, after a human decides the history can be left behind, `anet node start <node> --new-session`. Do not edit or delete the rollout. Read-only check:
+
+```bash
+head -n 1 <rollout> | grep -o '"history_mode":"[a-z]*"'   # paginated = written by codex >= 0.145
+tail -n 1 <rollout> | grep -c '"ordinal"'                   # 0 = an older codex appended to it
+```
+
+### Recovering a node whose thread can't be resumed (#738) {#fork-on-resume-failure}
+
+Fork the thread with codex ≥ 0.145 into a **new thread** with the same history and start the node on it:
+
+```bash
+anet node start <node> --fork-on-resume-failure          # asks [y/N]; forks only on y
+anet node start <node> --fork-on-resume-failure --yes    # no terminal (scripts / CI): --yes is required too
+```
+
+- It forks only when resume fails with exactly the `missing an ordinal` error. Any other resume failure stays fail-closed, no fork. Without the flag nothing changes.
+- Not confirmed (any answer but y, or non-interactive without `--yes`): no fork, no file is touched.
+- Before forking, the original rollout is **copied** to a read-only snapshot in `<node dir>/rollout-snapshots/`. The original is never modified (its hash is compared again after the fork; if it changed, the node is not switched).
+- Old thread → new thread, the snapshot path and the time are recorded in `<node dir>/codex-fork-recovery.json`, next to config.json. The thread recorded in config changes only after the fork succeeds.
+- If existing mapping history cannot be read, contains invalid JSON, or lacks a `forks` array, confirmed recovery stops before taking a snapshot or forking, preserving the file and reporting its path. Back up the current state, check permissions or restore valid history from backup, then retry; do not delete history to bypass the check. A first recovery with no history file still creates it normally.
+- 🔴 The new thread still reads its history from the **original rollout file**: keep it, do not move or delete it.
+- Currently covers `anet node start` of co-presence nodes only.
+
+#### Start-request correlation (#821, source capability, not released)
+
+A single-node start optionally accepts `--fork-recovery-request-id str_0123456789ab`. After a confirmed fork succeeds, only the new mapping gains `requestId`; existing records are preserved. Omitting it keeps the legacy format. It cannot be combined with `--all`. The ID identifies a Hub-generated start request; the CLI does not verify ownership or authorization. It replaces neither `--fork-on-resume-failure` nor `--yes`/interactive confirmation, and provides no idempotency or deduplication.
+
+A mapping means **the fork happened**, not that startup completed: it remains if subsequent bridge/TUI startup fails. Consumers must match the exact `requestId`, never infer the current result from the latest record or timestamp. No matching record does not prove absence of side effects. Hub→daemon argument forwarding and the client button are not connected yet.
+
+No services, ports, environment variables or secrets are added. Backups must still include the node's mapping, snapshots, configuration and original rollout; Git does not contain this runtime data. Use the existing version-switch procedure for software rollback; older code ignores the optional `requestId` and preserves history. Rollback does not undo a fork. Verify correlation against the old/new threads for the exact request ID; verify startup status separately.
+
+### Pin a node to one codex (#739) {#codex-bin-pin}
+
+So that one machine with several codex versions never mixes them on a thread, pin each co-presence node in its `config.json`:
+
+```json
+{ "codexBin": "/opt/codex-0.159.2/bin/codex", "codexVersion": "0.159.2" }
+```
+
+- `codexBin` (absolute path): the binary the launch **and** the #734 version check use, whatever comes first on PATH. A one-off `--codex-bin` still wins.
+- `codexVersion`: at start anet runs `<codexBin> --version` (the same way it checks for #734). If it is not exactly this version, or cannot be read, the start is refused before anything is started: `expected 0.159.2, got 0.133.0, path …`.
+- Neither set: bare `codex` from PATH, as before. `anet info <node>` shows both when set.
+- Currently covers `anet node start` of co-presence nodes only (not external app-server nodes). anet never installs codex.
 
 ## Layered health, degraded refusal and self-healing {#health}
 
@@ -522,3 +599,4 @@ Only one turn can be active in a thread; later network tasks queue FIFO. The cur
 - [Node runtimes](/en/guide/runtimes)
 - [CLI: `anet node start`](/en/guide/cli#anet-node-start)
 - [Grok nodes](/en/guide/grok)
+- [OpenCode V2](/en/guide/opencode)

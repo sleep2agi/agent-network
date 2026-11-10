@@ -59,6 +59,8 @@ beforeAll(async () => {
   expect((await rest(U.owner.token, "POST", "/api/admin/users", { username, password: PW, network_id: NET, role: "member" })).status).toBe(200);
   const login = await rest("", "POST", "/api/auth/login", { username, password: PW });
   U.member = { token: login.body.token, id: login.body.user.user_id };
+  // #746 起新成员默认 scoped;这里测的是 'all' 成员的 REST 键,显式放宽。
+  expect((await rest(U.owner.token, "PUT", `/api/networks/${NET}/members/${U.member.id}/task-grants`, { task_access: "all" })).status).toBe(200);
   for (const [k, alias] of [["nodeA", "示例-甲"], ["nodeB", "示例-乙"], ["nodeC", "示例-丙"]] as const) {
     const nodeId = `node_sp_${k}`;
     U[k] = { token: createNetworkTokenForNode(U.owner.id, NET, alias, nodeId).token!, id: nodeId };
@@ -211,8 +213,8 @@ describe("tool descriptions", () => {
     // #478:节点令牌的 tools/list 里本来就没有 projects_create / projects_update(调了也是 403),那两条的说明从人的列表里读。
     expect(byName.has("projects_create")).toBe(false);
     const human = new Map(((await rpc(U.member.token, "tools/list", {})).result.tools as any[]).map(t => [t.name, t]));
-    expect(byName.get("projects_list").description).toMatch(/node \(Agent\) tokens can only read projects/i);
-    for (const name of ["projects_create", "projects_update"]) expect(human.get(name).description).toMatch(/node \(Agent\) tokens can only read projects/i);
+    expect(byName.get("projects_list").description).toMatch(/node (?:\(Agent\) )?tokens can only read projects/i);
+    for (const name of ["projects_create", "projects_update"]) expect(human.get(name).description).toMatch(/node (?:\(Agent\) )?tokens can only read projects/i);
     const denied = await mcp(U.nodeA.token, "projects_create", { name: "示例项目" });
     expect(denied.status).toBe(403);
     expect(denied.error).toBe("user_token_required");

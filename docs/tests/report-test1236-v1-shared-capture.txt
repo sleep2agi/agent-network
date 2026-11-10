@@ -1,0 +1,137 @@
+TEST-ONLY: #1236 shared V1 candidate capture and offline scratch readback
+Date: 2026-10-14
+
+Scope
+-----
+Readonly library primitive, private exclusive migration-candidate envelope,
+full independently selected binding/Host/model/cohort and fresh offline scratch
+native import. No public CLI exporter, existing-node migration, binding switch,
+final checkpoint, lossless rollback, real provider/login or Win/macOS result.
+The original selected Host and sibling native session remain live in the
+fixture; scratch shutdown is owned by its independent fixture Owner.
+
+Source provenance
+-----------------
+Source PR: https://github.com/sleep2agi/agent-network/pull/2750
+Final source head: 9e69d6ac39b15550b06b3035dc991c75c0b2f7b6
+CI checkout: bea5bba60830b441afd577bb6285b0b1627f9416
+Ordinary source main: a9c147cffd1da212573b4c8f8d21c2c336b4f9a9
+Merged: 2026-10-14T13:13:33Z. Fresh main ancestry check passed.
+CI and actual source-main tree: bc142a340d4f71ec7f41425ce08992af566747b2
+Source PR rollup: 125 SUCCESS / 52 CANCELLED, no failure/pending.
+All ten protected exact-head checks pass. Not all broad QA passed.
+This report is not a release manifest.
+Exact native wrapper/platform SRIs:
+tests/test1194-v1-shared-feasibility/package-integrity.json
+Docker: pinned Bun 1.3.14, non-root; runtime network disabled, synthetic
+loopback model only. No local tests, production reads or original credentials.
+
+Candidate qualification (actual artifacts downloaded and read)
+------------------------------------------------------------
+Run 38568359219: SUCCESS, final source head above.
+1.18.1 job 115866757879: SUCCESS, 14 unit / 0 fail, 6 native checks.
+Artifact 11896028764
+SHA256 24df62862376c56b65a18171e09f5d80509d2ba5389b4f1326778f2850e0421c
+1.18.34 job 115866757700: SUCCESS, 14 unit / 0 fail, 6 native checks.
+Artifact 11895224881
+SHA256 e0c123bec895ec33e39e610a22fc1218083c672f1106b7659d00ca4ce3c511e8
+Both reports stamp CI checkout bea5bba60830b441afd577bb6285b0b1627f9416.
+
+Six actual checks per native version:
+1. Independently owned exact pinned Host, two nonempty native histories from
+   completed synthetic turns in distinct canonical Chinese project paths.
+2. Stable idle full-binding candidate, private roundtrip, nonfinal purpose and
+   cleanShutdown=false; duplicate write preserves original candidate bytes.
+3. Each of five binding fields independently mismatched, native foreign
+   directory/session witness, wrong model/cohort/Host incarnation refuse.
+4. Controlled busy/null status and changed second history response refuse,
+   leaving the saved candidate intact. These intercepted negative responses
+   are not proof of a real concurrent native human timing race.
+5. Native import before a scratch Server exists, into fresh disjoint private
+   roots; actual readback preserves exact session/directory and message IDs,
+   parents, parts via the existing checkpoint verifier. Original Host is live.
+6. Scratch closes; original Host and B still produce actual model replies,
+   A history and original registry/password/project config bytes remain exact.
+
+The 14-unit set comprises eight candidate recovery/identity/permission/data
+refusal cases plus six existing checkpoint tests. Candidate storage refuses
+unsafe root/symlink, external file references, edited digest data, unfinished
+assistant, missing/non-user parent, unexpected binding fields and final-state
+masquerade. It never silently upgrades a candidate into a final checkpoint.
+
+Existing owned checkpoint regression
+-----------------------------------
+Run 38568358840: SUCCESS, same final source head/CI checkout.
+1.18.1 job 115866730911: SUCCESS, 6 unit / 0 fail, 7 native checks.
+Artifact 11896113715
+SHA256 51f5cf9d70a8f80605e173ec52452698039f90d24a384a76a31356484245deb8
+1.18.34 job 115866731273: SUCCESS, 6 unit / 0 fail, 7 native checks.
+Artifact 11896343556
+SHA256 f0c836294f42b2e7695ef4780ca95ee1d658704488382ccb47184bc27d2a2267
+Both full artifacts were read: owned live export/PID/session refusal and
+old snapshot/process/config preservation, wrong identity refusal, imported
+permission/share removal, fresh exact session/history restoration, resumed
+synthetic turn and fixture cleanup. This does not turn the older owned-only
+exporter into an independent shared-Host exporter.
+
+Complete node unit and source ratchet
+------------------------------------
+QA run 38568359285, job 115867720319: SUCCESS.
+2917 pass / 2 skip / 0 fail; 2919 tests across 231 files, 216.57 seconds on
+Actions. All eight new candidate cases occur in the actual complete-domain log.
+The auxiliary test556 job portion passes 66 tests / 0 fail and five runner
+groups / 0 fail. Broader remaining report-only QA fanout was cancelled only
+after verifying this own branch/final head and obtaining native/checkpoint,
+typecheck and complete node-unit results. Cancellation is not PASS.
+Typecheck run 38568359157, job 115866733095: SUCCESS under its ratchet.
+81 existing errors / 81 baseline, actual tsc exit 2; not zero TypeScript errors.
+Mutation pin run 38568359082, job 115866732254: SUCCESS.
+
+Full Docker E2E regression
+--------------------------
+Run 38568359083, job 115866732976: SUCCESS.
+Rename ghost companion job 115866732491: SUCCESS.
+Artifact 11896634942
+SHA256 b813aefcda5b776f6a4031384089d01e48429c57b8c207186850f2738fb6eb03
+All eight log files were downloaded and read. Seven nonzero group verdicts:
+139 + 25 + 28 + 16 + 22 + 12 + 47 = 289 pass / 0 fail.
+The separate test-all.log is the same aggregate, not an eighth test group.
+The artifact audit first double-counted this aggregate (578); corrected
+classification matched the seven groups and aggregate at 289, with no test
+failure or rerun. Actual hard-gate verdict is complete and green.
+
+Change history and limits
+------------------------
+First head 5b4b445f3137c0bc1dbaba39a207f009ffc60751, native run 38568165176,
+passed both versions. Review then added final model recheck and required an
+assistant's parent to be a real user; final head was separately qualified.
+No healthy native gate was manually rerun. Superseded automatic QA cancellation
+and current report-only cancellation do not count as successful tests.
+
+Idle double read and a data digest do not exclude writers or establish a final
+checkpoint. Same UID/shared password is a cooperative trust cohort, not hostile
+tenant isolation. Candidate file contains private historical data and needs an
+Owner-managed encrypted backup; the fixture does not establish production
+backup location, retention or restore permission. The caller, not this API,
+owns the fresh offline scratch store. No concurrent import into live data.
+
+Rebuild and remaining work
+-------------------------
+Entrypoint: agent-node/src/runtime/opencode-copresence/v1-shared-capture.ts.
+Independent Host startup: deploy/node/opencode-v1-host/start.ts.
+Loopback ports remain selected registry authority; no proxy/tunnel changes.
+Host password comes from its original private password file, not candidate
+metadata/argv. Real node/provider credentials are not read from their stores;
+historical message contents remain private data. Git restores software and
+templates, not native history, Hub identity/login or original recovery leases.
+Upgrade/downgrade requires exact main software, not an old CLI ignoring intent.
+Keep original matching software/config and both stores until approved final
+export/restore. Do not delete unknown/intent markers or replay tasks as recovery.
+The six recovery answers and actual Owner gaps are in
+docs/design/opencode-v1-shared-capture.md.
+
+#1196 remains Doing: #1238 binding/config/intent cutover and journal failure
+recovery, #1239 final capture after new shared turns and owned lossless rollback,
+then original Owner named single-node idle canary/backup authority. Conditional
+active work 30-60 minutes per next source slice; external CI, permissions,
+maintenance window and real model waiting are unknown. No public release.

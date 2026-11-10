@@ -7,6 +7,7 @@
 // 路径通过 mcp 配置的 env `ANET_ACTIVE_NETWORK_TASK_FILE` 显式交给 node-server,
 // 不让它按 cwd 猜(credentialDir 布局下 .env 不在项目目录里)。
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { dirname, join } from "node:path";
 
 export const ACTIVE_NETWORK_TASK_FILE = ".active-network-task.json";
@@ -35,7 +36,7 @@ export function writeActiveNetworkTaskMarker(path: string, marker: ActiveNetwork
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify({ taskId: marker.taskId, from: marker.from, startedAt: marker.startedAt }), { mode: 0o600 });
-  renameSync(tmp, path);
+  renameOverExistingSync(tmp, path);
 }
 
 /** 不存在也算成功——清理必须幂等,回合结束会从多条路径各清一次。 */

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Exercise Codex behavior, not host resource admission (covered by test612).
+# Shared CI runner load/memory must not delay the fixture's app-server startup.
+export ANET_START_MEM_GATE=0
 
 # test750 — `anet node start <name>` alone brings up a codex co-presence TUI.
 #
@@ -79,6 +82,31 @@ UNIT_TOTAL=$(bun test src/codex-copresence-profile.test.ts src/codex-copresence-
 [ "${UNIT_TOTAL:-0}" -ge 74 ] || fail "expected >=74 unit assertions, ran ${UNIT_TOTAL:-0} — did the files resolve?"
 log "unit assertions: $UNIT_TOTAL"
 pass "profile + preflight decision functions ($UNIT_TOTAL tests)"
+
+log "[L1b] witnessed red: a painted banner without the current composer is not ready"
+PREFLIGHT=src/codex-copresence-preflight.ts
+PREFLIGHT_BAK=$(mktemp)
+cp "$PREFLIGHT" "$PREFLIGHT_BAK"
+python3 - "$PREFLIGHT" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+a = '  if (!INPUT_READY_MARKERS.some((n) => onScreen.includes(n))) return "input-not-ready";'
+b = '  if (false && !INPUT_READY_MARKERS.some((n) => onScreen.includes(n))) return "input-not-ready";'
+assert s.count(a) == 1, f"mutation anchor not found exactly once in {p}: {a!r}"
+open(p, "w").write(s.replace(a, b))
+PY
+set +e
+bun test src/codex-copresence-preflight.test.ts >/tmp/test750-input-ready-mutation.log 2>&1
+MUTATION_RC=$?
+set -e
+cp "$PREFLIGHT_BAK" "$PREFLIGHT"
+rm -f "$PREFLIGHT_BAK"
+[ "$MUTATION_RC" -ne 0 ] || fail "removing the current-composer gate stayed green"
+grep -Eq '^\(fail\).*painted TUI without the current composer' /tmp/test750-input-ready-mutation.log \
+  || { cat /tmp/test750-input-ready-mutation.log >>"$REPORT"; fail "mutation went red for the wrong reason"; }
+log "MUTATION_RED current-composer-gate-removed rc=$MUTATION_RC"
+pass "removing the input-readiness gate is witnessed by the named behavior"
 
 log "[L2] create writes what start will read"
 # A real hub, the way the other CLI suites do it (see tests/test20-cli-ux):
@@ -204,17 +232,17 @@ grep -q 'remembered co-presence for this node' "$WORK/oneoff.start" \
 pass "one-off flag is honoured and remembered"
 
 log "[L5] the sandbox the launcher actually resolved"
-# 🔴 Assert the RESOLVED sandbox, not just the persisted field. Persistence is
-#    driven by the flag; the sandbox is driven by the posture. A change that
-#    granted full access unconditionally would leave the field empty and the
-#    node wide open — and a field-only assertion reads green through it.
-[ "$(field .anet/nodes/noflag/config.json codexCopresenceFullAccess)" = "None" ] \
-  || fail "co-presence alone recorded a full-access grant"
-grep -qF -e 'sandbox=read-only' "$WORK/oneoff.start" \
-  || fail "co-presence without an explicit grant did not resolve to read-only"
-if grep -qF -e 'sandbox=danger-full-access' "$WORK/oneoff.start"; then
-  fail "co-presence resolved to danger-full-access with no grant — the default was inverted"
+# 🔴 Assert the RESOLVED sandbox, not just the persisted field. After #815 /
+#    co-presence yolo, recording `codexCopresence` is enough for full-auto
+#    (danger-full-access + never) without retyping danger flags. The grant
+#    field may still be absent until an explicit danger opt-in is remembered.
+grep -qF -e 'sandbox=danger-full-access' "$WORK/oneoff.start" \
+  || fail "co-presence after --copresence did not resolve to danger-full-access (yolo default)"
+if grep -qF -e 'sandbox=read-only' "$WORK/oneoff.start"; then
+  fail "co-presence resolved to read-only after opt-in — the yolo default was inverted"
 fi
+[ "$(field .anet/nodes/noflag/config.json codexCopresenceFullAccess)" = "None" ] \
+  || fail "plain --copresence should not require codexCopresenceFullAccess on disk yet"
 
 set +e
 $CLI node start noflag --copresence --dangerously-allow-full-access --yes-danger-full-access \
@@ -222,10 +250,10 @@ $CLI node start noflag --copresence --dangerously-allow-full-access --yes-danger
 set -e
 cat "$WORK/grant.start" >>"$REPORT"
 grep -qF -e 'sandbox=danger-full-access' "$WORK/grant.start" \
-  || fail "an explicit grant did not resolve to danger-full-access"
+  || fail "co-presence with explicit danger flags did not resolve to danger-full-access"
 [ "$(field .anet/nodes/noflag/config.json codexCopresenceFullAccess)" = "True" ] \
-  || fail "explicit grant was not recorded"
-pass "read-only is what co-presence actually resolves to; the grant is explicit and remembered"
+  || fail "explicit danger grant was not recorded on the profile"
+pass "co-presence resolves full-auto once recorded; explicit danger flags still persist the grant field"
 
 log "[L6] every missing dependency in one pass, with a command for each"
 # Hide tmux and codex from PATH rather than uninstalling them: the other layers

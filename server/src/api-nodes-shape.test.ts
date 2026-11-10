@@ -36,10 +36,29 @@ afterAll(() => {
 // the dashboard / external clients see.
 function mapRow(r: Record<string, unknown>): Record<string, unknown> {
   let role: string | null = null;
+  // #2293 —— 与 handler 同一套读法：快照可能是文本或对象；解析失败/形状不对 = 这一格没有。
+  let opencodeCatalog: string[] | null = null;
+  let opencodeCatalogSeenAt: string | null = null;
+  let opencodeGeneration: "v1" | "v2" | null = null;
+  let opencodeMode: string | null = null;
+  let opencodeServer: string | null = null;
   const snap = r.config_snapshot;
   if (snap) {
-    try { role = (typeof snap === "string" ? JSON.parse(snap) : snap)?.role ?? null; }
-    catch { /* malformed */ }
+    let parsed: any = null;
+    try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
+    catch { parsed = null; }
+    role = parsed?.role ?? null;
+    const raw = parsed?.opencode_catalog;
+    if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
+      opencodeCatalog = raw.slice(0, 400);
+      // #3144 —— 目录是快照：没有采集时刻的话，51 个模型是刚才的还是三周前的分不出。
+      const seen = parsed?.opencode_catalog_seen_at;
+      opencodeCatalogSeenAt = typeof seen === "string" && seen.length > 0 && seen.length <= 40 ? seen : null;
+    }
+    const flags = parsed?.flags;
+    if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
+    if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
+    if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
   }
   const { config_snapshot, ...rest } = r;
   return {
@@ -47,8 +66,42 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     tags: parseStoredTags(r.tags),
     attrs_revision: Number(r.attrs_revision ?? 0),
     role,
+    opencode_catalog: opencodeCatalog,
+    opencode_catalog_seen_at: opencodeCatalogSeenAt,
+    opencode_generation: opencodeGeneration,
+    opencode_mode: opencodeMode,
+    opencode_server: opencodeServer,
   };
 }
+
+describe("#3144 opencode_catalog_seen_at —— 三态，不塌成两种", () => {
+  // daemon 报了就带出来；没报就是 null。null 的含义是「未上报」，**不是**「很久以前」，
+  // 也不是「刚刚」——把两者塌成同一个值，客户端就只能显示一个它并不知道的时刻。
+  test("有 opencode_catalog_seen_at ⇒ 原样投影", () => {
+    const row = mapRow({
+      node_id: "n1", node_name: "n", alias: "n", runtime: "opencode-sdk", model: "m",
+      config_path: null, channels: null, server: null, hostname: null,
+      network_id: "net", created_at: "x", updated_at: "x", display_name: null,
+      team: null, tags: null, attrs_revision: 0,
+      config_snapshot: JSON.stringify({
+        opencode_catalog: ["a/b"], opencode_catalog_seen_at: "2026-11-01T02:00:00Z",
+      }),
+    });
+    expect(row.opencode_catalog_seen_at).toBe("2026-11-01T02:00:00Z");
+  });
+
+  test("没有那个字段 ⇒ null（不是空串、不是当前时间）", () => {
+    const row = mapRow({
+      node_id: "n2", node_name: "n", alias: "n", runtime: "opencode-sdk", model: "m",
+      config_path: null, channels: null, server: null, hostname: null,
+      network_id: "net", created_at: "x", updated_at: "x", display_name: null,
+      team: null, tags: null, attrs_revision: 0,
+      config_snapshot: JSON.stringify({ opencode_catalog: ["a/b"] }),
+    });
+    expect(row.opencode_catalog).toEqual(["a/b"]);
+    expect(row.opencode_catalog_seen_at).toBeNull();
+  });
+});
 
 describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", () => {
   test("explicit columns + role extracted: config_snapshot NOT in response, role IS", () => {
@@ -83,7 +136,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     // Expected fields present (13 = 12 contract + new role)
     for (const k of ["node_id", "node_name", "alias", "runtime", "model",
                      "config_path", "channels", "server", "hostname",
-                     "network_id", "created_at", "updated_at", "role"]) {
+                     "network_id", "created_at", "updated_at", "role", "opencode_catalog",
+                     "opencode_catalog_seen_at"]) {
       expect(row).toHaveProperty(k);
     }
     // Internal fields NOT present
@@ -100,7 +154,9 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     expect(Object.keys(row).sort()).toEqual([
       "alias", "attrs_revision", "channels", "config_path", "created_at",
       "display_name", "hostname", "model", "network_id", "node_id",
-      "node_name", "role", "runtime", "server", "tags", "team",
+      "node_name", "opencode_catalog", "opencode_catalog_seen_at",
+      "opencode_generation", "opencode_mode",
+      "opencode_server", "role", "runtime", "server", "tags", "team",
       "updated_at",
     ]);
   });
@@ -184,5 +240,76 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     );
     expect(cfgRow?.config_revision).toBe(42);
     expect(cfgRow?.config_snapshot).toContain("claude-opus");
+  });
+});
+
+// #2293（admin 2026-10-25）—— 节点自报的模型清单必须能到 /api/nodes：
+// 「没有 daemon 绑定」的节点，客户端就是靠这一格给建议列表（否则只能手填）。
+describe("#2293 opencode_catalog projection", () => {
+  const insert = (snapshot: unknown) => db.run(
+    `INSERT OR REPLACE INTO nodes (node_id, node_name, alias, network_id, config_snapshot)
+     VALUES (?1, ?2, ?3, ?4, ?5)`,
+    [TEST_NODE, "test-shape", "test-shape", TEST_NETWORK, typeof snapshot === "string" ? snapshot : JSON.stringify(snapshot)],
+  );
+  const read = () => mapRow(db.get<Record<string, unknown>>(
+    `SELECT node_id, node_name, alias, network_id, config_snapshot FROM nodes WHERE node_id = ?1`,
+    TEST_NODE,
+  )!);
+
+  test("valid list reaches the row, order kept", () => {
+    insert({ opencode_catalog: ["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"] });
+    expect(read().opencode_catalog).toEqual(["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"]);
+  });
+
+  test("absent / malformed / wrong shape → null, row still served", () => {
+    insert({ model: "x" });
+    expect(read().opencode_catalog).toBeNull();
+    insert("not-json{");
+    expect(read().opencode_catalog).toBeNull();
+    // 混了非字符串 → 整格作废（不猜、不部分展示）
+    insert({ opencode_catalog: ["a/b", 7] });
+    expect(read().opencode_catalog).toBeNull();
+    // 空列表是合法但无意义 → 照原样给出（客户端自己判断要不要建列表）
+    insert({ opencode_catalog: [] });
+    expect(read().opencode_catalog).toEqual([]);
+  });
+});
+
+// #2293（PR #1092 在真机上拿不到值的原因）—— /api/nodes 不带整个 config_snapshot，
+// 但「Runtime · V2」「OpenCode Server」两行只要三个标量：代际、模式、loopback 端点。
+describe("#2293 opencode_* scalars", () => {
+  test("generation / mode / server come from the snapshot, nothing else leaks", () => {
+    db.run(
+      `INSERT OR REPLACE INTO nodes (node_id, node_name, alias, network_id, config_snapshot)
+       VALUES (?1, ?2, ?3, ?4, ?5)`,
+      [TEST_NODE, "test-shape", "test-shape", TEST_NETWORK, JSON.stringify({
+        flags: { opencodeGeneration: "v2", opencodeMode: "copresence", secretOther: "must-not-leak" },
+        opencode_server: "http://127.0.0.1:4096",
+      })],
+    );
+    const row = mapRow(db.get<Record<string, unknown>>(
+      `SELECT node_id, node_name, alias, network_id, config_snapshot FROM nodes WHERE node_id = ?1`,
+      TEST_NODE,
+    )!);
+    expect(row.opencode_generation).toBe("v2");
+    expect(row.opencode_mode).toBe("copresence");
+    expect(row.opencode_server).toBe("http://127.0.0.1:4096");
+    expect(row).not.toHaveProperty("config_snapshot");
+    expect(JSON.stringify(row)).not.toContain("must-not-leak");
+  });
+
+  test("unknown generation / absent fields → null (old nodes keep rendering)", () => {
+    db.run(
+      `INSERT OR REPLACE INTO nodes (node_id, node_name, alias, network_id, config_snapshot)
+       VALUES (?1, ?2, ?3, ?4, ?5)`,
+      [TEST_NODE, "test-shape", "test-shape", TEST_NETWORK, JSON.stringify({ flags: { opencodeGeneration: "v9" } })],
+    );
+    const row = mapRow(db.get<Record<string, unknown>>(
+      `SELECT node_id, node_name, alias, network_id, config_snapshot FROM nodes WHERE node_id = ?1`,
+      TEST_NODE,
+    )!);
+    expect(row.opencode_generation).toBeNull();
+    expect(row.opencode_mode).toBeNull();
+    expect(row.opencode_server).toBeNull();
   });
 });

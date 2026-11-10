@@ -30,6 +30,7 @@ WORKDIR /app
 # the exact code under review (NOT a published npm tag). The hub side
 # is `server/`, the node-runtime side is `agent-node/`, and the
 # launchAgent + W1 supervisor under test live in `agent-network/`.
+COPY contracts /app/contracts
 COPY server /app/server
 COPY agent-node /app/agent-node
 COPY agent-network /app/agent-network

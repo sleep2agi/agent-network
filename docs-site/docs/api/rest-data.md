@@ -4,6 +4,57 @@
 
 ## 数据查询端点
 
+### GET /health
+
+健康与容量快照。**不需要鉴权**（只给聚合值，不含任何会话/节点明细）。
+
+```bash
+curl -s http://localhost:9200/health | python3 -m json.tool
+```
+
+```jsonc
+{
+  "ok": true,
+  "version": "0.9.0-preview.166",
+  "uptime": 273,                 // 进程已运行秒数
+  "sessions_count": 369,         // 会话总数（含 offline）
+  "sse_connections": 144,        // 当前 SSE 长连接数（≈ 在线节点 + 打开的面板）
+  "mcp_inflight": 0,             // 此刻正在处理的 MCP 请求数
+  "mcp_inflight_peak": 325,      // 自进程启动以来的高水位（不衰减）
+  "event_loop": {                // 0.9.0-preview.162 起
+    "max_gap_ms": 8354,          // 进程内单次 tick 的最大间隔（正常 ≈250ms）
+    "last_gap_ms": 697,
+    "stall_count": 2,            // 超过阈值的停顿次数
+    "last_stall_ms": 3019,
+    "last_stall_at": "2026-10-27T01:54:48.811Z",
+    "recent_stalls": [           // 最近 20 次，最新在前
+      { "at": "...", "gap_ms": 3269, "stall_ms": 3019, "rss_mb": 1410, "requests_since_last_tick": 32 }
+    ]
+  },
+  "limits": { "max_upload_bytes": 12582912, "max_request_content_length": 13631488 }
+}
+```
+
+#### 怎么读 `event_loop.recent_stalls`（这一格最容易读错）
+
+Hub 是单线程（Bun + 同步 SQLite），所以「事件循环被占住」和「timer 回调被饿住」**看起来一样**，处置却相反：
+
+| `requests_since_last_tick` | 含义 | 该做什么 |
+|---|---|---|
+| **> 0**（例如 514） | 这段时间**仍在服务**请求（成百上千次）⇒ 是**饱和**（timer 被 I/O 队列饿住） | 降低瞬时并发：广播扇出、重连风暴、大批任务投递 |
+| **= 0** | 这段时间**什么都没推进** ⇒ 是真的**同步阻塞** | 查慢查询 / 同步块：`grep "commhub slow-sql"` |
+
+只读 `gap_ms` 会把这两种情况混成一句“卡了 N 秒”，然后往错误的方向优化（例如给饱和型加内存）。
+
+::: tip 两个真实读数（2026-10-27 生产）
+- `gap 143.9s · served 1175` ⇒ 一条广播（384 行 inbox）打满 Hub，**不是**阻塞；
+- `gap 5.7s · served 20` + `slow-sql 5325ms` ⇒ 一条聚合查询真的把循环占住了。
+:::
+
+`mcp_inflight` 与 RSS 的关系（隔离实测）：**每在飞请求约占 1.2–1.4 MB**；`peak` 高但当前 `inflight` 为 0，说明尖峰已经过去，不是泄漏。
+
+
+
 ### GET /api/status
 
 
@@ -209,6 +260,22 @@ curl http://localhost:9200/api/nodes \
 `nodes` 表是**持久节点身份**（创建即写入，删 agent 才删），`sessions` 表是**运行时心跳状态**（agent 启动写入，10 分钟无心跳标 `offline`）。看 agent 是否在线用 [GET /api/status](#get-api-status)，看 agent 配置元数据用本 endpoint。
 :::
 
+**`restart_readiness`（#1511）**：每行还带一格里「能不能替你重启」，客户端保存密钥/env 后据此二选一提示用户：
+
+```json
+"restart_readiness": { "path": "restart_node", "in_flight": 0, "can_restart_now": true }
+```
+
+| 字段 | 说明 |
+|------|------|
+| `path` | `restart_node`：被 created-daemon 监督（exit-75 自动拉起）；`stop_then_start`：adopt 来的节点，`restart_node` 会拒绝但 daemon 仍能 Stop→Start；`manual`：没人管，必须上机 |
+| `in_flight` | 本节点正在做的任务数，与 `stop_node` / `restart_node` **同一份 SQL**（无状态行按 60 分钟龄判，终态任务不算） |
+| `can_restart_now` | `path !== "manual"` 且没有被在途任务挡住 |
+
+::: warning 别只读 `can_restart_now`
+它是「现在能不能点」的快照。真正发起时服务端仍会重新判一次（`node_busy_in_flight` / `adopted_restart_requires_daemon`），客户端要按这两个错误码兜底，不能把快照当承诺。
+:::
+
 ---
 
 ### GET /api/host-supervisors
@@ -269,7 +336,7 @@ curl "http://localhost:9200/api/host-supervisors" \
 🔴 **`can_create_nodes` / `create_nodes_blocked_reason`（daemon 建节点能力）**：daemon 通过 `report_status.host.daemon_capabilities` 上报，hub 原样镜像进这里 —— Dashboard「建节点向导」据此决定某台服务器能不能选、不能选时给出原因（`create_nodes_blocked_reason` 仅在 `can_create_nodes===false` 时出现）。
 🔴 **只有 daemon 真的上报了才带这两个键**：agent-node 版本较旧、尚未上报 `daemon_capabilities` 的 daemon，响应里这两个键**整个缺席**（不是 `false`）。消费方必须把「键缺席」当作「未知、按可建处理」，**不能**把缺席当成 blocked 而误灰掉一台健康的老 daemon（`undefined ≠ false`）。
 
-🔴 **`runtime_readiness`（逐 runtime 实测能否建节点，#622）**：daemon 开机自检一次、之后每 10 分钟（±10% 抖动）在后台自检，结果按 runtime 名给出，例如 `{"claude-code-cli": {"ok": true, "state": "ready", "reason": "可以创建", "version": "2.1.290", "checked_at": "2026-10-06T03:00:00.000Z", "cli": "found", "auth": "present", "network": "reachable"}}`。`state` ∈ `ready` / `missing_cli` / `not_logged_in` / `no_network` / `unknown`；`reason` 是面向用户的中文说明并带修法；`checked_at` 是 daemon 本机时钟。可选格：`version`、`cli`（`found`/`missing`/`bundled`/`unknown`）、`auth`（`present`/`absent`/`not_required`/`unknown`）、`network`（`reachable`/`unreachable`/`skipped`）、`shared_login_count`（仅 codex：本机已有多少别的节点共用同一条 codex 登录）。CLI 按 **daemon 建出的子节点实际拿到的 PATH** 解析；登录只看文件/变量名**是否存在**，从不读取或上报内容。**旧 daemon 不报时整个键缺席**；它**不改变** `can_create_nodes` 的语义。
+🔴 **`runtime_readiness`（逐 runtime 实测能否建节点，#622）**：daemon 开机自检一次、之后每 10 分钟（±10% 抖动）在后台自检，结果按 runtime 名给出，例如 `{"claude-code-cli": {"ok": true, "state": "ready", "reason": "可以创建", "version": "2.1.290", "checked_at": "2026-10-06T03:00:00.000Z", "cli": "found", "auth": "present", "network": "reachable"}}`。`state` ∈ `ready` / `missing_cli` / `not_logged_in` / `no_network` / `unknown`；`reason` 是面向用户的中文说明并带修法；`checked_at` 是 daemon 本机时钟。可选格：`version`、`cli`（`found`/`missing`/`bundled`/`unknown`）、`auth`（`present`/`absent`/`not_required`/`unknown`）、`network`（`reachable`/`unreachable`/`skipped`）、`shared_login_count`（仅 codex：本机已有多少别的节点共用同一条 codex 登录）。CLI 按 **daemon 建出的子节点实际拿到的 PATH** 解析；登录只看文件/变量名**是否存在**，从不读取或上报内容。**旧 daemon 不报时整个键缺席**；它**不改变** `can_create_nodes` 的语义。`opencode-cli` 的结果还可以带 `generation`（`v1` 或 `v2`）和 `accepted`（布尔）。旧 daemon 省略这两格；它们不把 `state` 变成 `ready`，也不改变 `can_create_nodes`。
 
 🔴 **`online` 的窗口是 5 分钟**，不是心跳周期本身。agent-node 的 `report_status` 每 **3 分钟**一次，窗口必须大于它 —— 否则每次心跳之后的 60~180 秒必然抖成 `offline`。
 
@@ -277,6 +344,42 @@ curl "http://localhost:9200/api/host-supervisors" \
 
 **网络作用域**：走 REST auth pipeline 的 `restScope`（SEC-1）。
 
+🔴 **`adoption_discovery`（收编候选发现）**：只在 daemon 上报了 `adoption_candidates` 数组时出现，值为 `true`。缺席不是「没有可收编节点」。清单本身在 [`GET /api/adoption-candidates`](#get-api-adoption-candidates)，不在这个响应里。
+
+
+---
+
+### GET /api/adoption-candidates
+
+> 只读。daemon 上报的、本机还能收编的手工节点。不收编、不发信号、不启动。
+
+```bash
+curl "http://localhost:9200/api/adoption-candidates?network_id=net_xxx" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+只接受请求头里的用户 token。daemon token、网络 token、URL 上的 token 返回 403 `user_token_required`。
+
+```json
+{
+  "ok": true,
+  "candidates": [
+    {
+      "node_id": "n_xxx",
+      "alias": "手工节点",
+      "daemon_node_id": "node_daemon_xxx",
+      "daemon_alias": "daemon",
+      "hostname": "build-1",
+      "workdir": "/home/user/project",
+      "runtime": "claude-agent-sdk",
+      "launch_hint": "tmux"
+    }
+  ],
+  "count": 1
+}
+```
+
+`launch_hint` 是 `bare` / `tmux` / `stopped` / `unverified` 之一，只是 daemon 看见的提示。工作目录只出现在节点主人、网络 owner/admin 或 Hub 管理员的响应里。共存节点不会出现在这里。详见 [收编候选发现](/deploy/daemon#adoption-candidates)。
 
 ---
 
@@ -1089,7 +1192,7 @@ curl -X POST http://localhost:9200/api/task \
 | `alias` | string | &check; | 目标 Agent 别名（最大 200 字符） |
 | `task` | string | &check; | 任务内容（最大 10000 字符） |
 | `priority` | enum | | `high` / `normal`（默认）/ `low` |
-| `from` | string | | 发送者标识（默认 `"api"`） |
+| `from` | string | | 用户令牌默认认证用户名，节点令牌默认绑定节点别名；省略或填自己的标识。代节点发送需使用该节点令牌 |
 | `network_id` | string | | 目标 network（utok\_ 调用时；ntok\_ 调用强制绑定） |
 | `parent_task_id` | string | | 用于自动回串结果的父任务 ID；没有权威当前任务 ID 时应省略。 |
 | `ttl_seconds` | number | | 过期秒数（默认 3600；非 schema 字段，server 在 [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) 直接取 `body.ttl_seconds`） |
@@ -1260,11 +1363,11 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 | `new_reply` | 收到 reply（`send_reply`） | `{inbox_count, from, message_id, in_reply_to, status}` |
 | `broadcast` | 收到广播（`broadcast` 工具） | `{inbox_count}` |
 | `chained_reply` | 子任务完成自动串回上游父任务发起者 ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 搜 `chained_reply`) | `{parent_task_id, child_task_id, child_alias}` |
-| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L196)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
+| `node.renamed` | RFC-010 节点改名 COMMIT 时广播（[`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L219)），推给 old + new 两个 alias 流 **+ 每个网络成员的 user channel**（dashboard 订阅的是 `/events/<username>` user channel、不是 per-alias 流，#84 SSE channel fix） | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 实际 payload 以上表为准。**自 #1439/#1441 起 `new_message` / `new_reply` / `broadcast` / `new_task`（含 retry/reassign）都带真实 `inbox_count`（收件人未读数），客户端可直接用它显示新消息数；`broadcast` 不再是硬编码 1。**另注：`new_task` / `new_message` 在目标 alias **刚被改名**时会额外带一个 `renamed_from` 字段（指向旧 alias，`tools.ts` 的 `canonical.renamed` 分支）。
 >
-> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L69) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
+> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L87) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
 
 **示例 SSE 数据流**：
 

@@ -655,7 +655,7 @@ test_claude_structural() {
   resp=$(curl -s -X POST "http://127.0.0.1:$HUB_PORT/api/task" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $USER_TOKEN" \
-    -d "{\"alias\":\"$alias\",\"task\":\"/loop 5m claude structural smoke\",\"priority\":\"normal\",\"from\":\"m4-harness\",\"network_id\":\"$NET_ID\"}")
+    -d "{\"alias\":\"$alias\",\"task\":\"/loop 5m claude structural smoke\",\"priority\":\"normal\",\"network_id\":\"$NET_ID\"}")
   ok=$(echo "$resp" | python3 -c "import sys,json;print(json.load(sys.stdin).get('ok',False))" 2>/dev/null || echo "False")
   if [ "$ok" != "True" ]; then fail "claude: POST /loop failed: $resp"; return; fi
   pass "claude: POST /loop slash command accepted"

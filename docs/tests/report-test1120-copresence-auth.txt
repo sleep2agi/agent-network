@@ -1,0 +1,45 @@
+#1120 V1 co-presence auth persistence candidate — 2026-10-13
+
+No local functional suites or real account/production-node operations.
+First Docker run 38358963602 on fa056aa291605ec9a189ba10b09806f6fe4d0719:
+26 PASS / 0 FAIL / 360 assertions. Synthetic API/OAuth/wellknown login survives
+launch cleanup → fresh launch; logout stays empty; probes/discard/ACP do not
+save/expand auth; concurrent edits and credential symlinks are protected.
+
+Native V1 checkpoint run 38358963719 passed both pinned 1.18.1 and 1.18.34.
+Exact CLI 174 / Node 140 pair run 38359263601 passed on candidate 470e4359.
+Later source/fixture changes require fresh final-head results before main merge.
+
+Added production openOpenCodeCopresenceRuntime → auth update → close → fresh
+server coverage, the original argv/cwd/env/launcher golden, and a TEST-ONLY
+missing-persistence-wiring mutation requiring the restart assertion to fail.
+Run 38359263659 FAILED while building this larger fixture: apt/npm dependency
+installation was under docker build --network none. No functional result was
+reached. The build now has network access; test execution retains --network none.
+Fixture source files are owned by its non-root user for container-only mutation.
+No assertion, isolation policy or source runtime was weakened for this failure.
+
+Follow-up on exact head 21b98c1fb5b138e2e8976e9adf654be73848341b:
+Docker 38359591027 SUCCESS: 28 PASS / 0 FAIL plus the missing-production-wiring
+mutation reached the login restart assertion and was RED as required. This
+includes the production entry's save → fresh server restore → launch-root cleanup
+and the original V1 argv/cwd/env/launcher golden, in addition to 26 boundary tests.
+Native V1 checkpoint 38359590971 SUCCESS for both supported pinned binaries;
+10 required checks passed. The dedicated gate now also triggers on edits to
+the production-entry snapshot test itself. Main/release still require the final
+head checks and the exact CLI/runtime pairing gate, not this historical snapshot.
+
+Scope: V1 human co-presence Auth.Info persistence on normal stop/restart only.
+Final source head 1a0120950a2e3c0779b6c6eb2ef40cf64883acfd:
+auth Docker 38360079942 SUCCESS (28 normal, 1 production-wiring assertion RED);
+native 38360079851 SUCCESS (both supported V1 pins), pair 38360080013 SUCCESS,
+typecheck 38360080010 SUCCESS and all 10 required checks PASS. Auth CI's actual
+tested merge 060d4c6089093fe1ad457d83b82b1e41bb735ab4 is full-tree identical to
+source main299cd2273033c33026de397c206843440b7ba96c (PR2693, 15:04:32+08).
+Formal notes correction PR2694/mainb4cd36f7a31385af0765533b1a8edf397841d19a
+changes no package source tree. See report-test1120-publication.txt for public
+bytes and independent original-user feedback limits.
+Session-history recovery, crash/SIGKILL auth updates and original-node live
+login/restart verification remain separate; #1120 must stay open for them.
+Publication status is recorded separately; this test report does not certify
+original-node account feedback or full credential/state disaster recovery.

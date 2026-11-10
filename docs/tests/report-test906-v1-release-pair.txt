@@ -1,0 +1,92 @@
+#906 CLI172/runtime138 release pairing — PUBLIC PAIR / NO ACTIVATION
+
+Observed2026-10-12 21:49+08, package source for BOTH targets:
+b61c0e490659e94ad1e487cc8086cb73dfa8f6ad (main ancestor).
+
+Runtime2.5.0-preview.138:
+- Formal run38252273421 build114821349416; gates114823810747/114823810506/
+  114823810618/114823810610 all SUCCESS, publish114827553712 SUCCESS.
+- Full anonymous canonical npm tarball downloaded and cmp matched the exact
+  main artifact,593514B; SHA256101c9a85622db3c6934e48ec5239d105e1b315cc0f7d53a183056b6514ccfd7f.
+- SHA1 75f620dbe4e450e95afa7aedc5d77e9111621757 matches registry metadata.
+- Registry preview138; latest2.5.0-preview.58 unchanged. Public time
+  2026-10-12T13:17:36.259Z. Metadata200 briefly preceded a tarball404;
+  only the subsequent full canonical byte download counted as availability.
+
+CLI2.3.0-preview.172:
+- Original release run38255025281 workflow headffa0cc6d9b39a120978806ca18d10dd3b649d3f9,
+  explicit checkout/build sourceb61c above (verified original build log).
+- Build114830755624 and gates114831101500/114831101450/114831101460/
+  114831101420 all SUCCESS. npm publish step SUCCESS, but original whole run
+  FAILURE after910s registry readback timeout. Preserve that failure; no npm
+  republish, new version or false original-job PASS.
+- Later full anonymous canonical npm tarball downloaded/cmp matched the
+  original formal main artifact,2118019B; SHA2566f19a3b63ce70d5157cf2ea1f5b036662a4f47920f857e5eecb7f755d3ec759a.
+- SHA1 d51478d2fb53689fa14671c676b1b8a90e40d1d8 matches registry metadata;
+  preview172, latest2.3.0-preview.76 unchanged. Public time13:40:11.261Z.
+
+Official GitHub CLI fallback:
+- Reviewed source-identity correction PR2658 mainaf0eff51c295af34ef6b81215520dc261adac66d;
+  raw-log file transport PR2659 main69922aabb774d655a9b0a6577ab14e9dba1937dc.
+  Existing independent Docker9-case contracts and ten required gates passed.
+- Failed runs38255441306 (workflow head/source mismatch) and38256720733
+  (gh ANSI log output protection, before Python guard) retained. No assets
+  created by either; no main/branch/gates/hash/identity check removed.
+- Run38258070406 workflow head69922a above, package sourceb61c, original
+  source run38255025281. Contract114841199361/publish114841452881 SUCCESS.
+- Immutable tag cli-v2.3.0-preview.172 -> exact b61c main package source.
+  Non-draft prerelease published13:47:36Z (21:47:36+08).
+- Full anonymous GitHub tarball downloaded/cmp matched the same main/npm
+  bytes and SHA2566f19a3b6...ec759a,2118019B. Download:
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.172/sleep2agi-agent-network-2.3.0-preview.172.tgz
+
+No native client installer/signature, real OAuth/vendor model, legacy production
+history export, node/daemon software activation or full machine recovery proof.
+No local product test/global npm modification/production restart/account/model
+change. Public archive caches retained for byte comparison; worktrees retained.
+Existing clients and old runtimes remain unchanged until separately activated.
+
+--- Earlier pair acceptance and pending states, retained as historical ---
+
+Observed2026-10-12 20:59+08:
+- PR2656 head723206ea660f64ee2d9ae7fe18cede1b18d9fb7a.
+- Docker Actions38251590593/job114819018758 SUCCESS: 10 tests across3 files,
+  27 assertions, zero failures. Exact pair and both package/lock consistency.
+- Tested merge5e873bc067289a26606a95a2ab6a4075bc7d7cba; no product recovery
+  code changed. Native recovery/export proof remains in PR2652/2654 reports.
+- Ten current required merge contexts SUCCESS; ordinary head-locked squash,
+  no admin/bypass/budget or guard modification. Other optional checks pending.
+- PR2656 merged12:56:20Z (20:56:20+08), main source
+  b61c0e490659e94ad1e487cc8086cb73dfa8f6ad.
+- PR2655 legacy-export evidence report merged12:55:25Z, main84b028f9a4273a9e6c76c29367d7d0806efd0cc5.
+- Runtime138 formal release.yml run38252273421 was dispatched on main with
+  commit=b61c0e490659e94ad1e487cc8086cb73dfa8f6ad and publish=true. Latest
+  observed build job114821349416 QUEUED; not a build/install/publish PASS.
+- CLI172 formal publication NOT DISPATCHED: wait for actual runtime138 bytes.
+  Anonymous exact-version registry checks returned404 before publication;
+  existing CLI171/runtime137 remain unchanged. No preview/latest movement.
+- Superseded headf84654340da0e0b9097e793d1cf99b0be3b81b48:31 unfinished
+  owned PR runs cancelled after individual branch/head/event/status rechecks.
+  Total34 old-head runs now completed/cancelled; the other3 cancellation
+  reasons were not independently diagnosed. No old-head PASS reused.
+- Merged owned PR2654 optional report-only QA38250521001 and superseded
+  owned main18697437e7373f236803da2ff039f67f55e75d09 QA38248706388 confirmed
+  completed/cancelled. Previously successful jobs retained, not whole-QA PASS.
+  Neither current-main counterpart nor publication gates cancelled.
+- No local product test/container, global npm write, production capture,
+  daemon/business-node restart, login/credential/model/config change.
+- Worktrees retained. No package/public-byte/activation claim yet.
+
+--- Original candidate plan, retained as historical ---
+
+Only package+lock versions, immutable pair, bilingual guidance and release
+notes changed. Hub128, product checkpoint/export implementation and production
+unchanged. Existing source core PR2652 and PR2654 passed fixed native1.18.1 and
+1.18.34 in Docker Actions; no repeat native matrix for this version-only slice.
+
+Pair core uses Dockerfile.pair in Actions, no network at runtime, ordinary UID;
+actual resolver pair assertions plus both package/lock consistency tests.
+Current result PENDING. Formal main-only runtime/CLI publication gates will
+rebuild and verify install/notes/pins/docs before publishing, not reuse PR bytes.
+No local product suite, global npm write, daemon or business-node restart.
+Report publication, anonymous bytes and selected-node activation separately.

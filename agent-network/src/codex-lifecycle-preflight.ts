@@ -32,6 +32,8 @@ export interface PreflightFacts {
     readonly dirMode: number | null;         // null = 不存在
     readonly authMode: number | null;
     readonly authBytes: number | null;
+    /** Selected custom env_key observed identically in owned Codex TUI/app-server. */
+    readonly providerEnvAttested?: boolean;
     readonly configTokenFingerprint: string | null;
     readonly envFileTokenFingerprint: string | null;
   };
@@ -82,13 +84,15 @@ export function checkHome(f: PreflightFacts): ReceiptCheck {
   const h = f.home;
   if (h.dirMode === null) return { key: "home_isolated", status: "fail", detail: `CODEX_HOME missing: ${h.dir}` };
   if ((h.dirMode & 0o077) !== 0) return { key: "home_isolated", status: "fail", detail: `CODEX_HOME mode ${h.dirMode.toString(8)} is not owner-only`, evidence: { dir: h.dir } };
-  if (h.authMode === null || !h.authBytes) return { key: "home_isolated", status: "fail", detail: "auth.json missing or empty in CODEX_HOME", evidence: { dir: h.dir } };
-  if ((h.authMode & 0o077) !== 0) return { key: "home_isolated", status: "fail", detail: `auth.json mode ${h.authMode.toString(8)} is not 0600`, evidence: { dir: h.dir } };
+  const envOnly = h.authMode === null && h.providerEnvAttested === true;
+  if (!envOnly && (h.authMode === null || !h.authBytes)) return { key: "home_isolated", status: "fail", detail: "auth.json missing or empty in CODEX_HOME, and no selected provider key attested in owned Codex processes", evidence: { dir: h.dir } };
+  if (h.authMode !== null && (h.authMode & 0o077) !== 0) return { key: "home_isolated", status: "fail", detail: `auth.json mode ${h.authMode.toString(8)} is not 0600`, evidence: { dir: h.dir } };
   if (!h.configTokenFingerprint) return { key: "home_isolated", status: "fail", detail: "node config carries no CommHub token" };
   if (h.envFileTokenFingerprint && h.envFileTokenFingerprint !== h.configTokenFingerprint) {
     return { key: "home_isolated", status: "fail", detail: "copresence env file token differs from node config token", evidence: { configTokenFingerprint: h.configTokenFingerprint, envFileTokenFingerprint: h.envFileTokenFingerprint } };
   }
-  return { key: "home_isolated", status: "pass", detail: `CODEX_HOME 0700, auth.json 0600 (${h.authBytes} B), token fp ${h.configTokenFingerprint}`, evidence: { dir: h.dir, tokenFingerprint: h.configTokenFingerprint } };
+  const auth = envOnly ? 'selected provider key present in owned Codex TUI/app-server (remote validity not checked)' : `auth.json 0600 (${h.authBytes} B)`;
+  return { key: "home_isolated", status: "pass", detail: `CODEX_HOME 0700, ${auth}, token fp ${h.configTokenFingerprint}`, evidence: { dir: h.dir, tokenFingerprint: h.configTokenFingerprint } };
 }
 
 // ③ 工作目录同时匹配 config、进程 cwd、TUI -C、Bridge project_dir、TUI 状态栏。

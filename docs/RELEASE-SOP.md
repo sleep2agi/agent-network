@@ -87,9 +87,9 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > 所以 R367 没有、也不该把它们清掉。代价是:**latest 或 preview 一发布,它们立刻变成假的**,
 > 而且是危险的那种假 —— 会告诉用户一道已经存在的安全 preflight 不存在。
 >
-> 逐次发版必须重新核对的位置(**43 行**,其中 42 个首格是纯路径,门只认这 42 个 ——
+> 逐次发版必须重新核对的位置(**51 行**,其中 50 个首格是纯路径,门只认这 50 个 ——
 > 不要把 zh/en 合成一行数,分母数错会漏核。
-> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42 → 39 → 43。**加新的信道断言时,同时把它加进这张表**,
+> 这张表的分母被修正过四次:7 → 8 → 12 → 14 → 40 → 42 → 39 → 43 → 49。**加新的信道断言时,同时把它加进这张表**,
 > 否则下一个人照着一份"看起来完整"的清单去核,漏掉的那几页永远不会被发现):
 >
 > | 文件 | 行 | 断言 |
@@ -104,6 +104,12 @@ R212/R213/R215/R225/R251/R253 chain 已经把 `docs-site/docs/guide/runtimes.md`
 > | `docs-site/docs/en/troubleshooting/is-this-node-alive.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/grok.md` | 见门输出 | Grok 节点页(原 grok-tui + grok-copresence 合并)：共存随 npm 发布包提供(latest 与 preview)、agent-node 版本下界断言——发版时核对仍真 |
 > | `docs-site/docs/en/guide/grok.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/opencode.md` | 见门输出 | OpenCode V2 指南：当日 npm `preview` / `latest` 具体版本，以及创建标志进入 preview 线的下界；模型目录读取器不在已发布 preview 包里。dist-tag 一动，版本句变假，发版时重核 |
+> | `docs-site/docs/en/guide/opencode.md` | 见门输出 | 同上(英文) |
+> | `docs-site/docs/guide/cli.md` | 见门输出 | V1 旧 CLI .171 / runtime .137 不恢复；新 .172/.138 候选需私有快照及首次旧桥导出，发布前不可下载，不把新版本号或心跳当作原会话恢复证明 |
+> | `docs-site/docs/guide/agent-node.md` | 见门输出 | 队列策略下界：CLI .175 / runtime .141 起认证 Dashboard 默认有界 4h、其他仍 30m；CLI .176 / runtime .142 起两层待办中认证人类优先、同级 FIFO，不抢已取出的工作；公开不等于采用 |
+> | `docs-site/docs/en/guide/agent-node.md` | 见门输出 | 同上（英文）；显式配置与 Hub 到期/取消仍优先，饱和并发需等槽位，不新增 active-owned-turn 注入或位置 UI |
+> | `docs-site/docs/en/guide/cli.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/upgrade.md` | 见门输出 | 初始管理员密码一节写「现在的 `latest` 与 `preview` 都在 `≥ 2.2.22-preview.4` 范围」（原 versioning 页并入）——是下界断言，发新版不会变假 |
 > | `docs-site/docs/en/guide/upgrade.md` | 见门输出 | 同上(英文) |
 > | `docs-site/docs/guide/install.md` | 见门输出 | 安装页(原 windows / deploy/npm / one-shot-install 并入)：Bun preflight「`2.3.0-preview.47` 及以后」与 Windows 跨盘修复「`2.3.0-preview.29` 及以后」都是下界断言，发新版不会变假 |
@@ -213,8 +219,6 @@ fail-closed，不拿空串去 grep——空串 grep 恒真会把断言变成永�
 - `docs-site/docs/v0.8.0/**`（整套历史归档版本的 docs）
 - `docs/archive/**`
 - `docs/evolution-log.md`
-- `docs/upgrade-v2.md`
-- `docs/sdk-upgrade-*.md`（baseline 报告）
 - `tests/test-npm-security/`、`tests/test28-demo-debate-v2.1.2/`、
   `agent-network/tests/docker-e2e/run-e2e.sh`（测试 fixture 钉死版本）
 
@@ -343,6 +347,30 @@ notes 写漏两节的 PR 会一路绿灯合进 main，直到你触发发版才�
 
 ⇒ 写 notes 时**照着上一版的文件抄形状**，别从空白开始。
 
+### Step 5.6：发完之后核**真实产物**，不是看 CI 文案
+
+`release-gate` 只证明"笔记形状 + 安装冒烟 + 版本钉"没问题，**不证明用户下载的字节里
+有你在 notes 里承诺的功能**。发布后跑这个（只读，不碰运行中的 hub 和数据库）：
+
+```bash
+scripts/verify-hub-release.sh                      # 用 preview dist-tag
+scripts/verify-hub-release.sh 0.9.0-preview.146    # 钉版本
+scripts/verify-hub-release.sh 0.9.0-preview.146 --tag latest
+```
+
+它做四件事：`dist-tags.<channel>` 是否等于该版本 → tarball 能否匿名下载并解压 →
+`package.json` 里的版本是否一致 → **按版本探测功能**（有 `since` 表，低版本自动 skip）。
+
+🔴 **两条 2026-10-23 踩出来的规矩**（脚本里都写死了）：
+
+1. **只钉行为，不钉实现位置**。那天我先断言"`assign_agent` 在 `departments.ts` 里"，
+   而分发其实在 `tools.ts` —— 包是好的，探针是错的；
+2. **不拿未发布的功能当验收条件**。同一天我把属于 PR2907 的 `avatar_storage_full`
+   当成了 `.145` 的必检项，而那一版本来就不含它 —— 于是"发布成功"被自己的脚本判成 FAIL。
+
+技能一句话：**探针错了和包坏了，输出长得一模一样**；所以探针要么盯"这个动作能不能
+被调到"，要么盯"这段行为在不在"，别盯文件名。
+
 ### Step 6：publish preview —— 走 GitHub Actions，**不在本机发**
 
 🔴 **本机不发包。** 这是 Vincent 2026-08-27 定的规则：发版一律走 GitHub Actions，
@@ -365,7 +393,93 @@ gh workflow run release.yml \
 > 本文档早先在这一步写的是 `cd agent-node && npm publish --tag preview`。
 > **那条指令现在是违规的**，已删除 —— 它正是上面那起事故的动作形状。
 
+#### 6.1 发布凭据的两种形态：`NPM_TOKEN`（旧）与 trusted publishing（OIDC，推荐）
+
+发布这一步有两种认证形态，`release.yml` 与 `promote-latest.yml` 都按同一个仓库变量切换：
+
+| 形态 | 开关 | 行为 |
+|---|---|---|
+| `secrets.NPM_TOKEN`（长期 token） | 默认 | `setup-node` 写 `.npmrc` 的 `_authToken`；token 泄露即等于发布权泄露 |
+| **trusted publishing（OIDC）** | 仓库变量 `NPM_TRUSTED_PUBLISHING=true` | **不写 `_authToken`**；npm 用本次运行的 OIDC 短时凭据发布，作用域只限这个仓库 + 这个 workflow |
+
+切换步骤（一次性）：
+
+1. npmjs.com → 该包 → **Settings → Trusted Publisher** → GitHub Actions，填
+   `org=sleep2agi`、`repo=agent-network`、`workflow=release.yml`（`environment` 留空）；
+2. 仓库 Settings → Variables → 新建 **`NPM_TRUSTED_PUBLISHING = true`**；
+3. 观察一次 `release.yml` 的 publish job 成功后再删 `secrets.NPM_TOKEN`。
+
+### 6.2 🔴 「publish 成功但 registry 里没有」先等 45 分钟，别重发
+
+2026-10-19/20 我按「发布失败」处理了三个版本，结论错了。事实是**处理慢**：
+
+| 包 | `npm publish` 之后到 registry 可见 |
+|---|---|
+| `agent-network@2.3.0-preview.186` | 未见（那一版被后续 `.187` 取代） |
+| `agent-network@2.3.0-preview.187` | **约 40 分钟** |
+| `agent-network-dashboard@0.6.3-preview.60` | **约 40 分钟**（`.59` 当时 7 分钟，快慢没有稳定值） |
+
+- `npm publish` 打印 `Your package is being processed and may take a few minutes` 时，
+  **退出码 0 不等于已经可见**；`npm view` 404 也不等于失败。
+- 🔴 **不要重发**：同一个版本重发会被拒
+  `E409 Cannot publish over previously staged version` —— 这条错误会把「慢」误读成「staged 卡住」。
+- 判据（按顺序、每次间隔几分钟）：
+
+```bash
+npm view <pkg>@<version> version      # 404 = 还没转出
+npm view <pkg> dist-tags              # 标签是否已指过去
+npm stage list                        # 有 staged 条目才谈得上「去批准」
+```
+
+- `release.yml` 的发后核实上限已按实测调到 **45 分钟**（`VERIFY_TIMEOUT_MIN`）：
+  超时只代表「尚未核实」，不代表「没生效」。发版人此时应该**等**，不是重发。
+
+### 6.3 npm 正在收紧「免 2FA 的发布 token」（与本条事故无关，但迟早要切）
+
+npm CLI 会打这类提示：
+
+```
+npm notice npm tokens that bypass 2FA are being restricted for account changes and direct publishing.
+```
+
+它**不是** 2026-10-19 那三个版本「看不见」的原因（那是 §6.2 的处理延迟，我一开始判断错了），
+但方向明确：长期 token 的发布通道会越来越受限。
+
+发布工作流已支持切到 **trusted publishing（OIDC）**，开关与步骤见 **§6.1**。
+切换是「迟早要做」的加固项，不是当前故障的解药 —— 不要把它当成发布失败的通用解释。
+
 ### Step 7：等待窗口 ≥ 30 分钟 + owner explicit ACK
+
+#### npm registry 尚不可下载时：复用正式 gated CLI tarball
+
+`npm publish` 被接受不等于匿名下载可用。不得重发同一版本，也不得把 PR artifact
+当正式包上传。CLI 可用 `.github/workflows/cli-gated-download.yml` 从 **GitHub Actions**
+发布原 `release.yml` 已验证的精确 main tarball；不在本机发包，不更改 npm dist-tag。
+
+输入必须是完整40位 main 源 SHA、该源的 main workflow_dispatch release run ID、
+CLI 精确版本及 **inner tarball** SHA256（不是 artifact ZIP digest）。工作流核查
+原 build 和四道门全部 SUCCESS、包名/版本/字节；下载前和公开前再次核查当前 main
+祖先关系。只创建新的不可变 `cli-v<version>` tag，不覆盖已有 tag/asset。
+
+workflow_dispatch 的工作流 head 可因 main 后续报告提交而不同于实际 checkout 源。
+此时下载门还必须从原 build job 的认证日志核对唯一 checkout SHA，以及已成功的
+main source guard 的 PUBLISH/RELEASE_COMMIT 输入；缺失、歧义或不匹配一律拒绝。
+不能仅凭工作流 head、用户填写的 SHA 或相同包版本替代实际构建来源。
+
+```bash
+gh workflow run cli-gated-download.yml --ref main \
+  -f commit=FULL_40_CHARACTER_MAIN_SOURCE_SHA \
+  -f run_id=ORIGINAL_RELEASE_RUN_ID \
+  -f version=EXACT_CLI_PREVIEW_VERSION \
+  -f sha256=INNER_TARBALL_SHA256 \
+  -F publish=true
+```
+
+公开后匿名下载整个 tarball，与原 SHA256 比对，才交接升级。该下载只是 CLI npm
+tarball，不是已签名的原生客户端。Daemon 使用版本源中的精确 runtime 配对，启动、
+验证与回滚仍按 `docs-site/docs/deploy/daemon.md`；保留旧私有安装和受保护配置，
+不自动改业务节点、登录账号、生产数据或服务拓扑。账号/会话仍来自原有安全来源和
+备份；此路径不增加端口、代理、密钥源或数据备份方案。
 
 两阶段发版规则（release-preview-first，见 [CONTRIBUTING.md §Release process](../CONTRIBUTING.md)）：
 
@@ -589,6 +703,33 @@ grep -c '<你的串>' package/dist/src/daemon-capability-display.js
 两处，`sync-pinned-versions.sh` **都不覆盖**，必须手工改，且 `release-gate` 的 **gate 4**
 会检查机器戳。
 
+#### 2.6.1 但「戳」和「正文」必须在**发包前**改 —— 否则 gate 4 直接拦发布
+
+2026-10-23 实测（`agent-network@2.3.0-preview.191`）：bump PR 合入、门也 dispatch 了，
+`build / gate 1 / gate 2 / gate 3` 全绿，**gate 4 红**，`publish` 被 **skipped**：
+
+```
+::error 正在发 agent-network@2.3.0-preview.191(preview 通道),而文档仍然断言 preview=2.3.0-preview.190
+    docs-site/docs/guide/getting-started.md:9
+    docs-site/docs/en/guide/getting-started.md:10
+```
+
+原因不是「戳过期」这种小漂移，而是**正文本身会变假**：`.190` 那段写的是 agent-node
+`.153` 的节点行为，而 `.191` 配对的是 `.154`。只改戳会被第二判据再拦一次
+（戳标出的版本必须在正文里落地，且正文描述要与该版本一致）。
+
+⇒ 所以顺序是**三段**，不是两段：
+
+1. **bump PR 里一起改** `getting-started.md`（中英各一份）的戳 + 正文；
+2. 本地先跑 gate 4 的同一条判据，绿了再 dispatch：
+   ```bash
+   python3 scripts/check-doc-version-claims.py \
+     --package '<pkg>' --version '<版本>' --verify-latest-from-npm
+   ```
+   ⚠️ `channel=latest` 的戳**不要跟着改**：`--verify-latest-from-npm` 比的是 npm 的
+   `dist-tags.latest`，preview 版本发出去之前它还是旧值；只改 `channel=preview` 那条。
+3. 发包成功之后才做**站点部署**（下一段）—— 否则站点会告诉用户装一个 npm 上不存在的版本。
+
 **② 站点部署。** 改完文档要真的部署 anet.sh，否则 main 上是新的、线上还是旧的。
 用 prebuilt 流（见 `deploy/docs-site/README.md`），部署后跑
 `.github/scripts/check-docs-site-drift.py` **按内容**验收，不看状态码。
@@ -687,3 +828,74 @@ git diff && git commit -m "chore(release): rollback @sleep2agi/<pkg> to <old-sta
 
 维护：发现遗漏或新增 hardcoded 位置时直接改本文档 + sync 脚本。改动走 PR 流程，
 Tier 1 review（通信龙 / 通信SDK马）通过后 merge。
+
+---
+
+## 7. 2026-11-05 实测踩出来的三条（写进这里，别靠记性）
+
+这三条都不改代码，但每一条都单独烧掉过至少一整轮。
+
+### 7.1 dispatch 的 `commit` 必须是**完整 40 位 SHA**
+
+```text
+传 8 位短 sha   ⇒ build 的 checkout 报
+                  "A branch or tag with the name 'dcb3b00f' could not be found"
+传分支名 main   ⇒ build 报
+                  "Publishing requires an explicit full 40-character commit SHA"
+```
+
+正确写法：
+
+```bash
+FULL=$(git rev-parse origin/main)      # 40 位
+curl ... -d "{\"ref\":\"main\",\"inputs\":{...,\"commit\":\"$FULL\",...}}"
+```
+
+### 7.2 冲突标记会**悄悄**进主干，唯一的拦网是一条便宜命令
+
+rebase / merge 收尾时用 `git add -A`，会把**尚未解决**的冲突文件一起提交。
+本次代价：`agent-node/package.json` 与 `package-lock.json` 带着 `<<<<<<< HEAD`
+进了主干 ⇒ release 的 `npm install` 直接 `EJSONPARSE`，tarball 都构不出来。
+
+```bash
+git add <具体文件>              # 不要 -A
+git diff --cached --check       # 专报冲突标记；输出为空才算干净
+```
+
+### 7.3 文档里的版本断言要**同一次**提交里跟
+
+`release-gate` 的 gate 4 会拿 `docs-site/docs/**/getting-started.md` 的
+`<!-- version-claim: ... version=X -->` 与本次发布的版本逐字比对。
+不同步 ⇒ gate 4 红 ⇒ publish 跳过，而前面四步全绿（看起来像"只差一步"）。
+
+### 7.4 判「发布出来的包完不完整」不要用 `ls | head`
+
+```bash
+# ❌ ls -la .../dist/bin/ | head -5   —— head 截断后，「没有第 6 行」与「只有 5 个文件」同形
+# ✅ 存在性判据（存在即为 1，缺了就是 0）
+curl -sL "$(npm view <pkg>@<ver> dist.tarball)" | tar tzf - | grep -c '^package/dist/bin/cli.js$'
+```
+
+本轮就有人（我）用 `head -5` 判过「包缺 cli.js」，实际只是输出被截断，白开了一张卡。
+
+### 7.5 一次 release 的**往返是 45 分钟**，这是设计值，不是故障
+
+`release.yml` 的「发后核实」会轮询 registry 最长 **45 分钟**
+（`VERIFY_TIMEOUT_MIN: '45'`），因为 npm 处理完毕后到 registry 可见历史上最坏约 40 分钟
+（`.186/.187` 实测；注释里写着「超时只说明尚未核实，不是没生效」）。
+
+于是有两个操作性后果，都不 obvious：
+
+```text
+① 看到 publish 步骤「in_progress」20–40 分钟，**不要重发**
+   重发会撞 E409（Cannot publish over previously staged version），把本来会好的那次也搞坏
+② 发版要**凑批**：同一个包连发两版，第二版必须等第一版从 registry 可见
+   （因为 gate 2 会 npm view 核对 pinned 常量；配对包还要断言 agent-node 已在 npm 上）
+   ⇒ 「改一点发一版」在这个仓里是 45 分钟起步，而不是 5 分钟
+```
+
+判据（别用 GitHub 的 in_progress 猜）：
+
+```bash
+npm view <pkg>@<version> version      # 出现 = 可见；npm error 404 = 还没到
+```

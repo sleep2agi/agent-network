@@ -59,8 +59,26 @@ test("public errors redact free text for granted viewers on every projection", a
       "not_my_child: daemon has no local record of fixture-node (fixture-id) — no children-map entry and no config at /private/fixture/fixture-node/config.json; refusing to signal processes by alias.",
       "bin: ENOENT: /private/fixture/bin/anet on fixture-host",
       "adopt_unknown_secret", "adopt_start_timeout: /private/fixture", "", "adopt_start_timeout", null,
+      "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed",
+      "adopt_codex_external_start_unproven", "adopt_codex_launch_failed", "adopt_codex_launch_timeout",
+      "adopt_codex_port_unproven", "adopt_codex_start_superseded", "adopt_codex_binding_generation_unproven",
+      "adopt_codex_start_evidence_missing", "adopt_codex_start_evidence_changed",
+      "adopt_codex_session_conflict", "adopt_codex_port_unavailable", "adopt_codex_stage_still_running",
+      "adopt_codex_identity_unproven",
+      "TUI session mismatch", "opencode_launch_health:TUI session mismatch", "opencode_tui_session_mismatch",
+      // #2012：daemon 明确拒绝的固定安全码，必须原样投影给用户，而不是退化成 lifecycle_error。
+      "copresence_adopt_v2",
+      // 负控：带后缀/路径/空白的形状仍必须清成 lifecycle_error（只精确放行这一串）。
+      "copresence_adopt_v2: /private/fixture", "copresence_adopt_v2x", " copresence_adopt_v2",
     ]) {
-      const expected = error === null || error === "adopt_start_timeout" ? error : "lifecycle_error";
+      const publicCodes = ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed", "opencode_tui_session_mismatch",
+        "copresence_adopt_v2",
+        "adopt_codex_external_start_unproven", "adopt_codex_launch_failed", "adopt_codex_launch_timeout",
+        "adopt_codex_port_unproven", "adopt_codex_start_superseded", "adopt_codex_binding_generation_unproven",
+        "adopt_codex_start_evidence_missing", "adopt_codex_start_evidence_changed",
+        "adopt_codex_session_conflict", "adopt_codex_port_unavailable", "adopt_codex_stage_still_running",
+        "adopt_codex_identity_unproven"];
+      const expected = error === null || publicCodes.includes(error) ? error : "lifecycle_error";
       for (const [kind, table, request] of [
         ["adopt", "node_daemon_bindings", "adopt_read_active"],
         ["start", "node_start_requests", "start_read_failed"],
@@ -115,6 +133,13 @@ test("adopt query preserves all persisted states, request id and bounded project
   for (const status of ["pending", "active", "refused", "revoked"]) {
     const r = await get(query("adopt", `request_id=adopt_read_${status}`));
     expect(r.status).toBe(200);
+    console.log("LIFE_KEYS=" + JSON.stringify(Object.keys(r.body).sort()) + " REQ_KEYS=" + JSON.stringify(Object.keys(r.body.request).sort()));
+    // 2026-10-31 —— #3214：外层与 request 的键集都由真实调用给出（此前只断言了值）
+    expect(Object.keys(r.body).sort()).toEqual(["ok", "request"]);
+    expect(Object.keys(r.body.request).sort()).toEqual([
+      "created_at", "daemon_node_id", "error", "kind", "network_id",
+      "node_id", "request_id", "status", "updated_at",
+    ]);
     expect(r.body.request).toMatchObject({ kind: "adopt", status, request_id: `adopt_read_${status}` });
     expect(r.body.request.workdir).toBeUndefined();
     expect(r.body.request.requested_by).toBeUndefined();
@@ -137,6 +162,36 @@ test("cross-network request and node guesses do not disclose data", async () => 
     expect(denied.body).toEqual((await get(query(kind, "request_id=nonexistent"), b.token)).body);
     expect((await get(query(kind, `node_id=${ids.active}`), b.token)).status).toBe(404);
     expect((await get(query(kind, `request_id=${id}&network_id=${a.network_id}`), b.token)).status).toBe(403);
+  }
+});
+test("fork receipt uses the same authenticated node visibility and redacts corrupt storage", async () => {
+  const receipt = { state: "forked", old_thread_id: "01a11846-d796-72f1-af68-8d9215a65dc8", new_thread_id: "01a11900-0000-7000-8000-000000000001" };
+  const path = query("start", "request_id=start_read_failed");
+  try {
+    db.run("UPDATE node_start_requests SET fork_recovery_json=?1,fork_result_json=?2 WHERE request_id='start_read_failed'",
+      [JSON.stringify({ kind: "fork_on_missing_ordinal", confirmed: true }), JSON.stringify(receipt)]);
+    expect((await get(path)).body.request.fork_recovery).toEqual({ requested: true, result: receipt });
+    expect((await get(path, b.token)).status).toBe(404);
+    expect((await get(path, limited.token)).status).toBe(404);
+    expect((await get(path, daemonToken)).status).toBe(403);
+    db.run("INSERT INTO network_member_agent_grants(network_id,user_id,node_id,can_message) VALUES(?1,?2,?3,0)", [a.network_id, limited.user.user_id, ids.active]);
+    expect((await get(path, limited.token)).body.request.fork_recovery.result).toEqual(receipt);
+    db.run("UPDATE node_start_requests SET fork_result_json=?1 WHERE request_id='start_read_failed'", [JSON.stringify({ ...receipt, snapshot: "/private/secret" })]);
+    const corrupted = await get(path, limited.token);
+    expect(corrupted.body.request.fork_recovery.result).toEqual({ state: "unknown", reason: "result_invalid" });
+    expect(JSON.stringify(corrupted)).not.toContain("/private");
+    // Corrupt confirmation cannot assert requested:true, but must not erase an
+    // independently valid recorded fork (nor make the request look ordinary).
+    for (const raw of ["broken /private/secret", "null", "{}", JSON.stringify({ kind: "fork_on_missing_ordinal", confirmed: false }),
+      JSON.stringify({ kind: "fork_on_missing_ordinal", confirmed: true, snapshot: "/private/secret" })]) {
+      db.run("UPDATE node_start_requests SET fork_recovery_json=?1,fork_result_json=?2 WHERE request_id='start_read_failed'", [raw, JSON.stringify(receipt)]);
+      const invalid = await get(path, limited.token);
+      expect(invalid.body.request.fork_recovery).toEqual({ requested: null, result: receipt });
+      expect(JSON.stringify(invalid)).not.toContain("/private");
+    }
+  } finally {
+    db.run("DELETE FROM network_member_agent_grants WHERE user_id=?1 AND node_id=?2", [limited.user.user_id, ids.active]);
+    db.run("UPDATE node_start_requests SET fork_recovery_json=NULL,fork_result_json=NULL WHERE request_id='start_read_failed'");
   }
 });
 test("same-network restricted viewer without node grants cannot read requests", async () => {

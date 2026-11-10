@@ -1,0 +1,69 @@
+#2014 / #2016 / #2017 / #2018 — new identity wire and revocation composition
+Date: 2026-10-22, first necessary new-wire run, PASS 22 assertions.
+
+EXACT PRODUCT INPUTS, all clean before the test-only evidence successor:
+- Runtime/Bridge PR2889: 3adf0408f8f2ddddf0e9536ed49568a3874591b4
+- Hub PR2890: 0aceb162632943a1398a93ce3a0b1bb78e5ffa6c
+- Client adapter PR1016: 0e7ab9e13b3617d08cb2f330d44b394194b3d6a5
+- Fixture: tests/test2014-session-background/integration/identity-wire.ts
+  tracked alongside this report; no product source changed for the run.
+
+RUN ENVIRONMENT
+Bun1.3.14, non-root uid1000, network none, read-only container/source mounts,
+128MiB /tmp tmpfs, fresh throwaway SQLite DB and freshly minted fixture-only
+human/node credentials. The Hub and synthetic OpenCode listeners are loopback
+inside the same container. No host DB/credential, identity copy or real session.
+
+Used cached integration image only for pinned Bun, existing dependencies and
+unchanged contracts:
+sha256:ebabd0066419315ce1d7bbe899999b07beb1aa01b896b548b439c2d7682da028
+All product sources above overlaid read-only. git diff verified no changes in
+server/package.json, server/package-lock.json or contracts between old Hub
+2255e25 and 0aceb1626; agent-network/src and contracts also unchanged from the
+old runtime 2f3a7158 to current 3adf0408f. No dependency install or network was
+needed. Existing integration/Dockerfile is retained, only COPY of this new
+opt-in fixture added; its default old run.ts CMD is unchanged and was NOT run.
+
+WITNESSES (22 checks, not the old 13-case suite)
+1. Actual Bridge POST /bridge to actual Hub accepts expected node/network and
+   returns all three authority fields matching the authenticated token identity.
+   Unchanged client adapter -> real Hub HTTP/SQLite -> actual Bridge pull/ACK ->
+   actual runtime HTTP adapter -> Basic-auth synthetic OpenCode returns only
+   request_processed, with exactly one original-session background POST.
+2. Same expected node/network but a separately minted peer-node token: actual
+   Hub409/session_control_changed, no successful identity, no claim or write by
+   the refused Bridge. The original binding still answers the client unchanged.
+3. Revocation injected AFTER the real last preflight HTTP read resolves:
+   one background claim, zero runtime POST and zero ACK; client observes unknown
+   when its local wait ends. Restoring original token with a later epoch does
+   not revive registration, pull, ACK or writes.
+4. Revocation injected AFTER the real single runtime POST completes with204:
+   exactly one POST, no ACK, client unknown, no registration/claim/ACK/replay
+   after A-to-B-to-A. It does not claim the already-sent write was retracted.
+
+IMPORTANT LIMITS
+- unknown here is the unchanged client's local wait result, NOT an assertion
+  that the Hub TTL has already expired or a server terminal receipt exists.
+- Polling calls the real Bridge trigger as a doorbell; this narrow fixture does
+  not repeat the previously tested SSE wire or full13 cases.
+- Exercises product identity Pin and epoch/AbortSignal checkpoints, not an
+  actually launched CLI config watcher or real token-file hot rotation.
+- OpenCode endpoint is a model-free Basic-auth fixture, not installed OpenCode,
+  native TUI, a real backgroundable tool or the screenshot node.
+- Not main/required-CI, paired-release, native acceptance or activation proof.
+  No deployed Hub/runtime, live process/session, DB, version or model changed.
+
+REPRODUCE WITHOUT THE PRIVATE CACHED IMAGE
+Assemble a throwaway context from this report's commit (runtime + test files),
+then overlay ONLY server/ from exact Hub0aceb1626 using git archive. Supply a clean
+app-src checkout at exact0e7ab9e1 via the existing named build context:
+  docker build --build-context app-src=<exact-client-checkout> \
+    -f tests/test2014-session-background/integration/Dockerfile \
+    -t anet-test2014-identity-wire <assembled-context>
+  timeout 90s docker run --rm --network none --read-only --user 1000:1000 \
+    --tmpfs /tmp:rw,nosuid,size=128m,mode=1777 \
+    anet-test2014-identity-wire bun /work/identity-wire.ts
+Actual run instead overlaid the three exact source roots and this fixture on
+the dependency-equivalent cached image, with identical isolation and command.
+Full local output: /tmp/opencode/2014-new-identity-wire.log. The durable witness
+is the tracked fixture and these exact inputs, not that submitting-node path.

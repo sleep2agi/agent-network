@@ -55,6 +55,7 @@ run agent-network-cli-build bun build /workspace/agent-network/bin/cli.ts \
   --external @inquirer/prompts \
   --external @sleep2agi/commhub-server \
   --external bun:sqlite --external node-pty \
-  --external '../../server/*'
+  --external '../../server/*' \
+  --external smol-toml
 
 printf '\nSummary: PASS (Docker-only integration regression)\n' | tee -a "$REPORT"

@@ -25,7 +25,7 @@ describe("#695 fetch exceptions become JSON with the exception's own message", (
     try {
       const res = await fetch(`http://127.0.0.1:${server.port}/mcp`, { method: "POST", body: "{}" });
       expect(res.status).toBe(500);
-      expect(res.headers.get("content-type") ?? "").toContain("application/json");
+      expect((res.headers.get("content-type") ?? "").split(";")[0].trim()).toBe("application/json");
       const json = await res.json() as { error: { code: number; message: string }; ok: boolean };
       expect(json.error.code).toBe(-32603);
       expect(json.error.message).toBe("boom-695-live");
@@ -35,4 +35,39 @@ describe("#695 fetch exceptions become JSON with the exception's own message", (
     }
   });
 
+  // 2026-10-31 —— join 的**前提**：一个错误要能被念回来，且念回的那个 id 必须真的进日志。
+  // 只说「加了 id」不算：三者（body / header / log）不一致时，念回 id 反而更糟 ——
+  // 它会让人以为服务端有记录。
+  // 我自己刚加了 error_id ⇒ 按本仓的「键集纪律」，这次加字段也必须是一次**有意识的**改动。
+  // 不加这条的话，下次再有人往这个 body 里加东西，没有任何测试会因此变红。
+  test("the error body's key set is pinned (adding a field here is a contract change)", () => {
+    expect(Object.keys(serveErrorBody(new Error("x"))).sort()).toEqual(
+      ["error", "error_id", "id", "jsonrpc", "message", "ok"],
+    );
+    expect(Object.keys(serveErrorBody(new Error("x")).error).sort()).toEqual(["code", "message"]);
+  });
+
+  describe("error_id: the join key must exist in all three places, identically", () => {
+    test("body.error_id === x-error-id === the logged id", async () => {
+      const logged: string[] = [];
+      const res = buildServeErrorResponse(new Error("boom-join"), (l) => logged.push(l));
+      const body = await res.json() as any;
+      expect(typeof body.error_id).toBe("string");
+      // ⚠️ 2026-10-31 —— 这条 `header === body.error_id` 的判别力有限：
+      //    header 与 body 由**同一个变量**序列化 ⇒ 它结构上恒真（改成任何实现都成立）。
+      //    真正的独立证据在下面两条：日志行里的 id 与之相同（另一个生产者），
+      //    以及「每次失败 id 不同」（常量会失败）。
+      expect(body.error_id).toMatch(/^[0-9a-f]{8}$/);
+      expect(res.headers.get("x-error-id")).toBe(body.error_id);
+      // 分母：日志必须真的有一条，且里面就是那个 id
+      expect(logged.length).toBe(1);
+      expect(logged[0]).toContain(`id=${body.error_id}`);
+    });
+
+    test("ids differ per failure (a constant id would join every incident to one line)", () => {
+      const a = serveErrorBody(new Error("a"));
+      const b = serveErrorBody(new Error("b"));
+      expect(a.error_id).not.toBe(b.error_id);
+    });
+  });
 });

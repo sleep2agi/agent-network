@@ -50,6 +50,24 @@ describe("ownershipChainVerdict (#1910)", () => {
 });
 
 describe("timedOutTurnAbortDecision (board #651)", () => {
+  test("native unfinished assistant is not an answer to our live turn (#1219)", () => {
+    const pending = { ...assistant("msg_a", "msg_sub"), info: { id: "msg_a", role: "assistant", parentID: "msg_sub", time: { created: 1 } } };
+    expect(timedOutTurnAbortDecision([user("msg_sub"), pending], "msg_sub")).toBe("abort");
+  });
+  test("native unfinished human assistant cannot unlock abort of our queued turn (#1219)", () => {
+    const pending = { info: { id: "msg_a", role: "assistant", parentID: "msg_human", time: { created: 1 } } };
+    expect(timedOutTurnAbortDecision([user("msg_human"), pending, user("msg_sub")], "msg_sub")).toBe("leave_running");
+  });
+  test("native completed tool-call step still leaves the user turn running (#1219)", () => {
+    const step = { info: { id: "msg_a", role: "assistant", parentID: "msg_human", time: { created: 1, completed: 2 }, finish: "tool-calls" } };
+    expect(timedOutTurnAbortDecision([user("msg_human"), step, user("msg_sub")], "msg_sub")).toBe("leave_running");
+    step.info.parentID = "msg_sub";
+    expect(timedOutTurnAbortDecision([user("msg_sub"), step], "msg_sub")).toBe("abort");
+  });
+  test("native completed final human reply unlocks our own unanswered turn (#1219)", () => {
+    const final = { info: { id: "msg_a", role: "assistant", parentID: "msg_human", time: { created: 1, completed: 2 }, finish: "stop" } };
+    expect(timedOutTurnAbortDecision([user("msg_human"), final, user("msg_sub")], "msg_sub")).toBe("abort");
+  });
   test("the only unanswered user message is ours", () => {
     expect(timedOutTurnAbortDecision([user("msg_sub")], "msg_sub")).toBe("abort");
   });

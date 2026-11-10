@@ -19,6 +19,7 @@ export const BOOLEAN_FLAGS = new Set([
   "--external-appserver",        // #630
   "--f",
   "--follow",
+  "--fork-on-resume-failure",    // #738 (node start <codex node> --fork-on-resume-failure)
   // 🔴 #1736 —— 这两个以前**没登记**,于是 `--force <token>` / `--yes <token>`
   //    会把下一个 token 当成它们的值吃掉。实测:
   //      parseCliOptions(["init","--force","myname"]) → {"force":"myname"}
@@ -34,12 +35,15 @@ export const BOOLEAN_FLAGS = new Set([
   "--grok-headless",
   "--hub-only",                  // #516 (node delete <node_id> --hub-only)
   "--new-session",
+  "--skip-recovery-backup",
   "--no-codex-login",            // #514 (fork)
   "--no-auto-self",
   "--no-yolo",
   "--opencode-unsafe-tools",     // #543 (node create --opencode-generation v2)
+  "--opencode-new-server",       // Opt out of the host's registered shared V2 Server.
   "--pick",                      // #536 (anet resume <codex node> --pick)
   "--resume-latest",
+  "--revoke-cli-tokens",         // #711 (anet passwd --revoke-cli-tokens)
   "--self",
   "--tmux",
   "--yes",

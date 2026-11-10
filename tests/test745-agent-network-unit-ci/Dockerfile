@@ -24,6 +24,7 @@ WORKDIR /workspace
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && npm ci
 
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/package.json
 # tests/feishu-envelope-compat.test.ts 跨包 import agent-node 的 runtime 源码。
 COPY agent-node/src ./agent-node/src
@@ -34,6 +35,9 @@ COPY agent-network ./agent-network
 COPY channel ./channel
 # #620 daemon-inherited-env.test.ts 逐名比对 hub-daemon.sh 的 _scrub_node_identity_env 名单。
 COPY deploy/hub/hub-daemon.sh ./deploy/hub/hub-daemon.sh
+# daemon-codex-inventory.test.ts 跨包 import server 的 codex-inventory。
+# 没有这行时容器里不存在 server/,模块解析红在「找不到文件」。
+COPY server/src/shared/codex-inventory.ts ./server/src/shared/codex-inventory.ts
 COPY tests/test745-agent-network-unit-ci/run.sh ./tests/test745-agent-network-unit-ci/run.sh
 
 ARG SOURCE_COMMIT

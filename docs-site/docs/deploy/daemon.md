@@ -54,6 +54,25 @@ anet daemon             # 有：打印 Usage: anet daemon <subcommand> …
 
 ## 5 分钟体验 `anet daemon` {#try-anet-daemon}
 
+### Codex 共存启动结果（源码能力，待发布） {#codex-start-completion}
+
+Hub 和 daemon 均包含 #819 的启动完成协议时，daemon 创建的 Codex 共存节点会保持
+`starting`，直到 `anet node start` 完成已有就绪检查并退出：退出码 0 才上报
+`started`，非零退出或进程信号上报 `start_failed`，不再把 launcher PID 存在当成启动成功。
+运行中每 20 秒上报进度，刷新 Hub 原有的 60 秒过期判断；不额外缩短 CLI 的大历史恢复预算。
+错误码 `codex_launcher_exit:<退出码或信号>` 表示启动器未成功，不表示已清理所有 tmux 会话。
+
+协议通过 `get_start_request.start_completion_capable` 协商；旧 Hub、旧 daemon 仍走旧启动行为，
+普通前台 runtime 和 adopted 节点不走此分支。需要 Hub 与 agent-node 都升级后才能生效；
+CLI 仍使用 daemon 已钉住的 anet。当前没有新的 fork 确认 API 或客户端恢复按钮。
+同一 daemon 存活期间重复请求复用原启动结果；不承诺 daemon 重启后恢复该内存结果，
+`started` 也不是持续健康证明。退出后 launcher PID 从子进程表移除，不作为后续停止的进程依据。
+
+本片不改变常驻服务启动脚本、端口、代理或密钥来源，不新增磁盘状态或数据库 migration。
+部署前按既有流程备份 Hub 数据和节点配置，固定已合入 main 的发布 SHA；用隔离节点核对
+`starting → started/start_failed` 后再升级实际 daemon。回滚到原 Hub/runtime 制品将恢复旧行为，
+无需数据降级迁移；节点历史与凭据仍需从原有受控备份恢复，Git 不包含这些数据。
+
 ### 1. 安装
 
 ```bash
@@ -196,6 +215,24 @@ daemon 会在子节点 config 里写 `codexCopresence: true`，之后的 `anet n
 
 - 只对 `codex-app-server` 有效；其他 runtime 带这个键会被 Hub 拒绝（`flag_not_applicable_to_runtime`）。
 - 不认识这个键的旧 Hub / 旧 daemon 会拒绝请求（`flag_key_unknown`），不会悄悄建出无头节点。
+
+校验失败时不会留下活着的三段会话。判据是子节点自己的身份标记：`copresence-identity.json` 在盘上且本 daemon 写的 config 对得上，才会用 `anet node stop <name>` 走同一套身份收据收尾；标记不在盘上时**一律不跑 stop**（那条路会退回按显示名清扫，等于按名字杀），也不会认领同名 tmux 会话。ack 的 `error` 末尾带与 OpenCode V2 相同的 `cleanup=` 结果，残留会话以 `residue_sessions=` 列出（daemon 不直接 `kill-session`）。
+
+### 经 daemon 创建 OpenCode V2 共存节点 {#opencode-v2-via-daemon}
+
+`runtime` 仍是 `opencode-cli`。要建 V2 共存节点，`create_node` 的 `node_spec.flags` 同时带 `"opencodeGeneration": "v2"` 和 `"opencodeUnsafeTools": true`，`model` 必须是 OpenCode 自己的 `provider/model`（恰好一个斜杠）：
+
+```json
+{"name": "oc-v2", "runtime": "opencode-cli", "model": "provider/model", "flags": {"opencodeGeneration": "v2", "opencodeUnsafeTools": true}}
+```
+
+这个接口不接收 anet 的 provider 预设，密钥留在目标节点已有的 OpenCode 配置里。daemon 在写子节点配置之前，要求 PATH 上的 `opencode --version` 是本发行接受的 `@opencode/cli@2.0.22`。显式 `v1` 同样必须对上接受的 `opencode-ai` 版本（当前 pin `1.18.34`，过渡版 `1.18.1`）。对不上的错误码是 `opencode_generation_mismatch`。省略 `opencodeGeneration` 仍按旧的 V1 创建，不因为机器上碰巧是 V2 二进制而拒绝。`--version` 超时不在这一步拒绝。
+
+同一台机器上同时装着 V1 与 V2 两份 `opencode` 是常见情况，而子进程 PATH 的第一命中未必是请求的那一代。自 #1611 起，显式 `v1` / `v2` 建节点会按 PATH 顺序逐个探测候选，取第一个版本被该代际接受的；启动侧同样按代际挑二进制，不再停在第一命中。所以「机器上两份都有」不再是阻塞项——但把 anet 管理的 V2 前缀（`~/.anet/oe-v2-prefix/node_modules/.bin`）留在 `daemonExtraPath` 里仍然是好习惯：它让探测少走几步，也让 PATH 顺序在别的工具里可预测。
+
+读回：daemon 上报的配置快照 `flags` 会带上 `opencodeGeneration`、`opencodeMode`、`opencodeUnsafeTools`，只读。`update_node_config` 不能改这三项。`runtime_readiness` 里的 `opencode-cli` 可带 `generation` 与 `accepted`；V2 的 `state` 仍是 `unknown`（provider 与登录取决于目标节点配置）。`accepted: false` 表示这个 2.x 不是接受的 pin，显式创建会被拒绝。
+
+post-spawn 校验失败不会留下活着的 generation。启动器没退出、退出非 0，或 launch-health / attach 记录缺失、不安全时，daemon 先停掉这次刚起的启动器，再用 `anet node stop <name>` 走与 stop doorbell 同一套生命周期收据，最后只对**本 generation 自己写的** launch-health / attach 记录里点名的进程兜底（pid 与启动时刻都要对上）。ack 的 `error` 末尾带 `cleanup=reaped | no_live_generation | handed_to_host | residue`；`cleanup=residue` 同时给出 `residue_pids=…`，表示按记录仍有进程活着、需要人工 `anet node stop <name>` 收尸 —— Hub 上的「失败」与磁盘真实状态因此在同一条 ack 里对得上。
 
 ### 任务超时 `flags.timeout` 的单位是毫秒 {#create-node-timeout-ms}
 
@@ -365,13 +402,33 @@ daemon 没有自己的 stop / delete / status 子命令，直接用节点命令�
 `anet daemon list` 提示 daemon 缺少某些 runtime 时，执行 `anet daemon init <daemon-name> --force` 补齐。
 它保留 `node_id`，但会重新签发 token，之后要重启 daemon。
 
+### 私有软件配对的窄升级 {#private-pair-upgrade}
+
+只换 Daemon 软件时，不需要 `init --force`、复制账号或重新登记节点。
+先确认原维护线已交接、目标空闲无在途请求，保留当前配置（`0600`）和旧私有安装。
+从已合入 main 的正式制品安装同一发行要求的 CLI/runtime 配对；CLI npm 暂不可下载时，
+可用 [正式门控下载备选](https://github.com/sleep2agi/agent-network/blob/main/docs/RELEASE-SOP.md#step-7等待窗口--30-分钟--owner-explicit-ack)，核对完整 tarball SHA256，不重发同一版本。
+私有目录里的安装不等于已切换；实际启动仍使用仓库 CLI：
+
+```bash
+cd <原配置工作区根>
+ANET_AGENT_NODE_BIN=<私有prefix>/node_modules/@sleep2agi/agent-node/dist/cli.js \
+  node <私有prefix>/node_modules/@sleep2agi/agent-network/dist/bin/anet.cjs daemon start <原daemon名>
+```
+
+先确认旧目标进程退出，再起一个新实例；不要直接从另一个项目目录启动裸 `agent-node`。
+验收核对实际 CLI/runtime 路径、新的同身份 Hub 心跳、SSE 和脱敏管理回读，而非仅看版本文件。
+软件回滚使用保留的旧配对与当前配置，从同一工作区根启动；不回退活跃业务数据，不扫停子节点。
+端口、代理和密钥来源仍用原部署配置；身份与本地密钥状态来自原有受控备份，Git 不含这些数据。
+升级 Daemon 不等于业务 TUI 已重启或新密钥已注入，也不证明开机扫描已钉到新私有配对。
+
 ## 收编节点的停启 {#adopted-lifecycle}
 
 收编节点的停止 / 启动从 agent-node ≥ `2.5.0-preview.118`、agent-network（`anet`）≥ `2.3.0-preview.151` 起提供；
 Hub 从 commhub-server ≥ `0.9.0-preview.109` 起对收编节点的重启返回 `adopted_restart_requires_daemon`，提示先停止再启动（`.108` 及更早没有这道拒绝门）。
 在节点原工作目录执行 `anet daemon adopt <alias> --daemon <daemon-id>` 先看计划，
 加 `--yes` 仅请求收编，必须等 daemon 独立核验、Hub 绑定成为 active 才生效。
-daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂不支持。
+daemon 配置的 `adopt_roots` 默认空，即不允许收编。codex 原生三段布局可以远程启动；`external-appserver` 布局的远程启动仍拒绝。
 
 - 停止前重新核验节点配置、UID 和 `/proc` 起始时间，只停止已核验的进程树。
 - 停止成功写入 `<nodeDir>/.hub-stopped`；`anet project up` 和仓库开机扫描会保留停止状态及 PID 文件。
@@ -389,10 +446,47 @@ daemon 配置的 `adopt_roots` 默认空，即不允许收编；共存节点暂�
 升级与回滚仍按上节及生产部署流程执行；回滚前须确认目标 daemon 保留收编节点的拒绝保护，
 不能假定所有旧版安全，也不能删除标记强行放行。
 
+### 共存节点重启后的恢复边界
+
+机器重启后，旧 `boot_id`、PID 和 marker 不能授权停止当前进程。daemon 只做无信号的
+缺席检查：对应会话以及同 UID 下携带旧 marker 或相同 `CODEX_HOME` 的进程都不在，
+才能回报已停止；有任一残留或新一代进程时返回 `adopt_codex_readopt_required`，需重新收编。
+无法读取证据时继续拒绝，不按名称清扫。删除收编节点仍拒绝，并保留
+`adopted_node_delete_unsupported` 错误码，不删目录、不停止进程。
+
+通过 CLI 手动成功启动两种 Codex 共存布局后，会写入 `.hub-resumed`，精确标记启动前的
+那一份 `.hub-stopped` 已被取代；不直接删除停止文件，避免误删另一进程并发写入的新收据。
+`anet project up` 和仓库 `deploy/fleet/anet-nodes-boot.sh` 同时识别此凭据，后续新停止
+会自动使旧凭据失效。失败启动、身份不符、损坏文件保持停止。更新时须同时部署新版 CLI
+和仓库开机脚本；未更新的旧扫描器仍保守地保持停止。凭据属于本地状态，恢复备份后若文件
+身份改变则保持停止，需要显式重新启动；回滚不会自动拉起原本停止的节点。本改动不改变
+常驻服务、端口、密钥来源或启动编排。原生布局的远程启动调用受信任的 `anet node start`，核对新 marker、三段进程和回环监听后才确认；`external-appserver` 仍拒绝。不证明 codex 版本或 rollout，也不把收编节点的 restart 放开。
+
+部署由运维执行，不由此 PR 自动部署：先记录当前 CLI 版本、开机服务的实际 ExecStart 路径，
+备份已安装脚本并对照仓库副本审查差异；从已合入 main 的精确提交发布并安装对应 CLI，
+再把同一提交的 `deploy/fleet/anet-nodes-boot.sh` 安装到该服务实际调用的位置，保留执行权限。
+核对 CLI 版本及已安装脚本的 SHA-256 与发布来源一致；先用隔离目录验证旧停止仍保持停止、
+成功手动启动的凭据可放行、新停止再次生效，再安排实际开机扫描。不要为验证而重启真实节点。
+回滚时成对恢复旧 CLI 和备份脚本，不清除 `.hub-stopped`；本地状态仅由节点数据备份恢复。
+凭据指纹只含 inode、ctime 和内容摘要，不依赖重启后可能变化的设备号；旧格式凭据不匹配时
+保持停止，显式成功启动会生成新凭据。探针仅退出码 42 表示放行，异常或其他退出码保持停止。
+
 ## 客户端收编状态查询（计划 Hub .110） {#adoption-read-api}
 
+daemon 专用 MCP `list_my_children` 对当前 active 的 adopted 子项额外返回
+`binding_request_id`，它就是不透明的绑定代际。只接受绑定目标 daemon 的有效节点令牌，
+按 daemon 与网络共同限定。owner 的 utok 也读不到；这不表示 owner 持有目标 daemon 的有效节点令牌时不能读取。
+身份按 Hub .111 的令牌属主/精确节点绑定校验（包括既有旧令牌兼容规则）解析，而非信任令牌名称：
+解析为其他 daemon 的令牌、子节点自己的节点令牌和跨网络令牌都不能读取目标 daemon 的这条绑定。
+子节点用自己的有效节点令牌调用时，若没有自己管理的子项，返回成功的空列表。
+`get_adopt_request` 仍只查询 pending，不开放 active 查询。撤销后再收编会生成新 request_id，
+旧代际不会复活；旧 Hub 缺字段时，daemon 启动前置门继续拒绝，不得用本地值补齐。
+**投影只是一次读取时的快照，不是租约。** 启动执行方须在动作边界重新确认同代绑定，
+并遵守在途生命周期的撤销保护。这个接口不执行启动。对旧客户端只新增一个字段，
+不改变已有字段或 created 子项；旧 daemon 可忽略此字段。此处不宣称实际版本兼容回放已通过。
+
 以下新增字段和接口只向请求头携带的用户 token 开放（不接受 URL token），并沿用节点列表的网络及节点可见性授权；
-不会给 daemon / 网络 token 新增读权限，也不改变旧字段。不是候选发现接口。
+不会给 daemon / 网络 token 新增读权限，也不改变旧字段。这一组只读已有的收编 / 停启记录，不是候选发现；候选发现见 [收编候选发现](#adoption-candidates)。
 
 - `GET /api/nodes` 新增 `managed: "created" | "adopted" | "none"`：分别由真实创建记录、
   active 收编绑定或均无记录决定。创建记录优先，不凭 ID 前缀或主机名猜测。
@@ -421,6 +515,24 @@ HTTP 200 或 pending 当成操作成功。返回 daemon 原因码，例如
 
 无需新配置、端口、服务或数据库迁移；升级/回滚遵循上述部署流程。绑定和请求历史仍来自
 Hub 数据库备份，Git 只恢复软件；本次未做生产升级或新的灾难恢复演练。
+
+## 收编候选发现（只读） {#adoption-candidates}
+
+daemon 在能够收编（`adopt_capable`）时，可以随心跳上报本机 `adopt_roots` 下、通过现有 v1 身份检查的手工节点。这只是一份清单：不写绑定、不发信号、不启动、不停止，也不把节点收编进来。`launch_hint`（`bare` / `tmux` / `stopped` / `unverified`）是本机提示，不是授权。
+
+和收编 v2 的边界：
+
+- 共存节点（codex 三段式、grok、opencode）不进入这份清单。daemon 发现时不打开 codex v2 身份检查；三段式的停启仍走原来的收编实现，不由这个接口代替。
+- `GET /api/nodes` 的 `managed` / `adoption`，以及 `GET /api/node-lifecycle-requests`，仍然只描述已经存在的创建记录和收编 / 停启请求。
+- 应用要真正收编，仍调用 `request_adopt_node`。daemon 会重新核验 UID、路径、配置和进程。上报过的工作目录不能当成已经核对过。
+
+`adopt_roots` 默认是空列表。不配置时 daemon 不上报 `adoption_candidates`，心跳和收编行为和以前一样。
+
+`GET /api/adoption-candidates` 只接受请求头里的用户 token（不接受 URL 上的 token，也不接受 daemon / 网络 token）。它列出同时满足这些条件的候选：daemon 在线（5 分钟内有心跳）、声明 `adopt_capable`、和节点在同一台机器上、别名与上报一致、节点本身还没有创建记录或 pending/active 绑定。工作目录只给该节点的主人、网络 owner/admin，或 Hub 管理员；其他人得到空列表。响应不含 token、环境变量或 PID。单台 daemon 最多 32 条，接口最多返回 64 条。
+
+`GET /api/host-supervisors` 只在 daemon 真的上报了数组时，给能看见该 daemon 的用户 token 增加 `adoption_discovery: true`。缺席表示这台 daemon 没有公布发现结果，不能当成「没有可收编节点」，也不能当成「不支持收编」。空数组表示发现跑过、当前没有候选。
+
+不新增表、端口、服务或密钥来源。回滚后这个接口不存在；已经生效的绑定不受影响。
 
 ## 相关 {#related}
 

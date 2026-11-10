@@ -147,7 +147,7 @@ describe("#461 GET /events/network/:id — auth", () => {
   test("member user token → SSE stream with observer connected frame", async () => {
     const res = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(memberToken) });
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type") || "").toContain("text/event-stream");
+    expect((res.headers.get("content-type") || "").split(";")[0].trim()).toBe("text/event-stream");
     const reader = res.body!.getReader();
     const connected = await readFrame(reader);
     expect(connected.type).toBe("connected");
@@ -226,7 +226,7 @@ describe("GET /events/users/me — Desktop user stream auth", () => {
   test("member utok → user stream connected frame keyed to authenticated user", async () => {
     const res = await fetch(`${BASE}/events/users/me?network_id=${encodeURIComponent(memberNetworkId)}`, { headers: auth(memberToken) });
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type") || "").toContain("text/event-stream");
+    expect((res.headers.get("content-type") || "").split(";")[0].trim()).toBe("text/event-stream");
     const reader = res.body!.getReader();
     const connected = await readFrame(reader);
     expect(connected.type).toBe("connected");
@@ -276,10 +276,21 @@ describe("#461 observer receives third-party traffic summaries", () => {
     await readFrame(reader); // connected
 
     const secret = `SECRET-TASK-CONTENT-${Date.now()}`;
+    const body = { alias: TARGET_ALIAS, task: secret, priority: "high", from: "third-party-sender", network_id: memberNetworkId };
+    // Human tokens send as their authenticated username; they cannot stand
+    // in for an Agent. Keep that refusal and exercise the observer with an
+    // actual bound sender token instead of weakening the identity contract.
+    const spoof = await fetch(`${BASE}/api/task`, {
+      method: "POST", headers: { ...auth(memberToken), "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    expect(spoof.status).toBe(403);
+    expect((await spoof.json() as any).error).toBe("from_session_identity_mismatch");
+    const sender = createNetworkTokenForNode(memberUserId, memberNetworkId, "third-party-sender", `node_obs_sender_${Date.now()}`);
+    expect(sender.ok).toBe(true);
     const dispatch = await fetch(`${BASE}/api/task`, {
       method: "POST",
-      headers: { ...auth(memberToken), "Content-Type": "application/json" },
-      body: JSON.stringify({ alias: TARGET_ALIAS, task: secret, priority: "high", from: "third-party-sender", network_id: memberNetworkId }),
+      headers: { ...auth(sender.token!), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
     expect([200, 202]).toContain(dispatch.status);
     const dispatched = await dispatch.json() as any;

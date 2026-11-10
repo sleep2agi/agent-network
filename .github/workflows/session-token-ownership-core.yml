@@ -1,0 +1,29 @@
+name: Session token ownership core
+on:
+  pull_request:
+    paths:
+      - 'server/src/node-token-ownership.ts'
+      - 'server/src/auth.ts'
+      - 'server/src/session-token-ownership-http.test.ts'
+      - 'server/src/daemon-token-owner-http.test.ts'
+      - 'tests/test689-session-token-ownership/**'
+      - '.github/workflows/session-token-ownership-core.yml'
+permissions:
+  contents: read
+# #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
+# 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
+# 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
+# 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  session-token-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build isolated HTTP test image
+        run: docker build --build-arg SOURCE_COMMIT=${{ github.sha }} -t session-token-ownership-test -f tests/test689-session-token-ownership/Dockerfile .
+      - name: SQLite and PostgreSQL issuance and compatibility boundaries
+        run: docker run --rm --init --network none session-token-ownership-test

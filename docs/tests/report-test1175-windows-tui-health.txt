@@ -1,0 +1,72 @@
+# test1175 — Windows native ongoing TUI health
+2026-10-14; requirement #1175; source/native/formal/original-device scopes separate.
+
+Previous CLI178/Node144 correctly stopped probing tmux on Windows, but native
+TUI health after startup remained unknown. This candidate writes a private
+windows-tui-health.json only after successful startup PID/birth/socket attribution.
+The bridge requires exact node, generation marker and configured remote before
+an asynchronous, non-overlapping, 10s-bounded PowerShell probe. It checks root
+birth before and after one process snapshot plus established loopback ownership.
+Running means an attributable connection to this exact remote. Exit/birth change
+maps to the existing pane-dead reason; connection loss to session-missing.
+Missing/stale receipt, access error, timeout or malformed probe output means
+unknown and clears the previous TUI layer. It never certifies model availability.
+AppServer and auth checks remain; no force dispatch or Hub schema change.
+
+Docker corrected core: 54PASS/179 assertions, 1native-Windows skip, 0FAIL,
+1.339seconds; runtime and real Hub HTTP dispatch guard on isolated SQLite.
+Initial mount tried /source without image dependencies: 37PASS, module-import
+error before Hub assertions; corrected by overlaying source into the image's
+dependency-backed /repo. Both outcomes retained in private iteration logs.
+After splitting the startup branches, Docker core again passed54/179; a
+designated mutation removing the original AppServer gate failed its startup
+quiet assertion (0PASS/1expectedFAIL/32filtered). The first private witness
+wrapper expected toHaveLength while the real assertion uses toEqual; corrected
+the wrapper only, and the same designated red was verified. No test/baseline was
+weakened. Local test time remains below the two-minute ceiling.
+
+First PR documentation symbol-pin gate failed because four inserted CLI lines
+shifted two architecture links; corrected the links to the actual definitions,
+without changing the checker or its baseline. The next mutation-pin check exposed the changed AppServer first-tick anchor.
+Restored that existing branch verbatim and kept native first-failure admission
+separate, preserving both guards. Docker mutation-pin ratchet is GREEN
+(4 unchecked <= existing4; no checker/baseline changes). Final-head CI pending.
+
+First native Windows run38465804032 / job115532921770: 38PASS/116 assertions
+including live owned/foreign connection, wrong remote, birth mismatch and exit,
+6.10seconds. Interactive startup/restart passed, but the real Hub native health
+wait timed out. Launcher had written resolved.id (directory alias windows-picker)
+while the bridge correctly requires config.node_id (immutable n_* identity).
+Corrected the writer to rawCfg.node_id and added direct receipt node/marker/remote
+binding checks plus bounded health-only failure evidence to the native fixture.
+The failed run is retained; no retries/force admission weaken this gate.
+
+Windows final-head run38466959691/job115536814413 SUCCESS:
+portable CLI/native25PASS/68 assertions; health/native38PASS/116 assertions,
+7.10seconds. Real fake-Codex bridge reports current Hub app_server=ok and native
+TUI running before normal/high Dashboard SSE; both join one human turn/steer,
+finish individual receipts, preserve remote/thread/HOME and a single bridge.
+The original alias/config identity mismatch FAIL remains recorded above.
+No credentialed Windows real-Codex gate was invoked. Source/native success is
+not original-device/model adoption.
+
+Final source head717ca3c1956f84555ee21e2e4e2e7831c46e8d48: 10required+7selected
+SUCCESS. CI merge9cb7dfdc033e7b108c11ff56ee44ce25e5bd398d and merged main
+2793c6a18be3dd111477f0686bd89a4140b072eb have the same tree as source head:
+ef854bd6b257147afa799c2533434cec536fc4e9. Ordinary merge21:06:48Z, no bypass.
+Only the remaining duplicate own PR QA was cancelled after selected gates;
+main QA continued. No all-matrix PASS claim is made.
+
+Formal Node145 run38468141717 and CLI179 run38468145147 were dispatched with
+exact merged main2793c6a18b, verified still a main ancestor. Formal/public
+results are tracked in report-test1175-public.txt; publication and original
+runtime adoption remain separate scopes.
+
+Recovery: native launch stays anet node start through the existing deploy/fleet
+and deploy/hub runbooks; ports/proxies and credential sources are unchanged.
+No existing runtime is restarted/upgraded here. Exact immutable CLI179/Node145
+candidate must be verified and adopted by the lifecycle owner. Rollback178/144
+ignores the additive private launch receipt; native ongoing health becomes unknown.
+Git/frozen locks restore software, not private login/task/receipt data, which
+remain in the existing authorized backups. Fresh launch regenerates its native
+identity evidence. Hub vault recovery is NOT COVERED; no production restore drill.

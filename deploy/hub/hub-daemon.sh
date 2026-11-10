@@ -22,6 +22,18 @@
 
 set -uo pipefail
 
+# 2026-11-01（#3160）—— **不要把「我是谁、我在哪」交给调用者**。
+#
+# 事故：在自己的会话里 `pm2 restart commhub-hub --update-env`，而那个会话的
+# HOME 被 agent-node 设成了节点目录 ⇒ `--update-env` 把调用者的 HOME 一起搬进
+# pm2 守护进程 ⇒ 下面所有 `$HOME/...` 全部解析到「节点的家」⇒ hub 起不来，
+# 生产停了约 40 秒（95+ 个 agent 的 SSE 全断）。
+#
+# ⇒ 路径基准不再用 `$HOME`，而用 `HUB_HOME`（默认 $HOME）。
+#    调用者的 HOME 只作为**诊断信息**保留，不再参与路径解析。
+HUB_HOME="${HUB_HOME:-$HOME}"
+CALLER_HOME="${HOME:-（未设置）}"
+
 # 版本切换点。回滚就是把这一行指回上一个 runtime-vNN 目录并重启 —— 旧目录保留不删。
 # 2026-07-30 06:1x: runtime-v22 → runtime-v23
 #   内容 = #500 文件下载归属校验（P0 活漏洞）+ #497 节点属性 + #502/#504 回复规则
@@ -95,21 +107,24 @@ set -uo pipefail
 # 2026-09-03: preview46 → preview47（跟随 PINNED_SERVER_VERSION；#1548 名册 blocked 有出口的修复 #1793）
 #   内容 = 四处单参 z.record 改双参;无新表无迁移
 #   回滚目标 = 生产机器上当前值(以该机器为准,不以本文件为准);生产 hub 现跑 bun 1.4.0(hub.env BUN_BIN,#1769)
-RUNTIME_DIR="$HOME/.commhub/runtime-v35-preview47"
+RUNTIME_DIR="$HUB_HOME/.commhub/runtime-v35-preview47"
+# A versioned deployment profile may select an already-installed exact runtime.
+# The default above remains the CLI compatibility floor checked by CI.
+RUNTIME_DIR="${HUB_RUNTIME_DIR:-$RUNTIME_DIR}"
 ENTRY="$RUNTIME_DIR/node_modules/@sleep2agi/commhub-server/bin/commhub.ts"
-ENV_FILE="${HUB_ENV_FILE:-$HOME/.commhub/hub.env}"
+ENV_FILE="${HUB_ENV_FILE:-$HUB_HOME/.commhub/hub.env}"
 # bun 解析：显式路径优先，其次走 PATH。
 # 注意 bun 是通过 nvm 下的 npm 装的，路径里带 node 版本号
 # (~/.nvm/versions/node/vX/bin/bun) —— **升级 node 会让这个路径失效**。
 # 所以不硬编死一个路径，找不到就 fail-closed 报出来，而不是静默起不来。
 _resolve_bun() {
   [ -n "${BUN_BIN:-}" ] && { echo "$BUN_BIN"; return; }
-  local nvm_bun="$HOME/.nvm/versions/node/v20.20.0/bin/bun"
+  local nvm_bun="$HUB_HOME/.nvm/versions/node/v20.20.0/bin/bun"
   [ -x "$nvm_bun" ] && { echo "$nvm_bun"; return; }
   command -v bun 2>/dev/null && return
   # 兜底：扫 nvm 下任意 node 版本里的 bun，容忍 node 升级
   local found
-  found=$(ls -1 "$HOME"/.nvm/versions/node/*/bin/bun 2>/dev/null | tail -1)
+  found=$(ls -1 "$HUB_HOME"/.nvm/versions/node/*/bin/bun 2>/dev/null | tail -1)
   [ -n "$found" ] && echo "$found"
 }
 BUN_BIN="$(_resolve_bun)"
@@ -141,6 +156,16 @@ fail_slow() {
 #    以及 ANET_HUB_SECRET_VAULT_KEY、ANET_SSE_*），所以这里是**显式名单**，不是「清掉
 #    所有 COMMHUB_*」—— 后者会把合法配置一起清掉。
 #    只打印**名字**，绝不打印值（里面有令牌）。
+# 2026-10-31 —— #3159：`*_API_KEY` 也进清理名单。
+#
+# 判据不是推测，是**源码读数**：
+#   grep -rn "API_KEY" server/src --include=*.ts  → 只有两处**注释**命中
+#   （db.ts:419 的 `allowed_secret_keys` 示例），没有任何 `process.env` 读取。
+#   ⇒ hub 自己不读这些 key；它们出现在 /proc/<pid>/environ 里纯粹是从**执行重启的那个会话**继承来的。
+#
+# 真需要时怎么办：写进 $ENV_FILE（600）。它在本次 scrub **之后**被 source（第 207 行），
+# 所以显式声明的值照样生效 —— 这条路径由 test2124 的「hub.env-set denylisted-prefix var」用例守着。
+# 注意 ANET_HUB_SECRET_VAULT_KEY 结尾是 `_KEY` 不是 `_API_KEY`，不会被这条误伤（它是 vault 的根密钥）。
 _scrub_node_identity_env() {
   local name scrubbed=""
   for name in $(compgen -e); do
@@ -149,7 +174,9 @@ _scrub_node_identity_env() {
       ANET_NODE_MARKER|ANET_CODEX_COMMHUB_TOKEN|ANET_INTERNAL_GROK_COPRESENCE_PROFILE|\
       ANET_CONFIG_UPDATE_CAPABLE|\
       CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_PLUGIN_DATA|CLAUDE_CODE_*|\
-      CODEX_*|GROK_*|TMUX|TMUX_PANE)
+      CODEX_*|GROK_*|TMUX|TMUX_PANE|\
+      AGENT|AI_AGENT|OPENCODE|OPENCODE_*|COMMHUB_SESSION_ID|\
+      *_API_KEY|*_API_KEY_*)
         unset "$name" && scrubbed="$scrubbed $name"
         ;;
     esac
@@ -162,7 +189,24 @@ _scrub_node_identity_env
 [ -x "$BUN_BIN" ] || fail_slow "找不到 bun：$BUN_BIN"
 
 # --- 预检 2：固化安装存在（不依赖 /tmp、不依赖启动时联网）---
-[ -f "$ENTRY" ] || fail_slow "固化安装缺失：$ENTRY（在 $RUNTIME_DIR 跑 npm install 重建）"
+# #3160 —— 这一句只有在「路径拼错了」时才发生，而拼错的原因几乎总是 HOME。
+# 所以报错必须同时给出 HUB_HOME 与调用者 HOME：只报路径看不出是谁的家目录。
+# 🔴 必须放进**同一次** fail_slow：它是 sleep 30 + exit 1，分开写后面几句永远不执行。
+if [ ! -f "$ENTRY" ]; then
+  _msg="固化安装缺失：$ENTRY（在 $RUNTIME_DIR 跑 npm install 重建）
+    HUB_HOME=${HUB_HOME}（路径基准）· 调用者 HOME=${CALLER_HOME}
+    ⇒ 两者不同时，说明这次启动是从别的会话继承来的（见 #3160）"
+  # 2026-11-01（#3160 后续）—— 默认 RUNTIME_DIR 是**写死的一个旧版本目录**，
+  # 生产上通常不存在（现有的都是 runtime-<版本>）。没显式给 HUB_RUNTIME_DIR 时，
+  # 报错要列出**真的存在**的目录，否则读的人会以为是自己路径写错。
+  if [ -z "${HUB_RUNTIME_DIR:-}" ]; then
+    _avail=$(ls -1d "$HUB_HOME"/.commhub/runtime-* 2>/dev/null | tail -3 | tr '\n' ' ')
+    _msg="$_msg
+    ⇒ 未显式给 HUB_RUNTIME_DIR（默认是写死的旧目录）。可用的 runtime：${_avail:-（一个都没有）}
+      （用法：HUB_RUNTIME_DIR=<上面某个> 启动/重启）"
+  fi
+  fail_slow "$_msg"
+fi
 
 # --- 预检 3：vault 密钥必须存在且非空（fail-closed）---
 [ -f "$ENV_FILE" ] || fail_slow "缺少 $ENV_FILE，无法取得 vault 密钥"

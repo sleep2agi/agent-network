@@ -1,0 +1,8 @@
+{
+  "name": "anet-v2-portable-test-tools",
+  "private": true,
+  "dependencies": {
+    "@opencode/cli": "2.0.22",
+    "playwright": "1.58.2"
+  }
+}

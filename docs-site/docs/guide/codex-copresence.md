@@ -131,28 +131,105 @@ anet node start codex-human
 
 线程原先记录的模型与配置不同时，**以配置为准**：codex 0.155 实测，`thread/resume` 不带 `model` 时会回到 rollout 最后一条 `turn_context` 里的旧模型、并忽略 app-server 的 `-c model=`；而线程一旦被第一个客户端加载，后来的 TUI `resume -m` 也改不动它。所以 anet 在第一次 `thread/resume` 就带上配置的模型（#512）。
 
-### 首次派活前必须看一眼 TUI 是否卡在审批框
+### commhub 工具审批框：anet 已自动预批准（#720） {#commhub-tool-approval}
 
-::: danger 节点会「看起来完全健康」却什么都干不了
-`--copresence` 起完之后，TUI 一旦接上，MCP 工具调用就变成**要人确认**。如果没人在 TUI 前面点，节点会永远停在：
+Codex 第一次调用每个 MCP 工具时会弹：
 
 ```
 Allow the commhub MCP server to run tool "get_task"?
 › 1. Allow   2. Allow for this session   3. Always allow   4. Cancel
 ```
 
-**此时 hub 上的所有信号都是健康的**：`status=idle`、SSE 已连接、`last_seen_at` 持续更新。派活方看不出任何异常，只会以为它闲着。
+无人值守的节点没人点，这一轮就卡住，Hub 最终判超时；而且此时 hub 上的信号全是健康的（`status=idle`、SSE 在线）。
+这个弹窗**不受 `approval_policy` 单独控制**：实测共存默认姿态（read-only + on-request）下 codex 0.133.0 和 0.159.2 都弹；
+never + read-only 下 0.133.0 仍弹，0.159.2 直接静默拒绝这次调用。「Always allow」也撑不过重启，因为 commhub 是 anet 启动时用 `-c` 传入的，不在 config.toml 里。
 
-**唯一能发现的方法**（hub 的任何字段都查不出来）：
+**现在**：anet 每次为节点启动 codex（POSIX / Windows 共存 app-server、agent-node 自管 app-server、codex-sdk）都会带上
+
+```
+-c mcp_servers.commhub.default_tools_approval_mode="approve"
+```
+
+只作用于 commhub，其他 MCP server 仍按 codex 默认行为询问。codex 0.133.0（取值 `auto|prompt|approve`）和 0.159.2（`auto|prompt|writes|approve`）都支持；
+实测见 `tests/test720-codex-commhub-tool-approval`。
+
+和你自己的 `CODEX_HOME/config.toml` 的关系（同一套件实测）：
+
+- anet 的 `-c` **覆盖**你在 `[mcp_servers.commhub]` 里写的 `url` 和 `default_tools_approval_mode`。
+- 你为某个工具写的 `[mcp_servers.commhub.tools.<工具名>] approval_mode = "prompt"` **仍然优先**，那个工具照样会弹，这是有意保留的逐工具开关。
+- codex 自己写下的逐工具 `approval_mode = "approve"` 子表（「Always allow」留下的）不受影响。
+- 外部 app-server 通道（`codexAppServerUrl` 固定、commhub 来自你自己的 config.toml）**不注入**这个键（单独注入一个未定义 server 的键会让 codex 报 `invalid transport` 起不来），
+  请在自己的 `[mcp_servers.commhub]` 下加 `default_tools_approval_mode = "approve"`。
+
+旧版本 anet 起的节点仍可能卡在这里，排查方法：
 
 ```bash
 tmux capture-pane -t =<alias> -p | grep "Allow the commhub MCP"
 ```
 
-**处置**：选 `3. Always allow`（commhub 那几个工具是节点自身运转必需的）；或在 app-server 启动参数里带 `-c approval_policy=never`，从源头避免。
+### 一条线程只用一个 codex 版本（#734） {#one-codex-version-per-thread}
 
-实测（2026-07-31）：新建 TUI 的节点复现；同宿主既有共存节点未受影响（它们的 app-server 启动时带了 `approval_policy=never`）。**所以这是「新建 TUI 时」的坑，不是存量问题。**
-:::
+codex ≥ 0.145 把会话写成「分页」格式：rollout 第一行的 `payload.history_mode` 是 `"paginated"`，之后每一行都带 `ordinal`。
+如果之后让 **0.145 之前**的 codex（例如 `npx` 拉到的 0.133）接着这条线程干活，它追加的行没有 `ordinal`；
+从此新版 codex 恢复这条线程会直接报错，而且是永久的：
+
+```
+final paginated rollout record at <path> is missing an ordinal
+```
+
+所以 **永远不要在同一条线程上混用 codex 版本**。anet 现在会在启动前检查（共存启动器 POSIX / Windows、外部 app-server 节点、agent-node 自己起的 app-server 和 codex-sdk）：
+
+- 按 codex 自己的顺序找 rollout（`sessions/` 里最新的那个，没有才看 `archived_sessions/`），只读它的**第一行**（有上限，几百 MB 的文件也只读几十 KB）。
+- 取 `codex --version`，只认 `codex-cli x.y.z` 这种行（包装脚本先打印的其它版本号不算，认不出就当未知）。版本探测走和启动完全相同的 shell 前缀（共存节点是 `bash -lc` 登录 shell；外部 app-server 节点先 source 工作区 `.env`），所以查的就是将要启动的那个 codex；启动命令本身不变。
+- 线程是分页格式、而 codex < 0.145：**拒绝启动**，什么都不起、不碰 rollout，并提示怎么把节点指向新版 codex：
+  `anet node start <节点> --codex-bin /path/to/codex`（共存节点），或 config.json 的 `codexBin` / 环境变量 `ANET_CODEX_BIN`（codex-sdk 节点），或让 PATH 上第一个 codex ≥ 0.145。
+- 找不到 rollout、第一行读不出来、版本拿不到：只警告，照旧启动。
+
+已经混用过的线程：恢复时 anet 会说明原因、说明原文件没动，然后照旧 fail-closed（不会偷偷开新线程）。
+安全的出路只有两条：fork 恢复（见下一节），或由人决定放弃这段历史后 `anet node start <节点> --new-session`。不要手改或删除 rollout。只读自查：
+
+```bash
+head -n 1 <rollout> | grep -o '"history_mode":"[a-z]*"'   # paginated = 新版写的
+tail -n 1 <rollout> | grep -c '"ordinal"'                   # 0 = 末尾被旧版追加过
+```
+
+### 线程恢复不了的节点怎么救（#738） {#fork-on-resume-failure}
+
+用 codex ≥ 0.145 把这条线程 fork 成一条**新线程**（历史一样），节点改在新线程上启动：
+
+```bash
+anet node start <节点> --fork-on-resume-failure          # 会问 [y/N]，只有回答 y 才 fork
+anet node start <节点> --fork-on-resume-failure --yes    # 没有终端（脚本 / CI）时必须再加 --yes
+```
+
+- 只在恢复失败、而且报错正是 `missing an ordinal` 时才会 fork；其它恢复失败照旧 fail-closed，不 fork。不加这个参数时行为和以前完全一样。
+- 没确认（回答不是 y，或非交互又没加 `--yes`）：不 fork，不动任何文件。
+- fork 之前先把原 rollout **复制**一份只读快照到 `<节点目录>/rollout-snapshots/`；原文件从头到尾不改（fork 后会再比对一次哈希，变了就不切换）。
+- 旧线程 → 新线程、快照路径、时间记在 `<节点目录>/codex-fork-recovery.json`（和 config.json 同目录）。fork 成功后才把 config 里记录的线程改成新线程。
+- 已有映射记录读不了、JSON 损坏或缺少 `forks` 数组时，确认后仍会在快照和 fork 之前停止，保留原文件并报出路径。先备份现场、检查文件权限或从有效备份恢复记录后再重试；不要删除记录来绕过检查。首次恢复尚无此文件时照常创建。
+- 🔴 新线程的历史仍然要读**原 rollout 文件**：原文件必须保留，不要移动或删除。
+- 目前只覆盖共存节点的 `anet node start`。
+
+#### 启动请求关联（#821，源码能力，尚未发布）
+
+单节点启动可选传入 `--fork-recovery-request-id str_0123456789ab`，确认 fork 成功时只在本次映射追加 `requestId`，不改旧记录。不传时仍使用原有格式；此参数不能配合 `--all`。ID 是 Hub 生成的启动请求标识，CLI 不验证其归属或授权；它不代替 `--fork-on-resume-failure`、`--yes` 或交互确认，也不提供幂等去重。
+
+映射记录的是 **fork 已发生**，不是完整启动成功：后续 bridge/TUI 启动失败时映射仍会保留。消费者必须按准确的 `requestId` 关联，不能把最后一条记录或最近时间当成本次结果；无匹配也不能证明没有副作用。Hub→daemon 传参和客户端按钮尚未接入。
+
+此变更没有新增服务、端口、环境变量或密钥。备份仍须包含节点目录中的映射/快照、配置和原 rollout；Git 不保存这些运行数据。软件回滚使用原有版本切换流程，旧实现忽略可选 `requestId` 并保留历史；回滚不会撤销已发生的 fork。验证关联须核对本次 ID 对应的旧/新线程，启动状态另行验证。
+
+### 给节点钉住一个 codex（#739） {#codex-bin-pin}
+
+一台机器上装了几个 codex 版本时，为了不让它们混用同一条线程，在每个共存节点的 `config.json` 里钉住：
+
+```json
+{ "codexBin": "/opt/codex-0.159.2/bin/codex", "codexVersion": "0.159.2" }
+```
+
+- `codexBin`（绝对路径）：启动**和** #734 版本检查都用这个可执行文件，不管 PATH 上谁排在前面。临时加 `--codex-bin` 仍然优先。
+- `codexVersion`：启动时 anet 跑一次 `<codexBin> --version`（和 #734 检查同一种方式）。不是这个版本、或者读不出版本，就在启动任何东西之前拒绝：`expected 0.159.2, got 0.133.0, path …`。
+- 两个都不设：照旧用 PATH 上的 `codex`。设了之后 `anet info <节点>` 会显示这两项。
+- 目前只覆盖共存节点的 `anet node start`（外部 app-server 节点不检查版本）。anet 不会自动安装 codex。
 
 ## 健康分层、降级拒收与自愈 {#health}
 
@@ -520,3 +597,4 @@ bridge 启动前先 `cd` 到节点工作目录。禁止用短前缀、「最近�
 - [节点 Runtime](/guide/runtimes)
 - [CLI：`anet node start`](/guide/cli#anet-node-start)
 - [Grok 节点](/guide/grok)
+- [OpenCode V2](/guide/opencode)

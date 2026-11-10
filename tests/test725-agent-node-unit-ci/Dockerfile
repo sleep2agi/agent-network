@@ -7,7 +7,7 @@ ARG BUN_VERSION=1.3.14
 ARG BUN_LINUX_X64_SHA256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash build-essential ca-certificates cron curl procps python3 unzip util-linux \
+  && apt-get install -y --no-install-recommends bash build-essential ca-certificates cron curl git procps python3 unzip util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 RUN curl --fail --silent --show-error --location \
@@ -21,6 +21,7 @@ RUN curl --fail --silent --show-error --location \
   && rm -f /tmp/bun-linux-x64.zip
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 # 🔴 两边都用 npm ci。原来 agent-node 走的是 npm install —— 而它旁边的

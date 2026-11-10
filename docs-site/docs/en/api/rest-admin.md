@@ -33,11 +33,21 @@ The `token` is the `ntok_` for that `(node_name, network_id)` pair. The hub forc
 
 **Common 4xx errors** (verify [`auth.ts createNetworkTokenForNode()`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts` route](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 
+Node identity uses exact bindings. Both name-only and explicit `node_id` issuance check same-network alias conflicts. A new name-only credential binds on its first successful registration. Refreshing an existing identity requires its owner or the same holder's existing valid node credential, and returns an exactly bound credential. Refresh does not backfill a legacy node's owner.
+
+**Intentional behavior change:** when a legacy node has neither an owner nor any historical node credential, an administrator can no longer mint a token merely by knowing its alias. Network administration is not proof of node ownership. This change provides no implicit claim; an explicit, audited administrator-claim workflow is separate future work and is not currently available.
+
+Legacy unbound daemon credentials remain compatible only with a unique network alias. Ownerless legacy nodes accept only pre-upgrade credentials. Duplicate aliases are never resolved by database row order; use an existing exactly bound credential.
+
+The upgrade persists token issuance epochs. Upgrade all token issuers together, including the CLI that writes directly to the database. Do not mix old Hub versions or issuers with new ones, and do not roll back to an old issuer: newly issued credentials could be mistaken for legacy ones. Preserve this field in database backups and recover using a version containing this fix. This compatibility layer is not an end-to-end certification of message attribution or SSE identity.
+
 | Status | `error` value | Trigger |
 |------|------------|---------|
 | 400 | `network_id and node_name required` | Body is missing `network_id` or `node_name` |
 | 400 | `not a member of this network` | Caller is not in `network_id` (must `join` first to mint an `ntok_`) |
 | 400 | `no write access to this network` | Caller is `viewer` (viewers cannot create full-access network tokens) |
+| 400 | `node_owner_mismatch` | Alias conflict, ambiguous identity, or unauthorized holder |
+| 400 | `node_owner_unclaimed` | Explicit ownerless legacy node has no same-holder credential evidence; no implicit claim |
 | 401 | `auth required` / `invalid token` | Missing / invalid utok_ |
 
 ### POST /api/auth/tokens
@@ -114,7 +124,7 @@ curl http://localhost:9200/api/auth/tokens \
 }
 ```
 
-The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L462) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
+The 6 fields per row map directly to [`auth.ts` `listTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `listTokens` SELECT: `token_id / name / scope / network_id / last_used_at / created_at`. `scope` is one of `user` (utok\_) / `network` (ntok\_) / `full` (legacy atok\_); `network_id` is only set for `network` / `full` scope. Sorted by `created_at DESC`. The plaintext `token` field is **not** returned here (only at POST creation).
 
 ### DELETE /api/auth/tokens/:id
 
@@ -137,7 +147,7 @@ curl -X DELETE http://localhost:9200/api/auth/tokens/tok_xxx \
 
 | Status | `error` value | Trigger |
 |------|------------|---------|
-| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L514) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
+| 404 | `token not found` | `token_id` does not exist or does not belong to the current user ([`auth.ts` `revokeToken`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) `DELETE ... WHERE token_id=?1 AND user_id=?2` affects 0 rows) |
 
 Writes audit log `action='token_revoked'`. After revocation, the next request using that token returns 401 `invalid token`.
 
@@ -659,61 +669,13 @@ Once connected the server periodically runs `tmux capture-pane` and pushes the p
 ## Legacy Endpoints (v0.6 era — frozen in OSS)
 
 ::: warning Not required since Apache 2.0
-Since v0.8 the project is Apache 2.0 open-source + self-hosted — there is no official paid license. The two endpoints below are leftovers from the v0.6 trial/activation flow. The hub still keeps a `licenses` table and an initial 14-day trial as a safety net, but new users and the main docs do not need to touch them. If you hit `license_expired`, see [troubleshooting](/en/troubleshooting#license-expired-license-expired-legacy-behavior).
+::: tip License removed entirely on 2026-10-29
+The open-source build has no licence, activation-code or quota concept. `GET /api/license` and
+`POST /api/license/activate` were deleted (they now 404), and `send_task` no longer checks licence expiry,
+so **`license_expired` can no longer occur**. `anet license` / `anet activate` keep their names but only
+print "feature removed". The `licenses` table stays in the database but is neither read nor written
+(historic rows are kept).
 :::
 
-### GET /api/license
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
-Reads the first row of the `licenses` table (by `created_at` ascending) and returns trial / pro status with `days_left`.
-
-```bash
-curl http://localhost:9200/api/license
-# → Public endpoint (no Authorization header required)
-```
-
-**Response** (trial / pro):
-
-```json
-{
-  "ok": true,
-  "license": { "type": "trial", "expires_at": "2026-04-25 12:00:00", "days_left": 12, "expired": false },
-  "limits": { "max_agents": 5, "max_networks": 3, "max_tasks_day": 500 }
-}
-```
-
-**Response** (no license row):
-
-```json
-{ "ok": true, "status": "no_license" }
-```
-
-### POST /api/license/activate
-
-> [View source ↗](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)
-
-Inject a pro license key. [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) only checks that `key.startsWith('anet-') && length >= 16` — **there is no real server-side validation**. The endpoint deletes any existing license row and writes a fresh pro license (limits 50 agents / 10 networks / 10000 tasks/day, expires in 365 days).
-
-```bash
-curl -X POST http://localhost:9200/api/license/activate \
-  -H "Content-Type: application/json" \
-  -d '{"key": "anet-anything-16-plus-chars"}'
-```
-
-**Response** (success):
-
-```json
-{ "ok": true, "type": "pro", "expires_in_days": 365 }
-```
-
-**4xx errors**:
-
-| Status | `error` value | Trigger |
-|------|------------|---------|
-| 400 | `key required` | Body missing `key` |
-| 400 | `invalid license key` | `key` does not start with `anet-` or is < 16 chars (**prefix-and-length check only, no real signature**) |
-
-> Effectively a self-service bypass kept around purely so that anyone hitting `license_expired` has an escape hatch in the OSS era. See [troubleshooting — license_expired](/en/troubleshooting#license-expired-license-expired-legacy-behavior) and [CLI `anet activate`](/en/guide/cli#other).
-
+---
 ---

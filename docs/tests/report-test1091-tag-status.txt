@@ -1,0 +1,47 @@
+#1091 server tag/status snapshot contract
+
+Candidate: complete caller-visible, unarchived current snapshot in tag_status;
+deduplicated per-tag memberships and separate null/no-label bucket. All four
+states count even when completion timestamps fall outside from/to. project_id
+and none constrain existing statistics and snapshot; omitted query keeps old
+semantics. Existing task visibility SQL remains authoritative, with one light
+full-network read and no client list limit. No client chart/filter UI is claimed.
+
+Final Docker38373659005 SUCCESS: same real HTTP suite on SQLite and PostgreSQL, preserving
+existing completion/range/privacy checks and adding four-state/archive/duplicate
+tag/null/project/visibility/empty/range-independent/beyond500/network isolation.
+No local stats functional test, production mutation or credential read.
+
+Recovery: service startup/ports/secrets/locked managed profile remain unchanged
+under deploy/hub. Main-published software and its verified artifact reproduce
+the API extension; rollback selects the previous verified package/profile.
+There is no schema or data migration. Original private data and key sources
+remain independent; whole key recovery NOT_COVERED. Managed production137 is
+not switched by this server contract slice; client delivery is separate.
+
+Source PR2699/main1c2df6bd0bf1ae7c5170ed86dd1dc29c67be4555 merged09:09:05Z.
+Actual tested merge37b574da1b15d04d87ae489588766868cb5843eb has the same full
+source tree. Final headab930bb30f36016ffafbb67014550f044680b2e0: SQLite19/
+PostgreSQL19 =38 real HTTP checks passed,10required passed. First8cc and second
+093 heads'38 HTTP checks also passed; doc claim freshness found an existing
+node.team line pointer449 vs450. Updated prose/manifest and both old test846
+anchors without weakening baseline or assertions; mutation-pin scan727 green.
+The narrow local documentation Docker run initially rejected an incorrect
+source parameter name before testing. Correct fullSHA/run.sh blob f99fe2a3f323daf5f2e48c93667e72900e70e60b
+then passed8claims/3negative witnesses in under90seconds. No local stats rerun.
+
+Formal exact-main release38374268696 SUCCESS: build job115218598912,
+authenticated checkout1c2df6bd0bf1ae7c5170ed86dd1dc29c67be4555, all four gates and npm upload/post-
+registry verification passed. Anonymous full tarball2026-10-13T09:15:29.895335+00:00:
+1255142 bytes; SHA1 5e11b22637eceda60f9a0987165d8e65b64f7eb1;
+SHA256 00775e71da54f4d188b3398bbdb4f19fdfbbd9f1a4698b58bfea9066470de1ea;
+sha512-31WuQAYeZFo7BznokCScifNCPCMYguVhL35h9rCYcnbOHDPKvnu50U3hXjuvNVAy/Wc/ToDiW3Ryg4M2qGJtpw==.
+URL https://registry.npmjs.org/@sleep2agi/commhub-server/-/commhub-server-0.9.0-preview.138.tgz
+Complete bytes equal original gated package. Preview138; stable latest30 unchanged.
+Source remains current main ancestor; no repeated npm publish or alternate build.
+
+API contract is in docs/requirements-tag-status.md. Only the server contract
+package is published; no chart, phone layout, click-filter or client package is
+claimed delivered. No production Hub/profile, account, Node, provider/model/login/
+thread or daemon change. Selected managed Hub remains137. Real client adoption
+and original#1113/#1105 activity plus#1120 login restart acceptance remain open.

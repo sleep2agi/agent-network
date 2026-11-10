@@ -21,7 +21,10 @@ if (mode === "seed") {
   await api("POST", "/api/auth/register", undefined, { username: "member", password: PW.member });
   const a = await login("admin"), m = await login("member");
   const net = (await api("POST", "/api/networks", a.token, { name: "upgrade-net" })).body;
-  const add = await api("POST", `/api/networks/${net.network_id}/members`, a.token, { user_id: m.user.user_id, role: "member" });
+  // This seed represents a pre-existing full-access member, independent of the
+  // baseline's default (.116 defaults new members to scoped). The new-member
+  // probe below still omits task_access and verifies that default separately.
+  const add = await api("POST", `/api/networks/${net.network_id}/members`, a.token, { user_id: m.user.user_id, role: "member", task_access: "all" });
   const cards: string[] = [];
   for (const [i, column] of ["todo", "doing", "done"].entries()) {
     const r = await api("POST", "/api/requirements", a.token, { name: `upgrade card ${i}`, priority: "normal", network_id: net.network_id, client_id: `upgrade-${i}` });

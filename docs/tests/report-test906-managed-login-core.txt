@@ -1,0 +1,245 @@
+2026-10-11 12:34 +08 — TEST-ONLY, not a delivered login/switch feature.
+Scope: managed ChatGPT device-code state machine and isolated stdio startup.
+Base: main f1b0502c20fff31a04e9787d54fe3d64c6f4a804.
+
+Official source read: https://learn.chatgpt.com/docs/app-server
+Native binary: codex-cli 0.159.2, exact npm install in Dockerfile.login.
+Native generated LoginAccountParams contains chatgptDeviceCode; cancellation
+schema contains canceled/notFound. No external-token or browser callback flow.
+
+Docker core: 4 PASS, 0 FAIL, 12 expectations.
+- matching completion plus ChatGPT account/read required for authenticated;
+- wrong loginId ignored and public state omits fixture account secrets;
+- cancel sends the exact loginId, closes draft process, ignores late success;
+- existing account is not overwritten; missing account after success is failure.
+Native protocol check PASS: initialize/initialized/account-read against actual
+Codex in an empty draft HOME/CODEX_HOME. A parent API-key sentinel is excluded
+by replaceEnv. Returned account=null. No actual login/start was sent to OpenAI.
+Container ran --init --rm --network none. No host credentials/DB/config mounted,
+no model inference, no production change. Container removed, exit 0.
+
+Initial targeted TypeScript check found two stale narrowing errors across async
+state transitions; replaced direct narrowed checks with a state predicate.
+Targeted strict tsc 5.9.3 in Docker then passed for both implementation files.
+The native stdio check does not use the state predicate; no binary behavior changed.
+No full suite, real OAuth success, Hub transport, account persistence, UI, node
+switch or inference is claimed. Those are still required to finish #906.
+
+Reproduce core + native contract:
+  sg docker -c 'docker build -f tests/test906-daemon-provider-management/Dockerfile.login -t anet-provider:test906-login-core . && docker run --init --rm --network none anet-provider:test906-login-core'
+
+2026-10-11 13:48 +08 — isolated draft factory increment (same draft PR2581)
+Official sources re-read: https://learn.chatgpt.com/docs/app-server (managed
+device-code protocol), https://learn.chatgpt.com/docs/auth (file-backed private
+CODEX_HOME and forced ChatGPT login). This is the existing local/open-source
+app-server path, not a hosted/commercial authentication broker.
+
+Added createCodexLoginDraft: takes an existing daemon-owned private root,
+creates its own 0700 child and 0600 config, uses explicit file credential storage,
+starts Codex with an allowlisted environment and isolated HOME/CODEX_HOME,
+initializes the actual RPC connection and requires account/read.account=null.
+It does not start OAuth implicitly. Abandoned drafts can be discarded; only
+the exact owned temporary child is removed, not the daemon root or other accounts.
+
+Docker results: 7 PASS / 0 FAIL / 21 expectations (4 prior controller cases
++ 3 factory cases: environment isolation, symlink rejection, failed spawn cleanup).
+Actual Codex 0.159.2 factory check PASS: parent API-key sentinel and foreign
+CODEX_HOME did not supply an account; private file/dir modes checked; idle login
+state returned; discard removed the child and left the parent intact.
+No live login/start, human account verification, real credentials or inference.
+Strict targeted TypeScript 6.0.3 check passed for factory/controller/stdio client
+in Docker. First invocation stopped before checking at TS5112 because the reused
+test image had tsconfig.json; rerun with explicit --ignoreConfig succeeded.
+
+Recovery/remaining integration: no new service, port, route, production config
+or database change. The draft process is owned by its caller; the caller must
+close/discard it. This increment does not yet add a daemon handler, account
+registry, Hub RPC, UI, or binding to existing nodes. Do not merge/release as a
+complete account-switch feature. Future credentials belong to the private
+daemon state/approved encrypted backups, never Git; an empty machine otherwise
+requires the account owner to sign in again. No recovery claim has been tested.
+Containers ran --init --rm --network none and exited; no production state mounted.
+
+2026-10-11 13:55 +08 — daemon-owned session manager, same draft PR2581
+Added serialized start/read/cancel/save operations and scoped saved-account
+metadata. The same start request reuses one ceremony; another request cannot
+overwrite an active login. Save requires the controller's confirmed ChatGPT
+state plus a private auth file, closes the process, and retains only that draft's
+home in place. No existing node credential is copied. Account metadata contains
+an opaque ID, user label, daemon/network scope and timestamp, not tokens/email.
+Listing persisted records after restart explicitly says auth_state=not_checked;
+it is not a fresh credential validation or a node binding. Unsaved cancellation
+discards the owned draft; a saved account cannot be cancelled as a login attempt.
+
+Docker: 10 PASS / 0 FAIL / 38 expectations. Three new manager cases cover
+idempotent/concurrent start and unsatisfied-save rejection; confirmed save/retry
+and scoped recovery; cancel/cleanup leaving a neighboring account intact.
+Existing controller/factory checks and the actual Codex 0.159.2 empty-account
+startup probe passed in the same image. The new manager success path uses
+synthetic RPC/account fixtures, NOT a real human OAuth completion. No inference.
+Strict targeted TypeScript 6.0.3 passed in Docker for manager + dependencies.
+Added this small offline suite to the existing daemon-provider CI workflow.
+Final source rerun after fixed-error/partial-marker cleanup edits: same 10/0/38,
+native probe PASS. Containers exited and were removed (--init --rm --network none).
+
+Recovery: no new service/port/production route is enabled in this increment.
+Saved metadata is anet-account.json inside the newly created login home; the
+private auth.json remains Codex-owned. A future daemon boot handler must provide
+the registered daemon's private root (including Windows ACL setup), own the
+manager lifecycle, and call close during orderly shutdown. Abruptly interrupted
+drafts without a valid scoped marker are not listed as saved accounts. Existing
+files are not a substitute for approved encrypted backup; without it an empty
+machine requires fresh user sign-in. No full-machine recovery drill claimed.
+Remaining: actual daemon/Hub authorization and RPC wiring, client login UI,
+account-to-Provider binding and single-node switch/rollback. This draft is NOT
+a usable or released account-switch feature and is not included in app 0.2.237.
+
+2026-10-11 14:01 +08 — Hub/daemon login command wiring (same draft)
+Implemented daemon_provider_snapshot action=login with provider intent
+{action:start|read|cancel|save|accounts,session_id?,label?}. Existing user/admin
+authorization and token-bound daemon identity remain in force. Old daemons do
+not receive login requests unless accept_logins is advertised. The runtime only
+advertises this on HTTPS/loopback-secure transport, validates its pinned local
+CLI scope, and owns the login manager for the daemon lifetime. Shutdown closes
+owned login processes and refuses new ceremonies. Cancel now replays its same
+receipt when the Hub acknowledgement was lost. No new endpoint/port or service.
+
+Private initialization is through the pinned CLI internal command
+anet daemon provider prepare-login <registered-daemon-alias>.
+DaemonProviderStore validates registered config, then uses existing private
+directory/Windows ACL helpers for provider-store/codex-logins. Root is never a
+remote input and never included in a Hub receipt. Saved account subdirectories
+remain there. Hub's additive daemon_provider_logins table stores only intent;
+responses contain status and short-lived device instructions, never auth.json
+or OAuth tokens. Expiry maintenance scrubs login responses after their 120s
+request window (on protocol access); the managed ceremony itself is bounded by
+the existing ten-minute deadline. Save does not apply an account to any node.
+
+Docker transport/core: 16 PASS / 0 FAIL / 142 expectations; 12 audience checks
+PASS / 0 FAIL / 304 expectations. New core route uses actual registered Hub
+handlers, reconciler, session manager, then compiled CLI bootstrap for account
+listing. OAuth completion is synthetic; actual account login was NOT attempted.
+Core standalone manager/controller/factory: 10 PASS / 0 FAIL / 39 expectations.
+Runtime and CLI bundles compiled in Docker. Production filesystem not mounted;
+all DBs, configs and credentials are TEST-ONLY within --rm offline containers.
+Final transport test mounted current server/src and agent-node/src read-only
+over the built image; compiled CLI matches the unchanged bootstrap implementation.
+
+Two failures were corrected without relaxing assertions: expiry fixture used
+epoch zero (correctly triggering seven-day retention deletion instead of merely
+expiring instructions), changed to now-1; tool-list user payload exceeded its
+57500-byte ceiling by 51 bytes, fixed by shortening description, now 57487 bytes.
+The docs symbol-pin check found zero drift among eight evaluated pins, but eight
+were skipped and one commit ref unavailable in the Docker read-only worktree;
+do not call this a full pin check. No production mutation or release in this PR.
+
+Upgrade/rollback: this is still draft source. Ship only exact main CLI/runtime/Hub
+after integration gates; bootstrap requires the new CLI, so old pair fails
+explicitly, never falls back to another account root. Existing releases ignore
+the additive intent table and new private account marker; rollback does not
+delete saved credentials. Pending logins may expire and require a fresh ceremony.
+Encrypted data backup or user re-login remains necessary after machine loss.
+Client login UI and account-to-node switch/rollback are still not implemented.
+
+2026-10-11 14:18 +08 saved-account binding increment:
+The saved login can now be referenced by opaque account_id under the same daemon's
+OpenAI/codex-tui ChatGPT profile/models. Daemon validates saved record scope and
+private credential presence; foreign/path/API-key references are rejected. Presence
+does not imply current authorization, model entitlement, or node application.
+Client counterpart is app PR836; it includes binding and keeps node switching off.
+
+Docker evidence:
+- daemon-provider-store.test.ts: 19 PASS / 0 FAIL / 70 expectations, including
+  owned binding, missing credential after save, foreign daemon, path and API-key
+  account-reference refusal, existing key-mode persistence cases.
+- server/src/daemon-provider-snapshots.test.ts: 15 PASS / 0 FAIL / 129 expectations.
+  New core: actual Hub handlers -> daemon reconciler -> newly compiled CLI ->
+  bound-model public snapshot. Account credentials are TEST-ONLY; no OAuth/inference.
+- CLI/runtime rebuilt with Dockerfile.transport. Test ran with final server/src
+  mounted read-only over that image to include expected credential-presence receipt
+  normalization. CLI/runtime binaries match the binding implementation.
+- Existing mirrored server/runtime snapshot contract parity passed in that suite.
+- All test containers --rm, offline, own /tmp DB/configs; no production mounts or
+  restarts. No new npm/main release from this feature branch.
+
+Remaining: exclusively apply selected saved login to a node, retain the latest
+rotated credential on switch-away, account/model runtime verification and rollback.
+Do not reuse a static refresh-token copy across nodes. No switch completion claim.
+
+2026-10-11 14:28 +08 managed-account application increment (TEST-ONLY):
+- Official selection carries exact account_id through client/Hub/runtime/CLI;
+  receipt must return the same account reference with built-in openai, exact model,
+  node and revision. API-key receipt protocol remains unchanged.
+- New local custody: bind one saved refresh chain to one node; capture auth only
+  after verified stop, park the current refreshed auth on switch-away, refuse
+  another node/active stale copy. Rollback parks a newly refreshed selected account
+  before restoring the original, and same-account rollback keeps refreshed tokens.
+- Actual loopback account/read RPC is required after startup (refreshToken=false),
+  alongside existing thread/provider/model verification and private file fingerprint.
+  This proves local mode/identity configuration, not remote authorization or entitlement.
+
+Evidence (Docker only, synthetic credentials, no production mounts/inference):
+1. Store source suite: 19 PASS / 0 FAIL / 70 expectations.
+2. Application + CLI dispatcher/lifecycle + loopback account-readback: 15 PASS /
+   0 FAIL / 145 expectations, mounted current agent-network/src read-only over
+   anet-provider:test906-account-apply. The CLI test uses injected stop/start/verify
+   subprocesses, actual private files, fixture Hub HTTP and real loopback WebSocket;
+   it is NOT evidence of a real Codex account switch.
+3. Hub transport suite: 15 PASS / 0 FAIL / 136 expectations. Includes official
+   application intent dispatch, exact account receipt, wrong-account/missing-account/
+   wrong-provider rejection. Those application receipts are fixtures. Existing
+   saved-account binding uses the actual compiled CLI.
+4. Dockerfile.transport rebuilt the final CLI (335 modules) and runtime (405) after
+   the transaction changes. No local global package changes.
+5. Client counterpart: PR836; UI confirmation/receipt test reported separately.
+
+Remaining release gates: actual Codex managed-account/native core acceptance,
+exact version guidance, CI review/merge and main-SHA release. No human OAuth,
+production restart, native installer acceptance, model inference or release claimed.
+Cleanup: all local test containers --rm; fixture DB/directories are container-only.
+Cached Docker build images retained for the next affected-path check.
+
+2026-10-11 14:43 +08 affected-path increment (TEST-ONLY):
+- Fixed strict TypeScript narrowing in account custody and rollback verification.
+  Dockerfile.cli compiled CLI roundtrip and full CLI tsc --noEmit passed.
+- Docker native login test passed both empty private draft and saved synthetic
+  auth account/read with the real Codex binary. Workspace-routing response comes
+  from the checked-in container-only HTTPS fixture, --network none plus explicit
+  chatgpt.com loopback mapping. Unsigned auth is NOT real OAuth/entitlement proof.
+- Login/lifecycle/vault unit slice: 10 PASS / 39 expectations. Application/readback
+  affected slice: 14 PASS / 80 expectations.
+- Full native application trial first stopped at a retired fixture-model prompt;
+  that isolated container was removed. Fixture model updated to GPT-6.1-Sol.
+  Second trial rendered the correct model and prior thread but did not complete
+  startup: restored account TUI omitted the historical OpenAI Codex banner.
+- Narrow readiness fix recognizes the current exact composer together with its
+  shortcuts footer; sign-in, trust and update blockers retain precedence. Docker
+  preflight suite: 28 PASS / 48 expectations. Full application recheck pending.
+- No production credentials, host global packages, daemon restarts or external
+  inference used. Tests and source-built containers are not released artifacts.
+
+2026-10-11 14:46 +08 native core follow-up:
+Source: 5d2608284eb283bf97f63e5f354ccc8316337184 (PR2581, TEST-ONLY).
+Image: anet-provider:test906-native-account-apply, config digest
+sha256:e715bb65cf09c64a759c533b8d41c53157f45e3886e2bb321737036b48dce16a.
+Run: docker run --init --rm --network none --add-host chatgpt.com:127.0.0.1
+  anet-provider:test906-native-account-apply
+PASS real Hub -> daemon -> CLI -> native Codex same-thread API key / managed
+account A / managed account B / API key. Exact account/model/provider/revision
+readback and custody markers checked. Two synthetic API-key model turns only;
+managed account data unsigned, routing fixture local, no real OAuth/external
+inference or account entitlement verified. Final CLI stop executed; isolated
+container removed by --rm. Production daemons and credentials untouched.
+
+2026-10-11 14:53 +08 candidate integration check:
+- Integrated main 5f8961c8b1d786eba5187a6ad6f8c79838ee014b, then prepared exact
+  CLI .164 / runtime .130 / Hub .122 at 32bc668b5 (release candidate, not published).
+- Pair suite: 6 PASS / 23 expectations. Initial invocation lacked a writable
+  /run/user/10001; repeated with container-only uid10001 tmpfs, no assertion change.
+- Fresh candidate Dockerfile.native image config
+  sha256:9bddacb1b6e7fbf2fea3627eb8dcbb39d4e60df87e9070df75806365fe3ddae3:
+  same native Hub/daemon/CLI key -> managed A -> B -> key core PASS, exit0.
+  Same synthetic-account/local-routing limits as above. Final node stop completed;
+  --rm removed the isolated container. No production state or credentials touched.
+- Published artifacts are still .163/.129/.121. CI and main publication gates
+  remain; never distribute this feature-branch image or tarball as a release.

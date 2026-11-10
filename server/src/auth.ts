@@ -2,9 +2,10 @@
  * V3 Auth module — user registration, login, token management
  */
 import { db, generateId, hashPassword, verifyPassword, hashToken, generateToken, generateUserToken, generateNetworkToken, uuidv4 } from "./db.js"; import { deleteDepartmentsForNetwork, groupTx, removeMemberFromChatGroups } from "./departments.js"; // #419: also ensures network_members.department_id exists (same line on purpose: docs pin auth.ts line numbers)
-import { WEAK_PASSWORDS } from "./password-dict.js";
+import { WEAK_PASSWORDS } from "./password-dict.js"; import { passwordNetworkTokens, type KeptNetworkToken } from "./password-network-tokens.js";
+import { checkNodeTokenClaim, legacyNodeHolder } from "./node-token-ownership.js";
 import { NETWORK_REST_COLUMNS, NETWORK_REST_SELECT, sqlColumns } from "./rest-projections.js";
-import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, NEW_MEMBER_TASK_ACCESS, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
+import { deleteAgentGrants, isAgentRestricted } from "./agent-access.js"; import { deleteTaskGrantsForMember, newMemberTaskAccess, type TaskAccessMode } from "./task-access.js"; // 一行两个 import:文档钉着 auth.ts 的行号
 
 // Round-6 A1 hardening — dummy hash for username-enumeration timing
 // close. We compute ONE scrypt hash of a throwaway password and reuse
@@ -34,6 +35,7 @@ export interface AuthUser {
   user_id: string;
   username: string;
   display_name: string | null;
+  avatar_url?: string | null;
   email: string | null;
   role: string;
 }
@@ -136,15 +138,15 @@ export function register(username: string, password: string, email?: string, dis
   const userToken = generateUserToken();
   const userTokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-    [userTokenId, hashToken(userToken), userId, null, "user-login", "user", cleanClientField(opts.client?.label, 64), cleanClientField(opts.client?.userAgent, 256)]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, kind, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+    [userTokenId, hashToken(userToken), userId, null, "user-login", "user", cleanClientField(opts.client?.label, 64), cleanClientField(opts.client?.userAgent, 256), userTokenKindFor(opts.client)]
   );
 
   // Network token (ntok_) — bound to default network, for agent-node
   const networkToken = generateNetworkToken();
   const networkTokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
     [networkTokenId, hashToken(networkToken), userId, networkId, "default-network", "network"]
   );
 
@@ -160,7 +162,7 @@ export function register(username: string, password: string, email?: string, dis
 
 export function login(username: string, password: string, client: SessionClientInfo = {}): AuthResult {
   const user = db.get<any>(
-    "SELECT user_id, username, password_hash, display_name, email, role, must_change_password FROM users WHERE username = ?1",
+    "SELECT user_id, username, password_hash, display_name, avatar_url, email, role, must_change_password FROM users WHERE username = ?1",
     username);
 
   if (!user) {
@@ -216,8 +218,8 @@ export function login(username: string, password: string, client: SessionClientI
   const userToken = generateUserToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-    [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user", cleanClientField(client.label, 64), cleanClientField(client.userAgent, 256)]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, kind, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+    [tokenId, hashToken(userToken), user.user_id, null, "user-login", "user", cleanClientField(client.label, 64), cleanClientField(client.userAgent, 256), userTokenKindFor(client)]
   );
 
   // Find default network
@@ -231,7 +233,7 @@ export function login(username: string, password: string, client: SessionClientI
 
   return {
     ok: true,
-    user: { user_id: user.user_id, username: user.username, display_name: user.display_name, email: user.email, role: user.role },
+    user: { user_id: user.user_id, username: user.username, display_name: user.display_name, avatar_url: user.avatar_url, email: user.email, role: user.role },
     token,
     token_id: tokenId,
     network_id: networkId,
@@ -246,8 +248,9 @@ export function login(username: string, password: string, client: SessionClientI
  *
  * RFC-036: callers that provide nodeId atomically establish the immutable
  * node-owner binding before the plaintext token is returned. The 3-argument
- * legacy form remains available for old clients, but its token has no bound
- * node id and therefore cannot consume external-schedule edit intents.
+ * name-only form remains available: new identities bind on first registration,
+ * and a verified same-holder refresh binds to the existing unique node. This
+ * does not fill NULL row owners or grant external-schedule ownership.
  */
 export function createNetworkTokenForNode(userId: string, networkId: string, nodeName: string, nodeId?: string): { ok: boolean; token?: string; token_id?: string; node_id?: string; error?: string } {
   // Verify user is a member of this network with write access
@@ -262,16 +265,18 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
   const tokenId = generateId("tok");
   try {
     db.transaction(() => {
+      nodeId = checkNodeTokenClaim(userId, networkId, nodeName, nodeId);
       if (nodeId) {
-        const existing = db.get<{ network_id: string | null; owner_user_id: string | null }>(
-          "SELECT network_id, owner_user_id FROM nodes WHERE node_id = ?1",
+        const existing = db.get<{ network_id: string | null; owner_user_id: string | null; alias: string | null }>(
+          "SELECT network_id, owner_user_id, alias FROM nodes WHERE node_id = ?1",
           nodeId,
         );
         if (existing?.network_id && existing.network_id !== networkId) throw new Error("cross_network_node");
+        if (existing?.alias && existing.alias !== nodeName) throw new Error("node_owner_mismatch");
         // Existing pre-RFC-036 rows have no trustworthy owner anchor. A token
         // refresh must not turn knowledge of a legacy node_id into ownership.
-        // They remain read-only until a separately authorized migration.
-        if (existing && !existing.owner_user_id) throw new Error("node_owner_unclaimed");
+        // A same-holder refresh binds the token, without filling the row owner.
+        if (existing && !existing.owner_user_id && !legacyNodeHolder(userId, networkId, nodeName, nodeId)) throw new Error("node_owner_unclaimed");
         if (existing?.owner_user_id && existing.owner_user_id !== userId) throw new Error("node_owner_mismatch");
         db.run(
           `INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, updated_at)
@@ -280,7 +285,7 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
              node_name = COALESCE(nodes.node_name, ?2),
              alias = COALESCE(nodes.alias, ?2),
              network_id = COALESCE(nodes.network_id, ?3),
-             owner_user_id = COALESCE(nodes.owner_user_id, ?4),
+             owner_user_id = nodes.owner_user_id,
              updated_at = datetime('now')`,
           [nodeId, nodeName, networkId, userId],
         );
@@ -293,7 +298,7 @@ export function createNetworkTokenForNode(userId: string, networkId: string, nod
         }
       }
       db.run(
-        "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, bound_node_id) VALUES (?1, ?2, ?3, ?4, ?5, 'network', ?6)",
+        "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, bound_node_id, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, 'network', ?6, 2)",
         [tokenId, hashToken(token), userId, networkId, `node:${nodeName}`, nodeId ?? null],
       );
     });
@@ -317,7 +322,28 @@ const SESSION_TOKEN_SQL = "scope = 'user' AND network_id IS NULL";
 // 以小时为粒度对一个以天计的闲置窗口没有影响。
 const LAST_USED_WRITE_INTERVAL_SECONDS = 3600;
 
-export type SessionClientInfo = { label?: unknown; userAgent?: unknown };
+export type SessionClientInfo = { label?: unknown; userAgent?: unknown; kind?: unknown };
+
+// #711 不绑网络的用户令牌的种类(api_tokens.kind):
+//   'login' — 浏览器 / app 的登录会话;
+//   'cli'   — anet 命令行登录、POST /api/auth/tokens 建的具名脚本令牌。
+// 种类由客户端自报(client_kind / client_label),**只用于展示和「显式保留」那条路**:
+// 改密码默认仍撤销全部不绑网络的令牌(当前这条除外),调用方显式 keep_cli_tokens=true 才保留 'cli'。
+// 所以一个自称 cli 的令牌永远不能靠自报在默认改密码里活下来。
+// 节点 / 网络令牌(network_id 非空)不按cli分类;具名网络令牌另有显式撤销选项。
+export type UserTokenKind = "login" | "cli";
+
+/** 登录 / 注册请求签发的令牌算哪一类:客户端显式报 kind='cli',或 client_label 是 anet 自报的「anet <版本> · …」。 */
+/** anet 自报的 client_label:去掉首尾空白后,区分大小写地以「anet 」开头(启动回填用同一条规则,见 db.ts)。 */
+export function isAnetClientLabel(label: string): boolean {
+  return label.trim().startsWith("anet ");
+}
+
+export function userTokenKindFor(client: SessionClientInfo = {}): UserTokenKind {
+  if (client.kind === "cli") return "cli";
+  if (typeof client.label === "string" && isAnetClientLabel(client.label)) return "cli";
+  return "login";
+}
 
 function cleanClientField(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
@@ -359,7 +385,7 @@ function lookupToken(token: string): { row: any; rejected?: undefined } | { row?
   const cutoff = idleCutoffOffset();
   const row = db.get<any>(
     `SELECT t.token_id, t.user_id, t.network_id, t.scope, t.name AS token_name,
-            u.username, u.display_name, u.email, u.role,
+            u.username, u.display_name, u.avatar_url, u.email, u.role,
             CASE WHEN t.network_id IS NULL THEN 1
                  WHEN EXISTS (SELECT 1 FROM network_members nm WHERE nm.network_id = t.network_id AND nm.user_id = t.user_id) THEN 1
                  ELSE 0 END AS is_member
@@ -408,7 +434,7 @@ export function resolveToken(token: string): { user: AuthUser; networkId: string
   );
 
   return {
-    user: { user_id: row.user_id, username: row.username, display_name: row.display_name, email: row.email, role: row.role },
+    user: { user_id: row.user_id, username: row.username, display_name: row.display_name, avatar_url: row.avatar_url, email: row.email, role: row.role },
     networkId: row.network_id,
     tokenId: row.token_id || null,
     // tokenName carries the binding identity. For node-scoped ntok_, it's
@@ -425,21 +451,41 @@ export function getUserNetworks(userId: string) {
     userId);
 }
 
-// Quota limits by plan
-const QUOTAS: Record<string, { max_networks_owned: number; max_networks_joined: number }> = {
-  free:  { max_networks_owned: 2, max_networks_joined: 3 },
-  pro:   { max_networks_owned: 10, max_networks_joined: 20 },
-  admin: { max_networks_owned: Infinity, max_networks_joined: Infinity },
-};
+// 2026-11-01（#2980）—— 自建 Hub 的**单一上限**，不再有 free/pro 套餐概念。
+//
+// 原来是一张 `QUOTAS` 表：free 2/3、pro 10/20、admin 无限。
+// `pro` 那一行**没有任何路径能到达**（没有代码把 plan 设成 pro），
+// 而它对自部署的人是可见的 —— 报错写的是「max 2 networks for free plan」，
+// 这句话在纯开源语境里无法解释（哪来的套餐？谁在收费？）。
+//
+// ⇒ 改成「一个可配置的上限」：默认仍是 2（**零行为变化**），
+//   但「为什么是 2」变成可解释、可调整的：COMMHUB_MAX_NETWORKS_PER_USER。
+//   `users.plan` 列保留但不参与判定（与 licenses 表同样处理：不删列，避免迁移风险）。
+export const DEFAULT_MAX_NETWORKS_PER_USER = 2;
+
+/** 每次调用时读环境变量（而不是模块加载时定死）：测试与运维都能改。 */
+export function maxNetworksPerUser(): number {
+  const raw = process.env.COMMHUB_MAX_NETWORKS_PER_USER;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_NETWORKS_PER_USER;
+  const n = Number(raw);
+  // 非法值**回落到默认**而不是抛错：这是启动期配置，抛错会让整个 Hub 起不来。
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_MAX_NETWORKS_PER_USER;
+}
 
 export function createNetwork(userId: string, name: string, description?: string) {
-  // Quota check
-  const user = db.get<any>("SELECT plan, role FROM users WHERE user_id = ?1", userId);
-  const plan = user?.role === "admin" ? "admin" : (user?.plan || "free");
-  const quota = QUOTAS[plan] || QUOTAS.free;
+  // 上限检查（#2980）：admin 无限，其余按 COMMHUB_MAX_NETWORKS_PER_USER（默认 2）
+  const user = db.get<any>("SELECT role FROM users WHERE user_id = ?1", userId);
   const ownedCount = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM networks WHERE owner_id = ?1", userId);
-  if ((ownedCount?.cnt || 0) >= quota.max_networks_owned) {
-    return { ok: false, error: `quota exceeded: max ${quota.max_networks_owned} networks for ${plan} plan` };
+  if (user?.role !== "admin") {
+    const max = maxNetworksPerUser();
+    if ((ownedCount?.cnt || 0) >= max) {
+      // 文案要能自解释：不出现「套餐」，并说出怎么改。
+      return {
+        ok: false,
+        error: `quota exceeded: max ${max} networks per user on this hub `
+          + `(set COMMHUB_MAX_NETWORKS_PER_USER to change it)`,
+      };
+    }
   }
 
   const existing = db.get<any>(
@@ -489,7 +535,10 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
     // single-network user to "ambiguous" or auto-resolve writes INTO the
     // deleted network. Remove memberships with the network.
     db.run("DELETE FROM network_members WHERE network_id = ?1", [networkId]);
-    deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); // #2144, #419 (one line: docs pin auth.ts line numbers)
+    deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); for (const t of AGENT_TEAM_TABLES) if (tableExists(t)) db.run(`DELETE FROM ${t} WHERE network_id = ?1`, [networkId]); // #2144, #419, #764 (one line: docs pin auth.ts line numbers)
+    // #993: the rules text belongs to the network; leaving it behind would make a
+    // later network that reuses the id inherit somebody else's rules.
+    if (tableExists("network_rules")) db.run("DELETE FROM network_rules WHERE network_id = ?1", [networkId]);
   });
   return { ok: true };
 }
@@ -504,9 +553,10 @@ export function createToken(userId: string, name: string, networkId?: string): {
   }
   const token = generateToken();
   const tokenId = generateId("tok");
+  // #711 不绑网络的具名令牌是给脚本 / 命令行长期用的:kind='cli'(改密码时可显式 keep_cli_tokens 保留)。
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    [tokenId, hashToken(token), userId, networkId || null, name, "full"]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, kind, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+    [tokenId, hashToken(token), userId, networkId || null, name, "full", networkId ? null : "cli"]
   );
   return { ok: true, token, token_id: tokenId };
 }
@@ -516,14 +566,53 @@ export function revokeToken(userId: string, tokenId: string): { ok: boolean; err
   return result.changes > 0 ? { ok: true } : { ok: false, error: "token not found" };
 }
 
-export function issueUserToken(userId: string, name = "user-login"): { token: string; token_id: string } {
+export function issueUserToken(
+  userId: string,
+  name = "user-login",
+  opts: { kind?: UserTokenKind; clientLabel?: string | null; userAgent?: string | null } = {},
+): { token: string; token_id: string } {
   const token = generateUserToken();
   const tokenId = generateId("tok");
   db.run(
-    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, NULL, ?4, 'user')",
-    [tokenId, hashToken(token), userId, name]
+    "INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, client_label, user_agent, kind, node_identity_epoch) VALUES (?1, ?2, ?3, NULL, ?4, 'user', ?5, ?6, ?7, 1)",
+    [tokenId, hashToken(token), userId, name, opts.clientLabel ?? null, opts.userAgent ?? null, opts.kind === "cli" ? "cli" : "login"]
   );
   return { token, token_id: tokenId };
+}
+
+/** 一条令牌的种类和设备标识(改密码换发新令牌时沿用,命令行的令牌换完还是命令行的)。 */
+export function getUserTokenMeta(userId: string, tokenId: string): { kind: UserTokenKind; client_label: string | null; user_agent: string | null } | null {
+  const row = db.get<any>("SELECT kind, client_label, user_agent FROM api_tokens WHERE token_id = ?1 AND user_id = ?2 AND network_id IS NULL", tokenId, userId);
+  if (!row) return null;
+  return { kind: row.kind === "cli" ? "cli" : "login", client_label: row.client_label ?? null, user_agent: row.user_agent ?? null };
+}
+
+// #711 改密码撤销哪些令牌。kind 为 NULL 的(启动回填之后由旧版 Hub 签出的)按 'login' 算。
+const CLI_KIND_SQL = "kind = 'cli'";
+const NOT_CLI_KIND_SQL = "COALESCE(kind, 'login') <> 'cli'";
+
+/** 改密码后保留下来的命令行 / 脚本令牌(给 UI 列出来、让用户逐条撤销)。**永远不含令牌值。** */
+export type KeptCliToken = { token_id: string; name: string; client_label: string | null; created_at: string; last_used_at: string | null };
+
+/**
+ * 改密码后的令牌撤销。默认(keepCli=false)= 改密码前的行为:撤销全部不绑网络的令牌;
+ * keepCli=true 时保留 kind='cli' 的,并把它们列出来。当前这条(exceptTokenId)和节点 / 网络令牌永远不动。
+ */
+export function revokeTokensAfterPasswordChange(userId: string, exceptTokenId: string | null | undefined, keepCli: boolean): { login: number; cli: number; kept: KeptCliToken[] } {
+  const except = exceptTokenId ? " AND token_id != ?2" : "";
+  const params = exceptTokenId ? [userId, exceptTokenId] : [userId];
+  const login = db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL AND ${NOT_CLI_KIND_SQL}${except}`, params).changes;
+  if (!keepCli) {
+    const cli = db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND network_id IS NULL${except}`, params).changes;
+    return { login, cli, kept: [] };
+  }
+  const kept = db.all<any>(
+    `SELECT token_id, name, client_label, created_at, last_used_at FROM api_tokens
+     WHERE user_id = ?1 AND network_id IS NULL AND ${CLI_KIND_SQL}${except}
+     ORDER BY created_at DESC`,
+    ...params,
+  ).map((r) => ({ token_id: r.token_id, name: r.name, client_label: r.client_label ?? null, created_at: r.created_at, last_used_at: r.last_used_at ?? null }));
+  return { login, cli: 0, kept };
 }
 
 export function revokeOtherUserTokens(userId: string, exceptTokenId?: string | null): number {
@@ -540,6 +629,7 @@ export type LoginSession = {
   last_used_at: string | null;
   client_label: string | null;
   user_agent: string | null;
+  kind: UserTokenKind;
   is_current: boolean;
 };
 
@@ -547,7 +637,7 @@ export type LoginSession = {
 export function listSessions(userId: string, currentTokenId: string | null): LoginSession[] {
   const cutoff = idleCutoffOffset();
   const rows = db.all<any>(
-    `SELECT token_id, name, created_at, last_used_at, client_label, user_agent FROM api_tokens
+    `SELECT token_id, name, created_at, last_used_at, client_label, user_agent, kind FROM api_tokens
      WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND revoked_at IS NULL${cutoff ? `
        AND COALESCE(last_used_at, created_at) >= datetime('now', ?2)` : ""}
      ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC`,
@@ -559,6 +649,7 @@ export function listSessions(userId: string, currentTokenId: string | null): Log
     last_used_at: r.last_used_at ?? null,
     client_label: r.client_label ?? null,
     user_agent: r.user_agent ?? null,
+    kind: r.kind === "cli" ? "cli" : "login",
     is_current: !!currentTokenId && r.token_id === currentTokenId,
   }));
 }
@@ -574,7 +665,14 @@ export function revokeOtherSessions(userId: string, currentTokenId: string): num
   return db.run(`DELETE FROM api_tokens WHERE user_id = ?1 AND ${SESSION_TOKEN_SQL} AND token_id != ?2`, [userId, currentTokenId]).changes;
 }
 
-export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null): { ok: boolean; error?: string; revoked?: number } {
+export type ChangePasswordResult = { ok: boolean; error?: string; revoked?: number; revoked_login?: number; revoked_cli?: number; kept_cli_tokens?: KeptCliToken[]; revoked_network?: number; kept_network_tokens?: KeptNetworkToken[] };
+
+/**
+ * 改密码。默认撤销该用户全部不绑网络的令牌(改密码前的行为,旧 app 依赖它)。#711:opts.keepCliTokens=true
+ * 时保留 kind='cli' 的(anet 命令行登录、具名脚本令牌),并在 kept_cli_tokens 里列出。当前会话和节点令牌永远保留。
+ * revokeNetworkTokens=true显式撤销具名网络令牌;默认列出保留清单。revoked含三类合计。
+ */
+export function changePassword(userId: string, oldPassword: string, newPassword: string, currentTokenId?: string | null, opts: { keepCliTokens?: boolean; revokeNetworkTokens?: boolean } = {}): ChangePasswordResult {
   const passwordError = validatePasswordStrength(newPassword, "new password");
   if (passwordError) return { ok: false, error: passwordError };
   const user = db.get<any>("SELECT password_hash FROM users WHERE user_id = ?1", userId);
@@ -588,9 +686,14 @@ export function changePassword(userId: string, oldPassword: string, newPassword:
   // password change. If the user changes via `anet passwd`, the bootstrap
   // nudge goes away on next login. SET to 0 explicitly (rather than skip)
   // so a future flag flip can't drift the state.
-  db.run("UPDATE users SET password_hash = ?1, must_change_password = 0, updated_at = datetime('now') WHERE user_id = ?2", [hashPassword(newPassword), userId]);
-  const revoked = revokeOtherUserTokens(userId, currentTokenId);
-  return { ok: true, revoked };
+  const nextHash = hashPassword(newPassword);
+  return db.transaction(() => {
+    db.run("UPDATE users SET password_hash = ?1, must_change_password = 0, updated_at = datetime('now') WHERE user_id = ?2", [nextHash, userId]);
+    const keep = opts.keepCliTokens === true;
+    const r = revokeTokensAfterPasswordChange(userId, currentTokenId, keep);
+    const network = passwordNetworkTokens(userId, currentTokenId, opts.revokeNetworkTokens === true);
+    return { ok: true, revoked: r.login + r.cli + network.revoked, revoked_login: r.login, revoked_cli: r.cli, ...(keep ? { kept_cli_tokens: r.kept } : {}), revoked_network: network.revoked, kept_network_tokens: network.kept };
+  });
 }
 
 /**
@@ -627,7 +730,7 @@ export function resetUserPassword(targetUsername: string, callerIsHubAdmin: bool
 
 export function getNetworkMembers(networkId: string) {
   return db.all<any>(
-    `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name,
+    `SELECT nm.user_id, nm.role, nm.joined_at, nm.invited_by, u.username, u.display_name, u.avatar_url,
             CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.agent_access = 'all' THEN 'all' ELSE 'granted' END AS agent_access,
             (SELECT COUNT(*) FROM network_member_agent_grants g WHERE g.network_id = nm.network_id AND g.user_id = nm.user_id) AS agent_grant_count,
             CASE WHEN u.role = 'admin' OR nm.role IN ('owner', 'admin') OR nm.task_access = 'all' THEN 'all' ELSE 'scoped' END AS task_access,
@@ -641,8 +744,8 @@ export function getNetworkMembers(networkId: string) {
 
 /** 网络里的人类成员(给受限成员也能看的通讯录):只有身份字段,不含角色与授权。 */
 export function getNetworkHumans(networkId: string) {
-  return db.all<{ user_id: string; username: string; display_name: string | null }>(
-    `SELECT u.user_id, u.username, u.display_name
+  return db.all<{ user_id: string; username: string; display_name: string | null; avatar_url: string | null }>(
+    `SELECT u.user_id, u.username, u.display_name, u.avatar_url
        FROM network_members nm JOIN users u ON nm.user_id = u.user_id
       WHERE nm.network_id = ?1 ORDER BY COALESCE(NULLIF(u.display_name, ''), u.username), u.user_id`,
     networkId);
@@ -674,8 +777,8 @@ export function usernameCollidesWithAgent(networkId: string, userId: string): bo
 export function addNetworkMember(networkId: string, userId: string, role: string, invitedBy?: string, opts: { agentAccess?: "all" | "granted"; taskAccess?: TaskAccessMode } = {}): { ok: boolean; error?: string } {
   if (!MEMBER_ROLES.has(role)) return { ok: false, error: "invalid role" };
   const agentAccess = opts.agentAccess === "all" ? "all" : "granted";
-  // 任务范围:新成员默认 NEW_MEMBER_TASK_ACCESS(task-access.ts 一处定义)。
-  const taskAccess: TaskAccessMode = opts.taskAccess === "all" || opts.taskAccess === "scoped" ? opts.taskAccess : NEW_MEMBER_TASK_ACCESS;
+  // 任务范围:显式传值优先;否则 newMemberTaskAccess(role)(#746:member/viewer 'scoped',admin 'all')。
+  const taskAccess: TaskAccessMode = opts.taskAccess === "all" || opts.taskAccess === "scoped" ? opts.taskAccess : newMemberTaskAccess(role);
   if (!db.get("SELECT 1 FROM users WHERE user_id = ?1", userId)) return { ok: false, error: "user not found" };
   const existing = db.get<any>("SELECT 1 FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, userId);
   if (existing) return { ok: false, error: "user already a member" };
@@ -741,14 +844,14 @@ export function joinByInvite(inviteCode: string, userId: string): { ok: boolean;
   if (usernameCollidesWithAgent(invite.network_id, userId)) return { ok: false, error: "username_collides_with_agent_alias" };
   // Add member + increment used count
   db.run("INSERT INTO network_members (network_id, user_id, role, invited_by, agent_access, task_access) VALUES (?1, ?2, ?3, ?4, 'granted', ?5)",
-    [invite.network_id, userId, invite.role, invite.created_by, NEW_MEMBER_TASK_ACCESS]);
+    [invite.network_id, userId, invite.role, invite.created_by, newMemberTaskAccess(invite.role)]);
   db.run("UPDATE network_invites SET used_count = used_count + 1 WHERE invite_code = ?1", [inviteCode]);
   // 受限成员不能持有网络令牌(resolveToken 会拒),别签一个用不了的。
   if (isAgentRestricted(userId, invite.network_id)) return { ok: true, network_id: invite.network_id, role: invite.role };
   // Auto-create a token for this network
   const token = generateToken();
   const tokenId = generateId("tok");
-  db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  db.run("INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
     [tokenId, hashToken(token), userId, invite.network_id, "auto-join", "full"]);
   return { ok: true, network_id: invite.network_id, role: invite.role };
 }
@@ -878,15 +981,20 @@ const NETWORK_CONTENT_CHECKS: Array<[label: string, sql: string]> = [
   ["pending_node_create_requests", "SELECT COUNT(*) AS cnt FROM node_create_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
   ["pending_node_start_requests", "SELECT COUNT(*) AS cnt FROM node_start_requests WHERE network_id = ?1 AND status IN ('pending', 'delivered')"],
 ];
+const AGENT_TEAM_TABLES = ["network_agent_teams", "network_agent_team_members"]; // #764
 const NETWORK_CLEANUP_TABLES = [
   "network_members", "network_member_agent_grants", "network_invites", "api_tokens",
   "node_create_requests", "node_start_requests", "node_stop_requests", "node_rules_requests",
   "node_config_updates", "rename_txn", "probe_results", "agent_telemetry", "completions",
-  "task_events", "task_terminal_events", "scheduled_task_runs", "external_schedule_edits",
+  "task_events", "task_terminal_events", "task_late_replies", "scheduled_task_runs", "external_schedule_edits",
   // 标签颜色:网络本身的元数据(标签本体在 requirements 行里,那张表是阻断项)。
   "network_tags",
+  // #993/#1542 全团队规则:规则文本是网络元数据,网络删了它不该留成孤儿行。
+  "network_rules",
   // 组织架构(board #419):部门是网络本身的元数据。
   "network_departments",
+  // Agent 团队(#764):Agent 自己的组织树,同样是网络元数据。
+  ...AGENT_TEAM_TABLES,
 ];
 
 function tableExists(name: string): boolean {

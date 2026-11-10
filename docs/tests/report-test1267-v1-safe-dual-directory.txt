@@ -1,0 +1,133 @@
+TEST-ONLY: #1267 independent default SAFE directory observation, prerequisite #1264
+Date: 2026-10-15 Asia/Shanghai; CI/main timestamps below UTC 2026-10-14
+
+Scope
+-----
+Read-only API requiring independently selected requested project/native session
+directory plus original node/network/alias/session/model, private config/checkpoint
+and selected binary installation. Same module instance records original project
+and fresh native data inodes and observes its own active SAFE allocation.
+No launch/cleanup admission is relaxed. Missing/noncanonical requested projects
+retain original launch behavior but cannot obtain this new observation.
+Allocation active is not process liveness, idle, writer exclusion or custody.
+State is observation-only. Custody, writer exclusion, final history, native process
+version, model execution, target cohort and commit remain explicitly unproven.
+Config workdir must explicitly match requested project; checkpoint directory must
+exactly match native directory. No inferred coordinate, credential/history output,
+config/intent write, spawn/import/stop, retention marker or credential transfer.
+Existing CLI/review plan gains no cutover admission. No original-node operations.
+
+Provenance and reconstruction inputs
+------------------------------------
+Source PR: https://github.com/sleep2agi/agent-network/pull/2758
+Exact head: 5249c7f929812a57806699ec10f0b418abf368a9
+CI checkout: d931b03b84db7391d4c3045f784ce6bf4e2ee2c5
+Head/CI/main tree: c1d2735e28db5781e10ed5e8264086dbc8d30389
+Ordinary SHA-locked source main: fbb4fbe85c8e175cafb1617f15611970d039f405
+Merged 2026-10-14T16:39:30Z; fetched main ancestry and identical tree verified.
+Eight source files: allocation observation, source API, independent Docker fixture
+Dockerfile/run.sh/probe, workflow/QA triggers and contract. No old sender/auth,
+Windows stop/harness or five failing legacy L1 suites changed versus source base.
+Bun1.3.14 base pinned by digest; native wrapper/platform package SRIs validated
+against tests/test1194-v1-shared-feasibility/package-integrity.json. Node package
+dependencies use package-lock/npm ci. Independent runtime non-root uid1000,
+--init --network none, trusted private /run/user/1000 and synthetic fixture roots.
+SOURCE_COMMIT must equal EXPECTED_SOURCE_COMMIT; native version actual --version.
+Build uses public package/debian network; fixture runtime uses owned loopback only.
+No local tests, global package change, paid/actual model prompt or actual original
+login, config dump, credentials, history, node/cwd/thread/model/provider changes.
+
+Dual native qualification
+-------------------------
+Run38599280301 SUCCESS, both complete artifacts downloaded/read and hashes match.
+1.18.1 job115974003004:25 inherited unit/0fail,9 native/controlled observations.
+Artifact11910708852 SHA256
+b810396c6ab6c66f218487413e391ada9002e3d275a55f12a4faaf3917590be2
+1.18.34 job115974003754:25 inherited unit/0fail,9 native/controlled observations.
+Artifact11913266900 SHA256
+9e2f282f43f39ee165afe98d9a92c16f8ede0ecb4c090fa6808bdf4bf2b0a11a
+The 25 inherited tests are19 existing SAFE boundary and6 existing checkpoint
+cases, not25 new isolated API tests. Each full report stamps exact CI/version
+and nine-check JSON PASS. Nine actual/controlled cases per native version:
+1. Actual default wrapper opens exact empty session/nonfinal checkpoint in a
+   disjoint native per-launch workspace, not requested project.
+2. Native /config retains declared model/SAFE deny policy and strips custom
+   provider package/baseURL. Declared model is not successful model execution.
+3. Exact native session/checkpoint agrees with independent coordinates and same
+   instance allocation; observation is secret-free and grants no custody/commit.
+4. Wrong independent identity fields, missing/collapsed coordinates, extra secret
+   metadata, wrong installation pin or non-SHA software request refuse.
+5. Missing/edited config workdir, unsafe/model changes, project symlink and
+   borrowed residues refuse; original residues are not cleared/adopted.
+6. Controlled requested-project inode substitution refuses. Fixture-only
+   restoration retains original config/checkpoint/project and usable allocation.
+7. Controlled fixture close retires launch/data; exact empty checkpoint and
+   original config/project survive. Unknown/live cleanup still defers in source.
+8. Closed allocation and same-path same-UID lookalike with copied owner marker
+   cannot obtain a current-module observation or lease. API does not delete it.
+9. Later unspawned allocation keeps original checkpoint; controlled data-inode
+   substitution refuses and restored allocation can be safely discarded.
+These are empty-session and controlled filesystem cases, not nonempty history
+restore, actual retention/handoff, a native writer/TUI race or second native resume.
+
+Inherited native regression and typecheck
+-----------------------------------------
+Existing #1246 run38599280128 SUCCESS at same exact CI/head tree:
+1.18.1 job115974002275:4 native observations; artifact11911358748 SHA256
+7055583e24e6cfd8835b48cfc501e33a25bec4a84a0686352fa43f7a90110095
+1.18.34 job115974002613:4 native observations; artifact11913292093 SHA256
+ac570fab702bbf1312b2a4d8b9119878620513dd6811ee9c16ba6071a1de165b
+Both complete inherited reports read/hash verified; no healthy manual rerun.
+Typecheck38599279751/job115974002187 ratchetSUCCESS:81 existing errors/baseline81,
+actual tsc exit2. Success does not mean zero TypeScript diagnostics.
+Mutation pin integrity38599280132 SUCCESS. Ten protected source checks SUCCESS.
+First post-source-merge snapshot74SUCCESS/107pending, zero observed rollup failures.
+Full automatic E2E38599279927 and broad QA still pending at source merge; later
+results must be recorded later, not backdated as passed before merge.
+
+Later automatic complete regression
+-----------------------------------
+QA38599280227/job115974427389 subsequently SUCCESS:2917PASS/2SKIP/0FAIL,
+2919 tests across231files,216.37s; auxiliary66/0 and five runner groups/0.
+Full E2E38599279927 subsequently SUCCESS:job115974004724 plus rename115974003982.
+Actual checkoutd931b03b84db7391d4c3045f784ce6bf4e2ee2c5 matches qualified tree.
+Artifact11913830585 SHA256
+33a346417f1636b347154ee2674d9b22ade645e99ff106c2c7ae2ccb7eabb8da
+All eight complete logs read; seven groups139+25+28+16+22+12+47=289PASS/0FAIL.
+Aggregate test-all.log is not an extra group. Archive hash matches API digest.
+These are later evidence, not source-merge qualification already completed then.
+Broad QA still has unfinished report-only gates; no all-QA/original-adoption claim.
+
+Older broad QA failure preserved (#1268)
+----------------------------------------
+Previous #1246 QA38594880454/job115959877632 L0+L1 report-only FAILURE at
+checkout8f363f498b786663d554fe9232ed5bb15852ecd7. Final old rollup168SUCCESS/1FAILURE.
+Five old L1 suites rc1: test8-runtime (12/1, registeredtest8admin/fromtest8
+identity_mismatch), qa-hub-10-network-scope-regressions (aliceA/fromalice-dashboard
+identity_mismatch), qa-frontdoor-docs (Docker ENOENT docs/upgrade-v2.md),
+test11-lifecycle (8/5, TTL creation missing, ack rejection/expired states; exact
+cause unknown), test584-dashboard-codex-delivery (MUTATION_FALSE_GREEN:
+detached-admission-cap-is-real, mutant13/0; precise mutation/timing cause unknown).
+Five-suite summary and bounded full actual job sections read; no aggregate L0/L1
+artifact was found in the queried100-entry artifact page. No invented digest.
+No separate baseline run; old sender/tools and five suite inputs have no diff in
+this source slice. Do not treat expected mutation REDs as these real five failures
+or claim original Node/model failed from them. #1268 Pool tracks bounded independent
+diagnosis/fixes without weakening assertions/auth guards. Existing Windows picker
+taskkill #1262 remains separate. Not all broad QA passed.
+
+Remaining migration and recovery
+--------------------------------
+Six recovery answers and protocol prerequisites: docs/design/opencode-v1-safe-dual-directory.md.
+#1264 still needs explicit retained native workspace/data custody and ownership
+handoff agreed by original runtime/close/stale sweep, without suppressing credential
+cleanup or inferring leases from process scans. Unknown/mixed retains both stores.
+#1238 still needs durable atomic config+intent journal, all matching launchers'
+pending refusal and fault recovery. #1239 needs shared new turns/final capture and
+lossless owned restore. Original Owner exact node/idle window/all writer exclusion,
+source/target actual version/model/policy/cohort, main installed capabilities and
+encrypted backup locations/retention/restore authority remain independent gates.
+Git restores software/templates, not original identities/logins/history/backups.
+No new daemon/proxy/tunnel/ports or original binding rollback here. First custody
+protocol/implementation slice30-60min active after inputs, then native fault slices;
+CI and original permissions/window waiting unknown. No public package or adoption.

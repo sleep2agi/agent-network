@@ -346,20 +346,27 @@ curl -X POST http://localhost:9200/api/auth/password \
 ```json
 {
   "ok": true,
-  "revoked": 2,
+  "revoked": 5,
+  "revoked_login": 2,
+  "revoked_cli": 3,
+  "revoked_network": 0,
+  "kept_network_tokens": [],
   "token": "utok_xxxxxxxxxxxxxxxx",
   "token_id": "tok_new_session_id"
 }
 ```
 
-`revoked` 字段是**其他设备**上被撤销的 utok\_/atok\_ 数量（不含本次调用方自己的 token，那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销）。
+可选请求字段 `keep_cli_tokens`(布尔,默认 `false`):为 `true` 时保留命令行 / 脚本令牌,并在响应的 `kept_cli_tokens` 里列出。不带这个字段(旧 app、dashboard)= 撤销全部其他不绑网络的令牌。
 
-**关键副作用** (verify [`auth.ts` `changePassword` + `revokeOtherUserTokens`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L577) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
+`revoked` 是**其他**令牌被撤销的总数(不含本次调用方自己的 token,那个由 `server.ts` 改密处理函数里的 `revokeToken(resolved.user.user_id, resolved.tokenId)` 单独撤销);`revoked_login` / `revoked_cli` 是按种类拆开的数(`revoked = revoked_login + revoked_cli + revoked_network`)。
+
+**关键副作用** (verify [`auth.ts` `changePassword` + `revokeTokensAfterPasswordChange`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) + [`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts)):
 1. **当前调用方的 `utok_`** (`resolved.tokenId`) 立即撤销（[`server.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/server.ts) `revokeToken(...)` 显式删）
-2. **其他设备的所有 `utok_` / `atok_`** 同步撤销（[`auth.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) 搜 `network_id IS NULL AND token_id != ` `DELETE ... WHERE user_id=? AND network_id IS NULL AND token_id != ?currentTokenId` 一锅端）—— 计数返回到 `revoked` 字段
-3. **`ntok_` 不受影响**（`revokeOtherUserTokens` 只删 `network_id IS NULL` 的 token，agent node 用 `ntok_` 跑着的不会被改密打断；跟 [account-system 改密码副作用](/guide/account-system#修改密码) ZH 描述一致）
-4. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回 —— 调用方应立即用新 token 覆盖本地存储
-5. 写 audit log: `action='password_changed'`
+2. **其他浏览器 / app 登录会话**(`api_tokens.kind='login'`)撤销,计数在 `revoked_login`
+3. **命令行 / 脚本令牌**(`kind='cli'`:`anet login` 等 anet 命令签的、`POST /api/auth/tokens` 建的不绑网络的具名令牌)**默认同样撤销**,计数在 `revoked_cli`;只有请求带 `keep_cli_tokens: true` 才保留,保留的逐条列在 `kept_cli_tokens`(`token_id` / `name` / `client_label` / `created_at` / `last_used_at`,**不含令牌值**),可用 `DELETE /api/auth/tokens/:token_id` 逐条撤销。种类由客户端自报,只影响展示和这条显式保留路径。`anet passwd` 默认带 `keep_cli_tokens: true`,`--revoke-cli-tokens` 不带
+4. **节点令牌保持有效**。`POST /api/auth/tokens` 创建的具名网络令牌默认保留，响应 `kept_network_tokens` 列出 `token_id`、`name`、`network_id`、`created_at`、`last_used_at`，不含凭据值。显式布尔 `revoke_network_tokens: true` 撤销本人各网络的有效具名令牌，数量计入 `revoked_network`。仅命中 `scope=full`、绑定网络且无节点绑定的令牌；与 `keep_cli_tokens` 独立，其他用户与节点令牌不受影响。密码更新和这些撤销在同一事务提交。
+5. **新 `utok_`** (`issued.token`) 颁发给调用方作为响应返回,种类沿用当前这条 —— 调用方应立即用新 token 覆盖本地存储
+6. 写 audit log: `action='password_changed'`
 
 跟 `anet passwd` CLI 行为一致（CLI 拿到新 token 后自动写 `~/.anet/config.json`）。其他设备下次请求拿 `401 invalid token` → 必须 `anet login` 重新登录。
 
@@ -456,7 +463,7 @@ curl http://localhost:9200/api/networks \
 }
 ```
 
-`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS networks` 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts#L422) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
+`networks` 数组每行 10 字段：9 个 `networks` 表字段 ([`db.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/db.ts) 搜 `CREATE TABLE IF NOT EXISTS networks` 含 v3 migration `visibility` + `max_members`) + 1 个 join 字段 `member_role`（[`auth.ts` `getUserNetworks`](https://github.com/sleep2agi/agent-network/blob/main/server/src/auth.ts) JOIN `network_members`）。排序：owner 在前，其余按 `created_at`（`ORDER BY nm.role = 'owner' DESC, n.created_at`）。`settings` / `description` 可为 `null`。`ntok_` 调用只返回当前 binding 那一个 network（不是全部）；`utok_` 返回所有所属网络。
 
 ---
 
@@ -620,6 +627,71 @@ scheduled_tasks / providers / network_secrets / skillhub_skills / side_chats / a
 | 409 | `network is not empty (nodes=1, sessions=1); …` | 网络非空；响应另带 `counts` 对象逐项给出计数 |
 | 409 | `the default network cannot be deleted` | 目标是 `default` |
 | 404 | `network not found` | `network_id` 不存在 |
+
+---
+
+### GET /api/providers {#providers}
+
+网络自有的 Provider 配置（表 `hub_provider_configs`）。**只读、不含密钥值。**
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://your-hub/api/providers?network_id=$NET"
+```
+
+```json
+{
+  "ok": true,
+  "network_id": "net_…",
+  "source": "hub",
+  "source_table": "hub_provider_configs",
+  "state": "unconfigured",
+  "counts": { "providers": 0, "providers_in_cli_registry": 0 },
+  "hint": "本端点读 hub_provider_configs，此处为空，且 CLI 注册表（providers）也是 0 条 ⇒ 客户端没有任何可选模型；需要管理员先录入第一行。",
+  "providers": []
+}
+```
+
+⚠️ **两条「providers」读的不是同一张表**：
+
+| 端点 / 工具 | 读的表 | 用途 |
+|---|---|---|
+| `GET /api/providers`（本文档） | `hub_provider_configs` | 网络自有 Provider 配置，客户端据此显示可选模型 |
+| MCP `list_providers` | `providers` / `provider_models` | CLI 侧注册表 |
+
+`state` 与 `counts` 就是为了让「哪张表是空的」一眼可见：
+
+| `state` | 含义 |
+|---|---|
+| `configured` | 本表至少一行（此时不带 `hint`） |
+| `unconfigured` | 本表为空；`hint` 会说明另一张表有没有行、以及下一步该谁做什么 |
+
+### PUT /api/providers {#providers-put}
+
+写入（或轮换）一行 Provider 配置。**需要网络 owner/admin。**密钥值只写不读。
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  "https://your-hub/api/providers?network_id=$NET" \
+  -d '{"revision":0,"provider":{"id":"main","label":"Main","enabled":true,
+       "protocol":"openai-chat-completions","baseUrl":"https://api.example.com/v1",
+       "models":["gpt-x"],"key":"sk-…"}}'
+```
+
+| 字段 | 说明 |
+|---|---|
+| `revision` | 新建传 `0`；后续传回读到的 `revision`（乐观锁） |
+| `provider.key` | 明文密钥，落 vault；响应里**永不回显** |
+| `provider.secretKeyRef` | 也可以改成引用已存在的 vault 键名（与 `key` 二选一） |
+
+| 状态 | `error` 值 | 触发条件 |
+|---|---|---|
+| 400 | `invalid_revision` | 缺少 / 非整数 `revision` |
+| 400 | `provider_key_required` | 换了 `baseUrl`/`protocol` 但没给新 key |
+| 400 | `invalid_hub_provider` | 字段形状不合法（模型名、baseUrl 等） |
+| 403 | `provider_owner_required` | 调用者不是 owner |
+| 403 | `provider_access_denied` | 调用者不是该网络成员 |
+| 409 | `hub_provider_revision_conflict` | `revision` 已过期（有人在之前改过） |
 
 ---
 

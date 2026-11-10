@@ -1,0 +1,80 @@
+Hub #906 — offline production-shape schema preflight
+Observed: 2026-10-11 12:18 +08
+Result: PASS (schema migration only; NOT production deployment).
+
+Source: main b4413131b73c52c286beec46509773716698d89f.
+Published Hub: @sleep2agi/commhub-server@0.9.0-preview.121.
+Formal release run: 38105661161 SUCCESS.
+Tarball SHA1: b890a4580ce83ad254df829d1d19bc67daa79847.
+Tarball integrity: sha512-iuDcA+oagXdSrmwFDzJWEVm95RRbG4ITGfgFgUux/4PpJ2nsE3tc9YEM3bBuAspwt9ed2hyCdRi7FI0Bcb9o9w==.
+Zod: 4.6.5, exact server/package-lock.json integrity checked in drive.mjs.
+Bun: 1.4.0 (same executable as running Hub, mounted read-only).
+Bun SHA256: 33d56b070be6a9e3da0ab013038b43d1645d0534ca811ecdba4472599117eb4b.
+
+Input was an owner-only VACUUM INTO consistent backup of running Hub .115.
+No live DB mount. Backup is private operator data and is NOT in Git/artifacts.
+Docker had no network, read-only root, no credentials, a private tmpfs DB copy.
+Only src/db.ts was imported. No HTTP server, scheduler or node dispatch ran.
+First attempt stopped on missing offline zod dependency/EROFS (not a product
+migration failure). Added the lockfile-pinned zod tarball, then one rerun passed.
+
+Both before/after PRAGMA integrity_check returned ok.
+Unchanged key-table row counts:
+  sessions 318; tasks 75019; nodes 288; networks 7;
+  requirements 948; api_tokens 3246; user_inbox 2190.
+New daemon_provider_snapshots/writes/applications tables exist and are empty.
+Original backup hash before/after:
+  SHA256 3e60c87923cbd4dfb6de84a201ca74cf6ed04ecd0f316d930fe2d15722251756.
+Container removed by --rm. No production restart/config change or new tasks.
+
+Reproduce after obtaining a fresh consistent offline backup and the exact inputs:
+  sg docker -c 'bash tests/test906-hub-upgrade-preflight/run.sh <backup>/before.db <packages>/hub121.tgz <packages>/zod.tgz <runtime>/bun'
+The operator must replace placeholders; do not point the command at a live DB.
+
+Boundary: counts/integrity do not prove every row's bytes are identical, nor
+HTTP/auth compatibility, vault decryption, fleet recovery or a complete upgrade.
+This evidence only clears the schema preflight for this backup. Actual cutover
+still requires the existing deploy/hub/README.md steps, a fresh backup if delayed,
+an authoritative launcher preserving the deployed side-thread setting, exact
+version readback, and fleet heartbeat/ack observations. CLI .163 is still not
+downloadable, and desktop .235 is not yet published. Android .235 publication
+is independent (run38110423323; not evidence of production Provider availability).
+
+2026-10-11 12:20 +08 — versioned launcher profile core check PASS.
+Command (network disabled throughout):
+  sg docker -c 'docker build --network none -f tests/test906-hub-upgrade-preflight/Dockerfile.launcher -t anet-provider:hub121-launcher . && docker run --rm --network none anet-provider:hub121-launcher'
+Verified with an isolated fake executor (no live Hub):
+  - profile passes the .121 fixed runtime entry to the original launcher;
+  - explicit rollback path selects .115;
+  - side-thread default 1 and explicit override 0 reach the executor correctly.
+Original vault/port preconditions remain in the shared launcher. This narrow
+check does not retest them, execute the Hub, or constitute deployment acceptance.
+
+2026-10-11 12:25 +08 — published Hub startup/authenticated read PASS.
+The .121 package was installed into the new, inactive sibling runtime with
+npm install --ignore-scripts --no-audit --no-fund. No global package changed.
+The exact resulting package.json/package-lock.json are recorded under
+deploy/hub/provider906/ for npm ci recovery (not an unpinned reinstall).
+Lock SHA256: 4430ea32c70fe1d14a2b0d04e2936305ebc78333d082f8848dc3a4e666560fd9.
+The installed Hub's lock integrity equals the published integrity above.
+
+Built Dockerfile.http and mounted this runtime, the same offline before.db,
+and Bun 1.4.0 read-only. Container had --network none, read-only root and
+private /tmp tmpfs; no host port, vault key or environment credentials.
+http.mjs copies DB, creates one random short-lived fixture token ONLY in that
+copy, and starts the actual published bin/commhub.ts on container loopback.
+PASS: /health version .121; anonymous /api/status 401; fixture-authenticated
+network-scoped /api/status 200, all 318 expected session rows in that network.
+No response bodies, row identities, token values or child logs were exported.
+Published startup can run background work only against the disposable DB copy;
+network isolation prevents production delivery. No live request was dispatched.
+Original backup SHA256 remains unchanged. Hub child stopped; --rm container
+anet-hub121-offline-http removed, exec exited 0. No production restart.
+This clears the runbook startup/auth-read step, NOT vault decryption, fleet
+heartbeat/ack recovery, Provider application or end-to-end product acceptance.
+
+CI follow-up: qa-trigger-coverage run38111335314 on 490c847 failed because the
+new CI-executed suite was absent from qa.yml's trigger list. Added its directory
+to BOTH pull_request and push filters, without changing the checker or assertions.
+The focused launcher CI itself passed on 490c847. Fresh-head CI remains required;
+neither the older success nor this trigger correction means the new head is green.

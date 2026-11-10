@@ -1,6 +1,7 @@
 FROM oven/bun:1.3.14
 
 WORKDIR /repo
+COPY contracts /repo/contracts
 COPY server/package.json server/package-lock.json /repo/server/
 RUN cd /repo/server && bun install --frozen-lockfile
 COPY server /repo/server

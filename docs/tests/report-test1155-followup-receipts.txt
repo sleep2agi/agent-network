@@ -1,0 +1,73 @@
+# test1155 — independent owned-follow-up receipt compatibility
+
+Date: 2026-10-13 (+08)
+Baseline: main 3a12ac1463494c98c0226e42680bb7474dbe3736 (contract PR2707).
+Scope: #1151 first implementation slice. This is receipt format, restoration
+identity and legacy replay isolation, not active owned-turn injection.
+
+Implemented in the existing ledger, without a second private state source:
+- V1 original receipts remain readable alongside V2 owned_followup rows.
+- V2 stages intent/accepted/answering retain immutable owner relationship,
+  nonce/body hash and routing; no prompt/result copy is serialized.
+- Acceptance requires exact owner turn/nonce; answer binding requires accepted
+  state, same thread, a different turn, and exact user-message client identity.
+- Pending/accepted rows cannot inherit the owner's final result. An answering
+  row needs independently verified persisted identity before result recovery.
+- Unknown future versions or invalid V2 fail before load cleanup or any write,
+  including public save([]); original disk bytes are preserved.
+- The actual legacy CLI adapter refuses a persisted V2 action before runtime
+  import. Existing read-only recovery gains optional client identity inspection;
+  no new steering/admission path, Hub context mutation or model activity is added.
+
+Local validation: Docker only, 110s ceiling per build/run.
+Pinned oven/bun:1.3.14 SHA256
+e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4,
+frozen agent-node/package-lock.json, no network during tests, no shared tmux,
+no real node/model/account/configuration or globally installed package changed.
+
+Initial fixture: PASS 35 tests / 186 assertions / 179ms, four production
+mutations ASSERTION RED. Static review then found direct save and partial-adapter
+replay also needed protection; both were implemented with an additional actual
+production admission witness. Canonical V2 serialization strips extra prompt
+fields even if a JavaScript caller supplies them. The final replay witness
+extracts stable surrounding source boundaries, so disabling the actual guard
+fails its execution assertion instead of just losing its extraction anchor.
+
+Pre-PR final local fixture: PASS, exit 0, 36 tests / 196 assertions / 179ms.
+Includes V1 persistence/recovery/wiring, prior owned waiting contract, V2
+compatibility/recovery, and a real WebSocket client/bridge history-inspection
+path. No real model invocation or native adoption is claimed.
+Five independent production mutation witnesses: owner-phase isolation,
+restored-answer proof, unknown-format preservation, WS identity and legacy
+action replay refusal — each reaches a failing behavior assertion.
+
+Legacy test703 exact-turn pagination mutation now names the additional optional
+expected-client-id parameter. Its old match count and behavioral criterion are
+preserved; no test expectation or unchecked-mutation baseline is weakened.
+The new fixture is registered in qa.yml's PR/push filters and its own pinned
+workflow, .github/workflows/followup-receipts.yml.
+
+Reproduce from repository root:
+  docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) \
+    -f tests/test1155-followup-receipts/Dockerfile -t followup-receipts .
+  docker run --rm --network none followup-receipts
+
+First PR CI: followup-receipts, typecheck, QA-trigger and mutation pins passed.
+The old human-queue fixture failed 137/138: its extracted production CLI
+function did not supply the newly referenced turnReceiptLedger global. The
+correction injects a null ledger for its existing V1 audience tests, retaining
+their original assertions and all production guards. The FAIL is preserved.
+Review also makes a V2 completed turn with empty final text remain unresolved,
+even with identity proof; V1 behavior stays unchanged.
+
+Corrected local Docker: 36 PASS / 198 assertions / 188ms; all five production
+mutations ASSERTION RED. Old authenticated human queue Docker: 138 PASS / 505
+assertions / 21.41s, plus its four original production mutations ASSERTION RED.
+Both bounded build/runs exited 0; no assertion or production guard was weakened.
+
+Delivery requires corrected-source CI/type/legacy receipt gate and exact-main
+merge. This slice alone does not publish Node/CLI versions or complete #1151 /
+#730. Production injection, scoped Hub reply lookup, immutable reply-context
+handling, and answer-only continuation remain separate implementation gates.
+Upgrade/rollback/data-backup limits are in
+docs/design/730-owned-turn-human-steering.md, implemented compatibility section.

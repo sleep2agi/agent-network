@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decidePendingThreadAtStart, findThreadRollouts } from "./codex-pending-thread-restart";
+import { decidePendingThreadAtStart, findThreadRollouts, reconcilePendingThreadAtStart } from "./codex-pending-thread-restart";
 
 const M1 = "8e5c181e-95e4-4fae-a09d-ca8b56ea7f52";
 const M2 = "11111111-2222-4333-8444-555555555555";
@@ -16,8 +16,14 @@ describe("#602 decidePendingThreadAtStart", () => {
     expect(decidePendingThreadAtStart(undefined, { kind: "missing" }, none)).toEqual({ kind: "none" });
   });
 
-  test("marker on disk and bound to it → migrate (crash recovery, unchanged)", () => {
-    expect(decidePendingThreadAtStart(pending(), { kind: "ok", marker: M1 }, none)).toEqual({ kind: "migrate", oldMarker: M1 });
+  test("marker on disk and bound to it but no rollout → drop the unmaterialized fresh candidate", () => {
+    expect(decidePendingThreadAtStart(pending(), { kind: "ok", marker: M1 }, none))
+      .toEqual({ kind: "drop-unmaterialized", threadId: TID });
+  });
+
+  test("marker on disk and bound to it with a rollout → migrate the materialized candidate", () => {
+    expect(decidePendingThreadAtStart(pending(), { kind: "ok", marker: M1 }, has()))
+      .toEqual({ kind: "migrate", oldMarker: M1 });
   });
 
   test("marker on disk but candidate bound to another marker → refuse (unchanged)", () => {
@@ -92,13 +98,35 @@ describe("#602 findThreadRollouts", () => {
   });
 });
 
+describe("#602 stopped-generation config reconciliation", () => {
+  test("Windows start -> stop -> start drops an unmaterialized pending thread before relaunch", () => {
+    const stoppedWindowsConfig = {
+      node_id: "node_windows",
+      codexPendingThread: pending(),
+      codexAppServerUrl: "ws://127.0.0.1:24700",
+    };
+    const result = reconcilePendingThreadAtStart(stoppedWindowsConfig, { kind: "missing" }, none);
+    expect(result.kind).toBe("drop-unmaterialized");
+    expect(result.changed).toBe(true);
+    expect(result.config).toEqual({ node_id: "node_windows", codexAppServerUrl: "ws://127.0.0.1:24700" });
+    // The caller's snapshot is not mutated before the private atomic write.
+    expect(stoppedWindowsConfig.codexPendingThread).toEqual(pending());
+  });
+
+  test("a materialized stopped-generation candidate remains fail-closed", () => {
+    const result = reconcilePendingThreadAtStart({ codexPendingThread: pending() }, { kind: "missing" }, has());
+    expect(result.kind).toBe("refuse");
+    expect(result.changed).toBe(false);
+  });
+});
+
 describe("#602 wiring in anet node start", () => {
   const cli = readFileSync(join(import.meta.dir, "../bin/cli.ts"), "utf8");
-  const start = cli.indexOf("const prelaunchCfg = JSON.parse(");
+  const start = cli.indexOf("let prelaunchCfg = JSON.parse(");
   const reap = cli.indexOf("const identityPrep = await prepareIdentityForStart(", start);
 
   test("the decision runs before the previous generation is reaped and before any session starts", () => {
-    const at = cli.indexOf("decidePendingThreadAtStart(", start);
+    const at = cli.indexOf("reconcilePendingThreadAtStart(", start);
     expect(start).toBeGreaterThan(0);
     expect(at).toBeGreaterThan(start);
     expect(at).toBeLessThan(reap);
@@ -119,5 +147,16 @@ describe("#602 wiring in anet node start", () => {
     const refuse = block.indexOf(`pendingDecision.kind === "refuse"`);
     expect(refuse).toBeGreaterThan(0);
     expect(block.indexOf("process.exit(1)", refuse)).toBeGreaterThan(refuse);
+  });
+
+  test("Windows uses the same pending-thread decision and persists a dropped unmaterialized candidate", () => {
+    const windowsStart = cli.indexOf("async function startWindowsCodexCopresence(");
+    const snapshot = cli.indexOf("await quiesceThenSnapshot(", windowsStart);
+    const block = cli.slice(windowsStart, snapshot);
+    expect(block).toContain("const pendingDecision = reconcilePendingThreadAtStart(");
+    expect(block).toContain("findThreadRollouts(opts.codexHome, tid)");
+    expect(block).toContain(`pendingDecision.kind === "drop-unmaterialized"`);
+    expect(block).toContain("recoveryCfg = pendingDecision.config;");
+    expect(block).toContain("atomicWritePrivateJson(recoveryCfgPath, recoveryCfg);");
   });
 });

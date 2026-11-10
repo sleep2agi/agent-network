@@ -6,6 +6,8 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 
 ## Runtimes — canonical table {#runtimes-—-canonical-table}
 
+DSH connects through a separate plugin, not a built-in runtime option below. See [DSH nodes](/en/guide/dsh).
+
 > This table is the **single source of truth** for runtimes across the site. Other pages (`cli` / `agent-node` / `getting-started` / `clean-server`) reference it and do not duplicate the full table.
 
 ::: tip Which runtimes are available in which channel
@@ -33,9 +35,9 @@ For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/gro
 | `codex-sdk` | `@openai/codex-sdk` (bundled with agent-node) | Writing code / running shell commands | OpenAI Codex (gpt-5 etc) | `codex login` done ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | Wizard prints a `codex login` hint, skips vendor |
 | `grok-build-acp` | spawn local `grok` ACP server | Run tasks / collaborate via xAI Grok Build | xAI Grok (grok-build series) | `grok login` done + `GROK_CODE_XAI_API_KEY` env (this runtime also needs the env; it's a runtime prereq, not a wizard output) | Wizard prints a `grok login` hint, skips vendor |
 | `codex-cli` (stored internally as `codex-app-server`, preview) | node-owned codex app-server + bridge | Codex TUI co-presence (human and agent share one thread) | OpenAI Codex (default gpt-5.6-sol) | `codex login` done | Selecting it in the wizard enables co-presence; there is no second mode question |
-| `opencode-cli` (preview) | spawn local `opencode` CLI (public sst/opencode, fixed `opencode-ai` version pin) | Use the public opencode CLI as a multi-vendor front-end (unified session / auth abstraction) | Multi-vendor: Anthropic native / OpenAI preset | Install `opencode` CLI (`npm i -g opencode-ai@<pin>`) + pick a vendor preset (Anthropic reads `ANTHROPIC_API_KEY` / OpenAI reads `OPENAI_API_KEY` env) | Wizard prompts to install opencode CLI → pick vendor preset (anthropic / openai); API key read from env, not prompted |
+| `opencode-cli` (preview) | V1: spawn local `opencode` (`opencode-ai` pin). V2: the same runtime, package `@opencode/cli@2.0.22`, co-presence only | V1: multi-vendor front-end. V2: the `model` / `providers` already written in OpenCode on this machine | V1: Anthropic native / OpenAI preset. V2: the `provider/model` in this machine's OpenCode config | V1: `npm i -g opencode-ai@<pin>` + a vendor preset. V2: install `@opencode/cli@2.0.22` in its own prefix. Both packages install a command named `opencode` | V1: prompt to install the CLI, then pick the anthropic / openai preset. V2 is not the wizard default; pass `--opencode-generation v2 --opencode-unsafe-tools`. See [OpenCode V2](/en/guide/opencode) |
 
-> ⚠️ **`opencode-cli` is still preview**: it is in the `anet node create` menu on both the `latest` and `preview` channels, but treat its maturity as preview.
+> ⚠️ **`opencode-cli` is still preview**: it is in the `anet node create` menu on both the `latest` and `preview` channels, but treat its maturity as preview. V1 and V2 share this runtime id. Omitting `--opencode-generation` is V1, and the safe preset, free Zen model, and gateway notes below are V1. The V2 create path is real (preview channel, co-presence only, `--opencode-unsafe-tools` required). npm `latest` does not have that flag yet. Steps, Hub dialogue, the daemon, and the model catalog that is not wired through yet: [OpenCode V2](/en/guide/opencode).
 
 > 🖥️ **Platforms and model**: `opencode-cli` co-presence runs on Linux and macOS; Windows is not supported. macOS needs
 > agent-network ≥ `2.3.0-preview.87` and agent-node ≥ `2.5.0-preview.67`.
@@ -93,6 +95,10 @@ For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/gro
 > is stripped by the credential allowlist, and the `npm` package of a built-in id cannot be overridden. Credentials still go
 > through the `anthropic` preset (`ANTHROPIC_API_KEY` read at create time, or `anet opencode auth-login <node> --provider anthropic`).
 >
+> OpenCode **V2** co-presence uses the `model` (`provider/model`) and `providers` already in this machine's OpenCode `opencode.json`.
+> If `--model` or `--provider` disagrees with that config, create refuses and names both sides. It does not substitute a preset default model or fall back to anthropic.
+> `--provider` may only restate the provider id OpenCode already has. It does not turn on unsafe-tools, and `--base-url` cannot rewrite OpenCode's provider. V1 safe mode still drops custom providers.
+>
 > Three deployment prerequisites: ① install `opencode-ai@<pin>` into a dedicated npm prefix under
 > umask 0022 (a group-writable prefix fails the package identity check with `unsafe directory ownership or mode`);
 > ② on hosts without `/run/user/<uid>` the default safe root is unavailable, so point `ANET_OPENCODE_SAFE_BASE` at a 0700
@@ -110,7 +116,7 @@ For the current state of Grok TUI co-presence see the [Grok nodes](/en/guide/gro
 - **Writing code / running commands** → `codex-sdk`
 - **Human and Agent sharing one Codex TUI/thread** → choose preview `codex-cli` in the wizard; then `anet node start <alias> --copresence` starts or resumes it ([full guide](/en/guide/codex-copresence))
 - **Using xAI Grok Build** → `grok-build-acp` ([detailed runtime guide ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md))
-- **Use the public sst/opencode CLI as a multi-vendor front-end (unified session/auth)** → `opencode-cli` (needs the local `opencode` CLI + an Anthropic/OpenAI env key)
+- **Use public OpenCode** → `opencode-cli`. V1 is the default (local `opencode` CLI + an Anthropic/OpenAI env key). V2 is the same id; the create path is [OpenCode V2](/en/guide/opencode), and its maturity is still preview
 - **Reach a vendor that's not in the built-in list** (GLM / Kimi / OpenRouter / vLLM / SiliconFlow / Qwen ...) → `claude-agent-sdk` + pick `custom` in the vendor submenu + `ANTHROPIC_BASE_URL`
 - **Mix and match (recommended)** → combine the available runtimes by role on one Hub
 :::

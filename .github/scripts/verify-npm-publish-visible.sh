@@ -13,7 +13,7 @@
 #   而假红会诱导人重发同一个版本号(npm 会回 E409 previously staged)。
 #
 # 判定三分(措辞必须能区分):
-#   - 通过:tag 与 shasum 都对上                                   → rc 0
+#   - 通过:版本可见且 shasum 相符(tag 落后只 warning,由显式 dist-tag 收口) → rc 0
 #   - 字节不符:版本已可见但 shasum ≠ 本地 tarball                  → 立即 rc 1,不轮询
 #   - 超时:npm 已接受,但 N 分钟内 registry 上还看不到              → rc 1(未核实 ≠ 没生效)
 #
@@ -76,8 +76,22 @@ while :; do
     exit 1
   fi
 
-  if [ "$tag" = "$EXPECTED" ] && [ "$reg_sha" = "$LOCAL_SHA1" ]; then
-    echo "✅ registry 已可见:preview=$tag,shasum 与 CI tarball 一致(用时 ${elapsed}s,第 $attempt 次)"
+  # 判据分两层,故意**不**把两件事捆成一票否决:
+  #   ① 这个版本可见 + shasum 与 CI tarball 一致  → 这是「发出去没有」,必须绿;
+  #   ② dist-tags.preview 指向这个版本            → 这是「@preview 装哪个」,由 publish job
+  #      后面的「收口 dist-tag:preview」那一步显式设置并回读。
+  # 🔴 为什么不能把 ② 并进 ①(2026-11-10 实测):`npm publish --tag preview` 的 tag 是一个
+  #    异步处理的副作用,tag 可能**落后于**版本可见性(225 实测:版本 200 可见、tag 还停在 224),
+  #    也可能一直没跟上;而连续发两个包时,较老那版的 tag 断言**永远不可能满足**(tag 会被更晚的
+  #    版本拿走) ⇒ 旧判据会让一个「字节已经正确落地」的发布白等超时后判红,人就会去重发,
+  #    撞 E409 previously staged。tag 由显式动作负责,不靠这里猜。
+  if [ "$reg_sha" = "$LOCAL_SHA1" ]; then
+    if [ "$tag" = "$EXPECTED" ]; then
+      echo "✅ registry 已可见:preview=$tag,shasum 与 CI tarball 一致(用时 ${elapsed}s,第 $attempt 次)"
+    else
+      echo "::warning::版本与字节都对上了(preview 目前是 ${tag:-<读不到>},不是 $EXPECTED)—— tag 会滞后于可见性,不判红;由后续「收口 dist-tag:preview」显式设置并回读。"
+      echo "✅ registry 已可见:$PKG@$EXPECTED,shasum 与 CI tarball 一致(用时 ${elapsed}s,第 $attempt 次)"
+    fi
     exit 0
   fi
 

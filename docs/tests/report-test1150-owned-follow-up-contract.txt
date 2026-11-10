@@ -1,0 +1,75 @@
+# test1150 — owned network-turn human follow-up contract
+
+Date: 2026-10-13 (+08)
+Scope: design + executable current fallback boundaries for #730.
+Production bridge/runtime/CLI/classifier code and package versions are unchanged.
+Active owned-turn injection, independent accepted-follow-up receipts and an
+answer-only continuation are the implementation slice, not delivered here.
+
+Source baseline: main 391efa6b356a42b5152f1c3e959bb2c4b487582b.
+Corrected fixture source: 77a118e249398c1273860d3ee621bb6e108135ac.
+Adding this report does not change fixture/runtime/classifier inputs.
+
+Environment: Docker only; oven/bun:1.3.14 pinned digest
+e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4;
+frozen agent-node/package-lock.json; procps for the production bridge imports.
+The test run has --network none. No real app-server, node, credentials, shared
+tmux, production process or installed global package was changed. Each local
+build/run had a timeout 110s ceiling (below the two-minute local limit).
+
+Reproduce from repository root:
+  docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) \
+    -f tests/test1150-owned-steer-contract/Dockerfile -t owned-follow-up .
+  docker run --rm --network none owned-follow-up
+Use sg docker -c under the repository's local Docker permission convention.
+CI: .github/workflows/owned-steer-contract.yml.
+
+Corrected local Docker: PASS, exit 0.
+  8 tests; 49 assertions; Bun test duration 76ms.
+  Production owned admission mutation: ASSERTION RED.
+  Production runtime reply attribution mutation: ASSERTION RED.
+The mutation witnesses change the real production guard only inside Docker,
+must reach expect(received), and restore the source afterward. They show the
+fixture detects a broken owned admission boundary and cross-task reply reuse.
+
+Verified current behavior:
+- A genuinely classified Dashboard human with both audience and steering
+  flags waits behind the active owned turn; no turn/steer or premature
+  submitted/consumed evidence for the waiting task.
+- The owner's final reply is attributed only to the owner; the waiting
+  human starts afterward and gets its own reply/runtime settlement.
+- A synchronous turn/start claim with no response cannot be steered.
+- Waiting cancellation and a short explicit queue deadline remove only the
+  unconsumed human row, preserving the owner and sending no turn/interrupt.
+- A Hub-terminal row is skipped before model consumption.
+- A row claimed for Hub validation retains its admission while a human arrives.
+- Reconnect history showing an orphaned network turn cannot supply human
+  steering authority or reuse its answer for the waiting follow-up.
+
+Initial local run: FAIL, 7 pass / 1 fail, 45 assertions. The simulated transport
+omitted thread/read's cheap active status response. The production recovery
+correctly returned unknown/no active turn before querying its bounded history.
+The fixture now supplies the required active/idle response. The expected
+orphaned-network classification and production recovery code were not changed.
+The initial failure is retained; it is not counted as a successful run.
+
+First PR CI on eff02879c: owned-follow-up, human-queue and agent-node-typecheck
+passed. Two repository quality gates failed: qa-trigger-coverage required the
+new CI-executed fixture in qa.yml's PR/push path filters; mutation pin integrity
+could not statically resolve the two inline multi-variable const declarations.
+The correction adds the fixture symmetrically to those filters and splits the
+declarations into literal const statements the existing scanner supports.
+No QA assertion, required check or unchecked-mutation baseline is weakened.
+Both first CI failures remain historical failures, requiring corrected CI.
+
+Contract reference: docs/design/730-owned-turn-human-steering.md, with the
+official https://developers.openai.com/codex/app-server/ turn/steer constraints.
+Guides in Chinese and English link the contract and explicitly separate it
+from implemented active-network-turn injection.
+
+Delivery boundary: no new alpha/npm/binary is required for docs/tests/CI alone;
+do not republish immutable Node preview.142 / CLI preview.176. Main CI checks
+and merge are still required. This fixture is an in-process transport test of
+actual classifier/bridge/runtime, not real WS/native/production acceptance.
+The later implementation must pass real WS ordering plus durable receipt and
+Hub reconciliation gates, then use exact-main paired release workflows.

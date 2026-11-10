@@ -1,0 +1,14 @@
+2026-10-11T07:04Z — package release-note preflight
+Base main e53df17e8d7a81a715f6a111298b3dced44eb45c.
+Found: Hub .122 and runtime .130 had no exact release-v<version>.md,
+so release.yml gate 3 would reject them despite passing product tests.
+Added package-specific Install, Upgrade, custody/rollback and evidence boundaries.
+Docker-only readonly check in anet-provider:test906-release-candidate,
+--rm --network none; no production writes.
+PASS release notes 0.9.0-preview.122: exact file, Install/Upgrade headings,
+and @0.9.0-preview.122 inside Install section.
+PASS release notes 2.5.0-preview.130: exact file, Install/Upgrade headings,
+and @2.5.0-preview.130 inside Install section.
+Exit 0. No product tests repeated, no gate changed.
+New main SHA is required for subsequent release dispatch; pending run from
+the older main SHA does not acquire these notes automatically.

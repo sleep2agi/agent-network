@@ -1,0 +1,65 @@
+#894 OpenCode model binding — formal release receipt
+OBSERVED_AT=2026-10-12 06:44+08
+
+Source and merge
+- PR2559 merged normally to d7236f6c8b58c03d0f23583a45a54137545ab7f0.
+  Its exact head8497894420f686713b1b9bca1d81295215bed6c5 later reached
+  177 SUCCESS/1 SKIPPED, independent of the paired metadata PR.
+- PR2631 paired versions merged normally at06:23:10+08. Formal build source:
+  main103d02b7697bca2a62ed67bfc39c56a27d03096e, main ancestry rechecked by
+  both build/publisher workflows. No feature-branch artifact published.
+- At PR2631 merge53 SUCCESS/10 IN_PROGRESS/109 QUEUED; required10 and
+  related core checks passed. Not an all-green claim or an admin bypass.
+- Only this owned, merged PR's redundant branch run38179744994 cancelled.
+  Branch f82cb0695b9801a4baf4272f67da503e6d9639d1 and official main103d
+  have identical tree50cf3492aa01340d9d0ee7a903cf48f859e8d7ae.
+  Final rollup81 SUCCESS/91 CANCELLED: cancelled is not passed.
+  Main QA and every formal release gate retained; no other owner's run cancelled.
+
+Runtime2.5.0-preview.134 — PUBLISHED, public bytes verified
+- Formal run38180247434: build, all four package gates, publisher and verdict
+  SUCCESS. Docker install-path smoke, pin audit, notes and doc claims passed.
+- Artifact11717394058, gated-tarball, exact main source above.
+  ZIP digestca2f89b13c5607e3b2b5658eac3e08c7c0b289fad347fc26746b65a9b6aa71ee
+  is the archive digest, NOT the inner npm tarball digest.
+- CI inner tarball and full anonymous registry download both589890 bytes:
+  SHA25651c15d785ee120db631ba1ea853c0b230e37cfdd6dfcb5f25bf2a527fdae1701
+  SHA1aa533c358f64288bbfbe39b91cd61294b35ec96e
+  SRIsha512-PbPU+AafKHGoQ571QbdNOijitwET2kGdAEC+ZIK46PwHkdcLFJzvfCCwLzQUeLOAvUp6EUc0PT9s11U+xlz3tA==
+- Anonymous metadata and complete tarball readback at06:36:18+08:
+  https://registry.npmjs.org/@sleep2agi/agent-node/-/agent-node-2.5.0-preview.134.tgz
+- Package name/version/bin inspected; compiled refused-default-model-fallback
+  marker present. Marker presence is not live inference/entitlement evidence.
+- Initial registry404 after npm accepted resolved in this formal run; no republish.
+
+CLI2.3.0-preview.168 — registry confirmation PENDING at this observation
+- Formal run38181087362, dispatched06:36:24+08, same exact main source.
+  Build plus all four gates SUCCESS, including Docker real-TTY install smoke.
+- npm publish --tag preview SUCCESS06:38:05+08; registry verification still
+  IN_PROGRESS, anonymous version endpoint404 at06:43+08. Not yet a public
+  downloadable CLI claim; do not overwrite/re-publish this immutable version.
+- Artifact11717566117, gated-tarball; inner tarball2121077 bytes,
+  SHA256049e69273d45e68a69fc3fe813a9a0440ae50965f0cc0bd94deac25d4abc87b4.
+  ZIP digestd9dd3486e34ef2291781a00ab8fe16925e42e1fc72c3b4fd2a681cba58990ac1
+  is distinct. No GitHub Release fallback uploaded in this iteration.
+- Next registry/official-run checkpoint06:50+08, not a publication promise.
+
+Scope, cleanup and recovery
+- This release binds explicitly selected ACP models after session creation/load
+  and refuses unsupported default fallback. Relevant actual Docker safe-session,
+  wrong-session and isolated TLS selected-model transport tests are reused from
+  the original exact head; no redundant inference/auth/native suites rerun.
+- App0.2.247 macOS/Windows/Android was published independently from
+  feba667e94ea3924883f6a6a74a69fe42f5478d9. It is not rebuilt or upgraded here.
+- AppPR795's native V1 registration/package layer remains pending; runtime
+  publication does not retrospectively pass it. No real OAuth/model-rights claim.
+- No Daemon, business node, credentials, global npm installation or production
+  inference changed. Existing Docker checks used disposable --rm/tmpfs fixtures.
+  Owned downloaded artifacts retained for evidence; not falsely marked deleted.
+- Authoritative release procedure: docs/RELEASE-SOP.md and
+  .github/workflows/release.yml, full40 main source inputs, preview only.
+- Startup/upgrade/verification/rollback: docs-site/docs/deploy/daemon.md.
+  Retain the prior private package pair and protected config before activation.
+  No new topology, port/proxy/tunnel, schema, secret source or backup changes.
+  Git reproduces software/procedure, not production data, accounts or sessions;
+  protected data backups and owner authentication remain separately required.

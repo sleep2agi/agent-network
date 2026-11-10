@@ -6,26 +6,17 @@
  *
  * 🔴 There are TWO outbound paths, and which one runs is decided at line ~445:
  *
- *     const client = commhubClient ?? createEnvCommHubClient();
- *     if (client) return createCommHubEventHandler(...);   // (A)
- *     if (typeof process.send === "function") ...          // (B)
+ *   选路由是**显式**的（resolveFeishuBridgeMode）：默认 direct，只有
+ *   ANET_FEISHU_BRIDGE_MODE=commhub 才走 Hub。非法值启动即抛，不静默取默认。
  *
- *   (A) CommHub task dispatch — **the default on any real node.**
- *       `createEnvCommHubClient()` returns null only when neither COMMHUB_URL
- *       nor ANET_HUB_URL is set, and every provisioned node has one. Replies
- *       carry `in_reply_to`, and the correlation store tracks task status.
- *   (B) parent IPC → agent-node's `think()` — the fallback when there is no
- *       hub URL in env (standalone / test harness).
+ *   (A) direct（默认）—— 消息直接进本机节点的 think()（IPC）。
+ *       桥必须和节点同机；少一跳，失败只在一层。
+ *   (B) commhub —— 消息变成一条 **CommHub task** 派给目标 alias，再轮询自己的
+ *       inbox 取 reply。桥可以在任何机器；多一层（派发/执行/回读），
+ *       多节点还需要一层"@谁发给谁"的路由（尚未实现）。
  *
- *   Both paths end at adapter.send() back to the originating conversation.
- *
- * 🔴 This block used to say the opposite —— verbatim:
- *       "IM messages do NOT pass through commhub task dispatch."
- *   That was true of the 2026-06-24 first cut, and stayed in the file after
- *   the commhub path landed (#1252, merged 2026-08-27). It is the first thing
- *   anyone reads in this file, so it mis-answered the question "does Feishu go
- *   through CommHub" for at least one reader before being caught. If you change
- *   which path is default, change these lines in the same commit.
+ *   ⚠️ 这段曾经写成「CommHub dispatch 是任何真实节点的默认」，而代码里默认是 direct ——
+ *   谁按注释选模式就会以为自己走 Hub。改默认值时，同一提交里改这段。
  *
  * Still true of both paths (unchanged from the first cut):
  *   - No separate gateway ntok_ / dedicated commhub alias.
@@ -47,6 +38,8 @@ import type { IMCorrelationStore, NormalizedIMEvent } from "../types.js";
 import { createJsonIMCorrelationStore } from "../correlation-store.js";
 import { FeishuAdapter } from "./adapter.js";
 import { loadFeishuChannelConfig } from "./config.js";
+import { mapHistoryToContext, renderContextBlock } from "./chat-context.js";
+import { queueNoticeText } from "./queue-notice.js";
 import {
   parseOutboundMarkers,
   validateOutboundPath,
@@ -115,6 +108,9 @@ export interface BridgeIncomingEnvelope {
    *  bridge from `event.conversation.conversationId` + `adapter
    *  .connectionName`. Trailing slash included. */
   outboundDir?: string;
+  /** #3682 —— 已归一化/裁剪/写明"不是新指令"的上下文块（跨包共享不了 mapper，
+   *  所以归一化留在有 mapper 的这一侧，node 侧只做拼接）。 */
+  contextBlock?: string;
 }
 
 /** Parent → bridge: agent reply text for a previously-forwarded event. */
@@ -151,7 +147,9 @@ const RATE_LIMIT_NOTICE_TEXT = "处理频率超出限制，请稍后重试";
 export async function startFeishuBridge(
   opts: FeishuBridgeOptions,
 ): Promise<FeishuAdapter> {
-  const channelConfig = loadFeishuChannelConfig(opts.channelDir);
+  // #3682 —— 传 process.env：跨机节点的密钥走 Hub 保险库 → node-secrets.json → env，
+  // 没有"把 .env 拷到那台机器"这条路。.env 仍然优先（见 config.ts 的读取顺序）。
+  const channelConfig = loadFeishuChannelConfig(opts.channelDir, process.env as Record<string, string | undefined>);
 
   const adapter = new FeishuAdapter({ onTerminalError: opts.onTerminalError });
   await adapter.init({
@@ -312,10 +310,10 @@ export function withRateLimit(
     // and breaks legitimate heavy work. Wildcard ["*"] is the public-
     // channel shape — flood protection MUST still apply there.
     //
-    // Group conversations: NOT exempt. Even an allowFrom-explicit user
-    // can spam a shared group, and the group-side limit gates by chat
-    // id (not sender), so an exemption would let one user starve others.
-    if (event.conversation.conversationType === "dm") {
+    // 群聊原来不豁免（怕一个人饿死其他人）。2026-11-05 改：名单里的人（有限白名单）
+    // 在群里也豁免限流，改为靠队列接 —— 拒绝一条本该排队的话，比让它排第 2 位更糟。
+    // 洪水保护由两处兜住：队列上限（20，满了明确拒绝）+ 通配符白名单仍走限流。
+    {
       const allowFrom = adapter.getAllowFrom();
       const isWildcard = allowFrom.includes("*");
       const isExplicit = !isWildcard && allowFrom.includes(event.sender.id);
@@ -620,6 +618,27 @@ export function createIPCEventHandler(
     }, ttlMs);
     timeout.unref?.();
 
+    // #3682 —— 队列可见性：入站串行（thinkQueue），第二条起会等前面跑完；
+    // 没有这句话时，"排队"与"卡死"在用户眼里一样。pending 刚把自己放进去 ⇒ ahead = size - 1。
+    const ahead = pending.size - 1;
+    if (ahead >= 1) {
+      const notice = queueNoticeText(ahead);
+      if (notice) {
+        try {
+          await adapter.send({
+            target: event.conversation,
+            text: notice,
+            replyToMessageId: event.messageId,
+            correlation: { taskId: event.idempotencyKey },
+          });
+          process.stderr.write(`[feishu:bridge] queue-notice ahead=${ahead} for ${event.idempotencyKey}\n`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[feishu:bridge] queue-notice send failed: ${msg}\n`);
+        }
+      }
+    }
+
     // Optional placeholder — gives the user an immediate push notification
     // ("bot saw my message"). Awaited so logs stay chronological. Failure
     // is non-fatal; pending stays without a placeholderMessageId and the
@@ -668,7 +687,16 @@ export function createIPCEventHandler(
       adapter.connectionName || "feishu",
       event.conversation.conversationId,
     );
-    const envelope: BridgeIncomingEnvelope = { type: "event", event, outboundDir };
+    // #3682 —— 上下文 best-effort：拿不到就省略，绝不因此丢消息。
+    let contextBlock: string | undefined;
+    try {
+      const conv = event.conversation;
+      if (conv.conversationId) {
+        const block = renderContextBlock(mapHistoryToContext(await adapter.fetchRecentContext(conv.conversationId, 8)));
+        if (block) contextBlock = block;
+      }
+    } catch { /* 上下文失败不影响主链路 */ }
+    const envelope: BridgeIncomingEnvelope = { type: "event", event, outboundDir, ...(contextBlock ? { contextBlock } : {}) };
     process.send!(envelope);
   };
 }

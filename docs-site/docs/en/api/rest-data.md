@@ -4,6 +4,57 @@ Part of the [REST API reference](/en/api/rest): reading state, dispatching tasks
 
 ## Data Query Endpoints
 
+### GET /health
+
+Health and capacity snapshot. **No authentication required** (aggregate values only — no per-session or per-node detail).
+
+```bash
+curl -s http://localhost:9200/health | python3 -m json.tool
+```
+
+```jsonc
+{
+  "ok": true,
+  "version": "0.9.0-preview.166",
+  "uptime": 273,                 // seconds the process has been up
+  "sessions_count": 369,         // all sessions, including offline
+  "sse_connections": 144,        // live SSE connections (nodes + open dashboards)
+  "mcp_inflight": 0,             // MCP requests being handled right now
+  "mcp_inflight_peak": 325,      // high-water mark since start (never decays)
+  "event_loop": {                // since 0.9.0-preview.162
+    "max_gap_ms": 8354,          // worst single tick gap in this process (normal ≈250ms)
+    "last_gap_ms": 697,
+    "stall_count": 2,            // ticks over the stall threshold
+    "last_stall_ms": 3019,
+    "last_stall_at": "2026-10-27T01:54:48.811Z",
+    "recent_stalls": [           // last 20, newest first
+      { "at": "...", "gap_ms": 3269, "stall_ms": 3019, "rss_mb": 1410, "requests_since_last_tick": 32 }
+    ]
+  },
+  "limits": { "max_upload_bytes": 12582912, "max_request_content_length": 13631488 }
+}
+```
+
+#### Reading `event_loop.recent_stalls` (the field people misread)
+
+The Hub is single-threaded (Bun + synchronous SQLite), so "the event loop is blocked" and "timer callbacks are starved" **look identical** while needing opposite responses:
+
+| `requests_since_last_tick` | Meaning | What to do |
+|---|---|---|
+| **> 0** (e.g. 514) | Requests were still being served (hundreds of them) ⇒ **saturation**, timers starved by the I/O queue | Lower instantaneous concurrency: broadcast fan-out, reconnect storms, bulk dispatch |
+| **= 0** | Nothing progressed at all ⇒ a real **synchronous block** | Look for slow queries / sync blocks: `grep "commhub slow-sql"` |
+
+Reading only `gap_ms` collapses both into "it hung for N seconds" and sends you optimizing the wrong thing (e.g. adding memory to a saturation event).
+
+::: tip Two real readings (production, 2026-10-27)
+- `gap 143.9s · served 1175` ⇒ one broadcast (384 inbox rows) saturated the Hub — **not** a block;
+- `gap 5.7s · served 20` + `slow-sql 5325ms` ⇒ one aggregate query really held the loop.
+:::
+
+`mcp_inflight` vs RSS (isolated measurements): **each in-flight request costs ~1.2–1.4 MB**. A high `peak` with `inflight` back at 0 means the spike is over — not a leak.
+
+
+
 ### GET /api/status
 
 
@@ -209,6 +260,22 @@ curl http://localhost:9200/api/nodes \
 The `nodes` table is **persistent node identity** (written at creation, deleted only when the agent is deleted). The `sessions` table is **runtime heartbeat state** (written at agent startup; marked `offline` after 10 minutes of silence). Use [GET /api/status](#get-api-status) to check whether an agent is online; use this endpoint for agent config metadata.
 :::
 
+**`restart_readiness` (#1511)**: every row also says whether this Hub can restart the node for you, so the client can tell the user which of two things will happen after a secret/env save:
+
+```json
+"restart_readiness": { "path": "restart_node", "in_flight": 0, "can_restart_now": true }
+```
+
+| Field | Meaning |
+|------|------|
+| `path` | `restart_node`: supervised by a created daemon (exit-75 relaunches it); `stop_then_start`: an adopted node — `restart_node` refuses, but the daemon can still Stop then Start; `manual`: nobody supervises it, someone must log into the machine |
+| `in_flight` | tasks this node is working on, computed by the **same SQL** as `stop_node` / `restart_node` (rows without a task are judged by a 60-minute age; terminal tasks do not count) |
+| `can_restart_now` | `path !== "manual"` and not blocked by in-flight work |
+
+::: warning It is a snapshot, not a promise
+The server re-checks on the real call (`node_busy_in_flight` / `adopted_restart_requires_daemon`). Clients must handle those two error codes instead of trusting the snapshot.
+:::
+
 ---
 
 ### GET /api/host-supervisors
@@ -269,7 +336,7 @@ curl "http://localhost:9200/api/host-supervisors" \
 🔴 **`can_create_nodes` / `create_nodes_blocked_reason` (daemon node-creation capability).** The daemon reports it via `report_status.host.daemon_capabilities`; the hub mirrors it here verbatim so the Dashboard "create-node wizard" can decide whether a host is selectable and, if not, why (`create_nodes_blocked_reason` appears **only** when `can_create_nodes === false`).
 🔴 **Both keys are present only if the daemon actually reported them.** A daemon running an older agent-node that does not yet send `daemon_capabilities` omits both keys **entirely** from the response — they are absent, not `false`. Consumers must treat an absent key as "unknown, assume creatable" and must **not** grey out a healthy older daemon by mistaking absence for blocked (`undefined ≠ false`).
 
-🔴 **`runtime_readiness` (measured per-runtime readiness, #622).** The daemon self-checks at start-up and then every 10 minutes (±10% jitter) in the background, keyed by runtime name, e.g. `{"claude-code-cli": {"ok": true, "state": "ready", "reason": "可以创建", "version": "2.1.290", "checked_at": "2026-10-06T03:00:00.000Z", "cli": "found", "auth": "present", "network": "reachable"}}`. `state` is one of `ready` / `missing_cli` / `not_logged_in` / `no_network` / `unknown`; `reason` is user-facing Chinese text that includes the fix; `checked_at` is the daemon's own clock. Optional: `version`, `cli` (`found`/`missing`/`bundled`/`unknown`), `auth` (`present`/`absent`/`not_required`/`unknown`), `network` (`reachable`/`unreachable`/`skipped`), `shared_login_count` (codex only: how many other local nodes share the same codex login). The CLI is resolved on **the PATH the daemon's child nodes actually get**; login checks look only at whether a file or env var name **exists** and never read or report contents. **Old daemons that don't report it have no such key**; it does **not** change the meaning of `can_create_nodes`.
+🔴 **`runtime_readiness` (measured per-runtime readiness, #622).** The daemon self-checks at start-up and then every 10 minutes (±10% jitter) in the background, keyed by runtime name, e.g. `{"claude-code-cli": {"ok": true, "state": "ready", "reason": "可以创建", "version": "2.1.290", "checked_at": "2026-10-06T03:00:00.000Z", "cli": "found", "auth": "present", "network": "reachable"}}`. `state` is one of `ready` / `missing_cli` / `not_logged_in` / `no_network` / `unknown`; `reason` is user-facing Chinese text that includes the fix; `checked_at` is the daemon's own clock. Optional: `version`, `cli` (`found`/`missing`/`bundled`/`unknown`), `auth` (`present`/`absent`/`not_required`/`unknown`), `network` (`reachable`/`unreachable`/`skipped`), `shared_login_count` (codex only: how many other local nodes share the same codex login). The CLI is resolved on **the PATH the daemon's child nodes actually get**; login checks look only at whether a file or env var name **exists** and never read or report contents. **Old daemons that don't report it have no such key**; it does **not** change the meaning of `can_create_nodes`. For `opencode-cli`, the result may also include `generation` (`v1` or `v2`) and `accepted` (boolean). Older daemons omit both; they do not make `state` `ready`, and they do not change `can_create_nodes`.
 
 🔴 **The `online` window is 5 minutes**, not the heartbeat period. agent-node's `report_status` fires every **3 minutes**, and the window must exceed it — otherwise a daemon would flap to `offline` for the 60–180 s after every heartbeat.
 
@@ -277,6 +344,42 @@ curl "http://localhost:9200/api/host-supervisors" \
 
 **Network scope**: the REST auth pipeline's `restScope` (SEC-1).
 
+**`adoption_discovery`** is `true` only when that daemon reported an `adoption_candidates` array. Absence does not mean there is nothing to adopt. The list itself is [`GET /api/adoption-candidates`](#get-api-adoption-candidates), not this response.
+
+
+---
+
+### GET /api/adoption-candidates
+
+> Read-only. Hand-started nodes a daemon reported as adoptable. Does not adopt, signal, or start.
+
+```bash
+curl "http://localhost:9200/api/adoption-candidates?network_id=net_xxx" \
+  -H "Authorization: Bearer utok_xxx"
+```
+
+Header user tokens only. A daemon token, network token, or token in the URL returns 403 `user_token_required`.
+
+```json
+{
+  "ok": true,
+  "candidates": [
+    {
+      "node_id": "n_xxx",
+      "alias": "hand-node",
+      "daemon_node_id": "node_daemon_xxx",
+      "daemon_alias": "daemon",
+      "hostname": "build-1",
+      "workdir": "/home/user/project",
+      "runtime": "claude-agent-sdk",
+      "launch_hint": "tmux"
+    }
+  ],
+  "count": 1
+}
+```
+
+`launch_hint` is `bare`, `tmux`, `stopped`, or `unverified`: a hint the daemon saw, not permission to act. The workdir is included only for the node owner, a network owner/admin, or a Hub admin. Co-presence nodes are not listed. See [adoption candidate discovery](/en/deploy/daemon#adoption-candidates).
 
 ---
 
@@ -1189,11 +1292,11 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 | `new_reply` | Reply to a task (`send_reply`) | `{inbox_count, from, message_id, in_reply_to, status}` |
 | `broadcast` | Broadcast received (`broadcast` tool) | `{inbox_count}` |
 | `chained_reply` | Sub-task completion routed back to the parent task's originator ([`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `chained_reply`) | `{parent_task_id, child_task_id, child_alias}` |
-| `node.renamed` | Broadcast on RFC-010 node-rename COMMIT ([`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L196)); pushed to the old + new alias streams **plus every network member's user channel** (the dashboard subscribes to `/events/<username>`, not per-alias streams — #84 SSE channel fix) | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
+| `node.renamed` | Broadcast on RFC-010 node-rename COMMIT ([`rename.ts` `renamedEvent`](https://github.com/sleep2agi/agent-network/blob/main/server/src/rename.ts#L219)); pushed to the old + new alias streams **plus every network member's user channel** (the dashboard subscribes to `/events/<username>`, not per-alias streams — #84 SSE channel fix) | `{txn_id, alias(=new_alias), network_id, data:{old_alias, new_alias, surfaces_updated[], history_policy:"preserve"}}` |
 
 > Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) for the actual payloads. **Since #1439/#1441, `new_message` / `new_reply` / `broadcast` / `new_task` (incl. retry/reassign) all carry the real `inbox_count` (recipient's unread count) — clients can use it directly to show the new-message count; `broadcast` is no longer a hardcoded 1.** Note: `new_task` / `new_message` additionally carry a `renamed_from` field (the old alias) when the target alias was just renamed — the `canonical.renamed` branch in `tools.ts`.
 >
-> **Correction**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L69) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)).
+> **Correction**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L87) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)).
 
 **Example SSE data stream**:
 

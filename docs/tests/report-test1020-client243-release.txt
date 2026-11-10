@@ -1,0 +1,67 @@
+Test1020: Hub vault-name references / client 0.2.243 public release receipt
+Observed: 2026-10-12 00:24 Asia/Shanghai (2026-10-11T16:24Z)
+Original requirement: CommHub #1020 / agent-network-app issue #860
+
+SOURCE AND FORMAL BUILDS
+App PR865 merged; exact main a90cfd2d978678ddc3bbd3c497540af46fef4288.
+Fresh origin/main ancestor proof passed immediately before publication.
+Desktop run38153297202: macOS, Windows and verify-draft SUCCESS.
+Android build38153299528 SUCCESS; versionName0.2.243/versionCode2243,
+existing release signer certificate retained. No Linux formal build selected.
+Published GitHub release409774010 / desktop-v0.2.243 at 16:20:51Z.
+Tag resolves to the exact main commit above. Eight selected desktop assets.
+Android channel publish38154888735 SUCCESS, checkout/source-run pinned to
+the same full main SHA, anonymous artifact/notes/hash/VERSION readback passed.
+
+CORE PUBLIC CHANNEL CHECKS (DOCKER ONLY)
+Cached image anet-app:test1020-provider-ref-core-next, image ID
+3f880e03f85f8dd15f65ace8e0e62c6950b6099bc35937378f8f46868b712b97.
+Docker via sg docker; --rm, read-only filesystem and source mount, tmpfs /tmp,
+cap-drop ALL/no-new-privileges, bridge network, no credentials or host ports.
+PASS: anonymous www.anet.sh/desktop/update/latest.json returns 200,
+JSON, no-store, version0.2.243; complete canonical comparison of published
+manifest after unique asset-API to browser URL normalization; notes and
+updater signatures unchanged; Linux entries absent as selected.
+PASS: full anonymous GitHub macOS DMG, 38951945 bytes,
+sha256:4de6237e5b7bd92f53557af0775fa989be246a47874254104ffd20df9b4dff5a.
+PASS: full anonymous GitHub Windows NSIS, 37155119 bytes,
+sha256:f35c5476dd6297fb66a58cf3542bd1d0a07017f6d2f316f15e943bdda2773093.
+PASS: independent anonymous Android latest/VERSION0.2.243, release notes,
+checksum file and full APK83781077 bytes,
+sha256:91e427b55af045cf15c21d6ce37dce84b4d75291b65235babf44206705f301c6.
+ModelScope base: datasets/SmartFlowAI/agent-network-releases/resolve/master;
+Android paths: android/latest/VERSION, android/0.2.243/notes.md,
+android/agent-network-0.2.243.apk and its .sha256 file.
+Manifest drift run38155078132 SUCCESS (separate workflow).
+
+DOMESTIC DESKTOP MIRROR
+Explicit same-main mirror run38155076443 SUCCESS at 00:23+08.
+PASS independent Docker readback: desktop/latest/VERSION0.2.243, complete
+mirror updater manifest URL mapping/notes/signatures, all8 versioned asset
+checksums, and full anonymous stable-alias macOS DMG/Windows NSIS downloads
+with exactly the same byte counts and SHA256 values as the GitHub assets above.
+Same-release automatic run38155076228 CANCELLED: it would wait
+30 minutes for a GitHub APK attachment, whereas Android is published via its
+independent supported channel. No unrelated run was cancelled.
+The explicit run uploaded the selected release and verified it anonymously.
+
+HUB / DEPENDENCY BOUNDARY
+Bundled sidecar pins public Hub0.9.0-preview.125 by package/lock SRI.
+Remote Provider-reference minimums: Hub125 / CLI166 / runtime132.
+Hub125 already live; activation/recovery receipt PR2610 merged normally to
+9a48bf6c7ce95b0d2766ec5d4b596942d44a42e8 after all10 required guards passed.
+No second Hub restart, Daemon upgrade, business-node restart or credential
+operation in this release receipt. Actual Daemons remain runtime130 until
+their separately coordinated software upgrade; published132 is not deployed132.
+Six recovery facts, startup scripts, backup/data separation and rollback:
+deploy/hub/README.md and report-test1020-hub125-preflight.txt are authoritative.
+
+LIMITS / CLEANUP
+This is the small existing vault-name/Provider-reference UI slice, not every
+runtime adapter, real external OAuth/model entitlement, or #1027 token401 fix.
+Reused prior affected Docker core/UI/native evidence; no repeated inference,
+paid model calls, production fixture or expanded defensive test suite.
+The first stdin-less Docker invocation ran no script and is NOT a PASS;
+the subsequent script-bearing invocations produced the explicit checks above.
+All test containers auto-removed. Public packages/assets retained unchanged.
+Old Hub install and protected data/launcher backups remain available.

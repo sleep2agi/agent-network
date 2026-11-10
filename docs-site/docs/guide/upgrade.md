@@ -20,6 +20,19 @@ Agent Network 有两个 npm 发布通道：
 - 主仓 [GitHub releases](https://github.com/sleep2agi/agent-network/releases) 的 `v0.10.x` 等 tag 是 2026-06 之前的「bundle release」，最后一条是 2026-06-17 的 `v2.2.15`，不代表当前版本。变更请看[更新日志](/changelog)；桌面端安装包在 [agent-network-app releases](https://github.com/sleep2agi/agent-network-app/releases)。
 - 包版本与整体版本的对应矩阵见 [docs/version/](https://github.com/sleep2agi/agent-network/blob/main/docs/version/README.md)。
 
+### CLI 与 agent-node 必须成对
+
+`agent-network`（CLI）与 `agent-node` 是**同一条发布链的两半**：CLI 里钉着它要求的 `agent-node` 精确版本，
+`codex` 共存与 `opencode-cli` 节点会拒绝不匹配的组合。两个包**单独升级可能拿到"半对"**——CLI 已可见、
+对应的 `agent-node` 还没发布，或反过来。
+
+安装时请用同一份版本说明里给出的**成对命令**。只装了一半的表现是配对不匹配、co-presence 节点起不来。
+需要确认仓库声明的配对是否都已发布时，在仓库里跑：
+
+```bash
+node scripts/check-pair-published.mjs
+```
+
 ## 1. 先看计划
 
 ```bash

@@ -91,6 +91,18 @@ while IFS= read -r f; do
     ran=$((ran+1)); failed=$((failed+1)); failed_names="$failed_names $name"
     echo "--- FAILED: $rel ---"
     tail -25 "/tmp/test798-$name.log"
+    # 2026-10-31 —— **红在哪一档**比「红了几条」可行动。
+    # 用 scripts/report-server-test-triage.py（同一个分档器），把这一条的失败块喂给它：
+    # 前面的汇总行是它认文件用的，真正的失败原因在后面的原日志里。
+    # 这一步是 report-only：分档失败不改变退出码，也绝不把「分不了档」读成「没问题」。
+    if command -v python3 >/dev/null 2>&1; then
+      triage_log="/tmp/test798-triage-$name.log"
+      { printf 'FAIL %s 0 pass 0 fail\n' "$rel"; cat "/tmp/test798-$name.log"; } > "$triage_log"
+      python3 /workspace/scripts/report-server-test-triage.py "$triage_log" 2>/dev/null \
+        | sed 's/^/    /' | head -12 || echo "    （分档没跑起来：python 或脚本缺失 —— 这是「没有读数」，不是「没问题」）"
+    else
+      echo "    （分档跳过：容器里没有 python3 —— 这条失败没有被分档，不是「已解释」）"
+    fi
   fi
 done < <(find "$ROOT/server/src" -type f -name '*.test.ts' | sort)
 

@@ -1,0 +1,20 @@
+TEST ONLY — supplemental package-boundary check, 2026-10-11 19:54+08
+
+Original PR2600 package-unit failure: job114461207734, run38135839730,
+job head2b6492b3b1ad1ca57ceb016cbbd7b909cf456476,
+tested merge077485dd361797c730b1eb92b45550a57082655a.
+Missing sibling server module prevented the old integration test from loading.
+
+Corrective source now at efd25f0360a5fdf37da4006614348485bf75bd45.
+Dedicated Docker core rebuilt: 6/6 tests,44 expects PASS; original cross-package
+4/4,36 assertions preserved. See report-test906-provider-create-core.txt.
+
+Supplemental Docker check: image anet-provider:test906-create,
+copy only /work/agent-network to /standalone/agent-network, then:
+  bun test --bail src/daemon-provider-initialize.test.ts
+Result: 2/2 tests,8 expects PASS without sibling server/agent-node directories.
+Container --rm, network none, UID root for the temporary in-container copy.
+This is not the entire non-root package CI suite and not a native launch.
+No host tests, production changes, real keys or inference. Container removed;
+cached image retained. This supplemental report is included in the later
+scoped main synchronization commit, not an independent CI-only retrigger.

@@ -1,0 +1,40 @@
+#906/#901 native OpenCode V2 catalog adapter — TEST-ONLY
+Observed: 2026-10-11 08:00 Asia/Shanghai
+Base main: 050b7bc400cde1378b35e27fdc8daa6f17841ca8 + this diff.
+Pinned upstream: @opencode/cli 2.0.22, installed only in Docker.
+
+Source inspection at upstream v2.0.22:
+https://github.com/anomalyco/opencode/blob/v2.0.22/packages/protocol/src/groups/provider.ts
+https://github.com/anomalyco/opencode/blob/v2.0.22/packages/protocol/src/groups/model.ts
+https://github.com/anomalyco/opencode/blob/v2.0.22/packages/cli/src/commands/handlers/models.ts
+The model API explicitly permits snapshots before initial plugin settlement.
+Native Provider.Info has arbitrary settings/headers/body; do NOT forward it raw.
+Native model IDs can contain slashes beyond the provider separator.
+
+Command (sg docker; no host credential mounts):
+docker build -f tests/test906-daemon-catalog/Dockerfile -t anet-catalog906:native .
+docker run --rm --network none anet-catalog906:native
+
+Environment/version check: PASS, opencode v2.0.22.
+Atomic adapter tests: 8 passed / 0 failed; 36 expect calls.
+Covers whitelist, native nested IDs, same-name models on distinct providers,
+default identity, unverified empty snapshot, directory mismatch, inconsistent data,
+duplicates, malformed/secret-shaped IDs, limits, non-loopback targets, authentication,
+redirect denial, oversized body and bounded hung reads.
+Then L1 real pinned V2: wrong Basic authentication rejected, PASS.
+Then L2 real pinned V2: custom configured model and default returned, PASS;
+native snapshot contained 2 providers / 9 models. No provider/model hardcoded fallback.
+Raw planted settings.apiKey excluded from adapter result.
+No prompt, paid inference, tool execution or model connectivity probe performed.
+Cleanup: private native child exited; temporary fixture directory removed;
+--rm containers removed; test images retained locally.
+
+Important limits:
+This is an adapter building block, NOT yet wired to daemon dispatch, Hub authorization,
+heartbeat or client model selection. Scope labels supplied by caller do not authorize
+access. Integration MUST resolve and authorize daemon identity server-side, then use
+the target's already-owned authenticated native server and exact project directory.
+Do not auto-start a background service for a supposedly read-only catalog request.
+Snapshots are explicitly incomplete/unknown and invocationVerified=false, including
+empty snapshots. Do not present these counts as verified usable models.
+No merge, release or production changes. Full parent #906/#901 acceptance remains open.

@@ -6,6 +6,8 @@
 
 ## Runtime 对比（canonical 表） {#runtime-对比-canonical-表}
 
+DSH 通过独立插件接入，不是下面的内置 runtime 选项，见 [DSH 节点](/guide/dsh)。
+
 > 本表是全站 runtime 信息的**单一权威来源**。其他页面（`cli` / `agent-node` / `getting-started` / `clean-server`）都引用这里，不在那些页面重复整表。
 
 ::: tip 哪些 runtime 在哪个通道可用
@@ -33,9 +35,9 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 | `codex-sdk` | `@openai/codex-sdk` (随 agent-node 装) | 写代码 / 跑命令 | OpenAI Codex (gpt-5 等) | 已 `codex login` ([@openai/codex](https://www.npmjs.com/package/@openai/codex) CLI) | 选完打印 `codex login` 提示，跳过 vendor |
 | `grok-build-acp` | spawn 本机 `grok` ACP server | 用 xAI Grok Build 跑任务 / 协作 | xAI Grok (grok-build 系列) | 已 `grok login` + `GROK_CODE_XAI_API_KEY` env（该 runtime 另需该 env，非 wizard 输出） | 选完打印 `grok login` 提示，跳过 vendor |
 | `codex-cli`（内部存为 `codex-app-server`，preview） | 节点自有的 codex app-server + 桥 | Codex TUI 人机共存（人和 agent 共用一个 thread） | OpenAI Codex（默认 gpt-5.6-sol） | 已 `codex login` | 向导选中即启用共存，无第二次模式选择 |
-| `opencode-cli` (preview) | spawn 本机 `opencode` 命令 (公版 sst/opencode CLI，固定 `opencode-ai` 版本 pin) | 用公版 opencode 做多 vendor 前端（统一 session / auth 抽象） | 多 vendor: Anthropic 原生 / OpenAI preset | 装 `opencode` CLI (`npm i -g opencode-ai@<pin>`) + 选 vendor preset (Anthropic 读 `ANTHROPIC_API_KEY` / OpenAI 读 `OPENAI_API_KEY` env) | 选完提示装 opencode CLI → 选 vendor preset (anthropic / openai)，API key 从 env 读，不 prompt |
+| `opencode-cli` (preview) | V1：spawn 本机 `opencode`（`opencode-ai` pin）。V2：同一 runtime，包 `@opencode/cli@2.0.22`，只共存 | V1：多 vendor 前端。V2：用这台机器已经写好的 OpenCode `model` / `providers` | V1：Anthropic 原生 / OpenAI preset。V2：本机 OpenCode 配置里的 `provider/model` | V1：`npm i -g opencode-ai@<pin>` + vendor preset。V2：独立前缀安装 `@opencode/cli@2.0.22`，两个包装出来的命令都叫 `opencode` | V1：提示装 CLI → 选 anthropic / openai preset。V2 不是向导默认项，要 `--opencode-generation v2 --opencode-unsafe-tools`。见 [OpenCode V2](/guide/opencode) |
 
-> ⚠️ **`opencode-cli` 仍是预览**：它已在 `latest` 与 `preview` 两条通道的 `anet node create` 选单里，但成熟度按预览看待。
+> ⚠️ **`opencode-cli` 仍是预览**：它已在 `latest` 与 `preview` 两条通道的 `anet node create` 选单里，但成熟度按预览看待。V1 与 V2 共用这个 runtime id。省略 `--opencode-generation` 就是 V1，下面的安全预设、免费 Zen 模型和网关说明都是 V1。V2 的创建路径是真的（preview 通道、只共存、必须 `--opencode-unsafe-tools`），npm `latest` 上还没有这条标志。步骤、Hub 对话、daemon 和尚未接线的模型目录见 [OpenCode V2](/guide/opencode)。
 
 > 🖥️ **平台与模型**：`opencode-cli` 共存在 Linux 与 macOS 上可用，Windows 不支持。macOS 需要
 > agent-network ≥ `2.3.0-preview.87` 且 agent-node ≥ `2.5.0-preview.67`。
@@ -91,6 +93,10 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 > 剥掉，内置 id 的 `npm` 包也不可覆盖。凭据仍按 `anthropic` preset 走（create 时读 `ANTHROPIC_API_KEY`，
 > 或 `anet opencode auth-login <node> --provider anthropic`）。
 >
+> OpenCode **V2** 共存节点用的是这台机器上 OpenCode 已经写在 `opencode.json` 里的 `model`（`provider/model`）和 `providers`。
+> 创建时如果 `--model` 或 `--provider` 和这份配置不一致，命令拒绝并写出两边的值，不会改成预设默认模型，也不会退回 anthropic。
+> `--provider` 只能重复本机已有的 provider id，不会打开 unsafe-tools，也不能用 `--base-url` 改写 OpenCode 自己的 provider。V1 安全模式仍然会丢掉自定义 provider。
+>
 > 三条部署前置：① `opencode-ai@<pin>` 要在 umask 0022 的独立 npm 前缀里装（前缀目录带组写位会被包身份校验拒，
 > 报 `unsafe directory ownership or mode`）；② 机器上没有 `/run/user/<uid>` 时默认安全根不可用，用 `ANET_OPENCODE_SAFE_BASE`
 > 指定一个 0700、不在 `$HOME`（含 `.claude`）且父目录不带组写位的目录；③ agent-node 必须是**你那份 anet 的配对版本**
@@ -106,7 +112,7 @@ Grok TUI 共存的当前状态见 [Grok 节点](/guide/grok)；`grok-build-acp` 
 - **写代码 / 跑命令** → `codex-sdk`
 - **人和 Agent 共用一个 Codex TUI/thread** → 向导选择 preview `codex-cli`；之后用 `anet node start <alias> --copresence` 启动或恢复（[完整指南](/guide/codex-copresence)）
 - **用 xAI Grok Build** → `grok-build-acp`（[详细 runtime 指南 ↗](https://github.com/sleep2agi/agent-network/blob/main/docs/grok-build-runtime.md)）
-- **想用公版 sst/opencode CLI 当多 vendor 前端（统一 session/auth）** → `opencode-cli`（需本机装 `opencode` CLI + Anthropic/OpenAI env key）
+- **想用公版 OpenCode** → `opencode-cli`。V1 是默认（本机 `opencode` CLI + Anthropic/OpenAI env key）。V2 仍是这个 id，创建路径见 [OpenCode V2](/guide/opencode)，成熟度仍是 preview
 - **接国产 / 非内置 vendor**（GLM / Kimi / OpenRouter / vLLM / SiliconFlow / 通义千问 等）→ `claude-agent-sdk` + 在 vendor 子菜单选 `自定义 (custom)` + `ANTHROPIC_BASE_URL`
 - **混搭（推荐）** → 在同一 Hub 按角色组合可用的 runtime
 :::

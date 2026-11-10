@@ -1,0 +1,50 @@
+CommHub #688 — inbox recipient identity
+
+Candidate base: 7589316b069d788e1f94a06b5483d5f2af22cf23 (main).
+Status: implementation candidate; local Docker HTTP verification passed.
+GitHub exact-head checks, main merge and public release remain pending.
+
+First GitHub run (38320496983): SQLite/PG HTTP suites passed; the separate
+44-test compatibility step had one failure: its multi-network member ACK
+fixture lacked recipient ownership. The network-resolution case now assigns
+the fixture recipient to that member; the HTTP unauthorized-member assertions
+remain unchanged. First hub-provider run also caught tools/list exceeding the
+unchanged 85,500-byte ceiling. Shortened inbox descriptions and omitted the
+new optional field's description; did not raise any ceiling. Updated the two
+message-lifecycle symbol links displaced by tools.ts lines. New-head CI pending.
+
+Second GitHub head ee2dda00b: dedicated HTTP/ACK compatibility core passed
+(30 SQLite + 30 PostgreSQL + 44 regressions). Symbol links passed. Tools-list
+budget was still four bytes over (85,504); shortened the two inbox alias labels
+by sixteen bytes and included that same existing byte-ceiling case in the
+focused workflow. No limits/permission assertions were changed.
+
+2026-10-13 07:07+08: SQLite 30/30 and PostgreSQL 30/30 passed,
+162 expect calls per backend. Container networking was disabled; HTTP stayed
+on loopback, with synthetic users/tokens and ephemeral databases only.
+Initial fixture run: 25 pass / 5 fail, because new fixture writes passed
+positional parameters to DbAdapter.run, which takes an array. Corrected the
+fixtures and ran both backends against a read-only source mount. No assertions
+were removed. Total local build/test time stayed below two minutes.
+
+get_inbox and ack_inbox share resolveInboxCaller, before inbox reads/writes.
+Node callers use resolveNodeCaller, never a requested alias or an issuer's
+network-admin role. Rejected identities cannot fall back to human authority.
+Human callers may use their own username, their owned node, or a recipient
+in a network where they are owner/admin. Multi-network human callers supply
+network_id when acting for another recipient. Open-development/global-token
+mode retains its existing semantics. ACK write-role checks remain in force.
+
+Verification: existing real HTTP caller suite plus five recipient scenarios:
+bound identity/token-name skew; unauthorized read and ACK without writes;
+same alias across networks; legacy ownerless and authorized human callers;
+full-access member denied another owner's recipient, own user inbox retained.
+The dedicated PR workflow runs the suite in Docker on SQLite and PostgreSQL.
+It also runs the existing task-consumption and MCP write-scope suites, including
+logical task-id/transport ACK regressions; these additional CI results pending.
+
+Operations: no schema, ports, proxy, credentials or persistent state changes.
+Start/upgrade/rollback uses the existing deploy/hub flow and exact main build.
+Inbox/task data still requires the existing database backup; Git recreates
+software, not user messages. No production restart, token change or release
+has been performed for this candidate.

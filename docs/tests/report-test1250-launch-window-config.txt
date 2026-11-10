@@ -1,0 +1,120 @@
+TEST-ONLY: #1250 launch-window private config fixture correction
+Date: 2026-10-14
+
+Source PR: https://github.com/sleep2agi/agent-network/pull/2754
+Source head: 851614f27185e8427c84c428b9e35dc4bc323137
+Ordinary source main: 8dbe728be8dbe0f52584a79ceab4aedb98e15e43
+Merged: 2026-10-14T15:19:27Z; fresh main ancestry passed.
+Source and ordinary-main tree: 745019f4547aac4edda66aad693de82dfb4110d3
+All ten protected exact-head checks passed. Wider Actions QA/full regression
+were still pending at source merge; this report does not claim their PASS.
+
+Qualified Docker inputs
+-----------------------
+agent-node/src tree: 87545525bbf964543f89545c8d40e2e5f73831f9
+tests/test894-launch-window tree: b90a6bfeaf25674409e912c212410c75b19ac66d
+Image: sha256:dadda5881dd043718f94d6bf54d086246451c8f00a1faaa1d0c82bd01c5775dd
+Its image revision label stamps the exact source head above; other OCI labels
+are inherited from the pinned Bun base and are not repository provenance.
+Bun1.3.14 base digest is pinned in the independent Dockerfile. Non-root runtime,
+--init/--network none, no external models/logins/history. Build+existing run.sh
+completed with exit0 inside one 110-second hard local cap. Only this created
+container ID was removed; no shared containers or services were interrupted.
+No new tests, guard changes, assertion changes, global package or production ops.
+
+Result and interpretation
+-------------------------
+Existing launcher-health unit:12 pass/0fail. Existing process probe:five PASS.
+The bypassed-wait negative exits1 at the exact original post-exec readiness
+assertion; runner verifies that reason and emits final PASS (whole suite exit0).
+It is an expected RED, not an uncorrected baseline test failure.
+The selected and foreign config paths now each have an exclusive0600 synthetic
+JSON file inside a fresh private test directory. Existing health inspection
+reads config before process validation. Without both readable configs, the
+probe stopped at generic missing/unsafe record instead of its original pre-exec
+or bridge-config mismatch assertion. Production validation remains unchanged.
+
+Previous actual RED
+-------------------
+Run38583114561/job115918923788 at43c1f9efc failed at original probe44:
+expected TUI session mismatch, actual missing or unsafe launch/attach record.
+Artifact11904224309 SHA2564864b06869897c996993a2f46169eda568d25306661ba5d504eea3f82b81b60d.
+Base and candidate guard/probe/bridge were identical then. No separate base
+Docker reproduction was performed; source inspection plus the corrected
+actual probe supports the fixture diagnosis, not a claim of old base PASS.
+The older report-test1245-v1-migration-plan.txt retains its historical RED.
+
+Six reconstruction answers and scope
+-----------------------------------
+1. This fixture starts through tests/test894-launch-window/Dockerfile and
+   run.sh, spawning only synthetic bridge/serve/TUI child processes. It is not
+   a new persistent service or production startup change.
+2. No proxy/tunnel/port changes; the qualified process suite runs network none.
+3. Selected/foreign configs are fresh synthetic empty JSON; no credentials,
+   production environment or original histories are needed/read/copied.
+4. Rebuild the exact selected Git revision with the pinned Dockerfile and run
+   the existing suite. Verify unit/probe exit0 and the negative's exact reason.
+   This does not verify an installed CLI/native binary on an original machine.
+5. Roll back the fixture source by selecting its prior software revision; no
+   runtime binding/data changed to restore. Keep the original RED evidence.
+6. Git reproduces software and this disposable fixture, not original native
+   history, identities/login, encrypted backup retention or restore authority.
+   Default SAFE migration, atomic journal and final lossless recovery remain
+   independent #1246/#1238/#1239 gates. No npm/installer/deployment or adoption.
+
+Full actual baseline output
+---------------------------
+bun test v1.3.14 (0d9b296a)
+
+agent-node/src/runtime/opencode-copresence/launcher-health.test.ts:
+(pass) daemon OpenCode live launch generation > matching bridge, child serve and same-session TUI [0.78ms]
+(pass) daemon OpenCode live launch generation > missing/dead and PID-reused processes all fail closed [0.37ms]
+(pass) daemon OpenCode live launch generation > old record and wrong TUI generation rejected [0.09ms]
+(pass) daemon OpenCode live launch generation > unrelated live serve/config/TUI rejected [0.18ms]
+(pass) daemon OpenCode live launch generation > exit zero required independently of health [0.12ms]
+(pass) daemon OpenCode live launch generation > malformed records, unknown process identity and missing proof refuse [0.49ms]
+(pass) daemon OpenCode live launch generation > real child proof private, replaced generation survives old cleanup [11.77ms]
+(pass) daemon OpenCode live launch generation > daemon removes only the exited PID and records verified bridge [1.12ms]
+(pass) bounded attach exec readiness > argv class separates pre-exec shell, wrong session, and the two-arg contract [0.09ms]
+(pass) bounded attach exec readiness > rechecks the unchanged full guard until exec makes the same session ready [0.88ms]
+(pass) bounded attach exec readiness > wrong session and a deadline already reached do not pass or gain budget [0.57ms]
+(pass) bounded attach exec readiness > linux pre-exec cmdline is TUI session mismatch and the same pid matches after exec [96.49ms]
+
+ 12 pass
+ 0 fail
+ 50 expect() calls
+Ran 12 tests across 1 file. [246.00ms]
+PASS: real launcher exit0 + live same-generation records BEFORE exec precisely rejects TUI session mismatch
+PASS: AFTER exec same PID/start ticks/generation passes original health guard
+PASS: repeated probes never accept a foreign generation
+PASS: reused PID/start ticks rejected
+PASS: foreign config and nonzero launcher remain rejected; restored exact identity healthy
+
+Full actual bypassed-wait negative output
+----------------------------------------
+PASS: real launcher exit0 + live same-generation records BEFORE exec precisely rejects TUI session mismatch
+52 |     ? Promise.resolve(check()) // witnessed old one-shot behavior; test only
+53 |     : waitForLaunchHealth(temp, config, launchedAt, Date.now() + 2000);
+54 |   await Bun.sleep(100);
+55 |   assert.deepEqual(check(), {ok: false, reason: 'TUI session mismatch'});
+56 |   writeFileSync(gate, 'release');
+57 |   assert.equal((await pending).ok, true, 'bounded full-identity wait did not observe exec');
+              ^
+AssertionError: bounded full-identity wait did not observe exec
+
+false !== true
+
+ generatedMessage: false,
+     actual: false,
+   expected: true,
+   operator: "strictEqual",
+       code: "ERR_ASSERTION"
+
+      at /fixture/probe.ts:57:10
+
+Bun v1.3.14 (Linux x64 baseline)
+
+Runner final verdict
+--------------------
+PASS: bypassed wait rejected at exact post-exec readiness assertion
+Suite exit0; negative exit1 matched the exact readiness assertion.
