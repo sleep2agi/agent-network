@@ -36,7 +36,12 @@ COPY server ./server
 # 若干 server 测试跨包 import agent-node 的源码(hub↔daemon 漂移门比对
 # shared/*.ts;peer-reply-atomic 用 reply-reliability;dashboard-slash-routing
 # 用 inbox-dispatch)。带整个 src,不带它的依赖 —— 这些是纯源码 import。
-COPY agent-node/package.json ./agent-node/package.json
+COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
+# 2026-11-10 —— 源码 fork 链路测试（session-project-create-http、session-source-evidence）
+# 会在测试里 Bun.build 真的 agent-node CLI，并把 agent-node/node_modules 下的
+# @anthropic-ai / @openai / node-pty 软链进夹具包；没有依赖时构建报
+# 「Could not resolve: "zod"」，链路以 unknown_rotation_required 收场。按 lockfile 装。
+RUN cd agent-node && npm ci --ignore-scripts
 COPY agent-node/src ./agent-node/src
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 COPY agent-network/src ./agent-network/src
