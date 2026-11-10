@@ -108,11 +108,13 @@ import { buildOpencodeSmokeEnv } from "../src/opencode-smoke-env";
 import {
   OPENCODE_AGENT_NODE_SPEC,
   OPENCODE_AGENT_NODE_VERSION,
+  PAIRED_AGENT_NETWORK_VERSION,
   PAIRED_AGENT_NODE_SPEC,
   PAIRED_AGENT_NODE_VERSION,
   agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairInfo,
   pairedAgentNodeResolution,
   pairedAgentNodeResolveTimeoutMs,
   pairedAgentNodeResolveError,
@@ -15442,6 +15444,26 @@ async function smokeOpencodeAcp(
   return result;
 }
 
+/**
+ * `anet pair` —— 精确配对的唯一答案。
+ *
+ * opencode-cli 这条路径**禁用了自动 npx**，目标机上必须有精确版本的全局 agent-node；
+ * 而两个包的 preview tag 是**先后**移动的（node 先发、声明它的 CLI 后发），
+ * 所以 `@preview` 在窗口期里不自洽。把本包里的常量打印出来，是唯一不用猜的答案 ——
+ * 客户端和文档都应当显示这条命令，而不是自己拼版本号。
+ */
+function pairCommand(): void {
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({
+      cli: `@sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`,
+      agentNode: `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`,
+      install: opencodeExactPairInstallCommand(),
+    }, null, 2));
+    return;
+  }
+  console.log(pairInfo());
+}
+
 async function upgradeCommand() {
   const opts = parseOpts();
   // #154 (Vincent 5489+5490) — `--self` was opt-in via #151's Option A which
@@ -20171,6 +20193,7 @@ switch (command) {
   case "channel": await channelCommand(); break;
   case "setup": await setupCommand(); break;
   case "upgrade": await upgradeCommand(); break;
+  case "pair": pairCommand(); break; // 精确配对的唯一答案：打印本包常量生成的安装命令
   case "session": sessionCommand(); break;
   case "skill": await skillCommand(); break;
   case "ls": case "list": await lsCommand(); break;
