@@ -47,6 +47,17 @@ node --test app/lib/x.test.mjs         # .mjs 里 import 无扩展名的 .ts →
 `server/src/*.test.ts` 里没有任何一处起真 tmux（只出现 `launch_hint: "tmux"` 这类字符串字面量），
 所以这一层用定向本地跑是安全的。
 
+⚠️ 但**不是每个 `server/src/*.test.ts` 都能在宿主上跑通**。2026-11-10 实测
+`server/src/session-source-evidence.test.ts`：容器里 39/39 绿，宿主上 **35 pass / 4 fail**，
+四个失败全部是同一类环境缺失：
+
+```text
+ENOENT: no such file or directory, mkdtemp '/work/source-cli-fixture-…'
+```
+
+容器里有 `/work`（镜像的工作目录布局），宿主没有；该套件会拉起真实子进程、在 `/work` 下造夹具。
+判据：**先看失败点是不是 ENOENT + 绝对路径**——是环境就换容器跑，别去改断言。
+
 ## 建议的默认动作
 
 1. 改完 → 定向跑受影响文件（秒级）
