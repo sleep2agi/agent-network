@@ -32,9 +32,11 @@ describe("OpenCode co-presence CLI wiring", () => {
   test("generation policy is checked before touching profiles or live sessions", () => {
     const guard = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal(");
     expect(guard).toBeGreaterThan(-1);
-    expect(body.indexOf("saveProfile(")).toBeGreaterThan(guard);
+    // #3418 —— 这里原来整份回写（saveProfile(resolved.id, profile)），现在只记一格
+    // （patchProfileFields）。**不变的是次序**：生成策略的拒绝必须在任何 profile 写入之前。
+    expect(body.indexOf("patchProfileFields(resolved.id")).toBeGreaterThan(guard);
     expect(body.indexOf("killTmuxSession(")).toBeGreaterThan(guard);
-    expect(body.slice(guard, body.indexOf("saveProfile("))).toContain("if (generationRefusal)");
+    expect(body.slice(guard, body.indexOf("patchProfileFields(resolved.id"))).toContain("if (generationRefusal)");
   });
 
   test("persists copresence mode before launching the bridge", () => {
@@ -47,7 +49,7 @@ describe("OpenCode co-presence CLI wiring", () => {
   test("policy refusal precedes profile writes and session replacement", () => {
     const refusal = body.indexOf("const generationRefusal = opencodeStartGenerationRefusal");
     expect(refusal).toBeGreaterThan(-1);
-    expect(refusal).toBeLessThan(body.indexOf("saveProfile(resolved.id, profile)"));
+    expect(refusal).toBeLessThan(body.indexOf("patchProfileFields(resolved.id"));
     expect(refusal).toBeLessThan(body.indexOf("killTmuxSession(name)"));
   });
 

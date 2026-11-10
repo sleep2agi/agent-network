@@ -89,6 +89,15 @@ async function connect(id: Identity) {
 beforeEach(() => { cleanup(); seedWorld(); });
 afterAll(cleanup);
 
+test("variant config update rejects a target from another network over MCP", async () => {
+  const u = await connect(asUser);
+  try {
+    const result = await u.call("update_node_config", { node_id: OTHER_NODE_ID, base_revision: 0, patch: { modelVariant: "high" } });
+    expect(result).toMatchObject({ ok: false, error: "cross_network_node" });
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM node_config_updates WHERE node_id = ?1", OTHER_NODE_ID)?.n).toBe(0);
+  } finally { await u.close(); }
+}, 20_000);
+
 describe("app#225 rules file — schema has no path", () => {
   test("read/write tool inputs are node id + content only; no path / file_name / dir field anywhere", async () => {
     // 🔴 不走 client.listTools():main 上 report_status / send_desktop_message /
@@ -126,21 +135,45 @@ describe("app#225 rules file — read round trip", () => {
     const n = await connect(asNode);
     try {
       const enq = await u.call("read_node_rules_file", { node_id: NODE_ID });
+      // #3275 批次 4 —— read 的外层三键（与 write 同形；本文件里 `enq` 被赋值 4 次，各归各的）
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(enq).toMatchObject({ ok: true, op: "read" });
       expect(enq.request_id).toMatch(/^rf_/);
 
-      expect(await u.call("get_rules_file_result", { request_id: enq.request_id })).toMatchObject({ ok: true, status: "pending", op: "read" });
+      // #3275 批次 4 —— 先接住再断言（同变量口径）：外层是 pending 态的闭集。
+      const pending = await u.call("get_rules_file_result", { request_id: enq.request_id });
+      // #3275 批次 4 —— 实测 9 键（我按族推断的 7 键少了 node_id 与 age_ms，当场红）。
+      // `age_ms` 尤其不能少：pending 唯一的「还要等多久」信号；没有它，客户端只能盲轮询。
+      expect(Object.keys(pending).sort()).toEqual([
+        "age_ms", "error", "exists", "file_name", "node_id", "ok", "op", "request_id", "status",
+      ]);
+      expect(pending).toMatchObject({ ok: true, status: "pending", op: "read" });
+      // read_node_rules_file 的外层（enq）：
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
 
       const pulled = await n.call("get_rules_file_request", {});
+      // #3309 分支 —— 有请求态的外层闭集 {ok, request}（与空态同形，但 request 非 null）；
+      // 空态已在上一条钉过 ⇒ 两个出口各自有断言，而不是「一个断言代表两态」。
+      expect(Object.keys(pulled).sort()).toEqual(["ok", "request"]);
       expect(pulled.ok).toBe(true);
       expect(Object.keys(pulled.request).sort()).toEqual(["op", "request_id"]);
       expect(pulled.request).toEqual({ request_id: enq.request_id, op: "read" });
       // 第二次拉:已经 in_progress,不再重复下发
       expect(await n.call("get_rules_file_request", {})).toEqual({ ok: true, request: null });
 
-      expect(await n.call("ack_rules_file_request", {
+      // #3275 批次 1 —— 同变量口径：这条断言必须测**这次调用的返回值**，而不是写在旁边的另一个值。
+      // 成功回执是闭集：{ok, request_id, status}。多一个键（例如 hint）客户端就会多一个没人知道的分支。
+      const acked = await n.call("ack_rules_file_request", {
         request_id: enq.request_id, status: "done", file_name: "CLAUDE.md", exists: true, content: "# 规则\n",
-      })).toMatchObject({ ok: true, status: "done" });
+      });
+      expect(Object.keys(acked).sort()).toEqual(["ok", "request_id", "status"]);
+      // #3275 批次 1·b —— 重复 ack 走 already_terminal：**形状不一样**（多一个 current_status）。
+      const twice = await n.call("ack_rules_file_request", {
+        request_id: enq.request_id, status: "done", file_name: "CLAUDE.md", exists: true,
+      });
+      expect(Object.keys(twice).sort()).toEqual(["current_status", "ignored", "ok"]);
+      expect(twice).toMatchObject({ ok: true, ignored: "already_terminal" });
+      expect(acked).toMatchObject({ ok: true, status: "done", request_id: enq.request_id });
 
       const res = await u.call("get_rules_file_result", { request_id: enq.request_id });
       expect(res).toMatchObject({ ok: true, status: "done", op: "read", file_name: "CLAUDE.md", exists: true, content: "# 规则\n", error: null });
@@ -153,8 +186,13 @@ describe("app#225 rules file — read round trip", () => {
     try {
       const body = "# new rules\n\n- 不碰生产 DB\n";
       const enq = await u.call("write_node_rules_file", { node_id: NODE_ID, content: body });
+      // #3275 批次 4 —— write 的外层与 read 同形（三键），但**必须各自钉**：
+      // 这个文件里 `enq` 被赋值 4 次，一条断言只属于它所在的那一次。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(enq).toMatchObject({ ok: true, op: "write" });
       const pulled = await n.call("get_rules_file_request", {});
+      // get_rules_file_request 的空态：`request: null`（两态，闭集两键）
+      expect(Object.keys(pulled).sort()).toEqual(["ok", "request"]);
       expect(pulled.request).toEqual({ request_id: enq.request_id, op: "write", content: body });
       await n.call("ack_rules_file_request", { request_id: enq.request_id, status: "done", file_name: "CLAUDE.md", exists: true });
       const res = await u.call("get_rules_file_result", { request_id: enq.request_id });
@@ -190,7 +228,12 @@ describe("app#225 rules file — SEC-1 and lifecycle", () => {
     try {
       const enq = await u.call("read_node_rules_file", { node_id: NODE_ID });
       expect(await o.call("get_rules_file_request", {})).toEqual({ ok: true, request: null });
-      expect(await o.call("ack_rules_file_request", { request_id: enq.request_id, status: "done", content: "stolen" })).toMatchObject({ ok: true, ignored: "unknown_or_foreign_request" });
+      // #3275 批次 1·b —— 别的节点 ack 别人的请求：**忽略也是契约**。
+      // 形状是 {ok, ignored} 两键（不带 request_id/status —— 那是主分支的形状），
+      // 只写 toMatchObject 时，多塞一个 current_status 不会有任何东西变红。
+      const foreignAck = await o.call("ack_rules_file_request", { request_id: enq.request_id, status: "done", content: "stolen" });
+      expect(Object.keys(foreignAck).sort()).toEqual(["ignored", "ok"]);
+      expect(foreignAck).toEqual({ ok: true, ignored: "unknown_or_foreign_request" });
       expect(db.get<{ status: string }>("SELECT status FROM node_rules_requests WHERE request_id = ?1", enq.request_id)?.status).toBe("pending");
     } finally { await u.close(); await o.close(); }
   }, 20_000);

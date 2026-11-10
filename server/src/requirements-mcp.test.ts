@@ -63,6 +63,9 @@ describe("requirements MCP tools", () => {
       // P0–P3:lowest(P3 极低)在建 / 改 / upsert 都能写;不认识的值在协议边界被拒
       expect((await s.call("requirements_create", { name: "x", priority: "urgent" })).mcpError).toBe(true);
       const low = await s.call("requirements_create", { name: "极低", priority: "lowest" });
+      // #3275 批次 2 —— 创建与更新的**外层**是同一个闭集 {ok, requirement}。
+      // 这两个工具是今晚我每轮都在用的写面；钉住外层之后，「顺手加一个顶层键」才会红。
+      expect(Object.keys(low).sort()).toEqual(["ok", "requirement"]);
       expect(low.requirement.priority).toBe("lowest");
       expect((await s.call("requirements_update", { id: low.requirement.id, priority: "high" })).requirement.priority).toBe("high");
       expect((await s.call("requirements_update", { id: low.requirement.id, priority: "lowest" })).requirement.priority).toBe("lowest");
@@ -75,9 +78,13 @@ describe("requirements MCP tools", () => {
     try {
       const ref = "github:acme/widgets#42";
       const first = await s.call("requirements_upsert_by_external_ref", { external_ref: ref, external_url: "https://github.com/acme/widgets/issues/42", name: "修复登录", description: "issue 正文", checklist: [{ id: "c1", text: "复现" }, { id: "c2", text: "修" }] });
+      // #3275 批次 4 —— upsert 的外层与 create/update 同族：{ok, requirement, created}
+      // `created` 是 upsert 独有的：调用方靠它区分「新建」与「命中已有」。
+      expect(Object.keys(first).sort()).toEqual(["created", "ok", "requirement"]);
       expect(first.ok).toBe(true);
       expect(first.created).toBe(true);
       const tagged = await s.call("requirements_update", { id: first.requirement.id, tags: ["release"] });
+      expect(Object.keys(tagged).sort()).toEqual(["ok", "requirement"]);
       expect(tagged.requirement.tags).toEqual(["release"]);
       expect(first.requirement.created_by).toEqual({ kind: "node", id: "node_gh_sync" });
       const again = await s.call("requirements_upsert_by_external_ref", { external_ref: ref, name: "修复登录(改了标题)" });
@@ -95,7 +102,16 @@ describe("requirements MCP tools", () => {
       expect((await s.call("requirements_update", { id, column: "doing", agent_owner: { kind: "node", id: "node_gh_sync" } })).requirement.column).toBe("doing");
       const ticked = await s.call("requirements_checklist_toggle", { id, item_id: "c1", done: true });
       expect(ticked.requirement.checklist.map((i: any) => i.done)).toEqual([true, false]);
-      expect((await s.call("requirements_get", { id })).requirement.agent_owner).toEqual({ kind: "node", id: "node_gh_sync" });
+      // #3275 批次 2 —— 同变量口径：`requirements_get` 的**外层**是闭集，内层 requirement 是实体投影。
+      // 今晚我每轮都靠这个工具读卡，而它的键集从来没有被钉过：
+      // 少一个 `column` 前端就分不出列；多一个字段，客户端会多一条没人写过的分支。
+      const got = await s.call("requirements_get", { id });
+      expect(Object.keys(got).sort()).toEqual(["ok", "requirement"]);
+      expect(got.requirement.agent_owner).toEqual({ kind: "node", id: "node_gh_sync" });
+      // 内层必须带这几个字段（不是全键集：实体字段会随产品增长，钉**读卡必需**的那几个）
+      for (const k of ["id", "seq", "name", "column", "tags", "updatedAt"]) {
+        expect(got.requirement).toHaveProperty(k);
+      }
       expect((await s.call("requirements_list", { status: "doing", agent_owner: "node:node_gh_sync" })).requirements.map((r: any) => r.id)).toContain(id);
       expect((await s.call("requirements_update", { id, owner: { kind: "node", id: "node_gh_sync" }, agent_owner: null })).error).toBe("owner_must_be_human");
       expect((await s.call("requirements_update", { id, archived: true })).requirement.archived).toBe(true);
@@ -120,7 +136,8 @@ describe("requirements MCP tools", () => {
       const slimRow = slim.requirements.find((r: any) => r.id === id);
       expect(slim.view).toBe("summary");
       expect("description" in slimRow).toBe(false);
-      expect(typeof slimRow.checklist_count.total).toBe("number");
+      expect(Number.isInteger(slimRow.checklist_count.total)).toBe(true);
+      expect(slimRow.checklist_count.total).toBeGreaterThanOrEqual(0);   // 类型不是断言
       expect(typeof slimRow.has_description).toBe("boolean");
       expect((await s.call("requirements_list", { view: "tiny" })).mcpError).toBe(true);
       expect((await s.call("requirements_list", { changes: true })).error).toBe("updated_since_required");

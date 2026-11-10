@@ -47,6 +47,15 @@ beforeEach(() => {
   db.run("DELETE FROM nodes");
 });
 
+test("variant updates cannot be finalized by a configured-model heartbeat", () => {
+  for (const variant of [null, "high"]) {
+    const node = insertNode({ alias: `variant-${variant}`, network_id: "netA" });
+    const update = insertUpdate({ node_id: node, network_id: "netA", patch: { model: "p/m", modelVariant: variant, flags: {} } });
+    expect(finalizePendingMatchingUpdates(node, { model: "p/m", flags: {} }).finalizedCount).toBe(0);
+    expect(db.get<{ status: string }>("SELECT status FROM node_config_updates WHERE update_id = ?1", update)?.status).toBe("pending");
+  }
+});
+
 describe("SEC-1 — resolveTargetNode-equivalent SELECT respects network_id", () => {
   // This is the exact query update_node_config / restart_node run
   // to fetch the target node + check network match. Pinning the SQL
@@ -739,6 +748,34 @@ describe("finalizePendingMatchingUpdates — #260 P5 channels content-match", ()
     );
     return id;
   }
+
+  test("variant-capable hot model-only update cannot finish from matching old heartbeat", () => {
+    const nid = insertNode({ alias: "n-variant-model-race", network_id: "netA" });
+    const uid = insertPendingUpdate({ node_id: nid, network_id: "netA", patch: { model: "fixture/model" }, apply_mode: "hot" });
+    const snapshot = { model: "fixture/model", modelVariant: "high", opencode_variant_config_capable: true, flags: {} };
+    expect(finalizePendingMatchingUpdates(nid, snapshot).finalizedCount).toBe(0);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("pending");
+  });
+
+  test("ordinary hot model update without variant capability retains content-match", () => {
+    const nid = insertNode({ alias: "n-ordinary-model", network_id: "netA" });
+    const uid = insertPendingUpdate({ node_id: nid, network_id: "netA", patch: { model: "fixture/model" }, apply_mode: "hot" });
+    expect(finalizePendingMatchingUpdates(nid, { model: "fixture/model", flags: {} }).finalizedIds).toContain(uid);
+  });
+
+  test("variant heartbeat match cannot finalize before explicit ack", () => {
+    const nid = insertNode({ alias: "n-variant-explicit-ack", network_id: "netA" });
+    const uid = insertPendingUpdate({ node_id: nid, network_id: "netA", patch: { modelVariant: "high" }, apply_mode: "hot" });
+    expect(finalizePendingMatchingUpdates(nid, { model: "fixture/model", modelVariant: "high", opencode_variant_config_capable: true }).finalizedCount).toBe(0);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("pending");
+  });
+
+  test("ack-required model operation stays pending when later capability readback is missing", () => {
+    const nid = insertNode({ alias: "n-variant-capability-lost", network_id: "netA" });
+    const uid = insertPendingUpdate({ node_id: nid, network_id: "netA", patch: { model: "fixture/model", _anet_variant_ack_required: true }, apply_mode: "hot" });
+    expect(finalizePendingMatchingUpdates(nid, { model: "fixture/model", flags: {} }).finalizedCount).toBe(0);
+    expect(db.get<any>("SELECT status FROM node_config_updates WHERE update_id = ?1", uid).status).toBe("pending");
+  });
 
   test("channels-only patch: snapshot BEFORE apply (first boot) must NOT finalize", () => {
     const nid = insertNode({ alias: "n-chan-1", network_id: "netA" });

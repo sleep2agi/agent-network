@@ -5,6 +5,7 @@ COPY tests/test1194-v1-shared-feasibility/package-integrity.json /fixture/packag
 RUN npm view "opencode-ai@${OPENCODE_VERSION}" dist.integrity > /tmp/wrapper-sri && npm view "opencode-linux-x64@${OPENCODE_VERSION}" dist.integrity > /tmp/native-sri
 RUN OPENCODE_VERSION=${OPENCODE_VERSION} node -e 'const f=require("fs"),v=process.env.OPENCODE_VERSION,d=require("/fixture/package-integrity.json")[v];for(const [p,n] of [["opencode-ai","wrapper"],["opencode-linux-x64","native"]])if(f.readFileSync(`/tmp/${n}-sri`,"utf8").trim()!==d[p].integrity)throw Error("package integrity changed")'
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" --no-audit --no-fund && test "$(opencode --version)" = "${OPENCODE_VERSION}"
+COPY contracts /repo/contracts
 COPY agent-node/src /repo/agent-node/src
 COPY deploy/node/opencode-v1-host /repo/deploy/node/opencode-v1-host
 COPY tests/test1210-v1-host-launcher /fixture

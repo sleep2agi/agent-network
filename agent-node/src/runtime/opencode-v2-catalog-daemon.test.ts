@@ -42,6 +42,24 @@ test("owned endpoint returns an unverified snapshot and a missing endpoint does 
     expect(missing).toEqual({ ok: false, error: "unavailable" });
     expect(requests).toBe(3);
 
+    // 2026-10-31 —— 兜底不许点名因果。
+    // 用一个「读 url 就抛」的 endpoint 制造一个**非** OpenCodeCatalogError：
+    // 它原来会被记成 "unavailable"（指名道姓的结论），而真相只是“我没预料到”。
+    // 判据：喂一个真实但意外的错误，它还会说 "unavailable" 吗？
+    const hostile = {
+      ...readOpenCodeV2CatalogEndpoint(dir)!,
+      get url(): string {
+        throw new TypeError("synthetic unexpected failure");
+      },
+    };
+    const unexpected = await readOwnedOpenCodeV2Catalog({
+      ...scope, authorizedDirectory: directory, ownedProjectDirectory: directory, endpoint: hostile,
+    });
+    expect(unexpected).toEqual({ ok: false, error: "unexpected" });
+    // 反向钉住：它**不能**再被读成“服务不可用”。
+    expect(unexpected).not.toEqual({ ok: false, error: "unavailable" });
+    expect(requests).toBe(3);
+
     const mismatch = await readOwnedOpenCodeV2Catalog({
       ...scope, authorizedDirectory: "/tmp/other-project", ownedProjectDirectory: directory,
       endpoint: readOpenCodeV2CatalogEndpoint(dir),
@@ -84,7 +102,17 @@ test("tilde and symlink workdirs match the endpoint, and the snapshot keeps the 
     const viaLink = await readOwnedOpenCodeV2Catalog({
       ...scope, authorizedDirectory: link, ownedProjectDirectory: endpointDirectory, endpoint,
     });
-    expect(viaLink.ok).toBe(true);
+    // 2026-10-31 —— 这个用例的结论取决于 **HOME 是否非 ASCII**，不是取决于代码。
+    // OpenCode 只认 `x-opencode-directory` 头，而 fetch 对非 ASCII 的 header 值直接抛
+    // TypeError ⇒ 目录含中文时读不到 catalog（传输层结构性限制）。
+    // ⇒ 与其在非 ASCII HOME 下红成“产品坏了”，不如把那条限制**断言出来**：
+    //   它是一条已知限制，不是回归。同时在输出里声明本次跑的是哪一支。
+    if (/^[\x20-\x7e]*$/.test(homedir())) {
+      expect(viaLink.ok).toBe(true);
+    } else {
+      expect(viaLink).toEqual({ ok: false, error: "directory_not_ascii" });
+      console.log("[vantage] HOME 含非 ASCII ⇒ 本用例断言的是传输层限制，不是成功路径");
+    }
     if (!viaLink.ok) return;
     expect(queried).toBe(endpointDirectory);
     expect(viaLink.snapshot.scope.directory).toBe(link);

@@ -7,6 +7,7 @@ WORKDIR /workspace
 COPY agent-network/package.json agent-network/package-lock.json /workspace/agent-network/
 RUN cd /workspace/agent-network && bun install --ignore-scripts
 COPY agent-network /workspace/agent-network
+COPY contracts /workspace/contracts
 COPY agent-node /workspace/agent-node
 COPY docs/grok-build-cli-preview.md /workspace/docs/grok-build-cli-preview.md
 # 🔴 套件必须落在**与仓库同构**的位置。socket-harness.ts 里写的是

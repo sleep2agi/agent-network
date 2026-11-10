@@ -6,6 +6,7 @@ COPY scripts ./scripts
 COPY .github ./.github
 COPY tests ./tests
 COPY agent-network ./agent-network
+COPY contracts /repo/contracts
 COPY agent-node ./agent-node
 COPY server ./server
 CMD ["sh", "-c", "python3 scripts/check-doc-symbol-pins.py . && python3 .github/scripts/check-qa-trigger-coverage.py"]

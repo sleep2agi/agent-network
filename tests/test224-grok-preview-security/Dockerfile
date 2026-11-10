@@ -11,6 +11,7 @@ WORKDIR /workspace
 
 # Dependency resolution is deliberately confined to image construction.  The
 # actual gate is run with --network none and uses only the resulting image.
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/package.json
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-node && bun install --ignore-scripts \

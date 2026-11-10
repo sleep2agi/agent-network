@@ -120,6 +120,27 @@ describe("clone_node — happy path (Hub #938)", () => {
       name: "cloned-child",
       network_id: NET,
     });
+    // #3275 批次 3 —— clone_node 是**最宽的**一张回执（8 键），因为它要同时描述：
+    // 新子节点（child_name / daemon_node_id）、这次下发的请求（request_id）、
+    // 以及两条**契约**（contract / session_contract）与目录策略（workdir_policy / copy_session）。
+    // 少掉 contract 类键 ⇒ 调用方会以为「子节点起来了就等于契约也过了」，而那是两件事。
+    expect(Object.keys(r).sort()).toEqual([
+      "child_name", "contract", "copy_session", "daemon_node_id", "ok", "request_id", "session_contract", "workdir_policy",
+    ]);
+    // 2026-10-31 —— #3275：clone_node 的形状（此前只断言了散值）。
+    // 8 键，其中 contract 是**给人读的三句话**、session_contract 是**给程序读的契约**：
+    //   contract         { token, workdir, session } —— 三条「新开了什么」的散文
+    //   session_contract { mode, runtime }           —— 用来判断能不能照抄 session
+    // 两者都存在是有意的：散文解释给人，结构给调用方。少一个都不是「简化」，是某一方没法工作。
+    expect(Object.keys(r).sort()).toEqual([
+      "child_name", "contract", "copy_session", "daemon_node_id", "ok", "request_id",
+      "session_contract", "workdir_policy",
+    ]);
+    expect(Object.keys(r.contract).sort()).toEqual(["session", "token", "workdir"]);
+    // ⚠️ 这一条也是**真实调用**给出的：我第一版按猜测写成 [mode, runtime]，
+    // 实际是 [detail, mode, runtime] —— 多出来的 detail 就是上面 contract.session 那句话的来源。
+    // （今天已经第三次栽在「按名字猜形状」上，所以这条消息留在这里当证据。）
+    expect(Object.keys(r.session_contract).sort()).toEqual(["detail", "mode", "runtime"]);
     expect(r.ok).toBe(true);
     expect(r.daemon_node_id).toBe(DAEMON);
     expect(r.child_name).toBe("cloned-child");

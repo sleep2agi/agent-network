@@ -6,6 +6,7 @@ import { providerScanTargets } from './daemon-provider-snapshots';
 import { validScopedSecretKey } from './shared/scoped-secret-contract';
 import { observeSecretWrite, transportOf } from './env-transport-gate.js';
 import { secretTransportVerdict } from './env-transport-policy.js';
+import { vaultGet } from './vault';
 type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
 type Daemon = { ok: false; error: string } | { ok: true; networkId: string; daemonNodeId: string; daemonAlias: string };
 type Request = { request_id: string; network_id: string; daemon_node_id: string | null; node_id: string | null;
@@ -33,9 +34,33 @@ function nodeSupported(network: string, node: string) {
   try { return JSON.parse(row?.config_snapshot ?? '{}').node_secrets_capable === true; } catch { return false; }
 }
 // Independent node lane: no supervisor lookup, binding, or Daemon credential.
-export function requestNodeSecrets(h: Human, node: string, action: Request['action'], key?: string, value?: string, revision?: number) {
+//
+// `fromVault`（2026-11-01，#3148）—— **把保险库里的值直接推给这个节点**，调用方不必再持有明文。
+//
+// 背景：RFC-028 的保险库是「只进不出」——`list_network_secrets` 只回键名，没有任何取值接口。
+// 这是对的：给 agent 一个读口，等于把整个网络的密钥变成任何一次 prompt 注入都能 dump 的东西。
+// 但它带来一个真实的死结（admin 2026-11-01 在客户端里撞到）：
+//
+//     密钥已经在保险库里了，可**没有任何路径**把它送到真正要用的那个进程；
+//     于是人只能把明文再复制一遍，或者干脆写进工作区文件 —— 两条都比保险库更差。
+//
+// 所以这里补的是**流向**而不是**读权**：值从保险库直接写进目标节点的那次请求，
+// 调用方（必须是 owner/admin）只提供键名。读侧仍然拿不到任何明文：
+//   · getScopedSecrets 只回 status/snapshot/error
+//   · 节点 ack 回来的 snapshot 里只有 {key, source}，没有值
+export function requestNodeSecrets(h: Human, node: string, action: Request['action'], key?: string, value?: string, revision?: number, fromVault?: boolean) {
   const refusal = authorize(h); if (refusal) return refusal;
   if (!nodeSupported(h.networkId!, node)) return denied('node_secrets_upgrade_required');
+  // from_vault 只在 put 上有意义：list/delete 没有值可推。
+  if (fromVault && action !== 'put') return denied('invalid_secret_input');
+  if (fromVault && value !== undefined) return denied('invalid_secret_input');
+  if (fromVault) {
+    if (!validScopedSecretKey(key)) return denied('invalid_secret_input');
+    // 保险库里没有这个名字 ⇒ 明确说「没有」，不要回一个看起来成功的请求。
+    const fromVaultValue = vaultGet(h.networkId!, key!);
+    if (typeof fromVaultValue !== 'string' || !fromVaultValue) return denied('vault_key_missing');
+    value = fromVaultValue;
+  }
   if (action !== 'list' && (!validScopedSecretKey(key) || !Number.isSafeInteger(revision) || revision! < 0
     || (action === 'put' && (typeof value !== 'string' || !value || Buffer.byteLength(value) > 8192 || value.includes('\0'))))) return denied('invalid_secret_input');
   expire();
@@ -45,7 +70,8 @@ export function requestNodeSecrets(h: Human, node: string, action: Request['acti
     const transport = transportOf(h.networkId!, node);
     const verdict = secretTransportVerdict(transport);
     if (verdict) return denied(verdict);
-    observeSecretWrite(h.networkId!, node, `node_secret_${action}`);
+    // 记录的是**来源**，不是值：from_vault 的注入要能从审计里区分出来。
+    observeSecretWrite(h.networkId!, node, `node_secret_${action}${fromVault ? '_from_vault' : ''}`);
   }
   if ([...requests.values()].some(r => r.network_id === h.networkId && r.daemon_node_id === null && r.node_id === node && r.status === 'pending')) return denied('secret_store_busy');
   if (requests.size >= 1000) return denied('secret_queue_busy');

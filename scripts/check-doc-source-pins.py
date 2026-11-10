@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """文档站里 blob/<ref>/<file>#L<N> 形式的源码行号引用,有没有指到不存在的东西。
 
-背景:#831。docs-site 下 141 处这类引用**全部**钉在 `main` 上,没有一个钉在
+背景:#831。当时 docs-site 下这类引用**全部**钉在 `main` 上,没有一个钉在
 不可变的 commit。钉 main 的锚点在每次重构后都会漂,而漂了不会有任何东西报错 ——
 读者点进去看到的是一行毫不相干的代码,文档却仍然理直气壮。
 
@@ -118,6 +118,12 @@ def collect_pins(files: list[str]) -> tuple[dict[tuple[str, int], set[str]], int
     第一版这里把 sum(len(v)) 当成了"引用总数"打印出来,得到 139,而原始出现
     次数是 141 —— 差的两处正是同文件内的重复。数对不上是自己发现的:同一份
     数据我先后量出两个数。
+
+    2026-10-31 —— 外部复核：「本仓手写『约 6 处』，实测 16 行 / 17 次调用，
+    而那句话是某件延期工作的完成判据。」
+    ⇒ 因此本文件头部不再写「141 处」这种**当前读数**：手写数字会漂，
+      而它漂了之后读起来和当时一模一样。要数就现跑本门，它会打印。
+      （上面 139/141 那段保留，因为它是「当时两次测量不一致」的**历史记录**，不是当前读数。）
     """
     pins: dict[tuple[str, int], set[str]] = {}
     occurrences = 0
@@ -142,16 +148,17 @@ def collect_pins(files: list[str]) -> tuple[dict[tuple[str, int], set[str]], int
     return pins, occurrences, pinned_to_sha
 
 
-def classify(path: str, line: int) -> tuple[str, str] | None:
+def classify(path: str, line: int, repo: Path | None = None) -> tuple[str, str] | None:
     """返回 (失效类别, 那一行的内容);指不出问题时返回 None。"""
     # 🔴 文档里写 `blob/main/../../etc/passwd#L1` 时,直接拼到 REPO 上会读出
     #    仓库外的文件,而 /etc/passwd 第一行非平凡 —— 一个根本不指向本仓的链接
     #    就被判成健康。先拒绝绝对路径与 .. 分量,再核解析后仍在 REPO 之下。
     if path.startswith("/") or ".." in Path(path).parts:
         return ("path-escapes-repo", path)
-    target = REPO / path
+    repo = repo or REPO
+    target = repo / path
     try:
-        target.resolve().relative_to(REPO)
+        target.resolve().relative_to(repo)
     except ValueError:
         return ("path-escapes-repo", path)
     if not target.is_file():
@@ -181,7 +188,61 @@ def read_baseline() -> set[str]:
     return entries
 
 
+SELFTEST_EXPECTED = 6
+
+
+def selftest(quiet: bool = False) -> int:
+    """2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`。
+
+    这门的判据就是 `classify()`：一条文档里的 `docs/x.md#L12` 指向的行是否可核。
+    自检在临时目录里造文件，逐类命中（每一类都必须被**它自己那一类**命中，
+    而不是「有报错就行」——那与「什么都没查」在退出码上同形）。
+    """
+    import tempfile
+    fails, ran = 0, 0
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "docs").mkdir()
+        (root / "docs" / "ok.md").write_text("l1\nl2\n", encoding="utf-8")
+        (root / "docs" / "trivial.md").write_text("  }\n---\n", encoding="utf-8")
+
+        def case(label: str, path: str, line: int, want: str | None) -> None:
+            nonlocal fails, ran
+            ran += 1
+            got = classify(path, line, root)
+            kind = got[0] if got else None
+            if kind != want:
+                fails += 1
+                print(f"✗ {label}: 期望 {want}，实际 {kind}", file=sys.stderr)
+            elif not quiet:
+                print(f"✓ {label} ⇒ {kind}")
+
+        case("正常行 ⇒ 无问题", "docs/ok.md", 1, None)
+        case("绝对路径 ⇒ 拒绝", "/etc/passwd", 1, "path-escapes-repo")
+        case(".. 逃逸 ⇒ 拒绝", "docs/../../etc/passwd", 1, "path-escapes-repo")
+        case("文件不存在 ⇒ 报出", "docs/ghost.md", 1, "missing-file")
+        case("行号 0 ⇒ 越界（不是读最后一行）", "docs/ok.md", 0, "line-out-of-range")
+        case("行号超上界 ⇒ 越界", "docs/ok.md", 99, "line-out-of-range")
+        case("平凡行 ⇒ 报出", "docs/trivial.md", 1, "trivial-line")
+
+    if ran != SELFTEST_EXPECTED + 1:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED + 1}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
+
     files, mode = tracked_docs()
     pins, occurrences, pinned_to_sha = collect_pins(files)
     print(f"listing_mode={mode}")

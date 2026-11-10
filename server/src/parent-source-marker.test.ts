@@ -15,7 +15,27 @@ const src = readFileSync(new URL("./tools.ts", import.meta.url), "utf8");
 describe("#669 parent source marker", () => {
   test("显式 parent 记为 explicit，推断命中时改写为 inferred", () => {
     expect(src).toContain('let parentSource: "explicit" | "inferred" | null = parentIn ? "explicit" : null;');
-    expect(src).toContain('if (recent?.task_id) { parentTaskId = recent.task_id; parentSource = "inferred"; }');
+    // #669 收窄之后，推断不再是「取最近一条」，而是「裁定通过才认」。
+    // 断言从「命中最近一条就改写」改成「裁定 ok 才改写」，并且配一条否定断言：
+    // 那条 SQL 不能退回 `LIMIT 1` —— 退回之后裁定拿不到候选条数，
+    // 「候选唯一」这条约束会静默失效，而它失效时测试仍然全绿（拿到的永远是一条）。
+    const block = src.slice(src.indexOf("const verdict = decideParentInference("),
+                            src.indexOf("// #669 —— 把来源写进 meta"));
+    expect(block).toContain("if (verdict.ok)");
+    expect(block).toContain('parentSource = "inferred"');
+    expect(block).toContain("noteInferAccepted()");
+    expect(block).toContain("noteInferRejected(verdict.rejection)");
+  });
+
+  // 分成独立一条，而不是塞进上一条：「候选唯一」这条约束的见证是 LIMIT，
+  // 「裁定通过才改写」的见证是 verdict.ok。两者放在同一个 test 里时，
+  // 任一被破都只让同一条红 —— 红的集合相同，归因就得靠读行号。
+  // 独立成条之后，「只破 LIMIT」只红这一条，「只破 verdict」只红上一条。
+  test("取候选必须看得到「不止一条」—— LIMIT 1 会让「候选唯一」静默失效", () => {
+    const sqlBlock = src.slice(src.indexOf("SELECT task_id, created_at FROM tasks WHERE to_name"),
+                               src.indexOf("const cands = db.all"));
+    expect(sqlBlock).toContain("LIMIT 5");
+    expect(sqlBlock).not.toContain("LIMIT 1");
   });
 
   test("来源只在确实有 parent 时写进 meta，且序列化失败不影响派发", () => {

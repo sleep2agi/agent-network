@@ -97,8 +97,46 @@ describe("#460 which layers count as degraded", () => {
     expect(degradedLayers({ tui: { ok: false, reason: "sleep-placeholder" } }).map(l => [l.layer, l.reason, l.label])).toEqual([["tui", "sleep-placeholder", "TUI 被占位(sleep)"]]);
     expect(degradedLayers({ model_auth: "revoked" }).map(l => l.label)).toEqual(["需要重新登录"]);
     expect(degradedLayers({ model_auth: "expired" }).map(l => l.label)).toEqual(["登录已过期"]);
+    // 2026-10-31 —— `reason` 有两个生产者（节点上报 vs Hub 合成 "unreachable"），
+    // 所以 origin 是唯一能把两者分开的一格。上游可以**原样声明** "unreachable"，
+    // 因此改名 / 拆分 catch / 加前缀都不构成判别力（`:148` 同形）。
+    expect(degradedLayers(DOWN_APP).map(l => [l.layer, l.origin])).toEqual([["app_server", "node"]]);
+    expect(degradedLayers({ app_server: { ok: false, rtt_ms: null, last_error: null } }).map(l => [l.reason, l.origin])).toEqual([["unreachable", "hub"]]);
+    // must-fire：两边都写出 "unreachable" 时，只有 origin 不同 —— 这条就是那一格存在的理由
+    expect(degradedLayers({ app_server: { ok: false, rtt_ms: null, last_error: "unreachable" } }).map(l => [l.reason, l.origin])).toEqual([["unreachable", "node"]]);
+    expect(degradedLayers({ tui: { ok: false, reason: "sleep-placeholder" } })[0].origin).toBe("node");
+
     // 修法只指向本节点重新登录,不教人拷别人的凭据
     expect(degradedLayers({ model_auth: "revoked" })[0].hint).toContain("不要拷别的节点的 auth.json");
+  });
+});
+
+// 2026-10-31 —— **属性断言**（外部复核 ④：「键集契约只能对工厂断言，不能对样本断言」）。
+// degradedLayers(health) 是工厂：它对**任意** health 形状都必须产出同一种元素形状。
+// 这里枚举 2×2×5×2 = 40 种组合，断言每个元素的键集恒为那五个。
+describe("degradedLayers 是工厂：任意 health 组合下元素键集不变", () => {
+  test("40 种组合，元素键集恒为 {layer,reason,origin,label,hint}", () => {
+    const seen = new Set<string>();
+    for (const appOk of [true, false]) {
+      for (const tuiOk of [true, false]) {
+        for (const auth of ["ok", "revoked", "expired", "unknown", undefined]) {
+          for (const lastErr of [null, "refused"]) {
+            const health: any = {
+              bridge: "ok",
+              app_server: appOk ? { ok: true, rtt_ms: 1, last_error: null }
+                : { ok: false, rtt_ms: null, last_error: lastErr },
+              ...(tuiOk === undefined ? {} : { tui: { ok: tuiOk, reason: "sleep-placeholder" } }),
+              ...(auth === undefined ? {} : { model_auth: auth }),
+            };
+            for (const layer of degradedLayers(health)) {
+              seen.add(Object.keys(layer).sort().join(","));
+            }
+          }
+        }
+      }
+    }
+    // 排序后的顺序是字典序（label 在 layer 前）——我第一版按定义顺序写，被断言当场纠正。
+    expect([...seen]).toEqual(["hint,label,layer,origin,reason"]);
   });
 });
 
@@ -126,10 +164,12 @@ describe("#460 REST /api/task", () => {
     expect(r.body.alias).toBe(TARGET);
     expect(r.body.layers.map((l: any) => l.layer)).toEqual(["app_server"]);
     expect(r.body.layers[0].reason).toContain("ECONNREFUSED");
+    expect(r.body.layers[0].origin).toBe("node");
     expect(r.body.message).toContain("App Server 断开");
     expect(r.body.hint).toContain("force=true");
     expect(r.body.force_allowed).toBe(true);
-    expect(typeof r.body.health_observed_ms_ago).toBe("number");
+    expect(Number.isFinite(r.body.health_observed_ms_ago)).toBe(true);
+    expect(r.body.health_observed_ms_ago).toBeGreaterThanOrEqual(0);   // 类型不是断言
     expect(taskCount()).toBe(before);
   });
 
@@ -138,6 +178,43 @@ describe("#460 REST /api/task", () => {
     const r = await postTask(ownerToken);
     expect(r.status).toBe(409);
     expect(r.body.layers.map((l: any) => l.layer)).toEqual(["tui", "model_auth"]);
+  });
+
+  // #3271 —— 第二道闸：**从未取走过任务**的目标。与降级闸同形（409 + force 只有人能用）。
+  // 这条覆盖的是 REST /api/task 这条派单面；MCP send_task 走同一个判据函数。
+  test("🔴 连续 3 次过期且从未消费 ⇒ 409 target_never_consumes，拒绝体带 window_since", async () => {
+    const { noteNeverConsumedExpiry, resetNeverConsumedExpiryCountersForTest } = await import("./expiry-counters.js");
+    setHealth(HEALTHY);
+    resetNeverConsumedExpiryCountersForTest();
+    for (let i = 0; i < 3; i += 1) noteNeverConsumedExpiry(TARGET);
+    const before = taskCount();
+    const r = await postTask(ownerToken, {});
+    expect(r.status).toBe(409);
+    expect(r.body.ok).toBe(false);
+    expect(r.body.error).toBe("target_never_consumes");
+    expect(r.body.alias).toBe(TARGET);
+    expect(r.body.expiries).toBe(3);
+    expect(typeof r.body.window_since).toBe("string");
+    expect(r.body.message).toContain("force:true");
+    expect(taskCount()).toBe(before);          // 一行都没写
+    resetNeverConsumedExpiryCountersForTest();
+  });
+
+  test("🔴 同一目标带 force（用户令牌）⇒ 放行；节点令牌带 force 仍被拒", async () => {
+    const { noteNeverConsumedExpiry, resetNeverConsumedExpiryCountersForTest } = await import("./expiry-counters.js");
+    // 健康报告也要是好的：否则先被降级闸拦下，这条测的就不是新闸了（我第一次就栽在这）。
+    setHealth(HEALTHY);
+    resetNeverConsumedExpiryCountersForTest();
+    try {
+      for (let i = 0; i < 3; i += 1) noteNeverConsumedExpiry(TARGET);
+      expect((await postTask(ownerToken, { force: true })).status).toBe(200);
+      // 节点令牌那一半在**判据层**钉（expiry-counters.test.ts：forceAllowed=false 时 force 不算）。
+      // 这里不重复断言：节点令牌会先撞上「降级闸」（健康报告按网络取，节点令牌没有网络 ⇒ 取值不同），
+      // 于是这条会变成在测两个闸的**先后顺序**，而不是在测这一道闸 —— 今天已经因为类似的原因误读两次了。
+    } finally {
+      // 计数器是**进程级**状态：不清干净会污染后面的用例（我第一次就漏了 finally）。
+      resetNeverConsumedExpiryCountersForTest();
+    }
   });
 
   test("expired login alone is refused", async () => {
@@ -265,13 +342,30 @@ describe("#460 /api/status carries `degraded` only for degraded nodes", () => {
   });
   test("degraded → light and full rows list the failing layers with the app's labels", async () => {
     setHealth({ bridge: "ok", app_server: { ok: false, rtt_ms: null, last_error: "refused" }, model_auth: "revoked" });
+    // 2026-10-31 —— 加了 `origin`（reason 的生产者）。这是**加字段**，不是改语义：
+    // 少这一格，「节点说自己不可达」与「Hub 问不到节点」在响应里同形。
     const want = [
-      { layer: "app_server", label: "App Server 断开", reason: "refused" },
-      { layer: "model_auth", label: "需要重新登录", reason: "revoked" },
+      { layer: "app_server", label: "App Server 断开", reason: "refused", origin: "node" },
+      { layer: "model_auth", label: "需要重新登录", reason: "revoked", origin: "node" },
     ];
     expect((await row(true)).degraded).toEqual(want);
     expect((await row(false)).degraded).toEqual(want);
   });
+  // 2026-10-31 —— **两个面必须说同一件事**（外部复核那条「共用的是解析还是判据」）。
+  // 同一个节点健康，经两条路到达用户：
+  //   ① /api/task 的 409 `layers`（派发被拒时当场告诉他哪层坏了）
+  //   ② /api/status 行里的 `degraded`（列表里一直可见）
+  // 二者都由 degradedLayers() 产出，但**没有任何测试保证两个面一致** ——
+  // 只要有人在其中一处 map 里漏掉 `origin`，两处就会开始说不同的版本。
+  test("parity: 409 layers and status degraded describe the same failure", async () => {
+    setHealth({ bridge: "ok", app_server: { ok: false, rtt_ms: null, last_error: "refused" }, model_auth: "revoked" });
+    const r = await postTask(ownerToken);
+    expect(r.status).toBe(409);
+    const fromTask = (r.body.layers as any[]).map((l) => [l.layer, l.reason, l.origin]);
+    const fromStatus = ((await row(false)).degraded as any[]).map((l) => [l.layer, l.reason, l.origin]);
+    expect(fromTask).toEqual(fromStatus);
+  });
+
   test("stale → no `degraded`", async () => {
     setHealth(DOWN_APP, Date.now() - NODE_HEALTH_TTL_MS - 1_000);
     expect("degraded" in (await row(true))).toBe(false);

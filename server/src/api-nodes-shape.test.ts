@@ -38,6 +38,7 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
   let role: string | null = null;
   // #2293 —— 与 handler 同一套读法：快照可能是文本或对象；解析失败/形状不对 = 这一格没有。
   let opencodeCatalog: string[] | null = null;
+  let opencodeCatalogSeenAt: string | null = null;
   let opencodeGeneration: "v1" | "v2" | null = null;
   let opencodeMode: string | null = null;
   let opencodeServer: string | null = null;
@@ -50,6 +51,9 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     const raw = parsed?.opencode_catalog;
     if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
       opencodeCatalog = raw.slice(0, 400);
+      // #3144 —— 目录是快照：没有采集时刻的话，51 个模型是刚才的还是三周前的分不出。
+      const seen = parsed?.opencode_catalog_seen_at;
+      opencodeCatalogSeenAt = typeof seen === "string" && seen.length > 0 && seen.length <= 40 ? seen : null;
     }
     const flags = parsed?.flags;
     if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
@@ -63,11 +67,41 @@ function mapRow(r: Record<string, unknown>): Record<string, unknown> {
     attrs_revision: Number(r.attrs_revision ?? 0),
     role,
     opencode_catalog: opencodeCatalog,
+    opencode_catalog_seen_at: opencodeCatalogSeenAt,
     opencode_generation: opencodeGeneration,
     opencode_mode: opencodeMode,
     opencode_server: opencodeServer,
   };
 }
+
+describe("#3144 opencode_catalog_seen_at —— 三态，不塌成两种", () => {
+  // daemon 报了就带出来；没报就是 null。null 的含义是「未上报」，**不是**「很久以前」，
+  // 也不是「刚刚」——把两者塌成同一个值，客户端就只能显示一个它并不知道的时刻。
+  test("有 opencode_catalog_seen_at ⇒ 原样投影", () => {
+    const row = mapRow({
+      node_id: "n1", node_name: "n", alias: "n", runtime: "opencode-sdk", model: "m",
+      config_path: null, channels: null, server: null, hostname: null,
+      network_id: "net", created_at: "x", updated_at: "x", display_name: null,
+      team: null, tags: null, attrs_revision: 0,
+      config_snapshot: JSON.stringify({
+        opencode_catalog: ["a/b"], opencode_catalog_seen_at: "2026-11-01T02:00:00Z",
+      }),
+    });
+    expect(row.opencode_catalog_seen_at).toBe("2026-11-01T02:00:00Z");
+  });
+
+  test("没有那个字段 ⇒ null（不是空串、不是当前时间）", () => {
+    const row = mapRow({
+      node_id: "n2", node_name: "n", alias: "n", runtime: "opencode-sdk", model: "m",
+      config_path: null, channels: null, server: null, hostname: null,
+      network_id: "net", created_at: "x", updated_at: "x", display_name: null,
+      team: null, tags: null, attrs_revision: 0,
+      config_snapshot: JSON.stringify({ opencode_catalog: ["a/b"] }),
+    });
+    expect(row.opencode_catalog).toEqual(["a/b"]);
+    expect(row.opencode_catalog_seen_at).toBeNull();
+  });
+});
 
 describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", () => {
   test("explicit columns + role extracted: config_snapshot NOT in response, role IS", () => {
@@ -102,7 +136,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     // Expected fields present (13 = 12 contract + new role)
     for (const k of ["node_id", "node_name", "alias", "runtime", "model",
                      "config_path", "channels", "server", "hostname",
-                     "network_id", "created_at", "updated_at", "role", "opencode_catalog"]) {
+                     "network_id", "created_at", "updated_at", "role", "opencode_catalog",
+                     "opencode_catalog_seen_at"]) {
       expect(row).toHaveProperty(k);
     }
     // Internal fields NOT present
@@ -119,7 +154,8 @@ describe("RFC-024 regression — GET /api/nodes response shape (no SELECT *)", (
     expect(Object.keys(row).sort()).toEqual([
       "alias", "attrs_revision", "channels", "config_path", "created_at",
       "display_name", "hostname", "model", "network_id", "node_id",
-      "node_name", "opencode_catalog", "opencode_generation", "opencode_mode",
+      "node_name", "opencode_catalog", "opencode_catalog_seen_at",
+      "opencode_generation", "opencode_mode",
       "opencode_server", "role", "runtime", "server", "tags", "team",
       "updated_at",
     ]);

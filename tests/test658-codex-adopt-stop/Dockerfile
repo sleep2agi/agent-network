@@ -1,6 +1,7 @@
 FROM oven/bun:1.3.9
 RUN apt-get update && apt-get install -y --no-install-recommends tmux nodejs && rm -rf /var/lib/apt/lists/*
 WORKDIR /test
+COPY contracts /test/contracts
 COPY --chown=bun:bun agent-node/src ./agent-node/src
 COPY --chown=bun:bun agent-network/src/stopped-receipt.ts ./agent-network/src/stopped-receipt.ts
 COPY --chown=bun:bun agent-network/bin/cli.ts ./agent-network/bin/cli.ts

@@ -144,7 +144,16 @@ test("rename registry: another network's node does not reserve the local alias",
   seedNode(`n_idv_foreign_target_${stamp}`, target, NET2, outsiderId);
   const prepared = await api(ownerToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: victimAlias, new_alias: target });
   expect(prepared.body.ok).toBe(true);
-  expect((await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id })).body.ok).toBe(true);
+  // 2026-10-31 —— #3214：abort 的成功体形状此前完全没钉（只断言了 ok）。
+  // 形状由真实调用给出：{ok, txn_id}，且回执里的 txn_id 必须是**被取消的那一笔** ——
+  // 客户端靠它把本地 pending 的 prepare 清掉，回错 id 就等于没清。
+  const aborted = await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id });
+  expect(Object.keys(aborted.body).sort()).toEqual(["ok", "txn_id"]);
+  expect(aborted.body.txn_id).toBe(prepared.body.txn_id);
+  // 幂等：再 abort 一次仍是同一对（rename.ts 里 `status === "aborted"` 分支显式回落）
+  const again = await api(ownerToken, "POST", "/api/node-rename/abort", { txn_id: prepared.body.txn_id });
+  expect(Object.keys(again.body).sort()).toEqual(["ok", "txn_id"]);
+  expect(again.body.txn_id).toBe(prepared.body.txn_id);
 });
 
 test("rename registry: a free alias commits and preserves node identity", async () => {
@@ -350,6 +359,14 @@ for (const shape of ["frozen", "legacy null", "wrong frozen", "same alias rebuil
             VALUES(?1,?2,?3,?4,?5,'fixture','{}','[]','started',?6,?7,'fixture')`,
       [`cr_${f.childId.slice(5)}`, f.daemonId, f.childAlias, f.childId, NET, childTok.tokenId, Date.now()]);
     const dispatched = await tool(ownerToken, "delete_node", { child_node_id: f.childId, daemon_node_id: f.daemonId, network_id: NET, confirm_alias: f.childAlias });
+    // 2026-10-31 —— #3275：delete_node 的形状（删节点是**下发**，不是立即删除）。
+    // in_flight_at_dispatch 是关键那一格：它告诉调用方「此刻这个节点上还有几条在飞」——
+    // 没有它，用户会以为删完就没在跑的任务了。
+    expect(Object.keys(dispatched as any).sort()).toEqual([
+      "action", "in_flight_at_dispatch", "lifecycle_state", "ok", "request_id",
+    ]);
+    expect((dispatched as any).action).toBe("delete");
+    expect((dispatched as any).lifecycle_state).toBe("deleting");
     expect(dispatched.ok).toBe(true);
     expect(db.get<{ child_token_id: string }>("SELECT child_token_id FROM node_stop_requests WHERE request_id=?1", dispatched.request_id)?.child_token_id).toBe(childTok.tokenId);
     if (shape === "legacy null" || shape === "wrong frozen") db.run("UPDATE node_stop_requests SET child_token_id=?1 WHERE request_id=?2", [shape === "wrong frozen" ? wrong.tokenId : null, dispatched.request_id]);
@@ -998,7 +1015,15 @@ function activityTask(nodeId: string, alias: string, network = NET) {
 }
 const activitySnap = (id: string) => db.get<any>("SELECT status, consumed_at, runtime_submitted_at, started_at, thread_id, turn_id, last_activity_at FROM tasks WHERE task_id = ?1", id);
 async function consumeActivityTask(context: {task_id: string; thread_id: string; turn_id: string}) {
-  expect((await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: [context.task_id], task_contexts: [context] })).ok).toBe(true);
+  const consumed = await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: [context.task_id], task_contexts: [context] });
+  expect(consumed.ok).toBe(true);
+  // 2026-10-31 —— **精确键集**（#3171）：这条响应此前只断言 ok。
+  // 键集来自实现（变更探测器）；契约来源是 tools.ts 的描述与本文件的消费方。
+  expect(Object.keys(consumed).sort()).toEqual(["ok", "tasks"]);
+  // 拒绝形状：不带 task_id 的拒绝只有两键（多一个就把「通用错误」变成「某条任务的错误」）
+  const denied = await tool(leaseTok.token, "mark_tasks_consumed", { task_ids: ["nope", "nope"], task_contexts: [] });
+  expect(denied.ok).toBe(false);
+  expect(Object.keys(denied).sort()).toEqual(["error", "ok"]);
 }
 const renewActivity = (token: string, contexts: Array<{task_id: string; thread_id: string; turn_id: string}>) => tool(token, "mark_tasks_consumed", { task_ids: contexts.map(c => c.task_id), task_contexts: contexts, activity_only: true });
 

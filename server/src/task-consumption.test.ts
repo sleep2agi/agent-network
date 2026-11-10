@@ -118,6 +118,16 @@ describe("task consumed_at identity and lifecycle", () => {
     );
     const handler = toolsFor({ alias: NODE_A, nodeToken: true }).list_tasks;
     const first = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100 });
+    // #3309 分支 —— list_tasks 的两个成功出口不是同一形状：
+    //   非游标：{ok, tasks, …}                     （无 capability）
+    //   游标  ：多一个 capability = "list_tasks.immutable-node-cursor.v1"
+    // 只断言 capability 的值时，「顺手把它也加到非游标那条」不会有东西变红。
+    // 实测五键：我按源码读成三键（漏了 count 与 stats）——又一次「按代码读会少」
+    // 🔴 2026-11-05 再变一次（#3119 since_last 水位）：游标出口多了 `server_time`（下一次的入参）
+    //    与 `stats_omitted`（节点令牌默认省 stats，于是 `stats` 只是一个**省略**标记而不是读数）。
+    //    ⇒ 这条断言从「六个键」变成「七个键」，而变的是**语义**不是措辞：
+    //       有 server_time ⇒ 调用方可以拿它做增量；有 stats_omitted ⇒ 「没有 stats」不再等于「stats 是空」。
+    expect(Object.keys(first).sort()).toEqual(["capability", "count", "next_cursor", "ok", "server_time", "stats_omitted", "tasks"]);
     expect(first.capability).toBe("list_tasks.immutable-node-cursor.v1");
     expect(first.tasks).toHaveLength(100);
     const second = await call(handler, { from_node_id: `id_${NODE_A}`, durable_cursor: true, limit: 100, ...first.next_cursor });
@@ -210,7 +220,11 @@ describe("task consumed_at identity and lifecycle", () => {
     expect(queued?.task).toBe(content);
     expect(queued?.last_seen_at).toBe(before?.last_seen_at);
 
-    expect((await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: taskId })).ok).toBe(true);
+    // #3275 批次 1 —— 同变量口径：断言的对象就是这次调用的返回值（不是「附近的某个断言」）。
+    // ack_inbox 成功路径的键集是**闭合的两态**：成功 {ok}，失败 {ok, error}。
+    const acked = await call(nodeTools.ack_inbox, { alias: NODE_A, message_id: taskId });
+    expect(Object.keys(acked).sort()).toEqual(["ok"]);
+    expect(acked.ok).toBe(true);
     expect(runtimeSubmittedAt(taskId)).toBeNull();
     expect(consumedAt(taskId)).toBeNull();
   });
@@ -218,7 +232,15 @@ describe("task consumed_at identity and lifecycle", () => {
   test("runtime submission is visible without claiming authoritative consumption", async () => {
     const taskId = await createTask("vendor request accepted but no turn event yet");
     const handler = toolsFor({ alias: NODE_A, nodeToken: true }).mark_tasks_runtime_submitted;
-    expect((await call(handler, { task_ids: [taskId] })).ok).toBe(true);
+    const submitted = await call(handler, { task_ids: [taskId] });
+    // 2026-10-31 —— #3275：mark_tasks_runtime_submitted 的形状（此前只断言 ok）。
+    // 外层两键；每个 evidence 行 5 键 —— 其中 consumed_at 与 runtime_submitted_at **同时存在**
+    // 是有意的：这一条工具只推进「提交到运行时」，不推进「消费」。
+    expect(Object.keys(submitted).sort()).toEqual(["ok", "tasks"]);
+    expect(Object.keys(submitted.tasks[0]).sort()).toEqual([
+      "consumed_at", "runtime_submitted_at", "task_id", "thread_id", "turn_id",
+    ]);
+    expect(submitted.ok).toBe(true);
     expect(typeof runtimeSubmittedAt(taskId)).toBe("string");
     expect(consumedAt(taskId)).toBeNull();
   });

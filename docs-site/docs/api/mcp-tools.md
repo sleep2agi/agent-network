@@ -121,7 +121,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `restart_node` | 不改配置直接重启节点 |
 | `update_node_config` | 设置节点目标配置（model + flags）并推门铃 |
 
-**主机 daemon 协议（内部，节点与 daemon 自动调用）** · 12 个
+**主机 daemon 协议（内部，节点与 daemon 自动调用）** · 13 个
 
 | 工具 | 说明 |
 |------|------|
@@ -151,6 +151,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `get_adopt_request` | 仅目标 daemon 的节点令牌拉取 pending 申请；本地路径与进程验证由 daemon 完成 |
 | `ack_adopt_request` | 目标 daemon 回报 `adopted` / `refused`（可附 `error`）；确认后绑定 active。已撤销的申请不能复活 |
 | `unadopt_node` | 主人或网络 owner/admin 撤销 pending/active 绑定，不停止节点；stop/start 在途时拒绝，完成后再撤销 |
+| `report_token_usage` | 节点按 **UTC 小时桶 × model** 累加自己的 LLM 用量（`input`/`output`/`cache_read` 三列分开，`cache` 绝不并进 total）；只收计数，不收 prompt/消息 id/凭据；写 `node_token_usage`，人从 `GET /api/token-usage` 读 |
 
 **Provider 与密钥金库（owner/admin）** · 9 个
 

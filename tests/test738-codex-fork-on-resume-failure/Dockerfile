@@ -25,6 +25,7 @@ RUN npm install -g --prefix /opt/codex-0.133.0 @openai/codex@0.133.0 \
 # 🔴 The release zip ships bun WITHOUT bunx; `anet hub start` paths spawn through bunx (#766).
 RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY server/package.json server/package-lock.json ./server/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd server && npm ci --ignore-scripts \

@@ -20,6 +20,7 @@ ARG QA_CC_NODE_ID_SOURCE_COMMIT=unknown
 ENV QA_CC_NODE_ID_SOURCE_COMMIT=${QA_CC_NODE_ID_SOURCE_COMMIT}
 
 WORKDIR /app
+COPY contracts /app/contracts
 COPY server /app/server
 COPY agent-network /app/agent-network
 RUN cd /app/server && bun install --silent

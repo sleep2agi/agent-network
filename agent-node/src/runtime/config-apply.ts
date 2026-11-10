@@ -115,6 +115,12 @@ export type ApplyMode = "hot" | "restart" | "restart_only";
 
 export interface ConfigPatch {
   model?: string;
+  /** Missing preserves; null clears; string selects a native model variant. */
+  modelVariant?: string | null;
+  /** Missing preserves; string selects an OpenCode V2 agent (POST
+   *  /api/session/<id>/agent). Verified hot on a real server: 204 plus a
+   *  readback that actually reports the new agent. */
+  agent?: string | null;
   flags?: Record<string, unknown>;
   /** #260 P5 — dashboard-driven channel enable/disable. Restart-tier
    *  (agent-node boot forks channel workers from config.channels).
@@ -137,6 +143,16 @@ export function validateLocalPatch(
   patch: ConfigPatch,
   opts?: { runtime?: string | null },
 ): ValidationResult {
+  if (patch.modelVariant !== undefined) {
+    if (opts?.runtime !== "opencode" && opts?.runtime !== "opencode-cli") return { field: "modelVariant", reason: "requires OpenCode V2" };
+    if (patch.modelVariant !== null && (typeof patch.modelVariant !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}$/.test(patch.modelVariant))) return { field: "modelVariant", reason: "invalid variant" };
+    if (patch.channels !== undefined || Object.keys(patch.flags ?? {}).length) return { field: "modelVariant", reason: "must not be combined with flags or channels" };
+  }
+  if (patch.agent !== undefined) {
+    if (opts?.runtime !== "opencode" && opts?.runtime !== "opencode-cli") return { field: "agent", reason: "requires OpenCode V2" };
+    if (patch.agent !== null && (typeof patch.agent !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}$/.test(patch.agent))) return { field: "agent", reason: "invalid agent" };
+    if (patch.channels !== undefined || Object.keys(patch.flags ?? {}).length) return { field: "agent", reason: "must not be combined with flags or channels" };
+  }
   if (patch.model !== undefined) {
     if (typeof patch.model !== "string" || patch.model.length === 0 || patch.model.length > 200) {
       return { field: "model", reason: "must be a non-empty string ≤ 200 chars" };
@@ -211,6 +227,11 @@ export function computeApplyMode(patch: ConfigPatch, opts?: {
   const flags = patch.flags || {};
   const flagKeys = Object.keys(flags);
   const hasChannels = patch.channels !== undefined;
+  if (patch.modelVariant !== undefined) return "hot";
+  // Agent selection is a hot session-level write (verified: POST
+  // /api/session/<id>/agent → 204 + readback). Same reasoning as modelVariant:
+  // a restart would reopen the previous agent.
+  if (patch.agent !== undefined) return "hot";
   if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
   // OpenCode V2 switches the live TUI session and writes config.model so the
   // dashboard poll can finish. A restart would reopen the old session model.
@@ -541,6 +562,45 @@ export interface MaskedSnapshot {
   flags: Record<string, unknown>;
   config_revision?: number;
   config_update_capable: boolean;
+  /** #3146 follow-up —— 同一个布尔，换个说得清的名字。
+   *
+   *  `config_update_capable` 这个名字会让人以为它管“能不能改配置”，
+   *  实际它只回答一件事：**exit 75 之后有没有东西把它拉起来**
+   *  （`anet node start` 的 sentinel-aware supervisor 才会设 1）。
+   *
+   *  「不能热更新」蕴含「这次需要重启」，但**不蕴含「重启是安全的」** ——
+   *  两个能力被一个名字合并过，导致有人在它上面写了错误的拦截规则。
+   *  这里同时上报更具名的键；Hub 优先读 `restart_supervised`，
+   *  旧字段保留以兼容存量客户端。两者永远同值。 */
+  restart_supervised?: boolean;
+  /**
+   * 2026-10-31 —— systemd 托管状态（三态）。由 cli.ts 用 systemd-supervision-snapshot 填入。
+   * 🔴 与 `restart_supervised` 的区别：后者是**声明**（env 说“我在被托管”），
+   *    这个是**读数**（systemd 自己说这个 unit 的 Restart=/Type=/LoadState= 是什么）。
+   *    两者不一致时，以读数优先，并把分歧暴露出来。
+   */
+  systemd_supervision?: "supervised" | "not_supervised" | "unknown";
+  /** 判定为否/为是时，是哪个旋钮决定的（load_state:… / type:… / restart_no / restart_unset / ok） */
+  systemd_supervision_knob?: string | null;
+  /** **只在 unknown 时**出现，且一律 `missing:` 前缀 —— 它只回答「为什么判不出来」 */
+  systemd_supervision_reason?: string | null;
+  respawns_on_exit75?: boolean | null;
+  /**
+   * 2026-10-31 —— 实例身份（内核口径），让「它有没有重启过」不再只靠自报时间戳。
+   *
+   * 三个字段都是 **boot_ 快照语义**：启动时读一次，进程内永不变。
+   *   boot_id                 /proc/sys/kernel/random/boot_id —— **机器**启动的标识
+   *   pid                     进程 id
+   *   proc_starttime_ticks    /proc/self/stat 第 22 字段 —— **进程**启动的刻度
+   *
+   * 🔴 为什么要它：`startedAt` 是自报的，而自报值可以被同一进程复用/伪造；
+   *    (boot_id, pid, starttime) 是内核给的，重启后三者至少变一个。
+   *    判据：两次读数三者全同 ⇔ 同一个进程代次；任一变化 ⇔ 换过一次。
+   *    ⚠️ pid 会复用 ⇒ 单看 pid 不够，必须与 starttime 一起看。
+   */
+  boot_id?: string | null;
+  pid?: number;
+  proc_starttime_ticks?: number | null;
   /** #698 protocol capability. The Hub stores this bit only when the
    * reporting ntok is immutably bound to this exact node_id. */
   peer_reply_inbox_capable: true;
@@ -582,6 +642,42 @@ export interface MaskedSnapshot {
    *  tier POSTs are refused instead of quietly killing the node. */
   channels: string[];
 }
+
+/**
+ * 2026-10-31 —— 实例身份：内核口径的三个 boot 快照值。
+ *
+ * 在模块加载时**读一次**（进程内不可能变），读不到就是 null/缺省 ——
+ * 明确“我不知道”比回退成一个看起来像值的数要好。
+ *
+ * `/proc/self/stat` 第 22 字段是 starttime（单位：开机后的 clock ticks）。
+ * 解析时注意 comm 字段可能含空格与括号，所以从**最后一个** ')' 之后切。
+ */
+function readProcStarttimeTicks(): number | null {
+  try {
+    const stat = readFileSync("/proc/self/stat", "utf8");
+    const close = stat.lastIndexOf(")");
+    if (close < 0) return null;
+    const rest = stat.slice(close + 1).trim().split(/\s+/);
+    // 第 22 字段相对于整行；')' 之后从第 3 字段（state）开始 ⇒ rest[19] 是 starttime。
+    const ticks = Number(rest[19]);
+    return Number.isFinite(ticks) ? ticks : null;
+  } catch {
+    return null;
+  }
+}
+
+function readBootId(): string | null {
+  try {
+    const id = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    return /^[0-9a-f-]{16,64}$/i.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+const BOOT_BOOT_ID = readBootId();
+const BOOT_PROC_STARTTIME = readProcStarttimeTicks();
+
 export function buildConfigSnapshot(
   fileConfig: any,
   configUpdateCapable: boolean,
@@ -613,6 +709,11 @@ export function buildConfigSnapshot(
     flags: {},
     config_revision: revision,
     config_update_capable: configUpdateCapable,
+    restart_supervised: configUpdateCapable,
+    // 内核口径的实例身份（boot 快照）：与自报的 startedAt 交叉校验用。
+    boot_id: BOOT_BOOT_ID,
+    pid: process.pid,
+    proc_starttime_ticks: BOOT_PROC_STARTTIME,
     peer_reply_inbox_capable: true,
     role: typeof fileConfig?.role === "string" ? fileConfig.role : null,
     // Always emit — see MaskedSnapshot.channels comment. Sort +

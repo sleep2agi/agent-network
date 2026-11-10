@@ -21,6 +21,7 @@ RUN curl --fail --silent --show-error --location \
   && rm -f /tmp/bun-linux-x64.zip
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY server/package.json server/package-lock.json ./server/
 # 🔴 npm ci 而不是 npm install:ci 严格按 lockfile 装,install 会按 caret 解析
 # 「当下最新的兼容版本」。后者意味着同一个 commit 在不同时间构建出不同依赖图 ——
@@ -28,7 +29,6 @@ COPY server/package.json server/package-lock.json ./server/
 RUN cd server && npm ci
 
 COPY server ./server
-COPY contracts/side-thread/v1 ./contracts/side-thread/v1
 # RFC-026 G9 / RFC-028 P1 的漂移门比对 hub 与 daemon 的同名共享源码,
 # 要读同级 agent-node/src/shared。只带这个目录,不带整个包。
 # 若干 server 测试跨包 import agent-node 的源码(hub↔daemon 漂移门比对
@@ -56,6 +56,9 @@ RUN cd agent-network && bun install --ignore-scripts \
 # scheduled-tasks-http.test.ts 起两个真 Hub 进程抢同一个 occurrence,
 # worker 脚本在 tests/test601-hub-scheduled-tasks 下,按仓根相对路径 import。
 COPY tests/test601-hub-scheduled-tasks ./tests/test601-hub-scheduled-tasks
+# 2026-10-31 —— 失败分档（scripts/report-server-test-triage.py）在容器里跑，
+# 所以脚本本身必须进镜像。原来镜像里没有任何 scripts/ ⇒ 分档会「跳过」。
+COPY scripts/report-server-test-triage.py ./scripts/report-server-test-triage.py
 COPY tests/test798-server-unit-ci/run.sh ./tests/test798-server-unit-ci/run.sh
 
 ARG SOURCE_COMMIT

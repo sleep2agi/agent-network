@@ -110,7 +110,11 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
   });
   test("old events and duplicate consumption do not replay after enable or process reopen", async () => {
     await card(); const { scheduleId } = await atThree(), before = state(scheduleId); expect(poll(scheduleId)).toBe(false);
-    const child = Bun.spawn([process.execPath, "-e", `import {consumeRequirementWake} from './server/src/scheduled-requirement-wake.ts'; console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})}));`], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
+    // 2026-10-31 —— 绝对路径，不再用 `'./server/src/…'` + `cwd: process.cwd()`。
+    // 那种写法只在「从仓库根跑」时成立；从 `server/` 跑（scripts/run-server-tests.sh 就是这样）
+    // 子进程立刻退出 1，于是断言长期红着，而看起来像被测行为失败。断言不该顺带测 cwd。
+    const wakeTs = new URL("./scheduled-requirement-wake.ts", import.meta.url).pathname;
+    const child = Bun.spawn([process.execPath, "-e", `import {consumeRequirementWake} from ${JSON.stringify(wakeTs)}; console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})}));`], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
     const output = await new Response(child.stdout).text(); expect(await child.exited).toBe(0);
     expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({ wake: false }); expect(state(scheduleId)).toEqual(before);
   });
@@ -144,7 +148,11 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
     expect(created.ok).toBe(true); const id = created.schedule.schedule_id;
     expect(created.schedule.schedule.requirement_wake.tag).toBe("ANet");
     expect((await mcp(nodes.b.token, "schedule_update", { schedule_id: id, schedule: { type: "interval", every_seconds: 180, requirement_wake: null } })).ok).toBe(false);
-    expect((await mcp(nodes.a.token, "schedule_batch_interval", { schedule_ids: [id], every_seconds: 180 })).ok).toBe(true);
+    const bi = await mcp(nodes.a.token, "schedule_batch_interval", { schedule_ids: [id], every_seconds: 180 });
+    // #3275 批次 4 —— 批量改间隔是**部分成功**语义：updated / failed / results 三个一起才有意义。
+    // 只断言 ok 时，「失败了几条」和「分别为什么」都拿不到 —— 而批量操作恰恰最需要这个。
+    expect(Object.keys(bi).sort()).toEqual(["failed", "ok", "results", "updated"]);
+    expect(bi.ok).toBe(true);
     expect(state(id).requirement_wake_json).toBeTruthy();
     expect((await mcp(nodes.a.token, "schedule_update", { schedule_id: id, name: "metadata" })).ok).toBe(true);
     expect(state(id).requirement_wake_json).toBeTruthy();
@@ -246,7 +254,9 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
   });
   test("two independent SQLite processes consume the event once and persist one generation",async()=>{
     const {scheduleId}=await atThree();await card();const before=state(scheduleId), gate=`/tmp/wake1279-${crypto.randomUUID()}`;
-    const code=`import {consumeRequirementWake} from './server/src/scheduled-requirement-wake.ts'; import {existsSync} from 'node:fs'; console.log('READY'); while(!existsSync(${JSON.stringify(gate)}))await Bun.sleep(10); for(let i=0;;i++){try{console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})})); break;}catch(e){if(i>=4||!String(e).includes('locked'))throw e;await Bun.sleep(20);}}`;
+    // 同上：绝对路径（这条要测的是**两个进程抢同一个事件**，不是 cwd 解析）
+    const wakeTs2 = new URL("./scheduled-requirement-wake.ts", import.meta.url).pathname;
+    const code=`import {consumeRequirementWake} from ${JSON.stringify(wakeTs2)}; import {existsSync} from 'node:fs'; console.log('READY'); while(!existsSync(${JSON.stringify(gate)}))await Bun.sleep(10); for(let i=0;;i++){try{console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})})); break;}catch(e){if(i>=4||!String(e).includes('locked'))throw e;await Bun.sleep(20);}}`;
     const workers=[] as any[];
     // Initialize each adapter before releasing both against the same DB;
     // schema startup is not the race under qualification.

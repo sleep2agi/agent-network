@@ -1,6 +1,7 @@
 // 需求池。长期卡片，存在 Hub 上，手机和电脑读同一份。
 // 不是 tasks：tasks 是正在派给节点的活，状态由节点收尾。
 import { errorBody, errorFrom, RequirementFieldError, type ErrorContext } from "./requirements-errors.js";
+import { clipSafe } from "./clip.js";
 import { createHash } from "node:crypto";
 import { parsePeopleQuery, peopleDirectory, resolvePersonName } from "./requirements-people.js";
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
@@ -256,7 +257,8 @@ const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/issues\/(\d+)\/?$/;
 
 function clipTitle(value: unknown): string {
-  return typeof value === "string" ? value.replace(/[\r\n\t]/g, " ").trim().slice(0, 120) : "";
+  // 120 是**渲染上限**；clipSafe 保证截断不产生孤立代理（否则该标题在 JSON 里「合法」、在 UTF-8 里非法）
+  return typeof value === "string" ? clipSafe(value.replace(/[\r\n\t]/g, " ").trim(), 120) : "";
 }
 
 function issueFromParts(repo: string, number: number, title: string) {
@@ -683,8 +685,29 @@ function networkTagNames(networkId: string): Set<string> {
   return names;
 }
 
+/**
+ * 2026-10-31 —— **状态码是 code 的函数，映射表必须穷尽**（外部复核 (c)：
+ * 「三元式默认分支 = 未映射与某个真实含义同值 ⇒ 口令字段；应改成
+ *  `Record<ErrorCode, number>` 由 tsc 报红」）。
+ *
+ * 原来是 `code === "tag_exists" ? 409 : code === "tag_parent_not_found" ? 404 : 400`：
+ * 新增一个错误码时它**默认落到 400**，而有些码 400 是错的（冲突应是 409），且没人会提醒你。
+ * 改成穷尽表之后，漏一个码 = tsc 红。
+ */
+// 2026-10-31 —— **本仓 server 没有 tsc 门**（只有 agent-network 在 e2e-docker 里 typecheck），
+// 所以「漏一个码 = tsc 红」在这里是空头支票。⇒ 用运行时钉住：
+//   码集合由这个数组当**唯一来源**，测试断言映射表的键与它逐字相等。
+// 这样新增一个码只改一处（数组），而「忘了加 status」会红在测试里，不依赖编辑器。
+export const TAG_CREATE_ERRORS = ["tag_exists", "tag_parent_not_found", "tag_depth_exceeded"] as const;
+export type TagCreateError = (typeof TAG_CREATE_ERRORS)[number];
+export const TAG_CREATE_STATUS: Record<TagCreateError, number> = {
+  tag_exists: 409,
+  tag_parent_not_found: 404,
+  tag_depth_exceeded: 400,
+};
+
 type CreateTagOutcome =
-  | { error: "tag_exists" | "tag_parent_not_found" | "tag_depth_exceeded" }
+  | { error: TagCreateError }
   | { name: string; parent: string | null; depth: number; parentRegistered: boolean };
 
 /** POST /api/requirements/tags/create —— 建标签(可带父)。原子、整网络判重、父不存在就报错。 */
@@ -724,8 +747,7 @@ async function handleTagCreate(ctx: RequirementsRequestContext): Promise<Respons
     return { name: input.name, parent: input.parent, depth: tagDepth(input.name, parentOf), parentRegistered };
   });
   if ("error" in result) {
-    const status = result.error === "tag_exists" ? 409 : result.error === "tag_parent_not_found" ? 404 : 400;
-    return jsonError(result.error, status);
+    return jsonError(result.error, TAG_CREATE_STATUS[result.error]);
   }
   if (ctx.auth) logAudit(ctx.auth.userId, ctx.auth.username || null, "requirement_tag_create", "requirement_tag", result.name, JSON.stringify({ parent_id: result.parent, depth: result.depth }).slice(0, 1000), undefined, networkId);
   return Response.json({ ok: true, tag: { name: result.name, parent_id: result.parent, depth: result.depth }, parent_registered: result.parentRegistered }, { status: 201 });
@@ -747,7 +769,8 @@ function toPublic(row: Row) {
     seq: row.seq == null ? null : Number(row.seq),
     name: row.title,
     priority: row.priority,
-    assignee: row.assignee || "",
+    // 引用优先：owner/agent_owner 在写入时被校验过；assignee 可能停在旧值（见 displayAssignee）
+    assignee: displayAssignee(row as any),
     due: row.due_on || "",
     // 开始(可空,甘特图用)。形状同 due;没设 = ""。旧 App 不认识这个字段,忽略即可。
     start: row.start_on || "",
@@ -806,6 +829,34 @@ function hiddenNodeFilter(ctx: RequirementsRequestContext, networkId: string): H
   const visible = new Set(visibleAgents(ctx.auth.userId, networkId).nodeIds);
   return (nodeId: string) => !visible.has(nodeId);
 }
+/**
+ * 2026-10-31 —— **派生展示字段绕过了引用抹除**（#3285 的另一半）。
+ *
+ * `owner` / `agent_owner` / `participants` 都是 `{kind:"node", id}` 引用，所以能被
+ * `isHiddenRef` 判定并抹掉。而 `assignee` 与事件里的同名字段存的是**别名字符串** ——
+ * 没有任何 {kind,id} 可判 ⇒ 受限成员在**卡片列表**上（比事件列表常用得多）直接读到
+ * 一个他看不见的 Agent 的名字。
+ *
+ * 只能在「别名集合」这一层判：把该网络里受限成员看不见的节点的别名收成一个集合。
+ * 方向写死：**命中就抹**（宁可少显示一个名字，也不多露一个）。
+ */
+const aliasSetByCtx = new WeakMap<RequirementsRequestContext, Map<string, Set<string>>>();
+export function hiddenNodeAliases(ctx: RequirementsRequestContext, networkId: string): Set<string> {
+  const hidden = hiddenNodeFilter(ctx, networkId);
+  if (!hidden) return EMPTY_ALIAS_SET;
+  let perNet = aliasSetByCtx.get(ctx);
+  if (!perNet) aliasSetByCtx.set(ctx, perNet = new Map());
+  let set = perNet.get(networkId);
+  if (!set) {
+    const rows = db.all<{ node_id: string; alias: string | null }>(
+      "SELECT node_id, alias FROM nodes WHERE network_id = ?1", networkId);
+    set = new Set(rows.filter(r => r.alias && hidden(r.node_id)).map(r => r.alias as string));
+    perNet.set(networkId, set);
+  }
+  return set;
+}
+const EMPTY_ALIAS_SET: Set<string> = new Set();
+
 function isHiddenRef(ref: unknown, hidden: HiddenNode): boolean {
   if (!hidden || !ref || typeof ref !== "object") return false;
   const r = ref as { kind?: unknown; id?: unknown };
@@ -828,8 +879,11 @@ function toPublicFor(ctx: RequirementsRequestContext, row: Row) {
   const pub = can ? { ...base, viewer_can: can } : base;
   const hidden = hiddenNodeFilter(ctx, row.network_id);
   if (!hidden) return pub;
+  const hiddenAliases = hiddenNodeAliases(ctx, row.network_id);
   return {
     ...pub,
+    // 别名不是引用 ⇒ 单列一条（见 hiddenNodeAliases 的长注释）
+    assignee: hiddenAliases.has(pub.assignee) ? null : pub.assignee,
     owner: isHiddenRef(pub.owner, hidden) ? null : pub.owner,
     agent_owner: isHiddenRef(pub.agent_owner, hidden) ? null : pub.agent_owner,
     participants: Array.isArray(pub.participants) ? pub.participants.filter((ref: unknown) => !isHiddenRef(ref, hidden)) : pub.participants,
@@ -1233,6 +1287,18 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   }
   let people;
   try { people = assignments(body, row.network_id, row, hiddenNodeFilter(ctx, row.network_id), ctx.strictOwner === true); } catch (e) { return errorFrom(e); }
+
+  // 2026-10-31 —— **写侧对账**（#3270 的另一半）：
+  // 读侧已经以 owner/agent_owner 为准（displayAssignee），但库里那一列仍会停在旧值。
+  // 一个派生字段只要有第二个写入路径，就迟早会与事实分叉；同一次写入里把它对齐，分叉就不会累积。
+  // 规则：调用方**没有显式给 assignee** 时，用本次写入后的引用回填；显式给了就以调用方为准
+  // （那可能是系统外的人，例如「王工」—— 用引用覆盖它等于丢信息）。
+  if (!has("assignee") && (has("owner") || has("agent_owner"))) {
+    // 用 refDisplayName（把 {kind,id} 换回人名），**不是** displayAssignee
+    // （后者只回显存下来的自由文本 —— 这里正是要从引用推）。
+    const fromRef = refDisplayName(people.agentOwnerJson) || refDisplayName(people.ownerJson);
+    if (fromRef) assignee = fromRef.slice(0, 80);
+  }
   // RFC-040:只凭负责人身份改这张卡时,负责人 / 负责 Agent 只能交给本部门的人(或自己)/ 本部门成员的 Agent,
   // 不能把卡推出本部门(推出去等于替别的部门派活)。清空(null)不限制。
   const headOnly = (has("owner") || has("agent_owner")) ? headOnlyEditScope(caller, row) : null;
@@ -1435,6 +1501,89 @@ function departmentNetworks(ctx: RequirementsRequestContext, deptId: string): st
 
 const LIST_ORDER = " ORDER BY created_at DESC, requirement_id DESC";
 type LightRow = { requirement_id: string; seq?: number | null; network_id: string; created_at: string; title: string; description: string | null; assignee: string | null; tags_json: string | null; project_id: string | null; owner_json: string | null; agent_owner_json: string | null; participants_json: string | null };
+/**
+ * 2026-10-31 —— `assignee` 是**派生展示字段**，但它有自己的旧写入路径，会停在旧值。
+ *
+ * 实测（ANet 项目 archived=0，1105 张）：25 张与 owner/agent_owner 不一致，
+ * 其中 22 张「有 assignee 但既无 owner 也无 agent_owner」。读的人看的是 assignee，
+ * 于是「有人负责」这句话可以比事实晚很久。
+ *
+ * 判据：**owner / agent_owner 是写入时被校验过的引用**（owner 必须是本网络 user，
+ * agent_owner 必须是本网络 node），而 assignee 是自由文本。两者冲突时，读一侧应以引用为准。
+ * 没有引用时保留自由文本 —— 它可能是系统外的人（例如「王工」），删掉就等于丢信息。
+ */
+/**
+ * 2026-10-31 —— **删节点时要清掉指向它的卡引用**（#3277，实测 31 条悬空）。
+ *
+ * 实测：三个已删除的 node id 仍被 27 张卡引用，其中两个 id 在 api_tokens 里还有绑定行
+ * ⇒ 悬空不是录入错误，是**删除路径的缺口**；而读侧把它显示成「负责人是 n_xxxx」。
+ *
+ * 处理：
+ *   · agent_owner 指向该节点 ⇒ 置空（卡本身不动，它是正确的）
+ *   · participants 含该节点     ⇒ 从列表里摘掉
+ *   · owner 是**人**，删节点不影响它 ⇒ 不动
+ * 返回 { agentOwnerCleared, participantsTouched }，供删除路径写进审计。
+ */
+export function clearNodeFromRequirements(nodeId: string): { agentOwnerCleared: number; participantsTouched: number } {
+  const needle = `"id":"${nodeId}"`;
+  let agentOwnerCleared = 0;
+  const owners = db.all<{ requirement_id: string }>(
+    "SELECT requirement_id FROM requirements WHERE agent_owner_json LIKE ?1", `%${needle}%`);
+  for (const row of owners) {
+    db.run("UPDATE requirements SET agent_owner_json = NULL, updated_at = ?2 WHERE requirement_id = ?1",
+      [row.requirement_id, new Date().toISOString()]);
+    agentOwnerCleared += 1;
+  }
+  let participantsTouched = 0;
+  const parts = db.all<{ requirement_id: string; participants_json: string | null }>(
+    "SELECT requirement_id, participants_json FROM requirements WHERE participants_json LIKE ?1", `%${needle}%`);
+  for (const row of parts) {
+    let list: Array<{ kind?: string; id?: string }> = [];
+    try { list = JSON.parse(row.participants_json || "[]") as any[]; } catch { continue; }
+    const next = (list || []).filter((ref) => !(ref?.kind === "node" && ref?.id === nodeId));
+    if (next.length !== (list || []).length) {
+      db.run("UPDATE requirements SET participants_json = ?2, updated_at = ?3 WHERE requirement_id = ?1",
+        [row.requirement_id, JSON.stringify(next), new Date().toISOString()]);
+      participantsTouched += 1;
+    }
+  }
+  return { agentOwnerCleared, participantsTouched };
+}
+
+export function refDisplayName(json: string | null | undefined): string {
+  /**
+   * 把写入侧的引用 `{kind,id}` 换回**给人看的名字**（node → nodes.alias，user → users.username）。
+   * 只给**写侧回填**用：读侧不再由它推导 assignee（见 displayAssignee 的注释）。
+   */
+  let ref: { kind?: string; id?: string; alias?: string; username?: string } | null = null;
+  try { ref = json ? JSON.parse(json) : null; } catch { return ""; }
+  if (!ref) return "";
+  const inline = String(ref.alias || ref.username || "").trim();
+  if (inline) return inline;
+  if (!ref.id) return "";
+  try {
+    if (ref.kind === "node") {
+      const r = db.get<{ alias: string | null }>("SELECT alias FROM nodes WHERE node_id = ?1", ref.id);
+      if (r?.alias) return String(r.alias);
+    } else if (ref.kind === "user") {
+      const r = db.get<{ username: string | null }>("SELECT username FROM users WHERE user_id = ?1", ref.id);
+      if (r?.username) return String(r.username);
+    }
+  } catch { /* 读不到就退回 id */ }
+  return String(ref.id);
+}
+
+export function displayAssignee(row: { assignee?: string | null }): string {
+  /**
+   * 2026-10-31 —— **只回显存下来的值，不从引用推导**（两次实测把方向改对了）：
+   *   · 契约要求「显式 assignee 不被引用覆盖」（requirements-http 老测试）
+   *   · 契约也要求「显式清空后就是空」（同文件的 cleared 用例）
+   * 两者合起来意味着：读侧无法区分「从没设过」与「显式清空」⇒ 推导就会猜错其中一边。
+   * ⇒ 漂移的修法放在**写侧回填**（设引用且没显式给 assignee 时），读侧只负责如实显示。
+   */
+  return String(row.assignee || "").trim();
+}
+
 const parseRef = (json: string | null) => { try { return json ? JSON.parse(json) : null; } catch { return null; } };
 
 /**
@@ -1459,7 +1608,7 @@ function listPage(ctx: RequirementsRequestContext, from: string, baseParams: unk
     for (const r of light) {
       let m = maps.get(r.network_id);
       if (!m) maps.set(r.network_id, m = searchNameMaps(ctx, r.network_id));
-      const row = { name: r.title, description: r.description || "", assignee: r.assignee || "", tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
+      const row = { name: r.title, description: r.description || "", assignee: displayAssignee(r), tags: storedTags(r.tags_json), project_id: r.project_id, owner: parseRef(r.owner_json), agent_owner: parseRef(r.agent_owner_json), participants: parseRef(r.participants_json) ?? [] };
       // #471 —— tag= 在这里按存好的标签数组精确比(JSON 列,SQLite / PostgreSQL 写法不同,所以不进 SQL)。
       if (lq.tag !== null && !row.tags.includes(lq.tag)) continue;
       if (!lq.terms.length || matchesTaskId(r, lq.idQuery) || matchesTerms(row, lq.terms, m)) hits.push(r.requirement_id);
@@ -1654,6 +1803,15 @@ function listEvents(ctx: RequirementsRequestContext): Response {
   const serverTime = new Date().toISOString();
   const caller = taskCaller(ctx);
   const hidden = hiddenNodeFilter(ctx, networkId);
+  // 2026-10-31 —— `assignee` 是**派生展示字段**，存的是**别名字符串**，不是 {kind,id} 引用。
+  // 于是它绕过了 isHiddenRef：受限成员会在事件里读到「某个他看不见的 Agent 的名字」。
+  // 实测（本仓）：把 agent_owner 设成一个受限成员看不见的节点后，事件列表里多出
+  //   { field:"assignee", old:null, new:"<那个节点的别名>" }
+  // 而同一张卡的 agent_owner 事件已被正确抹掉 ⇒ 名字从旁边漏了出去。
+  // 修法：按「隐藏节点的别名集合」判，命中就抹成 null；随后「抹后 old==new」的规则会把整条丢弃。
+  // 方向选择：宁可多抹（隐藏）也不多露 —— 别名与人名冲突时，少显示一个名字的代价小于多露一个。
+  const aliasSet = hiddenNodeAliases(ctx, networkId);
+  const hiddenAlias = (v: unknown): boolean => !!hidden && typeof v === "string" && v !== "" && aliasSet.has(v);
   const aware = knowsAbandoned(ctx);
   const seen = new Map<string, boolean>();
   const canSee = (id: string): boolean => {
@@ -1676,6 +1834,11 @@ function listEvents(ctx: RequirementsRequestContext): Response {
     const mask = (ref: unknown) => (isHiddenRef(ref, hidden) ? null : ref);
     const masked = { ...ev, actor: mask(ev.actor) };
     if (ev.field === "owner" || ev.field === "agent_owner") { masked.old = mask(ev.old); masked.new = mask(ev.new); }
+    if (ev.field === "assignee") {
+      // 见上：别名字符串同样要按隐藏节点判定
+      masked.old = hiddenAlias(ev.old) ? null : ev.old;
+      masked.new = hiddenAlias(ev.new) ? null : ev.new;
+    }
     if (ev.field === "participants") {
       masked.old = Array.isArray(ev.old) ? ev.old.filter(ref => !isHiddenRef(ref, hidden)) : ev.old;
       masked.new = Array.isArray(ev.new) ? ev.new.filter(ref => !isHiddenRef(ref, hidden)) : ev.new;

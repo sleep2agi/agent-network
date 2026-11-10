@@ -14,6 +14,7 @@
  *   M5: image upload / download (`im.image.create` / `im.messageResource.get`)
  *       + group @bot detection refined to match the bot's own open_id.
  */
+import type { FeishuHistoryItem } from "./chat-context";
 import * as lark from "@larksuiteoapi/node-sdk";
 import crypto from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -301,6 +302,23 @@ export class FeishuAdapter implements IMAdapter {
     this.feishuConfig = null;
     // Drop the shared chromium for clean shutdown (image-render path).
     await closeMarkdownBrowser().catch(() => {});
+  }
+
+  /** #3682 —— 拉这个会话最近的消息，做聊天上下文。放在 adapter 是因为只有它有已鉴权的 client。
+   *  失败一律返回 []：上下文是增益不是链路的一部分，绝不因为读历史失败而丢消息。 */
+  async fetchRecentContext(chatId: string, limit = 8): Promise<FeishuHistoryItem[]> {
+    const client = this.client;
+    if (!client || !chatId) return [];
+    try {
+      const resp = (await client.request({
+        method: "GET",
+        url: "/open-apis/im/v1/messages",
+        params: { container_id_type: "chat", container_id: chatId,
+          page_size: Math.max(1, Math.min(limit, 20)), sort_type: "ByCreateTimeDesc" },
+      })) as any;
+      const items = resp?.data?.items;
+      return Array.isArray(items) ? (items as FeishuHistoryItem[]) : [];
+    } catch { return []; }
   }
 
   async send(message: NormalizedIMMessage): Promise<{ messageId: string }> {

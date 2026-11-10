@@ -74,6 +74,8 @@ import sys
 import tempfile
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# qa.sh 写日志的位置（默认值用它们，而不是要求调用方每次手写 glob）
+DEFAULT_LOG_GLOBS = ("/tmp/qa-l0-*.log", "/tmp/qa-l1-*-run.log")
 JOBTS = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")
 # bun: `(pass) describe > test [123.45ms]` / `(fail) (unnamed) [5490.92ms]`
 TIMING = re.compile(r"^\s*\(?\b(pass|fail|skip)\)?\s+(?P<name>.+?)\s+\[(?P<ms>\d+(?:\.\d+)?)ms\]\s*$")
@@ -371,6 +373,22 @@ def selftest() -> int:
     """内嵌夹具自证：admin/评审不用信我的话,跑 `--selftest` 就行。"""
     failures: list[str] = []
 
+    # 2026-10-31 —— **「没有日志」必须退出 2**：它原来 return 0，
+    # 于是「什么都没读到」与「没有贴上限的测试」在退出码上同值 —— 一条绿。
+    # 自检要看的是**退出码**，所以这里真的再跑一遍自己（子进程），不是断言源码文本。
+    import subprocess as _sp
+    try:
+        rc = _sp.run([sys.executable, os.path.abspath(__file__),
+                      "--logs", "/tmp/anet-margin-selftest-no-such-*.log"],
+                     capture_output=True, text=True, timeout=120).returncode
+    except Exception as exc:  # noqa: BLE001
+        rc = -1
+        failures.append(f"自检无法跑子进程：{exc}")
+    if rc != 2 and rc != -1:
+        failures.append(f"没有日志时应 exit 2（没有读数），实际 {rc}")
+    if not failures:
+        print("✓ selftest 没有日志 ⇒ exit 2（不是 0）")
+
     def check(cond: bool, what: str) -> None:
         if not cond:
             failures.append(what)
@@ -487,8 +505,8 @@ def selftest() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="per-test timeout margin report (#1627)")
-    ap.add_argument("--logs", nargs="+",
-                    help="日志文件或 glob（默认当作 glob 展开，不存在则跳过）")
+    ap.add_argument("--logs", nargs="+", default=None,
+                    help="日志文件或 glob；缺省时用 DEFAULT_LOG_GLOBS（qa.sh 写的那两个位置）")
     ap.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     help="仓库根（用来解析声明超时）")
     ap.add_argument("--pct", type=float, default=float(os.environ.get("TEST_MARGIN_PCT", DEFAULT_PCT)),
@@ -503,13 +521,17 @@ def main() -> int:
 
     if args.selftest:
         return selftest()
-    if not args.logs:
-        ap.error("--logs 必填（除非用 --selftest）")
+    # 2026-10-31 —— 原来这里是 `ap.error("--logs 必填")`：
+    # 于是「没给日志」在巡检里显示成一段 argparse usage（读起来像崩溃），
+    # 而**给了 --logs 但一个文件都没匹配上**时下面会 return 0 —— 那是一条**绿**。
+    # 「没有读数」与「通过」在退出码上同值，正是这条门最不该有的形态。
+    # ⇒ 缺省用 qa.sh 的输出位置；一个文件都没有 ⇒ exit 2（没有读数），不是 0。
+    log_patterns = args.logs or list(DEFAULT_LOG_GLOBS)
 
     default_ms = args.default_ms if args.default_ms is not None else resolve_default_ms(args.root)
 
     files: list[str] = []
-    for pat in args.logs:
+    for pat in log_patterns:
         hits = sorted(globlib.glob(pat))
         if not hits and os.path.isfile(pat):
             hits = [pat]
@@ -527,8 +549,9 @@ def main() -> int:
 
     if not files:
         print(f"TEST-MARGIN v1 tests=0 hooks=0 threshold={args.pct:g}% near=0 slowest=-"
-              f"  # 没有可读日志（--logs 给的是 {args.logs}）")
-        return 0
+              f"  # 没有可读日志（模式 {log_patterns}）⇒ **没有读数**，不是「没有贴上限的测试」")
+        print("  ⇒ 先跑一次 `bash scripts/qa.sh`（或 --l0）产生 L1-TIMING 日志，再跑本脚本", file=sys.stderr)
+        return 2
 
     # 同名去重、分母解析、贴上限排序全在 evaluate() 里 —— selftest 走同一条路径，
     # 所以自证通过就意味着真实调用路径正确，而不是「另一份逻辑副本对上了」。

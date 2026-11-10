@@ -100,7 +100,15 @@ def main() -> int:
               "stopped matching qa.sh or the workflows; refusing to pass")
         return 2
 
-    covered = set(re.findall(r"tests/(test[\w.\-]+)/\*\*", QA_YML.read_text(encoding="utf-8")))
+    qa_yml_text = QA_YML.read_text(encoding="utf-8")
+    covered = set(re.findall(r"tests/(test[\w.\-]+)/\*\*", qa_yml_text))
+    # 2026-11-01 —— #675 把逐套件路径收敛成了 `tests/**`（并行 PR 不再抢同一行）。
+    # 于是「覆盖」这件事不再只由逐套件条目表达：一个 `tests/**` 覆盖全部 tests/<name>/。
+    # 不认这一条，「收敛」会被读成「316 个目录全掉出过滤器」——而那正是本门现在会报的。
+    blanket = any(re.match(r"^\s*-\s*'tests/\*\*'\s*$", line)
+                  for line in qa_yml_text.splitlines())
+    if blanket:
+        covered |= test_dirs
     gap = sorted(executed - covered)
 
     print(f"tests/ directories: {len(test_dirs)} · CI-executed: {len(executed)} · "
@@ -118,8 +126,11 @@ def main() -> int:
     if stale:
         # Not a failure: a dir may be listed ahead of being wired up. But say it,
         # because a filter entry for something CI never runs is coverage theatre.
-        print("note: in the filter but not executed by CI (harmless, but not coverage): "
-              + ", ".join(stale))
+        # 2026-11-01 —— 收敛成 `tests/**` 之后这一栏会一次列出上百个名字；
+        # 全列会把终端淹没，所以改成「计数 + 前 8 个」——数在，名单在，只是不再刷屏。
+        showing = ", ".join(stale[:8]) + (" …" if len(stale) > 8 else "")
+        print(f"note: {len(stale)} 个 tests/ 目录在过滤器里但没有 CI 执行"
+              f"（无害，但不是覆盖）：{showing}")
 
     print(f"all {len(executed)} CI-executed test directory/ies can re-trigger qa.yml.")
     return 0

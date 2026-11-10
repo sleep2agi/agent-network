@@ -12,6 +12,7 @@
 // later milestones) consumes SELF_LOOP_TOOL_SPECS to register tools
 // with each SDK's tool surface.
 
+import { parseHubTimestamp } from "../hub-timestamp";
 import { computeNextWakeAt } from "./schedule";
 import { parseGoalCommand } from "./parser";
 import { newGoal } from "./store";
@@ -61,7 +62,8 @@ function nowOf(ctx: SelfLoopCtx): number {
 }
 
 function withinCooldown(g: AgentGoal, now: number): boolean {
-  const updated = Date.parse(g.updated_at);
+  // hub 的 *_at 列是 UTC 且**不带时区标记**：Date.parse 会按本机时区解释。
+  const updated = parseHubTimestamp(g.updated_at) ?? 0;
   if (!Number.isFinite(updated)) return false;
   return now - updated < DEFAULT_COOLDOWN_MS;
 }

@@ -4,6 +4,7 @@ WORKDIR /workspace
 
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && bun install --ignore-scripts
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/package.json
 RUN cd agent-node && bun install --ignore-scripts
 COPY server/package.json ./server/package.json

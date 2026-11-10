@@ -100,8 +100,13 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
     expect(db.get("SELECT 1 AS ok FROM network_members m WHERE m.user_id=?1 AND m.network_id=?2", outsider.user!.user_id, a.network_id!)).toBeNull();
 
     // 匿名/节点令牌都不是「本人」。
+    // #3354 —— 拒绝之外钉「没有留下一行上传记录」：一次被拒的上传若仍写进 user_avatar_uploads，
+    // 它会占配额、也说明「拒绝」发生在落盘之后。
+    const uploadRows = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_avatar_uploads")!.n;
+    const beforeNeg = uploadRows();
     expect((await upload(null, PNG_1X1)).status).toBe(401);
     expect((await upload(node.token!, PNG_1X1)).status).toBe(403);
+    expect(uploadRows()).toBe(beforeNeg);
 
     // 畸形输入：非 PNG、超边长、空、多字段、非 multipart。
     expect((await upload(a.token!, Buffer.from("not a png"))).body.error).toBe("invalid_image");

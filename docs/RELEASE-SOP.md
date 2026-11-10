@@ -828,3 +828,74 @@ git diff && git commit -m "chore(release): rollback @sleep2agi/<pkg> to <old-sta
 
 维护：发现遗漏或新增 hardcoded 位置时直接改本文档 + sync 脚本。改动走 PR 流程，
 Tier 1 review（通信龙 / 通信SDK马）通过后 merge。
+
+---
+
+## 7. 2026-11-05 实测踩出来的三条（写进这里，别靠记性）
+
+这三条都不改代码，但每一条都单独烧掉过至少一整轮。
+
+### 7.1 dispatch 的 `commit` 必须是**完整 40 位 SHA**
+
+```text
+传 8 位短 sha   ⇒ build 的 checkout 报
+                  "A branch or tag with the name 'dcb3b00f' could not be found"
+传分支名 main   ⇒ build 报
+                  "Publishing requires an explicit full 40-character commit SHA"
+```
+
+正确写法：
+
+```bash
+FULL=$(git rev-parse origin/main)      # 40 位
+curl ... -d "{\"ref\":\"main\",\"inputs\":{...,\"commit\":\"$FULL\",...}}"
+```
+
+### 7.2 冲突标记会**悄悄**进主干，唯一的拦网是一条便宜命令
+
+rebase / merge 收尾时用 `git add -A`，会把**尚未解决**的冲突文件一起提交。
+本次代价：`agent-node/package.json` 与 `package-lock.json` 带着 `<<<<<<< HEAD`
+进了主干 ⇒ release 的 `npm install` 直接 `EJSONPARSE`，tarball 都构不出来。
+
+```bash
+git add <具体文件>              # 不要 -A
+git diff --cached --check       # 专报冲突标记；输出为空才算干净
+```
+
+### 7.3 文档里的版本断言要**同一次**提交里跟
+
+`release-gate` 的 gate 4 会拿 `docs-site/docs/**/getting-started.md` 的
+`<!-- version-claim: ... version=X -->` 与本次发布的版本逐字比对。
+不同步 ⇒ gate 4 红 ⇒ publish 跳过，而前面四步全绿（看起来像"只差一步"）。
+
+### 7.4 判「发布出来的包完不完整」不要用 `ls | head`
+
+```bash
+# ❌ ls -la .../dist/bin/ | head -5   —— head 截断后，「没有第 6 行」与「只有 5 个文件」同形
+# ✅ 存在性判据（存在即为 1，缺了就是 0）
+curl -sL "$(npm view <pkg>@<ver> dist.tarball)" | tar tzf - | grep -c '^package/dist/bin/cli.js$'
+```
+
+本轮就有人（我）用 `head -5` 判过「包缺 cli.js」，实际只是输出被截断，白开了一张卡。
+
+### 7.5 一次 release 的**往返是 45 分钟**，这是设计值，不是故障
+
+`release.yml` 的「发后核实」会轮询 registry 最长 **45 分钟**
+（`VERIFY_TIMEOUT_MIN: '45'`），因为 npm 处理完毕后到 registry 可见历史上最坏约 40 分钟
+（`.186/.187` 实测；注释里写着「超时只说明尚未核实，不是没生效」）。
+
+于是有两个操作性后果，都不 obvious：
+
+```text
+① 看到 publish 步骤「in_progress」20–40 分钟，**不要重发**
+   重发会撞 E409（Cannot publish over previously staged version），把本来会好的那次也搞坏
+② 发版要**凑批**：同一个包连发两版，第二版必须等第一版从 registry 可见
+   （因为 gate 2 会 npm view 核对 pinned 常量；配对包还要断言 agent-node 已在 npm 上）
+   ⇒ 「改一点发一版」在这个仓里是 45 分钟起步，而不是 5 分钟
+```
+
+判据（别用 GitHub 的 in_progress 猜）：
+
+```bash
+npm view <pkg>@<version> version      # 出现 = 可见；npm error 404 = 还没到
+```

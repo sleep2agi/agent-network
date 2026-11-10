@@ -361,6 +361,23 @@ describe("buildConfigSnapshot — pure helper contract (#290 final, drain-omit g
   // and the caller is the only place that decides whether to send
   // it. If anyone tries to fold drain detection into the builder, the
   // pure-helper signature changes and this test forces a re-think.
+  // 2026-10-31 —— 实例身份是**内核口径**，不是自报值。
+  // 判据：同一进程内两次构建，三者必须全同；pid 必须是本进程；
+  //       starttime 若是数字则必须非负（Linux 上应可读；其他平台允许 null）。
+  test("carries kernel-level instance identity (boot_id / pid / starttime) as boot snapshots", () => {
+    const a = buildConfigSnapshot({ model: "m" }, true, 1);
+    const b = buildConfigSnapshot({ model: "m" }, true, 1);
+    expect(a.pid).toBe(process.pid);
+    // 进程内不可能变 ⇒ 两次必须逐值相同（否则「它重启过」这个判据会自己假阳性）
+    expect(a.boot_id).toBe(b.boot_id);
+    expect(a.proc_starttime_ticks).toBe(b.proc_starttime_ticks);
+    // 形态约束：boot_id 要么是 null，要么是 uuid 形态；starttime 要么 null，要么 ≥ 0
+    if (a.boot_id !== null && a.boot_id !== undefined) expect(a.boot_id).toMatch(/^[0-9a-f-]{16,64}$/i);
+    if (a.proc_starttime_ticks !== null && a.proc_starttime_ticks !== undefined) {
+      expect(a.proc_starttime_ticks).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   test("buildConfigSnapshot returns a valid snapshot regardless of caller drain state (pure)", () => {
     const s = buildConfigSnapshot(
       { model: "m", flags: { maxTurns: 50 } },

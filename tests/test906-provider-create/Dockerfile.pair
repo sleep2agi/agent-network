@@ -5,6 +5,7 @@ RUN install -d -m 0755 /run/user && install -d -m 0700 -o bun -g bun /run/user/1
 WORKDIR /repo
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 COPY agent-network/src/ ./agent-network/src/
+COPY contracts /repo/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./agent-node/
 COPY agent-node/src/package-version-consistency.test.ts ./agent-node/src/package-version-consistency.test.ts
 ARG SOURCE_COMMIT

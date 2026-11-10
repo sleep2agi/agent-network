@@ -4,6 +4,7 @@ WORKDIR /workspace
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 RUN cd agent-network && npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-network ./agent-network
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/package.json
 COPY tests/test812-paired-resolve-timeout ./tests/test812-paired-resolve-timeout
 CMD ["bash", "tests/test812-paired-resolve-timeout/run.sh"]

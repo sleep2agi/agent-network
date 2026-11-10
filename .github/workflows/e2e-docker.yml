@@ -16,16 +16,8 @@ on:
   #
   # 仓里其它 workflow(qa.yml / action-pins.yml / lint-from-session.yml …)的 push
   # 触发器全部写了 `branches: [main]`,只有这个漏了。
-  push:
-    branches: [main]
-    paths:
-      - 'agent-network/**'
-      - 'agent-node/**'
-      - 'server/**'
-      - 'channel/**'
-      - 'tests/**'
-      - '.github/workflows/**'
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'agent-network/**'
       - 'agent-node/**'
@@ -36,11 +28,17 @@ on:
 # 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
 # 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
 # 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+  # Tier 3: heavy Docker suite. Runs nightly on main, on demand, or on PRs labelled full-qa.
+  # It no longer runs on every merge to main (2 runners; it queued PR feedback).
+  schedule:
+    - cron: '40 18 * * *'
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   e2e:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +146,7 @@ jobs:
           retention-days: 14
 
   rename-ghost-gate:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     # #180 regression gate — standalone HARD FAIL for a focused signal.
     #
     # The rename-ghost test suite (`tests/qa-180-rename-ghost/`) reproduces the

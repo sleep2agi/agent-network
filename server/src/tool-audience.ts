@@ -44,12 +44,15 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   get_opencode_catalog_request: "protocol", ack_opencode_catalog: "protocol",
   // ── 人:节点令牌一律 user_token_required(项目管理)/ node_token_cannot_browse_files / node_token_cannot_read_logs ──
   projects_create: "user", projects_update: "user", requirement_tags: "both",
-  read_opencode_catalog: "user", get_opencode_catalog: "user",
+  read_opencode_catalog: "user", get_opencode_catalog: "user", select_opencode_session_model: "user",
   list_node_files: "user", read_node_file: "user", tail_node_logs: "user",
   // ── 两边都能调 ──
   submit_skill: "both", list_skills: "both", get_skill: "both", review_skill: "both",
   report_completion: "both", get_inbox: "both", ack_inbox: "both",
   get_all_status: "both", get_session_status: "both",
+  // #3952 —— Token 审计：节点上报走 protocol（默认不列，agent-node 按名直调）；
+  // 人的审计视图走 REST `/api/nodes/token-usage`，**不占 tools/list 预算**。
+  report_token_usage: "protocol",
   send_task: "both", send_message: "both", send_reply: "both", send_peer_reply: "both", send_ack: "both",
   retry_task: "both", get_task: "both", list_tasks: "both", cancel_task: "both", reassign_task: "both",
   send_desktop_message: "both", broadcast: "both", get_completions: "both",
@@ -65,11 +68,18 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   requirements_events: "both", requirements_comment: "both", projects_list: "both",
 };
 
-/** 调用者:节点令牌(绑定网络)/ 用户令牌 / 没有身份(旧的全局令牌、未开鉴权)—— 最后一种什么都不藏。 */
+/**
+ * 调用者：节点令牌（绑定网络）/ 用户令牌 / **没有身份**（旧的全局令牌、未开鉴权）。
+ *
+ * 2026-10-31 —— 第三种以前叫 `"unknown"`，这是**把「已知」写成了「未知」**：
+ * 我们完全知道它是什么（没有身份），只是不知道它**是谁**——
+ * 而 `unknown` 会让读者以为「查不清」，进而给它加一个 reason、加一次重试。
+ * 名字必须说清是「哪一类缺失」（外部复核 ②：reason 要写成「哪个前提没满足」，不能写成「未知」）。
+ */
 export type ToolCaller =
   | { kind: "node"; tokenId: string | null; networkId: string | null; includeProtocol: boolean }
   | { kind: "user"; includeProtocol: boolean }
-  | { kind: "unknown" };
+  | { kind: "anonymous"; why: "no_identity" };
 
 /** #487 的判定里「不看参数就必拒」的那几类;和 nodeDecide 同一规则(显式模式恒拒,其余看开关),只是不记日志。 */
 function nodeHidden(name: string, verdictFor: (cls: string) => Verdict): boolean {
@@ -83,7 +93,7 @@ function nodeHidden(name: string, verdictFor: (cls: string) => Verdict): boolean
 
 /** 这个调用者的 tools/list 里留哪些。没归类的工具一律留下(宁可多列;测试保证不会有没归类的)。 */
 export function listedToolFilter(caller: ToolCaller): (name: string) => boolean {
-  if (caller.kind === "unknown") return () => true;
+  if (caller.kind === "anonymous") return () => true;
   if (caller.kind === "user") return name => { const a = TOOL_AUDIENCE[name]; return a !== "node" && a !== "protocol"; };
   const id = caller.tokenId && caller.networkId ? nodeIdentity(caller.tokenId, caller.networkId) : null;
   const verdictFor = (cls: string): Verdict => {

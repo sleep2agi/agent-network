@@ -1,7 +1,31 @@
 import { refreshScheduledBackoff } from "./scheduled-backoff.js"; import { scheduledFailureCode } from "./scheduled-failure-code.js";
 import { createAdapter, type DbAdapter } from "./db-adapter"; import { withStatementHook } from "./status-read-cache"; // #431 写 sessions 的语句让 /api/status 缓存失效
+import { sessionSourceGrantSchema } from "./session-source-grant";
+import { sessionSourceAdmissionSchema, sessionSourceExecutionSchema, sessionSourceDeliverySchema, sessionSourceTransportSchema, sessionProjectCreateSchema, migrateProjectOperationJournal } from "./session-source-admission-store";
+import { sessionSourceCreateGuards } from "./session-source-create";
 
 export const db: DbAdapter = withStatementHook(createAdapter());
+db.exec(sessionSourceGrantSchema);
+db.exec(sessionSourceAdmissionSchema);
+db.exec(sessionSourceExecutionSchema);
+db.exec(sessionSourceDeliverySchema);
+db.exec(sessionSourceTransportSchema);
+db.exec(sessionProjectCreateSchema);
+migrateProjectOperationJournal(db);
+
+// #590 additive journal. Keep intent tombstones: deleting one permits the
+// same user intent to create a second child after an uncertain outcome.
+db.exec(`CREATE TABLE IF NOT EXISTS session_fork_requests (
+  request_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL,
+  network_id TEXT NOT NULL, node_id TEXT NOT NULL, token_id TEXT NOT NULL,
+  requester_token_id TEXT NOT NULL, requester_user_id TEXT NOT NULL,
+  session_id TEXT NOT NULL, binding_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending','in_progress','done','failed','unknown','expired')),
+  result_session_id TEXT, error TEXT,
+  UNIQUE(requester_user_id, network_id, intent_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_fork_active_node
+  ON session_fork_requests(network_id,node_id) WHERE status IN ('pending','in_progress');`);
 
 // Schema
 db.exec(`
@@ -855,6 +879,17 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// #4150/#590 internal source admission. Add after legacy table rebuilds;
+// NULL leaves ordinary creation unchanged. PostgreSQL cannot enable admission.
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN source_ref TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+if (db.dialect === "sqlite" && db.atomicTransactions === true && db.transactionalFeaturesRefusal === null) {
+  db.exec(sessionSourceCreateGuards);
+}
+
 // #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,
 // 叠在 send_desktop_message 的代码级三闸之上:canWrite / `!effectiveNetId` return /
 // getUserNetworkRole,tools.ts)。「不产生 network_id=NULL 孤儿」现是代码级保证 + #1492
@@ -1219,6 +1254,35 @@ db.exec(`
   -- 展开查询本身走各表主键,见 agent-groups-perf.test.ts 的 EXPLAIN QUERY PLAN。
   CREATE INDEX IF NOT EXISTS idx_group_grants_group ON network_member_group_grants(group_id);
 `);
+// ── #3432(admin 2026-11-05) 部门维度授权:把「人的组织架构」当成授权单位 ──
+// 与组授权同构(每次现算展开),差别只在展开源是 departments 子树 + nodes.department_id。
+// 单独一张表:组那张表的主键/语义都是 Agent 侧的,部门是人的树,混在一张表里以后分不清。
+// ── #3943 list_tasks 的轮询水位（每个调用者一条）──
+// 「自上次调用以来新增」比「每次拉全量再自己筛」便宜一个数量级，而提示词那一招
+// 对本项无效（实测 19.1% → 50.3%）。水位由服务端给、服务端存：
+// 客户端连时间都不用记，也就不会因为两边时钟差几秒而漏活。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS list_tasks_watermarks (
+    network_id TEXT NOT NULL,
+    caller_key TEXT NOT NULL,
+    watermark  TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, caller_key)
+  );
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_member_department_grants (
+    network_id    TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    department_id TEXT NOT NULL,
+    can_message   INTEGER NOT NULL DEFAULT 1,
+    created_by    TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, user_id, department_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_dept_grants_user ON network_member_department_grants(network_id, user_id);
+`);
+
 
 // ── #84: node rename — rename_txn table (RFC-010 §4) ──
 // Single isolated table holding the rename 2PC transaction state. It doubles
@@ -2480,6 +2544,11 @@ try { db.exec("ALTER TABLE sessions ADD COLUMN secret_keys TEXT"); } catch {}
 // the node itself. Appended at EOF like the other post-1.0 columns so the doc
 // and test846 line anchors below it never drift.
 try { db.exec("ALTER TABLE sessions ADD COLUMN env_transport TEXT"); } catch {}
+// 2026-10-31 —— #3294：节点侧的**字节标识**（与 /health 的 git_commit 同一概念，但对象不同）。
+// 只有 version 时，「两个 .169 是不同字节」无法分辨；而 #3178 的批量升级前后都要问这句话。
+// 可为 NULL：老节点不报 ⇒ 「没报」与「没有标识」在这一列上同形，所以读侧必须配一个 reason
+// （见 /api/nodes 的 build_note）。
+try { db.exec("ALTER TABLE sessions ADD COLUMN build_commit TEXT"); } catch {}
 
 // #1510 — hourly count of secret writes that a transport gate WOULD have refused
 // (nodes reporting a plain-HTTP hub link). Log-only until an operator decides.

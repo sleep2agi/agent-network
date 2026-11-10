@@ -2,6 +2,7 @@ ARG SOURCE_COMMIT
 FROM oven/bun:1.3.14
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/package.json
 RUN cd agent-node && bun install --ignore-scripts
 COPY agent-node/src ./agent-node/src

@@ -509,7 +509,7 @@ describe("team skills", () => {
       for (const io of ios2) expect(io.warns).toEqual([]);
       for (const io of ios2) expect(io.logs.filter((l) => l.includes("本次跳过"))).toEqual([]);
       const after = await linked(home);
-      expect(Object.keys(after)).toEqual(["mine", "team-a", "team-c", "team-e", "team-f"]);
+      expect(Object.keys(after).sort()).toEqual(["mine", "team-a", "team-c", "team-e", "team-f"]);
       expect(after["team-f"]).toBe(path.join(team, "team-f"));
       expect(await fs.readFile(path.join(user(home), "mine", "SKILL.md"), "utf8")).toBe(md("mine"));
       expect((await skillView("claude", ctx)).warnings).toEqual([]);

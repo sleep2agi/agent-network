@@ -4,6 +4,7 @@ FROM node:22.22.2-bookworm-slim@sha256:9f6d5975c7dca860947d3915877f85607946403fc
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /candidate
 COPY agent-network/package*.json ./agent-network/
+COPY contracts /candidate/contracts
 COPY agent-node/package*.json ./agent-node/
 COPY server/package*.json ./server/
 RUN cd agent-network && npm ci --ignore-scripts --no-audit --no-fund && cd ../agent-node && npm ci --ignore-scripts --no-audit --no-fund && cd ../server && npm ci --ignore-scripts --no-audit --no-fund

@@ -13,6 +13,7 @@ COPY docs-site/docs/en/guide/runtimes.md docs-site/docs/en/guide/runtimes.md
 # 注册表里多一个文件,这里就必须多一行 —— 否则脚本在容器里报
 # MISSING TARGET,dry-run 非零退出,而红的理由和被测行为无关。
 # (2026-08-27 就是这样红的:注册了三包的 package.json/lock,镜像里没有。)
+COPY contracts /repo/contracts
 COPY agent-node/package.json agent-node/package.json
 COPY agent-node/package-lock.json agent-node/package-lock.json
 COPY agent-network/package.json agent-network/package.json

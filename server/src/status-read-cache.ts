@@ -65,7 +65,14 @@ const MAX_ENTRIES = 64;
 const memo = new Map<string, Entry>();
 export const statusCacheStats = { hits: 0, misses: 0, uncacheable: 0 };
 
-function etagOf(body: string): string {
+/**
+ * 2026-10-31 —— 导出只为测试可钉：ETag 是**正文的纯函数**，
+ * 而「纯函数」这个词不够——需要两条方向相反的读数：
+ *   必须不同：内容差一个字符（尤其是**最后一个字符**）⇒ ETag 必须不同
+ *   必须相同：同一份内容 ⇒ ETag 必须相同（否则每个响应都「变了」，304 永远不命中）
+ * 为什么差异要放在最后一个字符：任何截断式比较（前缀 / 前 N 位 hash）在差异靠后时仍会判等。
+ */
+export function etagOf(body: string): string {
   return `"s-${Bun.hash(body).toString(36)}-${body.length.toString(36)}"`;
 }
 

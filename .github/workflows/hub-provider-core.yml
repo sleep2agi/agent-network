@@ -1,5 +1,29 @@
 name: Hub Provider core
+# 2026-10-31 —— **加 push: main**（#3288）。
+#
+# 起因：`server/src/daemon-provider-snapshots.test.ts` 与 `hub-provider-config.test.ts`
+# 在本地逐文件跑是红的，它们的文件头写着「本地直跑会看到 N 条红，那不是回归……
+# 判定这个文件是否健康，看 hub-provider-core.yml 的容器测试」。
+# 而那个「权威套件」原来只在 **pull_request** 上跑，且只在那几个路径被踩到时跑
+# ⇒ 对 main 上的任何一次提交，「它有更权威的验证」这句话**都不成立**。
+# 实测：最近一次运行是 2026-10-30T12:50Z 的分支运行，之后 main 上的提交一条都没被它验过。
+#
+# 为什么 push 也带同一套 paths：不加过滤的话每次 main 提交都会跑一遍 Docker 构建。
+# 路径相同意味着「只有可能影响 provider 那套的提交才跑」——与 PR 上完全一致的口径。
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/src/hub-provider-config*'
+      - 'server/src/tools.ts'
+      - 'server/src/db.ts'
+      - 'server/src/vault.ts'
+      - 'server/src/daemon-provider-snapshots.ts'
+      - 'server/src/node-permissions.ts'
+      - 'server/src/tool-audience.ts'
+      - 'tests/test907-hub-provider/**'
+      - 'tests/test906-daemon-provider-management/native-application.ts'
+      - '.github/workflows/hub-provider-core.yml'
   pull_request:
     paths:
       - 'server/src/hub-provider-config*'

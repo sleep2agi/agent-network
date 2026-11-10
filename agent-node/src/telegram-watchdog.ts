@@ -14,6 +14,7 @@
 // see zero behavior change.
 
 import { existsSync, readFileSync } from "node:fs";
+import { parseHubTimestamp } from "./hub-timestamp";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
@@ -60,16 +61,6 @@ const DEFAULTS = {
 function expandHome(p: string): string {
   if (!p) return p;
   return p.startsWith("~") ? p.replace(/^~/, homedir()) : p;
-}
-
-function parseSqliteIsoTimestamp(ts: string | undefined | null): number | null {
-  // commhub `updated_at` is `'YYYY-MM-DD HH:MM:SS'` (UTC, no tz suffix).
-  // `Date.parse` is permissive enough but unreliable on the space-as-separator
-  // form across engines; do it explicitly.
-  if (!ts) return null;
-  const fixed = ts.includes("T") ? ts : ts.replace(" ", "T") + "Z";
-  const ms = Date.parse(fixed);
-  return Number.isFinite(ms) ? ms : null;
 }
 
 export function startTelegramWatchdog(
@@ -126,7 +117,7 @@ export function startTelegramWatchdog(
       if (!own) return null;
       return {
         status: own.status ?? "unknown",
-        lastSeenMs: parseSqliteIsoTimestamp(own.updated_at),
+        lastSeenMs: parseHubTimestamp(own.updated_at),
       };
     } catch {
       return null;

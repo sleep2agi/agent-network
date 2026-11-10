@@ -10,6 +10,7 @@ import { adoptedChild, forgetAdoptedChild, readWorkdirRegistry, writeAdoptedChil
 import { readCodexScope } from "./adopt-codex-scope.js";
 import { collectCodexPanes } from "./adopt-codex-tmux.js";
 import { configHash } from "./adopt-launch-evidence.js";
+import { readOpenCodeBridgePid, verifyOpenCodeBridge } from "./adopt-opencode-v2.js";
 import { optionalCodexStartInputs } from "./adopt-codex-start-inputs.js";
 
 /**
@@ -78,9 +79,22 @@ async function adopt(requestId: string, deps: AdoptDaemonDeps): Promise<void> {
   try {
     if (process.platform !== "linux") throw Error("adopt_platform_unsupported");
     if (req.request_id !== requestId) throw Error("adopt_request_mismatch");
-    const identity = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true });
+    const identity = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true, allowOpenCodeV2: true });
     alias = identity.alias;
-    if (identity.config.codexCopresence) {
+    if (identity.config.opencodeMode === "copresence") {
+      // Phase 1: registration only (source reads / fork). No signal, spawn or config write.
+      const readProc = deps.readProc ?? readAdoptionProc;
+      const pid = readOpenCodeBridgePid(identity.nodeDir, deps.uid);
+      const before = readProc(pid);
+      verifyOpenCodeBridge(identity, before, deps.uid);
+      // No await between final verification and atomic registry persistence.
+      const checked = verifyAdoptionLocalIdentity(req, { ...deps, allowOpenCodeV2: true });
+      if (!isDeepStrictEqual(identity, checked) || readOpenCodeBridgePid(identity.nodeDir, deps.uid) !== pid) throw Error("adopt_identity_changed");
+      if (!isDeepStrictEqual(before, readProc(pid))) throw Error("adopt_process_changed");
+      writeAdoptedChild(deps.workDir, alias, { adopted: true, request_id: requestId, node_id: identity.nodeId,
+        nodeDir: identity.nodeDir, workdir: identity.workdir, launch_mode: "tmux",
+        opencode_v2: { version: 1, config_hash: configHash(identity) } });
+    } else if (identity.config.codexCopresence) {
       const scope = readCodexScope(identity, deps.uid);
       collectCodexPanes(scope);
       const checked = verifyAdoptionLocalIdentity(req, { ...deps, allowCodexV2: true });

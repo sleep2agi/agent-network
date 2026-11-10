@@ -94,6 +94,13 @@ test("exact executor and exact turn append one late receipt without rewriting te
   const legacyDetail = await get(owner.token, `/api/tasks?task_id=${taskId}&limit=1&network_id=${owner.network_id}`);
   expect(legacyDetail.body.tasks[0].late_replies).toEqual(detail.body.task.late_replies);
   const mcpDetail = await mcp(owner.token, "get_task", { task_id: taskId });
+  // 2026-10-31 —— **条件键要显式登记**（#3171）：get_task 的 `pacing` 只在有 pacing 时出现，
+  // 所以这里不能写「键集恒等于三键」（那也是外部复核说的「条件键」）。
+  // 断言写成：两个必需键必在，且**除 pacing 外不许有别的键**。
+  const ks = Object.keys(mcpDetail);
+  expect(ks).toContain("ok");
+  expect(ks).toContain("task");
+  expect(ks.filter((k) => !["ok", "task", "pacing"].includes(k))).toEqual([]);
   expect(mcpDetail.task.late_replies).toEqual(detail.body.task.late_replies);
 
   const messages = await get(owner.token, `/api/messages?alias=${encodeURIComponent(owner.user.username)}&since=2000-01-01%2000:00:00`);

@@ -213,7 +213,14 @@ describe("PUT /api/nodes/:id/permission-mode", () => {
     expect((await call(node.nN.token, "PATCH", `/api/requirements/${card.boss}`, { description: "mode flip" })).status).toBe(200);
     expect((await call(user.sco.token, "PUT", `/api/nodes/${node.nS.id}/permission-mode`, { mode: "restricted" })).status).toBe(200); // sco 是 nS 的主人
     expect((await call(user.sco.token, "PUT", `/api/nodes/${node.nS.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    // #3354 —— 403 之后**行必须没变**。只断状态码时，「拒了但已经写进去」也会绿，
+    // 而那是这条路由最坏的一种缺陷（拒绝语义看起来对，实际改了数据）。
+    const modeBeforeDenied = db.get<{ permission_mode: string }>(
+      "SELECT permission_mode FROM nodes WHERE node_id = ?1", node.nN.id)!.permission_mode;
     expect((await call(user.mem.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "readonly" })).status).toBe(403);
+    const modeAfterDenied = db.get<{ permission_mode: string }>(
+      "SELECT permission_mode FROM nodes WHERE node_id = ?1", node.nN.id)!.permission_mode;
+    expect(modeAfterDenied).toBe(modeBeforeDenied);
     expect((await call(node.nN.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "normal" })).body.error).toBe("user_token_required");
     expect((await call(user.out.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "readonly" })).status).toBe(404);
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "admin" })).status).toBe(400);
@@ -240,6 +247,21 @@ describe("GET /api/nodes viewer_can.permission_mode (#489)", () => {
 });
 
 describe("GET /api/networks/:id/node-permission-report", () => {
+  // #3316 判据④ 在**这个字段上不可满足**，而原因是 schema：`permission_mode` 是
+  // `NOT NULL DEFAULT 'normal'` ⇒ 「从未设置」在库层面不存在，任何读口都只能给出 normal。
+  //
+  // 我试过加 `permission_mode_source: explicit|default`，但实测它恒为 explicit
+  // （因为列不可能为 NULL）⇒ 那样的字段比没有更糟：它长得像三态，实际是常量。
+  // ⇒ 回滚该字段，改成把这条**结构性边界**钉住：谁若允许 NULL，这条会红并强制更新读口。
+  test("permission_mode 是 NOT NULL DEFAULT 'normal' ⇒ 「没设过」在库层面不可表达（#3316 判据④ 的前置）", () => {
+    const ddl = db.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='nodes'")!.sql;
+    expect(ddl).toMatch(/permission_mode\s+TEXT\s+NOT NULL\s+DEFAULT\s+'normal'/);
+    const fresh = `n_fresh_${Math.random().toString(36).slice(2, 8)}`;
+    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, lifecycle_state) VALUES (?1, ?1, ?1, ?2, 'active')", [fresh, net]);
+    expect(db.get<{ permission_mode: string }>("SELECT permission_mode FROM nodes WHERE node_id = ?1", fresh)!.permission_mode).toBe("normal");
+  });
+
   test("owner sees would-have-blocked counts per node; members and node tokens are refused", async () => {
     const r = await call(user.boss.token, "GET", `/api/networks/${net}/node-permission-report`);
     expect(r.status).toBe(200);
@@ -407,6 +429,157 @@ describe("GET /api/nodes 读回白名单与 transport", () => {
     const row = await rowOf(node.other.id);
     expect(row.peer_allowlist).toEqual(["boss", node.nR.id]);
     expect(row.tool_allowlist).toEqual(["send_task", "get_inbox"]);
+  });
+
+  // #3354 —— 白名单路由的 L3 证据：拒绝必须同时证明「403」与「行没变」，允许要有镜像。
+  test("改白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）", async () => {
+    const read = () => db.get<{ tool_allowlist: string | null }>(
+      "SELECT tool_allowlist FROM nodes WHERE node_id = ?1", node.other.id)!.tool_allowlist;
+    const before = read();
+    const denied = await call(user.mem.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: ["send_task"] });
+    expect(denied.status).toBe(403);
+    // 只断 403 时，「拒了但已经写进去」也会绿 —— 而那正是这条路由最坏的一种缺陷。
+    expect(read()).toBe(before);
+    // 镜像：允许时必须真的变，否则「永远拒绝」也会绿。
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/tool-allowlist`, { tools: ["send_task"] });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before);
+  });
+
+  // #3354 —— rest-allowlist 此前**一条测试都没有**（同族里唯一零覆盖的写路由）。
+  // 它改的是「这个节点能调哪些 REST 路由」，与 tool-allowlist 同一套授权口径。
+  // #3354 —— POST /api/tmux/:id/send：三层门里最外层的一条。
+  // 门 = TMUX_ENABLED → IP 白名单 → 管理员。测试环境默认第 1 层就是关的，
+  // 于是这条路由在**功能未启用**时必须是 404 拒绝，而不是「悄悄成功」。
+  // ⚠ 允许路径需要真 tmux，本仓测试不具条件 ⇒ 只验拒绝（证据表里标了 note）。
+  test("tmux send：功能未启用时 404 拒绝，且不返回任何执行痕迹", async () => {
+    const r = await call(user.boss.token, "POST", "/api/tmux/whatever/send", { text: "echo pwned" });
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe("tmux disabled");
+    // 「拒了」还要求「没有假装成功」：ok 必须是 false（不是 true、也不是缺失 ——
+    // 缺失会让调用方按 `if (!body.ok)` 之外的写法读成成功），且不许有 sent 字段。
+    expect(r.body.ok).toBe(false);
+    expect(r.body.sent).toBeUndefined();
+  });
+
+  // #3354 —— PUT /api/nodes/:id/avatar：拒绝之后 avatar_url 必须没变。
+  // 门与 attrs 相同（canRestWriteNetwork + restNodeDenied）⇒ 拒绝方是 readonly 模式下的节点自己，
+  // 不是普通成员（成员有网络写权是设计如此 —— 第一次按节点主人模板写就猜错了）。
+  // #3018 判据④ —— 「GET 只可能返回 null 或非空数组」这句话要能扛住**库里的历史 []**。
+  // 客户端收不到 []，才无从把它读成「全部禁止」。
+  test("库里有历史 [] ⇒ GET 读回 null（不是 []），三条白名单都一样", async () => {
+    const target = node.other.id;
+    db.run("UPDATE nodes SET tool_allowlist = '[]', rest_allowlist = '[]', peer_allowlist = '[]' WHERE node_id = ?1", [target]);
+    const row = (await call(user.boss.token, "GET", `/api/nodes?node_id=${target}&network_id=${net}`)).body.nodes[0];
+    expect(row.tool_allowlist).toBeNull();
+    expect(row.rest_allowlist).toBeNull();
+    expect(row.peer_allowlist).toBeNull();
+    // 否定断言配镜像：非空的仍然原样返回
+    db.run(`UPDATE nodes SET tool_allowlist = '["send_task"]' WHERE node_id = ?1`, [target]);
+    const row2 = (await call(user.boss.token, "GET", `/api/nodes?node_id=${target}&network_id=${net}`)).body.nodes[0];
+    expect(row2.tool_allowlist).toEqual(["send_task"]);
+    db.run("UPDATE nodes SET tool_allowlist = NULL WHERE node_id = ?1", [target]);
+  });
+
+  test("改节点头像：readonly 节点被拒且 avatar_url 没变；owner 200 且真的变了（镜像）", async () => {
+    const read = () => db.get<{ avatar_url: string | null }>(
+      "SELECT avatar_url FROM nodes WHERE node_id = ?1", node.other.id)!.avatar_url;
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "readonly" })).status).toBe(200);
+    const before = read();
+    const denied = await call(node.other.token, "PUT", `/api/nodes/${node.other.id}/avatar`, { avatar_url: "/avatars/avatar-11.webp" });
+    expect(denied.status).toBe(403);
+    expect(read()).toBe(before);
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/avatar`, { avatar_url: "/avatars/avatar-11.webp" });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before);
+  });
+
+  // #3354 —— DELETE /api/nodes/:id：拒绝之后**行必须还在**。
+  // 这是唯一一条「只要写进去了就不可逆」的写路由 —— 拒了但删了，没有任何读数能复原。
+  // 用**可丢弃的 scratch 节点**做靶子：拒绝方是 readonly 模式下的 node.other，
+  // 这样 witness 若让闸失效，被误删的也只是 scratch，不会连带毁掉后面用例的公共夹具。
+  test("删节点：readonly 调用者被拒且行还在；owner 允许且行真的没了", async () => {
+    const scratch = `n_del_${Math.random().toString(36).slice(2, 8)}`;
+    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, lifecycle_state) VALUES (?1, ?1, ?1, ?2, 'active')", [scratch, net]);
+    expect(db.get("SELECT node_id FROM nodes WHERE node_id = ?1", scratch)).toBeTruthy();
+    // ① 拒绝：readonly 的 node.other 去删 scratch ⇒ 403，且 scratch 还在
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "readonly" })).status).toBe(200);
+    const denied = await call(node.other.token, "DELETE", `/api/nodes/${scratch}`);
+    expect(denied.status).toBe(403);
+    expect(db.get("SELECT node_id FROM nodes WHERE node_id = ?1", scratch)).toBeTruthy();
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    // ② 允许：owner 删同一个 scratch ⇒ 200 且行真的没了（镜像）
+    const ok = await call(user.boss.token, "DELETE", `/api/nodes/${scratch}`);
+    expect(ok.status).toBe(200);
+    expect(db.get("SELECT node_id FROM nodes WHERE node_id = ?1", scratch)).toBeFalsy();
+  });
+
+  // #3354 —— ATTRS：这条的门是 canRestWriteNetwork + restNodeDenied，另有**乐观锁**。
+  // 普通成员有网络写权是设计如此 ⇒ 这里的拒绝方是「readonly 模式下的节点自己」。
+  // 三件事必须一起钉：① 拒绝且行没变 ② 允许且行真变 ③ 旧 revision ⇒ 409 且行没变。
+  test("改 attrs：readonly 节点被拒且行没变；owner 200 且行真变；旧 revision 409 且行没变", async () => {
+    const row = () => db.get<{ display_name: string | null; attrs_revision: number | string }>(
+      "SELECT display_name, attrs_revision FROM nodes WHERE node_id = ?1", node.other.id)!;
+    // 先把节点设成 readonly（owner 才做得动），再让节点自己写属性 ⇒ 必须被拒
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "readonly" })).status).toBe(200);
+    const before = row();
+    const denied = await call(node.other.token, "PUT", `/api/nodes/${node.other.id}/attrs`, {
+      display_name: "pwned", base_attrs_revision: Number(before.attrs_revision),
+    });
+    expect(denied.status).toBe(403);
+    expect(row()).toEqual(before);          // 拒绝不许改数据（名字与 revision 都要看）
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/permission-mode`, { mode: "normal" })).status).toBe(200);
+    // 允许：200 且名字变了、revision 前进
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/attrs`, {
+      display_name: "renamed-by-owner", base_attrs_revision: Number(before.attrs_revision),
+    });
+    expect(ok.status).toBe(200);
+    const after = row();
+    expect(after.display_name).toBe("renamed-by-owner");
+    expect(Number(after.attrs_revision)).toBeGreaterThan(Number(before.attrs_revision));
+    // 旧 revision 再写：409，且行不许被这次写入改掉
+    const conflict = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/attrs`, {
+      display_name: "lost-the-race", base_attrs_revision: Number(before.attrs_revision),
+    });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error).toBe("attrs_revision_conflict");
+    expect(row()).toEqual(after);
+  });
+
+  // #3354 —— peer-allowlist 原本只有 200 / 400 / null，没有 403 分支。
+  // 它改的是「这个节点能跟哪些 peer 通信」⇒ 被拒失败等于任何人可改它的通信边界。
+  test("改 peer 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）", async () => {
+    const read = () => db.get<{ peer_allowlist: string | null }>(
+      "SELECT peer_allowlist FROM nodes WHERE node_id = ?1", node.other.id)!.peer_allowlist;
+    const before = read();
+    const denied = await call(user.mem.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: ["boss"] });
+    expect(denied.status).toBe(403);
+    expect(read()).toBe(before);   // 拒绝不许改数据
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/peer-allowlist`, { peers: ["boss"] });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before); // 镜像：允许时必须真的变
+  });
+
+  test("改 REST 白名单：成员 403 且**行没变**；owner 200 且行真的变（镜像）；[] 歧义 400", async () => {
+    const read = () => db.get<{ rest_allowlist: string | null }>(
+      "SELECT rest_allowlist FROM nodes WHERE node_id = ?1", node.other.id)!.rest_allowlist;
+    const before = read();
+    // ① 拒绝：403 且行必须没变（只断 403 时「拒了但已写入」也会绿）
+    const denied = await call(user.mem.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: ["POST /api/task"] });
+    expect(denied.status).toBe(403);
+    expect(read()).toBe(before);
+    // ② 镜像：允许时必须真的变（只测拒绝时「永远拒绝」也会绿）
+    const ok = await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: ["POST /api/task"] });
+    expect(ok.status).toBe(200);
+    expect(read()).not.toBe(before);
+    // ③ 空数组是歧义的：拒收，且不许落库（与 tool-allowlist 同一决定）
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: [] })).body.error)
+      .toBe("empty_allowlist_ambiguous");
+    expect(read()).toBe(JSON.stringify(["POST /api/task"]));
+    // ④ 清空请传 null
+    expect((await call(user.boss.token, "PUT", `/api/nodes/${node.other.id}/rest-allowlist`, { routes: null })).status).toBe(200);
+    expect(read()).toBeNull();
   });
 
   test("清空后回到 null，而不是 []", async () => {

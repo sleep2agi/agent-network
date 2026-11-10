@@ -36,6 +36,8 @@ const publicLifecycleErrors = new Set([
   // #2012 —— daemon 的 copresence_adopt_v2 拒绝是固定安全码（无路径/无异常文本），
   // 不放行会让用户投影退化成 lifecycle_error，看不到「为什么被拒绝」。
   "copresence_adopt_v2",
+  // OpenCode V2 co-presence adoption (registration for fork): bridge must be live; start/stop not yet supported.
+  "adopt_opencode_bridge_not_running", "adopt_opencode_lifecycle_unsupported",
   "adopt_proc_invalid", "adopt_proc_unreadable", "adopt_platform_unsupported",
   "adopt_registry_conflict", "adopt_registry_entry_invalid", "adopt_registry_invalid",
   "adopt_registry_unsafe", "adopt_config_env_invalid", "adopt_env_file_invalid",

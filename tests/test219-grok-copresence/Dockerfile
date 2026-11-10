@@ -12,6 +12,7 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:/usr/local/bin:/usr/bin:/bin"
 
 WORKDIR /workspace
+COPY contracts /workspace/contracts
 COPY agent-node/package.json ./agent-node/
 COPY agent-network/package.json agent-network/package-lock.json ./agent-network/
 

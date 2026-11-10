@@ -19,6 +19,17 @@ export type DegradedLayer = {
   layer: "app_server" | "tui" | "model_auth";
   /** 机器可读的原因:app_server 的错误摘要 / tui 的 reason / model_auth 的状态。 */
   reason: string;
+  /**
+   * 2026-10-31 —— `reason` 是**谁写的**。
+   *
+   * `app_server.reason` 有两个生产者：节点上报的 `last_error`（≤200 任意串），
+   * 和 Hub 在自己这边合成的字面量 `"unreachable"`（节点没报错误摘要时）。
+   * 两者在同一个字段里 ⇒ 读者无法区分「节点说它 unreachable」与「Hub 根本没能问到节点」。
+   *
+   * ⇒ 改名 / 拆分 catch 都拦不住：**上游可以原样声明 `"unreachable"`**（`:148` 同形）。
+   *   所以判别力只能来自一个独立的来源字段。
+   */
+  origin: "node" | "hub";
   /** 给人看的一句(中文,与 app 的「降级」徽标同一套措辞)。 */
   label: string;
   hint: string;
@@ -39,6 +50,9 @@ export function degradedLayers(health: NodeHealth | null | undefined): DegradedL
     out.push({
       layer: "app_server",
       reason: (health.app_server.last_error || "unreachable").slice(0, 200),
+      // 没有 upstream 摘要时这个串是**我们**写的；有则逐字是节点的。
+      // ⚠️ 节点自己也可以报 "unreachable" ⇒ 只有这一格能分辨。
+      origin: health.app_server.last_error ? "node" : "hub",
       label: "App Server 断开",
       hint: "节点的 codex app-server 端口没有响应:在节点所在机器上重启该节点(anet node restart <别名>)",
     });
@@ -47,6 +61,7 @@ export function degradedLayers(health: NodeHealth | null | undefined): DegradedL
     out.push({
       layer: "tui",
       reason: health.tui.reason,
+      origin: "node",
       label: TUI_LABEL[health.tui.reason] ?? "TUI 不可用",
       hint: "共存 TUI 不在运行:在节点所在机器上重新拉起该节点的 TUI(anet node restart <别名>)",
     });
@@ -55,6 +70,7 @@ export function degradedLayers(health: NodeHealth | null | undefined): DegradedL
     out.push({
       layer: "model_auth",
       reason: health.model_auth,
+      origin: "node",
       label: health.model_auth === "revoked" ? "需要重新登录" : "登录已过期",
       hint: "该节点自己的 CODEX_HOME 需要重新登录(在那台机器上:CODEX_HOME=<节点目录>/codex-home codex login);不要拷别的节点的 auth.json",
     });

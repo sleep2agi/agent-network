@@ -133,6 +133,15 @@ describe("#1353 Fix ① — hub gates create_node on daemon-reported can_create_
     });
     const t = tools();
     const r = await call(t.create_node, { daemon_node_id: DAEMON_ID, node_spec: spec });
+    // #3275 批次 4 —— 拒绝分支的实测闭集（**六键**，我按族推断的三键当场红）：
+    //   blocked_reason      为什么被挡（error 只回答「被挡了」）
+    //   remediation_hint    下一步做什么（没有它，调用方只能停下来问人）
+    //   capability_age / capability_observed_ms_ago / daemon_node_id
+    //                       —— 这三个回答「那个能力读数有多旧、是哪台 daemon 的」
+    // ⇒ 又一次「同族推断」错：这条拒绝路径比别的工具多三格**时间与归属**信息。
+    expect(Object.keys(r).sort()).toEqual([
+      "blocked_reason", "capability_age", "capability_observed_ms_ago", "daemon_node_id", "error", "ok", "remediation_hint",
+    ].sort());
     expect(r.ok).toBe(false);
     expect(r.error).toBe("daemon_cannot_create_nodes");
     expect(r.blocked_reason).toBe("anet_bin_permission");

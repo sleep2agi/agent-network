@@ -100,7 +100,9 @@ try {
   check('lost ACK plus generation change is unknown to client, not fake success', !unknown.ok && unknown.error === 'unknown');
   await bridge.trigger(); await bridge.trigger();
   check('reconnect/pull never replays the unknown write', writes.length === 2 && writes.every(path => path === `/api/session/${sid}/background`));
-  check('real SSE contains only fixed doorbell fields, no target secrets or commands', events.length >= 5 && events.every(event => Object.keys(event as object).sort().join(',') === 'request_id,type'));
+  // 🔴 键集用 JSON.stringify 比，不用 join(",")：键名可含逗号，{"request_id,type": …}
+  //    会拼出同样的字符串，于是「多一个字段」被读成「正好这两个字段」——静默通过。
+  check('real SSE contains only fixed doorbell fields, no target secrets or commands', events.length >= 5 && events.every(event => JSON.stringify(Object.keys(event as object).sort()) === '["request_id","type"]'));
   console.log(`RESULT PASS ${passed} integration assertions; real Hub+product adapters, OpenCode HTTP fixture only`);
 } finally {
   stop.abort(); await readEvents?.catch(() => {}); hub.stop(true); oc.stop(true);

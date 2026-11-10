@@ -266,6 +266,30 @@ export function canRestWriteNetwork(authCtx: { userId: string; networkId: string
   return !isAgentRestricted(authCtx.userId, networkId);
 }
 
+/**
+ * 能不能改**节点自身的安全配置**(permission-mode / rest-allowlist / peer-allowlist)。
+ *
+ * 这一类比 canRestWriteNetwork **更严**:后者放行任何非 viewer 成员,而改白名单等于
+ * 改这台节点还能做什么,所以只许 节点主人 / 网络 owner / 网络 admin / Hub 管理员
+ * (RFC-041 §2.3 / §2.4)。
+ *
+ * 为什么单独具名而不是复用 canRestWriteNetwork:两处调用点看起来在讲同一件事
+ * ("谁能改这个节点"),但强度差在被调函数里 —— 合并的方向是**放宽**,不是重构。
+ * 具名之后,静态检查只要认一个名字;不具名时,新写的路由会照抄它附近那一行,
+ * 而"附近那一行"是哪一种取决于作者当时读到哪段代码。
+ */
+export function canRestWriteNodeSecurity(
+  authCtx: { userId: string } | null,
+  ownerUserId: string | null,
+  networkRole: string | null,
+  isAdmin: boolean,
+): boolean {
+  if (isAdmin) return true;
+  if (!authCtx) return false;
+  if (ownerUserId && ownerUserId === authCtx.userId) return true;
+  return networkRole === "owner" || networkRole === "admin";
+}
+
 /** 旧的「成员且不是 viewer」判据,不看 Agent 授权。只给人类侧写入用。 */
 export function canRestWriteNetworkAsHuman(authCtx: { userId: string; networkId: string | null } | null, networkId: string | null, isAdmin: boolean): boolean {
   if (!authCtx) return true; // legacy global token or open dev mode

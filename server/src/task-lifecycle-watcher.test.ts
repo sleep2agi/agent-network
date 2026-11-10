@@ -137,7 +137,12 @@ describe("#167 Hub delivered-stale lifecycle watcher", () => {
 
   test("startHub owns a live watcher timer instead of relying on import side effects", async () => {
     const childDbPath = `/tmp/test683-live-${process.pid}-${Date.now()}.db`;
-    const init = Bun.spawnSync(["bun", "-e", "await import('./server/src/db.js')"], {
+    // 2026-10-31 —— 绝对路径，不再用 `'./server/src/…'` + `cwd: process.cwd()`。
+    // 那种写法只在「从仓库根跑」时成立；从 `server/` 跑（scripts/run-server-tests.sh 就是这样）
+    // 子进程立刻退出 1，于是断言长期红着，而看起来像被测行为失败。断言不该顺带测 cwd。
+    const dbJs = new URL("./db.js", import.meta.url).pathname;
+    const indexTs = new URL("./index.ts", import.meta.url).pathname;
+    const init = Bun.spawnSync(["bun", "-e", `await import(${JSON.stringify(dbJs)})`], {
       cwd: process.cwd(),
       env: { ...process.env, COMMHUB_DB: childDbPath },
       stdout: "pipe",
@@ -145,7 +150,7 @@ describe("#167 Hub delivered-stale lifecycle watcher", () => {
     });
     expect(init.exitCode).toBe(0);
 
-    const child = Bun.spawn(["bun", "run", "server/src/index.ts"], {
+    const child = Bun.spawn(["bun", "run", indexTs], {
       cwd: process.cwd(),
       env: {
         ...process.env,

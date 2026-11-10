@@ -146,6 +146,20 @@ describe("#515 exit codes: command × error condition (real CLI, temp HOME, fake
   }
 });
 
+// #3294 —— `anet --version` 必须**总是**给出 build 一行的四种形态之一。
+// 这测的是**接线**（版本报告真的读了 build-info），不是纯函数（那几条在 build-info.test.ts）。
+// 三种状态都要能在这一行上被认出来，否则「没有」与「没问题」在界面上同形。
+describe("#3294 --version 里的 build 行", () => {
+  test("四种形态之一，且一定出现", async () => {
+    const home = tempHome(cfg("none"));
+    const r = await runCli(home, ["--version"]);
+    expect(r.code).toBe(0);
+    const line = (r.out + r.err).split("\n").find((l) => l.trim().startsWith("build "));
+    expect(line).toBeDefined();
+    expect(line!).toMatch(/^\s*build (?:[0-9a-f]{12}(?: \(dirty tree.*\))?|unknown \()/);
+  }, 30_000);
+});
+
 describe("finalExitCode()", () => {
   test("no code recorded → 0; recorded number/string → that code", () => {
     const saved = process.exitCode;

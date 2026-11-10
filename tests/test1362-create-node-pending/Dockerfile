@@ -2,6 +2,7 @@ FROM oven/bun:1.3.14
 
 WORKDIR /workspace
 
+COPY contracts /workspace/contracts
 COPY server/package.json server/package-lock.json ./server/
 RUN cd /workspace/server && bun install --ignore-scripts
 

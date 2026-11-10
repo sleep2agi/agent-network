@@ -8,6 +8,7 @@ WORKDIR /app
 ARG TEST594_SOURCE_COMMIT=unknown
 ENV TEST594_SOURCE_COMMIT=${TEST594_SOURCE_COMMIT}
 
+COPY contracts /app/contracts
 COPY server/package.json server/bun.lock* ./server/
 RUN cd server && bun install --frozen-lockfile --ignore-scripts
 COPY agent-node/package.json ./agent-node/

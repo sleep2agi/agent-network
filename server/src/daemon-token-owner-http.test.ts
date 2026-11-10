@@ -61,6 +61,9 @@ beforeAll(async () => {
   const { bootServer } = await import("./server.js");
   hub = bootServer({ port: 0, hostname: "127.0.0.1" }); base = `http://127.0.0.1:${hub.port}`;
   const request = await call(owner.token, "request_adopt_node", { node_id: child, daemon_node_id: daemon, workdir: "/fixture/project" });
+  // #3275 批次 4 —— request_adopt_node 的外层三键（与 read_node_rules_file 同形：
+  // 「下发一个请求」这一族的统一形状）。status 一并回来，调用方不必再查一次。
+  expect(Object.keys(request).sort()).toEqual(["ok", "request_id", "status"]);
   expect(request.ok).toBe(true); requestId = request.request_id;
 }, 60000);
 afterAll(() => hub?.stop(true));
@@ -100,34 +103,136 @@ for (const [name, arguments_] of endpoints) {
   test(`daemon identity boundary: ${name}`, async () => {
     const args = name.includes("adopt_request") ? { ...arguments_, request_id: requestId } : arguments_;
     for (const token of [mismatched, wrongBound, ownerless, owner.token, member.token]) {
-      expect(await call(token, name, args)).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
+      const denied = await call(token, name, args);
+      expect(denied).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
+      // 2026-10-31 —— #3275：**错误信封也是契约**。
+      // 这八个 ack/get 工具此前只被断言过 error 的**值**，没有一条钉住键集：
+      // 谁顺手在某个出口多塞一个字段（例如 hint / request_id），客户端的分支就多一个没人知道的键。
+      // ⇒ 在同一个循环里把形状钉住，成本几乎为零。
+      expect(Object.keys(denied).sort()).toEqual(["error", "ok"]);
     }
     expect(db.get("SELECT status FROM node_daemon_bindings WHERE request_id=?1", requestId).status).toBe("pending");
   });
 }
 
+// #3275 批次 1 —— 上面那个表驱动循环里工具名是**变量**，所以「同变量」统计口径按名字归因不到任何一个工具。
+// 这不是测试写得不好，是**统计的粒度**问题：一条循环里的断言无法被归到被循环的那 N 个工具上。
+// ⇒ 给 ack_create_request 补一条带字面量的：错误信封是闭集 {error, ok}。
+//
+// 批次 1·c 的结论（写在这里，因为它是这一批的**真实成本**：夹具不够，不是断言不够）：
+//   三个 `ack_*_request` 的失败分支闭集是 request_not_found / not_your_request /
+//   cross_network_request / caller_not_a_daemon。今天只有最后一条可达（上面的循环已钉住 {error,ok}）。
+//   前三条要么需要**绑定到 daemon 的** MCP 凭证（owner 令牌先撞 caller_not_a_daemon），
+//   要么需要跨网络 daemon 凭证 —— 本夹具里的 `bound` 只用于 REST 侧 mint 测试，
+//   拿它调 /mcp 直接非 200（实测），所以那条路走不通。
+// ⇒ 批次 1·c 要先造一个「daemon 绑定 + MCP 可用」的凭证，再谈断言。
+//   在那之前，任何「4 条失败分支已覆盖」的说法都是假的。
+test("#3275 ack_create_request 的错误信封恰好 {error, ok}", async () => {
+  const denied = await call(owner.token, "ack_create_request", { request_id: "cr_fixture_absent", status: "started" });
+  expect(denied.ok).toBe(false);
+  expect(Object.keys(denied).sort()).toEqual(["error", "ok"]);
+});
+
 test("legacy owner and exact bound identity remain supported", async () => {
   expect(db.get("SELECT bound_node_id FROM api_tokens WHERE token_id='owner678_legacy'").bound_node_id).toBeNull();
   for (const token of [legacy, bound]) {
     expect((await call(token, "list_my_children")).ok).toBe(true);
-    expect((await call(token, "list_my_pending_create_requests")).ok).toBe(true);
-    expect((await call(token, "list_my_pending_lifecycle_requests")).ok).toBe(true);
-    expect((await call(token, "get_adopt_request", { request_id: requestId })).ok).toBe(true);
+    // 2026-10-31 —— #3275 批次 2：这两条是 **SSE 重连补偿**的入口（漏了门铃节点会卡死），
+    // 客户端按字段名读；键集从未被钉住。改为 `const` 赋值，顺便让严格口径能数到它们。
+    const pendCreate = await call(token, "list_my_pending_create_requests");
+    expect(pendCreate.ok).toBe(true);
+    expect(Object.keys(pendCreate).sort()).toEqual(["clone_count", "clone_requests", "count", "ok", "requests"]);
+
+    const pendLife = await call(token, "list_my_pending_lifecycle_requests");
+    expect(pendLife.ok).toBe(true);
+    expect(Object.keys(pendLife).sort()).toEqual(["ok", "start_count", "start_requests", "stop_count", "stop_requests"]);
+    // 计数与数组同源：两个 count 必须等于各自数组长度（否则「有 N 条」与「列出来」会分叉）
+    expect(pendLife.stop_count).toBe(pendLife.stop_requests.length);
+    expect(pendLife.start_count).toBe(pendLife.start_requests.length);
+    // 2026-10-31 —— #3275：形状由**一次真实调用**给出（不靠读源码猜）
+    const gotAdopt = await call(token, "get_adopt_request", { request_id: requestId });
+    expect(gotAdopt.ok).toBe(true);
+    // ⚠️ 我第一版按源码猜了 7 个键（binding_request_id / child_alias / child_node_id …）——**全错**。
+    // 真实形状由这次调用给出，12 个键；其中 error 为空、request_id 是这一行自己的 id。
+    // 这是本卡第三次被「读源码猜形状」打回，写进注释免得下一个人再猜：
+    //   行对象整行透传时，源码里看到的字段名是**SQL 的列名**，与对外载荷不是一回事。
+    expect(Object.keys(gotAdopt).sort()).toEqual([
+      "alias", "created_at", "daemon_node_id", "error", "network_id", "node_id",
+      "ok", "request_id", "requested_by", "status", "updated_at", "workdir",
+    ]);
   }
   // An explicit binding does not bypass the network or revocation boundaries.
   expect(await call(crossNetwork, "list_my_children")).toMatchObject({ ok: false, error: "caller_not_a_daemon" });
   const denied = await fetch(`${base}/mcp`, { method: "POST", headers: { Authorization: `Bearer ${revoked}` } });
   expect(denied.status).toBe(401);
-  expect(await call(legacy, "ack_adopt_request", { request_id: requestId, status: "adopted" })).toMatchObject({ ok: true, status: "active" });
+  // 2026-10-31 —— #3275：**成功体也要钉键集**（上面那个循环钉的是错误信封）。
+  // 这四条是 daemon 侧最常被按字段名读的回执；多一个键不会让谁报错，但会改变解析分支。
+  const adopted = await call(legacy, "ack_adopt_request", { request_id: requestId, status: "adopted" });
+  expect(adopted).toMatchObject({ ok: true, status: "active" });
+  expect(Object.keys(adopted).sort()).toEqual(["ok", "status"]);
   expect((await call(legacy, "list_my_children")).children).toContainEqual({ child_node_id: child, alias: child, lifecycle_state: "active", managed: "adopted", binding_request_id: requestId });
+  // 2026-10-31 —— #3275：get_probe_request 的**不存在**分支键集（成功分支需要真实 probe 夹具，
+  // 本文件不造；错误分支同样是契约：客户端按 error 分支，多一个键就会多一个没人知道的分支）
+  const gotProbe = await call(legacy, "get_probe_request", { probe_id: "probe_fixture_absent" });
+  expect(gotProbe.ok).toBe(false);
+  // 实测：错误分支多一个 reason（不是只 {error, ok}）——**又一次由真实调用纠正**
+  expect(Object.keys(gotProbe).sort()).toEqual(["error", "ok", "reason"]);
+  // #3309 分支 —— get_probe_request 的**成功出口**（此前只有不存在分支被钉）。
+  // `putPendingProbeSecret` 是导出的 ⇒ 直接把一条 probe 放进 Map 即可，不需要造真 probe 流程。
+  {
+    const { putPendingProbeSecret } = await import("./probe.js");
+    putPendingProbeSecret({
+      probe_id: "probe_fixture_live", daemon_node_id: daemon, provider_id: "prov_fixture",
+      vendor: "anthropic", base_url: "https://api.anthropic.com", model_name: "m",
+      api_key: `PROBE-SENTINEL-${Date.now()}`, network_id: owner.network_id,
+    });
+    const live = await call(legacy, "get_probe_request", { probe_id: "probe_fixture_live" });
+    // 实测六键。**注意 api_key 在里面** —— 这是本仓唯一一个「读面回传明文密钥」的出口，
+    // 它靠三条约束成立：① 只有目标 daemon 能取（cross-daemon guard）
+    //                    ② 取一次就删（takePendingProbeSecret）
+    //                    ③ 60s TTL
+    // ⇒ 断言里顺带把这三条的可观测面钉住：取走后第二次调用必须回到不存在分支。
+    expect(Object.keys(live).sort()).toEqual(["api_key", "base_url", "model_name", "ok", "probe_id", "vendor"]);
+    expect(live.ok).toBe(true);
+    const again = await call(legacy, "get_probe_request", { probe_id: "probe_fixture_live" });
+    expect(again).toEqual({ ok: false, error: "probe_request_unavailable", reason: "not_found_or_wrong_daemon_or_expired" });
+  }
+
+  // 2026-10-31 —— #3275：get_opencode_catalog_request 的**不存在**分支恰好两键
+  // （与 get_probe_request 的三键不同族 —— 又一次说明「错误信封不是全仓一个形状」）
+  const gotCatalog = await call(legacy, "get_opencode_catalog_request", { request_id: "cat_fixture_absent" });
+  expect(gotCatalog.ok).toBe(false);
+  expect(Object.keys(gotCatalog).sort()).toEqual(["error", "ok"]);
   const stop = await call(owner.token, "stop_node", { node_id: child, network_id: owner.network_id });
+  // #3275 批次 2·f —— stop_node 的外层（实测）。比 start_node 多两个键：
+  // `action` 说明触发的是哪条路径（restart_node 走同一条），`in_flight_at_dispatch` 说明
+  // **下发那一刻**手上还有几条任务 —— 少了它，客户端无法区分「干净停机」与「截断在跑的任务」。
+  expect(Object.keys(stop).sort()).toEqual(["action", "in_flight_at_dispatch", "lifecycle_state", "ok", "request_id"]);
   expect(stop.ok).toBe(true);
-  expect((await call(legacy, "get_stop_request", { request_id: stop.request_id })).ok).toBe(true);
-  expect((await call(legacy, "ack_stop_request", { request_id: stop.request_id, status: "stopped" })).ok).toBe(true);
+  // 2026-10-31 —— #3275 批次 2：get_stop_request 的**成功体**键集（daemon 按字段名读，
+  // 尤其 delete_config / grace_seconds / force 三个决定它要不要删配置）
+  const gotStop = await call(legacy, "get_stop_request", { request_id: stop.request_id });
+  expect(gotStop.ok).toBe(true);
+  expect(Object.keys(gotStop).sort()).toEqual([
+    "action", "child_alias", "child_node_id", "delete_config", "force", "grace_seconds", "ok", "request_id",
+  ]);
+  const stoppedAck = await call(legacy, "ack_stop_request", { request_id: stop.request_id, status: "stopped" });
+  expect(stoppedAck.ok).toBe(true);
+  expect(Object.keys(stoppedAck).sort()).toEqual(["ok", "status"]);   // #3275：成功体键集
   const start = await call(owner.token, "start_node", { node_id: child, network_id: owner.network_id });
+  // start_node 只有四个键：**它没有 in_flight_at_dispatch** ——
+  // 因为「启动时手上还有几条任务」不是一个有意义的问题。两个工具同名不同形，各自量。
+  expect(Object.keys(start).sort()).toEqual(["lifecycle_state", "ok", "request_id"]);
   expect(start.ok).toBe(true);
-  expect((await call(legacy, "get_start_request", { request_id: start.request_id })).ok).toBe(true);
-  expect(await call(legacy, "ack_start_request", { request_id: start.request_id, status: "started", child_pid: 4321 })).toMatchObject({ ok: true, status: "started" });
+  const gotStart = await call(legacy, "get_start_request", { request_id: start.request_id });
+  expect(gotStart.ok).toBe(true);
+  // 成功体：四个固定键 + start_completion_capable；fork_recovery 只在「创建即恢复」路径出现（条件键）
+  expect(Object.keys(gotStart).sort()).toEqual([
+    "child_alias", "child_node_id", "ok", "request_id", "start_completion_capable",
+  ]);
+  const startedAck = await call(legacy, "ack_start_request", { request_id: start.request_id, status: "started", child_pid: 4321 });
+  expect(startedAck).toMatchObject({ ok: true, status: "started" });
+  expect(Object.keys(startedAck).sort()).toEqual(["ok", "status"]);   // #3275：成功体键集
 });
 
 test("ownerless legacy daemon remains supported without rewriting its owner", async () => {
@@ -152,6 +257,11 @@ test("new name-only registration binds once and its holder can refresh with eith
   const result = await call(first.body.token, "report_status", {
     resume_id: "refresh-fixture-session", alias: "refresh_fixture", status: "idle", node_id: "n_refresh_fixture",
   });
+  // #3275 批次 2 —— 同变量口径，形状由一次真实调用给出：
+  //   ["alias","inbox_count","ok","resume_id"]
+  // 少一个 `inbox_count`，客户端就再也不知道「还有几条待办」——而它正是每轮心跳唯一的推送面；
+  // 少一个 `alias`，多网络下的会话就认不出自己是谁。只断言 ok 时，这两个都能被悄悄删掉。
+  expect(Object.keys(result).sort()).toEqual(["alias", "inbox_count", "ok", "resume_id"]);
   expect(result.ok).toBe(true);
   expect(db.get("SELECT bound_node_id FROM api_tokens WHERE token_id=?1", first.body.token_id).bound_node_id).toBe("n_refresh_fixture");
   expect(db.get("SELECT owner_user_id FROM nodes WHERE node_id='n_refresh_fixture'").owner_user_id).toBeNull();

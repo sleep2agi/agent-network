@@ -81,6 +81,11 @@ describe("login / register identify the issued token", () => {
   test("register returns token_id", async () => {
     const r = await call("", "POST", "/api/auth/register", { username: `sess_reg_${Date.now()}`, password: PW });
     expect(r.status).toBe(200);
+    // 2026-10-31 —— #3214：注册成功体的形状从未被钉（只断言了 token_id 的前缀）。
+    // 客户端要拿 token 才能用；多一个键 = 又一处没人读的字段。
+    expect(Object.keys(r.body).sort()).toEqual([
+      "network_id", "network_token", "ok", "token", "token_id", "user",
+    ]);
     expect(r.body.token_id).toMatch(/^tok_/);
     const row = db.get<any>("SELECT token_id, name FROM api_tokens WHERE token_hash = ?1", hashToken(r.body.token));
     expect(row.token_id).toBe(r.body.token_id);
@@ -160,6 +165,8 @@ describe("GET /api/auth/sessions", () => {
     ageToken(dead.token, 40);
     const r = await call(b.token, "GET", "/api/auth/sessions");
     expect(r.status).toBe(200);
+    // 2026-10-31 —— #3214：列表外层键集（内层每行另有断言）
+    expect(Object.keys(r.body).sort()).toEqual(["current_token_id", "idle_timeout_days", "ok", "sessions"]);
     expect(r.body.idle_timeout_days).toBe(30);
     expect(r.body.current_token_id).toBe(b.token_id);
     const ids = r.body.sessions.map((x: any) => x.token_id);
@@ -196,6 +203,9 @@ describe("revoking sessions", () => {
     const other2 = await loginAs("other2");
     const r = await call(keep.token, "POST", "/api/auth/sessions/revoke-others");
     expect(r.status).toBe(200);
+    // 2026-10-31 —— #3214：形状钉住（此前只有值断言）
+    expect(Object.keys(r.body).sort()).toEqual(["kept_token_id", "ok", "revoked"]);
+    expect(Number.isInteger(r.body.revoked)).toBe(true);
     expect(r.body.kept_token_id).toBe(keep.token_id);
     expect(r.body.revoked).toBeGreaterThanOrEqual(2);
     expect((await call(keep.token, "GET", "/api/auth/me")).status).toBe(200);

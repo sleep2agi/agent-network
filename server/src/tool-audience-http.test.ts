@@ -44,6 +44,7 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   upsert_network_secret: { key: "PROBE_KEY" },
   update_provider: { provider_id: "prov_probe" },
   schedule_batch_interval: { schedule_ids: ["sched_probe"], every_seconds: 60 },
+  select_opencode_session_model: { session_id: "ses_probe", model: { providerID: "stub", id: "model" } },
 };
 function fill(schema: any, key: string, ctx: Record<string, unknown>): unknown {
   if (!schema) return "probe";
@@ -117,6 +118,23 @@ describe("every tool is classified", () => {
     expect(registered.filter(n => !TOOL_AUDIENCE[n])).toEqual([]);
     expect(Object.keys(TOOL_AUDIENCE).filter(n => !registered.includes(n))).toEqual([]);
   });
+});
+
+test("create_node source_ref fails MCP validation without minting or enqueueing", async () => {
+  const count = (table: string) => db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`)!.n;
+  const before = [count("node_create_requests"), count("api_tokens")];
+  const base = { daemon_node_id: "daemon_source_fixture", network_id: NET,
+    node_spec: { name: "source-fixture", runtime: "opencode-cli" } };
+  for (const source_ref of ["src_fixture", null, "", {}]) {
+    for (const args of [{ ...base, source_ref }, { ...base, node_spec: { ...base.node_spec, source_ref } }]) {
+      const { json } = await rpc(T.owner, "tools/call", { name: "create_node", arguments: args });
+      const text = String(json.result?.content?.[0]?.text ?? "");
+      expect(json.error?.code === -32602 || /^MCP error -32602/.test(text)).toBe(true);
+    }
+  }
+  expect([count("node_create_requests"), count("api_tokens")]).toEqual(before);
+  const ordinary = await rpc(T.owner, "tools/call", { name: "create_node", arguments: base });
+  expect(JSON.parse(ordinary.json.result.content[0].text).error).toBe("daemon_not_found");
 });
 
 describe("compat replay: nothing callable today disappears from the list", () => {
@@ -217,7 +235,16 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   //   ② 砍掉一批冗长描述里重复的解释性从句（每条约 20–100 B，信息点全部保留）。
   // 实测（含新工具）：all 97 / 86,020 B；node 64 / 64,464 B；user 64 / 59,680 B —— 三个上限**一个都没动**。
   // 下次再加工具，请先合并动作或砍描述，不要直接改这三个数。
+  //
+  // #3294（2026-10-31）：report_status 新增 `build_commit`（节点侧的字节标识）。
+  // 第一次跑就撞上限：node 64,540 > 64,500（+40 B，全部来自那一句 describe）。
+  // 按上面那条规矩**不抬上限**，把描述从
+  //   "Build commit (hex, 7–40), from the packaged build-info.json"（63 字符）
+  // 压到 "Build commit (hex)"（19 字符）⇒ node 64,497 B，余量 **3 B**。
+  // ⚠️ 3 B 不是「刚好」，是**陷阱**：下一个人加一个字段名就会撞墙，而这条测试的失败会
+  //    读成「谁又把描述写长了」。所以下面把余量打出来，余量低于 100 B 时大声说一句。
   const CEILINGS = { node: 64_500, user: 60_500, all: 86_500 } as const;
+  const MARGIN_FLOOR = 100;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
     const user = await listTools(T.owner);
@@ -226,5 +253,14 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
     expect(node.bytes).toBeLessThanOrEqual(CEILINGS.node);
     expect(user.bytes).toBeLessThanOrEqual(CEILINGS.user);
     expect(all.bytes).toBeLessThanOrEqual(CEILINGS.all);
+    // 余量也是读数：只报「没超」时，余量从 400 B 掉到 3 B 这件事是看不见的，
+    // 下一个人撞墙时才知道上限早就被吃干了。
+    const margins = { node: CEILINGS.node - node.bytes, user: CEILINGS.user - user.bytes, all: CEILINGS.all - all.bytes };
+    console.log(`margin B — node ${margins.node}; user ${margins.user}; all ${margins.all}`);
+    for (const [role, m] of Object.entries(margins)) {
+      if (m < MARGIN_FLOOR) {
+        console.log(`::warning::${role} 的 tools/list 余量只剩 ${m} B（< ${MARGIN_FLOOR}）—— 下一次加字段会先撞这里，请先砍描述或合并动作`);
+      }
+    }
   });
 });

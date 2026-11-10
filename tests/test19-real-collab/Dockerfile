@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y curl python3 make g++ && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+COPY contracts /app/contracts
 COPY server/ server/
 COPY agent-node/ agent-node/
 

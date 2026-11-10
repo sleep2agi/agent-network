@@ -70,6 +70,15 @@ export function serializeProfileForConfigJson(
     ...((normalized.codexVersion ?? profile.codexVersion)
       ? { codexVersion: normalized.codexVersion ?? profile.codexVersion }
       : {}),
+    // #3418 —— 这一格是**运行时写的**（agent-node 的对账 marker），不是用户配置。
+    // 但它必须活过一次 profile 保存：启动器每次 `anet node start` 都会走 saveProfile →
+    // serializeProfileForConfigJson，而这里是**白名单**，不在名单上的键会被静默丢掉。
+    // 实测（2026-11-05）：agent-node 把 marker 清空成 "" 想触发对账，
+    // 下一次启动前被启动器保存 profile 时丢掉 ⇒ agent-node 读到 marker=undefined
+    // ⇒ shouldReconcile=false ⇒ 永远不自愈。空串也要**原样保留**（它是有效信号，不是"没配"）。
+    ...(typeof (normalized.opencodeConfiguredModelAtLastOpen ?? profile.opencodeConfiguredModelAtLastOpen) === "string"
+      ? { opencodeConfiguredModelAtLastOpen: normalized.opencodeConfiguredModelAtLastOpen ?? profile.opencodeConfiguredModelAtLastOpen }
+      : {}),
     ...((normalized.opencodeMode ?? profile.opencodeMode)
       ? { opencodeMode: normalized.opencodeMode ?? profile.opencodeMode }
       : {}),

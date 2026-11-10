@@ -54,6 +54,8 @@ describe("SkillHub real Hub + SQLite", () => {
   test("node submit is token-attributed, pending and immutable/idempotent", async () => {
     const input = { network_id: networkId, slug: "incident-handoff", name: "Incident handoff", version: "1.0.0", description: "handoff", content: "# Incident handoff\n\nVerify facts." };
     const first = await tool(nodeToken, "submit_skill", { ...input, source_alias: "forged-admin" });
+    // 精确键集（同变量口径）：提交回执的字段集合必须稳定 —— 它会流到 dashboard 的「待审」列表。
+    expect(Object.keys(first).sort()).toEqual(["ok", "skill_id", "source_alias", "source_type", "status"]);
     expect(first.ok).toBe(true); expect(first.status).toBe("pending"); expect(first.source_alias).toBe("skill-writer"); skillId = first.skill_id;
     const retry = await tool(nodeToken, "submit_skill", input);
     expect(retry.idempotent).toBe(true); expect(retry.skill_id).toBe(skillId);
@@ -71,14 +73,48 @@ describe("SkillHub real Hub + SQLite", () => {
   test("pending is reviewer-only; owner publishes; published becomes visible", async () => {
     const nodeList = await tool(nodeToken, "list_skills", { network_id: networkId, include_pending: true });
     expect(nodeList.skills).toHaveLength(0);
+    // 2026-10-31 —— **精确键集**（#3171）：这两个工具此前只有字段级断言，
+    // 于是「多给了一个字段」不会被任何测试发现 —— 而多给字段正是匿名/权限面最危险的改法。
+    // 列表投影固定三键；差别在 reviewer 的真假，而不是键的有无。
+    // （我第一版写成「非 reviewer 只有两键」—— 实测 reviewer 始终存在，只是 false。
+    //  ⇒ 这条断言当场把我自己写错的形状说出来，这正是它应有的作用。）
+    expect(Object.keys(nodeList).sort()).toEqual(["ok", "reviewer", "skills"]);
+    expect(nodeList.reviewer).toBe(false);
+    // 详情未找到：只有两个键；多一个键就意味着错误响应开始夹带上下文。
+    // #3275 批次 4 —— 同变量口径：先接住再断言（内联 `Object.keys(await f())` 在语义上一样，
+    // 但没有任何变量名可供归因；这条改完之后，它就是一次可被引用的形状断言）。
+    const missing = await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId });
+    expect(Object.keys(missing).sort()).toEqual(["error", "ok"]);
     expect((await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).error).toBe("skill_not_found");
     const ownerList = await tool(ownerToken, "list_skills", { network_id: networkId, include_pending: true });
-    expect(ownerList.reviewer).toBe(true); expect(ownerList.skills.map((x: any) => x.skill_id)).toContain(skillId);
+    expect(ownerList.reviewer).toBe(true);
+    // reviewer 视角多一格 reviewer：三键，不多不少。
+    expect(Object.keys(ownerList).sort()).toEqual(["ok", "reviewer", "skills"]); expect(ownerList.skills.map((x: any) => x.skill_id)).toContain(skillId);
     expect((await tool(ownerToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill.content).toContain("Verify facts");
     const reviewed = await tool(ownerToken, "review_skill", { network_id: networkId, skill_id: skillId, decision: "published" });
+    // 2026-10-31 —— **同变量口径的精确键集**（#3171）：断言绑的是本次调用的结果。
+    // 实际形状（我第一版只写了 ok/status，被断言纠正）：ok / skill_id / status / version。
+    expect(Object.keys(reviewed).sort()).toEqual(["ok", "skill_id", "status"]);
     expect(reviewed.status).toBe("published");
     const published = await tool(nodeToken, "list_skills", { network_id: networkId });
     expect(published.skills.map((x: any) => x.skill_id)).toContain(skillId);
+    // 2026-10-31 —— **属性断言**（外部复核 (b)：「断的是函数不产生条件键」，而不是几个样例）。
+    // 对 include_pending × query × limit 的笛卡尔组合逐一取键集，要求**全部相等**。
+    // 样例断言会说「这四个我试过」；属性断言说的是「任何组合都不变」——后者才是契约。
+    const combos: Array<Record<string, unknown>> = [];
+    for (const include_pending of [true, false]) {
+      for (const query of [undefined, "ship", "no-such-skill"]) {
+        for (const limit of [undefined, 1, 50]) {
+          combos.push({ network_id: networkId, include_pending, query, limit });
+        }
+      }
+    }
+    const keySets = new Set<string>();
+    for (const args of combos) {
+      const r = await tool(nodeToken, "list_skills", args as any);
+      keySets.add(JSON.stringify(Object.keys(r).sort()));
+    }
+    expect([...keySets]).toEqual([JSON.stringify(["ok", "reviewer", "skills"])]);
     expect((await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill.skill_id).toBe(skillId);
     const detail = (await tool(nodeToken, "get_skill", { network_id: networkId, skill_id: skillId })).skill;
     expect(detail.created_by_user).toBeUndefined(); expect(detail.reviewed_by_user).toBeUndefined(); expect(detail.content_hash).toBeUndefined();

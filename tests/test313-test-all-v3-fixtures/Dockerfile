@@ -10,6 +10,7 @@ RUN apt-get update \
 COPY agent-network/ /app/agent-network/
 RUN cd /app/agent-network && npm install && npm run build && npm install -g .
 
+COPY contracts /app/contracts
 COPY server/ /app/server/
 RUN cd /app/server && bun install
 

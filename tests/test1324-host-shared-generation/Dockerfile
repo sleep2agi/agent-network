@@ -13,6 +13,9 @@ RUN npm install -g --prefix /opt/v1 opencode-ai@1.18.34 --no-audit --no-fund \
  && readlink -f /opt/v1/bin/opencode > /v1-bin
 RUN echo "v2=$(cat /v2-bin) v1=$(cat /v1-bin)"
 WORKDIR /opt/node_modules/@sleep2agi/agent-node
+COPY contracts /opt/node_modules/@sleep2agi/contracts
+# contracts/*.ts re-export ../server/src/contracts/*: ship that next to the copied contracts
+COPY server/src/contracts /opt/node_modules/@sleep2agi/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY agent-node .

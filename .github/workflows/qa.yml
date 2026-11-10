@@ -11,23 +11,14 @@ name: anet QA (v0)
 
 on:
   pull_request:
+    # labeled：给 PR 打上 `full-qa` 标签即触发一次全量矩阵（见 changes.full）。
+    types: [opened, synchronize, reopened, labeled]
     paths:
-      - 'tests/test1091-tag-status/**'
-      - 'tests/test1109-supervisor-identity/**'
-      - 'tests/test1120-copresence-auth/**'
-      - 'tests/test1138-human-queue/**'
-      - 'tests/test1150-owned-steer-contract/**'
-      - 'tests/test1155-followup-receipts/**'
-      - 'tests/test1156-owned-followup-hub/**'
-      - 'tests/test1163-human-inbox/**'
+      - 'tests/**'
       - 'server/src/human-inbox.ts'
-      - 'tests/test1162-owned-followup-controller/**'
-      - 'tests/test1113-node-profile/**'
-      - 'tests/test961-download-platforms/**'
       - 'server/**'
       - 'docs/stale-issue-review.md'
       - 'scripts/check-doc-claims.py'
-      - 'tests/test846-doc-claims/**'
       - 'agent-network/**'
       - 'agent-node/**'
       # deploy/ 曾不在此列 —— 只改部署配置的 PR 因此绕过整个 QA 套件,
@@ -36,41 +27,13 @@ on:
       - 'tests/qa-*/**'
       - 'scripts/qa.sh'
       - 'scripts/check-test-margin.py'
-      - 'tests/test1627-test-margin/**'
       - 'scripts/sync-pinned-versions.sh'
       - 'docs/qa/**'
       - '.github/workflows/qa.yml'
-      - 'tests/test725-agent-node-unit-ci/**'
-      - 'tests/test556-node-tmux-format-locale/**'
-      - 'tests/test1755-rules-file-e2e/**'
-      - 'tests/test9763-team-skills-e2e/**'
-      - 'tests/test745-agent-network-unit-ci/**'
-      - 'tests/test505-tmux-socket-isolation/**'
-      - 'tests/test533-tmux-format-locale/**'
-      - 'tests/test746-setup-bun-pin/**'
-      - 'tests/test751-codex-copresence-windows/**'
-      - 'tests/test1212-windows-real-codex-gate/**'
       - '.github/workflows/windows-real-codex-gate.yml'
-      - 'tests/test1191-windows-steer-contract/**'
-      - 'tests/test1220-codex-tui-client-health/**'
-      - 'tests/test-codex-appserver-watchdog/**'
-      - 'tests/test-codex-copresence-first-start/**'
-      - 'tests/test812-paired-resolve-timeout/**'
       # test812 从 docs/node-liveness-criterion.md 抽出 tmux 命令实跑。
       # 只改那份文档也必须重跑这道门。
-      - 'tests/test812-tmux-target-semantics/**'
       - 'docs/node-liveness-criterion.md'
-      - 'tests/test1183-sync-pinned-dryrun/**'
-      - 'tests/test1193-side-thread-contract/**'
-      - 'tests/test1195-side-thread-hub-contract/**'
-      - 'tests/test1195-side-thread-hub-security/**'
-      - 'tests/test1195-side-thread-hub-race/**'
-      - 'tests/test1200-side-thread-command-transport/**'
-      - 'tests/test1199-btw-cross-layer-contract/**'
-      - 'tests/test1203-btw-production-e2e/**'
-      - 'tests/test1181-codex-durable-poll/**'
-      - 'tests/test1204-btw-production-wiring/**'
-      - 'tests/test1271-daemon-start-node/**'
       # A test directory belongs here exactly when CI executes it — otherwise
       # editing the test cannot re-run the gate that runs it. The four below are
       # reached through scripts/qa.sh L1_TESTS and the e2e workflow; the other
@@ -78,205 +41,40 @@ on:
       # would only look like coverage.
       - 'tests/qa-ut-01-auth-tokens/**'
       - 'tests/qa-ut-02-password-dict/**'
-      - 'tests/test292-e2e-ok-assertions/**'
-      - 'tests/test520-dashboard-attachment-read/**'
-      - 'tests/test584-dashboard-codex-delivery/**'
-      - 'tests/test-goal-cli/**'
-      - 'tests/test652-admin-network-list/**'
-      - 'tests/test653-batch-workdir/**'
-      - 'tests/test696-human-low-value-reply/**'
-      - 'tests/test702-primary-network/**'
-      - 'tests/test647-rest-explicit-columns/**'
-      - 'tests/test230-opencode-sender-label/**'
-      - 'tests/test228-opencode-inbox-concurrency/**'
-      - 'tests/test651-opencode-timeout-abort/**'
-      - 'tests/test656-capacity-retry/**'
-      - 'tests/test2028-vendor-replay-gate/**'
-      - 'tests/test667-project-dir-warn/**'
-      - 'tests/test668-grok-working-status/**'
-      - 'tests/test672-claude-auth-abort/**'
-      - 'tests/test612-start-admission/**'
       - 'tests/qa-board673-claude-process-auth/**'
-      - 'tests/test198-from-alias/**'
-      - 'tests/test8-runtime/**'
       - 'tests/qa-hub-10-network-scope-regressions/**'
-      - 'tests/test1287-sender-fixtures/**'
       - '.github/workflows/human-sender-fixtures.yml'
       - '.github/workflows/frontdoor-docs-fixtures.yml'
-      - 'tests/test17-user-journey/**'
-      - 'tests/test12-claude-channel/**'
-      - 'tests/test11-lifecycle/**'
-      - 'tests/test-npm-security/**'
-      - 'tests/test648-probe-ip-pin/**'
       - 'tests/qa-frontdoor-docs/**'
-      - 'tests/test13-multi-channel/**'
       - 'tests/qa-517-mcp-write-scope/**'
-      - 'tests/test203-alias-crossover-repro/**'
-      - 'tests/test583-dashboard-chat-idempotency/**'
-      - 'tests/test573-codex-turn-reconcile/**'
-      - 'tests/test520-ack-inbox-docs/**'
-      - 'tests/test199-agent-node-from-session/**'
       - 'tests/qa-ut-03-auth-validate/**'
-      - 'tests/test656-claude-sdk-tool-aliases/**'
-      - 'tests/test654-dashboard-managed-launch/**'
-      - 'tests/test657-claude-native-version-pin/**'
-      - 'tests/test236-dashboard-codex-goal/**'
-      - 'tests/test292-e2e-hard-gate/**'
-      - 'tests/test686-rest-shape-golden/**'
-      - 'tests/test765-batch-runtime-gate/**'
-      - 'tests/test766-bunx-preflight/**'
-      - 'tests/test1241-feishu-commhub-routing/**'
-      - 'tests/test1362-create-node-pending/**'
       # test823 是这道 L1 并发闸门自己的回归,跑的是真的 scripts/qa.sh
       # (把 docker/npm 换成 PATH 上的桩)。改它必须能重跑跑它的 workflow。
-      - 'tests/test823-l1-concurrency-cap/**'
-      - 'tests/test798-server-unit-ci/**'
       # test798 的镜像 COPY 了 test601 的 race-worker.ts,
       # 且 server/src/scheduled-tasks-http.test.ts 会执行它做「两个真 Hub 抢同一 occurrence」——
       # 只改那个 worker 的 PR 不该跳过这道门(codex P2,核过属实)
-      - 'tests/test601-hub-scheduled-tasks/**'
-      - 'tests/test224-grok-preview-security/**'
-      - 'tests/test597-dashboard-slash-namespace/**'
-      - 'tests/test679-task-trace/**'
       - 'tests/qa-daemon-lifecycle-e2e/**'
       - 'tests/qa-create-node-workdir/**'
       - 'tests/qa-runtime-readiness/**'
-      - 'tests/test571-lifecycle-safety/**'
-      - 'tests/test626-daemon-adoption/**'
-      - 'tests/test627-adopted-lifecycle/**'
-      - 'tests/test658-codex-adopt-stop/**'
-      - 'tests/test674-binding-generation/**'
-      - 'tests/test-agent-team-whoami/**'
-      - 'tests/test710-late-task-replies/**'
-      - 'tests/test705-bridge-epipe/**'
-      - 'tests/test703-codex-turn-receipts/**'
-      - 'tests/test678-daemon-token-owner/**'
-      - 'tests/test689-session-token-ownership/**'
-      - 'tests/test717-password-network/**'
-      - 'tests/test696-task-sender/**'
       - 'tests/node-caller-identity/**'
-      - 'tests/test629-lifecycle-read/**'
       - 'tests/qa-rfc024-config-apply/**'
       - 'tests/qa-rfc027-stop-delete/**'
       - 'tests/lib/**'
       - 'docs-site/**'
       - 'docs/doc-source-pins-baseline.txt'
       - 'scripts/check-doc-source-pins.py'
-      - 'tests/test831-doc-source-pins/**'
-      - 'tests/test813-grok-mcp-readiness/**'
       # 🔴 加这一条的直接原因:#1017 改了 test225 的夹具,27 个 check 全绿,
       #    而 CI 从头到尾没有执行过这个套件。job 存在、挂上、会被触发是三件事,
       #    漏的就是第三件。
-      - 'tests/test225-grok-preview-package-live/**'
-      - 'tests/test225-node-stop-convergence/**'
-      - 'tests/test233-grok-main-integration/**'
-      - 'tests/test234-grok-profile-disclosure/**'
-      - 'tests/test235-grok-mcp-outbound-only/**'
-      - 'tests/test219-grok-copresence/**'
-      - 'tests/test605-grok-startup-model-label/**'
-      - 'tests/test735-hub-daemon-rebuild/**'
-      - 'tests/test2124-hub-launcher-env-scrub/**'
-      - 'tests/test660-explicit-prod-db-optin/**'
-      - 'tests/test661-explicit-bootstrap-db/**'
-      - 'tests/test683-hub-lifecycle-watcher/**'
       - 'tests/qa-hub-17-rename-canonicalization/**'
-      - 'tests/test1210-actual-target-contract/**'
       - 'tests/qa-hub-19-login-guard/**'
-      - 'tests/test635-daemon-private-state/**'
-      - 'tests/test643-transient-hub-legacy-repair/**'
-      - 'tests/test671-task-runtime-evidence-hub/**'
-      - 'tests/test688-owner-gated-schedule-hub/**'
-      - 'tests/test629-mcp-schema-policy/**'
-      - 'tests/test1280-desktop-user-push/**'
       - 'tests/qa-anet-daemon-cmd/**'
       - 'tests/qa-hub-16-rest-task-api/**'
       - 'tests/qa-node-04-codex-app-server-reply-routing/**'
-      - 'tests/test599-skillhub/**'
-      - 'tests/test600-public-skillhub/**'
-      - 'tests/test659-codex-appserver-activity-timeout/**'
-      - 'tests/test3-security/**'
-      - 'tests/test336-feishu-bridge-wire/**'
-      - 'tests/test344-ack-transport-zod/**'
-      - 'tests/test467-headless-bootstrap/**'
-      - 'tests/test527-ext-validator-dedup/**'
-      - 'tests/test602-scheduled-misfire/**'
-      - 'tests/test604-scheduled-task-edit/**'
-      - 'tests/test606-node-start-help/**'
-      - 'tests/test607-health-upload-limits/**'
-      - 'tests/test609-dashboard-chat-doc-path/**'
-      - 'tests/test637-database-url-guard/**'
-      - 'tests/test2123-hub-postgres-ladder/**'
-      - 'tests/test-status-read-cache/**'
-      - 'tests/test-req-abandoned-column/**'
-      - 'tests/test649-token-cli/**'
-      - 'tests/test651-init-no-token-prompt/**'
-      - 'tests/test5-auth/**'
-      - 'tests/test610-opencode-clean-test-workspace/**'
-      - 'tests/test611-cli-boolean-flags/**'
-      - 'tests/test612-visible-inbox-skip/**'
-      - 'tests/test613-codex-dead-endpoint/**'
-      - 'tests/test614-rest-single-network/**'
-      - 'tests/test615-network-name/**'
-      - 'tests/test617-feishu-ws-readiness/**'
-      - 'tests/test618-claude-vendor-env/**'
-      - 'tests/test509-node-clone/**'
-      - 'tests/test621-test384-layer-isolation/**'
-      - 'tests/test624-task-cursor-pagination/**'
-      - 'tests/test625-explicit-env-crlf/**'
-      - 'tests/test632-honest-sse-recovery/**'
-      - 'tests/test633-doctor-locale/**'
-      - 'tests/test166-task-diagnostics/**'
-      - 'tests/test365-nonimage-read-attachments/**'
-      - 'tests/test585-codex-runtime-singleflight/**'
-      - 'tests/test586-codex-successor-reconcile/**'
-      - 'tests/test596-goal-loop-docs/**'
-      - 'tests/test638-server-aggregate-isolation/**'
-      - 'tests/test681-explicit-lifecycle/**'
-      - 'tests/test689-owner-schedule-agent/**'
-      - 'tests/test690-scheduled-run-terminal/**'
-      - 'tests/test1274-scheduled-work-outcome/**'
-      - 'tests/test1278-scheduled-backoff/**'
-      - 'tests/test1279-requirement-wake/**'
-      - 'tests/test1284-outcome-guidance/**'
       - '.github/workflows/scheduled-work-outcome.yml'
       - '.github/workflows/scheduled-backoff.yml'
       - '.github/workflows/scheduled-requirement-wake.yml'
       - '.github/workflows/scheduled-outcome-guidance.yml'
-      - 'tests/test1112-scheduled-execution-clock/**'
-      - 'tests/test1113-task-activity/**'
-      - 'tests/test693-agent-local-upload/**'
-      - 'tests/test697-codex-default-model/**'
-      - 'tests/test698-atomic-peer-reply/**'
-      - 'tests/test519-claude-code-peer-reply/**'
-      - 'tests/test750-codex-copresence-onecommand/**'
-      - 'tests/test720-codex-commhub-tool-approval/**'
-      - 'tests/test734-codex-paginated-rollout-guard/**'
-      - 'tests/test738-codex-fork-on-resume-failure/**'
-      - 'tests/test739-codex-bin-pin/**'
-      - 'tests/test-codex-external-appserver/**'
-      - 'tests/test1225-opencode-copresence-onecommand/**'
-      - 'tests/test543-opencode-v2-copresence/**'
-      - 'tests/test827-opencode-v2-hub/**'
-      - 'tests/test828-opencode-v2-mcp/**'
-      - 'tests/test829-opencode-create/**'
-      - 'tests/test906-daemon-catalog/**'
-      - 'tests/test906-v1-checkpoint/**'
-      - 'tests/test1194-v1-shared-feasibility/**'
-      - 'tests/test1207-v1-shared-read/**'
-      - 'tests/test1208-v1-host-admission/**'
-      - 'tests/test1210-v1-host-launcher/**'
-      - 'tests/test1212-v1-scoped-mcp/**'
-      - 'tests/test1214-v1-borrowed-admission/**'
-      - 'tests/test1216-v1-borrowed-backend/**'
-      - 'tests/test1219-v1-borrowed-turns/**'
-      - 'tests/test1224-v1-borrowed-cli/**'
-      - 'tests/test1226-v1-borrowed-launch/**'
-      - 'tests/test1226-v1-borrowed-tui/**'
-      - 'tests/test1236-v1-shared-capture/**'
-      - 'tests/test1245-v1-migration-plan/**'
-      - 'tests/test1246-v1-safe-topology/**'
-      - 'tests/test1267-v1-safe-dual-directory/**'
-      - 'tests/test1271-v1-safe-retention-request/**'
       - 'agent-node/src/runtime/opencode-copresence/v1-safe-retention-request.ts'
       - '.github/workflows/v1-safe-retention-request.yml'
       - '.github/workflows/v1-safe-topology.yml'
@@ -288,49 +86,8 @@ on:
       - '.github/workflows/v1-borrowed-cli.yml'
       - '.github/workflows/v1-borrowed-native-turns.yml'
       - '.github/workflows/v1-borrowed-backend-core.yml'
-      - 'tests/test906-daemon-provider-management/**'
-      - 'tests/test906-provider-collect/**'
-      - 'tests/test906-provider-create/**'
-      - 'tests/test1053-scoped-secrets/**'
-      - 'tests/test1075-node-secrets/**'
-      - 'tests/test907-hub-provider/**'
-      - 'tests/test906-hub-upgrade-preflight/**'
-      - 'tests/test832-opencode-v2-registry/**'
-      - 'tests/test1324-host-shared-generation/**'
-      - 'tests/test1326-host-shared-create/**'
-      - 'tests/test1327-shared-create-native/**'
-      - 'tests/test2017-node-session-control/**'
-      - 'tests/test1293-opencode-server-reuse/**'
-      - 'tests/test1313-host-shared-observer/**'
-      - 'tests/test883-v2-portable-client/**'
-      - 'tests/test2014-session-background/**'
-      - 'tests/test894-launch-window/**'
-      - 'tests/test894-v1-runtime/**'
-      - 'tests/test894-v1-acp-session/**'
-      - 'tests/test828-opencode-v2-policy/**'
-      - 'tests/test833-user-avatar/**'
-      - 'tests/test1178-codex-upgrade-recovery/**'
-      - 'tests/test736-pm2-fleet-rebuild/**'
-      - 'tests/test185-external-schedules/**'
-      - 'tests/test594-codex-login-health/**'
-      - 'tests/test631-private-config-permissions/**'
-      - 'tests/test646-config-node-id-precedence/**'
       - 'agent-node/src/cli.ts'
-      - 'tests/test630-file-download-header-auth/**'
-      - 'tests/test634-windows-secret-guidance/**'
-      - 'tests/test516-anet-secret-masking/**'
-      - 'tests/test516-node-delete-hub-row/**'
-      - 'tests/test522-node-delete-locate-stop/**'
-      - 'tests/test528-codex-adopt/**'
-      - 'tests/test532-codex-menu/**'
-      - 'tests/test561-node-menu/**'
-      - 'tests/test562-node-ls-all/**'
-      - 'tests/test562b-node-remote/**'
-      - 'tests/test536-codex-resume/**'
-      - 'tests/test623-feishu-scrub-health/**'
-      - 'tests/test30-v0.8-auth-deprecation/**'
       - 'deploy/hub/hub-daemon.sh'
-      - 'tests/test626-grok-model-switch-fallback/**'
       - '.github/scripts/ci-docs-only.py'
   # #2967 —— 主干**不再**重复跑整套矩阵：
   # squash 合并的树和刚跑绿的 PR head 是同一份内容，146 个 job 在 10 分钟前已经知道结果。
@@ -363,6 +120,7 @@ jobs:
       suite_skip: ${{ steps.scope.outputs.suite_skip }}
       docs_only: ${{ steps.plan.outputs.docs_only }}
       skip: ${{ steps.plan.outputs.skip }}
+      full: ${{ steps.full.outputs.full }}
       l1_only: ${{ steps.plan.outputs.l1_only }}
       # #2800 —— 「发版提交」在 main 上不再触发重型矩阵。
       # 现场（2026-10-27 23:45）：一条只改版本号+发布说明的 chore(release) 提交
@@ -437,6 +195,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # 2026-11-09 —— PR 分层（admin 拍板「砍」）：
+      # 一个只改 1 个文件的 PR 曾挂 185 个 check、QA 单次 ~29 分钟，排队拖慢整个迭代。
+      # 普通 PR 只跑快速层（三套 unit + doc claims/pins + release-sync dry run + test-lib-meta）；
+      # 重型矩阵（hub semantics 95 分片、Docker e2e、copresence/lifecycle 等）只在下面三种情况跑：
+      #   · 夜间 schedule / workflow_dispatch（非 pull_request 事件）
+      #   · PR 带 `full-qa` 标签（打标签即触发）
+      # 被跳过的 job 显示为 skipped，不占 runner。
+      - id: full
+        name: Full-matrix switch (non-PR event or `full-qa` label)
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$EVENT" != "pull_request" ] || printf '%s' "$LABELS" | grep -q '"full-qa"'; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build + run test1183-sync-pinned-dryrun
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
@@ -574,7 +350,7 @@ jobs:
     # bun install,不进 L1 的 5 分钟预算,独立 job(同 server unit 的形状)。
     name: rules-file e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test1755-rules-file-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test1755-rules-file-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -596,7 +372,7 @@ jobs:
     # 已有同名目录不覆盖、两个 codex home 各链各的,以及拿掉安装调用后链接不再出现。
     name: team skills e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test9763-team-skills-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test9763-team-skills-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -619,7 +395,7 @@ jobs:
     # 后断言必红)。冷构建含两次 bun install,不进 L1 的 5 分钟预算,独立 job(同 test1755 的形状)。
     name: node run-log e2e (Docker, real hub + agent-node)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-node-logs-e2e"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-node-logs-e2e"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -636,6 +412,8 @@ jobs:
         run: docker run --rm anet-qa-node-logs-e2e
 
   qa-claude-code-node-id:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     # claude-code-cli 节点的 MCP 通道(.anet/node-server.js)report_status 要带配置里的
     # node_id —— 不带,hub 的 nodes 表就没有这个节点,定时任务 / 桌面端选择器选不到它。
     # 真 hub + 与 dist 同一条 bun build 的 node-server 产物,含「修复前产物」正控。
@@ -662,7 +440,7 @@ jobs:
     # the 5-minute L1 job. Docs-only PRs skip it.
     name: claude processWithClaude auth (Docker, real hub)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-board673-claude-process-auth"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-board673-claude-process-auth"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -685,7 +463,7 @@ jobs:
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: create-node workdir e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-workdir"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-workdir"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -709,7 +487,7 @@ jobs:
     # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
     name: codex co-presence stop → start e2e (Docker, real hub + tmux + codex)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-codex-copresence-stop-start"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-codex-copresence-stop-start"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -732,7 +510,7 @@ jobs:
     # 共存路径的依赖预检输出就是「走了共存」的证据。冷构建同 qa-create-node-workdir(~4 分钟)—— 独立 job。
     name: create-node codex co-presence e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-codex-copresence"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-codex-copresence"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -757,7 +535,7 @@ jobs:
     # 镜像多装 codex+tmux,冷构建比 qa-create-node-codex-copresence 略长 —— 独立 job。
     name: daemon stop/delete codex co-presence e2e (Docker, real hub + daemon + tmux)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-daemon-stop-codex-copresence"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-daemon-stop-codex-copresence"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -779,7 +557,7 @@ jobs:
     # 并被 agent-node 的解析器读成 600000ms、0 收、3600001 拒。冷构建同 qa-create-node-codex-copresence —— 独立 job。
     name: create-node timeout unit e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-timeout-ms"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-create-node-timeout-ms"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -803,7 +581,7 @@ jobs:
     # --network none:网络探测只经容器内假 CONNECT 代理。冷构建同 qa-create-node-workdir —— 独立 job。
     name: daemon runtime readiness e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-runtime-readiness"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:qa-runtime-readiness"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -831,7 +609,7 @@ jobs:
     # 冷构建含三次 bun install + 两次 npm pack(同 qa-create-node-workdir 的形状),进不了 L1 —— 独立 job。
     name: node --remote e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test562b-node-remote"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test562b-node-remote"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -851,6 +629,8 @@ jobs:
           docker rm -f "run-anet-test562b" >/dev/null 2>&1 || true
           exit $rc
   test626-daemon-adoption:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: daemon adoption (Docker, real Hub + manual node)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -866,6 +646,8 @@ jobs:
           docker run --rm --init --network none anet-test626-e2e
 
   test674-binding-generation:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Binding generation (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -875,6 +657,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test674
 
   test-agent-team-whoami:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Agent team identity (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -884,6 +668,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-team-whoami
 
   test678-daemon-token-owner:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Daemon token ownership (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -893,6 +679,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test678
 
   test710-late-task-replies:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Late task replies (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -902,6 +690,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test710
 
   node-caller-identity:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Node caller identity (Docker, SQLite + PostgreSQL HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -911,6 +701,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity
 
   node-caller-identity-compat:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Node caller identity compat (Docker, agent-node .110 and .121)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -920,6 +712,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-node-caller-identity-compat
 
   test658-codex-adopt-stop:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Codex adoption and stop (Docker, two layouts)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -931,6 +725,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test658-http
 
   test703-codex-turn-receipts:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Codex interrupted-turn receipts (Docker)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -940,6 +736,8 @@ jobs:
       - run: docker run --rm --init --cpus=2 --network none anet-test703
 
   test627-adopted-lifecycle:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: adopted lifecycle (Docker, real Hub + private tmux)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -949,6 +747,8 @@ jobs:
       - run: docker run --rm --init --network none anet-test627
 
   test629-lifecycle-read:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: lifecycle read permissions (Docker, real HTTP)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -966,7 +766,7 @@ jobs:
     # 进不了 L1 的 5 分钟串行预算 —— 独立 job。
     name: lifecycle safety e2e (Docker, real hub + daemon)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test571-lifecycle-safety"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test571-lifecycle-safety"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1022,7 +822,7 @@ jobs:
   recovered-suites-a:
     name: recovered suites A (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-a"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-a"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -1070,7 +870,7 @@ jobs:
   recovered-suites-b:
     name: recovered suites B (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-b"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-b"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 16
     steps:
@@ -1118,7 +918,7 @@ jobs:
   recovered-suites-c:
     name: recovered suites C (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-c"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-c"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -1159,7 +959,7 @@ jobs:
   recovered-suites-security:
     name: recovered suites · security last (Docker)
     needs: [changes, recovered-suites-a, recovered-suites-b, recovered-suites-c]
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-security"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:recovered-suites-security"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -1198,7 +998,7 @@ jobs:
   qa:
     name: ${{ matrix.shard == '' && 'L0 (report-only)' || format('L1 (report-only, shard {0})', matrix.shard) }}
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     # #2800 —— 墙钟地板是「L0+L1 单 job 串行 87 个套件 ≈25.8 分钟」，并行度再高也压不下去。
     # 拆成 1 个 L0 + 3 个 L1 分片：qa.sh 的 QA_L1_SHARD 按索引取模切片，
@@ -1348,7 +1148,7 @@ jobs:
   test225-known-failures:
     name: test225 known-failure ratchet (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:test225-known-failures"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test225-known-failures"')) }}
     runs-on: ubuntu-latest
     # 完整跑一次 ~8 分钟(装依赖 + 起容器内 Hub + 真 tmux attach)。
     timeout-minutes: 25
@@ -1428,7 +1228,7 @@ jobs:
   grok-green-suites:
     name: grok suites (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # 🔴 改成矩阵的理由是量出来的，不是「应该更快」。
@@ -1507,7 +1307,7 @@ jobs:
     #    （改已有 job 的名字会动分支保护里的 required check，风险更高，所以新开。）
     name: hub daemon fail-closed (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:hub-daemon-gate"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:hub-daemon-gate"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1581,7 +1381,7 @@ jobs:
     # 名字必须说得出它管什么。
     name: private config write boundary (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:private-config-gates"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:private-config-gates"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -1644,7 +1444,7 @@ jobs:
     # 名字说得出它管什么：这四个套件守的是**鉴权 / 凭据下发 / 泄漏清洗**这一族。
     name: auth + secret hygiene (Docker)
     needs: changes
-    if: ${{ !cancelled() && !contains(needs.changes.outputs.skip, '"job:security-orphan-gates"') }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:security-orphan-gates"')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1875,7 +1675,7 @@ jobs:
     # 名字说得出它管什么：这三条守的是**生产 DB 边界与 hub 生命周期**。
     name: prod-db boundary + hub lifecycle (Docker)
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -1940,7 +1740,7 @@ jobs:
     # 它们的代码内容在上一个 PR 里已经跑过同一套矩阵；再跑一遍只会把 runner 池占满，
     # 让 release-gate 排在后面（2026-10-27 实测卡了 6 分钟）。
     # #2800 —— 本次改动与 hub 套件全不相干时整块跳过（否则空矩阵会让 GitHub 报错）。
-    if: ${{ !cancelled() && needs.changes.outputs.release_only != 'true' && needs.changes.outputs.suite_count != '0' }}
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && needs.changes.outputs.release_only != 'true' && needs.changes.outputs.suite_count != '0') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -2151,6 +1951,8 @@ jobs:
           if-no-files-found: ignore
 
   windows-codex-copresence:
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' }}
     name: Windows Codex co-presence native smoke
     runs-on: windows-latest
     timeout-minutes: 10

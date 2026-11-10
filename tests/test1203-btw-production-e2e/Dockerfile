@@ -9,6 +9,7 @@ ENV TEST1203_SOURCE_COMMIT=$TEST1203_SOURCE_COMMIT
 LABEL org.opencontainers.image.revision=$TEST1203_SOURCE_COMMIT
 
 WORKDIR /repo
+COPY contracts /repo/contracts
 COPY agent-node/package.json agent-node/package.json
 COPY agent-node/src agent-node/src
 COPY tests/lib tests/lib

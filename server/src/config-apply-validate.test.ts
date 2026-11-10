@@ -14,6 +14,8 @@ import {
   computeApplyMode,
   readOpencodeSnapshotFlags,
   readConfigUpdateCapable,
+  configUpdateCapabilityDivergence,
+  readSystemdSupervision,
   validatePatch,
   narrowChannelsPatch,
 } from "./config-apply-validate";
@@ -467,5 +469,71 @@ describe("readConfigUpdateCapable", () => {
     expect(readConfigUpdateCapable(null)).toBeNull();
     // 非布尔一律 unknown，不能当成 false —— 否则会给没上报的节点发警告
     expect(readConfigUpdateCapable('{"config_update_capable":"false"}')).toBeNull();
+  });
+});
+
+describe("readConfigUpdateCapable — restart_supervised 优先", () => {
+  test("prefers the named key when both are present", () => {
+    expect(readConfigUpdateCapable('{"restart_supervised":true,"config_update_capable":false}')).toBe(true);
+    expect(readConfigUpdateCapable('{"restart_supervised":false,"config_update_capable":true}')).toBe(false);
+  });
+  test("falls back to the legacy key for old nodes", () => {
+    expect(readConfigUpdateCapable('{"config_update_capable":true}')).toBe(true);
+  });
+  test("non-boolean named value falls through to legacy, then unknown", () => {
+    expect(readConfigUpdateCapable('{"restart_supervised":"true","config_update_capable":false}')).toBe(false);
+    expect(readConfigUpdateCapable('{"restart_supervised":"true"}')).toBeNull();
+  });
+});
+
+// 2026-10-31 —— 「被遮住的值」必须能被看见。
+// readConfigUpdateCapable 一旦选定 restart_supervised，config_update_capable 就再也读不到了；
+// 而「两个一致」与「有一个被遮住了」在调用方看来完全一样 —— 这是隐式回退的通用形状。
+describe("configUpdateCapabilityDivergence — 双写字段的分歧本身就是读数", () => {
+  test("reports both values when they disagree, in either direction", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true,"config_update_capable":false}'))
+      .toEqual({ named: true, legacy: false });
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":false,"config_update_capable":true}'))
+      .toEqual({ named: false, legacy: true });
+  });
+  test("stays quiet when they agree — that is the documented normal case", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true,"config_update_capable":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":false,"config_update_capable":false}')).toBeNull();
+  });
+  test("no divergence to report when only one field is present or shapes are unusable", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"config_update_capable":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":"true","config_update_capable":false}')).toBeNull();
+    expect(configUpdateCapabilityDivergence("")).toBeNull();
+    expect(configUpdateCapabilityDivergence("not json")).toBeNull();
+    expect(configUpdateCapabilityDivergence(null)).toBeNull();
+    expect(configUpdateCapabilityDivergence(undefined)).toBeNull();
+  });
+  test("accepts an already-parsed object (nodes may hand us either form)", () => {
+    expect(configUpdateCapabilityDivergence({ restart_supervised: true, config_update_capable: false }))
+      .toEqual({ named: true, legacy: false });
+  });
+});
+
+
+// 2026-10-31 —— #3168：节点自报的三态托管判定。
+// 「它说自己没人拉」与「它说有人拉」处置相反；而「不知道」两边都不能当。
+describe("readSystemdSupervision", () => {
+  test("reads the three declared states verbatim", () => {
+    expect(readSystemdSupervision(JSON.stringify({ systemd_supervision: "supervised" }))).toBe("supervised");
+    expect(readSystemdSupervision('{"systemd_supervision":"not_supervised"}')).toBe("not_supervised");
+    expect(readSystemdSupervision({ systemd_supervision: "unknown" })).toBe("unknown");
+  });
+
+  test("missing field ⇒ null, which is NOT the same as unknown", () => {
+    // 缺失 = 这一版还不会报（老节点）；unknown = 会报但这次判不出来。
+    expect(readSystemdSupervision('{"config_update_capable":false}')).toBeNull();
+    expect(readSystemdSupervision("")).toBeNull();
+    expect(readSystemdSupervision("not json")).toBeNull();
+  });
+
+  test("rejects values outside the declared set (a typo must not silently mean 'supervised')", () => {
+    expect(readSystemdSupervision('{"systemd_supervision":"yes"}')).toBeNull();
+    expect(readSystemdSupervision('{"systemd_supervision":true}')).toBeNull();
   });
 });

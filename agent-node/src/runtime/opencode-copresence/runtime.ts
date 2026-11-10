@@ -49,11 +49,13 @@ import { Agent } from "undici";
 import { fetchOpenCodeJson } from "./http";
 import type { SessionBackgroundControl } from "./session-background";
 import { openV1BorrowedAdmission, type V1BorrowedAdmissionOptions } from "./v1-borrowed-admission";
+import { redactUpstreamText } from "./redact-upstream-text.js";
 import {
   bindQueueOwner,
   isSessionGoneError,
   ownerLeftDecision,
   ownerLeftText,
+  queueOwnerLabel,
   type QueueOwnerBinding,
 } from "./queue-ownership";
 export { fetchOpenCodeJson } from "./http";
@@ -89,10 +91,22 @@ export class OpenCodeCopresenceTimeoutError extends Error {
   readonly timeoutMs: number;
   readonly aborted: boolean;
   readonly userReplyText: string;
+  /**
+   * 2026-10-31 —— **谁结束了这次等待**。
+   *
+   *   local   我方到点放弃（自己的 deadline / 自己 abort）
+   *   remote  对方超时或断开（连接被对端中止）
+   *   unknown 说不清
+   *
+   * 没有它时，「我方到点」与「别人中止」被抹成同一个 name ——
+   * 于是任何「谁违约」的统计都会系统性偏向一方，而偏向方向由实现决定、不由事实决定。
+   */
+  readonly endedBy: "local" | "remote" | "unknown";
   constructor(
     phase: "admission" | "reply",
     timeoutMs: number,
     outcome: "running" | "aborted" | "abort_failed" = "running",
+    endedBy: "local" | "remote" | "unknown" = "local",
   ) {
     const budget = formatOpenCodeTimeout(timeoutMs);
     const knob = "可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调整（单位 ms，0 = 不设上限）";
@@ -120,6 +134,7 @@ export class OpenCodeCopresenceTimeoutError extends Error {
     this.phase = phase;
     this.timeoutMs = timeoutMs;
     this.aborted = stopped === "aborted";
+    this.endedBy = endedBy;
     this.userReplyText = userReplyText;
   }
 }
@@ -183,12 +198,32 @@ export interface OpenCodeCopresenceSession {
   readonly sessionId: string;
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
+  readonly variantConfigCapable?: boolean;
+  readonly variantConfigTestOwned?: boolean;
+  variantConfigReadback?(): Promise<import("./v2-model-selection").V2ModelSelection | undefined>;
   /** #2014, V2 only: semantic Ctrl+B, bound to this live handle generation. */
   readonly backgroundControl?: SessionBackgroundControl;
   /** V2 only. The model the TUI session is running, `provider/id`. Read-only. */
   selectedModel?(): Promise<string | undefined>;
+  /** Read the native model reference only from this handle's bound V2 session. */
+  selectedSessionModel?(sessionId: string): Promise<import("./v2-model-selection").V2ModelSelection | undefined>;
+  /** Internal V2 fork primitive only; callers must authorize the source and target. */
+  forkSession?(sourceSessionId: string): Promise<import("./v2-fork").V2ForkResult>;
+  /** #4099: bound to this exact live session; unavailable if no atomic idle gate. */
+  selectSessionModel?(sessionId: string, model: import("./v2-model-selection").V2ModelSelection): Promise<import("./v2-model-selection").V2SelectionResult>;
+  /** V2 only. The agent the bound session is running ("build"/"plan"/...). Read-only. */
+  selectedSessionAgent?(sessionId: string): Promise<string | undefined>;
+  /** V2 only. Switch the bound session's agent (POST /api/session/<id>/agent). */
+  selectSessionAgent?(sessionId: string, agent: string): Promise<import("./agent-config-apply").V2AgentResult>;
+  /** #3952 —— 会话累计用量（调用方转增量后再上报）。 */
+  usageSnapshot?(): Promise<{ input?: number; output?: number; cache?: { read?: number } } | undefined>;
   /** V2 only. Switch the live session. The caller writes node config. */
   setSelectedModel?(model: string): Promise<void>;
+  /** V2 only, stock builds: idle-gated thinking-level write with readback. */
+  setSelectedVariant?(variant: string | null): Promise<import("./v2-model-selection").V2ModelSelection>;
+  /** V2 only. 把一条新指令**并进正在跑的那一轮**（delivery:"steer"），不进队列。
+   *  必须是显式动作：steer 会改写进行中的回合，半新半旧比排队更糟。 */
+  steer?(prompt: string): Promise<void>;
   notify(message: string, timeoutMs?: number, sender?: string): Promise<void>;
   submit(
     prompt: string,
@@ -965,7 +1000,31 @@ export async function openVettedOpenCodeCopresence(
           // #1879 ③ —— 排队项的归属在**开始等**的那一刻就定下来：
           // 后面无论是超时还是「负责人离开」，都要能说清是谁的那条任务。
           const queueOwner = bindQueueOwner({ taskId: owner?.taskId, sender, sinceMs: Date.now() });
-          await waitUntilSessionIdle(url, password, created.id, admissionBudgetMs, request, evidence?.onAdmissionBusy, queueOwner);
+          // 2026-10-31 —— **入口先落一行，不等结果**。
+          //
+          // 任何诊断通道，如果它的消费者可能在我们写之前就消失，那就不是通道。
+          // 这条任务会因为「排队没排上」「进程重启」「客户端先断」而永远不产生结果日志；
+          // 只有在入口写过的这一行，才能让人事后按**时间窗**反查「有进无出」的那些。
+          //
+          // 与超时日志的分工：入口这行说明「它来过」，超时那行说明「它怎么死的」。
+          // 只有后者时，日志里只剩“死了的”，没有“来过的” —— 差值读不出来。
+          const budgetLabel = budgetMs > 0 ? `${budgetMs}ms` : "unbounded";
+          log(`[opencode-copresence] task accepted task=${owner?.taskId ?? "-"} budget=${budgetLabel}`);
+          // 2026-10-31 —— 排队失败要有**自己的日志行**，与入口行成对。
+          //   入口行说明「它来过」，这一行说明「它没排上、等了多久、是谁的」。
+          //   没有这一行时，日志里 只有「accepted」而没有对应的结局 ⇒
+          //   「有进无出」的差值读不出来（而那条正是运维唯一能反查的形状）。
+          // ⚠️ 不改文案、不改错误类型：只加一行日志，异常原样抛出。
+          const admissionStartedAt = Date.now();
+          try {
+            await waitUntilSessionIdle(url, password, created.id, admissionBudgetMs, request, evidence?.onAdmissionBusy, queueOwner);
+          } catch (admissionErr) {
+            const waited = Date.now() - admissionStartedAt;
+            log(`[opencode-copresence] task admission-expired task=${owner?.taskId ?? "-"} `
+              + `waited=${waited}ms cap=${admissionBudgetMs > 0 ? `${admissionBudgetMs}ms` : "unbounded"} `
+              + `owner=${queueOwnerLabel?.(queueOwner) ?? "-"} err=${(admissionErr as Error)?.name ?? "Error"}`);
+            throw admissionErr;
+          }
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
@@ -993,7 +1052,10 @@ export async function openVettedOpenCodeCopresence(
           for (;;) {
           const messageId = createOpenCodeAscendingMessageId();
           if (deadline > 0 && Date.now() >= deadline) {
-            throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+            // 这里已经过了 waitUntilSessionIdle（准入），是**回复阶段**的整体截止。
+            // 原来标成 "admission" 会让运维分不清“没排上队”和“跑太久没回来”——
+            // 两者处置完全不同（前者改投别的节点，后者看这一轮的产出）。
+            throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
           }
           let message: any;
           const turnTimeoutMs = deadline > 0 ? Math.max(1, deadline - Date.now()) : 0;
@@ -1024,6 +1086,10 @@ export async function openVettedOpenCodeCopresence(
             // aborted before that reply goes out.
             if (turnSignal?.aborted
               && (error?.name === "TimeoutError" || error?.name === "AbortError")) {
+              // TimeoutError = 我方 deadline 到了；AbortError = 被动中止（可能是别人）。
+              const endedBy: "local" | "remote" | "unknown" =
+                error?.name === "TimeoutError" ? "local"
+                  : error?.name === "AbortError" ? "remote" : "unknown";
               // Abort only when the live turn is provably ours. Unreadable
               // history (this GET's own failure is often the same stall) and
               // an undecidable queue must not cancel whoever is using the
@@ -1033,17 +1099,17 @@ export async function openVettedOpenCodeCopresence(
               const decision = timedOutTurnAbortDecision(history, messageId);
               if (decision === "not_submitted") {
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission did not land`);
-                throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+                throw new OpenCodeCopresenceTimeoutError("admission", budgetMs, "running", endedBy);
               }
               if (decision !== "abort") {
                 if (borrowed) unknownWrite = true;
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; leaving the session running (history unread or the live turn is not ours)`);
-                throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
+                throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, "running", endedBy);
               }
               const aborted = await abortOwnTurn(created.id);
               if (borrowed && !aborted) unknownWrite = true;
               warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission landed — session ${aborted ? "aborted" : "abort failed"}`);
-              throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed");
+              throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed", endedBy);
             }
             if (borrowed) unknownWrite = true;
             throw error;
@@ -1101,7 +1167,9 @@ export async function openVettedOpenCodeCopresence(
               });
               continue;
             }
-            warn(`[opencode-copresence] provider error for this turn: ${raw}`);
+            // 上游自由文本进日志前先脱敏：对外摘要收紧了，对内出口也不能原样保留。
+            // 注意 capacityRetryDecision 仍用未脱敏的 raw（它要匹配上游措辞），只在这里脱敏。
+            warn(`[opencode-copresence] provider error for this turn: ${redactUpstreamText(raw)}`);
             const partial = (message?.parts ?? []).some((p: any) => p?.type === "text" && typeof p.text === "string" && p.text.trim())
               ? parseMessageReply(message)
               : "";
@@ -1212,7 +1280,18 @@ export function wrapSharedCopresenceSession(
     get isRunning() { return core.isRunning; },
     get backgroundControl() { return core.backgroundControl; },
     ...(core.selectedModel ? { selectedModel: () => core.selectedModel!() } : {}),
+    get variantConfigCapable() { return core.variantConfigCapable === true && core.isRunning; },
+    get variantConfigTestOwned() { return core.variantConfigTestOwned === true; },
+    ...(core.variantConfigReadback ? { variantConfigReadback: () => core.variantConfigReadback!() } : {}),
+    ...(core.forkSession ? { forkSession: (sessionId: string) => core.forkSession!(sessionId) } : {}),
+    ...(core.selectSessionModel ? { selectSessionModel: (sessionId: string, model: import("./v2-model-selection").V2ModelSelection) => core.selectSessionModel!(sessionId, model) } : {}),
+    ...(core.selectedSessionAgent ? { selectedSessionAgent: (id: string) => core.selectedSessionAgent!(id) } : {}),
+    ...(core.selectSessionAgent ? { selectSessionAgent: (id: string, agent: string) => core.selectSessionAgent!(id, agent) } : {}),
+    ...(core.usageSnapshot ? { usageSnapshot: () => core.usageSnapshot!() } : {}),
     ...(core.setSelectedModel ? { setSelectedModel: (model: string) => core.setSelectedModel!(model) } : {}),
+    ...(core.setSelectedVariant ? { setSelectedVariant: (variant: string | null) => core.setSelectedVariant!(variant) } : {}),
+    ...(core.selectedSessionModel ? { selectedSessionModel: (id: string) => core.selectedSessionModel!(id) } : {}),
+    ...(core.steer ? { steer: (prompt: string) => core.steer!(prompt) } : {}),
     notify: (message, timeoutMs, sender) => core.notify(message, timeoutMs, sender),
     submit: (prompt, timeoutMs, sender, evidence) => core.submit(prompt, timeoutMs, sender, evidence),
     async close(mode?: { restart?: boolean }) {
@@ -1273,6 +1352,7 @@ export async function openOpenCodeCopresenceRuntime(
     }
   }
   if (!binaryAttestation) throw new Error("opencode copresence version probe returned no accepted binary");
+  if (binaryAttestation.provenance === "anet-test-only-artifact" && opts.sharedServer) throw new Error("TEST-ONLY artifact requires owned server");
 
   const childEnv = backend.buildChildEnv({
     workDir,
@@ -1282,6 +1362,7 @@ export async function openOpenCodeCopresenceRuntime(
     credentialMode: "runtime",
     persistAuth: backend.generation === "v1",
   });
+  if (binaryAttestation.provenance === "anet-test-only-artifact") childEnv.ANET_VARIANT_TEST_ONLY = "1";
   let core: OpenCodeCopresenceSession | undefined;
   let cleaned = false;
   let instructions: OpenCodeCommhubInstructionsHandle | undefined;
