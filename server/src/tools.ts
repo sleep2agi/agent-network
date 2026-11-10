@@ -1,3 +1,4 @@
+import { allStatusCacheKey, cachedAllStatus } from "./all-status-cache.js";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { enqueueBroadcast } from "./broadcast-fanout.js";
 import { selectHumanInboxIds } from "./human-inbox.js";
@@ -1009,6 +1010,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // #2293 —— 这台机器上 OpenCode serve 的 loopback 端点（`http://127.0.0.1:PORT`）。
         // 客户端「OpenCode Server」行此前只能写「端口未上报」。只收 loopback URL，不收密码。
         opencode_server: z.string().max(200).optional().catch(undefined),
+        // 2026-11-10 —— 起这份 agent-node 的 **anet CLI 版本**（`2.3.0-preview.226` 这种形态）。
+        // 🔴 这一格必须写进 schema：zod 的 object 默认**丢掉未知键** ⇒ 不写在这里，节点
+        //    报上来也会被静默剥掉，而 /api/nodes 的投影读到的永远是 null。这个坑在本仓库
+        //    已经吃过两次（#3294 的 build_commit、#2293 的 opencode_catalog），都是
+        //    「字段明明发了、hub 上永远是 null」。`.catch(undefined)` 与邻居一致：
+        //    形状不对只丢这一格，绝不拒掉整份心跳。
+        // ⚠️ 不要复用 `anet_version`：那是节点自身配置里的静态占位值，含义不同、还有别的代码在读。
+        launched_by_cli_version: z.string().max(64).optional().catch(undefined),
         config_update_capable: z.boolean().optional(),
         peer_reply_inbox_capable: z.literal(true).optional(),
         side_thread_capability: z.object({
@@ -1995,10 +2004,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ filter_status, filter_server, filter_alias, network_id: netId }) => {
       const readScope = resolveReadScope(netId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
-      console.log(`[${ts()}] hub → get_all_status${filter_status ? ": filter=" + filter_status : ""}${filter_alias ? " alias=" + filter_alias.slice(0, 80) : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
+      const cacheKey = allStatusCacheKey(readScope, [filter_status ?? null, filter_server ?? null, filter_alias ?? null]);
 
       // Round-2/4 review ③: stale-marking moved to startStaleSessionSweeper()
       // (background timer, ~60s cadence). Read path no longer fires UPDATE.
+      // Members restricted to granted agents always read fresh: a grant/revoke must
+      // take effect on the next call, not up to TTL later.
+      const { text, hit } = cachedAllStatus(readScope.agentRestriction ? null : cacheKey, () => {
       let sql = "SELECT * FROM sessions WHERE 1=1";
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, readScope, { alias: "alias", nodeId: "node_id" });
@@ -2033,22 +2045,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const summary = db.all(summarySql, ...summaryParams);
 
       const filtered = !!(filter_status || filter_server || aliases.length > 0);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: true,
-              sessions,
-              summary,
-              summary_scope: filtered
-                ? "every session in the read scope — NOT narrowed by the filters applied to `sessions`"
-                : "every session in the read scope",
-              sessions_returned: sessions.length,
-            }),
-          },
-        ],
-      };
+      return JSON.stringify({
+        ok: true,
+        sessions,
+        summary,
+        summary_scope: filtered
+          ? "every session in the read scope — NOT narrowed by the filters applied to `sessions`"
+          : "every session in the read scope",
+        sessions_returned: sessions.length,
+      });
+      });
+      console.log(`[${ts()}] hub → get_all_status${hit ? " (cached)" : ""}${filter_status ? ": filter=" + filter_status : ""}${filter_alias ? " alias=" + filter_alias.slice(0, 80) : ""}${readScope.networkId ? " net=" + readScope.networkId.slice(0, 12) : ""}`);
+      return { content: [{ type: "text" as const, text }] };
     }
   );
 

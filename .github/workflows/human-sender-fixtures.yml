@@ -1,6 +1,7 @@
 name: Original human sender fixtures
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'tests/test8-runtime/**'
       - 'tests/qa-hub-10-network-scope-regressions/**'
@@ -15,6 +16,8 @@ on:
       - 'agent-node/**'
       - 'agent-network/**'
       - '.github/workflows/human-sender-fixtures.yml'
+  schedule:
+    - cron: '20 19 * * *'
   workflow_dispatch:
 permissions:
   contents: read
@@ -27,6 +30,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   sender-fixtures:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-qa')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

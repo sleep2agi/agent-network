@@ -18,6 +18,8 @@ import {
   agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
   opencodeExactPairInstallCommand,
+  pairInfo,
+  PAIRED_AGENT_NETWORK_VERSION,
   pairedAgentNodeResolution,
   resolveAgentNodePackageEntrypointFromPath,
   validateAgentNodePackageEntrypoint,
@@ -225,5 +227,24 @@ describe("OpenCode agent-node release pairing", () => {
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
+  });
+});
+
+
+// `anet pair` 印出来的必须是**这对常量本身**，且必须点明「tag 不是配对判据」——
+// 这条测试存在的理由：客户端/文档的单边 @preview 提示已经真实造成过半对节点。
+describe("pairInfo (anet pair)", () => {
+  test("prints the exact pair constants and the exact install command", () => {
+    const text = pairInfo();
+    expect(text).toContain(`@sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`);
+    expect(text).toContain(PAIRED_AGENT_NODE_SPEC);
+    expect(text).toContain(opencodeExactPairInstallCommand());
+  });
+  test("tells opencode-cli operators that npx is disabled and tags are not the pair judgement", () => {
+    const text = pairInfo();
+    expect(text).toContain("自动 npx 已被禁用");
+    expect(text).toContain("tag 不是配对判据");
+    // 非 opencode 场景不塞这一段：说多说少都要有理由
+    expect(pairInfo(false)).not.toContain("自动 npx 已被禁用");
   });
 });

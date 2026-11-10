@@ -80,6 +80,21 @@ const USERNAME = "opencode";
 const HISTORY_PAGE_LIMIT = 200;
 const HISTORY_MAX_PAGES = 25;
 const POLL_INTERVAL_MS = 250;
+/**
+ * History read timeout. `opencode serve` is single-threaded: while a turn runs a
+ * model/tool step, `GET …/message?limit=200` can take >10 s. The former fixed
+ * 10 s abort meant the bridge never saw the turn finish and the node stayed
+ * "working" with an empty output (TMA客户端欧 / TM测试基建欧, 2026-11-09).
+ * ANET_OPENCODE_HISTORY_TIMEOUT_MS overrides; clamped to 1 s–10 min.
+ */
+export function historyReadTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.ANET_OPENCODE_HISTORY_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 1_000 && raw <= 600_000 ? Math.trunc(raw) : 60_000;
+}
+/** Poll delay after `failures` consecutive history read failures: 250 ms, doubling, capped at 2 s. */
+export function historyPollDelayMs(failures: number): number {
+  return failures <= 0 ? POLL_INTERVAL_MS : Math.min(POLL_INTERVAL_MS * 2 ** Math.min(failures, 8), 2_000);
+}
 
 /**
  * #3071 —— 超时不等于结果丢失。
@@ -440,7 +455,7 @@ async function readEntriesAfter(
   const newerFirst: OpenCodeV2Entry[] = [];
   let path = `/api/session/${sessionId}/message?order=desc&limit=${HISTORY_PAGE_LIMIT}`;
   for (let page = 0; page < HISTORY_MAX_PAGES; page++) {
-    const body = await fetchOpenCodeJson(url, password, path, {}, 10_000);
+    const body = await fetchOpenCodeJson(url, password, path, {}, historyReadTimeoutMs());
     const data: OpenCodeV2Entry[] = Array.isArray(body?.data) ? body.data : [];
     for (const entry of data) {
       if (entry?.id === messageId) return newerFirst.reverse();
@@ -636,7 +651,12 @@ export async function openVettedOpenCodeV2Copresence(
       return result;
     };
     const readVariantSelection = async () => {
-      const body = await variantRequest(`/api/session/${sessionId}`);
+      // `variantRequest` pins the TEST-BUILD identity (it throws on a stock server),
+      // so the capability readback must use the plain scoped request there. Without
+      // this split a stock node reports opencode_variant_config_capable=false even
+      // when the catalog exposes variants for the current model.
+      const read = variantTestBuild ? variantRequest : scopedRequest;
+      const body = await read(`/api/session/${sessionId}`);
       if (!isV2SessionScope(body, sessionId, directory)) return undefined;
       const explicit = readV2ModelSelection(body);
       if (explicit) return explicit;
@@ -644,7 +664,7 @@ export async function openVettedOpenCodeV2Copresence(
       // Resolve ONLY the native directory default, never the profile hint, a
       // guessed first catalog row or a startup reconciliation/model mutation.
       if (!sharedTestBuild || body.data.model !== undefined) return undefined;
-      const fallback = await variantRequest("/api/model/default");
+      const fallback = await scopedRequest("/api/model/default");
       if (fallback?.location?.directory !== directory) return undefined;
       const selected = readV2ModelSelection({ data: { model: fallback.data } });
       return selected ? { ...selected, variant: selected.variant ?? "default" } : undefined;
@@ -668,6 +688,9 @@ export async function openVettedOpenCodeV2Copresence(
       },
     });
     let agentSwitching = false;
+    // Turns accepted but not yet settled. A variant applies to the NEXT turn, so writing
+    // it while a turn of ours is queued/running would silently change that turn.
+    let inFlight = 0;
     const session: OpenCodeCopresenceSession = {
       url,
       sessionId,
@@ -681,16 +704,17 @@ export async function openVettedOpenCodeV2Copresence(
         return session.isRunning ? result : { status: "unknown", reason: "verification_failed" };
       } } : {}),
       attachScriptPath,
-      get variantConfigCapable() { return variantTestBuild && session.isRunning; },
+      get variantConfigCapable() { return session.isRunning; },
       // Historical interface name: identified TEST-ONLY build, NOT Server ownership.
       get variantConfigTestOwned() { return variantTestBuild; },
       async variantConfigReadback() {
-        if (!variantTestBuild || !session.isRunning || !await testIdentityCurrent()) return undefined;
+        if (!session.isRunning) return undefined;
+        if (variantTestBuild && !await testIdentityCurrent()) return undefined;
         try {
           const selected = await readVariantSelection();
           if (!selected) return undefined;
           const start = performance.now();
-          const catalog = await variantRequest("/api/model");
+          const catalog = await scopedRequest("/api/model");
           const age = performance.now() - start;
           if (!session.isRunning || !Number.isFinite(age) || age < 0 || age > 5000 || !catalogSupportsVariants(catalog, directory, selected)) return undefined;
           const final = await readVariantSelection();
@@ -787,6 +811,34 @@ export async function openVettedOpenCodeV2Copresence(
         const tokens = (data as any)?.tokens;
         return tokens && typeof tokens === "object" ? tokens : undefined;
       },
+      /** Thinking-level write for stock (non-test) builds.
+       *
+       * Narrower than the test-build controller on purpose: it refuses while any of OUR
+       * turns is queued/running (the variant would apply to that turn), writes the whole
+       * model ref because the server replaces it, and always reads back — a mismatch
+       * throws instead of acking success.
+       *
+       * Known limit (documented, not hidden): OpenCode exposes no session busy flag, so a
+       * human turn started in the TUI at the same moment is not detectable here. The write
+       * is therefore best-effort, not a proven-atomic switch.
+       */
+      async setSelectedVariant(variant: string | null) {
+        if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
+        if (inFlight > 0) throw new Error("variant_busy");
+        const body = await scopedRequest(`/api/session/${sessionId}`);
+        const current = readV2ModelSelection(body);
+        if (!current) throw new Error("OpenCode v2 session scope unavailable");
+        const model = { providerID: current.providerID, id: current.id,
+          ...(variant === null || variant === "default" ? {} : { variant }) };
+        await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/model`, {
+          method: "POST", body: JSON.stringify({ model }),
+        }, 10_000);
+        const updated = await scopedRequest(`/api/session/${sessionId}`);
+        const after = readV2ModelSelection(updated);
+        const wanted = model.variant ?? "default";
+        if (!after || (after.variant ?? "default") !== wanted) throw new Error("OpenCode v2 session variant did not change");
+        return after;
+      },
       async setSelectedModel(modelRef: string) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
         const parsed = parseModelRef(modelRef);
@@ -847,13 +899,19 @@ export async function openVettedOpenCodeV2Copresence(
           evidence?.onSubmitted?.();
           let delivered = false;
           let misses = 0;
+          let readFailures = 0;
           while (Date.now() < deadline) {
             if (!session.isRunning) throw new Error("OpenCode v2 serve exited while the network turn was pending");
             let after: OpenCodeV2Entry[] | null = null;
             try {
               after = await readEntriesAfter(url, password, sessionId, messageId);
+              readFailures = 0;
             } catch (error: any) {
-              warn(`[opencode-copresence] v2 history read failed (will retry): ${error?.message ?? error}`);
+              readFailures += 1;
+              // A busy serve fails every read; one line per failure flooded the log every ~10 s.
+              if (readFailures === 1 || readFailures % 10 === 0) {
+                warn(`[opencode-copresence] v2 history read failed (will retry, #${readFailures}): ${error?.message ?? error}`);
+              }
             }
             if (after) {
               misses = 0;
@@ -920,7 +978,7 @@ export async function openVettedOpenCodeV2Copresence(
                 misses = 0;
               }
             }
-            await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+            await new Promise((r) => setTimeout(r, historyPollDelayMs(readFailures)));
           }
           if (!delivered) {
             // Still queued behind a (human) turn: withdraw it so it can never
@@ -956,6 +1014,7 @@ export async function openVettedOpenCodeV2Copresence(
           throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
           }
         });
+        inFlight += 1;
         const observed = operation.catch((error: any) => {
           if (shared && /ECONNREFUSED|ECONNRESET|UND_ERR_SOCKET|EPIPE/.test(error?.message ?? "")) {
             sharedDisconnectedAt = Date.now();
@@ -963,6 +1022,7 @@ export async function openVettedOpenCodeV2Copresence(
           throw error;
         });
         queue = observed.then(() => undefined, () => undefined);
+        void observed.finally(() => { inFlight = Math.max(0, inFlight - 1); }).catch(() => {});
         return observed;
       },
       async close(mode?: { restart?: boolean }) {

@@ -3,6 +3,8 @@ FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /opt/node_modules/@sleep2agi/agent-node
 COPY contracts /opt/node_modules/@sleep2agi/contracts
+# contracts/*.ts re-export ../server/src/contracts/*: ship that next to the copied contracts
+COPY server/src/contracts /opt/node_modules/@sleep2agi/server/src/contracts
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY agent-node .

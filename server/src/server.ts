@@ -4904,6 +4904,26 @@ return Bun.serve({
           return new Map<string, number>();
         }
       })();
+      // The node 密钥 page gates on node_secrets_capable, which nodes report in
+      // nodes.config_snapshot (not a sessions column). Without projecting it here the
+      // app never saw it and fell back to the runtime version — null for claude-code
+      // nodes — so a capable node (e.g. claude-code-cli on agent-network ≥ .219) was
+      // shown "upgrade required". Only emitted when true: other rows keep their bytes.
+      const nodeSecretsCapable = (() => {
+        const ids = isLight ? [] : [...new Set(rows.map((r: any) => r.node_id).filter((v: unknown): v is string => typeof v === "string" && v.length > 0))];
+        const out = new Set<string>();
+        for (let i = 0; i < ids.length; i += 500) {
+          const chunk = ids.slice(i, i + 500);
+          try {
+            const found = db.all<{ node_id: string; config_snapshot: string | null }>(
+              `SELECT node_id, config_snapshot FROM nodes WHERE node_id IN (${chunk.map((_, j) => `?${j + 1}`).join(",")})`, ...chunk);
+            for (const r of found) {
+              try { if (JSON.parse(r.config_snapshot || "{}")?.node_secrets_capable === true) out.add(r.node_id); } catch { /* malformed snapshot: not capable */ }
+            }
+          } catch { /* projection is best-effort; never fail /api/status */ }
+        }
+        return out;
+      })();
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
@@ -4960,6 +4980,7 @@ return Bun.serve({
           skills_capable: s.skills_capable === 1,
           files_capable: s.files_capable === 1,
           logs_capable: s.logs_capable === 1,
+          ...(s.node_id && nodeSecretsCapable.has(s.node_id) ? { node_secrets_capable: true } : {}),
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {
@@ -7080,6 +7101,11 @@ return Bun.serve({
         let opencodeGeneration: "v1" | "v2" | null = null;
         let opencodeMode: string | null = null;
         let opencodeServer: string | null = null;
+        // 2026-11-10 —— 起这台节点的 anet CLI 版本。**声明在 `if (snap)` 外面**：
+        // 下面的投影对每一行都会求值，块内 `let` 会让部署后的 /api/nodes 直接抛
+        // "launchedByCliVersion is not defined"（#4150-Build 的 opencodeAgents 踩过同一次）。
+        // null = 节点没报（老节点 / 不是 CLI 起的，如 daemon adopt 出来的子节点）。
+        let launchedByCliVersion: string | null = null;
         const snap = r.config_snapshot;
         // #4150-Build — declared outside the `if (snap)` block: the projection below is
         // evaluated for every row, and a block-scoped `let` here made /api/nodes throw
@@ -7087,6 +7113,9 @@ return Bun.serve({
         let opencodeAgents: string[] | null = null;
         let opencodeAgentsSeenAt: string | null = null;
         let opencodeAgentCurrent: string | null = null;
+        // 与 GET /api/nodes/:id/config 保持同一口径：列表里也要能读到「能不能切 agent」，
+        // 否则两个端点对同一台节点会给出不一致的能力结论。
+        let opencodeAgentConfigCapable = false;
         if (snap) {
           let parsed: any = null;
           try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
@@ -7118,10 +7147,17 @@ return Bun.serve({
           if (typeof rawAgentCurrent === "string" && rawAgentCurrent.length > 0 && rawAgentCurrent.length <= 200) {
             opencodeAgentCurrent = rawAgentCurrent;
           }
+          opencodeAgentConfigCapable = parsed?.opencode_agent_config_capable === true;
           const flags = parsed?.flags;
           if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
           if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
+          // 2026-11-10 —— 只做投影：节点报了就给出来，没报就是 null（两种成因见上面的注释）。
+          // 形状再校验一遍：schema 那层已经限了 64 字符，但库里的历史行不受 schema 管。
+          const rawLaunchedBy = parsed?.launched_by_cli_version;
+          if (typeof rawLaunchedBy === "string" && rawLaunchedBy.length > 0 && rawLaunchedBy.length <= 64) {
+            launchedByCliVersion = rawLaunchedBy;
+          }
         }
         // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
         // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
@@ -7142,12 +7178,14 @@ return Bun.serve({
           opencode_catalog: opencodeCatalog,
           opencode_agents: opencodeAgents,
           opencode_agent_current: opencodeAgentCurrent,
+          opencode_agent_config_capable: opencodeAgentConfigCapable,
           opencode_agents_seen_at: opencodeAgentsSeenAt,
           // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
           opencode_catalog_seen_at: opencodeCatalogSeenAt,
           opencode_generation: opencodeGeneration,
           opencode_mode: opencodeMode,
           opencode_server: opencodeServer,
+          launched_by_cli_version: launchedByCliVersion,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
