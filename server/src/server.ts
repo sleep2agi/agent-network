@@ -7101,6 +7101,11 @@ return Bun.serve({
         let opencodeGeneration: "v1" | "v2" | null = null;
         let opencodeMode: string | null = null;
         let opencodeServer: string | null = null;
+        // 2026-11-10 —— 起这台节点的 anet CLI 版本。**声明在 `if (snap)` 外面**：
+        // 下面的投影对每一行都会求值，块内 `let` 会让部署后的 /api/nodes 直接抛
+        // "launchedByCliVersion is not defined"（#4150-Build 的 opencodeAgents 踩过同一次）。
+        // null = 节点没报（老节点 / 不是 CLI 起的，如 daemon adopt 出来的子节点）。
+        let launchedByCliVersion: string | null = null;
         const snap = r.config_snapshot;
         // #4150-Build — declared outside the `if (snap)` block: the projection below is
         // evaluated for every row, and a block-scoped `let` here made /api/nodes throw
@@ -7147,6 +7152,12 @@ return Bun.serve({
           if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
           if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
           if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
+          // 2026-11-10 —— 只做投影：节点报了就给出来，没报就是 null（两种成因见上面的注释）。
+          // 形状再校验一遍：schema 那层已经限了 64 字符，但库里的历史行不受 schema 管。
+          const rawLaunchedBy = parsed?.launched_by_cli_version;
+          if (typeof rawLaunchedBy === "string" && rawLaunchedBy.length > 0 && rawLaunchedBy.length <= 64) {
+            launchedByCliVersion = rawLaunchedBy;
+          }
         }
         // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
         // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
@@ -7174,6 +7185,7 @@ return Bun.serve({
           opencode_generation: opencodeGeneration,
           opencode_mode: opencodeMode,
           opencode_server: opencodeServer,
+          launched_by_cli_version: launchedByCliVersion,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
