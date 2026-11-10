@@ -20,6 +20,10 @@ export interface FeishuAccessList {
   allowFrom: string[];
   /** Feishu chat_ids the bot is permitted to listen in. */
   allowChats: string[];
+  /** #3682 —— open_id → 角色。只对**已准入**的人生效。 */
+  users?: Record<string, { role?: string } | undefined>;
+  /** #3682 —— 未登记角色的人的默认档（缺省 member，与接入前行为一致）。 */
+  defaultRole?: string;
 }
 
 /**
@@ -78,13 +82,41 @@ export interface FeishuChannelConfig {
  * Load Feishu channel config from a node's channels/feishu directory.
  * Throws if required secrets are missing.
  */
-export function loadFeishuChannelConfig(channelDir: string): FeishuChannelConfig {
+export function loadFeishuChannelConfig(
+  channelDir: string,
+  /**
+   * 进程环境（可选）。存在的理由：跨机节点拿不到"把 .env 拷过去"这件事 ——
+   * 密钥只能通过 Hub 保险库推到 <nodeDir>/node-secrets.json，agent-node 启动时
+   * 把它灌进 process.env（activation: next_start）。所以这里的读取顺序是：
+   *   .env 文件 > process.env
+   * 反过来会让一个陈旧的 .env 悄悄盖掉刚推下来的值。
+   */
+  processEnv: Record<string, string | undefined> = {},
+): FeishuChannelConfig {
   const env = parseEnvFile(join(channelDir, ".env"));
-  const appId = env.FEISHU_APP_ID;
-  const appSecret = env.FEISHU_APP_SECRET;
+  // 允许别名：运维侧常见 SF_APP_ID / SF_APP_KEY 这种叫法（飞书官方叫 app_id / app_secret，
+  // 但凭据管理平台里往往带自己的前缀）。**只做名字映射，不改任何语义**；
+  // 顺序仍是 .env > process.env，别名在各自那一层内与主名等价、主名优先。
+  const ID_ALIASES = ["FEISHU_APP_ID", "SF_APP_ID", "FEISHU_APPID"] as const;
+  const SECRET_ALIASES = ["FEISHU_APP_SECRET", "SF_APP_KEY", "SF_APP_SECRET", "FEISHU_APPKEY"] as const;
+  const pickAny = (keys: readonly string[]): string | undefined => {
+    for (const k of keys) {
+      const v = env[k];
+      if (typeof v === "string" && v) return v;     // .env 优先
+    }
+    for (const k of keys) {
+      const v = processEnv[k];
+      if (typeof v === "string" && v) return v;     // 再兜底 process.env
+    }
+    return undefined;
+  };
+  const pick = (key: "FEISHU_APP_ID" | "FEISHU_APP_SECRET"): string | undefined =>
+    key === "FEISHU_APP_ID" ? pickAny(ID_ALIASES) : pickAny(SECRET_ALIASES);
+  const appId = pick("FEISHU_APP_ID");
+  const appSecret = pick("FEISHU_APP_SECRET");
   if (!appId || !appSecret) {
     throw new Error(
-      `feishu channel: FEISHU_APP_ID / FEISHU_APP_SECRET missing in ${channelDir}/.env`,
+      `feishu channel: FEISHU_APP_ID / FEISHU_APP_SECRET missing in ${channelDir}/.env and in the process environment`,
     );
   }
   const access = readAccessFile(join(channelDir, "access.json"));
@@ -142,6 +174,10 @@ function readAccessFile(path: string): AccessFileShape {
       allowChats: Array.isArray(data.allowChats) ? data.allowChats : [],
       outboundRender:
         typeof data.outboundRender === "string" ? data.outboundRender : undefined,
+      // #3682 —— 原样透传，不在这一层判合法性：角色解析与拒绝都在 agent-node
+      // （那里才知道 runtime 与回合上下文）。这里多一层校验只会让两处规则漂移。
+      users: data.users && typeof data.users === "object" ? (data.users as any) : undefined,
+      defaultRole: typeof data.defaultRole === "string" ? data.defaultRole : undefined,
     };
   } catch {
     return { allowFrom: [], allowChats: [] };

@@ -3,7 +3,7 @@
 // config is edited, no shared flag is added to node_spec, and spawnChild is not
 // overridden. Doorbells are invoked directly using the real Hub request ID.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, cpSync } from "node:fs";
 import { join } from "node:path";
 import { handleCreateNodeDoorbell } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/create-node-daemon.ts";
 import { observeHostSharedServe } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-host-shared-observer.ts";
@@ -134,6 +134,20 @@ async function task(alias: string, text: string) {
   check(`${alias}: exact task replied`, row.status === "replied");
   return String(row.result ?? "");
 }
+/** #1537 —— 只停本夹具的 shared server（按 PID 精确发信号并等它真的退出）。 */
+async function stopFixtureServer(child: ChildProcess) {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  try { child.kill("SIGTERM"); } catch { /* already gone */ }
+  return await until(() => child.exitCode !== null || child.signalCode !== null, 20_000);
+}
+/** 同一个端口、同一个 registry URL，但数据目录换成复制的副本。 */
+function startRestoredServer(dataDir: string, dbFile: string) {
+  return start("opencode", ["serve", "--hostname", "127.0.0.1", "--port", "13270"], join(root, "host-project"), {
+    PATH: process.env.PATH, HOME: home, XDG_DATA_HOME: dataDir,
+    OPENCODE_DB: dbFile, OPENCODE_SERVER_PASSWORD: password,
+  });
+}
+
 start("bun", ["src/index.ts"], "/workspace/server", { ...process.env, HOST: "127.0.0.1", PORT: "9327",
   COMMHUB_DB: join(root, "hub.db"), COMMHUB_AUTH_TOKEN: "test1327-bootstrap" });
 start("python3", ["/test1327/stub-model.py", "18837", join(artifact, "stub.log"), responsePrefix], root, process.env);
@@ -203,6 +217,62 @@ try {
     && fallback.health.serve.pid !== hostPid);
   check("fallback network turn completes", await task(aliases[3], "Reply with exactly FALLBACK1327") === `[${aliases[3]}] ${responsePrefix}FALLBACK1327`);
   check("host A still lives after own/fallback creation", host.exitCode === null && host.signalCode === null);
+  // ── #1537 双节点停机恢复：停机副本后原 session / 节点身份不得改变 ──
+  // 身份只在断言里用相等性/正则，绝不打印其值；token 只比相等性。
+  const identity = {
+    bSession: String(b.attach.gen), cSession: String(c.attach.gen),
+    bNode: String(b.config.node_id), cNode: String(c.config.node_id),
+    distinctTokens: b.config.token !== c.config.token,
+    sharedPid: hostPid,
+  };
+  check("#1537: two nodes ran on one shared server with distinct sessions/nodes/tokens",
+    /^ses_/.test(identity.bSession) && /^ses_/.test(identity.cSession)
+    && identity.bSession !== identity.cSession && identity.bNode !== identity.cNode && identity.distinctTokens);
+
+  // 1) 真实 CLI 停两个节点
+  await cli(["node", "stop", aliases[0]], projectFor(aliases[0]));
+  await cli(["node", "stop", aliases[1]], projectFor(aliases[1]));
+  check("#1537: both nodes stopped via the real CLI", await until(() =>
+    tmux("has-session", "-t", `=${aliases[0]}`).status !== 0
+    && tmux("has-session", "-t", `=${aliases[1]}`).status !== 0));
+
+  // 2) 精确停本夹具 Server，然后完整复制已停的 data（旧目录保留）
+  check("#1537: fixture shared server stopped before the copy", await stopFixtureServer(host));
+  const srcData = join(root, "host-data"), restoredData = join(root, "host-data-restored");
+  cpSync(srcData, restoredData, { recursive: true, preserveTimestamps: true });
+  check("#1537: stopped data copied into a new private dir; the original is kept",
+    existsSync(join(restoredData, "opencode.db")) && existsSync(join(srcData, "opencode.db")));
+
+  // 3) 新 Server 读新目录（同端口 -> registry URL 不变）
+  const restored = startRestoredServer(restoredData, join(restoredData, "opencode.db"));
+  check("#1537: restored server answers on the same URL",
+    await until(() => fetch(`${sharedUrl}/api/info`, { headers }).then(r => r.ok, () => false)));
+  const observedRestored = observeHostSharedServe(sharedUrl);
+  check("#1537: restored server is a different process", observedRestored.ok
+    && observedRestored.processEvidence.pid !== identity.sharedPid);
+
+  // 4) 两节点真实 start，核原身份（持久 session 读取是前置：缺失/替换都不算恢复）
+  await cli(["node", "start", aliases[0], "--tmux"], projectFor(aliases[0]));
+  await cli(["node", "start", aliases[1], "--tmux"], projectFor(aliases[1]));
+  check("#1537: both nodes have a live TUI again", await until(() =>
+    tmux("has-session", "-t", `=${aliases[0]}`).status === 0
+    && tmux("has-session", "-t", `=${aliases[1]}`).status === 0));
+  const b2 = json(join(nodeDir(aliases[0]), "opencode-attach.json"));
+  const c2 = json(join(nodeDir(aliases[1]), "opencode-attach.json"));
+  const bCfg = json(join(nodeDir(aliases[0]), "config.json"));
+  const cCfg = json(join(nodeDir(aliases[1]), "config.json"));
+  check("#1537: B kept its original session (persisted, not recreated)", String(b2.gen) === identity.bSession);
+  check("#1537: C kept its original session (persisted, not recreated)", String(c2.gen) === identity.cSession);
+  check("#1537: node identity unchanged", String(bCfg.node_id) === identity.bNode && String(cCfg.node_id) === identity.cNode);
+  check("#1537: private tokens unchanged and still distinct",
+    bCfg.token === b.config.token && cCfg.token === c.config.token && bCfg.token !== cCfg.token);
+
+  // 5) 两节点分别继续 exact Hub 回件
+  check("#1537: B replies exactly after restore",
+    await task(aliases[0], "Reply with exactly RESTOREB1537") === `[${aliases[0]}] ${responsePrefix}RESTOREB1537`);
+  check("#1537: C replies exactly after restore",
+    await task(aliases[1], "Reply with exactly RESTOREC1537") === `[${aliases[1]}] ${responsePrefix}RESTOREC1537`);
+
   console.log("PASS: real shared daemon create/start/session/task/close; no production or publication claim");
 } finally {
   for (const alias of aliases) {

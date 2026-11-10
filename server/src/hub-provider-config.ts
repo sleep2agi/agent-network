@@ -7,6 +7,63 @@ import { requestProviderWrite } from './daemon-provider-snapshots';
 type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
 type Config = { id: string; label: string; enabled: boolean; protocol: 'openai-responses' | 'openai-chat-completions' | 'anthropic-messages'; baseUrl: string; models: string[] };
 const denied = (error: string) => ({ ok: false as const, error });
+
+/**
+ * 2026-10-31 —— **写侧错误的 HTTP 状态必须是穷尽表**（外部复核：三元式默认分支
+ * = 未映射与某个真实含义同值 ⇒ 口令字段；应改成 `Record<Code, number>`）。
+ *
+ * 原来 REST 路由里写的是：
+ *   provider_owner_required ? 403 : revision_conflict ? 409 : access_denied ? 403 : 400
+ * ⇒ 新增一个错误码时它会**默认落到 400**，而 400 对某些码是错的（例如 vault 缺失应是 409/503）。
+ *
+ * 这里的码集合来自本文件里所有 `denied('...')` 与 VaultError 的 code；
+ * 测试会断言「映射键 == 码清单」，并且**码清单必须能在源码里逐个找到**（跨源，不是自说自话）。
+ */
+export const PROVIDER_WRITE_ERROR_CODES = [
+  "user_token_required",
+  "provider_owner_required",
+  "provider_access_denied",
+  "invalid_revision",
+  "invalid_hub_provider",
+  "invalid_provider_key",
+  "invalid_provider_secret_reference",
+  "provider_secret_reference_missing",
+  "provider_key_required",
+  "hub_provider_revision_conflict",
+  "hub_provider_disabled",
+  "hub_provider_save_failed",
+  "vault_unavailable",
+] as const;
+export type ProviderWriteErrorCode = (typeof PROVIDER_WRITE_ERROR_CODES)[number];
+export const PROVIDER_WRITE_STATUS: Record<ProviderWriteErrorCode, number> = {
+  user_token_required: 401,
+  provider_owner_required: 403,
+  provider_access_denied: 403,
+  invalid_revision: 400,
+  invalid_hub_provider: 400,
+  invalid_provider_key: 400,
+  invalid_provider_secret_reference: 400,
+  provider_secret_reference_missing: 400,
+  provider_key_required: 400,
+  hub_provider_revision_conflict: 409,
+  hub_provider_disabled: 409,
+  hub_provider_save_failed: 500,
+  vault_unavailable: 503,
+};
+/**
+ * 码 → HTTP 状态。
+ *
+ * 2026-10-31 —— 参数类型从 `string` 收紧到 `ProviderWriteErrorCode`：
+ * 之前签名收 `string`，于是「表里加码、忘了加状态」在**调用点**不会被类型拦住
+ * （编译器只看见一个字符串）。而 `Record<ProviderWriteErrorCode, number>` 只在
+ * 「用类型化的键去索引」时才保证穷尽 —— 签名放宽就等于把穷尽性丢了。
+ *
+ * 兜底也改了方向：`?? 400` 会告诉客户端「你的请求不对」，而表里查不到的码是**我们**的缺陷
+ * ⇒ 归因指向了错误的行动方。现在兜底返回 500（服务端错误），并让测试断言它不被 400 顶替。
+ */
+export function providerWriteStatus(code: ProviderWriteErrorCode): number {
+  return PROVIDER_WRITE_STATUS[code] ?? 500;
+}
 const idValid = (id: unknown) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id);
 function auth(h: Human, write: boolean, owner = false) {
   if (h.isNode || !h.userId || !h.networkId) return denied('user_token_required');
@@ -40,7 +97,47 @@ function publicRow(networkId: string, stored: Row, exposeRef = false) {
 export function readHubProviders(h: Human, exposeRefs = false) {
   const refusal = auth(h, false); if (refusal) return refusal;
   const rows = db.all<Row>('SELECT revision,config_json,secret_key_ref,updated_at FROM hub_provider_configs WHERE network_id=?1 ORDER BY provider_id', h.networkId!);
+  // 2026-10-31 —— **这个端点的空数组也必须自报家门**（与 MCP list_providers 同一课）。
+  // 关键事实：两条「providers」读的是**不同的表** ——
+  //   GET /api/providers  → hub_provider_configs（网络自有的 provider 配置，本函数）
+  //   MCP list_providers  → providers / provider_models
+  // 于是「客户端没有可选模型」既可能是「这张表空」，也可能是「另一张表空」，
+  // 而两者在载荷里长得一模一样。⇒ 在 source 之外再说清 state 与「另一处叫什么」。
+  const otherSource = db.get<{ cnt: number }>(
+    'SELECT COUNT(*) AS cnt FROM providers WHERE network_id=?1 AND enabled=1', h.networkId!);
+  const otherCount = otherSource?.cnt ?? 0;
+  // 2026-10-31 —— **闭集不许有死成员**：客户端 union 里写着
+  // "configured" | "unconfigured" | "all_disabled"，而这个端点原来只产出前两个
+  // ⇒ all_disabled 是一格永远不会出现的状态，界面里那条分支也就永远跑不到
+  // （实测：本地 hub 建了一行 enabled:true 的 provider 之后，state 仍是 configured／空表是 unconfigured，
+  //   把 enabled 改成 false 依旧是 configured ⇒ 读的人会把「全都关了」看成「配置好了」）。
+  // 现在三态都可产出，并把「哪些算可用」用计数说清（客户端不必自己再数一遍）。
+  const parsed = rows.map(r => JSON.parse(r.config_json) as { enabled?: boolean; models?: string[] });
+  const enabledRows = parsed.filter(c => c.enabled === true);
+  const state = rows.length === 0 ? 'unconfigured' as const
+    : enabledRows.length === 0 ? 'all_disabled' as const
+    : 'configured' as const;
   return { ok: true as const, network_id: h.networkId!, source: 'hub' as const,
+    // 读的是哪张表 —— 名字直接写出来，避免下一个人拿这个结果去解释另一个接口
+    source_table: 'hub_provider_configs' as const,
+    state,
+    counts: {
+      providers: rows.length,
+      providers_enabled: enabledRows.length,
+      providers_disabled: rows.length - enabledRows.length,
+      models_enabled: enabledRows.reduce((n, c) => n + (Array.isArray(c.models) ? c.models.length : 0), 0),
+      providers_without_models: enabledRows.filter(c => !Array.isArray(c.models) || c.models.length === 0).length,
+      providers_in_cli_registry: otherCount,
+    },
+    ...(state === 'all_disabled' ? {
+      hint: '这个网络里配置了 ' + rows.length + ' 个 provider，但**全部被禁用** ⇒ 客户端仍然没有可选模型。'
+        + '这不是「还没配置」，要做的是启用其中一个（或在确认无用后删除）。',
+    } : {}),
+    ...(state === 'unconfigured' ? {
+      hint: otherCount > 0
+        ? '本端点读 hub_provider_configs（网络自有 provider 配置），此处为空；但要给客户端选模型，还需要这里至少一行 —— CLI 注册表里的 ' + otherCount + ' 条不会自动出现在本端点。'
+        : '本端点读 hub_provider_configs，此处为空，且 CLI 注册表（providers）也是 0 条 ⇒ 客户端没有任何可选模型；需要管理员先录入第一行。',
+    } : {}),
     ...(exposeRefs ? { secret_reference_supported: true } : {}), providers: rows.map(r => publicRow(h.networkId!, r, exposeRefs)) };
 }
 export function putHubProvider(h: Human, revision: number, input: unknown) {

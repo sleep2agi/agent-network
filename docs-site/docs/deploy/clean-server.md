@@ -6,6 +6,7 @@
 每一步都带验证命令，文末有常见报错对照表（[故障排查表](#故障排查表)）。
 
 不是给已经装好 anet 的人看的，那个走 [上手指南](/guide/getting-started) 或 [升级指南](/guide/upgrade)。
+已有 Hub 要搬到另一台机器，请走 [迁移 Hub](/deploy/hub-migration)，不要把从零部署当数据恢复。
 :::
 
 ## 0. 前置

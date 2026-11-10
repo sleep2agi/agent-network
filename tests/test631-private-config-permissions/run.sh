@@ -84,6 +84,11 @@ cp agent-node/src/runtime/config-apply.ts agent-node/src/runtime/config-apply.te
 # to load ("Cannot find module") instead of failing the 0600 assertions, so the
 # witnessed-red grep for 384 never matches.
 cp agent-node/src/runtime/codex-config-flags.ts /mutation/agent-node/src/runtime/
+# #2224 —— config-apply.ts 现在把 rename 走 shared/windows-rename-retry（Windows 上的
+# EPERM/EBUSY 重试）。这份同样要在 /mutation 里存在，否则见证红会退化成
+# "Cannot find module"，grep 384 永远匹配不到 —— 那是**跑法造成的红**，不是权限断言。
+mkdir -p /mutation/agent-node/src/shared
+cp agent-node/src/shared/windows-rename-retry.ts /mutation/agent-node/src/shared/
 sed -i 's/0o600/0o666/g' /mutation/agent-network/src/private-state.ts /mutation/agent-node/src/runtime/config-apply.ts
 set +e
 (cd /mutation && bun test agent-network/src/private-state.test.ts agent-node/src/runtime/config-apply.test.ts) >/tmp/test631-mode-red.txt 2>&1

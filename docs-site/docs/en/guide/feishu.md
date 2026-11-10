@@ -8,7 +8,9 @@ Connect an anet node to Feishu so Feishu users can talk to the agent directly. `
 
 | Dimension | Current capability |
 |---|---|
-| Runtime | `claude-agent-sdk` only (claude-code-cli / codex-sdk / grok-build-acp later) |
+| Topology | **Point-to-point: one Feishu app ↔ one node** (one `APP_ID` cannot hold two long connections) |
+| Multi-node | Not yet. One bot serving several nodes needs an "@mention → target" routing layer, scheduled after point-to-point is stable |
+| Runtime | `claude-agent-sdk` verified; **OpenCode V2 co-presence**: outbound (text/images) and chat context verified on a real app; **inbound awaits a human message** (a bot does not receive its own); claude-code-cli / codex-sdk / grok-build-acp unverified |
 | Reach | ✅ DM (sender `open_id` on the allowlist) / ✅ Groups via `@bot` |
 | Media | ✅ Text / ✅ Images (requires a vision-capable model — see §4) |
 | Dashboard topology | ❌ Not yet (commhub-gateway lands later) |

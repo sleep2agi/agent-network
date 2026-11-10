@@ -52,16 +52,50 @@ export const selectDesktopRelease = (releases) => releases
   .filter((candidate) => candidate.version && candidate.manifest)
   .sort((left, right) => compareDesktopVersions(right.version, left.version))[0] ?? null;
 
-const validManifest = (manifest, version) => manifest?.version === version
-  && typeof manifest.platforms?.['darwin-aarch64']?.signature === 'string'
-  && typeof manifest.platforms?.['windows-x86_64']?.signature === 'string';
+// A release can legitimately exist with only one platform built: on 2026-11-08 the
+// Windows bundler spent an hour failing on external 5xx while macOS had already been
+// signed and published. Demanding both signatures then made a correct macOS release
+// invisible and forced the endpoint back to the previous version, so owners saw
+// "no update" for a build that existed.
+//
+// The rule now: the manifest must match its tag, every platform it *does* carry must
+// have a signature and map to a real asset of that release, and at least one of the
+// two desktop platforms must be present. A platform that is absent simply means this
+// release has no build for it; Tauri treats a missing platform key as "no update"
+// rather than as an error, so other platforms are not offered a wrong artifact.
+const validManifest = (manifest, version, release) => {
+  if (manifest?.version !== version) return false;
+  const platforms = manifest?.platforms ?? {};
+  const present = ['darwin-aarch64', 'windows-x86_64'].filter((name) => name in platforms);
+  if (present.length === 0) return false;
+  const assets = new Set((release?.assets ?? []).map((asset) => asset.name));
+  return present.every((name) => {
+    const entry = platforms[name];
+    if (typeof entry?.signature !== 'string' || typeof entry?.url !== 'string') return false;
+    const file = entry.url.slice(entry.url.lastIndexOf('/') + 1);
+    // assets present in the release object are authoritative; a manifest that points at
+    // an asset this release does not have is a broken manifest, not a partial release.
+    return file.length > 0 && (assets.has(file) || /[?&]/.test(entry.url));
+  });
+};
+
+// Manifests used to carry `api.github.com/.../releases/assets/<id>` URLs, so this
+// function translated them through the release's asset list. Since #1034 the release
+// workflow normalizes `latest.json` to public `releases/download/<tag>/<file>` links
+// *before* publishing, so there is nothing to translate: without the pass-through
+// below every platform lookup threw and the endpoint silently served the stale
+// fallback (0.2.287 was published while /desktop/update/latest.json still said
+// 0.2.286, `x-anet-update-source: fallback`).
+const isPublicDownloadUrl = (url) => typeof url === 'string'
+  && /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//.test(url);
 
 const useBrowserDownloadUrls = (manifest, release) => {
   const downloads = new Map(release.assets.map((asset) => [asset.url, asset.browser_download_url]));
   const platforms = Object.fromEntries(Object.entries(manifest.platforms).map(([name, entry]) => {
     const direct = downloads.get(entry.url);
-    if (!direct) throw new Error(`no browser download URL for ${name}`);
-    return [name, { ...entry, url: direct }];
+    if (direct) return [name, { ...entry, url: direct }];
+    if (isPublicDownloadUrl(entry.url)) return [name, entry];
+    throw new Error(`no browser download URL for ${name}`);
   }));
   return { ...manifest, platforms };
 };
@@ -81,8 +115,8 @@ export const resolveDesktopUpdate = async (fetchImpl = fetch) => {
       Accept: 'application/octet-stream',
       'User-Agent': 'anet-desktop-updater',
     });
-    if (!validManifest(manifest, selected.version.text)) {
-      throw new Error('release manifest does not match its tag or lacks signatures');
+    if (!validManifest(manifest, selected.version.text, selected.release)) {
+      throw new Error('release manifest does not match its tag, points at a missing asset, or carries no signed platform');
     }
     return {
       manifest: useBrowserDownloadUrls(manifest, selected.release),
@@ -90,12 +124,29 @@ export const resolveDesktopUpdate = async (fetchImpl = fetch) => {
     };
   } catch (error) {
     const manifest = await fetchJson(fetchImpl, DESKTOP_UPDATE_FALLBACK_URL);
-    if (!validManifest(manifest, manifest.version)) throw error;
+    if (!validManifest(manifest, manifest.version, { assets: Object.values(manifest.platforms ?? {}).map((entry) => ({ name: String(entry?.url ?? '').slice(String(entry?.url ?? '').lastIndexOf('/') + 1) })) })) throw error;
     return { manifest, source: 'fallback' };
   }
 };
 
-export default async function handler(_request, response) {
+// The desktop shell can run the app from a different origin (web build, dev
+// server, packaged app). Without an explicit allow-origin the browser blocks
+// the response and the app can only say "update server unavailable" even
+// though the endpoint answers 200 for curl. https://anet.sh also 307s to
+// www.anet.sh, so the final response is the one that must carry the header.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Max-Age': '600',
+};
+
+export default async function handler(request, response) {
+  for (const [name, value] of Object.entries(CORS_HEADERS)) response.setHeader(name, value);
+  if (request?.method === 'OPTIONS') {
+    response.status(204).end();
+    return;
+  }
   try {
     const { manifest, source } = await resolveDesktopUpdate();
     response.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -106,6 +157,7 @@ export default async function handler(_request, response) {
     response.setHeader('X-Anet-Update-Source', source);
     response.status(200).json(manifest);
   } catch (error) {
+    response.setHeader('Content-Type', 'application/json; charset=utf-8');
     response.setHeader('Cache-Control', 'no-store');
     response.status(503).json({ error: 'desktop_update_unavailable' });
   }

@@ -9,6 +9,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY docs-site/package*.json docs-site/
 RUN npm ci --prefix docs-site --ignore-scripts
+COPY contracts /workspace/contracts
 COPY server/src/tools.ts server/src/tools.ts
 COPY docs-site docs-site
 COPY tests/test520-ack-inbox-docs/run.sh tests/test520-ack-inbox-docs/run.sh

@@ -213,3 +213,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     flex: 1;
   }
 }
+
+/* 2026-10-31 —— Provider 页的状态行：三档必须一眼可分（ok / warn / error / muted） */
+.page .ok { color: var(--good, #16a34a); font-size: 13px; margin: 8px 0; }
+.page .warn { color: #b45309; font-size: 13px; margin: 8px 0; }
+.page section { margin-bottom: 20px; }
+.page input { padding: 6px 10px; margin-right: 8px; }

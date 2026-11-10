@@ -131,6 +131,10 @@ describe("#1828 POST /api/messages/ack covers inbox reply rows", () => {
   test("🔴 B 拿 A 的 inbox id 来 ack:匹配不到,A 的数不动", async () => {
     const { body } = await post("/api/messages/ack", bToken, { message_ids: ["ib_a1"] });
     expect(body).toMatchObject({ ok: true, acked: 0, acked_inbox: 0 });
+    // 2026-10-31 —— #3214：ack 的形状钉住（两个分桶 + 总数，客户端按这三个数更新未读角标）
+    expect(Object.keys(body).sort()).toEqual(["acked", "acked_inbox", "acked_user_inbox", "ok", "scope"]);
+    // 守恒：两个分桶之和 == 总数（否则角标与明细是两个读数）
+    expect(body.acked_inbox + body.acked_user_inbox).toBe(body.acked);
     const a = await get("/api/messages?scope=user", aToken);
     expect(a.body.unread_by_agent["peer-1"]).toBe(2);
   });
@@ -145,6 +149,30 @@ describe("#1828 POST /api/messages/ack covers inbox reply rows", () => {
     // 再 ack 同一条:幂等,0 行。
     const again = await post("/api/messages/ack", aToken, { message_ids: ["ib_a1"] });
     expect(again.body.acked).toBe(0);
+  });
+
+  // #3354 —— 拒绝路径：未认证必须 401，且**一条都不许 ack**。
+  // 这条路由的门是 `restAuth?.userId`（没有它就没有"我的消息"这个概念）。
+  test("🔴 未认证 ⇒ 401，且 A 的未读数一条都不减（拒绝不许有副作用）", async () => {
+    const before = await get("/api/messages?scope=user", aToken);
+    const res = await fetch(`${base}/api/messages/ack`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_ids: ["ib_a1"] }),
+    });
+    expect(res.status).toBe(401);
+    const after = await get("/api/messages?scope=user", aToken);
+    expect(after.body.unread_total).toBe(before.body.unread_total);
+  });
+
+  // 同时给 agent 与 message_ids 是歧义的：拒收，且不 ack 任何一边
+  test("🔴 {agent} 与 {message_ids} 同给 ⇒ 400 ambiguous_ack，且两边都不动", async () => {
+    const before = await get("/api/messages?scope=user", aToken);
+    const { status, body } = await post("/api/messages/ack", aToken, { agent: "peer-1", message_ids: ["ib_a1"] }) as any;
+    expect(status).toBe(400);
+    expect(body.error).toBe("ambiguous_ack");
+    const after = await get("/api/messages?scope=user", aToken);
+    expect(after.body.unread_total).toBe(before.body.unread_total);
   });
 
   test("status 类 inbox 行不会被用户 ack 掉(不是发给用户的消息)", async () => {

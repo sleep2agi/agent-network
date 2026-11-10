@@ -17,6 +17,18 @@ test("native IDs, distinct provider/model identity, counts and default survive w
   expect(JSON.stringify(value)).not.toContain("sk-FAKE-hidden");
   expect(JSON.stringify(value)).not.toContain("headers");
 });
+test("variant IDs are scoped and whitelisted; absent differs from empty", () => {
+  const rows = [
+    { providerID: "custom", id: "nested/model", variants: [{ id: "high", headers: { authorization: "sk-FAKE-hidden" }, body: { token: "sk-FAKE-hidden" } }] },
+    { providerID: "second", id: "nested/model", variants: [] },
+  ];
+  const value = normalize(undefined, wrap(rows));
+  expect(value.models).toEqual([{ providerId: "custom", id: "nested/model", variants: ["high"] }, { providerId: "second", id: "nested/model", variants: [] }]);
+  expect(value.defaultModel).toEqual({ providerId: "custom", id: "nested/model" });
+  expect(JSON.stringify(value)).not.toContain("sk-FAKE-hidden");
+  expect(normalize().models[0]).not.toHaveProperty("variants");
+  expect(() => normalize(undefined, wrap([{ ...rows[0], variants: [{ id: "high" }, { id: "high" }] }]))).toThrow("invalid_response");
+});
 test("empty snapshot is not verified empty/full availability", () => {
   const value = normalize(wrap([]), wrap([]), wrap(undefined));
   expect(value.models).toEqual([]);
@@ -45,13 +57,14 @@ test("target validation never reaches a remote host", async () => {
     await expect(readOpenCodeCatalog({ scope, url, authorization: "Basic fake" })).rejects.toThrow("invalid_target");
   }
 });
-test("authenticated local API fetch preserves scope and rejects auth failures without echo", async () => {
+test("authenticated local API fetch preserves scope in the native directory header and rejects auth failures without echo", async () => {
   let requests = 0;
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) {
     requests++;
     if (req.headers.get("authorization") !== "Basic fake") return new Response("sk-FAKE-hidden", { status: 401 });
     const url = new URL(req.url);
-    expect(url.searchParams.get("directory")).toBe(scope.directory);
+    expect(url.searchParams.get("directory")).toBeNull();
+    expect(req.headers.get("x-opencode-directory")).toBe(scope.directory);
     return Response.json(wrap(url.pathname === "/api/provider" ? providers : url.pathname === "/api/model" ? models : models[0]));
   } });
   try {

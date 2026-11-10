@@ -19,6 +19,7 @@ import {
 import { homedir } from "os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { fsyncDirectoryIfSupported } from "./posix-modes";
+import { renameOverExistingSync } from "./windows-rename-retry";
 
 export const OPENCODE_RUNTIME_BINDING_SCHEMA_VERSION = 1 as const;
 export const OPENCODE_RUNTIME_BINDING_RUNTIME = "opencode-cli" as const;
@@ -400,7 +401,7 @@ function atomicWriteBinding(path: string, body: string): void {
       || (before && current && !sameIdentity(before, current))) {
       throw new Error("OpenCode runtime binding target changed before atomic rename");
     }
-    renameSync(temp, path);
+    renameOverExistingSync(temp, path);
     assertPrivateBindingFile(path, "binding file");
 
     const parentFd = openSync(

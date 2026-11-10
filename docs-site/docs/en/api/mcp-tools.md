@@ -137,7 +137,7 @@ Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and 
 | `restart_node` | Restart a node without changing its config |
 | `update_node_config` | Set a node's desired config (model + flags) and ring its doorbell |
 
-**Host-daemon protocol — internal, called by nodes and daemons** · 12
+**Host-daemon protocol — internal, called by nodes and daemons** · 13
 
 | Tool | What it does |
 |------|------|
@@ -167,6 +167,7 @@ Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and 
 | `get_adopt_request` | Only the target daemon's node token may pull the pending request; the daemon performs local path/process verification |
 | `ack_adopt_request` | Target daemon reports `adopted` / `refused`, optionally `error`. Only acknowledgement activates a binding; revoked requests cannot reactivate |
 | `unadopt_node` | Owner or network owner/admin revokes pending/active authority without stopping the node. Refused while stop/start is in flight; retry after completion |
+| `report_token_usage` | Nodes add their own LLM usage into **UTC hour buckets per model** (`input` / `output` / `cache_read` kept apart — `cache` never folds into `total`). Counts only: no prompt, no message id, no credential. Lands in `node_token_usage`; humans read `GET /api/token-usage` |
 
 Adopted children appear in `list_my_children` with `managed: "adopted"`, including stopped children.
 They cannot be deleted (`adopted_node_delete_unsupported`). Stop/start require a creation record or active binding;
@@ -223,9 +224,11 @@ before controlling a process; a restored Hub row alone is insufficient.
 | `requirements_update` | Patch a task, omitted fields kept; `status` = `column` (as above). **`participants` replaces the whole list** (anyone left out is removed, `[]` clears it); to add / remove a few people use `participants_add` / `participants_remove`: applied to the current list without touching anyone else, adding someone already there or removing someone absent changes nothing; cannot be combined with `participants` (400 `participants_conflict`), the same person in both → 400 `participants_add_remove_overlap`; `archived: true` archives it (agents cannot delete) |
 | `requirements_checklist_toggle` | Set one checklist item done / not done; only that item is written |
 | `requirements_upsert_by_external_ref` | Idempotent sync by `external_ref` (e.g. `github:owner/repo#123`): create if missing, patch if present; also accepts the `status` alias |
+| `departments` | Read and write the org structure (department tree): `action: "list"` returns the tree (each department with its agent count and children); `create` / `update` / `delete` manage departments (name, parent, head, sort); `assign_agent` moves one Agent into a department (`department_id: null` removes it). **Writes are limited to the network owner/admin** (a plain member gets `forbidden`); every write is audited. Departments are **shared network-wide**, not per person |
 | `projects_list` | List the network's projects (id, name, color, sort, archived). Node (agent) tokens can **only read** projects |
 | `projects_create` | Create a project (name 1–40 characters, unique in the network; optional color / sort), same as the app's 管理项目 → 新建; needs a person's token: node (agent) tokens can only read projects and get 403 `user_token_required` here; task-scoped members and viewers get 403 too |
 | `projects_update` | Rename / recolour / reorder a project, or `archived: true / false` to archive / unarchive; only the fields you pass change; same permissions |
+| `requirement_tags` | Tags of this network. `action: "list"` returns the tree: `name`, `parent_id` (`null` = root), `depth`, colour, usage counts, `can_manage`. The same tool writes (`rename` / `merge` / `delete` / `color` / `reparent`) and **only the owner/admin may**; a node token calling a write gets 403. `reparent` only moves the tree edge (no card changes, no renames): unknown parent → 404 `tag_parent_not_found`; a cycle → 400 `tag_parent_cycle`; deeper than 4 after the move (the check is the new parent depth plus the tag's own subtree height) → 400 `tag_depth_exceeded`; **omitting the `parent` key → 400**, while `null` / `""` moves it to the top level. A refusal changes nothing in the database. Hub ≥ preview.156 |
 | `requirements_events` | Read the task activity timeline (field-level changes: who, when, old → new; and comments, `kind: "comment"` with the text in `new.text`; newest first); `requirement_id` (`req_…` or `"#N"`) for one task (`limit` default 200); **without `requirement_id` it is the whole network, 50 per page by default on MCP**, pass `next_cursor` as `cursor` for older events (`limit` ≤ 500; the REST default is still 200); `since` for only newer ones; same visibility as `requirements_list`; strict parameters (unknown ones → `-32602`) |
 | `requirements_comment` | Add a comment / progress note to a task (`{id, text}`, markdown, 1–4000 characters): **append-only**, never rewrites the description, shows in the timeline (`kind: "comment"`) under the caller (person or agent). Anyone who can see the task and is not read-only in the network may comment; can't see it → 404, viewer → 403. Hub ≥ preview.90 |
 
@@ -993,8 +996,9 @@ Everywhere an `{id}` is accepted (REST `GET` / `PATCH` / `DELETE` / checklist to
 | POST | `/api/requirements/{id}/comments` | `{text}` (1–4000 characters, trimmed) adds one comment, append-only; returns 201 `{event}` (`kind: "comment"`, `new.text`). Empty → 400 `invalid_comment`, too long → 400 `comment_too_long`; there is no route to edit or delete a comment. Comments are kept 180 days, like field changes |
 | DELETE | `/api/requirements/{id}` | Delete (humans only); children are kept and detached |
 | GET | `/api/requirements/projects` | Projects (creating / editing / deleting projects is human-only) |
-| GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them. A Hub with the `tag_ops` capability also returns `counts` / `colors` / `can_manage` |
+| GET | `/api/requirements/tags` | Tags that appear in the current network (deduplicated and sorted, including tags left only on archived tasks). A node token may read them. A Hub with the `tag_ops` capability also returns `counts` / `colors` / `can_manage`; a Hub with `tag_tree` also returns `nodes` (the tag tree, zero-task tags included — see [Task tags](/en/guide/task-tags#creating-tags-and-parent-child-levels)) |
 | POST | `/api/requirements/tags/ops` | Rename / merge / delete a tag across the network, or set its color (humans only; scoped members get 403). See [Task tags](/en/guide/task-tags#managing-tags) |
+| POST | `/api/requirements/tags/create` | Create a tag, optionally with `parent_id` (at most 4 levels); a duplicate returns 409 `tag_exists`, a missing parent 404 `tag_parent_not_found` (never falls back to the root). See [Task tags](/en/guide/task-tags#creating-tags-and-parent-child-levels) |
 
 **Sync example (GitHub issues → tasks)**: call `requirements_upsert_by_external_ref` once per issue with `external_ref` = `github:<owner>/<repo>#<number>` and `external_url` = the issue link; re-syncing updates the same task instead of creating a duplicate. Use `updated_since` on `requirements_list` for incremental sync.
 

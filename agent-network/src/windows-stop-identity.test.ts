@@ -231,6 +231,19 @@ describe("#1335 取证：后代出生身份必须来自**同一份枚举快照**
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: () => { throw new Error("powershell missing"); } }).unknownReason).toContain("capture query failed");
   });
 
+  test("#2869 默认上限必须容纳 CI 上出现过的 139 个后代；显式 cap 仍然生效", () => {
+    // CI 现场：node stop windows-picker → descendant count 139 exceeds cap 16 → STOP_TIMEOUT。
+    // 这里用同一形状的取证串直接验：默认上限不再误伤，而显式收紧仍然拦得住。
+    // 出生身份必须是 7 位小数（与 DESC_BIRTH 同形），否则 parser 直接判 "not understood"
+    const many = Array.from({ length: 139 }, (_, i) => `${8000 + i}=2026-10-16T02:41:37.${String(i).padStart(7, "0")}+00:00`).join(",");
+    const out = cap(many);
+    const byDefault = captureWindowsDescendantIdentities(root, { runPowerShell: () => out });
+    expect(byDefault.unknownReason).toBeUndefined();
+    expect(byDefault.identities).toHaveLength(139);
+    const tightened = captureWindowsDescendantIdentities(root, { runPowerShell: () => out, cap: 16 });
+    expect(tightened.unknownReason).toContain("exceeds cap 16");
+  });
+
   test("合规取证：后代身份带 kind=creation 且出生身份取自枚举", () => {
     const captured = captureWindowsDescendantIdentities(root, { runPowerShell: () => cap(`8744=${DESC_BIRTH},7656=2026-10-16T02:41:37.5555555+00:00`) });
     expect(captured.unknownReason).toBeUndefined();
@@ -341,6 +354,13 @@ describe("#1335 记录清理／本地节点停止回调门控（spy；真实文�
 });
 
 describe("#1335 原生验证：后代身份协议在真机上精确可往返（Windows runner 才跑）", () => {
+  // Why an explicit timeout: the body spawns cmd.exe, then runs three PowerShell
+  // invocations (birth ticks / capture / taskkill) plus a 1.5 s settle wait. On a
+  // cold Windows runner that regularly costs 6–9 s, and bun's default per-test
+  // timeout is 5 s — so this test failed on CI by timing out, not by asserting
+  // anything (see the `timed out after 5000ms` on qa.yml run 40047991237, where the
+  // same job passed on 11 of the previous 12 main runs). Each PowerShell call below
+  // already allows 30 s, so the test-level budget must be at least that per call.
   test.skipIf(process.platform !== "win32")("（原生）**有真实子进程**时 capture 仍返回合法 CAP 并能枚举到后代", () => {
     const parent = spawn("cmd.exe", ["/c", "start /b ping -n 30 127.0.0.1 > nul & ping -n 30 127.0.0.1 > nul"], { windowsHide: true });
     const ps = (script: string) => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
@@ -357,7 +377,7 @@ describe("#1335 原生验证：后代身份协议在真机上精确可往返（W
     } finally {
       try { execFileSync("taskkill.exe", ["/PID", String(parent.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch {}
     }
-  });
+  }, 60_000);
 
   test.skipIf(process.platform !== "win32")("CIM `CreationDate` 对同一进程两次读数**完全相同**（不截短／不近似），且与根的 ticks 协议不同域", () => {
     const child = spawn("cmd.exe", ["/c", "ping -n 30 127.0.0.1 > nul"], { windowsHide: true });
@@ -378,7 +398,7 @@ describe("#1335 原生验证：后代身份协议在真机上精确可往返（W
     } finally {
       try { execFileSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch {}
     }
-  });
+  }, 60_000);
 });
 
 // #1344: execute the CLI's actual private function against the strict SDK transport;

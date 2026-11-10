@@ -1,7 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { randomBytes } from "crypto";
+import type { LateReplyPayload } from "./v2-session";
 import { cleanupAfterExit } from "./close-cleanup";
 import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { createServer } from "net";
 import { dirname, join } from "path";
 import { resolve } from "path";
@@ -38,10 +40,24 @@ import {
   renderAttachRecordShell,
   stopRecordedAttach,
 } from "./attach-tui";
-import { OPENCODE_DEFAULT_TASK_TIMEOUT_MS } from "../opencode-timeout";
+import {
+  OPENCODE_DEFAULT_TASK_TIMEOUT_MS,
+  admissionBudgetFor,
+  resolveAdmissionCapMs,
+} from "../opencode-timeout";
 import { Agent } from "undici";
 import { fetchOpenCodeJson } from "./http";
+import type { SessionBackgroundControl } from "./session-background";
 import { openV1BorrowedAdmission, type V1BorrowedAdmissionOptions } from "./v1-borrowed-admission";
+import { redactUpstreamText } from "./redact-upstream-text.js";
+import {
+  bindQueueOwner,
+  isSessionGoneError,
+  ownerLeftDecision,
+  ownerLeftText,
+  queueOwnerLabel,
+  type QueueOwnerBinding,
+} from "./queue-ownership";
 export { fetchOpenCodeJson } from "./http";
 import { importV1Checkpoint, readV1Checkpoint, verifyV1ImportedHistory, writeV1Checkpoint,
   type V1CheckpointIdentity } from "./v1-checkpoint";
@@ -75,10 +91,22 @@ export class OpenCodeCopresenceTimeoutError extends Error {
   readonly timeoutMs: number;
   readonly aborted: boolean;
   readonly userReplyText: string;
+  /**
+   * 2026-10-31 —— **谁结束了这次等待**。
+   *
+   *   local   我方到点放弃（自己的 deadline / 自己 abort）
+   *   remote  对方超时或断开（连接被对端中止）
+   *   unknown 说不清
+   *
+   * 没有它时，「我方到点」与「别人中止」被抹成同一个 name ——
+   * 于是任何「谁违约」的统计都会系统性偏向一方，而偏向方向由实现决定、不由事实决定。
+   */
+  readonly endedBy: "local" | "remote" | "unknown";
   constructor(
     phase: "admission" | "reply",
     timeoutMs: number,
     outcome: "running" | "aborted" | "abort_failed" = "running",
+    endedBy: "local" | "remote" | "unknown" = "local",
   ) {
     const budget = formatOpenCodeTimeout(timeoutMs);
     const knob = "可用 OPENCODE_TIMEOUT_MS 或 config.json flags.timeout / flags.opencodeTimeoutMs 调整（单位 ms，0 = 不设上限）";
@@ -93,7 +121,8 @@ export class OpenCodeCopresenceTimeoutError extends Error {
           // #1879 —— 过期文案要点名「共享会话忙」和「等了多久」,不能让人读成「节点卡死」,
           // 也不能让人以为是模型/网络问题。原来那句「共享会话在 30 分钟内一直处于忙碌状态」
           // 已经点了名,但没说清是**共享会话被占**、等了**多久**、以及**这不是节点坏了**。
-          : `opencode 任务未提交：共享会话忙，${budget} 内未获提交 —— 这段时间共享会话一直被 TUI 里的一轮占着（不是节点卡死），本任务没有发出，可稍后重发。${knob}。`;
+          : `opencode 任务未提交：共享会话忙，${budget} 内未获提交 —— 这段时间共享会话一直被 TUI 里的一轮占着（不是节点卡死），本任务没有发出，可稍后重发。` +
+            `排队上限可用 OPENCODE_ADMISSION_CAP_MS 调整（默认 10 分钟，0 = 不额外限制）。${knob}。`;
     super(stopped === "aborted"
       ? `OpenCode reply wait exceeded ${timeoutMs}ms; the shared session was aborted`
       : stopped === "abort_failed"
@@ -105,7 +134,30 @@ export class OpenCodeCopresenceTimeoutError extends Error {
     this.phase = phase;
     this.timeoutMs = timeoutMs;
     this.aborted = stopped === "aborted";
+    this.endedBy = endedBy;
     this.userReplyText = userReplyText;
+  }
+}
+
+/**
+ * #1879/#1566 ③ —— 共享会话的负责人（TUI）离开了。
+ *
+ * 与超时**不是一回事**：超时是「人还在占着，只是占太久」；这一条是「人已经走了，
+ * 会话也没了，排队中的任务没有可投递的目标」。所以它必须有自己的理由
+ * （owner_left）和自己的文案，而不是复用那个泛泛的 busy 超时。
+ *
+ * 归属信息（task id + 提交者）跟着错误走，回复里能点名是谁的那条任务被终止。
+ */
+export class OpenCodeCopresenceOwnerLeftError extends Error {
+  readonly code = "opencode_copresence_owner_left";
+  readonly phase = "owner_left";
+  readonly owner: QueueOwnerBinding;
+  readonly userReplyText: string;
+  constructor(owner: QueueOwnerBinding) {
+    super("OpenCode shared session owner left; the queued task was terminated (owner_left)");
+    this.name = "OpenCodeCopresenceOwnerLeftError";
+    this.owner = owner;
+    this.userReplyText = ownerLeftText(owner);
   }
 }
 const OUTPUT_LIMIT = 64 * 1024;
@@ -146,10 +198,32 @@ export interface OpenCodeCopresenceSession {
   readonly sessionId: string;
   readonly attachScriptPath: string;
   readonly isRunning: boolean;
+  readonly variantConfigCapable?: boolean;
+  readonly variantConfigTestOwned?: boolean;
+  variantConfigReadback?(): Promise<import("./v2-model-selection").V2ModelSelection | undefined>;
+  /** #2014, V2 only: semantic Ctrl+B, bound to this live handle generation. */
+  readonly backgroundControl?: SessionBackgroundControl;
   /** V2 only. The model the TUI session is running, `provider/id`. Read-only. */
   selectedModel?(): Promise<string | undefined>;
+  /** Read the native model reference only from this handle's bound V2 session. */
+  selectedSessionModel?(sessionId: string): Promise<import("./v2-model-selection").V2ModelSelection | undefined>;
+  /** Internal V2 fork primitive only; callers must authorize the source and target. */
+  forkSession?(sourceSessionId: string): Promise<import("./v2-fork").V2ForkResult>;
+  /** #4099: bound to this exact live session; unavailable if no atomic idle gate. */
+  selectSessionModel?(sessionId: string, model: import("./v2-model-selection").V2ModelSelection): Promise<import("./v2-model-selection").V2SelectionResult>;
+  /** V2 only. The agent the bound session is running ("build"/"plan"/...). Read-only. */
+  selectedSessionAgent?(sessionId: string): Promise<string | undefined>;
+  /** V2 only. Switch the bound session's agent (POST /api/session/<id>/agent). */
+  selectSessionAgent?(sessionId: string, agent: string): Promise<import("./agent-config-apply").V2AgentResult>;
+  /** #3952 —— 会话累计用量（调用方转增量后再上报）。 */
+  usageSnapshot?(): Promise<{ input?: number; output?: number; cache?: { read?: number } } | undefined>;
   /** V2 only. Switch the live session. The caller writes node config. */
   setSelectedModel?(model: string): Promise<void>;
+  /** V2 only, stock builds: idle-gated thinking-level write with readback. */
+  setSelectedVariant?(variant: string | null): Promise<import("./v2-model-selection").V2ModelSelection>;
+  /** V2 only. 把一条新指令**并进正在跑的那一轮**（delivery:"steer"），不进队列。
+   *  必须是显式动作：steer 会改写进行中的回合，半新半旧比排队更糟。 */
+  steer?(prompt: string): Promise<void>;
   notify(message: string, timeoutMs?: number, sender?: string): Promise<void>;
   submit(
     prompt: string,
@@ -164,7 +238,22 @@ export interface OpenCodeCopresenceSession {
       capacityRetrySleep?: (ms: number) => Promise<void>;
       /** Once, when admission sees a non-idle session. Does not shorten the wait. */
       onAdmissionBusy?: () => void | Promise<void>;
+      /**
+       * #3071 —— 超时之后这一轮才结束时的回调。
+       * 不提供它＝保持旧行为（结果丢弃）；提供它就由调用方把它作为迟到结果补发回 Hub。
+       */
+      onLateReply?: (payload: LateReplyPayload) => void | Promise<void>;
+      /**
+       * #3095 —— 观察器挂上时回调一次（threadId=会话 id，turnId=这一轮的 message id）。
+       * 调用方用它把「正在等哪一轮」落盘，这样进程重启后能知道自己错过了什么。
+       */
+      onLateReplyArmed?: (info: { threadId: string; turnId: string }) => void;
     },
+    /**
+     * #1879 ③ —— 排队项的归属：这条任务是谁的（task id + 提交者）。
+     * 负责人离开时，终止理由要能点名是谁的那条任务被终止。
+     */
+    owner?: { taskId?: string | null },
   ): Promise<OpenCodeCopresenceSubmitResult>;
   /** `restart: true` keeps the human TUI's tmux pane alive with a placeholder for the next generation (#1957). */
   close(mode?: { restart?: boolean }): Promise<void>;
@@ -368,7 +457,7 @@ export function wireOpenCodeCommhubMcp(
   const temporaryConfig = `${renderedConfigPath}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
   writeFileSync(temporaryConfig, `${JSON.stringify(renderedConfig, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   chmodSync(temporaryConfig, 0o600);
-  renameSync(temporaryConfig, renderedConfigPath);
+  renameOverExistingSync(temporaryConfig, renderedConfigPath);
   chmodSync(renderedConfigPath, 0o600);
 
   childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(config);
@@ -507,21 +596,43 @@ async function waitUntilSessionIdle(
   timeoutMs: number,
   request = (path: string, init: RequestInit = {}, ms = 2_000) => fetchJson(url, password, path, init, ms),
   onBusy?: () => void | Promise<void>,
+  owner?: QueueOwnerBinding,
 ): Promise<void> {
   // `timeoutMs <= 0` = wait without a deadline.
   const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY;
   let notedBusy = false;
+  // #1879 ③ —— 「会话没了」的连续观测计数。负责人离开要连续确认，
+  // 一次 404 不足以判定（见 queue-ownership.ts 的两道门槛）。
+  let missingPolls = 0;
+  let missingSinceMs = 0;
   while (Date.now() < deadline) {
     try {
       const statuses = await request("/session/status", {}, 2_000);
+      if (!statuses || typeof statuses !== "object" || Array.isArray(statuses)) {
+        // #2011 —— 畸形 status 不是「会话没了」的证据，同样中断连续性。
+        missingPolls = 0;
+        missingSinceMs = 0;
+      }
       if (statuses && typeof statuses === "object" && !Array.isArray(statuses)) {
         const state = statuses[sessionId];
         if (state?.type === "idle") return;
         // A named non-idle state is a shared TUI turn, not a missing session.
         // Say so once. Undefined still means "maybe idle" and must not alarm.
-        if (!notedBusy && state && typeof state === "object" && state.type && state.type !== "idle") {
-          notedBusy = true;
-          await onBusy?.();
+        if (state && typeof state === "object" && state.type && state.type !== "idle") {
+          // #2011 —— 命名状态（busy/其它）是「这次不是 404」的正向观测：
+          // 必须清掉 owner_left 的连续缺失证据，否则 404 → busy → 404 也会凑成「连续」。
+          missingPolls = 0;
+          missingSinceMs = 0;
+          if (!notedBusy) {
+            notedBusy = true;
+            await onBusy?.();
+          }
+        }
+        if (state !== undefined && !(state && typeof state === "object" && state.type)) {
+          // #2011 —— 记录存在但形状畸形（`{}` / null / 非对象）：既不是 idle，
+          // 也不是命名状态；它同样「不是 404」，必须中断连续缺失证据。
+          missingPolls = 0;
+          missingSinceMs = 0;
         }
         if (state === undefined) {
           // Pinned OpenCode 1.18.1 returns an empty status map for an idle
@@ -532,15 +643,41 @@ async function waitUntilSessionIdle(
           try {
             const session = await request(`/session/${sessionId}`, {}, 2_000);
             if (session?.id === sessionId) return;
+            // 会话记录还在 ⇒ 负责人只是暂时不在，等它空闲后照常提交。
+            missingPolls = 0;
+            missingSinceMs = 0;
           } catch (error: any) {
             if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
+            // #1879 ③ —— 明确的 404：会话没了。连续确认够多次之后，
+            // 认定「负责人已经离开」，排队中的任务明确终止（owner_left），
+            // 而不是沉默地等满预算再报一个泛泛的 busy 超时。
+            //
+            // 其余错误（超时、5xx、连接问题）**不是**证据：重置计数，继续等。
+            if (isSessionGoneError(error)) {
+              if (missingPolls === 0) missingSinceMs = Date.now();
+              missingPolls += 1;
+              if (ownerLeftDecision({ missingPolls, missingSinceMs }) === "owner_left") {
+                throw new OpenCodeCopresenceOwnerLeftError(owner ?? bindQueueOwner({ sinceMs: Date.now() }));
+              }
+            } else {
+              missingPolls = 0;
+              missingSinceMs = 0;
+            }
             // Keep waiting: missing session is not evidence of idle.
           }
         }
       }
     } catch (error: any) {
+      // 🔴 owner_left 必须穿过这一层：下面那层 catch 抛出来的「负责人离开」
+      // 是在**外层** try 里面抛的，不在这里放行就会被当成「一次瞬时的状态
+      // 读取失败」吞掉，循环继续等 —— 判定永远不生效。
+      if (error?.code === "opencode_copresence_owner_left") throw error;
       if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
       // A transient status failure is also not evidence of idle.
+      // #2011 —— 外层 `/session/status` 失败（超时/5xx/连接问题）同样不是「会话没了」，
+      // 必须重置连续缺失计数：404 → status 500 → 404 不等于连续两次 404。
+      missingPolls = 0;
+      missingSinceMs = 0;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -662,7 +799,7 @@ export function writeAttachScript(
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
   writeFileSync(temporary, lines.join("\n"), { mode: 0o700, flag: "wx" });
   chmodSync(temporary, 0o700);
-  renameSync(temporary, path);
+  renameOverExistingSync(temporary, path);
   chmodSync(path, 0o700);
 }
 
@@ -835,7 +972,18 @@ export async function openVettedOpenCodeCopresence(
           capacityRetrySleep?: (ms: number) => Promise<void>;
           /** Once, when admission sees a non-idle session. Does not shorten the wait. */
           onAdmissionBusy?: () => void | Promise<void>;
+          onLateReply?: (payload: LateReplyPayload) => void | Promise<void>;
+      /**
+       * #3095 —— 观察器挂上时回调一次（threadId=会话 id，turnId=这一轮的 message id）。
+       * 调用方用它把「正在等哪一轮」落盘，这样进程重启后能知道自己错过了什么。
+       */
+      onLateReplyArmed?: (info: { threadId: string; turnId: string }) => void;
         },
+        /**
+         * #1879 ③ —— 归属：排队项绑定 task 与提交者。
+         * 共享会话的负责人离开时，终止要能点名是谁的那条任务。
+         */
+        owner?: { taskId?: string | null },
       ) {
         const operation = queue.then(async () => {
           if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
@@ -845,8 +993,38 @@ export async function openVettedOpenCodeCopresence(
           // the sleep is not counted as #651 reply time (see the retry site).
           const budgetMs = timeoutMs > 0 ? timeoutMs : 0;
           let deadline = budgetMs > 0 ? Date.now() + budgetMs : 0;
+          // #3103 —— 排队只拿自己的上限，不吃回复预算。被 TUI 占着时等再久也没用，
+          // 所以到点就说「排队没排上」，把剩下的时间留给真正执行后的回复。
+          const admissionBudgetMs = admissionBudgetFor(budgetMs, resolveAdmissionCapMs({ env: process.env.OPENCODE_ADMISSION_CAP_MS }));
           let capacityRetries = 0;
-          await waitUntilSessionIdle(url, password, created.id, budgetMs, request, evidence?.onAdmissionBusy);
+          // #1879 ③ —— 排队项的归属在**开始等**的那一刻就定下来：
+          // 后面无论是超时还是「负责人离开」，都要能说清是谁的那条任务。
+          const queueOwner = bindQueueOwner({ taskId: owner?.taskId, sender, sinceMs: Date.now() });
+          // 2026-10-31 —— **入口先落一行，不等结果**。
+          //
+          // 任何诊断通道，如果它的消费者可能在我们写之前就消失，那就不是通道。
+          // 这条任务会因为「排队没排上」「进程重启」「客户端先断」而永远不产生结果日志；
+          // 只有在入口写过的这一行，才能让人事后按**时间窗**反查「有进无出」的那些。
+          //
+          // 与超时日志的分工：入口这行说明「它来过」，超时那行说明「它怎么死的」。
+          // 只有后者时，日志里只剩“死了的”，没有“来过的” —— 差值读不出来。
+          const budgetLabel = budgetMs > 0 ? `${budgetMs}ms` : "unbounded";
+          log(`[opencode-copresence] task accepted task=${owner?.taskId ?? "-"} budget=${budgetLabel}`);
+          // 2026-10-31 —— 排队失败要有**自己的日志行**，与入口行成对。
+          //   入口行说明「它来过」，这一行说明「它没排上、等了多久、是谁的」。
+          //   没有这一行时，日志里 只有「accepted」而没有对应的结局 ⇒
+          //   「有进无出」的差值读不出来（而那条正是运维唯一能反查的形状）。
+          // ⚠️ 不改文案、不改错误类型：只加一行日志，异常原样抛出。
+          const admissionStartedAt = Date.now();
+          try {
+            await waitUntilSessionIdle(url, password, created.id, admissionBudgetMs, request, evidence?.onAdmissionBusy, queueOwner);
+          } catch (admissionErr) {
+            const waited = Date.now() - admissionStartedAt;
+            log(`[opencode-copresence] task admission-expired task=${owner?.taskId ?? "-"} `
+              + `waited=${waited}ms cap=${admissionBudgetMs > 0 ? `${admissionBudgetMs}ms` : "unbounded"} `
+              + `owner=${queueOwnerLabel?.(queueOwner) ?? "-"} err=${(admissionErr as Error)?.name ?? "Error"}`);
+            throw admissionErr;
+          }
           const visibleSender = normalizeNoticeSender(sender);
           // A network task becomes a visible user turn in the same session as
           // the human TUI. Preserve the authenticated CommHub sender in that
@@ -874,7 +1052,10 @@ export async function openVettedOpenCodeCopresence(
           for (;;) {
           const messageId = createOpenCodeAscendingMessageId();
           if (deadline > 0 && Date.now() >= deadline) {
-            throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+            // 这里已经过了 waitUntilSessionIdle（准入），是**回复阶段**的整体截止。
+            // 原来标成 "admission" 会让运维分不清“没排上队”和“跑太久没回来”——
+            // 两者处置完全不同（前者改投别的节点，后者看这一轮的产出）。
+            throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
           }
           let message: any;
           const turnTimeoutMs = deadline > 0 ? Math.max(1, deadline - Date.now()) : 0;
@@ -905,6 +1086,10 @@ export async function openVettedOpenCodeCopresence(
             // aborted before that reply goes out.
             if (turnSignal?.aborted
               && (error?.name === "TimeoutError" || error?.name === "AbortError")) {
+              // TimeoutError = 我方 deadline 到了；AbortError = 被动中止（可能是别人）。
+              const endedBy: "local" | "remote" | "unknown" =
+                error?.name === "TimeoutError" ? "local"
+                  : error?.name === "AbortError" ? "remote" : "unknown";
               // Abort only when the live turn is provably ours. Unreadable
               // history (this GET's own failure is often the same stall) and
               // an undecidable queue must not cancel whoever is using the
@@ -914,17 +1099,17 @@ export async function openVettedOpenCodeCopresence(
               const decision = timedOutTurnAbortDecision(history, messageId);
               if (decision === "not_submitted") {
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission did not land`);
-                throw new OpenCodeCopresenceTimeoutError("admission", budgetMs);
+                throw new OpenCodeCopresenceTimeoutError("admission", budgetMs, "running", endedBy);
               }
               if (decision !== "abort") {
                 if (borrowed) unknownWrite = true;
                 warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; leaving the session running (history unread or the live turn is not ours)`);
-                throw new OpenCodeCopresenceTimeoutError("reply", budgetMs);
+                throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, "running", endedBy);
               }
               const aborted = await abortOwnTurn(created.id);
               if (borrowed && !aborted) unknownWrite = true;
               warn(`[opencode-copresence] task deadline ${budgetMs}ms reached; submission landed — session ${aborted ? "aborted" : "abort failed"}`);
-              throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed");
+              throw new OpenCodeCopresenceTimeoutError("reply", budgetMs, aborted ? "aborted" : "abort_failed", endedBy);
             }
             if (borrowed) unknownWrite = true;
             throw error;
@@ -982,7 +1167,9 @@ export async function openVettedOpenCodeCopresence(
               });
               continue;
             }
-            warn(`[opencode-copresence] provider error for this turn: ${raw}`);
+            // 上游自由文本进日志前先脱敏：对外摘要收紧了，对内出口也不能原样保留。
+            // 注意 capacityRetryDecision 仍用未脱敏的 raw（它要匹配上游措辞），只在这里脱敏。
+            warn(`[opencode-copresence] provider error for this turn: ${redactUpstreamText(raw)}`);
             const partial = (message?.parts ?? []).some((p: any) => p?.type === "text" && typeof p.text === "string" && p.text.trim())
               ? parseMessageReply(message)
               : "";
@@ -1073,6 +1260,47 @@ export async function openVettedOpenCodeCopresence(
  * and launch-scoped env preparation as the ACP runtime, then open the native
  * serve+attach topology. No rejected executable receives provider auth.
  */
+/**
+ * #3146 —— 共享 OpenCode Server 分支的包装对象。
+ *
+ * 只做转发，不改变任何语义。**独立导出是为了能被单测直接覆盖**：
+ * 这个字面量曾经漏转发 `selectedModel` / `setSelectedModel`，于是
+ * `typeof session.setSelectedModel === "function"` 在共享 server 形态下恒为 false，
+ * 热切模型结构性不可达（生产表现：每次切模型都重启一次）。
+ * 当时没有任何测试覆盖 wrapper —— 它们都直接测 core。
+ */
+export function wrapSharedCopresenceSession(
+  core: OpenCodeCopresenceSession,
+  hooks: { afterClose?: () => Promise<void> | void } = {},
+): OpenCodeCopresenceSession {
+  return {
+    get url() { return core.url; },
+    get sessionId() { return core.sessionId; },
+    get attachScriptPath() { return core.attachScriptPath; },
+    get isRunning() { return core.isRunning; },
+    get backgroundControl() { return core.backgroundControl; },
+    ...(core.selectedModel ? { selectedModel: () => core.selectedModel!() } : {}),
+    get variantConfigCapable() { return core.variantConfigCapable === true && core.isRunning; },
+    get variantConfigTestOwned() { return core.variantConfigTestOwned === true; },
+    ...(core.variantConfigReadback ? { variantConfigReadback: () => core.variantConfigReadback!() } : {}),
+    ...(core.forkSession ? { forkSession: (sessionId: string) => core.forkSession!(sessionId) } : {}),
+    ...(core.selectSessionModel ? { selectSessionModel: (sessionId: string, model: import("./v2-model-selection").V2ModelSelection) => core.selectSessionModel!(sessionId, model) } : {}),
+    ...(core.selectedSessionAgent ? { selectedSessionAgent: (id: string) => core.selectedSessionAgent!(id) } : {}),
+    ...(core.selectSessionAgent ? { selectSessionAgent: (id: string, agent: string) => core.selectSessionAgent!(id, agent) } : {}),
+    ...(core.usageSnapshot ? { usageSnapshot: () => core.usageSnapshot!() } : {}),
+    ...(core.setSelectedModel ? { setSelectedModel: (model: string) => core.setSelectedModel!(model) } : {}),
+    ...(core.setSelectedVariant ? { setSelectedVariant: (variant: string | null) => core.setSelectedVariant!(variant) } : {}),
+    ...(core.selectedSessionModel ? { selectedSessionModel: (id: string) => core.selectedSessionModel!(id) } : {}),
+    ...(core.steer ? { steer: (prompt: string) => core.steer!(prompt) } : {}),
+    notify: (message, timeoutMs, sender) => core.notify(message, timeoutMs, sender),
+    submit: (prompt, timeoutMs, sender, evidence) => core.submit(prompt, timeoutMs, sender, evidence),
+    async close(mode?: { restart?: boolean }) {
+      await core.close(mode);
+      await hooks.afterClose?.();
+    },
+  };
+}
+
 export async function openOpenCodeCopresenceRuntime(
   opts: OpenOpenCodeCopresenceOptions,
 ): Promise<OpenCodeCopresenceSession> {
@@ -1124,6 +1352,7 @@ export async function openOpenCodeCopresenceRuntime(
     }
   }
   if (!binaryAttestation) throw new Error("opencode copresence version probe returned no accepted binary");
+  if (binaryAttestation.provenance === "anet-test-only-artifact" && opts.sharedServer) throw new Error("TEST-ONLY artifact requires owned server");
 
   const childEnv = backend.buildChildEnv({
     workDir,
@@ -1133,6 +1362,7 @@ export async function openOpenCodeCopresenceRuntime(
     credentialMode: "runtime",
     persistAuth: backend.generation === "v1",
   });
+  if (binaryAttestation.provenance === "anet-test-only-artifact") childEnv.ANET_VARIANT_TEST_ONLY = "1";
   let core: OpenCodeCopresenceSession | undefined;
   let cleaned = false;
   let instructions: OpenCodeCommhubInstructionsHandle | undefined;
@@ -1211,23 +1441,15 @@ export async function openOpenCodeCopresenceRuntime(
       warn: opts.warn,
     });
     await opts.onSession?.(core.sessionId);
-    const wrapped: OpenCodeCopresenceSession = {
-      get url() { return core!.url; },
-      get sessionId() { return core!.sessionId; },
-      get attachScriptPath() { return core!.attachScriptPath; },
-      get isRunning() { return core!.isRunning; },
-      notify: (message, timeoutMs, sender) => core!.notify(message, timeoutMs, sender),
-      submit: (prompt, timeoutMs, sender, evidence) =>
-        core!.submit(prompt, timeoutMs, sender, evidence),
-      async close(mode?: { restart?: boolean }) {
-        await core!.close(mode);
+    const wrapped: OpenCodeCopresenceSession = wrapSharedCopresenceSession(core!, {
+      afterClose: async () => {
         await sharedMcp?.close();
         removeInstructions();
         if (!await cleanupAfterExit(cleanup)) {
           opts.warn?.("[opencode-copresence] launch-root cleanup deferred; a live descendant still references it");
         }
       },
-    };
+    });
     return wrapped;
   } catch (error) {
     await core?.close().catch(() => {});

@@ -17,6 +17,8 @@ export interface AdoptionIdentityOptions {
   uid: number;
   daemonEnv: NodeJS.ProcessEnv;
   allowCodexV2?: boolean;
+  /** Opt-in: OpenCode V2 co-presence (TUI + bridge + shared serve). Registration only; see adopt-opencode-v2.ts. */
+  allowOpenCodeV2?: boolean;
 }
 export interface AdoptionLocalIdentity {
   workdir: string;
@@ -81,7 +83,9 @@ export function verifyAdoptionLocalIdentity(req: AdoptionIdentityRequest, opts: 
     if (config.role === "host_supervisor") refuse("cannot_adopt_daemon");
     if (config.network_id !== req.network_id) refuse("adopt_config_network_mismatch");
     if (canonicalHub(config.hub) !== canonicalHub(opts.hubUrl)) refuse("adopt_hub_mismatch");
-    if (config.grokCopresence || config.grokCopresenceAuto || config.opencodeMode === "copresence" ||
+    const openCodeV2 = config.opencodeMode === "copresence" && config.runtime === "opencode-cli" && config.opencodeGeneration === "v2";
+    if (config.grokCopresence || config.grokCopresenceAuto ||
+        (config.opencodeMode === "copresence" && !(opts.allowOpenCodeV2 && openCodeV2)) ||
         (config.codexCopresence && !(opts.allowCodexV2 && config.runtime === "codex-app-server"))) refuse("copresence_adopt_v2");
     matches.push({ workdir, nodeDir, configPath, nodeId: req.node_id, alias: req.alias, config });
   }

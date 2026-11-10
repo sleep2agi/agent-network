@@ -109,9 +109,11 @@ const TABLE: [string[], Cfg, number, RegExp, number][] = [
   [["token", "revoke", "tok_x"], "logged-in", 1, /not_found/, 0],
   [["passwd", "--old-password", "a".repeat(10), "--new-password", "b".repeat(10)], "none", 1, /Not logged in/, 0],
   [["passwd", "--old-password", "a".repeat(10), "--new-password", "b".repeat(10)], "logged-in", 1, /invalid_old_password/, 0],
-  [["activate", "anet-XXXX"], "none", 1, /anet init/, 0],
-  [["activate"], "logged-in", 2, /Usage: anet activate/, 0],
-  [["activate", "anet-XXXX"], "logged-in", 1, /invalid_key/, 0],
+  // 2026-10-29 —— 激活码体系已移除：命令名保留（脚本里 `anet activate` 不会变 unknown），
+  // 但任何参数下都直接提示并返回 0，不再读 hub、不再有 usage/失败分支。
+  [["activate", "anet-XXXX"], "none", 0, /activate 已移除/, 0],
+  [["activate"], "logged-in", 0, /activate 已移除/, 0],
+  [["license"], "none", 0, /license 功能已移除/, 0],
   // status / tasks
   [["status"], "none", 1, /No hub configured/, 0],
   [["tasks"], "none", 1, /No hub configured/, 0],
@@ -142,6 +144,20 @@ describe("#515 exit codes: command × error condition (real CLI, temp HOME, fake
       expect({ code: r.code, mentioned: mention.test(all) }).toEqual({ code: want, mentioned: true });
     }, 30_000);
   }
+});
+
+// #3294 —— `anet --version` 必须**总是**给出 build 一行的四种形态之一。
+// 这测的是**接线**（版本报告真的读了 build-info），不是纯函数（那几条在 build-info.test.ts）。
+// 三种状态都要能在这一行上被认出来，否则「没有」与「没问题」在界面上同形。
+describe("#3294 --version 里的 build 行", () => {
+  test("四种形态之一，且一定出现", async () => {
+    const home = tempHome(cfg("none"));
+    const r = await runCli(home, ["--version"]);
+    expect(r.code).toBe(0);
+    const line = (r.out + r.err).split("\n").find((l) => l.trim().startsWith("build "));
+    expect(line).toBeDefined();
+    expect(line!).toMatch(/^\s*build (?:[0-9a-f]{12}(?: \(dirty tree.*\))?|unknown \()/);
+  }, 30_000);
 });
 
 describe("finalExitCode()", () => {

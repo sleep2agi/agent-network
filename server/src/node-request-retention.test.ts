@@ -253,7 +253,7 @@ describe("node_rules_requests — TTL sweep", () => {
       ageCreated(ancient, ROW_TTL_MS + 60_000);
       ageCreated(w.request_id, CONTENT_TTL_MS + 60_000);
 
-      const r = sweepRetention();
+      const r = await sweepRetention();
       expect(r.nodeRequests.deleted).toBe(1);
       expect(r.nodeRequests.timedOut).toBe(1);
       expect(r.nodeRequests.purged).toBe(2);

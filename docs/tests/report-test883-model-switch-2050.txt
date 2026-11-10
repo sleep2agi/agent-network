@@ -1,0 +1,53 @@
+#2050 / PR #2895 — OpenCode V2 model apply
+
+Scope: isolated fixtures only. No merge, deployment, release or production writes.
+
+Recorded failure (before product fix)
+- Source 45fc0c65b11a60a42b26b65dc7d7fbcd6d848dbb
+- real-client run 39763750802 / job 119773995341: FAILURE
+- Artifact 12418614848, test-only-v2-portable-45fc0c65b11a60a42b26b65dc7d7fbcd6d848dbb
+- ZIP SHA256 e1b18f89792a668a665759b84da94b17887dd138f4a226b555d8dcad424fa027
+- model-before.json and model-failure.json: Hub model=stub/stub-model,
+  config_revision=0; session model=stub/stub-model, status=idle.
+- Update requested restart, rejected after 21 ms, new_revision=null.
+- Exact error: OpenCode V2 session is not running; model was not changed
+- Bridge/serve: state=S, recorded PID/start ticks still match. This is process
+  identity evidence, not proof of the JavaScript session object's running flag.
+- Expected runtime entry confirmed; its SHA256 was
+  84a556c44c222294b68ecc8029c69a8d34460a857b7cb1e370f8ecbdaca01d83.
+- Mutation job 119773995371 / run 39763750592: SUCCESS.
+
+Attribution: Hub configuration did not advance. The rejection is before the
+setSelectedModel call, rather than a model API timeout or a rendering-only issue.
+The V2 core implements that optional method, but openOpenCodeCopresenceRuntime's
+wrapper does not forward it. The CLI therefore cannot use the hot capability.
+The gate's error text conflates a stopped session with a missing method; it is
+not evidence that the recorded bridge/serve exited.
+
+Minimal product change
+- For V2 model-only patches, detect live hot-switch availability at the CLI.
+- If unavailable AND the Hub explicitly requested restart, use the existing
+  write/drain/ACK-restarting/exit-75/supervisor path.
+- A hot request does not gain restart authority. A failed attempted hot switch
+  is not retried as a restart. Other hot flags and V1 behavior stay unchanged.
+- This restores the requested restart path; it does not claim to implement
+  missing wrapper capabilities or validate TUI-driven hot model changes.
+- The 95-second rendered assertion, model/revision readback, native generation
+  change, actual provider-model check, lifecycle chain and wrong-model negative
+  control remain in place.
+
+Candidate validation (Docker, source mounted read-only, network disabled)
+- Image anet-test2014-control-integration:latest, Bun 1.3.14; this is a local
+  dependency image, not a cold build or delivered artifact.
+- bun test agent-node/src/runtime/config-apply.test.ts:
+  113 pass / 0 fail / 229 expectations, 223 ms.
+- Replayed the same new unavailable-capability test against the old classifier
+  in a container-only temporary source copy: 1 named failure,
+  Expected restart / Received hot. No working-tree rollback or baseline change.
+- CLI syntax/bundle check: 264 modules, 112 ms. Not a TypeScript typecheck.
+- check-doc-source-pins.py: broken_pins=0.
+- check-mutation-pins.py: 754 checked, unchecked 4 <= unchanged baseline 4.
+
+The product candidate still requires its own exact-head real-client receipt.
+The historical failed runs remain failed. PR2894 fresh-head verification is a
+separate outstanding acceptance item; this report does not waive that gate.

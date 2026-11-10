@@ -147,7 +147,7 @@ describe("#461 GET /events/network/:id — auth", () => {
   test("member user token → SSE stream with observer connected frame", async () => {
     const res = await fetch(`${BASE}/events/network/${memberNetworkId}`, { headers: auth(memberToken) });
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type") || "").toContain("text/event-stream");
+    expect((res.headers.get("content-type") || "").split(";")[0].trim()).toBe("text/event-stream");
     const reader = res.body!.getReader();
     const connected = await readFrame(reader);
     expect(connected.type).toBe("connected");
@@ -226,7 +226,7 @@ describe("GET /events/users/me — Desktop user stream auth", () => {
   test("member utok → user stream connected frame keyed to authenticated user", async () => {
     const res = await fetch(`${BASE}/events/users/me?network_id=${encodeURIComponent(memberNetworkId)}`, { headers: auth(memberToken) });
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type") || "").toContain("text/event-stream");
+    expect((res.headers.get("content-type") || "").split(";")[0].trim()).toBe("text/event-stream");
     const reader = res.body!.getReader();
     const connected = await readFrame(reader);
     expect(connected.type).toBe("connected");

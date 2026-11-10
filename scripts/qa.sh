@@ -63,318 +63,52 @@ L0_TESTS=(
   #    L0 的测试 import server/src,而 db.ts 的 import 链会长(#2247 起经 node-health-store 带上 zod)。
   #    本地跑 --l0 之前同样先装:(cd server && bun install --frozen-lockfile)。
 )
-L1_TESTS=(
-  # board #703: a bridge/watchdog restart must recover the exact persisted
-  # Codex turn and emit one durable receipt without re-running the model.
-  "test703-codex-turn-receipts"
-  # board #705: bridge stdout/sink failure must not terminate agent-node;
-  # includes witnessed-red checks for EPIPE, fatal diagnostics and tee -p.
-  "test705-bridge-epipe"
-  "test674-binding-generation"
-  "test-agent-team-whoami"
-  "test710-late-task-replies"
-  "test658-codex-adopt-stop"
-  # #1253 —— grok 换模型 hot→restart 回退路径。纯本地:跑 agent-node 源码的
-  # bun 测试,不需要 grok 二进制、不需要网络、不碰任何凭据。
-  "test626-grok-model-switch-fallback"
-  # 这道闸门自己的回归。放在最前:它跑的是本脚本,若闸门坏了应当最先暴露。
-  # (注册这一步不是可选的 —— 一个没被任何东西调用的套件等于不存在。)
-  "test823-l1-concurrency-cap"
-  # #812: tmux target 语义。命令从 docs/node-liveness-criterion.md 抽出来实跑,
-  # 容器里现造 session。只依赖 alpine 的 tmux,不碰机群、不碰凭据。
-  "test812-tmux-target-semantics"
-  # RFC-036 PR1: credential-free SideThread state machine + Codex adapter
-  # contract. Exact-version fail-closed has a witnessed-red mutation.
-  "test1193-side-thread-contract"
-  # #175 PR2: Hub contract, authenticated HTTP/SSE security, and lifecycle
-  # races are separate Docker layers. Each has its own witnessed-red mutation.
-  "test1195-side-thread-hub-contract"
-  "test1195-side-thread-hub-security"
-  "test1195-side-thread-hub-race"
-  "test1200-side-thread-command-transport"
-  # #497/#175 cross-layer App fixture -> Hub HTTP -> dedicated node port ->
-  # terminal -> hydrate. Pins the App-vendored contract bytes by sha256.
-  "test1199-btw-cross-layer-contract"
-  "test1203-btw-production-e2e"
-  "test1181-codex-durable-poll"
-  # #1027: deterministic reproduction of the historical test225 foreground
-  # start/stop race plus ownership, socket-residue and KILL escalation gates.
-  "test225-node-stop-convergence"
-  "test1204-btw-production-wiring"
-  "test1271-daemon-start-node"
-  "qa-cli-01-hub-start"
-  "qa-cli-02-network-create"
-  "qa-dash-07-auth-boundary"
-  "qa-dash-08-cross-account-views"
-  "qa-dash-10-incremental-poll"
-  "qa-hub-05-roundtrip"
-  "qa-hub-06-token-revoke"
-  "qa-hub-06b-cross-user-isolation"
-  "qa-hub-07-sse-reconnect"
-  "qa-hub-08-restart-persistence"
-  "qa-hub-09-task-state-machine"
-  "qa-hub-14-user-unread"
-  # #1532 补注册。它是 58 个孤儿之一,而且是**名字就写着用途**的那种
-  # (本套件与 test9-perm* 在按关键词分档时得分 0 —— 它们的断言
-  #  是 `no token → 401` 这种形式,词表里没有 401。#1532 记过这个 24% 的漏检)。
-  #
-  # 接回来之前先做了两件事(照 test236 的先例):
-  #   ① 修掉一条**过时到会误导人**的断言:原判据 `grep -q 'at least 6'` 把断言钉在
-  #      服务端的一句文案上,而策略此后收紧成分档(auth.ts:首用户<4 / 其余<8),
-  #      于是它红,名字却叫 `short password accepted` —— 读起来像服务端接受了弱密码,
-  #      **真相相反**。改成判行为(ok:false / 有 error),不判文案。
-  #   ② 两向见证:改测试发的密码为合法长度 ⇒ 该断言翻红(带响应原文);还原 ⇒ 20/20。
-  #
-  # 按 qa.sh 的真实调法实测:`docker build --no-cache` **21s**、`docker run --rm` **3s**、
-  # rc=0、20 条断言全过。(L1 软预算 900s,main 上余量 4-6%;这 24s 在余量内。)
-  "test3-security"
-  # 2026-08-19 补注册。它一直是孤儿(docs/test-suite-orphan-baseline.txt),
-  # 而在此之前套件里有 3 处字面量随一次改名过期(#1072):1 条 production grep
-  # 0 命中、2 条变异锚点 0 命中 ⇒ 变异是 no-op。修好之后它有三条成立的见证红,
-  # 才够格进这里 —— **先让它真的能红，再让 CI 跑它**。
-  # 按 qa.sh 的真实调法(docker run --rm，不挂 /artifacts)实测 rc=0。
-  "test236-dashboard-codex-goal"
-  # 2026-08-19 补注册。孤儿，但它本来就够格:两条 sed 变异后面都紧跟
-  # `grep -F '<变异后形态>' … >/dev/null`(锚点过期会当场红,而不是让变异变成 no-op),
-  # 且 :23-25 拿 resolver 的输出和【真实已安装的 SDK 版本】比,不是自证。
-  # 按 qa.sh 的真实调法(docker run --rm,不挂 /artifacts)实测 rc=0 pass=5 fail=0,
-  # 两条见证红都成立。耗时 build 105s + run 2s。
-  "test657-claude-native-version-pin"
-  # 2026-08-19 补注册。它之前是孤儿里 sed 最多(4 条)、也是唯一一处守卫都没有的，
-  # 所以 #1078 那轮我**没有**先接它 —— 先接只会把「有覆盖」的假象固定下来。
-  # #1079 补上 assert_mutated 之后才够格(那四条不能用 grep 写法:第 1 条变异后的形态
-  # 是原文的子串、后两条是删行，所以只能比对文件有没有变)。
-  # 按 qa.sh 真实调法(docker run --rm，不挂 /artifacts)实测 rc=0 RESULT pass=14 fail=0，
-  # 四条见证红全成立；耗时 build 104s + run 39s(L1 里较重的一个)。
-  "test654-dashboard-managed-launch"
-  # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的** ——
-  # `[[ "$SDK_VERSION" == 0.3.226 ]]` 是逐字相等，而 package.json 是 `^0.3.226`、
-  # 本套件 Dockerfile 不拷 lockfile ⇒ 解析到当时最新的 0.3.x，上游发到 0.3.235 就红。
-  # #1082 改成地板之后才够格（先修红、再登记）。
-  # 实测（按 qa.sh 真实调法 docker run --rm，不挂 /artifacts）：rc=0 RESULT pass=8 fail=0。
-  # 🔴 耗时按**冷构建**记：build 107s + run 33s = 140s（warm 只有 37s，会误导）。
-  # 推算：L1 24 条=3.50min → 25 条=5.32min；再加这个同量级的 ≈7min，
-  # 在 qa.yml:414 那个 10 分钟守卫内（那个守卫上一轮刚从 5 调到 10，原因见该处注释）。
-  "test656-claude-sdk-tool-aliases"
-  # 2026-08-19 补注册这三个纯单元套件。它们一直是孤儿 ——
-  # 61 条测试（19+19+23）此前不被任何 CI 跑到，而内容偏安全（token 生成/口令字典/认证校验）。
-  # 极便宜：各 build 2s + run 1~2s，没有 apt/install。
-  # 🔴 登记前先给它们补了 ARG SOURCE_COMMIT —— 原来三个都没有，
-  #   qa.sh 会在【没有 SHA 绑定】的情况下跑它们，而输出看起来一切正常
-  #   （这正是本文件上面那段注释警告过的形状）。绑了还让它们把 source_commit 打进输出。
-  "qa-ut-01-auth-tokens"
-  "qa-ut-02-password-dict"
-  "qa-ut-03-auth-validate"
-  # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的**，而且红得**完全没有输出**：
-  # 变异存活时那句裸的 `test "$X_rc" -ne 0` 在 set -e 下静默终止（#1096 让它说话），
-  # 说出来才发现是真覆盖洞：getUserAllNetworks() 的两条可达路径一条都没被测到（#1097 补上）。
-  # 三条见证红现在全部成立；按 qa.sh 真实调法实测 rc=0，build 3s + run 5s（很便宜）。
-  "test647-rest-explicit-columns"
-  # 2026-08-19 补注册这两个。它们此前是孤儿，**而且在干净检出上是红的**：
-  #   error: Could not resolve: "zod" ... at /agent-node-src/src/commhub-mcp.ts:31:19
-  # 根因不在测试逻辑，在 Dockerfile —— COPY 了 agent-node 源码却没 bun install。
-  # 🔴 它们之所以以前看着能过：仓里没有 .dockerignore，构建上下文会把开发者本地的
-  #    agent-node/node_modules 一起 COPY 进去 ⇒ 绿是【借来的】，取决于跑的人
-  #    有没有在本地 bun install 过。在干净检出／CI runner 上必红。
-  # 本 PR 给两个 Dockerfile 补了 `bun install --frozen-lockfile`，
-  # 干净 worktree（确认无 agent-node/node_modules）+ --no-cache 实测：
-  #   修前 run rc=1（zod 无法解析）→ 修后 run rc=0（OVERALL: PASS，各 34 expect）
-  # 便宜：build 含 bun install，run ~1s。
-  "test230-opencode-sender-label"
-  "test228-opencode-inbox-concurrency"
-  # Board #651. Reply-phase timeout must POST /session/:id/abort before the
-  # failed reply; removing that call turns the fake-opencode assertion red.
-  # Admission on a still-busy session is not aborted. Cheap: one bun test
-  # file, no real opencode binary.
-  "test651-opencode-timeout-abort"
-  # Board #656. A fake codex app-server that returns "at capacity" must
-  # retry the same body and, on a later success, emit one reply. Replacing
-  # the retry decision with give_up turns that assertion red (1:0:fail).
-  # The OpenCode case checks the wait extends the #651 reply deadline
-  # instead of aborting the shared session. Cheap: bun tests, no real binary.
-  "test656-capacity-retry"
-  # Board #667. cwd is still reported as project_dir. Starting in the node
-  # directory must warn with both paths; starting at the workspace root must
-  # not. Forcing the mismatch check to succeed turns the node-directory case
-  # red. Copies two source files, no install.
-  "test667-project-dir-warn"
-  # Board #668. A fake grok runtime holds one turn. The hub must show
-  # working plus that task, and mark the row running. Reporting only 200
-  # characters, letting the idle heartbeat win, or letting a later dispatch
-  # replace the text each turn the suite red.
-  "test668-grok-working-status"
-  # Board #672. A fake Claude key must abort on 401 before the CLI's own
-  # retry loop, and must not abort a 429. docker-run.args sets --cpus=2.
-  "test672-claude-auth-abort"
-  # Board #612. Docker --memory, via tests/$t/docker-run.args, so the real
-  # gate reads the cgroup. Putting the timeout cap back to the normal
-  # concurrency limit must turn the suite red.
-  "test612-start-admission"
-  # 2026-08-19 补注册。它此前是孤儿**且在 main 上是红的**，而红因有三层，
-  # 全部是「产品前进、套件写在它之前」，一条回归都没有：
-  #   ① #203 身份守卫（server/src/tools.ts 的 alias_identity_mismatch）——
-  #      产品**有意移除**了「ntok 用旧别名铸造、report_status 报新别名会被调和」这个行为，
-  #      理由写在守卫注释里：漂移的 ALIAS 会改写 api_tokens.name，导致此后该 token
-  #      的每一次 send_task 都被归到漂移别名上（#203 现象：grokB 的发送显示成 from=grokA）。
-  #   ② alias_not_found（tools.ts:411）：套件往【从未注册过】的 总指挥 发消息。
-  #      这一层之前发现不了，因为它在 ① 就死了。
-  # 🔴 修法是**倒过来断言现在真实存在的边界**，不是把断言删掉：
-  #   漂移别名必须被 alias_identity_mismatch 拒绝（#203 那道守卫此前**无人覆盖**）
-  #   ＋ 正控（换成绑定别名必须成功）＋ 原有的 from_session 防冒充断言一条没少（只是两侧对调）。
-  # 见证红：把漂移那次改用绑定别名 ⇒ 那条断言变红
-  #   FAIL: drifted alias was NOT rejected by the #203 guard, got: {"ok":true,...}
-  "test198-from-alias"
-  # 2026-08-20 补注册。它此前是孤儿**且在 main 上是 4 passed / 4 failed**，
-  # 红因共 6 层，**没有一条是回归** —— 全是产品前进、套件写在它之前：
-  #   ① 脚本全程用 master token（server/src/server.ts:169-170 已废弃它的写操作）
-  #   ② 我修 ① 时只改了两个 helper，**漏了内联的 SSE curl**（同一规则的第三个调用点）
-  #   ③ agent-node 自己读 /root/.anet/config.json，里面也是 master token
-  #   ④ utok_ 没有隐式 network，四类调用点都要显式带（含 SSE URL —— 我又漏过一次，
-  #      因为我数的是「认证头」，而 network 作用域落在**另一组端点**上）
-  #   ⑤ 节点注册要 **ntok_**（app-level rejection: network_token_required），
-  #      且按 #203 其 node_name 必须与别名一致
-  #   ⑥ --runtime http-api 已移出 agent-node 白名单（同 #1112③）
-  # 🔴 修法方向是**加断言不是减断言**：8 → 13 条，其中 3 条是新增的负向/边界断言
-  #   （master token 写操作必须 401 · utok_ 调 report_status 必须 network_token_required
-  #     · ntok_ 铸造别名一致）。
-  # 干净 worktree + --no-cache 实测：修前 4 passed/4 failed → 修后 **13 passed/0 failed**。
-  "test8-runtime"
-  # 2026-08-20 补注册。此前是孤儿且在 main 上 10 passed / 3 failed，两个根因，都不是回归：
-  #   ① --runtime http-api 已移出白名单（同 #1112③、#1116⑥）—— 只解释 3 条里的 2 条
-  #   ② `anet demo` 从「起一个 dashboard/server」改成「列出可用演示」，
-  #      而断言还在等旧行为的 'Agent Network Dashboard|Server:'
-  # 🔴 ② 的断言换成【现在真实的契约】而不是放宽：匹配一条目录条目行
-  #   （演示名 + 描述里的 agent 字样），demo 目录被清空/改名时它仍会红。
-  # ⚠️ run_step 用 `grep -Eqi`（**逐行 + POSIX ERE**）——我第一版写了跨行且带 \s 的正则，
-  #   它从一开始就匹配不到任何东西，而失败长得跟原来那条一模一样。
-  #   所以现在改断言前会先离线验一次「这个正则真的能命中实际输出」。
-  # 实测：修前 10/3 → 修后 **13 passed / 0 failed**。
-  "test17-user-journey"
-  # 2026-08-20 补注册。此前是孤儿且在 main 上 6 passed / 11 failed —— 11 条全是**一个**根因的级联：
-  #   注册返回的 network_token 绑定的是【用户名】claudeuser，而套件全程用别名 claude-agent，
-  #   撞 #203 身份守卫：{"ok":false,"error":"alias_identity_mismatch",
-  #                      "token_alias":"claudeuser","reported_alias":"claude-agent"}
-  #   ⇒ 第 3 步 report_status 就死，后面 10 条全是它的级联。**不是回归**，套件写在守卫之前。
-  # 🔴 修法同 tests/test198-from-alias（#1113）：**先把守卫钉成一条断言，再用一致身份走 happy path**。
-  #   而这里需要**两个** ntok（claude-agent 与 orchestrator）——因为 ntok 的 from_session
-  #   会被服务端强制成绑定别名（server/src/tools.ts:29-33），用同一个 token 发
-  #   from_session=orchestrator 会撞 from_session_identity_mismatch。
-  # 实测：修前 6/11 → 修后 **19 passed / 0 failed**；
-  #   见证红（把漂移那次的 alias 改成与绑定一致）⇒ 18 passed / 1 failed，红的正是新增那条。
-  "test12-claude-channel"
-  # 2026-08-20 补注册。此前是孤儿且在 main 上 3 passed / 6 failed。
-  # 🔴 而它最严重的问题不是那 6 条红，是它**用一条恒真断言把自己的真实故障盖住了**：
-  #     mcp_call "report_status" '...' >/dev/null   （三次，返回全丢掉）
-  #     pass "agents registered"                    （无条件）
-  #   而那三次调用一直在失败，逐字返回是：
-  #     {"ok":false,"error":"master-token auth is deprecated; use admin utok_"}
-  #   ⇒ 注册从没成功过，而成绩单上永远写着 PASS。
-  # 本 PR 两件：① 换 admin utok_ + 每别名自己的 ntok_（#203 要求 node_name 与别名一致）
-  #             ② 🔴 把无条件 pass 换成**逐个断言** —— 这条比 ① 重要：
-  #                ① 只修好这一次；② 让下一次注册失败**能被看见**。
-  #   并新增一条负向断言：master token 调 /mcp 必须被拒（把废弃边界真正测住）。
-  # 实测：修前 3/6 → 修后 **13 passed / 0 failed**；
-  #   见证红（把注册改回 master token）⇒ **5 passed / 8 failed** ——
-  #   也就是说那条断言现在真的会咬人，而改之前它在同样情况下会打印 PASS。
-  "test11-lifecycle"
-  # 2026-08-20 补注册这 3 个**本来就绿**的孤儿（干净 worktree + --no-cache，宿主 986f8aba，三个 rc=0）。
-  # 🔴 而登记前逐个核了三格，每一格今晚都有人（含我自己）栽过：
-  #   ① shebang —— qa-frontdoor-docs 的入口是 **run.mjs**（Node）不是 run.sh，
-  #      断言写成 bash 的 [[ ]] 在那里根本不会执行；已改用 JS 版。
-  #   ② ARG 名能不能被本文件下面那条 `^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)` 匹配到 ——
-  #      我第一版给 test-npm-security 起名 TESTNPMSEC_SOURCE_COMMIT，**当场校验发现不匹配**
-  #      （套件名里没有数字 ⇒ 只能用裸 SOURCE_COMMIT）。不匹配时 qa.sh **不传且不报错**。
-  #   ③ ARG 名与运行时 ENV 名是否一致（test573 那次就是两者不同，断言查了个不存在的变量）。
-  "test-npm-security"
-  "test648-probe-ip-pin"
-  "qa-frontdoor-docs"
-  # 2026-08-20 补注册。此前是孤儿且在 main 上 5 passed / 12 failed ——
-  # 12 条全是**一个**根因的级联：node_name 铸成 `agent-a-node` 而别名是 `agent-a`，
-  # 差一个 -node 后缀 ⇒ 撞 #203 身份守卫，第一步 report_status 就死。
-  # **不是回归**（同 #1113 test198、#1121 test12，这是同一根因的第三次）。
-  # 修法照前两次：先把守卫钉成一条断言，再用一致身份走 happy path。
-  # 实测：修前 5/12 → 修后 **18 passed / 0 failed**。
-  "test13-multi-channel"
-  # 2026-08-20 补注册。孤儿，在 origin/main 55b6a2dc 上实跑 build=0 run=0（真绿，非探针）。
-  "qa-517-mcp-write-scope"
-  # 2026-08-20 补注册。孤儿，在 origin/main 55b6a2dc 上实跑 build=0 run=0（真绿，非探针）。
-  "test203-alias-crossover-repro"
-  # 2026-08-20 补注册这 4 个。它们是**本来就绿**的孤儿 ——
-  # 干净 worktree（无 node_modules）+ --no-cache，宿主钉在 f13699ff == origin/main，
-  # 四个全部 build=0 run=0。登记它们不是修 bug，是把「验过的绿」变成「有门守着的绿」：
-  # 在此之前它们绿不绿没有任何东西会告诉我们。
-  # 🔴 其中 test583 / test199 原来**没有 ARG SOURCE_COMMIT**，本次一并补上
-  #   （否则 qa.sh 会在【没有 SHA 绑定】的情况下跑它们，而输出看起来一切正常）。
-  # 本机实测耗时（build+run）：test583 4+2s · test573 10+3s · test520 58+40s · test199 120+1s
-  # ⚠️ 一次加 4 个会让 L1 变长。按仓里既有的教训，这里**不外推** ——
-  #   直接看本 PR 上 L0+L1 job 的实测时长，再决定要不要拆批。守卫是 qa.yml 的 10 分钟。
-  "test583-dashboard-chat-idempotency"
-  "test573-codex-turn-reconcile"
-  "test520-ack-inbox-docs"
-  "test199-agent-node-from-session"
-  # 2026-08-19 批量补注册这 7 个。全部按 qa.sh 的真实调法（docker run --rm，不挂 /artifacts）
-  # 实测 rc=0；本机耗时（build+run）：
-  #   test652 3+4s · test653 8+4s · test-goal-cli 21+2s · test702 23+33s
-  #   test584 23+55s · test696 93+5s · test520-dashboard-attachment-read 134+21s
-  # 🔴 其中 test520-dashboard-attachment-read 与 test-goal-cli 原来**没有 ARG SOURCE_COMMIT**，
-  #    本 PR 一并补上（同 #1094 的形态：ARG/ENV 放 ENTRYPOINT 之前 + run.sh 里打印）。
-  # ⚠️ 一次加 7 个会让 L1 变慢。上一次我因为拿一个**被超时截断的观测**去外推而估错过
-  #    （#1092 那轮：25 条 5.32min 是斧头落下的位置，不是完成时间），所以这次不外推，
-  #    直接看本 PR 上 L0+L1 job 的实测时长再决定要不要拆批。守卫是 qa.yml:414 的 10 分钟。
-  "test520-dashboard-attachment-read"
-  "test584-dashboard-codex-delivery"
-  "test-goal-cli"
-  "test652-admin-network-list"
-  "test653-batch-workdir"
-  "test696-human-low-value-reply"
-  "test702-primary-network"
-  # 2026-08-19 补注册。它此前是孤儿**而且在 main 上就是红的**，
-  # 而红的表面原因（逐字计数 16 vs 17）底下藏着一道**恒真的门**：
-  # WEAK_COUNT 的正则对真实文件命中 0 行，那句
-  # "docker-e2e has no weak grep-ok assertions" 永远不可能红（#1088 修）。
-  # 修好之后 rc=0、weak_assertions=14（真实值），才够格接进来。
-  "test292-e2e-ok-assertions"
-  # 2026-08-18 补注册 —— 这四个是 #863 修好的那批(commit 61f7203a,「静默失效 6 周」
-  # 实跑 4/4 从红到绿),但修完之后**没有注册到任何地方**,于是回到了同一个位置:
-  # 没有任何东西会跑它们。#861 的实测把最后一个未知量补上了。
-  #
-  # 实测(通信IM马,隔离 tree,顺序 build+run):
-  #   warm cache   10:7+6  11:1+3  12:1+4  13:7+6   合计 35s
-  #   🔴 warm 是误导 —— 四个共享 node:20-slim + apt + bun.sh + `bun install server/`
-  #      的层。单独用 --no-cache 测 qa-hub-10 是 **22s**(比 warm 的 7s 多 15s)。
-  #      CI 冷跑的形状是「第一个 ~22s,后 3 个各 1-7s,4 个 run 合计 19s」⇒ 约 44-50s。
-  #   L0+L1 job 近 4 次 main 实测 137-165s / 预算 300s ⇒ 加完约 181-215s,余 85-119s。
-  #
-  # 依赖:这四个**不需要活 hub、不需要外网、不需要凭据**。每个 run.sh 自己在
-  # loopback 上起 hub(端口 9210/9211/9212/9213 写死互不撞),跑完 trap kill 掉自己的
-  # HUB_PID。run 阶段完全离网;build 阶段要外网(bun.sh + apt),与既有套件同形。
-  "qa-hub-10-network-scope-regressions"
-  "qa-hub-11-node-delete-sse"
-  "qa-hub-12-servers-endpoint"
-  "qa-hub-13-server-health-agents"
-  "qa-node-02-success-reply"
-  "qa-node-03b-task-events"
-  "test686-rest-shape-golden"
-  "test765-batch-runtime-gate"
-  "test766-bunx-preflight"
-  "test746-setup-bun-pin"
-  # 2026-08-27 补注册。Feishu CommHub route 是纯 mock/本地 Docker 验证：
-  # 不需要 FEISHU_APP_SECRET，不连接真实飞书，不往生产 IM 发探针。
-  # 它锁住三件事：legacy IPC + CommHub 双路径同时活着时 witnessed-red 为
-  # sendCount:2；CommHub reply 只发一次；orphan reply 明确日志+ack，不回落默认会话。
-  "test1241-feishu-commhub-routing"
-  "test1362-create-node-pending"
-  # #1627/#1309 —— 单条测试余量仪表自己的回归:钉死的 bun 1.3.14 上**实测**
-  # 隐式默认(5000ms)、显式 500ms 声明、钩子撞满它声明的超时,以及 qa.sh
-  # 启动清日志。跑的是 `scripts/check-test-margin.py` 本体,含其内嵌夹具。
-  "test1627-test-margin"
-  # 2026-08-13 扫出三个从没进 CI 的完整 Docker 门(test224 / test597 / test679),
-  # 一度想加在这里,但 L1 是「~16s 并行」的快层、job 预算 5 分钟,实测在 CI 上
-  # 已经用掉 141–148s;而 qa.sh 的 build 是**串行**的(只有 docker run 并行),
-  # 那三个套件单跑就要 39s / 15s / 36s,还要各加一次 build(test679 带
-  # javascript-obfuscator)。塞进来是拿余量赌。
-  # 它们改放在 qa.yml 的独立 job(预算 12 分钟),同单测门的形状。
-)
+# #675 —— L1 套件改为**按目录登记**：每个进 L1 的套件自己放一个空标记文件
+# tests/<套件名>/qa.l1，这里用 glob 收齐并按名字排序。
+#
+# 为什么不再用共享数组：并行 PR 每次都在同一段列表里插一行，冲突不断
+# （#2456/#2463 就是这样撞的）。按目录登记后，新增套件只要在自己目录里加一个
+# 空文件，不再触碰共享名单，并行 PR 之间也就不会为同一行打架。
+# 每条套件原来的说明（board 引用等）已经搬进各自目录的 qa.l1 里，就近可读。
+#
+# 只收 tests/*/qa.l1 —— 不是收所有 tests/*/run.sh：孤儿基线是**故意**留在 L1 外面的。
+L1_TESTS=()
+while IFS= read -r _marker; do
+  L1_TESTS+=("$(basename "$(dirname "$_marker")")")
+done < <(find "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests" -mindepth 2 -maxdepth 2 -name qa.l1 | sort)
+
+# #2800 —— 按**实测构建耗时降序**排序，让取模分片自然地做出「最重优先」的均衡分配。
+#
+# 为什么：取模分片（下面 `_idx % _n`）只保证「不重不漏」，不保证均衡。
+# 2026-10-30 实测（三个 shard 的套件数都是 29，很均）：
+#
+#     分片        构建总时长     墙钟
+#     shard 1/3    1792s         12.8 min
+#     shard 2/3     901s          7.3 min
+#     shard 3/3    1108s          7.1 min
+#
+# 差 891s 全部来自「哪几个重套件恰好落在哪一片」。按耗时降序排列后，
+# 取模分片等价于 LPT（最重优先）分配，预测三片 1397/1240/1164s（差 233s）。
+#
+# 耗时数据来自 CI 日志的 `[l1-build] <秒>s <套件名>`（#3231 加的），放在
+# tests/qa-l1-weights.tsv。**缺项的套件按 0 处理（排最后）** —— 所以这份表过期
+# 也只会让分配回到「接近字母序」，不会漏跑任何一个套件。
+_weights="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests/qa-l1-weights.tsv"
+if [[ -f "$_weights" && ${#L1_TESTS[@]} -gt 0 ]]; then
+  _ordered=()
+  while IFS= read -r _name; do _ordered+=("$_name"); done < <(
+    awk -F'\t' 'BEGIN{OFS="\t"} NR==FNR{ if ($1 !~ /^#/ && NF>=2) w[$1]=$2; next }
+                 { print (($1 in w) ? w[$1] : 0), $1 }' "$_weights" <(printf '%s\n' "${L1_TESTS[@]}") \
+      | sort -k1,1nr -k2,2 | cut -f2
+  )
+  # 只在「数量没变」时才采用，避免 awk/sort 出岔子把套件弄丢（那会变成静默漏跑）
+  if [[ ${#_ordered[@]} -eq ${#L1_TESTS[@]} ]]; then
+    L1_TESTS=("${_ordered[@]}")
+  else
+    note "警告：按耗时重排后条目数从 ${#L1_TESTS[@]} 变成 ${#_ordered[@]}，放弃重排（保持原顺序）"
+  fi
+fi
+
 
 if [[ "${1:-}" == "--list" ]]; then
   echo "L0 unit (bun test, local, ms-budget):"
@@ -394,7 +128,7 @@ esac
 
 # docs-only PR 的轻量路径:qa.yml 的 changes job(.github/scripts/ci-docs-only.py)
 # 只把「镜像里有 docs-site」的 L1 套件放进 QA_L1_ONLY。空/未设 = 全部 L1。
-# 名字必须逐字在 L1_TESTS 里 —— 拼错一个不是「少跑一个」,是红。
+# 名字必须逐字在 L1_TESTS 里（#675 起 = tests/<名字>/qa.l1 存在）—— 拼错一个不是「少跑一个」,是红。
 if [[ -n "${QA_L1_ONLY:-}" ]]; then
   _l1_keep=()
   for _t in $QA_L1_ONLY; do
@@ -407,7 +141,86 @@ if [[ -n "${QA_L1_ONLY:-}" ]]; then
   L1_TESTS=("${_l1_keep[@]}")
 fi
 
+# #2800 —— L1 分片：墙钟地板是「L0+L1 单个 job 跑 66 个套件 25.8 分钟」，
+# 并行度再高也压不下去。这里按索引取模切片，由 qa.yml 的 matrix 传 QA_L1_SHARD=i/n。
+# 判据：各分片并集 == 全集（顺序无关），且每片至少 1 个套件。
+if [[ -n "${QA_L1_SHARD:-}" ]]; then
+  if [[ ! "$QA_L1_SHARD" =~ ^([0-9]+)/([0-9]+)$ ]]; then
+    fail "QA_L1_SHARD 格式应为 i/n（例 1/3），收到: $QA_L1_SHARD"; exit 2
+  fi
+  _i=${BASH_REMATCH[1]}; _n=${BASH_REMATCH[2]}
+  if (( _n < 1 || _i < 1 || _i > _n )); then
+    fail "QA_L1_SHARD 越界: $_i/$_n"; exit 2
+  fi
+  _l1_shard=(); _idx=0
+  for _t in "${L1_TESTS[@]}"; do
+    if (( _idx % _n == _i - 1 )); then _l1_shard+=("$_t"); fi
+    _idx=$((_idx+1))
+  done
+  if (( ${#_l1_shard[@]} == 0 )); then
+    fail "QA_L1_SHARD=$_i/$_n 分到 0 个套件（总数 ${#L1_TESTS[@]}）"; exit 2
+  fi
+  note "QA_L1_SHARD=$_i/$_n: 本片 ${#_l1_shard[@]}/${#L1_TESTS[@]} 个 L1 套件"
+  L1_TESTS=("${_l1_shard[@]}")
+fi
+
+# #2871 —— 单个 L1 套件的 build 命令，**唯一来源**。
+# 预构建阶段与主循环都必须调它：任何一边复制一份命令字符串，都会让两边悄悄分叉。
+# （2026-10-28 踩过：预构建漏了 $build_args，而它装着 SOURCE_COMMIT —— 那是 provenance 门的输入。）
+_qa_l1_build_cmd() {
+  local t="$1" build_args="" arg_name _qa_sha _qa_blob _heavy
+  arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}' || true)
+  _qa_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "$arg_name" && -n "$_qa_sha" ]]; then
+    build_args="--build-arg $arg_name=$_qa_sha"
+    _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
+    [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
+  fi
+  case "$t" in
+    test8-runtime|test1203-btw-production-e2e) _heavy=1 ;;
+    *) _heavy=0 ;;
+  esac
+  if [[ "$_heavy" == "1" && "${QA_BUILDX_CACHE:-0}" == "1" ]] && docker buildx version >/dev/null 2>&1; then
+    printf 'docker buildx build --load %s --cache-from type=gha,scope=l1h-%s --cache-to type=gha,mode=min,scope=l1h-%s -t anet-%s -f tests/%s/Dockerfile .' \
+      "$build_args" "$t" "$t" "$t" "$t"
+  else
+    printf 'docker build -q %s -t anet-%s -f tests/%s/Dockerfile .' "$build_args" "$t" "$t"
+  fi
+}
+
 START=$(date +%s)
+
+# #2871 —— 可选并行预构建（默认关闭；QA_L1_BUILD_PAR<=1 时这段完全不执行）。
+# build 占了 L1 墙钟的 90%（实测 shard1 344/384s、shard2 496/549s），而它是串行 for。
+# 这里先用同一个 _qa_l1_build_cmd 并行构建，主循环凭 /tmp/qa-l1-<t>-prebuilt 跳过 build。
+# 失败语义：预构建失败的套件**不写标记**，主循环会照常再串行构建一次并在那里报错 ——
+# 也就是最坏情况退化成今天的行为，不会因为并行而少报错。
+_l1_bpar="${QA_L1_BUILD_PAR:-1}"
+if [[ "$_l1_bpar" =~ ^[0-9]+$ ]] && (( _l1_bpar > 1 )); then
+  note "L1 预构建并发 = ${_l1_bpar}（QA_L1_BUILD_PAR）"
+  rm -f /tmp/qa-l1-*-prebuilt
+  : > /tmp/qa-l1-prebuild.log
+  _pb0=$SECONDS
+  for _pt in "${L1_TESTS[@]}"; do
+    while (( $(jobs -rp | wc -l) >= _l1_bpar )); do wait -n 2>/dev/null || true; done
+    (
+      _pcmd="$(_qa_l1_build_cmd "$_pt")"
+      # #2800 —— 每套件的构建耗时必须自己报出来。
+      # 现在只知道分片总数是均的（29/29/29），却不知道哪几片重 —— 因为**没有任何一处
+      # 记录单个套件的构建时长**。没有这张表，「按耗时重新分片」就只能靠猜，
+      # 而猜错的代价是「某个套件从此不在任何分片里」（它和「跑过了」在报告里长得一样）。
+      _pb1=$SECONDS
+      if eval "$_pcmd" >"/tmp/qa-l1-$_pt-build.log" 2>&1; then
+        touch "/tmp/qa-l1-$_pt-prebuilt"
+      else
+        printf '%s\n' "$_pt" >> /tmp/qa-l1-prebuild.log
+      fi
+      printf '[l1-build] %5ss  %s\n' "$(( SECONDS - _pb1 ))" "$_pt"
+    ) &
+  done
+  wait
+  note "L1 预构建完成，用时 $(( SECONDS - _pb0 ))s；失败 $(wc -l < /tmp/qa-l1-prebuild.log) 个（主循环将串行重试）"
+fi
 FAILED=0
 
 # 🔴 启动时清掉**上一轮**的日志。复用的 runner 上,`/tmp/qa-l0-*.log` 与
@@ -509,32 +322,13 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     # 命令替换,set -e 于是在第一个这样的套件上把 runner 打死。
     # 第一版就是这么挂的:CI 在 `build qa-cli-01-hub-start` 处 exit 1,
     # 一个套件都没跑成,而失败看起来像「L1 挂了」而不是「参数推导写错了」。
-    build_args=""
-    arg_name=$(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' \
-      "tests/$t/Dockerfile" 2>/dev/null | head -1 | awk '{print $2}' || true)
-    # 🔴 git 调用必须是非致命的。test823 会在一个**只装了 bash/coreutils/procps、
-    # 没有 git** 的容器里重放这个脚本(它桩了 docker 和 npm,但没桩 git)。
-    # 直接写 $(git rev-parse HEAD):容器里 git 不存在 → 127 → set -e 当场中断
-    # → docker 桩一次都没被调用 → 峰值恒为 0 → 闸门自己的回归「通过」得毫无意义。
-    _qa_sha="$(git rev-parse HEAD 2>/dev/null || true)"
-    if [[ -n "$arg_name" && -n "$_qa_sha" ]]; then
-      build_args="--build-arg $arg_name=$_qa_sha"
-    fi
-    # blob 绑定:光验 SOURCE_COMMIT 的格式不够(任何 40 位十六进制都能过,
-    # 而那个 SHA 可能根本不含镜像里被测的文件)。套件的 Dockerfile 声明了
-    # ARG RUNSH_BLOB 时才供给 —— 同样从 Dockerfile 读,不猜。
-    if grep -qE '^ARG RUNSH_BLOB' "tests/$t/Dockerfile" 2>/dev/null; then
-      _qa_blob="$(git rev-parse "HEAD:tests/$t/run.sh" 2>/dev/null || true)"
-      [ -n "$_qa_blob" ] && build_args="$build_args --build-arg RUNSH_BLOB=$_qa_blob"
-    fi
-    # 🔴 #1593 —— build 的耗时必须**自己报**,不能靠相邻 note 行的时间差去推。
-    #    2026-09-01 整晚我都在用「相邻 `build` 行的间隔」当作单个套件的 build 耗时,
-    #    那个数把 build **和它后面那段发射/等待逻辑**混在一起 —— 够用来分「今天整体慢没慢」
-    #    (绿 11.9-12.3s vs 撞守卫 25.2-29.0s,两簇分得很开),但**答不了「慢在谁身上」**。
-    #    当晚 9 次 L0+L1 里 5 次撞 30 分钟守卫、152 分钟零产出(74%),
-    #    而唯一能下钻的量都还是推出来的。加这一行,下次就是读数不是推算。
     _b0=$SECONDS
-    if ! dockerrun "docker build -q $build_args -t anet-$t -f tests/$t/Dockerfile ." >/tmp/qa-l1-$t-build.log 2>&1; then
+    _build="$(_qa_l1_build_cmd "$t")"
+    if [[ -f "/tmp/qa-l1-$t-prebuilt" ]]; then
+      # #2871 预构建阶段已成功（同一函数、同一条命令）⇒ 跳过 build
+      rm -f "/tmp/qa-l1-$t-prebuilt"
+      printf '· build done %s  [prebuilt]\n' "$t"
+    elif ! dockerrun "$_build" >/tmp/qa-l1-$t-build.log 2>&1; then
       printf '· build fail %s  [%ss]\n' "$t" "$(( SECONDS - _b0 ))"
       fail "L1 $t — build failed, see /tmp/qa-l1-$t-build.log"
       FAILED=$((FAILED+1))
@@ -623,7 +417,11 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
       _run_cmd+=" ${_qa_run_flags} anet-$t"
       dockerrun "$_run_cmd" >/tmp/qa-l1-$t-run.log 2>&1 || _rc=$?
       _e=$(( $(date +%s) - START ))
-      printf '%s\t%s\t%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv
+      # 2026-10-31 —— 时间线改成**带标签**的一行（外部复核 ⑥：「给 log_format 加列会移动其后的所有下标
+      # ⇒ 会亲手制造第 ⑤ 条；必须先把消费方改成按标签取值」）。
+      # 这个文件是 /tmp 里的临时产物，不是历史 —— 所以改它不会让任何历史 run 对不上，
+      # 而按位置取值的消费方（$2/$3）会在加一列时静默算错时长。
+      printf 'suite=%s\tstart=%s\tend=%s\n' "$t" "$_s" "$_e" >> /tmp/qa-l1-timing.tsv
       # 🔴 **完成即打印**,不要只留给结尾的汇总。
       #    2026-08-27 一次 L0+L1 顶到 30 分天花板被 kill(run 33126449082,1815s):
       #    18 个 build 起来了,而时间线**一行都没有** —— 因为汇总只在所有 wait 结束后才跑,
@@ -645,7 +443,7 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     #    bash/coreutils/procps 的容器里重放(见本文件上面那条注释),那里未必有。
     #    退化行为是「安静地取不到时间」而不是报错,但那正是最难发现的一种坏 ——
     #    输出少了一段,谁也不会注意到。awk 是字段比较,不涉及正则方言。
-    _line=$(awk -F'\t' -v t="$_t" '$1==t{last=$0} END{if(last)print last}' /tmp/qa-l1-timing.tsv 2>/dev/null || true)
+    _line=$(awk -F'\t' -v t="suite=$_t" '$1==t{last=$0} END{if(last)print last}' /tmp/qa-l1-timing.tsv 2>/dev/null || true)
     [ -z "$_line" ] && return 0
     local _a _b
     _a=$(printf '%s' "$_line" | cut -f2); _b=$(printf '%s' "$_line" | cut -f3)
@@ -721,8 +519,16 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
   if [ -s /tmp/qa-l1-timing.tsv ]; then
     echo
     echo "L1 时间线（相对 L1 起点，按开始偏移排序）— #1333"
-    sort -t$'\t' -k2,2n /tmp/qa-l1-timing.tsv \
-      | awk -F'\t' '{printf "  +%4ds .. +%4ds  (%3ds)  %s\n", $2, $3, $3-$2, $1}'
+    # 按标签取值（不按位置）：插一个字段也不会让三列错位。
+    awk -F'\t' '
+      function lab(key,   i) { for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+      { n = lab("suite"); st = lab("start"); en = lab("end")
+        if (n == "" || st == "" || en == "") { bad++; next }
+        printf "%d\t%d\t%d\t%s\n", st, en, en - st, n }
+      END { if (bad) printf "✗ 时间线有 %d 行缺少 suite=/start=/end= 标签 ⇒ 拒绝出表（不打印猜出来的数字）\n", bad > "/dev/stderr" }
+    ' /tmp/qa-l1-timing.tsv \
+      | sort -k1,1n \
+      | awk -F'\t' '{printf "  +%4ds .. +%4ds  (%3ds)  %s\n", $1, $2, $3, $4}'
     # 🔴 #1627 —— 一行**格式固定**的摘要,专门为了「跨 run 比快慢」。
     #
     #    今天(2026-08-31)我能判定五次红都是「慢 runner 撞绝对超时」,
@@ -739,7 +545,13 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
     # ⚠ 时长是**算出来的**($3-$2),不是列 —— 不能直接 `sort -k4`。
     #   第一版我就这么写了,输出是一串带时长的套件名、**看起来完全合理**,
     #   实际是原文件顺序(漏掉真正第 3 慢的那个,混进一个 1s 的)。
-    _slowest=$(awk -F'\t' '{print $3-$2"\t"$1}' /tmp/qa-l1-timing.tsv 2>/dev/null \
+    # ⚠ 时长是**算出来的**（end-start），仍然不是列 —— 但现在两侧都按标签取。
+    _slowest=$(awk -F'\t' '
+        function lab(key,   i) { for (i = 1; i <= NF; i++) if (index($i, key "=") == 1) return substr($i, length(key) + 2); return "" }
+        { n = lab("suite"); st = lab("start"); en = lab("end")
+          if (n == "" || st == "" || en == "") next
+          print (en - st)"\t"n }
+      ' /tmp/qa-l1-timing.tsv 2>/dev/null \
       | sort -k1,1nr \
       | awk -F'\t' 'NR<=5{printf "%s%s=%ds", (NR>1?",":""), $2, $1}')
     echo "L1-TIMING v1 total=$(( $(date +%s) - START ))s suites=$(wc -l < /tmp/qa-l1-timing.tsv | tr -d ' ') slowest=${_slowest}"
@@ -781,8 +593,35 @@ if [[ "$L1_SOFT_BUDGET_S" != "0" && $ELAPSED -gt $L1_SOFT_BUDGET_S ]]; then
 fi
 
 echo
+# 2026-10-31 —— 「ALL PASS」在没有说清**跑了哪几层**时是两个事件的同值：
+#   (L0+L1 全过) 与 (只跑了 L0) —— 而后者在 CI 里出现过（--l0 / 早退）。
+#   外部复核给的同款反例：某 gate 的「全绿」= L0 全过，或 L0 全过 + 27 条没有读数。
+# ⇒ 汇总行必须自带作用域；未跑的层单独印一行，不许让它消失在一个绿里。
+SCOPE=""
+[[ $RUN_L0 -eq 1 ]] && SCOPE="${SCOPE}L0"
+[[ $RUN_L1 -eq 1 ]] && SCOPE="${SCOPE:+$SCOPE+}L1"
+NOT_RUN=""
+[[ $RUN_L0 -eq 0 ]] && NOT_RUN="${NOT_RUN}L0 "
+[[ $RUN_L1 -eq 0 ]] && NOT_RUN="${NOT_RUN}L1 "
+if [[ -n "$NOT_RUN" ]]; then
+  note "本次**未运行**：${NOT_RUN}（--l0 / 环境变量所致）⇒ 上面的绿不覆盖这些层"
+fi
+# 2026-10-31 —— **「没有读数」必须进退出码**（外部复核：
+# 「聚合器在散文里说对，在退出码里说反」——NORUN 印成「没有读数(不是通过)」却不在退出条件里）。
+# 本仓的具体形态：请求了某一层，而那一层**一个套件都没跑**（!= 全过）。
+#   L1 请求了但时间线为空 ⇒ 不是「L1 全绿」，是「L1 没有读数」。
+NO_READING=""
+if [[ $RUN_L1 -eq 1 ]]; then
+  _l1_ran=$(wc -l < /tmp/qa-l1-timing.tsv 2>/dev/null | tr -d ' ' || echo 0)
+  [[ "${_l1_ran:-0}" -eq 0 ]] && NO_READING="${NO_READING}L1(0 套件) "
+fi
+if [[ -n "$NO_READING" && $FAILED -eq 0 ]]; then
+  fail "没有读数（不是通过）：${NO_READING}—— 请求了该层，但它一个套件都没产出结果"
+  echo "  ⇒ 这与「该层全过」是两件事；先查为什么没跑起来（构建失败 / 早退 / 过滤条件）。"
+  exit 1
+fi
 if [[ $FAILED -eq 0 ]]; then
-  ok "ALL PASS in ${ELAPSED}s"
+  ok "ALL PASS in ${ELAPSED}s (scope: ${SCOPE:-none})"
   exit 0
 else
   fail "$FAILED test(s) failed in ${ELAPSED}s"

@@ -1,3 +1,18 @@
+// 2026-10-31 —— **本地直跑会看到若干条红，那不是回归**（与 hub-provider-config.test.ts 同一类）。
+// ⚠️ 不要在这里写死条数：它随环境变（写下这句时是 4，同一周实测已是 6）。
+//    要「几条、红在哪一档」就现跑：`scripts/run-server-tests.sh --triage daemon-provider-snapshots`
+//
+// 实测（本机，逐文件跑，独立 DB）：
+//   PASS 13 / FAIL 4
+//   失败点的期望都是 status:"succeeded"，实际收到 "failed"
+//   （reconcileProviderSnapshots 写回前会对 `daemon_provider_writes` 做一次
+//     validateWrite 的逐字段确认；本地没有那套容器网络/编译产物时这一步必失败）
+//
+// 反证（**这一步才是关键**，否则「环境问题」只是一句免罪声明）：
+//   把本次改动 `git stash -u` 后在同一个 HEAD 上重跑 ⇒ PASS 13 / FAIL 4，同一个 4 条。
+//   ⇒ 它在我改之前就红，且红的集合完全相同。
+//
+// 判定这个文件是否健康，看 `hub-provider-core.yml` 的容器测试，不看本地 bun test。
 import "./require-explicit-test-db";
 import { afterAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
@@ -105,9 +120,18 @@ test('managed login: admin intent → capable target daemon → session manager 
     expect((await command({ action: 'start', session_id: session, token: 'TEST-ONLY' })).ok).toBe(false);
     const start = await command({ action: 'start', session_id: session });
     expect(start.ok).toBe(true);
-    expect((await daemon('pull_daemon_provider_snapshots', { accept_writes: true, accept_applications: true })).requests).toEqual([]);
+    // 2026-10-31 —— #3275：pull 的形状（本地可验的那一半）。
+    // ⚠️ 只钉**空结果**：非空 requests[0] 的形状要走完整条 daemon 链（容器里才有），
+    //    本地拿到的是空数组。把「本地能验的那一半」钉住，比按猜测写全更难被证伪。
+    const emptyPull = await daemon('pull_daemon_provider_snapshots', { accept_writes: true, accept_applications: true });
+    expect(Object.keys(emptyPull).sort()).toEqual(["ok", "requests"]);
+    expect(emptyPull.requests).toEqual([]);
     expect((await client('daemon', 'other')('pull_daemon_provider_snapshots', { accept_logins: true })).ok).toBe(false);
-    expect((await daemon('ack_daemon_provider_snapshot', { request_id: start.request_id, login: { request_id: session, status: 'authenticated', token: 'TEST-ONLY' } })).ok).toBe(false);
+    // ack 的**拒绝**形状（真实调用给出）：{ ok:false, error }，且 error 是闭集里的具体码 ——
+    // 不是一句散文。拒绝比成功更容易在本地跑出来，所以先钉这一个方向。
+    const badAck = await daemon('ack_daemon_provider_snapshot', { request_id: start.request_id, login: { request_id: session, status: 'authenticated', token: 'TEST-ONLY' } });
+    expect(Object.keys(badAck).sort()).toEqual(["error", "ok"]);
+    expect(badAck).toMatchObject({ ok: false, error: "invalid_login_receipt" });
     await reconcileProviderSnapshots(deps);
     const challenge = await read(start.request_id);
     expect(challenge.status).toBe('succeeded');
@@ -156,7 +180,15 @@ test('application transport: scoped intent, capability gate, exact public receip
     expect((await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, application: bad })).error).toBe('invalid_application_receipt');
   }
   expect((await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, snapshot: snapshot() })).ok).toBe(false);
-  expect((await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, application: receipt })).status).toBe('succeeded');
+  // #3275 批次 1·d —— 同变量口径 + 闭集：成功回执恰好 {ok, status}；
+  // 而「重复 ack（非 pending）」走的是 {ok, status} 的**另一个值域**（status=已有状态），
+  // 只断言 .status 时，把两个出口合并、或给某一个出口多加一个键，都不会有东西变红。
+  const appliedAck = await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, application: receipt });
+  expect(Object.keys(appliedAck).sort()).toEqual(['ok', 'status']);
+  expect(appliedAck).toEqual({ ok: true, status: 'succeeded' });
+  const reAck = await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, failed: true });
+  expect(Object.keys(reAck).sort()).toEqual(['ok', 'status']);
+  expect(reAck).toEqual({ ok: true, status: 'succeeded' });   // 已终态 ⇒ 原样回读，不被改成 failed
   await daemon('ack_daemon_provider_snapshot', { request_id: r.request_id, failed: true });
   const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
   expect(read.status).toBe('succeeded'); expect(read.application).toEqual(receipt); expect(read.snapshot).toBeNull();

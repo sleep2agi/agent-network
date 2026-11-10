@@ -1,7 +1,31 @@
-import { refreshScheduledBackoff } from "./scheduled-backoff.js";
+import { refreshScheduledBackoff } from "./scheduled-backoff.js"; import { scheduledFailureCode } from "./scheduled-failure-code.js";
 import { createAdapter, type DbAdapter } from "./db-adapter"; import { withStatementHook } from "./status-read-cache"; // #431 写 sessions 的语句让 /api/status 缓存失效
+import { sessionSourceGrantSchema } from "./session-source-grant";
+import { sessionSourceAdmissionSchema, sessionSourceExecutionSchema, sessionSourceDeliverySchema, sessionSourceTransportSchema, sessionProjectCreateSchema, migrateProjectOperationJournal } from "./session-source-admission-store";
+import { sessionSourceCreateGuards } from "./session-source-create";
 
 export const db: DbAdapter = withStatementHook(createAdapter());
+db.exec(sessionSourceGrantSchema);
+db.exec(sessionSourceAdmissionSchema);
+db.exec(sessionSourceExecutionSchema);
+db.exec(sessionSourceDeliverySchema);
+db.exec(sessionSourceTransportSchema);
+db.exec(sessionProjectCreateSchema);
+migrateProjectOperationJournal(db);
+
+// #590 additive journal. Keep intent tombstones: deleting one permits the
+// same user intent to create a second child after an uncertain outcome.
+db.exec(`CREATE TABLE IF NOT EXISTS session_fork_requests (
+  request_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL,
+  network_id TEXT NOT NULL, node_id TEXT NOT NULL, token_id TEXT NOT NULL,
+  requester_token_id TEXT NOT NULL, requester_user_id TEXT NOT NULL,
+  session_id TEXT NOT NULL, binding_id TEXT NOT NULL, expires_at INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending','in_progress','done','failed','unknown','expired')),
+  result_session_id TEXT, error TEXT,
+  UNIQUE(requester_user_id, network_id, intent_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_fork_active_node
+  ON session_fork_requests(network_id,node_id) WHERE status IN ('pending','in_progress');`);
 
 // Schema
 db.exec(`
@@ -137,6 +161,13 @@ for (const col of [
   // Node run-log view — the same session answers logs_tail on the rules-file
   // doorbell (node-logs.ts). Sticky, bound-token only, like above.
   { name: "logs_capable", def: "INTEGER NOT NULL DEFAULT 0" },
+  // #2211 — what the node last did with the network's team rules (agent-node .156+
+  // reports it on every status). Not sticky: the newest report wins, and a node that
+  // later starts reporting `skipped` must be able to clear an older revision.
+  { name: "team_rules_revision", def: "INTEGER" },
+  { name: "team_rules_status", def: "TEXT" },
+  { name: "team_rules_at", def: "TEXT" },
+  { name: "team_rules_reason", def: "TEXT" },
 ]) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN ${col.name} ${col.def}`); } catch {}
 }
@@ -167,6 +198,13 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_agent_telemetry_alias_time
     ON agent_telemetry(network_id, alias, created_at);
+
+  -- #2614 —— retention 每小时跑一次 DELETE FROM agent_telemetry WHERE created_at < ?。
+  -- 上面三个复合索引都以 network_id 打头，**这个查询用不上**（没有 network_id 等值条件），
+  -- 于是每次扫全表 62 万行 → 生产实测每小时出现 **8–11 秒的事件循环阻塞**
+  -- （[commhub retention] swept in 8331ms / 9863ms / 10588ms，同时日志静默 11 秒）。
+  -- 单独给 created_at 建索引，让这个扫描变成范围 seek。
+  CREATE INDEX IF NOT EXISTS idx_agent_telemetry_created ON agent_telemetry(created_at);
 `);
 
 // Round-2/4 review ② — server-health index split.
@@ -320,6 +358,21 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+`);
+
+// 账号头像上传（二进制 PNG，Hub 自己发 URL）。与 users.avatar_url 并存：
+// avatar_url 仍可指向内建池/外链；这张表只存「上传到 Hub 本人的那张」。
+// 单行/人：新版本覆盖旧版本，旧 URL 立刻 404（version 变了），不做历史留存。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_avatar_uploads (
+    user_id    TEXT PRIMARY KEY,
+    version    TEXT NOT NULL,
+    png        BLOB NOT NULL,
+    bytes      INTEGER NOT NULL,
+    width      INTEGER NOT NULL,
+    height     INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Human profile avatar. Additive for existing databases; old binaries ignore it.
@@ -826,6 +879,17 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// #4150/#590 internal source admission. Add after legacy table rebuilds;
+// NULL leaves ordinary creation unchanged. PostgreSQL cannot enable admission.
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN source_ref TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+if (db.dialect === "sqlite" && db.atomicTransactions === true && db.transactionalFeaturesRefusal === null) {
+  db.exec(sessionSourceCreateGuards);
+}
+
 // #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,
 // 叠在 send_desktop_message 的代码级三闸之上:canWrite / `!effectiveNetId` return /
 // getUserNetworkRole,tools.ts)。「不产生 network_id=NULL 孤儿」现是代码级保证 + #1492
@@ -1094,16 +1158,11 @@ db.exec(`
   );
 `);
 
-// Auto-create trial license on first run
-const existingLicense = db.get<any>("SELECT id FROM licenses LIMIT 1");
-if (!existingLicense) {
-  const trialId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
-  db.run(
-    "INSERT INTO licenses (id, license_key, type, expires_at) VALUES (?1, ?2, 'trial', datetime('now', '+14 days'))",
-    [`lic_${trialId}`, `trial-${trialId}`]
-  );
-  console.log("[commhub] 🎉 14-day free trial started!");
-}
+// license 功能已移除（2026-10-29 admin 决定）。
+// 这里原来会在首次启动时插一条 14 天 trial —— 现在没有任何代码读它，
+// 继续插只会让每个新库凭空多一行死数据。
+// `licenses` 表本身保留（CREATE TABLE 不动）：已有实例里可能还有历史行，
+// 删表的迁移代价大于留着；表从此不再被读写。
 
 // ── V3.13: network_members table (user ↔ network many-to-many) ──
 db.exec(`
@@ -1195,6 +1254,35 @@ db.exec(`
   -- 展开查询本身走各表主键,见 agent-groups-perf.test.ts 的 EXPLAIN QUERY PLAN。
   CREATE INDEX IF NOT EXISTS idx_group_grants_group ON network_member_group_grants(group_id);
 `);
+// ── #3432(admin 2026-11-05) 部门维度授权:把「人的组织架构」当成授权单位 ──
+// 与组授权同构(每次现算展开),差别只在展开源是 departments 子树 + nodes.department_id。
+// 单独一张表:组那张表的主键/语义都是 Agent 侧的,部门是人的树,混在一张表里以后分不清。
+// ── #3943 list_tasks 的轮询水位（每个调用者一条）──
+// 「自上次调用以来新增」比「每次拉全量再自己筛」便宜一个数量级，而提示词那一招
+// 对本项无效（实测 19.1% → 50.3%）。水位由服务端给、服务端存：
+// 客户端连时间都不用记，也就不会因为两边时钟差几秒而漏活。
+db.exec(`
+  CREATE TABLE IF NOT EXISTS list_tasks_watermarks (
+    network_id TEXT NOT NULL,
+    caller_key TEXT NOT NULL,
+    watermark  TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, caller_key)
+  );
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_member_department_grants (
+    network_id    TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    department_id TEXT NOT NULL,
+    can_message   INTEGER NOT NULL DEFAULT 1,
+    created_by    TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network_id, user_id, department_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_dept_grants_user ON network_member_department_grants(network_id, user_id);
+`);
+
 
 // ── #84: node rename — rename_txn table (RFC-010 §4) ──
 // Single isolated table holding the rename 2PC transaction state. It doubles
@@ -1274,6 +1362,18 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_to_node ON tasks(to_node_id)
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_node ON inbox(node_id)"); } catch {}
 
 export function backfillMessageNodeIds() {
+  // #2664 —— 旧写法是 6 条 `UPDATE … SET x = (SELECT … WHERE alias = t.name …)`：
+  // 每条都对 **84k 行 tasks.from_node_id IS NULL / 36k 行 inbox.node_id IS NULL** 逐行
+  // 跑一次相关子查询，而子查询里的 `COALESCE(network_id,'default')` 让
+  // idx_sessions_network_alias_unique 用不上 ⇒ 每行扫一遍 369 行 sessions。
+  // 生产实测（`.162` 慢 SQL 日志，2026-10-27 00:21 重启）：5398ms / 2451ms / 1270ms，
+  // 而且当次命中 0 行 —— **结果是 0，代价不是 0**。
+  //
+  // 改成 `UPDATE … FROM (物化后的别名→node_id 表)`：sessions/rename_txn 只扫一遍，
+  // 每行只做一次自动索引探测。同一份生产库副本上 6.56s → 0.29s。
+  // 语义不变：同一 (alias, network) 取 `updated_at` / `committed_at` 最新的那一行；
+  // 仍然是「先按 session 别名直连，再补 rename_txn 的旧别名」；对 tasks 仍排除人是发送方的情况。
+  const t0 = performance.now();
   let inboxDirect = 0;
   let inboxRenamed = 0;
   let tasksToDirect = 0;
@@ -1284,160 +1384,197 @@ export function backfillMessageNodeIds() {
   try {
     inboxDirect = db.run(`
       UPDATE inbox
-      SET node_id = (
-        SELECT s.node_id FROM sessions s
-        WHERE s.node_id IS NOT NULL
-          AND s.alias = inbox.session_name
-          AND COALESCE(s.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        ORDER BY s.updated_at DESC
-        LIMIT 1
-      )
-      WHERE node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM sessions s
-          WHERE s.node_id IS NOT NULL
-            AND s.alias = inbox.session_name
-            AND COALESCE(s.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        )
+      SET node_id = pick.node_id
+      FROM (
+        SELECT alias, COALESCE(network_id, 'default') AS net, node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY alias, COALESCE(network_id, 'default')
+                 ORDER BY updated_at DESC
+               ) AS rn
+        FROM sessions
+        WHERE node_id IS NOT NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.alias = inbox.session_name
+        AND pick.net = COALESCE(inbox.network_id, 'default')
+        AND inbox.node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     inboxRenamed = db.run(`
       UPDATE inbox
-      SET node_id = (
-        SELECT s.node_id FROM rename_txn r
+      SET node_id = pick.node_id
+      FROM (
+        SELECT r.old_alias AS old_alias,
+               COALESCE(r.network_id, 'default') AS net,
+               s.node_id AS node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY r.old_alias, COALESCE(r.network_id, 'default')
+                 ORDER BY r.committed_at DESC
+               ) AS rn
+        FROM rename_txn r
         JOIN sessions s
           ON s.alias = r.new_alias
          AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
         WHERE s.node_id IS NOT NULL
           AND r.status = 'committed'
-          AND r.old_alias = inbox.session_name
-          AND COALESCE(r.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        ORDER BY r.committed_at DESC
-        LIMIT 1
-      )
-      WHERE node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM rename_txn r
-          JOIN sessions s
-            ON s.alias = r.new_alias
-           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
-          WHERE s.node_id IS NOT NULL
-            AND r.status = 'committed'
-            AND r.old_alias = inbox.session_name
-            AND COALESCE(r.network_id, 'default') = COALESCE(inbox.network_id, 'default')
-        )
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.old_alias = inbox.session_name
+        AND pick.net = COALESCE(inbox.network_id, 'default')
+        AND inbox.node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     tasksToDirect = db.run(`
       UPDATE tasks
-      SET to_node_id = (
-        SELECT s.node_id FROM sessions s
-        WHERE s.node_id IS NOT NULL
-          AND s.alias = tasks.to_name
-          AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY s.updated_at DESC
-        LIMIT 1
-      )
-      WHERE to_node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM sessions s
-          WHERE s.node_id IS NOT NULL
-            AND s.alias = tasks.to_name
-            AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
+      SET to_node_id = pick.node_id
+      FROM (
+        SELECT alias, COALESCE(network_id, 'default') AS net, node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY alias, COALESCE(network_id, 'default')
+                 ORDER BY updated_at DESC
+               ) AS rn
+        FROM sessions
+        WHERE node_id IS NOT NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.alias = tasks.to_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.to_node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     tasksToRenamed = db.run(`
       UPDATE tasks
-      SET to_node_id = (
-        SELECT s.node_id FROM rename_txn r
+      SET to_node_id = pick.node_id
+      FROM (
+        SELECT r.old_alias AS old_alias,
+               COALESCE(r.network_id, 'default') AS net,
+               s.node_id AS node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY r.old_alias, COALESCE(r.network_id, 'default')
+                 ORDER BY r.committed_at DESC
+               ) AS rn
+        FROM rename_txn r
         JOIN sessions s
           ON s.alias = r.new_alias
          AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
         WHERE s.node_id IS NOT NULL
           AND r.status = 'committed'
-          AND r.old_alias = tasks.to_name
-          AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY r.committed_at DESC
-        LIMIT 1
-      )
-      WHERE to_node_id IS NULL
-        AND EXISTS (
-          SELECT 1 FROM rename_txn r
-          JOIN sessions s
-            ON s.alias = r.new_alias
-           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
-          WHERE s.node_id IS NOT NULL
-            AND r.status = 'committed'
-            AND r.old_alias = tasks.to_name
-            AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.old_alias = tasks.to_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.to_node_id IS NULL
     `).changes;
   } catch {}
 
   try {
     tasksFromDirect = db.run(`
       UPDATE tasks
-      SET from_node_id = (
-        SELECT s.node_id FROM sessions s
-        WHERE s.node_id IS NOT NULL
-          AND s.alias = tasks.from_name
-          AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY s.updated_at DESC
-        LIMIT 1
-      )
-      WHERE from_node_id IS NULL
+      SET from_node_id = pick.node_id
+      FROM (
+        SELECT alias, COALESCE(network_id, 'default') AS net, node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY alias, COALESCE(network_id, 'default')
+                 ORDER BY updated_at DESC
+               ) AS rn
+        FROM sessions
+        WHERE node_id IS NOT NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.alias = tasks.from_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.from_node_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
-        AND EXISTS (
-          SELECT 1 FROM sessions s
-          WHERE s.node_id IS NOT NULL
-            AND s.alias = tasks.from_name
-            AND COALESCE(s.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
     `).changes;
   } catch {}
 
   try {
     tasksFromRenamed = db.run(`
       UPDATE tasks
-      SET from_node_id = (
-        SELECT s.node_id FROM rename_txn r
+      SET from_node_id = pick.node_id
+      FROM (
+        SELECT r.old_alias AS old_alias,
+               COALESCE(r.network_id, 'default') AS net,
+               s.node_id AS node_id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY r.old_alias, COALESCE(r.network_id, 'default')
+                 ORDER BY r.committed_at DESC
+               ) AS rn
+        FROM rename_txn r
         JOIN sessions s
           ON s.alias = r.new_alias
          AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
         WHERE s.node_id IS NOT NULL
           AND r.status = 'committed'
-          AND r.old_alias = tasks.from_name
-          AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        ORDER BY r.committed_at DESC
-        LIMIT 1
-      )
-      WHERE from_node_id IS NULL
+      ) pick
+      WHERE pick.rn = 1
+        AND pick.old_alias = tasks.from_name
+        AND pick.net = COALESCE(tasks.network_id, 'default')
+        AND tasks.from_node_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM users u WHERE u.username = tasks.from_name)
-        AND EXISTS (
-          SELECT 1 FROM rename_txn r
-          JOIN sessions s
-            ON s.alias = r.new_alias
-           AND COALESCE(s.network_id, 'default') = COALESCE(r.network_id, 'default')
-          WHERE s.node_id IS NOT NULL
-            AND r.status = 'committed'
-            AND r.old_alias = tasks.from_name
-            AND COALESCE(r.network_id, 'default') = COALESCE(tasks.network_id, 'default')
-        )
     `).changes;
   } catch {}
 
   const total = inboxDirect + inboxRenamed + tasksToDirect + tasksToRenamed + tasksFromDirect + tasksFromRenamed;
-  console.log(`[commhub] node_id backfill: inbox=${inboxDirect + inboxRenamed}, tasks.to=${tasksToDirect + tasksToRenamed}, tasks.from=${tasksFromDirect + tasksFromRenamed}, total=${total}`);
+  // #2664 —— 旧日志只有条数，于是「total=0 却花了 10 秒」在生产里完全看不见。
+  console.log(`[commhub] node_id backfill: inbox=${inboxDirect + inboxRenamed}, tasks.to=${tasksToDirect + tasksToRenamed}, tasks.from=${tasksFromDirect + tasksFromRenamed}, total=${total}, took=${Math.round(performance.now() - t0)}ms`);
 }
 
-backfillMessageNodeIds();
+// #2664 —— 不在 import 时跑（见 runDeferredBootBackfills 的说明）。这里留一行**准确**的日志：
+//   · 有测试/运维会 grep `node_id backfill` 来确认迁移路径被走到过；
+//   · 真正的汇总行（带 took=）在 runDeferredBootBackfills() 里，启动后 15 秒出现。
+console.log("[commhub] node_id backfill: deferred until after start (#2664)");
+
+/**
+ * #2664 —— 两个 boot 期的历史回填，挪到「服务已开始监听之后」再跑。
+ *
+ * 为什么：这两条语句在生产上合计约 3.5 秒（慢 SQL 日志实测：`UPDATE tasks … FROM` 1511ms +
+ * `INSERT OR IGNORE INTO task_terminal_events` 2137ms），而它们只修**历史缺口**——
+ * 新行由触发器实时写入。把 3.5 秒挡在启动路径上，等于让 369 个会话的重连风暴多等 3.5 秒，
+ * 而这段时间里 Hub 本来就最脆弱。
+ *
+ * 调用点：startHub() 监听成功后延迟数秒执行（见 server.ts）。
+ */
+export async function runDeferredBootBackfills(): Promise<{ nodeIdsMs: number; terminalEventsMs: number; chunks: number }> {
+  // #2664（第二批）—— 前一版把两条回填整体挪到启动后，但**每条仍是一次性长查询**：
+  // 生产实测 `node_id=1194ms terminal_events=1593ms`，对应一次 2.7秒级的 stall
+  // （`.165`/`.166` 启动窗口都观测到 3–3.7 秒)。这里把它们切成小块、块间让出事件循环，
+  // 让「2.7 秒卡一下」变成「若干次 <300ms 的让出」。
+  const t0 = performance.now();
+  try { backfillMessageNodeIds(); } catch (e: any) {
+    console.error(`[commhub] node_id backfill failed: ${e?.message || e}`);
+  }
+  await Bun.sleep(0);   // 两条之间先让一次：即使前半段偏慢，也不会和后半段叠成一段长阻塞
+  const t1 = performance.now();
+  let chunks = 0;
+  try {
+    if (db.dialect === "sqlite") {
+      const maxRow = db.get<{ m: number | null }>("SELECT MAX(rowid) AS m FROM tasks")?.m ?? 0;
+      const CHUNK = 20000;
+      for (let lo = 0; lo <= maxRow; lo += CHUNK) {
+        db.run(`INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
+                SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
+                  FROM tasks
+                 WHERE rowid BETWEEN ?1 AND ?2
+                   AND status IN ('replied', 'failed', 'cancelled', 'expired')
+                 ORDER BY COALESCE(completed_at, created_at), task_id`,
+          [lo, lo + CHUNK - 1]);
+        chunks++;
+        await Bun.sleep(0);   // 每 2 万行让出一次
+      }
+    }
+  } catch (e: any) {
+    console.error(`[commhub] task_terminal_events backfill failed: ${e?.message || e}`);
+  }
+  const t2 = performance.now();
+  return { nodeIdsMs: Math.round(t1 - t0), terminalEventsMs: Math.round(t2 - t1), chunks };
+}
 
 // ── P0: sessions alias uniqueness is network-scoped.
 // Older SQLite databases created `alias TEXT UNIQUE`, which prevents the same
@@ -1535,6 +1672,11 @@ migrateSessionsNetworkAliasUnique();
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_network ON sessions(network_id)"); } catch {}
 try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_network_alias_unique ON sessions(network_id, alias)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network ON tasks(network_id)"); } catch {}
+// #2722 —— 任务统计（`SELECT status, COUNT(*) FROM tasks WHERE network_id=? GROUP BY status`）是
+// Dashboard/状态接口最常走的聚合：只有上面的单列索引时，它要扫该网络**全部**行再建临时 B 树
+// （生产 116k 行实测 **5325ms**；同库副本 294ms）。加覆盖索引后副本 **24ms（12×）**。
+// 只加列、不改任何查询；老库首次启动多花约 0.4 秒建索引。
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_status ON tasks(network_id, status)"); } catch {}
 // #500 — covering index for the full /api/status queue_depth GROUP BY (task-queue-ahead.ts queueDepthQuery): the 24 h
 // created_at range plus every column that query reads, so it never touches the (wide) task rows. Here, not in the
 // CREATE TABLE block: tasks.network_id only exists after the ALTER above. On a read-only copy of the production DB
@@ -1626,11 +1768,8 @@ if (db.dialect === "sqlite") {
       VALUES (NEW.task_id, NEW.network_id, NEW.from_node_id, COALESCE(NEW.completed_at, datetime('now')));
     END;
   `);
-  db.run(`INSERT OR IGNORE INTO task_terminal_events (task_id, network_id, from_node_id, completed_at)
-          SELECT task_id, network_id, from_node_id, COALESCE(completed_at, created_at)
-            FROM tasks
-           WHERE status IN ('replied', 'failed', 'cancelled', 'expired')
-           ORDER BY COALESCE(completed_at, created_at), task_id`);
+  // #2664 —— 回填本身挪到 runDeferredBootBackfills()（启动后再跑）。这里只留触发器定义：
+  // 触发器负责**新**行的写入，回填只修历史缺口，不该占启动的关键路径。
 } else {
   db.exec(`
     CREATE OR REPLACE FUNCTION record_task_terminal_event() RETURNS trigger AS $$
@@ -2265,6 +2404,7 @@ type ScheduledTaskLifecycleRow = {
   network_id: string | null;
   status: string;
   completed_at: string | null;
+  result: string | null;
 };
 
 type ScheduledTaskBinding = { run_id: string; schedule_id: string };
@@ -2288,7 +2428,7 @@ export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: stri
 
 function syncScheduledRunForTaskInTransaction(taskId: string, expectedNetworkId?: string | null): { matched: boolean; status?: string } {
   const task = db.get<ScheduledTaskLifecycleRow>(
-    `SELECT task_id, network_id, status, completed_at
+    `SELECT task_id, network_id, status, completed_at, result
        FROM tasks
       WHERE task_id = ?1
         AND (CAST(?2 AS TEXT) IS NULL OR network_id = ?2)`,
@@ -2309,7 +2449,7 @@ function syncScheduledRunForTaskInTransaction(taskId: string, expectedNetworkId?
   const binding = bindings[0];
 
   if (SCHEDULED_RUN_TERMINAL_STATUSES.has(task.status)) {
-    const errorCode = task.status === "replied" ? null : `task_${task.status}`;
+    const errorCode = scheduledFailureCode(task.status, task.result);
     const updated = db.run(
       `UPDATE scheduled_task_runs
           SET status = ?1,
@@ -2404,6 +2544,11 @@ try { db.exec("ALTER TABLE sessions ADD COLUMN secret_keys TEXT"); } catch {}
 // the node itself. Appended at EOF like the other post-1.0 columns so the doc
 // and test846 line anchors below it never drift.
 try { db.exec("ALTER TABLE sessions ADD COLUMN env_transport TEXT"); } catch {}
+// 2026-10-31 —— #3294：节点侧的**字节标识**（与 /health 的 git_commit 同一概念，但对象不同）。
+// 只有 version 时，「两个 .169 是不同字节」无法分辨；而 #3178 的批量升级前后都要问这句话。
+// 可为 NULL：老节点不报 ⇒ 「没报」与「没有标识」在这一列上同形，所以读侧必须配一个 reason
+// （见 /api/nodes 的 build_note）。
+try { db.exec("ALTER TABLE sessions ADD COLUMN build_commit TEXT"); } catch {}
 
 // #1510 — hourly count of secret writes that a transport gate WOULD have refused
 // (nodes reporting a plain-HTTP hub link). Log-only until an operator decides.

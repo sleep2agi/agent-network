@@ -6,13 +6,16 @@ import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
+import { nodeCanAcceptDispatch } from "./node-serviceability.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, type AgentRef } from "./agent-access.js";
 import { dispatchVerdict } from "./node-permissions.js";
 import { hasSubscribers, pushEvent, pushNetworkObserverEvent } from "./push.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { blockerTimedOut, blockerTimeoutClock, expireStuckBlocker, sendStuckNotice, skipsBlockedBy, stuckNoticeSkips, stuckTimeoutMs, type StuckNotice } from "./scheduled-stuck.js";
-import { evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
+import { applyNoProgressBackoff, evaluateScheduleFailures, failureSummary } from "./scheduled-failures.js";
+import { parseHubTimestamp } from "./hub-timestamp.js";
+import { busyElapsedNote } from "./scheduled-failure-code.js";
 import { scheduledTargetOffline, sendOfflineNotice, type OfflineNotice } from "./scheduled-offline.js";
 
 export type ScheduleSpec =
@@ -131,9 +134,11 @@ export function parseScheduleSpec(raw: unknown, timezoneRaw: unknown): { spec: S
 
   if (type === "once") {
     if (typeof obj.run_at !== "string") throw new Error("run_at_required");
-    const when = new Date(obj.run_at);
-    if (!Number.isFinite(when.getTime())) throw new Error("invalid_run_at");
-    return { spec: { type, run_at: iso(when) }, timezone };
+    // #3951 —— 用户给的 run_at 走同一个入口：无时区标记的 'YYYY-MM-DDTHH:MM:SS'
+    // 若直接 new Date() 会按**本机时区**解释（hub 的列是 UTC 无标记）⇒ 跨时区差 8 小时。
+    const whenMs = parseHubTimestamp(obj.run_at);
+    if (whenMs === null) throw new Error("invalid_run_at");
+    return { spec: { type, run_at: iso(new Date(whenMs)) }, timezone };
   }
   if (type === "interval") {
     const every = Number(obj.every_seconds);
@@ -159,8 +164,11 @@ export function parseScheduleSpec(raw: unknown, timezoneRaw: unknown): { spec: S
  * platform timezone database instead of a hand-written offset guess. */
 export function nextOccurrence(spec: ScheduleSpec, timezone: string, after: Date): Date | null {
   if (spec.type === "once") {
-    const when = new Date(spec.run_at);
-    return when.getTime() > after.getTime() ? when : null;
+    // spec.run_at 由上面的 normalize 写出（总是带 Z），但仍然走同一个解析入口：
+    // 「这一处安全」是上一行写出来的事实，不是这一行能自己保证的。
+    const ms = parseHubTimestamp(spec.run_at);
+    if (ms === null) return null;
+    return ms > after.getTime() ? new Date(ms) : null;
   }
   if (spec.type === "interval") return new Date(after.getTime() + spec.every_seconds * 1000);
 
@@ -263,14 +271,22 @@ export function cancelSchedule(row: ScheduledRow): void {
 export function scheduleRuns(row: ScheduledRow, limit: number): Record<string, unknown> {
   const runs = db.all(
     // #523 — a task that ended `failed` leaves run.error_message empty; its reason is the task's reply text.
+    // #2884 — 共享会话忙的失败额外带上实测拆解（排队 / 会话等待两个量分开报）。
     `SELECT r.run_id, r.schedule_id, r.scheduled_for, r.task_id, r.status, r.error_code,
             CASE WHEN r.error_message IS NULL AND r.status = 'failed' THEN SUBSTR(t.result, 1, 500) ELSE r.error_message END AS error_message,
-            r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at, r.work_outcome, r.schedule_revision, r.work_outcome_node_id
+            r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at, r.work_outcome, r.schedule_revision, r.work_outcome_node_id,
+            t.created_at AS task_created_at, t.started_at AS task_started_at, t.completed_at AS task_completed_at
        FROM scheduled_task_runs r
        LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
       WHERE r.schedule_id = ?1 AND r.network_id = ?2 ORDER BY r.created_at DESC, r.scheduled_for DESC LIMIT ?3`,
     row.schedule_id, row.network_id, limit,
-  );
+  ).map((r: any) => {
+    const note = r.error_code === "task_failed_busy"
+      ? busyElapsedNote(r.task_created_at, r.task_started_at, r.task_completed_at)
+      : null;
+    const { task_created_at, task_started_at, task_completed_at, ...rest } = r;
+    return note ? { ...rest, error_message: [r.error_message, note].filter(Boolean).join(" ") } : rest;
+  });
   return { runs, ...failureSummary(row.schedule_id) };
 }
 
@@ -316,7 +332,7 @@ export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>, 
       ? null
       : schedulingChanged || backoffGenerationReset || resumed || !row.next_run_at
         ? nextOccurrence(parsed.spec, parsed.timezone, new Date())
-        : new Date(row.next_run_at);
+        : new Date(parseHubTimestamp(row.next_run_at) ?? Date.now());
     if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
     // Runs no longer bump revision, so the scheduler may have advanced
     // next_run_at after `row` was read. When cadence is preserved, keep the
@@ -449,6 +465,23 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         targetAlias: targetNode.alias,
       };
       if (advanceSchedule) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, advanceAfter);
+      // #2622 —— 目标长期离线时按同因链放慢（默认 3 次后 2 倍递增，上限 1 小时）。
+      try {
+        const bo = applyNoProgressBackoff(row.schedule_id);
+        if (bo && bo.effective_seconds) {
+          const sched = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
+          const at = parseHubTimestamp(sched?.next_run_at);
+          // 可观测性（不是装饰）：生产出现「backoff_effective_seconds=5760 但实际每 6 分钟跳一次」，
+          // 只看列分不清是哪一步把 next_run_at 写回去了。这行把「算出的 eff」与「此刻落库的 next」
+          // 打在一起；再配上本函数返回前的最终值，就能对上账。
+          console.error(`[commhub scheduled-tasks] offline-backoff schedule=${row.schedule_id} cause=${bo.cause} streak=${bo.streak} effective=${bo.effective_seconds}s next_before=${sched?.next_run_at ?? 'null'}`);
+          if (at !== null) advance({ ...row, target_alias: targetNode.alias }, scheduledFor, new Date(at));
+          const after = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
+          console.error(`[commhub scheduled-tasks] offline-backoff-final schedule=${row.schedule_id} next_after=${after?.next_run_at ?? 'null'}`);
+        }
+      } catch (e: any) {
+        console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
+      }
       return;
     }
     // Seeing the target online rearms exactly one warning for a future offline episode.
@@ -502,6 +535,27 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         const skips = skipsBlockedBy(row.schedule_id, open.task_id);
         if (skips === stuckNoticeSkips()) notices.push(stuckNoticeFor(row, "stuck", open, skips, stuckTimeoutMs(row.schedule_json)));
         if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+        // #2622（第二轮漏接的就是这里）—— 「上一次还在跑」这条跳过路径**从来没有调用过**退避：
+        // 上面的 UPDATE 把 run 记成 `skipped/previous_run_active`，然后直接 `advance` + `return`，
+        // 于是 `every_seconds=180` 的排程在上游一直忙的时候每 3 分钟写一行 skip，永不减速。
+        // 生产实测（.178，2026-10-28 00:05 起 1.9 小时）：10 个排程写了 175 行，
+        // 其中 4 个各 31–35 行、`backoff_effective_seconds` **全部为 NULL** ——
+        // 而同一次部署里走 target_offline 路径的排程退避是正常的（840 秒）。
+        // 顺序要紧：必须放在 UPDATE 之后（退避函数读「最近 12 次」，
+        // 最新那条 skip 必须已经入表），也要放在 advance 之后（它会把 next_run_at 再往后推）。
+        try {
+          const bo = applyNoProgressBackoff(row.schedule_id);
+          if (bo && bo.effective_seconds) {
+            // 这条日志是**可观测性**，不是装饰：上一轮「代码加了但没人调用」整轮排查，
+            // 就是因为生产日志里看不出退避到底有没有在这个分支生效。
+            console.error(`[commhub scheduled-tasks] skip-path backoff schedule=${row.schedule_id} cause=${bo.cause} streak=${bo.streak} effective=${bo.effective_seconds}s`);
+            const sched = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
+            const at = parseHubTimestamp(sched?.next_run_at);
+            if (at !== null) advance(row, scheduledFor, new Date(at));
+          }
+        } catch (e: any) {
+          console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
+        }
         return;
       }
     }
@@ -546,6 +600,24 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       );
       if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
+    }
+
+    // #2880 —— 节点级忙熔断（默认关闭；COMMHUB_NODE_BUSY_CIRCUIT=1 才生效）。
+    // 与 lifecycle/health 的区别：节点没坏、也没停，只是最近一直没有产出（忙类失败多且 0 成功），
+    // 投进去必然白等 ~30 分钟。所以记 **skipped** 而不是 failed —— 这不是故障，是「现在别投」。
+    // 熔断期间每 COMMHUB_NODE_BUSY_CIRCUIT_PROBE_HOURS 小时会放一条探针（见 node-serviceability.ts），
+    // 避免「不投递 ⇒ 拿不到成功 ⇒ 永远解不开」的死锁。
+    {
+      const circuit = nodeCanAcceptDispatch(node.alias, row.network_id);
+      if (!circuit.ok) {
+        finalStatus = "skipped";
+        db.run(
+          "UPDATE scheduled_task_runs SET status = 'skipped', error_code = 'target_busy_no_output', error_message = ?1, completed_at = datetime('now') WHERE run_id = ?2",
+          [String(circuit.reason ?? "target_busy_no_output").slice(0, 500), runId],
+        );
+        if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+        return;
+      }
     }
 
     // #460 — the target reports a degraded layer (App Server down / TUI gone / login revoked): the run fails
@@ -603,6 +675,13 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     // Dispatch is not completion. Keep the run open until the exact bound
     // task reaches replied/failed/cancelled/expired; db.ts owns that mirror.
     db.run("UPDATE scheduled_task_runs SET task_id = ?1, status = ?2, completed_at = NULL WHERE run_id = ?3", [taskId, deliveryState, runId]);
+
+        // #2622 —— 上一层任务还没跑完时按同因链放慢（间隔 180s 的排程曾一天写 343 行 skip）。
+        try {
+          applyNoProgressBackoff(row.schedule_id);
+        } catch (e: any) {
+          console.error(`[scheduled-tasks] no-progress backoff failed schedule=${row.schedule_id}: ${e?.message || e}`);
+        }
     db.run(`UPDATE sessions SET task = ${sessionTaskOnDispatch("?1")}, updated_at = datetime('now') WHERE node_id = ?2 AND network_id = ?3`, [sessionTaskPreview(taskContent), node.node_id, row.network_id]);
     db.run("UPDATE scheduled_tasks SET target_alias = ?1, last_run_at = ?2, updated_at = datetime('now') WHERE schedule_id = ?3", [node.alias, scheduledFor, row.schedule_id]);
     if (advanceSchedule) advance({ ...row, target_alias: node.alias }, scheduledFor, advanceAfter);

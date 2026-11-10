@@ -308,8 +308,12 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 # #833: auth.ts getUserNetworks/listTokens/revokeToken/changePassword 的
 # L447/L487/L540/L651 改为文件链接 + 原有函数定位；中英各四处。
 # 唯一 pin 6-4=2，出现次数 18-8=10；123 个扫描文件和基线不变。
-[[ "$uniq"  -eq 2  ]] || fail "预期 2 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 10 ]] || fail "预期 10 处原始出现,实际 $occ"
+# 2026-10-29:uniq 2 → 4,occ 10 → 14,files 不变(132)。#1720 给 guide/agent-node 的环境变量
+#   优先级一节补了源码行号锚点:中文 3 处(表行 #L42 + #L155、正文 #L155)、英文 1 处(正文 #L155)。
+#   两个新的唯一 pin 都是 agent-node/src/node-secrets.ts(#L42 nodeSecretsPath、#L155 loadNodeSecrets);
+#   为此 test831 的镜像也补了 `COPY agent-node /repo/agent-node`,否则它们被判 missing-file。
+[[ "$uniq"  -eq 4  ]] || fail "预期 4 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 14 ]] || fail "预期 14 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------

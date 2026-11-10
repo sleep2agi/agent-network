@@ -85,38 +85,29 @@ export default withMermaid(defineConfig({
               { text: '什么是 Agent Network', link: '/guide/introduction' },
               { text: '基本概念', link: '/guide/basics' },
               { text: '安装', link: '/guide/install' },
-              { text: '单文件可执行文件', link: '/guide/standalone-binary' },
               { text: '10 分钟跑通第一个节点', link: '/guide/getting-started' },
             ]
           },
           {
             text: '客户端',
             items: [
-              { text: '下载客户端', link: '/download' },
               { text: '桌面与手机客户端', link: '/guide/desktop-app' },
               { text: '任务', link: '/guide/tasks' },
-              { text: '任务标签', link: '/guide/task-tags' },
               { text: '定时任务', link: '/guide/schedules' },
-              { text: 'Web Dashboard', link: '/guide/dashboard' },
             ]
           },
           {
             text: '节点与 Runtime',
             items: [
               { text: 'Agent Node', link: '/guide/agent-node' },
-              { text: '复制节点', link: '/guide/copy-node' },
-              { text: '节点运行日志', link: '/guide/node-run-logs' },
               { text: '选择 Runtime', link: '/guide/runtimes' },
               { text: '支持矩阵', link: '/guide/support-matrix' },
               { text: '模型与供应商', link: '/guide/multi-model' },
               { text: 'Codex TUI 人机共存', link: '/guide/codex-copresence' },
-              { text: 'Codex 节点速查', link: '/guide/codex-cheatsheet' },
               { text: 'Grok 节点', link: '/guide/grok' },
               { text: 'OpenCode V2', link: '/guide/opencode' },
               { text: 'Goal 与 Loop', link: '/guide/goals-and-loops' },
               { text: 'Channel 接入', link: '/guide/channels' },
-              { text: '飞书 Channel', link: '/guide/feishu' },
-              { text: 'DSH 节点', link: '/guide/dsh' },
             ]
           },
           {
@@ -126,7 +117,6 @@ export default withMermaid(defineConfig({
               { text: '远程机器：anet daemon', link: '/deploy/daemon' },
               { text: '让 Hub 常驻', link: '/deploy/keep-alive' },
               { text: '生产部署 / 公网部署安全', link: '/deploy/production' },
-              { text: '迁移 Hub', link: '/deploy/hub-migration' },
             ]
           },
           {
@@ -143,7 +133,6 @@ export default withMermaid(defineConfig({
             text: '帮助',
             items: [
               { text: '故障排查', link: '/troubleshooting' },
-              { text: '更新日志', link: '/changelog' },
             ]
           },
           {
@@ -186,38 +175,29 @@ export default withMermaid(defineConfig({
               { text: 'What is Agent Network', link: '/en/guide/introduction' },
               { text: 'Basic Concepts', link: '/en/guide/basics' },
               { text: 'Install', link: '/en/guide/install' },
-              { text: 'Standalone executable', link: '/en/guide/standalone-binary' },
               { text: 'Your First Node in 10 Minutes', link: '/en/guide/getting-started' },
             ]
           },
           {
             text: 'Clients',
             items: [
-              { text: 'Download the app', link: '/en/download' },
               { text: 'Desktop & Mobile Clients', link: '/en/guide/desktop-app' },
               { text: 'Tasks', link: '/en/guide/tasks' },
-              { text: 'Task tags', link: '/en/guide/task-tags' },
               { text: 'Schedules', link: '/en/guide/schedules' },
-              { text: 'Web Dashboard', link: '/en/guide/dashboard' },
             ]
           },
           {
             text: 'Nodes & Runtimes',
             items: [
               { text: 'Agent Node', link: '/en/guide/agent-node' },
-              { text: 'Copying a node', link: '/en/guide/copy-node' },
-              { text: 'Node run logs', link: '/en/guide/node-run-logs' },
               { text: 'Choosing a Runtime', link: '/en/guide/runtimes' },
               { text: 'Support Matrix', link: '/en/guide/support-matrix' },
               { text: 'Models & Providers', link: '/en/guide/multi-model' },
               { text: 'Codex TUI Co-presence', link: '/en/guide/codex-copresence' },
-              { text: 'Codex node cheat sheet', link: '/en/guide/codex-cheatsheet' },
               { text: 'Grok Nodes', link: '/en/guide/grok' },
               { text: 'OpenCode V2', link: '/en/guide/opencode' },
               { text: 'Goals and Loops', link: '/en/guide/goals-and-loops' },
               { text: 'Channels', link: '/en/guide/channels' },
-              { text: 'Feishu Channel', link: '/en/guide/feishu' },
-              { text: 'DSH node', link: '/en/guide/dsh' },
             ]
           },
           {
@@ -227,7 +207,6 @@ export default withMermaid(defineConfig({
               { text: 'Remote Machines: anet daemon', link: '/en/deploy/daemon' },
               { text: 'Keeping the Hub Running', link: '/en/deploy/keep-alive' },
               { text: 'Production / Public Internet', link: '/en/deploy/production' },
-              { text: 'Moving the Hub', link: '/en/deploy/hub-migration' },
             ]
           },
           {
@@ -244,7 +223,6 @@ export default withMermaid(defineConfig({
             text: 'Help',
             items: [
               { text: 'Troubleshooting', link: '/en/troubleshooting' },
-              { text: 'Changelog', link: '/en/changelog' },
             ]
           },
           {

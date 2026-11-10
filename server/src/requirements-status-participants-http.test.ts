@@ -213,8 +213,8 @@ describe("tool descriptions", () => {
     // #478:节点令牌的 tools/list 里本来就没有 projects_create / projects_update(调了也是 403),那两条的说明从人的列表里读。
     expect(byName.has("projects_create")).toBe(false);
     const human = new Map(((await rpc(U.member.token, "tools/list", {})).result.tools as any[]).map(t => [t.name, t]));
-    expect(byName.get("projects_list").description).toMatch(/node \(Agent\) tokens can only read projects/i);
-    for (const name of ["projects_create", "projects_update"]) expect(human.get(name).description).toMatch(/node \(Agent\) tokens can only read projects/i);
+    expect(byName.get("projects_list").description).toMatch(/node (?:\(Agent\) )?tokens can only read projects/i);
+    for (const name of ["projects_create", "projects_update"]) expect(human.get(name).description).toMatch(/node (?:\(Agent\) )?tokens can only read projects/i);
     const denied = await mcp(U.nodeA.token, "projects_create", { name: "示例项目" });
     expect(denied.status).toBe(403);
     expect(denied.error).toBe("user_token_required");

@@ -48,11 +48,23 @@ doc 1.0.0 "" > "$STUB_DIR/resp.1"; doc 1.0.0 "" > "$STUB_DIR/resp.2"; doc 1.0.1 
 run_case visible-after-2-polls 60
 [ "$rc" = 0 ] && [ "$calls" = 3 ] && ok "visible after 2 polls → rc 0 on 3rd check" || bad "visible-after-2-polls rc=$rc calls=$calls"
 
-# 2) 版本已可见、tag 还落后 → 继续等,tag 跟上后通过(两条都要成立)
+# 2) 版本已可见 + shasum 相符、但 tag 还落后 → **立即通过并只打 warning**
+#    2026-11-10 改口径:tag 是 npm 的异步副作用(225 实测版本 200 可见、tag 仍停在 224),
+#    而连续发两个包时较老那版的 tag 断言永远不可能满足。tag 由 publish job 后面的
+#    「收口 dist-tag:preview」显式设置并回读,不在这里一票否决。
 new_stub
-doc 1.0.0 "$GOOD" > "$STUB_DIR/resp.1"; doc 1.0.1 "$GOOD" > "$STUB_DIR/resp.default"
+doc 1.0.0 "$GOOD" > "$STUB_DIR/resp.default"
 run_case tag-lags-shasum 60
-[ "$rc" = 0 ] && [ "$calls" = 2 ] && ok "tag lagging keeps polling, passes once tag moves" || bad "tag-lags rc=$rc calls=$calls"
+[ "$rc" = 0 ] && [ "$calls" = 1 ] && ok "tag lagging does NOT block: passes on first read" || bad "tag-lags rc=$rc calls=$calls"
+printf '%s' "$out" | grep -Fq '::warning::' && ok "tag lagging surfaces a warning" || bad "tag-lags warning missing"
+printf '%s' "$out" | grep -Fq 'preview 目前是 1.0.0' && ok "warning names the actual tag" || bad "warning does not name actual tag"
+
+# 2a) 版本可见、shasum 相符,且 tag 已经对了 → 通过且不出现 warning
+new_stub
+doc 1.0.1 "$GOOD" > "$STUB_DIR/resp.default"
+run_case tag-already-right 60
+[ "$rc" = 0 ] && [ "$calls" = 1 ] && ok "tag correct → passes on first read" || bad "tag-right rc=$rc calls=$calls"
+printf '%s' "$out" | grep -Fq '::warning::' && bad "no warning expected when tag is right" || ok "no warning when tag is right"
 
 # 2b) tag 已指向新版本、shasum 还看不到 → 不能只凭 tag 放行
 new_stub

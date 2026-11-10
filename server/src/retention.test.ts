@@ -105,36 +105,36 @@ const STRICT_CFG: RetentionConfig = {
 };
 
 describe("sweepRetention — high-frequency telemetry", () => {
-  test("deletes agent_telemetry older than telemetryDays, keeps fresh", () => {
+  test("deletes agent_telemetry older than telemetryDays, keeps fresh", async () => {
     insertTelemetry({ daysAgo: 0 });   // fresh
     insertTelemetry({ daysAgo: 1 });   // fresh
     insertTelemetry({ daysAgo: 6 });   // just within 7d
     insertTelemetry({ daysAgo: 8 });   // past 7d
     insertTelemetry({ daysAgo: 30 });  // way past
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.agent_telemetry).toBe(2);
     expect(count("agent_telemetry")).toBe(3);
   });
 
-  test("is idempotent: second sweep is a no-op on the same horizon", () => {
+  test("is idempotent: second sweep is a no-op on the same horizon", async () => {
     insertTelemetry({ daysAgo: 0 });
     insertTelemetry({ daysAgo: 10 });
 
-    const first = sweepRetention(STRICT_CFG);
-    const second = sweepRetention(STRICT_CFG);
+    const first = await sweepRetention(STRICT_CFG);
+    const second = await sweepRetention(STRICT_CFG);
 
     expect(first.deletes.agent_telemetry).toBe(1);
     expect(second.deletes.agent_telemetry).toBe(0);
     expect(count("agent_telemetry")).toBe(1);
   });
 
-  test("negative telemetryDays opts out of telemetry sweep", () => {
+  test("negative telemetryDays opts out of telemetry sweep", async () => {
     insertTelemetry({ daysAgo: 100 });
     insertTelemetry({ daysAgo: 200 });
 
-    const r = sweepRetention({ ...STRICT_CFG, telemetryDays: -1 });
+    const r = await sweepRetention({ ...STRICT_CFG, telemetryDays: -1 });
 
     expect(r.deletes.agent_telemetry).toBe(0);
     expect(count("agent_telemetry")).toBe(2);
@@ -142,26 +142,26 @@ describe("sweepRetention — high-frequency telemetry", () => {
 });
 
 describe("sweepRetention — task_events / audit_log", () => {
-  test("deletes task_events older than taskEventsDays", () => {
+  test("deletes task_events older than taskEventsDays", async () => {
     insertTaskEvent(0);
     insertTaskEvent(15);
     insertTaskEvent(31);
     insertTaskEvent(45);
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.task_events).toBe(2);
     expect(count("task_events")).toBe(2);
   });
 
-  test("deletes audit_log older than auditLogDays (longer horizon)", () => {
+  test("deletes audit_log older than auditLogDays (longer horizon)", async () => {
     insertAudit(0);
     insertAudit(30);   // young
     insertAudit(89);   // just within 90d
     insertAudit(91);   // past
     insertAudit(365);  // way past
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.audit_log).toBe(2);
     expect(count("audit_log")).toBe(3);
@@ -169,33 +169,33 @@ describe("sweepRetention — task_events / audit_log", () => {
 });
 
 describe("sweepRetention — inbox (acked only)", () => {
-  test("deletes acked inbox older than ackedInboxDays, never unacked", () => {
+  test("deletes acked inbox older than ackedInboxDays, never unacked", async () => {
     insertInbox({ acked: 1, daysAgo: 0 });  // acked fresh — keep
     insertInbox({ acked: 1, daysAgo: 30 }); // acked old — delete
     insertInbox({ acked: 0, daysAgo: 30 }); // unacked old — KEEP (could still be in-flight)
     insertInbox({ acked: 0, daysAgo: 365 });// unacked ancient — KEEP
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.inbox).toBe(1);
     expect(count("inbox")).toBe(3);
   });
 
-  test("does not touch unacked rows even at extreme ages (operator concern)", () => {
+  test("does not touch unacked rows even at extreme ages (operator concern)", async () => {
     // Why this test exists: a misread DELETE that forgot the
     // `acked = 1` predicate would silently drop in-flight deliveries
     // for agents temporarily offline. That's a correctness bug, not a
     // retention bug — pin it.
     for (let i = 0; i < 10; i++) insertInbox({ acked: 0, daysAgo: 365 });
 
-    sweepRetention(STRICT_CFG);
+    await sweepRetention(STRICT_CFG);
 
     expect(count("inbox")).toBe(10);
   });
 });
 
 describe("sweepRetention — tasks (terminal status only)", () => {
-  test("deletes terminal-status tasks older than horizon (replied with no child also reaped)", () => {
+  test("deletes terminal-status tasks older than horizon (replied with no child also reaped)", async () => {
     insertTask({ status: "completed", daysAgo: 35 });  // delete (safe-terminal)
     insertTask({ status: "cancelled", daysAgo: 35 });  // delete (safe-terminal)
     insertTask({ status: "failed",    daysAgo: 35 });  // delete (safe-terminal)
@@ -205,7 +205,7 @@ describe("sweepRetention — tasks (terminal status only)", () => {
     insertTask({ status: "delivered", daysAgo: 365 }); // active — KEEP
     insertTask({ status: "replied",   daysAgo: 365 }); // replied + no children → delete (round-2 fix)
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(5);
     expect(count("tasks")).toBe(3);
@@ -217,20 +217,20 @@ describe("sweepRetention — tasks (terminal status only)", () => {
   // full retention window after completion. Sweeping by created_at
   // alone reaps it the instant it enters terminal state → operators
   // get zero post-terminal retention.
-  test("60d-old created task completed today is KEPT (uses completed_at, not created_at)", () => {
+  test("60d-old created task completed today is KEPT (uses completed_at, not created_at)", async () => {
     insertTask({
       status: "completed",
       daysAgo: 60,           // created 60 days ago (way past horizon)
       completedDaysAgo: 0,   // completed today (within horizon)
     });
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(0);
     expect(count("tasks")).toBe(1);
   });
 
-  test("legacy row with NULL completed_at falls back to created_at (back-compat)", () => {
+  test("legacy row with NULL completed_at falls back to created_at (back-compat)", async () => {
     // Old DB rows that pre-date the completed_at column. The COALESCE
     // gracefully falls back so we don't permanently leak legacy data.
     insertTask({
@@ -239,20 +239,20 @@ describe("sweepRetention — tasks (terminal status only)", () => {
       completedDaysAgo: null,  // explicit NULL (legacy)
     });
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(1);
     expect(count("tasks")).toBe(0);
   });
 
-  test("recently-completed but past-horizon-completion gets reaped", () => {
+  test("recently-completed but past-horizon-completion gets reaped", async () => {
     insertTask({
       status: "completed",
       daysAgo: 60,
       completedDaysAgo: 35, // completed 35d ago — past 30d horizon
     });
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(1);
     expect(count("tasks")).toBe(0);
@@ -267,7 +267,7 @@ describe("sweepRetention — tasks (terminal status only)", () => {
   //
   // These three tests pin the corrected behaviour.
 
-  test("replied with active child task is KEPT (chain ancestor safety)", () => {
+  test("replied with active child task is KEPT (chain ancestor safety)", async () => {
     const parent = insertTask({
       status: "replied",
       daysAgo: 365,
@@ -281,34 +281,34 @@ describe("sweepRetention — tasks (terminal status only)", () => {
       [uuidv4(), parent]
     );
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(0);
     expect(count("tasks")).toBe(2);
   });
 
-  test("replied with NO child references AND past horizon is DELETED", () => {
+  test("replied with NO child references AND past horizon is DELETED", async () => {
     insertTask({ status: "replied", daysAgo: 365, completedDaysAgo: 60 });
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(1);
     expect(count("tasks")).toBe(0);
   });
 
-  test("replied with NO child references AND within horizon is KEPT", () => {
+  test("replied with NO child references AND within horizon is KEPT", async () => {
     // Just-completed replied with no children — needs to live for
     // the full retention window in case dashboard/audit wants to see
     // recent activity.
     insertTask({ status: "replied", daysAgo: 5, completedDaysAgo: 5 });
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.deletes.tasks).toBe(0);
     expect(count("tasks")).toBe(1);
   });
 
-  test("replied with child that's been ITSELF swept stays sweepable next round", () => {
+  test("replied with child that's been ITSELF swept stays sweepable next round", async () => {
     // Two-round scenario: parent + terminal child. Round 1: child
     // (cancelled, past horizon) gets reaped → parent now has no
     // children. Round 2: parent (replied, past horizon, no children)
@@ -324,7 +324,7 @@ describe("sweepRetention — tasks (terminal status only)", () => {
       [uuidv4(), parent]
     );
 
-    const r1 = sweepRetention(STRICT_CFG);
+    const r1 = await sweepRetention(STRICT_CFG);
     // Round 1: only the cancelled child can be reaped (parent still
     // has it as a referencing row at the time the DELETE NOT EXISTS
     // is evaluated). DELETE order in SQLite is single-statement, so
@@ -335,13 +335,13 @@ describe("sweepRetention — tasks (terminal status only)", () => {
 
     // Re-run: should converge with zero rows regardless of whether
     // round 1 took both or just the child.
-    sweepRetention(STRICT_CFG);
+    await sweepRetention(STRICT_CFG);
     expect(count("tasks")).toBe(0);
   });
 });
 
 describe("sweepRetention — VACUUM hook", () => {
-  test("returns wal_checkpoint pages-moved and incremental freed-pages", () => {
+  test("returns wal_checkpoint pages-moved and incremental freed-pages", async () => {
     // Just exercise the codepath — Bun's sqlite layer may or may not
     // return values the operator cares about depending on PRAGMA
     // settings. The point is that the call doesn't error and the
@@ -349,7 +349,7 @@ describe("sweepRetention — VACUUM hook", () => {
     insertTelemetry({ daysAgo: 100 });
     insertTelemetry({ daysAgo: 100 });
 
-    const r = sweepRetention(STRICT_CFG);
+    const r = await sweepRetention(STRICT_CFG);
 
     expect(r.vacuum.errored).toBe(false);
     // walCheckpointPagesMoved may be 0 if there's nothing in the WAL.
@@ -361,7 +361,7 @@ describe("sweepRetention — VACUUM hook", () => {
 });
 
 describe("readRetentionConfig — env-var overrides", () => {
-  test("falls back to defaults when env vars unset", () => {
+  test("falls back to defaults when env vars unset", async () => {
     delete process.env.COMMHUB_RETENTION_TELEMETRY_DAYS;
     delete process.env.COMMHUB_RETENTION_TASK_EVENTS_DAYS;
 
@@ -372,7 +372,7 @@ describe("readRetentionConfig — env-var overrides", () => {
     expect(cfg.auditLogDays).toBe(90);
   });
 
-  test("env override wins", () => {
+  test("env override wins", async () => {
     process.env.COMMHUB_RETENTION_TELEMETRY_DAYS = "3";
     process.env.COMMHUB_RETENTION_AUDIT_DAYS = "180";
 
@@ -385,14 +385,14 @@ describe("readRetentionConfig — env-var overrides", () => {
     delete process.env.COMMHUB_RETENTION_AUDIT_DAYS;
   });
 
-  test("non-finite env falls back silently (no operator footgun)", () => {
+  test("non-finite env falls back silently (no operator footgun)", async () => {
     process.env.COMMHUB_RETENTION_TELEMETRY_DAYS = "not-a-number";
     const cfg = readRetentionConfig();
     expect(cfg.telemetryDays).toBe(7);
     delete process.env.COMMHUB_RETENTION_TELEMETRY_DAYS;
   });
 
-  test("negative env value passes through (operator opt-out)", () => {
+  test("negative env value passes through (operator opt-out)", async () => {
     process.env.COMMHUB_RETENTION_INBOX_ACKED_DAYS = "-1";
     const cfg = readRetentionConfig();
     expect(cfg.ackedInboxDays).toBe(-1);
@@ -412,7 +412,7 @@ describe("agent_telemetry index split (round 2/4 review ② — query plan)", ()
   // (EXPLAIN QUERY PLAN) lives below to prove the OR-disjunction can
   // now use an index UNION instead of full scan.
 
-  test("split indexes exist; old combined is gone", () => {
+  test("split indexes exist; old combined is gone", async () => {
     const idx = db.all<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_telemetry' ORDER BY name"
     );
@@ -423,7 +423,7 @@ describe("agent_telemetry index split (round 2/4 review ② — query plan)", ()
     expect(names).not.toContain("idx_agent_telemetry_host_time");
   });
 
-  test("EXPLAIN QUERY PLAN for server-health (hostname OR ip) uses split indexes via index UNION", () => {
+  test("EXPLAIN QUERY PLAN for server-health (hostname OR ip) uses split indexes via index UNION", async () => {
     // Mirror the actual query from index.ts /api/server-health/:host
     // (post-addNetworkScope, network_id pinned via direct equality —
     // NOT COALESCE; addNetworkScope appends `AND network_id = ?` and
@@ -446,5 +446,65 @@ describe("agent_telemetry index split (round 2/4 review ② — query plan)", ()
     expect(planText).toContain("idx_agent_telemetry_hostname_time");
     expect(planText).toContain("idx_agent_telemetry_ip_time");
     expect(planText).not.toMatch(/^SCAN agent_telemetry$/m);
+  });
+});
+
+// ── #2614 —— 分批 sweep（每小时一次的 8–11 秒事件循环停顿）──
+describe("sweepRetention — chunked deletes (#2614)", () => {
+  const withChunkRows = async (rows: number, fn: () => Promise<void>) => {
+    const prev = process.env.COMMHUB_RETENTION_CHUNK_ROWS;
+    process.env.COMMHUB_RETENTION_CHUNK_ROWS = String(rows);
+    try {
+      await fn();
+    } finally {
+      if (prev === undefined) delete process.env.COMMHUB_RETENTION_CHUNK_ROWS;
+      else process.env.COMMHUB_RETENTION_CHUNK_ROWS = prev;
+    }
+  };
+
+  test("deletes a large backlog in multiple batches, all rows gone", async () => {
+    // 生产现场：一次 DELETE 删完 → 10 秒静默。这里把批大小压到 50 行，
+    // 断言「确实分了多批」且「结果与一次删完等价」（不丢行）。
+    await withChunkRows(50, async () => {
+      for (let i = 0; i < 120; i++) insertTelemetry({ daysAgo: 30 });
+      const before = count("agent_telemetry");
+      const r = await sweepRetention(STRICT_CFG);
+
+      expect(r.deletes.agent_telemetry).toBe(120);
+      expect(r.batches).toBeGreaterThanOrEqual(3); // 50 + 50 + 20
+      expect(r.truncated).toEqual([]);
+      expect(count("agent_telemetry")).toBe(before - 120);
+    });
+  });
+
+  test("an exact multiple of the chunk size leaves nothing behind", async () => {
+    // 100 行、批大小 50 ⇒ 两批「刚好装满」。游标版在这里必须再多查一次才知道删干净了，
+    // 否则会留下恰好等于批大小的残留（这是分批删除最典型的 off-by-one）。
+    await withChunkRows(50, async () => {
+      for (let i = 0; i < 100; i++) insertTelemetry({ daysAgo: 40 });
+      const r = await sweepRetention(STRICT_CFG);
+      expect(r.deletes.agent_telemetry).toBe(100);
+      expect(r.batches).toBeGreaterThanOrEqual(2);
+      expect(count("agent_telemetry")).toBe(0);
+    });
+  });
+
+  test("task child-safety still holds under chunking (parent with a live child is kept)", async () => {
+    // 父任务（旧、replied）**有未终止的子任务** ⇒ 是链祖先，必须留下；
+    // 分批不能改变这个语义 —— 用具体行断言，不用总数（同文件其他用例会留残留）。
+    const parent = insertTask({ status: "replied", daysAgo: 90 });
+    const child = uuidv4();
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, priority, status, content, requires_response, created_at, parent_task_id)
+       VALUES (?1, 'a', 'b', 'normal', 'running', 'child', 0, datetime('now', '-1 days'), ?2)`,
+      [child, parent],
+    );
+    await withChunkRows(50, async () => {
+      await sweepRetention(STRICT_CFG);
+    });
+    const parentRow = db.get<{ task_id: string }>("SELECT task_id FROM tasks WHERE task_id = ?1", parent);
+    const childRow = db.get<{ task_id: string }>("SELECT task_id FROM tasks WHERE task_id = ?1", child);
+    expect(parentRow?.task_id).toBe(parent);
+    expect(childRow?.task_id).toBe(child);
   });
 });

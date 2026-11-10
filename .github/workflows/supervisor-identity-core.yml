@@ -14,6 +14,13 @@ on:
       - '.github/workflows/supervisor-identity-core.yml'
 permissions:
   contents: read
+# #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
+# 2026-10-25 实测:一条 PR 反复 push 会留下 28 个过期 workflow 一直占着 runner 队列,
+# 新提交反而排不上(当天三条 PR 全卡在 queued)。只在 pull_request 上取消:
+# 主分支的 push 运行不取消 —— 那可能是发布/部署门。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   supervisor-identity:
     runs-on: ubuntu-latest

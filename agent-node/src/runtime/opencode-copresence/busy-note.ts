@@ -12,13 +12,28 @@
 //
 // 纯函数：不碰 react-native、不发请求。
 
-/** 「共享会话忙，任务还没提交，已等 3 分 20 秒（等 TUI 这轮结束）」 */
-export function busyNote(sinceMs: number, nowMs: number = Date.now()): string {
+import { bindQueueOwner, queueOwnerLabel } from "./queue-ownership";
+
+/**
+ * 「共享会话忙，任务还没提交，已等 3 分 20 秒（等 TUI 这轮结束）」
+ *
+ * #1879 ③ —— 排队项要**归属**到具体的 task 与提交者：看板上不止要看出「节点在等」，
+ * 还要看出「等的是谁的那条任务」。owner 已知时把它写进状态文本；不知道就这样，
+ * 不编。
+ */
+export function busyNote(
+  sinceMs: number,
+  nowMs: number = Date.now(),
+  owner?: { taskId?: string | null; sender?: string | null },
+): string {
   const waited = Math.max(0, nowMs - sinceMs);
   const minutes = Math.floor(waited / 60_000);
   const seconds = Math.floor((waited % 60_000) / 1000);
   const elapsed = minutes > 0
     ? `${minutes} 分 ${String(seconds).padStart(2, "0")} 秒`
     : `${seconds} 秒`;
-  return `共享会话忙，任务还没提交，已等 ${elapsed}（等 TUI 这轮结束）`;
+  const ownerPart = owner
+    ? `；${queueOwnerLabel(bindQueueOwner({ taskId: owner.taskId, sender: owner.sender, sinceMs }))}`
+    : "";
+  return `共享会话忙，任务还没提交，已等 ${elapsed}（等 TUI 这轮结束${ownerPart}）`;
 }

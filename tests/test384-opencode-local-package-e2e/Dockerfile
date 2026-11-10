@@ -31,6 +31,7 @@ RUN npm run build \
     && npm pack --ignore-scripts --pack-destination /artifacts
 
 WORKDIR /repo/agent-node
+COPY contracts /repo/contracts
 COPY agent-node/package.json ./
 RUN npm install --ignore-scripts --omit=optional
 COPY agent-node/ ./

@@ -15,6 +15,7 @@ RUN cd /app/agent-network && npm install && npm run build && npm install -g .
 
 # Copy local server + agent-node (V2 dev code)
 WORKDIR /app
+COPY contracts /app/contracts
 COPY server/ /app/server/
 COPY agent-node/ /app/agent-node/
 COPY tests/docker-e2e.sh /app/test.sh

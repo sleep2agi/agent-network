@@ -94,6 +94,13 @@ test("exact executor and exact turn append one late receipt without rewriting te
   const legacyDetail = await get(owner.token, `/api/tasks?task_id=${taskId}&limit=1&network_id=${owner.network_id}`);
   expect(legacyDetail.body.tasks[0].late_replies).toEqual(detail.body.task.late_replies);
   const mcpDetail = await mcp(owner.token, "get_task", { task_id: taskId });
+  // 2026-10-31 —— **条件键要显式登记**（#3171）：get_task 的 `pacing` 只在有 pacing 时出现，
+  // 所以这里不能写「键集恒等于三键」（那也是外部复核说的「条件键」）。
+  // 断言写成：两个必需键必在，且**除 pacing 外不许有别的键**。
+  const ks = Object.keys(mcpDetail);
+  expect(ks).toContain("ok");
+  expect(ks).toContain("task");
+  expect(ks.filter((k) => !["ok", "task", "pacing"].includes(k))).toEqual([]);
   expect(mcpDetail.task.late_replies).toEqual(detail.body.task.late_replies);
 
   const messages = await get(owner.token, `/api/messages?alias=${encodeURIComponent(owner.user.username)}&since=2000-01-01%2000:00:00`);
@@ -149,4 +156,72 @@ test("nonterminal legacy reply retains its established behavior", async () => {
   expect(result.late).toBeUndefined();
   expect(db.get("SELECT status,result FROM tasks WHERE task_id=?1", openId)).toEqual({ status: "replied", result: "ordinary final" });
   expect(db.get("SELECT COUNT(*) AS n FROM task_late_replies WHERE task_id=?1", openId).n).toBe(0);
+});
+
+// #3061 —— 任务**从未记下 turn 上下文**时，迟到结果也必须能收。
+//
+// 现场（2026-10-30 生产实测）：
+//   「仍在 TUI 会话里运行，等待回复已达 30 分钟上限」的失败任务 289 条，
+//   其中 thread_id/turn_id 非空的 **0 条**；「任务未提交」781 条里只有 1 条有。
+//   ⇒ 这类任务的迟到结果永远匹配不上上下文，等于「活干完了但结果必定丢弃」。
+//   全库 task_late_replies 只有 4 行，正是这条路走不通的证据。
+test("既有任务没有 turn 上下文时，迟到结果仍可落账并投递给发送方", async () => {
+  const contextlessId = "task_late710_noctx";
+  db.run(`INSERT INTO tasks
+    (task_id,from_name,to_name,to_node_id,status,content,result,network_id,thread_id,turn_id,completed_at)
+    VALUES(?1,?2,'late710-worker',?3,'failed','never started a turn','共享会话忙，30 分钟内未提交',?4,NULL,NULL,datetime('now'))`,
+    [contextlessId, owner.user.username, workerId, owner.network_id]);
+
+  const accepted = await mcp(workerToken, "send_reply", {
+    in_reply_to: contextlessId,
+    text: "结果其实跑完了",
+    status: "replied",
+    thread_id: "thread_from_runtime_any",
+    turn_id: "turn_from_runtime_any",
+  });
+  expect(accepted).toMatchObject({ ok: true, late: true, duplicate: false });
+  // 任务行不被改写
+  expect(db.get("SELECT status,result FROM tasks WHERE task_id=?1", contextlessId))
+    .toEqual({ status: "failed", result: "共享会话忙，30 分钟内未提交" });
+  // 落进 append-only 账，并带上运行时给的上下文
+  const row = db.get("SELECT thread_id,turn_id,status,result FROM task_late_replies WHERE task_id=?1", contextlessId);
+  expect(row).toMatchObject({ thread_id: "thread_from_runtime_any", turn_id: "turn_from_runtime_any", status: "replied", result: "结果其实跑完了" });
+  // 发送方能在 inbox 里看到它（否则「活干完了没人知道」）
+  const inbox = await mcp(owner.token, "get_inbox", { alias: owner.user.username, limit: 100 });
+  expect(inbox.messages).toContainEqual(expect.objectContaining({ id: accepted.message_id, late: true, content: "结果其实跑完了" }));
+  // 不是这个任务的负责人，仍然拒（放宽只针对上下文，不放宽归属）
+  expect(await mcp(siblingToken, "send_reply", {
+    in_reply_to: contextlessId, text: "impostor", thread_id: "t", turn_id: "u",
+  })).toMatchObject({ ok: false, error: "late_reply_task_not_owned" });
+});
+
+// #3061 续 —— 任务**从未记下 turn 上下文**时，不该再要求调用方凭空给出 thread/turn。
+//
+// 现场（2026-10-30 通信Dash欧）：它对一条 failed 任务调 send_reply 补结果，
+// 拿到 `reply_task_terminal`（因为没带 thread_id/turn_id），只好先 retry_task 把任务
+// 重置成 delivered 再回复 —— 账本里那条从 failed 变成 retried→replied，
+// **「当初失败过」这个事实被抹掉了**。而 #3244 只放宽了「id 对不上」，没放宽「必须给 id」。
+test("既有任务没有 turn 上下文时，不带 thread/turn 也能补迟到结果", async () => {
+  const noIdTask = "task_late710_noid";
+  db.run(`INSERT INTO tasks
+    (task_id,from_name,to_name,to_node_id,status,content,result,network_id,thread_id,turn_id,completed_at)
+    VALUES(?1,?2,'late710-worker',?3,'failed','timed out','[超时] 已达 30 分钟上限',?4,NULL,NULL,datetime('now'))`,
+    [noIdTask, owner.user.username, workerId, owner.network_id]);
+
+  const accepted = await mcp(workerToken, "send_reply", {
+    in_reply_to: noIdTask,
+    text: "没带 id 也应该收下",
+    status: "replied",
+  });
+  expect(accepted).toMatchObject({ ok: true, late: true, duplicate: false });
+  const row = db.get("SELECT status,result FROM task_late_replies WHERE task_id=?1", noIdTask);
+  expect(row).toMatchObject({ status: "replied", result: "没带 id 也应该收下" });
+  // 任务行仍不改写
+  expect(db.get("SELECT status FROM tasks WHERE task_id=?1", noIdTask)).toEqual({ status: "failed" });
+
+  // 反例：任务**有**上下文时，仍然必须给匹配的 id（不能被这次放宽带偏）
+  const mismatch = await mcp(siblingToken, "send_reply", {
+    in_reply_to: taskId, text: "impostor", thread_id: threadId, turn_id: turnId,
+  });
+  expect(mismatch).toMatchObject({ ok: false, error: "late_reply_task_not_owned" });
 });

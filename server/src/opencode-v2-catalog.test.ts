@@ -123,6 +123,20 @@ function snapshot(directory = PROJECT, overrides: Record<string, unknown> = {}) 
 }
 
 describe("hub authorizes an owned OpenCode V2 catalog read", () => {
+  test("session model write is denied by default and requires human admin", async () => {
+    seed();
+    const args = { daemon_node_id: DAEMON, node_id: V2, session_id: "ses_synthetic", model: { providerID: "stub", id: "model", variant: "high" } };
+    const admin = handlers(USER, false, null);
+    expect(await call(admin.out.select_opencode_session_model!, args)).toEqual({ ok: false, status: "rejected", reason: "unsupported" });
+    const viewer = handlers(VIEWER, false, null);
+    expect(await call(viewer.out.select_opencode_session_model!, args)).toEqual({ ok: false, error: "access_denied" });
+    const outsider = handlers(OUTSIDER, false, null);
+    expect(await call(outsider.out.select_opencode_session_model!, args)).toEqual({ ok: false, error: "access_denied" });
+    const node = handlers(USER, true, DAEMON_TOK);
+    expect(await call(node.out.select_opencode_session_model!, args)).toEqual({ ok: false, error: "user_token_required" });
+    const schema = (admin.server as any)._registeredTools.select_opencode_session_model.inputSchema;
+    expect((await schema.safeParseAsync({ ...args, model: { ...args.model, headers: { token: "fixture" } } })).success).toBe(false);
+  });
   test("member queues, daemon reads the owned loopback, ready snapshot stays unverified", async () => {
     seed();
     const user = handlers(USER, false, null);

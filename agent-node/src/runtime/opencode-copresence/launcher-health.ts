@@ -1,6 +1,7 @@
 // #829: a tmux launcher exits successfully while its runtime remains alive.
 // Linux-only evidence for daemon create, not a general readiness/security API.
 import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { hasBorrowedV1Intent, inspectBorrowedLaunchHealth } from "../../shared/opencode-borrowed-launch-health";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -49,7 +50,7 @@ function publishOpenCodeLaunchHealth(dir: string, generation: string, servePid: 
   const path = join(dir, LAUNCH_HEALTH_FILE), tmp = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(record), { flag: "wx", mode: 0o600 });
-    renameSync(tmp, path);
+    renameOverExistingSync(tmp, path);
   } finally { rmSync(tmp, { force: true }); }
   return () => {
     try {

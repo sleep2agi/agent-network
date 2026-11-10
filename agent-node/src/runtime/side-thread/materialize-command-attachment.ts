@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SideThreadAttachmentGrant } from "./command-transport";
@@ -24,6 +25,6 @@ export async function materializeCommandAttachment(grant: SideThreadAttachmentGr
   const path = join(deps.cacheDir, `${grant.fileId}-${grant.sha256.slice(0, 16)}`);
   const tmp = `${path}.tmp.${process.pid}.${randomUUID()}`;
   writeFileSync(tmp, bytes, { flag: "wx", mode: 0o600 });
-  renameSync(tmp, path); chmodSync(path, 0o600);
+  renameOverExistingSync(tmp, path); chmodSync(path, 0o600);
   return { path, mediaType: grant.mediaType, sha256: digest, size: bytes.byteLength };
 }

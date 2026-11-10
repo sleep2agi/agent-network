@@ -1,0 +1,937 @@
+{
+ "note": "表草稿：不是运行时路由表，也还没有被任何代码消费。order 承载语义，不许排序。",
+ "key": [
+  "path",
+  "method",
+  "query",
+  "order"
+ ],
+ "source_domain": {
+  "files": [
+   "server/src/server.ts"
+  ],
+  "granularity": "whole_file",
+  "known_bias": "改注释/空行也会让 source_sha256 变 ⇒ 表被判过期。这是**故意的**：把域收窄到「路由注册那一块」需要一份比正则更硬的结构，而那份结构本身要先被测。"
+ },
+ "runtime_claim": {
+  "is_runtime_fact": false,
+  "why": "本表由正则从源码抽取，路由代码不读它 ⇒ 表与运行时注册集合可能不同",
+  "upgrade_condition": "要么路由从表生成（表成为唯一生产者），要么加一条「运行时注册集合 == 表」的等价断言"
+ },
+ "generator": {
+  "path": "scripts/report-rest-endpoints.py",
+  "sha256": "e24c53ddb9956ea57ee54c05659e67c8076738c3e58092043c9086a3d8611779"
+ },
+ "method_parse": {
+  "rule": "同一行；否则 `const X = …` 绑定后 3 行内引用 X 的 `if (` 那一行",
+  "literal": 57,
+  "absent": 34,
+  "multi_method": [
+   {
+    "path": "/api/networks/:param1/members/:param2/task-grants",
+    "line": 2986,
+    "methods": [
+     "GET",
+     "PUT"
+    ]
+   },
+   {
+    "path": "/api/networks/:param1/members/:param2/agent-grants",
+    "line": 3028,
+    "methods": [
+     "GET",
+     "PUT"
+    ]
+   },
+   {
+    "path": "/api/admin/users",
+    "line": 3531,
+    "methods": [
+     "GET",
+     "POST"
+    ]
+   },
+   {
+    "path": "/api/files/:param1",
+    "line": 5505,
+    "methods": [
+     "GET",
+     "HEAD"
+    ]
+   }
+  ],
+  "known_gap": "多方法路由在 method 列里是 None ⇒ 按 method 判写路由时它们**既不算写也不算读**，必须并进这一格来数；6 行（GET||PUT ×2、GET||POST、GET||HEAD）在今天的分母里。"
+ },
+ "consumers": {
+  "content": [],
+  "self_consistency": [
+   "scripts/check-rest-route-table.py（每次 CI run 重跑本生成器并逐字节比较）"
+  ]
+ },
+ "key_note": "order = 分支在源文件中的序位；它进键是因为 (path,method,query) 实测不唯一（40/94 行与人同键）",
+ "rows": [
+  {
+   "id": 1,
+   "order": 1,
+   "path": "/ws/tmux/:param1",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2062
+  },
+  {
+   "id": 2,
+   "order": 2,
+   "path": "/mcp",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 2070
+  },
+  {
+   "id": 3,
+   "order": 3,
+   "path": "/events/network/:param1",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2159
+  },
+  {
+   "id": 4,
+   "order": 4,
+   "path": "/events/users/me",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2218
+  },
+  {
+   "id": 5,
+   "order": 5,
+   "path": "/events/:param1",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2242
+  },
+  {
+   "id": 6,
+   "order": 6,
+   "path": "/api/auth/register",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2381
+  },
+  {
+   "id": 7,
+   "order": 7,
+   "path": "/api/auth/login",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2397
+  },
+  {
+   "id": 8,
+   "order": 8,
+   "path": "/api/auth/me",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2437
+  },
+  {
+   "id": 9,
+   "order": 9,
+   "path": "/api/auth/me/avatar",
+   "method": "PUT",
+   "query": [],
+   "kind": "eq",
+   "line": 2457
+  },
+  {
+   "id": 10,
+   "order": 10,
+   "path": "/api/auth/me/avatar/upload",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2490
+  },
+  {
+   "id": 11,
+   "order": 11,
+   "path": "/api/users/:param1/avatar/:param2.png",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2568
+  },
+  {
+   "id": 12,
+   "order": 12,
+   "path": "/api/auth/me",
+   "method": "PUT",
+   "query": [],
+   "kind": "eq",
+   "line": 2616
+  },
+  {
+   "id": 13,
+   "order": 13,
+   "path": "/api/auth/password",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2641
+  },
+  {
+   "id": 14,
+   "order": 14,
+   "path": "/api/auth/node-token",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2667
+  },
+  {
+   "id": 15,
+   "order": 15,
+   "path": "/api/node-rename/prepare",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2687
+  },
+  {
+   "id": 16,
+   "order": 16,
+   "path": "/api/node-rename/commit",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2706
+  },
+  {
+   "id": 17,
+   "order": 17,
+   "path": "/api/node-rename/abort",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2723
+  },
+  {
+   "id": 18,
+   "order": 18,
+   "path": "/api/auth/tokens",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2741
+  },
+  {
+   "id": 19,
+   "order": 19,
+   "path": "/api/auth/tokens",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2751
+  },
+  {
+   "id": 20,
+   "order": 20,
+   "path": "/api/auth/tokens/:param1",
+   "method": "DELETE",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2767
+  },
+  {
+   "id": 21,
+   "order": 21,
+   "path": "/api/auth/sessions",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2781
+  },
+  {
+   "id": 22,
+   "order": 22,
+   "path": "/api/auth/sessions/revoke-others",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2791
+  },
+  {
+   "id": 23,
+   "order": 23,
+   "path": "/api/auth/sessions/:param1",
+   "method": "DELETE",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2805
+  },
+  {
+   "id": 24,
+   "order": 24,
+   "path": "/api/networks",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 2820
+  },
+  {
+   "id": 25,
+   "order": 25,
+   "path": "/api/networks",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 2850
+  },
+  {
+   "id": 26,
+   "order": 26,
+   "path": "/api/networks/:param1/rules",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2870
+  },
+  {
+   "id": 27,
+   "order": 27,
+   "path": "/api/networks/:param1/agent-groups(?:/:param2:param3?)?",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2917
+  },
+  {
+   "id": 28,
+   "order": 28,
+   "path": "/api/networks/:param1/members/:param2/task-grants",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 2986
+  },
+  {
+   "id": 29,
+   "order": 29,
+   "path": "/api/networks/:param1/members/:param2/agent-grants",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3028
+  },
+  {
+   "id": 30,
+   "order": 30,
+   "path": "/api/networks/:param1/agent-teams(?:/:param2)?",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3094
+  },
+  {
+   "id": 31,
+   "order": 31,
+   "path": "/api/networks/:param1/nodes/:param2/agent-team",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3095
+  },
+  {
+   "id": 32,
+   "order": 32,
+   "path": "/api/networks/:param1/humans",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3135
+  },
+  {
+   "id": 33,
+   "order": 33,
+   "path": "/api/networks/:param1/departments(?:/:param2)?",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3156
+  },
+  {
+   "id": 34,
+   "order": 34,
+   "path": "/api/networks/:param1/members/:param2/department",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3157
+  },
+  {
+   "id": 35,
+   "order": 35,
+   "path": "/api/networks/:param1/nodes/:param2/department",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3158
+  },
+  {
+   "id": 36,
+   "order": 36,
+   "path": "/api/networks/:param1/departments/:param2/:param3",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3159
+  },
+  {
+   "id": 37,
+   "order": 37,
+   "path": "/api/networks/:param1/chat-groups(?:/:param2(?:/:param3(?:/:param4)?)?)?",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3348
+  },
+  {
+   "id": 38,
+   "order": 38,
+   "path": "/api/networks/:param1/members(?:/:param2)?",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3444
+  },
+  {
+   "id": 39,
+   "order": 39,
+   "path": "/api/networks/:param1/invite",
+   "method": "POST",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3497
+  },
+  {
+   "id": 40,
+   "order": 40,
+   "path": "/api/networks/join",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 3514
+  },
+  {
+   "id": 41,
+   "order": 41,
+   "path": "/api/admin/users",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 3531
+  },
+  {
+   "id": 42,
+   "order": 42,
+   "path": "/api/users",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 3560
+  },
+  {
+   "id": 43,
+   "order": 43,
+   "path": "/api/networks/:param1",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 3571
+  },
+  {
+   "id": 44,
+   "order": 44,
+   "path": "/health",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 3648
+  },
+  {
+   "id": 45,
+   "order": 45,
+   "path": "/api/node-lifecycle-requests",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 4010
+  },
+  {
+   "id": 46,
+   "order": 46,
+   "path": "/api/adoption-candidates",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 4015
+  },
+  {
+   "id": 47,
+   "order": 47,
+   "path": "/api/nodes/:param1/permission-mode",
+   "method": "PUT",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4077
+  },
+  {
+   "id": 48,
+   "order": 48,
+   "path": "/api/nodes/:param1/provider-selection",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4105
+  },
+  {
+   "id": 49,
+   "order": 49,
+   "path": "/api/nodes/:param1/tool-allowlist",
+   "method": "PUT",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4229
+  },
+  {
+   "id": 50,
+   "order": 50,
+   "path": "/api/nodes/:param1/rest-allowlist",
+   "method": "PUT",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4277
+  },
+  {
+   "id": 51,
+   "order": 51,
+   "path": "/api/nodes/:param1/peer-allowlist",
+   "method": "PUT",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4313
+  },
+  {
+   "id": 52,
+   "order": 52,
+   "path": "/api/networks/:param1/node-permission-report",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4350
+  },
+  {
+   "id": 53,
+   "order": 53,
+   "path": "/api/networks/:param1/token-ledger",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4467
+  },
+  {
+   "id": 54,
+   "order": 54,
+   "path": "/api/skills",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 4569
+  },
+  {
+   "id": 55,
+   "order": 55,
+   "path": "/api/secrets",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4570
+  },
+  {
+   "id": 56,
+   "order": 56,
+   "path": "/api/providers",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4571
+  },
+  {
+   "id": 57,
+   "order": 57,
+   "path": "/api/providers",
+   "method": "PUT",
+   "query": [],
+   "kind": "eq",
+   "line": 4621
+  },
+  {
+   "id": 58,
+   "order": 58,
+   "path": "/api/networks/:param1/env-transport-log",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4649
+  },
+  {
+   "id": 59,
+   "order": 59,
+   "path": "/api/nodes/:param1/secrets",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4680
+  },
+  {
+   "id": 60,
+   "order": 60,
+   "path": "/api/nodes/:param1/secrets/:param2",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 4681
+  },
+  {
+   "id": 61,
+   "order": 61,
+   "path": "/api/dm",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4731
+  },
+  {
+   "id": 62,
+   "order": 62,
+   "path": "/api/dm/threads",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4731
+  },
+  {
+   "id": 63,
+   "order": 63,
+   "path": "/api/dm",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 4735
+  },
+  {
+   "id": 64,
+   "order": 64,
+   "path": "/api/dm/threads",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4756
+  },
+  {
+   "id": 65,
+   "order": 65,
+   "path": "/api/stats/routes",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 4781
+  },
+  {
+   "id": 66,
+   "order": 66,
+   "path": "/api/stats/versions",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 4795
+  },
+  {
+   "id": 67,
+   "order": 67,
+   "path": "/api/stats/sse",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4811
+  },
+  {
+   "id": 68,
+   "order": 68,
+   "path": "/api/status",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 4833
+  },
+  {
+   "id": 69,
+   "order": 69,
+   "path": "/api/servers",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 5012
+  },
+  {
+   "id": 70,
+   "order": 70,
+   "path": "/api/server/:param1/:param2",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5084
+  },
+  {
+   "id": 71,
+   "order": 71,
+   "path": "/api/upload",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 5214
+  },
+  {
+   "id": 72,
+   "order": 72,
+   "path": "/api/files/:param1",
+   "method": null,
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 5505
+  },
+  {
+   "id": 73,
+   "order": 73,
+   "path": "/api/task",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 5636
+  },
+  {
+   "id": 74,
+   "order": 74,
+   "path": "/api/broadcast",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 5977
+  },
+  {
+   "id": 75,
+   "order": 75,
+   "path": "/api/tmux/:param1",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6013
+  },
+  {
+   "id": 76,
+   "order": 76,
+   "path": "/api/tmux/:param1/send",
+   "method": "POST",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6037
+  },
+  {
+   "id": 77,
+   "order": 77,
+   "path": "/api/messages",
+   "method": null,
+   "query": [
+    "scope"
+   ],
+   "kind": "eq",
+   "line": 6077
+  },
+  {
+   "id": 78,
+   "order": 78,
+   "path": "/api/messages",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6144
+  },
+  {
+   "id": 79,
+   "order": 79,
+   "path": "/api/messages/ack",
+   "method": "POST",
+   "query": [],
+   "kind": "eq",
+   "line": 6176
+  },
+  {
+   "id": 80,
+   "order": 80,
+   "path": "/api/stats",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6244
+  },
+  {
+   "id": 81,
+   "order": 81,
+   "path": "/api/server-logs",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6284
+  },
+  {
+   "id": 82,
+   "order": 82,
+   "path": "/api/audit-log",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6300
+  },
+  {
+   "id": 83,
+   "order": 83,
+   "path": "/api/task_events",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6323
+  },
+  {
+   "id": 84,
+   "order": 84,
+   "path": "/api/nodes/:param1",
+   "method": "DELETE",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6343
+  },
+  {
+   "id": 85,
+   "order": 85,
+   "path": "/api/token-usage",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 6403
+  },
+  {
+   "id": 86,
+   "order": 86,
+   "path": "/api/nodes/:param1/config",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6448
+  },
+  {
+   "id": 87,
+   "order": 87,
+   "path": "/api/nodes/:param1/attrs",
+   "method": "PUT",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6512
+  },
+  {
+   "id": 88,
+   "order": 88,
+   "path": "/api/nodes/:param1/avatar",
+   "method": "PUT",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 6609
+  },
+  {
+   "id": 89,
+   "order": 89,
+   "path": "/api/node-create-requests",
+   "method": "GET",
+   "query": [],
+   "kind": "eq",
+   "line": 6664
+  },
+  {
+   "id": 90,
+   "order": 90,
+   "path": "/api/host-supervisors",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6685
+  },
+  {
+   "id": 91,
+   "order": 91,
+   "path": "/api/nodes",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 6892
+  },
+  {
+   "id": 92,
+   "order": 92,
+   "path": "/api/tasks?/:param1",
+   "method": "GET",
+   "query": [],
+   "kind": "regex_prefix",
+   "line": 7141
+  },
+  {
+   "id": 93,
+   "order": 93,
+   "path": "/api/tasks",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 7213
+  },
+  {
+   "id": 94,
+   "order": 94,
+   "path": "/api/completions",
+   "method": null,
+   "query": [],
+   "kind": "eq",
+   "line": 7276
+  },
+  {
+   "id": 95,
+   "order": 95,
+   "path": "/api/",
+   "method": null,
+   "query": [],
+   "kind": "starts_with",
+   "line": 7291
+  }
+ ],
+ "provenance": [
+  "generated_from: `server/src/server.ts` source_sha256=`eb03105e20cf`",
+  "reproduce: `python3 scripts/report-rest-endpoints.py --table-json`（或 --markdown）",
+  "机器可读版本（表草稿，尚未被任何代码消费）：`docs/rest-route-table.json`",
+  "重跑后与本文档不一致 ⇒ 本文档过期（它没有经过这一行的生成器就进来了）"
+ ]
+}

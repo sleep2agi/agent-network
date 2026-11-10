@@ -630,6 +630,71 @@ scheduled_tasks / providers / network_secrets / skillhub_skills / side_chats / a
 
 ---
 
+### GET /api/providers {#providers}
+
+网络自有的 Provider 配置（表 `hub_provider_configs`）。**只读、不含密钥值。**
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://your-hub/api/providers?network_id=$NET"
+```
+
+```json
+{
+  "ok": true,
+  "network_id": "net_…",
+  "source": "hub",
+  "source_table": "hub_provider_configs",
+  "state": "unconfigured",
+  "counts": { "providers": 0, "providers_in_cli_registry": 0 },
+  "hint": "本端点读 hub_provider_configs，此处为空，且 CLI 注册表（providers）也是 0 条 ⇒ 客户端没有任何可选模型；需要管理员先录入第一行。",
+  "providers": []
+}
+```
+
+⚠️ **两条「providers」读的不是同一张表**：
+
+| 端点 / 工具 | 读的表 | 用途 |
+|---|---|---|
+| `GET /api/providers`（本文档） | `hub_provider_configs` | 网络自有 Provider 配置，客户端据此显示可选模型 |
+| MCP `list_providers` | `providers` / `provider_models` | CLI 侧注册表 |
+
+`state` 与 `counts` 就是为了让「哪张表是空的」一眼可见：
+
+| `state` | 含义 |
+|---|---|
+| `configured` | 本表至少一行（此时不带 `hint`） |
+| `unconfigured` | 本表为空；`hint` 会说明另一张表有没有行、以及下一步该谁做什么 |
+
+### PUT /api/providers {#providers-put}
+
+写入（或轮换）一行 Provider 配置。**需要网络 owner/admin。**密钥值只写不读。
+
+```bash
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  "https://your-hub/api/providers?network_id=$NET" \
+  -d '{"revision":0,"provider":{"id":"main","label":"Main","enabled":true,
+       "protocol":"openai-chat-completions","baseUrl":"https://api.example.com/v1",
+       "models":["gpt-x"],"key":"sk-…"}}'
+```
+
+| 字段 | 说明 |
+|---|---|
+| `revision` | 新建传 `0`；后续传回读到的 `revision`（乐观锁） |
+| `provider.key` | 明文密钥，落 vault；响应里**永不回显** |
+| `provider.secretKeyRef` | 也可以改成引用已存在的 vault 键名（与 `key` 二选一） |
+
+| 状态 | `error` 值 | 触发条件 |
+|---|---|---|
+| 400 | `invalid_revision` | 缺少 / 非整数 `revision` |
+| 400 | `provider_key_required` | 换了 `baseUrl`/`protocol` 但没给新 key |
+| 400 | `invalid_hub_provider` | 字段形状不合法（模型名、baseUrl 等） |
+| 403 | `provider_owner_required` | 调用者不是 owner |
+| 403 | `provider_access_denied` | 调用者不是该网络成员 |
+| 409 | `hub_provider_revision_conflict` | `revision` 已过期（有人在之前改过） |
+
+---
+
 ## 错误响应格式
 
 错误通常返回以下格式：

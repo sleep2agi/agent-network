@@ -182,6 +182,9 @@ describe("list / read by alias reach a session with no nodes row", () => {
     const s = await connect(asSession);
     try {
       const enq = await u.call("read_node_file", { alias: SESSION_ALIAS, path: "docs/README.md" });
+      // 2026-10-31 —— #3275：read_node_file 与 list_node_files 是**同一族**（都只是下发请求），
+      // 所以形状也应当一样：{ok, op, request_id}。钉住它，顺带钉住「两个工具不能长成两种形状」。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(enq).toMatchObject({ ok: true, op: "file_read" });
       expect((await s.call("get_rules_file_request", {})).request).toEqual({ request_id: enq.request_id, op: "file_read", content: "docs/README.md" });
       const payload = JSON.stringify({ path: "docs/README.md", name: "README.md", kind: "text", size: 6, content: "# hi\n" });
@@ -248,6 +251,9 @@ describe("who may ask, and who may read the answer", () => {
     const other = await connect(asUserOtherLogin);
     try {
       const enq = await u.call("list_node_skills", { alias: SESSION_ALIAS });
+      // #3275 批次 4 —— list_node_skills 走的是**与 read/write/tail 同一条下发通道**
+      // （所以外层是三键 ok/op/request_id）；技能清单本体在 get_rules_file_request 里回。
+      expect(Object.keys(enq).sort()).toEqual(["ok", "op", "request_id"]);
       expect(await other.call("get_rules_file_result", { request_id: enq.request_id })).toMatchObject({ ok: true, status: "pending" });
     } finally { await u.close(); await other.close(); }
   }, 20_000);

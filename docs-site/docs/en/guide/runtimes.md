@@ -6,6 +6,8 @@ Every Agent Node has a **Runtime** (engine kernel) that decides how the node cal
 
 ## Runtimes — canonical table {#runtimes-—-canonical-table}
 
+DSH connects through a separate plugin, not a built-in runtime option below. See [DSH nodes](/en/guide/dsh).
+
 > This table is the **single source of truth** for runtimes across the site. Other pages (`cli` / `agent-node` / `getting-started` / `clean-server`) reference it and do not duplicate the full table.
 
 ::: tip Which runtimes are available in which channel

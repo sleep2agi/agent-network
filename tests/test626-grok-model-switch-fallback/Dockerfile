@@ -1,9 +1,7 @@
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS build
 
 # scripts/qa.sh 靠 grep `^ARG SOURCE_COMMIT` 决定传不传 --build-arg。
 # 没有这一行就**不传,而且不报错** —— 这次运行的输出无法被钉到任何提交上。
-ARG SOURCE_COMMIT=dev
-ENV SOURCE_COMMIT=$SOURCE_COMMIT
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bash build-essential ca-certificates curl git python3 unzip util-linux \
@@ -30,10 +28,19 @@ WORKDIR /workspace
 #   failed to compute cache key: "/agent-node/bun.lock": not found
 # 于是「本地构建通过、CI 构建失败」。
 # 仓里 test34 / test467 / test697 / test698 都是 `bun.lock*`,这里是唯一漏的。
+COPY contracts /workspace/contracts
 COPY agent-node/package.json agent-node/bun.lock* ./agent-node/
 
 RUN cd agent-node && bun install
 
 COPY . /workspace
 
+# 🔴 溯源单独一层 stage（缓存关键）。
+# `ARG SOURCE_COMMIT` 在 stage 内声明（哪怕没人引用它）也会让它之后每一层进入该 ARG 的缓存键；
+# 每次构建的 $GITHUB_SHA 都不同 ⇒ 前面的 RUN 层永远 miss（本地实测 146.5s vs 0.6s）。
+FROM build
+ARG SOURCE_COMMIT
+# 🔴 这个 ENV 必须和 ARG 同在一个 stage：原来它在 build stage 里引用了一个已声明的 ARG，
+# 把 ARG 移走后值会变空，套件断言 `SOURCE_COMMIT 必须是完整小写 Git SHA` 直接红（CI 抓到了）。
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
 ENTRYPOINT ["bash", "tests/test626-grok-model-switch-fallback/run.sh"]

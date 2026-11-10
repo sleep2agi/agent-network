@@ -6,7 +6,7 @@
 // 变成私信文件,之后转进私信也照旧全网成员可见。私信文件只能由看得见它的人再转发。
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { register, addNetworkMember } from "./auth.js";
@@ -71,6 +71,55 @@ beforeAll(async () => {
 afterAll(() => {
   try { hub?.stop?.(true); } catch {}
   try { rmSync(DIR, { recursive: true, force: true }); } catch {}
+});
+
+// #3354 —— POST /api/dm 的 L3 证据：非该网络成员必须被拒，且**一条私信都不许落库**。
+// 这条路由的门是 restAuth + getUserNetworkRole，两处都在 sendHumanDm 里。
+describe("POST /api/dm 的拒绝与镜像", () => {
+  const dmRows = (userId: string) =>
+    db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_inbox WHERE user_id = ?1 AND kind = 'human_dm'", userId)!.n;
+
+  test("非该网络成员 ⇒ 403，且没有私信落库；成员 ⇒ 200 且真的落了（镜像）", async () => {
+    // 造一个「自己有自己的网络、但不是 NET 成员」的人
+    const outsider = register(`dmfs_outsider_${Date.now()}`, PW);
+    expect(outsider.network_id).not.toBe(NET);
+    const before = dmRows(bob.id);
+    const denied = await fetch(`${BASE}/api/dm`, {
+      method: "POST",
+      headers: { ...auth(outsider.token!), "Content-Type": "application/json" },
+      body: JSON.stringify({ network_id: NET, to_user_id: bob.id, message: "hi" }),
+    });
+    expect(denied.status).toBe(403);
+    expect((await denied.json() as any).error).toBe("not a member of this network");
+    // 拒绝的第二半：**没有落库**（只断状态码时，「拒了但已经写进收件箱」也会绿）
+    expect(dmRows(bob.id)).toBe(before);
+    // 镜像：成员发给 bob ⇒ 200，且收件箱真的多一条
+    const ok = await fetch(`${BASE}/api/dm`, {
+      method: "POST",
+      headers: { ...auth(alice.token), "Content-Type": "application/json" },
+      body: JSON.stringify({ network_id: NET, to_user_id: bob.id, message: "hi from alice" }),
+    });
+    expect(ok.status).toBe(200);
+    expect(dmRows(bob.id)).toBe(before + 1);
+  });
+});
+
+// #3354 —— POST /api/upload 的 L3 证据：未认证必须 401，且**一个文件都没落盘**。
+// 这条路由有 8 种拒绝（401 / 403 / 411 / 413 / 415 / 429 / bad_content_length / bad_purpose），
+// 本轮验的是最外一层：没有身份就没有上传。
+describe("POST /api/upload 的拒绝与副作用", () => {
+  const indexCount = () => {
+    try { return readdirSync(join(DIR, "uploads", ".index")).length; } catch { return 0; }
+  };
+
+  test("未认证 ⇒ 401，且 .index 条目数不变（拒绝不许有副作用）", async () => {
+    const before = indexCount();
+    const form = new FormData();
+    form.append("file", new Blob([new TextEncoder().encode("probe")], { type: "image/png" }), "probe.png");
+    const res = await fetch(`${BASE}/api/upload?network_id=${NET}`, { method: "POST", body: form });
+    expect(res.status).toBe(401);
+    expect(indexCount()).toBe(before);
+  });
 });
 
 describe("upload ?purpose=dm", () => {

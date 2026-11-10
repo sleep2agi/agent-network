@@ -4,8 +4,8 @@
 // cwd-sensitive child commands, and module-singleton database state.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, readFileSync } from "node:fs";
+import { cpus, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 type Counts = { pass: number; fail: number; skip: number; expects: number };
@@ -43,6 +43,27 @@ function parseArgs(argv: string[]) {
   }
   if (!Number.isFinite(timeoutMs) || timeoutMs < 100) throw new Error("timeout must be at least 100ms");
   return { reverse, verbose, selectedFiles, timeoutMs };
+}
+
+/**
+ * #2898 —— 「模块顶层拥有进程级状态」的测试文件不能进聚合跑。
+ *
+ * 这些文件长这样：
+ *   process.env.COMMHUB_DB = join(dir, "hub.db");
+ *   const { db } = await import("./db.js");        // 单例
+ *
+ * 单进程跑 272 个文件时，db.js 只在**第一个**文件 import 时初始化一次；
+ * 之后每个文件改 env 都不再生效（模块已缓存）⇒ 它们共用第一个文件的库
+ * ⇒ 断言自己那份库内容的用例必红（即使单文件跑永远绿）。
+ *
+ * 判据不手写：直接读文件内容。加了新文件也自动成立。
+ *
+ * 🔴 别把正则写成 `\s*=`：多数文件用的是 `process.env.COMMHUB_DB ||= …`（允许外部覆盖），
+ *    那样会漏掉 41 个文件（实测 55 个里有 41 个是 ||= 形式），排除集只剩 14 个。
+ */
+const OWNS_PROCESS_DB_RE = /^process\.env\.COMMHUB_DB\b/m;
+function ownsProcessDb(file: string): boolean {
+  try { return OWNS_PROCESS_DB_RE.test(readFileSync(join(REPO_ROOT, file), "utf8")); } catch { return false; }
 }
 
 function collectTests(dir: string): string[] {
@@ -114,16 +135,23 @@ function terminateTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Sig
   }
 }
 
-let activeChild: ChildProcessWithoutNullStreams | null = null;
+// #2800 —— 并行后可能有多个子进程同时存活；原来只有一个 activeChild，
+// 多路并发时后者会覆盖前者，导致「中断时只杀掉最后一个」。
+const activeChildren = new Set<ChildProcessWithoutNullStreams>();
 let interruptedBy: NodeJS.Signals | null = null;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     interruptedBy = signal;
-    if (activeChild) terminateTree(activeChild, signal);
+    for (const child of activeChildren) terminateTree(child, signal);
   });
 }
 
-async function runFile(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
+// #2800 —— 并行下观察到过一次「文件 exit=0 但没输出任何 summary」（CI 上 create-node.test.ts，
+// pass=0 fail=0 skip=0），本地串行/小批并发都复现不出来。那种情况下 validSummary=false，
+// 整个聚合会被判 bad=true 而红 —— 但它的成因是「输出丢了」，不是「测试失败」。
+// 处置：空 summary 且 exit=0 时，**串行重跑一次**（并发池里也只占一个槽），仍空才判坏。
+// 这样既不掩盖真失败（真失败会带 fail>0 或 exit!=0），也不让一次输出抖动毁掉整条 CI。
+async function runFileOnce(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
   const suiteRoot = join(runRoot, slugFor(file));
   const dbPath = join(suiteRoot, "commhub.db");
   for (const dir of [join(suiteRoot, "home"), join(suiteRoot, "tmp"), join(suiteRoot, "uploads")]) {
@@ -138,7 +166,7 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
   });
-  activeChild = child;
+  activeChildren.add(child);
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => {
@@ -165,7 +193,7 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
   });
   clearTimeout(timeout);
   if (killTimer) clearTimeout(killTimer);
-  activeChild = null;
+  activeChildren.delete(child);
 
   const output = `${stdout}\n${stderr}`;
   const counts = parseCounts(output);
@@ -175,19 +203,41 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
     const tail = output.split("\n").slice(-60).join("\n");
     console.error(`\nFAIL_SUITE ${file} exit=${exited.code} signal=${exited.signal} timeout=${timedOut}\n${tail}`);
   }
-  console.log(`TEST_FILE_RESULT\t${file}\tpass=${counts.pass}\tfail=${counts.fail}\tskip=${counts.skip}\texpects=${counts.expects}\texit=${exited.code}\tsignal=${exited.signal ?? "none"}\ttimeout=${timedOut}`);
+  // #2800 —— 把已经算出来的 wallMs 打出来：没有它就说不清「聚合的 5–6 分钟花在哪些文件上」，
+  // 只能靠猜（我先前就猜错了：以为瓶颈是 strace，实测只占 2.5 分钟）。
+  // 追加在行尾，是为了不破坏按前缀 grep 的消费者（test638/639 都用 `grep -F ...pass=..\tfail=0`）。
+  console.log(`TEST_FILE_RESULT\t${file}\tpass=${counts.pass}\tfail=${counts.fail}\tskip=${counts.skip}\texpects=${counts.expects}\texit=${exited.code}\tsignal=${exited.signal ?? "none"}\ttimeout=${timedOut}\twall_ms=${Date.now() - started}`);
   return { file, dbPath, ...counts, exitCode: exited.code, signal: exited.signal, timedOut, wallMs: Date.now() - started };
+}
+
+async function runFile(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
+  const first = await runFileOnce(file, runRoot, timeoutMs, verbose);
+  const summaryEmpty = first.pass + first.fail + first.skip === 0;
+  if (!summaryEmpty || first.exitCode !== 0 || first.timedOut || first.signal !== null) return first;
+  console.error(`RETRY_EMPTY_SUMMARY ${file} exit=0 but no counts — rerunning serially once`);
+  return await runFileOnce(file, runRoot, timeoutMs, verbose);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  let files = collectTests(SERVER_SRC);
+  const enumerated = collectTests(SERVER_SRC);
   // Validate the complete enumerated tree before applying --file filters. A
   // filtered run must not hide a future path pair that would share one DB.
-  assertUniqueSlugs(files);
+  assertUniqueSlugs(enumerated);
+  // #2898 —— 把「模块顶层拥有 COMMHUB_DB」的文件排除在聚合之外；
+  // 它们由 per-file runner 覆盖（那里每个文件是新进程，环境变量才真的生效）。
+  // 不静默：打印数量与文件名，否则「少跑了 55 个文件」会变成没人看得见的假绿。
+  const excluded = enumerated.filter(ownsProcessDb);
+  let files = enumerated.filter((f) => !excluded.includes(f));
+  if (excluded.length > 0) {
+    console.log(`SKIP_PROCESS_DB\t${excluded.length} file(s) own process.env.COMMHUB_DB at module scope — covered by the per-file runner, not the aggregate`);
+    if (args.verbose) for (const f of excluded) console.log(`SKIP_PROCESS_DB_FILE\t${f}`);
+  }
+  if (files.length === 0) throw new Error("#2898: every enumerated test owns COMMHUB_DB — aggregate would run nothing");
   if (args.selectedFiles.length > 0) {
     for (const file of args.selectedFiles) {
-      if (!files.includes(file)) throw new Error(`--file is not an enumerated server test: ${file}`);
+      if (!enumerated.includes(file)) throw new Error(`--file is not an enumerated server test: ${file}`);
+      if (excluded.includes(file)) throw new Error(`--file ${file} owns process.env.COMMHUB_DB at module scope — it cannot run in the aggregate; use the per-file runner`);
     }
     files = [...new Set(args.selectedFiles)];
   }
@@ -198,15 +248,28 @@ async function main() {
   if (explicitRoot) mkdirSync(runRoot, { recursive: false, mode: 0o700 });
   const keep = process.env.ANET_SERVER_TEST_KEEP_ROOT === "1";
   const results: Result[] = [];
-  try {
-    for (const file of files) {
-      if (interruptedBy) break;
-      results.push(await runFile(file, runRoot, args.timeoutMs, args.verbose));
+  // #2800 —— 每个文件本来就跑在独立子进程、独立 DB root 里，所以文件之间的隔离
+  // 不由「串行」提供；并行只改变它们同时跑几个。默认 4 路，QA_AGGREGATE_CONCURRENCY=1
+  // 可一行回滚到串行。
+  const concurrency = Math.max(1, Math.min(
+    Number(process.env.QA_AGGREGATE_CONCURRENCY) || 4,
+    cpus().length || 1,
+  ));
+  let nextIndex = 0;
+  const worker = async () => {
+    while (!interruptedBy) {
+      const i = nextIndex++;
+      if (i >= files.length) return;
+      results.push(await runFile(files[i], runRoot, args.timeoutMs, args.verbose));
     }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
   } finally {
     if (!keep) rmSync(runRoot, { recursive: true, force: true });
   }
 
+  results.sort((a, b) => a.file.localeCompare(b.file));
   const totals = results.reduce((sum, item) => ({
     pass: sum.pass + item.pass,
     fail: sum.fail + item.fail,
@@ -224,6 +287,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(`SERVER_AGGREGATE_CRASH ${error instanceof Error ? error.stack || error.message : String(error)}`);
-  if (activeChild) terminateTree(activeChild, "SIGKILL");
+  for (const child of activeChildren) terminateTree(child, "SIGKILL");
   process.exit(2);
 });

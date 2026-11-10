@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   chmodSync,
   mkdirSync,
@@ -20,6 +22,7 @@ import {
   writebackOpencodeSession,
   writebackOpencodeConfiguredModel,
   shouldReconcileOpencodeSessionModel,
+  armModelReconcile,
 } from "./profile-state";
 
 function fixture(label: string) {
@@ -122,3 +125,55 @@ describe("OpenCode private profile state", () => {
   });
 });
 
+
+// #3418 —— marker 的语义是「上次打开时一致的那个模型」。会话漂走之后它就是一句谎话，
+// 于是 shouldReconcile 永远返回 false，节点永远不自愈、也不喊。armModelReconcile 是解药。
+describe("#3418 会话漂出配置后武装一次对账", () => {
+  test("清空 marker ⇒ 下一次启动必判差异（空串不等于任何真实模型名）", () => {
+    const f = fixture("arm");
+    try {
+      writebackOpencodeConfiguredModel(f.config, "xai/grok-4.7");
+      expect(shouldReconcileOpencodeSessionModel(readOpencodeConfig(f.config), "xai/grok-4.7")).toBe(false);
+      expect(armModelReconcile(f.config)).toBe(true);
+      expect(readOpencodeConfig(f.config).opencodeConfiguredModelAtLastOpen).toBe("");
+      expect(shouldReconcileOpencodeSessionModel(readOpencodeConfig(f.config), "xai/grok-4.7")).toBe(true);
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+
+  test("镜像：已经为空 ⇒ 返回 false，不重复写盘（心跳不该整天改 config.json）", () => {
+    const f = fixture("arm-idempotent");
+    try {
+      writebackOpencodeConfiguredModel(f.config, "xai/grok-4.7");
+      expect(armModelReconcile(f.config)).toBe(true);
+      expect(armModelReconcile(f.config)).toBe(false);
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+
+  test("镜像否定：marker 从未写过（旧节点）⇒ 不凭空造一个 marker", () => {
+    const f = fixture("arm-legacy");
+    try {
+      expect(readOpencodeConfig(f.config).opencodeConfiguredModelAtLastOpen).toBeUndefined();
+      expect(armModelReconcile(f.config)).toBe(false);
+      expect(readOpencodeConfig(f.config).opencodeConfiguredModelAtLastOpen).toBeUndefined();
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+});
+
+// 接线判据（源码契约）：纯函数对了，但轮询里没调用，生产上照样不自愈。
+// 用**守卫位置**而不是「文件里出现过」：调用必须挂在 `next !== MODEL` 这个条件里。
+describe("#3418 接线：轮询发现漂移时才武装", () => {
+  const src = readFileSync(join(import.meta.dir, "..", "..", "cli.ts"), "utf8");
+  test("pollOpencodeSessionModel 里，armModelReconcile 挂在 next !== MODEL 的条件下", () => {
+    const start = src.indexOf("async function pollOpencodeSessionModel()");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("\n}\n", start);
+    const fn = src.slice(start, end);
+    expect(fn).toMatch(/if \(MODEL && next !== MODEL && configFilePath\) \{[\s\S]*armModelReconcile\(configFilePath\)/);
+  });
+});

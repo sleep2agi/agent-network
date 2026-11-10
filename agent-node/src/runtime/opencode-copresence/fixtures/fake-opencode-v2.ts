@@ -113,8 +113,22 @@ Bun.serve({
     }
     const sessionLookup = /^\/api\/session\/(ses_[A-Za-z0-9]+)$/.exec(path);
     if (sessionLookup && request.method === "GET") {
+      if (sessionLookup[1] === "ses_FixtureNullResume") return json(null);
+      if (sessionLookup[1] === "ses_FixtureEmptyResume") return new Response(null, { status: 200 });
+      if (sessionLookup[1] === "ses_FixtureNoDataResume") return json({});
+      if (sessionLookup[1] === "ses_FixtureErrorResume") return json({ error: "synthetic unavailable" }, 503);
+      if (sessionLookup[1] === "ses_FixtureTimeoutResume") return new Promise<Response>(() => {});
+      if (sessionLookup[1] === "ses_FixtureWrongResume") return json({ data: { id: "ses_OtherFixture", location: { directory } } });
       const existing = sessions.get(sessionLookup[1]);
       return existing ? json({ data: { id: sessionLookup[1], location: existing.location, model: existing.model } }) : json({ error: "session not found" }, 404);
+    }
+    const sessionFork = /^\/api\/session\/(ses_[A-Za-z0-9]+)\/fork$/.exec(path);
+    if (sessionFork && request.method === "POST") {
+      const source = sessions.get(sessionFork[1]);
+      if (!source) return json({ error: "session not found" }, 404);
+      const sid = `ses_${Date.now().toString(16)}Fork${++counter}`;
+      sessions.set(sid, { entries: structuredClone(source.entries), inbox: [], running: false, steer: [], location: source.location, model: source.model });
+      return json({ data: { id: sid, location: source.location, model: source.model } });
     }
     const modelSwitch = /^\/api\/session\/(ses_[A-Za-z0-9]+)\/model$/.exec(path);
     if (modelSwitch && request.method === "POST") {

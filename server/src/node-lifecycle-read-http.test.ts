@@ -66,8 +66,13 @@ test("public errors redact free text for granted viewers on every projection", a
       "adopt_codex_session_conflict", "adopt_codex_port_unavailable", "adopt_codex_stage_still_running",
       "adopt_codex_identity_unproven",
       "TUI session mismatch", "opencode_launch_health:TUI session mismatch", "opencode_tui_session_mismatch",
+      // #2012：daemon 明确拒绝的固定安全码，必须原样投影给用户，而不是退化成 lifecycle_error。
+      "copresence_adopt_v2",
+      // 负控：带后缀/路径/空白的形状仍必须清成 lifecycle_error（只精确放行这一串）。
+      "copresence_adopt_v2: /private/fixture", "copresence_adopt_v2x", " copresence_adopt_v2",
     ]) {
       const publicCodes = ["adopt_start_timeout", "adopted_node_delete_unsupported", "adopt_codex_readopt_required", "adopt_stop_receipt_changed", "opencode_tui_session_mismatch",
+        "copresence_adopt_v2",
         "adopt_codex_external_start_unproven", "adopt_codex_launch_failed", "adopt_codex_launch_timeout",
         "adopt_codex_port_unproven", "adopt_codex_start_superseded", "adopt_codex_binding_generation_unproven",
         "adopt_codex_start_evidence_missing", "adopt_codex_start_evidence_changed",
@@ -128,6 +133,13 @@ test("adopt query preserves all persisted states, request id and bounded project
   for (const status of ["pending", "active", "refused", "revoked"]) {
     const r = await get(query("adopt", `request_id=adopt_read_${status}`));
     expect(r.status).toBe(200);
+    console.log("LIFE_KEYS=" + JSON.stringify(Object.keys(r.body).sort()) + " REQ_KEYS=" + JSON.stringify(Object.keys(r.body.request).sort()));
+    // 2026-10-31 —— #3214：外层与 request 的键集都由真实调用给出（此前只断言了值）
+    expect(Object.keys(r.body).sort()).toEqual(["ok", "request"]);
+    expect(Object.keys(r.body.request).sort()).toEqual([
+      "created_at", "daemon_node_id", "error", "kind", "network_id",
+      "node_id", "request_id", "status", "updated_at",
+    ]);
     expect(r.body.request).toMatchObject({ kind: "adopt", status, request_id: `adopt_read_${status}` });
     expect(r.body.request.workdir).toBeUndefined();
     expect(r.body.request.requested_by).toBeUndefined();

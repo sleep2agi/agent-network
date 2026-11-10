@@ -5,31 +5,42 @@ import { compareDesktopVersions, resolveDesktopUpdate, selectDesktopRelease } fr
 const release = (tag, { draft = false, asset = true } = {}) => ({
   tag_name: tag,
   draft,
+  // `url` mirrors the GitHub *asset API* URL the updater used to translate, and it
+  // keeps the real file name as its last segment so that
+  // `validManifest()` (which resolves every platform to an asset of the release) and
+  // `useBrowserDownloadUrls()` (which maps asset URL → browser download URL) can both
+  // be exercised by the same fixture.
   assets: asset ? [{
     name: 'latest.json',
-    url: `https://asset.test/${tag}`,
+    url: `https://asset.test/${tag}/latest.json`,
     browser_download_url: `https://download.test/${tag}/latest.json`,
   }, {
     name: 'mac.tar.gz',
-    url: `https://asset.test/${tag}/mac`,
+    url: `https://asset.test/${tag}/mac.tar.gz`,
     browser_download_url: `https://download.test/${tag}/mac.tar.gz`,
   }, {
     name: 'win.exe',
-    url: `https://asset.test/${tag}/win`,
+    url: `https://asset.test/${tag}/win.exe`,
     browser_download_url: `https://download.test/${tag}/win.exe`,
   }, {
     name: 'linux.deb',
-    url: `https://asset.test/${tag}/linux`,
+    url: `https://asset.test/${tag}/linux.deb`,
     browser_download_url: `https://download.test/${tag}/linux.deb`,
   }] : [],
 });
+// The fixture must look like a manifest the release workflow actually publishes:
+// every platform URL ends with the *file name* of an asset on that release, because
+// `validManifest()` resolves each platform to a real asset before the endpoint is
+// allowed to serve it. Keeping placeholder names here (mac/win/linux) made the
+// fixture describe a manifest that points at files the release does not have — the
+// route correctly rejected it and the whole check went red against a healthy route.
 const manifest = (version) => ({
   version,
   platforms: {
-    'darwin-aarch64': { signature: 'mac', url: `https://asset.test/desktop-v${version}/mac` },
-    'windows-x86_64': { signature: 'win', url: `https://asset.test/desktop-v${version}/win` },
-    'linux-x86_64': { signature: 'linux', url: `https://asset.test/desktop-v${version}/linux` },
-    'linux-x86_64-deb': { signature: 'linux', url: `https://asset.test/desktop-v${version}/linux` },
+    'darwin-aarch64': { signature: 'mac', url: `https://asset.test/desktop-v${version}/mac.tar.gz` },
+    'windows-x86_64': { signature: 'win', url: `https://asset.test/desktop-v${version}/win.exe` },
+    'linux-x86_64': { signature: 'linux', url: `https://asset.test/desktop-v${version}/linux.deb` },
+    'linux-x86_64-deb': { signature: 'linux', url: `https://asset.test/desktop-v${version}/linux.deb` },
   },
 });
 
@@ -69,6 +80,28 @@ assert.deepEqual(dynamic.manifest.platforms['linux-x86_64-deb'], {
 });
 assert.equal(calls.length, 2);
 
+// 0.2.287 published normalized manifests: the platform URLs are already public
+// `releases/download/<tag>/<file>` links, so there is nothing to translate. Before the
+// pass-through, every platform threw "no browser download URL" and the endpoint fell
+// back to the static 0.2.286 manifest while 0.2.287 was live.
+const publicManifest = (version) => ({
+  version,
+  platforms: {
+    'darwin-aarch64': { signature: 'mac', url: `https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v${version}/mac.tar.gz` },
+    'windows-x86_64': { signature: 'win', url: `https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v${version}/win.exe` },
+  },
+});
+const publicFetch = async (url) => {
+  if (url.includes('/releases?')) return { ok: true, json: async () => [release('desktop-v0.2.33-3')] };
+  return { ok: true, json: async () => publicManifest('0.2.33-3') };
+};
+const publicResult = await resolveDesktopUpdate(publicFetch);
+assert.equal(publicResult.source, 'desktop-v0.2.33-3');
+assert.equal(publicResult.manifest.platforms['darwin-aarch64'].url,
+  'https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.33-3/mac.tar.gz');
+assert.equal(publicResult.manifest.platforms['windows-x86_64'].url,
+  'https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.33-3/win.exe');
+
 const fallbackFetch = async (url) => {
   if (url.includes('/releases?')) return { ok: false, status: 502 };
   assert.match(url, /fallback\.json$/);
@@ -88,4 +121,4 @@ const vercelConfig = JSON.parse(fs.readFileSync(new URL('../vercel.json', import
 assert.match(handlerSource, /setHeader\('Cache-Control', 'no-store, max-age=0'\)/);
 assert.equal(vercelConfig.headers[0].headers[0].value, 'no-store, max-age=0');
 
-console.log('desktop updater dynamic route: 14 checks passed');
+console.log('desktop updater dynamic route: 16 checks passed');

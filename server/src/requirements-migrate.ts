@@ -41,6 +41,9 @@ export function ensureRequirementProjects(database: DbAdapter): void {
     );
     CREATE INDEX IF NOT EXISTS idx_requirement_projects_network ON requirement_projects(network_id, sort);
   `);
+  // 子项目（admin 2026-10-24：管理项目里没有层级）。加法式列，老库用 ALTER 补；重复执行无副作用。
+  // NULL = 顶层项目，所以现有行不需要回填。
+  try { database.exec("ALTER TABLE requirement_projects ADD COLUMN parent_id TEXT"); } catch {}
 }
 
 /**
@@ -56,6 +59,27 @@ export function ensureNetworkTags(database: DbAdapter): void {
       updated_at  TEXT NOT NULL,
       PRIMARY KEY (network_id, name)
     );
+  `);
+}
+
+/**
+ * 标签树(父子标签)。标签名就是 id,parent_name 指向同网络的父标签名;没有 parent 行 = 顶层。
+ * 只存「登记过的节点」:卡片上出现但没登记过的标签(老数据)仍然是平标签,不改写任何 cards_json。
+ * 建标签、改名 / 合并 / 删除时维护这里(见 requirements.ts 的 handleTagCreate / handleTagOp)。
+ * IF NOT EXISTS:重复执行无副作用。
+ */
+export function ensureNetworkTagNodes(database: DbAdapter): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS network_tag_nodes (
+      network_id      TEXT NOT NULL,
+      name            TEXT NOT NULL,
+      parent_name     TEXT,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL,
+      created_by_json TEXT,
+      PRIMARY KEY (network_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_network_tag_nodes_parent ON network_tag_nodes(network_id, parent_name);
   `);
 }
 

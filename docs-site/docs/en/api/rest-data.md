@@ -4,6 +4,57 @@ Part of the [REST API reference](/en/api/rest): reading state, dispatching tasks
 
 ## Data Query Endpoints
 
+### GET /health
+
+Health and capacity snapshot. **No authentication required** (aggregate values only — no per-session or per-node detail).
+
+```bash
+curl -s http://localhost:9200/health | python3 -m json.tool
+```
+
+```jsonc
+{
+  "ok": true,
+  "version": "0.9.0-preview.166",
+  "uptime": 273,                 // seconds the process has been up
+  "sessions_count": 369,         // all sessions, including offline
+  "sse_connections": 144,        // live SSE connections (nodes + open dashboards)
+  "mcp_inflight": 0,             // MCP requests being handled right now
+  "mcp_inflight_peak": 325,      // high-water mark since start (never decays)
+  "event_loop": {                // since 0.9.0-preview.162
+    "max_gap_ms": 8354,          // worst single tick gap in this process (normal ≈250ms)
+    "last_gap_ms": 697,
+    "stall_count": 2,            // ticks over the stall threshold
+    "last_stall_ms": 3019,
+    "last_stall_at": "2026-10-27T01:54:48.811Z",
+    "recent_stalls": [           // last 20, newest first
+      { "at": "...", "gap_ms": 3269, "stall_ms": 3019, "rss_mb": 1410, "requests_since_last_tick": 32 }
+    ]
+  },
+  "limits": { "max_upload_bytes": 12582912, "max_request_content_length": 13631488 }
+}
+```
+
+#### Reading `event_loop.recent_stalls` (the field people misread)
+
+The Hub is single-threaded (Bun + synchronous SQLite), so "the event loop is blocked" and "timer callbacks are starved" **look identical** while needing opposite responses:
+
+| `requests_since_last_tick` | Meaning | What to do |
+|---|---|---|
+| **> 0** (e.g. 514) | Requests were still being served (hundreds of them) ⇒ **saturation**, timers starved by the I/O queue | Lower instantaneous concurrency: broadcast fan-out, reconnect storms, bulk dispatch |
+| **= 0** | Nothing progressed at all ⇒ a real **synchronous block** | Look for slow queries / sync blocks: `grep "commhub slow-sql"` |
+
+Reading only `gap_ms` collapses both into "it hung for N seconds" and sends you optimizing the wrong thing (e.g. adding memory to a saturation event).
+
+::: tip Two real readings (production, 2026-10-27)
+- `gap 143.9s · served 1175` ⇒ one broadcast (384 inbox rows) saturated the Hub — **not** a block;
+- `gap 5.7s · served 20` + `slow-sql 5325ms` ⇒ one aggregate query really held the loop.
+:::
+
+`mcp_inflight` vs RSS (isolated measurements): **each in-flight request costs ~1.2–1.4 MB**. A high `peak` with `inflight` back at 0 means the spike is over — not a leak.
+
+
+
 ### GET /api/status
 
 
@@ -207,6 +258,22 @@ curl http://localhost:9200/api/nodes \
 
 ::: info nodes vs sessions
 The `nodes` table is **persistent node identity** (written at creation, deleted only when the agent is deleted). The `sessions` table is **runtime heartbeat state** (written at agent startup; marked `offline` after 10 minutes of silence). Use [GET /api/status](#get-api-status) to check whether an agent is online; use this endpoint for agent config metadata.
+:::
+
+**`restart_readiness` (#1511)**: every row also says whether this Hub can restart the node for you, so the client can tell the user which of two things will happen after a secret/env save:
+
+```json
+"restart_readiness": { "path": "restart_node", "in_flight": 0, "can_restart_now": true }
+```
+
+| Field | Meaning |
+|------|------|
+| `path` | `restart_node`: supervised by a created daemon (exit-75 relaunches it); `stop_then_start`: an adopted node — `restart_node` refuses, but the daemon can still Stop then Start; `manual`: nobody supervises it, someone must log into the machine |
+| `in_flight` | tasks this node is working on, computed by the **same SQL** as `stop_node` / `restart_node` (rows without a task are judged by a 60-minute age; terminal tasks do not count) |
+| `can_restart_now` | `path !== "manual"` and not blocked by in-flight work |
+
+::: warning It is a snapshot, not a promise
+The server re-checks on the real call (`node_busy_in_flight` / `adopted_restart_requires_daemon`). Clients must handle those two error codes instead of trusting the snapshot.
 :::
 
 ---
@@ -1229,7 +1296,7 @@ curl -N "http://localhost:9200/events/coder-1?token=ntok_xxx"
 
 > Earlier docs claimed `new_message` carried a `message` field and `broadcast` carried `{content, from}` — neither is correct. Verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) for the actual payloads. **Since #1439/#1441, `new_message` / `new_reply` / `broadcast` / `new_task` (incl. retry/reassign) all carry the real `inbox_count` (recipient's unread count) — clients can use it directly to show the new-message count; `broadcast` is no longer a hardcoded 1.** Note: `new_task` / `new_message` additionally carry a `renamed_from` field (the old alias) when the target alias was just renamed — the `canonical.renamed` branch in `tools.ts`.
 >
-> **Correction**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L69) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)).
+> **Correction**: the table previously listed a `heartbeat` event with `{time}` payload. No such JSON event is emitted. [`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L87) sends an SSE **comment line** `: keepalive\n\n` every 30s purely to defeat proxy/LB idle timeouts — comments are NOT delivered to `EventSource.onmessage` / `addEventListener` and carry no payload. The real once-per-connection initial event is `connected` (agent-node handles it explicitly at [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts)).
 
 **Example SSE data stream**:
 

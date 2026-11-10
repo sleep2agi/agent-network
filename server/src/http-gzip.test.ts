@@ -23,7 +23,7 @@ test("a large JSON body is gzipped only when the client asked, and round-trips",
   expect(bytes.byteLength).toBeLessThan(big.length / 3);
   expect(Number(out!.headers.get("Content-Length"))).toBe(bytes.byteLength);
   expect(new TextDecoder().decode(Bun.gunzipSync(bytes))).toBe(big);
-  expect(out!.headers.get("Content-Type")).toContain("application/json");
+  expect((out!.headers.get("Content-Type") || "").split(";")[0].trim()).toBe("application/json");
 
   const plain = json(big);
   expect(await maybeGzipResponse(reqWith(), plain)).toBe(plain); // untouched object

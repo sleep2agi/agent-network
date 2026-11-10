@@ -39,6 +39,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve } from "path";
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 import { fsyncDirectoryIfSupported } from "./posix-modes";
+import { renameOverExistingSync } from "./windows-rename-retry";
 
 export type OpencodePresetId = "anthropic" | "openai";
 
@@ -457,7 +458,7 @@ function atomicWritePrivateFile(path: string, body: string, label: string): void
       || (before !== undefined && current !== undefined && !sameIdentity(before, current))) {
       throw new Error(`OpenCode preset refuses ${label}: target changed before atomic rename`);
     }
-    renameSync(temp, path);
+    renameOverExistingSync(temp, path);
     assertPrivateRegularFile(path, label);
 
     // Durably bind the rename to the already-validated private directory.

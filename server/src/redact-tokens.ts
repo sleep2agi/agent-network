@@ -12,7 +12,10 @@
  *  🔴 前缀用**捕获组显式声明**，不靠"切到第一个下划线"之类的推断 ——
  *     第一版就是那么写的，`github_pat_xxx` 被切成了 `github_`，把"这是哪一类
  *     凭据"这个唯一有用的信息也遮掉了。声明比推断短，也不会错。 */
-const TOKEN_PATTERNS: ReadonlyArray<RegExp> = [
+// 2026-10-31 —— 导出这份清单，是因为**「条数对」不等于「内容是同一套」**
+// （外部复核：「删一条加一条，数不变，而遮掉的东西变了」）。
+// 只断言 length=5 的门，对「把 sk- 换成 bearer 」这种换手完全无感。
+export const TOKEN_PATTERNS: ReadonlyArray<RegExp> = [
   /\b(ntok_|utok_|atok_)[A-Za-z0-9_-]{6,}/g,          // 本仓自己的 token
   /\b(github_pat_)[A-Za-z0-9_]{20,}/g,                // GitHub fine-grained PAT（必须排在 ghp_ 之前无关，但更长的前缀先声明更清楚）
   /\b(ghp_)[A-Za-z0-9]{20,}/g,                        // GitHub classic PAT

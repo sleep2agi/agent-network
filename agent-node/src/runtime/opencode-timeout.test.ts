@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import {
+  OPENCODE_DEFAULT_ADMISSION_CAP_MS,
   OPENCODE_DEFAULT_TASK_TIMEOUT_MS,
+  admissionBudgetFor,
   describeOpencodeTimeout,
+  resolveAdmissionCapMs,
   resolveOpencodeTimeout,
 } from "./opencode-timeout";
 
@@ -48,6 +51,34 @@ describe("resolveOpencodeTimeout", () => {
       valueMs: 70_000, sourceLabel: "flags.opencodeTimeoutMs",
     });
     expect(resolveOpencodeTimeout({ env: "-5" }).sourceLabel).toBe("default");
+  });
+});
+
+describe("admission cap (#3103)", () => {
+  test("defaults to 10 minutes, not the whole task budget", () => {
+    expect(OPENCODE_DEFAULT_ADMISSION_CAP_MS).toBe(600_000);
+    expect(resolveAdmissionCapMs({})).toBe(600_000);
+  });
+
+  test("env overrides; 0 keeps the single-budget behaviour; junk falls back", () => {
+    expect(resolveAdmissionCapMs({ env: "5000" })).toBe(5_000);
+    expect(resolveAdmissionCapMs({ env: "0" })).toBe(0);
+    expect(resolveAdmissionCapMs({ env: "-1" })).toBe(600_000);
+    expect(resolveAdmissionCapMs({ env: "abc" })).toBe(600_000);
+  });
+
+  test("admission never takes the whole task budget", () => {
+    // 30 min task, 10 min cap ⇒ queueing may spend at most 10 min,
+    // leaving >= 20 min for the reply of a task that actually ran.
+    expect(admissionBudgetFor(1_800_000, 600_000)).toBe(600_000);
+    // A short task keeps its own (shorter) budget.
+    expect(admissionBudgetFor(300_000, 600_000)).toBe(300_000);
+    // Unlimited task budget still honours an explicit cap.
+    expect(admissionBudgetFor(0, 600_000)).toBe(600_000);
+    // cap 0 = no extra cap: unchanged legacy behaviour.
+    expect(admissionBudgetFor(1_800_000, 0)).toBe(1_800_000);
+    // Both unlimited: queueing is unlimited too.
+    expect(admissionBudgetFor(0, 0)).toBe(0);
   });
 });
 

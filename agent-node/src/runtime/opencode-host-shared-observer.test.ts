@@ -33,6 +33,10 @@ function fakeProc(opts: {
   platform?: NodeJS.Platform;
   fdsThrow?: NodeJS.ErrnoException;
   tcpThrow?: NodeJS.ErrnoException;
+  /** Extra processes on /proc whose fd table cannot be read (other user, or dumpable=0). */
+  foreign?: { pid: number; uid: number; code: string };
+  /** Whether the seeded owner actually holds the socket (false = nobody holds it). */
+  ownerHasSocket?: boolean;
 }): HostSharedObserverDeps {
   const inode = opts.inode ?? "4242";
   const pid = opts.pid ?? 777;
@@ -53,15 +57,19 @@ function fakeProc(opts: {
       return "";
     },
     readDir: (path) => {
-      if (path === "/proc") return ["1", String(pid), "self"];
+      if (path === "/proc") return ["1", String(pid), "self", ...(opts.foreign ? [String(opts.foreign.pid)] : [])];
+      if (opts.foreign && path === `/proc/${opts.foreign.pid}/fd`) {
+        throw Object.assign(new Error("denied"), { code: opts.foreign.code });
+      }
       if (opts.fdsThrow) throw opts.fdsThrow;
       return ["0", "1", "7"];
     },
     readLink: (path) => {
       if (path.endsWith("/exe")) return "/opt/opencode";
+      if (opts.ownerHasSocket === false) return "/dev/null";
       return path.includes(`/proc/${pid}/fd/7`) ? `socket:[${inode}]` : "/dev/null";
     },
-    procUid: () => uid,
+    procUid: (requested) => (opts.foreign && requested === opts.foreign.pid ? opts.foreign.uid : uid),
     liveProcess: (requested) => {
       if (requested !== pid) return undefined;
       const value = Array.isArray(ticks) ? ticks[Math.min(tickCall++, ticks.length - 1)] : ticks;
@@ -83,6 +91,45 @@ describe("process evidence (injected /proc)", () => {
       url: URL_4096, host: "127.0.0.1", port: 4096,
       listenInode: "4242", pid: 777, uid: 1000, startTicks: 900,
     });
+  });
+
+  // #1676 — 正常多用户主机上必然存在 root/其它用户进程,读不到它们的 /proc/<pid>/fd 是常态;
+  // 以前只要遇到一次 EACCES 就整条 path 判 permission_denied,导致「复用 host-shared server」
+  // 在所有机器上 100% 降级成私有 server(没有 provider 凭据)。
+  test("another user's unreadable fd table does NOT abort the observation (#1676)", () => {
+    const r = observeHostSharedServe(URL_4096, fakeProc({ foreign: { pid: 1, uid: 0, code: "EACCES" } }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.processEvidence.pid).toBe(777);
+  });
+
+  // 同 uid 但 dumpable=0 的进程(用户 systemd 单元、agent 守护)读不到 /proc/<pid>/fd
+  // 也是常态 —— 只要找到唯一一个可读的持有者,就不该因为「别的进程读不到」而整条拒绝。
+  test("a same-uid unreadable fd table (dumpable=0 daemon) does not abort either (#1676)", () => {
+    const r = observeHostSharedServe(URL_4096, fakeProc({ foreign: { pid: 900, uid: 1000, code: "EACCES" } }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.processEvidence.pid).toBe(777);
+  });
+
+  test("a vanished process (ENOENT) is skipped, not a refusal (#1676)", () => {
+    const r = observeHostSharedServe(URL_4096, fakeProc({ foreign: { pid: 901, uid: 0, code: "ENOENT" } }));
+    expect(r.ok).toBe(true);
+  });
+
+  // 安全边界保留:一个可读持有者都没有、却存在读不到的 fd 表时,仍然拒绝(不猜)。
+  test("no readable holder + unreadable fd tables is STILL permission_denied (#2784 kept)", () => {
+    const r = observeHostSharedServe(URL_4096, fakeProc({ ownerHasSocket: false, foreign: { pid: 900, uid: 0, code: "EACCES" } }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("permission_denied");
+  });
+
+  test("no readable holder and nothing unreadable is socket_owner_not_found, not a denial", () => {
+    const r = observeHostSharedServe(URL_4096, fakeProc({ ownerHasSocket: false }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("socket_owner_not_found");
   });
 
   test("the provider NEVER claims a proven generation — argv is diagnostics only", () => {
@@ -191,24 +238,36 @@ describe("process evidence (injected /proc)", () => {
     expect(parseLoopbackUrl("http://127.0.0.1:65535")).toEqual({ port: 65535 });
   });
 
-  test("a denial inside the candidate set is a refusal even when an owner was found (#2784 review)", () => {
-    // Mixed permissions: pid 777 is readable and holds the socket, pid 888 is a
-    // same-uid candidate whose fd table we cannot read. Uniqueness is therefore
-    // unprovable, so the visible owner must NOT be reported — while the very same
-    // tree without the unreadable candidate IS observable (the denial is what
-    // changes the answer, not something else).
+  // #2784 的原判据是「候选集合里只要有一个读不到就拒绝」。2026-10-23 的真机观测
+  // (#1676) 证明这条在正常主机上**永远成立**: 本机扫描到 216 个 EACCES 的 fd 表
+  // (root 系统进程 + 同 uid 但 `PR_SET_DUMPABLE=0` 的用户守护,如 pid 1415 uid=1000),
+  // 于是这条复用路径 100% 失败、每次建节点都静默降级成私有 server。
+  //
+  // 判据收窄成「**没有可读持有者** + 有读不到的 fd 表时才拒绝」: 一旦找到唯一可读的
+  // 持有者,它本身确实持有这个 socket;读不到的进程最多持有**同一个** socket(同一个
+  // server),且 locate() 仍从持有者自己的 /proc 读 uid/ticks/argv。安全边界没放宽到
+  // 「猜一个 pid」,只是不再把「别人读不到」当成「我们看不清」。
+  test("one readable holder wins even when other candidates are unreadable (#1676 supersedes the #2784 blanket rule)", () => {
     const withDenied = fakeProc({});
     withDenied.readDir = (path) => {
       if (path === "/proc") return ["1", "777", "888", "self"];
       if (path === "/proc/888/fd") throw Object.assign(new Error("denied"), { code: "EACCES" });
       return ["0", "1", "7"];
     };
-    expect(observeHostSharedServe(URL_4096, withDenied)).toEqual({ ok: false, reason: "permission_denied" });
+    const r = observeHostSharedServe(URL_4096, withDenied);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.processEvidence.pid).toBe(777);
+  });
 
-    const withoutDenied = fakeProc({});
-    withoutDenied.readDir = (path) => (path === "/proc" ? ["1", "777", "self"] : ["0", "1", "7"]);
-    const ok = observeHostSharedServe(URL_4096, withoutDenied);
-    expect(ok.ok).toBe(true);
+  test("with NO readable holder, unreadable candidates still force a refusal (#2784 kept)", () => {
+    const nobodyReadable = fakeProc({ ownerHasSocket: false });
+    nobodyReadable.readDir = (path) => {
+      if (path === "/proc") return ["1", "777", "888", "self"];
+      if (path === "/proc/888/fd") throw Object.assign(new Error("denied"), { code: "EACCES" });
+      return ["0", "1", "7"];
+    };
+    expect(observeHostSharedServe(URL_4096, nobodyReadable)).toEqual({ ok: false, reason: "permission_denied" });
   });
 
   test("an inherited fd is found even when the holder uid differs from the socket uid (#2784 review)", () => {

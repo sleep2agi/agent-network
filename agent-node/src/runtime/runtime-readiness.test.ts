@@ -327,6 +327,25 @@ describe("#622 网络 HEAD 与代理", () => {
     expect(proxyFor("api.x.ai", {})).toBeUndefined();
   });
 
+  // 2026-10-31 —— 同族匹配必须是**点边界**匹配，不能是裸后缀。
+  //
+  // 这条单独钉住，因为它是「同族 vs 外族」这一整类判断的最常见写法错误：
+  //   host.endsWith("x.ai")            ⇒ "evx.ai" / "attackx.ai" 都命中 ⇒ 绕过
+  //   host.endsWith("." + bare)        ⇒ 只有 "api.x.ai" 这种真子域命中
+  //
+  // 对应的线上形状：一个 origin/CSRF 闸如果用裸后缀，那么任意同族域都能过；
+  // 而用一个**同族**值去探测这种闸，会得到“放行”，看起来像“闸门正常”。
+  // 所以探针必须同时打一个外族值（evil.example）——它必然被拒，
+  // 只有它才能区分「精确匹配」与「后缀匹配」。判据在测试里钉住，防止实现被改回去。
+  test("proxyFor 的 NO_PROXY 后缀必须带点边界（裸后缀会被 evx.ai 绕过）", () => {
+    const env = { HTTPS_PROXY: "http://p:3128", NO_PROXY: "x.ai" };
+    expect(proxyFor("x.ai", env)).toBeUndefined();          // 精确主机照样命中
+    expect(proxyFor("api.x.ai", env)).toBeUndefined();      // 真子域命中
+    expect(proxyFor("evx.ai", env)).toBe("http://p:3128");  // 🔴 裸后缀会在这里误判为直连
+    expect(proxyFor("attackx.ai", env)).toBe("http://p:3128");
+    expect(proxyFor("x.ai.evil.example", env)).toBe("http://p:3128"); // 反向拼接也不能命中
+  });
+
   async function fakeProxy(reply: (line: string) => string | null): Promise<{ server: Server; port: number; seen: string[] }> {
     const seen: string[] = [];
     const server = createServer((sock) => {

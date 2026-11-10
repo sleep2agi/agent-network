@@ -10,6 +10,16 @@ import { shortHash } from "./codex-lifecycle-account";
 // 两个包不能互相 import(agent-node 不依赖 @sleep2agi/agent-network;反向由
 // grok-build-drift.test.ts 禁掉),所以照 #1727 的先例:**逐字节复制 + 这道门**。
 // 任一边改了而另一边没跟上,这里先红。
+//
+// 🔴 由此推出一条**别去"顺手修"**的边界(#2224 实测踩过)：
+//    正因为这份文件必须逐字节相同、且下面那条反控要求它**只 import node 内置模块**,
+//    所以它**不能**像 opencode-preset / opencode-runtime-binding 那样 import 本包的
+//    shared helper(例如 windows-rename-retry)。2026-10-25 我给 agent-node 侧的
+//    codex-auth-fingerprint.ts 接了那个 helper,两包副本立刻不再逐字节相同 —— 这道门当场红了,
+//    那次改动已撤回。
+//    若将来确实需要给它加"Windows 上 rename 覆盖被占用目标"的重试:
+//      · 要么把 15 行逻辑**两边同时内联**(保持逐字节相同、仍只 import node 内置模块),
+//      · 要么先改这里的反控规则并写清理由 —— 不要单边 import 后把这门改松。
 const HERE = import.meta.dir;
 const AGENT_NODE = join(HERE, "..", "..", "agent-node", "src");
 const NAME = "codex-auth-fingerprint.ts";

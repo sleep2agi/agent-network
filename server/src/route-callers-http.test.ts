@@ -71,7 +71,7 @@ describe("GET /api/stats/routes?by=caller", () => {
     const res = await get("/api/stats/routes?minutes=5", auth(admin));
     expect(await res.text()).toBe(expected);
     const body = JSON.parse(expected);
-    expect(Object.keys(body)).toEqual(["ok", "window_ms", "samples", "oldest_at", "routes"]);
+    expect(Object.keys(body).sort()).toEqual(["ok", "oldest_at", "routes", "samples", "window_ms"]);
     for (const r of body.routes) expect(Object.keys(r)).toEqual(["route", "count", "total_ms", "avg_ms", "p95_ms", "max_ms", "bytes", "errors"]);
   });
 

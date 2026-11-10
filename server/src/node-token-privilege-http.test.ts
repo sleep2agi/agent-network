@@ -17,7 +17,7 @@ const DIR = mkdtempSync(join(tmpdir(), "anet-ntok-priv-"));
 let BASE = "";
 let hub: any = null;
 const PW = "NtokPrivPassw0rd!";
-let adminToken = "", adminId = "", NET = "", OTHER_NET = "", ntok = "";
+let adminToken = "", adminId = "", NET = "", OTHER_NET = "", ntok = "", adminUsername = "";
 
 const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 async function call(token: string, method: string, path: string, body?: unknown) {
@@ -33,7 +33,8 @@ beforeAll(async () => {
   process.env.COMMHUB_DB ||= join(DIR, "hub.db");
   process.env.COMMHUB_UPLOADS_DIR = join(DIR, "uploads");
   process.env.HOST = "127.0.0.1";
-  const admin = register(`ntok_admin_${Date.now()}`, PW);
+  adminUsername = `ntok_admin_${Date.now()}`;
+  const admin = register(adminUsername, PW);
   adminToken = admin.token!; adminId = admin.user!.user_id; NET = admin.network_id!;
   db.run("UPDATE users SET role = 'admin' WHERE user_id = ?1", [adminId]);
   const other = createNetwork(adminId, "ntok-other");
@@ -80,28 +81,71 @@ describe("hub-admin powers need a user token", () => {
     void sub;
   });
   test("POST /api/admin/users and agent-grants", async () => {
+    // #3354 —— 拒绝之外钉「没有建出用户」：建用户的副作用是**多一行 users**。
+    const userRows = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users")!.n;
+    const beforeUsers = userRows();
     expect((await call(ntok, "POST", "/api/admin/users", { username: "ntok_made", password: PW })).status).toBe(403);
+    expect(userRows()).toBe(beforeUsers);
+    expect(db.get("SELECT 1 FROM users WHERE username = 'ntok_made'")).toBeFalsy();
+    // #3354 —— 写 side：节点令牌不能改 agent-grants（读的 403 上面已有）。
+    // 副作用是**多一条授权**（那意味着一个 Agent 对这个人可见）。
+    const grants = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM network_member_agent_grants WHERE network_id = ?1", NET)!.n;
+    const beforeGrants = grants();
     expect((await call(ntok, "GET", `/api/networks/${NET}/members/${adminId}/agent-grants`)).status).toBe(403);
+    expect((await call(ntok, "PUT", `/api/networks/${NET}/members/${adminId}/agent-grants`, { node_ids: ["n_x"] })).status).toBe(403);
+    expect(grants()).toBe(beforeGrants);
   });
 });
 
 describe("account and network management need a user token", () => {
   test("token management: cannot list, mint user tokens, mint node tokens or revoke", async () => {
+    // #3354 —— 拒绝之外还要钉「没有新令牌」：发令牌的副作用是**多一行 api_tokens**。
+    // 只断 403 时，「拒了但令牌已经发出来了」也会绿 —— 而那一枚令牌是能真的用的。
+    const tokenRows = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?1", adminId)!.n;
+    const beforeTokens = tokenRows();
     expect((await call(ntok, "GET", "/api/auth/tokens")).status).toBe(403);
     const minted = await call(ntok, "POST", "/api/auth/tokens", { name: "escalate" });
     expect(minted.status).toBe(403);
     expect(minted.body.token).toBeUndefined();
     expect((await call(ntok, "POST", "/api/auth/node-token", { network_id: OTHER_NET, node_name: "x" })).status).toBe(403);
+    // 两条被拒的发放都不许留下任何一行
+    expect(tokenRows()).toBe(beforeTokens);
+    expect(db.get("SELECT 1 FROM api_tokens WHERE name = 'escalate'")).toBeFalsy();
     expect((await call(ntok, "DELETE", "/api/auth/tokens/tok_whatever")).status).toBe(403);
     expect((await call(adminToken, "GET", "/api/auth/tokens")).status).toBe(200);
   });
+  // #3354 —— DELETE /api/auth/tokens/:id：拒绝之后**那一行必须还在**。
+  // 吊销是不可逆的副作用（令牌一旦删掉，用户的脚本当场断掉），所以拒绝时更不能碰它。
+  test("节点令牌不能吊销用户令牌：403 且目标行仍在", async () => {
+    const mint = await call(adminToken, "POST", "/api/auth/tokens", { name: "revoke-target" });
+    expect(mint.status).toBe(200);
+    const targetId = mint.body.token_id as string;
+    expect(db.get("SELECT 1 FROM api_tokens WHERE token_id = ?1", targetId)).toBeTruthy();
+    const denied = await call(ntok, "DELETE", `/api/auth/tokens/${targetId}`);
+    expect(denied.status).toBe(403);
+    // 拒绝的第二半：那一行还在（只断 403 时，「拒了但已经吊销了」也会绿）
+    expect(db.get("SELECT 1 FROM api_tokens WHERE token_id = ?1", targetId)).toBeTruthy();
+  });
+
   test("cannot edit the owner's profile or password", async () => {
     expect((await call(ntok, "PUT", "/api/auth/me", { display_name: "pwned" })).status).toBe(403);
     expect(db.get<{ display_name: string }>("SELECT display_name FROM users WHERE user_id = ?1", adminId)?.display_name).not.toBe("pwned");
     expect((await call(ntok, "POST", "/api/auth/password", { old_password: PW, new_password: "AnotherPassw0rd!" })).status).toBe(403);
+    // #3354 —— 拒绝的第二半：**旧密码仍然可用**（改密的副作用是旧密码立刻失效）。
+    // 只断 403 时，「拒了但密码已经被改掉」也会绿 —— 那会让主人当场登不进来。
+    const relogin = await call("", "POST", "/api/auth/login", { username: adminUsername, password: PW });
+    expect(relogin.status).toBe(200);
   });
   test("cannot create, rename or delete networks", async () => {
+    // #3354 —— 拒绝之外还要钉「没有副作用」：建网络的副作用是**多一行 networks**。
+    // 只断 403 时，「拒了但已经建出来了」也会绿 —— 而那是一个节点令牌自己开了租户。
+    const netCount = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM networks")!.n;
+    const beforeNets = netCount();
     expect((await call(ntok, "POST", "/api/networks", { name: "ntok-made" })).status).toBe(403);
+    expect(netCount()).toBe(beforeNets);
+    expect(db.get("SELECT 1 FROM networks WHERE network_name = 'ntok-made'")).toBeFalsy();
     expect((await call(ntok, "PUT", `/api/networks/${OTHER_NET}`, { name: "renamed" })).status).toBe(403);
     expect((await call(ntok, "DELETE", `/api/networks/${OTHER_NET}`)).status).toBe(403);
     expect(db.get("SELECT 1 FROM networks WHERE network_id = ?1", OTHER_NET)).toBeTruthy();
@@ -109,19 +153,41 @@ describe("account and network management need a user token", () => {
   test("cannot manage members, invites or join", async () => {
     expect((await call(ntok, "GET", `/api/networks/${NET}/members`)).status).toBe(403);
     expect((await call(ntok, "POST", `/api/networks/${NET}/members`, { user_id: "u_x" })).status).toBe(403);
+    // #3354 —— 邀请的副作用是**多一行 invite**（那行能换出一个新成员）。
+    const invites = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_invites")!.n;
+    const beforeInvites = invites();
     expect((await call(ntok, "POST", `/api/networks/${NET}/invite`, { role: "admin" })).status).toBe(403);
+    expect(invites()).toBe(beforeInvites);
+    // #3354 —— 拒绝之外还要钉「没加入任何网络」：join 的副作用是**多一行 network_members**。
+    // 只断 403 时，「拒了但已经加进去了」也会绿 —— 而那意味着节点令牌借邀请码混进了别人的租户。
+    const memberships = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM network_members WHERE user_id = ?1", adminId)!.n;
+    const beforeJoin = memberships();
     expect((await call(ntok, "POST", "/api/networks/join", { invite_code: "inv_x" })).status).toBe(403);
+    expect(memberships()).toBe(beforeJoin);
     expect((await call(adminToken, "GET", `/api/networks/${NET}/members`)).status).toBe(200);
   });
   test("renames: a node token may only rename ITSELF in its bound network", async () => {
     // 别的网络 / 别的节点 → user_token_required
+    // #3354 —— 拒绝之外钉「没有开出事务」：prepare 的副作用是多一行 rename_txn。
+    const txns = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM rename_txn")!.n;
+    const beforeTxns = txns();
     expect((await call(ntok, "POST", "/api/node-rename/prepare", { network_id: OTHER_NET, old_alias: "ntok-node", new_alias: "b" })).status).toBe(403);
+    expect(txns()).toBe(beforeTxns);
     db.run(`INSERT INTO sessions (resume_id, alias, status, network_id) VALUES ('r_other_node', 'other-node', 'idle', ?1)`, [NET]);
     expect((await call(ntok, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "other-node", new_alias: "b" })).status).toBe(403);
     // 另一个节点(管理员用户令牌)开的事务,本节点不能提交
     const foreign = await call(adminToken, "POST", "/api/node-rename/prepare", { network_id: NET, old_alias: "other-node", new_alias: "other-node-2" });
     expect(foreign.body.ok).toBe(true);
     expect((await call(ntok, "POST", "/api/node-rename/commit", { txn_id: foreign.body.txn_id })).status).toBe(403);
+    // #3354 —— 同理，abort 别人的事务也要被拒，且**拒绝之后那行事务还在**（状态仍是 prepared）。
+    // 只断 403 时，「拒了但已经把事务作废」也会绿 —— 而那会让真正的事务主人 abort 时拿到「已结束」。
+    const txnStatus = () => db.get<{ status: string }>(
+      "SELECT status FROM rename_txn WHERE txn_id = ?1", foreign.body.txn_id)?.status;
+    const statusBefore = txnStatus();
+    expect((await call(ntok, "POST", "/api/node-rename/abort", { txn_id: foreign.body.txn_id })).status).toBe(403);
+    expect(txnStatus()).toBe(statusBefore);
+    // 事务仍可被它的主人 abort（拒绝不许消耗掉它）
     expect((await call(adminToken, "POST", "/api/node-rename/abort", { txn_id: foreign.body.txn_id })).body.ok).toBe(true);
     // 自己:照常(anet node rename 就是这么用的)
     db.run(`INSERT INTO sessions (resume_id, alias, status, network_id) VALUES ('r_self_node', 'ntok-node', 'idle', ?1)`, [NET]);

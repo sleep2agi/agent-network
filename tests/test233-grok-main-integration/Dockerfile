@@ -10,6 +10,7 @@ RUN apt-get update \
 
 WORKDIR /workspace
 COPY agent-network /workspace/agent-network
+COPY contracts /workspace/contracts
 COPY agent-node /workspace/agent-node
 # bin/cli.ts imports smol-toml through the daemon provider modules. This image
 # bundles the CLI without a prior install, so the package has to be on disk

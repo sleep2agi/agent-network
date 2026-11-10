@@ -347,6 +347,30 @@ notes 写漏两节的 PR 会一路绿灯合进 main，直到你触发发版才�
 
 ⇒ 写 notes 时**照着上一版的文件抄形状**，别从空白开始。
 
+### Step 5.6：发完之后核**真实产物**，不是看 CI 文案
+
+`release-gate` 只证明"笔记形状 + 安装冒烟 + 版本钉"没问题，**不证明用户下载的字节里
+有你在 notes 里承诺的功能**。发布后跑这个（只读，不碰运行中的 hub 和数据库）：
+
+```bash
+scripts/verify-hub-release.sh                      # 用 preview dist-tag
+scripts/verify-hub-release.sh 0.9.0-preview.146    # 钉版本
+scripts/verify-hub-release.sh 0.9.0-preview.146 --tag latest
+```
+
+它做四件事：`dist-tags.<channel>` 是否等于该版本 → tarball 能否匿名下载并解压 →
+`package.json` 里的版本是否一致 → **按版本探测功能**（有 `since` 表，低版本自动 skip）。
+
+🔴 **两条 2026-10-23 踩出来的规矩**（脚本里都写死了）：
+
+1. **只钉行为，不钉实现位置**。那天我先断言"`assign_agent` 在 `departments.ts` 里"，
+   而分发其实在 `tools.ts` —— 包是好的，探针是错的；
+2. **不拿未发布的功能当验收条件**。同一天我把属于 PR2907 的 `avatar_storage_full`
+   当成了 `.145` 的必检项，而那一版本来就不含它 —— 于是"发布成功"被自己的脚本判成 FAIL。
+
+技能一句话：**探针错了和包坏了，输出长得一模一样**；所以探针要么盯"这个动作能不能
+被调到"，要么盯"这段行为在不在"，别盯文件名。
+
 ### Step 6：publish preview —— 走 GitHub Actions，**不在本机发**
 
 🔴 **本机不发包。** 这是 Vincent 2026-08-27 定的规则：发版一律走 GitHub Actions，
@@ -679,6 +703,33 @@ grep -c '<你的串>' package/dist/src/daemon-capability-display.js
 两处，`sync-pinned-versions.sh` **都不覆盖**，必须手工改，且 `release-gate` 的 **gate 4**
 会检查机器戳。
 
+#### 2.6.1 但「戳」和「正文」必须在**发包前**改 —— 否则 gate 4 直接拦发布
+
+2026-10-23 实测（`agent-network@2.3.0-preview.191`）：bump PR 合入、门也 dispatch 了，
+`build / gate 1 / gate 2 / gate 3` 全绿，**gate 4 红**，`publish` 被 **skipped**：
+
+```
+::error 正在发 agent-network@2.3.0-preview.191(preview 通道),而文档仍然断言 preview=2.3.0-preview.190
+    docs-site/docs/guide/getting-started.md:9
+    docs-site/docs/en/guide/getting-started.md:10
+```
+
+原因不是「戳过期」这种小漂移，而是**正文本身会变假**：`.190` 那段写的是 agent-node
+`.153` 的节点行为，而 `.191` 配对的是 `.154`。只改戳会被第二判据再拦一次
+（戳标出的版本必须在正文里落地，且正文描述要与该版本一致）。
+
+⇒ 所以顺序是**三段**，不是两段：
+
+1. **bump PR 里一起改** `getting-started.md`（中英各一份）的戳 + 正文；
+2. 本地先跑 gate 4 的同一条判据，绿了再 dispatch：
+   ```bash
+   python3 scripts/check-doc-version-claims.py \
+     --package '<pkg>' --version '<版本>' --verify-latest-from-npm
+   ```
+   ⚠️ `channel=latest` 的戳**不要跟着改**：`--verify-latest-from-npm` 比的是 npm 的
+   `dist-tags.latest`，preview 版本发出去之前它还是旧值；只改 `channel=preview` 那条。
+3. 发包成功之后才做**站点部署**（下一段）—— 否则站点会告诉用户装一个 npm 上不存在的版本。
+
 **② 站点部署。** 改完文档要真的部署 anet.sh，否则 main 上是新的、线上还是旧的。
 用 prebuilt 流（见 `deploy/docs-site/README.md`），部署后跑
 `.github/scripts/check-docs-site-drift.py` **按内容**验收，不看状态码。
@@ -777,3 +828,74 @@ git diff && git commit -m "chore(release): rollback @sleep2agi/<pkg> to <old-sta
 
 维护：发现遗漏或新增 hardcoded 位置时直接改本文档 + sync 脚本。改动走 PR 流程，
 Tier 1 review（通信龙 / 通信SDK马）通过后 merge。
+
+---
+
+## 7. 2026-11-05 实测踩出来的三条（写进这里，别靠记性）
+
+这三条都不改代码，但每一条都单独烧掉过至少一整轮。
+
+### 7.1 dispatch 的 `commit` 必须是**完整 40 位 SHA**
+
+```text
+传 8 位短 sha   ⇒ build 的 checkout 报
+                  "A branch or tag with the name 'dcb3b00f' could not be found"
+传分支名 main   ⇒ build 报
+                  "Publishing requires an explicit full 40-character commit SHA"
+```
+
+正确写法：
+
+```bash
+FULL=$(git rev-parse origin/main)      # 40 位
+curl ... -d "{\"ref\":\"main\",\"inputs\":{...,\"commit\":\"$FULL\",...}}"
+```
+
+### 7.2 冲突标记会**悄悄**进主干，唯一的拦网是一条便宜命令
+
+rebase / merge 收尾时用 `git add -A`，会把**尚未解决**的冲突文件一起提交。
+本次代价：`agent-node/package.json` 与 `package-lock.json` 带着 `<<<<<<< HEAD`
+进了主干 ⇒ release 的 `npm install` 直接 `EJSONPARSE`，tarball 都构不出来。
+
+```bash
+git add <具体文件>              # 不要 -A
+git diff --cached --check       # 专报冲突标记；输出为空才算干净
+```
+
+### 7.3 文档里的版本断言要**同一次**提交里跟
+
+`release-gate` 的 gate 4 会拿 `docs-site/docs/**/getting-started.md` 的
+`<!-- version-claim: ... version=X -->` 与本次发布的版本逐字比对。
+不同步 ⇒ gate 4 红 ⇒ publish 跳过，而前面四步全绿（看起来像"只差一步"）。
+
+### 7.4 判「发布出来的包完不完整」不要用 `ls | head`
+
+```bash
+# ❌ ls -la .../dist/bin/ | head -5   —— head 截断后，「没有第 6 行」与「只有 5 个文件」同形
+# ✅ 存在性判据（存在即为 1，缺了就是 0）
+curl -sL "$(npm view <pkg>@<ver> dist.tarball)" | tar tzf - | grep -c '^package/dist/bin/cli.js$'
+```
+
+本轮就有人（我）用 `head -5` 判过「包缺 cli.js」，实际只是输出被截断，白开了一张卡。
+
+### 7.5 一次 release 的**往返是 45 分钟**，这是设计值，不是故障
+
+`release.yml` 的「发后核实」会轮询 registry 最长 **45 分钟**
+（`VERIFY_TIMEOUT_MIN: '45'`），因为 npm 处理完毕后到 registry 可见历史上最坏约 40 分钟
+（`.186/.187` 实测；注释里写着「超时只说明尚未核实，不是没生效」）。
+
+于是有两个操作性后果，都不 obvious：
+
+```text
+① 看到 publish 步骤「in_progress」20–40 分钟，**不要重发**
+   重发会撞 E409（Cannot publish over previously staged version），把本来会好的那次也搞坏
+② 发版要**凑批**：同一个包连发两版，第二版必须等第一版从 registry 可见
+   （因为 gate 2 会 npm view 核对 pinned 常量；配对包还要断言 agent-node 已在 npm 上）
+   ⇒ 「改一点发一版」在这个仓里是 45 分钟起步，而不是 5 分钟
+```
+
+判据（别用 GitHub 的 in_progress 猜）：
+
+```bash
+npm view <pkg>@<version> version      # 出现 = 可见；npm error 404 = 还没到
+```

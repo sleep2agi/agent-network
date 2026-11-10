@@ -29,7 +29,11 @@ if (!activeDbPath) throw new Error("mcp-context-cost requires COMMHUB_DB (or COM
 // Hub #938 clone_node is audience both (60 tools / 58,169 B). OpenCode V2
 // catalog adds read_opencode_catalog and get_opencode_catalog on that user
 // list. Measured together: 62 tools / 59,409 B. Ceiling keeps ~401 B.
-const TOOLS_LIST_MAX_BYTES = 59_810;
+// #1894（2026-10-23）：新增 `departments` 一个工具（组织架构的 list/create/update/
+// delete/assign_agent 合并成一个，避免 5 个工具把上下文顶穿）。实测 63 个工具
+// 60,089 B，比原上限高 279 B —— 这是**有意的功能增长**，不是描述悄悄变长，
+// 所以显式抬到 60_500（留 411 B 余量）并在同一行写清理由。
+const TOOLS_LIST_MAX_BYTES = 60_500;
 /** 单个工具(名字 + 描述 + 输入 schema)的上限;最大的是 report_status(节点心跳,~8.4 KB 的遥测结构)。 */
 const TOOL_MAX_BYTES = 9_000;
 /** 单条工具描述的上限(说明写进参数的 describe,或者拆短)。 */

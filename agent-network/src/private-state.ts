@@ -62,6 +62,33 @@ export function ensurePrivateDirectory(path: string): void {
  * The 0600 temporary file is complete and fsynced before the atomic rename,
  * so replacing a legacy 0644/0664 target also repairs it with no chmod gap.
  */
+/**
+ * Windows 上「rename 覆盖一个正被别的句柄打开的目标」会失败(EPERM/EBUSY),POSIX 不会 ——
+ * 实测 test751 原生 smoke 在 CI 上随机红在 windows-copresence.json 的 rename 上(#2222)。
+ * 这里是**有界重试**:只在 win32 且错误码属于"别人暂时开着"那一类时退避重试,总时长约 385ms;
+ * 其它错误、以及重试耗尽,一律照原样抛 —— 不吞错,也不把原子写降级成"直接覆盖写"
+ * (那会让读者读到半个文件)。
+ */
+export function renamePrivateStateSync(
+  temp: string,
+  path: string,
+  rename: (from: string, to: string) => void = renameSync,
+  sleep: (ms: number) => void = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); },
+  platform: string = process.platform,
+): void {
+  const backoffMs = [10, 25, 50, 100, 200];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(temp, path);
+      return;
+    } catch (error: any) {
+      const transient = platform === "win32" && ["EPERM", "EBUSY", "EACCES"].includes(String(error?.code));
+      if (!transient || attempt >= backoffMs.length - 1) throw error;
+      sleep(backoffMs[attempt]);
+    }
+  }
+}
+
 export function atomicWritePrivateFile(path: string, body: string): void {
   const parent = dirname(path);
   ensurePrivateDirectory(parent);
@@ -83,7 +110,7 @@ export function atomicWritePrivateFile(path: string, body: string): void {
     }
     closeSync(fd);
     fd = undefined;
-    renameSync(temp, path);
+    renamePrivateStateSync(temp, path);
     const parentFd = openOwned(parent, constants.O_RDONLY | (constants.O_DIRECTORY || 0), "directory");
     try { fsyncDirectoryIfSupported(parentFd); } finally { closeSync(parentFd); }
   } catch (error) {

@@ -163,6 +163,12 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
   test("send_task resolves to the only membership", async () => {
     const { tools } = buildHandlers({ userId: U_SINGLE });
     const r = await call(tools["send_task"], { alias: A1, task: "x517 g1 send_task", priority: "normal" });
+    // #3275 批次 2 —— 同变量口径：`send_task` 的成功回执是 7 键（实测，不是推断）。
+    // 这七格里 queue_ahead / target_busy / est_wait_minutes 是「建议」：
+    // 少一个，调用方就不知道排在第几位；多一个，客户端会多一条没人写过的分支。
+    expect(Object.keys(r).sort()).toEqual([
+      "actual_to", "est_wait_minutes", "message_id", "ok", "queue_ahead", "session_status", "target_busy",
+    ]);
     expect(r.ok).toBe(true);
     expect(taskRow("x517 g1 send_task")?.network_id).toBe(NET_A);
   });
@@ -170,6 +176,8 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
   test("send_message resolves to the only membership", async () => {
     const { tools } = buildHandlers({ userId: U_SINGLE });
     const r = await call(tools["send_message"], { alias: A1, message: "x517 g1 send_message" });
+    // #3275 批次 2 —— send_message 外层闭集（实测）
+    expect(Object.keys(r).sort()).toEqual(["message_id", "ok", "session_status"]);
     expect(r.ok).toBe(true);
     expect(inboxRow("x517 g1 send_message")?.network_id).toBe(NET_A);
   });
@@ -194,6 +202,9 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
     const { tools } = buildHandlers({ userId: U_SINGLE });
     const t = makeTask(A1, "delivered", "x517 g1 send_ack");
     const r = await call(tools["send_ack"], { task_id: t });
+    // #3275 批次 2 —— send_ack 外层闭集（实测）：`updated` 是**这次是否真的改了状态**，
+    // 与 ok 不同（ok=调用成功）；少了它，客户端分不清「已 ack」与「早就是 ack 状态」。
+    expect(Object.keys(r).sort()).toEqual(["ok", "task_id", "updated"]);
     expect(r.ok).toBe(true);
     expect(taskById(t)?.status).toBe("acked");
   });
@@ -211,6 +222,9 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
     const t = makeTask(A1, "delivered", "x517 g1 cancel_task");
     const r = await call(tools["cancel_task"], { task_id: t });
     expect(r.ok).toBe(true);
+    // 2026-10-31 —— **同变量口径的精确键集**（#3171）：这条断言绑的是本次调用的结果变量 r。
+    // 实际三键（我第一版只写了 ok —— 断言当场纠正）。
+    expect(Object.keys(r).sort()).toEqual(["cancelled", "ok", "task_id"]);
     expect(taskById(t)?.status).toBe("cancelled");
   });
 
@@ -218,6 +232,10 @@ describe("utok single-network auto-resolve (no network_id argument)", () => {
     const { tools } = buildHandlers({ userId: U_SINGLE });
     const t = makeTask(A1, "delivered", "x517 g1 reassign_task");
     const r = await call(tools["reassign_task"], { task_id: t, new_alias: A2 });
+    // #3275 批次 2 —— 同变量口径，形状由一次真实调用给出（不是按源码推断）：
+    // 回执带**两端**（reassigned_from / reassigned_to）。少一个，调用方就不知道它是从哪来的；
+    // 而这两端正是「改派」与「新建」在回执上唯一可分的地方。
+    expect(Object.keys(r).sort()).toEqual(["ok", "reassigned_from", "reassigned_to", "task_id"]);
     expect(r.ok).toBe(true);
     expect(taskById(t)?.to_name).toBe(A2);
   });

@@ -6,6 +6,7 @@
 // and project directory. Settings, headers, and response bodies are not fields.
 
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 
@@ -46,7 +47,7 @@ export function writeOpenCodeV2CatalogEndpoint(nodeWorkDir: string, endpoint: Op
   const temporary = `${endpointPath(nodeWorkDir)}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
   writeFileSync(temporary, body, { mode: 0o600, flag: "wx" });
   try {
-    renameSync(temporary, endpointPath(nodeWorkDir));
+    renameOverExistingSync(temporary, endpointPath(nodeWorkDir));
   } catch (error) {
     rmSync(temporary, { force: true });
     throw error;

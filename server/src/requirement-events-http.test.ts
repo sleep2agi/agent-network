@@ -146,6 +146,33 @@ describe("requirement events", () => {
     expect(JSON.stringify(later[2])).not.toContain("一段描述");
   });
 
+  // 2026-10-31 —— **变化字段集合 == 实际被写库的字段集合**（外部复核那条的对账形态）。
+  // 上一节断言的是「事件字段集合」；这里把它与「读回来的行真的变了哪些字段」逐项比对 ——
+  // 只有两边相等，才能说「流水没有漏记，也没有凭空多记」。
+  test("changed-field set equals the set of columns that actually changed in the stored row", async () => {
+    const card = await create(admin.token, { name: "对账示例", priority: "normal" });
+    const read = async () => (await send(admin.token, "GET", `/api/requirements/${card.id}?network_id=${NET}`)).body.requirement;
+    const before = await read();
+    // 2026-10-31 —— **同一个 PATCH 里混一个「赋相同值」的字段**（外部复核 (a) 的原话：
+    // 「同一次 update 里加一个赋相同值的字段，断言它不在 changes 里」）。
+    // 这是「变化集 vs 赋值集」两种实现唯一分叉的输入形态：
+    //   只测「整单都是空操作」时，两种实现都绿；混一个不变字段，只有按值比较的那种才绿。
+    const r = await patch(member.token, card.id, { column: "doing", priority: "high", due: "2026-10-09", assignee: "" });
+    expect(r.status).toBe(200);
+    const after = await read();
+    // 只看这次 PATCH 涉及的四个字段（三个改了、一个赋的是原值）：读回来的行里**真的不同**的那些
+    const keys = ["column", "priority", "due", "assignee"] as const;
+    const actuallyChanged = keys.filter((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null)).sort();
+    const eventFields = of((await events(admin.token)).body.events, card.id)
+      .filter((e: any) => e.kind === "changed")
+      .map((e: any) => e.field).sort();
+    expect(eventFields).toEqual(actuallyChanged);
+    expect(actuallyChanged).toEqual(["column", "due", "priority"]);
+    // 赋相同值的那个字段：既不在实际变化里，也不在流水里（否则「赋值集」实现会多记一条）
+    expect(actuallyChanged).not.toContain("assignee");
+    expect(eventFields).not.toContain("assignee");
+  });
+
   test("checklist: ticking an item is `checklist_item` (repeat is a no-op); adding items is `checklist`", async () => {
     const card = await create(admin.token, { name: "动态示例三", checklist: [{ id: "a", text: "第一项" }, { id: "b", text: "第二项" }] });
     const tick = (done: boolean) => send(member.token, "PATCH", `/api/requirements/${card.id}/checklist/a?network_id=${NET}`, { done });
@@ -213,6 +240,22 @@ describe("requirement events", () => {
     expect((await events(scoped.token, `&requirement_id=${theirs.id}`)).body.events).toEqual([]);
   });
 
+  test("the CARD payload hides a hidden node's alias too (assignee is a string, not a ref)", async () => {
+    // 2026-10-31 —— #3285 的另一半，比事件列表**常用得多**的那一面。
+    // assignee 是派生展示字段（自由文本），写侧在设 agent_owner 时回填别名；
+    // 它没有 {kind,id} 形状 ⇒ isHiddenRef 判不了 ⇒ 只抹引用的话，卡列表上照样看得到别名。
+    const card = await create(admin.token, { name: "动态示例十之半" });
+    await patch(admin.token, card.id, { agent_owner: { kind: "node", id: NODE } });
+    const mine = (await send(admin.token, "GET", `/api/requirements?network_id=${NET}&limit=500`)).body.requirements
+      .find((c: any) => c.id === card.id);
+    expect(mine.assignee).toBe("ev-node");            // 无限制的读者：看得到（这是如实回显）
+    const theirs = (await send(restricted.token, "GET", `/api/requirements?network_id=${NET}&limit=500`)).body.requirements
+      .find((c: any) => c.id === card.id);
+    expect(theirs).toBeDefined();                      // 卡本身他看得见（不是「看不见的卡」那条规则）
+    expect(theirs.assignee).toBeNull();                // 但执行人那一栏不能借别名漏出去
+    expect(JSON.stringify(theirs)).not.toContain("ev-node");
+  });
+
   test("an agent-restricted member: hidden nodes are masked, and an event that only differs by a hidden node is dropped", async () => {
     const card = await create(admin.token, { name: "动态示例十" });
     await patch(nodeToken, card.id, { priority: "high" });
@@ -220,11 +263,18 @@ describe("requirement events", () => {
     await patch(admin.token, card.id, { participants: [user(admin.id), { kind: "node", id: NODE }] });
     const seen = of((await events(restricted.token)).body.events, card.id);
     const all = of((await events(admin.token)).body.events, card.id);
-    expect(all.map((e: any) => e.field)).toEqual(["participants", "agent_owner", "priority", null]);
+    // 2026-10-31 —— 加了 `assignee` 这一条：它是**派生展示字段**（写侧在设 agent_owner 时
+    // 同步回填），存的是**别名字符串**而不是 {kind,id} 引用。列表顺序按事件 id 倒序 ⇒
+    // 它排在 agent_owner 之后、priority 之前。
+    expect(all.map((e: any) => e.field)).toEqual(["participants", "agent_owner", "assignee", "priority", null]);
+    expect(all[2]).toMatchObject({ field: "assignee", old: null, new: "ev-node" });
+    // 受限成员那边：agent_owner 与**由它派生的 assignee** 都必须消失（后者是别名字符串，
+    // 不走 isHiddenRef，2026-10-31 实测会漏；见 requirements.ts 的 hiddenAlias）。
     expect(seen.map((e: any) => e.field)).toEqual(["participants", "priority", null]);
     expect(seen[0]).toMatchObject({ old: [], new: [user(admin.id)] });
     expect(seen[1]).toMatchObject({ field: "priority", actor: null });
     expect(JSON.stringify(seen)).not.toContain(NODE);
+    expect(JSON.stringify(seen)).not.toContain("ev-node");   // ← 别名也不能漏
   });
 
   test("paging: newest first, limit + next_cursor without overlap; since; bad params 400", async () => {

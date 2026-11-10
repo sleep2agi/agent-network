@@ -87,6 +87,19 @@ export interface SuperviseChildOpts {
    */
   jitterRatio?: number;
   /**
+   * 额外把**首次重连**摊开的窗口（ms）。默认 0 = 不摊开。
+   *
+   * #2363 —— 为什么需要：Hub 重启时，全网节点的 SSE 会在同一刻断掉，而
+   * `jitterRatio` 只给 ±25% 的抖动（base 1s ⇒ 750–1250ms），于是 300+ 个节点
+   * 仍然挤在约 0.5 秒的窗口里重连。生产实测（`.160` 的 `mcp_inflight_peak`）：
+   * 重启后 59 秒内出现 **308 个请求同时在飞**，按 ≈1.3 MB/条 ≈ 400 MB RSS —
+   * 这正是历史上那些“夜里突然 450 MB”的来源。
+   *
+   * 窗口只加在「刚稳定过又断开」的第一次重试上（`delay === baseDelayMs`），
+   * 指数退避的后续重试保持原样，因此不影响“Hub 真挂了”时的收敛速度上限。
+   */
+  firstRetrySpreadMs?: number;
+  /**
    * If cumulative downtime (consecutive iterations that did NOT call
    * markStable, plus their inter-iteration sleeps) exceeds this, the
    * supervisor invokes `onAbandon` and returns. Default `Infinity`
@@ -126,6 +139,7 @@ export async function superviseChild(opts: SuperviseChildOpts): Promise<void> {
   const baseDelayMs = opts.baseDelayMs ?? 1_000;
   const maxDelayMs = opts.maxDelayMs ?? 30_000;
   const jitterRatio = opts.jitterRatio ?? 0.25;
+  const firstRetrySpreadMs = opts.firstRetrySpreadMs ?? 0;
   const abandonAfterMs = opts.abandonAfterMs ?? Number.POSITIVE_INFINITY;
   const sleep = opts.sleep ?? defaultSleep;
   const random = opts.random ?? Math.random;
@@ -169,7 +183,12 @@ export async function superviseChild(opts: SuperviseChildOpts): Promise<void> {
     // floor matches the pre-helper connectFeishu behaviour and avoids
     // a hot-loop edge case if a caller sets baseDelayMs very small.
     const jitterDelta = jitterRatio > 0 ? delay * jitterRatio * (random() * 2 - 1) : 0;
-    const waitMs = Math.max(100, Math.round(delay + jitterDelta), minNextWaitMs);
+    // #2363 —— 首次重连（刚从稳定态断开）额外摊开，避免全网同时重连形成尖峰；
+    // 后续指数退避不摊开，保证 Hub 长时间不可用时的重试仍然可预期。
+    const herdSpread = firstRetrySpreadMs > 0 && delay === baseDelayMs
+      ? Math.floor(random() * firstRetrySpreadMs)
+      : 0;
+    const waitMs = Math.max(100, Math.round(delay + jitterDelta) + herdSpread, minNextWaitMs);
     opts.onRetryWait?.(waitMs, delay);
     await sleep(waitMs);
     delay = Math.min(delay * 2, maxDelayMs);

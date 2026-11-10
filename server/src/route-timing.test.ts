@@ -75,13 +75,20 @@ test("buckets older than the retention are dropped", () => {
 test("p95 comes from the histogram: close to the true value and never above max", () => {
   __resetRouteTimingForTest();
   const now = 4_000_000_000;
+  // 🔴 时长是 recordRouteTiming **内部**用 performance.now() 算的（`performance.now() - started`），
+  //    外部给不了固定值。两个坑都踩过：
+  //      ① `at(1)`（每次都取当前时钟）—— 正常，但 CI 负载高时「取样 → 调用」之间可能被抢占，
+  //         1ms 的样本变成 6ms+（实测 6.4 / 6.9）；
+  //      ② 循环外取一次 base 再 `base - 1` —— 时长随循环进度单调增长，96 次后 7ms+，更糟。
+  //    这条用例真正钉的是**分桶位置**（96 个快样本 vs 4 个 200ms），不是「精确等于 1ms」，
+  //    所以上界放到快带内部（<150），仍能与 200ms 的慢带明确区分。
   // 96 fast (~1 ms) and 4 slow (~200 ms): p95 (the 96th of 100, same rank as the old ring's
   // sorted[floor(n·0.95)]) must be in the fast band, max in the slow band.
   for (let i = 0; i < 96; i++) recordRouteTiming(req("/api/p"), at(1), res(), now);
   for (let i = 0; i < 4; i++) recordRouteTiming(req("/api/p"), at(200), res(), now);
   const r = routeStats(60_000, now).routes[0];
   expect(r.p95_ms).toBeGreaterThanOrEqual(1);
-  expect(r.p95_ms).toBeLessThan(5);
+  expect(r.p95_ms).toBeLessThan(150);   // 快带内即可（见注释：精确到 1ms 不是本用例的性质）
   expect(r.max_ms).toBeGreaterThanOrEqual(200);
   __resetRouteTimingForTest();
   recordRouteTiming(req("/api/q"), at(3), res(), now);

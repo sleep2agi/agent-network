@@ -86,7 +86,81 @@ def tool_registrations(lines: list[str]) -> list[tuple[int, str]]:
     return out
 
 
+SELFTEST_EXPECTED = 4
+
+
+def selftest(quiet: bool = False) -> int:
+    """2026-10-31 —— 元门要求每个已接线的门都能 `--selftest`。
+
+    本门有**两半**判据，两半都能给出反例（「什么输入能让它变假」）：
+      ① 注册点解析：`"name",` 前面一行必须是 `tool(` 或 `registerTool(` ——
+         少了这层，一段普通的对象字面量也会被当成注册点（分母变大，覆盖率虚高）。
+      ② 段归属：锚串必须落在**对的那个 tool 段**里 ——
+         落在文档开头（文件头）与落在上一段，是同一个读数。
+    自检只覆盖这两半的**纯逻辑**（不在真仓上跑，避免把「今天恰好绿」当证明）。
+    """
+    fails, ran = 0, 0
+
+    def case(label: str, got, want) -> None:
+        nonlocal fails, ran
+        ran += 1
+        if got != want:
+            fails += 1
+            print(f"✗ {label}: 期望 {want!r}，实际 {got!r}", file=sys.stderr)
+        elif not quiet:
+            print(f"✓ {label}")
+
+    # ① 注册点：只有紧跟在 tool(/registerTool( 之后的那一行才算
+    src = [
+        'server.tool(',
+        '  "alpha_tool",',
+        '  { description: "d" },',
+        'server.registerTool(',
+        '  "beta_tool",',
+        'const not_a_registration = {',
+        '  "gamma_tool",',
+    ]
+    case("注册点只认紧跟 tool(/registerTool( 的那一行",
+         tool_registrations(src), [(2, "alpha_tool"), (5, "beta_tool")])
+
+    # ② 段归属：给一个两段文档，锚串落错段必须能被看出来
+    doc = [
+        "### `alpha_tool`",
+        "搜 `alphaThing`",
+        "### `beta_tool`",
+        "搜 `betaThing`",
+    ]
+    sections = []
+    for i, line in enumerate(doc):
+        mm = SECTION.match(line)
+        if mm:
+            sections.append((i + 1, mm.group(1)))
+    case("段标题解析出两个 tool 段", sections, [(1, "alpha_tool"), (3, "beta_tool")])
+
+    def owner_of(line_no: int, regs=sections) -> str:
+        prior = [r for r in regs if r[0] <= line_no]
+        return prior[-1][1] if prior else "(file-head)"
+
+    case("锚串归属按最近的前一个段标题", owner_of(2), "alpha_tool")
+    case("段标题之前的行归到 (file-head)，不会被算进第一段", owner_of(0), "(file-head)")
+
+    if ran != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print(f"✗ 自检失败 {fails} 例", file=sys.stderr)
+        return 1
+    if not quiet:
+        print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     if not TOOLS.is_file():
         print(f"FAIL: 找不到 {TOOLS}", file=sys.stderr)
         return 1

@@ -2478,7 +2478,10 @@ describe("Grok copresence runtime integration", () => {
       runtime = await fixture.open();
       await fixture.crashCurrent();
       await waitFor(() => fixture.spawnedArgs.length === 2, 5_000);
-      await Bun.sleep(1_000);
+      // #2099 —— 这里原来是固定 `Bun.sleep(1_000)`：机器慢一点（或 runner 抢占）就可能
+      // 还没把恢复流拉起来就断言 isRunning，红的是时序不是恢复语义。改成有界等待，
+      // 语义不变（仍然要求 isRunning === true），只是不再赌 1 秒够不够。
+      await waitFor(() => runtime?.isRunning === true, 5_000);
       expect(runtime.isRunning).toBe(true);
       expect(fixture.humanPrompts).not.toContain("stale during recovery");
     } finally {

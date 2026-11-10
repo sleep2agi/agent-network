@@ -51,7 +51,59 @@ def pinned_preview(text: str):
     return m.group(1) if m else None
 
 
+SELFTEST_EXPECTED = 4
+
+
+def selftest(quiet: bool = False) -> int:
+    """四个提取用例 —— 这门的全部逻辑就是两个正则，抽不到值时它**必须红而不是绿**。
+
+    为什么必须有自检：改一次命名规则（`runtime-vNN-previewMM` → 别的形状）就会让两个
+    提取函数同时返回 None，而「None vs None」看起来像「一致」。这里把「取不到」钉死。
+    """
+    fails = 0
+    ran = 0
+
+    ran += 1
+    got = launcher_preview('RUNTIME_DIR="/x/runtime-v21-preview230/node_modules"\n')
+    ok = got == "230"
+    if not ok: fails.append(f"launcher 正常行应得 230，实际 {got!r}")
+    elif not quiet: print("✓ selftest launcher 正常行 ⇒ 230")
+
+    ran += 1
+    got = launcher_preview('RUNTIME_DIR="/x/runtime-v21/node_modules"\n')
+    ok = got is None
+    if not ok: fails.append(f"launcher 无 preview 段应得 None，实际 {got!r}")
+    elif not quiet: print("✓ selftest launcher 无 preview 段 ⇒ None（不是猜 0）")
+
+    ran += 1
+    got = pinned_preview('const PINNED_SERVER_VERSION = "0.9.0-preview.231";\n')
+    ok = got == "231"
+    if not ok: fails.append(f"pinned 正常行应得 231，实际 {got!r}")
+    elif not quiet: print("✓ selftest pinned 正常行 ⇒ 231")
+
+    ran += 1
+    got = pinned_preview('const PINNED_SERVER_VERSION = "0.9.0";\n')
+    ok = got is None
+    if not ok: fails.append(f"pinned 无 preview 段应得 None，实际 {got!r}")
+    elif not quiet: print("✓ selftest pinned 无 preview 段 ⇒ None")
+
+    if ran != SELFTEST_EXPECTED:
+        print(f"✗ 自检用例数应为 {SELFTEST_EXPECTED}，实际 {ran}", file=sys.stderr)
+        return 1
+    if fails:
+        print("✗ 自检失败：", file=sys.stderr)
+        for f in fails: print(f"    · {f}", file=sys.stderr)
+        return 1
+    if not quiet: print(f"✓ selftest {ran}/{ran} 通过")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+    if selftest(quiet=True) != 0:
+        print("✗ 自检未通过 ⇒ 没有读数", file=sys.stderr)
+        return 2
     if not LAUNCHER.exists():
         print(f"::error::{LAUNCHER.relative_to(ROOT)} 不存在 —— #735 说的正是这个:仓库无法复现生产启动器")
         return 1

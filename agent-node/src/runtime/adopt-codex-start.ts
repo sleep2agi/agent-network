@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -165,7 +166,7 @@ async function rollback(markerBefore: Buffer, previous: CodexAdoptionScope, iden
     const tmp = `${path}.restore-${process.pid}`;
     writeFileSync(tmp, markerBefore, { mode: 0o600, flag: "wx" });
     chmodSync(tmp, 0o600);
-    renameSync(tmp, path);
+    renameOverExistingSync(tmp, path);
   }
 }
 
@@ -201,7 +202,7 @@ function captureStoppedReceipt(nodeDir: string, nodeId: string): () => void {
     const tmp = `${file}.${randomUUID()}.tmp`;
     try {
       writeFileSync(tmp, JSON.stringify({ version: 1, node_id: nodeId, receipt_fingerprint: before }), { mode: 0o600, flag: "wx" });
-      renameSync(tmp, file);
+      renameOverExistingSync(tmp, file);
     } finally {
       try { unlinkSync(tmp); } catch (error: any) { if (error?.code !== "ENOENT") throw error; }
     }

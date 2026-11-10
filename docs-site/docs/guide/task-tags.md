@@ -46,11 +46,22 @@ Hub 在列表响应的 `capabilities` 里带 `tag_ops` 时，可以整网改名�
 | `merge` | `from`（1–50 个）、`to` | 每张带任一来源的卡，来源换成一个 `to` |
 | `delete` | `tag` | 从每张卡上拿掉这个标签，卡本身保留 |
 | `color` | `tag`、`color`（`#rrggbb` 或 `null` 清除） | 只改颜色，不动卡 |
+| `reparent` | `tag`、`parent`（父标签名，或 `null` 升为顶层） | **只改标签树的父子关系**，不动任何卡、也不改名 |
 
 - 网络里所有匹配的卡在一个事务里改写，含归档的。中途失败时一张都不改。
 - 改过的卡 `updated_at` 前移，`updated_by` 记调用者，`updated_since` 同步得到。
 - 改名、合并时，目标没有颜色就继承第一个有颜色的来源。来源的颜色和被删标签的颜色一起删掉。
-- 返回 `{ok, op, affected}`，`affected` 是改了几张卡。
+- 返回 `{ok, op, affected, reparented}`，`affected` 是改了几张卡，`reparented` 是几个子标签被改挂了父。
+- `reparent` 的四条规则（都**明确拒绝**，不静默纠正）：
+  - 父必须是本网络里存在的标签（卡片在用 / 有颜色 / 已是树节点），否则 `404 tag_parent_not_found`；
+  - 不能成环：父不能是自己，也不能是自己的子孙 → `400 tag_parent_cycle`；
+  - 搬完最深不超过 4 层（顶层算第 1 层）：检查的是「新父深度 + 自己这棵子树的高度」，
+    所以一个 3 层的分支不会因为父在浅层就被放行 → `400 tag_depth_exceeded`；
+  - **必须显式传 `parent`**：缺这个键是 `400 invalid_tag_parent_id`，空串或 `null` 才是升到顶层
+    （不接受「没传就把标签挪到根」，那会让 UI 显示的和实际存的不一致）。
+- 只在卡片上出现过、还没登记成节点的老标签也能 `reparent`：会先登记成顶层节点再挂到父下面。
+- `reparent` 不改卡片，所以 `affected` 恒为 0、`reparented` 为 1；它和改名/合并/删除走同一把权限锁
+  （网络 owner / 管理员 / `task_access='all'`），节点令牌与 scoped 成员一律 `403`。
 - 标签名规则同上。不合法返回 400 `invalid_tag`、`invalid_tag_color` 或 `invalid_tag_op`。来源和目标相同返回 400 `same_tag`。网络里没有这个标签返回 404 `tag_not_found`。
 - 每次成功都写审计 `requirement_tag_rename` / `_merge` / `_delete` / `_color`，详情里带 `affected`。
 
@@ -62,3 +73,37 @@ scoped 成员被整个拒绝，而不是只改他看得见的那几张。原因�
 
 - [任务](/guide/tasks)
 - [需求池 / 任务看板](/api/mcp-tools#需求池-任务看板)
+
+## 创建标签与父子层级
+
+Hub 在 `capabilities` 里带 `tag_tree` 时，可以新建标签，并把标签挂在父标签下面。旧 Hub 上没有这个能力，客户端不显示「新建子标签」，也不调用下面的接口。
+
+标签名在网络里唯一，**名字就是 id**（没有单独的 `tag_id`）。`parent_id` 就是父标签名。
+
+`POST /api/requirements/tags/create`：
+
+```json
+{ "name": "子标签", "parent_id": null }
+```
+
+`parent_id` 省略或 `null` 表示建在根上；给了名字就必须是网络里已经存在的标签。
+
+- 成功返回 201 `{"ok":true,"tag":{"name","parent_id","depth"},"parent_registered":false}`，`depth` 从 1 开始。
+- 已经存在（登记过的节点、任何卡片在用的、或有颜色行的）返回 409 `tag_exists`，不会「复用」已有标签。
+- 父不存在返回 404 `tag_parent_not_found`，**不会**把子标签静默建到根上。
+- 最多 4 层（含根），超了返回 400 `tag_depth_exceeded`。
+- 名字规则同上，不合法返回 400 `invalid_tag`；`parent_id` 不是字符串或不是合法标签名返回 400 `invalid_tag_parent_id`。
+- 父标签此前只出现在卡片上（老数据，没有节点行）时，会在同一事务里把它登记成顶层节点，响应里 `parent_registered: true`；子标签仍然挂在它下面，不是被降级到根。
+- 节点、审计在同一个事务里；失败一条都不留。
+
+`GET /api/requirements/tags` 在有 `tag_tree` 能力时多一个 `nodes`（`tags` / `counts` / `colors` / `can_manage` 语义不变）：
+
+```json
+{ "nodes": [ { "name": "前端", "parent_id": "需求", "depth": 2, "count": 0, "color": null, "registered": true } ] }
+```
+
+- `nodes` 是「登记过的节点 ∪ 调用者看得见的在用标签」。**0 任务的标签也在里面**（`count: 0`），侧栏据此显示空的子标签。
+- 只在卡片上出现过、没登记过的老标签：`parent_id: null`、`depth: 1`、`registered: false`，仍然显示成平标签。
+- 受限成员（`task_access = scoped`）只拿得到看得见的标签，登记过但没有一张可见卡的名字不外泄。
+
+改名 / 合并 / 删除会维护层级：`rename` 连带改子节点的 `parent_id`（目标已存在时按合并处理，不会自环）；`merge` 把来源的子标签挂到目标；`delete` 把子标签挂到被删标签的父（没有父就成根），不丢层级。

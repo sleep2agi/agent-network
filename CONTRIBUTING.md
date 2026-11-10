@@ -86,6 +86,20 @@ Docs-only updates (`docs/**`, `docs-site/docs/**`) go through the same PR flow �
 
 The PR pipeline (CI checks, branch protection, squash-merge) that issue [#15](https://github.com/sleep2agi/agent-network/issues/15) designed is now in force; that issue is closed.
 
+**Workflow hygiene (2026-10-25, board #2136).** Every workflow that runs on `pull_request`
+must declare a `concurrency` group so a re-push cancels its own superseded run:
+
+```yaml
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+```
+
+Without it, one branch pushed five times leaves five queued copies of every workflow: on
+2026-10-25 a single PR had **28 stale runs** holding the runners, and three unrelated PRs sat
+in `queued` for 20+ minutes. Cancel **only** `pull_request` runs — a `push` run on `main` may be
+a release or deploy gate, and cancelling that is worse than waiting.
+
 ## PR checklist
 
 See the [PR template](./.github/PULL_REQUEST_TEMPLATE.md) — the checklist lives there and stays in sync.

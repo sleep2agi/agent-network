@@ -4,6 +4,7 @@ RUN mkdir -p /opt/n110 /opt/n121 \
  && npm install --prefix /opt/n110 --omit=optional --no-audit --no-fund @sleep2agi/agent-node@2.5.0-preview.110 \
  && npm install --prefix /opt/n121 --omit=optional --no-audit --no-fund @sleep2agi/agent-node@2.5.0-preview.121
 WORKDIR /work/server
+COPY contracts /work/contracts
 COPY server/package.json server/package-lock.json ./
 RUN bun install --frozen-lockfile
 COPY server/src ./src

@@ -66,8 +66,12 @@ echo "$R" | grep -q '"ok":true' && pass "GET /health" || fail "GET /health"
 echo "$R" | grep -q '"v3_auth":true' && pass "v3_auth enabled" || fail "v3_auth"
 echo "$R" | grep -q '"multi_network":true' && pass "multi_network enabled" || fail "multi_network"
 
-R=$(curl -s "$BASE/api/license")
-echo "$R" | grep -q 'trial' && pass "GET /api/license (trial)" || fail "license"
+# 2026-10-29 —— license 功能已删除（PR #3200，纯开源）：端点不可达即通过。
+LIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/license")
+case "$LIC_CODE" in
+  401|403|404) pass "GET /api/license gone (HTTP $LIC_CODE)" ;;
+  *) fail "license endpoint still answers (HTTP $LIC_CODE)" ;;
+esac
 echo ""
 
 # ═══════════════════════════════════════════

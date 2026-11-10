@@ -13,6 +13,7 @@ import {
   rmSync,
   writeFileSync,
 } from "fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import type { Stats } from "fs";
 import { basename, dirname, resolve } from "path";
 
@@ -188,7 +189,7 @@ function atomicWritePrivateFile(
         `OpenCode state refuses ${label} at ${path}: target changed before atomic rename`,
       );
     }
-    renameSync(temp, path);
+    renameOverExistingSync(temp, path);
     assertPrivateRegularFile(path, label);
     const parentFd = openSync(
       parent,
@@ -311,6 +312,26 @@ export function writebackOpencodeConfiguredModel(configPath: string, model: stri
   const config = JSON.parse(current.body);
   if (config.opencodeConfiguredModelAtLastOpen === model) return false;
   config.opencodeConfiguredModelAtLastOpen = model;
+  atomicWritePrivateFile(configPath, JSON.stringify(config, null, 2) + "\n", "config.json", current.stat);
+  return true;
+}
+
+/**
+ * #3418 —— 会话跑在配置以外的模型时，把 marker 清空，让**下一次启动**去对账。
+ *
+ * marker 的语义是「上次打开时一致的那个模型」。一旦会话模型被别处改走
+ * （TUI 手动切 / 热切之后又重启 / 上次对账失败），marker 就变成了一句谎话：
+ * 配置说 xai、会话跑 deepseek，而 shouldReconcile 因为「marker == 配置」返回 false
+ * ⇒ 判据永远判成一致，永远不会自愈，也没有任何声音。
+ *
+ * 清空而不是写新值：空串一定不等于任何真实模型名 ⇒ 下次启动必判差异 ⇒ 强制对账一次。
+ * 已经为空时返回 false（不重复写盘，心跳不该整天改 config.json）。
+ */
+export function armModelReconcile(configPath: string): boolean {
+  const current = readPrivateSnapshot(configPath, "config.json");
+  const config = JSON.parse(current.body);
+  if (typeof config.opencodeConfiguredModelAtLastOpen !== "string" || config.opencodeConfiguredModelAtLastOpen === "") return false;
+  config.opencodeConfiguredModelAtLastOpen = "";
   atomicWritePrivateFile(configPath, JSON.stringify(config, null, 2) + "\n", "config.json", current.stat);
   return true;
 }

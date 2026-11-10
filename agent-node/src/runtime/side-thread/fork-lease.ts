@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { constants, chmodSync, closeSync, existsSync, fchmodSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -148,7 +149,7 @@ export class PrivateFileForkLeaseStore implements ForkLeaseStore {
     }
     const tmp = `${path}.tmp.${process.pid}.${randomUUID()}`;
     writeFileSync(tmp, `${JSON.stringify(record)}\n`, { flag: "wx", mode: 0o600 });
-    this.sync(tmp); renameSync(tmp, path); chmodSync(path, 0o600); this.syncDir();
+    this.sync(tmp); renameOverExistingSync(tmp, path); chmodSync(path, 0o600); this.syncDir();
   }
   get(nodeId: string, sourceThreadId: string): ForkLeaseRecord | undefined {
     const path = this.path(nodeId, operationHash(sourceThreadId));

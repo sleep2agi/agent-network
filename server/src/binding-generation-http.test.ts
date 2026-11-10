@@ -21,7 +21,22 @@ const list=(t=token)=>mcp(t,"list_my_children");
 const request=()=>mcp(owner.token,"request_adopt_node",{node_id:child,daemon_node_id:daemon,workdir:"/fixture/project"});
 const ack=(id:string,status="adopted")=>mcp(token,"ack_adopt_request",{request_id:id,status});
 const unadopt=()=>mcp(owner.token,"unadopt_node",{node_id:child});
-async function activate(){const r=await request();expect(r.ok).toBe(true);expect((await ack(r.request_id)).status).toBe("active");return r.request_id;}
+async function activate(){
+  const r=await request();
+  // 2026-10-31 —— #3275：request_adopt_node 的形状（收养也是**下发一个请求**）。
+  // status 一并回来，调用方不必再查一次「这条请求现在是什么状态」。
+  expect(Object.keys(r).sort()).toEqual(["ok","request_id","status"]);
+  expect(r.ok).toBe(true);
+  // #3275 批次 1·d —— ack_adopt_request 的成功回执形状：
+  // 源码里有两种（`{ok, key}` 与 `{ok, status}`），到底哪一种取决于这条请求是
+  // 「首次收养（要发 key）」还是「已有绑定代际」。只断言 .status 时，
+  // 把**带 key 的那个出口**顺手删掉/改名，不会有任何东西变红。
+  const acked = await ack(r.request_id);
+  // 实测两次都是 ["ok","status"]（打印过）；源码里那条 `{ok, key}` 出口走的是**另一条路径**
+  // （首次收养要下发 key），本夹具没走到。⇒ 这里钉住本夹具实际走的那个，**不声称两条都钉住**。
+  expect(Object.keys(acked).sort()).toEqual(["ok", "status"]);
+  expect(acked.status).toBe("active");
+  return r.request_id;}
 beforeAll(async()=>{
   ({db}=await import("./db.js"));
   const {register}=await import("./auth.js");
@@ -59,7 +74,12 @@ test("generation projection and unchanged created row",async()=>{
   expect(r.children.find((n:any)=>n.child_node_id==="node_binding_created")).toEqual({child_node_id:"node_binding_created",alias:"created",lifecycle_state:"active"});
   // Old consumers continue reading exactly the same fields; additive only.
   expect(r.children.map(({child_node_id,alias,lifecycle_state,managed}:any)=>({child_node_id,alias,lifecycle_state,managed}))).toContainEqual({child_node_id:child,alias:child,lifecycle_state:"active",managed:"adopted"});
-  expect((await unadopt()).ok).toBe(true);
+  // 2026-10-31 —— #3275：unadopt_node 的成功体 {ok, status}，且 status 必须是**第二终态**
+  // 「revoked」而不是「unadopted」—— 名字与载荷不是一回事（同 #3214 里 list_node_files 那一课）。
+  const un = await unadopt();
+  expect(Object.keys(un).sort()).toEqual(["ok", "status"]);
+  expect(un.status).toBe("revoked");
+  expect(un.ok).toBe(true);
 });
 test("token boundary denies humans general revoked and other owners",async()=>{
   await activate();

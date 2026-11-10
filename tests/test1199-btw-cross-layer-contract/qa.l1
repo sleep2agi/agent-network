@@ -1,0 +1,2 @@
+497/#175 cross-layer App fixture -> Hub HTTP -> dedicated node port ->
+terminal -> hydrate. Pins the App-vendored contract bytes by sha256.

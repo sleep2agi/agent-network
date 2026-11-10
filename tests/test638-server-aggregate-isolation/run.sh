@@ -29,7 +29,64 @@ cleanup() {
   rm -f -- "${PROBES[@]}"
   rmdir server/src/test639 2>/dev/null || true
 }
-trap cleanup EXIT
+
+# 🔴 #1963 (board): 红的时候必须留下**哪条断言**失败。
+#
+# 之前只有 dump_agg_failure 会往 ARTIFACT_DIR 拷东西 —— 它只覆盖 L1/L2 的
+# 聚合退出码。L3 之后的断言（count drift / aggregate not green / DB map
+# one-to-one / fixture shape / 各阶段 .out 的 grep）一旦失败就是裸的
+# `exit 1`：整份聚合输出没有落到 artifact，CI 上只剩一句
+# 「L2 之后 exit1」，查的人拿不到失败断言原文（#1961 的归因就卡在这）。
+#
+# 这里补两件事，**不改任何断言**：
+#   1) STAGE：每个阶段开头更新，失败时写进 artifact 与 stdout；
+#   2) EXIT trap：任何非零退出都把三份聚合输出、strace 与各阶段 .out 落盘，
+#      并把每个输出文件的尾部打进 stdout（artifact 之外的第二份现场）。
+STAGE=bootstrap
+
+save_failure_artifacts() {
+  local rc="$1"
+  set +e
+  if [ -n "${ARTIFACT_DIR:-}" ]; then
+    mkdir -p "$ARTIFACT_DIR" 2>/dev/null || true
+    {
+      echo "stage=$STAGE"
+      echo "rc=$rc"
+      echo "out1=$OUT1"
+      echo "out2=$OUT2"
+      echo "out3=$OUT3"
+      echo "trace1=$TRACE1"
+    } > "$ARTIFACT_DIR/fail-context.txt" 2>/dev/null
+    local f
+    for f in "$OUT1" "$OUT2" "$OUT3" "$TRACE1" \
+      /tmp/test638-no-db-upload.out /tmp/test638-no-db-host.out \
+      /tmp/test638-nonzero.out /tmp/test638-timeout.out /tmp/test638-signal.out \
+      /tmp/test639-missing-summary.out /tmp/test639-spawn-fail.out \
+      /tmp/test639-slug-collision.out /tmp/test639-slug-mutation.out \
+      /tmp/test638-mutation.out; do
+      [ -f "$f" ] && cp -- "$f" "$ARTIFACT_DIR/$(basename "$f")" 2>/dev/null
+    done
+    echo "--- saved failure artifacts (stage=$STAGE) to \$ARTIFACT_DIR ---"
+  fi
+  # stdout 里再留一份：不看 artifact 的人也能从 CI 日志读到失败现场。
+  local g
+  for g in "$OUT1" "$OUT2" "$OUT3"; do
+    if [ -f "$g" ]; then
+      echo "--- tail -60 of $g (stage=$STAGE) ---"
+      tail -60 "$g"
+    fi
+  done
+  set -e
+}
+
+on_exit() {
+  local rc=$?
+  cleanup
+  save_failure_artifacts "$rc"
+  # 保留原始退出码：trap 里不显式 exit，bash 沿用进入 trap 时的状态。
+  return $rc
+}
+trap on_exit EXIT
 dump_agg_failure() {
   # #1274: aggregate 失败时把诊断吐给 CI —— 否则 set -e 无声死，红无任何指名信息
   local label="$1" output="$2" rc="$3"
@@ -84,6 +141,7 @@ run_one() {
     bun run --cwd server test "${args[@]}" >"$output" 2>&1
 }
 
+STAGE=L1
 echo "L1: normal order under strace"
 set +e
 NODE_ENV=test DATABASE_URL='postgres://must-not-be-inherited.invalid/prod' COMMHUB_DB="$SHARED_DB" \
@@ -93,6 +151,7 @@ rc1=$?
 set -e
 [[ $rc1 -eq 0 ]] || { dump_agg_failure "L1" "$OUT1" "$rc1"; exit 1; }
 
+STAGE=L2
 echo "L2: concurrent normal + reverse order"
 set +e
 run_one "$RUN2" "$OUT2" normal & p2=$!
@@ -114,16 +173,52 @@ key3=$(summary_key "$OUT3")
 [[ "$key1" == "$key2" && "$key1" == "$key3" ]] || { echo "FAIL: count drift $key1 / $key2 / $key3"; exit 1; }
 [[ "$key1" =~ ^[0-9]+:[0-9]+:0:[0-9]+:[0-9]+:false$ ]] || { echo "FAIL: aggregate not green: $key1"; exit 1; }
 
+# 🔴 #1963 —— 上面这三个是**钉死的通过数**（pin）。钉死的意图是「这个文件
+# 真的跑完了，而且一个都没挂」。
+#
+# 之前它们是裸的 `grep -F ... >/dev/null`：一旦对不上，grep 退出码是 1，
+# 而 `set -e` 立刻把脚本带走 —— **一句 FAIL 都不会打印**，磁盘上也没有任何
+# 东西。这就是「L2 之后 exit1、拿不到失败断言原文」的真正成因。
+#
+# 现在对不上的时候：说要钉的是什么、实际报的是什么，一并打出来。
+expect_file_result() {
+  local file="$1" output="$2" expected="$3"
+  if grep -Fq "TEST_FILE_RESULT	${file}	pass=${expected}	fail=0" "$output"; then
+    return 0
+  fi
+  echo "FAIL: ${file} did not report pass=${expected} fail=0 in ${output}"
+  local actual
+  actual=$(grep -F "TEST_FILE_RESULT	${file}" "$output" | tail -1 || true)
+  if [ -n "$actual" ]; then
+    echo "  actual: ${actual}"
+  else
+    echo "  actual: (no TEST_FILE_RESULT line for ${file} — the file did not run)"
+  fi
+  return 1
+}
+
 for output in "$OUT1" "$OUT2" "$OUT3"; do
-  grep -F $'TEST_FILE_RESULT\tserver/src/api-host-supervisors-fallback.test.ts\tpass=8\tfail=0' "$output" >/dev/null
-  grep -F $'TEST_FILE_RESULT\tserver/src/uploads-http.test.ts\tpass=15\tfail=0' "$output" >/dev/null
-  grep -F $'TEST_FILE_RESULT\tserver/src/scheduled-tasks-http.test.ts\tpass=15\tfail=0' "$output" >/dev/null
+  expect_file_result "server/src/api-host-supervisors-fallback.test.ts" "$output" 8
+  expect_file_result "server/src/uploads-http.test.ts" "$output" 15
+  # 🔴 #1963 —— 钉数从 15 改成 16：#2854（watchers can see and edit a scheduled
+  # task，2026-10-20）给 server/src/scheduled-tasks-http.test.ts 加了第 16 个
+  # 用例。钉数没跟着改 ⇒ 断言对不上 ⇒ `set -e` 静默退出 ⇒ CI 上只剩一句
+  # 「L2 之后 exit1」，失败断言原文从来没被保存过。
+  #
+  # 实测（同一个 main 跑 Docker 复现）：三次聚合 fail=0、bad=false，
+  # 实际报的是 pass=16 fail=0 —— 业务测试一个都没挂，坏的只是这个钉数。
+  #
+  # 这一版只改**钉数**，不碰任何断言逻辑：期望值仍然是「这个文件跑完了、
+  # 一个都没挂、且用例数与当前代码一致」。
+  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 16
   ! grep -Eqi 'connection refused|ECONNREFUSED|database safety guard|FAIL_SUITE|timeout=true' "$output"
-  maps=$(grep -c '^TEST_DB_MAP' "$output")
+  # `grep -c` 在 0 匹配时退出码是 1 —— 在 set -e 下会静默退出（同一个坑）。
+  maps=$(grep -c '^TEST_DB_MAP' "$output" || true)
   unique_maps=$(grep '^TEST_DB_MAP' "$output" | cut -f3 | sort -u | wc -l)
   [[ $maps -gt 0 && $maps -eq $unique_maps ]] || { echo "FAIL: DB map not one-to-one in $output ($maps/$unique_maps)"; exit 1; }
 done
 
+STAGE=L3
 echo "L3: syscall DB scope + cross-suite fixtures"
 [[ $(grep -F -c "$SHARED_DB" "$TRACE1" || true) -eq 0 ]] || { echo "FAIL: inherited shared DB was opened"; exit 1; }
 outside=$(grep -oE '/tmp/[^" ]*commhub\.db' "$TRACE1" | grep -v "^$RUN1/" || true)
@@ -138,6 +233,7 @@ host_shape=$(TEST638_DB="$host_db" bun -e 'import {Database} from "bun:sqlite";c
 [[ "$host_shape" =~ ^0:[1-9][0-9]*$ ]] || { echo "FAIL: host fixture/cross-leak shape=$host_shape"; exit 1; }
 [[ ! -e "$SHARED_DB" ]] || { echo "FAIL: shared DB exists"; exit 1; }
 
+STAGE=L4
 echo "L4: standalone real-server tests fail closed without explicit DB"
 set +e
 NODE_ENV=test DATABASE_URL= COMMHUB_DB= bun test server/src/uploads-http.test.ts >/tmp/test638-no-db-upload.out 2>&1; nodb1=$?
@@ -147,6 +243,7 @@ set -e
 grep -F 'explicit_test_database_required' /tmp/test638-no-db-upload.out >/dev/null
 grep -F 'explicit_test_database_required' /tmp/test638-no-db-host.out >/dev/null
 
+STAGE=L5
 echo "L5: nonzero, timeout, signal, missing summary, and spawn failure cannot greenwash"
 printf '%s\n' 'import {test} from "bun:test";' 'test("nonzero",()=>{throw new Error("test638_expected_nonzero")});' > server/src/test638-nonzero.test.ts
 set +e
@@ -194,6 +291,7 @@ set -e
 grep -F $'TEST_FILE_RESULT\tserver/src/db-adapter-guard.test.ts\tpass=0\tfail=0\tskip=0\texpects=0\texit=null' /tmp/test639-spawn-fail.out >/dev/null
 grep -F 'SERVER_AGGREGATE_RESULT' /tmp/test639-spawn-fail.out | grep -F '"bad":true' >/dev/null
 
+STAGE=L5b
 echo "L5b: slug collisions fail before --file filtering"
 printf '%s\n' 'import {test,expect} from "bun:test";' 'test("flat collision fixture",()=>expect(true).toBe(true));' > server/src/test639-collision.test.ts
 mkdir -p server/src/test639
@@ -207,8 +305,9 @@ grep -F 'server/src/test639-collision.test.ts' /tmp/test639-slug-collision.out >
 grep -F 'server/src/test639/collision.test.ts' /tmp/test639-slug-collision.out >/dev/null
 
 cp server/scripts/test-aggregate.ts server/scripts/test-aggregate-mutation.ts
-sed -i '/^[[:space:]]*assertUniqueSlugs(files);$/d' server/scripts/test-aggregate-mutation.ts
-! grep -F 'assertUniqueSlugs(files);' server/scripts/test-aggregate-mutation.ts >/dev/null
+# #2898 —— 这一行的形参从 files 改成了 enumerated（聚合器现在先排除进程级状态文件再筛 --file）。
+sed -i '/^[[:space:]]*assertUniqueSlugs(enumerated);$/d' server/scripts/test-aggregate-mutation.ts
+! grep -F 'assertUniqueSlugs(enumerated);' server/scripts/test-aggregate-mutation.ts >/dev/null
 set +e
 bun server/scripts/test-aggregate-mutation.ts --file=server/src/test639-collision.test.ts >/tmp/test639-slug-mutation.out 2>&1; slug_mutation_rc=$?
 set -e
@@ -217,6 +316,7 @@ grep -F $'TEST_FILE_RESULT\tserver/src/test639-collision.test.ts\tpass=1\tfail=0
 rm -f -- server/src/test639-collision.test.ts server/src/test639/collision.test.ts server/scripts/test-aggregate-mutation.ts
 rmdir server/src/test639
 
+STAGE=L6
 echo "L6: deletion of per-file DB split is witnessed-red"
 cp server/scripts/test-aggregate.ts server/scripts/test-aggregate-mutation.ts
 sed -i 's/const suiteRoot = join(runRoot, slugFor(file));/const suiteRoot = join(runRoot, "shared");/' server/scripts/test-aggregate-mutation.ts

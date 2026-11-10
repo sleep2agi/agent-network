@@ -1,5 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { redactTokens, redactMessageRow } from "./redact-tokens.js";
+import { TOKEN_PATTERNS, redactTokens, redactMessageRow } from "./redact-tokens.js";
+
+// 2026-10-31 —— **计数管「有没有少」，集合管「有没有被换」**（外部复核：
+// 「删一条加一条，数不变，而遮掉的东西变了」）。
+// 这份清单是凭据形状的**唯一防线**，所以它需要的是身份断言，不是规模断言。
+test("credential shape list is pinned by identity, not by count", () => {
+  // ① 规模：少了要红
+  expect(TOKEN_PATTERNS).toHaveLength(5);
+  // ② 身份：换了也要红（把 sk- 换成 bearer、把 ghp_ 换成 gho_ 都会落在这里）
+  expect(TOKEN_PATTERNS.map((r) => r.source).sort()).toEqual([
+    "\\b(ghp_)[A-Za-z0-9]{20,}",
+    "\\b(github_pat_)[A-Za-z0-9_]{20,}",
+    "\\b(ntok_|utok_|atok_)[A-Za-z0-9_-]{6,}",
+    "\\b(sk-)[A-Za-z0-9_-]{16,}",
+    "\\b(xox[bpoars]-)[A-Za-z0-9-]{10,}",
+  ].sort());
+  // ③ 前提：每条都必须带一个捕获组（前缀要保留给人看），且必须是全局的（一次替换多处）
+  for (const re of TOKEN_PATTERNS) {
+    expect(re.global).toBe(true);
+    expect(re.source.includes("(")).toBe(true);
+  }
+});
 
 describe("#1459 ③ redact-at-read", () => {
   test("🔴 各种前缀形状都被遮住，且前缀保留（读者仍知道泄漏的是哪一类）", () => {

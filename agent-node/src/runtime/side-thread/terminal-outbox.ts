@@ -1,4 +1,5 @@
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { SideThreadTerminalEnvelope } from "./command-transport";
@@ -14,7 +15,7 @@ export class PrivateFileTerminalOutbox {
     }
     const tmp = `${path}.tmp.${process.pid}.${randomUUID()}`;
     writeFileSync(tmp, value, { flag: "wx", mode: 0o600 }); this.sync(tmp);
-    renameSync(tmp, path); chmodSync(path, 0o600); this.syncDir();
+    renameOverExistingSync(tmp, path); chmodSync(path, 0o600); this.syncDir();
   }
   list(): SideThreadTerminalEnvelope[] {
     return readdirSync(this.root).filter((x) => x.endsWith(".json")).sort().map((name) => {

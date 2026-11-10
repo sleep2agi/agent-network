@@ -110,7 +110,11 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
   });
   test("old events and duplicate consumption do not replay after enable or process reopen", async () => {
     await card(); const { scheduleId } = await atThree(), before = state(scheduleId); expect(poll(scheduleId)).toBe(false);
-    const child = Bun.spawn([process.execPath, "-e", `import {consumeRequirementWake} from './server/src/scheduled-requirement-wake.ts'; console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})}));`], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
+    // 2026-10-31 —— 绝对路径，不再用 `'./server/src/…'` + `cwd: process.cwd()`。
+    // 那种写法只在「从仓库根跑」时成立；从 `server/` 跑（scripts/run-server-tests.sh 就是这样）
+    // 子进程立刻退出 1，于是断言长期红着，而看起来像被测行为失败。断言不该顺带测 cwd。
+    const wakeTs = new URL("./scheduled-requirement-wake.ts", import.meta.url).pathname;
+    const child = Bun.spawn([process.execPath, "-e", `import {consumeRequirementWake} from ${JSON.stringify(wakeTs)}; console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})}));`], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", env: process.env });
     const output = await new Response(child.stdout).text(); expect(await child.exited).toBe(0);
     expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({ wake: false }); expect(state(scheduleId)).toEqual(before);
   });
@@ -144,7 +148,11 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
     expect(created.ok).toBe(true); const id = created.schedule.schedule_id;
     expect(created.schedule.schedule.requirement_wake.tag).toBe("ANet");
     expect((await mcp(nodes.b.token, "schedule_update", { schedule_id: id, schedule: { type: "interval", every_seconds: 180, requirement_wake: null } })).ok).toBe(false);
-    expect((await mcp(nodes.a.token, "schedule_batch_interval", { schedule_ids: [id], every_seconds: 180 })).ok).toBe(true);
+    const bi = await mcp(nodes.a.token, "schedule_batch_interval", { schedule_ids: [id], every_seconds: 180 });
+    // #3275 批次 4 —— 批量改间隔是**部分成功**语义：updated / failed / results 三个一起才有意义。
+    // 只断言 ok 时，「失败了几条」和「分别为什么」都拿不到 —— 而批量操作恰恰最需要这个。
+    expect(Object.keys(bi).sort()).toEqual(["failed", "ok", "results", "updated"]);
+    expect(bi.ok).toBe(true);
     expect(state(id).requirement_wake_json).toBeTruthy();
     expect((await mcp(nodes.a.token, "schedule_update", { schedule_id: id, name: "metadata" })).ok).toBe(true);
     expect(state(id).requirement_wake_json).toBeTruthy();
@@ -246,19 +254,36 @@ describe("#1279 authoritative scoped requirement-event wake over HTTP/MCP", () =
   });
   test("two independent SQLite processes consume the event once and persist one generation",async()=>{
     const {scheduleId}=await atThree();await card();const before=state(scheduleId), gate=`/tmp/wake1279-${crypto.randomUUID()}`;
-    const code=`import {consumeRequirementWake} from './server/src/scheduled-requirement-wake.ts'; import {existsSync} from 'node:fs'; console.log('READY'); while(!existsSync(${JSON.stringify(gate)}))await Bun.sleep(10); for(let i=0;;i++){try{console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})})); break;}catch(e){if(i>=4||!String(e).includes('locked'))throw e;await Bun.sleep(20);}}`;
+    // 同上：绝对路径（这条要测的是**两个进程抢同一个事件**，不是 cwd 解析）
+    const wakeTs2 = new URL("./scheduled-requirement-wake.ts", import.meta.url).pathname;
+    const code=`import {consumeRequirementWake} from ${JSON.stringify(wakeTs2)}; import {existsSync} from 'node:fs'; console.log('READY'); while(!existsSync(${JSON.stringify(gate)}))await Bun.sleep(10); for(let i=0;;i++){try{console.log(JSON.stringify({wake:consumeRequirementWake(${JSON.stringify(scheduleId)},${JSON.stringify(network)})})); break;}catch(e){if(i>=4||!String(e).includes('locked'))throw e;await Bun.sleep(20);}}`;
     const workers=[] as any[];
     // Initialize each adapter before releasing both against the same DB;
     // schema startup is not the race under qualification.
     for(let i=0;i<2;i++){
       const child=Bun.spawn([process.execPath,"-e",code],{cwd:process.cwd(),stdout:"pipe",stderr:"pipe",env:process.env});
+      // #1279: the child's stderr used to be piped and never read, so a worker that
+      // exited non-zero below left only "Received: 1" — no reason at all. Drain it in
+      // parallel and surface it when the exit code is not 0.
+      const errChunks:string[]=[];
+      const drain=(async()=>{const r=child.stderr.getReader();for(;;){const part=await r.read();if(part.done)break;errChunks.push(new TextDecoder().decode(part.value));}})();
       const reader=child.stdout.getReader();let start="";
       for(;;){const part=await reader.read();if(part.done)throw new Error('worker exited before ready');start+=new TextDecoder().decode(part.value);if(start.includes('READY'))break;}
-      workers.push({child,reader,start});
+      workers.push({child,reader,start,stderr:()=>errChunks.join(''),drain});
     }
     await Bun.write(gate,"go");const results=[];
-    for(const w of workers){let output=w.start;for(;;){const part=await w.reader.read();if(part.done)break;output+=new TextDecoder().decode(part.value);}expect(await w.child.exited).toBe(0);results.push(JSON.parse(output.trim().split("\n").at(-1)!).wake);}
+    for(const w of workers){let output=w.start;for(;;){const part=await w.reader.read();if(part.done)break;output+=new TextDecoder().decode(part.value);}
+      const code=await w.child.exited;await w.drain;
+      // Show the worker's own words on failure instead of a bare exit code.
+      expect({exit:code,stderr:w.stderr().trim().slice(0,800)}).toEqual({exit:0,stderr:""});
+      results.push(JSON.parse(output.trim().split("\n").at(-1)!).wake);}
     expect(results.sort()).toEqual([false,true]);expect(state(scheduleId).revision).toBe(before.revision+1);expect(poll(scheduleId)).toBe(false);
-  });
+  // #2198:显式预算。这条用例要起 2 个 Node 子进程、各自打开同一个磁盘 SQLite,
+  // 再用 /tmp 上的 gate 文件对齐起跑。默认 5s 在机器繁忙时会被打满,而**超时与断言
+  // 失败在报告里长得一样**(都只是一行 (fail)):实测 8 路并发 + 3× CPU 超订时,
+  // 11 轮里有 2 轮红,但每次红的都是 `timed out after 5000ms`,而 trues 恒为 1、
+  // revision 恒只 +1 —— 语义一直是对的,是预算不够。
+  // 这里只放宽**时间**,不放宽任何断言(仍然 [false,true]、仍然 revision+1、仍然 poll false)。
+  }, 30_000);
 
 });

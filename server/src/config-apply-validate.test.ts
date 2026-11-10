@@ -12,6 +12,10 @@ import {
   EDITABLE_CHANNELS,
   isAllowedToChangeFlag,
   computeApplyMode,
+  readOpencodeSnapshotFlags,
+  readConfigUpdateCapable,
+  configUpdateCapabilityDivergence,
+  readSystemdSupervision,
   validatePatch,
   narrowChannelsPatch,
 } from "./config-apply-validate";
@@ -179,6 +183,67 @@ describe("computeApplyMode — tier classifier (RFC-024 §4)", () => {
 
   test("mixed (hot + one restart flag) → restart", () => {
     expect(computeApplyMode(undefined, { maxTurns: 50, timeout: 60000 })).toBe("restart");
+  });
+});
+
+// #3146 —— 客户端「切模型不必重启」。agent-node 从 OpenCode V2 共存起就能
+// 在运行中的 TUI 会话里换模型，但 hub 把所有 `model` patch 一律判成
+// restart，于是客户端显示「重启中」而节点永远不会重启。
+describe("computeApplyMode — OpenCode V2 hot model switch (#3146)", () => {
+  const v2Copresence = {
+    runtime: "opencode-sdk",
+    opencodeGeneration: "v2" as const,
+    opencodeMode: "copresence",
+  };
+
+  test("model alone on an OpenCode V2 co-presence node → hot", () => {
+    expect(computeApplyMode("deepseek/deepseek-flash", {}, undefined, v2Copresence)).toBe("hot");
+  });
+
+  test("runtime spelling aliases all resolve to hot (opencode-cli / opencode / opencode-sdk)", () => {
+    for (const runtime of ["opencode-sdk", "opencode-cli", "opencode"]) {
+      expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, runtime })).toBe("hot");
+    }
+  });
+
+  test("model alone without opts keeps the pre-#3146 restart answer", () => {
+    expect(computeApplyMode("deepseek/deepseek-flash", {})).toBe("restart");
+  });
+
+  test("v1 node → restart (no live V2 session to switch)", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, opencodeGeneration: "v1" })).toBe("restart");
+  });
+
+  test("unknown generation → restart", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, opencodeGeneration: null })).toBe("restart");
+  });
+
+  test("headless V2 node → restart (no co-presence session to drive)", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, opencodeMode: "headless" })).toBe("restart");
+  });
+
+  test("non-OpenCode runtime → restart", () => {
+    expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, runtime: "codex-app-server-sdk" })).toBe("restart");
+  });
+
+  test("model + any flag → restart (mixed patch stays on the restart path)", () => {
+    expect(computeApplyMode("m", { maxTurns: 50 }, undefined, v2Copresence)).toBe("restart");
+    expect(computeApplyMode("m", { timeout: 60000 }, undefined, v2Copresence)).toBe("restart");
+  });
+
+  test("model + channels → restart", () => {
+    expect(computeApplyMode("m", {}, ["feishu"], v2Copresence)).toBe("restart");
+  });
+
+  test("readOpencodeSnapshotFlags parses text, object, and junk", () => {
+    expect(readOpencodeSnapshotFlags('{"flags":{"opencodeGeneration":"v2","opencodeMode":"copresence"}}'))
+      .toEqual({ opencodeGeneration: "v2", opencodeMode: "copresence" });
+    expect(readOpencodeSnapshotFlags({ flags: { opencodeGeneration: "v1" } }))
+      .toEqual({ opencodeGeneration: "v1", opencodeMode: null });
+    expect(readOpencodeSnapshotFlags("not json")).toEqual({ opencodeGeneration: null, opencodeMode: null });
+    expect(readOpencodeSnapshotFlags(null)).toEqual({ opencodeGeneration: null, opencodeMode: null });
+    expect(readOpencodeSnapshotFlags('{"flags":{"opencodeGeneration":"v9"}}'))
+      .toEqual({ opencodeGeneration: null, opencodeMode: null });
   });
 });
 
@@ -389,5 +454,86 @@ describe("Codex config flags (#815)", () => {
   test("codex flags on claude runtime rejected", () => {
     expect(validatePatch(undefined, { modelReasoningEffort: "low" }, undefined, "claude-agent-sdk")?.field)
       .toBe("flags.modelReasoningEffort");
+  });
+});
+
+// 裸起节点（无 supervisor）收到 restart-tier 变更会安静地死掉：
+// 写配置 → ack restarting → exit 75 → 没人拉起 → 更新判 timeout，
+// 而调用方只看到「超时」。这里锁住「把后果说在前面」的读法。
+describe("readConfigUpdateCapable", () => {
+  test("true / false / absent / junk", () => {
+    expect(readConfigUpdateCapable('{"config_update_capable":true}')).toBe(true);
+    expect(readConfigUpdateCapable('{"config_update_capable":false}')).toBe(false);
+    expect(readConfigUpdateCapable('{"model":"x"}')).toBeNull();
+    expect(readConfigUpdateCapable("not json")).toBeNull();
+    expect(readConfigUpdateCapable(null)).toBeNull();
+    // 非布尔一律 unknown，不能当成 false —— 否则会给没上报的节点发警告
+    expect(readConfigUpdateCapable('{"config_update_capable":"false"}')).toBeNull();
+  });
+});
+
+describe("readConfigUpdateCapable — restart_supervised 优先", () => {
+  test("prefers the named key when both are present", () => {
+    expect(readConfigUpdateCapable('{"restart_supervised":true,"config_update_capable":false}')).toBe(true);
+    expect(readConfigUpdateCapable('{"restart_supervised":false,"config_update_capable":true}')).toBe(false);
+  });
+  test("falls back to the legacy key for old nodes", () => {
+    expect(readConfigUpdateCapable('{"config_update_capable":true}')).toBe(true);
+  });
+  test("non-boolean named value falls through to legacy, then unknown", () => {
+    expect(readConfigUpdateCapable('{"restart_supervised":"true","config_update_capable":false}')).toBe(false);
+    expect(readConfigUpdateCapable('{"restart_supervised":"true"}')).toBeNull();
+  });
+});
+
+// 2026-10-31 —— 「被遮住的值」必须能被看见。
+// readConfigUpdateCapable 一旦选定 restart_supervised，config_update_capable 就再也读不到了；
+// 而「两个一致」与「有一个被遮住了」在调用方看来完全一样 —— 这是隐式回退的通用形状。
+describe("configUpdateCapabilityDivergence — 双写字段的分歧本身就是读数", () => {
+  test("reports both values when they disagree, in either direction", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true,"config_update_capable":false}'))
+      .toEqual({ named: true, legacy: false });
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":false,"config_update_capable":true}'))
+      .toEqual({ named: false, legacy: true });
+  });
+  test("stays quiet when they agree — that is the documented normal case", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true,"config_update_capable":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":false,"config_update_capable":false}')).toBeNull();
+  });
+  test("no divergence to report when only one field is present or shapes are unusable", () => {
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"config_update_capable":true}')).toBeNull();
+    expect(configUpdateCapabilityDivergence('{"restart_supervised":"true","config_update_capable":false}')).toBeNull();
+    expect(configUpdateCapabilityDivergence("")).toBeNull();
+    expect(configUpdateCapabilityDivergence("not json")).toBeNull();
+    expect(configUpdateCapabilityDivergence(null)).toBeNull();
+    expect(configUpdateCapabilityDivergence(undefined)).toBeNull();
+  });
+  test("accepts an already-parsed object (nodes may hand us either form)", () => {
+    expect(configUpdateCapabilityDivergence({ restart_supervised: true, config_update_capable: false }))
+      .toEqual({ named: true, legacy: false });
+  });
+});
+
+
+// 2026-10-31 —— #3168：节点自报的三态托管判定。
+// 「它说自己没人拉」与「它说有人拉」处置相反；而「不知道」两边都不能当。
+describe("readSystemdSupervision", () => {
+  test("reads the three declared states verbatim", () => {
+    expect(readSystemdSupervision(JSON.stringify({ systemd_supervision: "supervised" }))).toBe("supervised");
+    expect(readSystemdSupervision('{"systemd_supervision":"not_supervised"}')).toBe("not_supervised");
+    expect(readSystemdSupervision({ systemd_supervision: "unknown" })).toBe("unknown");
+  });
+
+  test("missing field ⇒ null, which is NOT the same as unknown", () => {
+    // 缺失 = 这一版还不会报（老节点）；unknown = 会报但这次判不出来。
+    expect(readSystemdSupervision('{"config_update_capable":false}')).toBeNull();
+    expect(readSystemdSupervision("")).toBeNull();
+    expect(readSystemdSupervision("not json")).toBeNull();
+  });
+
+  test("rejects values outside the declared set (a typo must not silently mean 'supervised')", () => {
+    expect(readSystemdSupervision('{"systemd_supervision":"yes"}')).toBeNull();
+    expect(readSystemdSupervision('{"systemd_supervision":true}')).toBeNull();
   });
 });

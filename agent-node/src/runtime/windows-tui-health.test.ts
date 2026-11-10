@@ -66,6 +66,41 @@ test("first attested native failure reports immediately", async () => {
   expect(reports[0].tui.reason).toBe("pane-dead");
 });
 
+/**
+ * #1285 — the fixture's birth query is a PowerShell spawn, and on a loaded Windows
+ * runner it can take longer than the 10 s it used to allow (2026-10-14: `ETIMEDOUT`
+ * in `spawnSync powershell.exe`, and 2026-10-24: the same test failed after 10.35 s).
+ *
+ * This is deliberately NOT "just raise the timeout":
+ *   * it measures the wall time and prints it when the query is slow, so the cost is
+ *     visible instead of silently eating the test's budget;
+ *   * it retries **once** on timeout, because a cold PowerShell start is the most
+ *     likely cause and a second attempt distinguishes "slow start" from "hung";
+ *   * if both attempts fail it throws an error naming the label, both elapsed times
+ *     and the underlying error — a fixture failure that says what happened instead of
+ *     a bare `ETIMEDOUT`.
+ *
+ * The assertions around the probe are unchanged; only the fixture's own query does.
+ */
+function birthTicks(pid: number, label: string): string {
+  const script = `[Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks`;
+  const attempts: string[] = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const started = Date.now();
+    try {
+      const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", timeout: 30_000 }).trim();
+      const elapsed = Date.now() - started;
+      if (elapsed > 5_000) console.warn(`[#1285] ${label} birth query took ${elapsed}ms (attempt ${attempt})`);
+      return out;
+    } catch (err: any) {
+      const elapsed = Date.now() - started;
+      attempts.push(`attempt ${attempt}: ${elapsed}ms, ${err?.code ?? err?.name ?? "error"}${err?.signal ? `, signal ${err.signal}` : ""}`);
+      if (attempt === 1) console.warn(`[#1285] ${label} birth query failed once (${elapsed}ms) — retrying`);
+    }
+  }
+  throw new Error(`[#1285] ${label} birth query failed after 2 attempts — ${attempts.join(" | ")}`);
+}
+
 describe.skipIf(process.platform !== "win32")("native Windows generation and TCP ownership", () => {
   test("owned connection, foreign client, different remote, birth mismatch, then exit", async () => {
     const server = createServer((socket) => socket.on("error", () => {}));
@@ -81,7 +116,7 @@ describe.skipIf(process.platform !== "win32")("native Windows generation and TCP
       const diag = windowsTuiDiagnosticsEnabled();
       let capturedBirth = "";
       const birthQuery = () => {
-        capturedBirth = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Diagnostics.Process]::GetProcessById(${child.pid}).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 10_000 }).trim();
+        capturedBirth = birthTicks(child.pid!, "child");
         return capturedBirth;
       };
       // Exactly one PowerShell invocation either way: the diagnostics call the
@@ -91,10 +126,19 @@ describe.skipIf(process.platform !== "win32")("native Windows generation and TCP
       const live = { ...identity, pid: child.pid!, creationDate, remote: `ws://127.0.0.1:${port}` };
       if (diag) console.error(`[diag-1321] ${describePreCheck(live)}`);
       const run = diag ? diagnosingRunPowerShell(runPowerShell) : undefined;
-      expect(await probeWindowsTuiHealth(live, run)).toEqual({ ok: true, reason: "running" });
+      // #1321 follow-up: the rich diagnostics above are opt-in (a repository
+      // Variable), so a CI failure used to leave only "+ Received + 1" — the
+      // received object truncated out of the diff. Print the probe result and the
+      // pre-check state **when it is not what we expect**, unconditionally. This
+      // adds output only on failure and changes no assertion.
+      const probed = await probeWindowsTuiHealth(live, run);
+      if (!(probed.ok === true && probed.reason === "running")) {
+        console.error(`[diag-1321] probe=${JSON.stringify(probed)} ${describePreCheck(live)}`);
+      }
+      expect(probed).toEqual({ ok: true, reason: "running" });
       let capturedSiblingBirth = "";
       const siblingQuery = () => {
-        capturedSiblingBirth = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Diagnostics.Process]::GetProcessById(${sibling.pid}).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 10_000 }).trim();
+        capturedSiblingBirth = birthTicks(sibling.pid!, "sibling");
         return capturedSiblingBirth;
       };
       const siblingBirth = diag ? (measureFixtureBirthQuery(siblingQuery), capturedSiblingBirth) : siblingQuery();

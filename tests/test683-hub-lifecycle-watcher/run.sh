@@ -87,16 +87,16 @@ cp server/src/task-lifecycle-watcher.ts /tmp/test683-watcher.ts
 
 echo "L6 mutation: remove write-once conflict gate"
 mutate_once server/src/task-lifecycle-watcher.ts \
-  '       ON CONFLICT(task_id, event_key) DO NOTHING' \
+  '     ON CONFLICT(task_id, event_key) DO NOTHING' \
   ''
 expect_red write-once-task-threshold /tmp/test683-mut-write-once.db
 cp /tmp/test683-watcher.ts server/src/task-lifecycle-watcher.ts
 
-echo "L7 mutation: move the first threshold past the exact 30s boundary"
+echo "L7 mutation: move the first threshold past its exact boundary"
 mutate_once server/src/task-lifecycle-watcher.ts \
-  'export const DELIVERED_STALE_THRESHOLDS = [30, 60] as const;' \
-  'export const DELIVERED_STALE_THRESHOLDS = [31, 60] as const;'
-expect_red exact-30-second-threshold /tmp/test683-mut-threshold.db
+  'export const DELIVERED_STALE_THRESHOLDS = [600, 1800] as const;' \
+  'export const DELIVERED_STALE_THRESHOLDS = [601, 1800] as const;'
+expect_red exact-10-minute-threshold /tmp/test683-mut-threshold.db
 cp /tmp/test683-watcher.ts server/src/task-lifecycle-watcher.ts
 
 echo "L8 mutation: allow acked tasks into the stale watcher"
@@ -107,9 +107,14 @@ expect_red delivered-status-only /tmp/test683-mut-status.db
 cp /tmp/test683-watcher.ts server/src/task-lifecycle-watcher.ts
 
 echo "L9 mutation: drop task network propagation"
+# #2571 —— SELECT 列表现在用 CASE 选事件名/文案（busy vs stale），原来的
+# `?1, ?1, 'patrol', ?2, network_id` 字面量不再存在。网络透传这条仍然要钉：
+# 锚点改成“最后一列 network_id 紧跟 FROM tasks”，替换成 NULL 时必须变红。
 mutate_once server/src/task-lifecycle-watcher.ts \
-  "SELECT task_id, 'delivered', 'delivered', ?1, ?1, 'patrol', ?2, network_id" \
-  "SELECT task_id, 'delivered', 'delivered', ?1, ?1, 'patrol', ?2, NULL"
+  "            network_id
+     FROM tasks" \
+  "            NULL
+     FROM tasks"
 expect_red network-propagation /tmp/test683-mut-network.db
 cp /tmp/test683-watcher.ts server/src/task-lifecycle-watcher.ts
 

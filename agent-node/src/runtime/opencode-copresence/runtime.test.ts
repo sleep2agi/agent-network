@@ -13,6 +13,7 @@ import {
 } from "./process-group";
 import {
   OPENCODE_COMMHUB_TOKEN_ENV,
+  OpenCodeCopresenceOwnerLeftError,
   OpenCodeCopresenceTimeoutError,
   openVettedOpenCodeCopresence,
   parseMessageReply,
@@ -35,6 +36,8 @@ if (command === "serve") {
   const port = Number(value("--port"));
   const statuses = {};
   const messages = {};
+  let statusPolls = 0;
+  let sessionLookupPolls = 0;
   const aborted = {};
   let lastResponse = null;
   const trace = (line) => { if (env.FAKE_LOG) require("fs").appendFileSync(env.FAKE_LOG, line + "\\n"); };
@@ -44,7 +47,23 @@ if (command === "serve") {
     const body = await new Promise((resolve) => { let s=""; req.on("data", c => s+=c); req.on("end", () => resolve(s)); });
     const json = body ? JSON.parse(body) : {};
     if (req.url === "/global/health") return send(res, { healthy:true, version:"1.18.34" });
-    if (req.url === "/session/status") return send(res, statuses);
+    if (req.url === "/session/status") {
+      statusPolls += 1;
+      const slowAt = Number(env.FAKE_STATUS_SLOW_POLL || 0);
+      const slowMs = Number(env.FAKE_STATUS_SLOW_MS || 0);
+      const errorAt = Number(env.FAKE_STATUS_ERROR_POLL || 0);
+      const malformedAt = Number(env.FAKE_STATUS_MALFORMED_POLL || 0);
+      const slowList = String(env.FAKE_STATUS_SLOW_POLLS || slowAt || "").split(",").filter(Boolean).map(Number);
+      if (slowList.includes(statusPolls) && slowMs > 0) await new Promise((r) => setTimeout(r, slowMs));
+      if (errorAt && statusPolls === errorAt) { res.writeHead(500); return res.end("status exploded"); }
+      if (malformedAt && statusPolls === malformedAt) return send(res, ["not", "a", "map"]);
+      const typelessAt = Number(env.FAKE_STATUS_TYPELESS_POLL || 0);
+      if (typelessAt && statusPolls === typelessAt) {
+        const onlyKey = Object.keys(statuses)[0] || "ses_test123";
+        return send(res, { [onlyKey]: {} });
+      }
+      return send(res, statuses);
+    }
     if (req.url === "/session" && req.method === "POST") {
       const id = "ses_test123";
       messages[id] = [];
@@ -55,6 +74,10 @@ if (command === "serve") {
     const sessionMatch = req.url.match(/^\\/session\\/(ses_[A-Za-z0-9]+)$/);
     if (sessionMatch && req.method === "GET") {
       if (env.FAKE_SESSION_LOOKUP_MISSING === "1" || !messages[sessionMatch[1]]) {
+        sessionLookupPolls += 1;
+        const slowAt = Number(env.FAKE_SESSION_LOOKUP_SLOW_POLL || 0);
+        const slowMs = Number(env.FAKE_SESSION_LOOKUP_SLOW_MS || 0);
+        if (slowAt && sessionLookupPolls === slowAt && slowMs > 0) await new Promise((r) => setTimeout(r, slowMs));
         res.writeHead(404); return res.end("session not found");
       }
       return send(res, { id:sessionMatch[1] });
@@ -669,7 +692,7 @@ describe("OpenCode native serve+attach copresence", () => {
 // FilePartSource[Text]). A completed turn with zero TextPart is a
 // canonical shape, not a bug.
 describe("OpenCode copresence task deadline", () => {
-  async function open(extraEnv: NodeJS.ProcessEnv) {
+  async function open(extraEnv: NodeJS.ProcessEnv, logSink?: (line: string) => void) {
     const f = fixture(extraEnv);
     const runtime = await openVettedOpenCodeCopresence({
       binary: f.binary,
@@ -678,6 +701,7 @@ describe("OpenCode copresence task deadline", () => {
       workDir: f.root,
       model: "opencode/fake",
       startupTimeoutMs: 5_000,
+      ...(logSink ? { log: logSink } : {}),
     });
     return { f, runtime };
   }
@@ -920,7 +944,11 @@ describe("OpenCode copresence task deadline", () => {
 
   test("admission timeout on a busy human session says the task was not submitted", async () => {
     const log = join(tmpdir(), `opencode-admission-${process.pid}-${Date.now()}.log`);
-    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000", FAKE_LOG: log });
+    // 2026-10-31 —— 抓 runtime 自己的日志行（不是 fake engine 的 FAKE_LOG）：
+    //   入口那行说「它来过」，admission-expired 那行说「它没排上、等了多久」。
+    //   只有前者时，「有进无出」的差值读不出来 —— 而那条正是运维唯一能反查的形状。
+    const runtimeLogs: string[] = [];
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000", FAKE_LOG: log }, (line) => runtimeLogs.push(line));
     try {
       let thrown: any;
       let busyNotes = 0;
@@ -939,12 +967,144 @@ describe("OpenCode copresence task deadline", () => {
       const trace = readFileSync(log, "utf8");
       expect(trace).not.toContain("ABORT");
       expect(trace).not.toMatch(/\/abort/);
+      // 2026-10-31 —— 入口行与结局行必须**成对**：只有 entry 时读不出「有进无出」。
+      expect(runtimeLogs.some((l) => l.includes("task accepted"))).toBe(true);
+      const expired = runtimeLogs.find((l) => l.includes("task admission-expired"));
+      expect(expired).toBeTruthy();
+      expect(expired).toContain("waited=");
+      expect(expired).toContain("cap=");
     } finally {
       await runtime.close();
       f.close();
       rmSync(log, { force: true });
     }
   }, 20_000);
+
+  // #3103 —— 排队（admission）只能吃掉自己的上限，不能吃掉回复预算。
+  // 现场：一条 30 分钟的任务若排队 29 分钟才提交，回复只剩 1 分钟，
+  // 于是「执行了但回复被撤」。这里把上限压到 400ms，总预算给 60s：
+  // 必须在 ~400ms 就明确报「排队没排上」，而不是等满 60s。
+  test("admission is capped so a busy TUI cannot eat the reply budget (#3103)", async () => {
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "5000" });
+    const previous = process.env.OPENCODE_ADMISSION_CAP_MS;
+    process.env.OPENCODE_ADMISSION_CAP_MS = "400";
+    try {
+      const started = Date.now();
+      let thrown: any;
+      try {
+        await runtime.submit("queued behind a long human turn", 60_000);
+      } catch (error) { thrown = error; }
+      const elapsed = Date.now() - started;
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      // The wording must report the cap it actually waited, not the 60s budget.
+      expect(thrown.timeoutMs).toBe(400);
+      expect(thrown.userReplyText).toContain("400ms");
+      expect(elapsed).toBeGreaterThanOrEqual(380);
+      // Proves the cap fired: with the whole budget it would have waited 60s.
+      expect(elapsed).toBeLessThan(10_000);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_ADMISSION_CAP_MS;
+      else process.env.OPENCODE_ADMISSION_CAP_MS = previous;
+      await runtime.close();
+      f.close();
+    }
+  }, 20_000);
+
+  // #1879 ③ —— 归属与终止：共享会话的负责人（TUI）离开后会话也没了时，
+  // 排队中的任务必须被**明确终止**（owner_left），而不是沉默地等满预算
+  // 再报一个泛泛的「会话忙」。终止理由要能点名是谁的那条任务。
+  test("the shared session owner left: the queued task is terminated with owner_left", async () => {
+    const { f, runtime } = await open({ FAKE_INITIAL_BUSY_MS: "800", FAKE_SESSION_LOOKUP_MISSING: "1" });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("queued for the owner", 20_000, "通信龙", undefined, { taskId: "5844f347" });
+      } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceOwnerLeftError);
+      expect(thrown.phase).toBe("owner_left");
+      expect(thrown.code).toBe("opencode_copresence_owner_left");
+      // 归属：终止的是谁的那条任务。
+      expect(thrown.owner.taskId).toBe("5844f347");
+      expect(thrown.owner.sender).toBe("通信龙");
+      expect(thrown.userReplyText).toContain("owner_left");
+      expect(thrown.userReplyText).toContain("5844f347");
+      expect(thrown.userReplyText).toContain("通信龙");
+      expect(thrown.userReplyText).not.toContain("共享会话忙");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 40_000);
+
+  // #2011 —— 「连续 404」必须是**连续**：中间夹一次 status 读取失败（500）时，
+  // 旧证据必须被清掉。否则 404 → 500 → 404×2 会凑够 3 次 + 2 秒，被误判成
+  // owner_left（负责人的会话其实一直只是那一刻查不到）。
+  test("#2011 a status 500 between 404s resets the consecutive-owner-left evidence", async () => {
+    const { f, runtime } = await open({
+      FAKE_SESSION_LOOKUP_MISSING: "1",
+      FAKE_STATUS_ERROR_POLL: "3",
+      FAKE_STATUS_SLOW_POLLS: "2,5",
+      FAKE_STATUS_SLOW_MS: "1300",
+    });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("interrupted by a status 500", 3_200, "通信龙", undefined, { taskId: "2011a" });
+      } catch (error) { thrown = error; }
+      // 修复后：这次中断重置了计数，剩余预算不够再凑满 3 次连续 404 → 只能是超时。
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      expect(thrown.code).not.toBe("opencode_copresence_owner_left");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 30_000);
+
+  // 记录存在但这台会话的值形状畸形（`{}`，没有 type）——既不是 idle 也不是 busy，
+  // 同样是「不是 404」的观测，必须重置（codex 4352468402）。
+  test("#2011 a typeless per-session state between 404s resets the consecutive-owner-left evidence", async () => {
+    const { f, runtime } = await open({
+      FAKE_SESSION_LOOKUP_MISSING: "1",
+      FAKE_STATUS_TYPELESS_POLL: "3",
+      FAKE_STATUS_SLOW_POLLS: "2,5",
+      FAKE_STATUS_SLOW_MS: "1300",
+    });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("interrupted by a typeless record", 3_200, "通信龙", undefined, { taskId: "2011c" });
+      } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.code).not.toBe("opencode_copresence_owner_left");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 30_000);
+
+  // 畸形 status（数组而不是 map）同样是「不是 404」的观测，必须重置。
+  test("#2011 a malformed status map between 404s resets the consecutive-owner-left evidence", async () => {
+    const { f, runtime } = await open({
+      FAKE_SESSION_LOOKUP_MISSING: "1",
+      FAKE_STATUS_MALFORMED_POLL: "3",
+      FAKE_STATUS_SLOW_POLLS: "2,5",
+      FAKE_STATUS_SLOW_MS: "1300",
+    });
+    try {
+      let thrown: any;
+      try {
+        await runtime.submit("interrupted by a malformed status map", 3_200, "通信龙", undefined, { taskId: "2011b" });
+      } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(OpenCodeCopresenceTimeoutError);
+      expect(thrown.phase).toBe("admission");
+      expect(thrown.code).not.toBe("opencode_copresence_owner_left");
+    } finally {
+      await runtime.close();
+      f.close();
+    }
+  }, 30_000);
 
   test("0 disables the deadline: a turn longer than any fetch budget still returns its reply", async () => {
     const { f, runtime } = await open({ FAKE_TURN_MS: "1200", FAKE_INITIAL_BUSY_MS: "300" });
@@ -1051,6 +1211,11 @@ const REAL_NODE_PROBE = (() => {
   try {
     const info = JSON.parse(probe.stdout.trim());
     if (info.bun) return { ok: false, why: `\`node\` on PATH is Bun posing as Node ${info.version}` };
+    // 2026-10-31 —— 还要有 undici 本体。它是 package.json 的依赖，但本机 agent-node/node_modules
+    // 常常是部分安装（实测这里没有 undici）⇒ 用例会红在 `expect(existsSync(undiciEntry))` 上，
+    // 而红的样子和「回归」一模一样。判据取「文件在不在」，与 /opt/x 那条同一处理：跳过并打理由。
+    const undiciEntry = join(import.meta.dir, "..", "..", "..", "node_modules", "undici", "index.js");
+    if (!existsSync(undiciEntry)) return { ok: false, why: `undici is not installed (${undiciEntry})` };
     return { ok: true, why: `node ${info.version}` };
   } catch {
     return { ok: false, why: `unreadable \`node\` probe output: ${probe.stdout}` };

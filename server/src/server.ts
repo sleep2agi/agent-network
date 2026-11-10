@@ -1,3 +1,7 @@
+import { existsSync, statfsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { buildServeErrorResponse } from "./serve-error.js";
 import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
@@ -12,6 +16,8 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
+import { activeBinding, createdDaemon } from "./node-daemon-bindings.js";
+import { countInFlightTasks } from "./node-in-flight-tasks.js";
 import { addManualMember, canManageGroup, createDepartmentGroup, getDepartmentGroup, groupById, groupTx, groupViewerCan, isGroupMember, listGroupMembers, listVisibleGroups, readGroup, removeManualMember, renameGroup, syncDepartmentGroups } from "./department-groups.js";
 import { DEPARTMENT_SCOPE_DENIED, departmentLeaders, departmentSubtree, headScope, listDepartmentProjectGrants, managedDepartmentIds, membersIn, replaceDepartmentProjectGrants } from "./department-heads.js";
 import { redactMessageRow } from "./redact-tokens.js";
@@ -23,15 +29,23 @@ import { normalizeSessionRuntime } from "./runtime-label.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
 import { registerTools } from "./tools.js";
-import { db, logTaskEvent, logAudit, syncScheduledRunForTask } from "./db.js";
+import { db, logTaskEvent, logAudit, syncScheduledRunForTask, runDeferredBootBackfills } from "./db.js";
+import { ensureNetworkRulesOnce, readNetworkRules, writeNetworkRules } from "./network-rules.js";
+import { deriveTeamRulesView } from "./team-rules-status.js";
 import { recentNodeIdentityConflicts } from "./node-identity-conflict.js";
 import { createSSEStream, createNetworkObserverStream, createUserEventStream, pushEvent, pushNetworkObserverEvent, getSSEStats, PRINTABLE_OBSERVER_KEY_PREFIX, closeUserStreamsInNetwork, getUserPresence, onUserPresenceChange, pushUserEventToNetwork } from "./push.js";
+import { enterMcpInflight, leaveMcpInflight, getMcpInflightStats } from "./mcp-inflight.js";
+import { eventLoopStats, startEventLoopLagMonitor } from "./event-loop-lag.js";
+import { aliasBaselineRefreshState, refreshAliasBaseline } from "./alias-baseline.js";
+import { broadcastRecentState, enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
+import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
 import { flagOrphanTasks } from "./task-orphan.js";
-import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { addAgentNetworkScope, addHumanNetworkScope, addNetworkScope, addOwnTrafficScope, addAgentTimelineScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, canRestWriteNodeSecurity, getUserNetworkIds, resolveRestNetworkScope, resolveRestWriteNetworkId, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
+import { withBusyElapsed } from "./scheduled-failure-code.js";
 import { pickAliasNetwork } from "./rest-alias-network-fallback.js";
 import { lifecycleProjections, lifecycleRequestResponse } from "./node-lifecycle-read.js";
 import { listAdoptionCandidates, snapshotReportsAdoptionDiscovery } from "./adoption-candidates.js";
@@ -39,7 +53,7 @@ import { restrictedMemberSeesFile, restrictedMemberAttachmentsDenied } from "./r
 import { dmParticipantSeesFile, listDmThread, listDmThreads, sendHumanDm } from "./human-dm.js";
 import { groupMemberSeesFile, groupUnreadFor, listGroupMessages, listGroupThreads, markGroupRead, memberGroup, sendGroupMessage } from "./group-messages.js";
 import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, newMemberTaskAccess } from "./task-access.js";
-import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup } from "./agent-access.js";
+import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup, listDepartmentGrants, departmentCoverage } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, humanOnlyVerdict, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
 import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
@@ -70,7 +84,12 @@ import {
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, unlinkSync, renameSync } from "fs";
 import { dirname as pathDirname, join as pathJoin } from "path";
 import { startRetentionSweeper } from "./retention.js";
+import { sweepEmptyNodeRows } from "./empty-node-sweeper.js";
+import { versionStats } from "./version-stats.js";
 import { startStaleSessionSweeper } from "./stale-sweeper.js";
+import { scanNodeFailureAlerts, scanModelAuthBlockedNodes } from "./node-failure-alert.js";
+import { scanStarvedSchedules } from "./schedule-starved.js";
+import { scanNodeBusyCircuit } from "./node-serviceability.js";
 import {
   AUDIT_LOG_REST_SELECT,
   COMPLETION_REST_SELECT,
@@ -86,18 +105,31 @@ import { diagnoseTask } from "./task-diagnostic.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
-import { handleRequirementsRequest } from "./requirements.js";
-import { readHubProviders } from "./hub-provider-config.js";
+import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
+import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
+import { readLastConfigUpdate } from "./node-config-last-update.js";
+import { readTokenUsage, tokenUsageCoverage } from "./node-token-usage.js";
+import { readBuildInfo } from "./build-info.js";
+import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
+import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
+import { createNodeSessionControlRelay } from "./node-session-control.js";
+import { createSessionSourceTransport } from "./session-source-transport.js";
 import { recordDeliveredStaleEvents } from "./task-lifecycle-watcher.js";
 import { SIDE_THREAD_FEATURE_FLAG, SideThreadCoordinator, SideThreadPortRegistry, SideThreadStore, type SideThreadActor, type SideThreadAttachmentRef, type SideThreadExecutionPort } from "./side-thread.js";
 import { handleSideThreadHttpRequest } from "./side-thread-http.js";
 import { createProductionSideThreadTransport } from "./side-thread-production.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { logTaskRejection } from "./task-rejection-log.js";
+import { taskRejectionCounters } from "./rejection-counters.js";
+import { neverConsumedExpiryCounters, noteNeverConsumedExpiry, neverConsumeGate, persistentNeverConsumedExpiries } from "./expiry-counters.js";
+import { parentInferCounters } from "./parent-infer.js";
+import { authAbuseSnapshot, noteLoginIpRateLimited, noteLoginLocked, noteRegisterRateLimited } from "./auth-abuse-counters.js";
+import { legacyLicenseField, licenseStateOf } from "./license-state.js";
+import { AVATAR_FIELD, avatarUrl, inspectAvatarImage, isMultipart, isValidAvatarVersion, MAX_AVATAR_BYTES, MAX_AVATAR_STORAGE_BYTES } from "./user-avatar-image.js";
 
 const PORT = resolvePort(process.env.PORT);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -110,7 +142,7 @@ const SECURITY_LABEL = DEV_OPEN ? "⚠️ DEV OPEN MODE" : "🔒 secured";
 const TMUX_ALLOWLIST = new Set(
   (process.env.COMMHUB_TMUX_ALLOWLIST || "")
     .split(",")
-    .map((s) => s.trim())
+    .map((s) => normalizeRequestIp(s))
     .filter(Boolean)
 );
 let masterTokenDeprecationLogged = false;
@@ -141,14 +173,43 @@ const MCP_LABEL_MAX_BYTES = 1024 * 1024;
 // Read version from package.json so banners and /health stay in sync.
 // ANET_EMBEDDED_COMMHUB_VERSION is set only by the standalone anet binary
 // (bin/anet-bin.ts). npm/bunx leaves it unset and keeps the disk read.
-const SERVER_VERSION = (() => {
-  const embedded = process.env.ANET_EMBEDDED_COMMHUB_VERSION?.trim() ?? "";
-  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embedded)) return embedded;
+/**
+ * 2026-10-31 —— **有覆盖、零仲裁**（外部复核 (d)：
+ * 「`versionSource`/`versionEnvIgnored` 在本仓库 0 命中 ⇒ `version` 是『有覆盖、零仲裁』的缺陷形态」）。
+ *
+ * 这个值有两个可能来源（standalone 二进制注入的 env / 磁盘 package.json），
+ * 而 `/health` 只报结果、不报**谁赢了**。后果：
+ *   · 有人改了 package.json 却发现线上版本没变（被 env 覆盖）
+ *   · 或以为在用二进制内嵌版本，其实是磁盘那个
+ * 两个方向都只能靠猜。⇒ 现在把来源作为字段一起给出。
+ */
+// 2026-10-31 —— 外部复核：「diagnosticIdValid 失败时**静默丢键** ⇒ id_absent 与 id_malformed
+// 不可区分。」同一形状在本字段上：原来 unknown 同时表示「读失败」与「读到空」，
+// 而两者的下一步完全不同（查文件权限 vs 修 package.json）。
+// ⇒ 拆成两个值，不新增字段：**两个成因就不是一个取值**。
+export type VersionSource = "embedded_env" | "package_json" | "read_failed" | "empty_value";
+export function resolveServerVersion(
+  embeddedRaw: string | undefined,
+  readPackageVersion: () => string,
+): { version: string; source: VersionSource } {
+  const embedded = (embeddedRaw ?? "").trim();
+  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embedded)) {
+    return { version: embedded, source: "embedded_env" };
+  }
   try {
-    const url = new URL("../package.json", import.meta.url);
-    return JSON.parse(require("fs").readFileSync(url, "utf8")).version || "?";
-  } catch { return "?"; }
-})();
+    const v = readPackageVersion();
+    if (v && v !== "?") return { version: v, source: "package_json" };
+    return { version: "?", source: "empty_value" };
+  } catch {
+    return { version: "?", source: "read_failed" };
+  }
+}
+const RESOLVED_VERSION = resolveServerVersion(process.env.ANET_EMBEDDED_COMMHUB_VERSION, () => {
+  const url = new URL("../package.json", import.meta.url);
+  return JSON.parse(require("fs").readFileSync(url, "utf8")).version || "?";
+});
+const SERVER_VERSION = RESOLVED_VERSION.version;
+const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 
 // Feature flags advertised on /health (see the /health handler). Exported for tests.
 // node_permission_mode(#489):节点有 permission_mode、GET /api/nodes 每行带 viewer_can.permission_mode,
@@ -296,6 +357,27 @@ function streamOwnerNodeId(alias: string, networkId: string): string | null {
   return rows.length === 1 ? rows[0].node_id : null;
 }
 
+/**
+ * 2026-10-31 —— 把 IPv4-mapped IPv6 折回 IPv4：`::ffff:1.2.3.4` ⇒ `1.2.3.4`。
+ *
+ * 为什么必须折：allowlist 是人手写的（通常写 IPv4），而 socket 地址在双栈监听下
+ * 常常是 `::ffff:` 形式 ⇒ 同一台机器在两个字符串下被判成两回事。
+ * 这属于「两个生产者、不同字符串」那一族：判据一样，字面不同 ⇒ 永远不相等。
+ * 方向是**少给**（不匹配 ⇒ 拒绝），所以它是 fail-closed 的静默锁死，而不是越权。
+ */
+export function normalizeRequestIp(ip: string): string {
+  const s = (ip || "").trim().toLowerCase();
+  const m = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(s);
+  return m ? m[1] : s;
+}
+
+/** 允许清单判定（纯函数，供测试直接钉方向）：空清单 = 只允许本机。 */
+export function ipAllowedBy(ip: string, allowlist: ReadonlySet<string>): boolean {
+  const n = normalizeRequestIp(ip);
+  if (isLocalhostIP(n) || isLocalhostIP((ip || "").trim().toLowerCase())) return true;
+  return allowlist.has(n);
+}
+
 function isLocalhostIP(ip: string): boolean {
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip === "localhost";
 }
@@ -306,7 +388,7 @@ function isLocalhostIP(ip: string): boolean {
 const normalizeRuntime = normalizeSessionRuntime;
 
 function isTmuxAllowedIP(ip: string): boolean {
-  return isLocalhostIP(ip) || TMUX_ALLOWLIST.has(ip);
+  return ipAllowedBy(ip, TMUX_ALLOWLIST);
 }
 
 // 节点令牌(ntok_ / 邀请码令牌,api_tokens.network_id 非空)是一个节点在一个网络里的身份。
@@ -386,6 +468,9 @@ function countNetworkUploads(networkId: string): number {
 }
 
 // RFC-041(#487):节点令牌的一次 REST 写 / 订阅先按 node-permissions.ts 判。用户令牌 → null(不判)。
+/** #2969 续 —— 会被 REST 写白名单检查的方法。GET / HEAD / OPTIONS 永远不在此列。 */
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 function restNodeDenied(req: Request, restAuth: { networkId: string | null; tokenId: string | null } | null, route: string, verdictOf: (id: NodeIdentity) => Verdict): Response | null {
   if (!restAuth?.networkId) return null;
   const id = nodeIdentity(restAuth.tokenId, restAuth.networkId);
@@ -842,11 +927,17 @@ const TaskSchema = z.object({
   force: z.boolean().optional(),
 });
 
-/** #460 — `{ degraded: [{ layer, label, reason }] }` when the node's fresh health says a layer is down, else `{}`. */
-function degradedField(networkId: string | null | undefined, alias: string): { degraded?: Array<{ layer: string; label: string; reason: string }> } {
+/**
+ * #460 — `{ degraded: [{ layer, label, reason, origin }] }` when the node's fresh health says a layer is down, else `{}`.
+ *
+ * `origin` 必带（2026-10-31）：`reason` 有两个生产者 —— 节点上报的摘要，与 Hub 合成的
+ * `"unreachable"`。少了这一格，「节点说自己不可达」与「Hub 问不到节点」在响应里同形，
+ * 而上游可以原样声明那个字面量，所以改名或拆 catch 都不构成判别力。
+ */
+function degradedField(networkId: string | null | undefined, alias: string): { degraded?: Array<{ layer: string; label: string; reason: string; origin: "node" | "hub" }> } {
   const h = readNodeHealth(networkId ?? "default", alias);
   const layers = degradedLayers(h?.health);
-  return layers.length ? { degraded: layers.map(l => ({ layer: l.layer, label: l.label, reason: l.reason })) } : {};
+  return layers.length ? { degraded: layers.map(l => ({ layer: l.layer, label: l.label, reason: l.reason, origin: l.origin })) } : {};
 }
 
 const BroadcastSchema = z.object({
@@ -856,9 +947,78 @@ const BroadcastSchema = z.object({
 });
 
 // ── HTTP Server (Bun native) ────────────────────────
-const CORS_ORIGINS = process.env.COMMHUB_CORS_ORIGINS
-  ? process.env.COMMHUB_CORS_ORIGINS.split(",").map((s) => s.trim())
-  : ["http://localhost:3000", "http://localhost:3001"];
+/**
+ * 2026-10-31 —— **「设了空」与「没设」是两件事**。
+ *
+ *   `if (process.env.X)` 把两者都判假：于是 `COMMHUB_CORS_ORIGINS=`（运维想「一个都不许」）
+ *   会悄悄回退到 localhost 默认值 —— 而那是**更松**的一侧。
+ *   `'X' in process.env` 才区分得开。
+ *
+ * ⇒ 口径：未设 ⇒ 开发默认（localhost 两个端口）；设了但为空 ⇒ **空清单**（谁都不许）。
+ *   这是「空必须落在更严的一侧」在本字段上的具体落点：
+ *   这个字段的**最松值**不是空，而是 `*`；所以空不能被读成「用默认」。
+ */
+/**
+ * 2026-10-31 —— **Origin 必须「解析后比较」，不能「字符串比较」**
+ * （外部复核 ①：`https://host` 与 `https://host:443` 在字符串上不等，在 origin 上相等；
+ *  若按字符串比，那一批用户全部被 CORS 挡掉，而他们的地址栏看起来完全正常）。
+ *
+ * `new URL(x).origin` 做的正是规范化：主机小写、**丢弃默认端口**、去掉尾斜杠与路径。
+ * 非 http(s) 或解析失败的条目返回空串（= 丢弃）——
+ * 因为「一条永远匹配不上的清单项」与「没有这一项」在行为上相同，
+ * 而前者会让运维以为已经放行了。
+ */
+export function normalizeOrigin(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+    return u.origin;
+  } catch {
+    return "";
+  }
+}
+
+export function parseCorsOrigins(raw: string | undefined): string[] {
+  if (raw === undefined) return ["http://localhost:3000", "http://localhost:3001"];
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const norm = normalizeOrigin(part);
+    if (norm && !out.includes(norm)) out.push(norm); // 空串 / 全逗号 / 非法 ⇒ 空清单（更严）
+  }
+  return out;
+}
+
+/**
+ * 2026-10-31 —— **「解除武装」不等于「修好」**（外部复核：
+ * 「『断掉』和『修好』都是正确的下一步，但它们解决的不是同一个问题」）。
+ *
+ * 现在非法条目会被**丢弃**（等于不放行）——那是解除武装：更安全，但**配置仍然是错的**，
+ * 而且没有任何信号，运维只会看到「前端突然 CORS 不过」。
+ * ⇒ 启动时直接拒绝：非法条目 = 配错了，别让它带着错的清单跑起来。
+ * （生产未设置这个变量，走 localhost 默认，不受影响。）
+ */
+export function assertCorsOrigins(raw: string | undefined): void {
+  if (raw === undefined) return;
+  const bad: string[] = [];
+  for (const part of raw.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (!normalizeOrigin(trimmed)) bad.push(trimmed);
+  }
+  if (bad.length) {
+    throw new Error(
+      `COMMHUB_CORS_ORIGINS 里有 ${bad.length} 个条目不是 http(s) origin：${bad.join(", ")}\n` +
+      "  ⇒ 它们会被丢弃（等于不放行）。配错了就别起服务：改成 https://host[:port] 的形式再启动。",
+    );
+  }
+}
+const CORS_ORIGINS = (() => {
+  const raw = "COMMHUB_CORS_ORIGINS" in process.env ? (process.env.COMMHUB_CORS_ORIGINS ?? "") : undefined;
+  assertCorsOrigins(raw);
+  return parseCorsOrigins(raw);
+})();
 
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
@@ -866,7 +1026,10 @@ function corsHeaders(req: Request): Record<string, string> {
   // Default (env unset) allows localhost dev origins only — see CORS_ORIGINS above.
   // No author-specific domains are hardcoded; production deployments must set
   // COMMHUB_CORS_ORIGINS explicitly. See docs/concepts/security.md "CORS 配置".
-  const allowed = CORS_ORIGINS.includes(origin) ? origin : "";
+  // 比较的是**规范化后的 origin**，回写给浏览器的也是规范化后的值。
+  // （回写原始字符串会让「带默认端口」的请求拿到一个与自身不符的 allow-origin。）
+  const normalized = normalizeOrigin(origin);
+  const allowed = normalized && CORS_ORIGINS.includes(normalized) ? normalized : "";
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -875,11 +1038,830 @@ function corsHeaders(req: Request): Record<string, string> {
   };
 }
 
+/**
+ * 2026-10-31 —— `/health` 的**匿名投影白名单**。
+ *
+ * 🔴 为什么是白名单而不是「逐个字段加鉴权门」：
+ *    原来的默认值是「加到 body 就自动匿名可见」，于是每加一个字段都要**记得**收进鉴权门。
+ *    而今晚我加了四次字段，四次都没想到 —— 因为**默认值不要求你想**。
+ *    ⇒ 改成：全量字段默认属于**鉴权投影**；匿名投影只给这里显式列出的键。
+ *    ⇒ 于是「忘了想」的结果是**少给**，不是泄露。
+ *
+ * 判据：安全相关的默认值必须落在「少给」那一侧。
+ *
+ * 加新字段时的三问（缺第二问就等于没问）：
+ *   ① 谁能读（匿名 / 鉴权 / 内部）
+ *   ② 知道它之后，读者能做什么以前做不到的事
+ *   ③ 默认投哪一档（答案是「鉴权」，除非在这里显式加一行）
+ */
+export const PUBLIC_HEALTH_KEYS: ReadonlySet<string> = new Set([
+  // 存活/版本：外部 watchdog 与运维只靠这些判断「活没活」
+  "ok", "status", "status_reasons", "version", "version_source", "version_role", "api_version", "transport", "uptime", "startedAt",
+  // 规模与健康度聚合（不含拓扑明细）
+  "sessions_count", "sse_connections", "mcp_inflight", "mcp_inflight_peak",
+  // #3271 —— 「到死没被取走」的**总数**（聚合，不含 by_node：节点名是拓扑）。
+  // 配 counters_since 一起读：只有总数时，「进程刚重启」与「一次都没发生」同值。
+  "task_expiries_never_consumed_total", "counters_since",
+  // 同一个理由：拒绝次数的**总数**是规模读数；by_reason 的明细留在鉴权投影。
+  "task_rejections_total",
+  // 事件循环停顿是**一个对象**（event_loop: {max_gap_ms, recent_stalls,…}），
+  // 不是我原先以为的三个顶层键 —— 死条目测试当场抓到了这一点。
+  "event_loop",
+  // 访问模式与安全档位（不含任何凭据/路径）
+  "auth", "security", "tmux", "v3_auth", "multi_network",
+  // 授权类型只需要「是什么」，不需要行内容
+  "license", "license_state",
+  // 容量与能力位（dashboard 上传代理要在开流前读）
+  "limits", "capabilities",
+  // 探针回显：只有带 X-Probe-Nonce 时才出现，本身不含敏感信息
+  "probe_nonce", "served_at",
+  // 值得匿名披露的「有没有」，不是「是什么」
+  "build_identified",
+]);
+
+/**
+ * 2026-10-31 —— **三分类必须是字段上的标签，不是一张文档里的表。**
+ *
+ * 原来「凭证类要慎给」只写在注释里 ⇒ 下一个人加 requestId 时，他看到的是「一个无害的字符串」。
+ * ⇒ 现在每个字段**必填**一档，且匿名暴露的合法性由这一档决定：
+ *
+ *   landmark   告诉你「精确在哪」（进程身份 / 提交 / 启动时刻 / 自报与内核是否打架）
+ *              ⇒ 一律不进匿名响应
+ *   gauge      聚合量或粗标签（计数、档位、能力位）
+ *              ⇒ **可以**匿名，但必须写清聚合到什么粒度
+ *   credential 用途是「与内部对上账」的值
+ *              ⇒ 不进匿名响应，**除非**它是请求方自己带来的（caller_supplied）
+ *                 因为那时它不构成「读者本来拿不到的信息」
+ *
+ * 🔴 判据（来自复核）：
+ *    · 凭证类的判据不是「可不可预测」，而是「拿到它与内部对上账能做什么」——
+ *      随机 uuid 的 trace id 也一样可关联 ⇒ 随机性解决伪造，解决不了关联。
+ *    · **一个分类只有在它成为字段上的必填标签时才可检查**；写在文档里的分类，只是写给愿意读的人。
+ */
+export type HealthFieldClass = "landmark" | "gauge" | "credential";
+
+/**
+ * 2026-10-31 —— gauge 的**粒度词表改成封闭枚举**，而且必须区分
+ * **电平（level）** 与 **累积（cumulative）**。
+ *
+ * 起因：一次复核里同一个文件四行四种语义，而其中一行（`under_oom`）是**电平**，
+ * 被当成计数器用 ⇒「用它判断有没有 OOM 过」恒为否 —— 一个结构上必然为否的读数。
+ *
+ * ⇒ 一个电平不能算速率；一个累积不能算「现在怎么样」。
+ *   两者在 JSON 里都是数字，**只有字段名或元数据能把它们分开**。
+ */
+export type HealthGranularity =
+  | "level"       // 读的那一刻的值（会上下波动）
+  | "cumulative"  // 自某个起点累计（只增；起点必须另有字段）
+  | "instant"     // 某个时刻戳
+  | "label"       // 枚举/字符串（描述性：可以为常量）
+  | "boolean"
+  /**
+   * 2026-10-31 —— **verdict：一个关于对错的判定**。
+   *
+   * 与 label 的差别只有一条，但它是致命的：
+   *   label   是描述（"streamable-http"），为常量无害 —— 它回答「这是什么」
+   *   verdict 是判定（"ok"/"degraded"），若另一支不可观测，它就不是判定而是装饰
+   *
+   * 起因：一次复核提出给 /health 加 `ptyWsAttached`，而 attach 在 listen 回调里
+   * **无条件**执行 ⇒ true 恒成立、false 不可观测 ⇒ 这个字段永远只有一个读数。
+   * ⇒ 判据：一个判定的另一支若在当前部署形态下不可达，这个字段就没有判别力。
+   *   verdict 档必须写 `verdict_other_branch`（怎么让它响），写不出即为缺口。
+   */
+  | "verdict";
+
+export interface HealthFieldMeta {
+  class: HealthFieldClass;
+  /**
+   * granularity: "verdict" 必填 —— **另一支怎么才能读到**。
+   * 写不出「怎么让它响」就说明这个判定只会有一种取值。
+   */
+  verdict_other_branch?: string;
+  /**
+   * 2026-10-31 —— **仲裁字段**（外部复核那条「每个问题一个权威字段 + 一个仲裁字段」）。
+   *
+   * 一个 verdict 只说结论，不解释结论怎么来的；当它被判错时，读者需要第二个字段去仲裁。
+   * 例如 `status` 被读成 "ok"，到底是「真的没问题」还是「检查没跑」—— 只有 `status_reasons` 能回答。
+   * ⇒ verdict 类字段必须声明仲裁字段；测试断言它真的在载荷里（存在即可，可为 null）。
+   */
+  arbiter?: string;
+  /**
+   * 2026-10-31 —— **身份三分类**（外部复核那条：产物属性 / 调用属性 / 声明）。
+   *
+   *   artifact     换调用方式不变（例：产物里注入的 commit）⇒ 它是「运行的是什么」的权威
+   *   call         换 cwd / 命令行就变（例：运行时读 RELEASE_COMMIT）⇒ 它描述「怎么被启动的」
+   *   declaration  写它的人影响不了它在跑什么（例：version）⇒ 它是标签，不是事实
+   * ⇒ 三类混在一起且不标注，就是「六个身份」的根。
+   * 每个问题**恰好一个** artifact 类权威；若存在 call 类覆盖，必须能被看出来（root_kind）。
+   */
+  identity_class?: "artifact" | "call" | "declaration";
+  /**
+   * 单向字段必填 —— 另一支**在任何部署里都不会出现**的原因。
+   * 与 verdict_other_branch 是同一件事的两面：
+   *   前者答「我没有实现那一支」，后者答「我实现了，但你要怎样才看得到」。
+   */
+  constant_by_design?: string;
+  /** gauge 必填：粒度（封闭枚举，见 HealthGranularity） */
+  granularity?: HealthGranularity;
+  /** credential 专用：该值由请求方带来（回显），因此不构成额外泄露 */
+  caller_supplied?: true;
+  /**
+   * 2026-10-31 —— credential 类的**可对账性**，把「读法之争」变成取值。
+   *
+   *   echo_only        值由请求方带来，服务端只是回显 ⇒ 不构成读者本来拿不到的信息
+   *   server_generated 由我们生成/持有 ⇒ 拿到它就能与内部对上账 ⇒ **永不可匿名**
+   *
+   * 原来的做法是在注释里写「若按最严读法……」——那是把决定权交给读法。
+   * 现在两种读法都是字段的取值，谁要严就断言 joinability !== "echo_only" 不许进匿名。
+   */
+  joinability?: "echo_only" | "server_generated";
+  /**
+   * 2026-10-31 —— 是不是**启动快照**（启动时刻定值、之后不再变）。
+   *
+   * 这一类字段有一个单向盲区：它们只会**漏报**，不会误报——
+   *   读初始快照的判据把「后来才有的」读成「从来没有」，
+   *   而结果与「真的没有」在读数上完全一致。
+   * ⇒ 所以分类必须写出**谁不算**：`served_at` 长得一模一样，而它的全部价值在于会变。
+   *   只写「什么算」的分类，对形似字段没有抵抗力。
+   */
+  frozen_at_boot?: true;
+  /**
+   * 2026-10-31 —— **分类必须带窗口**（外部复核 (e)：「六分类不决定『变不变』，
+   * 还缺『窗口』这一参数；`startedAt` 属 instance 却会在 failover 时变，
+   * 处理应分三态 pinned / excluded / allowed，而不是混进白名单」）。
+   *
+   * 「这个字段是常量」不是一句可以单独成立的话——它总得回答「在多长的时间里」。
+   * 本仓的取值：
+   *   request —— 同一次请求内不变（例如聚合出来的标签）
+   *   process —— 同一个进程内不变（startedAt / pid / boot_id / git_commit）；
+   *              **跨进程会变**（重启 / failover / 换制品），所以它不能用来做实例身份
+   *   deploy  —— 跨进程也不变（例如 version_source 的取值域）
+   * ⇒ 一个分类不写窗口，就无法被证伪：读一次相同与读一年相同，在断言上同形。
+   */
+  stable_within?: "request" | "process" | "deploy";
+  /**
+   * 2026-10-31 —— **凡是差值字段，必须同时给出两个端点的原始值**
+   * （外部复核：「任何 `a − b` 都会把『两字段一源』变成不可见；
+   *   读者至少能看出可能同源，只剩一个数时他无法质疑两个端点」）。
+   * ⇒ 派生字段在这里点名它的端点（必须是同一载荷里真实存在的键），
+   *   非派生字段不写。断言由 health-redaction 的「差值字段两端点」那条守。
+   */
+  derived_from?: readonly string[];
+  /** 为什么把它放这一档（只在有争议的字段上写） */
+  why?: string;
+}
+
+/**
+ * provider-selection 的**取值域生产者**（daemon status → 对外 state）。
+ *
+ * 提到模块作用域并导出，是为了让「服务端可产出的集合」与「客户端 TS union」
+ * 能被同一条跨源断言直接比较 —— 两份手写清单今天相等，不足以证明它们受同一个约束。
+ */
+export const SELECTION_STATE_BY_STATUS: Record<string, "pending" | "applied" | "failed"> = {
+  pending: "pending",
+  succeeded: "applied",   // daemon 侧成功的实际取值（不是 "applied"）
+  failed: "failed",
+  expired: "failed",      // 过期＝没生效；对使用者与失败同一档
+};
+
+/**
+ * 2026-10-31 —— `status` 与 `status_reasons` **是同一个位的两种说法**（外部复核：
+ * 「三字段一致时零证据」）。既然它们由构造保证一致，那么「status=='ok' ⟺ reasons 为空」
+ * 这条断言**恒真**，它保护不了任何东西。
+ * ⇒ 把映射抽成一个纯函数，测试改为断言**映射本身**（给一个理由就必须 degraded），
+ *   这样「有人把映射改成忽略 reasons」会红，而「两者一致」这种同义反复不会写成测试。
+ */
+export function statusFromReasons(reasons: readonly string[]): "ok" | "degraded" {
+  return reasons.length === 0 ? "ok" : "degraded";
+}
+
+/**
+ * 2026-11-01 —— `status_reasons` 的**值域**，与它的生产者逐个对应。
+ *
+ * 为什么要有这一格：`status_reasons` 是「`status: ok` 到底是没问题、还是检查没跑」的唯一读数。
+ * 它的值域若比生产者少 ⇒ 两个成因被合并成一个字（读的人分不出该修哪），
+ * 多 ⇒ 有原因却没有任何代码会产生它（死值，读者会为它设计一条不存在的修法）。
+ *
+ * 🔴 push 点**保留字面量**而不是引用这个常量：抽取判据要看的是「哪一行推了什么」，
+ *    改成 `push(STATUS_REASONS[0])` 之后，那条检查就只能看见下标，看不见成因。
+ *    ⇒ 这份常量是**断言的靶子**，不是运行时唯一入口。
+ *    两者的关系由 health-status-reasons.test.ts 断言（集合相等 + 生产者数 == 值数）。
+ */
+export const STATUS_REASONS = ["db_unreadable", "license_unreadable"] as const;
+
+export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
+  // ── gauge：聚合 / 粗标签 ─────────────────────────────────────────────
+  ok: {
+    class: "gauge",
+    granularity: "boolean",
+    constant_by_design: "200 是 watchdog 契约下的承诺 ⇒ 这一支只有 true；非 200 时读者根本拿不到这个字段（另一支在传输层，不在载荷里）",
+  },
+  version: {
+    class: "gauge",
+    granularity: "label",
+    why: "粗粒度版本号；精确字节身份由 git_commit 承担，而它不匿名",
+    identity_class: "declaration",
+  },
+  version_source: {
+    class: "gauge",
+    granularity: "label",
+    why: "同一字段的**仲裁位**：说明 version 是 env 注入（standalone 二进制）还是磁盘 package.json；不暴露路径或提交",
+  },
+  version_role: {
+    class: "gauge",
+    granularity: "label",
+    why: "把「version 是部署标签不是指纹」写进载荷 —— 读者不会去查它数的是什么",
+    constant_by_design: "本字段是那句话本身；另一支（version 当指纹）是错误用法，不是另一个取值",
+  },
+  api_version: { class: "gauge", granularity: "label", constant_by_design: "本进程只实现 v3；若将来并存两代，这里才会出现第二个取值" },
+  transport: { class: "gauge", granularity: "label", constant_by_design: "本进程只实现 streamable-http（另一支 SSE-only 是历史形态，已不接受配置）" },
+  uptime: {
+    class: "gauge",
+    granularity: "cumulative",
+    // 2026-10-31 —— uptime 是**单调时钟的读数**，不是 `now − startedAt`（后者同源、无判别力）。
+    // 所以它不写 derived_from；这条区别正是「差值字段必须给端点」的反面例子：
+    // 一个**不是**差值的字段，不该被要求给端点 —— 否则那条规则会变成填表。
+    // （对照：epoch_delta_ms / clk_tck_delta 是真差值，它们都有两个端点。）
+    // 2026-10-31 —— 这一格是**同一 body 里的第二个时钟源**（外部复核：
+    // 「time ← CLOCK_REALTIME（可被 NTP 拉、可冻结）；uptime ← CLOCK_MONOTONIC（只走不跳）」）。
+    // ⇒ 「served_at 不动而 uptime 在走」= 冻结的是墙钟，不是进程：**单次读数、零外部依赖、有方向**。
+    // 前提必须成立：uptime 来自 process.uptime()（单调），**不是** Date.now()-startedAt（同源就没判别力）。
+    why: "进程已运行秒数（process.uptime()，单调时钟）。与 served_at/startedAt 不同源：墙钟被 NTP 冻结时它仍在走 ⇒ 可判「是钟停了还是进程停了」",
+  },
+  startedAt: { frozen_at_boot: true, stable_within: "process", class: "gauge", granularity: "instant", why: "窗口起点；去掉它，event_loop 里的 stall 计数就没有分母时刻戳" },
+  sessions_count: { class: "gauge", granularity: "level" },
+  sse_connections: { class: "gauge", granularity: "level" },
+  mcp_inflight: { class: "gauge", granularity: "level" },
+  mcp_inflight_peak: { class: "gauge", granularity: "cumulative" },
+  event_loop: { class: "gauge", granularity: "cumulative" },
+  // #3271 —— 聚合计数：规模/强度，不含拓扑（by_node 留在鉴权投影里）。
+  task_expiries_never_consumed_total: { class: "gauge", granularity: "cumulative" },
+  task_rejections_total: { class: "gauge", granularity: "cumulative" },
+  counters_since: { class: "gauge", granularity: "label" },
+  auth: { class: "gauge", granularity: "label" },
+  security: { class: "gauge", granularity: "label" },
+  tmux: { class: "gauge", granularity: "label" },
+  v3_auth: { class: "gauge", granularity: "label", constant_by_design: "编译期能力，没有开关；false 只可能出现在老版本服务端上 —— 要读它请读 version" },
+  multi_network: { class: "gauge", granularity: "label", constant_by_design: "同上：多网络是数据模型能力，不是运行时开关 ⇒ 单网络部署里它也是 true" },
+  license: { class: "gauge", granularity: "label" },
+  license_state: {
+    class: "gauge",
+    granularity: "verdict",
+    arbiter: "license",
+    verdict_other_branch: "absent：删掉 license 行；unknown：让查询抛错（表被锁/被改名）—— 两者形状不同，这正是它存在的理由",
+  },
+  limits: { class: "gauge", granularity: "label" },
+  capabilities: { class: "gauge", granularity: "label" },
+  // ⚠️ 例外：**形似启动快照，但会变** —— 它的全部价值在于变，标成快照会毁掉它。
+  served_at: {
+    class: "gauge",
+    granularity: "instant",
+    // 2026-10-31 —— granularity=instant 的字段必须写出**反事实**（外部复核 (c)：
+    // 「判法应改为对『这个值变了，世界上什么变了』做反事实询问」）：
+    // 它变的不是世界，是**这一次读取的时刻**；所以它只能当窗口端点，不能当「新鲜度」。
+    why: "这一次读取的服务端时刻：变了不代表 Hub 状态变化，只代表又问了一次；用作窗口右端，不证明新鲜",
+  },
+  build_identified: {
+    class: "gauge",
+    granularity: "verdict",
+    arbiter: "build_identity_note",
+    why: "只说「有没有构建标识」，不说「是什么」",
+    verdict_other_branch: "false：从 npm 包（非 git 工作树）启动，包内没有 .git ⇒ 拿不到 commit ⇒ 这是最常见的生产形态，不是异常",
+  },
+  alert_baselines: { class: "gauge", granularity: "cumulative" },
+  broadcast: { class: "gauge", granularity: "level" },
+  host_disk: { class: "gauge", granularity: "level" },
+  counters: { class: "gauge", granularity: "cumulative", why: "按 status:code 分桶、封顶 64；聚合量，但当前只给鉴权读者" },
+  epoch_agreement: {
+    class: "gauge",
+    granularity: "verdict",
+    arbiter: "epoch_delta_ms",
+    why: "内核与自报是否一致；是「一致/不一致」这个结论，不是具体时刻",
+    verdict_other_branch: "disagree：宿主时钟被改过（NTP 大步进 / 手工 date / 虚拟机恢复快照）⇒ 差值超出误差界；unknown：/proc 不可读",
+  },
+  epoch_delta_ms: {
+    class: "gauge", granularity: "level",
+    derived_from: ["kernel_started_at", "startedAt"],
+    why: "内核口径时刻 − 进程口径时刻；两个端点都在同一载荷里，读者才能自己算一遍",
+  },
+  clk_tck_assumed: { class: "gauge", granularity: "label" },
+  clk_tck_estimate: {
+    class: "gauge",
+    granularity: "level",
+    why: "**未应用阈值**的原始估计；有它才能分辨「守卫被挂起打回」与「估计器本身有偏置」",
+  },
+  host_uptime_s: {
+    class: "gauge",
+    granularity: "cumulative",
+    why: "**机器**已开机秒数（与进程 uptime 是两个量）；守卫的可检出下限以它为基准，没有它这个阈值不可验",
+  },
+  clk_tck_assumed_reason: {
+    class: "gauge",
+    granularity: "verdict",
+    arbiter: "clk_tck_estimate",
+    why: "退回 assumed 的原因；三支挤在同一个值里时，「设备不支持」与「真的挂起过」同形",
+    verdict_other_branch: "rel_error_above_1pct：宿主挂起（uptime 涨、jiffies 不涨）超过 1% —— 本机实测已出现",
+  },
+  clk_tck_delta: {
+    class: "gauge", granularity: "level",
+    derived_from: ["clk_tck_estimate", "clk_tck_assumed"],
+    why: "derived − 100；confirmed 也要报差多少",
+  },
+  kernel_started_at_error_ms: {
+    class: "gauge",
+    granularity: "level",
+    why: "启动时刻误差界，**含地板**（btime 整秒 ±500ms + jiffies 10ms）；地板不会因为尺子变准而消失",
+  },
+  clk_tck_guard_min_suspend_s: {
+    class: "gauge",
+    granularity: "level",
+    why: "1% 相对偏差 = 多长的挂起 ⇒ 这是这个守卫**抓得住的最小异常**（134 天的机器约 32 小时）",
+  },
+  suspend_total_s: {
+    class: "gauge",
+    granularity: "cumulative",
+    why: "推导的前提（累计挂起）；有了它 derived 带前提，没有它前提在读数之外",
+  },
+  clk_tck_source: {
+    class: "gauge",
+    granularity: "verdict",
+    arbiter: "clk_tck_delta",
+    why: "assumed/derived/confirmed —— 一个叫 assumed 的字段必须有一条「它是否成立」的判定",
+    verdict_other_branch: "derived/assumed：非 x86 宿主（USER_HZ≠100）、/proc 不可读、或容器里 auxv 被剥 ⇒ 三档都在真实部署里出现过",
+  },
+
+  // ── landmark：精确位置/身份 ──────────────────────────────────────────
+  git_commit: {
+    frozen_at_boot: true, stable_within: "deploy",
+    class: "landmark",
+    why: "精确告诉外部这是哪一版代码（本仓公开）⇒ 等于指路到已知问题清单",
+    identity_class: "artifact",
+  },
+  git_dirty: { class: "landmark" },
+  status: {
+    class: "gauge",
+    granularity: "verdict",
+    arbiter: "status_reasons",
+    verdict_other_branch: "degraded：让 DB 读不到（chmod/移走 db 文件）或让 license 查询失败 ⇒ status_reasons 同时非空",
+  },
+  status_reasons: { class: "gauge", granularity: "level" },
+  git_identity_root: {
+    class: "landmark",
+    identity_class: "call",
+    why: "commit 是从**模块目录**（制品所在处）读的，还是退回 **cwd** 读的；后者会把启动目录里另一个仓库的身份报成本包的身份",
+  },
+  build_identity_note: {
+    class: "landmark",
+    why: "解释 git_commit 为什么为空；没有它，「没有」与「读不到」同形",
+  },
+  // 逐会话明细 = 拓扑 ⇒ 只需「有几个」，不需要「哪几个」（与 #473 的审计同一条）
+  sse_sessions: { class: "landmark", why: "按键列出连接 = 网络 id + 别名，正是 #473 那个泄露面" },
+  pid: { frozen_at_boot: true, stable_within: "process", class: "landmark" },
+  boot_id: { frozen_at_boot: true, stable_within: "process", class: "landmark" },
+  proc_start_ticks: { frozen_at_boot: true, stable_within: "process", class: "landmark" },
+  kernel_started_at: { frozen_at_boot: true, stable_within: "process", class: "landmark", why: "内核口径的精确启动时刻 ⇒ 可与外部日志对账" },
+  kernel_started_at_note: { class: "landmark" },
+
+  // ── credential ─────────────────────────────────────────────────────
+  probe_nonce: {
+    class: "credential",
+    caller_supplied: true,
+    joinability: "echo_only",
+    why: "用途是「证明这一次」，且值由请求方自带 ⇒ 不构成读者本来拿不到的信息",
+  },
+};
+
+/**
+ * 匿名可见的充要条件（可执行）：
+ *   gauge，或 credential 且 caller_supplied。
+ * ⇒ landmark 永不匿名；我们**生成**的 credential 永不匿名。
+ */
+export function mayBePublic(meta: HealthFieldMeta | undefined): boolean {
+  if (!meta) return false;
+  if (meta.class === "gauge") return true;
+  // credential 只有「回显」这一种可匿名；服务端生成的一律不可 —— 与 caller_supplied 同向，互为冗余。
+  return meta.class === "credential"
+    && meta.caller_supplied === true
+    && meta.joinability === "echo_only";
+}
+
+/** 匿名投影：只保留白名单里的键。逐键复制，绝不返回原对象的引用。 */
+export function projectPublicHealth(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(body)) {
+    if (PUBLIC_HEALTH_KEYS.has(key)) out[key] = body[key];
+  }
+  return out;
+}
+
+/**
+ * 2026-10-31 —— `/health` 的「这一次」回显位。
+ *
+ * 读 `X-Probe-Nonce`，只接受 1–64 个 `[A-Za-z0-9._-]`。
+ * 非法/超长一律**当作没带**（不裁剪、不转义、不回显）：
+ * 半接受会造出一个「看起来回显了、其实被改过」的值，比不回显更糟。
+ *
+ * 为什么用请求方给的值而不是自己生成：我们要证的是
+ * 「这个响应是收到**这个**请求之后生成的」，
+ * 所以 nonce 必须由调用方在**发请求之前**定下来，否则它只能证明「有个服务在答」。
+ */
+function probeNonceOf(req: Request): string | null {
+  const raw = req.headers.get("X-Probe-Nonce");
+  if (!raw) return null;
+  return /^[A-Za-z0-9._-]{1,64}$/.test(raw) ? raw : null;
+}
+
+/**
+ * 2026-10-31 —— 让「结论的站位」可验。
+ *
+ * 今晚反复踩到同一件事：一句话写着 `prod@18445bf4`，而线上其实跑 e230677f。
+ * **标签可以随手写；要让标签可验，就得有一个由系统自己产生、外部可读的值。**
+ * 这个字段就是那个值：`/health` 由进程自己报出它所在源码树的 commit。
+ *
+ * 🔴 取不到就是 **null**，绝不回退成 version 或任何“看起来像值”的东西 ——
+ *    一个未验的断言标了“未验”仍然有用；标成事实会污染整张表。
+ *    npm 安装形态没有 .git ⇒ 恒为 null，这是**设计**，不是缺陷。
+ *
+ * 只在启动时算一次（boot_* 语义）：git commit 不可能在进程生命周期内变化，
+ * 所以它满足「变更周期 ⊇ 进程生命周期」，可以绑进程边界。
+ */
+function detectBootGitIdentity(): {
+  commit: string | null;
+  /** 只有 commit 非空时才有意义；commit 为空时必须是 null（**不是 false**）。 */
+  dirty: boolean | null;
+  /** commit 为空时说明**为什么**空 —— 没有它，「没有」与「读不到」同形。 */
+  /**
+   * 2026-10-31 —— #3177：`build_info_invalid` 与 `not_a_git_checkout` 必须分开。
+   * 前者是**缺陷**（注入写坏了），后者是**部署形态的正常状态**（npm 包里没有 .git）。
+   * 合成一个 reason，就等于把「写坏了」读成「本来就没有」。
+   */
+  reason: "not_a_git_checkout" | "git_unavailable" | "unexpected_rev_parse_output" | "build_info_invalid" | null;
+  /**
+   * 2026-10-31 —— **这个 commit 是从哪个根读出来的**（外部复核那条：
+   * 「release 读的是 cwd 而不是可执行文件目录 ⇒ 它标识部署动作，不标识运行内容」）。
+   *
+   * 我们优先用模块目录（= 制品所在处），只在拿不到时退回 cwd。
+   * 但**没有字段说明用了哪个**时，「读到的是制品身份」与「读到的是启动目录里某个别的仓库」
+   * 在载荷上完全同形 —— 后者会把一台跑着旧包的机器报成新提交。
+   * ⇒ 加一格 root_kind 作仲裁；cwd 那一支必须能被看出来。
+   */
+  root_kind: "module_dir" | "cwd" | "build_info";
+} {
+  const moduleDir = (import.meta as { dir?: string }).dir;
+  const start = moduleDir ?? process.cwd();
+  const rootKind: "module_dir" | "cwd" = moduleDir ? "module_dir" : "cwd";
+  // 2026-10-31 —— #3177：**先读构建期注入**，再退回运行期 git。
+  // 生产是 `npm install` 出来的 runtime（没有 .git），运行期这条路在那里根本不存在 ⇒
+  // 只能由构建时写下 commit/dirty/built_at。读到了就以它为准（它是**制品的一部分**，
+  // 比「启动目录恰好是个 git 仓库」更能代表跑的是什么字节）。
+  // 包内布局是 `bin/commhub.ts` + `build-info.json` 在包根 ⇒ 两处都看。
+  const candidates = [start, dirname(start)];
+  let buildInfoInvalid = false;
+  for (const c of candidates) {
+    const read = readBuildInfo(c);
+    if (read.kind === "present") {
+      return { commit: read.info.commit, dirty: read.info.dirty, reason: null, root_kind: "build_info" };
+    }
+    if (read.kind === "invalid") buildInfoInvalid = true;
+  }
+  let dir = start;
+  for (let i = 0; i < 6; i += 1) {
+    if (existsSync(join(dir, ".git"))) {
+      try {
+        const out = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], {
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 1500,
+        }).toString().trim();
+        if (!/^[0-9a-f]{40}$/.test(out)) {
+          return { commit: null, dirty: null, reason: "unexpected_rev_parse_output", root_kind: rootKind };
+        }
+        // 2026-10-31 —— dirty 位不能省：commit sha 单独一个字段，
+        // 无法区分「干净树构建」与「脏树构建」，于是 vantage 依然可能把一个
+        // 非提交的值当成提交。dirty 一旦为 true，这个读数只能写 prod@自称。
+        let dirty = false;
+        try {
+          const st = execFileSync("git", ["-C", dir, "status", "--porcelain"], {
+            stdio: ["ignore", "pipe", "ignore"],
+            timeout: 1500,
+          }).toString();
+          dirty = st.trim().length > 0;
+        } catch {
+          dirty = true;   // 读不到状态 ⇒ 保守认定为脏（不许把“不知道”当干净）
+        }
+        return { commit: out, dirty, reason: null, root_kind: rootKind };
+      } catch {
+        return { commit: null, dirty: null, reason: "git_unavailable", root_kind: rootKind };
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return {
+    commit: null,
+    dirty: null,
+    // 注入文件在但写坏了 ⇒ 这是缺陷，不能与「部署形态没有 .git」同形
+    reason: buildInfoInvalid ? "build_info_invalid" : "not_a_git_checkout",
+    root_kind: rootKind,
+  };
+}
+
+const BOOT_GIT = detectBootGitIdentity();
+
+/**
+ * 2026-10-31 —— 内核口径的「本进程何时开始」。
+ *
+ * `startedAt` 是**自报**的（`Date.now() - uptime`），可被伪造、也可被同一进程复用。
+ * 内核侧有两条独立信息：`/proc/stat` 的 `btime`（开机时刻）与 `/proc/self/stat` 第 22 字段
+ * （开机后的 clock ticks）。→ 启动时刻 = btime + ticks/CLK_TCK。
+ *
+ * 🔴 2026-10-31 修订（原设计是反的）：原来「换算值与 startedAt 差 >10s ⇒ 不发布」，
+ *    等于让**自报字段否决内核读数** —— 而 startedAt 恰恰是可被伪造/可被替换的那一侧。
+ *    今晚刚立的规则是：判据用内核三元组（boot_id, pid, proc_start_ticks），
+ *    自报值只用于**展示/对账**，两者不一致是一条**独立告警**，不是「变 null」。
+ *
+ *    ⇒ 现在的分法：
+ *       · 判据：boot_id / pid / proc_start_ticks  —— 无条件发布，不含单位假设（不需要 CLK_TCK）
+ *       · 展示：kernel_started_at —— 只要 btime+ticks 可得就发布，但**永远带 agreement 标记**
+ *       · 不一致：epoch_agreement=disagree + epoch_delta_ms ⇒ 单独可读，不被折成 unknown
+ *       · 换算依赖 CLK_TCK=100 这个假设 ⇒ 显式给 clk_tck_assumed，读者可自行折算
+ *    10s 只用来**分类** agreement，不再是发布的闸门。
+ */
+/** 换算 ticks 时假设的 CLK_TCK：假设本身要**显式**出现在读数里，而不是藏在代码里。 */
+const CLK_TCK_ASSUMED = 100;
+
+/**
+ * 2026-10-31 —— 一个叫 assumed 的字段，必须有一条「它是否成立」的判定。
+ *
+ * 否则它只是一个被记录下来的数：换内核（USER_HZ 不是 100 的架构）之后它会**静默变错**，
+ * 而字段名里的 "assumed" 没有任何东西去校它。
+ *
+ * 推导方式（不依赖 sysconf，Node 没暴露）：
+ *   /proc/stat 里所有 cpu 行之和 = 自启动以来的总 jiffies
+ *   CLK_TCK ≈ 总 jiffies / (uptime 秒 × CPU 数)
+ * ⇒ 与 assumed 相等 ⇒ source="confirmed"；不等 ⇒ 用推导值，source="derived"；
+ *   两者都拿不到 ⇒ 退回 assumed，source="assumed"。
+ */
+function clkTck(): {
+  value: number;
+  source: "confirmed" | "derived" | "assumed";
+  /** derived − 100；只在算得出推导值时非 null（**这是「差多少」，不是「等不等」**）。 */
+  delta?: number | null;
+  /**
+   * 2026-10-31 —— **未应用任何阈值**的原始估计（tick/s，两位小数）。
+   *
+   * 为什么要它：本机实测 estimate=99.35、而 suspend_total_s=0 ⇒
+   * 「守卫被 1% 阈值打回 assumed」这件事**不是挂起造成的，是估计器本身的偏置**。
+   * 没有这一格时，那句话说不出来 —— 只能看到 assumed，看不到为什么。
+   */
+  estimate?: number | null;
+  /** 该差值隐含的启动时刻误差（毫秒）；**含地板**，见下。 */
+  errorMs?: number | null;
+  /** 1% 相对偏差对应多长的挂起（秒）—— 这就是这个守卫**抓得住的最小异常**。 */
+  guardMinSuspendS?: number | null;
+  /**
+   * 2026-10-31 —— 退回 assumed 的**原因**。
+   * 原来三支（读不到 / 算出来不可能 / 偏差过大）都返回同一个 `{value:100, source:"assumed"}`，
+   * 于是「设备不支持」与「这台机器真的挂起了 32 分钟」在读数上完全一样。
+   */
+  assumedReason?: "stat_unreadable" | "derived_out_of_range" | "rel_error_above_1pct";
+} {
+  try {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const os = require("node:os") as typeof import("node:os");
+    let jiffies = 0;
+    // 2026-10-31 —— **这里曾经是 Python 的 splitlines()**：JS 没有这个方法 ⇒ TypeError ⇒
+    // 被本函数的 catch 吞掉 ⇒ 永远 return { value: 100, source: "assumed" }。
+    // ⇒ 整条推导是死代码：clk_tck_delta / kernel_started_at_error_ms 恒为 null，
+    //   而「恒为 null」在报告里与「这台机器刚好是 100」同形。
+    //   外部复核指出的两件事（误差界没地板、1% 守卫抓不到一小时挂起）都作用在这条死路径上。
+    // ⇒ 现在改成 split，并在 catch 里带上原因，不再把「算不出」与「刚好等于 100」压成同一个值。
+    for (const line of fs.readFileSync("/proc/stat", "utf8").split(/\r?\n/)) {
+      // ⚠️ `cpu\d*` 会**同时**匹配聚合行 `cpu` 与每核行 `cpu0..cpuN` ⇒ 全部计两遍，
+      //    除以 cpus 只除一次 ⇒ 推导值翻倍（本机实测 199 而非 100）⇒ delta=99 ⇒ 被 1% 阈值打成 assumed。
+      // ⇒ 只数每核行（`cpu\d+`）；聚合行等于各核之和，再数一次就是重复计。
+      if (!/^cpu\d+\s/.test(line)) continue;
+      const parts = line.trim().split(/\s+/).slice(1).map(Number);
+      if (parts.every((n) => Number.isFinite(n))) jiffies += parts.reduce((a, b) => a + b, 0);
+    }
+    const uptime = os.uptime();
+    const cpus = Math.max(1, os.cpus().length);
+    if (!Number.isFinite(jiffies) || jiffies <= 0 || !Number.isFinite(uptime) || uptime <= 0) {
+      return { value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "stat_unreadable" };
+    }
+    const derived = Math.round(jiffies / (uptime * cpus));
+    if (!Number.isFinite(derived) || derived < 1 || derived > 100_000) {
+      return { value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "derived_out_of_range" };
+    }
+    // 2026-10-31 —— 「相等」在浮点比较里需要容差，而容差是新的魔数。
+    // ⇒ 不做二选一，而是**报差值 + 误差界**：
+    //    delta = derived − 100（以 tick/s 为单位）；它隐含的启动时刻误差 ≈ uptime × |delta| / value。
+    //    差值大到不可能是舍入（>1%）⇒ 假设已坏（典型成因：机器挂起过 —— jiffies 不涨而 uptime 涨）
+    //    ⇒ 退回 assumed，并把原因写进偏差值里，而不是继续报 derived。
+    const estimate = Math.round((jiffies / (uptime * cpus)) * 100) / 100;
+    const delta = derived - CLK_TCK_ASSUMED;
+    const relErr = Math.abs(delta) / Math.max(1, derived);
+    // 这两项**无论退不退回都要发布**：它们是「尺子的分辨率」与「守卫的检出下限」，
+    // 退回 assumed 只说明「我不信这个值」，不说明这两件事没发生。
+    const RULER_FLOOR_MS = 500 + 10;
+    const errorMs = RULER_FLOOR_MS + Math.round((uptime * Math.abs(delta) / Math.max(1, derived)) * 1000);
+    const guardMinSuspendS = Math.round(0.01 * uptime);
+    if (relErr > 0.01) {
+      return {
+        value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "rel_error_above_1pct",
+        delta, errorMs, guardMinSuspendS, estimate,
+      };
+    }
+    // 2026-10-31 —— 误差界必须有**地板**。
+    //   uptime×|delta|/value 只覆盖「尺子自己的舍入」，delta=0 时它报 0；
+    //   而 btime 是**整秒**（±500ms）、/proc/stat 的 jiffies 是 10ms 量化。
+    //   ⇒ 这两项不会因为尺子变准而消失 ⇒ 误差界的最小值是「尺子之外的误差之和」，不是 0。
+    //   （外部复核原话：一个误差界在「尺子最准」时报 0，说明它只覆盖了尺子的误差。）
+    return {
+      value: derived,
+      source: Math.abs(delta) < 0.5 ? "confirmed" : "derived",
+      delta,
+      errorMs,
+      estimate,
+      // 2026-10-31 —— 阈值决定了它抓得住多大的异常：relErr ≈ 挂起时长 / uptime ⇒ 1% ⇒ 挂起 ≥ 1% uptime。
+      //   134 天的机器 ⇒ ≈ 32 小时才触发 ⇒ 一小时的挂起读成「没有挂起」（derived 与 confirmed 只差一个容差）。
+      //   ⇒ 把这个量级印出来，读者才知道自己手里的 derived 意味着「没发生」还是「太小没看见」。
+      guardMinSuspendS,
+    };
+  } catch {
+    return { value: CLK_TCK_ASSUMED, source: "assumed", assumedReason: "stat_unreadable" };
+  }
+}
+
+const CLK_TCK = clkTck();
+const CLK_TCK_DELTA = CLK_TCK.delta ?? null;
+const CLK_TCK_ERROR_MS = CLK_TCK.errorMs ?? null;
+const CLK_TCK_GUARD_MIN_SUSPEND_S = CLK_TCK.guardMinSuspendS ?? null;
+const CLK_TCK_ASSUMED_REASON = CLK_TCK.assumedReason ?? null;
+const CLK_TCK_ESTIMATE = CLK_TCK.estimate ?? null;
+/** 机器 uptime（秒）。与 `uptime`（进程）分开报：守卫的阈值以这台机器为量纲。 */
+const HOST_UPTIME_S = (() => {
+  try {
+    const u = (require("node:os") as typeof import("node:os")).uptime();
+    return Number.isFinite(u) ? Math.round(u) : null;
+  } catch { return null; }
+})();
+/** agreement 的**分类**阈值（不是发布闸门）：超过它就算「内核与自报对不上」。 */
+const EPOCH_AGREEMENT_MS = 10_000;
+
+function detectKernelStart(startedAtIso: string): {
+  boot_id: string | null;
+  pid: number;
+  proc_start_ticks: number | null;
+  kernel_started_at: string | null;
+  kernel_started_at_note: string | null;
+  clk_tck_assumed: number;
+  clk_tck_source: "confirmed" | "derived" | "assumed";
+  epoch_agreement: "agree" | "disagree" | "unknown";
+  epoch_delta_ms: number | null;
+  /**
+   * 2026-10-31 —— 把**推导的前提**做成读数。
+   * 推导「kernel_started_at = btime + ticks/CLK_TCK」依赖「这台机器没挂起过」，
+   * 而挂起留下的唯一痕迹就是：(now − btime) 与 /proc/uptime 的差。
+   * ⇒ 有了它，derived 带着前提；没有它，前提在读数之外，推导的正确性只是没被推翻过。
+   */
+  suspend_total_s: number | null;
+} {
+  const pid = process.pid;
+  let bootId: string | null = null;
+  try {
+    const raw = require("node:fs").readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    if (/^[0-9a-f-]{16,64}$/i.test(raw)) bootId = raw;
+  } catch { /* 非 Linux 或不可读 ⇒ null */ }
+
+  let ticks: number | null = null;
+  try {
+    const stat = require("node:fs").readFileSync("/proc/self/stat", "utf8");
+    const close = stat.lastIndexOf(")");
+    if (close >= 0) {
+      const rest = stat.slice(close + 1).trim().split(/\s+/);
+      const n = Number(rest[19]); // 第 22 字段（`')' 之后` 从 state 起算 ⇒ 索引 19）
+      if (Number.isFinite(n)) ticks = n;
+    }
+  } catch { /* null */ }
+
+  let btime: number | null = null;
+  try {
+    const stat = require("node:fs").readFileSync("/proc/stat", "utf8");
+    const m = /^btime\s+(\d+)/m.exec(stat);
+    if (m) btime = Number(m[1]);
+  } catch { /* null */ }
+
+  if (ticks === null || btime === null) {
+    return {
+      boot_id: bootId, pid, proc_start_ticks: ticks,
+      kernel_started_at: null,
+      kernel_started_at_note: "proc_btime_or_ticks_unavailable",
+      clk_tck_assumed: CLK_TCK.value,
+      clk_tck_source: CLK_TCK.source,
+      epoch_agreement: "unknown",
+      epoch_delta_ms: null,
+      suspend_total_s: null,
+    };
+  }
+  const candidateMs = (btime + ticks / CLK_TCK.value) * 1000;
+  const selfMs = Date.parse(startedAtIso);
+  // 自报值解析不了 ⇒ 只影响 agreement，不影响内核读数的发布
+  const delta = Number.isFinite(selfMs) ? candidateMs - selfMs : null;
+  const agreement: "agree" | "disagree" | "unknown" =
+    delta === null ? "unknown" : Math.abs(delta) <= EPOCH_AGREEMENT_MS ? "agree" : "disagree";
+  return {
+    boot_id: bootId,
+    pid,
+    proc_start_ticks: ticks,
+    kernel_started_at: new Date(candidateMs).toISOString(),
+    kernel_started_at_note: null,
+    clk_tck_assumed: CLK_TCK.value,
+      clk_tck_source: CLK_TCK.source,
+    epoch_agreement: agreement,
+    epoch_delta_ms: delta === null ? null : Math.round(delta),
+    suspend_total_s: suspendTotalSeconds(btime),
+  };
+}
+
+/**
+ * 累计挂起时长（秒）= 墙钟自开机以来 − /proc/uptime。
+ *
+ * btime 是开机时刻的**墙钟**（挂起期间照走），而 /proc/uptime 统计的是**不挂起**的时长
+ * ⇒ 两者之差就是累计挂起。取不到（非 Linux / 读失败）⇒ null，不给 0。
+ * 「0 秒挂起」与「不知道挂没挂起」在读数上必须不同：前者是推导的前提成立，后者是前提未知。
+ */
+function suspendTotalSeconds(btime: number | null): number | null {
+  if (btime === null) return null;
+  try {
+    const os = require("node:os") as typeof import("node:os");
+    const uptime = os.uptime();
+    if (!Number.isFinite(uptime)) return null;
+    const wall = Date.now() / 1000 - btime;
+    const diff = wall - uptime;
+    // btime 是整秒 ⇒ |diff| < 1s 的读数就是 0（不是负挂起）；明显为负 ⇒ 时钟不可信 ⇒ null
+    if (!Number.isFinite(diff) || diff < -5) return null;
+    return Math.max(0, Math.round(diff));
+  } catch {
+    return null;
+  }
+}
+
+const BOOT_GIT_COMMIT = BOOT_GIT.commit;
+
+/**
+ * 2026-10-31 —— 窗口起点**在 boot 时算一次**，不要每次请求重算。
+ *
+ * 原来它是 per-request 的 `new Date(Date.now() - uptime*1000)`：毫秒舍入会让两次读数
+ * 差 1ms ⇒ 而「flapping 判据」正是拿两次读数的 startedAt 比较 ⇒ **同一进程会被读成重启过**。
+ * 一个用于证明“它没重启”的字段，自己每次都在变，是本末倒置。
+ *
+ * 稳定之后它才满足那条判据：`S2 === S1 ⇒ 没重启`。
+ */
+const startedAtIso = new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString();
+
+const BOOT_KERNEL_START = detectKernelStart(startedAtIso);
+
+/**
+ * 2026-10-31 —— **两条上传路径的两个逐字相同的生产者，收成一个**。
+ *
+ * 头像上传与文件上传各自写了一份 `earlyReject`（withCors + Connection: close）
+ * 和一份 429 限流头（X-RateLimit-*）。计数报告实测：`x-ratelimit-limit` 等三个头各有 2 处写出点。
+ * ⇒ 改一处只改了一半，而**没有任何测试会因为两处不一致而红**。
+ *
+ * 判据：这个值有几个生产者？>1 时，正确说法是「改掉了其中的 1/N」。
+ */
+function uploadEarlyReject(req: Request, res: Response): Response {
+  // pre-drain 拒绝统一关闭连接：keepalive 上残留的 multipart 未读字节会把
+  // 下一个请求读成垃圾。
+  const wrapped = withCors(req, res);
+  wrapped.headers.set("Connection", "close");
+  return wrapped;
+}
+
+function uploadRateLimitHeaders(rate: { resetAt: number; retryAfterMs?: number }): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-RateLimit-Limit": String(60),
+    "X-RateLimit-Remaining": "0",
+    "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
+  };
+  if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
+  return headers;
+}
+
 function withCors(req: Request, res: Response): Response {
   const headers = corsHeaders(req);
   for (const [k, v] of Object.entries(headers)) {
     res.headers.set(k, v);
   }
+  // 2026-10-31 —— **「谁写的」比「谁先谁后」更抗重构**（外部复核：
+  // 「头集合作第二主判据：它判『谁写的』，不判『谁先谁后』」）。
+  // 部署在前面有 nginx / 任何反代时，客户端拿到的错误页可能不是我们写的：
+  //   代理的 502/504 页面是 HTML，而我们的错误是 JSON —— 但只靠 content-type 判，
+  //   等于要求每个客户端都记得先看 content-type。
+  // ⇒ 加一个**静态**的产出者标记：同一个值永远不变，所以它不构成指纹
+  //   （与 `version_role` / `git_commit` 那类「回答我站在哪一层」的头不是一回事）。
+  res.headers.set("X-CommHub", "hub");
   return res;
 }
 
@@ -936,7 +1918,7 @@ export function patrolExpiredTasks(): void {
       // report_status match. Leave it for the node to finish. A consumed_at
       // stamped AFTER the deadline (late receipt replay) does not save it.
       const due = db.all<ExpiredTaskRow>(
-        `SELECT task_id, network_id, from_name, from_node_id, to_name, content, created_at, expires_at, parent_task_id, meta_json
+        `SELECT task_id, network_id, from_name, from_node_id, to_name, to_node_id, content, created_at, expires_at, consumed_at, parent_task_id, meta_json
            FROM tasks
           WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
             AND status IN ('created', 'delivered')
@@ -971,12 +1953,33 @@ export function patrolExpiredTasks(): void {
     });
     if (expired.length > 0) {
       console.log(`[patrol] expired ${expired.length} stale task(s)`);
-      for (const task of expired) logTaskEvent(task.task_id, null, "expired", "patrol");
+      for (const task of expired) {
+        logTaskEvent(task.task_id, null, "expired", "patrol");
+        // #3271 —— 只数「**从未取走**」那一批（consumed_at 为空）。
+        // 取走过但没回报完成的（consumed_at < expires_at）不是「没人取」，把它们算进来，
+        // 这个计数就退化成「过期了多少条」——那是另一个更没用的数。
+        if ((task as any).consumed_at === undefined || (task as any).consumed_at === null) {
+          noteNeverConsumedExpiry((task as any).to_name || (task as any).to_node_id || "(unknown)");
+        }
+      }
       // #500 — tell the sender, after commit (task-expiry-notice.ts).
       const notices = notifyExpiredTasks(expired);
       if (notices.length > 0) console.log(`[patrol] sent ${notices.length} expiry notice(s)`);
     }
   } catch {}
+  // #2668 —— 投给「已离线」目标的陈年投递：超过 TTL（默认 30 分钟）就过期，并走与 TTL 相同的通知路径。
+  // 只处理“目标明确不在”这一种；忙 ⇒ queued_behind_busy 告警，不在这里处置。
+  try {
+    const offlineDropped = expireDeliveredToOfflineTargets();
+    if (offlineDropped.length > 0) {
+      console.log(`[patrol] expired ${offlineDropped.length} task(s) queued to an offline target (#2668)`);
+      for (const task of offlineDropped) logTaskEvent(task.task_id, "delivered", "expired", "patrol");
+      const notices = notifyExpiredTasks(offlineDropped as any);
+      if (notices.length > 0) console.log(`[patrol] sent ${notices.length} offline-expiry notice(s)`);
+    }
+  } catch (e: any) {
+    console.error(`[patrol] offline-delivery phase failed: ${e?.message || e}`);
+  }
   // #519 — acked/running with no activity for COMMHUB_STALE_OPEN_TASK_HOURS
   // (default 0 = off) → expired, at most 500 per pass, no sender notice
   // (task-stale-open.ts). Its own try: a failure here must not hide the TTL phase.
@@ -1001,10 +2004,12 @@ export function patrolOrphanTasks(): void {
 }
 
 function patrolDeliveredStaleTasks(): void {
+  // #2571 —— watcher 现在按“目标节点此刻是否 working”分流写两类事件，但仍然是**同步**
+  // （db.run 是同步的）：巡逻旁路绝不因为 await 打乱调度时序。
   try {
     const result = recordDeliveredStaleEvents();
     if (result.inserted > 0) {
-      console.warn(`[patrol] recorded ${result.inserted} delivered-stale task warning(s)`);
+      console.warn(`[patrol] recorded ${result.inserted} delivered-stale/queued-behind-busy task warning(s)`);
     }
   } catch (error: any) {
     console.error(`[patrol] delivered-stale watcher failed: ${error?.message || error}`);
@@ -1027,6 +2032,9 @@ function patrolDeliveredStaleTasks(): void {
 // Note: `opts.port ?? PORT` uses nullish-coalescing on purpose — `||`
 // would swallow a legitimate `0`. Same for hostname.
 export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
+const nodeSessionControl = createNodeSessionControlRelay();
+const sessionSourceTransport = createSessionSourceTransport({ enabled: process.env.COMMHUB_SOURCE_FORK_PREVIEW === "1",
+  directoryEnabled: process.env.COMMHUB_SOURCE_DIRECTORY_PREVIEW === "1", projectEnabled: process.env.COMMHUB_PROJECT_NEW_SESSION_PREVIEW === "1" });
 return Bun.serve({
   port: opts?.port ?? PORT,
   hostname: opts?.hostname ?? HOST,
@@ -1087,6 +2095,16 @@ return Bun.serve({
           callerIdentityRejected = true;
         }
       }
+      // #2363 —— 在飞计数：从进入 /mcp 到 MCP server 关闭。Hub 的内存与“同时在飞的
+      // 请求数”成正比（隔离实测 ≈1.2–1.4 MB/条；顺序 54 条/秒时 RSS 完全平稳），
+      // 所以这个数比 req/s 更能解释 RSS 尖峰。只观测，不拦请求。
+      enterMcpInflight();
+      let mcpInflightSettled = false;
+      const settleMcpInflight = (): void => {
+        if (mcpInflightSettled) return;
+        mcpInflightSettled = true;
+        leaveMcpInflight();
+      };
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
@@ -1105,10 +2123,16 @@ return Bun.serve({
       }
       // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
       const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url), callerIdentityRejected);
-      await mcpServer.connect(transport);
-      const response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
+      let response: Response;
+      try {
+        await mcpServer.connect(transport);
+        response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
+      } catch (e) {
+        settleMcpInflight();
+        throw e;
+      }
       // Disconnect after response to prevent McpServer leak
-      setImmediate(() => mcpServer.close().catch(() => {}));
+      setImmediate(() => { mcpServer.close().catch(() => {}).finally(settleMcpInflight); });
       // #426: the MCP SDK's WebStandardStreamableHTTPServerTransport builds
       // its own Response with `Content-Type: text/event-stream` (or
       // `application/json` for JSON-mode) but WITHOUT charset. Legacy
@@ -1350,53 +2374,17 @@ return Bun.serve({
     }
 
     // ── V3: License endpoints ──
-    if (url.pathname === "/api/license" && req.method === "GET") {
-      const license = db.get<any>(
-        "SELECT type, expires_at, max_agents, max_networks, max_tasks_day FROM licenses ORDER BY created_at LIMIT 1",
-      );
-      if (!license) return withCors(req, Response.json({ ok: true, status: "no_license" }));
-      const now = new Date().toISOString().replace("T", " ").slice(0, 19);
-      const expired = license.expires_at && license.expires_at < now;
-      // #1650 — licenses.expires_at 是 TEXT(datetime('now') 家族),UTC 但不带时区
-      //   标记;`new Date()` 会按本机时区解析,边界上差一天。parse 失败时返回 null
-      //   而不是 NaN —— JSON.stringify(NaN) 本来也序列化成 null,线上字节不变。
-      const expiresMs = parseHubTimestamp(license.expires_at);
-      const daysLeft = expiresMs === null
-        ? null
-        : Math.max(0, Math.ceil((expiresMs - Date.now()) / 86400000));
-      return withCors(req, Response.json({
-        ok: true,
-        license: { type: license.type, expires_at: license.expires_at, days_left: daysLeft, expired },
-        limits: { max_agents: license.max_agents, max_networks: license.max_networks, max_tasks_day: license.max_tasks_day },
-      }));
-    }
-
-    if (url.pathname === "/api/license/activate" && req.method === "POST") {
-      try {
-        const body = await req.json() as any;
-        const key = body.key;
-        if (!key) return withCors(req, Response.json({ ok: false, error: "key required" }, { status: 400 }));
-        // For now: accept any key starting with "anet-" as valid pro license
-        if (!key.startsWith("anet-") || key.length < 16) {
-          return withCors(req, Response.json({ ok: false, error: "invalid license key" }, { status: 400 }));
-        }
-        // Upgrade existing license or create new
-        db.run("DELETE FROM licenses");
-        const licId = `lic_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-        db.run(
-          "INSERT INTO licenses (id, license_key, type, max_agents, max_networks, max_tasks_day, activated_at, expires_at) VALUES (?1, ?2, 'pro', 50, 10, 10000, datetime('now'), datetime('now', '+365 days'))",
-          [licId, key]
-        );
-        return withCors(req, Response.json({ ok: true, type: "pro", expires_in_days: 365 }));
-      } catch (e: any) {
-        return withCors(req, Response.json({ ok: false, error: e.message }, { status: 400 }));
-      }
-    }
-
+    // 🔴 2026-10-29 admin：「license 删掉吧」。
+    // 这两个端点原本是 v0.6 试用/激活码体系的遗留路径，开源后没有任何真实用途：
+    //   GET  /api/license            —— 读 licenses 表第一行（trial/pro + 剩余天数）
+    //   POST /api/license/activate   —— 收一个 "anet-" 前缀的串，先 DELETE FROM licenses 再写一条
+    //                                  （而且**完全没有鉴权**，见 #3199）
+    // 现已移除；命中时按未知路径处理（404），不再保留兼容壳。
     // ── V3: Auth endpoints (public) ──
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
       if (!checkRateLimit(clientIP, 30)) {
+        noteRegisterRateLimited(clientIP);
         return withCors(req, Response.json({ ok: false, error: "too many requests, try again later" }, { status: 429 }));
       }
       try {
@@ -1414,6 +2402,7 @@ return Bun.serve({
       const ipRate = sharedLoginIpRateLimiter.check(clientIP || "unknown");
       if (!ipRate.allowed) {
         logAudit(null, null, "login_rate_limited", "auth", undefined, clientIP);
+        noteLoginIpRateLimited(clientIP);
         return withCors(req, Response.json(
           { ok: false, error: "rate_limited", message: "Too many login attempts. Try again later.", retry_after_ms: ipRate.retryAfterMs },
           { status: 429, headers: { "Retry-After": String(Math.ceil((ipRate.retryAfterMs ?? 1000) / 1000)) } }
@@ -1424,6 +2413,7 @@ return Bun.serve({
         const lock = sharedLoginFailureLockout.check(body.username);
         if (lock.locked) {
           logAudit(null, body.username, "login_locked", "auth", undefined, `retry_after_ms=${lock.retryAfterMs ?? 0}`);
+          noteLoginLocked(body.username);
           return withCors(req, Response.json(
             { ok: false, error: "login_locked", message: "Too many failed login attempts. Try again later.", retry_after_ms: lock.retryAfterMs },
             { status: 429, headers: { "Retry-After": String(Math.ceil((lock.retryAfterMs ?? 1000) / 1000)) } }
@@ -1485,8 +2475,145 @@ return Bun.serve({
       const avatar = validateAvatarUrl((body as { avatar_url: unknown }).avatar_url);
       if (!avatar.ok) return withCors(req, Response.json({ ok: false, error: "invalid_avatar_url", reason: avatar.reason }, { status: 400 }));
       // No supplied target ID/alias; user identity comes exclusively from auth.
-      db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [avatar.value, resolved.user.user_id]);
+      // 清空或换成另一张（池/外链）时，旧托管行必须同一事务撤销：否则「清空后旧 URL 仍可读」。
+      db.transaction(() => {
+        db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [avatar.value, resolved.user.user_id]);
+        const keepsUploaded = typeof avatar.value === "string" && /^\/api\/users\/[^/]+\/avatar\/[A-Za-z0-9_-]{1,128}\.png$/.test(avatar.value);
+        if (!keepsUploaded) db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [resolved.user.user_id]);
+      });
       return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: avatar.value }));
+    }
+
+    // ── 账号头像上传（Hub 托管，非普通附件）──
+    //
+    // 契约（通信Mac马 交付单）：用户令牌 + multipart 仅一个 `file` 字段；PNG、
+    // 最长边 ≤512、≤8 MiB；服务端独立复核后原子覆盖本人头像；URL 由 Hub 发。
+    // 读取走 GET /api/users/:id/avatar/:version.png，按**人类资料可见性**判读
+    // （本人或共享网络的合法成员），不借用 /api/files 的附件 ACL。
+    if (url.pathname === "/api/auth/me/avatar/upload" && req.method === "POST") {
+      // pre-drain 拒绝统一关闭连接：keepalive 上残留的 multipart 未读字节会把
+      // 下一个请求读成垃圾（与 /api/upload 的 earlyReject 同一理由）。
+      const earlyReject = (res: Response): Response => uploadEarlyReject(req, res);
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return earlyReject(Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return earlyReject(Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
+      // 节点令牌代表机器，不是这个人：头像只能由本人用用户令牌写。
+      if (isNodeCredential(resolved)) return earlyReject(userTokenRequired(req));
+
+      // 解析 multipart **之前**先限流：否则一个被限流的调用方仍能让 Hub 读满 8 MiB。
+      const authCtx = resolveRequestAuth(req);
+      const rateKey = authCtx?.tokenId ?? `ip:${getClientIP(req, server)}`;
+      const rate = sharedUploadRateLimiter.check(rateKey);
+      if (!rate.allowed) {
+        const headers = uploadRateLimitHeaders(rate);
+        return earlyReject(new Response(
+          JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
+          { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },
+        ));
+      }
+
+      if (!isMultipart(req.headers.get("content-type"))) {
+        return earlyReject(Response.json({ ok: false, error: "multipart_required" }, { status: 415 }));
+      }
+      const declared = Number(req.headers.get("content-length") ?? NaN);
+      // 多留 1 MiB 给 multipart 信封；真正的二进制上限在解析后按 MAX_AVATAR_BYTES 再判一次。
+      if (Number.isFinite(declared) && declared > MAX_AVATAR_BYTES + 1024 * 1024) {
+        return earlyReject(Response.json({ ok: false, error: "too_large" }, { status: 413 }));
+      }
+      let form: FormData;
+      try { form = await req.formData(); } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid_multipart" }, { status: 400 }));
+      }
+      const fields = [...form.keys()];
+      const file = form.get(AVATAR_FIELD);
+      if (fields.length !== 1 || fields[0] !== AVATAR_FIELD || !(file instanceof File)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_avatar_body", reason: "expected exactly one `file` part" }, { status: 400 }));
+      }
+      if (file.size > MAX_AVATAR_BYTES) return withCors(req, Response.json({ ok: false, error: "too_large" }, { status: 413 }));
+      // #2054 —— Hub-wide 总容量上界：公开注册可无限建账号，per-user 单条上限挡不住
+      // 「轮换账号把主库撑大」。这里在**写入前**用当前总量 + 本次大小判一次；
+      // 已存在的其他用户头像绝不删除（不回收别人的数据），只拒绝本次上传。
+      const storedBytes = db.get<{ total: number }>("SELECT COALESCE(SUM(bytes), 0) AS total FROM user_avatar_uploads")?.total ?? 0;
+      const ownBytes = db.get<{ bytes: number }>("SELECT bytes FROM user_avatar_uploads WHERE user_id = ?1", [resolved.user.user_id])?.bytes ?? 0;
+      if (storedBytes - ownBytes + file.size > MAX_AVATAR_STORAGE_BYTES) {
+        return withCors(req, Response.json({ ok: false, error: "avatar_storage_full" }, { status: 503 }));
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const check = inspectAvatarImage(bytes);
+      if (!check.ok) return withCors(req, Response.json({ ok: false, error: "invalid_image", reason: check.reason }, { status: 400 }));
+      const version = crypto.randomUUID().replace(/-/g, "");
+      const url = avatarUrl(resolved.user.user_id, version);
+      // 头像表与用户资料必须在同一事务里落地：否则会出现「上传成功但资料页还是旧头像」，
+      // 或反过来点了清空却仍能读到旧字节。
+      db.transaction(() => {
+        db.run(
+          `INSERT INTO user_avatar_uploads (user_id, version, png, bytes, width, height, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+           ON CONFLICT(user_id) DO UPDATE SET
+             version = excluded.version, png = excluded.png, bytes = excluded.bytes,
+             width = excluded.width, height = excluded.height, updated_at = excluded.updated_at`,
+          [resolved.user.user_id, version, bytes, bytes.byteLength, check.width, check.height],
+        );
+        db.run("UPDATE users SET avatar_url = ?1, updated_at = datetime('now') WHERE user_id = ?2", [url, resolved.user.user_id]);
+      });
+      // 回读用户资料行，确认读取面能看到这张新头像（而不是只信内存里的变量）。
+      const persisted = db.get<{ avatar_url: string | null }>("SELECT avatar_url FROM users WHERE user_id = ?1", [resolved.user.user_id]);
+      if (persisted?.avatar_url !== url) {
+        return withCors(req, Response.json({ ok: false, error: "avatar_persist_failed" }, { status: 500 }));
+      }
+      return withCors(req, Response.json({ ok: true, user_id: resolved.user.user_id, avatar_url: url }));
+    }
+
+    // GET /api/users/:user_id/avatar/:version.png —— Bearer 用户令牌鉴权。
+    // 可见性 = 本人，或与调用者共享至少一个网络的合法人类成员；节点令牌不是「人」。
+    // 不可见与不存在都回 404：不让人用状态码探测别人的账号是否存在。
+    const userAvatarMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/avatar\/([^/]+)\.png$/);
+    if (userAvatarMatch && req.method === "GET") {
+      const [, rawUserId, rawVersion] = userAvatarMatch;
+      let targetUserId: string;
+      try { targetUserId = decodeURIComponent(rawUserId); } catch {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      if (!isValidAvatarVersion(rawVersion)) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+      if (!token) return withCors(req, Response.json({ ok: false, error: "token required" }, { status: 401 }));
+      const resolved = resolveToken(token);
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
+      if (isNodeCredential(resolved)) return userTokenRequired(req);
+      const callerId = resolved.user.user_id;
+      if (callerId !== targetUserId) {
+        // live membership：网络必须仍然存在（删除网络只留下 network_members 残行时不算共享）。
+        const shared = db.get<{ ok: number }>(
+          `SELECT 1 AS ok FROM network_members me
+             JOIN networks n ON n.network_id = me.network_id
+             JOIN network_members them ON them.network_id = me.network_id
+            WHERE me.user_id = ?1 AND them.user_id = ?2 LIMIT 1`,
+          [callerId, targetUserId],
+        );
+        if (!shared) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      // 只服务「当前」头像：清空/替换后旧 version 立即失效，即使行还没被删。
+      const current = db.get<{ avatar_url: string | null }>(
+        "SELECT avatar_url FROM users WHERE user_id = ?1", [targetUserId],
+      );
+      if (!current || current.avatar_url !== avatarUrl(targetUserId, rawVersion)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      const row = db.get<{ png: Uint8Array }>(
+        "SELECT png FROM user_avatar_uploads WHERE user_id = ?1 AND version = ?2",
+        [targetUserId, rawVersion],
+      );
+      if (!row) return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      return withCors(req, new Response(Buffer.from(row.png), {
+        status: 200,
+        headers: {
+          "Content-Type": "image/png",
+          // 头像随账号更新，不能让中间层缓存住旧的那张；也不做重定向。
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      }));
     }
 
     if (url.pathname === "/api/auth/me" && req.method === "PUT") {
@@ -1740,6 +2867,56 @@ return Bun.serve({
 
     // ── Agent 分组(RFC-038 §8):owner/admin/Hub 管理员管理;组授权动态生效 ──
     // GET/POST /api/networks/:id/agent-groups · PATCH/DELETE …/:gid · PUT …/:gid/members {node_ids}
+    // #993 — network-scoped rules text (first slice: storage + CAS write + audit).
+    // Inheritance (Hub → Daemon → node) is deliberately NOT here: it needs its own
+    // precedence/conflict decision, and shipping storage first keeps that reviewable.
+    const networkRulesMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/rules$/);
+    if (networkRulesMatch) {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      const netId = decodeURIComponent(networkRulesMatch[1]);
+      const hubAdmin = resolved.user.role === "admin";
+      const role = getUserNetworkRole(resolved.user.user_id, netId);
+      ensureNetworkRulesOnce(db);
+      if (req.method === "GET") {
+        // A node token resolves to the human who created it, which may be a hub
+        // admin — that must not turn a node into a reader of *every* network's
+        // rules. A node token is confined to its own network.
+        if (resolved.networkId && resolved.networkId !== netId) {
+          return withCors(req, Response.json({ ok: false, error: "not_a_member" }, { status: 403 }));
+        }
+        // Reading is for anyone in the network: the rules are what the nodes obey.
+        if (!hubAdmin && !role) return withCors(req, Response.json({ ok: false, error: "not_a_member" }, { status: 403 }));
+        return withCors(req, Response.json({ ok: true, rules: readNetworkRules(db, netId) }));
+      }
+      if (req.method === "PUT") {
+        // Writing changes what every node in the network would inherit.
+        if (resolved.networkId) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+        if (!hubAdmin && role !== "owner" && role !== "admin") {
+          return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
+        }
+        let body: any = null;
+        try { body = await req.json(); } catch { body = null; }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+        }
+        const result = writeNetworkRules(db, netId, body.content, body.expected_revision, {
+          user_id: resolved.user.user_id,
+          username: resolved.user.username ?? null,
+        });
+        if (!result.ok) return withCors(req, Response.json({ ok: false, error: result.error }, { status: result.status }));
+        // An idempotent save (same bytes) changes nothing, so it must not invent an
+        // audit entry that says the rules were updated.
+        if (result.changed) {
+          logAudit(resolved.user.user_id, resolved.user.username ?? null, "network_rules_updated", "network_rules", netId,
+            JSON.stringify({ revision: result.rules.revision, bytes: Buffer.byteLength(result.rules.content, "utf8") }), undefined, netId);
+        }
+        return withCors(req, Response.json({ ok: true, changed: result.changed, rules: result.rules }));
+      }
+      return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+    }
+
     const groupsMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/agent-groups(?:\/([^/]+)(\/members)?)?$/);
     if (groupsMatch) {
       const token = requestToken(req, { allowQueryToken: false });
@@ -1877,6 +3054,11 @@ return Bun.serve({
           restricted: isAgentRestricted(targetUid, netId),
           grants: listAgentGrants(netId, targetUid),
           group_grants: listGroupGrants(netId, targetUid),
+          // 部门维度授权(admin 2026-11-05)：与组授权同构，展开源是部门子树。
+          department_grants: listDepartmentGrants(netId, targetUid),
+          // 覆盖率必须一起给：没填 department_id 的节点永远不可能被部门授权覆盖，
+          // 否则用户会以为「授权了就该全看见」，然后在界面上找不到人。
+          department_coverage: departmentCoverage(netId),
         }));
       }
       // 网络 admin 不能改 owner / 其他 admin 的授权(对他们本来也不生效,但别让 admin 去碰平级)。
@@ -1886,7 +3068,8 @@ return Bun.serve({
       let body: any;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
       if (!body || typeof body !== "object" || Array.isArray(body)) return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
-      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined && body.group_grants === undefined) {
+      if (body.grants === undefined && body.node_ids === undefined && body.agent_access === undefined
+        && body.group_grants === undefined && body.department_grants === undefined) {
         return withCors(req, Response.json({ ok: false, error: "grants or agent_access required" }, { status: 400 }));
       }
       const result = replaceAgentGrants({
@@ -1895,13 +3078,14 @@ return Bun.serve({
         grants: body.grants ?? body.node_ids,
         agentAccess: body.agent_access,
         groupGrants: body.group_grants,
+        departmentGrants: body.department_grants,
         actorUserId: resolved.user.user_id,
       });
       if (!result.ok) {
         return withCors(req, Response.json({ ok: false, error: result.error, ...(result.detail ? { detail: result.detail } : {}) }, { status: result.status }));
       }
       logAudit(resolved.user.user_id, resolved.user.username, "member_agent_grants_changed", "network", netId,
-        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })), group_grants: result.group_grants.map((g) => ({ group_id: g.group_id, can_message: g.can_message })) }).slice(0, 4000),
+        JSON.stringify({ user_id: targetUid, agent_access: result.agent_access, grants: result.grants.map((g) => ({ node_id: g.node_id, alias: g.alias, can_message: g.can_message })), group_grants: result.group_grants.map((g) => ({ group_id: g.group_id, can_message: g.can_message })), department_grants: result.department_grants.map((g) => ({ department_id: g.department_id, can_message: g.can_message })) }).slice(0, 4000),
         undefined, netId);
       // 已连着的观察流 / 用户流按旧权限鉴权过,断开让它按新权限重连。
       closeUserStreamsInNetwork(netId, targetUid);
@@ -1996,7 +3180,9 @@ return Bun.serve({
         // viewer_can:manage = 能改名 / 移动 / 删除 / 换负责人;create_child = 能在它下面建子部门。
         // project_grants(部门项目授权)只给 owner / admin:项目 id 不对只看相关任务的成员公开。
         const departments = listed.departments.map((d) => ({ ...d, viewer_can: { manage: canManage || head.strict.has(d.id), create_child: canManage || head.managed.has(d.id) } }));
-        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
+        // agents_unassigned = 轴2 里没有显式归属的 Agent 数。Dashboard 的「未分组」必须用它，
+        // 不能用「人的未分配」去填（#2822：那是另一个轴，混了就会出现「105 个 Agent 在未分组」）。
+        return withCors(req, Response.json({ ok: true, network_id: netId, departments, members: listed.members, agents_unassigned: listed.agents_unassigned, ...(canManage ? { project_grants: listDepartmentProjectGrants(netId) } : {}) }));
       }
       if (deptSubMatch) {
         const deptId = decodeURIComponent(deptSubMatch[2]);
@@ -2018,7 +3204,7 @@ return Bun.serve({
             return {
               node_id: n.node_id, alias: n.alias, display_name: n.display_name, owner_user_id: n.owner_user_id,
               status: session?.status ?? "offline", last_seen_at: session?.last_seen_at ?? null,
-              health: h?.health ?? null, degraded: degradedLayers(h?.health).map((l) => ({ layer: l.layer, label: l.label, reason: l.reason })),
+              health: h?.health ?? null, degraded: degradedLayers(h?.health).map((l) => ({ layer: l.layer, label: l.label, reason: l.reason, origin: l.origin })),
             };
           });
           return withCors(req, Response.json({ ok: true, network_id: netId, department_id: deptId, nodes }));
@@ -2489,9 +3675,26 @@ return Bun.serve({
       //     dashboard user proxies with the logged-in user's utok_ so
       //     their own network's aliases surface; strangers' networks do
       //     not
-      const count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
+      // 2026-10-31 —— 「200 那一格」原来没有任何 body 判据：ok 恒 true。
+      // 于是「活着但降级」与「一切正常」在读数上同形（与 counters.releases 同族）。
+      // ⇒ 这里记录读库是否成功，供下面的 status 使用；不改变 200 这个 HTTP 承诺。
+      let dbReadable = true;
+      let count: { cnt: number } | undefined;
+      try {
+        count = db.get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM sessions");
+      } catch {
+        dbReadable = false;
+      }
       const sse = getSSEStats();
-      const license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
+      // 2026-10-31 —— 查询失败不再拖垮整个 /health（它有 500 兜底，但健康端点不该因附属数据挂掉），
+      // 并且让「查失败」与「没有 license 行」在读数上可分（见 license-state.ts）。
+      let license: any = null;
+      let licenseQueryFailed = false;
+      try {
+        license = db.get<any>("SELECT type, expires_at FROM licenses LIMIT 1");
+      } catch {
+        licenseQueryFailed = true;
+      }
 
       // Non-fatal auth probe (no 401 — /health must stay 200 anonymous).
       const healthAuth = resolveRequestAuth(req);
@@ -2557,20 +3760,139 @@ return Bun.serve({
       // scopedSessions undefined → sse_sessions field omitted entirely
       // (watchdog + arbitrary internet strangers see aggregates only).
 
+      const statusReasons: string[] = [];
+      if (!dbReadable) statusReasons.push("db_unreadable");
+      if (licenseQueryFailed) statusReasons.push("license_unreadable");
       const body: Record<string, unknown> = {
         ok: true,
+        // 200 是**承诺**（watchdog 契约），不等于「健康」。健康与否放在 body 里：
+        status: statusFromReasons(statusReasons),
+        status_reasons: statusReasons,
         version: SERVER_VERSION,
+        version_source: SERVER_VERSION_SOURCE,
+        // 2026-10-31 —— **version 是部署标签，不是代码指纹**（生产实例：4 分钟内 version 变、
+        // buildCommit 一字未变，同 commit 重新打包）。
+        // ⇒ 任何以 version 为键的巡检/回滚检测都会假跳或永远不跳。
+        // ⇒ 这里把它的角色写进载荷本身，因为**读者不会去查它数的是什么**。
+        //    判据：监控/告警/对账只认 buildCommit（本字段鉴权可见）；version 只用于人读。
+        version_role: "deployment_label",
         api_version: "v3",
         transport: "streamable-http",
-        sessions_count: count?.cnt ?? 0,
+        // 2026-10-31 —— 读库失败时给 null，不给 0。
+        // 「0 个会话」与「读不到」在读数上同形，而 0 是一个合法值 ⇒ 它会被当成事实。
+        // 兄弟字段 status_reasons 里已有 db_unreadable，两者一起读才构成完整读数。
+        sessions_count: count?.cnt ?? null,
         sse_connections: sse.total,
+        // #2363 —— MCP 在飞数（只观测）。RSS 与它成正比（≈1.2–1.4 MB/条），
+        // 而 `sse_connections` 只反映长连接，看不到“同秒打进来的一批请求”。
+        mcp_inflight: getMcpInflightStats().inflight,
+        mcp_inflight_peak: getMcpInflightStats().peak,
+        // #2614 —— 事件循环停顿。`mcp_inflight` 只能说明“有多少请求在排队”，
+        // 说明不了“服务端为什么卡”。这里给出停顿本身：max_gap_ms 是进程内
+        // 单次 tick 的最大间隔（正常 ≈250ms），recent_stalls 保留最近 20 次
+        // 超过阈值的停顿（含当时 RSS），用于和内存曲线对齐。
+        event_loop: eventLoopStats(),
+        // #2571 —— 告警阈值用的「每目标 p99 基线」最近一次刷新（只读聚合：时间/写了几行/现在共几行）。
+        // 没有它，「这条告警为什么没报」只能进机器 sqlite 查。
+        alert_baselines: aliasBaselineRefreshState(),
+        // #2721 —— 最近一次广播（时间/收件人数/批数/耗时）。广播是唯一能一次性唤醒
+        // 几百个 agent 的动作；没有这一格，事后只能把停顿记录和聊天记录对时间。
+        broadcast: broadcastRecentState(),
+        // #2756 —— Hub 自己所在磁盘的水位。
+        //
+        // 为什么要进 /health：2026-10-28 04:05 我做巡检时才发现根分区已经 95%（剩 28G）——
+        // 上一轮清理（85%）之后它只用了一天多就涨回去 10 个点，靠人「偶尔看一眼」
+        // 必然会漏。Hub 的 DB、日志、运行时目录都写在这块盘上，写满即生产停摆，
+        // 所以这个数字应该和 sessions/stalls 一样随手可见。
+        host_disk: redactHomeInPath(hostDiskState()),
         auth: DEV_OPEN ? "dev-open" : "user-token",
         security: DEV_OPEN ? "dev-open" : "secured",
         tmux: TMUX_ENABLED ? "enabled" : "disabled",
         v3_auth: true,
         multi_network: true,
-        license: license?.type || "none",
+        // 兼容字段：语义不精确（"none" 同时表示「没有行」「type 为空」「查失败」），勿用于判据。
+        license: legacyLicenseField(license),
+        // 判据请用这个三态：known / absent / unknown(reason)
+        license_state: licenseStateOf(license, licenseQueryFailed),
         uptime: Math.floor(process.uptime()),
+        // 2026-10-31 —— 把窗口起点显式暴露。
+        // 同一响应里的 stall_count / last_stall_at / recent_stalls 以及各 …last_error_at
+        // 的观测窗口都只是 [startedAt, now]，重启即归零。
+        // 只给 uptime 时读者要自己换算，实际使用中经常被忽略 ⇒
+        // “stall_count: 0”于是被读成“从未卡顿”。给出绝对时刻让窗口可被外部计算。
+        startedAt: startedAtIso,
+        // 2026-10-31 —— 「站位」要可验，但**可读性必须与敏感性配对**。
+        //
+        // /health 是**匿名**端点（watchdog 契约）。commit sha 对匿名读者等于
+        // 「精确告诉外部这是哪一版代码」——本仓是公开仓 ⇒ 等于把已知问题清单指给外人。
+        // ⇒ 匿名只回答「有没有构建标识」，**不给是什么**；完整值只给已鉴权者。
+        //    与 SSE 明细同一条规则：匿名给聚合、鉴权给明细。
+        build_identified: BOOT_GIT_COMMIT !== null,
+        // 2026-10-31 —— 常驻的 served_at：让「窗口」有两个时刻戳，而不是只有一个起点。
+        //
+        // 没有它，读者算速率只能拿**自己的**时钟去减 since ⇒ 偷偷假设了「我的钟和他的钟一致」。
+        // 而计数器是这台机器上的累计值 ⇒ 窗口的两端必须在**同一个时钟域**里。
+        // 判据：凡是速率/窗口类字段，分子分母各要自己的时刻戳；**被声明的那个永远不算**。
+        served_at: new Date().toISOString(),
+        // 2026-10-31 —— 内核口径的进程身份：**这一组是判据**（不含单位假设、不会被自报值否决）。
+        // 「进程在自报时间上撒谎」不再表现为 null，而是 epoch_agreement=disagree + 差值。
+        boot_id: BOOT_KERNEL_START.boot_id,
+        pid: BOOT_KERNEL_START.pid,
+        proc_start_ticks: BOOT_KERNEL_START.proc_start_ticks,
+        kernel_started_at: BOOT_KERNEL_START.kernel_started_at,
+        kernel_started_at_note: BOOT_KERNEL_START.kernel_started_at_note,
+        // 判据是上面三元组；这两个只是把「内核 vs 自报」的分歧**显式化**，
+        // 而不是像原来那样把它折进一个 null（null 会让「算不出来」和「两边打架」同形）。
+        clk_tck_assumed: BOOT_KERNEL_START.clk_tck_assumed,
+        clk_tck_source: BOOT_KERNEL_START.clk_tck_source,
+        // 2026-10-31 —— confirmed 必须报「差多少」并给误差界，否则它会被读成「精确」，
+        // 而它只是「在一个没写出来的容差内」。
+        clk_tck_delta: CLK_TCK_DELTA,
+        kernel_started_at_error_ms: CLK_TCK_ERROR_MS,
+        clk_tck_guard_min_suspend_s: CLK_TCK_GUARD_MIN_SUSPEND_S,
+        clk_tck_assumed_reason: CLK_TCK_ASSUMED_REASON,
+        clk_tck_estimate: CLK_TCK_ESTIMATE,
+        host_uptime_s: HOST_UPTIME_S,
+        suspend_total_s: BOOT_KERNEL_START.suspend_total_s,
+        epoch_agreement: BOOT_KERNEL_START.epoch_agreement,
+        epoch_delta_ms: BOOT_KERNEL_START.epoch_delta_ms,
+        // 🔴 这一对**属于鉴权投影**（不在 PUBLIC_HEALTH_KEYS 里）：
+        //    commit sha 对匿名读者 = 精确告诉外部这是哪一版代码（本仓公开）。
+        //    与 git_commit 成对：dirty=true ⇒ 只能写 prod@自称，不能写 prod@<sha>。
+        git_commit: BOOT_GIT_COMMIT,
+        git_dirty: BOOT_GIT.commit ? BOOT_GIT.dirty : null,
+        // 2026-10-31 —— 每个可为 null 的字段都要有一个**能解释它的兄弟字段**。
+        // 没有它时，「不是 git 树」「git 不可用」「rev-parse 输出异常」三种成因同形。
+        build_identity_note: BOOT_GIT.reason,
+        git_identity_root: BOOT_GIT.root_kind,
+        // 2026-10-31 —— 拒绝原因计数（与那条日志同一位置 +1，不会漏记）。
+        // 🔴 必须带窗口：计数器随进程重启归零，而「归零」与「没有发生」在读数上同值。
+        //    所以它和 startedAt 一起读 —— 窗口 = [startedAt, now]。
+        //    （历史教训：拿累计值除以 uptime 当速率 ⇒ 分母与分子不独立 ⇒ 刚重启必假阳性。）
+        counters: {
+          since: startedAtIso,
+          task_rejections: taskRejectionCounters(),
+          // #3271 —— 「到死都没被取走」按节点分桶。窗口用同一个 since。
+          task_expiries_never_consumed: neverConsumedExpiryCounters(),
+          // #3314 B 类 —— 故意匿名的那两条路由（register / login）没有身份门，
+          // 它们的健康度只能从「限流与锁定命中了几次、打到了几个不同来源」读出来。
+          // 比值才是有意义的部分：命中数 ≫ 去重数 ⇒ 单点重试；两者接近 ⇒ 换 IP / 撒网。
+          // 只给计数与去重数，不给 IP / 用户名的值（集合本身不出进程）。
+          auth_abuse: authAbuseSnapshot(),
+          // #669 —— 父任务推断的收窄效果：accepted 与两个 rejected 一起看，
+          // 否则「收窄了多少」与「收窄没生效」同形（两者都让 7 天失败率下降）。
+          parent_infer: parentInferCounters(),
+        },
+        // 🔴 2026-10-31 —— 上面那个 counters 对象**不在匿名投影里**（PUBLIC_HEALTH_KEYS）。
+        //    而 #3271 交付时我把「观察它有没有 fire」写成了 `/health.counters.…` ——
+        //    没有 token 的读者看不到它 ⇒ 那条 must-fire 判据**我自己也没法验**。
+        //    ⇒ 聚合值走匿名投影：**只给总数与窗口，不给 by_node**（节点名是拓扑，计数不是）。
+        //    这也与 sessions_count 同一条取舍：规模可以公开，明细不行。
+        task_expiries_never_consumed_total: neverConsumedExpiryCounters().total,
+        // #3193 子卡 —— 拒绝计数同一个缺口：原来只在鉴权投影里。聚合给匿名，by_reason 留鉴权。
+        task_rejections_total: taskRejectionCounters().total,
+        // 窗口的另一端：计数器随进程重启归零，而「归零」与「没有发生」同值 ⇒ 必须配起点。
+        counters_since: startedAtIso,
         // #496 — public, stable capability data. Dashboard upload proxies
         // need the Hub's real limits before opening a streaming request;
         // duplicating these constants client-side creates a silent
@@ -2586,7 +3908,62 @@ return Bun.serve({
         capabilities: HUB_HEALTH_CAPABILITIES,
       };
       if (scopedSessions !== undefined) body.sse_sessions = scopedSessions;
-      return withCors(req, Response.json(body));
+
+      // 🔴 投影放在**最外层**：先构全量，再决定给谁。
+      //    这样新字段默认落在鉴权侧；只有显式写进 PUBLIC_HEALTH_KEYS 的才匿名可见。
+      // 🔴 白名单只作用于**匿名**读者。
+      //    任何已鉴权调用者（成员 token / master / admin / dev-open）拿到全量 ——
+      //    否则会把「成员可见的 sse_sessions」误伤成匿名投影（我曾这么错过一次）。
+      //    安全边界在「有没有身份」，不在「身份多高」。
+      //    注意：投影必须调用在**所有字段写完之后**（探针字段是后加的），
+      //    所以这里只做一个惰性函数，而不是提前算好一个快照。
+      const isAnonymous = !healthAuth && !healthIsMaster && !healthIsDevOpen;
+      const shape = (b: Record<string, unknown>) => (isAnonymous ? projectPublicHealth(b) : b);
+      // 2026-10-31 —— 「这一次」的判据（探针回显）。
+      //
+      // /health 恒 200，于是「200」只证明*某处*有个 200：证不了是这台机器、这个进程，
+      // 更证不了**是这个请求**。缓存层、前面的代理、上一次运行留下的响应，
+      // 都会给出同一个 200 —— 而且失败不会产生空值，它产生的是**上一次的值**。
+      //
+      // 请求方带一个随机 nonce（`X-Probe-Nonce`），我们原样回显：
+      //   响应体里出现这个 nonce ⇔ 这个响应是在**收到这个请求之后**生成的。
+      // 这比 `startedAt` 强一格：startedAt 证明「某个实例在答」，nonce 证明「这一次」，
+      // 因为缓存不可能为一个**新的** nonce 生成响应。
+      //
+      // 🔴 只在带该头时追加两个键，默认响应体逐字节不变（那边有键集断言钉着）。
+      const probeNonce = probeNonceOf(req);
+      if (probeNonce) {
+        body.probe_nonce = probeNonce;
+        // `served_at` 现在是**常驻**字段（见 base body）：它给的是这个响应生成时的服务端时刻，
+        // 与 counters.since / startedAt 同一时钟域 ⇒ 窗口两端可比。
+        // 但它仍然**不证明新鲜**：证明“这一次”的是 probe_nonce（缓存不可能为新 nonce 生成响应）。
+        // 2026-10-31 —— 「三件套」的第③件：把 nonce 写进**响应之外**的地方。
+        //   ① body code      住在响应里（层标识）
+        //   ② probe_nonce    住在响应里（本次标识）
+        //   ③ 这一行日志      住在响应之外 ⇒ 中间层能伪造响应，伪造不了服务端日志
+        // 判据：探针发 nonce（一次性、不复用）⇒ 响应回显 ⇒
+        //       `grep -c "probe nonce=<value>" <hub log>` 必须为 **1**。
+        //   == 1 ⇒ 这次请求真的到了这个进程；
+        //   == 0 ⇒ 响应是别处伪造/伪造不了的日志缺失；
+        //   > 1  ⇒ 有人在复用同一个 nonce（重试没换）⇒ 那次读数不可信（见下）。
+        // 🔴 nonce 必须一次性：重试要生成新的。复用会让缓存返回上一次的响应，
+        //    而那响应里恰好有同一个 nonce ⇒ 会被读成“新鲜”。上面那条 ==1 正是拦它的。
+        // 只在带该头时打印，所以日志量与探针次数同阶，不随请求速率增长。
+        console.log(`[health] probe nonce=${probeNonce}`);
+      }
+      // 2026-10-31 —— **单一出口**。
+      // 之前是两个 return 各自记得调 shape()（匿名投影）—— 而「必须在所有字段写完之后执行」
+      // 的变换，多出口 × 惰性 = 迟早漏：下一个人加第三条出口（比如 degraded 分支）就会裸奔。
+      // ⇒ 收敛成一个 return，投影与 header 都在这里做完。
+      const healthRes = Response.json(shape(body));
+      // 2026-10-31 —— **一律不可缓存**，不只是带 nonce 的那一份。
+      //
+      // 原来只有 probe_nonce 存在时才设 no-store。而 /health 的每个字段都是「此刻的读数」：
+      // 一旦某层做协商缓存返回 304，`startedAt` 会冻结而 `counters` 照涨 ——
+      // **那正是 flapping 的假阳性形状**（看起来像「刚重启过」）。
+      // ⇒ 探针还必须显式断言 200 而非 304（见 health-redaction 的对应用例）。
+      healthRes.headers.set("Cache-Control", "no-store");
+      return withCors(req, healthRes);
     }
 
     // ── All REST /api endpoints require auth (if token configured) ──
@@ -2604,6 +3981,28 @@ return Bun.serve({
     // 按授权放行,人类数据用 addHumanNetworkScope。
     if (restScope.denied) {
       return withCors(req, Response.json({ ok: false, error: restScope.denied }, { status: 403 }));
+    }
+
+    // #2969 续 —— REST 写接口白名单：唯一 choke point。
+    //
+    // 为什么在这里而不是逐条路由：节点令牌的 REST 写面分散在两套判据里
+    // （server.ts 的 restNodeDenied + requirements.ts 的 nodeTaskGate）。
+    // 逐站点加会变成第三套规则，且漏掉任一处就是「装了一半的安全开关」——
+    // 那比没有更危险，因为它会被当成已经收紧了。
+    //
+    // 三条边界：
+    //   · 只对**节点令牌**生效（用户令牌 / daemon 令牌不受影响）
+    //   · 只对**写方法**生效：GET 与 SSE 永不经过这里 —— 挡掉 SSE 节点会变聋
+    //   · 只在**设置了清单**时生效：NULL = 不限制，与 MCP 工具白名单同构
+    if (restAuth?.networkId && WRITE_METHODS.has(req.method)) {
+      const restNode = nodeIdentity(restAuth.tokenId, restAuth.networkId);
+      if (restNode?.restAllowlist) {
+        const label = restRouteLabel(req.method, url.pathname);
+        const verdict = restAllowlistVerdict(restNode, label);
+        if (verdict && nodeDecide(restNode, label, verdict)) {
+          return withCors(req, Response.json(nodePermissionDeniedBody(verdict.reason, label), { status: 403 }));
+        }
+      }
     }
 
     // #629: only actual user credentials gain lifecycle read metadata. Legacy
@@ -2655,6 +4054,11 @@ return Bun.serve({
     });
     if (externalScheduleEditResponse) return withCors(req, externalScheduleEditResponse);
 
+    const sourceResponse = await sessionSourceTransport(req, url);
+    if (sourceResponse) return withCors(req, sourceResponse);
+    const sessionControlResponse = await nodeSessionControl(req, url);
+    if (sessionControlResponse) return withCors(req, sessionControlResponse);
+
     // Hub-owned scheduled tasks. Dashboard and mobile are management
     // clients only; each occurrence is dispatched as an ordinary task by the
     // scheduler started in startHub(). Node tokens are rejected in the
@@ -2692,13 +4096,261 @@ return Bun.serve({
       // 看不见这个节点(不在它的网络里)与不存在同一个 404。
       if (!node || !node.network_id || (!role && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
       // 节点主人、网络 owner / admin、Hub 管理员能改;部门负责人和别的成员不能(RFC-041 §2.3 / §2.4)。
-      if (!isAdmin && node.owner_user_id !== restAuth.userId && role !== "owner" && role !== "admin") {
+      if (!canRestWriteNodeSecurity(restAuth, node.owner_user_id, role, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its permission mode" }, { status: 403 }));
       }
       const previous = (node.permission_mode || "normal") as NodePermissionMode;
       db.run("UPDATE nodes SET permission_mode = ?1 WHERE node_id = ?2", [mode, node.node_id]);
       logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode }), getClientIP(req), node.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node.node_id, permission_mode: mode, previous }));
+    }
+    // 2026-10-31 —— **读侧：这个节点当前用的是哪个 provider / 模型**（#3145 的数据面）。
+    // 写侧（切哪个）已有 requestProviderApplication（MCP），但客户端要"显示当前"，需要一个 REST 读口，
+    // 否则界面只能显示上次操作的结果——而"上次操作"与"现在生效"不是同一件事。
+    const providerSelMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/provider-selection$/);
+    if (providerSelMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const nodeRef = decodeURIComponent(providerSelMatch[1]);
+      const node = db.get<{ node_id: string; network_id: string | null }>(
+        "SELECT node_id, network_id FROM nodes WHERE node_id = ?1", nodeRef);
+      const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
+      if (!node || !node.network_id || (!role && !isAdmin)) {
+        // 2026-10-31 —— 外部复核：「当一个选项对应两种修法相反的成因时，它不是选项，是问题的前半句。」
+        // 这里 404 同时表示「不存在」与「不在你的可见范围」，两者修法相反（找对节点 vs 申请权限）。
+        // 合并是**故意的**（否则可以枚举网络里有哪些节点），所以不能靠 hint 猜一个成因 ——
+        // 只能把「这是有意合并的」写进载荷，让前端不臆断。
+        return withCors(req, Response.json({
+          ok: false, error: "node_not_found",
+          note: "不存在，或不在你的可见范围内（两者故意同码，避免枚举）",
+        }, { status: 404 }));
+      }
+      const row = db.get<{ request_id: string; status: string; observed_at: number | null; snapshot_json: string | null; error: string | null }>(
+        `SELECT request_id, status, observed_at, snapshot_json, error FROM daemon_provider_snapshots
+          WHERE network_id = ?1 AND daemon_node_id = ?2 AND request_id LIKE 'dpa\_%' ESCAPE '\\'
+          ORDER BY created_at DESC LIMIT 1`,
+        node.network_id, node.node_id);
+      // 三态而不是「有/没有」：从未切换过 / 正在切 / 切失败，界面要给的下一步完全不同。
+      //
+      // 2026-10-31 —— **兜底不许是最乐观的那一档**：
+      // 原来写的是 `… ? "failed" : "applied"`，即任何**没被枚举到**的 status 都会折叠成「已生效」。
+      // 而 daemon 侧新增一个状态（取消 / 回滚 / 拼错的 succeeded_）时，界面会读到「切好了」——
+      // 这是所有折叠方向里唯一会**主动撒谎**的方向。
+      // ⇒ 改成闭集显式映射；不在表里的 status 报 unknown 并把原值带出去（不猜、不美化）。
+      // 表本身提到模块作用域并 export：它是**取值域的生产者**，客户端 union 是另一份手写清单，
+      // 两者必须能被同一条断言比较（否则「今天同值」永远只是巧合）。
+      const state = !row ? "never_switched" : (SELECTION_STATE_BY_STATUS[row.status] ?? "unknown");
+      let selection: unknown = null;
+      if (row?.snapshot_json) { try { selection = JSON.parse(row.snapshot_json); } catch { selection = null; } }
+      return withCors(req, Response.json({
+        ok: true,
+        node_id: node.node_id,
+        state,
+        selection,
+        revision: (selection as any)?.expected_revision ?? null,
+        // #1650 —— 这一列是 **INTEGER（ms epoch）**，不是 hub 那种「不带时区标记的 TEXT」。
+        // 棘轮看见「把这一列直接塞进 Date 构造器」会拦下它（形状相同、类型不同），
+        // 而**照它的建议改成 parseHubTimestamp 就是错的**：那函数只吃字符串，数字一律返回 null，
+        // 于是「有观测时间」会静默变成「从没观测过」。
+        // ⇒ 正解是把单位写进名字，让形状自己说清它是 ms。
+        observed_at: (() => {
+          const observedAtMs = row?.observed_at ?? null;
+          // 与原意一致：0 / 缺失都当「没有」。
+          return observedAtMs ? new Date(observedAtMs).toISOString() : null;
+        })(),
+        ...(state === "failed" ? { error: row?.error ?? null } : {}),
+        ...(state === "never_switched"
+          // 2026-10-31 —— **hint 必须自带动作**（外部复核：互斥选项若需要不同动作才能区分，
+          // 「一次动作」就只对其中一部分成立；同理，一句只描述状态的 hint 产不出下一步）。
+          // 原来这句只说「显示的是本地默认配置」——读者知道现状，但不知道该做什么。
+          ? { hint: "这个节点还没有被切换过 provider，现在显示的是它本地的默认配置（不是 Hub 的读数）。要看 Hub 这份读数，先给节点切一次：POST 同一路由 {revision, selection}，再 GET 回读 state 是否变 applied" }
+          : {}),
+        ...(state === "unknown"
+          ? {
+              observed_status: row?.status ?? null,
+              hint: "Hub 读到一个它不认识的切换状态；**这不等于已生效**，也不等于失败 —— 去 daemon 侧看这次请求的实际结果",
+            }
+          : {}),
+      }));
+    }
+    // 2026-10-31 —— **写侧：切这个节点的 provider / 模型**（#3146 的第一个动作面）。
+    // 直接复用 requestProviderApplication（校验/授权/加密下发都在那边），
+    // 这里只做两件 REST 侧的事：把「切换前是什么」一起回给对方，并给出下一步该看什么。
+    if (providerSelMatch && req.method === "POST") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const nodeRef = decodeURIComponent(providerSelMatch[1]);
+      const node = db.get<{ node_id: string; network_id: string | null }>(
+        "SELECT node_id, network_id FROM nodes WHERE node_id = ?1", nodeRef);
+      const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
+      if (!node || !node.network_id || (!role && !isAdmin)) {
+        // 同 GET：404 同时表示「不存在」与「不可见」，两者修法相反，合并是故意的 ⇒ 只说明「有意合并」
+        return withCors(req, Response.json({
+          ok: false, error: "node_not_found",
+          note: "不存在，或不在你的可见范围内（两者故意同码，避免枚举）",
+        }, { status: 404 }));
+      }
+      let body: any = null;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const revision = Number.isSafeInteger(body?.revision) ? body.revision : NaN;
+      if (!Number.isSafeInteger(revision) || revision < 0) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_revision", hint: "传节点当前的 config revision；不确定就先 GET 同一路由" }, { status: 400 }));
+      }
+      // 切换前读数（对照）：没有它，「切成功了吗」只能靠客户端自己记住上一次
+      const beforeRow = db.get<{ snapshot_json: string | null }>(
+        `SELECT snapshot_json FROM daemon_provider_snapshots
+          WHERE network_id = ?1 AND daemon_node_id = ?2 AND request_id LIKE 'dpa\_%' ESCAPE '\\'
+          ORDER BY created_at DESC LIMIT 1`, node.network_id, node.node_id);
+      let before: unknown = null;
+      if (beforeRow?.snapshot_json) { try { before = JSON.parse(beforeRow.snapshot_json); } catch { before = null; } }
+
+      const applied = requestProviderApplication(
+        { userId: restAuth.userId ?? null, isNode: false, networkId: node.network_id },
+        node.node_id, revision, body?.selection,
+      );
+      if (!applied.ok) {
+        const status = applied.error === "user_token_required" ? 401
+          : applied.error === "provider_admin_required" ? 403
+          : applied.error === "daemon_not_found" ? 404
+          : applied.error === "application_target_not_bound" ? 400
+          : applied.error === "invalid_application" ? 400
+          : 409;
+        return withCors(req, Response.json({ ...applied, before }, { status }));
+      }
+      return withCors(req, Response.json({
+        ok: true,
+        node_id: node.node_id,
+        request_id: applied.request_id,
+        state: "pending",
+        before,               // 切换前（可能为 null = 从未切换过）
+        // #1650 —— 同上：`expires_at` 这里是 **number（ms epoch）**，不是 TEXT 列。
+        // 放进 `expiresAtMs` 而不是直接塞进 new Date(...)：名字说明单位，棘轮也就不会误拦。
+        expires_at: (() => { const expiresAtMs = applied.expires_at; return new Date(expiresAtMs).toISOString(); })(),
+        hint: "已排队；用 GET 同一路由回读 state=applied 才算生效（pending 不等于生效）",
+      }, { status: 202 }));
+    }
+    // #2969 后半 —— 接口白名单：PUT /api/nodes/:id/tool-allowlist { tools: string[] | null }
+    // 与 peer-allowlist 同一套授权口径。
+    const toolAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/tool-allowlist$/);
+    if (toolAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawTools = body?.tools;
+      if (rawTools !== null && rawTools !== undefined && !Array.isArray(rawTools)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_tools", message: "tools must be an array of MCP tool names, or null" }, { status: 400 }));
+      }
+      const tools = Array.isArray(rawTools)
+        ? rawTools.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      // #2969 —— 空数组是**歧义的**，直接拒，不猜。
+      //
+      // 发生过的事：客户端把「[] = 不允许任何工具」做进了界面（PR #1165），
+      // 而 Hub 这边 `tools.length ? ... : null` 会把 [] 规范化成 null = **不限制**。
+      // 两边语义相反，结果是「用户以为收紧了，系统其实放开了」——比没有这个选项更糟。
+      //
+      // 三种做法里选了最不含糊的一种：
+      //   · 把 [] 当「禁止一切」  → 老客户端「清空」按钮会变成把节点封死，回归风险太大
+      //   · 把 [] 当 null（现状） → 界面可以无声地说「全部禁止」而实际全放开，安全洞
+      //   · 拒收 []（本实现）     → 调用方当场看到 400 和一句「清空请传 null」，没有静默行为
+      if (Array.isArray(rawTools) && tools.length === 0) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "empty_allowlist_ambiguous",
+          message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected",
+        }, { status: 400 }));
+      }
+      if (tools.length > 500) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_tools", message: "at most 500 entries" }, { status: 400 }));
+      }
+      const nodeRef3 = decodeURIComponent(toolAllowMatch[1]);
+      const node3 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; tool_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, tool_allowlist FROM nodes WHERE node_id = ?1", nodeRef3);
+      const role3 = node3?.network_id ? getUserNetworkRole(restAuth.userId, node3.network_id) : null;
+      if (!node3 || !node3.network_id || (!role3 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!canRestWriteNodeSecurity(restAuth, node3.owner_user_id, role3, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its tool allowlist" }, { status: 403 }));
+      }
+      const nextTools = tools.length ? JSON.stringify(tools) : null;
+      db.run("UPDATE nodes SET tool_allowlist = ?1 WHERE node_id = ?2", [nextTools, node3.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_tool_allowlist_changed", "node", node3.node_id, JSON.stringify({ from: node3.tool_allowlist, to: nextTools }), getClientIP(req), node3.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node3.node_id, tools: tools.length ? tools : null }));
+    }
+    // #2969 续 —— REST 写接口白名单：PUT /api/nodes/:id/rest-allowlist { routes: string[] | null }
+    // 与 tool-allowlist 同一套授权口径与空数组语义（拒收 []，清空请传 null）。
+    const restAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/rest-allowlist$/);
+    if (restAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawRoutes = body?.routes;
+      if (rawRoutes !== null && rawRoutes !== undefined && !Array.isArray(rawRoutes)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_routes", message: "routes must be an array of route labels like \"POST /api/task\", or null" }, { status: 400 }));
+      }
+      const routes = Array.isArray(rawRoutes)
+        ? rawRoutes.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      if (Array.isArray(rawRoutes) && routes.length === 0) {
+        return withCors(req, Response.json({ ok: false, error: "empty_allowlist_ambiguous", message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected" }, { status: 400 }));
+      }
+      if (routes.length > 200) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_routes", message: "at most 200 entries" }, { status: 400 }));
+      }
+      const nodeRef4 = decodeURIComponent(restAllowMatch[1]);
+      const node4 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; rest_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, rest_allowlist FROM nodes WHERE node_id = ?1", nodeRef4);
+      const role4 = node4?.network_id ? getUserNetworkRole(restAuth.userId, node4.network_id) : null;
+      if (!node4 || !node4.network_id || (!role4 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!canRestWriteNodeSecurity(restAuth, node4.owner_user_id, role4, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its REST allowlist" }, { status: 403 }));
+      }
+      const nextRoutes = routes.length ? JSON.stringify(routes) : null;
+      db.run("UPDATE nodes SET rest_allowlist = ?1 WHERE node_id = ?2", [nextRoutes, node4.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_rest_allowlist_changed", "node", node4.node_id, JSON.stringify({ from: node4.rest_allowlist, to: nextRoutes }), getClientIP(req), node4.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node4.node_id, routes: routes.length ? routes : null }));
+    }
+
+    // #2969 —— 节点级对端白名单：PUT /api/nodes/:id/peer-allowlist { peers: string[] | null }
+    // 与 permission-mode 同一套授权口径（用户令牌 + 节点主人 / 网络 owner·admin / Hub 管理员）。
+    // peers 为 null 或空数组 ⇒ 清空（不限制），与「没有这一列」等价。
+    const peerAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/peer-allowlist$/);
+    if (peerAllowMatch && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const rawPeers = body?.peers;
+      if (rawPeers !== null && rawPeers !== undefined && !Array.isArray(rawPeers)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_peers", message: "peers must be an array of alias/node_id strings, or null" }, { status: 400 }));
+      }
+      const peers = Array.isArray(rawPeers)
+        ? rawPeers.filter((x: unknown): x is string => typeof x === "string" && x.trim().length > 0).map((x: string) => x.trim())
+        : [];
+      // 同 tool-allowlist：空数组歧义，拒收；清空请传 null。
+      if (Array.isArray(rawPeers) && peers.length === 0) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "empty_allowlist_ambiguous",
+          message: "send null to clear the allowlist (no restriction); an empty array is ambiguous and is rejected",
+        }, { status: 400 }));
+      }
+      if (peers.length > 200) {
+        return withCors(req, Response.json({ ok: false, error: "too_many_peers", message: "at most 200 entries" }, { status: 400 }));
+      }
+      const nodeRef2 = decodeURIComponent(peerAllowMatch[1]);
+      const node2 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; peer_allowlist: string | null }>(
+        "SELECT node_id, network_id, owner_user_id, peer_allowlist FROM nodes WHERE node_id = ?1", nodeRef2);
+      const role2 = node2?.network_id ? getUserNetworkRole(restAuth.userId, node2.network_id) : null;
+      if (!node2 || !node2.network_id || (!role2 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!canRestWriteNodeSecurity(restAuth, node2.owner_user_id, role2, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its peer allowlist" }, { status: 403 }));
+      }
+      const nextValue = peers.length ? JSON.stringify(peers) : null;
+      db.run("UPDATE nodes SET peer_allowlist = ?1 WHERE node_id = ?2", [nextValue, node2.node_id]);
+      logAudit(restAuth.userId, restAuth.username, "node_peer_allowlist_changed", "node", node2.node_id, JSON.stringify({ from: node2.peer_allowlist, to: nextValue }), getClientIP(req), node2.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: node2.node_id, peers: peers.length ? peers : null }));
     }
     const permReportMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/node-permission-report$/);
     if (permReportMatch && req.method === "GET") {
@@ -2718,21 +4370,196 @@ return Bun.serve({
            FROM node_permission_log WHERE network_id = ?1 AND hour >= ?2
           GROUP BY node_id, route, reason ORDER BY node_id, route, reason`,
         networkId, sinceHour);
-      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }> }>();
+      const byNode = new Map<string, { node_id: string; alias: string | null; permission_mode: string; total: number; by_reason: Record<string, number>; routes: Array<{ route: string; reason: string; hits: number; sample: string | null; last_hour: string }>; tool_calls?: Array<{ tool: string; hits: number }>; tool_calls_total?: number; unbound_token?: boolean; unbound_token_name?: string | null; enforce_impact: Record<string, number> }>();
       for (const r of rows) {
         let entry = byNode.get(r.node_id);
         if (!entry) {
           const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", r.node_id);
-          entry = { node_id: r.node_id, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [] };
+          entry = { node_id: r.node_id, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [], enforce_impact: {} };
           byNode.set(r.node_id, entry);
         }
         const hits = Number(r.hits);
         entry.total += hits;
         entry.by_reason[r.reason] = (entry.by_reason[r.reason] ?? 0) + hits;
+        // #2970 判据④ 演练发现：这些行数**不等于**「打开 enforce 行为会变」的次数。
+        // 按 enforceImpactOf 分三类，让管理员看得出哪些是真增量、哪些本来就被拦着。
+        const impact = enforceImpactOf(r.reason as any);
+        entry.enforce_impact[impact] = (entry.enforce_impact[impact] ?? 0) + hits;
         entry.routes.push({ route: r.route, reason: r.reason, hits, sample: r.sample, last_hour: r.last_hour });
       }
-      const nodes = [...byNode.values()].sort((a, b) => b.total - a.total || a.node_id.localeCompare(b.node_id));
-      return withCors(req, Response.json({ ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(), total: nodes.reduce((n, e) => n + e.total, 0), nodes }));
+      // #2969 —— 按节点的工具调用明细。
+      // 为什么要这个：管理员在设「只能用哪些工具」之前，需要先看**这台节点实际用过哪些**，
+      // 否则白名单只能凭想象写，第一次上线就是拦掉在用的工具。
+      // 之前账本只有网络级合计（by_tool），且 nodes 只从「被拒过的行」聚合 ——
+      // 一台从不越界但天天在用的节点，在报表里根本不存在。
+      //
+      // #2971 之后账本包含读类工具，这里的明细才第一次是「全部调用面」而不是「会被拦的那部分」。
+      const perNodeCalls = db.all<{ node_id: string; tool: string; hits: number | string }>(
+        `SELECT node_id, tool, SUM(hits) AS hits FROM node_tool_calls
+          WHERE network_id = ?1 AND hour >= ?2
+          GROUP BY node_id, tool ORDER BY node_id, SUM(hits) DESC`,
+        networkId, sinceHour,
+      );
+      const callsByNode = new Map<string, Array<{ tool: string; hits: number }>>();
+      for (const r of perNodeCalls) {
+        const list = callsByNode.get(r.node_id) ?? [];
+        list.push({ tool: r.tool, hits: Number(r.hits) });
+        callsByNode.set(r.node_id, list);
+      }
+      // 有调用但没被拒过的节点也要出现在结果里（total = 0）。
+      for (const nodeId of callsByNode.keys()) {
+        if (byNode.has(nodeId)) continue;
+        const n = db.get<{ alias: string | null; permission_mode: string | null }>("SELECT alias, permission_mode FROM nodes WHERE node_id = ?1", nodeId);
+        byNode.set(nodeId, { node_id: nodeId, alias: n?.alias ?? null, permission_mode: n?.permission_mode || "normal", total: 0, by_reason: {}, routes: [], enforce_impact: {} });
+      }
+      for (const entry of byNode.values()) {
+        const list = callsByNode.get(entry.node_id) ?? [];
+        entry.tool_calls = list;
+        entry.tool_calls_total = list.reduce((n, e) => n + e.hits, 0);
+        // 未绑定节点的令牌：账本用 `token:<token_id>` 当键（nodeIdentity 的老路径）。
+        // 它们**没有 nodes 行**，所以两张白名单都管不到它们（toolAllowlist 为 null ⇒ 不限制）。
+        // 报表里必须显式标出来，否则管理员会以为「名单之外没有别人在派活」。
+        // 这里只标注，不改变任何判定。
+        if (entry.node_id.startsWith("token:")) {
+          entry.unbound_token = true;
+          // 令牌名往往就是答案：账本里是 `token:tok_xxx`，光看这个没法处理。
+          // 线上实测这 4 个令牌的名字是 `node:ANet基建` / `node:TMWork` …，而 nodes 表里
+          // 已经没有这些 alias 了 —— 节点改过名、令牌没跟着改，于是解析成「未注册」，
+          // 白名单静默不生效。把名字带出来，管理员才知道该改哪个令牌。
+          const tok = db.get<{ name: string | null }>("SELECT name FROM api_tokens WHERE token_id = ?1", entry.node_id.slice(6));
+          entry.unbound_token_name = tok?.name ?? null;
+        }
+      }
+      const nodes = [...byNode.values()].sort((a, b) =>
+        b.tool_calls_total - a.tool_calls_total || b.total - a.total || a.node_id.localeCompare(b.node_id));
+      // #2823 —— 调用面分母。`total` 只数「本来会被拒」的次数；没有分母时
+      // 「0 命中」既可能是没人越界，也可能是没人碰过这些工具，两者结论相反。
+      // 这里单独给一份 classified 工具的真实调用数（按小时合并后的 hits 之和），
+      // 与拒绝统计**分表分字段**，不改上面 `total` 的口径。
+      const callRows = db.all<{ tool: string; hits: number | string }>(
+        `SELECT tool, SUM(hits) AS hits FROM node_tool_calls
+          WHERE network_id = ?1 AND hour >= ?2 GROUP BY tool ORDER BY SUM(hits) DESC`,
+        networkId, sinceHour,
+      );
+      const toolCalls = callRows.map((r) => ({ tool: r.tool, hits: Number(r.hits) }));
+      const deniedTotal = nodes.reduce((n, e) => n + e.total, 0);
+      // 顶层汇总：切 enforce 的真实影响面是多少（explicit / likely_already_blocked 都不算）
+      const enforceImpact: Record<string, number> = {};
+      for (const e of nodes) {
+        for (const [k, v] of Object.entries(e.enforce_impact)) enforceImpact[k] = (enforceImpact[k] ?? 0) + v;
+      }
+      const callsTotal = toolCalls.reduce((n, e) => n + e.hits, 0);
+      return withCors(req, Response.json({
+        ok: true, network_id: networkId, since: new Date(sinceMs).toISOString(), mode: nodePermissionsFlag(),
+        total: deniedTotal,
+        // changes_behavior 才是「打开 enforce 会改变行为」的次数；另外两类都不是增量。
+        enforce_impact: enforceImpact,
+        nodes,
+        tool_calls: { total: callsTotal, by_tool: toolCalls },
+      }));
+    }
+
+    // ── #2719 —— 凭据台账：哪把钥匙、绑没绑、最后一次用是什么时候、用它调过什么 ──
+    //
+    // 为什么不能只用 node-permission-report：那张报表是**按流量**聚合的，
+    // 只列出「近 N 天有调用」的身份。生产实测 760 个未吊销令牌里有 381 个是
+    // `node:` 开头但没绑定节点的，而其中只有 4 个在近 24h 出现过。
+    // 剩下 377 个**在任何报表里都不存在** —— 于是「这把钥匙还有人在用吗」
+    // 这个问题永远答不清，也就永远不敢吊销。
+    //
+    // 这里只读、只列元信息（不返回 token 值，Hub 本来也只存 hash），
+    // 且要求「人的令牌 + 网络 owner/admin」—— 节点不能枚举网络的钥匙。
+    const ledgerMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/token-ledger$/);
+    if (ledgerMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = decodeURIComponent(ledgerMatch[1]);
+      const role = getUserNetworkRole(restAuth.userId, networkId);
+      if (!isAdmin && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 200) || 200, 1), 1000);
+      const rows = db.all<{ token_id: string; name: string | null; bound_node_id: string | null; scope: string | null; created_at: string | null; last_used_at: string | null }>(
+        `SELECT token_id, name, bound_node_id, scope, created_at, last_used_at
+           FROM api_tokens
+          WHERE network_id = ?1 AND revoked_at IS NULL
+          ORDER BY name, created_at DESC LIMIT ?2`,
+        networkId, limit,
+      );
+      // 近 24h 的调用面（按账本键 `token:<id>`）。没有这一列，台账只是一份名单；
+      // 有了它才能回答「这条要不要吊销」。
+      const sinceHour = new Date(Date.now() - 86_400_000).toISOString().slice(0, 13);
+      const calls = db.all<{ node_id: string; tool: string; hits: number | string }>(
+        `SELECT node_id, tool, SUM(hits) AS hits FROM node_tool_calls
+          WHERE network_id = ?1 AND hour >= ?2 AND node_id LIKE 'token:%'
+          GROUP BY node_id, tool ORDER BY SUM(hits) DESC`,
+        networkId, sinceHour,
+      );
+      const byToken = new Map<string, Array<{ tool: string; hits: number }>>();
+      for (const c of calls) {
+        const id = c.node_id.slice(6);
+        const list = byToken.get(id) ?? [];
+        list.push({ tool: c.tool, hits: Number(c.hits) });
+        byToken.set(id, list);
+      }
+      const tokens = rows.map((r) => {
+        const tools = byToken.get(r.token_id) ?? [];
+        const writes = tools.filter((t) => t.tool.startsWith("mcp:send_") || t.tool.startsWith("mcp:requirements_")
+          || t.tool.startsWith("mcp:projects_") || ["POST", "PUT", "PATCH", "DELETE"].includes(t.tool.split(" ")[0]))
+          .reduce((n, t) => n + t.hits, 0);
+        return {
+          token_id: r.token_id,
+          name: r.name,
+          scope: r.scope,
+          bound_node_id: r.bound_node_id,
+          // 名字说自己是节点、却没有绑定 ⇒ 三张白名单都管不到它（nodeIdentity 会退化成 token: 键）
+          looks_like_node: !!r.name && r.name.startsWith("node:"),
+          unbound_node: !!r.name && r.name.startsWith("node:") && !r.bound_node_id,
+          created_at: r.created_at,
+          last_used_at: r.last_used_at,
+          calls_24h: tools.reduce((n, t) => n + t.hits, 0),
+          writes_24h: writes,
+          top_tools: tools.slice(0, 3),
+        };
+      });
+      // 🔴 summary 必须按**全量**算，不能按这一页算。
+      // 2026-10-30 上线后第一次真实调用就抓到了：`?limit=5` 时 summary.total 报 5，
+      // 而那个网络实际有 580 个令牌 —— 管理员会以为「只有 5 把钥匙」。
+      // 分页只应影响 tokens 数组，不应影响计数。
+      const agg = db.get<{ total: number | string; bound: number | string; unbound_node: number | string; unbound_node_in_use: number | string; unused_24h: number | string }>(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN bound_node_id IS NOT NULL THEN 1 ELSE 0 END) AS bound,
+           SUM(CASE WHEN name LIKE 'node:%' AND bound_node_id IS NULL THEN 1 ELSE 0 END) AS unbound_node,
+           SUM(CASE WHEN name LIKE 'node:%' AND bound_node_id IS NULL
+                     AND EXISTS (SELECT 1 FROM node_tool_calls k
+                                  WHERE k.node_id = 'token:' || t.token_id AND k.hour >= ?2)
+                    THEN 1 ELSE 0 END) AS unbound_node_in_use,
+           SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM node_tool_calls k
+                                      WHERE k.node_id = 'token:' || t.token_id AND k.hour >= ?2)
+                    THEN 1 ELSE 0 END) AS unused_24h
+         FROM api_tokens t
+        WHERE t.network_id = ?1 AND t.revoked_at IS NULL`,
+        networkId, sinceHour,
+      );
+      const num = (v: number | string | null | undefined) => Number(v ?? 0);
+      return withCors(req, Response.json({
+        ok: true,
+        network_id: networkId,
+        since: new Date(Date.now() - 86_400_000).toISOString(),
+        limit,
+        // summary 是全量；tokens 只是这一页（returned 一眼能看出被截断没有）
+        summary: {
+          total: num(agg?.total),
+          bound: num(agg?.bound),
+          unbound_node: num(agg?.unbound_node),
+          // 「名义上还在、实际上没人用」的数量：这才是能不能吊销的判据
+          unused_24h: num(agg?.unused_24h),
+          unbound_node_in_use: num(agg?.unbound_node_in_use),
+        },
+        returned: tokens.length,
+        tokens,
+      }));
     }
 
     // ── #1473 (#909): read-only Hub catalogs for the desktop client ──
@@ -2788,6 +4615,35 @@ return Bun.serve({
         return withCors(req, Response.json(providers, { status: 403 }));
       }
       return withCors(req, Response.json({ ...providers, network_id: networkId }));
+    }
+    // 2026-10-31 —— **写侧也必须有 HTTP 面**，否则「第一行」只能由会用 MCP 的人录入。
+    //
+    // 现状：读有 REST（/api/providers），写只有 MCP（provider 工具 action=hub_put）
+    //   ⇒ 客户端能显示「还没有 provider」，却没有任何办法把它变成「有」；
+    //     而这一步恰好是「可选模型」的唯一阻塞。
+    // 这里不复制校验逻辑：直接调用**同一个** putHubProvider，
+    //   权限（owner）与校验（revision、模型名、baseUrl）都保持不变。
+    if (url.pathname === "/api/providers" && req.method === "PUT") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = singleNetworkId(restScope);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      if (!isAdmin && role !== "owner" && role !== "admin") {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      let body: any = null;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const revision = Number.isSafeInteger(body?.revision) ? body.revision : NaN;
+      if (!Number.isSafeInteger(revision)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_revision", hint: "传 0 表示新建；后续传回读到的 revision" }, { status: 400 }));
+      }
+      const saved = putHubProvider({ userId: restAuth.userId ?? null, isNode: false, networkId }, revision, body?.provider);
+      if (!saved.ok) {
+        // 状态码来自穷尽表（hub-provider-config.ts: PROVIDER_WRITE_STATUS），不再在这里写三元式
+        return withCors(req, Response.json(saved, { status: providerWriteStatus(saved.error) }));
+      }
+      return withCors(req, Response.json({ ...saved, network_id: networkId }));
     }
 
     // ── #1510: the log-only view of the secret transport gate ──
@@ -2936,6 +4792,19 @@ return Bun.serve({
       return withCors(req, Response.json({ ok: true, ...routeStats(minutes * 60_000, Date.now(), { byCaller }) }));
     }
 
+    // ── #2720 REST: 版本债务（只读聚合）──
+    // 为什么要有这一条：370 个 session 里 159 个没有版本号，而「没有版本」不是一个桶 ——
+    // 24 个是 claude-code（LLM 会话自己调工具，没有版本概念），9 个才是老 agent-node。
+    // 把两者混算会得出“升级节点能修好 33 个”的错误结论（只能修好 9 个）。
+    // 返回聚合数字，不含 alias 明细；节点令牌只看自己绑定的网络。
+    if (url.pathname === "/api/stats/versions" && req.method === "GET") {
+      if (restAuth && !isAdmin && !restAuth.networkId) {
+        return withCors(req, Response.json({ ok: false, error: "admin or network token required" }, { status: 403 }));
+      }
+      const scopeNet = restAuth?.networkId ?? null;
+      return withCors(req, Response.json({ ok: true, ...versionStats(scopeNet) }));
+    }
+
     // ── #473 REST: SSE connection detail (ops-only) ──
     // The per-key breakdown /health used to expose anonymously: keys are
     // `{networkId}:{alias}` (+ `\0netobs:{networkId}` observer keys via
@@ -3021,6 +4890,40 @@ return Bun.serve({
       // #500 step 2 — full projection only: queue_depth = open tasks on that node (task-queue-ahead.ts), one query for
       // all rows. The light / alias-resolver projections keep their exact bytes and do not read tasks.
       const depth = isLight ? null : queueDepthByNode(rows.map((r: any) => r.alias));
+      // #2211 — the network's current team-rules revision, one query for all rows (not N+1).
+      // Language models must not be able to infer "current" from a missing row: absent = no rules.
+      // The table is created lazily on first use of the rules API, so a Hub that never
+      // had a rules write may not have it yet — treat "no table" as "no rules".
+      const rulesRevisionByNetwork = isLight ? null : (() => {
+        try {
+          return new Map<string, number>(
+            db.all<{ network_id: string; revision: number }>("SELECT network_id, revision FROM network_rules")
+              .map((r) => [r.network_id, Number(r.revision)]),
+          );
+        } catch {
+          return new Map<string, number>();
+        }
+      })();
+      // The node 密钥 page gates on node_secrets_capable, which nodes report in
+      // nodes.config_snapshot (not a sessions column). Without projecting it here the
+      // app never saw it and fell back to the runtime version — null for claude-code
+      // nodes — so a capable node (e.g. claude-code-cli on agent-network ≥ .219) was
+      // shown "upgrade required". Only emitted when true: other rows keep their bytes.
+      const nodeSecretsCapable = (() => {
+        const ids = isLight ? [] : [...new Set(rows.map((r: any) => r.node_id).filter((v: unknown): v is string => typeof v === "string" && v.length > 0))];
+        const out = new Set<string>();
+        for (let i = 0; i < ids.length; i += 500) {
+          const chunk = ids.slice(i, i + 500);
+          try {
+            const found = db.all<{ node_id: string; config_snapshot: string | null }>(
+              `SELECT node_id, config_snapshot FROM nodes WHERE node_id IN (${chunk.map((_, j) => `?${j + 1}`).join(",")})`, ...chunk);
+            for (const r of found) {
+              try { if (JSON.parse(r.config_snapshot || "{}")?.node_secrets_capable === true) out.add(r.node_id); } catch { /* malformed snapshot: not capable */ }
+            }
+          } catch { /* projection is best-effort; never fail /api/status */ }
+        }
+        return out;
+      })();
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
       // that never reported a model — the dashboard falls back to a placeholder.
@@ -3049,15 +4952,35 @@ return Bun.serve({
           if (typeof s.external_schedules !== "string") return null;
           try { return JSON.parse(s.external_schedules); } catch { return null; }
         })();
-        const { external_schedules: _externalSchedulesJson, ...publicSession } = s;
+        // #2211 — the four raw columns feed `team_rules` below; they must not leak into
+        // the session object itself (a `toEqual` on this shape is how the API contract is
+        // pinned in several suites).
+        const {
+          external_schedules: _externalSchedulesJson,
+          team_rules_revision: _trRev, team_rules_status: _trStatus,
+          team_rules_at: _trAt, team_rules_reason: _trReason,
+          ...publicSession
+        } = s;
         return {
           ...publicSession,
           external_schedules: externalSchedules,
           // app#225 follow-up — sqlite INTEGER 0/1 → boolean on the wire.
+          // #2211 — one derived word per node: current / outdated / failed / never.
+          // Omitted entirely for a session that never reported (keeps old clients' bytes stable).
+          ...(() => {
+            const view = deriveTeamRulesView(
+              s.team_rules_revision == null && !s.team_rules_status
+                ? null
+                : { revision: s.team_rules_revision, status: s.team_rules_status, reason: s.team_rules_reason, at: s.team_rules_at },
+              rulesRevisionByNetwork ? (rulesRevisionByNetwork.get(s.network_id) ?? null) : null,
+            );
+            return view ? { team_rules: view } : {};
+          })(),
           rules_file_capable: s.rules_file_capable === 1,
           skills_capable: s.skills_capable === 1,
           files_capable: s.files_capable === 1,
           logs_capable: s.logs_capable === 1,
+          ...(s.node_id && nodeSecretsCapable.has(s.node_id) ? { node_secrets_capable: true } : {}),
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {
@@ -3324,11 +5247,7 @@ return Bun.serve({
       // just made it visible under aggregate `bun test` with a 12MiB
       // upload immediately followed by another request. Per-file green
       // hides this class of bug.
-      const earlyReject = (res: Response): Response => {
-        const wrapped = withCors(req, res);
-        wrapped.headers.set("Connection", "close");
-        return wrapped;
-      };
+      const earlyReject = (res: Response): Response => uploadEarlyReject(req, res);
       const authErr = requireAuth(req);
       if (authErr) return earlyReject(authErr);
 
@@ -3338,12 +5257,7 @@ return Bun.serve({
       const rateKey = authCtx?.tokenId ?? `ip:${getClientIP(req, server)}`;
       const rate = sharedUploadRateLimiter.check(rateKey);
       if (!rate.allowed) {
-        const headers: Record<string, string> = {
-          "X-RateLimit-Limit": String(60),
-          "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.floor(rate.resetAt / 1000)),
-        };
-        if (rate.retryAfterMs) headers["Retry-After"] = String(Math.ceil(rate.retryAfterMs / 1000));
+        const headers = uploadRateLimitHeaders(rate);
         return earlyReject(new Response(
           JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
           { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },   // #426 — legacy clients default to ISO-8859-1 without charset
@@ -3911,7 +5825,15 @@ return Bun.serve({
         : restAuth
           ? "user"
           : "legacy";
-      const metaJson = normalizeMetaJson(stampTaskAuthOrigin(mergedMeta, authOrigin));
+      // #669 —— REST 这一侧只标「显式」，**绝不推断**（推断只存在于 MCP send_task）。
+      // 但不标就会有一个偏差：REST 建的子任务全部落进「无标记」，
+      // 而 MCP 建的显式子任务有标记 ⇒ 统计里 explicit 被系统性地压低。
+      // 实测（2026-10-29）：近 90 分钟 3 条带 parent 的任务全部走 REST、全部无标记。
+      // parent_source 已排除出幂等指纹（task-idempotency.ts），加上它不影响重放判定。
+      const metaWithParent = body.parent_task_id
+        ? { ...(mergedMeta && typeof mergedMeta === "object" ? mergedMeta : {}), parent_source: "explicit" }
+        : mergedMeta;
+      const metaJson = normalizeMetaJson(stampTaskAuthOrigin(metaWithParent, authOrigin));
 
       // Client-request-id idempotency, mirroring the MCP `send_task` tool
       // (tools.ts). The app/Dashboard mint one `meta.client_request_id` per
@@ -3996,6 +5918,19 @@ return Bun.serve({
       {
         const hg = assertNodeHealthy(targetAlias, taskNetId ?? null, { force: body.force === true, forceAllowed: !restAuth?.networkId });
         if (!hg.ok) return reject(withCors(req, Response.json(hg, { status: 409 })));
+      }
+      // #3271 —— 与 MCP send_task 同一道闸（**两个派单面必须同形**，否则修了一个、另一个照旧）。
+      // 拒绝体与 MCP 路径逐字相同，只是走 409（REST 既有语义）。
+      {
+        const gate = neverConsumeGate({
+          alias: targetAlias,
+          counters: neverConsumedExpiryCounters(),
+          force: body.force === true,
+          forceAllowed: !restAuth?.networkId,
+          // #3271 —— 与 MCP 面同一份持久证据。
+          persistent: persistentNeverConsumedExpiries(db, targetAlias, taskNetId ?? null),
+        });
+        if (!gate.ok) return reject(withCors(req, Response.json(gate, { status: 409 })));
       }
       // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).
       const queueInfo = dispatchQueueInfo(targetAlias, taskNetId, target.session?.status, ttlSeconds);
@@ -4091,29 +6026,12 @@ return Bun.serve({
       if (body.filter_server) { sql += " AND server = ?"; params.push(body.filter_server); }
       if (body.filter_status) { sql += " AND status = ?"; params.push(body.filter_status); }
       const targets = db.all<{ alias: string; node_id: string | null; network_id: string | null }>(sql, ...params);
-      const ids: string[] = [];
-      // #1440 ① — mirrors the MCP handler: push to the recipients that
-      // actually got an inbox row, not to every candidate target.
-      const delivered: Array<{ alias: string; netId: string | null }> = [];
-      for (const t of targets) {
-        // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site
-        // 2/2). Broadcast skips non-active recipients silently per its
-        // best-effort semantics — mirrors the MCP broadcast handler
-        // in tools.ts (PR1.1 site 6/6).
-        const lc = assertNodeActive(t.alias, t.network_id ?? null);
-        if (!lc.ok) continue;
-        const id = crypto.randomUUID();
-        db.run(
-          `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
-           VALUES (?1, ?2, ?3, 'broadcast', 'normal', ?4, 'api', ?5)`,
-          [id, t.alias, t.node_id ?? null, body.message, t.network_id]
-        );
-        ids.push(id);
-        delivered.push({ alias: t.alias, netId: t.network_id });
-      }
-      for (const d of delivered) {
-        pushEvent(d.alias, { type: "broadcast", inbox_count: pendingInboxCount(d.alias, d.netId) }, d.netId);
-      }
+      // #2721 —— 与 MCP broadcast 同一条分批路径（reason 见 broadcast-fanout.ts 顶部）。
+      const { ids } = await enqueueBroadcast(targets, body.message, "api", null, {
+        // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.2a REST site 2/2).
+        isActive: (alias, netId) => assertNodeActive(alias, netId).ok,
+        notify: (alias, netId) => pushEvent(alias, { type: "broadcast", inbox_count: pendingInboxCount(alias, netId) }, netId),
+      });
       return withCors(req, Response.json({ ok: true, recipients: ids.length, message_ids: ids }));
     }
 
@@ -4468,6 +6386,7 @@ return Bun.serve({
       db.transaction(() => {
         db.run("DELETE FROM nodes WHERE node_id = ?1", [node.node_id]);
         clearNodeFromAgentTeams(node.node_id); // #764
+        clearNodeFromRequirements(node.node_id); // #3277：卡上指向它的引用一并清掉
         if (node.alias) {
           db.run(
             "DELETE FROM sessions WHERE alias = ?1 AND (network_id = ?2 OR (CAST(?2 AS TEXT) IS NULL AND network_id IS NULL))",
@@ -4501,6 +6420,57 @@ return Bun.serve({
     // {model, flags, config_revision} the node last posted via
     // report_status (B6). NEVER reads per-node files. Network-scoped
     // via addNetworkScope so a netA viewer can't read a netB node.
+    // ── #3952 Token 审计（admin 2026-11-05）──
+    // GET /api/token-usage?network_id=…&since_hours=24
+    //   人（成员/owner/admin）读本网络各节点的 LLM token 计数聚合；节点令牌不给（user_token_required）。
+    // 为什么走 REST 而不是 MCP 工具：tools/list 的 user 预算只剩 ~500 B，
+    // 而一个带 schema 的新工具要 ~900 B —— 审计页本来就是人看的表，REST 更合适。
+    // 只回计数：没有 prompt、没有消息 id、没有凭据（表形状决定的）。
+    if (url.pathname === "/api/token-usage" && req.method === "GET") {
+      const token = requestToken(req, { allowQueryToken: false });
+      const resolved = token ? resolveToken(token) : null;
+      if (!resolved) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (isNodeCredential(resolved)) return withCors(req, Response.json({ ok: false, error: "user_token_required" }, { status: 403 }));
+      // 作用域用 handler 顶部已解析的 restScope —— 它已经做过「是不是这个网络的成员」，
+      // 且 denied 分支在上面统一 return 403。**不要**再在这里自己查一次网络：
+      // 上一版调了一个本文件里不存在的 `getNetworkId()` ⇒ 这个端点自 .273 上线起一直 500，
+      // 而所有人都只会看到「空了」，不会看到「坏了」。（#3951 由 HTTP 测试抓出）
+      // 与 catalog 端点（/api/providers 等）**同一口径**：显式给了就用，没给就回退到
+      // 「唯一所属网络」，多个/零个才 400。上一版只认 restScope.networkId，
+      // 于是一个只属于一个网络的用户在这里拿到 400、在同一页的 /api/providers 上拿到 200 ——
+      // 相邻两个端点对同一用户给不同答案，客户端被迫多写一条分支。
+      // 三档，按"信息量从高到低"取：
+      //   ① restScope.networkId   —— 显式参数 / 节点绑定 / 管理员指定
+      //   ② restScope.networkIds 长度==1 —— 普通用户只属于一个网络
+      //   ③ 以上都拿不到时，退回「这个**人**自己所属的网络」再判一次唯一性
+      // 为什么需要 ③：authCtx 为 null（无鉴权/遗留全局模式）时 resolveRestNetworkScope
+      // 会返回 {networkId: requested||null, networkIds: null} —— 那不是「属于所有网络」，
+      // 而是「这份 scope 没带成员信息」。此时若直接 400，唯一所属网络的用户会被拒，
+      // 而同一页的 /api/providers 却放行。
+      const scopeIds = restScope.networkIds ?? (restScope.networkId ? null : getUserNetworkIds(resolved.user.user_id));
+      const netId = restScope.networkId ?? (scopeIds && scopeIds.length === 1 ? scopeIds[0] : null);
+      if (!netId) return withCors(req, Response.json({ ok: false, error: "network_required" }, { status: 400 }));
+      const raw = Number(url.searchParams.get("since_hours") ?? 24);
+      const sinceHours = Number.isFinite(raw) ? Math.max(1, Math.min(24 * 90, Math.floor(raw))) : 24;
+      const nodes = readTokenUsage(netId, sinceHours);
+      const totals = nodes.reduce((acc, r) => ({
+        input_tokens: acc.input_tokens + r.input_tokens,
+        output_tokens: acc.output_tokens + r.output_tokens,
+        // cache 单列：它可能是 total 的几百倍，绝不能加进 total
+        cache_read_tokens: acc.cache_read_tokens + r.cache_read_tokens,
+        total_tokens: acc.total_tokens + r.total_tokens,
+        cost_usd: Number((acc.cost_usd + r.cost_usd).toFixed(6)),
+      }), { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, total_tokens: 0, cost_usd: 0 });
+      return withCors(req, Response.json({
+        ok: true, network_id: netId, since_hours: sinceHours,
+        // 空表也要说清口径：0 行可能因为「没人上报」，也可能因为「窗口里没用量」。
+        note: nodes.length ? undefined : "这个窗口里没有任何节点上报过 token 用量（不是「用量为 0」）",
+        nodes, totals,
+        // #3950 —— 分母。只有 1 行时，读表的人必须能分清「只有 1 台在干活」还是「只有 1 台有这能力」。
+        coverage: tokenUsageCoverage(netId, nodes.length, (sql: string, ...params: any[]) => db.all(sql, ...params)),
+      }));
+    }
+
     const nodeConfigMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/config$/);
     if (nodeConfigMatch && req.method === "GET") {
       const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
@@ -4516,6 +6486,14 @@ return Bun.serve({
       if (node.config_snapshot) {
         try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
       }
+      // #3146 —— 上一次下发的**结局**。没有这一格时，客户端只能靠
+      // 「config_revision 有没有涨」推断，涨不了就一律显示成 timeout（「90s 内没回来，去看日志」），
+      // 而生产上真实结局是 rejected，原因（OpenCode V2 session is not running）就写在本库里。
+      // ⇒ 读者拿不到答案，于是被指去机器上看日志 —— 一句话把人送错了层。
+      const lastUpdate = readLastConfigUpdate(
+        (sql: string, ...params: any[]) => (db.get as any)(sql, ...params),
+        node.node_id,
+      );
       return withCors(req, Response.json({
         ok: true,
         node_id: node.node_id,
@@ -4523,8 +6501,18 @@ return Bun.serve({
         network_id: node.network_id,
         config_revision: node.config_revision || 0,
         model: snapshot.model ?? null,
+        ...(typeof snapshot.model_effective === "string" ? { model_effective: snapshot.model_effective } : {}),
+        ...(Object.prototype.hasOwnProperty.call(snapshot, "modelVariant") ? { modelVariant: snapshot.modelVariant } : {}),
+        // Agent (Build): the live session's agent, plus whether this node can
+        // switch it at all. Absent key = node never reported (not "build").
+        opencode_agent_config_capable: snapshot.opencode_agent_config_capable === true,
+        ...(typeof snapshot.opencode_agent_current === "string" ? { agent: snapshot.opencode_agent_current } : {}),
+        ...(Array.isArray(snapshot.opencode_agents) ? { agents: snapshot.opencode_agents } : {}),
+        opencode_variant_config_capable: snapshot.opencode_variant_config_capable === true,
         flags: snapshot.flags ?? {},
         config_update_capable: snapshot.config_update_capable ?? false,
+        // null = 这个节点从来没有被下发过配置（与「下发过但还没终局」是两件事）
+        last_update: lastUpdate,
       }));
     }
 
@@ -4766,9 +6754,18 @@ return Bun.serve({
         isPrivileged = true;
       }
 
+      // #973 — the daemon's self-reported runtime version. Nodes already send
+      // `version` in report_status (agent-node/src/cli.ts writes AGENT_NODE_VERSION)
+      // and the Hub stores it on the session row — that is why /api/status shows it.
+      // `nodes` has no version column, so read the daemon's newest session row.
+      // Absent stays absent: a daemon that never reported must read as "unknown",
+      // never as a made-up version.
       const sqlRows = hostSupervisorIdentityRows(`SELECT n.node_id, n.alias, n.hostname, n.network_id, n.owner_user_id,
           n.runtimes_supported, n.allowed_secret_keys,
-          n.created_at, n.updated_at, n.config_snapshot
+          n.created_at, n.updated_at, n.config_snapshot,
+          (SELECT s.version FROM sessions s
+             WHERE s.network_id = n.network_id AND s.node_id = n.node_id
+             ORDER BY s.updated_at DESC LIMIT 1) AS reported_version
         FROM nodes n WHERE n.network_id = ?1 ORDER BY n.updated_at DESC`, [effectiveNetId]);
 
       const nowMs = Date.now();
@@ -4873,6 +6870,9 @@ return Bun.serve({
             allowed_secret_keys: secrets,
             host_telemetry: telemetry,
           };
+          // #973 — only when the daemon actually reported one (see the SQL comment).
+          const reportedVersion = (r as unknown as { reported_version?: string | null }).reported_version;
+          if (typeof reportedVersion === "string" && reportedVersion) out.agent_node_version = reportedVersion;
           if (lifecycleUser && typeof adoptCapable === "boolean") {
             // Do not reveal even the new capability for a node the user cannot read.
             const visibleParams: any[] = [r.node_id];
@@ -4943,7 +6943,8 @@ return Bun.serve({
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
-                        display_name, team, tags, attrs_revision, permission_mode, owner_user_id
+                        display_name, team, tags, attrs_revision, permission_mode, owner_user_id,
+                        department_id, peer_allowlist, tool_allowlist, rest_allowlist
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];
       sql = addAgentNetworkScope(sql, params, restScope, { alias: "alias", nodeId: "node_id" });
@@ -4951,6 +6952,96 @@ return Bun.serve({
       if (alias) { sql += ` AND alias = ?${params.length + 1}`; params.push(alias); }
       sql += " ORDER BY updated_at DESC";
       const rawRows = db.all<Record<string, any>>(sql, ...params);
+      // #1511 —— 「能不能替你重启」必须在客户端保存密钥前就说清楚：
+      //   path='restart_node'   被 created-daemon 监督，exit-75 会被自动拉起
+      //   path='stop_then_start' 是 adopt 来的节点：restart_node 明确拒绝，但 daemon 仍能 Stop→Start
+      //   path='manual'         没人管它，必须上机
+      // in_flight 用与 stop_node / restart_node 同一份 SQL（node-in-flight-tasks.ts），
+      // 否则会出现「客户端说空闲、一点就被拒」。
+      // 批量化：daemon 创建记录与 adopt 绑定各一条 IN 查询取齐；在途计数只对
+      // 非 manual 的节点现算（绝大多数节点没有绑定 ⇒ 一次都不查）。
+      const createdIds = new Map<string, string>();
+      const bindingIds = new Map<string, string>();
+      const wanted = rawRows.filter((r) => typeof r.node_id === "string");
+      if (wanted.length) {
+        const placeholders = wanted.map((_, i) => `?${i + 1}`).join(",");
+        // createdDaemon 的键是 `cr_` + node_id 去掉 `node_`；一次 IN 取回。
+        const crKeys = wanted.filter((r) => String(r.node_id).startsWith("node_")).map((r) => `cr_${String(r.node_id).slice(5)}`);
+        if (crKeys.length) {
+          const ph = crKeys.map((_, i) => `?${i + 1}`).join(",");
+          for (const row of db.all<{ request_id: string; daemon_node_id: string }>(
+            `SELECT request_id, daemon_node_id FROM node_create_requests WHERE request_id IN (${ph})`, ...crKeys,
+          )) createdIds.set(`node_${row.request_id.slice(3)}`, row.daemon_node_id);
+        }
+        for (const row of db.all<{ node_id: string; daemon_node_id: string }>(
+          `SELECT node_id, daemon_node_id FROM node_daemon_bindings WHERE status = 'active' AND node_id IN (${placeholders})`,
+          ...wanted.map((r) => r.node_id),
+        )) bindingIds.set(row.node_id, row.daemon_node_id);
+      }
+      const restartReadiness = (nodeId: string, alias: string | null, networkId: string | null, role: string | null, lifecycle: string | null) => {
+        const supervised = createdIds.has(nodeId) || role === "host_supervisor";
+        const adopted = !supervised && bindingIds.has(nodeId);
+        const path = supervised ? "restart_node" : adopted ? "stop_then_start" : "manual";
+        // 手动节点不需要在途计数：算出来也用不上，白查一次。
+        const inFlight = path === "manual" || !alias ? 0 : countInFlightTasks(alias, networkId);
+        const blockedByInFlight = lifecycle === "active" && inFlight > 0;
+        return { path, in_flight: inFlight, can_restart_now: path !== "manual" && !blockedByInFlight };
+      };
+      // #1510 —— 节点的 transport 记在 sessions 行上（report_status 每次上报刷新）。
+      // 逐行查就是 N 次查询，所以先把 wanted 里所有 id / alias 一次取回、按 updated_at 倒序，
+      // 每个节点只认最新那条（与 transportOf() 的取法一致：node_id 或 alias 命中）。
+      const wantedIds = new Set<string>(wanted.map((r) => String(r.node_id)));
+      const transportByKey = new Map<string, string | null>();
+      const aliasTransport = new Map<string, string | null>();
+      // #3294 —— 与 transport 同一批行里取 build_commit（同一个键、同一套兜底顺序）。
+      const buildByKey = new Map<string, string | null>();
+      const aliasBuild = new Map<string, string | null>();
+      if (wanted.length) {
+        // 🔴 编号参数不能复用：`?1..?n` 出现两次，而实参给了 2n 个 ——
+        // SQLite 只认得 n 个绑定位置，多出来的直接抛错，整条 GET /api/nodes 变 500。
+        // （#3214 首版就这么写的；CI 上三条互不相干的 workflow 同时红，
+        //   共同点只有一个：它们都要先 `GET /api/nodes` 把 alias 解析成 node_id。）
+        // 正确做法是第二组参数从 n+1 开始编号。
+        const ids = wanted.map((r) => String(r.node_id));
+        const phA = ids.map((_, i) => `?${i + 1}`).join(",");
+        const phB = ids.map((_, i) => `?${ids.length + i + 1}`).join(",");
+        for (const row of db.all<{ node_id: string | null; alias: string | null; network_id: string | null; env_transport: string | null; build_commit: string | null }>(
+          `SELECT node_id, alias, network_id, env_transport, build_commit FROM sessions
+            WHERE node_id IN (${phA}) OR alias IN (${phB})
+            ORDER BY updated_at DESC`,
+          ...ids, ...ids,
+        )) {
+          if (row.node_id && wantedIds.has(row.node_id) && !transportByKey.has(row.node_id)) transportByKey.set(row.node_id, row.env_transport);
+          if (row.node_id && wantedIds.has(row.node_id) && !buildByKey.has(row.node_id)) buildByKey.set(row.node_id, row.build_commit ?? null);
+          // alias 只在**同一网络**内兜底：不同网络可以有同名 alias，
+          // 跨网络命中会把 A 网的 transport 显示成 B 网那台 —— 这一格是给人做安全决策用的，
+          // 宁可显示 null（未知）也不能显示错的值。
+          if (row.alias && row.network_id && wantedIds.has(row.alias)) {
+            const key = `${row.network_id}|${row.alias}`;
+            if (!aliasTransport.has(key)) aliasTransport.set(key, row.env_transport);
+            if (!aliasBuild.has(key)) aliasBuild.set(key, row.build_commit ?? null);
+          }
+        }
+      }
+      const envTransportOf = (nodeId: string, alias: string | null, networkId: string | null): string | null => {
+        const direct = transportByKey.get(nodeId);
+        if (direct !== undefined) return direct;
+        if (!networkId) return null;
+        // 兜底顺序与 transportOf() 一致：sessions 行的 alias 可能等于**节点 id**
+        // （老注册路径就是这样），也可能等于**人给的 alias**。两种都要试，且都带网络。
+        const byId = aliasTransport.get(`${networkId}|${nodeId}`);
+        if (byId !== undefined) return byId;
+        return alias ? aliasTransport.get(`${networkId}|${alias}`) ?? null : null;
+      };
+      // #3294 —— 与 envTransportOf 同构：先按 node_id，再按 (network, node_id)，最后按 (network, alias)。
+      const buildCommitOf = (nodeId: string, alias: string | null, networkId: string | null): string | null => {
+        const direct = buildByKey.get(nodeId);
+        if (direct !== undefined) return direct;
+        if (!networkId) return null;
+        const byId = aliasBuild.get(`${networkId}|${nodeId}`);
+        if (byId !== undefined) return byId;
+        return alias ? aliasBuild.get(`${networkId}|${alias}`) ?? null : null;
+      };
       // Add a single new field `role: string | null` per row, extracted from
       // config_snapshot JSON. Daemon nodes that posted role='host_supervisor'
       // via report_status surface here; dashboard uses this for daemon
@@ -5001,12 +7092,76 @@ return Bun.serve({
       const management = lifecycleUser ? lifecycleProjections(restScope) : null;
       const rows = rawRows.map(r => {
         let role: string | null = null;
+        // #2293（admin 2026-10-25）—— 节点自报的 OpenCode V2 模型 id 清单（`provider/model` 字符串数组）。
+        // 客户端在**没有 daemon 绑定**时用它当建议列表。读法同 role：快照可能是文本或对象；
+        // 解析失败/形状不对 = 这一格没有（null），不影响整行。
+        let opencodeCatalog: string[] | null = null;
+        // null = daemon 没报采集时刻（不是「很久以前」，也不是「刚刚」）
+        let opencodeCatalogSeenAt: string | null = null;
+        let opencodeGeneration: "v1" | "v2" | null = null;
+        let opencodeMode: string | null = null;
+        let opencodeServer: string | null = null;
+        // 2026-11-10 —— 起这台节点的 anet CLI 版本。**声明在 `if (snap)` 外面**：
+        // 下面的投影对每一行都会求值，块内 `let` 会让部署后的 /api/nodes 直接抛
+        // "launchedByCliVersion is not defined"（#4150-Build 的 opencodeAgents 踩过同一次）。
+        // null = 节点没报（老节点 / 不是 CLI 起的，如 daemon adopt 出来的子节点）。
+        let launchedByCliVersion: string | null = null;
         const snap = r.config_snapshot;
+        // #4150-Build — declared outside the `if (snap)` block: the projection below is
+        // evaluated for every row, and a block-scoped `let` here made /api/nodes throw
+        // "opencodeAgents is not defined" on the deployed hub.
+        let opencodeAgents: string[] | null = null;
+        let opencodeAgentsSeenAt: string | null = null;
+        let opencodeAgentCurrent: string | null = null;
+        // 与 GET /api/nodes/:id/config 保持同一口径：列表里也要能读到「能不能切 agent」，
+        // 否则两个端点对同一台节点会给出不一致的能力结论。
+        let opencodeAgentConfigCapable = false;
         if (snap) {
-          try { role = (typeof snap === "string" ? JSON.parse(snap) : snap)?.role ?? null; }
-          catch { /* malformed snapshot — leave role null */ }
+          let parsed: any = null;
+          try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
+          catch { parsed = null; }
+          role = parsed?.role ?? null;
+          const raw = parsed?.opencode_catalog;
+          if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
+            opencodeCatalog = raw.slice(0, 400);
+            // #3144 —— 目录是**快照**：51 个模型是刚才采集的还是三周前的，
+            // 读的人此前分不出（`last_seen_at` 是节点心跳，不是采集时刻）。
+            // 这里只做**投影**：daemon 报了 `opencode_catalog_seen_at` 就带出来，
+            // 没报就是 null（显式三态，不塌成「很久以前」也不塌成「刚刚」）。
+            const seen = parsed?.opencode_catalog_seen_at;
+            opencodeCatalogSeenAt =
+              typeof seen === "string" && seen.length > 0 && seen.length <= 40 ? seen : null;
+          }
+          // #2293 —— 客户端「Runtime · V2」和「OpenCode Server」两行要的正是快照里这三格标量。
+          // PR #1092 之前从 `node.config_snapshot` 读，但这个端点**刻意不带整个快照**
+          // （见上方 #312 注释）⇒ 真机上两行是空的/整行不出现。这里只放三个标量出来，
+          // 仍不暴露 flags 里的其它内容，更不暴露任何凭据。
+          // #4150-Build — agents this node's server exposes; [] means none configured.
+          const rawAgents = parsed?.opencode_agents;
+          if (Array.isArray(rawAgents) && rawAgents.every((a: unknown) => typeof a === "string" && a.length <= 200)) {
+            opencodeAgents = rawAgents.slice(0, 200);
+            const seenAgents = parsed?.opencode_agents_seen_at;
+            opencodeAgentsSeenAt = typeof seenAgents === "string" && seenAgents.length > 0 && seenAgents.length <= 40 ? seenAgents : null;
+          }
+          const rawAgentCurrent = parsed?.opencode_agent_current;
+          if (typeof rawAgentCurrent === "string" && rawAgentCurrent.length > 0 && rawAgentCurrent.length <= 200) {
+            opencodeAgentCurrent = rawAgentCurrent;
+          }
+          opencodeAgentConfigCapable = parsed?.opencode_agent_config_capable === true;
+          const flags = parsed?.flags;
+          if (flags?.opencodeGeneration === "v1" || flags?.opencodeGeneration === "v2") opencodeGeneration = flags.opencodeGeneration;
+          if (typeof flags?.opencodeMode === "string" && flags.opencodeMode.length <= 32) opencodeMode = flags.opencodeMode;
+          if (typeof parsed?.opencode_server === "string" && parsed.opencode_server.length <= 200) opencodeServer = parsed.opencode_server;
+          // 2026-11-10 —— 只做投影：节点报了就给出来，没报就是 null（两种成因见上面的注释）。
+          // 形状再校验一遍：schema 那层已经限了 64 字符，但库里的历史行不受 schema 管。
+          const rawLaunchedBy = parsed?.launched_by_cli_version;
+          if (typeof rawLaunchedBy === "string" && rawLaunchedBy.length > 0 && rawLaunchedBy.length <= 64) {
+            launchedByCliVersion = rawLaunchedBy;
+          }
         }
-        const { config_snapshot, owner_user_id, ...rest } = r;
+        // #2969 —— 两张白名单原来**只能写不能读**（PUT 有了，GET 里没有），
+        // 客户端因此做不出「当前设置」这一屏。这里把原始列解构出来，下面换成解析后的数组。
+        const { config_snapshot, owner_user_id, peer_allowlist, tool_allowlist, rest_allowlist, ...rest } = r;
         // `tags` is stored as JSON text; hand the dashboard a real array so
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
@@ -5020,10 +7175,34 @@ return Bun.serve({
           tags: parseStoredTags(r.tags),
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
+          opencode_catalog: opencodeCatalog,
+          opencode_agents: opencodeAgents,
+          opencode_agent_current: opencodeAgentCurrent,
+          opencode_agent_config_capable: opencodeAgentConfigCapable,
+          opencode_agents_seen_at: opencodeAgentsSeenAt,
+          // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
+          opencode_catalog_seen_at: opencodeCatalogSeenAt,
+          opencode_generation: opencodeGeneration,
+          opencode_mode: opencodeMode,
+          opencode_server: opencodeServer,
+          launched_by_cli_version: launchedByCliVersion,
           lifecycle_controllable,
           lifecycle_daemon_node_id: controllable.get(r.node_id) ?? null,
           ...(management ? (management.get(r.node_id) ?? { managed: "none", adoption: null }) : {}),
           viewer_can: { permission_mode: canSetPermissionMode(r) },
+          // #2969 —— 白名单读回来：null = 不限制；[] 不该出现（空数组在写入时已规范成 null）。
+          peer_allowlist: normalizePeerAllowlist(peer_allowlist),
+          tool_allowlist: normalizeToolAllowlist(tool_allowlist),
+          // #2969 续 —— REST 写接口白名单（形如 "POST /api/task"）。null = 不限制。
+          rest_allowlist: normalizePeerAllowlist(rest_allowlist),
+          // #1510 —— 管理员要能看出「谁的 transport 未知」才敢打开 strict。
+          // 这一格**只读**，不参与任何判定（判定在 env-transport-policy.ts）。
+          env_transport: envTransportOf(r.node_id, r.alias, r.network_id),
+          // #3294 —— 「跑的是哪一份字节」。null 有两种成因（节点没报 / 老节点不报这个字段），
+          // 所以配一个 note 说明该怎么读它 —— 单一 null 会把两种成因压成一个。
+          build_commit: buildCommitOf(r.node_id, r.alias, r.network_id),
+          build_note: "null = 这个节点没有上报 build_commit（老版本节点不会报）；空字符串不出现",
+          restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });
       return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
@@ -5037,10 +7216,12 @@ return Bun.serve({
       let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE task_id = ?1`;
       sql = addAgentTimelineScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       sql += " LIMIT 1";
-      const task = db.get(sql, ...params);
-      if (!task) {
+      const rawTask = db.get(sql, ...params);
+      if (!rawTask) {
         return withCors(req, Response.json({ ok: false, error: "task_not_found", task_id: taskId }, { status: 404 }));
       }
+      // #2884 —— 共享会话忙：读取时补上「排队 / 会话等待」拆解（幂等，不改写入）。
+      const task = withBusyElapsed(rawTask as any);
       const taskNetworkId = typeof task.network_id === "string" ? task.network_id : null;
       const canonicalTarget = task.to_node_id
         ? null
@@ -5142,7 +7323,7 @@ return Bun.serve({
       sql += ` ORDER BY created_at DESC, task_id DESC LIMIT ?${params.length + 1}`;
       params.push(limit);
 
-      const rows = db.all<any>(sql, ...params);
+      const rows = db.all<any>(sql, ...params).map((row: any) => withBusyElapsed(row));
       // Existing desktop clients implement their one-task detail read as
       // `/api/tasks?task_id=…&limit=1`. Keep broad list responses lean, but
       // enrich that exact-detail shape as well as `/api/tasks/:id`.
@@ -5171,6 +7352,18 @@ return Bun.serve({
       sql += " ORDER BY completed_at DESC LIMIT 100";
       const rows = db.all(sql, ...params);
       return withCors(req, Response.json({ ok: true, completions: rows }));
+    }
+
+    // #2946 —— 未匹配的 /api/* 必须 404，而不是 200 + 帮助页。
+    // 现场：带 token 打 /api/lang/status（不存在）→ 200 + 652B 帮助文本，
+    // 四个不同的假路径返回完全相同的字节 ⇒ 探针把「端点改名/拼错」读成「正常」。
+    // 这与 #2559（401 被伪装成空数据）同类：错误被伪装成成功。
+    // 根路径 / 仍然返回帮助页（那是给人/curl 看的入口说明）。
+    if (url.pathname.startsWith("/api/")) {
+      return withCors(req, Response.json(
+        { ok: false, error: "not_found", path: url.pathname },
+        { status: 404 },
+      ));
     }
 
     return withCors(req, new Response(
@@ -5334,6 +7527,57 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     : 60 * 60 * 1000;
   const retentionSweeperTimer = startRetentionSweeper(sweepIntervalMs);
 
+  // #2596 —— 空白 node 行（注册失败留下的空壳：runtime/hostname/config_path 全空、
+  // 没有 session）会让组织架构页出现“重复名字”。启动跑一次 + 每天一次。
+  // 判据写死在 empty-node-sweeper.ts：只删够旧、无身份、无 session 的行；删前把整行 JSON 打进日志。
+  const sweepEmptyNodes = () => {
+    try {
+      const r = sweepEmptyNodeRows();
+      if (r.deleted > 0) {
+        console.log(`[patrol] removed ${r.deleted} empty placeholder node row(s) older than ${r.ageDays}d`);
+      }
+    } catch (e: any) {
+      console.log(`[patrol] empty node sweep failed: ${e?.message ?? e}`);
+    }
+  };
+  setImmediate(sweepEmptyNodes);
+  const emptyNodeGcTimer = setInterval(sweepEmptyNodes, 24 * 60 * 60 * 1000);
+
+  // #2614 —— 事件循环停顿监测。放这里是因为 startHub() 才是“真的在跑一个 Hub”
+  // 的入口（测试用 bootServer() 不会背这个 timer）。停顿日志与
+  // `[commhub retention]` / `[commhub slow-sql]` 共用前缀族，便于一次 grep 出
+  // “同一秒里 retention 跑了 10 秒 + 有两百个请求在排队”。
+  const eventLoopLagTimer = startEventLoopLagMonitor();
+
+  // #2664 —— 两个历史回填（node_id 映射 / task_terminal_events）原来在 import 阶段跑，
+  // 生产实测合计约 3.5 秒，正好落在会话重连风暴窗口里。现在等监听稳定后再跑：
+  // 它们只修历史缺口，新行由触发器实时写入。
+  const deferredBackfillTimer = setTimeout(() => {
+    void (async () => {
+      try {
+        const r = await runDeferredBootBackfills();
+        console.log(`[commhub] deferred boot backfills: node_id=${r.nodeIdsMs}ms terminal_events=${r.terminalEventsMs}ms chunks=${r.chunks}`);
+      } catch (e: any) {
+        console.error(`[commhub] deferred boot backfills failed: ${e?.message || e}`);
+      }
+    })();
+  }, Number(process.env.COMMHUB_BOOT_BACKFILL_DELAY_MS) >= 0 ? Number(process.env.COMMHUB_BOOT_BACKFILL_DELAY_MS) : 15_000);
+  (deferredBackfillTimer as any)?.unref?.();
+
+  // #2571（第三轮）—— 每个目标自己的投递延迟 p99 基线，供 delivered_stale 判据使用。
+  // 生产库上重算一次约 0.46s（116k tasks / 7 天窗口），所以只每小时一次、且与 retention 错开。
+  // 失败不影响任何请求路径：基线表只是缓存，读不到就退回全局阈值。
+  const refreshBaseline = () => {
+    try {
+      const r = refreshAliasBaseline();
+      if (r.rows > 0) console.log(`[commhub alias-baseline] refreshed ${r.rows} alias(es)`);
+    } catch (e: any) {
+      console.error(`[commhub alias-baseline] refresh failed: ${e?.message || e}`);
+    }
+  };
+  refreshBaseline();
+  const aliasBaselineTimer = setInterval(refreshBaseline, 60 * 60 * 1000);
+
   // Round-2/4 review ③ — stale session sweeper (coexists with the
   // retention sweeper above; different concerns + different cadences).
   // Replaces the per-request UPDATE in GET /api/status (+ /api/servers,
@@ -5343,6 +7587,76 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // 99% no-op write-amp under hot read paths. Now done globally once
   // every COMMHUB_STALE_SWEEP_SECONDS (default 60s).
   const staleSweeperTimer = startStaleSessionSweeper();
+
+  // #2840 —— 节点「假活」告警：连续 5 次确定性失败（缺环境变量 / 二进制缺失 / 登录失效）
+  // 给节点主人发一条一次性通知。校准见 node-failure-alert.ts 头注释：
+  // 只算确定性错误时 7 天 6 条（0.9/天）；把 timeout 也算进去会变成 35 条。
+  const nodeFailureAlertMs = Number(process.env.COMMHUB_NODE_FAILURE_ALERT_MS) > 0
+    ? Number(process.env.COMMHUB_NODE_FAILURE_ALERT_MS) : 5 * 60 * 1000;
+  const nodeFailureAlertTimer = setInterval(() => {
+    try {
+      const r = scanNodeFailureAlerts();
+      if (r.alerts > 0) console.log(`[commhub node-failure-alert] sent ${r.alerts} alert(s): ${r.nodes.join(", ")}`);
+    } catch (e: any) {
+      console.log(`[commhub node-failure-alert] failed: ${e?.message ?? e}`);
+    }
+    // #2964 —— 「在线但干不了活」：登录失效的节点一条任务都不会接，连续失败那条路不会触发。
+    try {
+      const b = scanModelAuthBlockedNodes();
+      if (b.alerts > 0) console.log(`[commhub node-auth-blocked-alert] sent ${b.alerts} alert(s): ${b.nodes.join(", ")}`);
+    } catch (e: any) {
+      console.log(`[commhub node-auth-blocked-alert] failed: ${e?.message ?? e}`);
+    }
+  }, nodeFailureAlertMs);
+  (nodeFailureAlertTimer as any).unref?.();
+
+  // #2880 —— 空转排程巡检：默认**只记录**「本来会被暂停哪些」，不动作。
+  // 开启 COMMHUB_SCHEDULE_STARVED_AUTOPAUSE=1 才真暂停（判据见 schedule-starved.ts 头注释）。
+  // 与告警分开：告警解决「没人知道」，这里解决「知道了但一直不停」。
+  // 🔴 「只在候选集合变化时打一行」——每 5 分钟打一次等于 288 行/天，
+  //    那正是这套机制要治的噪音（2026-10-28 上线 15 分钟就打了 8 行才被发现）。
+  let lastStarvedKey = "";
+  const scheduleStarvedTimer = setInterval(() => {
+    try {
+      const r = scanStarvedSchedules();
+      if (r.paused.length > 0) {
+        console.log(`[commhub schedule-starved] paused ${r.paused.length}: ${r.paused.join(", ")}`);
+      } else {
+        const key = r.candidates.slice().sort().join(",");
+        if (r.candidates.length > 0 && key !== lastStarvedKey) {
+          console.log(`[commhub schedule-starved] would pause ${r.candidates.length} (autopause off): ${r.candidates.join(", ")}`);
+        } else if (r.candidates.length === 0 && lastStarvedKey !== "") {
+          console.log(`[commhub schedule-starved] 候选已清空（之前 ${lastStarvedKey.split(",").length} 个）`);
+        }
+        lastStarvedKey = key;
+      }
+    } catch (e: any) {
+      console.log(`[commhub schedule-starved] failed: ${e?.message ?? e}`);
+    }
+  }, nodeFailureAlertMs);
+  (scheduleStarvedTimer as any).unref?.();
+
+  // #2880 —— 节点级「不可服务」检测：窗口内忙类失败多、成功为零 ⇒ 这个节点现在投进去必然白等。
+  // 与排程级分开：排程是「某条排程该停」，这里是「某台节点该暂时不投」。
+  // 默认只记录；开启 COMMHUB_NODE_BUSY_CIRCUIT=1 才用于派发判断。
+  let lastCircuitKey = "";
+  const nodeBusyCircuitTimer = setInterval(() => {
+    try {
+      const r = scanNodeBusyCircuit();
+      if (!r.enabled) {
+        const key = r.tripped.slice().sort().join(",");
+        if (r.tripped.length > 0 && key !== lastCircuitKey) {
+          console.log(`[commhub node-busy-circuit] would trip ${r.tripped.length} in ${r.windowHours}h (circuit off): ${r.tripped.join(", ")}`);
+        } else if (r.tripped.length === 0 && lastCircuitKey !== "") {
+          console.log(`[commhub node-busy-circuit] 候选已清空（之前 ${lastCircuitKey.split(",").length} 个）`);
+        }
+        lastCircuitKey = key;
+      }
+    } catch (e: any) {
+      console.log(`[commhub node-busy-circuit] failed: ${e?.message ?? e}`);
+    }
+  }, nodeFailureAlertMs);
+  (nodeBusyCircuitTimer as any).unref?.();
 
   // #476 — the two legacy module-level intervals, now owned by startHub
   // like every other periodic job: rate-limit map cleanup (memory only)
@@ -5367,6 +7681,9 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // jobs must not — otherwise a test (or a future caller) that stops the
   // server would still hang on live intervals it cannot reach.
   (retentionSweeperTimer as any)?.unref?.();
+  (emptyNodeGcTimer as any)?.unref?.();
+  (eventLoopLagTimer as any)?.unref?.();
+  (aliasBaselineTimer as any)?.unref?.();
   (staleSweeperTimer as any)?.unref?.();
   (rateLimitSweepTimer as any)?.unref?.();
   (taskPatrolTimer as any)?.unref?.();
@@ -5378,7 +7695,11 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   function shutdown() {
     console.log("[commhub] shutting down...");
     clearInterval(retentionSweeperTimer);
+    clearInterval(eventLoopLagTimer);
+    clearInterval(aliasBaselineTimer);
+    clearTimeout(deferredBackfillTimer);
     clearInterval(staleSweeperTimer);
+    clearInterval(nodeFailureAlertTimer);
     clearInterval(rateLimitSweepTimer);
     clearInterval(taskPatrolTimer);
     clearInterval(deliveredStalePatrolTimer);
@@ -5427,4 +7748,44 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
 
   startedHub = { server, startedAt: new Date().toISOString() };
   return server;
+}
+/**
+ * #2756 —— Hub 所在文件系统的水位。
+ *
+ * 只报「一块盘」：数据库目录所在的那块。多挂载点的主机（比如把 DB 放到单独卷）
+ * 也能对得上，因为我们 statfs 的是 DB 的实际路径，不是写死 `/`。
+ *
+ * 为什么不在这里做告警：告警需要阈值与通知渠道，属于运维策略；这里只提供**可观测**。
+ * 客户端/巡检脚本按 `used_pct > 90` 自己决定要不要叫。
+ */
+/**
+ * `/health` 是**免鉴权**端点，而 host_disk.path 是数据库所在目录 ——
+ * 在常见部署里就是 `$HOME/.commhub/`，等于把用户名公开出去。
+ * 形状（挂载点）是运维需要的信息，**具体家目录名不是**。
+ * 只在响应层做替换：hostDiskState() 仍返回真实路径（测试与 statfs 要用）。
+ */
+export function redactHomeInPath<T extends { path: string } | null>(d: T): T {
+  if (!d) return d;
+  const home = process.env.HOME || homedir();
+  if (!home || home === "/") return d;
+  return d.path === home || d.path.startsWith(home + "/")
+    ? { ...d, path: "~" + d.path.slice(home.length) }
+    : d;
+}
+
+export function hostDiskState(): { path: string; total_gb: number; used_gb: number; avail_gb: number; used_pct: number } | null {
+  try {
+    // 探针打在**数据库实际所在目录**上，而不是写死 `/`：多挂载点主机也能对得上。
+    const dbFile = process.env.COMMHUB_DB || `${process.env.HOME || homedir()}/.commhub/commhub.db`;
+    const probe = dbFile.includes("/") ? dbFile.replace(/[^/]*$/, "") || "/" : "/";
+    const st = statfsSync(probe);
+    const total = Number(st.blocks) * Number(st.bsize);
+    const avail = Number(st.bavail) * Number(st.bsize);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    const used = total - avail;
+    const gb = (n: number) => Math.round((n / 1024 ** 3) * 10) / 10;
+    return { path: probe, total_gb: gb(total), used_gb: gb(used), avail_gb: gb(avail), used_pct: Math.round((used / total) * 1000) / 10 };
+  } catch {
+    return null;
+  }
 }

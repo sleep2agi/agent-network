@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -124,7 +125,7 @@ export async function runBorrowedV1Tui(configPath: string): Promise<number> {
     const ticks = readStartTicks(child.pid);
     if (!ticks) { stop(); await done; refuse("native TUI process birth unavailable"); }
     const tmp = `${path}.${nonce}.tmp`;
-    try { writeFileSync(tmp,JSON.stringify({...base,state:"running",tui:{pid:child.pid,ticks},root})+"\n",{flag:"wx",mode:0o600});renameSync(tmp,path); }
+    try { writeFileSync(tmp,JSON.stringify({...base,state:"running",tui:{pid:child.pid,ticks},root})+"\n",{flag:"wx",mode:0o600});renameOverExistingSync(tmp,path); }
     finally { rmSync(tmp,{force:true}); }
     watch = setInterval(()=>{
       if (checking || stopRequested) return;

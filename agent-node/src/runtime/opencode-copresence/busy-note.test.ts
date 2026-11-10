@@ -26,4 +26,18 @@ describe("busyNote", () => {
   test("names the shared session, so it is not read as a dead node", () => {
     expect(busyNote(base, base + 60_000)).toContain("共享会话");
   });
+
+  // #1879 ③ —— 归属：看板上要能看出「等的是谁的那条任务」。
+  test("names the task and the submitter when the owner is known", () => {
+    const note = busyNote(base, base + 60_000, { taskId: "5844f347", sender: "通信龙" });
+    expect(note).toContain("任务 5844f347");
+    expect(note).toContain("通信龙");
+  });
+
+  test("does not invent an owner when there is none", () => {
+    const note = busyNote(base, base + 60_000, { taskId: null, sender: null });
+    expect(note).toContain("共享会话忙");
+    expect(note).not.toContain("null");
+    expect(note).not.toContain("undefined");
+  });
 });

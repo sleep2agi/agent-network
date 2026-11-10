@@ -121,7 +121,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `restart_node` | 不改配置直接重启节点 |
 | `update_node_config` | 设置节点目标配置（model + flags）并推门铃 |
 
-**主机 daemon 协议（内部，节点与 daemon 自动调用）** · 12 个
+**主机 daemon 协议（内部，节点与 daemon 自动调用）** · 13 个
 
 | 工具 | 说明 |
 |------|------|
@@ -151,6 +151,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `get_adopt_request` | 仅目标 daemon 的节点令牌拉取 pending 申请；本地路径与进程验证由 daemon 完成 |
 | `ack_adopt_request` | 目标 daemon 回报 `adopted` / `refused`（可附 `error`）；确认后绑定 active。已撤销的申请不能复活 |
 | `unadopt_node` | 主人或网络 owner/admin 撤销 pending/active 绑定，不停止节点；stop/start 在途时拒绝，完成后再撤销 |
+| `report_token_usage` | 节点按 **UTC 小时桶 × model** 累加自己的 LLM 用量（`input`/`output`/`cache_read` 三列分开，`cache` 绝不并进 total）；只收计数，不收 prompt/消息 id/凭据；写 `node_token_usage`，人从 `GET /api/token-usage` 读 |
 
 **Provider 与密钥金库（owner/admin）** · 9 个
 
@@ -206,9 +207,11 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `requirements_update` | 修改任务，省略的字段保留；`status` 同 `column`（同上）。**`participants` 是整体替换**（没写进去的人会被删掉，`[]` 清空）；只想加 / 减几个人用 `participants_add` / `participants_remove`：在当前列表上增减、不动别人，加已有的 / 减不在的都是不变；和 `participants` 不能同时用（400 `participants_conflict`），同一个人既加又减 → 400 `participants_add_remove_overlap`；`archived: true` 归档（Agent 不能删除） |
 | `requirements_checklist_toggle` | 把一个子任务设为完成 / 未完成，只写这一项 |
 | `requirements_upsert_by_external_ref` | 按 `external_ref`（如 `github:owner/repo#123`）幂等同步：没有就建，有就改；也收 `status` 别名 |
+| `departments` | 组织架构（部门树）的读写：`action: "list"` 看树（每个部门带 Agent 数与下级）；`create` / `update` / `delete` 管部门（名字、上级、负责人、排序）；`assign_agent` 把某个 Agent 归到部门（`department_id: null` 移出）。**写操作只有网络 owner/admin 能做**（普通成员调用返回 `forbidden`），每次写都记 audit。部门是**网络共享**的，不按人隔离 |
 | `projects_list` | 列本网络的项目（id、名字、颜色、排序、是否归档）。节点令牌（Agent）**只能读项目** |
 | `projects_create` | 新建项目（名字 1–40 字、网络内不重名；可带颜色 / 排序），同 app「管理项目 → 新建」；要人的令牌：节点令牌（Agent）只能读项目，调这个 → 403 `user_token_required`；仅相关任务的成员和 viewer 也 403 |
 | `projects_update` | 改项目的名字 / 颜色 / 排序，或 `archived: true / false` 归档 / 取消归档；只改传了的字段，权限同上 |
+| `requirement_tags` | 标签（本网络）。`action: "list"` 看标签树：`name`、`parent_id`（`null` = 顶层）、`depth`、颜色、任务用量、`can_manage`；写操作用同一个工具（`rename` / `merge` / `delete` / `color` / `reparent`），**只有 owner/admin 能做**，节点令牌调写操作 → 403。`reparent` 只改标签树的父子关系（不动任何卡片、不改名）：父不存在 → 404 `tag_parent_not_found`；成环 → 400 `tag_parent_cycle`；搬完最深超 4 层（判据 = 新父深度 + 自己子树高度）→ 400 `tag_depth_exceeded`；**没传 `parent` 键 → 400**，`null` / `""` 才是升到顶层。被拒绝时库里什么都不变。Hub ≥ preview.156 |
 | `requirements_events` | 读任务的动态（字段级改动流水：谁、何时、旧值 → 新值；以及评论 `kind: "comment"`，正文在 `new.text`，从新到旧）；`requirement_id`（`req_…` 或 `"#N"`）只看一条（`limit` 默认 200）；**不带 `requirement_id` 是全网动态，MCP 默认每页 50 条**，`next_cursor` 传 `cursor` 翻更早的（`limit` ≤ 500；REST 的默认仍是 200）；`since` 只要之后的；可见范围同 `requirements_list`；参数严格（不认识的参数 → `-32602`） |
 | `requirements_comment` | 给任务发一条评论 / 进展（`{id, text}`，markdown 1–4000 字）：**只追加**，不改描述，出现在动态里（`kind: "comment"`），署名是调用者（人或 Agent）。看得见这张任务、且在这个网络里不是只读角色的都能发；看不见 → 404，viewer → 403。Hub ≥ preview.90 |
 
@@ -984,8 +987,9 @@ send_task({
 | POST | `/api/requirements/{id}/comments` | `{text}`（1–4000 字，首尾空白去掉）发一条评论，只追加；回 201 `{event}`（`kind: "comment"`，`new.text`）。空 → 400 `invalid_comment`，超长 → 400 `comment_too_long`；没有改 / 删评论的接口。评论和字段改动一样保留 180 天 |
 | DELETE | `/api/requirements/{id}` | 删除（只有人）；子需求保留并解挂 |
 | GET | `/api/requirements/projects` | 项目列表（建 / 改 / 删项目只有人） |
-| GET | `/api/requirements/tags` | 当前网络里出现过的标签（去重、排序，含归档任务上的）。节点令牌可以读。有 `tag_ops` 能力的 Hub 另带 `counts` / `colors` / `can_manage` |
+| GET | `/api/requirements/tags` | 当前网络里出现过的标签（去重、排序，含归档任务上的）。节点令牌可以读。有 `tag_ops` 能力的 Hub 另带 `counts` / `colors` / `can_manage`；有 `tag_tree` 能力的 Hub 另带 `nodes`（标签树，含 0 任务的标签，见 [任务标签](/guide/task-tags#创建标签与父子层级)） |
 | POST | `/api/requirements/tags/ops` | 标签整网改名 / 合并 / 删除 / 设颜色（只有人，scoped 成员 403），见 [任务标签](/guide/task-tags#管理标签) |
+| POST | `/api/requirements/tags/create` | 新建标签（可带 `parent_id`，最多 4 层）；重名 409 `tag_exists`、父不存在 404 `tag_parent_not_found`（不静默建到根），见 [任务标签](/guide/task-tags#创建标签与父子层级) |
 
 **同步示例（把 GitHub issue 同步成任务）**：对每个 issue 调一次 `requirements_upsert_by_external_ref`，`external_ref` 用 `github:<owner>/<repo>#<number>`、`external_url` 用 issue 链接；重复同步只会更新同一条，不会重复建。增量同步用 `requirements_list` 的 `updated_since`。
 

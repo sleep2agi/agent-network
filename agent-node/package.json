@@ -1,6 +1,6 @@
 {
   "name": "@sleep2agi/agent-node",
-  "version": "2.5.0-preview.152",
+  "version": "2.5.0-preview.195",
   "description": "AI Agent runtime for CommHub networks. Supports Claude Code CLI, Claude Agent SDK, Codex SDK, Codex app-server, Grok Build ACP, and OpenCode CLI.",
   "bin": {
     "agent-node": "dist/cli.js"
@@ -8,11 +8,13 @@
   "type": "module",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "build-info.json"
   ],
   "scripts": {
     "build": "bun build src/cli.ts --outdir dist --entry-naming cli.js --target node --minify --external @anthropic-ai/claude-agent-sdk --external '@anthropic-ai/claude-agent-sdk-*' --external @openai/codex-sdk --external node-pty && bun build src/upload-file-mcp-stdio.ts --outdir dist --entry-naming upload-file-mcp-stdio.js --target node --minify",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepack": "node scripts/write-build-info.mjs"
   },
   "keywords": [
     "agent",

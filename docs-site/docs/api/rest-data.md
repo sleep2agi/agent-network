@@ -4,6 +4,57 @@
 
 ## 数据查询端点
 
+### GET /health
+
+健康与容量快照。**不需要鉴权**（只给聚合值，不含任何会话/节点明细）。
+
+```bash
+curl -s http://localhost:9200/health | python3 -m json.tool
+```
+
+```jsonc
+{
+  "ok": true,
+  "version": "0.9.0-preview.166",
+  "uptime": 273,                 // 进程已运行秒数
+  "sessions_count": 369,         // 会话总数（含 offline）
+  "sse_connections": 144,        // 当前 SSE 长连接数（≈ 在线节点 + 打开的面板）
+  "mcp_inflight": 0,             // 此刻正在处理的 MCP 请求数
+  "mcp_inflight_peak": 325,      // 自进程启动以来的高水位（不衰减）
+  "event_loop": {                // 0.9.0-preview.162 起
+    "max_gap_ms": 8354,          // 进程内单次 tick 的最大间隔（正常 ≈250ms）
+    "last_gap_ms": 697,
+    "stall_count": 2,            // 超过阈值的停顿次数
+    "last_stall_ms": 3019,
+    "last_stall_at": "2026-10-27T01:54:48.811Z",
+    "recent_stalls": [           // 最近 20 次，最新在前
+      { "at": "...", "gap_ms": 3269, "stall_ms": 3019, "rss_mb": 1410, "requests_since_last_tick": 32 }
+    ]
+  },
+  "limits": { "max_upload_bytes": 12582912, "max_request_content_length": 13631488 }
+}
+```
+
+#### 怎么读 `event_loop.recent_stalls`（这一格最容易读错）
+
+Hub 是单线程（Bun + 同步 SQLite），所以「事件循环被占住」和「timer 回调被饿住」**看起来一样**，处置却相反：
+
+| `requests_since_last_tick` | 含义 | 该做什么 |
+|---|---|---|
+| **> 0**（例如 514） | 这段时间**仍在服务**请求（成百上千次）⇒ 是**饱和**（timer 被 I/O 队列饿住） | 降低瞬时并发：广播扇出、重连风暴、大批任务投递 |
+| **= 0** | 这段时间**什么都没推进** ⇒ 是真的**同步阻塞** | 查慢查询 / 同步块：`grep "commhub slow-sql"` |
+
+只读 `gap_ms` 会把这两种情况混成一句“卡了 N 秒”，然后往错误的方向优化（例如给饱和型加内存）。
+
+::: tip 两个真实读数（2026-10-27 生产）
+- `gap 143.9s · served 1175` ⇒ 一条广播（384 行 inbox）打满 Hub，**不是**阻塞；
+- `gap 5.7s · served 20` + `slow-sql 5325ms` ⇒ 一条聚合查询真的把循环占住了。
+:::
+
+`mcp_inflight` 与 RSS 的关系（隔离实测）：**每在飞请求约占 1.2–1.4 MB**；`peak` 高但当前 `inflight` 为 0，说明尖峰已经过去，不是泄漏。
+
+
+
 ### GET /api/status
 
 
@@ -207,6 +258,22 @@ curl http://localhost:9200/api/nodes \
 
 ::: info nodes vs sessions
 `nodes` 表是**持久节点身份**（创建即写入，删 agent 才删），`sessions` 表是**运行时心跳状态**（agent 启动写入，10 分钟无心跳标 `offline`）。看 agent 是否在线用 [GET /api/status](#get-api-status)，看 agent 配置元数据用本 endpoint。
+:::
+
+**`restart_readiness`（#1511）**：每行还带一格里「能不能替你重启」，客户端保存密钥/env 后据此二选一提示用户：
+
+```json
+"restart_readiness": { "path": "restart_node", "in_flight": 0, "can_restart_now": true }
+```
+
+| 字段 | 说明 |
+|------|------|
+| `path` | `restart_node`：被 created-daemon 监督（exit-75 自动拉起）；`stop_then_start`：adopt 来的节点，`restart_node` 会拒绝但 daemon 仍能 Stop→Start；`manual`：没人管，必须上机 |
+| `in_flight` | 本节点正在做的任务数，与 `stop_node` / `restart_node` **同一份 SQL**（无状态行按 60 分钟龄判，终态任务不算） |
+| `can_restart_now` | `path !== "manual"` 且没有被在途任务挡住 |
+
+::: warning 别只读 `can_restart_now`
+它是「现在能不能点」的快照。真正发起时服务端仍会重新判一次（`node_busy_in_flight` / `adopted_restart_requires_daemon`），客户端要按这两个错误码兜底，不能把快照当承诺。
 :::
 
 ---
@@ -1300,7 +1367,7 @@ curl -N "http://localhost:9200/events/代码1号?token=ntok_xxx"
 
 > 旧 doc 在 `new_message` 上写过 `message` 字段、`broadcast` 上写过 `{content, from}` —— 都不对。verify [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) 实际 payload 以上表为准。**自 #1439/#1441 起 `new_message` / `new_reply` / `broadcast` / `new_task`（含 retry/reassign）都带真实 `inbox_count`（收件人未读数），客户端可直接用它显示新消息数；`broadcast` 不再是硬编码 1。**另注：`new_task` / `new_message` 在目标 alias **刚被改名**时会额外带一个 `renamed_from` 字段（指向旧 alias，`tools.ts` 的 `canonical.renamed` 分支）。
 >
-> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L69) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
+> **校正**：原表列过 `heartbeat` event with `{time}` payload，源码不发这个事件。[`push.ts` `KEEPALIVE_MS`](https://github.com/sleep2agi/agent-network/blob/main/server/src/push.ts#L87) 实际发 SSE **comment 行** `: keepalive\n\n`（每 30s 一次，纯粹是给 proxy / LB 防 idle timeout 用），不会被 EventSource `onmessage` / `addEventListener` 触发，也不带 JSON payload。`connected` event 才是真正每次连接发一次的初始事件（agent-node 在 [`agent-node/src/cli.ts`](https://github.com/sleep2agi/agent-network/blob/main/agent-node/src/cli.ts) 显式处理它）。
 
 **示例 SSE 数据流**：
 

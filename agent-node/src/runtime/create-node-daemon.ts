@@ -585,6 +585,10 @@ export const DAEMON_CHILD_INHERITED_ENV_KEYS = [
   "all_proxy",
   "NO_PROXY",
   "no_proxy",
+  // Node's built-in fetch ignores the *_PROXY variables unless this is set, so a
+  // child forked by a daemon behind a proxy could not reach the Hub (2026-11-09:
+  // vdev fork child "fetch failed" → exit 1 while the daemon itself worked).
+  "NODE_USE_ENV_PROXY",
 ] as const;
 
 export function minimalEnv(
@@ -829,7 +833,14 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
   return { flags, ...codexExtras };
 }
 
+function hasSessionSourceReference(value: unknown): boolean {
+  return !!value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "source_ref");
+}
+
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
+  if (hasSessionSourceReference(spec) || hasSessionSourceReference(spec.flags)) {
+    throw new Error("session_source_unsupported");
+  }
   for (const field of ["opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer"]) {
     if (Object.prototype.hasOwnProperty.call(spec, field)) throw new Error(`flag_location_invalid:${field}:use node_spec.flags`);
   }
@@ -1065,6 +1076,17 @@ export async function handleCreateNodeDoorbell(
     deps.warn(`[create-node] get_create_request failed: ${req?.error || "unknown"}`);
     await deps.callCommHub("ack_create_request", {
       request_id, status: "failed", error: req?.error || "get_failed",
+    }).catch(() => {});
+    return;
+  }
+
+  // #4150: until authenticated source grants are wired, never reinterpret a
+  // source operation as ordinary creation, including null/empty placeholders.
+  // This precedes CLI probes, directory preparation, config writes and spawn.
+  if (hasSessionSourceReference(req) || hasSessionSourceReference(req.node_spec)
+    || hasSessionSourceReference(req.node_spec.flags)) {
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "rejected", error: "session_source_unsupported",
     }).catch(() => {});
     return;
   }
@@ -1466,7 +1488,12 @@ export async function handleCreateNodeDoorbell(
     childPid = child.pid || -1;
     launcher = child;
     const spawnedPid = childPid;
-    child.once("exit", (code, signal) => {
+    // `launch` 可能是 deps.spawnChild 注入的实现（类型比 ChildProcess 宽），
+    // 于是 `once("exit")` 会挑到 stream 的那个重载：code 变成
+    // `Error | Serializable | null | undefined`、signal 变成 `Signals | SendHandle | null`，
+    // 与 launcherExit 的 `{code: number|null, signal: Signals|null}` 对不上（TS2322）。
+    // 这里把处理函数**显式标注**再挂上去：判据仍在类型里，只是不让重载把参数类型带偏。
+    const onChildExit = (code: number | null, signal: NodeJS.Signals | null) => {
       launcherExit = { code, signal };
       // A co-presence launcher's pid is dead weight once it exits: keeping it in
       // the children map would let a later stop signal whoever reuses the number.
@@ -1476,7 +1503,8 @@ export async function handleCreateNodeDoorbell(
           .then(({ forgetSpawnedChildIfPid }) => { forgetSpawnedChildIfPid(childNodeIdForMap, spawnedPid); })
           .catch(() => { /* best-effort */ });
       }
-    });
+    };
+    (child as unknown as { once(ev: "exit", fn: typeof onChildExit): void }).once("exit", onChildExit);
     try { child.stdin?.destroy(); } catch { /* ok */ }
     try { child.stdout?.destroy(); } catch { /* ok */ }
     try { child.stderr?.destroy(); } catch { /* ok */ }

@@ -204,14 +204,36 @@ describe("restricted member with NO grants sees no agents (one test per path)", 
     expect((await get(aliceToken, `/api/messages?alias=${X.alias}&since=2000-01-01`)).body.messages).toEqual([]);
   });
   test("POST /api/task to an agent → 403 agent_not_granted; nonexistent alias gets the identical response", async () => {
+    // #3354 —— 拒绝之外还要钉「没有副作用」：派单的副作用是**写一条 tasks**，
+    // 只断 403 时，「拒了但任务已经进了队列」也会绿 —— 而那条任务会被目标真的执行。
+    const taskRows = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tasks WHERE network_id = ?1", NET)!.n;
+    const before = taskRows();
     const real = await send(aliceToken, "POST", "/api/task", { alias: X.alias, task: "hi", network_id: NET });
     const fake = await send(aliceToken, "POST", "/api/task", { alias: "no-such-agent", task: "hi", network_id: NET });
     expect(real.status).toBe(403);
     expect(real.body.error).toBe("agent_not_granted");
     expect(fake).toEqual(real);
+    expect(taskRows()).toBe(before);   // 两条被拒的派单都不许落库
   });
-  test("POST /api/broadcast → 403", async () => {
+  // #3354 —— 403 之外还要钉「没有副作用」：广播的副作用是**给每个目标写一条 inbox**，
+  // 只断状态码时，「拒了但已经把消息塞进大家收件箱」也会绿。
+  test("POST /api/broadcast → 403 且**一条 inbox 都没写**（拒绝不许有副作用）", async () => {
+    const inboxRows = () => db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM inbox WHERE network_id = ?1", NET)!.n;
+    const before = inboxRows();
     expect((await send(aliceToken, "POST", `/api/broadcast?network_id=${NET}`, { message: "hi" })).status).toBe(403);
+    expect(inboxRows()).toBe(before);
+  });
+
+  // 2026-10-31 —— #3214：`/api/broadcast` 此前只测过 403（拒绝路径），**成功体的形状从未被钉**。
+  // 它是会被客户端按字段名读的（recipients / message_ids 决定「发给了几个、分别是哪几条」）。
+  test("POST /api/broadcast 成功体恰好 {message_ids, ok, recipients}，且两个数同源", async () => {
+    const r = await send(adminToken, "POST", `/api/broadcast?network_id=${NET}`, { message: "keyset-probe" });
+    expect(r.status).toBe(200);
+    expect(Object.keys(r.body).sort()).toEqual(["message_ids", "ok", "recipients"]);
+    expect(Array.isArray(r.body.message_ids)).toBe(true);
+    // 守恒：recipients 必须等于 message_ids 的长度（否则「发给了几个」与「列出几条」是两个读数）
+    expect(r.body.recipients).toBe(r.body.message_ids.length);
   });
   test("node write endpoints (delete / config / attrs / avatar) → not found", async () => {
     expect((await send(aliceToken, "DELETE", `/api/nodes/${X.node}?network_id=${NET}`)).status).toBeGreaterThanOrEqual(403);
@@ -263,6 +285,11 @@ describe("humans: restricted members can still see and DM other humans", () => {
   });
   test("alice → bob send_desktop_message works; bob reads it from his user inbox", async () => {
     const r = await tool(aliceToken, "send_desktop_message", { to_username: "acl_bob", message: "hello bob", network_id: NET });
+    // #3275 批次 2 —— send_desktop_message 是七个键里**唯一带 reason** 的回执：
+    // delivered=false 时 reason 说明为什么（不在线/没落库），而它是客户端唯一能据以重试的字段。
+    expect(Object.keys(r).sort()).toEqual([
+      "delivered", "delivered_to_user_id", "message_id", "network_id", "ok", "persisted", "reason",
+    ]);
     expect(r.ok).toBe(true);
     const inbox = await get(bobToken, `/api/messages?scope=user&network_id=${NET}`);
     expect(inbox.body.messages.map((m: any) => m.content)).toContain("hello bob");
@@ -644,6 +671,11 @@ describe("lifecycle", () => {
     const before = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?1 AND network_id = ?2", carol.user!.user_id, NET)!.n;
     const j = await send(carol.token!, "POST", "/api/networks/join", { invite_code: inv.body.invite_code });
     expect(j.status).toBe(200);
+    // 2026-10-31 —— #3214：这个端点的成功体此前只被断言过 status。形状钉住：
+    // 恰好 {network_id, ok, role} —— 客户端按 role 决定进哪个界面，多一个键就是多一个没人读的字段。
+    expect(Object.keys(j.body).sort()).toEqual(["network_id", "ok", "role"]);
+    expect(j.body.network_id).toBe(NET);
+    expect(j.body.role).toBe("member");
     expect((await get(carol.token!, `/api/status?network_id=${NET}`)).body.sessions).toEqual([]);
     expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?1 AND network_id = ?2", carol.user!.user_id, NET)!.n).toBe(before);
   });

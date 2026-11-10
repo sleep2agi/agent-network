@@ -127,6 +127,41 @@ describe("Agent 显式归属部门", () => {
     expect((await setDept(U.owner.token, NODE_OUTSIDE, D.tmai)).status).toBe(404);
   });
 
+  // #2965 —— 同 alias 多 node 行必须在通讯录里折叠成一行，并给出「历史注册」计数。
+  // 现场：一组同名里只有一个挂过会话，其余是重复注册留下的空行；页面看起来就是「重复的 Agent」。
+  // 折叠不能只看 updated_at —— 实测那 3 个 node 的 updated_at 完全相同，必须优先保留有会话的那条。
+  test("同 alias 多 node：不删行，但其余行带 duplicate_of 指向首选（有会话者优先）", async () => {
+    const now = Date.now();
+    const dupAlias = `重复-Agent-${now}`;
+    const live = `n_live_${now}`;
+    const dead1 = `n_dead1_${now}`;
+    const dead2 = `n_dead2_${now}`;
+    // 三条 updated_at 完全一样（现场就是这样），只有 live 有会话行
+    for (const id of [dead2, live, dead1]) {
+      db.run(
+        "INSERT INTO nodes (node_id, node_name, alias, network_id, created_at, updated_at) VALUES (?1, ?2, ?2, ?3, datetime('now'), '2026-10-26 12:26:22')",
+        [id, dupAlias, NET],
+      );
+    }
+    db.run(
+      "INSERT INTO sessions (resume_id, alias, status, network_id, node_id, updated_at) VALUES (?1, ?2, 'offline', ?3, ?4, datetime('now'))",
+      [`s_${live}`, dupAlias, NET, live],
+    );
+
+    const dir = await send(U.owner.token, "GET", `/api/requirements/people/directory?network_id=${NET}`);
+    expect(dir.status).toBe(200);
+    const agents = [...(dir.body.people ?? []).flatMap((p: any) => p.agents ?? []), ...(dir.body.agents_without_owner ?? [])];
+    const rows = agents.filter((a: any) => a.alias === dupAlias);
+    // 契约不变：三条都还在（客户端照旧可按 updated_at 去重）
+    expect(rows).toHaveLength(3);
+    // 新增：其余两条都指向首选，而首选必须是**有会话**的那条（三条 updated_at 完全相同）
+    const liveRow = rows.find((a: any) => a.node_id === live);
+    expect(liveRow.duplicate_of).toBeUndefined();
+    for (const dead of [dead1, dead2]) {
+      expect(rows.find((a: any) => a.node_id === dead)?.duplicate_of).toBe(live);
+    }
+  });
+
   test("普通成员改不了（403）", async () => {
     const r = await setDept(U.member.token, NODE_A, D.tmai);
     expect(r.status).toBe(403);
@@ -149,6 +184,22 @@ describe("Agent 显式归属部门", () => {
   // #1976 —— Agent 归属与人类部门是两个独立的结构。通讯录顶层要说明「这个 Hub 支持显式
   // Agent 部门」,客户端据此把「行里没有 department_id」读成「没有显式归属」,
   // 而不是从「负责人在哪个部门」推断出来。
+  // #2888（通信客户端欧 2026-10-28 提）—— 军团按部门分区时，N 个部门要发 N 次
+  // `…/departments/:dept/nodes` 才能拼出「每个 Agent 属于哪个部门」，人数一多就慢。
+  // 事实上 /api/nodes 早就返回全部节点，只是没 select `department_id` 这一列。
+  // 补上之后一次往返就能完成分区初始化。
+  test("/api/nodes 一次返回全部节点且带 department_id（免 N 次部门往返）", async () => {
+    expect((await send(U.owner.token, "PUT", `/api/networks/${NET}/nodes/${NODE_A}/department`, { department_id: D.tmai })).status).toBe(200);
+    const all = await send(U.owner.token, "GET", `/api/nodes?network_id=${NET}`);
+    expect(all.status).toBe(200);
+    const row = (all.body.nodes ?? []).find((n: any) => n.node_id === NODE_A);
+    expect(row).toBeDefined();
+    expect(row.department_id).toBe(D.tmai);
+    // 未归属的节点这一格是 null（不是缺键）——分区逻辑可以统一按 null 判「未分组」。
+    const other = (all.body.nodes ?? []).find((n: any) => n.node_id === NODE_OUTSIDE);
+    if (other) expect(other.department_id ?? null).toBeNull();
+  });
+
   test("通讯录声明支持显式 Agent 部门（与人类部门相互独立）", async () => {
     const dir = await send(U.owner.token, "GET", `/api/requirements/people/directory?network_id=${NET}`);
     expect(dir.status).toBe(200);

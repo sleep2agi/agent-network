@@ -34,6 +34,21 @@ const ENTRIES: Record<string, Entry> = {
   not_found: { message: 'No such task, project or route.', hint: 'Check the id; requirements_list / projects_list return the ids you can use.' },
   project_not_found: { field: 'id', message: 'No project with that id in this network.', hint: 'Call projects_list to get project ids (proj_…).' },
   tag_not_found: { field: 'tag', message: 'No task in this network carries that tag.', hint: 'Tags are free text on tasks; list the ones in use from requirements_list (view=summary shows each task’s tags).' },
+  // 标签树(POST /api/requirements/tags/create):父标签是**标签名**不是 req_… id,所以用自己的错误码,
+  // 不借用任务父需求的 parent_not_found / invalid_parent_id(那两句文案会让调用方去查 req id)。
+  tag_exists: { field: 'name', message: 'This network already has a tag with that name (on a task, with a colour, or as a registered node).', hint: 'Pick another name, or rename / merge the existing tag with POST /api/requirements/tags/ops.' },
+  tag_parent_not_found: { field: 'parent_id', message: 'No tag named that in this network.', hint: 'Create the parent first (parent_id: null), or read GET /api/requirements/tags → nodes for the names that exist.' },
+  invalid_tag_parent_id: { field: 'parent_id', message: 'parent_id must be a tag name in this network, or null for the root.', hint: 'Tag names are 1–20 characters; read GET /api/requirements/tags → nodes for the names that exist.' },
+  tag_parent_cycle: { field: 'parent_id', message: 'A tag cannot be its own parent.', hint: 'Pass a different parent, or null for the root.' },
+  // 子项目（admin 2026-10-24）：项目也能成层级，错误码与标签那几条**分开**，文案指向 proj_… 而不是标签名。
+  invalid_project_parent: { field: 'parent_id', message: 'parent_id must be a project id (proj_…) or null for a top-level project.', hint: 'Call projects_list to get project ids.' },
+  project_parent_not_found: { field: 'parent_id', message: 'No project with that id in this network (or it was deleted).', hint: 'Call projects_list to get the ids that exist.' },
+  project_parent_archived: { field: 'parent_id', message: 'That parent project is archived, so it cannot take children.', hint: 'Unarchive it first, or pick an active project.' },
+  project_parent_cycle: { field: 'parent_id', message: 'That parent would make the project its own ancestor.', hint: 'Pick a project that is not this one or one of its children.' },
+  project_parent_too_deep: { field: 'parent_id', message: 'Projects nest at most 3 levels (a top-level project counts as level 1).', hint: 'Attach it to a higher-level project.' },
+  project_has_children: { message: 'This project still has sub-projects, so it cannot be deleted.', hint: 'Move or delete the sub-projects first (a parent is never silently orphaned).' },
+  tag_depth_exceeded: { field: 'parent_id', message: 'Tags nest at most 4 levels (the root counts as level 1).', hint: 'Attach the tag to a higher-level tag.' },
+  invalid_tag: { field: 'name', message: 'Tag names are 1–20 characters after trimming, with no control characters.', hint: 'Shorten the name, or remove line breaks.' },
   checklist_item_not_found: { field: 'item_id', message: 'This task has no checklist item with that id.', hint: 'Item ids (ck_…) are in requirements_get → checklist[].id.' },
   // ── 权限 ──
   user_token_required: { message: 'This operation is for people only: a node token can read projects and read / create / update tasks, but cannot manage projects or delete tasks.', hint: 'Use an existing project (projects_list), or ask a person to create / change the project in the app (任务 → 管理项目).' },

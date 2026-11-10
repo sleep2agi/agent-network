@@ -61,6 +61,16 @@ export interface ClassificationResult {
   kind: ClassificationKind;
   /** Short machine-readable reason; safe to log. */
   reason?: string;
+  /**
+   * 2026-10-31 —— **机器契约**：要按它分支的调用方只能用这个字段。
+   *
+   * 起因：本文件两种 `soft-fail-empty` 的 reason 都是一句话
+   * （"empty vendor result despite success signal" / "vendor returned in=0 out=0 …"），
+   * 而 cli.ts 曾按**那句散文**分支 ⇒ 文案一改分支静默失效，类型系统不拦。
+   * 判据：code 是契约，reason 是散文；同一个区分不该同时住在两边。
+   * ⇒ 目前只有 soft-fail-empty 的两个成因有 code（它们是唯一被分支的区分）。
+   */
+  code?: "empty_result_after_success" | "upstream_silent_reject";
   /** Vendor-specific remediation hint (URL / action) when applicable. */
   hint?: string;
 }
@@ -118,6 +128,7 @@ export function classifyRuntimeResult(
   if (inTokens === 0 && outTokens === 0 && cost === 0) {
     return {
       kind: "soft-fail-empty",
+      code: "upstream_silent_reject",
       reason: "vendor returned in=0 out=0 cost=0 — upstream silent reject (suspect 429/quota/auth without explicit error)",
       hint: quotaRemediationHint(baseUrl),
     };
@@ -132,6 +143,7 @@ export function classifyRuntimeResult(
   if (resultEmpty) {
     return {
       kind: "soft-fail-empty",
+      code: "empty_result_after_success",
       reason: "empty vendor result despite success signal",
       hint: quotaRemediationHint(baseUrl),
     };

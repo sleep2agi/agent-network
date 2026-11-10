@@ -8,6 +8,8 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const expectedTools = [
+  // #1894 —— 组织架构（一个工具合并 list/create/update/delete/assign_agent）。tools.ts 里注册在最前面。
+  "departments",
   "submit_skill", "list_skills", "get_skill", "review_skill",
   "report_status", "report_completion", "get_inbox", "ack_inbox",
   "mark_tasks_runtime_submitted", "mark_tasks_consumed", "get_all_status", "get_session_status",
@@ -27,7 +29,7 @@ const expectedTools = [
   "read_opencode_catalog", "get_opencode_catalog", "get_opencode_catalog_request", "ack_opencode_catalog",
   "requirements_list", "requirements_people", "requirements_get", "requirements_create", "requirements_update",
   "requirements_checklist_toggle", "requirements_upsert_by_external_ref", "projects_list",
-  "projects_create", "projects_update", "requirements_events", "requirements_comment",
+  "projects_create", "projects_update", "requirement_tags", "requirements_events", "requirements_comment",
 ];
 
 const toolsSource = readFileSync("src/tools.ts", "utf8");

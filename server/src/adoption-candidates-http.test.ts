@@ -65,6 +65,9 @@ test("owner and node owner see the candidate; the report token stays out", async
     const r = await raw(`/api/adoption-candidates?network_id=${owner.network_id}`, token);
     expect(r.status).toBe(200);
     expect(r.body.count).toBe(1);
+    // 2026-10-31 —— #3214：外层键集（候选每行的键由下面那条 toEqual 精确钉住）
+    expect(Object.keys(r.body).sort()).toEqual(["candidates", "count", "ok"]);
+    expect(r.body.candidates.length).toBe(r.body.count);   // 计数与数组同源
     expect(r.body.candidates).toEqual([{
       node_id: ids.hand, alias: "hand-node", daemon_node_id: ids.daemon, daemon_alias: "cand-daemon",
       hostname: "fixture-host", workdir: WORKDIR, runtime: "claude-agent-sdk", launch_hint: "tmux",
