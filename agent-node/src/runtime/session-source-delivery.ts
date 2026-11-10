@@ -21,6 +21,22 @@ export type SourceResumeLaunch = { configPath: string; cwd: string; existingSess
  * 客户端显示「结果未知，禁止自动重放」，运维在日志里也看不到是哪个守卫拒的。
  * status 不能改（子目录可能已建，谎报失败会引导用户重试并留下残留），但原因必须可读。
  */
+/** 早退路径的原因标签。
+ *
+ * `unknown_rotation_required` 是**保守**的 status（子目录可能已建，不能谎报失败），
+ * 但保守不等于不可诊断：这条 status 有 4 条互不相同的前置失败，运维此前只能看到一个
+ * 光秃秃的枚举，四种情况在日志里长得一模一样。
+ *
+ * 只加日志、不改 status（status 语义由客户端重放策略依赖，见 #4448）。
+ */
+const UNKNOWN_REASONS = {
+  child_dir_residue: '子目录已存在（上一轮残留），按不重放原则拒绝',
+  lease_expired: '投递已过期（expires_at 早于当前时间）',
+  lease_recheck_failed: '租约复核失败（recheck 返回 false）',
+  registration_unconfirmed: '子进程已拉起但注册未确认（confirmRegistration 返回 false）',
+} as const;
+type UnknownReason = keyof typeof UNKNOWN_REASONS;
+
 export const sourceDeliveryFailureReason = (e: unknown): string => {
   const any = e as { message?: unknown } | null;
   const msg = typeof any?.message === 'string' ? any.message : '';
@@ -33,6 +49,10 @@ export function createSessionSourceProfileWorker(local: { enabled?: boolean; cap
   nativeLaunch?: Parameters<typeof createSourceResumeLauncher>[0];
   confirmRegistration: (deliveryId: string, childToken: string) => Promise<boolean> }) {
   const children = new Map<string, SourceResumeChild>();
+  const unknown = (why: UnknownReason) => {
+    console.error(`[source-delivery] unknown: ${why} — ${UNKNOWN_REASONS[why]}`);
+    return { status: "unknown_rotation_required" as const };
+  };
   return {
     async stopChild(deliveryId: string): Promise<boolean> {
       const child = children.get(deliveryId); if (!child) return false;
@@ -53,7 +73,7 @@ export function createSessionSourceProfileWorker(local: { enabled?: boolean; cap
       const result = await local.reader.deliver(payload, async context => { try {
         const dir = join(context.project, ".anet", "nodes", childDirNameForCreate(payload.child_name));
         // No overwrite, auto-rotation, launch retry or adoption of prior residue.
-        if (existsSync(dir)) return { status: "unknown_rotation_required" as const };
+        if (existsSync(dir)) return unknown("child_dir_residue");
         began = true; mkdirSync(dir, { mode: 0o700 });
         // The exclusive directory is the no-relaunch tombstone. Persist it and
         // a non-secret claim before profile/runner side effects.
@@ -82,9 +102,8 @@ export function createSessionSourceProfileWorker(local: { enabled?: boolean; cap
         writeCreatedOpencodeProfile(dir, config, local.bindingHome);
         writeFileSync(passwordFile, decoded.slice("opencode:".length), { mode: 0o600, flag: "wx" });
         recordChildWorkdir(local.daemonWorkDir, payload.child_name, context.project);
-        if (Date.now() >= payload.expires_at || !await local.reader.recheck(payload.execution.evidence.lease_id)) {
-          return { status: "unknown_rotation_required" as const };
-        }
+        if (Date.now() >= payload.expires_at) return unknown("lease_expired");
+        if (!await local.reader.recheck(payload.execution.evidence.lease_id)) return unknown("lease_recheck_failed");
         // No new/fork API is available on this runner interface.
         const launch = local.launch ?? createSourceResumeLauncher(local.nativeLaunch ?? {
           command: loadAndVerifyAnetBin(), env: { ...minimalEnv(), HOME: local.bindingHome },
@@ -96,7 +115,8 @@ export function createSessionSourceProfileWorker(local: { enabled?: boolean; cap
         let confirmed = false;
         try { confirmed = await local.confirmRegistration(payload.delivery_id, payload.child_token); }
         finally { if (!confirmed && child) { await child.stop(); children.delete(payload.delivery_id); } }
-        return { status: confirmed ? "registration_confirmed" as const : "unknown_rotation_required" as const, child_node_id: payload.child_node_id };
+        if (!confirmed) return { ...unknown("registration_unconfirmed"), child_node_id: payload.child_node_id };
+        return { status: "registration_confirmed" as const, child_node_id: payload.child_node_id };
       } catch (e) { failReason = sourceDeliveryFailureReason(e); console.error(`[source-delivery] refused: ${failReason}`); throw e; } });
       if (result === undefined && began) console.error(`[source-delivery] delivery aborted after claim: ${failReason ?? 'no reason captured'}`);
       return result ?? { status: began ? "unknown_rotation_required" : "refused" };
