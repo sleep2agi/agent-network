@@ -87,6 +87,11 @@ function quoteSh(s: string): string {
  *    第一反应是去建 /etc/anet-daemon/path.conf —— 而那次实际只要 chmod。
  *    **把"要 sudo 改系统"和"一行 chmod"盖成同一句话,会让人修错方向。**
  */
+/** vdev 2026-11-11 实测：挂共享 serve 的 OpenCode 节点从拉起到就绪要 35–60 秒
+ * （启动 ~7s + 等共享 serve 按文件监听重载工作区配置 3–10s + MCP 就绪），35 秒的旧上限
+ * 总在就绪前把它杀掉（launcher start_failed）。 */
+export const OPENCODE_START_TIMEOUT_MS = 90_000;
+
 export type AnetBinFailureCode =
   | "anet_bin_identity"
   | "anet_bin_source"
@@ -1587,7 +1592,7 @@ export async function handleCreateNodeDoorbell(
   await new Promise<void>(resolve => setTimeout(resolve, FAIL_FAST_MS));
   if (opencodeCopresence) {
     // A still-running launcher is not proof of runtime readiness.
-    const deadline = launchedAt + (deps.capabilityCheckMs === undefined ? 35_000 : FAIL_FAST_MS);
+    const deadline = launchedAt + (deps.capabilityCheckMs === undefined ? OPENCODE_START_TIMEOUT_MS : FAIL_FAST_MS);
     while (!launcherExit && Date.now() < deadline) await new Promise(r => setTimeout(r, 50));
     const ex = launcherExit as { code: number | null; signal: NodeJS.Signals | null } | null;
     const health = successfulLauncherExit(ex)

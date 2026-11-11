@@ -77,6 +77,15 @@ test("seedCloneInstructions copies only AGENTS.md / CLAUDE.md, never symlinks or
     expect(seedCloneInstructions(src, dst)).toEqual([]);
     expect(readFileSync(join(dst, "AGENTS.md"), "utf8")).toBe("agents");
     expect(seedCloneInstructions(src, src)).toEqual([]);
+    // Heading equal to the source name is renamed; anything else stays verbatim.
+    const dst2 = join(root, "dst2"); mkdirSync(dst2);
+    writeFileSync(join(src, "AGENTS.md"), "# 源节点\n\n你的工作提 PR 到 # 源节点 的仓库\n");
+    expect(seedCloneInstructions(src, dst2, { from: "源节点", to: "新节点" })).toEqual(["AGENTS.md"]);
+    expect(readFileSync(join(dst2, "AGENTS.md"), "utf8")).toBe("# 新节点\n\n你的工作提 PR 到 # 源节点 的仓库\n");
+    const dst3 = join(root, "dst3"); mkdirSync(dst3);
+    writeFileSync(join(src, "AGENTS.md"), "# 别的标题\n");
+    seedCloneInstructions(src, dst3, { from: "源节点", to: "新节点" });
+    expect(readFileSync(join(dst3, "AGENTS.md"), "utf8")).toBe("# 别的标题\n");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
