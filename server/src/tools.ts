@@ -2121,7 +2121,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
       network_id: z.string().max(200).optional().describe("Network scope"),
       parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch serves; the reply auto-chains to its originator."),
-      meta: z.any().optional().describe("Optional task metadata, e.g. { attachments: [{type,path,url,mime,name,size}] }."),
+      meta: z.any().optional().describe("Optional task metadata (e.g. attachments)."),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => {
@@ -2466,14 +2466,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "send_message",
-    "Send a message to a session (no task lifecycle, just chat). Use for replies, status updates, or casual communication.",
+    "Send a chat message (no task lifecycle). control=interrupt stops the running turn.",
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
-      message: z.string().min(1).max(100_000).describe("Message content"),
+      message: z.string().min(1).max(100_000).describe("Message"),
+      control: z.enum(["interrupt"]).optional().describe("Interrupt turn"),
       from_session: z.string().max(200).optional(),
-      network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
+      network_id: z.string().max(200).optional().describe("Network (auto for single-network)"),
     },
-    async ({ alias, message, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ alias, message, control, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       { const sendDenied = agentSendDenied(effectiveNetId, alias, _fromIn, "write"); if (sendDenied) return sendDenied; }
       const canonical = resolveCanonicalAlias(effectiveNetId, alias);
@@ -2487,11 +2488,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!lc.ok) return { content: [{ type: "text" as const, text: JSON.stringify(lc) }] };
       }
       console.log(`[${ts()}] ${from_session} → send_message → ${targetAlias}: ${message.slice(0, 60)}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
+      const isControl = control === "interrupt";
       const id = uuidv4();
       db.run(
         `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
-         VALUES (?1, ?2, ?3, 'message', 'normal', ?4, ?5, ?6)`,
-        [id, targetAlias, target.session?.node_id ?? null, message, from_session, effectiveNetId ?? null]
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        [id, targetAlias, target.session?.node_id ?? null, isControl ? "control" : "message",
+         isControl ? "high" : "normal", isControl ? JSON.stringify({ op: "interrupt" }) : message,
+         from_session, effectiveNetId ?? null]
       );
 
       // 同 send_task：可达性用订阅者注册表判，不用心跳时间戳猜。
@@ -2514,6 +2518,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               message_id: id,
+              ...(isControl ? { control: "interrupt" as const, accepted: true, result_from: "node_reply" } : {}),
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: target.session?.status ?? "unknown",
             }),
@@ -3219,7 +3224,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // #3943 —— 服务端水位。调用方不传时间，Hub 用「上次给这个调用者返回的时刻」当下界，
       // 返回后把水位推到本次的 server_time。客户端连时钟都不用记（也就不会因两边差几秒漏活）。
       since_last: z.boolean().optional().default(false)
-        .describe("Only tasks created since this caller's previous list_tasks (server-side watermark)."),
+        .describe("Only since this caller's previous list_tasks (watermark)."),
     },
     async ({ alias, status, from_name, from_node_id, network_id: netId, before_created_at, before_task_id, durable_cursor, durable_terminal_cursor, after_terminal_seq, limit, created_since, omit_stats, since_last }) => {
       const readScope = resolveReadScope(netId);
@@ -7332,7 +7337,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     cursor: z.string().max(600).optional().describe("next_cursor from the previous page"),
     view: z.enum(["full", "summary"]).optional().describe("summary (default; no bodies) or full"),
     changes: z.boolean().optional().describe("with updated_since: tasks changed since then, +deleted ids, +server_time (+newer events with include_last_event)"),
-    include_last_event: z.boolean().optional().describe("true adds last_event per row (~150 B: type/field/actor/at/summary; null if none)"),
+    include_last_event: z.boolean().optional().describe("true adds last_event per row (~150B)"),
   };
   const reqListKeys = Object.keys(reqListShape);
   server.registerTool(
