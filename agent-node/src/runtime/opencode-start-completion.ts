@@ -1,7 +1,7 @@
 // Finite V2 launcher: spawn is progress, never evidence that the runtime is ready.
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { getAnetBinAbs, minimalEnv, resolveChildHome } from "./create-node-daemon.js";
+import { OPENCODE_START_TIMEOUT_MS, getAnetBinAbs, minimalEnv, resolveChildHome } from "./create-node-daemon.js";
 import { readHostSharedOpenCodeServer, withHostOpenCodeV2ClientPath } from "./opencode-shared-server-registry.js";
 import { forgetSpawnedChildIfPid, recordSpawnedChild } from "./stop-daemon.js";
 import { waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
@@ -63,7 +63,7 @@ export async function completeOpenCodeStart(
               finish({ status: "start_failed", error: `opencode_launcher_exit:${signal || code}` });
               return;
             }
-            const deadline = launchedAt + (deps.opencodeStartTimeoutMs ?? 35_000);
+            const deadline = launchedAt + (deps.opencodeStartTimeoutMs ?? OPENCODE_START_TIMEOUT_MS);
             const health = deps.inspectOpenCodeStartHealth
               ? deps.inspectOpenCodeStartHealth(nodeDir, join(nodeDir, "config.json"), launchedAt)
               : await (deps.waitOpenCodeStartHealth ?? waitForLaunchHealth)(nodeDir, join(nodeDir, "config.json"), launchedAt, deadline);
@@ -81,7 +81,7 @@ export async function completeOpenCodeStart(
           // Only this still-owned launcher. Never kill by name or a recovered PID.
           try { child.kill("SIGTERM"); } catch {}
           finish({ status: "start_failed", error: "opencode_launcher_timeout" });
-        }, deps.opencodeStartTimeoutMs ?? 35_000);
+        }, deps.opencodeStartTimeoutMs ?? OPENCODE_START_TIMEOUT_MS);
         child.unref();
       });
     } catch {

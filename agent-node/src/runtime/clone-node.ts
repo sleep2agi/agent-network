@@ -26,6 +26,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { adoptedChild } from "./adopt-registry.js";
@@ -143,7 +144,8 @@ function adoptedProvenHub(daemonWorkDir: string, alias: string): string | null {
 export const CLONE_SEED_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
 const SEED_MAX_BYTES = 256 * 1024;
 
-export function seedCloneInstructions(sourceWorkdir: string, targetWorkdir: string): string[] {
+export function seedCloneInstructions(sourceWorkdir: string, targetWorkdir: string,
+  rename?: { from: string; to: string }): string[] {
   if (resolve(sourceWorkdir) === resolve(targetWorkdir)) return [];
   const copied: string[] = [];
   for (const name of CLONE_SEED_FILES) {
@@ -153,7 +155,20 @@ export function seedCloneInstructions(sourceWorkdir: string, targetWorkdir: stri
     try { st = lstatSync(from); } catch { continue; }
     if (!st.isFile() || st.isSymbolicLink() || st.size > SEED_MAX_BYTES) continue;
     if (existsSync(to)) continue;
-    try { copyFileSync(from, to, fsConstants.COPYFILE_EXCL); chmodSync(to, 0o600); copied.push(name); } catch { /* best effort */ }
+    try { copyFileSync(from, to, fsConstants.COPYFILE_EXCL); chmodSync(to, 0o600); copied.push(name); } catch { continue; }
+    // vdev 2026-11-11：fork 出来的 8号 读 AGENTS.md 第一行仍是「# TMA客户端欧6号」。只改**恰好是**
+    // 源节点名的那一行标题，其余逐字节不动。
+    if (rename && rename.from && rename.to && rename.from !== rename.to) {
+      try {
+        const text = readFileSync(to, "utf8");
+        const lines = text.split("\n");
+        const i = lines.findIndex((l) => l.trim().length > 0);
+        if (i >= 0 && lines[i].replace(/\r$/, "").trim() === `# ${rename.from}`) {
+          lines[i] = lines[i].replace(`# ${rename.from}`, `# ${rename.to}`);
+          writeFileSync(to, lines.join("\n"), { mode: 0o600 });
+        }
+      } catch { /* keep the verbatim copy */ }
+    }
   }
   return copied;
 }
@@ -485,7 +500,7 @@ export async function handleCloneNodeDoorbell(
   }
   deps.log(`[clone-node] workdir ${childWorkDir} — ${disk.workdirReason}`);
   if (policy === "new_empty") {
-    const seeded = seedCloneInstructions(sourceWorkdir, childWorkDir);
+    const seeded = seedCloneInstructions(sourceWorkdir, childWorkDir, { from: alias, to: req.node_spec.name });
     if (seeded.length) deps.log(`[clone-node] seeded ${seeded.join(", ")} from ${sourceWorkdir}`);
   }
 

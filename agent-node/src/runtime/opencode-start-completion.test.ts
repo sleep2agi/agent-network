@@ -98,7 +98,8 @@ test("start rechecks within the original deadline and publishes the TUI mismatch
   expect(getChildrenSnapshot()).toEqual([]);
   const source = readFileSync(join(import.meta.dir, "opencode-start-completion.ts"), "utf8");
   expect(source).toContain("deps.waitOpenCodeStartHealth ?? waitForLaunchHealth");
-  expect(source).toContain("launchedAt + (deps.opencodeStartTimeoutMs ?? 35_000)");
+  expect(source).toContain("launchedAt + (deps.opencodeStartTimeoutMs ?? OPENCODE_START_TIMEOUT_MS)");
+
 });
 test("successful launcher with invalid generation proof is not started", async () => {
   const f = fixture(); f.deps.inspectOpenCodeStartHealth = () => ({ ok: false, reason: "stale or mismatched generation" });
