@@ -109,6 +109,12 @@ import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
+// #4495 —— 源目录 / 新建节点 / 复用已有 Session 的能力值。Hub 只认这几个**精确**字符串,
+// 别的值一律不投影(daemon 上报的是自由 JSON,不能把任意串透给客户端当能力)。
+import { SOURCE_DIRECTORY_CAPABILITY } from "./contracts/session-source-directory.js";
+import { SOURCE_FORK_CAPABILITY } from "./contracts/session-source-transport.js";
+import { SOURCE_DELIVERY_CAPABILITY } from "./contracts/session-source-delivery.js";
+import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "./contracts/session-project-create.js";
 import { readTokenUsage, tokenUsageCoverage } from "./node-token-usage.js";
 import { readBuildInfo } from "./build-info.js";
 import { requestProviderApplication } from "./daemon-provider-snapshots.js";
@@ -6927,6 +6933,8 @@ return Bun.serve({
           //    而这一格存在的全部意义就是让人分辨新鲜和陈旧。
           let snapObservedMsAgo: number | undefined;
           let snapReadiness: ReturnType<typeof sanitizeRuntimeReadiness>;
+          // #4495 —— 源能力,只在 daemon 真的按契约上报时才有键。
+          const snapCaps: Record<string, string> = {};
           if (r.config_snapshot) {
             try {
               const parsed = typeof r.config_snapshot === "string" ? JSON.parse(r.config_snapshot) : r.config_snapshot;
@@ -6948,14 +6956,28 @@ return Bun.serve({
               }
               // #622 —— 逐 runtime 就绪度;旧 daemon 不报 ⇒ undefined ⇒ 响应里没有这个键。
               snapReadiness = sanitizeRuntimeReadiness(caps?.runtime_readiness);
+              // #4495 —— 这五条以前**只存在 nodes.config_snapshot 里,没有任何 REST 出口**:
+              // 客户端想知道「这台 daemon 能不能列已有项目 / 复用已有 Session」只能靠猜
+              // (app 里 NodeSourcePalette 干脆写死 hasProjectCreateCapability: true)。
+              // 现在按精确能力值投影出来;没报 / 报的值不认识 ⇒ 键不出现(与 can_create_nodes 同一套兼容口径)。
+              for (const [key, want] of [
+                ["source_directory_read", SOURCE_DIRECTORY_CAPABILITY],
+                ["project_new_session", PROJECT_CREATE_CAPABILITY],
+                ["session_attach", SESSION_ATTACH_CAPABILITY],
+                ["source_fork_transport", SOURCE_FORK_CAPABILITY],
+                ["source_node_delivery", SOURCE_DELIVERY_CAPABILITY],
+              ] as const) {
+                const v = (caps as Record<string, unknown> | undefined)?.[key];
+                if (typeof v === "string" && v === want) snapCaps[key] = v;
+              }
             } catch { /* malformed */ }
           }
           return { row: r, role: snapRole, canCreate: snapCanCreate, blockedReason: snapBlockedReason,
             observedMsAgo: snapObservedMsAgo, readiness: snapReadiness, adoptCapable: snapAdoptCapable,
-            adoptionDiscovery: snapAdoptionDiscovery };
+            adoptionDiscovery: snapAdoptionDiscovery, caps: snapCaps };
         })
         .filter(({ role }) => role === "host_supervisor")
-        .map(({ row: r, canCreate, blockedReason, observedMsAgo, readiness, adoptCapable, adoptionDiscovery }) => {
+        .map(({ row: r, canCreate, blockedReason, observedMsAgo, readiness, adoptCapable, adoptionDiscovery, caps }) => {
           let online = false;
           let lastSeenAt: string | null = null;
           if (r.session_last_seen) {
@@ -6994,6 +7016,8 @@ return Bun.serve({
             runtimes_supported: runtimes,
             allowed_secret_keys: secrets,
             host_telemetry: telemetry,
+            // #4495 —— 没上报就不出现这些键（与 can_create_nodes 的「不是 false,是 undefined」同一口径）。
+            ...caps,
           };
           // #973 — only when the daemon actually reported one (see the SQL comment).
           const reportedVersion = (r as unknown as { reported_version?: string | null }).reported_version;
