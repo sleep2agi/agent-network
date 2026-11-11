@@ -27,7 +27,7 @@ import { createNodeSessionControlBridge, createSessionControlPin } from "./runti
 import { SOURCE_FORK_CAPABILITY } from "../../contracts/session-source-transport";
 import { isSecureSourceHubUrl } from "./runtime/source-hub-url";
 import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
-import { laneEnabled, sourceCapabilities } from "./daemon-source-capabilities";
+import { intendedSourceCapabilities, laneEnabled, sourceCapabilities } from "./daemon-source-capabilities";
 import { SOURCE_DIRECTORY_CAPABILITY } from "../../contracts/session-source-directory";
 import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
 import {
@@ -336,18 +336,21 @@ function sourceForkSnapshot<T extends { daemon_capabilities?: object }>(snapshot
   // 判定逻辑抽到 daemon-source-capabilities.ts（纯函数 + 单测）：那里同时解释了
   // 「为什么生产上 7 台 daemon 一条都不报」——原来要求四个环境变量全为 1。
   const secure = isSecureSourceHubUrl(COMMHUB_URL);
-  if (fileConfig.role === "host_supervisor" && !secure && !_insecureSourceHubWarned) {
-    _insecureSourceHubWarned = true;
-    warn(`[source-control] fork/directory lanes disabled: Hub URL must be https:// (or http on loopback); current ${(() => { try { return new URL(COMMHUB_URL).origin; } catch { return "invalid URL"; } })()}`);
-  }
-  const caps = sourceCapabilities({
+  const laneInput = {
     role: fileConfig.role,
     platform: process.platform,
     env: process.env,
     config: fileConfig,
-    secureHub: secure,
     createOk: !!daemonCreateCapability()?.ok,
-  });
+  };
+  // 只在「本来想开、却因为 Hub 不安全被清空」时告警；一个 transport 都没配的 daemon
+  // 不该看到「被安全策略拦了」这种误导性日志。
+  if (fileConfig.role === "host_supervisor" && !secure && !_insecureSourceHubWarned
+    && Object.keys(intendedSourceCapabilities(laneInput)).length > 0) {
+    _insecureSourceHubWarned = true;
+    warn(`[source-control] fork/directory lanes disabled: Hub URL must be https:// (or http on loopback); current ${(() => { try { return new URL(COMMHUB_URL).origin; } catch { return "invalid URL"; } })()}`);
+  }
+  const caps = sourceCapabilities({ ...laneInput, secureHub: secure });
   if (!Object.keys(caps).length) return snapshot;
   return { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, ...caps } };
 }
@@ -8715,23 +8718,30 @@ await register();
 log("已注册到 CommHub");
 // Independent explicit directory/fork previews; directory-only never probes or
 // starts a launcher. Ordinary daemons do not poll either source queue.
-if (fileConfig.role === "host_supervisor" && ((laneEnabled(process.env, "ANET_SOURCE_FORK_PREVIEW")
-  && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY) || (laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW")
-  && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY))
+// 🔴 能力上报与实际拉起 worker 用**同一份** sourceCapabilities 结果：
+//    报了什么就必须起什么，否则会出现「Hub 按能力派活、daemon 从不轮询 → 用户点了卡到超时」。
+const sourceLanes = sourceCapabilities({
+  role: fileConfig.role,
+  platform: process.platform,
+  env: process.env,
+  config: fileConfig,
+  secureHub: isSecureSourceHubUrl(COMMHUB_URL),
+  createOk: !!daemonCreateCapability()?.ok,
+});
+if (Object.keys(sourceLanes).length > 0
   && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID && process.platform === "linux"
   && isSecureSourceHubUrl(COMMHUB_URL)) {
   // An optional preview lane must never be the reason a daemon dies: any setup
   // error leaves the daemon running without the lane (and without advertising it).
   try {
+  log(`[source-control] lanes: ${Object.keys(sourceLanes).join(",") || "none"}`);
   const { createSessionSourceTransportWorker } = await import("./runtime/session-source-transport");
   sourceForkWorker = createSessionSourceTransportWorker({ hubUrl: COMMHUB_URL, daemonWorkDir: process.cwd(), home: daemonHome(),
-    // 与 sourceCapabilities() 用同一套判断（laneEnabled）：报了什么就必须真的起什么。
-    directoryEnabled: laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW") && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
-    attachEnabled: laneEnabled(process.env, "ANET_SESSION_ATTACH_PREVIEW") && fileConfig.sessionAttachTransport === SESSION_ATTACH_CAPABILITY
-      && laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW") && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
-    projectEnabled: laneEnabled(process.env, "ANET_PROJECT_NEW_SESSION_PREVIEW") && fileConfig.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY
-      && laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW") && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
-    forkEnabled: laneEnabled(process.env, "ANET_SOURCE_FORK_PREVIEW") && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY,
+    // 直接由 sourceLanes 推导：不重新读 env / config，杜绝两套判据漂移。
+    directoryEnabled: "source_directory_read" in sourceLanes,
+    attachEnabled: "session_attach" in sourceLanes,
+    projectEnabled: "project_new_session" in sourceLanes,
+    forkEnabled: "source_fork_transport" in sourceLanes,
     pin: createSessionControlPin({ hubUrl: COMMHUB_URL, token: SESSION_CONTROL_START_TOKEN, nodeId: NODE_ID, networkId: NETWORK_ID,
       epoch: sessionControlCredentialEpoch, currentToken: () => AUTH_TOKEN, currentEpoch: () => sessionControlCredentialEpoch,
       signal: sessionControlCredentialAbort.signal }) });

@@ -22,20 +22,31 @@ const fullConfig = {
 const base = { role: "host_supervisor", platform: "linux", env: {}, config: fullConfig, secureHub: true, createOk: true };
 
 describe("laneEnabled —— 上报与拉起共用同一判断", () => {
-  test("未设 / \"1\" ⇒ 开；\"0\" ⇒ 关", () => {
+  test("未设 / 空串 / \"1\" ⇒ 开；\"0\" \"false\" \"off\" ⇒ 关", () => {
     expect(laneEnabled({}, "ANET_SOURCE_FORK_PREVIEW")).toBe(true);
     expect(laneEnabled({ ANET_SOURCE_FORK_PREVIEW: "1" }, "ANET_SOURCE_FORK_PREVIEW")).toBe(true);
-    expect(laneEnabled({ ANET_SOURCE_FORK_PREVIEW: "0" }, "ANET_SOURCE_FORK_PREVIEW")).toBe(false);
+    // systemd `Environment=VAR=` / docker `-e VAR` 都会产生空串：按「未设」处理，不是关。
+    expect(laneEnabled({ ANET_SOURCE_FORK_PREVIEW: "" }, "ANET_SOURCE_FORK_PREVIEW")).toBe(true);
+    for (const v of ["0", "false", "off", " OFF "]) {
+      expect(laneEnabled({ ANET_SOURCE_FORK_PREVIEW: v }, "ANET_SOURCE_FORK_PREVIEW")).toBe(false);
+    }
   });
   test("源码守护：worker 启动不能再退回 `=== \"1\"`（否则报了能力却不干活）", () => {
     const src = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
     const start = src.indexOf("createSessionSourceTransportWorker({");
     const block = src.slice(start, src.indexOf("pin:", start));
+    // 起 worker 的前置判断也必须是同一份 sourceLanes（不是重新读 env）
+    const guardAt = src.indexOf("const sourceLanes = sourceCapabilities(");
+    expect(guardAt).toBeGreaterThan(0);
+    expect(src.slice(guardAt, start)).toContain("Object.keys(sourceLanes).length > 0");
     expect(start).toBeGreaterThan(0);
     expect(block).not.toContain('_PREVIEW === "1"');
-    for (const k of ["ANET_SOURCE_DIRECTORY_PREVIEW", "ANET_PROJECT_NEW_SESSION_PREVIEW", "ANET_SESSION_ATTACH_PREVIEW", "ANET_SOURCE_FORK_PREVIEW"]) {
-      expect(block).toContain(`laneEnabled(process.env, "${k}")`);
+    // 每条 lane 都从同一份 sourceCapabilities 结果推导，不再各自读 env / config。
+    for (const [field, cap] of [["directoryEnabled", "source_directory_read"], ["attachEnabled", "session_attach"],
+      ["projectEnabled", "project_new_session"], ["forkEnabled", "source_fork_transport"]]) {
+      expect(block).toContain(`${field}: "${cap}" in sourceLanes`);
     }
+    expect(block).not.toContain("laneEnabled(process.env");
   });
 });
 

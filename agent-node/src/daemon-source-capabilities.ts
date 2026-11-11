@@ -50,7 +50,21 @@ export type SourceCapabilities = {
  * `createSessionSourceTransportWorker`）**必须用同一个判断**，否则会出现
  * 「报了能力但 lane 没起」——能力是真的但用不了，比不报更糟。
  */
-export const laneEnabled = (env: Record<string, string | undefined>, key: string): boolean => env[key] !== "0";
+export const laneEnabled = (env: Record<string, string | undefined>, key: string): boolean => {
+  const raw = env[key];
+  if (typeof raw !== "string") return true;          // 未设 ⇒ 交给 config
+  const v = raw.trim().toLowerCase();
+  if (v === "") return true;                          // 空串 = systemd `Environment=VAR=` / docker `-e VAR`
+  return !(v === "0" || v === "false" || v === "off");
+};
+
+/**
+ * 这台 daemon **本来想开**哪些 lane（不看 Hub URL 是否安全）。
+ * 只用于判断「要不要因为不安全 Hub 而告警」——真的上报仍然走 sourceCapabilities。
+ */
+export function intendedSourceCapabilities(input: Omit<SourceCapabilityInput, "secureHub">): SourceCapabilities {
+  return sourceCapabilities({ ...input, secureHub: true });
+}
 
 export function sourceCapabilities(input: SourceCapabilityInput): SourceCapabilities {
   const { role, platform, env, config, secureHub, createOk } = input;
