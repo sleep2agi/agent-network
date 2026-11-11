@@ -7,8 +7,9 @@
 // node 范围只命中 agent_owner 就是那个节点的卡、readonly 模式下 edit 降 read。
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { db } from "./db.js";
+import { departmentCardsFor, departmentSubtree, isDepartmentCard } from "./department-heads.js";
 import "./departments.js";  // 建 network_departments（该表的 DDL 在 departments.ts，不在 db.ts）
-import { boardGrantForCard, cardDepartments } from "./node-grants.js";
+import { boardGrantForCard } from "./node-grants.js";
 
 const NET = `net_board_${Date.now()}`;
 const DEPT_PARENT = `dept_bp_${Date.now()}`;
@@ -29,8 +30,10 @@ beforeAll(() => {
   for (const [id, dept] of [[DEPT_PARENT, null], [DEPT_CHILD, DEPT_PARENT], [DEPT_OTHER, null]] as const) {
     db.run("INSERT INTO network_departments (department_id, network_id, name, parent_id, sort, created_at) VALUES (?1, ?2, ?1, ?3, 0, datetime('now'))", [id, NET, dept]);
   }
-  for (const [id, dept] of [[N_GRANTED, DEPT_OTHER], [N_CARD, DEPT_CHILD], [N_OTHER, DEPT_OTHER]] as const) {
-    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, department_id, created_at) VALUES (?1, ?1, ?1, ?2, ?3, datetime('now'))", [id, NET, dept]);
+  // 🔴 卡的「agent 负责人」是否属于某部门，判的是**agent 的主人在不在部门成员里**（nodesOwnedBy），
+  //    不是 agent 节点自己的 department_id —— 所以这里用 owner_user_id 建边。
+  for (const [id, owner] of [[N_GRANTED, U_PARENT], [N_CARD, U_IN], [N_OTHER, U_OUT]] as const) {
+    db.run("INSERT INTO nodes (node_id, node_name, alias, network_id, owner_user_id, created_at) VALUES (?1, ?1, ?1, ?2, ?3, datetime('now'))", [id, NET, owner]);
   }
 });
 
@@ -50,10 +53,11 @@ const grant = (scope_kind: string, scope_id: string, level: string) =>
   );
 
 describe("board 判定：按卡的负责人所在部门", () => {
-  test("卡属于哪些部门：owner 人的部门 + agent_owner 节点的部门", () => {
-    expect([...cardDepartments(NET, { owner_json: userJson(U_IN) })]).toEqual([DEPT_CHILD]);
-    expect([...cardDepartments(NET, { owner_json: null, agent_owner_json: nodeJson(N_CARD) })]).toEqual([DEPT_CHILD]);
-    expect([...cardDepartments(NET, { owner_json: userJson(U_OUT) })]).toEqual([DEPT_OTHER]);
+  test("部门的卡 = 负责人（人或 agent 的主人）在部门成员里", () => {
+    const cards = departmentCardsFor(NET, departmentSubtree(NET, DEPT_PARENT));
+    expect(isDepartmentCard(cards, { owner_json: userJson(U_IN) })).toBe(true);
+    expect(isDepartmentCard(cards, { owner_json: null, agent_owner_json: nodeJson(N_CARD) })).toBe(true);
+    expect(isDepartmentCard(cards, { owner_json: userJson(U_OUT) })).toBe(false);
   });
 
   test("没有授权 → null（不许默认放行）", () => {

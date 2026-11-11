@@ -16,7 +16,7 @@
 // 谁能授权（REST PUT /api/nodes/:id/grants）：网络 owner / admin 与 Hub 管理员可授任意范围；
 // 部门负责人只能授自己负责的子树里的 department / node 范围（不能授 network）。
 import { db } from "./db.js";
-import { departmentSubtree } from "./department-heads.js";
+import { departmentCardsFor, departmentSubtree, isDepartmentCard } from "./department-heads.js";
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS node_grants (
@@ -33,9 +33,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_node_grants_node ON node_grants(node_id);
 `);
 
-export const GRANT_CAPABILITIES = ["schedules", "board"] as const;
-// 第二期（board）已上线；这里留给后续「管理节点权限」那期。
-export const GRANT_CAPABILITIES_PLANNED = [] as const;
+export const GRANT_CAPABILITIES = ["schedules"] as const;
+// 第二期（board）：能力定义与判定已写好，但**暂不开闸** —— 等 requirements 读写判定 + 看板工具
+// 在同一个 PR 里一起上（否则「能授、能存、但不起作用」，看起来像生效了）。
+export const GRANT_CAPABILITIES_PLANNED = ["board"] as const;
 export type GrantCapability = (typeof GRANT_CAPABILITIES)[number];
 export type GrantScopeKind = "network" | "department" | "node";
 export type GrantLevel = "read" | "edit";
@@ -154,46 +155,26 @@ export function hasAnyGrant(networkId: string, nodeId: string, capability: Grant
 //
 // 与 schedules 的口径**不同**，别混：
 //   · schedules 按「目标节点所在部门」判（计划后面挂着一个目标节点）
-//   · board 按「**卡的负责人所在部门**」判 —— 卡没有「目标节点」，
-//     它只有 owner（人）与 agent_owner（节点）两种负责人（见 department-heads.ts）。
+//   · board 按「**卡的负责人所在部门**」判 —— 卡没有目标节点
 //
-// 因此这里不复用 grantLevelForTarget（那是按 targetNodeId 算的），
-// 而是先把「这张卡属于哪些部门」求出来，再用同一批授权行去匹配 scope：
-//   scope=network      → 命中任何卡
-//   scope=department   → 命中「卡的负责人 / 负责 Agent 落在该部门子树」
-//   scope=node         → 命中「卡的 agent_owner 就是这个节点」
+// 部门口径**必须**和部门负责人（RFC-040）完全一致，所以这里直接复用
+// `isDepartmentCard(departmentCardsFor(net, departmentSubtree(net, scope_id)), row)`，
+// 不自己解析 owner_json —— 那边判的是「agent 的主人是否在部门成员里」（nodesOwnedBy），
+// 而不是「agent 节点自己的 department_id」；两套写法会判出不同结果。
 export type BoardCardRef = {
   owner_json: string | null;
   agent_owner_json?: string | null;
 };
 
-/** 卡的负责人的部门集合（owner 人的部门 + agent_owner 节点的部门，含各自父链？不 —— 只取直接部门）。 */
-export function cardDepartments(networkId: string, row: BoardCardRef): Set<string> {
-  const out = new Set<string>();
-  const refId = (json: string | null, kind: "user" | "node"): string | null => {
-    if (!json) return null;
-    try {
-      const ref = JSON.parse(json) as { kind?: unknown; id?: unknown };
-      return ref && ref.kind === kind && typeof ref.id === "string" ? ref.id : null;
-    } catch {
-      return null;
-    }
-  };
-  const ownerUser = refId(row.owner_json, "user");
-  if (ownerUser) {
-    const dept = db.get<{ department_id: string | null }>(
-      "SELECT department_id FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, ownerUser,
-    )?.department_id;
-    if (dept) out.add(dept);
+/** 卡的 agent_owner 节点 id（只有 node 范围需要它）。 */
+function agentOwnerNodeId(row: BoardCardRef): string | null {
+  if (!row.agent_owner_json) return null;
+  try {
+    const ref = JSON.parse(row.agent_owner_json) as { kind?: unknown; id?: unknown };
+    return ref && ref.kind === "node" && typeof ref.id === "string" ? ref.id : null;
+  } catch {
+    return null;
   }
-  const agentNode = refId(row.agent_owner_json ?? null, "node");
-  if (agentNode) {
-    const dept = db.get<{ department_id: string | null }>(
-      "SELECT department_id FROM nodes WHERE network_id = ?1 AND node_id = ?2", networkId, agentNode,
-    )?.department_id;
-    if (dept) out.add(dept);
-  }
-  return out;
 }
 
 /** 这个节点对这张卡有没有 board 授权，以及级别。readonly 模式下 edit 降为 read。 */
@@ -205,25 +186,20 @@ export function boardGrantForCard(
     networkId, nodeId,
   );
   if (!grants.length) return null;
-  const depts = cardDepartments(networkId, row);
-  const refId = (json: string | null): string | null => {
-    if (!json) return null;
-    try {
-      const ref = JSON.parse(json) as { kind?: unknown; id?: unknown };
-      return ref && ref.kind === "node" && typeof ref.id === "string" ? ref.id : null;
-    } catch {
-      return null;
-    }
-  };
-  const agentNode = refId(row.agent_owner_json ?? null);
+  const agentNode = agentOwnerNodeId(row);
+  const deptScopes = new Map<string, ReturnType<typeof departmentCardsFor>>();
   let best: GrantLevel | null = null;
   for (const g of grants) {
     let hit = false;
     if (g.scope_kind === "network") hit = true;
     else if (g.scope_kind === "node") hit = !!agentNode && g.scope_id === agentNode;
     else if (g.scope_kind === "department") {
-      const subtree = departmentSubtree(networkId, g.scope_id);
-      for (const d of depts) if (subtree.has(d)) { hit = true; break; }
+      let cards = deptScopes.get(g.scope_id);
+      if (!cards) {
+        cards = departmentCardsFor(networkId, departmentSubtree(networkId, g.scope_id));
+        deptScopes.set(g.scope_id, cards);
+      }
+      hit = isDepartmentCard(cards, row);
     }
     if (!hit) continue;
     if (g.level === "edit") { best = "edit"; break; }

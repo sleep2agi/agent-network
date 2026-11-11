@@ -12,6 +12,9 @@
 // can_edit=1 = 可改)。旧代码不读它,回滚安全。递归在 JS 里算(部门 ≤ 500),不依赖 WITH RECURSIVE 的方言差异。
 
 import { db } from "./db.js";
+// 🔴 这一行是加载顺序保证：`network_members.department_id` 的迁移在 departments.ts:19，
+//    而本文件直接 SELECT 它。少了这行，新库（测试 / 新部署）会缺列（2026-11-11 写 board 测试时撞到）。
+import "./departments.js";
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS network_department_project_grants (

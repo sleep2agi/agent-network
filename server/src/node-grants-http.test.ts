@@ -107,21 +107,10 @@ describe("PUT /api/nodes/:id/grants —— 谁能授", () => {
     expect((await putGrants(user.lead.token, node.mgr.id, [{ capability: "schedules", scope_kind: "department", scope_id: deptB, level: "edit" }])).status).toBe(403);
     await putGrants(user.boss.token, node.mgr.id, []);
   });
-  test("未知能力 400；看板（第二期已可用）200；不存在的部门 404", async () => {
+  test("未知能力 400；看板（计划中）400 capability_not_supported；不存在的部门 404", async () => {
     expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "nope", scope_kind: "network" }])).body.error).toBe("invalid_capability");
-    // 第二期（2026-11-11）：board 从「计划中」转为正式能力，写入不再被拒。
-    const board = await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "network", level: "read" }]);
-    expect(board.status).toBe(200);
-    const readBack = await call(user.boss.token, "GET", `/api/nodes/${node.mgr.id}/grants?network_id=${net}`);
-    expect((readBack.body.grants || []).some((g: any) => g.capability === "board" && g.level === "read")).toBe(true);
-    await putGrants(user.boss.token, node.mgr.id, []);
+    expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "network" }])).body.error).toBe("capability_not_supported");
     expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "schedules", scope_kind: "department", scope_id: "dept_missing" }])).status).toBe(404);
-  });
-
-  test("部门负责人只能授本部门的 board（跨部门 403）", async () => {
-    expect((await putGrants(user.lead.token, node.mgr.id, [{ capability: "board", scope_kind: "department", scope_id: deptA, level: "read" }])).status).toBe(200);
-    expect((await putGrants(user.lead.token, node.mgr.id, [{ capability: "board", scope_kind: "department", scope_id: deptB, level: "read" }])).status).toBe(403);
-    await putGrants(user.boss.token, node.mgr.id, []);
   });
 });
 

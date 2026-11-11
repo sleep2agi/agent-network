@@ -2571,8 +2571,4 @@ db.exec(`
 // Agent 只能落进「未归属」——2026-10-19 现网就是 328 个 Agent 全在未归属里，
 // 而部门 0 个 Agent。这一列让 Agent 可以被直接放进部门，和人的归属互不覆盖：
 // 显式值优先，没有显式值时仍按负责人的部门推断。
-// 🔴 生产库有这个列，但建表语句里没有 —— 新库（测试 / 新部署）会缺，
-//    而 department-heads.ts 的 membersIn() 直接 SELECT 它 ⇒ 部门功能在新库上直接报错。
-//    2026-11-11 加 board 授权测试时撞到；补一条幂等迁移，别让「只有生产有」的列继续漂。
-try { db.exec("ALTER TABLE network_members ADD COLUMN department_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE nodes ADD COLUMN department_id TEXT"); } catch {}
