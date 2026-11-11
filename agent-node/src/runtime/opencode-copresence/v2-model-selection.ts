@@ -16,10 +16,24 @@ export function readV2ModelSelection(body: unknown): V2ModelSelection | undefine
   return { providerID, id, ...(variant === undefined ? {} : { variant }) };
 }
 
+/**
+ * The session's location is the node workspace or somewhere inside it.
+ * OpenCode moves a session's `location.directory` when the agent `cd`s (e.g. into
+ * `<workspace>/wt/<branch>` for a git worktree). Exact equality then refused to
+ * resume the node's own session after a restart (2026-11-11, TMA客户端欧5号 stayed
+ * offline). Boundary-checked: `/ws-2` is not inside `/ws`.
+ */
+export function isWithinWorkspace(location: unknown, workspace: string): boolean {
+  if (typeof location !== "string" || !location || !workspace) return false;
+  if (location === workspace) return true;
+  const base = workspace.endsWith("/") ? workspace : `${workspace}/`;
+  return location.startsWith(base) && !location.slice(base.length).split("/").includes("..");
+}
+
 /** A matching model alone cannot establish the identity or workspace of a readback. */
 export function isV2SessionScope(body: unknown, sessionId: string, directory: string): boolean {
   return record(body) && record(body.data) && body.data.id === sessionId &&
-    record(body.data.location) && body.data.location.directory === directory;
+    record(body.data.location) && isWithinWorkspace(body.data.location.directory, directory);
 }
 
 /** Fail closed if the catalog is absent, ambiguous, malformed or from another directory. */

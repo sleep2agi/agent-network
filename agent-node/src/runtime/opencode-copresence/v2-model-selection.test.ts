@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { catalogAllowsSelection, catalogSupportsVariants, createV2SelectionController, equalV2ModelSelection, isV2SessionScope, readV2ModelSelection } from "./v2-model-selection";
+import { catalogAllowsSelection, catalogSupportsVariants, createV2SelectionController, equalV2ModelSelection, isV2SessionScope, isWithinWorkspace, readV2ModelSelection } from "./v2-model-selection";
 
 describe("V2 scoped model selection", () => {
   const selected = { providerID: "stub", id: "family/model", variant: "high" };
@@ -53,6 +53,20 @@ describe("V2 scoped model selection", () => {
     expect(isV2SessionScope(body, "ses_other", "/isolated")).toBe(false);
     expect(isV2SessionScope(body, "ses_target", "/other")).toBe(false);
     expect(isV2SessionScope({ data: { model: selected } }, "ses_target", "/isolated")).toBe(false);
+  });
+
+  test("a session that moved into a subfolder of the workspace (git worktree) still belongs to the node", () => {
+    // 2026-11-11: TMA客户端欧5号's session location was <workspace>/wt/cli-path-visibility; exact equality refused the resume.
+    const moved = { data: { id: "ses_target", location: { directory: "/isolated/wt/feature" } } };
+    expect(isV2SessionScope(moved, "ses_target", "/isolated")).toBe(true);
+    expect(isV2SessionScope(moved, "ses_target", "/isolated/")).toBe(true);
+    // sibling folders and escapes are still another workspace
+    expect(isV2SessionScope({ data: { id: "ses_target", location: { directory: "/isolated-2" } } }, "ses_target", "/isolated")).toBe(false);
+    expect(isV2SessionScope({ data: { id: "ses_target", location: { directory: "/isolated/../other" } } }, "ses_target", "/isolated")).toBe(false);
+    expect(isWithinWorkspace("/isolated", "/isolated")).toBe(true);
+    expect(isWithinWorkspace("", "/isolated")).toBe(false);
+    expect(isWithinWorkspace(undefined, "/isolated")).toBe(false);
+    expect(isWithinWorkspace("/isolated/x", "")).toBe(false);
   });
   test("requires same-session full readback and never claims timeout is rejected", async () => {
     let releaseCount = 0;

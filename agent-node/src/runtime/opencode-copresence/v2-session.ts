@@ -58,7 +58,7 @@ import {
 } from "./runtime";
 import { unverifiedOwnerError } from "./reply-ownership";
 import { fetchOpenCodeSessionControlJson } from "./http";
-import { catalogSupportsVariants, createV2SelectionController, equalV2ModelSelection, isV2SessionScope, readV2ModelSelection } from "./v2-model-selection";
+import { catalogSupportsVariants, isWithinWorkspace, createV2SelectionController, equalV2ModelSelection, isV2SessionScope, readV2ModelSelection } from "./v2-model-selection";
 import { isOwnedTestBuild, observeSharedTestBuild, sharedVariantAuthorized } from "./v2-test-build-identity";
 import { forkV2Session } from "./v2-fork";
 import { resumeV2Session } from "./v2-resume";
@@ -607,7 +607,7 @@ export async function openVettedOpenCodeV2Copresence(
     if (requestedResume !== undefined && sessionId !== requestedResume) {
       throw new Error("OpenCode v2 resumed session id does not match the requested session");
     }
-    if (created?.data?.location?.directory !== resolve(opts.cwd)) {
+    if (!isWithinWorkspace(created?.data?.location?.directory, resolve(opts.cwd))) {
       throw new Error("OpenCode v2 session directory does not match the node workspace");
     }
     const resumedModelDiffers = shared && opts.resumeSessionId &&
