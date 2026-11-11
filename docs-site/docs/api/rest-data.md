@@ -292,7 +292,7 @@ curl -X PUT http://localhost:9200/api/nodes/n_abc123/inbox-allowlist \
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `senders` | `string[] \| null` | `<alias>` / `<node_id>` = Agent；`user:<username>` / `user:<user_id>` = 人；`user:*` = 任何人；`!strict` = 主人和网络 owner/admin 也必须列名。`null` 清空（谁都能发）。最多 200 条 |
+| `senders` | `string[] \| null` | `<alias>` / `<node_id>` = Agent；`user:<username>` / `user:<user_id>` = 人；`user:*` = 任何人；`dept:<department_id>` = 这个部门及其子部门里的 Agent 和人；`!strict` = 主人和网络 owner/admin 也必须列名。`null` 清空（谁都能发）。最多 200 条 |
 
 **响应**：`{"ok": true, "node_id": "n_abc123", "senders": ["planner", "n_def456", "user:alice"]}`（清空时 `senders: null`）。记审计 `node_inbox_allowlist_changed`，`detail` 为 `{from, to}`。
 

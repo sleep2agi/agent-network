@@ -276,6 +276,7 @@ It has the same shape as `peer-allowlist`: same authorization (user token + node
 | `<alias>` / `<node_id>` | an agent sender (node token) |
 | `user:<username>` / `user:<user_id>` | a person (user token from the Dashboard, desktop app or `anet`) |
 | `user:*` | any person |
+| `dept:<department_id>` | any agent (by the node's department) or person (by their member department) in that department or any sub-department |
 | `!strict` | turns off the implicit bypass below |
 
 **Implicit bypass (you cannot lock yourself out by accident):** without `!strict`, these senders get through regardless of the list: the node's owner, a network owner/admin, a hub admin, and old-style callers with no user identity (open / legacy mode, where anyone can claim to be anyone anyway). Add `!strict` to require them to be listed too. A node sending to itself is always allowed, even with `!strict`.

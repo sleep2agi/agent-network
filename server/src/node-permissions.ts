@@ -458,6 +458,39 @@ function inboxTargetRow(networkId: string | null, target: AgentRef): InboxTarget
   return null;
 }
 
+/** 名单里的部门项：`dept:<department_id>`（含它下面的子部门）。admin 2026-11-11「以部门去授权」。 */
+export const INBOX_DEPT_PREFIX = "dept:";
+
+/** 发件人所在部门及其所有上级部门（自下而上，最多 32 层防环）。拿不到部门 = 空。 */
+function senderDepartmentChain(sender: InboxSender, networkId: string | null): string[] {
+  if (!networkId) return [];
+  let dept: string | null = null;
+  if (sender.kind === "node") {
+    const row = sender.nodeId
+      ? db.get<{ department_id: string | null }>("SELECT department_id FROM nodes WHERE node_id = ?1", sender.nodeId)
+      : sender.aliases[0]
+        ? db.get<{ department_id: string | null }>("SELECT department_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1", sender.aliases[0], networkId)
+        : null;
+    dept = row?.department_id ?? null;
+  } else if (sender.kind === "user") {
+    dept = db.get<{ department_id: string | null }>(
+      "SELECT department_id FROM network_members WHERE network_id = ?1 AND user_id = ?2", networkId, sender.userId)?.department_id ?? null;
+  }
+  const chain: string[] = [];
+  for (let i = 0; dept && i < 32 && !chain.includes(dept); i++) {
+    chain.push(dept);
+    dept = db.get<{ parent_id: string | null }>(
+      "SELECT parent_id FROM network_departments WHERE network_id = ?1 AND department_id = ?2", networkId, dept)?.parent_id ?? null;
+  }
+  return chain;
+}
+
+function inboxDeptAllows(list: string[], sender: InboxSender, networkId: string | null): boolean {
+  const depts = list.filter(e => e.startsWith(INBOX_DEPT_PREFIX)).map(e => e.slice(INBOX_DEPT_PREFIX.length));
+  if (!depts.length) return false;
+  return senderDepartmentChain(sender, networkId).some(d => depts.includes(d));
+}
+
 /** 纯判定（不记账）：名单 + 发件人 → 放不放行。 */
 export function inboxAllows(
   list: string[] | null,
@@ -467,7 +500,8 @@ export function inboxAllows(
   if (!list) return true;
   if (sender.kind === "node") {
     if ((sender.nodeId && sender.nodeId === ctx.targetNodeId) || (ctx.targetAlias && sender.aliases.includes(ctx.targetAlias))) return true;
-    return (!!sender.nodeId && list.includes(sender.nodeId)) || sender.aliases.some(a => list.includes(a));
+    return (!!sender.nodeId && list.includes(sender.nodeId)) || sender.aliases.some(a => list.includes(a))
+      || inboxDeptAllows(list, sender, ctx.networkId);
   }
   const strict = list.includes(INBOX_STRICT_ENTRY);
   if (sender.kind === "legacy") return !strict;
@@ -481,7 +515,8 @@ export function inboxAllows(
   }
   return list.includes("user:*")
     || list.includes(`user:${sender.userId}`)
-    || (!!sender.username && list.includes(`user:${sender.username}`));
+    || (!!sender.username && list.includes(`user:${sender.username}`))
+    || inboxDeptAllows(list, sender, ctx.networkId);
 }
 
 export type InboxDenial = ReturnType<typeof nodePermissionDeniedBody> & { target: string; sender: string };

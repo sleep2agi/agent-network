@@ -151,6 +151,7 @@ PUT /api/nodes/{node_id}/inbox-allowlist   {"senders": null}                 // 
 | `<alias>` / `<node_id>` | Agent 发件人（节点令牌） |
 | `user:<username>` / `user:<user_id>` | 人（Dashboard / 桌面端 / `anet` 的用户令牌） |
 | `user:*` | 任何人 |
+| `dept:<department_id>` | 这个部门及其所有子部门里的 Agent（节点所属部门）和人（成员所属部门） |
 | `!strict` | 关掉下面的隐式放行 |
 
 **隐式放行（不会把自己锁在门外）**：没有 `!strict` 时，以下发件人不看名单直接放行 —— 节点主人、网络 owner / admin、Hub 管理员，以及没有用户身份的旧式调用（open / legacy 模式，本来就「谁都是谁」）。要连他们也必须列名，就加一条 `!strict`。节点发给自己永远放行（含 `!strict`）。

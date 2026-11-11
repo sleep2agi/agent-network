@@ -466,7 +466,7 @@ anet node perm <node> [--mode normal|readonly|restricted]
 ```
 
 - `<node>` is a local node name, a `node_id` or a Hub alias. Without a change flag it only prints the current settings (plus a read-only view of the `tool` / `rest` allowlists).
-- `--inbox` entries: `<alias>` / `<node_id>` is an agent, `user:<username>` / `user:<id>` is a person, `user:*` is any person, and `!strict` requires the node's owner and network owner/admin to be listed too. See [inbox allowlist](/en/guide/multi-user#inbox-allowlist).
+- `--inbox` entries: `<alias>` / `<node_id>` is an agent, `user:<username>` / `user:<id>` is a person, `user:*` is any person, `dept:<department_id>` is any agent or person in that department or a sub-department, and `!strict` requires the node's owner and network owner/admin to be listed too. See [inbox allowlist](/en/guide/multi-user#inbox-allowlist).
 - `none` clears that allowlist (no restriction). Removing the last entry with `--*-remove` is refused, because an empty list means fully open; write `none` explicitly.
 - Changes need the user token from `anet login`, as the node's owner, a network owner/admin or a hub admin. Against an old Hub that does not report `inbox_allowlist`, the display says so and `--inbox*` is refused rather than pretending to succeed.
 - `--json` prints `{ok, state, changed}` (`{ok: false, error, …}` on failure). A usage error exits 2; a Hub refusal or unreachable Hub exits 1.

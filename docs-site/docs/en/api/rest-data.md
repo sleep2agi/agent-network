@@ -292,7 +292,7 @@ curl -X PUT http://localhost:9200/api/nodes/n_abc123/inbox-allowlist \
 
 | Field | Type | Meaning |
 |------|------|------|
-| `senders` | `string[] \| null` | `<alias>` / `<node_id>` = an agent; `user:<username>` / `user:<user_id>` = a person; `user:*` = any person; `!strict` = the owner and network owner/admin must be listed too. `null` clears it (anyone may send). At most 200 entries |
+| `senders` | `string[] \| null` | `<alias>` / `<node_id>` = an agent; `user:<username>` / `user:<user_id>` = a person; `user:*` = any person; `dept:<department_id>` = agents and people in that department or any sub-department; `!strict` = the owner and network owner/admin must be listed too. `null` clears it (anyone may send). At most 200 entries |
 
 **Response**: `{"ok": true, "node_id": "n_abc123", "senders": ["planner", "n_def456", "user:alice"]}` (`senders: null` after a clear). Writes the audit entry `node_inbox_allowlist_changed` with `detail` `{from, to}`.
 
