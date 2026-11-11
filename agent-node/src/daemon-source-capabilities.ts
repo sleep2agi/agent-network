@@ -43,24 +43,30 @@ export type SourceCapabilities = {
   source_fork_transport?: string;
 };
 
-/** `0` = 显式关闭；未设 / `1` = 交给 config 决定。 */
-const enabled = (v: string | undefined): boolean => v !== "0";
+/**
+ * 单条 lane 的开关语义：`0` = 显式关闭；未设 / 其它值 = 交给 config 决定。
+ *
+ * 🔴 能力上报（sourceCapabilities）与实际拉起 worker（cli.ts 的
+ * `createSessionSourceTransportWorker`）**必须用同一个判断**，否则会出现
+ * 「报了能力但 lane 没起」——能力是真的但用不了，比不报更糟。
+ */
+export const laneEnabled = (env: Record<string, string | undefined>, key: string): boolean => env[key] !== "0";
 
 export function sourceCapabilities(input: SourceCapabilityInput): SourceCapabilities {
   const { role, platform, env, config, secureHub, createOk } = input;
   // 非 host_supervisor / 非 linux / 不安全 Hub —— 一条都不报，快照里完全不出现这些字段。
   if (role !== "host_supervisor" || platform !== "linux" || !secureHub) return {};
   const out: SourceCapabilities = {};
-  if (enabled(env.ANET_SOURCE_DIRECTORY_PREVIEW) && config.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY) {
+  if (laneEnabled(env, "ANET_SOURCE_DIRECTORY_PREVIEW") && config.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY) {
     out.source_directory_read = SOURCE_DIRECTORY_CAPABILITY;
-    if (enabled(env.ANET_PROJECT_NEW_SESSION_PREVIEW) && config.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY) {
+    if (laneEnabled(env, "ANET_PROJECT_NEW_SESSION_PREVIEW") && config.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY) {
       out.project_new_session = PROJECT_CREATE_CAPABILITY;
     }
-    if (enabled(env.ANET_SESSION_ATTACH_PREVIEW) && config.sessionAttachTransport === SESSION_ATTACH_CAPABILITY) {
+    if (laneEnabled(env, "ANET_SESSION_ATTACH_PREVIEW") && config.sessionAttachTransport === SESSION_ATTACH_CAPABILITY) {
       out.session_attach = SESSION_ATTACH_CAPABILITY;
     }
   }
-  if (enabled(env.ANET_SOURCE_FORK_PREVIEW) && config.sourceForkTransport === SOURCE_FORK_CAPABILITY && createOk) {
+  if (laneEnabled(env, "ANET_SOURCE_FORK_PREVIEW") && config.sourceForkTransport === SOURCE_FORK_CAPABILITY && createOk) {
     out.source_node_delivery = SOURCE_DELIVERY_CAPABILITY;
     out.source_fork_transport = SOURCE_FORK_CAPABILITY;
   }

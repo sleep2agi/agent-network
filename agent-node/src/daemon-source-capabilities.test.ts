@@ -5,7 +5,8 @@
 //   2) 每条能力仍要求 transport 在 config 里配好 —— 配了才报，没配就是没打算开；
 //   3) 环境变量 `=0` 能显式关掉（应急开关）；不设不再等于关闭（这正是生产上 0/7 上报的原因）。
 import { describe, expect, test } from "bun:test";
-import { sourceCapabilities } from "./daemon-source-capabilities";
+import { readFileSync } from "node:fs";
+import { laneEnabled, sourceCapabilities } from "./daemon-source-capabilities";
 import { PROJECT_CREATE_CAPABILITY } from "../../contracts/session-project-create";
 import { SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
 import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
@@ -19,6 +20,24 @@ const fullConfig = {
   sessionAttachTransport: SESSION_ATTACH_CAPABILITY,
 };
 const base = { role: "host_supervisor", platform: "linux", env: {}, config: fullConfig, secureHub: true, createOk: true };
+
+describe("laneEnabled —— 上报与拉起共用同一判断", () => {
+  test("未设 / \"1\" ⇒ 开；\"0\" ⇒ 关", () => {
+    expect(laneEnabled({}, "ANET_SOURCE_FORK_PREVIEW")).toBe(true);
+    expect(laneEnabled({ ANET_SOURCE_FORK_PREVIEW: "1" }, "ANET_SOURCE_FORK_PREVIEW")).toBe(true);
+    expect(laneEnabled({ ANET_SOURCE_FORK_PREVIEW: "0" }, "ANET_SOURCE_FORK_PREVIEW")).toBe(false);
+  });
+  test("源码守护：worker 启动不能再退回 `=== \"1\"`（否则报了能力却不干活）", () => {
+    const src = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
+    const start = src.indexOf("createSessionSourceTransportWorker({");
+    const block = src.slice(start, src.indexOf("pin:", start));
+    expect(start).toBeGreaterThan(0);
+    expect(block).not.toContain('_PREVIEW === "1"');
+    for (const k of ["ANET_SOURCE_DIRECTORY_PREVIEW", "ANET_PROJECT_NEW_SESSION_PREVIEW", "ANET_SESSION_ATTACH_PREVIEW", "ANET_SOURCE_FORK_PREVIEW"]) {
+      expect(block).toContain(`laneEnabled(process.env, "${k}")`);
+    }
+  });
+});
 
 describe("daemon 能力上报", () => {
   test("配置齐 + 不设环境变量 ⇒ 五条全报（以前要求 env=1，才会有 0/7）", () => {

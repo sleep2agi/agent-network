@@ -27,7 +27,7 @@ import { createNodeSessionControlBridge, createSessionControlPin } from "./runti
 import { SOURCE_FORK_CAPABILITY } from "../../contracts/session-source-transport";
 import { isSecureSourceHubUrl } from "./runtime/source-hub-url";
 import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
-import { sourceCapabilities } from "./daemon-source-capabilities";
+import { laneEnabled, sourceCapabilities } from "./daemon-source-capabilities";
 import { SOURCE_DIRECTORY_CAPABILITY } from "../../contracts/session-source-directory";
 import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
 import {
@@ -8715,8 +8715,8 @@ await register();
 log("已注册到 CommHub");
 // Independent explicit directory/fork previews; directory-only never probes or
 // starts a launcher. Ordinary daemons do not poll either source queue.
-if (fileConfig.role === "host_supervisor" && ((process.env.ANET_SOURCE_FORK_PREVIEW === "1"
-  && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY) || (process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1"
+if (fileConfig.role === "host_supervisor" && ((laneEnabled(process.env, "ANET_SOURCE_FORK_PREVIEW")
+  && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY) || (laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW")
   && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY))
   && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID && process.platform === "linux"
   && isSecureSourceHubUrl(COMMHUB_URL)) {
@@ -8725,12 +8725,13 @@ if (fileConfig.role === "host_supervisor" && ((process.env.ANET_SOURCE_FORK_PREV
   try {
   const { createSessionSourceTransportWorker } = await import("./runtime/session-source-transport");
   sourceForkWorker = createSessionSourceTransportWorker({ hubUrl: COMMHUB_URL, daemonWorkDir: process.cwd(), home: daemonHome(),
-    directoryEnabled: process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1" && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
-    attachEnabled: process.env.ANET_SESSION_ATTACH_PREVIEW === "1" && fileConfig.sessionAttachTransport === SESSION_ATTACH_CAPABILITY
-      && process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1" && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
-    projectEnabled: process.env.ANET_PROJECT_NEW_SESSION_PREVIEW === "1" && fileConfig.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY
-      && process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1" && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
-    forkEnabled: process.env.ANET_SOURCE_FORK_PREVIEW === "1" && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY,
+    // 与 sourceCapabilities() 用同一套判断（laneEnabled）：报了什么就必须真的起什么。
+    directoryEnabled: laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW") && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
+    attachEnabled: laneEnabled(process.env, "ANET_SESSION_ATTACH_PREVIEW") && fileConfig.sessionAttachTransport === SESSION_ATTACH_CAPABILITY
+      && laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW") && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
+    projectEnabled: laneEnabled(process.env, "ANET_PROJECT_NEW_SESSION_PREVIEW") && fileConfig.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY
+      && laneEnabled(process.env, "ANET_SOURCE_DIRECTORY_PREVIEW") && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY,
+    forkEnabled: laneEnabled(process.env, "ANET_SOURCE_FORK_PREVIEW") && fileConfig.sourceForkTransport === SOURCE_FORK_CAPABILITY,
     pin: createSessionControlPin({ hubUrl: COMMHUB_URL, token: SESSION_CONTROL_START_TOKEN, nodeId: NODE_ID, networkId: NETWORK_ID,
       epoch: sessionControlCredentialEpoch, currentToken: () => AUTH_TOKEN, currentEpoch: () => sessionControlCredentialEpoch,
       signal: sessionControlCredentialAbort.signal }) });
