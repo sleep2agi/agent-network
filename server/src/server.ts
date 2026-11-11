@@ -220,7 +220,8 @@ const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 // 被挡的派活回 reason=sender_not_allowed,广播回 inbox_skipped(有人被跳过时才出现,没人被跳过时回执与以前逐字节相同)。
 // scheduled_task_purge:POST /api/scheduled-tasks/:id/purge 真删一条已停下(cancelled / completed)的计划,连执行记录一起删;
 // 还在跑的回 409 schedule_not_stopped(先 cancel)。
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge"] as const;
+// node_inbox_allowlist_dept:收件白名单认 dept:<department_id>(该部门及子部门里的节点和人)。
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge", "node_inbox_allowlist_dept"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here

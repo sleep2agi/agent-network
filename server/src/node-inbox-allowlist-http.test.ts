@@ -301,6 +301,41 @@ describe("排程 —— 每次触发按建排程的人现判", () => {
   });
 });
 
+describe("部门授权 dept:<department_id>（admin 11-11「以部门去授权」）", () => {
+  const mkDept = (id: string, parent: string | null) =>
+    db.run("INSERT INTO network_departments (network_id, department_id, name, parent_id, sort, created_by) VALUES (?1, ?2, ?3, ?4, 0, ?5)", [net, id, id, parent, user.boss.id]);
+  const setDept = (nodeId: string, dept: string | null) => db.run("UPDATE nodes SET department_id = ?1 WHERE node_id = ?2", [dept, nodeId]);
+  test("名单写上级部门：子部门里的节点能派活，别的部门 / 未分配的被拒", async () => {
+    const top = `dept_top_${stamp}`, child = `dept_child_${stamp}`, other = `dept_other_${stamp}`;
+    mkDept(top, null); mkDept(child, top); mkDept(other, null);
+    setDept(node.a.id, child); setDept(node.b.id, other); setDept(node.c.id, null);
+    try {
+      setInbox([`dept:${top}`]);
+      const ok = await mcp(node.a.token, "send_task", { alias: node.tgt.alias, task: "dept ok" });
+      expect(ok.ok).not.toBe(false);
+      expectSenderDenied(await mcp(node.b.token, "send_task", { alias: node.tgt.alias, task: "dept other" }), node.b.alias);
+      expectSenderDenied(await mcp(node.c.token, "send_task", { alias: node.tgt.alias, task: "dept none" }), node.c.alias);
+    } finally {
+      setDept(node.a.id, null); setDept(node.b.id, null);
+      db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id IN (?2, ?3, ?4)", [net, top, child, other]);
+    }
+  });
+  test("人按 network_members.department_id 匹配；!strict 下同样只看名单", async () => {
+    const d = `dept_people_${stamp}`;
+    mkDept(d, null);
+    db.run("UPDATE network_members SET department_id = ?1 WHERE network_id = ?2 AND user_id = ?3", [d, net, user.mem.id]);
+    try {
+      const ctx = { targetNodeId: node.tgt.id, targetAlias: node.tgt.alias, ownerUserId: user.own.id, networkId: net };
+      const mem = { kind: "user" as const, userId: user.mem.id, username: user.mem.name };
+      expect(inboxAllows([`dept:${d}`, "!strict"], mem, ctx)).toBe(true);
+      expect(inboxAllows(["dept:dept_nope", "!strict"], mem, ctx)).toBe(false);
+    } finally {
+      db.run("UPDATE network_members SET department_id = NULL WHERE network_id = ?1 AND user_id = ?2", [net, user.mem.id]);
+      db.run("DELETE FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [net, d]);
+    }
+  });
+});
+
 describe("inboxAllows —— 纯判定", () => {
   const ctx = { targetNodeId: "n_t", targetAlias: "t", ownerUserId: "u_owner", networkId: null };
   test("null 放行一切;legacy 默认放行,!strict 拒", () => {

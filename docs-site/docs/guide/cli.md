@@ -471,7 +471,7 @@ anet node perm <node> [--mode normal|readonly|restricted]
 ```
 
 - `<node>` 可以是本地节点名、`node_id` 或 Hub 上的 alias；不带改动参数时只显示当前设置（另带 `tool` / `rest` 白名单的只读展示）。
-- `--inbox` 条目：`<alias>` / `<node_id>` 是 Agent，`user:<username>` / `user:<id>` 是人，`user:*` 是任何人，`!strict` 让节点主人和网络 owner/admin 也必须列名。语义见[收件白名单](/guide/multi-user#inbox-allowlist)。
+- `--inbox` 条目：`<alias>` / `<node_id>` 是 Agent，`user:<username>` / `user:<id>` 是人，`user:*` 是任何人，`dept:<department_id>` 是这个部门（含子部门）里的 Agent 和人，`!strict` 让节点主人和网络 owner/admin 也必须列名。语义见[收件白名单](/guide/multi-user#inbox-allowlist)。
 - `none` 清空对应名单（不限制）。`--*-remove` 删掉最后一条会被拒 —— 删空等于完全放开，必须显式写 `none`。
 - 改动要 `anet login` 的用户令牌，且是节点主人 / 网络 owner·admin / Hub 管理员。Hub 不认 `inbox_allowlist`（老 Hub）时，显示会注明，`--inbox*` 直接拒绝而不是假装成功。
 - `--json` 输出 `{ok, state, changed}`（失败为 `{ok: false, error, …}`）；用法错误退出码 2，Hub 拒绝 / 不可达退出码 1。
