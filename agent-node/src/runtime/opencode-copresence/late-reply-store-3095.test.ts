@@ -112,3 +112,34 @@ describe("#3095 迟到结果的落盘记录", () => {
     expect(out.corrupted).toBe(0);
   });
 });
+
+// #4529 —— 补发只能靠 `in_reply_to` 反查收件人；任务行一旦被清理，Hub 就以
+// `reply_target_unresolved` 拒掉，于是「重启后不再静默」在最该生效时失效
+// （2026-11-11 通信猫重启实测：日志里同一秒多条 startup notice refused）。
+// 修法：布防时把发送方一起落盘，补发时显式带 alias。
+describe("#4529 迟到补发要带上收件人", () => {
+  test("记录能存下 to（发送方 alias），并能原样读回", () => {
+    const dir = freshDir();
+    expect(saveLateReplyRecord(dir, { ...rec("t_to"), to: "通信欧" })).toBe(true);
+    const records = listLateReplyRecords(dir).records;
+    expect(records).toHaveLength(1);
+    expect(records[0].to).toBe("通信欧");
+  });
+
+  test("旧记录没有 to 也能读（向后兼容，读回 undefined）", () => {
+    const dir = freshDir();
+    expect(saveLateReplyRecord(dir, rec("t_old"))).toBe(true);
+    const records = listLateReplyRecords(dir).records;
+    expect(records[0].to).toBeUndefined();
+  });
+
+  test("接线：启动通知在记录带 to 时显式传 alias（不再只依赖反查）", () => {
+    const src = readFileSync(join(import.meta.dir, "../../cli.ts"), "utf8");
+    // 布防时把发送方落盘
+    expect(src).toContain("...(_from ? { to: _from } : {})");
+    // 启动通知：带 to 就显式给 alias
+    expect(src).toContain("...(rec.to ? { alias: rec.to } : {})");
+    // 进程内补发同样显式给 alias
+    expect(src).toContain("alias: _from");
+  });
+});
