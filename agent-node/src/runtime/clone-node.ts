@@ -121,21 +121,17 @@ export function planCloneWorkdir(input: {
   };
 }
 
-/** Which Hub URL the clone writes. Normally the daemon's. For an OpenCode node on the
- * machine's SHARED serve, the shared serve itself dials the CommHub MCP at this URL —
- * on a box where only the source's address is directly reachable (vdev: http :9300
- * direct, https only via a proxy the shared serve does not have), the daemon's URL
- * makes the clone fail to load its MCP. Keep the source's URL only when it is provably
- * the same Hub: identical to the daemon's, or the `proven_hub` recorded at adoption. */
-export function cloneHubUrl(source: Record<string, unknown>, daemonHub: string, provenHub: string | null): string {
-  const own = typeof source.hub === "string" ? source.hub : "";
-  if (!own || typeof source.opencodeSharedServerUrl !== "string" || !source.opencodeSharedServerUrl) return daemonHub;
-  return own === daemonHub || (provenHub !== null && own === provenHub) ? own : daemonHub;
-}
-
-function adoptedProvenHub(daemonWorkDir: string, alias: string): string | null {
-  try { const e = adoptedChild(daemonWorkDir, alias); return typeof e?.proven_hub === "string" ? e.proven_hub : null; }
-  catch { return null; }
+/** Which Hub URL the clone writes: always the daemon's own.
+ *
+ * .201 kept the source's URL for shared-serve OpenCode sources, on the theory that the shared
+ * serve dials the Hub. It does not: it dials the node's 127.0.0.1 MCP proxy, and the **node
+ * process** (spawned by the daemon, with the daemon's env) forwards to the Hub. On vdev that env
+ * carries NODE_USE_ENV_PROXY=1, through which the source's `http://…:9300` gets 407 and the
+ * daemon's https URL works (verified 2026-11-11: TMA客户端欧8号 daemon-started on https ⇒ ready
+ * and answering; on :9300 ⇒ MCP readiness timeout). The daemon's URL is reachable by
+ * construction: the daemon itself is connected through it. */
+export function cloneHubUrl(_source: Record<string, unknown>, daemonHub: string): string {
+  return daemonHub;
 }
 
 /** Human-written instruction files a fork carries into its new folder. Never the
@@ -551,7 +547,7 @@ export async function handleCloneNodeDoorbell(
   }
   const { config, skipped } = buildClonedConfig({
     source, name: req.node_spec.name, nodeId, token: req.child_token,
-    hubUrl: cloneHubUrl(source, deps.hubUrl, adoptedProvenHub(deps.workDir, alias)),
+    hubUrl: cloneHubUrl(source, deps.hubUrl),
     session, targetWorkdir: childWorkDir,
   });
   if (Array.isArray(req.clone.channels) && !config.channels) {
