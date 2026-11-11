@@ -27,6 +27,8 @@ import {
 } from "./scheduled-tasks.js";
 import { SCHEDULED_TASK_STORAGE_SELECT } from "./rest-projections.js";
 import { dispatchVerdict, nodePermissionDeniedBody, recordNodePermission, type NodeIdentity } from "./node-permissions.js";
+import { grantLevelForTarget, hasAnyGrant } from "./node-grants.js";
+import { logAudit } from "./db.js";
 
 export type AgentScheduleResult = Record<string, unknown> & { ok: boolean };
 
@@ -40,7 +42,9 @@ const fail = (error: string, extra: Record<string, unknown> = {}): AgentSchedule
 /** The scope rule. Exported so the mutation tests can pin it. */
 export function nodeMaySeeSchedule(id: NodeIdentity, row: ScheduledRow): boolean {
   if (!id.nodeId || row.network_id !== id.networkId) return false;
-  return row.target_node_id === id.nodeId || row.created_by_node_id === id.nodeId;
+  if (row.target_node_id === id.nodeId || row.created_by_node_id === id.nodeId) return true;
+  // 节点管理授权（node-grants.ts）：能力 schedules，按目标节点判范围；read / edit 都能看。
+  return grantLevelForTarget(id.networkId, id.nodeId, "schedules", row.target_node_id, id.mode) !== null;
 }
 
 function visibleRow(id: NodeIdentity, scheduleId: string): ScheduledRow | null {
@@ -50,12 +54,23 @@ function visibleRow(id: NodeIdentity, scheduleId: string): ScheduledRow | null {
 
 /** Visible AND created by this node; else the error to return. Exported for the mutation tests. */
 export function nodeMayMutateSchedule(id: NodeIdentity, row: ScheduledRow): boolean {
-  return !!id.nodeId && row.created_by_node_id === id.nodeId;
+  if (!id.nodeId) return false;
+  if (row.created_by_node_id === id.nodeId) return true;
+  return grantLevelForTarget(id.networkId, id.nodeId, "schedules", row.target_node_id, id.mode) === "edit";
+}
+
+/** 经授权（不是自己建的）改了一条计划：记一行审计，主人在报表里看得到是哪个节点改的。 */
+function auditGrantMutation(id: NodeIdentity, row: ScheduledRow, action: string): void {
+  if (!id.nodeId || row.created_by_node_id === id.nodeId) return;
+  try {
+    logAudit(id.ownerUserId, id.aliases[0] ?? id.nodeId, "schedule_changed_via_node_grant", "scheduled_task", row.schedule_id,
+      JSON.stringify({ action, node_id: id.nodeId, target_node_id: row.target_node_id }), undefined, id.networkId);
+  } catch { /* 审计失败不挡写入 */ }
 }
 function ownRow(id: NodeIdentity, scheduleId: string): ScheduledRow | AgentScheduleResult {
   const row = visibleRow(id, scheduleId);
   if (!row) return fail("schedule_not_found");
-  if (!nodeMayMutateSchedule(id, row)) return fail("not_schedule_creator", { message: "only schedules this node created can be changed" });
+  if (!nodeMayMutateSchedule(id, row)) return fail("not_schedule_creator", { message: "only schedules this node created (or that an edit grant covers) can be changed" });
   return row;
 }
 const isRow = (r: ScheduledRow | AgentScheduleResult): r is ScheduledRow => typeof (r as ScheduledRow).schedule_id === "string";
@@ -83,10 +98,20 @@ function inputError(e: any): AgentScheduleResult {
 export function agentListSchedules(id: NodeIdentity, status?: string): AgentScheduleResult {
   if (!id.nodeId) return fail("node_identity_unbound");
   const params: unknown[] = [id.networkId, id.nodeId];
-  let sql = `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE network_id = ?1 AND (target_node_id = ?2 OR created_by_node_id = ?2)`;
+  // 有 schedules 授权时扫全网（上限 500）再按授权逐条判；没有授权走原来的窄查询。
+  const granted = hasAnyGrant(id.networkId, id.nodeId, "schedules");
+  let sql = granted
+    ? `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE network_id = ?1 AND ?2 = ?2`
+    : `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE network_id = ?1 AND (target_node_id = ?2 OR created_by_node_id = ?2)`;
   if (status) { sql += " AND status = ?3"; params.push(status); }
-  sql += " ORDER BY updated_at DESC LIMIT 200";
-  const rows = db.all<ScheduledRow>(sql, ...params).map(decodeRowForAgent);
+  sql += granted ? " ORDER BY updated_at DESC LIMIT 500" : " ORDER BY updated_at DESC LIMIT 200";
+  const rawRows = db.all<ScheduledRow>(sql, ...params);
+  const rows = (granted ? rawRows.filter(r => nodeMaySeeSchedule(id, r)) : rawRows).map(decodeRowForAgent);
+  if (granted) for (const r of rows) {
+    const raw = rawRows.find(x => x.schedule_id === (r as Record<string, unknown>).schedule_id);
+    if (raw) (r as Record<string, unknown>).access = raw.created_by_node_id === id.nodeId || raw.target_node_id === id.nodeId
+      ? "own" : nodeMayMutateSchedule(id, raw) ? "grant_edit" : "grant_read";
+  }
   // #2935 —— 「周期比单轮工作耗时短」的排程会**永久 skip**：退避只会让它更稀疏，追不上。
   // 数据是现成的（scheduled_task_runs 的 completed_at - created_at），只是以前没人给出来。
   // 这里只**报数**，不改任何调度行为。
@@ -197,10 +222,16 @@ export function agentUpdateSchedule(id: NodeIdentity, canWrite: boolean, schedul
     if (!node?.alias) return fail("target_node_not_found");
     target = { node_id: node.node_id, alias: node.alias };
   }
-  const denied = targetDenied(id, route, target);
-  if (denied) return denied;
+  // 经授权改别人建的计划、且不改目标：不再要求本节点能给目标 send_task（每次执行仍按建计划者复查）。
+  // 改目标 / 改自己建的：照旧走 send_task 的判定。
+  const viaGrant = row.created_by_node_id !== id.nodeId;
+  if (!viaGrant || retarget) {
+    const denied = targetDenied(id, route, target);
+    if (denied) return denied;
+  }
   try {
     const patched = patchSchedule(row, { ...body, revision: body.revision ?? row.revision }, id.ownerUserId);
+    auditGrantMutation(id, row, retarget ? "update_retarget" : "update");
     return { ok: true, schedule: decodeRowForAgent(patched) };
   } catch (e) { return inputError(e); }
 }
@@ -230,6 +261,7 @@ export function agentCancelSchedule(id: NodeIdentity, canWrite: boolean, schedul
   const row = ownRow(id, scheduleId);
   if (!isRow(row)) return row;
   cancelSchedule(row);
+  auditGrantMutation(id, row, "cancel");
   return { ok: true, status: "cancelled" };
 }
 
@@ -240,10 +272,13 @@ export function agentRunScheduleNow(id: NodeIdentity, canWrite: boolean, schedul
   const row = ownRow(id, scheduleId);
   if (!isRow(row)) return row;
   if (row.status === "cancelled") return fail("schedule_cancelled");
-  const denied = targetDenied(id, route, { node_id: row.target_node_id, alias: row.target_alias });
-  if (denied) return denied;
+  if (row.created_by_node_id === id.nodeId) {
+    const denied = targetDenied(id, route, { node_id: row.target_node_id, alias: row.target_alias });
+    if (denied) return denied;
+  }
   try {
     const result = dispatchScheduledOccurrence(row, new Date().toISOString(), false);
+    auditGrantMutation(id, row, "run_now");
     const { event: _event, ...rest } = result;
     return { ok: result.status !== "failed", ...rest };
   } catch (e: any) {
