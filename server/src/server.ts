@@ -326,6 +326,15 @@ function requireAuth(req: Request, options: RequestTokenOptions = {}): Response 
   return Response.json({ error: "unauthorized", ...(tokenRejection(token) ?? {}) }, { status: 401 });
 }
 
+/**
+ * COMMHUB_REGISTRATION=closed —— 关掉公开注册（POST /api/auth/register 回 403 registration_closed）。
+ * 不设 / 其它值 = 开放（旧行为）。第一个用户（自动成为 admin）不受影响：库里还没有用户时照常放行。
+ */
+function registrationClosed(): boolean {
+  if ((process.env.COMMHUB_REGISTRATION ?? "").trim().toLowerCase() !== "closed") return false;
+  return !!db.get<{ ok: number }>("SELECT 1 AS ok FROM users LIMIT 1");
+}
+
 function getClientIP(req: Request, server?: any): string {
   const direct = server?.requestIP?.(req)?.address;
   if (direct) return direct;
@@ -2393,7 +2402,9 @@ return Bun.serve({
     // 现已移除；命中时按未知路径处理（404），不再保留兼容壳。
     // ── V3: Auth endpoints (public) ──
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
-      const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+      // 与登录同一口径（最后一跳 + COMMHUB_TRUSTED_PROXY_IPS）：原来取第一跳，客户端随便写就能换桶。
+      const clientIP = getLoginClientIp(req, server?.requestIP?.(req)?.address ?? null);
+      if (registrationClosed()) return withCors(req, Response.json({ ok: false, error: "registration_closed", message: "This Hub does not accept new sign-ups. Ask an admin for an invite." }, { status: 403 }));
       if (!checkRateLimit(clientIP, 30)) {
         noteRegisterRateLimited(clientIP);
         return withCors(req, Response.json({ ok: false, error: "too many requests, try again later" }, { status: 429 }));
@@ -2409,7 +2420,7 @@ return Bun.serve({
     }
 
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
-      const clientIP = getLoginClientIp(req);
+      const clientIP = getLoginClientIp(req, server?.requestIP?.(req)?.address ?? null);
       const ipRate = sharedLoginIpRateLimiter.check(clientIP || "unknown");
       if (!ipRate.allowed) {
         logAudit(null, null, "login_rate_limited", "auth", undefined, clientIP);

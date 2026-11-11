@@ -98,7 +98,26 @@ export function normalizeLoginUsername(username: unknown): string {
   return typeof username === "string" ? username.trim().toLowerCase() : "";
 }
 
-export function getLoginClientIp(req: Request): string {
+/**
+ * COMMHUB_TRUSTED_PROXY_IPS（逗号分隔）—— 只有从这些地址连进来的请求，才信它带的 X-Forwarded-For / X-Real-IP。
+ * 不设 = 旧行为（谁带都信），其它部署不受影响。设了以后，直连 Hub 端口的请求（对端不在名单里）
+ * 一律按对端地址限速：伪造 X-Forwarded-For 绕不过登录 / 注册的按 IP 限速（2026-11-11 安全排查）。
+ */
+export function trustedProxyIps(env: Record<string, string | undefined> = process.env): Set<string> | null {
+  const raw = env.COMMHUB_TRUSTED_PROXY_IPS?.trim();
+  if (!raw) return null;
+  return new Set(raw.split(",").map(s => normalizePeerIp(s.trim())).filter(Boolean));
+}
+
+/** `::ffff:1.2.3.4` → `1.2.3.4`（Bun 对 IPv4 连接常给映射地址）。 */
+export function normalizePeerIp(ip: string | null | undefined): string {
+  const v = (ip ?? "").trim();
+  return v.toLowerCase().startsWith("::ffff:") ? v.slice(7) : v;
+}
+
+export function getLoginClientIp(req: Request, peer?: string | null, trusted: Set<string> | null = trustedProxyIps()): string {
+  const direct = normalizePeerIp(peer);
+  if (trusted && direct && !trusted.has(direct)) return direct;
   const fwd = req.headers.get("x-forwarded-for");
   if (fwd) {
     const last = fwd.split(",").map((s) => s.trim()).filter(Boolean).at(-1);

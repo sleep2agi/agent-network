@@ -58,6 +58,12 @@ jobs:
     - name: '[lint-from-session] Run lint-no-hardcoded-from-session.py'
       if: ${{ !cancelled() }}
       run: python3 tests/scripts/lint-no-hardcoded-from-session.py
+    - name: '[no-live-tokens] python3 .github/scripts/check-no-live-tokens.py --selftest'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-no-live-tokens.py --selftest
+    - name: '[no-live-tokens] python3 .github/scripts/check-no-live-tokens.py'
+      if: ${{ !cancelled() }}
+      run: python3 .github/scripts/check-no-live-tokens.py
     - name: '[no-memory-slugs] Run check-no-memory-slugs.py'
       if: ${{ !cancelled() }}
       run: python3 .github/scripts/check-no-memory-slugs.py .

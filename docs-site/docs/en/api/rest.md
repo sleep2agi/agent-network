@@ -133,6 +133,10 @@ none).
 
 Register a new user. The first user registered automatically becomes admin.
 
+With `COMMHUB_REGISTRATION=closed` the Hub refuses new sign-ups with 403 `registration_closed`; an empty database (registering the first admin) is not affected. Unset keeps registration open.
+
+The per-IP limits on register and login read the last `X-Forwarded-For` hop by default. When a reverse proxy sits in front of the Hub, set `COMMHUB_TRUSTED_PROXY_IPS=<proxy IP,…>`: forwarded headers are honoured only on connections from those addresses, and anything connecting to the Hub port directly is limited by its own address, so a forged header cannot dodge the limit.
+
 ```bash
 # v0.8+: register is a public endpoint, no master token needed
 curl -X POST http://localhost:9200/api/auth/register \
