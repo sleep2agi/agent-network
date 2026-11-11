@@ -47,7 +47,7 @@ Vincent 在 `/home/vansin/grok-build/` 目录下：
       "args": [".anet/node-server.ts"],
       "env": {
         "COMMHUB_ALIAS": "grok测试员",
-        "COMMHUB_TOKEN": "ntok_fc200cca7fc445448d3e4ea795028588",
+        "COMMHUB_TOKEN": "ntok_<redacted>",
         "COMMHUB_RESUME_ID": "sdk-n_477f84c4"
       }
     }
