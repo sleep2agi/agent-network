@@ -33,10 +33,14 @@ if [ -n "$PID" ]; then
   ss -tnp 2>/dev/null | grep -q "pid=$PID" && es=1
 fi
 
+cron=0
+CRON_N=$(crontab -l 2>/dev/null | grep -vc '^[[:space:]]*#' || true)
+case "${CRON_N:-0}" in ''|0) cron=0;; *) cron=$CRON_N;; esac
+
 wc=0
 python3 -c "
 import json,sys
 d=json.load(open('$CH/access.json'))
 sys.exit(0 if '*' in (d.get('allowFrom') or []) else 1)" 2>/dev/null && wc=1
 
-echo "$(date -Is) channels=$ch worker=$wk estab=$es wildcard=$wc" >> "$LOG"
+echo "$(date -Is) channels=$ch worker=$wk estab=$es wildcard=$wc cron=${CRON_N:-0}" >> "$LOG"
