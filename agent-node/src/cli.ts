@@ -4590,6 +4590,8 @@ async function processWithOpencode(
           sessionId: threadId,
           armedAt: new Date().toISOString(),
           deadlineAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+          // #4529 —— 把发送方一起落盘：补发时不必反查任务行（它可能已被清理）。
+          ...(_from ? { to: _from } : {}),
         });
       },
       onLateReply: (payload) => {
@@ -4597,6 +4599,7 @@ async function processWithOpencode(
         log(`[${OPENCODE_PROCESS_BUNDLE_MARKER}] late reply for ${taskId}: ${payload.status} (${payload.replyText.length} chars)`);
         void callCommHub("send_reply", {
           in_reply_to: taskId,
+          ...(_from ? { alias: _from } : {}),
           text: payload.replyText,
           status: payload.status,
           thread_id: payload.threadId,
@@ -8993,6 +8996,9 @@ async function recoverLateResult(rec: { sessionId: string; turnId: string }): Pr
           if (recovered) log(`[late-reply] recovered content for ${rec.taskId} from session history`);
           return callCommHub("send_reply", {
             in_reply_to: rec.taskId,
+            // #4529 —— 显式带回收件人：任务行若已被清理，Hub 反查 from_name 会落空
+            // （reply_target_unresolved），补发就静默丢了。旧记录没有 to ⇒ 不传，行为不变。
+            ...(rec.to ? { alias: rec.to } : {}),
             text,
             status: recovered ? "replied" : "failed",
             thread_id: rec.threadId,

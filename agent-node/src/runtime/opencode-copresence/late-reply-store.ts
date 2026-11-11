@@ -30,6 +30,17 @@ export type LateReplyRecord = {
   armedAt: string;
   /** ISO 时间：观察窗口的硬上限。 */
   deadlineAt: string;
+  /**
+   * #4529 —— 这条迟到结果要回给谁（原任务的发送方 alias）。
+   *
+   * 补发时如果只带 `in_reply_to`，Hub 会从 tasks 表反查 `from_name`；任务行一旦被清理/过期，
+   * 反查就落空，补发直接以 `reply_target_unresolved` 被拒 —— 于是「重启后不再静默」这个承诺
+   * 在最该生效的时候失效（实测 2026-11-11 通信猫重启，启动通知全部这条错误）。
+   *
+   * 这里把发送方随记录一起落盘，补发时**显式**带上 alias，不再依赖反查。
+   * 旧记录没有这个字段 ⇒ `undefined`，行为与以前一致（向后兼容）。
+   */
+  to?: string;
 };
 
 export const PENDING_DIR_NAME = "pending-late-replies";
@@ -105,6 +116,8 @@ export function listLateReplyRecords(nodeDir: string): { records: LateReplyRecor
         sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : parsed.threadId,
         armedAt: typeof parsed.armedAt === "string" ? parsed.armedAt : "",
         deadlineAt: typeof parsed.deadlineAt === "string" ? parsed.deadlineAt : "",
+        // #4529 —— 旧记录没有这个字段 ⇒ undefined，补发退回「反查」的老行为。
+        ...(typeof parsed.to === "string" && parsed.to ? { to: parsed.to } : {}),
       });
     } catch {
       corrupted += 1;
