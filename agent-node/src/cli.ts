@@ -1470,6 +1470,7 @@ import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
 import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
+import { interruptCurrentTurn, parseControlOp } from "./runtime/control-interrupt";
 import { readOpenCodeCatalog, readOpenCodeAgents, readOpenCodeSessionAgent } from "./runtime/opencode-v2-catalog";
 // #3144 —— 清单与采集时刻同进同出（纯函数在 runtime/opencode-catalog-report.ts，可单测）
 import { catalogReport, keepLastCatalog } from "./runtime/opencode-catalog-report";
@@ -6772,6 +6773,37 @@ async function processInbox() {
   const messages = await getInbox();
   if (!messages.length) return;
   const processInboxMessage = async (msg: any) => {
+    // #cancel —— 控制消息是一条**指令**，不是任务：绝不能让它进模型回合。
+    // 目前只有一种 op：interrupt（停掉当前在跑的那一轮）。
+    // 走 inbox 是因为这是 Hub → 节点已经存在的可靠通道（有 ack、有重投、有 SSE）。
+    if ((msg.type || "task") === "control") {
+      const op = parseControlOp(msg.content);
+      if (op !== "interrupt") {
+        warn(`[control] unknown op, acknowledged and ignored: ${String(msg.content).slice(0, 120)}`);
+        await ackMessage(msg.id);
+        return;
+      }
+      const out = await interruptCurrentTurn({
+        readEndpoint: () => {
+          const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
+          return ep ? { url: ep.url, authorization: ep.authorization } : null;
+        },
+        sessionId: () => opencodeSessionId ?? null,
+      });
+      log(`[control] interrupt → ${JSON.stringify(out)}`);
+      try {
+        await sendReply(
+          msg.from_session || "hub",
+          `[${await liveAlias()}] interrupt ${JSON.stringify(out)}`,
+          msg.task_id || undefined,
+          !out.ok,
+        );
+      } catch (e: any) {
+        warn(`[control] reply failed: ${e?.message ?? e}`);
+      }
+      await ackMessage(msg.id);
+      return;
+    }
     // OpenCode copresence informational messages belong to their own fast
     // lane. Leaving them in the task drain would make a message wait behind
     // an arbitrarily long model turn from an earlier inbox row.
