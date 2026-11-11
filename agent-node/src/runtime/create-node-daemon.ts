@@ -9,7 +9,7 @@
 // once they hit `anet node start`.
 
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
+import { statSync, realpathSync, readFileSync, mkdirSync, openSync, closeSync, appendFileSync, copyFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { isReservedEnvKey } from "../shared/reserved-env.js";
@@ -91,6 +91,40 @@ function quoteSh(s: string): string {
  * （启动 ~7s + 等共享 serve 按文件监听重载工作区配置 3–10s + MCP 就绪），35 秒的旧上限
  * 总在就绪前把它杀掉（launcher start_failed）。 */
 export const OPENCODE_START_TIMEOUT_MS = 90_000;
+
+/**
+ * #4495 —— 失败时把子进程的 spawn 日志带出去。
+ *
+ * 为什么需要：`anet node start` 的 stdout/stderr 原来直接丢弃，子进程 5 秒内退出的真实
+ * 原因无从查起（日志跟着 childDir 一起被 reap 收走）。这里做两件事：
+ *   ① 取 spawn.log 尾部（脱敏后）拼进 ack 的 error，让报错自己说清「为什么」；
+ *   ② 复制一份到 ~/.anet/failed-creates/<request_id>.log —— 越过 reap，事后仍可查。
+ * 只读 + 尽力而为：任何异常都不影响失败路径本身。
+ */
+export function preserveSpawnLogDiagnostics(opts: {
+  childDir: string;
+  requestId: string;
+  homeDir?: string;
+  maxChars?: number;
+}): string {
+  const maxChars = opts.maxChars ?? 1200;
+  const src = join(opts.childDir, "logs", "spawn.log");
+  let text = "";
+  try { text = readFileSync(src, "utf8"); } catch { return ""; }
+  // 脱敏：任何凭据形态都不许进 error / 落盘文件
+  const redacted = text.replace(/\b(ntok|utok|atok|tok)_[A-Za-z0-9_-]{6,}/g, "$1_[redacted]")
+    .replace(/\b(sk-|gsk_|ak-)[A-Za-z0-9_-]{6,}/g, "$1[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]{8,}/gi, "Bearer [redacted]");
+  const tail = redacted.length > maxChars ? redacted.slice(-maxChars) : redacted;
+  try {
+    const destDir = join(opts.homeDir ?? process.env.HOME ?? ".", ".anet", "failed-creates");
+    mkdirSync(destDir, { recursive: true });
+    const dest = join(destDir, `${opts.requestId.replace(/[^A-Za-z0-9._-]/g, "_")}.log`);
+    appendFileSync(dest, `--- ${new Date().toISOString()} ${opts.requestId}\n${redacted}\n`, "utf8");
+  } catch { /* 诊断落盘失败不影响 create 结果 */ }
+  return tail.trim();
+}
+
 
 export type AnetBinFailureCode =
   | "anet_bin_identity"
@@ -1478,11 +1512,21 @@ export async function handleCreateNodeDoorbell(
   let launcher: SpawnedLauncher | null = null;
   const childNodeIdForMap = `node_${request_id.replace(/^cr_/, "")}`;
   try {
+    // #4495 —— 子进程的 stdout/stderr 原来是 ignore：它**为什么**在 5 秒内退出，事后无人可见，
+    // 只能靠猜（错误文案于是写了「likely missing runtime binary or auth」，把两次完全不同的
+    // 事故指向同一个方向）。这里落一份 spawn 日志：失败时把它带进 ack 的 error，并复制一份到
+    // ~/.anet/failed-creates/<request_id>.log —— reap 收走 childDir 之后仍然查得到。
+    const spawnLogPath = join(childDir, "logs", "spawn.log");
+    let spawnLogFd: number | null = null;
+    try {
+      mkdirSync(join(childDir, "logs"), { recursive: true });
+      spawnLogFd = openSync(spawnLogPath, "a");
+    } catch { spawnLogFd = null; }
     const launch = deps.spawnChild ?? ((bin: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) =>
       spawn(bin, args, {
         cwd: opts.cwd,
         env: opts.env,
-        stdio: ["ignore", "ignore", "ignore"],
+        stdio: spawnLogFd === null ? ["ignore", "ignore", "ignore"] : ["ignore", spawnLogFd, spawnLogFd],
         detached: true,
       }));
     // #652 — start by directory name: exact within this .anet root, and always ASCII.
@@ -1514,7 +1558,8 @@ export async function handleCreateNodeDoorbell(
     try { child.stdout?.destroy(); } catch { /* ok */ }
     try { child.stderr?.destroy(); } catch { /* ok */ }
     child.unref();
-    deps.log(`[create-node] spawned child '${req.node_spec.name}' pid=${childPid}`);
+    if (spawnLogFd !== null) { try { closeSync(spawnLogFd); } catch { /* ok */ } spawnLogFd = null; }
+    deps.log(`[create-node] spawned child '${req.node_spec.name}' pid=${childPid} (spawn log: ${spawnLogPath})`);
 
     if (childPid > 0) {
       try {
@@ -1680,7 +1725,9 @@ export async function handleCreateNodeDoorbell(
         }).catch(() => {});
         return;
       }
-      const msg = `child died within ${FAIL_FAST_MS}ms post-spawn (likely missing runtime binary or auth for runtime='${req.node_spec.runtime}'): ${kerr?.message || kerr}`;
+      const spawnTail = preserveSpawnLogDiagnostics({ childDir, requestId });
+      const msg = `child died within ${FAIL_FAST_MS}ms post-spawn for runtime='${req.node_spec.runtime}': ${kerr?.message || kerr}`
+        + (spawnTail ? ` | spawn log tail: ${spawnTail}` : " | spawn log: (empty)");
       deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
       // #1293:记录已经提前到 spawn 之后,这条失败路径必须把它撤掉,
       // 否则 map 里留一条指向已死 pid 的条目,stop doorbell 会去 signal 它。
