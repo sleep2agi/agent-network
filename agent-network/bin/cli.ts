@@ -2459,7 +2459,10 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     "bash", "-lc", bridgeCommand,
   ], { stdio: "pipe" });
 
-  const deadline = Date.now() + 30_000;
+  // vdev 2026-11-11 实测：挂共享 serve 的 OpenCode 节点 33 秒才就绪，30 秒上限在就绪前一刻把它杀了。
+  // 与 daemon 侧 OPENCODE_START_TIMEOUT_MS 对齐为 90 秒。
+  const COPRESENCE_START_WAIT_S = 90;
+  const deadline = Date.now() + COPRESENCE_START_WAIT_S * 1_000;
   while (!existsSync(attachScript) && tmuxSessionRunning(bridgeSession) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
@@ -2478,7 +2481,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     killTmuxSession(bridgeSession);
     for (const line of describeCopresenceStartupFailure({
       attachScript, bridgeLog, nodeLogDir, bridgeAlive,
-      waitedSeconds: 30, logTail, paneTail,
+      waitedSeconds: COPRESENCE_START_WAIT_S, logTail, paneTail,
     })) console.error(line);
     process.exit(1);
   }
