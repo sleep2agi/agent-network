@@ -1943,8 +1943,8 @@ let claudeLoginDead = false;
  * 失败一律 undefined:心跳既不许被这件事拖住(3s 超时),也不许因为读列表失败被拒。
  */
 // 上一次成功采到的清单。读失败时沿用它（见 keepLastCatalog 的注释）。
-let lastCatalogReport: { models: string[]; seenAt: string } | undefined;
-async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: string; directory: string } | null): Promise<{ models: string[]; seenAt: string } | undefined> {
+let lastCatalogReport: { models: string[]; seenAt: string; variants: string[] } | undefined;
+async function reportedOpenCodeCatalog(endpoint: { url: string; authorization: string; directory: string } | null): Promise<{ models: string[]; seenAt: string; variants: string[] } | undefined> {
   if (RUNTIME !== "opencode" || OPENCODE_GENERATION !== "v2" || !endpoint) return undefined;
   try {
     const snapshot = await readOpenCodeCatalog({
@@ -2173,6 +2173,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       ...(reportedCatalog ? {
         opencode_catalog: reportedCatalog.models,
         ...(reportedCatalog.seenAt ? { opencode_catalog_seen_at: reportedCatalog.seenAt } : {}),
+        ...(reportedCatalog.variants.length ? { opencode_catalog_variants: reportedCatalog.variants } : {}),
       } : {}),
       // 2026-11-10 —— 起这份 agent-node 的 anet CLI 版本（启动时抓的，见
       // INITIAL_LAUNCHED_BY_CLI_VERSION）。没有/形状不对 ⇒ 摊进来是空对象，

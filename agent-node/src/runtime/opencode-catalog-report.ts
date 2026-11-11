@@ -8,7 +8,7 @@
 // 为什么不放在 cli.ts 里：cli.ts 是入口，import 它会跑起整个进程，单测拿不到干净的调用点。
 
 export interface CatalogSnapshotLike {
-  models: Array<{ providerId: string; id: string }>;
+  models: Array<{ providerId: string; id: string; variants?: string[] }>;
   observedAt?: string | null;
 }
 
@@ -16,15 +16,24 @@ export interface CatalogReport {
   models: string[];
   /** 空串 = 「采到了模型，但上游没给采集时刻」。Hub 侧见 null，不塌成「刚刚」。 */
   seenAt: string;
+  /** admin 2026-11-11 —— 每个模型的思考档位（OpenCode 的 variants id，如 none/low/high/max），
+   * 编成 `provider/model=none,low,high,max`，只列**有档位**的模型。只有 id，不带 settings/body。
+   * 没有这一格时客户端只能写「未知」，而服务器其实提供了档位。 */
+  variants: string[];
 }
 
 export function catalogReport(snapshot: CatalogSnapshotLike): CatalogReport | undefined {
   // provider/model 形式与 Hub 侧的 model 引用同构（#3143）；只带 id，不带名字/headers/endpoint。
-  const models = snapshot.models.map((m) => `${m.providerId}/${m.id}`).slice(0, 400);
+  const kept = snapshot.models.slice(0, 400);
+  const models = kept.map((m) => `${m.providerId}/${m.id}`);
   if (!models.length) return undefined;
   const raw = typeof snapshot.observedAt === "string" ? snapshot.observedAt.trim() : "";
+  const variants = kept
+    .filter((m) => Array.isArray(m.variants) && m.variants.length > 0)
+    .map((m) => `${m.providerId}/${m.id}=${m.variants!.filter((v) => /^[A-Za-z0-9._-]{1,40}$/.test(v)).slice(0, 20).join(",")}`)
+    .filter((entry) => !entry.endsWith("=") && entry.length <= 600);
   // Hub 侧那一列是 max(40) 的字符串；这里先截，避免整份心跳因一格超长被拒。
-  return { models, seenAt: raw.slice(0, 40) };
+  return { models, seenAt: raw.slice(0, 40), variants };
 }
 
 // ── 缓存：一次读失败不许把整份清单抹掉 ──
