@@ -1008,6 +1008,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         //    （#3294 的 build_commit 就是同一个坑）。`.catch(undefined)` 与邻居一致：
         //    形状不对只丢这一格，绝不拒掉整份心跳。
         opencode_catalog_seen_at: z.string().max(40).optional().catch(undefined),
+        // 每个模型的思考档位：`provider/model=none,low,high,max`（只有 id）。不写进 schema 会被静默剥掉。
+        opencode_catalog_variants: z.array(z.string().max(600)).optional().catch(undefined),
         // #4150-Build —— 这台节点的 OpenCode V2 暴露的 agent 列表（`build`/`plan`…）。
         // 🔴 与上面 catalog 同一个陷阱：不写进这个 schema，daemon 报上来也**会被静默剥掉**，
         //    `/api/nodes` 的投影读到的永远是 null。空数组合法 =「确实没有 agent」。

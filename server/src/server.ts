@@ -7149,6 +7149,7 @@ return Bun.serve({
         let opencodeCatalog: string[] | null = null;
         // null = daemon 没报采集时刻（不是「很久以前」，也不是「刚刚」）
         let opencodeCatalogSeenAt: string | null = null;
+        let opencodeCatalogVariants: string[] | null = null;
         let opencodeGeneration: "v1" | "v2" | null = null;
         let opencodeMode: string | null = null;
         let opencodeServer: string | null = null;
@@ -7182,6 +7183,11 @@ return Bun.serve({
             const seen = parsed?.opencode_catalog_seen_at;
             opencodeCatalogSeenAt =
               typeof seen === "string" && seen.length > 0 && seen.length <= 40 ? seen : null;
+            // admin 2026-11-11 —— 每个模型的思考档位（`provider/model=a,b,c`），只做投影。
+            const rawVariants = parsed?.opencode_catalog_variants;
+            if (Array.isArray(rawVariants) && rawVariants.every((v: unknown) => typeof v === "string" && v.length <= 600)) {
+              opencodeCatalogVariants = rawVariants.slice(0, 400);
+            }
           }
           // #2293 —— 客户端「Runtime · V2」和「OpenCode Server」两行要的正是快照里这三格标量。
           // PR #1092 之前从 `node.config_snapshot` 读，但这个端点**刻意不带整个快照**
@@ -7233,6 +7239,7 @@ return Bun.serve({
           opencode_agents_seen_at: opencodeAgentsSeenAt,
           // 见上：null 表示 daemon 未上报；非 null 是它自己给的采集时刻
           opencode_catalog_seen_at: opencodeCatalogSeenAt,
+          opencode_catalog_variants: opencodeCatalogVariants,
           opencode_generation: opencodeGeneration,
           opencode_mode: opencodeMode,
           opencode_server: opencodeServer,

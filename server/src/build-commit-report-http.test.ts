@@ -126,6 +126,16 @@ describe("#3144 opencode_catalog_seen_at 的三段链路（真 HTTP）", () => {
     expect(row.opencode_catalog).toEqual(["a/b"]);
     expect(row.opencode_catalog_seen_at).toBeNull();
     expect(row.opencode_catalog_seen_at).not.toBe("");
+    expect(row.opencode_catalog_variants).toBeNull();
+  });
+
+  test("admin 2026-11-11：思考档位随清单上报 ⇒ 投影里读得到", async () => {
+    expect((await report({ config_snapshot: {
+      opencode_catalog: ["deepseek/deepseek-flash"],
+      opencode_catalog_variants: ["deepseek/deepseek-flash=none,low,high,max"],
+    } })).ok).toBe(true);
+    const row = (await nodes()).nodes.find((n: any) => n.alias === ALIAS);
+    expect(row.opencode_catalog_variants).toEqual(["deepseek/deepseek-flash=none,low,high,max"]);
   });
 });
 

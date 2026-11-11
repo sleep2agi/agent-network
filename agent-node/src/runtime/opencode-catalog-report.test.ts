@@ -14,6 +14,7 @@ describe("#3144 catalogReport —— 清单与采集时刻同进同出", () => {
     expect(r).toEqual({
       models: ["deepseek/deepseek-flash", "openai/gpt-6.1-terra"],
       seenAt: "2026-11-01T02:00:00.000Z",
+      variants: [],
     });
   });
 
@@ -62,5 +63,21 @@ describe("#3144 读失败不许抹掉清单（节点忙时 3s 超时经常不够
 
   test("从来没有成功过 ⇒ 仍然是 undefined（不编一份空清单）", () => {
     expect(keepLastCatalog(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("admin 2026-11-11 —— 思考档位随清单上报", () => {
+  test("models with variants are encoded as provider/model=a,b; models without are omitted", () => {
+    const r = catalogReport({
+      models: [
+        { providerId: "deepseek", id: "deepseek-flash", variants: ["none", "low", "high", "max"] },
+        { providerId: "opencode", id: "plain" },
+        { providerId: "x", id: "empty", variants: [] },
+        { providerId: "x", id: "weird", variants: ["ok", "bad value!"] },
+      ],
+      observedAt: "2026-11-11T00:00:00Z",
+    })!;
+    expect(r.models).toEqual(["deepseek/deepseek-flash", "opencode/plain", "x/empty", "x/weird"]);
+    expect(r.variants).toEqual(["deepseek/deepseek-flash=none,low,high,max", "x/weird=ok"]);
   });
 });
