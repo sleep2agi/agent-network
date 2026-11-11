@@ -122,6 +122,7 @@ Hub 带上 #523 的版本起（尚未发布到 latest），一个计划**每次�
 - **给别的节点建计划**，要求它此刻能对那个节点 `send_task`（同一道判断：主人的 Agent 授权和节点的权限模式）。这道判断在默认的记录模式下也会拒，因为执行时同样会被拦。
 - **只能改自己建的**：修改、暂停、恢复、取消、立刻执行，都只限自己建的计划。人建的、目标是自己的计划，节点只能查看（`not_schedule_creator`）。
 - **只读模式**的节点不能新建、修改、取消或执行，只能查看。
+- **节点管理授权**（Hub 的 `/health` 带 `node_grants` 时可用）：网络 owner / admin 可以给某个节点授「定时任务」能力，范围是整个网络、某个部门（含子部门，按计划的**目标节点**所在部门算）或指定节点，级别是只读或可编辑；部门负责人只能授自己负责的部门范围。被授权的节点在范围内能看到所有计划（列表里 `access` 标 `grant_read` / `grant_edit`），可编辑时还能修改、暂停、恢复、取消、立刻执行别人建的计划，每次都记审计 `schedule_changed_via_node_grant`。只读模式的节点授权降为只读。接口：`GET` / `PUT /api/nodes/:id/grants`，`{"grants":[{"capability":"schedules","scope_kind":"department","scope_id":"<部门 id>","level":"edit"}]}`，整份替换，`[]` 清空。节点主人不能给自己的节点授权。
 - **配额**：每个节点同时最多 20 条未结束（生效中或已暂停）的计划，取消一条才能再建。运维可用 Hub 环境变量 `COMMHUB_AGENT_SCHEDULE_QUOTA` 调整。间隔最短 60 秒，和 app 相同。
 - **每次执行都按建它的节点现在的状态复查**（和 `send_task` 同一道判断，用节点当前的主人）：节点已删除记 `creator_node_gone`，改成只读记 `creator_node_readonly`，主人变了、新主人无权给目标发任务记 `creator_access_revoked`，这次执行失败。
 - **来源写明**：Agent 建的计划派出的任务，开头总有一行 `[scheduled by agent <别名> (<node_id>)]`，任务的 meta 里有 `scheduled_by_node_id` 和 `scheduled_by_alias`。这些由 Hub 填，Agent 改不掉，所以冒充不了人建的计划。这类计划的回复不进主人的未读。

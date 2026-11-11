@@ -15,6 +15,7 @@ import { statusAliasResolverRead } from "./status-alias-resolver.js";
 import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
+import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
 import { activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { countInFlightTasks } from "./node-in-flight-tasks.js";
@@ -221,7 +222,8 @@ const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 // scheduled_task_purge:POST /api/scheduled-tasks/:id/purge 真删一条已停下(cancelled / completed)的计划,连执行记录一起删;
 // 还在跑的回 409 schedule_not_stopped(先 cancel)。
 // node_inbox_allowlist_dept:收件白名单认 dept:<department_id>(该部门及子部门里的节点和人)。
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge", "node_inbox_allowlist_dept"] as const;
+// node_grants:节点管理授权 GET/PUT /api/nodes/:id/grants(能力 schedules × 范围 network/department/node × read/edit)。
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge", "node_inbox_allowlist_dept", "node_grants"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here
@@ -4393,6 +4395,42 @@ return Bun.serve({
       db.run("UPDATE nodes SET peer_allowlist = ?1 WHERE node_id = ?2", [nextValue, node2.node_id]);
       logAudit(restAuth.userId, restAuth.username, "node_peer_allowlist_changed", "node", node2.node_id, JSON.stringify({ from: node2.peer_allowlist, to: nextValue }), getClientIP(req), node2.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node2.node_id, peers: peers.length ? peers : null }));
+    }
+    // 节点管理授权（node-grants.ts）：GET / PUT /api/nodes/:id/grants { grants: [{capability, scope_kind, scope_id, level}] }
+    // 读：本网络成员。写：网络 owner / admin、Hub 管理员可授任意范围；部门负责人只能授自己负责子树里的
+    // department / node 范围。**节点主人不行**（否则任何成员都能给自己的节点授全网的权）。PUT 是整份替换，[] 清空。
+    const nodeGrantsMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/grants$/);
+    if (nodeGrantsMatch && (req.method === "GET" || req.method === "PUT")) {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const ref = decodeURIComponent(nodeGrantsMatch[1]);
+      const gnode = db.get<{ node_id: string; network_id: string | null }>("SELECT node_id, network_id FROM nodes WHERE node_id = ?1", ref);
+      const grole = gnode?.network_id ? getUserNetworkRole(restAuth.userId, gnode.network_id) : null;
+      if (!gnode || !gnode.network_id || (!grole && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (req.method === "GET") {
+        return withCors(req, Response.json({ ok: true, node_id: gnode.node_id, grants: listNodeGrants(gnode.network_id, gnode.node_id), capabilities: GRANT_CAPABILITIES }));
+      }
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const parsed = parseNodeGrants(gnode.network_id, body?.grants);
+      if (!parsed.ok) return withCors(req, Response.json(parsed, { status: parsed.error.endsWith("_not_found") ? 404 : 400 }));
+      const fullAdmin = isAdmin || grole === "owner" || grole === "admin";
+      if (!fullAdmin) {
+        const managed = new Set(managedDepartmentIds(gnode.network_id, restAuth.userId).flatMap(d => [...departmentSubtree(gnode.network_id!, d)]));
+        const before = listNodeGrants(gnode.network_id, gnode.node_id);
+        // 负责人改的是整份名单：名单里不在他管辖内的旧授权必须原样保留，新增 / 删除的都得在他的子树里。
+        const outside = (g: { scope_kind: string; scope_id: string }) => !grantsWithinManaged(gnode.network_id!, [g as any], managed);
+        const keptOutside = before.filter(outside).every(b => parsed.grants.some(g => g.capability === b.capability && g.scope_kind === b.scope_kind && g.scope_id === b.scope_id && g.level === b.level));
+        const addedOutside = parsed.grants.filter(outside).some(g => !before.some(b => b.capability === g.capability && b.scope_kind === g.scope_kind && b.scope_id === g.scope_id && b.level === g.level));
+        if (!managed.size || !keptOutside || addedOutside) {
+          return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only network owners/admins can grant network-wide access; department heads can grant within the departments they lead" }, { status: 403 }));
+        }
+      }
+      const before = listNodeGrants(gnode.network_id, gnode.node_id);
+      replaceNodeGrants(gnode.network_id, gnode.node_id, parsed.grants, restAuth.userId);
+      logAudit(restAuth.userId, restAuth.username, "node_grants_changed", "node", gnode.node_id,
+        JSON.stringify({ from: before.map(({ capability, scope_kind, scope_id, level }) => ({ capability, scope_kind, scope_id, level })), to: parsed.grants }), getClientIP(req), gnode.network_id);
+      return withCors(req, Response.json({ ok: true, node_id: gnode.node_id, grants: listNodeGrants(gnode.network_id, gnode.node_id) }));
     }
     // 收件白名单：PUT /api/nodes/:id/inbox-allowlist { senders: string[] | null }
     // 与 peer-allowlist 同一套授权、审计与空数组语义（拒收 []，清空请传 null）。
