@@ -2,7 +2,7 @@
 // 也可以只管某个部门下的」）。
 //
 // 模型 = 能力 × 范围 × 级别，按行存在 node_grants：
-//   capability  schedules（第一期）；board（第二期：等 requirements 判定和看板工具一起上线时开放）
+//   capability  schedules（第一期）；board（第二期，随 requirements 读写判定一起上线）
 //   scope_kind  network（整个网络，scope_id = ""）| department（该部门及全部下级，scope_id = department_id）
 //               | node（单个节点，scope_id = node_id）
 //   level       read（只看）| edit（看 + 改）
@@ -33,10 +33,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_node_grants_node ON node_grants(node_id);
 `);
 
-export const GRANT_CAPABILITIES = ["schedules"] as const;
-// 第二期（board）：能力定义与判定已写好，但**暂不开闸** —— 等 requirements 读写判定 + 看板工具
-// 在同一个 PR 里一起上（否则「能授、能存、但不起作用」，看起来像生效了）。
-export const GRANT_CAPABILITIES_PLANNED = ["board"] as const;
+export const GRANT_CAPABILITIES = ["schedules", "board"] as const;
+// 第二期（board）：能力与判定 + requirements 读写判定已在同一个 PR 里一起上 ⇒ 现在开闸。
+export const GRANT_CAPABILITIES_PLANNED = [] as const;
 export type GrantCapability = (typeof GRANT_CAPABILITIES)[number];
 export type GrantScopeKind = "network" | "department" | "node";
 export type GrantLevel = "read" | "edit";
@@ -207,4 +206,29 @@ export function boardGrantForCard(
   }
   if (best === "edit" && mode === "readonly") return "read";
   return best;
+}
+
+/**
+ * 读侧的范围（给 requirements 可见性用）：这个节点的 board 授权能覆盖到哪些卡。
+ * 返回 null = 没有任何 board 授权（调用方必须**逐字节不变**地走原 SQL）。
+ * network 范围用 `network: true` 表示，而不是拼一个巨大的 IN 列表。
+ */
+export type BoardScope = { network: boolean; users: Set<string>; nodes: Set<string> };
+
+export function boardScopeForNode(networkId: string, nodeId: string): BoardScope | null {
+  const grants = db.all<{ scope_kind: GrantScopeKind; scope_id: string }>(
+    "SELECT scope_kind, scope_id FROM node_grants WHERE network_id = ?1 AND node_id = ?2 AND capability = 'board'",
+    networkId, nodeId,
+  );
+  if (!grants.length) return null;
+  const users = new Set<string>();
+  const nodes = new Set<string>();
+  for (const g of grants) {
+    if (g.scope_kind === "network") return { network: true, users, nodes };
+    if (g.scope_kind === "node") { nodes.add(g.scope_id); continue; }
+    const cards = departmentCardsFor(networkId, departmentSubtree(networkId, g.scope_id));
+    for (const u of cards.users) users.add(u);
+    for (const n of cards.nodes) nodes.add(n);
+  }
+  return { network: false, users, nodes };
 }

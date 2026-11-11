@@ -138,7 +138,15 @@ function headOf(userId: string, row: CardRow): boolean {
  *   only=false(正常模式、执行开关打开)—— 主人能改的能改,另外「派给这个节点的」在主人看得见时也能改;
  *   only=true (受限模式)—— 只看、只改派给这个节点的卡(负责 Agent / 参与人 / 它建的,及这些卡的子任务)。
  */
-export type TaskCaller = { userId: string; node?: { id: string; only: boolean } } | null;
+export type TaskCaller = {
+  userId: string;
+  node?: { id: string; only: boolean };
+  /**
+   * 节点管理授权（第二期 board）带来的**额外**可见范围。
+   * 有它才拼额外的析取项；没有它，SQL 必须逐字节不变（测试钉住这一点）。
+   */
+  board?: { network: boolean; users: ReadonlySet<string>; nodes: ReadonlySet<string> };
+} | null;
 
 export const nodeRefPattern = (nodeId: string) => `%${likeEscape(`"kind":"node","id":"${nodeId}"`)}%`;
 const nodeRefIs = (json: string | null | undefined, nodeId: string) => !!json && json.includes(`"kind":"node","id":"${nodeId}"`);
@@ -315,6 +323,18 @@ function addTaskVisibilityScopeAsUser(sql: string, params: unknown[], caller: Ta
   const ph = (ids: string[]) => ids.map((id) => `?${params.push(id)}`).join(", ");
   const all = scoped.map((s) => s.networkId);
   const parts = [`network_id NOT IN (${ph(all)})`];
+  // #board —— 节点管理授权（第二期）：**只加析取项**，且只在 caller 带 board 时才动 SQL。
+  // 没有授权（人 / 普通节点）时这里一行都不执行 ⇒ SQL 逐字节不变。
+  if (caller.board) {
+    if (caller.board.network) {
+      parts.push("1 = 1"); // network 范围：放开这个节点能看的卡（不拼巨大 IN 列表）
+    } else {
+      const extra: string[] = [];
+      if (caller.board.users.size) extra.push(`owner_json IN (${ph([...caller.board.users].map((id) => JSON.stringify({ kind: "user", id })))})`);
+      if (caller.board.nodes.size) extra.push(`agent_owner_json IN (${ph([...caller.board.nodes].map((id) => JSON.stringify({ kind: "node", id })))})`);
+      if (extra.length) parts.push(`(${extra.join(" OR ")})`);
+    }
+  }
   if (members.length) {
     const pat = params.push(userRefPattern(caller.userId));
     const mine = `owner_json LIKE ?${pat} ESCAPE '\\' OR participants_json LIKE ?${pat} ESCAPE '\\' OR created_by_json LIKE ?${pat} ESCAPE '\\' OR (created_by_json IS NULL AND created_by = ?${uid})`;

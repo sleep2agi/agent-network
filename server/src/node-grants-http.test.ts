@@ -75,6 +75,9 @@ beforeAll(async () => {
   }
   db.run("INSERT INTO network_departments (network_id, department_id, name, parent_id, sort, created_by, leader_user_id) VALUES (?1, ?2, 'A', NULL, 0, ?3, ?4)", [net, deptA, user.boss.id, user.lead.id]);
   db.run("INSERT INTO network_departments (network_id, department_id, name, parent_id, sort, created_by) VALUES (?1, ?2, 'B', NULL, 1, ?3)", [net, deptB, user.boss.id]);
+  // board 判「卡的负责人所在部门」⇒ 成员要先有部门。
+  db.run("UPDATE network_members SET department_id = ?1 WHERE network_id = ?2 AND user_id IN (?3, ?4)", [deptA, net, user.own.id, user.lead.id]);
+  db.run("UPDATE network_members SET department_id = ?1 WHERE network_id = ?2 AND user_id = ?3", [deptB, net, user.boss.id]);
   db.run("UPDATE nodes SET department_id = ?1 WHERE node_id = ?2", [deptA, node.a.id]);
   db.run("UPDATE nodes SET department_id = ?1 WHERE node_id = ?2", [deptB, node.b.id]);
   const mod: any = await import("./server.js");
@@ -107,10 +110,20 @@ describe("PUT /api/nodes/:id/grants —— 谁能授", () => {
     expect((await putGrants(user.lead.token, node.mgr.id, [{ capability: "schedules", scope_kind: "department", scope_id: deptB, level: "edit" }])).status).toBe(403);
     await putGrants(user.boss.token, node.mgr.id, []);
   });
-  test("未知能力 400；看板（计划中）400 capability_not_supported；不存在的部门 404", async () => {
+  test("未知能力 400；board（第二期已开闸）200 且可读回；不存在的部门 404", async () => {
     expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "nope", scope_kind: "network" }])).body.error).toBe("invalid_capability");
-    expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "network" }])).body.error).toBe("capability_not_supported");
+    // 第二期：board 与 requirements 读写判定同批上线 ⇒ 写入不再被拒。
+    expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "network", level: "read" }])).status).toBe(200);
+    const readBack = await call(user.boss.token, "GET", `/api/nodes/${node.mgr.id}/grants?network_id=${net}`);
+    expect((readBack.body.grants || []).some((g: any) => g.capability === "board" && g.level === "read")).toBe(true);
+    await putGrants(user.boss.token, node.mgr.id, []);
     expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "schedules", scope_kind: "department", scope_id: "dept_missing" }])).status).toBe(404);
+  });
+
+  test("部门负责人只能授本部门的 board（跨部门 403）", async () => {
+    expect((await putGrants(user.lead.token, node.mgr.id, [{ capability: "board", scope_kind: "department", scope_id: deptA, level: "read" }])).status).toBe(200);
+    expect((await putGrants(user.lead.token, node.mgr.id, [{ capability: "board", scope_kind: "department", scope_id: deptB, level: "read" }])).status).toBe(403);
+    await putGrants(user.boss.token, node.mgr.id, []);
   });
 });
 
@@ -150,5 +163,77 @@ describe("定时任务 —— 授权让节点看得到 / 改得了", () => {
   test("撤销（[]）当场生效", async () => {
     await putGrants(user.boss.token, node.mgr.id, []);
     expect(await listIds(node.mgr.token)).not.toContain(schedA);
+  });
+});
+
+// ── 第二期：任务看板（board）───────────────────────────────────────────────
+// 判「卡的负责人所在部门」，与定时任务按「目标节点所在部门」不是一回事。
+// 卡：A 的负责人在 deptA（部门负责人 lead 本人），B 的负责人在 deptB（网络 owner boss）。
+// 被授权的节点 mgr 的主人是 own（deptA），但它看不到别人的卡 —— 所以下面看到 A 一定是授权带来的。
+describe("任务看板 —— 授权让节点看得到 / 改得了", () => {
+  let cardA = "", cardB = "";
+  const cardIds = async (token: string) => ((await mcp(token, "requirements_list", { network_id: net })).requirements ?? []).map((r: any) => r.id);
+
+  beforeAll(async () => {
+    // 🔴 必须在 enforce 下测：默认 "log" 时节点根本不做范围收窄（nodeTaskCaller 返回 null），
+    //    那样「授权后才看得到」和「撤销后看不到」都测不出来（无论有没有授权都看得见）。
+    process.env.COMMHUB_NODE_PERMISSIONS = "enforce";
+    const mk = async (name: string, ownerId: string) => {
+      const r = await mcp(user.boss.token, "requirements_create", { network_id: net, name, owner: { kind: "user", id: ownerId } });
+      const id = r.requirement?.id;
+      expect(typeof id).toBe("string");
+      return id as string;
+    };
+    cardA = await mk(`board A ${stamp}`, user.lead.id);
+    cardB = await mk(`board B ${stamp}`, user.boss.id);
+  });
+  afterAll(() => { delete process.env.COMMHUB_NODE_PERMISSIONS; });
+
+  test("没授权：别人的卡看不到，也改不了", async () => {
+    await putGrants(user.boss.token, node.mgr.id, []);
+    const ids = await cardIds(node.mgr.token);
+    expect(ids).not.toContain(cardA); expect(ids).not.toContain(cardB);
+    const upd = await mcp(node.mgr.token, "requirements_update", { network_id: net, id: cardA, description: "nope" });
+    expect(upd.ok).not.toBe(true);
+  });
+
+  test("department(A)·read：看得到 A、看不到 B；B 是 not_found；改不了", async () => {
+    await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "department", scope_id: deptA, level: "read" }]);
+    const ids = await cardIds(node.mgr.token);
+    expect(ids).toContain(cardA); expect(ids).not.toContain(cardB);
+    expect((await mcp(node.mgr.token, "requirements_get", { network_id: net, id: cardB })).error).toBe("requirement_not_found");
+    expect((await mcp(node.mgr.token, "requirements_update", { network_id: net, id: cardA, description: "read only" })).ok).not.toBe(true);
+  });
+
+  test("department(A)·edit：能改 A，审计 requirement_changed_via_node_grant；B 仍 not_found", async () => {
+    await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "department", scope_id: deptA, level: "edit" }]);
+    const upd = await mcp(node.mgr.token, "requirements_update", { network_id: net, id: cardA, description: "changed by grant" });
+    expect(upd.ok).toBe(true);
+    const audit = db.get<{ n: number | string }>("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'requirement_changed_via_node_grant' AND target_id = ?1", cardA);
+    expect(Number(audit!.n)).toBeGreaterThanOrEqual(1);
+    expect((await mcp(node.mgr.token, "requirements_update", { network_id: net, id: cardB, description: "nope" })).error).toBe("requirement_not_found");
+  });
+
+  test("network·read：两张卡都能看到（不拼巨大 IN 列表）", async () => {
+    await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "network", level: "read" }]);
+    const ids = await cardIds(node.mgr.token);
+    expect(ids).toContain(cardA); expect(ids).toContain(cardB);
+  });
+
+  test("只读模式的节点：edit 降为 read，改不动", async () => {
+    await putGrants(user.boss.token, node.mgr.id, [{ capability: "board", scope_kind: "department", scope_id: deptA, level: "edit" }]);
+    db.run("UPDATE nodes SET permission_mode = 'readonly' WHERE node_id = ?1", [node.mgr.id]);
+    try {
+      expect((await mcp(node.mgr.token, "requirements_update", { network_id: net, id: cardA, description: "should fail" })).ok).not.toBe(true);
+      // 但看还是能看
+      expect(await cardIds(node.mgr.token)).toContain(cardA);
+    } finally {
+      db.run("UPDATE nodes SET permission_mode = 'normal' WHERE node_id = ?1", [node.mgr.id]);
+    }
+  });
+
+  test("撤销（[]）当场生效", async () => {
+    await putGrants(user.boss.token, node.mgr.id, []);
+    expect(await cardIds(node.mgr.token)).not.toContain(cardA);
   });
 });

@@ -10,6 +10,7 @@ import { db } from "./db.js";
 import { departmentCardsFor, departmentSubtree, isDepartmentCard } from "./department-heads.js";
 import "./departments.js";  // 建 network_departments（该表的 DDL 在 departments.ts，不在 db.ts）
 import { boardGrantForCard } from "./node-grants.js";
+import { addTaskVisibilityScope, userRefPattern } from "./task-access.js";
 
 const NET = `net_board_${Date.now()}`;
 const DEPT_PARENT = `dept_bp_${Date.now()}`;
@@ -25,7 +26,8 @@ beforeAll(() => {
   db.run("INSERT INTO networks (network_id, network_name, owner_id, created_at) VALUES (?1, ?1, ?2, datetime('now'))", [NET, U_PARENT]);
   for (const [id, dept] of [[U_PARENT, DEPT_PARENT], [U_IN, DEPT_CHILD], [U_OUT, DEPT_OTHER]] as const) {
     db.run(`INSERT INTO users (user_id, username, password_hash, role, created_at) VALUES (?1, ?1, 'x', 'user', datetime('now'))`, [id]);
-    db.run("INSERT INTO network_members (user_id, network_id, role, department_id, joined_at) VALUES (?1, ?2, 'member', ?3, datetime('now'))", [id, NET, dept]);
+    // task_access='scoped' 才走可见性收窄（成员默认就是 scoped；这里直接插行要自己写）
+    db.run("INSERT INTO network_members (user_id, network_id, role, department_id, task_access, joined_at) VALUES (?1, ?2, 'member', ?3, 'scoped', datetime('now'))", [id, NET, dept]);
   }
   for (const [id, dept] of [[DEPT_PARENT, null], [DEPT_CHILD, DEPT_PARENT], [DEPT_OTHER, null]] as const) {
     db.run("INSERT INTO network_departments (department_id, network_id, name, parent_id, sort, created_at) VALUES (?1, ?2, ?1, ?3, 0, datetime('now'))", [id, NET, dept]);
@@ -93,5 +95,40 @@ describe("board 判定：按卡的负责人所在部门", () => {
     expect(boardGrantForCard(NET, N_GRANTED, { owner_json: userJson(U_OUT) })).toBe("read");
     // 没有任何负责人的卡也归全网授权管（不是「默认放行」——是 network 范围本来覆盖全部卡）
     expect(boardGrantForCard(NET, N_GRANTED, { owner_json: null })).toBe("read");
+  });
+});
+
+describe("读侧：只有带 board 的调用才动 SQL（没授权逐字节不变）", () => {
+  const sql = "FROM requirements WHERE 1=1";
+  // 逐字节 golden：任务范围收窄那段的原文（改动前就是这样）。任何「顺手多拼一个子句 / 多压一个参数」都会红。
+  const GOLDEN =
+    "FROM requirements WHERE 1=1 AND (network_id NOT IN (?2) OR (network_id IN (?4) AND (owner_json LIKE ?3 ESCAPE '\\' " +
+    "OR participants_json LIKE ?3 ESCAPE '\\' OR created_by_json LIKE ?3 ESCAPE '\\' OR (created_by_json IS NULL AND created_by = ?1) " +
+    "OR project_id IN (SELECT g.project_id FROM network_member_project_grants g WHERE g.user_id = ?1 AND g.network_id = requirements.network_id))))";
+  const goldenParams = () => [U_IN, NET, userRefPattern(U_IN), NET];
+
+  test("没授权节点：SQL 与参数逐字节不变", () => {
+    const p: unknown[] = [];
+    const got = addTaskVisibilityScope(sql, p, { userId: U_IN, node: { id: N_GRANTED, only: false } });
+    expect(got).toBe(GOLDEN);
+    expect(p).toEqual(goldenParams());
+  });
+  test("人（无 board）：同样逐字节不变", () => {
+    const p: unknown[] = [];
+    expect(addTaskVisibilityScope(sql, p, { userId: U_IN })).toBe(GOLDEN);
+    expect(p).toEqual(goldenParams());
+  });
+  test("network 范围：放开（1 = 1），不拼巨大 IN 列表、不额外压参数", () => {
+    const p: unknown[] = [];
+    const got = addTaskVisibilityScope(sql, p, { userId: U_IN, board: { network: true, users: new Set(), nodes: new Set() } });
+    expect(got).toContain("1 = 1");
+    expect(p).toEqual(goldenParams());
+  });
+  test("部门范围：按 owner / agent_owner 各加一个析取项", () => {
+    const p: unknown[] = [];
+    const got = addTaskVisibilityScope(sql, p, { userId: U_IN, board: { network: false, users: new Set([U_PARENT]), nodes: new Set([N_CARD]) } });
+    expect(got).toContain("owner_json IN (?3)");
+    expect(got).toContain("agent_owner_json IN (?4)");
+    expect(p.length).toBe(6);
   });
 });
