@@ -1725,7 +1725,7 @@ export async function handleCreateNodeDoorbell(
         }).catch(() => {});
         return;
       }
-      const spawnTail = preserveSpawnLogDiagnostics({ childDir, requestId });
+      const spawnTail = preserveSpawnLogDiagnostics({ childDir, requestId: request_id });
       const msg = `child died within ${FAIL_FAST_MS}ms post-spawn for runtime='${req.node_spec.runtime}': ${kerr?.message || kerr}`
         + (spawnTail ? ` | spawn log tail: ${spawnTail}` : " | spawn log: (empty)");
       deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);

@@ -51,7 +51,7 @@ describe("#4495 失败时保留 spawn 日志", () => {
     const src = readFileSync(join(import.meta.dir, "create-node-daemon.ts"), "utf8");
     expect(src).toContain('join(childDir, "logs", "spawn.log")');
     expect(src).toContain("spawnLogFd");
-    expect(src).toContain("preserveSpawnLogDiagnostics({ childDir, requestId })");
+    expect(src).toContain("preserveSpawnLogDiagnostics({ childDir, requestId: request_id })");
     expect(src).toContain("spawn log tail:");
   });
 });
