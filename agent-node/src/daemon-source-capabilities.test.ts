@@ -36,9 +36,14 @@ describe("laneEnabled —— 上报与拉起共用同一判断", () => {
     const start = src.indexOf("createSessionSourceTransportWorker({");
     const block = src.slice(start, src.indexOf("pin:", start));
     // 起 worker 的前置判断也必须是同一份 sourceLanes（不是重新读 env）
-    const guardAt = src.indexOf("const sourceLanes = sourceCapabilities(");
+    const guardAt = src.indexOf("const sourceLanes = startedSourceLanes();");
     expect(guardAt).toBeGreaterThan(0);
     expect(src.slice(guardAt, start)).toContain("Object.keys(sourceLanes).length > 0");
+    // 残余风险（复审提出）：心跳现算会让「报的」和「起的」漂移 —— 快照必须用启动时那份。
+    const snapAt = src.indexOf("function sourceForkSnapshot");
+    const snap = src.slice(snapAt, src.indexOf("let _startedSourceLanes", snapAt));
+    expect(snap).toContain("startedSourceLanes()");
+    expect(snap).not.toContain("sourceCapabilities({");
     expect(start).toBeGreaterThan(0);
     expect(block).not.toContain('_PREVIEW === "1"');
     // 每条 lane 都从同一份 sourceCapabilities 结果推导，不再各自读 env / config。

@@ -27,7 +27,7 @@ import { createNodeSessionControlBridge, createSessionControlPin } from "./runti
 import { SOURCE_FORK_CAPABILITY } from "../../contracts/session-source-transport";
 import { isSecureSourceHubUrl } from "./runtime/source-hub-url";
 import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
-import { intendedSourceCapabilities, laneEnabled, sourceCapabilities } from "./daemon-source-capabilities";
+import { intendedSourceCapabilities, sourceCapabilities } from "./daemon-source-capabilities";
 import { SOURCE_DIRECTORY_CAPABILITY } from "../../contracts/session-source-directory";
 import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
 import {
@@ -336,23 +336,42 @@ function sourceForkSnapshot<T extends { daemon_capabilities?: object }>(snapshot
   // 判定逻辑抽到 daemon-source-capabilities.ts（纯函数 + 单测）：那里同时解释了
   // 「为什么生产上 7 台 daemon 一条都不报」——原来要求四个环境变量全为 1。
   const secure = isSecureSourceHubUrl(COMMHUB_URL);
-  const laneInput = {
-    role: fileConfig.role,
-    platform: process.platform,
-    env: process.env,
-    config: fileConfig,
-    createOk: !!daemonCreateCapability()?.ok,
-  };
   // 只在「本来想开、却因为 Hub 不安全被清空」时告警；一个 transport 都没配的 daemon
-  // 不该看到「被安全策略拦了」这种误导性日志。
+  // 不该看到「被安全策略拦了」这种误导性日志。⚠️ 只有不安全时才去探针（它会读文件系统）。
   if (fileConfig.role === "host_supervisor" && !secure && !_insecureSourceHubWarned
-    && Object.keys(intendedSourceCapabilities(laneInput)).length > 0) {
+    && Object.keys(intendedSourceCapabilities({
+      role: fileConfig.role,
+      platform: process.platform,
+      env: process.env,
+      config: fileConfig,
+      createOk: !!daemonCreateCapability()?.ok,
+    })).length > 0) {
     _insecureSourceHubWarned = true;
     warn(`[source-control] fork/directory lanes disabled: Hub URL must be https:// (or http on loopback); current ${(() => { try { return new URL(COMMHUB_URL).origin; } catch { return "invalid URL"; } })()}`);
   }
-  const caps = sourceCapabilities({ ...laneInput, secureHub: secure });
+  // 🔴 报什么只能来自「起了什么」：这里用的是**启动时**算好的那份 lanes（见 startedSourceLanes），
+  //    不在这里现算。daemonCreateCapability() 会真的读文件系统，运行期装/卸 anet 会让它翻转；
+  //    若心跳现算，就会出现「快照开始报 fork 能力，但 worker 启动时没起 fork lane」——
+  //    与 P1 同一个形状（报了没人接，用户卡到超时）。
+  const caps = startedSourceLanes();
   if (!Object.keys(caps).length) return snapshot;
   return { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, ...caps } };
+}
+
+/** 启动时算一次、全进程共用：能力上报与 worker lane 都从这里取，杜绝两套判据 / 运行期漂移。 */
+let _startedSourceLanes: ReturnType<typeof sourceCapabilities> | null = null;
+function startedSourceLanes(): ReturnType<typeof sourceCapabilities> {
+  if (_startedSourceLanes === null) {
+    _startedSourceLanes = sourceCapabilities({
+      role: fileConfig.role,
+      platform: process.platform,
+      env: process.env,
+      config: fileConfig,
+      secureHub: isSecureSourceHubUrl(COMMHUB_URL),
+      createOk: !!daemonCreateCapability()?.ok,
+    });
+  }
+  return _startedSourceLanes;
 }
 
 function daemonCreateCapability(): (DaemonCreateCapability & { defaultWorkdirRoot?: string | null }) | undefined {
@@ -8720,21 +8739,14 @@ log("已注册到 CommHub");
 // starts a launcher. Ordinary daemons do not poll either source queue.
 // 🔴 能力上报与实际拉起 worker 用**同一份** sourceCapabilities 结果：
 //    报了什么就必须起什么，否则会出现「Hub 按能力派活、daemon 从不轮询 → 用户点了卡到超时」。
-const sourceLanes = sourceCapabilities({
-  role: fileConfig.role,
-  platform: process.platform,
-  env: process.env,
-  config: fileConfig,
-  secureHub: isSecureSourceHubUrl(COMMHUB_URL),
-  createOk: !!daemonCreateCapability()?.ok,
-});
+const sourceLanes = startedSourceLanes();
+log(`[source-control] lanes: ${Object.keys(sourceLanes).join(",") || "none"}`);
 if (Object.keys(sourceLanes).length > 0
   && SESSION_CONTROL_START_TOKEN.startsWith("ntok_") && NODE_ID && NETWORK_ID && process.platform === "linux"
   && isSecureSourceHubUrl(COMMHUB_URL)) {
   // An optional preview lane must never be the reason a daemon dies: any setup
   // error leaves the daemon running without the lane (and without advertising it).
   try {
-  log(`[source-control] lanes: ${Object.keys(sourceLanes).join(",") || "none"}`);
   const { createSessionSourceTransportWorker } = await import("./runtime/session-source-transport");
   sourceForkWorker = createSessionSourceTransportWorker({ hubUrl: COMMHUB_URL, daemonWorkDir: process.cwd(), home: daemonHome(),
     // 直接由 sourceLanes 推导：不重新读 env / config，杜绝两套判据漂移。
