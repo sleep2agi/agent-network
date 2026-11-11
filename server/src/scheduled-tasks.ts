@@ -6,6 +6,8 @@ import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { assertNodeHealthy } from "./node-health-guard.js";
+import { neverConsumeGate, neverConsumedExpiryCounters, persistentNeverConsumedExpiries } from "./expiry-counters.js";
+import { db as hubDb } from "./db.js";
 import { nodeCanAcceptDispatch } from "./node-serviceability.js";
 import { addNetworkScope, canRestWriteNetwork, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, type AgentRef } from "./agent-access.js";
@@ -647,6 +649,29 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       );
       if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
       return;
+    }
+
+    // #4307/#4315 —— **排程派单也必须过这道闸**。
+    // 不然「某节点长期不消费」会被排程一遍遍喂任务：每一条都过期成 expired，
+    // 反过来把 never-consume 的计数顶得更高（实测 TMW微软欧 144/145 条 expired 全是
+    // 从未 consume 的排程任务）。REST 与 MCP 两个派单面本来就要同形，这里是第三个面。
+    // 判据完全相同：只看「最后一次成功回复之后」的过期；命中就 skip，不写任务行。
+    {
+      const gate = neverConsumeGate({
+        alias: node.alias,
+        counters: neverConsumedExpiryCounters(),
+        force: false,
+        forceAllowed: false,
+        persistent: persistentNeverConsumedExpiries(hubDb, node.alias, row.network_id),
+      });
+      if (!gate.ok) {
+        db.run(
+          "UPDATE scheduled_task_runs SET status = 'skipped', error_code = 'target_never_consumes', error_message = ?1, completed_at = datetime('now') WHERE run_id = ?2",
+          [gate.message.slice(0, 500), runId],
+        );
+        if (advanceSchedule) advance(row, scheduledFor, advanceAfter);
+        return;
+      }
     }
 
     const taskId = crypto.randomUUID();
