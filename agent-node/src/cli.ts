@@ -27,6 +27,7 @@ import { createNodeSessionControlBridge, createSessionControlPin } from "./runti
 import { SOURCE_FORK_CAPABILITY } from "../../contracts/session-source-transport";
 import { isSecureSourceHubUrl } from "./runtime/source-hub-url";
 import { SOURCE_DELIVERY_CAPABILITY } from "../../contracts/session-source-delivery";
+import { sourceCapabilities } from "./daemon-source-capabilities";
 import { SOURCE_DIRECTORY_CAPABILITY } from "../../contracts/session-source-directory";
 import { PROJECT_CREATE_CAPABILITY, SESSION_ATTACH_CAPABILITY } from "../../contracts/session-project-create";
 import {
@@ -332,32 +333,25 @@ import {
 const _createCapLogState: CreateCapabilityLogState = {};
 let _insecureSourceHubWarned = false;
 function sourceForkSnapshot<T extends { daemon_capabilities?: object }>(snapshot: T): T {
-  // The source worker refuses a plain-HTTP non-loopback Hub, so advertising these
-  // lanes would make the Hub queue work nobody will ever pick up (the app then
-  // shows the fork as refused). Advertise nothing and say why, once.
-  if (fileConfig.role === "host_supervisor" && !isSecureSourceHubUrl(COMMHUB_URL)
-    && [process.env.ANET_SOURCE_FORK_PREVIEW, process.env.ANET_SOURCE_DIRECTORY_PREVIEW].includes("1")) {
-    if (!_insecureSourceHubWarned) {
-      _insecureSourceHubWarned = true;
-      warn(`[source-control] fork/directory preview disabled: Hub URL must be https:// (or http on loopback); current ${(() => { try { return new URL(COMMHUB_URL).origin; } catch { return "invalid URL"; } })()}`);
-    }
-    return snapshot;
+  // 判定逻辑抽到 daemon-source-capabilities.ts（纯函数 + 单测）：那里同时解释了
+  // 「为什么生产上 7 台 daemon 一条都不报」——原来要求四个环境变量全为 1。
+  const secure = isSecureSourceHubUrl(COMMHUB_URL);
+  if (fileConfig.role === "host_supervisor" && !secure && !_insecureSourceHubWarned) {
+    _insecureSourceHubWarned = true;
+    warn(`[source-control] fork/directory lanes disabled: Hub URL must be https:// (or http on loopback); current ${(() => { try { return new URL(COMMHUB_URL).origin; } catch { return "invalid URL"; } })()}`);
   }
-  if (fileConfig.role === "host_supervisor" && process.platform === "linux" && process.env.ANET_SOURCE_DIRECTORY_PREVIEW === "1"
-    && fileConfig.sourceDirectoryTransport === SOURCE_DIRECTORY_CAPABILITY) {
-    snapshot = { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, source_directory_read: fileConfig.sourceDirectoryTransport } };
-    if (process.env.ANET_PROJECT_NEW_SESSION_PREVIEW === "1" && fileConfig.projectNewSessionTransport === PROJECT_CREATE_CAPABILITY) {
-      snapshot = { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, project_new_session: PROJECT_CREATE_CAPABILITY } };
-    }
-    if (process.env.ANET_SESSION_ATTACH_PREVIEW === "1" && fileConfig.sessionAttachTransport === SESSION_ATTACH_CAPABILITY) {
-      snapshot = { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, session_attach: SESSION_ATTACH_CAPABILITY } };
-    }
-  }
-  if (fileConfig.role !== "host_supervisor" || process.env.ANET_SOURCE_FORK_PREVIEW !== "1" || process.platform !== "linux"
-    || fileConfig.sourceForkTransport !== SOURCE_FORK_CAPABILITY || !daemonCreateCapability()?.ok) return snapshot;
-  return { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities,
-    source_node_delivery: SOURCE_DELIVERY_CAPABILITY, source_fork_transport: SOURCE_FORK_CAPABILITY } };
+  const caps = sourceCapabilities({
+    role: fileConfig.role,
+    platform: process.platform,
+    env: process.env,
+    config: fileConfig,
+    secureHub: secure,
+    createOk: !!daemonCreateCapability()?.ok,
+  });
+  if (!Object.keys(caps).length) return snapshot;
+  return { ...snapshot, daemon_capabilities: { ...snapshot.daemon_capabilities, ...caps } };
 }
+
 function daemonCreateCapability(): (DaemonCreateCapability & { defaultWorkdirRoot?: string | null }) | undefined {
   const cap = evaluateCreateCapability({
     role: fileConfig?.role,
