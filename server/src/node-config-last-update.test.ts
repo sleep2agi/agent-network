@@ -71,7 +71,8 @@ describe("#3146 上一次配置下发的投影", () => {
   test("不投影 created_by_token（凭据标识不是界面信息）", () => {
     const v: any = projectLastConfigUpdate(row() as any);
     expect(Object.keys(v).sort()).toEqual([
-      "acked_at", "created_at", "error", "observed_status", "requested_model", "status", "terminal", "update_id",
+      "acked_at", "created_at", "error", "observed_status", "requested_model", "requested_variant",
+      "resolved_after_queue", "status", "terminal", "update_id",
     ]);
     expect(JSON.stringify(v)).not.toContain("created_by_token");
   });
@@ -122,5 +123,106 @@ describe("#3146 GET /api/nodes/:id/config 的接线", () => {
 
   test("镜像否定：不投影 created_by_token（凭据标识不进响应）", () => {
     expect(configGetHandler()).not.toContain("created_by_token");
+  });
+});
+
+// ── #4499 ────────────────────────────────────────────────────────────────────
+// 现象（2026-11-10 生产实测，通信欧）：档位被拒（busy）→ 节点排队 → 29s 后真的应用上了
+// → 顶层 modelVariant 已变 → 但 last_update 永远停在 rejected/variant_busy，
+// 客户端于是一直显示「被拒绝」，而它其实已经生效。
+//
+// 判据（三条同时成立才算已生效，缺一条都保持 rejected）：
+//   ① ack 原因是 variant_busy；② patch 里确实要了档位；③ 节点当前回读的档位 == 请求值。
+// 另加 15 分钟时间窗；`applied` 仍然只代表「写入并回读一致」，不用「已排队」冒充。
+describe("#4499 被拒后排队已生效的下发", () => {
+  const busyRow = (over: Record<string, unknown> = {}) => ({
+    update_id: "cu_busy",
+    status: "rejected",
+    patch_json: JSON.stringify({ modelVariant: "high" }),
+    error: "variant_busy (in_flight=1, turn_age_ms=31421)",
+    created_at: "1793519656437",
+    acked_at: "1793519656466",
+    ...over,
+  });
+  const now = 1793519656437 + 29_000; // 29 秒后：正是生产里实际应用的时刻
+
+  test("回读档位 == 请求值 ⇒ 投影成 applied，但保留原始 rejected 与标记", () => {
+    const v = projectLastConfigUpdate(busyRow(), { currentVariant: "high", nowMs: now });
+    expect(v.status).toBe("applied");
+    expect(v.terminal).toBe(true);
+    expect(v.error).toBeNull();
+    expect(v.resolved_after_queue).toBe(true);
+    expect(v.observed_status).toBe("rejected"); // 原始事实不丢
+    expect(v.requested_variant).toBe("high");
+  });
+
+  test("回读档位对不上 ⇒ 保持 rejected（不许猜）", () => {
+    const v = projectLastConfigUpdate(busyRow(), { currentVariant: "low", nowMs: now });
+    expect(v.status).toBe("rejected");
+    expect(v.resolved_after_queue).toBe(false);
+    expect(v.error).toContain("variant_busy");
+  });
+
+  test("没有回读上下文 ⇒ 保持 rejected（不可能凭 patch 猜）", () => {
+    const v = projectLastConfigUpdate(busyRow(), { nowMs: now });
+    expect(v.status).toBe("rejected");
+    expect(v.resolved_after_queue).toBe(false);
+  });
+
+  test("超过 15 分钟窗口 ⇒ 不假设已生效", () => {
+    const late = 1793519656437 + 16 * 60 * 1000;
+    const v = projectLastConfigUpdate(busyRow(), { currentVariant: "high", nowMs: late });
+    expect(v.status).toBe("rejected");
+    expect(v.resolved_after_queue).toBe(false);
+  });
+
+  test("原因不是 variant_busy ⇒ 不参与这个推断（例如 session 没起）", () => {
+    const v = projectLastConfigUpdate(
+      busyRow({ error: "OpenCode V2 session is not running; model was not changed" }),
+      { currentVariant: "high", nowMs: now },
+    );
+    expect(v.status).toBe("rejected");
+    expect(v.resolved_after_queue).toBe(false);
+  });
+
+  test("patch 里没有 modelVariant ⇒ 与档位无关，不推断", () => {
+    const v = projectLastConfigUpdate(busyRow({ patch_json: JSON.stringify({ model: "a/b" }) }), {
+      currentVariant: "high",
+      nowMs: now,
+    });
+    expect(v.status).toBe("rejected");
+    expect(v.resolved_after_queue).toBe(false);
+    expect(v.requested_variant).toBeNull();
+  });
+
+  test("要求清空（modelVariant:null / \"default\"）⇒ 与回读的 null 相等才算生效", () => {
+    for (const patch of [{ modelVariant: null }, { modelVariant: "default" }]) {
+      const applied = projectLastConfigUpdate(busyRow({ patch_json: JSON.stringify(patch) }), {
+        currentVariant: null,
+        nowMs: now,
+      });
+      expect(applied.status).toBe("applied");
+      const notApplied = projectLastConfigUpdate(busyRow({ patch_json: JSON.stringify(patch) }), {
+        currentVariant: "high",
+        nowMs: now,
+      });
+      expect(notApplied.status).toBe("rejected");
+    }
+  });
+
+  test("真的 applied 行不受影响：resolved_after_queue=false 且 requested_variant 仍然带出", () => {
+    const v = projectLastConfigUpdate(busyRow({ status: "applied", error: null }), {
+      currentVariant: "high",
+      nowMs: now,
+    });
+    expect(v.status).toBe("applied");
+    expect(v.resolved_after_queue).toBe(false);
+    expect(v.requested_variant).toBe("high");
+  });
+
+  test("接线：GET /api/nodes/:id/config 把当前档位传给投影", () => {
+    const block = configGetHandler();
+    expect(block).toContain("currentVariant:");
+    expect(block).toContain("modelVariant");
   });
 });

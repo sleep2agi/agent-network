@@ -41,6 +41,15 @@ export interface LastConfigUpdate {
   terminal: boolean;
   /** 这次下发要的模型（来自 patch_json.model）；patch 里没有就是 null。 */
   requested_model: string | null;
+  /** 这次下发要的思考档位（来自 patch_json.modelVariant）；patch 里没有就是 null。 */
+  requested_variant: string | null;
+  /**
+   * #4499 —— 「排队后被应用」是**推断**出来的，不是节点回报的：
+   * 原来 ack 是 rejected/variant_busy，之后节点把排队的档位应用上了，回读档位 == 请求值。
+   * 这种情况下 status 投影成 applied（因为它确实生效且回读一致），但这里留 true 便于排查；
+   * observed_status 仍然保留原始的 rejected。应用窗口外的、或回读对不上的，一律 false。
+   */
+  resolved_after_queue: boolean;
   /** 节点自报的失败原因（rejected/timeout 才有；applied 是 null）。 */
   error: string | null;
   /** ISO；TEXT 存的是 ms epoch，转不出来就是 null。 */
@@ -76,17 +85,72 @@ function requestedModel(patchJson: string | null): string | null {
   }
 }
 
+/**
+ * patch_json 里的思考档位（`modelVariant`）。
+ *
+ * 三种「没要档位」必须分开，不能都折叠成 null：
+ *   · patch 里**没有** modelVariant 这个键 ⇒ undefined（这次下发与档位无关）
+ *   · patch 里是 `null` / `"default"`        ⇒ null（**明确要求清空**回默认）
+ *   · patch 里是字符串                        ⇒ 原样
+ */
+function requestedVariant(patchJson: string | null): string | null | undefined {
+  if (!patchJson) return undefined;
+  try {
+    const parsed = JSON.parse(patchJson) as { modelVariant?: unknown };
+    if (!Object.prototype.hasOwnProperty.call(parsed, "modelVariant")) return undefined;
+    const v = (parsed as { modelVariant?: unknown }).modelVariant;
+    if (v === null || v === undefined) return null;
+    if (typeof v === "string") return v === "default" ? null : v;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** #4499 —— 排队应用的时间窗。超过这个窗口就不再假设「它后来生效了」。 */
+export const QUEUED_VARIANT_WINDOW_MS = 15 * 60 * 1000;
+
+/** ack 的原因是「档位忙」吗？只认节点自己写的 `variant_busy`（后面可能带细节）。 */
+function isVariantBusy(error: string | null): boolean {
+  return typeof error === "string" && /^variant_busy\b/.test(error);
+}
+
 /** 纯函数：一行 → 对外形状。抽出来是为了能单独钉住「闭集外不折叠」那条。 */
-export function projectLastConfigUpdate(row: Row): LastConfigUpdate {
+export function projectLastConfigUpdate(
+  row: Row,
+  ctx: { currentVariant?: string | null; nowMs?: number } = {},
+): LastConfigUpdate {
   const observed = typeof row.status === "string" ? row.status : "";
   const known = (CONFIG_UPDATE_STATUSES as readonly string[]).includes(observed);
+  const reqVariant = requestedVariant(row.patch_json);
+
+  // #4499：rejected/variant_busy 之后，节点把排队的档位应用上了。
+  // 判据三条同时成立才算（缺一条都保持 rejected，绝不把「排队中」冒充 applied）：
+  //   ① ack 原因是 variant_busy；② patch 里确实要了档位；③ 节点当前回读的档位 == 请求值。
+  // 另外加一条时间窗：太久以前的下发即使值巧合相等也不算（那是另一件事）。
+  let resolvedAfterQueue = false;
+  if (known && observed === "rejected" && isVariantBusy(row.error) && reqVariant !== undefined) {
+    const nowMs = ctx.nowMs ?? Date.now();
+    const createdMs = Number(row.created_at);
+    const inWindow =
+      Number.isFinite(createdMs) && createdMs > 0 &&
+      nowMs >= createdMs && nowMs - createdMs <= QUEUED_VARIANT_WINDOW_MS;
+    const current = ctx.currentVariant === undefined ? undefined : ctx.currentVariant === "default" ? null : ctx.currentVariant;
+    const requested = reqVariant === null ? null : reqVariant;
+    if (inWindow && current !== undefined && current === requested) resolvedAfterQueue = true;
+  }
+
+  const effectiveStatus = resolvedAfterQueue ? "applied" : known ? (observed as ConfigUpdateStatus) : "unknown";
+
   return {
     update_id: row.update_id,
-    status: known ? (observed as ConfigUpdateStatus) : "unknown",
+    status: effectiveStatus,
     observed_status: observed,
-    terminal: known ? TERMINAL[observed as ConfigUpdateStatus] : false,
+    terminal: resolvedAfterQueue ? true : known ? TERMINAL[observed as ConfigUpdateStatus] : false,
     requested_model: requestedModel(row.patch_json),
-    error: typeof row.error === "string" && row.error ? row.error : null,
+    requested_variant: reqVariant === undefined ? null : reqVariant,
+    resolved_after_queue: resolvedAfterQueue,
+    error: resolvedAfterQueue ? null : typeof row.error === "string" && row.error ? row.error : null,
     created_at: msToIso(row.created_at),
     acked_at: msToIso(row.acked_at),
   };
@@ -101,7 +165,8 @@ export const LAST_CONFIG_UPDATE_SQL =
 export function readLastConfigUpdate(
   get: (sql: string, ...params: any[]) => Row | null,
   nodeId: string,
+  ctx: { currentVariant?: string | null; nowMs?: number } = {},
 ): LastConfigUpdate | null {
   const row = get(LAST_CONFIG_UPDATE_SQL, nodeId);
-  return row ? projectLastConfigUpdate(row) : null;
+  return row ? projectLastConfigUpdate(row, ctx) : null;
 }

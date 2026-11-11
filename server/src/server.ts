@@ -6544,6 +6544,9 @@ return Bun.serve({
       const lastUpdate = readLastConfigUpdate(
         (sql: string, ...params: any[]) => (db.get as any)(sql, ...params),
         node.node_id,
+        // #4499 —— 排队后被应用的那种下发：ack 当时是 rejected/variant_busy，
+        // 节点随后把档位改过去了。用「当前回读的档位」判断它到底生效了没有。
+        { currentVariant: typeof snapshot.modelVariant === "string" ? snapshot.modelVariant : null },
       );
       return withCors(req, Response.json({
         ok: true,
