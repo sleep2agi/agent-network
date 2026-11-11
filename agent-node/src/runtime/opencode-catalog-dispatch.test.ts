@@ -121,3 +121,20 @@ test("symlink node directories are not an owned match", () => {
     expect(findOwnedOpenCodeNodeDir(daemonWorkDir, "child-a", "node_child")).toBeNull();
   } finally { rmSync(daemonWorkDir, { recursive: true, force: true }); }
 });
+
+test("an ADOPTED child (object registry entry) is found under its own workdir (admin 2026-11-11)", () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-cat-adopted-"));
+  try {
+    const daemonWorkDir = join(root, "daemon");
+    const project = join(root, "client-oe-2");
+    const nodeDir = join(project, ".anet", "nodes", "adopted-a");
+    mkdirSync(nodeDir, { recursive: true });
+    writeFileSync(join(nodeDir, "config.json"), JSON.stringify({ node_id: "n_adopted", alias: "adopted-a" }));
+    mkdirSync(join(daemonWorkDir, ".anet"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(daemonWorkDir, ".anet", "child-workdirs.json"), JSON.stringify({
+      "adopted-a": { adopted: true, node_id: "n_adopted", workdir: project, nodeDir, request_id: "adopt_1", launch_mode: "tmux" },
+    }), { mode: 0o600 });
+    expect(findOwnedOpenCodeNodeDir(daemonWorkDir, "adopted-a", "n_adopted")).toBe(nodeDir);
+    expect(findOwnedOpenCodeNodeDir(daemonWorkDir, "adopted-a", "n_other")).toBeNull();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

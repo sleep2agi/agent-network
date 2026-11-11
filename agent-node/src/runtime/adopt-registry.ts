@@ -56,3 +56,15 @@ export function refreshAdoptedChild(root: string, alias: string, entry: AdoptedC
   if (adoptedChild(root, alias)?.request_id !== entry.request_id) throw Error("adopt_binding_revoked_during_start");
   writeAdoptedChild(root, alias, entry);
 }
+
+/** Project directory of a child this daemon manages: an adopted entry's `workdir`
+ * (object entry), else the plain registry / legacy layout (`childWorkDirFor`). A
+ * malformed adopted entry falls back to the plain lookup, never throws. */
+export function managedChildWorkdirFor(daemonWorkDir: string, alias: string,
+  plain: (daemonWorkDir: string, alias: string) => string): string {
+  try {
+    const entry = adoptedChild(daemonWorkDir, alias);
+    if (entry?.workdir) return entry.workdir;
+  } catch { /* fall back */ }
+  return plain(daemonWorkDir, alias);
+}

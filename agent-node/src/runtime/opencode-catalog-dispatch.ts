@@ -5,6 +5,7 @@
 import { constants, lstatSync, openSync, closeSync, fstatSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { childWorkDirFor } from "./child-workdir";
+import { managedChildWorkdirFor } from "./adopt-registry";
 import { readOwnedOpenCodeV2Catalog } from "./opencode-v2-catalog-daemon";
 import { readOpenCodeV2CatalogEndpoint } from "./opencode-v2-catalog-endpoint";
 import type { CatalogError } from "./opencode-v2-catalog";
@@ -37,7 +38,7 @@ function readNodeId(configPath: string): string | null {
  * Symlinked node directories are ignored. */
 export function findOwnedOpenCodeNodeDir(daemonWorkDir: string, alias: string, nodeId: string): string | null {
   if (!alias || !nodeId) return null;
-  const project = childWorkDirFor(daemonWorkDir, alias);
+  const project = managedChildWorkdirFor(daemonWorkDir, alias, childWorkDirFor);
   const nodesRoot = join(project, ".anet", "nodes");
   let names: string[];
   try {
@@ -75,7 +76,7 @@ export async function handleOpenCodeCatalogDoorbell(
     deps.warn(`[opencode-catalog] pull refused: ${pulled?.error || "unknown"}`);
     return;
   }
-  const project = resolve(childWorkDirFor(deps.daemonWorkDir, String(pulled.alias ?? "")));
+  const project = resolve(managedChildWorkdirFor(deps.daemonWorkDir, String(pulled.alias ?? ""), childWorkDirFor));
   const nodeDir = findOwnedOpenCodeNodeDir(deps.daemonWorkDir, String(pulled.alias ?? ""), String(pulled.node_id ?? ""));
   const endpoint = nodeDir ? readOpenCodeV2CatalogEndpoint(nodeDir) : null;
   const result = await readOwnedOpenCodeV2Catalog({
