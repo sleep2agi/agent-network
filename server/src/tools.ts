@@ -2469,7 +2469,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Send a message to a session (no task lifecycle, just chat). Use for replies, status updates, or casual communication.",
     {
       alias: z.string().min(1).max(200).describe("Target session alias"),
-      message: z.string().min(1).max(100_000).describe("Message content (raised from 10k: node side used to cut replies at 2000)"),
+      message: z.string().min(1).max(100_000).describe("Message content"),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network; auto-resolved for single-network user tokens"),
     },
@@ -2534,7 +2534,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // undefined at alias". The target was already knowable from the task,
       // so requiring the caller to pass it was a redundant-param trap.
       alias: z.string().min(1).max(200).optional().describe("Target alias — optional; defaults to in_reply_to's sender"),
-      text: z.string().min(1).max(100_000).describe("Reply content (raised from 10k to match node reply cap)"),
+      text: z.string().min(1).max(100_000).describe("Reply content"),
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
       from_session: z.string().max(200).optional(),
@@ -3414,7 +3414,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // ── V2: cancel_task (取消任务) ──
   server.tool(
     "cancel_task",
-    "Cancel a pending task. Works on delivered/acked/running tasks. A **user token** may also cancel an already-`expired` task: that is the remediation for `target_never_consumes` (the gate counts expired rows with no result, so clearing them unblocks delivery). Node tokens cannot rewrite terminal history.",
+    "Cancel a task (user tokens may cancel expired too).",
     {
       task_id: z.string().min(1).max(200).describe("Task ID to cancel"),
       reason: z.string().max(1000).optional().describe("Cancellation reason"),
