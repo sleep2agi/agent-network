@@ -2,7 +2,7 @@
 // 也可以只管某个部门下的」）。
 //
 // 模型 = 能力 × 范围 × 级别，按行存在 node_grants：
-//   capability  schedules（第一期）；board（看板，第二期，2026-11-11 起可用）
+//   capability  schedules（第一期）；board（第二期：等 requirements 判定和看板工具一起上线时开放）
 //   scope_kind  network（整个网络，scope_id = ""）| department（该部门及全部下级，scope_id = department_id）
 //               | node（单个节点，scope_id = node_id）
 //   level       read（只看）| edit（看 + 改）
