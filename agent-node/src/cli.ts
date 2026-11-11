@@ -8313,8 +8313,13 @@ async function connectSSE() {
             // main fixed both with a single coalescing drain; this branch adds
             // the separate informational lane copresence needs, which subsumes it.
             if (ev.type === "new_message" && RUNTIME === "opencode" && opencodeMode === "copresence") {
-              log(`← SSE ${ev.type}`);
+              log(`← SSE ${ev.type}${(ev as any).control ? ` control=${(ev as any).control}` : ""}`);
               scheduleInformationalInboxDrain();
+              // 控制消息（停止当前轮）既不是 task 也不是 message：
+              // 信息通道只排空 type=message，工作通道只在 new_task/broadcast 时排空 ——
+              // 于是 control 行在两条 lane 之间被漏掉（实测：回合进行中发出，回合结束后仍 acked=0，
+              // 节点再也没去取）。这里让它也唤醒工作通道。
+              if ((ev as any).control) scheduleWorkInboxDrain();
             } else if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
               log(`← SSE ${ev.type}`);
               scheduleWorkInboxDrain();
