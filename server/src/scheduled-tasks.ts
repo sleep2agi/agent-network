@@ -265,6 +265,15 @@ export function insertSchedule(networkId: string, createdBy: string | null, crea
 }
 
 /** Idempotent cancel (shared by REST DELETE / POST cancel and MCP schedule_cancel). */
+/** 真删一条已停下的计划（见 purge 路由）。三张表一个事务。 */
+export function purgeSchedule(scheduleId: string): void {
+  db.transaction(() => {
+    db.run("DELETE FROM scheduled_task_watchers WHERE schedule_id = ?1", [scheduleId]);
+    db.run("DELETE FROM scheduled_task_runs WHERE schedule_id = ?1", [scheduleId]);
+    db.run("DELETE FROM scheduled_tasks WHERE schedule_id = ?1", [scheduleId]);
+  });
+}
+
 export function cancelSchedule(row: ScheduledRow): void {
   if (row.status === "cancelled") return;
   db.run("UPDATE scheduled_tasks SET status = 'cancelled', next_run_at = NULL, backoff_streak = 0, backoff_effective_seconds = NULL, backoff_last_run_id = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?1", [row.schedule_id]);
@@ -945,7 +954,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     }
   }
 
-  const match = url.pathname.match(/^\/api\/scheduled-tasks\/([^/]+)(?:\/(runs|run-now|cancel))?$/);
+  const match = url.pathname.match(/^\/api\/scheduled-tasks\/([^/]+)(?:\/(runs|run-now|cancel|purge))?$/);
   if (!match) return jsonError("not_found", 404);
   const scheduleId = decodeURIComponent(match[1]);
   const sub = match[2] || null;
@@ -960,7 +969,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   const watcher = watchingSchedule(row.schedule_id, ctx.auth?.userId ?? null);
   const writer = writeAllowed(ctx, row.network_id);
   if (!writer && !watcher) return jsonError("permission_denied", 403);
-  if (!writer && (sub === "cancel" || (!sub && req.method === "DELETE"))) return jsonError("watcher_cannot_cancel", 403);
+  if (!writer && (sub === "cancel" || sub === "purge" || (!sub && req.method === "DELETE"))) return jsonError("watcher_cannot_cancel", 403);
   if (!writer && sub === "run-now") return jsonError("watcher_cannot_run", 403);
 
   if (sub === "run-now" && req.method === "POST") {
@@ -986,6 +995,16 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
   if ((!sub && req.method === "DELETE") || (sub === "cancel" && req.method === "POST")) {
     cancelSchedule(row);
     return Response.json({ ok: true, status: "cancelled" });
+  }
+
+  // Purge（admin 2026-11-11「没有删除定时任务的功能」）—— 真删：计划行 + 执行记录 + 关注人一起删掉，
+  // 列表里不再出现。只删已经停下的计划（cancelled / completed）；还在跑的先 cancel 再 purge，
+  // 避免一次误点把正在派发的计划连同历史一起抹掉。已派出去的 task 行不动（那是节点收件箱的历史）。
+  // 不存在 = 404（上面 scopedSchedule 已判）；重复 purge 的第二次也就是 404。
+  if (sub === "purge" && (req.method === "POST" || req.method === "DELETE")) {
+    if (row.status !== "cancelled" && row.status !== "completed") return jsonError("schedule_not_stopped", 409, { status: row.status });
+    purgeSchedule(row.schedule_id);
+    return Response.json({ ok: true, status: "purged", schedule_id: row.schedule_id });
   }
 
   if (!sub && req.method === "PATCH") {
