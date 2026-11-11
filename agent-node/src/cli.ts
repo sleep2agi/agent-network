@@ -14,6 +14,9 @@
 import { opencodeModelEffectiveSnapshot } from "./opencode-model-effective";
 import { launchedByCliVersionField, readLaunchedByCliVersion } from "./launched-by-cli-version";
 import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copresence/late-reply-recover.js";
+import { capReplyText } from "./shared/reply-text-cap.js";
+
+
 import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
@@ -2603,7 +2606,7 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
     try {
       await sendReply(
         goal.report_to,
-        `[${ALIAS}] /aloop ${idShort} ${failed ? "执行失败" : completed ? "已完成" : "进度汇报"}\n\n${text.slice(0, 2000)}`,
+        `[${ALIAS}] /aloop ${idShort} ${failed ? "执行失败" : completed ? "已完成" : "进度汇报"}\n\n${capReplyText(text)}`,
         goal.parent_task_id,
         failed,
       );
@@ -3085,7 +3088,7 @@ async function recoverCodexTurnReceipts(): Promise<void> {
       warn(`[codex-receipt] ${recovery.queryErrors} turn query/queries failed; retained for retry`);
     }
     for (const receipt of recovery.receipts) {
-      const body = `[${ALIAS}] ${receipt.text.slice(0, 2000)}`;
+      const body = `[${ALIAS}] ${capReplyText(receipt.text)}`;
       const delivery = await deliverReplyReliably(
         receipt.entry.replyTo,
         body,
@@ -4913,7 +4916,7 @@ async function resumePersistedOwnedFollowUps(): Promise<void> {
       let body: string, failed = false;
       try { body = await processWithOwnedFollowUpReplyOnly(row.entry); }
       catch (error: any) { if (error?.code === "codex_task_skipped") return; failed = true; body = error instanceof Error ? error.message : String(error); }
-      await deliverReplyReliably(row.entry.replyTo, `[${ALIAS}] ${body.slice(0, 2000)}`, row.entry.taskId, failed);
+      await deliverReplyReliably(row.entry.replyTo, `[${ALIAS}] ${capReplyText(body)}`, row.entry.taskId, failed);
       // Local reply completion suppresses redelivery; it is not Hub runtime
       // consumption/activity evidence. Transport ACK still uses inbox.id.
       commhubCompensation?.recordLifecycle(row.entry.taskId, "completed");
@@ -6981,7 +6984,7 @@ async function processInbox() {
       }
 
       // (3c-e) Persist + ack + try send.
-      const replyBody = `[${ALIAS}] ${result.slice(0, 2000)}`;
+      const replyBody = `[${ALIAS}] ${capReplyText(result)}`;
       await deliverReplyReliably(from, replyBody, logicalTaskId, failed);
       try {
         // Keep the transport ACK visibly bound to inbox.id here. Stable
