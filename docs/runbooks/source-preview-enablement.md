@@ -48,14 +48,23 @@ agent-node 在**进程内部**把 `config.json` 的 `env` 合并进 `process.env
 
 ## 3. 开启（按 daemon）
 
-写在 `<node dir>/config.json` 的 `env` 里（该 daemon 自己读，不需要动 systemd unit）：
+⚠️ **2026-11-11 起：由配置决定，环境变量只做应急关闭。**
+
+```text
+开关判定 = config.json 里对应的 transport 字符串是否与 contracts 一致；
+          环境变量 `=0` 才是显式关闭，不设 / `=1` 都交给配置决定。
+为什么改：这四条原来要求 env 全为 "1"，而 daemon 大多是 systemd/脚本起的，改 env 要停机，
+          于是生产上出现过「配置早就配好、能力一条没报」的情况。
+上报（sourceCapabilities）与实际拉起 worker 用的是同一个判断（laneEnabled），
+不允许「报了能力但 lane 没起」。
+```
+
+所以正常开启只需要 config.json 里的四条 transport（通常已经在），**不需要写 env**。
+若确实要临时关掉某条（例如想先只开只读级），写 `"0"`：
 
 ```json
 "env": {
-  "ANET_SOURCE_DIRECTORY_PREVIEW": "1",
-  "ANET_PROJECT_NEW_SESSION_PREVIEW": "1",
-  "ANET_SESSION_ATTACH_PREVIEW": "1",
-  "ANET_SOURCE_FORK_PREVIEW": "1"
+  "ANET_SOURCE_FORK_PREVIEW": "0"
 }
 ```
 
@@ -124,18 +133,32 @@ Hub 的目录接口要求**人类凭据**：节点令牌到不了能力判断那
 
 ## 6. 回滚
 
+🔴 **删掉 env 变量不再是关闭**（不设 = 交给配置决定 = 开）。回滚必须写 `"0"`，或去掉 transport 配置：
+
 ```text
-· 只回滚 fork：删掉 config.json env 里的 ANET_SOURCE_FORK_PREVIEW，重启该 daemon
-· 全关：删掉四条，重启
+· 只回滚 fork：env 里写 ANET_SOURCE_FORK_PREVIEW="0"，重启该 daemon
+· 只回滚目录/新会话：ANET_SOURCE_DIRECTORY_PREVIEW="0"（连带 attach / project 两条一起关）
+· 全关：四条都写 "0"，重启
+· 更彻底：把 config.json 里对应的 transport 字段删掉（配置是意图表达）
 · 配置改错：从 config.json.bak-<ts> 恢复后重启
 ```
 
 ---
 
+## 6.1 这两个语义是「重启才生效」的（2026-11-11 起）
+
+```text
+· fork lane 依赖 createOk（能不能建节点），而它在**启动那一刻**定死。
+  装/卸/换 anet 二进制之后，fork 仍旧是灰的 —— 重启那台 daemon 才会开始报，别当 bug 查。
+· transports / role 同理：fileConfig 只在切模型那条路径被换引用，改 config.json 的 transport 字段也要重启。
+  （之前是心跳现读、能热生效；现在为了「报了就必须真的起 worker」，改成启动时定死。）
+```
+
 ## 7. 已知边界
 
 ```text
-· 能力值是**每次上报现算**的，不是持久状态：改环境变量后必须重启才生效
+· 能力值是**每次上报现算**的，不是持久状态：改配置 / 环境变量后必须重启才生效
+· 环境变量的语义是「`0` 才关」：删掉变量不会关闭能力（2026-11-11 之前是反的）
 · 明文非环回 Hub 会被显式拒绝，并在日志里 warning 一次（`[source-control] fork/directory preview disabled`）
 · 这两条通道都在 preview 阶段，行为仍可能变；Fork 会产生真实子节点，别在正式节点上随手试
 ```
