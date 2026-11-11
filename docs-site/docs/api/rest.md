@@ -123,6 +123,10 @@ curl http://localhost:9200/health
 
 注册新用户。第一个注册的用户自动成为管理员。
 
+Hub 设置 `COMMHUB_REGISTRATION=closed` 后不再接受新注册，返回 403 `registration_closed`；库里还没有用户时（装机注册第一个管理员）不受影响。不设则保持开放。
+
+注册和登录的按 IP 限速默认读 `X-Forwarded-For` 的最后一跳。Hub 前面有反向代理时，设置 `COMMHUB_TRUSTED_PROXY_IPS=<代理 IP,…>`：只有从这些地址连进来的请求，才采用它们带的转发头；直连 Hub 端口的请求按对端地址限速，伪造转发头绕不过限速。
+
 ```bash
 # v0.8+：注册不需要 master token，公开端点
 curl -X POST http://localhost:9200/api/auth/register \

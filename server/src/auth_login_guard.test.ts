@@ -6,6 +6,7 @@ import {
   LOGIN_IP_MAX_PER_WINDOW,
   LOGIN_IP_WINDOW_MS,
   getLoginClientIp,
+  trustedProxyIps,
   LoginFailureLockout,
   LoginIpRateLimiter,
   normalizeLoginUsername,
@@ -126,5 +127,19 @@ describe("getLoginClientIp", () => {
     });
     expect(getLoginClientIp(withRealIp)).toBe("203.0.113.20");
     expect(getLoginClientIp(new Request("http://127.0.0.1/api/auth/login"))).toBe("unknown");
+  });
+
+  test("COMMHUB_TRUSTED_PROXY_IPS: only a trusted peer's forwarded headers count; direct callers are keyed by their own address", () => {
+    const trusted = trustedProxyIps({ COMMHUB_TRUSTED_PROXY_IPS: " 47.0.0.1 , ::ffff:10.0.0.9" });
+    expect([...trusted!]).toEqual(["47.0.0.1", "10.0.0.9"]);
+    const spoofed = new Request("http://127.0.0.1/api/auth/login", { headers: { "x-forwarded-for": "198.51.100.1", "x-real-ip": "198.51.100.2" } });
+    // 直连（对端不在名单）：伪造的头不算数。
+    expect(getLoginClientIp(spoofed, "::ffff:203.0.113.7", trusted)).toBe("203.0.113.7");
+    // 经可信代理：用代理追加的最后一跳。
+    const viaProxy = new Request("http://127.0.0.1/api/auth/login", { headers: { "x-forwarded-for": "198.51.100.1, 203.0.113.8" } });
+    expect(getLoginClientIp(viaProxy, "47.0.0.1", trusted)).toBe("203.0.113.8");
+    // 没设名单 = 旧行为。
+    expect(getLoginClientIp(spoofed, "203.0.113.7", null)).toBe("198.51.100.1");
+    expect(trustedProxyIps({})).toBeNull();
   });
 });
