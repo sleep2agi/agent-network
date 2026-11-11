@@ -2556,7 +2556,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       turn_id: z.string().optional(),
     };
   const handleReply = async (args: any, peerCapabilityRequired: boolean) => {
-      const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta, thread_id: threadId, turn_id: turnId } = args;
+      const { alias, text, in_reply_to: inReplyToArg, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta, thread_id: threadId, turn_id: turnId } = args;
+      // #4315 —— `in_reply_to` 必须是可改写的局部量：某些 runtime 回执时既不带 alias
+      // 也不带 in_reply_to（模型直接裸调 send_reply），于是回执被拒 ⇒ 那笔任务走不完生命周期
+      // ⇒ 每处理一笔 +1 expired ⇒ 攒到 3 条就把整台节点挡成 target_never_consumes。
+      // 下面会在「恰好一条在手的任务」时把它推断出来。
+      let in_reply_to = inReplyToArg as string | undefined;
       const workSignal = parseScheduledWorkOutcome(meta, replyStatus);
       if (!workSignal.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: workSignal.error, reply_queued: false }) }] };
       if (workSignal.outcome && !in_reply_to) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "scheduled_work_outcome_task_required", reply_queued: false }) }] };
@@ -2565,6 +2570,30 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       if (peerCapabilityRequired && !in_reply_to) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "peer_reply_task_required" }) }] };
+      }
+      // #4315 —— 裸回执（既无 alias 也无 in_reply_to）的推断：
+      // 只有当**这台节点手上恰好有一条非终态任务**时才推断（单候选才安全）；
+      // 多条并存时保持原来的 reply_target_required —— 宁可拒绝，也不赌错对象。
+      const callerBoundNodeId = callerTokenId
+        ? (db.get<{ bound_node_id: string | null }>("SELECT bound_node_id FROM api_tokens WHERE token_id = ?1", callerTokenId)?.bound_node_id ?? null)
+        : null;
+      if (!in_reply_to && !(typeof alias === "string" && alias.trim()) && callerBoundNodeId) {
+        // 先拿这台节点的 alias（不要在同一条 SQL 里 JOIN nodes：两表都有 network_id，
+        // addScope 追加的裸列名会歧义报 SQLITE_ERROR —— 第一版就是这么挂的）
+        const selfAlias = db.get<{ alias: string | null }>(
+          "SELECT alias FROM nodes WHERE node_id = ?1", callerBoundNodeId)?.alias ?? null;
+        const cands = selfAlias ? (() => {
+          const candParams: any[] = [selfAlias];
+          let candSql = `SELECT task_id, from_name FROM tasks
+                          WHERE to_name = ?1 AND status IN ('delivered','acked','running')`;
+          candSql = addScope(candSql, candParams, effectiveNetId);
+          candSql += " ORDER BY created_at DESC LIMIT 2";
+          return db.all<{ task_id: string; from_name: string }>(candSql, ...candParams);
+        })() : [];
+        if (cands.length === 1) {
+          in_reply_to = cands[0].task_id;
+          console.log(`[${ts()}] ${from_session} → send_reply 裸回执，推断 in_reply_to=${cands[0].task_id.slice(0, 8)} (#4315)`);
+        }
       }
       if ([threadId, turnId].some((v) => v !== undefined && (typeof v !== "string" || v.length < 1 || v.length > 200))) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "late_reply_context_invalid", message: "thread_id and turn_id must be 1-200 characters" }) }] };
