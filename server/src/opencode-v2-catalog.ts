@@ -191,6 +191,26 @@ function evictExpired(now = Date.now()): void {
   }
 }
 
+const OPENCODE_RUNTIME_LABELS = new Set(["opencode-cli", "opencode-sdk", "opencode"]);
+/** An actively adopted child of this daemon that reports OpenCode V2 (projection only). */
+function adoptedOpenCodeV2Child(nodeId: string, networkId: string, daemonNodeId: string):
+  { child_name: string; workdir: string | null } | "not_v2" | null {
+  let b: { workdir: string } | null = null;
+  try {
+    b = db.get<{ workdir: string }>(
+      "SELECT workdir FROM node_daemon_bindings WHERE node_id=?1 AND network_id=?2 AND daemon_node_id=?3 AND status='active'",
+      nodeId, networkId, daemonNodeId);
+  } catch { return null; }
+  if (!b) return null;
+  const n = db.get<{ alias: string | null; runtime: string | null; config_snapshot: string | null }>(
+    "SELECT alias, runtime, config_snapshot FROM nodes WHERE node_id=?1 AND network_id=?2", nodeId, networkId);
+  if (!n?.alias) return null;
+  let generation: unknown;
+  try { generation = JSON.parse(n.config_snapshot || "{}")?.flags?.opencodeGeneration; } catch { generation = undefined; }
+  if (!OPENCODE_RUNTIME_LABELS.has(n.runtime ?? "") || generation !== "v2") return "not_v2";
+  return { child_name: n.alias, workdir: b.workdir || null };
+}
+
 export function queueOpenCodeCatalogRead(input: QueueCatalogInput):
   | { ok: true; request_id: string; status: "pending"; daemon_alias: string; network_id: string }
   | { ok: false; error: string } {
@@ -225,9 +245,22 @@ export function queueOpenCodeCatalogRead(input: QueueCatalogInput):
     input.networkId, input.daemonNodeId,
   );
   const owned = creates.filter(row => childNodeId(row.request_id) === input.nodeId && row.daemon_node_id === input.daemonNodeId);
-  if (owned.length !== 1) return { ok: false, error: "node_not_found" };
-  const row = owned[0]!;
-  if (row.runtime !== "opencode-cli" || !v2Flags(row.flags_json)) return { ok: false, error: "not_opencode_v2" };
+  let row: { child_name: string; workdir: string | null };
+  if (owned.length === 1) {
+    const created = owned[0]!;
+    if (created.runtime !== "opencode-cli" || !v2Flags(created.flags_json)) return { ok: false, error: "not_opencode_v2" };
+    row = created;
+  } else if (owned.length === 0) {
+    // admin 2026-11-11：被这个 daemon **收编**的节点没有创建记录，此前一律 node_not_found，
+    // 客户端模型面板只剩一行错误码。active 绑定 + 节点自报 OpenCode V2 就允许代读；
+    // 目录用绑定登记的 workdir（daemon 侧照样用它核对 endpoint 的目录）。
+    const adopted = adoptedOpenCodeV2Child(input.nodeId, input.networkId, input.daemonNodeId);
+    if (adopted === "not_v2") return { ok: false, error: "not_opencode_v2" };
+    if (!adopted) return { ok: false, error: "node_not_found" };
+    row = adopted;
+  } else {
+    return { ok: false, error: "node_not_found" };
+  }
 
   const requestId = `cat_${uuidv4()}`;
   const directory = typeof row.workdir === "string" && row.workdir.length > 0 ? row.workdir : null;
