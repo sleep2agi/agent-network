@@ -348,26 +348,23 @@ test("doorbell refuses when the target directory already holds another alias", a
   }
 });
 
-test("OpenCode shared-serve clone keeps the shared serve and the source's proven Hub URL (vdev 2026-11-11)", () => {
+test("OpenCode shared-serve clone keeps the shared serve and uses the daemon's Hub URL (vdev 2026-11-11)", () => {
   const source = {
     runtime: "opencode-cli", opencodeGeneration: "v2", opencodeMode: "copresence", token: SOURCE_TOKEN,
     hub: "http://hub.example:9300", network_id: "net_1",
     opencodeSharedServerUrl: "http://127.0.0.1:4097", opencodeSharedServerPasswordFile: "/srv/shared/server-password",
   };
   const daemonHub = "https://hub.example";
-  expect(cloneHubUrl(source, daemonHub, "http://hub.example:9300")).toBe("http://hub.example:9300");
-  expect(cloneHubUrl(source, daemonHub, null)).toBe(daemonHub);
-  expect(cloneHubUrl(source, daemonHub, "http://other:9300")).toBe(daemonHub);
-  expect(cloneHubUrl({ ...source, hub: daemonHub }, daemonHub, null)).toBe(daemonHub);
-  // No shared serve: always the daemon's Hub.
-  expect(cloneHubUrl({ runtime: "claude-code-cli", hub: "http://hub.example:9300" }, daemonHub, "http://hub.example:9300")).toBe(daemonHub);
+  // Always the daemon's own Hub URL (the node process, spawned with the daemon's env, dials it).
+  expect(cloneHubUrl(source, daemonHub)).toBe(daemonHub);
+  expect(cloneHubUrl({ runtime: "claude-code-cli", hub: "http://hub.example:9300" }, daemonHub)).toBe(daemonHub);
   const { config } = buildClonedConfig({
-    source, name: "c", nodeId: "node_c", token: NEW_TOKEN, hubUrl: cloneHubUrl(source, daemonHub, "http://hub.example:9300"),
+    source, name: "c", nodeId: "node_c", token: NEW_TOKEN, hubUrl: cloneHubUrl(source, daemonHub),
     session: { capability: "unsupported", reason: "fresh" }, targetWorkdir: "/srv/ws/c",
   });
   expect(config.opencodeSharedServerUrl).toBe("http://127.0.0.1:4097");
   expect(config.opencodeSharedServerPasswordFile).toBe("/srv/shared/server-password");
-  expect(config.hub).toBe("http://hub.example:9300");
+  expect(config.hub).toBe(daemonHub);
   expect(config.network_id).toBe("net_1");
   expect(config.token).toBe(NEW_TOKEN);
   expect(JSON.stringify(config)).not.toContain(SOURCE_TOKEN);
