@@ -199,7 +199,8 @@ export function neverConsumeGate(input: {
       message:
         `this target has ${fromDb} expired task(s) with no reply since its last reply`
         + `${input.persistent?.last_reply_at ? ` (${input.persistent.last_reply_at})` : " (it has never replied)"}; `
-        + `nothing will queue correctly here until it replies again — pass force:true (user tokens) if you know it recovered`,
+        + `nothing will queue correctly here until it replies again — pass force:true (user tokens) if you know it recovered, `
+        + `or as a user token cancel the expired rows (cancel_task accepts expired for user tokens) to clear this gate`,
     };
   }
   // 2026-10-31 —— **只数不衰减会把恢复了的节点永久拉黑**。
