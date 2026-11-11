@@ -1000,3 +1000,62 @@ Assert the verified release is the one users will open
 
 处理：`ios-pods-autoretry.yml` 只在 `conclusion == cancelled` 时重跑，最多到第 3 次。
 **不要**把 cancelled 全局当绿——真失败必须保持红。
+
+## 9. 2026-11-11 桌面发版链上的两条死锁与两个看门狗
+
+这两条都不是「代码错」，是**流程里没人值班就会静默停住**的地方。现在由本机 cron 兜住。
+
+### 9.1 签名闸没人批 ⇒ 整条链静默停在 `waiting`
+
+`build-release (macos)` 进入 `macos-signing` environment 后 run 停在 `waiting`，
+直到有人点 approve。**它不报错、不发通知、看起来像「正在构建」**。
+
+判据（别盯 Actions 页面等）：
+
+```bash
+# 该 run 有没有待批的 environment
+curl -s -H "Authorization: Bearer $TOKEN" \
+  https://api.github.com/repos/sleep2agi/agent-network-app/actions/runs/<run_id>/pending_deployments \
+  | jq -r '.[].environment.name'          # 出现 macos-signing = 在等人批
+```
+
+### 9.2 `waiting` 的 run 会**永久占住** concurrency 组，而 `cancel` 对它无效
+
+`release-desktop-auto-update.yml` 的组名是固定的 `release-desktop-auto-update`
+（除非 `bypass_lock=true`）。一个卡在 waiting 的 run 会一直占着组 ⇒
+**新 dispatch 的 run 永远 `pending`、一个 job 都起不来**，同样不报错。
+
+实测两次：2026-10-31（卡 2.5h+）、2026-11-11 01:11（新 run 00:35 dispatch，20 分钟 0 job）。
+
+```text
+❌ POST /actions/runs/<id>/cancel         → 返回 202，但状态一直 waiting（连试两次都一样）
+✅ POST /actions/runs/<id>/pending_deployments
+   {"environment_ids":[...],"state":"rejected"}
+   → 该 run 立刻 completed/cancelled，**concurrency 组当秒释放**
+```
+
+所以正确顺序是：**先 reject 掉「同 commit 已经有成功 run」的那个 duplicate**，
+组一空，新 run 自己就会起步；只有在没有 duplicate 可 reject 时，才用
+`dispatch {commit, bypass_lock:true}` 另开一组（`bypass_lock` 是备选，不是首选：
+它会让两个 run 同时跑同一版本，得靠 8.1 的 verify-draft 断言挡住重复资产）。
+
+### 9.3 两个看门狗（本机 cron，不依赖 GitHub 调度）
+
+```text
+mirror-guard.py   */15   ~/.commhub/logs/mirror-guard.log
+  读「最新**已发布**版本」 vs 镜像 desktop/android 的 VERSION
+  齐平 → ok ｜ 有 mirror run 在跑 → waiting ｜ 25 分钟内补过 → cooldown
+  落后且无人管 → dispatch modelscope-mirror（带该 tag 的 commit）→ dispatched
+
+release-guard.py  */10   ~/.commhub/logs/release-guard.log
+  ① 有 run 停在 macos-signing 且我能批 → approve
+  ② 最新 run 长时间 queued 且 0 job、被 waiting 旧 run 占组 →
+     优先 reject 掉「同 commit 已成功」的 duplicate（释放组），否则补 bypass_lock run
+  ③ 每轮一行 verdict
+```
+
+两条都遵守同一个纪律：**判定一次就退出**，不 sleep、不轮询、不在前台等。
+
+实现时踩到的一个小坑（值得写下来）：GitHub 的 `created_at` 是 UTC，
+用 `time.mktime` 解析会按本机 `TZ`（这台是 +08）偏移，算出来的 age 会**凭空多 8 小时**，
+于是「刚起 1 分钟的 run」被误判成「卡了 8 小时」。必须用 `calendar.timegm`。
