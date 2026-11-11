@@ -62,7 +62,7 @@ import { register, login, resolveToken, tokenRejection, isExpiredSessionToken, s
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
 import { sharedSendDedup, buildDuplicateSendPayload } from "./send_dedup.js";
 import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type StoredIdempotentTask } from "./task-idempotency.js";
-import { getLoginClientIp, sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
+import { getLoginClientIp, normalizePeerIp, sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
 import {
   FILE_ID_REGEX,
   MAX_REQUEST_CONTENT_LENGTH,
@@ -324,6 +324,19 @@ function requireAuth(req: Request, options: RequestTokenOptions = {}): Response 
 
   // #488 —— 令牌存在但因主人的成员身份被拒:说清楚为什么(reason + hint),节点日志里一眼看懂为什么掉线。
   return Response.json({ error: "unauthorized", ...(tokenRejection(token) ?? {}) }, { status: 401 });
+}
+
+/** COMMHUB_ALLOWED_PEER_IPS（逗号分隔）。回环地址（127.0.0.0/8、::1）永远放行；拿不到对端地址时放行（不误伤）。 */
+const ALLOWED_PEER_IPS: Set<string> | null = (() => {
+  const raw = process.env.COMMHUB_ALLOWED_PEER_IPS?.trim();
+  return raw ? new Set(raw.split(",").map(s => normalizePeerIp(s.trim())).filter(Boolean)) : null;
+})();
+export function peerAllowed(peer: string | null, allowed: Set<string> | null = ALLOWED_PEER_IPS): boolean {
+  if (!allowed) return true;
+  const ip = normalizePeerIp(peer);
+  if (!ip) return true;
+  if (ip === "::1" || ip.startsWith("127.")) return true;
+  return allowed.has(ip);
 }
 
 /**
@@ -2071,6 +2084,12 @@ return Bun.serve({
   error: (err) => buildServeErrorResponse(err),
 
   async fetch(req, server) {
+    // 2026-11-11 安全排查 —— COMMHUB_ALLOWED_PEER_IPS：Hub 端口只接这些对端（外加本机回环）。
+    // 生产 :9200 直接暴露在公网，但真正的来路只有本机（frp、本机节点）和 https 反代那台机器；
+    // 没有云安全组权限时，在 Hub 里把其它来源挡在门外。不设 = 不限制（旧行为）。
+    if (!peerAllowed(server?.requestIP?.(req)?.address ?? null)) {
+      return new Response(JSON.stringify({ ok: false, error: "peer_not_allowed" }), { status: 403, headers: { "Content-Type": "application/json", Connection: "close" } });
+    }
     // 2026-09-16 —— 所有 JSON/文本响应在客户端要求时 gzip(见 http-gzip.ts);SSE/流式/二进制原样。
     // 2026-09-30 —— 每个请求的路由形状 + 耗时进内存环(route-timing.ts),GET /api/stats/routes 看谁在吃 CPU。
     return recordRouteTiming(req, performance.now(), await maybeGzipResponse(req, explainExpiredSession(req, await (async (): Promise<Response | undefined> => {
