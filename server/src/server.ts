@@ -218,7 +218,9 @@ const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 // GET /api/dm/threads 的 group_threads;群对象带 viewer_can {manage, post},会话行带 last_message 预览,成员带 username / display_name。
 // node_inbox_allowlist:收件白名单可用 —— PUT /api/nodes/:id/inbox-allowlist { senders },GET /api/nodes 每行带 inbox_allowlist,
 // 被挡的派活回 reason=sender_not_allowed,广播回 inbox_skipped(有人被跳过时才出现,没人被跳过时回执与以前逐字节相同)。
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist"] as const;
+// scheduled_task_purge:POST /api/scheduled-tasks/:id/purge 真删一条已停下(cancelled / completed)的计划,连执行记录一起删;
+// 还在跑的回 409 schedule_not_stopped(先 cancel)。
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here

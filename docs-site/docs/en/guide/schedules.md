@@ -38,6 +38,8 @@ A run that is at most 1 minute late still counts as that occurrence and runs. La
 
 An Active schedule can be paused (暂停). Pausing clears the next time; the detail says 「已暂停，恢复后继续」. Resume (恢复) computes the next time again. Cancel (取消计划) stops it for good; cancelling again stays cancelled. Completed and cancelled schedules cannot be made Active again.
 
+A cancelled or completed schedule can be deleted (删除). The schedule and its run history are removed and it no longer appears in the list; tasks it already dispatched stay in the node's task history. An active or paused schedule must be cancelled first. The endpoint is `POST /api/scheduled-tasks/:id/purge` (409 `schedule_not_stopped` while it is still running); it is available when the Hub's `/health` `capabilities` includes `scheduled_task_purge`.
+
 Changing the name, the task text or the priority does not recompute the next time. The next time is recomputed only when the frequency or the time zone changes, when a paused schedule is resumed, or when an Active schedule has no next time.
 
 Active and paused schedules can also run now (立即执行). That follows the skip rule in the next section, and it does not change the next scheduled time.

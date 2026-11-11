@@ -636,6 +636,31 @@ describe("Hub scheduled task API and dispatcher", () => {
     expect(runs.body.runs.length).toBeGreaterThanOrEqual(4);
   });
 
+  test("purge deletes a stopped schedule with its runs; active ones and viewers are refused", async () => {
+    const q = `?network_id=${encodeURIComponent(networkId)}`;
+    const schedule = await createSchedule("purge me");
+    makeDue(schedule.schedule_id);
+    await runDueScheduledTasks(new Date());
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM scheduled_task_runs WHERE schedule_id = ?1", schedule.schedule_id)!.n).toBeGreaterThan(0);
+    // 还在跑的不让直接删：先 cancel。
+    const early = await api(ownerToken, `/api/scheduled-tasks/${schedule.schedule_id}/purge${q}`, { method: "POST", body: "{}" });
+    expect(early.status).toBe(409);
+    expect(early.body.error).toBe("schedule_not_stopped");
+    await api(ownerToken, `/api/scheduled-tasks/${schedule.schedule_id}/cancel${q}`, { method: "POST", body: "{}" });
+    // viewer 不能删（与 cancel 同一判据）。
+    const viewer = await api(viewerToken, `/api/scheduled-tasks/${schedule.schedule_id}/purge${q}`, { method: "POST", body: "{}" });
+    expect(viewer.status).toBe(403);
+    const purged = await api(ownerToken, `/api/scheduled-tasks/${schedule.schedule_id}/purge${q}`, { method: "POST", body: "{}" });
+    expect(purged.status).toBe(200);
+    expect(purged.body.status).toBe("purged");
+    expect((await api(ownerToken, `/api/scheduled-tasks/${schedule.schedule_id}${q}`)).status).toBe(404);
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM scheduled_task_runs WHERE schedule_id = ?1", schedule.schedule_id)!.n).toBe(0);
+    const listed = await api(ownerToken, `/api/scheduled-tasks${q}`);
+    expect(listed.body.schedules.some((r: any) => r.schedule_id === schedule.schedule_id)).toBe(false);
+    // 再删一次 = 404（行已经没了）。
+    expect((await api(ownerToken, `/api/scheduled-tasks/${schedule.schedule_id}/purge${q}`, { method: "POST", body: "{}" })).status).toBe(404);
+  });
+
   test("a watcher can edit the schedule but cannot cancel it or change watchers", async () => {
     const viewerId = db.get<{ user_id: string }>("SELECT user_id FROM network_members WHERE network_id = ?1 AND role = 'viewer'", networkId)!.user_id;
     const schedule = await createSchedule(`watchers-${Date.now()}`);
