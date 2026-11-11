@@ -1059,3 +1059,44 @@ release-guard.py  */10   ~/.commhub/logs/release-guard.log
 实现时踩到的一个小坑（值得写下来）：GitHub 的 `created_at` 是 UTC，
 用 `time.mktime` 解析会按本机 `TZ`（这台是 +08）偏移，算出来的 age 会**凭空多 8 小时**，
 于是「刚起 1 分钟的 run」被误判成「卡了 8 小时」。必须用 `calendar.timegm`。
+
+### 9.4 desktop 镜像 ≠ android 镜像：是**两条独立流水线**
+
+0.2.509 实测：`modelscope-mirror` 跑绿之后 `desktop/latest/VERSION` 已经是 0.2.509，
+但 `android/latest/VERSION` 仍停在 0.2.507。原因是安卓有自己的一条：
+
+```text
+desktop   modelscope-mirror.yml            inputs: commit
+android   modelscope-android-publish.yml   inputs: commit + run_id（产出该 APK 的 android-build run）
+```
+
+安卓那条**不会**被 `modelscope-mirror` 或 `release: published` 自动带动，最后一次跑还是上一版
+（01:20 对应 0.2.508 的 commit）。判据只有一条：
+
+```bash
+curl -s "<mirror>/android/latest/VERSION"   # 必须等于本次版本，别只看 desktop
+curl -s "<mirror>/desktop/latest/VERSION"
+```
+
+补 dispatch 时要配对：`run_id` 必须是**同 commit** 且 `conclusion=success` 的 `android-build` run，
+随便给一个 run_id 会把别的版本的 APK 推上去。`mirror-guard.py` 现在两条都覆盖：
+desktop 落后走 mirror，android 落后走 android-publish（自动找同 commit 的 android-build run）。
+
+### 9.5 「草稿对」不等于「发布后对」：发布后必须再核一次 tag 名
+
+`verify-draft` 断言的是**草稿阶段**的 `release.tag_name == desktop-v<version>`。
+0.2.509 实测：它当时是绿的，但 PATCH `draft=false` 之后，发布对象的 tag 名变成了
+`untagged-d676edc9b93361015139`，而 `/git/ref/tags/desktop-v0.2.509` 根本不存在 ⇒
+用户按 tag 下载 404、镜像按 tag 找资产落空、updater 也算不出新版本。
+
+```text
+发布后必须回读三件：
+  1  GET /releases/tags/desktop-v<version>      → 200 且 draft=false
+  2  GET /releases/latest                       → tag_name 不是 untagged-*
+  3  assets >= 6
+```
+
+修复方式（已验证）：先 `POST /git/refs {ref: refs/tags/desktop-v<ver>, sha: <该发布 commit>}`，
+再 `PATCH /releases/<id> {tag_name: desktop-v<ver>}`。
+`release-tag-guard.py`（cron */10）自动做这件事：latest 是 untagged-* 就按资产名解析版本并改名；
+解析不出版本、或同名 tag 指向别的 commit，就报 `error` 交给人——不猜。
