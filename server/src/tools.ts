@@ -3385,7 +3385,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // ── V2: cancel_task (取消任务) ──
   server.tool(
     "cancel_task",
-    "Cancel a pending task. Works on delivered/acked/running tasks.",
+    "Cancel a pending task. Works on delivered/acked/running tasks. A **user token** may also cancel an already-`expired` task: that is the remediation for `target_never_consumes` (the gate counts expired rows with no result, so clearing them unblocks delivery). Node tokens cannot rewrite terminal history.",
     {
       task_id: z.string().min(1).max(200).describe("Task ID to cancel"),
       reason: z.string().max(1000).optional().describe("Cancellation reason"),
@@ -3396,9 +3396,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
       console.log(`[${ts()}] ${from_session} → cancel_task → ${task_id.slice(0, 8)}`);
+      // #4307 —— `expired` 是终态，节点令牌不得改写；但**用户令牌**必须能清：
+      // target_never_consumes 的判据是「最后一次回复之后仍 expired 且 result 为空」，
+      // 不清这些行，那个节点就永远收不到新消息（实测 4 个节点各 14–46 条）。
+      // 取消时写 result（非空），既保留行做审计，又让它不再被计数。
+      const cancelStatuses = callerTokenIsNetwork
+        ? "('created', 'delivered', 'acked', 'running')"
+        : "('created', 'delivered', 'acked', 'running', 'expired')";
       const updateParams: any[] = [reason || "cancelled by " + from_session, task_id];
       let updateSql = `UPDATE tasks SET status = 'cancelled', result = ?1, completed_at = datetime('now')
-         WHERE task_id = ?2 AND status IN ('created', 'delivered', 'acked', 'running')`;
+         WHERE task_id = ?2 AND status IN ${cancelStatuses}`;
       updateSql = addScope(updateSql, updateParams, effectiveNetId);
       const result = db.transaction(() => {
         const updated = db.run(updateSql, updateParams);

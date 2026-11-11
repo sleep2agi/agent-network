@@ -448,3 +448,39 @@ describe("legacy global-token mode pinned", () => {
     expect(inboxRow("x517 g5 legacy")?.network_id).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Group 9 — #4307: `expired` 行的清理权限
+// target_never_consumes 的判据是「最后一次回复之后仍 status='expired' 且 result 为空」。
+// 节点令牌不得改写终态（那是别人的历史）；但**用户令牌必须能清**，否则那个节点
+// 永远收不到新消息（实测 4 个节点各 14–46 条，只能人工改库）。
+// ─────────────────────────────────────────────────────────────────────
+describe("#4307 cancel_task 对 expired：用户令牌可清、节点令牌不可", () => {
+  test("用户令牌：可以取消 expired，且 result 被写上（从而不再被 409 计数）", async () => {
+    const { tools } = buildHandlers({ userId: U_SINGLE });
+    const t = makeTask(A1, "expired", "x517 g9 expired by user");
+    const r = await call(tools["cancel_task"], { task_id: t, reason: "clear backlog" });
+    expect(r.ok).toBe(true);
+    expect(r.cancelled).toBe(true);
+    expect(taskById(t)?.status).toBe("cancelled");
+    const row = db.get<{ result: string | null }>("SELECT result FROM tasks WHERE task_id = ?1", t);
+    expect(row?.result).toBe("clear backlog");
+  });
+
+  test("节点令牌：expired 仍不可取消（不重写终态历史）", async () => {
+    const { tools } = buildHandlers({ netId: NET_A, alias: A1, isNetwork: true });
+    const t = makeTask(A1, "expired", "x517 g9 expired by node");
+    const r = await call(tools["cancel_task"], { task_id: t });
+    expect(r.ok).toBe(false);
+    expect(r.cancelled).toBe(false);
+    expect(taskById(t)?.status).toBe("expired");
+  });
+
+  test("节点令牌：非终态仍可取消（既有行为不变）", async () => {
+    const { tools } = buildHandlers({ netId: NET_A, alias: A1, isNetwork: true });
+    const t = makeTask(A1, "delivered", "x517 g9 delivered by node");
+    const r = await call(tools["cancel_task"], { task_id: t });
+    expect(r.cancelled).toBe(true);
+    expect(taskById(t)?.status).toBe("cancelled");
+  });
+});
