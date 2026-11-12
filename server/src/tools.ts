@@ -2505,7 +2505,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       );
 
       // 同 send_task：可达性用订阅者注册表判，不用心跳时间戳猜。
-      pushEvent(targetAlias, { type: "new_message", inbox_count: pendingInboxCount(targetAlias, effectiveNetId), from: from_session, message_id: id, ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
+      // #cancel —— control 消息的 SSE 事件必须带上 control 字段：节点侧（cli.ts 的 copresence 分支）
+      // 靠 `ev.control` 决定要不要唤醒工作通道去捞 type=control 的 inbox 行。这里不写，control 行
+      // 会卡在「信息通道只排 type=message、工作通道只在 new_task 时排」两条 lane 之间，节点永远不取。
+      pushEvent(targetAlias, { type: "new_message", inbox_count: pendingInboxCount(targetAlias, effectiveNetId), from: from_session, message_id: id, ...(isControl ? { control: "interrupt" } : {}), ...(canonical.renamed ? { renamed_from: alias } : {}) }, effectiveNetId);
 
       const offlineReply = deliveryTargetReply(target, { message_id: id });
       if (offlineReply) {
