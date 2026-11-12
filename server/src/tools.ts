@@ -3718,7 +3718,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const { allowed: targets, skipped: inboxSkipped } = filterBroadcastByInbox(allTargets, effectiveNetId, inboxSender(), "mcp:broadcast");
       // #2721 —— 分批入库 + 批间让出（见 broadcast-fanout.ts 顶部：一条广播 384 行曾把 Hub
       // 打成 143.9 秒的 timer 饥饿）。语义不变：仍然逐个收件人一行、仍然 best-effort 跳过非 active。
-      const { ids } = await enqueueBroadcast(targets, message, "hub", effectiveNetId, {
+      // #4066 —— 发信人必须是**真的调用者**，不是 'hub'。
+      // 原来这里写死 "hub"，于是一条由 TMA客户端欧5号 发出的广播，收件人看到的
+      // from_session 是 hub、正文却是 "[TMA客户端欧5号] …" ⇒ 用户根本分不清谁说的。
+      // 生产 2026-11-13 实测：type=broadcast 且 from_session='hub' 共 3253 行。
+      // 节点令牌调用时 callerAlias 就是该节点 alias；人/API 调用时退化成用户名；都拿不到才回 "hub"。
+      const { ids } = await enqueueBroadcast(targets, message, callerAlias || "hub", effectiveNetId, {
         // RFC-027 §2.3 inbox-enqueue lifecycle guard (PR1.1 site 6/6).
         isActive: (alias, netId) => assertNodeActive(alias, netId).ok,
         notify: (alias, netId) => pushEvent(alias, { type: "broadcast", inbox_count: pendingInboxCount(alias, netId) }, netId),
