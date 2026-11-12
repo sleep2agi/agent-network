@@ -2471,10 +2471,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).describe("Target session alias"),
       message: z.string().min(1).max(100_000).describe("Message"),
       control: z.enum(["interrupt"]).optional().describe("Interrupt turn"),
+      steer: z.boolean().optional().describe("Inject into running turn"),
       from_session: z.string().max(200).optional(),
       network_id: z.string().max(200).optional().describe("Network (auto for single-network)"),
     },
-    async ({ alias, message, control, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ alias, message, control, steer, from_session: _fromIn, network_id: netId }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+      if (control !== undefined && steer !== undefined) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "steer_conflicts_with_control", message: "control 与 steer 互斥：一次只能要一样" }) }] };
+      }
       const effectiveNetId = getNetworkId(netId);
       { const sendDenied = agentSendDenied(effectiveNetId, alias, _fromIn, "write"); if (sendDenied) return sendDenied; }
       const canonical = resolveCanonicalAlias(effectiveNetId, alias);
@@ -2489,13 +2493,15 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
       console.log(`[${ts()}] ${from_session} → send_message → ${targetAlias}: ${message.slice(0, 60)}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
       const isControl = control === "interrupt";
+      const isSteer = steer === true;
+      const meta = isSteer ? JSON.stringify({ delivery: "steer" }) : null;
       const id = uuidv4();
       db.run(
-        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id, meta_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
         [id, targetAlias, target.session?.node_id ?? null, isControl ? "control" : "message",
          isControl ? "high" : "normal", isControl ? JSON.stringify({ op: "interrupt" }) : message,
-         from_session, effectiveNetId ?? null]
+         from_session, effectiveNetId ?? null, meta]
       );
 
       // 同 send_task：可达性用订阅者注册表判，不用心跳时间戳猜。
@@ -2519,6 +2525,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               ok: true,
               message_id: id,
               ...(isControl ? { control: "interrupt" as const, accepted: true, result_from: "node_reply" } : {}),
+              ...(isSteer ? { delivery: "steer" as const, accepted: true } : {}),
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: target.session?.status ?? "unknown",
             }),

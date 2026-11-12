@@ -6730,6 +6730,14 @@ function isIMBridgeMessage(msg: any): boolean {
   return meta?.im?.bridge === "feishu";
 }
 
+/** #4685 —— Hub send_message(steer:true) 的标记：meta_json = {"delivery":"steer"}。 */
+function wantsSteer(msg: any): boolean {
+  const meta = msg?.meta || (() => {
+    try { return msg?.meta_json ? JSON.parse(msg.meta_json) : null; } catch { return null; }
+  })();
+  return meta?.delivery === "steer";
+}
+
 function shouldSkipMessage(from: string, content: string, msgType?: string, msg?: any): string | null {
   // #519 — logic lives in inbox-skip-close.ts so the verdict is unit-testable.
   return classifyInboundSkip({
@@ -6816,6 +6824,37 @@ async function processInbox() {
         );
       } catch (e: any) {
         warn(`[control] reply failed: ${e?.message ?? e}`);
+      }
+      await ackMessage(msg.id);
+      return;
+    }
+    // #4685 —— steer：把一条 send_message(steer:true) 并进**正在跑的那一轮**（不排队）。
+    // 与 control 同性质：它是一条「注入当前轮次」的指令，不是新任务。
+    if ((msg.type || "task") === "message" && RUNTIME === "opencode" && opencodeMode === "copresence" && wantsSteer(msg)) {
+      const session = opencodeCopresenceSession;
+      let outcome: { ok: boolean; delivered: "steer" | "missed" | "failed"; reason?: string };
+      try {
+        if (!session?.isRunning || typeof session.steer !== "function") {
+          // 没有在跑的轮次 / 这个运行时没有 steer ⇒ **丢弃**（下面那条 fast-lane 会 ack，send_message
+          // 本来就不触发模型回合）。如实回「missed」，客户端据此提示「这一轮已结束，未插入」，
+          // 而不是让用户以为说了却没反应。
+          outcome = { ok: false, delivered: "missed", reason: "no-running-turn" };
+        } else {
+          await session.steer(String(msg.content ?? "").trim() ? String(msg.content ?? "").trim() : (() => { throw new Error("steer needs a non-empty instruction"); })());
+          outcome = { ok: true, delivered: "steer" };
+        }
+      } catch (e: any) {
+        outcome = { ok: false, delivered: "failed", reason: String(e?.message ?? e) };
+      }
+      try {
+        await sendReply(
+          msg.from_session || "hub",
+          `[${await liveAlias()}] steer ${JSON.stringify(outcome)}`,
+          msg.task_id || undefined,
+          !outcome.ok,
+        );
+      } catch (e: any) {
+        warn(`[steer] reply failed: ${e?.message ?? e}`);
       }
       await ackMessage(msg.id);
       return;
