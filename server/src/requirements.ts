@@ -14,6 +14,7 @@ import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-s
 import { addHumanNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, resolveRestWriteNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { isAgentRestricted, restrictedNetworkIds, visibleAgents } from "./agent-access.js";
 import { nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, type NodeIdentity, type Verdict } from "./node-permissions.js";
+import { boardGrantForCard, boardScopeForNode } from "./node-grants.js";
 import {
   addProjectVisibilityScope, addTaskVisibilityScope, canDeleteTask, canEditTask, deletesAsHeadOnly, headOnlyEditScope, canParticipantEditTask, canSeeTask, canUseProject, deleteTaskGrantsForProject, projectUseResolver,
   cardAssignedToNode, isTaskScoped, PARTICIPANT_EDIT_FIELDS, shouldAuditDenied, taskPermissionsResolver, type TaskCaller,
@@ -149,8 +150,13 @@ function nodeIdent(ctx: RequirementsRequestContext): NodeIdentity | null {
 function nodeTaskCaller(ctx: RequirementsRequestContext): TaskCaller {
   const id = nodeIdent(ctx);
   if (!id?.ownerUserId) return null;
-  if (id.mode === "restricted") return { userId: id.ownerUserId, node: { id: id.logKey, only: true } };
-  if (nodePermissionsFlag() === "enforce") return { userId: id.ownerUserId, node: { id: id.logKey, only: false } };
+  // 第二期 board：只有「这个节点**确实有** board 授权」时才带上额外范围。
+  // 没授权的节点返回 null / 原样对象 ⇒ 可见性 SQL 逐字节不变。
+  const board = id.networkId ? boardScopeForNode(id.networkId, id.logKey) : null;
+  if (id.mode === "restricted") return { userId: id.ownerUserId, node: { id: id.logKey, only: true }, ...(board ? { board } : {}) };
+  if (nodePermissionsFlag() === "enforce") return { userId: id.ownerUserId, node: { id: id.logKey, only: false }, ...(board ? { board } : {}) };
+  // 影子模式（默认 log / 未开 enforce）：本来就不收窄可见性，节点看到的就是全部卡 ——
+  // 这时再挂 board 只会把范围**收窄**到「主人 + 授权」，违反「授权只加不减」。所以这里保持原来的 null。
   return null;
 }
 
@@ -162,6 +168,18 @@ function nodeTaskGate(ctx: RequirementsRequestContext, route: string, row: Row |
   const id = nodeIdent(ctx);
   if (!id) return null;
   const sample = row ? `#${row.seq ?? "?"} ${row.requirement_id}` : create?.projectId ?? undefined;
+  // 第二期 board：这一刀只管「改已有卡」。boardGrantForCard 已把 readonly 模式的 edit 降成 read，
+  // 所以这里拿到 "edit" 就说明真的可写；read 不放行（只读不能改）。
+  if (row && id.networkId) {
+    const level = boardGrantForCard(id.networkId, id.logKey, row, id.mode);
+    if (level === "edit") {
+      try {
+        logAudit(id.ownerUserId, id.aliases[0] ?? id.nodeId, "requirement_changed_via_node_grant", "requirement",
+          row.requirement_id, JSON.stringify({ route, node_id: id.nodeId }), undefined, id.networkId);
+      } catch { /* 审计失败不挡写入 */ }
+      return null;
+    }
+  }
   let verdict: Verdict = null;
   if (id.mode === "readonly") verdict = { reason: "mode_readonly", sample };
   else if (id.mode === "restricted") {
@@ -176,6 +194,13 @@ function nodeTaskGate(ctx: RequirementsRequestContext, route: string, row: Row |
     if (!ok) verdict = { reason: "beyond_owner_visibility", sample };
   }
   return nodeDecide(id, route, verdict) ? Response.json(nodePermissionDeniedBody(verdict!.reason, route), { status: 403 }) : null;
+}
+
+/** 第二期 board：这个节点经授权可写这张卡（edit 级；readonly 模式在 boardGrantForCard 里已降成 read）。 */
+function nodeBoardEdit(ctx: RequirementsRequestContext, row: Row): boolean {
+  const id = nodeIdent(ctx);
+  if (!id?.networkId) return false;
+  return boardGrantForCard(id.networkId, id.logKey, row, id.mode) === "edit";
 }
 
 /** 正常模式的节点读到了主人看不见的卡:只记录(执行时 taskCaller 已按主人收窄,读不到)。主人不受任务范围限制时什么都不做。 */
@@ -1239,7 +1264,7 @@ function patchRequirement(ctx: RequirementsRequestContext, row: Row, body: Recor
   const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id", row);
   if (nodeDenied) return nodeDenied;
   const caller = taskCaller(ctx);
-  if (!canEditTask(caller, row)) {
+  if (!canEditTask(caller, row) && !nodeBoardEdit(ctx, row)) {
     // 参与人:只放状态和检查项;别的字段点名拒绝。不是参与人 → 与今天一样。
     if (!canParticipantEditTask(caller, row)) return taskDenied(ctx, row, "task_read_only");
     const other = PATCH_FIELDS.find(k => has(k) && !PARTICIPANT_EDIT_FIELDS.includes(k));
@@ -2142,7 +2167,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (!canWrite(ctx, row.network_id)) return jsonError("permission_denied", 403);
     const nodeDenied = nodeTaskGate(ctx, "PATCH /api/requirements/:id/checklist/:id", row);
     if (nodeDenied) return nodeDenied;
-    if (!canEditTask(taskCaller(ctx), row) && !canParticipantEditTask(taskCaller(ctx), row)) return taskDenied(ctx, row, "task_read_only");
+    if (!canEditTask(taskCaller(ctx), row) && !canParticipantEditTask(taskCaller(ctx), row) && !nodeBoardEdit(ctx, row)) return taskDenied(ctx, row, "task_read_only");
     // 读-改-写在同一个同步段里完成(中间没有 await),同一进程里的两次勾选不会交错。
     const items = storedChecklist(row.checklist_json);
     const itemId = decodeURIComponent(itemMatch[2]);

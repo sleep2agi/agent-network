@@ -2,7 +2,7 @@
 // 也可以只管某个部门下的」）。
 //
 // 模型 = 能力 × 范围 × 级别，按行存在 node_grants：
-//   capability  schedules（第一期）；board（看板，第二期，现在写入会被拒 capability_not_supported）
+//   capability  schedules（第一期）；board（第二期，随 requirements 读写判定一起上线）
 //   scope_kind  network（整个网络，scope_id = ""）| department（该部门及全部下级，scope_id = department_id）
 //               | node（单个节点，scope_id = node_id）
 //   level       read（只看）| edit（看 + 改）
@@ -16,7 +16,7 @@
 // 谁能授权（REST PUT /api/nodes/:id/grants）：网络 owner / admin 与 Hub 管理员可授任意范围；
 // 部门负责人只能授自己负责的子树里的 department / node 范围（不能授 network）。
 import { db } from "./db.js";
-import { departmentSubtree } from "./department-heads.js";
+import { departmentCardsFor, departmentSubtree, isDepartmentCard } from "./department-heads.js";
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS node_grants (
@@ -33,8 +33,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_node_grants_node ON node_grants(node_id);
 `);
 
-export const GRANT_CAPABILITIES = ["schedules"] as const;
-export const GRANT_CAPABILITIES_PLANNED = ["board"] as const;
+export const GRANT_CAPABILITIES = ["schedules", "board"] as const;
+// 第二期（board）：能力与判定 + requirements 读写判定已在同一个 PR 里一起上 ⇒ 现在开闸。
+export const GRANT_CAPABILITIES_PLANNED = [] as const;
 export type GrantCapability = (typeof GRANT_CAPABILITIES)[number];
 export type GrantScopeKind = "network" | "department" | "node";
 export type GrantLevel = "read" | "edit";
@@ -147,4 +148,87 @@ export function grantLevelForTarget(
 /** 这个节点有没有任何该能力的授权（列表时决定要不要扫全网的计划）。 */
 export function hasAnyGrant(networkId: string, nodeId: string, capability: GrantCapability): boolean {
   return !!db.get("SELECT 1 AS ok FROM node_grants WHERE network_id = ?1 AND node_id = ?2 AND capability = ?3 LIMIT 1", networkId, nodeId, capability);
+}
+
+// ── 第二期：任务看板（board）─────────────────────────────────────────────
+//
+// 与 schedules 的口径**不同**，别混：
+//   · schedules 按「目标节点所在部门」判（计划后面挂着一个目标节点）
+//   · board 按「**卡的负责人所在部门**」判 —— 卡没有目标节点
+//
+// 部门口径**必须**和部门负责人（RFC-040）完全一致，所以这里直接复用
+// `isDepartmentCard(departmentCardsFor(net, departmentSubtree(net, scope_id)), row)`，
+// 不自己解析 owner_json —— 那边判的是「agent 的主人是否在部门成员里」（nodesOwnedBy），
+// 而不是「agent 节点自己的 department_id」；两套写法会判出不同结果。
+export type BoardCardRef = {
+  owner_json: string | null;
+  agent_owner_json?: string | null;
+};
+
+/** 卡的 agent_owner 节点 id（只有 node 范围需要它）。 */
+function agentOwnerNodeId(row: BoardCardRef): string | null {
+  if (!row.agent_owner_json) return null;
+  try {
+    const ref = JSON.parse(row.agent_owner_json) as { kind?: unknown; id?: unknown };
+    return ref && ref.kind === "node" && typeof ref.id === "string" ? ref.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 这个节点对这张卡有没有 board 授权，以及级别。readonly 模式下 edit 降为 read。 */
+export function boardGrantForCard(
+  networkId: string, nodeId: string, row: BoardCardRef, mode?: string | null,
+): "edit" | "read" | null {
+  const grants = db.all<{ scope_kind: GrantScopeKind; scope_id: string; level: GrantLevel }>(
+    "SELECT scope_kind, scope_id, level FROM node_grants WHERE network_id = ?1 AND node_id = ?2 AND capability = 'board'",
+    networkId, nodeId,
+  );
+  if (!grants.length) return null;
+  const agentNode = agentOwnerNodeId(row);
+  const deptScopes = new Map<string, ReturnType<typeof departmentCardsFor>>();
+  let best: GrantLevel | null = null;
+  for (const g of grants) {
+    let hit = false;
+    if (g.scope_kind === "network") hit = true;
+    else if (g.scope_kind === "node") hit = !!agentNode && g.scope_id === agentNode;
+    else if (g.scope_kind === "department") {
+      let cards = deptScopes.get(g.scope_id);
+      if (!cards) {
+        cards = departmentCardsFor(networkId, departmentSubtree(networkId, g.scope_id));
+        deptScopes.set(g.scope_id, cards);
+      }
+      hit = isDepartmentCard(cards, row);
+    }
+    if (!hit) continue;
+    if (g.level === "edit") { best = "edit"; break; }
+    best = best ?? "read";
+  }
+  if (best === "edit" && mode === "readonly") return "read";
+  return best;
+}
+
+/**
+ * 读侧的范围（给 requirements 可见性用）：这个节点的 board 授权能覆盖到哪些卡。
+ * 返回 null = 没有任何 board 授权（调用方必须**逐字节不变**地走原 SQL）。
+ * network 范围用 `network: true` 表示，而不是拼一个巨大的 IN 列表。
+ */
+export type BoardScope = { network: boolean; users: Set<string>; nodes: Set<string> };
+
+export function boardScopeForNode(networkId: string, nodeId: string): BoardScope | null {
+  const grants = db.all<{ scope_kind: GrantScopeKind; scope_id: string }>(
+    "SELECT scope_kind, scope_id FROM node_grants WHERE network_id = ?1 AND node_id = ?2 AND capability = 'board'",
+    networkId, nodeId,
+  );
+  if (!grants.length) return null;
+  const users = new Set<string>();
+  const nodes = new Set<string>();
+  for (const g of grants) {
+    if (g.scope_kind === "network") return { network: true, users, nodes };
+    if (g.scope_kind === "node") { nodes.add(g.scope_id); continue; }
+    const cards = departmentCardsFor(networkId, departmentSubtree(networkId, g.scope_id));
+    for (const u of cards.users) users.add(u);
+    for (const n of cards.nodes) nodes.add(n);
+  }
+  return { network: false, users, nodes };
 }
