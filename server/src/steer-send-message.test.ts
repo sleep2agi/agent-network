@@ -6,7 +6,7 @@ import { afterAll, beforeEach, afterEach, describe, expect, test } from "bun:tes
 import { db } from "./db.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "./tools.js";
-import { __resetSSEClientsForTest } from "./push.js";
+import { __resetSSEClientsForTest, createSSEStream } from "./push.js";
 
 const NET = "steer-test-net", OWNER = "steer-owner", RECV = "steer-recv";
 type ToolHandler = (args: any) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
@@ -47,6 +47,26 @@ async function call(handler: ToolHandler, args: any): Promise<Record<string, any
   return JSON.parse(r.content[0].text);
 }
 
+async function readFrame(reader: ReadableStreamDefaultReader<Uint8Array>, timeoutMs = 2_000): Promise<Record<string, any>> {
+  const decoder = new TextDecoder();
+  let buf = "";
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`no SSE frame within ${timeoutMs}ms`)), deadline - Date.now())),
+    ]);
+    if (result.done) throw new Error("SSE stream ended unexpectedly");
+    buf += decoder.decode(result.value, { stream: true });
+    const sep = buf.indexOf("\n\n");
+    if (sep === -1) continue;
+    const dataLine = buf.slice(0, sep).split("\n").find((l) => l.startsWith("data: "));
+    if (!dataLine) continue;
+    return JSON.parse(dataLine.slice(6));
+  }
+  throw new Error(`no SSE frame within ${timeoutMs}ms`);
+}
+
 describe("#4685 send_message steer", () => {
   test("steer 与 control 互斥 → steer_conflicts_with_control", async () => {
     const tools = buildHandlers(OWNER);
@@ -73,5 +93,29 @@ describe("#4685 send_message steer", () => {
     expect(r.delivery).toBeUndefined();
     const row = db.get<{ meta_json: string | null }>("SELECT meta_json FROM inbox WHERE network_id = ?1", NET);
     expect(row!.meta_json).toBeNull();
+  });
+
+  // #4685 —— control:"interrupt" 必须让 SSE new_message 事件带上 control 字段：
+  // 节点侧（cli.ts copresence 分支）靠 ev.control 决定是否唤醒工作通道去捞 type=control 的 inbox 行。
+  // 这里不写，control 行会卡在「信息/工作」两条 lane 之间，节点永远不取 → 真机「停止」不生效。
+  test("control:interrupt 落库 type=control，且 SSE new_message 带 control 字段", async () => {
+    const reader = createSSEStream(RECV, NET).body!.getReader();
+    await readFrame(reader); // swallow connected
+
+    const tools = buildHandlers(OWNER);
+    const r = await call(tools.send_message, { alias: RECV, message: "x", control: "interrupt", network_id: NET });
+    expect(r.ok).toBe(true);
+    expect(r.control).toBe("interrupt");
+    expect(r.accepted).toBe(true);
+
+    const row = db.get<{ type: string; content: string; priority: string }>(
+      "SELECT type, content, priority FROM inbox WHERE network_id = ?1", NET);
+    expect(row!.type).toBe("control");
+    expect(JSON.parse(row!.content)).toEqual({ op: "interrupt" });
+    expect(row!.priority).toBe("high");
+
+    const evt = await readFrame(reader);
+    expect(evt.type).toBe("new_message");
+    expect(evt.control).toBe("interrupt");
   });
 });
