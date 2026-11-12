@@ -11,9 +11,11 @@ describe("control 消息必须唤醒工作通道", () => {
   test("SSE new_message 分支里，带 control 的事件同时唤醒工作通道", () => {
     const i = src.indexOf('if (ev.type === "new_message" && RUNTIME === "opencode" && opencodeMode === "copresence")');
     expect(i).toBeGreaterThan(-1);
-    const block = src.slice(i, i + 700);
+    const block = src.slice(i, i + 1100);
     expect(block).toContain("scheduleInformationalInboxDrain()");
-    expect(block).toContain("if ((ev as any).control) scheduleWorkInboxDrain()");
+    // control 事件既唤醒串行工作通道（fallback），又并发取 control 行立刻打断（不串在回合后面）。
+    expect(block).toContain("if ((ev as any).control)");
+    expect(block).toContain("processControlInstruction");
   });
   test("工作通道的分派里认识 control（不把它当任务跑）", () => {
     expect(src).toContain('if ((msg.type || "task") === "control")');

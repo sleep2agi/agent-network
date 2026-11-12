@@ -6782,6 +6782,44 @@ async function ackAndRecordConsumed(msg: any, label: string): Promise<void> {
   }
 }
 
+// #cancel —— 控制消息（interrupt）必须**并发**处理，不能走串行的 work lane。
+// 串行 lane 会被正在跑的回合占住（await 整个 model turn），于是 interrupt 要等回合
+// 跑完才被取到 → interrupted:false（没东西可停了）。这里抽出来，让 SSE 侧在
+// 收到 control 事件时立刻并发调用，不等回合结束。
+async function processControlInstruction(msg: any): Promise<void> {
+  if (inflightMessageIds.has(msg.id)) return; // 并发路径与串行 fallback 竞态：只处理一次
+  inflightMessageIds.add(msg.id);
+  try {
+    const op = parseControlOp(msg.content);
+    if (op !== "interrupt") {
+      warn(`[control] unknown op, acknowledged and ignored: ${String(msg.content).slice(0, 120)}`);
+      await ackMessage(msg.id);
+      return;
+    }
+    const out = await interruptCurrentTurn({
+      readEndpoint: () => {
+        const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
+        return ep ? { url: ep.url, authorization: ep.authorization } : null;
+      },
+      sessionId: () => opencodeSessionId ?? null,
+    });
+    log(`[control] interrupt → ${JSON.stringify(out)}`);
+    try {
+      await sendReply(
+        msg.from_session || "hub",
+        `[${await liveAlias()}] interrupt ${JSON.stringify(out)}`,
+        msg.task_id || undefined,
+        !out.ok,
+      );
+    } catch (e: any) {
+      warn(`[control] reply failed: ${e?.message ?? e}`);
+    }
+    await ackMessage(msg.id);
+  } finally {
+    inflightMessageIds.delete(msg.id);
+  }
+}
+
 async function processInbox() {
   // (1) Drain leftovers from previous runs.
   if (shouldDrainPendingReplies(RUNTIME, inflightMessageIds.size)) {
@@ -6801,31 +6839,7 @@ async function processInbox() {
     // 目前只有一种 op：interrupt（停掉当前在跑的那一轮）。
     // 走 inbox 是因为这是 Hub → 节点已经存在的可靠通道（有 ack、有重投、有 SSE）。
     if ((msg.type || "task") === "control") {
-      const op = parseControlOp(msg.content);
-      if (op !== "interrupt") {
-        warn(`[control] unknown op, acknowledged and ignored: ${String(msg.content).slice(0, 120)}`);
-        await ackMessage(msg.id);
-        return;
-      }
-      const out = await interruptCurrentTurn({
-        readEndpoint: () => {
-          const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
-          return ep ? { url: ep.url, authorization: ep.authorization } : null;
-        },
-        sessionId: () => opencodeSessionId ?? null,
-      });
-      log(`[control] interrupt → ${JSON.stringify(out)}`);
-      try {
-        await sendReply(
-          msg.from_session || "hub",
-          `[${await liveAlias()}] interrupt ${JSON.stringify(out)}`,
-          msg.task_id || undefined,
-          !out.ok,
-        );
-      } catch (e: any) {
-        warn(`[control] reply failed: ${e?.message ?? e}`);
-      }
-      await ackMessage(msg.id);
+      await processControlInstruction(msg);
       return;
     }
     // #4685 —— steer：把一条 send_message(steer:true) 并进**正在跑的那一轮**（不排队）。
@@ -8374,7 +8388,20 @@ async function connectSSE() {
               // 信息通道只排空 type=message，工作通道只在 new_task/broadcast 时排空 ——
               // 于是 control 行在两条 lane 之间被漏掉（实测：回合进行中发出，回合结束后仍 acked=0，
               // 节点再也没去取）。这里让它也唤醒工作通道。
-              if ((ev as any).control) scheduleWorkInboxDrain();
+              if ((ev as any).control) {
+                scheduleWorkInboxDrain();
+                // 但串行 work lane 会被正在跑的回合占住，interrupt 要等回合跑完才被处理 →
+                // interrupted:false。所以这里**并发**取一次 control 行立刻打断，不等回合结束。
+                void (async () => {
+                  try {
+                    const rows = await getInbox();
+                    const ctrl = rows.find((m) => (m.type || "task") === "control");
+                    if (ctrl) await processControlInstruction(ctrl);
+                  } catch (e: any) {
+                    warn(`[control] concurrent drain failed: ${e?.message || e}`);
+                  }
+                })();
+              }
             } else if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
               log(`← SSE ${ev.type}`);
               scheduleWorkInboxDrain();
