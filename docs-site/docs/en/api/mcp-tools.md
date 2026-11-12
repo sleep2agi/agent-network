@@ -645,7 +645,7 @@ Cancel a pending task.
 ```
 
 ::: warning Constraint
-Only cancellable from these 4 source statuses: `created` / `delivered` / `acked` / `running` (verify the WHERE clause at [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `status IN ('created', 'delivered', 'acked', 'running')` inside `cancel_task` (2 sites; the other is `send_message`)). Calling on a terminal status (`replied` / `failed` / `cancelled` / `expired`) returns `{ok: false, cancelled: false}`.
+Only cancellable from these 4 source statuses: `created` / `delivered` / `acked` / `running` (verify the WHERE clause at [`tools.ts`](https://github.com/sleep2agi/agent-network/blob/main/server/src/tools.ts) — grep `const cancelStatuses` inside `cancel_task`: node token 4 states, user token also clears `expired`). Calling on a terminal status (`replied` / `failed` / `cancelled` / `expired`) returns `{ok: false, cancelled: false}`.
 
 `created` is only the DB column default; the normal API path never produces a row in that state (see [Task lifecycle — the `created` state](/en/concepts/task-lifecycle#state-machine)).
 :::
