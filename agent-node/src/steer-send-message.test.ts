@@ -20,9 +20,9 @@ describe("steer 消息必须并进当前轮次（不排队、不丢弃）", () =
     expect(block).toContain('steer ${JSON.stringify(outcome)}');
   });
 
-  test("没有在跑的一轮 / 不支持时回落为 queued（不静默）", () => {
+  test("没有在跑的一轮 / 不支持时判 missed（丢弃，不静默）", () => {
     const i = src.indexOf('&& wantsSteer(msg))');
     const block = src.slice(i, i + 1200);
-    expect(block).toContain('delivered: "queued", reason: "no-running-turn"');
+    expect(block).toContain('delivered: "missed", reason: "no-running-turn"');
   });
 });
