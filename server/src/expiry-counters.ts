@@ -182,7 +182,15 @@ export function neverConsumeGate(input: {
   persistent?: PersistentExpiryEvidence;
 }): NeverConsumeGate {
   const limit = input.limit ?? NEVER_CONSUME_LIMIT;
-  const fromMemory = input.counters.by_node[input.alias] ?? 0;
+  // 2026-11-13 —— **内存计数也要以「最后一次回复」为界**（与 DB 证据同一条判据）。
+  // 现场：TMA客户端欧 卡住期间攒了 ≥3 次内存过期，之后它恢复并正常回复了，DB 证据随即归零，
+  // 但内存桶只有 count + lastAt，没有回复边界 ⇒ 闸继续拒发直到 2 小时 TTL 或 Hub 重启。
+  // 有人为此重启了 Hub。回复本身就是「它活着」的证据：最后一次回复晚于内存里最近一次过期
+  // ⇒ 那些内存计数全部发生在恢复之前，不再算数。
+  const memLastAt = parseHubTime(input.counters.last_at?.[input.alias]);
+  const lastReplyAt = parseHubTime(input.persistent?.last_reply_at ?? undefined);
+  const memorySupersededByReply = memLastAt !== null && lastReplyAt !== null && lastReplyAt >= memLastAt;
+  const fromMemory = memorySupersededByReply ? 0 : (input.counters.by_node[input.alias] ?? 0);
   const fromDb = input.persistent?.expiries ?? 0;
   const expiries = Math.max(fromMemory, fromDb);
   if (expiries < limit) return { ok: true };
@@ -206,13 +214,15 @@ export function neverConsumeGate(input: {
   // 2026-10-31 —— **只数不衰减会把恢复了的节点永久拉黑**。
   // 实测的教训来自另一台机（TM中转运维）：连「抑制了多少」这个数本身都在被环缓冲淘汰，
   // 所以任何「累计」都只在它的窗口内可引用；这里把窗口写进判据：最近一次过期超过 TTL ⇒ 放行。
-  const lastAt = [input.counters.last_at?.[input.alias], input.persistent?.last_at ?? undefined]
-    .filter((x): x is string => typeof x === "string")
-    .sort()
-    .pop();
-  if (lastAt) {
-    const age = (input.now ?? Date.now()) - Date.parse(lastAt);
-    if (Number.isFinite(age) && age > (input.staleAfterMs ?? NEVER_CONSUME_STALE_MS)) return { ok: true };
+  // 两个来源的时间格式不同（内存是 ISO，tasks 表是 SQLite 的 "YYYY-MM-DD HH:MM:SS" UTC），
+  // 原来按字符串排序再 Date.parse —— 后者会把 SQLite 时间当成**本地时间**解析（Hub 机是 UTC+8）。
+  const lastAtMs = [input.counters.last_at?.[input.alias], input.persistent?.last_at ?? undefined]
+    .map(parseHubTime)
+    .filter((x): x is number => x !== null)
+    .reduce<number | null>((a, b) => (a === null || b > a ? b : a), null);
+  if (lastAtMs !== null) {
+    const age = (input.now ?? Date.now()) - lastAtMs;
+    if (age > (input.staleAfterMs ?? NEVER_CONSUME_STALE_MS)) return { ok: true };
   }
   if (input.force && input.forceAllowed) return { ok: true };
   return {
@@ -225,4 +235,15 @@ export function neverConsumeGate(input: {
       `this target has expired ${expiries} task(s) without ever taking one (window since ${input.counters.since}); `
       + `nothing will queue correctly here until it consumes again — pass force:true (user tokens) if you know it recovered`,
   };
+}
+
+/**
+ * 解析 Hub 里出现的两种时间：ISO（带 Z / 偏移）和 SQLite `datetime('now')` 的
+ * "YYYY-MM-DD HH:MM:SS"（UTC、无时区标记）。后者必须按 UTC 解析，不能交给 Date.parse 当本地时间。
+ */
+export function parseHubTime(v: string | null | undefined): number | null {
+  if (typeof v !== "string" || !v) return null;
+  const sqlite = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/.exec(v);
+  const ms = Date.parse(sqlite ? `${sqlite[1]}T${sqlite[2]}Z` : v);
+  return Number.isFinite(ms) ? ms : null;
 }
