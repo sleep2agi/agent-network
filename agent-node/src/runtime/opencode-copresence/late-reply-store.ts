@@ -126,3 +126,12 @@ export function listLateReplyRecords(nodeDir: string): { records: LateReplyRecor
   }
   return { records, corrupted };
 }
+
+/**
+ * #4529 收尾 —— 这些错误是**终态**：再重试也不会成功，记录应当删掉而不是每次重启重报。
+ *
+ * 目前只有 `reply_target_unresolved`：旧记录（#4529 之前写的，没有 `to`）只能靠 Hub 从 tasks
+ * 反查 `from_name`，任务行被清理后永远反查不到。实测 2026-11-13 本机 4 条旧记录，每次重启刷 4 行 warning。
+ * 其余错误（网络、5xx、超时）都是可重试的，不能删。
+ */
+export const isTerminalLateReplyError = (error: unknown): boolean => error === "reply_target_unresolved";
