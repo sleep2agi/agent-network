@@ -17,7 +17,7 @@ import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copres
 import { capReplyText } from "./shared/reply-text-cap.js";
 
 
-import { clearLateReplyRecord, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
+import { clearLateReplyRecord, isTerminalLateReplyError, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
@@ -9127,7 +9127,18 @@ async function recoverLateResult(rec: { sessionId: string; turnId: string }): Pr
             thread_id: rec.threadId,
             turn_id: rec.turnId,
           }, 0).then((response: any) => {
-          if (response?.ok === false) warn(`[late-reply] startup notice refused: ${response?.error ?? "?"}`);
+          if (response?.ok === false) {
+            warn(`[late-reply] startup notice refused: ${response?.error ?? "?"}`);
+            // #4529 收尾：`reply_target_unresolved` 表示这条记录**永远**补不上 ——
+            // 旧记录（#4529 之前写的，没有 to 字段）只能靠 Hub 从 tasks 反查 from_name，
+            // 任务行一旦被清理就反查落空。留着它只会让每次重启都重报一次、且发送方永远收不到。
+            // 实测 2026-11-13 本机有 4 条这种旧记录（11-05/08/09/11 各一条），每次重启都刷 4 行 warning。
+            // 这类错误是终态：删记录并说明，不再无限重试。
+            if (isTerminalLateReplyError(response?.error)) {
+              clearLateReplyRecord(NODE_DIR, rec.taskId);
+              warn(`[late-reply] dropped unrecoverable record ${rec.taskId.slice(0, 8)} (no reply target; task row already gone)`);
+            }
+          }
           else {
             clearLateReplyRecord(NODE_DIR, rec.taskId);
             log(`[late-reply] startup notice sent for ${rec.taskId}`);

@@ -143,3 +143,12 @@ describe("#4529 迟到补发要带上收件人", () => {
     expect(src).toContain("alias: _from");
   });
 });
+
+// #4529 收尾：终态错误判定（只有 reply_target_unresolved 是终态，其余可重试）
+test("terminal late-reply errors are only the unrecoverable ones", async () => {
+  const m = await import("./late-reply-store");
+  expect(m.isTerminalLateReplyError("reply_target_unresolved")).toBe(true);
+  for (const retryable of ["reply_target_required", "network_error", "HTTP 502", undefined, null, ""]) {
+    expect(m.isTerminalLateReplyError(retryable)).toBe(false);
+  }
+});
