@@ -169,8 +169,21 @@ describe("health monitor + watchdog", () => {
   test("end to end: server dies → degraded+restarting → restart rebinds → ok, each flip reported", async () => {
     // A bare TCP server that answers the ws upgrade; "dying" = closing it, "restart" = listening again on the same port.
     let srv: NetServer | null = null;
+    // 探针握手后会把 TCP 连接留着（它对 ws 做的是 health probe，不负责关连接）。
+    // 不主动 destroy 的话 `srv.close()` 的 callback 要等这些连接自己断 —— 在部分环境下永远等不到，
+    // 整条用例就以「timed out after 5000ms」红掉（2026-11-13 本地稳定复现）。
+    // 这里只让「关闭」这件事确定发生，断言内容不变。
+    const sockets = new Set<any>();
+    const closeServer = () => new Promise<void>((resolve) => {
+      for (const s of sockets) { try { s.destroy(); } catch {} }
+      sockets.clear();
+      if (!srv) return resolve();
+      srv.close(() => resolve());
+    });
     const listen = (port = 0) => new Promise<number>((resolve) => {
       srv = createNetServer((sock) => {
+        sockets.add(sock);
+        sock.on("close", () => sockets.delete(sock));
         sock.on("error", () => {});
         sock.once("data", (d) => {
           const key = /Sec-WebSocket-Key: (.+)\r\n/i.exec(d.toString("latin1"))?.[1]?.trim() ?? "";
@@ -196,7 +209,7 @@ describe("health monitor + watchdog", () => {
       onChange: (r) => reports.push(`${r.app_server?.ok}:${(r.app_server?.last_error ?? "").slice(0, 20)}`),
     });
     expect((await mon.tick()).app_server?.ok).toBe(true);
-    await new Promise<void>((r) => srv!.close(() => r()));
+    await closeServer();
     const degraded = await mon.tick();
     expect(degraded.app_server?.ok).toBe(false);
     expect(degraded.app_server?.last_error).toMatch(/^restarting app-server \(attempt 1\/3\)/);
@@ -205,7 +218,7 @@ describe("health monitor + watchdog", () => {
     expect(healed.app_server?.ok).toBe(true);
     expect(restarts).toBe(1);
     expect(reports).toEqual(["false:restarting app-serve", "true:"]);
-    await new Promise<void>((r) => srv!.close(() => r()));
+    await closeServer();
   });
 });
 
