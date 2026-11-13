@@ -69,7 +69,7 @@ describe("#3271 从未取走过的过期计数", () => {
 });
 
 // ---- 派单侧硬闸（#3271）----
-import { neverConsumeGate, NEVER_CONSUME_LIMIT, NEVER_CONSUME_STALE_MS } from "./expiry-counters.js";
+import { neverConsumeGate, NEVER_CONSUME_LIMIT, NEVER_CONSUME_STALE_MS, parseHubTime } from "./expiry-counters.js";
 
 describe("#3271 派单侧硬闸：从未取走过的目标", () => {
   const NOW = Date.parse("2026-10-31T10:00:00.000Z");
@@ -183,5 +183,54 @@ describe("#3271 硬闸的时效：只数不衰减会把恢复了的节点永久�
     const c = neverConsumedExpiryCounters();
     expect(c.last_at["ghost"]).toBe(new Date(NOW).toISOString());
     expect(c.by_node["ghost"]).toBe(1);
+  });
+});
+
+describe("2026-11-13 内存计数也以「最后一次回复」为界（恢复了的节点不该等 Hub 重启）", () => {
+  const NOW = Date.parse("2026-11-13T12:00:00.000Z");
+  const sqlite = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19);
+  const mem = (n: number, lastAtMs: number) => ({
+    since: "2026-11-13T00:00:00.000Z", total: n, by_node: { ghost: n }, last_at: { ghost: new Date(lastAtMs).toISOString() },
+  });
+
+  test("🔴 内存 5 次过期（20 分钟前），之后节点回复过（5 分钟前）⇒ 放行", () => {
+    const r = neverConsumeGate({
+      alias: "ghost", counters: mem(5, NOW - 20 * 60_000), force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 0, last_at: null, last_reply_at: sqlite(NOW - 5 * 60_000) },
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  test("负数用例：回复早于最近一次内存过期 ⇒ 仍然拒（它恢复前那一下不算恢复）", () => {
+    const r = neverConsumeGate({
+      alias: "ghost", counters: mem(5, NOW - 5 * 60_000), force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 0, last_at: null, last_reply_at: sqlite(NOW - 20 * 60_000) },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  test("负数用例：从来没回复过 ⇒ 内存计数照常生效", () => {
+    const r = neverConsumeGate({
+      alias: "ghost", counters: mem(5, NOW - 5 * 60_000), force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 0, last_at: null, last_reply_at: null },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  test("回复之后 DB 里又攒了 ≥3 条过期 ⇒ 仍然拒（DB 证据自带边界，不受这条修正影响）", () => {
+    const r = neverConsumeGate({
+      alias: "ghost", counters: mem(5, NOW - 20 * 60_000), force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 3, last_at: sqlite(NOW - 60_000), last_reply_at: sqlite(NOW - 5 * 60_000) },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  test("parseHubTime：SQLite 时间按 UTC 解析，不随宿主时区漂 8 小时", () => {
+    expect(parseHubTime("2026-11-13 12:00:00")).toBe(NOW);
+    expect(parseHubTime("2026-11-13T12:00:00")).toBe(NOW);
+    expect(parseHubTime("2026-11-13T12:00:00.000Z")).toBe(NOW);
+    expect(parseHubTime("2026-11-13T20:00:00+08:00")).toBe(NOW);
+    expect(parseHubTime(null)).toBeNull();
+    expect(parseHubTime("garbage")).toBeNull();
   });
 });
