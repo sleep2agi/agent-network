@@ -366,6 +366,21 @@ for await (const message of query({ prompt, options })) { /* ... */ }
 
 这不等于操作系统级隔离：Agent 获得的文件、Shell 和网络工具仍作用于宿主环境。需要强隔离时应使用容器或专用低权限账户。
 
+### 信任边界：同机同用户
+
+Hub 在**网络层**强制隔离：`ntok_` 绑定 network，跨 network 的读写由 Server 拒绝。但在**同一台机器、同一个操作系统用户**下运行的节点之间，没有隔离——它们属于同一个信任域：
+
+- **节点凭据**：每个节点的 `ntok_` 存在 `.anet/nodes/<节点>/config.json`（权限 600）。600 只挡其它系统用户；同一用户下任何带文件或 Shell 工具的节点都能读到它，进而以那个节点的身份连 Hub。
+- **工作目录**：Agent 的文件和 Shell 工具以该系统用户的权限运行，能读写同一用户可访问的所有目录，包括其它节点的项目。
+- **共享 OpenCode Server**：多个 OpenCode V2 节点共用一个 `opencode serve` 时，它们共用一份 Server 密码。持有密码的一方拥有这个 Server 的全部能力（会话、PTY、文件接口），文件接口也能用相对路径访问项目目录之外的文件。共享 Server 只是省资源，不是隔离手段。
+
+**需要节点之间互相隔离时**（不同客户、不同部门、不同敏感级别）：
+
+1. 每个信任域用独立的系统用户，或独立的容器 / 虚拟机运行节点；
+2. 不要让不同信任域的节点共享同一个 OpenCode Server；
+3. 敏感数据放在只有对应用户可读的目录里；
+4. 节点被攻破或凭据可能泄露时，用 `anet token ls` 找到该节点的 token，`anet token revoke <token-id>` 撤销后重新签发（见[账号体系](/guide/account-system)）。
+
 ### 工具权限（默认 Claude Code preset，user responsibility）
 
 `claude-agent-sdk` runtime 的默认 toolset 是 Claude Code preset 全集。每个新节点启动后就能：
