@@ -67,6 +67,29 @@ if (self.status === 404) {
     self.status === other.status, "两个 status 相等", `self=${self.status} other=${other.status}`);
 }
 
+// ── N4a：会话接入链（project-create 下的 attach）同构断言 ────────────────────
+// 这条链挂在 project-create 路由里，且要求 directory lane + COMMHUB_SESSION_ATTACH_PREVIEW=1 才存在；
+// 未开启时返回 404 —— 那是 NOT_RUN，不是通过。
+const ATTACH_PATH = "/api/node-session-control/source/project-create";
+const attachSelf = await post(A.token, ATTACH_PATH, {
+  network_id: nodes.network_id, source_node_id: A.node_id, daemon_node_id: A.node_id,
+  capability: "existing-session-attach-v1-opencode-2.0.22", session_id: "ses_fixture_self",
+});
+const attachOther = await post(A.token, ATTACH_PATH, {
+  network_id: nodes.network_id, source_node_id: B.node_id, daemon_node_id: B.node_id,
+  capability: "existing-session-attach-v1-opencode-2.0.22", session_id: "ses_fixture_other",
+});
+if (attachSelf.status === 404 && attachOther.status === 404) {
+  console.log("NOT_RUN N4a —— 接入链未开启（需 COMMHUB_SOURCE_DIRECTORY_PREVIEW=1 且 COMMHUB_SESSION_ATTACH_PREVIEW=1）");
+} else {
+  check("N4a 节点令牌指向自己 ⇒ 非 2xx", attachSelf.status >= 400,
+    ">=400（凭据类型闸）", `${attachSelf.status} ${attachSelf.text.slice(0, 120)}`);
+  check("N4a 节点令牌指向别人 ⇒ 非 2xx", attachOther.status >= 400,
+    ">=400（凭据类型闸）", `${attachOther.status} ${attachOther.text.slice(0, 120)}`);
+  check("N4a 两个目标的响应码一致（证明拒绝来自凭据类型，不是跨节点）",
+    attachSelf.status === attachOther.status, "两个 status 相等", `self=${attachSelf.status} other=${attachOther.status}`);
+}
+
 // ── N2：A 的令牌声称 B 的 node_id ───────────────────────────────────────────
 // 已知行为：不会借到 B 的能力（鉴权绑在令牌的 bound_node_id 上），
 // 但**会把 A 自己的 session 行重绑到 B 的 node_id**。这里只断言「不报错 + 回执正常」，
