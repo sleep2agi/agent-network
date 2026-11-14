@@ -870,6 +870,14 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// 2026-11-14 —— 新建节点时选部门(admin:「创建人可能兼多个部门」→ 不猜,让创建人选)。
+// NULL = 不指定(老行为)。节点首次注册时写进 nodes.department_id(applyRequestedDepartment)。
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN department_id TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // Hub #938 — clone_node reuses this table (same token mint, sweeper, and
 // register finalize) but must not be replayed as a blank create_node.
 // NULL/empty = ordinary create. Non-empty JSON = clone directives.
