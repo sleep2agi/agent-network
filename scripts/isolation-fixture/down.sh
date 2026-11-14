@@ -25,6 +25,17 @@ stop_one() {
 stop_one a
 stop_one b
 
+# #4063-A2：本地 Hub 也要一起停（pid 记在 $ROOT/hub.pid，dir 一删就找不到了）
+if [[ -f "$ROOT/hub.pid" ]]; then
+  hubpid=$(cat "$ROOT/hub.pid" 2>/dev/null || true)
+  if [[ -n "${hubpid:-}" ]] && kill -0 "$hubpid" 2>/dev/null; then
+    kill "$hubpid" 2>/dev/null || true
+    for _ in $(seq 1 25); do kill -0 "$hubpid" 2>/dev/null || break; sleep 0.2; done
+    kill -9 "$hubpid" 2>/dev/null || true
+  fi
+  rm -f "$ROOT/hub.pid"
+fi
+
 # 兜底：按端口清掉本夹具的残留（只匹配我们这个 ROOT 下的 serve）
 pkill -f "serve --port 4611 --pure" 2>/dev/null || true
 pkill -f "serve --port 4612 --pure" 2>/dev/null || true
