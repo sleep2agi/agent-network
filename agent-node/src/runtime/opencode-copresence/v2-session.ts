@@ -36,6 +36,7 @@ import { randomBytes } from "crypto";
 import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-health";
 import { waitUntilIdle } from "../idle-wait";
 import { QUEUED_VARIANT_TTL_MS, shouldApplyQueuedVariant } from "./queued-variant";
+import { OPENCODE_V2_PIN } from "../opencode-versions";
 import { queueMissVerdict } from "./queue-miss-error";
 import { rmSync } from "fs";
 import { join } from "path";
@@ -58,7 +59,7 @@ import {
 } from "./runtime";
 import { unverifiedOwnerError } from "./reply-ownership";
 import { fetchOpenCodeSessionControlJson } from "./http";
-import { catalogSupportsVariants, isWithinWorkspace, createV2SelectionController, equalV2ModelSelection, isV2SessionScope, readV2ModelSelection } from "./v2-model-selection";
+import { catalogAllowsSelection, catalogSupportsVariants, isWithinWorkspace, createV2SelectionController, equalV2ModelSelection, isV2SessionScope, readV2ModelSelection } from "./v2-model-selection";
 import { isOwnedTestBuild, observeSharedTestBuild, sharedVariantAuthorized } from "./v2-test-build-identity";
 import { forkV2Session } from "./v2-fork";
 import { resumeV2Session } from "./v2-resume";
@@ -549,7 +550,7 @@ export async function openVettedOpenCodeV2Copresence(
       } catch { return false; }
     };
     if ((!backend.isSupportedVersion(version) && !variantTestBuild) || (opts.expectedVersion && version !== opts.expectedVersion)) {
-      throw new Error(`OpenCode v2 server version ${version} does not match the accepted version`);
+      throw new Error(`OpenCode v2 server version ${version} does not match the accepted version ${opts.expectedVersion ?? OPENCODE_V2_PIN}; refusing model/depth fallback (do not replace a shared server automatically)`);
     }
     if (sharedTestBuild && opts.reconcileResumedModel) throw Error("shared_variant_reconcile_refused");
     if (shared && opts.sharedMcpUrl) {
@@ -700,6 +701,7 @@ export async function openVettedOpenCodeV2Copresence(
     // Turns accepted but not yet settled. A variant applies to the NEXT turn, so writing
     // it while a turn of ours is queued/running would silently change that turn.
     let inFlight = 0;
+    let variantSwitching = false;
     /** 客户端 MODEL_SWITCH_DEADLINE_MS=45s；等待留给写入 + 回读 10s 余量。 */
     // 🔴 外层 withDeadlineMs 是 45s。如果内部等满 35s、SSE 下发又花了 10s 以上，
     //    外层会先判 timeout/unknown —— 那时连 rejected/busy 都发不出去（#4415 实测踩到）。
@@ -855,47 +857,60 @@ export async function openVettedOpenCodeV2Copresence(
        * human turn started in the TUI at the same moment is not detectable here. The write
        * is therefore best-effort, not a proven-atomic switch.
        */
-      async setSelectedVariant(variant: string | null) {
+      async setSelectedModelAndVariant(modelRef: string, variant: string | null) {
+        return session.setSelectedVariant!(variant, modelRef);
+      },
+      async setSelectedVariant(variant: string | null, modelRef?: string) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");
-        if (inFlight > 0) {
-          // 有轮次在飞时**等它结束**，而不是立刻拒绝。理由（2026-11-10 实测）：
-          // 一台正常在干活的节点几乎总是有轮次在飞 —— 连续 14 次写入全被拒，只有重启后到
-          // 下一轮开始前那几秒能落进去。对用户来说「点档位 → 被拒 → 自己再试」不可接受。
-          // 等待有上界：客户端的 applied 预算是 45 秒（MODEL_SWITCH_DEADLINE_MS），这里等
-          // 35 秒，留出写入 + 回读的余量。等到就照常写（applied 仍然只表示真的变了），
-          // 等不到仍然诚实地说 busy。
-          const idle = await waitUntilIdle({
-            isBusy: () => inFlight > 0 || !session.isRunning,
-            budgetMs: VARIANT_IDLE_WAIT_MS,
-          });
-          if (!idle) {
-            // 等不到就**排队**，但绝不谎报 applied：
-            //   · ack 仍然是 rejected/busy（现在确实没生效）；
-            //   · 同时记下意图，这一轮结束（inFlight→0）时应用一次。
-            // 这样客户端那句「档位会对下一轮生效 —— 跑完再切」就是事实，而不是安慰。
-            queuedVariant = variant === "default" ? null : variant;
-            queuedVariantAt = Date.now();
-            // 打日志：这条路径此前**完全没有输出**，于是「排队到底发生了没有」只能靠猜
-            // （#4415 实测：Hub 上只看到 timeout，节点日志里一行都没有）。
-            log(`[variant] queued ${JSON.stringify(queuedVariant)} (in_flight=${inFlight}, turn_age_ms=${turnStartedAt ? Date.now() - turnStartedAt : -1})`);
-            // 判据写进异常文本：它会被 applyVariantConfig 带回 ack，最终出现在 Hub 的
-            // last_update.error 里。不写，读的人只能登机器翻日志。
-            throw new Error(`variant_busy (in_flight=${inFlight}, turn_age_ms=${turnStartedAt ? Date.now() - turnStartedAt : -1})`);
+        if (variantSwitching) throw new Error("variant_busy (concurrent selection)");
+        const target = modelRef === undefined ? undefined : parseModelRef(modelRef);
+        if (modelRef !== undefined && (!target || modelRef !== `${target.providerID}/${target.modelID}` || modelRef.includes("#"))) throw new Error("variant_invalid model reference");
+        if (variant !== null && (typeof variant !== "string" || !/^[A-Za-z0-9._-]{1,40}$/.test(variant))) throw new Error("variant_invalid depth");
+        variantSwitching = true;
+        try {
+          if (inFlight > 0) {
+            // #4415: bounded wait within the client's 45s deadline. A depth-only
+            // request may queue after timeout, but its ack must still say busy.
+            const idle = await waitUntilIdle({
+              isBusy: () => inFlight > 0 || !session.isRunning,
+              budgetMs: VARIANT_IDLE_WAIT_MS,
+            });
+            if (!idle) {
+              // Never queue just the depth of a combined request: that would apply
+              // it to the old model. The caller receives busy, not false success.
+              if (modelRef !== undefined) throw new Error(`variant_busy (combined selection, in_flight=${inFlight})`);
+              queuedVariant = variant === "default" ? null : variant;
+              queuedVariantAt = Date.now();
+              log(`[variant] queued ${JSON.stringify(queuedVariant)} (in_flight=${inFlight}, turn_age_ms=${turnStartedAt ? Date.now() - turnStartedAt : -1})`);
+              // Preserve the rejection evidence in the Hub ack, not only logs.
+              throw new Error(`variant_busy (in_flight=${inFlight}, turn_age_ms=${turnStartedAt ? Date.now() - turnStartedAt : -1})`);
+            }
           }
-        }
-        const body = await scopedRequest(`/api/session/${sessionId}`);
-        const current = readV2ModelSelection(body);
-        if (!current) throw new Error("OpenCode v2 session scope unavailable");
-        const model = { providerID: current.providerID, id: current.id,
-          ...(variant === null || variant === "default" ? {} : { variant }) };
-        await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/model`, {
-          method: "POST", body: JSON.stringify({ model }),
-        }, 10_000);
-        const updated = await scopedRequest(`/api/session/${sessionId}`);
-        const after = readV2ModelSelection(updated);
-        const wanted = model.variant ?? "default";
-        if (!after || (after.variant ?? "default") !== wanted) throw new Error("OpenCode v2 session variant did not change");
-        return after;
+          const body = await scopedRequest(`/api/session/${sessionId}`);
+          if (!session.isRunning || !isV2SessionScope(body, sessionId, directory)) throw new Error("OpenCode v2 session scope unavailable");
+          const current = readV2ModelSelection(body);
+          if (!current) throw new Error("OpenCode v2 session scope unavailable");
+          const model = { providerID: target?.providerID ?? current.providerID, id: target?.modelID ?? current.id,
+            ...(variant === null || variant === "default" ? {} : { variant }) };
+          if (modelRef !== undefined) {
+            const catalog = await scopedRequest("/api/model");
+            if (!catalogAllowsSelection(catalog, directory, model)) throw new Error("variant_catalog selection not listed");
+            if (!session.isRunning || inFlight > 0) throw new Error("variant_busy (turn started during validation)");
+            // Supersede an older queued depth only after this combined request is
+            // admitted; otherwise it could undo the selection after the next turn.
+            queuedVariant = undefined;
+            queuedVariantAt = 0;
+          }
+          await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/model`, {
+            method: "POST", body: JSON.stringify({ model }),
+          }, 10_000);
+          const updated = await scopedRequest(`/api/session/${sessionId}`);
+          const after = readV2ModelSelection(updated);
+          const wanted = model.variant ?? "default";
+          if (!session.isRunning || !isV2SessionScope(updated, sessionId, directory) || !after || after.providerID !== model.providerID || after.id !== model.id) throw new Error("OpenCode v2 session model/variant outcome unknown");
+          if ((after.variant ?? "default") !== wanted) throw new Error("model_applied_variant_readback_mismatch");
+          return after;
+        } finally { variantSwitching = false; }
       },
       async setSelectedModel(modelRef: string) {
         if (!session.isRunning) throw new Error("OpenCode copresence server is not running");

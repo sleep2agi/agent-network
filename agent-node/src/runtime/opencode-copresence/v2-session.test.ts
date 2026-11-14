@@ -12,6 +12,7 @@ import { readOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 import { OPENCODE_V2_BACKEND } from "../opencode-backend";
 import { openSharedV2CommhubMcp } from "./shared-v2-mcp";
 import { OpenCodeProviderError } from "../opencode-provider-error";
+import { applyVariantConfig } from "./variant-config-apply";
 import { OpenCodeCopresenceTimeoutError, openVettedOpenCodeCopresence, reserveLoopbackPort, type OpenCodeCopresenceSession } from "./runtime";
 import {
   openCodeV2Outcome,
@@ -181,6 +182,13 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     // the TUI started at the same instant is NOT detectable — documented trade-off.
     expect(session.variantConfigCapable).toBe(true);
     expect(typeof session.setSelectedVariant).toBe("function");
+  });
+
+  test("combined partial native readback: model applied, depth did not -> unknown with detail", async () => {
+    const { session } = await open({ TEST4822_PARTIAL_MODEL: "1" });
+    const result = await applyVariantConfig(session, { model: "stub/other", modelVariant: "high" });
+    expect(await session.selectedSessionModel!(session.sessionId)).toEqual({ providerID: "stub", id: "other", variant: "low" });
+    expect(result).toEqual({ status: "unknown", detail: "model_applied_variant_readback_mismatch" });
   });
 
   test("MCP observation precedes session and ready launcher; close reaps serve", async () => {

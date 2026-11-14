@@ -65,7 +65,7 @@ export type V2SelectionResult =
   | { status: "rejected"; reason: "busy" | "unsupported" | "invalid" | "catalog" | "scope" | "concurrent";
       /** 判据原文（例如 in_flight / turn_age_ms）。只用于回执，不参与分支。 */
       detail?: string }
-  | { status: "unknown" };
+  | { status: "unknown"; detail?: string };
 
 /** Adapter must use the *same* server and directory for every read and write.
  * An idle snapshot is not an atomic idle lease: a TUI can start work immediately

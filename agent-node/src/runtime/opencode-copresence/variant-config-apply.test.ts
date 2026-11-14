@@ -57,9 +57,45 @@ describe("applyVariantConfig — stock-build writer", () => {
     expect(await applyVariantConfig(session({ setSelectedVariant: async () => { throw new Error("variant did not change"); } }) as any, { modelVariant: "high" }))
       .toEqual({ status: "unknown" });
   });
-  test("model+variant in one patch stays unsupported on stock builds", async () => {
+  test("older stock handles without combined writer remain unsupported", async () => {
     expect(await applyVariantConfig(session() as any, { model: "deepseek/deepseek-flash", modelVariant: "high" }))
       .toEqual({ status: "rejected", reason: "unsupported" });
+  });
+  test("combined selection uses one combined writer, never two independent switches", async () => {
+    const calls: unknown[] = [];
+    const result = await applyVariantConfig(session({
+      setSelectedVariant: async () => { throw Error("must not split writes"); },
+      setSelectedModelAndVariant: async (model: string, variant: string | null) => {
+        calls.push([model, variant]); return { providerID: "other", id: "nested/model", variant: "high" };
+      },
+    }) as any, { model: "other/nested/model", modelVariant: "high" });
+    expect(result).toEqual({ status: "applied", model: { providerID: "other", id: "nested/model", variant: "high" } });
+    expect(calls).toEqual([["other/nested/model", "high"]]);
+  });
+  test("combined wrong model or depth is unknown, not applied", async () => {
+    for (const model of [{ providerID: "wrong", id: "m", variant: "high" }, { providerID: "p", id: "m", variant: "low" }]) {
+      expect(await applyVariantConfig(session({ setSelectedModelAndVariant: async () => model }) as any,
+        { model: "p/m", modelVariant: "high" })).toEqual({ status: "unknown", detail: model.providerID === "p" ? "model_applied_variant_readback_mismatch" : "combined_model_readback_mismatch" });
+    }
+  });
+  test("model applied but depth did not: unknown plus detail, never applied", async () => {
+    let actual = { providerID: "old", id: "model", variant: "low" };
+    const result = await applyVariantConfig(session({ setSelectedModelAndVariant: async () => {
+      actual = { providerID: "p", id: "new-model", variant: "low" };
+      throw Error("model_applied_variant_readback_mismatch");
+    } }) as any, { model: "p/new-model", modelVariant: "high" });
+    expect(actual).toEqual({ providerID: "p", id: "new-model", variant: "low" });
+    expect(result).toEqual({ status: "unknown", detail: "model_applied_variant_readback_mismatch" });
+  });
+  test("combined timeout is unknown, never retried as separate operations", async () => {
+    let calls = 0;
+    expect(await applyVariantConfig(session({ setSelectedModelAndVariant: async () => { calls++; throw Error("timeout"); } }) as any,
+      { model: "p/m", modelVariant: "high" })).toEqual({ status: "unknown" });
+    expect(calls).toBe(1);
+  });
+  test("combined explicit clear accepts native default readback", async () => {
+    expect(await applyVariantConfig(session({ setSelectedModelAndVariant: async () => ({ providerID: "p", id: "m", variant: "default" }) }) as any,
+      { model: "p/m", modelVariant: null })).toEqual({ status: "applied", model: { providerID: "p", id: "m", variant: "default" } });
   });
 });
 

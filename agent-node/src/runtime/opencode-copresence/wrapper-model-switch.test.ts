@@ -76,6 +76,15 @@ describe("#3146 — shared-server wrapper", () => {
     expect(seen).toEqual(["deepseek/deepseek-v4-pro"]);
     expect(await wrapped.selectedModel!()).toBe("deepseek/deepseek-v4-pro");
   });
+  test("combined model/depth writer survives the shared-server wrapper", async () => {
+    const calls: unknown[] = [];
+    const wrapped = wrapSharedCopresenceSession(stubCore({
+      setSelectedModelAndVariant: async (model, variant) => { calls.push([model, variant]); return { providerID: "p", id: "m", variant: "high" }; },
+    }));
+    expect(await wrapped.setSelectedModelAndVariant!("p/m", "high")).toEqual({ providerID: "p", id: "m", variant: "high" });
+    expect(calls).toEqual([["p/m", "high"]]);
+    expect(wrapSharedCopresenceSession(stubCore()).setSelectedModelAndVariant).toBeUndefined();
+  });
 
   test("omits the optional methods when the core does not expose them", () => {
     const wrapped = wrapSharedCopresenceSession(stubCore({ selectedModel: undefined, setSelectedModel: undefined }));

@@ -2,6 +2,8 @@
 // The caller owns the authenticated loopback server and the daemon/network scope.
 // A native model snapshot can precede plugin settlement: it is NOT a successful
 // model invocation, credential verification, or proof that the catalog is complete.
+import { OPENCODE_V2_PIN } from "./opencode-versions";
+import { equalV2ModelSelection, isV2SessionScope, readV2ModelSelection } from "./opencode-copresence/v2-model-selection";
 export interface OpenCodeCatalogScope {
   networkId: string;
   daemonId: string;
@@ -200,10 +202,12 @@ async function readOpenCodeRaw(opts: { scope: OpenCodeCatalogScope; url: string;
   if (!['127.0.0.1', '[::1]'].includes(base.hostname) || base.protocol !== 'http:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
     throw new OpenCodeCatalogError("invalid_target");
   }
-  if (!opts.scope.directory || !opts.authorization || /[\r\n]/.test(opts.authorization)) throw new OpenCodeCatalogError("invalid_target");
+  if (!opts.scope.networkId || !opts.scope.daemonId || !opts.scope.directory || !opts.authorization || /[\r\n]/.test(opts.authorization)) throw new OpenCodeCatalogError("invalid_target");
   if (!/^[\x20-\x7e]*$/.test(opts.scope.directory)) throw new OpenCodeCatalogError("directory_not_ascii");
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new OpenCodeCatalogError("invalid_target");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(new URL(path, base), { headers: {
       authorization: opts.authorization, "x-opencode-directory": opts.scope.directory,
@@ -247,4 +251,52 @@ export async function readOpenCodeSessionAgent(opts: {
   const agent = data.agent;
   if (agent === undefined || agent === null) return undefined;
   return { agent: identifier(agent), sessionId: opts.sessionId };
+}
+
+/** #4822: read-only diagnostics against the existing authenticated native server.
+ * A missing selection/variant is unknown, never the catalog default or "medium".
+ * Catalog metadata does not establish credential validity or model invocation. */
+export async function readOpenCodeModelDepth(opts: {
+  scope: OpenCodeCatalogScope;
+  url: string;
+  authorization: string;
+  sessionId: string;
+  timeoutMs?: number;
+}) {
+  if (!/^ses_[A-Za-z0-9]{1,190}$/.test(opts.sessionId)) throw new OpenCodeCatalogError("invalid_target");
+  const info = await readOpenCodeRaw(opts, "/api/info");
+  if (!record(info) || typeof info.version !== "string" || !/^[0-9A-Za-z.+-]{1,80}$/.test(info.version)) {
+    throw new OpenCodeCatalogError("invalid_response");
+  }
+  if (info.version !== OPENCODE_V2_PIN) {
+    throw new Error(`OpenCode V2 model/depth requires @opencode/cli ${OPENCODE_V2_PIN}; server reports ${info.version}. Refusing model/depth fallback; use a matching server (do not replace a shared server automatically).`);
+  }
+  const path = `/api/session/${encodeURIComponent(opts.sessionId)}`;
+  const before = await readOpenCodeRaw(opts, path);
+  if (!isV2SessionScope(before, opts.sessionId, opts.scope.directory)) throw new OpenCodeCatalogError("scope_mismatch");
+  const selected = readV2ModelSelection(before);
+  if (selected) {
+    identifier(selected.providerID);
+    identifier(selected.id);
+    if (selected.variant !== undefined) identifier(selected.variant);
+  }
+  if (record(before) && record(before.data) && before.data.model !== undefined && !selected) {
+    throw new OpenCodeCatalogError("invalid_response");
+  }
+  const catalog = await readOpenCodeCatalog(opts);
+  const after = await readOpenCodeRaw(opts, path);
+  if (!isV2SessionScope(after, opts.sessionId, opts.scope.directory)) throw new OpenCodeCatalogError("scope_mismatch");
+  const final = readV2ModelSelection(after);
+  if (selected ? !equalV2ModelSelection(final, selected) : record(after) && record(after.data) && after.data.model !== undefined) {
+    throw new Error("OpenCode V2 model/depth changed during read; retry this read-only command.");
+  }
+  return {
+    ...catalog,
+    runtimeVersion: info.version,
+    sessionId: opts.sessionId,
+    current: selected ? { provider: selected.providerID, model: selected.id, depth: selected.variant ?? null } : null,
+    models: catalog.models.map(model => ({
+      provider: model.providerId, model: model.id, availableDepths: model.variants ?? null,
+    })),
+  };
 }

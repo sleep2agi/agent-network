@@ -1,0 +1,105 @@
+#4822 — stock OpenCode V2 model/depth transport and one-command diagnostics
+Observed: initial 2026-11-14 15:49 UTC; combined-path 15:57 UTC
+Base: f58457ea, branch feat/4822-model-depth
+
+Execution: Docker anet-diag (Bun 1.3.14), --network none, 2 CPUs / 2 GiB.
+Repository mounted read-only. Existing stock ELF mounted read-only at /tool/opencode.
+No shared server access, host credentials, tmux, or crontab operations.
+Command inside container: bash tests/test4822-model-depth/run.sh
+
+Layer 1: 33 pass / 0 fail / 130 expect calls, four targeted files:
+  opencode-v2-catalog.test.ts
+  opencode-v2-model-depth.test.ts
+  opencode-copresence/variant-config-apply.test.ts
+  opencode-copresence/wrapper-model-switch.test.ts
+
+Combined follow-up: 39 pass / 0 fail / 143 expect calls in the same four files.
+Includes secret-shaped selection refusal, one combined writer call, wrong
+model/depth unknown, timeout without split/replay, explicit clear, and wrapper.
+
+Layer 2: stock @opencode/cli 2.0.22, /api/info version confirmed.
+ELF SHA256: 32cf5aa0a69a650e36277e3315d189835ddc79fb9aa1d0aef5025be5af5ad122
+PASS create session with model.variant=low, GET exact model readback.
+PASS same session, fixture/model low -> provider reasoning_effort=low -> EFFORT_low.
+PASS same session, fixture/model high -> provider reasoning_effort=high -> EFFORT_high.
+PASS settled runtime catalog exposes fixture/model variants [low, high].
+PASS diagnostic command runs against private endpoint record and returns:
+  runtimeVersion: 2.0.22
+  model row: {provider: fixture, model: model, availableDepths: [low, high]}
+  current: {provider: fixture, model: model, depth: high}
+PASS no endpoint authorization or fixture API key in command stdout.
+
+Combined production-path acceptance (Docker --network none, dedicated image
+with current source mounted read-only):
+  applyVariantConfig -> wrapSharedCopresenceSession -> setSelectedModelAndVariant
+  -> admitted whole-model write -> stock /model HTTP.
+  PASS fixture/model -> fixture/other + high: applied with full native readback.
+  PASS subsequent session.submit: Provider saw model=other, reasoning_effort=high;
+       reply.replyText=EFFORT_high; assistant metadata model=other, variant=high.
+  PASS unlisted variant: rejected/catalog; native selection remains other/high.
+  PASS diagnostic output current={provider:fixture, model:other, depth:high}.
+
+Diagnostic negative unit checks:
+  version mismatch errors with expected 2.0.22 / observed 2.0.23, no fallback;
+  unknown selection and absent variant remain null;
+  wrong workspace, malformed selection, concurrent selection changes rejected.
+
+Limits / not accepted:
+  Synthetic Provider proves actual parameter transport and response routing,
+  not real LLM reasoning quality or paid-provider credential validity.
+  ACP session/set_model variant encoding was not tested.
+  Combined support is present only on handles exposing the new writer;
+  older handles reject it instead of splitting operations.
+  Existing writer's busy arbitration is not an atomic lock against human TUI.
+  Catalog completeness remains unknown; initial fixture snapshot was empty,
+  later snapshot contained fixture/model. Exact startup timing cause unproven.
+  No Hub/client end-to-end acceptance, publication, deployment, or restart.
+  Standalone Dockerfile build AND final rebuilt image execution passed at
+  2026-11-14 15:58 UTC, without any host source or artifact mount:
+    sg docker -c 'docker build -f tests/test4822-model-depth/Dockerfile -t anet-test4822 .'
+    sg docker -c 'docker run --rm --network none --cpus 2 --memory 2g anet-test4822'
+  39 pass / 0 fail / 143 assertions; stock transport, combined production path,
+  unlisted variant rejection, and diagnostic command all passed.
+  Separate V2 core regression: 27 pass / 0 fail / 130 assertions, Docker with
+  parent shell so test process is not PID 1. No host tmux or crontab used.
+
+Earlier probe failures (not hidden as passes):
+  Python fixture first had unbalanced braces, fixed before runtime execution.
+  Initial health probe omitted Basic auth and timed out despite live listener.
+  Old V1-shaped provider npm/options + object variants produced no fixture row.
+  Native package/settings + variants array produced request/response evidence.
+  Combined fixture initially lacked a detached process group: production's
+  source_resume_namespace_identity_required gate correctly refused admission.
+  Fixed the fixture with start_new_session=True, not a product gate bypass.
+  Combined fixture initially treated submit result as a string; fixed to read
+  reply.replyText. Both failures preceded the passing 15:57 transport evidence.
+  Broader v2-session regression first used bun as container PID 1, which the
+  existing launch-health identity reader rejects. Retest uses a parent shell.
+
+Raw local transcript: /tmp/opencode/test4822-e2e-final.log
+Combined transcript: /tmp/opencode/test4822-combined.log
+Clean-image transcript: /tmp/opencode/test4822-clean-image.log
+V2 regression transcript: /tmp/opencode/test4822-v2-regression.log
+PR #3583 partial-readback follow-up (2026-11-15 UTC+8):
+  Docker: 40 pass / 0 fail / 145 assertions across the four diagnostic/adapter
+  files, stock transport and combined path passed; V2 core 28 pass / 0 fail /
+  132 assertions. Includes a protocol fake that applies the new model but
+  deliberately keeps low while high was requested. Production writer + adapter
+  return {status:unknown, detail:model_applied_variant_readback_mismatch}, never
+  applied. CLI forwards the detail in ack error without adding a partial state.
+  This simulates an inconsistent native readback for the single-mutation design,
+  not a second mutation failing in a two-step implementation.
+  Transcript: /tmp/opencode/test4822-partial.log
+  PR-head typecheck failure reproduced in Docker: 81 diagnostics / 40 identities,
+  baseline 80 / 39; sole new identity cli.ts TS7006 callback parameter m.
+  Root: getInbox returns an untyped collection, so rows.find's callback lacks
+  contextual typing. Added {type?:string} to that callback, no runtime behavior
+  or baseline relaxation. Docker CI-equivalent TypeScript5.9.3/@types-node20:
+  ratchet EXIT 0, 80 diagnostics / 39 identities, new=0, increased=0. This is a
+  passing baseline ratchet, NOT a clean zero-error TypeScript build.
+  First reproduction image lacked git so the attempted diff application failed;
+  its untouched PR-head result reproduced CI. Verification uses source tar plus
+  changed-file tar overlays, with set -e, and applies the actual current source.
+  Transcript: /tmp/opencode/test4822-typecheck-final.log
+Reproduction source: tests/test4822-model-depth/{Dockerfile,run.sh,probe.py}
+Operational contract: docs/runbooks/opencode-v2-model-depth.md

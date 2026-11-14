@@ -92,6 +92,9 @@ Bun.serve({
     if (process.env.TEST832_TRACE) appendFileSync(process.env.TEST832_TRACE, `${process.pid} ${path}\n`);
     if (path === "/api/info") return json({ version: process.env.TEST_INFO_VERSION ?? "2.0.22", pid: process.pid, urls: [`http://${hostname}:${port}`] });
     const directory = request.headers.get("x-opencode-directory");
+    if (path === "/api/model" && process.env.TEST4822_PARTIAL_MODEL === "1") return json({ location: { directory }, data: [
+      { providerID: "stub", id: "other", variants: [{ id: "low" }, { id: "high" }] },
+    ] });
     const projectConfig = directory && existsSync(join(directory, "opencode.json"))
       ? JSON.parse(readFileSync(join(directory, "opencode.json"), "utf8")) : {};
     if (path === "/api/config") return json(directory
@@ -135,7 +138,9 @@ Bun.serve({
       const existing = sessions.get(modelSwitch[1]);
       if (!existing) return json({ error: "session not found" }, 404);
       const body: any = await request.json();
-      existing.model = body.model;
+      existing.model = process.env.TEST4822_PARTIAL_MODEL === "1"
+        ? { providerID: body.model.providerID, id: body.model.id, variant: "low" }
+        : body.model;
       return new Response(null, { status: 204 });
     }
     if (path === "/test/state") return json(Object.fromEntries(sessions));
