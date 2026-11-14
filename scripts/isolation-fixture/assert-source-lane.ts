@@ -14,6 +14,7 @@
 // 退出码：全部符合期望 = 0；任一不符 = 1（并打印「命令 / 期望 / 实际」）。
 
 import { readFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
 import { join } from "node:path";
 
 const ROOT = process.env.ROOT ?? "/tmp/anet-isolation";
@@ -79,6 +80,35 @@ const impostor = await post(A.token, "/mcp", {
 });
 check("N2 冒充 node_id 的 report_status 不会 5xx（行为由读库确认）",
   impostor.status === 200, "200（若改成拒绝，这里要同步改期望）", `${impostor.status} ${impostor.text.slice(0, 120)}`);
+
+// ── 撤权后重跑：先证明「撤权真的生效了」，再证明「生效后也没变成允许」──────────
+// 只看「还是 403」是不够的：撤权可能压根没写进去，那这条就是空断言。
+// 所以先读库确认 daemon 的能力格被清空，再打一次源目录链。
+const dbPath = process.env.COMMHUB_DB ?? join(ROOT, "hub.db");
+const db = new Database(dbPath, { readonly: true });
+const readCaps = (): Record<string, unknown> | null => {
+  const row = db.query("SELECT config_snapshot FROM nodes WHERE node_id = ?1").get(A.node_id) as { config_snapshot?: string } | null;
+  try { return JSON.parse(row?.config_snapshot ?? "{}").daemon_capabilities ?? null; } catch { return null; }
+};
+const before = readCaps();
+const revokeReport = await post(A.token, "/mcp", {
+  jsonrpc: "2.0", id: 2, method: "tools/call",
+  params: { name: "report_status", arguments: {
+    resume_id: `r_${A.alias}`, alias: A.alias, status: "idle", node_id: A.node_id, node_name: A.alias,
+    config_snapshot: { role: "host_supervisor" },   // 不带 daemon_capabilities ⇒ 撤权
+  } },
+});
+const after = readCaps();
+check("撤权：心跳不带能力后，库里的能力格确实被清空（证明撤权生效，不是空断言）",
+  before !== null && after === null, "撤权前有、撤权后为 null", `before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
+
+if (self.status !== 404) {
+  const afterRevoke = await post(A.token, DIR_PATH, { network_id: nodes.network_id, source_node_id: A.node_id, daemon_node_id: A.node_id });
+  check("撤权后重打源目录链 ⇒ 仍是拒绝（不能因撤权反而变成允许）",
+    afterRevoke.status >= 400, ">=400", `${afterRevoke.status} ${afterRevoke.text.slice(0, 120)}`);
+}
+
+db.close?.();
 
 if (failures) {
   console.error(`\n${failures} 项不符合期望`);
