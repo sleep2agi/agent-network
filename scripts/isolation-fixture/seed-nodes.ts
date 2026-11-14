@@ -71,7 +71,60 @@ for (const t of Object.values(tokens)) {
   );
 }
 
-const out = { network_id: networkId, owner_user_id: ownerId, base_url: `http://127.0.0.1:${PORT}`, nodes: tokens };
+// 5) 把 A 报成一台 host_supervisor daemon，并声明两条源能力（N1/N4 的前置）
+//
+// 🔴 这里有个静默坑（实测踩到）：report_status 只在**带 node_id** 时才 upsert nodes 行。
+//    不带 node_id 时，config_snapshot 里的一切（含 daemon_capabilities）会被**丢掉且仍回 200 ok**。
+//    所以「能力上报成功」必须靠读回校验，不能靠回执。
+const CAP_DIR = "source-directory-read-v1-opencode-2.0.22";
+const CAP_ATTACH = "existing-session-attach-v1-opencode-2.0.22";
+
+async function callTool(name: string, args: unknown, token: string): Promise<{ status: number; text: string }> {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+    return { status: res.status, text: await res.text() };
+  } catch (error: any) {
+    return { status: 0, text: String(error?.message ?? error) };
+  }
+}
+
+const daemon = tokens.a;
+const reported = await callTool("report_status", {
+  resume_id: `r_${daemon.alias}`,
+  alias: daemon.alias,
+  status: "idle",
+  node_id: daemon.node_id,
+  node_name: daemon.alias,
+  config_snapshot: {
+    role: "host_supervisor",
+    daemon_capabilities: { source_directory_read: CAP_DIR, session_attach: CAP_ATTACH },
+  },
+}, daemon.token);
+
+// 读回校验 —— 回执 200 不算证据
+const readback = db.get<{ config_snapshot: string }>(
+  "SELECT config_snapshot FROM nodes WHERE node_id = ?1", [daemon.node_id],
+);
+let caps: Record<string, unknown> | null = null;
+try { caps = JSON.parse(readback?.config_snapshot ?? "{}").daemon_capabilities ?? null; } catch { caps = null; }
+const capabilityOk = caps?.source_directory_read === CAP_DIR && caps?.session_attach === CAP_ATTACH;
+
+const out = {
+  network_id: networkId,
+  owner_user_id: ownerId,
+  base_url: `http://127.0.0.1:${PORT}`,
+  daemon: { alias: daemon.alias, node_id: daemon.node_id, capabilities_ok: capabilityOk, http_status: reported.status },
+  nodes: tokens,
+};
 mkdirSync(ROOT, { recursive: true });
 const file = join(ROOT, "nodes.json");
 writeFileSync(file, JSON.stringify(out, null, 2), { mode: 0o600 });
@@ -82,5 +135,12 @@ console.log(JSON.stringify({
   file,
   base_url: out.base_url,
   network_id: networkId,
+  daemon: out.daemon,
   nodes: Object.fromEntries(Object.entries(tokens).map(([k, v]) => [k, { alias: v.alias, node_id: v.node_id, token: "<in file>" }])),
 }, null, 2));
+
+// 能力没落库就直接失败 —— 否则后面 N1/N4 的「拒绝」可能来自「能力压根没上」（假绿）
+if (!capabilityOk) {
+  console.error("FAIL: daemon 能力没有落库（report_status 回 200 不代表写入成功；检查是否带了 node_id）");
+  process.exitCode = 1;
+}
