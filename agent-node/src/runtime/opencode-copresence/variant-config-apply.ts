@@ -25,7 +25,8 @@ export async function applyVariantConfig(
       if (patch.model !== undefined) {
         const model = await session.setSelectedModelAndVariant!(patch.model, patch.modelVariant);
         const depth = patch.modelVariant === "default" ? null : patch.modelVariant;
-        if (`${model.providerID}/${model.id}` !== patch.model || (model.variant ?? "default") !== (depth ?? "default")) return { status: "unknown" };
+        if (`${model.providerID}/${model.id}` !== patch.model) return { status: "unknown", detail: "combined_model_readback_mismatch" };
+        if ((model.variant ?? "default") !== (depth ?? "default")) return { status: "unknown", detail: "model_applied_variant_readback_mismatch" };
         return { status: "applied", model };
       }
       return { status: "applied", model: await session.setSelectedVariant!(patch.modelVariant) };
@@ -37,6 +38,7 @@ export async function applyVariantConfig(
       if (message.includes("variant_invalid")) return { status: "rejected", reason: "invalid" };
       if (message.includes("variant_catalog")) return { status: "rejected", reason: "catalog" };
       if (message.includes("scope")) return { status: "rejected", reason: "scope" };
+      if (message.includes("model_applied_variant_readback_mismatch")) return { status: "unknown", detail: "model_applied_variant_readback_mismatch" };
       return { status: "unknown" };
     }
   };

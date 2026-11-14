@@ -28,6 +28,12 @@ an older queued depth. Ambiguous writes return unknown without automatic replay
 or default-model fallback. This is one mutation with verified readback, **not**
 an atomic lock against a simultaneous human TUI turn.
 
+If a readback shows the requested model but a different depth, the adapter returns
+`{status:"unknown", detail:"model_applied_variant_readback_mismatch"}`. The existing
+CLI ack maps unknown to timeout and preserves that detail in `error`; it never
+acks applied or introduces a new partial status. This describes observed state,
+not proof that a particular writer caused the mismatch. Do not automatically replay.
+
 ## One read-only command
 
 From the repository root, with Bun available:

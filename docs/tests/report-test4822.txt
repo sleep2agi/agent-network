@@ -80,5 +80,26 @@ Raw local transcript: /tmp/opencode/test4822-e2e-final.log
 Combined transcript: /tmp/opencode/test4822-combined.log
 Clean-image transcript: /tmp/opencode/test4822-clean-image.log
 V2 regression transcript: /tmp/opencode/test4822-v2-regression.log
+PR #3583 partial-readback follow-up (2026-11-15 UTC+8):
+  Docker: 40 pass / 0 fail / 145 assertions across the four diagnostic/adapter
+  files, stock transport and combined path passed; V2 core 28 pass / 0 fail /
+  132 assertions. Includes a protocol fake that applies the new model but
+  deliberately keeps low while high was requested. Production writer + adapter
+  return {status:unknown, detail:model_applied_variant_readback_mismatch}, never
+  applied. CLI forwards the detail in ack error without adding a partial state.
+  This simulates an inconsistent native readback for the single-mutation design,
+  not a second mutation failing in a two-step implementation.
+  Transcript: /tmp/opencode/test4822-partial.log
+  PR-head typecheck failure reproduced in Docker: 81 diagnostics / 40 identities,
+  baseline 80 / 39; sole new identity cli.ts TS7006 callback parameter m.
+  Root: getInbox returns an untyped collection, so rows.find's callback lacks
+  contextual typing. Added {type?:string} to that callback, no runtime behavior
+  or baseline relaxation. Docker CI-equivalent TypeScript5.9.3/@types-node20:
+  ratchet EXIT 0, 80 diagnostics / 39 identities, new=0, increased=0. This is a
+  passing baseline ratchet, NOT a clean zero-error TypeScript build.
+  First reproduction image lacked git so the attempted diff application failed;
+  its untouched PR-head result reproduced CI. Verification uses source tar plus
+  changed-file tar overlays, with set -e, and applies the actual current source.
+  Transcript: /tmp/opencode/test4822-typecheck-final.log
 Reproduction source: tests/test4822-model-depth/{Dockerfile,run.sh,probe.py}
 Operational contract: docs/runbooks/opencode-v2-model-depth.md

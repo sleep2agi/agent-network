@@ -75,8 +75,17 @@ describe("applyVariantConfig — stock-build writer", () => {
   test("combined wrong model or depth is unknown, not applied", async () => {
     for (const model of [{ providerID: "wrong", id: "m", variant: "high" }, { providerID: "p", id: "m", variant: "low" }]) {
       expect(await applyVariantConfig(session({ setSelectedModelAndVariant: async () => model }) as any,
-        { model: "p/m", modelVariant: "high" })).toEqual({ status: "unknown" });
+        { model: "p/m", modelVariant: "high" })).toEqual({ status: "unknown", detail: model.providerID === "p" ? "model_applied_variant_readback_mismatch" : "combined_model_readback_mismatch" });
     }
+  });
+  test("model applied but depth did not: unknown plus detail, never applied", async () => {
+    let actual = { providerID: "old", id: "model", variant: "low" };
+    const result = await applyVariantConfig(session({ setSelectedModelAndVariant: async () => {
+      actual = { providerID: "p", id: "new-model", variant: "low" };
+      throw Error("model_applied_variant_readback_mismatch");
+    } }) as any, { model: "p/new-model", modelVariant: "high" });
+    expect(actual).toEqual({ providerID: "p", id: "new-model", variant: "low" });
+    expect(result).toEqual({ status: "unknown", detail: "model_applied_variant_readback_mismatch" });
   });
   test("combined timeout is unknown, never retried as separate operations", async () => {
     let calls = 0;

@@ -907,7 +907,8 @@ export async function openVettedOpenCodeV2Copresence(
           const updated = await scopedRequest(`/api/session/${sessionId}`);
           const after = readV2ModelSelection(updated);
           const wanted = model.variant ?? "default";
-          if (!session.isRunning || !isV2SessionScope(updated, sessionId, directory) || !after || after.providerID !== model.providerID || after.id !== model.id || (after.variant ?? "default") !== wanted) throw new Error("OpenCode v2 session model/variant outcome unknown");
+          if (!session.isRunning || !isV2SessionScope(updated, sessionId, directory) || !after || after.providerID !== model.providerID || after.id !== model.id) throw new Error("OpenCode v2 session model/variant outcome unknown");
+          if ((after.variant ?? "default") !== wanted) throw new Error("model_applied_variant_readback_mismatch");
           return after;
         } finally { variantSwitching = false; }
       },

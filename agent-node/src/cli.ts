@@ -7950,7 +7950,7 @@ async function processConfigUpdate(): Promise<void> {
         // 拒绝时把判据一起回执：Hub 只存 `error` 这个字符串，丢掉原文之后
         // 「恰好有一轮在飞」和「计数器卡死」在观测面上不可分（#4414）。
         ...(result.status === "applied" ? { new_revision: ++currentConfigRevision }
-          : { error: result.status === "unknown" ? "variant_outcome_unknown"
+          : { error: result.status === "unknown" ? `variant_outcome_unknown${"detail" in result && typeof result.detail === "string" ? ` ${result.detail}` : ""}`
               : `variant_${result.reason}${result.detail ? ` ${result.detail}` : ""}` }),
       });
       return;
@@ -8395,7 +8395,7 @@ async function connectSSE() {
                 void (async () => {
                   try {
                     const rows = await getInbox();
-                    const ctrl = rows.find((m) => (m.type || "task") === "control");
+                    const ctrl = rows.find((m: { type?: string }) => (m.type || "task") === "control");
                     if (ctrl) await processControlInstruction(ctrl);
                   } catch (e: any) {
                     warn(`[control] concurrent drain failed: ${e?.message || e}`);
