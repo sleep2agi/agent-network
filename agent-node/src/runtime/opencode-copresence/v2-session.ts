@@ -36,6 +36,7 @@ import { randomBytes } from "crypto";
 import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-health";
 import { waitUntilIdle } from "../idle-wait";
 import { QUEUED_VARIANT_TTL_MS, shouldApplyQueuedVariant } from "./queued-variant";
+import { OPENCODE_V2_PIN } from "../opencode-versions";
 import { queueMissVerdict } from "./queue-miss-error";
 import { rmSync } from "fs";
 import { join } from "path";
@@ -549,7 +550,7 @@ export async function openVettedOpenCodeV2Copresence(
       } catch { return false; }
     };
     if ((!backend.isSupportedVersion(version) && !variantTestBuild) || (opts.expectedVersion && version !== opts.expectedVersion)) {
-      throw new Error(`OpenCode v2 server version ${version} does not match the accepted version`);
+      throw new Error(`OpenCode v2 server version ${version} does not match the accepted version ${opts.expectedVersion ?? OPENCODE_V2_PIN}; refusing model/depth fallback (do not replace a shared server automatically)`);
     }
     if (sharedTestBuild && opts.reconcileResumedModel) throw Error("shared_variant_reconcile_refused");
     if (shared && opts.sharedMcpUrl) {

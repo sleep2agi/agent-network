@@ -1,0 +1,54 @@
+#4822 — stock OpenCode V2 model/depth transport and one-command diagnostics
+Observed: 2026-11-14 15:49 UTC
+Base: f58457ea, branch feat/4822-model-depth
+
+Execution: Docker anet-diag (Bun 1.3.14), --network none, 2 CPUs / 2 GiB.
+Repository mounted read-only. Existing stock ELF mounted read-only at /tool/opencode.
+No shared server access, host credentials, tmux, or crontab operations.
+Command inside container: bash tests/test4822-model-depth/run.sh
+
+Layer 1: 33 pass / 0 fail / 130 expect calls, four targeted files:
+  opencode-v2-catalog.test.ts
+  opencode-v2-model-depth.test.ts
+  opencode-copresence/variant-config-apply.test.ts
+  opencode-copresence/wrapper-model-switch.test.ts
+
+Layer 2: stock @opencode/cli 2.0.22, /api/info version confirmed.
+ELF SHA256: 32cf5aa0a69a650e36277e3315d189835ddc79fb9aa1d0aef5025be5af5ad122
+PASS create session with model.variant=low, GET exact model readback.
+PASS same session, fixture/model low -> provider reasoning_effort=low -> EFFORT_low.
+PASS same session, fixture/model high -> provider reasoning_effort=high -> EFFORT_high.
+PASS settled runtime catalog exposes fixture/model variants [low, high].
+PASS diagnostic command runs against private endpoint record and returns:
+  runtimeVersion: 2.0.22
+  model row: {provider: fixture, model: model, availableDepths: [low, high]}
+  current: {provider: fixture, model: model, depth: high}
+PASS no endpoint authorization or fixture API key in command stdout.
+
+Diagnostic negative unit checks:
+  version mismatch errors with expected 2.0.22 / observed 2.0.23, no fallback;
+  unknown selection and absent variant remain null;
+  wrong workspace, malformed selection, concurrent selection changes rejected.
+
+Limits / not accepted:
+  Synthetic Provider proves actual parameter transport and response routing,
+  not real LLM reasoning quality or paid-provider credential validity.
+  ACP session/set_model variant encoding was not tested.
+  No new combined model+variant config-update support: existing stock path
+  explicitly rejects that combination (covered by regression test).
+  Existing writer's busy arbitration is not an atomic lock against human TUI.
+  Catalog completeness remains unknown; initial fixture snapshot was empty,
+  later snapshot contained fixture/model. Exact startup timing cause unproven.
+  No Hub/client end-to-end acceptance, publication, deployment, or restart.
+  Standalone Dockerfile build/clean-image execution is a separate gate;
+  above evidence uses the existing Docker image plus stock artifact mount.
+
+Earlier probe failures (not hidden as passes):
+  Python fixture first had unbalanced braces, fixed before runtime execution.
+  Initial health probe omitted Basic auth and timed out despite live listener.
+  Old V1-shaped provider npm/options + object variants produced no fixture row.
+  Native package/settings + variants array produced request/response evidence.
+
+Raw local transcript: /tmp/opencode/test4822-e2e-final.log
+Reproduction source: tests/test4822-model-depth/{Dockerfile,run.sh,probe.py}
+Operational contract: docs/runbooks/opencode-v2-model-depth.md
