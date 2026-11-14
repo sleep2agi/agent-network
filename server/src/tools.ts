@@ -3824,7 +3824,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "update_node_config",
-    "Set the per-node config (model + flags) and push a doorbell; the node pulls, validates and applies (hot or restart per field). RFC-024.",
+    "Set the per-node config (model + flags) and push a doorbell; the node pulls, validates and applies (hot or restart per field).",
     {
       ...NODE_ID_ALIAS_FIELDS,
       base_revision: z.number().int().min(0).describe("Revision from the dashboard's last GET — 409 if the hub's differs."),
@@ -4191,7 +4191,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_config_update",
-    "Node pulls its pending config update (called from agent-node when SSE config_update doorbell arrives). RFC-024.",
+    "Node pulls its pending config update (called from agent-node when SSE config_update doorbell arrives).",
     {},
     async () => {
       // F-A (CHANGE_REQ): require ntok_ + non-null enforceNetworkId.
@@ -4246,7 +4246,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "ack_config_update",
-    "Node acknowledges a config update — applied / rejected / restarting / timeout. RFC-024.",
+    "Node acknowledges a config update — applied / rejected / restarting / timeout.",
     {
       update_id: z.string().min(1).max(200),
       status: z.enum(["applied", "rejected", "restarting", "timeout"]),
@@ -4501,7 +4501,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "read_node_rules_file",
-    "Read the node's workdir rules file (CLAUDE.md for claude, else AGENTS.md). No path argument. Poll get_rules_file_result with request_id. app#225.",
+    "Read the node's workdir rules file (CLAUDE.md for claude, else AGENTS.md). No path argument. Poll get_rules_file_result with request_id.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or rules_file_capable session alias."),
@@ -4587,7 +4587,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_rules_file_request",
-    "Node pulls its oldest pending rules-file request (called from agent-node when the SSE rules_file doorbell arrives). app#225.",
+    "Node pulls its oldest pending rules-file request (called from agent-node when the SSE rules_file doorbell arrives).",
     {},
     async () => {
       // 同 get_config_update 的 F-A 闸：必须是网络 token + alias。
@@ -4632,7 +4632,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "ack_rules_file_request",
-    "Node reports the outcome of a rules-file request — done (with content for reads) or failed (with error). app#225.",
+    "Node reports the outcome of a rules-file request — done (with content for reads) or failed (with error).",
     {
       request_id: z.string().min(1).max(200),
       status: z.enum(["done", "failed"]),
@@ -4684,7 +4684,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_rules_file_result",
-    "Poll a read_node_rules_file / write_node_rules_file / node-file / node-log request. Returns status pending|in_progress|done|failed|timeout plus the file name and (reads) content. app#225.",
+    "Poll a read_node_rules_file / write_node_rules_file / node-file / node-log request. Returns status pending|in_progress|done|failed|timeout plus the file name and (reads) content.",
     { request_id: z.string().min(1).max(200), network_id: z.string().max(200).optional() },
     async ({ request_id: requestId, network_id: clientNetId }) => {
       const effectiveNetId = getNetworkId(clientNetId);
@@ -5394,7 +5394,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // the policy and the runtime's session capability (see clone-node.ts).
   server.tool(
     "clone_node",
-    "Clone a daemon child into a new node on the same daemon: new name + token. copy_session defaults true; workdir_policy new_empty (default) or share_source. Hub #938.",
+    "Clone a daemon child to a new node (new name + token). copy_session default true; workdir_policy new_empty (default) or share_source.",
     {
       source_node_id: z.string().min(1).max(200),
       name: z.string().min(1).max(256),
@@ -5735,7 +5735,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // record fork-side info.
   server.tool(
     "ack_create_request",
-    "Daemon acks a create-node request (called after fork). status='started' | 'failed' | 'rejected' | 'runtime_capability_check_failed'. RFC-026 §9.3 D2.",
+    "Daemon acks a create-node request (called after fork). status='started' | 'failed' | 'rejected' | 'runtime_capability_check_failed'.",
     {
       request_id: z.string().min(1).max(200),
       // RFC-026 §9.3 D2 — runtime_capability_check_failed signals the
@@ -6184,7 +6184,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "delete_node",
-    "Stop child + revoke token + delete hub row + (default) back up config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must match. daemon_node_id auto-resolved. RFC-027 §2.2.",
+    "Stop child + revoke token + delete hub row + (default) back up config to ~/.anet/deleted/<ts>-<alias>/ for 30d. confirm_alias must match. daemon_node_id auto-resolved.",
     {
       ...NODE_ID_ALIAS_FIELDS,
       daemon_node_id: z.string().min(1).max(200).regex(/^node_[a-z0-9_-]+$/).optional(),
@@ -6214,7 +6214,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_stop_request",
-    "Daemon pulls a pending stop/delete request (called when SSE stop_node doorbell arrives). RFC-027 §2.4.",
+    "Daemon pulls a pending stop/delete request (called when SSE stop_node doorbell arrives).",
     {
       request_id: z.string().min(1).max(200),
     },
@@ -6258,7 +6258,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "ack_stop_request",
-    "Daemon reports stop/delete completion (or per-status failure). On 'stopped' status finalizes the lifecycle: stop→stopped + keep config; delete→DB row gone + revoke ntok. RFC-027 §2.3 + §4.5.",
+    "Daemon reports stop/delete completion (or per-status failure). On 'stopped' status finalizes the lifecycle: stop→stopped + keep config; delete→DB row gone + revoke ntok.",
     {
       request_id: z.string().min(1).max(200),
       status: z.enum(["stopped", "stop_failed", "noop_not_my_child"]),
@@ -6685,7 +6685,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // §2.3.4 — upsert_network_secret (OWNER-ONLY; vault write).
   server.tool(
     "upsert_network_secret",
-    "Create or replace one vault secret by key (value never read back). RFC-028.",
+    "Create or replace one vault secret by key (value never read back).",
     {
       key: z.string().min(1).max(64).regex(/^[A-Z][A-Z0-9_]{0,63}$/),
       value: z.string().min(1).max(16 * 1024),
@@ -6717,7 +6717,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // §2.3.4b — list_network_secrets (key names only; viewer+).
   server.tool(
     "list_network_secrets",
-    "List vault key NAMES (NEVER values) for a network. RFC-028.",
+    "List vault key NAMES (NEVER values) for a network.",
     { network_id: z.string().max(200).optional() },
     async ({ network_id: clientNetId }) => {
       const effectiveNetId = getNetworkId(clientNetId);
@@ -6734,7 +6734,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // §2.3.1 — upsert_provider (admin+).
   server.tool(
     "upsert_provider",
-    "Create or update a provider (vendor + base_url + secret_key_ref + initial models). Admin+. RFC-028.",
+    "Create or update a provider (vendor + base_url + secret_key_ref + initial models). Admin+.",
     {
       name: z.string().min(1).max(100),
       vendor: z.string().min(1).max(64),

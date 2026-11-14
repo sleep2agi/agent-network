@@ -243,6 +243,9 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // 压到 "Build commit (hex)"（19 字符）⇒ node 64,497 B，余量 **3 B**。
   // ⚠️ 3 B 不是「刚好」，是**陷阱**：下一个人加一个字段名就会撞墙，而这条测试的失败会
   //    读成「谁又把描述写长了」。所以下面把余量打出来，余量低于 100 B 时大声说一句。
+  // 2026-11-14:create_node 新增 department_id(新节点归哪个部门)。all 先撞墙 86,534 > 86,500(+34 B)。
+  // 照规矩**不抬上限**:去掉工具描述末尾的 RFC / issue 编号(RFC-024/026/027/028、app#225、Hub #938,共 13 处,
+  // 调用方用不上这些编号,上下文都在代码注释里),clone_node 描述顺手压短 —— 合计约 −156 B。
   const CEILINGS = { node: 64_500, user: 60_500, all: 86_500 } as const;
   const MARGIN_FLOOR = 100;
   test("node / user / all", async () => {
