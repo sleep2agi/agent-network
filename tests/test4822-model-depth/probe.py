@@ -54,7 +54,7 @@ variants = [{"id": depth, "settings": {"reasoningEffort": depth}} for depth in [
 config = {"providers": {"fixture": {
     "package": "@opencode/ai/providers/openai-compatible",
     "settings": {"baseURL": "http://127.0.0.1:18544/v1", "apiKey": "fixture-not-secret"},
-    "models": {"model": {"variants": variants}},
+    "models": {"model": {"variants": variants}, "other": {"variants": variants}},
 }}}
 env = dict(os.environ, HOME=str(ROOT), XDG_CONFIG_HOME=str(ROOT / "config"),
     XDG_DATA_HOME=str(ROOT / "data"), XDG_STATE_HOME=str(ROOT / "state"), XDG_CACHE_HOME=str(ROOT / "cache"),
@@ -64,7 +64,7 @@ assert digest == "32cf5aa0a69a650e36277e3315d189835ddc79fb9aa1d0aef5025be5af5ad1
 print("stock_binary_sha256=" + digest, flush=True)
 with (ROOT / "runtime.log").open("w") as log:
     process = subprocess.Popen(["/tool/opencode", "serve", "--hostname", "127.0.0.1", "--port", "18543"],
-        cwd=ROOT, env=env, stdout=log, stderr=log)
+        cwd=ROOT, env=env, stdout=log, stderr=log, start_new_session=True)
     try:
         deadline = time.monotonic() + 20
         while True:
@@ -105,6 +105,11 @@ with (ROOT / "runtime.log").open("w") as log:
         fixture = [row for row in catalog["data"] if row["providerID"] == "fixture" and row["id"] == "model"]
         assert len(fixture) == 1
         assert {row["id"] for row in fixture[0]["variants"]} == {"low", "high"}
+        combined = subprocess.run(["bun", "tests/test4822-model-depth/combined.ts", str(ROOT), sid],
+            cwd="/repo", env=env, capture_output=True, text=True, timeout=60)
+        assert combined.returncode == 0, combined.stdout + combined.stderr
+        assert SEEN[-1]["model"] == "other" and SEEN[-1]["reasoning_effort"] == "high"
+        print(combined.stdout)
         node = ROOT / "diagnostic-node"
         node.mkdir()
         endpoint = node / "opencode-v2-catalog-endpoint.json"
@@ -114,7 +119,7 @@ with (ROOT / "runtime.log").open("w") as log:
             cwd="/repo", env=env, capture_output=True, text=True, timeout=30)
         assert command.returncode == 0, command.stderr
         output = json.loads(command.stdout)
-        assert output["current"] == {"provider": "fixture", "model": "model", "depth": "high"}
+        assert output["current"] == {"provider": "fixture", "model": "other", "depth": "high"}
         assert {"provider": "fixture", "model": "model", "availableDepths": ["low", "high"]} in output["models"]
         assert AUTH not in command.stdout and "fixture-not-secret" not in command.stdout
         print("PASS stock create/switch/prompt/provider-response: " + json.dumps(evidence))

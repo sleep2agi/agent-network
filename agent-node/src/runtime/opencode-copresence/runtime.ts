@@ -220,7 +220,9 @@ export interface OpenCodeCopresenceSession {
   /** V2 only. Switch the live session. The caller writes node config. */
   setSelectedModel?(model: string): Promise<void>;
   /** V2 only, stock builds: idle-gated thinking-level write with readback. */
-  setSelectedVariant?(variant: string | null): Promise<import("./v2-model-selection").V2ModelSelection>;
+  setSelectedVariant?(variant: string | null, modelRef?: string): Promise<import("./v2-model-selection").V2ModelSelection>;
+  /** #4822: one native write of the whole model/depth selection, never two switches. */
+  setSelectedModelAndVariant?(modelRef: string, variant: string | null): Promise<import("./v2-model-selection").V2ModelSelection>;
   /** V2 only. 把一条新指令**并进正在跑的那一轮**（delivery:"steer"），不进队列。
    *  必须是显式动作：steer 会改写进行中的回合，半新半旧比排队更糟。 */
   steer?(prompt: string): Promise<void>;
@@ -1289,7 +1291,8 @@ export function wrapSharedCopresenceSession(
     ...(core.selectSessionAgent ? { selectSessionAgent: (id: string, agent: string) => core.selectSessionAgent!(id, agent) } : {}),
     ...(core.usageSnapshot ? { usageSnapshot: () => core.usageSnapshot!() } : {}),
     ...(core.setSelectedModel ? { setSelectedModel: (model: string) => core.setSelectedModel!(model) } : {}),
-    ...(core.setSelectedVariant ? { setSelectedVariant: (variant: string | null) => core.setSelectedVariant!(variant) } : {}),
+    ...(core.setSelectedVariant ? { setSelectedVariant: (variant: string | null, modelRef?: string) => core.setSelectedVariant!(variant, modelRef) } : {}),
+    ...(core.setSelectedModelAndVariant ? { setSelectedModelAndVariant: (modelRef: string, variant: string | null) => core.setSelectedModelAndVariant!(modelRef, variant) } : {}),
     ...(core.selectedSessionModel ? { selectedSessionModel: (id: string) => core.selectedSessionModel!(id) } : {}),
     ...(core.steer ? { steer: (prompt: string) => core.steer!(prompt) } : {}),
     notify: (message, timeoutMs, sender) => core.notify(message, timeoutMs, sender),

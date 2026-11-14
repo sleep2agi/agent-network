@@ -13,12 +13,20 @@ is a string-selector representation, not the HTTP wire shape. ACP
 `session/set_model` is a separate protocol: this work does not establish its
 variant encoding or extend the V1/ACP implementation.
 
-Reuse the existing `modelVariant` config-update route, `applyVariantConfig`,
-and co-presence `setSelectedVariant` writer/readback. Do not assume that a
-successful model-only switch preserves the previous depth: the native model
-object is replaced. Combined model/depth changes and busy/concurrent changes
-still require the existing application arbitration; no new atomic guarantee
-is claimed here.
+Reuse the existing `modelVariant` config-update route and `applyVariantConfig`.
+For `{model: "provider/model", modelVariant: "high"}`, the stock co-presence
+handle exposes `setSelectedModelAndVariant`, forwarded through the shared wrapper.
+It validates the target against the native catalog, performs **one** POST with
+the whole model object, then verifies provider, model and depth together. It
+never performs two sequential switches or restarts. Older handles without this
+method still reject the combination. A model-only switch need not preserve depth.
+
+The existing bounded idle wait remains. A combined request that cannot obtain
+local idle returns busy without queueing a depth-only intent for the wrong model.
+Concurrent variant writers are rejected; an admitted combined request supersedes
+an older queued depth. Ambiguous writes return unknown without automatic replay
+or default-model fallback. This is one mutation with verified readback, **not**
+an atomic lock against a simultaneous human TUI turn.
 
 ## One read-only command
 
@@ -63,8 +71,11 @@ and no crontab. It first runs targeted tests, then starts the stock runtime
 with a loopback synthetic Provider. In one session it selects the same model
 at `low` and `high`, captures actual `reasoning_effort` values at the Provider,
 and checks different Provider-generated response markers in native messages.
-It also invokes the diagnostic command and asserts catalog depths and current
-selection. This proves parameter transport and response routing, not a real
+It then exercises the production config adapter -> shared wrapper -> combined
+writer against that stock server, changes to `fixture/other` + `high`, checks
+the Provider request and response, rejects an unlisted depth without changing
+the selection, and invokes the diagnostic command to verify the current value.
+This proves parameter transport and response routing, not a real
 LLM's reasoning quality. No arbitrary existing models are invoked.
 
 ## Operational/recovery boundary

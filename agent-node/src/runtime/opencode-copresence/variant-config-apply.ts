@@ -9,6 +9,7 @@ export async function applyVariantConfig(
     selectSessionModel?(id: string, model: V2ModelSelection): Promise<V2SelectionResult>;
     /** Stock-build path: idle-gated direct write with readback. */
     setSelectedVariant?(variant: string | null): Promise<V2ModelSelection>;
+    setSelectedModelAndVariant?(model: string, variant: string | null): Promise<V2ModelSelection>;
     /** True only on the identity-pinned TEST build; picks which writer runs. */
     readonly variantConfigTestOwned?: boolean;
   } | undefined,
@@ -17,16 +18,24 @@ export async function applyVariantConfig(
   if (!session?.isRunning) return { status: "rejected", reason: "unsupported" };
   // The narrower writer. Stock builds share no atomic idle lease with the human TUI, so
   // it refuses while one of our turns is in flight, verifies the readback, and never
-  // accepts a model change in the same patch. Best-effort by construction, not atomic.
+  // splits a model/depth change into two writes. Best-effort against human TUI, not atomic.
   const writeStock = async (): Promise<V2SelectionResult> => {
-    if (patch.model !== undefined) return { status: "rejected", reason: "unsupported" };
+    if (patch.model !== undefined && !session.setSelectedModelAndVariant) return { status: "rejected", reason: "unsupported" };
     try {
+      if (patch.model !== undefined) {
+        const model = await session.setSelectedModelAndVariant!(patch.model, patch.modelVariant);
+        const depth = patch.modelVariant === "default" ? null : patch.modelVariant;
+        if (`${model.providerID}/${model.id}` !== patch.model || (model.variant ?? "default") !== (depth ?? "default")) return { status: "unknown" };
+        return { status: "applied", model };
+      }
       return { status: "applied", model: await session.setSelectedVariant!(patch.modelVariant) };
     } catch (error: any) {
       const message = String(error?.message ?? "");
       // 把判据一起带回去：Hub 只存 `error` 这个字符串，丢掉原文之后
       // 「恰好有一轮在飞」和「计数器卡死」在观测面上不可分（#4414）。
       if (message.includes("variant_busy")) return { status: "rejected", reason: "busy", detail: message };
+      if (message.includes("variant_invalid")) return { status: "rejected", reason: "invalid" };
+      if (message.includes("variant_catalog")) return { status: "rejected", reason: "catalog" };
       if (message.includes("scope")) return { status: "rejected", reason: "scope" };
       return { status: "unknown" };
     }
