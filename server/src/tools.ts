@@ -5090,8 +5090,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         workdir: z.string().max(1024).optional().nullable(),
       }),
       network_id: z.string().max(200).optional(),
+      // 2026-11-14:新节点归哪个部门。缺席 / null / "" = 不指定(老行为)。create_node 已要求 admin / owner,
+      // 所以本网络任何存在的部门都可以选;不存在 → department_not_found,不建。
+      department_id: z.string().max(200).optional().nullable(),
     },
-    async ({ daemon_node_id, node_spec, network_id: clientNetId }) => {
+    async ({ daemon_node_id, node_spec, network_id: clientNetId, department_id: requestedDepartment }) => {
       const effectiveNetId = getNetworkId(clientNetId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
 
@@ -5315,6 +5318,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const childToken = generateNetworkToken();
       const childTokenId = generateId("tok");
       const networkIdForChild = daemon.network_id || effectiveNetId || "default";
+      // 2026-11-14:部门必须在新节点所在的网络里存在;在派单之前拒,不留半成品请求。
+      const departmentForChild = typeof requestedDepartment === "string" && requestedDepartment.trim() ? requestedDepartment.trim() : null;
+      if (departmentForChild && !db.get("SELECT 1 AS x FROM network_departments WHERE network_id = ?1 AND department_id = ?2", networkIdForChild, departmentForChild)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "department_not_found", department_id: departmentForChild }) }] };
+      }
       const requestId = newRequestId();
       // Use the dashboard caller's user_id as the token's user_id so
       // resolveToken returns sane role / network on the child's side
@@ -5340,13 +5348,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const envKeys = Object.keys(envBlob);
       db.run(
         `INSERT INTO node_create_requests
-           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, workdir)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11, ?12)`,
+           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, workdir, department_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?10, ?11, ?12, ?13)`,
         [
           requestId, daemon_node_id, node_spec.name, networkIdForChild,
           node_spec.runtime, node_spec.model ?? null, JSON.stringify(node_spec.flags || {}),
           JSON.stringify(envKeys), childTokenId, Date.now(), callerTokenId || "unknown",
-          requestedWorkdir,
+          requestedWorkdir, departmentForChild,
         ],
       );
 
@@ -5370,11 +5378,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           flag_keys: Object.keys(node_spec.flags || {}),
           env_keys: envKeys,
           workdir: requestedWorkdir,
+          department_id: departmentForChild,
         },
       });
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId }) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, ...(departmentForChild ? { department_id: departmentForChild } : {}) }) }],
       };
     },
   );

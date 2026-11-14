@@ -229,7 +229,7 @@ const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 // 还在跑的回 409 schedule_not_stopped(先 cancel)。
 // node_inbox_allowlist_dept:收件白名单认 dept:<department_id>(该部门及子部门里的节点和人)。
 // node_grants:节点管理授权 GET/PUT /api/nodes/:id/grants(能力 schedules × 范围 network/department/node × read/edit)。
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge", "node_inbox_allowlist_dept", "node_grants"] as const;
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge", "node_inbox_allowlist_dept", "node_grants", "create_node_department"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here

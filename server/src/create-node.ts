@@ -186,6 +186,23 @@ export function stopBackgroundTimersForTest(): void {
 // in caller's network, mark it succeeded and stamp the real
 // child_node_id. Mirrors RFC-024 finalizePendingMatchingUpdates.
 
+/**
+ * 2026-11-14 —— create_node 时创建人选的部门,节点首次注册时落到 nodes.department_id。
+ * 只填空:节点已经有部门(别人先放好了)就不覆盖;部门在这期间被删了就跳过。Best effort。
+ */
+export function applyRequestedDepartment(requestId: string, childNodeId: string, networkId: string): void {
+  try {
+    const dept = db.get<{ department_id: string | null }>("SELECT department_id FROM node_create_requests WHERE request_id = ?1", requestId)?.department_id;
+    if (!dept) return;
+    if (!db.get("SELECT 1 AS x FROM network_departments WHERE network_id = ?1 AND department_id = ?2", networkId, dept)) return;
+    db.run(`UPDATE nodes SET department_id = ?2, updated_at = datetime('now')
+      WHERE node_id = ?1 AND network_id = ?3 AND (department_id IS NULL OR department_id = '')`,
+      [childNodeId, dept, networkId]);
+  } catch (e: any) {
+    console.warn(`[commhub] requested department apply failed: ${e?.message || e}`);
+  }
+}
+
 /** A clone (fork to a new folder) lands in its source's department, unless
  * someone already placed it. Same rule as the source fork (#3485). Best effort. */
 export function inheritCloneDepartment(requestId: string, childNodeId: string, networkId: string): void {
@@ -224,6 +241,7 @@ export function finalizeCreateOnFirstRegister(
       [incoming.node_id, Date.now(), row.request_id],
     );
     matchedIds.push(row.request_id);
+    applyRequestedDepartment(row.request_id, incoming.node_id, net);
     inheritCloneDepartment(row.request_id, incoming.node_id, net);
     console.log(`[commhub] ✓ create-node finalize: request=${row.request_id} child=${incoming.alias} (${incoming.node_id}) daemon=${row.daemon_node_id}`);
     auditCreateNode({
