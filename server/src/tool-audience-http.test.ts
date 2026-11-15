@@ -246,6 +246,8 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // 2026-11-14:create_node 新增 department_id(新节点归哪个部门)。all 先撞墙 86,534 > 86,500(+34 B)。
   // 照规矩**不抬上限**:去掉工具描述末尾的 RFC / issue 编号(RFC-024/026/027/028、app#225、Hub #938,共 13 处,
   // 调用方用不上这些编号,上下文都在代码注释里),clone_node 描述顺手压短 —— 合计约 −156 B。
+  // 2026-11-15:get_all_status / get_session_status 描述里点名 description / profile.description(节点职责介绍,
+  // 让调用方知道去哪读别的节点「负责什么」)。照规矩不抬上限,两句都压到最短。
   const CEILINGS = { node: 64_500, user: 60_500, all: 86_500 } as const;
   const MARGIN_FLOOR = 100;
   test("node / user / all", async () => {

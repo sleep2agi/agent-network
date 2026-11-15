@@ -1,4 +1,5 @@
 import { allStatusCacheKey, cachedAllStatus } from "./all-status-cache.js";
+import { descriptionSummary } from "./node-attrs-validate.js";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { enqueueBroadcast } from "./broadcast-fanout.js";
 import { selectHumanInboxIds } from "./human-inbox.js";
@@ -2007,9 +2008,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   //  Hub Tools (5)
   // ═══════════════════════════════════════════
 
+  /** node_id → 职责介绍(只取写了的)。一条 IN 查询,不按行回查。 */
+  const nodeDescriptions = (ids: string[]): Map<string, string> => {
+    const out = new Map<string, string>();
+    const uniq = [...new Set(ids)];
+    for (let i = 0; i < uniq.length; i += 500) {
+      const chunk = uniq.slice(i, i + 500);
+      const marks = chunk.map((_, j) => `?${j + 1}`).join(", ");
+      for (const r of db.all<any>(`SELECT node_id, description FROM nodes WHERE description IS NOT NULL AND node_id IN (${marks})`, ...chunk)) {
+        if (typeof r.description === "string" && r.description) out.set(r.node_id, r.description);
+      }
+    }
+    return out;
+  };
+
   server.tool(
     "get_all_status",
-    "Session status for Hub patrol; queue_depth = open tasks. Use comma-separated filter_alias for specific nodes. Unfiltered: one row/session, 31 columns; large fleets can exceed client limits.",
+    "Session status for Hub patrol; queue_depth = open tasks; description = node's role (full: get_session_status). Use comma-separated filter_alias for specific nodes. Unfiltered: one row/session, 31 columns; large fleets can exceed client limits.",
     {
       filter_status: z.string().max(50).optional(),
       filter_server: z.string().max(200).optional(),
@@ -2049,7 +2064,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // #500 step 2 — queue_depth = open tasks on that node (task-queue-ahead.ts); one GROUP BY, not one query per row.
       const rows = db.all<any>(sql, ...params);
       const depth = queueDepthByNode(rows.map((r: any) => r.alias));
-      const sessions = rows.map((s: any) => ({ ...s, queue_depth: depth.get(queueDepthKey(s.network_id, s.alias)) ?? 0 }));
+      // admin 2026-11-15 —— 节点职责介绍:别的节点挑人派活前就能看到「它负责什么、能干什么」。
+      // 列表里只给一行摘要(description,≤ 120 字;没写就不带这个键),整段在 get_session_status。
+      const duty = nodeDescriptions(rows.map((r: any) => r.node_id).filter((id: unknown): id is string => typeof id === "string" && !!id));
+      const sessions = rows.map((s: any) => {
+        const summary = descriptionSummary(s.node_id ? duty.get(s.node_id) : null);
+        return { ...s, queue_depth: depth.get(queueDepthKey(s.network_id, s.alias)) ?? 0, ...(summary ? { description: summary } : {}) };
+      });
 
       // `summary` has always counted every session in the read scope, ignoring
       // filter_status / filter_server — and now filter_alias. That is fine for
@@ -2082,7 +2103,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_session_status",
-    "Get detailed status of a specific session by alias.",
+    "Get detailed status of a specific session by alias; profile.description = its role.",
     { alias: z.string().min(1).max(200).describe("Session alias") },
     async ({ alias }) => {
       const readScope = resolveReadScope(null);
@@ -2104,11 +2125,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       recentSql += " ORDER BY completed_at DESC LIMIT 5";
       const recent = db.all(recentSql, ...recentParams);
 
+      // admin 2026-11-15 —— 节点的「名片」:职责介绍整段 + 展示名 / 团队 / 标签(都是给别人看的,不是它自己的 AGENTS.md)。
+      const sid = (session as any)?.node_id;
+      const node = typeof sid === "string" && sid
+        ? db.get<any>("SELECT display_name, team, tags, description FROM nodes WHERE node_id = ?1", sid)
+        : null;
+      const profile = node ? {
+        description: node.description ?? null,
+        display_name: node.display_name ?? null,
+        team: node.team ?? null,
+        tags: (() => { try { const t = JSON.parse(node.tags ?? "[]"); return Array.isArray(t) ? t : []; } catch { return []; } })(),
+      } : null;
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ ok: true, session, inbox_pending: pending?.cnt ?? 0, recent_completions: recent }),
+            text: JSON.stringify({ ok: true, session, profile, inbox_pending: pending?.cnt ?? 0, recent_completions: recent }),
           },
         ],
       };

@@ -256,3 +256,35 @@ describe("#2293 opencode bits on GET /api/nodes (real HTTP)", () => {
     expect(row.opencode_catalog ?? null).toBeNull();
   });
 });
+
+// admin 2026-11-15 —— 节点职责介绍(给别的节点 / 人看的「我负责什么、能干什么」)。
+describe("node description (职责介绍)", () => {
+  test("PUT description round-trips through GET /api/nodes, keeps line breaks, bumps attrs_revision", async () => {
+    const before = (await listNodes()).find((r) => r.node_id === LEGACY_NODE)!;
+    const rev = Number(before.attrs_revision);
+    const text = "负责 App 发版：dispatch release、跑 verify。\n\n找我：发版、签名、TestFlight。\n不做：Hub 改动。";
+    const w = await putAttrs(LEGACY_ALIAS, { base_attrs_revision: rev, description: `  ${text}  ` });
+    expect(w.status).toBe(200);
+    expect(w.json.description).toBe(text);
+    expect(w.json.attrs_revision).toBe(rev + 1);
+    const row = (await listNodes()).find((r) => r.node_id === LEGACY_NODE)!;
+    expect(row.description).toBe(text);
+    // 只改 description 时别的展示字段不动
+    expect(row.display_name).toBe(before.display_name ?? null);
+  });
+
+  test("null / blank clears it; wrong type and > 1000 chars are rejected without writing", async () => {
+    const rev = Number((await listNodes()).find((r) => r.node_id === LEGACY_NODE)!.attrs_revision);
+    const bad = await putAttrs(LEGACY_ALIAS, { base_attrs_revision: rev, description: { x: 1 } });
+    expect(bad.status).toBe(400);
+    expect(bad.json.error).toBe("invalid_description");
+    const long = await putAttrs(LEGACY_ALIAS, { base_attrs_revision: rev, description: "字".repeat(1001) });
+    expect(long.status).toBe(400);
+    const still = (await listNodes()).find((r) => r.node_id === LEGACY_NODE)!;
+    expect(still.attrs_revision).toBe(rev);
+    expect(typeof still.description).toBe("string");
+    const clear = await putAttrs(LEGACY_ALIAS, { base_attrs_revision: rev, description: "   " });
+    expect(clear.status).toBe(200);
+    expect((await listNodes()).find((r) => r.node_id === LEGACY_NODE)!.description ?? null).toBeNull();
+  });
+});

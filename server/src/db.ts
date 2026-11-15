@@ -504,6 +504,9 @@ for (const ddl of [
   `ALTER TABLE nodes ADD COLUMN team TEXT`,
   `ALTER TABLE nodes ADD COLUMN tags TEXT`,
   `ALTER TABLE nodes ADD COLUMN attrs_revision INTEGER NOT NULL DEFAULT 0`,
+  // admin 2026-11-15:节点「职责介绍」—— 给其他节点 / 人看的「我负责什么、能干什么」(AGENTS.md 是给自己看的)。
+  // 和 display_name / team 一样走 PUT /api/nodes/:id/attrs,受 attrs_revision 乐观锁保护。
+  `ALTER TABLE nodes ADD COLUMN description TEXT`,
 ]) {
   try {
     db.exec(ddl);
