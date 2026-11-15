@@ -6732,6 +6732,15 @@ return Bun.serve({
       if (nextDescription && !nextDescription.ok) {
         return withCors(req, Response.json({ ok: false, error: "invalid_description", reason: nextDescription.reason }, { status: 400 }));
       }
+      // 职责介绍是节点对外的「名片」:节点令牌只许写**自己的**,不看 node-permissions 开关(那个开关在 off / log 时会放行
+      // 「写别的节点」—— 对展示名还算无害,对名片就是冒名)。人(用户令牌)照旧按网络写权限。
+      if (nextDescription && restAuth?.networkId) {
+        const caller = nodeIdentity(restAuth.tokenId, restAuth.networkId);
+        const self = !!caller && ((!!caller.nodeId && caller.nodeId === node.node_id) || (!!node.alias && caller.aliases.includes(node.alias)));
+        if (!self) {
+          return withCors(req, Response.json({ ok: false, error: "description_self_only", message: "a node may only edit its own description; ask a person to edit another node's" }, { status: 403 }));
+        }
+      }
 
       // Only the supplied fields move; the rest keep their stored value.
       const sets: string[] = [];

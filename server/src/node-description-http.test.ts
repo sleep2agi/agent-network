@@ -5,6 +5,7 @@
 //   2. 另一个节点用自己的节点令牌调 MCP get_all_status:目标那一行带 description(一行摘要,≤ 120 字);
 //      没写的节点行里没有这个键(不给全网每行加一个 null);
 //   3. MCP get_session_status:profile.description 是整段(含换行),另带 display_name / team / tags。
+//   4. 自助:节点用**自己的**节点令牌能写**自己的** description(谁最清楚自己干什么);写别的节点 → 403(只有人能改别人)。
 //
 // 跑法:cd server && bun test src/node-description-http.test.ts
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -92,6 +93,20 @@ describe("node description is visible to other nodes", () => {
     expect(target.description).not.toContain("\n");
     expect(blank).toBeDefined();
     expect("description" in blank).toBe(false);
+  });
+
+  test("self-service: a node writes its OWN description with its node token; writing another node is refused", async () => {
+    const put = (token: string, ref: string, rev: number, description: string) => fetch(`${BASE}/api/nodes/${encodeURIComponent(ref)}/attrs?network_id=${NET}`, {
+      method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ base_attrs_revision: rev, description }),
+    });
+    const own = await put(nodes.reader.token, nodes.reader.nodeId, 0, "负责读别人的名片。");
+    expect(own.status).toBe(200);
+    expect(((await own.json()) as any).description).toBe("负责读别人的名片。");
+    const other = await put(nodes.reader.token, nodes.blank.nodeId, 0, "冒名顶替");
+    expect(other.status).toBe(403);
+    expect(((await other.json()) as any).error).toBe("description_self_only");
+    expect(db.get("SELECT description FROM nodes WHERE node_id = ?1", nodes.blank.nodeId)?.description ?? null).toBeNull();
   });
 
   test("get_session_status: profile carries the full text plus team", async () => {
