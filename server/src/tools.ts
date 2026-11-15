@@ -1561,6 +1561,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // A copied node_id must not relabel the row. The heartbeat itself still
       // succeeds: only a token rejected as impersonation fails the whole call.
       // identity_mismatch must not leave this session pointing at the other row.
+      // #3585 —— 这一格只做判定，不改变控制流；写入仍在下面的 if (node_id) 里。
+      const configSnapshotRejected = cfgSnap != null && !node_id;
       if (node_id) {
         try {
           const nodeRuntime = ag?.includes(":") ? ag.split(":")[1] + "-sdk" : ag ?? null;
@@ -1601,6 +1603,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
               alias: effectiveAlias,
               ...(canonical.renamed ? { renamed_from: alias } : {}),
               ...(offlineDeferred ? { offline_deferred: true, reason: "node_identity_conflict" } : {}),
+              // #3585 —— config_snapshot 没有 node_id 时不写入，但**必须在回执里说出来**。
+              // 以前是静默丢弃 + 200 ok，调用方以为报上去了（能力声明丢失 ⇒ 客户端入口永远是灰的）。
+              // 仍不整条失败：在线状态/心跳照常更新，只拒这一个字段。
+              ...(configSnapshotRejected ? { config_snapshot: "rejected (node_id required)" } : {}),
               inbox_count: row?.cnt ?? 0,
             }),
           },
