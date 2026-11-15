@@ -28,8 +28,8 @@ features:
 ---
 
 <section class="home-video" aria-labelledby="home-video-title">
-  <div class="home-video-heading"><span class="eyebrow">48 SECONDS</span><h2 id="home-video-title">48 秒看完 Agent Network</h2><p>产品画面、支持的 Runtime 和项目里程碑。片中数字截至 2026-11-09，来自 GitHub 与 npm。</p></div>
-  <div class="home-video-frame"><video controls playsinline preload="none" poster="/intro/anet-intro-cover.jpg" aria-label="Agent Network 介绍视频，48 秒，无旁白"><source src="/intro/anet-intro.mp4" type="video/mp4" /></video></div>
+  <div class="home-video-heading"><span class="eyebrow">48 SECONDS</span><h2 id="home-video-title">48 秒看完 Agent Network</h2><p>产品画面、支持的 Runtime 和项目里程碑。片中数字截至 2026-11-15，来自 GitHub 与 npm。</p></div>
+  <div class="home-video-frame"><video controls playsinline preload="none" poster="/intro/anet-intro-v6-cover.jpg" aria-label="Agent Network 介绍视频，48 秒，无旁白"><source src="/intro/anet-intro-v6.mp4" type="video/mp4" /></video></div>
 </section>
 
 <HomeRuntimes lang="zh" />

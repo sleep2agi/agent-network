@@ -28,8 +28,8 @@ features:
 ---
 
 <section class="home-video" aria-labelledby="home-video-title">
-  <div class="home-video-heading"><span class="eyebrow">48 SECONDS</span><h2 id="home-video-title">Agent Network in 48 seconds</h2><p>The product, the supported runtimes and the project milestones. On-screen text is in Chinese; figures are as of 2026-11-09, from GitHub and npm.</p></div>
-  <div class="home-video-frame"><video controls playsinline preload="none" poster="/intro/anet-intro-cover.jpg" aria-label="Agent Network intro video, 48 seconds, no voiceover"><source src="/intro/anet-intro.mp4" type="video/mp4" /></video></div>
+  <div class="home-video-heading"><span class="eyebrow">48 SECONDS</span><h2 id="home-video-title">Agent Network in 48 seconds</h2><p>The product, the supported runtimes and the project milestones. On-screen text is in Chinese; figures are as of 2026-11-15, from GitHub and npm.</p></div>
+  <div class="home-video-frame"><video controls playsinline preload="none" poster="/intro/anet-intro-v6-cover.jpg" aria-label="Agent Network intro video, 48 seconds, no voiceover"><source src="/intro/anet-intro-v6.mp4" type="video/mp4" /></video></div>
 </section>
 
 <HomeRuntimes lang="en" />
