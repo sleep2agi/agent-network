@@ -86,3 +86,37 @@ export function parseStoredTags(stored: unknown): string[] {
     return [];
   }
 }
+
+/**
+ * 节点「职责介绍」(admin 2026-11-15「每个节点的职责需要让其他节点也能看到;desc 里放介绍而不是 AGENTS.md,
+ * AGENTS.md 是给自己看的,需要设计个给其他节点看的自己的职责、能干什么」)。
+ *
+ * 和 display_name / team 同一种姿态(类型错 → 400,不强转),但它是一段多行文字:
+ *   - 保留换行和制表(写「能干什么 / 不干什么 / 怎么找我」要分行);其余控制字符换成空格;
+ *   - 每行去掉行尾空白,连续空行最多留一行;
+ *   - 上限 MAX_DESCRIPTION_LEN 字符(按 Unicode 码点数),超了拒绝 —— 让人看到,而不是悄悄截掉。
+ */
+export const MAX_DESCRIPTION_LEN = 1000;
+
+export function validateDescription(raw: unknown): ScalarAttrResult {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false, reason: "description must be a string or null" };
+  // eslint-disable-next-line no-control-regex
+  const clean = raw.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, " ")
+    .split("\n").map(line => line.replace(/\s+$/u, "")).join("\n")
+    .replace(/\n{3,}/g, "\n\n").trim();
+  if (clean.length === 0) return { ok: true, value: null };
+  if ([...clean].length > MAX_DESCRIPTION_LEN) {
+    return { ok: false, reason: `description exceeds ${MAX_DESCRIPTION_LEN} characters` };
+  }
+  return { ok: true, value: clean };
+}
+
+/** 状态列表里只放一行摘要(整段在 get_session_status / GET /api/nodes 里):第一段非空行,最多 n 个字。 */
+export function descriptionSummary(description: string | null | undefined, n = 120): string | null {
+  if (!description) return null;
+  const first = description.split("\n").map(s => s.trim()).find(Boolean) ?? "";
+  if (!first) return null;
+  const chars = [...first];
+  return chars.length > n ? `${chars.slice(0, n - 1).join("")}…` : first;
+}

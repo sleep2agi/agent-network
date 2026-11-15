@@ -57,7 +57,7 @@ import { getTaskAccessMode, isTaskScoped, listProjectGrants, replaceTaskGrants, 
 import { canMessageAgent, isAgentRestricted, visibleAgents, listAgentGrants, listGroupGrants, getAgentAccessMode, replaceAgentGrants, restrictedNetworkIds, usernameIsAgentAlias, listAgentGroups, createAgentGroup, updateAgentGroup, replaceAgentGroupMembers, deleteAgentGroup, usersGrantedGroup, listDepartmentGrants, departmentCoverage } from "./agent-access.js";
 import { broadcastVerdict, dispatchVerdict, filterBroadcastByInbox, humanOnlyVerdict, inboxDenied, inboxSenderFromAuth, NODE_PERMISSION_MODES, nodeDecide, nodeIdentity, nodePermissionDeniedBody, nodePermissionsFlag, streamVerdict, writeVerdict, type InboxSender, type NodeIdentity, type NodePermissionMode, type Verdict } from "./node-permissions.js";
 import { validateAvatarUrl } from "./avatar-validate.js";
-import { narrowTags, parseStoredTags, validateScalarAttr } from "./node-attrs-validate.js";
+import { narrowTags, parseStoredTags, validateDescription, validateScalarAttr } from "./node-attrs-validate.js";
 import { daemonDefaultWorkdirRoot } from "./create-node-validate.js";
 import { register, login, resolveToken, tokenRejection, isExpiredSessionToken, sessionIdleDays, listSessions, revokeSession, revokeOtherSessions, getUserNetworks, getUserAllNetworks, createNetwork, deleteNetwork, adminDeleteEmptyNetwork, renameNetwork, changePassword, issueUserToken, getUserTokenMeta, listTokens, createToken, revokeToken, getNetworkMembers, getNetworkHumans, getUserNetworkRole, addNetworkMember, adminCreateUser, listUsersWithMemberships, updateMemberRole, removeNetworkMember, createInvite, joinByInvite, createNetworkTokenForNode, type AuthUser } from "./auth.js";
 import { abortRename, cleanupCommittedRenameSessions, commitRename, prepareRename, resolveCanonicalAlias } from "./rename.js";
@@ -6684,7 +6684,7 @@ return Bun.serve({
       }
       const ref = decodeURIComponent(nodeAttrsMatch[1]);
       const params: any[] = [ref, ref, ref];
-      let sql = "SELECT node_id, alias, network_id, display_name, team, tags, attrs_revision FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      let sql = "SELECT node_id, alias, network_id, display_name, team, tags, description, attrs_revision FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC LIMIT 1";
       const node = db.get<any>(sql, ...params);
@@ -6727,6 +6727,11 @@ return Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "invalid_team", reason: nextTeam.reason }, { status: 400 }));
       }
       const nextTags = "tags" in attrsBody ? narrowTags(attrsBody.tags) : null;
+      // 职责介绍(多行,≤ 1000 字);类型错 → 400,和 display_name 同一姿态。
+      const nextDescription = "description" in attrsBody ? validateDescription(attrsBody.description) : null;
+      if (nextDescription && !nextDescription.ok) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_description", reason: nextDescription.reason }, { status: 400 }));
+      }
 
       // Only the supplied fields move; the rest keep their stored value.
       const sets: string[] = [];
@@ -6734,6 +6739,7 @@ return Bun.serve({
       if (nextDisplay) { sets.push(`display_name = ?${vals.length + 1}`); vals.push(nextDisplay.value); }
       if (nextTeam) { sets.push(`team = ?${vals.length + 1}`); vals.push(nextTeam.value); }
       if (nextTags) { sets.push(`tags = ?${vals.length + 1}`); vals.push(JSON.stringify(nextTags)); }
+      if (nextDescription) { sets.push(`description = ?${vals.length + 1}`); vals.push(nextDescription.value); }
       // A no-op patch still bumps the revision: the caller observed a state
       // and asserted it, so honouring the CAS keeps client counters in step.
       sets.push(`attrs_revision = ?${vals.length + 1}`); vals.push(currentRev + 1);
@@ -6756,10 +6762,10 @@ return Bun.serve({
         }, { status: 409 }));
       }
       logAudit(restAuth?.userId ?? null, restAuth?.username ?? null, "node_attrs_updated", "node", node.node_id,
-        JSON.stringify({ display_name: nextDisplay?.value ?? undefined, team: nextTeam?.value ?? undefined, tags: nextTags ?? undefined }),
+        JSON.stringify({ display_name: nextDisplay?.value ?? undefined, team: nextTeam?.value ?? undefined, tags: nextTags ?? undefined, description_changed: nextDescription ? true : undefined }),
         undefined, nodeNetId ?? undefined);
       const after = db.get<any>(
-        "SELECT display_name, team, tags, attrs_revision FROM nodes WHERE node_id = ?1", node.node_id);
+        "SELECT display_name, team, tags, description, attrs_revision FROM nodes WHERE node_id = ?1", node.node_id);
       return withCors(req, Response.json({
         ok: true,
         node_id: node.node_id,
@@ -6767,6 +6773,7 @@ return Bun.serve({
         display_name: after?.display_name ?? null,
         team: after?.team ?? null,
         tags: parseStoredTags(after?.tags),
+        description: after?.description ?? null,
         attrs_revision: Number(after?.attrs_revision ?? currentRev + 1),
       }));
     }
@@ -7092,7 +7099,7 @@ return Bun.serve({
                         config_path, channels, server, hostname,
                         network_id, created_at, updated_at,
                         config_snapshot, lifecycle_state, avatar_url,
-                        display_name, team, tags, attrs_revision, permission_mode, owner_user_id,
+                        display_name, team, tags, description, attrs_revision, permission_mode, owner_user_id,
                         department_id, peer_allowlist, tool_allowlist, rest_allowlist, inbox_allowlist
                  FROM nodes WHERE 1=1`;
       const params: any[] = [];

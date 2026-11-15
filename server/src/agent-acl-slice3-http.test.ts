@@ -358,13 +358,14 @@ describe("update_node_config 响应键集（exact key set）", () => {
 
   // 2026-10-31 —— #3171：再补两个「文件级算过、邻近级没有」的工具。
   describe("projects_list / get_session_status: pinned key sets next to the call", () => {
-    test("projects_list ⇒ {network_id, ok, projects}; get_session_status ⇒ {inbox_pending, ok, recent_completions, session}", async () => {
+    // 2026-11-15:get_session_status 多一个 profile(节点职责介绍 + 展示名 / 团队 / 标签;admin「节点职责要让其他节点也能看到」)。
+    test("projects_list ⇒ {network_id, ok, projects}; get_session_status ⇒ {inbox_pending, ok, profile, recent_completions, session}", async () => {
       const pl = await tool(adminToken, "projects_list", { network_id: NET });
       expect(Object.keys(pl).sort()).toEqual(["network_id", "ok", "projects"]);
       expect(Array.isArray(pl.projects)).toBe(true);
 
       const gs = await tool(adminToken, "get_session_status", { alias: "acl3-agent-x", network_id: NET });
-      expect(Object.keys(gs).sort()).toEqual(["inbox_pending", "ok", "recent_completions", "session"]);
+      expect(Object.keys(gs).sort()).toEqual(["inbox_pending", "ok", "profile", "recent_completions", "session"]);
       expect(Number.isInteger(gs.inbox_pending)).toBe(true);
       expect(gs.inbox_pending).toBeGreaterThanOrEqual(0);   // 2026-10-31：类型不是断言
       expect(Array.isArray(gs.recent_completions)).toBe(true);
