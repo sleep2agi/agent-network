@@ -1,0 +1,51 @@
+RFC-044 Windows SDK stop: ACK contract and batch evidence
+
+Root cause evidence: #3619 run 43910467131 at bd5c9515.
+Owner-exported Windows job: /tmp/opencode/3619-133450829547.log.
+Windows SDK reply succeeded in 17366ms; cloud sentinel unchanged.
+CLI confirmed owned process-tree stopped at 16:46:52, but Hub rejected the
+ACK at 16:46:59: exit_signal exceeded its 16-character schema bound.
+Repeated CIM descendant capture/identity calls cost about 19 seconds each.
+macOS native SDK chain including stop passed on this run (owner handoff).
+
+Changes:
+- Use exit_signal=taskkill. New server/src/windows-sdk-stop-wire.test.ts
+  captures the schema actually registered by registerTools and validates real
+  daemon stopped AND stop_failed payloads; rejects the original long string.
+- SDK-only native batch provider: Toolhelp32 local kernel process tables and
+  .NET birth ticks, one PowerShell per capture/final stage, no CIM/WMI.
+- Capture brackets two PPID tables with per-process birth reads and root
+  birth checks. Each root still has immediate pre-taskkill birth validation.
+  The existing orchestrator still decides unknown/alive/gone/PID-reused;
+  missing evidence, late unaccounted descendants or surviving identities
+  cannot be reported stopped. Receipts stay on failed/unverifiable outcomes.
+- Each batch call is bounded at 5s, 8192 table rows, 512 captured identities,
+  with existing per-root 256-descendant cap. No user PATH/Git/global changes.
+- Native Windows smoke measures dispatch through accepted stopped ACK and
+  requires <=15000ms. This is an acceptance target, NOT measured evidence yet.
+- Workflow runs actual Hub wire-schema test in Docker; native Windows
+  primitive job additionally exercises real Toolhelp capture and birth probe.
+
+Acceptance limits:
+Linux injected tests cannot prove Windows PowerShell compilation, native
+process enumeration, SDK stop timing or native exit behavior. A Windows CI
+rerun remains required before declaring the native stop fix accepted. This
+still does not prove clean-App installation/download-to-first-reply in 3min.
+No production service, port, secrets, package installation or data changes.
+Restore/rollback remains paired packages + App-private state as documented
+in docs/runbooks/windows-local-daemon.md; Git does not contain user data.
+
+Final Docker verification: all commands exited 0.
+Raw output: /tmp/opencode/rfc044-fast-stop-final.log
+  path/runtime unit set: 23 pass, 2 skip, 88 assertions
+  lifecycle identity set: 110 pass, 275 assertions
+  regression set: 86 pass, 2 skips, 350 assertions
+  actual Hub wire schema: 1 pass, 8 assertions
+Total: 220 pass, 4 platform-only skips, 721 assertions, zero failures.
+Real SDK Linux smoke: first reply 4144ms, one model request, unchanged cloud
+sentinel; stop including Hub acknowledgment 552ms. These Linux timings do
+not establish the Windows <=15s target.
+Batch negative controls cover live descendants, unavailable final evidence,
+late unaccounted descendants after nonzero taskkill, root birth changes,
+unstable parent edges, descendant birth changes, malformed/empty snapshots,
+unknown process birth, and invalid script inputs.

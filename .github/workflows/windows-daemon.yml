@@ -6,6 +6,8 @@ on:
       - "agent-network/**"
       - ".github/workflows/windows-daemon.yml"
       - "tests/test-rfc044-windows-daemon/**"
+      - "server/src/windows-sdk-stop-wire.test.ts"
+      - "server/src/tools.ts"
   push:
     branches: [main]
 concurrency:
@@ -57,4 +59,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -f tests/test-rfc044-windows-daemon/Dockerfile.smoke -t anet-rfc044-sdk-smoke .
+      - name: Windows stop ACK payloads against the actual Hub schema (Docker)
+        run: docker run --rm --network none --entrypoint bun anet-rfc044-sdk-smoke test server/src/windows-sdk-stop-wire.test.ts
       - run: docker run --rm --network none anet-rfc044-sdk-smoke

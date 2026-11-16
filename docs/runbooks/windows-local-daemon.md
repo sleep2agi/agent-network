@@ -59,6 +59,16 @@ Unknown identity, PID reuse or incomplete descendant evidence keeps the receipt
 and fails stop; dead-wrapper/crash recovery is fail-closed where the surviving
 tree cannot be proven. Boot uses persisted receipts, not `pgrep`, for this path.
 
+SDK stop capture and final verification use one bounded PowerShell invocation
+per stage, with a local Toolhelp process table (kernel32) and .NET birth ticks;
+they do not initialize CIM/WMI for each descendant. Capture brackets parent
+edges with birth reads and rechecks each root, and each root is still revalidated
+immediately before taskkill. Missing/partial evidence remains an error, not an
+empty tree. The Hub ACK uses `exit_signal: "taskkill"` (within its 16-character
+contract); detailed stages stay in logs. The native smoke requires stop plus
+accepted Hub acknowledgment within 15 seconds. That performance target remains
+unproven until the native Windows run passes.
+
 `init` can capture stdout/stderr without a shell: call private Node with the
 argument array and wait for its output. Do not use `cmd /c` just to read output.
 HOME and USERPROFILE are full paths; e.g. for `D:\App Private\home`, HOMEDRIVE

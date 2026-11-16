@@ -162,6 +162,7 @@ try {
   const elapsed = Date.now() - launchStartedAt;
   assert(elapsed <= 180_000, `init-to-reply exceeded 3 minutes: ${elapsed}ms`);
   console.log(JSON.stringify({ ok: true, platform: process.platform, first_reply: task.result, model_requests: vendorHits, init_to_reply_ms: elapsed, cloud_sentinel: "unchanged" }));
+  const stopStartedAt = Date.now();
   const stopped = await mcp("stop_node", { node_id: child.node_id });
   assert(stopped.ok, JSON.stringify(stopped));
   const { db } = await import("../../server/src/db.js");
@@ -171,6 +172,9 @@ try {
     if (row?.status === "stop_failed") throw Error(JSON.stringify(row));
     return row?.status === "stopped" ? row : null;
   }, "daemon acknowledges native process-tree stop", DAEMON_CLI_STOP_TIMEOUT_MS + 15_000);
+  const stopElapsed = Date.now() - stopStartedAt;
+  console.log(JSON.stringify({ platform: process.platform, stopped: true, stop_ms: stopElapsed }));
+  if (process.platform === "win32") assert(stopElapsed <= 15_000, `Windows stop exceeded 15 seconds: ${stopElapsed}ms`);
 } catch (error) {
   // Native SDK/bootstrap errors must be actionable, including a missing git
   // dependency. Emit only bounded logs, never the credential-bearing config.

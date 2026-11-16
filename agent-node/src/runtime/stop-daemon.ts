@@ -431,7 +431,7 @@ export async function handleStopDoorbell(
       ? moveWorkdirToTrash(childDirName, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir) : null;
     forgetIfDeleted(backup);
     childrenMap.delete(child_node_id);
-    await deps.callCommHub("ack_stop_request", { request_id, status: "stopped", exit_signal: "WINDOWS_PROCESS_TREE", ...(backup ? { backup_path: backup } : {}) })
+    await deps.callCommHub("ack_stop_request", { request_id, status: "stopped", exit_signal: "taskkill", ...(backup ? { backup_path: backup } : {}) })
       .then(() => deps.log(`[stop-daemon] request=${request_id} Windows SDK stop ack accepted`))
       .catch((e: any) => deps.warn(`[stop-daemon] request=${request_id} failed acknowledgment: ${tailText(e?.message || e)}`));
     return;

@@ -2962,6 +2962,7 @@ import {
 } from "../src/normalize-runtime";
 import { describeStaleRuntimeSupport } from "../src/daemon-runtime-staleness";
 import { windowsRuntimeSupported } from "../src/windows-runtime";
+import { windowsSdkBatchEvidence } from "../src/windows-sdk-stop-evidence";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
 import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCurrentLoginSession, sameHub } from "../src/cli-auth-session";
@@ -13433,7 +13434,7 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
       console.log(`[anet] Windows SDK stop: native tree verification begins (roots=${stopProcesses.length})`);
       const stop = orchestrateWindowsManagedStop(stopProcesses.map(identity => ({
         role: identity.role, pid: identity.pid, creationDate: identity.birth,
-      })), { onProgress: stage => console.log(`[anet] Windows SDK stop: ${stage}`) });
+      })), { ...windowsSdkBatchEvidence(), onProgress: stage => console.log(`[anet] Windows SDK stop: ${stage}`) });
       for (const diagnostic of stop.verdict.retainedDiagnostics) console.warn(`[anet] ${diagnostic}`);
       if (stop.verdict.kind !== "stopped") {
         console.error(`[anet] WINDOWS_SDK_STOP_UNPROVEN: ${stop.verdict.kind}; lifecycle receipt kept, hub not notified offline`);
