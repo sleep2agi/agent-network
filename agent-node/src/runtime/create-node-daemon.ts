@@ -32,6 +32,7 @@ import {
 } from "./codex-copresence-yolo.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
+import { daemonCliLaunch } from "./daemon-cli-launch.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
 import {
   assertOpenCodeV2RequestedModel,
@@ -183,7 +184,7 @@ function verifyAnetBinIdentity(abs: string): void {
   // Source-tree/dev fallback: bin/anet.cjs is copied verbatim to dist/bin/anet.cjs
   // at build time, but package.json points at the dist path.
   const body = readFileSync(abs, "utf-8");
-  if (abs.endsWith("/anet.cjs") && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
+  if (/[\\/]anet\.cjs$/.test(abs) && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
 
   throw unsafePathHelp("anet_bin_identity", `not an anet package bin: package.json bin.anet does not point at ${abs}`, "unset ANET_BIN_ABS and re-run: anet daemon up");
 }
@@ -472,8 +473,8 @@ const FIXED_ENV_KEYS = new Set([...FIXED_ENV_KEYS_POSIX, ...FIXED_ENV_KEYS_WIN32
  */
 export function resolveChildHome(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
   if (platform === "win32") {
-    const home = env.USERPROFILE
-      || env.HOME
+    const home = env.HOME
+      || env.USERPROFILE
       || (env.HOMEDRIVE && env.HOMEPATH ? env.HOMEDRIVE + env.HOMEPATH : "");
     if (!home) {
       throw new Error(
@@ -511,7 +512,8 @@ export function computeChildPath(
   platform: NodeJS.Platform = process.platform,
   execPath: string = process.execPath,
 ): string {
-  const execDir = dirname(execPath);
+  const execDir = platform === "win32" ? win32.dirname(execPath) : dirname(execPath);
+  if (platform === "win32") return execDir;
   const safe = safePathFor(platform);
   // Skip prepend if execDir is already a safe-PATH entry
   // (avoid duplicate path; canonical order wins).
@@ -523,7 +525,7 @@ export function computeChildPath(
 /** #648 — daemon 节点 config.json 的字段名。只接受绝对路径数组,不读 PATH,不猜目录。 */
 export const DAEMON_EXTRA_PATH_FIELD = "daemonExtraPath";
 
-/** 子进程 PATH 与 computeChildPath 一样用 `:`,含 win32。额外目录接在整段固定 PATH 之后。 */
+/** Extra directories follow the fixed PATH, using the platform delimiter. */
 let daemonExtraPathDirs: readonly string[] = [];
 /** 只给测试把「栽进去的 CLI」放到固定 PATH 之前。生产始终是空的:
  *  daemonExtraPath 仍然追加,配置项不能盖住 /usr/local/bin。 */
@@ -573,9 +575,10 @@ export function _resetDaemonExtraPathForTest(): void {
   childPathPrefixForTest = [];
 }
 
-function withChildPathTestPrefix(base: string): string {
+function withChildPathTestPrefix(base: string, platform: NodeJS.Platform = process.platform): string {
   if (childPathPrefixForTest.length === 0) return base;
-  return `${childPathPrefixForTest.join(":")}:${base}`;
+  const separator = platform === "win32" ? ";" : ":";
+  return `${childPathPrefixForTest.join(separator)}${separator}${base}`;
 }
 
 /** 追加到固定 PATH 之后,并去掉已经在固定 PATH 里的目录。 */
@@ -584,7 +587,8 @@ export function appendExtraPath(
   extras: readonly string[],
   platform: NodeJS.Platform = process.platform,
 ): string {
-  const have = new Set(base.split(":").filter(Boolean));
+  const separator = platform === "win32" ? ";" : ":";
+  const have = new Set(base.split(separator).filter(Boolean));
   const add: string[] = [];
   for (const raw of extras) {
     const dir = canonicalExtraDir(raw, platform);
@@ -593,7 +597,7 @@ export function appendExtraPath(
     add.push(dir);
   }
   if (add.length === 0) return base;
-  return `${base}:${add.join(":")}`;
+  return `${base}${separator}${add.join(separator)}`;
 }
 
 export function missingCliCreateError(command: string): string {
@@ -658,7 +662,7 @@ export function minimalEnv(
     // #648 — fixed prefix (computeChildPath, historically aS()) first, then
     // daemonExtraPath. Not process.env.PATH, and not guessed user dirs.
     // The test prefix is empty in production, so this string stays the same.
-    PATH: withChildPathTestPrefix(appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform)),
+    PATH: withChildPathTestPrefix(appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform), platform),
     HOME: home,
     LANG: parentEnv.LANG || "C.UTF-8",
   };
@@ -673,14 +677,11 @@ export function minimalEnv(
       // C:\Users\alice → HOMEDRIVE=C: HOMEPATH=\Users\alice
       base.HOMEDRIVE = home.slice(0, 2);
       base.HOMEPATH = home.slice(2);
-    } else if (parentEnv.HOMEDRIVE && parentEnv.HOMEPATH) {
-      // Non-drive-letter home (UNC path, weird service context) — fall
-      // back to whatever the daemon inherited, on the assumption that
-      // if the daemon is running with those values the child needs the
-      // same. If neither branch fires the child just doesn't get
-      // HOMEDRIVE/HOMEPATH — tools that need them will fail loudly.
-      base.HOMEDRIVE = parentEnv.HOMEDRIVE;
-      base.HOMEPATH = parentEnv.HOMEPATH;
+    } else if (home.startsWith("\\\\")) {
+      // Never fall back to the OS account's unrelated cloud home.
+      const root = win32.parse(home).root;
+      base.HOMEDRIVE = root.replace(/[\\/]+$/, "");
+      base.HOMEPATH = "\\" + home.slice(root.length);
     }
   }
   return base;
@@ -1530,7 +1531,8 @@ export async function handleCreateNodeDoorbell(
         detached: true,
       }));
     // #652 — start by directory name: exact within this .anet root, and always ASCII.
-    const child = launch(anetBin, ["node", "start", childDirName], {
+    const plan = daemonCliLaunch(anetBin, ["node", "start", childDirName]);
+    const child = launch(plan.command, plan.args, {
       cwd: childWorkDir,
       env: childEnvForCli,
     });

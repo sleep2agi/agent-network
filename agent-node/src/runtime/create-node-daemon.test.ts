@@ -776,9 +776,9 @@ describe("#1490 minimalEnv — cross-platform HOME resolution", () => {
     expect(env.HOME).toBe("/home/user");
   });
 
-  test("resolveChildHome: Windows cascade priority USERPROFILE > HOME > HOMEDRIVE+HOMEPATH", () => {
-    // Direct unit test on the helper. USERPROFILE wins because that's
-    // what os.homedir() and every modern Windows tool reads first.
+  test("resolveChildHome: explicit HOME wins over inherited Windows USERPROFILE", () => {
+    // The App sets a private HOME; inherited OS USERPROFILE must not redirect
+    // children back into the cloud CLI's login and credential directories.
     expect(
       resolveChildHome(
         {
@@ -789,7 +789,7 @@ describe("#1490 minimalEnv — cross-platform HOME resolution", () => {
         },
         "win32",
       ),
-    ).toBe("C:\\Users\\up");
+    ).toBe("C:\\Users\\h");
     // Missing USERPROFILE: HOME wins.
     expect(
       resolveChildHome(
@@ -1350,8 +1350,8 @@ describe("#603 computeChildPath — per-platform child PATH", () => {
     expect(computeChildPath("linux", "/usr/bin/node")).toBe(SAFE);
     expect(minimalEnv({}, "linux", { HOME: "/home/a" }).PATH).not.toContain("homebrew");
   });
-  test("win32 unchanged: no Homebrew dirs", () => {
-    expect(computeChildPath("win32", "/opt/node/bin/node")).toBe(`/opt/node/bin:${SAFE}`);
+  test("win32 uses only the trusted executable directory, no POSIX dirs", () => {
+    expect(computeChildPath("win32", "C:\\Private Node\\node.exe")).toBe("C:\\Private Node");
     expect(minimalEnv({}, "win32", { USERPROFILE: "C:\\Users\\a" }).PATH).not.toContain("homebrew");
   });
 });

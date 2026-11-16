@@ -80,7 +80,7 @@ export function verifyDaemonAnetBinIdentity(abs: string): void {
   // Source-tree/dev fallback: bin/anet.cjs is copied verbatim to dist/bin/anet.cjs
   // at build time, but package.json points at the dist path.
   const body = readFileSync(abs, "utf-8");
-  if (abs.endsWith("/anet.cjs") && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
+  if (/[\\/]anet\.cjs$/.test(abs) && body.includes("anet 的 bin 入口垫片") && body.includes("PARSE_FLOOR")) return;
 
   throw new Error(`ANET_BIN_ABS is not an anet package bin: package.json bin.anet does not point at ${abs}. Run: unset ANET_BIN_ABS && anet daemon up`);
 }
@@ -119,7 +119,7 @@ export type DaemonAnetBinCheck =
 /** Non-fatal resolve + verify: the exact checks `anet daemon start` applies,
  *  returned instead of `process.exit`. `prepareDaemonAnetBin()` exits on
  *  `ok:false`; the `anet node start <daemon>` path logs and continues. */
-export function checkDaemonAnetBin(input: { envBin?: string; argv1?: string }): DaemonAnetBinCheck {
+export function checkDaemonAnetBin(input: { envBin?: string; argv1?: string }, platform: NodeJS.Platform = process.platform): DaemonAnetBinCheck {
   let anetBin: string;
   try {
     anetBin = resolveCurrentAnetBinForDaemon(input);
@@ -127,6 +127,9 @@ export function checkDaemonAnetBin(input: { envBin?: string; argv1?: string }): 
     return { ok: false, code: "resolve", lines: [String(e?.message || e)] };
   }
   const st = statSync(anetBin);
+  // Windows stat mode bits are synthetic; the runtime pin verifier already
+  // follows this policy. Do not pretend a chmod check validates Windows ACLs.
+  if (platform === "win32") return { ok: true, bin: anetBin, notes: ["Windows: POSIX executable/mode checks do not validate ACLs."] };
   if ((st.mode & 0o022) !== 0) {
     const before = (st.mode & 0o777).toString(8);
     return {
