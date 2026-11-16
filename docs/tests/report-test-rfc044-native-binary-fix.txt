@@ -1,0 +1,41 @@
+RFC-044 / PR #3619 native CI follow-up
+
+Observed run: https://github.com/sleep2agi/agent-network/actions/runs/43901827048
+Windows primitives and Linux Docker succeeded. Windows first reply failed at
+daemon init due to prepareDaemonAnetBin's blanket Windows rejection. macOS
+reached task delivery, then processWithClaude's Linux-only preflight rejected
+the packaged executable. Logs were exported by the reviewer, not inferred:
+/tmp/opencode/3619-windows-step9.log
+/tmp/opencode/3619-macos-step9.log
+
+Changes:
+- Remove the obsolete Windows daemon prepare/pin exclusions. Keep package/pin
+  safety checks and Windows SDK-only runtime guards.
+- Resolve @anthropic-ai/claude-agent-sdk-${platform}-${arch}/claude (Windows:
+  claude.exe). Preflight and query.pathToClaudeCodeExecutable share this path.
+- Probe --version using execFileSync with argv, shell:false, 15s timeout.
+- Missing package produces its exact platform package name and instructions to
+  repair optionalDependencies, not instructions to install a global Claude CLI.
+- Remove which/global and SDK-default fallback. Preserve the existing pinned
+  Linux-x64 glibc missing-package install, limited to its actual architecture.
+
+Package evidence:
+SDK 0.3.289 optionalDependencies include linux/darwin/win32 x64 and arm64.
+The isolated Linux image actually contains SDK, linux-x64 and linux-x64-musl.
+Registry tar members confirmed: darwin-arm64 package/claude, win32-x64 and
+win32-arm64 package/claude.exe. No platform package install scripts are needed.
+This does not attest the contents of the already-disposed native runner prefix.
+
+Docker verification command:
+sg docker -c 'docker build -f tests/test-rfc044-windows-daemon/Dockerfile -t anet-rfc044-sdk-units . && docker run --rm --network none anet-rfc044-sdk-units && docker build -f tests/test-rfc044-windows-daemon/Dockerfile.smoke -t anet-rfc044-sdk-smoke . && docker run --rm --network none --cpus 2 --memory 3g anet-rfc044-sdk-smoke'
+Exit: 0. Raw local output: /tmp/opencode/rfc044-native-binary-fix.log
+Focused/native resolver: 19 pass, 1 skip, 70 assertions.
+Create/CLI pin regression: 110 pass, 0 fail, 275 assertions.
+Stop/identity regression: 85 pass, 2 skips, 338 assertions.
+Total: 214 pass, 3 platform-only skips, 0 fail, 683 assertions.
+Real SDK reply: init_to_reply_ms=4855, model_requests=1, cloud sentinel unchanged.
+stop_node ack accepted: sr_f174ffc6c7bc.
+
+Native Windows/macOS rerun remains REQUIRED. No claim of no-git native SDK
+success, complete Windows process-tree acceptance, or clean-App timing yet.
+No Git dependency, global package, production or schedule change was made.

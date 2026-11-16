@@ -5,7 +5,27 @@ import {
   claudeLinuxX64PackageSpec,
   installPinnedClaudeNativeBinary,
   resolveInstalledClaudeSdkVersion,
+  resolveBundledClaudeBinary,
 } from "./claude-native-binary";
+
+describe("Claude SDK packaged executable resolution", () => {
+  for (const platform of ["linux", "darwin", "win32"] as const) for (const arch of ["x64", "arm64"]) {
+    test(`${platform}-${arch} resolves only its platform package`, () => {
+      const wanted = `@anthropic-ai/claude-agent-sdk-${platform}-${arch}/${platform === "win32" ? "claude.exe" : "claude"}`;
+      const calls: string[] = [];
+      expect(resolveBundledClaudeBinary({ platform, arch,
+        resolvePackage: specifier => { calls.push(specifier); return "/private install/claude"; },
+        pathExists: () => true,
+      })).toBe("/private install/claude");
+      expect(calls).toEqual([wanted]);
+    });
+  }
+  test("missing optional package/file is explicit absence, never a global fallback", () => {
+    expect(resolveBundledClaudeBinary({ platform: "darwin", arch: "arm64", resolvePackage: () => { throw Error("MODULE_NOT_FOUND"); } })).toBeNull();
+    expect(resolveBundledClaudeBinary({ platform: "win32", arch: "x64", resolvePackage: () => "missing.exe", pathExists: () => false })).toBeNull();
+    expect(() => resolveBundledClaudeBinary({ platform: "linux", arch: "riscv64", resolvePackage: () => "wrong" })).toThrow("unsupported");
+  });
+});
 
 describe("Claude native binary version pin", () => {
   test("uses a directly exported package manifest when available", () => {

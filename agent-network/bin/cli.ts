@@ -11561,11 +11561,6 @@ const DAEMON_DEFAULT_NAME = "daemon";
 let daemonAnetBinPrepared = false;
 
 function prepareDaemonAnetBin(): void {
-  if (process.platform === "win32") {
-    console.error("[anet daemon] Windows is not supported for host_supervisor daemon mode yet.");
-    console.error("[anet daemon] The daemon binary safety checks and child process model are POSIX-only; run this on Linux/macOS or WSL.");
-    process.exit(1);
-  }
   // #1353 —— 解析与校验搬到 src/daemon-anet-bin.ts,`anet node start <daemon>` 共用同一份。
   const check = checkDaemonAnetBin({ envBin: process.env.ANET_BIN_ABS, argv1: process.argv[1] });
   if (!check.ok) {
@@ -11586,7 +11581,6 @@ function prepareDaemonAnetBin(): void {
  *  由 agent-node 把 can_create_nodes=false 报给 hub(#1371/#1510),这里只给一行修法。 */
 function pinDaemonAnetBinForNodeStart(alias: string, role: string | undefined): void {
   if (!shouldPinDaemonOnNodeStart({ role, alreadyPrepared: daemonAnetBinPrepared })) return;
-  if (process.platform === "win32") return;
   const check = checkDaemonAnetBin({ envBin: process.env.ANET_BIN_ABS, argv1: process.argv[1] });
   if (!check.ok) {
     console.error(`[anet daemon] #1353 "${alias}" is a daemon but its anet binary pin did not verify; starting it anyway — it will report "cannot create nodes" to the hub until fixed:`);
