@@ -165,11 +165,12 @@ try {
   const stopped = await mcp("stop_node", { node_id: child.node_id });
   assert(stopped.ok, JSON.stringify(stopped));
   const { db } = await import("../../server/src/db.js");
+  const { DAEMON_CLI_STOP_TIMEOUT_MS } = await import("../../agent-node/src/runtime/stop-daemon.js");
   await wait(async () => {
     const row = db.get<{ status: string; error: string | null }>("SELECT status, error FROM node_stop_requests WHERE request_id = ?1", stopped.request_id);
     if (row?.status === "stop_failed") throw Error(JSON.stringify(row));
     return row?.status === "stopped" ? row : null;
-  }, "daemon acknowledges native process-tree stop");
+  }, "daemon acknowledges native process-tree stop", DAEMON_CLI_STOP_TIMEOUT_MS + 15_000);
 } catch (error) {
   // Native SDK/bootstrap errors must be actionable, including a missing git
   // dependency. Emit only bounded logs, never the credential-bearing config.

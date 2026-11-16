@@ -39,3 +39,33 @@ stop_node ack accepted: sr_f174ffc6c7bc.
 Native Windows/macOS rerun remains REQUIRED. No claim of no-git native SDK
 success, complete Windows process-tree acceptance, or clean-App timing yet.
 No Git dependency, global package, production or schedule change was made.
+
+Native rerun on deb6207c: run 43906042867
+Windows job 133435888763 log: /tmp/opencode/3619-133435888763.log.
+Native Windows SDK first reply verified: init_to_reply_ms=16932,
+model_requests=1, first_reply=WINDOWS_SDK_FIRST_REPLY, cloud sentinel unchanged.
+The final stop acknowledgment observer timed out after 60 seconds; the product
+CLI subprocess's existing bound is 120 seconds and its output was buffered.
+Child SSE disconnected 56 seconds after stop dispatch. This is evidence of
+progress, not proof of successful tree stop or of a missing lifecycle receipt.
+The rebuild log's "0 children" counts the Hub list at that moment, NOT on-disk
+lifecycle identities. No path-normalization root cause has been established.
+
+Follow-up changes preserve the 120-second product bound, align the smoke's
+observation bound to that value + 15 seconds for acknowledgment, and add bounded
+live CLI output plus receipt/capture/revalidation/taskkill/verdict stage logs.
+Missing identity and failed acknowledgment are logged explicitly; no identity
+or descendant-exit safety predicate is weakened. Actual stop cause/result must
+still be established on the next native run, not claimed fixed from Linux.
+
+The workflow already has strategy.fail-fast:false. Public API reports macOS
+cancelled with no steps, 16:19:54 to 16:35:10, rather than cancellation at the
+Windows failure at 16:22. No unsupported fail-fast diagnosis or CI edit made.
+
+Observation/diagnostics follow-up Docker verification (same command): exit 0.
+Raw output: /tmp/opencode/rfc044-windows-stop-observation.log
+19 pass / 1 skip / 70 assertions; 110 pass / 275 assertions;
+86 pass / 2 skips / 350 assertions. Total 215 pass, 3 skips, 695 assertions.
+SDK first reply 4583ms; stopped ack sr_f3ce6a93d770. Added negative controls
+confirm missing local config/receipt-delegation failure emit stop_failed and
+diagnostics, without invoking alias scans or weakening native stop verification.

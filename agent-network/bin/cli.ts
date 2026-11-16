@@ -13369,6 +13369,8 @@ Stop a running agent node.
  * proven stopped is never deleted.
  */
 async function stopResolvedNode(resolved: { id: string; profile: Profile }, stopInvokedAt: number = Date.now()) {
+  const windowsSdkStop = process.platform === "win32" && resolved.profile.runtime === "claude-agent-sdk";
+  if (windowsSdkStop) console.log("[anet] Windows SDK stop: acquiring lifecycle lock");
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   const borrowedHostSelected = hasBorrowedV1Intent(join(nodesDir(),resolved.id),resolved.profile);
   let stopGeneration = "";
@@ -13376,6 +13378,7 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
   try {
     await withLifecycleLock(resolved.id, () => {
       const prior = readLifecycleOwner(resolved.id);
+      if (windowsSdkStop) console.log(`[anet] Windows SDK stop: receipt=${prior ? prior.state : "missing"}, identities=${prior?.processes?.length ?? 0}`);
       stopGeneration = prior?.generation || randomUUID();
       let roots = prior?.processes || [];
       if (process.platform === "win32" && resolved.profile.runtime === "claude-agent-sdk" && !prior) {
@@ -13427,9 +13430,10 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
   }
   if (process.platform === "win32") {
     if (resolved.profile.runtime === "claude-agent-sdk") {
+      console.log(`[anet] Windows SDK stop: native tree verification begins (roots=${stopProcesses.length})`);
       const stop = orchestrateWindowsManagedStop(stopProcesses.map(identity => ({
         role: identity.role, pid: identity.pid, creationDate: identity.birth,
-      })));
+      })), { onProgress: stage => console.log(`[anet] Windows SDK stop: ${stage}`) });
       for (const diagnostic of stop.verdict.retainedDiagnostics) console.warn(`[anet] ${diagnostic}`);
       if (stop.verdict.kind !== "stopped") {
         console.error(`[anet] WINDOWS_SDK_STOP_UNPROVEN: ${stop.verdict.kind}; lifecycle receipt kept, hub not notified offline`);

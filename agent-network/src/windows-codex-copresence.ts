@@ -463,6 +463,7 @@ export function probeWindowsCimIdentity(
 export interface WindowsStopOrchestrationDeps {
   runPowerShell?: (script: string) => string;
   runTaskkill?: (pid: number) => TaskkillOutcome;
+  onProgress?: (stage: string) => void;
 }
 
 export interface WindowsStopOrchestration {
@@ -490,7 +491,9 @@ export function orchestrateWindowsManagedStop(
   const gaps: string[] = [];
   const notes: string[] = [];
   for (const root of roots) {
+    deps.onProgress?.(`capture ${root.role} pid=${root.pid}`);
     const captured = captureWindowsDescendantIdentities(root, { runPowerShell });
+    deps.onProgress?.(`captured ${root.role}: descendants=${captured.identities.length}, unknown=${!!captured.unknownReason}`);
     if (captured.unknownReason) gaps.push(captured.unknownReason);
     identities.push(...captured.identities);
   }
@@ -498,10 +501,13 @@ export function orchestrateWindowsManagedStop(
   const killedPids: number[] = [];
   for (const root of [...roots].reverse()) {
     const label = `${root.role} pid=${root.pid}`;
+    deps.onProgress?.(`revalidate ${label}`);
     const state = probeWindowsIdentity(root.pid, root.creationDate, runPowerShell, root.kind);
     if (state !== "alive") { notes.push(`kill withheld for ${label}: root identity ${state}`); continue; }
     killedPids.push(root.pid);
+    deps.onProgress?.(`taskkill ${label}`);
     kills.push({ label, outcome: runTaskkill(root.pid) });
+    deps.onProgress?.(`taskkill finished ${label}`);
   }
   // 🔴 非零 kill ⇒ 必须以**遍历本身**证明「没有未记账的存活后代」：
   //    快照只提供 (pid, ppid)，遍历在 JS 侧、种子是**全部已捕获身份**（根 + 后代），
@@ -528,8 +534,12 @@ export function orchestrateWindowsManagedStop(
     kills,
     notes,
     captureUnknown: [...gaps, ...reconGaps],
-    probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell, identity.kind),
+    probe: (identity) => {
+      deps.onProgress?.(`verify ${identity.role} pid=${identity.pid}`);
+      return probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell, identity.kind);
+    },
   });
+  deps.onProgress?.(`verdict=${verdict.kind}`);
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
 
