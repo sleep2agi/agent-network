@@ -1,0 +1,45 @@
+#4616 phase 3 — scoped node-token permission tightening
+Base: origin/main a4c6d105. Branch: feat/4616-permissions-tighten.
+
+All execution in Docker; network disabled at test runtime; disposable SQLite.
+COMMHUB_NODE_PERMISSIONS=enforce in the dedicated runner and initial regression
+environment. Legacy regression tests intentionally exercise log/off/enforce too.
+
+Commands actually run (from repository root):
+  sg docker -c 'docker build -f tests/test4616-permissions/Dockerfile -t anet-test4616-permissions-final . && docker run --rm --network none anet-test4616-permissions-final'
+  sg docker -c 'docker build -f tests/test4616-permissions/Dockerfile -t anet-test4616-permissions . && docker run --rm --network none anet-test4616-permissions && docker run --rm --network none -e COMMHUB_NODE_PERMISSIONS=enforce -e COMMHUB_DB=/tmp/regression.db anet-test4616-permissions bun test server/src/node-grants-http.test.ts server/src/node-inbox-allowlist-http.test.ts server/src/node-permissions-http.test.ts server/src/tool-audience-http.test.ts'
+
+Final dedicated image (no host source mounts):
+  pure comparison: 2 pass / 0 fail / 20 assertions
+  real HTTP: 15 pass / 0 fail / 52 assertions
+  includes grant installation through existing REST, edit-only validation,
+  node/network/department-descendant scope, cross-network denial, self denial,
+  readonly caller downgrade, immediate revocation, current-state last-write-wins,
+  inbox subset/null/empty handling, !strict preservation and attributed audits.
+  Transcript: /tmp/opencode/test4616-delivery.log
+
+Explicit real HTTP refusal evidence (printed by dedicated test command above):
+  PUT permission-mode without grant -> 403
+    {"ok":false,"error":"node_permission_denied","reason":"not_granted"}
+  PUT permission-mode on caller itself with network grant -> 403
+    {"ok":false,"error":"node_permission_denied","reason":"self"}
+  PUT permission-mode restricted -> normal with grant -> 403
+    {"ok":false,"error":"node_permission_denied","reason":"not_tightening"}
+  Tests assert denied writes preserve target state.
+
+Existing four-file regression: 117 pass / 0 fail / 805 assertions.
+  tools/list bytes: all 86428 B / node 63669 B / user 58191 B.
+  Existing audience byte ceiling assertions pass WITHOUT changing ceilings,
+  tools, descriptions or schemas. Transcript: /tmp/opencode/test4616-verified.log
+  This regression image predates two additional dedicated HTTP cases, but has
+  the same product code and the updated intentional legacy self-denial assertions.
+
+Earlier attempt: /tmp/opencode/test4616-final.log: 60 pass / 1 fail / 542
+assertions. Only failure expected old user_token_required for a self-write;
+new specified reason is self. Updated that assertion and the analogous mode
+assertion, kept refusal status 403; final regression above passes.
+
+No App changes, new MCP interface, new database table, real crontab writes,
+global package changes, npm publication, production upgrade or deployment.
+REST endpoint interpretation and !strict security edge flagged to 通信欧 for
+explicit confirmation; no release/native-client acceptance claim.

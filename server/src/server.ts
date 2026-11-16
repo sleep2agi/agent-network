@@ -16,6 +16,8 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
+import { isInboxTightening, isPermissionModeTightening } from "./permission-tightening.js";
+import { permissionManagementAudit, permissionManagementDenial } from "./node-permission-management.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
 import { activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { countInFlightTasks } from "./node-in-flight-tasks.js";
@@ -4133,7 +4135,8 @@ return Bun.serve({
     const permModeMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/permission-mode$/);
     if (permModeMatch && req.method === "PUT") {
       if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
-      if (restAuth.networkId) return userTokenRequired(req);
+      const delegated = !!restAuth.networkId;
+      const permissionCaller = delegated ? nodeIdentity(restAuth.tokenId, restAuth.networkId) : null;
       let body: any;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
       const mode = body?.mode;
@@ -4145,14 +4148,18 @@ return Bun.serve({
         "SELECT node_id, network_id, owner_user_id, permission_mode FROM nodes WHERE node_id = ?1", nodeRef);
       const role = node?.network_id ? getUserNetworkRole(restAuth.userId, node.network_id) : null;
       // 看不见这个节点(不在它的网络里)与不存在同一个 404。
-      if (!node || !node.network_id || (!role && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (!node || !node.network_id || (delegated ? node.network_id !== restAuth.networkId : (!role && !isAdmin))) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
       // 节点主人、网络 owner / admin、Hub 管理员能改;部门负责人和别的成员不能(RFC-041 §2.3 / §2.4)。
-      if (!canRestWriteNodeSecurity(restAuth, node.owner_user_id, role, isAdmin)) {
+      if (delegated) {
+        const reason = permissionManagementDenial(permissionCaller, node.network_id, node.node_id)
+          ?? (!isPermissionModeTightening(node.permission_mode || "normal", mode) ? "not_tightening" : null);
+        if (reason) return withCors(req, Response.json({ ok: false, error: "node_permission_denied", reason }, { status: 403 }));
+      } else if (!canRestWriteNodeSecurity(restAuth, node.owner_user_id, role, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its permission mode" }, { status: 403 }));
       }
       const previous = (node.permission_mode || "normal") as NodePermissionMode;
       db.run("UPDATE nodes SET permission_mode = ?1 WHERE node_id = ?2", [mode, node.node_id]);
-      logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode }), getClientIP(req), node.network_id);
+      logAudit(restAuth.userId, restAuth.username, "node_permission_mode_changed", "node", node.node_id, JSON.stringify({ from: previous, to: mode, ...permissionManagementAudit(permissionCaller) }), getClientIP(req), node.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node.node_id, permission_mode: mode, previous }));
     }
     // 2026-10-31 —— **读侧：这个节点当前用的是哪个 provider / 模型**（#3145 的数据面）。
@@ -4445,7 +4452,8 @@ return Bun.serve({
     const inboxAllowMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/inbox-allowlist$/);
     if (inboxAllowMatch && req.method === "PUT") {
       if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
-      if (restAuth.networkId) return userTokenRequired(req);
+      const delegated = !!restAuth.networkId;
+      const permissionCaller = delegated ? nodeIdentity(restAuth.tokenId, restAuth.networkId) : null;
       let body: any;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
       const rawSenders = body?.senders;
@@ -4469,13 +4477,17 @@ return Bun.serve({
       const node5 = db.get<{ node_id: string; network_id: string | null; owner_user_id: string | null; inbox_allowlist: string | null }>(
         "SELECT node_id, network_id, owner_user_id, inbox_allowlist FROM nodes WHERE node_id = ?1", nodeRef5);
       const role5 = node5?.network_id ? getUserNetworkRole(restAuth.userId, node5.network_id) : null;
-      if (!node5 || !node5.network_id || (!role5 && !isAdmin)) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
-      if (!canRestWriteNodeSecurity(restAuth, node5.owner_user_id, role5, isAdmin)) {
+      if (!node5 || !node5.network_id || (delegated ? node5.network_id !== restAuth.networkId : (!role5 && !isAdmin))) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (delegated) {
+        const reason = permissionManagementDenial(permissionCaller, node5.network_id, node5.node_id)
+          ?? (!isInboxTightening(normalizePeerAllowlist(node5.inbox_allowlist), senders.length ? senders : null) ? "not_tightening" : null);
+        if (reason) return withCors(req, Response.json({ ok: false, error: "node_permission_denied", reason }, { status: 403 }));
+      } else if (!canRestWriteNodeSecurity(restAuth, node5.owner_user_id, role5, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only the node's owner or a network owner/admin can change its inbox allowlist" }, { status: 403 }));
       }
       const nextSenders = senders.length ? JSON.stringify(senders) : null;
       db.run("UPDATE nodes SET inbox_allowlist = ?1 WHERE node_id = ?2", [nextSenders, node5.node_id]);
-      logAudit(restAuth.userId, restAuth.username, "node_inbox_allowlist_changed", "node", node5.node_id, JSON.stringify({ from: node5.inbox_allowlist, to: nextSenders }), getClientIP(req), node5.network_id);
+      logAudit(restAuth.userId, restAuth.username, "node_inbox_allowlist_changed", "node", node5.node_id, JSON.stringify({ from: node5.inbox_allowlist, to: nextSenders, ...permissionManagementAudit(permissionCaller) }), getClientIP(req), node5.network_id);
       return withCors(req, Response.json({ ok: true, node_id: node5.node_id, senders: senders.length ? senders : null }));
     }
     const permReportMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/node-permission-report$/);

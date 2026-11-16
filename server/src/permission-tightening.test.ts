@@ -18,4 +18,6 @@ test("inbox is a nonempty subset; null is unlimited, never a tightening target",
   expect(isInboxTightening(["a"], null)).toBe(false);
   expect(isInboxTightening(null, null)).toBe(false);
   expect(isInboxTightening(["a"], [])).toBe(false);
+  expect(isInboxTightening(["!strict", "a"], ["a"])).toBe(false);
+  expect(isInboxTightening(["!strict", "a"], ["!strict"])).toBe(true);
 });

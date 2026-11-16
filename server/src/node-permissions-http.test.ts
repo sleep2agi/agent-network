@@ -221,7 +221,7 @@ describe("PUT /api/nodes/:id/permission-mode", () => {
     const modeAfterDenied = db.get<{ permission_mode: string }>(
       "SELECT permission_mode FROM nodes WHERE node_id = ?1", node.nN.id)!.permission_mode;
     expect(modeAfterDenied).toBe(modeBeforeDenied);
-    expect((await call(node.nN.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "normal" })).body.error).toBe("user_token_required");
+    expect((await call(node.nN.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "normal" })).body.reason).toBe("self");
     expect((await call(user.out.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "readonly" })).status).toBe(404);
     expect((await call(user.boss.token, "PUT", `/api/nodes/${node.nN.id}/permission-mode`, { mode: "admin" })).status).toBe(400);
     expect(db.get<{ n: number | string }>("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'node_permission_mode_changed' AND target_id = ?1", node.nN.id)!.n).toBeTruthy();
