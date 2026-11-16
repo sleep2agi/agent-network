@@ -237,3 +237,49 @@ describe("任务看板 —— 授权让节点看得到 / 改得了", () => {
     expect(await cardIds(node.mgr.token)).not.toContain(cardA);
   });
 });
+
+// admin 2026-11-16「节点新增权限可以编辑其他人的 AGENTS.md 的管理权限」:rules 能力。
+describe("rules 授权 —— 节点写别的节点的规则文件", () => {
+  const write = (token: string, nodeId: string) => mcp(token, "write_node_rules_file", { node_id: nodeId, content: "# rules\n" });
+  const clearQueue = () => db.run("DELETE FROM node_rules_requests WHERE node_id IN (?1, ?2, ?3)", [node.mgr.id, node.a.id, node.b.id]);
+
+  test("写自己的不需要授权", async () => {
+    clearQueue();
+    await putGrants(user.boss.token, node.mgr.id, []);
+    const r = await write(node.mgr.token, node.mgr.id);
+    expect(r.ok).toBe(true);
+  });
+  test("没授权写别人的 ⇒ rules_write_not_granted", async () => {
+    clearQueue();
+    const r = await write(node.mgr.token, node.a.id);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("rules_write_not_granted");
+  });
+  test("rules·node·edit ⇒ 只能写那一个节点", async () => {
+    clearQueue();
+    expect((await putGrants(user.boss.token, node.mgr.id, [{ capability: "rules", scope_kind: "node", scope_id: node.a.id, level: "edit" }])).status).toBe(200);
+    expect((await write(node.mgr.token, node.a.id)).ok).toBe(true);
+    expect((await write(node.mgr.token, node.b.id)).error).toBe("rules_write_not_granted");
+  });
+  test("rules·department·edit 覆盖子树;read 级别不能写", async () => {
+    clearQueue();
+    await putGrants(user.boss.token, node.mgr.id, [{ capability: "rules", scope_kind: "department", scope_id: deptB, level: "edit" }]);
+    expect((await write(node.mgr.token, node.b.id)).ok).toBe(true);
+    clearQueue();
+    await putGrants(user.boss.token, node.mgr.id, [{ capability: "rules", scope_kind: "network", level: "read" }]);
+    expect((await write(node.mgr.token, node.b.id)).error).toBe("rules_write_not_granted");
+  });
+  test("只读节点即使有 edit 授权也不能写别人的", async () => {
+    clearQueue();
+    await putGrants(user.boss.token, node.mgr.id, [{ capability: "rules", scope_kind: "network", level: "edit" }]);
+    db.run("UPDATE nodes SET permission_mode = 'readonly' WHERE node_id = ?1", [node.mgr.id]);
+    const r = await write(node.mgr.token, node.a.id);
+    db.run("UPDATE nodes SET permission_mode = 'normal' WHERE node_id = ?1", [node.mgr.id]);
+    expect(r.ok).toBe(false);
+  });
+  test("人(用户令牌)照旧能写", async () => {
+    clearQueue();
+    await putGrants(user.boss.token, node.mgr.id, []);
+    expect((await write(user.boss.token, node.a.id)).ok).toBe(true);
+  });
+});

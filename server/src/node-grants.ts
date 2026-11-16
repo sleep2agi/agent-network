@@ -2,7 +2,7 @@
 // 也可以只管某个部门下的」）。
 //
 // 模型 = 能力 × 范围 × 级别，按行存在 node_grants：
-//   capability  schedules（第一期）；board（第二期，随 requirements 读写判定一起上线）
+//   capability  schedules（第一期）；board（第二期，随 requirements 读写判定一起上线）；rules（写别的节点的 AGENTS.md）
 //   scope_kind  network（整个网络，scope_id = ""）| department（该部门及全部下级，scope_id = department_id）
 //               | node（单个节点，scope_id = node_id）
 //   level       read（只看）| edit（看 + 改）
@@ -33,7 +33,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_node_grants_node ON node_grants(node_id);
 `);
 
-export const GRANT_CAPABILITIES = ["schedules", "board"] as const;
+// rules（admin 2026-11-16「节点新增权限可以编辑其他人的 AGENTS.md 的管理权限」）：
+//   节点令牌写**别的节点**的规则文件（AGENTS.md / CLAUDE.md）必须有 rules·edit 覆盖目标；写自己的不需要。
+//   读照旧（read 类工具），人（用户令牌）不受影响。
+export const GRANT_CAPABILITIES = ["schedules", "board", "rules"] as const;
 // 第二期（board）：能力与判定 + requirements 读写判定已在同一个 PR 里一起上 ⇒ 现在开闸。
 export const GRANT_CAPABILITIES_PLANNED = [] as const;
 export type GrantCapability = (typeof GRANT_CAPABILITIES)[number];
