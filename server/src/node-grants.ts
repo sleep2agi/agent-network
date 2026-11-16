@@ -36,7 +36,7 @@ db.exec(`
 // rules（admin 2026-11-16「节点新增权限可以编辑其他人的 AGENTS.md 的管理权限」）：
 //   节点令牌写**别的节点**的规则文件（AGENTS.md / CLAUDE.md）必须有 rules·edit 覆盖目标；写自己的不需要。
 //   读照旧（read 类工具），人（用户令牌）不受影响。
-export const GRANT_CAPABILITIES = ["schedules", "board", "rules"] as const;
+export const GRANT_CAPABILITIES = ["schedules", "board", "rules", "permissions"] as const;
 // 第二期（board）：能力与判定 + requirements 读写判定已在同一个 PR 里一起上 ⇒ 现在开闸。
 export const GRANT_CAPABILITIES_PLANNED = [] as const;
 export type GrantCapability = (typeof GRANT_CAPABILITIES)[number];
@@ -81,6 +81,7 @@ export function parseNodeGrants(networkId: string, raw: unknown): GrantValidatio
     }
     const level = g.level ?? "edit";
     if (level !== "read" && level !== "edit") return { ok: false, error: "invalid_level", index: i, message: "level must be read or edit" };
+    if (capability === "permissions" && level !== "edit") return { ok: false, error: "invalid_level", index: i, message: "permissions only accepts edit" };
     const key = `${capability}|${kind}|${scopeId}`;
     if (seen.has(key)) continue;
     seen.add(key);
