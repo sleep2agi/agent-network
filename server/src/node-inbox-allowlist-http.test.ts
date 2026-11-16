@@ -137,10 +137,11 @@ describe("PUT /api/nodes/:id/inbox-allowlist —— 与 peer-allowlist 同形", 
     expect(storedInbox()).toBe(JSON.stringify(["keep"]));
   });
 
-  test("节点令牌 403 user_token_required;网络外的人 / 不存在的节点 404;无令牌 401", async () => {
+  test("节点令牌改自己 403 self;网络外的人 / 不存在的节点 404;无令牌 401", async () => {
     const asNode = await put(node.tgt.token, { senders: ["x"] });
     expect(asNode.status).toBe(403);
-    expect(asNode.body.error).toBe("user_token_required");
+    expect(asNode.body.error).toBe("node_permission_denied");
+    expect(asNode.body.reason).toBe("self");
     expect((await put(user.out.token, { senders: ["x"] })).status).toBe(404);
     expect((await put(user.boss.token, { senders: ["x"] }, "n_does_not_exist")).status).toBe(404);
     const anon = await fetch(`${base}/api/nodes/${node.tgt.id}/inbox-allowlist`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" });
