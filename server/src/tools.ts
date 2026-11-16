@@ -58,6 +58,7 @@ import {
   validateOpenCodeV2ProviderModel,
   ValidationError,
 } from "./create-node-validate.js";
+import { grantLevelForTarget } from "./node-grants.js";
 import {
   putPendingEnvBlob,
   takePendingEnvBlob,
@@ -4487,6 +4488,23 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
     }
     const nodeId = node.node_id;
+    // admin 2026-11-16 —— 节点令牌改**别的节点**的规则文件要有 rules·edit 授权（节点页「管理权限」里给）。
+    // 改自己的照旧放行；人（用户令牌）不走这条。只读节点一律降为 read ⇒ 不能写。
+    if (op === "write" && callerTokenIsNetwork) {
+      const caller = resolveNodeCaller(callerTokenId);
+      const self = caller.ok && (caller.kind === "node" ? caller.nodeId === nodeId : false)
+        || caller.ok && node.alias === caller.alias;
+      if (!self) {
+        const callerNodeId = caller.ok && caller.kind === "node" ? caller.nodeId : null;
+        const mode = callerNodeId ? db.get<{ permission_mode: string | null }>("SELECT permission_mode FROM nodes WHERE node_id = ?1", callerNodeId)?.permission_mode ?? null : null;
+        const level = callerNodeId && !nodeId.startsWith("session:")
+          ? grantLevelForTarget(node.network_id || "default", callerNodeId, "rules", nodeId, mode)
+          : null;
+        if (level !== "edit") {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "rules_write_not_granted", target: node.alias, message: "a node may only edit its own rules file; editing another node's AGENTS.md needs a 'rules' edit grant covering that node (node page → 管理权限), or use a user login" }) }] };
+        }
+      }
+    }
     if (isLogsOp(op) && !canReadNodeLogs(nodeId, node.network_id || "default")) {
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "logs_permission_denied", message: "only the node's owner or a network owner/admin can read its run log" }) }] };
     }
