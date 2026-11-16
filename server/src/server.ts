@@ -3923,7 +3923,8 @@ return Bun.serve({
           since: startedAtIso,
           task_rejections: taskRejectionCounters(),
           // #3271 —— 「到死都没被取走」按节点分桶。窗口用同一个 since。
-          task_expiries_never_consumed: neverConsumedExpiryCounters(),
+          // recent_at 只给闸用（逐条时刻，按节点最多 16 条），不进这个读数，免得读数随节点数膨胀。
+          task_expiries_never_consumed: (({ recent_at: _recent, ...rest }) => rest)(neverConsumedExpiryCounters()),
           // #3314 B 类 —— 故意匿名的那两条路由（register / login）没有身份门，
           // 它们的健康度只能从「限流与锁定命中了几次、打到了几个不同来源」读出来。
           // 比值才是有意义的部分：命中数 ≫ 去重数 ⇒ 单点重试；两者接近 ⇒ 换 IP / 撒网。

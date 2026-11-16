@@ -234,3 +234,54 @@ describe("2026-11-13 内存计数也以「最后一次回复」为界（恢复�
     expect(parseHubTime("garbage")).toBeNull();
   });
 });
+
+describe("2026-11-16 内存计数只数「最后一次回复之后」的那几条（admin：TMA客户端欧 内存 4、回复后实际 2，仍被拒）", () => {
+  const NOW = Date.parse("2026-11-16T03:00:00.000Z");
+  const sqlite = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19);
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const memAt = (times: number[]) => ({
+    since: "2026-11-15T13:17:00.000Z", total: times.length, by_node: { tma: times.length },
+    last_at: { tma: iso(times[times.length - 1]) }, recent_at: { tma: times.map(iso) },
+  });
+
+  test("🔴 回复前 3 次 + 回复后 1 次 ⇒ 只算 1 次，放行", () => {
+    const h = 60 * 60_000;
+    const r = neverConsumeGate({
+      alias: "tma", counters: memAt([NOW - 13 * h, NOW - 12 * h, NOW - 11 * h, NOW - 1 * h]), force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 1, last_at: sqlite(NOW - h), last_reply_at: sqlite(NOW - 2 * h) },
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  test("负数用例：回复后又过期 3 次 ⇒ 仍然拒，拒绝体带 last_reply_at", () => {
+    const m = 60_000;
+    const r = neverConsumeGate({
+      alias: "tma", counters: memAt([NOW - 90 * m, NOW - 30 * m, NOW - 20 * m, NOW - 10 * m]), force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 0, last_at: null, last_reply_at: sqlite(NOW - 60 * m) },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.expiries).toBe(3);
+      expect(r.last_reply_at).toBe(sqlite(NOW - 60 * m));
+    }
+  });
+
+  test("没有 recent_at（旧快照）⇒ 退回原来的整桶计数", () => {
+    const m = 60_000;
+    const r = neverConsumeGate({
+      alias: "tma", counters: { since: "x", total: 4, by_node: { tma: 4 }, last_at: { tma: iso(NOW - 10 * m) } }, force: false, forceAllowed: true, now: NOW,
+      persistent: { expiries: 0, last_at: null, last_reply_at: sqlite(NOW - 60 * m) },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  test("noteNeverConsumedExpiry 记下逐条时刻，最多 16 条", () => {
+    resetNeverConsumedExpiryCountersForTest(new Date(NOW));
+    for (let i = 0; i < 20; i++) noteNeverConsumedExpiry("tma", NOW + i * 1000);
+    const c = neverConsumedExpiryCounters();
+    expect(c.by_node.tma).toBe(20);
+    expect(c.recent_at?.tma.length).toBe(16);
+    expect(c.recent_at?.tma[15]).toBe(iso(NOW + 19 * 1000));
+    expect(c.last_at.tma).toBe(iso(NOW + 19 * 1000));
+  });
+});

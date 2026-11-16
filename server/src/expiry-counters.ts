@@ -25,9 +25,17 @@ export type NeverConsumedExpiryCounters = {
   by_node: Record<string, number>;
   /** 每个节点最近一次「从未取走」的时刻（ISO）。**光有计数会永久拉黑一台恢复了的节点。** */
   last_at: Record<string, string>;
+  /**
+   * 2026-11-16 —— 每个节点最近几次「从未取走」的时刻（ISO，旧→新，最多 RECENT_CAP 条）。
+   * 闸要数的是「最后一次回复**之后**」的过期；只有 count + lastAt 时，回复之前攒下的过期
+   * 会和回复之后的一条一起被算进去（现场：TMA客户端欧 内存 4、库里回复之后只有 2，仍被拒）。
+   */
+  recent_at?: Record<string, string[]>;
 };
 
-type Bucket = { count: number; lastAt: number };
+/** 每个节点保留的最近过期时刻条数（够判阈值 3，键有限、不随请求膨胀）。 */
+const RECENT_CAP = 16;
+type Bucket = { count: number; lastAt: number; recent: number[] };
 const counters = new Map<string, Bucket>();
 let since = new Date().toISOString();
 
@@ -35,19 +43,22 @@ let since = new Date().toISOString();
 export function noteNeverConsumedExpiry(node: string, now = Date.now()): void {
   const key = node || "(unknown)";
   const prev = counters.get(key);
-  counters.set(key, { count: (prev?.count ?? 0) + 1, lastAt: now });
+  const recent = [...(prev?.recent ?? []), now].slice(-RECENT_CAP);
+  counters.set(key, { count: (prev?.count ?? 0) + 1, lastAt: now, recent });
 }
 
 export function neverConsumedExpiryCounters(): NeverConsumedExpiryCounters {
   let total = 0;
   const by_node: Record<string, number> = {};
   const last_at: Record<string, string> = {};
+  const recent_at: Record<string, string[]> = {};
   for (const [k, v] of [...counters.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     by_node[k] = v.count;
     last_at[k] = new Date(v.lastAt).toISOString();
+    recent_at[k] = v.recent.map(t => new Date(t).toISOString());
     total += v.count;
   }
-  return { since, total, by_node, last_at };
+  return { since, total, by_node, last_at, recent_at };
 }
 
 /** 仅测试用：清零并重置窗口。 */
@@ -166,7 +177,7 @@ export function persistentNeverConsumedExpiries(
 
 export type NeverConsumeGate =
   | { ok: true }
-  | { ok: false; error: "target_never_consumes"; alias: string; expiries: number; window_since: string; message: string };
+  | { ok: false; error: "target_never_consumes"; alias: string; expiries: number; window_since: string; last_reply_at: string | null; message: string };
 
 export function neverConsumeGate(input: {
   alias: string;
@@ -190,7 +201,13 @@ export function neverConsumeGate(input: {
   const memLastAt = parseHubTime(input.counters.last_at?.[input.alias]);
   const lastReplyAt = parseHubTime(input.persistent?.last_reply_at ?? undefined);
   const memorySupersededByReply = memLastAt !== null && lastReplyAt !== null && lastReplyAt >= memLastAt;
-  const fromMemory = memorySupersededByReply ? 0 : (input.counters.by_node[input.alias] ?? 0);
+  // 2026-11-16 —— 只比「最近一次」不够：回复之后哪怕再过期一条，回复之前攒的也会全部复活。
+  // 有逐条时刻时，只数**晚于最后一次回复**的那几条（与 DB 证据同一条边界）。
+  const recent = input.counters.recent_at?.[input.alias];
+  const fromMemory = memorySupersededByReply ? 0
+    : recent && lastReplyAt !== null
+      ? recent.map(parseHubTime).filter((t): t is number => t !== null && t > lastReplyAt).length
+      : (input.counters.by_node[input.alias] ?? 0);
   const fromDb = input.persistent?.expiries ?? 0;
   const expiries = Math.max(fromMemory, fromDb);
   if (expiries < limit) return { ok: true };
@@ -204,6 +221,7 @@ export function neverConsumeGate(input: {
       alias: input.alias,
       expiries,
       window_since: input.counters.since,
+      last_reply_at: input.persistent?.last_reply_at ?? null,
       message:
         `this target has ${fromDb} expired task(s) with no reply since its last reply`
         + `${input.persistent?.last_reply_at ? ` (${input.persistent.last_reply_at})` : " (it has never replied)"}; `
@@ -231,6 +249,7 @@ export function neverConsumeGate(input: {
     alias: input.alias,
     expiries,
     window_since: input.counters.since,
+    last_reply_at: input.persistent?.last_reply_at ?? null,
     message:
       `this target has expired ${expiries} task(s) without ever taking one (window since ${input.counters.since}); `
       + `nothing will queue correctly here until it consumes again — pass force:true (user tokens) if you know it recovered`,
