@@ -1,0 +1,31 @@
+RFC-044 Windows daemon, slice 1: path and launch primitives
+Base main: 5b325b2f. Branch: feat/rfc044-windows-daemon.
+
+Actual command (Docker build + no-network runtime, no host source mounts):
+sg docker -c 'docker build -f tests/test-rfc044-windows-daemon/Dockerfile -t anet-rfc044-paths . && docker run --rm --network none anet-rfc044-paths'
+
+Final local result:
+  new primitives: 6 pass / 1 skip (Windows-only real child) / 0 fail / 13 assertions
+  existing create-daemon + CLI bin-pin: 110 pass / 0 fail / 275 assertions
+  Transcript: /tmp/opencode/rfc044-paths-delivery.log
+  Linux and Darwin PATH invariants and POSIX permission gates remain covered by
+  these parameterized tests, not native macOS/Windows lifecycle acceptance.
+
+First attempt /tmp/opencode/rfc044-paths.log: old test expected a POSIX-colon
+PATH for win32. Updated the deliberately changed Windows expectation, preserving
+Linux/Darwin checks. Subsequent run passed before adding the Windows-only child
+and UNC private-home coverage, then final image above rebuilt and passed.
+
+Added native windows-latest primitive CI, explicitly named "not E2E":
+  .github/workflows/windows-daemon.yml
+  Real JS child uses a path containing spaces and &, resolves private HOME even
+  when USERPROFILE points to a separate cloud sentinel, writes the private config
+  and leaves the cloud config untouched. Skipped locally, NOT claimed passed.
+
+Not completed by this slice:
+  native daemon init/start, SDK runtime filtering/refusal, all process-tree
+  shutdown paths, Windows Hub->daemon->Claude SDK first reply, full daemon/child
+  config isolation, native macOS regression, 3-minute clean-install timing.
+No package version bump/publication, production changes, global installation,
+App edits or real-user crontab activity. See the App launch contract in
+docs/runbooks/windows-local-daemon.md.

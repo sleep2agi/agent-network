@@ -1,0 +1,25 @@
+name: Windows daemon
+on:
+  pull_request:
+    paths:
+      - "agent-node/**"
+      - "agent-network/**"
+      - ".github/workflows/windows-daemon.yml"
+      - "tests/test-rfc044-windows-daemon/**"
+  push:
+    branches: [main]
+concurrency:
+  group: windows-daemon-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  paths:
+    name: Windows daemon path primitives (not E2E)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Private HOME and shell-free JS launch on native Windows
+        run: bun test agent-node/src/runtime/daemon-cli-launch.test.ts agent-node/src/runtime/daemon-windows-paths.test.ts

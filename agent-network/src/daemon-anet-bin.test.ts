@@ -32,6 +32,14 @@ beforeAll(() => { root = mkdtempSync(join(tmpdir(), "anet-daemon-bin-1353-")); }
 afterAll(() => { rmSync(root, { recursive: true, force: true }); });
 
 describe("#1353 checkDaemonAnetBin —— 与 `anet daemon start` 同一套规则,非致命返回", () => {
+  test("Windows skips synthetic POSIX bits but still verifies package identity", () => {
+    const pkg = fakeAnetPackage("win-script", { mode: 0o666 });
+    const result = checkDaemonAnetBin({ argv1: pkg.argv1 }, "win32");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.notes.join(" ")).toContain("ACLs");
+    const bad = fakeAnetPackage("win-impostor", { pkgName: "not-anet" });
+    expect(checkDaemonAnetBin({ argv1: bad.argv1 }, "win32").ok).toBe(false);
+  });
   test("无 env、从 argv[1] 旁自解析 ⇒ ok,pin 指向包的 anet.cjs,env 三键齐", () => {
     const pkg = fakeAnetPackage("ok");
     const r = checkDaemonAnetBin({ argv1: pkg.argv1 });
