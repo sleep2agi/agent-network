@@ -29,6 +29,7 @@
 
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
+import { daemonCliLaunch } from "./daemon-cli-launch.js";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { childWorkDirFor, forgetChildWorkdir } from "./child-workdir.js";
@@ -94,6 +95,7 @@ export function getChildrenSnapshot(): ChildEntry[] {
 }
 
 export interface StopDoorbellDeps {
+  platform?: NodeJS.Platform;
   adoption?: AdoptDaemonDeps;
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   log: (msg: string) => void;
@@ -296,8 +298,10 @@ export async function stopCopresenceChild(alias: string, childWorkDir: string): 
   try { bin = getAnetBinAbs(); }
   catch (e: any) { return { ok: false, detail: `anet binary unavailable: ${e?.message || e}` }; }
   try {
-    const { stdout } = await execFileP(bin, ["node", "stop", alias], {
+    const launch = daemonCliLaunch(bin, ["node", "stop", alias]);
+    const { stdout } = await execFileP(launch.command, launch.args, {
       cwd: childWorkDir, env: minimalEnv(), timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
+      shell: false, windowsHide: true,
     });
     return { ok: true, detail: tailText(stdout) };
   } catch (e: any) {
@@ -383,6 +387,29 @@ export async function handleStopDoorbell(
   };
 
   const entry = childrenMap.get(child_node_id);
+  if ((deps.platform ?? process.platform) === "win32") {
+    // CLI owns the persisted generation identities, including after a daemon
+    // restart. Never enter pgrep, /proc, tmux or POSIX signal fallback here.
+    let local: any;
+    try {
+      const cfg = childDirName && join(workdirRoot, childDirName, "config.json");
+      if (!cfg || !lstatSync(cfg).isFile() || lstatSync(cfg).isSymbolicLink()) throw Error("missing local config");
+      local = JSON.parse(readFileSync(cfg, "utf8"));
+      if (local.node_id !== child_node_id || local.runtime !== "claude-agent-sdk") throw Error("local node identity/runtime mismatch");
+      const run = deps.stopCopresenceNode ?? stopCopresenceChild;
+      const stopped = await run(childDirName!, dirname(dirname(workdirRoot)));
+      if (!stopped.ok) throw Error(stopped.detail);
+    } catch (e: any) {
+      await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error: `windows_sdk_stop_failed: ${tailText(e?.message || e)}` }).catch(() => {});
+      return;
+    }
+    const backup = action === "delete" && delete_config && childDirName
+      ? moveWorkdirToTrash(childDirName, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir) : null;
+    forgetIfDeleted(backup);
+    childrenMap.delete(child_node_id);
+    await deps.callCommHub("ack_stop_request", { request_id, status: "stopped", exit_signal: "WINDOWS_PROCESS_TREE", ...(backup ? { backup_path: backup } : {}) }).catch(() => {});
+    return;
+  }
   if (!entry) {
     // #1286 (delete) + #1448 finding-3 (stop): no map entry, for BOTH actions.
     //
@@ -801,6 +828,7 @@ async function sweepOrphansForChild(
 interface MyChild { child_node_id: string; alias: string; lifecycle_state: string; managed?: string; }
 
 export interface RebuildDeps {
+  platform?: NodeJS.Platform;
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
@@ -918,6 +946,11 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
     return result;
   }
   result.total_children_from_hub = children.length;
+  if ((deps.platform ?? process.platform) === "win32") {
+    // Stop uses the CLI's on-disk lifecycle receipt, not an alias process scan.
+    deps.log(`[rebuild] Windows uses persisted CLI lifecycle identities for ${children.length} children`);
+    return result;
+  }
 
   const selfPid = process.pid;
   const daemonWorkDir = deps.workDir ?? process.cwd();
