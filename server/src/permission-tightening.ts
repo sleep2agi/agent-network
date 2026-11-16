@@ -10,5 +10,7 @@ export function isInboxTightening(previous: readonly string[] | null, next: read
   if (!next?.length) return false;
   // !strict disables implicit human bypass; removing it would widen access.
   if (previous?.includes("!strict") && !next.includes("!strict")) return false;
+  // 反向也不行：「严格」会把主人和管理员也挡在外面，那是人的决定，节点代管不能替人打开。
+  if (next.includes("!strict") && !previous?.includes("!strict")) return false;
   return previous === null || next.every(sender => previous.includes(sender));
 }

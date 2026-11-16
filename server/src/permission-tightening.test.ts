@@ -20,4 +20,7 @@ test("inbox is a nonempty subset; null is unlimited, never a tightening target",
   expect(isInboxTightening(["a"], [])).toBe(false);
   expect(isInboxTightening(["!strict", "a"], ["a"])).toBe(false);
   expect(isInboxTightening(["!strict", "a"], ["!strict"])).toBe(true);
+  // 代管节点不能替人打开「严格」（会把主人和管理员挡在外面）
+  expect(isInboxTightening(null, ["!strict", "a"])).toBe(false);
+  expect(isInboxTightening(["a", "b"], ["!strict", "a"])).toBe(false);
 });
