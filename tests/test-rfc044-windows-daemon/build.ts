@@ -11,3 +11,4 @@ mkdirSync(resolve(root, "agent-network/dist/bin"), { recursive: true });
 copyFileSync(resolve(root, "agent-network/bin/anet.cjs"), resolve(root, "agent-network/dist/bin/anet.cjs"));
 bun(["build", "agent-network/src/node-server.ts", "--outdir", "agent-network/dist/src", "--target", "node"]);
 bun(["run", "build"], resolve(root, "agent-node"));
+bun(["build", "tests/test-rfc044-windows-daemon/helper-probe.ts", "--outfile", "agent-network/dist/helper-probe.mjs", "--target", "node", "--format", "esm"]);

@@ -118,6 +118,16 @@ try {
       console.log('rfc044-os-path-ok');
     `], { cwd: work, env: childEnv, timeout: 30_000 });
     assert.match(probe.stdout, /rfc044-os-path-ok/);
+    try {
+      const helper = await exec(node, [join(prefix, "agent-network", "dist", "helper-probe.mjs")], {
+        cwd: work, env, shell: false, windowsHide: true, timeout: 60_000, maxBuffer: 64 * 1024,
+      });
+      console.log(helper.stdout);
+      assert.match(helper.stdout, /product_env_node_chain_ok/);
+    } catch (error: any) {
+      console.log(String(error.stdout ?? "")); console.error(String(error.stderr ?? ""));
+      throw Error("native private-Node product-env helper probe failed");
+    }
   }
   const response = await fetch(`${base}/api/auth/register`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: `rfc044_${Date.now()}`, password: "RFC044Smoke123!" }) });

@@ -74,6 +74,11 @@ accepted Hub acknowledgment within 15 seconds. That performance target remains
 unproven until the native Windows run passes. This end-to-end target still
 includes helper startup/compilation; separating timeout budgets does not hide
 cold-start latency from acceptance. The helper is disposed on completion/error.
+Helper startup diagnostics expose fixed stage names, exit-observation flags,
+output byte counts and allowlisted error reasons, not stderr text or paths.
+The native E2E additionally probes the helper through a private Node parent and
+child with product `minimalEnv()`, private cwd and captured pipes. This preflight
+is diagnostic evidence, not a substitute for the final SDK stop acceptance.
 
 `init` can capture stdout/stderr without a shell: call private Node with the
 argument array and wait for its output. Do not use `cmd /c` just to read output.

@@ -113,8 +113,11 @@ export function windowsSdkBatchEvidence(run: (script: string) => string): Pick<W
   };
 }
 
-const RESIDENT_SCRIPT = `${PRELUDE}
+const RESIDENT_SCRIPT = `[Console]::Out.WriteLine('SDKBOOT');[Console]::Out.Flush()
+${PRELUDE}
+[Console]::Out.WriteLine('SDKCOMPILED');[Console]::Out.Flush()
 [Console]::Out.WriteLine('SDKREADY')
+[Console]::Out.Flush()
 while($null -ne ($line=[Console]::In.ReadLine())) {
  $request=$null
  try {
@@ -127,6 +130,15 @@ while($null -ne ($line=[Console]::In.ReadLine())) {
  }
 }`;
 
+/** Deliberately never return upstream text, paths or environment values. */
+export function sdkEvidenceReason(raw: string): string {
+  if (/access.{0,20}denied|unauthorizedaccess|permissiondenied/i.test(raw)) return "access_denied";
+  if (/commandnotfound|not recognized|could not.*find|filenotfound/i.test(raw)) return "dependency_missing";
+  if (/compiler|compilation|add-type|csharp/i.test(raw)) return "compile_failed";
+  if (/parsererror|syntaxerror/i.test(raw)) return "script_invalid";
+  return raw ? "unknown" : "none";
+}
+
 /** A private pipe, not a disk DLL cache. Compile once per stop, reuse for every
  * capture, immediate pre-kill birth check and final query; dispose on all paths.
  * Startup/compilation has its own bound, queries retain their 5s bound. */
@@ -137,9 +149,13 @@ export async function openWindowsSdkEvidenceSession(options: {
   launch?: { command: string; args: string[] }; // transport fixture, never Hub input
 } = {}): Promise<{ deps: AsyncWindowsStopDeps; close: () => void }> {
   const started = Date.now();
+  options.onProgress?.(`helper starting runtime=${process.versions.bun ? "bun" : "node"} env_present=${JSON.stringify(Object.fromEntries(
+    ["SystemRoot", "windir", "TEMP", "TMP", "HOME", "USERPROFILE", "PSModulePath"].map(key => [key, !!process.env[key]])))}`);
   const launch = options.launch ?? { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(RESIDENT_SCRIPT, "utf16le").toString("base64")] };
   const child = spawn(launch.command, launch.args, { stdio: ["pipe", "pipe", "pipe"], shell: false, windowsHide: true });
-  let closed = false, sequence = 0, buffer = "", stderr = "";
+  let closed = false, sequence = 0, buffer = "", stderr = "", stderrBytes = 0, stdoutBytes = 0;
+  let stage = "launch_requested", exitObserved = false;
+  const diagnostic = () => `stage=${stage} exit_observed=${exitObserved} exit_code=${child.exitCode ?? "none"} termination_observed=${child.signalCode !== null} stdout_bytes=${stdoutBytes} buffered_bytes=${Buffer.byteLength(buffer)} stderr_bytes=${stderrBytes} stderr_reason=${sdkEvidenceReason(stderr)}`;
   let pending: { resolve: (raw: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; id: number } | undefined;
   const fail = (error: Error) => {
     if (pending) { clearTimeout(pending.timer); pending.reject(error); pending = undefined; }
@@ -154,15 +170,16 @@ export async function openWindowsSdkEvidenceSession(options: {
     child.kill();
   };
   const wait = (id: number, ms: number): Promise<string> => new Promise((resolve, reject) => {
-    pending = { id, resolve, reject, timer: setTimeout(() => fail(Error(`SDK evidence ${id === 0 ? "startup" : "query"} timeout (${ms}ms): ${stderr}`)), ms) };
+    pending = { id, resolve, reject, timer: setTimeout(() => fail(Error(`SDK evidence ${id === 0 ? "startup" : "query"} timeout (${ms}ms): ${diagnostic()}`)), ms) };
   });
   const ready = wait(0, options.startupTimeoutMs ?? 20_000);
-  child.on("error", error => fail(error));
-  child.on("exit", (code) => fail(Error(`SDK evidence process exited ${code}: ${stderr}`)));
-  child.stdin.on("error", error => fail(error));
-  child.stderr.on("data", chunk => { stderr = (stderr + String(chunk)).slice(-1000); });
+  child.on("spawn", () => { if (stage === "launch_requested") stage = "spawned"; });
+  child.on("error", () => fail(Error(`SDK evidence spawn failed: ${diagnostic()}`)));
+  child.on("exit", () => { exitObserved = true; fail(Error(`SDK evidence process exited: ${diagnostic()}`)); });
+  child.stdin.on("error", () => fail(Error(`SDK evidence input failed: ${diagnostic()}`)));
+  child.stderr.on("data", chunk => { stderrBytes += chunk.length; stderr = (stderr + String(chunk)).slice(0, 512); });
   child.stdout.on("data", chunk => {
-    buffer += String(chunk);
+    stdoutBytes += chunk.length; buffer += String(chunk);
     if (Buffer.byteLength(buffer) > 4 * 1024 * 1024) { fail(Error("SDK evidence output cap exceeded")); return; }
     let end: number;
     while ((end = buffer.indexOf("\n")) >= 0) {
@@ -171,14 +188,22 @@ export async function openWindowsSdkEvidenceSession(options: {
       try {
         if (!pending) throw Error("unsolicited SDK evidence response");
         let raw = line;
-        if (pending.id === 0) { if (line !== "SDKREADY") throw Error("SDK readiness protocol mismatch"); }
+        if (pending.id === 0) {
+          if (line === "SDKBOOT" || line === "SDKCOMPILED") {
+            stage = line === "SDKBOOT" ? "script_entered" : "initialized";
+            options.onProgress?.(`helper stage=${stage} elapsed_ms=${Date.now() - started}`);
+            continue;
+          }
+          if (line !== "SDKREADY") throw Error(`SDK readiness protocol mismatch: ${diagnostic()}`);
+          stage = "ready";
+        }
         else {
           const reply = JSON.parse(line);
-          if (reply.id !== pending.id || reply.ok !== true || typeof reply.result !== "string") throw Error(`SDK query failed: ${String(reply.error || "protocol mismatch").slice(0, 400)}`);
+          if (reply.id !== pending.id || reply.ok !== true || typeof reply.result !== "string") throw Error(`SDK query failed: reason=${sdkEvidenceReason(typeof reply.error === "string" ? reply.error : "protocol mismatch")} ${diagnostic()}`);
           raw = reply.result;
         }
         clearTimeout(pending.timer); const resolve = pending.resolve; pending = undefined; resolve(raw);
-      } catch (error) { fail(error as Error); return; }
+      } catch { fail(Error(`SDK evidence protocol failed: ${diagnostic()}`)); return; }
     }
   });
   await ready;

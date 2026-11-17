@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { windowsRuntimeSupported } from "./windows-runtime.js";
 import { windowsRuntimeSupported as daemonSupports } from "../../agent-node/src/shared/windows-runtime.js";
-import { windowsSdkBatchEvidence, windowsSdkEvidenceScript, openWindowsSdkEvidenceSession } from "./windows-sdk-stop-evidence.js";
+import { windowsSdkBatchEvidence, windowsSdkEvidenceScript, openWindowsSdkEvidenceSession, sdkEvidenceReason } from "./windows-sdk-stop-evidence.js";
 import { orchestrateWindowsManagedStop, orchestrateWindowsManagedStopAsync, probeWindowsCreationDate } from "./windows-codex-copresence.js";
 
 test("Windows CLI and daemon agree on SDK-only first-run support", () => {
@@ -112,7 +112,8 @@ test("async evidence transport uses the same fail-closed stop decision flow", as
 // Real private child/pipe exercise in Docker, without needing Windows or tmux.
 const fixture = (mode: string) => ({ command: process.execPath, args: ["-e", `
   const mode=${JSON.stringify(mode)};
-  if(mode!=='startup-timeout') setTimeout(()=>console.log('SDKREADY'),mode==='slow-start'?350:30);
+  if(mode==='stderr-timeout') { process.stderr.write('Add-Type C:/private/secret-path ntok_private-secret'); console.log('SDKBOOT'); }
+  else if(mode!=='startup-timeout') setTimeout(()=>{console.log('SDKBOOT');console.log('SDKCOMPILED');console.log('SDKREADY')},mode==='slow-start'?350:30);
   let buffer='';process.stdin.on('data',chunk=>{
     buffer+=chunk;let end;while((end=buffer.indexOf('\\n'))>=0){
       const req=JSON.parse(buffer.slice(0,end));buffer=buffer.slice(end+1);
@@ -144,4 +145,18 @@ test("resident evidence startup/query timeout, exit and wrong response identity 
       await expect(session.deps.captureRoots!([sdkRoot])).rejects.toThrow();
     } finally { session.close(); }
   }
+});
+
+test("helper diagnostics retain stage/exit/output metadata but never upstream text or paths", async () => {
+  let message = "";
+  try { await openWindowsSdkEvidenceSession({ launch: fixture("stderr-timeout"), startupTimeoutMs: 500 }); }
+  catch (error: any) { message = error.message; }
+  expect(message).toContain("stage=script_entered");
+  expect(message).toContain("exit_observed=false");
+  expect(message).toContain("exit_code=none");
+  expect(message).toContain("stderr_reason=compile_failed");
+  expect(message).toContain("stdout_bytes=");
+  expect(message).not.toContain("secret-path");
+  expect(message).not.toContain("ntok_");
+  expect(sdkEvidenceReason("C:/private/other-path")).toBe("unknown");
 });

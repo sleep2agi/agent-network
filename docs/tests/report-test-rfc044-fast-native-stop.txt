@@ -88,3 +88,49 @@ Targeted TypeScript noEmit check passed for windows-sdk-stop-evidence.ts and
 windows-codex-copresence.ts (ES2022, ESNext, bundler resolution, skipLibCheck).
 Linux real SDK smoke: first reply 4188ms, one model request, unchanged cloud
 sentinel; stopped ACK in 445ms. No native Windows latency claim from this.
+
+Native run 44018964557 at 38741b8a:
+Primitives, macOS SDK chain and Linux passed. Windows replied in 16415ms,
+then its actual Node stop CLI timed out waiting for helper SDKREADY (20s).
+Owner logs: /tmp/opencode/3619-native-windows.log and
+/tmp/opencode/3619-primitives.log. Bun primitive helper startup/compile was
+1550ms; capture 1885ms, prekill 31ms, final 8ms. No successful product-path
+helper readiness, helper output or exit observation was recorded. This does
+NOT establish environment loss, a compiler problem or a pipe problem.
+
+Diagnostic follow-up (not a claimed root-cause fix):
+- Flush fixed SDKBOOT / SDKCOMPILED / SDKREADY stage markers explicitly.
+- Timeout/error output contains only stage, exit-observed flag, exit code,
+  termination-observed flag, stdout/buffer/stderr byte counts and a white-list
+  stderr reason. Absence of an exit event is NOT reported as proof of liveness.
+  No upstream stderr prefix, query error text, environment value or path is
+  copied into diagnostics. First 512 stderr bytes stay internal for mapping.
+- Native E2E includes helper-probe.ts bundled for private Node. A private Node
+  parent uses actual product minimalEnv() to execFile a private Node child in
+  the same private cwd, with shell:false/windowsHide:true and captured pipes.
+  The child exercises the actual resident helper. This removes Bun's spawn
+  implementation and the runner's unfiltered env from the reproduction.
+  Diagnostics list only presence booleans for selected env keys, never values.
+- The helper preflight is outside the init-to-reply timer, like other env
+  prerequisites, and must not be called clean-App install timing evidence.
+- No env expansion, PowerShell invocation-mode workaround, identity gate,
+  product timeout or Windows <=15s stop+ACK acceptance relaxation was made.
+
+Next native run must identify the last observed stage and outcome in this
+product-env Node probe. A Linux test cannot resolve the Windows-only startup
+failure, and the blank old stderr must not be assigned a guessed cause.
+
+Diagnostic follow-up Docker verification: full command chain exited 0.
+Raw output: /tmp/opencode/rfc044-private-node-helper-final.log
+27 pass / 2 skips / 114 assertions; 110 pass / 275 assertions;
+86 pass / 2 skips / 350 assertions; actual Hub ACK schema 1 pass / 8 assertions.
+Total: 224 pass, 4 platform-only skips, 747 assertions, zero failures.
+Targeted TypeScript noEmit check passed. Linux SDK reply 4293ms, one model
+request, unchanged sentinel; stopped ACK 448ms. Final launch_requested/spawned
+stage refinement was retested with the latest source mounted read-only into
+Docker: 9 pass / 1 native skip / 72 assertions (overlapping tests, not added
+to the total); /tmp/opencode/rfc044-helper-final-stage-test.log.
+The generated helper-probe.mjs loaded under actual Node in Docker and reached
+its intended Windows-only platform guard. That checks Node bundling, not
+PowerShell behavior. The exact private-Node/minimalEnv Windows probe and
+startup failure diagnosis remain unverified until native CI.
