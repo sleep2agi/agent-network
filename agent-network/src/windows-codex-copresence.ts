@@ -492,7 +492,7 @@ export function orchestrateWindowsManagedStop(
 ): WindowsStopOrchestration {
   const flow = windowsManagedStopFlow(roots, deps);
   let step = flow.next();
-  while (step.done === false) {
+  while (step.done !== true) {
     try { step = flow.next(step.value()); }
     catch (error) { step = flow.throw(error); }
   }
@@ -509,7 +509,7 @@ export type AsyncWindowsStopDeps = Omit<WindowsStopOrchestrationDeps, "captureRo
 export async function orchestrateWindowsManagedStopAsync(roots: WindowsManagedIdentity[], deps: AsyncWindowsStopDeps): Promise<WindowsStopOrchestration> {
   const flow = windowsManagedStopFlow(roots, deps);
   let step = flow.next();
-  while (step.done === false) {
+  while (step.done !== true) {
     try { step = flow.next(await step.value()); }
     catch (error) { step = flow.throw(error); }
   }
