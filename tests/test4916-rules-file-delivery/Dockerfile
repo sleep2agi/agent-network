@@ -10,6 +10,5 @@ COPY agent-network ./agent-network
 COPY agent-node ./agent-node
 COPY server ./server
 COPY contracts ./contracts
-COPY docs/queries/rules-file-24h.sql ./docs/queries/rules-file-24h.sql
 COPY tests/test4916-rules-file-delivery ./tests/test4916-rules-file-delivery
 CMD ["bash", "tests/test4916-rules-file-delivery/run.sh"]

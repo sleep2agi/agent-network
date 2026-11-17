@@ -41,7 +41,7 @@ not backfilled with guessed causes. Other queue operation types stay unchanged.
 
 ## Read-only 24h query
 
-Run [`../queries/rules-file-24h.sql`](../queries/rules-file-24h.sql) on a read-only
+Run [`server/queries/rules-file-24h.sql`](../../server/queries/rules-file-24h.sql) on a read-only
 connection, binding `?1` to the intended network id. It returns terminal outcome
 counts, success percentage, timeout percentage and timeout reason distribution.
 The denominator is **terminal read/write requests completed in the last 24h**,

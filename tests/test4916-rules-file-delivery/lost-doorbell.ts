@@ -57,7 +57,7 @@ try {
   })).json() as any;
   assert(login.ok); token = login.token; network = login.network_id;
   privateValues.push(token);
-  const statistics = readFileSync("docs/queries/rules-file-24h.sql", "utf8");
+  const statistics = readFileSync("server/queries/rules-file-24h.sql", "utf8");
   assert.deepEqual(db.all(statistics, network), []);
   console.log(JSON.stringify({ statistics_fixture_before: db.all(statistics, network) }));
   const nodeId = `node_rules4916_${Date.now()}`, alias = "rules4916";

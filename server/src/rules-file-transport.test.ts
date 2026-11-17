@@ -105,7 +105,7 @@ test("rules-file expiry uses only scoped timeout codes, pull evidence wins, fore
       expect((await n.call("ack_rules_file_request", { request_id: req.request_id, status: "done" })).ignored).toBe("already_terminal");
       expect(db.get<any>("SELECT timeout_reason FROM node_rules_requests WHERE request_id = ?1", req.request_id)?.timeout_reason).toBe(expected);
     }
-    const stats = db.all<any>(readFileSync(new URL("../../docs/queries/rules-file-24h.sql", import.meta.url), "utf8"), NET);
+    const stats = db.all<any>(readFileSync(new URL("../queries/rules-file-24h.sql", import.meta.url), "utf8"), NET);
     expect(stats.map(row => row.reason).sort()).toEqual(["not_capable", "not_pulled", "pulled_no_ack"]);
     for (const row of stats) {
       expect(row.terminal_count).toBe(3); expect(row.success_pct).toBe(0); expect(row.timeout_pct).toBe(100);
