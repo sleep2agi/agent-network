@@ -1,38 +1,34 @@
 <div align="center">
 
-<a href="https://anet.sh"><img src="docs/assets/readme/hero-zh.jpg" alt="Agent Network：一个人，一支 Agent 军团。像用微信一样指挥 Claude、Codex、Grok、OpenCode 节点" width="100%"></a>
+<a href="https://anet.sh"><img src="docs/assets/readme/hero-zh.jpg" alt="Agent Network：企业级开源版 Grok Bot。一个人，一支 Agent 军团，私有化部署在你自己的机器上" width="100%"></a>
 
 <p>
 <a href="https://www.anet.sh/download"><img alt="Desktop" src="https://img.shields.io/github/v/release/sleep2agi/agent-network-app?display_name=release&label=download&color=1b65db&style=for-the-badge&labelColor=0b1220"></a>
 <a href="https://www.npmjs.com/package/@sleep2agi/agent-network"><img alt="npm" src="https://img.shields.io/npm/v/@sleep2agi/agent-network/preview?label=npm&color=1b65db&style=for-the-badge&labelColor=0b1220"></a>
 <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-38c8e0?style=for-the-badge&labelColor=0b1220"></a>
 <a href="https://github.com/sleep2agi/agent-network/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/sleep2agi/agent-network?color=38c8e0&style=for-the-badge&labelColor=0b1220"></a>
-<a href="https://anet.sh"><img alt="Docs" src="https://img.shields.io/badge/docs-anet.sh-38c8e0?style=for-the-badge&labelColor=0b1220"></a>
 </p>
 
-**[🌐 官网](https://anet.sh) · [⬇️ 下载桌面版](https://www.anet.sh/download) · [🚀 快速上手](https://anet.sh/guide/getting-started) · [▶️ 48 秒介绍视频](https://anet.sh) · 中文 · [English](./README.en.md)**
+**[官网](https://anet.sh) · [下载桌面版](https://www.anet.sh/download) · [快速上手](https://anet.sh/guide/getting-started) · [48 秒介绍视频](https://anet.sh) · 中文 · [English](./README.en.md)**
 
-**企业级开源版 Grok Bot，更适合企业内部私有化部署。**
-
-把分布在多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团 —— 在一个桌面应用里指挥它们。
+把多台机器上的 Claude Code、Codex、Grok、OpenCode 连成一支 Agent 军团，在一个桌面应用里像微信一样指挥它们。
 
 </div>
 
 ## 为什么用 Agent Network
 
-- 🤖 **一支跨机器的 Agent 军团** —— Claude Code、Claude Agent SDK、Codex、Grok Build、OpenCode 都能作为节点接入同一个网络，节点之间通过 MCP 互相发现、互相派活。
-- 🛰️ **一个 Hub 串起所有机器** —— CommHub 通过 MCP 暴露工具、通过 SSE 实时投递任务；每台机器跑一个 `anet daemon`，就能从客户端远程创建、启动和停止那台机器上的节点。
-- 💬 **一个客户端管全部** —— 桌面（macOS / Windows）和 Android：聊天派活、收发文件；任务页管理项目、子任务、GitHub Issue 和到秒的时间；界面可切换中英文；可看节点与 Hub 日志；规则文件、技能、项目目录、远程切模型和重启仍在。iOS 只走 TestFlight，公开链接还没开。
-- 🔐 **自托管、本地优先、开源** —— Hub 和 SQLite 数据跑在你自己的机器上（桌面端还自带一个本地 Hub），不做 SaaS 托管；Apache 2.0。
-
-<table><tr>
-<td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/rules-dark.webp"><img src="docs/assets/readme/rules-light.webp" alt="在桌面端阅读节点的 CLAUDE.md 规则文件"></picture></td>
-<td width="50%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/files-dark.webp"><img src="docs/assets/readme/files-light.webp" alt="在桌面端浏览节点的项目文件夹"></picture></td>
-</tr></table>
-
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" width="880" alt="桌面端任务页：左侧按项目筛选，右侧是需求池、进行中、完成三列看板"></picture>
+- **一支跨机器的 Agent 军团**：Claude Code、Claude Agent SDK、Codex、Grok Build、OpenCode 都能作为节点接入同一个网络，节点之间通过 MCP 互相发现、互相派活。
+- **一个 Hub 串起所有机器**：每台机器跑一个 `anet daemon`，就能在客户端里远程创建、启动、停止那台机器上的节点。
+- **一个客户端管全部**：桌面（macOS / Windows）和 Android 上聊天派活、收发文件、管任务和定时任务，看节点日志、规则文件和项目目录。
+- **私有化部署，开源**：Hub 和数据都在你自己的机器上，桌面端自带本地 Hub；不做 SaaS 托管，Apache 2.0。
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp"><img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network 桌面端：左侧是在线 Agent 列表，右侧是与一个节点的对话"></picture>
+
+<table><tr>
+<td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" alt="任务页：需求池、进行中、完成三列看板"></picture></td>
+<td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/rules-dark.webp"><img src="docs/assets/readme/rules-light.webp" alt="阅读节点的 CLAUDE.md 规则文件"></picture></td>
+<td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/files-dark.webp"><img src="docs/assets/readme/files-light.webp" alt="浏览节点的项目文件夹"></picture></td>
+</tr></table>
 
 ## 30 秒上手
 
@@ -55,44 +51,32 @@ anet node start my-bot
 
 <div align="center"><img width="2667" height="1400" alt="Agent Network 开源版架构：人类指挥层、客户端层、Hub、部署层、节点层" src="https://github.com/user-attachments/assets/0e4ead5a-fab5-4cb3-a92d-cd029549c2bf" /></div>
 
-```mermaid
-flowchart LR
-  subgraph A["机器 A"]
-    DA["anet daemon"] -.管理.-> N1["Claude Code 节点"] & N2["Codex 节点"]
-  end
-  subgraph B["机器 B"]
-    DB["anet daemon"] -.管理.-> N3["Grok 节点"] & N4["OpenCode 节点"]
-  end
-  N1 & N2 & N3 & N4 <-->|"MCP 工具 + SSE 任务"| H[("CommHub<br/>SQLite")]
-  DA & DB <-->|"MCP + SSE"| H
-  H <-->|"HTTP + SSE"| C["桌面端 · 移动端 · Web Dashboard"]
-```
-
-每个节点都是一个 `agent-node` 进程，包着一种 Agent 运行时，通过 MCP 调用 Hub 的工具（查队友、派任务、回复），通过 SSE 实时收任务。daemon 是一个特殊节点（`host_supervisor`），替 Hub 在它所在的机器上创建、启动和停止其他节点；切模型、重启这类操作由节点自己收到 Hub 下发的配置后执行。详见 [架构说明](https://anet.sh/guide/architecture)。
+每个节点是一个 `agent-node` 进程，包着一种 Agent 运行时：通过 MCP 调用 Hub 的工具（查队友、派任务、回复），通过 SSE 实时收任务。daemon 是一个特殊节点，替 Hub 在它所在的机器上创建、启动和停止其他节点。详见 [架构说明](https://anet.sh/guide/architecture)。
 
 ## 支持的运行时
 
-| Runtime | Agent | 登录方式 | 人机共用一个 TUI 会话 |
+| Runtime | Agent | 登录方式 | 人机共用 TUI |
 |---|---|---|---|
-| `claude-code-cli` | Claude Code | 复用 `claude auth login`（订阅） | — |
-| `claude-agent-sdk` | Claude Agent SDK（Anthropic 及兼容 API：MiniMax、DeepSeek、GLM、Kimi…） | API Key | — |
+| `claude-code-cli` | Claude Code | 复用 `claude auth login` | — |
+| `claude-agent-sdk` | Claude Agent SDK（及 MiniMax、DeepSeek、GLM、Kimi 等兼容 API） | API Key | — |
 | `codex-sdk` | OpenAI Codex | 复用 `codex login` | — |
 | `codex-app-server` | Codex TUI 共存（向导里显示为 `codex-cli`） | 复用 `codex login` | ✅ |
 | `grok-build-acp` | xAI Grok Build | 复用 `grok login` | — |
-| `grok-build-cli` | Grok Build TUI 共存（实验性预览，仅可信任务） | 复用 `grok login` | ✅ |
-| `opencode-cli` | OpenCode。默认 V1（`opencode-ai`，Anthropic / OpenAI preset，预览）。V2 是同一 runtime 的共存预览：`@opencode/cli@2.0.22`，`anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools`，本机工具全开，只用于可信任务。npm `latest` 还没有这条标志。见 [OpenCode V2](https://anet.sh/guide/opencode) | V1：提供方 API Key。V2：复制本机 OpenCode 已有的 `provider/model` | V1 ✅（Linux / macOS）。V2 共存的现有验收在 Linux |
-各运行时的能力与平台支持矩阵见 [Runtime 对比](https://anet.sh/guide/runtimes) 和 [支持矩阵](https://anet.sh/guide/support-matrix)。
+| `grok-build-cli` | Grok Build TUI 共存（实验性） | 复用 `grok login` | ✅ |
+| `opencode-cli` | OpenCode V1 / V2（[说明](https://anet.sh/guide/opencode)） | 提供方 API Key / 本机 OpenCode 配置 | ✅ |
 
-## 文档
+各运行时的能力和平台支持见 [Runtime 对比](https://anet.sh/guide/runtimes) 和 [支持矩阵](https://anet.sh/guide/support-matrix)。
 
-[上手指南](https://anet.sh/guide/getting-started) · [OpenCode V2](https://anet.sh/guide/opencode) · [桌面应用](https://anet.sh/guide/desktop-app) · [任务 API](https://anet.sh/api/mcp-tools) · [架构](https://anet.sh/guide/architecture) · [CLI](https://anet.sh/guide/cli) · [生产部署](https://anet.sh/deploy/production) · [升级通道](https://anet.sh/guide/upgrade) · [更新日志](https://anet.sh/changelog)
+## 文档与社区
 
-## 参与与社区
+[上手指南](https://anet.sh/guide/getting-started) · [桌面应用](https://anet.sh/guide/desktop-app) · [任务 API](https://anet.sh/api/mcp-tools) · [架构](https://anet.sh/guide/architecture) · [CLI](https://anet.sh/guide/cli) · [生产部署](https://anet.sh/deploy/production) · [升级通道](https://anet.sh/guide/upgrade) · [更新日志](https://anet.sh/changelog)
 
-欢迎贡献！开始之前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [行为准则](./CODE_OF_CONDUCT.md)；安全问题请按 [SECURITY.md](./SECURITY.md) 私下报告。提问和反馈：[Issues](https://github.com/sleep2agi/agent-network/issues) · [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [社群](https://anet.sh/community)。
+欢迎贡献：先读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [行为准则](./CODE_OF_CONDUCT.md)，安全问题请按 [SECURITY.md](./SECURITY.md) 私下报告。提问和反馈：[Issues](https://github.com/sleep2agi/agent-network/issues) · [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [社群](https://anet.sh/community)。
 
 <a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
+
 ## 许可证
+
 [Apache License 2.0](./LICENSE)。桌面与移动客户端源码在 [sleep2agi/agent-network-app](https://github.com/sleep2agi/agent-network-app)（MIT）。
 
 Grok 与 Grok Bot 是 xAI 的商标；Agent Network 是独立的开源项目，与 xAI 无关联。
