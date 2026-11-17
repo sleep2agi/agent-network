@@ -114,6 +114,7 @@ import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js"
 import { dispatchQueueInfo, queueDepthByNode, queueDepthKey } from "./task-queue-ahead.js";
 import { parseHubTimestamp } from "./hub-timestamp";
 import { noteTerminalResultRead, purgeLogsResultNow, sweepNodeRequestContent } from "./node-request-retention.js";
+import { expireRulesFileRequest } from "./rules-file-timeout.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
 import { pollPacer } from "./poll-pacing.js";
 import { neverConsumedExpiryCounters, neverConsumeGate, persistentNeverConsumedExpiries } from "./expiry-counters.js";
@@ -4537,10 +4538,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (age <= RULES_REQUEST_STALE_MS) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_in_flight", existing_request_id: inFlight.request_id, age_ms: age }) }] };
       }
-      db.run(
-        "UPDATE node_rules_requests SET status = 'timeout', acked_at = ?1, error = ?2 WHERE request_id = ?3",
-        [Date.now(), `superseded after ${age}ms (> ${RULES_REQUEST_STALE_MS}ms) — node did not answer`, inFlight.request_id],
-      );
+      expireRulesFileRequest(inFlight.request_id, Date.now(), `superseded after ${age}ms (> ${RULES_REQUEST_STALE_MS}ms) — node did not answer`);
     }
 
     // Opportunistic content retention (bounded, indexed) — node-request-retention.ts.
@@ -4746,7 +4744,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(clientNetId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, "read rules file result");
       const row = db.get<any>(
-        "SELECT request_id, node_id, network_id, op, status, file_name, file_exists, result_content, error, created_at, pulled_at, acked_at, created_by_token FROM node_rules_requests WHERE request_id = ?1",
+        "SELECT request_id, node_id, network_id, op, status, file_name, file_exists, result_content, error, created_at, pulled_at, acked_at, created_by_token, timeout_reason FROM node_rules_requests WHERE request_id = ?1",
         requestId,
       );
       // SEC-1：结果行的网络必须等于调用方作用域，否则当不存在。
@@ -4760,10 +4758,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const ageMs = Date.now() - (row.pulled_at ?? row.created_at);
       if ((status === "pending" || status === "in_progress") && ageMs > RULES_REQUEST_STALE_MS) {
         status = "timeout";
-        db.run(
-          "UPDATE node_rules_requests SET status = 'timeout', acked_at = ?1, error = ?2 WHERE request_id = ?3 AND status IN ('pending', 'in_progress')",
-          [Date.now(), `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`, requestId],
-        );
+        expireRulesFileRequest(requestId, Date.now(), `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`);
+        row.timeout_reason = db.get<{ timeout_reason: string | null }>("SELECT timeout_reason FROM node_rules_requests WHERE request_id = ?1", requestId)?.timeout_reason;
         row.error = `node did not answer within ${RULES_REQUEST_STALE_MS}ms (offline, or running an agent-node without app#225 support)`;
       }
       // Privacy: node file bytes are handed out for a short grace window after the
@@ -4784,6 +4780,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             node_id: row.node_id,
             op: row.op,
             status,
+            ...(status === "timeout" && row.timeout_reason ? { timeout_reason: row.timeout_reason } : {}),
             file_name: row.file_name ?? null,
             exists: row.file_exists === null || row.file_exists === undefined ? null : row.file_exists === 1,
             ...(status === "done" && row.op !== "write" && !purged ? { content: row.result_content ?? "" } : {}),

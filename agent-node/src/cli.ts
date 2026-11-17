@@ -74,7 +74,7 @@ import { currentTeamRulesOutcome } from "./runtime/team-rules-inject.js";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
-import { processRulesFileRequests } from "./runtime/rules-file";
+import { processRulesFileRequests, startRulesFilePolling } from "./runtime/rules-file";
 import { createLogRedactor, parseLogsTailParams, tailNodeLogs } from "./runtime/node-logs";
 import { chooseGrokBinary, grokBinaryPinToRecord, findVerifiedGrokCandidates, grokRecoveryHint } from "./runtime/grok-binary-pin";
 
@@ -9142,6 +9142,7 @@ const scheduleHeartbeat = (): void => {
   (timer as any)?.unref?.();
 };
 scheduleHeartbeat();
+const stopRulesFilePolling = startRulesFilePolling(rulesFileDeps());
 if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeMode === "copresence") {
   setInterval(() => { void pollOpencodeSessionModel(); }, OPENCODE_MODEL_POLL_MS).unref();
   if (sessionControlBridge) {
@@ -9296,6 +9297,7 @@ const shutdown = async () => {
   shuttingDown = true;
   codexWatchdogStopping = true;
   ownerScheduleConsumer?.stop();
+  stopRulesFilePolling();
   sideThreadNodeRuntime?.close();
   sideThreadOwnedSession?.client.close();
   sideThreadOwnedSession?.proc?.kill("SIGTERM");

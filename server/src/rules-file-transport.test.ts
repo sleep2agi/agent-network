@@ -14,6 +14,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db } from "./db.js";
 import { registerTools } from "./tools.js";
+import { readFileSync } from "node:fs";
 
 const NET = "net_rules_file";
 const OTHER_NET = "net_rules_file_other";
@@ -88,6 +89,48 @@ async function connect(id: Identity) {
 
 beforeEach(() => { cleanup(); seedWorld(); });
 afterAll(cleanup);
+
+test("rules-file expiry uses only scoped timeout codes, pull evidence wins, foreign results stay hidden", async () => {
+  const u = await connect(asUser), n = await connect(asNode), other = await connect(asOtherNode);
+  try {
+    db.run("INSERT INTO sessions (resume_id, alias, node_id, network_id, rules_file_capable) VALUES ('rf_session', ?1, ?2, ?3, 1)", [NODE_ALIAS, NODE_ID, NET]);
+    for (const [capable, pull, expected] of [[1, false, "not_pulled"], [0, false, "not_capable"], [0, true, "pulled_no_ack"]] as const) {
+      db.run("UPDATE sessions SET rules_file_capable = ?1 WHERE resume_id = 'rf_session'", [capable]);
+      const req = await u.call("read_node_rules_file", { node_id: NODE_ID });
+      if (pull) expect((await n.call("get_rules_file_request", {})).request.request_id).toBe(req.request_id);
+      const old = Date.now() - 120_000;
+      db.run("UPDATE node_rules_requests SET created_at = ?1, pulled_at = ?2 WHERE request_id = ?3", [old, pull ? old : null, req.request_id]);
+      expect(await u.call("get_rules_file_result", { request_id: req.request_id })).toMatchObject({ status: "timeout", timeout_reason: expected });
+      expect(await other.call("get_rules_file_result", { request_id: req.request_id })).toMatchObject({ error: "request_not_found" });
+      expect((await n.call("ack_rules_file_request", { request_id: req.request_id, status: "done" })).ignored).toBe("already_terminal");
+      expect(db.get<any>("SELECT timeout_reason FROM node_rules_requests WHERE request_id = ?1", req.request_id)?.timeout_reason).toBe(expected);
+    }
+    const stats = db.all<any>(readFileSync(new URL("../../docs/queries/rules-file-24h.sql", import.meta.url), "utf8"), NET);
+    expect(stats.map(row => row.reason).sort()).toEqual(["not_capable", "not_pulled", "pulled_no_ack"]);
+    for (const row of stats) {
+      expect(row.terminal_count).toBe(3); expect(row.success_pct).toBe(0); expect(row.timeout_pct).toBe(100);
+    }
+  } finally { db.run("DELETE FROM sessions WHERE resume_id = 'rf_session'"); await u.close(); await n.close(); await other.close(); }
+}, 20_000);
+
+test("rules-file stale supersede and retention share timeout classification without changing success payloads", async () => {
+  const u = await connect(asUser), n = await connect(asNode);
+  try {
+    const first = await u.call("read_node_rules_file", { node_id: NODE_ID });
+    db.run("UPDATE node_rules_requests SET created_at = ?1 WHERE request_id = ?2", [Date.now() - 120_000, first.request_id]);
+    const next = await u.call("read_node_rules_file", { node_id: NODE_ID });
+    expect(db.get<any>("SELECT timeout_reason FROM node_rules_requests WHERE request_id = ?1", first.request_id)?.timeout_reason).toBe("not_pulled");
+    expect((await n.call("get_rules_file_request", {})).request.request_id).toBe(next.request_id);
+    await n.call("ack_rules_file_request", { request_id: next.request_id, status: "done", content: "safe" });
+    const done = await u.call("get_rules_file_result", { request_id: next.request_id });
+    expect(done.status).toBe("done"); expect(done).not.toHaveProperty("timeout_reason");
+    const old = await u.call("read_node_rules_file", { node_id: NODE_ID });
+    db.run("UPDATE node_rules_requests SET created_at = ?1 WHERE request_id = ?2", [Date.now() - 25 * 3600_000, old.request_id]);
+    const { sweepNodeRequestContent } = await import("./node-request-retention.js");
+    sweepNodeRequestContent();
+    expect(db.get<any>("SELECT timeout_reason FROM node_rules_requests WHERE request_id = ?1", old.request_id)?.timeout_reason).toBe("not_pulled");
+  } finally { await u.close(); await n.close(); }
+}, 20_000);
 
 test("variant config update rejects a target from another network over MCP", async () => {
   const u = await connect(asUser);

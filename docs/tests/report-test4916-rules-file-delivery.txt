@@ -1,0 +1,57 @@
+#4916 rules_file delivery, 2026-11-17
+Base: main 3356ff6a; branch feat/4916-rules-file-delivery.
+
+Scope
+- Both long-lived consumers share single-flight SSE/reconnect/15s polling.
+- Hub nullable timeout_reason: not_pulled / pulled_no_ack / not_capable.
+- node-server reports bundled CLI package version; agent-node already did.
+- Existing 60s stale and retention windows unchanged. ANET_TEAM_RULES off;
+  team_rules_* untouched. No production operations, publication or global edits.
+
+Execution (all tests in disposable Docker containers, no host source mounts)
+sg docker -c 'docker build -f tests/test4916-rules-file-delivery/Dockerfile -t anet-4916-rules-file . && docker run --rm --network none anet-4916-rules-file && docker run --rm --network none --entrypoint bash anet-4916-rules-file tests/test4916-rules-file-delivery/mutation.sh'
+
+Final combined verification
+- 139 tests passed, 0 failed, 653 assertions. Includes both file consumers,
+  node-server regression tests, network isolation, stale supersede, late ACK,
+  three timeout codes, capability handover and retention regressions.
+- Source bundles of both long-lived entrypoints succeeded.
+- Real temporary Hub + real agent-node, all SSE suppressed: write 15143ms,
+  read 202ms; package version 2.5.0-preview.208; team_rules_status NULL.
+- Real temporary Hub + real channel, all SSE suppressed: write 14980ms,
+  read 210ms; package version 2.3.0-preview.240; team_rules_status NULL.
+  The follow-up read can be handled by the same still-active drain.
+- Removing each process's actual poll wiring independently made its E2E
+  fail at request completion, after successful registration. Both mutations
+  passed their expected-failure gates in disposable containers.
+- SQL fixture: empty input []; two done outcomes => terminal_count 2,
+  success_pct 100, timeout_pct 0. Three timeout reasons => terminal_count 3,
+  success_pct 0, timeout_pct 100. These are synthetic, not production counts.
+
+Investigation note
+Channel fixture initially failed its registration gate. Captured child log
+showed ZlibError in /api/nodes ownership readback. Bun fetch had decompressed
+upstream bytes while the fixture proxy forwarded Content-Encoding. Fixed only
+the disposable proxy to drop content-encoding/content-length after fetch.
+Restored per-node token; no product identity/authorization bypass introduced.
+
+Typecheck concern (not reported as green)
+CLI bun run typecheck exits 2 with TS2322 in windows-codex-copresence.ts:499/516
+(WindowsStopOrchestration | (() => unknown)). Replaced container source with
+git archive 3356ff6a agent-network agent-node server contracts and reran:
+identical errors. File unchanged by #4916. Separately fixed per owner request
+in 139ba9bb442b59a0d8bd324da9b9bc138a7c1d98, based on 3356ff6a;
+that commit passes CLI typecheck. Do not mix its code into this branch.
+Logs: /tmp/opencode/4916-typecheck.log and
+/tmp/opencode/4916-typecheck-main-baseline.log.
+
+Final command exited 0. Full log:
+/tmp/opencode/4916-rules-file-complete.log
+
+Acceptance limits
+- No clean-App Windows install/download acceptance or production rollout.
+- Version proves an advertisement, not every node being upgraded.
+- not_pulled cannot distinguish offline/consumer failure from a missed push.
+- NULL historical timeout reasons are not retrospectively guessed.
+- Read-only network-bound SQL reports terminal requests completed in 24h,
+  not pending work or injection success; no production query was executed.
