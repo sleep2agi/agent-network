@@ -23,6 +23,10 @@ mkdirSync(runtimeDir, { recursive: true });
 const node = join(runtimeDir, process.platform === "win32" ? "node.exe" : "node");
 cpSync(sourceNode, node);
 for (const name of ["agent-network", "agent-node"]) {
+  if (name === "agent-node" && process.env.RFC044_EXPECT_RUNTIME) {
+    assert.equal(JSON.parse(readFileSync(join(source, name, "package.json"), "utf8")).version, process.env.RFC044_EXPECT_RUNTIME,
+      "acceptance must use the expected published runtime, not a source substitute");
+  }
   const dest = join(prefix, name);
   mkdirSync(dest, { recursive: true });
   for (const entry of ["dist", "package.json", "node_modules"]) {

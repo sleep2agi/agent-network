@@ -1,17 +1,20 @@
 # PR #3627: real daemon/CLI Hub isolation E2E
 
 ```sh
-sg docker -c 'docker build -f tests/test1497-daemon-hub-isolation/Dockerfile -t anet3627-hub-isolation .'
-sg docker -c 'docker run --rm --network none --init anet3627-hub-isolation'
+sg docker -c 'docker build -f tests/test1497-daemon-hub-isolation/Dockerfile -t anet3627-npm210 .'
+sg docker -c 'docker run --rm --network none --init anet3627-npm210'
 ```
 
-Test-only supplement to #3627. It changes no product source, package version or
+Test-only supplement rebased onto main after #3627/#3629. It changes no product source, package version or
 HOME behavior. `daemonChildCliEnv()` and the removed writer are the PR author's
 implementation, not replaced by the earlier parallel `--hub` proposal.
 
-The image downloads the **actual published CLI .241** archive, checks SHA256
-before extraction, and tests it with the PR's source-built runtime, real local
-Hub and actual Claude SDK. Checked-in lockfiles supply dependencies. Only model
+The image downloads **actual published CLI .242 and runtime .210** archives,
+checks pinned SHA512 and registry integrity before extraction, and tests them
+with the real local Hub and actual Claude SDK. No CLI/runtime source build is
+performed. Checked-in lockfiles supply dependencies, whose declarations must
+match the published manifests. Logs record archive/entry hashes and public
+build-info metadata. Only model
 HTTP is stubbed with fake keys. Container networking is disabled while testing;
 loopback remains available. No real credentials/global packages/production used.
 
@@ -32,6 +35,18 @@ cloud sentinel is retained, but is not the main proof. Existing180s reply and
 With no variable, its previous bootstrap-mode assertions/flow remain in place.
 The dedicated suite also runs the PR's unit tests before these E2Es. The Linux
 CI smoke job builds/runs it and includes its directory in PR path triggers.
+
+After positives pass, run the **real published .209** negative control with the
+same CLI .242, Hub, SDK and test. No fake version or altered writer:
+
+```sh
+sg docker -c 'docker build --build-arg RUNTIME_VERSION=2.5.0-preview.209 -f tests/test1497-daemon-hub-isolation/Dockerfile -t anet3627-npm209 .'
+sg docker -c 'bash tests/test1497-daemon-hub-isolation/negative.sh anet3627-npm209'
+```
+
+The wrapper requires exit1, actual child registration, and the named byte-equality
+assertion, rejecting setup/model/timeouts as negative-control successes. The
+archive SHA256 for .209 is pinned too. CI runs this after the positive gate.
 
 This proves Linux process behavior, not native Windows/macOS App installation,
 signed package delivery, GUI/IPC or account-backed login. Release/pin/activation

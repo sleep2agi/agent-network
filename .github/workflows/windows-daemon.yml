@@ -63,7 +63,11 @@ jobs:
       - name: Windows stop ACK payloads against the actual Hub schema (Docker)
         run: docker run --rm --network none --entrypoint bun anet-rfc044-sdk-smoke test server/src/windows-sdk-stop-wire.test.ts
       - run: docker run --rm --network none anet-rfc044-sdk-smoke
-      - name: Published CLI .241 with unchanged user global config (different hub, missing, invalid JSON)
+      - name: Published CLI .242 and runtime .210 preserve user global config (three cases)
         run: |
           docker build -f tests/test1497-daemon-hub-isolation/Dockerfile -t anet1497-hub-isolation .
           docker run --rm --network none --init anet1497-hub-isolation
+      - name: Published runtime .209 negative control (must register then fail byte equality)
+        run: |
+          docker build --build-arg RUNTIME_VERSION=2.5.0-preview.209 -f tests/test1497-daemon-hub-isolation/Dockerfile -t anet3627-npm209 .
+          bash tests/test1497-daemon-hub-isolation/negative.sh anet3627-npm209
