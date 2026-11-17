@@ -1,0 +1,28 @@
+Windows stop iterator TS2322 follow-up, 2026-11-17
+Branch: fix/windows-copresence-ts2322
+Exact base: 3356ff6a (#3619); no #4916 changes.
+
+Root cause
+IteratorYieldResult.done is optional false. A loop testing done === false
+does not prove the returned step is IteratorReturnResult to TypeScript.
+Both sync/async drivers now loop until done === true (done !== true).
+No assertions/casts, stop policy, evidence, identity or timeout changes.
+
+Docker verification
+Base source was streamed with git archive 3356ff6a agent-network agent-node
+server contracts into an isolated --network none container using the
+anet-4916-rules-file dependency image. Archive replaced the image sources;
+only windows-codex-copresence.ts was overlaid from this worktree read-only.
+No tests ran against local/global packages or production.
+
+cd /app/agent-network
+bun run typecheck
+  PASS: tsc --noEmit exits 0 (before fix: TS2322 at lines 499 and 516).
+bun test src/windows-codex-copresence.test.ts src/windows-stop-identity.test.ts src/windows-runtime.test.ts
+  45 pass / 6 platform skips / 0 fail / 239 assertions, 3 files.
+  Includes synchronous and asynchronous fail-closed stop flow regressions.
+git diff --check: PASS.
+
+Full output: /tmp/opencode/windows-copresence-ts2322-verified.log
+Native Windows-only process/ACL probes were skipped on Linux, not rerun.
+No claim of new native stop latency or full App acceptance from this test.
