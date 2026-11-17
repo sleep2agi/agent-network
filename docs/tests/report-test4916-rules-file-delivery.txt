@@ -67,6 +67,27 @@ Full combined command exited 0.
 - Empty/success/three-timeout-reason SQL fixtures: PASS.
 Full output: /tmp/opencode/4916-after-main-f8332b96.log
 
+CI fixture packaging follow-up (#3623)
+CI test798 copied server/ but not docs/queries/, so the new statistics test
+failed ENOENT despite the dedicated #4916 image passing. Moved the unchanged
+query into server/queries/rules-file-24h.sql; updated test/E2E/runbook paths;
+removed the dedicated image's special docs COPY. No test798 Dockerfile change.
+Source fix: 99eaf4ff; no product behavior/SQL changes.
+Rebuilt dedicated #4916 image and reran: 139 pass / 0 fail / 653 assertions;
+both bundles and real Hub + agent-node/channel lost-doorbell E2E passed.
+Full output: /tmp/opencode/4916-query-in-server-regression.log
+CI-identical test798 full verification: PASS, command exited 0.
+Built tests/test798-server-unit-ci/Dockerfile unchanged with:
+  SOURCE_COMMIT=99eaf4ff21327380bf5dddafca4b3b9cd59d4f37
+  RUNSH_BLOB=$(git rev-parse 99eaf4ff:tests/test798-server-unit-ci/run.sh)
+Ran its default entrypoint via docker run --rm anet-4916-test798.
+  bun=1.3.14 node=v22.23.5 uid=1000
+  executed_files=347 discovered_files=347 failed_files=0
+  MUTATION_RED registration-password-floor-weakened rc=1
+  RESULT: PASS
+No source mounts or docs/queries COPY workaround; server package supplies SQL.
+Full output: /tmp/opencode/4916-test798-package-query.log
+
 Acceptance limits
 - No clean-App Windows install/download acceptance or production rollout.
 - Version proves an advertisement, not every node being upgraded.
