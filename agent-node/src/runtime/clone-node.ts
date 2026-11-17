@@ -36,7 +36,7 @@ import { atomicWriteJson } from "./config-apply.js";
 import { findCodexRolloutFile } from "./codex-thread-size-check.js";
 import { writeCopresenceYoloToCodexHome } from "./codex-copresence-yolo.js";
 import {
-  ensureGlobalAnetConfig,
+  daemonChildCliEnv,
   getAnetBinAbs,
   minimalEnv,
   resolveChildHome,
@@ -563,8 +563,6 @@ export async function handleCloneNodeDoorbell(
   deps.log(`[clone-node] session ${session.capability}: ${session.reason}`);
   if (skipped.length) deps.log(`[clone-node] skipped secrets/channels: ${skipped.join(", ")}`);
 
-  try { ensureGlobalAnetConfig(home, deps.hubUrl); }
-  catch (e: any) { deps.warn(`[clone-node] global config write failed (continuing): ${e?.message || e}`); }
 
   const childCfgPath = join(childDir, "config.json");
   try {
@@ -611,7 +609,7 @@ export async function handleCloneNodeDoorbell(
   try {
     const launch = deps.spawnChild ?? ((bin: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) =>
       spawn(bin, args, { cwd: opts.cwd, env: opts.env, stdio: ["ignore", "ignore", "ignore"], detached: true }));
-    const child = launch(anetBin, ["node", "start", childDirName], { cwd: childWorkDir, env: minimalEnv() });
+    const child = launch(anetBin, ["node", "start", childDirName], { cwd: childWorkDir, env: daemonChildCliEnv(deps.hubUrl) });
     childPid = child.pid || -1;
     try { child.stdin?.destroy(); } catch { /* ok */ }
     try { child.stdout?.destroy(); } catch { /* ok */ }

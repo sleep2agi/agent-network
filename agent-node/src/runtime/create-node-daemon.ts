@@ -18,7 +18,6 @@ import { childDirNameForCreate } from "./child-dir-name.js";
 import {
   atomicWriteJson,
   atomicWritePrivateText,
-  repairPrivateConfigPermissions,
   isValidTimeoutMs,
   TIMEOUT_MS_MIN,
   TIMEOUT_MS_MAX,
@@ -1066,20 +1065,16 @@ export async function reconcilePendingCreateRequestsOnConnect(
   if (handled > 0) deps.log(`[create-node] pending reconcile handled ${handled} request(s)`);
 }
 
-/** §2.5 step 3 helper — ensure $HOME/.anet/config.json carries the
- *  daemon's hub URL so the spawned `anet node create + start` doesn't
- *  bail with `未找到 CommHub Server`. Idempotent. */
-export function ensureGlobalAnetConfig(home: string, hubUrl: string): void {
-  const dir = join(home, ".anet");
-  const path = join(dir, "config.json");
-  try { mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
-  repairPrivateConfigPermissions(path);
-  let cur: Record<string, any> = {};
-  try { cur = JSON.parse(readFileSync(path, "utf-8")); } catch { /* fresh */ }
-  if (cur.hub !== hubUrl) {
-    cur.hub = hubUrl;
-    atomicWriteJson(path, cur);
-  }
+/** The daemon's Hub for a spawned `anet node start`. 2026-11-17: the child used
+ *  to find it through the user's own ~/.anet/config.json, which this daemon
+ *  rewrote on every create/clone (`ensureGlobalAnetConfig`). On a machine whose
+ *  CLI is logged into a different Hub — the desktop App's local daemon next to a
+ *  cloud login — that silently repointed the user's `anet` at the local Hub (and a
+ *  missing or unreadable file was replaced by `{hub}` alone). The child profile
+ *  already carries `hub`; the CLI also reads COMMHUB_URL before the global file,
+ *  so the daemon passes it in the child env and never writes the user's config. */
+export function daemonChildCliEnv(hubUrl: string, platform: NodeJS.Platform = process.platform, parentEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return minimalEnv(hubUrl ? { COMMHUB_URL: hubUrl } : {}, platform, parentEnv);
 }
 
 interface GetCreateRequestResult {
@@ -1189,7 +1184,7 @@ export async function handleCreateNodeDoorbell(
     deps.warn("[create-node] ignoring invalid shared OpenCode registry for explicit new Server");
   }
   const childEnvForCli = withHostOpenCodeV2ClientPath(
-    minimalEnv() as Record<string, string | undefined>, sharedOpenCodeServerForCreate);
+    daemonChildCliEnv(deps.hubUrl) as Record<string, string | undefined>, sharedOpenCodeServerForCreate);
   const requestedOpenCodeGeneration = req.node_spec.flags?.opencodeGeneration;
   const cliStatus = await requiredCliStatus(
     req.node_spec.runtime,
@@ -1269,13 +1264,7 @@ export async function handleCreateNodeDoorbell(
     }
   }
 
-  // P1: ensure global ~/.anet/config.json has hub so `anet node start`
-  // can resolve the hub even when called from minimalEnv. Idempotent.
-  // #1490 — was `process.env.HOME!` which passed undefined on Windows and
-  // crashed the write with `undefined/.anet/config.json`. resolveChildHome
-  // reads Windows env cascade (USERPROFILE / HOMEDRIVE+HOMEPATH / HOME).
-  try { ensureGlobalAnetConfig(resolveChildHome(process.env, process.platform), deps.hubUrl); }
-  catch (e: any) { deps.warn(`[create-node] global config write failed (continuing): ${e?.message || e}`); }
+  // The child learns the Hub from its profile + COMMHUB_URL (daemonChildCliEnv); never from the user's ~/.anet/config.json.
 
   // V2 co-presence must use the OpenCode model and provider already configured
   // on this machine. #2567's format gate (exactly one slash) already ran in
