@@ -119,7 +119,28 @@ export const RULES_FILE_MAX_PER_DOORBELL = 8;
  * 门铃处理器：拉 pending 请求直到空，每条 ack done / failed。
  * 返回处理条数（测试用）。
  */
-export async function processRulesFileRequests(deps: ProcessRulesFileDeps): Promise<number> {
+const activeDrains = new WeakMap<ProcessRulesFileDeps["callCommHub"], Promise<number>>();
+
+/** Doorbells, reconnects and polling share one drain per authenticated client. */
+export function processRulesFileRequests(deps: ProcessRulesFileDeps): Promise<number> {
+  const active = activeDrains.get(deps.callCommHub);
+  if (active) return active;
+  const drain = drainRulesFileRequests(deps).finally(() => activeDrains.delete(deps.callCommHub));
+  activeDrains.set(deps.callCommHub, drain);
+  return drain;
+}
+
+export const RULES_FILE_POLL_MS = 15_000;
+
+export function startRulesFilePolling(deps: ProcessRulesFileDeps, intervalMs = RULES_FILE_POLL_MS): () => void {
+  const timer = setInterval(() => {
+    void processRulesFileRequests(deps).catch(() => deps.warn("[rules-file] poll_failed"));
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+async function drainRulesFileRequests(deps: ProcessRulesFileDeps): Promise<number> {
   let handled = 0;
   for (let i = 0; i < RULES_FILE_MAX_PER_DOORBELL; i++) {
     const pull = await deps.callCommHub("get_rules_file_request", {});

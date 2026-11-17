@@ -343,6 +343,17 @@ jobs:
       - name: Run test556-node-tmux-format-locale
         run: docker run --rm --network none anet-test556-node-tmux-format-locale
 
+  test4916-rules-file-delivery:
+    name: rules-file lost-doorbell recovery (Docker)
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' && (!cancelled() && !contains(needs.changes.outputs.skip, '"job:test4916-rules-file-delivery"')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: docker build -t anet-test4916 -f tests/test4916-rules-file-delivery/Dockerfile .
+      - run: docker run --rm --network none anet-test4916
+
   test1755-rules-file-e2e:
     # app#225 —— 节点规则文件(CLAUDE.md/AGENTS.md)端到端:真 hub + 真 agent-node
     # 同镜像,桌面端同款 tools/call。验单测验不了的那几条(远端节点可用 / 文件落在

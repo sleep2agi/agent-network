@@ -46,6 +46,7 @@
 // that predates this module.
 
 import { db } from "./db.js";
+import { expireRulesFileRequest } from "./rules-file-timeout.js";
 
 export const CONTENT_GRACE_MS = 60_000;
 export const CONTENT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -79,10 +80,9 @@ export function sweepNodeRequestContent(now: number = Date.now()): NodeRequestSw
       [now - ROW_TTL_MS],
     ).changes ?? 0;
     const ttlCutoff = now - CONTENT_TTL_MS;
-    out.timedOut = db.run(
-      `UPDATE node_rules_requests SET status = 'timeout', acked_at = ?1, error = ?2 WHERE request_id IN (SELECT request_id FROM node_rules_requests WHERE created_at < ?3 AND status IN ('pending', 'in_progress') LIMIT ${SWEEP_BATCH})`,
-      [now, "expired by retention sweep (node never answered)", ttlCutoff],
-    ).changes ?? 0;
+    for (const row of db.all<{ request_id: string }>(
+      `SELECT request_id FROM node_rules_requests WHERE created_at < ?1 AND status IN ('pending', 'in_progress') LIMIT ${SWEEP_BATCH}`, ttlCutoff,
+    )) out.timedOut += expireRulesFileRequest(row.request_id, now, "expired by retention sweep (node never answered)");
     // ?1 = now (PURGE_SET), ?2… = where params.
     out.purged += purgeWhere("first_read_at IS NOT NULL AND first_read_at <= ?2 AND status IN ('done', 'failed', 'timeout')", [now - CONTENT_GRACE_MS], now);
     out.purged += purgeWhere("created_at < ?2 AND status IN ('done', 'failed', 'timeout')", [ttlCutoff], now);

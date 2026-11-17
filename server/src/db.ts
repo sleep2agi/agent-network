@@ -686,7 +686,7 @@ db.exec(`
 // Content retention (node-request-retention.ts): file bytes in content /
 // result_content are purged after the first terminal read (+grace) or a TTL;
 // these two columns record when, so the row itself survives as audit metadata.
-for (const col of ["first_read_at INTEGER", "content_purged_at INTEGER"]) {
+for (const col of ["first_read_at INTEGER", "content_purged_at INTEGER", "timeout_reason TEXT"]) {
   try { db.exec(`ALTER TABLE node_rules_requests ADD COLUMN ${col}`); } catch {}
 }
 db.exec(`

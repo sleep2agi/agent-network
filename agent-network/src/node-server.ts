@@ -45,6 +45,8 @@ import {
 } from "./outbound-attachments";
 import { attachLocalLinks } from "./reply-local-links";
 import { drainRulesFileRequests, handleRulesFileEvent } from "./node-server-rules-file";
+import { startRulesFilePolling } from "./rules-file";
+import cliPackage from "../package.json";
 import { drainNodeSecrets, handleNodeSecretsEvent, nodeSecretsReportFields, resolveNodeSecretScope } from "./node-server-secrets";
 import { installTeamSkills } from "./node-skills";
 import { sendChannelTaskWithTrace } from "./channel-task-trace";
@@ -673,6 +675,7 @@ async function reregister(): Promise<void> {
       tmux_name: TMUX_NAME || undefined,
       // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
       rules_file_capable: true,
+      version: cliPackage.version,
       // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
       skills_capable: true,
       // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
@@ -865,6 +868,7 @@ const drainChannelInbox = createSingleFlight(async () => {
 });
 
 // ── Main ────────────────────────────────────────────
+let stopRulesFilePolling: (() => void) | undefined;
 async function main() {
   await installTeamSkills("claude", { workDir: process.cwd() }, { log, warn: log }).catch((err) => {
     log(`[skills] 团队技能安装失败：${err?.message || err}`);
@@ -879,6 +883,7 @@ async function main() {
   }
 
   log("starting SSE listener...");
+  stopRulesFilePolling = startRulesFilePolling({ callCommHub, runtime: "claude", workDir: process.cwd(), log, warn: log });
   connectSSE().catch((err) => log(`SSE fatal: ${err}`));
 
   // 兜底:任何一次漏推(hub 判错没人在听、事件类型没认)最多晚一个周期。
@@ -915,6 +920,7 @@ async function main() {
     tmux_name: TMUX_NAME || undefined,
     // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
     rules_file_capable: true,
+    version: cliPackage.version,
     // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
     skills_capable: true,
     // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
@@ -949,6 +955,7 @@ async function main() {
       tmux_name: TMUX_NAME || undefined,
       // app#225 follow-up —— 本进程答 rules_file 门铃(node-server-rules-file.ts)。
       rules_file_capable: true,
+      version: cliPackage.version,
       // 同一门铃也答 skills_list / skill_read(node-skills.ts)。
       skills_capable: true,
       // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
@@ -967,6 +974,7 @@ main().catch((err) => {
 });
 
 async function gracefulShutdown() {
+  stopRulesFilePolling?.();
   if (OUTBOUND_ONLY) {
     log("shutting down outbound-only MCP client");
   } else {
