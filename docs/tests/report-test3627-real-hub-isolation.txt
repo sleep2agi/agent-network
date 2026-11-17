@@ -1,6 +1,6 @@
 PR #3627 test-only real-process Hub isolation supplement
 ======================================================
-Base PR HEAD:901521db (fix/daemon-child-hub-no-global-write).
+Current base main:3c4f88aa2058b5647717811b8125477edd70eb68 (#3627 + #3629).
 Supplement branch:test/pr3627-real-hub-isolation.
 No product code or version changes. The earlier independent implementation
 00f6857f is obsolete and NOT a prerequisite; do not cherry-pick it for this test.
@@ -9,9 +9,11 @@ Scope
 -----
 Uses #3627's daemonChildCliEnv(hubUrl) = minimalEnv({COMMHUB_URL}) and the PR's
 existing per-child hub profile, not the parallel proposal's --hub product change.
-Actual published CLI .241 tarball SHA256 verified before extraction:
-887fb13eeaaf4f297888f6cf6bbd365ad3e7d0b11e0415f7d36df73cb7bbfd57.
-Runtime is source-built from the PR checkout; Hub and Claude SDK are real.
+Current gate uses actual npm CLI .242 + runtime .210, no CLI/runtime source build.
+Pinned integrity checked before extraction; public build-info, archive/entry
+hashes recorded. Real npm .209 is the negative-control runtime, same CLI .242
+and same test. Locked dependencies must match published manifest declarations.
+Hub and Claude SDK are real.
 Only model HTTP is stubbed with fake keys; run uses --network none plus loopback.
 
 Each fresh workspace first bootstraps local credentials for daemon init, THEN
@@ -30,19 +32,19 @@ Existing tests/test-rfc044-windows-daemon/smoke.ts gets opt-in case selection;
 without RFC044_CLOUD_CONFIG_CASE its prior bootstrap flow is unchanged.
 No reply/stop assertion thresholds changed. New independent Dockerfile/run.sh
 runs unit prerequisites first, then all3 E2Es. Uses lockfile dependencies and
-verified published CLI .241 code with the PR runtime as installed sibling.
+verified published CLI/runtime code and manifests as installed siblings.
 windows-daemon.yml's Linux job runs suite and includes its PR path trigger.
 Reproduction: tests/test1497-daemon-hub-isolation/README.md.
 
-Prerequisite checks
--------------------
-Current PR source, Docker targeted unit suite:117 pass /1 native-Windows skip /
+Historical pre-rebase checks (PR source901521db, NOT npm .210 evidence)
+--------------------------------------------------------------------
+Prior PR source, Docker targeted unit suite:117 pass /1 native-Windows skip /
 0 fail /341 assertions,5 files. Log:/tmp/opencode/3627-e2e-unit.log.
 Docker full CLI tsc noEmit:PASS(exit0), /tmp/opencode/3627-e2e-tsc.log.
 Docker workflow actionlint:PASS(exit0), /tmp/opencode/3627-e2e-actionlint.log.
 
-Fresh PR implementation E2E results (Docker Linux)
-------------------------------------------------
+Historical PR-source E2E results (Docker Linux, NOT npm .210 evidence)
+-------------------------------------------------------------------
 Case            init-to-SDK-reply   stop dispatch->Hub accepted stopped ACK
 different-hub   6261ms              538ms
 missing         4586ms              484ms
@@ -59,9 +61,63 @@ The same run first passed117 unit tests/341 assertions with1 native-only skip.
 Boundaries
 ----------
 This is Linux Docker execution, NOT native Windows/macOS App installer, signed
-package, GUI/IPC or account-backed login acceptance. Runtime release (.210),
-App pins and deployed runtime activation remain owner/release responsibilities.
+package, GUI/IPC or account-backed login acceptance. Runtime publication and
+App pins/deployed runtime activation remain owner/release responsibilities.
 No npm publication, authenticated push, production/global package/crontab changes.
 No ports, service startup, reverse proxy/tunnel, secret sources or recovery flow
 changed. Historical overwritten user contents require backup or explicit login/
 configuration; no automatic restoration or complete-system recovery claim.
+
+Published-artifact positive gate (current main base3c4f88aa)
+----------------------------------------------------------
+Actual npm packages, not source-built executable substitutes:
+CLI @sleep2agi/agent-network@2.3.0-preview.242
+  tarball SHA256 e6a5ed8ec01bbe2eb306ac39512a25f82f9bb7a7f5b24cc4a6a86fec514d5353
+runtime @sleep2agi/agent-node@2.5.0-preview.210
+  tarball SHA256 48af7e5efe3a904239d6bdd64355bbf5848c46353e89e108e45e95a96f14f9aa
+  dist/cli.js SHA256 0f08360aaeea9cd75171cbebd4959191acf5625caca87a8af16b006868f06342
+Both package build-info:commit3c4f88aa2058b5647717811b8125477edd70eb68,
+dirty=false. Archive SHA512 checked against pinned values AND exact-version npm
+metadata before extraction. Both published manifests/code installed as siblings;
+dependency declarations match the repository's locked dependency trees. No CLI
+or runtime build command runs in this Dockerfile. Test asserts runtime version.
+
+Case            init-to-SDK-reply   stop dispatch->Hub accepted stopped ACK
+different-hub   4285ms              404ms
+missing         4147ms              450ms
+invalid-json    4768ms              454ms
+All3 PASS on Linux Docker. Each child really registers on daemon Hub, profile
+has daemon Hub, dispatched task produces real SDK reply from one model HTTP
+fixture request. Actual HOME's config bytes unchanged after online/reply/stop;
+missing file remains absent. No private-HOME workaround and no threshold change.
+Unit prerequisites117 pass/1 native-only skip/0 fail/341 assertions.
+Build+run exit0, log:/tmp/opencode/3627-npm210-e2e.log.
+Current workflow actionlint exit0:/tmp/opencode/3627-npm-actionlint.log.
+Negative-wrapper bash syntax exit0:/tmp/opencode/3627-npm-negative-shellcheck.log
+(bash -n only; that filename does not imply ShellCheck execution).
+
+Delivery:78f498bd was already pushed as PR #3630 while artifact tests were being
+added. Its history is preserved; these published-package changes are a follow-up
+test-only commit, not a rewrite. Product source and version pins remain main's.
+
+Published .209 negative control (fresh, same CLI .242)
+---------------------------------------------------
+Runtime archive SHA256:
+cc32d818e9f780a60a1d6c976d5a9ea2174b0a9cf4e5700f626f9a377ad489b1
+dist/cli.js SHA256:
+1eb55fe79e85de50ddb30de03c8d6359ce8a0b4aa6d28e0e139cb16dec25b568
+Public build-info commit9706827d7b5df218317fabbe17ebd82bf68f6c5c,dirty=false.
+Real exact .209 npm archive verified, not a fake version or injected writer.
+Same different-hub fixture, daemon HOME, published CLI .242, real Hub and SDK.
+Daemon registered, child registered, THEN named assertion failed:
+  AssertionError: user global config bytes must not change
+Smoke exit1 EXPECTED; negative.sh checks exit1, registered child and named failure
+and returns0 with NEGATIVE_CONTROL_PASS. No install/auth/model timeout counted
+as a successful negative control. Log:/tmp/opencode/3627-npm209-negative.log.
+CI runs this gate only after all3 published .210 positives pass.
+Reproduce with Docker --build-arg RUNTIME_VERSION=2.5.0-preview.209 then run the
+checked-in negative.sh wrapper, as documented in the suite README.
+
+Outcome:real npm .210 fixes this tested config-overwrite path; real npm .209
+reproduces it under the same test. Still NOT_RUN:native macOS/Windows signed App,
+GUI/IPC, account-backed logins or production activation. No production touched.
