@@ -8,7 +8,7 @@ import {
   computeChildPath,
   loadAndVerifyAnetBin,
   probeAnetBinReadiness,
-  ensureGlobalAnetConfig,
+  daemonChildCliEnv,
   reconcilePendingCreateRequestsOnConnect,
   resolveChildHome,
   defaultPathConf,
@@ -68,40 +68,32 @@ describe("create_node pending reconciliation after SSE connect", () => {
   });
 });
 
-describe("#633 daemon private state", () => {
-  const fixture = "/tmp/anet-test633-daemon-private";
+// 2026-11-17 —— 本机 daemon 建 / 克隆子节点时把用户自己的 ~/.anet/config.json 的 hub 改成 daemon 的 hub
+// （桌面 App 本机 daemon + 云端登录的机器上，用户的 anet 被悄悄指到本地 Hub；缺失或坏 JSON 被写成只剩 {hub}）。
+// 现在子进程从自己的 profile + COMMHUB_URL 拿 hub，daemon 不再碰用户的全局配置。
+describe("daemon never writes the user's global ~/.anet/config.json", () => {
+  const src = readFileSync(new URL("./create-node-daemon.ts", import.meta.url), "utf8");
+  const clone = readFileSync(new URL("./clone-node.ts", import.meta.url), "utf8");
 
-  test("global config repair and replacement converge to private state", () => {
-    rmSync(fixture, { recursive: true, force: true });
-    const parent = join(fixture, ".anet");
-    const config = join(parent, "config.json");
-    mkdirSync(parent, { recursive: true, mode: 0o755 });
-    writeFileSync(config, JSON.stringify({ token: "ntok_fixture", hub: "old" }), { mode: 0o666 });
-    chmodSync(config, 0o666);
-
-    ensureGlobalAnetConfig(fixture, "http://hub.test");
-
-    expect(statSync(parent).mode & 0o777).toBe(0o700);
-    expect(statSync(config).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
-      token: "ntok_fixture",
-      hub: "http://hub.test",
-    });
-    rmSync(fixture, { recursive: true, force: true });
+  test("child CLI env carries the daemon hub as COMMHUB_URL", () => {
+    const env = daemonChildCliEnv("http://127.0.0.1:58122", "linux", { HOME: "/home/fixture", PATH: "/usr/bin" });
+    expect(env.COMMHUB_URL).toBe("http://127.0.0.1:58122");
+    expect(env.HOME).toBe("/home/fixture");
+    const win = daemonChildCliEnv("http://127.0.0.1:58122", "win32", { USERPROFILE: "C:\\Users\\fixture", SystemRoot: "C:\\Windows", PATH: "C:\\Windows" });
+    expect(win.COMMHUB_URL).toBe("http://127.0.0.1:58122");
   });
 
-  test("global config read refuses a symlink without touching its target", () => {
-    rmSync(fixture, { recursive: true, force: true });
-    const parent = join(fixture, ".anet");
-    const config = join(parent, "config.json");
-    const victim = join(fixture, "victim.json");
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
-    writeFileSync(victim, '{"sentinel":"unchanged"}\n', { mode: 0o600 });
-    symlinkSync(victim, config);
+  test("no hub → no COMMHUB_URL key", () => {
+    expect(daemonChildCliEnv("", "linux", { HOME: "/home/fixture" }).COMMHUB_URL).toBeUndefined();
+  });
 
-    expect(() => ensureGlobalAnetConfig(fixture, "http://hub.test")).toThrow(/linked|refuses/);
-    expect(readFileSync(victim, "utf8")).toBe('{"sentinel":"unchanged"}\n');
-    rmSync(fixture, { recursive: true, force: true });
+  test("create and clone spawn the child with daemonChildCliEnv and never write the global config", () => {
+    expect(src).not.toMatch(/ensureGlobalAnetConfig\(|function ensureGlobalAnetConfig/);
+    expect(clone).not.toMatch(/ensureGlobalAnetConfig/);
+    expect(src).toMatch(/daemonChildCliEnv\(deps\.hubUrl\)/);
+    expect(clone).toMatch(/env: daemonChildCliEnv\(deps\.hubUrl\)/);
+    // 子节点 profile 仍写 hub —— anet node start 先读 profile.hub。
+    expect(src).toMatch(/hub: deps\.hubUrl,/);
   });
 });
 
