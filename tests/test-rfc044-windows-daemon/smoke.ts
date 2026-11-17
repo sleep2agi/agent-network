@@ -1,7 +1,7 @@
 // Real Hub + packaged CLI/agent-node + real Claude SDK, only the model HTTP is a stub.
 import { spawn, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, win32 } from "node:path";
 import assert from "node:assert/strict";
@@ -69,6 +69,15 @@ for (const key of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH|OPENAI_A
 let daemon: ReturnType<typeof spawn> | undefined;
 let token = "", net = "";
 let launchStartedAt = 0;
+const cloudCase = process.env.RFC044_CLOUD_CONFIG_CASE;
+assert(!cloudCase || ["different-hub", "missing", "invalid-json"].includes(cloudCase), "unknown cloud config case");
+const globalConfig = join(home, ".anet", "config.json");
+let originalGlobal: Buffer | undefined;
+function assertGlobalUnchanged() {
+  if (!cloudCase) return;
+  if (originalGlobal === undefined) assert(!existsSync(globalConfig), "missing user config must remain absent");
+  else assert.deepEqual(readFileSync(globalConfig), originalGlobal, "user global config bytes must not change");
+}
 async function mcp(name: string, args: Record<string, unknown>) {
   const response = await fetch(`${base}/mcp`, { method: "POST", headers: {
     Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream",
@@ -138,6 +147,15 @@ try {
   const init = await exec(node, [cli, "daemon", "init", "local-daemon", "--force"], { cwd: work, env, timeout: 30_000 });
   assert.match(init.stdout, /host_supervisor/);
   const daemonConfig = JSON.parse(readFileSync(join(work, ".anet", "nodes", "local-daemon", "config.json"), "utf8"));
+  // Exercise the user's actual HOME, not an unrelated cloud-home sentinel.
+  // Only init receives local credentials; daemon start and its children must
+  // leave the subsequent user configuration untouched.
+  if (cloudCase) {
+    if (cloudCase === "missing") unlinkSync(globalConfig);
+    else writeFileSync(globalConfig, cloudCase === "invalid-json" ? "CLOUD-SENTINEL-NOT-JSON\n" :
+      '{ "hub": "http://127.0.0.1:1", "token": "fake-cloud-only", "network_id": "fake-cloud-network", "keep": [1, 2] }\n');
+    originalGlobal = existsSync(globalConfig) ? readFileSync(globalConfig) : undefined;
+  }
   if (process.platform === "win32") assert.deepEqual(daemonConfig.runtimes_supported, ["claude-agent-sdk"]);
   daemon = spawn(node, [cli, "daemon", "start", "local-daemon"], { cwd: work, env, shell: false, stdio: ["ignore", "pipe", "pipe"] });
   daemon.stdout?.on("data", data => process.stdout.write(data)); daemon.stderr?.on("data", data => process.stderr.write(data));
@@ -156,6 +174,7 @@ try {
     const { session } = await mcp("get_session_status", { alias: "first-agent" });
     return session?.node_id && session.status === "idle" ? session : null;
   }, "child online");
+  assertGlobalUnchanged();
   const sent = await mcp("send_task", { alias: "first-agent", task: "Say hello. Do not use any tools." });
   const taskId = sent.task_id ?? sent.message_id;
   assert(sent.ok && taskId, JSON.stringify(sent));
@@ -167,11 +186,12 @@ try {
   }, "first SDK reply", 120_000);
   assert(vendorHits > 0);
   assert.equal(readFileSync(sentinel, "utf8"), "CLOUD-CONFIG-MUST-NOT-BE-READ-OR-WRITTEN");
-  assert.equal(JSON.parse(readFileSync(join(home, ".anet", "config.json"), "utf8")).hub, base);
+  if (!cloudCase) assert.equal(JSON.parse(readFileSync(globalConfig, "utf8")).hub, base);
+  assertGlobalUnchanged();
   assert.equal(JSON.parse(readFileSync(join(childDir, "config.json"), "utf8")).hub, base);
   const elapsed = Date.now() - launchStartedAt;
   assert(elapsed <= 180_000, `init-to-reply exceeded 3 minutes: ${elapsed}ms`);
-  console.log(JSON.stringify({ ok: true, platform: process.platform, first_reply: task.result, model_requests: vendorHits, init_to_reply_ms: elapsed, cloud_sentinel: "unchanged" }));
+  console.log(JSON.stringify({ ok: true, platform: process.platform, first_reply: task.result, model_requests: vendorHits, init_to_reply_ms: elapsed, cloud_sentinel: "unchanged", actual_home_config_case: cloudCase ?? "bootstrap", actual_home_config: cloudCase ? "byte-for-byte unchanged (missing remains absent)" : "bootstrap" }));
   const stopStartedAt = Date.now();
   const stopped = await mcp("stop_node", { node_id: child.node_id });
   assert(stopped.ok, JSON.stringify(stopped));
@@ -185,6 +205,7 @@ try {
   const stopElapsed = Date.now() - stopStartedAt;
   console.log(JSON.stringify({ platform: process.platform, stopped: true, stop_ms: stopElapsed }));
   if (process.platform === "win32") assert(stopElapsed <= 15_000, `Windows stop exceeded 15 seconds: ${stopElapsed}ms`);
+  assertGlobalUnchanged();
 } catch (error) {
   // Native SDK/bootstrap errors must be actionable, including a missing git
   // dependency. Emit only bounded logs, never the credential-bearing config.

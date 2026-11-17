@@ -1,0 +1,67 @@
+PR #3627 test-only real-process Hub isolation supplement
+======================================================
+Base PR HEAD:901521db (fix/daemon-child-hub-no-global-write).
+Supplement branch:test/pr3627-real-hub-isolation.
+No product code or version changes. The earlier independent implementation
+00f6857f is obsolete and NOT a prerequisite; do not cherry-pick it for this test.
+
+Scope
+-----
+Uses #3627's daemonChildCliEnv(hubUrl) = minimalEnv({COMMHUB_URL}) and the PR's
+existing per-child hub profile, not the parallel proposal's --hub product change.
+Actual published CLI .241 tarball SHA256 verified before extraction:
+887fb13eeaaf4f297888f6cf6bbd365ad3e7d0b11e0415f7d36df73cb7bbfd57.
+Runtime is source-built from the PR checkout; Hub and Claude SDK are real.
+Only model HTTP is stubbed with fake keys; run uses --network none plus loopback.
+
+Each fresh workspace first bootstraps local credentials for daemon init, THEN
+replaces actual HOME/.anet/config.json before daemon start. Both daemon and child
+retain this HOME. Cases: different Hub+fake cloud token/network+extra fields and
+formatting; missing file; invalid JSON. This does not substitute a separate cloud
+directory or private-HOME workaround. Requires child registration at daemon Hub,
+per-node profile Hub, real task/SDK reply sourced from model HTTP and accepted
+stop ACK. Checks actual HOME config after registration, reply and stop, requiring
+byte equality or absence. Original unrelated cloud sentinel remains additional
+write evidence only; no claim of complete read isolation.
+
+Implementation
+--------------
+Existing tests/test-rfc044-windows-daemon/smoke.ts gets opt-in case selection;
+without RFC044_CLOUD_CONFIG_CASE its prior bootstrap flow is unchanged.
+No reply/stop assertion thresholds changed. New independent Dockerfile/run.sh
+runs unit prerequisites first, then all3 E2Es. Uses lockfile dependencies and
+verified published CLI .241 code with the PR runtime as installed sibling.
+windows-daemon.yml's Linux job runs suite and includes its PR path trigger.
+Reproduction: tests/test1497-daemon-hub-isolation/README.md.
+
+Prerequisite checks
+-------------------
+Current PR source, Docker targeted unit suite:117 pass /1 native-Windows skip /
+0 fail /341 assertions,5 files. Log:/tmp/opencode/3627-e2e-unit.log.
+Docker full CLI tsc noEmit:PASS(exit0), /tmp/opencode/3627-e2e-tsc.log.
+Docker workflow actionlint:PASS(exit0), /tmp/opencode/3627-e2e-actionlint.log.
+
+Fresh PR implementation E2E results (Docker Linux)
+------------------------------------------------
+Case            init-to-SDK-reply   stop dispatch->Hub accepted stopped ACK
+different-hub   6261ms              538ms
+missing         4586ms              484ms
+invalid-json    4272ms              377ms
+All3 PASS. Child registered at real daemon Hub, own profile persisted that Hub,
+task completed with SDK marker originating in one model HTTP request per case.
+Actual daemon/child HOME config bytes unchanged at each checkpoint; missing
+remained absent. This run exercises #3627's COMMHUB_URL implementation, not the
+superseded parallel --hub product patch. No product source/version diff in this
+supplement. Native Windows/macOS NOT_RUN here, not inferred from Linux green.
+Build+run exit0, log:/tmp/opencode/3627-real-hub-isolation.log.
+The same run first passed117 unit tests/341 assertions with1 native-only skip.
+
+Boundaries
+----------
+This is Linux Docker execution, NOT native Windows/macOS App installer, signed
+package, GUI/IPC or account-backed login acceptance. Runtime release (.210),
+App pins and deployed runtime activation remain owner/release responsibilities.
+No npm publication, authenticated push, production/global package/crontab changes.
+No ports, service startup, reverse proxy/tunnel, secret sources or recovery flow
+changed. Historical overwritten user contents require backup or explicit login/
+configuration; no automatic restoration or complete-system recovery claim.
