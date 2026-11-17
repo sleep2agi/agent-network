@@ -26,6 +26,13 @@ public static class AnetProcessTable {
  }
 }`;
 
+export function windowsSdkHelperLaunch(): { command: string; args: string[] } {
+  return { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(RESIDENT_SCRIPT, "utf16le").toString("base64")] };
+}
+
+// Use only PowerShell's installation, never caller/user module search paths.
+// Avoid Join-Path here: it is itself a cmdlet and may require module autoload.
+const MODULE_PATH_SETUP = "$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules')";
 const PRELUDE = [
   "$ErrorActionPreference='Stop'",
   `Add-Type -TypeDefinition '${NATIVE_TABLE.replace(/'/g, "''")}'`,
@@ -40,7 +47,7 @@ function validIdentity(identity: WindowsManagedIdentity): boolean {
 export function windowsSdkEvidenceScript(identities: WindowsManagedIdentity[], capture: boolean, includePrelude = true): string {
   if (!identities.every(validIdentity)) throw Error("invalid SDK process identity");
   const pids = [...new Set(identities.map(identity => identity.pid))];
-  const code = [includePrelude ? PRELUDE : "", `$roots=@(${pids.join(",")})`];
+  const code = [includePrelude ? `${MODULE_PATH_SETUP};\n${PRELUDE}` : "", `$roots=@(${pids.join(",")})`];
   if (capture) {
     code.push(
       "$before=@{};foreach($id in $roots){$before[$id]=Birth $id}",
@@ -113,7 +120,8 @@ export function windowsSdkBatchEvidence(run: (script: string) => string): Pick<W
   };
 }
 
-const RESIDENT_SCRIPT = `[Console]::Out.WriteLine('SDKBOOT');[Console]::Out.Flush()
+const RESIDENT_SCRIPT = `${MODULE_PATH_SETUP}
+[Console]::Out.WriteLine('SDKBOOT');[Console]::Out.Flush()
 ${PRELUDE}
 [Console]::Out.WriteLine('SDKCOMPILED');[Console]::Out.Flush()
 [Console]::Out.WriteLine('SDKREADY')
@@ -151,7 +159,7 @@ export async function openWindowsSdkEvidenceSession(options: {
   const started = Date.now();
   options.onProgress?.(`helper starting runtime=${process.versions.bun ? "bun" : "node"} env_present=${JSON.stringify(Object.fromEntries(
     ["SystemRoot", "windir", "TEMP", "TMP", "HOME", "USERPROFILE", "PSModulePath"].map(key => [key, !!process.env[key]])))}`);
-  const launch = options.launch ?? { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(RESIDENT_SCRIPT, "utf16le").toString("base64")] };
+  const launch = options.launch ?? windowsSdkHelperLaunch();
   const child = spawn(launch.command, launch.args, { stdio: ["pipe", "pipe", "pipe"], shell: false, windowsHide: true });
   let closed = false, sequence = 0, buffer = "", stderr = "", stderrBytes = 0, stdoutBytes = 0;
   let stage = "launch_requested", exitObserved = false;

@@ -27,6 +27,10 @@ if (process.argv[2] !== "--child") {
   }
 } else {
   try {
+    // Node/libuv Windows spawn supplements missing required OS keys (including
+    // WINDIR) from its parent. This is the received env, not the builder object.
+    console.log(JSON.stringify({ helper_probe: "received_process_env", runtime: "node", node_version: process.versions.node,
+      present: Object.fromEntries(["SystemRoot", "windir", "TEMP", "TMP", "HOME", "USERPROFILE", "PSModulePath"].map(key => [key, !!process.env[key]])) }));
     const at = Date.now();
     const birth = probeWindowsCreationDate(process.pid);
     console.log(`[helper-probe] reference_birth_ms=${Date.now() - at}`);

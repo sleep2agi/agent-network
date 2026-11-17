@@ -134,3 +134,41 @@ The generated helper-probe.mjs loaded under actual Node in Docker and reached
 its intended Windows-only platform guard. That checks Node bundling, not
 PowerShell behavior. The exact private-Node/minimalEnv Windows probe and
 startup failure diagnosis remain unverified until native CI.
+
+Builtin-module discovery follow-up after native run 44020510448 (2e77f7c7):
+Windows job 133828740881: private Node + actual minimalEnv reached script_entered
+in 211ms, then startup timed out after 20s without initialized/exit/stderr.
+Bun primitive job 133828603396: script_entered 167ms, initialized 1157ms,
+capture/prekill/final query times 1061/40/4ms. Bun had PSModulePath; the actual
+Node child did not. This narrows the hang to initialization including Add-Type,
+but module autodiscovery as the cause remains a native-testable hypothesis.
+
+Change: first helper script line sets its process-local PSModulePath to
+[IO.Path]::Combine($PSHOME,'Modules'), before any cmdlet. It deliberately does
+not use Join-Path (also a cmdlet), append caller values or read user profiles/
+module paths. NoProfile and NonInteractive were already present and remain.
+Regression decodes the production EncodedCommand and checks the first line,
+ordering before Add-Type, flags and absence of user-profile path references.
+The product-env native Node probe from the previous commit is retained.
+No timeout/identity/descendant gates or <=15s stop+ACK gate were changed.
+
+WINDIR discrepancy is between two distinct layers, not a single env object:
+product_env logs the JS builder output; received_process_env/helper logs the
+spawned Node child's process.env. The native setup log identifies Node v22.23.4.
+Its bundled libuv required_vars includes WINDIR, and make_program_env uses
+GetEnvironmentVariableW to supplement missing required keys from the parent:
+https://github.com/nodejs/node/blob/v22.23.4/deps/uv/src/win/process.c
+This explains false in the builder / true after Node spawn. PSModulePath is
+not in that required list. The fixture now logs received_process_env and actual
+Node version explicitly (only key-presence booleans, never env values).
+No product env allowlist expansion was made to hide the discrepancy.
+
+Builtin-module follow-up Docker verification: command chain exited 0.
+Raw output: /tmp/opencode/rfc044-helper-builtin-modules.log
+28 pass / 2 skips / 121 assertions; 110 pass / 275 assertions;
+86 pass / 2 skips / 350 assertions; actual Hub ACK schema 1 pass / 8 assertions.
+Total 225 pass, 4 platform-only skips, 754 assertions; zero failures.
+Targeted TypeScript noEmit check passed. Linux real SDK reply 4755ms, one
+model request, unchanged sentinel, stopped ACK 445ms. These results verify
+script construction and Linux regressions, not Windows module autoload or
+the <=15s native stop target. Native acceptance remains pending.

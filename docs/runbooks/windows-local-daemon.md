@@ -74,6 +74,11 @@ accepted Hub acknowledgment within 15 seconds. That performance target remains
 unproven until the native Windows run passes. This end-to-end target still
 includes helper startup/compilation; separating timeout budgets does not hide
 cold-start latency from acceptance. The helper is disposed on completion/error.
+Before any cmdlet, the helper replaces its own `PSModulePath` with
+`[IO.Path]::Combine($PSHOME,'Modules')`, using only PowerShell's installation.
+It does not inherit/append user module directories, and uses .NET path joining
+rather than a cmdlet that itself needs module discovery. Launch remains
+`-NoProfile -NonInteractive`. This does not expand daemon/SDK child env policy.
 Helper startup diagnostics expose fixed stage names, exit-observation flags,
 output byte counts and allowlisted error reasons, not stderr text or paths.
 The native E2E additionally probes the helper through a private Node parent and

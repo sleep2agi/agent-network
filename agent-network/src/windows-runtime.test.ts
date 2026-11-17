@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { windowsRuntimeSupported } from "./windows-runtime.js";
 import { windowsRuntimeSupported as daemonSupports } from "../../agent-node/src/shared/windows-runtime.js";
-import { windowsSdkBatchEvidence, windowsSdkEvidenceScript, openWindowsSdkEvidenceSession, sdkEvidenceReason } from "./windows-sdk-stop-evidence.js";
+import { windowsSdkBatchEvidence, windowsSdkEvidenceScript, openWindowsSdkEvidenceSession, sdkEvidenceReason, windowsSdkHelperLaunch } from "./windows-sdk-stop-evidence.js";
 import { orchestrateWindowsManagedStop, orchestrateWindowsManagedStopAsync, probeWindowsCreationDate } from "./windows-codex-copresence.js";
 
 test("Windows CLI and daemon agree on SDK-only first-run support", () => {
@@ -16,6 +16,17 @@ test("Windows CLI and daemon agree on SDK-only first-run support", () => {
 const sdkRoot = { pid: 8100, role: "wrapper", creationDate: "999" };
 const agentRoot = { pid: 8744, role: "agent", creationDate: "888" };
 const wire = (value: unknown) => `SDKSTOP:${JSON.stringify(value)}`;
+test("helper fixes module discovery to PSHOME before any cmdlet and stays noninteractive", () => {
+  const launch = windowsSdkHelperLaunch();
+  expect(launch.args).toContain("-NoProfile");
+  expect(launch.args).toContain("-NonInteractive");
+  const script = Buffer.from(launch.args[launch.args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
+  expect(script.split("\n")[0]).toBe("$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules')");
+  expect(script.indexOf("$env:PSModulePath=")).toBeLessThan(script.indexOf("Add-Type"));
+  expect(script).not.toContain("Join-Path");
+  expect(script).not.toContain("$env:USERPROFILE");
+  expect(windowsSdkEvidenceScript([sdkRoot], true).split("\n")[0]).toContain("$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules')");
+});
 const captured = {
   checks: [{ pid: 8100, before: "999", after: "999" }, { pid: 8744, before: "888", after: "888" }],
   rows: [{ pid: 8100, ppid: 1, birth: "999", after: "999", stable: true }, { pid: 8744, ppid: 8100, birth: "888", after: "888", stable: true }],
