@@ -76,15 +76,15 @@ describe("daemon never writes the user's global ~/.anet/config.json", () => {
   const clone = readFileSync(new URL("./clone-node.ts", import.meta.url), "utf8");
 
   test("child CLI env carries the daemon hub as COMMHUB_URL", () => {
-    const env = daemonChildCliEnv("http://127.0.0.1:58122", "linux", { HOME: "/home/fixture", PATH: "/usr/bin" });
+    const env = daemonChildCliEnv("http://127.0.0.1:58122", "linux", { HOME: "/home/user", PATH: "/usr/bin" });
     expect(env.COMMHUB_URL).toBe("http://127.0.0.1:58122");
-    expect(env.HOME).toBe("/home/fixture");
+    expect(env.HOME).toBe("/home/user");
     const win = daemonChildCliEnv("http://127.0.0.1:58122", "win32", { USERPROFILE: "C:\\Users\\fixture", SystemRoot: "C:\\Windows", PATH: "C:\\Windows" });
     expect(win.COMMHUB_URL).toBe("http://127.0.0.1:58122");
   });
 
   test("no hub → no COMMHUB_URL key", () => {
-    expect(daemonChildCliEnv("", "linux", { HOME: "/home/fixture" }).COMMHUB_URL).toBeUndefined();
+    expect(daemonChildCliEnv("", "linux", { HOME: "/home/user" }).COMMHUB_URL).toBeUndefined();
   });
 
   test("create and clone spawn the child with daemonChildCliEnv and never write the global config", () => {
