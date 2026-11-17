@@ -78,7 +78,8 @@ test("cli.ts 在启动和热更新时都把 daemonExtraPath 交给同一份 PATH
   const n = cli.split("applyDaemonExtraPath(fileConfig.daemonExtraPath)").length - 1;
   expect(n).toBe(2);
   const src = readFileSync(new URL("./create-node-daemon.ts", import.meta.url), "utf8");
-  expect(src).toContain("appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform)");
+  // RFC-044: computeChildPath also takes execPath + SystemRoot (Windows private Node); the extra dirs still append to that same PATH.
+  expect(src).toMatch(/appendExtraPath\(computeChildPath\(platform[^)]*\), daemonExtraPathDirs, platform\)/);
   expect(src).toContain(DAEMON_EXTRA_PATH_FIELD);
 });
 

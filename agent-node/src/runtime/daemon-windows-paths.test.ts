@@ -21,6 +21,14 @@ test("Windows fixed PATH preserves drive letters and uses semicolon extras", () 
   expect(base).toBe('C:\\Private Node');
   expect(appendExtraPath(base, ['D:\\tools', 'C:\\Private Node'], "win32")).toBe('C:\\Private Node;D:\\tools');
 });
+test("Windows lifecycle tools use trusted SystemRoot rather than user PATH", () => {
+  expect(computeChildPath("win32", 'D:\\Private Node\\node.exe', 'C:\\Windows')).toBe('D:\\Private Node;C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0');
+  const env = minimalEnv({}, "win32", { HOME: 'D:\\Private', SystemRoot: 'C:\\Windows', TEMP: 'D:\\Private\\temp', PATH: 'C:\\attacker' });
+  expect(env.SystemRoot).toBe('C:\\Windows');
+  expect(env.TEMP).toBe('D:\\Private\\temp');
+  expect(env.PATH).not.toContain('attacker');
+  expect(() => minimalEnv({ SystemRoot: 'C:\\attacker' }, "win32", { HOME: 'D:\\Private' })).toThrow();
+});
 test("UNC private home does not inherit the cloud account's home drive", () => {
   const env = minimalEnv({}, "win32", { HOME: '\\\\server\\share\\app', HOMEDRIVE: 'C:', HOMEPATH: '\\Users\\cloud' });
   expect(env.HOMEDRIVE).toBe('\\\\server\\share');

@@ -1,0 +1,51 @@
+RFC-044 SDK smoke candidate, 2026-11-16
+Branch: feat/rfc044-windows-sdk-smoke (uncommitted candidate atop #3618)
+
+Verification, all local execution inside Docker:
+sg docker -c 'docker build -f tests/test-rfc044-windows-daemon/Dockerfile -t anet-rfc044-sdk-units . && docker run --rm --network none anet-rfc044-sdk-units && docker build -f tests/test-rfc044-windows-daemon/Dockerfile.smoke -t anet-rfc044-sdk-smoke . && docker run --rm --network none --cpus 2 --memory 3g anet-rfc044-sdk-smoke'
+Exit: 0
+Raw local log: /tmp/opencode/rfc044-sdk-verified.log
+
+Updated stop implementation verification (same command), exit 0:
+Raw local log: /tmp/opencode/rfc044-sdk-stop-verified-v2.log
+Focused primitives/policy: 8 pass, 1 Windows-only skip, 46 assertions.
+Existing create-node/CLI pin: 110 pass, 0 fail, 275 assertions.
+Stop/Windows identity regressions: 85 pass, 2 Windows-only skips, 338 assertions.
+Real SDK reply: init_to_reply_ms=4651, model_requests=1, cloud sentinel unchanged.
+Daemon stop ack accepted: sr_e26cf697a9b3.
+Expanded stop tests required procps and the MCP dependency in the Docker image;
+initial missing-fixture-tools failures were resolved by installing them in Docker.
+Later changes add Windows-only no-git/tool probes and bounded failure logs;
+these Windows branches still require native CI.
+
+Focused primitives/policy: 10 pass, 1 Windows-only skip, 0 fail, 55 assertions.
+Existing create-node/CLI pin regression: 110 pass, 0 fail, 275 assertions.
+Real Hub -> private Node/paired CLI -> daemon init/start -> Hub create_node
+-> real Claude Agent SDK -> local model HTTP stub -> task reply:
+{"ok":true,"platform":"linux","first_reply":"[first-agent] WINDOWS_SDK_FIRST_REPLY","model_requests":1,"init_to_reply_ms":4389,"cloud_sentinel":"unchanged"}
+stop_node completion verified via node_stop_requests.status=stopped.
+Daemon log: ack accepted request_id=sr_1b3e59292f99 action=stop.
+
+Earlier harness failures, not product gate relaxations:
+- /api/nodes has no session.status; use get_session_status.
+- Copied POSIX shim mode 775 was correctly rejected; fixture installs mode 755.
+- Initial send_task returns message_id; accept task_id or message_id.
+Final verification rebuilt both images, no host source mounts.
+
+NOT ACCEPTED / outstanding gates:
+- Native Windows and macOS SDK workflow jobs have not run for this candidate.
+- POSIX stop/sweep/rebuild paths are now bypassed on Windows. Daemon delegates
+  to pinned CLI via private Node. SDK CLI requires a persisted lifecycle receipt
+  and uses existing native identity/descendant/taskkill orchestration. Unknown
+  identity/capture fails closed, retaining the receipt; no alias-only fallback.
+  Native execution remains unproven, including dead-wrapper recovery semantics.
+- Verify PID ownership/reuse and descendant termination on Windows, not merely
+  root disappearance or taskkill argument construction.
+- Audit create-failure, daemon shutdown/rebuild and all SDK subprocess paths.
+- Timer excludes artifact downloads/install and App interaction. This is not
+  a clean-Windows three-minute App acceptance result.
+- Unchanged cloud sentinel bytes prove no writes, not absence of reads. HOME
+  primitive coverage is separate; full read isolation is not established here.
+
+No production, global npm packages, real-user config or schedules changed.
+No merge/release authorization inferred from these test results.

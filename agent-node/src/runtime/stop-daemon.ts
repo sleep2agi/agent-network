@@ -29,6 +29,7 @@
 
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
+import { daemonCliLaunch } from "./daemon-cli-launch.js";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { childWorkDirFor, forgetChildWorkdir } from "./child-workdir.js";
@@ -94,6 +95,7 @@ export function getChildrenSnapshot(): ChildEntry[] {
 }
 
 export interface StopDoorbellDeps {
+  platform?: NodeJS.Platform;
   adoption?: AdoptDaemonDeps;
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   log: (msg: string) => void;
@@ -129,6 +131,8 @@ export interface StopDoorbellDeps {
 }
 
 export interface CopresenceTeardownResult { ok: boolean; detail: string }
+
+export const DAEMON_CLI_STOP_TIMEOUT_MS = 120_000;
 
 interface GetStopRequestResult {
   ok: boolean;
@@ -290,14 +294,32 @@ function tailText(s: unknown, n = 600): string {
 /** `anet node stop <alias>` with the pinned binary and the daemon's minimal env.
  *  Exported (#1625) so a failed create runs the *same* stop authority as the stop
  *  doorbell instead of inventing a second, weaker one. */
-export async function stopCopresenceChild(alias: string, childWorkDir: string): Promise<CopresenceTeardownResult> {
+export async function stopCopresenceChild(alias: string, childWorkDir: string, onProgress?: (message: string) => void): Promise<CopresenceTeardownResult> {
   const { getAnetBinAbs, minimalEnv } = await import("./create-node-daemon.js");
   let bin: string;
   try { bin = getAnetBinAbs(); }
   catch (e: any) { return { ok: false, detail: `anet binary unavailable: ${e?.message || e}` }; }
   try {
-    const { stdout } = await execFileP(bin, ["node", "stop", alias], {
-      cwd: childWorkDir, env: minimalEnv(), timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
+    const launch = daemonCliLaunch(bin, ["node", "stop", alias]);
+    const { stdout } = await new Promise<{ stdout: string }>((resolve, reject) => {
+      const child = execFile(launch.command, launch.args, {
+        cwd: childWorkDir, env: minimalEnv(), timeout: DAEMON_CLI_STOP_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024,
+        shell: false, windowsHide: true,
+      }, (error, stdout, stderr) => {
+        if (error) reject(Object.assign(error, { stdout, stderr }));
+        else resolve({ stdout: String(stdout) });
+      });
+      // Bounded live diagnostics: buffering until exit hid every stop stage
+      // from the daemon when the caller's observation deadline expired first.
+      let remaining = 16_000;
+      const progress = (chunk: Buffer | string) => {
+        if (!onProgress || remaining <= 0) return;
+        const text = String(chunk).slice(0, Math.min(remaining, 600)).trim();
+        remaining -= Buffer.byteLength(String(chunk));
+        if (text) onProgress(text);
+      };
+      child.stdout?.on("data", progress);
+      child.stderr?.on("data", progress);
     });
     return { ok: true, detail: tailText(stdout) };
   } catch (e: any) {
@@ -348,6 +370,7 @@ export async function handleStopDoorbell(
 
   let req: GetStopRequestResult;
   try {
+    deps.log(`[stop-daemon] request=${request_id} fetching owned stop request`);
     req = await deps.callCommHub("get_stop_request", { request_id });
   } catch (e: any) {
     deps.warn(`[stop-daemon] get_stop_request failed: ${e?.message || e}`);
@@ -383,6 +406,36 @@ export async function handleStopDoorbell(
   };
 
   const entry = childrenMap.get(child_node_id);
+  if ((deps.platform ?? process.platform) === "win32") {
+    // CLI owns the persisted generation identities, including after a daemon
+    // restart. Never enter pgrep, /proc, tmux or POSIX signal fallback here.
+    let local: any;
+    try {
+      const cfg = childDirName && join(workdirRoot, childDirName, "config.json");
+      if (!cfg || !lstatSync(cfg).isFile() || lstatSync(cfg).isSymbolicLink()) throw Error("missing local config");
+      local = JSON.parse(readFileSync(cfg, "utf8"));
+      if (local.node_id !== child_node_id || local.runtime !== "claude-agent-sdk") throw Error("local node identity/runtime mismatch");
+      deps.log(`[stop-daemon] request=${request_id} Windows SDK local identity verified; delegating to CLI (budget=${DAEMON_CLI_STOP_TIMEOUT_MS}ms)`);
+      const run = deps.stopCopresenceNode ?? ((alias: string, cwd: string) => stopCopresenceChild(alias, cwd,
+        message => deps.log(`[stop-daemon] request=${request_id} CLI: ${message}`)));
+      const stopped = await run(childDirName!, dirname(dirname(workdirRoot)));
+      if (!stopped.ok) throw Error(stopped.detail);
+    } catch (e: any) {
+      const error = `windows_sdk_stop_failed: ${tailText(e?.message || e)}`;
+      deps.warn(`[stop-daemon] request=${request_id} ${error}`);
+      await deps.callCommHub("ack_stop_request", { request_id, status: "stop_failed", error })
+        .catch((e: any) => deps.warn(`[stop-daemon] request=${request_id} failed acknowledgment: ${tailText(e?.message || e)}`));
+      return;
+    }
+    const backup = action === "delete" && delete_config && childDirName
+      ? moveWorkdirToTrash(childDirName, workdirRoot, deletedRoot, deps, ensureDir, chmod, renameDir) : null;
+    forgetIfDeleted(backup);
+    childrenMap.delete(child_node_id);
+    await deps.callCommHub("ack_stop_request", { request_id, status: "stopped", exit_signal: "taskkill", ...(backup ? { backup_path: backup } : {}) })
+      .then(() => deps.log(`[stop-daemon] request=${request_id} Windows SDK stop ack accepted`))
+      .catch((e: any) => deps.warn(`[stop-daemon] request=${request_id} failed acknowledgment: ${tailText(e?.message || e)}`));
+    return;
+  }
   if (!entry) {
     // #1286 (delete) + #1448 finding-3 (stop): no map entry, for BOTH actions.
     //
@@ -801,6 +854,7 @@ async function sweepOrphansForChild(
 interface MyChild { child_node_id: string; alias: string; lifecycle_state: string; managed?: string; }
 
 export interface RebuildDeps {
+  platform?: NodeJS.Platform;
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
@@ -918,6 +972,11 @@ export async function rebuildChildrenMapOnBoot(deps: RebuildDeps): Promise<Rebui
     return result;
   }
   result.total_children_from_hub = children.length;
+  if ((deps.platform ?? process.platform) === "win32") {
+    // Stop uses the CLI's on-disk lifecycle receipt, not an alias process scan.
+    deps.log(`[rebuild] Windows uses persisted CLI lifecycle identities for ${children.length} children`);
+    return result;
+  }
 
   const selfPid = process.pid;
   const daemonWorkDir = deps.workDir ?? process.cwd();

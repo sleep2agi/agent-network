@@ -463,6 +463,12 @@ export function probeWindowsCimIdentity(
 export interface WindowsStopOrchestrationDeps {
   runPowerShell?: (script: string) => string;
   runTaskkill?: (pid: number) => TaskkillOutcome;
+  onProgress?: (stage: string) => void;
+  captureRoots?: (roots: WindowsManagedIdentity[]) => WindowsDescendantCapture[];
+  readFinalEvidence?: (identities: WindowsManagedIdentity[]) => {
+    snapshot: Array<{ pid: number; ppid: number }> | null;
+    probe: (identity: WindowsManagedIdentity) => WindowsIdentityState;
+  };
 }
 
 export interface WindowsStopOrchestration {
@@ -484,13 +490,52 @@ export function orchestrateWindowsManagedStop(
   roots: WindowsManagedIdentity[],
   deps: WindowsStopOrchestrationDeps = {},
 ): WindowsStopOrchestration {
+  const flow = windowsManagedStopFlow(roots, deps);
+  let step = flow.next();
+  while (step.done === false) {
+    try { step = flow.next(step.value()); }
+    catch (error) { step = flow.throw(error); }
+  }
+  return step.value;
+}
+
+export type AsyncWindowsStopDeps = Omit<WindowsStopOrchestrationDeps, "captureRoots" | "readFinalEvidence"> & {
+  captureRoots?: (roots: WindowsManagedIdentity[]) => WindowsDescendantCapture[] | Promise<WindowsDescendantCapture[]>;
+  readFinalEvidence?: (identities: WindowsManagedIdentity[]) => ReturnType<NonNullable<WindowsStopOrchestrationDeps["readFinalEvidence"]>> | Promise<ReturnType<NonNullable<WindowsStopOrchestrationDeps["readFinalEvidence"]>>>;
+  probeRoot?: (root: WindowsManagedIdentity) => WindowsIdentityState | Promise<WindowsIdentityState>;
+};
+
+/** Same decision flow as the synchronous CLI, with async evidence transport. */
+export async function orchestrateWindowsManagedStopAsync(roots: WindowsManagedIdentity[], deps: AsyncWindowsStopDeps): Promise<WindowsStopOrchestration> {
+  const flow = windowsManagedStopFlow(roots, deps);
+  let step = flow.next();
+  while (step.done === false) {
+    try { step = flow.next(await step.value()); }
+    catch (error) { step = flow.throw(error); }
+  }
+  return step.value;
+}
+
+function* windowsManagedStopFlow(
+  roots: WindowsManagedIdentity[], deps: AsyncWindowsStopDeps,
+): Generator<() => unknown, WindowsStopOrchestration, any> {
   const runPowerShell = deps.runPowerShell;
   const runTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
   const identities: WindowsManagedIdentity[] = [...roots];
   const gaps: string[] = [];
   const notes: string[] = [];
-  for (const root of roots) {
-    const captured = captureWindowsDescendantIdentities(root, { runPowerShell });
+  let batch: WindowsDescendantCapture[] | undefined;
+  if (deps.captureRoots) {
+    deps.onProgress?.(`batch capture roots=${roots.length}`);
+    try { batch = yield () => deps.captureRoots!(roots); }
+    catch (error: any) { batch = roots.map(() => ({ identities: [], unknownReason: `batch capture failed: ${String(error?.stderr || error?.code || error?.message || error).slice(-400)}` })); }
+  }
+  for (const [index, root] of roots.entries()) {
+    deps.onProgress?.(`capture ${root.role} pid=${root.pid}`);
+    const captured = deps.captureRoots
+      ? batch?.[index] ?? { identities: [], unknownReason: "batch capture unavailable" }
+      : captureWindowsDescendantIdentities(root, { runPowerShell });
+    deps.onProgress?.(`captured ${root.role}: descendants=${captured.identities.length}, unknown=${!!captured.unknownReason}`);
     if (captured.unknownReason) gaps.push(captured.unknownReason);
     identities.push(...captured.identities);
   }
@@ -498,19 +543,33 @@ export function orchestrateWindowsManagedStop(
   const killedPids: number[] = [];
   for (const root of [...roots].reverse()) {
     const label = `${root.role} pid=${root.pid}`;
-    const state = probeWindowsIdentity(root.pid, root.creationDate, runPowerShell, root.kind);
+    deps.onProgress?.(`revalidate ${label}`);
+    const state: WindowsIdentityState = yield () => deps.probeRoot ? deps.probeRoot(root)
+      : probeWindowsIdentity(root.pid, root.creationDate, runPowerShell, root.kind);
     if (state !== "alive") { notes.push(`kill withheld for ${label}: root identity ${state}`); continue; }
     killedPids.push(root.pid);
+    deps.onProgress?.(`taskkill ${label}`);
     kills.push({ label, outcome: runTaskkill(root.pid) });
+    deps.onProgress?.(`taskkill finished ${label}`);
   }
   // 🔴 非零 kill ⇒ 必须以**遍历本身**证明「没有未记账的存活后代」：
   //    快照只提供 (pid, ppid)，遍历在 JS 侧、种子是**全部已捕获身份**（根 + 后代），
   //    **不依赖根是否可达**。任何未记账的现存后代 / 快照不可得 ⇒ unknown。
   const reconGaps: string[] = [];
+  let finalEvidence: ReturnType<NonNullable<WindowsStopOrchestrationDeps["readFinalEvidence"]>> | undefined;
+  if (deps.readFinalEvidence) {
+    deps.onProgress?.(`batch final verification identities=${identities.length}`);
+    try { finalEvidence = yield () => deps.readFinalEvidence!(identities); }
+    catch (error: any) {
+      notes.push(`final evidence failed: ${String(error?.stderr || error?.code || error?.message || error).slice(-400)}`);
+      // All final identity probes below become unknown, never gone.
+    }
+  }
   if (kills.some((kill) => kill.outcome.status !== 0 || kill.outcome.signal)) {
     const capturedPids = identities.map((identity) => identity.pid);
     let snapshot: Array<{ pid: number; ppid: number }> | null = null;
-    try { snapshot = parseWindowsProcessSnapshot((runPowerShell ?? defaultPowerShellRunner)(windowsProcessSnapshotScript())); }
+    try { snapshot = deps.readFinalEvidence ? finalEvidence?.snapshot ?? null
+      : parseWindowsProcessSnapshot((runPowerShell ?? defaultPowerShellRunner)(windowsProcessSnapshotScript())); }
     catch { snapshot = null; }
     if (snapshot === null) {
       reconGaps.push(`tree not reconciled: process snapshot not obtained or not understood`);
@@ -528,8 +587,13 @@ export function orchestrateWindowsManagedStop(
     kills,
     notes,
     captureUnknown: [...gaps, ...reconGaps],
-    probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell, identity.kind),
+    probe: (identity) => {
+      deps.onProgress?.(`verify ${identity.role} pid=${identity.pid}`);
+      return deps.readFinalEvidence ? finalEvidence?.probe(identity) ?? "unknown"
+        : probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell, identity.kind);
+    },
   });
+  deps.onProgress?.(`verdict=${verdict.kind}`);
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
 

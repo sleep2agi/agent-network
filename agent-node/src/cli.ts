@@ -184,6 +184,7 @@ import {
 import {
   CLAUDE_LINUX_X64_PACKAGE,
   installPinnedClaudeNativeBinary,
+  resolveBundledClaudeBinary,
 } from "./runtime/claude-native-binary";
 import {
   buildResumeHint,
@@ -3179,24 +3180,12 @@ async function processWithClaude(
     warn(`[claude] image attachments (${images!.length}) received but resolved model is NOT marked imageCapable (flags.modelImageCapable !== true); sending text-only. Set modelImageCapable=true via anet node create with a vision-capable model (MiniMax-M3 / claude-sonnet-4-6 / etc).`);
   }
 
-  // Pre-flight: if no Claude binary is resolvable, on-the-fly install the
-  // glibc one. SDK ships musl-only by default on Linux x64 which fails on
-  // Debian/Ubuntu/RHEL hosts. Auto-install means the user doesn't need to
-  // know about the binary distribution detail.
-  const { existsSync } = await import("fs");
-  let hasBinary = false;
-  try {
-    const glibcPath = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
-    if (existsSync(glibcPath)) hasBinary = true;
-  } catch {}
-  if (!hasBinary) {
-    try {
-      const { execSync } = await import("child_process");
-      execSync("which claude", { stdio: "pipe" });
-      hasBinary = true;
-    } catch {}
-  }
-  if (!hasBinary && process.platform === "linux") {
+  // Native packages are optionalDependencies of the exact installed SDK.
+  // Use the same resolved path for preflight and query(), not a Linux-only
+  // presence check followed by a different global/PATH executable.
+  const resolveNative = () => resolveBundledClaudeBinary({ resolvePackage: specifier => require.resolve(specifier) });
+  let claudePath = resolveNative();
+  if (!claudePath && process.platform === "linux" && process.arch === "x64") {
     try {
       const { execFileSync } = await import("child_process");
       const packageRoot = packageRootFrom(import.meta.url, process.argv[1]);
@@ -3212,26 +3201,23 @@ async function processWithClaude(
         }),
       });
       log(`[claude] no Claude binary found — installed ${CLAUDE_LINUX_X64_PACKAGE}@${install.sdkVersion} (glibc) ...`);
-      try {
-        const glibcPath2 = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
-        if (existsSync(glibcPath2)) {
-          hasBinary = true;
-          log(`[claude] glibc binary installed: ${glibcPath2}`);
-        }
-      } catch {}
+      claudePath = resolveNative();
     } catch (e: any) {
       log(`[claude] auto-install of glibc binary failed: ${e?.message || e}`);
     }
   }
-  if (!hasBinary) {
+  if (!claudePath) {
     return [
       "claude 错误: Claude Code 二进制未找到。",
-      "agent-node 默认运行 claude-agent-sdk runtime 需要 Claude Code 本地二进制。",
-      "解决方案：",
-      "  1. 全局安装 Claude Code: npm i -g @anthropic-ai/claude-code",
-      "  2. 或者切换到 codex-sdk runtime: anet node create <name> --runtime codex-sdk (需 codex auth login)",
-      "  3. 或者在 node config.json 里设 pathToClaudeCodeExecutable 指向已安装的 claude 二进制",
+      `缺少 SDK 平台包 @anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/${process.platform === "win32" ? "claude.exe" : "claude"}。`,
+      "请修复 agent-node 的配对 SDK 安装并包含 optionalDependencies；不需要全局安装 Claude Code，也不会从用户 PATH 查找。",
     ].join("\n");
+  }
+  try {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync(claudePath, ["--version"], { stdio: "pipe", shell: false, windowsHide: true, timeout: 15_000 });
+  } catch (error: any) {
+    return `claude 错误: SDK 平台二进制无法执行 (${process.platform}-${process.arch}): ${error?.message || error}`;
   }
 
   // Root-safety log (was a hard-fail before 2026-06-24 — see the partner-team host incident). Claude Code's security policy rejects `--dangerously-skip-
@@ -3480,37 +3466,6 @@ async function processWithClaude(
   } catch (e: any) {
     warn(`[claude] loops SDK MCP server init failed (${e?.message || e}); self-loop tools unavailable for this agent`);
   }
-
-  // ALWAYS resolve a working binary. Earlier we returned undefined when
-  // commhub MCP was injected to avoid a URL-MCP rejection, but the SDK's
-  // default falls back to a musl binary on Linux that doesn't exist on
-  // glibc (Debian/Ubuntu) → 'Claude Code native binary not found'. Newer
-  // SDK + Claude CLI accept URL-type MCP, so we resolve a binary either
-  // way and let it handle the MCP config.
-  const claudePath = (() => {
-    try {
-      const { execSync } = require("child_process");
-      const fs = require("fs");
-      // 1. SDK-bundled glibc binary (works on most Linux x64)
-      try {
-        const glibcPath = require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/claude");
-        if (fs.existsSync(glibcPath)) {
-          execSync(`${glibcPath} --version`, { stdio: "pipe" });
-          log(`[claude] using glibc binary: ${glibcPath}`);
-          return glibcPath;
-        }
-      } catch {}
-      // 2. Global Claude Code install (claude in PATH — Mac users on Pro)
-      try {
-        const globalPath = execSync("which claude", { encoding: "utf-8" }).trim();
-        if (globalPath) { log(`[claude] using global binary: ${globalPath}`); return globalPath; }
-      } catch {}
-      // 3. SDK default (likely fails on glibc but lets the SDK surface a
-      // clearer error than a silent path mismatch).
-      log(`[claude] no binary resolved, falling back to SDK default`);
-      return undefined;
-    } catch { return undefined; }
-  })();
 
   // permissionMode resolution (Vincent ask via 通信龙 2026-06-24):
   //

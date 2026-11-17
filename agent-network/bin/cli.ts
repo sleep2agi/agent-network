@@ -312,6 +312,7 @@ import {
   probeWindowsOwnedLoopbackConnection,
   readWindowsCopresenceRecord,
   orchestrateWindowsManagedStop,
+  orchestrateWindowsManagedStopAsync,
   settleWindowsManagedStop,
   taskkillWindowsProcessTree,
   windowsCopresenceLogPath,
@@ -2961,6 +2962,8 @@ import {
   type RuntimeName,
 } from "../src/normalize-runtime";
 import { describeStaleRuntimeSupport } from "../src/daemon-runtime-staleness";
+import { windowsRuntimeSupported } from "../src/windows-runtime";
+import { openWindowsSdkEvidenceSession } from "../src/windows-sdk-stop-evidence";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
 import { clearLocalCredentials, describeRevokeOutcome, normalizeHubUrl, revokeCurrentLoginSession, sameHub } from "../src/cli-auth-session";
@@ -7909,7 +7912,9 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       cmd = process.execPath;
       commandArgs = [sibling.entrypoint, ...agentArgs];
       console.log(`[anet] using the agent-node installed beside anet (${sibling.version ?? "version unknown"}): ${sibling.entrypoint}`);
-    } else try { execSync(process.platform === "win32" ? "where agent-node" : "which agent-node", { stdio: "pipe" }); } catch {
+    } else if (process.platform === "win32") {
+      throw new Error("Native Windows SDK nodes require the paired agent-node installed beside anet; PATH shims and automatic npx installation are not used.");
+    } else try { execSync("which agent-node", { stdio: "pipe" }); } catch {
       cmd = "npx";
       commandArgs = ["-y", "@sleep2agi/agent-node@preview", ...agentArgs];
     }
@@ -7977,23 +7982,30 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     let activeAgentChild: ReturnType<typeof spawn> | null = null;
     let parentShuttingDown = false;
     let childKillTimer: ReturnType<typeof setTimeout> | null = null;
+    const ownsAgentChild = runtime === "opencode-cli" || process.platform === "win32";
 
-    // The foreground anet process owns the supervised OpenCode child. Keep
-    // this handler OpenCode-only: generic Windows runtimes launch through a
-    // cmd.exe wrapper (`shell:true`) and must retain main's already-vetted
-    // process lifecycle until a process-tree-aware Windows gate exists.
+    // The foreground wrapper owns the supervised OpenCode/Windows SDK child.
+    // Windows SDK now launches private Node directly, not a shell wrapper.
+    // Other POSIX runtimes retain their existing supervision behavior.
     const forwardAgentSignal = (signal: NodeJS.Signals) => {
       if (parentShuttingDown) return;
       parentShuttingDown = true;
-      try { activeAgentChild?.kill(signal); } catch {}
+      try {
+        if (process.platform === "win32") {
+          if (activeAgentChild?.pid) taskkillWindowsProcessTree(activeAgentChild.pid);
+        } else activeAgentChild?.kill(signal);
+      } catch {}
       childKillTimer = setTimeout(() => {
-        try { activeAgentChild?.kill("SIGKILL"); } catch {}
+        try {
+          if (process.platform === "win32") activeAgentChild?.kill();
+          else activeAgentChild?.kill("SIGKILL");
+        } catch {}
       }, 5_000);
       childKillTimer.unref?.();
     };
     const onAgentSigint = () => forwardAgentSignal("SIGINT");
     const onAgentSigterm = () => forwardAgentSignal("SIGTERM");
-    if (runtime === "opencode-cli") {
+    if (ownsAgentChild) {
       process.once("SIGINT", onAgentSigint);
       process.once("SIGTERM", onAgentSigterm);
     }
@@ -8032,9 +8044,9 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         const child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn(runCommand, runCommandArgs, {
           env: childEnv,
           stdio: "inherit",
-          shell: standaloneNow() ? false : runtime === "opencode-cli" ? false : process.platform === "win32",
+          shell: standaloneNow() || runCommand === process.execPath || runtime === "opencode-cli" ? false : process.platform === "win32",
         }));
-        if (runtime === "opencode-cli") activeAgentChild = child;
+        if (ownsAgentChild) activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
         if (expectedCodexHome && child.pid) {
           const verdict = verifyProcessTreeCodexHome({ rootPid: child.pid, expected: expectedCodexHome, label: "agent-node" });
@@ -8065,7 +8077,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
           },
         );
         clearTimeout(stableTimer);
-        if (runtime === "opencode-cli" && activeAgentChild === child) {
+        if (ownsAgentChild && activeAgentChild === child) {
           activeAgentChild = null;
         }
 
@@ -8092,7 +8104,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       },
     });
     if (childKillTimer) clearTimeout(childKillTimer);
-    if (runtime === "opencode-cli") {
+    if (ownsAgentChild) {
       process.off("SIGINT", onAgentSigint);
       process.off("SIGTERM", onAgentSigterm);
     }
@@ -8521,7 +8533,7 @@ async function spawnOwnedNodeChild<T extends ReturnType<typeof spawn>>(nodeId: s
     let birth = processBirth(child.pid);
     for (let i = 0; !birth && i < 10; i++) { await new Promise(r => setTimeout(r, 10)); birth = processBirth(child.pid); }
     if (!birth) {
-      try { child.kill("SIGKILL"); } catch {}
+      try { child.kill(process.platform === "win32" ? undefined : "SIGKILL"); } catch {}
       throw new Error(`NODE_CHILD_BIRTH_UNAVAILABLE: pid=${child.pid}`);
     }
     writeLifecycleOwner(nodeId, { ...owner, processes: [...(owner.processes || []), { pid: child.pid, birth, role: "agent" }] });
@@ -8900,6 +8912,13 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  if (process.platform === "win32" && resolvedForCopresence && (
+    !windowsRuntimeSupported(resolvedForCopresence.profile.runtime || "claude-agent-sdk") ||
+    opts.tmux === "true" || opts["accept-dev-channels"] === "true" || copresenceFlagPassed ||
+    resolvedForCopresence.profile.codexCopresence === true || resolvedForCopresence.profile.grokCopresence === true
+  )) {
+    throw new Error("Native Windows supports claude-agent-sdk only; terminal, tmux and co-presence runtimes are unavailable. Choose claude-agent-sdk (no WSL required).");
+  }
   // #1353: pin before ANY spawn below (incl. the source-resume branch), since children copy process.env at spawn.
   if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
   // Private source delivery never enters ordinary orchestration (which replaces
@@ -11544,11 +11563,6 @@ const DAEMON_DEFAULT_NAME = "daemon";
 let daemonAnetBinPrepared = false;
 
 function prepareDaemonAnetBin(): void {
-  if (process.platform === "win32") {
-    console.error("[anet daemon] Windows is not supported for host_supervisor daemon mode yet.");
-    console.error("[anet daemon] The daemon binary safety checks and child process model are POSIX-only; run this on Linux/macOS or WSL.");
-    process.exit(1);
-  }
   // #1353 —— 解析与校验搬到 src/daemon-anet-bin.ts,`anet node start <daemon>` 共用同一份。
   const check = checkDaemonAnetBin({ envBin: process.env.ANET_BIN_ABS, argv1: process.argv[1] });
   if (!check.ok) {
@@ -11569,7 +11583,6 @@ function prepareDaemonAnetBin(): void {
  *  由 agent-node 把 can_create_nodes=false 报给 hub(#1371/#1510),这里只给一行修法。 */
 function pinDaemonAnetBinForNodeStart(alias: string, role: string | undefined): void {
   if (!shouldPinDaemonOnNodeStart({ role, alreadyPrepared: daemonAnetBinPrepared })) return;
-  if (process.platform === "win32") return;
   const check = checkDaemonAnetBin({ envBin: process.env.ANET_BIN_ABS, argv1: process.argv[1] });
   if (!check.ok) {
     console.error(`[anet daemon] #1353 "${alias}" is a daemon but its anet binary pin did not verify; starting it anyway — it will report "cannot create nodes" to the hub until fixed:`);
@@ -11774,7 +11787,7 @@ async function daemonInitCommand() {
     // #1298 — 引用 canonical 集合，不再手写。这里曾经是硬编码的三元组，
     // 于是 grok-build-cli / codex-app-server / opencode-cli 三个共存 runtime
     // 永远不会出现在 daemon 的能力声明里，hub 据此把 create_node 拒掉。
-    runtimes_supported: [...SUPPORTED_RUNTIME_NAMES],
+    runtimes_supported: SUPPORTED_RUNTIME_NAMES.filter(runtime => windowsRuntimeSupported(runtime)),
     allowed_secret_keys: allowedSecretKeys,
     max_concurrent_children: 20,
     channels: [],
@@ -13358,6 +13371,8 @@ Stop a running agent node.
  * proven stopped is never deleted.
  */
 async function stopResolvedNode(resolved: { id: string; profile: Profile }, stopInvokedAt: number = Date.now()) {
+  const windowsSdkStop = process.platform === "win32" && resolved.profile.runtime === "claude-agent-sdk";
+  if (windowsSdkStop) console.log("[anet] Windows SDK stop: acquiring lifecycle lock");
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
   const borrowedHostSelected = hasBorrowedV1Intent(join(nodesDir(),resolved.id),resolved.profile);
   let stopGeneration = "";
@@ -13365,8 +13380,12 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
   try {
     await withLifecycleLock(resolved.id, () => {
       const prior = readLifecycleOwner(resolved.id);
+      if (windowsSdkStop) console.log(`[anet] Windows SDK stop: receipt=${prior ? prior.state : "missing"}, identities=${prior?.processes?.length ?? 0}`);
       stopGeneration = prior?.generation || randomUUID();
       let roots = prior?.processes || [];
+      if (process.platform === "win32" && resolved.profile.runtime === "claude-agent-sdk" && !prior) {
+        throw new Error("WINDOWS_SDK_OWNER_RECEIPT_REQUIRED; refusing alias/PID-only discovery");
+      }
       // 🔴 这一条与下面 alias-fallback 支里的 NODE_OWNER_BIRTH_UNAVAILABLE 是**两件事**,
       // 原先共用同一句错误 —— 于是 CI 上只看错误文本分不出是哪一种,#1422 的定位
       // 因此走过弯路。两者的成因完全不同:
@@ -13383,25 +13402,21 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
       // while holding stop-intent, then freeze exact identities. Reaping never
       // rescans by alias, so a later same-name generation cannot be adopted.
       if (roots.length === 0) {
-        if (borrowedHostSelected) throw new Error("BORROWED_V1_STOP_OWNER_UNAVAILABLE; no alias or Host/TUI adoption");
-        // #1438 — findNodeStopCandidates captures (pid, discoveredBirth) in
-        // ONE `ps` snapshot; the (pid, birth) pair has no TOCTOU window
-        // between the two fields. resolveOwnedRoots then verifies via
-        // currentBirthSignature that the pid we're about to freeze still
-        // belongs to the SAME incarnation — if it was recycled to another
-        // process B between discovery and here, the mismatch check rejects
-        // pid so reap does not kill B.
-        const legacy = findNodeStopCandidates(displayName);
-        if (legacy === null) throw new Error("NODE_PROCESS_TABLE_UNAVAILABLE");
-        // #1422 (window with /proc read collapsing to no-op) is orthogonal:
-        // if pid vanished cleanly between discovery and here, that's the
-        // stop-outcome we wanted. probes.vanished (ESRCH-based) still
-        // handles that path.
-        roots = resolveOwnedRoots(legacy, {
-          birth: processBirth,
-          vanished: (pid) => processVanished(pid),
-          currentBirthSignature: probeCurrentBirthSignature,
-        });
+        if (process.platform === "win32" && resolved.profile.runtime === "claude-agent-sdk") {
+          if (prior?.state !== "stopped") throw new Error("WINDOWS_SDK_OWNER_IDENTITIES_REQUIRED");
+        } else {
+          if (borrowedHostSelected) throw new Error("BORROWED_V1_STOP_OWNER_UNAVAILABLE; no alias or Host/TUI adoption");
+          // #1438 — capture pid + birth together; revalidate the incarnation
+          // before authorizing any termination. Never discover Windows SDK
+          // nodes by alias, even if the persisted receipt is missing.
+          const legacy = findNodeStopCandidates(displayName);
+          if (legacy === null) throw new Error("NODE_PROCESS_TABLE_UNAVAILABLE");
+          roots = resolveOwnedRoots(legacy, {
+            birth: processBirth,
+            vanished: (pid) => processVanished(pid),
+            currentBirthSignature: probeCurrentBirthSignature,
+          });
+        }
       }
       stopProcesses = snapshotOwnedProcessTree(roots);
       writeLifecycleOwner(resolved.id, {
@@ -13416,6 +13431,30 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
     process.exit(1);
   }
   if (process.platform === "win32") {
+    if (resolved.profile.runtime === "claude-agent-sdk") {
+      console.log(`[anet] Windows SDK stop: native tree verification begins (roots=${stopProcesses.length})`);
+      const onProgress = (stage: string) => console.log(`[anet] Windows SDK stop: ${stage}`);
+      const session = await openWindowsSdkEvidenceSession({ onProgress });
+      let stop;
+      try {
+        stop = await orchestrateWindowsManagedStopAsync(stopProcesses.map(identity => ({
+          role: identity.role, pid: identity.pid, creationDate: identity.birth,
+        })), { ...session.deps, onProgress });
+      } finally { session.close(); }
+      for (const diagnostic of stop.verdict.retainedDiagnostics) console.warn(`[anet] ${diagnostic}`);
+      if (stop.verdict.kind !== "stopped") {
+        console.error(`[anet] WINDOWS_SDK_STOP_UNPROVEN: ${stop.verdict.kind}; lifecycle receipt kept, hub not notified offline`);
+        process.exit(1);
+      }
+      await withLifecycleLock(resolved.id, () => writeLifecycleOwner(resolved.id, {
+        ...(readLifecycleOwner(resolved.id) || { schema: 1 }), schema: 1, state: "stopped", stopInvokedAt,
+        processes: [],
+      }));
+      rmSync(join(nodesDir(), resolved.id, ".pid"), { force: true });
+      await notifyServerOffline(resolved.profile, resolved.id);
+      console.log(`[anet] Stopped "${displayName}" (Windows SDK owned process tree)`);
+      return;
+    }
     let record;
     try { record = readWindowsCopresenceRecord(nodesDir(), resolved.id); }
     catch (e) {

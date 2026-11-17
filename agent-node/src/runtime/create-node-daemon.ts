@@ -33,6 +33,7 @@ import {
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 import { daemonCliLaunch } from "./daemon-cli-launch.js";
+import { windowsRuntimeSupported } from "../shared/windows-runtime.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
 import {
   assertOpenCodeV2RequestedModel,
@@ -446,7 +447,7 @@ export function safePathFor(platform: NodeJS.Platform): string {
 // key we own — smuggling USERPROFILE on Windows would let an untrusted
 // caller point the child at a different home, so it's fixed there too.
 const FIXED_ENV_KEYS_POSIX = new Set(["PATH", "HOME", "LANG"]);
-const FIXED_ENV_KEYS_WIN32 = new Set(["PATH", "HOME", "LANG", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"]);
+const FIXED_ENV_KEYS_WIN32 = new Set(["PATH", "HOME", "LANG", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP"]);
 function fixedEnvKeysFor(platform: NodeJS.Platform): ReadonlySet<string> {
   return platform === "win32" ? FIXED_ENV_KEYS_WIN32 : FIXED_ENV_KEYS_POSIX;
 }
@@ -511,9 +512,12 @@ export function resolveChildHome(env: NodeJS.ProcessEnv, platform: NodeJS.Platfo
 export function computeChildPath(
   platform: NodeJS.Platform = process.platform,
   execPath: string = process.execPath,
+  systemRoot?: string,
 ): string {
   const execDir = platform === "win32" ? win32.dirname(execPath) : dirname(execPath);
-  if (platform === "win32") return execDir;
+  if (platform === "win32") return systemRoot && win32.isAbsolute(systemRoot)
+    ? [execDir, win32.join(systemRoot, "System32"), win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0")].join(";")
+    : execDir;
   const safe = safePathFor(platform);
   // Skip prepend if execDir is already a safe-PATH entry
   // (avoid duplicate path; canonical order wins).
@@ -662,11 +666,15 @@ export function minimalEnv(
     // #648 — fixed prefix (computeChildPath, historically aS()) first, then
     // daemonExtraPath. Not process.env.PATH, and not guessed user dirs.
     // The test prefix is empty in production, so this string stays the same.
-    PATH: withChildPathTestPrefix(appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform), platform),
+    PATH: withChildPathTestPrefix(appendExtraPath(computeChildPath(platform, process.execPath, parentEnv.SystemRoot || parentEnv.SYSTEMROOT), daemonExtraPathDirs, platform), platform),
     HOME: home,
     LANG: parentEnv.LANG || "C.UTF-8",
   };
   if (platform === "win32") {
+    // OS/SDK subprocesses need these; never accept them from Hub extra keys.
+    const systemRoot = parentEnv.SystemRoot || parentEnv.SYSTEMROOT;
+    if (systemRoot) base.SystemRoot = systemRoot;
+    for (const key of ["TEMP", "TMP"] as const) if (parentEnv[key]) base[key] = parentEnv[key];
     // #1490 — Windows-only. Node's os.homedir() and most tools read
     // USERPROFILE first; grok / claude / codex CLIs invoked as
     // grandchildren also need HOMEDRIVE+HOMEPATH to resolve %HOMEPATH%
@@ -1133,6 +1141,10 @@ export async function handleCreateNodeDoorbell(
 
   // §4.2 daemon-side runtime allowlist fallback (belt-and-suspenders;
   // hub already enforces, this catches hub-bypass / compromised-hub).
+  if (!windowsRuntimeSupported(req.node_spec.runtime)) {
+    await deps.callCommHub("ack_create_request", { request_id, status: "rejected", error: "runtime_unsupported_on_windows: choose claude-agent-sdk; terminal/co-presence runtimes are unavailable" }).catch(() => {});
+    return;
+  }
   if (deps.allowedRuntimes && deps.allowedRuntimes.length > 0 &&
       !deps.allowedRuntimes.includes(req.node_spec.runtime)) {
     deps.warn(`[create-node] runtime '${req.node_spec.runtime}' not in daemon's allowed_runtimes: [${deps.allowedRuntimes.join(",")}]`);

@@ -4,6 +4,26 @@ import { dirname, join, parse } from "node:path";
 export const CLAUDE_SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 export const CLAUDE_LINUX_X64_PACKAGE = "@anthropic-ai/claude-agent-sdk-linux-x64";
 
+/** Resolve only the SDK's matching optional package. Never require a global
+ * Claude CLI or run a shell/PATH probe on a clean native installation. */
+export function resolveBundledClaudeBinary(deps: {
+  platform?: NodeJS.Platform;
+  arch?: string;
+  resolvePackage: (specifier: string) => string;
+  pathExists?: (path: string) => boolean;
+}): string | null {
+  const platform = deps.platform ?? process.platform;
+  const arch = deps.arch ?? process.arch;
+  if (!["linux", "darwin", "win32"].includes(platform) || !["x64", "arm64"].includes(arch)) {
+    throw new Error(`unsupported Claude SDK native platform: ${platform}-${arch}`);
+  }
+  const specifier = `@anthropic-ai/claude-agent-sdk-${platform}-${arch}/${platform === "win32" ? "claude.exe" : "claude"}`;
+  try {
+    const path = deps.resolvePackage(specifier);
+    return (deps.pathExists ?? existsSync)(path) ? path : null;
+  } catch { return null; }
+}
+
 const EXACT_PACKAGE_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export interface ClaudeSdkVersionDeps {

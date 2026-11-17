@@ -1,0 +1,174 @@
+RFC-044 Windows SDK stop: ACK contract and batch evidence
+
+Root cause evidence: #3619 run 43910467131 at bd5c9515.
+Owner-exported Windows job: /tmp/opencode/3619-133450829547.log.
+Windows SDK reply succeeded in 17366ms; cloud sentinel unchanged.
+CLI confirmed owned process-tree stopped at 16:46:52, but Hub rejected the
+ACK at 16:46:59: exit_signal exceeded its 16-character schema bound.
+Repeated CIM descendant capture/identity calls cost about 19 seconds each.
+macOS native SDK chain including stop passed on this run (owner handoff).
+
+Changes:
+- Use exit_signal=taskkill. New server/src/windows-sdk-stop-wire.test.ts
+  captures the schema actually registered by registerTools and validates real
+  daemon stopped AND stop_failed payloads; rejects the original long string.
+- SDK-only native batch provider: Toolhelp32 local kernel process tables and
+  .NET birth ticks, one PowerShell per capture/final stage, no CIM/WMI.
+- Capture brackets two PPID tables with per-process birth reads and root
+  birth checks. Each root still has immediate pre-taskkill birth validation.
+  The existing orchestrator still decides unknown/alive/gone/PID-reused;
+  missing evidence, late unaccounted descendants or surviving identities
+  cannot be reported stopped. Receipts stay on failed/unverifiable outcomes.
+- Each batch call is bounded at 5s, 8192 table rows, 512 captured identities,
+  with existing per-root 256-descendant cap. No user PATH/Git/global changes.
+- Native Windows smoke measures dispatch through accepted stopped ACK and
+  requires <=15000ms. This is an acceptance target, NOT measured evidence yet.
+- Workflow runs actual Hub wire-schema test in Docker; native Windows
+  primitive job additionally exercises real Toolhelp capture and birth probe.
+
+Acceptance limits:
+Linux injected tests cannot prove Windows PowerShell compilation, native
+process enumeration, SDK stop timing or native exit behavior. A Windows CI
+rerun remains required before declaring the native stop fix accepted. This
+still does not prove clean-App installation/download-to-first-reply in 3min.
+No production service, port, secrets, package installation or data changes.
+Restore/rollback remains paired packages + App-private state as documented
+in docs/runbooks/windows-local-daemon.md; Git does not contain user data.
+
+Final Docker verification: all commands exited 0.
+Raw output: /tmp/opencode/rfc044-fast-stop-final.log
+  path/runtime unit set: 23 pass, 2 skip, 88 assertions
+  lifecycle identity set: 110 pass, 275 assertions
+  regression set: 86 pass, 2 skips, 350 assertions
+  actual Hub wire schema: 1 pass, 8 assertions
+Total: 220 pass, 4 platform-only skips, 721 assertions, zero failures.
+Real SDK Linux smoke: first reply 4144ms, one model request, unchanged cloud
+sentinel; stop including Hub acknowledgment 552ms. These Linux timings do
+not establish the Windows <=15s target.
+Batch negative controls cover live descendants, unavailable final evidence,
+late unaccounted descendants after nonzero taskkill, root birth changes,
+unstable parent edges, descendant birth changes, malformed/empty snapshots,
+unknown process birth, and invalid script inputs.
+
+Resident-helper follow-up after native run 43913764157 (f803f2b1):
+Windows primitives job 133462317199 hit Bun's default 5000ms timeout in
+the native probe (5228.79ms); SDK/Docker CI jobs were skipped by dependency.
+Raw owner log: /tmp/opencode/3619-133462317199.log.
+This confirms the whole-test observation deadline was too short. It does NOT
+separately measure initial birth probe, PowerShell startup or Add-Type cost.
+Source inspection also confirms the old batch provider started/compiled a
+fresh PowerShell for every stage, with compilation inside each 5s deadline.
+
+Fix: one private resident PowerShell process for the entire SDK stop. Toolhelp
+compiles once in that process's memory, not into a persisted DLL cache. Capture,
+immediate per-root pre-kill probes and final evidence reuse the same helper.
+Startup has a 20s budget, queries have separate 5s budgets after SDKREADY.
+The native test explicitly allows 60s and logs initial_birth_ms,
+startup_compile_ms and per-stage query_ms. The native smoke's <=15s stop+ACK
+gate remains unchanged and INCLUDES startup/compilation, not just query time.
+Both sync legacy and async SDK transports now drive one shared generator-based
+decision flow, retaining existing identity/tree safety predicates.
+
+New portable Docker tests drive real private child pipes: a startup slower
+than the query budget still succeeds; one helper serves repeated queries;
+startup timeout/query timeout/exit/wrong response identity fail closed and
+dispose the helper. Async capture failure still cannot produce stopped.
+No global package, production config, service, secret or data changes.
+Native compilation/PowerShell transport and <=15s Windows timing remain pending
+the next native CI run. Linux mocked transport evidence does not replace it.
+
+Resident-helper final Docker verification: command chain exited 0.
+Raw output: /tmp/opencode/rfc044-resident-stop-final.log
+  path/runtime/transport: 26 pass, 2 skips, 106 assertions
+  lifecycle identity: 110 pass, 275 assertions
+  regression: 86 pass, 2 skips, 350 assertions
+  actual Hub ACK schema: 1 pass, 8 assertions
+Total 223 pass, 4 platform-only skips, 739 assertions; zero failures.
+Targeted TypeScript noEmit check passed for windows-sdk-stop-evidence.ts and
+windows-codex-copresence.ts (ES2022, ESNext, bundler resolution, skipLibCheck).
+Linux real SDK smoke: first reply 4188ms, one model request, unchanged cloud
+sentinel; stopped ACK in 445ms. No native Windows latency claim from this.
+
+Native run 44018964557 at 38741b8a:
+Primitives, macOS SDK chain and Linux passed. Windows replied in 16415ms,
+then its actual Node stop CLI timed out waiting for helper SDKREADY (20s).
+Owner logs: /tmp/opencode/3619-native-windows.log and
+/tmp/opencode/3619-primitives.log. Bun primitive helper startup/compile was
+1550ms; capture 1885ms, prekill 31ms, final 8ms. No successful product-path
+helper readiness, helper output or exit observation was recorded. This does
+NOT establish environment loss, a compiler problem or a pipe problem.
+
+Diagnostic follow-up (not a claimed root-cause fix):
+- Flush fixed SDKBOOT / SDKCOMPILED / SDKREADY stage markers explicitly.
+- Timeout/error output contains only stage, exit-observed flag, exit code,
+  termination-observed flag, stdout/buffer/stderr byte counts and a white-list
+  stderr reason. Absence of an exit event is NOT reported as proof of liveness.
+  No upstream stderr prefix, query error text, environment value or path is
+  copied into diagnostics. First 512 stderr bytes stay internal for mapping.
+- Native E2E includes helper-probe.ts bundled for private Node. A private Node
+  parent uses actual product minimalEnv() to execFile a private Node child in
+  the same private cwd, with shell:false/windowsHide:true and captured pipes.
+  The child exercises the actual resident helper. This removes Bun's spawn
+  implementation and the runner's unfiltered env from the reproduction.
+  Diagnostics list only presence booleans for selected env keys, never values.
+- The helper preflight is outside the init-to-reply timer, like other env
+  prerequisites, and must not be called clean-App install timing evidence.
+- No env expansion, PowerShell invocation-mode workaround, identity gate,
+  product timeout or Windows <=15s stop+ACK acceptance relaxation was made.
+
+Next native run must identify the last observed stage and outcome in this
+product-env Node probe. A Linux test cannot resolve the Windows-only startup
+failure, and the blank old stderr must not be assigned a guessed cause.
+
+Diagnostic follow-up Docker verification: full command chain exited 0.
+Raw output: /tmp/opencode/rfc044-private-node-helper-final.log
+27 pass / 2 skips / 114 assertions; 110 pass / 275 assertions;
+86 pass / 2 skips / 350 assertions; actual Hub ACK schema 1 pass / 8 assertions.
+Total: 224 pass, 4 platform-only skips, 747 assertions, zero failures.
+Targeted TypeScript noEmit check passed. Linux SDK reply 4293ms, one model
+request, unchanged sentinel; stopped ACK 448ms. Final launch_requested/spawned
+stage refinement was retested with the latest source mounted read-only into
+Docker: 9 pass / 1 native skip / 72 assertions (overlapping tests, not added
+to the total); /tmp/opencode/rfc044-helper-final-stage-test.log.
+The generated helper-probe.mjs loaded under actual Node in Docker and reached
+its intended Windows-only platform guard. That checks Node bundling, not
+PowerShell behavior. The exact private-Node/minimalEnv Windows probe and
+startup failure diagnosis remain unverified until native CI.
+
+Builtin-module discovery follow-up after native run 44020510448 (2e77f7c7):
+Windows job 133828740881: private Node + actual minimalEnv reached script_entered
+in 211ms, then startup timed out after 20s without initialized/exit/stderr.
+Bun primitive job 133828603396: script_entered 167ms, initialized 1157ms,
+capture/prekill/final query times 1061/40/4ms. Bun had PSModulePath; the actual
+Node child did not. This narrows the hang to initialization including Add-Type,
+but module autodiscovery as the cause remains a native-testable hypothesis.
+
+Change: first helper script line sets its process-local PSModulePath to
+[IO.Path]::Combine($PSHOME,'Modules'), before any cmdlet. It deliberately does
+not use Join-Path (also a cmdlet), append caller values or read user profiles/
+module paths. NoProfile and NonInteractive were already present and remain.
+Regression decodes the production EncodedCommand and checks the first line,
+ordering before Add-Type, flags and absence of user-profile path references.
+The product-env native Node probe from the previous commit is retained.
+No timeout/identity/descendant gates or <=15s stop+ACK gate were changed.
+
+WINDIR discrepancy is between two distinct layers, not a single env object:
+product_env logs the JS builder output; received_process_env/helper logs the
+spawned Node child's process.env. The native setup log identifies Node v22.23.4.
+Its bundled libuv required_vars includes WINDIR, and make_program_env uses
+GetEnvironmentVariableW to supplement missing required keys from the parent:
+https://github.com/nodejs/node/blob/v22.23.4/deps/uv/src/win/process.c
+This explains false in the builder / true after Node spawn. PSModulePath is
+not in that required list. The fixture now logs received_process_env and actual
+Node version explicitly (only key-presence booleans, never env values).
+No product env allowlist expansion was made to hide the discrepancy.
+
+Builtin-module follow-up Docker verification: command chain exited 0.
+Raw output: /tmp/opencode/rfc044-helper-builtin-modules.log
+28 pass / 2 skips / 121 assertions; 110 pass / 275 assertions;
+86 pass / 2 skips / 350 assertions; actual Hub ACK schema 1 pass / 8 assertions.
+Total 225 pass, 4 platform-only skips, 754 assertions; zero failures.
+Targeted TypeScript noEmit check passed. Linux real SDK reply 4755ms, one
+model request, unchanged sentinel, stopped ACK 445ms. These results verify
+script construction and Linux regressions, not Windows module autoload or
+the <=15s native stop target. Native acceptance remains pending.
