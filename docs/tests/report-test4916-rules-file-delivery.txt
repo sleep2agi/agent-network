@@ -39,14 +39,33 @@ Typecheck concern (not reported as green)
 CLI bun run typecheck exits 2 with TS2322 in windows-codex-copresence.ts:499/516
 (WindowsStopOrchestration | (() => unknown)). Replaced container source with
 git archive 3356ff6a agent-network agent-node server contracts and reran:
-identical errors. File unchanged by #4916. Separately fixed per owner request
-in 139ba9bb442b59a0d8bd324da9b9bc138a7c1d98, based on 3356ff6a;
-that commit passes CLI typecheck. Do not mix its code into this branch.
+identical errors. File unchanged by the initial #4916 feature commit. Separately
+fixed per owner request in 139ba9bb442b59a0d8bd324da9b9bc138a7c1d98,
+then squash-merged as main f8332b965cf428cf843daa6888c3e1f433f60b61 (#3622).
+The integration below imports the reviewed main fix, not a duplicate patch.
 Logs: /tmp/opencode/4916-typecheck.log and
 /tmp/opencode/4916-typecheck-main-baseline.log.
 
 Final command exited 0. Full log:
 /tmp/opencode/4916-rules-file-complete.log
+
+Post-#3622 integration verification, 2026-11-17
+Merged origin/main f8332b965cf428cf843daa6888c3e1f433f60b61 without conflicts:
+merge commit 6693a27e447856d2bc21b451b959b2cccfa0d125.
+Rebuilt image from merged source and ran, in order (all --network none):
+  docker run --rm --network none --workdir /app/agent-network anet-4916-rules-file bun run typecheck
+  docker run --rm --network none anet-4916-rules-file
+  docker run --rm --network none --entrypoint bash anet-4916-rules-file tests/test4916-rules-file-delivery/mutation.sh
+Full combined command exited 0.
+- Complete CLI tsc --noEmit: PASS, no remaining TS2322 errors.
+- #4916 regression: 139 pass / 0 fail / 653 assertions.
+- Both source entrypoint bundles: PASS.
+- Real Hub + agent-node, SSE suppressed: write 15144ms / read 14978ms.
+- Real Hub + channel, SSE suppressed: write 14992ms / read 222ms.
+- Both actual-poll-wiring removal mutations: expected failure after registration.
+- Both version advertisements and team_rules_status NULL assertions: PASS.
+- Empty/success/three-timeout-reason SQL fixtures: PASS.
+Full output: /tmp/opencode/4916-after-main-f8332b96.log
 
 Acceptance limits
 - No clean-App Windows install/download acceptance or production rollout.
