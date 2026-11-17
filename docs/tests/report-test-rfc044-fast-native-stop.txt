@@ -49,3 +49,42 @@ Batch negative controls cover live descendants, unavailable final evidence,
 late unaccounted descendants after nonzero taskkill, root birth changes,
 unstable parent edges, descendant birth changes, malformed/empty snapshots,
 unknown process birth, and invalid script inputs.
+
+Resident-helper follow-up after native run 43913764157 (f803f2b1):
+Windows primitives job 133462317199 hit Bun's default 5000ms timeout in
+the native probe (5228.79ms); SDK/Docker CI jobs were skipped by dependency.
+Raw owner log: /tmp/opencode/3619-133462317199.log.
+This confirms the whole-test observation deadline was too short. It does NOT
+separately measure initial birth probe, PowerShell startup or Add-Type cost.
+Source inspection also confirms the old batch provider started/compiled a
+fresh PowerShell for every stage, with compilation inside each 5s deadline.
+
+Fix: one private resident PowerShell process for the entire SDK stop. Toolhelp
+compiles once in that process's memory, not into a persisted DLL cache. Capture,
+immediate per-root pre-kill probes and final evidence reuse the same helper.
+Startup has a 20s budget, queries have separate 5s budgets after SDKREADY.
+The native test explicitly allows 60s and logs initial_birth_ms,
+startup_compile_ms and per-stage query_ms. The native smoke's <=15s stop+ACK
+gate remains unchanged and INCLUDES startup/compilation, not just query time.
+Both sync legacy and async SDK transports now drive one shared generator-based
+decision flow, retaining existing identity/tree safety predicates.
+
+New portable Docker tests drive real private child pipes: a startup slower
+than the query budget still succeeds; one helper serves repeated queries;
+startup timeout/query timeout/exit/wrong response identity fail closed and
+dispose the helper. Async capture failure still cannot produce stopped.
+No global package, production config, service, secret or data changes.
+Native compilation/PowerShell transport and <=15s Windows timing remain pending
+the next native CI run. Linux mocked transport evidence does not replace it.
+
+Resident-helper final Docker verification: command chain exited 0.
+Raw output: /tmp/opencode/rfc044-resident-stop-final.log
+  path/runtime/transport: 26 pass, 2 skips, 106 assertions
+  lifecycle identity: 110 pass, 275 assertions
+  regression: 86 pass, 2 skips, 350 assertions
+  actual Hub ACK schema: 1 pass, 8 assertions
+Total 223 pass, 4 platform-only skips, 739 assertions; zero failures.
+Targeted TypeScript noEmit check passed for windows-sdk-stop-evidence.ts and
+windows-codex-copresence.ts (ES2022, ESNext, bundler resolution, skipLibCheck).
+Linux real SDK smoke: first reply 4188ms, one model request, unchanged cloud
+sentinel; stopped ACK in 445ms. No native Windows latency claim from this.

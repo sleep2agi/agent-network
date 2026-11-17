@@ -59,15 +59,21 @@ Unknown identity, PID reuse or incomplete descendant evidence keeps the receipt
 and fails stop; dead-wrapper/crash recovery is fail-closed where the surviving
 tree cannot be proven. Boot uses persisted receipts, not `pgrep`, for this path.
 
-SDK stop capture and final verification use one bounded PowerShell invocation
-per stage, with a local Toolhelp process table (kernel32) and .NET birth ticks;
+SDK stop uses one private, resident PowerShell helper for the whole stop flow.
+It compiles Toolhelp once in memory, then reuses it for capture, immediate
+pre-kill birth checks and final verification, without a disk DLL cache. Helper
+startup/compilation has a separate 20-second bound; each query has a 5-second
+bound after readiness. Logs distinguish `startup_compile_ms` from `query_ms`.
+Capture and final verification use a local Toolhelp process table (kernel32) and .NET birth ticks;
 they do not initialize CIM/WMI for each descendant. Capture brackets parent
 edges with birth reads and rechecks each root, and each root is still revalidated
 immediately before taskkill. Missing/partial evidence remains an error, not an
 empty tree. The Hub ACK uses `exit_signal: "taskkill"` (within its 16-character
 contract); detailed stages stay in logs. The native smoke requires stop plus
 accepted Hub acknowledgment within 15 seconds. That performance target remains
-unproven until the native Windows run passes.
+unproven until the native Windows run passes. This end-to-end target still
+includes helper startup/compilation; separating timeout budgets does not hide
+cold-start latency from acceptance. The helper is disposed on completion/error.
 
 `init` can capture stdout/stderr without a shell: call private Node with the
 argument array and wait for its output. Do not use `cmd /c` just to read output.

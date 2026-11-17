@@ -490,6 +490,35 @@ export function orchestrateWindowsManagedStop(
   roots: WindowsManagedIdentity[],
   deps: WindowsStopOrchestrationDeps = {},
 ): WindowsStopOrchestration {
+  const flow = windowsManagedStopFlow(roots, deps);
+  let step = flow.next();
+  while (step.done === false) {
+    try { step = flow.next(step.value()); }
+    catch (error) { step = flow.throw(error); }
+  }
+  return step.value;
+}
+
+export type AsyncWindowsStopDeps = Omit<WindowsStopOrchestrationDeps, "captureRoots" | "readFinalEvidence"> & {
+  captureRoots?: (roots: WindowsManagedIdentity[]) => WindowsDescendantCapture[] | Promise<WindowsDescendantCapture[]>;
+  readFinalEvidence?: (identities: WindowsManagedIdentity[]) => ReturnType<NonNullable<WindowsStopOrchestrationDeps["readFinalEvidence"]>> | Promise<ReturnType<NonNullable<WindowsStopOrchestrationDeps["readFinalEvidence"]>>>;
+  probeRoot?: (root: WindowsManagedIdentity) => WindowsIdentityState | Promise<WindowsIdentityState>;
+};
+
+/** Same decision flow as the synchronous CLI, with async evidence transport. */
+export async function orchestrateWindowsManagedStopAsync(roots: WindowsManagedIdentity[], deps: AsyncWindowsStopDeps): Promise<WindowsStopOrchestration> {
+  const flow = windowsManagedStopFlow(roots, deps);
+  let step = flow.next();
+  while (step.done === false) {
+    try { step = flow.next(await step.value()); }
+    catch (error) { step = flow.throw(error); }
+  }
+  return step.value;
+}
+
+function* windowsManagedStopFlow(
+  roots: WindowsManagedIdentity[], deps: AsyncWindowsStopDeps,
+): Generator<() => unknown, WindowsStopOrchestration, any> {
   const runPowerShell = deps.runPowerShell;
   const runTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
   const identities: WindowsManagedIdentity[] = [...roots];
@@ -498,7 +527,7 @@ export function orchestrateWindowsManagedStop(
   let batch: WindowsDescendantCapture[] | undefined;
   if (deps.captureRoots) {
     deps.onProgress?.(`batch capture roots=${roots.length}`);
-    try { batch = deps.captureRoots(roots); }
+    try { batch = yield () => deps.captureRoots!(roots); }
     catch (error: any) { batch = roots.map(() => ({ identities: [], unknownReason: `batch capture failed: ${String(error?.stderr || error?.code || error?.message || error).slice(-400)}` })); }
   }
   for (const [index, root] of roots.entries()) {
@@ -515,7 +544,8 @@ export function orchestrateWindowsManagedStop(
   for (const root of [...roots].reverse()) {
     const label = `${root.role} pid=${root.pid}`;
     deps.onProgress?.(`revalidate ${label}`);
-    const state = probeWindowsIdentity(root.pid, root.creationDate, runPowerShell, root.kind);
+    const state: WindowsIdentityState = yield () => deps.probeRoot ? deps.probeRoot(root)
+      : probeWindowsIdentity(root.pid, root.creationDate, runPowerShell, root.kind);
     if (state !== "alive") { notes.push(`kill withheld for ${label}: root identity ${state}`); continue; }
     killedPids.push(root.pid);
     deps.onProgress?.(`taskkill ${label}`);
@@ -529,7 +559,7 @@ export function orchestrateWindowsManagedStop(
   let finalEvidence: ReturnType<NonNullable<WindowsStopOrchestrationDeps["readFinalEvidence"]>> | undefined;
   if (deps.readFinalEvidence) {
     deps.onProgress?.(`batch final verification identities=${identities.length}`);
-    try { finalEvidence = deps.readFinalEvidence(identities); }
+    try { finalEvidence = yield () => deps.readFinalEvidence!(identities); }
     catch (error: any) {
       notes.push(`final evidence failed: ${String(error?.stderr || error?.code || error?.message || error).slice(-400)}`);
       // All final identity probes below become unknown, never gone.

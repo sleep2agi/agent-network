@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { findUnaccountedDescendants, type WindowsManagedIdentity, type WindowsDescendantCapture, type WindowsStopOrchestrationDeps } from "./windows-codex-copresence.js";
+import { spawn } from "node:child_process";
+import { findUnaccountedDescendants, type WindowsManagedIdentity, type WindowsDescendantCapture, type WindowsStopOrchestrationDeps, type AsyncWindowsStopDeps, probeWindowsIdentity } from "./windows-codex-copresence.js";
 
 // Toolhelp is a local kernel snapshot. Unlike CIM it does not initialize WMI
 // for each identity. No command lines, secrets, shell, or external executable.
@@ -37,10 +37,10 @@ function validIdentity(identity: WindowsManagedIdentity): boolean {
   return Number.isSafeInteger(identity.pid) && identity.pid > 1 && /^\d+$/.test(identity.creationDate) && (!identity.kind || identity.kind === "ticks");
 }
 
-export function windowsSdkEvidenceScript(identities: WindowsManagedIdentity[], capture: boolean): string {
+export function windowsSdkEvidenceScript(identities: WindowsManagedIdentity[], capture: boolean, includePrelude = true): string {
   if (!identities.every(validIdentity)) throw Error("invalid SDK process identity");
   const pids = [...new Set(identities.map(identity => identity.pid))];
-  const code = [PRELUDE, `$roots=@(${pids.join(",")})`];
+  const code = [includePrelude ? PRELUDE : "", `$roots=@(${pids.join(",")})`];
   if (capture) {
     code.push(
       "$before=@{};foreach($id in $roots){$before[$id]=Birth $id}",
@@ -77,9 +77,7 @@ function decode(raw: string): any {
   return value;
 }
 
-export function windowsSdkBatchEvidence(run: (script: string) => string = script => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-  encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true, timeout: 5_000, maxBuffer: 4 * 1024 * 1024,
-})): Pick<WindowsStopOrchestrationDeps, "captureRoots" | "readFinalEvidence"> {
+export function windowsSdkBatchEvidence(run: (script: string) => string): Pick<WindowsStopOrchestrationDeps, "captureRoots" | "readFinalEvidence"> {
   return {
     captureRoots(roots): WindowsDescendantCapture[] {
       if (!roots.length) return [];
@@ -113,4 +111,102 @@ export function windowsSdkBatchEvidence(run: (script: string) => string = script
       } };
     },
   };
+}
+
+const RESIDENT_SCRIPT = `${PRELUDE}
+[Console]::Out.WriteLine('SDKREADY')
+while($null -ne ($line=[Console]::In.ReadLine())) {
+ $request=$null
+ try {
+  $request=$line|ConvertFrom-Json
+  $script=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($request.script))
+  $result=(& ([scriptblock]::Create($script))|Out-String).Trim()
+  [Console]::Out.WriteLine((@{id=$request.id;ok=$true;result=$result}|ConvertTo-Json -Compress))
+ } catch {
+  [Console]::Out.WriteLine((@{id=$request.id;ok=$false;error=$_.Exception.Message}|ConvertTo-Json -Compress))
+ }
+}`;
+
+/** A private pipe, not a disk DLL cache. Compile once per stop, reuse for every
+ * capture, immediate pre-kill birth check and final query; dispose on all paths.
+ * Startup/compilation has its own bound, queries retain their 5s bound. */
+export async function openWindowsSdkEvidenceSession(options: {
+  onProgress?: (message: string) => void;
+  startupTimeoutMs?: number;
+  queryTimeoutMs?: number;
+  launch?: { command: string; args: string[] }; // transport fixture, never Hub input
+} = {}): Promise<{ deps: AsyncWindowsStopDeps; close: () => void }> {
+  const started = Date.now();
+  const launch = options.launch ?? { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(RESIDENT_SCRIPT, "utf16le").toString("base64")] };
+  const child = spawn(launch.command, launch.args, { stdio: ["pipe", "pipe", "pipe"], shell: false, windowsHide: true });
+  let closed = false, sequence = 0, buffer = "", stderr = "";
+  let pending: { resolve: (raw: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; id: number } | undefined;
+  const fail = (error: Error) => {
+    if (pending) { clearTimeout(pending.timer); pending.reject(error); pending = undefined; }
+    close();
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (pending) { clearTimeout(pending.timer); pending.reject(Error("SDK evidence session closed")); pending = undefined; }
+    child.stdin.end();
+    // Node terminates its owned Windows process handle, no POSIX signal argv.
+    child.kill();
+  };
+  const wait = (id: number, ms: number): Promise<string> => new Promise((resolve, reject) => {
+    pending = { id, resolve, reject, timer: setTimeout(() => fail(Error(`SDK evidence ${id === 0 ? "startup" : "query"} timeout (${ms}ms): ${stderr}`)), ms) };
+  });
+  const ready = wait(0, options.startupTimeoutMs ?? 20_000);
+  child.on("error", error => fail(error));
+  child.on("exit", (code) => fail(Error(`SDK evidence process exited ${code}: ${stderr}`)));
+  child.stdin.on("error", error => fail(error));
+  child.stderr.on("data", chunk => { stderr = (stderr + String(chunk)).slice(-1000); });
+  child.stdout.on("data", chunk => {
+    buffer += String(chunk);
+    if (Buffer.byteLength(buffer) > 4 * 1024 * 1024) { fail(Error("SDK evidence output cap exceeded")); return; }
+    let end: number;
+    while ((end = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, end).trim(); buffer = buffer.slice(end + 1);
+      if (!line) continue;
+      try {
+        if (!pending) throw Error("unsolicited SDK evidence response");
+        let raw = line;
+        if (pending.id === 0) { if (line !== "SDKREADY") throw Error("SDK readiness protocol mismatch"); }
+        else {
+          const reply = JSON.parse(line);
+          if (reply.id !== pending.id || reply.ok !== true || typeof reply.result !== "string") throw Error(`SDK query failed: ${String(reply.error || "protocol mismatch").slice(0, 400)}`);
+          raw = reply.result;
+        }
+        clearTimeout(pending.timer); const resolve = pending.resolve; pending = undefined; resolve(raw);
+      } catch (error) { fail(error as Error); return; }
+    }
+  });
+  await ready;
+  options.onProgress?.(`helper ready startup_compile_ms=${Date.now() - started}`);
+  const query = async (script: string, stage: string): Promise<string> => {
+    if (closed || pending) throw Error("SDK evidence session unavailable or busy");
+    const at = Date.now(), id = ++sequence;
+    const result = wait(id, options.queryTimeoutMs ?? 5_000);
+    child.stdin.write(JSON.stringify({ id, script: Buffer.from(script, "utf8").toString("base64") }) + "\n");
+    const raw = await result;
+    options.onProgress?.(`${stage} query_ms=${Date.now() - at}`);
+    return raw;
+  };
+  return { close, deps: {
+    captureRoots: async roots => {
+      const raw = await query(windowsSdkEvidenceScript(roots, true, false), "capture");
+      return windowsSdkBatchEvidence(() => raw).captureRoots!(roots);
+    },
+    probeRoot: async root => {
+      if (!validIdentity(root)) return "unknown";
+      try {
+        const raw = await query(`$birth=Birth ${root.pid};'IDSTATE:'+$(if($birth-eq 'ABSENT'){'ABSENT'}elseif($birth-eq 'ERROR'){'ERROR'}else{'TICKS='+$birth})`, "prekill");
+        return probeWindowsIdentity(root.pid, root.creationDate, () => raw);
+      } catch { return "unknown"; }
+    },
+    readFinalEvidence: async identities => {
+      const raw = await query(windowsSdkEvidenceScript(identities, false, false), "final");
+      return windowsSdkBatchEvidence(() => raw).readFinalEvidence!(identities);
+    },
+  } };
 }
