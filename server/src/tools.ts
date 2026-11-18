@@ -5463,18 +5463,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const callerRole = enforceUserId && effectiveNetId
         ? getUserNetworkRole(enforceUserId, effectiveNetId)
         : null;
-      // #4826：部门负责人也能在自己管的部门里 fork —— 否则「无权限时落到自己部门」那条分支永远走不到。
-      const managesAnyDept = !!(enforceUserId && effectiveNetId)
-        && managedDepartmentIds(effectiveNetId, enforceUserId).length > 0;
-      if (callerRole !== "admin" && callerRole !== "owner" && !managesAnyDept) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_create_node", required_role: "admin", caller_role: callerRole }) }] };
-      }
       const { row: source, sec1Ok } = resolveTargetNode(source_node_id, effectiveNetId);
       if (!source) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: source_node_id }) }] };
       }
       if (!sec1Ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
+      }
+      // #4826 fork 权限（负责人 2026-11-19 定）：
+      //   owner/admin → 任意节点；
+      //   部门负责人 → **只能 fork 源节点部门在自己 managedDepartmentIds 里的节点**；
+      //   源节点没有部门 ⇒ 只有 owner/admin 能 fork；其余人一律 403。
+      // 🔴 不能为了「让某条分支走得到」而放宽：放宽等于任意部门负责人可 fork 别的部门的节点，
+      //    再勾 copy_session=true 就把别人的对话历史 / 权限模式 / 白名单整套复制走（越权 + 数据泄露）。
+      if (callerRole !== "admin" && callerRole !== "owner") {
+        const forbidden = { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_create_node", required_role: "admin", caller_role: callerRole }) }] };
+        const gateNet = source.network_id || effectiveNetId || "default";
+        const srcDeptForGate = db.get<{ department_id: string | null }>(
+          "SELECT department_id FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+          source_node_id, gateNet,
+        )?.department_id ?? null;
+        if (!enforceUserId || !srcDeptForGate) return forbidden;
+        if (!managedDepartmentIds(gateNet, enforceUserId).includes(srcDeptForGate)) return forbidden;
       }
       const createRow = db.get<{ daemon_node_id: string; runtime: string; model: string | null; flags_json: string; child_name: string }>(
         `SELECT daemon_node_id, runtime, model, flags_json, child_name

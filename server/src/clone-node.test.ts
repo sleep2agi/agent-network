@@ -327,3 +327,36 @@ describe("decideCloneDepartment (#4826)", () => {
     expect(r.notice).toContain("d1");
   });
 });
+
+// #4826 fork 权限（负责人 2026-11-19）：部门负责人**只能 fork 自己管部门里的节点**。
+// 放宽这一条 = 任意部门负责人能 fork 别的部门节点，勾上 copy_session 就把别人的历史/权限/白名单复制走。
+describe("clone_node — fork 权限 (#4826)", () => {
+  function seedHeadSource(opts: { sourceDept: string | null }) {
+    seed();
+    // 夹具不跨用例复用部门行（cleanup 只清它认识的表）
+    db.run("DELETE FROM network_departments WHERE network_id = ?1", [NET]);
+    db.run("UPDATE network_members SET role = 'member' WHERE network_id = ?1 AND user_id = ?2", [NET, USER]);
+    db.run("INSERT INTO network_departments (network_id, department_id, name, sort) VALUES (?1, 'dept_own', '平台部', 0)", [NET]);
+    db.run("UPDATE network_departments SET leader_user_id = ?1 WHERE network_id = ?2 AND department_id = 'dept_own'", [USER, NET]);
+    if (opts.sourceDept) {
+      db.run("INSERT INTO network_departments (network_id, department_id, name, sort) VALUES (?1, ?2, '研发部', 1)", [NET, opts.sourceDept]);
+      db.run("UPDATE nodes SET department_id = ?1 WHERE node_id = ?2", [opts.sourceDept, SOURCE]);
+    }
+  }
+
+  test("部门负责人 fork 别的部门的节点 → 拒绝", async () => {
+    seedHeadSource({ sourceDept: "dept_other_team" });
+    const tools = handlers();
+    const r = await call(tools.clone_node, { source_node_id: SOURCE, name: "cloned-child" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("insufficient_role_for_create_node");
+  });
+
+  test("部门负责人 fork 没有部门的节点 → 拒绝", async () => {
+    seedHeadSource({ sourceDept: null });
+    const tools = handlers();
+    const r = await call(tools.clone_node, { source_node_id: SOURCE, name: "cloned-child" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("insufficient_role_for_create_node");
+  });
+});
