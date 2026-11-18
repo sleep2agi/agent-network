@@ -285,9 +285,32 @@ export function decideClone(source: CloneSourceFacts, ask: CloneAsk): CloneDecis
 }
 
 export function parseWorkdirPolicy(raw: unknown): CloneWorkdirPolicy {
-  if (raw === undefined || raw === null || raw === "") return "new_empty";
+  // #4826 spec（负责人 2026-11-19）：默认**共用源目录**（同路径、不复制文件），
+  // 因为 fork 的语义是「同一份代码，另一个 agent」；创建页必须提示两个 agent 会同目录。
+  // 想要干净目录的调用方显式传 new_empty。
+  if (raw === undefined || raw === null || raw === "") return "share_source";
   if (raw === "new_empty" || raw === "share_source") return raw;
   throw new ValidationError("workdir_policy_invalid", { value: typeof raw === "string" ? raw.slice(0, 40) : typeof raw, allowed: [...CLONE_WORKDIR_POLICIES] });
 }
 
 export { ValidationError };
+
+/**
+ * fork 时改写收件白名单里的「源节点自己的 alias」。
+ *
+ * 负责人 2026-11-19 定：白名单原样复制，但其中若有**源节点自己的 alias**，必须替换成**新节点的 alias**；
+ * 否则新节点收不到自己转出去的消息（它会把消息按旧名字发给别人，回程却找不到收件人）。
+ * 去重保持首次出现顺序；空值/空白项丢弃。
+ */
+export function rewriteCloneChannels(channels: readonly string[], sourceAlias: string, newAlias: string): string[] {
+  const src = (sourceAlias ?? "").trim();
+  const dst = (newAlias ?? "").trim();
+  const out: string[] = [];
+  for (const raw of channels ?? []) {
+    const c = typeof raw === "string" ? raw.trim() : "";
+    if (!c) continue;
+    const v = src && c === src && dst ? dst : c;
+    if (!out.includes(v)) out.push(v);
+  }
+  return out;
+}

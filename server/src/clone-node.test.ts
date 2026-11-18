@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db, hashToken } from "./db.js";
 import { peekPendingEnvBlob, stopBackgroundTimersForTest } from "./create-node.js";
 import { registerTools } from "./tools.js";
+import { rewriteCloneChannels } from "./clone-node.js";
 import { sessionContractForRuntime } from "./clone-node.js";
 
 const NET = "net_clone_938";
@@ -144,12 +145,14 @@ describe("clone_node — happy path (Hub #938)", () => {
     expect(r.ok).toBe(true);
     expect(r.daemon_node_id).toBe(DAEMON);
     expect(r.child_name).toBe("cloned-child");
-    expect(r.copy_session).toBe(true);
-    expect(r.workdir_policy).toBe("new_empty");
+    // #4826 spec（负责人 2026-11-19）：默认**不带** session 历史、默认**共用**源目录。
+    // 这两条默认值是产品决策，不是实现细节 —— 老调用方要旧行为就显式传 true / "new_empty"。
+    expect(r.copy_session).toBe(false);
+    expect(r.workdir_policy).toBe("share_source");
     expect(r.session_contract).toMatchObject({ mode: "transcript_when_present", runtime: "claude-agent-sdk" });
     const contract = r.contract as { token: string; workdir: string; session: string };
     expect(contract.token).toContain("new ntok_");
-    expect(contract.workdir).toContain("new empty directory");
+    expect(contract.workdir).toContain("source workdir");
     expect(contract.session).toContain("jsonl");
 
     const requestId = r.request_id as string;
@@ -167,8 +170,8 @@ describe("clone_node — happy path (Hub #938)", () => {
     expect(meta).toMatchObject({
       source_node_id: SOURCE,
       source_alias: SOURCE_ALIAS,
-      copy_session: true,
-      workdir_policy: "new_empty",
+      copy_session: false,
+      workdir_policy: "share_source",
       channels: ["server:commhub"],
     });
     expect(JSON.stringify(meta.channels)).not.toContain("feishu");
@@ -265,5 +268,31 @@ describe("session contract is honest per runtime", () => {
 
   test("an unknown runtime does not claim a session copy", () => {
     expect(sessionContractForRuntime("not-a-runtime").mode).toBe("unsupported");
+  });
+});
+
+// 负责人 2026-11-19：白名单原样复制，但源节点自己的 alias 必须换成新节点的 alias，
+// 否则新节点收不到自己转出去的消息。
+describe("rewriteCloneChannels (#4826)", () => {
+  test("源节点自己的 alias 换成新 alias", () => {
+    expect(rewriteCloneChannels(["通信欧2号", "通信欧", "运维欧"], "通信欧", "通信欧 副本")).toEqual([
+      "通信欧2号", "通信欧 副本", "运维欧",
+    ]);
+  });
+
+  test("不含源 alias 时原样保留", () => {
+    expect(rewriteCloneChannels(["a", "b"], "src", "dst")).toEqual(["a", "b"]);
+  });
+
+  test("空白项丢弃、重复项去重且保持首次出现顺序", () => {
+    expect(rewriteCloneChannels([" a ", "", "a", "  ", "b"], "src", "dst")).toEqual(["a", "b"]);
+  });
+
+  test("源 alias 为空时不替换（不能把别人的名字当自己）", () => {
+    expect(rewriteCloneChannels(["x", "y"], "", "dst")).toEqual(["x", "y"]);
+  });
+
+  test("替换后的新 alias 与既有项撞名时去重", () => {
+    expect(rewriteCloneChannels(["dst", "src"], "src", "dst")).toEqual(["dst"]);
   });
 });

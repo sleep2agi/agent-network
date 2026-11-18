@@ -71,7 +71,7 @@ import {
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
   resolveNodeCaller,
 } from "./create-node.js";
-import { decideClone, factsFromRows, parseWorkdirPolicy } from "./clone-node.js";
+import { decideClone, factsFromRows, parseWorkdirPolicy, rewriteCloneChannels } from "./clone-node.js";
 import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
   VaultError,
@@ -5447,7 +5447,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // the policy and the runtime's session capability (see clone-node.ts).
   server.tool(
     "clone_node",
-    "Clone a daemon child to a new node (new name + token). copy_session default true; workdir_policy new_empty (default) or share_source.",
+    "Clone a daemon child to a new node (new name + token). Defaults per #4826 spec (2026-11-19): copy_session false (opt-in history), workdir_policy share_source (same project dir, files not copied; the wizard must warn about two agents in one dir). Passing true/new_empty overrides.",
     {
       source_node_id: z.string().min(1).max(200),
       name: z.string().min(1).max(256),
@@ -5505,7 +5505,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       try {
         decision = decideClone(facts, {
           newName: name,
-          copySession: copy_session !== false,
+          // #4826 spec：session 历史默认**不带**（线上有几百 MB 对话文件把节点拖死的先例），勾选才带。
+          copySession: copy_session === true,
           workdirPolicy: policy,
           requestedDaemonId: daemon_node_id ?? null,
         });
@@ -5531,7 +5532,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         source_alias: facts.alias,
         copy_session: decision.copySession,
         workdir_policy: decision.workdirPolicy,
-        channels: decision.channels,
+        // 白名单原样复制，但源节点自己的 alias 必须换成新节点的（负责人 2026-11-19）。
+        channels: rewriteCloneChannels(decision.channels, facts.alias, decision.name),
       };
       db.run(
         `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, role, request_id, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 2)`,
