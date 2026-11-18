@@ -11,6 +11,21 @@ Hub 一直能算出 `inbox_pending = N`（Dashboard / 节点状态里都有）�
 
 这一版只加**一个只读端点**，不新增写接口：标已读仍然复用现有的 `ack_inbox`。
 
+## Install
+
+```bash
+bun add -g @sleep2agi/commhub-server@0.9.0-preview.287
+```
+
+## Upgrade
+
+```bash
+bun add -g @sleep2agi/commhub-server@0.9.0-preview.287
+# production: 用 scripts/deploy-hub-runtime.sh --version 0.9.0-preview.287
+#   （装 → 验 → 切 → 回读 → 失败即回滚，按 docs/runbooks/hub-release-deploy.md 写 build-info.json）
+#   注意：anet 主机的 ~/.local/bin/hub-daemon.sh 硬编码了 HUB_RUNTIME_DIR，必要时改那一行再 pm2 restart。
+```
+
 ## What changed
 
 ```text
