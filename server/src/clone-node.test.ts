@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db, hashToken } from "./db.js";
 import { peekPendingEnvBlob, stopBackgroundTimersForTest } from "./create-node.js";
 import { registerTools } from "./tools.js";
+import { rewriteCloneChannels, decideCloneDepartment } from "./clone-node.js";
 import { sessionContractForRuntime } from "./clone-node.js";
 
 const NET = "net_clone_938";
@@ -144,12 +145,14 @@ describe("clone_node — happy path (Hub #938)", () => {
     expect(r.ok).toBe(true);
     expect(r.daemon_node_id).toBe(DAEMON);
     expect(r.child_name).toBe("cloned-child");
-    expect(r.copy_session).toBe(true);
-    expect(r.workdir_policy).toBe("new_empty");
+    // #4826 spec（负责人 2026-11-19）：默认**不带** session 历史、默认**共用**源目录。
+    // 这两条默认值是产品决策，不是实现细节 —— 老调用方要旧行为就显式传 true / "new_empty"。
+    expect(r.copy_session).toBe(false);
+    expect(r.workdir_policy).toBe("share_source");
     expect(r.session_contract).toMatchObject({ mode: "transcript_when_present", runtime: "claude-agent-sdk" });
     const contract = r.contract as { token: string; workdir: string; session: string };
     expect(contract.token).toContain("new ntok_");
-    expect(contract.workdir).toContain("new empty directory");
+    expect(contract.workdir).toContain("source workdir");
     expect(contract.session).toContain("jsonl");
 
     const requestId = r.request_id as string;
@@ -167,8 +170,8 @@ describe("clone_node — happy path (Hub #938)", () => {
     expect(meta).toMatchObject({
       source_node_id: SOURCE,
       source_alias: SOURCE_ALIAS,
-      copy_session: true,
-      workdir_policy: "new_empty",
+      copy_session: false,
+      workdir_policy: "share_source",
       channels: ["server:commhub"],
     });
     expect(JSON.stringify(meta.channels)).not.toContain("feishu");
@@ -265,5 +268,95 @@ describe("session contract is honest per runtime", () => {
 
   test("an unknown runtime does not claim a session copy", () => {
     expect(sessionContractForRuntime("not-a-runtime").mode).toBe("unsupported");
+  });
+});
+
+// 负责人 2026-11-19：白名单原样复制，但源节点自己的 alias 必须换成新节点的 alias，
+// 否则新节点收不到自己转出去的消息。
+describe("rewriteCloneChannels (#4826)", () => {
+  test("源节点自己的 alias 换成新 alias", () => {
+    expect(rewriteCloneChannels(["通信欧2号", "通信欧", "运维欧"], "通信欧", "通信欧 副本")).toEqual([
+      "通信欧2号", "通信欧 副本", "运维欧",
+    ]);
+  });
+
+  test("不含源 alias 时原样保留", () => {
+    expect(rewriteCloneChannels(["a", "b"], "src", "dst")).toEqual(["a", "b"]);
+  });
+
+  test("空白项丢弃、重复项去重且保持首次出现顺序", () => {
+    expect(rewriteCloneChannels([" a ", "", "a", "  ", "b"], "src", "dst")).toEqual(["a", "b"]);
+  });
+
+  test("源 alias 为空时不替换（不能把别人的名字当自己）", () => {
+    expect(rewriteCloneChannels(["x", "y"], "", "dst")).toEqual(["x", "y"]);
+  });
+
+  test("替换后的新 alias 与既有项撞名时去重", () => {
+    expect(rewriteCloneChannels(["dst", "src"], "src", "dst")).toEqual(["dst"]);
+  });
+});
+
+// #4826 部门归属（负责人 2026-11-19）：判定是纯函数，测试不依赖库表。
+describe("decideCloneDepartment (#4826)", () => {
+  test("owner/admin fork → 跟随源部门，无提示", () => {
+    expect(decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "owner", managesSourceDept: false }))
+      .toEqual({ department: "d1", notice: null });
+    expect(decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "admin", managesSourceDept: false }).department).toBe("d1");
+  });
+
+  test("部门负责人但不管源部门 → 落 null + 提示用部门名（不静默）", () => {
+    const r = decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "member", managesSourceDept: false });
+    expect(r.department).toBeNull();
+    expect(r.notice).toContain("研发部");
+    expect(r.notice).not.toContain("d1");
+  });
+
+  test("部门负责人管着源部门 → 跟随源部门", () => {
+    expect(decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "member", managesSourceDept: true }))
+      .toEqual({ department: "d1", notice: null });
+  });
+
+  test("源节点没有部门 → 不管谁 fork 都不设部门、也不提示", () => {
+    expect(decideCloneDepartment({ srcDept: null, srcDeptName: null, role: "member", managesSourceDept: false }))
+      .toEqual({ department: null, notice: null });
+  });
+
+  test("查不到部门名时提示退回 id", () => {
+    const r = decideCloneDepartment({ srcDept: "d1", srcDeptName: "d1", role: "member", managesSourceDept: false });
+    expect(r.notice).toContain("d1");
+  });
+});
+
+// #4826 fork 权限（负责人 2026-11-19）：部门负责人**只能 fork 自己管部门里的节点**。
+// 放宽这一条 = 任意部门负责人能 fork 别的部门节点，勾上 copy_session 就把别人的历史/权限/白名单复制走。
+describe("clone_node — fork 权限 (#4826)", () => {
+  function seedHeadSource(opts: { sourceDept: string | null }) {
+    seed();
+    // 夹具不跨用例复用部门行（cleanup 只清它认识的表）
+    db.run("DELETE FROM network_departments WHERE network_id = ?1", [NET]);
+    db.run("UPDATE network_members SET role = 'member' WHERE network_id = ?1 AND user_id = ?2", [NET, USER]);
+    db.run("INSERT INTO network_departments (network_id, department_id, name, sort) VALUES (?1, 'dept_own', '平台部', 0)", [NET]);
+    db.run("UPDATE network_departments SET leader_user_id = ?1 WHERE network_id = ?2 AND department_id = 'dept_own'", [USER, NET]);
+    if (opts.sourceDept) {
+      db.run("INSERT INTO network_departments (network_id, department_id, name, sort) VALUES (?1, ?2, '研发部', 1)", [NET, opts.sourceDept]);
+      db.run("UPDATE nodes SET department_id = ?1 WHERE node_id = ?2", [opts.sourceDept, SOURCE]);
+    }
+  }
+
+  test("部门负责人 fork 别的部门的节点 → 拒绝", async () => {
+    seedHeadSource({ sourceDept: "dept_other_team" });
+    const tools = handlers();
+    const r = await call(tools.clone_node, { source_node_id: SOURCE, name: "cloned-child" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("insufficient_role_for_create_node");
+  });
+
+  test("部门负责人 fork 没有部门的节点 → 拒绝", async () => {
+    seedHeadSource({ sourceDept: null });
+    const tools = handlers();
+    const r = await call(tools.clone_node, { source_node_id: SOURCE, name: "cloned-child" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("insufficient_role_for_create_node");
   });
 });

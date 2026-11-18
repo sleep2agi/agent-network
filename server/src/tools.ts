@@ -71,7 +71,8 @@ import {
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
   resolveNodeCaller,
 } from "./create-node.js";
-import { decideClone, factsFromRows, parseWorkdirPolicy } from "./clone-node.js";
+import { decideClone, decideCloneDepartment, factsFromRows, parseWorkdirPolicy, rewriteCloneChannels } from "./clone-node.js";
+import { managedDepartmentIds } from "./department-heads.js";
 import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
   VaultError,
@@ -5447,7 +5448,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // the policy and the runtime's session capability (see clone-node.ts).
   server.tool(
     "clone_node",
-    "Clone a daemon child to a new node (new name + token). copy_session default true; workdir_policy new_empty (default) or share_source.",
+    "Clone a daemon child to a new node (new name + token). Defaults: copy_session false; workdir_policy share_source (shared dir). Pass true/new_empty to override.",
     {
       source_node_id: z.string().min(1).max(200),
       name: z.string().min(1).max(256),
@@ -5462,15 +5463,28 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const callerRole = enforceUserId && effectiveNetId
         ? getUserNetworkRole(enforceUserId, effectiveNetId)
         : null;
-      if (callerRole !== "admin" && callerRole !== "owner") {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_create_node", required_role: "admin", caller_role: callerRole }) }] };
-      }
       const { row: source, sec1Ok } = resolveTargetNode(source_node_id, effectiveNetId);
       if (!source) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "node_not_found", node_id: source_node_id }) }] };
       }
       if (!sec1Ok) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_node" }) }] };
+      }
+      // #4826 fork 权限（负责人 2026-11-19 定）：
+      //   owner/admin → 任意节点；
+      //   部门负责人 → **只能 fork 源节点部门在自己 managedDepartmentIds 里的节点**；
+      //   源节点没有部门 ⇒ 只有 owner/admin 能 fork；其余人一律 403。
+      // 🔴 不能为了「让某条分支走得到」而放宽：放宽等于任意部门负责人可 fork 别的部门的节点，
+      //    再勾 copy_session=true 就把别人的对话历史 / 权限模式 / 白名单整套复制走（越权 + 数据泄露）。
+      if (callerRole !== "admin" && callerRole !== "owner") {
+        const forbidden = { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_create_node", required_role: "admin", caller_role: callerRole }) }] };
+        const gateNet = source.network_id || effectiveNetId || "default";
+        const srcDeptForGate = db.get<{ department_id: string | null }>(
+          "SELECT department_id FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+          source_node_id, gateNet,
+        )?.department_id ?? null;
+        if (!enforceUserId || !srcDeptForGate) return forbidden;
+        if (!managedDepartmentIds(gateNet, enforceUserId).includes(srcDeptForGate)) return forbidden;
       }
       const createRow = db.get<{ daemon_node_id: string; runtime: string; model: string | null; flags_json: string; child_name: string }>(
         `SELECT daemon_node_id, runtime, model, flags_json, child_name
@@ -5505,7 +5519,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       try {
         decision = decideClone(facts, {
           newName: name,
-          copySession: copy_session !== false,
+          // #4826 spec：session 历史默认**不带**（线上有几百 MB 对话文件把节点拖死的先例），勾选才带。
+          copySession: copy_session === true,
           workdirPolicy: policy,
           requestedDaemonId: daemon_node_id ?? null,
         });
@@ -5526,12 +5541,39 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const childTokenId = generateId("tok");
       const requestId = newRequestId();
       const networkIdForChild = daemon.network_id || net;
+      // #4826 部门归属（负责人 2026-11-19）：默认跟随源节点部门；
+      // 但操作者若在源节点部门没有建节点权限，**不能静默继承** —— 落 null 并在结果里明确提示。
+      // 判定口径：owner/admin 任何部门都可；部门负责人（含子部门）只能放自己管的部门。
+      const srcDeptRow = db.get<{ department_id: string | null }>(
+        "SELECT department_id FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+        source_node_id, net,
+      );
+      const srcDept = srcDeptRow?.department_id ?? null;
+      const placeableInSrcDept = !srcDept
+        || callerRole === "owner" || callerRole === "admin"
+        || managedDepartmentIds(net, enforceUserId).includes(srcDept);
+      // 提示里要给**部门名字**（用户看不懂 department_id）；查不到名字才退回 id。
+      const srcDeptName = srcDept
+        ? (db.get<{ name: string | null }>(
+            "SELECT name FROM network_departments WHERE network_id = ?1 AND department_id = ?2",
+            net, srcDept,
+          )?.name || srcDept)
+        : null;
+      const deptDecision = decideCloneDepartment({
+        srcDept, srcDeptName, role: callerRole ?? null, managesSourceDept: placeableInSrcDept && (callerRole !== "owner" && callerRole !== "admin"),
+      });
+      const departmentNotice = deptDecision.notice;
+      const cloneDept = deptDecision.department;
+
       const cloneMeta = {
         source_node_id,
         source_alias: facts.alias,
+        // false ⇒ finalize 时**不要**再继承源部门（否则会静默把没权限的部门塞回去）
+        inherit_department: placeableInSrcDept,
         copy_session: decision.copySession,
         workdir_policy: decision.workdirPolicy,
-        channels: decision.channels,
+        // 白名单原样复制，但源节点自己的 alias 必须换成新节点的（负责人 2026-11-19）。
+        channels: rewriteCloneChannels(decision.channels, facts.alias, decision.name),
       };
       db.run(
         `INSERT INTO api_tokens (token_id, token_hash, user_id, network_id, name, scope, role, request_id, node_identity_epoch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 2)`,
@@ -5546,12 +5588,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
       db.run(
         `INSERT INTO node_create_requests
-           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, clone_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', 'pending', ?8, ?9, ?10, ?11)`,
+           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, clone_json, department_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', 'pending', ?8, ?9, ?10, ?11, ?12)`,
         [
           requestId, decision.daemonNodeId, decision.name, networkIdForChild,
           decision.runtime, decision.model, JSON.stringify(decision.flags),
-          childTokenId, Date.now(), callerTokenId || "unknown", JSON.stringify(cloneMeta),
+          childTokenId, Date.now(), callerTokenId || "unknown", JSON.stringify(cloneMeta), cloneDept,
         ],
       );
       pushEvent(daemon.alias, { type: "clone_node", request_id: requestId }, networkIdForChild);
@@ -5579,11 +5621,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           copy_session: decision.copySession,
           workdir_policy: decision.workdirPolicy,
           session_contract: decision.sessionContract,
+          ...(cloneDept ? { department_id: cloneDept } : {}),
+          // 不能静默改归属：没权限继承源部门时，把原因原样告诉调用方。
+          ...(departmentNotice ? { department_notice: departmentNotice } : {}),
           contract: {
             token: "new ntok_ minted for the clone; the source token is not copied",
             workdir: decision.workdirPolicy === "new_empty"
               ? "new empty directory under the source workdir's parent (or <daemon cwd>/clone-work when the source has no project workdir)"
-              : "share the source workdir (explicit)",
+              : "share the source workdir — 与源节点共用同一个目录，两个 agent 同时改会互相踩（创建页必须提示）",
             session: decision.sessionContract.detail,
           },
         }) }],
