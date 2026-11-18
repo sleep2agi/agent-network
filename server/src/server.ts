@@ -44,6 +44,7 @@ import { broadcastRecentState, enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { resolveInboxCaller } from "./inbox-caller.js";
+import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected } from "./inbox-endpoint-helpers.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7487,12 +7488,14 @@ return Bun.serve({
       if (!recipient.ok) return withCors(req, Response.json(recipient, { status: 403 }));
       // #4987 review：跨网络的 owner 令牌必须 403 —— 目标 alias 必须在**调用方自己的网络**里存在。
       // 否则同名 alias 会把别的网络的收件箱露出来。
-      if (restAuth.networkId && recipient.alias !== requestedAlias) {
-        const inNet = db.get<{ node_id: string }>(
-          "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1",
-          recipient.alias, restAuth.networkId,
-        );
-        if (!inNet) return withCors(req, Response.json({ ok: false, error: "inbox_identity_mismatch" }, { status: 403 }));
+      const inNet = restAuth.networkId && recipient.delegated
+        ? !!db.get<{ node_id: string }>(
+            "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1",
+            recipient.alias, restAuth.networkId,
+          )
+        : true;
+      if (inboxCrossNetworkRejected({ callerNetworkId: restAuth.networkId ?? null, delegated: recipient.delegated, inNetwork: inNet })) {
+        return withCors(req, Response.json({ ok: false, error: "inbox_identity_mismatch" }, { status: 403 }));
       }
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
       // preview 口径（与 #4987 判据一致）：按码点截断 ≤200，超长追加单个「…」，换行折叠成空格。
@@ -7509,10 +7512,7 @@ return Bun.serve({
       )?.cnt ?? 0;
       // #4987 review：at 输出 ISO-8601 UTC（SQLite 存的是 'YYYY-MM-DD HH:MM:SS'，补 T 与 Z）；
       // pending 已在上面用单独 COUNT 算成「总积压」，不受 limit 影响。
-      const isoUtc = (v: string): string => {
-        const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(v);
-        return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z` : v;
-      };
+      const isoUtc = inboxAtIsoUtc;
       const preview = (text: string | null): string => {
         const flat = (text ?? "").replace(/\s+/g, " ").trim();
         const cps = Array.from(flat);
@@ -7524,7 +7524,7 @@ return Bun.serve({
         pending: total,
         returned: rows.length,
         // 代读标记：由 resolveInboxCaller 判定后透传（不要在这里用 alias 比较——规范化后恒等，会恒为 self）。
-        scope: recipient.delegated ? "delegated" : "self",
+        scope: inboxScope(recipient.delegated),
         messages: rows.map((r) => ({
           id: r.id, from: r.from_session ?? "", at: isoUtc(r.created_at), preview: preview(r.content),
           acked: r.acked === 1, is_task: r.task_id !== null,
