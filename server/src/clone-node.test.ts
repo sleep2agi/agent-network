@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { db, hashToken } from "./db.js";
 import { peekPendingEnvBlob, stopBackgroundTimersForTest } from "./create-node.js";
 import { registerTools } from "./tools.js";
-import { rewriteCloneChannels } from "./clone-node.js";
+import { rewriteCloneChannels, decideCloneDepartment } from "./clone-node.js";
 import { sessionContractForRuntime } from "./clone-node.js";
 
 const NET = "net_clone_938";
@@ -294,5 +294,36 @@ describe("rewriteCloneChannels (#4826)", () => {
 
   test("替换后的新 alias 与既有项撞名时去重", () => {
     expect(rewriteCloneChannels(["dst", "src"], "src", "dst")).toEqual(["dst"]);
+  });
+});
+
+// #4826 部门归属（负责人 2026-11-19）：判定是纯函数，测试不依赖库表。
+describe("decideCloneDepartment (#4826)", () => {
+  test("owner/admin fork → 跟随源部门，无提示", () => {
+    expect(decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "owner", managesSourceDept: false }))
+      .toEqual({ department: "d1", notice: null });
+    expect(decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "admin", managesSourceDept: false }).department).toBe("d1");
+  });
+
+  test("部门负责人但不管源部门 → 落 null + 提示用部门名（不静默）", () => {
+    const r = decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "member", managesSourceDept: false });
+    expect(r.department).toBeNull();
+    expect(r.notice).toContain("研发部");
+    expect(r.notice).not.toContain("d1");
+  });
+
+  test("部门负责人管着源部门 → 跟随源部门", () => {
+    expect(decideCloneDepartment({ srcDept: "d1", srcDeptName: "研发部", role: "member", managesSourceDept: true }))
+      .toEqual({ department: "d1", notice: null });
+  });
+
+  test("源节点没有部门 → 不管谁 fork 都不设部门、也不提示", () => {
+    expect(decideCloneDepartment({ srcDept: null, srcDeptName: null, role: "member", managesSourceDept: false }))
+      .toEqual({ department: null, notice: null });
+  });
+
+  test("查不到部门名时提示退回 id", () => {
+    const r = decideCloneDepartment({ srcDept: "d1", srcDeptName: "d1", role: "member", managesSourceDept: false });
+    expect(r.notice).toContain("d1");
   });
 });

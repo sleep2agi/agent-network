@@ -314,3 +314,28 @@ export function rewriteCloneChannels(channels: readonly string[], sourceAlias: s
   }
   return out;
 }
+
+/**
+ * fork 的部门归属判定（#4826，负责人 2026-11-19）。
+ *
+ * 默认跟随源节点部门；但「操作者在这个部门没有建节点权限」时**不能静默**：
+ * 落 null，并把原因说人话（部门名，查不到名字才退回 id）。
+ * `managesSourceDept`：操作者是否是源部门（含子部门）的负责人。
+ * owner/admin 视为任何部门都可。
+ */
+export function decideCloneDepartment(input: {
+  srcDept: string | null;
+  srcDeptName: string | null;
+  role: string | null;
+  managesSourceDept: boolean;
+}): { department: string | null; notice: string | null } {
+  const { srcDept, srcDeptName, role, managesSourceDept } = input;
+  if (!srcDept) return { department: null, notice: null };
+  const allowed = role === "owner" || role === "admin" || managesSourceDept;
+  if (allowed) return { department: srcDept, notice: null };
+  const shown = srcDeptName || srcDept;
+  return {
+    department: null,
+    notice: `源节点部门「${shown}」不在你的建节点权限内，新节点未设部门（创建后可调整）`,
+  };
+}

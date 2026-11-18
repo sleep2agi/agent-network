@@ -71,7 +71,7 @@ import {
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
   resolveNodeCaller,
 } from "./create-node.js";
-import { decideClone, factsFromRows, parseWorkdirPolicy, rewriteCloneChannels } from "./clone-node.js";
+import { decideClone, decideCloneDepartment, factsFromRows, parseWorkdirPolicy, rewriteCloneChannels } from "./clone-node.js";
 import { managedDepartmentIds } from "./department-heads.js";
 import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
@@ -5463,7 +5463,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const callerRole = enforceUserId && effectiveNetId
         ? getUserNetworkRole(enforceUserId, effectiveNetId)
         : null;
-      if (callerRole !== "admin" && callerRole !== "owner") {
+      // #4826：部门负责人也能在自己管的部门里 fork —— 否则「无权限时落到自己部门」那条分支永远走不到。
+      const managesAnyDept = !!(enforceUserId && effectiveNetId)
+        && managedDepartmentIds(effectiveNetId, enforceUserId).length > 0;
+      if (callerRole !== "admin" && callerRole !== "owner" && !managesAnyDept) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "insufficient_role_for_create_node", required_role: "admin", caller_role: callerRole }) }] };
       }
       const { row: source, sec1Ok } = resolveTargetNode(source_node_id, effectiveNetId);
@@ -5539,10 +5542,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const placeableInSrcDept = !srcDept
         || callerRole === "owner" || callerRole === "admin"
         || managedDepartmentIds(net, enforceUserId).includes(srcDept);
-      const cloneDept = placeableInSrcDept ? srcDept : null;
-      const departmentNotice = placeableInSrcDept
-        ? null
-        : `源节点部门 ${srcDept} 不在你的建节点权限内，新节点未设部门（创建后可调整）`;
+      // 提示里要给**部门名字**（用户看不懂 department_id）；查不到名字才退回 id。
+      const srcDeptName = srcDept
+        ? (db.get<{ name: string | null }>(
+            "SELECT name FROM network_departments WHERE network_id = ?1 AND department_id = ?2",
+            net, srcDept,
+          )?.name || srcDept)
+        : null;
+      const deptDecision = decideCloneDepartment({
+        srcDept, srcDeptName, role: callerRole ?? null, managesSourceDept: placeableInSrcDept && (callerRole !== "owner" && callerRole !== "admin"),
+      });
+      const departmentNotice = deptDecision.notice;
+      const cloneDept = deptDecision.department;
 
       const cloneMeta = {
         source_node_id,
