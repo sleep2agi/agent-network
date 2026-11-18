@@ -105,6 +105,8 @@ describe("#2293 node-reported OpenCode catalog reaches GET /api/nodes", () => {
     expect(row).toBeDefined();
     expect(row.opencode_catalog).toEqual(["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"]);
     expect(row.opencode_generation).toBe("v2");
+    // #4976 —— 有目录 ⇒ reported（客户端据此渲染模型列表，不再转圈）
+    expect(row.opencode_catalog_state).toBe("reported");
     expect(row.opencode_mode).toBe("copresence");
     expect(row.opencode_server).toBe("http://127.0.0.1:4096");
     // 整个快照仍然不出现在这一行里；flags 中的其它键也不外泄。
@@ -124,6 +126,8 @@ describe("#2293 node-reported OpenCode catalog reaches GET /api/nodes", () => {
     expect(row).toBeDefined();
     expect(row.opencode_catalog).toBeNull();
     expect(row.opencode_server).toBeNull();
+    // #4976 —— 形状不对 ⇒ not_reported（可重试），而不是让客户端无限「正在读取」
+    expect(row.opencode_catalog_state).toBe("not_reported");
     // 代际这一格仍然照常投影（没被同一条错误连带丢掉）。
     expect(row.opencode_generation).toBe("v2");
   });
@@ -135,5 +139,37 @@ describe("#2293 node-reported OpenCode catalog reaches GET /api/nodes", () => {
     expect(other.opencode_generation ?? null).toBeNull();
     expect(other.opencode_mode ?? null).toBeNull();
     expect(other.opencode_server ?? null).toBeNull();
+  });
+});
+
+// #4976 —— `opencode_catalog_state` 的**宽进严出**判据。
+// 判死（unsupported_runtime）的代价是客户端永远不给重试入口，所以只有「runtime 非空且明确不是 opencode*」
+// 才允许判死；runtime 为空（老行 / 刚注册 / 长期离线）一律落到 not_reported，保留重试。
+describe("#4976 opencode_catalog_state 判据", () => {
+  function seedNode(id: string, runtime: string | null, snapshot: Record<string, unknown> | null) {
+    db.run(
+      `INSERT INTO nodes (node_id, node_name, alias, network_id, runtime, config_snapshot, created_at, updated_at)
+       VALUES (?1, ?2, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'))`,
+      [id, `state-${id}`, networkId, runtime, snapshot ? JSON.stringify(snapshot) : null],
+    );
+  }
+  const stateOf = async (id: string) => (await listNodes()).find(r => r.node_id === id)?.opencode_catalog_state;
+
+  test("codex-cli 运行时、无目录 → unsupported_runtime（永远不会有，不给重试）", async () => {
+    const id = `node_codex_${stamp}`;
+    seedNode(id, "codex-cli", { model: "gpt-6.2" });
+    expect(await stateOf(id)).toBe("unsupported_runtime");
+  });
+
+  test("runtime 为空、没报代际 → not_reported（不能判死）", async () => {
+    const id = `node_noruntime_${stamp}`;
+    seedNode(id, "", { model: "deepseek/deepseek-flash" });
+    expect(await stateOf(id)).toBe("not_reported");
+  });
+
+  test("runtime 为空、报了代际 v2 → not_reported（是 OpenCode 节点，只是目录没采到）", async () => {
+    const id = `node_noruntime_v2_${stamp}`;
+    seedNode(id, "", { model: "deepseek/deepseek-flash", flags: { opencodeGeneration: "v2" } });
+    expect(await stateOf(id)).toBe("not_reported");
   });
 });
