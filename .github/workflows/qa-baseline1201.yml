@@ -1,12 +1,6 @@
 name: HTTP baseline corrections (TEST-ONLY)
 on:
   pull_request:
-    paths:
-      - 'server/src/host-supervisor-identity-http.test.ts'
-      - 'server/src/observer-avatar-http.test.ts'
-      - 'server/src/requirements-http.test.ts'
-      - 'tests/test1109-supervisor-identity/*1201*'
-      - '.github/workflows/qa-baseline1201.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,7 +12,25 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      match: ${{ steps.filter.outputs.match }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            match:
+              - 'server/src/host-supervisor-identity-http.test.ts'
+              - 'server/src/observer-avatar-http.test.ts'
+              - 'server/src/requirements-http.test.ts'
+              - 'tests/test1109-supervisor-identity/*1201*'
+              - '.github/workflows/qa-baseline1201.yml'
   baseline-and-fixed:
+    needs: changes
+    if: needs.changes.outputs.match == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
