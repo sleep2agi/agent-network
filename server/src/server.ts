@@ -7493,6 +7493,11 @@ return Bun.serve({
          ORDER BY created_at DESC, id DESC LIMIT ?3`,
         recipient.alias, restAuth.networkId ?? null, limit,
       );
+      // #4987 复核修正：pending 必须是「未读总数」，不受 limit 影响；返回的条数单列 returned。
+      const total = db.get<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND acked = 0 AND (network_id IS NULL OR network_id = ?2)`,
+        recipient.alias, restAuth.networkId ?? null,
+      )?.cnt ?? 0;
       const preview = (text: string | null): string => {
         const flat = (text ?? "").replace(/\s+/g, " ").trim();
         const cps = Array.from(flat);
@@ -7501,7 +7506,10 @@ return Bun.serve({
       return withCors(req, Response.json({
         ok: true,
         alias: recipient.alias,
-        pending: rows.length,
+        pending: total,
+        returned: rows.length,
+        // 代读标记：网络级 owner/admin 读他人 alias 时不是「读自己」，UI 应显示「代读」。
+        scope: recipient.alias === requestedAlias ? "self" : "delegated",
         messages: rows.map((r) => ({
           id: r.id, from: r.from_session ?? "", at: r.created_at, preview: preview(r.content),
           acked: r.acked === 1, is_task: r.task_id !== null,
