@@ -45,6 +45,7 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { resolveInboxCaller } from "./inbox-caller.js";
 import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilter } from "./inbox-endpoint-helpers.js";
+import { canListOpencodeSessions } from "./opencode-session-access.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7551,6 +7552,50 @@ return Bun.serve({
           acked: r.acked === 1, is_task: r.task_id !== null,
         })),
       }));
+    }
+
+    // #4825 —— 某节点 OpenCode Server 上的会话列表（REST，不是 MCP 工具）。
+    // 为什么走 REST：用这个列表的是 App 向导（本来就只读 /api/nodes、/api/inbox），
+    // 做成 MCP 工具会占 tools/list 的按角色字节预算（#476 天花板）；
+    // 也刻意不合并进 get_opencode_catalog —— 会话列表权限比目录更严，
+    // 同一工具里按 action 分派不同权限正是 #3639 那类 bug 的温床。
+    const opencodeSessionsMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/opencode-sessions$/);
+    if (opencodeSessionsMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+      const targetNodeId = decodeURIComponent(opencodeSessionsMatch[1] ?? "");
+      const scopedParams: any[] = [targetNodeId];
+      let scopedSql = "SELECT node_id, alias, network_id, runtime, department_id, config_snapshot FROM nodes WHERE node_id = ?1";
+      scopedSql = addNetworkScope(scopedSql, scopedParams, restScope);
+      scopedSql += " LIMIT 1";
+      const target = db.get<any>(scopedSql, ...scopedParams);
+      if (!target) {
+        return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: targetNodeId }, { status: 404 }));
+      }
+      // 权限只走这一个判定函数（会话标题与目录本身就是敏感信息）。
+      const viewerRole = restAuth.userId && target.network_id ? getUserNetworkRole(restAuth.userId, target.network_id) : null;
+      const managesTarget = !!(restAuth.userId && target.network_id && target.department_id)
+        && managedDepartmentIds(target.network_id, restAuth.userId).includes(target.department_id);
+      const verdict = canListOpencodeSessions({
+        role: viewerRole ?? null,
+        targetDepartmentId: target.department_id ?? null,
+        managesTargetDepartment: managesTarget,
+      });
+      if (!verdict.ok) return withCors(req, Response.json(verdict, { status: 403 }));
+
+      // 失败码三件套（负责人 2026-11-19 定字面量）
+      const nodeRuntime = String(target.runtime ?? "");
+      if (!/^opencode/.test(nodeRuntime)) {
+        return withCors(req, Response.json({ ok: false, error: "unsupported_runtime", runtime: nodeRuntime || null }, { status: 409 }));
+      }
+      // 代读还没接：daemon 侧必须先把「列出 OpenCode server sessions」的通路做出来。
+      // 这里返回显式错误码而不是空数组 —— 「没有会话」和「读不到」是两件事。
+      return withCors(req, Response.json({
+        ok: false,
+        error: "server_unreachable",
+        detail: "daemon_probe_not_wired",
+        node_id: target.node_id,
+        alias: target.alias,
+      }, { status: 409 }));
     }
 
     if (url.pathname === "/api/tasks") {
