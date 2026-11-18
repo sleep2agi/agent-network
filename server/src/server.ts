@@ -7523,8 +7523,8 @@ return Bun.serve({
         alias: recipient.alias,
         pending: total,
         returned: rows.length,
-        // 代读标记：网络级 owner/admin 读他人 alias 时不是「读自己」，UI 应显示「代读」。
-        scope: recipient.alias === requestedAlias ? "self" : "delegated",
+        // 代读标记：由 resolveInboxCaller 判定后透传（不要在这里用 alias 比较——规范化后恒等，会恒为 self）。
+        scope: recipient.delegated ? "delegated" : "self",
         messages: rows.map((r) => ({
           id: r.id, from: r.from_session ?? "", at: isoUtc(r.created_at), preview: preview(r.content),
           acked: r.acked === 1, is_task: r.task_id !== null,

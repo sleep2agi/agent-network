@@ -13,7 +13,7 @@ type InboxCaller = {
 
 /** Inbox reads and ACKs act as the recipient, not as a dispatch target. */
 export function resolveInboxCaller(alias: string, caller: InboxCaller):
-  { ok: true; alias: string } | { ok: false; error: string } {
+  { ok: true; alias: string; delegated: boolean } | { ok: false; error: string } {
   const denied = { ok: false as const, error: "inbox_identity_mismatch" };
   if (caller.identityRejected) return denied;
   const requested = alias.trim();
@@ -22,7 +22,7 @@ export function resolveInboxCaller(alias: string, caller: InboxCaller):
     if (node.ok) {
       if (node.networkId !== caller.networkId) return denied;
       const canonical = resolveCanonicalAlias(node.networkId, requested).alias;
-      return canonical === node.alias ? { ok: true, alias: node.alias } : denied;
+      return canonical === node.alias ? { ok: true, alias: node.alias, delegated: false } : denied;
     }
     // Registration tokens are network-scoped human tokens, not node tokens.
     // Missing/foreign/ambiguous node identities never fall back to the issuer.
@@ -33,17 +33,18 @@ export function resolveInboxCaller(alias: string, caller: InboxCaller):
     if (!token || token.name?.startsWith("node:")) return denied;
   }
   // Preserve open-development and legacy global-token mode.
-  if (!caller.userId) return { ok: true, alias: requested };
+  if (!caller.userId) return { ok: true, alias: requested, delegated: false };
   const user = db.get<{ username: string }>("SELECT username FROM users WHERE user_id = ?1", caller.userId);
-  if (user?.username === requested) return { ok: true, alias: requested };
+  if (user?.username === requested) return { ok: true, alias: requested, delegated: false };
   if (!caller.networkId) return { ok: false, error: "network_id_required" };
   const role = getUserNetworkRole(caller.userId, caller.networkId);
   if (!role) return denied;
   const canonical = resolveCanonicalAlias(caller.networkId, requested).alias;
-  if (role === "owner" || role === "admin") return { ok: true, alias: canonical };
+  if (role === "owner" || role === "admin") return { ok: true, alias: canonical, delegated: canonical !== requested.trim() };
   const owned = db.get<{ node_id: string }>(
     "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2 AND owner_user_id = ?3 LIMIT 1",
     canonical, caller.networkId, caller.userId,
   );
-  return owned ? { ok: true, alias: canonical } : denied;
+  // 用户读「自己拥有的节点」= 代读（不是读自己），必须标记，避免静默。
+  return owned ? { ok: true, alias: canonical, delegated: canonical !== requested.trim() } : denied;
 }
