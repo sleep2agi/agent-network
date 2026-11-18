@@ -1,0 +1,18 @@
+{
+  "source": "agent-network/src/codex-copresence-env.ts",
+  "names": [
+    "ANET_CODEX_COMMHUB_TOKEN",
+    "ANET_CODEX_PAIRED_AGENT_NODE",
+    "ANET_CODEX_RECOVERY_MAX_PAYLOAD_BYTES",
+    "ANET_CODEX_RESUME_TIMEOUT_MS",
+    "ANET_CODEX_TUI_SESSION",
+    "ANET_COPRESENCE_BRIDGE",
+    "ANET_NODE_MARKER",
+    "CODEX_HOME",
+    "COMMHUB_ALIAS",
+    "COMMHUB_AUTH_TOKEN",
+    "COMMHUB_NODE_ID",
+    "COMMHUB_TOKEN",
+    "COMMHUB_URL"
+  ]
+}

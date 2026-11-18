@@ -128,6 +128,9 @@ jobs:
           fi
 
       - uses: actions/attest-build-provenance@v2
+        # Fork pull_request jobs do not receive the OIDC request environment.
+        # Keep provenance on release dispatches; PRs still compile, smoke, and upload artifacts.
+        if: github.event_name == 'workflow_dispatch'
         with:
           subject-path: dist/${{ matrix.artifact }}*
 
