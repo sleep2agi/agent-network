@@ -1,23 +1,6 @@
 name: Inbox recipient core
 on:
   pull_request:
-    paths:
-      - 'server/src/inbox-caller.ts'
-      - 'server/src/tools.ts'
-      - 'server/src/task-activity.ts'
-      - 'server/src/create-node.ts'
-      - 'server/src/rename.ts'
-      - 'server/src/rest-identity.ts'
-      - 'server/src/server.ts'
-      - 'server/src/node-token-identity.ts'
-      - 'server/src/node-daemon-bindings.ts'
-      - 'server/src/stop-delete-node.test.ts'
-      - 'server/src/node-daemon-bindings.test.ts'
-      - 'server/src/node-caller-identity-http.test.ts'
-      - 'server/src/mcp-write-network-resolution.test.ts'
-      - 'server/src/tool-audience*'
-      - 'tests/node-caller-identity/**'
-      - '.github/workflows/inbox-recipient-core.yml'
 permissions:
   contents: read
 # #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
@@ -28,9 +11,40 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    # 路径过滤从 workflow 级移到 job 内：没命中就**跳过一个同名 job**，
+    # 让 required check 永远有上报（skipped 算通过），而不是「Expected 永不出现」。
+    runs-on: ubuntu-latest
+    outputs:
+      match: ${{ steps.filter.outputs.match }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad
+        with:
+          filters: |
+            match:
+              - 'server/src/inbox-caller.ts'
+              - 'server/src/tools.ts'
+              - 'server/src/task-activity.ts'
+              - 'server/src/create-node.ts'
+              - 'server/src/rename.ts'
+              - 'server/src/rest-identity.ts'
+              - 'server/src/server.ts'
+              - 'server/src/node-token-identity.ts'
+              - 'server/src/node-daemon-bindings.ts'
+              - 'server/src/stop-delete-node.test.ts'
+              - 'server/src/node-daemon-bindings.test.ts'
+              - 'server/src/node-caller-identity-http.test.ts'
+              - 'server/src/mcp-write-network-resolution.test.ts'
+              - 'server/src/tool-audience*'
+              - 'tests/node-caller-identity/**'
+              - '.github/workflows/inbox-recipient-core.yml'
   inbox-recipient:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.match == 'true'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Build isolated HTTP test image
