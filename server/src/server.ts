@@ -43,6 +43,8 @@ import { aliasBaselineRefreshState, refreshAliasBaseline } from "./alias-baselin
 import { broadcastRecentState, enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
+import { resolveInboxCaller } from "./inbox-caller.js";
+import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilter } from "./inbox-endpoint-helpers.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7468,6 +7470,70 @@ return Bun.serve({
     }
 
     // ── REST: tasks table (V2) ──
+    // #4987 —— 收件箱可见入口（只读，只读自己的）。
+    // 背景：Hub 一直能算 inbox_pending=N，但没有任何接口能列出那 N 条；
+    // 运维/用户只能看到计数，无法自证「对方到底发了什么」。
+    // 鉴权与 get_inbox / ack_inbox 用同一个 resolveInboxCaller ⇒ 只能读自己的，
+    // 读别人一律 { ok:false, error:"inbox_identity_mismatch" }（显式拒绝，不是空数组）。
+    if (url.pathname === "/api/inbox" && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+      const requestedAlias = (url.searchParams.get("alias") || "").trim();
+      if (!requestedAlias) return withCors(req, Response.json({ ok: false, error: "alias_required" }, { status: 400 }));
+      const recipient = resolveInboxCaller(requestedAlias, {
+        tokenId: restAuth.tokenId, userId: restAuth.userId ?? null, networkId: restAuth.networkId ?? null,
+        // 🔴 必须用 nodeIdentity 判「是不是节点令牌」：节点令牌同时带 userId（代表其主人），
+        //    用 `!!networkId && !userId` 判会把节点令牌误当成用户令牌 ⇒ owner 角色可读任意 alias（实测踩到）。
+        nodeToken: !!nodeIdentity(restAuth.tokenId, restAuth.networkId), identityRejected: false,
+      });
+      if (!recipient.ok) return withCors(req, Response.json(recipient, { status: 403 }));
+      // #4987 review：跨网络的 owner 令牌必须 403 —— 目标 alias 必须在**调用方自己的网络**里存在。
+      // 否则同名 alias 会把别的网络的收件箱露出来。
+      const inNet = restAuth.networkId && recipient.delegated
+        ? !!db.get<{ node_id: string }>(
+            "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1",
+            recipient.alias, restAuth.networkId,
+          )
+        : true;
+      if (inboxCrossNetworkRejected({ callerNetworkId: restAuth.networkId ?? null, delegated: recipient.delegated, inNetwork: inNet })) {
+        return withCors(req, Response.json({ ok: false, error: "inbox_identity_mismatch" }, { status: 403 }));
+      }
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+      // preview 口径（与 #4987 判据一致）：按码点截断 ≤200，超长追加单个「…」，换行折叠成空格。
+      // 代读（scope=delegated）时不带出 network_id IS NULL 的旧行，见 inboxNetworkFilter。
+      const netFilter = inboxNetworkFilter(recipient.delegated);
+      const rows = db.all<{ id: string; from_session: string | null; created_at: string; content: string | null; acked: number | null; task_id: string | null }>(
+        `SELECT id, from_session, created_at, content, acked, task_id FROM inbox
+         WHERE session_name = ?1 AND acked = 0 AND ${netFilter}
+         ORDER BY created_at DESC, id DESC LIMIT ?3`,
+        recipient.alias, restAuth.networkId ?? null, limit,
+      );
+      // #4987 复核修正：pending 必须是「未读总数」，不受 limit 影响；返回的条数单列 returned。
+      const total = db.get<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND acked = 0 AND ${netFilter}`,
+        recipient.alias, restAuth.networkId ?? null,
+      )?.cnt ?? 0;
+      // #4987 review：at 输出 ISO-8601 UTC（SQLite 存的是 'YYYY-MM-DD HH:MM:SS'，补 T 与 Z）；
+      // pending 已在上面用单独 COUNT 算成「总积压」，不受 limit 影响。
+      const isoUtc = inboxAtIsoUtc;
+      const preview = (text: string | null): string => {
+        const flat = (text ?? "").replace(/\s+/g, " ").trim();
+        const cps = Array.from(flat);
+        return cps.length > 200 ? cps.slice(0, 200).join("") + "…" : flat;
+      };
+      return withCors(req, Response.json({
+        ok: true,
+        alias: recipient.alias,
+        pending: total,
+        returned: rows.length,
+        // 代读标记：由 resolveInboxCaller 判定后透传（不要在这里用 alias 比较——规范化后恒等，会恒为 self）。
+        scope: inboxScope(recipient.delegated),
+        messages: rows.map((r) => ({
+          id: r.id, from: r.from_session ?? "", at: isoUtc(r.created_at), preview: preview(r.content),
+          acked: r.acked === 1, is_task: r.task_id !== null,
+        })),
+      }));
+    }
+
     if (url.pathname === "/api/tasks") {
       const taskId = url.searchParams.get("task_id");
       const status = url.searchParams.get("status");
