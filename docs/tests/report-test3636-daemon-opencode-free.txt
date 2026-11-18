@@ -1,0 +1,77 @@
+Daemon OpenCode free Provider — phase 2, layer 1
+================================================
+Date:2026-11-18
+Agent Network base:122ec733 (main when branch created)
+Branch:feat/daemon-opencode-free-provider
+App base:61234369 (main); branch:test/local-daemon-opencode-v2
+App working tree:/tmp/opencode/app-daemon-opencode-v2 (no edits in this slice)
+
+Implemented in this slice
+-------------------------
+Extends existing daemon Provider store, not a second node-owned registry:
+runtime=opencode-cli, auth.kind=free, provider id=opencode. Native model IDs are
+cached references only. Keys/custom endpoints/account IDs rejected for free mode.
+Provider resolution requires explicit unsafeToolsConsent===true. It does not
+grant node execution permissions or bypass any existing unsafe-tools refusal.
+Both independently published snapshot validators updated identically.
+Native /api/info pinned2.0.22; guarded /api/model reader retains exact directory,
+loopback/auth/redirect/body/time bounds and projects only model IDs.
+Filter:enabled true, recognized nondeprecated status, nonempty cost array and
+every tier's input/output/cache.read/cache.write explicitly numeric0. Empty,
+missing, malformed, string, negative or nonzero prices are not free. No name
+heuristics and no paid fallback. Candidate order retained from native catalog.
+No candidates => explicit opencode_free_model_unavailable from selection helper.
+
+First executed Linux Docker evidence (before added free Hub-write test)
+---------------------------------------------------------------------
+Atomic policy+Provider store:29 pass,0 fail.
+Existing Hub Provider transport regression:17 pass,0 fail.
+Real stock2.0.22 binary SHA256:
+32cf5aa0a69a650e36277e3315d189835ddc79fb9aa1d0aef5025be5af5ad122
+Native authenticated catalog->daemon Provider->real session/model HTTP stub:
+PASS,2295ms,2 model HTTP requests. Model endpoint loopback; fake cost/endpoint
+overrides are fixture-only, not real Zen availability or price proof. Private
+prefix, HOME/XDG, no inherited user PATH, no tmux/PTY, networking disabled.
+HOME/.anet/config.json sentinel unchanged. Stop only native child cleanup;
+NOT a daemon Hub-accepted stopped ACK. No claim of complete isolation coverage.
+Full CLI tsc noEmit:PASS(exit0).
+Logs:/tmp/opencode/daemon-free-provider-docker.log and daemon-free-provider-tsc.log
+
+Final current-source rerun (includes new free Provider Hub-write integration)
+--------------------------------------------------------------------------
+Atomic tests:29 pass/0 fail/131 assertions.
+Hub Provider suite:18 pass/0 fail/174 assertions, including free Provider put ->
+scoped Hub request -> real compiled daemon CLI -> persisted/redacted snapshot.
+Real stock2.0.22 native discovery+Provider+model HTTP stub:PASS,1985ms,2 requests.
+Full CLI typecheck:PASS(exit0), same image after successful native stage.
+Docker build+all stages exit0:/tmp/opencode/daemon-free-provider-final.log.
+Docker actionlint:PASS(exit0), /tmp/opencode/daemon-free-provider-actionlint.log.
+New Linux workflow gates these primitives only, not signed App/native platforms.
+
+Harness correction recorded
+---------------------------
+Initial source-mounted existing image run used no explicit test DB, then the
+existing Hub suite failed6 CLI transport cases without trusted binary pinning.
+Did not proceed to native layer on that failure. Dedicated Dockerfile builds
+current CLI, pins its container-only /etc/anet-daemon/path.conf and explicit
+temporary DB. Rerun then passed17/17 existing Hub tests. No host config modified.
+
+Remaining acceptance — NOT_RUN / not implemented by this slice
+-------------------------------------------------------------
+Actual bootstrap/install->daemon-created V2 node->task->Hub stopped ACK and
+complete App isolation gates; portable owned shared-serve lifecycle; narrow
+Windows admission/start/stop path; App first-run UI integration/consent forwarding;
+native Windows/macOS (and native App Linux) acceptance; actual free-tier manual
+inference. Native model HTTP stub is not a real free-tier request. Do not enable
+the new default Agent from this layer alone. Current Windows block retained.
+Existing runtime/package/version pins untouched; no npm publication/push or
+production changes. First-run UI remains with owner. Key/subscription OpenCode
+adapters are future Provider modes, not claimed supported by this free adapter.
+
+Reproduction and recovery boundary
+----------------------------------
+tests/test3636-daemon-opencode-free/Dockerfile + run.sh; see README/runbook.
+docs/runbooks/daemon-opencode-free-provider.md records contract, explicit consent,
+test startup/loopback/auth sources, version verification, rollback handling for
+older readers and distinction between Git software and private data backups.
+No new deployed service/proxy/tunnel/backup or full recovery-drill claim.

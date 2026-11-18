@@ -25,14 +25,18 @@ export function validateDaemonProviderSnapshot(value: unknown, networkId: string
       || /[\x00-\x1f\x7f]/.test(p.label) || typeof p.enabled !== "boolean") fail();
     const runtimes = arr(p.runtimes, 8); unique(runtimes, "runtime");
     for (const r of runtimes) {
-      obj(r, ["runtime", "auth"]); if (r.runtime !== "codex-tui") fail();
+      obj(r, ["runtime", "auth"]); if (r.runtime !== "codex-tui" && r.runtime !== "opencode-cli") fail();
       const auths = arr(r.auth, 32); unique(auths, "id");
       for (const a of auths) {
         obj(a, ["id", "kind", "models", "baseUrl", "account_id", "credential_present", "verification", "application"]);
         if (!id(a.id) || a.verification !== "not_checked" || a.application !== "not_applied") fail();
         const models = arr(a.models, 200);
-        if (new Set(models).size !== models.length || models.some(m => typeof m !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(m))) fail();
-        if (a.kind === "chatgpt") {
+        const pattern = r.runtime === "opencode-cli" ? /^opencode\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/ : /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+        if (new Set(models).size !== models.length || models.some(m => typeof m !== "string" || !pattern.test(m))) fail();
+        if ((r.runtime === "opencode-cli") !== (a.kind === "free")) fail();
+        if (a.kind === "free") {
+          if (p.id !== "opencode" || a.baseUrl !== undefined || a.account_id !== undefined || a.credential_present !== false) fail();
+        } else if (a.kind === "chatgpt") {
           if (p.id !== "openai" || a.baseUrl !== undefined || typeof a.credential_present !== 'boolean') fail();
           if (a.account_id !== undefined && (typeof a.account_id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(a.account_id))) fail();
           if (a.credential_present && !a.account_id) fail();

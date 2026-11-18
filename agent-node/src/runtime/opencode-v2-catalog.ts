@@ -196,7 +196,7 @@ export async function readOpenCodeAgents(opts: {
 }
 
 /** Shared guarded fetch: loopback only, same header contract as the catalog. */
-async function readOpenCodeRaw(opts: { scope: OpenCodeCatalogScope; url: string; authorization: string; timeoutMs?: number }, path: string): Promise<unknown> {
+export async function readOpenCodeRaw(opts: { scope: OpenCodeCatalogScope; url: string; authorization: string; timeoutMs?: number }, path: string): Promise<unknown> {
   let base: URL;
   try { base = new URL(opts.url); } catch { throw new OpenCodeCatalogError("invalid_target"); }
   if (!['127.0.0.1', '[::1]'].includes(base.hostname) || base.protocol !== 'http:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
@@ -231,6 +231,7 @@ async function readOpenCodeRaw(opts: { scope: OpenCodeCatalogScope; url: string;
     throw error instanceof OpenCodeCatalogError ? error : new OpenCodeCatalogError("unavailable");
   } finally { clearTimeout(timer); controller.abort(); }
 }
+
 
 /** The agent a specific native session is currently bound to (`session.agent`).
  *  The client cannot read the node's loopback server, so this is reported with

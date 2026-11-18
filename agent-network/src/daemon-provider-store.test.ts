@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonProviderStore } from "./daemon-provider-store";
 import { readProviderInput, runDaemonProvider } from "./daemon-provider-command";
+import { validateDaemonProviderSnapshot } from "../../agent-node/src/shared/daemon-provider-snapshot";
 
 const roots: string[] = [];
 const SECRET = "fixture-key-never-in-a-response";
@@ -22,6 +23,30 @@ const official = () => ({ id: "openai", label: "OpenAI", enabled: true,
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("#906 daemon Provider persistence", () => {
+  const freeProvider = () => ({ id: "opencode", label: "OpenCode free", enabled: true,
+    runtimes: [{ runtime: "opencode-cli", auth: [{ id: "free", kind: "free", models: ["opencode/discovered-model"] }] }] });
+  test("free OpenCode is a daemon-scoped Provider, never a credential or invocation claim", () => {
+    const a = setup(), b = setup("net_b", "daemon_b");
+    const result = a.store.upsert(freeProvider(), 0);
+    expect(result.providers[0].runtimes[0].auth[0]).toMatchObject({ kind: "free", credential_present: false, verification: "not_checked", application: "not_applied" });
+    expect(validateDaemonProviderSnapshot(result, "net_a", "daemon_a")).toEqual(result);
+    expect(new DaemonProviderStore(a.dir).list()).toEqual(result);
+    expect(b.store.list().providers).toEqual([]);
+    expect(a.store.resolveOpenCodeFree({ revision: 1, providerId: "opencode", authId: "free", unsafeToolsConsent: true })).toMatchObject({ network_id: "net_a", daemon_node_id: "daemon_a", kind: "free" });
+    expect(() => a.store.resolveOpenCodeFree({ revision: 0, providerId: "opencode", authId: "free", unsafeToolsConsent: true })).toThrow("revision_conflict");
+    expect(() => a.store.resolveOpenCodeFree({ revision: 1, providerId: "opencode", authId: "free", unsafeToolsConsent: false })).toThrow("opencode_v2_requires_unsafe_opt_in");
+  });
+  test("free profile rejects keys, arbitrary endpoints, accounts and foreign provider IDs", () => {
+    for (const extra of [{ key: SECRET }, { baseUrl: "https://paid.test" }, { account_id: "foreign-account" }]) {
+      const { store } = setup(); const p = freeProvider(); Object.assign(p.runtimes[0].auth[0], extra);
+      expect(() => store.upsert(p, 0)).toThrow("unsupported_auth_combination");
+      expect(store.list().revision).toBe(0);
+    }
+    const { store } = setup(); const p = freeProvider(); p.id = "other";
+    expect(() => store.upsert(p, 0)).toThrow("unsupported_auth_combination");
+    p.id = "opencode"; p.runtimes[0].auth[0].models = ["paid/other-model"];
+    expect(() => store.upsert(p, 0)).toThrow("invalid_model");
+  });
   test('saved login binds only to its owning daemon, without exposing credentials', () => {
     const { store } = setup();
     const { root } = store.prepareLoginDirectory();

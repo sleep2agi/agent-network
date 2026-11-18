@@ -65,6 +65,24 @@ function client(kind = "human", network = net) {
 const snapshot = () => ({ network_id: net, daemon_node_id: node, revision: 0, source: "daemon", providers: [] });
 const request = () => client()("daemon_provider_snapshot", { action: "refresh", network_id: net, id: node });
 
+test('free OpenCode Provider traverses scoped Hub write and actual daemon CLI without a key', async () => {
+  process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
+  const work = mkdtempSync(join(root, 'free-')), dir = join(work, '.anet/nodes', alias);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const provider = { id: 'opencode', label: 'OpenCode free', enabled: true, runtimes: [{ runtime: 'opencode-cli', auth: [
+    { id: 'free', kind: 'free', models: ['opencode/dynamically-discovered'] },
+  ] }] };
+  const human = client(), daemon = client('daemon');
+  const r = await human('daemon_provider_snapshot', { action: 'put', id: node, network_id: net, revision: 0, provider });
+  expect(r.ok).toBe(true);
+  await reconcileProviderSnapshots({ workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {}, callCommHub: daemon });
+  const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
+  expect(read.status).toBe('succeeded');
+  expect(read.snapshot.providers[0].runtimes[0].auth[0]).toMatchObject({ kind: 'free', credential_present: false, verification: 'not_checked', application: 'not_applied' });
+  expect(new DaemonProviderStore(dir).list().providers[0].id).toBe('opencode');
+});
+
 test('saved ChatGPT account binding traverses Hub and compiled daemon CLI without credentials', async () => {
   process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
   const work = mkdtempSync(join(root, 'bind-')), dir = join(work, '.anet/nodes', alias);

@@ -1,0 +1,30 @@
+name: Daemon OpenCode free Provider
+on:
+  pull_request:
+    paths:
+      - 'agent-network/src/daemon-provider-store*'
+      - 'agent-node/src/runtime/daemon-opencode-free-provider*'
+      - 'agent-node/src/runtime/opencode-v2-catalog.ts'
+      - 'agent-node/src/shared/daemon-provider-snapshot.ts'
+      - 'server/src/shared/daemon-provider-snapshot.ts'
+      - 'server/src/daemon-provider-snapshots.test.ts'
+      - 'tests/test3636-daemon-opencode-free/**'
+      - '.github/workflows/daemon-opencode-free-provider.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  linux-provider-primitives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build locked source and stock OpenCode 2.0.22 in private prefix
+        run: docker build -f tests/test3636-daemon-opencode-free/Dockerfile -t anet-daemon-free-provider .
+      - name: Atomic policy, Hub Provider transport, native catalog and loopback model stub
+        run: docker run --rm --network none --init anet-daemon-free-provider
+      - name: CLI typecheck
+        run: docker run --rm --network none --entrypoint bash anet-daemon-free-provider -c 'cd agent-network && node_modules/.bin/tsc --noEmit -p tsconfig.json'

@@ -7,10 +7,10 @@ import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { atomicWritePrivateJson, ensurePrivateDirectory } from "./private-state";
 
-export type ProviderAuthKind = "chatgpt" | "api_key";
+export type ProviderAuthKind = "chatgpt" | "api_key" | "free";
 type Auth = { id: string; kind: ProviderAuthKind; models: string[]; baseUrl?: string; key?: string; account_id?: string };
 const accountId = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
-type Runtime = { runtime: "codex-tui"; auth: Auth[] };
+type Runtime = { runtime: "codex-tui" | "opencode-cli"; auth: Auth[] };
 type Provider = { id: string; label: string; enabled: boolean; runtimes: Runtime[] };
 type Scope = { network_id: string; daemon_node_id: string };
 type State = Scope & { schema: 1; revision: number; providers: Provider[];
@@ -59,16 +59,22 @@ function parseProvider(value: unknown, previous?: Provider): Provider {
     const r = object(raw); keys(r, ["runtime", "auth"]);
     // Add runtimes only with an actual adapter; do not claim all runtimes support
     // both authentication modes because the UI hierarchy has those dimensions.
-    if (r.runtime !== "codex-tui") fail("unsupported_runtime");
+    if (r.runtime !== "codex-tui" && r.runtime !== "opencode-cli") fail("unsupported_runtime");
     const auth = list(r.auth, 32).map(rawAuth => {
       const a = object(rawAuth); keys(a, ["id", "kind", "models", "baseUrl", "key", "account_id"]);
       const authId = id(a.id);
-      if (a.kind !== "chatgpt" && a.kind !== "api_key") fail("unsupported_auth");
+      if (a.kind !== "chatgpt" && a.kind !== "api_key" && a.kind !== "free") fail("unsupported_auth");
+      if ((r.runtime === "opencode-cli") !== (a.kind === "free")) fail("unsupported_auth_combination");
       const models = list(a.models, 200).map(model => {
-        if (typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(model)) fail("invalid_model");
+        const pattern = r.runtime === "opencode-cli" ? /^opencode\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/ : /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+        if (typeof model !== "string" || !pattern.test(model)) fail("invalid_model");
         return model;
       });
       unique(models);
+      if (a.kind === "free") {
+        if (providerId !== "opencode" || a.key !== undefined || a.baseUrl !== undefined || a.account_id !== undefined) fail("unsupported_auth_combination");
+        return { id: authId, kind: "free" as const, models };
+      }
       if (a.kind === "chatgpt") {
         if (providerId !== "openai" || a.key !== undefined || a.baseUrl !== undefined) fail("unsupported_auth_combination");
         if (a.account_id !== undefined && !accountId(a.account_id)) fail('invalid_account_id');
@@ -83,7 +89,7 @@ function parseProvider(value: unknown, previous?: Provider): Provider {
       return { id: authId, kind: "api_key" as const, models, baseUrl, key };
     });
     unique(auth.map(x => x.id));
-    return { runtime: "codex-tui" as const, auth };
+    return { runtime: r.runtime as Runtime["runtime"], auth };
   });
   unique(runtimes.map(x => x.runtime));
   return { id: providerId, label: p.label.trim(), enabled: p.enabled, runtimes };
@@ -158,6 +164,21 @@ export class DaemonProviderStore {
         })) })) })) };
   }
   list() { return this.publicState(this.read()); }
+  /** Local reference lookup only: model IDs are a discovery cache, never proof
+   * of current price/availability. Re-read the owned native catalog at launch. */
+  resolveOpenCodeFree(selection: { revision: number; providerId: string; authId: string; unsafeToolsConsent: boolean }) {
+    // Consent is supplied by the first-run caller, never inferred from a saved
+    // Provider, zero price, a daemon default or a nonempty model catalog.
+    if (selection.unsafeToolsConsent !== true) fail("opencode_v2_requires_unsafe_opt_in");
+    if (!Number.isSafeInteger(selection.revision) || selection.revision < 0) fail("invalid_revision");
+    const state = this.read();
+    if (state.revision !== selection.revision) fail("revision_conflict");
+    const provider = state.providers.find(p => p.id === selection.providerId);
+    if (!provider?.enabled) fail("provider_not_enabled");
+    const auth = provider.runtimes.find(r => r.runtime === "opencode-cli")?.auth.find(a => a.id === selection.authId);
+    if (!auth || auth.kind !== "free") fail("authentication_profile_required");
+    return { ...this.scope, revision: state.revision, provider_id: provider.id, auth_id: auth.id, kind: "free" as const };
+  }
   /** Presence only, never entitlement. Resolve an opaque saved-login ID solely
    * inside this daemon's owned directory; callers cannot supply a credential path. */
   private savedAccountPresent(id: string): boolean {
