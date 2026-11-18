@@ -72,6 +72,7 @@ import {
   resolveNodeCaller,
 } from "./create-node.js";
 import { decideClone, factsFromRows, parseWorkdirPolicy, rewriteCloneChannels } from "./clone-node.js";
+import { managedDepartmentIds } from "./department-heads.js";
 import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
   VaultError,
@@ -5527,9 +5528,27 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const childTokenId = generateId("tok");
       const requestId = newRequestId();
       const networkIdForChild = daemon.network_id || net;
+      // #4826 部门归属（负责人 2026-11-19）：默认跟随源节点部门；
+      // 但操作者若在源节点部门没有建节点权限，**不能静默继承** —— 落 null 并在结果里明确提示。
+      // 判定口径：owner/admin 任何部门都可；部门负责人（含子部门）只能放自己管的部门。
+      const srcDeptRow = db.get<{ department_id: string | null }>(
+        "SELECT department_id FROM nodes WHERE node_id = ?1 AND network_id = ?2",
+        source_node_id, net,
+      );
+      const srcDept = srcDeptRow?.department_id ?? null;
+      const placeableInSrcDept = !srcDept
+        || callerRole === "owner" || callerRole === "admin"
+        || managedDepartmentIds(net, enforceUserId).includes(srcDept);
+      const cloneDept = placeableInSrcDept ? srcDept : null;
+      const departmentNotice = placeableInSrcDept
+        ? null
+        : `源节点部门 ${srcDept} 不在你的建节点权限内，新节点未设部门（创建后可调整）`;
+
       const cloneMeta = {
         source_node_id,
         source_alias: facts.alias,
+        // false ⇒ finalize 时**不要**再继承源部门（否则会静默把没权限的部门塞回去）
+        inherit_department: placeableInSrcDept,
         copy_session: decision.copySession,
         workdir_policy: decision.workdirPolicy,
         // 白名单原样复制，但源节点自己的 alias 必须换成新节点的（负责人 2026-11-19）。
@@ -5548,12 +5567,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
       db.run(
         `INSERT INTO node_create_requests
-           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, clone_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', 'pending', ?8, ?9, ?10, ?11)`,
+           (request_id, daemon_node_id, child_name, network_id, runtime, model, flags_json, env_keys, status, child_token_id, created_at, created_by_token, clone_json, department_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', 'pending', ?8, ?9, ?10, ?11, ?12)`,
         [
           requestId, decision.daemonNodeId, decision.name, networkIdForChild,
           decision.runtime, decision.model, JSON.stringify(decision.flags),
-          childTokenId, Date.now(), callerTokenId || "unknown", JSON.stringify(cloneMeta),
+          childTokenId, Date.now(), callerTokenId || "unknown", JSON.stringify(cloneMeta), cloneDept,
         ],
       );
       pushEvent(daemon.alias, { type: "clone_node", request_id: requestId }, networkIdForChild);
@@ -5581,11 +5600,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           copy_session: decision.copySession,
           workdir_policy: decision.workdirPolicy,
           session_contract: decision.sessionContract,
+          ...(cloneDept ? { department_id: cloneDept } : {}),
+          // 不能静默改归属：没权限继承源部门时，把原因原样告诉调用方。
+          ...(departmentNotice ? { department_notice: departmentNotice } : {}),
           contract: {
             token: "new ntok_ minted for the clone; the source token is not copied",
             workdir: decision.workdirPolicy === "new_empty"
               ? "new empty directory under the source workdir's parent (or <daemon cwd>/clone-work when the source has no project workdir)"
-              : "share the source workdir (explicit)",
+              : "share the source workdir — 与源节点共用同一个目录，两个 agent 同时改会互相踩（创建页必须提示）",
             session: decision.sessionContract.detail,
           },
         }) }],

@@ -209,7 +209,10 @@ export function inheritCloneDepartment(requestId: string, childNodeId: string, n
   try {
     const raw = db.get<{ clone_json: string | null }>("SELECT clone_json FROM node_create_requests WHERE request_id = ?1", requestId)?.clone_json;
     if (!raw) return;
-    const sourceId = (JSON.parse(raw) as { source_node_id?: unknown })?.source_node_id;
+    const meta = JSON.parse(raw) as { source_node_id?: unknown; inherit_department?: unknown };
+    // #4826：创建时已判定「操作者无权继承源部门」时，这里**不许**再把源部门塞回去（否则等于静默改归属）。
+    if (meta.inherit_department === false) return;
+    const sourceId = meta.source_node_id;
     if (typeof sourceId !== "string" || !sourceId) return;
     db.run(`UPDATE nodes SET department_id = (SELECT s.department_id FROM nodes s WHERE s.node_id = ?2 AND s.network_id = ?3)
       WHERE node_id = ?1 AND network_id = ?3 AND (department_id IS NULL OR department_id = '')`,
