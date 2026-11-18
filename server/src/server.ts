@@ -7485,6 +7485,15 @@ return Bun.serve({
         nodeToken: !!nodeIdentity(restAuth.tokenId, restAuth.networkId), identityRejected: false,
       });
       if (!recipient.ok) return withCors(req, Response.json(recipient, { status: 403 }));
+      // #4987 review：跨网络的 owner 令牌必须 403 —— 目标 alias 必须在**调用方自己的网络**里存在。
+      // 否则同名 alias 会把别的网络的收件箱露出来。
+      if (restAuth.networkId && recipient.alias !== requestedAlias) {
+        const inNet = db.get<{ node_id: string }>(
+          "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2 LIMIT 1",
+          recipient.alias, restAuth.networkId,
+        );
+        if (!inNet) return withCors(req, Response.json({ ok: false, error: "inbox_identity_mismatch" }, { status: 403 }));
+      }
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
       // preview 口径（与 #4987 判据一致）：按码点截断 ≤200，超长追加单个「…」，换行折叠成空格。
       const rows = db.all<{ id: string; from_session: string | null; created_at: string; content: string | null; acked: number | null; task_id: string | null }>(
@@ -7498,6 +7507,12 @@ return Bun.serve({
         `SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND acked = 0 AND (network_id IS NULL OR network_id = ?2)`,
         recipient.alias, restAuth.networkId ?? null,
       )?.cnt ?? 0;
+      // #4987 review：at 输出 ISO-8601 UTC（SQLite 存的是 'YYYY-MM-DD HH:MM:SS'，补 T 与 Z）；
+      // pending 已在上面用单独 COUNT 算成「总积压」，不受 limit 影响。
+      const isoUtc = (v: string): string => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(v);
+        return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z` : v;
+      };
       const preview = (text: string | null): string => {
         const flat = (text ?? "").replace(/\s+/g, " ").trim();
         const cps = Array.from(flat);
@@ -7511,7 +7526,7 @@ return Bun.serve({
         // 代读标记：网络级 owner/admin 读他人 alias 时不是「读自己」，UI 应显示「代读」。
         scope: recipient.alias === requestedAlias ? "self" : "delegated",
         messages: rows.map((r) => ({
-          id: r.id, from: r.from_session ?? "", at: r.created_at, preview: preview(r.content),
+          id: r.id, from: r.from_session ?? "", at: isoUtc(r.created_at), preview: preview(r.content),
           acked: r.acked === 1, is_task: r.task_id !== null,
         })),
       }));
