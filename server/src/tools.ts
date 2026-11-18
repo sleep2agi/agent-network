@@ -5448,7 +5448,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // the policy and the runtime's session capability (see clone-node.ts).
   server.tool(
     "clone_node",
-    "Clone a daemon child to a new node (new name + token). Defaults per #4826 spec (2026-11-19): copy_session false (opt-in history), workdir_policy share_source (same project dir, files not copied; the wizard must warn about two agents in one dir). Passing true/new_empty overrides.",
+    "Clone a daemon child to a new node (new name + token). Defaults: copy_session false; workdir_policy share_source (shared dir). Pass true/new_empty to override.",
     {
       source_node_id: z.string().min(1).max(200),
       name: z.string().min(1).max(256),
