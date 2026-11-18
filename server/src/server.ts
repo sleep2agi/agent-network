@@ -7362,9 +7362,12 @@ return Bun.serve({
         const opencodeCatalogState: "reported" | "reported_empty" | "not_reported" | "unsupported_runtime" =
           Array.isArray(opencodeCatalog)
             ? (opencodeCatalog.length > 0 ? "reported" : "reported_empty")
-            // 判「是不是 OpenCode 运行时」不能只看 runtime 列：老行 runtime 可能是空的，
-            // 但它报了代际 / opencode_server，那就是 OpenCode 节点（只是目录还没采到）。
-            : (/^opencode/.test(nodeRuntime) || opencodeGeneration !== null || opencodeServer !== null)
+            // 判「是不是 OpenCode 运行时」要宽进严出：
+            //   · runtime 为空（老行 / 刚注册 / 长期离线）⇒ **不能判死**，落到 not_reported（可重试）；
+            //   · runtime 是 opencode*，或报了代际 / opencode_server ⇒ not_reported；
+            //   · 只有 runtime 非空且明确不是 opencode*（codex-cli / grok …）才 unsupported_runtime。
+            // 判死的代价是客户端永远不给重试入口 —— 它其实可能是 OpenCode 节点，只是还没自报。
+            : (nodeRuntime === "" || /^opencode/.test(nodeRuntime) || opencodeGeneration !== null || opencodeServer !== null)
               ? "not_reported"
               : "unsupported_runtime";
         // app#196 —— 显式告诉前端这个节点能不能走生命周期操作,以及该找哪个 daemon。
