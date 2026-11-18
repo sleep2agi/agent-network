@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad
         with:
           filters: |
             match:
