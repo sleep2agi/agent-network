@@ -105,6 +105,8 @@ describe("#2293 node-reported OpenCode catalog reaches GET /api/nodes", () => {
     expect(row).toBeDefined();
     expect(row.opencode_catalog).toEqual(["deepseek/deepseek-flash", "opencode/mimo-v2.6-flash-free"]);
     expect(row.opencode_generation).toBe("v2");
+    // #4976 —— 有目录 ⇒ reported（客户端据此渲染模型列表，不再转圈）
+    expect(row.opencode_catalog_state).toBe("reported");
     expect(row.opencode_mode).toBe("copresence");
     expect(row.opencode_server).toBe("http://127.0.0.1:4096");
     // 整个快照仍然不出现在这一行里；flags 中的其它键也不外泄。
@@ -124,6 +126,8 @@ describe("#2293 node-reported OpenCode catalog reaches GET /api/nodes", () => {
     expect(row).toBeDefined();
     expect(row.opencode_catalog).toBeNull();
     expect(row.opencode_server).toBeNull();
+    // #4976 —— 形状不对 ⇒ not_reported（可重试），而不是让客户端无限「正在读取」
+    expect(row.opencode_catalog_state).toBe("not_reported");
     // 代际这一格仍然照常投影（没被同一条错误连带丢掉）。
     expect(row.opencode_generation).toBe("v2");
   });

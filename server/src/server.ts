@@ -7352,6 +7352,21 @@ return Bun.serve({
         // it can map() without a guard, and normalise legacy/absent values
         // to [] rather than null. attrs_revision is normalised to a number
         // so pre-migration rows (NULL) read as 0.
+        // #4976 —— 目录的**显式四态**。此前只有 `opencode_catalog: null` 一个信号，
+        // 客户端无法区分「还在采集」和「这台节点永远不会有」，于是永久停在「正在读取…」。
+        //   reported           有目录（非空）
+        //   reported_empty     报了但是空数组（真·没有可用模型）
+        //   not_reported       OpenCode 运行时但没报目录（采集失败/未采集 —— 可重试）
+        //   unsupported_runtime  不是 OpenCode 运行时（codex / grok …）—— 不可能有目录，不该重试
+        const nodeRuntime = String((r as any).runtime ?? "");
+        const opencodeCatalogState: "reported" | "reported_empty" | "not_reported" | "unsupported_runtime" =
+          Array.isArray(opencodeCatalog)
+            ? (opencodeCatalog.length > 0 ? "reported" : "reported_empty")
+            // 判「是不是 OpenCode 运行时」不能只看 runtime 列：老行 runtime 可能是空的，
+            // 但它报了代际 / opencode_server，那就是 OpenCode 节点（只是目录还没采到）。
+            : (/^opencode/.test(nodeRuntime) || opencodeGeneration !== null || opencodeServer !== null)
+              ? "not_reported"
+              : "unsupported_runtime";
         // app#196 —— 显式告诉前端这个节点能不能走生命周期操作,以及该找哪个 daemon。
         // daemon 自己(role=host_supervisor)也能被 restart/stop,它的 id 同样是 node_ 前缀
         // 且在 node_create_requests 里没有记录,所以单独放行。
@@ -7362,6 +7377,7 @@ return Bun.serve({
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
           opencode_catalog: opencodeCatalog,
+          opencode_catalog_state: opencodeCatalogState,
           opencode_agents: opencodeAgents,
           opencode_agent_current: opencodeAgentCurrent,
           opencode_agent_config_capable: opencodeAgentConfigCapable,
