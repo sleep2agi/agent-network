@@ -40,11 +40,13 @@ export function resolveInboxCaller(alias: string, caller: InboxCaller):
   const role = getUserNetworkRole(caller.userId, caller.networkId);
   if (!role) return denied;
   const canonical = resolveCanonicalAlias(caller.networkId, requested).alias;
-  if (role === "owner" || role === "admin") return { ok: true, alias: canonical, delegated: canonical !== requested.trim() };
+  // 走到这里说明请求的不是调用者自己的名字 ⇒ 一定是代读。
+  // ⚠️ 不能用 canonical !== requested 判：canonical 就是请求值的规范化结果，两者恒等，会把代读标成 self。
+  if (role === "owner" || role === "admin") return { ok: true, alias: canonical, delegated: true };
   const owned = db.get<{ node_id: string }>(
     "SELECT node_id FROM nodes WHERE alias = ?1 AND network_id = ?2 AND owner_user_id = ?3 LIMIT 1",
     canonical, caller.networkId, caller.userId,
   );
   // 用户读「自己拥有的节点」= 代读（不是读自己），必须标记，避免静默。
-  return owned ? { ok: true, alias: canonical, delegated: canonical !== requested.trim() } : denied;
+  return owned ? { ok: true, alias: canonical, delegated: true } : denied;
 }

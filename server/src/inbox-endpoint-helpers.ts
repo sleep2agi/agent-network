@@ -25,3 +25,12 @@ export function inboxCrossNetworkRejected(input: { callerNetworkId: string | nul
   if (!input.delegated) return false;         // 读自己：不涉及跨网络
   return !input.inNetwork;
 }
+
+/**
+ * 代读时不能带出「无网络」的旧行（review 第 3 条）。
+ * 读自己时保留 `network_id IS NULL`（老数据没写 network_id，仍是本节点自己的）；
+ * owner 代读是替别人看，混进无网络行会给出不属于该网络的收件箱。
+ */
+export function inboxNetworkFilter(delegated: boolean): string {
+  return delegated ? "network_id = ?2" : "(network_id IS NULL OR network_id = ?2)";
+}

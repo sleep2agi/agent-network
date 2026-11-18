@@ -44,7 +44,7 @@ import { broadcastRecentState, enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { resolveInboxCaller } from "./inbox-caller.js";
-import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected } from "./inbox-endpoint-helpers.js";
+import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilter } from "./inbox-endpoint-helpers.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7499,15 +7499,17 @@ return Bun.serve({
       }
       const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
       // preview 口径（与 #4987 判据一致）：按码点截断 ≤200，超长追加单个「…」，换行折叠成空格。
+      // 代读（scope=delegated）时不带出 network_id IS NULL 的旧行，见 inboxNetworkFilter。
+      const netFilter = inboxNetworkFilter(recipient.delegated);
       const rows = db.all<{ id: string; from_session: string | null; created_at: string; content: string | null; acked: number | null; task_id: string | null }>(
         `SELECT id, from_session, created_at, content, acked, task_id FROM inbox
-         WHERE session_name = ?1 AND acked = 0 AND (network_id IS NULL OR network_id = ?2)
+         WHERE session_name = ?1 AND acked = 0 AND ${netFilter}
          ORDER BY created_at DESC, id DESC LIMIT ?3`,
         recipient.alias, restAuth.networkId ?? null, limit,
       );
       // #4987 复核修正：pending 必须是「未读总数」，不受 limit 影响；返回的条数单列 returned。
       const total = db.get<{ cnt: number }>(
-        `SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND acked = 0 AND (network_id IS NULL OR network_id = ?2)`,
+        `SELECT COUNT(*) AS cnt FROM inbox WHERE session_name = ?1 AND acked = 0 AND ${netFilter}`,
         recipient.alias, restAuth.networkId ?? null,
       )?.cnt ?? 0;
       // #4987 review：at 输出 ISO-8601 UTC（SQLite 存的是 'YYYY-MM-DD HH:MM:SS'，补 T 与 Z）；
