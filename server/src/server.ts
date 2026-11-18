@@ -43,6 +43,7 @@ import { aliasBaselineRefreshState, refreshAliasBaseline } from "./alias-baselin
 import { broadcastRecentState, enqueueBroadcast } from "./broadcast-fanout.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
+import { resolveInboxCaller } from "./inbox-caller.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7468,6 +7469,46 @@ return Bun.serve({
     }
 
     // ── REST: tasks table (V2) ──
+    // #4987 —— 收件箱可见入口（只读，只读自己的）。
+    // 背景：Hub 一直能算 inbox_pending=N，但没有任何接口能列出那 N 条；
+    // 运维/用户只能看到计数，无法自证「对方到底发了什么」。
+    // 鉴权与 get_inbox / ack_inbox 用同一个 resolveInboxCaller ⇒ 只能读自己的，
+    // 读别人一律 { ok:false, error:"inbox_identity_mismatch" }（显式拒绝，不是空数组）。
+    if (url.pathname === "/api/inbox" && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+      const requestedAlias = (url.searchParams.get("alias") || "").trim();
+      if (!requestedAlias) return withCors(req, Response.json({ ok: false, error: "alias_required" }, { status: 400 }));
+      const recipient = resolveInboxCaller(requestedAlias, {
+        tokenId: restAuth.tokenId, userId: restAuth.userId ?? null, networkId: restAuth.networkId ?? null,
+        // 🔴 必须用 nodeIdentity 判「是不是节点令牌」：节点令牌同时带 userId（代表其主人），
+        //    用 `!!networkId && !userId` 判会把节点令牌误当成用户令牌 ⇒ owner 角色可读任意 alias（实测踩到）。
+        nodeToken: !!nodeIdentity(restAuth.tokenId, restAuth.networkId), identityRejected: false,
+      });
+      if (!recipient.ok) return withCors(req, Response.json(recipient, { status: 403 }));
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+      // preview 口径（与 #4987 判据一致）：按码点截断 ≤200，超长追加单个「…」，换行折叠成空格。
+      const rows = db.all<{ id: string; from_session: string | null; created_at: string; content: string | null; acked: number | null; task_id: string | null }>(
+        `SELECT id, from_session, created_at, content, acked, task_id FROM inbox
+         WHERE session_name = ?1 AND acked = 0 AND (network_id IS NULL OR network_id = ?2)
+         ORDER BY created_at DESC, id DESC LIMIT ?3`,
+        recipient.alias, restAuth.networkId ?? null, limit,
+      );
+      const preview = (text: string | null): string => {
+        const flat = (text ?? "").replace(/\s+/g, " ").trim();
+        const cps = Array.from(flat);
+        return cps.length > 200 ? cps.slice(0, 200).join("") + "…" : flat;
+      };
+      return withCors(req, Response.json({
+        ok: true,
+        alias: recipient.alias,
+        pending: rows.length,
+        messages: rows.map((r) => ({
+          id: r.id, from: r.from_session ?? "", at: r.created_at, preview: preview(r.content),
+          acked: r.acked === 1, is_task: r.task_id !== null,
+        })),
+      }));
+    }
+
     if (url.pathname === "/api/tasks") {
       const taskId = url.searchParams.get("task_id");
       const status = url.searchParams.get("status");
