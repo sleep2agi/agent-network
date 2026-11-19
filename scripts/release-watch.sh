@@ -177,13 +177,20 @@ PY
         ;;
       stuck)
         minutes=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('minutes'))" "$act")
+        key=$(python3 -c "import json,sys;d=json.loads(sys.argv[1]);print('stuck-%s-%s' % (d.get('run'), (d.get('job') or '').replace(' ','_')))" "$act")
+        [ -f "$STATE_DIR/$key" ] && continue
         job=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('job'))" "$act")
         run=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('run'))" "$act")
         alert "$ver" "构建 job「$job」已排队 ${minutes} 分钟（run $run），按 ⑥ 处理"
+        touch "$STATE_DIR/$key"
         ;;
       capacity)
         job=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('job'))" "$act")
         run=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('run'))" "$act")
+        att=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$APP_REPO/actions/runs/$run" | python3 -c "import json,sys;print(json.load(sys.stdin).get('run_attempt',''))" 2>/dev/null)
+        ckey="$STATE_DIR/capacity-$run-$att"
+        [ -f "$ckey" ] && continue
+        touch "$ckey"
         n=0; f="$STATE_DIR/rerun-$run"; [ -f "$f" ] && n=$(cat "$f")
         # ⑤ 只在 run 已 completed 时 rerun（in_progress 会被 403，白烧计数）
         state=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$APP_REPO/actions/runs/$run" \
