@@ -202,11 +202,12 @@ PY
         run=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('run'))" "$act")
         env=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('env_id'))" "$act")
         [ "$MODE" = "--dry-run" ] && { say "DRY approve run $run env $env"; continue; }
+        # 正确端点：POST /actions/runs/{run_id}/pending_deployments（没有 /{env}/approve 这个路径）
+        body=$(python3 -c "import json,sys;print(json.dumps({'environment_ids':[int(sys.argv[1])],'state':'approved','comment':'release-watch '+sys.argv[2]}))" "$env" "$ver")
         code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" \
           -H 'Accept: application/vnd.github+json' -H 'Content-Type: application/json' \
-          -d '{"comment":"release-watch: auto-approve signing for this release run"}' \
-          "https://api.github.com/repos/$APP_REPO/actions/runs/$run/pending_deployments/$env/approve")
-        say "approve run $run env $env -> $code"
+          -d "$body" "https://api.github.com/repos/$APP_REPO/actions/runs/$run/pending_deployments")
+        say "approve run $run env $env -> $code (body=$body)"
         ;;
       blocked)
         say "blocked: $act"
