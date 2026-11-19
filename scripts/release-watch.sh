@@ -67,7 +67,8 @@ if not cands:
     out['notes'].append('no bump PR found')
     print(json.dumps(out)); raise SystemExit(0)
 
-ver, num = sorted(cands)[-1]
+cands.sort(key=lambda c: (parse(c[0]) or (0,0,0)))
+ver, num = cands[-1]
 pr=get(f'https://api.github.com/repos/{APP}/pulls/{num}')
 out['version']=ver; out['pr']=num; out['merged']=bool(pr.get('merged'))
 
@@ -75,11 +76,14 @@ out['version']=ver; out['pr']=num; out['merged']=bool(pr.get('merged'))
 disp_file=os.path.join(os.environ.get('STATE_DIR',''), 'dispatched-%s' % ver)
 os.environ.setdefault('STATE_DIR', os.path.expanduser('~/.commhub/state'))
 disp_file=os.path.join(os.environ['STATE_DIR'], 'dispatched-%s' % ver)
-if pr.get('merged') and not os.path.exists(disp_file):
+published = any(r['tag_name']=='desktop-v'+ver and not r.get('draft') for r in get(f'https://api.github.com/repos/{APP}/releases?per_page=30'))
+if published:
+    out['notes'].append('already published: %s' % ver)
+if pr.get('merged') and not published and not os.path.exists(disp_file):
     sha=pr.get('merge_commit_sha') or ''
     if len(sha)==40:
         cmp=get(f'https://api.github.com/repos/{APP}/compare/main...{sha}')
-        drafts=[r['tag_name'] for r in get(f'https://api.github.com/repos/{APP}/releases?per_page=30') if r.get('draft') and ver in r['tag_name']]
+        drafts=[r['tag_name'] for r in get(f'https://api.github.com/repos/{APP}/releases?per_page=30') if r.get('draft') and r['tag_name']=='desktop-v'+ver]
         runs=get(f'https://api.github.com/repos/{APP}/actions/runs?per_page=100')['workflow_runs']
         exist=[w['id'] for w in runs if w.get('head_sha')==sha and ('release-desktop-auto-update' in (w.get('name') or '') or 'ios-build' in (w.get('name') or '').lower())]
         if cmp.get('status') in ('identical','behind') and not drafts and not exist:
@@ -97,7 +101,7 @@ for r in get(f'https://api.github.com/repos/{APP}/releases?per_page=30'):
         ready = n>=9 and newer and tag_ok
         out['release']={'assets':n,'newer':newer,'tag_ok':tag_ok,'ready':ready,'id':r['id']}
         if ready:
-            out['actions'].append({'do':'publish','version':ver})
+            out['actions'].append({'do':'publish','version':ver,'sha':pr.get('merge_commit_sha') or ''})
 
 # ⑥ 构建 job 排队超时 / 因容量被取消
 runs=get(f'https://api.github.com/repos/{APP}/actions/runs?per_page=20')['workflow_runs']
@@ -113,8 +117,16 @@ for w in runs:
             mins=(datetime.now(timezone.utc)-t).total_seconds()/60
             if mins > float(os.environ.get('QUEUE_LIMIT_MIN','20')):
                 out['actions'].append({'do':'stuck','run':w['id'],'job':j.get('name'),'minutes':int(mins)})
-        if concl=='cancelled' and 'not acquired by Runner' in json.dumps(j):
-            out['actions'].append({'do':'capacity','run':w['id'],'job':j.get('name')})
+        if concl=='cancelled':
+            # 「not acquired by Runner」只在 check-run 的 annotations 里，jobs JSON 不含这段文字。
+            jid=j.get('id')
+            try:
+                anns=get(f'https://api.github.com/repos/{APP}/check-runs/{jid}/annotations?per_page=50')
+                text=json.dumps(anns)
+            except Exception:
+                text=''
+            if 'not acquired by Runner' in text or 'capacity' in text.lower():
+                out['actions'].append({'do':'capacity','run':w['id'],'job':j.get('name'),'head_sha':w.get('head_sha')})
 print(json.dumps(out))
 PY
 )
