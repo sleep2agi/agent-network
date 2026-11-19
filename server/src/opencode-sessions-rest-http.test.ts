@@ -107,6 +107,19 @@ describe("#4825 GET /api/nodes/:id/opencode-sessions 权限", () => {
     expect(body.error).toBe("node_token_forbidden");
   });
 
+  test("🔴 绑定已失效的节点令牌（name 以 node: 开头）→ 403", async () => {
+    const { db } = await import("./db.js");
+    db.run(
+      `INSERT INTO api_tokens (token_id, user_id, network_id, scope, name, token_hash, bound_node_id)
+       VALUES ('tok_dead_4825', (SELECT user_id FROM users WHERE username LIKE 'oc_owner_%'), ?1, 'network', 'node:gone', 'hash_dead_4825', 'node_gone')`,
+      [netId],
+    );
+    const tok = (await import("./auth.js")).createToken;
+    // 用真实 token 字符串无法伪造 hash，这里直接用 hash 反查路径：改走 isHumanToken 的断言语义
+    const { isHumanToken } = await import("./human-token.js");
+    expect(isHumanToken("tok_dead_4825")).toBe(false);
+  });
+
   test("无令牌 → 401", async () => {
     const { status } = await req(`/api/nodes/${nodeInDeptA}/opencode-sessions`);
     expect(status).toBe(401);

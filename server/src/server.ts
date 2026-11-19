@@ -47,6 +47,7 @@ import { resolveInboxCaller } from "./inbox-caller.js";
 import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilter } from "./inbox-endpoint-helpers.js";
 import { canListOpencodeSessions } from "./opencode-session-access.js";
 import { runtimeIsOpencode } from "./opencode-runtime.js";
+import { isHumanToken } from "./human-token.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7575,9 +7576,9 @@ return Bun.serve({
       // 🔴 节点令牌一律 403：节点令牌同样带着主人的 userId（#3639 踩过），
       // 不识别它就会拿到主人角色，任何 agent 都能列同网络任意节点的会话。
       // 这个接口是给**人**用的向导，agent 不需要。
-      // 判「是不是节点令牌」用 resolveNodeCaller（真正绑定到节点的令牌才 ok），
-      // 不能用 nodeIdentity：它对任何网络级令牌都返回非空（#3639 那次的教训只解决了一半）。
-      if (restAuth.tokenId && resolveNodeCaller(restAuth.tokenId).ok) {
+      // 默认拒绝（负责人 2026-11-19 review）：共用 isHumanToken —— 真节点令牌、身份不明的
+      // 节点令牌（绑定缺失/歧义/别的网络）、以及 name 以 node: 开头的失效绑定，全都不放行。
+      if (!isHumanToken(restAuth.tokenId)) {
         return withCors(req, Response.json({ ok: false, error: "node_token_forbidden", message: "this endpoint is for humans (app wizard), not nodes" }, { status: 403 }));
       }
       // 权限只走这一个判定函数（会话标题与目录本身就是敏感信息）。
