@@ -46,6 +46,7 @@ import { pendingInboxCount } from "./inbox-count.js";
 import { resolveInboxCaller } from "./inbox-caller.js";
 import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilter } from "./inbox-endpoint-helpers.js";
 import { canListOpencodeSessions } from "./opencode-session-access.js";
+import { runtimeIsOpencode } from "./opencode-runtime.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7571,6 +7572,14 @@ return Bun.serve({
       if (!target) {
         return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: targetNodeId }, { status: 404 }));
       }
+      // 🔴 节点令牌一律 403：节点令牌同样带着主人的 userId（#3639 踩过），
+      // 不识别它就会拿到主人角色，任何 agent 都能列同网络任意节点的会话。
+      // 这个接口是给**人**用的向导，agent 不需要。
+      // 判「是不是节点令牌」用 resolveNodeCaller（真正绑定到节点的令牌才 ok），
+      // 不能用 nodeIdentity：它对任何网络级令牌都返回非空（#3639 那次的教训只解决了一半）。
+      if (restAuth.tokenId && resolveNodeCaller(restAuth.tokenId).ok) {
+        return withCors(req, Response.json({ ok: false, error: "node_token_forbidden", message: "this endpoint is for humans (app wizard), not nodes" }, { status: 403 }));
+      }
       // 权限只走这一个判定函数（会话标题与目录本身就是敏感信息）。
       const viewerRole = restAuth.userId && target.network_id ? getUserNetworkRole(restAuth.userId, target.network_id) : null;
       const managesTarget = !!(restAuth.userId && target.network_id && target.department_id)
@@ -7583,19 +7592,28 @@ return Bun.serve({
       if (!verdict.ok) return withCors(req, Response.json(verdict, { status: 403 }));
 
       // 失败码三件套（负责人 2026-11-19 定字面量）
-      const nodeRuntime = String(target.runtime ?? "");
-      if (!/^opencode/.test(nodeRuntime)) {
-        return withCors(req, Response.json({ ok: false, error: "unsupported_runtime", runtime: nodeRuntime || null }, { status: 409 }));
+      // 与 #3641 同一口径（共用 opencode-runtime.ts，不写第二份）：
+      // runtime 为空、或报了代际 / opencode_server 都不能判死。
+      const snapForRuntime: any = (() => {
+        try { return target.config_snapshot ? JSON.parse(target.config_snapshot) : {}; } catch { return {}; }
+      })();
+      const gen = snapForRuntime?.flags?.opencodeGeneration === "v1" || snapForRuntime?.flags?.opencodeGeneration === "v2"
+        ? snapForRuntime.flags.opencodeGeneration : null;
+      const serverUrl = typeof snapForRuntime?.opencode_server === "string" ? snapForRuntime.opencode_server : null;
+      if (!runtimeIsOpencode({ runtime: target.runtime, generation: gen, opencodeServer: serverUrl })) {
+        return withCors(req, Response.json({ ok: false, error: "unsupported_runtime", runtime: target.runtime ?? null }, { status: 409 }));
       }
       // 代读还没接：daemon 侧必须先把「列出 OpenCode server sessions」的通路做出来。
       // 这里返回显式错误码而不是空数组 —— 「没有会话」和「读不到」是两件事。
+      // 代读没接之前**不能返回 server_unreachable** —— App 会把它当成真的连不上并提示网络问题。
+      // 501 not_implemented 是实话：这个能力还没实现。接上代读后再换成真实的三个失败码。
       return withCors(req, Response.json({
         ok: false,
-        error: "server_unreachable",
+        error: "not_implemented",
         detail: "daemon_probe_not_wired",
         node_id: target.node_id,
         alias: target.alias,
-      }, { status: 409 }));
+      }, { status: 501 }));
     }
 
     if (url.pathname === "/api/tasks") {

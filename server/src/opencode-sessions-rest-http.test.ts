@@ -73,14 +73,14 @@ afterAll(() => {
 describe("#4825 GET /api/nodes/:id/opencode-sessions 权限", () => {
   test("owner 可以敲门（拿到显式 server_unreachable，而不是 403）", async () => {
     const { status, body } = await req(`/api/nodes/${nodeInDeptA}/opencode-sessions`, ownerToken);
-    expect(status).toBe(409);
-    expect(body.error).toBe("server_unreachable");
+    expect(status).toBe(501);
+    expect(body.error).toBe("not_implemented");
   });
 
   test("部门负责人看自己管辖部门的节点 → 放行", async () => {
     const { status, body } = await req(`/api/nodes/${nodeInDeptA}/opencode-sessions`, headToken);
-    expect(status).toBe(409);
-    expect(body.error).toBe("server_unreachable");
+    expect(status).toBe(501);
+    expect(body.error).toBe("not_implemented");
   });
 
   test("🔴 部门负责人看没有部门的节点 → 403（不猜部门）", async () => {
@@ -93,6 +93,18 @@ describe("#4825 GET /api/nodes/:id/opencode-sessions 权限", () => {
     const { status, body } = await req(`/api/nodes/${nodeInDeptA}/opencode-sessions`, memberToken);
     expect(status).toBe(403);
     expect(body.error).toBe("insufficient_role_for_list_sessions");
+  });
+
+  test("🔴 节点令牌（主人是 owner）→ 403（agent 不需要这个接口）", async () => {
+    const { db } = await import("./db.js");
+    const { createNetworkTokenForNode } = await import("./auth.js");
+    const ownerId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username LIKE 'oc_owner_%'")!.user_id;
+    db.run("UPDATE nodes SET owner_user_id = ?1 WHERE node_id = ?2", [ownerId, nodeInDeptA]);
+    const nt = createNetworkTokenForNode(ownerId, netId, nodeInDeptA, nodeInDeptA);
+    expect(nt.ok).toBe(true);
+    const { status, body } = await req(`/api/nodes/${nodeInDeptA}/opencode-sessions`, nt.token!);
+    expect(status).toBe(403);
+    expect(body.error).toBe("node_token_forbidden");
   });
 
   test("无令牌 → 401", async () => {
