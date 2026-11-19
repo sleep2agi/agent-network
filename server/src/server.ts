@@ -45,6 +45,9 @@ import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { resolveInboxCaller } from "./inbox-caller.js";
 import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilter } from "./inbox-endpoint-helpers.js";
+import { canListOpencodeSessions } from "./opencode-session-access.js";
+import { runtimeIsOpencode } from "./opencode-runtime.js";
+import { isHumanToken } from "./human-token.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -7551,6 +7554,67 @@ return Bun.serve({
           acked: r.acked === 1, is_task: r.task_id !== null,
         })),
       }));
+    }
+
+    // #4825 —— 某节点 OpenCode Server 上的会话列表（REST，不是 MCP 工具）。
+    // 为什么走 REST：用这个列表的是 App 向导（本来就只读 /api/nodes、/api/inbox），
+    // 做成 MCP 工具会占 tools/list 的按角色字节预算（#476 天花板）；
+    // 也刻意不合并进 get_opencode_catalog —— 会话列表权限比目录更严，
+    // 同一工具里按 action 分派不同权限正是 #3639 那类 bug 的温床。
+    const opencodeSessionsMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/opencode-sessions$/);
+    if (opencodeSessionsMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+      const targetNodeId = decodeURIComponent(opencodeSessionsMatch[1] ?? "");
+      const scopedParams: any[] = [targetNodeId];
+      let scopedSql = "SELECT node_id, alias, network_id, runtime, department_id, config_snapshot FROM nodes WHERE node_id = ?1";
+      scopedSql = addNetworkScope(scopedSql, scopedParams, restScope);
+      scopedSql += " LIMIT 1";
+      const target = db.get<any>(scopedSql, ...scopedParams);
+      if (!target) {
+        return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: targetNodeId }, { status: 404 }));
+      }
+      // 🔴 节点令牌一律 403：节点令牌同样带着主人的 userId（#3639 踩过），
+      // 不识别它就会拿到主人角色，任何 agent 都能列同网络任意节点的会话。
+      // 这个接口是给**人**用的向导，agent 不需要。
+      // 默认拒绝（负责人 2026-11-19 review）：共用 isHumanToken —— 真节点令牌、身份不明的
+      // 节点令牌（绑定缺失/歧义/别的网络）、以及 name 以 node: 开头的失效绑定，全都不放行。
+      if (!isHumanToken(restAuth.tokenId)) {
+        return withCors(req, Response.json({ ok: false, error: "node_token_forbidden", message: "this endpoint is for humans (app wizard), not nodes" }, { status: 403 }));
+      }
+      // 权限只走这一个判定函数（会话标题与目录本身就是敏感信息）。
+      const viewerRole = restAuth.userId && target.network_id ? getUserNetworkRole(restAuth.userId, target.network_id) : null;
+      const managesTarget = !!(restAuth.userId && target.network_id && target.department_id)
+        && managedDepartmentIds(target.network_id, restAuth.userId).includes(target.department_id);
+      const verdict = canListOpencodeSessions({
+        role: viewerRole ?? null,
+        targetDepartmentId: target.department_id ?? null,
+        managesTargetDepartment: managesTarget,
+      });
+      if (!verdict.ok) return withCors(req, Response.json(verdict, { status: 403 }));
+
+      // 失败码三件套（负责人 2026-11-19 定字面量）
+      // 与 #3641 同一口径（共用 opencode-runtime.ts，不写第二份）：
+      // runtime 为空、或报了代际 / opencode_server 都不能判死。
+      const snapForRuntime: any = (() => {
+        try { return target.config_snapshot ? JSON.parse(target.config_snapshot) : {}; } catch { return {}; }
+      })();
+      const gen = snapForRuntime?.flags?.opencodeGeneration === "v1" || snapForRuntime?.flags?.opencodeGeneration === "v2"
+        ? snapForRuntime.flags.opencodeGeneration : null;
+      const serverUrl = typeof snapForRuntime?.opencode_server === "string" ? snapForRuntime.opencode_server : null;
+      if (!runtimeIsOpencode({ runtime: target.runtime, generation: gen, opencodeServer: serverUrl })) {
+        return withCors(req, Response.json({ ok: false, error: "unsupported_runtime", runtime: target.runtime ?? null }, { status: 409 }));
+      }
+      // 代读还没接：daemon 侧必须先把「列出 OpenCode server sessions」的通路做出来。
+      // 这里返回显式错误码而不是空数组 —— 「没有会话」和「读不到」是两件事。
+      // 代读没接之前**不能返回 server_unreachable** —— App 会把它当成真的连不上并提示网络问题。
+      // 501 not_implemented 是实话：这个能力还没实现。接上代读后再换成真实的三个失败码。
+      return withCors(req, Response.json({
+        ok: false,
+        error: "not_implemented",
+        detail: "daemon_probe_not_wired",
+        node_id: target.node_id,
+        alias: target.alias,
+      }, { status: 501 }));
     }
 
     if (url.pathname === "/api/tasks") {
