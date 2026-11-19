@@ -103,6 +103,19 @@ for r in get(f'https://api.github.com/repos/{APP}/releases?per_page=30'):
         if ready:
             out['actions'].append({'do':'publish','version':ver,'sha':pr.get('merge_commit_sha') or ''})
 
+# ③ 待批准的部署（macos-signing 等）：只批「本次版本的 release run 且 head_sha == merge sha」
+for w in runs:
+    if not ('release-desktop-auto-update' in (w.get('name') or '')): continue
+    if w.get('head_sha') != pr.get('merge_commit_sha'): continue
+    try:
+        pend=get(f"https://api.github.com/repos/{APP}/actions/runs/{w['id']}/pending_deployments")
+    except Exception:
+        pend=[]
+    for d in (pend or []):
+        if d.get('current_user_can_approve') is False:
+            continue
+        out['actions'].append({'do':'approve','run':w['id'],'env_id':d.get('environment',{}).get('id') or d.get('environment_id')})
+
 # ⑥ 构建 job 排队超时 / 因容量被取消
 runs=get(f'https://api.github.com/repos/{APP}/actions/runs?per_page=20')['workflow_runs']
 for w in runs:
@@ -172,12 +185,28 @@ PY
         job=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('job'))" "$act")
         run=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('run'))" "$act")
         n=0; f="$STATE_DIR/rerun-$run"; [ -f "$f" ] && n=$(cat "$f")
-        alert "$ver" "构建 job「$job」因 runner 容量被取消（run $run），自动 rerun 第 $((n+1)) 次"
-        if [ "$n" -lt "$MAX_RERUN" ] && [ "$MODE" != "--dry-run" ]; then
-          curl -s -o /dev/null -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
-            -d '{}' "https://api.github.com/repos/$APP_REPO/actions/runs/$run/rerun-failed-jobs"
-          echo $((n+1)) > "$f"
+        # ⑤ 只在 run 已 completed 时 rerun（in_progress 会被 403，白烧计数）
+        state=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$APP_REPO/actions/runs/$run" \
+          | python3 -c "import json,sys;print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+        alert "$ver" "构建 job「$job」因 runner 容量被取消（run $run，status=$state），尝试自动 rerun（已用 $n/$MAX_RERUN）"
+        if [ "$n" -lt "$MAX_RERUN" ] && [ "$MODE" != "--dry-run" ] && [ "$state" = "completed" ]; then
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' -d '{}' \
+            "https://api.github.com/repos/$APP_REPO/actions/runs/$run/rerun-failed-jobs")
+          say "rerun-failed-jobs run $run -> $code"
+          # ⑤ 只在 201（真的建了重跑）时递增
+          [ "$code" = "201" ] && echo $((n+1)) > "$f"
         fi
+        ;;
+      approve)
+        run=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('run'))" "$act")
+        env=$(python3 -c "import json,sys;print(json.loads(sys.argv[1]).get('env_id'))" "$act")
+        [ "$MODE" = "--dry-run" ] && { say "DRY approve run $run env $env"; continue; }
+        code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" \
+          -H 'Accept: application/vnd.github+json' -H 'Content-Type: application/json' \
+          -d '{"comment":"release-watch: auto-approve signing for this release run"}' \
+          "https://api.github.com/repos/$APP_REPO/actions/runs/$run/pending_deployments/$env/approve")
+        say "approve run $run env $env -> $code"
         ;;
       blocked)
         say "blocked: $act"
