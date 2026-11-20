@@ -81,6 +81,14 @@ export interface GrokAcpTurnOptions {
    */
   enforceModelReadback?: boolean;
   /**
+   * 2026-11-20 —— 有些 ACP server（agy）`session/set_model` 返回 `{}` 成功，但**不发**
+   * `model_changed` / 任何 model 通知，读回这条路不存在。真机验证（负责人 2026-11-20）：
+   * set_model 换成 gemini-3.8-flash-high 后同一 session 追问「你是什么模型」，回
+   * 「我是 Gemini 3.8 Flash」—— 调用被接受就是生效。置 true 时以「调用没报错」为生效判据，
+   * modelSource 记 `set_model`（区别于有硬读回的 `readback`）。
+   */
+  trustSetModelResult?: boolean;
+  /**
    * 2026-11-20 —— ACP `initialize` 的 `protocolVersion`。Grok 的服务端对类型宽容，
    * 一直发字符串 `"1"`（默认不变）；agy（Go 写的 ACP server）对 JSON 类型敏感，
    * 字符串会报 `cannot unmarshal string into Go struct field …protocolVersion of
@@ -148,6 +156,8 @@ export interface GrokAcpTurnResult {
   /**
    * #1958 — where `effectiveModel` comes from:
    *   readback — agent confirmed it (`session/set_model` Ok / `model_changed` / session response);
+   *   set_model — the agent accepted `session/set_model` but emits no model events; the
+   *              call itself is the confirmation (agy 2026-11-20 verified on a real node);
    *   argv     — a model was configured and passed on argv, but this grok build has no
    *              `session/set_model` and reported nothing, so it is the *requested* id;
    *   default  — no model configured; the id is whatever the agent reported (or unknown).
@@ -155,7 +165,7 @@ export interface GrokAcpTurnResult {
   modelSource: GrokModelSource;
 }
 
-export type GrokModelSource = "readback" | "argv" | "default";
+export type GrokModelSource = "readback" | "set_model" | "argv" | "default";
 
 interface SessionResponse {
   sessionId?: string;
@@ -477,6 +487,10 @@ async function applyConfiguredModel(
     const res = await client.request<SetModelResponse>("session/set_model", { sessionId, modelId: requested }, timeoutMs);
     const ok = res?._meta?.model?.Ok;
     confirmed = typeof ok === "string" ? ok : undefined;
+    // agy：没有 model_changed 可等，调用本身成功即生效（真机已验证会真的换模型）。
+    if (opts.trustSetModelResult) {
+      return { effectiveModel: requested, modelSource: "set_model" };
+    }
   } catch (err) {
     const { code, message, data } = rpcErrorParts(err);
     if (code === -32601 || /method not found/i.test(message)) {
