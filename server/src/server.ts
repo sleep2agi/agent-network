@@ -4852,6 +4852,10 @@ return Bun.serve({
         { userId: restAuth!.userId ?? null, isNode: false, networkId },
         nodeId, action, body?.key, body?.value, body?.revision,
       );
+      // #4827 —— 用户提交后清掉对应的「举手」；delete 同理。
+      if (result.ok && (action === "put" || action === "delete") && typeof body?.key === "string") {
+        clearSecretRequest(nodeId, body.key);
+      }
       if (!result.ok) {
         const status = result.error === "secret_admin_required" ? 403
           : result.error === "node_secrets_upgrade_required" ? 409
@@ -4873,7 +4877,10 @@ return Bun.serve({
         const status = result.error === "secret_admin_required" ? 403 : 404;
         return withCors(req, Response.json(result, { status }));
       }
-      return withCors(req, Response.json(result));
+      // #4827 —— agent 举手的待填密钥（App 卡片的数据源）。无待填时字段缺省，不是空数组。
+      const requestedNode = nodeSecretGet[1] ? decodeURIComponent(nodeSecretGet[1]) : null;
+      const pending = requestedNode ? pendingSecretRequests(requestedNode) : undefined;
+      return withCors(req, Response.json({ ...result, ...(pending ? { pending } : {}) }));
     }
 
     if (url.pathname === "/api/dm" || url.pathname === "/api/dm/threads") {
