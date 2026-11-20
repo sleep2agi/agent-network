@@ -4865,6 +4865,16 @@ return Bun.serve({
       }
       return withCors(req, Response.json(result));
     }
+    // #4827 —— 列表端点：agent 举手的待填密钥（App 卡片的数据源）。无待填时字段缺省，不是空数组。
+    if (nodeSecretReq && req.method === "GET") {
+      if (restAuth!.networkId) return userTokenRequired(req);
+      const listNet = singleNetworkId(restScope);
+      if (!listNet) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const listNodeId = decodeURIComponent(nodeSecretReq[1]);
+      const pending = pendingSecretRequests(listNodeId);
+      return withCors(req, Response.json({ ok: true, node_id: listNodeId, ...(pending ? { pending } : {}) }));
+    }
+
     if (nodeSecretGet && req.method === "GET") {
       if (restAuth!.networkId) return userTokenRequired(req);
       const networkId = singleNetworkId(restScope);
@@ -4877,10 +4887,8 @@ return Bun.serve({
         const status = result.error === "secret_admin_required" ? 403 : 404;
         return withCors(req, Response.json(result, { status }));
       }
-      // #4827 —— agent 举手的待填密钥（App 卡片的数据源）。无待填时字段缺省，不是空数组。
-      const requestedNode = nodeSecretGet[1] ? decodeURIComponent(nodeSecretGet[1]) : null;
-      const pending = requestedNode ? pendingSecretRequests(requestedNode) : undefined;
-      return withCors(req, Response.json({ ...result, ...(pending ? { pending } : {}) }));
+      // 轮询端点（/secrets/:request_id）保持原样：它返回的是某次请求的回执，不挂 pending。
+      return withCors(req, Response.json(result));
     }
 
     if (url.pathname === "/api/dm" || url.pathname === "/api/dm/threads") {
