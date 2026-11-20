@@ -1365,7 +1365,7 @@ class GrokCopresenceRuntime implements GrokCopresenceRuntimeSession {
       binary: this.opts.binary,
       cwd: this.opts.cwd,
       env: this.spawnEnv,
-      args: ["agent", "--leader", "--leader-socket", this.leaderSocket, "stdio"],
+      argv: ["agent", "--leader", "--leader-socket", this.leaderSocket, "stdio"],
     });
     try {
       const init = await client.request<{ authMethods?: Array<{ id?: string }> }>("initialize", {

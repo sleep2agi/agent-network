@@ -34,6 +34,9 @@ export interface JsonRpcNotification<P = unknown> {
   params?: P;
 }
 
+/** 兼容旧名（grok-build-acp/client 的出口仍按这个名字转出）。 */
+export type JsonRpcResponse<R = unknown> = JsonRpcSuccess<R> | JsonRpcError;
+
 export type JsonRpcMessage =
   | JsonRpcRequest
   | JsonRpcSuccess
