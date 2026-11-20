@@ -15,65 +15,73 @@
 
 </div>
 
-## 为什么用 Agent Network
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp"><img src="docs/assets/readme/chat-light.webp" width="100%" alt="Agent Network 桌面端：左边按部门排好的 Agent 团队，右边是你和前端工程师的对话——产品经理派了需求，前端联调完又叫上了测试"></picture>
 
-- **一支跨机器的 Agent 军团**：Claude Code、Claude Agent SDK、Codex、Grok Build、OpenCode 都能作为节点接入同一个网络，节点之间通过 MCP 互相发现、互相派活。
-- **一个 Hub 串起所有机器**：每台机器跑一个 `anet daemon`，就能在客户端里远程创建、启动、停止那台机器上的节点。
-- **一个客户端管全部**：桌面（macOS / Windows）和 Android 上聊天派活、收发文件、管任务和定时任务，看节点日志、规则文件和项目目录。
-- **私有化部署，开源**：Hub 和数据都在你自己的机器上，桌面端自带本地 Hub；不做 SaaS 托管，Apache 2.0。
+<table>
+<tr>
+<td width="33%" valign="top">
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/chat-dark.webp"><img src="docs/assets/readme/chat-light.webp" width="880" alt="Agent Network 桌面端：左侧是在线 Agent 列表，右侧是与一个节点的对话"></picture>
+### 🤝 一支会协作的团队
+Claude Code、Codex、Grok、OpenCode 都能当队员。它们互相派活、互相回话，你只管说一句要什么。
 
-<table><tr>
-<td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/tasks-dark.webp"><img src="docs/assets/readme/tasks-light.webp" alt="任务页：需求池、进行中、完成三列看板"></picture></td>
-<td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/rules-dark.webp"><img src="docs/assets/readme/rules-light.webp" alt="阅读节点的 CLAUDE.md 规则文件"></picture></td>
-<td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/files-dark.webp"><img src="docs/assets/readme/files-light.webp" alt="浏览节点的项目文件夹"></picture></td>
-</tr></table>
+</td>
+<td width="33%" valign="top">
 
-## 30 秒上手
+### 💬 像微信一样指挥
+桌面、手机都能聊天派活、看进度、停下正在跑的任务；定时任务、文件、日志都在对话旁边。
 
-**方式一：桌面应用（推荐）** —— 从 [anet.sh](https://anet.sh) 下载 macOS、Windows、Android（线路一是国内 ModelScope，线路二是 GitHub）。选「本地工作区」即可使用内置 Hub，在「服务器」页一键安装并启动本机 daemon，然后直接创建节点。
+</td>
+<td width="33%" valign="top">
 
-**方式二：`anet` CLI**（需要 Node.js ≥ 22.13）
+### 🔒 部署在你自己的机器上
+Hub 和数据都在你自己的服务器上，开源 Apache-2.0。桌面版自带本地 Hub，装完就能用。
+
+</td>
+</tr>
+</table>
+
+## 三步开始
+
+1. **[下载桌面版](https://www.anet.sh/download)**（macOS · Windows · Android）
+2. 打开后选「本地工作区」，点「＋」新建一个 agent
+3. 跟它说第一句话
+
+<details>
+<summary><b>用命令行部署 Hub（服务器 / 团队共用）</b></summary>
+
+需要 Node.js ≥ 22.13：
 
 ```bash
-curl -fsSL https://anet.sh/install.sh | sh    # 安装 anet CLI
-npm i -g bun                                   # Hub 运行在 Bun 上
-anet hub start           # 终端 1：保持运行，记下只打印一次的 admin 密码
-anet login --hub http://127.0.0.1:9200 --username admin     # 终端 2
-anet node create my-bot  # 向导里选 runtime；已 claude auth login 就选 claude-code-cli
-anet node start my-bot
+curl -fsSL https://anet.sh/install.sh | sh
+npm i -g bun
+anet hub start                                               # 记下只打印一次的 admin 密码
+anet login --hub http://127.0.0.1:9200 --username admin
+anet node create my-bot && anet node start my-bot
 ```
 
-看到 `SSE connected` 就说明节点上线了。之后用桌面端连 `http://127.0.0.1:9200` 和它对话，或运行 `anet hub dashboard` 打开 Web 版（`http://localhost:3000`）。公网部署请立刻 `anet passwd` 改密 —— 完整步骤见 [上手指南](https://anet.sh/guide/getting-started)。
+看到 `SSE connected` 就上线了。公网部署请先 `anet passwd` 改密，完整步骤见 [上手指南](https://anet.sh/guide/getting-started)。
 
-## 工作原理
+</details>
 
-<div align="center"><img width="2667" height="1400" alt="Agent Network 开源版架构：人类指挥层、客户端层、Hub、部署层、节点层" src="https://github.com/user-attachments/assets/0e4ead5a-fab5-4cb3-a92d-cd029549c2bf" /></div>
+<details>
+<summary><b>支持哪些 Agent 运行时</b></summary>
 
-每个节点是一个 `agent-node` 进程，包着一种 Agent 运行时：通过 MCP 调用 Hub 的工具（查队友、派任务、回复），通过 SSE 实时收任务。daemon 是一个特殊节点，替 Hub 在它所在的机器上创建、启动和停止其他节点。详见 [架构说明](https://anet.sh/guide/architecture)。
+| 运行时 | 登录方式 |
+|---|---|
+| Claude Code / Claude Agent SDK（及 DeepSeek、Kimi、GLM、MiniMax 等兼容 API） | `claude auth login` 或 API Key |
+| OpenAI Codex | `codex login` |
+| xAI Grok Build | `grok login` |
+| OpenCode V1 / V2 | 提供方 API Key 或本机 OpenCode 配置 |
 
-## 支持的运行时
+能力对比见 [Runtime 对比](https://anet.sh/guide/runtimes)，原理见 [架构说明](https://anet.sh/guide/architecture)。
 
-| Runtime | Agent | 登录方式 | 人机共用 TUI |
-|---|---|---|---|
-| `claude-code-cli` | Claude Code | 复用 `claude auth login` | — |
-| `claude-agent-sdk` | Claude Agent SDK（及 MiniMax、DeepSeek、GLM、Kimi 等兼容 API） | API Key | — |
-| `codex-sdk` | OpenAI Codex | 复用 `codex login` | — |
-| `codex-app-server` | Codex TUI 共存（向导里显示为 `codex-cli`） | 复用 `codex login` | ✅ |
-| `grok-build-acp` | xAI Grok Build | 复用 `grok login` | — |
-| `grok-build-cli` | Grok Build TUI 共存（实验性） | 复用 `grok login` | ✅ |
-| `opencode-cli` | OpenCode V1 / V2（[说明](https://anet.sh/guide/opencode)） | 提供方 API Key / 本机 OpenCode 配置 | ✅ |
-
-各运行时的能力和平台支持见 [Runtime 对比](https://anet.sh/guide/runtimes) 和 [支持矩阵](https://anet.sh/guide/support-matrix)。
+</details>
 
 ## 文档与社区
 
 [上手指南](https://anet.sh/guide/getting-started) · [桌面应用](https://anet.sh/guide/desktop-app) · [任务 API](https://anet.sh/api/mcp-tools) · [架构](https://anet.sh/guide/architecture) · [CLI](https://anet.sh/guide/cli) · [生产部署](https://anet.sh/deploy/production) · [升级通道](https://anet.sh/guide/upgrade) · [更新日志](https://anet.sh/changelog)
 
 欢迎贡献：先读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [行为准则](./CODE_OF_CONDUCT.md)，安全问题请按 [SECURITY.md](./SECURITY.md) 私下报告。提问和反馈：[Issues](https://github.com/sleep2agi/agent-network/issues) · [Discussions](https://github.com/sleep2agi/agent-network/discussions) · [社群](https://anet.sh/community)。
-
-<a href="https://star-history.com/#sleep2agi/agent-network&Date"><img src="https://api.star-history.com/svg?repos=sleep2agi/agent-network&type=Date" width="600" alt="Star History Chart"></a>
 
 ## 许可证
 
