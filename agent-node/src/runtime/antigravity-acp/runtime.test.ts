@@ -11,8 +11,9 @@ describe("antigravity-acp turn wrapper", () => {
     expect(src).toContain("AGY_ACP_ARGV");
     expect(src).toContain("argv: [...AGY_ACP_ARGV]");
   });
-  it("does not enforce the grok-only model readback", () => {
-    expect(src).toContain("enforceModelReadback: false");
+  it("applies the configured model and trusts session/set_model's empty Ok (agy sends no model events)", () => {
+    expect(src).toContain("trustSetModelResult: true");
+    expect(src).not.toContain("enforceModelReadback: false");
   });
   it("reuses the grok ACP turn implementation (no second protocol copy)", () => {
     expect(src).toContain('from "../grok-build-acp/runtime"');

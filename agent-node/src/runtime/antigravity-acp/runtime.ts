@@ -30,7 +30,9 @@ export function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnResult> 
     ...opts,
     binary: opts.binary ?? agyBinary(),
     argv: [...AGY_ACP_ARGV],
-    enforceModelReadback: false,
+    // 2026-11-20：切模型是真的（负责人真机验证），但 agy 不发 model 事件，只能以
+    // session/set_model 调用结果为准；不能再用「不读回、按 argv 记」那套。
+    trustSetModelResult: true,
     // 真机实测（2026-11-20）：agy 的 ACP server 是 Go 写的，initialize 的
     // protocolVersion 字段类型是 int，Grok 默认发的字符串 "1" 在这里会被
     // Go 的 JSON 反序列化拒绝（-32602 unmarshal error）。agy 要数字。
