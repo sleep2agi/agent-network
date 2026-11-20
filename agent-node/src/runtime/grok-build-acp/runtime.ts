@@ -71,6 +71,15 @@ export interface GrokAcpTurnOptions {
    * turn fails closed before any prompt is sent. Undefined = agent default.
    */
   model?: string;
+  /** ACP 子进程的可执行文件（默认 grok）；agy 传 agy。 */
+  binary?: string;
+  /** ACP 子进程的 argv（默认 `grok agent stdio`）；agy 传 ["acp"]。 */
+  argv?: string[];
+  /**
+   * 是否强制 `session/set_model` 读回等于配置模型（grok 需要，#1958）。
+   * agy 目前没有验证过的 set_model 语义，接的时候传 false，按 argv 记 modelSource。
+   */
+  enforceModelReadback?: boolean;
   timeoutMs?: number;
   /**
    * #261 P1 redirect (2026-06-28) — handshake deadline (initialize +
@@ -82,7 +91,6 @@ export interface GrokAcpTurnOptions {
    */
   handshakeTimeoutMs?: number;
   drainMs?: number;
-  binary?: string;
   env?: NodeJS.ProcessEnv;
   /**
    * #204 — explicit MCP server list passed verbatim to `session/new` /
@@ -209,7 +217,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   if (opts.onStderr) client.on("stderr", onStderr);
 
   try {
-    client.start({ cwd: opts.cwd, env: childEnv, binary: opts.binary , model: opts.model });
+    client.start({ cwd: opts.cwd, env: childEnv, binary: opts.binary, model: opts.model, argv: opts.argv });
 
     // #205 RFC-021 Path A — request Grok backend tools (X search, video
     // gen, web search/fetch) via _meta capability hint. ACP spec has no
@@ -411,7 +419,11 @@ async function applyConfiguredModel(
   state: GrokTurnState,
   opts: GrokAcpTurnOptions,
   timeoutMs: number,
-): Promise<{ effectiveModel?: string; modelSource: GrokModelSource }> {
+: Promise<{ effectiveModel?: string; modelSource: GrokModelSource }> {
+  // agy 这类没有验证过 set_model 读回的 runtime：不猜、不读回，按 argv 记来源。
+  if (opts.enforceModelReadback === false) {
+    return { effectiveModel: opts.model, modelSource: opts.model ? "argv" : "default" };
+  }
   const { current, available } = sessionModels(session);
   const requested = opts.model?.trim();
   if (!requested) {
