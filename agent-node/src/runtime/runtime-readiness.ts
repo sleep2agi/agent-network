@@ -95,6 +95,12 @@ interface RuntimeSpec {
   authEnvKeys: string[];
   /** true = 默认不需要登录(opencode 免费 Zen 模型)。 */
   authOptional?: boolean;
+  /**
+   * true = daemon **无法用文件/env 判断**登录态，且没有可靠的只读探测命令。
+   * 例：Antigravity CLI（agy）把凭据放在系统 keyring，`agy models` 又要真跑一次请求；
+   * 乱报 present/absent 都会误导用户（目录存在 ≠ 已登录）。宁可报 unknown（向导仍可选）。
+   */
+  authUnknown?: boolean;
   loginHint: string;
   endpoint: string;
   codexShared?: boolean;
@@ -158,7 +164,9 @@ const SPECS: Record<string, RuntimeSpec> = {
   "antigravity-acp": {
     cli: "agy",
     installHint: `安装 Antigravity CLI 1.5.13（验收版本）:curl -fsSL https://antigravity.google/cli/install.sh | bash,${ON_CHILD_PATH}`,
-    authFiles: [".gemini/antigravity-cli"],
+    // 凭据在系统 keyring（Google 登录），文件存在与否不代表已登录 → 不猜。
+    authFiles: [],
+    authUnknown: true,
     authEnvKeys: [],
     loginHint: "在这台机器上运行 `agy acp --login`(Google 登录;SSH 下会打印授权 URL 并接受粘贴 code)",
     endpoint: "https://antigravity.google",
@@ -348,6 +356,7 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
   let authUnknownMac = false;
   if (fileHit || envHit) out.auth = "present";
   else if (spec.authOptional) out.auth = "not_required";
+  else if (spec.authUnknown) out.auth = "unknown";
   else if (deps.platform === "darwin" && spec.authFiles.some((f) => f.startsWith(".claude/"))) {
     // macOS 的 Claude Code 把登录放在钥匙串里,文件不在 ≠ 没登录。不猜。
     out.auth = "unknown";
