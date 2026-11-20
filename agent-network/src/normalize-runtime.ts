@@ -20,10 +20,11 @@ export type RuntimeName =
   | "grok-build-acp"
   | "grok-build-cli"
   | "opencode-cli"
-  | "codex-app-server";
+  | "codex-app-server"
+  | "antigravity-acp";
 
 /** 一个 runtime 复用的是哪种**外部登录态**，而不是 API key。 */
-export type ReusedLogin = "claude" | "codex" | "grok";
+export type ReusedLogin = "claude" | "codex" | "grok" | "antigravity";
 
 /**
  * runtime → 它复用的外部登录。**只有一处定义**，VENDORS 的 `requiresAuth`
@@ -41,6 +42,7 @@ export const RUNTIME_REUSED_LOGIN: Readonly<Partial<Record<RuntimeName, ReusedLo
   "codex-app-server": "codex",   // 同上；TUI 共存走同一个 codex 登录态
   "grok-build-acp": "grok",      // grok login
   "grok-build-cli": "grok",      // 同上；共存 TUI 走同一个 grok 登录态
+  "antigravity-acp": "antigravity", // agy 的 Google 登录（keyring / OAuth）
 } as const;
 
 /** 该 runtime 复用哪种登录；返回 undefined 表示它用 API key。 */
@@ -59,6 +61,7 @@ export const SUPPORTED_RUNTIME_NAMES: readonly RuntimeName[] = [
   "grok-build-acp",
   "grok-build-cli",
   "opencode-cli",
+  "antigravity-acp",
 ] as const;
 
 // Subset of Profile fields this helper inspects. Keeping it narrow so
@@ -88,6 +91,7 @@ function canonicalizeRuntime(runtime: string): RuntimeName | undefined {
   ) return "grok-build-acp";
   // Grok shared-TUI lane is explicit opt-in. Legacy `grok` aliases stay on
   // ACP so an existing profile can never silently change execution mode.
+  if (runtime === "antigravity" || runtime === "agy" || runtime === "antigravity-cli" || runtime === "antigravity-acp") return "antigravity-acp";
   if (
     runtime === "grok-build-cli" ||
     runtime === "grok-cli" ||

@@ -456,7 +456,7 @@ for (let i = 0; i < argv.length; i++) {
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
   --opencode-borrowed-attach <config>  Attach the exact existing borrowed V1 TUI
   --alias <name>      Agent 别名 / CommHub alias (必需)
-  --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
+  --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli | antigravity-acp
                       (claude-code-cli is NOT here: it runs via \`anet node start\`, not by passing --runtime to agent-node — see the Runtime section)
   --model <name>      AI 模型 (codex 默认: ${DEFAULT_CODEX_MODEL}, claude-agent-sdk 默认: 账号默认模型)
   --hub <url>         CommHub URL
@@ -476,6 +476,7 @@ Runtime:
   codex-sdk         Codex SDK — GPT-5.4，复用 codex 登录态
   codex-app-server  Codex app-server — Codex TUI bridge
   grok-build-acp    Grok Build ACP — xAI Grok Build via "grok agent stdio"
+  antigravity-acp   Antigravity CLI (agy) — Google Antigravity via "agy acp"（版本要钉在 1.5.13）
   grok-build-cli    Grok Build CLI — headless 或 grokCopresence 共存 TUI 模式
   opencode-cli      opencode CLI — Anthropic/OpenAI vendor preset via ACP
 
@@ -753,6 +754,8 @@ const RUNTIME_MAP: Record<string, string> = {
   // bucket from `codex` (that's the @openai/codex-sdk transport). Aliases:
   // `codex-app-server` (canonical) / `codex-tui` / `codex-appserver`.
   "codex-app-server": "codex-app-server", "codex-appserver": "codex-app-server", "codex-tui": "codex-app-server",
+  // 2026-11-20 — Antigravity CLI（agy）走正常 ACP。`agy` / `antigravity` 是短别名。
+  "antigravity-acp": "antigravity", "antigravity": "antigravity", "agy": "antigravity", "antigravity-cli": "antigravity",
 };
 // 🔴 `claude-code-cli` is intentionally NOT a key here (#909). Its execution lane lives in the LAUNCHER
 //    (`agent-network/bin/cli.ts` — `anet node start` → launchAgent → spawns the real `claude` CLI, ~:5096)
@@ -777,7 +780,7 @@ if (!Object.prototype.hasOwnProperty.call(RUNTIME_MAP, rawRuntime)) {
   console.error(`[${ALIAS}] Unsupported runtime "${rawRuntime}". Supported: ${supported}`);
   process.exit(1);
 }
-const RUNTIME = RUNTIME_MAP[rawRuntime] as "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
+const RUNTIME = RUNTIME_MAP[rawRuntime] as "claude" | "codex" | "grok" | "opencode" | "codex-app-server" | "antigravity";
 const RUNTIME_LABEL = rawRuntime; // 日志用原始名
 // `grok-build-cli` defaults to the compatible `grok -p` headless lane.
 // `grokCopresence:true` explicitly switches it to the single PTY-owner bridge
@@ -4995,6 +4998,49 @@ async function processWithCodexAppServer(
   return codexAppServerReplyOrThrow(outcome);
 }
 
+/**
+ * Antigravity CLI（agy）—— 正常 ACP runtime 的回合执行。
+ *
+ * 复用 grok 的 ACP 回合实现（runAgyAcpTurn → runGrokAcpTurn，binary=agy / argv=["acp"]），
+ * 所以这里只做四件事：版本钉检查、MCP 注入（同一套 HTTP commhub）、prompt 组装、返回文本。
+ * 暂不做的（后续按需补）：resume hint、逐 token 推送、图片直发（先按文本发并告警）。
+ */
+async function processWithAntigravity(
+  task: string,
+  from: string,
+  images?: string[],
+  evidence?: TaskRuntimeEvidenceReporter,
+): Promise<string> {
+  const { checkAgyReadiness } = await import("./runtime/antigravity-acp/readiness");
+  const readiness = checkAgyReadiness();
+  if (!readiness.ok) throw new Error(readiness.message);
+  if (images?.length) {
+    warn(`[antigravity] image attachments received; sending text-only prompt for now (ACP reports image=true, no verified image case yet)`);
+  }
+
+  const { buildGrokMcpServers } = await import("./goals/loops-grok-wire");
+  const mcpServers = buildGrokMcpServers({
+    commhubUrl: COMMHUB_URL,
+    alias: ALIAS,
+    authToken: AUTH_TOKEN || undefined,
+    nodeDir: typeof NODE_DIR === "string" ? NODE_DIR : undefined,
+  });
+
+  const { runAgyAcpTurn } = await import("./runtime/antigravity-acp/runtime");
+  const result = await runAgyAcpTurn({
+    prompt: buildGrokCommhubPrompt(task, from),
+    cwd: process.cwd(),
+    mcpServers,
+    // agy 的 turn 没有单独的超时配置：给一个和 grok 一样的 300s 上限，
+    // 之后按真机表现再决定要不要独立 flags。
+    timeoutMs: 300_000,
+    onSubmitted: evidence?.submitted,
+    onConsumed: evidence?.consumed,
+    onStderr: (line) => debug(`[agy-stderr] ${line}`),
+  });
+  return result.replyText;
+}
+
 async function processWithGrok(
   task: string,
   from: string,
@@ -6297,6 +6343,9 @@ function think(
             ? await processWithGrokCopresence(task, from, taskId, images, evidence)
             : await processWithGrokCli(task, from, images, evidence)
           : await processWithGrok(task, from, images, evidence);
+      }
+      if (RUNTIME === "antigravity") {
+        return await processWithAntigravity(task, from, images, evidence);
       }
       if (RUNTIME === "opencode") {
         // #1879 ③ —— 把 taskId 带进去，排队项才有归属。
