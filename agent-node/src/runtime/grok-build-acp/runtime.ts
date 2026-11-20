@@ -87,6 +87,17 @@ export interface GrokAcpTurnOptions {
    * type int`（真机实测抓到），agy 侧传数字 `1`。
    */
   protocolVersion?: number | string;
+  /**
+   * 2026-11-20 —— `authenticate` 选哪个非交互方式。`selectAuthMethod()` 原本硬编码
+   * 只认 grok 自己的两个 method id（`xai.api_key` / `cached_token`），agy 的
+   * advertised 方式（`oauth-personal` 等）永远不在这张表里，于是即使 admin 已经在
+   * 这台机器上 `agy acp --login` 登录过（`agy models` 能正常列出模型，证明 keyring
+   * 里有有效凭据），headless 回合还是每次都报 "no supported non-interactive auth
+   * method" 并拒绝往下走——不是没登录，是我们的选择逻辑根本不认识 agy 的方式。
+   * 真机实测抓到。调用方可以传一份按优先级排列的 method id 列表；默认不变
+   * （grok 继续用内置的两条规则）。
+   */
+  authMethodPreference?: readonly string[];
   timeoutMs?: number;
   /**
    * #261 P1 redirect (2026-06-28) — handshake deadline (initialize +
@@ -314,7 +325,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     // a wedged `initialize` would burn the full prompt window before the
     // operator saw a failure signal.
     const init = await client.request<InitializeResponse>("initialize", initParams, handshakeTimeoutMs);
-    const authMethod = selectAuthMethod(init, childEnv);
+    const authMethod = selectAuthMethod(init, childEnv, opts.authMethodPreference);
     await client.request("authenticate", { methodId: authMethod, meta: { headless: true } }, handshakeTimeoutMs);
 
     // #204 — pass through the caller's mcpServers list; empty array preserves
@@ -491,8 +502,13 @@ async function applyConfiguredModel(
   return { effectiveModel: reported, modelSource: "readback" };
 }
 
-function selectAuthMethod(init: InitializeResponse, env: NodeJS.ProcessEnv): string {
+export function selectAuthMethod(init: InitializeResponse, env: NodeJS.ProcessEnv, preference?: readonly string[]): string {
   const ids = new Set((init.authMethods ?? []).map((method) => method.id).filter((id): id is string => typeof id === "string"));
+  // 调用方显式给的优先级表（目前只有 agy 传）先试——保持 grok 的两条内置规则不变，
+  // 不让这份新表影响它。
+  if (preference) {
+    for (const id of preference) if (ids.has(id)) return id;
+  }
   if (env.GROK_CODE_XAI_API_KEY && ids.has("xai.api_key")) return "xai.api_key";
   if (ids.has("cached_token")) return "cached_token";
   throw new Error(`Grok ACP authenticate failed: no supported non-interactive auth method (advertised=${JSON.stringify([...ids])})`);
