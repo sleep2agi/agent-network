@@ -419,7 +419,7 @@ async function applyConfiguredModel(
   state: GrokTurnState,
   opts: GrokAcpTurnOptions,
   timeoutMs: number,
-: Promise<{ effectiveModel?: string; modelSource: GrokModelSource }> {
+): Promise<{ effectiveModel?: string; modelSource: GrokModelSource }> {
   // agy 这类没有验证过 set_model 读回的 runtime：不猜、不读回，按 argv 记来源。
   if (opts.enforceModelReadback === false) {
     return { effectiveModel: opts.model, modelSource: opts.model ? "argv" : "default" };
