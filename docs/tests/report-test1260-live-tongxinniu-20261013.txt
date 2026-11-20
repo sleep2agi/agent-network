@@ -1,0 +1,46 @@
+通信牛 TUI repair — authorized operational verification
+Date: 2026-10-13 Asia/Shanghai
+
+Observed failures:
+1. Deployed anet's 15-second thread recovery deadline was shorter than loading
+   the existing ~818 MiB rollout.
+2. TUI full-history RPC returned 189100993 bytes; the native client disconnected.
+3. After transport/history rendering was repaired, the original chat showed
+   "Chat stopped as a precaution". This is separate from a transport failure.
+
+Technical repair:
+- Authoritative launcher, shim, preview proxy and runbook:
+  deploy/codex-large-history/
+- Launcher extends its own 15-second deadlines to 120 seconds. Child runtimes
+  keep ordinary timers and do not inherit the preload.
+- Only oversized TUI historical MCP tool results receive display previews.
+  Original stored history/model context, every turn, user and assistant message,
+  tool identity and arguments are retained. Other clients and requests pass through.
+- Observed old-history preview: 189100993 -> 34491347 bytes; 2811 tool previews.
+- Independent Docker checks passed against both the working repository lockfile
+  and a clean main-based worktree. See report-test1260.txt.
+
+User-authorized configuration changes:
+- Telegram removed from the node channels array and discovery directory.
+  Original configuration/channel state retained in a private node-local backup.
+- User authorized switching after disclosure of the old chat's safety stop.
+- Original repeating Hub schedule set to paused, revision 681, next_run_at=null.
+  No old automatic task was sent to the new chat.
+- Created a fresh chat using the existing gpt-6.1-sol model. An independent,
+  non-operational readiness request returned READY; no project task was executed.
+- Updated node binding only after the readiness check; original rollout remains.
+- Restarted app-server, bridge and TUI on the same new thread and isolated home.
+
+Final actual runtime verification:
+- All three tmux panes alive (native Codex TUI, not a placeholder).
+- TUI shows the new chat and READY answer, with no resuming or safety-stop screen.
+- Typed an unsubmitted draft marker, observed it in the editor, cleared it and
+  verified its removal. No inference was triggered by the input responsiveness check.
+- Bridge resumed the new thread, registered with Hub and logged SSE connected.
+- Startup logs report channels: (none); Telegram polling does not start.
+- Hub schedule re-read confirms paused and no next occurrence.
+
+Boundaries:
+- No global npm package changed; no npm/GitHub Release artifact published.
+- The old stopped chat was not resumed for work or bypassed. Its data is preserved.
+- Docker checks do not claim disaster recovery of production credentials/data.
