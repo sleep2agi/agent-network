@@ -9,7 +9,7 @@ import { markTaskActivity } from "./task-activity.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestSecretUi } from "./secret-request-ui.js";
-import { markAcked } from "./acked-unconfirmed.js";
+import { markAcked, markReply } from "./acked-unconfirmed.js";
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
 import { adoptedCloneSourceRow, requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
@@ -3110,12 +3110,26 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             message_id: id,
             ...("workOutcome" in replyOutcome ? { scheduled_work_outcome: replyOutcome.workOutcome } : {}),
             session_status: session?.status ?? "unknown",
+            // B 止血（口径 ①）：这条回复就是「该 alias 有产出」的证据，窗口内的 acked 记录标成已投递。
+            ...(markReplySafe(args), {}),
             ...(warning ? { warning } : {}),
             ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
           }),
         }],
       };
     };
+
+
+  // B 止血 —— 把「谁回复了」记成投递证据；失败绝不影响回复本身。
+  const markReplySafe = (args: any) => {
+    try {
+      const raw = typeof args?.from_session === "string" && args.from_session ? args.from_session : null;
+      const alias = raw ?? (callerAlias ?? null);
+      const net = (() => { try { return getNetworkId(args?.network_id) ?? null; } catch { return null; } })();
+      if (alias) markReply(alias, net);
+    } catch {}
+    return {};
+  };
 
   server.tool(
     "send_reply",
