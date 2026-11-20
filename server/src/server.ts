@@ -48,6 +48,7 @@ import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilte
 import { canListOpencodeSessions } from "./opencode-session-access.js";
 import { runtimeIsOpencode } from "./opencode-runtime.js";
 import { isHumanToken } from "./human-token.js";
+import { pendingSecretRequests, clearSecretRequest } from "./secret-request-ui.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -4852,6 +4853,10 @@ return Bun.serve({
         { userId: restAuth!.userId ?? null, isNode: false, networkId },
         nodeId, action, body?.key, body?.value, body?.revision,
       );
+      // #4827 —— 用户提交后清掉对应的「举手」；delete 同理。
+      if (result.ok && (action === "put" || action === "delete") && typeof body?.key === "string") {
+        clearSecretRequest(nodeId, body.key);
+      }
       if (!result.ok) {
         const status = result.error === "secret_admin_required" ? 403
           : result.error === "node_secrets_upgrade_required" ? 409
@@ -4859,8 +4864,23 @@ return Bun.serve({
           : 400;
         return withCors(req, Response.json(result, { status }));
       }
+      // #4827 —— App 读快照走的是 POST {action:"list"}，pending 挂这里才是它真正能看到的地方。
+      if (action === "list") {
+        const pending = pendingSecretRequests(decodeURIComponent(nodeSecretReq[1]));
+        if (pending) return withCors(req, Response.json({ ...result, pending }));
+      }
       return withCors(req, Response.json(result));
     }
+    // #4827 —— 列表端点：agent 举手的待填密钥（App 卡片的数据源）。无待填时字段缺省，不是空数组。
+    if (nodeSecretReq && req.method === "GET") {
+      if (restAuth!.networkId) return userTokenRequired(req);
+      const listNet = singleNetworkId(restScope);
+      if (!listNet) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const listNodeId = decodeURIComponent(nodeSecretReq[1]);
+      const pending = pendingSecretRequests(listNodeId);
+      return withCors(req, Response.json({ ok: true, node_id: listNodeId, ...(pending ? { pending } : {}) }));
+    }
+
     if (nodeSecretGet && req.method === "GET") {
       if (restAuth!.networkId) return userTokenRequired(req);
       const networkId = singleNetworkId(restScope);
@@ -4873,6 +4893,7 @@ return Bun.serve({
         const status = result.error === "secret_admin_required" ? 403 : 404;
         return withCors(req, Response.json(result, { status }));
       }
+      // 轮询端点（/secrets/:request_id）保持原样：它返回的是某次请求的回执，不挂 pending。
       return withCors(req, Response.json(result));
     }
 

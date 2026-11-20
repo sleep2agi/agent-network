@@ -8,6 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { markTaskActivity } from "./task-activity.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
+import { requestSecretUi } from "./secret-request-ui.js";
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
 import { adoptedCloneSourceRow, requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
@@ -4983,11 +4984,24 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   server.tool(
     "daemon_provider_snapshot", "Providers, no tokens; hub_*=owner catalog+bind; secret_*=Daemon env; node_secret_*=node env; provider={node_id?,key?,value?}; next full start.",
-    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read", "node_secret_list", "node_secret_put", "node_secret_delete"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
+    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read", "secret_request_ui", "node_secret_list", "node_secret_put", "node_secret_delete"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
       // Separate scoped-secret contract using the existing management lane.
       // No additional tools in model context; ordinary Provider actions unchanged.
+      // #4827 —— agent「举手」要密钥：只登记、不写值、立刻返回；**允许节点令牌**（与 secret_put 的 user_token_required 不同）。
+      if (action === 'secret_request_ui') {
+        const input = provider as { node_id?: string | null; key?: string; label?: string } | undefined;
+        const targetNodeId = input?.node_id ?? id;
+        const node = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', targetNodeId, human.networkId!);
+        if (!node) return providerReply({ ok: false, error: 'node_not_found' });
+        return providerReply(requestSecretUi({
+          nodeId: targetNodeId,
+          key: String(input?.key ?? ''),
+          ...(input?.label ? { label: input.label } : {}),
+          byNodeId: id,
+        }));
+      }
       if (action === 'secret_read') return providerReply(getScopedSecrets(human, id));
       if (action === 'node_secret_list' || action === 'node_secret_put' || action === 'node_secret_delete') {
         const input = provider as { key?: string; value?: string; from_vault?: boolean } | undefined;
