@@ -334,7 +334,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           attachments: ATTACHMENTS_SCHEMA,
         },
-        required: ["text"],
+        // #4827-followup —— status 必须显式给：缺省时工具只更新 session 状态、
+        // **不会投递一条对话消息**，但返回值看起来是成功的（历史上多次被当成「已回复」）。
+        // 进度更新应该走 commhub_report_status，不是 commhub_reply。
+        required: ["text", "status"],
       },
     },
     {
