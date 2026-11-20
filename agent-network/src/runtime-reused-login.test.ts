@@ -37,10 +37,11 @@ describe("RUNTIME_REUSED_LOGIN", () => {
     }
   });
 
-  test("覆盖面断言：7 个 runtime 每一个都被明确归类，没有漏网的", () => {
+  test("覆盖面断言：8 个 runtime 每一个都被明确归类，没有漏网的", () => {
     const classified = SUPPORTED_RUNTIME_NAMES.map((rt) => [rt, reusedLoginFor(rt) ?? "api-key"] as const);
-    // 分母写死成 7：将来加 runtime 而忘了归类，这里会红并列出全部分类结果。
-    expect(classified.length).toBe(7);
+    // 分母写死成 8（2026-11-20 从 7 升上来：#3677 加了 antigravity-acp，这条测试
+    // 当时就该跟着改却没改——将来再加 runtime 而忘了归类，这里会红并列出全部分类结果。
+    expect(classified.length).toBe(8);
     expect(Object.fromEntries(classified)).toEqual({
       "claude-agent-sdk": "api-key",
       "claude-code-cli": "claude",
@@ -49,6 +50,7 @@ describe("RUNTIME_REUSED_LOGIN", () => {
       "grok-build-acp": "grok",
       "grok-build-cli": "grok",
       "opencode-cli": "api-key",
+      "antigravity-acp": "antigravity",
     });
   });
 });
