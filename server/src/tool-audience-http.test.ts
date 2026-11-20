@@ -248,7 +248,10 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // 调用方用不上这些编号,上下文都在代码注释里),clone_node 描述顺手压短 —— 合计约 −156 B。
   // 2026-11-15:get_all_status / get_session_status 描述里点名 description / profile.description(节点职责介绍,
   // 让调用方知道去哪读别的节点「负责什么」)。照规矩不抬上限,两句都压到最短。
-  const CEILINGS = { node: 64_500, user: 60_500, all: 86_500 } as const;
+  // 2026-11-20 — agy 登录（start_agy_login / submit_agy_login_code）是真人功能，只能是 user 工具，
+  // 两个工具 + 必填校验把 all 从 86.4KB 推到 88.0KB。node 不变（不走 node），user 仍在 60.5KB 内；
+  // 只抬 all 的上限（#476 ratchet 的例外要写明原因）。
+  const CEILINGS = { node: 64_500, user: 60_500, all: 89_500 } as const;
   const MARGIN_FLOOR = 100;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
