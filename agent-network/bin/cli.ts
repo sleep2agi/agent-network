@@ -7794,6 +7794,15 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // `anet init project` can write non-JSON-RPC bytes to stdout, surfacing
     // as Grok's `serde error expected value at line 1 column 2`. Cheap
     // (read+write a few KB) and only fires for these three runtimes.
+    //
+    // 2026-11-20 (通信欧 review on #3677) — antigravity-acp 复用 grok-build-acp
+    // 的 ACP 回合实现，但**不需要**这条刷新：agent-node/src/runtime/grok-build-acp/
+    // runtime.ts 里 preview.6 起首选 Http 变体（正是为了躲开 bun/node-server.js/
+    // framing 这串坑），运行期根本不 spawn 这个文件；agy 走同一套。这条历史防御
+    // 只对应「命令行走 stdio 的旧 grok 配置」。加了也只是多写一份没人读的文件，
+    // 反而让人以为它被用到。往后新增的 runtime 别再按名字往这里加——这个"按
+    // runtime 名列举"的模式本身就是这次漏项的根源，更准确的判据应该是"这个节点
+    // 的 channels 配置是否真的走 stdio"，不是"runtime 叫什么名字"（见 #3677 讨论）。
     if (runtime === "grok-build-acp") {
       try {
         const anetDir = join(process.cwd(), ".anet");

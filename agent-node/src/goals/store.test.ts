@@ -327,6 +327,13 @@ describe("P0 runtime gate — name resolution", () => {
     // RFC-029 — opencode CLI bucket.
     expect(runtimeBucket("opencode-cli")).toBe("opencode");
     expect(runtimeBucket("opencode")).toBe("opencode");
+    // 2026-11-20 — Antigravity CLI（agy）bucket (#3677: this set was missing the
+    // aliases cli.ts's RUNTIME_MAP already had, so every antigravity-acp node's
+    // /aloop scheduler silently refused to run — "unknown runtime bucket").
+    expect(runtimeBucket("antigravity-acp")).toBe("antigravity");
+    expect(runtimeBucket("antigravity")).toBe("antigravity");
+    expect(runtimeBucket("antigravity-cli")).toBe("antigravity");
+    expect(runtimeBucket("agy")).toBe("antigravity");
     expect(runtimeBucket("mystery")).toBe("unknown");
     expect(runtimeBucket(null)).toBe("unknown");
     expect(runtimeBucket(undefined)).toBe("unknown");
@@ -455,6 +462,16 @@ describe("#144 round-6 — decideStartupAction (refined-B matrix)", () => {
 
   test("claude + empty → ok (scheduler runs; was 'skip' pre-#144)", () => {
     const a = decideStartupAction("claude", []);
+    expect(a.kind).toBe("ok");
+    expect(a.runScheduler).toBe(true);
+  });
+
+  // 2026-11-20 — #3677: before runtimeBucket() knew about antigravity, this bucket
+  // string could never reach decideStartupAction (it stayed "unknown" and the
+  // scheduler refused to run at all, silently, with no goal ever created or
+  // archived). Confirm it's treated like every other recognized bucket now.
+  test("antigravity + empty → ok (scheduler runs, not the unknown-bucket skip)", () => {
+    const a = decideStartupAction("antigravity", []);
     expect(a.kind).toBe("ok");
     expect(a.runScheduler).toBe(true);
   });
