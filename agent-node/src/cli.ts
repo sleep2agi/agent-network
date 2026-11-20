@@ -2800,7 +2800,7 @@ let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || unde
 // and where that knowledge came from. Reported to the hub as `model` so the
 // dashboard shows the running model rather than the configured one.
 let grokEffectiveModel: string | undefined;
-let grokModelSource: "readback" | "argv" | "default" | undefined;
+let grokModelSource: "readback" | "set_model" | "argv" | "default" | undefined;
 // OpenCode V2 TUI selection. Display only: never written back into config.json.
 let opencodeEffectiveModel: string | undefined;
 // RFC-029 PR② — opencode-cli session state.
