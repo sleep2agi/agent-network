@@ -279,6 +279,16 @@ describe("#622 秘密永不出现在输出里(真文件 + 埋点假 key)", () =>
     return h;
   }
 
+  test("antigravity-acp：给了 spec，但登录态只报 unknown（keyring 无法用文件判断）", async () => {
+    const h = plantHome();
+    const real = realReadinessDeps({ childEnv: { PATH: "/nonexistent", HOME: h }, daemonEnv: {} });
+    const d: ReadinessDeps = { ...real, httpHead: async () => "reachable" };
+    const r = await probeRuntimeReadiness(["antigravity-acp"], d);
+    expect(r["antigravity-acp"]).toBeTruthy();
+    expect(r["antigravity-acp"].auth).toBe("unknown");
+    expect(JSON.stringify(r["antigravity-acp"])).toContain("1.5.13");
+  });
+
   test("全部 runtime 的结果 + 日志摘要里都不含任何埋点值", async () => {
     const h = plantHome();
     const real = realReadinessDeps({
