@@ -190,6 +190,37 @@ interface InitializeResponse {
  *   4. reduce streamed notifications with replay filtering,
  *   5. return the accumulated reply text.
  */
+
+/**
+ * 2026-11-20 —— `initialize` 请求体的纯构造。抽出来是因为这里踩过真机坑：
+ * `protocolVersion` 原来写死成字符串 "1"（Grok 的服务端类型宽容），agy（Go 写的
+ * ACP server）对 JSON 类型敏感，字符串会报 `-32602 unmarshal string into Go
+ * struct field …int`。默认值不变（grok 继续发字符串），调用方可以显式覆盖
+ * （agy 传数字 1）。纯函数，方便直接断言字段类型，不用 mock 真实的 ACP 子进程。
+ */
+/** Shared with the session-level `_meta` hint further down in runGrokAcpTurn — one list, not two. */
+const BACKEND_TOOLS_HINT = ["x_keyword_search", "x_user_search", "video_gen", "web_search"];
+
+export function buildAcpInitParams(opts: {
+  protocolVersion?: number | string;
+  backendToolsHintEnabled: boolean;
+}): Record<string, unknown> {
+  const backendToolsHint = BACKEND_TOOLS_HINT;
+  return {
+    protocolVersion: opts.protocolVersion ?? "1",
+    clientCapabilities: {
+      fs: { readTextFile: true, writeTextFile: true },
+      // Only advertise capabilities implemented by GrokAcpClient.
+      // Claiming terminal support lets Grok send terminal/* client
+      // requests, which this adapter cannot satisfy and can surface as
+      // generic ACP -32603 internal errors.
+      terminal: false,
+      ...(opts.backendToolsHintEnabled ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } } : {}),
+    },
+    ...(opts.backendToolsHintEnabled ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } } : {}),
+  };
+}
+
 export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpTurnResult> {
   const timeoutMs = opts.timeoutMs ?? 120_000;
   // #261 P1 redirect — handshake (init+auth+session) is a separate
@@ -272,20 +303,10 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
         `Grok's backend tools (X search / video_gen), see RFC-021 §11.`,
       );
     }
-    const backendToolsHint = ["x_keyword_search", "x_user_search", "video_gen", "web_search"];
-    const initParams: Record<string, unknown> = {
-      protocolVersion: opts.protocolVersion ?? "1",
-      clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: true },
-        // Only advertise capabilities implemented by GrokAcpClient.
-        // Claiming terminal support lets Grok send terminal/* client
-        // requests, which this adapter cannot satisfy and can surface as
-        // generic ACP -32603 internal errors.
-        terminal: false,
-        ...(_hintEnabled ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } } : {}),
-      },
-      ...(_hintEnabled ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } } : {}),
-    };
+    const initParams: Record<string, unknown> = buildAcpInitParams({
+      protocolVersion: opts.protocolVersion,
+      backendToolsHintEnabled: _hintEnabled,
+    });
     // #261 P1 redirect (2026-06-28) — handshake (initialize / authenticate
     // / session/new|load) now uses `handshakeTimeoutMs` (default 45s),
     // decoupled from the long-running `session/prompt` deadline. Pre-fix
@@ -307,7 +328,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     // session-create time rather than at initialize-time; we cover both.
     const mcpServers = opts.mcpServers ?? [];
     const sessionExtra = _hintEnabled
-      ? { _meta: { "x.ai/requestedBackendTools": backendToolsHint } }
+      ? { _meta: { "x.ai/requestedBackendTools": BACKEND_TOOLS_HINT } }
       : {};
     const session = opts.sessionId
       ? await client.request<SessionResponse>("session/load", { sessionId: opts.sessionId, cwd: opts.cwd, mcpServers, ...sessionExtra }, handshakeTimeoutMs)
