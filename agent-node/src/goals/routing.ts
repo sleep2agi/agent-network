@@ -1,6 +1,8 @@
 import { parseGoalCommand } from "./parser";
 
-export type GoalRoutingRuntime = "claude" | "codex" | "grok" | "opencode" | "codex-app-server";
+// "antigravity" 来自 runtimeBucket()（agy / antigravity-acp）；不是 native Codex TUI，
+// 所以 /goal 走的还是 Agent Network 调度路径（与 #3677 同一处改动）。
+export type GoalRoutingRuntime = "claude" | "codex" | "grok" | "opencode" | "codex-app-server" | "antigravity";
 
 export interface ReplyMessageProvenance {
   messageType: string;
