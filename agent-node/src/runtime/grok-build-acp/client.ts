@@ -76,11 +76,12 @@ export class GrokAcpClient extends EventEmitter {
     return this.lastIncomingAt;
   }
 
-  start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string; model?: string } = {}): void {
+  start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string; model?: string; argv?: string[] } = {}): void {
     if (this.child) throw new Error("GrokAcpClient already started");
     this.cwd = resolve(opts.cwd ?? process.cwd());
     const bin = opts.binary ?? "grok";
-    this.child = spawn(bin, grokAgentStdioArgs(opts.model), {
+    // argv：给别的 ACP CLI 复用（Antigravity CLI 是 `agy acp`，没有 `agent stdio` 这层）。
+    this.child = spawn(bin, opts.argv ?? grokAgentStdioArgs(opts.model), {
       cwd: this.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],
