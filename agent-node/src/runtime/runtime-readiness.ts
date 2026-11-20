@@ -155,6 +155,14 @@ const SPECS: Record<string, RuntimeSpec> = {
     loginHint: GROK_LOGIN_HINT,
     endpoint: "https://api.x.ai",
   },
+  "antigravity-acp": {
+    cli: "agy",
+    installHint: `安装 Antigravity CLI 1.5.13（验收版本）:curl -fsSL https://antigravity.google/cli/install.sh | bash,${ON_CHILD_PATH}`,
+    authFiles: [".gemini/antigravity-cli"],
+    authEnvKeys: [],
+    loginHint: "在这台机器上运行 `agy acp --login`(Google 登录;SSH 下会打印授权 URL 并接受粘贴 code)",
+    endpoint: "https://antigravity.google",
+  },
   "opencode-cli": {
     cli: "opencode",
     installHint: `安装 anet 固定版本的 opencode-ai(见 anet 文档「OpenCode 节点」),${ON_CHILD_PATH}`,

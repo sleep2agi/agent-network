@@ -34,7 +34,7 @@ export class ValidationError extends Error {
 // **764 次成功完成任务**,当天仍在跑 —— 比两个普通 runtime 的节点(61 次 / 3 次)
 // 都多一个量级。⇒ 任务链路不需要人坐在屏幕前。
 //
-// 🔴 这七个名字与 `agent-network/src/normalize-runtime.ts` 的 `RuntimeName` 一致。
+// 🔴 这八个名字与 `agent-network/src/normalize-runtime.ts` 的 `RuntimeName` 一致。
 //    那边是 CLI 侧的全集;两边分叉过一次(daemon 侧的 VALID_RUNTIMES 早就是 7 个,
 //    只有这里还是 3 个,而记录此事的 #1298 正文写的是「三道闸都关着」——
 //    **一份快照式的盘点,只在写下的那一刻是真的**)。
@@ -46,6 +46,7 @@ export const RUNTIMES = [
   "grok-build-acp",
   "grok-build-cli",
   "opencode-cli",
+  "antigravity-acp",
 ] as const;
 export type Runtime = typeof RUNTIMES[number];
 
