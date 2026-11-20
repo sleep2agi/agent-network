@@ -3914,6 +3914,9 @@ async function setupCommand() {
   if (runtimeSelections.includes("grok-build-acp") && !isInstalled(versions.agentNode) && !runtimeSelections.includes("grok-build-cli")) {
     addPackage("@sleep2agi/agent-node");
   }
+  if (runtimeSelections.includes("antigravity-acp") && !isInstalled(versions.agentNode) && !runtimeSelections.includes("grok-build-cli")) {
+    addPackage("@sleep2agi/agent-node");
+  }
   if (runtimeSelections.includes("grok-build-cli") && !isInstalled(versions.agentNode)) {
     addPackage("@sleep2agi/agent-node@preview");
   }
@@ -3953,7 +3956,7 @@ async function setupCommand() {
   if (runtimeSelections.includes("claude-code-cli")) {
     console.log(`  ${isInstalled(verified.claude) ? "✅" : "❌"} ${formatDetectedVersion(verified.claude)}`);
   }
-  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk") || runtimeSelections.includes("grok-build-acp") || runtimeSelections.includes("grok-build-cli")) {
+  if (runtimeSelections.includes("codex-sdk") || runtimeSelections.includes("claude-agent-sdk") || runtimeSelections.includes("grok-build-acp") || runtimeSelections.includes("grok-build-cli") || runtimeSelections.includes("antigravity-acp")) {
     console.log(`  ${isInstalled(verified.agentNode) ? "✅" : "❌"} ${formatDetectedVersion(verified.agentNode)}`);
   }
   if (runtimeSelections.includes("codex-sdk")) {
@@ -3968,6 +3971,9 @@ async function setupCommand() {
   }
   if (runtimeSelections.includes("grok-build-acp") || runtimeSelections.includes("grok-build-cli")) {
     console.log(`  ⚠ grok 需要安装并登录: grok login 或 x.ai CLI 认证缓存`);
+  }
+  if (runtimeSelections.includes("antigravity-acp")) {
+    console.log(`  ⚠ agy 需要安装并登录 Google 账号: agy acp --login（版本钉在 1.5.13，不跟随自动升级）`);
   }
   if (runtimeSelections.includes("grok-build-cli")) {
     console.warn(`  ⚠ EXPERIMENTAL/DANGEROUS: 网络任务会驱动同一个 Grok TUI；审批归属未完成硬化。`);
@@ -4735,6 +4741,10 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
   if ((runtime === "grok-build-acp" || runtime === "grok-build-cli") && !commandExists("grok")) {
     console.warn(`[anet] Warning: grok CLI not found in PATH.`);
     console.warn(`[anet] Install/login Grok Build first: https://x.ai/cli`);
+  }
+  if (runtime === "antigravity-acp" && !commandExists("agy")) {
+    console.warn(`[anet] Warning: agy (Antigravity CLI) not found in PATH.`);
+    console.warn(`[anet] Install first: curl -fsSL https://antigravity.google/cli/install.sh | bash`);
   }
   // RFC-030 — codex-app-server (codex TUI bridge) runs a standalone
   // `codex app-server`, so it needs the `codex` CLI on PATH (same binary
@@ -6389,6 +6399,7 @@ function createRuntimeChoices() {
     { value: "codex-sdk", name: "codex-sdk — OpenAI Codex, 复用 `codex login` 登录态" },
     { value: "codex-app-server", name: "codex-cli — Codex 共存 TUI（人和 Agent 共用一个 thread）" },
     { value: "grok-build-acp", name: "grok-build-acp — Grok（推荐 / default：headless ACP）, 复用 `grok` CLI 登录态" },
+    { value: "antigravity-acp", name: "antigravity-acp — Google Antigravity（headless ACP）, 复用 `agy` 的 Google 登录态（版本钉 1.5.13）" },
     { value: "opencode-cli", name: "opencode-cli — 公版 OpenCode CLI, Anthropic/OpenAI preset (RFC-029)" },
     // Owner decision 2026-09-25: Grok co-presence is experimental — listed last,
     // behind the default ACP choice, with its limitations on the same line.
@@ -6460,7 +6471,7 @@ async function createInteractiveCommand() {
 
 This wizard creates one agent node for this project:
   - node config: .anet/nodes/<node-name>/config.json
-  - runtime: claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli
+  - runtime: claude-agent-sdk / claude-code-cli / codex-sdk / codex-app-server / grok-build-acp / grok-build-cli / opencode-cli / antigravity-acp
   - optional Telegram channel: text + images from an allowlist user
 `);
 
@@ -6510,6 +6521,9 @@ This wizard creates one agent node for this project:
     opts.runtime = pickedRuntime;
     console.log(`[anet] 请确保已安装并登录 Grok Build CLI: grok login`);
     if (pickedRuntime === "grok-build-cli") printGrokCopresenceWarning(id, undefined, "configured");
+  } else if (pickedRuntime === "antigravity-acp") {
+    opts.runtime = "antigravity-acp";
+    console.log(`[anet] 请确保已安装并登录 Antigravity CLI: agy acp --login（版本钉 1.5.13）`);
   } else if (pickedRuntime === "opencode-cli") {
     await configureOpencodeRuntime(opts, true);
   } else {
@@ -6717,7 +6731,7 @@ async function createCommand(idOverride?: string) {
       console.error(`\n  ❌ --batch 与 --runtime 不能同用。`);
       console.error(`\n     --batch 多节点向导的运行时只能来自内置 vendor 预设`);
       console.error(`     (claude-agent-sdk / claude-code-cli / codex-sdk),它无法表达`);
-      console.error(`     opencode-cli、grok-build-acp、grok-build-cli、codex-app-server。`);
+      console.error(`     opencode-cli、grok-build-acp、grok-build-cli、codex-app-server、antigravity-acp。`);
       console.error(`\n     要指定这些运行时,去掉 --batch,按单节点创建:`);
       console.error(`       anet node create <name> --runtime <runtime>\n`);
       process.exit(1);
@@ -6729,7 +6743,7 @@ async function createCommand(idOverride?: string) {
   const id = idOverride || args[1];
   if (!id) return createInteractiveCommand();
   if (id.startsWith("--")) {
-    console.error("Usage: anet node create <node-name> [--runtime claude-agent-sdk|claude-code-cli|codex-sdk|codex-app-server|grok-build-acp|grok-build-cli|opencode-cli] [--model ...] [--tools ...]");
+    console.error("Usage: anet node create <node-name> [--runtime claude-agent-sdk|claude-code-cli|codex-sdk|codex-app-server|grok-build-acp|grok-build-cli|opencode-cli|antigravity-acp] [--model ...] [--tools ...]");
     console.error("Or run fully interactive: anet node create");
     process.exit(1);
   }
@@ -6789,7 +6803,8 @@ async function createCommand(idOverride?: string) {
     || explicitRuntime === "codex-app-server"
     || explicitRuntime === "grok-build-acp"
     || explicitRuntime === "grok-build-cli"
-    || explicitRuntime === "opencode-cli";
+    || explicitRuntime === "opencode-cli"
+    || explicitRuntime === "antigravity-acp";
 
   // #133 selectRuntime — runtime-first, exported as a helper so create paths
   // (interactive single / batch wizard / sci-team demo) can share the picker.
@@ -6832,6 +6847,8 @@ async function createCommand(idOverride?: string) {
       const requestedTools = opts.tools ? parseAndValidateTools(opts.tools, "grok-build-cli") : undefined;
       printGrokCopresenceWarning(id, requestedTools, "configured");
     }
+  } else if (opts.runtime === "antigravity-acp") {
+    console.log("[anet] 请确保已安装并登录 Antigravity CLI: agy acp --login（版本钉 1.5.13，不跟随自动升级）");
   } else if (opts.runtime === "opencode-cli") {
     await configureOpencodeRuntime(opts, Boolean(process.stdin.isTTY));
   } else {
@@ -7759,7 +7776,8 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     runtime === "claude-agent-sdk" ||
     runtime === "grok-build-acp" ||
     runtime === "grok-build-cli" ||
-    runtime === "opencode-cli"
+    runtime === "opencode-cli" ||
+    runtime === "antigravity-acp"
   ) {
     // spawn agent-node
     const agentArgs = [
@@ -7776,6 +7794,15 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // `anet init project` can write non-JSON-RPC bytes to stdout, surfacing
     // as Grok's `serde error expected value at line 1 column 2`. Cheap
     // (read+write a few KB) and only fires for these three runtimes.
+    //
+    // 2026-11-20 (通信欧 review on #3677) — antigravity-acp 复用 grok-build-acp
+    // 的 ACP 回合实现，但**不需要**这条刷新：agent-node/src/runtime/grok-build-acp/
+    // runtime.ts 里 preview.6 起首选 Http 变体（正是为了躲开 bun/node-server.js/
+    // framing 这串坑），运行期根本不 spawn 这个文件；agy 走同一套。这条历史防御
+    // 只对应「命令行走 stdio 的旧 grok 配置」。加了也只是多写一份没人读的文件，
+    // 反而让人以为它被用到。往后新增的 runtime 别再按名字往这里加——这个"按
+    // runtime 名列举"的模式本身就是这次漏项的根源，更准确的判据应该是"这个节点
+    // 的 channels 配置是否真的走 stdio"，不是"runtime 叫什么名字"（见 #3677 讨论）。
     if (runtime === "grok-build-acp") {
       try {
         const anetDir = join(process.cwd(), ".anet");

@@ -8,7 +8,9 @@ import {
   shouldCreateScheduledGoal,
 } from "./routing";
 
-const RUNTIMES = ["codex-app-server", "codex", "claude", "grok", "opencode"] as const;
+// 2026-11-20 — antigravity 加进来（#3677）：goals/store.ts 的 runtimeBucket() 漏了这个
+// 名字，agent-node 启动时报 "unknown runtime bucket"，/aloop 调度器整个起不来。
+const RUNTIMES = ["codex-app-server", "codex", "claude", "grok", "opencode", "antigravity"] as const;
 
 describe("shouldCreateScheduledGoal — Dashboard native slash pass-through", () => {
   test("authenticated Dashboard /goal and /loop pass through for every agent-node runtime", () => {
