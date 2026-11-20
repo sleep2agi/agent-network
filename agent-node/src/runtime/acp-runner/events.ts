@@ -98,7 +98,7 @@ export function reduceGrokAcpNotification(
   const updateType = typeof update?.sessionUpdate === "string" ? update.sessionUpdate : "";
 
   if (updateType === "agent_message_chunk") {
-    const content = asRecord(update.content);
+    const content = asRecord(update?.content);
     if (content?.type === "text" && typeof content.text === "string") {
       state.replyText += content.text;
       state.chunks++;
