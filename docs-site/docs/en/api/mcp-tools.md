@@ -148,6 +148,8 @@ Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and 
 | `get_config_update` | Node pulls its pending config update |
 | `ack_config_update` | Node reports the config-update outcome |
 | `read_node_rules_file` | Ask a node to send back the rules file in its working directory (claude → CLAUDE.md, others → AGENTS.md); no path argument, poll `get_rules_file_result` (app#225) |
+| `start_agy_login` | Start `agy acp --login` on an Antigravity node and return the Google authorization URL; poll `get_rules_file_result` for `url` / `login_id` / `expires_at`. User logins only. |
+| `submit_agy_login_code` | Submit the authorization code or the full redirect URL (`{request_id, login_id, code}`); relayed once, purged right after the node acknowledges. User logins only. |
 | `write_node_rules_file` | Ask a node to overwrite its rules file with `content`; no path argument, 256 KB cap (app#225) |
 | `list_node_skills` | Ask a node to list the skills its runtime actually loads (`{name, scope, path_rel, description}`, read-only); directories are chosen by the node per runtime, no path argument, poll `get_rules_file_result` |
 | `read_node_skill` | Ask a node to send back one skill's SKILL.md (read-only, 256 KB cap); the only input is the skill `name` (`[A-Za-z0-9._-]{1,64}`), never a path |

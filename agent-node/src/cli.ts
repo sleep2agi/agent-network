@@ -75,6 +75,7 @@ import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
 import { packageRootFrom } from "./runtime/package-root";
 import { processRulesFileRequests, startRulesFilePolling } from "./runtime/rules-file";
+import { createAgyLoginManager } from "./runtime/agy-login";
 import { createLogRedactor, parseLogsTailParams, tailNodeLogs } from "./runtime/node-logs";
 import { chooseGrokBinary, grokBinaryPinToRecord, findVerifiedGrokCandidates, grokRecoveryHint } from "./runtime/grok-binary-pin";
 
@@ -1610,9 +1611,13 @@ const taskTraceLog = (line: string) => {
 
 // 规则文件门铃(rules_file / skills / files / logs_tail)的依赖。logs_tail 读本进程自己的
 // 日志目录;脱敏器每次现建,节点 token 轮换后(reloadNodeToken)立刻按新值遮。
+// 2026-11-20 — agy 登录会话管理器：一个进程一份（单并发由它保证）。
+const agyLoginManager = RUNTIME === "antigravity" ? createAgyLoginManager() : null;
+
 function rulesFileDeps() {
   return {
     callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn,
+    ...(agyLoginManager ? { agyLogin: agyLoginManager } : {}),
     logsTail: (raw: string | undefined) => tailNodeLogs(
       PRIVATE_LOG_DIR,
       parseLogsTailParams(raw),
@@ -2162,6 +2167,9 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
+      // 2026-11-20 — agy 登录通道（设计稿 handoff/agy-login-channel-design.md）。
+      // 只在 antigravity 节点上报；老 daemon 没这个键 → 客户端回退「复制命令」。
+      ...(RUNTIME === "antigravity" ? { agy_login_capable: true } : {}),
       ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
       ...(variantReadback && variantSession?.isRunning ? { opencode_variant_config_capable: true } : {}),
       // Agent (Build) hot switch: advertised only when this process actually has

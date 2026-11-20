@@ -99,6 +99,39 @@ describe("门铃循环（#225 验收第 5 条：hub 塞路径也写不到别处�
     expect(acks[1]).toMatchObject({ request_id: "rf_ok", status: "done", exists: false, content: "" });
   });
 
+  test("agy 登录：start 回 URL，submit 把码交给管理器（不打印）", async () => {
+    const d = await tmpDir();
+    const hub = fakeHub([
+      { request_id: "lg_1", op: "agy_login_start" },
+      { request_id: "lg_2", op: "agy_login_submit", content: JSON.stringify({ login_id: "L1", code: "good-code" }) },
+    ]);
+    const seen: string[] = [];
+    const agyLogin = {
+      start: async () => ({ ok: true as const, session: { loginId: "L1", url: "https://accounts.google.com/o/oauth2/auth?state=x", expiresAt: Date.now() + 300000 } }),
+      submit: async (id: string, code: string) => { seen.push(`${id}:${code}`); return { ok: true as const }; },
+      cancel: () => true,
+    };
+    const logLines: string[] = [];
+    expect(await processRulesFileRequests({ ...hub, runtime: "antigravity", workDir: d, agyLogin, log: m => logLines.push(m), warn: () => {} })).toBe(2);
+    expect(seen).toEqual(["L1:good-code"]);
+    const acks = hub.calls.filter(c => c.method === "ack_rules_file_request").map(c => c.params);
+    expect(acks[0]).toMatchObject({ request_id: "lg_1", status: "done", file_name: "agy-login" });
+    expect(JSON.parse(acks[0].content)).toMatchObject({ login_id: "L1" });
+    expect(acks[1]).toMatchObject({ request_id: "lg_2", status: "done" });
+    // URL 只走 ack 结果给发起者；**日志**里不能出现 URL 或授权码
+    const logs = logLines.join("\n");
+    expect(logs).not.toContain("accounts.google.com");
+    expect(logs).not.toContain("good-code");
+  });
+
+  test("agy 登录：非 antigravity 节点 ack failed，不假装成功", async () => {
+    const d = await tmpDir();
+    const hub = fakeHub([{ request_id: "lg_x", op: "agy_login_start" }]);
+    expect(await processRulesFileRequests({ ...hub, runtime: "claude", workDir: d, ...quiet })).toBe(1);
+    const ack = hub.calls.find(c => c.method === "ack_rules_file_request")!.params;
+    expect(ack).toMatchObject({ request_id: "lg_x", status: "failed" });
+  });
+
   test("没有 pending → 0 条，且不 ack", async () => {
     const hub = fakeHub([]);
     expect(await processRulesFileRequests({ ...hub, runtime: "claude", workDir: await tmpDir(), ...quiet })).toBe(0);

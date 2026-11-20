@@ -4377,6 +4377,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const NODE_FILE_PATH_MAX = 1024;
   const NODE_FILES_RESULT_MAX_CHARS = 1024 * 1024;
   const isFilesOp = (op: string) => op === "files_list" || op === "file_read";
+  // 2026-11-20 — agy 登录（设计稿 handoff/agy-login-channel-design.md）：复用同一张请求表与
+  // 门铃/拉取/ack 通道，只加两个 op。start 的结果（授权 URL）走 result_content；submit 的
+  // content 里带授权码，ack 之后立刻清掉（见 ack_rules_file_request）。
+  const isLoginOp = (op: string) => op === "agy_login_start" || op === "agy_login_submit";
+  const AGY_LOGIN_CODE_MAX = 4096;
   const normalizeNodeRelPath = (raw: unknown): string | null => {
     if (raw === undefined || raw === null) return "";
     if (typeof raw !== "string" || raw.length > NODE_FILE_PATH_MAX) return null;
@@ -4417,7 +4422,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   };
 
   const enqueueRulesFileRequest = (
-    op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | "logs_tail",
+    op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | "logs_tail" | "agy_login_start" | "agy_login_submit",
     a: { node_id?: string; child_node_id?: string; alias?: string; network_id?: string; content?: string },
   ) => {
     const effectiveNetId = getNetworkId(a.network_id);
@@ -4436,6 +4441,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       a = { ...a, content: rel };
     }
     if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId, isLogsOp(op) ? "read node logs" : isSkillsOp(op) ? `${op} node skills` : `${op} rules file`);
+    if (op === "agy_login_submit") {
+      // content 是 {login_id, code}：只做长度/形状校验，code 不做任何日志。
+      if (typeof a.content !== "string" || a.content.length === 0 || a.content.length > AGY_LOGIN_CODE_MAX) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_login_code_payload", max: AGY_LOGIN_CODE_MAX }) }] };
+      }
+      let parsed: any = null;
+      try { parsed = JSON.parse(a.content); } catch { parsed = null; }
+      if (!parsed || typeof parsed.login_id !== "string" || typeof parsed.code !== "string" || !parsed.code.trim()) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_login_code_payload", reason: "expect {login_id, code}" }) }] };
+      }
+    }
     if (op === "skill_read" && (typeof a.content !== "string" || !SKILL_NAME_RE.test(a.content) || a.content === "." || a.content === "..")) {
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "invalid_skill_name", reason: "name must match [A-Za-z0-9._-]{1,64} and not be . or .." }) }] };
     }
@@ -4525,7 +4541,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // Separate single-flight lanes: the client opens the rules file and the
     // skills list together; one must not block the other.
     const inFlight = db.get<{ request_id: string; created_at: number; pulled_at: number | null }>(
-      isLogsOp(op)
+      isLoginOp(op)
+        ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('agy_login_start', 'agy_login_submit') ORDER BY created_at DESC LIMIT 1"
+        : isLogsOp(op)
         ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op = 'logs_tail' ORDER BY created_at DESC LIMIT 1"
         : isFilesOp(op)
         ? "SELECT request_id, created_at, pulled_at FROM node_rules_requests WHERE node_id = ?1 AND status IN ('pending', 'in_progress') AND op IN ('files_list', 'file_read') ORDER BY created_at DESC LIMIT 1"
@@ -4548,7 +4566,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     const networkId = node.network_id || "default";
     db.run(
       `INSERT INTO node_rules_requests (request_id, node_id, network_id, op, content, status, created_at, created_by_token) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
-      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" || isFilesOp(op) || isLogsOp(op) ? a.content! : null, Date.now(), callerTokenId || "unknown"],
+      [requestId, nodeId, networkId, op, op === "write" || op === "skill_read" || op === "agy_login_submit" || isFilesOp(op) || isLogsOp(op) ? a.content! : null, Date.now(), callerTokenId || "unknown"],
     );
     pushEvent(node.alias, { type: "rules_file", request_id: requestId }, networkId);
     return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, op }) }] };
@@ -4575,6 +4593,46 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, content, network_id }) => enqueueRulesFileRequest("write", { node_id, child_node_id, alias, content, network_id }),
+  );
+
+  // 2026-11-20 — agy 登录（handoff/agy-login-channel-design.md）：同一个门铃/拉取/ack 通道。
+  // start 的授权 URL 走 result_content；submit 的 content 是 {login_id, code}，ack 后立即清除。
+  server.tool(
+    "start_agy_login",
+    "Start `agy acp --login` on an Antigravity node and return the Google authorization URL. Poll get_rules_file_result with request_id: {url, login_id, expires_at}.",
+    {
+      ...NODE_ID_ALIAS_FIELDS,
+      alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or rules_file_capable session alias."),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ node_id, child_node_id, alias, network_id }) => {
+      // 登录是人的操作：节点令牌一律拒绝（否则会被当成「可调但没列出」）。
+      if (callerTokenIsNetwork) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "user_token_required" }) }] };
+      return enqueueRulesFileRequest("agy_login_start", { node_id, child_node_id, alias, network_id });
+    },
+  );
+
+  server.tool(
+    "submit_agy_login_code",
+    "Submit the Google authorization code (or the full redirect URL) for a started agy login. Code is relayed once and purged after the node acknowledges.",
+    {
+      request_id: z.string().min(1).max(200).describe("request_id from start_agy_login's result (not the login_id)."),
+      login_id: z.string().min(1).max(200),
+      code: z.string().min(1).max(AGY_LOGIN_CODE_MAX),
+      node_id: z.string().max(200).optional(),
+      alias: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ request_id, login_id, code, node_id: _nodeId, alias: _alias, network_id: _netId }) => {
+      if (callerTokenIsNetwork) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "user_token_required" }) }] };
+      // 绑到发起 start 的那个请求/节点：不信任调用方另指的 node/alias。
+      const row = db.get<any>("SELECT request_id, node_id, network_id, op, status FROM node_rules_requests WHERE request_id = ?1", request_id);
+      if (!row || row.op !== "agy_login_start") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "login_request_not_found" }) }] };
+      }
+      const a: any = { node_id: row.node_id.startsWith("session:") ? undefined : row.node_id, alias: row.node_id.startsWith("session:") ? row.node_id.slice("session:".length) : alias, network_id: row.network_id };
+      return enqueueRulesFileRequest("agy_login_submit", { ...a, content: JSON.stringify({ login_id, code }) });
+    },
   );
 
   server.tool(
@@ -4733,6 +4791,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           requestId,
         ],
       );
+      if (req.op === "agy_login_submit") {
+        // 授权码只活到节点 ack 为止：内容立刻清掉，行本身留作审计。
+        db.run(
+          "UPDATE node_rules_requests SET content = NULL, content_purged_at = ?1 WHERE request_id = ?2",
+          [Date.now(), requestId],
+        );
+      }
       return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, request_id: requestId, status }) }] };
     },
   );
@@ -4751,7 +4816,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // SEC-1：结果行的网络必须等于调用方作用域，否则当不存在。
       // Project folder results: only the (user) token that asked may read them.
       // Run-log results: same rule — only the token that asked.
-      const foreignFilesRow = !!row && (isFilesOp(row.op) || isLogsOp(row.op)) && (callerTokenIsNetwork || row.created_by_token !== (callerTokenId || "unknown"));
+      const foreignFilesRow = !!row && (isFilesOp(row.op) || isLogsOp(row.op) || isLoginOp(row.op)) && (callerTokenIsNetwork || row.created_by_token !== (callerTokenId || "unknown"));
       if (!row || row.network_id !== (effectiveNetId || "default") || foreignFilesRow) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found", request_id: requestId }) }] };
       }

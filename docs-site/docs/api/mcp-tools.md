@@ -132,6 +132,8 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `get_config_update` | 节点拉取待应用的配置更新 |
 | `ack_config_update` | 节点回报配置更新结果 |
 | `read_node_rules_file` | 请节点回传其工作目录下的规则文件（claude → CLAUDE.md，其余 → AGENTS.md）；无路径参数，结果用 `get_rules_file_result` 轮询（app#225） |
+| `start_agy_login` | 在 Antigravity（agy）节点上启动 `agy acp --login`，返回 Google 授权链接；结果（`url` / `login_id` / `expires_at`）用 `get_rules_file_result` 轮询。仅用户令牌 |
+| `submit_agy_login_code` | 提交授权码或落地页完整 URL（`{request_id, login_id, code}`）；码只转发一次，节点 ack 后立即清除。仅用户令牌 |
 | `write_node_rules_file` | 请节点用 `content` 覆盖其规则文件；无路径参数，256 KB 上限（app#225） |
 | `list_node_skills` | 请节点列出它的运行时实际加载的技能（`{name, scope, path_rel, description}`，只读）；目录由节点按运行时决定，无路径参数，结果用 `get_rules_file_result` 轮询 |
 | `read_node_skill` | 请节点回传某个技能的 SKILL.md（只读，256 KB 上限）；唯一入参是技能名 `name`（`[A-Za-z0-9._-]{1,64}`），不接受路径 |
