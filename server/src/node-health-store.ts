@@ -43,7 +43,13 @@ export const codexLoginSchema = z.object({
   fingerprint: z.string().regex(/^[0-9a-f]{8}$/),
   shared_with: z.number().int().min(0).max(100_000),
   shared_home_with: z.number().int().min(0).max(100_000).optional().catch(undefined),
-  codex_home: z.string().max(1024).regex(/^[^\u0000-\u001f\u007f]*$/).optional().catch(undefined),
+  // 2026-11-20：同 adoption-candidates.ts 那次真机坑——\u0000-\u001f 是 JS/JSON Schema 都
+  // 认的 Unicode 转义，但 agy（Go 写的 ACP server）走 Go regexp(RE2) 编译 pattern，不认
+  // \u，会让整个 report_status 的 schema 校验失败。这个字段本身目前走 z.unknown() 对外
+  // 广播（codexLoginSchema 只在收到数据后内部 safeParse，不进 MCP 工具的 advertised
+  // schema），不是这次真机报错的直接原因，但字符范围不变、换成这个仓库里其它地方
+  // 已经在用的 \x 写法，省得以后真的接进 advertised schema 时再踩一次同样的坑。
+  codex_home: z.string().max(1024).regex(/^[^\x00-\x1f\x7f]*$/).optional().catch(undefined),
 });
 export type CodexLoginHealth = z.infer<typeof codexLoginSchema>;
 
