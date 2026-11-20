@@ -4605,7 +4605,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).optional().describe("Instead of node_id: node or rules_file_capable session alias."),
       network_id: z.string().max(200).optional(),
     },
-    async ({ node_id, child_node_id, alias, network_id }) => enqueueRulesFileRequest("agy_login_start", { node_id, child_node_id, alias, network_id }),
+    async ({ node_id, child_node_id, alias, network_id }) => {
+      // 登录是人的操作：节点令牌一律拒绝（否则会被当成「可调但没列出」）。
+      if (callerTokenIsNetwork) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "user_token_required" }) }] };
+      return enqueueRulesFileRequest("agy_login_start", { node_id, child_node_id, alias, network_id });
+    },
   );
 
   server.tool(
@@ -4620,6 +4624,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       network_id: z.string().max(200).optional(),
     },
     async ({ request_id, login_id, code, node_id: _nodeId, alias: _alias, network_id: _netId }) => {
+      if (callerTokenIsNetwork) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "user_token_required" }) }] };
       // 绑到发起 start 的那个请求/节点：不信任调用方另指的 node/alias。
       const row = db.get<any>("SELECT request_id, node_id, network_id, op, status FROM node_rules_requests WHERE request_id = ?1", request_id);
       if (!row || row.op !== "agy_login_start") {
