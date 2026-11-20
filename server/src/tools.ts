@@ -9,6 +9,7 @@ import { markTaskActivity } from "./task-activity.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestSecretUi } from "./secret-request-ui.js";
+import { markAcked } from "./acked-unconfirmed.js";
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
 import { adoptedCloneSourceRow, requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
@@ -1807,6 +1808,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       let ackSql = "UPDATE inbox SET acked = 1 WHERE id = ?1 AND session_name = ?2 AND acked = 0";
       ackSql = addScope(ackSql, ackParams, effectiveNetId);
       const result = db.run(ackSql, ackParams);
+      if (result.changes > 0) {
+        // B 止血：记下「这条被签收了」。若窗口内该节点没有任何回复，会被扫描回退未读并告警
+        // （口径 ①，负责⼈ 2026-11-20）。登记失败绝不能影响 ack 本身。
+        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null }); } catch {}
+      }
       if (result.changes === 0) {
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or not yours" }) }],
