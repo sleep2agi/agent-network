@@ -57,6 +57,8 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   retry_task: "both", get_task: "both", list_tasks: "both", cancel_task: "both", reassign_task: "both",
   send_desktop_message: "both", broadcast: "both", get_completions: "both",
   update_node_config: "both", read_node_rules_file: "both", write_node_rules_file: "both",
+  // 2026-11-20 — agy 登录：只有人（用户令牌）能发起；节点按名直调 get/ack 走 protocol。
+  start_agy_login: "user", submit_agy_login_code: "user",
   list_node_skills: "both", read_node_skill: "both", get_rules_file_result: "both",
   restart_node: "both", list_host_supervisors: "both", create_node: "both", clone_node: "both", stop_node: "both", delete_node: "both", start_node: "both",
   upsert_network_secret: "both", list_network_secrets: "both", upsert_provider: "both", update_provider: "both",

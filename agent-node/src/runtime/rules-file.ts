@@ -94,7 +94,10 @@ export interface RulesFileRequest {
   /** read/write = 规则文件;skills_list/skill_read = 只读技能(node-skills.ts),content 是技能名;
    *  files_list/file_read = 只读项目文件夹(node-files.ts),content 是相对工作目录的路径;
    *  logs_tail = 只读本节点运行日志(node-logs.ts),content 是过滤参数 JSON(没有路径)。 */
-  op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | "logs_tail";
+  op: "read" | "write" | "skills_list" | "skill_read" | "files_list" | "file_read" | "logs_tail"
+    /** 2026-11-20 — agy 登录（handoff/agy-login-channel-design.md）。start 的 content 为空；
+     *  submit 的 content 是 hub 转来的 {login_id, code}（授权码只进子进程 stdin，不写日志）。 */
+    | "agy_login_start" | "agy_login_submit";
   content?: string;
 }
 
@@ -110,6 +113,12 @@ export interface ProcessRulesFileDeps {
   /** logs_tail 用:读本进程自己的日志并脱敏(agent-node 的 runtime/node-logs.ts,由 cli.ts 注入)。
    *  参数是 hub 转来的过滤 JSON;没有路径。缺省(例如 claude-code 通道进程)时 logs_tail 回 failed。 */
   logsTail?: (rawParams: string | undefined) => Promise<{ files: string[]; lines: unknown[]; matched: number }>;
+  /** agy 登录会话管理器（agy-login.ts 的 createAgyLoginManager()）；非 antigravity 节点不注入。 */
+  agyLogin?: {
+    start(): Promise<{ ok: true; session: { loginId: string; url: string; expiresAt: number } } | { ok: false; reason: string }>;
+    submit(loginId: string, code: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+    cancel(loginId?: string): boolean;
+  };
 }
 
 /** 一次门铃最多处理这么多条，防止 hub 侧异常堆积把节点拖进死循环。 */
@@ -208,6 +217,32 @@ async function drainRulesFileRequests(deps: ProcessRulesFileDeps): Promise<numbe
           content: JSON.stringify(r),
         });
         deps.log(`[files] read ${r.path} kind=${r.kind} (${req.request_id})`);
+      } else if (req.op === "agy_login_start") {
+        if (!deps.agyLogin) throw new Error("this node does not serve agy login (runtime is not antigravity)");
+        const r = await deps.agyLogin.start();
+        if (!r.ok) throw new Error(`agy login start failed: ${r.reason}`);
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: "agy-login",
+          exists: true,
+          content: JSON.stringify({ url: r.session.url, login_id: r.session.loginId, expires_at: r.session.expiresAt }),
+        });
+        // 不打印 URL。URL 里含 state/挑战参数，只留在 hub 的结果里给发起者。
+        deps.log(`[agy-login] start ok (${req.request_id})`);
+      } else if (req.op === "agy_login_submit") {
+        if (!deps.agyLogin) throw new Error("this node does not serve agy login (runtime is not antigravity)");
+        const parsed = JSON.parse(String(req.content || "{}"));
+        const r = await deps.agyLogin.submit(String(parsed.login_id || ""), String(parsed.code || ""));
+        if (!r.ok) throw new Error(`agy login submit failed: ${r.reason}`);
+        await deps.callCommHub("ack_rules_file_request", {
+          request_id: req.request_id,
+          status: "done",
+          file_name: "agy-login",
+          exists: true,
+          content: JSON.stringify({ ok: true }),
+        });
+        deps.log(`[agy-login] submit ok (${req.request_id})`);
       } else if (req.op === "logs_tail") {
         if (!deps.logsTail) throw new Error("this process does not serve its run log");
         const r = await deps.logsTail(req.content);
