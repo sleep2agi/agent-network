@@ -48,6 +48,7 @@ import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilte
 import { canListOpencodeSessions } from "./opencode-session-access.js";
 import { runtimeIsOpencode } from "./opencode-runtime.js";
 import { isHumanToken } from "./human-token.js";
+import { pendingSecretRequests, clearSecretRequest } from "./secret-request-ui.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -4862,6 +4863,11 @@ return Bun.serve({
           : result.error === "secret_store_busy" || result.error === "secret_queue_busy" ? 409
           : 400;
         return withCors(req, Response.json(result, { status }));
+      }
+      // #4827 —— App 读快照走的是 POST {action:"list"}，pending 挂这里才是它真正能看到的地方。
+      if (action === "list") {
+        const pending = pendingSecretRequests(decodeURIComponent(nodeSecretReq[1]));
+        if (pending) return withCors(req, Response.json({ ...result, pending }));
       }
       return withCors(req, Response.json(result));
     }
