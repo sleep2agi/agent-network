@@ -1,17 +1,6 @@
 name: Supervisor identity core
 on:
   pull_request:
-    paths:
-      - 'server/src/create-node.ts'
-      - 'server/src/node-token-identity.ts'
-      - 'server/src/host-supervisor-identity*'
-      - 'server/src/tools.ts'
-      - 'server/src/server.ts'
-      - 'tests/test1109-supervisor-identity/**'
-      - 'tests/test678-daemon-token-owner/mutations.ts'
-      - 'docs/tests/report-test1109-supervisor-identity.txt'
-      - 'docs/tests/release-v0.9.0-preview.137.md'
-      - '.github/workflows/supervisor-identity-core.yml'
 permissions:
   contents: read
 # #2136 —— 同一 PR 重新 push 时**取消上一轮还在排队的运行**。
@@ -22,7 +11,30 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      match: ${{ steps.filter.outputs.match }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad
+        with:
+          filters: |
+            match:
+              - 'server/src/create-node.ts'
+              - 'server/src/node-token-identity.ts'
+              - 'server/src/host-supervisor-identity*'
+              - 'server/src/tools.ts'
+              - 'server/src/server.ts'
+              - 'tests/test1109-supervisor-identity/**'
+              - 'tests/test678-daemon-token-owner/mutations.ts'
+              - 'docs/tests/report-test1109-supervisor-identity.txt'
+              - 'docs/tests/release-v0.9.0-preview.137.md'
+              - '.github/workflows/supervisor-identity-core.yml'
   supervisor-identity:
+    needs: changes
+    if: needs.changes.outputs.match == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
