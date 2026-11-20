@@ -132,7 +132,7 @@ export function reduceOpencodeAcpNotification(
   const updateType = typeof update?.sessionUpdate === "string" ? update.sessionUpdate : "";
 
   if (updateType === "agent_message_chunk") {
-    const content = asRecord(update.content);
+    const content = asRecord(update?.content);
     if (content?.type === "text" && typeof content.text === "string") {
       state.replyText += content.text;
       state.chunks++;
@@ -143,7 +143,7 @@ export function reduceOpencodeAcpNotification(
   }
 
   if (updateType === "agent_thought_chunk") {
-    const content = asRecord(update.content);
+    const content = asRecord(update?.content);
     if (content?.type === "text" && typeof content.text === "string") {
       state.thoughtText += content.text;
       state.thoughtChunks++;

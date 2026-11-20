@@ -34,6 +34,8 @@ export interface JsonRpcNotification<P = unknown> {
   params?: P;
 }
 
+export type JsonRpcResponse<R = unknown> = JsonRpcSuccess<R> | JsonRpcError;
+
 export type JsonRpcMessage =
   | JsonRpcRequest
   | JsonRpcSuccess
