@@ -4736,6 +4736,10 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
     console.warn(`[anet] Warning: grok CLI not found in PATH.`);
     console.warn(`[anet] Install/login Grok Build first: https://x.ai/cli`);
   }
+  if (runtime === "antigravity-acp" && !commandExists("agy")) {
+    console.warn(`[anet] Warning: agy (Antigravity CLI) not found in PATH.`);
+    console.warn(`[anet] Install first: curl -fsSL https://antigravity.google/cli/install.sh | bash`);
+  }
   // RFC-030 — codex-app-server (codex TUI bridge) runs a standalone
   // `codex app-server`, so it needs the `codex` CLI on PATH (same binary
   // as codex-sdk, but the app-server subcommand). agent-node itself is
@@ -7759,7 +7763,8 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     runtime === "claude-agent-sdk" ||
     runtime === "grok-build-acp" ||
     runtime === "grok-build-cli" ||
-    runtime === "opencode-cli"
+    runtime === "opencode-cli" ||
+    runtime === "antigravity-acp"
   ) {
     // spawn agent-node
     const agentArgs = [

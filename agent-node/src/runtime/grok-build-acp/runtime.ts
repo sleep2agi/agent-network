@@ -80,6 +80,13 @@ export interface GrokAcpTurnOptions {
    * agy 目前没有验证过的 set_model 语义，接的时候传 false，按 argv 记 modelSource。
    */
   enforceModelReadback?: boolean;
+  /**
+   * 2026-11-20 —— ACP `initialize` 的 `protocolVersion`。Grok 的服务端对类型宽容，
+   * 一直发字符串 `"1"`（默认不变）；agy（Go 写的 ACP server）对 JSON 类型敏感，
+   * 字符串会报 `cannot unmarshal string into Go struct field …protocolVersion of
+   * type int`（真机实测抓到），agy 侧传数字 `1`。
+   */
+  protocolVersion?: number | string;
   timeoutMs?: number;
   /**
    * #261 P1 redirect (2026-06-28) — handshake deadline (initialize +
@@ -267,7 +274,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     }
     const backendToolsHint = ["x_keyword_search", "x_user_search", "video_gen", "web_search"];
     const initParams: Record<string, unknown> = {
-      protocolVersion: "1",
+      protocolVersion: opts.protocolVersion ?? "1",
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
         // Only advertise capabilities implemented by GrokAcpClient.

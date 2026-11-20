@@ -20,5 +20,9 @@ export function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnResult> 
     binary: opts.binary ?? agyBinary(),
     argv: [...AGY_ACP_ARGV],
     enforceModelReadback: false,
+    // 真机实测（2026-11-20）：agy 的 ACP server 是 Go 写的，initialize 的
+    // protocolVersion 字段类型是 int，Grok 默认发的字符串 "1" 在这里会被
+    // Go 的 JSON 反序列化拒绝（-32602 unmarshal error）。agy 要数字。
+    protocolVersion: 1,
   });
 }

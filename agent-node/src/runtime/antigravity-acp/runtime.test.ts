@@ -16,4 +16,8 @@ describe("antigravity-acp turn wrapper", () => {
     expect(src).toContain('from "../grok-build-acp/runtime"');
     expect(src).not.toContain("new GrokAcpClient()");
   });
+  it("sends protocolVersion as a number (agy's Go ACP server rejects grok's string \"1\")", () => {
+    // 真机实测 2026-11-20：不传这个会报 -32602 unmarshal string into Go struct field …int。
+    expect(src).toContain("protocolVersion: 1");
+  });
 });
