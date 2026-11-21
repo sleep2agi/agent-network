@@ -78,8 +78,11 @@ if (!gte(cur, parts(PARSE_FLOOR))) {
 
 if (!gte(cur, parts(SUPPORTED))) {
   // 警告不退出 —— 与 cli.ts 的既有立场一致。走 stderr，不污染任何解析 stdout 的调用方。
-  console.error('[anet] \u26a0 Node ' + process.versions.node + ' 低于受支持的 >=' + SUPPORTED
-    + '；能跑，但不保证。升级: nvm install ' + SUPPORTED.split('.')[0]);
+  // 2026-11-22（负责人）：说人话，且只出现一次 —— 之前 `anet pair` 会在这一行之后再打一条
+  // 同义提示，用户看到两条警告。现在这一层统一负责措辞，commands 不再重复打印。
+  console.error('[anet] \u26a0\ufe0f  当前 Node v' + process.versions.node + ' 低于本包 engines 要求的 '
+    + SUPPORTED + ' —— 建议升级到 >=' + SUPPORTED + '（nvm install ' + SUPPORTED.split('.')[0]
+    + '），否则可能有不明确的行为差异（本次不阻断）。');
 }
 
 var path = require('path');

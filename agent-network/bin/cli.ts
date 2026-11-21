@@ -15593,7 +15593,7 @@ function pairCommand(): void {
     }, null, 2));
     return;
   }
-  if (nodeWarning) console.log(nodeWarning);
+  // 警告由 anet.cjs 启动层统一打印（避免同一条提示出现两次）；--json 仍带字段。
   console.log(pairInfo());
 }
 
