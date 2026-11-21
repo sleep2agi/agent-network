@@ -48,6 +48,7 @@ import { inboxAtIsoUtc, inboxScope, inboxCrossNetworkRejected, inboxNetworkFilte
 import { canListOpencodeSessions } from "./opencode-session-access.js";
 import { runtimeIsOpencode } from "./opencode-runtime.js";
 import { isHumanToken } from "./human-token.js";
+import { getMachineAlias, setMachineAlias, normalizeMachineAlias, countNodesOnHost, MACHINE_ALIAS_MAX } from "./machine-alias.js";
 import { pendingSecretRequests, clearSecretRequest } from "./secret-request-ui.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
@@ -7513,6 +7514,32 @@ return Bun.serve({
     }
 
     // ── REST: tasks table (V2) ──
+    // 机器别名（admin 2026-11-21）：按 hostname 聚合，同一台机器的多个节点共享一个别名。
+    const machineAliasMatch = url.pathname.match(/^\/api\/machines\/([^/]+)$/);
+    if (machineAliasMatch) {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+      const host = decodeURIComponent(machineAliasMatch[1] ?? "");
+      if (!host) return withCors(req, Response.json({ ok: false, error: "hostname_required" }, { status: 400 }));
+      if (req.method === "GET") {
+        const row = getMachineAlias(host);
+        return withCors(req, Response.json({
+          ok: true, hostname: host, alias: row?.alias ?? null, updated_at: row?.updated_at ?? null,
+          nodes_on_host: countNodesOnHost(host),
+        }));
+      }
+      if (req.method === "PUT") {
+        // 只允许人改机器名：节点令牌改名等于允许 agent 伪装机器身份。
+        if (!isHumanToken(restAuth.tokenId)) return userTokenRequired(req);
+        let body: any;
+        try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+        const alias = normalizeMachineAlias(body?.alias);
+        if (!alias) return withCors(req, Response.json({ ok: false, error: "invalid_machine_alias", max: MACHINE_ALIAS_MAX }, { status: 400 }));
+        const row = setMachineAlias(host, alias, restAuth.username ?? null);
+        return withCors(req, Response.json({ ok: true, hostname: row.hostname, alias: row.alias, updated_at: row.updated_at, nodes_on_host: countNodesOnHost(host) }));
+      }
+      return withCors(req, Response.json({ ok: false, error: "method_not_allowed" }, { status: 405 }));
+    }
+
     // #4987 —— 收件箱可见入口（只读，只读自己的）。
     // 背景：Hub 一直能算 inbox_pending=N，但没有任何接口能列出那 N 条；
     // 运维/用户只能看到计数，无法自证「对方到底发了什么」。
