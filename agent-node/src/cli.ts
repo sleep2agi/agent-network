@@ -5038,6 +5038,11 @@ async function processWithAntigravity(
   const result = await runAgyAcpTurn({
     prompt: buildGrokCommhubPrompt(task, from),
     cwd: process.cwd(),
+    // #3704 follow-up（负责人 2026-11-21 真机）：AGY 这条链从来没把配置的模型传进来，
+    // applyConfiguredModel 拿到空 requested ⇒ 每次都按会话默认模型跑
+    //（真机表现：配 claude-sonnet-5-5-high，自报 "Gemini 4 Neon"）。grok 早已传
+    // `model: MODEL || undefined`，这里补齐同一行。
+    model: MODEL || undefined,
     mcpServers,
     // agy 的 turn 没有单独的超时配置：给一个和 grok 一样的 300s 上限，
     // 之后按真机表现再决定要不要独立 flags。
