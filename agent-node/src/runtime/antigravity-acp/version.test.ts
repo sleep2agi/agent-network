@@ -17,9 +17,10 @@ describe("agy version pin", () => {
     expect(compareAgyVersion(parseAgyVersion("1.5.12"))).toBe("older");
     expect(compareAgyVersion(null)).toBe("unknown");
   });
-  it("explains why newer/older/unknown are blocked", () => {
+  it("newer/older are advisory (not blockers)", () => {
     expect(agyReadinessMessage("pinned", parseAgyVersion("1.5.13"))).toContain("已验收");
-    expect(agyReadinessMessage("newer", parseAgyVersion("1.5.14"))).toContain("先审过");
+    expect(agyReadinessMessage("newer", parseAgyVersion("1.5.14"))).toContain("不阻断");
+    expect(agyReadinessMessage("older", parseAgyVersion("1.5.12"))).toContain("不阻断");
     expect(agyReadinessMessage("older", parseAgyVersion("1.5.12"))).toContain("1.5.13");
     expect(agyReadinessMessage("unknown", null)).toContain("PATH");
   });
