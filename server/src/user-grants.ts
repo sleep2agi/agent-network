@@ -95,3 +95,18 @@ export function userManageScope(networkId: string, userId: string): { kind: "glo
   }
   return { kind: "departments", deptIds: ids };
 }
+
+/**
+ * 单节点读写判定（第二步，HTTP 层强制，负责人 接手部分）。
+ *   · global ⇒ 放行；
+ *   · 空授权（deptIds 为空）⇒ 不额外拦——这层只narrow「明确被授了部门范围」的人，
+ *     没有任何 manage_nodes 授权的人照旧由既有的网络角色判定说了算（node-list 的收窄用的是同一条口径）；
+ *   · 有部门范围、节点没有部门 ⇒ 拒绝（无部门节点只归 global，拍板口径）；
+ *   · 有部门范围、节点的部门在范围内 ⇒ 放行，否则拒绝。
+ */
+export function canUserManageNode(scope: { kind: "global" } | { kind: "departments"; deptIds: ReadonlySet<string> }, nodeDepartmentId: string | null): boolean {
+  if (scope.kind === "global") return true;
+  if (scope.deptIds.size === 0) return true;
+  if (!nodeDepartmentId) return false;
+  return scope.deptIds.has(nodeDepartmentId);
+}

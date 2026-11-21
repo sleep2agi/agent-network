@@ -16,7 +16,7 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
-import { userManageScope, USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
+import { userManageScope, canUserManageNode, USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
 import { isInboxTightening, isPermissionModeTightening } from "./permission-tightening.js";
 import { permissionManagementAudit, permissionManagementDenial } from "./node-permission-management.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
@@ -532,6 +532,24 @@ function restInboxSender(_req: Request, restAuth: { networkId: string | null; to
 /** 写别的节点 = 只有人能做;写自己 = 只看模式。 */
 const nodeTargetVerdict = (targetNodeId: string) => (id: NodeIdentity): Verdict =>
   id.nodeId && id.nodeId === targetNodeId ? writeVerdict(id, targetNodeId) : humanOnlyVerdict(id, targetNodeId);
+
+/**
+ * 单节点读写的部门范围拦截（#3665 第二步，HTTP 层强制，不止纯函数/列表过滤）。
+ * 只对「人类用户令牌 + 被明确授了部门范围管理」的调用者生效：
+ *   · 节点令牌（restAuth.networkId 有值）、owner/admin、没有任何 manage_nodes 授权的人 ⇒ 不额外拦，
+ *     原有的 canRestWriteNetwork / canRestWriteNodeSecurity 等判定已经够了；
+ *   · 部门范围管理者访问范围外（或无部门）的节点 ⇒ 403 out_of_scope（不是 404，不装作不存在）。
+ */
+function userDeptScopeDenied(req: Request, restAuth: { userId?: string | null; networkId: string | null } | null, node: { network_id?: string | null; department_id?: string | null }): Response | null {
+  if (!restAuth?.userId || restAuth.networkId) return null;
+  const netId = node.network_id;
+  if (!netId) return null;
+  const role = getUserNetworkRole(restAuth.userId, netId);
+  if (role === "owner" || role === "admin") return null;
+  const scope = userManageScope(netId, restAuth.userId);
+  if (canUserManageNode(scope, node.department_id ?? null)) return null;
+  return withCors(req, Response.json({ ok: false, error: "out_of_scope", message: "this node is outside the departments you manage" }, { status: 403 }));
+}
 
 function userTokenRequired(req: Request): Response {
   return withCors(req, Response.json({ ok: false, error: "user_token_required", message: "this endpoint acts on a user account; node tokens cannot use it" }, { status: 403 }));
@@ -6596,7 +6614,7 @@ return Bun.serve({
     if (nodeDeleteMatch && req.method === "DELETE") {
       const ref = decodeURIComponent(nodeDeleteMatch[1]);
       const params: any[] = [ref, ref, ref];
-      let sql = "SELECT node_id, node_name, alias, network_id FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      let sql = "SELECT node_id, node_name, alias, network_id, department_id FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC LIMIT 1";
       const node = db.get<any>(sql, ...params);
@@ -6606,6 +6624,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const deptScopeDenied = userDeptScopeDenied(req, restAuth, node);
+      if (deptScopeDenied) return deptScopeDenied;
       const nodeWriteDenied = restNodeDenied(req, restAuth, "DELETE /api/nodes/:id", nodeTargetVerdict(node.node_id));
       if (nodeWriteDenied) return nodeWriteDenied;
 
@@ -6701,13 +6721,16 @@ return Bun.serve({
     if (nodeConfigMatch && req.method === "GET") {
       const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
       const params: any[] = [nodeId];
-      let sql = "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
+      let sql = "SELECT node_id, alias, network_id, department_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
       sql = addNetworkScope(sql, params, restScope);
       sql += " LIMIT 1";
       const node = db.get<any>(sql, ...params);
       if (!node) {
         return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: nodeId }, { status: 404 }));
       }
+      // #3665 —— 部门范围管理者读单个节点的配置详情，也要落在管理范围内（不止列表收窄）。
+      const readDeptDenied = userDeptScopeDenied(req, restAuth, node);
+      if (readDeptDenied) return readDeptDenied;
       let snapshot: any = {};
       if (node.config_snapshot) {
         try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
@@ -6782,7 +6805,7 @@ return Bun.serve({
       }
       const ref = decodeURIComponent(nodeAttrsMatch[1]);
       const params: any[] = [ref, ref, ref];
-      let sql = "SELECT node_id, alias, network_id, display_name, team, tags, description, attrs_revision FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      let sql = "SELECT node_id, alias, network_id, department_id, display_name, team, tags, description, attrs_revision FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC LIMIT 1";
       const node = db.get<any>(sql, ...params);
@@ -6792,6 +6815,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const attrsDeptDenied = userDeptScopeDenied(req, restAuth, node);
+      if (attrsDeptDenied) return attrsDeptDenied;
       const nodeWriteDenied = restNodeDenied(req, restAuth, "PUT /api/nodes/:id/attrs", nodeTargetVerdict(node.node_id));
       if (nodeWriteDenied) return nodeWriteDenied;
 
@@ -7497,16 +7522,24 @@ return Bun.serve({
         };
       });
       // #3665 —— 部门范围管理：被授予「只管某部门」的人，列表里只看得到范围内节点。
-      // 口径：无授权/global ⇒ 原样返回；有 department 授权 ⇒ 按节点 department_id 过滤（含子部门）。
+      // 口径：无授权/global ⇒ 原样返回；有 department 授权 ⇒ 按节点 department_id 过滤（含子部门，
+      // 无部门节点不可见——只归 global，拍板口径，见 canUserManageNode）。
       // 注意：owner/admin 走 manageScopeFrom 的 global 分支，不受影响。
+      //
+      // 2026-11-21 负责人 修：原来判「是不是人的请求」用的是 restAuth.networkId——但人类令牌
+      // （utok_）**恒为 null**（只有节点令牌/network token 才绑网络，见 resolveRestNetworkScope
+      // 「Network tokens are forcibly scoped to their bound network」），这个判据一直是死码，
+      // 部门范围从未真正收窄过列表。改成从 restScope 取单一网络 id；取不到（跨网络 token）就不收窄，
+      // 不是「收窄」的覆盖范围，不强判。
       const scopedRows = (() => {
-        if (!restAuth?.userId || !restAuth.networkId) return rows;
-        const role = getUserNetworkRole(restAuth.userId, restAuth.networkId);
+        if (!restAuth?.userId) return rows;
+        const netIdForScope = singleNetworkId(restScope);
+        if (!netIdForScope) return rows;
+        const role = getUserNetworkRole(restAuth.userId, netIdForScope);
         if (role === "owner" || role === "admin") return rows;
-        const scope = userManageScope(restAuth.networkId, restAuth.userId);
-        if (scope.kind === "global") return rows;
-        if (scope.deptIds.size === 0) return rows;   // 没有任何管理授权 ⇒ 保持既有可见性（本 PR 只管「收窄」）
-        return rows.filter((r: any) => !r.department_id || scope.deptIds.has(r.department_id));
+        const scope = userManageScope(netIdForScope, restAuth.userId);
+        if (scope.kind === "global" || scope.deptIds.size === 0) return rows;   // 没有任何管理授权 ⇒ 保持既有可见性（本 PR 只管「收窄」）
+        return rows.filter((r: any) => canUserManageNode(scope, r.department_id ?? null));
       })();
       return withCors(req, Response.json({ ok: true, nodes: scopedRows, count: scopedRows.length }));
     }
