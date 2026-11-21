@@ -51,6 +51,7 @@ import { runtimeIsOpencode } from "./opencode-runtime.js";
 import { isHumanToken } from "./human-token.js";
 import { getMachineAlias, setMachineAlias, normalizeMachineAlias, countNodesOnHost, MACHINE_ALIAS_MAX } from "./machine-alias.js";
 import { pendingSecretRequests, clearSecretRequest } from "./secret-request-ui.js";
+import { sweepUnconfirmed } from "./acked-unconfirmed.js";
 import { notifyExpiredTasks, type ExpiredTaskRow } from "./task-expiry-notice.js";
 import { expireStaleOpenTasks } from "./task-stale-open.js";
 import { expireDeliveredToOfflineTargets } from "./task-offline-delivery.js";
@@ -8029,6 +8030,25 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     }
   };
   setImmediate(sweepEmptyNodes);
+
+  // B 止血（负责人 2026-11-20）：acked 但窗口内没有任何回复 ⇒ 回退未读并留痕。
+  // 口径 ①：以「该 alias 在窗口内是否产生过回复」为投递证据，纯 Hub 侧可算。
+  const ACKED_UNCONFIRMED_WINDOW_MS = 10 * 60 * 1000;
+  const ackedSweep = () => {
+    try {
+      for (const r of sweepUnconfirmed(Date.now(), ACKED_UNCONFIRMED_WINDOW_MS)) {
+        const params: any[] = [r.messageId];
+        let sql = "UPDATE inbox SET acked = 0 WHERE id = ?1 AND acked = 1";
+        sql = addNetworkScope(sql, params, r.networkId ? { kind: "network", networkId: r.networkId } as any : null as any);
+        try { db.run(sql, ...params); } catch { db.run("UPDATE inbox SET acked = 0 WHERE id = ?1 AND acked = 1", r.messageId); }
+        console.log(`[commhub acked-unconfirmed] ${r.alias}: ${r.messageId.slice(0, 8)} 签收后 ${Math.round((Date.now() - r.ackedAtMs) / 60000)} 分钟无回复 ⇒ 已回退未读`);
+        try { pushEvent(r.alias, { type: "acked_unconfirmed", message_id: r.messageId, waited_ms: Date.now() - r.ackedAtMs }, r.networkId); } catch {}
+      }
+    } catch (e: any) {
+      console.log(`[commhub acked-unconfirmed] sweep failed: ${e?.message ?? e}`);
+    }
+  };
+  const ackedSweepTimer = setInterval(ackedSweep, 60 * 1000);
   const emptyNodeGcTimer = setInterval(sweepEmptyNodes, 24 * 60 * 60 * 1000);
 
   // #2614 —— 事件循环停顿监测。放这里是因为 startHub() 才是“真的在跑一个 Hub”

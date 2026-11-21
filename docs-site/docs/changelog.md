@@ -1,5 +1,12 @@
 # 更新日志
 
+## 未发布：antigravity（agy）节点加固：通用空闲超时 / 运行时标签 / 版本基线逃生口（2026-11-21）
+
+- 新增通用空闲超时开关 `ACP_IDLE_TIMEOUT_MS` / `flags.acpIdleTimeoutMs`，grok 与 antigravity 共用；历史键 `GROK_ACP_TIMEOUT_MS` / `flags.grokAcpTimeoutMs` 继续兼容。antigravity 的默认值由 5 分钟提高到 15 分钟（真机：一条 7.5 分钟的长文任务被判 idle 超时失败）。启动横幅会打印实际生效的值与来源键。
+- 共用 ACP 客户端（`acp-runner/client`）的错误文案按运行时打标签：antigravity 节点不再出现 `grok ACP request ... ~/.grok/sessions/ ... flags.grokAcpTimeoutMs` 这类把人指向错误位置的信息。
+- agy 版本基线支持 `AGY_ACCEPTED_VERSION` 显式覆盖，默认仍是 1.5.13。agy 的自动升级关不掉（`settings.json` 的 `AutoUpdate` 不生效、二进制会被 `--bg-updater` 替换），原来升级一次节点就整体拒跑；现在审过新版本后可放行。`newer` / `older` 的报错直接给出两条修法：装回基线并 `chflags uchg` 锁定，或设置 `AGY_ACCEPTED_VERSION=<版本>` 后重启。
+- 模型回读失败且可用模型列表异常小（≤8）时，报错补充"CLI 背后的账号可能变了（共享凭证槽位）"的排查提示（真机：多个残留 agy 进程回写钥匙串，27 个模型变 6 个）。
+
 ## 未发布：节点收件白名单（谁能给它派活）与 `anet node perm`（2026-11-10）
 
 - 节点新增收件白名单 `inbox_allowlist`：`PUT /api/nodes/:id/inbox-allowlist` `{"senders": [...] | null}`，与 `peer-allowlist` 同形同授权（节点主人 / 网络 owner·admin / Hub 管理员，审计 `node_inbox_allowlist_changed`）。`GET /api/nodes` 每行带 `inbox_allowlist`；`/health` 能力 `node_inbox_allowlist`。

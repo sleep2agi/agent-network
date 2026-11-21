@@ -163,7 +163,7 @@ import {
   type PendingReply,
 } from "./reply-reliability";
 import { isTelemetrySchemaRejection, withoutOptionalTelemetry } from "./register-telemetry-fallback";
-import { resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
+import { resolveAcpIdleTimeout, resolveGrokAcpTimeout } from "./runtime/grok-build-acp/timeout-resolve";
 import { attachLocalFileLinks } from "./runtime/reply-file-links";
 import { claudeAttemptsDetail, codexTimeoutDetail } from "./runtime/sdk-timeout-detail";
 import { compactionPressure } from "./runtime/compaction-pressure";
@@ -5065,9 +5065,17 @@ async function processWithAntigravity(
     // `model: MODEL || undefined`，这里补齐同一行。
     model: MODEL || undefined,
     mcpServers,
-    // agy 的 turn 没有单独的超时配置：给一个和 grok 一样的 300s 上限，
-    // 之后按真机表现再决定要不要独立 flags。
-    timeoutMs: 300_000,
+    // #agy-timeout —— 原来这里写死 300s（和 grok 一样），但真机上一条 7.5 分钟的
+    // 长文任务直接被判 idle 超时。agy 的默认放宽到 15 分钟，同时支持通用开关
+    // ACP_IDLE_TIMEOUT_MS / flags.acpIdleTimeoutMs（历史键 GROK_ACP_TIMEOUT_MS /
+    // flags.grokAcpTimeoutMs 仍兼容）。
+    timeoutMs: resolveAcpIdleTimeout({
+      envValue: process.env.ACP_IDLE_TIMEOUT_MS,
+      flagValue: fileConfig.flags?.acpIdleTimeoutMs,
+      legacyEnvValue: process.env.GROK_ACP_TIMEOUT_MS,
+      legacyFlagValue: fileConfig.flags?.grokAcpTimeoutMs,
+      defaultMs: 900_000,
+    }).valueMs,
     // admin 2026-11-21「上一轮下一轮应该知道的吧」—— 真的不知道：这里原来没传 sessionId，
     // 每轮任务都是全新 session/new，agy 节点没有跨任务记忆，和 claude(claudeSessionId) /
     // grok ACP 模式(grokSessionId)不一致。续会话、写回同一份 config.json，和那两个一样的机制。
@@ -5287,9 +5295,11 @@ async function processWithGrok(
       // session kept whatever model it had while the hub showed config.model.
       model: MODEL || undefined,
       mcpServers: grokMcpServers,
-      timeoutMs: resolveGrokAcpTimeout({
-        envValue: process.env.GROK_ACP_TIMEOUT_MS,
-        flagValue: fileConfig.flags?.grokAcpTimeoutMs,
+      timeoutMs: resolveAcpIdleTimeout({
+        envValue: process.env.ACP_IDLE_TIMEOUT_MS,
+        flagValue: fileConfig.flags?.acpIdleTimeoutMs,
+        legacyEnvValue: process.env.GROK_ACP_TIMEOUT_MS,
+        legacyFlagValue: fileConfig.flags?.grokAcpTimeoutMs,
         defaultMs: 300000,
       }).valueMs,
       // #261 P1 redirect — handshake decoupled from prompt deadline.
@@ -8715,16 +8725,26 @@ log(`  instance: ${INSTANCE_ID}`);
 // is the same one runGrokAcpTurn() will use for its session/prompt
 // activity-based timeout (#211).
 if (RUNTIME === "grok" && GROK_EXECUTION_MODE === "acp") {
-  const t = resolveGrokAcpTimeout({
-    envValue: process.env.GROK_ACP_TIMEOUT_MS,
-    flagValue: fileConfig.flags?.grokAcpTimeoutMs,
+  const t = resolveAcpIdleTimeout({
+    envValue: process.env.ACP_IDLE_TIMEOUT_MS,
+    flagValue: fileConfig.flags?.acpIdleTimeoutMs,
+    legacyEnvValue: process.env.GROK_ACP_TIMEOUT_MS,
+    legacyFlagValue: fileConfig.flags?.grokAcpTimeoutMs,
     defaultMs: 300000,
   });
-  const sourceLabel =
-    t.source === "flags" ? "flags.grokAcpTimeoutMs" :
-    t.source === "env" ? "env GROK_ACP_TIMEOUT_MS" :
-    "default";
+  const sourceLabel = t.knob ?? "default";
   log(`  [grok] session/prompt idle timeout = ${t.valueMs}ms (source: ${sourceLabel})`);
+} else if (RUNTIME === "antigravity") {
+  // agy 的 idle 阈值同样可以被打错名字的旧键影响，启动时明确打印解析结果，
+  // 免得运维以为配了 flags.acpIdleTimeoutMs 却没生效。
+  const t = resolveAcpIdleTimeout({
+    envValue: process.env.ACP_IDLE_TIMEOUT_MS,
+    flagValue: fileConfig.flags?.acpIdleTimeoutMs,
+    legacyEnvValue: process.env.GROK_ACP_TIMEOUT_MS,
+    legacyFlagValue: fileConfig.flags?.grokAcpTimeoutMs,
+    defaultMs: 900_000,
+  });
+  log(`  [antigravity] session/prompt idle timeout = ${t.valueMs}ms (source: ${t.knob ?? "default"})`);
 } else if (RUNTIME === "grok") {
   const raw = process.env.GROK_CLI_TIMEOUT_MS || fileConfig.flags?.grokCliTimeoutMs || "300000";
   log(`  [grok-cli] execution mode=${GROK_COPRESENCE ? "co-presence TUI" : "headless TUI engine"}; idle timeout=${raw}ms`);

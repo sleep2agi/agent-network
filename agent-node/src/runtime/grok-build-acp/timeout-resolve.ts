@@ -14,7 +14,44 @@ export type ResolvedAcpTimeout = {
   valueMs: number;
   source: "env" | "flags" | "default";
   rawValue?: string;
+  /** 实际生效的配置键名（用于启动横幅），例如 `flags.acpIdleTimeoutMs`。 */
+  knob?: string;
 };
+
+/**
+ * ACP 通用空闲超时（grok 与 antigravity 共用）。
+ *
+ * 优先级：`ACP_IDLE_TIMEOUT_MS` > `flags.acpIdleTimeoutMs`
+ *        > `GROK_ACP_TIMEOUT_MS` > `flags.grokAcpTimeoutMs` > default。
+ *
+ * 后两项是历史键名，grok 节点继续可用；但 antigravity 节点不该再被迫使用
+ * 带 grok 前缀的开关（真机报错就让人去改 `flags.grokAcpTimeoutMs`）。
+ */
+export function resolveAcpIdleTimeout(opts: {
+  envValue?: string | null;
+  flagValue?: string | number | null;
+  legacyEnvValue?: string | null;
+  legacyFlagValue?: string | number | null;
+  defaultMs: number;
+}): ResolvedAcpTimeout {
+  const genericEnv = parseNumeric(opts.envValue);
+  if (genericEnv !== null) {
+    return { valueMs: genericEnv, source: "env", rawValue: String(opts.envValue), knob: "ACP_IDLE_TIMEOUT_MS" };
+  }
+  const genericFlag = parseNumeric(opts.flagValue);
+  if (genericFlag !== null) {
+    return { valueMs: genericFlag, source: "flags", rawValue: String(opts.flagValue), knob: "flags.acpIdleTimeoutMs" };
+  }
+  const legacyEnv = parseNumeric(opts.legacyEnvValue);
+  if (legacyEnv !== null) {
+    return { valueMs: legacyEnv, source: "env", rawValue: String(opts.legacyEnvValue), knob: "GROK_ACP_TIMEOUT_MS" };
+  }
+  const legacyFlag = parseNumeric(opts.legacyFlagValue);
+  if (legacyFlag !== null) {
+    return { valueMs: legacyFlag, source: "flags", rawValue: String(opts.legacyFlagValue), knob: "flags.grokAcpTimeoutMs" };
+  }
+  return { valueMs: opts.defaultMs, source: "default" };
+}
 
 export function resolveGrokAcpTimeout(opts: {
   envValue?: string | null;
