@@ -22,3 +22,18 @@ test("adoptionCandidatesReportSchema's JSON Schema pattern has no \\u escape (Go
   // 正向断言：\x 写法确实在，而且字符范围没被我顺手改错。
   expect(asText).toContain("\\\\x00-\\\\x1f");
 });
+
+// 2026-11-21 真机实测——换 \x 之后又在**同一条 pattern**上炸出第二个 Go RE2 坑：
+//   "error parsing regexp: invalid repeat count: `{0,1023}`"
+// Go 的 regexp/syntax 把 {n,m} 里的 m 硬性限制在 1000 以内（JS 正则和 JSON Schema 规范都没有
+// 这个上限），所以这条只能从真实的 Go 编译器才会暴露，JS 侧只能守住"写出来的 pattern 字符串
+// 里不再出现任何一段超过 1000 的重复次数"这个必要条件（不是完整证明，完整证明要靠 Go 侧真机）。
+test("adoptionCandidatesReportSchema's JSON Schema pattern has no single repeat-count above 1000 (Go RE2's maxRepeat cap; distinct bug from the \\u escape above)", () => {
+  const schema = z.toJSONSchema(z.object({ adoption_candidates: adoptionCandidatesReportSchema }));
+  const asText = JSON.stringify(schema);
+  const counts = [...asText.matchAll(/\{(\d+),(\d+)\}/g)].map(m => Number(m[2]));
+  expect(counts.length).toBeGreaterThan(0);
+  for (const n of counts) expect(n).toBeLessThanOrEqual(1000);
+  // 正向断言：workdir 的实际字符上限（含开头的 "/"，共 1024）没有被拆分弄丢。
+  expect(asText).toContain("\\\\x00-\\\\x1f]{0,1000}[^\\\\x00-\\\\x1f]{0,23}");
+});
