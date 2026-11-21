@@ -33,7 +33,7 @@ bun add -g @sleep2agi/commhub-server@0.9.0-preview.289
         · 判定层 + 每分钟扫描（10 分钟无回复把 inbox.acked 回退为 0 并发 acked_unconfirmed）
         · 回复成功即 markReply，避免把有回复的消息误判成未投递
 
-#3724  修 main red：测试里硬编码 /home/vansin 路径 → /srv/proj（home-path 基线检查）
+#3724  修 main red：测试里硬编码 /home/<user> 路径 → /srv/proj（home-path 基线检查）
 ```
 
 ## Verified
