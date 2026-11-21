@@ -8944,7 +8944,7 @@ async function startCommand() {
     opts.tmux === "true" || opts["accept-dev-channels"] === "true" || copresenceFlagPassed ||
     resolvedForCopresence.profile.codexCopresence === true || resolvedForCopresence.profile.grokCopresence === true
   )) {
-    throw new Error("Native Windows supports claude-agent-sdk only; terminal, tmux and co-presence runtimes are unavailable. Choose claude-agent-sdk (no WSL required).");
+    throw new Error("Native Windows supports claude-agent-sdk by default; terminal, tmux and co-presence runtimes are unavailable. ACP stdio runtimes (antigravity-acp) can be enabled for evaluation with ANET_ALLOW_ACP_WINDOWS=1 (Windows-native first-reply + stop not yet verified).");
   }
   // #1353: pin before ANY spawn below (incl. the source-resume branch), since children copy process.env at spawn.
   if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);

@@ -4,12 +4,26 @@ import { windowsRuntimeSupported as daemonSupports } from "../../agent-node/src/
 import { windowsSdkBatchEvidence, windowsSdkEvidenceScript, openWindowsSdkEvidenceSession, sdkEvidenceReason, windowsSdkHelperLaunch } from "./windows-sdk-stop-evidence.js";
 import { orchestrateWindowsManagedStop, orchestrateWindowsManagedStopAsync, probeWindowsCreationDate } from "./windows-codex-copresence.js";
 
-test("Windows CLI and daemon agree on SDK-only first-run support", () => {
-  for (const runtime of ["claude-agent-sdk", "claude-code-cli", "codex-sdk", "codex-app-server", "grok-build-cli", "grok-build-acp", "opencode-cli"]) {
-    expect(windowsRuntimeSupported(runtime, "win32")).toBe(runtime === "claude-agent-sdk");
-    expect(daemonSupports(runtime, "win32")).toBe(windowsRuntimeSupported(runtime, "win32"));
-    expect(windowsRuntimeSupported(runtime, "linux")).toBe(true);
-    expect(windowsRuntimeSupported(runtime, "darwin")).toBe(true);
+test("Windows CLI and daemon agree: SDK by default, ACP only with ANET_ALLOW_ACP_WINDOWS=1", () => {
+  const off = {} as NodeJS.ProcessEnv;
+  const on = { ANET_ALLOW_ACP_WINDOWS: "1" } as NodeJS.ProcessEnv;
+  const runtimes = ["claude-agent-sdk", "claude-code-cli", "codex-sdk", "codex-app-server", "grok-build-cli", "grok-build-acp", "opencode-cli", "antigravity-acp"];
+  for (const runtime of runtimes) {
+    // 默认口径不变：win32 只有 SDK；ACP stdio 要显式开
+    expect(windowsRuntimeSupported(runtime, "win32", off)).toBe(runtime === "claude-agent-sdk");
+    expect(windowsRuntimeSupported(runtime, "win32", on)).toBe(runtime === "claude-agent-sdk" || runtime === "antigravity-acp");
+    // 开关只放 ACP stdio 这一条，TUI/co-presence 仍然挡住
+    if (runtime !== "antigravity-acp") expect(windowsRuntimeSupported(runtime, "win32", on)).toBe(runtime === "claude-agent-sdk");
+    // CLI 与 daemon 两份实现必须逐条一致（独立 npm 包，靠这条断言防漂移）
+    for (const env of [off, on]) expect(daemonSupports(runtime, "win32", env)).toBe(windowsRuntimeSupported(runtime, "win32", env));
+    expect(windowsRuntimeSupported(runtime, "linux", off)).toBe(true);
+    expect(windowsRuntimeSupported(runtime, "darwin", off)).toBe(true);
+  }
+});
+
+test("ANET_ALLOW_ACP_WINDOWS 只认字面 1（不把 \"true\"/空串当开）", () => {
+  for (const value of ["", "0", "true", "yes", " 1"]) {
+    expect(windowsRuntimeSupported("antigravity-acp", "win32", { ANET_ALLOW_ACP_WINDOWS: value } as NodeJS.ProcessEnv)).toBe(false);
   }
 });
 
