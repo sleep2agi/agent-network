@@ -4,7 +4,7 @@
 // `agy -p` 会打印 OAuth URL 并等 60 秒，用它做探活会把节点卡住。
 // 登录态探测留给上层用 `agy models`（成功=已登录）。
 import { spawnSync } from "node:child_process";
-import { agyReadinessMessage, compareAgyVersion, parseAgyVersion, PINNED_AGY_VERSION, type AgyPinState, type AgyVersion } from "./version";
+import { agyReadinessMessage, compareAgyVersion, parseAgyVersion, pinnedAgyVersion, type AgyPinState, type AgyVersion } from "./version";
 
 export interface AgyReadiness {
   ok: boolean;
@@ -23,14 +23,16 @@ export function agyBinary(): string {
 export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
   const ver = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15_000 });
   const version = ver.status === 0 ? parseAgyVersion(String(ver.stdout ?? "")) : null;
-  const state = compareAgyVersion(version, PINNED_AGY_VERSION);
+  // 每次检查都读一遍环境变量：AGY_ACCEPTED_VERSION 是给审过新版本的节点用的逃生口。
+  const pinned = pinnedAgyVersion();
+  const state = compareAgyVersion(version, pinned);
   const help = spawnSync(bin, ["acp", "--help"], { encoding: "utf8", timeout: 15_000 });
   // agy 把 subcommand 的帮助打到 stderr（实测），两路都要看。
   const helpText = `${help.stdout ?? ""}${help.stderr ?? ""}`;
   const hasAcp = help.status === 0 && /Agent Client Protocol/i.test(helpText);
   const ok = state === "pinned" && hasAcp;
   const message = !hasAcp
-    ? `Antigravity CLI 这个版本没有 acp 子命令（需要 >= ${PINNED_AGY_VERSION}）：${agyReadinessMessage(state, version)}`
-    : agyReadinessMessage(state, version);
-  return { ok, bin, state, version, pinned: PINNED_AGY_VERSION, hasAcp, message };
+    ? `Antigravity CLI 这个版本没有 acp 子命令（需要 >= ${pinned}）：${agyReadinessMessage(state, version, pinned)}`
+    : agyReadinessMessage(state, version, pinned);
+  return { ok, bin, state, version, pinned, hasAcp, message };
 }

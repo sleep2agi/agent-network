@@ -266,3 +266,17 @@ rl.on("line", (line) => {
     expect(result.errorEcho.data?.originalCode).toBeUndefined();
   });
 });
+
+// 2026-11-21 — 同一个 ACP 客户端同时服务 grok 与 agy。真机上 antigravity 节点的
+// 报错写成 "grok ACP ... ~/.grok/sessions/"，把人指向根本不存在的位置。
+// 运行时标签只影响文案，不影响协议行为。
+describe("GrokAcpClient runtime label", () => {
+  test("default label stays grok (no breaking change for existing grok nodes)", async () => {
+    const c = new GrokAcpClient();
+    await expect(c.request("session/prompt", {})).rejects.toThrow(/^grok ACP client not started/);
+  });
+  test("antigravity label replaces grok in error text", async () => {
+    const c = new GrokAcpClient("antigravity");
+    await expect(c.request("session/prompt", {})).rejects.toThrow(/^antigravity ACP client not started/);
+  });
+});

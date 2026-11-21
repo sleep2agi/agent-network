@@ -4,7 +4,7 @@
 // took effect; the precedence here MUST match the inline parseInt() chain
 // in cli.ts so they stay coherent.
 import { describe, expect, test } from "bun:test";
-import { resolveGrokAcpTimeout } from "./timeout-resolve";
+import { resolveAcpIdleTimeout, resolveGrokAcpTimeout } from "./timeout-resolve";
 
 describe("resolveGrokAcpTimeout", () => {
   test("env wins over flags and default (mirrors cli.ts precedence)", () => {
@@ -73,5 +73,48 @@ describe("resolveGrokAcpTimeout", () => {
     expect(resolveGrokAcpTimeout({ envValue: undefined, flagValue: "-1", defaultMs: 300000 }).source).toBe("default");
     expect(resolveGrokAcpTimeout({ envValue: undefined, flagValue: 0, defaultMs: 300000 }).source).toBe("default");
     expect(resolveGrokAcpTimeout({ envValue: undefined, flagValue: NaN, defaultMs: 300000 }).source).toBe("default");
+  });
+});
+
+// ACP 通用空格超时：grok 与 antigravity 共用客户端，但 antigravity 不该被迫使用
+// 带 grok 前缀的开关（真机报错就是让人去改 flags.grokAcpTimeoutMs）。
+describe("resolveAcpIdleTimeout — generic knobs first, legacy grok knobs still honoured", () => {
+  test("generic env wins over generic flag and legacy knobs", () => {
+    const r = resolveAcpIdleTimeout({
+      envValue: "1800000",
+      flagValue: "120000",
+      legacyEnvValue: "600000",
+      legacyFlagValue: "90000",
+      defaultMs: 900000,
+    });
+    expect(r.valueMs).toBe(1800000);
+    expect(r.knob).toBe("ACP_IDLE_TIMEOUT_MS");
+  });
+
+  test("generic flag wins over legacy knobs", () => {
+    const r = resolveAcpIdleTimeout({
+      flagValue: 1800000,
+      legacyEnvValue: "600000",
+      legacyFlagValue: "90000",
+      defaultMs: 900000,
+    });
+    expect(r.valueMs).toBe(1800000);
+    expect(r.knob).toBe("flags.acpIdleTimeoutMs");
+  });
+
+  test("legacy grok knobs still work (no breaking change for existing nodes)", () => {
+    const r = resolveAcpIdleTimeout({
+      legacyEnvValue: "600000",
+      defaultMs: 900000,
+    });
+    expect(r.valueMs).toBe(600000);
+    expect(r.knob).toBe("GROK_ACP_TIMEOUT_MS");
+  });
+
+  test("falls back to the runtime default", () => {
+    const r = resolveAcpIdleTimeout({ defaultMs: 900000 });
+    expect(r.valueMs).toBe(900000);
+    expect(r.source).toBe("default");
+    expect(r.knob).toBeUndefined();
   });
 });

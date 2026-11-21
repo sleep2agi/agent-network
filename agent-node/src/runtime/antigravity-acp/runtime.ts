@@ -28,6 +28,9 @@ export type AgyTurnOptions = Omit<GrokAcpTurnOptions, "argv" | "enforceModelRead
 export function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnResult> {
   return runGrokAcpTurn({
     ...opts,
+    // 报错/日志里的运行时名必须是 antigravity：共用 ACP 客户端但不能共用文案，
+    // 否则 agy 节点报错会写 "grok ACP ... ~/.grok/sessions/"（真机踩过）。
+    runtimeLabel: opts.runtimeLabel ?? "antigravity",
     binary: opts.binary ?? agyBinary(),
     argv: [...AGY_ACP_ARGV],
     // 2026-11-20：切模型是真的（负责人真机验证），但 agy 不发 model 事件，只能以
