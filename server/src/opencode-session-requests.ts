@@ -11,6 +11,7 @@
 //   · 结果体是**已经投影过**的 HubSession 数组（投影在 opencode-sessions-project.ts），
 //     这里只存 JSON 字符串，不解析上游形状。
 import type { Database } from "bun:sqlite";
+import { projectSessionPage } from "./opencode-sessions-project.js";
 
 export const SESSION_REQUEST_TTL_MS = 60_000;
 export const SESSION_REQUEST_MAX_AGE_MS = 5 * 60_000;
@@ -137,12 +138,27 @@ export function ackSessionRequest(
   if (row.status === "succeeded" || row.status === "failed") return { ok: true }; // 幂等
   if (row.status !== "delivered" && row.status !== "pending") return { ok: false, error: "request_not_open" };
   if (args.ok && !args.resultJson) return { ok: false, error: "result_required" };
+  const normalized = args.ok ? normalizeSessionPagePayload(args.resultJson!) : null;
+  if (args.ok && !normalized) return { ok: false, error: "bad_session_page" };
   db.run(
     `UPDATE node_session_requests SET status = ?1, result_json = ?2, error = ?3, acked_at = ?4
       WHERE request_id = ?5`,
-    [args.ok ? "succeeded" : "failed", args.ok ? args.resultJson! : null, args.ok ? null : (args.error ?? "failed"), Date.now(), args.requestId],
+    [args.ok ? "succeeded" : "failed", normalized, args.ok ? null : (args.error ?? "failed"), Date.now(), args.requestId],
   );
   return { ok: true };
+}
+
+/**
+ * daemon 回填的必须是 **OpenCode 原始页**（{data:[...], cursor}），投影只在 Hub 做一次：
+ * 上游形状变化只改一个地方，daemon 不需要理解 Hub 的对外六个字段。
+ * 返回 null 表示形状不可用 —— 调用方应当把请求标成 failed，而不是存一个空列表装成功。
+ */
+export function normalizeSessionPagePayload(dataJson: string): string | null {
+  let raw: any = null;
+  try { raw = JSON.parse(dataJson); } catch { return null; }
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.data)) return null;
+  const { sessions, next_cursor } = projectSessionPage(raw);
+  return JSON.stringify({ data: sessions, cursor: { next: next_cursor } });
 }
 
 /** 老行清理（挂到已有的清扫循环里；不删最近 5 分钟的，便于排障）。 */

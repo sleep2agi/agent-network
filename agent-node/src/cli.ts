@@ -8367,6 +8367,17 @@ async function connectSSE() {
                 import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({
                   callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, warn,
                 })).catch(()=>warn('[daemon-secrets] module unavailable'));
+                // #4821 —— daemon 侧会话列表：拉 Hub 排队的请求，读本地 OpenCode V2，回填原始页。
+                // 没有共享 server（opencodeSharedServerUrl/PasswordFile）就什么都不做 —— 不猜默认 server。
+                import("./runtime/opencode-sessions-bridge.js").then(({ startSessionRequestDrainLoop, makeSharedServerPageReader }) => {
+                  const readPage = makeSharedServerPageReader({
+                    url: fileConfig.opencodeSharedServerUrl,
+                    passwordFile: fileConfig.opencodeSharedServerPasswordFile,
+                    readFile: (path: string) => readFileSync(path, "utf8"),
+                  });
+                  if (!readPage) return;
+                  startSessionRequestDrainLoop({ callCommHub, key: `${NETWORK_ID}:${NODE_ID}`, warn: (m: string) => warn(m), readPage });
+                }).catch(() => warn("[opencode-sessions] bridge module unavailable"));
                 import("./runtime/daemon-provider-snapshot.js").then(({ reconcileProviderSnapshots }) => reconcileProviderSnapshots({
                   callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, serverUrl: COMMHUB_URL,
                   warn: (m: string) => warn(m),
