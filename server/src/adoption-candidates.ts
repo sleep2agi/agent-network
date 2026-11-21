@@ -50,7 +50,13 @@ const adoptionCandidateItemSchema = z.object({
   // report_status 工具的 schema 校验失败，agy 那边直接报 agent executor error，这台节点
   // 什么都做不了。字符范围完全一样（0x00–0x1F），换成这个文件里本来就在用的 \x 写法，
   // 两种正则引擎都认。
-  workdir: z.string().regex(/^\/[^\x00-\x1f]{0,1023}$/),
+  // 2026-11-21 真机实测（第二个 Go RE2 坑，换 \x 之后才暴露）：{0,1023} 这个重复次数本身
+  // 又被 RE2 拒绝（"invalid repeat count: {0,1023}"）——Go 的 regexp/syntax 把单个 {n,m}
+  // 里的 m 硬性限制在 1000 以内，JS 正则和 JSON Schema 规范都没有这个上限，本地测不出来。
+  // 拆成两段 {0,1000}{0,23}：两段用的是同一个字符类，加起来覆盖的还是 0–1023 次（任何
+  // n∈[0,1023] 都能拆成 a≤1000、b≤23 两段），长度上限（连同开头的 "/" 共 1024 字符，见
+  // 33 行的 workdir.length > 1024）完全不变，只是不再有任何一段单独超过 1000。
+  workdir: z.string().regex(/^\/[^\x00-\x1f]{0,1000}[^\x00-\x1f]{0,23}$/),
   runtime: z.string().min(1).max(64).nullable().optional(),
   launch_hint: z.enum(["bare", "tmux", "stopped", "unverified"]),
 }).strip().catch(null);
