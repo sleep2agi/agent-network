@@ -30,9 +30,13 @@ describe("#4821 opencode-session-requests", () => {
     expect(m.getSessionRequest(db, req.request_id)?.status).toBe("delivered");
     // 再拉一次拿不到（已经 delivered）
     expect(m.takePendingForDaemon(db, "d2").map(r => r.request_id)).not.toContain(req.request_id);
-    const payload = JSON.stringify({ data: [{ id: "ses_1", title: "t", project_id: null, model: null, updated_at: "2026-01-01T00:00:00Z", directory: "/x" }], cursor: { previous: null, next: "n2" } });
+    // daemon 回填的是 **OpenCode 原始页**（上游字段名），投影在 Hub 做一次
+    const payload = JSON.stringify({ data: [{ id: "ses_1", title: "t", projectID: "p1", model: { id: "m", providerID: "anthropic" }, time: { created: 1767225600000, updated: 1767225600000 }, location: { directory: "/x" } }], cursor: { previous: null, next: "n2" } });
     expect(m.ackSessionRequest(db, { requestId: req.request_id, ok: true, resultJson: payload })).toEqual({ ok: true });
-    expect(m.findFreshResult(db, "n2", "d2", "c1")?.request_id).toBe(req.request_id);
+    const stored = JSON.parse(m.findFreshResult(db, "n2", "d2", "c1")!.result_json!);
+    expect(stored.data[0]).toMatchObject({ id: "ses_1", project_id: "p1", directory: "/x" });
+    expect(stored.data[0].model).toEqual({ provider: "anthropic", id: "m" });
+    expect(stored.cursor.next).toBe("n2");
     const later = Date.now() + m.SESSION_REQUEST_TTL_MS + 1;
     expect(m.findFreshResult(db, "n2", "d2", "c1", later)).toBeNull();
   });
@@ -43,6 +47,9 @@ describe("#4821 opencode-session-requests", () => {
     m.ensureSessionRequestsTable(db);
     const req = m.createSessionRequest(db, { networkId: "n3", nodeId: "d3", cursor: null, limit: 10, createdBy: "u1" });
     expect(m.ackSessionRequest(db, { requestId: req.request_id, ok: true })).toEqual({ ok: false, error: "result_required" });
+    m.takePendingForDaemon(db, "d3");
+    // 形状不对 ⇒ bad_session_page（不把「读不懂」存成空列表装成功）
+    expect(m.ackSessionRequest(db, { requestId: req.request_id, ok: true, resultJson: JSON.stringify({ items: [] }) })).toEqual({ ok: false, error: "bad_session_page" });
     m.takePendingForDaemon(db, "d3");
     expect(m.ackSessionRequest(db, { requestId: req.request_id, ok: false, error: "opencode_unreachable" })).toEqual({ ok: true });
     expect(m.getSessionRequest(db, req.request_id)?.status).toBe("failed");
