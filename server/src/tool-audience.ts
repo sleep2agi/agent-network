@@ -38,6 +38,8 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   get_rules_file_request: "protocol", ack_rules_file_request: "protocol",
   list_my_pending_create_requests: "protocol", list_my_pending_lifecycle_requests: "protocol", list_my_children: "protocol",
   get_create_request: "protocol", ack_create_request: "protocol",
+  // #4821 —— 只读会话列表请求通道（daemon 拉/ack），与 create 通道同一受众
+  pull_session_requests: "protocol", ack_session_request: "protocol",
   get_stop_request: "protocol", ack_stop_request: "protocol",
   get_start_request: "protocol", ack_start_request: "protocol",
   get_probe_request: "protocol", ack_probe_request: "protocol",

@@ -5936,7 +5936,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // `GET /api/session` 后投影成 HubSession[]，再用 ack_session_request 回填。
   server.tool(
     "pull_session_requests",
-    "Daemon pulls pending OpenCode V2 session-list requests for itself (#4821). Marks each as delivered.",
+    "Pull pending session-list requests.",
     { limit: z.number().int().min(1).max(10).optional() },
     async ({ limit }) => {
       const callerDaemon = resolveCallerDaemonTokenBound();
@@ -5953,7 +5953,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "ack_session_request",
-    "Daemon acks a session-list request (#4821). ok=true requires data_json ({data: HubSession[], cursor: {previous,next}}).",
+    "Ack a session-list request.",
     {
       request_id: z.string().min(1).max(200),
       ok: z.boolean(),
