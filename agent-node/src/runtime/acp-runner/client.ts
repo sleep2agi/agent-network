@@ -5,6 +5,7 @@
 // in the adapter layer, not here.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import { withWindowsChildPath } from "../../shared/windows-child-env.js";
 import { EventEmitter } from "events";
 import { readFileSync, writeFileSync } from "fs";
 import { basename, relative, resolve } from "path";
@@ -93,9 +94,12 @@ export class GrokAcpClient extends EventEmitter {
     this.cwd = resolve(opts.cwd ?? process.cwd());
     const bin = opts.binary ?? "grok";
     // argv：给别的 ACP CLI 复用（Antigravity CLI 是 `agy acp`，没有 `agent stdio` 这层）。
+    // 2026-11-22 —— Windows 上子进程直接继承 daemon 的 process.env 时，计划任务/服务启动的
+    // PATH 常常缺 System32\WindowsPowerShell\v1.0，agy 的 shell 工具会报
+    // "exec: powershell not found"（闻星真机）。只**补缺**，不改 daemon 自己的 env。
     this.child = spawn(bin, opts.argv ?? grokAgentStdioArgs(opts.model), {
       cwd: this.cwd,
-      env: { ...process.env, ...opts.env },
+      env: withWindowsChildPath({ ...process.env, ...opts.env }),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
