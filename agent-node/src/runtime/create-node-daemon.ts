@@ -1138,7 +1138,7 @@ export async function handleCreateNodeDoorbell(
   // §4.2 daemon-side runtime allowlist fallback (belt-and-suspenders;
   // hub already enforces, this catches hub-bypass / compromised-hub).
   if (!windowsRuntimeSupported(req.node_spec.runtime)) {
-    await deps.callCommHub("ack_create_request", { request_id, status: "rejected", error: "runtime_unsupported_on_windows: choose claude-agent-sdk; terminal/co-presence runtimes are unavailable" }).catch(() => {});
+    await deps.callCommHub("ack_create_request", { request_id, status: "rejected", error: "runtime_unsupported_on_windows: choose claude-agent-sdk; terminal/co-presence runtimes are unavailable; ACP stdio runtimes (antigravity-acp) require ANET_ALLOW_ACP_WINDOWS=1 on the daemon" }).catch(() => {});
     return;
   }
   if (deps.allowedRuntimes && deps.allowedRuntimes.length > 0 &&
