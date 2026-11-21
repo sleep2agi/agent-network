@@ -10,6 +10,7 @@ import { requestProviderSnapshot, requestProviderWrite, requestProviderCollectio
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestSecretUi } from "./secret-request-ui.js";
 import { markAcked, markReply } from "./acked-unconfirmed.js";
+import { getSessionRequest, takePendingForDaemon, ackSessionRequest } from "./opencode-session-requests.js";
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
 import { adoptedCloneSourceRow, requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
 import { runtimeReadinessSchema } from "./runtime-readiness.js";
@@ -5930,6 +5931,53 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // failures (fork crashed, etc.). Daemon should still call this on
   // success too — it's a useful idempotent confirmation + lets hub
   // record fork-side info.
+  // #4821 —— 只读 session 列表的请求通道（照 node_create_requests 的形状，但没有副作用）。
+  // daemon 侧：收到 SSE 门铃或定时轮询时调用 pull_session_requests，读完本地
+  // `GET /api/session` 后投影成 HubSession[]，再用 ack_session_request 回填。
+  server.tool(
+    "pull_session_requests",
+    "Daemon pulls pending OpenCode V2 session-list requests for itself (#4821). Marks each as delivered.",
+    { limit: z.number().int().min(1).max(10).optional() },
+    async ({ limit }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      const rows = takePendingForDaemon(db, callerDaemon.daemonNodeId, limit ?? 5);
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        requests: rows.map(r => ({ request_id: r.request_id, cursor: r.cursor, limit: r.limit_n })),
+      }) }] };
+    },
+  );
+
+  server.tool(
+    "ack_session_request",
+    "Daemon acks a session-list request (#4821). ok=true requires data_json ({data: HubSession[], cursor: {previous,next}}).",
+    {
+      request_id: z.string().min(1).max(200),
+      ok: z.boolean(),
+      data_json: z.string().max(2_000_000).optional(),
+      error: z.string().max(1000).optional(),
+    },
+    async ({ request_id, ok, data_json, error: ackError }) => {
+      const callerDaemon = resolveCallerDaemonTokenBound();
+      if (!callerDaemon.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: callerDaemon.error }) }] };
+      }
+      const row = getSessionRequest(db, request_id);
+      if (!row) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "request_not_found" }) }] };
+      if (row.daemon_node_id !== callerDaemon.daemonNodeId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "not_your_request" }) }] };
+      }
+      if (row.network_id !== callerDaemon.networkId) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "cross_network_request" }) }] };
+      }
+      const res = ackSessionRequest(db, { requestId: request_id, ok, resultJson: data_json ?? null, error: ackError ?? null });
+      return { content: [{ type: "text" as const, text: JSON.stringify(res) }] };
+    },
+  );
+
   server.tool(
     "ack_create_request",
     "Daemon acks a create-node request (called after fork). status='started' | 'failed' | 'rejected' | 'runtime_capability_check_failed'.",
