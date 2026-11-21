@@ -4,6 +4,7 @@
 // `agy -p` 会打印 OAuth URL 并等 60 秒，用它做探活会把节点卡住。
 // 登录态探测留给上层用 `agy models`（成功=已登录）。
 import { spawnSync } from "node:child_process";
+import { withWindowsChildPath } from "../../shared/windows-child-env.js";
 import { agyReadinessMessage, compareAgyVersion, parseAgyVersion, pinnedAgyVersion, type AgyPinState, type AgyVersion } from "./version";
 
 export interface AgyReadiness {
@@ -21,12 +22,14 @@ export function agyBinary(): string {
 }
 
 export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
-  const ver = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15_000 });
+  // Windows：探活子进程也要补 PATH（计划任务/服务启动的 PATH 常缺 System32 与 PowerShell v1.0）
+  const env = withWindowsChildPath({ ...process.env });
+  const ver = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15_000, env });
   const version = ver.status === 0 ? parseAgyVersion(String(ver.stdout ?? "")) : null;
   // 每次检查都读一遍环境变量：AGY_ACCEPTED_VERSION 是给审过新版本的节点用的逃生口。
   const pinned = pinnedAgyVersion();
   const state = compareAgyVersion(version, pinned);
-  const help = spawnSync(bin, ["acp", "--help"], { encoding: "utf8", timeout: 15_000 });
+  const help = spawnSync(bin, ["acp", "--help"], { encoding: "utf8", timeout: 15_000, env });
   // agy 把 subcommand 的帮助打到 stderr（实测），两路都要看。
   const helpText = `${help.stdout ?? ""}${help.stderr ?? ""}`;
   const hasAcp = help.status === 0 && /Agent Client Protocol/i.test(helpText);
