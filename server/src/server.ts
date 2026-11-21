@@ -16,6 +16,7 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
+import { createSessionRequest, findFreshResult, findOpenRequest, getSessionRequest, ensureSessionRequestsTable } from "./opencode-session-requests.js";
 import { userManageScope, canUserManageNode, USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
 import { isInboxTightening, isPermissionModeTightening } from "./permission-tightening.js";
 import { permissionManagementAudit, permissionManagementDenial } from "./node-permission-management.js";
@@ -2103,6 +2104,7 @@ function patrolDeliveredStaleTasks(): void {
 // Note: `opts.port ?? PORT` uses nullish-coalescing on purpose — `||`
 // would swallow a legitimate `0`. Same for hostname.
 export function bootServer(opts?: { port?: number; hostname?: string }): ReturnType<typeof Bun.serve> {
+ensureSessionRequestsTable(db);   // #4821 只读 session 请求通道（daemon 拉、Hub 存结果）
 const nodeSessionControl = createNodeSessionControlRelay();
 const sessionSourceTransport = createSessionSourceTransport({ enabled: process.env.COMMHUB_SOURCE_FORK_PREVIEW === "1",
   directoryEnabled: process.env.COMMHUB_SOURCE_DIRECTORY_PREVIEW === "1", projectEnabled: process.env.COMMHUB_PROJECT_NEW_SESSION_PREVIEW === "1" });
@@ -4473,6 +4475,63 @@ return Bun.serve({
         JSON.stringify({ from: before.map(({ capability, scope_kind, scope_id, level }) => ({ capability, scope_kind, scope_id, level })), to: parsed.grants }), getClientIP(req), gnode.network_id);
       return withCors(req, Response.json({ ok: true, node_id: gnode.node_id, grants: listNodeGrants(gnode.network_id, gnode.node_id) }));
     }
+    // #4821 —— OpenCode V2 会话列表：Hub 侧请求通道（daemon 只能拉，不能被 Hub 调）。
+    //   GET /api/nodes/:node_id/opencode-sessions?cursor=&limit=
+    //     · 60 秒内同 node+cursor 的成功结果直接复用（App 刷新不打满 daemon）
+    //     · 否则建/复用一条 pending 请求，返回 { pending: true, request_id }，App 轮询下面那条
+    //   GET /api/session-requests/:request_id
+    //     · 只有创建者本人或 owner/admin 能看
+    // 口径：#3665 的部门范围同样适用于「这台节点你能不能看」——越界 403，不是 404（用户能申诉）。
+    const nodeSessionsMatch = url.pathname.match(/^\/api\/nodes\/([^/]+)\/opencode-sessions$/);
+    if (nodeSessionsMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const ref = decodeURIComponent(nodeSessionsMatch[1]);
+      const nrow = db.get<{ node_id: string; network_id: string | null; department_id: string | null }>(
+        "SELECT node_id, network_id, department_id FROM nodes WHERE node_id = ?1", [ref]);
+      if (!nrow || !nrow.network_id) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      const nrole = getUserNetworkRole(restAuth.userId, nrow.network_id);
+      if (!nrole && !isAdmin) return withCors(req, Response.json({ ok: false, error: "node_not_found" }, { status: 404 }));
+      if (nrole && nrole !== "owner" && nrole !== "admin") {
+        const scope = userManageScope(nrow.network_id, restAuth.userId);
+        if (!canUserManageNode(scope, nrow.department_id ?? null)) {
+          return withCors(req, Response.json({ ok: false, error: "manage_scope_forbidden", message: "this node is outside the departments you manage" }, { status: 403 }));
+        }
+      }
+      const cursor = url.searchParams.get("cursor") || null;
+      const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const limitN = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
+      const fresh = findFreshResult(db, nrow.network_id, nrow.node_id, cursor);
+      if (fresh?.result_json) {
+        let parsed: any = null;
+        try { parsed = JSON.parse(fresh.result_json); } catch { parsed = null; }
+        if (parsed) return withCors(req, Response.json({ ok: true, cached: true, data: parsed.data ?? [], next_cursor: parsed.cursor?.next ?? null, request_id: fresh.request_id }));
+      }
+      const open = findOpenRequest(db, nrow.network_id, nrow.node_id, cursor)
+        ?? createSessionRequest(db, { networkId: nrow.network_id, nodeId: nrow.node_id, cursor, limit: limitN, createdBy: restAuth.userId ?? null });
+      return withCors(req, Response.json({ ok: true, pending: true, request_id: open.request_id, poll: `/api/session-requests/${open.request_id}` }));
+    }
+
+    const sessionReqMatch = url.pathname.match(/^\/api\/session-requests\/([^/]+)$/);
+    if (sessionReqMatch && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const row = getSessionRequest(db, decodeURIComponent(sessionReqMatch[1]));
+      if (!row) return withCors(req, Response.json({ ok: false, error: "request_not_found" }, { status: 404 }));
+      const role = getUserNetworkRole(restAuth.userId, row.network_id);
+      const isOwner = row.created_by && row.created_by === restAuth.userId;
+      if (!isOwner && !(role === "owner" || role === "admin" || isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "request_not_found" }, { status: 404 }));
+      }
+      if (row.status === "succeeded" && row.result_json) {
+        let parsed: any = null;
+        try { parsed = JSON.parse(row.result_json); } catch { parsed = null; }
+        return withCors(req, Response.json({ ok: true, status: row.status, data: parsed?.data ?? [], next_cursor: parsed?.cursor?.next ?? null }));
+      }
+      if (row.status === "failed") return withCors(req, Response.json({ ok: false, status: row.status, error: row.error ?? "failed" }, { status: 502 }));
+      return withCors(req, Response.json({ ok: true, status: row.status, pending: true }));
+    }
+
     // 人的范围管理授权（#3665，admin 2026-11-21）：GET / PUT /api/users/:user_id/grants
     //   body { grants: [{capability:'manage_nodes', scope_kind:'network'|'department', scope_id, level:'read'|'edit'}] } —— 整份替换
     // 谁能授：network owner/admin 任意范围；部门负责人只能授自己子树内的 department，不能授 network（接口层强制）。
