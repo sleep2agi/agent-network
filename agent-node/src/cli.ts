@@ -1317,6 +1317,25 @@ function clearGrokSession(reason: string) {
   }
 }
 
+// admin 2026-11-21「agy runtime 没有上下文吗」—— 真的没有：processWithAntigravity 从来没把
+// sessionId 传给 runAgyAcpTurn，每轮任务都走 session/new，agy 节点和其他运行时（claude 的
+// claudeSessionId、grok ACP 模式的 grokSessionId）不一样，没有「一个节点续用同一会话」。
+// 补齐同一套机制：复用通用的 writebackSession()（agy 没有自己专属的 config 键，SESSION_ID
+// 的兜底链本来就读 fileConfig.session，不用新开键）。
+function clearAgySession(reason: string) {
+  agySessionId = undefined;
+  if (!configFilePath) return;
+  try {
+    const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
+    if (!cfg.session) return;
+    delete cfg.session;
+    atomicWriteJson(configFilePath, cfg);
+    warn(`cleared session (agy, ${reason})`);
+  } catch (e: any) {
+    warn(`clearAgySession failed: ${e.message}`);
+  }
+}
+
 // ── Channel config ──
 function loadEnvFile(path: string) {
   if (!existsSync(path)) return;
@@ -2804,6 +2823,7 @@ function writebackClaudeSessionCost(sessionId: string, totalUsd: number) {
   }
 }
 let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
+let agySessionId: string | undefined = RUNTIME === "antigravity" ? (SESSION_ID || undefined) : undefined;
 // #1958 — model the ACP session actually ran with (readback from the agent),
 // and where that knowledge came from. Reported to the hub as `model` so the
 // dashboard shows the running model rather than the configured one.
@@ -5035,9 +5055,10 @@ async function processWithAntigravity(
   });
 
   const { runAgyAcpTurn } = await import("./runtime/antigravity-acp/runtime");
-  const result = await runAgyAcpTurn({
+  const runOnce = (sessionId?: string) => runAgyAcpTurn({
     prompt: buildGrokCommhubPrompt(task, from),
     cwd: process.cwd(),
+    sessionId,
     // #3704 follow-up（负责人 2026-11-21 真机）：AGY 这条链从来没把配置的模型传进来，
     // applyConfiguredModel 拿到空 requested ⇒ 每次都按会话默认模型跑
     //（真机表现：配 claude-sonnet-5-5-high，自报 "Gemini 4 Neon"）。grok 早已传
@@ -5047,11 +5068,31 @@ async function processWithAntigravity(
     // agy 的 turn 没有单独的超时配置：给一个和 grok 一样的 300s 上限，
     // 之后按真机表现再决定要不要独立 flags。
     timeoutMs: 300_000,
+    // admin 2026-11-21「上一轮下一轮应该知道的吧」—— 真的不知道：这里原来没传 sessionId，
+    // 每轮任务都是全新 session/new，agy 节点没有跨任务记忆，和 claude(claudeSessionId) /
+    // grok ACP 模式(grokSessionId)不一致。续会话、写回同一份 config.json，和那两个一样的机制。
+    onSession: (newSessionId: string) => { agySessionId = newSessionId; writebackSession(newSessionId); },
     onSubmitted: evidence?.submitted,
     onConsumed: evidence?.consumed,
     onStderr: (line) => debug(`[agy-stderr] ${line}`),
   });
-  return result.replyText;
+
+  const firstSessionId = agySessionId || SESSION_ID || undefined;
+  try {
+    const result = await runOnce(firstSessionId);
+    return result.replyText;
+  } catch (e: any) {
+    // agy 的「续上的会话已失效」错误文案未验证过（不像 grok 的 -32603 是真机测出来的），
+    // 所以这里不窄判具体错误文本：只要带着 sessionId 续的这次失败了，就清掉它退回全新会话重试一次——
+    // 最坏情况也就是这一轮没有上文（和改之前的行为一样），不会比现状更差。
+    if (firstSessionId) {
+      warn(`[antigravity] resumed session failed (${e?.message || e}); retrying once with a fresh session`);
+      clearAgySession("resume failed");
+      const result = await runOnce(undefined);
+      return result.replyText;
+    }
+    throw e;
+  }
 }
 
 async function processWithGrok(
