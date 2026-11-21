@@ -18,7 +18,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } fro
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
 import { describeUnsafeDirectory, describeUnsafePath } from "./unsafe-package-path-reason";
 
-export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.244";
+export const PAIRED_AGENT_NETWORK_VERSION = "2.3.0-preview.245";
 export const PAIRED_AGENT_NODE_VERSION = "2.5.0-preview.212";
 export const PAIRED_AGENT_NODE_SPEC = `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`;
 // Backward-compatible names for the first consumer of the shared pair.
@@ -249,6 +249,28 @@ export function resolveAgentNodePackageEntrypointFromPath(
  * 所以「两边都用 @preview」本身也有窗口期不自洽 —— tag 不是配对判据，
  * **本包里的常量才是**。把常量打印出来，是唯一不用猜的答案。
  */
+/** `engines` 要求的 Node 版本（与 agent-network/package.json 同源）。 */
+export const REQUIRED_NODE_VERSION = "22.13.0";
+
+/**
+ * `anet pair` 的 Node 版本提示（不阻断）。
+ *
+ * 2026-11-22 —— 负责人：npm 的 EBADENGINE 只是裸警告，用户看不懂「会怎样」。
+ * 这里用一句话说清：当前版本 X、建议 ≥ required、否则可能有不明确的行为差异。
+ * 纯函数，方便单测；返回 null 表示无需提示。
+ */
+export function nodeEngineWarning(
+  current: string = process.versions.node,
+  required: string = REQUIRED_NODE_VERSION,
+): string | null {
+  const parse = (v: string) => v.split(".").map(n => parseInt(n, 10) || 0);
+  const [maj, min, patch] = parse(current);
+  const [rMaj, rMin, rPatch] = parse(required);
+  const ok = maj > rMaj || (maj === rMaj && min > rMin) || (maj === rMaj && min === rMin && patch >= rPatch);
+  if (ok) return null;
+  return `[anet] ⚠️  当前 Node v${current} 低于本包 engines 要求的 ${required} —— 建议升级到 ≥${required}，否则可能有不明确的行为差异（本次不阻断）。`;
+}
+
 export function pairInfo(includeOpenCodeConstraints = true): string {
   const lines = [
     `CLI:        @sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`,

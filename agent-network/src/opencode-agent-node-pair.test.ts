@@ -248,3 +248,17 @@ describe("pairInfo (anet pair)", () => {
     expect(pairInfo(false)).not.toContain("自动 npx 已被禁用");
   });
 });
+
+// 2026-11-22（负责人）：`anet pair` 要有一行说人话的 Node 版本提示，不阻断。
+import { nodeEngineWarning, REQUIRED_NODE_VERSION } from "./opencode-agent-node-pair";
+test("nodeEngineWarning: 低于 engines 才提示，且说清「当前/建议/后果」", () => {
+  expect(REQUIRED_NODE_VERSION).toBe("22.13.0");
+  expect(nodeEngineWarning("22.13.0")).toBeNull();
+  expect(nodeEngineWarning("23.0.0")).toBeNull();
+  const warn = nodeEngineWarning("20.20.0");
+  expect(warn).not.toBeNull();
+  expect(warn!).toContain("v20.20.0");
+  expect(warn!).toContain("22.13.0");
+  expect(warn!).toContain("不阻断");
+  expect(nodeEngineWarning("22.12.9")).not.toBeNull();
+});

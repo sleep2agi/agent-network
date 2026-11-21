@@ -113,6 +113,7 @@ import {
   PAIRED_AGENT_NODE_VERSION,
   agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
+  nodeEngineWarning,
   opencodeExactPairInstallCommand,
   pairInfo,
   pairedAgentNodeResolution,
@@ -15580,14 +15581,19 @@ async function smokeOpencodeAcp(
  * 客户端和文档都应当显示这条命令，而不是自己拼版本号。
  */
 function pairCommand(): void {
+  // 2026-11-22（负责人）—— npm 的 EBADENGINE 是裸警告，用户看不懂后果；
+  // 这里补一行说人话的提示，**不阻断**任何操作。
+  const nodeWarning = nodeEngineWarning();
   if (process.argv.includes("--json")) {
     console.log(JSON.stringify({
       cli: `@sleep2agi/agent-network@${PAIRED_AGENT_NETWORK_VERSION}`,
       agentNode: `@sleep2agi/agent-node@${PAIRED_AGENT_NODE_VERSION}`,
       install: opencodeExactPairInstallCommand(),
+      nodeEngineWarning: nodeWarning,
     }, null, 2));
     return;
   }
+  if (nodeWarning) console.log(nodeWarning);
   console.log(pairInfo());
 }
 
