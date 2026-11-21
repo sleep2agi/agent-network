@@ -16,6 +16,7 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
+import { USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
 import { isInboxTightening, isPermissionModeTightening } from "./permission-tightening.js";
 import { permissionManagementAudit, permissionManagementDenial } from "./node-permission-management.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
@@ -4452,6 +4453,64 @@ return Bun.serve({
         JSON.stringify({ from: before.map(({ capability, scope_kind, scope_id, level }) => ({ capability, scope_kind, scope_id, level })), to: parsed.grants }), getClientIP(req), gnode.network_id);
       return withCors(req, Response.json({ ok: true, node_id: gnode.node_id, grants: listNodeGrants(gnode.network_id, gnode.node_id) }));
     }
+    // 人的范围管理授权（#3665，admin 2026-11-21）：GET / PUT /api/users/:user_id/grants
+    //   body { grants: [{capability:'manage_nodes', scope_kind:'network'|'department', scope_id, level:'read'|'edit'}] } —— 整份替换
+    // 谁能授：network owner/admin 任意范围；部门负责人只能授自己子树内的 department，不能授 network（接口层强制）。
+    const userGrantsMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/grants$/);
+    if (userGrantsMatch && (req.method === "GET" || req.method === "PUT")) {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const netId = singleNetworkId(restScope);
+      if (!netId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const targetUserId = decodeURIComponent(userGrantsMatch[1]);
+      if (!getUserNetworkRole(targetUserId, netId) && !isAdmin) {
+        return withCors(req, Response.json({ ok: false, error: "user_not_found" }, { status: 404 }));
+      }
+      if (req.method === "GET") {
+        return withCors(req, Response.json({
+          ok: true, user_id: targetUserId, grants: listUserGrants(netId, targetUserId),
+          capabilities: USER_GRANT_CAPABILITIES, scopes: USER_GRANT_SCOPES, levels: USER_GRANT_LEVELS,
+        }));
+      }
+      const actorRole = getUserNetworkRole(restAuth.userId, netId);
+      const actorManaged = new Set(managedDepartmentIds(netId, restAuth.userId).flatMap(d => [...departmentSubtree(netId, d)]));
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const raw = Array.isArray(body?.grants) ? body.grants : null;
+      if (!raw) return withCors(req, Response.json({ ok: false, error: "invalid_grants" }, { status: 400 }));
+      const next: Array<{ capability: string; scope_kind: string; scope_id: string; level: string }> = [];
+      for (const g of raw) {
+        const capability = String(g?.capability ?? "");
+        const scopeKind = String(g?.scope_kind ?? "");
+        const scopeId = String(g?.scope_id ?? "").trim();
+        const level = String(g?.level ?? "");
+        if (!(USER_GRANT_CAPABILITIES as readonly string[]).includes(capability)) return withCors(req, Response.json({ ok: false, error: "invalid_capability" }, { status: 400 }));
+        if (!(USER_GRANT_SCOPES as readonly string[]).includes(scopeKind)) return withCors(req, Response.json({ ok: false, error: "invalid_scope" }, { status: 400 }));
+        if (!(USER_GRANT_LEVELS as readonly string[]).includes(level)) return withCors(req, Response.json({ ok: false, error: "invalid_level" }, { status: 400 }));
+        if (scopeKind === "department") {
+          if (!scopeId) return withCors(req, Response.json({ ok: false, error: "scope_id_required" }, { status: 400 }));
+          if (!db.get("SELECT 1 AS x FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [netId, scopeId])) {
+            return withCors(req, Response.json({ ok: false, error: "department_not_found" }, { status: 404 }));
+          }
+        }
+        const verdict = canGrantUserScope({ actorRole, actorManagedDeptIds: actorManaged, scopeKind, scopeId });
+        if (!verdict.ok && !isAdmin) {
+          return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only network owners/admins can grant network-wide access; department heads can grant within the departments they lead" }, { status: 403 }));
+        }
+        next.push({ capability, scope_kind: scopeKind, scope_id: scopeKind === "network" ? "" : scopeId, level });
+      }
+      const before = listUserGrants(netId, targetUserId);
+      db.transaction(() => {
+        db.run("DELETE FROM user_grants WHERE network_id = ?1 AND user_id = ?2", [netId, targetUserId]);
+        for (const g of next) {
+          setUserGrant({ networkId: netId, userId: targetUserId, capability: g.capability, scopeKind: g.scope_kind, scopeId: g.scope_id, level: g.level, grantedBy: restAuth.userId ?? null });
+        }
+      });
+      logAudit(restAuth.userId, restAuth.username, "user_grants_changed", "user", targetUserId,
+        JSON.stringify({ before, after: next }), getClientIP(req), netId);
+      return withCors(req, Response.json({ ok: true, user_id: targetUserId, grants: listUserGrants(netId, targetUserId) }));
+    }
+
     // 收件白名单：PUT /api/nodes/:id/inbox-allowlist { senders: string[] | null }
     // 与 peer-allowlist 同一套授权、审计与空数组语义（拒收 []，清空请传 null）。
     // 条目语法与发件人匹配规则见 node-permissions.ts「收件白名单」。
