@@ -1,7 +1,11 @@
-import { describe, expect, test, mock } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { fetchOpenCodeSessionPage } from "./sessions.js";
 
 // 用 bun 的 fetch 桩：只验证「请求路径/查询参数」与「返回形状校验」，不连真 server。
+// ⚠️ 必须还原：bun test 同进程跑所有文件，桩一泄漏就会让后面依赖真 fetch 的用例挂掉
+//    （2026-11-22 CI 复现：v1-shared-read.test.ts 因 health 读到桩数据报 health/version mismatch）。
+const realFetch = globalThis.fetch;
+afterEach(() => { (globalThis as any).fetch = realFetch; });
 function stubFetch(body: any, capture?: { url?: string }) {
   (globalThis as any).fetch = async (url: any) => {
     if (capture) capture.url = String(url);
