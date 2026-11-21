@@ -34,6 +34,11 @@ bun add -g @sleep2agi/commhub-server@0.9.0-preview.289
         · 回复成功即 markReply，避免把有回复的消息误判成未投递
 
 #3724  修 main red：测试里硬编码 /home/<user> 路径 → /srv/proj（home-path 基线检查）
+
+fix   provider-selection 快照查询加 rowid 兜底排序
+        · 原来 ORDER BY created_at DESC LIMIT 1 —— 同一毫秒写入两条时顺序不确定，
+          测试与生产都可能读到旧的那条（CI 上稳定复现成 pending 而不是 applied）
+        · 改为 ORDER BY created_at DESC, rowid DESC（同毫秒取后写入的），语义不变但确定
 ```
 
 ## Verified

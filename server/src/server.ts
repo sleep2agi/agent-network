@@ -4213,7 +4213,7 @@ return Bun.serve({
       const row = db.get<{ request_id: string; status: string; observed_at: number | null; snapshot_json: string | null; error: string | null }>(
         `SELECT request_id, status, observed_at, snapshot_json, error FROM daemon_provider_snapshots
           WHERE network_id = ?1 AND daemon_node_id = ?2 AND request_id LIKE 'dpa\_%' ESCAPE '\\'
-          ORDER BY created_at DESC LIMIT 1`,
+          ORDER BY created_at DESC, rowid DESC LIMIT 1`,
         node.network_id, node.node_id);
       // 三态而不是「有/没有」：从未切换过 / 正在切 / 切失败，界面要给的下一步完全不同。
       //
@@ -4285,7 +4285,7 @@ return Bun.serve({
       const beforeRow = db.get<{ snapshot_json: string | null }>(
         `SELECT snapshot_json FROM daemon_provider_snapshots
           WHERE network_id = ?1 AND daemon_node_id = ?2 AND request_id LIKE 'dpa\_%' ESCAPE '\\'
-          ORDER BY created_at DESC LIMIT 1`, node.network_id, node.node_id);
+          ORDER BY created_at DESC, rowid DESC LIMIT 1`, node.network_id, node.node_id);
       let before: unknown = null;
       if (beforeRow?.snapshot_json) { try { before = JSON.parse(beforeRow.snapshot_json); } catch { before = null; } }
 
