@@ -33,9 +33,16 @@ export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
   // agy 把 subcommand 的帮助打到 stderr（实测），两路都要看。
   const helpText = `${help.stdout ?? ""}${help.stderr ?? ""}`;
   const hasAcp = help.status === 0 && /Agent Client Protocol/i.test(helpText);
-  const ok = state === "pinned" && hasAcp;
+  // 2026-11-21 admin 定：版本是**建议**，不是闸门。agy 的自动升级关不掉，
+  // 硬钉会让节点在「某天自己升级了」之后直接停摆。所以默认只提示不阻断；
+  // 需要严格锁版本的场景（回归基线、发版验证）才设 AGY_STRICT_VERSION=1。
+  const strict = process.env.AGY_STRICT_VERSION === "1";
+  const ok = hasAcp && state !== "unknown" && (!strict || state === "pinned");
+  const base = agyReadinessMessage(state, version, pinned);
   const message = !hasAcp
-    ? `Antigravity CLI 这个版本没有 acp 子命令（需要 >= ${pinned}）：${agyReadinessMessage(state, version, pinned)}`
-    : agyReadinessMessage(state, version, pinned);
+    ? `Antigravity CLI 这个版本没有 acp 子命令（需要 >= ${pinned}）：${base}`
+    : strict && state !== "pinned"
+      ? `${base}（本节点设了 AGY_STRICT_VERSION=1，按严格模式拒绝）`
+      : base;
   return { ok, bin, state, version, pinned, hasAcp, message };
 }

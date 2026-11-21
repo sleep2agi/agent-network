@@ -85,11 +85,11 @@ export function agyReadinessMessage(state: AgyPinState, actual: AgyVersion | nul
     case "pinned":
       return `Antigravity CLI ${pinned}（已验收版本）`;
     case "newer":
-      return `Antigravity CLI ${seen} 比验收版本 ${pinned} 新：升级要我们先审过，节点暂不给用。` +
-        `修法二选一：① 装回 ${pinned} 并锁定二进制（chflags uchg "$(command -v agy)"，agy 的自动升级关不掉）；` +
-        `② 审过 ${seen} 后设置 AGY_ACCEPTED_VERSION=${seen} 并重启节点。`;
+      return `Antigravity CLI ${seen} 比建议版本 ${pinned} 新：不阻断，仅提示（未验收版本可能改 ACP 行为）。` +
+        `出问题先装回 ${pinned} 并锁定二进制（chflags uchg "$(command -v agy)" / Windows attrib +R，agy 的自动升级关不掉）；` +
+        `确认要以 ${seen} 为新基线就设 AGY_ACCEPTED_VERSION=${seen}。`;
     case "older":
-      return `Antigravity CLI ${seen} 比验收版本 ${pinned} 旧：请安装 ${pinned}（curl -fsSL https://antigravity.google/cli/install.sh | bash），不要让它自动升级。`;
+      return `Antigravity CLI ${seen} 比建议版本 ${pinned} 旧：不阻断，仅提示。建议升到 ${pinned} 以上（curl -fsSL https://antigravity.google/cli/install.sh | bash）。`;
     default:
       return "没读到 Antigravity CLI 的版本：确认 `agy` 在 PATH 里（或设置 AGY_BIN），并运行 `agy --version` 复核，或装上验收过的 " + pinned + "。";
   }
