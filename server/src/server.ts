@@ -16,7 +16,7 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
-import { USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
+import { userManageScope, USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
 import { isInboxTightening, isPermissionModeTightening } from "./permission-tightening.js";
 import { permissionManagementAudit, permissionManagementDenial } from "./node-permission-management.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
@@ -7496,7 +7496,19 @@ return Bun.serve({
           restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });
-      return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
+      // #3665 —— 部门范围管理：被授予「只管某部门」的人，列表里只看得到范围内节点。
+      // 口径：无授权/global ⇒ 原样返回；有 department 授权 ⇒ 按节点 department_id 过滤（含子部门）。
+      // 注意：owner/admin 走 manageScopeFrom 的 global 分支，不受影响。
+      const scopedRows = (() => {
+        if (!restAuth?.userId || !restAuth.networkId) return rows;
+        const role = getUserNetworkRole(restAuth.userId, restAuth.networkId);
+        if (role === "owner" || role === "admin") return rows;
+        const scope = userManageScope(restAuth.networkId, restAuth.userId);
+        if (scope.kind === "global") return rows;
+        if (scope.deptIds.size === 0) return rows;   // 没有任何管理授权 ⇒ 保持既有可见性（本 PR 只管「收窄」）
+        return rows.filter((r: any) => !r.department_id || scope.deptIds.has(r.department_id));
+      })();
+      return withCors(req, Response.json({ ok: true, nodes: scopedRows, count: scopedRows.length }));
     }
 
     // ── REST: single task lookup (V2) ──
