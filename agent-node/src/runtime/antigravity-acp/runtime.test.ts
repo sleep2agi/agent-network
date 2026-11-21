@@ -19,6 +19,9 @@ describe("antigravity-acp turn wrapper", () => {
     expect(src).toContain('from "../grok-build-acp/runtime"');
     expect(src).not.toContain("new GrokAcpClient()");
   });
+  it("labels shared ACP errors as antigravity, not grok (真机：报错指向 ~/.grok/sessions/)", () => {
+    expect(src).toContain('runtimeLabel: opts.runtimeLabel ?? "antigravity"');
+  });
   it("wires its fixed protocolVersion through to the shared turn call", () => {
     // 弱校验，只守"接线没掉"——真正的类型行为由下面 buildAcpInitParams 的断言守。
     expect(src).toContain("protocolVersion: 1");

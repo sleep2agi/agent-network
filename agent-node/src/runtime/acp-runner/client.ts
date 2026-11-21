@@ -70,6 +70,15 @@ export class GrokAcpClient extends EventEmitter {
   private lastIncomingAt = Date.now();
 
   /**
+   * 运行时标签（`grok` / `antigravity`），只用于错误文案与日志。
+   * 这个客户端同时服务 grok 与 agy 两条链，硬编码 "grok" 会让 antigravity
+   * 节点的报错把人指向 `~/.grok/sessions/` 这种根本不存在的位置。
+   */
+  constructor(private readonly runtimeLabel: string = "grok") {
+    super();
+  }
+
+  /**
    * Wall-clock timestamp (ms since epoch) of the last successfully parsed
    * JSON-RPC frame received from the agent on stdout. Updated by
    * `onStdout`. Exposed read-only for tests and consumers that want to
@@ -80,7 +89,7 @@ export class GrokAcpClient extends EventEmitter {
   }
 
   start(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string; model?: string; argv?: string[] } = {}): void {
-    if (this.child) throw new Error("GrokAcpClient already started");
+    if (this.child) throw new Error(`${this.runtimeLabel} ACP client already started`);
     this.cwd = resolve(opts.cwd ?? process.cwd());
     const bin = opts.binary ?? "grok";
     // argv：给别的 ACP CLI 复用（Antigravity CLI 是 `agy acp`，没有 `agent stdio` 这层）。
@@ -97,20 +106,20 @@ export class GrokAcpClient extends EventEmitter {
     this.child.on("exit", (code, signal) => {
       this.closed = true;
       this.emit("exit", { code, signal });
-      for (const [, p] of this.pending) p.reject(new Error(`grok agent stdio exited (code=${code} signal=${signal})`));
+      for (const [, p] of this.pending) p.reject(new Error(`${this.runtimeLabel} ACP child exited (code=${code} signal=${signal})`));
       this.pending.clear();
     });
     this.child.on("error", (err) => this.emit("error", err));
   }
 
   async request<R = unknown, P = unknown>(method: string, params?: P, timeoutMs = 30_000): Promise<R> {
-    if (!this.child || this.closed) throw new Error("GrokAcpClient not started or already exited");
+    if (!this.child || this.closed) throw new Error(`${this.runtimeLabel} ACP client not started or already exited`);
     const id = this.nextId++;
     const payload: JsonRpcRequest<P> = { jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) };
     return new Promise<R>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`grok ACP request '${method}' (id=${id}) timed out after ${timeoutMs}ms`));
+        reject(new Error(`${this.runtimeLabel} ACP request '${method}' (id=${id}) timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v as R); },
@@ -153,7 +162,7 @@ export class GrokAcpClient extends EventEmitter {
     params?: P,
     idleTimeoutMs = 300_000,
   ): Promise<R> {
-    if (!this.child || this.closed) throw new Error("GrokAcpClient not started or already exited");
+    if (!this.child || this.closed) throw new Error(`${this.runtimeLabel} ACP client not started or already exited`);
     const id = this.nextId++;
     const payload: JsonRpcRequest<P> = { jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) };
     const startedAt = Date.now();
@@ -180,13 +189,12 @@ export class GrokAcpClient extends EventEmitter {
           settle(() =>
             reject(
               new Error(
-                `grok ACP request '${method}' (id=${id}) idle for ${sinceActivity}ms ` +
+                `${this.runtimeLabel} ACP request '${method}' (id=${id}) idle for ${sinceActivity}ms ` +
                   `(threshold ${idleTimeoutMs}ms, total elapsed ${totalMs}ms). ` +
-                  `The task may still be running in the background — check the Grok session ` +
-                  `directory under ~/.grok/sessions/ for partial outputs. ` +
-                  `If your task is genuinely long-running (e.g. batch video generation), ` +
-                  `raise flags.grokAcpTimeoutMs in your node config (it now controls ` +
-                  `the idle threshold, not a hard deadline).`,
+                  `The agent sent no frames for that long; the task may still be running ` +
+                  `in the background. If it is genuinely long-running, raise ` +
+                  `flags.acpIdleTimeoutMs (or the legacy flags.grokAcpTimeoutMs) in the node ` +
+                  `config — that value controls the idle threshold, not a hard deadline.`,
               ),
             ),
           );
@@ -212,7 +220,7 @@ export class GrokAcpClient extends EventEmitter {
   }
 
   notify<P = unknown>(method: string, params?: P): void {
-    if (!this.child || this.closed) throw new Error("GrokAcpClient not started or already exited");
+    if (!this.child || this.closed) throw new Error(`${this.runtimeLabel} ACP client not started or already exited`);
     const payload: JsonRpcNotification<P> = { jsonrpc: "2.0", method, ...(params !== undefined ? { params } : {}) };
     this.child.stdin.write(JSON.stringify(payload) + "\n");
   }
@@ -271,14 +279,14 @@ export class GrokAcpClient extends EventEmitter {
       }
       this.pending.delete(id);
       if ("error" in msg && msg.error) {
-        const err = new Error(formatJsonRpcError(msg.error));
+        const err = new Error(formatJsonRpcError(msg.error, this.runtimeLabel));
         (err as Error & { code?: number; data?: unknown }).code = msg.error.code;
         (err as Error & { code?: number; data?: unknown }).data = msg.error.data;
         pending.reject(err);
       } else if ("result" in msg) {
         pending.resolve(msg.result);
       } else {
-        pending.reject(new Error(`grok ACP response (id=${String(msg.id)}) missing both result and error`));
+        pending.reject(new Error(`${this.runtimeLabel} ACP response (id=${String(msg.id)}) missing both result and error`));
       }
       return;
     }
@@ -398,8 +406,8 @@ function looksLikeGrokBalanceExhausted(message: string, data: unknown): boolean 
 /** Test-only export: the error text the ACP produces (see the 402 hint above). */
 export const formatJsonRpcErrorForTest = formatJsonRpcError;
 
-function formatJsonRpcError(error: JsonRpcError["error"]): string {
-  const base = `grok ACP error ${error.code}: ${error.message}`;
+function formatJsonRpcError(error: JsonRpcError["error"], runtimeLabel = "grok"): string {
+  const base = `${runtimeLabel} ACP error ${error.code}: ${error.message}`;
   const balance = looksLikeGrokBalanceExhausted(error.message ?? "", error.data);
   if (error.data === undefined) return balance ? `${base} — ${GROK_BALANCE_HINT}` : base;
   let data: string;
