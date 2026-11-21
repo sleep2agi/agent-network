@@ -16,6 +16,7 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
+import { userManageScope, canUserManageNode, USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
 import { isInboxTightening, isPermissionModeTightening } from "./permission-tightening.js";
 import { permissionManagementAudit, permissionManagementDenial } from "./node-permission-management.js";
 import { auditDepartment, createDepartment, deleteDepartment, listDepartments, setAgentDepartment, setMemberDepartment, updateDepartment } from "./departments.js";
@@ -532,6 +533,24 @@ function restInboxSender(_req: Request, restAuth: { networkId: string | null; to
 /** 写别的节点 = 只有人能做;写自己 = 只看模式。 */
 const nodeTargetVerdict = (targetNodeId: string) => (id: NodeIdentity): Verdict =>
   id.nodeId && id.nodeId === targetNodeId ? writeVerdict(id, targetNodeId) : humanOnlyVerdict(id, targetNodeId);
+
+/**
+ * 单节点读写的部门范围拦截（#3665 第二步，HTTP 层强制，不止纯函数/列表过滤）。
+ * 只对「人类用户令牌 + 被明确授了部门范围管理」的调用者生效：
+ *   · 节点令牌（restAuth.networkId 有值）、owner/admin、没有任何 manage_nodes 授权的人 ⇒ 不额外拦，
+ *     原有的 canRestWriteNetwork / canRestWriteNodeSecurity 等判定已经够了；
+ *   · 部门范围管理者访问范围外（或无部门）的节点 ⇒ 403 out_of_scope（不是 404，不装作不存在）。
+ */
+function userDeptScopeDenied(req: Request, restAuth: { userId?: string | null; networkId: string | null } | null, node: { network_id?: string | null; department_id?: string | null }): Response | null {
+  if (!restAuth?.userId || restAuth.networkId) return null;
+  const netId = node.network_id;
+  if (!netId) return null;
+  const role = getUserNetworkRole(restAuth.userId, netId);
+  if (role === "owner" || role === "admin") return null;
+  const scope = userManageScope(netId, restAuth.userId);
+  if (canUserManageNode(scope, node.department_id ?? null)) return null;
+  return withCors(req, Response.json({ ok: false, error: "out_of_scope", message: "this node is outside the departments you manage" }, { status: 403 }));
+}
 
 function userTokenRequired(req: Request): Response {
   return withCors(req, Response.json({ ok: false, error: "user_token_required", message: "this endpoint acts on a user account; node tokens cannot use it" }, { status: 403 }));
@@ -4453,6 +4472,64 @@ return Bun.serve({
         JSON.stringify({ from: before.map(({ capability, scope_kind, scope_id, level }) => ({ capability, scope_kind, scope_id, level })), to: parsed.grants }), getClientIP(req), gnode.network_id);
       return withCors(req, Response.json({ ok: true, node_id: gnode.node_id, grants: listNodeGrants(gnode.network_id, gnode.node_id) }));
     }
+    // 人的范围管理授权（#3665，admin 2026-11-21）：GET / PUT /api/users/:user_id/grants
+    //   body { grants: [{capability:'manage_nodes', scope_kind:'network'|'department', scope_id, level:'read'|'edit'}] } —— 整份替换
+    // 谁能授：network owner/admin 任意范围；部门负责人只能授自己子树内的 department，不能授 network（接口层强制）。
+    const userGrantsMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/grants$/);
+    if (userGrantsMatch && (req.method === "GET" || req.method === "PUT")) {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const netId = singleNetworkId(restScope);
+      if (!netId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const targetUserId = decodeURIComponent(userGrantsMatch[1]);
+      if (!getUserNetworkRole(targetUserId, netId) && !isAdmin) {
+        return withCors(req, Response.json({ ok: false, error: "user_not_found" }, { status: 404 }));
+      }
+      if (req.method === "GET") {
+        return withCors(req, Response.json({
+          ok: true, user_id: targetUserId, grants: listUserGrants(netId, targetUserId),
+          capabilities: USER_GRANT_CAPABILITIES, scopes: USER_GRANT_SCOPES, levels: USER_GRANT_LEVELS,
+        }));
+      }
+      const actorRole = getUserNetworkRole(restAuth.userId, netId);
+      const actorManaged = new Set(managedDepartmentIds(netId, restAuth.userId).flatMap(d => [...departmentSubtree(netId, d)]));
+      let body: any;
+      try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 })); }
+      const raw = Array.isArray(body?.grants) ? body.grants : null;
+      if (!raw) return withCors(req, Response.json({ ok: false, error: "invalid_grants" }, { status: 400 }));
+      const next: Array<{ capability: string; scope_kind: string; scope_id: string; level: string }> = [];
+      for (const g of raw) {
+        const capability = String(g?.capability ?? "");
+        const scopeKind = String(g?.scope_kind ?? "");
+        const scopeId = String(g?.scope_id ?? "").trim();
+        const level = String(g?.level ?? "");
+        if (!(USER_GRANT_CAPABILITIES as readonly string[]).includes(capability)) return withCors(req, Response.json({ ok: false, error: "invalid_capability" }, { status: 400 }));
+        if (!(USER_GRANT_SCOPES as readonly string[]).includes(scopeKind)) return withCors(req, Response.json({ ok: false, error: "invalid_scope" }, { status: 400 }));
+        if (!(USER_GRANT_LEVELS as readonly string[]).includes(level)) return withCors(req, Response.json({ ok: false, error: "invalid_level" }, { status: 400 }));
+        if (scopeKind === "department") {
+          if (!scopeId) return withCors(req, Response.json({ ok: false, error: "scope_id_required" }, { status: 400 }));
+          if (!db.get("SELECT 1 AS x FROM network_departments WHERE network_id = ?1 AND department_id = ?2", [netId, scopeId])) {
+            return withCors(req, Response.json({ ok: false, error: "department_not_found" }, { status: 404 }));
+          }
+        }
+        const verdict = canGrantUserScope({ actorRole, actorManagedDeptIds: actorManaged, scopeKind, scopeId });
+        if (!verdict.ok && !isAdmin) {
+          return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "only network owners/admins can grant network-wide access; department heads can grant within the departments they lead" }, { status: 403 }));
+        }
+        next.push({ capability, scope_kind: scopeKind, scope_id: scopeKind === "network" ? "" : scopeId, level });
+      }
+      const before = listUserGrants(netId, targetUserId);
+      db.transaction(() => {
+        db.run("DELETE FROM user_grants WHERE network_id = ?1 AND user_id = ?2", [netId, targetUserId]);
+        for (const g of next) {
+          setUserGrant({ networkId: netId, userId: targetUserId, capability: g.capability, scopeKind: g.scope_kind, scopeId: g.scope_id, level: g.level, grantedBy: restAuth.userId ?? null });
+        }
+      });
+      logAudit(restAuth.userId, restAuth.username, "user_grants_changed", "user", targetUserId,
+        JSON.stringify({ before, after: next }), getClientIP(req), netId);
+      return withCors(req, Response.json({ ok: true, user_id: targetUserId, grants: listUserGrants(netId, targetUserId) }));
+    }
+
     // 收件白名单：PUT /api/nodes/:id/inbox-allowlist { senders: string[] | null }
     // 与 peer-allowlist 同一套授权、审计与空数组语义（拒收 []，清空请传 null）。
     // 条目语法与发件人匹配规则见 node-permissions.ts「收件白名单」。
@@ -6538,7 +6615,7 @@ return Bun.serve({
     if (nodeDeleteMatch && req.method === "DELETE") {
       const ref = decodeURIComponent(nodeDeleteMatch[1]);
       const params: any[] = [ref, ref, ref];
-      let sql = "SELECT node_id, node_name, alias, network_id FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      let sql = "SELECT node_id, node_name, alias, network_id, department_id FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC LIMIT 1";
       const node = db.get<any>(sql, ...params);
@@ -6548,6 +6625,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const deptScopeDenied = userDeptScopeDenied(req, restAuth, node);
+      if (deptScopeDenied) return deptScopeDenied;
       const nodeWriteDenied = restNodeDenied(req, restAuth, "DELETE /api/nodes/:id", nodeTargetVerdict(node.node_id));
       if (nodeWriteDenied) return nodeWriteDenied;
 
@@ -6643,13 +6722,16 @@ return Bun.serve({
     if (nodeConfigMatch && req.method === "GET") {
       const nodeId = decodeURIComponent(nodeConfigMatch[1] ?? "");
       const params: any[] = [nodeId];
-      let sql = "SELECT node_id, alias, network_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
+      let sql = "SELECT node_id, alias, network_id, department_id, config_revision, config_snapshot FROM nodes WHERE node_id = ?1";
       sql = addNetworkScope(sql, params, restScope);
       sql += " LIMIT 1";
       const node = db.get<any>(sql, ...params);
       if (!node) {
         return withCors(req, Response.json({ ok: false, error: "node_not_found", node_id: nodeId }, { status: 404 }));
       }
+      // #3665 —— 部门范围管理者读单个节点的配置详情，也要落在管理范围内（不止列表收窄）。
+      const readDeptDenied = userDeptScopeDenied(req, restAuth, node);
+      if (readDeptDenied) return readDeptDenied;
       let snapshot: any = {};
       if (node.config_snapshot) {
         try { snapshot = JSON.parse(node.config_snapshot); } catch { snapshot = {}; }
@@ -6724,7 +6806,7 @@ return Bun.serve({
       }
       const ref = decodeURIComponent(nodeAttrsMatch[1]);
       const params: any[] = [ref, ref, ref];
-      let sql = "SELECT node_id, alias, network_id, display_name, team, tags, description, attrs_revision FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
+      let sql = "SELECT node_id, alias, network_id, department_id, display_name, team, tags, description, attrs_revision FROM nodes WHERE (node_id = ?1 OR node_name = ?2 OR alias = ?3)";
       sql = addNetworkScope(sql, params, restScope);
       sql += " ORDER BY updated_at DESC LIMIT 1";
       const node = db.get<any>(sql, ...params);
@@ -6734,6 +6816,8 @@ return Bun.serve({
       if (!canRestWriteNetwork(restAuth, nodeNetId, isAdmin)) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
       }
+      const attrsDeptDenied = userDeptScopeDenied(req, restAuth, node);
+      if (attrsDeptDenied) return attrsDeptDenied;
       const nodeWriteDenied = restNodeDenied(req, restAuth, "PUT /api/nodes/:id/attrs", nodeTargetVerdict(node.node_id));
       if (nodeWriteDenied) return nodeWriteDenied;
 
@@ -7438,7 +7522,27 @@ return Bun.serve({
           restart_readiness: restartReadiness(r.node_id, r.alias, r.network_id, role, r.lifecycle_state ?? null),
         };
       });
-      return withCors(req, Response.json({ ok: true, nodes: rows, count: rows.length }));
+      // #3665 —— 部门范围管理：被授予「只管某部门」的人，列表里只看得到范围内节点。
+      // 口径：无授权/global ⇒ 原样返回；有 department 授权 ⇒ 按节点 department_id 过滤（含子部门，
+      // 无部门节点不可见——只归 global，拍板口径，见 canUserManageNode）。
+      // 注意：owner/admin 走 manageScopeFrom 的 global 分支，不受影响。
+      //
+      // 2026-11-21 负责人 修：原来判「是不是人的请求」用的是 restAuth.networkId——但人类令牌
+      // （utok_）**恒为 null**（只有节点令牌/network token 才绑网络，见 resolveRestNetworkScope
+      // 「Network tokens are forcibly scoped to their bound network」），这个判据一直是死码，
+      // 部门范围从未真正收窄过列表。改成从 restScope 取单一网络 id；取不到（跨网络 token）就不收窄，
+      // 不是「收窄」的覆盖范围，不强判。
+      const scopedRows = (() => {
+        if (!restAuth?.userId) return rows;
+        const netIdForScope = singleNetworkId(restScope);
+        if (!netIdForScope) return rows;
+        const role = getUserNetworkRole(restAuth.userId, netIdForScope);
+        if (role === "owner" || role === "admin") return rows;
+        const scope = userManageScope(netIdForScope, restAuth.userId);
+        if (scope.kind === "global" || scope.deptIds.size === 0) return rows;   // 没有任何管理授权 ⇒ 保持既有可见性（本 PR 只管「收窄」）
+        return rows.filter((r: any) => canUserManageNode(scope, r.department_id ?? null));
+      })();
+      return withCors(req, Response.json({ ok: true, nodes: scopedRows, count: scopedRows.length }));
     }
 
     // ── REST: single task lookup (V2) ──
