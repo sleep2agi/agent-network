@@ -7,7 +7,7 @@ const raw = {
   projectID: "proj_1",
   model: { id: "claude-sonnet-4", providerID: "anthropic", variant: "high" },
   time: { created: 1763700000000, updated: 1763703600000, idle: 1763703000000 },
-  location: { directory: "/home/vansin/proj" },
+  location: { directory: "/srv/proj" },
   tokens: { input: 1000, output: 200 },
 };
 
@@ -17,7 +17,7 @@ describe("#4821 OpenCode session 投影", () => {
     expect(s).toEqual({
       id: "ses_abc", title: "看板排查", project_id: "proj_1",
       model: { provider: "anthropic", id: "claude-sonnet-4", variant: "high" },
-      updated_at: "2025-11-21T05:40:00Z", directory: "/home/vansin/proj",
+      updated_at: "2025-11-21T05:40:00Z", directory: "/srv/proj",
     });
   });
 
