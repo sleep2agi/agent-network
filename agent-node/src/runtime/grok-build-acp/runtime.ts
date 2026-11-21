@@ -489,6 +489,13 @@ async function applyConfiguredModel(
     confirmed = typeof ok === "string" ? ok : undefined;
     // agy：没有 model_changed 可等，调用本身成功即生效（真机已验证会真的换模型）。
     if (opts.trustSetModelResult) {
+      // agy 在部分路径会回空对象；「没报错」不等于「换了模型」，至少要在日志里说清楚。
+      if (!confirmed) {
+        opts.onStderr?.(
+          `[agy] session/set_model returned no _meta.model.Ok; trusting the call because agy emits no model events — ` +
+          `cannot prove "${requested}" took effect on this session.`,
+        );
+      }
       return { effectiveModel: requested, modelSource: "set_model" };
     }
   } catch (err) {
