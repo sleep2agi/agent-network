@@ -26,9 +26,10 @@ describe("#5152 browser-use skill", () => {
   test("Linux 带 --no-sandbox；macOS 不带；都先 close 残留 daemon", () => {
     const linux = browserUseWrapperScript("linux");
     expect(linux).toContain('--args "--no-sandbox"');
-    expect(linux.indexOf("agent-browser close")).toBeLessThan(linux.indexOf("agent-browser --args"));
+    expect(linux.indexOf("agent-browser close")).toBeLessThan(linux.indexOf("agent-browser open"));
     const mac = browserUseWrapperScript("darwin");
-    expect(mac).not.toContain("--no-sandbox");
+    const macExec = mac.split("\n").filter(l => l.trim().startsWith("exec")).join("\n");
+    expect(macExec).not.toContain("--no-sandbox");   // 注释里提到是给人看的，执行行才算数
     expect(mac).toContain("agent-browser close");
   });
 
