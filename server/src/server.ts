@@ -16,6 +16,7 @@ import { readNodeHealth } from "./node-health-store.js";
 import { wantsAllTools } from "./tool-audience.js";
 import { assertNodeHealthy, degradedLayers } from "./node-health-guard.js";
 import { GRANT_CAPABILITIES, grantsWithinManaged, listNodeGrants, parseNodeGrants, replaceNodeGrants } from "./node-grants.js";
+import { readReportedWorkdir, workdirProjection } from "./node-workdir.js";
 import { createSessionRequest, findFreshResult, findOpenRequest, getSessionRequest, ensureSessionRequestsTable } from "./opencode-session-requests.js";
 import { userManageScope, canUserManageNode, USER_GRANT_CAPABILITIES, USER_GRANT_LEVELS, USER_GRANT_SCOPES, canGrantUserScope, listUserGrants, setUserGrant } from "./user-grants.js";
 import { isInboxTightening, isPermissionModeTightening } from "./permission-tightening.js";
@@ -7439,8 +7440,38 @@ return Bun.serve({
         return role === "owner" || role === "admin";
       };
       const management = lifecycleUser ? lifecycleProjections(restScope) : null;
+      // #5125 —— 逐行判定「这个人能不能看这台节点的工作目录」。
+      // 口径比 canUserManageNode 更严：那一层是「不额外拦没有授权的人」，这里必须**默认拒绝**——
+      //   owner/admin ⇒ 可见；有 network 级 manage_nodes 授权 ⇒ 可见；
+      //   有部门授权 ⇒ 仅本人管辖子树（含子部门）可见；
+      //   其余（含普通成员、节点令牌）⇒ forbidden。
+      // 角色/范围按网络缓存一次（列表可能上千行）。
+      const workdirRoleCache = new Map<string, string | null>();
+      const workdirScopeCache = new Map<string, { kind: "global" } | { kind: "departments"; deptIds: Set<string> }>();
+      const workdirLedCache = new Map<string, Set<string>>();
+      const canViewWorkdirFor = (networkId: string | null, departmentId: string | null): boolean => {
+        if (!restAuth?.userId || restAuth.networkId) return false;
+        const netId = networkId;
+        if (!netId) return false;
+        if (isAdmin) return true;
+        if (!workdirRoleCache.has(netId)) workdirRoleCache.set(netId, getUserNetworkRole(restAuth.userId, netId));
+        const role = workdirRoleCache.get(netId);
+        if (role === "owner" || role === "admin") return true;
+        if (!workdirScopeCache.has(netId)) workdirScopeCache.set(netId, userManageScope(netId, restAuth.userId));
+        const scope = workdirScopeCache.get(netId)!;
+        if (scope.kind === "global") return true;
+        // 允许集合 = 被授的部门子树 ∪ 本人**负责**的部门子树（部门负责人的管辖不写在 user_grants 里）
+        if (!workdirLedCache.has(netId)) workdirLedCache.set(netId, new Set(managedDepartmentIds(netId, restAuth.userId)));
+        const allowed = new Set<string>([...scope.deptIds, ...workdirLedCache.get(netId)!]);
+        if (allowed.size === 0) return false;                // 既没有授权也不负责任何部门 ⇒ 不可见
+        if (!departmentId) return false;                     // 无部门节点只归 owner/admin
+        return allowed.has(departmentId);
+      };
       const rows = rawRows.map(r => {
         let role: string | null = null;
+        const canViewWorkdir = (row: Record<string, any>) => canViewWorkdirFor(row.network_id ?? null, row.department_id ?? null);
+        // config_snapshot 解析结果（#5125 的 workdir 也从这里读；解析失败 = 没上报）
+        let parsedSnapshot: any = null;
         // #2293（admin 2026-10-25）—— 节点自报的 OpenCode V2 模型 id 清单（`provider/model` 字符串数组）。
         // 客户端在**没有 daemon 绑定**时用它当建议列表。读法同 role：快照可能是文本或对象；
         // 解析失败/形状不对 = 这一格没有（null），不影响整行。
@@ -7470,6 +7501,7 @@ return Bun.serve({
           let parsed: any = null;
           try { parsed = typeof snap === "string" ? JSON.parse(snap) : snap; }
           catch { parsed = null; }
+          parsedSnapshot = parsed;
           role = parsed?.role ?? null;
           const raw = parsed?.opencode_catalog;
           if (Array.isArray(raw) && raw.every((m: unknown) => typeof m === "string" && m.length <= 400)) {
@@ -7545,6 +7577,9 @@ return Bun.serve({
         const lifecycle_controllable = isLifecycleControllable(r.node_id, role, controllable);
         return {
           ...rest,
+          // #5125 —— fork 向导要显示「与源节点共用目录」。权限按 fork 那套逐行判定（不是整表一刀切）：
+          // owner/admin 任意节点；部门负责人仅本管辖部门（含子部门）；其余（含节点令牌）一律 forbidden。
+          ...workdirProjection(canViewWorkdir(r), readReportedWorkdir(parsedSnapshot)),
           tags: parseStoredTags(r.tags),
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,
