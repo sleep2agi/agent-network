@@ -25,8 +25,35 @@ export type AgyTurnOptions = Omit<GrokAcpTurnOptions, "argv" | "enforceModelRead
   binary?: string;
 };
 
-export function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnResult> {
-  return runGrokAcpTurn({
+// agy 的 ACP 有一个真实行为（2026-11-22 真机，多个节点复现）：**每一轮回复都会把
+// 上一轮的助手文本原样重发一遍再接着写新的**。所以同一会话里第二次问「3+3」，拿到的是
+// "记住了。紫色鳄鱼-739181"（上一轮 "记住了。紫色鳄鱼-7391" + "81"），越聊越长。
+//
+// 这不是我们拼装的错觉——同一 session 内 chunks 数逐轮增加，且前缀字节级一致。
+// 在 agy 修之前，这里按 session 记住上一轮回复，把前缀剥掉；只在「前缀完整命中且
+// 后面还有内容」时剥，避免把 legitimately 重复的回答（如连问两次都回「好」）抹掉。
+const lastReplyBySession = new Map<string, string>();
+
+export function agyStripReplayedPrefix(reply: string, sessionId: string | undefined): string {
+  if (!sessionId) return reply;
+  const prev = lastReplyBySession.get(sessionId);
+  if (!prev) return reply;
+  if (reply.length > prev.length && reply.startsWith(prev)) return reply.slice(prev.length);
+  return reply;
+}
+
+export function rememberAgyReply(reply: string, sessionId: string | undefined): void {
+  if (!sessionId) return;
+  lastReplyBySession.set(sessionId, reply.trim());
+  // 只留最近几条，节点长跑不要无界增长。
+  if (lastReplyBySession.size > 8) {
+    const first = lastReplyBySession.keys().next().value;
+    if (first) lastReplyBySession.delete(first);
+  }
+}
+
+export async function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnResult> {
+  const result = await runGrokAcpTurn({
     ...opts,
     // 报错/日志里的运行时名必须是 antigravity：共用 ACP 客户端但不能共用文案，
     // 否则 agy 节点报错会写 "grok ACP ... ~/.grok/sessions/"（真机踩过）。
@@ -42,4 +69,11 @@ export function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnResult> 
     protocolVersion: 1,
     authMethodPreference: opts.authMethodPreference ?? AGY_AUTH_METHOD_PREFERENCE,
   });
+  const sessionId = result.sessionId;
+  const cleaned = agyStripReplayedPrefix(result.replyText ?? "", sessionId);
+  if (cleaned !== result.replyText) {
+    opts.onStderr?.(`[antigravity] stripped replayed prefix (${(result.replyText ?? "").length - cleaned.length} chars) from session ${String(sessionId).slice(0, 8)}`);
+  }
+  rememberAgyReply(cleaned, sessionId);
+  return { ...result, replyText: cleaned };
 }

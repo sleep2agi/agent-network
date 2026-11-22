@@ -2823,7 +2823,20 @@ function writebackClaudeSessionCost(sessionId: string, totalUsd: number) {
   }
 }
 let grokSessionId: string | undefined = RUNTIME === "grok" ? (SESSION_ID || undefined) : undefined;
-let agySessionId: string | undefined = RUNTIME === "antigravity" ? (SESSION_ID || undefined) : undefined;
+// agy —— **只在进程内复用会话，不跨进程 resume**。
+//
+// 2026-11-22 真机（主苹果运维鸽，重启后接上 cfg.session 的 e0e3b0b8）：
+//   session/load 把上一轮助手消息重放出来，紧接着的 session/prompt 被当成同一轮的
+//   续写，于是每轮回复都变成「上一轮答案 + 新答案」并越堆越长：
+//     问 9*9 → "记住了。紫色鳄鱼-739181"
+//     问 3+3 → "记住了。紫色鳄鱼-7391816"
+//   chunks 逐轮递增、前缀字节级一致，不是偶发。
+//
+// 所以启动时不再从 config 读回（SESSION_ID 对 agy 一律不参与），本次进程的第一轮
+// 一定是 session/new；进程内后续任务仍然共用这条会话 —— admin 要的「一个节点记着
+// 上下文」在运行期间成立，只是重启后重新开始。agySession 仍然写回 config，只用于
+// 观测/排查，不再作为 resume 源。
+let agySessionId: string | undefined = undefined;
 // #1958 — model the ACP session actually ran with (readback from the agent),
 // and where that knowledge came from. Reported to the hub as `model` so the
 // dashboard shows the running model rather than the configured one.
@@ -5087,7 +5100,9 @@ async function processWithAntigravity(
     onStderr: (line) => debug(`[agy-stderr] ${line}`),
   });
 
-  const firstSessionId = agySessionId || SESSION_ID || undefined;
+  // agy 只续「本次进程内」的会话：不拿 SESSION_ID（它是 cfg.session 的读回值），
+  // 见 agySessionId 的声明处那段真机复现说明。
+  const firstSessionId = agySessionId || undefined;
   try {
     const result = await runOnce(firstSessionId);
     return result.replyText;
