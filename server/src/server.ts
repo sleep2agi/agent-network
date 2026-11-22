@@ -7580,6 +7580,16 @@ return Bun.serve({
           // #5125 —— fork 向导要显示「与源节点共用目录」。权限按 fork 那套逐行判定（不是整表一刀切）：
           // owner/admin 任意节点；部门负责人仅本管辖部门（含子部门）；其余（含节点令牌）一律 forbidden。
           ...workdirProjection(canViewWorkdir(r), readReportedWorkdir(parsedSnapshot)),
+          // 「CLI 在等一个选项」：原样投影上报值（不做权限裁剪 —— 摘录已在节点侧脱敏，
+          // 且它描述的是节点状态而非文件系统路径）。没上报 ⇒ null，不用空对象装。
+          prompt_pending: (() => {
+            const ip = parsedSnapshot?.interactive_prompt;
+            if (!ip || typeof ip !== "object") return null;
+            const kind = typeof ip.kind === "string" ? ip.kind : null;
+            const detectedAt = typeof ip.detected_at === "string" ? ip.detected_at : null;
+            if (!kind || !detectedAt) return null;
+            return { kind, excerpt: typeof ip.excerpt === "string" ? ip.excerpt : null, detected_at: detectedAt };
+          })(),
           tags: parseStoredTags(r.tags),
           attrs_revision: Number(r.attrs_revision ?? 0),
           role,

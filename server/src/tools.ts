@@ -1001,6 +1001,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // 🔴 必须写进 schema：zod object 默认**丢弃未知键** ⇒ 不写在这里，daemon 报上来也会被静默剥掉，
         //    /api/nodes 的 workdir_state 就永远是 not_reported（实测踩到过，2026-11-22 临时节点验证）。
         workdir: z.string().max(4096).optional().catch(undefined),
+        // 「CLI 在等一个选项」的可观测信号（只读展示，不改任何 runtime 行为）。
+        // 同样必须写进 schema —— zod object 会静默丢弃未知键（#5125 的 workdir 踩过一次）。
+        interactive_prompt: z.object({
+          kind: z.string().max(40),
+          excerpt: z.string().max(400).optional(),
+          detected_at: z.string().max(40),
+        }).optional().catch(undefined),
         model: z.string().max(200).optional().nullable(),
         model_effective: z.string().max(401).optional(),
         modelVariant: z.string().max(200).nullable().optional(),
