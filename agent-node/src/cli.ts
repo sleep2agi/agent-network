@@ -22,6 +22,7 @@ import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LIN
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
 import { persistVariantToConfig, shouldPersistVariant, startupVariantPlan } from "./runtime/opencode-copresence/variant-persist.js";
+import { createPromptTracker } from "./shared/interactive-prompt.js";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -1644,6 +1645,19 @@ const taskTraceLog = (line: string) => {
 // 2026-11-20 — agy 登录会话管理器：一个进程一份（单并发由它保证）。
 const agyLoginManager = RUNTIME === "antigravity" ? createAgyLoginManager() : null;
 
+// CLI 等选项的可观测信号（#cli-prompt-options ②）。
+// 只读我们 spawn 的子进程 stderr/stdout —— 不碰任何 TUI 行为，检测到就上报、不改输出。
+const interactivePromptTracker = createPromptTracker();
+function clearInteractivePrompt(reason: string): void {
+  if (interactivePromptTracker.clear()) log(`[prompt] cleared (${reason})`);
+}
+function observeInteractivePrompt(line: string): void {
+  try {
+    const seen = interactivePromptTracker.observe(line);
+    if (seen?.first) warn(`[prompt] node looks like it is waiting on an option: kind=${seen.signal.kind}`);
+  } catch { /* 观测失败绝不影响主流程 */ }
+}
+
 function rulesFileDeps() {
   return {
     callCommHub, runtime: RUNTIME, workDir: process.cwd(), log, warn,
@@ -2199,6 +2213,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       // #5125 续 —— 上报本节点的工作目录（Hub 的 fork 向导要显示「与源节点共用目录」）。
       // 放快照顶层而不是 flags：flags 参与 config content-match，加键会让旧 Hub 的比对漂移。
       ...workdirSnapshotField(process.cwd()),
+      // CLI 在等选项（只读观测，不改行为）
+      ...(interactivePromptTracker.current() ? { interactive_prompt: interactivePromptTracker.current() } : {}),
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
       // 2026-11-20 — agy 登录通道（设计稿 handoff/agy-login-channel-design.md）。
       // 只在 antigravity 节点上报；老 daemon 没这个键 → 客户端回退「复制命令」。
@@ -5134,7 +5150,7 @@ async function processWithAntigravity(
     onSession: (newSessionId: string) => { agySessionId = newSessionId; writebackSession(newSessionId); },
     onSubmitted: evidence?.submitted,
     onConsumed: evidence?.consumed,
-    onStderr: (line) => debug(`[agy-stderr] ${line}`),
+    onStderr: (line) => { observeInteractivePrompt(line); debug(`[agy-stderr] ${line}`); },
   });
 
   // agy 只续「本次进程内」的会话：不拿 SESSION_ID（它是 cfg.session 的读回值），
@@ -5142,6 +5158,7 @@ async function processWithAntigravity(
   const firstSessionId = agySessionId || undefined;
   try {
     const result = await runOnce(firstSessionId);
+    clearInteractivePrompt("turn-completed");
     return result.replyText;
   } catch (e: any) {
     // admin 2026-11-22「这个能修一下吗」（公众号鸽连续两次 session/prompt idle 30 分钟）——
@@ -5156,6 +5173,7 @@ async function processWithAntigravity(
     if (firstSessionId) {
       warn(`[antigravity] resumed session failed (${e?.message || e}); retrying once with a fresh session`);
       const result = await runOnce(undefined);
+      clearInteractivePrompt("turn-completed");
       return result.replyText;
     }
     throw e;
@@ -5396,6 +5414,7 @@ async function processWithGrok(
       // anything not in that table keeps the old warn()/debug() split, so
       // a failure shape nobody has classified yet is never made quiet.
       onStderr: (line) => {
+        observeInteractivePrompt(line);
         const emission = stderrAggregator.observe(line);
         if (!emission) return;
         if (emission.level === "warn") warn(emission.line);
@@ -5441,6 +5460,7 @@ async function processWithGrok(
       warn(`[grok] #205 path surface skipped: ${e?.message || e}`);
     }
 
+    clearInteractivePrompt("turn-completed");
     return replyText;
   };
 
@@ -6269,6 +6289,7 @@ async function processWithGrokCli(
           if (event.type === "end") debug(`[grok-cli] end stopReason=${event.stopReason || "unknown"}`);
         },
         onStderr: (line) => {
+          observeInteractivePrompt(line);
           const emission = stderrAggregator.observe(line);
           if (!emission) return;
           if (emission.level === "warn") warn(emission.line);
@@ -6284,6 +6305,7 @@ async function processWithGrokCli(
     }
     writebackGrokSession(result.sessionId);
     log(`[grok-cli] done ${label} | ${Date.now() - started}ms | session=${result.sessionId.slice(0, 8)} | events=${result.eventCount}`);
+    clearInteractivePrompt("turn-completed");
     return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
     } finally {
       await turnLock.release();

@@ -40,3 +40,28 @@ describe("detectInteractivePrompt", () => {
     expect(mergePromptSignal(first, other).detected_at).toBe(other.detected_at);
   });
 });
+
+describe("createPromptTracker 生命周期", () => {
+  test("观测到 → current 有值；clear 之后回到 null（不会永久显示旧提示）", () => {
+    const { createPromptTracker } = require("./interactive-prompt.js") as typeof import("./interactive-prompt.js");
+    const tr = createPromptTracker(() => at);
+    expect(tr.current()).toBeNull();
+    const seen = tr.observe("Update available", at);
+    expect(seen?.first).toBe(true);
+    expect(tr.current()?.kind).toBe("codex_update");
+    // 同类重复：不算第一次
+    expect(tr.observe("Update available", at)?.first).toBe(false);
+    // 一轮正常跑完 → 清除
+    expect(tr.clear("turn-completed")).toBe(true);
+    expect(tr.current()).toBeNull();
+    // 再清一次是 no-op
+    expect(tr.clear("turn-completed")).toBe(false);
+  });
+
+  test("不同 kind 再次出现仍算第一次（要能重新 warn）", () => {
+    const { createPromptTracker } = require("./interactive-prompt.js") as typeof import("./interactive-prompt.js");
+    const tr = createPromptTracker(() => at);
+    tr.observe("Update available", at);
+    expect(tr.observe("Please log in", at)?.first).toBe(true);
+  });
+});

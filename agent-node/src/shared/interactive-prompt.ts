@@ -65,3 +65,33 @@ export function mergePromptSignal(
   if (previous && previous.kind === next.kind) return { ...next, detected_at: previous.detected_at };
   return next;
 }
+
+/**
+ * 信号的生命周期：**观测到 ≠ 一直在等**。
+ * 只有在一轮任务真正跑完（正常拿到回复）时才清除 —— 否则这个信号会从「曾经见过」
+ * 变成永久状态，运维会被早就不存在的「卡住」持续误导（2026-11-22 review）。
+ */
+export interface PromptTracker {
+  observe(line: string, now?: number): { signal: InteractivePromptSignal; first: boolean } | null;
+  clear(reason: string): boolean;
+  current(): InteractivePromptSignal | null;
+}
+
+export function createPromptTracker(now: () => number = Date.now): PromptTracker {
+  let state: InteractivePromptSignal | null = null;
+  return {
+    observe(line, at = now()) {
+      const next = detectInteractivePrompt(line, at);
+      if (!next) return null;
+      const before = state;
+      state = mergePromptSignal(before, next);
+      return { signal: state, first: !before || before.kind !== next.kind };
+    },
+    clear() {
+      if (!state) return false;
+      state = null;
+      return true;
+    },
+    current() { return state; },
+  };
+}
