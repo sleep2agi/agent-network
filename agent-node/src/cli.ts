@@ -21,7 +21,7 @@ import { clearLateReplyRecord, isTerminalLateReplyError, listLateReplyRecords, s
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
-import { persistVariantToConfig, startupVariantPlan } from "./runtime/opencode-copresence/variant-persist.js";
+import { persistVariantToConfig, shouldPersistVariant, startupVariantPlan } from "./runtime/opencode-copresence/variant-persist.js";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -8068,7 +8068,9 @@ async function processConfigUpdate(): Promise<void> {
       });
       // #5123 —— 只有回读确认 applied 才写回配置；rejected/unknown 不落盘
       //（unknown 落盘会制造「配置说切了、会话没切」的谎，比不持久化更坏）。
-      if (result.status === "applied") {
+      // #5123 review —— 先过守卫再落盘：applied 且形状合法才写。
+      // （shouldPersistVariant 是这条不变量的唯一定义处，不能只让测试用它。）
+      if (shouldPersistVariant(result.status, update.patch.modelVariant)) {
         persistVariantToConfig(configFilePath, update.patch.modelVariant, { warn });
       }
       return;

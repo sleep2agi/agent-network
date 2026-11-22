@@ -64,6 +64,12 @@ export function persistVariantToConfig(
   const writeConfig = deps.writeConfig ?? ((p: string, c: string) => writeFileSync(p, c, { mode: 0o600 }));
   const rename = deps.rename ?? ((from: string, to: string) => renameSync(from, to));
   const warn = deps.warn ?? (() => {});
+  // 纵深防御：调用方可能漏过 shouldPersistVariant；这里再挡一次形状，
+  // 避免把一个永远用不上的脏值写进 config.json（#5123 review 2026-11-22）。
+  if (variant !== null && !isValidVariantId(variant)) {
+    warn(`[variant-persist] refused invalid variant id (${String(variant).slice(0, 40)})`);
+    return false;
+  }
   try {
     const cfg = JSON.parse(readConfig(configPath));
     if (variant === null) delete cfg.modelVariant;

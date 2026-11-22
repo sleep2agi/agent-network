@@ -45,6 +45,20 @@ describe("#5123 variant persist", () => {
     expect(JSON.parse(written).modelVariant).toBeUndefined();
   });
 
+  test("🔴 纵深防御：persistVariantToConfig 自己也会拒绝非法档位（不写盘）", () => {
+    let wrote = false;
+    const warns: string[] = [];
+    const ok = persistVariantToConfig("/cfg.json", "bad variant!", {
+      readConfig: () => JSON.stringify({ alias: "n1" }),
+      writeConfig: () => { wrote = true; },
+      rename: () => {},
+      warn: (m) => warns.push(m),
+    });
+    expect(ok).toBe(false);
+    expect(wrote).toBe(false);
+    expect(warns.join(" ")).toContain("refused invalid variant id");
+  });
+
   test("读配置失败只 warn，不抛（切换成功不应被写回失败连坐）", () => {
     const warns: string[] = [];
     const ok = persistVariantToConfig("/cfg.json", "high", {
