@@ -1325,7 +1325,16 @@ function clearGrokSession(reason: string) {
 // 补齐同一套机制：复用通用的 writebackSession()（agy 没有自己专属的 config 键，SESSION_ID
 // 的兜底链本来就读 fileConfig.session，不用新开键）。
 function clearAgySession(reason: string) {
+  // 会话被丢弃时把它记住的重放历史一起清掉，否则下次万一拿到同一个 session id，
+  // 会拿旧前缀去剥新会话的回复（不同 id 天然不撞 key，所以这里是兜底，不承担主逻辑）。
+  const deadSessionId = agySessionId;
   agySessionId = undefined;
+  if (deadSessionId) {
+    // runtime 是动态 import 的（agy 相关依赖不进 cli 的启动路径），这里同样异步取一次。
+    void import("./runtime/antigravity-acp/runtime")
+      .then((m) => m.forgetAgySession(deadSessionId))
+      .catch(() => undefined);
+  }
   if (!configFilePath) return;
   try {
     const cfg = JSON.parse(readFileSync(configFilePath, "utf-8"));
