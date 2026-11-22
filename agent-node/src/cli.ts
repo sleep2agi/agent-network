@@ -5460,6 +5460,7 @@ async function processWithGrok(
       warn(`[grok] #205 path surface skipped: ${e?.message || e}`);
     }
 
+    clearInteractivePrompt("turn-completed");
     return replyText;
   };
 
@@ -6059,7 +6060,6 @@ async function processWithGrokCopresence(
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
     });
-    clearInteractivePrompt("turn-completed");
     return sanitizeGrokCommhubLeak(result.replyText || "（无回复）");
   } catch (error) {
     const {
