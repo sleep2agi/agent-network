@@ -1645,6 +1645,28 @@ const taskTraceLog = (line: string) => {
 // 2026-11-20 — agy 登录会话管理器：一个进程一份（单并发由它保证）。
 const agyLoginManager = RUNTIME === "antigravity" ? createAgyLoginManager() : null;
 
+// #5321 —— agy 的模型清单 / 登录状态：后台每 10 分钟探测一次，心跳只读缓存（绝不等探测）。
+const agyCatalogCache = RUNTIME === "antigravity"
+  ? (() => {
+      const { createAgyCatalogCache } = require("./runtime/antigravity-acp/agy-catalog.js") as typeof import("./runtime/antigravity-acp/agy-catalog.js");
+      const cache = createAgyCatalogCache({ binary: process.env.AGY_BIN?.trim() || "agy" });
+      void cache.refresh();
+      const timer = setInterval(() => { void cache.refresh(); }, 10 * 60_000);
+      (timer as any).unref?.();
+      return cache;
+    })()
+  : null;
+
+/** 心跳里取 agy 两格：没探测过 / 读不到 ⇒ 不报模型、登录态 unknown（不是「未登录」）。 */
+function agyCatalogSnapshotFields(): Record<string, unknown> {
+  if (!agyCatalogCache) return {};
+  const c = agyCatalogCache.current();
+  return {
+    ...(c.models && c.models.length ? { agy_models: c.models } : {}),
+    agy_login_state: c.loginState,
+  };
+}
+
 // CLI 等选项的可观测信号（#cli-prompt-options ②）。
 // 只读我们 spawn 的子进程 stderr/stdout —— 不碰任何 TUI 行为，检测到就上报、不改输出。
 const interactivePromptTracker = createPromptTracker();
@@ -2219,6 +2241,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       // 2026-11-20 — agy 登录通道（设计稿 handoff/agy-login-channel-design.md）。
       // 只在 antigravity 节点上报；老 daemon 没这个键 → 客户端回退「复制命令」。
       ...(RUNTIME === "antigravity" ? { agy_login_capable: true } : {}),
+      // #5321 —— 模型清单 + 登录状态（只读缓存，来源是后台 `agy models` 探测）
+      ...(RUNTIME === "antigravity" ? agyCatalogSnapshotFields() : {}),
       ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
       ...(variantReadback && variantSession?.isRunning ? { opencode_variant_config_capable: true } : {}),
       // Agent (Build) hot switch: advertised only when this process actually has
