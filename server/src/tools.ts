@@ -1006,6 +1006,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // #5321 —— agy 的模型清单与登录状态（节点侧已上报；App 第三段用）
         agy_models: z.array(z.string().max(200)).max(200).optional().catch(undefined),
         agy_login_state: z.enum(["logged_in", "needs_login", "unknown"]).optional().catch(undefined),
+        // #5332 —— 回合控制能力位（客户端据此显不显示「停止 / 打断并发送 / 插话」）
+        turn_interrupt_capable: z.boolean().optional().catch(undefined),
+        turn_steer_capable: z.boolean().optional().catch(undefined),
         interactive_prompt: z.object({
           kind: z.string().max(40),
           excerpt: z.string().max(400).optional(),
