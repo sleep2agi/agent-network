@@ -5135,12 +5135,17 @@ async function processWithAntigravity(
     const result = await runOnce(firstSessionId);
     return result.replyText;
   } catch (e: any) {
-    // agy 的「续上的会话已失效」错误文案未验证过（不像 grok 的 -32603 是真机测出来的），
-    // 所以这里不窄判具体错误文本：只要带着 sessionId 续的这次失败了，就清掉它退回全新会话重试一次——
-    // 最坏情况也就是这一轮没有上文（和改之前的行为一样），不会比现状更差。
+    // admin 2026-11-22「这个能修一下吗」（公众号鸽连续两次 session/prompt idle 30 分钟）——
+    // 卡死的会话会一直卡死：agy 侧那条 session 停在未完成的一轮，之后 session/load 进去
+    // 再 prompt 依旧不出帧，于是同一个任务重试也是再等 30 分钟。
+    // 所以任何一轮失败都把进程内会话判死，下一个任务从 session/new 开始；带 firstSessionId
+    // 续失败的还额外立刻用全新会话重试一次（最坏情况只是这一轮没有上文）。
+    const failedSession = agySessionId;
+    if (failedSession) {
+      clearAgySession(`turn failed (${String(e?.message || e).slice(0, 80)})`);
+    }
     if (firstSessionId) {
       warn(`[antigravity] resumed session failed (${e?.message || e}); retrying once with a fresh session`);
-      clearAgySession("resume failed");
       const result = await runOnce(undefined);
       return result.replyText;
     }
