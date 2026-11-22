@@ -21,6 +21,7 @@ import { clearLateReplyRecord, isTerminalLateReplyError, listLateReplyRecords, s
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
+import { persistVariantToConfig, startupVariantPlan } from "./runtime/opencode-copresence/variant-persist.js";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -4839,6 +4840,29 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
     opencodeCopresenceSession = opened;
     void sessionControlBridge?.register();
     if (OPENCODE_GENERATION === "v2") void pollOpencodeSessionModel();
+    // #5123 —— 启动恢复：配置里存过档位就尽力应用一次（best-effort，绝不阻断启动；
+    // busy/unsupported 只记一行，不重试 —— 共享 server 下并发启动按「最后写者生效」处理）。
+    if (OPENCODE_GENERATION === "v2") void (async () => {
+      try {
+        const configured = typeof fileConfig?.modelVariant === "string" ? fileConfig.modelVariant : undefined;
+        const session: any = opened;
+        const capable = session?.variantConfigCapable === true || typeof session?.setSelectedVariant === "function";
+        let current: string | undefined;
+        try {
+          const sel = await session?.selectedSessionModel?.(opened.sessionId);
+          current = typeof sel?.variant === "string" ? sel.variant : undefined;
+        } catch { current = undefined; }
+        const plan = startupVariantPlan(configured, current, capable);
+        if (plan !== "apply") {
+          if (configured && plan === "skip-unsupported") warn("[variant] configured variant present but this node cannot apply it (session-level only)");
+          return;
+        }
+        await withDeadlineMs(session.setSelectedVariant(configured), MODEL_SWITCH_DEADLINE_MS, "startup variant restore timed out");
+        log(`[variant] restored configured depth: ${configured}`);
+      } catch (e: any) {
+        warn(`[variant] startup restore skipped: ${e?.message ?? e}`);
+      }
+    })();
     if (borrowed && process.env.ANET_BORROWED_V1_LAUNCH_ID) {
       const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
       clearBorrowedLaunchHealth = publishBorrowedLaunchHealth(configFilePath, process.env.ANET_BORROWED_V1_LAUNCH_ID);
@@ -8042,6 +8066,11 @@ async function processConfigUpdate(): Promise<void> {
           : { error: result.status === "unknown" ? `variant_outcome_unknown${"detail" in result && typeof result.detail === "string" ? ` ${result.detail}` : ""}`
               : `variant_${result.reason}${result.detail ? ` ${result.detail}` : ""}` }),
       });
+      // #5123 —— 只有回读确认 applied 才写回配置；rejected/unknown 不落盘
+      //（unknown 落盘会制造「配置说切了、会话没切」的谎，比不持久化更坏）。
+      if (result.status === "applied") {
+        persistVariantToConfig(configFilePath, update.patch.modelVariant, { warn });
+      }
       return;
     }
 
