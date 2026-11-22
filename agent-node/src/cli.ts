@@ -1649,7 +1649,7 @@ const agyLoginManager = RUNTIME === "antigravity" ? createAgyLoginManager() : nu
 // 只读我们 spawn 的子进程 stderr/stdout —— 不碰任何 TUI 行为，检测到就上报、不改输出。
 const interactivePromptTracker = createPromptTracker();
 function clearInteractivePrompt(reason: string): void {
-  if (interactivePromptTracker.clear()) log(`[prompt] cleared (${reason})`);
+  if (interactivePromptTracker.clear(reason)) log(`[prompt] cleared (${reason})`);
 }
 function observeInteractivePrompt(line: string): void {
   try {

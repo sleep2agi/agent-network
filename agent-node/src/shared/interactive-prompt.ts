@@ -87,7 +87,9 @@ export function createPromptTracker(now: () => number = Date.now): PromptTracker
       state = mergePromptSignal(before, next);
       return { signal: state, first: !before || before.kind !== next.kind };
     },
-    clear() {
+    // reason 由调用方给出（用于日志/排障）；实现侧不依赖它，但要收下并在接口上保持一致，
+    // 否则「接口声明有参、实现忽略、调用点忘传」这种组合会在 tsc 那里才炸（2026-11-22 hotfix）。
+    clear(_reason: string) {
       if (!state) return false;
       state = null;
       return true;
