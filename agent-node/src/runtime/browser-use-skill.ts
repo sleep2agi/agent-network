@@ -29,7 +29,7 @@ export const BROWSER_USE_SKILL_MD = `# browser-use
 
 \`\`\`bash
 browser-use open https://example.com      # 打开（配置了白名单时域外会被拒）
-browser-use text                          # 读当前页面正文
+browser-use get text body                 # 读当前页面正文（agent-browser 没有裸 text 子命令）
 browser-use screenshot /tmp/page.png      # 截图
 browser-use close                         # 用完关掉（会清掉常驻 daemon）
 \`\`\`
@@ -43,8 +43,11 @@ browser-use close                         # 用完关掉（会清掉常驻 daemo
 
 const SH_TEMPLATE = `#!/bin/sh
 # #5152 browser-use wrapper —— agent 只调这个，不直调 agent-browser。
-# · 先 close 残留 daemon：agent-browser 的 --args 只在启动时生效，残留时会静默忽略。
-# · Linux 必须带 --args "--no-sandbox"（实测 No usable sandbox）；macOS 不带。
+# · Linux 每条命令都带 --args "--no-sandbox"（实测 No usable sandbox）；macOS 不带。
+#   参数放在子命令**之前**（agent-browser --args ... <cmd>），这样即便是 get/screenshot
+#   触发的新启动也带上——只给 open 带参数会漏掉后续命令（实测踩到）。
+# · 不主动 close：close 会让下一条命令重新启动浏览器，而重启未必带参数；
+#   要收起浏览器请显式执行: browser-use close
 # · 白名单：设 BROWSER_USE_ALLOWED_DOMAINS=a.com,b.com 时 open 只放行这些主机；
 #   未设置则放行但打一行 stderr 提醒（默认放行，不假装安全）。
 
@@ -61,14 +64,7 @@ if [ "\$1" = "open" ] && [ -n "\${2:-}" ]; then
   fi
 fi
 
-npx -y agent-browser close >/dev/null 2>&1 || true
-
-if [ "\$1" = "open" ] && [ -n "\${2:-}" ]; then
-  URL="\$2"; shift 2
-  exec npx -y agent-browser open "\$URL"@EXTRA_ARGS@ "\$@"
-fi
-
-exec npx -y agent-browser@EXTRA_ARGS_GLOBAL@ "\$@"
+exec npx -y agent-browser@EXTRA_GLOBAL@ "\$@"
 `;
 
 const WIN_TEMPLATE = `@echo off
@@ -86,7 +82,7 @@ exit /b %ERRORLEVEL%
 export function browserUseWrapperScript(platform: NodeJS.Platform = process.platform): string {
   if (platform === "win32") return WIN_TEMPLATE;
   const extra = platform === "linux" ? ' --args "--no-sandbox"' : "";
-  return SH_TEMPLATE.replace("@EXTRA_ARGS@", extra).replace("@EXTRA_ARGS_GLOBAL@", "");
+  return SH_TEMPLATE.replace("@EXTRA_GLOBAL@", extra);
 }
 
 export interface BrowserUseInstallDeps {
