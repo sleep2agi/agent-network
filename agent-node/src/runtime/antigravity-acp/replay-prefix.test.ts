@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agyStripReplayedPrefix, rememberAgyReply } from "./runtime";
+import { agyStripReplayedPrefix, forgetAgySession, rememberAgyReply } from "./runtime";
 
 // 2026-11-22 真机：agy 每轮回复会把上一轮助手文本重发一遍再接新内容。
 // 这里锁住剥离规则，避免以后又把「前缀」当成真回答喂回 Hub。
@@ -49,5 +49,12 @@ describe("agy replayed-prefix stripping", () => {
   it("keeps sessions isolated from each other", () => {
     rememberAgyReply("紫色鳄鱼-7391", "s-7");
     expect(agyStripReplayedPrefix("紫色鳄鱼-739181", "s-8")).toBe("紫色鳄鱼-739181");
+  });
+
+  // clearAgySession（会话判死）会调 forgetAgySession，保证死会话的历史不会残留在内存里。
+  it("drops the stored history when a session is forgotten", () => {
+    rememberAgyReply("历史甲", "s-9");
+    forgetAgySession("s-9");
+    expect(agyStripReplayedPrefix("历史甲-新内容", "s-9")).toBe("历史甲-新内容");
   });
 });
