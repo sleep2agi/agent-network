@@ -678,6 +678,23 @@ function readBootId(): string | null {
 const BOOT_BOOT_ID = readBootId();
 const BOOT_PROC_STARTTIME = readProcStarttimeTicks();
 
+/**
+ * #5125 续 —— 节点上报自己的工作目录，Hub 的 `/api/nodes` 才能给出 `workdir_state=reported`。
+ *
+ * 为什么不塞进 `flags`：`flags` 参与 config content-match（Hub 按字段比对判定「配置是否已应用」），
+ * 加键会让旧 Hub 的比对结果漂移。所以走快照顶层的新键，Hub 侧 `readReportedWorkdir` 已把它列为
+ * 第三个候选（flags.workdir → flags.cwd → workdir），旧 Hub 不认识这个键也不会拒整份上报。
+ *
+ * 只报**绝对路径**：相对路径在 Hub 侧无意义（每个读者的 cwd 都不同）。形状不对 ⇒ 不报。
+ */
+export function workdirSnapshotField(cwd: string | undefined | null): { workdir?: string } {
+  if (typeof cwd !== "string") return {};
+  const v = cwd.trim();
+  if (!v || v.length > 4096 || /[\0\r\n]/.test(v)) return {};
+  const isAbsolute = v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v) || v.startsWith("\\\\");
+  return isAbsolute ? { workdir: v } : {};
+}
+
 export function buildConfigSnapshot(
   fileConfig: any,
   configUpdateCapable: boolean,

@@ -221,6 +221,7 @@ import {
   loadConfigWithSelfHeal,
   mergePatch,
   buildConfigSnapshot,
+  workdirSnapshotField,
   attachRuntimeReadiness,
   attachCodexForkCapability,
   RESTART_SENTINEL,
@@ -2185,6 +2186,9 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
+      // #5125 续 —— 上报本节点的工作目录（Hub 的 fork 向导要显示「与源节点共用目录」）。
+      // 放快照顶层而不是 flags：flags 参与 config content-match，加键会让旧 Hub 的比对漂移。
+      ...workdirSnapshotField(process.cwd()),
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
       // 2026-11-20 — agy 登录通道（设计稿 handoff/agy-login-channel-design.md）。
       // 只在 antigravity 节点上报；老 daemon 没这个键 → 客户端回退「复制命令」。
