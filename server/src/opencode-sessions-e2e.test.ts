@@ -24,7 +24,7 @@ beforeAll(async () => {
         id: "ses_e2e", title: "端到端会话", projectID: "proj_1",
         model: { id: "claude-sonnet-4", providerID: "anthropic", variant: "high" },
         time: { created: 1767225600000, updated: 1767225660000 },
-        location: { directory: "/home/dev/work" },
+        location: { directory: "/srv/work" },
       }],
       cursor: { previous: null, next: "cur_next" },
     });
@@ -75,7 +75,7 @@ describe("#4821 端到端：HTTP 请求 → daemon bridge 读真 server → Hub 
     expect(j2.status).toBe("succeeded");
     expect(j2.data).toHaveLength(1);
     expect(j2.data[0]).toMatchObject({
-      id: "ses_e2e", title: "端到端会话", project_id: "proj_1", directory: "/home/dev/work",
+      id: "ses_e2e", title: "端到端会话", project_id: "proj_1", directory: "/srv/work",
       updated_at: "2026-01-01T00:01:00Z",             // epoch ms → ISO-8601 UTC
       model: { provider: "anthropic", id: "claude-sonnet-4", variant: "high" },
     });
