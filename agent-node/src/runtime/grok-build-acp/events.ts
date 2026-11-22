@@ -5,6 +5,7 @@ export {
   reduceGrokAcpNotification,
   reduceGrokAcpNotifications,
   type GrokAcpNotification,
+  type ReduceOptions,
   type ReduceResult,
   type GrokTurnState,
 } from "../acp-runner/events";

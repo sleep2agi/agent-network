@@ -54,9 +54,22 @@ export function newGrokTurnState(sessionId?: string): GrokTurnState {
   };
 }
 
+export interface ReduceOptions {
+  /**
+   * True while the ACP session handshake (`initialize` / `authenticate` / `session/load` /
+   * `session/set_model`) is still running and `session/prompt` has not been dispatched yet.
+   * Standard ACP agents such as Antigravity (`agy acp`) replay prior turns' `session/update`
+   * chunks during `session/load` without Grok's `_meta.isReplay: true` flag; gating turn
+   * updates until `session/prompt` prevents historical transcripts from leaking into the new
+   * turn's `replyText`, while still reducing model-change notifications (#1958).
+   */
+  ignoreTurnUpdates?: boolean;
+}
+
 export function reduceGrokAcpNotification(
   state: GrokTurnState,
   notification: GrokAcpNotification,
+  options?: ReduceOptions,
 ): ReduceResult {
   // #1958 — the session's effective model. Observed on grok 1.0.5: session/new
   // and session/load each emit `model_changed` with the session's id, and
@@ -76,6 +89,10 @@ export function reduceGrokAcpNotification(
     return { state, consumed: true, kind: "ignored" };
   }
   if (notification.method === "_x.ai/session/prompt_complete") {
+    if (options?.ignoreTurnUpdates) {
+      state.skippedReplay++;
+      return { state, consumed: false, kind: "replay_skipped" };
+    }
     const params = asRecord(notification.params);
     const stopReason = typeof params?.stopReason === "string" ? params.stopReason : undefined;
     state.promptComplete = true;
@@ -89,7 +106,7 @@ export function reduceGrokAcpNotification(
 
   const params = asRecord(notification.params);
   const meta = asRecord(params?._meta);
-  if (meta?.isReplay === true) {
+  if (options?.ignoreTurnUpdates || meta?.isReplay === true) {
     state.skippedReplay++;
     return { state, consumed: false, kind: "replay_skipped" };
   }
