@@ -4,7 +4,7 @@ import { workdirSnapshotField } from "./config-apply.js";
 
 describe("#5125 workdirSnapshotField", () => {
   test("绝对路径照报（POSIX / Windows 两种）", () => {
-    expect(workdirSnapshotField("/home/dev/proj")).toEqual({ workdir: "/home/dev/proj" });
+    expect(workdirSnapshotField("/srv/proj")).toEqual({ workdir: "/srv/proj" });
     expect(workdirSnapshotField("C:\\work\\proj")).toEqual({ workdir: "C:\\work\\proj" });
     expect(workdirSnapshotField("\\\\server\\share")).toEqual({ workdir: "\\\\server\\share" });
   });
