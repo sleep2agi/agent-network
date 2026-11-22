@@ -997,6 +997,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // (W1) — bare-spawned agent-nodes set this to false so dashboard
       // can grey out remote-restart for them.
       config_snapshot: z.object({
+        // #5125 续 —— 节点自报的工作目录（fork 向导显示「与源节点共用目录」）。
+        // 🔴 必须写进 schema：zod object 默认**丢弃未知键** ⇒ 不写在这里，daemon 报上来也会被静默剥掉，
+        //    /api/nodes 的 workdir_state 就永远是 not_reported（实测踩到过，2026-11-22 临时节点验证）。
+        workdir: z.string().max(4096).optional().catch(undefined),
         model: z.string().max(200).optional().nullable(),
         model_effective: z.string().max(401).optional(),
         modelVariant: z.string().max(200).nullable().optional(),
