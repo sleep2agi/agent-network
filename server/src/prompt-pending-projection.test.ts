@@ -31,6 +31,19 @@ beforeAll(async () => {
 afterAll(() => { try { hub?.stop(true); } catch {}; try { rmSync(DIR, { recursive: true, force: true }); } catch {} });
 
 describe("/api/nodes prompt_pending", () => {
+  test("🔴 越权看不见：普通成员拿不到 prompt_pending（与 workdir 同权限）", async () => {
+    const { db } = await import("./db.js");
+    const { register, addNetworkMember } = await import("./auth.js");
+    const stamp = Date.now();
+    const member = register(`pp_member_${stamp}`, "Pp-Member-1!");
+    const memberId = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", [`pp_member_${stamp}`])!.user_id;
+    addNetworkMember(net, memberId, "member");
+    db.run("UPDATE network_members SET agent_access='all' WHERE network_id=?1 AND user_id=?2", [net, memberId]);
+    const r = await fetch(`${base}/api/nodes?alias=pp-waiting`, { headers: { Authorization: `Bearer ${member.token!}` } });
+    const body: any = await r.json();
+    expect(body.nodes[0].prompt_pending).toBeNull();
+  });
+
   test("上报了就投影；没上报/形状不全 ⇒ null", async () => {
     const r = await fetch(`${base}/api/nodes?network_id=${net}`, { headers: { Authorization: `Bearer ${token}` } });
     const body: any = await r.json();

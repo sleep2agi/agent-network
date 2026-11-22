@@ -7580,9 +7580,13 @@ return Bun.serve({
           // #5125 —— fork 向导要显示「与源节点共用目录」。权限按 fork 那套逐行判定（不是整表一刀切）：
           // owner/admin 任意节点；部门负责人仅本管辖部门（含子部门）；其余（含节点令牌）一律 forbidden。
           ...workdirProjection(canViewWorkdir(r), readReportedWorkdir(parsedSnapshot)),
-          // 「CLI 在等一个选项」：原样投影上报值（不做权限裁剪 —— 摘录已在节点侧脱敏，
-          // 且它描述的是节点状态而非文件系统路径）。没上报 ⇒ null，不用空对象装。
+          // 「CLI 在等一个选项」：与 workdir **同一套权限**。
+          // 2026-11-22 review：codex_trust / claude_trust 的真实文本常带目录路径
+          //（"Do you trust the files in this folder? <path>"），而 excerpt 只做 token 脱敏、
+          // 不认路径 ⇒ 不裁剪就等于把 workdir 要保护的那类信息从另一条路漏出去。
+          // 先按最严口径收（views 不够 ⇒ null），等真机确认提示文本确实不含路径再考虑放开。
           prompt_pending: (() => {
+            if (!canViewWorkdir(r)) return null;
             const ip = parsedSnapshot?.interactive_prompt;
             if (!ip || typeof ip !== "object") return null;
             const kind = typeof ip.kind === "string" ? ip.kind : null;
