@@ -1344,6 +1344,16 @@ export async function handleCreateNodeDoorbell(
   if (req.node_spec.runtime !== "opencode-cli") {
     try { mkdirSync(childDir, { recursive: true, mode: 0o700 }); } catch { /* ok */ }
   }
+  // #5152 —— 新节点默认带浏览器能力：把 SKILL.md（.agents/skills + .claude/skills）与
+  // 不可绕过的 wrapper（.anet/bin/browser-use，平台参数已内置）铺进子节点的 workdir。
+  // best-effort：铺不上只 warn，不让建节点失败（这是默认能力，不是前置条件）。
+  try {
+    const { installBrowserUseSkill } = await import("./browser-use-skill.js");
+    installBrowserUseSkill(childWorkDir ?? childDir, { platform: process.platform });
+    deps.log(`[create-node] browser-use skill installed under ${childWorkDir ?? childDir}`);
+  } catch (e: any) {
+    deps.warn(`[create-node] browser-use skill skipped: ${e?.message ?? e}`);
+  }
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
   // #1027 — opencode-cli 缺省写 opencodeGeneration=v1,否则 anet node start 因
