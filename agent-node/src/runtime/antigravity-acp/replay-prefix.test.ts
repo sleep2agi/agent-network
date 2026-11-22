@@ -27,4 +27,27 @@ describe("agy replayed-prefix stripping", () => {
     rememberAgyReply("好的", "s-4");
     expect(agyStripReplayedPrefix("好，我来看看", "s-4")).toBe("好，我来看看");
   });
+
+  // 2026-11-22 真机（微软视频鸽，Windows）：重放的不止上一轮，而是此前所有助手消息按顺序拼起来。
+  //   1) "在线，当前目录为 …vanisn。"
+  //   2) "好。"
+  //   3) "在线，当前目录为 …vanisn。好上一轮的口令是靛蓝水獭-8030，13*13 等于 169"
+  it("strips the whole replayed history, not just the last turn", () => {
+    const first = "在线，当前目录为 `C:\\Users\\msnod\\anet_vansin\\win_video`，主机名为 `vanisn`。";
+    rememberAgyReply(first, "s-5");
+    rememberAgyReply("好。", "s-5");
+    const replayed = first + "好。" + "上一轮的口令是靛蓝水獭-8030，13*13 等于 169";
+    expect(agyStripReplayedPrefix(replayed, "s-5")).toBe("上一轮的口令是靛蓝水獭-8030，13*13 等于 169");
+  });
+
+  it("does not mistake a history-only repeat for a new answer", () => {
+    rememberAgyReply("甲", "s-6");
+    rememberAgyReply("乙", "s-6");
+    expect(agyStripReplayedPrefix("甲乙", "s-6")).toBe("甲乙");
+  });
+
+  it("keeps sessions isolated from each other", () => {
+    rememberAgyReply("紫色鳄鱼-7391", "s-7");
+    expect(agyStripReplayedPrefix("紫色鳄鱼-739181", "s-8")).toBe("紫色鳄鱼-739181");
+  });
 });
