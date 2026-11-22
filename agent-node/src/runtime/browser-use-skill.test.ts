@@ -23,14 +23,14 @@ describe("#5152 browser-use skill", () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  test("Linux 带 --no-sandbox；macOS 不带；都先 close 残留 daemon", () => {
+  test("Linux 每条命令都带 --args（参数在子命令前）；macOS 不带；不主动 close", () => {
     const linux = browserUseWrapperScript("linux");
-    expect(linux).toContain('--args "--no-sandbox"');
-    expect(linux.indexOf("agent-browser close")).toBeLessThan(linux.indexOf("agent-browser open"));
+    expect(linux).toContain('exec npx -y agent-browser --args "--no-sandbox" "$@"');
+    expect(linux).not.toContain("agent-browser close >/dev/null");
     const mac = browserUseWrapperScript("darwin");
     const macExec = mac.split("\n").filter(l => l.trim().startsWith("exec")).join("\n");
-    expect(macExec).not.toContain("--no-sandbox");   // 注释里提到是给人看的，执行行才算数
-    expect(mac).toContain("agent-browser close");
+    expect(macExec).not.toContain("--no-sandbox");
+    expect(macExec).toBe('exec npx -y agent-browser "$@"');
   });
 
   test("Windows 用 .cmd 形状（不写 sh 语法），且不带 linux 专属参数", () => {
