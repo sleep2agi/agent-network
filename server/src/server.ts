@@ -7523,6 +7523,13 @@ return Bun.serve({
           // #5125 —— fork 向导要显示「与源节点共用目录」。权限按 fork 那套逐行判定（不是整表一刀切）：
           // owner/admin 任意节点；部门负责人仅本管辖部门（含子部门）；其余（含节点令牌）一律 forbidden。
           ...workdirProjection(canViewWorkdir(r), readReportedWorkdir(parsedSnapshot)),
+          // #5321 —— agy 模型清单 / 登录状态（只读投影；只对 antigravity 节点有意义，其它 runtime 为 null）
+          agy_models: Array.isArray(parsedSnapshot?.agy_models)
+            ? parsedSnapshot.agy_models.filter((m: unknown) => typeof m === "string" && m.length > 0 && m.length <= 200).slice(0, 200)
+            : null,
+          agy_login_state: parsedSnapshot?.agy_login_state === "logged_in" || parsedSnapshot?.agy_login_state === "needs_login"
+            ? parsedSnapshot.agy_login_state
+            : (parsedSnapshot?.agy_login_state === "unknown" ? "unknown" : null),
           // 「CLI 在等一个选项」：与 workdir **同一套权限**。
           // 2026-11-22 review：codex_trust / claude_trust 的真实文本常带目录路径
           //（"Do you trust the files in this folder? <path>"），而 excerpt 只做 token 脱敏、

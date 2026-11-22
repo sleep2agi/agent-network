@@ -1003,6 +1003,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         workdir: z.string().max(4096).optional().catch(undefined),
         // 「CLI 在等一个选项」的可观测信号（只读展示，不改任何 runtime 行为）。
         // 同样必须写进 schema —— zod object 会静默丢弃未知键（#5125 的 workdir 踩过一次）。
+        // #5321 —— agy 的模型清单与登录状态（节点侧已上报；App 第三段用）
+        agy_models: z.array(z.string().max(200)).max(200).optional().catch(undefined),
+        agy_login_state: z.enum(["logged_in", "needs_login", "unknown"]).optional().catch(undefined),
         interactive_prompt: z.object({
           kind: z.string().max(40),
           excerpt: z.string().max(400).optional(),
