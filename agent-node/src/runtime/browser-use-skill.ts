@@ -74,7 +74,9 @@ exec npx -y agent-browser@EXTRA_ARGS_GLOBAL@ "\$@"
 const WIN_TEMPLATE = `@echo off
 setlocal
 rem #5152 browser-use wrapper (win32). Allowlist: set BROWSER_USE_ALLOWED_DOMAINS=a.com,b.com
-rem Windows needs no sandbox flag; allowlist not enforced here yet (see plan).
+rem Windows needs no sandbox flag.
+rem Allowlist INTENTIONALLY not enforced here: no verified Windows code path yet.
+rem A "looks like it blocks" PowerShell host parser is more dangerous than an honest gap (owner 2026-11-22).
 npx -y agent-browser close >nul 2>&1
 npx -y agent-browser %*
 exit /b %ERRORLEVEL%
