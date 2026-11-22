@@ -1657,6 +1657,21 @@ const agyCatalogCache = RUNTIME === "antigravity"
     })()
   : null;
 
+/**
+ * #5332 —— 回合控制能力位。
+ * 口径：**只报实现里真的有通道的组合**，不按 runtime 名字猜。
+ *   · 当前只有 OpenCode V2 共存（opencode + v2 + copresence）同时具备 interrupt 与 steer；
+ *   · 其余 runtime 一律 false —— 客户端宁可不显示，也不给假按钮。
+ * 以后接通 codex-app-server / antigravity 时，在这里逐个打开（与实现同一个 PR）。
+ */
+function turnControlCapabilities(): { turn_interrupt_capable: boolean; turn_steer_capable: boolean } {
+  const opencodeCopresence = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeMode === "copresence";
+  return {
+    turn_interrupt_capable: opencodeCopresence,
+    turn_steer_capable: opencodeCopresence,
+  };
+}
+
 /** 心跳里取 agy 两格：没探测过 / 读不到 ⇒ 不报模型、登录态 unknown（不是「未登录」）。 */
 function agyCatalogSnapshotFields(): Record<string, unknown> {
   if (!agyCatalogCache) return {};
@@ -2241,6 +2256,9 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       // 2026-11-20 — agy 登录通道（设计稿 handoff/agy-login-channel-design.md）。
       // 只在 antigravity 节点上报；老 daemon 没这个键 → 客户端回退「复制命令」。
       ...(RUNTIME === "antigravity" ? { agy_login_capable: true } : {}),
+      // #5332 —— 回合控制能力位：客户端据此决定显不显示「停止 / 打断并发送 / 插话」。
+      // 只有真有通道的 runtime 才是 true；旧 Hub 会丢这两个键（客户端走白名单兜底）。
+      ...turnControlCapabilities(),
       // #5321 —— 模型清单 + 登录状态（只读缓存，来源是后台 `agy models` 探测）
       ...(RUNTIME === "antigravity" ? agyCatalogSnapshotFields() : {}),
       ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),

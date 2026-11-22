@@ -7523,6 +7523,9 @@ return Bun.serve({
           // #5125 —— fork 向导要显示「与源节点共用目录」。权限按 fork 那套逐行判定（不是整表一刀切）：
           // owner/admin 任意节点；部门负责人仅本管辖部门（含子部门）；其余（含节点令牌）一律 forbidden。
           ...workdirProjection(canViewWorkdir(r), readReportedWorkdir(parsedSnapshot)),
+          // #5332 —— 回合控制能力位：没上报 ⇒ null（客户端据此走白名单兜底，不要当成 false 的等价）
+          turn_interrupt_capable: typeof parsedSnapshot?.turn_interrupt_capable === "boolean" ? parsedSnapshot.turn_interrupt_capable : null,
+          turn_steer_capable: typeof parsedSnapshot?.turn_steer_capable === "boolean" ? parsedSnapshot.turn_steer_capable : null,
           // #5321 —— agy 模型清单 / 登录状态（只读投影；只对 antigravity 节点有意义，其它 runtime 为 null）
           agy_models: Array.isArray(parsedSnapshot?.agy_models)
             ? parsedSnapshot.agy_models.filter((m: unknown) => typeof m === "string" && m.length > 0 && m.length <= 200).slice(0, 200)
