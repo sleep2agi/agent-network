@@ -71,16 +71,19 @@ afterAll(() => {
 });
 
 describe("#4825 GET /api/nodes/:id/opencode-sessions 权限", () => {
-  test("owner 可以敲门（拿到显式 server_unreachable，而不是 403）", async () => {
+  // 2026-11-22 —— 代读已接（#4821 请求通道）：占位的 501 not_implemented 换成真实的排队语义。
+  // 权限判定没变，仍是 #4825 那套（人 + canListOpencodeSessions + runtime 检查）。
+  test("owner 可以敲门（拿到 pending 请求，而不是 403）", async () => {
     const { status, body } = await req(`/api/nodes/${nodeInDeptA}/opencode-sessions`, ownerToken);
-    expect(status).toBe(501);
-    expect(body.error).toBe("not_implemented");
+    expect(status).toBe(200);
+    expect(body.pending).toBe(true);
+    expect(String(body.request_id)).toStartWith("ssr_");
   });
 
   test("部门负责人看自己管辖部门的节点 → 放行", async () => {
     const { status, body } = await req(`/api/nodes/${nodeInDeptA}/opencode-sessions`, headToken);
-    expect(status).toBe(501);
-    expect(body.error).toBe("not_implemented");
+    expect(status).toBe(200);
+    expect(body.pending).toBe(true);
   });
 
   test("🔴 部门负责人看没有部门的节点 → 403（不猜部门）", async () => {
