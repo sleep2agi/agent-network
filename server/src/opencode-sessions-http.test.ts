@@ -25,8 +25,10 @@ beforeAll(async () => {
   const owner = register(`ssr_owner_${stamp}`, "Ssr-Owner-1!");
   net = owner.network_id!;
   ownerToken = owner.token!;
-  db.run(`INSERT OR REPLACE INTO nodes (node_id, node_name, network_id, alias, created_at, updated_at)
-          VALUES (?1, 'ssr-node', ?2, 'ssr-node', ?3, ?3)`, [nodeId, net, Date.now()]);
+  // 合并后这条路由先过 #4825 的 runtime 检查：必须是 opencode 运行时才继续
+  db.run(`INSERT OR REPLACE INTO nodes (node_id, node_name, network_id, alias, runtime, config_snapshot, created_at, updated_at)
+          VALUES (?1, 'ssr-node', ?2, 'ssr-node', 'opencode-cli', ?3, ?4, ?4)`,
+    [nodeId, net, JSON.stringify({ flags: { opencodeGeneration: "v2" } }), Date.now()]);
   const mod = await import("./server.js");
   hub = mod.bootServer({ port: 0, hostname: "127.0.0.1" });
   base = `http://127.0.0.1:${hub.port}`;
@@ -75,9 +77,10 @@ describe("#4821 /api/nodes/:id/opencode-sessions", () => {
     db.run("INSERT INTO network_departments (network_id, department_id, name, sort) VALUES (?1,'d-b','B',1)", [net]);
     const ug = await import("./user-grants.js");
     ug.setUserGrant({ networkId: net, userId: memberId, capability: "manage_nodes", scopeKind: "department", scopeId: "d-b", level: "read", grantedBy: null });
+    // 2026-11-22 —— 两套实现合并后，权限码统一走 #4825 的判定函数
     const denied = await call("GET", `/api/nodes/${nodeId}/opencode-sessions?network_id=${net}`, member.token!);
     expect(denied.status).toBe(403);
-    expect(denied.body.error).toBe("manage_scope_forbidden");
+    expect(denied.body.error).toBe("insufficient_role_for_list_sessions");
     const owner = await call("GET", `/api/nodes/${nodeId}/opencode-sessions?network_id=${net}`, ownerToken);
     expect(owner.status).toBe(200);
   });
