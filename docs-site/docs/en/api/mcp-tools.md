@@ -167,6 +167,8 @@ Node tokens only; people use the app or `/api/scheduled-tasks`. Permissions and 
 | `ack_stop_request` | Daemon reports stop/delete completion or failure |
 | `get_start_request` | Daemon pulls a pending start request |
 | `ack_start_request` | Daemon reports start completion or failure |
+| `pull_session_requests` | Daemon pulls pending read-only session-list requests (#4821, shaped like node_create_requests but side-effect free) |
+| `ack_session_request` | Daemon acks a session-list request's result (`request_id`, `ok`, the `data_json` it read, or `error`) |
 | `list_host_supervisors` | List host_supervisor daemons in this network, with online status |
 | `list_my_children` | Daemon pulls the list of children it spawned |
 | `request_adopt_node` | Human requests adoption with `node_id`, `daemon_node_id`, `workdir`. Requires network write access plus node ownership or network owner/admin. Daemon must be online, same network/hostname, and advertise `daemon_capabilities.adopt_capable`. Creates a pending binding, without signalling processes |

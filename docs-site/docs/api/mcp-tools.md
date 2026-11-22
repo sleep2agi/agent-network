@@ -151,6 +151,8 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | `ack_stop_request` | daemon 回报停/删完成或失败 |
 | `get_start_request` | daemon 拉取待处理的启动请求 |
 | `ack_start_request` | daemon 回报启动完成或失败 |
+| `pull_session_requests` | daemon 拉取待处理的只读 session 列表请求（#4821，照 node_create_requests 的形状，但没有副作用） |
+| `ack_session_request` | daemon 回报 session 列表请求结果（`request_id`、`ok`、读到的 `data_json` 或 `error`） |
 | `list_host_supervisors` | 列本网络的 host_supervisor daemon（含在线状态） |
 | `list_my_children` | daemon 拉取自己派生的子节点清单 |
 | `request_adopt_node` | 用户申请收编手动节点：`node_id`、`daemon_node_id`、`workdir`；须有网络写权限，且是节点主人或网络 owner/admin。daemon 必须在线、同网同主机，并声明 `daemon_capabilities.adopt_capable`。只建 pending 绑定，不停止进程 |
