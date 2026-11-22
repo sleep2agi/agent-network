@@ -44,6 +44,51 @@ rl.on("line", (line) => {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
+
+  test("ignores unflagged historical session/update replay emitted during session/load (Antigravity ACP)", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "acp-load-replay-"));
+    const fake = join(cwd, "fake-agy.js");
+    writeFileSync(fake, `#!/usr/bin/env node
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin });
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+rl.on("line", (line) => {
+  const req = JSON.parse(line);
+  if (req.method === "initialize") {
+    send({ jsonrpc: "2.0", id: req.id, result: { authMethods: [{ id: "cached_token" }] } });
+  } else if (req.method === "authenticate") {
+    send({ jsonrpc: "2.0", id: req.id, result: {} });
+  } else if (req.method === "session/load") {
+    // Standard ACP replay without Grok's _meta.isReplay flag (exact agy acp behavior)
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: req.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "PRIOR_TURN_1_96KB_" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: req.params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "old-tool-1" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: req.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "PRIOR_TURN_2_" } } } });
+    send({ jsonrpc: "2.0", id: req.id, result: { sessionId: req.params.sessionId } });
+  } else if (req.method === "session/prompt") {
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: req.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "CURRENT_TURN_REPLY" } } } });
+    send({ jsonrpc: "2.0", id: req.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+    chmodSync(fake, 0o755);
+    try {
+      const result = await runGrokAcpTurn({
+        cwd,
+        binary: fake,
+        sessionId: "agy-existing-session",
+        prompt: "what is 2+2?",
+        drainMs: 0,
+        runtimeLabel: "antigravity",
+      });
+      expect(result.replyText).toBe("CURRENT_TURN_REPLY");
+      expect(result.replyText).not.toContain("PRIOR_TURN");
+      expect(result.state.skippedReplay).toBe(3);
+      expect(result.state.toolCalls).toBe(0);
+      expect(result.state.chunks).toBe(1);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 });
 
 // #1958 — the configured model must reach the agent and the agent's readback

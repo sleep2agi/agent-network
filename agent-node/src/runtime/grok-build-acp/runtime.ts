@@ -273,9 +273,10 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   const childEnv = { ...process.env, ...opts.env };
   const client = new GrokAcpClient(opts.runtimeLabel ?? "grok");
   const state = newGrokTurnState(opts.sessionId);
+  let acceptingPromptUpdates = false;
 
   const onNotification = (msg: GrokAcpNotification) => {
-    reduceGrokAcpNotification(state, msg);
+    reduceGrokAcpNotification(state, msg, { ignoreTurnUpdates: !acceptingPromptUpdates });
     opts.onEvent?.(msg, state);
   };
   client.on("notification", onNotification);
@@ -398,6 +399,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     // the wait is not an idle timeout. Same session, same prompt, no model change.
     let promptResponse: unknown;
     let capacityRetries = 0;
+    acceptingPromptUpdates = true;
     for (;;) {
       const toolsAtStart = state.toolCalls;
       try {
