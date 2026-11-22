@@ -12,7 +12,8 @@
 //
 // 语义边界（写进 #5123 方案）：档位提升为**节点配置级**（与 model 同级）；
 //   多人共用一个 OpenCode server 时是「最后一写者生效」；旧节点忽略该键 ⇒ 降级为会话级，不报错。
-import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { renameOverExistingSync } from "../../shared/windows-rename-retry.js";
 
 export type VariantSwitchStatus = "applied" | "rejected" | "unknown";
 
@@ -62,7 +63,9 @@ export function persistVariantToConfig(
   if (!configPath) return false;
   const readConfig = deps.readConfig ?? ((p: string) => readFileSync(p, "utf-8"));
   const writeConfig = deps.writeConfig ?? ((p: string, c: string) => writeFileSync(p, c, { mode: 0o600 }));
-  const rename = deps.rename ?? ((from: string, to: string) => renameSync(from, to));
+  // 原子写要覆盖「可能正被别的句柄打开」的目标 —— 正是 #2224 那类 Windows 失败，
+  // 所以默认走带重试的封装（裸 renameSync 会被 windows-rename-coverage 元测试判红）。
+  const rename = deps.rename ?? ((from: string, to: string) => renameOverExistingSync(from, to));
   const warn = deps.warn ?? (() => {});
   // 纵深防御：调用方可能漏过 shouldPersistVariant；这里再挡一次形状，
   // 避免把一个永远用不上的脏值写进 config.json（#5123 review 2026-11-22）。
