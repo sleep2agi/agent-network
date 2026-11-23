@@ -3,6 +3,8 @@
 // 一页 20 条任务 41 KB 要 5.6 s,而 hub 从不压缩。gzip 后 128 KB → 31 KB、137 KB → 49 KB。
 // 只在客户端明确 `Accept-Encoding: gzip` 时压;text/event-stream(SSE)与流式 body 一律不碰。
 export const GZIP_MIN_BYTES = 1024;
+/** 超过这个字节数的正文用 1 级压缩（省 CPU；实测 200 条任务页 690KB：14ms vs 42ms）。 */
+export const GZIP_LARGE_BODY_BYTES = 256 * 1024;
 
 const COMPRESSIBLE = /^(application\/json|text\/(plain|html|css|javascript)|application\/javascript)\b/i;
 
@@ -58,7 +60,13 @@ function gzipCached(key: string | undefined, raw: () => Promise<Uint8Array>): Pr
     if (bytes.byteLength < GZIP_MIN_BYTES) return { raw: bytes, gz: null };
     // 可复用的正文(带键)压一次、存起来、反复发:压缩级别拉到 9 —— 多花的那点 CPU 只花一次,
     // 而线上每次都少发 ~3%(#431 实测:旧节点别名解析读 29.6 KB → 28.6 KB)。不带键的照旧默认级别。
-    const gz = key ? Bun.gzipSync(bytes, { level: 9 }) : Bun.gzipSync(bytes);
+    //
+    // 2026-11-23(负责人定) —— **大正文用 1 级**：`/api/tasks` 200 条一页 690KB，
+    // 单次实测 gzip-1 14.3ms/181KB vs gzip-6 41.8ms/136KB：省下 2/3 的 CPU，
+    // 代价是多发 33% 字节(本地链路)。阈值 256KB；≤256KB 维持原级别（带键的仍压到 9 级，
+    // 因为它只压一次、字节更省）。
+    const level = bytes.byteLength > GZIP_LARGE_BODY_BYTES ? 1 : (key ? 9 : undefined);
+    const gz = level === undefined ? Bun.gzipSync(bytes) : Bun.gzipSync(bytes, { level });
     if (key) gzipCacheStats.misses++;
     if (key && gz.byteLength <= GZIP_CACHE_MAX_BYTES / 4) {
       gzipCache.set(key, gz);
