@@ -1529,7 +1529,7 @@ import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
 import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
-import { interruptCurrentTurn, parseControlOp } from "./runtime/control-interrupt";
+import { interruptCurrentTurn, parseControlOp, sharedServerInterruptEndpoint } from "./runtime/control-interrupt";
 import { readOpenCodeCatalog, readOpenCodeAgents, readOpenCodeSessionAgent } from "./runtime/opencode-v2-catalog";
 // #3144 —— 清单与采集时刻同进同出（纯函数在 runtime/opencode-catalog-report.ts，可单测）
 import { catalogReport, keepLastCatalog } from "./runtime/opencode-catalog-report";
@@ -7042,7 +7042,12 @@ async function processControlInstruction(msg: any): Promise<void> {
       : await interruptCurrentTurn({
         readEndpoint: () => {
           const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
-          return ep ? { url: ep.url, authorization: ep.authorization } : null;
+          if (ep) return { url: ep.url, authorization: ep.authorization };
+          // No record (never written on Windows): the node's own shared-Server configuration.
+          return sharedServerInterruptEndpoint(fileConfig, (passwordFile) => {
+            assertPrivateFile(passwordFile, "Shared OpenCode Server password file must be a private regular file");
+            return readFileSync(passwordFile, "utf8");
+          });
         },
         sessionId: () => opencodeSessionId ?? null,
       });
