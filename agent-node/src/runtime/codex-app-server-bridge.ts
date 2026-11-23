@@ -1222,6 +1222,21 @@ export class CodexAppServerBridge extends EventEmitter {
     this.emitTaskActivity(p.turnId, "item_completed");
   }
 
+  /**
+   * #5332 —— 停止当前回合（codex app-server 协议里有 `turn/interrupt`，二进制里确认存在）。
+   * 没有在飞回合 ⇒ 明确回 no_active_turn，不假装成功。
+   */
+  async interruptActiveTurn(): Promise<{ ok: boolean; turnId?: string | null; reason?: string }> {
+    const turnId = this.activeTurnId;
+    if (!turnId) return { ok: false, reason: "no_active_turn" };
+    try {
+      await this.client.request("turn/interrupt", { threadId: this.threadId, turnId });
+      return { ok: true, turnId };
+    } catch (error: any) {
+      return { ok: false, turnId, reason: String(error?.message ?? error) };
+    }
+  }
+
   private noteOwnedSideEffect(turnId: string, itemType: string | undefined): void {
     if (!isCodexSideEffectItem(itemType)) return;
     this.sideEffectTurnIds.add(turnId);

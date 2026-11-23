@@ -1676,8 +1676,10 @@ function turnControlCapabilities(): { turn_interrupt_capable: boolean; turn_stee
   // claude（claude-agent-sdk）已有 AbortController 通道 ⇒ 只支持「停止」，**不支持插话**
   // （SDK query() 是一次性 prompt，没有同轮再喂一句的接口；steer 要改 streaming-input，单独立卡）。
   const claudeInterrupt = RUNTIME === "claude";
+  // codex-app-server：协议层有 turn/interrupt（codex 二进制里确认存在），可停止；插话仍只有 opencode V2 共存
+  const codexAppServerInterrupt = RUNTIME === "codex-app-server";
   return {
-    turn_interrupt_capable: opencodeCopresence || claudeInterrupt,
+    turn_interrupt_capable: opencodeCopresence || claudeInterrupt || codexAppServerInterrupt,
     turn_steer_capable: opencodeCopresence,
   };
 }
@@ -7003,6 +7005,13 @@ async function processControlInstruction(msg: any): Promise<void> {
     // 没有在飞的尝试 ⇒ 明确回 no_active_turn，不假装成功。
     const out = RUNTIME === "claude"
       ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const }) : { ok: false as const, reason: "no_active_turn" })
+      : RUNTIME === "codex-app-server"
+      ? await (async () => {
+          // #5332 —— codex app-server 协议有 turn/interrupt；没有在飞会话就明确回 no_active_turn
+          const session = codexAppServerSessionManager.current();
+          if (!session) return { ok: false as const, reason: "no_active_turn" };
+          return await session.bridge.interruptActiveTurn();
+        })()
       : await interruptCurrentTurn({
         readEndpoint: () => {
           const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
