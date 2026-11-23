@@ -101,8 +101,11 @@ function nodeHidden(name: string, verdictFor: (cls: string) => Verdict): boolean
 export function listedToolFilter(caller: ToolCaller): (name: string) => boolean {
   if (caller.kind === "anonymous") return () => true;
   if (caller.kind === "user") return name => { const a = TOOL_AUDIENCE[name]; return a !== "node" && a !== "protocol"; };
-  const id = caller.tokenId && caller.networkId ? nodeIdentity(caller.tokenId, caller.networkId) : null;
+  // 2026-11-23 —— 身份/权限现查：McpServer 实例会被复用，注册时快照会把
+  // 「节点改绑 / 权限模式变更」冻结到 Hub 重启为止。
+  const currentId = () => (caller.tokenId && caller.networkId ? nodeIdentity(caller.tokenId, caller.networkId) : null);
   const verdictFor = (cls: string): Verdict => {
+    const id = currentId();
     if (!id) return null;
     if (cls === "broadcast") return broadcastVerdict(id);
     if (cls === "node_write") return writeVerdict(id);
