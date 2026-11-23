@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   __resetRouteTimingForTest, callerTokenKind, labelRoute, mcpRouteLabel, recordRouteTiming, routeKey, routeStats,
-  setRouteCallerMasterToken, setRouteCallerTokenReader, userAgentFamily, ROUTE_MAX_CALLERS_PER_ROUTE,
+  setRouteCallerMasterToken, setRouteCallerTokenReader, userAgentFamily, takeTickRouteCosts, ROUTE_MAX_CALLERS_PER_ROUTE,
   ROUTE_BUCKET_MS, ROUTE_BUCKET_RETENTION, ROUTE_MAX_KEYS_PER_BUCKET, ROUTE_OVERFLOW_KEY,
 } from "./route-timing";
 
@@ -215,4 +215,38 @@ test("caller classes are capped per route: per bucket and again after merging bu
   expect(callers.at(-1)!.class).toBe(ROUTE_OVERFLOW_KEY);
   expect(callers.reduce((n, c) => n + c.count, 0)).toBe(55);
   expect(callers.reduce((n, c) => n + c.bytes, 0)).toBe(55);
+});
+
+// ── tick 归因（2026-11-23）：停顿窗口里「谁在跑」─────────────────────────────
+test("takeTickRouteCosts：按路由累计次数/总耗时/最大值，读一次就抽干", () => {
+  __resetRouteTimingForTest();
+  const t0 = performance.now();
+  recordRouteTiming(req("/api/inbox"), t0 - 30, res(200, 10));
+  recordRouteTiming(req("/api/inbox"), t0 - 10, res(200, 10));
+  recordRouteTiming(req("/api/nodes/x/config"), t0 - 5, res(200, 10));
+  const tick = takeTickRouteCosts();
+  // 只测「有、且对」，不锁顺序：排序是 event-loop-lag 的 rankTopRoutes 的事。
+  const byRoute = new Map(tick.map(t => [t.route, t]));
+  expect(byRoute.size).toBe(2);
+  const inbox = byRoute.get("GET /api/inbox")!;
+  expect(inbox.count).toBe(2);
+  expect(inbox.total_ms).toBeGreaterThanOrEqual(39);
+  expect(inbox.max_ms).toBeGreaterThanOrEqual(29);
+  expect(byRoute.get("GET /api/nodes/x/config")!.count).toBe(1);
+  // 抽干：第二次读是空的，且新请求只算进新窗口。
+  expect(takeTickRouteCosts()).toEqual([]);
+  recordRouteTiming(req("/api/inbox"), performance.now() - 1, res(200, 10));
+  expect(takeTickRouteCosts().map(t => t.route)).toEqual(["GET /api/inbox"]);
+});
+
+test("tick 归因带 MCP 工具名（labelRoute），键数量封顶折进 (other)", () => {
+  __resetRouteTimingForTest();
+  const mreq = req("/mcp", "POST");
+  labelRoute(mreq, "tools/call report_status");
+  recordRouteTiming(mreq, performance.now() - 7, res(200));
+  expect(takeTickRouteCosts().map(t => t.route)).toEqual(["POST /mcp tools/call report_status"]);
+  for (let i = 0; i < 300; i++) recordRouteTiming(req(`/api/odd/${i}`), performance.now() - 1, res(200));
+  const tick = takeTickRouteCosts();
+  expect(tick.length).toBeLessThanOrEqual(257);
+  expect(tick.some(t => t.route === "GET /api/odd/:id")).toBe(true);
 });

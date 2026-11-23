@@ -15,6 +15,18 @@
 // 注意：`setInterval` 自己也会被阻塞 —— 这正是我们要测量的东西。
 // 停顿结束后第一次 tick 的 gap 就是停顿长度，不需要外部进程配合。
 
+/**
+ * 一个 tick 窗口里某个路由（或 MCP 工具）的耗时累计。
+ * 只记「次数 / 总耗时 / 单次最大」，不记 query、不记请求体、不记别名。
+ */
+export type TickRouteCost = {
+  /** 路由形状，MCP 会带工具名，如 "POST /mcp tools/call report_status"。 */
+  route: string;
+  count: number;
+  total_ms: number;
+  max_ms: number;
+};
+
 export type EventLoopStall = {
   /** 这个间隔里处理完的请求数：0 = 真的没推进；>0 = 循环在干活，只是 timer 被饿住。 */
   /** ISO 时间（停顿**结束**的时刻，即这次 tick 的时间）。 */
@@ -26,7 +38,18 @@ export type EventLoopStall = {
   /** 停顿结束时的进程 RSS（MB），用于和内存尖峰对齐。 */
   rss_mb: number;
   requests_since_last_tick?: number;
+  /**
+   * 这个停顿窗口里总耗时最高的前几条路由（最多 5 条，按 total_ms 降序）。
+   * 归因用：requests_since_last_tick 说明循环在干活，这里说明**活是谁干的**。
+   * 未接计时源（测试 / 早期调用）时缺省。
+   */
+  top_routes?: TickRouteCost[];
 };
+
+/** 一次停顿里最多留几条路由归因。 */
+export const STALL_TOP_ROUTES = 5;
+/** 日志里每个路由名的最大长度（MCP 标签已经限长，这里再兜一层，避免一行被撑爆）。 */
+const STALL_ROUTE_CLIP = 48;
 
 const KEEP_STALLS = 20;
 
@@ -57,7 +80,7 @@ const stalls: EventLoopStall[] = [];
 /** 记录一次 tick 间隔。返回这次 tick 的停顿量（毫秒，可为负→归零）。 */
 export function recordGap(
   gapMs: number,
-  opts: { intervalMs?: number; thresholdMs?: number; rssMb?: number; now?: number; served?: number } = {},
+  opts: { intervalMs?: number; thresholdMs?: number; rssMb?: number; now?: number; served?: number; topRoutes?: readonly TickRouteCost[] } = {},
 ): number {
   const interval = opts.intervalMs ?? 250;
   const threshold = opts.thresholdMs ?? 2000;
@@ -69,15 +92,37 @@ export function recordGap(
   stallCount++;
   lastStallAt = at;
   lastStallMs = stallMs;
+  const top = opts.topRoutes && opts.topRoutes.length ? rankTopRoutes(opts.topRoutes) : undefined;
   stalls.push({
     at,
     gap_ms: Math.round(gapMs),
     stall_ms: Math.round(stallMs),
     rss_mb: opts.rssMb ?? 0,
     requests_since_last_tick: opts.served ?? 0,
+    ...(top ? { top_routes: top } : {}),
   });
   while (stalls.length > KEEP_STALLS) stalls.shift();
   return stallMs;
+}
+
+/** 取总耗时最高的前 N 条（只在 stall 时调用，不是每 tick）。 */
+export function rankTopRoutes(routes: readonly TickRouteCost[], limit = STALL_TOP_ROUTES): TickRouteCost[] {
+  const out = routes
+    .filter(r => r && r.count > 0)
+    .map(r => ({ route: r.route, count: r.count, total_ms: Math.round(r.total_ms * 10) / 10, max_ms: Math.round(r.max_ms * 10) / 10 }))
+    .sort((a, b) => b.total_ms - a.total_ms || b.max_ms - a.max_ms)
+    .slice(0, limit);
+  return out;
+}
+
+/** 把 top_routes 拼成日志后缀；空数组/未接计时源时返回空串。 */
+export function formatTopRoutes(routes: readonly TickRouteCost[] | undefined): string {
+  if (!routes || !routes.length) return "";
+  const parts = routes.map(r => {
+    const route = r.route.length > STALL_ROUTE_CLIP ? `${r.route.slice(0, STALL_ROUTE_CLIP - 1)}…` : r.route;
+    return `${route} ×${r.count} ${Math.round(r.total_ms)}ms max ${Math.round(r.max_ms)}ms`;
+  });
+  return ` | top: ${parts.join("; ")}`;
 }
 
 /**
@@ -160,6 +205,11 @@ export function startEventLoopLagMonitor(opts: {
   bootGraceMs?: number;
   /** 测试注入：返回进程已运行的毫秒数（默认 process.uptime()）。 */
   uptimeMs?: () => number;
+  /**
+   * 归因来源：取走**本 tick 窗口**内按路由累计的耗时（route-timing.ts 的 takeTickRouteCosts），
+   * 每个 tick 都会被调用一次且会清空窗口。不接就没有 top_routes（行为与旧版一致）。
+   */
+  tickRoutes?: () => TickRouteCost[];
 } = {}): ReturnType<typeof setInterval> {
   const intervalMs = opts.intervalMs ?? Math.max(50, envMs("COMMHUB_STALL_TICK_MS", 250));
   const thresholdMs = opts.thresholdMs ?? envMs("COMMHUB_STALL_LOG_MS", 2000);
@@ -181,17 +231,26 @@ export function startEventLoopLagMonitor(opts: {
     const rss = rssMb();
     const served = servedSinceTick;
     servedSinceTick = 0;
+    // 归因窗口必须每个 tick 都抽干：否则非停顿的 tick 会一直往同一次累计里堆，
+    // 停顿时看到的就成了「过去好几个 tick 的总和」。抽干是清空，不排序。
+    let tickRoutes: TickRouteCost[] = [];
+    if (opts.tickRoutes) {
+      try { tickRoutes = opts.tickRoutes() ?? []; } catch { tickRoutes = []; }
+    }
     // 启动尖峰：只可能是**第一个** tick，且到来时进程才刚起来。
     // 两个条件缺一不可 —— 只看「第一个 tick」会吞掉运行中立刻发生的真实停顿。
     if (firstTick) {
       firstTick = false;
       if (uptimeMs() < bootGraceMs) return;
     }
-    const stall = recordGap(gap, { intervalMs, thresholdMs, rssMb: rss, served });
+    // 排序/取前 N 只在真停顿的时候做。
+    const top = tickRoutes.length ? rankTopRoutes(tickRoutes) : undefined;
+    const stall = recordGap(gap, { intervalMs, thresholdMs, rssMb: rss, served, ...(top ? { topRoutes: top } : {}) });
     if (thresholdMs > 0 && stall >= thresholdMs) {
       // 和 retention/slow-sql 的日志同一前缀，方便 grep。
       // `served` 是判据的关键：它非零就说明循环在干活，这段“gap”是 timer 被饿住，不是阻塞。
-      log(`[commhub stall] loop idle ~${Math.round(stall)}ms (tick gap ${Math.round(gap)}ms, rss ${rss} MB, served ${served} req)`);
+      // `top` 是归因：这个窗口里总耗时最高的几条路由（见 route-timing.ts 的 tick 归因）。
+      log(`[commhub stall] loop idle ~${Math.round(stall)}ms (tick gap ${Math.round(gap)}ms, rss ${rss} MB, served ${served} req)${formatTopRoutes(top)}`);
     }
   }, intervalMs);
   // 监测不该拖住进程退出。
