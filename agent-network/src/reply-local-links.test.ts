@@ -1,10 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { attachLocalLinks, findLocalLinks, rewriteLocalLinks } from "./reply-local-links";
+import { attachLocalLinks, findLocalLinks, normalizeWin32Path, rewriteLocalLinks } from "./reply-local-links";
 
 describe("reply-local-links (node-server auto-attach)", () => {
   test("finds absolute and file:// links only", () => {
     const l = findLocalLinks("[a](/w/r.pptx) [b](file:///tmp/x%20y.pdf) [c](https://h/x) [d](/api/files/abcdefgh) [e](./rel)");
     expect(l.map((x) => x.path)).toEqual(["/w/r.pptx", "/tmp/x y.pdf"]);
+  });
+  test("Windows 盘符写法归一成 C:\\…(只在 win32 生效)", () => {
+    expect(normalizeWin32Path("C:\\Users\\a\\r.pptx", "win32")).toBe("C:\\Users\\a\\r.pptx");
+    expect(normalizeWin32Path("C:/Users/a/r.pptx", "win32")).toBe("C:\\Users\\a\\r.pptx");
+    expect(normalizeWin32Path("/C:/Users/a/r.pptx", "win32")).toBe("C:\\Users\\a\\r.pptx");
+    expect(normalizeWin32Path("https://x/y", "win32")).toBeNull();
+    expect(normalizeWin32Path("/C:/Users/a/r.pptx", "darwin")).toBeNull();
   });
   test("uploaded links become /api/files/<id> with attachments; failures annotated with reason", async () => {
     const r = await attachLocalLinks("报告 [下载](/w/r.pptx) 和 [旧](/nowhere/o.pdf)", async (p) => {

@@ -21,7 +21,30 @@ export interface LocalFileLink {
   readonly path: string;
 }
 
-/** 只认 markdown 链接且目标像本机绝对路径:`/…` 或 `file:///…`。http(s)、/api/files/… 不算。 */
+/**
+ * Windows 盘符绝对路径归一:`C:\a\b`、`C:/a/b`、`/C:/a/b` → `C:\a\b`。
+ * 非 Windows 平台返回 null(Unix 上 `/C:/…` 只是个普通目录,不能乱改)。
+ *
+ * 2026-11-23 真机:Windows agy 节点把工作目录里的文件写成 `[x](/C:/Users/…/f.txt)`,上一版只认 POSIX 绝对路径,
+ * realpath 直接失败,人在 Hub 上只看到「文件未上传:文件不存在」——Windows 端永远发不出文件。
+ */
+export function normalizeWin32Path(p: string, platform: string = process.platform): string | null {
+  if (platform !== "win32") return null;
+  const m = /^\/?([A-Za-z]):[\\/](.*)$/.exec(p);
+  if (!m) return null;
+  return `${m[1]}:\\${m[2].replace(/\//g, "\\")}`;
+}
+
+/**
+ * markdown 链接里的空格按惯例写成 `%20`,过去只有 `file:///…` 会 decode,裸 `/…` 不解 → 带空格/中文的文件名
+ * 永远 realpath 失败(2026-11-23 真机:mac 节点回复 10 个链接,`/…/中文 名字.txt` 直接判「不存在」)。
+ * 解不开(比如文件名本身含裸 `%`)就原样返回,不因为一次 decode 失败丢掉链接。
+ */
+export function decodeLinkPath(p: string): string {
+  try { return decodeURIComponent(p); } catch { return p; }
+}
+
+/** 只认 markdown 链接且目标像本机绝对路径:`/…`、`file:///…`、Windows 盘符 `C:\…`/`C:/…`/`/C:/…`。http(s)、/api/files/… 不算。 */
 export function findLocalFileLinks(text: string): LocalFileLink[] {
   const out: LocalFileLink[] = [];
   const re = /\[([^\]\n]{1,200})\]\(([^()\s]+)\)/g;
@@ -29,8 +52,12 @@ export function findLocalFileLinks(text: string): LocalFileLink[] {
   while ((m = re.exec(text)) !== null) {
     const target = m[2];
     let path: string | null = null;
-    if (target.startsWith("file:///")) path = decodeURIComponent(target.slice("file://".length));
-    else if (target.startsWith("/") && !target.startsWith("/api/") && !target.startsWith("//")) path = target;
+    const win = normalizeWin32Path(target);
+    if (win) path = win;
+    else if (target.startsWith("file:///")) {
+      const raw = decodeURIComponent(target.slice("file://".length));
+      path = normalizeWin32Path(raw) ?? raw;
+    } else if (target.startsWith("/") && !target.startsWith("/api/") && !target.startsWith("//")) path = decodeLinkPath(target);
     if (!path || !isAbsolute(path)) continue;
     out.push({ raw: m[0], label: m[1], target, path });
     if (out.length >= REPLY_FILE_MAX_COUNT) break;
