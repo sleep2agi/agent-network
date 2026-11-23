@@ -17,8 +17,13 @@ import {
   PAIRED_AGENT_NODE_VERSION,
   agentNodeHelpSupportsCodexAppServer,
   agentNodeHelpSupportsOpencode,
+  agentNodeVersionAccepted,
+  agentNodeVersionRejectionMessage,
+  comparePreviewVersions,
+  newerAgentNodeVersionHint,
   opencodeExactPairInstallCommand,
   pairInfo,
+  parsePreviewVersion,
   PAIRED_AGENT_NETWORK_VERSION,
   pairedAgentNodeResolution,
   resolveAgentNodePackageEntrypointFromPath,
@@ -32,6 +37,27 @@ const networkPackage = JSON.parse(
 const nodePackage = JSON.parse(
   readFileSync(new URL("../../agent-node/package.json", import.meta.url), "utf8"),
 );
+
+/**
+ * 把 preview 版本号的最后一段 +1 / -1。
+ * 不抄具体版本号：sync-pinned-versions.sh 每次发版都会改常量，
+ * 抄数字的断言会让「改它的那个 PR 自己红」（仓库里已有两条血泪注释）。
+ */
+function bumpPreviewNumber(version: string, delta = 1): string {
+  const m = /^(\d+)\.(\d+)\.(\d+)-preview\.(\d+)$/.exec(version);
+  if (!m) throw new Error(`not a preview version: ${version}`);
+  return `${m[1]}.${m[2]}.${m[3]}-preview.${Math.max(0, Number(m[4]) + delta)}`;
+}
+
+/** 取出函数抛出的错误文案；没抛就返回空串。 */
+function messageOf(fn: () => unknown): string {
+  try {
+    fn();
+    return "";
+  } catch (error: any) {
+    return String(error?.message ?? error);
+  }
+}
 
 describe("OpenCode agent-node release pairing", () => {
   test("pins the exact versions being released together", () => {
@@ -125,6 +151,36 @@ describe("OpenCode agent-node release pairing", () => {
         OPENCODE_AGENT_NODE_SPEC,
         OPENCODE_AGENT_NODE_VERSION,
       )).toThrow(`not exact version ${OPENCODE_AGENT_NODE_VERSION}`);
+
+      // 生产事故形状（2026-11-23，macmini）：只把 agent-node 升到**更新**的
+      // preview、CLI 还停在旧的配对版本 → `anet node start` 拒启，只抛一句
+      // "No exact trusted global @sleep2agi/agent-node@<旧> is available"，
+      // 看不出「你装的其实更新、该装哪个 CLI」。闸门不变（仍然拒），
+      // 但错误文案必须把「装的是更新的」和「该装哪个」说清楚。
+      const newerVersion = bumpPreviewNumber(OPENCODE_AGENT_NODE_VERSION);
+      writePackage({ version: newerVersion });
+      expect(() => validateAgentNodePackageEntrypoint(
+        entrypoint,
+        OPENCODE_AGENT_NODE_SPEC,
+        OPENCODE_AGENT_NODE_VERSION,
+      )).toThrow(`not exact version ${OPENCODE_AGENT_NODE_VERSION}`);
+      expect(() => validateAgentNodePackageEntrypoint(
+        entrypoint,
+        OPENCODE_AGENT_NODE_SPEC,
+        OPENCODE_AGENT_NODE_VERSION,
+      )).toThrow(newerVersion);
+      expect(() => validateAgentNodePackageEntrypoint(
+        entrypoint,
+        OPENCODE_AGENT_NODE_SPEC,
+        OPENCODE_AGENT_NODE_VERSION,
+      )).toThrow("newer than the pinned");
+      // 旧版本**不给**这条提示（那是另一回事：装的是旧的，只该说版本不对）。
+      writePackage({ version: bumpPreviewNumber(OPENCODE_AGENT_NODE_VERSION, -1) });
+      expect(messageOf(() => validateAgentNodePackageEntrypoint(
+        entrypoint,
+        OPENCODE_AGENT_NODE_SPEC,
+        OPENCODE_AGENT_NODE_VERSION,
+      ))).not.toContain("newer than the pinned");
 
       // 不传 expectedVersion 时判据换成「是不是 preview 通道」,这条同样没被覆盖过。
       writePackage({ version: "2.5.0" });
@@ -261,4 +317,77 @@ test("nodeEngineWarning: 低于 engines 才提示，且说清「当前/建议/�
   expect(warn!).toContain("22.13.0");
   expect(warn!).toContain("不阻断");
   expect(nodeEngineWarning("22.12.9")).not.toBeNull();
+});
+
+// 2026-11-23：只升 agent-node、CLI 还停在旧配对版本时的版本比较与提示。
+// 生产事故形状（macmini）：`npm i -g @sleep2agi/agent-node@2.5.0-preview.221`
+// 之后 `anet node start` 直接拒启，只抛一句
+// 「No exact trusted global @sleep2agi/agent-node@2.5.0-preview.211 is available」——
+// 看不出「你装的其实更新」，更看不出该装哪个 CLI。
+// 这组用例锁两件事：**闸门不变**（更新的版本仍然被拒），但**文案要说清楚**。
+describe("preview version comparison and the newer-agent-node hint", () => {
+  test("parses only the strict preview version shape", () => {
+    expect(parsePreviewVersion("2.5.0-preview.221")).toEqual({
+      major: 2,
+      minor: 5,
+      patch: 0,
+      preview: 221,
+    });
+    expect(parsePreviewVersion("2.5.0")).toBeNull();
+    expect(parsePreviewVersion("2.5.0-preview.221-not-the-paired-one")).toBeNull();
+    expect(parsePreviewVersion("")).toBeNull();
+  });
+
+  test("orders by major, minor, patch, then preview", () => {
+    const v = (s: string) => parsePreviewVersion(s)!;
+    expect(comparePreviewVersions(v("2.6.0-preview.1"), v("2.5.0-preview.999"))).toBe(1);
+    expect(comparePreviewVersions(v("2.5.1-preview.1"), v("2.5.0-preview.999"))).toBe(1);
+    expect(comparePreviewVersions(v("2.5.0-preview.222"), v("2.5.0-preview.221"))).toBe(1);
+    expect(comparePreviewVersions(v("2.5.0-preview.221"), v("2.5.0-preview.221"))).toBe(0);
+    expect(comparePreviewVersions(v("2.5.0-preview.220"), v("2.5.0-preview.221"))).toBe(-1);
+  });
+
+  test("hints only when the installed agent-node is newer than the pinned one", () => {
+    const pinned = OPENCODE_AGENT_NODE_VERSION;
+    const newer = bumpPreviewNumber(pinned, 1);
+    const older = bumpPreviewNumber(pinned, -1);
+
+    const hint = newerAgentNodeVersionHint(newer, pinned);
+    expect(hint).toContain(newer);
+    expect(hint).toContain(pinned);
+    expect(hint).toContain("newer than the pinned");
+
+    // 同版本、旧版本、格式不认识 —— 一律不给这条提示。
+    expect(newerAgentNodeVersionHint(pinned, pinned)).toBeNull();
+    expect(newerAgentNodeVersionHint(older, pinned)).toBeNull();
+    expect(newerAgentNodeVersionHint(`${pinned}-not-the-paired-one`, pinned)).toBeNull();
+  });
+
+  test("version acceptance stays exact: newer is still refused", () => {
+    const pinned = OPENCODE_AGENT_NODE_VERSION;
+    expect(agentNodeVersionAccepted(pinned, pinned)).toBe(true);
+    expect(agentNodeVersionAccepted(bumpPreviewNumber(pinned, 1), pinned)).toBe(false);
+    expect(agentNodeVersionAccepted(bumpPreviewNumber(pinned, -1), pinned)).toBe(false);
+    expect(agentNodeVersionAccepted(`${pinned}-not-the-paired-one`, pinned)).toBe(false);
+    expect(agentNodeVersionAccepted(undefined, pinned)).toBe(false);
+    // 不传 expectedVersion 时只看 preview 通道
+    expect(agentNodeVersionAccepted("2.5.0-preview.221")).toBe(true);
+    expect(agentNodeVersionAccepted("2.5.0")).toBe(false);
+    expect(agentNodeVersionAccepted(undefined)).toBe(false);
+  });
+
+  test("rejection message names the installed newer version and stays compatible", () => {
+    const pinned = OPENCODE_AGENT_NODE_VERSION;
+    const newer = bumpPreviewNumber(pinned, 1);
+    const message = agentNodeVersionRejectionMessage(newer, pinned);
+    expect(message).toContain(`not exact version ${pinned}`);
+    expect(message).toContain(newer);
+    expect(message).toContain("newer than the pinned");
+
+    // 旧文案不许变（外部脚本/文档在匹配它）
+    expect(agentNodeVersionRejectionMessage(`${pinned}-not-the-paired-one`, pinned))
+      .toBe(`resolved agent-node package is not exact version ${pinned}`);
+    expect(agentNodeVersionRejectionMessage("2.5.0"))
+      .toBe("resolved agent-node package is not a preview-channel candidate");
+  });
 });

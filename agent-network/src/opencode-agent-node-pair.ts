@@ -148,6 +148,77 @@ function assertSafeAncestors(packageRoot: string): void {
 }
 
 /**
+ * 预览版本号比较：`2.5.0-preview.221` 这类字符串。
+ *
+ * 只认严格格式；别的形态（`-not-the-paired-one`、缺 `-preview.N` 段）一律判为
+ * **不可比**（调用方按「不匹配」处理，绝不因为解析失败而放行）。
+ */
+export function parsePreviewVersion(value: string): { major: number; minor: number; patch: number; preview: number } | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)-preview\.(\d+)$/.exec(String(value ?? "").trim());
+  if (!m) return null;
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), preview: Number(m[4]) };
+}
+
+/** a - b；不可比的版本返回 0（调用方必须先确认两者都可解析）。 */
+export function comparePreviewVersions(
+  a: { major: number; minor: number; patch: number; preview: number },
+  b: { major: number; minor: number; patch: number; preview: number },
+): number {
+  if (a.major !== b.major) return a.major > b.major ? 1 : -1;
+  if (a.minor !== b.minor) return a.minor > b.minor ? 1 : -1;
+  if (a.patch !== b.patch) return a.patch > b.patch ? 1 : -1;
+  if (a.preview !== b.preview) return a.preview > b.preview ? 1 : -1;
+  return 0;
+}
+
+/**
+ * 装了**更新的** agent-node、但 CLI 钉的是旧版本时的提示。
+ *
+ * 生产事故（2026-11-23，macmini）：只把 agent-node 从 2.5.0-preview.211 换成
+ * 2.5.0-preview.221，CLI 还停在 2.3.0-preview.248（它的配对版本就是 .211），
+ * 于是 `anet node start` 直接拒启，只抛一句
+ * `No exact trusted global @sleep2agi/agent-node@2.5.0-preview.211 is available`
+ * —— 看不出「你装的其实更新」，更看不出该装哪个 CLI。
+ *
+ * 这里不改变闸门本身（精确配对仍然是硬要求），只把这句话说清楚。
+ */
+export function newerAgentNodeVersionHint(candidate: string, expected: string): string | null {
+  const c = parsePreviewVersion(candidate);
+  const e = parsePreviewVersion(expected);
+  if (!c || !e) return null;
+  if (comparePreviewVersions(c, e) <= 0) return null;
+  return `installed @sleep2agi/agent-node@${candidate} is newer than the pinned ${expected}; `
+    + `this CLI trusts only the exact pinned version — either install @sleep2agi/agent-node@${expected} `
+    + `or upgrade agent-network to the release paired with ${candidate}`;
+}
+
+/**
+ * 版本判据：精确配对（传了 expectedVersion）或 preview 通道（没传）。
+ * 抽成纯函数是为了能脱离「Linux uid 语义」那套文件身份检查单独测。
+ */
+export function agentNodeVersionAccepted(packageVersion: unknown, expectedVersion?: string): boolean {
+  if (typeof packageVersion !== "string") return false;
+  return expectedVersion
+    ? packageVersion === expectedVersion
+    : packageVersion.includes("-preview.");
+}
+
+/**
+ * 版本被拒时的文案。
+ * 闸门本身不变（精确配对仍是硬要求），但要让运维一眼看出
+ * 「你装的其实更新」以及「该装哪个 CLI」——见 newerAgentNodeVersionHint。
+ */
+export function agentNodeVersionRejectionMessage(packageVersion: unknown, expectedVersion?: string): string {
+  const newerHint = expectedVersion && typeof packageVersion === "string"
+    ? newerAgentNodeVersionHint(packageVersion, expectedVersion)
+    : null;
+  return (expectedVersion
+    ? `resolved agent-node package is not exact version ${expectedVersion}`
+    : "resolved agent-node package is not a preview-channel candidate")
+    + (newerHint ? `; ${newerHint}` : "");
+}
+
+/**
  * Resolve a package-owned agent-node entrypoint and verify its immutable
  * release identity before it can receive `opencode-cli`. Capability text is
  * not a security boundary: an older preview already advertised the runtime.
@@ -190,18 +261,15 @@ export function validateAgentNodePackageEntrypoint(
 
   const packageJsonPath = join(packageRoot, "package.json");
   const pkg = readPackageJsonNoFollow(packageJsonPath);
+  const versionAccepted = agentNodeVersionAccepted(pkg?.version, expectedVersion);
   if (
     pkg?.name !== "@sleep2agi/agent-node"
     || typeof pkg?.version !== "string"
-    || (expectedVersion ? pkg.version !== expectedVersion : !pkg.version.includes("-preview."))
+    || !versionAccepted
     || pkg?.publishConfig?.tag !== "preview"
     || pkg?.bin?.["agent-node"] !== "dist/cli.js"
   ) {
-    throw new Error(
-      expectedVersion
-        ? `resolved agent-node package is not exact version ${expectedVersion}`
-        : "resolved agent-node package is not a preview-channel candidate",
-    );
+    throw new Error(agentNodeVersionRejectionMessage(pkg?.version, expectedVersion));
   }
 
   return entrypoint;
