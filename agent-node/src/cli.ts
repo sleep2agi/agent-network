@@ -741,6 +741,9 @@ if (fileConfig.env && typeof fileConfig.env === "object") {
     console.warn(`[anet]      anet doctor`);
   }
 }
+// Again, now that the profile's own variables are in: a proxy set only in config.json `env`
+// was not visible to the first call above.
+exemptLoopbackFromProxy();
 
 const secretProbeCode = runNodeSecretProbeIfRequested();
 if (secretProbeCode !== null) process.exit(secretProbeCode);

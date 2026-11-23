@@ -18,8 +18,16 @@ export function withLoopbackNoProxy(value: string | undefined): string {
   return [...entries, ...LOOPBACK.filter((name) => !have.has(name))].join(",");
 }
 
-/** Applies it to this process and, by inheritance, to every child it starts. */
+const PROXY_VARIABLES = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"];
+
+/**
+ * Applies it to this process and, by inheritance, to every child it starts — but only when a proxy
+ * is configured at all. With no proxy there is nothing to exempt, and adding two variables to every
+ * node's environment changes what its children inherit: the first full test run after this shipped
+ * flagged exactly that (the reviewed environment key set of a node no longer matched).
+ */
 export function exemptLoopbackFromProxy(env: NodeJS.ProcessEnv = process.env): void {
+  if (!PROXY_VARIABLES.some((name) => !!env[name])) return;
   const value = withLoopbackNoProxy(env.NO_PROXY ?? env.no_proxy);
   env.NO_PROXY = value;
   env.no_proxy = value;
