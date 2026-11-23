@@ -22,6 +22,8 @@ import { join } from "node:path";
 const DIR = mkdtempSync(join(tmpdir(), "anet-mcp-pool-"));
 process.env.COMMHUB_DB ||= join(DIR, "hub.db");
 process.env.COMMHUB_UPLOADS_DIR = join(DIR, "uploads");
+// 复用池默认关闭（生产由启动脚本显式打开）；这个套件测的就是复用，所以显式打开。
+process.env.COMMHUB_MCP_SERVER_POOL ||= "1";
 
 const PW = "McpPoolPassw0rd!";
 let BASE = "";
@@ -243,5 +245,41 @@ describe("McpServer 复用池：LRU 与上限", () => {
     } finally {
       if (prevMax === undefined) delete process.env.COMMHUB_MCP_SERVER_POOL_MAX; else process.env.COMMHUB_MCP_SERVER_POOL_MAX = prevMax;
     }
+  });
+});
+
+describe("McpServer 复用池：默认关闭", () => {
+  test("未设置 COMMHUB_MCP_SERVER_POOL 时默认关闭（发版本身零行为变化）", async () => {
+    const { mcpServerPoolStats } = await import("./server.js");
+    const prev = process.env.COMMHUB_MCP_SERVER_POOL;
+    try {
+      delete process.env.COMMHUB_MCP_SERVER_POOL;
+      expect(mcpServerPoolStats().enabled).toBe(false);
+      for (const v of ["0", "false", "off", ""]) {
+        process.env.COMMHUB_MCP_SERVER_POOL = v;
+        expect(mcpServerPoolStats().enabled).toBe(false);
+      }
+      for (const v of ["1", "true", "on", "YES"]) {
+        process.env.COMMHUB_MCP_SERVER_POOL = v;
+        expect(mcpServerPoolStats().enabled).toBe(true);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.COMMHUB_MCP_SERVER_POOL; else process.env.COMMHUB_MCP_SERVER_POOL = prev;
+    }
+  });
+});
+
+describe("/health 暴露复用池读数（上线后看命中率）", () => {
+  test("mcp_server_pool 带 pooled/created/reused/evicted/max/enabled", async () => {
+    // 匿名 /health 是白名单投影，池子读数属于鉴权侧 ⇒ 带 admin 令牌读。
+    const res = await fetch(`${BASE}/health`, { headers: { Authorization: `Bearer ${adminToken}` } });
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    const p = body.mcp_server_pool;
+    expect(p).toBeDefined();
+    for (const k of ["pooled", "created", "reused", "evicted", "max", "enabled"]) {
+      expect(typeof p[k]).toBe(k === "enabled" ? "boolean" : "number");
+    }
+    expect(p.max).toBeGreaterThan(0);
   });
 });
