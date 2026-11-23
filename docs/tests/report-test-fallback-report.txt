@@ -1,0 +1,55 @@
+Fallback report-only verification, 2026-11-23
+
+Latest consumer/trust extension: Docker 64/64 passed, zero failures/skips.
+Includes ZIP digest/member validation, full generation-record matching, default-main
+producer ancestry/code comparison, required-policy normalization and check-producer
+binding to App/workflow/PR/head/base/single-file scope.
+Real #3823 read-only replay: policy valid with two lint contexts/app15368;
+downloadsVerified=true; trustedCreation=false (no historical artifact).
+Manual reasons additionally include closed/stale PR and 13 hidden ratchet exits.
+Only baseIsCurrentMain failed snapshot checks; observed main/protection/release/checks
+did not change during collection. This is negative-path evidence, not positive
+GitHub artifact production/consumption acceptance. No eligible samples yet.
+
+Follow-up generation evidence tests: Docker 31/31 passed, zero failures/skips.
+Added real local Git/bare-remote tests: main/no-change emits no record; unpushed
+commit is rejected; pushed commit records exact head, parent and fallback blob.
+This is an isolated Git test, not live GitHub generator/artifact acceptance.
+
+Docker command:
+sg docker -c 'docker build -t anet-fallback-report:test -f tests/test-fallback-report/Dockerfile . && docker run --rm --network none --cap-drop ALL anet-fallback-report:test'
+
+Result: 27 tests, 27 passed, 0 failed, 0 skipped.
+Includes real minisign-generated signatures, corrupted payload, corrupted signature,
+missing verifier, hidden nonzero CI exit, missing/unavailable/inconsistent job logs,
+PR file scope, exact head, release identity, manifest content and snapshot policies.
+
+Real-repository read-only rehearsal:
+Hub PR #3823, head caa80dc5e3be03e6bb6d4b3c0f4b86de0fbb9398,
+App release ID 455275015, release source daf56c121a3f69c27f2d46c8f4b05ed8f24d8ee9.
+All three unique desktop packages passed complete anonymous download size/SHA-256
+checks and standard minisign package/comment signature verification. Three signature
+assets matched their release metadata and fallback manifest contents.
+
+Historical result remains MANUAL, not a qualifying pre-merge release:
+- PR already closed; historical base no longer current main.
+- Creation provenance and trusted required-check policy remain incomplete.
+- lint (ratchets) had 13 runner nonzero exits hidden by continue-on-error, despite
+  job/step API conclusions showing success; collector now records and rejects them.
+
+Workflow YAML parsed and read-only permissions/main-only guard/credential isolation
+checked locally. New default-main workflow has NOT yet executed on GitHub.
+No auto-merge, branch protection, new credentials or production deployment changes.
+
+Submission static checks:
+- check-action-pins.py: PASS (226 references, 74 workflows).
+- check-workflow-structure.py: PASS (74 workflows, 149 jobs, zero problems).
+- check-test-suite-registration.py: FAIL for test4616-permissions and
+  test4822-model-depth. These same failures were present in the historical #3823
+  lint log; neither directory is modified by this change. The new
+  test-fallback-report suite is discovered and referenced by its dedicated CI.
+- Dedicated test workflow PR/main path lists match exactly.
+
+Real rehearsal occurred before the final missing-log policy hardening; the hardened
+policy passed Docker regression tests. Rehearsal of the final submitted SHA remains
+a pre-merge requirement, not claimed complete here.

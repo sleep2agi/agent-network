@@ -1,0 +1,45 @@
+name: desktop-fallback-report-tests
+
+on:
+  pull_request:
+    paths:
+      - 'docs-site/scripts/fallback-report*.mjs'
+      - 'docs-site/scripts/record-fallback-generation*.mjs'
+      - 'tests/test-fallback-report/**'
+      - '.github/workflows/desktop-fallback-report.yml'
+      - '.github/workflows/desktop-fallback-sync.yml'
+      - '.github/workflows/desktop-fallback-report-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs-site/scripts/fallback-report*.mjs'
+      - 'docs-site/scripts/record-fallback-generation*.mjs'
+      - 'tests/test-fallback-report/**'
+      - '.github/workflows/desktop-fallback-report.yml'
+      - '.github/workflows/desktop-fallback-sync.yml'
+      - '.github/workflows/desktop-fallback-report-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build isolated test image
+        run: docker build -t fallback-report-tests -f tests/test-fallback-report/Dockerfile .
+      - name: Run policy and real signature tests offline
+        run: |
+          set -o pipefail
+          docker run --rm --network none --cap-drop ALL fallback-report-tests | tee fallback-tests.tap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fallback-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: fallback-tests.tap
+          if-no-files-found: warn
