@@ -8347,6 +8347,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       claudeArgs.push("--session-id", profile.session);
     }
 
+    env.ANET_USAGE_CLAUDE_SESSION = profile.session;
     claudeArgs.push("-n", displayName);
 
     // #138 fix — fa08eb4 (#135) wrap calls `process.exit(0)` the moment

@@ -1,0 +1,23 @@
+#5338 report_status.config_snapshot.usage_week — Linux Docker, 2026-11-23
+
+Reproduce: sg docker -c 'sh tests/test5338-usage-week/run.sh'
+The product agent-node and node-server bundles build. The test container runs
+with --network none; the only Hub is on loopback, with a disposable SQLite DB.
+Server: cd server && bun test src/report-status-workdir-schema.test.ts
+3 passed / 0 failed (7 assertions). Measured value, explicit null, missing
+field from old senders and invalid input tested against actual tool schema.
+Node source tests: 3 passed / 0 failed. Monday boundary, cumulative rollout
+deduplication, Claude assistant chunks, exact OpenCode session/week, zero cost.
+Smoke: real node-server process with a node-bound token and synthetic Claude
+JSONL -> existing report_status -> SELECT nodes.config_snapshot. Read back
+{"tokens":17,"since":"2026-11-23"}. No live vendor inference in this test.
+
+Accounting scope: active node-bound runtime session, local Monday midnight;
+not an account limit, and not an archive of prior node sessions. OpenCode reads
+the local stats backing records rather than invoking a project-wide stats CLI.
+Only an owned DB can be used; shared/borrowed servers without a verified local
+DB binding, missing/unsupported sources, agy and grok report null. Codex and
+Claude JSONL supply tokens only. No new network requests, credentials, tables
+or migration. Old Hubs strip the field and old nodes can omit it. Deploy Hub
+schema before node packages; revert the change to stop reporting. Usage history
+requires the original runtime's local data, not just a checkout of the repo.

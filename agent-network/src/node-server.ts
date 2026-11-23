@@ -25,6 +25,7 @@ import { hostname } from "os";
 import { execTmux } from "./tmux";
 import { tmuxUtf8Args } from "./tmux-format";
 import { encodeCwd } from "./project-key";
+import { claudeLog, readUsageLog, usageSampler } from './usage-week';
 import { loadOwnerOnlyEnvFile } from "./owner-env-file";
 import { createActivityLogSink } from "./node-activity-log";
 import {
@@ -226,6 +227,12 @@ const CONFIG_PATH = nodeConfigPath();
 // app#225 follow-up —— 独立节点密钥。目录/身份只从本节点 config.json 得出
 // (`dirname(CONFIG_PATH)`),hub 请求里没有路径;没有配置就不上报能力、不处理请求。
 const NODE_SECRET_SCOPE = resolveNodeSecretScope(CONFIG_PATH);
+const sampleWeek = usageSampler();
+async function nodeSnapshotFields() {
+  const fields = nodeSecretsReportFields(NODE_SECRET_SCOPE);
+  const id = process.env.ANET_USAGE_CLAUDE_SESSION;
+  return { ...fields, config_snapshot: { ...fields.config_snapshot, usage_week: id ? await sampleWeek(id, () => readUsageLog('claude', claudeLog(id))) : null } };
+}
 // #171 —— claude-code 族在名册里 model 全空(在线 38/38):节点配置里 `anet node create --model X`
 // 写下的 `model` 从没被报给 hub。读一次配置,有就报;没有就照旧为空(不编一个默认值)。
 // node_id / node_name 同理:不报 node_id,hub 的 nodes 表就没有这个节点,定时任务选不到它
@@ -684,7 +691,7 @@ async function reregister(): Promise<void> {
       // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
       files_capable: true,
       // app#225 follow-up —— 独立节点密钥:能力 + 已加载的 key 名(值永不出节点)。
-      ...nodeSecretsReportFields(NODE_SECRET_SCOPE),
+      ...await nodeSnapshotFields(),
     });
     log(`re-registered as "${ALIAS}" after SSE reconnect`);
   } catch (e) {
@@ -929,7 +936,7 @@ async function main() {
     // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
     files_capable: true,
     // app#225 follow-up —— 独立节点密钥:能力 + 已加载的 key 名(值永不出节点)。
-    ...nodeSecretsReportFields(NODE_SECRET_SCOPE),
+    ...await nodeSnapshotFields(),
   })
     .then(() => log(`registered as "${ALIAS}" (${RESUME_ID.slice(0, 8)})`))
     .catch((e) => log(`warning: could not register: ${e}`));
@@ -964,7 +971,7 @@ async function main() {
       // 同一门铃也答 files_list / file_read(node-files.ts,项目文件夹只读查看)。
       files_capable: true,
       // app#225 follow-up —— 独立节点密钥:能力 + 已加载的 key 名(值永不出节点)。
-      ...nodeSecretsReportFields(NODE_SECRET_SCOPE),
+      ...await nodeSnapshotFields(),
     }).catch((e) => log(`heartbeat failed: ${e}`));
   }, 3 * 60 * 1000);
 
