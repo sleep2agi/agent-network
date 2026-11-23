@@ -1,0 +1,67 @@
+name: desktop-fallback-report
+
+# Report-only: run trusted main code against PR data, never check out the PR.
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Fallback PR number to inspect before human merge
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  checks: read
+
+jobs:
+  report:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install signature verifier
+        timeout-minutes: 3
+        run: |
+          sudo timeout --kill-after=10s 60s apt-get update
+          sudo timeout --kill-after=10s 90s apt-get install -y --no-install-recommends minisign
+      - name: Collect read-only evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: node docs-site/scripts/fallback-report.mjs "$PR_NUMBER" fallback-report.json
+      - name: Summarize report or missing evidence
+        if: always()
+        env:
+          REPORT_CODE_SHA: ${{ github.sha }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+          const path = 'fallback-report.json';
+          if (!existsSync(path)) {
+            writeFileSync(path, JSON.stringify({ result: { decision: 'manual', mode: 'report-only',
+              reasons: ['collector-or-setup-failed'] } }, null, 2));
+          }
+          const report = JSON.parse(readFileSync(path, 'utf8'));
+          report.reportCodeSha = process.env.REPORT_CODE_SHA;
+          writeFileSync(path, JSON.stringify(report, null, 2) + '\n');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            '## Fallback report-only\n\nDecision: **' + report.result.decision +
+            '**\n\nA successful workflow means collection completed, not merge approval. ' +
+            'Read the JSON artifact for evidence and manual reasons.\n');
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fallback-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: fallback-report.json
+          if-no-files-found: error
+          retention-days: 30

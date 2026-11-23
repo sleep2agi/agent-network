@@ -1,0 +1,39 @@
+# Desktop fallback report-only
+
+`desktop-fallback-report.yml` is a manually dispatched, read-only evidence collector.
+After it is merged, dispatch it on **main**, supplying the fallback PR number before
+human merge. It checks out the exact main workflow commit, never PR code, and uses
+the existing `GITHUB_TOKEN` with read permissions. It cannot merge or change branch
+protection. No new credentials are required.
+
+Download the `fallback-report-<run>-<attempt>` JSON artifact. A green workflow only
+means collection finished; inspect `result.decision` and every reason. Setup or
+collection failures produce a manual report. Artifact retention is 30 days; retain
+release acceptance evidence separately for the three-release observation ledger.
+
+Current limitations deliberately keep real reports manual: creation provenance and
+trusted required-check producer policy are not yet fully implemented. If protection
+APIs reject the existing token, the error remains evidence debt, not an empty policy.
+Downloads bind exact release assets, lengths and SHA-256; minisign uses the updater
+public key from the exact release source. This does not independently approve key
+rotation or prove native installation, Authenticode, store submission or rollback.
+
+The historic 614 PR replay does not count toward the required three consecutive
+pre-merge eligible reports. Each future qualifying report also needs final merged
+content and deployed-channel verification; missing or conflicting evidence resets
+the count. Automatic merge remains disabled.
+
+Local collection requires Node 22+, minisign on PATH (or `MINISIGN_BIN`), and existing
+GitHub read access through `GITHUB_TOKEN`. Run from the repository root:
+
+```sh
+node docs-site/scripts/fallback-report.mjs 3823 fallback-report.json
+```
+
+Tests run in the isolated `tests/test-fallback-report/Dockerfile` image with network
+disabled at runtime. `desktop-fallback-report-tests.yml` runs this suite for PRs
+and main pushes with symmetric paths covering collector, tests and both workflows.
+The collector also receives a syntax check during the image build. Tests cover
+policy rejection and real minisign verification of
+valid, corrupted and unavailable-verifier cases. Real-repository read-only rehearsal
+is additionally required before merging changes to the collector.
