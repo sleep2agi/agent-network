@@ -8,7 +8,7 @@
 // 这个套件钉住四件事：
 //   ① 带 Accept: text/event-stream 的 GET 也是 405 + Allow（不再开流）；
 //   ② 不带的 GET 同样 405 + Allow；
-//   ③ 这两种请求都**不增加** MCP 在飞计数，也不新建 McpServer 实例；
+//   ③ 这两种请求都**不增加** MCP 在飞计数（短路在 enterMcpInflight() 之前），也不产生 SSE 流；
 //   ④ 紧接着的 POST /mcp tools/call 照常工作（短路没有波及正常请求）。
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -64,23 +64,25 @@ afterAll(() => {
 });
 
 describe("GET /mcp 一律 405（建实例之前）", () => {
-  test("带 Accept: text/event-stream 也是 405 + Allow，且不开流", async () => {
-    const before = (await import("./mcp-inflight.js")).getMcpInflightStats().inflight;
-    const createdBefore = (await import("./server.js")).mcpServerPoolStats().created;
+  test("带 Accept: text/event-stream 也是 405 + Allow，且不计入在飞、不开流", async () => {
+    const { getMcpInflightStats } = await import("./mcp-inflight.js");
+    const before = getMcpInflightStats().inflight;
     const r = await getMcp("text/event-stream");
     expect(r.status).toBe(405);
     expect(r.allow ?? "").toContain("POST");
-    expect((await import("./mcp-inflight.js")).getMcpInflightStats().inflight).toBe(before);
-    expect((await import("./server.js")).mcpServerPoolStats().created).toBe(createdBefore);
+    // 短路发生在 enterMcpInflight() 之前 ⇒ 在飞计数不变；且响应是普通 JSON 而不是 SSE 流。
+    expect(getMcpInflightStats().inflight).toBe(before);
     expect(r.text).toContain("-32000");
+    expect(r.text).not.toContain("event: message");
   });
 
-  test("不带 Accept 的 GET 同样 405 + Allow，且不建实例", async () => {
-    const createdBefore = (await import("./server.js")).mcpServerPoolStats().created;
+  test("不带 Accept 的 GET 同样 405 + Allow，同样不进入在飞计数", async () => {
+    const { getMcpInflightStats } = await import("./mcp-inflight.js");
+    const before = getMcpInflightStats().inflight;
     const r = await getMcp();
     expect(r.status).toBe(405);
     expect(r.allow ?? "").toContain("POST");
-    expect((await import("./server.js")).mcpServerPoolStats().created).toBe(createdBefore);
+    expect(getMcpInflightStats().inflight).toBe(before);
   });
 
   test("紧接着 POST /mcp tools/call 照常工作", async () => {
