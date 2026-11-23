@@ -15,8 +15,9 @@ SCRIPT=/app/deploy/hub/hub-daemon.sh
 #      · 夹具路径与脚本实际要用的路径**必然一致**(而不是"碰巧一致")
 #    取不到就退出 1,不静默用一个默认值 —— 一个用错路径的夹具会让
 #    后面每一条断言都在测别的东西,而它们照样能绿。
-RUNTIME_BASENAME=$(sed -n 's|^RUNTIME_DIR="\$HOME/\.commhub/\([^"]*\)"|\1|p' "$SCRIPT" | head -1)
-if [ -z "$RUNTIME_BASENAME" ]; then
+# 默认目录现在以 HUB_HOME 为基准；不要把后面的 HUB_RUNTIME_DIR 覆盖行当成默认值。
+RUNTIME_BASENAME=$(sed -n 's|^RUNTIME_DIR="\$HUB_HOME/\.commhub/\(runtime-[[:alnum:]_.-][[:alnum:]_.-]*\)"$|\1|p' "$SCRIPT")
+if [[ -z "$RUNTIME_BASENAME" || "$RUNTIME_BASENAME" == *$'\n'* ]]; then
   echo "FAIL: 从 $SCRIPT 里取不到 RUNTIME_DIR 的目录名。改了那一行的写法就要同步改这里。" >&2
   exit 1
 fi
