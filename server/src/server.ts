@@ -2175,6 +2175,16 @@ return Bun.serve({
           callerIdentityRejected = true;
         }
       }
+      // 2026-11-23 —— GET /mcp 是 SDK 的 standalone SSE 流（transport 要求 Accept 含
+      // text/event-stream）。带不上这个头的 GET 一定是客户端误轮询（线上实测 8 次/秒），
+      // 而每条都会先建一台 McpServer + transport 再被 SDK 判掉。在建实例**之前**直接 406。
+      if (req.method === "GET" && !(req.headers.get("accept") || "").includes("text/event-stream")) {
+        return withCors(req, Response.json({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Not Acceptable: Client must accept text/event-stream" },
+          id: null,
+        }, { status: 406 }));
+      }
       // #2363 —— 在飞计数：从进入 /mcp 到 MCP server 关闭。Hub 的内存与“同时在飞的
       // 请求数”成正比（隔离实测 ≈1.2–1.4 MB/条；顺序 54 条/秒时 RSS 完全平稳），
       // 所以这个数比 req/s 更能解释 RSS 尖峰。只观测，不拦请求。

@@ -110,6 +110,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_user_inbox_user_acked
     ON user_inbox(user_id, acked, created_at);
 
+  -- 2026-11-23 —— App 聊天页每 5s 拉一次「我的私信/通知」：
+  --   SELECT ... FROM user_inbox WHERE user_id=?1 ORDER BY created_at DESC LIMIT 100
+  -- 上面那条索引是 (user_id, acked, created_at)，而这条查询**不过滤 acked** ⇒ 用不上
+  -- created_at，只能 TEMP B-TREE 排序（线上 6920 行时单次 ~60ms）。补一条对齐排序的索引。
+  CREATE INDEX IF NOT EXISTS idx_user_inbox_user_created
+    ON user_inbox(user_id, created_at DESC);
+
   CREATE TABLE IF NOT EXISTS completions (
     id               TEXT PRIMARY KEY,
     session_name     TEXT NOT NULL,
