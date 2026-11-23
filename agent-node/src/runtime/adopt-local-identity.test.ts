@@ -62,6 +62,21 @@ test("process exact config/alias/home and reproducible environment", () => {
   expect(() => verifyAdoptionProcess(identity, { ...evidence, env: { ...env, TMUX: "/other/socket,12,0" } }, opts)).toThrow("adopt_tmux_socket_mismatch");
   expect(() => verifyAdoptionProcess(identity, evidence, { ...opts, reproducibleEnv: { HOME: env.HOME, PATH: env.PATH } })).toThrow("adopt_env_not_reproducible:API_KEY");
 });
+test("a node started through the CLI carries the CLI's version stamp and is still verified", () => {
+  const f = fixture(); const identity = verifyAdoptionLocalIdentity(f.req, f.opts);
+  const env = { HOME: f.home, PATH: "/bin" };
+  const argv = ["/usr/bin/agent-node", "--alias", f.req.alias, "--config", f.configPath];
+  const opts = { uid: f.opts.uid, home: f.home, defaultTmuxSocket: "/tmp/tmux-fixture/default", reproducibleEnv: env };
+  const withStamp = (value: string) => ({ uid: f.opts.uid, cwd: f.req.workdir, argv, env: { ...env, ANET_LAUNCHED_BY_CLI_VERSION: value } });
+  for (const version of ["2.3.0", "2.3.0-preview.260"]) expect(verifyAdoptionProcess(identity, withStamp(version), opts)).toBe("bare");
+  // Only a plain version string is waved through; anything else under that name is still a mismatch.
+  for (const bad of ["", "latest", "2.3.0; rm -rf /", "x".repeat(80)]) {
+    expect(() => verifyAdoptionProcess(identity, withStamp(bad), opts)).toThrow("adopt_env_not_reproducible:ANET_LAUNCHED_BY_CLI_VERSION");
+  }
+  // It does not hide another variable that cannot be reproduced.
+  expect(() => verifyAdoptionProcess(identity, { ...withStamp("2.3.0"), env: { ...env, ANET_LAUNCHED_BY_CLI_VERSION: "2.3.0", API_KEY: "fixture-only-value" } }, opts))
+    .toThrow("adopt_env_not_reproducible:API_KEY");
+});
 // Bun 1.3 fs.chmodSync drops setgid/sticky bits, so use the real chmod(1).
 const chmodBits = (path: string, mode: number) => { if (spawnSync("chmod", [mode.toString(8), path]).status !== 0) throw new Error("chmod failed"); };
 test("#747 sticky group-writable workdir accepted only for the workdir itself", () => {

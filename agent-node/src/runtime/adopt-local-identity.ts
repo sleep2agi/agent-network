@@ -2,6 +2,7 @@
 import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { assertWorkdirAllowed } from "./child-workdir.js";
+import { LAUNCHED_BY_CLI_VERSION_ENV, readLaunchedByCliVersion } from "../launched-by-cli-version.js";
 
 export interface AdoptionIdentityRequest {
   node_id: string;
@@ -134,6 +135,12 @@ export function verifyAdoptionProcess(
   const tmux = evidence.env.TMUX;
   if (tmux && tmux.split(",")[0] !== opts.defaultTmuxSocket) refuse("adopt_tmux_socket_mismatch");
   const launcherKeys = new Set(["TMUX", "TMUX_PANE", "SHLVL", "_", "PWD", "OLDPWD"]);
+  // `anet node start` stamps its own version on the node it starts (2026-11-10). The daemon cannot
+  // predict that value — it depends on which CLI did the start, including the daemon's own remote
+  // start — so it is accepted when it is a plain version string and nothing else. Without this,
+  // every node started through the CLI failed this check: it could not be adopted, and a remote
+  // start of an adopted node came up and was then reported as failed.
+  if (readLaunchedByCliVersion(evidence.env) !== undefined) launcherKeys.add(LAUNCHED_BY_CLI_VERSION_ENV);
   const missing = Object.keys(evidence.env).filter(key => !launcherKeys.has(key) && evidence.env[key] !== opts.reproducibleEnv[key]);
   if (missing.length) refuse(`adopt_env_not_reproducible:${missing.sort().join(",")}`);
   return tmux ? "tmux" : "bare";

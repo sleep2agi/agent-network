@@ -5,7 +5,7 @@ import { execTmux } from "../tmux.js";
 import { parseTmuxRows, tmuxListArgs } from "../tmux-format.js";
 import { atomicWriteJson } from "./config-apply.js";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
-import { reproducibleEnvironment, type AdoptDaemonDeps } from "./adopt-daemon.js";
+import { publicAdoptError, reproducibleEnvironment, type AdoptDaemonDeps } from "./adopt-daemon.js";
 import { adoptedChild, writeAdoptedChild, refreshAdoptedChild, type AdoptedChild } from "./adopt-registry.js";
 import { verifyAdoptionLocalIdentity, verifyAdoptionProcess, withProvenHub } from "./adopt-local-identity.js";
 import { readAdoptionPid, readAdoptionProc } from "./adopt-proc.js";
@@ -42,12 +42,24 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
     result = await operate(req, entry, deps, bindingRequestId);
   } catch (e: any) {
     result = { status: req.action === "start" ? "start_failed" : "stop_failed",
-      error: e?.message === "adopted_node_delete_unsupported" || /^adopt_[a-z_]+$/.test(e?.message ?? "") ? e.message : "adopt_lifecycle_verification_failed" };
+      error: lifecycleError(e?.message) };
+    // The Hub gets a code; the reason stays in the daemon log, where the operator can read it.
+    deps.warn(`[adopt-lifecycle] ${req.action} ${req.child_alias} failed: ${result.error}`);
   }
   // Ack transport failure is not an operation failure. Preserve local evidence
   // and let the request replay against PID/marker state rather than send a lie.
   await deps.callCommHub(req.action === "start" ? "ack_start_request" : "ack_stop_request", { request_id: req.request_id, ...result });
   return true;
+}
+/**
+ * What the Hub is told. Codes pass through — including the parameterised
+ * `adopt_env_not_reproducible:KEY,…`, which names variables, never values — so a refusal can be
+ * acted on. Anything else (paths, OS errors) is folded into one code.
+ */
+export function lifecycleError(message: unknown): string {
+  if (message === "adopted_node_delete_unsupported") return message;
+  const code = publicAdoptError(message);
+  return code === "adopt_local_verification_failed" ? "adopt_lifecycle_verification_failed" : code;
 }
 async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: AdoptDaemonDeps, bindingRequestId: unknown): Promise<Record<string, unknown>> {
   // OpenCode V2 co-presence is registered for source reads only; a daemon start/stop
