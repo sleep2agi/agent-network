@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { cancelActiveAcpTurn, clearActiveAcpTurn, getActiveAcpTurn, setActiveAcpTurn } from "./active-turn.js";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { __resetActiveAcpTurnForTest, cancelActiveAcpTurn, clearActiveAcpTurn, getActiveAcpTurn, setActiveAcpTurn } from "./active-turn.js";
 
 describe("#5332 ACP cancel", () => {
+  beforeEach(() => { __resetActiveAcpTurnForTest(); });
   test("没有在飞回合 ⇒ no_active_turn（不假装成功）", () => {
-    clearActiveAcpTurn({ client: { notify: () => {} }, sessionId: "s", runtime: "antigravity" });
     expect(cancelActiveAcpTurn()).toEqual({ ok: false, reason: "no_active_turn" });
   });
 

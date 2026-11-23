@@ -17,6 +17,8 @@ let current: ActiveAcpTurn | null = null;
 export function setActiveAcpTurn(turn: ActiveAcpTurn): void { current = turn; }
 export function clearActiveAcpTurn(turn: ActiveAcpTurn): void { if (current === turn) current = null; }
 export function getActiveAcpTurn(): ActiveAcpTurn | null { return current; }
+/** 测试用：清空（生产不需要，避免跨用例污染）。 */
+export function __resetActiveAcpTurnForTest(): void { current = null; }
 
 export function cancelActiveAcpTurn(): { ok: boolean; reason?: string } {
   const turn = current;

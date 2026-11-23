@@ -380,7 +380,8 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     const sessionId = extractSessionId(session) ?? opts.sessionId;
     // #5332 —— 登记当前 ACP 回合，供 control=interrupt 发 session/cancel（agy 与本实现共用）
     if (typeof sessionId === "string" && sessionId) {
-      setActiveAcpTurn({ client: client as any, sessionId, runtime: String(opts.runtime ?? "acp") });
+      // GrokAcpTurnOptions 没有 runtime 字段：这里只记「ACP 通用」，能力位判断在 cli.ts 按 RUNTIME 做
+      setActiveAcpTurn({ client: client as any, sessionId, runtime: "acp" });
     }
     if (!sessionId) throw new Error(`${opts.runtimeLabel ?? "grok"} ACP session response did not include sessionId`);
 
