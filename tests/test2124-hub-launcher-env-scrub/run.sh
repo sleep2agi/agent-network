@@ -14,9 +14,9 @@ set -euo pipefail
 source /lib/safe-rm.sh
 
 SCRIPT=/app/deploy/hub/hub-daemon.sh
-RUNTIME_BASENAME=$(sed -n 's|^RUNTIME_DIR="\$HOME/\.commhub/\([^"]*\)"|\1|p' "$SCRIPT")
-RUNTIME_BASENAME=${RUNTIME_BASENAME%%$'\n'*}
-if [ -z "$RUNTIME_BASENAME" ]; then
+# 默认目录现在以 HUB_HOME 为基准；不要把后面的 HUB_RUNTIME_DIR 覆盖行当成默认值。
+RUNTIME_BASENAME=$(sed -n 's|^RUNTIME_DIR="\$HUB_HOME/\.commhub/\(runtime-[[:alnum:]_.-][[:alnum:]_.-]*\)"$|\1|p' "$SCRIPT")
+if [[ -z "$RUNTIME_BASENAME" || "$RUNTIME_BASENAME" == *$'\n'* ]]; then
   echo "FAIL: 从 $SCRIPT 里取不到 RUNTIME_DIR 的目录名" >&2
   exit 1
 fi
