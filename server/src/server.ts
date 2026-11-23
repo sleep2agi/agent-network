@@ -349,10 +349,36 @@ function serverPoolEnabled(): boolean {
   return !(raw === "0" || raw === "false" || raw === "off");
 }
 
-const serverPool = new Map<string, McpServer[]>();
+/** key → 空闲实例栈；`lruKeys` 按「最近一次放回」排序（队尾最新），淘汰从队头取。 */
+const idleByKey = new Map<string, McpServer[]>();
+const lruKeys: string[] = [];
 let serverPoolSize = 0;
 let serverCreated = 0;
 let serverReused = 0;
+
+function dropKey(key: string): void {
+  idleByKey.delete(key);
+  const i = lruKeys.indexOf(key);
+  if (i >= 0) lruKeys.splice(i, 1);
+}
+
+/** 淘汰最久没被用过的那个 key 的一个实例（LRU）；返回是否真的淘汰了。 */
+function evictOldest(): boolean {
+  while (lruKeys.length) {
+    const key = lruKeys[0];
+    const list = idleByKey.get(key);
+    if (!list || !list.length) { dropKey(key); continue; }
+    list.pop();
+    serverPoolSize--;
+    if (!list.length) dropKey(key);
+    else {
+      // 这个 key 还有实例，但这一台被淘汰了 —— 把 key 移到队尾（它刚被处理过）
+      lruKeys.shift(); lruKeys.push(key);
+    }
+    return true;
+  }
+  return false;
+}
 
 /** 键 = 清单里的字段按固定顺序取值（与 createServer 是同一个对象，不会漏字段）。 */
 export function poolKeyOf(o: CreateServerOptions): string {
@@ -363,20 +389,30 @@ export function poolKeyOf(o: CreateServerOptions): string {
 function acquireServer(opts: CreateServerOptions): { server: McpServer; key: string } {
   const key = poolKeyOf(opts);
   if (!serverPoolEnabled()) { serverCreated++; return { server: createServer(opts), key }; }
-  const idle = serverPool.get(key);
-  const server = idle && idle.length ? idle.pop()! : null;
-  if (server) { serverPoolSize--; serverReused++; return { server, key }; }
+  const list = idleByKey.get(key);
+  const server = list && list.length ? list.pop()! : null;
+  if (server) {
+    serverPoolSize--; serverReused++;
+    if (!list!.length) dropKey(key);
+    else { const i = lruKeys.indexOf(key); if (i >= 0) { lruKeys.splice(i, 1); lruKeys.push(key); } }
+    return { server, key };
+  }
   serverCreated++;
   return { server: createServer(opts), key };
 }
 
 /** 一次请求结束后把 server 放回池（超过上限就丢弃，交给 GC）。 */
 function releaseServer(key: string, server: McpServer): void {
-  // 每次放回时重读上限：运维可以热调 env（下次释放生效），超限就丢给 GC。
-  if (!serverPoolEnabled() || serverPoolSize >= serverPoolMax()) return;
-  const idle = serverPool.get(key);
-  if (idle) { idle.push(server); serverPoolSize++; return; }
-  serverPool.set(key, [server]); serverPoolSize++;
+  if (!serverPoolEnabled()) return;
+  // 每次放回时重读上限：运维可以热调 env（下次释放生效）。
+  // 满了就先淘汰最久没用的一个 key（LRU）——否则先到的 64 个身份会永久占坑，
+  // 线上 455 个会话的其余身份永远拿不到复用。
+  while (serverPoolSize >= serverPoolMax() && evictOldest()) { /* 继续淘汰到低于上限 */ }
+  if (serverPoolSize >= serverPoolMax()) return; // 池子里一个都淘汰不掉（理论上不会）
+  const list = idleByKey.get(key);
+  if (list) list.push(server);
+  else { idleByKey.set(key, [server]); lruKeys.push(key); }
+  serverPoolSize++;
 }
 
 /**

@@ -222,3 +222,26 @@ describe("McpServer 复用池：键完整性 / 开关 / 失效路径", () => {
     expect(shouldPoolServer(null)).toBe(false);
   });
 });
+
+describe("McpServer 复用池：LRU 与上限", () => {
+  test("池子满了淘汰最久没用的身份，而不是让先到的永久占坑", async () => {
+    const { mcpServerPoolStats } = await import("./server.js");
+    const { register } = await import("./auth.js");
+    const prevMax = process.env.COMMHUB_MCP_SERVER_POOL_MAX;
+    try {
+      process.env.COMMHUB_MCP_SERVER_POOL_MAX = "2";
+      // 三个不同身份各打一次 ⇒ 池子最多留 2 台
+      const tokens = [0, 1, 2].map(i => register(`pool_lru_${Date.now()}_${i}`, PW).token!);
+      for (const t of tokens) await mcpRaw(t, toolCall("get_all_status"));
+      const after3 = mcpServerPoolStats();
+      expect(after3.pooled).toBeLessThanOrEqual(2);
+      // 第一个身份再打一次：它的实例已被 LRU 淘汰 ⇒ 必须重新建（created 增长）
+      const before = mcpServerPoolStats();
+      await mcpRaw(tokens[0], toolCall("get_all_status"));
+      const after = mcpServerPoolStats();
+      expect(after.created).toBeGreaterThan(before.created);
+    } finally {
+      if (prevMax === undefined) delete process.env.COMMHUB_MCP_SERVER_POOL_MAX; else process.env.COMMHUB_MCP_SERVER_POOL_MAX = prevMax;
+    }
+  });
+});

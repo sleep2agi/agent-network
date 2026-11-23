@@ -245,7 +245,7 @@ export function resolveNodeIdArg(a: { node_id?: string; child_node_id?: string }
   return { ok: true, node_id: id };
 }
 
-function guardRestrictedMemberTools(server: McpServer, restrictedNets: string[], _userId: string): void {
+function guardRestrictedMemberTools(server: McpServer, restrictedNetsNow: () => string[], _userId: string): void {
   const denied = (tool: string) => ({
     content: [{
       type: "text" as const,
@@ -257,11 +257,13 @@ function guardRestrictedMemberTools(server: McpServer, restrictedNets: string[],
     }],
   });
   const wrap = (name: string, handler: (...callArgs: any[]) => any) => async (...callArgs: any[]) => {
+    // 2026-11-23 —— 现查而不是注册时快照：实例被复用后，管理员把成员改成受限/解除受限
+    // 必须在下一次调用就生效，不能等到 Hub 重启。
     if (!RESTRICTED_MEMBER_TOOLS.has(name)) {
       const args = callArgs[0];
       const raw = args && typeof args === "object" ? (args as Record<string, unknown>).network_id : undefined;
       const net = typeof raw === "string" && raw.trim() ? raw.trim() : null;
-      if (!net || restrictedNets.includes(net)) return denied(name);
+      if (!net || restrictedNetsNow().includes(net)) return denied(name);
     }
     return handler(...callArgs);
   };
@@ -360,8 +362,11 @@ function guardNodePermissionTools(server: McpServer, tokenId: string, networkId:
 export function registerTools(server: McpServer, clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, listing: { includeProtocol?: boolean } = {}, callerIdentityRejected = false) {
   // 多用户 Agent 权限:用户令牌调用者在哪些网络里是受限成员(只看授权 Agent)。
   // 网络令牌不会走到这里 —— 受限成员的网络令牌在 resolveToken 就被拒了。
-  const restrictedNets = enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : [];
-  if (restrictedNets.length) guardRestrictedMemberTools(server, restrictedNets, enforceUserId!);
+  // 2026-11-23 —— 改成**每次调用现查**（不传值）：McpServer 实例会被复用，
+  // 注册时快照会把「管理员调整成员受限状态」冻结到 Hub 重启为止。
+  const restrictedNetsNow = (): string[] =>
+    enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : [];
+  if (restrictedNetsNow().length) guardRestrictedMemberTools(server, restrictedNetsNow, enforceUserId!);
   if (callerTokenIsNetwork && callerTokenId && enforceNetworkId) guardNodePermissionTools(server, callerTokenId, enforceNetworkId);
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
@@ -444,7 +449,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 给 Agent 发任务 / 消息的准入。不受限:原判据。受限网络里:目标必须是授权且 can_message 的 Agent,
   // 发件人固定为自己的用户名;目标不存在与没授权返回同一个错误,不留 alias 探测差异。
   const agentSendDenied = (effectiveNetworkId: string | null, alias: string, clientFrom: string | undefined, action: "send_task" | "write", meta?: unknown) => {
-    if (!effectiveNetworkId || !restrictedNets.includes(effectiveNetworkId)) {
+    if (!effectiveNetworkId || !restrictedNetsNow().includes(effectiveNetworkId)) {
       return canWrite(effectiveNetworkId) ? null : writeDeniedReply(effectiveNetworkId, action);
     }
     if (!canWriteHuman(effectiveNetworkId)) return writeDeniedReply(effectiveNetworkId, action);
@@ -763,9 +768,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 受限网络挂在 scope.agentRestriction 上:addReadScope(= addNetworkScope)对它们 fail-closed,
   // 逐条审过的工具改用 addAgentNetworkScope / addOwnTrafficScope 按授权放行。
   const withRestriction = (scope: ReadScope): ReadScope => {
-    if (!restrictedNets.length || !enforceUserId) return scope;
+    const nets = restrictedNetsNow();
+    if (!nets.length || !enforceUserId) return scope;
     const inScope = scope.networkId ? [scope.networkId] : (scope.networkIds ?? []);
-    const restricted = restrictedNets.filter((id) => inScope.includes(id));
+    const restricted = nets.filter((id) => inScope.includes(id));
     return restricted.length ? { ...scope, agentRestriction: { userId: enforceUserId, username: callerAlias ?? "", networkIds: restricted } } : scope;
   };
   const resolveReadScope = (clientNetId?: string | null): ReadScope => {
@@ -3633,7 +3639,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const effectiveNetId = getNetworkId(netId);
       // 人类 ↔ 人类私信:受限成员也能发(canWriteHuman 不看 Agent 授权),但发件人固定为自己的用户名。
       if (!canWriteHuman(effectiveNetId)) return writeDeniedReply(effectiveNetId, "write");
-      if (effectiveNetId && restrictedNets.includes(effectiveNetId) && _fromIn?.trim() && _fromIn.trim() !== callerAlias) {
+      if (effectiveNetId && restrictedNetsNow().includes(effectiveNetId) && _fromIn?.trim() && _fromIn.trim() !== callerAlias) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "from_session_identity_mismatch", message: "restricted members always send as their own username" }) }] };
       }
       if (!effectiveNetId) return writeDeniedReply(effectiveNetId, "write");
