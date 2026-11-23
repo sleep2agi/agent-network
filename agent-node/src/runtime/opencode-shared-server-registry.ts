@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { assertPrivateFile } from "../shared/private-file";
 
 export type HostSharedOpenCodeServer = {
   opencodeSharedServerUrl: string;
@@ -14,10 +15,8 @@ export function readHostSharedOpenCodeServer(path: string): HostSharedOpenCodeSe
     || typeof entry.passwordFile !== "string" || !isAbsolute(entry.passwordFile)) {
     throw new Error("shared_opencode_registry_invalid: expected loopback url and absolute passwordFile");
   }
-  const passwordStat = statSync(entry.passwordFile);
-  if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
-    throw new Error("shared_opencode_password_file_not_private");
-  }
+  // Mode bits on POSIX, the access list on Windows (shared/private-file.ts).
+  assertPrivateFile(entry.passwordFile, "shared_opencode_password_file_not_private");
   let clientBinDir: string | undefined;
   if (entry.clientBinDir !== undefined) {
     if (typeof entry.clientBinDir !== "string" || !isAbsolute(entry.clientBinDir)
