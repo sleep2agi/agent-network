@@ -25,7 +25,7 @@ export interface AgySession {
 
 /** 起 `agy acp` 并完成 initialize 握手。调用方负责 close()。 */
 export async function openAgyAcpSession(opts: { cwd?: string; env?: NodeJS.ProcessEnv; binary?: string } = {}): Promise<AgySession> {
-  const client = new GrokAcpClient();
+  const client = new GrokAcpClient("antigravity");
   client.start({ ...opts, binary: opts.binary ?? agyBinary(), argv: [...AGY_ACP_ARGV] });
   try {
     const init = await client.request<AgyInitializeResult>("initialize", {

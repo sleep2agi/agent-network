@@ -32,6 +32,18 @@ export function parseAgyModels(stdout: string): string[] | null {
   return models.length ? models : null;
 }
 
+/** 纯函数：把 `agy models` 的退出码与 stdout/stderr 归类为模型清单和登录态。 */
+export function classifyAgyModelsOutput(out: { status: number | null; stdout: string; stderr: string }): AgyProbeResult {
+  const combined = `${out.stdout}\n${out.stderr}`;
+  if (out.status === 0) {
+    const models = parseAgyModels(out.stdout);
+    // 成功但没有可解析的模型行 ⇒ 不报清单；登录态仍可判为已登录（命令本身跑通了）
+    return { models, loginState: "logged_in" };
+  }
+  if (NEEDS_LOGIN_RE.test(combined)) return { models: null, loginState: "needs_login" };
+  return { models: null, loginState: "unknown" };
+}
+
 /** 一次探测。**永不抛出**：任何异常都是 unknown。 */
 export function probeAgy(deps: AgyProbeDeps): AgyProbeResult {
   const run = deps.run ?? ((bin, args) => {
@@ -44,14 +56,7 @@ export function probeAgy(deps: AgyProbeDeps): AgyProbeResult {
   } catch {
     return { models: null, loginState: "unknown" };
   }
-  const combined = `${out.stdout}\n${out.stderr}`;
-  if (out.status === 0) {
-    const models = parseAgyModels(out.stdout);
-    // 成功但没有可解析的模型行 ⇒ 不报清单；登录态仍可判为已登录（命令本身跑通了）
-    return { models, loginState: "logged_in" };
-  }
-  if (NEEDS_LOGIN_RE.test(combined)) return { models: null, loginState: "needs_login" };
-  return { models: null, loginState: "unknown" };
+  return classifyAgyModelsOutput(out);
 }
 
 export interface AgyCatalogCache {

@@ -279,12 +279,70 @@ describe("#622 秘密永不出现在输出里(真文件 + 埋点假 key)", () =>
     return h;
   }
 
-  test("antigravity-acp：给了 spec，但登录态只报 unknown（keyring 无法用文件判断）", async () => {
+  test("antigravity-acp：未登录（无凭据文件且 agy models 报 needs_login）→ not_logged_in，和 Codex/Claude 一致", async () => {
+    let probedBin = "";
+    const d = deps({
+      bins: { agy: OK("antigravity 1.5.13") },
+      probeAgyAuth: async (bin) => { probedBin = bin; return "needs_login"; },
+    });
+    const e = (await probeRuntimeReadiness(["antigravity-acp"], d))["antigravity-acp"];
+    expect(probedBin).toBe("/usr/local/bin/agy");
+    expect(e.state).toBe("not_logged_in");
+    expect(e.ok).toBe(false);
+    expect(e.cli).toBe("found");
+    expect(e.auth).toBe("absent");
+    expect(e.network).toBe("skipped");
+    expect(e.reason).toContain("agy acp --login");
+    expect(d.calls.head).toEqual([]);
+  });
+
+  test("antigravity-acp：Linux 凭据文件存在 + 网络通 → ready（无需再起 agy models）", async () => {
+    let probeCalled = false;
+    const d = deps({
+      bins: { agy: OK("antigravity 1.5.13") },
+      files: [".gemini/antigravity-cli/antigravity-oauth-token"],
+      probeAgyAuth: async () => { probeCalled = true; return "needs_login"; },
+    });
+    const e = (await probeRuntimeReadiness(["antigravity-acp"], d))["antigravity-acp"];
+    expect(probeCalled).toBe(false);
+    expect(e.state).toBe("ready");
+    expect(e.ok).toBe(true);
+    expect(e.auth).toBe("present");
+    expect(e.network).toBe("reachable");
+  });
+
+  test("antigravity-acp：凭据在系统 keyring（无文件但 agy models 报 logged_in）+ 网络通 → ready", async () => {
+    const d = deps({
+      bins: { agy: OK("antigravity 1.5.13") },
+      probeAgyAuth: async () => "logged_in",
+    });
+    const e = (await probeRuntimeReadiness(["antigravity-acp"], d))["antigravity-acp"];
+    expect(e.state).toBe("ready");
+    expect(e.ok).toBe(true);
+    expect(e.auth).toBe("present");
+    expect(e.network).toBe("reachable");
+  });
+
+  test("antigravity-acp：登录探测超时/未知（auth=unknown）→ unknown（绝不误判为 ready）", async () => {
+    const d = deps({
+      bins: { agy: OK("antigravity 1.5.13") },
+      probeAgyAuth: async () => "unknown",
+    });
+    const e = (await probeRuntimeReadiness(["antigravity-acp"], d))["antigravity-acp"];
+    expect(e.state).toBe("unknown");
+    expect(e.ok).toBe(false);
+    expect(e.auth).toBe("unknown");
+    expect(e.reason).toContain("agy acp --login");
+  });
+
+  test("antigravity-acp：缺少 CLI（PATH 上找不到 agy）→ missing_cli，auth=unknown，不跑登录探测", async () => {
     const h = plantHome();
     const real = realReadinessDeps({ childEnv: { PATH: "/nonexistent", HOME: h }, daemonEnv: {} });
     const d: ReadinessDeps = { ...real, httpHead: async () => "reachable" };
     const r = await probeRuntimeReadiness(["antigravity-acp"], d);
     expect(r["antigravity-acp"]).toBeTruthy();
+    expect(r["antigravity-acp"].state).toBe("missing_cli");
+    expect(r["antigravity-acp"].ok).toBe(false);
     expect(r["antigravity-acp"].auth).toBe("unknown");
     expect(JSON.stringify(r["antigravity-acp"])).toContain("1.5.13");
   });

@@ -1,4 +1,5 @@
 import { setActiveAcpTurn, clearActiveAcpTurn, cancelActiveAcpTurn, type ActiveAcpTurn } from "../acp-runner/active-turn";
+import { attachAcpUserReplyText } from "../acp-runner/user-error";
 import { GrokAcpClient } from "./client";
 import { newGrokTurnState, reduceGrokAcpNotification } from "./events";
 import type { GrokAcpNotification, GrokTurnState } from "./events";
@@ -464,6 +465,8 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       effectiveModel: modelCheck.effectiveModel,
       modelSource: modelCheck.modelSource,
     };
+  } catch (error) {
+    throw attachAcpUserReplyText(error, opts.runtimeLabel ?? "grok");
   } finally {
     // 回合结束就撤销登记：之后再来的停止指令应得到 no_active_turn，而不是去通知一个已关闭的进程。
     if (activeTurn) clearActiveAcpTurn(activeTurn);
@@ -547,9 +550,10 @@ async function applyConfiguredModel(
     }
   } catch (err) {
     const { code, message, data } = rpcErrorParts(err);
+    const label = opts.runtimeLabel ?? "grok";
     if (code === -32601 || /method not found/i.test(message)) {
       opts.onStderr?.(
-        `[grok] #1958 this grok build has no session/set_model (${message}); ` +
+        `[${label}] #1958 this ${label} build has no session/set_model (${message}); ` +
         `model "${requested}" was passed on argv only — the session may still run its own model.`,
       );
       return { effectiveModel: requested, modelSource: "argv" };
