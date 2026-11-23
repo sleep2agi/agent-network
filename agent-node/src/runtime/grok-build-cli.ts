@@ -69,6 +69,12 @@ const GROK_TOOL_ALIASES: Record<string, string> = {
 };
 
 export const SAFE_GROK_TOOLS = ["read_file", "grep", "list_dir", "web_search", "web_fetch"] as const;
+/**
+ * 2026-11-23 —— `SAFE_GROK_TOOLS.includes(tool)` 在 tool: string 时是 TS2345
+ * （ReadonlyArray<字面量联合>.includes 只接受那个联合）。用 Set 查表，既消掉类型错误，
+ * 也不用把调用点改成 as any。
+ */
+const SAFE_GROK_TOOL_SET: ReadonlySet<string> = new Set(SAFE_GROK_TOOLS);
 const REQUIRED_GROK_CLI_FLAGS = [
   "--prompt-file",
   "streaming-json",
@@ -205,7 +211,7 @@ export function buildGrokCliArgs(opts: GrokCliTurnOptions, promptFile: string): 
     args.push("--sandbox", opts.sandboxProfile || "workspace", "--always-approve");
   } else {
     const safeTools = configuredTools
-      ? configuredTools.filter((tool) => SAFE_GROK_TOOLS.includes(tool))
+      ? configuredTools.filter((tool) => SAFE_GROK_TOOL_SET.has(tool))
       : SAFE_GROK_TOOLS;
     if (!safeTools.length) {
       throw new Error("grok-build-cli has no read-only tools after applying the configured allowlist");

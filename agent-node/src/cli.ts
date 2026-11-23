@@ -58,6 +58,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { nodeRolloutGuard, SDK_POINT_AT_NEWER_CODEX } from "./runtime/codex-rollout-guard-node.js";
+import { withFreshSessionRetryNote } from "./runtime/antigravity-acp/runtime";
 import { describeMissingOrdinalFailure, probeCodexVersionCached } from "./runtime/codex-rollout-history-guard.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
 import { reportedTask } from "./project-dir-mismatch.js";
@@ -5233,6 +5234,12 @@ async function processWithAntigravity(
       warn(`[antigravity] resumed session failed (${e?.message || e}); retrying once with a fresh session`);
       const result = await runOnce(undefined);
       clearInteractivePrompt("turn-completed");
+      // 2026-11-23 负责人 review 第 3 条：回放判决失败后换新会话重做成功时，用户看到的不能是一条
+      // 普通回复 —— 那等于悄悄丢了上下文。只有「回放型失败」才加这句人话；其它失败（idle 超时等）
+      // 原有语义不变。
+      if (e?.code === "agy_replay_only_no_new_content") {
+        return withFreshSessionRetryNote(result.replyText);
+      }
       return result.replyText;
     }
     throw e;
