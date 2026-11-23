@@ -63,6 +63,20 @@ describe("reply-file-links: rewrite + end-to-end", () => {
     const r = await attachLocalFileLinks("纯文字 [站](https://a.b/c)", { roots: [root], upload: async () => { calls++; return { file_id: "x", name: "", mime: "", size: 0 }; } });
     expect(r.text).toBe("纯文字 [站](https://a.b/c)"); expect(calls).toBe(0); expect(r.attachments).toEqual([]);
   });
+  test("前面失败的不吃配额：6 个坏链接 + 2 个好链接 → 好的仍然上传", async () => {
+    const bad = Array.from({ length: 6 }, (_, i) => `[b${i}](/nowhere/b${i}.pdf)`).join(" ");
+    const text = `${bad} [good1](${root}/report.pdf) [good2](${root}/report.pdf)`;
+    const r = await attachLocalFileLinks(text, { roots: [root], upload: async (f) => ({ file_id: "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", name: f.name, mime: f.mime, size: f.size }) });
+    expect(r.uploaded).toBe(2);
+    expect(r.text).toContain("[good1](/api/files/f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1)");
+  });
+  test("超过 6 个成功上限的链接被标注，不静默留在正文里", async () => {
+    const text = Array.from({ length: 8 }, (_, i) => `[g${i}](${root}/report.pdf)`).join(" ");
+    const r = await attachLocalFileLinks(text, { roots: [root], upload: async (f) => ({ file_id: "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", name: f.name, mime: f.mime, size: f.size }) });
+    expect(r.uploaded).toBe(6);
+    expect(r.text).toContain("g6(文件未上传:超过 6 个附件上限");
+    expect(r.text).toContain("g7(文件未上传:超过 6 个附件上限");
+  });
   test("rewriteReplyLinks leaves unrelated text alone", () => {
     expect(rewriteReplyLinks("abc", []).text).toBe("abc");
   });

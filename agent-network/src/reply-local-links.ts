@@ -4,11 +4,13 @@
  * 2026-09-15 真机:外部团队节点 两条带 pptx 的回复到 hub 时附件为空,人只看到「点卡片下载」四个字。
  */
 export const REPLY_LOCAL_LINK_MAX = 6;
+/** 扫描上限(只限制「找几个链接」):上限要按成功数算,前面的失败不该吃掉配额。 */
+export const REPLY_LOCAL_LINK_SCAN_MAX = 50;
 
 export interface LocalLink { readonly raw: string; readonly label: string; readonly path: string }
 
 /** 只认 markdown 链接且目标像本机绝对路径(`/…` 或 `file:///…`);http(s)、/api/files/… 不算。 */
-export function findLocalLinks(text: string): LocalLink[] {
+export function findLocalLinks(text: string, maxCount: number = REPLY_LOCAL_LINK_MAX): LocalLink[] {
   const out: LocalLink[] = [];
   const re = /\[([^\]\n]{1,200})\]\(([^()\s]+)\)/g;
   let m: RegExpExecArray | null;
@@ -19,7 +21,7 @@ export function findLocalLinks(text: string): LocalLink[] {
     else if (t.startsWith("/") && !t.startsWith("/api/") && !t.startsWith("//")) path = t;
     if (!path) continue;
     out.push({ raw: m[0], label: m[1], path });
-    if (out.length >= REPLY_LOCAL_LINK_MAX) break;
+    if (out.length >= maxCount) break;
   }
   return out;
 }
@@ -49,11 +51,13 @@ export async function attachLocalLinks(
   text: string,
   upload: (path: string) => Promise<UploadedRef>,
 ): Promise<{ text: string; attachments: Array<{ type: "file"; file_id: string; name?: string; mime?: string; size?: number }>; uploaded: number; failed: number }> {
-  const links = findLocalLinks(text);
+  const links = findLocalLinks(text, REPLY_LOCAL_LINK_SCAN_MAX);
   if (links.length === 0) return { text, attachments: [], uploaded: 0, failed: 0 };
   const results: Array<{ link: LocalLink; uploaded?: UploadedRef; reason?: string }> = [];
+  let succeeded = 0;
   for (const link of links) {
-    try { results.push({ link, uploaded: await upload(link.path) }); }
+    if (succeeded >= REPLY_LOCAL_LINK_MAX) { results.push({ link, reason: `超过 ${REPLY_LOCAL_LINK_MAX} 个附件上限` }); continue; }
+    try { results.push({ link, uploaded: await upload(link.path) }); succeeded += 1; }
     catch (e: any) { results.push({ link, reason: String(e?.message ?? e).slice(0, 160) }); }
   }
   const rw = rewriteLocalLinks(text, results);

@@ -11,6 +11,12 @@ import { basename, extname, isAbsolute, resolve, sep } from "node:path";
 
 export const REPLY_FILE_MAX_BYTES = 12 * 1024 * 1024; // = hub MAX_UPLOAD_BYTES
 export const REPLY_FILE_MAX_COUNT = 6;
+/**
+ * 扫描上限(只限制「找几个链接」,不限制「能传几个」)。
+ * 2026-11-23 真机:Windows 节点一条回复里前 6 个链接全是 `/C:/…`(当时必失败),第 7 个起写得出的文件
+ * 连试都不试、静默留在正文里。上限必须按**成功数**算,不能按「匹配到第 6 个就收手」算。
+ */
+export const REPLY_FILE_MAX_SCAN = 50;
 
 export interface LocalFileLink {
   /** 整个 `[label](target)` 原文,用于替换。 */
@@ -22,7 +28,7 @@ export interface LocalFileLink {
 }
 
 /** 只认 markdown 链接且目标像本机绝对路径:`/…` 或 `file:///…`。http(s)、/api/files/… 不算。 */
-export function findLocalFileLinks(text: string): LocalFileLink[] {
+export function findLocalFileLinks(text: string, maxCount: number = REPLY_FILE_MAX_COUNT): LocalFileLink[] {
   const out: LocalFileLink[] = [];
   const re = /\[([^\]\n]{1,200})\]\(([^()\s]+)\)/g;
   let m: RegExpExecArray | null;
@@ -33,7 +39,7 @@ export function findLocalFileLinks(text: string): LocalFileLink[] {
     else if (target.startsWith("/") && !target.startsWith("/api/") && !target.startsWith("//")) path = target;
     if (!path || !isAbsolute(path)) continue;
     out.push({ raw: m[0], label: m[1], target, path });
-    if (out.length >= REPLY_FILE_MAX_COUNT) break;
+    if (out.length >= maxCount) break;
   }
   return out;
 }
@@ -93,13 +99,15 @@ export async function attachLocalFileLinks(
   text: string,
   deps: { roots: readonly string[]; upload: (file: { realPath: string; name: string; mime: string; size: number }) => Promise<UploadedFile> },
 ): Promise<{ text: string; attachments: ReplyAttachment[]; uploaded: number; failed: number }> {
-  const links = findLocalFileLinks(text);
+  const links = findLocalFileLinks(text, REPLY_FILE_MAX_SCAN);
   if (links.length === 0) return { text, attachments: [], uploaded: 0, failed: 0 };
   const results: Array<{ link: LocalFileLink; uploaded?: UploadedFile; reason?: string }> = [];
+  let succeeded = 0;
   for (const link of links) {
+    if (succeeded >= REPLY_FILE_MAX_COUNT) { results.push({ link, reason: `超过 ${REPLY_FILE_MAX_COUNT} 个附件上限` }); continue; }
     const check = checkLocalFile(link.path, deps.roots);
     if (!check.ok) { results.push({ link, reason: check.reason }); continue; }
-    try { results.push({ link, uploaded: await deps.upload(check) }); }
+    try { results.push({ link, uploaded: await deps.upload(check) }); succeeded += 1; }
     catch (e: any) { results.push({ link, reason: `上传失败(${e?.message ?? e})` }); }
   }
   const rewritten = rewriteReplyLinks(text, results);
