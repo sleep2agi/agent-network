@@ -141,6 +141,33 @@ describe("#1625 liveLaunchResidue", () => {
     }
   });
 
+  // A shared serve is used by every node on the host. A failed create of ONE node must never hand
+  // it to the reaper: stopping it takes down all the other nodes (and any person attached to it).
+  test("a shared serve is never residue of this launch; a private serve still is", () => {
+    const dir = mkdtempSync(join(tmpdir(), "shared-serve-residue-"));
+    try {
+      const self = readLiveProcess(process.pid);
+      expect(self).toBeDefined();
+      const live = { pid: process.pid, ticks: self!.ticks, parent: 1, state: "S" };
+      const configPath = join(dir, "config.json");
+      writeFileSync(configPath, "{}", { mode: 0o600 });
+      const write = (extra: object) => writeFileSync(join(dir, LAUNCH_HEALTH_FILE), JSON.stringify({
+        version: 1, generation: "ses_shared", writtenAt: 1, bridge: live, serve: live, ...extra,
+      }), { mode: 0o600 });
+
+      write({ serveOwnership: "shared" });
+      expect(liveLaunchResidue(dir, configPath)).toEqual({
+        borrowed: false,
+        alive: [{ pid: process.pid, role: "bridge", ticks: self!.ticks }],
+      });
+
+      write({});
+      expect(liveLaunchResidue(dir, configPath).alive.map((p) => p.role)).toEqual(["bridge", "serve"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("no records means nothing provable is alive", () => {
     const dir = mkdtempSync(join(tmpdir(), "t1625-empty-"));
     try {
