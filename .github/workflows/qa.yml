@@ -1265,6 +1265,10 @@ jobs:
           # 含 test668 的 job 数 = 0。也就是说「它偶发失败」这件事今天既无法复现也无法验证。
           # 这里把它接回矩阵恢复覆盖；若跑起来确实不稳定，再按 #677 处置（而不是继续不跑）。
           - test668-grok-working-status
+          # #5332 —— 停止指令在回合进行中到达运行时（真实 Hub + 真实 agent-node + 假 ACP agent）。
+          # 第一次提 PR 时只加了目录：只改 tests/ 的 PR 不算「全量」，于是 54 项检查里 42 项被跳过、
+          # 没有任何 job 跑它，却是全绿。接进矩阵它才真的会跑。
+          - test5332-interrupt-mid-turn
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
