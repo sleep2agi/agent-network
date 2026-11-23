@@ -1,5 +1,16 @@
 Fallback report-only verification, 2026-11-23
 
+Latest consumer/trust extension: Docker 64/64 passed, zero failures/skips.
+Includes ZIP digest/member validation, full generation-record matching, default-main
+producer ancestry/code comparison, required-policy normalization and check-producer
+binding to App/workflow/PR/head/base/single-file scope.
+Real #3823 read-only replay: policy valid with two lint contexts/app15368;
+downloadsVerified=true; trustedCreation=false (no historical artifact).
+Manual reasons additionally include closed/stale PR and 13 hidden ratchet exits.
+Only baseIsCurrentMain failed snapshot checks; observed main/protection/release/checks
+did not change during collection. This is negative-path evidence, not positive
+GitHub artifact production/consumption acceptance. No eligible samples yet.
+
 Follow-up generation evidence tests: Docker 31/31 passed, zero failures/skips.
 Added real local Git/bare-remote tests: main/no-change emits no record; unpushed
 commit is rejected; pushed commit records exact head, parent and fallback blob.

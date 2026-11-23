@@ -32,7 +32,7 @@ jobs:
         timeout-minutes: 3
         run: |
           sudo timeout --kill-after=10s 60s apt-get update
-          sudo timeout --kill-after=10s 90s apt-get install -y --no-install-recommends minisign
+          sudo timeout --kill-after=10s 90s apt-get install -y --no-install-recommends minisign unzip
       - name: Collect read-only evidence
         env:
           GITHUB_TOKEN: ${{ github.token }}

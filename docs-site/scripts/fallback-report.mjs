@@ -3,6 +3,10 @@ import { evaluateFallback, FALLBACK_PATH } from './fallback-report-policy.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { verifyDownloads } from './fallback-report-downloads.mjs';
+import { readGenerationArtifact } from './fallback-report-artifact.mjs';
+import { matchGenerationRecord } from './fallback-report-generation.mjs';
+import { verifyGenerationProducer } from './fallback-report-producer.mjs';
+import { normalizeRequiredPolicy, verifyRequiredCheckProducer } from './fallback-report-checks.mjs';
 
 // Read-only collector: never executes PR code or mutates GitHub state.
 const number = process.argv[2];
@@ -31,6 +35,7 @@ async function pages(path, field) {
 }
 
 const pr = await api(`${hub}/pulls/${number}`);
+const initialMain = await api(`${hub}/commits/main`);
 // Observe both classic protection and effective rules. An unavailable endpoint
 // stays explicit evidence debt, not an empty/permissive policy.
 async function observeCheckPolicy() {
@@ -41,6 +46,7 @@ async function observeCheckPolicy() {
   })));
 }
 const observedCheckPolicy = await observeCheckPolicy();
+const checkPolicy = normalizeRequiredPolicy(observedCheckPolicy);
 const [files, file, baseFile, latest, checkRuns] = await Promise.all([
   pages(`${hub}/pulls/${number}/files`),
   api(`${hub}/contents/${FALLBACK_PATH}?ref=${pr.head.sha}`),
@@ -51,6 +57,36 @@ const [files, file, baseFile, latest, checkRuns] = await Promise.all([
 if (file.encoding !== 'base64' || typeof file.content !== 'string') throw new Error('Missing candidate content');
 const candidate = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
 if (!/^\d+\.\d+\.\d+$/.test(candidate.version || '')) throw new Error('Invalid candidate version');
+let generationArtifacts;
+try {
+  const commit = await api(`${hub}/commits/${pr.head.sha}`);
+  if (commit.parents?.length !== 1) throw new Error('Expected one generated commit parent');
+  const parentSha = commit.parents[0].sha;
+  const runs = await api(`${hub}/actions/workflows/desktop-fallback-sync.yml/runs?head_sha=${parentSha}&event=workflow_dispatch&per_page=100`);
+  if (runs.total_count > 100) throw new Error('Generation run observation truncated');
+  const candidates = runs.workflow_runs.filter(run => run.head_sha === parentSha
+    && run.head_branch === 'main' && run.conclusion === 'success');
+  generationArtifacts = { parentSha, runs: await Promise.all(candidates.map(async run => {
+    const artifacts = await pages(`${hub}/actions/runs/${run.id}/artifacts`, 'artifacts');
+    const expectedName = `fallback-generation-${run.id}-${run.run_attempt}`;
+    const producer = artifacts.some(artifact => artifact.name === expectedName)
+      ? await verifyGenerationProducer(run, initialMain.sha, api)
+      : { trusted: false, reason: 'generation-artifact-missing' };
+    return { runId: run.id, runAttempt: run.run_attempt, workflowSha: run.head_sha,
+      producer,
+      artifacts: await Promise.all(artifacts.filter(artifact => artifact.name === expectedName).map(async artifact => {
+        const observation = { id: artifact.id, name: artifact.name, expired: artifact.expired,
+          digest: artifact.digest, size: artifact.size_in_bytes };
+        try {
+          const downloaded = await readGenerationArtifact(artifact);
+          return { ...observation, ...downloaded, contentBinding: matchGenerationRecord(downloaded.record, {
+            run, artifact, headSha: pr.head.sha, parentSha, blobSha: file.sha,
+            version: candidate.version, branch: pr.head.ref,
+          }), producerTrusted: producer.trusted };
+        } catch (error) { return { ...observation, error: error.message }; }
+      })) };
+  })) };
+} catch (error) { generationArtifacts = { error: error.message }; }
 const release = await api(`${app}/releases/tags/desktop-v${candidate.version}`);
 const assets = release.assets.filter(asset => asset.name === 'latest.json');
 if (assets.length !== 1) throw new Error('Expected one release manifest');
@@ -113,8 +149,7 @@ try {
   packageVerification = { ...await verifyDownloads({ candidate, release, publicKey }),
     keySourceCommit: release.target_commitish, configBlobSha: config.sha };
 } catch (error) { packageVerification = { verified: false, error: error.message }; }
-const requiredNames = observedCheckPolicy['branches/main/protection/required_status_checks']
-  ?.data?.checks?.map(check => check.context) || [];
+const requiredNames = checkPolicy.required.map(check => check.name);
 const requiredCheckProvenance = await Promise.all(checkRuns
   .filter(check => requiredNames.includes(check.name)).map(async check => {
     const observation = { checkId: check.id, name: check.name };
@@ -124,6 +159,8 @@ const requiredCheckProvenance = await Promise.all(checkRuns
       return { ...observation, error: 'unbound-check-run-url' };
     try {
       const run = await api(`${hub}/actions/runs/${match[1]}`);
+      const producer = await verifyRequiredCheckProducer({ check, run, pr, files, mainSha: initialMain.sha,
+        requirement: checkPolicy.required.find(required => required.name === check.name) }, api);
       // A success conclusion can hide continue-on-error failures. Observe the
       // runner's actual exit markers, not selftests' intentional error annotations.
       let jobLog;
@@ -148,14 +185,14 @@ const requiredCheckProvenance = await Promise.all(checkRuns
           && run.check_suite_id === check.check_suite?.id
           && run.repository?.full_name === hub && run.head_repository?.full_name === hub,
         status: run.status, conclusion: run.conclusion,
-        // Run identity alone does not prove the executed workflow is trusted.
-        workflowContentTrusted: false };
+        producer, workflowContentTrusted: producer.trusted };
     } catch (error) { return { ...observation, error: error.message }; }
   }));
-const [finalPr, finalBase, finalLatest, finalRelease, finalChecks] = await Promise.all([
+const [finalPr, finalBase, finalLatest, finalRelease, finalChecks, finalCheckPolicy] = await Promise.all([
   api(`${hub}/pulls/${number}`), api(`${hub}/commits/main`),
   api(`${app}/releases/latest`), api(`${app}/releases/${release.id}`),
   pages(`${hub}/commits/${pr.head.sha}/check-runs`, 'check_runs'),
+  observeCheckPolicy(),
 ]);
 const checkIdentity = rows => rows.map(c => ({ id: c.id, sha: c.head_sha,
   status: c.status, conclusion: c.conclusion, completedAt: c.completed_at }))
@@ -165,6 +202,8 @@ const snapshotChecks = {
   baseUnchanged: finalPr.base.sha === pr.base.sha,
   stateUnchanged: finalPr.state === pr.state,
   baseIsCurrentMain: finalBase.sha === pr.base.sha,
+  trustedMainUnchanged: finalBase.sha === initialMain.sha,
+  requiredPolicyUnchanged: isDeepStrictEqual(observedCheckPolicy, finalCheckPolicy),
   latestReleaseUnchanged: finalLatest.id === latest.id,
   releaseUnchanged: isDeepStrictEqual(finalRelease, release),
   checksUnchanged: isDeepStrictEqual(checkIdentity(finalChecks), checkIdentity(checkRuns)),
@@ -176,23 +215,33 @@ const evidence = {
   files, candidate, release, manifest, latestReleaseId: latest.id,
   checks: checkRuns.map(check => ({ name: check.name, sha: check.head_sha,
     jobLog: requiredCheckProvenance.find(observation => observation.checkId === check.id)?.jobLog,
-    conclusion: check.conclusion, trusted: false, url: check.html_url, appId: check.app?.id })),
+    conclusion: check.conclusion,
+    trusted: requiredCheckProvenance.find(observation => observation.checkId === check.id)?.producer?.trusted === true,
+    url: check.html_url, appId: check.app?.id })),
   // These proofs are deliberately NOT inferred from branch names, authors or a
   // green check list. Until independently collected, the report stays manual.
-  requiredChecks: [], trustedCreation: false,
+  requiredChecks: requiredNames,
+  trustedCreation: generationArtifacts.runs?.some(run => run.producer.trusted
+    && run.artifacts.length === 1 && run.artifacts[0].producerTrusted
+    && run.artifacts[0].contentBinding?.matches) === true,
   downloadsVerified: packageVerification.verified === true && signatureAssets.length > 0
     && signatureAssets.every(asset => asset.sizeMatches && asset.digestMatches && asset.manifestSignaturesMatch),
   noDowngrade, snapshotUnchanged,
 };
 const report = { collectedAt: new Date().toISOString(), prNumber: Number(number),
   observedCheckPolicy,
+  checkPolicy,
+  generationArtifacts,
   signatureAssets,
   packageVerification,
   requiredCheckProvenance,
   snapshot: { checks: snapshotChecks, observedMainSha: finalBase.sha,
     failedChecks: Object.keys(snapshotChecks).filter(key => !snapshotChecks[key]) },
   candidateBlobSha: file.sha, result: evaluateFallback(evidence), evidence,
-  incompleteProofs: ['creation provenance', 'required check policy and trusted producers',
+  incompleteProofs: [...(!evidence.trustedCreation ? ['creation provenance'] : []),
+    ...(!checkPolicy.valid ? ['required check policy'] : []),
+    ...(!requiredNames.length || requiredNames.some(name =>
+      !evidence.checks.some(check => check.name === name && check.trusted)) ? ['trusted check producers'] : []),
     ...(!evidence.downloadsVerified ? ['anonymous asset digests/signatures'] : [])],
 };
 await writeFile(process.argv[3] || 'fallback-report.json', JSON.stringify(report, null, 2) + '\n');

@@ -11,9 +11,16 @@ means collection finished; inspect `result.decision` and every reason. Setup or
 collection failures produce a manual report. Artifact retention is 30 days; retain
 release acceptance evidence separately for the three-release observation ledger.
 
-Current limitations deliberately keep real reports manual: creation provenance and
-trusted required-check producer policy are not yet fully implemented. If protection
-APIs reject the existing token, the error remains evidence debt, not an empty policy.
+Creation provenance now checks the generation artifact digest/content, exact run
+identity, main ancestry and producer code blobs. Required-check policy is read from
+classic protection and effective rules, then rechecked at collection end. Currently
+only the two existing lint contexts bound to GitHub Actions app 15368 are supported;
+unknown contexts or effective rules remain manual. Check producers must bind to the
+exact PR/head/base, approved lint workflow ID/content and fallback-only file scope.
+Positive end-to-end GitHub acceptance is still pending: historic 614 has no generation
+artifact and an outdated base, so it correctly remains manual. Skipped extra checks
+have no approved allowlist yet and also require manual handling. If protection APIs
+reject the existing token, the error remains evidence debt, not an empty policy.
 Downloads bind exact release assets, lengths and SHA-256; minisign uses the updater
 public key from the exact release source. This does not independently approve key
 rotation or prove native installation, Authenticode, store submission or rollback.
@@ -30,7 +37,7 @@ pre-merge eligible reports. Each future qualifying report also needs final merge
 content and deployed-channel verification; missing or conflicting evidence resets
 the count. Automatic merge remains disabled.
 
-Local collection requires Node 22+, minisign on PATH (or `MINISIGN_BIN`), and existing
+Local collection requires Node 22+, unzip, minisign on PATH (or `MINISIGN_BIN`), and existing
 GitHub read access through `GITHUB_TOKEN`. Run from the repository root:
 
 ```sh
