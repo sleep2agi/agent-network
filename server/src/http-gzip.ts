@@ -3,6 +3,10 @@
 // 一页 20 条任务 41 KB 要 5.6 s,而 hub 从不压缩。gzip 后 128 KB → 31 KB、137 KB → 49 KB。
 // 只在客户端明确 `Accept-Encoding: gzip` 时压;text/event-stream(SSE)与流式 body 一律不碰。
 export const GZIP_MIN_BYTES = 1024;
+/** 超过这个字节数的正文用 1 级压缩（省 CPU；实测 200 条任务页 690KB：14ms vs 42ms）。 */
+export const GZIP_LARGE_BODY_BYTES = 256 * 1024;
+/** 32KB–256KB 这一档用 3 级：实测 125KB 时 3 级 3.0ms/37.8KB vs 6 级 7.8ms/33.3KB（省 ~2.5× CPU，多发 13% 字节）。 */
+export const GZIP_MID_BODY_BYTES = 32 * 1024;
 
 const COMPRESSIBLE = /^(application\/json|text\/(plain|html|css|javascript)|application\/javascript)\b/i;
 
@@ -44,7 +48,17 @@ export function markGzipReusable(res: Response, key: string): Response {
   return res;
 }
 
-function gzipCached(key: string | undefined, raw: () => Promise<Uint8Array>): Promise<{ raw: Uint8Array | null; gz: Uint8Array | null }> | { raw: null; gz: Uint8Array } {
+/**
+ * 显式指定这条响应的压缩级别（很少变、但体积大的调用方用：宁可多花一次 CPU 少发字节）。
+ * 未指定时按大小三档：>256KB → 1；32–256KB → 3；<32KB → 带键 9 / 不带键默认。
+ */
+const levelHints = new WeakMap<Response, number>();
+export function markGzipLevel<T extends Response>(res: T, level: number): T {
+  levelHints.set(res, level);
+  return res;
+}
+
+function gzipCached(key: string | undefined, raw: () => Promise<Uint8Array>, hintLevel?: number): Promise<{ raw: Uint8Array | null; gz: Uint8Array | null }> | { raw: null; gz: Uint8Array } {
   if (key) {
     const hit = gzipCache.get(key);
     if (hit) {
@@ -58,7 +72,19 @@ function gzipCached(key: string | undefined, raw: () => Promise<Uint8Array>): Pr
     if (bytes.byteLength < GZIP_MIN_BYTES) return { raw: bytes, gz: null };
     // 可复用的正文(带键)压一次、存起来、反复发:压缩级别拉到 9 —— 多花的那点 CPU 只花一次,
     // 而线上每次都少发 ~3%(#431 实测:旧节点别名解析读 29.6 KB → 28.6 KB)。不带键的照旧默认级别。
-    const gz = key ? Bun.gzipSync(bytes, { level: 9 }) : Bun.gzipSync(bytes);
+    //
+    // 2026-11-23(负责人定) —— **大正文用 1 级**：`/api/tasks` 200 条一页 690KB，
+    // 单次实测 gzip-1 14.3ms/181KB vs gzip-6 41.8ms/136KB：省下 2/3 的 CPU，
+    // 代价是多发 33% 字节(本地链路)。阈值 256KB；≤256KB 维持原级别（带键的仍压到 9 级，
+    // 因为它只压一次、字节更省）。
+    // 2026-11-23(负责人定) —— 三档按大小，不再区分带不带键：
+    //   >256KB → 1 级；32–256KB → 3 级；<32KB → 现状（带键 9 级 / 不带键默认）。
+    // 显式 hint（很少变的大调用方，如需求表）优先于档位。
+    const hint = hintLevel;
+    const level = hint ?? (bytes.byteLength > GZIP_LARGE_BODY_BYTES ? 1
+      : bytes.byteLength >= GZIP_MID_BODY_BYTES ? 3
+      : (key ? 9 : undefined));
+    const gz = level === undefined ? Bun.gzipSync(bytes) : Bun.gzipSync(bytes, { level });
     if (key) gzipCacheStats.misses++;
     if (key && gz.byteLength <= GZIP_CACHE_MAX_BYTES / 4) {
       gzipCache.set(key, gz);
@@ -89,7 +115,7 @@ export function __resetGzipCacheForTest(): void {
 export async function maybeGzipResponse(req: Request, res: Response | undefined | void): Promise<Response | undefined> {
   if (!res) return res as undefined;
   if (req.method === "HEAD" || !wantsGzip(req) || !isCompressibleResponse(res)) return res;
-  const got = await gzipCached(gzipKeys.get(res), async () => new Uint8Array(await res.arrayBuffer()));
+  const got = await gzipCached(gzipKeys.get(res), async () => new Uint8Array(await res.arrayBuffer()), levelHints.get(res));
   if (!got.gz) {
     return new Response(got.raw, { status: res.status, statusText: res.statusText, headers: res.headers });
   }

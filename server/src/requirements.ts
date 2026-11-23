@@ -7,7 +7,7 @@ import { parsePeopleQuery, peopleDirectory, resolvePersonName } from "./requirem
 import { encodeCursor, matchesTaskId, matchesTerms, parseListQuery, type ListQuery, type NameMaps } from "./requirements-search.js";
 import { db, logAudit } from "./db.js";
 import { resolveNodeCaller } from "./create-node.js";
-import { markGzipReusable } from "./http-gzip.js";
+import { markGzipLevel, markGzipReusable } from "./http-gzip.js";
 import { applyTagOp, normalizeTags, parseTagOp, storedTags, type TagOp } from "./requirement-tags.js";
 import { buildTagNodes, isDescendant, MAX_TAG_DEPTH, parseCreateTag, TAG_TREE_CAPABILITY, tagDepth, tagSubtreeHeight, type TagNodeRow } from "./requirement-tag-tree.js";
 import { aggregateStats, parseStatsQuery, type StatsRow } from "./requirements-stats.js";
@@ -1044,21 +1044,33 @@ function operationOf(req: Request, url: URL): string {
  * 绝大多数轮询里表根本没变。按**响应体**算,所以对这个调用方可见的任何字段变了都会变
  * (同一张表不同成员看到的不同,ETag 也不同)。不带 If-None-Match 的旧客户端照旧拿 200 全量。
  */
-export function conditionalJson(req: Request, payload: unknown): Response {
+export function conditionalJson(
+  req: Request,
+  payload: unknown,
+  opts: { level?: number; cache?: boolean } = {},
+): Response {
   const body = JSON.stringify(payload);
-  return conditionalBody(req, body, bodyEtag(body));
+  return conditionalBody(req, body, bodyEtag(body), opts);
 }
 
 function bodyEtag(body: string): string {
   return `W/"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"`;
 }
 
-function conditionalBody(req: Request, body: string, etag: string): Response {
+function conditionalBody(req: Request, body: string, etag: string, opts: { level?: number; cache?: boolean } = {}): Response {
   // private:按用户可见范围生成,不能被共享缓存复用;no-cache:每次都要回来验证,不会拿旧表当新的。
   const headers = { ETag: etag, "Cache-Control": "private, no-cache" };
   if (ifNoneMatchHits(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
-  // ETag 就是正文的哈希:同一份正文的 gzip 结果可以复用(http-gzip.ts)。
-  return markGzipReusable(new Response(body, { headers: { ...headers, "Content-Type": "application/json;charset=utf-8" } }), etag);
+  let res: Response = new Response(body, { headers: { ...headers, "Content-Type": "application/json;charset=utf-8" } });
+  // 2026-11-23 —— 两个开关分开：
+  //   cache: 是否让这份正文进 gzip 缓存（键=ETag）。默认**不进**：聊天轮询每来一条消息就换新键，
+  //          十几万字节一份，十几份就能把 16MB 缓存里「很少变」的需求表挤掉，反而让它每次重压。
+  //   level: 显式压缩级别（很少变又大的调用方例如需求表：宁可多花一次 CPU，少发字节）。
+  if (opts.level !== undefined) res = markGzipLevel(res, opts.level);
+  // 默认进缓存（需求表这类「很少变」的调用方就是靠它压一次用很多次）；
+  // 高频轮询端点显式传 { cache: false } 才不进，避免把老条目挤出去。
+  if (opts.cache !== false) res = markGzipReusable(res, etag);
+  return res;
 }
 
 function ifNoneMatchHits(header: string | null, etag: string): boolean {
@@ -2012,7 +2024,8 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
       statsParams, taskCaller(ctx),
     );
     const rows = db.all<StatsRow>(statsSql, ...statsParams);
-    return conditionalJson(ctx.req, { ok: true, networkId, ...aggregateStats(rows, sq, hiddenNodeFilter(ctx, networkId)) });
+    // 需求表：很少变、单份 708KB ⇒ 显式要高压缩(9 级) + 允许进 gzip 缓存（压一次用很多次）。
+    return conditionalJson(ctx.req, { ok: true, networkId, ...aggregateStats(rows, sq, hiddenNodeFilter(ctx, networkId)) }, { level: 9, cache: true });
   }
 
   if (url.pathname === "/api/requirements/events" && req.method === "GET") return listEvents(ctx);
@@ -2073,7 +2086,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (cached && cached.generation === generation && cached.acl === acl && Date.now() - cached.at < LIST_CACHE_MAX_AGE_MS) {
       listCache.delete(cacheKey!);
       listCache.set(cacheKey!, cached);
-      return conditionalBody(ctx.req, cached.body, cached.etag);
+      return conditionalBody(ctx.req, cached.body, cached.etag, { level: 9 });
     }
     const page = listPage(ctx, filtered, params, lq);
     // last_event(#506):每行最新一条动态(含评论),没有 = null。旧 App 不认识,忽略即可。
@@ -2092,7 +2105,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const body = JSON.stringify(payload);
     const etag = bodyEtag(body);
     if (cacheKey && acl !== null) rememberList(cacheKey, { generation, acl, at: Date.now(), body, etag });
-    return conditionalBody(ctx.req, body, etag);
+    return conditionalBody(ctx.req, body, etag, { level: 9 });
   }
 
   if (url.pathname === "/api/requirements" && req.method === "POST") {

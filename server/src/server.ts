@@ -119,7 +119,7 @@ import { diagnoseTask } from "./task-diagnostic.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
-import { clearNodeFromRequirements, handleRequirementsRequest } from "./requirements.js";
+import { clearNodeFromRequirements, conditionalJson, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
 // #4495 —— 源目录 / 新建节点 / 复用已有 Session 的能力值。Hub 只认这几个**精确**字符串,
@@ -6418,7 +6418,7 @@ return Bun.serve({
       //    这一层单独防"有人把凭据塞进正文/标题/meta"。
       const messages = rows.map(redactMessageRow);
 
-      return withCors(req, Response.json({
+      return withCors(req, conditionalJson(req, {
         ok: true,
         messages,
         unread,
@@ -6427,7 +6427,7 @@ return Bun.serve({
         pending_count: unread,
         unread_by_agent: byAgent,
         unread_total: unreadTotal,
-      }));
+      }, { cache: false }));
     }
 
     // ── REST: recent messages (for Dashboard communication graph) ──
@@ -6459,7 +6459,9 @@ return Bun.serve({
         pendingCount = db.get<{ cnt: number }>(countSql, ...countParams)?.cnt ?? 0;
       }
 
-      return withCors(req, Response.json({ ok: true, messages: rows, ...(alias ? { pending_count: pendingCount ?? 0 } : {}) }));
+      // 2026-11-23 —— App 聊天页每 5s 轮询这条；加内容哈希 ETag（状态/正文/acked 变则 ETag 变），
+      // 客户端带 If-None-Match 时没变就 304（零正文、零 gzip）。
+      return withCors(req, conditionalJson(req, { ok: true, messages: rows, ...(alias ? { pending_count: pendingCount ?? 0 } : {}) }, { cache: false }));
     }
 
     // ── REST: ack per-user desktop messages (#1459 ① P3) ──
@@ -7931,15 +7933,18 @@ return Bun.serve({
           row.late_replies = listTaskLateReplies(db, String(row.task_id), typeof row.network_id === "string" ? row.network_id : null);
         }
       }
+      // 2026-11-23 —— 聊天页入站/出站轮询都走这里（to_name / from_name），加内容哈希 ETag：
+      // 任何会改变响应的状态（status / result / acked / late_replies / created_at…）变了 ETag 必变；
+      // 没变且客户端带 If-None-Match ⇒ 304 空体（省掉 691KB 正文与 ~48ms gzip）。
       if (skipStats) {
-        return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length }));
+        return withCors(req, conditionalJson(req, { ok: true, tasks: rows, count: rows.length }, { cache: false }));
       }
       const statsParams: any[] = [];
       let statsSql = "SELECT status, COUNT(*) as count FROM tasks WHERE 1=1";
       statsSql = addAgentTimelineScope(statsSql, statsParams, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
       statsSql += " GROUP BY status";
       const stats = db.all<any>(statsSql, ...statsParams);
-      return withCors(req, Response.json({ ok: true, tasks: rows, count: rows.length, stats }));
+      return withCors(req, conditionalJson(req, { ok: true, tasks: rows, count: rows.length, stats }, { cache: false }));
     }
 
     // ── REST: recent completions ──
