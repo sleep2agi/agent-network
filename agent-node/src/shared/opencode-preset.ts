@@ -38,8 +38,21 @@ import {
 } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "path";
 import { opencodeOwnedPathModeIsSafe } from "./opencode-owner-mode";
-import { fsyncDirectoryIfSupported } from "./posix-modes";
+import { fsyncDirectoryIfSupported, modeIsJudgeable } from "./posix-modes";
 import { renameOverExistingSync } from "./windows-rename-retry";
+
+// #3812 — owner uid and mode bits are POSIX facts. Windows has no uid and reports 0o666 / 0o777
+// for every ordinary file and directory, so there the mode conditions below could only ever
+// refuse, and fchmod on a directory handle fails outright (posix-modes.ts). On Windows the checks
+// that still mean something stay: a real file or directory, not a link, single-linked, unchanged
+// between look and use, inside the node directory. Who may read these paths on Windows is decided
+// by the folder's access list, which this module neither sets nor judges.
+const POSIX = modeIsJudgeable();
+/** The path is its own real path. On Windows the same path may differ in drive-letter case. */
+function canonical(path: string): boolean {
+  const real = realpathSync(path);
+  return POSIX ? real === path : real.toLowerCase() === resolve(path).toLowerCase();
+}
 
 export type OpencodePresetId = "anthropic" | "openai";
 
@@ -169,7 +182,7 @@ function assertContained(root: string, candidate: string, label: string): void {
 
 function assertPrivateDirectory(path: string, label: string, created = false): void {
   const before = lstatSync(path);
-  if (before.isSymbolicLink() || !before.isDirectory() || realpathSync(path) !== path) {
+  if (before.isSymbolicLink() || !before.isDirectory() || !canonical(path)) {
     throw new Error(`OpenCode preset refuses ${label} at ${path}: expected a canonical real directory`);
   }
   let fd: number | undefined;
@@ -182,14 +195,14 @@ function assertPrivateDirectory(path: string, label: string, created = false): v
     const current = lstatSync(path);
     const uid = process.getuid?.();
     if (!opened.isDirectory() || current.isSymbolicLink() || !sameIdentity(before, opened)
-      || !sameIdentity(opened, current) || realpathSync(path) !== path) {
+      || !sameIdentity(opened, current) || !canonical(path)) {
       throw new Error(`OpenCode preset refuses ${label} at ${path}: directory changed during validation`);
     }
     if (uid !== undefined && opened.uid !== uid) {
       throw new Error(`OpenCode preset refuses ${label} at ${path}: owner ${opened.uid} does not match runtime uid ${uid}`);
     }
-    if (created) fchmodSync(fd, 0o700);
-    if ((fstatSync(fd).mode & 0o777) !== 0o700) {
+    if (created && POSIX) fchmodSync(fd, 0o700);
+    if (POSIX && (fstatSync(fd).mode & 0o777) !== 0o700) {
       throw new Error(`OpenCode preset refuses ${label} at ${path}: directory mode must be 0700`);
     }
   } catch (error: any) {
@@ -211,7 +224,7 @@ function assertPrivateDirectory(path: string, label: string, created = false): v
  */
 function assertSecureProfileAncestor(path: string, label: string, created = false): void {
   const before = lstatSync(path);
-  if (before.isSymbolicLink() || !before.isDirectory() || realpathSync(path) !== path) {
+  if (before.isSymbolicLink() || !before.isDirectory() || !canonical(path)) {
     throw new Error(`OpenCode profile refuses ${label} at ${path}: expected a canonical real directory`);
   }
   let fd: number | undefined;
@@ -224,16 +237,16 @@ function assertSecureProfileAncestor(path: string, label: string, created = fals
     const current = lstatSync(path);
     const uid = process.getuid?.();
     if (!opened.isDirectory() || current.isSymbolicLink() || !sameIdentity(before, opened)
-      || !sameIdentity(opened, current) || realpathSync(path) !== path) {
+      || !sameIdentity(opened, current) || !canonical(path)) {
       throw new Error(`OpenCode profile refuses ${label} at ${path}: directory changed during validation`);
     }
     if (uid !== undefined && opened.uid !== uid) {
       throw new Error(`OpenCode profile refuses ${label} at ${path}: owner ${opened.uid} does not match runtime uid ${uid}`);
     }
-    if (created) fchmodSync(fd, 0o700);
+    if (created && POSIX) fchmodSync(fd, 0o700);
     const finalStat = fstatSync(fd);
     const mode = finalStat.mode & 0o777;
-    if ((mode & 0o700) !== 0o700 || !opencodeOwnedPathModeIsSafe(finalStat)) {
+    if (POSIX && ((mode & 0o700) !== 0o700 || !opencodeOwnedPathModeIsSafe(finalStat))) {
       throw new Error(`OpenCode profile refuses ${label} at ${path}: owner must have rwx; world write and non-private group write are forbidden`);
     }
   } catch (error: any) {
@@ -285,7 +298,7 @@ function ensurePrivateChildDirectory(root: string, parent: string, name: string,
 function assertPrivateRegularFile(path: string, label: string): ReturnType<typeof lstatSync> | undefined {
   const before = lstatIfPresent(path);
   if (!before) return undefined;
-  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1 || realpathSync(path) !== path) {
+  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1 || !canonical(path)) {
     throw new Error(`OpenCode preset refuses ${label} at ${path}: expected a canonical single-link regular file`);
   }
   let fd: number | undefined;
@@ -301,7 +314,7 @@ function assertPrivateRegularFile(path: string, label: string): ReturnType<typeo
     if (uid !== undefined && opened.uid !== uid) {
       throw new Error(`OpenCode preset refuses ${label} at ${path}: owner ${opened.uid} does not match runtime uid ${uid}`);
     }
-    if ((opened.mode & 0o777) !== 0o600) {
+    if (POSIX && (opened.mode & 0o777) !== 0o600) {
       throw new Error(`OpenCode preset refuses ${label} at ${path}: file mode must be 0600`);
     }
     return opened;
@@ -322,7 +335,7 @@ function readPrivateRegularFile(path: string, label: string): string | undefined
     const opened = fstatSync(fd);
     const uid = process.getuid?.();
     if (!opened.isFile() || opened.nlink !== 1 || (uid !== undefined && opened.uid !== uid)
-      || (opened.mode & 0o777) !== 0o600) {
+      || (POSIX && (opened.mode & 0o777) !== 0o600)) {
       throw new Error(`OpenCode preset refuses ${label} at ${path}: file changed before read`);
     }
     return readFileSync(fd, "utf8");
@@ -442,7 +455,7 @@ function atomicWritePrivateFile(path: string, body: string, label: string): void
       0o600,
     );
     writeFileSync(fd, body, "utf8");
-    fchmodSync(fd, 0o600);
+    if (POSIX) fchmodSync(fd, 0o600);
     fsyncSync(fd);
     const tempStat = fstatSync(fd);
     const uid = process.getuid?.();
