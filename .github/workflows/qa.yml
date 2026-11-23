@@ -145,6 +145,24 @@ jobs:
 
       # #2800 —— 发版提交识别（只看 push 到 main 的提交信息首行）。
       # PR 上永远为空：PR 的改动必须跑全套，这条只用来避免“发版提交把自己的发版门堵住”。
+      # 2026-11-09 —— PR 分层（admin 拍板「砍」）：
+      # 一个只改 1 个文件的 PR 曾挂 185 个 check、QA 单次 ~29 分钟，排队拖慢整个迭代。
+      # 普通 PR 只跑快速层（三套 unit + doc claims/pins + release-sync dry run + test-lib-meta）；
+      # 重型矩阵（hub semantics 95 分片、Docker e2e、copresence/lifecycle 等）只在下面三种情况跑：
+      #   · 夜间 schedule / workflow_dispatch（非 pull_request 事件）
+      #   · PR 带 `full-qa` 标签（打标签即触发）
+      # 被跳过的 job 显示为 skipped，不占 runner。
+      - id: full
+        name: Full-matrix switch (non-PR event or `full-qa` label)
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$EVENT" != "pull_request" ] || printf '%s' "$LABELS" | grep -q '"full-qa"'; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Release-commit classifier
         id: release
         env:
@@ -195,24 +213,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      # 2026-11-09 —— PR 分层（admin 拍板「砍」）：
-      # 一个只改 1 个文件的 PR 曾挂 185 个 check、QA 单次 ~29 分钟，排队拖慢整个迭代。
-      # 普通 PR 只跑快速层（三套 unit + doc claims/pins + release-sync dry run + test-lib-meta）；
-      # 重型矩阵（hub semantics 95 分片、Docker e2e、copresence/lifecycle 等）只在下面三种情况跑：
-      #   · 夜间 schedule / workflow_dispatch（非 pull_request 事件）
-      #   · PR 带 `full-qa` 标签（打标签即触发）
-      # 被跳过的 job 显示为 skipped，不占 runner。
-      - id: full
-        name: Full-matrix switch (non-PR event or `full-qa` label)
-        env:
-          EVENT: ${{ github.event_name }}
-          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        run: |
-          if [ "$EVENT" != "pull_request" ] || printf '%s' "$LABELS" | grep -q '"full-qa"'; then
-            echo "full=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "full=false" >> "$GITHUB_OUTPUT"
-          fi
       - name: Build + run test1183-sync-pinned-dryrun
         run: |
           docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
