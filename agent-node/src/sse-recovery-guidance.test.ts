@@ -32,4 +32,17 @@ describe("sseAbandonGuidance", () => {
     expect(cli).toContain("onAbandon: () => error(sseAbandonGuidance(ALIAS, COMMHUB_URL))");
     expect(cli).not.toContain("运行 `anet node start ${ALIAS}` 手动恢复");
   });
+
+  test("guidance says the node retries slowly and recovers by itself", () => {
+    const text = sseAbandonGuidance("node-b", "http://127.0.0.1:9200");
+    expect(text).toContain("降频重连");
+    expect(text).toContain("自动");
+    expect(text).toContain("看起来是在线的");
+    expect(text).not.toContain("已停止自动重连");
+  });
+
+  test("the SSE supervisor keeps probing after the abandon threshold", () => {
+    const cli = readFileSync(join(import.meta.dir, "cli.ts"), "utf8");
+    expect(cli).toContain("slowRetryAfterAbandonMs: 5 * 60_000");
+  });
 });

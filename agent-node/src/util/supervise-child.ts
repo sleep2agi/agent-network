@@ -107,6 +107,23 @@ export interface SuperviseChildOpts {
    * give up after a long unsuccessful run.
    */
   abandonAfterMs?: number;
+  /**
+   * After the abandon threshold is exceeded, keep probing at this fixed
+   * cadence instead of stopping for good.
+   *
+   * Why this exists: an agent-node whose SSE supervisor gave up keeps
+   * reporting heartbeats, so the Hub still lists it as online, but it never
+   * receives another task — the node looks alive and is deaf. Production
+   * case (2026-11-22): a laptop lost the network for >1h, the supervisor
+   * stopped reconnecting, and the node silently dropped every task pushed
+   * afterwards until somebody restarted it by hand.
+   *
+   * `onAbandon` still fires exactly once per outage so operators see the
+   * milestone; the supervisor then keeps reconnecting slowly and recovers on
+   * its own as soon as the network is back. Default: undefined → the
+   * supervisor stops (historical behaviour).
+   */
+  slowRetryAfterAbandonMs?: number;
   /** Called once if the supervisor abandons. */
   onAbandon?: () => void;
   /** Called with the runOnce error before scheduling the next iteration. */
@@ -141,12 +158,15 @@ export async function superviseChild(opts: SuperviseChildOpts): Promise<void> {
   const jitterRatio = opts.jitterRatio ?? 0.25;
   const firstRetrySpreadMs = opts.firstRetrySpreadMs ?? 0;
   const abandonAfterMs = opts.abandonAfterMs ?? Number.POSITIVE_INFINITY;
+  const slowRetryAfterAbandonMs = opts.slowRetryAfterAbandonMs;
   const sleep = opts.sleep ?? defaultSleep;
   const random = opts.random ?? Math.random;
   const now = opts.now ?? Date.now;
 
   let delay = baseDelayMs;
   let downSince: number | null = null;
+  let abandonNotified = false;
+  let slowMode = false;
 
   while (!opts.shutdownGate()) {
     let stable = false;
@@ -160,6 +180,8 @@ export async function superviseChild(opts: SuperviseChildOpts): Promise<void> {
         stable = true;
         delay = baseDelayMs;
         downSince = null;
+        slowMode = false;
+        abandonNotified = false;
       },
     };
 
@@ -174,23 +196,35 @@ export async function superviseChild(opts: SuperviseChildOpts): Promise<void> {
     if (!stable) {
       if (downSince === null) downSince = now();
       if (now() - downSince > abandonAfterMs) {
-        opts.onAbandon?.();
-        return;
+        if (slowRetryAfterAbandonMs === undefined || slowRetryAfterAbandonMs <= 0) {
+          opts.onAbandon?.();
+          return;
+        }
+        // Milestone fires once per outage; the supervisor keeps probing.
+        if (!abandonNotified) {
+          opts.onAbandon?.();
+          abandonNotified = true;
+        }
+        slowMode = true;
       }
     }
 
     // Jittered sleep, then double the backoff (capped). The min 100 ms
     // floor matches the pre-helper connectFeishu behaviour and avoids
     // a hot-loop edge case if a caller sets baseDelayMs very small.
-    const jitterDelta = jitterRatio > 0 ? delay * jitterRatio * (random() * 2 - 1) : 0;
+    // Slow mode keeps a fixed cadence: the exponential backoff below must
+    // not shrink it back to seconds, otherwise a long outage turns into a
+    // hot reconnect loop against a hub that is still down.
+    const effectiveDelay = slowMode ? (slowRetryAfterAbandonMs as number) : delay;
+    const jitterDelta = jitterRatio > 0 ? effectiveDelay * jitterRatio * (random() * 2 - 1) : 0;
     // #2363 —— 首次重连（刚从稳定态断开）额外摊开，避免全网同时重连形成尖峰；
     // 后续指数退避不摊开，保证 Hub 长时间不可用时的重试仍然可预期。
-    const herdSpread = firstRetrySpreadMs > 0 && delay === baseDelayMs
+    const herdSpread = firstRetrySpreadMs > 0 && delay === baseDelayMs && !slowMode
       ? Math.floor(random() * firstRetrySpreadMs)
       : 0;
-    const waitMs = Math.max(100, Math.round(delay + jitterDelta) + herdSpread, minNextWaitMs);
+    const waitMs = Math.max(100, Math.round(effectiveDelay + jitterDelta) + herdSpread, minNextWaitMs);
     opts.onRetryWait?.(waitMs, delay);
     await sleep(waitMs);
-    delay = Math.min(delay * 2, maxDelayMs);
+    if (!slowMode) delay = Math.min(delay * 2, maxDelayMs);
   }
 }
