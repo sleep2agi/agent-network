@@ -9,7 +9,7 @@ import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { db } from './db';
 import { adoptedCloneSourceRow } from './node-daemon-bindings';
 import { finalizeCreateOnFirstRegister } from './create-node';
-import { factsFromRows } from './clone-node';
+import { factsFromRows, decideClone } from './clone-node';
 
 const NET = 'net_clone_adopted';
 const DAEMON = 'node_daemon_clone_adopted';
@@ -75,4 +75,31 @@ test('an OpenCode node reporting the "opencode-sdk" label clones as opencode-cli
   expect(facts(null, 'opencode-sdk')).toBe('opencode-cli');
   expect(facts('opencode-cli')).toBe('opencode-cli');
   expect(facts('claude-code-cli')).toBe('claude-code-cli');
+});
+
+test('an agy node reporting the "antigravity-sdk" label clones as antigravity-acp (#3829)', () => {
+  const facts = (runtime: string | null, snapRuntime?: string) => factsFromRows({
+    node: { node_id: 'n_agy', alias: 'n_agy', runtime, config_snapshot: snapRuntime ? JSON.stringify({ runtime: snapRuntime }) : null },
+    createRow: null, existingNames: [], inflightNames: [],
+  }).runtime;
+  // 节点自报的是 ACP SDK 名（macmini 2026-11-23 实测），可创建的是 antigravity-acp。
+  expect(facts('antigravity-sdk')).toBe('antigravity-acp');
+  expect(facts(null, 'antigravity-sdk')).toBe('antigravity-acp');
+  // 已经是对的写法不受影响。
+  expect(facts('antigravity-acp')).toBe('antigravity-acp');
+  // 其它 runtime 不被这张表误伤。
+  expect(facts('claude-agent-sdk')).toBe('claude-agent-sdk');
+  expect(facts('codex-app-server')).toBe('codex-app-server');
+});
+
+test('agy clone from the reported label reaches decideClone without runtime_invalid (#3829)', () => {
+  const facts = factsFromRows({
+    node: { node_id: 'n_agy', alias: 'agy-src', runtime: 'antigravity-sdk', model: 'default', channels: null, config_snapshot: null },
+    createRow: { daemon_node_id: 'node_daemon_x', runtime: 'antigravity-acp', model: 'default', flags_json: '{}', child_name: 'agy-src' },
+    existingNames: [], inflightNames: [],
+  });
+  const decided = decideClone(facts, { newName: 'agy-copy', copySession: false, workdirPolicy: 'new_empty' });
+  expect(decided.ok).toBe(true);
+  if (!decided.ok) return;
+  expect(decided.runtime).toBe('antigravity-acp');
 });
