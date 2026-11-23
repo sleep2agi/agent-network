@@ -119,7 +119,8 @@ export function classifyTuiArgv(args: string[], generation: string): "match" | "
  *  wrote any) = nothing proven alive, and nothing to signal.
  *
  *  A borrowed V1 host generation is reported as `borrowed` and never enumerated:
- *  its server belongs to the host, so the only honest outcome is handing it back. */
+ *  its server belongs to the host, so the only honest outcome is handing it back.
+ *  A shared V2 serve is likewise never enumerated; this launch's own bridge and TUI still are. */
 export interface LaunchResidue {
   borrowed: boolean;
   alive: Array<{ pid: number; role: "bridge" | "serve" | "tui"; ticks: string }>;
@@ -138,7 +139,9 @@ export function liveLaunchResidue(dir: string, configPath: string): LaunchResidu
   try {
     const record = readRecord(join(dir, LAUNCH_HEALTH_FILE));
     add(record?.bridge, "bridge");
-    add(record?.serve, "serve");
+    // A shared serve belongs to every node on this host, not to this launch. Listing it here
+    // hands it to the failed-create reaper, which would stop the server other nodes are using.
+    if (record?.serveOwnership !== "shared") add(record?.serve, "serve");
     const attach = readRecord(join(dir, "opencode-attach.json"));
     add({ pid: attach?.pid, ticks: String(attach?.startTicks) }, "tui");
   } catch { /* unreadable/missing record: nothing provable */ }
