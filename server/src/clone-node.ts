@@ -60,6 +60,18 @@ export type CloneWorkdirPolicy = typeof CLONE_WORKDIR_POLICIES[number];
 
 const SECRET_VALUE_RX = /^(sk-|utok_|ntok_|atok_|ak-|gsk_|key-|Bearer\s)/i;
 
+/**
+ * 节点自报的 runtime **标签** → daemon 能创建的 runtime 名。
+ *
+ * 只做这一件事：把「运行时把自己的实现名写进 nodes.runtime」这种情况归一，
+ * 不改变可创建 runtime 的集合（集合仍由 create-node-validate 的白名单决定）。
+ */
+const RUNTIME_LABEL_ALIASES: Readonly<Record<string, string>> = {
+  "opencode-sdk": "opencode-cli",
+  opencode: "opencode-cli",
+  "antigravity-sdk": "antigravity-acp",
+};
+
 export interface CloneSourceFacts {
   nodeId: string;
   alias: string;
@@ -203,10 +215,11 @@ export function factsFromRows(input: {
     : {};
   const reported = (typeof snap.runtime === "string" && snap.runtime) ? snap.runtime
     : (input.node.runtime || input.createRow?.runtime || null);
-  // nodes.runtime 是运行中节点自报的**标签**：OpenCode 节点报 "opencode-sdk" / "opencode"，
-  // 而 daemon 能创建的 runtime 只有 "opencode-cli"（daemon 实际照磁盘上源节点 config 的 runtime 写）。
-  // 不归一就会把收编来的 OpenCode 节点一律拒成 runtime_invalid（vdev 2026-11-11 实测）。
-  const runtime = reported === "opencode-sdk" || reported === "opencode" ? "opencode-cli" : reported;
+  // nodes.runtime 是运行中节点自报的**标签**，不等于 daemon 能创建的 runtime 名。
+  // 不归一就会把这类节点一律拒成 runtime_invalid（vdev 2026-11-11、agy 2026-11-23 各实测一次）：
+  //   - OpenCode 节点报 "opencode-sdk" / "opencode"，可创建的是 "opencode-cli"
+  //   - agy 节点报 "antigravity-sdk"（ACP SDK 名），可创建的是 "antigravity-acp"（#3829）
+  const runtime = RUNTIME_LABEL_ALIASES[reported] ?? reported;
   const model = (typeof snap.model === "string" || snap.model === null) ? (snap.model as string | null)
     : (input.node.model ?? input.createRow?.model ?? null);
   const channels = Array.isArray(snap.channels) ? snap.channels
