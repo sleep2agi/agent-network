@@ -7006,11 +7006,11 @@ async function processControlInstruction(msg: any): Promise<void> {
     const out = RUNTIME === "claude"
       ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const }) : { ok: false as const, reason: "no_active_turn" })
       : RUNTIME === "codex-app-server"
-      ? (() => {
+      ? await (async () => {
           // #5332 —— codex app-server 协议有 turn/interrupt；没有在飞会话就明确回 no_active_turn
           const session = codexAppServerSessionManager.current();
           if (!session) return { ok: false as const, reason: "no_active_turn" };
-          return session.bridge.interruptActiveTurn();
+          return await session.bridge.interruptActiveTurn();
         })()
       : await interruptCurrentTurn({
         readEndpoint: () => {
