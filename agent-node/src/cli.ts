@@ -273,6 +273,7 @@ import {
   opencodeGenerationSupport,
 } from "./runtime/opencode-versions";
 import { createInboxDrainLane, drainInboxBatch } from "./runtime/inbox-drain-lane";
+import { isBenignAckRejection } from "./runtime/inbox-ack";
 import { shouldSkipTerminalTask } from "./runtime/terminal-task-guard";
 import {
   createDetachedInboxDispatcher,
@@ -2353,7 +2354,19 @@ const getInbox = async () => {
 };
 const ackMessage = async (id: string) => {
   const alias = await liveAlias();
-  return callCommHub("ack_inbox", { alias, message_id: id });
+  try {
+    return await callCommHub("ack_inbox", { alias, message_id: id });
+  } catch (e: any) {
+    // The row may already be gone because another consumer acknowledged it
+    // first (typically the model calling the Hub's own `ack_inbox` MCP tool
+    // inside its turn). That is the desired end state, not a transport
+    // failure: rethrowing here fails the whole drainInboxBatch() pass and
+    // parks the lane in a retry loop, which stalled delivery of later
+    // messages for hours (2026-11-23 incident).
+    if (!isBenignAckRejection(e)) throw e;
+    debug(`ack_inbox ${String(id).slice(0, 8)}: already acknowledged (benign)`);
+    return { ok: true, already_acked: true };
+  }
 };
 
 // #168 RC-B1 + RC-B2 + RC-C fix: structured sendReply.
