@@ -83,6 +83,47 @@ describe("ack_inbox：只有期待回复的行才进 B 止血的回退窗口", (
     const hit = sweepUnconfirmed(Date.now() + W + 60_000, W);
     expect(hit.map(h => h.messageId)).toEqual(["inbox_task_1"]);
   });
+
+  test("普通聊天消息行（type='message'）：ack 后不再被回退（它不进模型，永远不会有回复）", async () => {
+    // 旧数据里 send_message 没显式写 requires_response，吃的是列默认值 'reply'。
+    seedInbox("inbox_chat_1", "reply", "message");
+    const r = await call("ack_inbox", { alias: ALIAS, message_id: "inbox_chat_1" });
+    expect(r.ok).toBe(true);
+    expect(sweepUnconfirmed(Date.now() + W + 60_000, W)).toEqual([]);
+  });
+
+  test("别人的任务结果行（type='reply'）：ack 后不再被回退", async () => {
+    seedInbox("inbox_result_1", "reply", "reply");
+    const r = await call("ack_inbox", { alias: ALIAS, message_id: "inbox_result_1" });
+    expect(r.ok).toBe(true);
+    expect(sweepUnconfirmed(Date.now() + W + 60_000, W)).toEqual([]);
+  });
+});
+
+describe("send_message：普通聊天消息不该被标成「期待回复」", () => {
+  test("新写入的 message 行 requires_response='none'", async () => {
+    seedSession(ALIAS);
+    const r = await call("send_message", { alias: ALIAS, message: "hi there", from_session: "peer-node" });
+    expect(r.ok).toBe(true);
+    const row = db.get<{ requires_response: string | null; type: string }>(
+      "SELECT type, requires_response FROM inbox WHERE id = ?1 AND session_name = ?2",
+      [String(r.message_id), ALIAS],
+    );
+    expect(row?.type).toBe("message");
+    expect(row?.requires_response).toBe("none");
+  });
+
+  test("control（interrupt）行仍然期待回复：节点会用回执证明它执行了", async () => {
+    seedSession(ALIAS);
+    const r = await call("send_message", { alias: ALIAS, message: "stop", control: "interrupt", from_session: "peer-node" });
+    expect(r.ok).toBe(true);
+    const row = db.get<{ requires_response: string | null; type: string }>(
+      "SELECT type, requires_response FROM inbox WHERE id = ?1 AND session_name = ?2",
+      [String(r.message_id), ALIAS],
+    );
+    expect(row?.type).toBe("control");
+    expect(row?.requires_response).toBe("reply");
+  });
 });
 
 describe("ack_inbox：先回执、后 ack 的正常顺序不该被误判成「签收但没投递」", () => {

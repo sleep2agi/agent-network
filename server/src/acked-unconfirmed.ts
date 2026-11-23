@@ -33,6 +33,29 @@ export type SweepVerdict =
   | { kind: "delivered" }
   | { kind: "unconfirmed"; waitedMs: number };
 
+/**
+ * 这一行到底期不期待一个回复？（决定它要不要进 B 止血的回退窗口）
+ *
+ * 口径：
+ *   - `requires_response = 'none'` ⇒ 不期待（通知 / 节点间回执的显式声明）；
+ *   - `type = 'message'` ⇒ 不期待。普通聊天消息**不会被交给模型**（agent-node 的
+ *     `inboxDeliveryPolicy`：message ⇒ deliverToRuntime=false），收件方只会 ack 一条，
+ *     永远不会产出回复 ⇒ 等回复等于等一个永远不会来的东西 ⇒ 10 分钟后必被回退 ⇒
+ *     重投 ⇒ 再 ack ⇒ 再回退（生产实测：497 条 message 行 / 24h，ANet负责人 一台就回退 920 次）；
+ *   - `type = 'reply'` ⇒ 不期待。别人的任务结果行，回它就变成乒乓（agent-node 的
+ *     `replyExpected=false`：结果要立刻进模型，但绝不能再回一条）。
+ *
+ * 注意 `send_message` 早期没显式写 `requires_response`，吃的是列默认值 `'reply'`，
+ * 所以库里存着大量「message 行却标着 reply」的旧行 —— 这里按 type 兜底，新写入的行
+ * 则由 `send_message` 直接写 `'none'`（见 tools.ts）。
+ */
+export function rowExpectsResponse(row: { type?: string | null; requiresResponse?: string | null }): boolean {
+  if (row.requiresResponse === "none") return false;
+  const type = String(row.type ?? "task").toLowerCase();
+  if (type === "message" || type === "reply") return false;
+  return true;
+}
+
 /** 单条消息的判定：窗口内有回复 ⇒ delivered；窗口到期仍无回复 ⇒ unconfirmed。 */
 export function verdictFor(r: AckRecord, nowMs: number, windowMs: number): SweepVerdict {
   if (r.hasReply) return { kind: "delivered" };
