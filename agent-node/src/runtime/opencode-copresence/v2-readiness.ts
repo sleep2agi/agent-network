@@ -3,6 +3,8 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { createHash } from "node:crypto";
+import { modeIsJudgeable } from "../../shared/posix-modes";
+import { opencodeDirectoryHeader, sameWorkspacePath } from "./workspace-path";
 
 export const V2_REGISTRY_RPC = "/api/rpc/anet.commhub-readiness/ready";
 
@@ -44,21 +46,27 @@ export function installV2RegistryPlugin(dataRoot: string | undefined): string {
 export function installSharedV2RegistryPlugin(workDir: string): string {
   const root = resolve(workDir);
   const stat = lstatSync(root);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(root) !== root
-    || (stat.mode & 0o077) !== 0 || (process.getuid && stat.uid !== process.getuid())) {
+  // Mode bits and uid are POSIX facts. Windows synthesises 0o666/0o777 and has no uid, so there
+  // these two conditions could only ever say "unsafe" (shared/posix-modes.ts); the directory still
+  // has to be a real directory that is not a link.
+  const posix = modeIsJudgeable();
+  const open = (mode: number, uid: number) => posix && ((mode & 0o077) !== 0 || (!!process.getuid && uid !== process.getuid()));
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !sameWorkspacePath(realpathSync(root), root)
+    || open(stat.mode, stat.uid)) {
     throw new Error("OpenCode shared registry plugin requires an owned private node directory");
   }
   const digest = createHash("sha256").update(V2_REGISTRY_PLUGIN).digest("hex").slice(0, 16);
   const directory = join(root, `anet-commhub-registry-${digest}`);
   if (!existsSync(directory)) mkdirSync(directory, { mode: 0o700 });
   const pluginStat = lstatSync(directory);
-  if (!pluginStat.isDirectory() || pluginStat.isSymbolicLink() || (pluginStat.mode & 0o077) !== 0
-    || (process.getuid && pluginStat.uid !== process.getuid())) throw new Error("OpenCode shared registry plugin directory is unsafe");
+  if (!pluginStat.isDirectory() || pluginStat.isSymbolicLink() || open(pluginStat.mode, pluginStat.uid)) {
+    throw new Error("OpenCode shared registry plugin directory is unsafe");
+  }
   const file = join(directory, "index.js");
   if (!existsSync(file)) writeFileSync(file, V2_REGISTRY_PLUGIN, { flag: "wx", mode: 0o600 });
   const fileStat = lstatSync(file);
-  if (!fileStat.isFile() || fileStat.isSymbolicLink() || (fileStat.mode & 0o077) !== 0
-    || (process.getuid && fileStat.uid !== process.getuid()) || readFileSync(file, "utf8") !== V2_REGISTRY_PLUGIN) {
+  if (!fileStat.isFile() || fileStat.isSymbolicLink() || open(fileStat.mode, fileStat.uid)
+    || readFileSync(file, "utf8") !== V2_REGISTRY_PLUGIN) {
     throw new Error("OpenCode shared registry plugin file is unsafe or changed");
   }
   return directory;
@@ -87,7 +95,7 @@ async function readObservation(
             headers: {
               authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
               "content-type": "application/json",
-              ...(directory ? { "x-opencode-directory": directory } : {}),
+              ...(directory ? { "x-opencode-directory": opencodeDirectoryHeader(directory) } : {}),
             },
             ...(path === V2_REGISTRY_RPC ? { body: '{"input":{}}' } : {}),
             signal: controller.signal,
@@ -119,7 +127,7 @@ async function readObservation(
 }
 
 function connected(body: any, directory?: string): boolean {
-  if (directory && body?.location?.directory !== directory) throw new Error("OpenCode v2 MCP observation returned a different workspace");
+  if (directory && !sameWorkspacePath(body?.location?.directory, directory)) throw new Error("OpenCode v2 MCP observation returned a different workspace");
   if (!Array.isArray(body?.data)) throw new Error("OpenCode v2 CommHub MCP observation returned an invalid server list");
   const servers = body.data.filter((entry: any) => entry?.name === "commhub");
   if (servers.length > 1) throw new Error("OpenCode v2 CommHub MCP observation returned duplicate servers");

@@ -5,6 +5,10 @@ import { chmodSync, existsSync, readFileSync, renameSync, rmSync, statSync, writ
 import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import { basename, dirname, join, resolve } from "node:path";
 import { installSharedV2RegistryPlugin } from "./v2-readiness";
+import { sameWorkspacePath } from "./workspace-path";
+
+/** Windows editors and PowerShell 5.1 save UTF-8 with a byte-order mark; JSON.parse rejects it. */
+const parseJsonFile = (bytes: Buffer) => JSON.parse(bytes.toString("utf8").replace(/^\uFEFF/, ""));
 
 export interface SharedV2McpHandle {
   url: string;
@@ -49,16 +53,20 @@ export async function openSharedV2CommhubMcp(
   const configPath = join(cwd, "opencode.json");
   const pluginDirectory = installSharedV2RegistryPlugin(workDir);
   const isBridgePlugin = (entry: any) => typeof entry?.package === "string"
-    && dirname(entry.package) === resolve(workDir)
+    && sameWorkspacePath(dirname(entry.package), resolve(workDir))
     && /^anet-commhub-registry-[a-f0-9]{16}$/.test(basename(entry.package));
   const backupPath = join(workDir, "opencode-shared-project-config.backup");
   const installedHashPath = join(workDir, "opencode-shared-project-config.installed.sha256");
   const saved = existsSync(backupPath) ? readFileSync(backupPath) : undefined;
   const current = existsSync(configPath) ? readFileSync(configPath) : undefined;
-  let original = saved?.length ? saved : current?.length ? current : undefined;
+  // A backup records what the workspace file was before the bridge wrote to it; an EMPTY backup
+  // records that there was no file. After a bridge that was killed (no chance to restore), the
+  // file on disk is still the bridge's own: starting from it made the next start refuse with
+  // "Workspace already defines a CommHub MCP server" and the node could not come back.
+  let original = saved !== undefined ? (saved.length ? saved : undefined) : current?.length ? current : undefined;
   if (saved && current && (!existsSync(installedHashPath)
     || readFileSync(installedHashPath, "utf8").trim() !== createHash("sha256").update(current).digest("hex"))) {
-    const edited = JSON.parse(current.toString("utf8"));
+    const edited = parseJsonFile(current);
     const priorMcp = edited.mcp?.servers?.commhub;
     if (priorMcp) {
       if (priorMcp.type !== "remote" || !/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(priorMcp.url)
@@ -91,7 +99,7 @@ export async function openSharedV2CommhubMcp(
   const mode = existsSync(configPath) ? statSync(configPath).mode & 0o777 : 0o600;
   let installed: Buffer | undefined;
   try {
-    const config = original ? JSON.parse(original.toString("utf8")) : {};
+    const config = original ? parseJsonFile(original) : {};
     if (config.mcp?.servers?.commhub) throw new Error("Workspace already defines a CommHub MCP server");
     if (config.plugins !== undefined && !Array.isArray(config.plugins)) throw new Error("Workspace OpenCode plugins must be an array");
     if (!existsSync(backupPath)) writeFileSync(backupPath, original ?? Buffer.alloc(0), { flag: "wx", mode: 0o600 });

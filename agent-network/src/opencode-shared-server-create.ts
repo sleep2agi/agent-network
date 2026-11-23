@@ -19,7 +19,9 @@ export function resolveSharedOpenCodeServer(
   if (url !== undefined || passwordFile !== undefined) {
     selected = { url, passwordFile };
   } else if (existsSync(registryPath)) {
-    selected = JSON.parse(readFileSync(registryPath, "utf8"));
+    // Windows PowerShell 5.1 writes UTF-8 files with a byte-order mark; JSON.parse rejects it.
+    try { selected = JSON.parse(readFileSync(registryPath, "utf8").replace(/^\uFEFF/, "")); }
+    catch { throw new Error(`Shared OpenCode Server registry is not valid JSON: ${registryPath}`); }
   } else {
     return undefined;
   }

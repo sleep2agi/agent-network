@@ -26,6 +26,7 @@ import { createPromptTracker } from "./shared/interactive-prompt.js";
 import { cancelActiveAcpTurn } from "./runtime/acp-runner/active-turn";
 import { createControlLane, createHandledIds } from "./control-lane";
 import { assertPrivateFile } from "./shared/private-file";
+import { exemptLoopbackFromProxy } from "./shared/loopback-no-proxy";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -406,6 +407,8 @@ const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
 // A node profile may intentionally override PATH for other runtimes, but it
 // must never replace the OpenCode executable/version selected by anet (or the
 // operator's original PATH for a direct agent-node launch).
+// Local servers are reached directly, never through a proxy (shared/loopback-no-proxy.ts).
+exemptLoopbackFromProxy();
 const INITIAL_OPENCODE_BIN = process.env.ANET_OPENCODE_BIN;
 const INITIAL_OPENCODE_VERSION = process.env.ANET_OPENCODE_VERSION;
 const INITIAL_LAUNCH_PATH = process.env.PATH || "";
@@ -1526,7 +1529,7 @@ import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows
 import { systemdSupervisionSnapshot } from "./runtime/systemd-supervision-snapshot.js";
 import { consumePlannedRestart, currentBootId, writeRestartIntent } from "./runtime/restart-intent.js";
 import { readOpenCodeV2CatalogEndpoint } from "./runtime/opencode-v2-catalog-endpoint";
-import { interruptCurrentTurn, parseControlOp } from "./runtime/control-interrupt";
+import { interruptCurrentTurn, parseControlOp, sharedServerInterruptEndpoint } from "./runtime/control-interrupt";
 import { readOpenCodeCatalog, readOpenCodeAgents, readOpenCodeSessionAgent } from "./runtime/opencode-v2-catalog";
 // #3144 —— 清单与采集时刻同进同出（纯函数在 runtime/opencode-catalog-report.ts，可单测）
 import { catalogReport, keepLastCatalog } from "./runtime/opencode-catalog-report";
@@ -4953,7 +4956,9 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
       clearBorrowedLaunchHealth = publishBorrowedLaunchHealth(configFilePath, process.env.ANET_BORROWED_V1_LAUNCH_ID);
     }
-    log(borrowed ? "[opencode-copresence] borrowed existing V1 session; Host/TUI lifecycle remains with its Owner" : `[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
+    // No attach script is written on Windows; the "ready" line above already carries the command.
+    if (borrowed) log("[opencode-copresence] borrowed existing V1 session; Host/TUI lifecycle remains with its Owner");
+    else if (process.platform !== "win32") log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
     return opened;
   });
 }
@@ -5168,7 +5173,15 @@ async function processWithAntigravity(
 ): Promise<string> {
   const { checkAgyReadiness } = await import("./runtime/antigravity-acp/readiness");
   const readiness = checkAgyReadiness();
-  if (!readiness.ok) throw new Error(readiness.message);
+  if (!readiness.ok) {
+    const err = new Error(readiness.message) as Error & { code?: string; userReplyText?: string };
+    if (readiness.missingBinary) {
+      err.code = "ENOENT";
+      const { attachAcpUserReplyText } = await import("./runtime/acp-runner/user-error");
+      attachAcpUserReplyText(err, "antigravity");
+    }
+    throw err;
+  }
   // 版本是建议值：不钉死，只提醒。真出兼容问题再按提示装回/换基线。
   if (readiness.state !== "pinned") warn(`[antigravity] ${readiness.message}`);
   if (images?.length) {
@@ -7037,7 +7050,12 @@ async function processControlInstruction(msg: any): Promise<void> {
       : await interruptCurrentTurn({
         readEndpoint: () => {
           const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
-          return ep ? { url: ep.url, authorization: ep.authorization } : null;
+          if (ep) return { url: ep.url, authorization: ep.authorization };
+          // No record (never written on Windows): the node's own shared-Server configuration.
+          return sharedServerInterruptEndpoint(fileConfig, (passwordFile) => {
+            assertPrivateFile(passwordFile, "Shared OpenCode Server password file must be a private regular file");
+            return readFileSync(passwordFile, "utf8");
+          });
         },
         sessionId: () => opencodeSessionId ?? null,
       });

@@ -1,9 +1,9 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { claimSharedSessionBridge } from "./source-resume-launcher";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { afterAll } from "bun:test";
 
 // serverPid must name a real process that leads its own process group (like an OpenCode
@@ -53,4 +53,33 @@ test("legacy unknown per-child claim is never treated as absence or removed", ()
   const path = join(old, "source-resume-launch-claim.json"); writeFileSync(path, text, { mode: 0o600 });
   expect(() => claimSharedSessionBridge({ ...f, workDir: `${old}-new`, requestId: "attach" })).toThrow("source_resume_bridge_claimed");
   expect(readFileSync(path, "utf8")).toBe(text);
+});
+
+// #3812 — on Windows every stop is a kill, so the bridge never releases its claim. Measured on a
+// real Windows machine: the first restart after a stop refused with source_resume_bridge_claimed.
+test("Windows: a node takes back the claim its own killed run left behind, and nothing else", async () => {
+  const f = fixture(), workDir = join(f.project, ".anet", "nodes", "a");
+  const claimOf = () => {
+    const root = join(f.project, ".anet", "session-bridge-claims");
+    return join(root, readdirSync(root)[0]);
+  };
+  claimSharedSessionBridge({ ...f, workDir, consume: true });           // the run that will be killed: never released
+  const dead = spawnSync("true").pid!;                                    // a pid whose process has exited
+  const runtimePath = join(claimOf(), "runtime.json");
+  const leftBehind = (pid: number) => writeFileSync(runtimePath,
+    JSON.stringify({ ...JSON.parse(readFileSync(runtimePath, "utf8")), pid }), { mode: 0o600 });
+
+  // The previous run is still alive: refuse, on every platform.
+  expect(() => claimSharedSessionBridge({ ...f, workDir, consume: true, platform: "win32" })).toThrow("source_resume_bridge_claimed");
+  leftBehind(dead);
+  // POSIX keeps its rule: a dead owner's claim is not taken automatically.
+  expect(() => claimSharedSessionBridge({ ...f, workDir, consume: true, platform: "linux" })).toThrow("source_resume_bridge_claimed");
+  // Another node may not take it, dead or not.
+  expect(() => claimSharedSessionBridge({ ...f, workDir: `${workDir}-other`, consume: true, platform: "win32" })).toThrow("source_resume_bridge_claimed");
+  // The same node, same session, previous process gone: it starts again.
+  const again = claimSharedSessionBridge({ ...f, workDir, consume: true, platform: "win32" });
+  expect(JSON.parse(readFileSync(runtimePath, "utf8")).pid).toBe(process.pid);
+  // …and while it runs, the claim is held as firmly as before.
+  expect(() => claimSharedSessionBridge({ ...f, workDir, consume: true, platform: "win32" })).toThrow("source_resume_bridge_claimed");
+  again.release();
 });

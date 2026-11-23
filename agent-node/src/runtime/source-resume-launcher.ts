@@ -4,6 +4,8 @@ import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync,
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { readProcessGroupIdentity } from "./opencode-copresence/process-group";
+import { sameWorkspacePath } from "./opencode-copresence/workspace-path";
+import { modeIsJudgeable } from "../shared/posix-modes";
 import { resumeV2Session } from "./opencode-copresence/v2-resume";
 import type { SourceResumeLaunch } from "./session-source-delivery";
 import { acceptsSharedVersion, sharedVariantAuthorized, TEST_BUILD_VERSION } from "./opencode-copresence/v2-test-build-identity";
@@ -12,7 +14,7 @@ export const SOURCE_RESUME_HEALTH = "source-resume-health.json";
 /** ANet namespace only: never claims absence of external writers or human TUI.
  * An uncertain/dead owner's tombstone is NOT automatically reclaimable. */
 export function claimSharedSessionBridge(input: { project: string; url: string; serverPid: number; sessionId: string;
-  workDir: string; requestId?: string; consume?: boolean }) {
+  workDir: string; requestId?: string; consume?: boolean; platform?: NodeJS.Platform }) {
   const project = realpathSync(input.project), workDir = resolve(input.workDir);
   let requestId = input.requestId;
   if (input.consume && !requestId && existsSync(join(workDir, "source-delivery-claim.json"))) {
@@ -23,14 +25,20 @@ export function claimSharedSessionBridge(input: { project: string; url: string; 
       throw Error("source_resume_claim_handoff_refused");
     requestId = c.delivery_id;
   }
-  const identity = readProcessGroupIdentity(input.serverPid);
-  if (!identity || !/^ses_[A-Za-z0-9]+$/.test(input.sessionId) || project !== resolve(input.project)
+  // Windows has no process group or /proc start time to bind the claim to; the server's pid is what
+  // is left. Mode bits and uid are not judged there either (shared/posix-modes.ts). The claim still
+  // does its job — two bridges of this product cannot take the same session — with less proof that
+  // the server behind the pid is the same process as before.
+  const posix = modeIsJudgeable();
+  const identity = readProcessGroupIdentity(input.serverPid)
+    ?? (!posix && Number.isSafeInteger(input.serverPid) && input.serverPid > 1 ? { pid: input.serverPid } : undefined);
+  if (!identity || !/^ses_[A-Za-z0-9]+$/.test(input.sessionId) || !sameWorkspacePath(project, resolve(input.project))
     || !/^http:\/\/127\.0\.0\.1:\d+$/.test(input.url)) throw Error("source_resume_namespace_identity_required");
   const ensure = (path: string) => {
     if (!existsSync(path)) { try { mkdirSync(path, { mode: 0o700 }); } catch (e: any) { if (e.code !== "EEXIST") throw e; } }
     const s = lstatSync(path);
-    if (!s.isDirectory() || s.isSymbolicLink() || realpathSync(path) !== path || (s.mode & 0o077)
-      || s.uid !== process.getuid?.()) throw Error("source_resume_namespace_private_required");
+    if (!s.isDirectory() || s.isSymbolicLink() || !sameWorkspacePath(realpathSync(path), path)
+      || (posix && ((s.mode & 0o077) || s.uid !== process.getuid?.()))) throw Error("source_resume_namespace_private_required");
   };
   ensure(join(project, ".anet"));
   const root = join(project, ".anet", "session-bridge-claims"); ensure(root);
@@ -46,8 +54,23 @@ export function claimSharedSessionBridge(input: { project: string; url: string; 
     syncDirectory(dir); syncDirectory(root);
   } else {
     ensure(dir); owner = privateJson(ownerPath);
+    // #3812 — Windows has no graceful stop: `anet node stop`, a closed terminal and Stop-Process all
+    // kill the bridge outright, so it never releases its claim and the node could not start again
+    // (measured: "source_resume_bridge_claimed" on the first restart). A node may take back the
+    // claim its own previous run left behind — same node directory, same session — once that run's
+    // process is gone. A live or unknowable process still refuses, as does anyone else's claim.
+    const runtimePath = join(dir, "runtime.json");
+    const ownPreviousRun = (input.platform ?? process.platform) === "win32" && input.consume === true && !requestId
+      && owner.workDir === workDir && owner.sessionId === input.sessionId && existsSync(runtimePath)
+      && !alive(privateJson(runtimePath).pid);
+    if (ownPreviousRun) {
+      owner = { nonce: randomUUID(), workDir, requestId: null, sessionId: input.sessionId };
+      unlinkSync(runtimePath); unlinkSync(ownerPath);
+      const fd = openSync(ownerPath, "wx", 0o600);
+      try { writeFileSync(fd, JSON.stringify(owner)); fsyncSync(fd); } finally { closeSync(fd); }
+    }
     // Only a pre-reserved one-shot delivery can hand its own claim to its child.
-    if (!input.consume || !requestId || owner.requestId !== requestId || owner.workDir !== workDir
+    else if (!input.consume || !requestId || owner.requestId !== requestId || owner.workDir !== workDir
       || owner.sessionId !== input.sessionId) throw Error("source_resume_bridge_claimed");
   }
   // Under the atomic Session claim check legacy bridges that predate this gate.
@@ -82,15 +105,17 @@ export function claimSharedSessionBridge(input: { project: string; url: string; 
   } };
 }
 function syncDirectory(path: string) {
+  // Windows cannot fsync a directory handle (EPERM); NTFS journals the metadata itself.
+  if (!modeIsJudgeable()) return;
   const fd = openSync(path, "r"); try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 function privateJson(path: string): any { return JSON.parse(privateText(path)); }
 function privateText(path: string): string {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const s = fstatSync(fd);
-    if (!s.isFile() || s.nlink !== 1 || s.size > 65536 || (s.mode & 0o077)
-      || (process.getuid && s.uid !== process.getuid())) throw Error("source_resume_private_file_required");
+    if (!s.isFile() || s.nlink !== 1 || s.size > 65536 || (modeIsJudgeable() && ((s.mode & 0o077)
+      || (process.getuid && s.uid !== process.getuid())))) throw Error("source_resume_private_file_required");
     return readFileSync(fd, "utf8");
   } finally { closeSync(fd); }
 }
