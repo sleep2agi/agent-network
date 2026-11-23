@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import {
   __resetRouteTimingForTest, callerTokenKind, labelRoute, mcpRouteLabel, recordRouteTiming, routeKey, routeStats,
   setRouteCallerMasterToken, setRouteCallerTokenReader, userAgentFamily, takeTickRouteCosts, ROUTE_MAX_CALLERS_PER_ROUTE,
-  ROUTE_BUCKET_MS, ROUTE_BUCKET_RETENTION, ROUTE_MAX_KEYS_PER_BUCKET, ROUTE_OVERFLOW_KEY,
+  ROUTE_BUCKET_MS, ROUTE_BUCKET_RETENTION, ROUTE_MAX_KEYS_PER_BUCKET, ROUTE_OVERFLOW_KEY, limitBucket,
 } from "./route-timing";
 
 const u = (s: string) => new URL(`http://hub${s}`);
@@ -11,13 +11,14 @@ const res = (status = 200, len?: number) => new Response("x", { status, headers:
 const at = (ms: number) => performance.now() - ms;
 
 test("routeKey collapses ids, aliases and file names, keeps payload-shaping params", () => {
-  expect(routeKey("GET", u("/api/requirements?network_id=net_1&limit=500"))).toBe("GET /api/requirements");
+  // 2026-11-23 —— limit 现在按档进形状（<=50 / <=150 / >150），所以这里带上了 limit=gt150。
+  expect(routeKey("GET", u("/api/requirements?network_id=net_1&limit=500"))).toBe("GET /api/requirements?limit=gt150");
   expect(routeKey("GET", u("/api/requirements?view=summary&network_id=n"))).toBe("GET /api/requirements?view=summary");
   expect(routeKey("PATCH", u("/api/requirements/req_3f9a/checklist/c1"))).toBe("PATCH /api/requirements/:id/checklist/:id");
   expect(routeKey("GET", u("/api/requirements/stats"))).toBe("GET /api/requirements/stats");
   expect(routeKey("GET", u("/api/status?light=1"))).toBe("GET /api/status?light=1");
   expect(routeKey("GET", u(`/api/nodes/${encodeURIComponent("通信牛")}/config`))).toBe("GET /api/nodes/:id/config");
-  expect(routeKey("GET", u("/api/messages?scope=user&limit=50"))).toBe("GET /api/messages?scope=user");
+  expect(routeKey("GET", u("/api/messages?scope=user&limit=50"))).toBe("GET /api/messages?scope=user&limit=le50");
 });
 
 test("routeStats groups the window, sorts by total time, and counts every request (no sample cap)", () => {
@@ -249,4 +250,17 @@ test("tick 归因带 MCP 工具名（labelRoute），键数量封顶折进 (othe
   const tick = takeTickRouteCosts();
   expect(tick.length).toBeLessThanOrEqual(257);
   expect(tick.some(t => t.route === "GET /api/odd/:id")).toBe(true);
+});
+
+// 2026-11-23 —— limit 分档 + skip_stats 进形状：为了把「App 30 条轮询」与「Dashboard 200 条拉取」分开。
+test("limit 分档与 skip_stats 进路由形状（不取原值，避免键无界）", () => {
+  expect(routeKey("GET", u("/api/tasks?to_name=x&limit=30&skip_stats=1"))).toBe("GET /api/tasks?limit=le50&skip_stats=1");
+  expect(routeKey("GET", u("/api/tasks?to_name=x&limit=200"))).toBe("GET /api/tasks?limit=gt150");
+  expect(routeKey("GET", u("/api/tasks?to_name=x&limit=100"))).toBe("GET /api/tasks?limit=le150");
+  // 不带 limit / 不带 skip_stats 时键与旧行为一致（不加多余的段）
+  expect(routeKey("GET", u("/api/tasks?to_name=x"))).toBe("GET /api/tasks");
+  // 非法值折成 invalid，不把用户输入原样塞进键
+  expect(routeKey("GET", u("/api/tasks?limit=abc"))).toBe("GET /api/tasks?limit=invalid");
+  expect(limitBucket(null)).toBeNull();
+  expect(limitBucket("200")).toBe("gt150");
 });
