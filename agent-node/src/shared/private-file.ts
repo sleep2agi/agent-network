@@ -10,6 +10,10 @@
 // user, SYSTEM or the local Administrators group — the same boundary a 0600 file has on a POSIX
 // machine, where root can read it too. This is access control, not isolation: other programs
 // running as the same Windows user can read the file. It must not be described as a sandbox.
+//
+// 🔴 This file exists byte-identically in agent-node/src/shared and agent-network/src/shared
+//    (parity gate: agent-network/src/shared/private-file-parity.test.ts). The two packages cannot
+//    import each other, so only node builtins may be imported here.
 
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
@@ -25,8 +29,10 @@ const TRUSTED_ALIASES: Record<string, string> = { SY: SYSTEM_SID, BA: ADMINISTRA
 /** Readable names for the aliases people most often find on a too-open file. */
 const ALIAS_NAMES: Record<string, string> = {
   WD: "Everyone", BU: "Users", AU: "Authenticated Users", IU: "Interactive Users", NU: "Network Users",
-  AN: "Anonymous", BG: "Guests", DU: "Domain Users", CO: "Creator Owner", OW: "Owner Rights",
+  AN: "Anonymous", BG: "Guests", DU: "Domain Users",
 };
+/** "Whoever owns the file": Owner Rights and Creator Owner, as aliases and as SIDs. */
+const OWNER_TRUSTEES = new Set(["OW", "CO", "S-1-3-4", "S-1-3-0"]);
 
 export type SddlAce = { type: string; flags: string; rights: string; trustee: string };
 
@@ -35,8 +41,10 @@ export type SddlAce = { type: string; flags: string; rights: string; trustee: st
  * `D:NO_ACCESS_CONTROL` (a null DACL) grants everyone full access; a missing `D:` section means
  * the ACL was not returned at all.
  */
-export function parseSddlDacl(sddl: string): { aces: SddlAce[] } | { error: string } {
+export function parseSddlDacl(sddl: string): { owner: string; aces: SddlAce[] } | { error: string } {
   const text = String(sddl ?? "").trim();
+  // The owner section, when present, opens the string: `O:<sid or alias>` up to `G:` or `D:`.
+  const owner = /^O:(S-1-[0-9-]+|[A-Z]{2})(?=G:|D:|S:|$)/.exec(text)?.[1] ?? "";
   const start = text.indexOf("D:");
   if (start < 0) return { error: "no access list was returned" };
   // The DACL runs until the SACL section (`S:` at top level, outside any parentheses).
@@ -55,10 +63,11 @@ export function parseSddlDacl(sddl: string): { aces: SddlAce[] } | { error: stri
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(dacl))) {
     const fields = match[1].split(";");
-    if (fields.length < 6) return { error: "the access list could not be read" };
-    aces.push({ type: fields[0], flags: fields[1], rights: fields[2], trustee: fields[5] });
+    // An entry that names nobody cannot be judged; refuse rather than guess.
+    if (fields.length < 6 || !fields[5].trim()) return { error: "the access list could not be read" };
+    aces.push({ type: fields[0], flags: fields[1], rights: fields[2], trustee: fields[5].trim() });
   }
-  return { aces };
+  return { owner, aces };
 }
 
 const grantsAccess = (ace: SddlAce): boolean =>
@@ -74,18 +83,26 @@ export function judgeWindowsSddl(sddl: string, currentUserSid: string): PrivateF
   }
   const parsed = parseSddlDacl(sddl);
   if ("error" in parsed) return { ok: false, reason: "acl_unreadable", detail: parsed.error };
+  const trusted = (sid: string) => sid === currentUserSid || sid === SYSTEM_SID || sid === ADMINISTRATORS_SID;
   const others = new Set<string>();
+  let grantsCurrentUser = false;
   for (const ace of parsed.aces) {
     if (!grantsAccess(ace)) continue;
-    const sid = TRUSTED_ALIASES[ace.trustee] ?? ace.trustee;
-    if (sid === currentUserSid || sid === SYSTEM_SID || sid === ADMINISTRATORS_SID) continue;
-    others.add(ALIAS_NAMES[ace.trustee] ?? ace.trustee);
+    // Entries for "the owner" mean whoever the owner section names; without an owner they cannot be judged.
+    const named = OWNER_TRUSTEES.has(ace.trustee) ? parsed.owner : ace.trustee;
+    if (!named) return { ok: false, reason: "acl_unreadable", detail: "the file's owner could not be identified" };
+    const sid = TRUSTED_ALIASES[named] ?? named;
+    if (sid === currentUserSid) grantsCurrentUser = true;
+    if (trusted(sid)) continue;
+    others.add(ALIAS_NAMES[named] ?? named);
   }
   if (others.size) {
     return { ok: false, reason: "acl_open_to_others", detail: `also accessible to: ${[...others].join(", ")}` };
   }
-  if (!parsed.aces.some(grantsAccess)) {
-    return { ok: false, reason: "acl_unreadable", detail: "the access list allows nobody, including you" };
+  // Private from others but closed to you too is not a usable secret file: say so here instead of
+  // letting the read fail later with a bare permission error.
+  if (!grantsCurrentUser) {
+    return { ok: false, reason: "acl_unreadable", detail: "the access list does not give you access" };
   }
   return { ok: true };
 }

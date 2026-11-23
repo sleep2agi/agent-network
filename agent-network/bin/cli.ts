@@ -13,6 +13,7 @@
 import { constants, openSync, closeSync, fstatSync, chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
 import { formatBuildLine, readPackageBuildInfo } from "../src/build-info";
 import { hasBorrowedV1Intent, readBorrowedLaunchConfig, waitForBorrowedLaunchHealth } from "../src/shared/opencode-borrowed-launch-health";
+import { isPrivateFile, privateFileFix } from "../src/shared/private-file";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
 import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
@@ -2407,9 +2408,11 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
       console.error("[anet] ❌ Shared OpenCode Server config requires V2, loopback URL and existing absolute password file; no sessions were stopped.");
       process.exit(1);
     }
-    const passwordStat = statSync(passwordFile);
-    if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
-      console.error("[anet] ❌ Shared OpenCode Server password file must be a private regular file; no sessions were stopped.");
+    // 权限位只在 Linux/macOS 上有意义；Windows 上改查访问控制列表（src/shared/private-file.ts）。
+    const passwordVerdict = isPrivateFile(passwordFile);
+    if (!passwordVerdict.ok) {
+      console.error(`[anet] ❌ Shared OpenCode Server password file must be a private regular file (${passwordVerdict.detail}); no sessions were stopped.`);
+      console.error(`[anet]    ${privateFileFix(passwordFile)}`);
       process.exit(1);
     }
   }

@@ -16,7 +16,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 describe("parseSddlDacl", () => {
   test("reads each access entry's type, flags, rights and trustee", () => {
     const parsed = parseSddlDacl(`O:${ME}G:${ME}D:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1301bf;;;${ME})`);
-    expect(parsed).toEqual({ aces: [
+    expect(parsed).toEqual({ owner: ME, aces: [
       { type: "A", flags: "", rights: "FA", trustee: "SY" },
       { type: "A", flags: "", rights: "FA", trustee: "BA" },
       { type: "A", flags: "", rights: "0x1301bf", trustee: ME },
@@ -24,12 +24,16 @@ describe("parseSddlDacl", () => {
   });
   test("stops at the audit section and tolerates conditional entries", () => {
     const parsed = parseSddlDacl(`O:BAG:SYD:(A;;FA;;;SY)S:(AU;SA;FA;;;WD)`);
-    expect(parsed).toEqual({ aces: [{ type: "A", flags: "", rights: "FA", trustee: "SY" }] });
+    expect(parsed).toEqual({ owner: "BA", aces: [{ type: "A", flags: "", rights: "FA", trustee: "SY" }] });
+    expect(parseSddlDacl("D:(A;;FA;;;SY)")).toEqual({ owner: "", aces: [{ type: "A", flags: "", rights: "FA", trustee: "SY" }] });
   });
   test("a null access list or a missing one is an error, not an empty list", () => {
     expect(parseSddlDacl("O:BAG:SYD:NO_ACCESS_CONTROL")).toEqual({ error: "the file has no access list (everyone has full access)" });
     expect(parseSddlDacl("O:BAG:SY")).toEqual({ error: "no access list was returned" });
     expect(parseSddlDacl("O:BAG:SYD:(A;;FA)")).toEqual({ error: "the access list could not be read" });
+    // An entry naming nobody: never rendered as "also accessible to: " with an empty name.
+    expect(parseSddlDacl("O:BAG:SYD:(A;;FA;;;)")).toEqual({ error: "the access list could not be read" });
+    expect(judgeWindowsSddl(`D:(A;;FA;;;${ME})(A;;FA;;;)`, ME)).toEqual({ ok: false, reason: "acl_unreadable", detail: "the access list could not be read" });
   });
 });
 
@@ -53,8 +57,28 @@ describe("judgeWindowsSddl", () => {
   test("an unreadable or empty access list is never treated as private", () => {
     expect(judgeWindowsSddl("D:NO_ACCESS_CONTROL", ME).ok).toBe(false);
     expect(judgeWindowsSddl("O:BAG:SY", ME).ok).toBe(false);
-    expect(judgeWindowsSddl("D:(D;;FA;;;WD)", ME)).toEqual({ ok: false, reason: "acl_unreadable", detail: "the access list allows nobody, including you" });
+    expect(judgeWindowsSddl("D:(D;;FA;;;WD)", ME)).toEqual({ ok: false, reason: "acl_unreadable", detail: "the access list does not give you access" });
     expect(judgeWindowsSddl(`D:(A;;FA;;;${ME})`, "not-a-sid")).toEqual({ ok: false, reason: "acl_unreadable", detail: "the current Windows user could not be identified" });
+  });
+});
+
+describe("owner entries and your own access", () => {
+  test("Owner Rights / Creator Owner mean whoever owns the file", () => {
+    // Owned by me: the owner entry is my access.
+    expect(judgeWindowsSddl(`O:${ME}G:${ME}D:(A;;FA;;;OW)(A;;FA;;;SY)`, ME)).toEqual({ ok: true });
+    expect(judgeWindowsSddl(`O:${ME}D:(A;;FA;;;CO)`, ME)).toEqual({ ok: true });
+    expect(judgeWindowsSddl(`O:${ME}D:(A;;FA;;;S-1-3-4)`, ME)).toEqual({ ok: true });
+    // Owned by someone else: the same entry is that person's access.
+    expect(judgeWindowsSddl(`O:${OTHER}D:(A;;FA;;;OW)(A;;FA;;;${ME})`, ME)).toEqual({ ok: false, reason: "acl_open_to_others", detail: `also accessible to: ${OTHER}` });
+    // Owned by Administrators: trusted, but it is not *my* access.
+    expect(judgeWindowsSddl(`O:BAD:(A;;FA;;;OW)`, ME)).toEqual({ ok: false, reason: "acl_unreadable", detail: "the access list does not give you access" });
+    // No owner section: an owner entry cannot be judged.
+    expect(judgeWindowsSddl(`D:(A;;FA;;;OW)(A;;FA;;;${ME})`, ME)).toEqual({ ok: false, reason: "acl_unreadable", detail: "the file's owner could not be identified" });
+  });
+  test("private from others but closed to you is refused with its own message", () => {
+    expect(judgeWindowsSddl("D:(A;;FA;;;SY)", ME)).toEqual({ ok: false, reason: "acl_unreadable", detail: "the access list does not give you access" });
+    expect(judgeWindowsSddl("D:(A;;FA;;;SY)(A;;FA;;;BA)", ME)).toEqual({ ok: false, reason: "acl_unreadable", detail: "the access list does not give you access" });
+    expect(judgeWindowsSddl(`D:(A;;FA;;;SY)(D;;FA;;;${ME})`, ME).ok).toBe(false);
   });
 });
 
