@@ -139,11 +139,18 @@ export function seedAgyReplaysFromLoad(sessionId: string | undefined, replayText
   if (!sessionId) return;
   const text = (replayText ?? "").trim();
   if (!text) return;
-  const arr = repliesBySession.get(sessionId) ?? [];
-  if (!arr.includes(text)) arr.unshift(text);
-  while (arr.length > 20) arr.pop();
-  repliesBySession.set(sessionId, arr);
+  // 2026-11-23 review —— **直接替换，不与内存里的旧记录合并**：
+  // 握手回放是 agy 自己认的**完整历史**，合并会让每轮多出一条越来越长的拼接串
+  // （["r1r2","r1","r2"] → ["r1r2r3","r1r2","r1","r2","r3"] …），
+  // 而且超上限时丢的是末尾=最新回复，正好是匹配最需要的那几条；
+  // 混着「整段拼接」和「单条」两种粒度，stripOnce 的 k 模型也对不上。
+  repliesBySession.set(sessionId, [text]);
   sawReplayBySession.add(sessionId);
+}
+
+/** 只给测试：该会话当前记着多少条历史（断言它不随轮数增长）。 */
+export function agyReplyHistorySizeForTests(sessionId: string): number {
+  return repliesBySession.get(sessionId)?.length ?? 0;
 }
 
 export function rememberAgyReply(reply: string, sessionId: string | undefined): void {

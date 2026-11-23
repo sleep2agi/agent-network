@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGY_FRESH_SESSION_RETRY_NOTE, AgyReplayOnlyError, agyStripReplayedPrefix, agyStripReplay, forgetAgySession, rememberAgyReply, seedAgyReplaysFromLoad, withFreshSessionRetryNote } from "./runtime";
+import { AGY_FRESH_SESSION_RETRY_NOTE, AgyReplayOnlyError, agyStripReplayedPrefix, agyStripReplay, forgetAgySession, rememberAgyReply, agyReplyHistorySizeForTests, seedAgyReplaysFromLoad, withFreshSessionRetryNote } from "./runtime";
 
 // 2026-11-22 真机：agy 每轮回复会把上一轮助手文本重发一遍再接新内容。
 // 这里锁住剥离规则，避免以后又把「前缀」当成真回答喂回 Hub。
@@ -171,5 +171,43 @@ describe("agy replay: seed from session/load replay (restart case)", () => {
   it("种入种子后，本轮=回放+新内容 ⇒ 只留新内容", () => {
     seedAgyReplaysFromLoad("s-restart2", "旧回复。");
     expect(agyStripReplay("旧回复。重启后的新回复。", "s-restart2")).toEqual({ text: "重启后的新回复。", replayOnly: false });
+  });
+});
+
+// 2026-11-23 review B 修正：握手回放**替换**历史，不合并（长跑进程里不膨胀）
+describe("agy seed replaces history (no growth across rounds)", () => {
+  it("连续三轮续会话：历史长度恒为 1 条（+本轮追加），且第三轮判定正确", () => {
+    const sid = "s-multi";
+    // 第 1 轮：握手回放 r1，本轮新内容「新1」
+    seedAgyReplaysFromLoad(sid, "r1");
+    expect(agyReplyHistorySizeForTests(sid)).toBe(1);
+    expect(agyStripReplay("r1新1", sid)).toEqual({ text: "新1", replayOnly: false });
+    rememberAgyReply("新1", sid);
+    expect(agyReplyHistorySizeForTests(sid)).toBe(2);
+
+    // 第 2 轮：握手回放 r1+新1（完整历史），替换掉之前的记录
+    seedAgyReplaysFromLoad(sid, "r1新1");
+    expect(agyReplyHistorySizeForTests(sid)).toBe(1);
+    expect(agyStripReplay("r1新1新2", sid)).toEqual({ text: "新2", replayOnly: false });
+    rememberAgyReply("新2", sid);
+    expect(agyReplyHistorySizeForTests(sid)).toBe(2);
+
+    // 第 3 轮：握手回放 r1+新1+新2
+    seedAgyReplaysFromLoad(sid, "r1新1新2");
+    expect(agyReplyHistorySizeForTests(sid)).toBe(1);
+    // 回放 + 新内容 ⇒ 只留新内容
+    expect(agyStripReplay("r1新1新2新3", sid)).toEqual({ text: "新3", replayOnly: false });
+    // 只有回放 ⇒ 判失败
+    expect(agyStripReplay("r1新1新2", sid)).toEqual({ text: "", replayOnly: true });
+    // 三轮下来数组长度仍是「1 条种子（+本轮尚未 remember）」
+    expect(agyReplyHistorySizeForTests(sid)).toBe(1);
+  });
+
+  it("没有握手回放（新会话）时不动已有历史", () => {
+    seedAgyReplaysFromLoad("s-noop", "历史X");
+    const before = agyReplyHistorySizeForTests("s-noop");
+    seedAgyReplaysFromLoad("s-noop", undefined);
+    seedAgyReplaysFromLoad("s-noop", "   ");
+    expect(agyReplyHistorySizeForTests("s-noop")).toBe(before);
   });
 });
