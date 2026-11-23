@@ -119,3 +119,16 @@ describe("#4685 send_message steer", () => {
     expect(evt.control).toBe("interrupt");
   });
 });
+
+// 2026-11-23 —— control=interrupt 的回执必须诚实：只说「已排入」，不许暗示节点已回/已停。
+// 来源：真机复现（回合进行中投 interrupt，Hub 立刻回 accepted:true + result_from:"node_reply"，
+// 而节点 3 分钟后才处理、且报 ACP client not started or already exited）。
+test("control=interrupt 回执：accepted + confirmation=pending，且不出现 result_from", async () => {
+  const toolsTab = buildHandlers(RECV);
+  const body = await call(toolsTab.send_message as ToolHandler, { alias: RECV, message: "stop please", control: "interrupt", network_id: NET });
+  expect(body.ok).toBe(true);
+  expect(body.control).toBe("interrupt");
+  expect(body.accepted).toBe(true);
+  expect(body.confirmation).toBe("pending");
+  expect("result_from" in body).toBe(false);
+});
