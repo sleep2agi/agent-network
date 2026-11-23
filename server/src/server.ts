@@ -298,6 +298,47 @@ function sweepStaleRateLimits(): void {
 }
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
+//
+// 2026-11-23 —— 生产卡顿归因：`createServer()` 每条 /mcp 请求都要新建一次 McpServer，
+// 把 105 个工具（含 zod → JSON Schema 转换）重新注册一遍。本地 455 会话库实测：
+// 只发 JSON-RPC `ping`（完全不跑任何工具）也要 ~30 ms CPU/请求，而普通 REST
+// （/api/session-requests、/health）只有 1–1.3 ms。线上 ≈28 req/s 的 /mcp 洪峰下，
+// 光这一项就 ≈840 ms/s，正好对上「主线程吃满一个核 + 每 3–5 秒停顿一次」。
+// ⇒ 按调用方上下文缓存**已注册好工具的 McpServer**，复用时只 connect/handleRequest/close。
+//   缓存键就是 createServer 的全部入参（谁的身份、看哪些工具）；池子有上限，拿不到就现建，
+//   所以行为与「每次新建」完全一致，只是跳过重复注册。
+type ServerPoolKey = [string | undefined, string | null | undefined, string | null | undefined, string | null | undefined, boolean, string | null | undefined, boolean, boolean];
+const SERVER_POOL_MAX = 64;
+const serverPool = new Map<string, McpServer[]>();
+let serverPoolSize = 0;
+let serverCreated = 0;
+let serverReused = 0;
+
+function poolKey(k: ServerPoolKey): string { return JSON.stringify(k); }
+
+/** 取一台该上下文可用的 McpServer：池里有空闲的就复用，没有就新建。 */
+function acquireServer(k: ServerPoolKey): { server: McpServer; key: string } {
+  const key = poolKey(k);
+  const idle = serverPool.get(key);
+  const server = idle && idle.length ? idle.pop()! : null;
+  if (server) { serverPoolSize--; serverReused++; return { server, key }; }
+  serverCreated++;
+  return { server: createServer(...k), key };
+}
+
+/** 一次请求结束后把 server 放回池（超过上限就丢弃，交给 GC）。 */
+function releaseServer(key: string, server: McpServer): void {
+  if (serverPoolSize >= SERVER_POOL_MAX) return;
+  const idle = serverPool.get(key);
+  if (idle) { idle.push(server); serverPoolSize++; return; }
+  serverPool.set(key, [server]); serverPoolSize++;
+}
+
+/** 只读：池子/复用计数（/health 观察用；不参与任何决策）。 */
+export function mcpServerPoolStats(): { pooled: number; created: number; reused: number } {
+  return { pooled: serverPoolSize, created: serverCreated, reused: serverReused };
+}
+
 function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, includeProtocolTools = false, callerIdentityRejected = false): McpServer {
   const server = new McpServer({
     name: "commhub",
@@ -2202,7 +2243,8 @@ return Bun.serve({
         labelRoute(req, mcpParsedBody === undefined ? "?" : mcpRouteLabel(mcpParsedBody));
       }
       // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url), callerIdentityRejected);
+      const acquireKey: ServerPoolKey = [clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url), callerIdentityRejected];
+      const { server: mcpServer, key: mcpServerKey } = acquireServer(acquireKey);
       let response: Response;
       try {
         await mcpServer.connect(transport);
@@ -2211,8 +2253,12 @@ return Bun.serve({
         settleMcpInflight();
         throw e;
       }
-      // Disconnect after response to prevent McpServer leak
-      setImmediate(() => { mcpServer.close().catch(() => {}).finally(settleMcpInflight); });
+      // Disconnect after response to prevent McpServer leak（复用池：close 之后 _transport 会清空，
+      // 所以这台 server 可以接着服务下一次同上下文请求；不 close 会造成 Handler 泄漏）。
+      // 只有 close 成功才放回池子：close 失败说明这台实例状态不明，宁可丢给 GC 也不要复用。
+      setImmediate(() => {
+        mcpServer.close().then(() => releaseServer(mcpServerKey, mcpServer)).catch(() => {}).finally(settleMcpInflight);
+      });
       // #426: the MCP SDK's WebStandardStreamableHTTPServerTransport builds
       // its own Response with `Content-Type: text/event-stream` (or
       // `application/json` for JSON-mode) but WITHOUT charset. Legacy
