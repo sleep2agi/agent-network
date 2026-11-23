@@ -4,15 +4,19 @@ on:
   pull_request:
     paths:
       - 'docs-site/scripts/fallback-report*.mjs'
+      - 'docs-site/scripts/record-fallback-generation*.mjs'
       - 'tests/test-fallback-report/**'
       - '.github/workflows/desktop-fallback-report.yml'
+      - '.github/workflows/desktop-fallback-sync.yml'
       - '.github/workflows/desktop-fallback-report-tests.yml'
   push:
     branches: [main]
     paths:
       - 'docs-site/scripts/fallback-report*.mjs'
+      - 'docs-site/scripts/record-fallback-generation*.mjs'
       - 'tests/test-fallback-report/**'
       - '.github/workflows/desktop-fallback-report.yml'
+      - '.github/workflows/desktop-fallback-sync.yml'
       - '.github/workflows/desktop-fallback-report-tests.yml'
   workflow_dispatch:
 

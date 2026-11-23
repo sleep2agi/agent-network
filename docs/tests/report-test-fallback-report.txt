@@ -1,5 +1,10 @@
 Fallback report-only verification, 2026-11-23
 
+Follow-up generation evidence tests: Docker 31/31 passed, zero failures/skips.
+Added real local Git/bare-remote tests: main/no-change emits no record; unpushed
+commit is rejected; pushed commit records exact head, parent and fallback blob.
+This is an isolated Git test, not live GitHub generator/artifact acceptance.
+
 Docker command:
 sg docker -c 'docker build -t anet-fallback-report:test -f tests/test-fallback-report/Dockerfile . && docker run --rm --network none --cap-drop ALL anet-fallback-report:test'
 

@@ -81,3 +81,15 @@ jobs:
             exit 1
           fi
           echo "$out"
+      - name: Record generated fallback identity
+        env:
+          GENERATOR_RUN_ID: ${{ github.run_id }}
+          GENERATOR_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GENERATOR_WORKFLOW_SHA: ${{ github.sha }}
+        run: node docs-site/scripts/record-fallback-generation.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fallback-generation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: fallback-generation.json
+          if-no-files-found: ignore
+          retention-days: 90

@@ -18,6 +18,13 @@ Downloads bind exact release assets, lengths and SHA-256; minisign uses the upda
 public key from the exact release source. This does not independently approve key
 rotation or prove native installation, Authenticode, store submission or rollback.
 
+The existing generator additionally emits `fallback-generation-<run>-<attempt>`
+after a successful branch push, with full commit/parent/blob SHA, version, branch
+and workflow/run identity. A no-change run emits no creation artifact. This closes
+the short-SHA logging gap for future releases; the collector must still independently
+verify the artifact's producing workflow and bind its contents to the current PR.
+The record is provenance data, not approval or a replacement for the three-release gate.
+
 The historic 614 PR replay does not count toward the required three consecutive
 pre-merge eligible reports. Each future qualifying report also needs final merged
 content and deployed-channel verification; missing or conflicting evidence resets
