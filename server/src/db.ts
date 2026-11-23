@@ -117,7 +117,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_user_inbox_user_created
     ON user_inbox(user_id, created_at DESC);
 
-  -- 2026-11-23 —— App 聊天页的另一条轮询 `/api/messages?alias=…`：
+  -- 2026-11-23 —— App 聊天页的另一条轮询 /api/messages?alias=…：
   --   SELECT ... FROM inbox WHERE created_at >= ?1 AND session_name = ?2 ORDER BY created_at DESC LIMIT n
   -- 线上 EXPLAIN 是 **SCAN inbox**（95,254 行）+ TEMP B-TREE 排序，单次实测 122ms，
   -- 停顿窗口里记到过 1084ms 的 slow-sql（还带逐行 EXISTS task_late_replies）。
