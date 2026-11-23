@@ -25,6 +25,7 @@ import { persistVariantToConfig, shouldPersistVariant, startupVariantPlan } from
 import { createPromptTracker } from "./shared/interactive-prompt.js";
 import { cancelActiveAcpTurn } from "./runtime/acp-runner/active-turn";
 import { createControlLane, createHandledIds } from "./control-lane";
+import { assertPrivateFile } from "./shared/private-file";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -4852,10 +4853,8 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       if (typeof sharedServerUrl !== "string" || typeof sharedServerPasswordFile !== "string") {
         throw new Error("Shared OpenCode Server requires URL and password file");
       }
-      const passwordStat = statSync(sharedServerPasswordFile);
-      if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
-        throw new Error("Shared OpenCode Server password file must be a private regular file");
-      }
+      // 权限位只在 Linux/macOS 上有意义；Windows 上改查访问控制列表（shared/private-file.ts）。
+      assertPrivateFile(sharedServerPasswordFile, "Shared OpenCode Server password file must be a private regular file");
       sharedServer = { url: sharedServerUrl, password: readFileSync(sharedServerPasswordFile, "utf8").trim(), passwordFile: sharedServerPasswordFile };
     }
     const borrowed = opencodeBorrowedCli
