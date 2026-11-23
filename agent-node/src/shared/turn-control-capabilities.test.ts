@@ -6,7 +6,8 @@ import { describe, expect, test } from "bun:test";
 function caps(runtime: string, generation: string | null, mode: string | null) {
   const opencodeCopresence = runtime === "opencode" && generation === "v2" && mode === "copresence";
   const claudeInterrupt = runtime === "claude";
-  return { interrupt: opencodeCopresence || claudeInterrupt, steer: opencodeCopresence };
+  const codexAppServerInterrupt = runtime === "codex-app-server";
+  return { interrupt: opencodeCopresence || claudeInterrupt || codexAppServerInterrupt, steer: opencodeCopresence };
 }
 
 describe("#5332 turnControlCapabilities 判据", () => {
@@ -18,8 +19,12 @@ describe("#5332 turnControlCapabilities 判据", () => {
     expect(caps("claude", null, null)).toEqual({ interrupt: true, steer: false });
   });
 
+  test("codex-app-server：interrupt true，steer false", () => {
+    expect(caps("codex-app-server", null, null)).toEqual({ interrupt: true, steer: false });
+  });
+
   test("其余 runtime / opencode V1：都 false", () => {
-    for (const r of ["antigravity", "grok", "codex", "codex-app-server"]) {
+    for (const r of ["antigravity", "grok", "codex", "codex-sdk"]) {
       expect(caps(r, null, null)).toEqual({ interrupt: false, steer: false });
     }
     expect(caps("opencode", "v1", "copresence")).toEqual({ interrupt: false, steer: false });
