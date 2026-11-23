@@ -18,6 +18,11 @@ export function normalizeWin32Path(p: string, platform: string = process.platfor
   return `${m[1]}:\\${m[2].replace(/\//g, "\\")}`;
 }
 
+/** markdown 里空格按惯例写成 `%20`,裸 `/…` 也要 decode,否则带空格/中文的文件名永远 realpath 失败。 */
+export function decodeLinkPath(p: string): string {
+  try { return decodeURIComponent(p); } catch { return p; }
+}
+
 /** 只认 markdown 链接且目标像本机绝对路径(`/…` 或 `file:///…`,Windows 另有 `C:\…`/`C:/…`/`/C:/…`);http(s)、/api/files/… 不算。 */
 export function findLocalLinks(text: string): LocalLink[] {
   const out: LocalLink[] = [];
@@ -31,7 +36,7 @@ export function findLocalLinks(text: string): LocalLink[] {
     else if (t.startsWith("file:///")) {
       const raw = decodeURIComponent(t.slice("file://".length));
       path = normalizeWin32Path(raw) ?? raw;
-    } else if (t.startsWith("/") && !t.startsWith("/api/") && !t.startsWith("//")) path = t;
+    } else if (t.startsWith("/") && !t.startsWith("/api/") && !t.startsWith("//")) path = decodeLinkPath(t);
     if (!path) continue;
     out.push({ raw: m[0], label: m[1], path });
     if (out.length >= REPLY_LOCAL_LINK_MAX) break;

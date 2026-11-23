@@ -35,6 +35,15 @@ export function normalizeWin32Path(p: string, platform: string = process.platfor
   return `${m[1]}:\\${m[2].replace(/\//g, "\\")}`;
 }
 
+/**
+ * markdown 链接里的空格按惯例写成 `%20`,过去只有 `file:///…` 会 decode,裸 `/…` 不解 → 带空格/中文的文件名
+ * 永远 realpath 失败(2026-11-23 真机:mac 节点回复 10 个链接,`/…/中文 名字.txt` 直接判「不存在」)。
+ * 解不开(比如文件名本身含裸 `%`)就原样返回,不因为一次 decode 失败丢掉链接。
+ */
+export function decodeLinkPath(p: string): string {
+  try { return decodeURIComponent(p); } catch { return p; }
+}
+
 /** 只认 markdown 链接且目标像本机绝对路径:`/…`、`file:///…`、Windows 盘符 `C:\…`/`C:/…`/`/C:/…`。http(s)、/api/files/… 不算。 */
 export function findLocalFileLinks(text: string): LocalFileLink[] {
   const out: LocalFileLink[] = [];
@@ -48,7 +57,7 @@ export function findLocalFileLinks(text: string): LocalFileLink[] {
     else if (target.startsWith("file:///")) {
       const raw = decodeURIComponent(target.slice("file://".length));
       path = normalizeWin32Path(raw) ?? raw;
-    } else if (target.startsWith("/") && !target.startsWith("/api/") && !target.startsWith("//")) path = target;
+    } else if (target.startsWith("/") && !target.startsWith("/api/") && !target.startsWith("//")) path = decodeLinkPath(target);
     if (!path || !isAbsolute(path)) continue;
     out.push({ raw: m[0], label: m[1], target, path });
     if (out.length >= REPLY_FILE_MAX_COUNT) break;
