@@ -51,17 +51,8 @@ type OrphanRow = ExpiredTaskRow & { status: string; started: string; node_status
 
 export type OrphanFlagged = { task_id: string; notified: "agent" | "user" | null };
 
-export function orphanNoticeText(r: Pick<OrphanRow, "task_id" | "to_name" | "status" | "content" | "node_status">, openMin: number | null): { title: string; text: string } {
-  const preview = (r.content ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
-  const m = openMin === null ? "?" : String(openMin);
-  return {
-    title: "任务可能没人收尾",
-    text: `[Hub] 任务可能没人收尾:你派给 ${r.to_name} 的任务 ${r.task_id} 停在 ${r.status} 已 ${m} 分钟,但 ${r.to_name} 之后已回到 ${r.node_status},一直没有回复。`
-      + `Hub 没有改这条任务的状态。\n内容:${preview}\n`
-      + `建议:问 ${r.to_name} 一句,或 cancel_task 后换个节点重派。\n`
-      + `Task ${r.task_id} to ${r.to_name} has been ${r.status} for ${m} min while ${r.to_name} went ${r.node_status} without replying. Its status was not changed.`,
-  };
-}
+export { orphanNoticeText } from "./task-orphan-notice-text.js";
+import { orphanNoticeText } from "./task-orphan-notice-text.js";
 
 /** 一次巡检的孤儿阶段。返回本次新标记的任务(测试 / 日志用)。调用方负责吞异常。 */
 export function flagOrphanTasks(opts: { minutes?: number | null; lookbackHours?: number | null; nowMs?: number } = {}): OrphanFlagged[] {
@@ -106,7 +97,7 @@ export function flagOrphanTasks(opts: { minutes?: number | null; lookbackHours?:
         const startedMs = parseDbTimestampMs(r.started);
         const openMin = Number.isFinite(startedMs) ? Math.max(0, Math.round((nowMs - startedMs) / 60_000)) : null;
         const meta = { task_orphan_suspected: { task_id: r.task_id, target: r.to_name, status: r.status, node_status: r.node_status } };
-        const id = deliver(route, r.network_id, r.to_name, r.task_id, orphanNoticeText(r, openMin), meta,
+        const id = deliver(route, r.network_id, r.to_name, r.task_id, orphanNoticeText(r, openMin, route.kind), meta,
           { kind: ORPHAN_NOTICE_KIND, status: "orphan_suspected", agentPrefix: "orph_", userPrefix: "dm_orphan_" });
         if (id) notified = route.kind;
       } catch (e: any) {
