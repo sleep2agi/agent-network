@@ -7,7 +7,18 @@ export const REPLY_LOCAL_LINK_MAX = 6;
 
 export interface LocalLink { readonly raw: string; readonly label: string; readonly path: string }
 
-/** 只认 markdown 链接且目标像本机绝对路径(`/…` 或 `file:///…`);http(s)、/api/files/… 不算。 */
+/**
+ * Windows 盘符绝对路径归一:`C:\a\b`、`C:/a/b`、`/C:/a/b` → `C:\a\b`。非 Windows 平台返回 null。
+ * 与 agent-node 的 runtime/reply-file-links.ts 同一判据(两包不互相 import)。
+ */
+export function normalizeWin32Path(p: string, platform: string = process.platform): string | null {
+  if (platform !== "win32") return null;
+  const m = /^\/?([A-Za-z]):[\\/](.*)$/.exec(p);
+  if (!m) return null;
+  return `${m[1]}:\\${m[2].replace(/\//g, "\\")}`;
+}
+
+/** 只认 markdown 链接且目标像本机绝对路径(`/…` 或 `file:///…`,Windows 另有 `C:\…`/`C:/…`/`/C:/…`);http(s)、/api/files/… 不算。 */
 export function findLocalLinks(text: string): LocalLink[] {
   const out: LocalLink[] = [];
   const re = /\[([^\]\n]{1,200})\]\(([^()\s]+)\)/g;
@@ -15,8 +26,12 @@ export function findLocalLinks(text: string): LocalLink[] {
   while ((m = re.exec(text)) !== null) {
     const t = m[2];
     let path: string | null = null;
-    if (t.startsWith("file:///")) path = decodeURIComponent(t.slice("file://".length));
-    else if (t.startsWith("/") && !t.startsWith("/api/") && !t.startsWith("//")) path = t;
+    const win = normalizeWin32Path(t);
+    if (win) path = win;
+    else if (t.startsWith("file:///")) {
+      const raw = decodeURIComponent(t.slice("file://".length));
+      path = normalizeWin32Path(raw) ?? raw;
+    } else if (t.startsWith("/") && !t.startsWith("/api/") && !t.startsWith("//")) path = t;
     if (!path) continue;
     out.push({ raw: m[0], label: m[1], path });
     if (out.length >= REPLY_LOCAL_LINK_MAX) break;

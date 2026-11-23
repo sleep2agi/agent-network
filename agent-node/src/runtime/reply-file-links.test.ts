@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { attachLocalFileLinks, checkLocalFile, findLocalFileLinks, mimeFor, rewriteReplyLinks } from "./reply-file-links";
+import { attachLocalFileLinks, checkLocalFile, findLocalFileLinks, mimeFor, normalizeWin32Path, rewriteReplyLinks } from "./reply-file-links";
 
 describe("reply-file-links: finding local links", () => {
   test("absolute paths and file:// count; http, /api/files, relative do not", () => {
@@ -14,6 +14,17 @@ describe("reply-file-links: finding local links", () => {
   test("caps at 6 links", () => {
     const t = Array.from({ length: 9 }, (_, i) => `[f${i}](/w/f${i}.pdf)`).join(" ");
     expect(findLocalFileLinks(t).length).toBe(6);
+  });
+  test("Windows 盘符写法归一成 C:\\…(只在 win32 生效)", () => {
+    expect(normalizeWin32Path("C:\\Users\\a\\f.txt", "win32")).toBe("C:\\Users\\a\\f.txt");
+    expect(normalizeWin32Path("C:/Users/a/f.txt", "win32")).toBe("C:\\Users\\a\\f.txt");
+    expect(normalizeWin32Path("/C:/Users/a/f.txt", "win32")).toBe("C:\\Users\\a\\f.txt");
+    expect(normalizeWin32Path("https://x/y", "win32")).toBeNull();
+    expect(normalizeWin32Path("/C:/Users/a/f.txt", "darwin")).toBeNull();
+    expect(normalizeWin32Path("/C:/Users/a/f.txt", "linux")).toBeNull();
+  });
+  test("Unix 上 /C:/… 仍按普通绝对路径处理,不被改写", () => {
+    expect(findLocalFileLinks("[x](/C:/Users/a/f.txt)").map((x) => x.path)).toEqual(["/C:/Users/a/f.txt"]);
   });
 });
 
