@@ -56,9 +56,30 @@ export function agyStripReplayedPrefix(reply: string, sessionId: string | undefi
     stripped = true;
   }
   if (!stripped) return reply;
-  // 剥完只剩历史内容（这一轮没有新东西）——宁可原样返回，也不要把旧回答当成新回答发出去。
-  if (!out.trim() || ordered.includes(out.trim())) return reply;
+  // 剥完只剩历史内容（这一轮没有新东西）——**返回空串**，由调用方判成失败。
+  // 2026-11-23 事故（通信鸽连发 5 次 374 字旧回复）：原来这里 `return reply`，
+  // 本意是「宁可原样返回」，但在回复通道上等价于**把上一轮的文本当成这一轮的结果发出去**。
+  // 现在：没有新内容就是没有新内容，绝不冒充结果。
+  if (!out.trim() || ordered.includes(out.trim())) return "";
   return out;
+}
+
+/**
+ * 剥离结果：`replayOnly=true` 表示这一轮**只有历史回放、没有任何新内容**。
+ * 调用方必须把它当失败（`agy_replay_only_no_new_content`），不能当回复发出去。
+ */
+export function agyStripReplay(reply: string, sessionId: string | undefined): { text: string; replayOnly: boolean } {
+  const text = agyStripReplayedPrefix(reply, sessionId);
+  return { text, replayOnly: text.trim() === "" && (reply.trim() !== "") };
+}
+
+/** 这一轮只有回放、没有新内容时抛这个（给用户看的是人话，错误码只进结构化字段/日志）。 */
+export class AgyReplayOnlyError extends Error {
+  readonly code = "agy_replay_only_no_new_content";
+  constructor() {
+    super("这次没有生成新内容，请重发一次；如果反复出现，换一个新会话");
+    this.name = "AgyReplayOnlyError";
+  }
 }
 
 export function rememberAgyReply(reply: string, sessionId: string | undefined): void {
@@ -99,9 +120,14 @@ export async function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnRe
     authMethodPreference: opts.authMethodPreference ?? AGY_AUTH_METHOD_PREFERENCE,
   });
   const sessionId = result.sessionId;
-  const cleaned = agyStripReplayedPrefix(result.replyText ?? "", sessionId);
+  const { text: cleaned, replayOnly } = agyStripReplay(result.replyText ?? "", sessionId);
   if (cleaned !== result.replyText) {
     opts.onStderr?.(`[antigravity] stripped replayed prefix (${(result.replyText ?? "").length - cleaned.length} chars) from session ${String(sessionId).slice(0, 8)}`);
+  }
+  if (replayOnly) {
+    // 2026-11-23 —— 绝不能把旧回复当本轮结果发出去；判失败，让人重发/换会话。
+    opts.onStderr?.(`[antigravity] replay-only turn (${(result.replyText ?? "").length} chars of history, no new content) in session ${String(sessionId).slice(0, 8)}`);
+    throw new AgyReplayOnlyError();
   }
   rememberAgyReply(cleaned, sessionId);
   return { ...result, replyText: cleaned };

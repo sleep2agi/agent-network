@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agyStripReplayedPrefix, forgetAgySession, rememberAgyReply } from "./runtime";
+import { AgyReplayOnlyError, agyStripReplayedPrefix, agyStripReplay, forgetAgySession, rememberAgyReply } from "./runtime";
 
 // 2026-11-22 真机：agy 每轮回复会把上一轮助手文本重发一遍再接新内容。
 // 这里锁住剥离规则，避免以后又把「前缀」当成真回答喂回 Hub。
@@ -40,10 +40,13 @@ describe("agy replayed-prefix stripping", () => {
     expect(agyStripReplayedPrefix(replayed, "s-5")).toBe("上一轮的口令是靛蓝水獭-8030，13*13 等于 169");
   });
 
-  it("does not mistake a history-only repeat for a new answer", () => {
+  it("history-only repeat is not an answer at all (returns empty, never the history)", () => {
+    // 2026-11-23 事故后口径：原来这里断言「原样返回」，那正是把旧话当结果的来源；
+    // 现在返回空串，由 runAgyAcpTurn 判成 agy_replay_only_no_new_content。
     rememberAgyReply("甲", "s-6");
     rememberAgyReply("乙", "s-6");
-    expect(agyStripReplayedPrefix("甲乙", "s-6")).toBe("甲乙");
+    expect(agyStripReplayedPrefix("甲乙", "s-6")).toBe("");
+    expect(agyStripReplay("甲乙", "s-6").replayOnly).toBe(true);
   });
 
   it("keeps sessions isolated from each other", () => {
@@ -56,5 +59,37 @@ describe("agy replayed-prefix stripping", () => {
     rememberAgyReply("历史甲", "s-9");
     forgetAgySession("s-9");
     expect(agyStripReplayedPrefix("历史甲-新内容", "s-9")).toBe("历史甲-新内容");
+  });
+});
+// 2026-11-23 事故（通信鸽连发 5 次 374 字旧回复）——
+// 这一轮只有回放、没有新内容时，**必须判失败**，绝不能把旧文本当结果返回。
+describe("agy replay-only turn must fail, never echo history", () => {
+  it("纯回放（回复 == 历史拼接）⇒ replayOnly=true 且文本为空", () => {
+    rememberAgyReply("第一段回复。", "s-ro1");
+    rememberAgyReply("第二段回复。", "s-ro1");
+    const r = agyStripReplay("第一段回复。第二段回复。", "s-ro1");
+    expect(r.replayOnly).toBe(true);
+    expect(r.text).toBe("");
+  });
+
+  it("回放 + 新内容 ⇒ 只留新内容，不算 replayOnly", () => {
+    rememberAgyReply("旧回复A。", "s-ro2");
+    const r = agyStripReplay("旧回复A。这轮的新结果。", "s-ro2");
+    expect(r.replayOnly).toBe(false);
+    expect(r.text).toBe("这轮的新结果。");
+  });
+
+  it("合法的重复回答（连问两次都回「好」）不被误判", () => {
+    rememberAgyReply("好", "s-ro3");
+    const r = agyStripReplay("好", "s-ro3");
+    expect(r.replayOnly).toBe(false);
+    expect(r.text).toBe("好");
+  });
+
+  it("错误带人话与错误码（给用户看的那句不是码）", () => {
+    const e = new AgyReplayOnlyError();
+    expect(e.code).toBe("agy_replay_only_no_new_content");
+    expect(e.message).toContain("请重发一次");
+    expect(e.message).not.toContain("agy_replay_only_no_new_content");
   });
 });
