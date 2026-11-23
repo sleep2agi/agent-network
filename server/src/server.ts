@@ -327,12 +327,106 @@ function sweepStaleRateLimits(): void {
 }
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, includeProtocolTools = false, callerIdentityRejected = false): McpServer {
+//
+// 2026-11-23 —— 生产卡顿归因：`createServer()` 每条 /mcp 请求都要新建一次 McpServer，
+// 把 105 个工具（含 zod → JSON Schema 转换）重新注册一遍。本地 455 会话库实测：
+// 只发 JSON-RPC `ping`（完全不跑任何工具）也要 ~30 ms CPU/请求，而普通 REST
+// （/api/session-requests、/health）只有 1–1.3 ms。线上 ≈28 req/s 的 /mcp 洪峰下，
+// 光这一项就 ≈840 ms/s，正好对上「主线程吃满一个核 + 每 3–5 秒停顿一次」。
+// ⇒ 按调用方上下文缓存**已注册好工具的 McpServer**，复用时只 connect/handleRequest/close。
+//   缓存键由 createServer 的**同一个入参对象**生成（见 CREATE_SERVER_FIELDS），池子有上限，
+//   拿不到就现建，所以行为与「每次新建」一致，只是跳过重复注册。
+//   `COMMHUB_MCP_SERVER_POOL=0` 一键退回旧行为（每次新建，不复用），线上出问题不必回滚版本。
+export type CreateServerOptions = {
+  /** 调用方 IP：工具层用它做限流，所以进键。 */
+  clientIP: string | undefined;
+  /** 令牌绑定的网络（节点令牌/网络令牌），工具层据此收窄读范围。 */
+  enforceNetworkId: string | null | undefined;
+  /** 令牌代表的用户（人类令牌）。 */
+  enforceUserId: string | null | undefined;
+  /** 令牌代表的节点别名（节点令牌）。 */
+  callerAlias: string | null | undefined;
+  /** 令牌是不是节点令牌（决定 from 身份与工具可见性）。 */
+  callerTokenIsNetwork: boolean;
+  /** 令牌 id：工具层用它判「这条收件箱是不是我自己的」。 */
+  callerTokenId: string | null | undefined;
+  /** 是否额外列出协议工具（X-Anet-Tools: all）。 */
+  includeProtocolTools: boolean;
+  /** 令牌自称的节点身份与绑定不符（已拒绝）。 */
+  callerIdentityRejected: boolean;
+};
+
+/**
+ * 缓存键的字段清单 = CreateServerOptions 的**全部**字段。
+ * 加参数却忘了加进键里，会让「A 的实例服务 B 的请求」——所以键从这一份清单生成，
+ * 并有一条断言把「对象字段数/字段名」和这份清单钉在一起（见 mcp-server-pool-http.test.ts）。
+ */
+export const CREATE_SERVER_FIELDS = [
+  "clientIP", "enforceNetworkId", "enforceUserId", "callerAlias",
+  "callerTokenIsNetwork", "callerTokenId", "includeProtocolTools", "callerIdentityRejected",
+] as const;
+
+/** 池子上限：`COMMHUB_MCP_SERVER_POOL_MAX` 可调；每实例内存见 PR 描述。 */
+function serverPoolMax(): number {
+  const raw = Number(process.env.COMMHUB_MCP_SERVER_POOL_MAX);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(Math.round(raw), 4096) : 64;
+}
+
+/** `0` = 关闭复用（每次新建，等价旧行为）。默认开。 */
+function serverPoolEnabled(): boolean {
+  const raw = process.env.COMMHUB_MCP_SERVER_POOL;
+  return !(raw === "0" || raw === "false" || raw === "off");
+}
+
+const serverPool = new Map<string, McpServer[]>();
+let serverPoolSize = 0;
+let serverCreated = 0;
+let serverReused = 0;
+
+/** 键 = 清单里的字段按固定顺序取值（与 createServer 是同一个对象，不会漏字段）。 */
+export function poolKeyOf(o: CreateServerOptions): string {
+  return JSON.stringify(CREATE_SERVER_FIELDS.map(f => o[f]));
+}
+
+/** 取一台该上下文可用的 McpServer：池里有空闲的就复用，没有就新建。 */
+function acquireServer(opts: CreateServerOptions): { server: McpServer; key: string } {
+  const key = poolKeyOf(opts);
+  if (!serverPoolEnabled()) { serverCreated++; return { server: createServer(opts), key }; }
+  const idle = serverPool.get(key);
+  const server = idle && idle.length ? idle.pop()! : null;
+  if (server) { serverPoolSize--; serverReused++; return { server, key }; }
+  serverCreated++;
+  return { server: createServer(opts), key };
+}
+
+/** 一次请求结束后把 server 放回池（超过上限就丢弃，交给 GC）。 */
+function releaseServer(key: string, server: McpServer): void {
+  // 每次放回时重读上限：运维可以热调 env（下次释放生效），超限就丢给 GC。
+  if (!serverPoolEnabled() || serverPoolSize >= serverPoolMax()) return;
+  const idle = serverPool.get(key);
+  if (idle) { idle.push(server); serverPoolSize++; return; }
+  serverPool.set(key, [server]); serverPoolSize++;
+}
+
+/**
+ * 这台实例能不能回池：只有「正常应答（非 5xx）」才算状态可信。
+ * 抛异常的那条路径根本走不到这里（catch 里直接丢弃）。
+ */
+export function shouldPoolServer(res: { status: number } | null | undefined): boolean {
+  return !!res && res.status < 500;
+}
+
+/** 只读：池子/复用计数（只观测，不参与任何决策）。 */
+export function mcpServerPoolStats(): { pooled: number; created: number; reused: number; max: number; enabled: boolean } {
+  return { pooled: serverPoolSize, created: serverCreated, reused: serverReused, max: serverPoolMax(), enabled: serverPoolEnabled() };
+}
+
+export function createServer(o: CreateServerOptions): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId, { includeProtocol: includeProtocolTools }, callerIdentityRejected);
+  registerTools(server, o.clientIP, o.enforceNetworkId, o.enforceUserId, o.callerAlias, o.callerTokenIsNetwork, o.callerTokenId, { includeProtocol: o.includeProtocolTools }, o.callerIdentityRejected);
   return server;
 }
 
@@ -2283,17 +2377,37 @@ return Bun.serve({
         labelRoute(req, mcpParsedBody === undefined ? "?" : mcpRouteLabel(mcpParsedBody));
       }
       // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url), callerIdentityRejected);
+      // 复用池的键由这同一个对象生成（CREATE_SERVER_FIELDS = 全部字段，见 createServer 上方注释）。
+      const { server: mcpServer, key: mcpServerKey } = acquireServer({
+        clientIP,
+        enforceNetworkId: enforceNetId,
+        enforceUserId: authCtx?.userId || null,
+        callerAlias,
+        callerTokenIsNetwork: !!token?.startsWith("ntok_"),
+        callerTokenId: authCtx?.tokenId || null,
+        includeProtocolTools: wantsAllTools(req, url),
+        callerIdentityRejected,
+      });
       let response: Response;
+      let poolEligible = true;
       try {
         await mcpServer.connect(transport);
         response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
+        // 服务端错误（5xx）说明这台实例状态不明 ⇒ 不回池，交给 GC。
+        poolEligible = shouldPoolServer(response);
       } catch (e) {
         settleMcpInflight();
-        throw e;
+        throw e; // 抛异常路径：实例直接丢弃，不回池
       }
-      // Disconnect after response to prevent McpServer leak
-      setImmediate(() => { mcpServer.close().catch(() => {}).finally(settleMcpInflight); });
+      // Disconnect after response to prevent McpServer leak（复用池：close 之后 _transport 会清空，
+      // 所以这台 server 可以接着服务下一次同上下文请求；不 close 会造成 Handler 泄漏）。
+      // 只有 close 成功、且这次不是 5xx 才放回池子：状态不明的实例宁可丢给 GC 也不要复用。
+      setImmediate(() => {
+        mcpServer.close()
+          .then(() => { if (poolEligible) releaseServer(mcpServerKey, mcpServer); })
+          .catch(() => {})
+          .finally(settleMcpInflight);
+      });
       // #426: the MCP SDK's WebStandardStreamableHTTPServerTransport builds
       // its own Response with `Content-Type: text/event-stream` (or
       // `application/json` for JSON-mode) but WITHOUT charset. Legacy
