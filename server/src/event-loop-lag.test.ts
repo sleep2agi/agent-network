@@ -8,10 +8,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   eventLoopStats,
+  formatTopRoutes,
   noteRequestServed,
+  rankTopRoutes,
   recordGap,
   resetEventLoopLagForTests,
   startEventLoopLagMonitor,
+  STALL_TOP_ROUTES,
 } from "./event-loop-lag.js";
 import { formatSlowSql, slowSqlThresholdMs } from "./db-adapter.js";
 
@@ -68,6 +71,77 @@ describe("event-loop-lag: recordGap", () => {
     const s = eventLoopStats();
     expect(s.max_gap_ms).toBe(47_000);
     expect(s.last_gap_ms).toBe(260);
+  });
+});
+
+describe("event-loop-lag: 停顿归因（2026-11-23）", () => {
+  test("rankTopRoutes：按总耗时降序取前 5，保留次数/最大值", () => {
+    const top = rankTopRoutes([
+      { route: "a", count: 1, total_ms: 10, max_ms: 10 },
+      { route: "b", count: 3, total_ms: 90, max_ms: 40 },
+      { route: "c", count: 2, total_ms: 30, max_ms: 20 },
+      { route: "d", count: 1, total_ms: 5, max_ms: 5 },
+      { route: "e", count: 1, total_ms: 1, max_ms: 1 },
+      { route: "f", count: 1, total_ms: 100, max_ms: 100 },
+    ]);
+    expect(top.map(r => r.route)).toEqual(["f", "b", "c", "a", "d"]);
+    expect(top.length).toBe(STALL_TOP_ROUTES);
+    expect(top[1].count).toBe(3);
+    expect(top[1].max_ms).toBe(40);
+  });
+
+  test("recordGap：停顿记录里带上 top_routes（/health recent_stalls 读的就是它）", () => {
+    resetEventLoopLagForTests();
+    recordGap(30_000, {
+      intervalMs: 250, thresholdMs: 2_000, rssMb: 900, served: 120,
+      topRoutes: [
+        { route: "POST /mcp tools/call report_status", count: 40, total_ms: 5_000, max_ms: 300 },
+        { route: "GET /api/inbox", count: 60, total_ms: 2_000, max_ms: 120 },
+      ],
+    });
+    const s = eventLoopStats().recent_stalls[0];
+    expect(s.requests_since_last_tick).toBe(120);
+    expect(s.top_routes?.map(r => r.route)).toEqual(["POST /mcp tools/call report_status", "GET /api/inbox"]);
+    expect(s.top_routes?.[0].total_ms).toBe(5000);
+  });
+
+  test("未接归因源时停顿记录不出现 top_routes（与旧行为一致）", () => {
+    resetEventLoopLagForTests();
+    recordGap(30_000, { intervalMs: 250, thresholdMs: 2_000 });
+    expect(eventLoopStats().recent_stalls[0].top_routes).toBeUndefined();
+  });
+
+  test("formatTopRoutes：空/未定义为空串，有数据时带次数与最大值", () => {
+    expect(formatTopRoutes(undefined)).toBe("");
+    expect(formatTopRoutes([])).toBe("");
+    const line = formatTopRoutes([{ route: "GET /api/inbox", count: 7, total_ms: 140.4, max_ms: 90.2 }]);
+    expect(line).toContain("GET /api/inbox ×7 140ms max 90ms");
+  });
+
+  test("monitor：每个 tick 都抽干归因窗口，停顿日志与记录里带前 5", async () => {
+    resetEventLoopLagForTests();
+    const logs: string[] = [];
+    let drains = 0;
+    const timer = startEventLoopLagMonitor({
+      intervalMs: 20,
+      thresholdMs: 40,
+      log: (m) => logs.push(m),
+      rssMb: () => 321,
+      bootGraceMs: 0,
+      tickRoutes: () => {
+        drains++;
+        // 每 tick 只给一条，证明窗口是「这次窗口」而不是累积好几轮
+        return [{ route: "GET /api/inbox", count: 1, total_ms: 5, max_ms: 5 }];
+      },
+    });
+    const until = performance.now() + 120;
+    while (performance.now() < until) { /* spin */ }
+    await Bun.sleep(60);
+    clearInterval(timer);
+    expect(drains).toBeGreaterThan(0);
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs[0]).toContain("top: GET /api/inbox ×1 5ms max 5ms");
+    expect(eventLoopStats().recent_stalls[0].top_routes?.[0].route).toBe("GET /api/inbox");
   });
 });
 

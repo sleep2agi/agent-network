@@ -134,7 +134,7 @@ import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
-import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader } from "./route-timing.js";
+import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader, takeTickRouteCosts } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
 import { createSessionSourceTransport } from "./session-source-transport.js";
@@ -8150,7 +8150,9 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // 的入口（测试用 bootServer() 不会背这个 timer）。停顿日志与
   // `[commhub retention]` / `[commhub slow-sql]` 共用前缀族，便于一次 grep 出
   // “同一秒里 retention 跑了 10 秒 + 有两百个请求在排队”。
-  const eventLoopLagTimer = startEventLoopLagMonitor();
+  // 2026-11-23 —— 归因：每个 tick 抽干一次「本窗口按路由累计的耗时」，停顿日志带上前 5 条。
+  // 抽干只做清空，排序/取前 N 只在真停顿那次做，正常 tick 没有额外排序开销。
+  const eventLoopLagTimer = startEventLoopLagMonitor({ tickRoutes: takeTickRouteCosts });
 
   // #2664 —— 两个历史回填（node_id 映射 / task_terminal_events）原来在 import 阶段跑，
   // 生产实测合计约 3.5 秒，正好落在会话重连风暴窗口里。现在等监听稳定后再跑：
