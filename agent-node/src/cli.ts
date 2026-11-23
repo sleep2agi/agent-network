@@ -1646,6 +1646,13 @@ const taskTraceLog = (line: string) => {
 const agyLoginManager = RUNTIME === "antigravity" ? createAgyLoginManager() : null;
 
 // #5321 —— agy 的模型清单 / 登录状态：后台每 10 分钟探测一次，心跳只读缓存（绝不等探测）。
+/**
+ * #5332 —— 当前 claude 尝试的 AbortController（停止/打断用）。
+ * processWithClaude 每次尝试创建它并注册到 options.abortController；这里留一个句柄，
+ * 收到 control=interrupt 时 abort 当前这一次。只在 claude 运行时非 null。
+ */
+let currentClaudeAbort: AbortController | null = null;
+
 const agyCatalogCache = RUNTIME === "antigravity"
   ? (() => {
       const { createAgyCatalogCache } = require("./runtime/antigravity-acp/agy-catalog.js") as typeof import("./runtime/antigravity-acp/agy-catalog.js");
@@ -1666,8 +1673,11 @@ const agyCatalogCache = RUNTIME === "antigravity"
  */
 function turnControlCapabilities(): { turn_interrupt_capable: boolean; turn_steer_capable: boolean } {
   const opencodeCopresence = RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeMode === "copresence";
+  // claude（claude-agent-sdk）已有 AbortController 通道 ⇒ 只支持「停止」，**不支持插话**
+  // （SDK query() 是一次性 prompt，没有同轮再喂一句的接口；steer 要改 streaming-input，单独立卡）。
+  const claudeInterrupt = RUNTIME === "claude";
   return {
-    turn_interrupt_capable: opencodeCopresence,
+    turn_interrupt_capable: opencodeCopresence || claudeInterrupt,
     turn_steer_capable: opencodeCopresence,
   };
 }
@@ -3787,6 +3797,8 @@ async function processWithClaude(
         let inner = "";
         const ac = new AbortController();
         options.abortController = ac;
+        // #5332 —— 让 processControlInstruction 能停止当前这一次尝试
+        currentClaudeAbort = ac;
         const forward = () => ac.abort();
         signal.addEventListener("abort", forward, { once: true });
         // #4010 —— idle 看门狗：每收到一条消息 poke 一次；连续无消息到点就 abort。
@@ -6987,13 +6999,17 @@ async function processControlInstruction(msg: any): Promise<void> {
       await ackMessage(msg.id);
       return;
     }
-    const out = await interruptCurrentTurn({
-      readEndpoint: () => {
-        const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
-        return ep ? { url: ep.url, authorization: ep.authorization } : null;
-      },
-      sessionId: () => opencodeSessionId ?? null,
-    });
+    // #5332 —— claude：直接 abort 当前尝试（AbortController 已在 processWithClaude 里注册）。
+    // 没有在飞的尝试 ⇒ 明确回 no_active_turn，不假装成功。
+    const out = RUNTIME === "claude"
+      ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const }) : { ok: false as const, reason: "no_active_turn" })
+      : await interruptCurrentTurn({
+        readEndpoint: () => {
+          const ep = readOpenCodeV2CatalogEndpoint(NODE_DIR) ?? readOpenCodeV2CatalogEndpoint(process.cwd());
+          return ep ? { url: ep.url, authorization: ep.authorization } : null;
+        },
+        sessionId: () => opencodeSessionId ?? null,
+      });
     log(`[control] interrupt → ${JSON.stringify(out)}`);
     try {
       await sendReply(
