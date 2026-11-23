@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { markAcked, markReply, sweepUnconfirmed, verdictFor, _resetForTest, _sizeForTest } from "./acked-unconfirmed.js";
+import { markAcked, markReply, rowExpectsResponse, sweepUnconfirmed, verdictFor, _resetForTest, _sizeForTest } from "./acked-unconfirmed.js";
 
 const W = 10 * 60 * 1000;
 beforeEach(_resetForTest);
@@ -119,5 +119,29 @@ describe("B 止血：任务粒度的投递证据（先回执、后 ack 也不误
     markAcked({ messageId: "t1", alias: "n", networkId: "net", nowMs: t0 + 61 * 60 * 1000, taskId: "t1" });
     const hit = sweepUnconfirmed(t0 + 61 * 60 * 1000 + W, W);
     expect(hit.map(h => h.messageId)).toEqual(["t1"]);
+  });
+});
+
+describe("rowExpectsResponse：哪些行值得等一个回复", () => {
+  test("任务 / 广播行：期待回复", () => {
+    expect(rowExpectsResponse({ type: "task", requiresResponse: "reply" })).toBe(true);
+    expect(rowExpectsResponse({ type: "broadcast", requiresResponse: "reply" })).toBe(true);
+    expect(rowExpectsResponse({ type: "control", requiresResponse: "reply" })).toBe(true);
+    expect(rowExpectsResponse({ type: null, requiresResponse: "reply" })).toBe(true);
+  });
+
+  test("普通聊天消息行：不期待回复（它根本不进模型，只会被 ack）", () => {
+    expect(rowExpectsResponse({ type: "message", requiresResponse: "none" })).toBe(false);
+    // 旧数据里 send_message 没显式写 requires_response，吃的是列默认值 'reply'。
+    expect(rowExpectsResponse({ type: "message", requiresResponse: "reply" })).toBe(false);
+  });
+
+  test("别人的任务结果行（reply）：不期待回复（回它就变乒乓）", () => {
+    expect(rowExpectsResponse({ type: "reply", requiresResponse: "none" })).toBe(false);
+    expect(rowExpectsResponse({ type: "reply", requiresResponse: "reply" })).toBe(false);
+  });
+
+  test("显式 requires_response='none' 优先于 type", () => {
+    expect(rowExpectsResponse({ type: "task", requiresResponse: "none" })).toBe(false);
   });
 });

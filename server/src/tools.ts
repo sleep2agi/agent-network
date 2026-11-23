@@ -10,7 +10,7 @@ import { requestProviderSnapshot, requestProviderWrite, requestProviderCollectio
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestSecretUi } from "./secret-request-ui.js";
 import { validScopedSecretKey } from "./shared/scoped-secret-contract";
-import { markAcked, markReply } from "./acked-unconfirmed.js";
+import { markAcked, markReply, rowExpectsResponse } from "./acked-unconfirmed.js";
 import { getSessionRequest, takePendingForDaemon, ackSessionRequest } from "./opencode-session-requests.js";
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
 import { adoptedCloneSourceRow, requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
@@ -1839,7 +1839,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // （口径 ①，负责⼈ 2026-11-20）。登记失败绝不能影响 ack 本身。
         // 只有「期待回复」的行才进 B 止血的回退窗口：通知 / 节点间回执（requires_response='none'）
         // 的 ack 本身就是终点，等不到回复也不该被回退成未读再重投（否则全网原地打转）。
-        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null, expectsResponse: inboxTask.requires_response !== "none", taskId: inboxTask.task_id }); } catch {}
+        // 普通聊天消息（type='message'）也不会进窗口：它根本不进模型，收件方只 ack 不回复，
+        // 等回复＝等一个永远不会来的东西（见 acked-unconfirmed.ts 的 rowExpectsResponse）。
+        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null, expectsResponse: rowExpectsResponse({ type: inboxTask.type, requiresResponse: inboxTask.requires_response }), taskId: inboxTask.task_id }); } catch {}
       }
       if (result.changes === 0) {
         return {
@@ -2575,11 +2577,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const meta = isSteer ? JSON.stringify({ delivery: "steer" }) : null;
       const id = uuidv4();
       db.run(
-        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id, meta_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
         [id, targetAlias, target.session?.node_id ?? null, isControl ? "control" : "message",
          isControl ? "high" : "normal", isControl ? JSON.stringify({ op: "interrupt" }) : message,
-         from_session, effectiveNetId ?? null, meta]
+         from_session, isControl ? "reply" : "none", effectiveNetId ?? null, meta]
       );
 
       // 同 send_task：可达性用订阅者注册表判，不用心跳时间戳猜。
