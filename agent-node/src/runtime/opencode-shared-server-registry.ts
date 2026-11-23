@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { assertPrivateFile, type CheckPrivateFileDeps } from "../shared/private-file-acl.js";
 
 export type HostSharedOpenCodeServer = {
   opencodeSharedServerUrl: string;
@@ -7,17 +8,21 @@ export type HostSharedOpenCodeServer = {
   clientBinDir?: string;
 };
 
-export function readHostSharedOpenCodeServer(path: string): HostSharedOpenCodeServer | undefined {
+export function readHostSharedOpenCodeServer(
+  path: string,
+  passwordCheckDeps?: CheckPrivateFileDeps,
+): HostSharedOpenCodeServer | undefined {
   if (!existsSync(path)) return undefined;
   const entry = JSON.parse(readFileSync(path, "utf8"));
   if (!entry || typeof entry.url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+$/.test(entry.url)
     || typeof entry.passwordFile !== "string" || !isAbsolute(entry.passwordFile)) {
     throw new Error("shared_opencode_registry_invalid: expected loopback url and absolute passwordFile");
   }
-  const passwordStat = statSync(entry.passwordFile);
-  if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
-    throw new Error("shared_opencode_password_file_not_private");
-  }
+  assertPrivateFile(entry.passwordFile, {
+    errorPrefix: "shared_opencode_password_file_not_private",
+    label: "共享 OpenCode Server 密码文件",
+    deps: passwordCheckDeps,
+  });
   let clientBinDir: string | undefined;
   if (entry.clientBinDir !== undefined) {
     if (typeof entry.clientBinDir !== "string" || !isAbsolute(entry.clientBinDir)

@@ -4852,10 +4852,11 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       if (typeof sharedServerUrl !== "string" || typeof sharedServerPasswordFile !== "string") {
         throw new Error("Shared OpenCode Server requires URL and password file");
       }
-      const passwordStat = statSync(sharedServerPasswordFile);
-      if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
-        throw new Error("Shared OpenCode Server password file must be a private regular file");
-      }
+      const { assertPrivateFile } = await import("./shared/private-file-acl.js");
+      assertPrivateFile(sharedServerPasswordFile, {
+        errorPrefix: "Shared OpenCode Server password file must be a private regular file",
+        label: "共享 OpenCode Server 密码文件",
+      });
       sharedServer = { url: sharedServerUrl, password: readFileSync(sharedServerPasswordFile, "utf8").trim(), passwordFile: sharedServerPasswordFile };
     }
     const borrowed = opencodeBorrowedCli
