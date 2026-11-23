@@ -24,6 +24,7 @@ import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config
 import { persistVariantToConfig, shouldPersistVariant, startupVariantPlan } from "./runtime/opencode-copresence/variant-persist.js";
 import { createPromptTracker } from "./shared/interactive-prompt.js";
 import { cancelActiveAcpTurn } from "./runtime/acp-runner/active-turn";
+import { createControlLane, createHandledIds } from "./control-lane";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -1681,7 +1682,8 @@ function turnControlCapabilities(): { turn_interrupt_capable: boolean; turn_stee
   // codex-app-server：协议层有 turn/interrupt（codex 二进制里确认存在），可停止；插话仍只有 opencode V2 共存
   const codexAppServerInterrupt = RUNTIME === "codex-app-server";
   // ACP 运行时（antigravity，以及同一 runner 的 grok ACP）走 session/cancel 通知
-  const acpInterrupt = RUNTIME === "antigravity" || RUNTIME === "grok";
+  // Grok 的 CLI 模式不走 ACP，没有取消通道 ⇒ 不报能力。
+  const acpInterrupt = RUNTIME === "antigravity" || (RUNTIME === "grok" && GROK_EXECUTION_MODE === "acp");
   return {
     turn_interrupt_capable: opencodeCopresence || claudeInterrupt || codexAppServerInterrupt || acpInterrupt,
     turn_steer_capable: opencodeCopresence,
@@ -7003,6 +7005,12 @@ async function ackAndRecordConsumed(msg: any, label: string): Promise<void> {
 // 收到 control 事件时立刻并发调用，不等回合结束。
 async function processControlInstruction(msg: any): Promise<void> {
   if (inflightMessageIds.has(msg.id)) return; // 并发路径与串行 fallback 竞态：只处理一次
+  // 已经处理过的 control 行又被取到（串行通道在 ack 生效前就读到了它，或上次 ack 没成功）：
+  // 只补一次 ack，绝不再停一次、再回一条。
+  if (handledControlIds.has(msg.id)) {
+    await ackMessage(msg.id).catch((e: any) => warn(`[control] re-ack failed: ${e?.message ?? e}`));
+    return;
+  }
   inflightMessageIds.add(msg.id);
   try {
     const op = parseControlOp(msg.content);
@@ -7015,8 +7023,11 @@ async function processControlInstruction(msg: any): Promise<void> {
     // 没有在飞的尝试 ⇒ 明确回 no_active_turn，不假装成功。
     const out = RUNTIME === "claude"
       ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const }) : { ok: false as const, reason: "no_active_turn" })
-      : (RUNTIME === "antigravity")
+      : (RUNTIME === "antigravity" || (RUNTIME === "grok" && GROK_EXECUTION_MODE === "acp"))
       ? cancelActiveAcpTurn()
+      : RUNTIME === "grok" || RUNTIME === "codex"
+      // 这些运行方式没有停止通道：如实说不支持，不借用 OpenCode 的通道去试。
+      ? { ok: false as const, reason: "not_supported" }
       : RUNTIME === "codex-app-server"
       ? await (async () => {
           // #5332 —— codex app-server 协议有 turn/interrupt；没有在飞会话就明确回 no_active_turn
@@ -7032,6 +7043,7 @@ async function processControlInstruction(msg: any): Promise<void> {
         sessionId: () => opencodeSessionId ?? null,
       });
     log(`[control] interrupt → ${JSON.stringify(out)}`);
+    handledControlIds.add(msg.id);
     try {
       await sendReply(
         msg.from_session || "hub",
@@ -7047,6 +7059,18 @@ async function processControlInstruction(msg: any): Promise<void> {
     inflightMessageIds.delete(msg.id);
   }
 }
+
+const handledControlIds = createHandledIds();
+// 停止指令的独立通道：Hub 一通知就取、就处理，所有运行时通用，不排在正在跑的回合后面。
+// 取 100 条、按优先级排（control 行是 high），队列再深也取得到。
+const drainControlNow = createControlLane<any>({
+  fetchInbox: async () => {
+    const result = await callCommHub("get_inbox", { alias: await liveAlias(), limit: 100 });
+    return result?.messages || [];
+  },
+  handle: processControlInstruction,
+  warn,
+});
 
 async function processInbox() {
   // (1) Drain leftovers from previous runs.
@@ -8638,19 +8662,14 @@ async function connectSSE() {
                 scheduleWorkInboxDrain();
                 // 但串行 work lane 会被正在跑的回合占住，interrupt 要等回合跑完才被处理 →
                 // interrupted:false。所以这里**并发**取一次 control 行立刻打断，不等回合结束。
-                void (async () => {
-                  try {
-                    const rows = await getInbox();
-                    const ctrl = rows.find((m: { type?: string }) => (m.type || "task") === "control");
-                    if (ctrl) await processControlInstruction(ctrl);
-                  } catch (e: any) {
-                    warn(`[control] concurrent drain failed: ${e?.message || e}`);
-                  }
-                })();
+                void drainControlNow();
               }
             } else if (["new_task", "new_message", "broadcast"].includes(ev.type)) {
-              log(`← SSE ${ev.type}`);
+              log(`← SSE ${ev.type}${(ev as any).control ? ` control=${(ev as any).control}` : ""}`);
               scheduleWorkInboxDrain();
+              // 其它运行时（claude / codex-app-server / antigravity / grok）同样如此：
+              // 回合进行中，串行通道被占住，停止指令必须走并发通道才打得到正在跑的回合。
+              if ((ev as any).control) void drainControlNow();
             }
             if (ev.type === "new_reply") {
               log(`← SSE reply from ${ev.from || "?"}${ev.in_reply_to ? ` (task ${ev.in_reply_to.slice(0, 8)})` : ""}`);

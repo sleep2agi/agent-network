@@ -29,3 +29,17 @@ describe("#5332 ACP cancel", () => {
     expect(getActiveAcpTurn()?.sessionId).toBe("b");
   });
 });
+
+describe("回合结束后撤销登记", () => {
+  const src = require("node:fs").readFileSync(require("node:path").join(import.meta.dir, "../grok-build-acp/runtime.ts"), "utf8") as string;
+  test("ACP 回合在 finally 里撤销自己的登记，之后的停止得到 no_active_turn", () => {
+    const tail = src.slice(src.lastIndexOf("  } finally {\n    // 回合结束就撤销登记"));
+    expect(tail).toContain("if (activeTurn) clearActiveAcpTurn(activeTurn);");
+    expect(tail.indexOf("clearActiveAcpTurn(activeTurn)")).toBeLessThan(tail.indexOf("await client.close()"));
+    const turn = { client: { notify: () => { throw new Error("antigravity ACP client not started or already exited"); } }, sessionId: "s", runtime: "acp" };
+    __resetActiveAcpTurnForTest();
+    setActiveAcpTurn(turn);
+    clearActiveAcpTurn(turn);
+    expect(cancelActiveAcpTurn()).toEqual({ ok: false, reason: "no_active_turn" });
+  });
+});

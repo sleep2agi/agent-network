@@ -1,4 +1,4 @@
-import { setActiveAcpTurn, cancelActiveAcpTurn } from "../acp-runner/active-turn";
+import { setActiveAcpTurn, clearActiveAcpTurn, cancelActiveAcpTurn, type ActiveAcpTurn } from "../acp-runner/active-turn";
 import { GrokAcpClient } from "./client";
 import { newGrokTurnState, reduceGrokAcpNotification } from "./events";
 import type { GrokAcpNotification, GrokTurnState } from "./events";
@@ -279,6 +279,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   const childEnv = { ...process.env, ...opts.env };
   const client = new GrokAcpClient(opts.runtimeLabel ?? "grok");
   const state = newGrokTurnState(opts.sessionId);
+  let activeTurn: ActiveAcpTurn | null = null;
   let acceptingPromptUpdates = false;
 
   // 握手期（acceptingPromptUpdates=false）收到的 assistant 文本 = session/load 回放出来的历史。
@@ -395,7 +396,8 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     // #5332 —— 登记当前 ACP 回合，供 control=interrupt 发 session/cancel（agy 与本实现共用）
     if (typeof sessionId === "string" && sessionId) {
       // GrokAcpTurnOptions 没有 runtime 字段：这里只记「ACP 通用」，能力位判断在 cli.ts 按 RUNTIME 做
-      setActiveAcpTurn({ client: client as any, sessionId, runtime: "acp" });
+      activeTurn = { client: client as any, sessionId, runtime: "acp" };
+      setActiveAcpTurn(activeTurn);
     }
     if (!sessionId) throw new Error(`${opts.runtimeLabel ?? "grok"} ACP session response did not include sessionId`);
 
@@ -463,6 +465,8 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       modelSource: modelCheck.modelSource,
     };
   } finally {
+    // 回合结束就撤销登记：之后再来的停止指令应得到 no_active_turn，而不是去通知一个已关闭的进程。
+    if (activeTurn) clearActiveAcpTurn(activeTurn);
     client.off("notification", onNotification);
     if (opts.onStderr) {
       client.off("stderr", onStderr);

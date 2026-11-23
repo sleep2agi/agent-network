@@ -15,7 +15,7 @@ describe("control 消息必须唤醒工作通道", () => {
     expect(block).toContain("scheduleInformationalInboxDrain()");
     // control 事件既唤醒串行工作通道（fallback），又并发取 control 行立刻打断（不串在回合后面）。
     expect(block).toContain("if ((ev as any).control)");
-    expect(block).toContain("processControlInstruction");
+    expect(block).toContain("void drainControlNow()");
   });
   test("工作通道的分派里认识 control（不把它当任务跑）", () => {
     expect(src).toContain('if ((msg.type || "task") === "control")');
