@@ -117,6 +117,7 @@ export interface OpencodeThinkResult {
 }
 
 export interface OpencodeRuntimeSession {
+  usageDb?: string;
   client: OpencodeAcpClient;
   sessionId: string;
 }
@@ -331,7 +332,7 @@ export async function openOpencodeRuntime(opts: {
       }
     }
     if (opts.onSession) await opts.onSession(sessionId);
-    return { client, sessionId };
+    return { client, sessionId, usageDb: childEnv.XDG_DATA_HOME ? resolve(childEnv.XDG_DATA_HOME, 'opencode', 'opencode.db') : undefined };
   } catch (error) {
     // initialize/session failures happen before a runtime session is returned;
     // without this boundary the ACP child survives with no owner.

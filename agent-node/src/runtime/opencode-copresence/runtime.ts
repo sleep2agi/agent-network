@@ -194,6 +194,7 @@ export interface OpenCodeCopresenceSubmitResult {
 }
 
 export interface OpenCodeCopresenceSession {
+  readonly usageDb?: string;
   readonly url: string;
   readonly sessionId: string;
   readonly attachScriptPath: string;
@@ -934,6 +935,7 @@ export async function openVettedOpenCodeCopresence(
       url,
       sessionId: created.id,
       attachScriptPath,
+      usageDb: !borrowed && childEnv.XDG_DATA_HOME ? join(childEnv.XDG_DATA_HOME, 'opencode', 'opencode.db') : undefined,
       get isRunning() {
         return !closed && !unknownWrite && (borrowed ? borrowed.isAdmitted : child!.exitCode === null && child!.signalCode === null);
       },

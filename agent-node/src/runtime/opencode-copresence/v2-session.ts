@@ -727,6 +727,7 @@ export async function openVettedOpenCodeV2Copresence(
       return !o.isBusy();
     };
     const session: OpenCodeCopresenceSession = {
+      usageDb: !shared && childEnv.XDG_DATA_HOME ? childEnv.OPENCODE_DB || join(childEnv.XDG_DATA_HOME, 'opencode', 'opencode.db') : undefined,
       url,
       sessionId,
       ...(shared ? { async forkSession(sourceSessionId: string): Promise<import("./v2-fork").V2ForkResult> {

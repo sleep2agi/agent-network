@@ -21,6 +21,13 @@ function snapshotSchema(): any {
 }
 
 describe("#5125 report_status.config_snapshot", () => {
+  test('#5338 retains measured usage, explicit null, and legacy omission', () => {
+    const schema = snapshotSchema(), value = {tokens:17, since:'2026-11-23', cost_usd:null};
+    expect(schema.parse({usage_week:value}).usage_week).toEqual(value);
+    expect(schema.parse({usage_week:null}).usage_week).toBeNull();
+    expect(schema.parse({}).usage_week).toBeUndefined();
+    expect(schema.parse({usage_week:{...value,tokens:-1},model:'m'})).toMatchObject({usage_week:null,model:'m'});
+  });
   test("workdir 原样保留（不是被当未知键丢掉）", () => {
     const parsed = snapshotSchema().parse({ workdir: "/srv/work" });
     expect(parsed.workdir).toBe("/srv/work");

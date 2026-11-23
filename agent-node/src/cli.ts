@@ -56,7 +56,9 @@ import {
 } from "./runtime/grok-copresence/platform";
 import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copresence/active-network-task-marker.js";
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
-import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
+import { describeLargeCodexThreadBeforeResume, findCodexRolloutFile } from "./runtime/codex-thread-size-check.js";
+import { usageSampler, readUsageLog, claudeLog, openCodeWeek } from '../../agent-network/src/usage-week';
+const sampleUsageWeek = usageSampler();
 import { nodeRolloutGuard, SDK_POINT_AT_NEWER_CODEX } from "./runtime/codex-rollout-guard-node.js";
 import { describeMissingOrdinalFailure, probeCodexVersionCached } from "./runtime/codex-rollout-history-guard.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
@@ -2262,6 +2264,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
+      usage_week: await nodeUsageWeek(),
       // #5125 续 —— 上报本节点的工作目录（Hub 的 fork 向导要显示「与源节点共用目录」）。
       // 放快照顶层而不是 flags：flags 参与 config content-match，加键会让旧 Hub 的比对漂移。
       ...workdirSnapshotField(process.cwd()),
@@ -4443,6 +4446,18 @@ async function processWithCodex(
 // Preview.N+1 (after Vincent macOS verify) will flip the default.
 let codexStdio: import("./runtime/codex-stdio-client").CodexStdioClient | null = null;
 let codexStdioThreadId: string | null = null;
+function nodeUsageWeek() {
+  if (RUNTIME === 'claude') return sampleUsageWeek(claudeSessionId || '', () => readUsageLog('claude', claudeLog(claudeSessionId)));
+  if ((RUNTIME === 'codex' || RUNTIME === 'codex-app-server') && NODE_CODEX_HOME) {
+    const id = (RUNTIME === 'codex' ? codexThread?.id : codexStdioThreadId || codexAppServerThreadId) || SESSION_ID;
+    return id ? sampleUsageWeek(id, () => readUsageLog('codex', findCodexRolloutFile(join(NODE_CODEX_HOME, 'sessions'), id))) : null;
+  }
+  if (RUNTIME === 'opencode') {
+    const s = opencodeCopresenceSession ?? opencodeRuntimeSession;
+    if (s?.usageDb) return sampleUsageWeek(`${s.usageDb}:${s.sessionId}`, () => openCodeWeek(s.usageDb!, s.sessionId, OPENCODE_GENERATION === 'v2'));
+  }
+  return null;
+}
 // #553 — the thread this node continues: the recorded `session` at boot, then
 // the thread of the last turn that completed. It survives an app-server exit
 // (which only clears codexStdioThreadId), so the respawned app-server resumes
