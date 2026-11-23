@@ -1810,13 +1810,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // the original row can have id == task_id but is already ACKed, while
       // the current row has a fresh transport id and the same logical task_id.
       const inboxTaskParams: any[] = [message_id, alias];
-      let inboxTaskSql = `SELECT id, type, COALESCE(task_id, id) AS task_id
+      let inboxTaskSql = `SELECT id, type, requires_response, COALESCE(task_id, id) AS task_id
          FROM inbox
          WHERE session_name = ?2 AND acked = 0
            AND (id = ?1 OR (type = 'task' AND task_id = ?1))`;
       inboxTaskSql = addScope(inboxTaskSql, inboxTaskParams, effectiveNetId);
       inboxTaskSql += " ORDER BY created_at DESC LIMIT 1";
-      const inboxTask = db.get<{ id: string; type: string; task_id: string }>(inboxTaskSql, ...inboxTaskParams);
+      const inboxTask = db.get<{ id: string; type: string; requires_response: string | null; task_id: string }>(inboxTaskSql, ...inboxTaskParams);
       if (!inboxTask) {
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or already acknowledged" }) }],
@@ -1829,7 +1829,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (result.changes > 0) {
         // B 止血：记下「这条被签收了」。若窗口内该节点没有任何回复，会被扫描回退未读并告警
         // （口径 ①，负责⼈ 2026-11-20）。登记失败绝不能影响 ack 本身。
-        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null }); } catch {}
+        // 只有「期待回复」的行才进 B 止血的回退窗口：通知 / 节点间回执（requires_response='none'）
+        // 的 ack 本身就是终点，等不到回复也不该被回退成未读再重投（否则全网原地打转）。
+        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null, expectsResponse: inboxTask.requires_response !== "none" }); } catch {}
       }
       if (result.changes === 0) {
         return {

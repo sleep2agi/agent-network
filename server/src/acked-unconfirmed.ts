@@ -14,6 +14,16 @@ export type AckRecord = {
   networkId: string | null;
   ackedAtMs: number;
   hasReply: boolean;
+  /**
+   * 这条消息是否期待一个回复。
+   *
+   * 口径 ①（「该 alias 在窗口内是否产生过任何回复」作投递证据）只对**期待回复**的行成立：
+   * 通知 / 节点间回执这类 `requires_response = 'none'` 的行，ack 本身就是终点，
+   * 没有回复可等。把它们也拉进回退窗口 ⇒ ack 10 分钟后被回退成未读 ⇒ hub 重新投递 ⇒
+   * 节点再 ack ⇒ 再回退……全网都在原地打转（生产实测：orphan 通知 50 条 / idem 262 条
+   * 被反复回退，29,856 条 reply 型 inbox 行处于未读状态）。
+   */
+  expectsResponse: boolean;
 };
 
 export type SweepVerdict =
@@ -33,10 +43,18 @@ export function verdictFor(r: AckRecord, nowMs: number, windowMs: number): Sweep
 const acks = new Map<string, AckRecord>();
 const keyOf = (alias: string, networkId: string | null, messageId: string) => `${networkId ?? "global"}:${alias}:${messageId}`;
 
-export function markAcked(input: { messageId: string; alias: string; networkId: string | null; nowMs?: number }): void {
+export function markAcked(input: { messageId: string; alias: string; networkId: string | null; nowMs?: number; expectsResponse?: boolean }): void {
   const k = keyOf(input.alias, input.networkId, input.messageId);
   if (acks.has(k)) return;
-  acks.set(k, { messageId: input.messageId, alias: input.alias, networkId: input.networkId, ackedAtMs: input.nowMs ?? Date.now(), hasReply: false });
+  acks.set(k, {
+    messageId: input.messageId,
+    alias: input.alias,
+    networkId: input.networkId,
+    ackedAtMs: input.nowMs ?? Date.now(),
+    hasReply: false,
+    // 默认 true：拿不准时按旧口径（等回复）处理，不改变既有行为。
+    expectsResponse: input.expectsResponse ?? true,
+  });
 }
 
 /** 该 alias 产生过任何出站内容时调用：把窗口内所有待确认记录标成已投递。 */
@@ -48,6 +66,8 @@ export function markReply(alias: string, networkId: string | null): void {
 export function sweepUnconfirmed(nowMs: number, windowMs: number): AckRecord[] {
   const out: AckRecord[] = [];
   for (const [k, r] of acks) {
+    // 不期待回复的行：ack 即终点，直接清掉，不进回退窗口（见 AckRecord.expectsResponse）。
+    if (!r.expectsResponse) { acks.delete(k); continue; }
     const v = verdictFor(r, nowMs, windowMs);
     if (v.kind === "unconfirmed") { out.push(r); acks.delete(k); }
     else if (v.kind === "delivered") acks.delete(k);
