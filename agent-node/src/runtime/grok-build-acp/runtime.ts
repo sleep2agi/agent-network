@@ -158,6 +158,11 @@ export interface GrokAcpTurnResult {
   stopReason?: string;
   promptResponse: unknown;
   state: GrokTurnState;
+  /**
+   * 2026-11-23 —— 握手阶段（session/load 回放）收到的助手文本（agent_message_chunk 拼接）。
+   * antigravity 用它给「历史回复」做种子：进程重启后也能识别回放（见 antigravity-acp/runtime.ts）。
+   */
+  handshakeReplayText?: string;
   /** #1958 — model id the session actually ran with, when the agent told us. */
   effectiveModel?: string;
   /**
@@ -276,7 +281,16 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   const state = newGrokTurnState(opts.sessionId);
   let acceptingPromptUpdates = false;
 
+  // 握手期（acceptingPromptUpdates=false）收到的 assistant 文本 = session/load 回放出来的历史。
+  let handshakeReplayText = "";
   const onNotification = (msg: GrokAcpNotification) => {
+    if (!acceptingPromptUpdates) {
+      const p: any = (msg as any)?.params;
+      const u: any = p?.update;
+      if (msg?.method === "session/update" && u?.sessionUpdate === "agent_message_chunk" && u?.content?.type === "text" && typeof u.content.text === "string") {
+        handshakeReplayText += u.content.text;
+      }
+    }
     reduceGrokAcpNotification(state, msg, { ignoreTurnUpdates: !acceptingPromptUpdates });
     opts.onEvent?.(msg, state);
   };
@@ -441,6 +455,7 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     return {
       sessionId,
       replyText: state.replyText,
+      ...(handshakeReplayText ? { handshakeReplayText } : {}),
       stopReason: state.lastStopReason,
       promptResponse,
       state,

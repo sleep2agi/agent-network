@@ -54,19 +54,19 @@ export function agyStripReplayedPrefix(reply: string, sessionId: string | undefi
   return stripOnce(reply, sessionId).text;
 }
 
-function stripOnce(reply: string, sessionId: string | undefined): { text: string; stripped: boolean } {
-  if (!sessionId) return { text: reply, stripped: false };
+function stripOnce(reply: string, sessionId: string | undefined): { text: string; stripped: boolean; k: number } {
+  if (!sessionId) return { text: reply, stripped: false, k: 0 };
   const prevs = repliesBySession.get(sessionId);
-  if (!prevs?.length) return { text: reply, stripped: false };
+  if (!prevs?.length) return { text: reply, stripped: false, k: 0 };
   // k = 1..n：取最后 k 条按记录顺序拼接，从最长的开始试（n 往下到 1）
   for (let k = prevs.length; k >= 1; k--) {
     const prefix = prevs.slice(prevs.length - k).join("");
     if (!prefix) continue;
     if (reply.length >= prefix.length && reply.startsWith(prefix)) {
-      return { text: reply.slice(prefix.length), stripped: true };
+      return { text: reply.slice(prefix.length), stripped: true, k };
     }
   }
-  return { text: reply, stripped: false };
+  return { text: reply, stripped: false, k: 0 };
 }
 
 /** 该会话是否**观察到过回放**（曾经剥出过非空余量）。用来消解「历史只有一条且本轮回复恰好相同」的歧义。 */
@@ -86,14 +86,22 @@ export function forgetAgyReplayEvidence(sessionId: string | undefined): void {
  * 依据：agy 一旦开始回放，在这个会话里就是持续行为；从没见过回放的会话，直接误判会白白毁掉正常回合。
  */
 export function agyStripReplay(reply: string, sessionId: string | undefined): { text: string; replayOnly: boolean } {
-  const { text, stripped } = stripOnce(reply, sessionId);
+  const { text, stripped, k } = stripOnce(reply, sessionId);
   if (!stripped) return { text: reply, replayOnly: false };
   const newContent = text.trim();
   if (newContent) {
     if (sessionId) sawReplayBySession.add(sessionId);
     return { text, replayOnly: false };
   }
-  // 剥完为空：只有「这个会话见过回放」才敢断定是回放；否则可能是正常重复回答。
+  // 剥完为空：
+  //   k>=2（等于最近两条及以上按记录顺序拼接）⇒ 不可能是巧合的正常回答，**无条件**判回放。
+  //     2026-11-23 review：通信鸽那种「历史 2 条、本轮恰好等于两条拼接」的形态必须先命中这条，
+  //     否则进程刚重启（没有任何 sawReplay 证据）时旧话会被当正常回答发出去。
+  //   k==1（恰好等于最后一条历史）⇒ 才存在歧义，看本会话是否见过回放。
+  if (k >= 2) {
+    if (sessionId) sawReplayBySession.add(sessionId);
+    return { text: "", replayOnly: true };
+  }
   if (sessionId && !sawReplayBySession.has(sessionId)) return { text: reply, replayOnly: false };
   return { text: "", replayOnly: true };
 }
@@ -117,6 +125,25 @@ export class AgyReplayOnlyError extends Error {
     super("这次没有生成新内容，请重发一次；如果反复出现，换一个新会话");
     this.name = "AgyReplayOnlyError";
   }
+}
+
+/**
+ * 2026-11-23 review B —— **重启后的种子**：`repliesBySession` 原本只在内存里，节点一重启就空，
+ * 续同一个 agy 会话的第一轮既剥不掉回放、也识别不出纯回放（正好是我们验修复的方式）。
+ * 续会话时 agy 在 `session/load` 阶段会把历史助手消息回放一遍（#3780 就是这段），
+ * 用它给历史做种子：这是 **agy 自己认的历史**，比我们记的更准。
+ * 种成一条（拼接文本）即可：下一轮回放 = 这条 + 新消息，按 k>=2 或 k=1 都能命中。
+ * 同时记一条「这个会话会回放」的证据。
+ */
+export function seedAgyReplaysFromLoad(sessionId: string | undefined, replayText: string | undefined): void {
+  if (!sessionId) return;
+  const text = (replayText ?? "").trim();
+  if (!text) return;
+  const arr = repliesBySession.get(sessionId) ?? [];
+  if (!arr.includes(text)) arr.unshift(text);
+  while (arr.length > 20) arr.pop();
+  repliesBySession.set(sessionId, arr);
+  sawReplayBySession.add(sessionId);
 }
 
 export function rememberAgyReply(reply: string, sessionId: string | undefined): void {
@@ -157,6 +184,8 @@ export async function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnRe
     authMethodPreference: opts.authMethodPreference ?? AGY_AUTH_METHOD_PREFERENCE,
   });
   const sessionId = result.sessionId;
+  // 续会话时把 session/load 回放出来的历史种进本进程记忆（重启场景也能识别回放）。
+  seedAgyReplaysFromLoad(sessionId, result.handshakeReplayText);
   const { text: cleaned, replayOnly } = agyStripReplay(result.replyText ?? "", sessionId);
   if (cleaned !== result.replyText) {
     opts.onStderr?.(`[antigravity] stripped replayed prefix (${(result.replyText ?? "").length - cleaned.length} chars) from session ${String(sessionId).slice(0, 8)}`);

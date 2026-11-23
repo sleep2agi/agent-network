@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGY_FRESH_SESSION_RETRY_NOTE, AgyReplayOnlyError, agyStripReplayedPrefix, agyStripReplay, forgetAgySession, rememberAgyReply, withFreshSessionRetryNote } from "./runtime";
+import { AGY_FRESH_SESSION_RETRY_NOTE, AgyReplayOnlyError, agyStripReplayedPrefix, agyStripReplay, forgetAgySession, rememberAgyReply, seedAgyReplaysFromLoad, withFreshSessionRetryNote } from "./runtime";
 
 // 2026-11-22 真机：agy 每轮回复会把上一轮助手文本重发一遍再接新内容。
 // 这里锁住剥离规则，避免以后又把「前缀」当成真回答喂回 Hub。
@@ -41,16 +41,16 @@ describe("agy replayed-prefix stripping", () => {
     expect(agyStripReplayedPrefix(replayed, "s-5")).toBe("上一轮的口令是靛蓝水獭-8030，13*13 等于 169");
   });
 
-  it("history-only repeat：本会话见过回放才判回放（返回空），否则当正常重复回答", () => {
-    // 2026-11-23 事故后口径：不能再把旧话当结果；但也不能把「正常重复回答」误判成回放。
-    // 判据=int 会话是否观察到过回放（见 agyStripReplay 注释）。
+  it("k>=2 的纯回放无条件判失败；k==1 才看「本会话见过回放」", () => {
     rememberAgyReply("甲", "s-6");
     rememberAgyReply("乙", "s-6");
-    // 没见过回放 ⇒ 当正常回答
-    expect(agyStripReplay("甲乙", "s-6")).toEqual({ text: "甲乙", replayOnly: false });
-    // 一旦见过回放（先剥出过非空余量）⇒ 纯回放判失败
-    expect(agyStripReplay("甲乙丙", "s-6")).toEqual({ text: "丙", replayOnly: false });
+    // 两条按序拼接 ⇒ 无条件回放（不需要证据）
     expect(agyStripReplay("甲乙", "s-6")).toEqual({ text: "", replayOnly: true });
+    // 回放+新内容 ⇒ 只留新内容
+    expect(agyStripReplay("甲乙丙", "s-6")).toEqual({ text: "丙", replayOnly: false });
+    // k==1 的歧义：另一个会话只有一条历史、没有证据 ⇒ 当正常回答
+    rememberAgyReply("好", "s-6b");
+    expect(agyStripReplay("好", "s-6b")).toEqual({ text: "好", replayOnly: false });
   });
 
   it("keeps sessions isolated from each other", () => {
@@ -139,5 +139,37 @@ describe("agy replay model: recorded-order longest prefix, strip once", () => {
     expect(out.startsWith(AGY_FRESH_SESSION_RETRY_NOTE)).toBe(true);
     expect(out.endsWith("新会话的正式回复")).toBe(true);
     expect(AGY_FRESH_SESSION_RETRY_NOTE).toContain("已换新会话重做");
+  });
+});
+
+// 2026-11-23 review A：k>=2 且余下为空 ⇒ 无条件 replayOnly（不等 sawReplay 证据）
+describe("agy replay: k>=2 with empty remainder is unconditional", () => {
+  it("历史两条、无任何先前证据、本轮=两条按序拼接 ⇒ replayOnly", () => {
+    rememberAgyReply("第一段。", "s-k2-fresh");
+    rememberAgyReply("第二段。", "s-k2-fresh");
+    // 该会话此前没有剥出过非空余量（模拟进程刚重启、没有证据）
+    expect(agyStripReplay("第一段。第二段。", "s-k2-fresh")).toEqual({ text: "", replayOnly: true });
+  });
+
+  it("历史两条、本轮=两条拼接+新内容 ⇒ 只留新内容", () => {
+    rememberAgyReply("A段。", "s-k2-new");
+    rememberAgyReply("B段。", "s-k2-new");
+    expect(agyStripReplay("A段。B段。新内容。", "s-k2-new")).toEqual({ text: "新内容。", replayOnly: false });
+  });
+});
+
+// 2026-11-23 review B：进程重启后历史为空 ⇒ 用 session/load 回放做种子
+describe("agy replay: seed from session/load replay (restart case)", () => {
+  it("种入 session/load 回放后，续会话本轮只有回放 ⇒ 判失败", () => {
+    // 进程内没有任何历史（重启后），只有 session/load 回放出来的那份文本
+    seedAgyReplaysFromLoad("s-restart", "上上轮回复。上一轮回复。");
+    const r = agyStripReplay("上上轮回复。上一轮回复。", "s-restart");
+    expect(r.replayOnly).toBe(true);
+    expect(r.text).toBe("");
+  });
+
+  it("种入种子后，本轮=回放+新内容 ⇒ 只留新内容", () => {
+    seedAgyReplaysFromLoad("s-restart2", "旧回复。");
+    expect(agyStripReplay("旧回复。重启后的新回复。", "s-restart2")).toEqual({ text: "重启后的新回复。", replayOnly: false });
   });
 });

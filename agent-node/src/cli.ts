@@ -58,6 +58,7 @@ import { activeNetworkTaskMarkerPathInCredentialDir } from "./runtime/grok-copre
 import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-check.js";
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { nodeRolloutGuard, SDK_POINT_AT_NEWER_CODEX } from "./runtime/codex-rollout-guard-node.js";
+import { withFreshSessionRetryNote } from "./runtime/antigravity-acp/runtime";
 import { describeMissingOrdinalFailure, probeCodexVersionCached } from "./runtime/codex-rollout-history-guard.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
 import { reportedTask } from "./project-dir-mismatch.js";
@@ -5237,7 +5238,6 @@ async function processWithAntigravity(
       // 普通回复 —— 那等于悄悄丢了上下文。只有「回放型失败」才加这句人话；其它失败（idle 超时等）
       // 原有语义不变。
       if (e?.code === "agy_replay_only_no_new_content") {
-        const { withFreshSessionRetryNote } = await import("./runtime/antigravity-acp/runtime");
         return withFreshSessionRetryNote(result.replyText);
       }
       return result.replyText;
