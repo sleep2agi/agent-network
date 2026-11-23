@@ -30,12 +30,30 @@ const buckets: Bucket[] = [];
 
 /** 路由的形状:id / 别名 / 文件名这类段换成 :id,几个会改变载荷形状的参数保留(light / view / scope / changes)。 */
 const SHAPE_PARAMS = ["changes", "light", "scope", "view"];
+/**
+ * 2026-11-23 —— `limit` 与 `skip_stats` 也进形状，但 **limit 分档** 不取原值：
+ * `/api/tasks` 的 200–650ms 到底是「App 30 条轮询」还是「Dashboard 200 条拉取」，
+ * 靠 `GET /api/tasks` 这个键分辨不出来；而 limit 的取值是连续的，原值会让键无界增长。
+ * 档位：<=50 / <=150 / >150（线上就是 20/30/50/200 这几个）。
+ */
+const LIMIT_BUCKETS: Array<[number, string]> = [[50, "le50"], [150, "le150"], [Infinity, "gt150"]];
+export function limitBucket(raw: string | null): string | null {
+  if (raw === null || raw.trim() === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return "invalid";
+  for (const [max, name] of LIMIT_BUCKETS) if (n <= max) return name;
+  return "gt150";
+}
 export function routeKey(method: string, url: URL): string {
   const segments = url.pathname.split("/").map((seg, i) => {
     if (i < 2 || !seg) return seg;
     return /[0-9%]/.test(seg) || /[^\x20-\x7e]/.test(seg) || seg.length > 24 ? ":id" : seg;
   });
-  const shape = SHAPE_PARAMS.filter(k => url.searchParams.has(k)).map(k => `${k}=${url.searchParams.get(k)}`).join("&");
+  const parts = SHAPE_PARAMS.filter(k => url.searchParams.has(k)).map(k => `${k}=${url.searchParams.get(k)}`);
+  const bucket = limitBucket(url.searchParams.get("limit"));
+  if (bucket) parts.push(`limit=${bucket}`);
+  if (url.searchParams.get("skip_stats") === "1") parts.push("skip_stats=1");
+  const shape = parts.join("&");
   return `${method} ${segments.join("/")}${shape ? `?${shape}` : ""}`;
 }
 
