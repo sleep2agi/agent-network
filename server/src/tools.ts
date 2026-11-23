@@ -1,4 +1,4 @@
-import { allStatusCacheKey, cachedAllStatus } from "./all-status-cache.js";
+import { allStatusCacheKey, cachedAllStatus, invalidateAllStatusCache, rosterChanged } from "./all-status-cache.js";
 import { descriptionSummary } from "./node-attrs-validate.js";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { enqueueBroadcast } from "./broadcast-fanout.js";
@@ -1372,6 +1372,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // (get_all_status, full /api/status, members who see the agent but not its
         // conversations), so only the dispatch-sized preview is stored here.
         const sessionTask = task == null ? null : sessionTaskPreview(task); // board668-session-preview
+        // A node appearing, returning or leaving must be visible to the next get_all_status (all-status-cache.ts).
+        if (rosterChanged(db.get<{ status: string | null }>("SELECT status FROM sessions WHERE resume_id = ?1", resume_id)?.status, storedStatus)) invalidateAllStatusCache();
         db.run("DELETE FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3", [effectiveAlias, resume_id, sessionNetId]);
         db.run(
           `INSERT INTO sessions (resume_id, alias, tmux_name, server, ip, hostname, agent, project_dir, version, status, task, output, progress, score, node_id, session_id, config_path, channels, network_id, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb, disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct, process_uptime_seconds, process_in_flight_count, external_schedules, peer_reply_inbox_capable, last_seen_at, updated_at)
