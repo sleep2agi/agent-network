@@ -33,5 +33,24 @@ export function cachedAllStatus(key: string | null, build: () => string, now: ()
   return { text, hit: false };
 }
 
+/**
+ * The roster itself changed: a node appeared, came back online, or went offline.
+ *
+ * "≤10 s stale is fine" holds for a node's working/idle status, not for whether the node exists.
+ * A node that had just registered was missing from every cached answer for up to 10 s, so a peer
+ * asked to hand a task to it right away looked it up, did not find it, and did nothing
+ * (tests/node-caller-identity/compat.ts, "121-sends": red since this cache was added).
+ * These transitions happen when a node starts or stops, not on heartbeats, so dropping the
+ * cache here costs one rebuild per start/stop.
+ */
+export function invalidateAllStatusCache(): void { cache.clear(); }
+
+const OFFLINE = new Set(["offline", "stale"]);
+/** True when a status report adds a session or moves it across the online/offline line. */
+export function rosterChanged(priorStatus: string | null | undefined, nextStatus: string): boolean {
+  if (priorStatus == null) return true;
+  return OFFLINE.has(priorStatus) !== OFFLINE.has(nextStatus);
+}
+
 /** Tests only. */
 export function clearAllStatusCache(): void { cache.clear(); }
