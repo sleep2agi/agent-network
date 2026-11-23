@@ -5,7 +5,7 @@
 // 2026-10-01 —— 原来是 4096 条样本的环:生产上 212 s 就写满,?minutes=10 实际只覆盖三分半钟。
 // 改成按分钟分桶的累计器:每个桶里每个路由一行(次数 / 总耗时 / 最大值 / 字节 / 5xx / 耗时直方图),
 // 保留 ROUTE_BUCKET_RETENTION 个桶(24 小时),窗口多长就真覆盖多长。p95 从直方图取(桶上沿,不超过 max)。
-import { noteRequestServed } from "./event-loop-lag.js";
+import { noteRequestServed, type TickRouteCost } from "./event-loop-lag.js";
 
 export const ROUTE_BUCKET_MS = 60_000;
 export const ROUTE_BUCKET_RETENTION = 1440;
@@ -143,10 +143,48 @@ export function recordRouteTiming<T extends Response | undefined>(req: Request, 
   const route = label ? `${routeKey(req.method, url)} ${label}` : routeKey(req.method, url);
   const length = Number(res.headers.get("content-length"));
   const bytes = Number.isFinite(length) && res.headers.has("content-length") ? length : 0;
-  addSample(route, performance.now() - started, res.status, bytes, now, callerClass(req));
+  const ms = performance.now() - started;
+  addSample(route, ms, res.status, bytes, now, callerClass(req));
+  addTickCost(route, ms);
   // #2614 —— 让停顿监测能区分「循环被阻塞」与「timer 被饿住」：见 event-loop-lag.ts 顶部说明。
   noteRequestServed();
   return res;
+}
+
+// ── 停顿归因（event-loop-lag 的 stall 日志 / /health recent_stalls.top_routes）──
+//
+// 分钟桶回答的是「最近 N 分钟谁最贵」，但 stall 日志要回答的是「**这一次**停顿的窗口里谁在跑」。
+// 所以另开一个只在内存里的 tick 窗口：每个请求完成时累加一次（次数 / 总耗时 / 单次最大），
+// 由 event-loop-lag 每个 tick 抽干一次（见 startEventLoopLagMonitor({ tickRoutes })）。
+// 抽干是清空，不排序不取前 N —— 那些只在真停顿的时候做，正常 tick 里零额外排序开销。
+// 键同样是路由形状（MCP 带工具名），最多 TICK_MAX_KEYS 个，超了折进 `(other)`，不让怪路径撑内存。
+const TICK_MAX_KEYS = 256;
+let tickCosts = new Map<string, { count: number; totalMs: number; maxMs: number }>();
+
+function addTickCost(route: string, ms: number): void {
+  let a = tickCosts.get(route);
+  if (!a) {
+    if (tickCosts.size >= TICK_MAX_KEYS) route = ROUTE_OVERFLOW_KEY;
+    a = tickCosts.get(route);
+    if (!a) tickCosts.set(route, a = { count: 0, totalMs: 0, maxMs: 0 });
+  }
+  a.count++;
+  a.totalMs += ms;
+  if (ms > a.maxMs) a.maxMs = ms;
+}
+
+/** 取走本 tick 窗口的按路由耗时累计并清空窗口（event-loop-lag 每个 tick 调一次）。 */
+export function takeTickRouteCosts(): TickRouteCost[] {
+  if (!tickCosts.size) return [];
+  const out: TickRouteCost[] = [];
+  for (const [route, a] of tickCosts) out.push({ route, count: a.count, total_ms: a.totalMs, max_ms: a.maxMs });
+  tickCosts = new Map();
+  return out;
+}
+
+/** 只给测试用：清空 tick 归因窗口。 */
+export function resetTickRouteCostsForTests(): void {
+  tickCosts = new Map();
 }
 
 function addSample(route: string, ms: number, status: number, bytes: number, now: number, caller: string): void {
@@ -259,4 +297,5 @@ function callerStats(callers: Map<string, CallerAgg> | undefined): CallerStat[] 
 /** Test-only. */
 export function __resetRouteTimingForTest(): void {
   buckets.length = 0;
+  tickCosts = new Map();
 }
