@@ -7,7 +7,8 @@ function caps(runtime: string, generation: string | null, mode: string | null) {
   const opencodeCopresence = runtime === "opencode" && generation === "v2" && mode === "copresence";
   const claudeInterrupt = runtime === "claude";
   const codexAppServerInterrupt = runtime === "codex-app-server";
-  return { interrupt: opencodeCopresence || claudeInterrupt || codexAppServerInterrupt, steer: opencodeCopresence };
+  const acpInterrupt = runtime === "antigravity" || runtime === "grok";
+  return { interrupt: opencodeCopresence || claudeInterrupt || codexAppServerInterrupt || acpInterrupt, steer: opencodeCopresence };
 }
 
 describe("#5332 turnControlCapabilities 判据", () => {
@@ -23,8 +24,12 @@ describe("#5332 turnControlCapabilities 判据", () => {
     expect(caps("codex-app-server", null, null)).toEqual({ interrupt: true, steer: false });
   });
 
+  test("ACP 运行时（antigravity / grok）：interrupt true，steer false", () => {
+    for (const r of ["antigravity", "grok"]) expect(caps(r, null, null)).toEqual({ interrupt: true, steer: false });
+  });
+
   test("其余 runtime / opencode V1：都 false", () => {
-    for (const r of ["antigravity", "grok", "codex", "codex-sdk"]) {
+    for (const r of ["codex", "codex-sdk"]) {
       expect(caps(r, null, null)).toEqual({ interrupt: false, steer: false });
     }
     expect(caps("opencode", "v1", "copresence")).toEqual({ interrupt: false, steer: false });

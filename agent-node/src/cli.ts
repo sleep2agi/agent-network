@@ -23,6 +23,7 @@ import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js"
 import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
 import { persistVariantToConfig, shouldPersistVariant, startupVariantPlan } from "./runtime/opencode-copresence/variant-persist.js";
 import { createPromptTracker } from "./shared/interactive-prompt.js";
+import { cancelActiveAcpTurn } from "./runtime/acp-runner/active-turn";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -1678,8 +1679,10 @@ function turnControlCapabilities(): { turn_interrupt_capable: boolean; turn_stee
   const claudeInterrupt = RUNTIME === "claude";
   // codex-app-server：协议层有 turn/interrupt（codex 二进制里确认存在），可停止；插话仍只有 opencode V2 共存
   const codexAppServerInterrupt = RUNTIME === "codex-app-server";
+  // ACP 运行时（antigravity，以及同一 runner 的 grok ACP）走 session/cancel 通知
+  const acpInterrupt = RUNTIME === "antigravity" || RUNTIME === "grok";
   return {
-    turn_interrupt_capable: opencodeCopresence || claudeInterrupt || codexAppServerInterrupt,
+    turn_interrupt_capable: opencodeCopresence || claudeInterrupt || codexAppServerInterrupt || acpInterrupt,
     turn_steer_capable: opencodeCopresence,
   };
 }
@@ -7005,6 +7008,8 @@ async function processControlInstruction(msg: any): Promise<void> {
     // 没有在飞的尝试 ⇒ 明确回 no_active_turn，不假装成功。
     const out = RUNTIME === "claude"
       ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const }) : { ok: false as const, reason: "no_active_turn" })
+      : (RUNTIME === "antigravity")
+      ? cancelActiveAcpTurn()
       : RUNTIME === "codex-app-server"
       ? await (async () => {
           // #5332 —— codex app-server 协议有 turn/interrupt；没有在飞会话就明确回 no_active_turn
