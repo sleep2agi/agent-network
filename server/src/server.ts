@@ -135,6 +135,7 @@ import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader, takeTickRouteCosts } from "./route-timing.js";
+import { resetRequestMemo } from "./request-memo.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
 import { createSessionSourceTransport } from "./session-source-transport.js";
@@ -343,10 +344,14 @@ function serverPoolMax(): number {
   return Number.isFinite(raw) && raw > 0 ? Math.min(Math.round(raw), 4096) : 64;
 }
 
-/** `0` = 关闭复用（每次新建，等价旧行为）。默认开。 */
+/**
+ * 复用池开关。**默认关闭**（未设置 = 旧行为：每次新建）。
+ * 2026-11-23 负责人定：首版发版本身零行为变化，线上由启动脚本显式 `COMMHUB_MCP_SERVER_POOL=1` 打开；
+ * 出问题去掉这一行重启即可。`0/false/off` 也都表示关闭。
+ */
 function serverPoolEnabled(): boolean {
-  const raw = process.env.COMMHUB_MCP_SERVER_POOL;
-  return !(raw === "0" || raw === "false" || raw === "off");
+  const raw = (process.env.COMMHUB_MCP_SERVER_POOL ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
 /** key → 空闲实例栈；`lruKeys` 按「最近一次放回」排序（队尾最新），淘汰从队头取。 */
@@ -355,6 +360,7 @@ const lruKeys: string[] = [];
 let serverPoolSize = 0;
 let serverCreated = 0;
 let serverReused = 0;
+let serverEvicted = 0;
 
 function dropKey(key: string): void {
   idleByKey.delete(key);
@@ -370,6 +376,7 @@ function evictOldest(): boolean {
     if (!list || !list.length) { dropKey(key); continue; }
     list.pop();
     serverPoolSize--;
+    serverEvicted++;
     if (!list.length) dropKey(key);
     else {
       // 这个 key 还有实例，但这一台被淘汰了 —— 把 key 移到队尾（它刚被处理过）
@@ -425,7 +432,7 @@ export function shouldPoolServer(res: { status: number } | null | undefined): bo
 
 /** 只读：池子/复用计数（只观测，不参与任何决策）。 */
 export function mcpServerPoolStats(): { pooled: number; created: number; reused: number; max: number; enabled: boolean } {
-  return { pooled: serverPoolSize, created: serverCreated, reused: serverReused, max: serverPoolMax(), enabled: serverPoolEnabled() };
+  return { pooled: serverPoolSize, created: serverCreated, reused: serverReused, evicted: serverEvicted, max: serverPoolMax(), enabled: serverPoolEnabled() };
 }
 
 export function createServer(o: CreateServerOptions): McpServer {
@@ -1495,6 +1502,9 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   sessions_count: { class: "gauge", granularity: "level" },
   sse_connections: { class: "gauge", granularity: "level" },
   mcp_inflight: { class: "gauge", granularity: "level" },
+  // 2026-11-23 —— McpServer 复用池读数（pooled/created/reused/evicted/max/enabled）。
+  // 只给运维看命中率；不进匿名白名单。
+  mcp_server_pool: { class: "gauge", granularity: "level" },
   mcp_inflight_peak: { class: "gauge", granularity: "cumulative" },
   event_loop: { class: "gauge", granularity: "cumulative" },
   // #3271 —— 聚合计数：规模/强度，不含拓扑（by_node 留在鉴权投影里）。
@@ -2346,6 +2356,8 @@ return Bun.serve({
       let response: Response;
       let poolEligible = true;
       try {
+        // 池子复用同一实例 ⇒ 上一请求的权限/身份缓存必须清零（见 request-memo.ts）。
+        resetRequestMemo(mcpServer);
         await mcpServer.connect(transport);
         response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
         // 服务端错误（5xx）说明这台实例状态不明 ⇒ 不回池，交给 GC。
@@ -4019,6 +4031,8 @@ return Bun.serve({
         // 而 `sse_connections` 只反映长连接，看不到“同秒打进来的一批请求”。
         mcp_inflight: getMcpInflightStats().inflight,
         mcp_inflight_peak: getMcpInflightStats().peak,
+        // 2026-11-23 —— McpServer 复用池读数（负责人要看命中率）。enabled=false 时 created 只增不复用。
+        mcp_server_pool: mcpServerPoolStats(),
         // #2614 —— 事件循环停顿。`mcp_inflight` 只能说明“有多少请求在排队”，
         // 说明不了“服务端为什么卡”。这里给出停顿本身：max_gap_ms 是进程内
         // 单次 tick 的最大间隔（正常 ≈250ms），recent_stalls 保留最近 20 次

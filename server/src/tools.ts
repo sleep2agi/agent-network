@@ -1,4 +1,5 @@
 import { allStatusCacheKey, cachedAllStatus } from "./all-status-cache.js";
+import { memoRequest } from "./request-memo.js";
 import { descriptionSummary } from "./node-attrs-validate.js";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { enqueueBroadcast } from "./broadcast-fanout.js";
@@ -364,8 +365,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 网络令牌不会走到这里 —— 受限成员的网络令牌在 resolveToken 就被拒了。
   // 2026-11-23 —— 改成**每次调用现查**（不传值）：McpServer 实例会被复用，
   // 注册时快照会把「管理员调整成员受限状态」冻结到 Hub 重启为止。
-  const restrictedNetsNow = (): string[] =>
-    enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : [];
+  // 请求内算一次（memoRequest），跨请求清空（/mcp 入口 resetRequestMemo）。
+  const restrictedNetsNow = (): string[] => memoRequest(server, "restrictedNets", () =>
+    enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : []);
   if (restrictedNetsNow().length) guardRestrictedMemberTools(server, restrictedNetsNow, enforceUserId!);
   if (callerTokenIsNetwork && callerTokenId && enforceNetworkId) guardNodePermissionTools(server, callerTokenId, enforceNetworkId);
   // Default from_session for outbound tools — extracted from the calling
@@ -426,11 +428,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   // 收件白名单（目标节点愿不愿意收这个发件人）。放在各工具自己的权限检查**之后**判，
   // 这样没权限 / 没授权的调用方仍然拿到原来那条统一的错误，不能拿它探测别人设没设名单。
-  let inboxSenderCache: InboxSender | null = null;
-  const inboxSender = (): InboxSender => inboxSenderCache ??= inboxSenderFromAuth({
+  // 2026-11-23 —— 原来是「实例级」缓存（let inboxSenderCache）：池子复用后，节点改别名/改绑、
+  // 用户角色变化都会冻结到 Hub 重启。改成**请求级** memo：一次调用算一次，跨请求清空。
+  const inboxSender = (): InboxSender => memoRequest(server, "inboxSender", () => inboxSenderFromAuth({
     isNodeToken: callerTokenIsNetwork, tokenId: callerTokenId ?? null, boundNetworkId: enforceNetworkId ?? null,
     userId: enforceUserId ?? null, username: callerAlias ?? null,
-  });
+  }));
   const inboxDeniedReply = (netId: string | null, target: AgentRef, tool: string) => {
     const denial = inboxDenied(netId, target, inboxSender(), `mcp:${tool}`);
     return denial ? { content: [{ type: "text" as const, text: JSON.stringify(denial) }] } : null;
