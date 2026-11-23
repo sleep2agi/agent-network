@@ -2463,6 +2463,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         if (!humanSender) releaseBlockedSession(from_session, effectiveNetId);
       });
       logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${targetAlias} (parent=${parentTaskId.slice(0,8)})` : `→ ${targetAlias}`);
+      // B 止血（口径 ①）：节点发出一条任务，同样是「该 alias 有产出」的证据（见 acked-unconfirmed.ts）。
+      if (!humanSender) { try { markReply(from_session, effectiveNetId ?? null); } catch {} }
       // Only stamp the dedup index after the inbox/tasks transaction
       // succeeds, so a failed insert never silently shadows a legitimate
       // retry.
