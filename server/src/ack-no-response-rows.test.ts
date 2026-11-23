@@ -60,6 +60,14 @@ function seedInbox(id: string, requiresResponse: string, type: string) {
 beforeEach(seed);
 afterAll(cleanup);
 
+function seedSession(alias: string) {
+  db.run(
+    `INSERT OR REPLACE INTO sessions (resume_id, alias, status, updated_at, last_seen_at, network_id)
+     VALUES (?1, ?2, 'idle', datetime('now'), datetime('now'), ?3)`,
+    [`res_${alias}`, alias, NET],
+  );
+}
+
 describe("ack_inbox：只有期待回复的行才进 B 止血的回退窗口", () => {
   test("requires_response='none' 的通知行：ack 后不再被回退", async () => {
     seedInbox("inbox_notice_1", "none", "reply");
@@ -74,5 +82,31 @@ describe("ack_inbox：只有期待回复的行才进 B 止血的回退窗口", (
     expect(r.ok).toBe(true);
     const hit = sweepUnconfirmed(Date.now() + W + 60_000, W);
     expect(hit.map(h => h.messageId)).toEqual(["inbox_task_1"]);
+  });
+});
+
+describe("ack_inbox：先回执、后 ack 的正常顺序不该被误判成「签收但没投递」", () => {
+  test("回执在前、ack 在后 ⇒ 任务行不再被回退", async () => {
+    seedSession(ALIAS);
+    seedSession("peer-node");
+    db.run(
+      `INSERT INTO tasks (task_id, from_name, to_name, status, content, created_at, delivered_at, requires_response, network_id)
+       VALUES ('t_reply_first', 'peer-node', ?1, 'acked', 'do it', datetime('now'), datetime('now'), 'reply', ?2)`,
+      [ALIAS, NET],
+    );
+    db.run(
+      `INSERT INTO inbox (id, task_id, session_name, type, content, created_at, acked, requires_response, network_id)
+       VALUES ('t_reply_first', 't_reply_first', ?1, 'task', 'do it', datetime('now'), 0, 'reply', ?2)`,
+      [ALIAS, NET],
+    );
+
+    // 节点的真实顺序：先回执（send_reply），再 ack 收件箱那一行。
+    const reply = await call("send_reply", { alias: "peer-node", text: "done", in_reply_to: "t_reply_first", from_session: ALIAS });
+    expect(reply.ok).toBe(true);
+
+    const ack = await call("ack_inbox", { alias: ALIAS, message_id: "t_reply_first" });
+    expect(ack.ok).toBe(true);
+
+    expect(sweepUnconfirmed(Date.now() + W + 60_000, W)).toEqual([]);
   });
 });
