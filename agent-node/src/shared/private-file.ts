@@ -3,13 +3,18 @@
 // POSIX answers with mode bits (no group/other access). Windows has no such bits: Node
 // synthesises 0o666 for ordinary files, so `(mode & 0o077) !== 0` is true for every file and
 // a mode check there can only ever say "unsafe". The Windows question is an ACL question:
-// who is allowed access by the file's DACL.
+// who is allowed access by the file's access list.
 //
-// On Windows the DACL is read as SDDL, which is locale-independent (icacls prints account names
-// in the system language). A file counts as private when every allow entry names the current
-// user, SYSTEM or the local Administrators group — the same boundary a 0600 file has on a POSIX
-// machine, where root can read it too. This is access control, not isolation: other programs
-// running as the same Windows user can read the file. It must not be described as a sandbox.
+// On Windows one PowerShell probe reports the access list with every principal as a SID, so
+// nothing depends on the system language (icacls prints localised account names). A file counts
+// as private when it is a regular file on an NTFS/ReFS volume, owned by a trusted principal, and
+// every allow entry — inherited ones included — names the current user, SYSTEM or the local
+// Administrators group. That is the boundary a 0600 file has on a POSIX machine, where root can
+// read it too. It is access control, not isolation: other programs running as the same Windows
+// user can read the file. It must not be described as a sandbox.
+//
+// The probe and its JSON shape were captured on a real Windows 11 machine; the samples in
+// private-file.test.ts are that machine's output, verbatim.
 //
 // 🔴 This file exists byte-identically in agent-node/src/shared and agent-network/src/shared
 //    (parity gate: agent-network/src/shared/private-file-parity.test.ts). The two packages cannot
@@ -17,117 +22,146 @@
 
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
+import { win32 } from "node:path";
 
 export type PrivateFileVerdict =
   | { ok: true }
-  | { ok: false; reason: "not_a_file" | "group_or_other_access" | "acl_unreadable" | "acl_open_to_others"; detail: string };
+  | {
+    ok: false;
+    reason: "not_a_file" | "group_or_other_access" | "acl_unreadable" | "acl_open_to_others"
+      | "reparse_point" | "unsupported_volume" | "owner_untrusted";
+    detail: string;
+    /** Set when the Windows probe identified the caller; lets the fix command be shell-neutral. */
+    currentUserSid?: string;
+  };
 
-const SYSTEM_SID = "S-1-5-18";
-const ADMINISTRATORS_SID = "S-1-5-32-544";
-/** SDDL two-letter aliases for the two system principals that are always acceptable. */
-const TRUSTED_ALIASES: Record<string, string> = { SY: SYSTEM_SID, BA: ADMINISTRATORS_SID };
-/** Readable names for the aliases people most often find on a too-open file. */
-const ALIAS_NAMES: Record<string, string> = {
-  WD: "Everyone", BU: "Users", AU: "Authenticated Users", IU: "Interactive Users", NU: "Network Users",
-  AN: "Anonymous", BG: "Guests", DU: "Domain Users",
+export const WINDOWS_SYSTEM_SID = "S-1-5-18";
+export const WINDOWS_ADMINISTRATORS_SID = "S-1-5-32-544";
+const SID = /^S-1-[0-9-]+$/;
+const ACL_VOLUME = /^(?:NTFS|ReFS)$/i;
+/** Readable names for the principals people most often find on a too-open file. */
+const SID_NAMES: Record<string, string> = {
+  "S-1-1-0": "Everyone", "S-1-5-7": "Anonymous Logon", "S-1-5-11": "Authenticated Users",
+  "S-1-5-32-545": "Users", "S-1-5-32-546": "Guests",
 };
-/** "Whoever owns the file": Owner Rights and Creator Owner, as aliases and as SIDs. */
-const OWNER_TRUSTEES = new Set(["OW", "CO", "S-1-3-4", "S-1-3-0"]);
+const nameOf = (sid: string) => (SID_NAMES[sid] ? `${SID_NAMES[sid]} (${sid})` : sid);
 
-export type SddlAce = { type: string; flags: string; rights: string; trustee: string };
+/** The probe. The path arrives in an environment variable and is only ever used as a literal. */
+export const WINDOWS_ACL_PROBE = [
+  "$ErrorActionPreference = 'Stop'",
+  "$p = $env:ANET_PRIVATE_FILE_PATH",
+  "$item = Get-Item -LiteralPath $p -Force",
+  "$acl = Get-Acl -LiteralPath $p",
+  "$curSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+  "$ownerSid = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value",
+  "$driveFs = try { [IO.DriveInfo]::new([IO.Path]::GetPathRoot($item.FullName)).DriveFormat } catch { '' }",
+  "$aces = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {",
+  "  [ordered]@{",
+  "    sid = $_.IdentityReference.Value",
+  "    type = $_.AccessControlType.ToString()",
+  "    rights = $_.FileSystemRights.ToString()",
+  "    inherited = [bool]$_.IsInherited",
+  "  }",
+  "})",
+  "[ordered]@{",
+  "  currentUserSid = $curSid",
+  "  ownerSid = $ownerSid",
+  "  isReparsePoint = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)",
+  "  isDirectory = [bool]$item.PSIsContainer",
+  "  protected = [bool]$acl.AreAccessRulesProtected",
+  "  driveFormat = $driveFs",
+  "  access = $aces",
+  "} | ConvertTo-Json -Depth 4 -Compress",
+].join("\n");
+
+export type WindowsAclEntry = { sid: string; type: string; rights: string; inherited: boolean };
+export type WindowsAclSnapshot = {
+  currentUserSid: string; ownerSid: string; isReparsePoint: boolean; isDirectory: boolean;
+  protected: boolean; driveFormat: string; access: WindowsAclEntry[];
+};
 
 /**
- * The discretionary ACL of an SDDL string, or a reason it cannot be trusted.
- * `D:NO_ACCESS_CONTROL` (a null DACL) grants everyone full access; a missing `D:` section means
- * the ACL was not returned at all.
+ * Parses the probe's JSON exactly as Windows PowerShell 5.1 / PowerShell 7 print it: an optional
+ * UTF-8 BOM, CRLF, and `access` as a single object when the list has one entry.
  */
-export function parseSddlDacl(sddl: string): { owner: string; aces: SddlAce[] } | { error: string } {
-  const text = String(sddl ?? "").trim();
-  // The owner section, when present, opens the string: `O:<sid or alias>` up to `G:` or `D:`.
-  const owner = /^O:(S-1-[0-9-]+|[A-Z]{2})(?=G:|D:|S:|$)/.exec(text)?.[1] ?? "";
-  const start = text.indexOf("D:");
-  if (start < 0) return { error: "no access list was returned" };
-  // The DACL runs until the SACL section (`S:` at top level, outside any parentheses).
-  let depth = 0;
-  let end = text.length;
-  for (let i = start + 2; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    else if (depth === 0 && ch === "S" && text[i + 1] === ":") { end = i; break; }
+export function parseWindowsAclProbe(raw: string): { snapshot: WindowsAclSnapshot } | { error: string } {
+  const text = String(raw ?? "").replace(/^﻿/, "").trim();
+  if (!text) return { error: "no access list was returned" };
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return { error: "the access list could not be read" }; }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { error: "the access list could not be read" };
+  const o = value as Record<string, unknown>;
+  if (typeof o.currentUserSid !== "string" || !SID.test(o.currentUserSid)) return { error: "the current Windows user could not be identified" };
+  if (typeof o.ownerSid !== "string" || !SID.test(o.ownerSid)) return { error: "the file's owner could not be identified" };
+  if (typeof o.isReparsePoint !== "boolean" || typeof o.isDirectory !== "boolean"
+    || typeof o.protected !== "boolean" || typeof o.driveFormat !== "string") return { error: "the access list could not be read" };
+  const list = o.access === null || o.access === undefined ? [] : Array.isArray(o.access) ? o.access : [o.access];
+  const access: WindowsAclEntry[] = [];
+  for (const item of list) {
+    const e = item as Record<string, unknown> | null;
+    // An entry that names nobody, or is not an entry at all, cannot be judged: refuse, never guess.
+    if (!e || typeof e !== "object" || Array.isArray(e) || typeof e.sid !== "string" || !SID.test(e.sid)
+      || typeof e.type !== "string" || typeof e.rights !== "string" || typeof e.inherited !== "boolean") {
+      return { error: "the access list could not be read" };
+    }
+    access.push({ sid: e.sid, type: e.type, rights: e.rights, inherited: e.inherited });
   }
-  const dacl = text.slice(start + 2, end);
-  if (/NO_ACCESS_CONTROL/.test(dacl)) return { error: "the file has no access list (everyone has full access)" };
-  const aces: SddlAce[] = [];
-  const pattern = /\(([^()]*)\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(dacl))) {
-    const fields = match[1].split(";");
-    // An entry that names nobody cannot be judged; refuse rather than guess.
-    if (fields.length < 6 || !fields[5].trim()) return { error: "the access list could not be read" };
-    aces.push({ type: fields[0], flags: fields[1], rights: fields[2], trustee: fields[5].trim() });
-  }
-  return { owner, aces };
+  return { snapshot: {
+    currentUserSid: o.currentUserSid, ownerSid: o.ownerSid, isReparsePoint: o.isReparsePoint,
+    isDirectory: o.isDirectory, protected: o.protected, driveFormat: o.driveFormat, access,
+  } };
 }
 
-const grantsAccess = (ace: SddlAce): boolean =>
-  // A = allow, XA = conditional allow, OA = object allow. Deny entries only narrow access.
-  ["A", "XA", "OA"].includes(ace.type)
-  // Inherit-only entries describe what children would get; they do not apply to this file.
-  && !/IO/.test(ace.flags);
-
-/** Pure verdict from a file's SDDL and the current user's SID. */
-export function judgeWindowsSddl(sddl: string, currentUserSid: string): PrivateFileVerdict {
-  if (!/^S-1-\d+(-\d+)+$/.test(currentUserSid)) {
-    return { ok: false, reason: "acl_unreadable", detail: "the current Windows user could not be identified" };
+/** Pure verdict from a probe snapshot. */
+export function judgeWindowsAcl(s: WindowsAclSnapshot): PrivateFileVerdict {
+  const refuse = (reason: Exclude<PrivateFileVerdict, { ok: true }>["reason"], detail: string): PrivateFileVerdict =>
+    ({ ok: false, reason, detail, currentUserSid: s.currentUserSid });
+  // A link or junction can be re-pointed at another file after the check.
+  if (s.isReparsePoint) return refuse("reparse_point", "it is a symbolic link or junction, not the file itself");
+  if (s.isDirectory) return refuse("not_a_file", "not a regular file");
+  // FAT/exFAT and most network shares carry no access list at all.
+  if (!ACL_VOLUME.test(s.driveFormat.trim())) {
+    return refuse("unsupported_volume", `the volume (${s.driveFormat.trim() || "unknown"}) cannot restrict access; keep the file on a local NTFS disk`);
   }
-  const parsed = parseSddlDacl(sddl);
-  if ("error" in parsed) return { ok: false, reason: "acl_unreadable", detail: parsed.error };
-  const trusted = (sid: string) => sid === currentUserSid || sid === SYSTEM_SID || sid === ADMINISTRATORS_SID;
-  const others = new Set<string>();
-  let grantsCurrentUser = false;
-  for (const ace of parsed.aces) {
-    if (!grantsAccess(ace)) continue;
-    // Entries for "the owner" mean whoever the owner section names; without an owner they cannot be judged.
-    const named = OWNER_TRUSTEES.has(ace.trustee) ? parsed.owner : ace.trustee;
-    if (!named) return { ok: false, reason: "acl_unreadable", detail: "the file's owner could not be identified" };
-    const sid = TRUSTED_ALIASES[named] ?? named;
-    if (sid === currentUserSid) grantsCurrentUser = true;
-    if (trusted(sid)) continue;
-    others.add(ALIAS_NAMES[named] ?? named);
-  }
-  if (others.size) {
-    return { ok: false, reason: "acl_open_to_others", detail: `also accessible to: ${[...others].join(", ")}` };
+  const trusted = (sid: string) => sid === s.currentUserSid || sid === WINDOWS_SYSTEM_SID || sid === WINDOWS_ADMINISTRATORS_SID;
+  // An owner can always rewrite the access list, whatever it says today.
+  if (!trusted(s.ownerSid)) return refuse("owner_untrusted", `owned by ${nameOf(s.ownerSid)}`);
+  // Deny entries only narrow access; only allow entries can open the file to someone.
+  const allow = s.access.filter((e) => e.type.toLowerCase() === "allow");
+  const others = [...new Set(allow.filter((e) => !trusted(e.sid)).map((e) => e.sid))];
+  if (others.length) {
+    const inherited = allow.some((e) => !trusted(e.sid) && e.inherited) ? " (inherited from the folder)" : "";
+    return refuse("acl_open_to_others", `also accessible to: ${others.map(nameOf).join(", ")}${inherited}`);
   }
   // Private from others but closed to you too is not a usable secret file: say so here instead of
   // letting the read fail later with a bare permission error.
-  if (!grantsCurrentUser) {
-    return { ok: false, reason: "acl_unreadable", detail: "the access list does not give you access" };
+  if (!allow.some((e) => e.sid === s.currentUserSid)) {
+    return refuse("acl_unreadable", "the access list does not give you access");
   }
   return { ok: true };
 }
 
-export type WindowsAclReader = (path: string) => { sddl: string; currentUserSid: string } | { error: string };
+export type WindowsAclReader = (path: string) => { raw: string } | { error: string };
 
 /**
- * Reads the SDDL and the current user's SID with one PowerShell call. The path travels in an
- * environment variable, never on the command line: paths with spaces, CJK characters or quotes
- * need no escaping, and nothing about the file shows up in a process listing.
+ * Runs the probe. The script is passed base64-encoded and the path in an environment variable,
+ * never on the command line: paths with spaces, CJK characters, quotes or `[` `]` need no
+ * escaping, and nothing about the file shows up in a process listing.
  */
 export const readWindowsAcl: WindowsAclReader = (path) => {
-  const script = "$ErrorActionPreference='Stop';"
-    + "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
-    + "Write-Output ((Get-Acl -LiteralPath $env:ANET_PRIVATE_FILE_PATH).Sddl);"
-    + "Write-Output ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)";
-  const run = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    env: { ...process.env, ANET_PRIVATE_FILE_PATH: path }, encoding: "utf8", timeout: 20_000, windowsHide: true,
+  const root = process.env.SystemRoot ?? process.env.windir;
+  const powershell = root && win32.isAbsolute(root)
+    ? win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
+  const run = spawnSync(powershell, [
+    "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(WINDOWS_ACL_PROBE, "utf16le").toString("base64"),
+  ], {
+    env: { ...process.env, ANET_PRIVATE_FILE_PATH: path }, encoding: "utf8", timeout: 20_000,
+    windowsHide: true, maxBuffer: 256 * 1024, stdio: ["ignore", "pipe", "pipe"],
   });
-  if (run.error || run.status !== 0) {
-    return { error: run.error ? String((run.error as NodeJS.ErrnoException).code ?? run.error.message) : `PowerShell exited with ${run.status}` };
-  }
-  const lines = String(run.stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length < 2) return { error: "PowerShell returned no access list" };
-  return { sddl: lines[0], currentUserSid: lines[lines.length - 1] };
+  // Only an error code or exit status is reported: never the command line or its output.
+  if (run.error) return { error: `the access list could not be read (${String((run.error as NodeJS.ErrnoException).code ?? "command failed")})` };
+  if (run.status !== 0) return { error: `the access list could not be read (exit ${run.status})` };
+  return { raw: String(run.stdout) };
 };
 
 export function isPrivateFile(
@@ -142,19 +176,24 @@ export function isPrivateFile(
       ? { ok: true }
       : { ok: false, reason: "group_or_other_access", detail: "group or other users have access" };
   }
-  const acl = (deps.readAcl ?? readWindowsAcl)(path);
-  if ("error" in acl) return { ok: false, reason: "acl_unreadable", detail: acl.error };
-  return judgeWindowsSddl(acl.sddl, acl.currentUserSid);
+  const read = (deps.readAcl ?? readWindowsAcl)(path);
+  if ("error" in read) return { ok: false, reason: "acl_unreadable", detail: read.error };
+  const parsed = parseWindowsAclProbe(read.raw);
+  if ("error" in parsed) return { ok: false, reason: "acl_unreadable", detail: parsed.error };
+  return judgeWindowsAcl(parsed.snapshot);
 }
 
 /**
  * One sentence a person can act on. Names the file and the command that fixes it; never the
- * file's contents.
+ * file's contents. With the caller's SID the Windows command works unchanged in cmd.exe and in
+ * PowerShell, and in any system language; without it, it is a PowerShell line that looks the SID up.
  */
-export function privateFileFix(path: string, platform: NodeJS.Platform = process.platform): string {
-  return platform === "win32"
-    ? `Make it readable only by you: icacls "${path}" /inheritance:r /grant:r "%USERNAME%:(R,W)"`
-    : `Make it readable only by you: chmod 600 '${path.replace(/'/g, "'\\''")}'`;
+export function privateFileFix(path: string, platform: NodeJS.Platform = process.platform, currentUserSid?: string): string {
+  if (platform !== "win32") return `Make it readable only by you: chmod 600 '${path.replace(/'/g, "'\\''")}'`;
+  const grants = `"*${WINDOWS_SYSTEM_SID}:F" "*${WINDOWS_ADMINISTRATORS_SID}:F"`;
+  return currentUserSid && SID.test(currentUserSid)
+    ? `Make it readable only by you: icacls "${path}" /inheritance:r /grant:r "*${currentUserSid}:F" ${grants}`
+    : `Make it readable only by you (PowerShell): icacls '${path.replace(/'/g, "''")}' /inheritance:r /grant:r "*$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value):F" ${grants}`;
 }
 
 /** Throws `<code>: <what is wrong>. <how to fix>` unless the file is private. */
@@ -165,5 +204,5 @@ export function assertPrivateFile(
 ): void {
   const verdict = isPrivateFile(path, deps);
   if (verdict.ok) return;
-  throw new Error(`${code}: ${verdict.detail}. ${privateFileFix(path, deps.platform)}`);
+  throw new Error(`${code}: ${verdict.detail}. ${privateFileFix(path, deps.platform, verdict.currentUserSid)}`);
 }
