@@ -45,3 +45,41 @@ export function windowsOpencodeSharedNode(profile: {
     && typeof profile.opencodeSharedServerUrl === "string" && !!profile.opencodeSharedServerUrl
     && typeof profile.opencodeSharedServerPasswordFile === "string" && !!profile.opencodeSharedServerPasswordFile;
 }
+
+/**
+ * Native Windows has had its own Codex co-presence path since 2026-08 (`startWindowsCodexCopresence`:
+ * app-server + bridge as managed processes, no tmux), and the interactive picker offers it there.
+ * The SDK-only start gate added on 2026-11-17 refused it together with the tmux shapes, so a node
+ * the picker had just created could not be started. This names the one Codex shape that is let
+ * through; `--tmux`, dev channels and grok co-presence stay refused.
+ */
+export function windowsCodexCopresenceNode(
+  profile: { runtime?: unknown; codexCopresence?: unknown } | null | undefined,
+  copresenceFlag = false,
+): boolean {
+  return !!profile && profile.runtime === "codex-app-server" && (profile.codexCopresence === true || copresenceFlag);
+}
+
+/**
+ * Why `anet node start` refuses this node on native Windows, or null when it may start.
+ * One sentence the user can act on: what is wrong and what to do instead.
+ */
+export function windowsStartRefusal(input: {
+  profile: { runtime?: unknown; opencodeGeneration?: unknown; opencodeSharedServerUrl?: unknown;
+    opencodeSharedServerPasswordFile?: unknown; codexCopresence?: unknown; grokCopresence?: unknown };
+  copresenceFlag: boolean; tmuxFlag: boolean; devChannelsFlag: boolean;
+  env?: NodeJS.ProcessEnv;
+}): string | null {
+  const { profile, copresenceFlag, tmuxFlag, devChannelsFlag } = input;
+  const runtime = typeof profile.runtime === "string" && profile.runtime ? profile.runtime : "claude-agent-sdk";
+  if (tmuxFlag) return "--tmux is not available on native Windows (there is no tmux). Start the node without --tmux.";
+  if (devChannelsFlag) return "--accept-dev-channels needs a terminal session that native Windows does not have. Start the node without it.";
+  if (profile.grokCopresence === true) return "Grok co-presence needs tmux, which native Windows does not have. Run this node under WSL, or create a claude-agent-sdk node here.";
+  if (windowsCodexCopresenceNode(profile, copresenceFlag) || windowsOpencodeSharedNode(profile)) return null;
+  if (copresenceFlag || profile.codexCopresence === true) {
+    return `Co-presence on native Windows is available for Codex (runtime codex-app-server) and for OpenCode V2 on a shared Server; this node's runtime is ${runtime}. Start it without --copresence, or run it under WSL.`;
+  }
+  if (windowsRuntimeSupported(runtime, "win32", input.env ?? process.env)) return null;
+  return `Runtime ${runtime} cannot be started on native Windows yet. Available here: claude-agent-sdk, Codex co-presence (codex-app-server), OpenCode V2 on a shared Server`
+    + (WINDOWS_ACP_OPT_IN_RUNTIMES.includes(runtime) ? `; ${runtime} can be tried by setting ANET_ALLOW_ACP_WINDOWS=1.` : ". Create one of those, or run this node under WSL.");
+}

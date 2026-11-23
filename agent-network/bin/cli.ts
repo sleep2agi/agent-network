@@ -2970,7 +2970,7 @@ import {
   type RuntimeName,
 } from "../src/normalize-runtime";
 import { describeStaleRuntimeSupport } from "../src/daemon-runtime-staleness";
-import { windowsOpencodeSharedNode, windowsRuntimeSupported } from "../src/windows-runtime";
+import { windowsOpencodeSharedNode, windowsRuntimeSupported, windowsStartRefusal } from "../src/windows-runtime";
 import { openWindowsSdkEvidenceSession } from "../src/windows-sdk-stop-evidence";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
@@ -8979,12 +8979,12 @@ async function startCommand() {
   // #3812: an OpenCode V2 node that connects to a shared Server is the one co-presence shape that
   // needs neither a terminal nor tmux; `--copresence` is how such a node is normally started.
   const windowsOpencodeShared = process.platform === "win32" && windowsOpencodeSharedNode(resolvedForCopresence?.profile);
-  if (process.platform === "win32" && resolvedForCopresence && (
-    !(windowsRuntimeSupported(resolvedForCopresence.profile.runtime || "claude-agent-sdk") || windowsOpencodeShared) ||
-    opts.tmux === "true" || opts["accept-dev-channels"] === "true" || (copresenceFlagPassed && !windowsOpencodeShared) ||
-    resolvedForCopresence.profile.codexCopresence === true || resolvedForCopresence.profile.grokCopresence === true
-  )) {
-    throw new Error("Native Windows supports claude-agent-sdk by default; terminal, tmux and co-presence runtimes are unavailable. ACP stdio runtimes (antigravity-acp) can be enabled for evaluation with ANET_ALLOW_ACP_WINDOWS=1 (Windows-native first-reply + stop not yet verified).");
+  if (process.platform === "win32" && resolvedForCopresence) {
+    const refusal = windowsStartRefusal({
+      profile: resolvedForCopresence.profile as any,
+      copresenceFlag: copresenceFlagPassed, tmuxFlag: opts.tmux === "true", devChannelsFlag: opts["accept-dev-channels"] === "true",
+    });
+    if (refusal) throw new Error(refusal);
   }
   // #1353: pin before ANY spawn below (incl. the source-resume branch), since children copy process.env at spawn.
   if (resolvedForCopresence) pinDaemonAnetBinForNodeStart(id, (resolvedForCopresence.profile as any)?.role);
