@@ -5168,7 +5168,15 @@ async function processWithAntigravity(
 ): Promise<string> {
   const { checkAgyReadiness } = await import("./runtime/antigravity-acp/readiness");
   const readiness = checkAgyReadiness();
-  if (!readiness.ok) throw new Error(readiness.message);
+  if (!readiness.ok) {
+    const err = new Error(readiness.message) as Error & { code?: string; userReplyText?: string };
+    if (readiness.missingBinary) {
+      err.code = "ENOENT";
+      const { attachAcpUserReplyText } = await import("./runtime/acp-runner/user-error");
+      attachAcpUserReplyText(err, "antigravity");
+    }
+    throw err;
+  }
   // 版本是建议值：不钉死，只提醒。真出兼容问题再按提示装回/换基线。
   if (readiness.state !== "pinned") warn(`[antigravity] ${readiness.message}`);
   if (images?.length) {

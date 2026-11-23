@@ -63,6 +63,7 @@ export class GrokAcpClient extends EventEmitter {
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private rxBuffer = "";
   private closed = false;
+  private spawnError: Error | null = null;
   private cwd = process.cwd();
   // #211 — Activity heartbeat. Every successfully parsed JSON-RPC frame on
   // stdout (notification, response, or server-to-client request) bumps
@@ -113,10 +114,17 @@ export class GrokAcpClient extends EventEmitter {
       for (const [, p] of this.pending) p.reject(new Error(`${this.runtimeLabel} ACP child exited (code=${code} signal=${signal})`));
       this.pending.clear();
     });
-    this.child.on("error", (err) => this.emit("error", err));
+    this.child.on("error", (err) => {
+      this.closed = true;
+      this.spawnError = err;
+      for (const [, p] of this.pending) p.reject(err);
+      this.pending.clear();
+      if (this.listenerCount("error") > 0) this.emit("error", err);
+    });
   }
 
   async request<R = unknown, P = unknown>(method: string, params?: P, timeoutMs = 30_000): Promise<R> {
+    if (this.spawnError) throw this.spawnError;
     if (!this.child || this.closed) throw new Error(`${this.runtimeLabel} ACP client not started or already exited`);
     const id = this.nextId++;
     const payload: JsonRpcRequest<P> = { jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) };
@@ -367,7 +375,8 @@ export class GrokAcpClient extends EventEmitter {
     const abs = resolve(this.cwd, inputPath);
     const rel = relative(this.cwd, abs);
     if (rel === "" || rel === ".." || rel.startsWith(`..${"/"}`) || rel.startsWith(`..${"\\"}`)) {
-      throw new Error(`path outside Grok runtime cwd: ${inputPath}`);
+      const label = this.runtimeLabel === "grok" ? "Grok" : this.runtimeLabel;
+      throw new Error(`path outside ${label} runtime cwd: ${inputPath}`);
     }
     if (!basename(abs)) throw new Error(`invalid path: ${inputPath}`);
     return abs;
@@ -410,13 +419,19 @@ function looksLikeGrokBalanceExhausted(message: string, data: unknown): boolean 
 /** Test-only export: the error text the ACP produces (see the 402 hint above). */
 export const formatJsonRpcErrorForTest = formatJsonRpcError;
 
+function balanceHintFor(runtimeLabel: string): string {
+  if (runtimeLabel === "grok") return GROK_BALANCE_HINT;
+  return `${runtimeLabel} 账号额度耗尽(402):检查账号额度或切换账号;这不是网络、模型或节点的问题`;
+}
+
 function formatJsonRpcError(error: JsonRpcError["error"], runtimeLabel = "grok"): string {
   const base = `${runtimeLabel} ACP error ${error.code}: ${error.message}`;
   const balance = looksLikeGrokBalanceExhausted(error.message ?? "", error.data);
-  if (error.data === undefined) return balance ? `${base} — ${GROK_BALANCE_HINT}` : base;
+  const hint = balance ? balanceHintFor(runtimeLabel) : "";
+  if (error.data === undefined) return balance ? `${base} — ${hint}` : base;
   let data: string;
   try { data = JSON.stringify(error.data); }
   catch { data = String(error.data); }
   if (data.length > 1000) data = `${data.slice(0, 1000)}...`;
-  return balance ? `${base} data=${data} — ${GROK_BALANCE_HINT}` : `${base} data=${data}`;
+  return balance ? `${base} data=${data} — ${hint}` : `${base} data=${data}`;
 }

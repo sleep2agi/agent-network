@@ -24,6 +24,7 @@ import { connect as netConnect } from "node:net";
 import { join, delimiter as pathDelimiter } from "node:path";
 import { connect as tlsConnect } from "node:tls";
 import { codexFingerprintIndexDir, fingerprintRefreshToken } from "../codex-auth-fingerprint.js";
+import { classifyAgyModelsOutput, type AgyLoginState } from "./antigravity-acp/agy-catalog.js";
 import { isAcceptedOpencodeVersionFor, opencodeGenerationSupport } from "./opencode-versions.js";
 
 export type ReadinessState = "ready" | "missing_cli" | "not_logged_in" | "no_network" | "unknown";
@@ -72,6 +73,8 @@ export interface ReadinessDeps {
   httpHead(url: string, timeoutMs: number, proxyEnv: Record<string, string | undefined>): Promise<"reachable" | "unreachable">;
   /** 本机有多少别的节点和 `home/.codex/auth.json` 共用同一条刷新链;算不出返回 null。 */
   codexSharedCount(home: string): number | null;
+  /** 可选：用只读 `agy models` 探测 Antigravity 登录态（不弹浏览器，覆盖系统 keyring 场景）。 */
+  probeAgyAuth?(bin: string, env: Record<string, string | undefined>, timeoutMs: number): Promise<AgyLoginState>;
   now(): number;
 }
 
@@ -95,10 +98,11 @@ interface RuntimeSpec {
   authEnvKeys: string[];
   /** true = 默认不需要登录(opencode 免费 Zen 模型)。 */
   authOptional?: boolean;
+  /** 文件不在时调用只读 CLI 探测登录态（agy 的凭据可能在系统 keyring，`agy models` 本地判未登录不弹浏览器）。 */
+  authProbe?: "agy-models";
   /**
    * true = daemon **无法用文件/env 判断**登录态，且没有可靠的只读探测命令。
-   * 例：Antigravity CLI（agy）把凭据放在系统 keyring，`agy models` 又要真跑一次请求；
-   * 乱报 present/absent 都会误导用户（目录存在 ≠ 已登录）。宁可报 unknown（向导仍可选）。
+   * 报 unknown（绝不误判为 ready）。
    */
   authUnknown?: boolean;
   loginHint: string;
@@ -164,9 +168,10 @@ const SPECS: Record<string, RuntimeSpec> = {
   "antigravity-acp": {
     cli: "agy",
     installHint: `安装 Antigravity CLI 1.5.13（验收版本）:curl -fsSL https://antigravity.google/cli/install.sh | bash,${ON_CHILD_PATH}`,
-    // 凭据在系统 keyring（Google 登录），文件存在与否不代表已登录 → 不猜。
-    authFiles: [],
-    authUnknown: true,
+    // Linux 无桌面环境（headless 服务器 / 小米15）凭据落在文件；
+    // macOS / Windows / 桌面 Linux 凭据可能在系统 keyring，文件不在时再跑一次只读 `agy models` 确认（实测未登录秒退、不弹浏览器）。
+    authFiles: [".gemini/antigravity-cli/antigravity-oauth-token"],
+    authProbe: "agy-models",
     authEnvKeys: [],
     loginHint: "在这台机器上运行 `agy acp --login`(Google 登录;SSH 下会打印授权 URL 并接受粘贴 code)",
     endpoint: "https://antigravity.google",
@@ -356,7 +361,20 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
   let authUnknownMac = false;
   if (fileHit || envHit) out.auth = "present";
   else if (spec.authOptional) out.auth = "not_required";
-  else if (spec.authUnknown) out.auth = "unknown";
+  else if (spec.authProbe === "agy-models") {
+    const cliAbs = out.cli === "found" && spec.cli ? deps.resolveOnPath(spec.cli, pathValue) : null;
+    if (cliAbs && deps.probeAgyAuth) {
+      let loginState: AgyLoginState = "unknown";
+      try {
+        loginState = await deps.probeAgyAuth(cliAbs, withProxyEnv(deps.childEnv, deps.daemonEnv), stepTimeoutMs);
+      } catch {
+        loginState = "unknown";
+      }
+      out.auth = loginState === "logged_in" ? "present" : loginState === "needs_login" ? "absent" : "unknown";
+    } else {
+      out.auth = "unknown";
+    }
+  } else if (spec.authUnknown) out.auth = "unknown";
   else if (deps.platform === "darwin" && spec.authFiles.some((f) => f.startsWith(".claude/"))) {
     // macOS 的 Claude Code 把登录放在钥匙串里,文件不在 ≠ 没登录。不猜。
     out.auth = "unknown";
@@ -403,6 +421,9 @@ async function probeOne(runtime: string, deps: ReadinessDeps, stepTimeoutMs: num
   } else if (authUnknownMac) {
     out.state = "unknown";
     out.reason = "macOS 上 Claude Code 的登录可能存在钥匙串里,无法只凭文件确认;如果建出来的节点报未登录,在这台机器上运行 `claude` 并执行 /login";
+  } else if (out.auth === "unknown") {
+    out.state = "unknown";
+    out.reason = `无法确认这台机器上 ${runtime} 的登录状态;如果建出来的节点报未登录,${spec.loginHint}`;
   } else {
     out.state = "ready";
     out.ok = true;
@@ -599,6 +620,55 @@ export function codexSharedCountReal(home: string, indexDir: string = codexFinge
   return dirs.size;
 }
 
+const PROXY_ENV_KEYS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"] as const;
+
+/** 只从 daemonEnv 补齐代理变量（绝不拷 API key 等凭据），与 httpHeadReal 同口径。 */
+function withProxyEnv(
+  childEnv: Record<string, string | undefined>,
+  daemonEnv: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const merged = { ...childEnv };
+  for (const k of PROXY_ENV_KEYS) {
+    if ((merged[k] === undefined || merged[k] === "") && typeof daemonEnv[k] === "string" && daemonEnv[k] !== "") {
+      merged[k] = daemonEnv[k];
+    }
+  }
+  return merged;
+}
+
+export function probeAgyAuthReal(
+  bin: string,
+  env: Record<string, string | undefined>,
+  timeoutMs: number,
+): Promise<AgyLoginState> {
+  return new Promise((resolve) => {
+    const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(bin);
+    try {
+      execFile(bin, ["models"], {
+        env: env as NodeJS.ProcessEnv,
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+        windowsHide: true,
+        maxBuffer: 64 * 1024,
+        shell,
+      }, (err: any, stdout, stderr) => {
+        if (err && (err.killed || err.signal === "SIGKILL" || err.code === "ETIMEDOUT")) {
+          resolve("unknown");
+          return;
+        }
+        const status = err ? (typeof err.code === "number" ? err.code : 1) : 0;
+        resolve(classifyAgyModelsOutput({
+          status,
+          stdout: String(stdout ?? ""),
+          stderr: String(stderr ?? ""),
+        }).loginState);
+      });
+    } catch {
+      resolve("unknown");
+    }
+  });
+}
+
 export function realReadinessDeps(input: {
   childEnv: Record<string, string | undefined>;
   daemonEnv?: Record<string, string | undefined>;
@@ -616,6 +686,7 @@ export function realReadinessDeps(input: {
     execVersion: execVersionReal,
     httpHead: httpHeadReal,
     codexSharedCount: (home) => codexSharedCountReal(home),
+    probeAgyAuth: probeAgyAuthReal,
     now: () => Date.now(),
   };
 }

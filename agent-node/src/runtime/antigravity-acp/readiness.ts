@@ -14,6 +14,8 @@ export interface AgyReadiness {
   version: AgyVersion | null;
   pinned: string;
   hasAcp: boolean;
+  /** True when the `agy` executable itself was not found (ENOENT). */
+  missingBinary?: boolean;
   message: string;
 }
 
@@ -25,11 +27,12 @@ export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
   // Windows：探活子进程也要补 PATH（计划任务/服务启动的 PATH 常缺 System32 与 PowerShell v1.0）
   const env = withWindowsChildPath({ ...process.env });
   const ver = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15_000, env });
+  const missingBinary = (ver.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
   const version = ver.status === 0 ? parseAgyVersion(String(ver.stdout ?? "")) : null;
   // 每次检查都读一遍环境变量：AGY_ACCEPTED_VERSION 是给审过新版本的节点用的逃生口。
   const pinned = pinnedAgyVersion();
   const state = compareAgyVersion(version, pinned);
-  const help = spawnSync(bin, ["acp", "--help"], { encoding: "utf8", timeout: 15_000, env });
+  const help = missingBinary ? { status: null, stdout: "", stderr: "" } : spawnSync(bin, ["acp", "--help"], { encoding: "utf8", timeout: 15_000, env });
   // agy 把 subcommand 的帮助打到 stderr（实测），两路都要看。
   const helpText = `${help.stdout ?? ""}${help.stderr ?? ""}`;
   const hasAcp = help.status === 0 && /Agent Client Protocol/i.test(helpText);
@@ -39,10 +42,12 @@ export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
   const strict = process.env.AGY_STRICT_VERSION === "1";
   const ok = hasAcp && state !== "unknown" && (!strict || state === "pinned");
   const base = agyReadinessMessage(state, version, pinned);
-  const message = !hasAcp
-    ? `Antigravity CLI 这个版本没有 acp 子命令（需要 >= ${pinned}）：${base}`
-    : strict && state !== "pinned"
-      ? `${base}（本节点设了 AGY_STRICT_VERSION=1，按严格模式拒绝）`
-      : base;
-  return { ok, bin, state, version, pinned, hasAcp, message };
+  const message = missingBinary
+    ? `找不到 Antigravity CLI（${bin}，ENOENT）：${base}`
+    : !hasAcp
+      ? `Antigravity CLI 这个版本没有 acp 子命令（需要 >= ${pinned}）：${base}`
+      : strict && state !== "pinned"
+        ? `${base}（本节点设了 AGY_STRICT_VERSION=1，按严格模式拒绝）`
+        : base;
+  return { ok, bin, state, version, pinned, hasAcp, ...(missingBinary ? { missingBinary: true } : {}), message };
 }
