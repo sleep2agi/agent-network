@@ -2593,7 +2593,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             text: JSON.stringify({
               ok: true,
               message_id: id,
-              ...(isControl ? { control: "interrupt" as const, accepted: true, result_from: "node_reply" } : {}),
+              // 2026-11-23 —— 诚实回执：这里只表示「停止请求已排入对方的队列」。
+              // 之前写死 `result_from: "node_reply"`，让调用方以为节点已经回了、甚至以为回合停了；
+              // 实际节点在回合结束后才取到这行（真机已复现），根本没回过任何结果。
+              // 等节点侧把 outcome 写回来（inbox.meta）之后，再在这里回 interrupted 才算「已停下」。
+              ...(isControl ? { control: "interrupt" as const, accepted: true, confirmation: "pending" as const } : {}),
               ...(isSteer ? { delivery: "steer" as const, accepted: true } : {}),
               ...(canonical.renamed ? { renamed_from: alias, renamed_to: targetAlias } : {}),
               session_status: target.session?.status ?? "unknown",
