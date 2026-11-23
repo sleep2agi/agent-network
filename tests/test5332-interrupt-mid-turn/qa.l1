@@ -1,0 +1,6 @@
+Card #5332. A stop request must reach the runtime while its turn is still
+running. A real hub and a real agent-node run a fake ACP agent that holds
+one turn; the stop is sent through the hub the way a user sends it. Handling
+the stop only after the turn ends turns the suite red; it also checks one
+cancel and one answer per stop, an honest "nothing to stop" when idle, and
+that the node takes the next task afterwards.
