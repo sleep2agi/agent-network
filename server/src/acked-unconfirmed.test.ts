@@ -67,3 +67,29 @@ describe("B 止血：只对「期待回复」的行生效（不期待回复 ⇒ 
     expect(hit.map(h => h.messageId)).toEqual(["m1"]);
   });
 });
+
+describe("B 止血：任务粒度的投递证据（先回执、后 ack 也不误判）", () => {
+  test("回执早于 ack 登记 ⇒ 仍然算已投递（不回退）", () => {
+    const t0 = 4_000_000;
+    // 节点的正常顺序：先回执（send_reply），两秒后才 ack 收件箱那一行。
+    markReply("n", "net", { inReplyTo: "t1", nowMs: t0 });
+    markAcked({ messageId: "t1", alias: "n", networkId: "net", nowMs: t0 + 2_000, taskId: "t1" });
+    expect(sweepUnconfirmed(t0 + W, W)).toEqual([]);
+  });
+
+  test("回执晚于 ack 登记 ⇒ 精确匹配到这条任务（不回退）", () => {
+    const t0 = 5_000_000;
+    markAcked({ messageId: "t1", alias: "n", networkId: "net", nowMs: t0, taskId: "t1" });
+    markReply("n", "net", { inReplyTo: "t1", nowMs: t0 + 1_000 });
+    expect(sweepUnconfirmed(t0 + W, W)).toEqual([]);
+  });
+
+  test("回执证据过期（超过 TTL）⇒ 仍然回退", () => {
+    const t0 = 6_000_000;
+    markReply("n", "net", { inReplyTo: "t1", nowMs: t0 });
+    // 证据 1 小时后过期；此时再 ack 就不能算已投递了。
+    markAcked({ messageId: "t1", alias: "n", networkId: "net", nowMs: t0 + 61 * 60 * 1000, taskId: "t1" });
+    const hit = sweepUnconfirmed(t0 + 61 * 60 * 1000 + W, W);
+    expect(hit.map(h => h.messageId)).toEqual(["t1"]);
+  });
+});

@@ -1831,7 +1831,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // （口径 ①，负责⼈ 2026-11-20）。登记失败绝不能影响 ack 本身。
         // 只有「期待回复」的行才进 B 止血的回退窗口：通知 / 节点间回执（requires_response='none'）
         // 的 ack 本身就是终点，等不到回复也不该被回退成未读再重投（否则全网原地打转）。
-        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null, expectsResponse: inboxTask.requires_response !== "none" }); } catch {}
+        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null, expectsResponse: inboxTask.requires_response !== "none", taskId: inboxTask.task_id }); } catch {}
       }
       if (result.changes === 0) {
         return {
@@ -3131,7 +3131,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             ...("workOutcome" in replyOutcome ? { scheduled_work_outcome: replyOutcome.workOutcome } : {}),
             session_status: session?.status ?? "unknown",
             // B 止血（口径 ①）：这条回复就是「该 alias 有产出」的证据，窗口内的 acked 记录标成已投递。
-            ...(markReplySafe(args), {}),
+            ...(markReplySafe(args, in_reply_to), {}),
             ...(warning ? { warning } : {}),
             ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
           }),
@@ -3141,12 +3141,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
 
   // B 止血 —— 把「谁回复了」记成投递证据；失败绝不影响回复本身。
-  const markReplySafe = (args: any) => {
+  // in_reply_to 传进来（handleReply 里可能被推断出来）：任务粒度的证据能治
+  // 「先回执、后 ack」这个顺序问题（见 acked-unconfirmed.ts 的 repliedTasks）。
+  const markReplySafe = (args: any, inReplyTo?: string | null) => {
     try {
       const raw = typeof args?.from_session === "string" && args.from_session ? args.from_session : null;
       const alias = raw ?? (callerAlias ?? null);
       const net = (() => { try { return getNetworkId(args?.network_id) ?? null; } catch { return null; } })();
-      if (alias) markReply(alias, net);
+      if (alias) markReply(alias, net, { inReplyTo: inReplyTo ?? args?.in_reply_to ?? null });
     } catch {}
     return {};
   };
