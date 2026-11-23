@@ -15,9 +15,10 @@
  */
 export function sseAbandonGuidance(alias: string, hubUrl: string): string {
   return [
-    `SSE 连续 >1h 连不上 hub (${hubUrl}) — 已停止自动重连。`,
+    `SSE 连续 >1h 连不上 hub (${hubUrl}) — 已降频重连（每 5 分钟一次），网络恢复后会自动回来。`,
     `当前 agent-node 实例（alias=${alias}）仍在运行；不要另起同 alias 实例，否则会产生重复消费者。`,
-    "请先停止当前实例，再通过原 supervisor/service 或本实例的原始启动命令做替换式重启。",
+    "降频期间节点仍会上报心跳，Hub 上看起来是在线的，但它收不到新任务；等网络恢复即可自动接上。",
+    "如果长时间不恢复，请先停止当前实例，再通过原 supervisor/service 或本实例的原始启动命令做替换式重启。",
     "共存节点必须保留原 --copresence / 专用 config 启动方式，不能改用通用 node start。",
   ].join(" ");
 }

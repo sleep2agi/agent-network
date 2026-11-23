@@ -8488,6 +8488,10 @@ async function connectSSE() {
     label: "sse",
     shutdownGate: () => false,  // no in-process shutdown gate for SSE; abandon-after-1h is the bail
     abandonAfterMs: ABANDON_AFTER_MS,
+    // 1h 连续连不上 hub 之后不再永久放弃：降频重连（每 5 分钟一次）。
+    // 放弃重连的节点仍然会上报心跳，Hub 上看着是在线的，但永远收不到新任务；
+    // 降频重连让节点在网络一恢复时自己回来（2026-11-22 主苹果运维 实例）。
+    slowRetryAfterAbandonMs: 5 * 60_000,
     onAbandon: () => error(sseAbandonGuidance(ALIAS, COMMHUB_URL)),
     onRetryWait: (waitMs) => debug(`SSE reconnecting (${(waitMs / 1000).toFixed(1)}s)...`),
     // #2363 —— Hub 重启会让**所有**节点的 SSE 在同一刻断开。±25% 抖动只能把重连

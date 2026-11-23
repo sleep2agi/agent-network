@@ -252,6 +252,111 @@ describe("superviseChild — abandonAfterMs", () => {
   });
 });
 
+describe("superviseChild — slowRetryAfterAbandonMs", () => {
+  test("keeps probing after the abandon threshold and fires onAbandon only once", async () => {
+    const h = makeHarness();
+    let abandonCalls = 0;
+    let iterations = 0;
+    let stable = false;
+    const p = superviseChild({
+      label: "slow-retry",
+      shutdownGate: () => stable,
+      runOnce: async (ctrl) => {
+        iterations++;
+        h.tick(100);
+        if (stable) ctrl.markStable();
+      },
+      baseDelayMs: 50,
+      maxDelayMs: 200,
+      jitterRatio: 0,
+      abandonAfterMs: 500,
+      slowRetryAfterAbandonMs: 60_000,
+      onAbandon: () => { abandonCalls++; },
+      sleep: h.sleep, random: h.random, now: h.now,
+    });
+    const drain = (async () => {
+      // The slow cadence is 60s of fake time, so the clock has to jump that
+      // far for the fake sleep to resolve.
+      for (let i = 0; i < 8 && !stable; i++) {
+        h.tick(60_000);
+        await new Promise((r) => setImmediate(r));
+      }
+      stable = true;
+      h.drainAll();
+      await new Promise((r) => setImmediate(r));
+    })();
+    await Promise.all([p, drain]);
+    // The supervisor never gave up: it kept retrying past the threshold.
+    expect(iterations).toBeGreaterThan(3);
+    // The milestone is reported once per outage, not once per attempt.
+    expect(abandonCalls).toBe(1);
+  });
+
+  test("slow mode keeps a fixed cadence instead of falling back to the exponential backoff", async () => {
+    const h = makeHarness();
+    const waits: number[] = [];
+    let iterations = 0;
+    let stop = false;
+    const p = superviseChild({
+      label: "slow-cadence",
+      shutdownGate: () => stop,
+      runOnce: async () => { iterations++; h.tick(100); },
+      baseDelayMs: 50,
+      maxDelayMs: 200,
+      jitterRatio: 0,
+      abandonAfterMs: 500,
+      slowRetryAfterAbandonMs: 60_000,
+      onRetryWait: (waitMs) => { waits.push(waitMs); },
+      sleep: h.sleep, random: h.random, now: h.now,
+    });
+    const drain = (async () => {
+      for (let i = 0; i < 8 && iterations < 6; i++) {
+        h.tick(60_000);
+        await new Promise((r) => setImmediate(r));
+      }
+      stop = true;
+      h.drainAll();
+      await new Promise((r) => setImmediate(r));
+    })();
+    await Promise.all([p, drain]);
+    // The first wait uses the normal backoff; every wait after the abandon
+    // threshold uses the slow cadence (never maxDelayMs=200).
+    expect(waits.length).toBeGreaterThan(1);
+    expect(waits[0]).toBeLessThan(60_000);
+    for (const w of waits.slice(1)) expect(w).toBe(60_000);
+  });
+
+  test("without slowRetryAfterAbandonMs the supervisor still stops for good", async () => {
+    const h = makeHarness();
+    let abandonCalls = 0;
+    let iterations = 0;
+    const p = superviseChild({
+      label: "hard-abandon",
+      shutdownGate: () => false,
+      runOnce: async () => { iterations++; h.tick(100); },
+      baseDelayMs: 50,
+      maxDelayMs: 200,
+      jitterRatio: 0,
+      abandonAfterMs: 500,
+      onAbandon: () => { abandonCalls++; },
+      sleep: h.sleep, random: h.random, now: h.now,
+    });
+    const drain = (async () => {
+      for (let i = 0; i < 50 && abandonCalls === 0; i++) {
+        h.tick(100);
+        await new Promise((r) => setImmediate(r));
+      }
+    })();
+    await Promise.all([p, drain]);
+    expect(abandonCalls).toBe(1);
+    // The loop returned: no further iterations after the abandon.
+    const after = iterations;
+    h.tick(10_000);
+    await new Promise((r) => setImmediate(r));
+    expect(iterations).toBe(after);
+  });
+});
+
 describe("superviseChild — runOnce error handling", () => {
   test("runOnce throws → onError fires, loop continues", async () => {
     const h = makeHarness();
