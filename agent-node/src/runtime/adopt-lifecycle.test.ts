@@ -43,9 +43,10 @@ test("late startup evidence cannot resurrect revocation or replace a new request
 
 test("the Hub is told which variable could not be reproduced, never a path or an OS error", async () => {
   const { lifecycleError } = await import("./adopt-lifecycle.js");
-  expect(lifecycleError("adopt_env_not_reproducible:ANET_LAUNCHED_BY_CLI_VERSION")).toBe("adopt_env_not_reproducible:ANET_LAUNCHED_BY_CLI_VERSION");
-  expect(lifecycleError("adopt_start_timeout")).toBe("adopt_start_timeout");
-  expect(lifecycleError("adopted_node_delete_unsupported")).toBe("adopted_node_delete_unsupported");
-  expect(lifecycleError("ENOENT: no such file or directory, open '/home/someone/.anet/x'")).toBe("adopt_lifecycle_verification_failed");
+  expect(lifecycleError(Error("adopt_env_not_reproducible:ANET_LAUNCHED_BY_CLI_VERSION"))).toBe("adopt_env_not_reproducible:ANET_LAUNCHED_BY_CLI_VERSION");
+  expect(lifecycleError(Error("adopt_start_timeout"))).toBe("adopt_start_timeout");
+  expect(lifecycleError(Error("adopted_node_delete_unsupported"))).toBe("adopted_node_delete_unsupported");
+  expect(lifecycleError(Error("ENOENT: no such file or directory, open '/home/someone/.anet/x'"))).toBe("adopt_lifecycle_verification_failed");
   expect(lifecycleError(undefined)).toBe("adopt_lifecycle_verification_failed");
+  expect(lifecycleError(Error("adopt_local_verification_failed"))).toBe("adopt_lifecycle_verification_failed");
 });

@@ -42,7 +42,7 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
     result = await operate(req, entry, deps, bindingRequestId);
   } catch (e: any) {
     result = { status: req.action === "start" ? "start_failed" : "stop_failed",
-      error: lifecycleError(e?.message) };
+      error: lifecycleError(e) };
     // The Hub gets a code; the reason stays in the daemon log, where the operator can read it.
     deps.warn(`[adopt-lifecycle] ${req.action} ${req.child_alias} failed: ${result.error}`);
   }
@@ -56,10 +56,10 @@ async function handle(req: AdoptLifecycleRequest, deps: AdoptDaemonDeps): Promis
  * `adopt_env_not_reproducible:KEY,…`, which names variables, never values — so a refusal can be
  * acted on. Anything else (paths, OS errors) is folded into one code.
  */
-export function lifecycleError(message: unknown): string {
-  if (message === "adopted_node_delete_unsupported") return message;
-  const code = publicAdoptError(message);
-  return code === "adopt_local_verification_failed" ? "adopt_lifecycle_verification_failed" : code;
+export function lifecycleError(e: any): string {
+  // tests/test658-codex-adopt-stop/recovery-mutation.ts removes the first clause to prove the delete reason is asserted.
+  return e?.message === "adopted_node_delete_unsupported" || publicAdoptError(e?.message) !== "adopt_local_verification_failed"
+    ? e.message : "adopt_lifecycle_verification_failed";
 }
 async function operate(req: AdoptLifecycleRequest, entry: AdoptedChild, deps: AdoptDaemonDeps, bindingRequestId: unknown): Promise<Record<string, unknown>> {
   // OpenCode V2 co-presence is registered for source reads only; a daemon start/stop
