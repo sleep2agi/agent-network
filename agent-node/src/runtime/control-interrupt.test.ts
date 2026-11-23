@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { interruptCurrentTurn, parseControlOp } from "./control-interrupt";
+import { interruptCurrentTurn, parseControlOp, sharedServerInterruptEndpoint } from "./control-interrupt";
 
 const ep = { url: "http://127.0.0.1:1234", authorization: "Bearer x" };
 const mk = (interrupted: boolean) => (async () =>
@@ -36,5 +36,27 @@ describe("parseControlOp", () => {
     expect(parseControlOp('{"op":"other"}')).toBeNull();
     expect(parseControlOp("not json")).toBeNull();
     expect(parseControlOp(undefined)).toBeNull();
+  });
+});
+
+// #3812 — measured on a real Windows node: a stop answered {"ok":false,"reason":"no_endpoint"} and
+// the turn kept running, because the endpoint record is not written there.
+
+describe("the shared OpenCode Server as an interrupt endpoint", () => {
+  const config = { opencodeSharedServerUrl: "http://127.0.0.1:14096", opencodeSharedServerPasswordFile: "C:\\Users\\a\\.anet\\pw" };
+  test("built from the node's own configuration", () => {
+    const seen: string[] = [];
+    const ep = sharedServerInterruptEndpoint(config, (file) => { seen.push(file); return "s3cret\r\n"; });
+    expect(seen).toEqual([config.opencodeSharedServerPasswordFile]);
+    expect(ep).toEqual({ url: "http://127.0.0.1:14096", authorization: `Basic ${Buffer.from("opencode:s3cret").toString("base64")}` });
+  });
+  test("nothing is guessed: no shared Server, a non-loopback URL, an unreadable or empty password", () => {
+    const read = () => "pw";
+    expect(sharedServerInterruptEndpoint(null, read)).toBeNull();
+    expect(sharedServerInterruptEndpoint({}, read)).toBeNull();
+    expect(sharedServerInterruptEndpoint({ ...config, opencodeSharedServerUrl: "http://10.0.0.5:14096" }, read)).toBeNull();
+    expect(sharedServerInterruptEndpoint({ ...config, opencodeSharedServerPasswordFile: "" }, read)).toBeNull();
+    expect(sharedServerInterruptEndpoint(config, () => { throw new Error("not private"); })).toBeNull();
+    expect(sharedServerInterruptEndpoint(config, () => "  \n")).toBeNull();
   });
 });

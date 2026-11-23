@@ -43,6 +43,28 @@ export async function interruptCurrentTurn(deps: InterruptDeps): Promise<Interru
   }
 }
 
+/**
+ * The shared OpenCode Server this node is configured for, as an interrupt endpoint.
+ *
+ * The usual source is the catalog endpoint record the node writes at startup. That record holds a
+ * copy of the Server password and is not written on Windows (#3812) — so a stop sent to a Windows
+ * node answered `no_endpoint` and the turn kept running (measured on a real machine). The node's
+ * own configuration already names the Server and its password file; read it from there.
+ * `readPassword` must refuse a password file that is not private. Anything missing or refused
+ * yields null: the caller reports no endpoint, it does not guess one.
+ */
+export function sharedServerInterruptEndpoint(
+  config: { opencodeSharedServerUrl?: unknown; opencodeSharedServerPasswordFile?: unknown } | null | undefined,
+  readPassword: (passwordFile: string) => string,
+): { url: string; authorization: string } | null {
+  const url = config?.opencodeSharedServerUrl, file = config?.opencodeSharedServerPasswordFile;
+  if (typeof url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+$/.test(url) || typeof file !== "string" || !file) return null;
+  let password: string;
+  try { password = readPassword(file).trim(); } catch { return null; }
+  if (!password) return null;
+  return { url, authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` };
+}
+
 /** 控制消息的载荷形状：{op:"interrupt"}。解析失败不猜，返回 null。 */
 export function parseControlOp(content: unknown): "interrupt" | null {
   if (typeof content !== "string") return null;

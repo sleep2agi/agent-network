@@ -23,6 +23,16 @@ describe("OpenCode shared Server create defaults", () => {
     expect(() => resolveSharedOpenCodeServer({ "opencode-shared-server-url": "http://127.0.0.1:5000" }, registry)).toThrow();
     expect(() => resolveSharedOpenCodeServer({ "opencode-new-server": "true", "opencode-shared-server-url": "http://127.0.0.1:5000" }, registry)).toThrow();
   });
+  // Measured on Windows 11: PowerShell 5.1 wrote this file as EF BB BF 7B…, and `anet node create`
+  // died with "Unexpected token '\uFEFF'" before doing anything.
+  test("a registry written with a UTF-8 byte-order mark is read normally", () => {
+    writeFileSync(registry, `\uFEFF${JSON.stringify({ url: "http://127.0.0.1:4097", passwordFile: "/private/password" })}\r\n`);
+    expect(resolveSharedOpenCodeServer({}, registry)).toEqual({ url: "http://127.0.0.1:4097", passwordFile: "/private/password" });
+  });
+  test("a registry that is not JSON names the file instead of quoting its bytes", () => {
+    writeFileSync(registry, "url = http://127.0.0.1:4097");
+    expect(() => resolveSharedOpenCodeServer({}, registry)).toThrow(`Shared OpenCode Server registry is not valid JSON: ${registry}`);
+  });
   test("new Server flag does not consume the node name", () => {
     expect(parseCliOptions(["node", "create", "--opencode-new-server", "example"])["opencode-new-server"]).toBe("true");
   });
