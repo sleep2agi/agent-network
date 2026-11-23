@@ -1,3 +1,4 @@
+import { setActiveAcpTurn, cancelActiveAcpTurn } from "../acp-runner/active-turn";
 import { GrokAcpClient } from "./client";
 import { newGrokTurnState, reduceGrokAcpNotification } from "./events";
 import type { GrokAcpNotification, GrokTurnState } from "./events";
@@ -377,6 +378,10 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers, ...sessionExtra }, handshakeTimeoutMs);
 
     const sessionId = extractSessionId(session) ?? opts.sessionId;
+    // #5332 —— 登记当前 ACP 回合，供 control=interrupt 发 session/cancel（agy 与本实现共用）
+    if (typeof sessionId === "string" && sessionId) {
+      setActiveAcpTurn({ client: client as any, sessionId, runtime: String(opts.runtime ?? "acp") });
+    }
     if (!sessionId) throw new Error(`${opts.runtimeLabel ?? "grok"} ACP session response did not include sessionId`);
 
     state.sessionId = sessionId;
