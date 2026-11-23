@@ -2175,6 +2175,21 @@ return Bun.serve({
           callerIdentityRejected = true;
         }
       }
+      // 2026-11-23 —— GET /mcp 是 SDK 的 standalone SSE 流。这个 Hub 是 stateless 的
+      // （transport 每请求新建、响应后即 close），所以这条流**从来不会推任何东西**：
+      // 客户端连上就断、断完再连 —— 线上实测 8 次/秒，每条还先建一台 McpServer（105 个工具）。
+      // MCP 规范允许服务端用 405 表示「本端点不提供 SSE 流」，SDK 客户端对 405 的处理是
+      // 「正常情况、直接返回、不报错不重连」（client/streamableHttp.js `openSseStream`），
+      // 所以这里统一回 405，且发生在建实例之前。
+      // 对老 agent-node 的影响：它们现在拿到的本来就是「立刻关闭的流」（等价无推送），换成 405
+      // 只会让它们安静下来（不再反复重连），不会丢任何消息 —— 消息走 /events/:session 与轮询。
+      if (req.method === "GET") {
+        return withCors(req, Response.json({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Method Not Allowed: this stateless Hub does not expose an MCP SSE stream; use /events/:session" },
+          id: null,
+        }, { status: 405, headers: { Allow: "POST, DELETE" } }));
+      }
       // #2363 —— 在飞计数：从进入 /mcp 到 MCP server 关闭。Hub 的内存与“同时在飞的
       // 请求数”成正比（隔离实测 ≈1.2–1.4 MB/条；顺序 54 条/秒时 RSS 完全平稳），
       // 所以这个数比 req/s 更能解释 RSS 尖峰。只观测，不拦请求。
