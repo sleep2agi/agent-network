@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { exemptLoopbackFromProxy, withLoopbackNoProxy } from "./loopback-no-proxy";
 
@@ -35,5 +37,19 @@ describe("loopback is never proxied", () => {
       exemptLoopbackFromProxy(env);
       expect(env.NO_PROXY).toBe("127.0.0.1,localhost,::1");
     }
+  });
+  test("a proxy that arrives later (from the node profile) is covered by calling it again", () => {
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    exemptLoopbackFromProxy(env);
+    expect(env.NO_PROXY).toBeUndefined();
+    env.HTTPS_PROXY = "http://proxy:8080";
+    exemptLoopbackFromProxy(env);
+    expect(env.NO_PROXY).toBe("127.0.0.1,localhost,::1");
+  });
+  test("the node applies it once more after merging the profile's variables", () => {
+    const cli = readFileSync(join(import.meta.dir, "..", "cli.ts"), "utf8");
+    const merged = cli.indexOf("if (fileConfig.env && typeof fileConfig.env === \"object\")");
+    expect(merged).toBeGreaterThan(0);
+    expect(cli.indexOf("exemptLoopbackFromProxy();", merged)).toBeGreaterThan(merged);
   });
 });
