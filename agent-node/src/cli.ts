@@ -5233,6 +5233,13 @@ async function processWithAntigravity(
       warn(`[antigravity] resumed session failed (${e?.message || e}); retrying once with a fresh session`);
       const result = await runOnce(undefined);
       clearInteractivePrompt("turn-completed");
+      // 2026-11-23 负责人 review 第 3 条：回放判决失败后换新会话重做成功时，用户看到的不能是一条
+      // 普通回复 —— 那等于悄悄丢了上下文。只有「回放型失败」才加这句人话；其它失败（idle 超时等）
+      // 原有语义不变。
+      if (e?.code === "agy_replay_only_no_new_content") {
+        const { withFreshSessionRetryNote } = await import("./runtime/antigravity-acp/runtime");
+        return withFreshSessionRetryNote(result.replyText);
+      }
       return result.replyText;
     }
     throw e;
