@@ -1067,7 +1067,9 @@ function conditionalBody(req: Request, body: string, etag: string, opts: { level
   //          十几万字节一份，十几份就能把 16MB 缓存里「很少变」的需求表挤掉，反而让它每次重压。
   //   level: 显式压缩级别（很少变又大的调用方例如需求表：宁可多花一次 CPU，少发字节）。
   if (opts.level !== undefined) res = markGzipLevel(res, opts.level);
-  if (opts.cache === true) res = markGzipReusable(res, etag);
+  // 默认进缓存（需求表这类「很少变」的调用方就是靠它压一次用很多次）；
+  // 高频轮询端点显式传 { cache: false } 才不进，避免把老条目挤出去。
+  if (opts.cache !== false) res = markGzipReusable(res, etag);
   return res;
 }
 
@@ -2084,7 +2086,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     if (cached && cached.generation === generation && cached.acl === acl && Date.now() - cached.at < LIST_CACHE_MAX_AGE_MS) {
       listCache.delete(cacheKey!);
       listCache.set(cacheKey!, cached);
-      return conditionalBody(ctx.req, cached.body, cached.etag);
+      return conditionalBody(ctx.req, cached.body, cached.etag, { level: 9 });
     }
     const page = listPage(ctx, filtered, params, lq);
     // last_event(#506):每行最新一条动态(含评论),没有 = null。旧 App 不认识,忽略即可。
@@ -2103,7 +2105,7 @@ async function handleRequirementsRequestInner(ctx: RequirementsRequestContext): 
     const body = JSON.stringify(payload);
     const etag = bodyEtag(body);
     if (cacheKey && acl !== null) rememberList(cacheKey, { generation, acl, at: Date.now(), body, etag });
-    return conditionalBody(ctx.req, body, etag);
+    return conditionalBody(ctx.req, body, etag, { level: 9 });
   }
 
   if (url.pathname === "/api/requirements" && req.method === "POST") {
