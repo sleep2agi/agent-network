@@ -16,6 +16,23 @@ import {
 import { renameOverExistingSync } from "../../shared/windows-rename-retry";
 import type { Stats } from "fs";
 import { basename, dirname, resolve } from "path";
+import { modeIsJudgeable } from "../../shared/posix-modes";
+import { sameWorkspacePath } from "../opencode-copresence/workspace-path";
+
+// #3812 — owner uid and mode bits are POSIX facts. Windows has no uid and reports 0o666/0o777 for
+// every ordinary file and directory, so on Windows these two conditions could only ever refuse
+// (shared/posix-modes.ts). There the checks that remain are the ones that still mean something:
+// a real file or directory, not a link, single-linked, unchanged between look and use. Who may
+// read the node directory on Windows is decided by that folder's access list, which this module
+// does not set or judge.
+const POSIX = modeIsJudgeable();
+const ownedWithMode = (stat: Stats, mode: number): boolean => {
+  if (!POSIX) return true;
+  const uid = process.getuid?.();
+  return uid !== undefined && stat.uid === uid && (stat.mode & 0o777) === mode;
+};
+/** Canonical path check; on Windows the same path may differ in drive-letter case. */
+const canonical = (path: string): boolean => sameWorkspacePath(realpathSync(path), path);
 
 export interface OpencodeConfigLoadOutcome {
   config: Record<string, any>;
@@ -44,7 +61,7 @@ function lstatIfPresent(path: string): Stats | undefined {
 function assertPrivateDirectory(path: string, label: string): Stats {
   const absolute = resolve(path);
   const before = lstatSync(absolute);
-  if (before.isSymbolicLink() || !before.isDirectory() || realpathSync(absolute) !== absolute) {
+  if (before.isSymbolicLink() || !before.isDirectory() || !canonical(absolute)) {
     throw new OpencodeStateSafetyError(
       `OpenCode state refuses ${label} at ${absolute}: expected a canonical real directory`,
     );
@@ -57,15 +74,14 @@ function assertPrivateDirectory(path: string, label: string): Stats {
     );
     const opened = fstatSync(fd);
     const current = lstatSync(absolute);
-    const uid = process.getuid?.();
     if (!opened.isDirectory() || current.isSymbolicLink()
       || !sameIdentity(before, opened) || !sameIdentity(opened, current)
-      || realpathSync(absolute) !== absolute) {
+      || !canonical(absolute)) {
       throw new OpencodeStateSafetyError(
         `OpenCode state refuses ${label} at ${absolute}: directory identity changed`,
       );
     }
-    if (uid === undefined || opened.uid !== uid || (opened.mode & 0o777) !== 0o700) {
+    if (!ownedWithMode(opened, 0o700)) {
       throw new OpencodeStateSafetyError(
         `OpenCode state refuses ${label} at ${absolute}: owner/mode must be current uid/0700`,
       );
@@ -87,7 +103,7 @@ function assertPrivateRegularFile(
     throw new OpencodeStateSafetyError(`OpenCode state refuses ${label} at ${path}: file is missing`);
   }
   if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1
-    || realpathSync(path) !== path) {
+    || !canonical(path)) {
     throw new OpencodeStateSafetyError(
       `OpenCode state refuses ${label} at ${path}: expected a canonical single-link regular file`,
     );
@@ -97,14 +113,13 @@ function assertPrivateRegularFile(
     fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
     const opened = fstatSync(fd);
     const current = lstatSync(path);
-    const uid = process.getuid?.();
     if (!opened.isFile() || opened.nlink !== 1 || current.isSymbolicLink()
       || !sameIdentity(before, opened) || !sameIdentity(opened, current)) {
       throw new OpencodeStateSafetyError(
         `OpenCode state refuses ${label} at ${path}: file identity changed`,
       );
     }
-    if (uid === undefined || opened.uid !== uid || (opened.mode & 0o777) !== 0o600) {
+    if (!ownedWithMode(opened, 0o600)) {
       throw new OpencodeStateSafetyError(
         `OpenCode state refuses ${label} at ${path}: owner/mode must be current uid/0600`,
       );
@@ -173,7 +188,7 @@ function atomicWritePrivateFile(
     fsyncSync(fd);
     const tempStat = fstatSync(fd);
     const uid = process.getuid?.();
-    if (!tempStat.isFile() || tempStat.nlink !== 1 || uid === undefined || tempStat.uid !== uid) {
+    if (!tempStat.isFile() || tempStat.nlink !== 1 || (POSIX && (uid === undefined || tempStat.uid !== uid))) {
       throw new OpencodeStateSafetyError(
         `OpenCode state refuses ${label}: temporary file is not owner-controlled`,
       );
@@ -195,7 +210,8 @@ function atomicWritePrivateFile(
       parent,
       constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
     );
-    try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+    // Windows cannot fsync a directory handle (EPERM); NTFS journals the rename itself.
+    try { if (POSIX) fsyncSync(parentFd); } finally { closeSync(parentFd); }
   } catch (error) {
     if (fd !== undefined) {
       try { closeSync(fd); } catch {}

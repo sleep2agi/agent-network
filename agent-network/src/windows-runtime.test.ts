@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { windowsRuntimeSupported } from "./windows-runtime.js";
 import { windowsRuntimeSupported as daemonSupports } from "../../agent-node/src/shared/windows-runtime.js";
+import { windowsOpencodeSharedNode as daemonOpencodeShared } from "../../agent-node/src/shared/windows-runtime.js";
+import { windowsOpencodeSharedNode } from "./windows-runtime";
 import { windowsSdkBatchEvidence, windowsSdkEvidenceScript, openWindowsSdkEvidenceSession, sdkEvidenceReason, windowsSdkHelperLaunch } from "./windows-sdk-stop-evidence.js";
 import { orchestrateWindowsManagedStop, orchestrateWindowsManagedStopAsync, probeWindowsCreationDate } from "./windows-codex-copresence.js";
 
@@ -184,4 +186,25 @@ test("helper diagnostics retain stage/exit/output metadata but never upstream te
   expect(message).not.toContain("secret-path");
   expect(message).not.toContain("ntok_");
   expect(sdkEvidenceReason("C:/private/other-path")).toBe("unknown");
+});
+
+// #3812 — the one OpenCode shape native Windows runs: V2, connected to a Server that already exists.
+test("Windows admits an OpenCode node only as a client of a shared V2 Server; both packages agree", () => {
+  const shared = { runtime: "opencode-cli", opencodeGeneration: "v2",
+    opencodeSharedServerUrl: "http://127.0.0.1:4097", opencodeSharedServerPasswordFile: "C:\\Users\\a\\.anet\\pw" };
+  const cases: Array<[unknown, boolean]> = [
+    [shared, true],
+    [{ ...shared, opencodeGeneration: "v1" }, false],
+    [{ ...shared, opencodeGeneration: undefined }, false],
+    [{ ...shared, opencodeSharedServerUrl: undefined }, false],
+    [{ ...shared, opencodeSharedServerPasswordFile: "" }, false],
+    [{ ...shared, runtime: "codex-app-server" }, false],
+    [null, false], [undefined, false],
+  ];
+  for (const [profile, expected] of cases) {
+    expect(windowsOpencodeSharedNode(profile as any)).toBe(expected);
+    expect(daemonOpencodeShared(profile as any)).toBe(expected);
+  }
+  // The general allowlist is unchanged: opencode-cli as such is still not a Windows runtime.
+  expect(windowsRuntimeSupported("opencode-cli", "win32", {} as NodeJS.ProcessEnv)).toBe(false);
 });

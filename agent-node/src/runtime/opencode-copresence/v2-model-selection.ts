@@ -1,3 +1,4 @@
+import { isWithinWorkspacePath, sameWorkspacePath } from "./workspace-path";
 /** Session-scoped model selection primitives. Never pass raw catalog fields on. */
 export interface V2ModelSelection {
   providerID: string;
@@ -24,10 +25,8 @@ export function readV2ModelSelection(body: unknown): V2ModelSelection | undefine
  * offline). Boundary-checked: `/ws-2` is not inside `/ws`.
  */
 export function isWithinWorkspace(location: unknown, workspace: string): boolean {
-  if (typeof location !== "string" || !location || !workspace) return false;
-  if (location === workspace) return true;
-  const base = workspace.endsWith("/") ? workspace : `${workspace}/`;
-  return location.startsWith(base) && !location.slice(base.length).split("/").includes("..");
+  // POSIX: byte-exact, as before. Windows: one directory has many spellings (workspace-path.ts).
+  return isWithinWorkspacePath(location, workspace);
 }
 
 /** A matching model alone cannot establish the identity or workspace of a readback. */
@@ -38,7 +37,7 @@ export function isV2SessionScope(body: unknown, sessionId: string, directory: st
 
 /** Fail closed if the catalog is absent, ambiguous, malformed or from another directory. */
 export function catalogAllowsSelection(body: unknown, directory: string, selection: V2ModelSelection): boolean {
-  if (!record(body) || !record(body.location) || body.location.directory !== directory || !Array.isArray(body.data)) return false;
+  if (!record(body) || !record(body.location) || !sameWorkspacePath(body.location.directory, directory) || !Array.isArray(body.data)) return false;
   const matches = body.data.filter((row: unknown) => record(row) && row.providerID === selection.providerID && row.id === selection.id);
   if (matches.length !== 1 || !record(matches[0]) || !Array.isArray(matches[0].variants)) return false;
   const variants = matches[0].variants;

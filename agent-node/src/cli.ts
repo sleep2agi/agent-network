@@ -26,6 +26,7 @@ import { createPromptTracker } from "./shared/interactive-prompt.js";
 import { cancelActiveAcpTurn } from "./runtime/acp-runner/active-turn";
 import { createControlLane, createHandledIds } from "./control-lane";
 import { assertPrivateFile } from "./shared/private-file";
+import { exemptLoopbackFromProxy } from "./shared/loopback-no-proxy";
 import { applyAgentConfig } from "./runtime/opencode-copresence/agent-config-apply.js";
 import { renameOverExistingSync } from "./shared/windows-rename-retry";
 import { createNodeSessionControlBridge, createSessionControlPin } from "./runtime/session-control-bridge.js";
@@ -406,6 +407,8 @@ const peerReplyCapabilityCache = createPeerReplyCapabilityCache();
 // A node profile may intentionally override PATH for other runtimes, but it
 // must never replace the OpenCode executable/version selected by anet (or the
 // operator's original PATH for a direct agent-node launch).
+// Local servers are reached directly, never through a proxy (shared/loopback-no-proxy.ts).
+exemptLoopbackFromProxy();
 const INITIAL_OPENCODE_BIN = process.env.ANET_OPENCODE_BIN;
 const INITIAL_OPENCODE_VERSION = process.env.ANET_OPENCODE_VERSION;
 const INITIAL_LAUNCH_PATH = process.env.PATH || "";
@@ -4953,7 +4956,9 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
       clearBorrowedLaunchHealth = publishBorrowedLaunchHealth(configFilePath, process.env.ANET_BORROWED_V1_LAUNCH_ID);
     }
-    log(borrowed ? "[opencode-copresence] borrowed existing V1 session; Host/TUI lifecycle remains with its Owner" : `[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
+    // No attach script is written on Windows; the "ready" line above already carries the command.
+    if (borrowed) log("[opencode-copresence] borrowed existing V1 session; Host/TUI lifecycle remains with its Owner");
+    else if (process.platform !== "win32") log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
     return opened;
   });
 }

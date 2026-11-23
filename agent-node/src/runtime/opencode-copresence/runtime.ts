@@ -1304,6 +1304,76 @@ export function wrapSharedCopresenceSession(
   };
 }
 
+/**
+ * Native Windows: the node is a client of an OpenCode Server someone else started.
+ *
+ * Everything the POSIX path does before connecting exists to launch `opencode` safely as a child:
+ * a private launch root, a vetted binary, a filtered environment. On Windows this bridge starts no
+ * OpenCode process at all, so none of that applies — and each of those steps is built on uid and
+ * mode bits that Windows does not have. What remains is the part that is the same everywhere:
+ * the per-workspace CommHub proxy, and a session on the shared server (whose version the session
+ * core still checks against the accepted pin before it creates or resumes anything).
+ *
+ * A node-owned server is not offered here. Refusing is better than a half-working launch.
+ */
+async function openWindowsSharedRuntime(
+  opts: OpenOpenCodeCopresenceOptions,
+  backend: OpencodeBackend,
+  model: string,
+  workDir: string,
+  projectCwd: string,
+): Promise<OpenCodeCopresenceSession> {
+  if (backend.generation !== "v2" || !opts.sharedServer) {
+    throw new Error("On Windows an OpenCode node connects to an OpenCode V2 Server that is already running on this "
+      + "computer. Start one, record its address and password file in %USERPROFILE%\\.anet\\opencode-shared-server.json, "
+      + "then create the node again.");
+  }
+  if (!opts.commhubMcpUrl || !opts.commhubToken) throw new Error("OpenCode copresence requires both CommHub MCP URL and token");
+  let instructions: OpenCodeCommhubInstructionsHandle | undefined;
+  let sharedMcp: import("./shared-v2-mcp").SharedV2McpHandle | undefined;
+  let core: OpenCodeCopresenceSession | undefined;
+  const removeInstructions = () => {
+    if (instructions && !removeOwnOpenCodeCommhubInstructions(instructions)) {
+      opts.warn?.(`[opencode-copresence] left ${instructions.path} in place; its content is no longer ours`);
+    }
+    instructions = undefined;
+  };
+  try {
+    const { openSharedV2CommhubMcp } = await import("./shared-v2-mcp");
+    instructions = writeOpenCodeCommhubInstructions(join(projectCwd, "ANET-COMMHUB.md"), opts.commhubAlias);
+    sharedMcp = await openSharedV2CommhubMcp(projectCwd, workDir, opts.commhubMcpUrl, opts.commhubToken, instructions.path);
+    core = await openVettedOpenCodeCopresence({
+      backend,
+      // No OpenCode process is started from here and no attach script is written on Windows.
+      binary: "",
+      env: {},
+      cwd: projectCwd,
+      workDir,
+      model,
+      expectedVersion: opts.expectedVersion,
+      title: opts.title,
+      startupTimeoutMs: opts.startupTimeoutMs,
+      sessionId: opts.sessionId,
+      newSession: opts.newSession,
+      sharedServer: opts.sharedServer,
+      sharedMcpUrl: sharedMcp.url,
+      resumeSessionId: opts.resumeSessionId,
+      reconcileResumedModel: opts.reconcileResumedModel,
+      log: opts.log,
+      warn: opts.warn,
+    });
+    await opts.onSession?.(core.sessionId);
+    return wrapSharedCopresenceSession(core, {
+      afterClose: async () => { await sharedMcp?.close(); removeInstructions(); },
+    });
+  } catch (error) {
+    await core?.close().catch(() => {});
+    await sharedMcp?.close().catch(() => {});
+    removeInstructions();
+    throw error;
+  }
+}
+
 export async function openOpenCodeCopresenceRuntime(
   opts: OpenOpenCodeCopresenceOptions,
 ): Promise<OpenCodeCopresenceSession> {
@@ -1329,6 +1399,7 @@ export async function openOpenCodeCopresenceRuntime(
   // before anything is probed or spawned. V1 is never refused here.
   const generationRefusal = opencodeGenerationRefusal(backend.generation, { unsafeTools, mode: "copresence" });
   if (generationRefusal) throw new Error(generationRefusal);
+  if (process.platform === "win32") return await openWindowsSharedRuntime(opts, backend, model, workDir, projectCwd);
   const forbiddenRoots = [workDir, ...discoverOpencodeForbiddenRoots(projectCwd)];
   const probeEnv = backend.buildChildEnv({
     workDir,

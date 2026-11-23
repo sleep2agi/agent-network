@@ -2377,6 +2377,25 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   if (freshDeferred) console.log(`[anet]    state:     connected; shared thread binds when you begin the first TUI message (Dashboard tasks retry until then)`);
 }
 
+/** Exits with what is wrong and how to fix it, before anything is stopped or started. */
+function assertSharedOpencodeServerProfile(profile: Profile): void {
+  if (!profile.opencodeSharedServerUrl && !profile.opencodeSharedServerPasswordFile) return;
+  const url = profile.opencodeSharedServerUrl;
+  const passwordFile = profile.opencodeSharedServerPasswordFile;
+  if (profile.opencodeGeneration !== "v2" || !url || !/^http:\/\/127\.0\.0\.1:\d+$/.test(url)
+    || !passwordFile || !isAbsolute(passwordFile) || !existsSync(passwordFile)) {
+    console.error("[anet] ❌ Shared OpenCode Server config requires V2, loopback URL and existing absolute password file; no sessions were stopped.");
+    process.exit(1);
+  }
+  // 权限位只在 Linux/macOS 上有意义；Windows 上改查访问控制列表（src/shared/private-file.ts）。
+  const passwordVerdict = isPrivateFile(passwordFile);
+  if (!passwordVerdict.ok) {
+    console.error(`[anet] ❌ Shared OpenCode Server password file must be a private regular file (${passwordVerdict.detail}); no sessions were stopped.`);
+    console.error(`[anet]    ${privateFileFix(passwordFile, process.platform, passwordVerdict.currentUserSid)}`);
+    process.exit(1);
+  }
+}
+
 async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?: string): Promise<void> {
   const resolved = resolveNodeRef(nodeId);
   if (!resolved) {
@@ -2400,22 +2419,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     console.error(`[anet] ❌ ${generationRefusal}`);
     process.exit(1);
   }
-  if (resolved.profile.opencodeSharedServerUrl || resolved.profile.opencodeSharedServerPasswordFile) {
-    const url = resolved.profile.opencodeSharedServerUrl;
-    const passwordFile = resolved.profile.opencodeSharedServerPasswordFile;
-    if (resolved.profile.opencodeGeneration !== "v2" || !url || !/^http:\/\/127\.0\.0\.1:\d+$/.test(url)
-      || !passwordFile || !isAbsolute(passwordFile) || !existsSync(passwordFile)) {
-      console.error("[anet] ❌ Shared OpenCode Server config requires V2, loopback URL and existing absolute password file; no sessions were stopped.");
-      process.exit(1);
-    }
-    // 权限位只在 Linux/macOS 上有意义；Windows 上改查访问控制列表（src/shared/private-file.ts）。
-    const passwordVerdict = isPrivateFile(passwordFile);
-    if (!passwordVerdict.ok) {
-      console.error(`[anet] ❌ Shared OpenCode Server password file must be a private regular file (${passwordVerdict.detail}); no sessions were stopped.`);
-      console.error(`[anet]    ${privateFileFix(passwordFile, process.platform, passwordVerdict.currentUserSid)}`);
-      process.exit(1);
-    }
-  }
+  assertSharedOpencodeServerProfile(resolved.profile);
   if (!tmuxAvailable()) {
     console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
     process.exit(1);
@@ -2966,7 +2970,7 @@ import {
   type RuntimeName,
 } from "../src/normalize-runtime";
 import { describeStaleRuntimeSupport } from "../src/daemon-runtime-staleness";
-import { windowsRuntimeSupported } from "../src/windows-runtime";
+import { windowsOpencodeSharedNode, windowsRuntimeSupported } from "../src/windows-runtime";
 import { openWindowsSdkEvidenceSession } from "../src/windows-sdk-stop-evidence";
 import { findEnvironAliasMatches } from "../src/environ-alias";
 import { describeGrokBuildDrift, parseGrokBuildFromLog, parseGrokBuildFromVersionOutput } from "../src/grok-build-drift";
@@ -4585,14 +4589,26 @@ function assertStartCompatibility(runtime: RuntimeName, profile?: Profile, nodeI
       console.error(`[anet] ❌ ${refusal}`);
       process.exit(1);
     }
-    const check = checkOpencodeGenerationBinary("v2");
-    if (!check.ok) {
-      console.error(`[anet] Incompatible OpenCode v2 runtime.`);
-      console.error(`[anet] ${check.hint}`);
-      process.exit(1);
+    if (process.platform === "win32") {
+      // #3812: on Windows the node never launches `opencode`; it connects to a Server that is
+      // already running, and that Server's version is checked when the node connects.
+      if (!windowsOpencodeSharedNode(profile)) {
+        console.error("[anet] ❌ On Windows an OpenCode node connects to an OpenCode V2 Server already running on this computer.");
+        console.error("[anet]    Start one, record it in %USERPROFILE%\\.anet\\opencode-shared-server.json, then create the node again.");
+        process.exit(1);
+      }
+      console.warn(`[anet] ⚠ OpenCode v2 co-presence PREVIEW (shared Server ${profile.opencodeSharedServerUrl}): every local tool is enabled (flags.opencodeUnsafeTools=true); trusted tasks only.`);
+      opencodeLaunchIdentity = null;
+    } else {
+      const check = checkOpencodeGenerationBinary("v2");
+      if (!check.ok) {
+        console.error(`[anet] Incompatible OpenCode v2 runtime.`);
+        console.error(`[anet] ${check.hint}`);
+        process.exit(1);
+      }
+      console.warn(`[anet] ⚠ OpenCode v2 co-presence PREVIEW (${check.binary}): every local tool is enabled (flags.opencodeUnsafeTools=true); trusted tasks only.`);
+      opencodeLaunchIdentity = { binary: check.binary, version: check.version };
     }
-    console.warn(`[anet] ⚠ OpenCode v2 co-presence PREVIEW (${check.binary}): every local tool is enabled (flags.opencodeUnsafeTools=true); trusted tasks only.`);
-    opencodeLaunchIdentity = { binary: check.binary, version: check.version };
     try {
       resolveOpencodeAgentNodeLaunchPlan();
     } catch (error: any) {
@@ -7901,7 +7917,13 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       expectedCodexHome = applied.codexHome;
     }
 
-    if (runtime === "opencode-cli") {
+    if (runtime === "opencode-cli" && process.platform === "win32" && !opencodeLaunchIdentity) {
+      // #3812: a Windows node launches no `opencode`; whatever the profile or .env put here is not
+      // an identity this launcher vetted, so it is not passed on.
+      delete env.ANET_OPENCODE_BIN;
+      delete env.ANET_OPENCODE_VERSION;
+      delete env.ANET_OPENCODE_SAFE_BASE;
+    } else if (runtime === "opencode-cli") {
       if (!opencodeLaunchIdentity) {
         throw new Error("opencode launch identity missing after successful compatibility gate");
       }
@@ -8425,7 +8447,18 @@ async function withLifecycleLock<T>(nodeId: string, fn: () => T | Promise<T>, op
       const birth = processBirth(process.pid);
       if (!birth) { rmSync(claim, { recursive: true, force: true }); throw new Error("NODE_LIFECYCLE_BIRTH_UNAVAILABLE"); }
       atomicWritePrivateJson(join(claim, "owner.json"), { schema: 1, pid: process.pid, birth, operation, ...(generation ? { generation } : {}) });
-      symlinkSync(claim, lock, "dir");
+      // The lock must appear with its receipt already inside, atomically, and must not replace an
+      // existing one. POSIX: a symlink to the prepared directory. Windows: move the prepared directory
+      // into place instead — links are not available everywhere there (measured: exFAT data drives
+      // refuse both directory symlinks and junctions with EISDIR, and `anet node start` died here),
+      // while a directory rename onto an existing name is refused on NTFS (EPERM) and exFAT (EEXIST).
+      if (process.platform === "win32") {
+        try { renameSync(claim, lock); }
+        catch (moveError: any) {
+          if (!existsSync(lock)) throw moveError;
+          throw Object.assign(new Error(`lifecycle lock is held: ${lock}`), { code: "EEXIST" });
+        }
+      } else symlinkSync(claim, lock, "dir");
       break;
     }
     catch (e: any) {
@@ -8943,9 +8976,12 @@ async function startCommand() {
   // already use. Resolve first so the profile can answer the question too.
   const copresenceFlagPassed = opts.copresence === "true";
   const resolvedForCopresence = resolveNodeRef(id);
+  // #3812: an OpenCode V2 node that connects to a shared Server is the one co-presence shape that
+  // needs neither a terminal nor tmux; `--copresence` is how such a node is normally started.
+  const windowsOpencodeShared = process.platform === "win32" && windowsOpencodeSharedNode(resolvedForCopresence?.profile);
   if (process.platform === "win32" && resolvedForCopresence && (
-    !windowsRuntimeSupported(resolvedForCopresence.profile.runtime || "claude-agent-sdk") ||
-    opts.tmux === "true" || opts["accept-dev-channels"] === "true" || copresenceFlagPassed ||
+    !(windowsRuntimeSupported(resolvedForCopresence.profile.runtime || "claude-agent-sdk") || windowsOpencodeShared) ||
+    opts.tmux === "true" || opts["accept-dev-channels"] === "true" || (copresenceFlagPassed && !windowsOpencodeShared) ||
     resolvedForCopresence.profile.codexCopresence === true || resolvedForCopresence.profile.grokCopresence === true
   )) {
     throw new Error("Native Windows supports claude-agent-sdk by default; terminal, tmux and co-presence runtimes are unavailable. ACP stdio runtimes (antigravity-acp) can be enabled for evaluation with ANET_ALLOW_ACP_WINDOWS=1 (Windows-native first-reply + stop not yet verified).");
@@ -9036,6 +9072,19 @@ async function startCommand() {
   //    false for every grok node — so `anet node start <grok> --copresence`
   //    fell through to the codex orchestration and died on "requires
   //    runtime=codex-app-server". Each lane answers for itself.
+  if (windowsOpencodeShared && resolvedForCopresence && process.env.ANET_COPRESENCE_BRIDGE !== "1") {
+    // #3812 — no tmux on Windows and no terminal to keep open: this process becomes the bridge
+    // itself and runs in the foreground, like every other node on Windows. Keeping it running in
+    // the background is the launcher's job (a scheduled task), not this command's. Marking this
+    // process as the bridge also keeps it out of the tmux orchestration below.
+    const refusal = opencodeStartGenerationRefusal(resolvedForCopresence.profile, {
+      copresence: true, configFile: join(nodesDir(), resolvedForCopresence.id, "config.json"),
+    });
+    if (refusal) { console.error(`[anet] ❌ ${refusal}`); process.exit(1); }
+    assertSharedOpencodeServerProfile(resolvedForCopresence.profile);
+    process.env.ANET_OPENCODE_MODE = "copresence";
+    process.env.ANET_COPRESENCE_BRIDGE = "1";
+  }
   if (process.env.ANET_COPRESENCE_BRIDGE !== "1" && resolvedForCopresence
     && (codexCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)
       || grokCopresenceRequested(copresenceFlagPassed, resolvedForCopresence.profile as any)

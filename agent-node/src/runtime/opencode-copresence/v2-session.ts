@@ -37,6 +37,7 @@ import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-healt
 import { waitUntilIdle } from "../idle-wait";
 import { QUEUED_VARIANT_TTL_MS, shouldApplyQueuedVariant } from "./queued-variant";
 import { OPENCODE_V2_PIN } from "../opencode-versions";
+import { opencodeDirectoryHeader, sameWorkspacePath } from "./workspace-path";
 import { queueMissVerdict } from "./queue-miss-error";
 import { rmSync } from "fs";
 import { join } from "path";
@@ -560,10 +561,10 @@ export async function openVettedOpenCodeV2Copresence(
       const deadline = Date.now() + (opts.startupTimeoutMs ?? 20_000);
       for (;;) {
         const sources = await fetchOpenCodeJson(url, password, "/api/config", {
-          headers: { "x-opencode-directory": resolve(opts.cwd) },
+          headers: { "x-opencode-directory": opencodeDirectoryHeader(resolve(opts.cwd)) },
         }).catch(() => undefined);
         const project = Array.isArray(sources) ? sources.find((source) =>
-          source?.type === "document" && source.path === join(resolve(opts.cwd), "opencode.json")) : undefined;
+          source?.type === "document" && sameWorkspacePath(source.path, join(resolve(opts.cwd), "opencode.json"))) : undefined;
         if (project?.info?.mcp?.servers?.commhub?.url === opts.sharedMcpUrl) break;
         if (Date.now() >= deadline) throw new Error("OpenCode v2 shared server did not load this workspace's CommHub MCP");
         await new Promise((r) => setTimeout(r, 500));
@@ -628,10 +629,16 @@ export async function openVettedOpenCodeV2Copresence(
     clearLaunchHealth = shared
       ? publishSharedLaunchHealth(opts.workDir, sessionId, serverPid)
       : publishLaunchHealth(opts.workDir, sessionId, child!.pid!);
-    writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir,
-      opts.sharedServer?.passwordFile);
-    attachScriptWritten = true;
-    try {
+    // Windows: the attach script is a bash script and the catalog record holds a copy of the server
+    // password protected only by a mode bit. Neither exists there: the bridge does not need them to
+    // serve tasks, and a person joins the session with the command logged below.
+    const windows = process.platform === "win32";
+    if (!windows) {
+      writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir,
+        opts.sharedServer?.passwordFile);
+      attachScriptWritten = true;
+    }
+    if (!windows) try {
       writeOpenCodeV2CatalogEndpoint(opts.workDir, {
         url,
         authorization: `Basic ${Buffer.from(`${USERNAME}:${password}`).toString("base64")}`,
@@ -641,12 +648,13 @@ export async function openVettedOpenCodeV2Copresence(
     } catch {
       warn("[opencode-copresence] v2 catalog endpoint was not recorded");
     }
-    log(`[opencode-copresence] v2 ${shared ? "shared" : "private"} ready version=${version} session=${sessionId.slice(0, 12)} attach=${attachScriptPath}`);
+    log(`[opencode-copresence] v2 ${shared ? "shared" : "private"} ready version=${version} session=${sessionId.slice(0, 12)} attach=${
+      windows ? `opencode ${backend.attachArgs({ url, sessionId, cwd: opts.cwd }).join(" ")}` : attachScriptPath}`);
     relaunchPreviousAttach(opts.workDir, attachScriptPath, { log, warn, respawn: opts.tmuxRespawn, tmux: opts.tmuxRunner });
 
     const directory = resolve(opts.cwd);
     const scopedRequest = (path: string, init: RequestInit = {}) => fetchOpenCodeJson(url, password, path, {
-      ...init, redirect: "error", headers: { "x-opencode-directory": directory },
+      ...init, redirect: "error", headers: { "x-opencode-directory": opencodeDirectoryHeader(directory) },
     }, 5_000);
     // Neither the profile nor a cached capability is process attestation. Check
     // the independent local policy + exact native/OS instance around each access.
@@ -675,7 +683,7 @@ export async function openVettedOpenCodeV2Copresence(
       // guessed first catalog row or a startup reconciliation/model mutation.
       if (!sharedTestBuild || body.data.model !== undefined) return undefined;
       const fallback = await scopedRequest("/api/model/default");
-      if (fallback?.location?.directory !== directory) return undefined;
+      if (!sameWorkspacePath(fallback?.location?.directory, directory)) return undefined;
       const selected = readV2ModelSelection({ data: { model: fallback.data } });
       return selected ? { ...selected, variant: selected.variant ?? "default" } : undefined;
     };
@@ -735,7 +743,7 @@ export async function openVettedOpenCodeV2Copresence(
           return { status: "rejected", reason: "scope" };
         }
         const result = await forkV2Session({ sourceSessionId, expectedDirectory: resolve(opts.cwd), request: (path, init = {}) =>
-          fetchOpenCodeJson(url, password, path, { ...init, redirect: "error", headers: { "x-opencode-directory": resolve(opts.cwd) } }, 5_000) });
+          fetchOpenCodeJson(url, password, path, { ...init, redirect: "error", headers: { "x-opencode-directory": opencodeDirectoryHeader(resolve(opts.cwd)) } }, 5_000) });
         return session.isRunning ? result : { status: "unknown", reason: "verification_failed" };
       } } : {}),
       attachScriptPath,

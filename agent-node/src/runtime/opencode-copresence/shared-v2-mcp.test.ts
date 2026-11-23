@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openSharedV2CommhubMcp, type SharedV2McpHandle } from "./shared-v2-mcp";
@@ -73,4 +73,36 @@ test("a bridge restart preserves edits made to the live project config", async (
   } finally {
     await first.close();
   }
+});
+
+// Measured on Windows (#3812): the bridge was killed with its terminal session, and the next start
+// refused with "Workspace already defines a CommHub MCP server". The workspace had no opencode.json
+// before the bridge, so the backup was empty — and an empty backup was read as "no backup".
+test("a bridge that was killed can start again in a workspace that had no OpenCode config", async () => {
+  root = mkdtempSync(join(tmpdir(), "anet-shared-mcp-killed-"));
+  const configPath = join(root, "opencode.json");
+  const leftovers = ["opencode.json", "opencode-shared-project-config.backup", "opencode-shared-project-config.installed.sha256"];
+  hub = createServer((_request, response) => response.writeHead(200).end());
+  await new Promise<void>((resolve) => hub!.listen(0, "127.0.0.1", resolve));
+  const address = hub.address();
+  if (!address || typeof address === "string") throw new Error("hub port unavailable");
+  const hubUrl = `http://127.0.0.1:${address.port}/mcp`;
+  const instructionPath = join(root, "ANET-COMMHUB.md");
+
+  const first = await openSharedV2CommhubMcp(root, root, hubUrl, "node-secret", instructionPath);
+  const left = leftovers.map((name) => readFileSync(join(root!, name)));
+  expect(left[1].length).toBe(0);
+  await first.close();
+  // Put back exactly what a killed bridge leaves on disk.
+  leftovers.forEach((name, i) => writeFileSync(join(root!, name), left[i]));
+
+  proxy = await openSharedV2CommhubMcp(root, root, hubUrl, "node-secret", instructionPath);
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  expect(config.mcp.servers.commhub.url).toBe(proxy.url);
+  expect(config.plugins).toHaveLength(1);
+  expect(config.instructions).toEqual([instructionPath]);
+  await proxy.close();
+  proxy = undefined;
+  // There was no file before the bridge: nothing of it may remain.
+  for (const name of leftovers) expect(existsSync(join(root, name))).toBe(false);
 });
