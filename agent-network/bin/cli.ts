@@ -2412,7 +2412,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     const passwordVerdict = isPrivateFile(passwordFile);
     if (!passwordVerdict.ok) {
       console.error(`[anet] ❌ Shared OpenCode Server password file must be a private regular file (${passwordVerdict.detail}); no sessions were stopped.`);
-      console.error(`[anet]    ${privateFileFix(passwordFile)}`);
+      console.error(`[anet]    ${privateFileFix(passwordFile, process.platform, passwordVerdict.currentUserSid)}`);
       process.exit(1);
     }
   }
