@@ -17,9 +17,23 @@ describe("loopback is never proxied", () => {
     expect(withLoopbackNoProxy("*")).toBe("*");
   });
   test("sets both spellings, from whichever one existed", () => {
-    const env: NodeJS.ProcessEnv = { no_proxy: "corp.example" };
+    const env: NodeJS.ProcessEnv = { no_proxy: "corp.example", HTTPS_PROXY: "http://127.0.0.1:7890" };
     exemptLoopbackFromProxy(env);
     expect(env.NO_PROXY).toBe("corp.example,127.0.0.1,localhost,::1");
     expect(env.no_proxy).toBe(env.NO_PROXY);
+  });
+  test("with no proxy configured the environment is left exactly as it was", () => {
+    for (const before of [{}, { PATH: "/usr/bin" }, { NO_PROXY: "corp.example" }, { HTTP_PROXY: "" }]) {
+      const env: NodeJS.ProcessEnv = { ...before };
+      exemptLoopbackFromProxy(env);
+      expect(env).toEqual(before);
+    }
+  });
+  test("any spelling of a proxy variable counts", () => {
+    for (const name of ["HTTP_PROXY", "https_proxy", "ALL_PROXY"]) {
+      const env: NodeJS.ProcessEnv = { [name]: "http://proxy:8080" };
+      exemptLoopbackFromProxy(env);
+      expect(env.NO_PROXY).toBe("127.0.0.1,localhost,::1");
+    }
   });
 });
