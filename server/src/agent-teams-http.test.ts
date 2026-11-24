@@ -325,8 +325,20 @@ describe("#764 existing endpoints unchanged", () => {
     // Name the part that moved: on PostgreSQL (test2123) this failed with a bare
     // "expect(received).toBe(expected)" and the runner dropped the diff, so
     // nobody could tell which of the three bodies changed.
+    // The PG runner prints only the error's first line, so put the changed top-level
+    // keys (with before→after values) on that line.
+    const keyDiff = (got: unknown, want: unknown): string => {
+      try {
+        const a = JSON.parse(String(got)), b = JSON.parse(String(want));
+        if (a && b && typeof a === 'object' && typeof b === 'object') {
+          const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+          return keys.map(k => `${k}: ${JSON.stringify(b[k])} -> ${JSON.stringify(a[k])}`).join('; ').slice(0, 600);
+        }
+      } catch { /* not JSON */ }
+      return `${String(want).slice(0, 200)} -> ${String(got).slice(0, 200)}`;
+    };
     const same = (label: string, got: unknown, want: unknown) => {
-      if (got !== want) throw new Error(`${label} changed after team operations\n--- before\n${want}\n--- after\n${got}`);
+      if (got !== want) throw new Error(`${label} changed after team operations: ${keyDiff(got, want)}\n--- before\n${want}\n--- after\n${got}`);
     };
     same("departments (minus agents_unassigned)", a.body, b.body);
     same("departments.agents_unassigned", a.n, (b.n as number) - 1);
