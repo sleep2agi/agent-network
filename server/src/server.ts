@@ -117,6 +117,7 @@ import { resolveNodeCaller } from "./create-node.js";
 import { stampTaskAuthOrigin, type TaskAuthOrigin } from "./task-auth-origin.js";
 import { diagnoseTask } from "./task-diagnostic.js";
 import { listTaskLateReplies } from "./task-late-replies.js";
+import { recallTaskRecord } from "./task-recall.js";
 import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startScheduledTaskScheduler } from "./scheduled-tasks.js";
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, conditionalJson, handleRequirementsRequest } from "./requirements.js";
@@ -7622,6 +7623,56 @@ return Bun.serve({
         return rows.filter((r: any) => canUserManageNode(scope, r.department_id ?? null));
       })();
       return withCors(req, Response.json({ ok: true, nodes: scopedRows, count: scopedRows.length }));
+    }
+
+    // ── REST: recall an un-answered task (#5502) ──
+    const taskRecallMatch = url.pathname.match(/^\/api\/tasks?\/([^/]+)\/recall$/);
+    if (taskRecallMatch && req.method === "POST") {
+      const taskId = decodeURIComponent(taskRecallMatch[1] ?? "");
+      const params: any[] = [taskId];
+      let sql = `SELECT ${TASK_REST_SELECT} FROM tasks WHERE task_id = ?1`;
+      sql = addAgentTimelineScope(sql, params, restScope, { from: "from_name", to: "to_name", fromNodeId: "from_node_id", toNodeId: "to_node_id" });
+      sql += " LIMIT 1";
+      const task = db.get<any>(sql, ...params);
+      if (!task) {
+        return withCors(req, Response.json({ ok: false, error: "task_not_found", task_id: taskId }, { status: 404 }));
+      }
+      const taskNetId = typeof task.network_id === "string" && task.network_id ? task.network_id : singleNetworkId(restScope);
+      if (!canRestWriteNetwork(restAuth, taskNetId, isAdmin)) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
+      let actor = "dashboard";
+      if (restAuth?.networkId) {
+        const caller = nodeIdentity(restAuth.tokenId, restAuth.networkId);
+        const isSender = !!caller && (
+          (!!caller.nodeId && caller.nodeId === task.from_node_id)
+          || (!!task.from_name && caller.aliases.includes(String(task.from_name)))
+        );
+        if (!isSender) {
+          return withCors(req, Response.json({ ok: false, error: "recall_sender_only" }, { status: 403 }));
+        }
+        actor = caller.aliases[0] ?? caller.nodeId ?? "node";
+      } else {
+        const callerUsername = restAuth?.username ?? "";
+        const isNetOwner = !!(taskNetId && restAuth?.userId && db.get<any>(
+          "SELECT 1 FROM networks WHERE network_id = ?1 AND owner_id = ?2",
+          taskNetId,
+          restAuth.userId,
+        ));
+        const isSender = !!callerUsername && String(task.from_name ?? "") === callerUsername;
+        if (!isSender && !isAdmin && !isNetOwner) {
+          return withCors(req, Response.json({ ok: false, error: "recall_sender_only" }, { status: 403 }));
+        }
+        actor = callerUsername || "admin";
+      }
+      const outcome = recallTaskRecord(db, { task, actor });
+      if (!outcome.ok) {
+        return withCors(req, Response.json(
+          { ok: false, error: outcome.error, task_id: outcome.task_id, task_status: outcome.task_status },
+          { status: outcome.httpStatus },
+        ));
+      }
+      return withCors(req, Response.json(outcome));
     }
 
     // ── REST: single task lookup (V2) ──
