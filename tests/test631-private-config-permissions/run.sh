@@ -29,7 +29,11 @@ grep -q 'atomicWritePrivateFile(dotenvPath, body)' agent-network/bin/cli.ts
 grep -q 'atomicWritePrivateFile(anetEnvPath, envContent)' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(p);' agent-network/bin/cli.ts
 grep -q 'repairPrivateFilePermissions(path);' agent-network/bin/cli.ts
-test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 7
+test "$(grep -c 'atomicWriteJson(configFilePath, cfg)' agent-node/src/cli.ts)" -eq 8
+# #3727 — the 8th writer: clearing a dead Antigravity (agy) session id. Same private
+# atomic choke point; bind it to its function so the count cannot hide a swap.
+grep -A20 'function clearAgySession' agent-node/src/cli.ts \
+  | grep -q 'atomicWriteJson(configFilePath, cfg)'
 # #557 — the 7th writer: claude session cost total, same private atomic writer.
 grep -A8 'function writebackClaudeSessionCost' agent-node/src/cli.ts \
   | grep -q 'atomicWriteJson(configFilePath, cfg)'
