@@ -44,8 +44,10 @@ echo "L2 witnessed-red mutations"
 # (the child gets the Hub from its profile + COMMHUB_URL). With the target gone
 # the sed was a no-op and the "red" run passed, failing this suite. Guard the
 # removal itself instead: the daemon must not touch the global config again.
-if grep -nE 'ensureGlobalAnetConfig|repairPrivateConfigPermissions' \
-  agent-node/src/runtime/create-node-daemon.ts; then
+# Calls only: the explanatory comment above daemonChildCliEnv names the removed
+# function on purpose, and must not trip this guard.
+if grep -nE '(ensureGlobalAnetConfig|repairPrivateConfigPermissions)\(' \
+  agent-node/src/runtime/create-node-daemon.ts | grep -vE '^[0-9]+:\s*(\*|//)'; then
   echo "DAEMON_TOUCHES_GLOBAL_CONFIG_AGAIN"
   exit 1
 fi

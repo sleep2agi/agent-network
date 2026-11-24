@@ -16,7 +16,7 @@ COPY agent-node/src/ agent-node/src/
 # source-fork chain tests landed). Their node_modules links are only external
 # references for Bun.build, but the bundle itself resolves agent-node's own
 # imports, so install its dependencies (no lifecycle scripts) as well.
-COPY agent-node/package.json agent-node/bun.lock agent-node/
+COPY agent-node/package.json agent-node/package-lock.json agent-node/
 RUN cd agent-node && bun install --ignore-scripts
 # health-redaction.test.ts checks the rejection inventory against the repo's
 # route table (../../docs/rest-route-table.json from server/src).
