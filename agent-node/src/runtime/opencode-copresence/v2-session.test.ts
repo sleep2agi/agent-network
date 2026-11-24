@@ -87,6 +87,8 @@ describe("turn verdict (pure)", () => {
     const verdict = openCodeV2TurnVerdict([{ type: "idle", outcome: "failed" }]);
     if (verdict.state !== "done") throw new Error("expected done");
     expect(() => openCodeV2Outcome(verdict, "msg_1")).toThrow(/outcome=failed/);
+    // The user sees this text as the reply: it must name a next step.
+    expect(() => openCodeV2Outcome(verdict, "msg_1")).toThrow(/opencode auth login/);
   });
 });
 
