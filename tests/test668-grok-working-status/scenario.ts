@@ -463,8 +463,11 @@ async function runClaude(userToken: string, networkId: string): Promise<void> {
 
   const logged = `${readText("/tmp/node668-claude.log")}\n${dirLogText("/tmp/node668-claude-logs")}`;
   if (!logged.includes("processing [claude]")) fail("FAIL: claude-runtime");
+  // #3619 起解析只走 SDK 捆绑的平台包（不再查全局/PATH），日志是 "using bundled binary: <路径>"；
+  // installFakeClaudeBinary 把假 claude 覆盖在这些捆绑路径上，所以路径须落在 claude-agent-sdk-linux-x64* 包里。
   const usedFake = logged.includes("using global binary: /opt/fake-claude/claude")
-    || logged.includes("using glibc binary:");
+    || logged.includes("using glibc binary:")
+    || /using bundled binary: \S*\/@anthropic-ai\/claude-agent-sdk-linux-x64(?:-musl)?\/claude\b/.test(logged);
   if (!usedFake) fail("FAIL: claude-binary");
 
   const started = readState(CLAUDE_ALIAS, CLAUDE_TAIL);
