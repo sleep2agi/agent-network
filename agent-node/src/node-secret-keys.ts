@@ -19,6 +19,7 @@
  * A missing file is not an error: many nodes have no `secrets.env`.
  */
 import { lstatSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isReservedEnvKey } from "./shared/reserved-env.js";
 import { nodeSecretsPath, parseSecretsEnv } from "./node-secrets.js";
 
@@ -28,29 +29,53 @@ export const SECRET_KEYS_MAX = 50;
 /** Same shape the loader accepts: uppercase env identifiers, max 64 chars. */
 export const SECRET_KEY_RE = /^[A-Z_][A-Z0-9_]{0,63}$/;
 
-export function collectSecretKeys(nodeDir: string | undefined | null): string[] {
-  if (!nodeDir) return [];
-  let raw: string;
+function readRegularFileSafe(path: string): string | null {
   try {
-    const path = nodeSecretsPath(nodeDir);
     const st = lstatSync(path);
     // lstat (not stat): a symlink could point at a file this node does not own.
-    if (!st.isFile() || st.isSymbolicLink()) return [];
-    raw = readFileSync(path, "utf8");
+    if (!st.isFile() || st.isSymbolicLink()) return null;
+    return readFileSync(path, "utf8");
   } catch {
-    return [];
+    return null;
   }
-  let parsed: ReturnType<typeof parseSecretsEnv>;
-  try {
-    parsed = parseSecretsEnv(raw);
-  } catch {
-    return [];
-  }
+}
+
+export function collectSecretKeys(nodeDir: string | undefined | null): string[] {
+  if (!nodeDir) return [];
   const keys = new Set<string>();
-  for (const key of Object.keys(parsed.values)) {
-    if (!SECRET_KEY_RE.test(key)) continue;
-    if (isReservedEnvKey(key)) continue;
+  const addKey = (key: string) => {
+    if (!SECRET_KEY_RE.test(key)) return;
+    if (isReservedEnvKey(key)) return;
     keys.add(key);
+  };
+
+  const envRaw = readRegularFileSafe(nodeSecretsPath(nodeDir));
+  if (envRaw !== null) {
+    try {
+      const parsed = parseSecretsEnv(envRaw);
+      for (const key of Object.keys(parsed.values)) addKey(key);
+    } catch {
+      // Ignore malformed secrets.env; never leak values or break heartbeats.
+    }
   }
+
+  // #5505 — also read key NAMES from `<nodeDir>/node-secrets.json` written by
+  // Hub's independent node-secrets lane (and ChatSecretCard). Values are never
+  // returned or logged.
+  const jsonRaw = readRegularFileSafe(join(nodeDir, "node-secrets.json"));
+  if (jsonRaw !== null) {
+    try {
+      const parsed = JSON.parse(jsonRaw) as { values?: unknown };
+      if (parsed && typeof parsed === "object" && parsed.values && typeof parsed.values === "object" && !Array.isArray(parsed.values)) {
+        for (const [key, val] of Object.entries(parsed.values as Record<string, unknown>)) {
+          if (typeof val !== "string" || !val) continue;
+          addKey(key);
+        }
+      }
+    } catch {
+      // Ignore malformed node-secrets.json.
+    }
+  }
+
   return [...keys].sort().slice(0, SECRET_KEYS_MAX);
 }
