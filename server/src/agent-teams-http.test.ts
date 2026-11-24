@@ -343,6 +343,16 @@ describe("#764 existing endpoints unchanged", () => {
     same("departments (minus agents_unassigned)", a.body, b.body);
     same("departments.agents_unassigned", a.n, (b.n as number) - 1);
     same("humans", after.humans, before.humans);
+    // test2123 (PostgreSQL): both reads were error bodies that differed only in the
+    // random error_id — i.e. GET /api/nodes/:id/config itself fails on PG. Say so,
+    // with the error, instead of comparing two errors.
+    for (const [when, body] of [["before", before.node], ["after", after.node]] as const) {
+      let parsed: any = null; try { parsed = JSON.parse(body); } catch { /* not JSON */ }
+      if (parsed && parsed.ok === false) {
+        const { error_id: _ignored, ...rest } = parsed;
+        throw new Error(`node config read fails (${when} team ops): ${JSON.stringify(rest).slice(0, 400)}`);
+      }
+    }
     same("node config", after.node, before.node);
   });
 });
