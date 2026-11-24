@@ -58,11 +58,13 @@ export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
           : base;
   const userReplyText = ok
     ? undefined
-    : missingBinary || state === "unknown"
+    : missingBinary
       ? "这台机器上找不到 Antigravity 程序。请确认已安装，再发一次。"
-      : !hasAcp && seen
-        ? `这台机器上的 Antigravity 版本过低（当前 ${seen}，需要 ${pinned} 及以上）。请升级后再发一次。`
-        : undefined;
+      : state === "unknown"
+        ? "这台机器上的 Antigravity 程序没正常响应，读不到版本号。请确认它能正常启动，再发一次。"
+        : !hasAcp && seen
+          ? `这台机器上的 Antigravity 版本过低（当前 ${seen}，需要 ${pinned} 及以上）。请升级后再发一次。`
+          : undefined;
   return {
     ok,
     bin,

@@ -100,7 +100,8 @@ describe.skipIf(isWindows)("agy readiness — version is advisory", () => {
     expect(r.ok).toBe(false);
     expect(r.message).toContain("没读到 Antigravity CLI 的版本");
     expect(r.message).not.toContain("没有 acp 子命令");
-    expect(r.userReplyText).toBe("这台机器上找不到 Antigravity 程序。请确认已安装，再发一次。");
+    expect(r.userReplyText).toBe("这台机器上的 Antigravity 程序没正常响应，读不到版本号。请确认它能正常启动，再发一次。");
+    expect(r.userReplyText).not.toContain("找不到");
     expect(r.userReplyText).not.toContain("PATH");
     expect(r.userReplyText).not.toContain("AGY_BIN");
     expect(r.userReplyText).not.toContain("acp");
