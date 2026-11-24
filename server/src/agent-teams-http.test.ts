@@ -322,9 +322,37 @@ describe("#764 existing endpoints unchanged", () => {
     // 不把「删节点」当成「团队操作改了部门」。
     const dept = (t: string) => { const o = JSON.parse(t); const n = o.agents_unassigned; delete o.agents_unassigned; return { body: JSON.stringify(o), n }; };
     const a = dept(after.departments), b = dept(before.departments);
-    expect(a.body).toBe(b.body);
-    expect(a.n).toBe((b.n as number) - 1);
-    expect(after.humans).toBe(before.humans);
-    expect(after.node).toBe(before.node);
+    // Name the part that moved: on PostgreSQL (test2123) this failed with a bare
+    // "expect(received).toBe(expected)" and the runner dropped the diff, so
+    // nobody could tell which of the three bodies changed.
+    // The PG runner prints only the error's first line, so put the changed top-level
+    // keys (with before→after values) on that line.
+    const keyDiff = (got: unknown, want: unknown): string => {
+      try {
+        const a = JSON.parse(String(got)), b = JSON.parse(String(want));
+        if (a && b && typeof a === 'object' && typeof b === 'object') {
+          const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+          return keys.map(k => `${k}: ${JSON.stringify(b[k])} -> ${JSON.stringify(a[k])}`).join('; ').slice(0, 600);
+        }
+      } catch { /* not JSON */ }
+      return `${String(want).slice(0, 200)} -> ${String(got).slice(0, 200)}`;
+    };
+    const same = (label: string, got: unknown, want: unknown) => {
+      if (got !== want) throw new Error(`${label} changed after team operations: ${keyDiff(got, want)}\n--- before\n${want}\n--- after\n${got}`);
+    };
+    same("departments (minus agents_unassigned)", a.body, b.body);
+    same("departments.agents_unassigned", a.n, (b.n as number) - 1);
+    same("humans", after.humans, before.humans);
+    // test2123 (PostgreSQL): both reads were error bodies that differed only in the
+    // random error_id — i.e. GET /api/nodes/:id/config itself fails on PG. Say so,
+    // with the error, instead of comparing two errors.
+    for (const [when, body] of [["before", before.node], ["after", after.node]] as const) {
+      let parsed: any = null; try { parsed = JSON.parse(body); } catch { /* not JSON */ }
+      if (parsed && parsed.ok === false) {
+        const { error_id: _ignored, ...rest } = parsed;
+        throw new Error(`node config read fails (${when} team ops): ${JSON.stringify(rest).slice(0, 400)}`);
+      }
+    }
+    same("node config", after.node, before.node);
   });
 });

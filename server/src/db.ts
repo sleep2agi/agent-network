@@ -2532,8 +2532,11 @@ export function logTaskEvent(taskId: string, fromStatus: string | null, toStatus
 
 // RFC-039 F3: queries break created_at ties with SQLite's implicit rowid
 // (insertion order). PostgreSQL has none, so give these tables a real one.
+// #5431: daemon_provider_snapshots (GET/PUT provider routes) and
+// session_source_transports (daemon transport poll) also ORDER BY rowid and
+// failed on PostgreSQL with "column rowid does not exist".
 if (db.dialect === "postgres") {
-  for (const table of ["nodes", "user_inbox", "inbox"]) db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS rowid BIGSERIAL`);
+  for (const table of ["nodes", "user_inbox", "inbox", "daemon_provider_snapshots", "session_source_transports"]) db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS rowid BIGSERIAL`);
 }
 
 // Board #625: common SQLite/PostgreSQL DDL. Adoption records authority, not processes.
