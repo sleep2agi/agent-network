@@ -15,17 +15,31 @@ const expectedTools = [
   "mark_tasks_runtime_submitted", "mark_tasks_consumed", "get_all_status", "get_session_status",
   "send_task", "send_message", "send_reply", "send_peer_reply",
   "send_ack", "retry_task", "get_task", "list_tasks",
+  // protocol: bound network/node caller reports its own usage; no owner/admin role.
+  // Not listed for nodes by default; visible in the node protocol opt-in list.
+  "report_token_usage",
   "cancel_task", "reassign_task", "send_desktop_message", "broadcast", "get_completions",
   "update_node_config", "get_config_update", "ack_config_update",
-  "read_node_rules_file", "write_node_rules_file", "list_node_skills", "read_node_skill", "list_node_files", "read_node_file", "tail_node_logs", "get_rules_file_request", "ack_rules_file_request", "get_rules_file_result",
+  "read_node_rules_file", "write_node_rules_file",
+  // user: both require network write access (an unrestricted member is enough;
+  // not owner/admin-only). Hidden from nodes even on opt-in; node calls rejected.
+  "start_agy_login", "submit_agy_login_code",
+  "list_node_skills", "read_node_skill", "list_node_files", "read_node_file", "tail_node_logs", "get_rules_file_request", "ack_rules_file_request", "get_rules_file_result",
   "restart_node",
   "daemon_provider_snapshot", "pull_daemon_provider_snapshots", "ack_daemon_provider_snapshot",
-  "list_host_supervisors", "create_node", "clone_node", "list_my_pending_create_requests", "list_my_pending_lifecycle_requests", "get_create_request", "ack_create_request",
+  "list_host_supervisors", "create_node", "clone_node", "list_my_pending_create_requests", "list_my_pending_lifecycle_requests", "get_create_request",
+  // protocol: bound daemon-side node token, scoped to its own requests/network;
+  // no owner/admin role. Hidden from nodes by default, visible on protocol opt-in.
+  "pull_session_requests", "ack_session_request",
+  "ack_create_request",
   "stop_node", "delete_node", "get_stop_request", "ack_stop_request",
   "start_node", "get_start_request", "ack_start_request",
   "list_my_children", "request_adopt_node", "get_adopt_request", "ack_adopt_request", "unadopt_node", "upsert_network_secret", "list_network_secrets", "upsert_provider",
   "update_provider", "list_providers", "probe_provider_model", "get_probe_results",
   "get_probe_request", "ack_probe_request",
+  // user: network owner/admin required; even authorized calls currently return
+  // unsupported. Hidden from nodes even on protocol opt-in; node calls rejected.
+  "select_opencode_session_model",
   "read_opencode_catalog", "get_opencode_catalog", "get_opencode_catalog_request", "ack_opencode_catalog",
   "requirements_list", "requirements_people", "requirements_get", "requirements_create", "requirements_update",
   "requirements_checklist_toggle", "requirements_upsert_by_external_ref", "projects_list",
