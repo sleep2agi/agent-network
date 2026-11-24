@@ -1,0 +1,24 @@
+#5402 a4; source base 39b61d0b
+Docker --network none, 1 CPU, 64 shares. Reused installed audited MCP SDK 1.32.0; ran the suite run.sh from a writable fixture of current source and inventory.
+
+error: FAIL: all 88 production MCP registrations are explicitly inventoried in source order
+# test629 — MCP unknown-field policy audit
+source_commit=39b61d0b+inventory
+MUTATION_RED: unreviewed-tool-inventory rc=1
+MUTATION_RED: registertool-style-inventory rc=1
+PASS: MCP SDK is pinned to an exact version in server/package.json (1.32.0)
+PASS: installed MCP SDK matches the pin (1.32.0 vs 1.32.0)
+PASS: real MCP SDK version is recorded (1.32.0)
+PASS: all 94 production MCP registrations are explicitly inventoried in source order
+PASS: real SDK accepts a call containing an unknown field
+PASS: real SDK silently strips the unknown field before the handler
+PASS: global strict mode would hard-fail an existing caller with an extra field
+PASS: telemetry wrapper can preserve unknown keys at the validation boundary
+PASS: telemetry records sorted key names
+PASS: telemetry never records unknown values
+PASS: second validation accepts the known payload
+PASS: telemetry wrapper preserves the current stripped handler contract
+inventory_count=94
+sdk_version=1.32.0
+recommended_policy=observe-key-shape-then-strip
+RESULT: PASS
