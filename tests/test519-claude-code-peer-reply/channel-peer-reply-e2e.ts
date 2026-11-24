@@ -109,7 +109,13 @@ const proxy = Bun.serve({
     }
     const up = await fetch(`${hub}${url.pathname}${url.search}`, { method: req.method, headers, body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer() }).catch(() => null);
     if (!up) return new Response("hub unavailable", { status: 502 });
-    return new Response(up.body, { status: up.status, headers: up.headers });
+    // Bun's fetch already decompressed a gzip body. Forwarding the Hub's
+    // Content-Encoding/Content-Length with the plain bytes made the channel
+    // fail with "Decompression error: ZlibError" once the Hub started gzipping
+    // /api/nodes (#3801) — a proxy bug, not a product one.
+    const passHeaders = new Headers(up.headers);
+    passHeaders.delete("content-encoding"); passHeaders.delete("content-length");
+    return new Response(up.body, { status: up.status, headers: passHeaders });
   },
 });
 
