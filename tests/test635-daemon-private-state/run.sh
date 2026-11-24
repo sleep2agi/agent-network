@@ -38,20 +38,18 @@ test "$(stat -c '%u:%a' "$foreign_config")" = "10002:600"
 echo "FOREIGN_UID_RED: caller=10001 owner=10002 rc=$foreign_rc"
 
 echo "L2 witnessed-red mutations"
-preread_root="$(mktemp -d /tmp/test635-preread.XXXXXX)"
-cp -a agent-node "$preread_root/"
-
-# Removing the pre-read repair makes the symlink refusal behavior disappear.
-sed -i '/repairPrivateConfigPermissions(path);/d' \
-  "$preread_root/agent-node/src/runtime/create-node-daemon.ts"
-set +e
-(cd "$preread_root" && bun test agent-node/src/runtime/create-node-daemon.test.ts) \
-  >/tmp/test635-preread-red.txt 2>&1
-preread_rc=$?
-set -e
-test "$preread_rc" -ne 0
-grep -Eq 'global config read refuses|expected function to throw' /tmp/test635-preread-red.txt
-echo "MUTATION_RED: preread-repair rc=$preread_rc"
+# The former "preread-repair" mutation targeted ensureGlobalAnetConfig() in
+# create-node-daemon.ts. #3627 (2026-11-17) removed that function on purpose:
+# the daemon no longer reads or rewrites the user's ~/.anet/config.json at all
+# (the child gets the Hub from its profile + COMMHUB_URL). With the target gone
+# the sed was a no-op and the "red" run passed, failing this suite. Guard the
+# removal itself instead: the daemon must not touch the global config again.
+if grep -nE 'ensureGlobalAnetConfig|repairPrivateConfigPermissions' \
+  agent-node/src/runtime/create-node-daemon.ts; then
+  echo "DAEMON_TOUCHES_GLOBAL_CONFIG_AGAIN"
+  exit 1
+fi
+echo "GUARD: daemon does not read/repair the user's global config"
 
 writer_root="$(mktemp -d /tmp/test635-writer.XXXXXX)"
 cp -a agent-node "$writer_root/"
@@ -64,9 +62,11 @@ set +e
 writer_rc=$?
 set -e
 test "$writer_rc" -ne 0
-# The unchanged mutation removes one writer; the source contract now pins
-# three JSON writes (including the private source marker), not the old two.
-grep -Eq 'toBe\(3\)|Expected.*3|expected.*3' /tmp/test635-writer-red.txt
+# The mutation removes one writer; the enumerated writer contract must be the
+# test that goes red. (Match its name, not the count: #3627 dropped the
+# global-config writer, so the pinned count moved 3 → 2 and the old count
+# grep missed a correct red.)
+grep -Eq '\(fail\) #633 daemon secret writers' /tmp/test635-writer-red.txt
 echo "MUTATION_RED: writer-bypass rc=$writer_rc"
 
 echo "RESULT: PASS"

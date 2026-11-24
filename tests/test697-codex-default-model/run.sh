@@ -146,7 +146,11 @@ mapfile -t NON_CODEX_RUNTIMES < <(
     const codex = new Set(["codex-sdk", "codex-app-server"]);
     for (const runtime of SUPPORTED_RUNTIME_NAMES) if (!codex.has(runtime)) console.log(runtime);'
 )
-if [[ "${#NON_CODEX_RUNTIMES[@]}" -ne 5 ]]; then
+# Pin the exact set, not just a count: a new runtime must still make someone
+# look at this test (antigravity-acp, #3670, 2026-11-20, raised it 5 → 6).
+EXPECTED_NON_CODEX="antigravity-acp claude-agent-sdk claude-code-cli grok-build-acp grok-build-cli opencode-cli"
+ACTUAL_NON_CODEX=$(printf '%s\n' "${NON_CODEX_RUNTIMES[@]}" | sort | tr '\n' ' ' | sed 's/ $//')
+if [[ "$ACTUAL_NON_CODEX" != "$EXPECTED_NON_CODEX" ]]; then
   echo "NON_CODEX_RUNTIME_DENOMINATOR_WRONG count=${#NON_CODEX_RUNTIMES[@]} values=${NON_CODEX_RUNTIMES[*]}"
   exit 1
 fi

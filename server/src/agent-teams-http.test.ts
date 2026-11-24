@@ -322,9 +322,15 @@ describe("#764 existing endpoints unchanged", () => {
     // 不把「删节点」当成「团队操作改了部门」。
     const dept = (t: string) => { const o = JSON.parse(t); const n = o.agents_unassigned; delete o.agents_unassigned; return { body: JSON.stringify(o), n }; };
     const a = dept(after.departments), b = dept(before.departments);
-    expect(a.body).toBe(b.body);
-    expect(a.n).toBe((b.n as number) - 1);
-    expect(after.humans).toBe(before.humans);
-    expect(after.node).toBe(before.node);
+    // Name the part that moved: on PostgreSQL (test2123) this failed with a bare
+    // "expect(received).toBe(expected)" and the runner dropped the diff, so
+    // nobody could tell which of the three bodies changed.
+    const same = (label: string, got: unknown, want: unknown) => {
+      if (got !== want) throw new Error(`${label} changed after team operations\n--- before\n${want}\n--- after\n${got}`);
+    };
+    same("departments (minus agents_unassigned)", a.body, b.body);
+    same("departments.agents_unassigned", a.n, (b.n as number) - 1);
+    same("humans", after.humans, before.humans);
+    same("node config", after.node, before.node);
   });
 });

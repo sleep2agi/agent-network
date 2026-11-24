@@ -11,6 +11,16 @@ COPY contracts /work/contracts
 COPY server/src/contracts /work/server/src/contracts
 COPY server/ server/
 COPY agent-node/src/ agent-node/src/
+# session-project-create-http / session-source-evidence build a synthetic
+# agent-node package from agent-node/package.json (ENOENT here since the
+# source-fork chain tests landed). Their node_modules links are only external
+# references for Bun.build, but the bundle itself resolves agent-node's own
+# imports, so install its dependencies (no lifecycle scripts) as well.
+COPY agent-node/package.json agent-node/bun.lock agent-node/
+RUN cd agent-node && bun install --ignore-scripts
+# health-redaction.test.ts checks the rejection inventory against the repo's
+# route table (../../docs/rest-route-table.json from server/src).
+COPY docs/rest-route-table.json docs/rest-route-table.json
 # The daemon credential tests import CLI error guidance and recursively inspect
 # production token issuers. Keep the same cross-package inputs as test798.
 COPY agent-network/package.json agent-network/package-lock.json agent-network/
