@@ -50,7 +50,7 @@ grep -Fq 'model:   configured by Grok CLI' docs/grok-build-runtime.md
 grep -Fq 'model id.' docs/grok-build-runtime.md
 
 cp agent-node/src/cli.ts /tmp/test605-cli.ts
-cp agent-node/src/runtime/grok-build-acp/client.ts /tmp/test605-client.ts
+cp agent-node/src/runtime/acp-runner/client.ts /tmp/test605-client.ts
 
 echo "L3 witnessed-red: runtime alias must not return as model id"
 sed -i 's/? "configured by Grok CLI"/? "grok-build"/' agent-node/src/cli.ts
@@ -59,10 +59,11 @@ expect_red grok-runtime-alias-is-not-model run_banner_test
 cp /tmp/test605-cli.ts agent-node/src/cli.ts
 
 echo "L4 witnessed-red: ACP spawn must not acquire a model flag"
-sed -i 's/\["agent", "stdio"\]/["agent", "stdio", "--model", "grok-build"]/' agent-node/src/runtime/grok-build-acp/client.ts
-grep -Fq '["agent", "stdio", "--model", "grok-build"]' agent-node/src/runtime/grok-build-acp/client.ts
+# #3669 起 argv 在通用 acp-runner/client.ts 里拼（grok-build-acp/client.ts 只是转出）。
+sed -i 's/\["agent", "stdio"\]/["agent", "stdio", "--model", "grok-build"]/' agent-node/src/runtime/acp-runner/client.ts
+grep -Fq '["agent", "stdio", "--model", "grok-build"]' agent-node/src/runtime/acp-runner/client.ts
 expect_red acp-argv-has-no-invented-model run_acp_argv_test
-cp /tmp/test605-client.ts agent-node/src/runtime/grok-build-acp/client.ts
+cp /tmp/test605-client.ts agent-node/src/runtime/acp-runner/client.ts
 
 echo "L5 restored green"
 run_banner_test

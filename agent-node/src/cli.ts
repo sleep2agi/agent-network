@@ -3360,6 +3360,9 @@ async function processWithClaude(
   } catch (error: any) {
     return `claude 错误: SDK 平台二进制无法执行 (${process.platform}-${process.arch}): ${error?.message || error}`;
   }
+  // 排错用：#3619 重写解析时删掉了 "using global/glibc binary" 两行，之后日志里看不出这一轮
+  // 到底用了哪个 claude（test668 也因此一直红）。只在二进制确认可执行之后打一行。
+  log(`[claude] using bundled binary: ${claudePath}`);
 
   // Root-safety log (was a hard-fail before 2026-06-24 — see the partner-team host incident). Claude Code's security policy rejects `--dangerously-skip-
   // permissions` when running as root, so the old "bypass permissions" path
