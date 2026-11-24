@@ -1,27 +1,27 @@
 {
-  "version": "0.2.616",
-  "pub_date": "2026-11-23T18:34:56Z",
+  "version": "0.2.617",
+  "pub_date": "2026-11-24T02:55:18Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlZZc0lCSDdCNkE1clpnTU1kekV1alZsTlZOcHhzUnVqelM0Ry9EU0hUaU85MXA4QjBuSmkxU0JtSFMwS1o0RDh4RitlUy9Qa2N6WGxwd3lCVW5idEE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU4MDY5CWZpbGU6QU5ldC5hcHAudGFyLmd6ClV1V3ZtTHd0Q1hzcHF4VG9vdUJOaE9BSExob3o5YkUvOFh0NWt0OGxLd1I0UVc5aUduNDNVK1lzNUZ3RFpEOHNJOUVIZ1c5aWd2V3JERVVyRXZYaUNnPT0K",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.616/ANet_0.2.616_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlZjK2tnYjlmOWFXeU9HME9FeWkwYk9CV3hMbHJ5c1NOVmhDRHRCWmhMUTZkTFFlTis0UXRqUmFTWVVXTSs3MzZNRkpLeEJ0dU4ra1dJZFRFR3psRGdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg3NDQ0CWZpbGU6QU5ldC5hcHAudGFyLmd6CnlSVzE4RE1qUkVnWVJjY0hwUVdZbm1zb2FSNTlPZWs1Q2l3WjcrWHMvUE9CMWZLVm45ZDVBYmI4L0cxblZsak94UUQ1amhBcHVUcGtMVENhVkowTUFBPT0K",
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.617/ANet_0.2.617_aarch64.app.tar.gz"
     },
     "darwin-aarch64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlZZc0lCSDdCNkE1clpnTU1kekV1alZsTlZOcHhzUnVqelM0Ry9EU0hUaU85MXA4QjBuSmkxU0JtSFMwS1o0RDh4RitlUy9Qa2N6WGxwd3lCVW5idEE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU4MDY5CWZpbGU6QU5ldC5hcHAudGFyLmd6ClV1V3ZtTHd0Q1hzcHF4VG9vdUJOaE9BSExob3o5YkUvOFh0NWt0OGxLd1I0UVc5aUduNDNVK1lzNUZ3RFpEOHNJOUVIZ1c5aWd2V3JERVVyRXZYaUNnPT0K",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.616/ANet_0.2.616_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlZjK2tnYjlmOWFXeU9HME9FeWkwYk9CV3hMbHJ5c1NOVmhDRHRCWmhMUTZkTFFlTis0UXRqUmFTWVVXTSs3MzZNRkpLeEJ0dU4ra1dJZFRFR3psRGdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg3NDQ0CWZpbGU6QU5ldC5hcHAudGFyLmd6CnlSVzE4RE1qUkVnWVJjY0hwUVdZbm1zb2FSNTlPZWs1Q2l3WjcrWHMvUE9CMWZLVm45ZDVBYmI4L0cxblZsak94UUQ1amhBcHVUcGtMVENhVkowTUFBPT0K",
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.617/ANet_0.2.617_aarch64.app.tar.gz"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlJWSFBWN09OVlc1Z0ZxZUxrUTNEZVRzZFV2Wm0xRFM5cWtmZHNBL0NnT3hZOUp0N3dZazBXWTM5NzR0R2xBWmU1dnpFaVRhbG5zNkdOd0VJdTNYV0FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU4MjM1CWZpbGU6QU5ldF8wLjIuNjE2X3g2NC1zZXR1cC5leGUKR2d1bVVQcElwM3hROG01N3RySEFjalBwQXFBbXgyNGYraUY2dFQ1a3JGZzBVRDZ5TDRucU9XcjZyRzhYcExyRUJuNDJnTVdadFBGRzJCNmM3OUNCQnc9PQo=",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.616/ANet_0.2.616_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TmJWU0lLaW83SkVaVk4yWFBJVTFzTHlCbnN6OXFlZW1jYkh5TWttUlBqQ216L0gycFZ0NE5zTmR1SUZiUnV1UHlqV2g4RU9QUDBTQmtSRk82Nm1aWUFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg3NDQ4CWZpbGU6QU5ldF8wLjIuNjE3X3g2NC1zZXR1cC5leGUKYllDWDEyL1pQYlpqa2J5NVlldDdnUmtzZFloTlRnRzRabTNpV3Z1MEk2bExkbU4rc0xLb3c3cEdBd29tcXVzTVVqaDlheU1menVsSGtrRk9ic05zQUE9PQo=",
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.617/ANet_0.2.617_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlJWSFBWN09OVlc1Z0ZxZUxrUTNEZVRzZFV2Wm0xRFM5cWtmZHNBL0NnT3hZOUp0N3dZazBXWTM5NzR0R2xBWmU1dnpFaVRhbG5zNkdOd0VJdTNYV0FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU4MjM1CWZpbGU6QU5ldF8wLjIuNjE2X3g2NC1zZXR1cC5leGUKR2d1bVVQcElwM3hROG01N3RySEFjalBwQXFBbXgyNGYraUY2dFQ1a3JGZzBVRDZ5TDRucU9XcjZyRzhYcExyRUJuNDJnTVdadFBGRzJCNmM3OUNCQnc9PQo=",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.616/ANet_0.2.616_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TmJWU0lLaW83SkVaVk4yWFBJVTFzTHlCbnN6OXFlZW1jYkh5TWttUlBqQ216L0gycFZ0NE5zTmR1SUZiUnV1UHlqV2g4RU9QUDBTQmtSRk82Nm1aWUFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg3NDQ4CWZpbGU6QU5ldF8wLjIuNjE3X3g2NC1zZXR1cC5leGUKYllDWDEyL1pQYlpqa2J5NVlldDdnUmtzZFloTlRnRzRabTNpV3Z1MEk2bExkbU4rc0xLb3c3cEdBd29tcXVzTVVqaDlheU1menVsSGtrRk9ic05zQUE9PQo=",
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.617/ANet_0.2.617_x64-setup.exe"
     },
     "windows-x86_64-msi": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TlkwZGJYSVBQVllVTXJwc2xPdmcrUE84ZWh5MlUvbTNLVjFtNWxwYWdlemRHYlNqWkNXWXBaeFNwVStPMW5GdWN6SmpROEtLZVI3dkFWR3pJdytac1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU4MjM1CWZpbGU6QU5ldF8wLjIuNjE2X3g2NF9lbi1VUy5tc2kKcVJRaU9CajVZL2dYUXRMTEFmZWdaMGkwR3YzcC9NTFZYMmZiU1RjSXlmTFd0Wm5ZdWJnS1VDUklPSzNRN1llWFlZNVdHRWZET1ZJVWgwQnViM1JIQmc9PQo=",
-      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.616/ANet_0.2.616_x64_en-US.msi"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTNUtqcThBUWk4TmEyLzNySTA3SlZZZHhzNk1RRG5VUVJFblovWWUrWFVMOEJHdEwwcHNKTTJWRUNwWDJDcTNLNkpxYmdIckMvZllaU2FSOVdBSTZ3dFlaWnFSY2lxNFFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg3NDQ4CWZpbGU6QU5ldF8wLjIuNjE3X3g2NF9lbi1VUy5tc2kKcjZEa3MraG5NSjFSMmR0dTRSdmlKbWczL3ZXVFR5cGI1c3NLa3UwSlB1cGJTaFlwOFRGaFJRUEFETmNLT09IMVc5SFpUMGJJc1lWcWdGUFd5MExmQWc9PQo=",
+      "url": "https://github.com/sleep2agi/agent-network-app/releases/download/desktop-v0.2.617/ANet_0.2.617_x64_en-US.msi"
     }
   },
-  "notes": "macOS (Apple Silicon) and Windows (x64) installers are attached; Ubuntu 24.04 (amd64) is included only when its installer is listed in this release. Signing status is version-specific — check it against the build itself, not against this paragraph.\n\nWhat's new in 0.2.616:\n### 修复与改进\n\n- Agent 列表按「名称前缀」分组时，有新消息的 Agent 留在自己的分组里（分组标题显示未读数），不再散在分组上方。\n\nWhat's new in 0.2.615:\n### 修复与改进\n\n- 新建节点时，暂时用不了的 AI 会收进可展开的分组，不再满屏红字；原因更简短，需要的命令可以直接复制。全应用的开关颜色也统一了。\n- 部门数量会显示「含下级共 N 个」，手机和电脑看到的统计一致。\n\nWhat's new in 0.2.614:\n### 修复与改进\n\n- 助手发来的表格在手机和平板上更好读了；代码字样不再和链接一个颜色；平板上消息不再只占中间一窄条。\n\n更早版本的更新内容：https://github.com/sleep2agi/agent-network-app/releases"
+  "notes": "macOS (Apple Silicon) and Windows (x64) installers are attached; Ubuntu 24.04 (amd64) is included only when its installer is listed in this release. Signing status is version-specific — check it against the build itself, not against this paragraph.\n\nWhat's new in 0.2.617:\n### 修复与改进\n\n- Android 检查更新时会同时核对官网版本，减少镜像同步延迟导致误报“已是最新”的情况。镜像版本正常时仍优先从镜像下载；新版安装包暂时取不到时会提示正在同步。\n\nWhat's new in 0.2.616:\n### 修复与改进\n\n- Agent 列表按「名称前缀」分组时，有新消息的 Agent 留在自己的分组里（分组标题显示未读数），不再散在分组上方。\n\nWhat's new in 0.2.615:\n### 修复与改进\n\n- 新建节点时，暂时用不了的 AI 会收进可展开的分组，不再满屏红字；原因更简短，需要的命令可以直接复制。全应用的开关颜色也统一了。\n- 部门数量会显示「含下级共 N 个」，手机和电脑看到的统计一致。\n\n更早版本的更新内容：https://github.com/sleep2agi/agent-network-app/releases"
 }
