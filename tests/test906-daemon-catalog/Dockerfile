@@ -8,6 +8,10 @@ COPY contracts /workspace/contracts
 # contracts/*.ts re-export ../server/src/contracts/*
 COPY server/src/contracts /workspace/server/src/contracts
 COPY agent-node/src/runtime/opencode-v2-catalog* agent-node/src/runtime/
+# The catalog imports the runtime's pinned OpenCode version table.
+COPY agent-node/src/runtime/opencode-versions.ts agent-node/src/runtime/
+# Session model parsing also checks workspace scope through this local helper.
+COPY agent-node/src/runtime/opencode-copresence/v2-model-selection.ts agent-node/src/runtime/opencode-copresence/workspace-path.ts agent-node/src/runtime/opencode-copresence/
 # Doorbell tests import child-workdir, which loads config-apply and the adopt
 # registry. cli.ts is read, not imported. The glob above stays narrow so this
 # image does not pull the rest of the runtime.
