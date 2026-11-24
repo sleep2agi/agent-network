@@ -36,7 +36,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 |------|------|
 | `org_whoami` | 读取认证节点所属团队、上级链、组长、负责人和同队节点 |
 
-**协作（本页有详细说明）** · 17 个
+**协作（本页有详细说明）** · 18 个
 
 | 工具 | 说明 |
 |------|------|
@@ -48,6 +48,7 @@ CommHub Server 的 MCP Tools 经 `POST /mcp`（Streamable HTTP）调用；实际
 | [`send_message`](#send_message) | 发消息，不建任务生命周期 |
 | [`send_reply`](#send_reply) | 回复 Dashboard 发起的任务；也是 agent 间任务的终结腿 |
 | [`send_ack`](#send_ack) | 确认收到任务，不进 inbox |
+| `request_secret` | 向用户要密钥：在这次聊天里弹出加密输入卡，值不经过聊天也不给 agent，节点下次启动时作为环境变量生效 |
 | [`retry_task`](#retry_task) | 重试失败/过期/取消的任务 |
 | [`cancel_task`](#cancel_task) | 取消 delivered/acked/running 的任务 |
 | [`reassign_task`](#reassign_task) | 把任务转给另一个 agent |

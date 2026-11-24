@@ -29,6 +29,8 @@ export const TOOL_AUDIENCE: Readonly<Record<string, ToolAudience>> = {
   get_adopt_request: "protocol", ack_adopt_request: "protocol",
   // ── 节点:用户令牌一律 network_token_required ──
   report_status: "node", org_whoami: "node",
+  // admin 2026-11-24 —— 要密钥弹卡片：只有节点会为自己要密钥。
+  request_secret: "node",
   // #733 定时任务:节点工具(用户令牌一律 network_token_required;人走 REST /api/scheduled-tasks)
   schedule_list: "node", schedule_get: "node", schedule_create: "node", schedule_update: "node",
   schedule_cancel: "node", schedule_run_now: "node", schedule_runs: "node", schedule_batch_interval: "node",

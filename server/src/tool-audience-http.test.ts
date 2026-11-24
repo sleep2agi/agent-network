@@ -251,7 +251,10 @@ describe("bytes per role (#476 ceilings stay meaningful per role)", () => {
   // 2026-11-20 — agy 登录（start_agy_login / submit_agy_login_code）是真人功能，只能是 user 工具，
   // 两个工具 + 必填校验把 all 从 86.4KB 推到 88.0KB。node 不变（不走 node），user 仍在 60.5KB 内；
   // 只抬 all 的上限（#476 ratchet 的例外要写明原因）。
-  const CEILINGS = { node: 64_500, user: 60_500, all: 89_500 } as const;
+  // 2026-11-24 — request_secret（admin 需求：要密钥弹加密卡片，不让人把值贴进聊天）是 node 工具的
+  // **新功能**，描述已压到一句、参数只给 key 写说明，实测 node 64,888 B（+~440 B）。user 不变（不列给人）。
+  // 抬 node 上限到 65,300（余量 412 B）、all 到 90,300（实测 89,902，余量 398 B）；#476 ratchet 的例外写明原因。
+  const CEILINGS = { node: 65_300, user: 60_500, all: 90_300 } as const;
   const MARGIN_FLOOR = 100;
   test("node / user / all", async () => {
     const node = await listTools(T.node_normal);
