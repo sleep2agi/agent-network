@@ -49,4 +49,17 @@ describe("#5321 agy 模型清单 + 登录状态", () => {
   test("模型行形状：畸形行丢弃，不把说明性文字当模型", () => {
     expect(parseAgyModels("Usage: agy models\nclaude-opus-5-5-high\n[bad line\n")).toEqual(["claude-opus-5-5-high"]);
   });
+
+  test("真机 agy models 制表符两列输出（<slug>\\t<显示名>）正常提取全部模型 slug 并过滤 Fetching 行", () => {
+    const stdout = [
+      "Fetching available models...",
+      "gemini-4-neon-high\tGemini 4 Neon (High)",
+      "claude-opus-5-5-high\tClaude Opus 5.5 (High)",
+      "gpt-oss-120b-medium  GPT-OSS 120B (Medium)",
+      "gemini-4-neon-high\tGemini 4 Neon (High)",
+    ].join("\n");
+    const r = probeAgy({ binary: "agy", run: () => ({ status: 0, stdout, stderr: "" }) });
+    expect(r.loginState).toBe("logged_in");
+    expect(r.models).toEqual(["gemini-4-neon-high", "claude-opus-5-5-high", "gpt-oss-120b-medium"]);
+  });
 });

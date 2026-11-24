@@ -25,11 +25,28 @@ export interface AgyProbeDeps {
 
 const NEEDS_LOGIN_RE = /(please (log ?in|sign ?in)|run:? ?agy (acp )?--?login|no supported non-interactive auth method|not (logged|signed) in|unauthori[sz]ed)/i;
 
-/** 把 `agy models` 的输出解析成模型名列表。只接受像 `provider/model` 或纯模型名的单行；畸形行丢弃。 */
+const MODEL_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,120}$/;
+const HEADER_LINE_RE = /^(available|models|usage|fetching|loading|error|warning|note)\b/i;
+
+/** 把 `agy models` 的输出解析成模型名列表。兼容真机 `<slug>\t<显示名>`、双空格分列和单列 `<slug>`；说明/畸形行丢弃。 */
 export function parseAgyModels(stdout: string): string[] | null {
-  const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const models = lines.filter(l => /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,120}$/.test(l) && !/^(available|models|usage)/i.test(l));
-  return models.length ? models : null;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of stdout.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || HEADER_LINE_RE.test(line)) continue;
+    let candidate = line;
+    const tabIdx = line.indexOf("\t");
+    if (tabIdx > 0) {
+      candidate = line.slice(0, tabIdx).trim();
+    } else if (/\s{2,}/.test(line)) {
+      candidate = line.split(/\s{2,}/)[0].trim();
+    }
+    if (!MODEL_SLUG_RE.test(candidate) || HEADER_LINE_RE.test(candidate) || seen.has(candidate)) continue;
+    seen.add(candidate);
+    out.push(candidate);
+  }
+  return out.length ? out : null;
 }
 
 /** 纯函数：把 `agy models` 的退出码与 stdout/stderr 归类为模型清单和登录态。 */
