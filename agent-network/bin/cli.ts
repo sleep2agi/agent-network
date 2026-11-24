@@ -9016,7 +9016,15 @@ async function startCommand() {
         || !/^(?:opencode v)?2\.0\.22-anet-test\.29040e2$/.test(execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }).trim())) throw Error("source_resume_cli_version_refused");
       return { ok: true, binary, version: "2.0.22-anet-test.29040e2" };
     })() : checkOpencodeGenerationBinary("v2");
-    if (!checked.ok || checked.version !== p.sourceDelivery.expected_version) throw Error("source_resume_cli_version_refused");
+    if (!checked.ok || checked.version !== p.sourceDelivery.expected_version) {
+      // Say why before refusing: the delivery worker only reports unknown_rotation_required,
+      // so without this line an operator (or test638 in Docker) cannot tell which OpenCode
+      // check failed. The hint names a path and an install command, never a credential.
+      console.error(`[source-resume] OpenCode binary refused: ${"hint" in checked
+        ? checked.hint
+        : `version ${checked.version} ≠ expected ${p.sourceDelivery.expected_version}`}`);
+      throw Error("source_resume_cli_version_refused");
+    }
     opencodeLaunchIdentity = { binary: checked.binary, version: checked.version };
     const plan = resolveOpencodeAgentNodeLaunchPlan();
     const sourceHelp = execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
