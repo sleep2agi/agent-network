@@ -81,17 +81,38 @@ describe.skipIf(isWindows)("agy readiness — version is advisory", () => {
     expect(r.ok).toBe(true);
   });
 
-  it("still hard-fails when the build has no acp subcommand", () => {
-    const bin = writeStub(dir, { version: "1.5.13", acp: false });
+  it("still hard-fails when the build has no acp subcommand (and reports version too low)", () => {
+    const bin = writeStub(dir, { version: "1.5.12", acp: false });
     const r = checkAgyReadiness(bin);
     expect(r.hasAcp).toBe(false);
     expect(r.ok).toBe(false);
+    expect(r.message).toContain("1.5.12");
+    expect(r.message).toContain("没有 acp 子命令");
+    expect(r.userReplyText).toBe("这台机器上的 Antigravity 版本过低（当前 1.5.12，需要 1.5.13 及以上）。请升级后再发一次。");
+    expect(r.userReplyText).not.toContain("PATH");
+    expect(r.userReplyText).not.toContain("AGY_BIN");
   });
 
-  it("still hard-fails when the version cannot be read", () => {
-    const bin = writeStub(dir, { version: null, acp: true });
+  it("still hard-fails when the version cannot be read — never contradicts itself with 'no acp subcommand'", () => {
+    const bin = writeStub(dir, { version: null, acp: false });
     const r = checkAgyReadiness(bin);
     expect(r.state).toBe("unknown");
     expect(r.ok).toBe(false);
+    expect(r.message).toContain("没读到 Antigravity CLI 的版本");
+    expect(r.message).not.toContain("没有 acp 子命令");
+    expect(r.userReplyText).toBe("这台机器上的 Antigravity 程序没正常响应，读不到版本号。请确认它能正常启动，再发一次。");
+    expect(r.userReplyText).not.toContain("找不到");
+    expect(r.userReplyText).not.toContain("PATH");
+    expect(r.userReplyText).not.toContain("AGY_BIN");
+    expect(r.userReplyText).not.toContain("acp");
+  });
+
+  it("missing binary (ENOENT) gives plain userReplyText without PATH/AGY_BIN/acp while keeping log detail", () => {
+    const r = checkAgyReadiness(join(dir, "does-not-exist-agy"));
+    expect(r.ok).toBe(false);
+    expect(r.missingBinary).toBe(true);
+    expect(r.message).toContain("ENOENT");
+    expect(r.message).not.toContain("没有 acp 子命令");
+    expect(r.userReplyText).toBe("这台机器上找不到 Antigravity 程序。请确认已安装，再发一次。");
   });
 });
