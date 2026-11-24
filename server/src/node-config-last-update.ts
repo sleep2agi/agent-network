@@ -156,10 +156,13 @@ export function projectLastConfigUpdate(
   };
 }
 
+// `rowid` is SQLite-only: on PostgreSQL this query failed and GET /api/nodes/:id/config
+// returned an error body for every node (test2123, 2026-11-24). Tie-break on the
+// primary key instead — only matters for two updates in the same millisecond.
 export const LAST_CONFIG_UPDATE_SQL =
   `SELECT update_id, status, patch_json, error, created_at, acked_at
      FROM node_config_updates WHERE node_id = ?1
-    ORDER BY created_at DESC, rowid DESC LIMIT 1`;
+    ORDER BY created_at DESC, update_id DESC LIMIT 1`;
 
 /** 读这个节点最近一次配置下发。从未下发过 ⇒ null（不是空对象：两者在界面上不同）。 */
 export function readLastConfigUpdate(
