@@ -5,7 +5,7 @@
 // 登录态探测留给上层用 `agy models`（成功=已登录）。
 import { spawnSync } from "node:child_process";
 import { withWindowsChildPath } from "../../shared/windows-child-env.js";
-import { agyReadinessMessage, compareAgyVersion, parseAgyVersion, pinnedAgyVersion, type AgyPinState, type AgyVersion } from "./version";
+import { agyReadinessMessage, compareAgyVersion, formatAgyVersion, parseAgyVersion, pinnedAgyVersion, type AgyPinState, type AgyVersion } from "./version";
 
 export interface AgyReadiness {
   ok: boolean;
@@ -17,6 +17,8 @@ export interface AgyReadiness {
   /** True when the `agy` executable itself was not found (ENOENT). */
   missingBinary?: boolean;
   message: string;
+  /** Short plain-Chinese user reply (no PATH / AGY_BIN / ACP jargon); raw `message` stays in node logs. */
+  userReplyText?: string;
 }
 
 export function agyBinary(): string {
@@ -32,7 +34,9 @@ export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
   // 每次检查都读一遍环境变量：AGY_ACCEPTED_VERSION 是给审过新版本的节点用的逃生口。
   const pinned = pinnedAgyVersion();
   const state = compareAgyVersion(version, pinned);
-  const help = missingBinary ? { status: null, stdout: "", stderr: "" } : spawnSync(bin, ["acp", "--help"], { encoding: "utf8", timeout: 15_000, env });
+  const help = missingBinary || state === "unknown"
+    ? { status: null, stdout: "", stderr: "" }
+    : spawnSync(bin, ["acp", "--help"], { encoding: "utf8", timeout: 15_000, env });
   // agy 把 subcommand 的帮助打到 stderr（实测），两路都要看。
   const helpText = `${help.stdout ?? ""}${help.stderr ?? ""}`;
   const hasAcp = help.status === 0 && /Agent Client Protocol/i.test(helpText);
@@ -42,12 +46,32 @@ export function checkAgyReadiness(bin = agyBinary()): AgyReadiness {
   const strict = process.env.AGY_STRICT_VERSION === "1";
   const ok = hasAcp && state !== "unknown" && (!strict || state === "pinned");
   const base = agyReadinessMessage(state, version, pinned);
+  const seen = version ? formatAgyVersion(version) : null;
   const message = missingBinary
     ? `找不到 Antigravity CLI（${bin}，ENOENT）：${base}`
-    : !hasAcp
-      ? `Antigravity CLI 这个版本没有 acp 子命令（需要 >= ${pinned}）：${base}`
-      : strict && state !== "pinned"
-        ? `${base}（本节点设了 AGY_STRICT_VERSION=1，按严格模式拒绝）`
-        : base;
-  return { ok, bin, state, version, pinned, hasAcp, ...(missingBinary ? { missingBinary: true } : {}), message };
+    : state === "unknown"
+      ? base
+      : !hasAcp
+        ? `Antigravity CLI ${seen ?? ""} 版本过低，没有 acp 子命令（需要 >= ${pinned}）：${base}`
+        : strict && state !== "pinned"
+          ? `${base}（本节点设了 AGY_STRICT_VERSION=1，按严格模式拒绝）`
+          : base;
+  const userReplyText = ok
+    ? undefined
+    : missingBinary || state === "unknown"
+      ? "这台机器上找不到 Antigravity 程序。请确认已安装，再发一次。"
+      : !hasAcp && seen
+        ? `这台机器上的 Antigravity 版本过低（当前 ${seen}，需要 ${pinned} 及以上）。请升级后再发一次。`
+        : undefined;
+  return {
+    ok,
+    bin,
+    state,
+    version,
+    pinned,
+    hasAcp,
+    ...(missingBinary ? { missingBinary: true } : {}),
+    message,
+    ...(userReplyText ? { userReplyText } : {}),
+  };
 }

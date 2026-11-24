@@ -86,7 +86,7 @@ export function formatAcpUserError(runtimeLabel: string, err: unknown): string |
 
   // 2. CLI binary missing (Node spawn ENOENT or readiness missingBinary).
   if (code === "ENOENT" || MISSING_CLI_RE.test(combined)) {
-    return `这台机器上还没有安装 ${name} CLI（找不到 \`${cli}\` 命令）。请在那台机器上安装 \`${cli}\` 并确保它在 PATH 里，然后再发一次。`;
+    return `这台机器上找不到 ${name} 程序。请确认已安装，再发一次。`;
   }
 
   // 3. Account quota / balance exhausted (verbatim #1941 / #1976 402 shape).

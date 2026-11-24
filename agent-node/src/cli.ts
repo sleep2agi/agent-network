@@ -5181,8 +5181,10 @@ async function processWithAntigravity(
   const readiness = checkAgyReadiness();
   if (!readiness.ok) {
     const err = new Error(readiness.message) as Error & { code?: string; userReplyText?: string };
-    if (readiness.missingBinary) {
-      err.code = "ENOENT";
+    if (readiness.missingBinary) err.code = "ENOENT";
+    if (readiness.userReplyText) {
+      err.userReplyText = readiness.userReplyText;
+    } else if (readiness.missingBinary) {
       const { attachAcpUserReplyText } = await import("./runtime/acp-runner/user-error");
       attachAcpUserReplyText(err, "antigravity");
     }

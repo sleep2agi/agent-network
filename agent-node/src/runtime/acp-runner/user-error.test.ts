@@ -39,16 +39,16 @@ describe("formatAcpUserError —— 报错归并纯函数", () => {
     expect(grokOut).toContain("`grok login`");
   });
 
-  test("没装 CLI（ENOENT）→ 人话 + 安装提示", () => {
+  test("没装 CLI（ENOENT）→ 人话 + 安装提示（不露 PATH / AGY_BIN / ACP）", () => {
     const enoent = Object.assign(new Error("spawn agy ENOENT"), { code: "ENOENT" });
     const agyOut = formatAcpUserError("antigravity", enoent);
-    expect(agyOut).toContain("还没有安装 Antigravity CLI");
-    expect(agyOut).toContain("`agy`");
+    expect(agyOut).toBe("这台机器上找不到 Antigravity 程序。请确认已安装，再发一次。");
     expect(agyOut).not.toContain("ACP");
+    expect(agyOut).not.toContain("PATH");
+    expect(agyOut).not.toContain("AGY_BIN");
 
     const grokOut = formatAcpUserError("grok", new Error("spawn grok ENOENT"));
-    expect(grokOut).toContain("还没有安装 Grok CLI");
-    expect(grokOut).toContain("`grok`");
+    expect(grokOut).toBe("这台机器上找不到 Grok 程序。请确认已安装，再发一次。");
   });
 
   test("额度用完（#1941 真机 402 原文）→ 人话，不露 -32603 / ACP / JSON", () => {
