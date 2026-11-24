@@ -9,6 +9,7 @@ import { markTaskActivity } from "./task-activity.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestSecretUi } from "./secret-request-ui.js";
+import { validScopedSecretKey } from "./shared/scoped-secret-contract";
 import { markAcked, markReply } from "./acked-unconfirmed.js";
 import { getSessionRequest, takePendingForDaemon, ackSessionRequest } from "./opencode-session-requests.js";
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
@@ -2984,15 +2985,21 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           // 那个键是提问者随任务带的附件,客户端把它画在提问者的气泡里。以前这里用回复的 metaJson
           // 整体 COALESCE 替换,于是 agent 回的图出现在提问者气泡下面、提问者自己带的附件被覆盖
           // (Vincent 2026-09-06 实测「好像没成功发送给我」)。inbox 行(收件方视角)照旧写 metaJson。
+          // admin 2026-11-24 —— request_secret 的卡片同理：App/Dashboard 读的是 tasks 行，
+          // 所以把 meta.secret_request 以 reply_secret_request 落到 tasks.meta_json（只有 key/label/hint，永无值）。
+          const replySecretRequest = mergedMeta && typeof mergedMeta === "object" && !Array.isArray(mergedMeta)
+            ? (mergedMeta as { secret_request?: unknown }).secret_request : undefined;
           const replyTaskMetaJson = (() => {
-            if (!attachmentsResult.attachments.length) return null;
+            if (!attachmentsResult.attachments.length && !replySecretRequest) return null;
             const rowParams: any[] = [in_reply_to];
             let rowSql = "SELECT meta_json FROM tasks WHERE task_id = ?1";
             rowSql = addScope(rowSql, rowParams, effectiveNetId);
             const existing = db.get<{ meta_json: string | null }>(rowSql, ...rowParams)?.meta_json ?? null;
             let base: Record<string, unknown> = {};
             if (existing) { try { const parsed = JSON.parse(existing); if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) base = parsed; } catch {} }
-            return JSON.stringify({ ...base, reply_attachments: attachmentsResult.attachments });
+            return JSON.stringify({ ...base,
+              ...(attachmentsResult.attachments.length ? { reply_attachments: attachmentsResult.attachments } : {}),
+              ...(replySecretRequest ? { reply_secret_request: replySecretRequest } : {}) });
           })();
           const updateParams: any[] = [replyStatus, text, replyTaskMetaJson, in_reply_to];
           let updateSql = `UPDATE tasks
@@ -3168,6 +3175,44 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     "Atomically finalize one node-owned task and enqueue one no-response result when the recipient advertises peer_reply_inbox_capable. Stored capability mismatch -> refused, not silently degraded.",
     replyToolSchema,
     (args) => handleReply(args, true),
+  );
+
+  // admin 2026-11-24 —— 「要密钥弹卡片」：用户想给 agent 一个密钥/令牌时，agent 不让人把值
+  // 贴进聊天，而是调这个工具。它做两件事：① 登记「待填」（#4827 那套，30 分钟）；
+  // ② 用一条带 meta.secret_request 的回执把卡片放进**这次对话**，App/Dashboard 渲染成
+  // 加密输入卡；不认识卡片的旧客户端看到的是下面那行人话（告诉人去节点设置里填）。
+  // 值永远不经过 agent 和聊天：卡片直接写节点密钥，生效于节点下次启动（环境变量 $KEY）。
+  server.tool(
+    "request_secret",
+    "Need a key/token/password? Never ask the user to paste it: this shows a secure card in this chat and closes the task. You never see the value; it is env var $key after node restart.",
+    {
+      key: z.string().min(1).max(120).describe("Env var name, e.g. GITHUB_TOKEN"),
+      label: z.string().max(80).optional(),
+      hint: z.string().max(200).optional(),
+      in_reply_to: z.string().max(200).optional(),
+      network_id: z.string().max(200).optional(),
+    },
+    async ({ key, label, hint, in_reply_to, network_id }) => {
+      const out = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v) }] });
+      const caller = callerTokenIsNetwork && callerTokenId ? resolveNodeCaller(callerTokenId) : null;
+      if (!caller?.ok || caller.kind !== "node") return out({ ok: false, error: "node_token_required", message: "Only an agent node can ask for its own secret." });
+      const cleanKey = key.trim();
+      if (!validScopedSecretKey(cleanKey)) return out({ ok: false, error: "invalid_secret_key", message: "Use an env var name like GITHUB_TOKEN (letters, digits, underscore)." });
+      const registered = requestSecretUi({ nodeId: caller.nodeId, key: cleanKey, ...(label ? { label } : {}), byNodeId: caller.nodeId });
+      if (!registered.ok) return out(registered);
+      const name = label?.trim() || cleanKey;
+      const reply = await handleReply({
+        in_reply_to,
+        network_id,
+        text: `🔑 请在下方卡片里填写「${name}」，不要把它直接发在聊天里。（看不到卡片时：到这个 AI 的「设置 → 密钥」里添加 ${cleanKey}）`,
+        meta: { secret_request: { node_id: caller.nodeId, key: cleanKey, ...(label ? { label: label.trim() } : {}), ...(hint ? { hint: hint.trim() } : {}) } },
+      }, false);
+      let replied: any = null;
+      try { replied = JSON.parse((reply as any)?.content?.[0]?.text ?? "null"); } catch {}
+      if (!replied?.ok) return reply;
+      return out({ ...replied, secret_request: { key: cleanKey, pending: true },
+        next: "Card shown and this task is closed. Stop here; the user will message you after saving. The value never reaches you or the chat; it is available as env var after this node restarts." });
+    },
   );
 
   // ── V2: send_ack (不入 inbox，仅更新状态) ──

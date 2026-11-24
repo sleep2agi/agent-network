@@ -14,6 +14,8 @@ const expectedTools = [
   "report_status", "report_completion", "get_inbox", "ack_inbox",
   "mark_tasks_runtime_submitted", "mark_tasks_consumed", "get_all_status", "get_session_status",
   "send_task", "send_message", "send_reply", "send_peer_reply",
+  // #3864 —— 向用户要密钥：值不进聊天、不给 agent，节点下次启动作为环境变量生效。
+  "request_secret",
   "send_ack", "retry_task", "get_task", "list_tasks",
   // protocol: bound network/node caller reports its own usage; no owner/admin role.
   // Not listed for nodes by default; visible in the node protocol opt-in list.

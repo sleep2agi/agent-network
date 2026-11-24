@@ -49,7 +49,7 @@ client stops observation, not the remote operation; a timeout does not mean roll
 |------|------|
 | `org_whoami` | Read the authenticated node's team, ancestors, lead, owner and teammates |
 
-**Collaboration — detailed below** · 17
+**Collaboration — detailed below** · 18
 
 | Tool | What it does |
 |------|------|
@@ -61,6 +61,7 @@ client stops observation, not the remote operation; a timeout does not mean roll
 | [`send_message`](#send_message) | Send a message with no task lifecycle |
 | [`send_reply`](#send_reply) | Reply to a Dashboard-originated task; also the terminal leg for agent-to-agent tasks |
 | [`send_ack`](#send_ack) | Acknowledge a task without entering the inbox |
+| `request_secret` | Ask the user for a secret via a secure card in this chat; the value never enters the chat or reaches the agent and becomes an env var on the next node start |
 | [`retry_task`](#retry_task) | Retry a failed, expired, or cancelled task |
 | [`cancel_task`](#cancel_task) | Cancel a delivered/acked/running task |
 | [`reassign_task`](#reassign_task) | Reassign a task to a different agent |

@@ -596,7 +596,7 @@ export const NODE_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
   pull_daemon_provider_snapshots: "always", ack_daemon_provider_snapshot: "always",
   // 回复 / 上报 / 自己的收件箱 / 生命周期协议(节点自己的请求)—— 任何模式都能做
   report_status: "always", report_completion: "always", get_inbox: "always", ack_inbox: "always",
-  mark_tasks_runtime_submitted: "always", mark_tasks_consumed: "always", send_reply: "always", send_peer_reply: "always", send_ack: "always",
+  mark_tasks_runtime_submitted: "always", mark_tasks_consumed: "always", send_reply: "always", send_peer_reply: "always", send_ack: "always", request_secret: "always",
   get_config_update: "always", ack_config_update: "always", get_rules_file_request: "always", ack_rules_file_request: "always", get_rules_file_result: "always",
   get_create_request: "always", ack_create_request: "always", get_stop_request: "always", ack_stop_request: "always",
   get_start_request: "always", ack_start_request: "always", get_probe_request: "always", ack_probe_request: "always",
