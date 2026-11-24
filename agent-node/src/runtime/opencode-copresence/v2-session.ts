@@ -364,7 +364,16 @@ export function openCodeV2Outcome(
     );
   }
   if (verdict.closedBy === "idle" && verdict.idleOutcome && verdict.idleOutcome !== "succeeded") {
-    throw new Error(`OpenCode v2 turn ended with outcome=${verdict.idleOutcome} and no provider error`);
+    // OpenCode gave no reason. In practice (2026-11-24, a node moved from a
+    // borrowed shared server to its own) this is a node whose own OpenCode
+    // home has no login for the model's provider: the turn fails in ~2 s with
+    // no provider error at all. Say that, and how to fix it, instead of only
+    // echoing the outcome code.
+    throw new Error(
+      `OpenCode v2 turn ended with outcome=${verdict.idleOutcome} without saying why. `
+      + "Most often this node has no working login for its model provider. "
+      + "Fix: run `opencode auth login` in this node's home, or add the provider key in the Dashboard's node secrets, then restart the node.",
+    );
   }
   return { replyText: openCodeV2ReplyText(verdict.assistants) };
 }
