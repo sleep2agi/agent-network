@@ -66,3 +66,33 @@ test("the list is capped", () => {
   expect(keys).toHaveLength(SECRET_KEYS_MAX);
   expect(keys[0]).toBe("KEY_000");
 });
+
+test("collects key names from node-secrets.json and merges with secrets.env without leaking values (#5505)", () => {
+  const d = mk();
+  const SENTINEL = "ghp_sentinel_NEVER_REPORT_9981";
+  writeFileSync(join(d, "secrets.env"), `LEGACY_KEY=${SENTINEL}\n`);
+  writeFileSync(join(d, "node-secrets.json"), JSON.stringify({
+    schema: 1,
+    node_id: "n_test",
+    network_id: "net_test",
+    revision: 1,
+    values: {
+      GITHUB_TOKEN: SENTINEL,
+      PATH: "/evil",
+      lower_bad: SENTINEL,
+      EMPTY_VAL: "",
+      LEGACY_KEY: SENTINEL,
+    },
+  }));
+  const keys = collectSecretKeys(d);
+  expect(keys).toEqual(["GITHUB_TOKEN", "LEGACY_KEY"]);
+  expect(JSON.stringify(keys)).not.toContain(SENTINEL);
+});
+
+test("a symlinked node-secrets.json is not followed", () => {
+  const d = mk();
+  const target = mk();
+  writeFileSync(join(target, "node-secrets.json"), JSON.stringify({ schema: 1, values: { GITHUB_TOKEN: "secret" } }));
+  symlinkSync(join(target, "node-secrets.json"), join(d, "node-secrets.json"));
+  expect(collectSecretKeys(d)).toEqual([]);
+});
