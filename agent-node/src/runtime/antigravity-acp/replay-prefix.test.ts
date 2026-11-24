@@ -210,4 +210,22 @@ describe("agy seed replaces history (no growth across rounds)", () => {
     seedAgyReplaysFromLoad("s-noop", "   ");
     expect(agyReplyHistorySizeForTests("s-noop")).toBe(before);
   });
+
+  // 2026-11-24 真机（小苹果公众号鸽）：回放的历史以换行开头（"\n⚠ Individual quota reached…"），
+  // 而记下的历史是 trim 过的 ⇒ 旧实现一个字都剥不掉，回复越来越长。
+  it("strips replayed history even when the replay starts with a newline", () => {
+    const quota = "⚠ Individual quota reached. Please upgrade your subscription to increase your limits.";
+    rememberAgyReply("\n" + quota, "s-ws");
+    expect(agyStripReplay("\n" + quota + "\n新的回答", "s-ws")).toEqual({ text: "\n新的回答", replayOnly: false });
+    rememberAgyReply("新的回答", "s-ws");
+    // 第三轮：两条历史中间也夹着换行
+    expect(agyStripReplay("\n" + quota + "\n新的回答\n第三轮", "s-ws")).toEqual({ text: "\n第三轮", replayOnly: false });
+    // 只有回放（含换行）⇒ 判失败，不能把旧话当回复
+    expect(agyStripReplay("\n" + quota + "\n新的回答\n第三轮".replace("\n第三轮", "") , "s-ws")).toEqual({ text: "", replayOnly: true });
+  });
+
+  it("whitespace tolerance does not swallow differing text", () => {
+    rememberAgyReply("甲乙", "s-ws2");
+    expect(agyStripReplayedPrefix("\n甲 乙丙", "s-ws2")).toBe("\n甲 乙丙");
+  });
 });

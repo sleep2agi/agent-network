@@ -60,13 +60,33 @@ function stripOnce(reply: string, sessionId: string | undefined): { text: string
   if (!prevs?.length) return { text: reply, stripped: false, k: 0 };
   // k = 1..n：取最后 k 条按记录顺序拼接，从最长的开始试（n 往下到 1）
   for (let k = prevs.length; k >= 1; k--) {
-    const prefix = prevs.slice(prevs.length - k).join("");
-    if (!prefix) continue;
-    if (reply.length >= prefix.length && reply.startsWith(prefix)) {
-      return { text: reply.slice(prefix.length), stripped: true, k };
-    }
+    const end = matchReplayedPieces(reply, prevs.slice(prevs.length - k));
+    if (end >= 0) return { text: reply.slice(end), stripped: true, k };
   }
   return { text: reply, stripped: false, k: 0 };
+}
+
+/**
+ * 按顺序匹配回放的各条历史，返回回放结束位置；对不上返回 -1。
+ *
+ * 2026-11-24 真机（小苹果公众号鸽）：额度用完后 agy 每轮先回放一条以换行开头的
+ * "\n⚠ Individual quota reached…"。历史是 trim 过才记下的（rememberAgyReply），
+ * 原来用 `reply.startsWith(拼接串)` 比对，开头那个换行就让整段对不上 ⇒ 一点都没剥，
+ * 回复越聊越长（104 → 2333 → 3100 → 4633 → 5328 字）。
+ * 所以每条历史之前允许有空白（换行/空格）——只放宽「条与条之间的空白」，正文仍须逐字一致。
+ */
+function matchReplayedPieces(reply: string, pieces: string[]): number {
+  let i = 0;
+  let matchedAny = false;
+  for (const piece of pieces) {
+    if (!piece) continue;
+    let j = i;
+    while (j < reply.length && /\s/.test(reply[j]!)) j++;
+    if (!reply.startsWith(piece, j)) return -1;
+    i = j + piece.length;
+    matchedAny = true;
+  }
+  return matchedAny ? i : -1;
 }
 
 /** 该会话是否**观察到过回放**（曾经剥出过非空余量）。用来消解「历史只有一条且本轮回复恰好相同」的歧义。 */
