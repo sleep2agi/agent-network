@@ -950,7 +950,14 @@ jobs:
           notes=$(ls docs/tests/release-v"$VER"*.md 2>/dev/null | head -1 || true)
           [ -n "$notes" ] || { echo "::error::no docs/tests/release-v$VER*.md (gate 3 should have caught this)"; exit 1; }
 
-          existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          # On a missing tag gh exits non-zero and still prints the 404 JSON body
+          # to stdout (first run of this job, agent-node .228, read that body as
+          # an existing sha). Only a successful lookup that returns a 40-hex sha
+          # counts as "exists".
+          existing=""
+          if out=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null); then
+            if [[ "$out" =~ ^[0-9a-f]{40}$ ]]; then existing="$out"; fi
+          fi
           if [ -z "$existing" ]; then
             gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$COMMIT" > /dev/null
             echo "created tag $tag → $COMMIT"
