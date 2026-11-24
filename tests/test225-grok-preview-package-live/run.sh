@@ -1669,7 +1669,8 @@ chmod 600 "$EXPECTED_HELPER_ENV"
   for key in PATH HOME TMPDIR TMP TEMP LANG LC_ALL LC_CTYPE TZ SHELL USER LOGNAME TERM COLORTERM NO_COLOR; do
     printenv "$key" >/dev/null 2>&1 && printf '%s\n' "$key"
   done
-  printf '%s\n' GROK_BINARY ANET_CONFIG_UPDATE_CAPABLE
+  # 2026-11-10: anet CLI stamps its version at spawn and agent-node validates its shape so install guidance pairs the packages instead of trusting the placeholder anet_version.
+  printf '%s\n' GROK_BINARY ANET_CONFIG_UPDATE_CAPABLE ANET_LAUNCHED_BY_CLI_VERSION
 } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))' > "$EXPECTED_AGENT_NODE_ENV_KEYS"
 
 {

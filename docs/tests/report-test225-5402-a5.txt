@@ -1,0 +1,6 @@
+#5402 a5; source base 39b61d0b
+Docker --network none, 1 CPU, 64 shares. Targeted fixture runs the exact assertion from run.sh against synthetic observations before/after and with a child leak mutation. Full test225 package-live and ratchet NOT_RUN.
+
+FAIL: candidate Grok probe/PTY env differs from the exact reviewed key set
+PASS: exact Grok probe/PTY env; ANET_LAUNCHED_BY_CLI_VERSION admitted in parent only
+MUTATION_RED: stamp leaked to Grok child
