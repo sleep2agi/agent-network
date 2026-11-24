@@ -912,3 +912,60 @@ jobs:
           LANDED_TIMEOUT_MIN: '5'
           LANDED_INTERVAL_S: '30'
         run: bash .github/scripts/verify-npm-release-landed.sh
+
+  # ── 发布落地之后：打 git tag + 建 GitHub Release ─────────────────────────────
+  # 2026-11-24：改用 workflow_dispatch 发版后，没有人再手推 tag —— CLI 停在
+  # cli-v2.3.0-preview.242，之后 .243–.261 在 npm 上有、在 GitHub 上找不到对应提交
+  # 和说明；`scripts/release-backlog.mjs` 也因此一直拿 .242 当基准，报「181 条未发」。
+  # 一个没人带的新公司要能从 npm 版本号查到源码和更新说明，所以由发布流程自己打。
+  #   · 只在 publish 成功、且 landed 判定「registry 上真的有了」之后跑；没发或没落地就不打
+  #   · tag 打在 build-tarball 解析出的那个提交上（就是实际被打包的源码），不是 main 当前头
+  #   · 命名 <短包名>@v<版本>（npm 惯例；本 workflow 的 push.tags 已认这个形状）
+  #   · 用 GITHUB_TOKEN 建 tag 不会触发任何 workflow，所以不会再跑一遍 release gate
+  #   · 说明用 gate 3 已校验过的 docs/tests/release-v<版本>*.md；preview 版标 prerelease
+  #   · 已存在同名 tag：指向同一提交 → 只补 Release；指向别的提交 → 报错，不覆盖
+  github-release:
+    name: git tag + GitHub Release
+    needs: [publish, landed, build-tarball]
+    runs-on: ubuntu-latest
+    # landed 在「没安排发布」时也判 success，所以必须同时要求 publish 本身成功。
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && needs.publish.result == 'success' && needs.landed.result == 'success'
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-tarball.outputs.commit }}
+
+      - name: tag + release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PKG: ${{ needs.build-tarball.outputs.package }}
+          VER: ${{ needs.build-tarball.outputs.version }}
+          COMMIT: ${{ needs.build-tarball.outputs.commit }}
+        run: |
+          set -euo pipefail
+          tag="${PKG}@v${VER}"
+          notes=$(ls docs/tests/release-v"$VER"*.md 2>/dev/null | head -1 || true)
+          [ -n "$notes" ] || { echo "::error::no docs/tests/release-v$VER*.md (gate 3 should have caught this)"; exit 1; }
+
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+          if [ -z "$existing" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$COMMIT" > /dev/null
+            echo "created tag $tag → $COMMIT"
+          elif [ "$existing" != "$COMMIT" ]; then
+            echo "::error::tag $tag already points at $existing, not the published commit $COMMIT — not overwriting"
+            exit 1
+          else
+            echo "tag $tag already at $COMMIT"
+          fi
+
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "release $tag already exists — leaving it as is"
+          else
+            pre=()
+            case "$VER" in *-*) pre=(--prerelease) ;; esac
+            gh release create "$tag" --verify-tag --title "$PKG $VER" --notes-file "$notes" "${pre[@]}"
+            echo "created GitHub Release $tag"
+          fi
