@@ -30,6 +30,15 @@ export const ORPHAN_NOTICE_KIND = "task_orphan_suspected";
 const BATCH_LIMIT = 200;
 
 /** 未设 / 非数字 → 默认 60;0 或负数 → 关闭(null)。 */
+/** True for tasks that only carry a peer's reply (meta.peer_reply_wake); no answer is expected. */
+export function isPeerReplyWake(metaJson: unknown): boolean {
+  if (typeof metaJson !== "string" || !metaJson.includes("peer_reply_wake")) return false;
+  try {
+    const m = JSON.parse(metaJson);
+    return !!m && typeof m === "object" && !!m.peer_reply_wake && typeof m.peer_reply_wake === "object";
+  } catch { return false; }
+}
+
 export function orphanTaskMinutes(env: Record<string, string | undefined> = process.env): number | null {
   const raw = (env[ORPHAN_TASK_ENV] ?? "").trim();
   if (!raw) return ORPHAN_DEFAULT_MINUTES;
@@ -92,7 +101,10 @@ export function flagOrphanTasks(opts: { minutes?: number | null; lookbackHours?:
     );
     if (res.changes < 1) continue; // 只做一次:别的巡检 / 别的 Hub worker 已经标过了
     let notified: OrphanFlagged["notified"] = null;
-    if (route.kind !== "none") {
+    // A peer reply delivered as a wake task (channel fallback when atomic peer replies are not
+    // supported) is an answer, not a request: the reader owes nothing back. Mark it checked (above)
+    // so it never re-enters the batch, but do not tell the sender it "went unanswered".
+    if (route.kind !== "none" && !isPeerReplyWake(r.meta_json)) {
       try {
         const startedMs = parseDbTimestampMs(r.started);
         const openMin = Number.isFinite(startedMs) ? Math.max(0, Math.round((nowMs - startedMs) / 60_000)) : null;

@@ -164,7 +164,10 @@ export async function sendChannelPeerReply(
 
   // 1. Wake first. If it fails, do not close: a closed task the peer never
   //    hears about is worse than an open one the model can retry.
-  const wake = await safeCall(deps, "send_task", { alias: target, task: v.text, priority: "normal", from_session: deps.fromAlias });
+  // meta.peer_reply_wake marks this task as a reply, not a request: nobody owes an answer, so
+  // the Hub's orphan patrol must not nag the sender when the peer reads it and goes idle.
+  const wake = await safeCall(deps, "send_task", { alias: target, task: v.text, priority: "normal", from_session: deps.fromAlias,
+    meta: { peer_reply_wake: { in_reply_to: taskId } } });
   if (failed(wake.payload)) {
     return reject(wake.code, `Could not wake ${target}: ${wake.message}. Nothing was closed; the original task is still open.`, { task_id: taskId, route: "wake-then-close", fallback_reason: reason, upstream: wake.payload });
   }
