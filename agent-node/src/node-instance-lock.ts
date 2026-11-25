@@ -37,7 +37,7 @@ import {
   writeSync,
 } from "node:fs";
 import { hostname as osHostname } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export const NODE_INSTANCE_LOCK_FILE = "agent-node.lock";
 
@@ -78,6 +78,8 @@ export interface AcquireNodeInstanceLockOptions {
   isPidAlive?: (pid: number) => boolean;
   /** Optional process command-line reader (defaults to Linux `/proc/<pid>/cmdline`) to detect PID reuse. */
   readPidCmdline?: (pid: number) => string | null;
+  /** Override O_NOFOLLOW flag (defaults to `constants.O_NOFOLLOW || 0`; pass `0` to simulate Windows). */
+  noFollowFlag?: number;
   /** Max retries when competing to reclaim a stale lock or waiting for an in-progress write. */
   maxAttempts?: number;
   /** Short wait between retries when an existing lock file is freshly created and empty. */
@@ -122,10 +124,17 @@ export function defaultIsPidAlive(pid: number): boolean {
   }
 }
 
-export function formatDuplicateNodeMessage(holderPid?: number | null, alias?: string | null): string {
+export function formatDuplicateNodeMessage(
+  holderPid?: number | null,
+  alias?: string | null,
+  lockPath?: string | null,
+): string {
   const pidPart = holderPid && Number.isInteger(holderPid) && holderPid > 0 ? `（PID ${holderPid}）` : "";
   const stopCmd = alias && alias.trim() ? `anet node stop ${alias.trim()}` : "anet node stop";
-  return `这个 AI 已经在这台机器上运行${pidPart}，不用再启动；要重启请先 ${stopCmd}`;
+  const clearHint = lockPath && lockPath.trim()
+    ? `；如果确认它没在运行，删除 ${lockPath.trim()} 后再启动`
+    : "";
+  return `这个 AI 已经在这台机器上运行${pidPart}，不用再启动；要重启请先 ${stopCmd}${clearHint}`;
 }
 
 function parseLockRecord(raw: string): Partial<NodeInstanceLockRecord> | null {
@@ -151,7 +160,7 @@ function sleepSync(ms: number): void {
   }
 }
 
-function readExistingLockSafe(lockPath: string):
+function readExistingLockSafe(lockPath: string, noFollowFlag: number):
   | { kind: "missing" }
   | { kind: "symlink" }
   | { kind: "ok"; raw: string; mtimeMs: number; dev: number; ino: number }
@@ -166,7 +175,7 @@ function readExistingLockSafe(lockPath: string):
   if (lst.isSymbolicLink() || !lst.isFile()) return { kind: "symlink" };
   let fd: number | null = null;
   try {
-    fd = openSync(lockPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    fd = openSync(lockPath, constants.O_RDONLY | noFollowFlag);
     const st = fstatSync(fd);
     if (!st.isFile()) return { kind: "symlink" };
     const raw = readFileSync(fd, "utf8");
@@ -187,13 +196,14 @@ export function acquireNodeInstanceLock(
   meta: { alias: string; nodeId?: string | null },
   options: AcquireNodeInstanceLockOptions = {},
 ): AcquireNodeInstanceLockResult {
-  const lockPath = join(nodeDir, NODE_INSTANCE_LOCK_FILE);
+  const lockPath = join(resolve(nodeDir), NODE_INSTANCE_LOCK_FILE);
   const myPid = options.pid ?? process.pid;
   const host = options.hostname ?? osHostname();
   const currentBootId = options.bootId !== undefined ? options.bootId : readLinuxBootId();
   const now = options.now ?? (() => new Date());
   const isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
   const readPidCmdline = options.readPidCmdline ?? defaultReadPidCmdline;
+  const noFollowFlag = options.noFollowFlag ?? (constants.O_NOFOLLOW || 0);
   const maxAttempts = Math.max(1, options.maxAttempts ?? 4);
   const retryDelayMs = options.retryDelayMs ?? 15;
 
@@ -249,7 +259,7 @@ export function acquireNodeInstanceLock(
     try {
       fd = openSync(
         lockPath,
-        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0),
+        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | noFollowFlag,
         0o600,
       );
       const payload = `${JSON.stringify(record)}\n`;
@@ -263,7 +273,7 @@ export function acquireNodeInstanceLock(
         released = true;
         try { closeSync(heldFd); } catch { /* already closed */ }
         // Only unlink if the file on disk still belongs to this exact lock instance.
-        const current = readExistingLockSafe(lockPath);
+        const current = readExistingLockSafe(lockPath, noFollowFlag);
         if (current.kind === "ok") {
           const parsed = parseLockRecord(current.raw);
           if (parsed?.token === record.token && parsed?.pid === record.pid) {
@@ -300,7 +310,7 @@ export function acquireNodeInstanceLock(
     }
 
     // Lock file exists — inspect holder and decide reject vs stale-reclaim.
-    const existing = readExistingLockSafe(lockPath);
+    const existing = readExistingLockSafe(lockPath, noFollowFlag);
     if (existing.kind === "missing") {
       // Previous holder just exited; retry acquire immediately.
       continue;
@@ -322,7 +332,7 @@ export function acquireNodeInstanceLock(
           lockPath,
           holderPid: null,
           holderAlias: meta.alias,
-          message: formatDuplicateNodeMessage(null, meta.alias),
+          message: formatDuplicateNodeMessage(null, meta.alias, lockPath),
         };
       }
       return {
@@ -353,7 +363,7 @@ export function acquireNodeInstanceLock(
         lockPath,
         holderPid: null,
         holderAlias,
-        message: formatDuplicateNodeMessage(null, holderAlias),
+        message: formatDuplicateNodeMessage(null, holderAlias, lockPath),
       };
     }
 
@@ -370,7 +380,7 @@ export function acquireNodeInstanceLock(
         lockPath,
         holderPid,
         holderAlias,
-        message: formatDuplicateNodeMessage(holderPid, holderAlias),
+        message: formatDuplicateNodeMessage(holderPid, holderAlias, lockPath),
       };
     }
 
@@ -398,7 +408,7 @@ export function acquireNodeInstanceLock(
           lockPath,
           holderPid,
           holderAlias,
-          message: formatDuplicateNodeMessage(holderPid, holderAlias),
+          message: formatDuplicateNodeMessage(holderPid, holderAlias, lockPath),
         };
       }
       if (unlinkErr?.code !== "ENOENT") {
@@ -418,6 +428,6 @@ export function acquireNodeInstanceLock(
     lockPath,
     holderPid: null,
     holderAlias: meta.alias,
-    message: formatDuplicateNodeMessage(null, meta.alias),
+    message: formatDuplicateNodeMessage(null, meta.alias, lockPath),
   };
 }

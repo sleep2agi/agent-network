@@ -44,21 +44,22 @@ describe("agent-node single-instance lock (agent-node.lock)", () => {
 
   test("refuses second start when holder PID is alive and prints plain-Chinese message", () => {
     const dir = mkDir();
-    const first = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { pid: 55123, isPidAlive: () => true });
+    const lockPath = join(dir, NODE_INSTANCE_LOCK_FILE);
+    const first = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { pid: 55123, isPidAlive: () => true, readPidCmdline: () => null });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
 
-    const second = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { pid: 55999, isPidAlive: (p) => p === 55123 });
+    const second = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { pid: 55999, isPidAlive: (p) => p === 55123, readPidCmdline: () => null });
     expect(second.ok).toBe(false);
     if (second.ok) return;
 
     expect(second.reason).toBe("already_running");
     expect(second.holderPid).toBe(55123);
-    expect(second.message).toBe("这个 AI 已经在这台机器上运行（PID 55123），不用再启动；要重启请先 anet node stop 神鸽");
+    expect(second.message).toBe(`这个 AI 已经在这台机器上运行（PID 55123），不用再启动；要重启请先 anet node stop 神鸽；如果确认它没在运行，删除 ${lockPath} 后再启动`);
 
     first.handle.release();
     // After the first instance exits/releases, a fresh start succeeds.
-    const third = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { pid: 55999, isPidAlive: () => false });
+    const third = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { pid: 55999, isPidAlive: () => false, readPidCmdline: () => null });
     expect(third.ok).toBe(true);
     if (third.ok) third.handle.release();
   });
@@ -95,6 +96,33 @@ describe("agent-node single-instance lock (agent-node.lock)", () => {
     expect(readFileSync(target, "utf8")).toBe("keep-me");
   });
 
+  test("refuses symlinked agent-node.lock even when O_NOFOLLOW is unavailable (Windows simulation)", () => {
+    const dir = mkDir();
+    const targetDir = mkDir();
+    const existingTarget = join(targetDir, "victim.txt");
+    writeFileSync(existingTarget, "untouched");
+    symlinkSync(existingTarget, join(dir, NODE_INSTANCE_LOCK_FILE));
+
+    const existingRes = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { noFollowFlag: 0 });
+    expect(existingRes.ok).toBe(false);
+    if (!existingRes.ok) {
+      expect(existingRes.reason).toBe("unsafe_lock_file");
+    }
+    expect(readFileSync(existingTarget, "utf8")).toBe("untouched");
+
+    // Also verify a dangling symlink (target does not exist yet) is refused without creating the target.
+    const danglingDir = mkDir();
+    const missingTarget = join(targetDir, "should-not-be-created.txt");
+    symlinkSync(missingTarget, join(danglingDir, NODE_INSTANCE_LOCK_FILE));
+
+    const danglingRes = acquireNodeInstanceLock(danglingDir, { alias: "神鸽" }, { noFollowFlag: 0 });
+    expect(danglingRes.ok).toBe(false);
+    if (!danglingRes.ok) {
+      expect(danglingRes.reason).toBe("unsafe_lock_file");
+    }
+    expect(existsSync(missingTarget)).toBe(false);
+  });
+
   test("release() never unlinks a lock file owned by a different token/PID", () => {
     const dir = mkDir();
     const first = acquireNodeInstanceLock(dir, { alias: "神鸽" }, { pid: 10001 });
@@ -114,9 +142,16 @@ describe("agent-node single-instance lock (agent-node.lock)", () => {
   });
 
   test("formatDuplicateNodeMessage works with and without alias / PID", () => {
-    expect(formatDuplicateNodeMessage(1234, "通信鸽")).toBe("这个 AI 已经在这台机器上运行（PID 1234），不用再启动；要重启请先 anet node stop 通信鸽");
-    expect(formatDuplicateNodeMessage(1234, "")).toBe("这个 AI 已经在这台机器上运行（PID 1234），不用再启动；要重启请先 anet node stop");
-    expect(formatDuplicateNodeMessage(null, "通信鸽")).toBe("这个 AI 已经在这台机器上运行，不用再启动；要重启请先 anet node stop 通信鸽");
+    const lockPath = "/tmp/anet-node-demo/agent-node.lock";
+    expect(formatDuplicateNodeMessage(1234, "通信鸽", lockPath)).toBe(
+      `这个 AI 已经在这台机器上运行（PID 1234），不用再启动；要重启请先 anet node stop 通信鸽；如果确认它没在运行，删除 ${lockPath} 后再启动`,
+    );
+    expect(formatDuplicateNodeMessage(1234, "", lockPath)).toBe(
+      `这个 AI 已经在这台机器上运行（PID 1234），不用再启动；要重启请先 anet node stop；如果确认它没在运行，删除 ${lockPath} 后再启动`,
+    );
+    expect(formatDuplicateNodeMessage(null, "通信鸽", lockPath)).toBe(
+      `这个 AI 已经在这台机器上运行，不用再启动；要重启请先 anet node stop 通信鸽；如果确认它没在运行，删除 ${lockPath} 后再启动`,
+    );
   });
 
   test("cli.ts wires acquireNodeInstanceLock early and releases on exit + shutdown", () => {

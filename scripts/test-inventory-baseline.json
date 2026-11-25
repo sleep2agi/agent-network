@@ -2831,6 +2831,7 @@
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims stale lock left behind by a dead PID (e.g. kill -9 / crash)": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses second start when holder PID is alive and prints plain-Chinese message": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses symlinked agent-node.lock (fail-closed)": 1,
+  "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses symlinked agent-node.lock even when O_NOFOLLOW is unavailable (Windows simulation)": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::release() never unlinks a lock file owned by a different token/PID": 1,
   "agent-node/src/node-secret-keys.test.ts::a symlinked node-secrets.json is not followed": 1,
   "agent-node/src/node-secret-keys.test.ts::a symlinked secrets.env is not followed": 1,
@@ -12235,6 +12236,7 @@
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims stale lock left behind by a dead PID (e.g. kill -9 / crash)",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses second start when holder PID is alive and prints plain-Chinese message",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses symlinked agent-node.lock (fail-closed)",
+  "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses symlinked agent-node.lock even when O_NOFOLLOW is unavailable (Windows simulation)",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::release() never unlinks a lock file owned by a different token/PID",
   "agent-node/src/node-secret-keys.test.ts::a symlinked node-secrets.json is not followed",
   "agent-node/src/node-secret-keys.test.ts::a symlinked secrets.env is not followed",
@@ -18808,7 +18810,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "f1d266e4134a4c86dc5c920c06c1cfd1b86e2013",
+  "commit": "6b243312d0b222596c1f0246b41867e19f08c35f",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
