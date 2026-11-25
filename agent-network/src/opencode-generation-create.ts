@@ -83,3 +83,32 @@ export function opencodeGenerationInstallCommand(generation: "v1" | "v2"): strin
   const support = opencodeGenerationSupport(generation);
   return `npm install -g ${support.packageName}@${support.pin}`;
 }
+
+/**
+ * Warning lines emitted on `anet node create` when `opencode` is not on PATH.
+ * V2 nodes must never recommend the V1 `opencode-ai` package; when a shared V2
+ * Server is already configured, the note points at the V2 package rather than
+ * raising a false V1 missing-CLI alarm.
+ */
+export function opencodeCreateMissingCliWarnings(
+  generation: "v1" | "v2" | undefined,
+  opts?: { hasSharedServer?: boolean; v1InstallCommand?: string },
+): string[] {
+  if (generation === "v2") {
+    const v2Install = opencodeGenerationInstallCommand("v2");
+    if (opts?.hasSharedServer) {
+      return [
+        `[anet] note: opencode CLI not found in PATH (shared OpenCode V2 Server is configured; for local TUI attach, add the V2 prefix to PATH or install: ${v2Install})`,
+      ];
+    }
+    return [
+      `[anet] Warning: OpenCode V2 CLI (opencode) not found in PATH.`,
+      `[anet] Install (exact): ${v2Install}`,
+    ];
+  }
+  const v1Install = opts?.v1InstallCommand ?? opencodeGenerationInstallCommand("v1");
+  return [
+    `[anet] Warning: opencode CLI not found in PATH.`,
+    `[anet] Install (exact): ${v1Install}`,
+  ];
+}

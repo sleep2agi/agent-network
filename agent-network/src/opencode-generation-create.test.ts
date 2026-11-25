@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { parseCliOptions } from "./cli-args";
 import {
   applyOpencodeGenerationCreateOption,
+  opencodeCreateMissingCliWarnings,
   opencodeGenerationInstallCommand,
   opencodeStartGenerationRefusal,
 } from "./opencode-generation-create";
@@ -84,5 +85,20 @@ describe("start: stored profile gate", () => {
 
   test("install commands come from the table", () => {
     expect(opencodeGenerationInstallCommand("v2")).toBe("npm install -g @opencode/cli@2.0.22");
+  });
+
+  test("create missing-CLI warnings match generation and never recommend V1 for V2 nodes", () => {
+    const v1 = opencodeCreateMissingCliWarnings("v1");
+    expect(v1.join("\n")).toContain("npm install -g opencode-ai@");
+
+    const v2 = opencodeCreateMissingCliWarnings("v2");
+    expect(v2.join("\n")).toContain("npm install -g @opencode/cli@2.0.22");
+    expect(v2.join("\n")).not.toContain("opencode-ai@");
+
+    const v2Shared = opencodeCreateMissingCliWarnings("v2", { hasSharedServer: true });
+    expect(v2Shared).toHaveLength(1);
+    expect(v2Shared[0]).toContain("shared OpenCode V2 Server");
+    expect(v2Shared[0]).toContain("npm install -g @opencode/cli@2.0.22");
+    expect(v2Shared[0]).not.toContain("opencode-ai@");
   });
 });
