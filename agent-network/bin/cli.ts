@@ -2399,7 +2399,7 @@ function assertSharedOpencodeServerProfile(profile: Profile): void {
   }
 }
 
-async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?: string): Promise<void> {
+async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?: string, newSession = false): Promise<void> {
   const resolved = resolveNodeRef(nodeId);
   if (!resolved) {
     console.error(`Node "${nodeId}" not found. Create it first: anet node create ${nodeId}`);
@@ -2464,7 +2464,10 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     `export ANET_COPRESENCE_BRIDGE=1`,
     `exec > >(tee -a ${shellQuote(bridgeLog)}) 2>&1`,
     `exec ${cliPrefix} node start ${shellQuote(resolved.id)}`
-      + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
+      + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : "")
+      // The bridge is the process that picks resume vs fresh: without this the user's
+      // --new-session was dropped and the node silently resumed its saved session.
+      + (newSession ? " --new-session" : ""),
   ].join(" ; ");
   execTmux([
     "new-session", "-d", "-s", bridgeSession, "-c", process.cwd(),
@@ -9172,7 +9175,7 @@ async function startCommand() {
       `start copresence node ${JSON.stringify(id)}`,
     );
     if (copresenceRuntime === "opencode-cli") {
-      await startOpencodeCopresenceOrchestration(id, opts.hub);
+      await startOpencodeCopresenceOrchestration(id, opts.hub, forceNewSession);
       return;
     }
     if (copresenceRuntime === "grok-build-cli") {
