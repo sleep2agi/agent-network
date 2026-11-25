@@ -195,6 +195,23 @@ describe("#758 orphan detected", () => {
 });
 
 describe("#758 not orphans", () => {
+  test("a peer reply delivered as a wake task (meta.peer_reply_wake) → checked once, no notice to the sender", async () => {
+    const r = await tool(nodes.sender.token, "send_task", { alias: nodes.target.alias, task: `peer reply ${stamp} #${++seq}`, network_id: NET,
+      meta: { peer_reply_wake: { in_reply_to: "t_original" } } });
+    expect(r.ok).toBe(true);
+    const id = r.task_id ?? r.message_id;
+    expect(typeof id).toBe("string");
+    await ack(id);
+    age(id, 120);
+    await targetStatus("idle");
+
+    withMinutes(undefined, () => { patrol(); patrol(); });
+
+    expect(orphanEvents(id).length).toBe(1);   // marked so it never re-enters the batch
+    expect(agentNotices().length).toBe(0);     // but nobody is told it "went unanswered"
+    expect(taskRow(id).status).toBe("acked");
+  });
+
   test("node is working (busy) → not flagged", async () => {
     const t = await dispatch(nodes.sender.token);
     await ack(t.id);

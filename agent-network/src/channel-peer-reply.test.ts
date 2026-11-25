@@ -84,7 +84,9 @@ describe("sendChannelPeerReply", () => {
     const r = await sendChannelPeerReply({ task_id: "inbox-1", text: "done" }, deps(hub));
     expect(r).toMatchObject({ ok: true, route: "wake-then-close", closed: true, woke: true, wake_task_id: "wake-1", fallback_reason: "peer_reply_unsupported" });
     expect(hub.calls.map((c) => c.tool)).toEqual(["send_peer_reply", "send_task", "send_reply"]);
-    expect(hub.calls[1].args).toEqual({ alias: "asker", task: "done", priority: "normal", from_session: "replier" });
+    // The wake is marked as a reply so the Hub's orphan patrol never nags the sender about it.
+    expect(hub.calls[1].args).toEqual({ alias: "asker", task: "done", priority: "normal", from_session: "replier",
+      meta: { peer_reply_wake: { in_reply_to: "task-1" } } });
     expect(hub.calls[2].args).toMatchObject({ in_reply_to: "task-1", status: "replied" });
   });
 
