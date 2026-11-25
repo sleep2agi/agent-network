@@ -3445,6 +3445,8 @@ async function processWithClaude(
     GET_TASK_TOOL_LINE,
     `- mcp__commhub__send_message(alias, message) — 发纯消息（不要求对方回复）。`,
     `- mcp__commhub__send_reply(task_id, text) — 给某 task 发回复（不会再触发处理）。`,
+    // admin 2026-11-24 —— 真机验收里 opencode 节点没用密钥卡片、反而让人把密钥写进本地文件:把规则写进任务提示。
+    `- mcp__commhub__request_secret(key, label, in_reply_to="${currentTaskId}") — 用户要给你密钥 / 令牌 / 密码时**必须**用它在聊天里弹加密卡片（如 key=GITHUB_TOKEN, label="GitHub 密钥"），然后结束这一轮；**绝不**让用户把密钥贴进聊天或写进文件。保存后它会作为环境变量在你下次启动时生效。`,
     `- mcp__commhub__get_session_status(alias) — 单 agent 详情。`,
     `- mcp__commhub__list_tasks(...) — 查询任务列表。`,
     `拿到子任务 reply 后整合进你给 ${from} 的最终汇报。即便 session 中途断开，只要 parent_task_id 设了系统也会自动交付。`,
