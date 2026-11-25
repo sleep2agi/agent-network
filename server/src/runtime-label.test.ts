@@ -11,12 +11,16 @@ describe("session runtime projection", () => {
     expect(normalizeSessionRuntime("agent-node:claude")).toBe("claude-agent-sdk");
     expect(normalizeSessionRuntime("agent-node:grok")).toBe("grok-build-acp");
     expect(normalizeSessionRuntime("agent-node:opencode")).toBe("opencode-cli");
+    expect(normalizeSessionRuntime("agent-node:antigravity")).toBe("antigravity-acp");
+    expect(normalizeSessionRuntime("agent-node:antigravity-acp")).toBe("antigravity-acp");
+    expect(normalizeSessionRuntime("agent-node:antigravity-sdk")).toBe("antigravity-acp");
     expect(normalizeSessionRuntime("claude-code")).toBe("claude-code-cli");
   });
   test("does not invent unknown runtimes", () => {
     expect(normalizeSessionRuntime("agent-node:future-runtime")).toBeNull();
     expect(normalizeSessionRuntime("agent-node:codex-app-server-evil")).toBeNull();
     expect(normalizeSessionRuntime("agent-node:grok-build-cli-preview")).toBeNull();
+    expect(normalizeSessionRuntime("agent-node:antigravity-evil")).toBeNull();
     expect(normalizeSessionRuntime(null)).toBeNull();
   });
 });
