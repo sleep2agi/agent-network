@@ -13,6 +13,7 @@ import {
   isAllowedToChangeFlag,
   computeApplyMode,
   readOpencodeSnapshotFlags,
+  readAgyHotModelCapable,
   readConfigUpdateCapable,
   configUpdateCapabilityDivergence,
   readSystemdSupervision,
@@ -216,6 +217,20 @@ describe("computeApplyMode — OpenCode V2 hot model switch (#3146)", () => {
 
   test("unknown generation → restart", () => {
     expect(computeApplyMode("m", {}, undefined, { ...v2Copresence, opencodeGeneration: null })).toBe("restart");
+  });
+
+  test("Antigravity (agy) model only → hot ONLY when node advertises agy_hot_model_capable", () => {
+    for (const runtime of ["antigravity-acp", "antigravity-sdk", "antigravity", "agy"]) {
+      expect(computeApplyMode("claude-opus-5-5-high", {}, undefined, { runtime, agyHotModelCapable: true })).toBe("hot");
+      expect(computeApplyMode("claude-opus-5-5-high", {}, undefined, { runtime, agyHotModelCapable: false })).toBe("restart");
+      expect(computeApplyMode("claude-opus-5-5-high", {}, undefined, { runtime })).toBe("restart");
+      expect(computeApplyMode("claude-opus-5-5-high", { maxTurns: 10 }, undefined, { runtime, agyHotModelCapable: true })).toBe("restart");
+      expect(computeApplyMode("claude-opus-5-5-high", {}, ["feishu"], { runtime, agyHotModelCapable: true })).toBe("restart");
+    }
+    expect(readAgyHotModelCapable(JSON.stringify({ agy_hot_model_capable: true }))).toBe(true);
+    expect(readAgyHotModelCapable(JSON.stringify({ agy_hot_model_capable: false }))).toBe(false);
+    expect(readAgyHotModelCapable(null)).toBe(false);
+    expect(readAgyHotModelCapable("not-json")).toBe(false);
   });
 
   test("headless V2 node → restart (no co-presence session to drive)", () => {

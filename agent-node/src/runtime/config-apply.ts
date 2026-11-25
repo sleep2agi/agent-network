@@ -214,6 +214,18 @@ export function validateLocalPatch(
   return null;
 }
 
+const ANTIGRAVITY_RUNTIME_LABELS = new Set<string>([
+  "antigravity-acp",
+  "antigravity-sdk",
+  "antigravity",
+  "antigravity-cli",
+  "agy",
+]);
+
+export function isAntigravityRuntime(runtime: string | null | undefined): boolean {
+  return !!runtime && ANTIGRAVITY_RUNTIME_LABELS.has(runtime);
+}
+
 /** Classify whether a patch needs restart vs hot apply. Empty patch
  * → "restart_only" (used by restart_node tool). Mirrors hub helper —
  * see config-apply-validate.ts. */
@@ -233,6 +245,12 @@ export function computeApplyMode(patch: ConfigPatch, opts?: {
   // a restart would reopen the previous agent.
   if (patch.agent !== undefined) return "hot";
   if (!hasModel && flagKeys.length === 0 && !hasChannels) return "restart_only";
+  // Antigravity (agy) spawns `agy acp` per turn and runs `session/set_model(MODEL)`
+  // before each prompt, so a model-only change applies immediately on the next turn
+  // without restarting agent-node (preserving the in-process agySessionId).
+  if (hasModel && flagKeys.length === 0 && !hasChannels && isAntigravityRuntime(opts?.runtime)) {
+    return "hot";
+  }
   // OpenCode V2 switches the live TUI session and writes config.model so the
   // dashboard poll can finish. A restart would reopen the old session model.
   //

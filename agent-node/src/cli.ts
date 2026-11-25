@@ -903,7 +903,9 @@ if (RUNTIME === "opencode") {
 }
 
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
-const MODEL = opts.model || process.env.MODEL || fileConfig.model;
+// Mutable for runtimes that support hot model switching (antigravity-acp updates
+// MODEL in place on config_update without restarting or losing in-process session).
+let MODEL = opts.model || process.env.MODEL || fileConfig.model;
 // #101 fix: when config.tools is absent the agent must still get the full
 // built-in toolset (WebFetch / WebSearch / Bash / Read / Write / Edit / Glob /
 // Grep / Task / NotebookEdit / ...). Earlier behavior set the SDK
@@ -2038,9 +2040,9 @@ const register = async () => {
     // #667 — "" only on this startup report. Later idle reports omit task,
     // so the last description stays. A mismatch still sends the warning.
     task: projectDirTask("idle") ?? "",
-    // #1958 — grok: prefer the agent's readback once a turn has run.
+    // #1958 — grok / antigravity: prefer the agent's readback once a turn has run.
     // OpenCode V2: prefer the TUI-selected session model once polled.
-    model: (RUNTIME === "grok" ? grokEffectiveModel : RUNTIME === "opencode" ? opencodeEffectiveModel : undefined) || MODEL || undefined,
+    model: (RUNTIME === "grok" ? grokEffectiveModel : RUNTIME === "opencode" ? opencodeEffectiveModel : RUNTIME === "antigravity" ? agyEffectiveModel : undefined) || MODEL || undefined,
     network_id: NETWORK_ID || undefined,
     host: getHostTelemetry(),
     process_telemetry: getProcessTelemetry(),
@@ -2291,8 +2293,10 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     // schema already accepts `model`; on a hub that ignores it nothing breaks.
     // OpenCode V2 reports the TUI session model the same way. config_snapshot.model
     // stays the configured value, so a dashboard model edit is not false-finalized.
-    ...((RUNTIME === "grok" && grokEffectiveModel) || (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeEffectiveModel)
-      ? { model: RUNTIME === "grok" ? grokEffectiveModel : opencodeEffectiveModel }
+    ...((RUNTIME === "grok" && grokEffectiveModel)
+      || (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2" && opencodeEffectiveModel)
+      || (RUNTIME === "antigravity" && (agyEffectiveModel || MODEL))
+      ? { model: RUNTIME === "grok" ? grokEffectiveModel : RUNTIME === "opencode" ? opencodeEffectiveModel : (agyEffectiveModel || MODEL) }
       : {}),
     // #448 —— 分层健康(codex-app-server);旧 Hub 静默丢弃该键,不会拒整份上报。
     // #594 —— 上报用 reportedNodeHealth()(多带 codex_login);上面的 model_auth 闸门仍只看监视器那份。
@@ -2306,7 +2310,8 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       ...(fileConfig.role === 'host_supervisor' ? { scoped_secrets_capable: true } : {}),
       // 2026-11-20 — agy 登录通道（设计稿 handoff/agy-login-channel-design.md）。
       // 只在 antigravity 节点上报；老 daemon 没这个键 → 客户端回退「复制命令」。
-      ...(RUNTIME === "antigravity" ? { agy_login_capable: true } : {}),
+      // 同时上报 agy_hot_model_capable: true，供 Hub / App 识别纯改模型支持无重启热切。
+      ...(RUNTIME === "antigravity" ? { agy_login_capable: true, agy_hot_model_capable: true as const } : {}),
       // #5332 —— 回合控制能力位：客户端据此决定显不显示「停止 / 打断并发送 / 插话」。
       // 只有真有通道的 runtime 才是 true；旧 Hub 会丢这两个键（客户端走白名单兜底）。
       ...turnControlCapabilities(),
@@ -2339,6 +2344,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       // snapshot.model (still the configured value) field-by-field, so extra
       // keys are safe and older hubs drop them (non-strict object).
       ...(RUNTIME === "grok" && grokEffectiveModel ? { model_effective: grokEffectiveModel, model_source: grokModelSource } : {}),
+      ...(RUNTIME === "antigravity" && agyEffectiveModel ? { model_effective: agyEffectiveModel, model_source: agyModelSource } : {}),
       // #2293 —— 节点自报的 OpenCode V2 模型清单与 loopback 端点。
       // 🔴 必须在 **config_snapshot 里面**：report_status 的顶层 schema 不认这两个键，
       //    放在顶层会被**静默丢弃**（.159 首版就这样白跑过一次，2026-10-25 用独立验证节点发现）。
@@ -2965,6 +2971,8 @@ let agySessionId: string | undefined = undefined;
 // dashboard shows the running model rather than the configured one.
 let grokEffectiveModel: string | undefined;
 let grokModelSource: "readback" | "set_model" | "argv" | "default" | undefined;
+let agyEffectiveModel: string | undefined;
+let agyModelSource: "readback" | "set_model" | "argv" | "default" | undefined;
 // OpenCode V2 TUI selection. Display only: never written back into config.json.
 let opencodeEffectiveModel: string | undefined;
 // RFC-029 PR② — opencode-cli session state.
@@ -5263,11 +5271,20 @@ async function processWithAntigravity(
     onStderr: (line) => { observeInteractivePrompt(line); debug(`[agy-stderr] ${line}`); },
   });
 
+  const recordAgyModel = (result: { effectiveModel?: string; modelSource?: "readback" | "set_model" | "argv" | "default" }) => {
+    if (result.effectiveModel !== agyEffectiveModel || result.modelSource !== agyModelSource) {
+      agyEffectiveModel = result.effectiveModel;
+      agyModelSource = result.modelSource;
+      log(`[antigravity] #1958 model=${result.effectiveModel ?? "(unknown)"} source=${result.modelSource ?? "unknown"}${MODEL && result.effectiveModel !== MODEL ? ` configured=${MODEL}` : ""}`);
+    }
+  };
+
   // agy 只续「本次进程内」的会话：不拿 SESSION_ID（它是 cfg.session 的读回值），
   // 见 agySessionId 的声明处那段真机复现说明。
   const firstSessionId = agySessionId || undefined;
   try {
     const result = await runOnce(firstSessionId);
+    recordAgyModel(result);
     clearInteractivePrompt("turn-completed");
     return result.replyText;
   } catch (e: any) {
@@ -5283,6 +5300,7 @@ async function processWithAntigravity(
     if (firstSessionId) {
       warn(`[antigravity] resumed session failed (${e?.message || e}); retrying once with a fresh session`);
       const result = await runOnce(undefined);
+      recordAgyModel(result);
       clearInteractivePrompt("turn-completed");
       // 2026-11-23 负责人 review 第 3 条：回放判决失败后换新会话重做成功时，用户看到的不能是一条
       // 普通回复 —— 那等于悄悄丢了上下文。只有「回放型失败」才加这句人话；其它失败（idle 超时等）
@@ -8286,7 +8304,7 @@ async function processConfigUpdate(): Promise<void> {
     }
 
     const localMode = computeConfigApplyMode(update.patch, {
-      runtime: fileConfig?.runtime,
+      runtime: fileConfig?.runtime ?? (RUNTIME === "antigravity" ? "antigravity-acp" : undefined),
       opencodeGeneration: fileConfig?.opencodeGeneration,
       requestedMode: update.apply_mode,
       hotModelSwitchAvailable: opencodeCopresenceSession?.isRunning === true
@@ -8430,6 +8448,13 @@ async function processConfigUpdate(): Promise<void> {
       // (currentMaxTurns / currentMaxBudget / currentClaudeTimeoutMs /
       // currentCodexTimeoutMs) read this new value on the next call.
       fileConfig = merged;
+      if (update.patch.model !== undefined && RUNTIME === "antigravity") {
+        MODEL = update.patch.model;
+        // Clear prior turn's readback so snapshot never reports the old model
+        // as model_effective while the new model awaits its next turn.
+        agyEffectiveModel = undefined;
+        agyModelSource = undefined;
+      }
       applyDaemonExtraPath(fileConfig.daemonExtraPath);
       currentConfigRevision += 1;
       await callCommHub("ack_config_update", {
@@ -8437,7 +8462,8 @@ async function processConfigUpdate(): Promise<void> {
         status: "applied",
         new_revision: currentConfigRevision,
       });
-      log(`[config-apply] HOT applied ${updateId} → revision=${currentConfigRevision}`);
+      log(`[config-apply] HOT applied ${updateId} → revision=${currentConfigRevision}${update.patch.model !== undefined && RUNTIME === "antigravity" ? ` model=${MODEL}` : ""}`);
+      void reportStatus(lastReportedStatus.status, lastReportedStatus.task).catch(() => {});
       return;
     }
 

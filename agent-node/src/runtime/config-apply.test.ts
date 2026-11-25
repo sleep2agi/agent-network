@@ -145,6 +145,13 @@ describe("computeApplyMode — tier classifier", () => {
     expect(computeApplyMode({ model: "deepseek/deepseek-flash" }, { runtime: "opencode-cli", opencodeGeneration: "v1" })).toBe("restart");
     expect(computeApplyMode({ model: "deepseek/deepseek-flash", flags: { timeout: 60000 } }, { runtime: "opencode-cli", opencodeGeneration: "v2" })).toBe("restart");
   });
+  test("Antigravity (agy) model only → hot (next turn runs session/set_model, no restart)", () => {
+    for (const runtime of ["antigravity-acp", "antigravity-sdk", "antigravity", "agy"]) {
+      expect(computeApplyMode({ model: "claude-opus-5-5-high" }, { runtime })).toBe("hot");
+      expect(computeApplyMode({ model: "claude-opus-5-5-high", flags: { maxTurns: 20 } }, { runtime })).toBe("restart");
+      expect(computeApplyMode({ model: "claude-opus-5-5-high", channels: ["feishu"] }, { runtime })).toBe("restart");
+    }
+  });
   test("permissionMode → restart", () => {
     expect(computeApplyMode({ flags: { permissionMode: "auto" } })).toBe("restart");
   });
