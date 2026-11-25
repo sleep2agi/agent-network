@@ -102,7 +102,7 @@ describe("OpenCode co-presence CLI wiring", () => {
   test("the generic --copresence dispatcher selects OpenCode by stored runtime", () => {
     const dispatch = cli.indexOf('if (copresenceRuntime === "opencode-cli")');
     expect(dispatch).toBeGreaterThan(-1);
-    expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id, opts.hub)");
+    expect(cli.slice(dispatch, dispatch + 240)).toContain("startOpencodeCopresenceOrchestration(id, opts.hub, forceNewSession)");
   });
 
   test("ordinary V2 profile starts select orchestration, but internal bridge starts do not recurse", () => {
