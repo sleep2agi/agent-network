@@ -119,3 +119,23 @@ test("lost health ACK stops only the newly spawned child, retains durable unknow
   expect(p.registered()).toBe(1);
   expect(p.requests.some(r => r.startsWith("POST /api/"))).toBe(false);
 });
+
+// test638 only ever showed source_resume_cli_version_refused: the CLI printed why, but the
+// launcher drops child output. Exactly the CLI's fixed refusal line may pass, nothing else.
+test("SOURCE_RESUME_WHY lifts only the CLI's own refusal reason", async () => {
+  const { SOURCE_RESUME_WHY } = await import("./source-resume-launcher");
+  const pick = (s: string) => SOURCE_RESUME_WHY.exec(s)?.[1];
+  expect(pick("[source-resume] OpenCode test binary refused: sha256 1cf5fcccf345… does not match the pinned test build\n"))
+    .toBe("sha256 1cf5fcccf345… does not match the pinned test build");
+  expect(pick("noise\n[source-resume] OpenCode binary refused: version 2.0.21 ≠ expected 2.0.22\nsource_resume_cli_version_refused\n"))
+    .toBe("version 2.0.21 ≠ expected 2.0.22");
+  // Any other child output — including token-looking text — is never picked up.
+  expect(pick("COMMHUB_TOKEN=ntok_secret\nsource_resume_cli_version_refused")).toBeUndefined();
+  expect(pick("[source-resume] something else: ntok_secret")).toBeUndefined();
+});
+
+test("the launcher logs the lifted reason before refusing", () => {
+  const src = readFileSync(resolve(import.meta.dir, "source-resume-launcher.ts"), "utf8");
+  expect(src).toContain("const why = SOURCE_RESUME_WHY.exec(text); if (why) refusedBecause = why[1].slice(0, 200);");
+  expect(src).toContain("if (refusedBecause) console.error(`[source-resume] child refused because: ${refusedBecause}`);");
+});

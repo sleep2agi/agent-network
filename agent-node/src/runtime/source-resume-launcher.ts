@@ -238,6 +238,9 @@ export function recoverSourceResumeLaunch(configPath: string) {
 }
 /** Executable must be a local vetted anet CLI (same daemon pin as ordinary
  * create). Explicit command prefix supports source checkout/Bun, never npx. */
+/** Matches only the CLI's fixed refusal line; group 1 is the non-secret reason. */
+export const SOURCE_RESUME_WHY = /\[source-resume\] OpenCode (?:test )?binary refused: ([^\r\n]*)/;
+
 export function createSourceResumeLauncher(local: { command: string; argsPrefix?: string[]; env: NodeJS.ProcessEnv; timeoutMs?: number }) {
   return async (input: SourceResumeLaunch): Promise<SourceResumeChild> => {
     if (!isAbsolute(local.command) || input.newSession !== false || !["2.0.22", TEST_BUILD_VERSION].includes(input.expectedVersion)
@@ -256,9 +259,15 @@ export function createSourceResumeLauncher(local: { command: string; argsPrefix?
       stdio: ["ignore", "ignore", "pipe"], detached: false,
     });
     let refusal = "";
+    let refusedBecause = "";
     child.stderr?.on("data", b => {
       // Retain only fixed-code diagnostics; never log/persist child output.
-      const found = String(b).match(/\bsource_resume_[a-z_]+\b/); if (found) refusal = found[0];
+      const text = String(b);
+      const found = text.match(/\bsource_resume_[a-z_]+\b/); if (found) refusal = found[0];
+      // The one exception: the CLI's own "OpenCode (test) binary refused: <why>" line. It is
+      // written to hold only a path, a hash prefix, a platform or a version — never a credential
+      // (#3862/#3878) — and without it test638 only ever showed source_resume_cli_version_refused.
+      const why = SOURCE_RESUME_WHY.exec(text); if (why) refusedBecause = why[1].slice(0, 200);
     });
     let failed = false; child.on("error", () => { failed = true; });
     const stop = async () => {
@@ -281,6 +290,7 @@ export function createSourceResumeLauncher(local: { command: string; argsPrefix?
         }
         await new Promise(r => setTimeout(r, 25));
       }
+      if (refusedBecause) console.error(`[source-resume] child refused because: ${refusedBecause}`);
       throw Error(refusal || "source_resume_unconfirmed_rotation_required");
     } catch (e) { await stop(); throw e; }
   };
