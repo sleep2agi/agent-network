@@ -172,7 +172,9 @@ if [[ "${TEST467_SKIP_MUTATIONS:-0}" != "1" ]]; then
   grep -Fq 'let hub = gc.hub;' "$CLI"
   expect_mutation_red register-explicit-hub 'FAIL_REGISTER_EXPLICIT_HUB'
 
-  sed -i 's/if (!opts\.network && gc\.token && gc\.hub) {/if (!opts.network \&\& gc.token \&\& gc.hub \&\& process.stdin.isTTY) {/' "$CLI"
+  # #3876 restructured this block: the explicit --network case now comes first and the
+  # headless/unique-network recovery is the `else if` branch below it.
+  sed -i 's/} else if (gc\.token && gc\.hub) {/} else if (gc.token \&\& gc.hub \&\& process.stdin.isTTY) {/' "$CLI"
   grep -Fq 'gc.hub && process.stdin.isTTY' "$CLI"
   expect_mutation_red unique-network-headless-recovery 'FAIL_UNIQUE_NETWORK_HEADLESS_RECOVERY'
 
