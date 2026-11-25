@@ -6915,7 +6915,8 @@ async function createCommand(idOverride?: string) {
       process.exit(1);
     }
     if (!gc.token || !gc.hub) {
-      ensureLoginAndNetwork(gc);
+      console.error(`[anet] ❌ Not logged in. Run: anet login   (or: anet register)`);
+      process.exit(1);
     }
     let netsBody: any;
     try {
