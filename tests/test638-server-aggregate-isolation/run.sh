@@ -216,7 +216,9 @@ for output in "$OUT1" "$OUT2" "$OUT3"; do
   #
   # 这一版只改**钉数**，不碰任何断言逻辑：期望值仍然是「这个文件跑完了、
   # 一个都没挂、且用例数与当前代码一致」。
-  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 16
+  # 16 → 17：#3527（定时任务真删 /purge）给这个文件加了第 17 个用例；
+  # #3891 跑出的实际值是 pass=17 fail=0，同样只改钉数。
+  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 17
   ! grep -Eqi 'connection refused|ECONNREFUSED|database safety guard|FAIL_SUITE|timeout=true' "$output"
   # `grep -c` 在 0 匹配时退出码是 1 —— 在 set -e 下会静默退出（同一个坑）。
   maps=$(grep -c '^TEST_DB_MAP' "$output" || true)
