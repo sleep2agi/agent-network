@@ -78,6 +78,7 @@ import { followUpInputHash, followUpAnswerPrompt, type OwnedFollowUpAdapter } fr
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
+import { acquireNodeInstanceLock, type NodeInstanceLockHandle } from "./node-instance-lock.js";
 import { currentTeamRulesOutcome } from "./runtime/team-rules-inject.js";
 import { hostname as osHostname, homedir } from "os";
 import { codexTuiAlignmentNotice } from "./codex-tui-alignment";
@@ -1165,6 +1166,24 @@ function reloadNodeToken(): boolean {
   return true;
 }
 const NODE_DIR = configFilePath ? dirname(configFilePath) : join(process.cwd(), ".anet", "nodes", ALIAS);
+// 单机同名节点防双开（Layer 1）：在连 Hub / 起 runtime 之前先拿节点目录 agent-node.lock。
+// 若已有活进程持有，直接以人话报错退出，避免双进程抢同一套 inbox/SSE/session 文件导致顶号或双回。
+let instanceLock: NodeInstanceLockHandle | null = null;
+if (process.env.ANET_DISABLE_INSTANCE_LOCK !== "1") {
+  const lockRes = acquireNodeInstanceLock(NODE_DIR, {
+    alias: ALIAS,
+    nodeId: fileConfig.node_id ?? null,
+  });
+  if (!lockRes.ok) {
+    console.error(`[agent-node] ${lockRes.message}`);
+    process.exit(1);
+  }
+  instanceLock = lockRes.handle;
+  if (lockRes.reclaimedStalePid !== undefined) {
+    console.warn(`[agent-node] 已清理失效锁文件（旧 PID ${lockRes.reclaimedStalePid} 已不在运行）: ${lockRes.handle.lockPath}`);
+  }
+  process.on("exit", () => instanceLock?.release());
+}
 // #652 — the per-node state directory. A node's directory under .anet/nodes/ is not always
 // its alias (daemon-created nodes with a Chinese alias live in an ASCII `node-<hash>` dir;
 // clones too), and `anet node logs` reads `<nodes>/<dir>/logs`. When the config IS
@@ -9685,6 +9704,7 @@ const shutdown = async () => {
   try { await loopsHttpServerHandle?.close(); } catch { /* already closed */ }
   commhubCompensation?.stop();
   await reportStatus("offline").catch(() => {});
+  instanceLock?.release();
   process.exit(0);
 };
 process.on("SIGINT", shutdown);
