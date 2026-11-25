@@ -9066,9 +9066,24 @@ async function startCommand() {
     if (p.flags?.opencodeUnsafeTools !== true) throw Error("source_resume_existing_policy_opt_in_required");
     const checked = sharedTest ? (() => {
       const binary = "/tmp/opencode/anet-4099-test-only-29040e2/cli/cli-linux-x64/bin/opencode";
-      if (process.platform !== "linux" || realpathSync(binary) !== binary
-        || createHash("sha256").update(readFileSync(binary)).digest("hex") !== "1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786"
-        || !/^(?:opencode v)?2\.0\.22-anet-test\.29040e2$/.test(execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }).trim())) throw Error("source_resume_cli_version_refused");
+      // Each check names itself when it fails: this path refused silently and test638 in Docker
+      // only ever saw unknown_rotation_required (#3862 logged the other branch, not this one).
+      const why = (() => {
+        try {
+          if (process.platform !== "linux") return `platform ${process.platform} (test binary is linux-only)`;
+          const real = realpathSync(binary);
+          if (real !== binary) return `${binary} resolves to ${real}`;
+          const sha = createHash("sha256").update(readFileSync(binary)).digest("hex");
+          if (sha !== "1cf5fcccf345438316db82d4c63c5df5f5010cc94a8465e1a119f9639c53c786") return `sha256 ${sha.slice(0, 12)}… does not match the pinned test build`;
+          const out = execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }).trim();
+          if (!/^(?:opencode v)?2\.0\.22-anet-test\.29040e2$/.test(out)) return `--version printed ${JSON.stringify(out.slice(0, 80))}`;
+          return null;
+        } catch (e: any) { return `${binary}: ${String(e?.code ?? e?.message ?? e).slice(0, 120)}`; }
+      })();
+      if (why) {
+        console.error(`[source-resume] OpenCode test binary refused: ${why}`);
+        throw Error("source_resume_cli_version_refused");
+      }
       return { ok: true, binary, version: "2.0.22-anet-test.29040e2" };
     })() : checkOpencodeGenerationBinary("v2");
     if (!checked.ok || checked.version !== p.sourceDelivery.expected_version) {
