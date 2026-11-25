@@ -125,4 +125,46 @@ describe("agent-node single-instance lock (agent-node.lock)", () => {
     expect(cli).toContain("instanceLock?.release()");
     expect(cli).toContain('process.on("exit", () => instanceLock?.release())');
   });
+
+  test("reclaims lock when boot_id changed after reboot even if PID number was reused", () => {
+    const dir = mkDir();
+    const lockPath = join(dir, NODE_INSTANCE_LOCK_FILE);
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ version: 1, pid: 1234, alias: "神鸽", hostname: "host", boot_id: "boot-old", started_at: "2026-11-24T00:00:00Z", token: "old-tok" }),
+      { mode: 0o600 },
+    );
+
+    const res = acquireNodeInstanceLock(dir, { alias: "神鸽" }, {
+      pid: 9999,
+      bootId: "boot-new",
+      isPidAlive: () => true,
+      readPidCmdline: () => "bun /app/agent-node/dist/cli.js",
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.reclaimedStalePid).toBe(1234);
+    res.handle.release();
+  });
+
+  test("reclaims lock when live PID belongs to an unrelated binary (Linux PID reuse)", () => {
+    const dir = mkDir();
+    const lockPath = join(dir, NODE_INSTANCE_LOCK_FILE);
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ version: 1, pid: 4321, alias: "神鸽", hostname: "host", boot_id: "boot-same", started_at: "2026-11-25T00:00:00Z", token: "stale-tok" }),
+      { mode: 0o600 },
+    );
+
+    const res = acquireNodeInstanceLock(dir, { alias: "神鸽" }, {
+      pid: 8888,
+      bootId: "boot-same",
+      isPidAlive: () => true,
+      readPidCmdline: () => "/usr/sbin/sshd -D",
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.reclaimedStalePid).toBe(4321);
+    res.handle.release();
+  });
 });

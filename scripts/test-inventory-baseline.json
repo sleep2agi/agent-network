@@ -2826,6 +2826,8 @@
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::acquires lock, writes PID metadata, and removes lock cleanly on release": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::cli.ts wires acquireNodeInstanceLock early and releases on exit + shutdown": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::formatDuplicateNodeMessage works with and without alias / PID": 1,
+  "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims lock when boot_id changed after reboot even if PID number was reused": 1,
+  "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims lock when live PID belongs to an unrelated binary (Linux PID reuse)": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims stale lock left behind by a dead PID (e.g. kill -9 / crash)": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses second start when holder PID is alive and prints plain-Chinese message": 1,
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses symlinked agent-node.lock (fail-closed)": 1,
@@ -12228,6 +12230,8 @@
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::acquires lock, writes PID metadata, and removes lock cleanly on release",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::cli.ts wires acquireNodeInstanceLock early and releases on exit + shutdown",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::formatDuplicateNodeMessage works with and without alias / PID",
+  "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims lock when boot_id changed after reboot even if PID number was reused",
+  "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims lock when live PID belongs to an unrelated binary (Linux PID reuse)",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::reclaims stale lock left behind by a dead PID (e.g. kill -9 / crash)",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses second start when holder PID is alive and prints plain-Chinese message",
   "agent-node/src/node-instance-lock.test.ts::agent-node single-instance lock (agent-node.lock)::refuses symlinked agent-node.lock (fail-closed)",
@@ -18804,7 +18808,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "0e5f84638ea9b552914bbe81c2310622e7c61c69",
+  "commit": "f1d266e4134a4c86dc5c920c06c1cfd1b86e2013",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

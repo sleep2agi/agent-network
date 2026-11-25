@@ -48,6 +48,8 @@ export interface NodeInstanceLockRecord {
   node_id?: string | null;
   hostname: string;
   started_at: string;
+  /** Linux `/proc/sys/kernel/random/boot_id` when available; mismatch after reboot proves stale PID reuse. */
+  boot_id?: string | null;
   token: string;
 }
 
@@ -71,12 +73,41 @@ export type AcquireNodeInstanceLockResult =
 export interface AcquireNodeInstanceLockOptions {
   pid?: number;
   hostname?: string;
+  bootId?: string | null;
   now?: () => Date;
   isPidAlive?: (pid: number) => boolean;
+  /** Optional process command-line reader (defaults to Linux `/proc/<pid>/cmdline`) to detect PID reuse. */
+  readPidCmdline?: (pid: number) => string | null;
   /** Max retries when competing to reclaim a stale lock or waiting for an in-progress write. */
   maxAttempts?: number;
   /** Short wait between retries when an existing lock file is freshly created and empty. */
   retryDelayMs?: number;
+}
+
+export function readLinuxBootId(): string | null {
+  if (process.platform !== "linux") return null;
+  try {
+    const raw = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+export function defaultReadPidCmdline(pid: number): string | null {
+  if (process.platform !== "linux" || !Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const raw = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0+/g, " ").trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Returns false only when we have positive proof the PID belongs to an unrelated program. */
+export function cmdlineLooksLikeAgentNode(cmdline: string | null): boolean {
+  if (!cmdline) return true; // unreadable or non-Linux: stay conservative (do not falsely reclaim)
+  return /\b(node|bun|agent-node|anet)(\.exe)?\b|agent-node|cli\.(ts|js)/i.test(cmdline);
 }
 
 export function defaultIsPidAlive(pid: number): boolean {
@@ -159,8 +190,10 @@ export function acquireNodeInstanceLock(
   const lockPath = join(nodeDir, NODE_INSTANCE_LOCK_FILE);
   const myPid = options.pid ?? process.pid;
   const host = options.hostname ?? osHostname();
+  const currentBootId = options.bootId !== undefined ? options.bootId : readLinuxBootId();
   const now = options.now ?? (() => new Date());
   const isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
+  const readPidCmdline = options.readPidCmdline ?? defaultReadPidCmdline;
   const maxAttempts = Math.max(1, options.maxAttempts ?? 4);
   const retryDelayMs = options.retryDelayMs ?? 15;
 
@@ -178,6 +211,29 @@ export function acquireNodeInstanceLock(
   let reclaimedStalePid: number | undefined;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Explicit pre-open lstat guard so symlinks/non-regular files are refused on Windows too
+    // (where constants.O_NOFOLLOW is 0).
+    try {
+      const pre = lstatSync(lockPath);
+      if (pre.isSymbolicLink() || !pre.isFile()) {
+        return {
+          ok: false,
+          reason: "unsafe_lock_file",
+          lockPath,
+          message: `拒绝启动：节点锁文件不是普通文件（${lockPath}）`,
+        };
+      }
+    } catch (preErr: any) {
+      if (preErr?.code !== "ENOENT") {
+        return {
+          ok: false,
+          reason: "io_error",
+          lockPath,
+          message: `无法检查节点运行锁（${lockPath}）：${preErr?.message || preErr}`,
+        };
+      }
+    }
+
     const record: NodeInstanceLockRecord = {
       version: 1,
       pid: myPid,
@@ -185,6 +241,7 @@ export function acquireNodeInstanceLock(
       ...(meta.nodeId ? { node_id: meta.nodeId } : {}),
       hostname: host,
       started_at: now().toISOString(),
+      ...(currentBootId ? { boot_id: currentBootId } : {}),
       token: randomUUID(),
     };
 
@@ -300,7 +357,13 @@ export function acquireNodeInstanceLock(
       };
     }
 
-    if (holderPid !== null && isPidAlive(holderPid)) {
+    const rebooted = !!(currentBootId && typeof holder?.boot_id === "string" && holder.boot_id && holder.boot_id !== currentBootId);
+    const holderAlive = !rebooted
+      && holderPid !== null
+      && isPidAlive(holderPid)
+      && cmdlineLooksLikeAgentNode(readPidCmdline(holderPid));
+
+    if (holderAlive) {
       return {
         ok: false,
         reason: "already_running",
