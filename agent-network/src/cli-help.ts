@@ -70,6 +70,8 @@ Options:
                          antigravity-acp
                          (aliases: grok = grok-build-acp, antigravity/agy = antigravity-acp)
   --model <id>           Model for the runtime
+  --network <id|name>    Target network (id, unique id prefix, or exact name); skips
+                         the interactive network picker for scripts/multi-network accounts
   --tools <list>         Extra tools to enable (e.g. WebSearch)
   --copresence           Shared human + agent TUI (codex-app-server / opencode-cli / grok)
   --env KEY=VALUE        Environment for the node (stored as an env ref, repeatable)
