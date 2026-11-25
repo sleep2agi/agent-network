@@ -69,6 +69,7 @@ import { formatOfflineAges, parseHubTimestamp, summarizeOfflineAges } from "../s
 import { oneLineCell } from "../src/one-line-cell";
 import { padDisplayEnd } from "../src/display-width";
 import { formatMachineGroups, groupNodesByMachine, machineGroupsJson, parseNodeLsAllArgs, pickNetwork } from "../src/node-ls-all";
+import { resolveExplicitCreateNetwork } from "../src/node-create-network";
 import { describeTarget as describeRemoteTarget, evaluateOutcome as evaluateRemoteOutcome, explainHubRefusal as explainRemoteHubRefusal, isRemoteInvocation, parseRemoteArgs, planRemote, precheck, resolveRemoteTarget, timeoutMessage as remoteTimeoutMessage, toolCall as remoteToolCall, type Observation as RemoteObservation, type RemoteVerb } from "../src/node-remote";
 import { parseCommhubToolResult } from "../src/commhub-response";
 import { formatHubTime } from "../src/hub-time-display";
@@ -6912,12 +6913,46 @@ async function createCommand(idOverride?: string) {
     }
   }
 
-  // Network selection. A headless bootstrap can safely recover a missing
-  // network_id only when the authenticated user has exactly one writable
-  // network. Multiple candidates are never guessed; interactive callers may
-  // choose, while non-interactive callers get an actionable fail-closed error
-  // below. This also repairs legacy/token-only global configs (#467).
-  if (!opts.network && gc.token && gc.hub) {
+  // Network selection. An explicit `--network <id|name>` always resolves
+  // against GET /api/networks (fail-closed) and targets that network for this
+  // node without mutating the user's saved default network. Otherwise, a
+  // headless bootstrap can safely recover a missing network_id only when the
+  // authenticated user has exactly one writable network. Multiple candidates
+  // are never guessed; interactive callers may choose, while non-interactive
+  // callers get an actionable fail-closed error below (#467).
+  let targetNetworkId: string | undefined = gc.network_id;
+  let targetNetworkName: string | undefined = gc.network_name;
+  if (opts.network !== undefined) {
+    if (opts.network === "true" || !String(opts.network).trim()) {
+      console.error(`[anet] ❌ --network requires a value: --network <id|name>`);
+      process.exit(1);
+    }
+    if (!gc.token || !gc.hub) {
+      console.error(`[anet] ❌ Not logged in. Run: anet login   (or: anet register)`);
+      process.exit(1);
+    }
+    let netsBody: any;
+    try {
+      const r = await fetch(`${gc.hub}/api/networks`, {
+        headers: { Authorization: `Bearer ${gc.token}` },
+      });
+      netsBody = await r.json().catch(() => null);
+      if (!r.ok || !Array.isArray(netsBody?.networks)) {
+        console.error(`[anet] ❌ Could not resolve --network "${opts.network}": HTTP ${r.status}${netsBody ? ` (${hubErrorText(netsBody)})` : ""}`);
+        process.exit(1);
+      }
+    } catch (e: any) {
+      console.error(`[anet] ❌ Could not reach hub to resolve --network "${opts.network}": ${errorText(e)}`);
+      process.exit(1);
+    }
+    const resolved = resolveExplicitCreateNetwork(netsBody.networks, opts.network);
+    if (!resolved.ok) {
+      console.error(`[anet] ❌ ${resolved.error}`);
+      process.exit(1);
+    }
+    targetNetworkId = resolved.network_id;
+    targetNetworkName = resolved.network_name ?? undefined;
+  } else if (gc.token && gc.hub) {
     try {
       const nets = await fetch(`${gc.hub}/api/networks`, {
         headers: { Authorization: `Bearer ${gc.token}` },
@@ -6939,6 +6974,8 @@ async function createCommand(idOverride?: string) {
           gc.network_id = chosen;
           gc.network_name = writable.find((n: any) => n.network_id === chosen)?.network_name;
           saveGlobal(gc);
+          targetNetworkId = gc.network_id;
+          targetNetworkName = gc.network_name;
         } catch {
           // inquirer not available, use current network
         }
@@ -6946,6 +6983,8 @@ async function createCommand(idOverride?: string) {
         gc.network_id = writable[0].network_id;
         gc.network_name = writable[0].network_name;
         saveGlobal(gc);
+        targetNetworkId = gc.network_id;
+        targetNetworkName = gc.network_name;
       }
     } catch {}
   }
@@ -7045,13 +7084,13 @@ async function createCommand(idOverride?: string) {
 
   // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
   // No silent fallback to utok_; that just defers the failure to runtime.
-  ensureLoginAndNetwork(gc);   // #1469 f1 —— 与交互向导共用同一道门；调用点位置未变
+  ensureLoginAndNetwork({ ...gc, network_id: targetNetworkId });   // #1469 f1 —— 与交互向导共用同一道门；调用点位置未变
   let nodeTokenRes: any;
   try {
     nodeTokenRes = await fetch(`${gc.hub}/api/auth/node-token`, {
       method: "POST",
       headers: { Authorization: `Bearer ${gc.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ network_id: gc.network_id, node_name: id, node_id: profile.node_id }),
+      body: JSON.stringify({ network_id: targetNetworkId, node_name: id, node_id: profile.node_id }),
     }).then(r => r.json() as any);
   } catch (e: any) {
     if (isNetworkError(e)) {
@@ -7083,7 +7122,7 @@ async function createCommand(idOverride?: string) {
     hasOpencodeSharedServer: Boolean(profile.opencodeSharedServerUrl),
   });
 
-  const netLabel = gc.network_name || gc.network_id || "global";
+  const netLabel = targetNetworkName || targetNetworkId || "global";
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)}) in network "${netLabel}"`);
   // A headless codex-app-server node gets one line telling it how to become a
   // shared TUI. Hint only; nothing about the node changes.
