@@ -13764,13 +13764,17 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
   // when every process eventually disappears. Give the frozen agent identity
   // a bounded graceful shutdown before touching its terminal or descendants.
   // Never widen marker-authorized teardown or signal an unverified pidfile.
+  // A graceful exit here takes the bridge and TUI tmux sessions down with it and the
+  // agent clears its own pidfile, so none of the checks below see anything left to
+  // stop. Remember it, or a successful stop is reported as "not running locally".
+  let opencodeAgentSignalled = false;
   if (allowLegacyTmuxNameSweep && process.platform === "linux"
       && resolved.profile.runtime === "opencode-cli" && resolved.profile.opencodeMode === "copresence") {
     const agents = stopProcesses.filter(identity => identity.role === "agent");
     for (const identity of agents) {
       const current = processIdentitySnapshot(identity.pid);
       if (current.kind === "live" && current.birth === identity.birth) {
-        try { process.kill(identity.pid, "SIGTERM"); } catch { /* reaper audits below */ }
+        try { process.kill(identity.pid, "SIGTERM"); opencodeAgentSignalled = true; } catch { /* reaper audits below */ }
       }
     }
     const drainDeadline = Date.now() + 10_000;
@@ -13945,7 +13949,7 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
     if (owner.state === "stopped") return;
     writeLifecycleOwner(resolved.id, { ...(owner || { schema: 1 }), schema: 1, state: "stopped", stopInvokedAt });
   }, "stop-complete", stopGeneration);
-  const killed = stopResult.status === "stopped";
+  const killed = stopResult.status === "stopped" || opencodeAgentSignalled;
   // Always notify server — even if PID file missing, server may have stale session
   await notifyServerOffline(resolved.profile, resolved.id);
   if (killed || tmuxKilled) {
