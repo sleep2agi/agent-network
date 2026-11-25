@@ -92,6 +92,7 @@ import { mergeProfilePatch, droppedProfileKeys } from "../src/profile-merge";
 import { backfillOpencodeGeneration, stampOpencodeGeneration } from "../src/opencode-generation-record";
 import {
   applyOpencodeGenerationCreateOption,
+  opencodeCreateMissingCliWarnings,
   opencodeGenerationInstallCommand,
   opencodeStartGenerationRefusal,
 } from "../src/opencode-generation-create";
@@ -4718,7 +4719,11 @@ function printGrokCopresenceWarning(
   }
 }
 
-function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start") {
+function checkRuntimeDependency(
+  runtime: RuntimeName,
+  phase: "create" | "start",
+  depOpts?: { opencodeGeneration?: "v1" | "v2"; hasOpencodeSharedServer?: boolean },
+) {
   if (runtime === "claude-code-cli") {
     const claudeInstalled = commandExists("claude");
     if (!claudeInstalled && phase === "create") {
@@ -4746,8 +4751,12 @@ function checkRuntimeDependency(runtime: RuntimeName, phase: "create" | "start")
       console.warn(`[anet] Install exact pair: ${opencodeExactPairInstallCommand()}`);
     }
     if (phase === "create" && !commandExists("opencode")) {
-      console.warn(`[anet] Warning: opencode CLI not found in PATH.`);
-      console.warn(`[anet] Install (exact): ${opencodeExactInstallCommand(OPENCODE_PINNED_VERSION)}`);
+      for (const line of opencodeCreateMissingCliWarnings(depOpts?.opencodeGeneration, {
+        hasSharedServer: depOpts?.hasOpencodeSharedServer,
+        v1InstallCommand: opencodeExactInstallCommand(OPENCODE_PINNED_VERSION),
+      })) {
+        console.warn(line);
+      }
     }
     return;
   }
@@ -6639,7 +6648,10 @@ Telegram setup:
   }
   writeOpencodePresetIfRequested(id, profile, opts);
   materializeRuntimeProviderOrExit(id, stagedProvider);
-  checkRuntimeDependency(normalizeRuntime(profile), "create");
+  checkRuntimeDependency(normalizeRuntime(profile), "create", {
+    opencodeGeneration: opencodeGenerationOfConfig(profile),
+    hasOpencodeSharedServer: Boolean(profile.opencodeSharedServerUrl),
+  });
 
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
   if (telegramConfig) console.log(`[anet] ✅ Telegram channel added`);
@@ -7066,7 +7078,10 @@ async function createCommand(idOverride?: string) {
   saveCreatedNode(id, profile);
   writeOpencodePresetIfRequested(id, profile, opts);
   materializeRuntimeProviderOrExit(id, stagedProvider);
-  checkRuntimeDependency(normalizeRuntime(profile), "create");
+  checkRuntimeDependency(normalizeRuntime(profile), "create", {
+    opencodeGeneration: opencodeGenerationOfConfig(profile),
+    hasOpencodeSharedServer: Boolean(profile.opencodeSharedServerUrl),
+  });
 
   const netLabel = gc.network_name || gc.network_id || "global";
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)}) in network "${netLabel}"`);

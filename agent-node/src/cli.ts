@@ -62,6 +62,7 @@ import { describeUnknownReasoningEfforts } from "./runtime/codex-models-cache-ch
 import { describeLargeCodexThreadBeforeResume } from "./runtime/codex-thread-size-check.js";
 import { nodeRolloutGuard, SDK_POINT_AT_NEWER_CODEX } from "./runtime/codex-rollout-guard-node.js";
 import { withFreshSessionRetryNote } from "./runtime/antigravity-acp/runtime";
+import { resolveReportedSessionId } from "./runtime/reported-session-id";
 import { describeMissingOrdinalFailure, probeCodexVersionCached } from "./runtime/codex-rollout-history-guard.js";
 import { codexLoginCheckIntervalFromEnv, createCodexLoginHealth, type CodexLoginHealth } from "./codex-login-health.js";
 import { reportedTask } from "./project-dir-mismatch.js";
@@ -1989,11 +1990,14 @@ if (NODE_ID) {
 // instead of requiring a node restart.
 const register = async () => {
   const alias = await liveAlias();
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : RUNTIME === "opencode"
-      ? opencodeSessionId
-      : SESSION_ID || undefined;
+  const activeSessionId = resolveReportedSessionId({
+    phase: "register",
+    runtime: RUNTIME,
+    grokSessionId,
+    opencodeSessionId,
+    agySessionId,
+    fallbackSessionId: SESSION_ID,
+  });
   const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
@@ -2177,11 +2181,14 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     inFlight: getInFlightCount(),
     loginDead: claudeLoginDead,
   });
-  const activeSessionId = RUNTIME === "grok"
-    ? grokSessionId
-    : RUNTIME === "claude"
-      ? claudeSessionId
-      : SESSION_ID || undefined;
+  const activeSessionId = resolveReportedSessionId({
+    phase: "report_status",
+    runtime: RUNTIME,
+    grokSessionId,
+    claudeSessionId,
+    agySessionId,
+    fallbackSessionId: SESSION_ID,
+  });
   // #2293 —— 只在 opencode v2 且本进程记过 loopback 端点时才真的去读(见该函数注释)。
   // await 是有意的:读失败/超时返回 undefined,心跳照发。
   // 同一份端点文件也给出「这台机器的 OpenCode Server 在哪」——PR #1092 的
