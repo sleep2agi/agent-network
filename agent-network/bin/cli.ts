@@ -81,6 +81,7 @@ import { bunInstallCacheDir, formatHubVersionBanner, isExactSemver, resolveHubSe
 import { nodeCountLine } from "../src/doctor-node-count";
 import { nodeNotFoundMessage } from "../src/node-not-found";
 import { columnWidth, lsHeaderRow, lsSeparatorRow, runtimeColumnWidth } from "../src/ls-columns";
+import { isAliasSseConnected } from "../src/sse-session-match";
 import { describeLocalProcess, LOCAL_VS_HUB_NOTE, type LocalProcessState } from "../src/local-process-state";
 import { daemonSubcommandRedirect, nodeSubcommandRedirect, projectSubcommandRedirect } from "../src/subcommand-redirect";
 import { OPENCODE_KEYLESS_FREE_MODEL_NOTE, opencodeFreeTierSafePresetWarning } from "../src/opencode-free-tier";
@@ -2779,10 +2780,10 @@ async function fetchSseConnectionCount(hub: string): Promise<number | null> {
 //   "yes"     — every alias has ≥1 connection (verified)
 //   "no"      — detail readable, at least one alias not yet connected
 //   "unknown" — detail not readable; cannot assert either way
-async function sseAllConnected(hub: string, aliases: string[]): Promise<"yes" | "no" | "unknown"> {
+async function sseAllConnected(hub: string, aliases: string[], networkId?: string | null): Promise<"yes" | "no" | "unknown"> {
   const detail = await fetchSseSessions(hub);
   if (!detail.ok) return "unknown";
-  return aliases.every(a => (detail.sessions[a] || 0) >= 1) ? "yes" : "no";
+  return aliases.every(a => isAliasSseConnected(detail.sessions, a, networkId)) ? "yes" : "no";
 }
 
 let warnedCorruptGlobal = false;
@@ -10501,7 +10502,8 @@ async function lsCommand() {
       // Match with CommHub
       const ns: any = networkSessions.find((n: any) => n.alias === displayName || n.node_id === p?.node_id);
       const serverStatus = ns ? ns.status : (localAlive ? "starting" : "offline");
-      const sseConnected = !sseDetail.ok ? "?" : (sseDetail.sessions[displayName] ? "●" : "○");
+      const sseNetId = ns?.network_id || (p as any)?.network_id || gc.network_id;
+      const sseConnected = !sseDetail.ok ? "?" : (isAliasSseConnected(sseDetail.sessions, displayName, sseNetId) ? "●" : "○");
 
       const statusIcon = serverStatus === "idle" ? "idle" :
                          serverStatus === "working" ? "working" :
@@ -10569,7 +10571,7 @@ async function lsCommand() {
         if (match) {
           const alias = match[1].trim();
           const ns: any = networkSessions.find((n: any) => n.alias === alias);
-          const sse = !sseDetail.ok ? "?" : (sseDetail.sessions[alias] ? "●" : "○");
+          const sse = !sseDetail.ok ? "?" : (isAliasSseConnected(sseDetail.sessions, alias, ns?.network_id || gc.network_id) ? "●" : "○");
           network = ns ? `${alias} ${ns.status} ${sse}` : `${alias} (not registered)`;
         }
       }
@@ -17543,7 +17545,7 @@ async function demoDebateCommand() {
       // #473: tristate — never GUESS from the aggregate count that these
       // specific aliases are up. "unknown" (non-admin/unreachable) → say
       // so and proceed, don't claim connected and don't burn the full 60s.
-      const state = await sseAllConnected(hub, DEBATE_ROLES.map(r => roleAliases[r]));
+      const state = await sseAllConnected(hub, DEBATE_ROLES.map(r => roleAliases[r]), networkId || gc.network_id);
       if (state === "yes") { console.log(`        ✓ 6 agent 全部 SSE connected`); break; }
       if (state === "unknown") { console.log(`        ⚠ 无法确认 6 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
@@ -17925,7 +17927,7 @@ async function demoSocialMediaCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const state = await sseAllConnected(hub, SOCIAL_ROLES.map(r => roleAliases[r]));
+      const state = await sseAllConnected(hub, SOCIAL_ROLES.map(r => roleAliases[r]), networkId || gc.network_id);
       if (state === "yes") { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
       if (state === "unknown") { console.log(`        ⚠ 无法确认 4 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
@@ -18463,7 +18465,7 @@ async function demoPrReviewCommand() {
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 2000));
     try {
-      const state = await sseAllConnected(hub, PR_REVIEW_ROLES.map(r => roleAliases[r]));
+      const state = await sseAllConnected(hub, PR_REVIEW_ROLES.map(r => roleAliases[r]), networkId || gc.network_id);
       if (state === "yes") { console.log(`        ✓ 4 agent 全部 SSE connected`); break; }
       if (state === "unknown") { console.log(`        ⚠ 无法确认 4 个 agent 的 SSE 连接状态（需 admin 权限查看明细），继续执行`); break; }
     } catch {}
