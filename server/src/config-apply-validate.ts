@@ -159,11 +159,31 @@ export function isAllowedToChangeFlag(
  * and restart depending on which build reported last.
  */
 const OPENCODE_RUNTIME_LABELS = new Set<string>(["opencode-sdk", "opencode-cli", "opencode"]);
+const ANTIGRAVITY_RUNTIME_LABELS = new Set<string>(["antigravity-acp", "antigravity-sdk", "antigravity", "antigravity-cli", "agy"]);
 
 /** Reported runtime family + explicit mode only; never local ownership proof. */
 export function isOpenCodeV2CopresenceRuntime(runtime: string | null | undefined,
   generation: "v1" | "v2" | null, mode: string | null): boolean {
   return !!runtime && OPENCODE_RUNTIME_LABELS.has(runtime) && generation === "v2" && mode === "copresence";
+}
+
+export function isAntigravityRuntime(runtime: string | null | undefined): boolean {
+  return !!runtime && ANTIGRAVITY_RUNTIME_LABELS.has(runtime);
+}
+
+/** True only when an antigravity node explicitly advertised hot model switching
+ *  in its config_snapshot. Older nodes (which still restart on model patches)
+ *  stay classified as `restart` so warnings and client UX remain truthful. */
+export function readAgyHotModelCapable(configSnapshot: unknown): boolean {
+  let parsed: any = null;
+  try {
+    parsed = typeof configSnapshot === "string"
+      ? (configSnapshot ? JSON.parse(configSnapshot) : null)
+      : configSnapshot;
+  } catch {
+    parsed = null;
+  }
+  return parsed?.agy_hot_model_capable === true;
 }
 
 /**
@@ -222,10 +242,12 @@ export function isHotModelSwitchSupported(
   runtime: string | null | undefined,
   opencodeGeneration: "v1" | "v2" | null,
   opencodeMode: string | null,
+  agyHotModelCapable?: boolean,
 ): boolean {
   if (model === undefined) return false;
   if (Object.keys(flags).length !== 0) return false;
   if (channels !== undefined) return false;
+  if (isAntigravityRuntime(runtime) && agyHotModelCapable === true) return true;
   return isOpenCodeV2CopresenceRuntime(runtime, opencodeGeneration, opencodeMode);
 }
 
@@ -346,6 +368,7 @@ export function computeApplyMode(
     runtime?: string | null;
     opencodeGeneration?: "v1" | "v2" | null;
     opencodeMode?: string | null;
+    agyHotModelCapable?: boolean;
   },
 ): "hot" | "restart" | "restart_only" {
   const fieldCount = (model !== undefined ? 1 : 0) + Object.keys(flags).length + (channels !== undefined ? 1 : 0);
@@ -358,6 +381,7 @@ export function computeApplyMode(
       opts?.runtime,
       opts?.opencodeGeneration ?? null,
       opts?.opencodeMode ?? null,
+      opts?.agyHotModelCapable === true,
     )) return "hot";
     return "restart";
   }

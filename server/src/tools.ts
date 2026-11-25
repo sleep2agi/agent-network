@@ -108,6 +108,7 @@ import {
   EDITABLE_CHANNELS,
   computeApplyMode,
   readOpencodeSnapshotFlags,
+  readAgyHotModelCapable,
   readConfigUpdateCapable,
   configUpdateCapabilityDivergence,
   validatePatch,
@@ -1007,6 +1008,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // #5321 —— agy 的模型清单与登录状态（节点侧已上报；App 第三段用）
         agy_models: z.array(z.string().max(200)).max(200).optional().catch(undefined),
         agy_login_state: z.enum(["logged_in", "needs_login", "unknown"]).optional().catch(undefined),
+        agy_hot_model_capable: z.literal(true).optional().catch(undefined),
         // #5332 —— 回合控制能力位（客户端据此显不显示「停止 / 打断并发送 / 插话」）
         turn_interrupt_capable: z.boolean().optional().catch(undefined),
         turn_steer_capable: z.boolean().optional().catch(undefined),
@@ -4185,10 +4187,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // computeApplyMode 退回旧行为（model ⇒ restart），那正是客户端
       // 显示「重启中」却永远等不到重启的原因。
       const opencodeSnap = readOpencodeSnapshotFlags(node.config_snapshot);
+      const agyHotModelCapable = readAgyHotModelCapable(node.config_snapshot);
       const applyMode = patch.modelVariant !== undefined || patch.agent !== undefined ? "hot" : computeApplyMode(model, flags, channels, {
         runtime: node.runtime,
         opencodeGeneration: opencodeSnap.opencodeGeneration,
         opencodeMode: opencodeSnap.opencodeMode,
+        agyHotModelCapable,
       });
       let variantCapableAtQueue = false;
       try { variantCapableAtQueue = JSON.parse(node.config_snapshot || "{}").opencode_variant_config_capable === true; } catch { /* fail closed */ }

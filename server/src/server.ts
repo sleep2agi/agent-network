@@ -6784,6 +6784,7 @@ return Bun.serve({
         ...(typeof snapshot.opencode_agent_current === "string" ? { agent: snapshot.opencode_agent_current } : {}),
         ...(Array.isArray(snapshot.opencode_agents) ? { agents: snapshot.opencode_agents } : {}),
         opencode_variant_config_capable: snapshot.opencode_variant_config_capable === true,
+        ...(snapshot.agy_hot_model_capable === true ? { agy_hot_model_capable: true } : {}),
         flags: snapshot.flags ?? {},
         config_update_capable: snapshot.config_update_capable ?? false,
         // null = 这个节点从来没有被下发过配置（与「下发过但还没终局」是两件事）
@@ -7551,6 +7552,7 @@ return Bun.serve({
           agy_login_state: parsedSnapshot?.agy_login_state === "logged_in" || parsedSnapshot?.agy_login_state === "needs_login"
             ? parsedSnapshot.agy_login_state
             : (parsedSnapshot?.agy_login_state === "unknown" ? "unknown" : null),
+          agy_hot_model_capable: parsedSnapshot?.agy_hot_model_capable === true ? true : null,
           // 「CLI 在等一个选项」：与 workdir **同一套权限**。
           // 2026-11-22 review：codex_trust / claude_trust 的真实文本常带目录路径
           //（"Do you trust the files in this folder? <path>"），而 excerpt 只做 token 脱敏、
