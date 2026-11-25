@@ -9,9 +9,14 @@ fi
 
 cd /work
 SHARED_DB=/tmp/test638-shared-must-not-open.db
-RUN1=/tmp/test638-run1
-RUN2=/tmp/test638-run2
-RUN3=/tmp/test638-run3
+# Run roots must NOT live under /tmp. test-aggregate gives every suite HOME=<root>/<suite>/home,
+# and the OpenCode source-resume suites build a synthetic @opencode/cli there; the CLI refuses
+# any package with a world-writable ancestor (/tmp is 1777), so under /tmp those suites always
+# failed with "unsafe directory ownership or mode" (seen once #3890 surfaced the reason).
+RUN_BASE="${HOME:-/root}/.test638-runs"
+RUN1="$RUN_BASE/run1"
+RUN2="$RUN_BASE/run2"
+RUN3="$RUN_BASE/run3"
 OUT1=/tmp/test638-run1.out
 OUT2=/tmp/test638-run2.out
 OUT3=/tmp/test638-run3.out
@@ -129,7 +134,8 @@ dump_agg_failure() {
   fi
 }
 
-rm -rf -- /tmp/test638-run1 /tmp/test638-run2 /tmp/test638-run3
+rm -rf -- "$RUN_BASE"
+mkdir -p -m 700 "$RUN_BASE"
 rm -f -- "$OUT1" "$OUT2" "$OUT3" "$TRACE1" "$SHARED_DB" "$SHARED_DB-wal" "$SHARED_DB-shm"
 
 run_one() {
@@ -210,7 +216,9 @@ for output in "$OUT1" "$OUT2" "$OUT3"; do
   #
   # 这一版只改**钉数**，不碰任何断言逻辑：期望值仍然是「这个文件跑完了、
   # 一个都没挂、且用例数与当前代码一致」。
-  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 16
+  # 16 → 17：#3527（定时任务真删 /purge）给这个文件加了第 17 个用例；
+  # #3891 跑出的实际值是 pass=17 fail=0，同样只改钉数。
+  expect_file_result "server/src/scheduled-tasks-http.test.ts" "$output" 17
   ! grep -Eqi 'connection refused|ECONNREFUSED|database safety guard|FAIL_SUITE|timeout=true' "$output"
   # `grep -c` 在 0 匹配时退出码是 1 —— 在 set -e 下会静默退出（同一个坑）。
   maps=$(grep -c '^TEST_DB_MAP' "$output" || true)
@@ -221,7 +229,9 @@ done
 STAGE=L3
 echo "L3: syscall DB scope + cross-suite fixtures"
 [[ $(grep -F -c "$SHARED_DB" "$TRACE1" || true) -eq 0 ]] || { echo "FAIL: inherited shared DB was opened"; exit 1; }
-outside=$(grep -oE '/tmp/[^" ]*commhub\.db' "$TRACE1" | grep -v "^$RUN1/" || true)
+# Any absolute commhub.db path outside RUN1 counts (not just /tmp ones), so moving the run
+# roots out of /tmp does not narrow this check.
+outside=$(grep -oE '"/[^"]*commhub\.db' "$TRACE1" | tr -d '"' | grep -v "^$RUN1/" || true)
 [[ -z "$outside" ]] || { echo "FAIL: DB opened outside per-file root: $outside"; exit 1; }
 
 upload_db=$(grep -F $'TEST_DB_MAP\tserver/src/uploads-http.test.ts\t' "$OUT1" | cut -f3)
