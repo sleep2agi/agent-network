@@ -1,3 +1,4 @@
+import { timedJob } from "./route-timing.js";
 import { bindRequirementWake, parseRequirementWake, publicRequirementWake, requirementWakeHead, pollRequirementWakes, type RequirementWake } from "./scheduled-requirement-wake.js";
 import { scheduledOutcomeGuidance } from "./scheduled-outcome-guidance.js";
 import { parseBackoffPolicy, refreshScheduledBackoff } from "./scheduled-backoff.js";
@@ -847,7 +848,7 @@ export function startScheduledTaskScheduler(intervalMs?: number): ReturnType<typ
   // full cadence. Recurrences advance from "now", intentionally collapsing a
   // long outage into one catch-up occurrence instead of a dispatch storm.
   runDueScheduledTasks();
-  return setInterval(() => runDueScheduledTasks(), ms);
+  return setInterval(timedJob("scheduled-tasks", () => runDueScheduledTasks()), ms);
 }
 
 async function bodyObject(req: Request): Promise<Record<string, unknown>> {

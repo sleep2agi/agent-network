@@ -200,6 +200,34 @@ export function takeTickRouteCosts(): TickRouteCost[] {
   return out;
 }
 
+/**
+ * #5614 —— 后台定时任务也进同一个计时账本。
+ *
+ * 2026-11-26 线上两次约 2.1 秒的停顿里，被记录的请求合计只有约 0.5 秒：
+ * 剩下的时间花在请求之外（定时巡检 / 清理 / 排程），而这些以前完全没计时，
+ * 停顿的 top_routes 里永远看不到它们。现在用 `timedJob("delivered-stale-patrol", fn)`
+ * 包一层：每次执行按 `JOB <name>` 记进分钟桶（/api/stats/routes 可查）和 tick 窗口
+ * （停顿归因 top_routes 可见），抛错记成 5xx 并原样抛出，行为不变。
+ * 异步任务只量**同步段**（到第一个 await 为止）—— 阻塞事件循环的正是这一段。
+ */
+export function timedJob<A extends unknown[], R>(name: string, fn: (...args: A) => R): (...args: A) => R {
+  const route = `JOB ${name}`;
+  return (...args: A): R => {
+    const started = performance.now();
+    let status = 200;
+    try {
+      return fn(...args);
+    } catch (e) {
+      status = 500;
+      throw e;
+    } finally {
+      const ms = performance.now() - started;
+      addSample(route, ms, status, 0, Date.now(), "hub job");
+      addTickCost(route, ms);
+    }
+  };
+}
+
 /** 只给测试用：清空 tick 归因窗口。 */
 export function resetTickRouteCostsForTests(): void {
   tickCosts = new Map();

@@ -38,6 +38,7 @@
 //     选这个而不是「把旧卡逐张记成已发」:不用每卡每天写行,也不怕某张旧卡第一次没被扫到、第二天又冒出来。
 //     即将到期 / 今天到期不受基线影响(它们本来就只在临近时发一次)。
 
+import { timedJob } from "./route-timing.js";
 import type { DbAdapter } from "./db-adapter.js";
 import { db, uuidv4 } from "./db.js";
 import { sendAgentNotice } from "./agent-notice.js";
@@ -412,5 +413,5 @@ export function startDueReminderTimer(): ReturnType<typeof setInterval> | null {
   const tick = () => { try { runDueReminders(); } catch (e: any) { console.error(`[due-reminders] tick failed: ${e?.message || e}`); } };
   const first = setTimeout(tick, Math.min(ms, 30_000));
   (first as any)?.unref?.();
-  return setInterval(tick, ms);
+  return setInterval(timedJob("due-reminders", tick), ms);
 }

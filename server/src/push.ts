@@ -42,6 +42,7 @@
 //    half-open during a quiet period still gets reaped — not waiting
 //    for the next inbox push.
 
+import { timedJob } from "./route-timing.js";
 import { eventBus, type RenameCommittedEvent } from "./event_bus";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -304,13 +305,13 @@ function sweepLiveness(): void {
 let livenessSweepTimer: ReturnType<typeof setInterval> | null = null;
 function ensureLivenessSweep(): void {
   if (livenessSweepTimer) return;
-  livenessSweepTimer = setInterval(() => {
+  livenessSweepTimer = setInterval(timedJob("sse-liveness-sweep", () => {
     try {
       sweepLiveness();
     } catch (e: any) {
       console.log(`[${ts()}] SSE sweep failed: ${e?.message || e}`);
     }
-  }, LIVENESS_SWEEP_MS);
+  }), LIVENESS_SWEEP_MS);
   // Don't keep the event loop alive just for the sweep.
   (livenessSweepTimer as any)?.unref?.();
 }

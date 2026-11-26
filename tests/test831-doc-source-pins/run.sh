@@ -318,8 +318,11 @@ broken=$(printf '%s' "$out" | sed -nE 's/^broken_pins=([0-9]+)$/\1/p')
 #   优先级一节补了源码行号锚点:中文 3 处(表行 #L42 + #L155、正文 #L155)、英文 1 处(正文 #L155)。
 #   两个新的唯一 pin 都是 agent-node/src/node-secrets.ts(#L42 nodeSecretsPath、#L155 loadNodeSecrets);
 #   为此 test831 的镜像也补了 `COPY agent-node /repo/agent-node`,否则它们被判 missing-file。
-[[ "$uniq"  -eq 4  ]] || fail "预期 4 个唯一 pin,实际 $uniq"
-[[ "$occ"   -eq 14 ]] || fail "预期 14 处原始出现,实际 $occ"
+# 2026-11-26:uniq 4 → 3,occ 14 → 12。#3896 在 push.ts 顶部加了一行 import,KEEPALIVE_MS 从 L87 挪到 L88,
+#   api/rest-data(中英各 1 处)的 `push.ts#L87` 成了失效 trivial-line pin。链接文字本来就写着符号名
+#   `KEEPALIVE_MS`,所以去掉行号锚点、只链文件 —— 唯一 pin −1、出现 −2,files 不变。
+[[ "$uniq"  -eq 3  ]] || fail "预期 3 个唯一 pin,实际 $uniq"
+[[ "$occ"   -eq 12 ]] || fail "预期 12 处原始出现,实际 $occ"
 echo "  OK  walk 路径与 git 路径给出同一份清单($files 文件 / $uniq 唯一 pin / $occ 处)"
 
 # ---------------------------------------------------------------------------
