@@ -143,7 +143,10 @@ describe.skipIf(PG)("#500 queue_depth at production scale (57k tasks, 31k stuck 
       const sendPlan = plan(send.sql, send.params);
       console.log(`[plan] per-send open count (net=${net ? "set" : "none"}): ${sendPlan}`);
       expect(sendPlan).not.toContain("idx_tasks_status");
-      expect(sendPlan).toContain("idx_tasks_to_created");
+      // #3898 起带网络时走 idx_tasks_network_to_created（network_id=? AND to_name=? AND created_at>?）：
+      // 比 idx_tasks_to_created 多一个等值列，同样是按 to_name + created_at 范围取，不会更慢。
+      expect(sendPlan).toMatch(net ? /idx_tasks_(network_)?to_created/ : /idx_tasks_to_created/);
+      expect(sendPlan).not.toContain("TEMP B-TREE");
     }
   });
 
