@@ -59,7 +59,7 @@ features:
   </div>
   <div class="download-grid">
     <a class="download-card download-card-primary" href="/en/download#macos"><span class="download-platform">Desktop</span><strong>macOS / Windows / Linux</strong><small>Open the latest installers</small></a>
-    <a class="download-card" href="/en/download#android"><span class="download-platform">Phone</span><strong>Android / iOS</strong><small>Android package; iOS uses TestFlight</small></a>
+    <a class="download-card" href="/en/download#android"><span class="download-platform">Phone</span><strong>Android / HarmonyOS / iOS</strong><small>Android package; HarmonyOS coming soon; iOS uses TestFlight</small></a>
   </div>
 </section>
 
