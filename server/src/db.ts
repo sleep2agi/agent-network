@@ -2616,3 +2616,24 @@ db.exec(`
 // 而部门 0 个 Agent。这一列让 Agent 可以被直接放进部门，和人的归属互不覆盖：
 // 显式值优先，没有显式值时仍按负责人的部门推断。
 try { db.exec("ALTER TABLE nodes ADD COLUMN department_id TEXT"); } catch {}
+
+// #5653 — Network-level managed Voice ASR config (Doubao Flash proxy).
+// Ciphertext/IV/tag are base64-encoded AES-256-GCM output from vault.ts so
+// schema is portable across SQLite and PostgreSQL and strictly isolated from
+// node-facing network_secrets. Appended at EOF so earlier line anchors stay fixed.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_voice_configs (
+    network_id      TEXT PRIMARY KEY,
+    enabled         INTEGER NOT NULL DEFAULT 0,
+    provider        TEXT NOT NULL DEFAULT 'doubao',
+    auth_mode       TEXT NOT NULL DEFAULT 'api-key',
+    app_id          TEXT NOT NULL DEFAULT '',
+    endpoint        TEXT NOT NULL DEFAULT '',
+    key_hint        TEXT NOT NULL DEFAULT '',
+    ciphertext_b64  TEXT NOT NULL DEFAULT '',
+    iv_b64          TEXT NOT NULL DEFAULT '',
+    tag_b64         TEXT NOT NULL DEFAULT '',
+    updated_at      BIGINT NOT NULL,
+    updated_by      TEXT NOT NULL DEFAULT ''
+  );
+`);
