@@ -1,40 +1,31 @@
-// #5653 — Network-managed Voice ASR config & authenticated Doubao Flash proxy.
+// #5653 — Network-managed Voice ASR config & authenticated member key distribution.
 //
-// Security boundaries:
+// Design (direct-to-ASR key distribution, no audio forwarding through Hub):
+// - Network owner/admin saves Doubao ASR credentials once on the Hub.
 // - Credentials are encrypted at rest via vault.ts (AES-256-GCM) in a dedicated
-//   `network_voice_configs` table isolated from node-facing `network_secrets`.
-// - Plaintext API Key / Access Token is NEVER returned in GET/PUT/DELETE/POST
-//   responses, NEVER logged, and NEVER written to audit logs.
-// - Upstream Volcengine auth errors (401/403) are returned as HTTP 502 with
-//   structured `{ ok: false, code: 'auth_failed' | 'not_enabled' }` — NEVER
-//   HTTP 401 — so a misconfigured ASR key never triggers client Hub logout.
+//   `network_voice_configs` table strictly isolated from node-facing `network_secrets`.
+// - GET /api/voice/config returns non-secret metadata + availability for UI/status.
+// - GET /api/voice/credentials issues the decrypted credentials ONLY to authenticated
+//   human members of that network (never node tokens, never outsiders, Cache-Control: no-store)
+//   so clients connect directly to Volcengine Doubao (both real-time streaming and flash)
+//   with zero Hub audio bandwidth/latency overhead.
 
-import { randomUUID } from "node:crypto";
 import { db, logAudit } from "./db.js";
 import { decryptSecret, encryptSecret, VaultError } from "./vault.js";
-
-export const DOUBAO_DEFAULT_ENDPOINT =
-  "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash";
-export const DOUBAO_FLASH_RESOURCE_ID = "volc.bigasr.auc_turbo";
-/** ~60 s of 16 kHz / 16-bit / mono PCM WAV (~1.92 MB) with headroom. */
-export const MAX_WAV_BYTES = 2_500_000;
-/** Max HTTP JSON body size for POST /api/voice/recognize (~3.33 MB base64 + JSON envelope). */
-export const MAX_RECOGNIZE_BODY_BYTES = 4 * 1024 * 1024;
-export const REQUEST_TIMEOUT_MS = 20_000;
 
 export type VoiceProvider = "doubao";
 export type VoiceAuthMode = "api-key" | "app-token";
 
-export type VoiceAsrErrorCode =
-  | "not_configured"
-  | "too_long"
-  | "auth_failed"
-  | "not_enabled"
-  | "rate_limited"
-  | "bad_audio"
-  | "timeout"
-  | "network"
-  | "upstream_error";
+export const STREAM_RESOURCE_IDS = [
+  "volc.bigasr.sauc.duration",
+  "volc.bigasr.sauc.concurrent",
+  "volc.seedasr.sauc.duration",
+  "volc.seedasr.sauc.concurrent",
+] as const;
+
+export type StreamResourceId = (typeof STREAM_RESOURCE_IDS)[number];
+
+const STREAM_RESOURCE_SET = new Set<string>(STREAM_RESOURCE_IDS);
 
 export const VOICE_WRITE_ERROR_CODES = [
   "invalid_provider",
@@ -43,6 +34,8 @@ export const VOICE_WRITE_ERROR_CODES = [
   "credential_required",
   "invalid_credential",
   "invalid_endpoint",
+  "invalid_stream_endpoint",
+  "invalid_stream_resource_id",
   "vault_master_key_missing",
   "vault_master_key_invalid",
   "vault_unavailable",
@@ -57,6 +50,8 @@ export const VOICE_WRITE_STATUS: Record<VoiceWriteErrorCode, number> = {
   credential_required: 400,
   invalid_credential: 400,
   invalid_endpoint: 400,
+  invalid_stream_endpoint: 400,
+  invalid_stream_resource_id: 400,
   vault_master_key_missing: 503,
   vault_master_key_invalid: 503,
   vault_unavailable: 503,
@@ -71,16 +66,42 @@ export interface NetworkVoicePublicConfig {
   network_id: string;
   enabled: boolean;
   configured: boolean;
-  mode: "hub-proxy";
+  mode: "hub-key";
   provider: VoiceProvider;
   auth_mode: VoiceAuthMode;
   app_id: string;
   key_hint: string;
   endpoint: string;
+  stream_endpoint: string;
+  stream_resource_id: string;
   can_manage: boolean;
   vault_ready: boolean;
   updated_at: number | null;
 }
+
+export interface DistributedVoiceCredentials {
+  provider: VoiceProvider;
+  auth_mode: VoiceAuthMode;
+  app_id: string;
+  access_token: string;
+  endpoint: string;
+  stream_endpoint: string;
+  stream_resource_id: string;
+}
+
+export type VoiceCredentialsReadResult =
+  | {
+      ok: true;
+      status: 200;
+      network_id: string;
+      enabled: true;
+      configured: true;
+      mode: "hub-key";
+      provider: VoiceProvider;
+      credentials: DistributedVoiceCredentials;
+      updated_at: number | null;
+    }
+  | { ok: false; status: number; error: string; message: string };
 
 export interface VoiceConfigWriteInput {
   enabled?: unknown;
@@ -90,31 +111,13 @@ export interface VoiceConfigWriteInput {
   access_token?: unknown;
   api_key?: unknown;
   endpoint?: unknown;
+  stream_endpoint?: unknown;
+  stream_resource_id?: unknown;
 }
 
 export type VoiceConfigWriteResult =
   | NetworkVoicePublicConfig
   | { ok: false; error: VoiceWriteErrorCode; message: string };
-
-export type VoiceRecognizeResult =
-  | { ok: true; status: 200; text: string }
-  | { ok: false; status: number; code: VoiceAsrErrorCode; error: string; upstream?: string };
-
-export type VoiceFetchLike = (
-  url: string,
-  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
-) => Promise<{
-  status: number;
-  headers: { get(name: string): string | null };
-  json(): Promise<unknown>;
-}>;
-
-const BLOCKED_METADATA_HOSTS = new Set([
-  "169.254.169.254",
-  "100.100.100.200",
-  "metadata.google.internal",
-  "metadata.goog",
-]);
 
 function isLoopbackHost(host: string): boolean {
   const h = host.toLowerCase();
@@ -134,15 +137,9 @@ export function isVoiceVaultReady(): boolean {
   return !!hex && /^[0-9a-fA-F]{64}$/.test(hex);
 }
 
-/**
- * Validate custom Doubao endpoint override.
- * Blank = use official default. Non-blank must be https:// without embedded
- * userinfo or cloud-metadata hosts. Loopback http:// is permitted only when
- * explicitly enabled (local dev / integration tests) to prevent Hub SSRF.
- */
+/** Validate optional custom Doubao Flash endpoint (blank = official default; must be https:// or loopback http://). */
 export function validateVoiceEndpoint(
   input: string,
-  opts?: { allowLoopback?: boolean },
 ): { ok: true; url: string } | { ok: false; error: "invalid_endpoint"; message: string } {
   const s = input.trim();
   if (!s) return { ok: true, url: "" };
@@ -155,21 +152,29 @@ export function validateVoiceEndpoint(
   if (u.username || u.password) {
     return { ok: false, error: "invalid_endpoint", message: "接口地址不能包含内嵌账号密码" };
   }
-  const host = u.hostname.toLowerCase();
-  if (BLOCKED_METADATA_HOSTS.has(host)) {
-    return { ok: false, error: "invalid_endpoint", message: "不允许指向云主机元数据地址" };
+  if (u.protocol === "https:") return { ok: true, url: u.toString() };
+  if (u.protocol === "http:" && isLoopbackHost(u.hostname)) return { ok: true, url: u.toString() };
+  return { ok: false, error: "invalid_endpoint", message: "接口地址必须使用 https://（本机回环除外）" };
+}
+
+/** Validate optional custom Doubao Streaming endpoint (blank = official default; must be wss:// or loopback ws://). */
+export function validateVoiceStreamEndpoint(
+  input: string,
+): { ok: true; url: string } | { ok: false; error: "invalid_stream_endpoint"; message: string } {
+  const s = input.trim();
+  if (!s) return { ok: true, url: "" };
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return { ok: false, error: "invalid_stream_endpoint", message: "流式接口地址不是合法的 URL" };
   }
-  const allowLoopback = opts?.allowLoopback ?? process.env.ANET_VOICE_ALLOW_LOOPBACK_ENDPOINT === "1";
-  if (u.protocol === "https:") {
-    if (isLoopbackHost(host) && !allowLoopback) {
-      return { ok: false, error: "invalid_endpoint", message: "不允许指向 Hub 本机回环地址" };
-    }
-    return { ok: true, url: u.toString() };
+  if (u.username || u.password) {
+    return { ok: false, error: "invalid_stream_endpoint", message: "流式接口地址不能包含内嵌账号密码" };
   }
-  if (u.protocol === "http:" && isLoopbackHost(host) && allowLoopback) {
-    return { ok: true, url: u.toString() };
-  }
-  return { ok: false, error: "invalid_endpoint", message: "接口地址必须使用 https://" };
+  if (u.protocol === "wss:") return { ok: true, url: u.toString() };
+  if (u.protocol === "ws:" && isLoopbackHost(u.hostname)) return { ok: true, url: u.toString() };
+  return { ok: false, error: "invalid_stream_endpoint", message: "流式接口地址必须使用 wss://（本机回环除外）" };
 }
 
 interface StoredMetaRow {
@@ -178,6 +183,8 @@ interface StoredMetaRow {
   auth_mode: string;
   app_id: string;
   endpoint: string;
+  stream_endpoint: string;
+  stream_resource_id: string;
   key_hint: string;
   configured: number;
   updated_at: number | null;
@@ -201,12 +208,14 @@ function toPublicConfig(
     network_id: networkId,
     enabled: configured && Number(row?.enabled) === 1,
     configured,
-    mode: "hub-proxy",
+    mode: "hub-key",
     provider: "doubao",
     auth_mode: authMode,
     app_id: authMode === "app-token" ? (row?.app_id || "") : "",
     key_hint: configured ? (row?.key_hint || "…") : "",
     endpoint: row?.endpoint || "",
+    stream_endpoint: row?.stream_endpoint || "",
+    stream_resource_id: row?.stream_resource_id || "",
     can_manage: canManage,
     vault_ready: isVoiceVaultReady(),
     updated_at: row?.updated_at != null ? Number(row.updated_at) : null,
@@ -216,7 +225,7 @@ function toPublicConfig(
 /** Read public non-secret projection for a network. Never selects ciphertext columns. */
 export function readNetworkVoiceConfig(networkId: string, canManage: boolean): NetworkVoicePublicConfig {
   const row = db.get<StoredMetaRow>(
-    `SELECT enabled, provider, auth_mode, app_id, endpoint, key_hint,
+    `SELECT enabled, provider, auth_mode, app_id, endpoint, stream_endpoint, stream_resource_id, key_hint,
             CASE WHEN ciphertext_b64 IS NOT NULL AND ciphertext_b64 != '' THEN 1 ELSE 0 END AS configured,
             updated_at
        FROM network_voice_configs
@@ -226,13 +235,59 @@ export function readNetworkVoiceConfig(networkId: string, canManage: boolean): N
   return toPublicConfig(networkId, row, canManage);
 }
 
+/** Decrypt & issue active network voice credentials to an authenticated member (caller enforces authz). */
+export function readNetworkVoiceCredentials(networkId: string): VoiceCredentialsReadResult {
+  const row = db.get<StoredSecretRow>(
+    `SELECT enabled, provider, auth_mode, app_id, endpoint, stream_endpoint, stream_resource_id, key_hint,
+            ciphertext_b64, iv_b64, tag_b64,
+            CASE WHEN ciphertext_b64 IS NOT NULL AND ciphertext_b64 != '' THEN 1 ELSE 0 END AS configured,
+            updated_at
+       FROM network_voice_configs
+      WHERE network_id = ?1`,
+    networkId,
+  );
+  if (!row || Number(row.configured) !== 1 || Number(row.enabled) !== 1) {
+    return { ok: false, status: 409, error: "voice_not_configured", message: "当前网络未启用服务器语音配置" };
+  }
+  let accessToken: string;
+  try {
+    accessToken = decryptSecret({
+      ciphertext: Buffer.from(row.ciphertext_b64, "base64"),
+      iv: Buffer.from(row.iv_b64, "base64"),
+      tag: Buffer.from(row.tag_b64, "base64"),
+    });
+  } catch (e) {
+    const errCode = e instanceof VaultError ? e.code : "vault_decrypt_failed";
+    return { ok: false, status: 503, error: errCode, message: "Hub 加密主密钥不可用，无法读取语音配置" };
+  }
+  const authMode: VoiceAuthMode = row.auth_mode === "app-token" ? "app-token" : "api-key";
+  return {
+    ok: true,
+    status: 200,
+    network_id: networkId,
+    enabled: true,
+    configured: true,
+    mode: "hub-key",
+    provider: "doubao",
+    credentials: {
+      provider: "doubao",
+      auth_mode: authMode,
+      app_id: authMode === "app-token" ? (row.app_id || "") : "",
+      access_token: accessToken,
+      endpoint: row.endpoint || "",
+      stream_endpoint: row.stream_endpoint || "",
+      stream_resource_id: row.stream_resource_id || "",
+    },
+    updated_at: row.updated_at != null ? Number(row.updated_at) : null,
+  };
+}
+
 /** Create or update a network's managed voice config (owner/admin only — caller enforces authz). */
 export function saveNetworkVoiceConfig(
   networkId: string,
   actorUserId: string | null,
   actorUsername: string | null,
   input: VoiceConfigWriteInput,
-  opts?: { allowLoopback?: boolean },
 ): VoiceConfigWriteResult {
   const rawProvider = typeof input.provider === "string" ? input.provider.trim().toLowerCase() : "doubao";
   if (rawProvider !== "" && rawProvider !== "doubao") {
@@ -240,7 +295,7 @@ export function saveNetworkVoiceConfig(
   }
 
   const existing = db.get<StoredSecretRow>(
-    `SELECT enabled, provider, auth_mode, app_id, endpoint, key_hint,
+    `SELECT enabled, provider, auth_mode, app_id, endpoint, stream_endpoint, stream_resource_id, key_hint,
             ciphertext_b64, iv_b64, tag_b64,
             CASE WHEN ciphertext_b64 IS NOT NULL AND ciphertext_b64 != '' THEN 1 ELSE 0 END AS configured,
             updated_at
@@ -286,8 +341,20 @@ export function saveNetworkVoiceConfig(
   }
 
   const endpointRaw = typeof input.endpoint === "string" ? input.endpoint : (existing?.endpoint || "");
-  const ep = validateVoiceEndpoint(endpointRaw, opts);
+  const ep = validateVoiceEndpoint(endpointRaw);
   if (!ep.ok) return ep;
+
+  const streamEndpointRaw = typeof input.stream_endpoint === "string" ? input.stream_endpoint : (existing?.stream_endpoint || "");
+  const sep = validateVoiceStreamEndpoint(streamEndpointRaw);
+  if (!sep.ok) return sep;
+
+  const streamResourceIdRaw =
+    typeof input.stream_resource_id === "string"
+      ? input.stream_resource_id.trim()
+      : (existing?.stream_resource_id || "");
+  if (streamResourceIdRaw && !STREAM_RESOURCE_SET.has(streamResourceIdRaw)) {
+    return { ok: false, error: "invalid_stream_resource_id", message: "流式资源 ID 不是豆包控制台提供的有效选项" };
+  }
 
   const enabled = typeof input.enabled === "boolean"
     ? input.enabled
@@ -337,21 +404,23 @@ export function saveNetworkVoiceConfig(
   const now = Date.now();
   db.run(
     `INSERT INTO network_voice_configs
-       (network_id, enabled, provider, auth_mode, app_id, endpoint, key_hint, ciphertext_b64, iv_b64, tag_b64, updated_at, updated_by)
-     VALUES (?1, ?2, 'doubao', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+       (network_id, enabled, provider, auth_mode, app_id, endpoint, stream_endpoint, stream_resource_id, key_hint, ciphertext_b64, iv_b64, tag_b64, updated_at, updated_by)
+     VALUES (?1, ?2, 'doubao', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
      ON CONFLICT(network_id) DO UPDATE SET
        enabled = ?2,
        provider = 'doubao',
        auth_mode = ?3,
        app_id = ?4,
        endpoint = ?5,
-       key_hint = ?6,
-       ciphertext_b64 = ?7,
-       iv_b64 = ?8,
-       tag_b64 = ?9,
-       updated_at = ?10,
-       updated_by = ?11`,
-    [networkId, enabled ? 1 : 0, authMode, appId, ep.url, keyHint, ciphertextB64, ivB64, tagB64, now, actorUserId ?? actorUsername ?? ""],
+       stream_endpoint = ?6,
+       stream_resource_id = ?7,
+       key_hint = ?8,
+       ciphertext_b64 = ?9,
+       iv_b64 = ?10,
+       tag_b64 = ?11,
+       updated_at = ?12,
+       updated_by = ?13`,
+    [networkId, enabled ? 1 : 0, authMode, appId, ep.url, sep.url, streamResourceIdRaw, keyHint, ciphertextB64, ivB64, tagB64, now, actorUserId ?? actorUsername ?? ""],
   );
 
   logAudit(
@@ -365,6 +434,8 @@ export function saveNetworkVoiceConfig(
       provider: "doubao",
       auth_mode: authMode,
       custom_endpoint: !!ep.url,
+      custom_stream_endpoint: !!sep.url,
+      stream_resource_id: streamResourceIdRaw || undefined,
       key_rotated: !!rawSecret,
     }),
     undefined,
@@ -383,184 +454,4 @@ export function deleteNetworkVoiceConfig(
   db.run("DELETE FROM network_voice_configs WHERE network_id = ?1", [networkId]);
   logAudit(actorUserId, actorUsername, "voice_config.delete", "network_voice", networkId, "cleared", undefined, networkId);
   return readNetworkVoiceConfig(networkId, true);
-}
-
-const digits = (s: string | null | undefined): string | undefined => {
-  const t = (s ?? "").trim();
-  return /^\d{1,12}$/.test(t) ? t : undefined;
-};
-
-/** Pure mapping from Volcengine Doubao Flash HTTP status + X-Api-Status-Code + JSON body. */
-export function interpretDoubaoFlashResponse(
-  httpStatus: number,
-  apiStatus: string | null | undefined,
-  body: unknown,
-): { text: string } | { error: VoiceAsrErrorCode; upstream?: string } {
-  const code = digits(apiStatus);
-  if (httpStatus === 401) return { error: "auth_failed", upstream: "401" };
-  if (httpStatus === 403) return { error: "not_enabled", upstream: "403" };
-  if (httpStatus === 429) return { error: "rate_limited", upstream: "429" };
-  if (code === "20000003" || code === "45000002") return { text: "" };
-  if (code === "45000151") return { error: "bad_audio", upstream: code };
-  if (code === "55000031") return { error: "rate_limited", upstream: code };
-  if (httpStatus >= 200 && httpStatus < 300 && code === "20000000") {
-    const text = (body as { result?: { text?: unknown } } | null)?.result?.text;
-    if (typeof text !== "string") return { error: "upstream_error", upstream: "no_text" };
-    return { text: text.trim() };
-  }
-  return { error: "upstream_error", upstream: code ?? (httpStatus ? String(httpStatus) : undefined) };
-}
-
-/** Validate base64 WAV payload and enforce MAX_WAV_BYTES cap. */
-export function validateWavBase64(
-  raw: unknown,
-): { ok: true; wavBase64: string; byteLength: number } | { ok: false; status: number; code: "bad_audio" | "too_long"; error: string } {
-  if (typeof raw !== "string") {
-    return { ok: false, status: 400, code: "bad_audio", error: "wav_base64_required" };
-  }
-  const cleaned = raw.replace(/\s+/g, "");
-  if (!cleaned) {
-    return { ok: false, status: 400, code: "bad_audio", error: "wav_base64_empty" };
-  }
-  // Quick pre-decode length check before allocating buffer.
-  const maxBase64Chars = Math.ceil(MAX_WAV_BYTES / 3) * 4 + 4;
-  if (cleaned.length > maxBase64Chars) {
-    return { ok: false, status: 413, code: "too_long", error: "audio_too_long" };
-  }
-  if (cleaned.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(cleaned)) {
-    return { ok: false, status: 400, code: "bad_audio", error: "invalid_base64" };
-  }
-  const buf = Buffer.from(cleaned, "base64");
-  if (buf.length === 0) {
-    return { ok: false, status: 400, code: "bad_audio", error: "wav_base64_empty" };
-  }
-  if (buf.length > MAX_WAV_BYTES) {
-    return { ok: false, status: 413, code: "too_long", error: "audio_too_long" };
-  }
-  return { ok: true, wavBase64: cleaned, byteLength: buf.length };
-}
-
-function asrErrorHttpStatus(code: VoiceAsrErrorCode): number {
-  switch (code) {
-    case "not_configured": return 409;
-    case "too_long": return 413;
-    case "bad_audio": return 400;
-    case "rate_limited": return 429;
-    case "timeout": return 504;
-    // Upstream Volcengine 401/403 must NEVER map to HTTP 401/403 so clients do not
-    // misclassify a bad ASR credential as an expired ANet Hub login session.
-    case "auth_failed":
-    case "not_enabled":
-    case "network":
-    case "upstream_error":
-      return 502;
-  }
-}
-
-/** Proxy one WAV recognition request using the network's encrypted Doubao ASR credentials. */
-export async function recognizeNetworkVoice(
-  networkId: string,
-  wavBase64Input: unknown,
-  opts?: { fetchImpl?: VoiceFetchLike; timeoutMs?: number; requestId?: string; allowLoopback?: boolean },
-): Promise<VoiceRecognizeResult> {
-  const row = db.get<StoredSecretRow>(
-    `SELECT enabled, provider, auth_mode, app_id, endpoint, key_hint,
-            ciphertext_b64, iv_b64, tag_b64,
-            CASE WHEN ciphertext_b64 IS NOT NULL AND ciphertext_b64 != '' THEN 1 ELSE 0 END AS configured,
-            updated_at
-       FROM network_voice_configs
-      WHERE network_id = ?1`,
-    networkId,
-  );
-  if (!row || Number(row.configured) !== 1 || Number(row.enabled) !== 1) {
-    return { ok: false, status: 409, code: "not_configured", error: "voice_not_configured" };
-  }
-
-  const audio = validateWavBase64(wavBase64Input);
-  if (!audio.ok) {
-    return { ok: false, status: audio.status, code: audio.code, error: audio.error };
-  }
-
-  const ep = validateVoiceEndpoint(row.endpoint || "", opts);
-  if (!ep.ok) {
-    return { ok: false, status: 502, code: "upstream_error", error: "invalid_configured_endpoint" };
-  }
-
-  let accessToken: string;
-  try {
-    accessToken = decryptSecret({
-      ciphertext: Buffer.from(row.ciphertext_b64, "base64"),
-      iv: Buffer.from(row.iv_b64, "base64"),
-      tag: Buffer.from(row.tag_b64, "base64"),
-    });
-  } catch (e) {
-    const errCode = e instanceof VaultError ? e.code : "vault_decrypt_failed";
-    return { ok: false, status: 503, code: "upstream_error", error: errCode };
-  }
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-Api-Resource-Id": DOUBAO_FLASH_RESOURCE_ID,
-    "X-Api-Request-Id": opts?.requestId ?? randomUUID(),
-    "X-Api-Sequence": "-1",
-  };
-  if (row.auth_mode === "app-token" && row.app_id) {
-    headers["X-Api-App-Key"] = row.app_id;
-    headers["X-Api-Access-Key"] = accessToken;
-  } else {
-    headers["X-Api-Key"] = accessToken;
-  }
-
-  const url = ep.url || DOUBAO_DEFAULT_ENDPOINT;
-  const payload = JSON.stringify({
-    user: { uid: "anet-hub-voice" },
-    audio: { data: audio.wavBase64, format: "wav" },
-    request: { model_name: "bigmodel", enable_itn: true, enable_punc: true },
-  });
-
-  const fetchImpl: VoiceFetchLike = opts?.fetchImpl ?? ((u, init) => fetch(u, init));
-  const timeoutMs = opts?.timeoutMs ?? REQUEST_TIMEOUT_MS;
-  const ctrl = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    ctrl.abort();
-  }, timeoutMs);
-
-  try {
-    const res = await fetchImpl(url, {
-      method: "POST",
-      headers,
-      body: payload,
-      signal: ctrl.signal,
-    });
-    let body: unknown = null;
-    try {
-      body = await res.json();
-    } catch {
-      body = null;
-    }
-    const interpreted = interpretDoubaoFlashResponse(
-      res.status,
-      res.headers.get("X-Api-Status-Code"),
-      body,
-    );
-    if ("error" in interpreted) {
-      return {
-        ok: false,
-        status: asrErrorHttpStatus(interpreted.error),
-        code: interpreted.error,
-        error: interpreted.error,
-        ...(interpreted.upstream ? { upstream: interpreted.upstream } : {}),
-      };
-    }
-    return { ok: true, status: 200, text: interpreted.text };
-  } catch {
-    if (timedOut) {
-      return { ok: false, status: 504, code: "timeout", error: "upstream_timeout" };
-    }
-    return { ok: false, status: 502, code: "network", error: "upstream_network_error" };
-  } finally {
-    clearTimeout(timer);
-  }
 }

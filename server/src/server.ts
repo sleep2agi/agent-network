@@ -123,10 +123,9 @@ import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, conditionalJson, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
 import {
-  MAX_RECOGNIZE_BODY_BYTES,
   deleteNetworkVoiceConfig,
   readNetworkVoiceConfig,
-  recognizeNetworkVoice,
+  readNetworkVoiceCredentials,
   saveNetworkVoiceConfig,
   voiceWriteStatus,
 } from "./voice-asr.js";
@@ -4898,13 +4897,14 @@ return Bun.serve({
       return withCors(req, Response.json({ ...saved, network_id: networkId }));
     }
 
-    // ── #5653: Network-managed Voice ASR config & authenticated proxy ──
+    // ── #5653: Network-managed Voice ASR config & authenticated member key distribution ──
     //
     // Network owner/admin configures Doubao ASR credentials once on the Hub
-    // (encrypted at rest via vault.ts in `network_voice_configs`, never echoed).
-    // All authenticated members in that network can read non-secret availability
-    // via GET /api/voice/config and transcribe audio via POST /api/voice/recognize
-    // without ever seeing or configuring a Volcengine key locally.
+    // (encrypted at rest via vault.ts in `network_voice_configs`, isolated from
+    // node-facing `network_secrets`). Authenticated human members read non-secret
+    // status via GET /api/voice/config and fetch credentials via GET /api/voice/credentials
+    // (Cache-Control: no-store) so clients connect directly to Doubao (streaming + flash)
+    // without forwarding audio through the Hub.
     if (url.pathname === "/api/voice/config" && (req.method === "GET" || req.method === "PUT" || req.method === "DELETE")) {
       if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       if (restAuth.networkId) return userTokenRequired(req);
@@ -4956,47 +4956,20 @@ return Bun.serve({
       return withCors(req, res);
     }
 
-    if (url.pathname === "/api/voice/recognize" && req.method === "POST") {
+    if (url.pathname === "/api/voice/credentials" && req.method === "GET") {
       if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       if (restAuth.networkId) return userTokenRequired(req);
-      const declaredLen = Number(req.headers.get("content-length") ?? "0");
-      if (Number.isFinite(declaredLen) && declaredLen > MAX_RECOGNIZE_BODY_BYTES) {
-        return withCors(req, Response.json({ ok: false, code: "too_long", error: "audio_too_long" }, { status: 413 }));
-      }
-      let rawText = "";
-      try {
-        rawText = await req.text();
-      } catch {
-        return withCors(req, Response.json({ ok: false, code: "bad_audio", error: "invalid_body" }, { status: 400 }));
-      }
-      if (Buffer.byteLength(rawText, "utf8") > MAX_RECOGNIZE_BODY_BYTES) {
-        return withCors(req, Response.json({ ok: false, code: "too_long", error: "audio_too_long" }, { status: 413 }));
-      }
-      let body: Record<string, unknown>;
-      try {
-        const parsed = JSON.parse(rawText);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          return withCors(req, Response.json({ ok: false, code: "bad_audio", error: "invalid_json" }, { status: 400 }));
-        }
-        body = parsed as Record<string, unknown>;
-      } catch {
-        return withCors(req, Response.json({ ok: false, code: "bad_audio", error: "invalid_json" }, { status: 400 }));
-      }
-      const bodyNetId = typeof body.network_id === "string" && body.network_id.trim() ? body.network_id.trim() : null;
-      const voiceScope = bodyNetId ? resolveRestNetworkScope(bodyNetId, restAuth, isAdmin) : restScope;
-      if (voiceScope.denied) {
-        return withCors(req, Response.json({ ok: false, error: voiceScope.denied }, { status: 403 }));
-      }
-      const networkId = resolveRestWriteNetworkId(voiceScope, restAuth, isAdmin);
+      const networkId = resolveRestWriteNetworkId(restScope, restAuth, isAdmin);
       if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
       const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
       if (!isAdmin && !role) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
       }
-      const rec = await recognizeNetworkVoice(networkId, body.wav_base64);
-      const { status, ...payload } = rec;
+      const issued = readNetworkVoiceCredentials(networkId);
+      const { status, ...payload } = issued;
       const res = Response.json(payload, { status });
       res.headers.set("Cache-Control", "no-store");
+      res.headers.set("Pragma", "no-cache");
       return withCors(req, res);
     }
 
