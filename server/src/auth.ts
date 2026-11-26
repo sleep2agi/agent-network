@@ -790,6 +790,7 @@ export function addNetworkMember(networkId: string, userId: string, role: string
 
 export function updateMemberRole(networkId: string, userId: string, newRole: string): { ok: boolean; error?: string } {
   if (newRole === "owner") return { ok: false, error: "cannot assign owner role" };
+  if (typeof newRole !== "string" || !MEMBER_ROLES.has(newRole)) return { ok: false, error: "invalid role" };
   const result = db.run("UPDATE network_members SET role = ?1 WHERE network_id = ?2 AND user_id = ?3 AND role != 'owner'",
     [newRole, networkId, userId]);
   return result.changes > 0 ? { ok: true } : { ok: false, error: "member not found or is owner" };

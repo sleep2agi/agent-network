@@ -3546,22 +3546,26 @@ return Bun.serve({
     // ── V3.13: Network members + invites ──
     const membersMatch = url.pathname.match(/^\/api\/networks\/([^/]+)\/members(?:\/([^/]+))?$/);
     if (membersMatch) {
+      const netId = membersMatch[1];
+      const targetUid = membersMatch[2];
+      const membersMethodAllowed = targetUid
+        ? (req.method === "PUT" || req.method === "DELETE")
+        : (req.method === "GET" || req.method === "POST");
+      if (membersMethodAllowed) {
       const token = req.headers.get("Authorization")?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
       const resolved = resolveToken(token);
       if (!resolved) return withCors(req, Response.json({ ok: false, error: "invalid token", ...(tokenRejection(token) ?? {}) }, { status: 401 }));
       if (isNodeCredential(resolved)) return userTokenRequired(req);
-      const netId = membersMatch[1];
-      const targetUid = membersMatch[2];
       const callerRole = getUserNetworkRole(resolved.user.user_id, netId);
       if (!callerRole) return withCors(req, Response.json({ ok: false, error: "not a member of this network" }, { status: 403 }));
 
-      if (req.method === "GET") {
+      if (req.method === "GET" && !targetUid) {
         if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
         const members = getNetworkMembers(netId);
         return withCors(req, Response.json({ ok: true, members }));
       }
-      if (req.method === "POST") {
+      if (req.method === "POST" && !targetUid) {
         if (!["owner", "admin"].includes(callerRole)) return withCors(req, Response.json({ ok: false, error: "owner/admin required" }, { status: 403 }));
         const body = await req.json() as any;
         // agent_access 缺省 'granted'(新成员看不到任何 Agent);owner/admin 可显式传 'all' 加一个完全信任的成员。
@@ -3578,7 +3582,11 @@ return Bun.serve({
       }
       if (req.method === "PUT" && targetUid) {
         if (callerRole !== "owner") return withCors(req, Response.json({ ok: false, error: "owner required" }, { status: 403 }));
-        const body = await req.json() as any;
+        let body: any;
+        try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 }));
+        }
         const result = updateMemberRole(netId, targetUid, body.role);
         if (result.ok) {
           logAudit(resolved.user.user_id, resolved.user.username, "member_role_changed", "network", netId, `${targetUid} → ${body.role}`, undefined, netId);
@@ -3594,6 +3602,7 @@ return Bun.serve({
           closeUserStreamsInNetwork(netId, targetUid);
         }
         return withCors(req, Response.json(result, { status: result.ok ? 200 : 400 }));
+      }
       }
     }
 
