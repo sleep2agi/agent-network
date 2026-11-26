@@ -1709,8 +1709,23 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_status ON tasks(netw
 // (57k tasks, 1.9k in the last 24 h) the statement went from ~3 ms (idx_tasks_created + one row lookup per task) to
 // ~0.3 ms; building it there took ~170 ms once. Plain composite index: the same DDL runs on PostgreSQL.
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_queue ON tasks(created_at, status, network_id, to_name)"); } catch {}
+// #5614 —— `GET /api/tasks`（通知 / 聊天时间线，limit≤50、skip_stats=1）在 2026-11-26 生产停顿窗口里排第二（单次 ~335ms）。
+// 生产只读副本（13.3 万行）实测：只按网络 424ms、网络 + from_name 346ms —— 都是用单列网络索引取出全网络行再建临时 B 树排序。
+// 三个复合索引都带上排序的两列 (created_at, task_id)，让 `ORDER BY created_at DESC, task_id DESC LIMIT n` 直接按索引倒序取前 n 条：
+// 同规模合成库 340ms → 0.06ms、82ms → 0.07ms；带 to_name 的也不退化（含很少收到任务的节点：0.02 → 0.01ms）。
+// 只带 (network_id, created_at) 不够：规划器会为了省排序改走它、在全网络里逐行过滤 to_name（冷门节点 52ms），所以 to / from 各要一条。
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_created ON tasks(network_id, created_at, task_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_to_created ON tasks(network_id, to_name, created_at, task_id)"); } catch {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_from_created ON tasks(network_id, from_name, created_at, task_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodes_network ON nodes(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)"); } catch {}
+// #5614 —— `GET /api/messages`（App 回复未读 / 通知每 10 s 读一次，limit=300）是 2026-11-26 生产停顿窗口里
+// 耗时第一的路由（单次 ~650ms，5–9 秒停顿里出现 4–8 次）。原因：只有上面的单列索引，
+// `WHERE network_id IN (…) AND created_at >= ? ORDER BY created_at DESC LIMIT n` 要把该网络**全部** inbox 行
+// （生产约 9 万）取出来再建临时 B 树排序 —— 生产只读副本实测整读 7 天 622ms，增量（2 分钟）也要 139ms。
+// 加 (network_id, created_at) 复合索引后按范围倒序直接取前 n 条：同规模合成库整读 105ms → 0.6ms、增量 33ms → 0.01ms，
+// 计划里不再有 TEMP B-TREE。只加索引、不改查询；普通复合索引，PostgreSQL 上同样的 DDL 也成立。
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network_created ON inbox(network_id, created_at)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_network ON task_events(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions(network_id)"); } catch {}
 
