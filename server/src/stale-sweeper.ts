@@ -26,6 +26,7 @@
 // Same pattern as `src/retention.ts` for shutdown (clearInterval in
 // the graceful shutdown handler).
 
+import { timedJob } from "./route-timing.js";
 import { db } from "./db.js";
 
 export type StaleSweepResult = {
@@ -110,5 +111,5 @@ export function startStaleSessionSweeper(
   // after server start gets fresh stale state without blocking
   // startup.
   setImmediate(sweep);
-  return setInterval(sweep, ms);
+  return setInterval(timedJob("stale-session-sweep", sweep), ms);
 }

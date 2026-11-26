@@ -23,6 +23,7 @@
 // Run isolated tests against retention.test.ts:
 //   COMMHUB_DB=/tmp/test-retention.db bun test src/retention.test.ts
 
+import { timedJob } from "./route-timing.js";
 import { db } from "./db.js";
 import { getMcpInflightStats } from "./mcp-inflight.js";
 import { eventLoopStats } from "./event-loop-lag.js";
@@ -584,5 +585,5 @@ export function startRetentionSweeper(
   };
   if (firstDelayMs > 0) setTimeout(() => { void firstSweep(); }, 0).unref?.();
   else setImmediate(() => { void firstSweep(); });
-  return setInterval(() => { void sweep(); }, intervalMs);
+  return setInterval(timedJob("retention-sweep", () => { void sweep(); }), intervalMs);
 }

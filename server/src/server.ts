@@ -135,7 +135,7 @@ import { requestProviderApplication } from "./daemon-provider-snapshots.js";
 import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
-import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader, takeTickRouteCosts } from "./route-timing.js";
+import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader, takeTickRouteCosts, timedJob } from "./route-timing.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
 import { createSessionSourceTransport } from "./session-source-transport.js";
@@ -8216,8 +8216,8 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
       console.log(`[commhub acked-unconfirmed] sweep failed: ${e?.message ?? e}`);
     }
   };
-  const ackedSweepTimer = setInterval(ackedSweep, 60 * 1000);
-  const emptyNodeGcTimer = setInterval(sweepEmptyNodes, 24 * 60 * 60 * 1000);
+  const ackedSweepTimer = setInterval(timedJob("acked-sweep", ackedSweep), 60 * 1000);
+  const emptyNodeGcTimer = setInterval(timedJob("empty-node-gc", sweepEmptyNodes), 24 * 60 * 60 * 1000);
 
   // #2614 —— 事件循环停顿监测。放这里是因为 startHub() 才是“真的在跑一个 Hub”
   // 的入口（测试用 bootServer() 不会背这个 timer）。停顿日志与
@@ -8254,7 +8254,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     }
   };
   refreshBaseline();
-  const aliasBaselineTimer = setInterval(refreshBaseline, 60 * 60 * 1000);
+  const aliasBaselineTimer = setInterval(timedJob("alias-baseline", refreshBaseline), 60 * 60 * 1000);
 
   // Round-2/4 review ③ — stale session sweeper (coexists with the
   // retention sweeper above; different concerns + different cadences).
@@ -8271,7 +8271,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // 只算确定性错误时 7 天 6 条（0.9/天）；把 timeout 也算进去会变成 35 条。
   const nodeFailureAlertMs = Number(process.env.COMMHUB_NODE_FAILURE_ALERT_MS) > 0
     ? Number(process.env.COMMHUB_NODE_FAILURE_ALERT_MS) : 5 * 60 * 1000;
-  const nodeFailureAlertTimer = setInterval(() => {
+  const nodeFailureAlertTimer = setInterval(timedJob("node-failure-alert", () => {
     try {
       const r = scanNodeFailureAlerts();
       if (r.alerts > 0) console.log(`[commhub node-failure-alert] sent ${r.alerts} alert(s): ${r.nodes.join(", ")}`);
@@ -8285,7 +8285,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     } catch (e: any) {
       console.log(`[commhub node-auth-blocked-alert] failed: ${e?.message ?? e}`);
     }
-  }, nodeFailureAlertMs);
+  }), nodeFailureAlertMs);
   (nodeFailureAlertTimer as any).unref?.();
 
   // #2880 —— 空转排程巡检：默认**只记录**「本来会被暂停哪些」，不动作。
@@ -8294,7 +8294,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
   // 🔴 「只在候选集合变化时打一行」——每 5 分钟打一次等于 288 行/天，
   //    那正是这套机制要治的噪音（2026-10-28 上线 15 分钟就打了 8 行才被发现）。
   let lastStarvedKey = "";
-  const scheduleStarvedTimer = setInterval(() => {
+  const scheduleStarvedTimer = setInterval(timedJob("schedule-starved", () => {
     try {
       const r = scanStarvedSchedules();
       if (r.paused.length > 0) {
@@ -8311,14 +8311,14 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     } catch (e: any) {
       console.log(`[commhub schedule-starved] failed: ${e?.message ?? e}`);
     }
-  }, nodeFailureAlertMs);
+  }), nodeFailureAlertMs);
   (scheduleStarvedTimer as any).unref?.();
 
   // #2880 —— 节点级「不可服务」检测：窗口内忙类失败多、成功为零 ⇒ 这个节点现在投进去必然白等。
   // 与排程级分开：排程是「某条排程该停」，这里是「某台节点该暂时不投」。
   // 默认只记录；开启 COMMHUB_NODE_BUSY_CIRCUIT=1 才用于派发判断。
   let lastCircuitKey = "";
-  const nodeBusyCircuitTimer = setInterval(() => {
+  const nodeBusyCircuitTimer = setInterval(timedJob("node-busy-circuit", () => {
     try {
       const r = scanNodeBusyCircuit();
       if (!r.enabled) {
@@ -8333,7 +8333,7 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     } catch (e: any) {
       console.log(`[commhub node-busy-circuit] failed: ${e?.message ?? e}`);
     }
-  }, nodeFailureAlertMs);
+  }), nodeFailureAlertMs);
   (nodeBusyCircuitTimer as any).unref?.();
 
   // #476 — the two legacy module-level intervals, now owned by startHub
@@ -8347,10 +8347,10 @@ export function startHub(opts?: { port?: number; hostname?: string }): ReturnTyp
     ? Number(process.env.COMMHUB_TASK_PATROL_MS) : 5 * 60 * 1000;
   const deliveredStalePatrolMs = Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) > 0
     ? Number(process.env.COMMHUB_DELIVERED_STALE_PATROL_MS) : 5 * 1000;
-  const rateLimitSweepTimer = setInterval(sweepStaleRateLimits, rateLimitSweepMs);
-  const taskPatrolTimer = setInterval(() => { patrolExpiredTasks(); patrolOrphanTasks(); }, taskPatrolMs);
+  const rateLimitSweepTimer = setInterval(timedJob("ratelimit-sweep", sweepStaleRateLimits), rateLimitSweepMs);
+  const taskPatrolTimer = setInterval(() => { timedJob("task-expiry-patrol", patrolExpiredTasks)(); timedJob("task-orphan-patrol", patrolOrphanTasks)(); }, taskPatrolMs);
   patrolDeliveredStaleTasks();
-  const deliveredStalePatrolTimer = setInterval(patrolDeliveredStaleTasks, deliveredStalePatrolMs);
+  const deliveredStalePatrolTimer = setInterval(timedJob("delivered-stale-patrol", patrolDeliveredStaleTasks), deliveredStalePatrolMs);
   const scheduledTaskTimer = startScheduledTaskScheduler();
   // #492 —— 任务到期提醒(默认每 10 分钟;COMMHUB_DUE_REMINDERS=0 关掉)。bootServer 不起它,测试按需直接调 runDueReminders。
   const dueReminderTimer = startDueReminderTimer();
