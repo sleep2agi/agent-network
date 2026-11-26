@@ -74,6 +74,7 @@ export interface NetworkVoicePublicConfig {
   endpoint: string;
   stream_endpoint: string;
   stream_resource_id: string;
+  can_use: boolean;
   can_manage: boolean;
   vault_ready: boolean;
   updated_at: number | null;
@@ -200,6 +201,7 @@ function toPublicConfig(
   networkId: string,
   row: StoredMetaRow | null | undefined,
   canManage: boolean,
+  canUse: boolean,
 ): NetworkVoicePublicConfig {
   const configured = !!row && Number(row.configured) === 1;
   const authMode: VoiceAuthMode = row?.auth_mode === "app-token" ? "app-token" : "api-key";
@@ -216,6 +218,7 @@ function toPublicConfig(
     endpoint: row?.endpoint || "",
     stream_endpoint: row?.stream_endpoint || "",
     stream_resource_id: row?.stream_resource_id || "",
+    can_use: canUse,
     can_manage: canManage,
     vault_ready: isVoiceVaultReady(),
     updated_at: row?.updated_at != null ? Number(row.updated_at) : null,
@@ -223,7 +226,11 @@ function toPublicConfig(
 }
 
 /** Read public non-secret projection for a network. Never selects ciphertext columns. */
-export function readNetworkVoiceConfig(networkId: string, canManage: boolean): NetworkVoicePublicConfig {
+export function readNetworkVoiceConfig(
+  networkId: string,
+  canManage: boolean,
+  canUse = true,
+): NetworkVoicePublicConfig {
   const row = db.get<StoredMetaRow>(
     `SELECT enabled, provider, auth_mode, app_id, endpoint, stream_endpoint, stream_resource_id, key_hint,
             CASE WHEN ciphertext_b64 IS NOT NULL AND ciphertext_b64 != '' THEN 1 ELSE 0 END AS configured,
@@ -232,11 +239,14 @@ export function readNetworkVoiceConfig(networkId: string, canManage: boolean): N
       WHERE network_id = ?1`,
     networkId,
   );
-  return toPublicConfig(networkId, row, canManage);
+  return toPublicConfig(networkId, row, canManage, canUse);
 }
 
-/** Decrypt & issue active network voice credentials to an authenticated member (caller enforces authz). */
-export function readNetworkVoiceCredentials(networkId: string): VoiceCredentialsReadResult {
+/** Decrypt & issue active network voice credentials to an authorized member (caller enforces authz) and record audit trail. */
+export function readNetworkVoiceCredentials(
+  networkId: string,
+  actor?: { userId: string | null; username: string | null },
+): VoiceCredentialsReadResult {
   const row = db.get<StoredSecretRow>(
     `SELECT enabled, provider, auth_mode, app_id, endpoint, stream_endpoint, stream_resource_id, key_hint,
             ciphertext_b64, iv_b64, tag_b64,
@@ -261,6 +271,16 @@ export function readNetworkVoiceCredentials(networkId: string): VoiceCredentials
     return { ok: false, status: 503, error: errCode, message: "Hub 加密主密钥不可用，无法读取语音配置" };
   }
   const authMode: VoiceAuthMode = row.auth_mode === "app-token" ? "app-token" : "api-key";
+  logAudit(
+    actor?.userId ?? null,
+    actor?.username ?? null,
+    "voice_credentials.issue",
+    "network_voice",
+    networkId,
+    JSON.stringify({ auth_mode: authMode }),
+    undefined,
+    networkId,
+  );
   return {
     ok: true,
     status: 200,

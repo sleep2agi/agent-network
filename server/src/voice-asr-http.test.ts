@@ -15,6 +15,7 @@ let globalAdminNetworkId = "";
 let ownerToken = "";
 let ownerNetworkId = "";
 let memberToken = "";
+let viewerToken = "";
 let outsiderToken = "";
 let outsiderNetworkId = "";
 let nodeToken = "";
@@ -42,6 +43,15 @@ beforeAll(async () => {
     `voice_member_${suffix}`,
   )!.user_id;
   addNetworkMember(ownerNetworkId, memberUserId, "member");
+
+  const viewer = register(`voice_viewer_${suffix}`, "VoiceViewer-Strong-1!", undefined, "viewer");
+  expect(viewer.ok).toBe(true);
+  viewerToken = viewer.token!;
+  const viewerUserId = db.get<{ user_id: string }>(
+    "SELECT user_id FROM users WHERE username = ?1",
+    `voice_viewer_${suffix}`,
+  )!.user_id;
+  addNetworkMember(ownerNetworkId, viewerUserId, "viewer");
 
   const outsider = register(`voice_outsider_${suffix}`, "VoiceOutsider-Strong-1!", undefined, "outsider");
   expect(outsider.ok).toBe(true);
@@ -182,6 +192,33 @@ describe("Hub /api/voice/* key distribution HTTP endpoints (#5653)", () => {
         stream_resource_id: "volc.bigasr.sauc.duration",
       },
     });
+
+    // Issuance is audited with actor + network and NEVER records the secret key
+    const { db } = await import("./db.js");
+    const issueAudits = db.all<any>(
+      "SELECT user_id, username, action, target_id, detail, network_id FROM audit_log WHERE action = 'voice_credentials.issue' AND network_id = ?1",
+      ownerNetworkId,
+    );
+    expect(issueAudits.length).toBeGreaterThanOrEqual(1);
+    expect(issueAudits[0].username).toContain("voice_member_");
+    expect(JSON.stringify(issueAudits)).not.toContain(apiKey);
+
+    // Read-only viewer gets can_use=false on /api/voice/config and 403 on /api/voice/credentials
+    const viewerCfg = await fetch(`${base}/api/voice/config?network_id=${ownerNetworkId}`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
+    expect(viewerCfg.status).toBe(200);
+    expect(await viewerCfg.json()).toMatchObject({ ok: true, can_use: false, can_manage: false });
+
+    const viewerCreds = await fetch(`${base}/api/voice/credentials?network_id=${ownerNetworkId}`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
+    expect(viewerCreds.status).toBe(403);
+    expect(await viewerCreds.json()).toMatchObject({ ok: false, error: "voice_viewer_forbidden" });
+
+    // Network deletion guard recognizes network_voice_configs as network content
+    const { countNetworkContents } = await import("./auth.js");
+    expect(countNetworkContents(ownerNetworkId).network_voice_configs).toBe(1);
 
     // Outsider cannot read config or fetch credentials of owner's network
     const outGet = await fetch(`${base}/api/voice/config?network_id=${ownerNetworkId}`, {

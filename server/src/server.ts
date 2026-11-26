@@ -4929,11 +4929,12 @@ return Bun.serve({
       if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
       const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
       const canManage = isAdmin || role === "owner" || role === "admin";
+      const canUse = canManage || role === "member";
       if (req.method === "GET") {
         if (!isAdmin && !role) {
           return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
         }
-        const res = Response.json(readNetworkVoiceConfig(networkId, canManage));
+        const res = Response.json(readNetworkVoiceConfig(networkId, canManage, canUse));
         res.headers.set("Cache-Control", "no-store");
         return withCors(req, res);
       }
@@ -4965,7 +4966,18 @@ return Bun.serve({
       if (!isAdmin && !role) {
         return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
       }
-      const issued = readNetworkVoiceCredentials(networkId);
+      const canUse = isAdmin || role === "owner" || role === "admin" || role === "member";
+      if (!canUse) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "voice_viewer_forbidden",
+          message: "只读成员（viewer）无对话权限，不发放网络共享语音 Key",
+        }, { status: 403 }));
+      }
+      const issued = readNetworkVoiceCredentials(networkId, {
+        userId: restAuth.userId ?? null,
+        username: restAuth.username ?? null,
+      });
       const { status, ...payload } = issued;
       const res = Response.json(payload, { status });
       res.headers.set("Cache-Control", "no-store");
