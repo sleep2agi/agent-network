@@ -122,6 +122,13 @@ import { assertScheduledTaskBackendSupported, handleScheduledTaskRequest, startS
 import { startDueReminderTimer } from "./requirement-due-reminders.js";
 import { clearNodeFromRequirements, conditionalJson, handleRequirementsRequest } from "./requirements.js";
 import { readHubProviders, putHubProvider, providerWriteStatus } from "./hub-provider-config.js";
+import {
+  deleteNetworkVoiceConfig,
+  readNetworkVoiceConfig,
+  readNetworkVoiceCredentials,
+  saveNetworkVoiceConfig,
+  voiceWriteStatus,
+} from "./voice-asr.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
 // #4495 —— 源目录 / 新建节点 / 复用已有 Session 的能力值。Hub 只认这几个**精确**字符串,
 // 别的值一律不投影(daemon 上报的是自由 JSON,不能把任意串透给客户端当能力)。
@@ -4888,6 +4895,94 @@ return Bun.serve({
         return withCors(req, Response.json(saved, { status: providerWriteStatus(saved.error) }));
       }
       return withCors(req, Response.json({ ...saved, network_id: networkId }));
+    }
+
+    // ── #5653: Network-managed Voice ASR config & authenticated member key distribution ──
+    //
+    // Network owner/admin configures Doubao ASR credentials once on the Hub
+    // (encrypted at rest via vault.ts in `network_voice_configs`, isolated from
+    // node-facing `network_secrets`). Authenticated human members read non-secret
+    // status via GET /api/voice/config and fetch credentials via GET /api/voice/credentials
+    // (Cache-Control: no-store) so clients connect directly to Doubao (streaming + flash)
+    // without forwarding audio through the Hub.
+    if (url.pathname === "/api/voice/config" && (req.method === "GET" || req.method === "PUT" || req.method === "DELETE")) {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: Record<string, unknown> | null = null;
+      if (req.method === "PUT") {
+        try {
+          const parsed = await req.json();
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+          }
+          body = parsed as Record<string, unknown>;
+        } catch {
+          return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+        }
+      }
+      const bodyNetId = typeof body?.network_id === "string" && body.network_id.trim() ? body.network_id.trim() : null;
+      const voiceScope = bodyNetId ? resolveRestNetworkScope(bodyNetId, restAuth, isAdmin) : restScope;
+      if (voiceScope.denied) {
+        return withCors(req, Response.json({ ok: false, error: voiceScope.denied }, { status: 403 }));
+      }
+      const networkId = resolveRestWriteNetworkId(voiceScope, restAuth, isAdmin);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      const canManage = isAdmin || role === "owner" || role === "admin";
+      const canUse = canManage || role === "member";
+      if (req.method === "GET") {
+        if (!isAdmin && !role) {
+          return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
+        }
+        const res = Response.json(readNetworkVoiceConfig(networkId, canManage, canUse));
+        res.headers.set("Cache-Control", "no-store");
+        return withCors(req, res);
+      }
+      if (!canManage) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const actorUserId = restAuth.userId ?? null;
+      const actorUsername = restAuth.username ?? null;
+      if (req.method === "DELETE") {
+        const res = Response.json(deleteNetworkVoiceConfig(networkId, actorUserId, actorUsername));
+        res.headers.set("Cache-Control", "no-store");
+        return withCors(req, res);
+      }
+      const saved = saveNetworkVoiceConfig(networkId, actorUserId, actorUsername, body!);
+      if (!saved.ok) {
+        return withCors(req, Response.json(saved, { status: voiceWriteStatus(saved.error) }));
+      }
+      const res = Response.json(saved);
+      res.headers.set("Cache-Control", "no-store");
+      return withCors(req, res);
+    }
+
+    if (url.pathname === "/api/voice/credentials" && req.method === "GET") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      const networkId = resolveRestWriteNetworkId(restScope, restAuth, isAdmin);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      if (!isAdmin && !role) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
+      }
+      const canUse = isAdmin || role === "owner" || role === "admin" || role === "member";
+      if (!canUse) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: "voice_viewer_forbidden",
+          message: "只读成员（viewer）无对话权限，不发放网络共享语音 Key",
+        }, { status: 403 }));
+      }
+      const issued = readNetworkVoiceCredentials(networkId, {
+        userId: restAuth.userId ?? null,
+        username: restAuth.username ?? null,
+      });
+      const { status, ...payload } = issued;
+      const res = Response.json(payload, { status });
+      res.headers.set("Cache-Control", "no-store");
+      res.headers.set("Pragma", "no-cache");
+      return withCors(req, res);
     }
 
     // ── #1510: the log-only view of the secret transport gate ──
