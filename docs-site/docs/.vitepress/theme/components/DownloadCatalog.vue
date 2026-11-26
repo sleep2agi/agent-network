@@ -62,12 +62,14 @@ const copy = computed(() => props.lang === 'en' ? {
     deb: 'Debian package (.deb)',
     appimage: 'AppImage',
     apk: 'Package (.apk)',
+    hap: 'Package (.hap)',
     ipa: 'Audit package (.ipa)',
   },
   platforms: [
     { id: 'macos', title: 'macOS', note: 'Apple silicon. Open the disk image and drag Agent Network into Applications.' },
     { id: 'windows', title: 'Windows', note: '64-bit Windows 10/11. The .exe is the usual installer; the .msi is for managed installs.' },
     { id: 'android', title: 'Android', note: 'Test-signed package for Android 7.0 or newer. If the system blocks it, allow installs from this source.' },
+    { id: 'harmony', title: 'HarmonyOS', note: 'For HarmonyOS NEXT (HarmonyOS 5 / 6), which cannot install Android packages. HarmonyOS 4 and earlier can use the Android package above.' },
     { id: 'linux', title: 'Linux', note: 'Linux builds are not a priority in this release. Only published packages are listed.' },
     { id: 'ios', title: 'iOS', note: 'Distributed through TestFlight. There is no public testing link yet. An audit .ipa cannot be sideloaded.' },
   ],
@@ -93,12 +95,14 @@ const copy = computed(() => props.lang === 'en' ? {
     deb: 'Debian 包（.deb）',
     appimage: 'AppImage',
     apk: '安装包（.apk）',
+    hap: '安装包（.hap）',
     ipa: '审计包（.ipa）',
   },
   platforms: [
     { id: 'macos', title: 'macOS', note: 'Apple 芯片。打开 dmg，把 Agent Network 拖进「应用程序」。' },
     { id: 'windows', title: 'Windows', note: '64 位 Windows 10/11。.exe 是常规安装包；.msi 适合集中部署。' },
     { id: 'android', title: 'Android', note: '测试签名安装包，需 Android 7.0 及以上。系统若拦截，允许来自此来源的安装。' },
+    { id: 'harmony', title: '鸿蒙 HarmonyOS', note: '给鸿蒙 NEXT（HarmonyOS 5 / 6）用，这类系统装不了安卓包。HarmonyOS 4 及更早的版本直接用上面的安卓包。' },
     { id: 'linux', title: 'Linux', note: 'Linux 后续支持；这里只展示实际已发布的安装包。' },
     { id: 'ios', title: 'iOS', note: '只通过 TestFlight 分发，公开测试链接还没开。审计用 .ipa 不能侧载安装。' },
   ],
@@ -120,7 +124,9 @@ const kindLabel = (kind: string) => {
 
 onMounted(async () => {
   const ua = navigator.userAgent
-  currentPlatform.value = /Android/i.test(ua) ? 'android' : /Windows/i.test(ua) ? 'windows'
+  // 鸿蒙 NEXT 的浏览器 UA 带 OpenHarmony / HarmonyOS 且没有 Android;老鸿蒙(带 Android)仍按安卓推荐。
+  currentPlatform.value = /OpenHarmony|HarmonyOS/i.test(ua) && !/Android/i.test(ua) ? 'harmony'
+    : /Android/i.test(ua) ? 'android' : /Windows/i.test(ua) ? 'windows'
     : /Macintosh|Mac OS X/i.test(ua) && !/iPhone|iPad/i.test(ua) ? 'macos' : /Linux/i.test(ua) ? 'linux' : ''
   try {
     const response = await fetch(withBase('/api/desktop-downloads'), { cache: 'no-store' })
@@ -189,6 +195,12 @@ onMounted(async () => {
               <a v-if="asset.notesUrl" class="download-route" :href="asset.notesUrl">{{ copy.notes }}</a>
               <a v-if="asset.checksumUrl" class="download-route" :href="asset.checksumUrl">{{ copy.checksum }}</a>
             </div>
+          </div>
+        </div>
+        <div v-else-if="platform.id === 'harmony'" class="download-grid">
+          <div class="download-card download-card-pending" aria-disabled="true">
+            <span class="download-platform">{{ lang === 'en' ? 'HarmonyOS package (.hap)' : '鸿蒙安装包（.hap）' }}</span>
+            <strong>{{ lang === 'en' ? 'Coming soon' : '即将开放' }}</strong>
           </div>
         </div>
         <p v-else-if="platform.id !== 'ios'" class="download-note">{{ copy.missing }}</p>

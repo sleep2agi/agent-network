@@ -12,11 +12,13 @@ import {
 
 const MIRROR_ROOT = 'https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/desktop';
 
-export const PLATFORM_ORDER = ['macos', 'windows', 'android', 'linux', 'ios'];
+// harmony = HarmonyOS NEXT(鸿蒙 5/6,不能装 .apk)。admin 2026-11-26:官网要留鸿蒙下载位;发布里有 .hap 才出按钮。
+export const PLATFORM_ORDER = ['macos', 'windows', 'android', 'harmony', 'linux', 'ios'];
 export const ANDROID_ROOT = 'https://modelscope.cn/datasets/SmartFlowAI/agent-network-releases/resolve/master/android';
 
 export const assetArchitecture = (name) => {
   if (/android-universal|\.apk$/i.test(name)) return 'universal';
+  if (/\.hap$/i.test(name)) return 'arm64';
   if (/(?:aarch64|arm64)/i.test(name)) return 'arm64';
   if (/(?:x64|x86_64|amd64)/i.test(name)) return 'x64';
   return null;
@@ -36,6 +38,7 @@ export const classifyInstallAsset = (name) => {
   if (lower.endsWith('.deb')) return { platform: 'linux', kind: 'deb', role: 'install' };
   if (lower.endsWith('.appimage')) return { platform: 'linux', kind: 'appimage', role: 'install' };
   if (lower.endsWith('.apk')) return { platform: 'android', kind: 'apk', role: 'install' };
+  if (lower.endsWith('.hap')) return { platform: 'harmony', kind: 'hap', role: 'install' };
   if (lower.endsWith('.ipa')) return { platform: 'ios', kind: 'ipa', role: 'audit' };
   return null;
 };
@@ -79,7 +82,7 @@ const assetRecord = (releaseTag, version, asset) => {
   };
 };
 
-const kindRank = { dmg: 0, nsis: 0, deb: 0, apk: 0, ipa: 0, msi: 1, appimage: 1 };
+const kindRank = { dmg: 0, nsis: 0, deb: 0, apk: 0, hap: 0, ipa: 0, msi: 1, appimage: 1 };
 
 export const catalogFromRelease = (release, version) => (release?.assets ?? [])
   .map((asset) => assetRecord(release.tag_name, version, asset))

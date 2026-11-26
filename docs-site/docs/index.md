@@ -59,7 +59,7 @@ features:
   </div>
   <div class="download-grid">
     <a class="download-card download-card-primary" href="/download#macos"><span class="download-platform">电脑</span><strong>macOS / Windows / Linux</strong><small>打开下载页上的最新安装包</small></a>
-    <a class="download-card" href="/download#android"><span class="download-platform">手机</span><strong>Android / iOS</strong><small>Android 安装包；iOS 走 TestFlight</small></a>
+    <a class="download-card" href="/download#android"><span class="download-platform">手机</span><strong>Android / 鸿蒙 / iOS</strong><small>Android 安装包；鸿蒙即将开放；iOS 走 TestFlight</small></a>
   </div>
 </section>
 
