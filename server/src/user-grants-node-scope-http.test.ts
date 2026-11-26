@@ -10,7 +10,7 @@ const DIR = mkdtempSync(join(tmpdir(), "anet-user-grants-node-scope-"));
 process.env.COMMHUB_DB ||= join(DIR, "hub.db");
 let hub: ReturnType<typeof Bun.serve>;
 let base = "";
-let ownerToken = "", headToken = "";
+let ownerToken = "", headToken = "", scopedAdminToken = "", plainAdminToken = "";
 let net = "";
 let devNode = "", opsNode = "", noDeptNode = "";
 
@@ -43,10 +43,23 @@ beforeAll(async () => {
   db.run("UPDATE network_members SET agent_access = 'all' WHERE network_id = ?1 AND user_id = ?2", [net, headId]);
   headToken = head.token!;
 
+  // 2026-11-26（cc123）：管理员被授了「仅某部门」也要收窄；没授部门的管理员仍看全部。
+  const mkAdmin = (name: string) => {
+    const u = register(`${name}_${stamp}`, "Ns-Admin-1!");
+    const id = db.get<{ user_id: string }>("SELECT user_id FROM users WHERE username = ?1", `${name}_${stamp}`)!.user_id;
+    addNetworkMember(net, id, "admin");
+    return { token: u.token!, id };
+  };
+  const scopedAdmin = mkAdmin("ns_sadmin");
+  const plainAdmin = mkAdmin("ns_padmin");
+  scopedAdminToken = scopedAdmin.token;
+  plainAdminToken = plainAdmin.token;
+
   db.run("INSERT INTO network_departments (network_id, department_id, name, sort) VALUES (?1,'d-dev','研发',0)", [net]);
   db.run("INSERT INTO network_departments (network_id, department_id, name, sort) VALUES (?1,'d-ops','运维',1)", [net]);
   // head 被明确授予「只管 d-dev」——不是部门负责人角色，是 user_grants 的 manage_nodes 授权本身。
   setUserGrant({ networkId: net, userId: headId, capability: "manage_nodes", scopeKind: "department", scopeId: "d-dev", level: "edit", grantedBy: null });
+  setUserGrant({ networkId: net, userId: scopedAdmin.id, capability: "manage_nodes", scopeKind: "department", scopeId: "d-dev", level: "edit", grantedBy: null });
 
   devNode = `n_ns_dev_${stamp}`; opsNode = `n_ns_ops_${stamp}`; noDeptNode = `n_ns_none_${stamp}`;
   for (const [id, dept] of [[devNode, "d-dev"], [opsNode, "d-ops"], [noDeptNode, null]] as const) {
@@ -112,5 +125,30 @@ describe("#3665 单节点读写的部门范围拦截", () => {
     expect(ids).toContain(devNode);
     expect(ids).not.toContain(opsNode);
     expect(ids).not.toContain(noDeptNode);
+  });
+
+  test("🔴 管理员被授了「仅某部门」：列表只剩该部门的节点（cc123 场景）", async () => {
+    const r = await call("GET", `/api/nodes?network_id=${net}`, scopedAdminToken);
+    expect(r.status).toBe(200);
+    const ids = (r.body.nodes as any[]).map(n => n.node_id);
+    expect(ids).toContain(devNode);
+    expect(ids).not.toContain(opsNode);
+    expect(ids).not.toContain(noDeptNode);
+  });
+
+  test("🔴 管理员被授了「仅某部门」：范围外节点读写 403 out_of_scope", async () => {
+    const got = await call("GET", `/api/nodes/${opsNode}/config?network_id=${net}`, scopedAdminToken);
+    expect(got.status).toBe(403);
+    expect(got.body.error).toBe("out_of_scope");
+    const put = await call("PUT", `/api/nodes/${opsNode}/attrs?network_id=${net}`, scopedAdminToken, { base_attrs_revision: 0, display_name: "改名" });
+    expect(put.status).toBe(403);
+  });
+
+  test("默认管理员（没有部门授权）不受影响：列表看全部、范围外节点照样读", async () => {
+    const r = await call("GET", `/api/nodes?network_id=${net}`, plainAdminToken);
+    const ids = (r.body.nodes as any[]).map(n => n.node_id);
+    expect(ids).toEqual(expect.arrayContaining([devNode, opsNode, noDeptNode]));
+    const got = await call("GET", `/api/nodes/${opsNode}/config?network_id=${net}`, plainAdminToken);
+    expect(got.status).toBe(200);
   });
 });
