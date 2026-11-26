@@ -550,7 +550,9 @@ function userDeptScopeDenied(req: Request, restAuth: { userId?: string | null; n
   const netId = node.network_id;
   if (!netId) return null;
   const role = getUserNetworkRole(restAuth.userId, netId);
-  if (role === "owner" || role === "admin") return null;
+  // 2026-11-26（cc123）：管理员也要收窄 —— App 的「管理范围：仅某部门」卡片只对管理员显示，
+  // 原来这里放行全部 admin，等于这项设置从来不生效。没有任何部门授权的管理员（默认）仍是全网。
+  if (role === "owner") return null;
   const scope = userManageScope(netId, restAuth.userId);
   if (canUserManageNode(scope, node.department_id ?? null)) return null;
   return withCors(req, Response.json({ ok: false, error: "out_of_scope", message: "this node is outside the departments you manage" }, { status: 403 }));
@@ -7418,10 +7420,12 @@ return Bun.serve({
         if (isAdmin) return true;
         if (!workdirRoleCache.has(netId)) workdirRoleCache.set(netId, getUserNetworkRole(restAuth.userId, netId));
         const role = workdirRoleCache.get(netId);
-        if (role === "owner" || role === "admin") return true;
+        if (role === "owner") return true;
         if (!workdirScopeCache.has(netId)) workdirScopeCache.set(netId, userManageScope(netId, restAuth.userId));
         const scope = workdirScopeCache.get(netId)!;
         if (scope.kind === "global") return true;
+        // 默认管理员（没有部门授权）看全部；被授了「仅某部门」的管理员按下面的部门集合收窄。
+        if (role === "admin" && scope.deptIds.size === 0) return true;
         // 允许集合 = 被授的部门子树 ∪ 本人**负责**的部门子树（部门负责人的管辖不写在 user_grants 里）
         if (!workdirLedCache.has(netId)) workdirLedCache.set(netId, new Set(managedDepartmentIds(netId, restAuth.userId)));
         const allowed = new Set<string>([...scope.deptIds, ...workdirLedCache.get(netId)!]);
@@ -7607,7 +7611,7 @@ return Bun.serve({
       // #3665 —— 部门范围管理：被授予「只管某部门」的人，列表里只看得到范围内节点。
       // 口径：无授权/global ⇒ 原样返回；有 department 授权 ⇒ 按节点 department_id 过滤（含子部门，
       // 无部门节点不可见——只归 global，拍板口径，见 canUserManageNode）。
-      // 注意：owner/admin 走 manageScopeFrom 的 global 分支，不受影响。
+      // 注意：owner 不受影响；admin 只有被授了部门范围才收窄（2026-11-26 起，之前 admin 一律放行是 bug）。
       //
       // 2026-11-21 负责人 修：原来判「是不是人的请求」用的是 restAuth.networkId——但人类令牌
       // （utok_）**恒为 null**（只有节点令牌/network token 才绑网络，见 resolveRestNetworkScope
@@ -7619,7 +7623,8 @@ return Bun.serve({
         const netIdForScope = singleNetworkId(restScope);
         if (!netIdForScope) return rows;
         const role = getUserNetworkRole(restAuth.userId, netIdForScope);
-        if (role === "owner" || role === "admin") return rows;
+        // 管理员被授了「仅某部门」也收窄（见 userDeptScopeDenied 同日注释）；默认管理员没有部门授权，下面原样返回。
+        if (role === "owner") return rows;
         const scope = userManageScope(netIdForScope, restAuth.userId);
         if (scope.kind === "global" || scope.deptIds.size === 0) return rows;   // 没有任何管理授权 ⇒ 保持既有可见性（本 PR 只管「收窄」）
         return rows.filter((r: any) => canUserManageNode(scope, r.department_id ?? null));
