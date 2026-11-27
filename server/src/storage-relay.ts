@@ -18,6 +18,8 @@
 //                    → Direct GET bytes from ModelScope / OSS / S3
 
 import { createHash, createHmac } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { db, logAudit } from "./db.js";
 import { decryptSecret, encryptSecret, VaultError } from "./vault.js";
 import {
@@ -213,13 +215,222 @@ export type ResolveDownloadResult =
     }
   | { ok: false; status: number; error: string; message: string };
 
+export const MAX_STORAGE_REDIRECTS = 5;
+
+export type StorageSsrfErrorCode =
+  | "invalid_endpoint"
+  | "invalid_public_base_url"
+  | "storage_ssrf_blocked"
+  | "storage_ssrf_dns_failed"
+  | "storage_ssrf_too_many_redirects";
+
+export class StorageSsrfError extends Error {
+  constructor(
+    public readonly code: StorageSsrfErrorCode,
+    message: string,
+    public readonly detail?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "StorageSsrfError";
+  }
+}
+
+export type StorageLookupFn = (
+  hostname: string,
+) => Promise<ReadonlyArray<{ address: string; family: number }>>;
+
+export interface SafeStorageUrlOptions {
+  /** Explicit test/dev opt-in to allow loopback (127.0.0.0/8, ::1, localhost). Never allows RFC1918/link-local/CGNAT/ULA. */
+  allowLoopback?: boolean;
+  /** Injectable DNS resolver for deterministic unit tests; defaults to node:dns/promises lookup({ all: true, verbatim: true }). */
+  lookupFn?: StorageLookupFn;
+  /** Override error code when callers want write-validation codes (invalid_endpoint / invalid_public_base_url). */
+  errorCode?: StorageSsrfErrorCode;
+}
+
+export interface SafeStorageFetchOptions extends SafeStorageUrlOptions {
+  fetchFn?: typeof fetch;
+  maxRedirects?: number;
+}
+
+/** Dev/test-only opt-in for loopback storage mocks. Production MUST leave ANET_STORAGE_ALLOW_LOOPBACK unset. */
+export function isStorageLoopbackAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.ANET_STORAGE_ALLOW_LOOPBACK === "1";
+}
+
+function stripHostBrackets(host: string): string {
+  const trimmed = host.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function normalizeHostForCheck(host: string): string {
+  return stripHostBrackets(host).split("%")[0].replace(/\.+$/, "").toLowerCase();
+}
+
+function parseIpv4Octets(ip: string): [number, number, number, number] | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  const out: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    if (part.length > 1 && part.startsWith("0")) return null;
+    const n = Number(part);
+    if (n < 0 || n > 255) return null;
+    out.push(n);
+  }
+  return [out[0], out[1], out[2], out[3]];
+}
+
+function parseIpv6Groups(raw: string): number[] | null {
+  let s = raw;
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon !== -1 && s.slice(lastColon + 1).includes(".")) {
+    const v4 = parseIpv4Octets(s.slice(lastColon + 1));
+    if (!v4) return null;
+    const hi = ((v4[0] << 8) | v4[1]).toString(16);
+    const lo = ((v4[2] << 8) | v4[3]).toString(16);
+    s = `${s.slice(0, lastColon + 1)}${hi}:${lo}`;
+  }
+
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+
+  const parseSide = (part: string): number[] | null => {
+    if (!part) return [];
+    const segs = part.split(":");
+    const groups: number[] = [];
+    for (const seg of segs) {
+      if (!/^[0-9a-f]{1,4}$/.test(seg)) return null;
+      groups.push(parseInt(seg, 16));
+    }
+    return groups;
+  };
+
+  if (halves.length === 1) {
+    const groups = parseSide(halves[0]);
+    return groups && groups.length === 8 ? groups : null;
+  }
+
+  const left = parseSide(halves[0]);
+  const right = parseSide(halves[1]);
+  if (!left || !right) return null;
+  const missing = 8 - (left.length + right.length);
+  if (missing < 1) return null;
+  return [...left, ...new Array<number>(missing).fill(0), ...right];
+}
+
+function isLoopbackIpv4Octets(a: number): boolean {
+  return a === 127;
+}
+
+function isForbiddenIpv4Octets(
+  a: number,
+  b: number,
+  _c: number,
+  _d: number,
+  allowLoopback: boolean,
+): boolean {
+  if (a === 0) return true; // 0.0.0.0/8 unspecified / "this network"
+  if (a === 10) return true; // 10.0.0.0/8 RFC1918
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT (RFC6598)
+  if (a === 127) return !allowLoopback; // 127.0.0.0/8 loopback
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local + cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 RFC1918
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16 RFC1918
+  if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved/broadcast
+  return false;
+}
+
+/**
+ * Check whether an IPv4/IPv6 address belongs to a forbidden internal/reserved range (SSRF guard).
+ * Fails closed on malformed/unparseable IP strings.
+ *
+ * Forbidden by default:
+ * - IPv4: 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8 (unless allowLoopback),
+ *         169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4
+ * - IPv6: ::, ::1 (unless allowLoopback), fc00::/7, fe80::/10, fec0::/10, ff00::/8,
+ *         plus IPv4-mapped (::ffff:0:0/96), IPv4-compatible (::/96), NAT64 (64:ff9b::/96),
+ *         and 6to4 (2002::/16) wrapping a forbidden IPv4 address.
+ */
+export function isForbiddenStorageIp(
+  ip: string,
+  opts: { allowLoopback?: boolean } = {},
+): boolean {
+  const allowLoopback = opts.allowLoopback === true;
+  const clean = normalizeHostForCheck(ip);
+  if (!clean) return true;
+
+  const family = isIP(clean);
+  if (family === 4) {
+    const octets = parseIpv4Octets(clean);
+    if (!octets) return true;
+    return isForbiddenIpv4Octets(octets[0], octets[1], octets[2], octets[3], allowLoopback);
+  }
+  if (family === 6) {
+    const g = parseIpv6Groups(clean);
+    if (!g) return true;
+    const isAllZeroPrefix6 = g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0;
+    // :: (unspecified)
+    if (isAllZeroPrefix6 && g[6] === 0 && g[7] === 0) return true;
+    // ::1 (loopback)
+    if (isAllZeroPrefix6 && g[6] === 0 && g[7] === 1) return !allowLoopback;
+    // ::ffff:0:0/96 (IPv4-mapped IPv6, both dotted-quad and hex form e.g. ::ffff:a9fe:a9fe)
+    if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0xffff) {
+      return isForbiddenIpv4Octets(g[6] >> 8, g[6] & 0xff, g[7] >> 8, g[7] & 0xff, allowLoopback);
+    }
+    // ::/96 (deprecated IPv4-compatible IPv6)
+    if (isAllZeroPrefix6) {
+      return isForbiddenIpv4Octets(g[6] >> 8, g[6] & 0xff, g[7] >> 8, g[7] & 0xff, allowLoopback);
+    }
+    // 64:ff9b::/96 (NAT64 well-known prefix)
+    if (g[0] === 0x0064 && g[1] === 0xff9b && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0) {
+      return isForbiddenIpv4Octets(g[6] >> 8, g[6] & 0xff, g[7] >> 8, g[7] & 0xff, allowLoopback);
+    }
+    // 2002::/16 (6to4 embedding IPv4 in bits 16..47)
+    if (g[0] === 0x2002) {
+      return isForbiddenIpv4Octets(g[1] >> 8, g[1] & 0xff, g[2] >> 8, g[2] & 0xff, allowLoopback);
+    }
+    // fc00::/7 (Unique Local Addresses: fc00:: – fdff::)
+    if ((g[0] & 0xfe00) === 0xfc00) return true;
+    // fe80::/10 (Link-Local: fe80:: – febf::)
+    if ((g[0] & 0xffc0) === 0xfe80) return true;
+    // fec0::/10 (deprecated Site-Local)
+    if ((g[0] & 0xffc0) === 0xfec0) return true;
+    // ff00::/8 (Multicast)
+    if ((g[0] & 0xff00) === 0xff00) return true;
+    return false;
+  }
+
+  // Non-IP string passed to IP checker -> fail closed.
+  return true;
+}
+
 function isLoopbackHost(host: string): boolean {
-  const h = host.toLowerCase();
-  return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+  const clean = normalizeHostForCheck(host);
+  if (!clean) return false;
+  if (clean === "localhost" || clean.endsWith(".localhost")) return true;
+  const family = isIP(clean);
+  if (family === 4) {
+    const octets = parseIpv4Octets(clean);
+    return !!octets && isLoopbackIpv4Octets(octets[0]);
+  }
+  if (family === 6) {
+    const g = parseIpv6Groups(clean);
+    if (!g) return false;
+    const isAllZeroPrefix6 = g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0;
+    if (isAllZeroPrefix6 && g[6] === 0 && g[7] === 1) return true;
+    if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0xffff) {
+      return isLoopbackIpv4Octets(g[6] >> 8);
+    }
+  }
+  return false;
 }
 
 function isIpLiteral(host: string): boolean {
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[") || host.includes(":");
+  return isIP(normalizeHostForCheck(host)) !== 0;
 }
 
 /** Mask secret to tail 4 chars only; values shorter than 8 chars collapse to "…". */
@@ -252,10 +463,15 @@ function normalizeRepoType(raw: unknown, fallback: ModelScopeRepoType = "dataset
   return null;
 }
 
-/** Validate optional HTTPS URL (loopback http:// allowed for local tests/dev). */
+/**
+ * Validate optional HTTPS storage URL statically (no DNS I/O).
+ * Rejects embedded credentials, non-HTTPS schemes, localhost, and literal private/link-local/CGNAT/reserved IPs.
+ * Loopback (http:// or https:// to localhost / 127.0.0.0/8 / ::1) is ONLY allowed when explicitly opted in for tests.
+ */
 export function validateStorageUrl(
   input: string,
   errorCode: "invalid_endpoint" | "invalid_public_base_url",
+  opts: { allowLoopback?: boolean } = {},
 ): { ok: true; url: string } | { ok: false; error: "invalid_endpoint" | "invalid_public_base_url"; message: string } {
   const s = input.trim();
   if (!s) return { ok: true, url: "" };
@@ -268,10 +484,202 @@ export function validateStorageUrl(
   if (u.username || u.password) {
     return { ok: false, error: errorCode, message: "地址不能包含内嵌账号密码" };
   }
-  if (u.protocol === "https:" || (u.protocol === "http:" && isLoopbackHost(u.hostname))) {
-    return { ok: true, url: u.toString().replace(/\/+$/, "") };
+  const host = normalizeHostForCheck(u.hostname);
+  if (!host) {
+    return { ok: false, error: errorCode, message: "地址缺少有效主机名" };
   }
-  return { ok: false, error: errorCode, message: "地址必须使用 https://（本机回环除外）" };
+  const allowLoopback = opts.allowLoopback ?? isStorageLoopbackAllowed();
+  const hostIsLoopback = isLoopbackHost(host);
+
+  if (u.protocol !== "https:") {
+    if (!(u.protocol === "http:" && allowLoopback && hostIsLoopback)) {
+      return { ok: false, error: errorCode, message: "地址必须使用 https://" };
+    }
+  }
+  if (hostIsLoopback && !allowLoopback) {
+    return { ok: false, error: errorCode, message: "地址不能指向本机回环地址（SSRF 防护）" };
+  }
+  if (isIP(host) !== 0 && isForbiddenStorageIp(host, { allowLoopback })) {
+    return { ok: false, error: errorCode, message: "地址不能指向内网、保留或链路本地 IP（SSRF 防护）" };
+  }
+  return { ok: true, url: u.toString().replace(/\/+$/, "") };
+}
+
+const defaultStorageLookup: StorageLookupFn = (hostname) =>
+  dnsLookup(hostname, { all: true, verbatim: true });
+
+/**
+ * Full async SSRF validation before any Hub outbound request or config write:
+ * 1. Static scheme / credential / literal IP validation.
+ * 2. DNS resolution (all A/AAAA records) with FAIL-CLOSED on lookup error or empty result.
+ * 3. Every resolved IP checked against isForbiddenStorageIp (RFC1918, 127/8, 169.254/16, 100.64/10, ::1, fc00::/7, fe80::/10, etc.).
+ */
+export async function assertSafeStorageUrl(
+  urlStr: string,
+  opts: SafeStorageUrlOptions = {},
+): Promise<{ url: string; hostname: string; addresses: ReadonlyArray<{ address: string; family: number }> }> {
+  const allowLoopback = opts.allowLoopback ?? isStorageLoopbackAllowed();
+  const blockCode: StorageSsrfErrorCode = opts.errorCode ?? "storage_ssrf_blocked";
+  const dnsCode: StorageSsrfErrorCode = opts.errorCode ?? "storage_ssrf_dns_failed";
+
+  const staticRes = validateStorageUrl(urlStr, "invalid_endpoint", { allowLoopback });
+  if (!staticRes.ok || !staticRes.url) {
+    throw new StorageSsrfError(
+      blockCode,
+      staticRes.ok ? "地址不能为空" : staticRes.message,
+      { reason: "static_rejected" },
+    );
+  }
+
+  const u = new URL(staticRes.url);
+  const host = normalizeHostForCheck(u.hostname);
+  const ipFamily = isIP(host);
+  if (ipFamily !== 0) {
+    if (isForbiddenStorageIp(host, { allowLoopback })) {
+      throw new StorageSsrfError(blockCode, `目标 IP ${host} 属于禁止访问的内网/保留网段（SSRF 防护）`, {
+        reason: "forbidden_ip",
+        ip: host,
+      });
+    }
+    return { url: staticRes.url, hostname: host, addresses: [{ address: host, family: ipFamily }] };
+  }
+
+  const lookupFn = opts.lookupFn ?? defaultStorageLookup;
+  let addrs: ReadonlyArray<{ address: string; family: number }>;
+  try {
+    addrs = await lookupFn(host);
+  } catch (e: any) {
+    throw new StorageSsrfError(
+      dnsCode,
+      `域名 ${host} DNS 解析失败，已按安全策略拒绝访问（SSRF 防护）`,
+      { reason: "dns_lookup_failed", host, error: e?.code || e?.message || String(e) },
+    );
+  }
+
+  if (!Array.isArray(addrs) || addrs.length === 0) {
+    throw new StorageSsrfError(
+      dnsCode,
+      `域名 ${host} 未解析到有效 IP，已按安全策略拒绝访问（SSRF 防护）`,
+      { reason: "dns_empty", host },
+    );
+  }
+
+  for (const record of addrs) {
+    if (!record || typeof record.address !== "string" || isForbiddenStorageIp(record.address, { allowLoopback })) {
+      throw new StorageSsrfError(
+        blockCode,
+        `域名 ${host} 解析到禁止访问的内网/保留 IP（SSRF 防护）`,
+        { reason: "forbidden_resolved_ip", host, ip: record?.address ?? "" },
+      );
+    }
+  }
+
+  return { url: staticRes.url, hostname: host, addresses: addrs };
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+function stripHeadersCaseInsensitive(headers: HeadersInit | undefined, namesToStrip: ReadonlySet<string>): Headers {
+  const out = new Headers(headers);
+  for (const key of [...out.keys()]) {
+    if (namesToStrip.has(key.toLowerCase())) {
+      out.delete(key);
+    }
+  }
+  return out;
+}
+
+/**
+ * SSRF-hardened outbound fetch for all Hub → external storage requests:
+ * - Validates initial URL (scheme + literal IP + DNS resolution + IP blocklist) before connecting.
+ * - Uses `redirect: "manual"` and re-validates EVERY redirect hop target BEFORE following.
+ * - Strips Authorization / Cookie / Proxy-Authorization headers on cross-origin redirects.
+ * - Enforces a strict redirect hop cap (default 5).
+ */
+export async function safeStorageFetch(
+  url: string,
+  init: RequestInit = {},
+  opts: SafeStorageFetchOptions = {},
+): Promise<Response> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  const maxRedirects = opts.maxRedirects ?? MAX_STORAGE_REDIRECTS;
+
+  let currentUrl = url;
+  let currentMethod = (init.method || "GET").toUpperCase();
+  let currentHeaders = new Headers(init.headers);
+  let currentBody = init.body;
+
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    await assertSafeStorageUrl(currentUrl, {
+      allowLoopback: opts.allowLoopback,
+      lookupFn: opts.lookupFn,
+    });
+
+    const res = await fetchFn(currentUrl, {
+      ...init,
+      method: currentMethod,
+      headers: currentHeaders,
+      body: currentBody,
+      redirect: "manual",
+    });
+
+    if (!REDIRECT_STATUSES.has(res.status)) {
+      return res;
+    }
+
+    const location = res.headers.get("Location");
+    if (!location) {
+      return res;
+    }
+
+    // Drain/cancel intermediate redirect body to avoid holding sockets open.
+    await res.body?.cancel().catch(() => {});
+
+    if (hop >= maxRedirects) {
+      throw new StorageSsrfError(
+        "storage_ssrf_too_many_redirects",
+        `远程存储重定向次数超过上限（${maxRedirects} 次），已拒绝请求`,
+        { reason: "too_many_redirects", maxRedirects },
+      );
+    }
+
+    let nextUrl: string;
+    try {
+      nextUrl = new URL(location, currentUrl).toString();
+    } catch {
+      throw new StorageSsrfError(
+        "storage_ssrf_blocked",
+        "远程存储返回无效的重定向地址（SSRF 防护）",
+        { reason: "invalid_redirect_location" },
+      );
+    }
+
+    const prevOrigin = new URL(currentUrl).origin;
+    const nextOrigin = new URL(nextUrl).origin;
+    if (prevOrigin !== nextOrigin) {
+      currentHeaders = stripHeadersCaseInsensitive(
+        currentHeaders,
+        new Set(["authorization", "cookie", "proxy-authorization"]),
+      );
+    }
+
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && currentMethod === "POST")) {
+      currentMethod = "GET";
+      currentBody = undefined;
+      currentHeaders = stripHeadersCaseInsensitive(
+        currentHeaders,
+        new Set(["content-length", "content-type"]),
+      );
+    }
+
+    currentUrl = nextUrl;
+  }
+
+  throw new StorageSsrfError(
+    "storage_ssrf_too_many_redirects",
+    `远程存储重定向次数超过上限（${maxRedirects} 次），已拒绝请求`,
+    { reason: "too_many_redirects", maxRedirects },
+  );
 }
 
 export function validateModelScopeRepoId(input: string): string | null {
@@ -451,6 +859,7 @@ function resolveDraftConfig(
   networkId: string,
   input: StorageConfigWriteInput,
   existing: StoredSecretRow | null,
+  opts: { allowLoopback?: boolean } = {},
 ):
   | {
       ok: true;
@@ -486,13 +895,13 @@ function resolveDraftConfig(
   const epRaw = typeof input.endpoint === "string"
     ? input.endpoint
     : (sameProvider ? (existing?.endpoint || "") : "");
-  const ep = validateStorageUrl(epRaw, "invalid_endpoint");
+  const ep = validateStorageUrl(epRaw, "invalid_endpoint", opts);
   if (!ep.ok) return ep;
 
   const pubRaw = typeof input.public_base_url === "string"
     ? input.public_base_url
     : (sameProvider ? (existing?.public_base_url || "") : "");
-  const pub = validateStorageUrl(pubRaw, "invalid_public_base_url");
+  const pub = validateStorageUrl(pubRaw, "invalid_public_base_url", opts);
   if (!pub.ok) return pub;
 
   const prefixRaw = typeof input.prefix === "string"
@@ -693,6 +1102,41 @@ function resolveDraftConfig(
   }
 
   return { ok: false, error: "credential_required", message: "请填写 AccessKey ID 和 AccessKey Secret" };
+}
+
+/** Async write-time URL + DNS SSRF validation for PUT /api/storage/config. */
+export async function validateStorageConfigUrlsAsync(
+  networkId: string,
+  input: StorageConfigWriteInput,
+  opts: SafeStorageUrlOptions = {},
+): Promise<{ ok: true } | { ok: false; error: StorageWriteErrorCode; message: string }> {
+  const existing = readStoredSecretRow(networkId);
+  const resolved = resolveDraftConfig(networkId, input, existing, { allowLoopback: opts.allowLoopback });
+  if (!resolved.ok) return resolved;
+
+  if (resolved.endpoint) {
+    try {
+      await assertSafeStorageUrl(resolved.endpoint, { ...opts, errorCode: "invalid_endpoint" });
+    } catch (e: any) {
+      return {
+        ok: false,
+        error: "invalid_endpoint",
+        message: e instanceof StorageSsrfError ? e.message : `接口地址不安全：${e?.message || e}`,
+      };
+    }
+  }
+  if (resolved.public_base_url) {
+    try {
+      await assertSafeStorageUrl(resolved.public_base_url, { ...opts, errorCode: "invalid_public_base_url" });
+    } catch (e: any) {
+      return {
+        ok: false,
+        error: "invalid_public_base_url",
+        message: e instanceof StorageSsrfError ? e.message : `公开访问地址不安全：${e?.message || e}`,
+      };
+    }
+  }
+  return { ok: true };
 }
 
 /** Create or update a network's external storage relay config (owner/admin only). */
@@ -1027,11 +1471,11 @@ function shouldSendModelScopeAuthToUrl(targetUrl: string, configuredEndpoint: st
 }
 
 async function fetchJsonSafe(
-  fetchFn: typeof fetch,
   url: string,
   init: RequestInit,
+  opts: SafeStorageFetchOptions = {},
 ): Promise<{ ok: boolean; status: number; body: any; rawText: string }> {
-  const res = await fetchFn(url, init);
+  const res = await safeStorageFetch(url, init, opts);
   const rawText = await res.text().catch(() => "");
   let body: any = null;
   try { body = rawText ? JSON.parse(rawText) : null; } catch { /* non-JSON */ }
@@ -1045,13 +1489,15 @@ export async function testNetworkStorageConfig(
   networkId: string,
   draft: StorageConfigWriteInput | null,
   fetchFn: typeof fetch = fetch,
+  ssrfOpts: SafeStorageUrlOptions = {},
 ): Promise<StorageTestResult> {
   const started = Date.now();
   const existing = readStoredSecretRow(networkId);
   let cfg: ActiveStorageRuntimeConfig;
+  const fetchOpts: SafeStorageFetchOptions = { ...ssrfOpts, fetchFn };
 
   if (draft && Object.keys(draft).length > 0) {
-    const resolved = resolveDraftConfig(networkId, draft, existing);
+    const resolved = resolveDraftConfig(networkId, draft, existing, { allowLoopback: ssrfOpts.allowLoopback });
     if (!resolved.ok) {
       return {
         ok: false,
@@ -1115,6 +1561,13 @@ export async function testNetworkStorageConfig(
   }
 
   try {
+    if (cfg.public_base_url) {
+      await assertSafeStorageUrl(cfg.public_base_url, {
+        ...ssrfOpts,
+        errorCode: "invalid_public_base_url",
+      });
+    }
+
     if (cfg.provider === "modelscope") {
       const token = cfg.secrets.token || "";
       if (!token) {
@@ -1123,11 +1576,11 @@ export async function testNetworkStorageConfig(
       const ep = modelScopeEndpoint(cfg);
       const seg = modelScopeRepoSegment(cfg.repo_type);
       const infoUrl = `${ep}/api/v1/${seg}/${cfg.repo_id}`;
-      const r = await fetchJsonSafe(fetchFn, infoUrl, {
+      const r = await fetchJsonSafe(infoUrl, {
         method: "GET",
         headers: modelScopeAuthHeaders(token),
         signal: AbortSignal.timeout(15_000),
-      });
+      }, fetchOpts);
       const latency = Date.now() - started;
       const apiCode = typeof r.body?.Code === "number" ? r.body.Code : null;
       if (!r.ok || (apiCode !== null && apiCode !== 200)) {
@@ -1177,7 +1630,7 @@ export async function testNetworkStorageConfig(
       sessionToken: cfg.secrets.session_token,
       expiresSeconds: 120,
     });
-    const res = await fetchFn(signedUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) });
+    const res = await safeStorageFetch(signedUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) }, fetchOpts);
     const latency = Date.now() - started;
     if (res.status === 200 || res.status === 404) {
       return {
@@ -1195,6 +1648,15 @@ export async function testNetworkStorageConfig(
       message: `${cfg.provider === "oss" ? "阿里云 OSS" : "AWS S3"} 校验失败（HTTP ${res.status}）`,
     };
   } catch (e: any) {
+    if (e instanceof StorageSsrfError) {
+      return {
+        ok: false,
+        provider: cfg.provider,
+        latency_ms: Date.now() - started,
+        error: e.code,
+        message: e.message,
+      };
+    }
     return {
       ok: false,
       provider: cfg.provider,
@@ -1218,8 +1680,10 @@ export async function presignStorageUpload(
     mime: string;
   },
   fetchFn: typeof fetch = fetch,
+  ssrfOpts: SafeStorageUrlOptions = {},
 ): Promise<PresignStorageResult> {
   const objectKey = buildRemoteObjectKey(cfg.prefix, params.networkId, params.dateBucket, params.fileId, params.ext);
+  const fetchOpts: SafeStorageFetchOptions = { ...ssrfOpts, fetchFn };
 
   if (cfg.provider === "modelscope") {
     const token = cfg.secrets.token || "";
@@ -1231,7 +1695,7 @@ export async function presignStorageUpload(
     const batchUrl = `${ep}/api/v1/repos/${seg}/${cfg.repo_id}/info/lfs/objects/batch`;
     let r: { ok: boolean; status: number; body: any; rawText: string };
     try {
-      r = await fetchJsonSafe(fetchFn, batchUrl, {
+      r = await fetchJsonSafe(batchUrl, {
         method: "POST",
         headers: {
           ...modelScopeAuthHeaders(token),
@@ -1243,8 +1707,11 @@ export async function presignStorageUpload(
           objects: [{ oid: params.sha256, size: params.size }],
         }),
         signal: AbortSignal.timeout(20_000),
-      });
+      }, fetchOpts);
     } catch (e: any) {
+      if (e instanceof StorageSsrfError) {
+        return { ok: false, status: 400, error: e.code, message: e.message };
+      }
       return { ok: false, status: 502, error: "storage_upstream_error", message: `ModelScope LFS 预签名请求失败：${e?.message || e}` };
     }
 
@@ -1290,6 +1757,18 @@ export async function presignStorageUpload(
       };
     }
 
+    const hrefCheck = validateStorageUrl(uploadAction.href, "invalid_endpoint", {
+      allowLoopback: ssrfOpts.allowLoopback,
+    });
+    if (!hrefCheck.ok) {
+      return {
+        ok: false,
+        status: 502,
+        error: "storage_presign_bad_response",
+        message: `ModelScope LFS 返回不安全的上传地址：${hrefCheck.message}`,
+      };
+    }
+
     const headers: Record<string, string> = {};
     if (uploadAction.header && typeof uploadAction.header === "object") {
       for (const [k, v] of Object.entries(uploadAction.header)) {
@@ -1320,6 +1799,12 @@ export async function presignStorageUpload(
   const sk = cfg.secrets.access_key_secret || "";
   if (!ak || !sk) {
     return { ok: false, status: 503, error: "storage_credential_missing", message: "对象存储 AccessKey 未配置" };
+  }
+  if (cfg.endpoint) {
+    const epCheck = validateStorageUrl(cfg.endpoint, "invalid_endpoint", { allowLoopback: ssrfOpts.allowLoopback });
+    if (!epCheck.ok) {
+      return { ok: false, status: 400, error: "storage_ssrf_blocked", message: epCheck.message };
+    }
   }
   const signedPutUrl = signObjectStoragePresignedUrl({
     provider: cfg.provider,
@@ -1367,7 +1852,10 @@ export async function completeStorageUpload(
     storage: RemoteStorageIndexMeta;
   },
   fetchFn: typeof fetch = fetch,
+  ssrfOpts: SafeStorageUrlOptions = {},
 ): Promise<CompleteStorageResult> {
+  const fetchOpts: SafeStorageFetchOptions = { ...ssrfOpts, fetchFn };
+
   if (params.storage.provider === "modelscope") {
     const token = cfg.secrets.token || "";
     if (!token) {
@@ -1382,7 +1870,7 @@ export async function completeStorageUpload(
 
     let r: { ok: boolean; status: number; body: any; rawText: string };
     try {
-      r = await fetchJsonSafe(fetchFn, commitUrl, {
+      r = await fetchJsonSafe(commitUrl, {
         method: "POST",
         headers: {
           ...modelScopeAuthHeaders(token),
@@ -1403,8 +1891,11 @@ export async function completeStorageUpload(
           ],
         }),
         signal: AbortSignal.timeout(20_000),
-      });
+      }, fetchOpts);
     } catch (e: any) {
+      if (e instanceof StorageSsrfError) {
+        return { ok: false, status: 400, error: e.code, message: e.message };
+      }
       return { ok: false, status: 502, error: "storage_commit_error", message: `ModelScope 提交失败：${e?.message || e}` };
     }
 
@@ -1437,7 +1928,7 @@ export async function completeStorageUpload(
   });
 
   try {
-    const res = await fetchFn(headUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) });
+    const res = await safeStorageFetch(headUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) }, fetchOpts);
     if (!res.ok) {
       return {
         ok: false,
@@ -1460,6 +1951,9 @@ export async function completeStorageUpload(
     }
     return { ok: true };
   } catch (e: any) {
+    if (e instanceof StorageSsrfError) {
+      return { ok: false, status: 400, error: e.code, message: e.message };
+    }
     return { ok: false, status: 502, error: "storage_verify_error", message: `对象存储校验失败：${e?.message || e}` };
   }
 }
@@ -1471,7 +1965,11 @@ export function resolveStorageDownload(
 ): ResolveDownloadResult {
   // Public base URL override (e.g. CDN domain) needs no credentials.
   if (storage.public_base_url) {
-    const base = storage.public_base_url.replace(/\/+$/, "");
+    const pubCheck = validateStorageUrl(storage.public_base_url, "invalid_public_base_url");
+    if (!pubCheck.ok || !pubCheck.url) {
+      return { ok: false, status: 400, error: "storage_ssrf_blocked", message: pubCheck.ok ? "无效的公开访问地址" : pubCheck.message };
+    }
+    const base = pubCheck.url;
     return {
       ok: true,
       provider: storage.provider,
@@ -1498,11 +1996,15 @@ export function resolveStorageDownload(
       return { ok: false, status: 503, error: "storage_credential_missing", message: "ModelScope Token 未配置" };
     }
     const ep = (storage.endpoint || modelScopeEndpoint(cfg)).replace(/\/+$/, "");
+    const epCheck = validateStorageUrl(ep, "invalid_endpoint");
+    if (!epCheck.ok || !epCheck.url) {
+      return { ok: false, status: 400, error: "storage_ssrf_blocked", message: epCheck.ok ? "无效的存储地址" : epCheck.message };
+    }
     const repoType: ModelScopeRepoType = storage.repo_type === "model" ? "model" : "dataset";
     const repoId = storage.repo_id || cfg.repo_id;
     const revision = storage.revision || cfg.revision || DEFAULT_MODELSCOPE_REVISION;
     const seg = modelScopeRepoSegment(repoType);
-    const url = `${ep}/api/v1/${seg}/${repoId}/repo?Revision=${encodeURIComponent(revision)}&FilePath=${encodeURIComponent(storage.object_key)}`;
+    const url = `${epCheck.url}/api/v1/${seg}/${repoId}/repo?Revision=${encodeURIComponent(revision)}&FilePath=${encodeURIComponent(storage.object_key)}`;
     return {
       ok: true,
       provider: "modelscope",
@@ -1520,12 +2022,19 @@ export function resolveStorageDownload(
   if (!ak || !sk) {
     return { ok: false, status: 503, error: "storage_credential_missing", message: "对象存储 AccessKey 未配置" };
   }
+  const ep = storage.endpoint || cfg.endpoint;
+  if (ep) {
+    const epCheck = validateStorageUrl(ep, "invalid_endpoint");
+    if (!epCheck.ok) {
+      return { ok: false, status: 400, error: "storage_ssrf_blocked", message: epCheck.message };
+    }
+  }
   const signedGetUrl = signObjectStoragePresignedUrl({
     provider: storage.provider,
     method: "GET",
     bucket: storage.bucket || cfg.bucket,
     region: storage.region || cfg.region,
-    endpoint: storage.endpoint || cfg.endpoint,
+    endpoint: ep,
     objectKey: storage.object_key,
     accessKeyId: ak,
     accessKeySecret: sk,
