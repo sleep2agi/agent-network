@@ -1079,6 +1079,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // Preserve the runtime's independent-key capability through MCP input
         // parsing; unknown z.object fields are otherwise silently stripped.
         node_secrets_capable: z.boolean().optional(),
+        // #5675 PR-3 — phase-1 runtime hot-secret activation capability (claude-agent-sdk,
+        // codex-sdk, owned codex-app-server, grok-acp, antigravity-acp only).
+        secrets_hot_capable: z.boolean().optional(),
         // RFC-026 §9.3 / #338 PR3 — daemon self-declare nested under
         // `daemon_capabilities` (canonical shape per existing hub reads
         // at tools.ts:2010/2075 — PR1/PR2 placed these top-level, hub
@@ -5082,7 +5085,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const providerReply = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   server.tool(
     "daemon_provider_snapshot", "Providers, no tokens; hub_*=owner catalog+bind; secret_*=Daemon env; node_secret_*=node env; provider={node_id?,key?,value?}; next full start.",
-    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read", "secret_request_ui", "node_secret_list", "node_secret_put", "node_secret_delete"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
+    { action: z.enum(["refresh", "read", "put", "collect", "apply", "login", "hub_read", "hub_put", "hub_bind", "secret_list", "secret_put", "secret_delete", "secret_read", "secret_request_ui", "node_secret_list", "node_secret_put", "node_secret_delete", "node_secret_reload"]), id: z.string().min(1).max(200), network_id: z.string().max(200).optional(), revision: z.number().int().min(0).optional(), provider: z.unknown().optional(), include_discovery: z.boolean().optional() },
     async ({ action, id, network_id, revision, provider, include_discovery }) => {
       const human = providerHuman(network_id);
       // Separate scoped-secret contract using the existing management lane.
@@ -5101,9 +5104,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         }));
       }
       if (action === 'secret_read') return providerReply(getScopedSecrets(human, id));
-      if (action === 'node_secret_list' || action === 'node_secret_put' || action === 'node_secret_delete') {
+      if (action === 'node_secret_list' || action === 'node_secret_put' || action === 'node_secret_delete' || action === 'node_secret_reload') {
         const input = provider as { key?: string; value?: string; from_vault?: boolean } | undefined;
-        const result = requestNodeSecrets(human, id, action === 'node_secret_list' ? 'list' : action === 'node_secret_put' ? 'put' : 'delete', input?.key, input?.value, revision, input?.from_vault === true);
+        const mappedAction = action === 'node_secret_list' ? 'list'
+          : action === 'node_secret_put' ? 'put'
+          : action === 'node_secret_delete' ? 'delete'
+          : 'reload';
+        const result = requestNodeSecrets(human, id, mappedAction, input?.key, input?.value, revision, input?.from_vault === true);
         if (result.ok) {
           const target = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', id, human.networkId!);
           if (target) pushEvent(target.alias, { type: 'node_secrets', request_id: result.request_id }, human.networkId!);
@@ -5155,11 +5162,29 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   server.tool(
     "ack_daemon_provider_snapshot", "Target daemon acknowledges redacted Provider configuration readback; fixed failure code only.",
     { request_id: z.string().min(1).max(200), snapshot: z.unknown().optional(), failed: z.boolean().optional(), applied_revision: z.number().int().min(0).optional(), application: z.unknown().optional(), login: z.unknown().optional() },
-    async ({ request_id, snapshot, failed, applied_revision, application, login }) => providerReply(request_id.startsWith('nsk_')
-      ? ackNodeSecrets(resolveCallerDaemonTokenBound(), request_id, snapshot, failed)
-      : request_id.startsWith('dsk_')
-      ? ackScopedSecrets(resolveCallerDaemonTokenBound(), request_id, snapshot, failed)
-      : ackProviderSnapshot(resolveCallerDaemonTokenBound(), request_id, snapshot, failed, applied_revision, application, login)),
+    async ({ request_id, snapshot, failed, applied_revision, application, login }) => {
+      if (request_id.startsWith('nsk_')) {
+        return providerReply(ackNodeSecrets(resolveCallerDaemonTokenBound(), request_id, snapshot, failed));
+      }
+      if (request_id.startsWith('dsk_')) {
+        const ackRes = ackScopedSecrets(resolveCallerDaemonTokenBound(), request_id, snapshot, failed);
+        // #5675 PR-3 — Daemon never mutates its own process.env. Once scoped-secrets.json
+        // is persisted & acked, notify affected bound child node(s) via SSE doorbell (key name
+        // only, never secret value) so hot-capable children reload directly from disk.
+        if (ackRes.ok && 'notify_children' in ackRes && ackRes.notify_children) {
+          const { network_id, node_ids, key, action, revision } = ackRes.notify_children;
+          for (const childId of node_ids) {
+            const child = db.get<{ alias: string }>('SELECT alias FROM nodes WHERE node_id=?1 AND network_id=?2', childId, network_id);
+            if (child?.alias) {
+              pushEvent(child.alias, { type: 'node_secrets_reload', key, action, source: 'daemon', revision }, network_id);
+            }
+          }
+          return providerReply({ ok: ackRes.ok, status: ackRes.status });
+        }
+        return providerReply(ackRes);
+      }
+      return providerReply(ackProviderSnapshot(resolveCallerDaemonTokenBound(), request_id, snapshot, failed, applied_revision, application, login));
+    },
   );
 
   // Helper — map a ValidationError thrown from create-node-validate

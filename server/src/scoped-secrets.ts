@@ -7,10 +7,15 @@ import { validScopedSecretKey } from './shared/scoped-secret-contract';
 import { observeSecretWrite, transportOf } from './env-transport-gate.js';
 import { secretTransportVerdict } from './env-transport-policy.js';
 import { vaultGet } from './vault';
+export const SECRET_ACTIVATION_STATES = ['next_start', 'hot_applied', 'hot_pending_idle', 'shadowed'] as const;
+export type SecretActivation = (typeof SECRET_ACTIVATION_STATES)[number];
+const isValidSecretActivation = (v: unknown): v is SecretActivation =>
+  typeof v === 'string' && (SECRET_ACTIVATION_STATES as readonly string[]).includes(v);
+
 type Human = { userId?: string | null; isNode: boolean; networkId: string | null };
 type Daemon = { ok: false; error: string } | { ok: true; networkId: string; daemonNodeId: string; daemonAlias: string };
 type Request = { request_id: string; network_id: string; daemon_node_id: string | null; node_id: string | null;
-  action: 'list' | 'put' | 'delete'; key?: string; value?: string; revision?: number;
+  action: 'list' | 'put' | 'delete' | 'reload'; key?: string; value?: string; revision?: number;
   status: 'pending' | 'succeeded' | 'failed' | 'expired'; expires_at: number; snapshot?: any; error?: string };
 const requests = new Map<string, Request>();
 const denied = (error: string) => ({ ok: false as const, error });
@@ -61,11 +66,13 @@ export function requestNodeSecrets(h: Human, node: string, action: Request['acti
     if (typeof fromVaultValue !== 'string' || !fromVaultValue) return denied('vault_key_missing');
     value = fromVaultValue;
   }
-  if (action !== 'list' && (!validScopedSecretKey(key) || !Number.isSafeInteger(revision) || revision! < 0
+  if (action === 'reload') {
+    if (value !== undefined || (key !== undefined && !validScopedSecretKey(key))) return denied('invalid_secret_input');
+  } else if (action !== 'list' && (!validScopedSecretKey(key) || !Number.isSafeInteger(revision) || revision! < 0
     || (action === 'put' && (typeof value !== 'string' || !value || Buffer.byteLength(value) > 8192 || value.includes('\0'))))) return denied('invalid_secret_input');
   expire();
   // #1510 — transport gate (log-only by default). A `put` carries the secret, so
-  // that is the only action worth observing; delete/list leak nothing.
+  // that is the only action worth observing; delete/list/reload leak nothing.
   if (action === 'put') {
     const transport = transportOf(h.networkId!, node);
     const verdict = secretTransportVerdict(transport);
@@ -76,7 +83,8 @@ export function requestNodeSecrets(h: Human, node: string, action: Request['acti
   if ([...requests.values()].some(r => r.network_id === h.networkId && r.daemon_node_id === null && r.node_id === node && r.status === 'pending')) return denied('secret_store_busy');
   if (requests.size >= 1000) return denied('secret_queue_busy');
   const r: Request = { request_id: `nsk_${randomUUID()}`, network_id: h.networkId!, daemon_node_id: null,
-    node_id: node, action, ...(action === 'list' ? {} : { key, revision, ...(action === 'put' ? { value } : {}) }),
+    node_id: node, action,
+    ...(action === 'list' ? {} : action === 'reload' ? (key ? { key } : {}) : { key, revision, ...(action === 'put' ? { value } : {}) }),
     expires_at: Date.now() + 120_000, status: 'pending' };
   requests.set(r.request_id, r);
   return { ok: true as const, request_id: r.request_id, status: r.status, expires_at: r.expires_at };
@@ -95,10 +103,10 @@ export function ackNodeSecrets(d: Daemon, id: string, snapshot: any, failed = fa
   if (!failed) {
     if (!snapshot || Object.keys(snapshot).some(k => !['network_id','daemon_node_id','node_id','revision','activation','keys'].includes(k))
       || snapshot.network_id !== r.network_id || snapshot.daemon_node_id !== null || snapshot.node_id !== r.node_id
-      || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 || snapshot.activation !== 'next_start'
+      || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 || !isValidSecretActivation(snapshot.activation)
       || !Array.isArray(snapshot.keys) || snapshot.keys.length > 128 || new Set(snapshot.keys.map((x:any)=>x?.key)).size !== snapshot.keys.length
       || snapshot.keys.some((x:any)=>!x || Object.keys(x).some(k=>!['key','source'].includes(k)) || !validScopedSecretKey(x.key) || x.source !== 'node')
-      || (r.action !== 'list' && snapshot.revision !== r.revision! + 1)
+      || (r.action !== 'list' && r.action !== 'reload' && snapshot.revision !== r.revision! + 1)
       || (r.action === 'put' && !snapshot.keys.some((x:any)=>x.key === r.key))
       || (r.action === 'delete' && snapshot.keys.some((x:any)=>x.key === r.key))) return denied('invalid_secret_receipt');
     r.snapshot = snapshot;
@@ -150,18 +158,26 @@ export function ackScopedSecrets(d: Daemon, id: string, snapshot: any, failed = 
   const r = requests.get(id);
   if (!r || r.network_id !== d.networkId || r.daemon_node_id !== d.daemonNodeId) return denied('request_not_found');
   if (r.status !== 'pending') return { ok: r.status === 'succeeded' || r.status === 'failed', status: r.status };
+  let notifyChildren: { network_id: string; node_ids: string[]; key: string; action: 'put' | 'delete'; revision: number } | undefined;
   if (!failed) {
     if (!snapshot || Object.keys(snapshot).some(k => !['network_id','daemon_node_id','node_id','revision','activation','keys'].includes(k))
       || snapshot.network_id !== r.network_id || snapshot.daemon_node_id !== r.daemon_node_id || snapshot.node_id !== r.node_id
-      || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 || snapshot.activation !== 'next_start'
+      || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0 || !isValidSecretActivation(snapshot.activation)
       || !Array.isArray(snapshot.keys) || snapshot.keys.length > 256 || new Set(snapshot.keys.map((x:any)=>x.key)).size !== snapshot.keys.length
       || snapshot.keys.some((x:any) => !x || Object.keys(x).some(k=>!['key','source'].includes(k)) || !validScopedSecretKey(x.key)
         || !['daemon','node'].includes(x.source) || (r.node_id === null && x.source !== 'daemon'))
       || (r.action !== 'list' && snapshot.revision !== r.revision! + 1)
       || (r.action === 'put' && !snapshot.keys.some((x:any)=>x.key === r.key && x.source === (r.node_id ? 'node' : 'daemon')))) return denied('invalid_secret_receipt');
-    if (r.node_id !== null && !providerScanTargets(r.network_id,r.daemon_node_id).some(t=>t.node_id === r.node_id)) return denied('secret_target_not_bound');
+    const boundTargets = providerScanTargets(r.network_id, r.daemon_node_id);
+    if (r.node_id !== null && !boundTargets.some(t=>t.node_id === r.node_id)) return denied('secret_target_not_bound');
     r.snapshot = snapshot;
+    if ((r.action === 'put' || r.action === 'delete') && r.key) {
+      const nodeIds = r.node_id !== null ? [r.node_id] : boundTargets.map(t => t.node_id);
+      if (nodeIds.length > 0) {
+        notifyChildren = { network_id: r.network_id, node_ids: nodeIds, key: r.key, action: r.action, revision: snapshot.revision };
+      }
+    }
   }
   r.status = failed ? 'failed' : 'succeeded'; if (failed) r.error = 'secret_operation_unavailable'; delete r.value;
-  return { ok: true, status: r.status };
+  return { ok: true as const, status: r.status, ...(notifyChildren ? { notify_children: notifyChildren } : {}) };
 }
