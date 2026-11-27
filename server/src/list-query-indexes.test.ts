@@ -29,4 +29,21 @@ describe("inbox (network_id, created_at) index", () => {
       expect(plan).not.toContain("TEMP B-TREE");
     });
   }
+
+  test("/api/messages 不带网络过滤（Hub 管理员看全部）：走 idx_inbox_created，不再全表扫描排序", () => {
+    const plan = db.all<{ detail: string }>(
+      "EXPLAIN QUERY PLAN SELECT id, content, created_at FROM inbox WHERE created_at >= ?1 ORDER BY created_at DESC LIMIT 300",
+      "2026-11-19 00:00:00",
+    ).map(r => r.detail).join(" | ");
+    expect(plan).toContain("idx_inbox_created");
+    expect(plan).not.toContain("TEMP B-TREE");
+  });
+
+  test("/api/tasks 不带网络、按发件人：走 idx_tasks_from_created，不再整表排序", () => {
+    const plan = db.all<{ detail: string }>(
+      "EXPLAIN QUERY PLAN SELECT * FROM tasks WHERE from_name = 'x' ORDER BY created_at DESC, task_id DESC LIMIT 50",
+    ).map(r => r.detail).join(" | ");
+    expect(plan).toContain("idx_tasks_from_created");
+    expect(plan).not.toContain("TEMP B-TREE");
+  });
 });

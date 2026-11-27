@@ -1717,6 +1717,9 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_queue ON tasks(creat
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_created ON tasks(network_id, created_at, task_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_to_created ON tasks(network_id, to_name, created_at, task_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_network_from_created ON tasks(network_id, from_name, created_at, task_id)"); } catch {}
+// 同日：不带网络过滤、按发件人取最新任务（`from_name=? ORDER BY created_at DESC, task_id DESC`）走单列 idx_tasks_from + 临时 B 树，
+// 生产 60ms（to_name 那边已有 idx_tasks_to_created，1.5ms）。补对称的一条。
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_from_created ON tasks(from_name, created_at, task_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_nodes_network ON nodes(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)"); } catch {}
 // #5614 —— `GET /api/messages`（App 回复未读 / 通知每 10 s 读一次，limit=300）是 2026-11-26 生产停顿窗口里
@@ -1726,6 +1729,10 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network ON inbox(network_id)
 // 加 (network_id, created_at) 复合索引后按范围倒序直接取前 n 条：同规模合成库整读 105ms → 0.6ms、增量 33ms → 0.01ms，
 // 计划里不再有 TEMP B-TREE。只加索引、不改查询；普通复合索引，PostgreSQL 上同样的 DDL 也成立。
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_network_created ON inbox(network_id, created_at)"); } catch {}
+// 2026-11-27 —— .304 上线后剩下的停顿：02:00 那一串里 `GET /api/messages?limit=gt150` 单次仍 0.66–1.4 秒。
+// 生产只读实测：带网络过滤的形状走上面的复合索引 3.3ms，但**不带网络过滤**的（Hub 管理员 / 跨网络令牌看全部）
+// 没有 inbox(created_at) 索引 ⇒ SCAN inbox + TEMP B-TREE，587ms。补单列时间索引后按时间倒序直接取前 n 条。
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_inbox_created ON inbox(created_at)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_task_events_network ON task_events(network_id)"); } catch {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_completions_network ON completions(network_id)"); } catch {}
 
