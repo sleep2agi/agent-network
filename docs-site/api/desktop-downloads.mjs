@@ -38,7 +38,11 @@ export const classifyInstallAsset = (name) => {
   if (lower.endsWith('.deb')) return { platform: 'linux', kind: 'deb', role: 'install' };
   if (lower.endsWith('.appimage')) return { platform: 'linux', kind: 'appimage', role: 'install' };
   if (lower.endsWith('.apk')) return { platform: 'android', kind: 'apk', role: 'install' };
-  if (lower.endsWith('.hap')) return { platform: 'harmony', kind: 'hap', role: 'install' };
+  // 2026-11-27:目前发布里的 .hap 是开发签名内测包,只有签名里登记过 UDID 的设备能装。
+  // 归成 devtest:不当成普通安装包出大按钮、也不进「推荐下载」,页面只给开发者一个小链接。
+  // 将来上架 / 公开签名的包换个文件名约定(如 _harmony-release.hap)再归 install。
+  if (lower.endsWith('-release.hap') || lower.endsWith('_harmony-release.hap')) return { platform: 'harmony', kind: 'hap', role: 'install' };
+  if (lower.endsWith('.hap')) return { platform: 'harmony', kind: 'hap', role: 'devtest' };
   if (lower.endsWith('.ipa')) return { platform: 'ios', kind: 'ipa', role: 'audit' };
   return null;
 };

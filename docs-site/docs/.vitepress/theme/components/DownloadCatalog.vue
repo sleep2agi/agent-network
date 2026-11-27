@@ -5,7 +5,7 @@ import { withBase } from 'vitepress'
 type Asset = {
   platform: string
   kind: string
-  role: 'install' | 'audit'
+  role: 'install' | 'audit' | 'devtest'
   name: string
   bytes: number | null
   url: string | null
@@ -55,6 +55,7 @@ const copy = computed(() => props.lang === 'en' ? {
   checksum: 'SHA256 checksum',
   cli: 'CLI / Daemon installation',
   audit: 'Audit package only. This file cannot be sideloaded.',
+  devtest: 'Developer test build: installs only on devices whose UDID is registered in its signing profile (Developer mode on, then hdc install). Other devices: wait for the public release.',
   kinds: {
     dmg: 'Disk image (.dmg)',
     nsis: 'Installer (.exe)',
@@ -88,6 +89,7 @@ const copy = computed(() => props.lang === 'en' ? {
   checksum: 'SHA256 校验文件',
   cli: 'CLI / Daemon 安装',
   audit: '仅供审计比对，这个文件不能侧载安装。',
+  devtest: '开发者内测包：只有签名里登记过 UDID 的设备能装（打开开发者模式后用 hdc install）。其他设备请等公开发行版。',
   kinds: {
     dmg: '磁盘映像（.dmg）',
     nsis: '安装包（.exe）',
@@ -111,6 +113,7 @@ const copy = computed(() => props.lang === 'en' ? {
 const platformAssets = (id: string) => catalog.value?.platforms.find((platform) => platform.id === id)?.assets ?? []
 const installAssets = (id: string) => platformAssets(id).filter((asset) => asset.role === 'install')
 const auditAssets = (id: string) => platformAssets(id).filter((asset) => asset.role === 'audit')
+const devAssets = (id: string) => platformAssets(id).filter((asset) => asset.role === 'devtest')
 
 const sizeLabel = (bytes: number | null) => {
   if (typeof bytes !== 'number') return ''
@@ -213,6 +216,10 @@ onMounted(async () => {
         <div v-for="asset in auditAssets(platform.id)" :key="asset.name" class="download-note">
           {{ copy.audit }}
           <a :href="asset.url" rel="noopener">{{ asset.name }}</a>
+        </div>
+        <div v-for="asset in devAssets(platform.id)" :key="asset.name" class="download-note" :data-devtest="asset.name">
+          {{ copy.devtest }}
+          <a :href="asset.mirrorUrl || asset.url || undefined" rel="noopener">{{ asset.name }}</a>
         </div>
       </section>
       <p class="release-links">
