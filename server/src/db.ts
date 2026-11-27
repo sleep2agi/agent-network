@@ -2648,3 +2648,29 @@ db.exec(`
 `);
 try { db.exec("ALTER TABLE network_voice_configs ADD COLUMN stream_endpoint TEXT NOT NULL DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE network_voice_configs ADD COLUMN stream_resource_id TEXT NOT NULL DEFAULT ''"); } catch {}
+
+// External storage relay config (ModelScope / Aliyun OSS / AWS S3).
+// Encrypted at rest via vault.ts (AES-256-GCM) in a dedicated table isolated from
+// node-facing network_secrets. Appended at EOF so earlier line anchors stay fixed.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS network_storage_configs (
+    network_id      TEXT PRIMARY KEY,
+    enabled         INTEGER NOT NULL DEFAULT 0,
+    provider        TEXT NOT NULL DEFAULT 'modelscope',
+    endpoint        TEXT NOT NULL DEFAULT '',
+    region          TEXT NOT NULL DEFAULT '',
+    bucket          TEXT NOT NULL DEFAULT '',
+    repo_id         TEXT NOT NULL DEFAULT '',
+    repo_type       TEXT NOT NULL DEFAULT 'dataset',
+    revision        TEXT NOT NULL DEFAULT 'master',
+    prefix          TEXT NOT NULL DEFAULT 'anet-files',
+    public_base_url TEXT NOT NULL DEFAULT '',
+    max_file_bytes  BIGINT NOT NULL DEFAULT 104857600,
+    key_hint        TEXT NOT NULL DEFAULT '',
+    ciphertext_b64  TEXT NOT NULL DEFAULT '',
+    iv_b64          TEXT NOT NULL DEFAULT '',
+    tag_b64         TEXT NOT NULL DEFAULT '',
+    updated_at      BIGINT NOT NULL,
+    updated_by      TEXT NOT NULL DEFAULT ''
+  );
+`);

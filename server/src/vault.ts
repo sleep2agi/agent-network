@@ -50,7 +50,12 @@ export function vaultStatusForBoot(): { configured: boolean; tablesHaveData: boo
       const r3 = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_voice_configs WHERE ciphertext_b64 != ''");
       r3Count = r3?.n || 0;
     } catch { /* table may not exist in older fixtures */ }
-    tablesHaveData = (r1?.n || 0) > 0 || (r2?.n || 0) > 0 || r3Count > 0;
+    let r4Count = 0;
+    try {
+      const r4 = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM network_storage_configs WHERE ciphertext_b64 != ''");
+      r4Count = r4?.n || 0;
+    } catch { /* table may not exist in older fixtures */ }
+    tablesHaveData = (r1?.n || 0) > 0 || (r2?.n || 0) > 0 || r3Count > 0 || r4Count > 0;
   } catch { /* tables may not exist yet */ }
   return {
     configured,

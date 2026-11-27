@@ -25,6 +25,24 @@ import { homedir } from "os";
 import { join, relative, isAbsolute } from "path";
 
 export const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+export const MIN_REMOTE_UPLOAD_BYTES = 1 * 1024 * 1024;
+export const DEFAULT_REMOTE_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_REMOTE_UPLOAD_BYTES = 500 * 1024 * 1024;
+
+export type RemoteStorageProvider = "modelscope" | "oss" | "s3";
+
+export type RemoteStorageIndexMeta = {
+  provider: RemoteStorageProvider;
+  object_key: string;
+  sha256: string;
+  repo_id?: string;
+  repo_type?: "dataset" | "model";
+  revision?: string;
+  bucket?: string;
+  region?: string;
+  endpoint?: string;
+  public_base_url?: string;
+};
 
 // Allow ~1 MiB of multipart envelope overhead on top of the 12 MiB
 // payload limit when checking Content-Length. The post-parse check is
@@ -204,10 +222,35 @@ export type UploadIndexEntry = {
   // 只有上传者、收到/发出过带它的私信的人和管理员能下载(server.ts authorizeFileDownload)。
   // 不是私信的文件不写这个键;以后被转进私信也不会补写,原来谁能看还是谁能看。
   scope?: typeof DM_FILE_SCOPE;
+  // External direct-upload lifecycle: omitted = "ready" (local disk or finalized remote).
+  // "pending" entries are hidden from downloads (404) until POST /api/uploads/complete finishes.
+  status?: "pending" | "ready";
+  storage?: RemoteStorageIndexMeta;
   uploaded_at: string; // ISO 8601
 };
 
 export const DM_FILE_SCOPE = "dm";
+
+const REMOTE_STORAGE_PROVIDERS = new Set<string>(["modelscope", "oss", "s3"]);
+const SHA256_HEX_REGEX = /^[0-9a-f]{64}$/;
+
+export function isValidRemoteStorageMeta(storage: unknown): storage is RemoteStorageIndexMeta {
+  if (!storage || typeof storage !== "object") return false;
+  const s: any = storage;
+  if (typeof s.provider !== "string" || !REMOTE_STORAGE_PROVIDERS.has(s.provider)) return false;
+  if (typeof s.object_key !== "string" || s.object_key.length === 0 || s.object_key.length > 512) return false;
+  if (s.object_key.startsWith("/") || s.object_key.includes("\\") || /[\x00-\x1f\x7f]/.test(s.object_key)) return false;
+  const segs = s.object_key.split("/");
+  if (segs.some((seg: string) => seg === "" || seg === "." || seg === "..")) return false;
+  // sha256 is required for ModelScope LFS; optional (empty string allowed) for OSS/S3 when client omits it.
+  if (typeof s.sha256 !== "string") return false;
+  if (s.provider === "modelscope") {
+    if (!SHA256_HEX_REGEX.test(s.sha256)) return false;
+  } else if (s.sha256 !== "" && !SHA256_HEX_REGEX.test(s.sha256)) {
+    return false;
+  }
+  return true;
+}
 
 /** Path to the index entry file for a given file_id. Lives in
  * `<uploadsRoot>/.index/<file_id>.json` so /api/files/:file_id can do
@@ -232,11 +275,15 @@ export function validateIndexEntry(entry: unknown): entry is UploadIndexEntry {
   if ("network_id" in e && !(typeof e.network_id === "string" && e.network_id.length > 0)) return false;
   // 未知的 scope 值不当成「没有 scope」放行(那等于把私信文件退回全网可见):整条判坏,下载 404。
   if ("scope" in e && e.scope !== DM_FILE_SCOPE) return false;
+  if ("status" in e && e.status !== "pending" && e.status !== "ready") return false;
+  const hasRemoteStorage = "storage" in e && e.storage !== undefined;
+  if (hasRemoteStorage && !isValidRemoteStorageMeta(e.storage)) return false;
+  const sizeCap = hasRemoteStorage ? MAX_REMOTE_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
   return (
     typeof e.file_id === "string" && FILE_ID_REGEX.test(e.file_id) &&
     typeof e.date_bucket === "string" && /^\d{4}-\d{2}-\d{2}$/.test(e.date_bucket) &&
     isValidExtToken(e.ext) &&
-    typeof e.size === "number" && e.size >= 0 && e.size <= MAX_UPLOAD_BYTES
+    typeof e.size === "number" && e.size >= 0 && e.size <= sizeCap
   );
 }
 
@@ -375,7 +422,11 @@ export function stripHostLocalPathsForCrossHostSafe(meta: any): any {
 }
 
 /** Light validator usable from the REST handler. Returns null on success or an error message string. */
-export function validateAttachments(input: unknown): { ok: true; attachments: TaskAttachment[] } | { ok: false; error: string } {
+export function validateAttachments(
+  input: unknown,
+  opts: { maxBytes?: number } = {},
+): { ok: true; attachments: TaskAttachment[] } | { ok: false; error: string } {
+  const maxBytes = opts.maxBytes ?? MAX_UPLOAD_BYTES;
   if (input === undefined || input === null) return { ok: true, attachments: [] };
   if (!Array.isArray(input)) return { ok: false, error: "attachments must be an array" };
   if (input.length > 20) return { ok: false, error: "too many attachments (max 20)" };
@@ -393,8 +444,8 @@ export function validateAttachments(input: unknown): { ok: true; attachments: Ta
     if (a.mime !== undefined && (typeof a.mime !== "string" || a.mime.length > 100)) {
       return { ok: false, error: `attachments[${i}].mime must be a string ≤ 100 chars` };
     }
-    if (a.size !== undefined && (typeof a.size !== "number" || a.size < 0 || a.size > MAX_UPLOAD_BYTES)) {
-      return { ok: false, error: `attachments[${i}].size must be a non-negative number ≤ ${MAX_UPLOAD_BYTES}` };
+    if (a.size !== undefined && (typeof a.size !== "number" || a.size < 0 || a.size > maxBytes)) {
+      return { ok: false, error: `attachments[${i}].size must be a non-negative number ≤ ${maxBytes}` };
     }
     out.push({ type: "file", file_id: a.file_id, name: a.name, mime: a.mime, size: a.size });
   }

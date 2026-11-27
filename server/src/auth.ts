@@ -538,7 +538,7 @@ export function deleteNetwork(userId: string, networkId: string): { ok: boolean;
     deleteNetworkAgentGroups(networkId); deleteDepartmentsForNetwork(networkId); for (const t of AGENT_TEAM_TABLES) if (tableExists(t)) db.run(`DELETE FROM ${t} WHERE network_id = ?1`, [networkId]); // #2144, #419, #764 (one line: docs pin auth.ts line numbers)
     // #993: the rules text belongs to the network; leaving it behind would make a
     // later network that reuses the id inherit somebody else's rules.
-    if (tableExists("network_rules")) db.run("DELETE FROM network_rules WHERE network_id = ?1", [networkId]); if (tableExists("network_voice_configs")) db.run("DELETE FROM network_voice_configs WHERE network_id = ?1", [networkId]);
+    if (tableExists("network_rules")) db.run("DELETE FROM network_rules WHERE network_id = ?1", [networkId]); if (tableExists("network_voice_configs")) db.run("DELETE FROM network_voice_configs WHERE network_id = ?1", [networkId]); if (tableExists("network_storage_configs")) db.run("DELETE FROM network_storage_configs WHERE network_id = ?1", [networkId]);
   });
   return { ok: true };
 }
@@ -974,7 +974,7 @@ const NETWORK_CONTENT_CHECKS: Array<[label: string, sql: string]> = [
   ["requirement_projects", "SELECT COUNT(*) AS cnt FROM requirement_projects WHERE network_id = ?1"],
   ["scheduled_tasks", "SELECT COUNT(*) AS cnt FROM scheduled_tasks WHERE network_id = ?1"],
   ["providers", "SELECT COUNT(*) AS cnt FROM providers WHERE network_id = ?1"],
-  ["network_secrets", "SELECT COUNT(*) AS cnt FROM network_secrets WHERE network_id = ?1"], ["network_voice_configs", "SELECT COUNT(*) AS cnt FROM network_voice_configs WHERE network_id = ?1"],
+  ["network_secrets", "SELECT COUNT(*) AS cnt FROM network_secrets WHERE network_id = ?1"], ["network_voice_configs", "SELECT COUNT(*) AS cnt FROM network_voice_configs WHERE network_id = ?1"], ["network_storage_configs", "SELECT COUNT(*) AS cnt FROM network_storage_configs WHERE network_id = ?1"],
   ["skillhub_skills", "SELECT COUNT(*) AS cnt FROM skillhub_skills WHERE network_id = ?1"],
   ["side_chats", "SELECT COUNT(*) AS cnt FROM side_chats WHERE network_id = ?1"],
   // #2144 —— 组是管理员手工建的配置,和 requirements 一样算内容:有组就拒,别替人删掉。

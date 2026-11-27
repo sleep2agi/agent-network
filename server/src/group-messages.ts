@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { db, uuidv4 } from "./db.js";
 import { isAgentRestricted } from "./agent-access.js";
 import { pushUserEvent, hasUserSubscribers } from "./push.js";
-import { DM_FILE_SCOPE, FILE_ID_REGEX, validateAttachments } from "./uploads.js";
+import { DM_FILE_SCOPE, FILE_ID_REGEX, MAX_REMOTE_UPLOAD_BYTES, validateAttachments } from "./uploads.js";
 import { restrictedMemberCanUseFile } from "./restricted-files.js";
 import { redactMessageRow } from "./redact-tokens.js";
 import { MAX_DM_CHARS, dmParticipantSeesFile, networkFileEntry } from "./human-dm.js";
@@ -94,7 +94,7 @@ export function sendGroupMessage(input: GroupSendInput): GroupSendResult {
   if (!group) return fail(404, "group_not_found");
   const text = typeof input.message === "string" ? input.message : "";
   if (text.length > MAX_DM_CHARS) return fail(400, "message_too_long");
-  const attachments = validateAttachments(input.attachments);
+  const attachments = validateAttachments(input.attachments, { maxBytes: MAX_REMOTE_UPLOAD_BYTES });
   if (!attachments.ok) return fail(400, "bad_attachments");
   if (!text.trim() && attachments.attachments.length === 0) return fail(400, "message_required");
 

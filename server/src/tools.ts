@@ -81,7 +81,7 @@ import {
   vaultUpsert, vaultGet, vaultListKeys, vaultDelete,
   VaultError,
 } from "./vault.js";
-import { stripHostLocalPathsForCrossHostSafe, validateAttachments } from "./uploads.js";
+import { MAX_REMOTE_UPLOAD_BYTES, stripHostLocalPathsForCrossHostSafe, validateAttachments } from "./uploads.js";
 import {
   validateBaseUrl as _validateBaseUrl,
   SUPPORTED_VENDORS,
@@ -2701,7 +2701,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // reverse-(e) invariant (no attachments → behavior unchanged) is
       // pinned by tests that assert byte-identical response shape
       // before/after this validation runs.
-      const attachmentsResult = validateAttachments(attachments ?? (meta && typeof meta === "object" ? (meta as any).attachments : undefined));
+      const attachmentsResult = validateAttachments(
+        attachments ?? (meta && typeof meta === "object" ? (meta as any).attachments : undefined),
+        { maxBytes: MAX_REMOTE_UPLOAD_BYTES },
+      );
       if (!attachmentsResult.ok) {
         return {
           content: [{
