@@ -378,6 +378,8 @@ export interface CodexAppServerThinkResult {
   replyText: string;
   failed: boolean;
   queued: boolean;
+  interrupted?: boolean;
+  partialReplyText?: string;
   /**
    * #1930 — the queued row was dropped before its turn because the Hub no
    * longer lists it as pending (the model acked it meanwhile). Nothing ran,
@@ -400,7 +402,9 @@ export function codexAppServerReplyOrThrow(outcome: CodexAppServerThinkResult): 
     throw new CodexTaskSkippedError("not pending on hub");
   }
   if (outcome.failed) {
-    throw new Error(outcome.replyText.replace(/^codex-app-server 错误:\s*/, ""));
+    const error = new Error(outcome.replyText.replace(/^codex-app-server 错误:\s*/, ""));
+    if (outcome.interrupted) Object.assign(error, { name: "AbortError", partialReplyText: outcome.partialReplyText });
+    throw error;
   }
   return outcome.replyText || "（无回复）";
 }
@@ -607,8 +611,12 @@ export function codexAppServerThink(
           : `codex-app-server 错误: ${raw}`;
       finish({ replyText, failed: true, queued });
     };
-    const onError = (ev: { taskId: string; error: string }) => {
+    const onError = (ev: { taskId: string; error: string; interrupted?: boolean; partialReplyText?: string }) => {
       if (ev.taskId !== opts.taskId) return;
+      if (ev.interrupted) {
+        finish({ replyText: `codex-app-server 错误: ${ev.error}`, failed: true, queued: false, interrupted: true, partialReplyText: ev.partialReplyText });
+        return;
+      }
       failCapacityOrFinish(ev.error);
     };
     const armResponseIdleTimer = () => {

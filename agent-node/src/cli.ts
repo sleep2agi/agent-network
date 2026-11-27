@@ -47,6 +47,7 @@ import {
 import { accessSync, constants as fsConstants } from "node:fs";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
+import { isTurnAbort, UserStoppedTurn } from "./runtime/user-stopped-turn";
 import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
 import { envTransportFor } from "./runtime/env-transport.js";
@@ -1684,6 +1685,9 @@ const agyLoginManager = RUNTIME === "antigravity" ? createAgyLoginManager() : nu
  * 收到 control=interrupt 时 abort 当前这一次。只在 claude 运行时非 null。
  */
 let currentClaudeAbort: AbortController | null = null;
+const userClaudeAbort = Object.assign(new Error("Claude turn was interrupted"), { name: "AbortError" });
+// Only actual runtime executions enter this set, not tasks waiting on thinkQueue.
+const activeStopTurns = new Set<UserStoppedTurn>();
 
 const agyCatalogCache = RUNTIME === "antigravity"
   ? (() => {
@@ -3855,6 +3859,8 @@ async function processWithClaude(
     claudeMessagesThisAttempt = 0;
     let timedOut = false;
     const attemptStart = Date.now();
+    let stoppedPartial = "";
+    let userStoppedAttempt = false;
     try {
       result = await withTimeout(async (signal) => {
         let inner = "";
@@ -3871,6 +3877,7 @@ async function processWithClaude(
         const idleWatch = startIdleWatchdog({
           idleMs,
           onFire: (idleForMs) => {
+            if (ac.signal.aborted) return;
             claudeIdleRef.v = { idleForMs, lastItem: lastClaudeMessageType };
             log(`[claude] idle ${Math.round(idleForMs / 1000)}s 无任何消息（上限 ${Math.round(idleMs / 1000)}s，最后一条=${lastClaudeMessageType ?? "无"}）；abort 本次尝试`);
             ac.abort();
@@ -3883,6 +3890,10 @@ async function processWithClaude(
           for await (const message of messages) {
             evidence?.consumed();
             const m = message as any;
+            if (m.type === "stream_event" && m.event?.type === "content_block_delta"
+                && m.event.delta?.type === "text_delta" && typeof m.event.delta.text === "string") {
+              stoppedPartial += m.event.delta.text;
+            }
             // #4010 —— 「有消息」就是有进展：重置 idle 计时，并记下类型用于超时定位。
             idleWatch.poke();
             claudeMessagesThisAttempt += 1;
@@ -3963,6 +3974,8 @@ async function processWithClaude(
                   inner = m.result;
                 }
               } else {
+                const failure = m.error || m.result || (Array.isArray(m.errors) ? m.errors.join("; ") : "") || "未知错误";
+                if (ac.signal.reason === userClaudeAbort && isTurnAbort(failure)) throw userClaudeAbort;
                 inner = `执行出错: ${m.error || m.result || "未知错误"}`;
               }
             }
@@ -4065,8 +4078,11 @@ async function processWithClaude(
               inner = formatClassificationForUser(cls, { runtime: "claude-agent-sdk", usage: m.usage });
             }
           }
+          if (ac.signal.reason === userClaudeAbort && !inner) throw userClaudeAbort;
           return inner;
         } finally {
+          userStoppedAttempt = ac.signal.reason === userClaudeAbort;
+          if (currentClaudeAbort === ac) currentClaudeAbort = null;
           idleWatch.stop();
           signal.removeEventListener("abort", forward);
         }
@@ -4076,6 +4092,12 @@ async function processWithClaude(
     } catch (err: any) {
       const idleHit = claudeIdleHit();
       timedOut = err instanceof TimeoutError || idleHit !== null;
+      if (!timedOut && userStoppedAttempt && isTurnAbort(err)) {
+        // Bypass vendor retries for the explicit stop without reclassifying watchdog aborts.
+        throw Object.assign(new Error(String(err?.message ?? err), { cause: err }), {
+          name: "AbortError", partialReplyText: stoppedPartial,
+        });
+      }
       // #4010 —— idle 到点走的是 abort，不是 TimeoutError；错误串要能自己说清
       // 「卡在哪一步」。只写 "timed out after 300000ms" 时，读的人无法区分
       // 「一直没动」与「一直在动但总量超了」，而两者的下一步动作相反。
@@ -5123,6 +5145,7 @@ async function processWithCodexAppServer(
   steerIfExternalTurn = false,
   evidence?: TaskRuntimeEvidenceReporter,
   trackReceipt = true,
+  stopTurn?: UserStoppedTurn,
 ): Promise<string> {
   // This compatibility slice can recover an identity-proven V2 answer, but
   // it does not yet admit/replay an injected action through the old adapter.
@@ -5167,6 +5190,7 @@ async function processWithCodexAppServer(
     },
     onSubmitted: evidence?.submitted,
     onConsumed: (event) => {
+      if (stopTurn) stopTurn.codexTurnId = event.turnId;
       const threadId = session.bridge.getThreadId();
       const inboxId = taskId ? queuedInboxRowByTask.get(taskId) : undefined;
       if (trackReceipt && taskId && inboxId && turnReceiptLedger) {
@@ -6593,6 +6617,7 @@ function think(
   steerIfExternalTurn = false,
   evidence?: TaskRuntimeEvidenceReporter,
   trackReceipt = true,
+  stopTurn?: UserStoppedTurn,
 ): Promise<string> {
   if (configApplyDraining) {
     // Don't accept new work during a restart drain. The error string
@@ -6613,6 +6638,7 @@ function think(
     // serializes so the counter is mostly 0 or 1, but the increment/decrement
     // pattern is still correct under future concurrency changes.
     incrementInFlight();
+    if (stopTurn) activeStopTurns.add(stopTurn);
     try {
       if (RUNTIME === "codex") {
         // #141 Phase 1.3 — opt-in to direct app-server stdio.
@@ -6644,6 +6670,7 @@ function think(
       }
       return await processWithClaude(task, from, images, evidence);
     } finally {
+      if (stopTurn) activeStopTurns.delete(stopTurn);
       if (prev !== undefined) process.env.CURRENT_TASK_ID = prev; else delete process.env.CURRENT_TASK_ID;
       decrementInFlight();
     }
@@ -6655,8 +6682,10 @@ function think(
   // its own process environment and task identity is carried in the prompt.
   if (RUNTIME === "codex-app-server") {
     incrementInFlight();
-    return processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt)
+    if (stopTurn) activeStopTurns.add(stopTurn);
+    return processWithCodexAppServer(task, from, taskId, steerIfExternalTurn, evidence, trackReceipt, stopTurn)
       .finally(() => {
+        if (stopTurn) activeStopTurns.delete(stopTurn);
         decrementInFlight();
       });
   }
@@ -6821,13 +6850,16 @@ async function processTask(
     },
     debug,
   });
+  const stopTurn = new UserStoppedTurn(taskId);
   try {
     // Every inbound network task must be visible in the shared Grok TUI. A2
     // delegation is intentionally human-only, so the legacy network-side
     // wrapper is skipped for copresence and remains unchanged elsewhere.
     text = (GROK_COPRESENCE ? null : await tryHandleExplicitDelegation(augmentedTask, from, taskId))
-      || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected);
+      || await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected, stopTurn);
   } catch (err: any) {
+    const stopped = await stopTurn.reply(err);
+    if (stopped) return stopped;
     // #2028 —— 保留结构化失败码：重放门按码判断，不靠被压平后的回复文本。
     runtimeFailureCode = typeof err?.code === "string" ? err.code : null;
     if (err?.code === "codex_task_skipped") {
@@ -6904,8 +6936,9 @@ async function processTask(
       `[vendor-retry] transient error detected, retrying in ${backoff}ms (attempt ${retryAttempt}/${VENDOR_RETRY_PROFILE.maxRetries})`,
     );
     await new Promise((r) => setTimeout(r, backoff));
+    const retryStopTurn = new UserStoppedTurn(taskId);
     try {
-      const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected);
+      const retried = await think(augmentedTask, from, taskId, images, steerIfExternalTurn, runtimeEvidence, receiptExpected, retryStopTurn);
       text = retried;
       runtimeFailureCode = null;
       failed = false;
@@ -6928,6 +6961,8 @@ async function processTask(
         }
       }
     } catch (err: any) {
+      const stopped = await retryStopTurn.reply(err);
+      if (stopped) return stopped;
       // #2028 —— 重试也失败时同样保留结构化码，后续循环判定/诊断都用它。
       runtimeFailureCode = typeof err?.code === "string" ? err.code : runtimeFailureCode;
       text = runtimeErrorReplyText(RUNTIME, err);
@@ -7097,8 +7132,12 @@ async function processControlInstruction(msg: any): Promise<void> {
     // #5332 —— claude：直接 abort 当前尝试（AbortController 已在 processWithClaude 里注册）。
     // 没有在飞的尝试 ⇒ 明确回 no_active_turn，不假装成功。
     // 统一附带 interrupted: boolean（与 OpenCode 回执契约对齐，供 App replyProvesInterrupted 判定）。
-    const out = RUNTIME === "claude"
-      ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const, interrupted: true as const }) : { ok: false as const, interrupted: false as const, reason: "no_active_turn" })
+    const claudeAbort = currentClaudeAbort;
+    const codexBridge = RUNTIME === "codex-app-server" ? codexAppServerSessionManager.current()?.bridge : undefined;
+    const codexTurnId = codexBridge?.getActiveTurnId();
+    const turn = activeStopTurns.size === 1 ? activeStopTurns.values().next().value : undefined;
+    const interrupt = async () => RUNTIME === "claude"
+      ? (claudeAbort && !claudeAbort.signal.aborted ? (claudeAbort.abort(userClaudeAbort), { ok: true as const, interrupted: true as const }) : { ok: false as const, interrupted: false as const, reason: "no_active_turn" })
       : (RUNTIME === "antigravity" || (RUNTIME === "grok" && GROK_EXECUTION_MODE === "acp"))
       ? cancelActiveAcpTurn()
       : RUNTIME === "grok" || RUNTIME === "codex"
@@ -7107,9 +7146,8 @@ async function processControlInstruction(msg: any): Promise<void> {
       : RUNTIME === "codex-app-server"
       ? await (async () => {
           // #5332 —— codex app-server 协议有 turn/interrupt；没有在飞会话就明确回 no_active_turn
-          const session = codexAppServerSessionManager.current();
-          if (!session) return { ok: false as const, interrupted: false as const, reason: "no_active_turn" };
-          return await session.bridge.interruptActiveTurn();
+          if (!codexBridge) return { ok: false as const, interrupted: false as const, reason: "no_active_turn" };
+          return await codexBridge.interruptActiveTurn(codexTurnId);
         })()
       : await interruptCurrentTurn({
         readEndpoint: () => {
@@ -7123,6 +7161,14 @@ async function processControlInstruction(msg: any): Promise<void> {
         },
         sessionId: () => opencodeSessionId ?? null,
       });
+    // For Codex, bind to the runtime-confirmed turn, never a queued task.
+    const owners = RUNTIME === "codex-app-server"
+      ? [...activeStopTurns].filter(candidate => !!codexTurnId && candidate.codexTurnId === codexTurnId)
+      : turn ? [turn] : [];
+    const receipt = Promise.resolve().then(interrupt);
+    const out = owners.length
+      ? (await Promise.all(owners.map(owner => owner.interrupt(() => receipt))))[0]
+      : await receipt;
     log(`[control] interrupt → ${JSON.stringify(out)}`);
     handledControlIds.add(msg.id);
     try {
