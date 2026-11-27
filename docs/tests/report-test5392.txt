@@ -1,0 +1,21 @@
+#5392 — user interrupt is not a runtime failure
+
+2026-11-27; code 51fde396; version and exact pair bc750ef8.
+Isolated Docker (anet-test5338, current source bind mounts, --init,
+--network none, --cpus 1 --cpu-shares 64); runs were serial.
+
+PASS: bun test, 141 pass / 0 fail across 8 files:
+  agent-node/src/runtime/{user-stopped-turn,control-interrupt,codex-app-server-bridge}.test.ts
+  agent-node/src/runtime/{opencode-copresence/v2-session,codex-app-server/runtime}.test.ts
+  agent-node/src/package-version-consistency.test.ts
+  agent-network/src/{opencode-agent-node-pair,package-version-consistency}.test.ts
+PASS: agent-node bun run build (both entrypoints).
+PASS: tests/test5332-interrupt-mid-turn/scenario.ts (positive scenario only):
+  private Hub -> node -> fake Grok ACP. Stop reached the in-flight turn in
+  156 ms; idle stop reported no active turn; the next task ran normally.
+
+The focused tests cover delayed positive ACK, absent/negative ACK, a retry
+with the same task ID, Claude AbortError, OpenCode V2 error mapping and
+partial text, Codex structured interruption, and watchdog error exclusion.
+The Grok scenario verifies control delivery, not the OpenCode/Claude reply
+UI. No real provider, device, or production end-to-end replay was run.
