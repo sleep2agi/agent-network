@@ -1226,9 +1226,15 @@ export class CodexAppServerBridge extends EventEmitter {
    * #5332 —— 停止当前回合（codex app-server 协议里有 `turn/interrupt`，二进制里确认存在）。
    * 没有在飞回合 ⇒ 明确回 no_active_turn，不假装成功。
    */
-  async interruptActiveTurn(): Promise<{ ok: boolean; interrupted: boolean; turnId?: string | null; reason?: string }> {
+  getActiveTurnId(): string | null {
+    return this.activeTurnId;
+  }
+
+  async interruptActiveTurn(expectedTurnId?: string | null): Promise<{ ok: boolean; interrupted: boolean; turnId?: string | null; reason?: string }> {
     const turnId = this.activeTurnId;
-    if (!turnId) return { ok: false, interrupted: false, reason: "no_active_turn" };
+    if (!turnId || (expectedTurnId !== undefined && turnId !== expectedTurnId)) {
+      return { ok: false, interrupted: false, reason: "no_active_turn" };
+    }
     try {
       await this.client.request("turn/interrupt", { threadId: this.threadId, turnId });
       return { ok: true, interrupted: true, turnId };
@@ -1482,7 +1488,10 @@ export class CodexAppServerBridge extends EventEmitter {
           ? "Codex turn was interrupted without an error message"
           : undefined);
     if (turnErr) {
-      this.emit("task_error", { taskId: pending.taskId, error: turnErr });
+      this.emit("task_error", {
+        taskId: pending.taskId, error: turnErr,
+        ...(terminal.status === "interrupted" ? { interrupted: true, partialReplyText: pending.finalText || pending.agentTextChunks.join("") } : {}),
+      });
     } else {
       // Prefer the captured final_answer item; fall back to accumulated deltas.
       const text = pending.finalText && pending.finalText.length > 0

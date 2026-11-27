@@ -893,6 +893,8 @@ describe("CodexAppServerBridge — bootstrap + task mapping", () => {
     expect(errors).toEqual([{
       taskId: "task_interrupted",
       error: "Codex turn was interrupted without an error message",
+      interrupted: true,
+      partialReplyText: "",
     }]);
   });
 });
@@ -1783,6 +1785,8 @@ describe("CodexAppServerBridge — sync claim + FIFO queue (通信龙)", () => {
     expect(errors).toEqual([{
       taskId: "t-reconcile-interrupted",
       error: "Codex turn was interrupted without an error message",
+      interrupted: true,
+      partialReplyText: "partial text",
     }]);
 
     await client.close();
