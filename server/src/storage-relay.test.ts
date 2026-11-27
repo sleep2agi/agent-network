@@ -8,6 +8,9 @@ const PRIVATE_DIR = mkdtempSync(join(tmpdir(), "anet-storage-relay-test-"));
 process.env.COMMHUB_DB ||= join(PRIVATE_DIR, "hub.db");
 process.env.COMMHUB_UPLOADS_DIR ||= join(PRIVATE_DIR, "uploads");
 process.env.ANET_HUB_SECRET_VAULT_KEY = "ab".repeat(32);
+const PREV_ALLOW_LOOPBACK = process.env.ANET_STORAGE_ALLOW_LOOPBACK;
+// Explicit test-only opt-in for local mock provider E2E; SSRF tests below explicitly test default (unset/false) behavior.
+process.env.ANET_STORAGE_ALLOW_LOOPBACK = "1";
 
 let hubServer: ReturnType<typeof Bun.serve>;
 let hubBase = "";
@@ -41,6 +44,20 @@ beforeAll(async () => {
       const url = new URL(req.url);
       const auth = req.headers.get("Authorization") || "";
       const cookie = req.headers.get("Cookie") || "";
+
+      // 0. SSRF redirect trap for E2E verification (both /api/storage/test and legacy /api/files/:id proxy)
+      if (req.method === "GET" && url.pathname === "/api/v1/datasets/owner/ssrf-redirect-repo") {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://169.254.169.254/latest/meta-data/iam/security-credentials/" },
+        });
+      }
+      if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/api/v1/datasets/owner/ssrf-proxy-redirect/repo") {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "https://169.254.169.254/latest/meta-data/" },
+        });
+      }
 
       // 1. ModelScope repo info: GET /api/v1/{datasets|models}/{owner}/{repo}
       if (req.method === "GET" && /^\/api\/v1\/(datasets|models)\/[^/]+\/[^/]+$/.test(url.pathname)) {
@@ -188,6 +205,8 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(() => {
+  if (PREV_ALLOW_LOOPBACK === undefined) delete process.env.ANET_STORAGE_ALLOW_LOOPBACK;
+  else process.env.ANET_STORAGE_ALLOW_LOOPBACK = PREV_ALLOW_LOOPBACK;
   try { hubServer?.stop(true); } catch {}
   try { mockProviderServer?.stop(true); } catch {}
   try { rmSync(PRIVATE_DIR, { recursive: true, force: true }); } catch {}
@@ -602,5 +621,632 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     expect(delRes.ok).toBe(true);
     expect(delRes.configured).toBe(false);
     expect(delRes.enabled).toBe(false);
+  });
+});
+
+describe("Storage Relay SSRF Hardening (#5719)", () => {
+  test("isForbiddenStorageIp blocks RFC1918, 127/8, 169.254/16, 100.64/10, 0/8, multicast, ::, ::1, fc00::/7, fe80::/10, and IPv4-mapped IPv6", async () => {
+    const { isForbiddenStorageIp } = await import("./storage-relay.js");
+
+    const alwaysForbidden = [
+      // RFC1918
+      "10.0.0.0", "10.0.0.1", "10.255.255.254",
+      "172.16.0.0", "172.16.0.1", "172.24.10.20", "172.31.255.255",
+      "192.168.0.0", "192.168.1.1", "192.168.255.254",
+      // Link-local & cloud metadata
+      "169.254.0.1", "169.254.169.254", "169.254.255.254",
+      // CGNAT (RFC6598, incl. Aliyun 100.100.100.200 metadata)
+      "100.64.0.0", "100.64.0.1", "100.100.100.200", "100.127.255.255",
+      // Unspecified / multicast / reserved
+      "0.0.0.0", "0.1.2.3", "224.0.0.1", "239.255.255.255", "240.0.0.1", "255.255.255.255",
+      // IPv6 unspecified / ULA (full fc00::/7) / link-local (full fe80::/10) / multicast
+      "::", "0:0:0:0:0:0:0:0",
+      "fc00::1", "fcff::1", "fd00::1", "fd12:3456:789a::1", "fdff:ffff::1",
+      "fe80::1", "fe80::1%eth0", "fe90::1", "fea0::1", "febf:ffff::1",
+      "fec0::1", "ff02::1",
+      // IPv4-mapped IPv6 (both dotted-quad and URL-normalized hex form) + NAT64 + 6to4
+      "::ffff:10.0.0.1", "::ffff:a00:1",
+      "::ffff:172.16.0.1", "::ffff:192.168.1.1",
+      "::ffff:169.254.169.254", "::ffff:a9fe:a9fe", "::FFFF:169.254.169.254",
+      "::ffff:100.64.0.1", "::ffff:0.0.0.0",
+      "::10.0.0.1", "64:ff9b::10.0.0.1", "2002:0a00:0001::1",
+      // Malformed / non-IP fails closed
+      "", "not-an-ip", "999.0.0.1",
+    ];
+    for (const ip of alwaysForbidden) {
+      expect(isForbiddenStorageIp(ip)).toBe(true);
+      // Even when loopback is opted in for tests, non-loopback internal ranges MUST remain forbidden!
+      expect(isForbiddenStorageIp(ip, { allowLoopback: true })).toBe(true);
+    }
+
+    const loopbackIps = [
+      "127.0.0.1", "127.0.0.0", "127.255.255.254",
+      "::1", "[::1]", "0:0:0:0:0:0:0:1",
+      "::ffff:127.0.0.1", "::ffff:7f00:1",
+    ];
+    for (const ip of loopbackIps) {
+      expect(isForbiddenStorageIp(ip)).toBe(true);
+      expect(isForbiddenStorageIp(ip, { allowLoopback: false })).toBe(true);
+      expect(isForbiddenStorageIp(ip, { allowLoopback: true })).toBe(false);
+    }
+
+    const publicIps = [
+      "1.1.1.1", "8.8.8.8", "47.96.1.1", "93.184.216.34",
+      // Adjacent boundaries outside private/CGNAT ranges
+      "172.15.255.255", "172.32.0.1", "192.167.255.255", "192.169.0.1",
+      "100.63.255.255", "100.128.0.1",
+      // Public IPv6 & public IPv4-mapped IPv6
+      "2606:4700:4700::1111", "2408:4001::1", "::ffff:93.184.216.34",
+    ];
+    for (const ip of publicIps) {
+      expect(isForbiddenStorageIp(ip)).toBe(false);
+    }
+  });
+
+  test("validateStorageUrl rejects private/loopback/obfuscated/non-https URLs by default and honors test loopback opt-in only for loopback", async () => {
+    const { validateStorageUrl } = await import("./storage-relay.js");
+
+    const blockedByDefault = [
+      "https://10.0.0.1",
+      "https://172.16.0.1",
+      "https://172.31.255.254",
+      "https://192.168.1.1",
+      "https://169.254.169.254/latest/meta-data",
+      "https://100.64.0.1",
+      "https://100.100.100.200",
+      "https://0.0.0.0",
+      "https://127.0.0.1",
+      "http://127.0.0.1:9200",
+      "https://127.255.0.1",
+      "https://localhost",
+      "http://localhost:9200",
+      "https://sub.localhost",
+      "https://[::1]",
+      "http://[::1]:9200",
+      "https://[::]",
+      "https://[fc00::1]",
+      "https://[fd12:3456::1]",
+      "https://[fe80::1]",
+      "https://[febf::1]",
+      "https://[::ffff:10.0.0.1]",
+      "https://[::ffff:169.254.169.254]",
+      "https://[::ffff:127.0.0.1]",
+      // Obfuscated integer / hex / octal IPv4 forms normalized by URL parser
+      "https://2130706433",
+      "https://0x7f000001",
+      "https://0xa9fea9fe",
+      "https://0177.0.0.1",
+      // Non-https & embedded credentials
+      "http://www.modelscope.cn",
+      "https://user:pass@www.modelscope.cn",
+      "file:///etc/passwd",
+      "ftp://files.example.com",
+    ];
+    for (const bad of blockedByDefault) {
+      const res = validateStorageUrl(bad, "invalid_endpoint", { allowLoopback: false });
+      expect(res.ok).toBe(false);
+    }
+
+    // Public HTTPS & blank (use default endpoint) allowed
+    expect(validateStorageUrl("https://www.modelscope.cn", "invalid_endpoint", { allowLoopback: false }).ok).toBe(true);
+    expect(validateStorageUrl("", "invalid_endpoint", { allowLoopback: false }).ok).toBe(true);
+
+    // Explicit test opt-in allows loopback ONLY; RFC1918/link-local/CGNAT/ULA/plain-http-public remain blocked
+    expect(validateStorageUrl("http://127.0.0.1:18080", "invalid_endpoint", { allowLoopback: true }).ok).toBe(true);
+    expect(validateStorageUrl("http://localhost:18080", "invalid_endpoint", { allowLoopback: true }).ok).toBe(true);
+    expect(validateStorageUrl("http://[::1]:18080", "invalid_endpoint", { allowLoopback: true }).ok).toBe(true);
+    expect(validateStorageUrl("https://10.0.0.1", "invalid_endpoint", { allowLoopback: true }).ok).toBe(false);
+    expect(validateStorageUrl("https://169.254.169.254", "invalid_endpoint", { allowLoopback: true }).ok).toBe(false);
+    expect(validateStorageUrl("https://100.64.0.1", "invalid_endpoint", { allowLoopback: true }).ok).toBe(false);
+    expect(validateStorageUrl("https://[fc00::1]", "invalid_endpoint", { allowLoopback: true }).ok).toBe(false);
+    expect(validateStorageUrl("https://[fe80::1]", "invalid_endpoint", { allowLoopback: true }).ok).toBe(false);
+    expect(validateStorageUrl("http://www.modelscope.cn", "invalid_endpoint", { allowLoopback: true }).ok).toBe(false);
+  });
+
+  test("assertSafeStorageUrl checks DNS-resolved IPs and fails closed on DNS errors or empty results", async () => {
+    const { assertSafeStorageUrl, StorageSsrfError } = await import("./storage-relay.js");
+
+    // Public IPv4 + IPv6 DNS resolution succeeds
+    const ok = await assertSafeStorageUrl("https://storage.public.example", {
+      allowLoopback: false,
+      lookupFn: async () => [
+        { address: "93.184.216.34", family: 4 },
+        { address: "2606:4700:4700::1111", family: 6 },
+      ],
+    });
+    expect(ok.hostname).toBe("storage.public.example");
+
+    // Every forbidden CIDR resolved via DNS MUST be rejected
+    const dnsForbiddenTargets = [
+      { address: "10.0.0.5", family: 4 },
+      { address: "172.16.4.2", family: 4 },
+      { address: "192.168.10.1", family: 4 },
+      { address: "127.0.0.1", family: 4 },
+      { address: "169.254.169.254", family: 4 },
+      { address: "100.64.0.10", family: 4 },
+      { address: "0.0.0.0", family: 4 },
+      { address: "::1", family: 6 },
+      { address: "::", family: 6 },
+      { address: "fc00::1", family: 6 },
+      { address: "fd12:3456::1", family: 6 },
+      { address: "fe80::1", family: 6 },
+      { address: "febf::1", family: 6 },
+      { address: "::ffff:10.0.0.1", family: 6 },
+      { address: "::ffff:169.254.169.254", family: 6 },
+    ];
+    for (const rec of dnsForbiddenTargets) {
+      await expect(
+        assertSafeStorageUrl("https://rebind.evil.example", {
+          allowLoopback: false,
+          lookupFn: async () => [rec],
+        }),
+      ).rejects.toMatchObject({ name: "StorageSsrfError", code: "storage_ssrf_blocked" });
+    }
+
+    // Mixed public + private DNS records MUST reject (cannot cherry-pick safe record)
+    await expect(
+      assertSafeStorageUrl("https://dual-homed.evil.example", {
+        allowLoopback: false,
+        lookupFn: async () => [
+          { address: "93.184.216.34", family: 4 },
+          { address: "10.0.0.1", family: 4 },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(StorageSsrfError);
+
+    // DNS empty result -> FAIL CLOSED
+    await expect(
+      assertSafeStorageUrl("https://empty.dns.example", {
+        allowLoopback: false,
+        lookupFn: async () => [],
+      }),
+    ).rejects.toMatchObject({ name: "StorageSsrfError", code: "storage_ssrf_dns_failed" });
+
+    // DNS lookup exception -> FAIL CLOSED
+    await expect(
+      assertSafeStorageUrl("https://nxdomain.example", {
+        allowLoopback: false,
+        lookupFn: async () => {
+          const err: any = new Error("getaddrinfo ENOTFOUND nxdomain.example");
+          err.code = "ENOTFOUND";
+          throw err;
+        },
+      }),
+    ).rejects.toMatchObject({ name: "StorageSsrfError", code: "storage_ssrf_dns_failed" });
+
+    // Domain resolving to loopback is rejected by default, allowed ONLY with allowLoopback=true
+    await expect(
+      assertSafeStorageUrl("https://localtest.example", {
+        allowLoopback: false,
+        lookupFn: async () => [{ address: "127.0.0.1", family: 4 }],
+      }),
+    ).rejects.toMatchObject({ code: "storage_ssrf_blocked" });
+    const lbOk = await assertSafeStorageUrl("https://localtest.example", {
+      allowLoopback: true,
+      lookupFn: async () => [{ address: "127.0.0.1", family: 4 }],
+    });
+    expect(lbOk.addresses[0].address).toBe("127.0.0.1");
+  });
+
+  test("safeStorageFetch re-validates every redirect target, blocks hops to internal IPs/DNS failures, and strips auth on cross-origin redirect", async () => {
+    const { safeStorageFetch } = await import("./storage-relay.js");
+
+    // 1. Redirect to literal metadata IP -> blocked BEFORE second hop fetch
+    let calls = 0;
+    await expect(
+      safeStorageFetch(
+        "https://public.example/start",
+        { headers: { Authorization: "Bearer secret", Cookie: "m_session_id=secret" } },
+        {
+          allowLoopback: false,
+          lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+          fetchFn: (async () => {
+            calls++;
+            return new Response(null, { status: 302, headers: { Location: "https://169.254.169.254/latest/meta-data" } });
+          }) as unknown as typeof fetch,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "storage_ssrf_blocked" });
+    expect(calls).toBe(1);
+
+    // 2. Redirect to domain resolving to RFC1918 IP -> blocked BEFORE second hop fetch
+    calls = 0;
+    await expect(
+      safeStorageFetch(
+        "https://public.example/start",
+        {},
+        {
+          allowLoopback: false,
+          lookupFn: async (host) =>
+            host === "public.example"
+              ? [{ address: "93.184.216.34", family: 4 }]
+              : [{ address: "10.0.0.8", family: 4 }],
+          fetchFn: (async () => {
+            calls++;
+            return new Response(null, { status: 302, headers: { Location: "https://internal.corp.example/admin" } });
+          }) as unknown as typeof fetch,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "storage_ssrf_blocked" });
+    expect(calls).toBe(1);
+
+    // 3. Redirect to HTTPS -> HTTP downgrade -> blocked
+    calls = 0;
+    await expect(
+      safeStorageFetch(
+        "https://public.example/start",
+        {},
+        {
+          allowLoopback: false,
+          lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+          fetchFn: (async () => {
+            calls++;
+            return new Response(null, { status: 302, headers: { Location: "http://public.example/insecure" } });
+          }) as unknown as typeof fetch,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "storage_ssrf_blocked" });
+    expect(calls).toBe(1);
+
+    // 4. Cross-origin redirect between two public hosts -> allowed AND strips Authorization & Cookie!
+    const seenHeaders: Array<{ url: string; auth: string | null; cookie: string | null }> = [];
+    const okRes = await safeStorageFetch(
+      "https://origin-a.example/file",
+      { headers: { Authorization: "Bearer ms_secret", Cookie: "m_session_id=ms_secret" } },
+      {
+        allowLoopback: false,
+        lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+        fetchFn: (async (url: string | URL | Request, init?: RequestInit) => {
+          const u = String(url);
+          const h = new Headers(init?.headers);
+          seenHeaders.push({ url: u, auth: h.get("Authorization"), cookie: h.get("Cookie") });
+          if (u.startsWith("https://origin-a.example/")) {
+            return new Response(null, { status: 302, headers: { Location: "https://cdn-b.example/blob" } });
+          }
+          return new Response("ok-body", { status: 200 });
+        }) as unknown as typeof fetch,
+      },
+    );
+    expect(okRes.status).toBe(200);
+    expect(await okRes.text()).toBe("ok-body");
+    expect(seenHeaders).toHaveLength(2);
+    expect(seenHeaders[0].auth).toBe("Bearer ms_secret");
+    expect(seenHeaders[0].cookie).toBe("m_session_id=ms_secret");
+    expect(seenHeaders[1].auth).toBeNull();
+    expect(seenHeaders[1].cookie).toBeNull();
+
+    // 5. Redirect loop exceeding cap -> rejected
+    let loopCount = 0;
+    await expect(
+      safeStorageFetch(
+        "https://loop.example/0",
+        {},
+        {
+          allowLoopback: false,
+          maxRedirects: 2,
+          lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+          fetchFn: (async () => {
+            loopCount++;
+            return new Response(null, { status: 302, headers: { Location: `https://loop.example/${loopCount}` } });
+          }) as unknown as typeof fetch,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "storage_ssrf_too_many_redirects" });
+    expect(loopCount).toBe(3);
+  });
+
+  test("driver operations (test/presign/complete) block DNS-resolved private IPs before any outbound fetch", async () => {
+    const {
+      testNetworkStorageConfig,
+      presignStorageUpload,
+      completeStorageUpload,
+      validateStorageConfigUrlsAsync,
+    } = await import("./storage-relay.js");
+
+    let fetchCalled = 0;
+    const neverCalledFetch = (async () => {
+      fetchCalled++;
+      return new Response("should not be reached", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const privateLookup = async () => [{ address: "10.0.0.42", family: 4 }];
+    const emptyLookup = async () => [];
+    const publicLookup = async () => [{ address: "93.184.216.34", family: 4 }];
+
+    // Write-time async DNS validation blocks domains resolving to private IP or failing DNS
+    const writePriv = await validateStorageConfigUrlsAsync(
+      ownerNetworkId,
+      {
+        provider: "modelscope",
+        repo_id: "owner/relay-repo",
+        endpoint: "https://evil-internal.example",
+        api_token: "ms_test_secret_token_9876543210",
+      },
+      { allowLoopback: false, lookupFn: privateLookup },
+    );
+    expect(writePriv.ok).toBe(false);
+    if (!writePriv.ok) expect(writePriv.error).toBe("invalid_endpoint");
+
+    const writeEmptyDns = await validateStorageConfigUrlsAsync(
+      ownerNetworkId,
+      {
+        provider: "modelscope",
+        repo_id: "owner/relay-repo",
+        public_base_url: "https://nxdomain.cdn.example",
+        api_token: "ms_test_secret_token_9876543210",
+      },
+      { allowLoopback: false, lookupFn: emptyLookup },
+    );
+    expect(writeEmptyDns.ok).toBe(false);
+    if (!writeEmptyDns.ok) expect(writeEmptyDns.error).toBe("invalid_public_base_url");
+
+    const writePublicOk = await validateStorageConfigUrlsAsync(
+      ownerNetworkId,
+      {
+        provider: "modelscope",
+        repo_id: "owner/relay-repo",
+        endpoint: "https://storage.public.example",
+        api_token: "ms_test_secret_token_9876543210",
+      },
+      { allowLoopback: false, lookupFn: publicLookup },
+    );
+    expect(writePublicOk.ok).toBe(true);
+
+    const testRes = await testNetworkStorageConfig(
+      ownerNetworkId,
+      {
+        provider: "modelscope",
+        repo_id: "owner/relay-repo",
+        endpoint: "https://evil-internal.example",
+        api_token: "ms_test_secret_token_9876543210",
+      },
+      neverCalledFetch,
+      { allowLoopback: false, lookupFn: privateLookup },
+    );
+    expect(testRes.ok).toBe(false);
+    expect(testRes.error).toBe("storage_ssrf_blocked");
+    expect(fetchCalled).toBe(0);
+
+    const testDnsEmpty = await testNetworkStorageConfig(
+      ownerNetworkId,
+      {
+        provider: "oss",
+        bucket: "my-bucket",
+        region: "cn-hangzhou",
+        endpoint: "https://no-dns.example",
+        access_key_id: "LTAI5tMockAccessKeyId",
+        access_key_secret: "MockOssSecretKey999999",
+      },
+      neverCalledFetch,
+      { allowLoopback: false, lookupFn: emptyLookup },
+    );
+    expect(testDnsEmpty.ok).toBe(false);
+    expect(testDnsEmpty.error).toBe("storage_ssrf_dns_failed");
+    expect(fetchCalled).toBe(0);
+
+    const cfg = {
+      network_id: ownerNetworkId,
+      enabled: true,
+      provider: "modelscope" as const,
+      endpoint: "https://evil-internal.example",
+      region: "",
+      bucket: "",
+      repo_id: "owner/relay-repo",
+      repo_type: "dataset" as const,
+      revision: "master",
+      prefix: "anet-files",
+      public_base_url: "",
+      max_file_bytes: 100 * 1024 * 1024,
+      secrets: { token: "ms_test_secret_token_9876543210" },
+    };
+
+    const presignRes = await presignStorageUpload(
+      cfg,
+      {
+        networkId: ownerNetworkId,
+        dateBucket: "2026-11-27",
+        fileId: "f_ssrf_1",
+        ext: ".bin",
+        size: 10,
+        sha256: "a".repeat(64),
+        mime: "application/octet-stream",
+      },
+      neverCalledFetch,
+      { allowLoopback: false, lookupFn: privateLookup },
+    );
+    expect(presignRes.ok).toBe(false);
+    if (!presignRes.ok) {
+      expect(presignRes.status).toBe(400);
+      expect(presignRes.error).toBe("storage_ssrf_blocked");
+    }
+    expect(fetchCalled).toBe(0);
+
+    const completeRes = await completeStorageUpload(
+      cfg,
+      {
+        fileId: "f_ssrf_1",
+        size: 10,
+        storage: {
+          provider: "modelscope",
+          object_key: "anet-files/net/2026-11-27/f_ssrf_1.bin",
+          sha256: "a".repeat(64),
+          repo_id: "owner/relay-repo",
+          repo_type: "dataset",
+          revision: "master",
+          endpoint: "https://evil-internal.example",
+        },
+      },
+      neverCalledFetch,
+      { allowLoopback: false, lookupFn: privateLookup },
+    );
+    expect(completeRes.ok).toBe(false);
+    if (!completeRes.ok) {
+      expect(completeRes.status).toBe(400);
+      expect(completeRes.error).toBe("storage_ssrf_blocked");
+    }
+    expect(fetchCalled).toBe(0);
+
+    // Malicious ModelScope LFS response returning an internal uploadAction.href is rejected
+    const poisonedHrefRes = await presignStorageUpload(
+      { ...cfg, endpoint: "https://storage.public.example" },
+      {
+        networkId: ownerNetworkId,
+        dateBucket: "2026-11-27",
+        fileId: "f_ssrf_2",
+        ext: ".bin",
+        size: 10,
+        sha256: "b".repeat(64),
+        mime: "application/octet-stream",
+      },
+      (async () =>
+        Response.json({
+          objects: [{ oid: "b".repeat(64), size: 10, actions: { upload: { href: "https://169.254.169.254/latest/meta-data" } } }],
+        })) as unknown as typeof fetch,
+      { allowLoopback: false, lookupFn: publicLookup },
+    );
+    expect(poisonedHrefRes.ok).toBe(false);
+    if (!poisonedHrefRes.ok) {
+      expect(poisonedHrefRes.error).toBe("storage_presign_bad_response");
+    }
+  });
+
+  test("HTTP /api/storage/config & /api/storage/test reject private/loopback endpoints in production mode and block redirect-to-metadata SSRF", async () => {
+    // 1. Production mode (ANET_STORAGE_ALLOW_LOOPBACK unset): all internal & loopback URLs return 400
+    delete process.env.ANET_STORAGE_ALLOW_LOOPBACK;
+    try {
+      const forbiddenEndpoints = [
+        "https://10.0.0.1",
+        "https://172.16.0.1",
+        "https://192.168.1.1",
+        "https://169.254.169.254",
+        "https://100.64.0.1",
+        "https://127.0.0.1",
+        mockProviderBase,
+        "https://localhost",
+        "https://[::1]",
+        "https://[fc00::1]",
+        "https://[fd12:3456::1]",
+        "https://[fe80::1]",
+        "https://[febf::1]",
+        "https://[::ffff:169.254.169.254]",
+      ];
+      for (const ep of forbiddenEndpoints) {
+        const putRes = await fetch(`${hubBase}/api/storage/config`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            network_id: ownerNetworkId,
+            provider: "modelscope",
+            repo_id: "owner/relay-repo",
+            endpoint: ep,
+            api_token: mockExpectedToken,
+          }),
+        });
+        expect(putRes.status).toBe(400);
+        const putBody: any = await putRes.json();
+        expect(putBody.ok).toBe(false);
+        expect(putBody.error).toBe("invalid_endpoint");
+
+        const testRes = await fetch(`${hubBase}/api/storage/test`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            network_id: ownerNetworkId,
+            provider: "modelscope",
+            repo_id: "owner/relay-repo",
+            endpoint: ep,
+            api_token: mockExpectedToken,
+          }),
+        });
+        expect(testRes.status).toBe(400);
+        const testBody: any = await testRes.json();
+        expect(testBody.ok).toBe(false);
+      }
+
+      // Also reject private public_base_url
+      const badPub = await fetch(`${hubBase}/api/storage/config`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          network_id: ownerNetworkId,
+          provider: "modelscope",
+          repo_id: "owner/relay-repo",
+          public_base_url: "https://169.254.169.254/bucket",
+          api_token: mockExpectedToken,
+        }),
+      });
+      expect(badPub.status).toBe(400);
+      expect((await badPub.json() as any).error).toBe("invalid_public_base_url");
+    } finally {
+      process.env.ANET_STORAGE_ALLOW_LOOPBACK = "1";
+    }
+
+    // 2. Live HTTP redirect-to-metadata trap: even with loopback enabled for the mock provider,
+    // a 302 redirect to 169.254.169.254 MUST be blocked by safeStorageFetch on BOTH /api/storage/test AND legacy /api/files/:id!
+    const redirectTest = await fetch(`${hubBase}/api/storage/test`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        provider: "modelscope",
+        repo_id: "owner/ssrf-redirect-repo",
+        endpoint: mockProviderBase,
+        api_token: mockExpectedToken,
+      }),
+    });
+    expect(redirectTest.status).toBe(400);
+    const redirectBody: any = await redirectTest.json();
+    expect(redirectBody.ok).toBe(false);
+    expect(redirectBody.error).toBe("storage_ssrf_blocked");
+
+    // 3. Legacy GET /api/files/:id private ModelScope proxy also blocks 302 redirect to metadata IP
+    const putProxyCfg = await fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: true,
+        provider: "modelscope",
+        repo_id: "owner/ssrf-proxy-redirect",
+        endpoint: mockProviderBase,
+        api_token: mockExpectedToken,
+      }),
+    });
+    expect(putProxyCfg.status).toBe(200);
+    const proxyPayload = Buffer.from("proxy-redirect-trap-bytes");
+    const proxySha = createHash("sha256").update(proxyPayload).digest("hex");
+    const proxyPresign: any = await fetch(`${hubBase}/api/uploads/presign`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        name: "trap.bin",
+        mime: "application/octet-stream",
+        size: proxyPayload.length,
+        sha256: proxySha,
+      }),
+    }).then((r) => r.json());
+    expect(proxyPresign.ok).toBe(true);
+    await fetch(proxyPresign.upload.url, { method: "PUT", headers: proxyPresign.upload.headers, body: proxyPayload });
+    const proxyComplete: any = await fetch(`${hubBase}/api/uploads/complete`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: proxyPresign.file_id }),
+    }).then((r) => r.json());
+    expect(proxyComplete.ok).toBe(true);
+
+    const legacyRedirectRes = await fetch(`${hubBase}/api/files/${proxyPresign.file_id}`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    expect(legacyRedirectRes.status).toBe(400);
+    const legacyRedirectBody: any = await legacyRedirectRes.json();
+    expect(legacyRedirectBody.ok).toBe(false);
+    expect(legacyRedirectBody.error).toBe("storage_ssrf_blocked");
+
+    // Clean up storage config after SSRF E2E test
+    await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
   });
 });

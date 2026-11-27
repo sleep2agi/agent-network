@@ -132,15 +132,18 @@ import {
   voiceWriteStatus,
 } from "./voice-asr.js";
 import {
+  StorageSsrfError,
   completeStorageUpload,
   deleteNetworkStorageConfig,
   presignStorageUpload,
   readActiveNetworkStorageConfig,
   readNetworkStorageConfig,
   resolveStorageDownload,
+  safeStorageFetch,
   saveNetworkStorageConfig,
   storageWriteStatus,
   testNetworkStorageConfig,
+  validateStorageConfigUrlsAsync,
 } from "./storage-relay.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
 // #4495 —— 源目录 / 新建节点 / 复用已有 Session 的能力值。Hub 只认这几个**精确**字符串,
@@ -5061,6 +5064,10 @@ return Bun.serve({
         res.headers.set("Cache-Control", "no-store");
         return withCors(req, res);
       }
+      const urlCheck = await validateStorageConfigUrlsAsync(networkId, body!);
+      if (!urlCheck.ok) {
+        return withCors(req, Response.json(urlCheck, { status: storageWriteStatus(urlCheck.error) }));
+      }
       const saved = saveNetworkStorageConfig(networkId, actorUserId, actorUsername, body!);
       if (!saved.ok) {
         return withCors(req, Response.json(saved, { status: storageWriteStatus(saved.error) }));
@@ -6422,7 +6429,7 @@ return Bun.serve({
           ...(rangeHeader ? { Range: rangeHeader } : {}),
         };
         try {
-          const upstream = await fetch(resolved.url, {
+          const upstream = await safeStorageFetch(resolved.url, {
             method: req.method,
             headers: upstreamHeaders,
             signal: AbortSignal.timeout(60_000),
@@ -6451,6 +6458,12 @@ return Bun.serve({
             headers,
           });
         } catch (e: any) {
+          if (e instanceof StorageSsrfError) {
+            return withCors(req, Response.json(
+              { ok: false, error: e.code, message: e.message },
+              { status: 400 },
+            ));
+          }
           return withCors(req, Response.json(
             { ok: false, error: "storage_upstream_error", message: `远程存储拉取失败：${e?.message || e}` },
             { status: 502 },
