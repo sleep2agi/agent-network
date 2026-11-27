@@ -63,9 +63,12 @@ beforeAll(async () => {
         const obj = body?.objects?.[0];
         if (!obj?.oid) return Response.json({ Code: 400, Message: "missing oid" }, { status: 400 });
         if (mockDeduplicateOid === obj.oid || lfsObjects.has(obj.oid)) {
+          // Matches real ModelScope live dedup shape: Data.objects = []
           return Response.json({
-            transfer: "basic",
-            objects: [{ oid: obj.oid, size: obj.size }], // no actions.upload => dedup!
+            Code: 200,
+            Data: { objects: [], "reused-objects": [] },
+            Message: "success",
+            Success: true,
           });
         }
         const uploadHref = mockExternalUploadHost
@@ -445,7 +448,7 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     expect(legacyRes.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(Buffer.from(await legacyRes.arrayBuffer())).toEqual(payload);
 
-    // 7. Second presign of identical sha256 triggers LFS dedup (skip_upload = true!)
+    // 7. Second presign of identical sha256 triggers LFS dedup (live ModelScope returns objects: [])
     const dedupRes = await fetch(`${hubBase}/api/uploads/presign`, {
       method: "POST",
       headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
@@ -460,6 +463,30 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     expect(dedupRes.ok).toBe(true);
     expect(dedupRes.skip_upload).toBe(true);
     expect(dedupRes.upload).toBeNull();
+
+    // 7b. Concurrent multi-file completions coalesce into a single ModelScope Git commit (prevents 429 commit lock busy!)
+    const commitsBefore = lfsCommits.length;
+    const batchFiles = await Promise.all([1, 2, 3].map(async (idx) => {
+      const buf = Buffer.from(`concurrent-photo-${idx}-${Date.now()}`);
+      const h = createHash("sha256").update(buf).digest("hex");
+      const pr: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: `p${idx}.png`, mime: "image/png", size: buf.length, sha256: h }),
+      }).then((r) => r.json());
+      await fetch(pr.upload.url, { method: "PUT", headers: pr.upload.headers, body: buf });
+      return pr.file_id as string;
+    }));
+    const batchCompleted = await Promise.all(batchFiles.map((fid) =>
+      fetch(`${hubBase}/api/uploads/complete`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ file_id: fid }),
+      }).then((r) => r.json() as Promise<any>),
+    ));
+    expect(batchCompleted.every((c) => c.ok === true)).toBe(true);
+    expect(lfsCommits.length - commitsBefore).toBe(1);
+    expect(lfsCommits[lfsCommits.length - 1].actions.length).toBe(3);
 
     // 8. Token leak defense: when ModelScope LFS returns an external host href, never attach ModelScope token!
     const otherSha = createHash("sha256").update("external-host-blob").digest("hex");

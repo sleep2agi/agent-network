@@ -1248,22 +1248,14 @@ export async function presignStorageUpload(
       return { ok: false, status: 502, error: "storage_upstream_error", message: `ModelScope LFS 预签名请求失败：${e?.message || e}` };
     }
 
-    if (!r.ok) {
+    if (!r.ok || r.body?.Success === false || r.body?.success === false || (typeof r.body?.Code === "number" && r.body.Code !== 200)) {
       const msg = r.body?.Message || r.body?.message || `HTTP ${r.status}`;
       return { ok: false, status: 502, error: "storage_presign_failed", message: `ModelScope LFS 预签名失败：${msg}` };
     }
     const data = r.body?.Data ?? r.body;
-    const obj = Array.isArray(data?.objects) ? data.objects[0] : null;
-    if (!obj) {
+    const objects = Array.isArray(data?.objects) ? data.objects : null;
+    if (!objects) {
       return { ok: false, status: 502, error: "storage_presign_bad_response", message: "ModelScope LFS 返回格式异常（缺少 objects）" };
-    }
-    if (obj.error) {
-      return {
-        ok: false,
-        status: 502,
-        error: "storage_presign_rejected",
-        message: `ModelScope LFS 拒绝上传：${obj.error?.message || obj.error?.code || "unknown"}`,
-      };
     }
 
     const storageMeta: RemoteStorageIndexMeta = {
@@ -1277,9 +1269,31 @@ export async function presignStorageUpload(
       ...(cfg.public_base_url ? { public_base_url: cfg.public_base_url } : {}),
     };
 
-    const uploadAction = obj.actions?.upload;
+    // Live ModelScope returns `Data: { objects: [], "reused-objects": [] }` when the blob already exists in LFS!
+    if (objects.length === 0) {
+      return {
+        ok: true,
+        provider: "modelscope",
+        object_key: objectKey,
+        skip_upload: true,
+        upload: null,
+        storage_meta: storageMeta,
+      };
+    }
+
+    const obj = objects[0];
+    if (obj?.error) {
+      return {
+        ok: false,
+        status: 502,
+        error: "storage_presign_rejected",
+        message: `ModelScope LFS 拒绝上传：${obj.error?.message || obj.error?.code || "unknown"}`,
+      };
+    }
+
+    const uploadAction = obj?.actions?.upload;
     if (!uploadAction || typeof uploadAction.href !== "string" || !uploadAction.href) {
-      // LFS content-addressed dedup: blob already exists in ModelScope storage, client only needs /complete to commit pointer!
+      // Standard Git-LFS dedup: object returned without upload action.
       return {
         ok: true,
         provider: "modelscope",
@@ -1358,6 +1372,131 @@ export async function presignStorageUpload(
   };
 }
 
+// Per-repo ModelScope Git commit coalescer + 429 retry queue.
+// Live ModelScope benchmarks (2026-11-27) showed concurrent `POST .../commit/master` calls
+// collide with HTTP 429 Code 10030000001 ("commit lock busy, please try again") and each
+// commit takes ~2.8s. Serializing & micro-batching actions per repo eliminates 429s and lets
+// multi-image sends (e.g. 9 photos) land in a single Git commit.
+interface QueuedModelScopeCommitItem {
+  fileId: string;
+  size: number;
+  objectKey: string;
+  sha256: string;
+  token: string;
+  fetchFn: typeof fetch;
+  resolve: (res: CompleteStorageResult) => void;
+}
+interface ModelScopeCommitQueue {
+  pending: QueuedModelScopeCommitItem[];
+  flushing: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+const modelScopeCommitQueues = new Map<string, ModelScopeCommitQueue>();
+const MODELSCOPE_COMMIT_COALESCE_MS = 80;
+const MODELSCOPE_COMMIT_MAX_BATCH = 20;
+const MODELSCOPE_COMMIT_RETRY_DELAYS_MS = [600, 1200, 2400, 3500];
+
+function isCommitLockBusy(status: number, body: any): boolean {
+  if (status === 429) return true;
+  if (body?.Code === 10030000001) return true;
+  const msg = String(body?.Message || body?.message || "");
+  return /commit lock busy|try again/i.test(msg);
+}
+
+async function flushModelScopeCommitQueue(queueKey: string, commitUrl: string): Promise<void> {
+  const q = modelScopeCommitQueues.get(queueKey);
+  if (!q || q.flushing) return;
+  q.flushing = true;
+  try {
+    while (q.pending.length > 0) {
+      const batch = q.pending.splice(0, MODELSCOPE_COMMIT_MAX_BATCH);
+      const token = batch[batch.length - 1].token;
+      const fetchFn = batch[0].fetchFn;
+      const payload = JSON.stringify({
+        commit_message: batch.length === 1
+          ? `anet relay ${batch[0].fileId}`
+          : `anet relay batch (${batch.length} files)`,
+        actions: batch.map((item) => ({
+          action: "create",
+          path: item.objectKey,
+          type: "lfs",
+          size: item.size,
+          sha256: item.sha256,
+          content: "",
+          encoding: "",
+        })),
+      });
+
+      let outcome: CompleteStorageResult = {
+        ok: false,
+        status: 502,
+        error: "storage_commit_failed",
+        message: "ModelScope 提交失败",
+      };
+
+      for (let attempt = 0; attempt <= MODELSCOPE_COMMIT_RETRY_DELAYS_MS.length; attempt++) {
+        let r: { ok: boolean; status: number; body: any; rawText: string };
+        try {
+          r = await fetchJsonSafe(fetchFn, commitUrl, {
+            method: "POST",
+            headers: {
+              ...modelScopeAuthHeaders(token),
+              "Content-Type": "application/json",
+            },
+            body: payload,
+            signal: AbortSignal.timeout(25_000),
+          });
+        } catch (e: any) {
+          outcome = { ok: false, status: 502, error: "storage_commit_error", message: `ModelScope 提交失败：${e?.message || e}` };
+          break;
+        }
+
+        const failedFlag = r.body?.Success === false || r.body?.success === false
+          || (typeof r.body?.Code === "number" && r.body.Code !== 200);
+        if (r.ok && !failedFlag) {
+          outcome = { ok: true };
+          break;
+        }
+        if (isCommitLockBusy(r.status, r.body) && attempt < MODELSCOPE_COMMIT_RETRY_DELAYS_MS.length) {
+          await new Promise((res) => setTimeout(res, MODELSCOPE_COMMIT_RETRY_DELAYS_MS[attempt]));
+          continue;
+        }
+        const msg = r.body?.Message || r.body?.message || `HTTP ${r.status}`;
+        outcome = { ok: false, status: r.status === 429 ? 429 : 502, error: "storage_commit_failed", message: `ModelScope 提交文件记录失败：${msg}` };
+        break;
+      }
+
+      for (const item of batch) item.resolve(outcome);
+    }
+  } finally {
+    q.flushing = false;
+    if (q.pending.length > 0) {
+      void flushModelScopeCommitQueue(queueKey, commitUrl);
+    } else if (!q.timer) {
+      modelScopeCommitQueues.delete(queueKey);
+    }
+  }
+}
+
+function enqueueModelScopeCommit(
+  commitUrl: string,
+  item: Omit<QueuedModelScopeCommitItem, "resolve">,
+): Promise<CompleteStorageResult> {
+  return new Promise((resolve) => {
+    let q = modelScopeCommitQueues.get(commitUrl);
+    if (!q) {
+      q = { pending: [], flushing: false, timer: null };
+      modelScopeCommitQueues.set(commitUrl, q);
+    }
+    q.pending.push({ ...item, resolve });
+    if (q.flushing || q.timer) return;
+    q.timer = setTimeout(() => {
+      if (q) q.timer = null;
+      void flushModelScopeCommitQueue(commitUrl, commitUrl);
+    }, MODELSCOPE_COMMIT_COALESCE_MS);
+  });
+}
+
 /** Step 3 of direct upload: commit ModelScope LFS pointer or verify S3/OSS object exists. */
 export async function completeStorageUpload(
   cfg: ActiveStorageRuntimeConfig,
@@ -1380,41 +1519,14 @@ export async function completeStorageUpload(
     const seg = modelScopeRepoSegment(repoType);
     const commitUrl = `${ep}/api/v1/repos/${seg}/${repoId}/commit/${encodeURIComponent(revision)}`;
 
-    let r: { ok: boolean; status: number; body: any; rawText: string };
-    try {
-      r = await fetchJsonSafe(fetchFn, commitUrl, {
-        method: "POST",
-        headers: {
-          ...modelScopeAuthHeaders(token),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          commit_message: `anet relay ${params.fileId}`,
-          actions: [
-            {
-              action: "create",
-              path: params.storage.object_key,
-              type: "lfs",
-              size: params.size,
-              sha256: params.storage.sha256,
-              content: "",
-              encoding: "",
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(20_000),
-      });
-    } catch (e: any) {
-      return { ok: false, status: 502, error: "storage_commit_error", message: `ModelScope 提交失败：${e?.message || e}` };
-    }
-
-    const failedFlag = r.body?.Success === false || r.body?.success === false
-      || (typeof r.body?.Code === "number" && r.body.Code !== 200);
-    if (!r.ok || failedFlag) {
-      const msg = r.body?.Message || r.body?.message || `HTTP ${r.status}`;
-      return { ok: false, status: 502, error: "storage_commit_failed", message: `ModelScope 提交文件记录失败：${msg}` };
-    }
-    return { ok: true };
+    return enqueueModelScopeCommit(commitUrl, {
+      fileId: params.fileId,
+      size: params.size,
+      objectKey: params.storage.object_key,
+      sha256: params.storage.sha256,
+      token,
+      fetchFn,
+    });
   }
 
   // Aliyun OSS / AWS S3: verify object exists via presigned HEAD (ensures client actually uploaded bytes).
