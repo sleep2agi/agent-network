@@ -68,7 +68,7 @@ const copy = computed(() => props.lang === 'en' ? {
   },
   platforms: [
     { id: 'macos', title: 'macOS', note: 'Apple silicon. Open the disk image and drag Agent Network into Applications.' },
-    { id: 'windows', title: 'Windows', note: '64-bit Windows 10/11. The .exe is the usual installer; the .msi is for managed installs.' },
+    { id: 'windows', title: 'Windows', note: '64-bit Windows 10/11. The .exe is the usual installer; the .msi is for managed installs. If SmartScreen shows “Unknown publisher” for the installer you downloaded from this page, choose “More info”, then “Run anyway” to continue.' },
     { id: 'android', title: 'Android', note: 'Test-signed package for Android 7.0 or newer. If the system blocks it, allow installs from this source.' },
     { id: 'harmony', title: 'HarmonyOS', note: 'For HarmonyOS NEXT (HarmonyOS 5 / 6), which cannot install Android packages. HarmonyOS 4 and earlier can use the Android package above.' },
     { id: 'linux', title: 'Linux', note: 'Linux builds are not a priority in this release. Only published packages are listed.' },
@@ -102,7 +102,7 @@ const copy = computed(() => props.lang === 'en' ? {
   },
   platforms: [
     { id: 'macos', title: 'macOS', note: 'Apple 芯片。打开 dmg，把 Agent Network 拖进「应用程序」。' },
-    { id: 'windows', title: 'Windows', note: '64 位 Windows 10/11。.exe 是常规安装包；.msi 适合集中部署。' },
+    { id: 'windows', title: 'Windows', note: '64 位 Windows 10/11。.exe 是常规安装包；.msi 适合集中部署。如果 SmartScreen 对从本页下载的安装包提示「未知发布者」，请选择「更多信息」，再点「仍要运行」继续安装。' },
     { id: 'android', title: 'Android', note: '测试签名安装包，需 Android 7.0 及以上。系统若拦截，允许来自此来源的安装。' },
     { id: 'harmony', title: '鸿蒙 HarmonyOS', note: '给鸿蒙 NEXT（HarmonyOS 5 / 6）用，这类系统装不了安卓包。HarmonyOS 4 及更早的版本直接用上面的安卓包。' },
     { id: 'linux', title: 'Linux', note: 'Linux 后续支持；这里只展示实际已发布的安装包。' },
