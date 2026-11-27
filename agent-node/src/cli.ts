@@ -285,6 +285,13 @@ import {
 import { formatInboxSkipLog } from "./inbox-skip-log";
 import { classifyInboundSkip, closeLowValueTask, closeSkippedTask, formatCloseOutcome, type HubToolCall } from "./inbox-skip-close";
 import { createSingleFlight } from "./util/single-flight";
+import {
+  computeBootShadowedKeys,
+  createHotSecretController,
+  isHotSecretActivationSupported,
+  terminateOwnedChildProcess,
+  type HotSecretController,
+} from "./runtime/hot-secrets.js";
 import { createCodexSessionManager } from "./runtime/codex-app-server/session-manager";
 import { buildGrokChildEnv } from "./runtime/grok-child-env";
 import {
@@ -677,15 +684,26 @@ applyDaemonExtraPath(fileConfig.daemonExtraPath);
 const nodeSecretsDir = configFilePath && basename(configFilePath) === "config.json"
   ? dirname(configFilePath)
   : "";
+let bootShadowedSecretKeys: ReadonlySet<string> = new Set();
+const initialManagedSecretKeys = new Set<string>();
 try {
   loadNodeSecrets(nodeSecretsDir, process.env, {
     explicitConfigKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
     log: (line) => console.log(line),
   });
+  // #5675 PR-3 — capture startup shadowing keys (outer process.env + legacy secrets.env +
+  // config.json plain/cross-name env) BEFORE injecting node/daemon scoped secrets.
+  bootShadowedSecretKeys = computeBootShadowedKeys({
+    initialEnvKeys: Object.keys(process.env),
+    configEnv: fileConfig.env && typeof fileConfig.env === "object" ? fileConfig.env : null,
+  });
   const { readScopedNodeEnv } = await import('./shared/scoped-secret-env.js');
   const scopedEnv = nodeSecretsDir ? readScopedNodeEnv(nodeSecretsDir) : {};
   for (const [key, value] of Object.entries(scopedEnv)) {
-    if (!Object.hasOwn(process.env, key) && typeof fileConfig.env?.[key] !== 'string') process.env[key] = value;
+    if (!bootShadowedSecretKeys.has(key)) {
+      process.env[key] = value;
+      initialManagedSecretKeys.add(key);
+    }
   }
 } catch (e: any) {
   console.error(`[agent-node] ${e?.message || e}`);
@@ -2318,6 +2336,7 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
       // #5321 —— 模型清单 + 登录状态（只读缓存，来源是后台 `agy models` 探测）
       ...(RUNTIME === "antigravity" ? agyCatalogSnapshotFields() : {}),
       ...(nodeSecretsDir && fileConfig.node_id && fileConfig.network_id ? { node_secrets_capable: true } : {}),
+      ...(secretsHotCapable() ? { secrets_hot_capable: true } : {}),
       ...(variantReadback && variantSession?.isRunning ? { opencode_variant_config_capable: true } : {}),
       // Agent (Build) hot switch: advertised only when this process actually has
       // the bound-session writer, so the hub can fail closed for everything else.
@@ -3216,6 +3235,71 @@ async function ensureCodexAppServerSession(): Promise<
   writebackCodexThread(session.threadId);
   return session;
 }
+
+// #5675 PR-3 — Phase-1 hot secret activation capability & controller.
+// Excludes host_supervisor daemon, OpenCode V2 copresence/shared serve, claude-code-cli,
+// shared codex-app-server, and grok-build-cli.
+function secretsHotCapable(): boolean {
+  return isHotSecretActivationSupported({
+    role: fileConfig.role,
+    runtime: RUNTIME,
+    grokExecutionMode: GROK_EXECUTION_MODE,
+    codexAppServerUrl,
+    hasNodeSecretsDir: !!nodeSecretsDir,
+    hasNodeIdentity: !!(fileConfig.node_id && fileConfig.network_id),
+  });
+}
+
+const hotSecretsController: HotSecretController | null =
+  nodeSecretsDir && fileConfig.node_id && fileConfig.network_id && fileConfig.role !== "host_supervisor"
+    ? createHotSecretController({
+        nodeDir: nodeSecretsDir,
+        env: process.env,
+        shadowedKeys: bootShadowedSecretKeys,
+        initialManagedKeys: initialManagedSecretKeys,
+        hotCapable: secretsHotCapable(),
+        isBusy: () => activeTurnDepth > 0 || !!activeTurnTask,
+        onEnvApplied: async () => {
+          // 1. codex-sdk: drop cached Codex/Thread handle while preserving live thread id
+          //    so the next turn creates a fresh Codex client inheriting updated process.env.
+          if (RUNTIME === "codex") {
+            if (codexThread?.id) {
+              codexSdkResumeThreadId = codexThread.id;
+              writebackSession(codexThread.id);
+            }
+            codexThread = null;
+            if (codexStdio) {
+              const oldStdio = codexStdio;
+              codexStdio = null;
+              codexStdioThreadId = null;
+              await oldStdio.close().catch(() => {});
+            }
+          }
+          // 2. codex-app-server (owned subprocess only): gracefully stop resident app-server
+          //    and await child exit while preserving codexAppServerThreadId so the next turn
+          //    respawns cleanly with the updated process.env and resumes the same thread.
+          if (RUNTIME === "codex-app-server" && !codexAppServerUrl) {
+            const session = codexAppServerSessionManager.current();
+            if (session) {
+              if (session.threadId) writebackCodexThread(session.threadId);
+              codexAppServerSessionManager.invalidate(session);
+              try { session.client.close(); } catch { /* noop */ }
+              await terminateOwnedChildProcess(session.proc);
+            }
+            if (sideThreadOwnedSession?.proc) {
+              const ownedSide = sideThreadOwnedSession;
+              sideThreadOwnedSession = null;
+              try { ownedSide.client.close(); } catch { /* noop */ }
+              await terminateOwnedChildProcess(ownedSide.proc);
+            }
+          }
+          // 3. claude-agent-sdk, grok-acp, antigravity-acp spawn per-turn child processes
+          //    inheriting process.env; claudeSessionId / grokSessionId / agySessionId remain intact.
+        },
+        log,
+        warn,
+      })
+    : null;
 let codexReceiptRecoveryInFlight: Promise<void> | null = null;
 async function codexFollowUpHubState(entry: OwnedFollowUpReceiptEntry) {
   try {
@@ -4182,6 +4266,7 @@ async function processWithClaude(
 // Codex Runtime
 // ══════════════════════════════════════
 let codexThread: any = null;
+let codexSdkResumeThreadId: string = SESSION_ID;
 
 // Codex instructions — balance autonomy + safety. Earlier version banned
 // all comm tools, killing multi-agent coordination. Now we allow them
@@ -4345,17 +4430,17 @@ async function processWithCodex(
     // resume 会以 unknown variant 致命退出、表现为 300s 超时。只警告,不拦。
     // #1973 —— 用 #1969 解析出的实际 codex 版本判断,不再只信硬编码的 0.133 档位集合。
     for (const line of describeUnknownReasoningEfforts(undefined, getCodexBinResolution().version)) warn(line);
-    if (SESSION_ID) {
+    if (codexSdkResumeThreadId) {
       // #1645 —— 线程有多大在 resume 前就写在 codex 的 rollout 文件里;太大的线程 resume 时
       // 上游 compaction 常失败、表现为 300s 超时。这里先说一句,不拦。
-      for (const line of describeLargeCodexThreadBeforeResume(SESSION_ID)) warn(line);
+      for (const line of describeLargeCodexThreadBeforeResume(codexSdkResumeThreadId)) warn(line);
       // Board #734 — a paginated rollout (written by codex >= 0.145) must never be
       // resumed by an older codex: its lines would lack ordinals and the thread would
       // become permanently unresumable. Refuse the turn; never touch the rollout.
-      const refusal = codexSdkResumeRefusal(SESSION_ID);
+      const refusal = codexSdkResumeRefusal(codexSdkResumeThreadId);
       if (refusal) return refusal;
-      codexThread = codex.resumeThread(SESSION_ID, codexOpts);
-      log(`codex resumed thread: ${SESSION_ID}`);
+      codexThread = codex.resumeThread(codexSdkResumeThreadId, codexOpts);
+      log(`codex resumed thread: ${codexSdkResumeThreadId}`);
     } else {
       codexThread = codex.startThread(codexOpts);
     }
@@ -4427,7 +4512,10 @@ async function processWithCodex(
     //   却是 300 秒后的超时。只在失败时说话的仪表,警告不了任何人。
     const pressure = compactionPressure(inTokens, CODEX_CONFIG.model_auto_compact_token_limit);
     if (pressure.text) log(pressure.text);
-    if (codexThread?.id) writebackSession(codexThread.id);
+    if (codexThread?.id) {
+      codexSdkResumeThreadId = codexThread.id;
+      writebackSession(codexThread.id);
+    }
     // Auto-compact 由 Codex CLI 原生处理（model_auto_compact_token_limit=200000）
 
     // #261 P1 redirect — classify codex turn result so silent reject
@@ -6857,6 +6945,9 @@ async function processTask(
     activeTurnDepth = Math.max(0, activeTurnDepth - 1);
     if (activeTurnDepth === 0) {
       activeTurnTask = null;
+      if (hotSecretsController?.hasPending()) {
+        await hotSecretsController.flushPendingOnIdle().catch(() => {});
+      }
       await reportStatus("idle").catch(() => {});
     } else if (activeTurnTask) {
       await reportStatus("working", activeTurnTask).catch(() => {});
@@ -8641,6 +8732,7 @@ async function connectSSE() {
               if (nodeSecretsDir && fileConfig.node_id && fileConfig.network_id) {
                 import('./runtime/node-secrets.js').then(({reconcileNodeSecrets})=>reconcileNodeSecrets({
                   callCommHub,nodeDir:nodeSecretsDir,nodeId:NODE_ID,networkId:NETWORK_ID,warn,
+                  onSecretChanged: hotSecretsController ? (info) => hotSecretsController.applyAfterPersist(info) : undefined,
                 })).catch(()=>warn('[node-secrets] module unavailable'));
               }
               if (fileConfig.role === "host_supervisor") {
@@ -8931,7 +9023,14 @@ async function connectSSE() {
             if (ev.type === 'node_secrets' && nodeSecretsDir && fileConfig.node_id && fileConfig.network_id) {
               import('./runtime/node-secrets.js').then(({reconcileNodeSecrets})=>reconcileNodeSecrets({
                 callCommHub,nodeDir:nodeSecretsDir,nodeId:NODE_ID,networkId:NETWORK_ID,warn,
+                onSecretChanged: hotSecretsController ? (info) => hotSecretsController.applyAfterPersist(info) : undefined,
               })).catch(()=>warn('[node-secrets] module unavailable'));
+            }
+            if (ev.type === 'node_secrets_reload' && hotSecretsController) {
+              const reloadAction = ev.action === 'delete' ? 'delete' : 'put';
+              const reloadKey = typeof ev.key === 'string' ? ev.key : undefined;
+              hotSecretsController.applyAfterPersist({ action: reloadAction, key: reloadKey })
+                .catch(() => warn('[hot-secrets] reload doorbell failed'));
             }
             if (ev.type === 'scoped_secrets' && fileConfig.role === 'host_supervisor') {
               import('./runtime/scoped-secrets.js').then(({ reconcileScopedSecrets }) => reconcileScopedSecrets({

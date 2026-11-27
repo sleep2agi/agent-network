@@ -5166,19 +5166,23 @@ return Bun.serve({
       let body: any;
       try { body = await req.json(); } catch { return withCors(req, Response.json({ ok: false, error: "invalid JSON" }, { status: 400 })); }
       const action = body?.action;
-      if (action !== "list" && action !== "put" && action !== "delete") {
-        return withCors(req, Response.json({ ok: false, error: "invalid_action", message: "action must be list | put | delete" }, { status: 400 }));
+      if (action !== "list" && action !== "put" && action !== "delete" && action !== "reload") {
+        return withCors(req, Response.json({ ok: false, error: "invalid_action", message: "action must be list | put | delete | reload" }, { status: 400 }));
       }
       // A `put` without a revision is a client bug, not a server decision: the
       // node rejects it anyway, and silently inventing 0 would overwrite a file
       // the operator edited in the meantime.
-      if (action !== "list" && !Number.isSafeInteger(body?.revision)) {
+      if (action !== "list" && action !== "reload" && !Number.isSafeInteger(body?.revision)) {
         return withCors(req, Response.json({ ok: false, error: "revision_required", message: "put/delete need the revision from the last list" }, { status: 400 }));
       }
       const result = requestNodeSecrets(
         { userId: restAuth!.userId ?? null, isNode: false, networkId },
         nodeId, action, body?.key, body?.value, body?.revision,
       );
+      if (result.ok) {
+        const target = db.get<{ alias: string }>("SELECT alias FROM nodes WHERE node_id = ?1 AND network_id = ?2", nodeId, networkId);
+        if (target?.alias) pushEvent(target.alias, { type: "node_secrets", request_id: result.request_id }, networkId);
+      }
       // #4827 —— 用户提交后清掉对应的「举手」；delete 同理。
       if (result.ok && (action === "put" || action === "delete") && typeof body?.key === "string") {
         clearSecretRequest(nodeId, body.key);
@@ -5399,20 +5403,25 @@ return Bun.serve({
       // app never saw it and fell back to the runtime version — null for claude-code
       // nodes — so a capable node (e.g. claude-code-cli on agent-network ≥ .219) was
       // shown "upgrade required". Only emitted when true: other rows keep their bytes.
-      const nodeSecretsCapable = (() => {
+      const { nodeSecretsCapable, secretsHotCapable } = (() => {
         const ids = isLight ? [] : [...new Set(rows.map((r: any) => r.node_id).filter((v: unknown): v is string => typeof v === "string" && v.length > 0))];
-        const out = new Set<string>();
+        const nodeCap = new Set<string>();
+        const hotCap = new Set<string>();
         for (let i = 0; i < ids.length; i += 500) {
           const chunk = ids.slice(i, i + 500);
           try {
             const found = db.all<{ node_id: string; config_snapshot: string | null }>(
               `SELECT node_id, config_snapshot FROM nodes WHERE node_id IN (${chunk.map((_, j) => `?${j + 1}`).join(",")})`, ...chunk);
             for (const r of found) {
-              try { if (JSON.parse(r.config_snapshot || "{}")?.node_secrets_capable === true) out.add(r.node_id); } catch { /* malformed snapshot: not capable */ }
+              try {
+                const snap = JSON.parse(r.config_snapshot || "{}");
+                if (snap?.node_secrets_capable === true) nodeCap.add(r.node_id);
+                if (snap?.secrets_hot_capable === true) hotCap.add(r.node_id);
+              } catch { /* malformed snapshot: not capable */ }
             }
           } catch { /* projection is best-effort; never fail /api/status */ }
         }
-        return out;
+        return { nodeSecretsCapable: nodeCap, secretsHotCapable: hotCap };
       })();
       // `model` comes straight from the explicit sessions projection; `runtime` is
       // derived from the raw `agent` field. Both default to null for old nodes
@@ -5471,6 +5480,7 @@ return Bun.serve({
           files_capable: s.files_capable === 1,
           logs_capable: s.logs_capable === 1,
           ...(s.node_id && nodeSecretsCapable.has(s.node_id) ? { node_secrets_capable: true } : {}),
+          ...(s.node_id && secretsHotCapable.has(s.node_id) ? { secrets_hot_capable: true } : {}),
           model: s.model ?? null,
           runtime: normalizeRuntime(s.agent),
           host: {

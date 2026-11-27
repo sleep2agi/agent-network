@@ -5,13 +5,15 @@ import { createHash } from 'node:crypto';
 import { atomicWriteJson } from './config-apply.js';
 import { scopedSecretJson, readIndependentNodeEnv } from '../shared/scoped-secret-env.js';
 import { validScopedSecretKey } from '../shared/scoped-secret-contract.js';
+import { isValidSecretActivation, type SecretActivation } from './hot-secrets.js';
 type Deps = { callCommHub: (name: string, args: Record<string,unknown>) => Promise<any>;
-  nodeDir: string; nodeId: string; networkId: string; warn: (text: string) => void };
+  nodeDir: string; nodeId: string; networkId: string; warn: (text: string) => void;
+  onSecretChanged?: (info: { action: 'put' | 'delete' | 'reload'; key?: string }) => Promise<SecretActivation> | SecretActivation };
 export function operateNodeSecrets(nodeDir: string, input: any) {
   const config = scopedSecretJson(join(nodeDir, 'config.json'));
   if (!config.node_id || !config.network_id || input?.node_id !== config.node_id || input.network_id !== config.network_id
     || input.daemon_node_id !== null || !/^nsk_[a-f0-9-]{36}$/.test(input.request_id)
-    || !['list','put','delete'].includes(input.action)) throw Error('invalid_secret_request');
+    || !['list','put','delete','reload'].includes(input.action)) throw Error('invalid_secret_request');
   const path = join(nodeDir, 'node-secrets.json');
   const read = () => {
     // Validate real permissions, durable identity and values before any write.
@@ -19,11 +21,11 @@ export function operateNodeSecrets(nodeDir: string, input: any) {
     return existsSync(path) ? { ...scopedSecretJson(path), values } : { schema: 1,
       node_id: config.node_id, network_id: config.network_id, revision: 0, values };
   };
-  const project = (s: any) => ({network_id: config.network_id, daemon_node_id: null, node_id: config.node_id,
-    revision: s.revision, activation: 'next_start', keys: Object.keys(s.values).sort().map(key=>({key,source:'node'}))});
-  if (input.action === 'list') return project(read());
+  const project = (s: any, activation: SecretActivation = 'next_start') => ({network_id: config.network_id, daemon_node_id: null, node_id: config.node_id,
+    revision: s.revision, activation, keys: Object.keys(s.values).sort().map(key=>({key,source:'node'}))});
+  if (input.action === 'list' || input.action === 'reload') return project(read());
   if (!validScopedSecretKey(input.key) || !Number.isSafeInteger(input.revision) || input.revision < 0
-    || (input.action === 'put' && (typeof input.value !== 'string' || !input.value || Buffer.byteLength(input.value) > 8192 || input.value.includes('\\0')))) throw Error('invalid_secret_input');
+    || (input.action === 'put' && (typeof input.value !== 'string' || !input.value || Buffer.byteLength(input.value) > 8192 || input.value.includes('\0')))) throw Error('invalid_secret_input');
   const lock = join(nodeDir, '.node-secrets.lock');
   const fd = openSync(lock, 'wx', 0o600);
   try {
@@ -56,6 +58,17 @@ export function reconcileNodeSecrets(deps: Deps): Promise<void> {
       let snapshot;
       try { snapshot = operateNodeSecrets(deps.nodeDir,r); }
       catch { await deps.callCommHub('ack_daemon_provider_snapshot',{request_id:r.request_id,failed:true}); continue; }
+      if (deps.onSecretChanged && (r.action === 'put' || r.action === 'delete' || r.action === 'reload')) {
+        try {
+          const act = await deps.onSecretChanged({
+            action: r.action,
+            ...(typeof r.key === 'string' ? { key: r.key } : {}),
+          });
+          if (isValidSecretActivation(act)) snapshot = { ...snapshot, activation: act };
+        } catch {
+          deps.warn('[node-secrets] hot activation unconfirmed; using next_start');
+        }
+      }
       await deps.callCommHub('ack_daemon_provider_snapshot',{request_id:r.request_id,snapshot});
     }
   } while (state.again); })().catch(()=>deps.warn('[node-secrets] management request unconfirmed'))
