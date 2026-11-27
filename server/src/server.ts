@@ -5848,6 +5848,16 @@ return Bun.serve({
       }
       const loaded = readActiveNetworkStorageConfig(uploadNetId, { requireEnabled: true });
       if (!loaded.ok) {
+        const reqSize = Number(body.size);
+        if (Number.isFinite(reqSize) && Number.isInteger(reqSize) && reqSize > 0 && reqSize <= MAX_UPLOAD_BYTES) {
+          return withCors(req, Response.json({
+            ok: true,
+            mode: "hub",
+            max_file_bytes: MAX_UPLOAD_BYTES,
+            upload_url: "/api/upload",
+            fallback_reason: loaded.error,
+          }));
+        }
         return withCors(req, Response.json({ ok: false, error: loaded.error, message: loaded.message }, { status: loaded.status }));
       }
       if (!loaded.config) {
@@ -5890,6 +5900,17 @@ return Bun.serve({
         mime,
       });
       if (!presigned.ok) {
+        // Degrade cleanly to Hub local /api/upload for transient upstream/storage outages when file fits Hub cap.
+        // Keep security/validation errors (4xx, e.g. SSRF blocks) loud and fail-closed.
+        if (presigned.status >= 500 && size <= MAX_UPLOAD_BYTES) {
+          return withCors(req, Response.json({
+            ok: true,
+            mode: "hub",
+            max_file_bytes: MAX_UPLOAD_BYTES,
+            upload_url: "/api/upload",
+            fallback_reason: presigned.error,
+          }));
+        }
         return withCors(req, Response.json({ ok: false, error: presigned.error, message: presigned.message }, { status: presigned.status }));
       }
 
@@ -5928,6 +5949,7 @@ return Bun.serve({
         max_file_bytes: cfg.max_file_bytes,
         skip_upload: presigned.skip_upload,
         upload: presigned.upload,
+        ...(presigned.fallback_upload ? { fallback_upload: presigned.fallback_upload } : {}),
         complete_url: "/api/uploads/complete",
       });
       res.headers.set("Cache-Control", "no-store");
@@ -6355,6 +6377,8 @@ return Bun.serve({
         provider: resolved.provider,
         file_id: fileId,
         url: resolved.url,
+        ...(resolved.fallback_url ? { fallback_url: resolved.fallback_url } : {}),
+        proxy_url: `/api/files/${fileId}?proxy=1`,
         headers: resolved.headers,
         expires_in: resolved.expires_in,
         name: entry.name || `${fileId}${entry.ext || ""}`,
@@ -6408,8 +6432,10 @@ return Bun.serve({
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
-      // Remote-stored file legacy fallback: OSS/S3/CDN → 302 redirect (0 Hub bytes);
-      // private ModelScope → transparent authenticated stream proxy for older clients.
+      // Remote-stored file fallback:
+      // - Normal OSS/S3: 302 redirect to short-lived presigned URL (0 Hub bytes).
+      // - Explicit `?proxy=1` (client/node direct download failed!) OR private ModelScope:
+      //   transparent authenticated stream proxy through Hub with automatic accelerate -> regional retry.
       if (entry.storage) {
         const resolved = resolveStorageDownload(entry.network_id, entry.storage);
         if (!resolved.ok) {
@@ -6419,7 +6445,8 @@ return Bun.serve({
           ? entry.name
           : `${fileId}${entry.ext || ""}`;
         const hasAuthHeaders = Object.keys(resolved.headers).length > 0;
-        if (!hasAuthHeaders) {
+        const forceProxy = url.searchParams.get("proxy") === "1" || url.searchParams.get("proxy") === "true";
+        if (!hasAuthHeaders && !forceProxy) {
           if (req.method === "HEAD") {
             return new Response(null, {
               status: 200,
@@ -6448,47 +6475,64 @@ return Bun.serve({
           ...resolved.headers,
           ...(rangeHeader ? { Range: rangeHeader } : {}),
         };
-        try {
-          const upstream = await safeStorageFetch(resolved.url, {
-            method: req.method,
-            headers: upstreamHeaders,
-            signal: AbortSignal.timeout(60_000),
-          });
-          if (!upstream.ok && upstream.status !== 206) {
-            return withCors(req, Response.json(
-              { ok: false, error: "storage_upstream_error", message: `远程存储返回 HTTP ${upstream.status}` },
-              { status: upstream.status === 404 ? 404 : 502 },
-            ));
+        const candidateUrls = resolved.fallback_url ? [resolved.url, resolved.fallback_url] : [resolved.url];
+        let upstream: Response | null = null;
+        let lastUpstreamStatus = 502;
+        let lastUpstreamErr: any = null;
+        for (let i = 0; i < candidateUrls.length; i++) {
+          try {
+            const attempt = await safeStorageFetch(candidateUrls[i], {
+              method: req.method,
+              headers: upstreamHeaders,
+              signal: AbortSignal.timeout(60_000),
+            });
+            if (attempt.ok || attempt.status === 206) {
+              upstream = attempt;
+              break;
+            }
+            lastUpstreamStatus = attempt.status;
+            await attempt.body?.cancel().catch(() => {});
+            if (i + 1 < candidateUrls.length) continue;
+          } catch (e: any) {
+            if (e instanceof StorageSsrfError) {
+              return withCors(req, Response.json(
+                { ok: false, error: e.code, message: e.message },
+                { status: 400 },
+              ));
+            }
+            lastUpstreamErr = e;
+            if (i + 1 < candidateUrls.length) continue;
           }
-          const headers: Record<string, string> = {
-            ...corsHeaders(req),
-            "Content-Type": "application/octet-stream",
-            "Content-Disposition": `attachment; filename="${safeFilename.replace(/"/g, "")}"`,
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "private, no-store",
-            "Accept-Ranges": "bytes",
-          };
-          const upstreamLen = upstream.headers.get("Content-Length");
-          if (upstreamLen) headers["Content-Length"] = upstreamLen;
-          else if (!rangeHeader) headers["Content-Length"] = String(entry.size);
-          const upstreamRange = upstream.headers.get("Content-Range");
-          if (upstreamRange) headers["Content-Range"] = upstreamRange;
-          return new Response(req.method === "HEAD" ? null : upstream.body, {
-            status: upstream.status,
-            headers,
-          });
-        } catch (e: any) {
-          if (e instanceof StorageSsrfError) {
-            return withCors(req, Response.json(
-              { ok: false, error: e.code, message: e.message },
-              { status: 400 },
-            ));
-          }
+        }
+        if (!upstream) {
           return withCors(req, Response.json(
-            { ok: false, error: "storage_upstream_error", message: `远程存储拉取失败：${e?.message || e}` },
-            { status: 502 },
+            {
+              ok: false,
+              error: "storage_upstream_error",
+              message: lastUpstreamErr
+                ? `远程存储拉取失败：${lastUpstreamErr?.message || lastUpstreamErr}`
+                : `远程存储返回 HTTP ${lastUpstreamStatus}`,
+            },
+            { status: !lastUpstreamErr && lastUpstreamStatus === 404 ? 404 : 502 },
           ));
         }
+        const headers: Record<string, string> = {
+          ...corsHeaders(req),
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${safeFilename.replace(/"/g, "")}"`,
+          "X-Content-Type-Options": "nosniff",
+          "Cache-Control": "private, no-store",
+          "Accept-Ranges": "bytes",
+        };
+        const upstreamLen = upstream.headers.get("Content-Length");
+        if (upstreamLen) headers["Content-Length"] = upstreamLen;
+        else if (!rangeHeader) headers["Content-Length"] = String(entry.size);
+        const upstreamRange = upstream.headers.get("Content-Range");
+        if (upstreamRange) headers["Content-Range"] = upstreamRange;
+        return new Response(req.method === "HEAD" ? null : upstream.body, {
+          status: upstream.status,
+          headers,
+        });
       }
 
       // #509 defence-in-depth: pre-check date_bucket against BOTH

@@ -178,6 +178,88 @@ describe("uploadBufferViaStorageRelay", () => {
       "http://hub.test:9200/api/upload",
     ]);
   });
+
+  test("degradation: retries fallback_upload on accelerate PUT failure, and degrades <=12MiB to Hub /api/upload when all direct PUTs fail", async () => {
+    const payload = new Uint8Array(Buffer.from("small-image-for-fallback-resilience"));
+
+    // Case 1: Primary accelerate PUT fails -> succeeds via Tier-2 regional fallback_upload (0 Hub bytes)
+    const tier2Urls: string[] = [];
+    const tier2Fetch: typeof fetch = async (input: any) => {
+      const url = String(input);
+      tier2Urls.push(url);
+      if (url.endsWith("/api/uploads/presign")) {
+        return Response.json({
+          ok: true,
+          mode: "direct",
+          provider: "s3",
+          file_id: "tier2fb1234567890abcdef123456789",
+          skip_upload: false,
+          upload: { method: "PUT", url: "https://bucket.s3-accelerate.amazonaws.com/k", headers: {} },
+          fallback_upload: { method: "PUT", url: "https://bucket.s3.us-west-1.amazonaws.com/k", headers: {} },
+        });
+      }
+      if (url.includes("s3-accelerate")) throw new Error("edge timeout");
+      if (url.includes("s3.us-west-1")) return new Response("", { status: 200 });
+      if (url.endsWith("/api/uploads/complete")) {
+        return Response.json({ ok: true, file_id: "tier2fb1234567890abcdef123456789", url: "/api/files/tier2fb1234567890abcdef123456789", size: payload.byteLength, mime: "image/png" });
+      }
+      throw new Error(`unexpected ${url}`);
+    };
+    const r2 = await uploadBufferViaStorageRelay({
+      hubUrl: "http://hub.test:9200",
+      authToken: "ntok_x",
+      bytes: payload,
+      name: "pic.png",
+      mime: "image/png",
+      fetch: tier2Fetch,
+    });
+    expect(r2.ok).toBe(true);
+    expect(tier2Urls).toEqual([
+      "http://hub.test:9200/api/uploads/presign",
+      "https://bucket.s3-accelerate.amazonaws.com/k",
+      "https://bucket.s3.us-west-1.amazonaws.com/k",
+      "http://hub.test:9200/api/uploads/complete",
+    ]);
+
+    // Case 2: All direct PUTs fail for <=12MiB -> degrades transparently to Hub multipart POST /api/upload
+    const tier3Urls: string[] = [];
+    const tier3Fetch: typeof fetch = async (input: any) => {
+      const url = String(input);
+      tier3Urls.push(url);
+      if (url.endsWith("/api/uploads/presign")) {
+        return Response.json({
+          ok: true,
+          mode: "direct",
+          provider: "s3",
+          file_id: "tier3fb1234567890abcdef123456789",
+          skip_upload: false,
+          upload: { method: "PUT", url: "https://bucket.s3-accelerate.amazonaws.com/k", headers: {} },
+          fallback_upload: { method: "PUT", url: "https://bucket.s3.us-west-1.amazonaws.com/k", headers: {} },
+        });
+      }
+      if (url.includes("amazonaws.com")) return new Response("unavailable", { status: 503 });
+      if (url.endsWith("/api/upload")) {
+        return Response.json({ ok: true, file_id: "hubdegraded1234567890abcdef12345", url: "/api/files/hubdegraded1234567890abcdef12345", size: payload.byteLength, mime: "image/png" });
+      }
+      throw new Error(`unexpected ${url}`);
+    };
+    const r3 = await uploadBufferViaStorageRelay({
+      hubUrl: "http://hub.test:9200",
+      authToken: "ntok_x",
+      bytes: payload,
+      name: "pic.png",
+      mime: "image/png",
+      fetch: tier3Fetch,
+    });
+    expect(r3.ok).toBe(true);
+    if (r3.ok) expect(r3.file_id).toBe("hubdegraded1234567890abcdef12345");
+    expect(tier3Urls).toEqual([
+      "http://hub.test:9200/api/uploads/presign",
+      "https://bucket.s3-accelerate.amazonaws.com/k",
+      "https://bucket.s3.us-west-1.amazonaws.com/k",
+      "http://hub.test:9200/api/upload",
+    ]);
+  });
 });
 
 describe("resolveAttachmentToLocalPath — direct external download", () => {
@@ -229,6 +311,49 @@ describe("resolveAttachmentToLocalPath — direct external download", () => {
     expect(calls.map((c) => c.url)).toEqual([
       "http://hub.test:9200/api/files/directfile123456/direct",
       "https://www.modelscope.cn/api/v1/datasets/owner/relay/repo?Revision=master&FilePath=anet-files/a.mp4",
+    ]);
+  });
+
+  test("3-tier download cascade: primary direct fails -> regional fallback_url fails -> Hub ?proxy=1 delivers exact bytes", async () => {
+    const payload = Buffer.from("hub-proxy-fallback-bytes-99999");
+    const visited: string[] = [];
+
+    const fakeFetch: typeof fetch = async (input: any) => {
+      const url = String(input);
+      visited.push(url);
+      if (url === "http://hub.test:9200/api/files/cascadefile12345/direct") {
+        return Response.json({
+          ok: true,
+          mode: "direct",
+          provider: "s3",
+          file_id: "cascadefile12345",
+          url: "https://bucket.s3-accelerate.amazonaws.com/k",
+          fallback_url: "https://bucket.s3.us-west-1.amazonaws.com/k",
+          proxy_url: "/api/files/cascadefile12345?proxy=1",
+          headers: {},
+          size: payload.length,
+        });
+      }
+      if (url.includes("s3-accelerate")) throw new Error("edge blocked");
+      if (url.includes("s3.us-west-1")) return new Response("timeout", { status: 504 });
+      if (url === "http://hub.test:9200/api/files/cascadefile12345?proxy=1") {
+        return new Response(payload, { status: 200, headers: { "Content-Length": String(payload.length) } });
+      }
+      throw new Error(`unexpected fetch to ${url}`);
+    };
+
+    const res = await resolveAttachmentToLocalPath(
+      { file_id: "cascadefile12345", name: "photo.jpg", mime: "image/jpeg", size: payload.length },
+      { hubUrl: "http://hub.test:9200", authToken: "ntok_node_1", cacheDir: TEST_DIR, fetch: fakeFetch },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(readFileSync(res.localPath)).toEqual(payload);
+    expect(visited).toEqual([
+      "http://hub.test:9200/api/files/cascadefile12345/direct",
+      "https://bucket.s3-accelerate.amazonaws.com/k",
+      "https://bucket.s3.us-west-1.amazonaws.com/k",
+      "http://hub.test:9200/api/files/cascadefile12345?proxy=1",
     ]);
   });
 

@@ -26,6 +26,7 @@ let mockRepoVisibility: number | undefined = 1; // 1 = Private, 5 = Public
 let mockExpectedToken = "ms_test_secret_token_9876543210";
 let mockDeduplicateOid: string | null = null;
 let mockModelScopeEmptyObjectsDedup = false;
+let mockModelScopeBatchStatus = 200;
 let mockCommitBusyFailuresRemaining = 0;
 let mockExternalUploadHost = false;
 let capturedPutAuthHeader: string | null = null;
@@ -82,6 +83,9 @@ beforeAll(async () => {
       if (req.method === "POST" && url.pathname.endsWith("/info/lfs/objects/batch")) {
         if (auth !== `Bearer ${mockExpectedToken}`) {
           return Response.json({ Code: 401, Message: "unauthorized" }, { status: 401 });
+        }
+        if (mockModelScopeBatchStatus !== 200) {
+          return Response.json({ Code: mockModelScopeBatchStatus, Message: "upstream down" }, { status: mockModelScopeBatchStatus });
         }
         const body: any = await req.json();
         const obj = body?.objects?.[0];
@@ -913,6 +917,23 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     const downloaded = Buffer.from(await fetch(loc).then((r) => r.arrayBuffer()));
     expect(downloaded).toEqual(payload);
 
+    // /api/files/:id?proxy=1 streams the remote OSS file through Hub (no 302 loop when direct download fails!)
+    const proxyRes = await fetch(`${hubBase}/api/files/${presign.file_id}?proxy=1`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+      redirect: "manual",
+    });
+    expect(proxyRes.status).toBe(200);
+    expect(proxyRes.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(proxyRes.headers.get("Content-Disposition")).toContain("attachment");
+    expect(Buffer.from(await proxyRes.arrayBuffer())).toEqual(payload);
+
+    // /api/files/:id/direct also advertises proxy_url for client/node fallback
+    const directInfo: any = await fetch(`${hubBase}/api/files/${presign.file_id}/direct`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    }).then((r) => r.json());
+    expect(directInfo.ok).toBe(true);
+    expect(directInfo.proxy_url).toBe(`/api/files/${presign.file_id}?proxy=1`);
+
     // DELETE clears config cleanly
     const delRes: any = await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
       method: "DELETE",
@@ -921,6 +942,145 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     expect(delRes.ok).toBe(true);
     expect(delRes.configured).toBe(false);
     expect(delRes.enabled).toBe(false);
+  });
+
+  test("degradation resilience: presign degrades <=12MiB to mode=hub on upstream outage, accelerate emits regional fallback_upload/fallback_url, and complete retries regional HEAD", async () => {
+    const {
+      presignStorageUpload,
+      completeStorageUpload,
+      resolveStorageDownload,
+      saveNetworkStorageConfig,
+    } = await import("./storage-relay.js");
+
+    // 1. Upstream ModelScope LFS outage: <=12MiB degrades cleanly to mode=hub (/api/upload); >12MiB returns 502
+    const putMs = await fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: true,
+        provider: "modelscope",
+        repo_id: "owner/degrade-repo",
+        endpoint: mockProviderBase,
+        api_token: mockExpectedToken,
+      }),
+    });
+    expect(putMs.status).toBe(200);
+
+    try {
+      mockModelScopeBatchStatus = 502;
+      const smallPresignRes = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          network_id: ownerNetworkId,
+          name: "photo.png",
+          mime: "image/png",
+          size: 1024,
+          sha256: "a".repeat(64),
+        }),
+      });
+      expect(smallPresignRes.status).toBe(200);
+      const smallPresign: any = await smallPresignRes.json();
+      expect(smallPresign.ok).toBe(true);
+      expect(smallPresign.mode).toBe("hub");
+      expect(smallPresign.upload_url).toBe("/api/upload");
+      expect(smallPresign.fallback_reason).toBe("storage_presign_failed");
+
+      const bigPresignRes = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          network_id: ownerNetworkId,
+          name: "huge.mp4",
+          mime: "video/mp4",
+          size: 20 * 1024 * 1024,
+          sha256: "b".repeat(64),
+        }),
+      });
+      expect(bigPresignRes.status).toBe(502);
+    } finally {
+      mockModelScopeBatchStatus = 200;
+      await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      });
+    }
+
+    // 2. Accelerate presign & download emit regional fallback_upload / fallback_url, and completeStorageUpload retries regional HEAD
+    const accelCfg = {
+      network_id: ownerNetworkId,
+      enabled: true,
+      provider: "s3" as const,
+      endpoint: "https://s3-accelerate.amazonaws.com",
+      region: "us-west-1",
+      bucket: "anet-private-usw1",
+      repo_id: "",
+      repo_type: "dataset" as const,
+      revision: "master",
+      prefix: "anet-files",
+      public_base_url: "",
+      max_file_bytes: 100 * 1024 * 1024,
+      secrets: { access_key_id: "AKIAIOSFODNN7EXAMPLE", access_key_secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" },
+    };
+    const pAcc = await presignStorageUpload(accelCfg, {
+      networkId: ownerNetworkId,
+      dateBucket: "2026-11-28",
+      fileId: "f_accel_fb_1",
+      ext: ".mp4",
+      size: 4096,
+      sha256: "c".repeat(64),
+      mime: "video/mp4",
+    });
+    expect(pAcc.ok).toBe(true);
+    if (pAcc.ok) {
+      expect(new URL(pAcc.upload!.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+      expect(pAcc.fallback_upload?.url).toBeTruthy();
+      expect(new URL(pAcc.fallback_upload!.url).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+
+      // completeStorageUpload retries regional HEAD when accelerate HEAD fails with HTTP 503
+      const headHosts: string[] = [];
+      const compRes = await completeStorageUpload(
+        accelCfg,
+        { fileId: "f_accel_fb_1", size: 4096, storage: pAcc.storage_meta },
+        (async (url: string | URL | Request) => {
+          const u = new URL(String(url));
+          headHosts.push(u.hostname);
+          if (u.hostname.includes("s3-accelerate")) {
+            return new Response(null, { status: 503 });
+          }
+          return new Response(null, { status: 200, headers: { "Content-Length": "4096" } });
+        }) as unknown as typeof fetch,
+        { allowLoopback: false, lookupFn: async () => [{ address: "52.219.120.1", family: 4 }] },
+      );
+      expect(compRes.ok).toBe(true);
+      expect(headHosts).toEqual([
+        "anet-private-usw1.s3-accelerate.amazonaws.com",
+        "anet-private-usw1.s3.us-west-1.amazonaws.com",
+      ]);
+
+      // resolveStorageDownload emits both accelerate url and regional fallback_url
+      saveNetworkStorageConfig(ownerNetworkId, null, "test", {
+        enabled: false,
+        provider: "s3",
+        bucket: "anet-private-usw1",
+        region: "us-west-1",
+        endpoint: "https://s3-accelerate.amazonaws.com",
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        access_key_secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      });
+      const dlAcc = resolveStorageDownload(ownerNetworkId, pAcc.storage_meta);
+      expect(dlAcc.ok).toBe(true);
+      if (dlAcc.ok) {
+        expect(new URL(dlAcc.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+        expect(dlAcc.fallback_url).toBeTruthy();
+        expect(new URL(dlAcc.fallback_url!).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+      }
+      await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      });
+    }
   });
 
   test("strict private-only policy: blocks public_base_url, public OSS/S3 buckets (anon list/read/ACL/policy), and ignores legacy public_base_url", async () => {
