@@ -148,98 +148,143 @@ export async function uploadBufferViaStorageRelay(opts: {
     // Network glitch on presign → fall back to /api/upload if small enough, or fail there.
   }
 
+  const canFallbackHub = opts.bytes.byteLength <= HUB_LOCAL_UPLOAD_CAP;
+
   if (useDirect && presignBody) {
     const fileId = String(presignBody.file_id);
+    let directError: DirectUploadRelayResultFail | null = null;
     if (!FILE_ID_RE.test(fileId)) {
-      return { ok: false, error: "missing_file_id", message: "presign response missing valid file_id" };
+      directError = { ok: false, error: "missing_file_id", message: "presign response missing valid file_id" };
     }
 
-    // Step 2: Direct PUT to ModelScope / OSS / S3 (unless content-addressed dedup says skip_upload).
-    if (!presignBody.skip_upload) {
-      const uploadUrl = presignBody.upload?.url;
-      if (typeof uploadUrl !== "string" || !uploadUrl) {
-        return { ok: false, error: "bad_response", message: "presign response missing upload.url" };
-      }
-      const uploadHeaders = cleanStringHeaders(presignBody.upload?.headers);
-      if (!uploadHeaders["Content-Length"] && !uploadHeaders["content-length"]) {
-        uploadHeaders["Content-Length"] = String(opts.bytes.byteLength);
-      }
-      let putRes: Response;
-      try {
-        putRes = await fetchFn(uploadUrl, {
+    // Step 2: Direct PUT to ModelScope / OSS / S3 (with optional regional fallback_upload retry on accelerate hiccup).
+    if (!directError && !presignBody.skip_upload) {
+      const candidates: Array<{ url: string; method: string; headers: Record<string, string> }> = [];
+      if (typeof presignBody.upload?.url === "string" && presignBody.upload.url) {
+        candidates.push({
+          url: presignBody.upload.url,
           method: presignBody.upload?.method || "PUT",
-          headers: uploadHeaders,
-          body: opts.bytes as unknown as BodyInit,
-          signal: AbortSignal.timeout(timeoutMs),
+          headers: cleanStringHeaders(presignBody.upload?.headers),
         });
-      } catch (e: any) {
-        return { ok: false, error: "upload_failed", message: `direct storage PUT failed: ${e?.message ?? e}` };
       }
-      if (!putRes.ok) {
-        const snippet = await putRes.text().catch(() => "").then((s) => s.slice(0, 200));
-        return {
-          ok: false,
-          error: "upload_failed",
-          message: `direct storage PUT HTTP ${putRes.status}${snippet ? `: ${snippet}` : ""}`,
-        };
+      if (typeof presignBody.fallback_upload?.url === "string" && presignBody.fallback_upload.url) {
+        candidates.push({
+          url: presignBody.fallback_upload.url,
+          method: presignBody.fallback_upload?.method || "PUT",
+          headers: cleanStringHeaders(presignBody.fallback_upload?.headers),
+        });
       }
-      // ModelScope occasionally returns HTTP 200 with JSON { Code: != 200 }.
-      const putCt = (putRes.headers.get("Content-Type") || "").toLowerCase();
-      if (putCt.includes("application/json")) {
-        try {
-          const j: any = await putRes.json();
-          if (typeof j?.Code === "number" && j.Code !== 200) {
-            return { ok: false, error: "upload_failed", message: j?.Message || `storage PUT Code ${j.Code}` };
+      if (candidates.length === 0) {
+        directError = { ok: false, error: "bad_response", message: "presign response missing upload.url" };
+      } else {
+        let putSucceeded = false;
+        let lastPutErr: DirectUploadRelayResultFail = { ok: false, error: "upload_failed", message: "direct storage PUT failed" };
+        for (const cand of candidates) {
+          const uploadHeaders = { ...cand.headers };
+          if (!uploadHeaders["Content-Length"] && !uploadHeaders["content-length"]) {
+            uploadHeaders["Content-Length"] = String(opts.bytes.byteLength);
           }
-          if (j?.Success === false || j?.success === false) {
-            return { ok: false, error: "upload_failed", message: j?.Message || "storage PUT rejected" };
+          let putRes: Response;
+          try {
+            putRes = await fetchFn(cand.url, {
+              method: cand.method,
+              headers: uploadHeaders,
+              body: opts.bytes as unknown as BodyInit,
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+          } catch (e: any) {
+            lastPutErr = { ok: false, error: "upload_failed", message: `direct storage PUT failed: ${e?.message ?? e}` };
+            continue;
           }
-        } catch { /* empty/non-JSON body is normal on PUT */ }
+          if (!putRes.ok) {
+            const snippet = await putRes.text().catch(() => "").then((s) => s.slice(0, 200));
+            lastPutErr = {
+              ok: false,
+              error: "upload_failed",
+              message: `direct storage PUT HTTP ${putRes.status}${snippet ? `: ${snippet}` : ""}`,
+            };
+            continue;
+          }
+          // ModelScope occasionally returns HTTP 200 with JSON { Code: != 200 }.
+          const putCt = (putRes.headers.get("Content-Type") || "").toLowerCase();
+          let bodyRejected = false;
+          if (putCt.includes("application/json")) {
+            try {
+              const j: any = await putRes.json();
+              if (typeof j?.Code === "number" && j.Code !== 200) {
+                lastPutErr = { ok: false, error: "upload_failed", message: j?.Message || `storage PUT Code ${j.Code}` };
+                bodyRejected = true;
+              } else if (j?.Success === false || j?.success === false) {
+                lastPutErr = { ok: false, error: "upload_failed", message: j?.Message || "storage PUT rejected" };
+                bodyRejected = true;
+              }
+            } catch { /* empty/non-JSON body is normal on PUT */ }
+          }
+          if (!bodyRejected) {
+            putSucceeded = true;
+            break;
+          }
+        }
+        if (!putSucceeded) directError = lastPutErr;
       }
     }
 
     // Step 3: Notify Hub to commit pointer / verify object and mark file_id ready.
-    let completeRes: Response;
-    try {
-      completeRes = await fetchFn(`${hubBase}/api/uploads/complete`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${opts.authToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ file_id: fileId }),
-        signal: AbortSignal.timeout(30_000),
-      });
-    } catch (e: any) {
-      return { ok: false, error: "upload_failed", message: `upload complete failed: ${e?.message ?? e}` };
+    if (!directError) {
+      let completeRes: Response | null = null;
+      try {
+        completeRes = await fetchFn(`${hubBase}/api/uploads/complete`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${opts.authToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ file_id: fileId }),
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (e: any) {
+        directError = { ok: false, error: "upload_failed", message: `upload complete failed: ${e?.message ?? e}` };
+      }
+
+      if (!directError && completeRes) {
+        let completeBody: any = null;
+        try {
+          completeBody = await completeRes.json();
+        } catch {
+          directError = { ok: false, error: "bad_response", message: `hub complete returned non-JSON (HTTP ${completeRes.status})` };
+        }
+        if (!directError) {
+          if (!completeRes.ok || !completeBody?.ok) {
+            const errMsg = completeBody?.message || completeBody?.error || `HTTP ${completeRes.status}`;
+            // Do not silently fall back on auth/quota rejections.
+            if (completeRes.status === 401 || completeRes.status === 403 || completeRes.status === 413) {
+              return { ok: false, error: "upload_failed", message: errMsg };
+            }
+            directError = { ok: false, error: "upload_failed", message: errMsg };
+          } else {
+            const finalId = String(completeBody.file_id || fileId);
+            if (!FILE_ID_RE.test(finalId)) {
+              directError = { ok: false, error: "missing_file_id", message: "complete response missing valid file_id" };
+            } else {
+              return {
+                ok: true,
+                file_id: finalId,
+                name: typeof completeBody.name === "string" && completeBody.name ? completeBody.name : opts.name,
+                mime: typeof completeBody.mime === "string" && completeBody.mime ? completeBody.mime.slice(0, 100) : opts.mime,
+                size: typeof completeBody.size === "number" ? completeBody.size : opts.bytes.byteLength,
+                url: typeof completeBody.url === "string" ? completeBody.url : `/api/files/${finalId}`,
+                storage_provider: typeof completeBody.storage_provider === "string" ? completeBody.storage_provider : presignBody.provider,
+              };
+            }
+          }
+        }
+      }
     }
 
-    let completeBody: any;
-    try {
-      completeBody = await completeRes.json();
-    } catch {
-      return { ok: false, error: "bad_response", message: `hub complete returned non-JSON (HTTP ${completeRes.status})` };
+    // If direct relay failed and the payload fits Hub's 12 MiB cap, degrade cleanly to POST /api/upload below.
+    if (directError && !canFallbackHub) {
+      return directError;
     }
-    if (!completeRes.ok || !completeBody?.ok) {
-      return {
-        ok: false,
-        error: "upload_failed",
-        message: completeBody?.message || completeBody?.error || `HTTP ${completeRes.status}`,
-      };
-    }
-    const finalId = String(completeBody.file_id || fileId);
-    if (!FILE_ID_RE.test(finalId)) {
-      return { ok: false, error: "missing_file_id", message: "complete response missing valid file_id" };
-    }
-    return {
-      ok: true,
-      file_id: finalId,
-      name: typeof completeBody.name === "string" && completeBody.name ? completeBody.name : opts.name,
-      mime: typeof completeBody.mime === "string" && completeBody.mime ? completeBody.mime.slice(0, 100) : opts.mime,
-      size: typeof completeBody.size === "number" ? completeBody.size : opts.bytes.byteLength,
-      url: typeof completeBody.url === "string" ? completeBody.url : `/api/files/${finalId}`,
-      storage_provider: typeof completeBody.storage_provider === "string" ? completeBody.storage_provider : presignBody.provider,
-    };
   }
 
   // Fallback: legacy multipart POST /api/upload through Hub.
@@ -290,7 +335,7 @@ export async function uploadBufferViaStorageRelay(opts: {
 }
 
 export type DirectDownloadProbeResult =
-  | { kind: "direct"; url: string; headers: Record<string, string>; provider?: string }
+  | { kind: "direct"; url: string; fallbackUrl?: string; headers: Record<string, string>; provider?: string }
   | { kind: "hub" }
   | { kind: "auth_failed"; status: number };
 
@@ -324,6 +369,7 @@ export async function probeDirectDownloadTarget(opts: {
       return {
         kind: "direct",
         url: body.url,
+        ...(typeof body.fallback_url === "string" && body.fallback_url ? { fallbackUrl: body.fallback_url } : {}),
         headers: cleanStringHeaders(body.headers),
         provider: typeof body.provider === "string" ? body.provider : undefined,
       };

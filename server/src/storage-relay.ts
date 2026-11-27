@@ -199,6 +199,8 @@ export type PresignStorageResult =
       object_key: string;
       skip_upload: boolean;
       upload: DirectUploadInstruction | null;
+      /** Optional regional fallback PUT target when primary upload uses a Transfer Acceleration endpoint. */
+      fallback_upload?: DirectUploadInstruction | null;
       storage_meta: RemoteStorageIndexMeta;
     }
   | { ok: false; status: number; error: string; message: string };
@@ -212,6 +214,8 @@ export type ResolveDownloadResult =
       ok: true;
       provider: StorageProvider;
       url: string;
+      /** Optional regional fallback GET target when primary download uses a Transfer Acceleration endpoint. */
+      fallback_url?: string;
       headers: Record<string, string>;
       expires_in: number;
     }
@@ -2154,6 +2158,27 @@ export async function presignStorageUpload(
     expiresSeconds: PRESIGN_TTL_SECONDS,
   });
 
+  // When primary upload uses Transfer Acceleration, also provide a regional presigned PUT URL
+  // so clients can transparently fall back to regional direct upload if an edge PoP hiccups.
+  const fallbackUpload: DirectUploadInstruction | null = isObjectStorageAccelerateEndpoint(cfg.provider, cfg.endpoint)
+    ? {
+        method: "PUT",
+        url: signObjectStoragePresignedUrl({
+          provider: cfg.provider,
+          method: "PUT",
+          bucket: cfg.bucket,
+          region: cfg.region,
+          endpoint: "",
+          objectKey,
+          accessKeyId: ak,
+          accessKeySecret: sk,
+          sessionToken: cfg.secrets.session_token,
+          expiresSeconds: PRESIGN_TTL_SECONDS,
+        }),
+        headers: {},
+      }
+    : null;
+
   const storageMeta: RemoteStorageIndexMeta = {
     provider: cfg.provider,
     object_key: objectKey,
@@ -2173,6 +2198,7 @@ export async function presignStorageUpload(
       url: signedPutUrl,
       headers: {},
     },
+    ...(fallbackUpload ? { fallback_upload: fallbackUpload } : {}),
     storage_meta: storageMeta,
   };
 }
@@ -2351,53 +2377,73 @@ export async function completeStorageUpload(
   }
 
   // Aliyun OSS / AWS S3: verify object exists via presigned HEAD (ensures client actually uploaded bytes).
+  // If an accelerate endpoint fails (edge glitch or client fell back to regional PUT), retry HEAD against the regional endpoint.
   const ak = cfg.secrets.access_key_id || "";
   const sk = cfg.secrets.access_key_secret || "";
   if (!ak || !sk) {
     return { ok: false, status: 503, error: "storage_credential_missing", message: "对象存储 AccessKey 未配置" };
   }
-  const headUrl = signObjectStoragePresignedUrl({
-    provider: params.storage.provider,
-    method: "HEAD",
-    bucket: params.storage.bucket || cfg.bucket,
-    region: params.storage.region || cfg.region,
-    endpoint: params.storage.endpoint || cfg.endpoint,
-    objectKey: params.storage.object_key,
-    accessKeyId: ak,
-    accessKeySecret: sk,
-    sessionToken: cfg.secrets.session_token,
-    expiresSeconds: 120,
-  });
+  const effectiveEp = params.storage.endpoint || cfg.endpoint;
+  const headEndpoints = isObjectStorageAccelerateEndpoint(params.storage.provider, effectiveEp)
+    ? [effectiveEp, ""]
+    : [effectiveEp];
 
-  try {
-    const res = await safeStorageFetch(headUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) }, fetchOpts);
-    if (!res.ok) {
-      return {
-        ok: false,
-        status: res.status === 404 ? 400 : 502,
-        error: res.status === 404 ? "storage_object_missing" : "storage_verify_failed",
-        message: res.status === 404 ? "文件尚未上传到对象存储" : `对象存储校验失败（HTTP ${res.status}）`,
-      };
-    }
-    const lenRaw = res.headers.get("Content-Length");
-    if (lenRaw !== null) {
-      const actualLen = Number(lenRaw);
-      if (Number.isFinite(actualLen) && actualLen !== params.size) {
-        return {
+  let lastFailure: CompleteStorageResult = {
+    ok: false,
+    status: 502,
+    error: "storage_verify_error",
+    message: "对象存储校验失败",
+  };
+
+  for (let i = 0; i < headEndpoints.length; i++) {
+    const headUrl = signObjectStoragePresignedUrl({
+      provider: params.storage.provider,
+      method: "HEAD",
+      bucket: params.storage.bucket || cfg.bucket,
+      region: params.storage.region || cfg.region,
+      endpoint: headEndpoints[i],
+      objectKey: params.storage.object_key,
+      accessKeyId: ak,
+      accessKeySecret: sk,
+      sessionToken: cfg.secrets.session_token,
+      expiresSeconds: 120,
+    });
+
+    try {
+      const res = await safeStorageFetch(headUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) }, fetchOpts);
+      if (!res.ok) {
+        lastFailure = {
           ok: false,
-          status: 400,
-          error: "storage_size_mismatch",
-          message: `上传字节数不匹配（预期 ${params.size}，实际 ${actualLen}）`,
+          status: res.status === 404 ? 400 : 502,
+          error: res.status === 404 ? "storage_object_missing" : "storage_verify_failed",
+          message: res.status === 404 ? "文件尚未上传到对象存储" : `对象存储校验失败（HTTP ${res.status}）`,
         };
+        if (i + 1 < headEndpoints.length) continue;
+        return lastFailure;
       }
+      const lenRaw = res.headers.get("Content-Length");
+      if (lenRaw !== null) {
+        const actualLen = Number(lenRaw);
+        if (Number.isFinite(actualLen) && actualLen !== params.size) {
+          return {
+            ok: false,
+            status: 400,
+            error: "storage_size_mismatch",
+            message: `上传字节数不匹配（预期 ${params.size}，实际 ${actualLen}）`,
+          };
+        }
+      }
+      return { ok: true };
+    } catch (e: any) {
+      if (e instanceof StorageSsrfError) {
+        return { ok: false, status: 400, error: e.code, message: e.message };
+      }
+      lastFailure = { ok: false, status: 502, error: "storage_verify_error", message: `对象存储校验失败：${e?.message || e}` };
+      if (i + 1 < headEndpoints.length) continue;
+      return lastFailure;
     }
-    return { ok: true };
-  } catch (e: any) {
-    if (e instanceof StorageSsrfError) {
-      return { ok: false, status: 400, error: e.code, message: e.message };
-    }
-    return { ok: false, status: 502, error: "storage_verify_error", message: `对象存储校验失败：${e?.message || e}` };
   }
+  return lastFailure;
 }
 
 /** Resolve authenticated/presigned direct download URL for an authorized download request (never unauthenticated public_base_url). */
@@ -2467,10 +2513,25 @@ export function resolveStorageDownload(
     sessionToken: cfg.secrets.session_token,
     expiresSeconds: PRESIGN_TTL_SECONDS,
   });
+  const fallbackUrl = isObjectStorageAccelerateEndpoint(storage.provider, ep)
+    ? signObjectStoragePresignedUrl({
+        provider: storage.provider,
+        method: "GET",
+        bucket: storage.bucket || cfg.bucket,
+        region: storage.region || cfg.region,
+        endpoint: "",
+        objectKey: storage.object_key,
+        accessKeyId: ak,
+        accessKeySecret: sk,
+        sessionToken: cfg.secrets.session_token,
+        expiresSeconds: PRESIGN_TTL_SECONDS,
+      })
+    : undefined;
   return {
     ok: true,
     provider: storage.provider,
     url: signedGetUrl,
+    ...(fallbackUrl ? { fallback_url: fallbackUrl } : {}),
     headers: {},
     expires_in: PRESIGN_TTL_SECONDS,
   };

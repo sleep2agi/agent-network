@@ -205,25 +205,30 @@ async function fetchAndCache(
     return { ok: false, code: "auth_failed", error: `hub refused fetch: HTTP ${probe.status}` };
   }
   if (probe.kind === "direct") {
-    try {
-      const directRes = await fetchFn(probe.url, {
-        method: "GET",
-        headers: probe.headers,
-      });
-      if (directRes.ok) {
-        res = directRes;
-      } else {
-        try { await directRes.body?.cancel?.(); } catch { /* ignore */ }
+    const directCandidates = probe.fallbackUrl ? [probe.url, probe.fallbackUrl] : [probe.url];
+    for (const targetUrl of directCandidates) {
+      try {
+        const directRes = await fetchFn(targetUrl, {
+          method: "GET",
+          headers: probe.headers,
+        });
+        if (directRes.ok) {
+          res = directRes;
+          break;
+        } else {
+          try { await directRes.body?.cancel?.(); } catch { /* ignore */ }
+        }
+      } catch {
+        // Network issue talking directly to storage — try regional fallback or Hub proxy.
       }
-    } catch {
-      // Network issue talking directly to storage — fall back to Hub /api/files/:id proxy.
     }
   }
 
-  // Step 2: Hub fallback (local files, older Hubs, or direct-download error).
+  // Step 2: Hub fallback (local files, older Hubs, or direct-download failure via ?proxy=1 so OSS/S3 does not 302-loop).
   if (!res) {
+    const fallbackHubUrl = probe.kind === "direct" ? `${hubUrl}?proxy=1` : hubUrl;
     try {
-      res = await fetchFn(hubUrl, {
+      res = await fetchFn(fallbackHubUrl, {
         method: "GET",
         headers: { Authorization: `Bearer ${deps.authToken}` },
       });
