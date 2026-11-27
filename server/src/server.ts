@@ -144,6 +144,7 @@ import {
   storageWriteStatus,
   testNetworkStorageConfig,
   validateStorageConfigUrlsAsync,
+  verifyStorageConfigPrivateAsync,
 } from "./storage-relay.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
 // #4495 —— 源目录 / 新建节点 / 复用已有 Session 的能力值。Hub 只认这几个**精确**字符串,
@@ -5067,6 +5068,15 @@ return Bun.serve({
       const urlCheck = await validateStorageConfigUrlsAsync(networkId, body!);
       if (!urlCheck.ok) {
         return withCors(req, Response.json(urlCheck, { status: storageWriteStatus(urlCheck.error) }));
+      }
+      const privacyCheck = await verifyStorageConfigPrivateAsync(networkId, body!);
+      if (!privacyCheck.ok) {
+        return withCors(req, Response.json({
+          ok: false,
+          error: privacyCheck.error,
+          message: privacyCheck.message,
+          ...(privacyCheck.visibility ? { visibility: privacyCheck.visibility } : {}),
+        }, { status: privacyCheck.status }));
       }
       const saved = saveNetworkStorageConfig(networkId, actorUserId, actorUsername, body!);
       if (!saved.ok) {
