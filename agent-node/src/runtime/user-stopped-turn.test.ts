@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { OpenCodeProviderError } from "./opencode-provider-error";
-import { UserStoppedTurn } from "./user-stopped-turn";
+import { AcpTurnCancelledError, acpPromptStopReason, UserStoppedTurn } from "./user-stopped-turn";
 import { runtimeErrorReplyText } from "./unverified-reply-text";
 import { openCodeV2Outcome, openCodeV2TurnVerdict } from "./opencode-copresence/v2-session";
 import { codexAppServerReplyOrThrow } from "./codex-app-server/runtime";
@@ -62,4 +62,25 @@ test("structured Codex interruption preserves text only with a confirmed stop", 
   expect(await turn.reply(caught)).toBeNull();
   await turn.interrupt(() => stopped);
   expect(await turn.reply(caught)).toEqual({ text: "已按要求停止。\n\n停止前已产出：\npartial", failed: false });
+});
+
+test.each([
+  ["Antigravity ACP", { stopReason: "cancelled" }, undefined],
+  ["Grok ACP", {}, "cancelled"],
+] as const)("%s cancelled outcome needs an own-stop receipt", async (_runtime, response, notification) => {
+  expect(acpPromptStopReason(response, notification)).toBe("cancelled");
+  const error = new AcpTurnCancelledError("partial ACP text");
+  const turn = new UserStoppedTurn("acp-task");
+  expect(await turn.reply(error)).toBeNull();
+  await turn.interrupt(() => stopped);
+  expect(await turn.reply(error)).toEqual({ text: "已按要求停止。\n\n停止前已产出：\npartial ACP text", failed: false });
+  expect(acpPromptStopReason({ stopReason: "end_turn" }, "cancelled")).toBe("end_turn");
+});
+
+test("an unrelated watchdog or upstream disconnect stays an error even if a stop receipt raced it", async () => {
+  const turn = new UserStoppedTurn("transport-task");
+  await turn.interrupt(() => stopped);
+  expect(await turn.reply(Object.assign(new Error("watchdog aborted request"), { name: "AbortError" }))).toBeNull();
+  expect(await turn.reply(Object.assign(new Error("request aborted"), { code: "ECONNRESET" }))).toBeNull();
+  expect(await turn.reply(new OpenCodeProviderError({ name: "aborted", message: "upstream connection closed" }))).toBeNull();
 });

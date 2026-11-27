@@ -47,7 +47,7 @@ import {
 import { accessSync, constants as fsConstants } from "node:fs";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
-import { isTurnAbort, UserStoppedTurn } from "./runtime/user-stopped-turn";
+import { AcpTurnCancelledError, isTurnAbort, UserStoppedTurn } from "./runtime/user-stopped-turn";
 import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
 import { envTransportFor } from "./runtime/env-transport.js";
@@ -5319,8 +5319,10 @@ async function processWithAntigravity(
     const result = await runOnce(firstSessionId);
     recordAgyModel(result);
     clearInteractivePrompt("turn-completed");
+    if (result.stopReason === "cancelled") throw new AcpTurnCancelledError(result.replyText);
     return result.replyText;
   } catch (e: any) {
+    if (e instanceof AcpTurnCancelledError) throw e;
     // admin 2026-11-22「这个能修一下吗」（公众号鸽连续两次 session/prompt idle 30 分钟）——
     // 卡死的会话会一直卡死：agy 侧那条 session 停在未完成的一轮，之后 session/load 进去
     // 再 prompt 依旧不出帧，于是同一个任务重试也是再等 30 分钟。
@@ -5335,6 +5337,7 @@ async function processWithAntigravity(
       const result = await runOnce(undefined);
       recordAgyModel(result);
       clearInteractivePrompt("turn-completed");
+      if (result.stopReason === "cancelled") throw new AcpTurnCancelledError(result.replyText);
       // 2026-11-23 负责人 review 第 3 条：回放判决失败后换新会话重做成功时，用户看到的不能是一条
       // 普通回复 —— 那等于悄悄丢了上下文。只有「回放型失败」才加这句人话；其它失败（idle 超时等）
       // 原有语义不变。
@@ -5601,6 +5604,10 @@ async function processWithGrok(
       log(`[grok] #1958 model=${result.effectiveModel ?? "(unknown)"} source=${result.modelSource}${MODEL && result.effectiveModel !== MODEL ? ` configured=${MODEL}` : ""}`);
     }
     log(`[grok] done ${label} | ${dt}ms | session=${result.sessionId.slice(0, 8)} | chunks=${result.state.chunks} replay_skipped=${result.state.skippedReplay}`);
+    if (result.stopReason === "cancelled") {
+      clearInteractivePrompt("turn-completed");
+      throw new AcpTurnCancelledError(sanitizeGrokCommhubLeak(result.replyText));
+    }
     let replyText = sanitizeGrokCommhubLeak(result.replyText.trim() || "（无回复）");
 
     // #205 Step 2 (simplified per Vincent 6420 — "不用管吧生成哪就哪").
