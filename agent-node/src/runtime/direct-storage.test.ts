@@ -259,6 +259,25 @@ describe("uploadBufferViaStorageRelay", () => {
       "https://bucket.s3.us-west-1.amazonaws.com/k",
       "http://hub.test:9200/api/upload",
     ]);
+
+    // Case 3 (P2): >12MiB presign 502 MUST surface real presign error and NEVER waste bandwidth into Hub /api/upload (413)
+    const oversizePayload = new Uint8Array(12 * 1024 * 1024 + 1);
+    const oversizeUrls: string[] = [];
+    const rOversize = await uploadBufferViaStorageRelay({
+      hubUrl: "http://hub.test:9200",
+      authToken: "ntok_x",
+      bytes: oversizePayload,
+      name: "13mb.mp4",
+      mime: "video/mp4",
+      fetch: (async (input: any) => {
+        const u = String(input);
+        oversizeUrls.push(u);
+        return Response.json({ ok: false, error: "storage_presign_failed", message: "LFS upstream 502" }, { status: 502 });
+      }) as typeof fetch,
+    });
+    expect(rOversize.ok).toBe(false);
+    if (!rOversize.ok) expect(rOversize.message).toContain("LFS upstream 502");
+    expect(oversizeUrls).toEqual(["http://hub.test:9200/api/uploads/presign"]);
   });
 });
 

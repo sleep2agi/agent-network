@@ -111,6 +111,8 @@ export async function uploadBufferViaStorageRelay(opts: {
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const sha256 = createHash("sha256").update(opts.bytes).digest("hex");
 
+  const canFallbackHub = opts.bytes.byteLength <= HUB_LOCAL_UPLOAD_CAP;
+
   // Step 1: Ask Hub whether direct storage relay is enabled for this network.
   let useDirect = false;
   let presignBody: any = null;
@@ -134,21 +136,28 @@ export async function uploadBufferViaStorageRelay(opts: {
       if (presignBody?.ok === true && presignBody?.mode === "direct" && typeof presignBody?.file_id === "string") {
         useDirect = true;
       }
-    } else if (presignRes.status === 413) {
+    } else if (
+      presignRes.status === 401
+      || presignRes.status === 403
+      || presignRes.status === 413
+      || presignRes.status === 429
+      || (!canFallbackHub && presignRes.status !== 404 && presignRes.status !== 405 && presignRes.status !== 501)
+    ) {
       let errBody: any = null;
       try { errBody = await presignRes.json(); } catch { /* ignore */ }
       return {
         ok: false,
         error: "upload_failed",
-        message: errBody?.message || errBody?.error || "HTTP 413",
+        message: errBody?.message || errBody?.error || `HTTP ${presignRes.status}`,
       };
     }
-    // 404/405/non-direct → fall back to legacy POST /api/upload below.
-  } catch {
-    // Network glitch on presign → fall back to /api/upload if small enough, or fail there.
+    // 404/405/501 (older Hub) or <=12 MiB transient 5xx → fall back to legacy POST /api/upload below.
+  } catch (e: any) {
+    if (!canFallbackHub) {
+      return { ok: false, error: "upload_failed", message: `presign request failed: ${e?.message ?? e}` };
+    }
+    // Network glitch on presign for <=12 MiB → fall back to /api/upload below.
   }
-
-  const canFallbackHub = opts.bytes.byteLength <= HUB_LOCAL_UPLOAD_CAP;
 
   if (useDirect && presignBody) {
     const fileId = String(presignBody.file_id);
