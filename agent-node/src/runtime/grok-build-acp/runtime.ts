@@ -1,5 +1,6 @@
 import { setActiveAcpTurn, clearActiveAcpTurn, cancelActiveAcpTurn, type ActiveAcpTurn } from "../acp-runner/active-turn";
 import { attachAcpUserReplyText } from "../acp-runner/user-error";
+import { acpPromptStopReason } from "../user-stopped-turn";
 import { GrokAcpClient } from "./client";
 import { newGrokTurnState, reduceGrokAcpNotification } from "./events";
 import type { GrokAcpNotification, GrokTurnState } from "./events";
@@ -280,7 +281,6 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
   const childEnv = { ...process.env, ...opts.env };
   const client = new GrokAcpClient(opts.runtimeLabel ?? "grok");
   const state = newGrokTurnState(opts.sessionId);
-  let activeTurn: ActiveAcpTurn | null = null;
   let acceptingPromptUpdates = false;
 
   // 握手期（acceptingPromptUpdates=false）收到的 assistant 文本 = session/load 回放出来的历史。
@@ -394,12 +394,6 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       : await client.request<SessionResponse>("session/new", { cwd: opts.cwd, mcpServers, ...sessionExtra }, handshakeTimeoutMs);
 
     const sessionId = extractSessionId(session) ?? opts.sessionId;
-    // #5332 —— 登记当前 ACP 回合，供 control=interrupt 发 session/cancel（agy 与本实现共用）
-    if (typeof sessionId === "string" && sessionId) {
-      // GrokAcpTurnOptions 没有 runtime 字段：这里只记「ACP 通用」，能力位判断在 cli.ts 按 RUNTIME 做
-      activeTurn = { client: client as any, sessionId, runtime: "acp" };
-      setActiveAcpTurn(activeTurn);
-    }
     if (!sessionId) throw new Error(`${opts.runtimeLabel ?? "grok"} ACP session response did not include sessionId`);
 
     state.sessionId = sessionId;
@@ -426,12 +420,20 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     for (;;) {
       const toolsAtStart = state.toolCalls;
       try {
-        const promptRequest = client.requestWithIdleTimeout("session/prompt", {
-          sessionId,
-          prompt: [{ type: "text", text: opts.prompt }],
-        }, timeoutMs);
-        opts.onSubmitted?.();
-        promptResponse = await promptRequest;
+        // Do not acknowledge a stop during session setup, retry backoff, or
+        // the drain after the runtime has already ended this prompt.
+        const activeTurn: ActiveAcpTurn = { client, sessionId, runtime: "acp" };
+        setActiveAcpTurn(activeTurn);
+        try {
+          const promptRequest = client.requestWithIdleTimeout("session/prompt", {
+            sessionId,
+            prompt: [{ type: "text", text: opts.prompt }],
+          }, timeoutMs);
+          opts.onSubmitted?.();
+          promptResponse = await promptRequest;
+        } finally {
+          clearActiveAcpTurn(activeTurn);
+        }
         opts.onConsumed?.();
         break;
       } catch (error) {
@@ -459,7 +461,9 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
       sessionId,
       replyText: state.replyText,
       ...(handshakeReplayText ? { handshakeReplayText } : {}),
-      stopReason: state.lastStopReason,
+      // Standard ACP returns the reason on session/prompt. Grok also emits
+      // its own prompt_complete notification, which older builds rely on.
+      stopReason: acpPromptStopReason(promptResponse, state.lastStopReason),
       promptResponse,
       state,
       effectiveModel: modelCheck.effectiveModel,
@@ -469,7 +473,6 @@ export async function runGrokAcpTurn(opts: GrokAcpTurnOptions): Promise<GrokAcpT
     throw attachAcpUserReplyText(error, opts.runtimeLabel ?? "grok");
   } finally {
     // 回合结束就撤销登记：之后再来的停止指令应得到 no_active_turn，而不是去通知一个已关闭的进程。
-    if (activeTurn) clearActiveAcpTurn(activeTurn);
     client.off("notification", onNotification);
     if (opts.onStderr) {
       client.off("stderr", onStderr);

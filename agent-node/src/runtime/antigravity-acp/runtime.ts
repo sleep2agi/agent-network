@@ -217,7 +217,7 @@ export async function runAgyAcpTurn(opts: AgyTurnOptions): Promise<GrokAcpTurnRe
   if (cleaned !== result.replyText) {
     opts.onStderr?.(`[antigravity] stripped replayed prefix (${(result.replyText ?? "").length - cleaned.length} chars) from session ${String(sessionId).slice(0, 8)}`);
   }
-  if (replayOnly) {
+  if (replayOnly && result.stopReason !== "cancelled") {
     // 2026-11-23 —— 绝不能把旧回复当本轮结果发出去；判失败，让人重发/换会话。
     opts.onStderr?.(`[antigravity] replay-only turn (${(result.replyText ?? "").length} chars of history, no new content) in session ${String(sessionId).slice(0, 8)}`);
     throw new AgyReplayOnlyError();
