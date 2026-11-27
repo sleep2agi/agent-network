@@ -2,18 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { attachLocalFileLinks, checkLocalFile, findLocalFileLinks, mimeFor, rewriteReplyLinks } from "./reply-file-links";
 
 describe("reply-file-links: finding local links", () => {
   test("absolute paths and file:// count; http, /api/files, relative do not", () => {
     const t = "看 [报告](/data/w/r.pdf) 和 [图](file:///tmp/a%20b.png);不算的:[站](https://x.y/z.pdf) [已传](/api/files/abc12345) [rel](./x.pdf) [proto](//cdn/x)";
-    const l = findLocalFileLinks(t);
+    const l = findLocalFileLinks(t, false);
     expect(l.map((x) => x.path)).toEqual(["/data/w/r.pdf", "/tmp/a b.png"]);
     expect(l[0].label).toBe("报告");
   });
   test("caps at 6 links", () => {
     const t = Array.from({ length: 9 }, (_, i) => `[f${i}](/w/f${i}.pdf)`).join(" ");
-    expect(findLocalFileLinks(t).length).toBe(6);
+    expect(findLocalFileLinks(t, false).length).toBe(6);
   });
 });
 
@@ -55,7 +56,7 @@ describe("reply-file-links: rewrite + end-to-end", () => {
     expect(r.attachments).toEqual([{ type: "file", file_id: "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", name: "report.pdf", mime: "application/pdf", size: 7 }]);
   });
   test("upload throwing is reported inline, not thrown", async () => {
-    const r = await attachLocalFileLinks(`[x](${root}/report.pdf)`, { roots: [root], upload: async () => { throw new Error("HTTP 413"); } });
+    const r = await attachLocalFileLinks(`[x](${pathToFileURL(join(root, "report.pdf")).href})`, { roots: [root], upload: async () => { throw new Error("HTTP 413"); } });
     expect(r.failed).toBe(1); expect(r.text).toContain("上传失败(HTTP 413)");
   });
   test("no local links → untouched, no upload calls", async () => {
