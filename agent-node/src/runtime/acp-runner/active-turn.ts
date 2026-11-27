@@ -20,13 +20,13 @@ export function getActiveAcpTurn(): ActiveAcpTurn | null { return current; }
 /** 测试用：清空（生产不需要，避免跨用例污染）。 */
 export function __resetActiveAcpTurnForTest(): void { current = null; }
 
-export function cancelActiveAcpTurn(): { ok: boolean; reason?: string } {
+export function cancelActiveAcpTurn(): { ok: true; interrupted: true } | { ok: false; interrupted: false; reason: string } {
   const turn = current;
-  if (!turn) return { ok: false, reason: "no_active_turn" };
+  if (!turn) return { ok: false, interrupted: false, reason: "no_active_turn" };
   try {
     turn.client.notify("session/cancel", { sessionId: turn.sessionId });
-    return { ok: true };
+    return { ok: true, interrupted: true };
   } catch (error: any) {
-    return { ok: false, reason: String(error?.message ?? error) };
+    return { ok: false, interrupted: false, reason: String(error?.message ?? error) };
   }
 }

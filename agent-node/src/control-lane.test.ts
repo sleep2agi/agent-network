@@ -125,4 +125,10 @@ describe("cli.ts 接线", () => {
     expect(handler).toContain('reason: "not_supported"');
     expect(src).toContain('const acpInterrupt = RUNTIME === "antigravity" || (RUNTIME === "grok" && GROK_EXECUTION_MODE === "acp");');
   });
+
+  test("all non-OpenCode interrupt paths emit interrupted:true/false matching App replyProvesInterrupted", () => {
+    expect(handler).toContain("{ ok: true as const, interrupted: true as const }");
+    expect(handler).toContain('{ ok: false as const, interrupted: false as const, reason: "no_active_turn" }');
+    expect(handler).toContain('{ ok: false as const, interrupted: false as const, reason: "not_supported" }');
+  });
 });
