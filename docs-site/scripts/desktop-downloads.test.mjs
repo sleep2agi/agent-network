@@ -23,7 +23,10 @@ assert.equal(classifyInstallAsset('Agent.Network_0.2.228_amd64.AppImage')?.kind,
 assert.equal(classifyInstallAsset('Agent.Network_0.2.228_android-universal.apk')?.platform, 'android');
 assert.equal(classifyInstallAsset('Agent.Network_0.2.41_ios.ipa')?.role, 'audit');
 // 鸿蒙 NEXT 的 .hap(admin 2026-11-26 官网鸿蒙下载位):归 harmony 平台、安装包、arm64。
-assert.deepEqual(classifyInstallAsset('Agent.Network_0.2.623_harmony.hap'), { platform: 'harmony', kind: 'hap', role: 'install' });
+// 2026-11-27:开发签名内测包(只在登记过 UDID 的设备上能装)不当普通安装包,不出大按钮、不进推荐。
+assert.deepEqual(classifyInstallAsset('ANet_0.2.626_harmony.hap'), { platform: 'harmony', kind: 'hap', role: 'devtest' });
+// 将来公开签名的包按约定命名后才当安装包。
+assert.deepEqual(classifyInstallAsset('ANet_0.2.700_harmony-release.hap'), { platform: 'harmony', kind: 'hap', role: 'install' });
 assert.equal(assetArchitecture('Agent.Network_0.2.623_harmony.hap'), 'arm64');
 
 assert.equal(publicGithubDownloadUrl('https://api.github.com/repos/sleep2agi/agent-network-app/releases/assets/569210828'), null);
