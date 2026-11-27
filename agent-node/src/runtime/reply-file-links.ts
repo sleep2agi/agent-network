@@ -91,13 +91,13 @@ export function rewriteReplyLinks(
 /** 端到端(上传函数注入):找链接 → 校验 → 上传 → 改写。没有本机链接时原样返回、零副作用。 */
 export async function attachLocalFileLinks(
   text: string,
-  deps: { roots: readonly string[]; upload: (file: { realPath: string; name: string; mime: string; size: number }) => Promise<UploadedFile> },
+  deps: { roots: readonly string[]; maxBytes?: number; upload: (file: { realPath: string; name: string; mime: string; size: number }) => Promise<UploadedFile> },
 ): Promise<{ text: string; attachments: ReplyAttachment[]; uploaded: number; failed: number }> {
   const links = findLocalFileLinks(text);
   if (links.length === 0) return { text, attachments: [], uploaded: 0, failed: 0 };
   const results: Array<{ link: LocalFileLink; uploaded?: UploadedFile; reason?: string }> = [];
   for (const link of links) {
-    const check = checkLocalFile(link.path, deps.roots);
+    const check = checkLocalFile(link.path, deps.roots, deps.maxBytes ?? REPLY_FILE_MAX_BYTES);
     if (!check.ok) { results.push({ link, reason: check.reason }); continue; }
     try { results.push({ link, uploaded: await deps.upload(check) }); }
     catch (e: any) { results.push({ link, reason: `上传失败(${e?.message ?? e})` }); }

@@ -49,6 +49,7 @@
 import { mkdirSync, statSync, writeFileSync, chmodSync, readdirSync, rmSync, existsSync, createWriteStream, lstatSync, realpathSync } from "node:fs";
 import { renameOverExistingSync } from "../shared/windows-rename-retry";
 import { join, extname, dirname, isAbsolute, relative, sep } from "node:path";
+import { probeDirectDownloadTarget } from "./direct-storage";
 
 export const DEFAULT_MAX_BYTES = (() => {
   const env = process.env.COMMHUB_ATTACHMENT_MAX_BYTES;
@@ -181,7 +182,7 @@ export async function resolveAttachmentToLocalPath(
   return { ok: false, code: "no_file_id_no_path", error: "attachment has neither file_id nor path" };
 }
 
-/** Internal — fetch /api/files/<id> with auth, size cap, atomic write. */
+/** Internal — prefer direct external storage via /api/files/<id>/direct, fall back to /api/files/<id>. */
 async function fetchAndCache(
   fileId: string,
   localPath: string,
@@ -190,24 +191,54 @@ async function fetchAndCache(
   maxBytes: number,
 ): Promise<ResolveResult> {
   const hubBase = deps.hubUrl.replace(/\/+$/, "");
-  const url = `${hubBase}/api/files/${encodeURIComponent(fileId)}`;
-  let res: Response;
-  try {
-    res = await fetchFn(url, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${deps.authToken}` },
-    });
-  } catch (e: any) {
-    return { ok: false, code: "fetch_failed", error: `fetch threw: ${e?.message || e}` };
+  const hubUrl = `${hubBase}/api/files/${encodeURIComponent(fileId)}`;
+
+  // Step 1: Probe /api/files/:id/direct so externally stored files bypass Hub bandwidth (0 Hub bytes).
+  let res: Response | null = null;
+  const probe = await probeDirectDownloadTarget({
+    hubUrl: deps.hubUrl,
+    authToken: deps.authToken,
+    fileId,
+    fetch: fetchFn,
+  });
+  if (probe.kind === "auth_failed") {
+    return { ok: false, code: "auth_failed", error: `hub refused fetch: HTTP ${probe.status}` };
   }
-  if (res.status === 401 || res.status === 403) {
-    return { ok: false, code: "auth_failed", error: `hub refused fetch: HTTP ${res.status}` };
+  if (probe.kind === "direct") {
+    try {
+      const directRes = await fetchFn(probe.url, {
+        method: "GET",
+        headers: probe.headers,
+      });
+      if (directRes.ok) {
+        res = directRes;
+      } else {
+        try { await directRes.body?.cancel?.(); } catch { /* ignore */ }
+      }
+    } catch {
+      // Network issue talking directly to storage — fall back to Hub /api/files/:id proxy.
+    }
   }
-  if (res.status === 404) {
-    return { ok: false, code: "not_found", error: `hub has no file_id=${fileId}` };
-  }
-  if (!res.ok) {
-    return { ok: false, code: "fetch_failed", error: `hub returned HTTP ${res.status}` };
+
+  // Step 2: Hub fallback (local files, older Hubs, or direct-download error).
+  if (!res) {
+    try {
+      res = await fetchFn(hubUrl, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${deps.authToken}` },
+      });
+    } catch (e: any) {
+      return { ok: false, code: "fetch_failed", error: `fetch threw: ${e?.message || e}` };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, code: "auth_failed", error: `hub refused fetch: HTTP ${res.status}` };
+    }
+    if (res.status === 404) {
+      return { ok: false, code: "not_found", error: `hub has no file_id=${fileId}` };
+    }
+    if (!res.ok) {
+      return { ok: false, code: "fetch_failed", error: `hub returned HTTP ${res.status}` };
+    }
   }
 
   // Pre-check Content-Length — refuse before consuming bytes.

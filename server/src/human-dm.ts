@@ -11,7 +11,7 @@ import { getUserNetworkRole } from "./auth.js";
 import { isAgentRestricted } from "./agent-access.js";
 import { pushUserEvent, hasUserSubscribers } from "./push.js";
 import { existsSync, readFileSync } from "fs";
-import { DM_FILE_SCOPE, FILE_ID_REGEX, indexEntryPath, validateAttachments, validateIndexEntry, type UploadIndexEntry } from "./uploads.js";
+import { DM_FILE_SCOPE, FILE_ID_REGEX, MAX_REMOTE_UPLOAD_BYTES, indexEntryPath, validateAttachments, validateIndexEntry, type UploadIndexEntry } from "./uploads.js";
 import { restrictedMemberCanUseFile } from "./restricted-files.js";
 import { redactMessageRow } from "./redact-tokens.js";
 
@@ -50,7 +50,7 @@ export function sendHumanDm(input: HumanDmSendInput): HumanDmSendResult {
   if (!target || !getUserNetworkRole(target.user_id, networkId)) return { ok: false, error: "dm_target_not_in_network", status: 404 };
   if (target.user_id === sender.userId) return { ok: false, error: "dm_to_self", status: 400 };
 
-  const attachments = validateAttachments(input.attachments);
+  const attachments = validateAttachments(input.attachments, { maxBytes: MAX_REMOTE_UPLOAD_BYTES });
   if (!attachments.ok) return { ok: false, error: "bad_attachments", status: 400 };
   if (!text.trim() && attachments.attachments.length === 0) return { ok: false, error: "message_required", status: 400 };
   const restricted = isAgentRestricted(sender.userId, networkId);
@@ -159,7 +159,7 @@ export function networkFileEntry(networkId: string, fileId: string): UploadIndex
   if (!path || !existsSync(path)) return null;
   try {
     const entry = JSON.parse(readFileSync(path, "utf8"));
-    return validateIndexEntry(entry) && entry.file_id === fileId && entry.network_id === networkId ? entry : null;
+    return validateIndexEntry(entry) && entry.status !== "pending" && entry.file_id === fileId && entry.network_id === networkId ? entry : null;
   } catch { return null; }
 }
 

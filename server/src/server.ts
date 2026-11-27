@@ -79,12 +79,14 @@ import { clientRequestIdFromMeta, idempotentTaskId, idempotentTaskMatches, type 
 import { getLoginClientIp, normalizePeerIp, sharedLoginFailureLockout, sharedLoginIpRateLimiter } from "./auth_login_guard.js";
 import {
   FILE_ID_REGEX,
+  MAX_REMOTE_UPLOAD_BYTES,
   MAX_REQUEST_CONTENT_LENGTH,
   MAX_UPLOAD_BYTES,
   buildStoragePath,
   pathForExistingBlob,
   isValidCalendarBucket,
   generateFileId,
+  getDateBucket,
   getUploadsRoot,
   indexEntryPath,
   isPathInsideUploadsRoot,
@@ -129,6 +131,17 @@ import {
   saveNetworkVoiceConfig,
   voiceWriteStatus,
 } from "./voice-asr.js";
+import {
+  completeStorageUpload,
+  deleteNetworkStorageConfig,
+  presignStorageUpload,
+  readActiveNetworkStorageConfig,
+  readNetworkStorageConfig,
+  resolveStorageDownload,
+  saveNetworkStorageConfig,
+  storageWriteStatus,
+  testNetworkStorageConfig,
+} from "./storage-relay.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
 // #4495 —— 源目录 / 新建节点 / 复用已有 Session 的能力值。Hub 只认这几个**精确**字符串,
 // 别的值一律不投影(daemon 上报的是自由 JSON,不能把任意串透给客户端当能力)。
@@ -250,7 +263,7 @@ const SERVER_VERSION_SOURCE = RESOLVED_VERSION.source;
 // 还在跑的回 409 schedule_not_stopped(先 cancel)。
 // node_inbox_allowlist_dept:收件白名单认 dept:<department_id>(该部门及子部门里的节点和人)。
 // node_grants:节点管理授权 GET/PUT /api/nodes/:id/grants(能力 schedules × 范围 network/department/node × read/edit)。
-export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge", "node_inbox_allowlist_dept", "node_grants", "create_node_department"] as const;
+export const HUB_HEALTH_CAPABILITIES = ["status_node_id", "node_permission_mode", "chat_groups", "node_inbox_allowlist", "scheduled_task_purge", "node_inbox_allowlist_dept", "node_grants", "create_node_department", "storage_relay"] as const;
 
 // In-memory log ring buffer — last N lines streamed via /api/server-logs.
 // Wraps console.log/info/warn/error so EVERY existing log call lands here
@@ -4994,6 +5007,108 @@ return Bun.serve({
       return withCors(req, res);
     }
 
+    // ── External storage relay config (ModelScope / Aliyun OSS / AWS S3) ──
+    //
+    // Network owner/admin configures external object/LFS storage credentials once
+    // on the Hub (encrypted at rest via vault.ts in `network_storage_configs`).
+    // Clients upload & download file/image/video bytes directly to the configured
+    // storage backend (0 file bytes routed through Hub bandwidth).
+    if (url.pathname === "/api/storage/config" && (req.method === "GET" || req.method === "PUT" || req.method === "DELETE")) {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (req.method === "GET" && restAuth.networkId) {
+        // Node tokens may read non-secret metadata (enabled, provider, max_file_bytes) for their bound network.
+        const res = Response.json(readNetworkStorageConfig(restAuth.networkId, false));
+        res.headers.set("Cache-Control", "no-store");
+        return withCors(req, res);
+      }
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: Record<string, unknown> | null = null;
+      if (req.method === "PUT") {
+        try {
+          const parsed = await req.json();
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+          }
+          body = parsed as Record<string, unknown>;
+        } catch {
+          return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+        }
+      }
+      const bodyNetId = typeof body?.network_id === "string" && body.network_id.trim() ? body.network_id.trim() : null;
+      const storageScope = bodyNetId ? resolveRestNetworkScope(bodyNetId, restAuth, isAdmin) : restScope;
+      if (storageScope.denied) {
+        return withCors(req, Response.json({ ok: false, error: storageScope.denied }, { status: 403 }));
+      }
+      const networkId = resolveRestWriteNetworkId(storageScope, restAuth, isAdmin);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      const canManage = isAdmin || role === "owner" || role === "admin";
+      if (req.method === "GET") {
+        if (!isAdmin && !role) {
+          return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network member only" }, { status: 403 }));
+        }
+        const res = Response.json(readNetworkStorageConfig(networkId, canManage));
+        res.headers.set("Cache-Control", "no-store");
+        return withCors(req, res);
+      }
+      if (!canManage) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const actorUserId = restAuth.userId ?? null;
+      const actorUsername = restAuth.username ?? null;
+      if (req.method === "DELETE") {
+        const res = Response.json(deleteNetworkStorageConfig(networkId, actorUserId, actorUsername));
+        res.headers.set("Cache-Control", "no-store");
+        return withCors(req, res);
+      }
+      const saved = saveNetworkStorageConfig(networkId, actorUserId, actorUsername, body!);
+      if (!saved.ok) {
+        return withCors(req, Response.json(saved, { status: storageWriteStatus(saved.error) }));
+      }
+      const res = Response.json(saved);
+      res.headers.set("Cache-Control", "no-store");
+      return withCors(req, res);
+    }
+
+    if (url.pathname === "/api/storage/test" && req.method === "POST") {
+      if (!restAuth) return withCors(req, Response.json({ ok: false, error: "auth required" }, { status: 401 }));
+      if (restAuth.networkId) return userTokenRequired(req);
+      let body: Record<string, unknown> | null = null;
+      try {
+        const text = await req.text();
+        if (text.trim()) {
+          const parsed = JSON.parse(text);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+          }
+          body = parsed as Record<string, unknown>;
+        }
+      } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+      }
+      const bodyNetId = typeof body?.network_id === "string" && body.network_id.trim() ? body.network_id.trim() : null;
+      const storageScope = bodyNetId ? resolveRestNetworkScope(bodyNetId, restAuth, isAdmin) : restScope;
+      if (storageScope.denied) {
+        return withCors(req, Response.json({ ok: false, error: storageScope.denied }, { status: 403 }));
+      }
+      const networkId = resolveRestWriteNetworkId(storageScope, restAuth, isAdmin);
+      if (!networkId) return withCors(req, Response.json({ ok: false, error: "network_id_required" }, { status: 400 }));
+      const role = restAuth.userId ? getUserNetworkRole(restAuth.userId, networkId) : null;
+      const canManage = isAdmin || role === "owner" || role === "admin";
+      if (!canManage) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied", message: "network owner/admin only" }, { status: 403 }));
+      }
+      const draft: Record<string, unknown> | null = body ? (() => {
+        const copy = { ...body };
+        delete copy.network_id;
+        return Object.keys(copy).length > 0 ? copy : null;
+      })() : null;
+      const result = await testNetworkStorageConfig(networkId, draft);
+      const res = Response.json(result, { status: result.ok ? 200 : 400 });
+      res.headers.set("Cache-Control", "no-store");
+      return withCors(req, res);
+    }
+
     // ── #1510: the log-only view of the secret transport gate ──
     //
     // Answers "how many secret writes WOULD a plain-HTTP refusal have blocked,
@@ -5605,6 +5720,275 @@ return Bun.serve({
     // Bearer auth and forces Content-Disposition: attachment +
     // X-Content-Type-Options: nosniff so uploaded files can never be
     // executed or served as HTML.
+    // ── Direct external upload relay: presign + complete (0 file bytes through Hub) ──
+    if (url.pathname === "/api/uploads/presign" && req.method === "POST") {
+      const authErr = requireAuth(req, { allowQueryToken: false });
+      if (authErr) return withCors(req, authErr);
+
+      const authCtx = resolveRequestAuth(req, { allowQueryToken: false });
+      const rateKey = authCtx?.tokenId ?? `ip:${getClientIP(req, server)}`;
+      const rate = sharedUploadRateLimiter.check(rateKey);
+      if (!rate.allowed) {
+        const headers = uploadRateLimitHeaders(rate);
+        return withCors(req, new Response(
+          JSON.stringify({ ok: false, error: "rate_limited", message: "Upload rate limit exceeded (60/hour). Try again later.", retry_after_ms: rate.retryAfterMs }),
+          { status: 429, headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } },
+        ));
+      }
+
+      let body: Record<string, unknown>;
+      try {
+        const parsed = await req.json();
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+        }
+        body = parsed as Record<string, unknown>;
+      } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+      }
+
+      const principal = resolvePrincipal(req, { allowQueryToken: false });
+      const requestedNetId = (typeof body.network_id === "string" && body.network_id.trim() ? body.network_id.trim() : null)
+        ?? url.searchParams.get("network_id");
+      const rawPurpose = body.purpose !== undefined && body.purpose !== null && body.purpose !== ""
+        ? String(body.purpose)
+        : url.searchParams.get("purpose");
+      if (rawPurpose !== null && rawPurpose !== DM_FILE_SCOPE) {
+        return withCors(req, Response.json({ ok: false, error: "bad_purpose", message: `purpose must be "${DM_FILE_SCOPE}" or absent` }, { status: 400 }));
+      }
+
+      let uploadNetId: string | null = null;
+      switch (principal.kind) {
+        case "anonymous":
+          return withCors(req, Response.json({ ok: false, error: "auth_required" }, { status: 401 }));
+        case "dev-open-anon":
+          uploadNetId = null;
+          break;
+        case "legacy-master":
+          if (!requestedNetId) {
+            return withCors(req, Response.json({ ok: false, error: "network_id_required", message: "legacy master uploads must specify a network_id" }, { status: 400 }));
+          }
+          uploadNetId = requestedNetId;
+          break;
+        case "ntok":
+          if (requestedNetId && requestedNetId !== principal.boundNetworkId) {
+            return withCors(req, Response.json({ ok: false, error: "network_id_conflict", message: "network_id conflicts with the token-bound network" }, { status: 400 }));
+          }
+          uploadNetId = principal.boundNetworkId;
+          break;
+        case "admin-utok": {
+          if (requestedNetId) {
+            uploadNetId = requestedNetId;
+            break;
+          }
+          const adminNetworks = getUserNetworkIds(principal.userId);
+          if (adminNetworks.length === 1) {
+            uploadNetId = adminNetworks[0];
+          } else {
+            return withCors(req, Response.json({ ok: false, error: "network_id_required", message: "admin has 0 or ≥2 network memberships; network_id required" }, { status: 400 }));
+          }
+          break;
+        }
+        case "utok": {
+          const scope = resolveRestNetworkScope(requestedNetId, authCtx, false);
+          if (scope.denied) {
+            return withCors(req, Response.json({ ok: false, error: scope.denied }, { status: 403 }));
+          }
+          uploadNetId = requestedNetId ?? singleNetworkId(scope);
+          if (!uploadNetId) {
+            return withCors(req, Response.json({ ok: false, error: "network_id_required", message: "network_id required for a multi-network user token" }, { status: 400 }));
+          }
+          break;
+        }
+      }
+
+      if (uploadNetId !== null) {
+        const networkRow = db.get<any>("SELECT network_id FROM networks WHERE network_id = ?1", uploadNetId);
+        if (!networkRow) {
+          if (principal.kind === "admin-utok" || principal.kind === "legacy-master") {
+            return withCors(req, Response.json({ ok: false, error: "unknown_network", message: "network_id does not exist" }, { status: 400 }));
+          }
+          return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+        }
+      }
+      if (!canRestWriteNetworkAsHuman(authCtx, uploadNetId, principal.kind === "admin-utok")) {
+        return withCors(req, Response.json({ ok: false, error: "permission_denied" }, { status: 403 }));
+      }
+
+      // If no external storage is enabled for this network, instruct the client to use local /api/upload.
+      if (!uploadNetId) {
+        return withCors(req, Response.json({ ok: true, mode: "hub", max_file_bytes: MAX_UPLOAD_BYTES, upload_url: "/api/upload" }));
+      }
+      const loaded = readActiveNetworkStorageConfig(uploadNetId, { requireEnabled: true });
+      if (!loaded.ok) {
+        return withCors(req, Response.json({ ok: false, error: loaded.error, message: loaded.message }, { status: loaded.status }));
+      }
+      if (!loaded.config) {
+        return withCors(req, Response.json({ ok: true, mode: "hub", max_file_bytes: MAX_UPLOAD_BYTES, upload_url: "/api/upload" }));
+      }
+      const cfg = loaded.config;
+
+      const size = Number(body.size);
+      if (!Number.isFinite(size) || !Number.isInteger(size) || size <= 0) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_size", message: "size must be a positive integer" }, { status: 400 }));
+      }
+      if (size > cfg.max_file_bytes) {
+        return withCors(req, Response.json(
+          { ok: false, error: "payload_too_large", message: `Upload exceeds the ${cfg.max_file_bytes} byte limit`, limit_bytes: cfg.max_file_bytes, observed_bytes: size },
+          { status: 413 },
+        ));
+      }
+
+      const rawSha = typeof body.sha256 === "string" ? body.sha256.trim().toLowerCase() : "";
+      if (cfg.provider === "modelscope" && !/^[0-9a-f]{64}$/.test(rawSha)) {
+        return withCors(req, Response.json({ ok: false, error: "sha256_required", message: "ModelScope direct upload requires 64-char hex sha256" }, { status: 400 }));
+      }
+      if (rawSha && !/^[0-9a-f]{64}$/.test(rawSha)) {
+        return withCors(req, Response.json({ ok: false, error: "invalid_sha256", message: "sha256 must be 64 lowercase hex chars" }, { status: 400 }));
+      }
+
+      const name = typeof body.name === "string" ? body.name.slice(0, 255) : "";
+      const mime = typeof body.mime === "string" && body.mime.trim() ? body.mime.trim().slice(0, 100) : "application/octet-stream";
+      const fileId = generateFileId();
+      const ext = sanitizeExt(name);
+      const dateBucket = getDateBucket();
+
+      const presigned = await presignStorageUpload(cfg, {
+        networkId: uploadNetId,
+        dateBucket,
+        fileId,
+        ext,
+        size,
+        sha256: rawSha,
+        mime,
+      });
+      if (!presigned.ok) {
+        return withCors(req, Response.json({ ok: false, error: presigned.error, message: presigned.message }, { status: presigned.status }));
+      }
+
+      const idxPath = indexEntryPath(fileId);
+      if (!idxPath) {
+        return withCors(req, Response.json({ ok: false, error: "index_path_error" }, { status: 500 }));
+      }
+      try {
+        mkdirSync(pathDirname(idxPath), { recursive: true });
+        const tmpIdx = `${idxPath}.tmp`;
+        writeFileSync(tmpIdx, JSON.stringify({
+          file_id: fileId,
+          date_bucket: dateBucket,
+          ext,
+          name,
+          mime,
+          size,
+          owner: authCtx?.username ?? null,
+          owner_id: authCtx?.userId ?? null,
+          network_id: uploadNetId,
+          ...(rawPurpose === DM_FILE_SCOPE ? { scope: DM_FILE_SCOPE } : {}),
+          status: "pending",
+          storage: presigned.storage_meta,
+          uploaded_at: new Date().toISOString(),
+        }, null, 2));
+        renameSync(tmpIdx, idxPath);
+      } catch (e: any) {
+        return withCors(req, Response.json({ ok: false, error: "index_write_failed", message: e?.message?.slice(0, 200) ?? "index write failed" }, { status: 500 }));
+      }
+
+      const res = Response.json({
+        ok: true,
+        mode: "direct",
+        provider: presigned.provider,
+        file_id: fileId,
+        max_file_bytes: cfg.max_file_bytes,
+        skip_upload: presigned.skip_upload,
+        upload: presigned.upload,
+        complete_url: "/api/uploads/complete",
+      });
+      res.headers.set("Cache-Control", "no-store");
+      res.headers.set("Pragma", "no-cache");
+      return withCors(req, res);
+    }
+
+    if (url.pathname === "/api/uploads/complete" && req.method === "POST") {
+      const authErr = requireAuth(req, { allowQueryToken: false });
+      if (authErr) return withCors(req, authErr);
+
+      let body: Record<string, unknown>;
+      try {
+        const parsed = await req.json();
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+        }
+        body = parsed as Record<string, unknown>;
+      } catch {
+        return withCors(req, Response.json({ ok: false, error: "invalid_json" }, { status: 400 }));
+      }
+      const fileId = typeof body.file_id === "string" ? body.file_id.trim() : "";
+      if (!FILE_ID_REGEX.test(fileId)) {
+        return withCors(req, Response.json({ ok: false, error: "bad_file_id" }, { status: 400 }));
+      }
+      const idxPath = indexEntryPath(fileId);
+      if (!idxPath || !existsSync(idxPath)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      let entry: any;
+      try { entry = JSON.parse(readFileSync(idxPath, "utf-8")); } catch {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      if (!validateIndexEntry(entry) || !entry.storage) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+
+      const principal = resolvePrincipal(req, { allowQueryToken: false });
+      const isUploader =
+        principal.kind === "admin-utok"
+        || (principal.kind === "utok" && entry.owner_id === principal.userId)
+        || (principal.kind === "ntok" && entry.network_id === principal.boundNetworkId && entry.owner_id === principal.userId)
+        || (principal.kind === "dev-open-anon" && !entry.owner_id && !entry.network_id);
+      if (!isUploader) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+
+      if (entry.status !== "ready") {
+        if (!entry.network_id) {
+          return withCors(req, Response.json({ ok: false, error: "storage_network_missing" }, { status: 500 }));
+        }
+        const loaded = readActiveNetworkStorageConfig(entry.network_id, { requireEnabled: false });
+        if (!loaded.ok) {
+          return withCors(req, Response.json({ ok: false, error: loaded.error, message: loaded.message }, { status: loaded.status }));
+        }
+        if (!loaded.config) {
+          return withCors(req, Response.json({ ok: false, error: "storage_not_configured", message: "存储配置已清除" }, { status: 503 }));
+        }
+        const completed = await completeStorageUpload(loaded.config, {
+          fileId,
+          size: entry.size,
+          storage: entry.storage,
+        });
+        if (!completed.ok) {
+          return withCors(req, Response.json({ ok: false, error: completed.error, message: completed.message }, { status: completed.status }));
+        }
+
+        const updated = { ...entry, status: "ready", uploaded_at: new Date().toISOString() };
+        try {
+          const tmpIdx = `${idxPath}.tmp`;
+          writeFileSync(tmpIdx, JSON.stringify(updated, null, 2));
+          renameSync(tmpIdx, idxPath);
+        } catch (e: any) {
+          return withCors(req, Response.json({ ok: false, error: "index_write_failed", message: e?.message?.slice(0, 200) ?? "index write failed" }, { status: 500 }));
+        }
+      }
+
+      return withCors(req, Response.json({
+        ok: true,
+        file_id: fileId,
+        url: `/api/files/${fileId}`,
+        name: entry.name || `${fileId}${entry.ext || ""}`,
+        mime: entry.mime || "application/octet-stream",
+        size: entry.size,
+        storage_provider: entry.storage.provider,
+      }));
+    }
+
     if (url.pathname === "/api/upload" && req.method === "POST") {
       // #503 Finding 3 = Option A (lead 40be9845): every 4xx returned
       // BEFORE `req.formData()` drains the request body MUST include
@@ -5896,6 +6280,66 @@ return Bun.serve({
     // or dashboard-proxy path for /api/files MUST route through this
     // handler (via authorizeFileDownload) — do not duplicate the
     // allow-list inline, or the branches will drift.
+    // ── Direct download target resolution (0 file bytes through Hub) ──
+    // Matched BEFORE /api/files/:id so `/api/files/<id>/direct` resolves cleanly.
+    const fileDirectMatch = url.pathname.match(/^\/api\/files\/([^/]+)\/direct$/);
+    if (fileDirectMatch && req.method === "GET") {
+      const authErr = requireAuth(req, { allowQueryToken: false });
+      if (authErr) return withCors(req, authErr);
+
+      const fileId = decodeURIComponent(fileDirectMatch[1]);
+      if (!FILE_ID_REGEX.test(fileId)) {
+        return withCors(req, Response.json({ ok: false, error: "bad_file_id" }, { status: 400 }));
+      }
+      const idxPath = indexEntryPath(fileId);
+      if (!idxPath || !existsSync(idxPath)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      let entry: any;
+      try { entry = JSON.parse(readFileSync(idxPath, "utf-8")); } catch {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      if (!validateIndexEntry(entry) || entry.status === "pending") {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      if (!authorizeFileDownload(resolvePrincipal(req, { allowQueryToken: false }), normalizeEntry(entry), fileId)) {
+        return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+      if (!entry.storage) {
+        const res = Response.json({
+          ok: true,
+          mode: "hub",
+          file_id: fileId,
+          url: `/api/files/${fileId}`,
+          name: entry.name || `${fileId}${entry.ext || ""}`,
+          mime: entry.mime || "application/octet-stream",
+          size: entry.size,
+        });
+        res.headers.set("Cache-Control", "private, no-store");
+        return withCors(req, res);
+      }
+      const resolved = resolveStorageDownload(entry.network_id, entry.storage);
+      if (!resolved.ok) {
+        return withCors(req, Response.json({ ok: false, error: resolved.error, message: resolved.message }, { status: resolved.status }));
+      }
+      const res = Response.json({
+        ok: true,
+        mode: "direct",
+        provider: resolved.provider,
+        file_id: fileId,
+        url: resolved.url,
+        headers: resolved.headers,
+        expires_in: resolved.expires_in,
+        name: entry.name || `${fileId}${entry.ext || ""}`,
+        mime: entry.mime || "application/octet-stream",
+        size: entry.size,
+        sha256: entry.storage.sha256 || "",
+      });
+      res.headers.set("Cache-Control", "private, no-store");
+      res.headers.set("Pragma", "no-cache");
+      return withCors(req, res);
+    }
+
     const fileMatch = url.pathname.match(/^\/api\/files\/(.+)$/);
     if (fileMatch && (req.method === "GET" || req.method === "HEAD")) {
       // #501: file credentials must never travel in the URL. Query tokens
@@ -5922,9 +6366,9 @@ return Bun.serve({
         // (input refused at boundary, no enumeration).
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
-      if (!validateIndexEntry(entry)) {
+      if (!validateIndexEntry(entry) || entry.status === "pending") {
         // #509 副指挥 66983a19: schema-invalid index (bucket "../etc",
-        // missing fields, wrong types) is also 404 — same discipline.
+        // missing fields, wrong types) or unfinalized pending upload is 404.
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
       }
 
@@ -5935,6 +6379,83 @@ return Bun.serve({
       // status code and headers are the authoritative signal).
       if (!authorizeFileDownload(resolvePrincipal(req, { allowQueryToken: false }), normalizeEntry(entry), fileId)) {
         return withCors(req, Response.json({ ok: false, error: "not_found" }, { status: 404 }));
+      }
+
+      // Remote-stored file legacy fallback: OSS/S3/CDN → 302 redirect (0 Hub bytes);
+      // private ModelScope → transparent authenticated stream proxy for older clients.
+      if (entry.storage) {
+        const resolved = resolveStorageDownload(entry.network_id, entry.storage);
+        if (!resolved.ok) {
+          return withCors(req, Response.json({ ok: false, error: resolved.error, message: resolved.message }, { status: resolved.status }));
+        }
+        const safeFilename = (entry.name && /^[\x20-\x7e]+$/.test(entry.name))
+          ? entry.name
+          : `${fileId}${entry.ext || ""}`;
+        const hasAuthHeaders = Object.keys(resolved.headers).length > 0;
+        if (!hasAuthHeaders) {
+          if (req.method === "HEAD") {
+            return new Response(null, {
+              status: 200,
+              headers: {
+                ...corsHeaders(req),
+                "Content-Type": "application/octet-stream",
+                "Content-Length": String(entry.size),
+                "Content-Disposition": `attachment; filename="${safeFilename.replace(/"/g, "")}"`,
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+                "Accept-Ranges": "bytes",
+              },
+            });
+          }
+          return new Response(null, {
+            status: 302,
+            headers: {
+              ...corsHeaders(req),
+              Location: resolved.url,
+              "Cache-Control": "private, no-store",
+            },
+          });
+        }
+        const rangeHeader = req.headers.get("Range");
+        const upstreamHeaders: Record<string, string> = {
+          ...resolved.headers,
+          ...(rangeHeader ? { Range: rangeHeader } : {}),
+        };
+        try {
+          const upstream = await fetch(resolved.url, {
+            method: req.method,
+            headers: upstreamHeaders,
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (!upstream.ok && upstream.status !== 206) {
+            return withCors(req, Response.json(
+              { ok: false, error: "storage_upstream_error", message: `远程存储返回 HTTP ${upstream.status}` },
+              { status: upstream.status === 404 ? 404 : 502 },
+            ));
+          }
+          const headers: Record<string, string> = {
+            ...corsHeaders(req),
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="${safeFilename.replace(/"/g, "")}"`,
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+            "Accept-Ranges": "bytes",
+          };
+          const upstreamLen = upstream.headers.get("Content-Length");
+          if (upstreamLen) headers["Content-Length"] = upstreamLen;
+          else if (!rangeHeader) headers["Content-Length"] = String(entry.size);
+          const upstreamRange = upstream.headers.get("Content-Range");
+          if (upstreamRange) headers["Content-Range"] = upstreamRange;
+          return new Response(req.method === "HEAD" ? null : upstream.body, {
+            status: upstream.status,
+            headers,
+          });
+        } catch (e: any) {
+          return withCors(req, Response.json(
+            { ok: false, error: "storage_upstream_error", message: `远程存储拉取失败：${e?.message || e}` },
+            { status: 502 },
+          ));
+        }
       }
 
       // #509 defence-in-depth: pre-check date_bucket against BOTH
@@ -6182,7 +6703,10 @@ return Bun.serve({
       // duplicate `meta.attachments` the client supplied. Validation
       // matches the MCP-side schema (max 20 entries, file_id regex,
       // size cap, etc.).
-      const attachmentsResult = validateAttachments((body as any).attachments ?? (body as any).meta?.attachments);
+      const attachmentsResult = validateAttachments(
+        (body as any).attachments ?? (body as any).meta?.attachments,
+        { maxBytes: MAX_REMOTE_UPLOAD_BYTES },
+      );
       if (!attachmentsResult.ok) {
         return reject(withCors(req, Response.json({ ok: false, error: "bad_attachments", message: attachmentsResult.error }, { status: 400 })));
       }

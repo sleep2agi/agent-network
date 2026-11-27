@@ -2398,20 +2398,29 @@ const ackMessage = async (id: string) => {
 // "we need to escalate to the retry-queue" — the prior fire-and-forget
 // shape resolved to undefined in both cases and silently lost reply
 // failures (see #168 paste from designer-poster incident 2026-05-21).
-/** 回复前把本机文件链接上传到 hub(multipart /api/upload,节点 token);根目录 = 节点 cwd + 家目录。任何异常都不阻断回复。 */
+/** 回复前把本机文件链接上传(优先外部存储直传,未配置时回落 Hub /api/upload);根目录 = 节点 cwd + 家目录。任何异常都不阻断回复。 */
 async function prepareReplyAttachments(text: string): Promise<{ text: string; attachments: Array<{ type: "file"; file_id: string; name: string; mime: string; size: number }>; uploaded: number; failed: number }> {
   try {
+    const { probeHubStorageUploadLimit, uploadBufferViaStorageRelay } = await import("./runtime/direct-storage");
+    const maxBytes = AUTH_TOKEN
+      ? await probeHubStorageUploadLimit({ hubUrl: COMMHUB_URL, authToken: AUTH_TOKEN })
+      : undefined;
     return await attachLocalFileLinks(text, {
       roots: [process.cwd(), homedir()],
+      maxBytes,
       upload: async (f) => {
         const { readFileSync } = await import("node:fs");
-        const body = new FormData();
-        body.append("file", new Blob([readFileSync(f.realPath)], { type: f.mime }), f.name);
-        const res = await fetch(`${COMMHUB_URL}/api/upload`, { method: "POST", headers: AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}, body, signal: AbortSignal.timeout(60_000) });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const j: any = await res.json();
-        if (!j?.file_id) throw new Error("no file_id in upload response");
-        return { file_id: String(j.file_id), name: f.name, mime: f.mime, size: f.size };
+        const bytes = new Uint8Array(readFileSync(f.realPath));
+        const uploaded = await uploadBufferViaStorageRelay({
+          hubUrl: COMMHUB_URL,
+          authToken: AUTH_TOKEN,
+          bytes,
+          name: f.name,
+          mime: f.mime,
+          timeoutMs: 120_000,
+        });
+        if (!uploaded.ok) throw new Error(uploaded.message || uploaded.error);
+        return { file_id: uploaded.file_id, name: f.name, mime: f.mime, size: f.size };
       },
     });
   } catch (e: any) {
