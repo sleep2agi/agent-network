@@ -32,10 +32,11 @@ describe("#5332 ACP cancel", () => {
 
 describe("回合结束后撤销登记", () => {
   const src = require("node:fs").readFileSync(require("node:path").join(import.meta.dir, "../grok-build-acp/runtime.ts"), "utf8") as string;
-  test("ACP 回合在 finally 里撤销自己的登记，之后的停止得到 no_active_turn", () => {
-    const tail = src.slice(src.lastIndexOf("  } finally {\n    // 回合结束就撤销登记"));
-    expect(tail).toContain("if (activeTurn) clearActiveAcpTurn(activeTurn);");
-    expect(tail.indexOf("clearActiveAcpTurn(activeTurn)")).toBeLessThan(tail.indexOf("await client.close()"));
+  test("ACP 只在一轮 prompt 在飞时登记，prompt 结束即撤销（之后的停止得到 no_active_turn）", () => {
+    // #3922：登记点从「建好 session 就登记」改成「session/prompt 在飞期间登记、finally 撤销」——
+    // 建会话、重试退避、收尾 drain 期间来的停止不能再被当成「这一轮被取消」。
+    const promptScoped = /const activeTurn: ActiveAcpTurn = \{ client, sessionId, runtime: "acp" \};\s*setActiveAcpTurn\(activeTurn\);\s*try \{[\s\S]*?\} finally \{\s*clearActiveAcpTurn\(activeTurn\);\s*\}/;
+    expect(promptScoped.test(src)).toBe(true);
     const turn = { client: { notify: () => { throw new Error("antigravity ACP client not started or already exited"); } }, sessionId: "s", runtime: "acp" };
     __resetActiveAcpTurnForTest();
     setActiveAcpTurn(turn);
