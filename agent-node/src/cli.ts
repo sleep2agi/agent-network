@@ -7087,18 +7087,19 @@ async function processControlInstruction(msg: any): Promise<void> {
     }
     // #5332 —— claude：直接 abort 当前尝试（AbortController 已在 processWithClaude 里注册）。
     // 没有在飞的尝试 ⇒ 明确回 no_active_turn，不假装成功。
+    // 统一附带 interrupted: boolean（与 OpenCode 回执契约对齐，供 App replyProvesInterrupted 判定）。
     const out = RUNTIME === "claude"
-      ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const }) : { ok: false as const, reason: "no_active_turn" })
+      ? (currentClaudeAbort ? (currentClaudeAbort.abort(), { ok: true as const, interrupted: true as const }) : { ok: false as const, interrupted: false as const, reason: "no_active_turn" })
       : (RUNTIME === "antigravity" || (RUNTIME === "grok" && GROK_EXECUTION_MODE === "acp"))
       ? cancelActiveAcpTurn()
       : RUNTIME === "grok" || RUNTIME === "codex"
       // 这些运行方式没有停止通道：如实说不支持，不借用 OpenCode 的通道去试。
-      ? { ok: false as const, reason: "not_supported" }
+      ? { ok: false as const, interrupted: false as const, reason: "not_supported" }
       : RUNTIME === "codex-app-server"
       ? await (async () => {
           // #5332 —— codex app-server 协议有 turn/interrupt；没有在飞会话就明确回 no_active_turn
           const session = codexAppServerSessionManager.current();
-          if (!session) return { ok: false as const, reason: "no_active_turn" };
+          if (!session) return { ok: false as const, interrupted: false as const, reason: "no_active_turn" };
           return await session.bridge.interruptActiveTurn();
         })()
       : await interruptCurrentTurn({

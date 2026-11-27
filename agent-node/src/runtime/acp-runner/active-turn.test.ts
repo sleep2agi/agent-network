@@ -4,21 +4,21 @@ import { __resetActiveAcpTurnForTest, cancelActiveAcpTurn, clearActiveAcpTurn, g
 describe("#5332 ACP cancel", () => {
   beforeEach(() => { __resetActiveAcpTurnForTest(); });
   test("没有在飞回合 ⇒ no_active_turn（不假装成功）", () => {
-    expect(cancelActiveAcpTurn()).toEqual({ ok: false, reason: "no_active_turn" });
+    expect(cancelActiveAcpTurn()).toEqual({ ok: false, interrupted: false, reason: "no_active_turn" });
   });
 
-  test("有在飞回合 ⇒ 发 session/cancel 通知，带 sessionId", () => {
+  test("有在飞回合 ⇒ 发 session/cancel 通知，带 sessionId 且回 interrupted:true", () => {
     const calls: Array<{ method: string; params: any }> = [];
     const turn = { client: { notify: (method: string, params?: unknown) => { calls.push({ method, params }); } }, sessionId: "ses_1", runtime: "antigravity" };
     setActiveAcpTurn(turn);
-    expect(cancelActiveAcpTurn()).toEqual({ ok: true });
+    expect(cancelActiveAcpTurn()).toEqual({ ok: true, interrupted: true });
     expect(calls).toEqual([{ method: "session/cancel", params: { sessionId: "ses_1" } }]);
     clearActiveAcpTurn(turn);
   });
 
-  test("notify 抛错 ⇒ ok:false + 原因（不吞掉）", () => {
+  test("notify 抛错 ⇒ ok:false + interrupted:false + 原因（不吞掉）", () => {
     setActiveAcpTurn({ client: { notify: () => { throw new Error("closed"); } }, sessionId: "s", runtime: "grok-build-acp" });
-    expect(cancelActiveAcpTurn()).toEqual({ ok: false, reason: "closed" });
+    expect(cancelActiveAcpTurn()).toEqual({ ok: false, interrupted: false, reason: "closed" });
   });
 
   test("clear 只清自己那一份（不误清下一轮）", () => {
@@ -40,6 +40,6 @@ describe("回合结束后撤销登记", () => {
     __resetActiveAcpTurnForTest();
     setActiveAcpTurn(turn);
     clearActiveAcpTurn(turn);
-    expect(cancelActiveAcpTurn()).toEqual({ ok: false, reason: "no_active_turn" });
+    expect(cancelActiveAcpTurn()).toEqual({ ok: false, interrupted: false, reason: "no_active_turn" });
   });
 });
