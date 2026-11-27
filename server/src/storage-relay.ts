@@ -48,6 +48,7 @@ export const STORAGE_WRITE_ERROR_CODES = [
   "invalid_region",
   "invalid_endpoint",
   "invalid_public_base_url",
+  "public_storage_forbidden",
   "invalid_prefix",
   "invalid_max_file_bytes",
   "credential_required",
@@ -68,6 +69,7 @@ export const STORAGE_WRITE_STATUS: Record<StorageWriteErrorCode, number> = {
   invalid_region: 400,
   invalid_endpoint: 400,
   invalid_public_base_url: 400,
+  public_storage_forbidden: 400,
   invalid_prefix: 400,
   invalid_max_file_bytes: 400,
   credential_required: 400,
@@ -762,7 +764,7 @@ function toPublicConfig(
     repo_type: repoType,
     revision: row?.revision || DEFAULT_MODELSCOPE_REVISION,
     prefix: row?.prefix ?? DEFAULT_STORAGE_PREFIX,
-    public_base_url: row?.public_base_url || "",
+    public_base_url: "",
     max_file_bytes: maxBytes,
     key_hint: configured ? (row?.key_hint || "…") : "",
     can_manage: canManage,
@@ -844,7 +846,7 @@ export function readActiveNetworkStorageConfig(
       repo_type: normalizeRepoType(row.repo_type, "dataset") ?? "dataset",
       revision: row.revision || DEFAULT_MODELSCOPE_REVISION,
       prefix: row.prefix ?? DEFAULT_STORAGE_PREFIX,
-      public_base_url: row.public_base_url || "",
+      public_base_url: "",
       max_file_bytes: Math.min(
         Math.max(Number(row.max_file_bytes) || DEFAULT_REMOTE_UPLOAD_BYTES, MIN_REMOTE_UPLOAD_BYTES),
         MAX_REMOTE_UPLOAD_BYTES,
@@ -898,11 +900,16 @@ function resolveDraftConfig(
   const ep = validateStorageUrl(epRaw, "invalid_endpoint", opts);
   if (!ep.ok) return ep;
 
-  const pubRaw = typeof input.public_base_url === "string"
-    ? input.public_base_url
-    : (sameProvider ? (existing?.public_base_url || "") : "");
-  const pub = validateStorageUrl(pubRaw, "invalid_public_base_url", opts);
-  if (!pub.ok) return pub;
+  // Strictly private-only policy: public CDN / unauthenticated base URLs are forbidden.
+  const pubRaw = typeof input.public_base_url === "string" ? input.public_base_url.trim() : "";
+  if (pubRaw) {
+    return {
+      ok: false,
+      error: "invalid_public_base_url",
+      message: "出于隐私安全策略，禁止配置公开下载 / CDN 地址（仅允许私有鉴权直传）",
+    };
+  }
+  const pub = { ok: true as const, url: "" };
 
   const prefixRaw = typeof input.prefix === "string"
     ? input.prefix
@@ -1125,18 +1132,51 @@ export async function validateStorageConfigUrlsAsync(
       };
     }
   }
-  if (resolved.public_base_url) {
-    try {
-      await assertSafeStorageUrl(resolved.public_base_url, { ...opts, errorCode: "invalid_public_base_url" });
-    } catch (e: any) {
-      return {
-        ok: false,
-        error: "invalid_public_base_url",
-        message: e instanceof StorageSsrfError ? e.message : `公开访问地址不安全：${e?.message || e}`,
-      };
-    }
-  }
   return { ok: true };
+}
+
+/**
+ * Async write-time privacy gate for PUT /api/storage/config:
+ * - When enabled=true, verifies live against the provider that the target repo/bucket is STRICTLY PRIVATE
+ *   (ModelScope Visibility=1; OSS/S3 non-public ACL, non-public policy, and non-public anonymous access).
+ * - When enabled=false, skips live upstream probe so admins can always disable a relay immediately.
+ */
+export async function verifyStorageConfigPrivateAsync(
+  networkId: string,
+  input: StorageConfigWriteInput,
+  fetchFn: typeof fetch = fetch,
+  ssrfOpts: SafeStorageUrlOptions = {},
+): Promise<
+  | { ok: true }
+  | { ok: false; status: number; error: string; message: string; visibility?: "private" | "public" | "unknown" }
+> {
+  const existing = readStoredSecretRow(networkId);
+  const resolved = resolveDraftConfig(networkId, input, existing, { allowLoopback: ssrfOpts.allowLoopback });
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      status: storageWriteStatus(resolved.error),
+      error: resolved.error,
+      message: resolved.message,
+    };
+  }
+  if (!resolved.enabled) {
+    return { ok: true };
+  }
+  const testRes = await testNetworkStorageConfig(networkId, input, fetchFn, ssrfOpts);
+  if (testRes.ok) return { ok: true };
+  const errCode = testRes.error || "public_storage_forbidden";
+  const status =
+    errCode.startsWith("vault_") ? 503
+      : errCode === "network_error" ? 502
+      : 400;
+  return {
+    ok: false,
+    status,
+    error: errCode,
+    message: testRes.message,
+    ...(testRes.visibility ? { visibility: testRes.visibility } : {}),
+  };
 }
 
 /** Create or update a network's external storage relay config (owner/admin only). */
@@ -1301,7 +1341,7 @@ function resolveS3OrOssTarget(
   canonicalUri: string;
   signingRegion: string;
 } {
-  const encodedKey = encodeObjectKeyPath(objectKey);
+  const encodedKey = objectKey ? encodeObjectKeyPath(objectKey) : "";
   const rawEndpoint = endpointOverride.trim()
     || (provider === "oss"
       ? `https://oss-${region.replace(/^oss-/, "")}.aliyuncs.com`
@@ -1363,6 +1403,7 @@ export function signObjectStoragePresignedUrl(params: {
   region: string;
   endpoint?: string;
   objectKey: string;
+  extraQuery?: ReadonlyArray<readonly [string, string]>;
   accessKeyId: string;
   accessKeySecret: string;
   sessionToken?: string;
@@ -1404,9 +1445,24 @@ export function signObjectStoragePresignedUrl(params: {
         ...(params.sessionToken ? [["X-Amz-Security-Token", params.sessionToken] as [string, string]] : []),
       ];
 
-  queryParams.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (params.extraQuery) {
+    for (const [k, v] of params.extraQuery) {
+      queryParams.push([k, v]);
+    }
+  }
+
+  queryParams.sort(([aKey, aVal], [bKey, bVal]) => {
+    const ka = encodeRfc3986(aKey);
+    const kb = encodeRfc3986(bKey);
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    const va = encodeRfc3986(aVal);
+    const vb = encodeRfc3986(bVal);
+    return va < vb ? -1 : va > vb ? 1 : 0;
+  });
+  // Aliyun OSS V4 omits "=" for valueless subresource params (e.g. `?acl`),
+  // whereas AWS SigV4 requires `acl=`.
   const canonicalQuery = queryParams
-    .map(([k, v]) => `${encodeRfc3986(k)}=${encodeRfc3986(v)}`)
+    .map(([k, v]) => (isOss && v === "" ? encodeRfc3986(k) : `${encodeRfc3986(k)}=${encodeRfc3986(v)}`))
     .join("&");
 
   const canonicalHeaders = `host:${target.hostHeader}\n`;
@@ -1480,6 +1536,42 @@ async function fetchJsonSafe(
   let body: any = null;
   try { body = rawText ? JSON.parse(rawText) : null; } catch { /* non-JSON */ }
   return { ok: res.ok, status: res.status, body, rawText };
+}
+
+function isPublicBucketAclXml(provider: "oss" | "s3", xml: string): boolean {
+  if (provider === "oss") {
+    return /<Grant>\s*public-read(?:-write)?\s*<\/Grant>/i.test(xml);
+  }
+  return /https?:\/\/acs\.amazonaws\.com\/groups\/global\/(?:AllUsers|AuthenticatedUsers)/i.test(xml);
+}
+
+function isWildcardPrincipal(principal: unknown): boolean {
+  if (principal === "*") return true;
+  if (Array.isArray(principal)) return principal.some((p) => p === "*");
+  if (principal && typeof principal === "object") {
+    const aws = (principal as Record<string, unknown>).AWS;
+    if (aws === "*") return true;
+    if (Array.isArray(aws)) return aws.some((p) => p === "*");
+  }
+  return false;
+}
+
+function isPublicBucketPolicyJson(rawText: string): boolean {
+  let parsed: any;
+  try {
+    parsed = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== "object") return false;
+  const rawStatements = parsed.Statement;
+  const statements = Array.isArray(rawStatements) ? rawStatements : (rawStatements ? [rawStatements] : []);
+  for (const stmt of statements) {
+    if (!stmt || typeof stmt !== "object") continue;
+    if (String(stmt.Effect || "").toLowerCase() !== "allow") continue;
+    if (isWildcardPrincipal(stmt.Principal)) return true;
+  }
+  return false;
 }
 
 // ── Unified Provider Operations ───────────────────────────────────────────
@@ -1562,10 +1654,13 @@ export async function testNetworkStorageConfig(
 
   try {
     if (cfg.public_base_url) {
-      await assertSafeStorageUrl(cfg.public_base_url, {
-        ...ssrfOpts,
-        errorCode: "invalid_public_base_url",
-      });
+      return {
+        ok: false,
+        provider: cfg.provider,
+        latency_ms: Date.now() - started,
+        error: "invalid_public_base_url",
+        message: "出于隐私安全策略，禁止配置公开下载 / CDN 地址（仅允许私有鉴权直传）",
+      };
     }
 
     if (cfg.provider === "modelscope") {
@@ -1596,22 +1691,31 @@ export async function testNetworkStorageConfig(
       const visNum = r.body?.Data?.Visibility;
       const visibility: "private" | "public" | "unknown" =
         visNum === 1 ? "private" : visNum === 5 ? "public" : "unknown";
-      const warning = visibility === "public"
-        ? "注意：该 ModelScope 仓库当前为公开（Public），建议切换为私有（Private）仓库以保护聊天文件隐私"
-        : undefined;
+      if (visibility !== "private") {
+        return {
+          ok: false,
+          provider: "modelscope",
+          latency_ms: latency,
+          visibility,
+          error: "public_storage_forbidden",
+          message: visibility === "public"
+            ? `安全策略禁止使用公开（Public）ModelScope 仓库 ${cfg.repo_id}，请将仓库设为私有（Private）后再试`
+            : `无法确认 ModelScope 仓库 ${cfg.repo_id} 为私有（Visibility=${String(visNum ?? "unknown")}），出于隐私安全策略已拒绝启用`,
+        };
+      }
       return {
         ok: true,
         provider: "modelscope",
         latency_ms: latency,
-        visibility,
-        warning,
-        message: visibility === "private"
-          ? `连接成功：ModelScope 私有仓库 ${cfg.repo_id} 可用`
-          : `连接成功：ModelScope 仓库 ${cfg.repo_id} 可用`,
+        visibility: "private",
+        message: `连接成功：ModelScope 私有仓库 ${cfg.repo_id} 校验通过`,
       };
     }
 
-    // Aliyun OSS / AWS S3: verify bucket access via signed HEAD on a probe key (200 or 404 = valid credentials & bucket).
+    // Aliyun OSS / AWS S3:
+    // 1. Verify bucket access via signed HEAD on a probe key (200 or 404 = valid credentials & bucket).
+    // 2. Enforce strict private-only policy via anonymous list/read probes + signed ACL & policy checks.
+    const providerLabel = cfg.provider === "oss" ? "阿里云 OSS" : "AWS S3";
     const ak = cfg.secrets.access_key_id || "";
     const sk = cfg.secrets.access_key_secret || "";
     if (!ak || !sk) {
@@ -1631,21 +1735,161 @@ export async function testNetworkStorageConfig(
       expiresSeconds: 120,
     });
     const res = await safeStorageFetch(signedUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) }, fetchOpts);
-    const latency = Date.now() - started;
-    if (res.status === 200 || res.status === 404) {
+    await res.body?.cancel().catch(() => {});
+    if (res.status !== 200 && res.status !== 404) {
       return {
-        ok: true,
+        ok: false,
         provider: cfg.provider,
-        latency_ms: latency,
-        message: `连接成功：${cfg.provider === "oss" ? "阿里云 OSS" : "AWS S3"} Bucket ${cfg.bucket} 可用`,
+        latency_ms: Date.now() - started,
+        error: res.status === 403 ? "auth_failed" : "bucket_check_failed",
+        message: `${providerLabel} 校验失败（HTTP ${res.status}）`,
       };
     }
-    return {
-      ok: false,
+
+    const bucketRootUrl = resolveS3OrOssTarget(cfg.provider, cfg.bucket, cfg.region, cfg.endpoint, "").urlBase;
+    const probeObjectUrl = resolveS3OrOssTarget(cfg.provider, cfg.bucket, cfg.region, cfg.endpoint, probeKey).urlBase;
+
+    // Privacy probe A: unsigned anonymous bucket listing MUST NOT succeed.
+    const anonListRes = await safeStorageFetch(
+      `${bucketRootUrl}?list-type=2&max-keys=1`,
+      { method: "GET", signal: AbortSignal.timeout(10_000) },
+      fetchOpts,
+    );
+    await anonListRes.body?.cancel().catch(() => {});
+    if (anonListRes.status >= 200 && anonListRes.status < 300) {
+      return {
+        ok: false,
+        provider: cfg.provider,
+        latency_ms: Date.now() - started,
+        visibility: "public",
+        error: "public_storage_forbidden",
+        message: `安全策略禁止使用公开（允许匿名列举）的 ${providerLabel} Bucket（${cfg.bucket}），请将读写权限设为私有（Private）后再试`,
+      };
+    }
+
+    // Privacy probe B: unsigned anonymous HEAD on probe object MUST NOT return 2xx.
+    const anonHeadRes = await safeStorageFetch(
+      probeObjectUrl,
+      { method: "HEAD", signal: AbortSignal.timeout(10_000) },
+      fetchOpts,
+    );
+    await anonHeadRes.body?.cancel().catch(() => {});
+    if (anonHeadRes.status >= 200 && anonHeadRes.status < 300) {
+      return {
+        ok: false,
+        provider: cfg.provider,
+        latency_ms: Date.now() - started,
+        visibility: "public",
+        error: "public_storage_forbidden",
+        message: `安全策略禁止使用允许匿名读取的公开 ${providerLabel} Bucket（${cfg.bucket}），请将读写权限设为私有（Private）后再试`,
+      };
+    }
+
+    // Privacy probe C: signed GET ?acl checks OSS public-read/public-read-write & S3 AllUsers/AuthenticatedUsers.
+    const signedAclUrl = signObjectStoragePresignedUrl({
       provider: cfg.provider,
-      latency_ms: latency,
-      error: res.status === 403 ? "auth_failed" : "bucket_check_failed",
-      message: `${cfg.provider === "oss" ? "阿里云 OSS" : "AWS S3"} 校验失败（HTTP ${res.status}）`,
+      method: "GET",
+      bucket: cfg.bucket,
+      region: cfg.region,
+      endpoint: cfg.endpoint,
+      objectKey: "",
+      extraQuery: [["acl", ""]],
+      accessKeyId: ak,
+      accessKeySecret: sk,
+      sessionToken: cfg.secrets.session_token,
+      expiresSeconds: 120,
+    });
+    const aclRes = await safeStorageFetch(signedAclUrl, { method: "GET", signal: AbortSignal.timeout(10_000) }, fetchOpts);
+    if (aclRes.status === 200) {
+      const aclXml = await aclRes.text().catch(() => "");
+      if (isPublicBucketAclXml(cfg.provider, aclXml)) {
+        return {
+          ok: false,
+          provider: cfg.provider,
+          latency_ms: Date.now() - started,
+          visibility: "public",
+          error: "public_storage_forbidden",
+          message: `安全策略禁止使用公开 ACL 的 ${providerLabel} Bucket（${cfg.bucket}），请将 Bucket ACL 设为私有（Private）后再试`,
+        };
+      }
+    } else {
+      await aclRes.body?.cancel().catch(() => {});
+    }
+
+    // Privacy probe D: AWS S3 GetBucketPolicyStatus (?policyStatus) + OSS/S3-compat GetBucketPolicy (?policy).
+    let checkPolicyJson = cfg.provider === "oss";
+    if (cfg.provider === "s3") {
+      const signedPolicyStatusUrl = signObjectStoragePresignedUrl({
+        provider: "s3",
+        method: "GET",
+        bucket: cfg.bucket,
+        region: cfg.region,
+        endpoint: cfg.endpoint,
+        objectKey: "",
+        extraQuery: [["policyStatus", ""]],
+        accessKeyId: ak,
+        accessKeySecret: sk,
+        sessionToken: cfg.secrets.session_token,
+        expiresSeconds: 120,
+      });
+      const psRes = await safeStorageFetch(signedPolicyStatusUrl, { method: "GET", signal: AbortSignal.timeout(10_000) }, fetchOpts);
+      if (psRes.status === 200) {
+        const psXml = await psRes.text().catch(() => "");
+        if (/<IsPublic>\s*true\s*<\/IsPublic>/i.test(psXml)) {
+          return {
+            ok: false,
+            provider: "s3",
+            latency_ms: Date.now() - started,
+            visibility: "public",
+            error: "public_storage_forbidden",
+            message: `安全策略禁止使用公开 Bucket Policy 的 AWS S3 Bucket（${cfg.bucket}），请关闭公开访问并开启 Block Public Access 后再试`,
+          };
+        }
+      } else {
+        await psRes.body?.cancel().catch(() => {});
+        if (psRes.status === 405 || psRes.status === 501) {
+          checkPolicyJson = true;
+        }
+      }
+    }
+    if (checkPolicyJson) {
+      const signedPolicyUrl = signObjectStoragePresignedUrl({
+        provider: cfg.provider,
+        method: "GET",
+        bucket: cfg.bucket,
+        region: cfg.region,
+        endpoint: cfg.endpoint,
+        objectKey: "",
+        extraQuery: [["policy", ""]],
+        accessKeyId: ak,
+        accessKeySecret: sk,
+        sessionToken: cfg.secrets.session_token,
+        expiresSeconds: 120,
+      });
+      const polRes = await safeStorageFetch(signedPolicyUrl, { method: "GET", signal: AbortSignal.timeout(10_000) }, fetchOpts);
+      if (polRes.status === 200) {
+        const polText = await polRes.text().catch(() => "");
+        if (isPublicBucketPolicyJson(polText)) {
+          return {
+            ok: false,
+            provider: cfg.provider,
+            latency_ms: Date.now() - started,
+            visibility: "public",
+            error: "public_storage_forbidden",
+            message: `安全策略禁止使用包含匿名公开授权策略（Principal="*"）的 ${providerLabel} Bucket（${cfg.bucket}），请移除公开策略后再试`,
+          };
+        }
+      } else {
+        await polRes.body?.cancel().catch(() => {});
+      }
+    }
+
+    return {
+      ok: true,
+      provider: cfg.provider,
+      latency_ms: Date.now() - started,
+      visibility: "private",
+      message: `连接成功：${providerLabel} 私有 Bucket ${cfg.bucket} 校验通过`,
     };
   } catch (e: any) {
     if (e instanceof StorageSsrfError) {
@@ -1715,22 +1959,14 @@ export async function presignStorageUpload(
       return { ok: false, status: 502, error: "storage_upstream_error", message: `ModelScope LFS 预签名请求失败：${e?.message || e}` };
     }
 
-    if (!r.ok) {
+    if (!r.ok || r.body?.Success === false || r.body?.success === false || (typeof r.body?.Code === "number" && r.body.Code !== 200)) {
       const msg = r.body?.Message || r.body?.message || `HTTP ${r.status}`;
       return { ok: false, status: 502, error: "storage_presign_failed", message: `ModelScope LFS 预签名失败：${msg}` };
     }
     const data = r.body?.Data ?? r.body;
-    const obj = Array.isArray(data?.objects) ? data.objects[0] : null;
-    if (!obj) {
+    const objects = Array.isArray(data?.objects) ? data.objects : null;
+    if (!objects) {
       return { ok: false, status: 502, error: "storage_presign_bad_response", message: "ModelScope LFS 返回格式异常（缺少 objects）" };
-    }
-    if (obj.error) {
-      return {
-        ok: false,
-        status: 502,
-        error: "storage_presign_rejected",
-        message: `ModelScope LFS 拒绝上传：${obj.error?.message || obj.error?.code || "unknown"}`,
-      };
     }
 
     const storageMeta: RemoteStorageIndexMeta = {
@@ -1741,12 +1977,33 @@ export async function presignStorageUpload(
       repo_type: cfg.repo_type,
       revision: cfg.revision,
       endpoint: ep,
-      ...(cfg.public_base_url ? { public_base_url: cfg.public_base_url } : {}),
     };
 
-    const uploadAction = obj.actions?.upload;
+    // Live ModelScope returns `Data: { objects: [], "reused-objects": [] }` when the blob already exists in LFS.
+    if (objects.length === 0) {
+      return {
+        ok: true,
+        provider: "modelscope",
+        object_key: objectKey,
+        skip_upload: true,
+        upload: null,
+        storage_meta: storageMeta,
+      };
+    }
+
+    const obj = objects[0];
+    if (obj?.error) {
+      return {
+        ok: false,
+        status: 502,
+        error: "storage_presign_rejected",
+        message: `ModelScope LFS 拒绝上传：${obj.error?.message || obj.error?.code || "unknown"}`,
+      };
+    }
+
+    const uploadAction = obj?.actions?.upload;
     if (!uploadAction || typeof uploadAction.href !== "string" || !uploadAction.href) {
-      // LFS content-addressed dedup: blob already exists in ModelScope storage, client only needs /complete to commit pointer!
+      // Standard Git-LFS dedup: object returned without upload action; client only needs /complete to commit pointer.
       return {
         ok: true,
         provider: "modelscope",
@@ -1826,7 +2083,6 @@ export async function presignStorageUpload(
     bucket: cfg.bucket,
     region: cfg.region,
     ...(cfg.endpoint ? { endpoint: cfg.endpoint } : {}),
-    ...(cfg.public_base_url ? { public_base_url: cfg.public_base_url } : {}),
   };
 
   return {
@@ -1841,6 +2097,135 @@ export async function presignStorageUpload(
     },
     storage_meta: storageMeta,
   };
+}
+
+// Per-repo ModelScope Git commit coalescer + 429 retry queue.
+// Live ModelScope benchmarks showed concurrent `POST .../commit/master` calls collide with
+// HTTP 429 Code 10030000001 ("commit lock busy, please try again"). Serializing and
+// micro-batching actions per repo eliminates 429s and coalesces multi-file sends into one commit.
+interface QueuedModelScopeCommitItem {
+  fileId: string;
+  size: number;
+  objectKey: string;
+  sha256: string;
+  token: string;
+  fetchOpts: SafeStorageFetchOptions;
+  resolve: (res: CompleteStorageResult) => void;
+}
+interface ModelScopeCommitQueue {
+  pending: QueuedModelScopeCommitItem[];
+  flushing: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+const modelScopeCommitQueues = new Map<string, ModelScopeCommitQueue>();
+const MODELSCOPE_COMMIT_COALESCE_MS = 80;
+const MODELSCOPE_COMMIT_MAX_BATCH = 20;
+const MODELSCOPE_COMMIT_RETRY_DELAYS_MS = [600, 1200, 2400, 3500];
+
+function isCommitLockBusy(status: number, body: any): boolean {
+  if (status === 429) return true;
+  if (body?.Code === 10030000001) return true;
+  const msg = String(body?.Message || body?.message || "");
+  return /commit lock busy|try again/i.test(msg);
+}
+
+async function flushModelScopeCommitQueue(queueKey: string, commitUrl: string): Promise<void> {
+  const q = modelScopeCommitQueues.get(queueKey);
+  if (!q || q.flushing) return;
+  q.flushing = true;
+  try {
+    while (q.pending.length > 0) {
+      const batch = q.pending.splice(0, MODELSCOPE_COMMIT_MAX_BATCH);
+      const token = batch[batch.length - 1].token;
+      const fetchOpts = batch[0].fetchOpts;
+      const payload = JSON.stringify({
+        commit_message: batch.length === 1
+          ? `anet relay ${batch[0].fileId}`
+          : `anet relay batch (${batch.length} files)`,
+        actions: batch.map((item) => ({
+          action: "create",
+          path: item.objectKey,
+          type: "lfs",
+          size: item.size,
+          sha256: item.sha256,
+          content: "",
+          encoding: "",
+        })),
+      });
+
+      let outcome: CompleteStorageResult = {
+        ok: false,
+        status: 502,
+        error: "storage_commit_failed",
+        message: "ModelScope 提交失败",
+      };
+
+      for (let attempt = 0; attempt <= MODELSCOPE_COMMIT_RETRY_DELAYS_MS.length; attempt++) {
+        let r: { ok: boolean; status: number; body: any; rawText: string };
+        try {
+          r = await fetchJsonSafe(commitUrl, {
+            method: "POST",
+            headers: {
+              ...modelScopeAuthHeaders(token),
+              "Content-Type": "application/json",
+            },
+            body: payload,
+            signal: AbortSignal.timeout(25_000),
+          }, fetchOpts);
+        } catch (e: any) {
+          if (e instanceof StorageSsrfError) {
+            outcome = { ok: false, status: 400, error: e.code, message: e.message };
+          } else {
+            outcome = { ok: false, status: 502, error: "storage_commit_error", message: `ModelScope 提交失败：${e?.message || e}` };
+          }
+          break;
+        }
+
+        const failedFlag = r.body?.Success === false || r.body?.success === false
+          || (typeof r.body?.Code === "number" && r.body.Code !== 200);
+        if (r.ok && !failedFlag) {
+          outcome = { ok: true };
+          break;
+        }
+        if (isCommitLockBusy(r.status, r.body) && attempt < MODELSCOPE_COMMIT_RETRY_DELAYS_MS.length) {
+          await new Promise((res) => setTimeout(res, MODELSCOPE_COMMIT_RETRY_DELAYS_MS[attempt]));
+          continue;
+        }
+        const msg = r.body?.Message || r.body?.message || `HTTP ${r.status}`;
+        outcome = { ok: false, status: r.status === 429 ? 429 : 502, error: "storage_commit_failed", message: `ModelScope 提交文件记录失败：${msg}` };
+        break;
+      }
+
+      for (const item of batch) item.resolve(outcome);
+    }
+  } finally {
+    q.flushing = false;
+    if (q.pending.length > 0) {
+      void flushModelScopeCommitQueue(queueKey, commitUrl);
+    } else if (!q.timer) {
+      modelScopeCommitQueues.delete(queueKey);
+    }
+  }
+}
+
+function enqueueModelScopeCommit(
+  commitUrl: string,
+  item: Omit<QueuedModelScopeCommitItem, "resolve">,
+): Promise<CompleteStorageResult> {
+  const queueKey = `${commitUrl}\0${sha256Hex(item.token).slice(0, 16)}`;
+  return new Promise((resolve) => {
+    let q = modelScopeCommitQueues.get(queueKey);
+    if (!q) {
+      q = { pending: [], flushing: false, timer: null };
+      modelScopeCommitQueues.set(queueKey, q);
+    }
+    q.pending.push({ ...item, resolve });
+    if (q.flushing || q.timer) return;
+    q.timer = setTimeout(() => {
+      if (q) q.timer = null;
+      void flushModelScopeCommitQueue(queueKey, commitUrl);
+    }, MODELSCOPE_COMMIT_COALESCE_MS);
+  });
 }
 
 /** Step 3 of direct upload: commit ModelScope LFS pointer or verify S3/OSS object exists. */
@@ -1868,30 +2253,8 @@ export async function completeStorageUpload(
     const seg = modelScopeRepoSegment(repoType);
     const commitUrl = `${ep}/api/v1/repos/${seg}/${repoId}/commit/${encodeURIComponent(revision)}`;
 
-    let r: { ok: boolean; status: number; body: any; rawText: string };
     try {
-      r = await fetchJsonSafe(commitUrl, {
-        method: "POST",
-        headers: {
-          ...modelScopeAuthHeaders(token),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          commit_message: `anet relay ${params.fileId}`,
-          actions: [
-            {
-              action: "create",
-              path: params.storage.object_key,
-              type: "lfs",
-              size: params.size,
-              sha256: params.storage.sha256,
-              content: "",
-              encoding: "",
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(20_000),
-      }, fetchOpts);
+      await assertSafeStorageUrl(commitUrl, ssrfOpts);
     } catch (e: any) {
       if (e instanceof StorageSsrfError) {
         return { ok: false, status: 400, error: e.code, message: e.message };
@@ -1899,13 +2262,14 @@ export async function completeStorageUpload(
       return { ok: false, status: 502, error: "storage_commit_error", message: `ModelScope 提交失败：${e?.message || e}` };
     }
 
-    const failedFlag = r.body?.Success === false || r.body?.success === false
-      || (typeof r.body?.Code === "number" && r.body.Code !== 200);
-    if (!r.ok || failedFlag) {
-      const msg = r.body?.Message || r.body?.message || `HTTP ${r.status}`;
-      return { ok: false, status: 502, error: "storage_commit_failed", message: `ModelScope 提交文件记录失败：${msg}` };
-    }
-    return { ok: true };
+    return enqueueModelScopeCommit(commitUrl, {
+      fileId: params.fileId,
+      size: params.size,
+      objectKey: params.storage.object_key,
+      sha256: params.storage.sha256,
+      token,
+      fetchOpts,
+    });
   }
 
   // Aliyun OSS / AWS S3: verify object exists via presigned HEAD (ensures client actually uploaded bytes).
@@ -1958,27 +2322,11 @@ export async function completeStorageUpload(
   }
 }
 
-/** Resolve direct download URL (+ provider headers if private ModelScope) for an authorized download request. */
+/** Resolve authenticated/presigned direct download URL for an authorized download request (never unauthenticated public_base_url). */
 export function resolveStorageDownload(
   networkId: string | undefined,
   storage: RemoteStorageIndexMeta,
 ): ResolveDownloadResult {
-  // Public base URL override (e.g. CDN domain) needs no credentials.
-  if (storage.public_base_url) {
-    const pubCheck = validateStorageUrl(storage.public_base_url, "invalid_public_base_url");
-    if (!pubCheck.ok || !pubCheck.url) {
-      return { ok: false, status: 400, error: "storage_ssrf_blocked", message: pubCheck.ok ? "无效的公开访问地址" : pubCheck.message };
-    }
-    const base = pubCheck.url;
-    return {
-      ok: true,
-      provider: storage.provider,
-      url: `${base}/${encodeObjectKeyPath(storage.object_key)}`,
-      headers: {},
-      expires_in: PRESIGN_TTL_SECONDS,
-    };
-  }
-
   if (!networkId) {
     return { ok: false, status: 503, error: "storage_network_missing", message: "远程文件缺少网络归属" };
   }

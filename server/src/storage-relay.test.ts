@@ -22,11 +22,18 @@ let mockProviderBase = "";
 const lfsObjects = new Map<string, Uint8Array>(); // sha256 -> raw bytes
 const lfsCommits: Array<{ repo: string; revision: string; actions: any[] }> = [];
 const s3Objects = new Map<string, Uint8Array>(); // pathname -> raw bytes
-let mockRepoVisibility = 1; // 1 = Private, 5 = Public
+let mockRepoVisibility: number | undefined = 1; // 1 = Private, 5 = Public
 let mockExpectedToken = "ms_test_secret_token_9876543210";
 let mockDeduplicateOid: string | null = null;
+let mockModelScopeEmptyObjectsDedup = false;
+let mockCommitBusyFailuresRemaining = 0;
 let mockExternalUploadHost = false;
 let capturedPutAuthHeader: string | null = null;
+let mockBucketPublicList = false;
+let mockBucketPublicObjectRead = false;
+let mockBucketAclMode: "private" | "oss-public-read" | "oss-public-read-write" | "s3-all-users" | "s3-auth-users" | "forbidden" = "private";
+let mockBucketPolicyStatus: "private" | "public" | "unsupported" = "private";
+let mockBucketPolicyPublic = false;
 
 let ownerToken = "";
 let ownerNetworkId = "";
@@ -80,6 +87,13 @@ beforeAll(async () => {
         const obj = body?.objects?.[0];
         if (!obj?.oid) return Response.json({ Code: 400, Message: "missing oid" }, { status: 400 });
         if (mockDeduplicateOid === obj.oid || lfsObjects.has(obj.oid)) {
+          if (mockModelScopeEmptyObjectsDedup) {
+            return Response.json({
+              Code: 200,
+              Success: true,
+              Data: { objects: [], "reused-objects": [] },
+            });
+          }
           return Response.json({
             transfer: "basic",
             objects: [{ oid: obj.oid, size: obj.size }], // no actions.upload => dedup!
@@ -117,6 +131,13 @@ beforeAll(async () => {
         if (auth !== `Bearer ${mockExpectedToken}`) {
           return Response.json({ Code: 401, Message: "unauthorized" }, { status: 401 });
         }
+        if (mockCommitBusyFailuresRemaining > 0) {
+          mockCommitBusyFailuresRemaining--;
+          return Response.json(
+            { Code: 10030000001, Success: false, Message: "commit lock busy, please try again" },
+            { status: 429 },
+          );
+        }
         const body: any = await req.json();
         const rev = url.pathname.split("/commit/")[1] || "master";
         lfsCommits.push({ repo: url.pathname, revision: rev, actions: body.actions || [] });
@@ -143,12 +164,47 @@ beforeAll(async () => {
         });
       }
 
-      // 6. Mock S3 / OSS path-style endpoints (validates presigned query params presence)
+      // 6. Mock S3 / OSS path-style endpoints (validates presigned query params + privacy probes)
       const isSignedOss = url.searchParams.get("x-oss-signature-version") === "OSS4-HMAC-SHA256"
         && !!url.searchParams.get("x-oss-signature");
       const isSignedS3 = url.searchParams.get("X-Amz-Algorithm") === "AWS4-HMAC-SHA256"
         && !!url.searchParams.get("X-Amz-Signature");
       if (isSignedOss || isSignedS3) {
+        if (req.method === "GET" && url.searchParams.has("acl")) {
+          if (mockBucketAclMode === "forbidden") return new Response("AccessDenied", { status: 403 });
+          if (mockBucketAclMode === "oss-public-read") {
+            return new Response("<AccessControlPolicy><AccessControlList><Grant>public-read</Grant></AccessControlList></AccessControlPolicy>", { status: 200 });
+          }
+          if (mockBucketAclMode === "oss-public-read-write") {
+            return new Response("<AccessControlPolicy><AccessControlList><Grant>public-read-write</Grant></AccessControlList></AccessControlPolicy>", { status: 200 });
+          }
+          if (mockBucketAclMode === "s3-all-users") {
+            return new Response("<AccessControlPolicy><AccessControlList><Grant><Grantee><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>", { status: 200 });
+          }
+          if (mockBucketAclMode === "s3-auth-users") {
+            return new Response("<AccessControlPolicy><AccessControlList><Grant><Grantee><URI>http://acs.amazonaws.com/groups/global/AuthenticatedUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>", { status: 200 });
+          }
+          return new Response(
+            isSignedOss
+              ? "<AccessControlPolicy><AccessControlList><Grant>private</Grant></AccessControlList></AccessControlPolicy>"
+              : "<AccessControlPolicy><AccessControlList><Grant><Grantee><ID>owner-id</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>",
+            { status: 200 },
+          );
+        }
+        if (req.method === "GET" && url.searchParams.has("policyStatus")) {
+          if (mockBucketPolicyStatus === "unsupported") return new Response("NotImplemented", { status: 501 });
+          return new Response(
+            `<PolicyStatus><IsPublic>${mockBucketPolicyStatus === "public" ? "true" : "false"}</IsPublic></PolicyStatus>`,
+            { status: 200 },
+          );
+        }
+        if (req.method === "GET" && url.searchParams.has("policy")) {
+          if (!mockBucketPolicyPublic) return new Response("NoSuchBucketPolicy", { status: 404 });
+          return Response.json({
+            Version: "1",
+            Statement: [{ Effect: "Allow", Principal: ["*"], Action: ["oss:GetObject"], Resource: ["*"] }],
+          });
+        }
         if (req.method === "PUT") {
           const bytes = new Uint8Array(await req.arrayBuffer());
           s3Objects.set(url.pathname, bytes);
@@ -164,6 +220,18 @@ beforeAll(async () => {
           if (!existing) return new Response("not found", { status: 404 });
           return new Response(existing, { status: 200, headers: { "Content-Length": String(existing.byteLength) } });
         }
+      }
+
+      // 7. Unsigned S3 / OSS anonymous access probes (403 on private buckets; 200 when public mock flags enabled)
+      if (req.method === "GET" && url.searchParams.get("list-type") === "2") {
+        return mockBucketPublicList
+          ? new Response("<ListBucketResult><Name>public</Name></ListBucketResult>", { status: 200 })
+          : new Response("AccessDenied", { status: 403 });
+      }
+      if (req.method === "HEAD") {
+        return mockBucketPublicObjectRead
+          ? new Response(null, { status: 200 })
+          : new Response(null, { status: 403 });
       }
 
       return new Response("unhandled mock route", { status: 404 });
@@ -351,17 +419,78 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     expect(testPriv.visibility).toBe("private");
     expect(testPriv.warning).toBeUndefined();
 
-    // Test connection: Public repo -> ok WITH privacy warning
+    // Test connection: Public repo MUST be hard-rejected (strict private-only policy!)
     mockRepoVisibility = 5;
-    const testPub = await fetch(`${hubBase}/api/storage/test`, {
+    const testPubRes = await fetch(`${hubBase}/api/storage/test`, {
       method: "POST",
       headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ network_id: ownerNetworkId }),
-    }).then((r) => r.json() as Promise<any>);
-    expect(testPub.ok).toBe(true);
+    });
+    expect(testPubRes.status).toBe(400);
+    const testPub: any = await testPubRes.json();
+    expect(testPub.ok).toBe(false);
+    expect(testPub.error).toBe("public_storage_forbidden");
     expect(testPub.visibility).toBe("public");
-    expect(testPub.warning).toContain("公开");
+
+    // Saving enabled=true against a public ModelScope repo is also hard-rejected at write time!
+    const putPubRes = await fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: true,
+        provider: "modelscope",
+        repo_id: "owner/relay-repo",
+        endpoint: mockProviderBase,
+      }),
+    });
+    expect(putPubRes.status).toBe(400);
+    const putPub: any = await putPubRes.json();
+    expect(putPub.ok).toBe(false);
+    expect(putPub.error).toBe("public_storage_forbidden");
+
+    // Unknown visibility also fails closed
+    mockRepoVisibility = undefined;
+    const testUnknownRes = await fetch(`${hubBase}/api/storage/test`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ network_id: ownerNetworkId }),
+    });
+    expect(testUnknownRes.status).toBe(400);
+    const testUnknown: any = await testUnknownRes.json();
+    expect(testUnknown.ok).toBe(false);
+    expect(testUnknown.error).toBe("public_storage_forbidden");
+    expect(testUnknown.visibility).toBe("unknown");
+
+    // Disabling (enabled=false) always succeeds even if repo is not private/reachable
+    const disableRes = await fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: false,
+        provider: "modelscope",
+        repo_id: "owner/relay-repo",
+        endpoint: mockProviderBase,
+      }),
+    });
+    expect(disableRes.status).toBe(200);
+    expect((await disableRes.json() as any).enabled).toBe(false);
+
+    // Restore private & re-enable for subsequent E2E lifecycle tests
     mockRepoVisibility = 1;
+    const reEnableRes = await fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: true,
+        provider: "modelscope",
+        repo_id: "owner/relay-repo",
+        endpoint: mockProviderBase,
+      }),
+    });
+    expect(reEnableRes.status).toBe(200);
   });
 
   test("ModelScope full direct relay lifecycle: presign -> pending 404 -> direct PUT -> complete -> direct download + ACL + legacy proxy + dedup", async () => {
@@ -621,6 +750,255 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     expect(delRes.ok).toBe(true);
     expect(delRes.configured).toBe(false);
     expect(delRes.enabled).toBe(false);
+  });
+
+  test("strict private-only policy: blocks public_base_url, public OSS/S3 buckets (anon list/read/ACL/policy), and ignores legacy public_base_url", async () => {
+    const { signObjectStoragePresignedUrl, resolveStorageDownload } = await import("./storage-relay.js");
+
+    // 1. Subresource signing formats `?acl` per provider spec (OSS omits "=", AWS requires "=")
+    const fixedDate = new Date("2026-11-27T12:00:00Z");
+    const ossAclUrl = signObjectStoragePresignedUrl({
+      provider: "oss",
+      method: "GET",
+      bucket: "anet-private",
+      region: "oss-cn-hangzhou",
+      objectKey: "",
+      extraQuery: [["acl", ""]],
+      accessKeyId: "LTAI5tTestAccessKey",
+      accessKeySecret: "SecretValue1234567890",
+      expiresSeconds: 120,
+      now: fixedDate,
+    });
+    expect(ossAclUrl).toContain("?acl&x-oss-credential=");
+    const s3AclUrl = signObjectStoragePresignedUrl({
+      provider: "s3",
+      method: "GET",
+      bucket: "anet-private",
+      region: "us-west-2",
+      objectKey: "",
+      extraQuery: [["acl", ""]],
+      accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+      accessKeySecret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      expiresSeconds: 120,
+      now: fixedDate,
+    });
+    expect(s3AclUrl).toContain("&acl=&X-Amz-Signature=");
+
+    // 2. Any non-empty public_base_url is rejected even for valid public HTTPS CDN URLs
+    const cdnPut = await fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: true,
+        provider: "oss",
+        bucket: "anet-oss-bucket",
+        region: "oss-cn-hangzhou",
+        endpoint: mockProviderBase,
+        public_base_url: "https://cdn.example.com/public",
+        access_key_id: "LTAI5tMockAccessKeyId",
+        access_key_secret: "MockOssSecretKey999999",
+      }),
+    });
+    expect(cdnPut.status).toBe(400);
+    expect((await cdnPut.json() as any).error).toBe("invalid_public_base_url");
+
+    const putBucket = (provider: "oss" | "s3") => fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: true,
+        provider,
+        bucket: provider === "oss" ? "anet-oss-bucket" : "anet-s3-bucket",
+        region: provider === "oss" ? "oss-cn-hangzhou" : "us-west-2",
+        endpoint: mockProviderBase,
+        access_key_id: "LTAI5tMockAccessKeyId",
+        access_key_secret: "MockSecretKey999999",
+      }),
+    });
+
+    try {
+      // 3. Anonymous listable bucket -> hard-rejected on PUT & test
+      mockBucketPublicList = true;
+      const pubListPut = await putBucket("oss");
+      expect(pubListPut.status).toBe(400);
+      expect((await pubListPut.json() as any).error).toBe("public_storage_forbidden");
+      mockBucketPublicList = false;
+
+      // 4. Anonymous readable object -> hard-rejected
+      mockBucketPublicObjectRead = true;
+      const pubObjPut = await putBucket("s3");
+      expect(pubObjPut.status).toBe(400);
+      expect((await pubObjPut.json() as any).error).toBe("public_storage_forbidden");
+      mockBucketPublicObjectRead = false;
+
+      // 5. OSS public-read & public-read-write ACL -> hard-rejected
+      for (const mode of ["oss-public-read", "oss-public-read-write"] as const) {
+        mockBucketAclMode = mode;
+        const r = await putBucket("oss");
+        expect(r.status).toBe(400);
+        expect((await r.json() as any).error).toBe("public_storage_forbidden");
+      }
+      mockBucketAclMode = "private";
+
+      // 6. OSS wildcard bucket policy (Principal="*") -> hard-rejected
+      mockBucketPolicyPublic = true;
+      const ossPolPut = await putBucket("oss");
+      expect(ossPolPut.status).toBe(400);
+      expect((await ossPolPut.json() as any).error).toBe("public_storage_forbidden");
+      mockBucketPolicyPublic = false;
+
+      // 7. S3 AllUsers / AuthenticatedUsers ACL -> hard-rejected
+      for (const mode of ["s3-all-users", "s3-auth-users"] as const) {
+        mockBucketAclMode = mode;
+        const r = await putBucket("s3");
+        expect(r.status).toBe(400);
+        expect((await r.json() as any).error).toBe("public_storage_forbidden");
+      }
+      mockBucketAclMode = "private";
+
+      // 8. S3 GetBucketPolicyStatus IsPublic=true -> hard-rejected
+      mockBucketPolicyStatus = "public";
+      const s3PsPut = await putBucket("s3");
+      expect(s3PsPut.status).toBe(400);
+      expect((await s3PsPut.json() as any).error).toBe("public_storage_forbidden");
+
+      // 9. S3-compatible store returning 501 for ?policyStatus falls back to ?policy JSON
+      mockBucketPolicyStatus = "unsupported";
+      mockBucketPolicyPublic = true;
+      const s3CompatPut = await putBucket("s3");
+      expect(s3CompatPut.status).toBe(400);
+      expect((await s3CompatPut.json() as any).error).toBe("public_storage_forbidden");
+      mockBucketPolicyPublic = false;
+      mockBucketPolicyStatus = "private";
+
+      // 10. Private S3 bucket with minimal IAM (?acl returns 403) passes cleanly with visibility=private
+      mockBucketAclMode = "forbidden";
+      const privS3Put = await putBucket("s3");
+      expect(privS3Put.status).toBe(200);
+      const privS3Test: any = await fetch(`${hubBase}/api/storage/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId }),
+      }).then((r) => r.json());
+      expect(privS3Test.ok).toBe(true);
+      expect(privS3Test.visibility).toBe("private");
+
+      // 11. resolveStorageDownload ignores legacy public_base_url metadata and ALWAYS signs privately
+      const dl = resolveStorageDownload(ownerNetworkId, {
+        provider: "s3",
+        object_key: "anet-files/net/2026-11-28/legacy.png",
+        sha256: "c".repeat(64),
+        bucket: "anet-s3-bucket",
+        region: "us-west-2",
+        endpoint: mockProviderBase,
+        public_base_url: "https://cdn.example.com/should-never-be-used",
+      });
+      expect(dl.ok).toBe(true);
+      if (dl.ok) {
+        expect(dl.url).not.toContain("cdn.example.com");
+        expect(dl.url).toContain("X-Amz-Signature=");
+      }
+    } finally {
+      mockBucketPublicList = false;
+      mockBucketPublicObjectRead = false;
+      mockBucketAclMode = "private";
+      mockBucketPolicyStatus = "private";
+      mockBucketPolicyPublic = false;
+      await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      });
+    }
+  });
+
+  test("ModelScope live empty-objects dedup, concurrent commit coalescing, and 429 lock-busy retry", async () => {
+    const putMs = await fetch(`${hubBase}/api/storage/config`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        network_id: ownerNetworkId,
+        enabled: true,
+        provider: "modelscope",
+        repo_id: "owner/batch-repo",
+        endpoint: mockProviderBase,
+        api_token: mockExpectedToken,
+      }),
+    });
+    expect(putMs.status).toBe(200);
+
+    const commitsBefore = lfsCommits.length;
+    try {
+      // 1. Live ModelScope returns Data: { objects: [] } when blob already exists -> skip_upload=true
+      const existingBytes = Buffer.from("modelscope-empty-objects-dedup-bytes");
+      const existingSha = createHash("sha256").update(existingBytes).digest("hex");
+      lfsObjects.set(existingSha, new Uint8Array(existingBytes));
+      mockModelScopeEmptyObjectsDedup = true;
+
+      const dedupPresign: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          network_id: ownerNetworkId,
+          name: "dedup-empty.png",
+          mime: "image/png",
+          size: existingBytes.length,
+          sha256: existingSha,
+        }),
+      }).then((r) => r.json());
+      expect(dedupPresign.ok).toBe(true);
+      expect(dedupPresign.skip_upload).toBe(true);
+      expect(dedupPresign.upload).toBeNull();
+
+      // 2. Concurrent /complete calls coalesce into a single commit AND survive a 429 commit-lock-busy response
+      const otherBytes1 = Buffer.from("batch-item-1-bytes");
+      const otherBytes2 = Buffer.from("batch-item-2-bytes");
+      const sha1 = createHash("sha256").update(otherBytes1).digest("hex");
+      const sha2 = createHash("sha256").update(otherBytes2).digest("hex");
+      lfsObjects.set(sha1, new Uint8Array(otherBytes1));
+      lfsObjects.set(sha2, new Uint8Array(otherBytes2));
+
+      const [p1, p2] = await Promise.all([
+        fetch(`${hubBase}/api/uploads/presign`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ network_id: ownerNetworkId, name: "b1.png", mime: "image/png", size: otherBytes1.length, sha256: sha1 }),
+        }).then((r) => r.json() as Promise<any>),
+        fetch(`${hubBase}/api/uploads/presign`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ network_id: ownerNetworkId, name: "b2.png", mime: "image/png", size: otherBytes2.length, sha256: sha2 }),
+        }).then((r) => r.json() as Promise<any>),
+      ]);
+      expect(p1.ok && p2.ok).toBe(true);
+
+      // Inject 1 transient 429 Code 10030000001 ("commit lock busy") on the batched commit
+      mockCommitBusyFailuresRemaining = 1;
+      const [c0, c1, c2] = await Promise.all([dedupPresign.file_id, p1.file_id, p2.file_id].map((fileId) =>
+        fetch(`${hubBase}/api/uploads/complete`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ file_id: fileId }),
+        }).then((r) => r.json() as Promise<any>),
+      ));
+      expect(c0.ok).toBe(true);
+      expect(c1.ok).toBe(true);
+      expect(c2.ok).toBe(true);
+      expect(mockCommitBusyFailuresRemaining).toBe(0);
+
+      // All 3 concurrent completions landed in ONE coalesced Git commit!
+      const newCommits = lfsCommits.slice(commitsBefore);
+      expect(newCommits.length).toBe(1);
+      expect(newCommits[0].actions.length).toBe(3);
+    } finally {
+      mockModelScopeEmptyObjectsDedup = false;
+      mockCommitBusyFailuresRemaining = 0;
+      await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      });
+    }
   });
 });
 
