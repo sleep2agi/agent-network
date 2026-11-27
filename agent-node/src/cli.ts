@@ -1107,7 +1107,7 @@ if (fileConfig.sourceDelivery && (RUNTIME !== "opencode" || fileConfig.opencodeG
   || (opts.session && opts.session !== fileConfig.sessionId))) {
   throw Error("source_resume_cli_runtime_override_refused");
 }
-const SESSION_ID = NEW_SESSION ? "" : (
+let SESSION_ID = NEW_SESSION ? "" : (
   RUNTIME === "grok"
     ? (GROK_EXECUTION_MODE === "cli"
       ? (opts.session || fileConfig.grokCliSession || "")
@@ -3264,7 +3264,7 @@ const hotSecretsController: HotSecretController | null =
           //    so the next turn creates a fresh Codex client inheriting updated process.env.
           if (RUNTIME === "codex") {
             if (codexThread?.id) {
-              codexSdkResumeThreadId = codexThread.id;
+              SESSION_ID = codexThread.id;
               writebackSession(codexThread.id);
             }
             codexThread = null;
@@ -4266,7 +4266,6 @@ async function processWithClaude(
 // Codex Runtime
 // ══════════════════════════════════════
 let codexThread: any = null;
-let codexSdkResumeThreadId: string = SESSION_ID;
 
 // Codex instructions — balance autonomy + safety. Earlier version banned
 // all comm tools, killing multi-agent coordination. Now we allow them
@@ -4430,17 +4429,17 @@ async function processWithCodex(
     // resume 会以 unknown variant 致命退出、表现为 300s 超时。只警告,不拦。
     // #1973 —— 用 #1969 解析出的实际 codex 版本判断,不再只信硬编码的 0.133 档位集合。
     for (const line of describeUnknownReasoningEfforts(undefined, getCodexBinResolution().version)) warn(line);
-    if (codexSdkResumeThreadId) {
+    if (SESSION_ID) {
       // #1645 —— 线程有多大在 resume 前就写在 codex 的 rollout 文件里;太大的线程 resume 时
       // 上游 compaction 常失败、表现为 300s 超时。这里先说一句,不拦。
-      for (const line of describeLargeCodexThreadBeforeResume(codexSdkResumeThreadId)) warn(line);
+      for (const line of describeLargeCodexThreadBeforeResume(SESSION_ID)) warn(line);
       // Board #734 — a paginated rollout (written by codex >= 0.145) must never be
       // resumed by an older codex: its lines would lack ordinals and the thread would
       // become permanently unresumable. Refuse the turn; never touch the rollout.
-      const refusal = codexSdkResumeRefusal(codexSdkResumeThreadId);
+      const refusal = codexSdkResumeRefusal(SESSION_ID);
       if (refusal) return refusal;
-      codexThread = codex.resumeThread(codexSdkResumeThreadId, codexOpts);
-      log(`codex resumed thread: ${codexSdkResumeThreadId}`);
+      codexThread = codex.resumeThread(SESSION_ID, codexOpts);
+      log(`codex resumed thread: ${SESSION_ID}`);
     } else {
       codexThread = codex.startThread(codexOpts);
     }
@@ -4513,7 +4512,7 @@ async function processWithCodex(
     const pressure = compactionPressure(inTokens, CODEX_CONFIG.model_auto_compact_token_limit);
     if (pressure.text) log(pressure.text);
     if (codexThread?.id) {
-      codexSdkResumeThreadId = codexThread.id;
+      SESSION_ID = codexThread.id;
       writebackSession(codexThread.id);
     }
     // Auto-compact 由 Codex CLI 原生处理（model_auto_compact_token_limit=200000）

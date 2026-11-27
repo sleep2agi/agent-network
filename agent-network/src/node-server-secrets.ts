@@ -26,7 +26,7 @@ import { readNodeSecretKeys } from "./node-secret-file";
 /** Hub's node-secret request id. `nsk_` distinguishes it from `dsk_` daemon scope. */
 export const NODE_SECRET_REQUEST_RE = /^nsk_[a-f0-9-]{36}$/;
 
-export type NodeSecretAction = "list" | "put" | "delete";
+export type NodeSecretAction = "list" | "put" | "delete" | "reload";
 
 /** Fixed local identity of the node this process serves. */
 export interface NodeSecretScope {
@@ -61,12 +61,12 @@ const project = (config: any, state: any) => ({
   keys: Object.keys(state.values).sort().map((key) => ({ key, source: "node" })),
 });
 
-/** list/put/delete over the node's private store, mirroring agent-node's `operateNodeSecrets`. */
+/** list/put/delete/reload over the node's private store, mirroring agent-node's `operateNodeSecrets`. */
 export function operateNodeSecrets(nodeDir: string, input: any) {
   const config = scopedSecretJson(join(nodeDir, "config.json"));
   if (!config.node_id || !config.network_id || input?.node_id !== config.node_id || input.network_id !== config.network_id
     || input.daemon_node_id !== null || !NODE_SECRET_REQUEST_RE.test(input.request_id)
-    || !["list", "put", "delete"].includes(input.action)) throw Error("invalid_secret_request");
+    || !["list", "put", "delete", "reload"].includes(input.action)) throw Error("invalid_secret_request");
   const path = join(nodeDir, "node-secrets.json");
   const read = () => {
     // Validate real permissions, durable identity and values before any write.
@@ -74,7 +74,7 @@ export function operateNodeSecrets(nodeDir: string, input: any) {
     return existsSync(path) ? { ...scopedSecretJson(path), values } : { schema: 1,
       node_id: config.node_id, network_id: config.network_id, revision: 0, values };
   };
-  if (input.action === "list") return project(config, read());
+  if (input.action === "list" || input.action === "reload") return project(config, read());
   if (!validScopedSecretKey(input.key) || !Number.isSafeInteger(input.revision) || input.revision < 0
     // `"\\0"` (literal backslash-zero) is intentionally byte-for-byte what
     // agent-node checks — parity matters more than "fixing" it here. The Hub

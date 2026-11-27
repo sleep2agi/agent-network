@@ -25,7 +25,7 @@ export function operateNodeSecrets(nodeDir: string, input: any) {
     revision: s.revision, activation, keys: Object.keys(s.values).sort().map(key=>({key,source:'node'}))});
   if (input.action === 'list' || input.action === 'reload') return project(read());
   if (!validScopedSecretKey(input.key) || !Number.isSafeInteger(input.revision) || input.revision < 0
-    || (input.action === 'put' && (typeof input.value !== 'string' || !input.value || Buffer.byteLength(input.value) > 8192 || input.value.includes('\0')))) throw Error('invalid_secret_input');
+    || (input.action === 'put' && (typeof input.value !== 'string' || !input.value || Buffer.byteLength(input.value) > 8192 || input.value.includes('\\0')))) throw Error('invalid_secret_input');
   const lock = join(nodeDir, '.node-secrets.lock');
   const fd = openSync(lock, 'wx', 0o600);
   try {

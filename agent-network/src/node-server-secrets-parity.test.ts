@@ -39,7 +39,7 @@ const req = (action: string, revision?: number, extra: Record<string, unknown> =
   daemon_node_id: null,
   node_id: NODE_ID,
   action,
-  ...(action === "list" ? {} : { key: "TEST_VENDOR_KEY", revision, ...(action === "put" ? { value: VALUE } : {}) }),
+  ...(action === "list" || action === "reload" ? {} : { key: "TEST_VENDOR_KEY", revision, ...(action === "put" ? { value: VALUE } : {}) }),
   expires_at: Date.now() + 60_000,
   ...extra,
 });
@@ -75,6 +75,7 @@ describe("channel-server ↔ agent-node node-secret parity", () => {
     expect(assertSame("exact replay", firstPut)).toEqual(assertSame("exact replay again", firstPut));
 
     assertSame("list after put", req("list", 0));
+    assertSame("reload after put", req("reload", 0));
     expect(assertSame("put second key", req("put", 1, { key: "ALPHA_KEY", value: "a" }))).toEqual({
       ok: true,
       value: {
