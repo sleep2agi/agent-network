@@ -45,6 +45,8 @@ import {
   type CodexBinResolution,
 } from "./runtime/codex-bin";
 import { accessSync, constants as fsConstants } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { resolveAcpUploadMcpEntry } from "./runtime/acp-upload-mcp-entry";
 import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
 import { AcpTurnCancelledError, isTurnAbort, UserStoppedTurn } from "./runtime/user-stopped-turn";
@@ -451,7 +453,7 @@ if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embeddedAgentNodeVersion)) {
 } else {
   try {
     // Try relative to the script location (works for both dev and npm install)
-    const scriptDir = new URL(".", import.meta.url).pathname;
+    const scriptDir = fileURLToPath(new URL(".", import.meta.url));
     for (const rel of ["../package.json", "../../package.json"]) {
       try {
         const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
@@ -5357,6 +5359,7 @@ async function processWithAntigravity(
     commhubUrl: COMMHUB_URL,
     alias: ALIAS,
     authToken: AUTH_TOKEN || undefined,
+    ...resolveAcpUploadMcpEntry(import.meta.url, { bunBin: process.env.BUN_BIN }),
     nodeDir: typeof NODE_DIR === "string" ? NODE_DIR : undefined,
   });
 
@@ -5505,21 +5508,13 @@ async function processWithGrok(
   // ALIAS/AUTH_TOKEN/COMMHUB_URL reads stay here; the helper is pure.
   const { buildGrokMcpServers } = await import("./goals/loops-grok-wire");
   // #693 — local stdio MCP: controlled path → Hub file_id (cross-host upload bridge)
-  const uploadMcpHere = new URL(".", import.meta.url).pathname;
-  const uploadMcpEntry = [
-    join(uploadMcpHere, "upload-file-mcp-stdio.js"),
-    join(uploadMcpHere, "upload-file-mcp-stdio.ts"),
-  ].find((c) => existsSync(c));
   const grokMcpServers = buildGrokMcpServers({
     commhubUrl: COMMHUB_URL,
     alias: ALIAS,
     authToken: AUTH_TOKEN || undefined,
     loopsUrl: process.env.LOOPS_MCP_URL,
     loopsToken: process.env.LOOPS_MCP_TOKEN,
-    uploadMcpCommand: uploadMcpEntry
-      ? (uploadMcpEntry.endsWith(".ts") ? (process.env.BUN_BIN || "bun") : process.execPath)
-      : undefined,
-    uploadMcpArgs: uploadMcpEntry ? [uploadMcpEntry] : undefined,
+    ...resolveAcpUploadMcpEntry(import.meta.url, { bunBin: process.env.BUN_BIN }),
     nodeDir: typeof NODE_DIR === "string" ? NODE_DIR : undefined,
   });
 
@@ -7854,7 +7849,7 @@ interface FeishuBridgeEnvelope {
 }
 
 function resolveFeishuWorkerPath(): string | null {
-  const here = new URL(".", import.meta.url).pathname;
+  const here = fileURLToPath(new URL(".", import.meta.url));
   const candidates = computeFeishuWorkerCandidates({
     here,
     envOverride: process.env.ANET_FEISHU_WORKER_PATH,

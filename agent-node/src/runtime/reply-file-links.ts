@@ -7,7 +7,8 @@
  * `/api/files/<id>` 并附上 attachments;上传不了的在链接后注明原因,不吞。纯逻辑在此,上传由调用方注入。
  */
 import { realpathSync, statSync } from "node:fs";
-import { basename, extname, isAbsolute, resolve, sep } from "node:path";
+import { basename, extname, posix, sep, win32 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const REPLY_FILE_MAX_BYTES = 12 * 1024 * 1024; // = hub MAX_UPLOAD_BYTES
 export const REPLY_FILE_MAX_COUNT = 6;
@@ -21,17 +22,20 @@ export interface LocalFileLink {
   readonly path: string;
 }
 
-/** 只认 markdown 链接且目标像本机绝对路径:`/…` 或 `file:///…`。http(s)、/api/files/… 不算。 */
-export function findLocalFileLinks(text: string): LocalFileLink[] {
+/** 只认 markdown 链接且目标像本机绝对路径。http(s)、/api/files/… 不算。 */
+export function findLocalFileLinks(text: string, windows = process.platform === "win32"): LocalFileLink[] {
   const out: LocalFileLink[] = [];
   const re = /\[([^\]\n]{1,200})\]\(([^()\s]+)\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const target = m[2];
     let path: string | null = null;
-    if (target.startsWith("file:///")) path = decodeURIComponent(target.slice("file://".length));
-    else if (target.startsWith("/") && !target.startsWith("/api/") && !target.startsWith("//")) path = target;
-    if (!path || !isAbsolute(path)) continue;
+    if (/^file:\/\/\/[^/\\]/i.test(target)) {
+      try { path = fileURLToPath(target, { windows }); } catch { continue; }
+    } else if (windows ? /^[a-z]:[/\\]/i.test(target) : target.startsWith("/") && !target.startsWith("/api/") && !target.startsWith("//")) {
+      path = target;
+    }
+    if (!path || path.includes("\0") || !(windows ? win32 : posix).isAbsolute(path)) continue;
     out.push({ raw: m[0], label: m[1], target, path });
     if (out.length >= REPLY_FILE_MAX_COUNT) break;
   }
