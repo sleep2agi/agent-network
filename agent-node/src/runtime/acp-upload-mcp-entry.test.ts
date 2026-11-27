@@ -21,12 +21,17 @@ test("source mode uses bun; a missing entry never advertises a broken tool", () 
   expect(resolveAcpUploadMcpEntry(url, { windows: false, exists: () => false })).toEqual({});
 });
 
+test("the shared upload entry is resolved once at module scope with import.meta", () => {
+  const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
+  expect(cli).toMatch(/const ACP_UPLOAD_MCP_ENTRY = resolveAcpUploadMcpEntry\(import\.meta\.url,/);
+});
+
 test("both ACP runtime dispatchers use the same upload registration", () => {
   const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
   for (const runtime of ["processWithAntigravity", "processWithGrok"]) {
     const start = cli.indexOf(`async function ${runtime}(`);
     expect(start).toBeGreaterThan(-1);
     const body = cli.slice(start).split(/\r?\nasync function /)[0];
-    expect(body).toMatch(/buildGrokMcpServers\(\{[^}]*\.\.\.resolveAcpUploadMcpEntry\(import\.meta\.url,/);
+    expect(body).toMatch(/buildGrokMcpServers\(\{[^}]*\.\.\.ACP_UPLOAD_MCP_ENTRY,/);
   }
 });

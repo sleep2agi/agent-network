@@ -923,6 +923,10 @@ if (RUNTIME === "opencode") {
   else process.env.ANET_OPENCODE_SAFE_BASE = INITIAL_OPENCODE_SAFE_BASE;
 }
 
+// #5757: resolve the ACP upload MCP entry once at module scope — the #730 test transpiles
+// the per-runtime functions via new Function(), where `import.meta` is not valid.
+const ACP_UPLOAD_MCP_ENTRY = resolveAcpUploadMcpEntry(import.meta.url, { bunBin: process.env.BUN_BIN });
+
 const COMMHUB_URL = opts.url || opts.hub || process.env.COMMHUB_URL || fileConfig.hub || "http://127.0.0.1:9200";
 // Mutable for runtimes that support hot model switching (antigravity-acp updates
 // MODEL in place on config_update without restarting or losing in-process session).
@@ -5359,7 +5363,7 @@ async function processWithAntigravity(
     commhubUrl: COMMHUB_URL,
     alias: ALIAS,
     authToken: AUTH_TOKEN || undefined,
-    ...resolveAcpUploadMcpEntry(import.meta.url, { bunBin: process.env.BUN_BIN }),
+    ...ACP_UPLOAD_MCP_ENTRY,
     nodeDir: typeof NODE_DIR === "string" ? NODE_DIR : undefined,
   });
 
@@ -5514,7 +5518,7 @@ async function processWithGrok(
     authToken: AUTH_TOKEN || undefined,
     loopsUrl: process.env.LOOPS_MCP_URL,
     loopsToken: process.env.LOOPS_MCP_TOKEN,
-    ...resolveAcpUploadMcpEntry(import.meta.url, { bunBin: process.env.BUN_BIN }),
+    ...ACP_UPLOAD_MCP_ENTRY,
     nodeDir: typeof NODE_DIR === "string" ? NODE_DIR : undefined,
   });
 
