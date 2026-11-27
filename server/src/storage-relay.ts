@@ -1033,6 +1033,13 @@ function resolveDraftConfig(
     return { ok: false, error: "invalid_bucket", message: "请填写有效的 Bucket 名称（小写字母、数字、连字符）" };
   }
   bucket = validBucket;
+  if (provider === "s3" && isAwsS3AccelerateEndpoint(ep.url) && bucket.includes(".")) {
+    return {
+      ok: false,
+      error: "invalid_bucket",
+      message: "AWS S3 传输加速（s3-accelerate.amazonaws.com）要求 Bucket 名称不能包含点号（.）",
+    };
+  }
 
   const rawRegion = typeof input.region === "string"
     ? input.region
@@ -1122,14 +1129,32 @@ export async function validateStorageConfigUrlsAsync(
   if (!resolved.ok) return resolved;
 
   if (resolved.endpoint) {
-    try {
-      await assertSafeStorageUrl(resolved.endpoint, { ...opts, errorCode: "invalid_endpoint" });
-    } catch (e: any) {
-      return {
-        ok: false,
-        error: "invalid_endpoint",
-        message: e instanceof StorageSsrfError ? e.message : `接口地址不安全：${e?.message || e}`,
-      };
+    const urlsToCheck: string[] = [];
+    if (resolved.provider === "oss" || resolved.provider === "s3") {
+      // Validate the effective virtual-host / path-style request URL so wildcard-only accelerate
+      // endpoints (e.g. s3-accelerate.amazonaws.com, oss-accelerate.aliyuncs.com) resolve <bucket>.<host>.
+      urlsToCheck.push(
+        resolveS3OrOssTarget(resolved.provider, resolved.bucket, resolved.region, resolved.endpoint, "").urlBase,
+      );
+      if (isObjectStorageAccelerateEndpoint(resolved.provider, resolved.endpoint)) {
+        urlsToCheck.push(
+          resolveS3OrOssTarget(resolved.provider, resolved.bucket, resolved.region, "", "").urlBase,
+        );
+      }
+    } else {
+      urlsToCheck.push(resolved.endpoint);
+    }
+
+    for (const targetUrl of urlsToCheck) {
+      try {
+        await assertSafeStorageUrl(targetUrl, { ...opts, errorCode: "invalid_endpoint" });
+      } catch (e: any) {
+        return {
+          ok: false,
+          error: "invalid_endpoint",
+          message: e instanceof StorageSsrfError ? e.message : `接口地址不安全：${e?.message || e}`,
+        };
+      }
     }
   }
   return { ok: true };
@@ -1329,6 +1354,38 @@ function formatAmzDate(now: Date): { amzDate: string; dateStamp: string } {
   return { amzDate: iso, dateStamp: iso.slice(0, 8) };
 }
 
+export function isAwsS3AccelerateEndpoint(endpoint: string): boolean {
+  const raw = endpoint.trim();
+  if (!raw) return false;
+  try {
+    const host = normalizeHostForCheck(new URL(raw).hostname);
+    return host === "s3-accelerate.amazonaws.com"
+      || host.endsWith(".s3-accelerate.amazonaws.com")
+      || host === "s3-accelerate.dualstack.amazonaws.com"
+      || host.endsWith(".s3-accelerate.dualstack.amazonaws.com");
+  } catch {
+    return false;
+  }
+}
+
+export function isOssAccelerateEndpoint(endpoint: string): boolean {
+  const raw = endpoint.trim();
+  if (!raw) return false;
+  try {
+    const host = normalizeHostForCheck(new URL(raw).hostname);
+    return host === "oss-accelerate.aliyuncs.com"
+      || host.endsWith(".oss-accelerate.aliyuncs.com")
+      || host === "oss-accelerate-overseas.aliyuncs.com"
+      || host.endsWith(".oss-accelerate-overseas.aliyuncs.com");
+  } catch {
+    return false;
+  }
+}
+
+function isObjectStorageAccelerateEndpoint(provider: "oss" | "s3", endpoint: string): boolean {
+  return provider === "s3" ? isAwsS3AccelerateEndpoint(endpoint) : isOssAccelerateEndpoint(endpoint);
+}
+
 function resolveS3OrOssTarget(
   provider: "oss" | "s3",
   bucket: string,
@@ -1348,7 +1405,11 @@ function resolveS3OrOssTarget(
       : `https://s3.${region}.amazonaws.com`);
   const parsed = new URL(rawEndpoint);
   const hostLower = parsed.hostname.toLowerCase();
-  const usePathStyle = isLoopbackHost(hostLower) || isIpLiteral(hostLower) || parsed.pathname.length > 1;
+  // Cloudflare R2 (*.r2.cloudflarestorage.com) uses path-style addressing so single-level TLS wildcard certs match.
+  const usePathStyle = isLoopbackHost(hostLower)
+    || isIpLiteral(hostLower)
+    || parsed.pathname.length > 1
+    || (provider === "s3" && hostLower.endsWith(".r2.cloudflarestorage.com"));
 
   if (provider === "oss") {
     const ossRegion = region.replace(/^oss-/, "");
@@ -1713,9 +1774,13 @@ export async function testNetworkStorageConfig(
     }
 
     // Aliyun OSS / AWS S3:
-    // 1. Verify bucket access via signed HEAD on a probe key (200 or 404 = valid credentials & bucket).
+    // 1. Verify data-plane access via signed HEAD on a probe key (200 or 404 = valid credentials & bucket).
     // 2. Enforce strict private-only policy via anonymous list/read probes + signed ACL & policy checks.
+    //    For Transfer Acceleration endpoints (s3-accelerate / oss-accelerate), control-plane probes
+    //    target the standard regional endpoint so bucket ACL/policyStatus checks never fail or degrade.
     const providerLabel = cfg.provider === "oss" ? "阿里云 OSS" : "AWS S3";
+    const isAccelerate = isObjectStorageAccelerateEndpoint(cfg.provider, cfg.endpoint);
+    const controlEndpoint = isAccelerate ? "" : cfg.endpoint;
     const ak = cfg.secrets.access_key_id || "";
     const sk = cfg.secrets.access_key_secret || "";
     if (!ak || !sk) {
@@ -1737,6 +1802,17 @@ export async function testNetworkStorageConfig(
     const res = await safeStorageFetch(signedUrl, { method: "HEAD", signal: AbortSignal.timeout(15_000) }, fetchOpts);
     await res.body?.cancel().catch(() => {});
     if (res.status !== 200 && res.status !== 404) {
+      if (isAccelerate && (res.status === 400 || res.status === 403)) {
+        return {
+          ok: false,
+          provider: cfg.provider,
+          latency_ms: Date.now() - started,
+          error: res.status === 403 ? "auth_failed" : "bucket_check_failed",
+          message: cfg.provider === "s3"
+            ? `AWS S3 传输加速校验失败（HTTP ${res.status}）：请确认已在 AWS S3 控制台为 Bucket "${cfg.bucket}" 开启「Transfer Acceleration（传输加速）」，且 AccessKey 与 Region（${cfg.region}）正确`
+            : `阿里云 OSS 传输加速校验失败（HTTP ${res.status}）：请确认已在阿里云 OSS 控制台为 Bucket "${cfg.bucket}" 开启「传输加速」，且 AccessKey 与地域（${cfg.region}）正确`,
+        };
+      }
       return {
         ok: false,
         provider: cfg.provider,
@@ -1746,8 +1822,8 @@ export async function testNetworkStorageConfig(
       };
     }
 
-    const bucketRootUrl = resolveS3OrOssTarget(cfg.provider, cfg.bucket, cfg.region, cfg.endpoint, "").urlBase;
-    const probeObjectUrl = resolveS3OrOssTarget(cfg.provider, cfg.bucket, cfg.region, cfg.endpoint, probeKey).urlBase;
+    const bucketRootUrl = resolveS3OrOssTarget(cfg.provider, cfg.bucket, cfg.region, controlEndpoint, "").urlBase;
+    const probeObjectUrl = resolveS3OrOssTarget(cfg.provider, cfg.bucket, cfg.region, controlEndpoint, probeKey).urlBase;
 
     // Privacy probe A: unsigned anonymous bucket listing MUST NOT succeed.
     const anonListRes = await safeStorageFetch(
@@ -1791,7 +1867,7 @@ export async function testNetworkStorageConfig(
       method: "GET",
       bucket: cfg.bucket,
       region: cfg.region,
-      endpoint: cfg.endpoint,
+      endpoint: controlEndpoint,
       objectKey: "",
       extraQuery: [["acl", ""]],
       accessKeyId: ak,
@@ -1824,7 +1900,7 @@ export async function testNetworkStorageConfig(
         method: "GET",
         bucket: cfg.bucket,
         region: cfg.region,
-        endpoint: cfg.endpoint,
+        endpoint: controlEndpoint,
         objectKey: "",
         extraQuery: [["policyStatus", ""]],
         accessKeyId: ak,
@@ -1858,7 +1934,7 @@ export async function testNetworkStorageConfig(
         method: "GET",
         bucket: cfg.bucket,
         region: cfg.region,
-        endpoint: cfg.endpoint,
+        endpoint: controlEndpoint,
         objectKey: "",
         extraQuery: [["policy", ""]],
         accessKeyId: ak,
@@ -1889,7 +1965,9 @@ export async function testNetworkStorageConfig(
       provider: cfg.provider,
       latency_ms: Date.now() - started,
       visibility: "private",
-      message: `连接成功：${providerLabel} 私有 Bucket ${cfg.bucket} 校验通过`,
+      message: isAccelerate
+        ? `连接成功：${providerLabel} 私有 Bucket ${cfg.bucket} 校验通过（已启用传输加速）`
+        : `连接成功：${providerLabel} 私有 Bucket ${cfg.bucket} 校验通过`,
     };
   } catch (e: any) {
     if (e instanceof StorageSsrfError) {

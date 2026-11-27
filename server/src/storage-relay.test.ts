@@ -331,6 +331,177 @@ describe("SigV4 Presigned URL signing (Aliyun OSS & AWS S3)", () => {
     expect(u.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
     expect(urlStr).not.toContain("wJalrXUtnFEMI");
   });
+
+  test("supports AWS S3 & Aliyun OSS Transfer Acceleration (virtual-host DNS + regional control-plane probes) and Cloudflare R2 path-style", async () => {
+    const {
+      signObjectStoragePresignedUrl,
+      validateStorageConfigUrlsAsync,
+      testNetworkStorageConfig,
+    } = await import("./storage-relay.js");
+
+    // 1. AWS S3 Transfer Acceleration presigns <bucket>.s3-accelerate.amazonaws.com with bucket's real signing region
+    const fixedDate = new Date("2026-11-28T06:00:00Z");
+    const s3AccPut = signObjectStoragePresignedUrl({
+      provider: "s3",
+      method: "PUT",
+      bucket: "anet-private-usw1",
+      region: "us-west-1",
+      endpoint: "https://s3-accelerate.amazonaws.com",
+      objectKey: "anet-files/net_1/2026-11-28/vid.mp4",
+      accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+      accessKeySecret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      expiresSeconds: 900,
+      now: fixedDate,
+    });
+    const uAcc = new URL(s3AccPut);
+    expect(uAcc.hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+    expect(uAcc.searchParams.get("X-Amz-Credential")).toBe("AKIAIOSFODNN7EXAMPLE/20261128/us-west-1/s3/aws4_request");
+
+    // 2. Cloudflare R2 uses path-style addressing so *.r2.cloudflarestorage.com TLS cert matches cleanly
+    const r2Put = signObjectStoragePresignedUrl({
+      provider: "s3",
+      method: "PUT",
+      bucket: "anet-r2-private",
+      region: "auto",
+      endpoint: "https://acct123456.r2.cloudflarestorage.com",
+      objectKey: "anet-files/net_1/2026-11-28/pic.png",
+      accessKeyId: "R2ACCESSKEY1234",
+      accessKeySecret: "R2SECRETKEY987654321",
+      expiresSeconds: 900,
+      now: fixedDate,
+    });
+    const uR2 = new URL(r2Put);
+    expect(uR2.hostname).toBe("acct123456.r2.cloudflarestorage.com");
+    expect(uR2.pathname).toBe("/anet-r2-private/anet-files/net_1/2026-11-28/pic.png");
+
+    // 3. Bucket with dots is rejected for AWS S3 Transfer Acceleration (wildcard TLS incompatibility)
+    const dotBucket = await validateStorageConfigUrlsAsync(
+      ownerNetworkId,
+      {
+        provider: "s3",
+        bucket: "anet.dotted.bucket",
+        region: "us-west-1",
+        endpoint: "https://s3-accelerate.amazonaws.com",
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        access_key_secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      },
+      { allowLoopback: false, lookupFn: async () => [{ address: "52.219.120.1", family: 4 }] },
+    );
+    expect(dotBucket.ok).toBe(false);
+    if (!dotBucket.ok) expect(dotBucket.error).toBe("invalid_bucket");
+
+    // 4. Write-time DNS SSRF validation resolves <bucket>.s3-accelerate.amazonaws.com (NOT bare apex which has no DNS record!)
+    const lookedUpHosts: string[] = [];
+    const accelDnsOk = await validateStorageConfigUrlsAsync(
+      ownerNetworkId,
+      {
+        provider: "s3",
+        bucket: "anet-private-usw1",
+        region: "us-west-1",
+        endpoint: "https://s3-accelerate.amazonaws.com",
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        access_key_secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      },
+      {
+        allowLoopback: false,
+        lookupFn: async (host) => {
+          lookedUpHosts.push(host);
+          if (host === "s3-accelerate.amazonaws.com") {
+            throw Object.assign(new Error("ENOTFOUND bare apex"), { code: "ENOTFOUND" });
+          }
+          return [{ address: "52.219.120.1", family: 4 }];
+        },
+      },
+    );
+    expect(accelDnsOk.ok).toBe(true);
+    expect(lookedUpHosts).toContain("anet-private-usw1.s3-accelerate.amazonaws.com");
+    expect(lookedUpHosts).toContain("anet-private-usw1.s3.us-west-1.amazonaws.com");
+    expect(lookedUpHosts).not.toContain("s3-accelerate.amazonaws.com");
+
+    // Same for Aliyun OSS Transfer Acceleration (bare oss-accelerate.aliyuncs.com has no DNS record)
+    const ossHosts: string[] = [];
+    const ossDnsOk = await validateStorageConfigUrlsAsync(
+      ownerNetworkId,
+      {
+        provider: "oss",
+        bucket: "anet-private-oss",
+        region: "cn-hongkong",
+        endpoint: "https://oss-accelerate.aliyuncs.com",
+        access_key_id: "LTAI5tMockAccessKeyId",
+        access_key_secret: "MockOssSecretKey999999",
+      },
+      {
+        allowLoopback: false,
+        lookupFn: async (host) => {
+          ossHosts.push(host);
+          if (host === "oss-accelerate.aliyuncs.com") {
+            throw Object.assign(new Error("ENOTFOUND bare apex"), { code: "ENOTFOUND" });
+          }
+          return [{ address: "47.88.1.1", family: 4 }];
+        },
+      },
+    );
+    expect(ossDnsOk.ok).toBe(true);
+    expect(ossHosts).toContain("anet-private-oss.oss-accelerate.aliyuncs.com");
+    expect(ossHosts).toContain("anet-private-oss.oss-cn-hongkong.aliyuncs.com");
+
+    // 5. testNetworkStorageConfig sends data-plane HEAD to s3-accelerate, but privacy probes (?acl/?policyStatus/anon) to regional s3.<region>
+    const hitUrls: string[] = [];
+    const accelFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(url));
+      hitUrls.push(`${init?.method || "GET"} ${u.hostname}${u.search ? "?" + [...u.searchParams.keys()].sort().join(",") : ""}`);
+      if (u.hostname === "anet-private-usw1.s3-accelerate.amazonaws.com" && init?.method === "HEAD") {
+        return new Response(null, { status: 404 });
+      }
+      if (u.hostname === "anet-private-usw1.s3.us-west-1.amazonaws.com") {
+        if (u.searchParams.has("acl")) {
+          return new Response("<AccessControlPolicy><AccessControlList><Grant><Grantee><ID>owner</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>", { status: 200 });
+        }
+        if (u.searchParams.has("policyStatus")) {
+          return new Response("<PolicyStatus><IsPublic>false</IsPublic></PolicyStatus>", { status: 200 });
+        }
+        return new Response("AccessDenied", { status: 403 });
+      }
+      return new Response("unexpected host", { status: 400 });
+    }) as unknown as typeof fetch;
+
+    const testAcc = await testNetworkStorageConfig(
+      ownerNetworkId,
+      {
+        provider: "s3",
+        bucket: "anet-private-usw1",
+        region: "us-west-1",
+        endpoint: "https://s3-accelerate.amazonaws.com",
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        access_key_secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      },
+      accelFetch,
+      { allowLoopback: false, lookupFn: async () => [{ address: "52.219.120.1", family: 4 }] },
+    );
+    expect(testAcc.ok).toBe(true);
+    expect(testAcc.visibility).toBe("private");
+    expect(testAcc.message).toContain("传输加速");
+    expect(hitUrls.some((h) => h.startsWith("HEAD anet-private-usw1.s3-accelerate.amazonaws.com"))).toBe(true);
+    expect(hitUrls.some((h) => h.includes("anet-private-usw1.s3.us-west-1.amazonaws.com") && h.includes("acl"))).toBe(true);
+    expect(hitUrls.some((h) => h.includes("anet-private-usw1.s3.us-west-1.amazonaws.com") && h.includes("policyStatus"))).toBe(true);
+
+    // 6. Unconfigured Transfer Acceleration (HTTP 400 from accelerate endpoint) returns actionable Chinese guidance
+    const unconfiguredAcc = await testNetworkStorageConfig(
+      ownerNetworkId,
+      {
+        provider: "s3",
+        bucket: "anet-private-usw1",
+        region: "us-west-1",
+        endpoint: "https://s3-accelerate.amazonaws.com",
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        access_key_secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      },
+      (async () => new Response(null, { status: 400 })) as unknown as typeof fetch,
+      { allowLoopback: false, lookupFn: async () => [{ address: "52.219.120.1", family: 4 }] },
+    );
+    expect(unconfiguredAcc.ok).toBe(false);
+    expect(unconfiguredAcc.message).toContain("Transfer Acceleration");
+  });
 });
 
 describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
