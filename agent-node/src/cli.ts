@@ -7455,7 +7455,8 @@ async function processInbox() {
         const replyText = daemonProgramReply(ALIAS);
         log(`← [${from}] (host_supervisor: free-text task answered by program, no LLM turn) ${content.slice(0, 80)}`);
         await deliverReplyReliably(from, replyText, logicalTaskId, false);
-        if (await ackAndRecordConsumed(msg, "daemon-program")) turnSettledAndAcked = true;
+        const ackedDaemon = await ackAndRecordConsumed(msg, "daemon-program");
+        if (ackedDaemon) turnSettledAndAcked = true;
         return;
       }
 
@@ -7485,7 +7486,8 @@ async function processInbox() {
           interactiveDashboardTask,
         );
         await deliverReplyReliably(from, replyText, logicalTaskId, goalFailed);
-        if (await ackAndRecordConsumed(msg, "goal")) turnSettledAndAcked = true;
+        const ackedGoal = await ackAndRecordConsumed(msg, "goal");
+        if (ackedGoal) turnSettledAndAcked = true;
         return;
       }
 
@@ -7497,7 +7499,6 @@ async function processInbox() {
       // reaches the front of the queue (see queuedRowStillPendingOnHub).
       queuedInboxRowByTask.set(logicalTaskId, msg.id);
       let skippedOnHub = false;
-      let peerReplyAcked = false;
       const inboxTurn = await runInboxTurnByReplyPolicy(
         { id: msg.id, from, content: runtimeContent, taskId: logicalTaskId },
         deliveryPolicy.replyExpected,
@@ -7524,15 +7525,12 @@ async function processInbox() {
               if (!skippedOnHub) throw e;
               debug(`ack after hub-side skip: ${e.message}`);
             }
-            peerReplyAcked = true;
+            turnSettledAndAcked = true;
             commhubCompensation?.recordConsumed(msg);
           },
         },
       );
-      if (inboxTurn.kind === "terminal_peer_reply") {
-        if (peerReplyAcked) turnSettledAndAcked = true;
-        return;
-      }
+      if (inboxTurn.kind === "terminal_peer_reply") return;
       const taskOutcome = inboxTurn.result;
       if (taskOutcome.skipped) {
         log(`skip reply: queued row ${logicalTaskId.slice(0, 8)} was no longer pending on hub; no turn ran`);
@@ -7568,7 +7566,8 @@ async function processInbox() {
         log(GROK_EXECUTION_MODE === "cli"
           ? `skip reply: low-value (${result.length} chars; content withheld)`
           : `skip reply: low-value (${result.slice(0, 30)})`);
-        if (await ackAndRecordConsumed(msg, "low-value")) turnSettledAndAcked = true;
+        const ackedLowValue = await ackAndRecordConsumed(msg, "low-value");
+        if (ackedLowValue) turnSettledAndAcked = true;
         // #519 — the turn ran; record its result and close the task without an
         // inbox reply, so the sender is not woken by an acknowledgement.
         const closed = await closeLowValueTask(hubToolCall, { alias: ALIAS, taskId: logicalTaskId, msgType, result });
