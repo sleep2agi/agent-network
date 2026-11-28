@@ -164,6 +164,7 @@ import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader, takeTickRouteCosts, timedJob } from "./route-timing.js";
+import { resetRequestMemo } from "./request-memo.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
 import { createSessionSourceTransport } from "./session-source-transport.js";
@@ -327,12 +328,148 @@ function sweepStaleRateLimits(): void {
 }
 
 // ── Factory: 每个请求创建新的 McpServer（stateless 模式）──
-function createServer(clientIP?: string, enforceNetworkId?: string | null, enforceUserId?: string | null, callerAlias?: string | null, callerTokenIsNetwork = false, callerTokenId?: string | null, includeProtocolTools = false, callerIdentityRejected = false): McpServer {
+//
+// 2026-11-23 —— 生产卡顿归因：`createServer()` 每条 /mcp 请求都要新建一次 McpServer，
+// 把 105 个工具（含 zod → JSON Schema 转换）重新注册一遍。本地 455 会话库实测：
+// 只发 JSON-RPC `ping`（完全不跑任何工具）也要 ~30 ms CPU/请求，而普通 REST
+// （/api/session-requests、/health）只有 1–1.3 ms。线上 ≈28 req/s 的 /mcp 洪峰下，
+// 光这一项就 ≈840 ms/s，正好对上「主线程吃满一个核 + 每 3–5 秒停顿一次」。
+// ⇒ 按调用方上下文缓存**已注册好工具的 McpServer**，复用时只 connect/handleRequest/close。
+//   缓存键由 createServer 的**同一个入参对象**生成（见 CREATE_SERVER_FIELDS），池子有上限，
+//   拿不到就现建，所以行为与「每次新建」一致，只是跳过重复注册。
+//   `COMMHUB_MCP_SERVER_POOL=0` 一键退回旧行为（每次新建，不复用），线上出问题不必回滚版本。
+export type CreateServerOptions = {
+  /** 调用方 IP：工具层用它做限流，所以进键。 */
+  clientIP: string | undefined;
+  /** 令牌绑定的网络（节点令牌/网络令牌），工具层据此收窄读范围。 */
+  enforceNetworkId: string | null | undefined;
+  /** 令牌代表的用户（人类令牌）。 */
+  enforceUserId: string | null | undefined;
+  /** 令牌代表的节点别名（节点令牌）。 */
+  callerAlias: string | null | undefined;
+  /** 令牌是不是节点令牌（决定 from 身份与工具可见性）。 */
+  callerTokenIsNetwork: boolean;
+  /** 令牌 id：工具层用它判「这条收件箱是不是我自己的」。 */
+  callerTokenId: string | null | undefined;
+  /** 是否额外列出协议工具（X-Anet-Tools: all）。 */
+  includeProtocolTools: boolean;
+  /** 令牌自称的节点身份与绑定不符（已拒绝）。 */
+  callerIdentityRejected: boolean;
+};
+
+/**
+ * 缓存键的字段清单 = CreateServerOptions 的**全部**字段。
+ * 加参数却忘了加进键里，会让「A 的实例服务 B 的请求」——所以键从这一份清单生成，
+ * 并有一条断言把「对象字段数/字段名」和这份清单钉在一起（见 mcp-server-pool-http.test.ts）。
+ */
+export const CREATE_SERVER_FIELDS = [
+  "clientIP", "enforceNetworkId", "enforceUserId", "callerAlias",
+  "callerTokenIsNetwork", "callerTokenId", "includeProtocolTools", "callerIdentityRejected",
+] as const;
+
+/** 池子上限：`COMMHUB_MCP_SERVER_POOL_MAX` 可调；每实例内存见 PR 描述。 */
+function serverPoolMax(): number {
+  const raw = Number(process.env.COMMHUB_MCP_SERVER_POOL_MAX);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(Math.round(raw), 4096) : 64;
+}
+
+/**
+ * 复用池开关。**默认关闭**（未设置 = 旧行为：每次新建）。
+ * 2026-11-23 负责人定：首版发版本身零行为变化，线上由启动脚本显式 `COMMHUB_MCP_SERVER_POOL=1` 打开；
+ * 出问题去掉这一行重启即可。`0/false/off` 也都表示关闭。
+ */
+function serverPoolEnabled(): boolean {
+  const raw = (process.env.COMMHUB_MCP_SERVER_POOL ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
+
+/** key → 空闲实例栈；`lruKeys` 按「最近一次放回」排序（队尾最新），淘汰从队头取。 */
+const idleByKey = new Map<string, McpServer[]>();
+const lruKeys: string[] = [];
+let serverPoolSize = 0;
+let serverCreated = 0;
+let serverReused = 0;
+let serverEvicted = 0;
+
+function dropKey(key: string): void {
+  idleByKey.delete(key);
+  const i = lruKeys.indexOf(key);
+  if (i >= 0) lruKeys.splice(i, 1);
+}
+
+/** 淘汰最久没被用过的那个 key 的一个实例（LRU）；返回是否真的淘汰了。 */
+function evictOldest(): boolean {
+  while (lruKeys.length) {
+    const key = lruKeys[0];
+    const list = idleByKey.get(key);
+    if (!list || !list.length) { dropKey(key); continue; }
+    list.pop();
+    serverPoolSize--;
+    serverEvicted++;
+    if (!list.length) dropKey(key);
+    else {
+      // 这个 key 还有实例，但这一台被淘汰了 —— 把 key 移到队尾（它刚被处理过）
+      lruKeys.shift(); lruKeys.push(key);
+    }
+    return true;
+  }
+  return false;
+}
+
+/** 键 = 清单里的字段按固定顺序取值（与 createServer 是同一个对象，不会漏字段）。 */
+export function poolKeyOf(o: CreateServerOptions): string {
+  return JSON.stringify(CREATE_SERVER_FIELDS.map(f => o[f]));
+}
+
+/** 取一台该上下文可用的 McpServer：池里有空闲的就复用，没有就新建。 */
+function acquireServer(opts: CreateServerOptions): { server: McpServer; key: string } {
+  const key = poolKeyOf(opts);
+  if (!serverPoolEnabled()) { serverCreated++; return { server: createServer(opts), key }; }
+  const list = idleByKey.get(key);
+  const server = list && list.length ? list.pop()! : null;
+  if (server) {
+    serverPoolSize--; serverReused++;
+    if (!list!.length) dropKey(key);
+    else { const i = lruKeys.indexOf(key); if (i >= 0) { lruKeys.splice(i, 1); lruKeys.push(key); } }
+    return { server, key };
+  }
+  serverCreated++;
+  return { server: createServer(opts), key };
+}
+
+/** 一次请求结束后把 server 放回池（超过上限就丢弃，交给 GC）。 */
+function releaseServer(key: string, server: McpServer): void {
+  if (!serverPoolEnabled()) return;
+  // 每次放回时重读上限：运维可以热调 env（下次释放生效）。
+  // 满了就先淘汰最久没用的一个 key（LRU）——否则先到的 64 个身份会永久占坑，
+  // 线上 455 个会话的其余身份永远拿不到复用。
+  while (serverPoolSize >= serverPoolMax() && evictOldest()) { /* 继续淘汰到低于上限 */ }
+  if (serverPoolSize >= serverPoolMax()) return; // 池子里一个都淘汰不掉（理论上不会）
+  const list = idleByKey.get(key);
+  if (list) list.push(server);
+  else { idleByKey.set(key, [server]); lruKeys.push(key); }
+  serverPoolSize++;
+}
+
+/**
+ * 这台实例能不能回池：只有「正常应答（非 5xx）」才算状态可信。
+ * 抛异常的那条路径根本走不到这里（catch 里直接丢弃）。
+ */
+export function shouldPoolServer(res: { status: number } | null | undefined): boolean {
+  return !!res && res.status < 500;
+}
+
+/** 只读：池子/复用计数（只观测，不参与任何决策）。 */
+export function mcpServerPoolStats(): { pooled: number; created: number; reused: number; evicted: number; max: number; enabled: boolean } {
+  return { pooled: serverPoolSize, created: serverCreated, reused: serverReused, evicted: serverEvicted, max: serverPoolMax(), enabled: serverPoolEnabled() };
+}
+
+export function createServer(o: CreateServerOptions): McpServer {
   const server = new McpServer({
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, clientIP, enforceNetworkId, enforceUserId, callerAlias, callerTokenIsNetwork, callerTokenId, { includeProtocol: includeProtocolTools }, callerIdentityRejected);
+  registerTools(server, o.clientIP, o.enforceNetworkId, o.enforceUserId, o.callerAlias, o.callerTokenIsNetwork, o.callerTokenId, { includeProtocol: o.includeProtocolTools }, o.callerIdentityRejected);
   return server;
 }
 
@@ -1431,6 +1568,9 @@ export const HEALTH_FIELD_META: Readonly<Record<string, HealthFieldMeta>> = {
   sessions_count: { class: "gauge", granularity: "level" },
   sse_connections: { class: "gauge", granularity: "level" },
   mcp_inflight: { class: "gauge", granularity: "level" },
+  // 2026-11-23 —— McpServer 复用池读数（pooled/created/reused/evicted/max/enabled）。
+  // 只给运维看命中率；不进匿名白名单。
+  mcp_server_pool: { class: "gauge", granularity: "level" },
   mcp_inflight_peak: { class: "gauge", granularity: "cumulative" },
   event_loop: { class: "gauge", granularity: "cumulative" },
   // #3271 —— 聚合计数：规模/强度，不含拓扑（by_node 留在鉴权投影里）。
@@ -2283,17 +2423,39 @@ return Bun.serve({
         labelRoute(req, mcpParsedBody === undefined ? "?" : mcpRouteLabel(mcpParsedBody));
       }
       // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
-      const mcpServer = createServer(clientIP, enforceNetId, authCtx?.userId || null, callerAlias, !!token?.startsWith("ntok_"), authCtx?.tokenId || null, wantsAllTools(req, url), callerIdentityRejected);
+      // 复用池的键由这同一个对象生成（CREATE_SERVER_FIELDS = 全部字段，见 createServer 上方注释）。
+      const { server: mcpServer, key: mcpServerKey } = acquireServer({
+        clientIP,
+        enforceNetworkId: enforceNetId,
+        enforceUserId: authCtx?.userId || null,
+        callerAlias,
+        callerTokenIsNetwork: !!token?.startsWith("ntok_"),
+        callerTokenId: authCtx?.tokenId || null,
+        includeProtocolTools: wantsAllTools(req, url),
+        callerIdentityRejected,
+      });
       let response: Response;
+      let poolEligible = true;
       try {
+        // 池子复用同一实例 ⇒ 上一请求的权限/身份缓存必须清零（见 request-memo.ts）。
+        resetRequestMemo(mcpServer);
         await mcpServer.connect(transport);
         response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
+        // 服务端错误（5xx）说明这台实例状态不明 ⇒ 不回池，交给 GC。
+        poolEligible = shouldPoolServer(response);
       } catch (e) {
         settleMcpInflight();
-        throw e;
+        throw e; // 抛异常路径：实例直接丢弃，不回池
       }
-      // Disconnect after response to prevent McpServer leak
-      setImmediate(() => { mcpServer.close().catch(() => {}).finally(settleMcpInflight); });
+      // Disconnect after response to prevent McpServer leak（复用池：close 之后 _transport 会清空，
+      // 所以这台 server 可以接着服务下一次同上下文请求；不 close 会造成 Handler 泄漏）。
+      // 只有 close 成功、且这次不是 5xx 才放回池子：状态不明的实例宁可丢给 GC 也不要复用。
+      setImmediate(() => {
+        mcpServer.close()
+          .then(() => { if (poolEligible) releaseServer(mcpServerKey, mcpServer); })
+          .catch(() => {})
+          .finally(settleMcpInflight);
+      });
       // #426: the MCP SDK's WebStandardStreamableHTTPServerTransport builds
       // its own Response with `Content-Type: text/event-stream` (or
       // `application/json` for JSON-mode) but WITHOUT charset. Legacy
@@ -3959,6 +4121,8 @@ return Bun.serve({
         // 而 `sse_connections` 只反映长连接，看不到“同秒打进来的一批请求”。
         mcp_inflight: getMcpInflightStats().inflight,
         mcp_inflight_peak: getMcpInflightStats().peak,
+        // 2026-11-23 —— McpServer 复用池读数（负责人要看命中率）。enabled=false 时 created 只增不复用。
+        mcp_server_pool: mcpServerPoolStats(),
         // #2614 —— 事件循环停顿。`mcp_inflight` 只能说明“有多少请求在排队”，
         // 说明不了“服务端为什么卡”。这里给出停顿本身：max_gap_ms 是进程内
         // 单次 tick 的最大间隔（正常 ≈250ms），recent_stalls 保留最近 20 次

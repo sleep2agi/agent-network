@@ -68,7 +68,10 @@ describe("#2363 server wiring (source assertions)", () => {
     // 抛异常路径
     expect(src).toContain("settleMcpInflight();\n        throw e;");
     // 正常路径（setImmediate 里 close 完成后结算，且重复调用安全）
-    expect(src).toContain("mcpServer.close().catch(() => {}).finally(settleMcpInflight)");
+    // 2026-11-23 复用池：结算挂在 close().finally 上；只有 close 成功且这次不是 5xx 才回池。
+    expect(src).toContain("mcpServer.close()");
+    expect(src).toContain("if (poolEligible) releaseServer(mcpServerKey, mcpServer);");
+    expect(src).toContain(".finally(settleMcpInflight);");
     // 幂等闸门：只允许真正减一次
     expect(src).toContain("if (mcpInflightSettled) return;");
   });
