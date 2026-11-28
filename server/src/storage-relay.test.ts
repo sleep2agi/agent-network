@@ -1958,4 +1958,182 @@ describe("Storage Relay SSRF Hardening (#5719)", () => {
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
   });
+
+  test("Hub-managed default storage (COMMHUB_STORAGE_*): zero-config inheritance, private test guard, network override, historical download continuity, and reset back to hub_managed", async () => {
+    const envKeys = [
+      "COMMHUB_STORAGE_ENABLED",
+      "COMMHUB_STORAGE_PROVIDER",
+      "COMMHUB_STORAGE_BUCKET",
+      "COMMHUB_STORAGE_REGION",
+      "COMMHUB_STORAGE_ENDPOINT",
+      "COMMHUB_STORAGE_ACCESS_KEY_ID",
+      "COMMHUB_STORAGE_ACCESS_KEY_SECRET",
+      "COMMHUB_STORAGE_PREFIX",
+      "COMMHUB_STORAGE_MAX_FILE_BYTES",
+    ] as const;
+    const savedEnv: Record<string, string | undefined> = {};
+    for (const k of envKeys) savedEnv[k] = process.env[k];
+
+    try {
+      // 1. No env + no DB config -> source=none, hub_managed_available=false
+      for (const k of envKeys) delete process.env[k];
+      const beforeCfg: any = await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      }).then((r) => r.json());
+      expect(beforeCfg.ok).toBe(true);
+      expect(beforeCfg.configured).toBe(false);
+      expect(beforeCfg.source).toBe("none");
+      expect(beforeCfg.hub_managed_available).toBe(false);
+
+      // 2. Enable Hub-managed S3 via env -> network immediately inherits with zero App/DB configuration
+      process.env.COMMHUB_STORAGE_PROVIDER = "s3";
+      process.env.COMMHUB_STORAGE_BUCKET = "anet-hub-managed";
+      process.env.COMMHUB_STORAGE_REGION = "us-west-1";
+      process.env.COMMHUB_STORAGE_ENDPOINT = mockProviderBase;
+      process.env.COMMHUB_STORAGE_ACCESS_KEY_ID = "AKIAHUBMANAGEDEXAMPLE";
+      process.env.COMMHUB_STORAGE_ACCESS_KEY_SECRET = "HubManagedSuperSecretKey123456";
+      process.env.COMMHUB_STORAGE_MAX_FILE_BYTES = String(150 * 1024 * 1024);
+
+      const managedCfg: any = await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      }).then((r) => r.json());
+      expect(managedCfg.ok).toBe(true);
+      expect(managedCfg.configured).toBe(true);
+      expect(managedCfg.enabled).toBe(true);
+      expect(managedCfg.source).toBe("hub_managed");
+      expect(managedCfg.hub_managed_available).toBe(true);
+      expect(managedCfg.provider).toBe("s3");
+      expect(managedCfg.bucket).toBe("anet-hub-managed");
+      expect(managedCfg.region).toBe("us-west-1");
+      expect(managedCfg.max_file_bytes).toBe(150 * 1024 * 1024);
+      expect(managedCfg.key_hint).toContain("MPLE");
+      expect(JSON.stringify(managedCfg)).not.toContain("HubManagedSuperSecretKey123456");
+
+      // Node token also sees managed enabled metadata
+      const nodeCfg: any = await fetch(`${hubBase}/api/storage/config`, {
+        headers: { Authorization: `Bearer ${nodeToken}` },
+      }).then((r) => r.json());
+      expect(nodeCfg.ok).toBe(true);
+      expect(nodeCfg.enabled).toBe(true);
+      expect(nodeCfg.source).toBe("hub_managed");
+      expect(nodeCfg.max_file_bytes).toBe(150 * 1024 * 1024);
+
+      // 3. POST /api/storage/test works with empty body AND with matching legacy-App draft (no secrets)
+      const testEmpty: any = await fetch(`${hubBase}/api/storage/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId }),
+      }).then((r) => r.json());
+      expect(testEmpty.ok).toBe(true);
+      expect(testEmpty.provider).toBe("s3");
+      expect(testEmpty.visibility).toBe("private");
+
+      const testMatchingDraft: any = await fetch(`${hubBase}/api/storage/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          network_id: ownerNetworkId,
+          provider: "s3",
+          bucket: "anet-hub-managed",
+          region: "us-west-1",
+          endpoint: mockProviderBase,
+        }),
+      }).then((r) => r.json());
+      expect(testMatchingDraft.ok).toBe(true);
+
+      // Security: tampering with endpoint or bucket without providing new credentials MUST fail closed (never leak Hub secrets!)
+      const testTampered = await fetch(`${hubBase}/api/storage/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          network_id: ownerNetworkId,
+          provider: "s3",
+          bucket: "attacker-bucket",
+          region: "us-west-1",
+          endpoint: mockProviderBase,
+        }),
+      });
+      expect(testTampered.status).toBe(400);
+      expect((await testTampered.json() as any).error).toBe("credential_required");
+
+      // 4. Full direct upload -> complete -> direct download using Hub-managed S3 (scoped by network_id prefix)
+      const payload = Buffer.from("hub-managed-zero-config-s3-payload");
+      const sha = createHash("sha256").update(payload).digest("hex");
+      const pre: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: "zero-cfg.png", mime: "image/png", size: payload.length, sha256: sha }),
+      }).then((r) => r.json());
+      expect(pre.ok).toBe(true);
+      expect(pre.mode).toBe("direct");
+      expect(pre.provider).toBe("s3");
+      expect(pre.upload.url).toContain(`/anet-hub-managed/anet-files/${ownerNetworkId}/`);
+
+      const putRes = await fetch(pre.upload.url, { method: "PUT", body: payload });
+      expect(putRes.ok).toBe(true);
+
+      const comp: any = await fetch(`${hubBase}/api/uploads/complete`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ file_id: pre.file_id }),
+      }).then((r) => r.json());
+      expect(comp.ok).toBe(true);
+
+      // 5. Network custom override takes precedence, yet historical file uploaded on Hub-managed S3 still downloads!
+      const overrideRes = await fetch(`${hubBase}/api/storage/config`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          network_id: ownerNetworkId,
+          enabled: true,
+          provider: "modelscope",
+          repo_id: "owner/custom-override",
+          endpoint: mockProviderBase,
+          api_token: mockExpectedToken,
+        }),
+      });
+      expect(overrideRes.status).toBe(200);
+      const overrideBody: any = await overrideRes.json();
+      expect(overrideBody.source).toBe("network");
+      expect(overrideBody.hub_managed_available).toBe(true);
+      expect(overrideBody.provider).toBe("modelscope");
+
+      const histDirect: any = await fetch(`${hubBase}/api/files/${pre.file_id}/direct`, {
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      }).then((r) => r.json());
+      expect(histDirect.ok).toBe(true);
+      expect(histDirect.provider).toBe("s3");
+      const histBytes = Buffer.from(await fetch(histDirect.url).then((r) => r.arrayBuffer()));
+      expect(histBytes.equals(payload)).toBe(true);
+
+      // 6. Clearing the network override reverts seamlessly back to source=hub_managed
+      const resetBody: any = await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      }).then((r) => r.json());
+      expect(resetBody.ok).toBe(true);
+      expect(resetBody.source).toBe("hub_managed");
+      expect(resetBody.enabled).toBe(true);
+      expect(resetBody.provider).toBe("s3");
+      expect(resetBody.bucket).toBe("anet-hub-managed");
+
+      // 7. COMMHUB_STORAGE_ENABLED=false disables Hub-managed default cleanly
+      process.env.COMMHUB_STORAGE_ENABLED = "false";
+      const offCfg: any = await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      }).then((r) => r.json());
+      expect(offCfg.configured).toBe(false);
+      expect(offCfg.source).toBe("none");
+      expect(offCfg.hub_managed_available).toBe(false);
+    } finally {
+      for (const k of envKeys) {
+        if (savedEnv[k] === undefined) delete process.env[k];
+        else process.env[k] = savedEnv[k];
+      }
+      await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      });
+    }
+  });
 });

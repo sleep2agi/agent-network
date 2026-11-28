@@ -9082,6 +9082,7 @@
   "server/src/storage-relay.test.ts::SigV4 Presigned URL signing (Aliyun OSS & AWS S3)::generates deterministic OSS4-HMAC-SHA256 virtual-host presigned URLs": 1,
   "server/src/storage-relay.test.ts::SigV4 Presigned URL signing (Aliyun OSS & AWS S3)::supports AWS S3 & Aliyun OSS Transfer Acceleration (virtual-host DNS + regional control-plane probes) and Cloudflare R2 path-style": 1,
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::HTTP /api/storage/config & /api/storage/test reject private/loopback endpoints in production mode and block redirect-to-metadata SSRF": 1,
+  "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::Hub-managed default storage (COMMHUB_STORAGE_*): zero-config inheritance, private test guard, network override, historical download continuity, and reset back to hub_managed": 1,
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::assertSafeStorageUrl checks DNS-resolved IPs and fails closed on DNS errors or empty results": 1,
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::driver operations (test/presign/complete) block DNS-resolved private IPs before any outbound fetch": 1,
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::isForbiddenStorageIp blocks RFC1918, 127/8, 169.254/16, 100.64/10, 0/8, multicast, ::, ::1, fc00::/7, fe80::/10, and IPv4-mapped IPv6": 1,
@@ -18577,6 +18578,7 @@
   "server/src/storage-relay.test.ts::SigV4 Presigned URL signing (Aliyun OSS & AWS S3)::generates deterministic OSS4-HMAC-SHA256 virtual-host presigned URLs",
   "server/src/storage-relay.test.ts::SigV4 Presigned URL signing (Aliyun OSS & AWS S3)::supports AWS S3 & Aliyun OSS Transfer Acceleration (virtual-host DNS + regional control-plane probes) and Cloudflare R2 path-style",
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::HTTP /api/storage/config & /api/storage/test reject private/loopback endpoints in production mode and block redirect-to-metadata SSRF",
+  "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::Hub-managed default storage (COMMHUB_STORAGE_*): zero-config inheritance, private test guard, network override, historical download continuity, and reset back to hub_managed",
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::assertSafeStorageUrl checks DNS-resolved IPs and fails closed on DNS errors or empty results",
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::driver operations (test/presign/complete) block DNS-resolved private IPs before any outbound fetch",
   "server/src/storage-relay.test.ts::Storage Relay SSRF Hardening (#5719)::isForbiddenStorageIp blocks RFC1918, 127/8, 169.254/16, 100.64/10, 0/8, multicast, ::, ::1, fc00::/7, fe80::/10, and IPv4-mapped IPv6",
@@ -18990,7 +18992,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "029b74c51224a805f2dceedeed94056c92f97d9d",
+  "commit": "9e8436eeca4303614a9d48e8adbed8e826d3f635",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
