@@ -30,3 +30,17 @@ describe("request-memo", () => {
     expect(memoRequest(a, "k", () => "x")).toBe("a");
   });
 });
+
+test("调用方 IP 每个请求单独设置，不跨请求残留，也不进复用池的键", async () => {
+  const { setRequestClientIP, requestClientIP, resetRequestMemo } = await import("./request-memo.js");
+  const { CREATE_SERVER_FIELDS, poolKeyOf } = await import("./server.js");
+  const owner = {};
+  resetRequestMemo(owner); setRequestClientIP(owner, "10.0.0.1");
+  expect(requestClientIP(owner)).toBe("10.0.0.1");
+  resetRequestMemo(owner); setRequestClientIP(owner, "10.0.0.2");
+  expect(requestClientIP(owner)).toBe("10.0.0.2");
+  // 同一身份、不同 IP ⇒ 同一个池子键（能复用同一台实例）
+  expect((CREATE_SERVER_FIELDS as readonly string[]).includes("clientIP")).toBe(false);
+  const id = { enforceNetworkId: "net", enforceUserId: null, callerAlias: "n", callerTokenIsNetwork: true, callerTokenId: "t", includeProtocolTools: false, callerIdentityRejected: false };
+  expect(poolKeyOf({ ...id, clientIP: "1.1.1.1" } as any)).toBe(poolKeyOf({ ...id, clientIP: "2.2.2.2" } as any));
+});

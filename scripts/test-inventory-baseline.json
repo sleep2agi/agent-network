@@ -8109,6 +8109,7 @@
   "server/src/request-memo.test.ts::request-memo::不同 owner 互不影响": 1,
   "server/src/request-memo.test.ts::request-memo::同一请求内只算一次": 1,
   "server/src/request-memo.test.ts::request-memo::跨请求清空：值必须重新算（复用池不许残留权限/身份快照）": 1,
+  "server/src/request-memo.test.ts::调用方 IP 每个请求单独设置，不跨请求残留，也不进复用池的键": 1,
   "server/src/request-secret-tool.test.ts::request_secret —— 聊天里的加密输入卡::卡片随回执落到 inbox 与 tasks 行；登记待填；正文是人话兜底": 1,
   "server/src/request-secret-tool.test.ts::request_secret —— 聊天里的加密输入卡::用户令牌（不是节点）⇒ node_token_required": 1,
   "server/src/request-secret-tool.test.ts::request_secret —— 聊天里的加密输入卡::非法环境变量名 ⇒ invalid_secret_key，不登记、不回执": 1,
@@ -17643,6 +17644,7 @@
   "server/src/request-memo.test.ts::request-memo::不同 owner 互不影响",
   "server/src/request-memo.test.ts::request-memo::同一请求内只算一次",
   "server/src/request-memo.test.ts::request-memo::跨请求清空：值必须重新算（复用池不许残留权限/身份快照）",
+  "server/src/request-memo.test.ts::调用方 IP 每个请求单独设置，不跨请求残留，也不进复用池的键",
   "server/src/request-secret-tool.test.ts::request_secret —— 聊天里的加密输入卡::卡片随回执落到 inbox 与 tasks 行；登记待填；正文是人话兜底",
   "server/src/request-secret-tool.test.ts::request_secret —— 聊天里的加密输入卡::用户令牌（不是节点）⇒ node_token_required",
   "server/src/request-secret-tool.test.ts::request_secret —— 聊天里的加密输入卡::非法环境变量名 ⇒ invalid_secret_key，不登记、不回执",
@@ -19068,7 +19070,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "f4003ed64f6787ba57cb5ed587fc141259bcc29c",
+  "commit": "ebce3bc1dc0ad8518e9c4787f846da3b0d33b9e1",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
