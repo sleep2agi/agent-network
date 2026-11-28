@@ -17,7 +17,7 @@ import { extractTurnResult, readSessionEntries } from "./runtime/opencode-copres
 import { capReplyText } from "./shared/reply-text-cap.js";
 
 
-import { clearLateReplyRecord, isTerminalLateReplyError, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
+import { clearLateReplyRecord, isStaleLateReplyRecord, isTerminalLateReplyError, listLateReplyRecords, saveLateReplyRecord } from "./runtime/opencode-copresence/late-reply-store.js";
 import { GET_TASK_TOOL_LINE, IDENTITY_POLL_DISCIPLINE_LINES, POLL_DISCIPLINE_LINES, POLL_STEP_LINES } from "./poll-discipline-guidance.js";
 import { MODEL_SWITCH_DEADLINE_MS, withDeadlineMs } from "./runtime/deadline.js";
 import { applyVariantConfig } from "./runtime/opencode-copresence/variant-config-apply.js";
@@ -9620,11 +9620,16 @@ async function recoverLateResult(rec: { sessionId: string; turnId: string }): Pr
 {
   const { records, corrupted } = listLateReplyRecords(NODE_DIR);
   if (corrupted > 0) warn(`[late-reply] dropped ${corrupted} corrupted pending record(s)`);
-  if (records.length > 0) {
-    log(`[late-reply] ${records.length} pending record(s) at startup — notifying senders`);
+  // 过期记录（> 24h 或没有时间）直接删，不补发：隔了几天的「迟到结果」对发送方没有用。
+  const stale = records.filter(r => isStaleLateReplyRecord(r));
+  for (const rec of stale) clearLateReplyRecord(NODE_DIR, rec.taskId);
+  if (stale.length > 0) log(`[late-reply] dropped ${stale.length} stale pending record(s) older than 24h (not notified)`);
+  const fresh = records.filter(r => !isStaleLateReplyRecord(r));
+  if (fresh.length > 0) {
+    log(`[late-reply] ${fresh.length} pending record(s) at startup — notifying senders`);
     // 放到后台，绝不阻塞启动（注册/心跳优先）。
     setTimeout(() => {
-      for (const rec of records) {
+      for (const rec of fresh) {
         void (async () => {
           // 阶段二：共享 opencode server 仍持有历史时，把那一轮的结果读回来。
           const recovered = await recoverLateResult(rec);
