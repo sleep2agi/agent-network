@@ -2098,6 +2098,11 @@ describe("Storage Relay SSRF Hardening (#5719)", () => {
       "COMMHUB_STORAGE_ACCESS_KEY_SECRET",
       "COMMHUB_STORAGE_PREFIX",
       "COMMHUB_STORAGE_MAX_FILE_BYTES",
+      "COMMHUB_STORAGE_REPO_ID",
+      "COMMHUB_STORAGE_REPO_TYPE",
+      "COMMHUB_STORAGE_REVISION",
+      "COMMHUB_STORAGE_TOKEN",
+      "COMMHUB_STORAGE_API_TOKEN",
     ] as const;
     const savedEnv: Record<string, string | undefined> = {};
     for (const k of envKeys) savedEnv[k] = process.env[k];
@@ -2253,6 +2258,56 @@ describe("Storage Relay SSRF Hardening (#5719)", () => {
       expect(offCfg.configured).toBe(false);
       expect(offCfg.source).toBe("none");
       expect(offCfg.hub_managed_available).toBe(false);
+
+      // 8. Defense-in-depth: Hub-managed default storage refuses provider=modelscope (only s3/oss allowed)
+      const { readHubManagedStorageConfig } = await import("./storage-relay.js");
+      for (const rawProv of ["modelscope", "ModelScope", " MODELSCOPE "]) {
+        expect(readHubManagedStorageConfig({
+          COMMHUB_STORAGE_PROVIDER: rawProv,
+          COMMHUB_STORAGE_REPO_ID: "owner/hub-managed-ms",
+          COMMHUB_STORAGE_TOKEN: mockExpectedToken,
+          COMMHUB_STORAGE_API_TOKEN: mockExpectedToken,
+          COMMHUB_STORAGE_ENDPOINT: mockProviderBase,
+          ANET_STORAGE_ALLOW_LOOPBACK: "1",
+        })).toBeNull();
+      }
+      // S3 and OSS remain accepted for Hub-managed default storage
+      expect(readHubManagedStorageConfig({
+        COMMHUB_STORAGE_PROVIDER: "s3",
+        COMMHUB_STORAGE_BUCKET: "anet-hub-s3",
+        COMMHUB_STORAGE_REGION: "us-west-1",
+        COMMHUB_STORAGE_ACCESS_KEY_ID: "AKIAUNITTESTEXAMPLE",
+        COMMHUB_STORAGE_ACCESS_KEY_SECRET: "UnitTestSecretKey123456",
+      })?.config.provider).toBe("s3");
+      expect(readHubManagedStorageConfig({
+        COMMHUB_STORAGE_PROVIDER: "oss",
+        COMMHUB_STORAGE_BUCKET: "anet-hub-oss",
+        COMMHUB_STORAGE_REGION: "cn-shanghai",
+        COMMHUB_STORAGE_ACCESS_KEY_ID: "LTAIUNITTESTEXAMPLE",
+        COMMHUB_STORAGE_ACCESS_KEY_SECRET: "UnitTestSecretKey123456",
+      })?.config.provider).toBe("oss");
+
+      // HTTP E2E: setting COMMHUB_STORAGE_PROVIDER=modelscope in Hub env leaves network unconfigured (mode=hub)
+      delete process.env.COMMHUB_STORAGE_ENABLED;
+      process.env.COMMHUB_STORAGE_PROVIDER = "modelscope";
+      process.env.COMMHUB_STORAGE_REPO_ID = "owner/hub-managed-ms";
+      process.env.COMMHUB_STORAGE_TOKEN = mockExpectedToken;
+      process.env.COMMHUB_STORAGE_ENDPOINT = mockProviderBase;
+      const msHubCfg: any = await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      }).then((r) => r.json());
+      expect(msHubCfg.ok).toBe(true);
+      expect(msHubCfg.configured).toBe(false);
+      expect(msHubCfg.source).toBe("none");
+      expect(msHubCfg.hub_managed_available).toBe(false);
+
+      const msPre: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: "deny-ms.bin", mime: "application/octet-stream", size: payload.length, sha256: sha }),
+      }).then((r) => r.json());
+      expect(msPre.ok).toBe(true);
+      expect(msPre.mode).toBe("hub");
     } finally {
       for (const k of envKeys) {
         if (savedEnv[k] === undefined) delete process.env[k];
