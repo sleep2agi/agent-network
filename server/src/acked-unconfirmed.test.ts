@@ -57,7 +57,7 @@ describe("B: acked 但无回复 ⇒ 回退未读（口径 ①）", () => {
   });
 
   test("verdictFor 三态：pending 带剩余时间", () => {
-    const r = { messageId: "m", alias: "n", networkId: null, ackedAtMs: 0, hasReply: false, expectsResponse: true };
+    const r = { messageId: "m", alias: "n", networkId: null, ackedAtMs: 0, hasReply: false, expectsResponse: true, taskId: null };
     expect(verdictFor(r, 100, W)).toEqual({ kind: "pending", msLeft: W - 100 });
     expect(verdictFor({ ...r, hasReply: true }, 100, W)).toEqual({ kind: "delivered" });
   });
@@ -123,10 +123,8 @@ describe("B 止血：任务粒度的投递证据（先回执、后 ack 也不误
 });
 
 describe("rowExpectsResponse：哪些行值得等一个回复", () => {
-  test("任务 / 广播行：期待回复", () => {
+  test("任务行：期待回复（广播 / 控制指令不期待，见文件末尾那条）", () => {
     expect(rowExpectsResponse({ type: "task", requiresResponse: "reply" })).toBe(true);
-    expect(rowExpectsResponse({ type: "broadcast", requiresResponse: "reply" })).toBe(true);
-    expect(rowExpectsResponse({ type: "control", requiresResponse: "reply" })).toBe(true);
     expect(rowExpectsResponse({ type: null, requiresResponse: "reply" })).toBe(true);
   });
 
@@ -144,4 +142,11 @@ describe("rowExpectsResponse：哪些行值得等一个回复", () => {
   test("显式 requires_response='none' 优先于 type", () => {
     expect(rowExpectsResponse({ type: "task", requiresResponse: "none" })).toBe(false);
   });
+});
+
+test("广播与控制指令不期待回复：即使 requires_response 是 'reply' 也不进回退窗口", () => {
+  expect(rowExpectsResponse({ type: "broadcast", requiresResponse: "reply" })).toBe(false);
+  expect(rowExpectsResponse({ type: "control", requiresResponse: "reply" })).toBe(false);
+  expect(rowExpectsResponse({ type: "task", requiresResponse: "reply" })).toBe(true);
+  expect(rowExpectsResponse({ type: null, requiresResponse: null })).toBe(true);
 });

@@ -52,7 +52,10 @@ export type SweepVerdict =
 export function rowExpectsResponse(row: { type?: string | null; requiresResponse?: string | null }): boolean {
   if (row.requiresResponse === "none") return false;
   const type = String(row.type ?? "task").toLowerCase();
-  if (type === "message" || type === "reply") return false;
+  // broadcast：一对多的通知，Hub 写入时 requires_response 仍是 'reply'，但没有人在等某个节点回它。
+  // 2026-11-28 生产：一条存储提醒广播给 363 个会话，被这里当成「待回复」回退未读后重投，
+  // 几百个节点每 10 分钟被唤醒一次，Hub 因此反复停顿 2–20 秒。control（停止等控制指令）同理，回执另有通道。
+  if (type === "message" || type === "reply" || type === "broadcast" || type === "control") return false;
   return true;
 }
 
