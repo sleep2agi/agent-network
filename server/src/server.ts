@@ -5787,6 +5787,21 @@ return Bun.serve({
     // X-Content-Type-Options: nosniff so uploaded files can never be
     // executed or served as HTML.
     // ── Direct external upload relay: presign + complete (0 file bytes through Hub) ──
+// Never hand a storage credential to clients. ModelScope has no per-object signed URLs, so a direct
+    // upload/download would ship the network's raw ModelScope token (Bearer / m_session_id) to every
+    // uploader/downloader — one attachment leaks the whole repo (and usually the whole ModelScope account).
+    // Any client-facing header carrying a configured secret forces the Hub path instead.
+    function headersCarrySecret(headers: unknown, secrets: object | undefined): boolean {
+      if (!headers || typeof headers !== "object") return false;
+      const values = Object.values((secrets ?? {}) as Record<string, unknown>).filter((v): v is string => typeof v === "string" && v.length >= 8);
+      for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+        if (typeof v !== "string") continue;
+        const key = k.toLowerCase();
+        if (values.some(sec => v.includes(sec))) return true;
+        if ((key === "authorization" || key === "cookie") && values.length === 0) return true;
+      }
+      return false;
+    }
     if (url.pathname === "/api/uploads/presign" && req.method === "POST") {
       const authErr = requireAuth(req, { allowQueryToken: false });
       if (authErr) return withCors(req, authErr);
@@ -5940,6 +5955,23 @@ return Bun.serve({
         mime,
         route: routeOpts,
       });
+      if (presigned.ok && (headersCarrySecret(presigned.upload?.headers, cfg.secrets)
+        || headersCarrySecret(presigned.fallback_upload?.headers, cfg.secrets))) {
+        if (size <= MAX_UPLOAD_BYTES) {
+          return withCors(req, Response.json({
+            ok: true,
+            mode: "hub",
+            max_file_bytes: MAX_UPLOAD_BYTES,
+            upload_url: "/api/upload",
+            fallback_reason: "storage_credential_not_shareable",
+          }));
+        }
+        return withCors(req, Response.json({
+          ok: false,
+          error: "storage_credential_not_shareable",
+          message: `这个存储（${presigned.provider}）不能把文件直传给客户端，只能经 Hub 上传，单个文件上限 ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB。需要传更大的文件，请改用 S3 或阿里云 OSS 私有桶。`,
+        }, { status: 413 }));
+      }
       if (!presigned.ok) {
         // Degrade cleanly to Hub local /api/upload for transient upstream/storage outages when file fits Hub cap.
         // Keep security/validation errors (4xx, e.g. SSRF blocks) loud and fail-closed.
@@ -6413,6 +6445,20 @@ return Bun.serve({
       const resolved = resolveStorageDownload(entry.network_id, entry.storage, resolveCallerStorageRoute(req, url, directAuthCtx));
       if (!resolved.ok) {
         return withCors(req, Response.json({ ok: false, error: resolved.error, message: resolved.message }, { status: resolved.status }));
+      }
+      // Credentialed downloads (ModelScope) are streamed by the Hub; the token never leaves the server.
+      if (resolved.provider === "modelscope" || Object.keys(resolved.headers ?? {}).length > 0) {
+        const res = Response.json({
+          ok: true,
+          mode: "hub",
+          file_id: fileId,
+          url: `/api/files/${fileId}`,
+          name: entry.name || `${fileId}${entry.ext || ""}`,
+          mime: entry.mime || "application/octet-stream",
+          size: entry.size,
+        });
+        res.headers.set("Cache-Control", "private, no-store");
+        return withCors(req, res);
       }
       const res = Response.json({
         ok: true,
