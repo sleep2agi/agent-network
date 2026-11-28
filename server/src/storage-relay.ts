@@ -83,11 +83,17 @@ export function storageWriteStatus(code: StorageWriteErrorCode): number {
   return STORAGE_WRITE_STATUS[code];
 }
 
+export type NetworkStorageSource = "network" | "hub_managed" | "none";
+
 export interface NetworkStoragePublicConfig {
   ok: true;
   network_id: string;
   enabled: boolean;
   configured: boolean;
+  /** Where this effective config comes from: per-network override, Hub-managed env default, or none. */
+  source: NetworkStorageSource;
+  /** True when the Hub server has a valid COMMHUB_STORAGE_* default configured. */
+  hub_managed_available: boolean;
   provider: StorageProvider;
   endpoint: string;
   region: string;
@@ -799,12 +805,181 @@ export function buildRemoteObjectKey(
   return parts.join("/");
 }
 
+export interface HubManagedStorageRuntime {
+  config: Omit<ActiveStorageRuntimeConfig, "network_id">;
+  keyHint: string;
+}
+
+/**
+ * Read optional Hub-level managed default external storage from environment variables
+ * (`COMMHUB_STORAGE_PROVIDER`, `COMMHUB_STORAGE_BUCKET`, `COMMHUB_STORAGE_REGION`,
+ * `COMMHUB_STORAGE_ENDPOINT`, `COMMHUB_STORAGE_ACCESS_KEY_ID`, `COMMHUB_STORAGE_ACCESS_KEY_SECRET`,
+ * `COMMHUB_STORAGE_SESSION_TOKEN`, or ModelScope `COMMHUB_STORAGE_REPO_ID` / `COMMHUB_STORAGE_TOKEN`).
+ *
+ * Strictly private-only and SSRF-validated; returns null if unset, disabled (`COMMHUB_STORAGE_ENABLED=0/false`),
+ * or invalid (fail-closed, never throws). Any network without a per-network override inherits this seamlessly.
+ */
+export function readHubManagedStorageConfig(
+  env: Record<string, string | undefined> = process.env,
+): HubManagedStorageRuntime | null {
+  const rawEnabled = (env.COMMHUB_STORAGE_ENABLED ?? "").trim().toLowerCase();
+  if (rawEnabled === "0" || rawEnabled === "false" || rawEnabled === "off") return null;
+
+  const rawProvider = (env.COMMHUB_STORAGE_PROVIDER ?? "").trim().toLowerCase();
+  if (!rawProvider) return null;
+  const provider = normalizeProvider(rawProvider, "s3");
+  if (!provider) return null;
+
+  const allowLoopback = isStorageLoopbackAllowed(env);
+  const epCheck = validateStorageUrl(env.COMMHUB_STORAGE_ENDPOINT ?? "", "invalid_endpoint", { allowLoopback });
+  if (!epCheck.ok) return null;
+
+  const prefixRaw = env.COMMHUB_STORAGE_PREFIX !== undefined ? env.COMMHUB_STORAGE_PREFIX : DEFAULT_STORAGE_PREFIX;
+  const prefix = validateStoragePrefix(prefixRaw);
+  if (prefix === null) return null;
+
+  let maxFileBytes = DEFAULT_REMOTE_UPLOAD_BYTES;
+  const rawMax = (env.COMMHUB_STORAGE_MAX_FILE_BYTES ?? "").trim();
+  if (rawMax) {
+    const n = Number(rawMax);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < MIN_REMOTE_UPLOAD_BYTES || n > MAX_REMOTE_UPLOAD_BYTES) {
+      return null;
+    }
+    maxFileBytes = n;
+  }
+
+  if (provider === "modelscope") {
+    const repoId = validateModelScopeRepoId(env.COMMHUB_STORAGE_REPO_ID ?? "");
+    const repoType = normalizeRepoType(env.COMMHUB_STORAGE_REPO_TYPE, "dataset");
+    const revision = validateModelScopeRevision(env.COMMHUB_STORAGE_REVISION ?? DEFAULT_MODELSCOPE_REVISION);
+    const token = (env.COMMHUB_STORAGE_TOKEN ?? env.COMMHUB_STORAGE_API_TOKEN ?? "").trim();
+    if (!repoId || !repoType || !revision || !isValidSecretString(token)) return null;
+    return {
+      config: {
+        enabled: true,
+        provider,
+        endpoint: epCheck.url,
+        region: "",
+        bucket: "",
+        repo_id: repoId,
+        repo_type: repoType,
+        revision,
+        prefix,
+        public_base_url: "",
+        max_file_bytes: maxFileBytes,
+        secrets: { token },
+      },
+      keyHint: maskStorageSecretTail(token),
+    };
+  }
+
+  const bucket = validateBucketName(env.COMMHUB_STORAGE_BUCKET ?? "");
+  const region = validateRegion(env.COMMHUB_STORAGE_REGION ?? "");
+  const ak = (env.COMMHUB_STORAGE_ACCESS_KEY_ID ?? "").trim();
+  const sk = (env.COMMHUB_STORAGE_ACCESS_KEY_SECRET ?? env.COMMHUB_STORAGE_SECRET_ACCESS_KEY ?? "").trim();
+  const sessionToken = (env.COMMHUB_STORAGE_SESSION_TOKEN ?? "").trim();
+  if (!bucket || !region || !isValidSecretString(ak) || !isValidSecretString(sk)) return null;
+  if (sessionToken && !isValidSecretString(sessionToken)) return null;
+  if (provider === "s3" && isAwsS3AccelerateEndpoint(epCheck.url) && bucket.includes(".")) return null;
+
+  return {
+    config: {
+      enabled: true,
+      provider,
+      endpoint: epCheck.url,
+      region,
+      bucket,
+      repo_id: "",
+      repo_type: "dataset",
+      revision: DEFAULT_MODELSCOPE_REVISION,
+      prefix,
+      public_base_url: "",
+      max_file_bytes: maxFileBytes,
+      secrets: {
+        access_key_id: ak,
+        access_key_secret: sk,
+        ...(sessionToken ? { session_token: sessionToken } : {}),
+      },
+    },
+    keyHint: maskStorageSecretTail(ak),
+  };
+}
+
+function runtimeMatchesStorageMeta(cfg: Omit<ActiveStorageRuntimeConfig, "network_id">, storage: RemoteStorageIndexMeta): boolean {
+  if (cfg.provider !== storage.provider) return false;
+  if (storage.provider === "modelscope") {
+    return !storage.repo_id || cfg.repo_id === storage.repo_id;
+  }
+  return (!storage.bucket || cfg.bucket === storage.bucket) && (!storage.region || cfg.region === storage.region);
+}
+
+function draftMatchesHubManagedWithoutSecrets(
+  draft: StorageConfigWriteInput,
+  hubDefault: HubManagedStorageRuntime,
+  allowLoopback?: boolean,
+): boolean {
+  const hasAnySecret = [
+    draft.api_token,
+    draft.token,
+    draft.access_key_id,
+    draft.access_key_secret,
+    draft.secret_access_key,
+    draft.session_token,
+  ].some((v) => typeof v === "string" && v.trim().length > 0);
+  if (hasAnySecret) return false;
+
+  const target = hubDefault.config;
+  const prov = normalizeProvider(draft.provider, target.provider);
+  if (prov !== target.provider) return false;
+
+  const epRaw = typeof draft.endpoint === "string" ? draft.endpoint : target.endpoint;
+  const epCheck = validateStorageUrl(epRaw, "invalid_endpoint", { allowLoopback });
+  if (!epCheck.ok || epCheck.url !== target.endpoint) return false;
+
+  if (target.provider === "modelscope") {
+    const repoId = typeof draft.repo_id === "string" ? validateModelScopeRepoId(draft.repo_id) : target.repo_id;
+    const repoType = draft.repo_type !== undefined ? normalizeRepoType(draft.repo_type, target.repo_type) : target.repo_type;
+    const revision = typeof draft.revision === "string" ? validateModelScopeRevision(draft.revision) : target.revision;
+    return repoId === target.repo_id && repoType === target.repo_type && revision === target.revision;
+  }
+
+  const bucket = typeof draft.bucket === "string" ? validateBucketName(draft.bucket) : target.bucket;
+  const region = typeof draft.region === "string" ? validateRegion(draft.region) : target.region;
+  return bucket === target.bucket && region === target.region;
+}
+
 function toPublicConfig(
   networkId: string,
   row: StoredMetaRow | null | undefined,
   canManage: boolean,
+  hubDefault: HubManagedStorageRuntime | null,
 ): NetworkStoragePublicConfig {
   const configured = !!row && Number(row.configured) === 1;
+  if (!configured && hubDefault) {
+    const hc = hubDefault.config;
+    return {
+      ok: true,
+      network_id: networkId,
+      enabled: hc.enabled,
+      configured: true,
+      source: "hub_managed",
+      hub_managed_available: true,
+      provider: hc.provider,
+      endpoint: hc.endpoint,
+      region: hc.region,
+      bucket: hc.bucket,
+      repo_id: hc.repo_id,
+      repo_type: hc.repo_type,
+      revision: hc.revision,
+      prefix: hc.prefix,
+      public_base_url: "",
+      max_file_bytes: hc.max_file_bytes,
+      key_hint: hubDefault.keyHint,
+      can_manage: canManage,
+      vault_ready: isStorageVaultReady(),
+      updated_at: null,
+    };
+  }
   const provider = normalizeProvider(row?.provider, "modelscope") ?? "modelscope";
   const repoType = normalizeRepoType(row?.repo_type, "dataset") ?? "dataset";
   const maxBytes = row?.max_file_bytes && Number(row.max_file_bytes) >= MIN_REMOTE_UPLOAD_BYTES
@@ -815,6 +990,8 @@ function toPublicConfig(
     network_id: networkId,
     enabled: configured && Number(row?.enabled) === 1,
     configured,
+    source: configured ? "network" : "none",
+    hub_managed_available: !!hubDefault,
     provider,
     endpoint: row?.endpoint || "",
     region: row?.region || "",
@@ -846,7 +1023,7 @@ export function readNetworkStorageConfig(
       WHERE network_id = ?1`,
     networkId,
   );
-  return toPublicConfig(networkId, row, canManage);
+  return toPublicConfig(networkId, row, canManage, readHubManagedStorageConfig());
 }
 
 function readStoredSecretRow(networkId: string): StoredSecretRow | null {
@@ -881,7 +1058,18 @@ export function readActiveNetworkStorageConfig(
 ): { ok: true; config: ActiveStorageRuntimeConfig | null } | { ok: false; status: number; error: string; message: string } {
   const requireEnabled = opts.requireEnabled !== false;
   const row = readStoredSecretRow(networkId);
-  if (!row || Number(row.configured) !== 1) return { ok: true, config: null };
+  if (!row || Number(row.configured) !== 1) {
+    const hubDefault = readHubManagedStorageConfig();
+    if (!hubDefault) return { ok: true, config: null };
+    if (requireEnabled && !hubDefault.config.enabled) return { ok: true, config: null };
+    return {
+      ok: true,
+      config: {
+        ...hubDefault.config,
+        network_id: networkId,
+      },
+    };
+  }
   if (requireEnabled && Number(row.enabled) !== 1) return { ok: true, config: null };
   const provider = normalizeProvider(row.provider, "modelscope");
   if (!provider) return { ok: false, status: 500, error: "invalid_provider", message: "存储配置 provider 无效" };
@@ -1709,46 +1897,54 @@ export async function testNetworkStorageConfig(
   const fetchOpts: SafeStorageFetchOptions = { ...ssrfOpts, fetchFn };
 
   if (draft && Object.keys(draft).length > 0) {
-    const resolved = resolveDraftConfig(networkId, draft, existing, { allowLoopback: ssrfOpts.allowLoopback });
-    if (!resolved.ok) {
-      return {
-        ok: false,
-        provider: normalizeProvider(draft.provider, "modelscope") ?? "modelscope",
-        latency_ms: Date.now() - started,
-        error: resolved.error,
-        message: resolved.message,
+    const hubDefault = !existing ? readHubManagedStorageConfig() : null;
+    if (hubDefault && draftMatchesHubManagedWithoutSecrets(draft, hubDefault, ssrfOpts.allowLoopback)) {
+      cfg = {
+        ...hubDefault.config,
+        network_id: networkId,
       };
-    }
-    let secrets = resolved.secrets;
-    if (resolved.reuseCiphertext && existing) {
-      try {
-        secrets = decryptStoredSecrets(existing);
-      } catch (e) {
-        const code = e instanceof VaultError ? e.code : "vault_decrypt_failed";
+    } else {
+      const resolved = resolveDraftConfig(networkId, draft, existing, { allowLoopback: ssrfOpts.allowLoopback });
+      if (!resolved.ok) {
         return {
           ok: false,
-          provider: resolved.provider,
+          provider: normalizeProvider(draft.provider, "modelscope") ?? "modelscope",
           latency_ms: Date.now() - started,
-          error: code,
-          message: "Hub 加密主密钥不可用，无法读取已保存密钥",
+          error: resolved.error,
+          message: resolved.message,
         };
       }
+      let secrets = resolved.secrets;
+      if (resolved.reuseCiphertext && existing) {
+        try {
+          secrets = decryptStoredSecrets(existing);
+        } catch (e) {
+          const code = e instanceof VaultError ? e.code : "vault_decrypt_failed";
+          return {
+            ok: false,
+            provider: resolved.provider,
+            latency_ms: Date.now() - started,
+            error: code,
+            message: "Hub 加密主密钥不可用，无法读取已保存密钥",
+          };
+        }
+      }
+      cfg = {
+        network_id: networkId,
+        enabled: resolved.enabled,
+        provider: resolved.provider,
+        endpoint: resolved.endpoint,
+        region: resolved.region,
+        bucket: resolved.bucket,
+        repo_id: resolved.repo_id,
+        repo_type: resolved.repo_type,
+        revision: resolved.revision,
+        prefix: resolved.prefix,
+        public_base_url: resolved.public_base_url,
+        max_file_bytes: resolved.max_file_bytes,
+        secrets,
+      };
     }
-    cfg = {
-      network_id: networkId,
-      enabled: resolved.enabled,
-      provider: resolved.provider,
-      endpoint: resolved.endpoint,
-      region: resolved.region,
-      bucket: resolved.bucket,
-      repo_id: resolved.repo_id,
-      repo_type: resolved.repo_type,
-      revision: resolved.revision,
-      prefix: resolved.prefix,
-      public_base_url: resolved.public_base_url,
-      max_file_bytes: resolved.max_file_bytes,
-      secrets,
-    };
   } else {
     const loaded = readActiveNetworkStorageConfig(networkId, { requireEnabled: false });
     if (!loaded.ok) {
@@ -2520,13 +2716,18 @@ export function resolveStorageDownload(
   if (!networkId) {
     return { ok: false, status: 503, error: "storage_network_missing", message: "远程文件缺少网络归属" };
   }
-  // Allow downloading historical files even if the admin later toggled `enabled=false` (still configured!).
+  // Allow downloading historical files even if the admin later toggled `enabled=false` or switched between
+  // Hub-managed default storage and a custom network bucket.
   const loaded = readActiveNetworkStorageConfig(networkId, { requireEnabled: false });
-  if (!loaded.ok) return loaded;
-  if (!loaded.config) {
+  const hubDefault = readHubManagedStorageConfig();
+  let cfg: ActiveStorageRuntimeConfig | null = loaded.ok ? loaded.config : null;
+  if ((!cfg || !runtimeMatchesStorageMeta(cfg, storage)) && hubDefault && runtimeMatchesStorageMeta(hubDefault.config, storage)) {
+    cfg = { ...hubDefault.config, network_id: networkId };
+  }
+  if (!cfg) {
+    if (!loaded.ok) return loaded;
     return { ok: false, status: 503, error: "storage_not_configured", message: "当前网络存储配置已清除，无法读取远程文件" };
   }
-  const cfg = loaded.config;
 
   if (storage.provider === "modelscope") {
     const token = cfg.secrets.token || "";
