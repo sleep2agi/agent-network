@@ -64,7 +64,10 @@ describe("Claude channel attachments", () => {
 
     expect(result.failures).toEqual([]);
     expect(result.paths).toHaveLength(1);
-    expect(requests).toEqual([{ url: "http://hub.invalid/api/files/file_png_520", auth: "Bearer ntok_test_secret" }]);
+    expect(requests).toEqual([
+      { url: "http://hub.invalid/api/files/file_png_520/direct", auth: "Bearer ntok_test_secret" },
+      { url: "http://hub.invalid/api/files/file_png_520", auth: "Bearer ntok_test_secret" },
+    ]);
     expect(existsSync(result.paths[0]!)).toBe(true);
     expect([...readFileSync(result.paths[0]!)]).toEqual([...png]);
     expect(statSync(result.paths[0]!).mode & 0o777).toBe(0o600);
