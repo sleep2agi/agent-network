@@ -31,6 +31,7 @@ import {
   defaultControlledUploadRoots,
   uploadControlledLocalFile,
 } from "./controlled-upload";
+import { probeHubStorageUploadLimit } from "./direct-storage";
 
 import {
   appendChannelAttachmentPaths,
@@ -406,7 +407,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "commhub_upload_file",
-      description: "Upload a controlled local file to CommHub (returns file_id for attachments). Max 12 MiB. Rejects path traversal/symlinks/untrusted roots. Cross-host: streams bytes to Hub /api/upload.",
+      description: "Upload a controlled local file to CommHub (returns file_id for attachments). Uses direct external storage (S3/OSS) when enabled on the Hub (up to configured limit), or falls back to Hub /api/upload (12 MiB). Rejects path traversal/symlinks/untrusted roots.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -621,11 +622,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req: any) => {
 
   if (name === "commhub_upload_file") {
     const { path: filePath, name: fileName, mime } = args as any;
+    const maxBytes = await probeHubStorageUploadLimit({
+      hubUrl: COMMHUB_URL,
+      authToken: AUTH_TOKEN || "",
+    });
     const result = await uploadControlledLocalFile(String(filePath || ""), {
       hubUrl: COMMHUB_URL,
       authToken: AUTH_TOKEN || "",
       alias: ALIAS,
       nodeDir: process.env.ANET_NODE_DIR || undefined,
+      maxBytes,
       allowedRoots: defaultControlledUploadRoots({
         alias: ALIAS,
         nodeDir: process.env.ANET_NODE_DIR || undefined,

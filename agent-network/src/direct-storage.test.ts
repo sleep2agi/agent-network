@@ -1,0 +1,190 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { _clearDirectStorageCacheForTest, detectCallerCloud, probeHubStorageUploadLimit } from "./direct-storage";
+import { uploadControlledLocalFile } from "./controlled-upload";
+import { channelAttachmentCacheDir, downloadChannelAttachments } from "./channel-attachments";
+
+const dirs: string[] = [];
+const origCloud = process.env.ANET_CALLER_CLOUD;
+
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  if (origCloud === undefined) delete process.env.ANET_CALLER_CLOUD;
+  else process.env.ANET_CALLER_CLOUD = origCloud;
+  _clearDirectStorageCacheForTest();
+});
+
+describe("agent-network direct external storage relay (Claude Code channel)", () => {
+  test("detectCallerCloud honors ANET_CALLER_CLOUD=aws override", () => {
+    process.env.ANET_CALLER_CLOUD = "aws";
+    _clearDirectStorageCacheForTest();
+    expect(detectCallerCloud()).toBe("aws");
+    process.env.ANET_CALLER_CLOUD = "none";
+    _clearDirectStorageCacheForTest();
+    expect(detectCallerCloud()).toBeUndefined();
+  });
+
+  test("probeHubStorageUploadLimit returns configured max_file_bytes when Hub external storage is enabled", async () => {
+    const limit = await probeHubStorageUploadLimit({
+      hubUrl: "https://hub.example",
+      authToken: "ntok_probe_1",
+      fetch: (async () => Response.json({
+        ok: true,
+        configured: true,
+        enabled: true,
+        max_file_bytes: 150 * 1024 * 1024,
+      })) as typeof fetch,
+    });
+    expect(limit).toBe(150 * 1024 * 1024);
+  });
+
+  test("uploadControlledLocalFile uploads directly to S3 via presign -> PUT (with regional fallback) -> complete", async () => {
+    process.env.ANET_CALLER_CLOUD = "aws";
+    _clearDirectStorageCacheForTest();
+    const root = mkdtempSync(join(tmpdir(), "anet-direct-up-"));
+    dirs.push(root);
+    const filePath = join(root, "report.png");
+    const payload = Buffer.from("fake-png-bytes-for-s3-direct-upload");
+    writeFileSync(filePath, payload);
+
+    const calls: Array<{ method: string; url: string; cloudHeader: string | null }> = [];
+    const fetchMock = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      calls.push({ method: init?.method || "GET", url, cloudHeader: headers.get("x-anet-caller-cloud") });
+      if (url.endsWith("/api/uploads/presign")) {
+        return Response.json({
+          ok: true,
+          mode: "direct",
+          provider: "s3",
+          file_id: "direct_s3_file_001",
+          skip_upload: false,
+          upload: { method: "PUT", url: "https://b.s3-accelerate.amazonaws.com/k", headers: { "Content-Type": "image/png" } },
+          fallback_upload: { method: "PUT", url: "https://b.s3.us-west-2.amazonaws.com/k", headers: { "Content-Type": "image/png" } },
+        });
+      }
+      if (url.includes("s3-accelerate")) {
+        return new Response("edge timeout", { status: 503 });
+      }
+      if (url.includes("s3.us-west-2")) {
+        return new Response("", { status: 200 });
+      }
+      if (url.endsWith("/api/uploads/complete")) {
+        return Response.json({
+          ok: true,
+          file_id: "direct_s3_file_001",
+          name: "report.png",
+          mime: "image/png",
+          size: payload.byteLength,
+          url: "/api/files/direct_s3_file_001",
+          storage_provider: "s3",
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const res = await uploadControlledLocalFile(filePath, {
+      hubUrl: "https://hub.example",
+      authToken: "ntok_claude_test",
+      allowedRoots: [root],
+      maxBytes: 100 * 1024 * 1024,
+      fetch: fetchMock,
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.file_id).toBe("direct_s3_file_001");
+      expect(res.size).toBe(payload.byteLength);
+    }
+    expect(calls.map(c => `${c.method} ${c.url}`)).toEqual([
+      "POST https://hub.example/api/uploads/presign",
+      "PUT https://b.s3-accelerate.amazonaws.com/k",
+      "PUT https://b.s3.us-west-2.amazonaws.com/k",
+      "POST https://hub.example/api/uploads/complete",
+    ]);
+    expect(calls[0]?.cloudHeader).toBe("aws");
+  });
+
+  test("downloadChannelAttachments downloads directly from S3 with regional fallback and Hub ?proxy=1 cascade", async () => {
+    process.env.ANET_CALLER_CLOUD = "aws";
+    _clearDirectStorageCacheForTest();
+    const root = mkdtempSync(join(tmpdir(), "anet-direct-dl-"));
+    dirs.push(root);
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    // Case 1: Tier-1 accelerate 503 -> Tier-2 regional S3 200 (0 bytes through Hub!)
+    const urls1: string[] = [];
+    let cloudHeaderSeen: string | null = null;
+    const r1 = await downloadChannelAttachments({
+      meta: { attachments: [{ type: "file", file_id: "s3_direct_dl_001", name: "shot.png", mime: "image/png", size: png.length }] },
+    }, {
+      hubUrl: "https://hub.example",
+      authToken: "ntok_claude_dl",
+      cacheDir: channelAttachmentCacheDir(root, "node-s3-1"),
+      fetch: (async (input, init) => {
+        const u = String(input);
+        urls1.push(u);
+        if (u.endsWith("/direct")) {
+          cloudHeaderSeen = new Headers(init?.headers).get("x-anet-caller-cloud");
+          return Response.json({
+            ok: true,
+            mode: "direct",
+            provider: "s3",
+            url: "https://b.s3-accelerate.amazonaws.com/shot.png",
+            fallback_url: "https://b.s3.us-west-2.amazonaws.com/shot.png",
+            headers: {},
+          });
+        }
+        if (u.includes("s3-accelerate")) return new Response("err", { status: 503 });
+        if (u.includes("s3.us-west-2")) return new Response(png, { status: 200, headers: { "content-type": "image/png" } });
+        return new Response("unexpected", { status: 500 });
+      }) as typeof fetch,
+    });
+    expect(r1.failures).toEqual([]);
+    expect(r1.paths).toHaveLength(1);
+    expect([...readFileSync(r1.paths[0]!)]).toEqual([...png]);
+    expect(cloudHeaderSeen).toBe("aws");
+    expect(urls1).toEqual([
+      "https://hub.example/api/files/s3_direct_dl_001/direct",
+      "https://b.s3-accelerate.amazonaws.com/shot.png",
+      "https://b.s3.us-west-2.amazonaws.com/shot.png",
+    ]);
+
+    // Case 2: Both direct URLs fail -> Tier-3 Hub ?proxy=1 succeeds
+    const urls2: string[] = [];
+    const r2 = await downloadChannelAttachments({
+      meta: { attachments: [{ type: "file", file_id: "s3_direct_dl_002", name: "shot2.png", mime: "image/png", size: png.length }] },
+    }, {
+      hubUrl: "https://hub.example",
+      authToken: "ntok_claude_dl",
+      cacheDir: channelAttachmentCacheDir(root, "node-s3-2"),
+      fetch: (async (input) => {
+        const u = String(input);
+        urls2.push(u);
+        if (u.endsWith("/direct")) {
+          return Response.json({
+            ok: true,
+            mode: "direct",
+            provider: "s3",
+            url: "https://b.s3-accelerate.amazonaws.com/shot2.png",
+            fallback_url: "https://b.s3.us-west-2.amazonaws.com/shot2.png",
+            headers: {},
+          });
+        }
+        if (u.includes("amazonaws.com")) throw new Error("network unreachable");
+        if (u.endsWith("?proxy=1")) return new Response(png, { status: 200, headers: { "content-type": "image/png" } });
+        return new Response("unexpected", { status: 500 });
+      }) as typeof fetch,
+    });
+    expect(r2.failures).toEqual([]);
+    expect(r2.paths).toHaveLength(1);
+    expect(urls2).toEqual([
+      "https://hub.example/api/files/s3_direct_dl_002/direct",
+      "https://b.s3-accelerate.amazonaws.com/shot2.png",
+      "https://b.s3.us-west-2.amazonaws.com/shot2.png",
+      "https://hub.example/api/files/s3_direct_dl_002?proxy=1",
+    ]);
+  });
+});

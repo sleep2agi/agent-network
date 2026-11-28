@@ -10,9 +10,10 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { extname, join } from "node:path";
 import { chmodIfPosix } from "./posix-modes";
+import { probeDirectDownloadTarget } from "./direct-storage";
 
 const FILE_ID = /^[A-Za-z0-9_-]{8,64}$/;
-const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
+const DEFAULT_MAX_BYTES = 500 * 1024 * 1024;
 const READABLE_EXTENSION_SET = new Set([
   ".bmp", ".csv", ".docx", ".gif", ".jpeg", ".jpg", ".json",
   ".md", ".pdf", ".png", ".txt", ".webp",
@@ -122,17 +123,59 @@ async function fetchOne(
   const path = join(deps.cacheDir, `${fileId}${extension}`);
   if (existingRegularFile(path, expectedSize)) return { ok: true, path };
 
+  const fetchFn = deps.fetch ?? fetch;
+  const hubBase = deps.hubUrl.replace(/\/+$/, "");
+  const hubFileUrl = `${hubBase}/api/files/${encodeURIComponent(fileId)}`;
+
+  // Prefer direct external storage (/api/files/:id/direct -> S3/OSS primary -> regional fallback)
+  // so externally stored attachments bypass Hub bandwidth (0 Hub bytes), falling back to Hub ?proxy=1.
+  const probe = await probeDirectDownloadTarget({
+    hubUrl: deps.hubUrl,
+    authToken: deps.authToken,
+    fileId,
+    fetch: fetchFn,
+  });
+  if (probe.kind === "auth_failed") {
+    if (probe.status === 401) {
+      return { ok: false, code: "auth_failed", message: "Hub refused attachment download (HTTP 401): credential missing or invalid — sign in again" };
+    }
+    return { ok: false, code: "forbidden", message: "Hub refused attachment download (HTTP 403): this identity may not read this attachment — signing in again will not help" };
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
-  let response: Response;
+  let response: Response | null = null;
   try {
-    response = await (deps.fetch ?? fetch)(
-      `${deps.hubUrl.replace(/\/+$/, "")}/api/files/${encodeURIComponent(fileId)}`,
-      {
-        headers: { Authorization: `Bearer ${deps.authToken}` },
-        signal: controller.signal,
-      },
-    );
+    if (probe.kind === "direct") {
+      const candidates = probe.fallbackUrl ? [probe.url, probe.fallbackUrl] : [probe.url];
+      for (const targetUrl of candidates) {
+        try {
+          const directRes = await fetchFn(targetUrl, {
+            method: "GET",
+            headers: probe.headers,
+            signal: controller.signal,
+          });
+          if (directRes.ok) {
+            response = directRes;
+            break;
+          }
+          try { await directRes.body?.cancel?.(); } catch { /* ignore */ }
+        } catch {
+          // Try regional fallback or Hub proxy below.
+        }
+      }
+    }
+
+    if (!response) {
+      const fallbackUrl = probe.kind === "direct" ? `${hubFileUrl}?proxy=1` : hubFileUrl;
+      response = await fetchFn(
+        fallbackUrl,
+        {
+          headers: { Authorization: `Bearer ${deps.authToken}` },
+          signal: controller.signal,
+        },
+      );
+    }
   } catch (error) {
     return {
       ok: false,

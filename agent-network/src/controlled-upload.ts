@@ -26,6 +26,7 @@ import {
 } from "node:fs";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
+import { uploadBufferViaStorageRelay } from "./direct-storage";
 
 /** Mirrors server/src/uploads.ts MAX_UPLOAD_BYTES. */
 export const CONTROLLED_UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
@@ -74,6 +75,7 @@ export interface ControlledUploadDeps {
   nodeDir?: string;
   fetch?: typeof fetch;
   home?: string;
+  maxBytes?: number;
 }
 
 function sniffMime(name: string): string {
@@ -369,58 +371,29 @@ export async function uploadControlledLocalFile(
   const file = openFstatBoundedReadControlledFile(
     resolved.canonicalPath,
     roots,
-    CONTROLLED_UPLOAD_MAX_BYTES,
+    deps.maxBytes ?? CONTROLLED_UPLOAD_MAX_BYTES,
   );
   if (!file.ok) return file;
 
   const name = normalizeUploadName(opts.name ?? basename(file.canonicalPath));
   const mime = (opts.mime && opts.mime.slice(0, 100)) || sniffMime(name);
-  const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(file.bytes)], { type: mime }), name);
 
-  const url = `${deps.hubUrl.replace(/\/+$/, "")}/api/upload`;
-  const fetchFn = deps.fetch ?? fetch;
-  let res: Response;
-  try {
-    res = await fetchFn(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${deps.authToken}` },
-      body: form,
-    });
-  } catch (e: any) {
-    return { ok: false, error: "upload_failed", message: e?.message ?? "network error" };
-  }
-
-  let body: any;
-  try {
-    body = await res.json();
-  } catch {
-    return {
-      ok: false,
-      error: "bad_response",
-      message: `hub returned non-JSON (HTTP ${res.status})`,
-    };
-  }
-
-  if (!res.ok) {
-    return {
-      ok: false,
-      error: "upload_failed",
-      message: body?.message || body?.error || `HTTP ${res.status}`,
-    };
-  }
-
-  const fileId = body?.file_id ?? body?.fileId;
-  if (typeof fileId !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(fileId)) {
-    return { ok: false, error: "missing_file_id", message: "hub response missing valid file_id" };
-  }
+  const uploaded = await uploadBufferViaStorageRelay({
+    hubUrl: deps.hubUrl,
+    authToken: deps.authToken,
+    bytes: new Uint8Array(file.bytes),
+    name,
+    mime,
+    fetch: deps.fetch,
+  });
+  if (!uploaded.ok) return uploaded;
 
   return {
     ok: true,
-    file_id: fileId,
-    name: typeof body?.name === "string" && body.name ? normalizeUploadName(body.name, name) : name,
-    mime: typeof body?.mime === "string" && body.mime ? body.mime.slice(0, 100) : mime,
-    size: typeof body?.size === "number" ? body.size : file.size,
-    url: typeof body?.url === "string" ? body.url : `/api/files/${fileId}`,
+    file_id: uploaded.file_id,
+    name: normalizeUploadName(uploaded.name, name),
+    mime: uploaded.mime,
+    size: uploaded.size,
+    url: uploaded.url,
   };
 }
