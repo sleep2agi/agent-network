@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _clearDirectStorageCacheForTest, detectCallerCloud, probeHubStorageUploadLimit } from "./direct-storage";
@@ -186,5 +186,61 @@ describe("agent-network direct external storage relay (Claude Code channel)", ()
       "https://b.s3.us-west-2.amazonaws.com/shot2.png",
       "https://hub.example/api/files/s3_direct_dl_002?proxy=1",
     ]);
+  });
+
+  test("aborts streaming download on the overflowing chunk when Content-Length is absent and cleans up temp file", async () => {
+    const root = mkdtempSync(join(tmpdir(), "anet-stream-cap-"));
+    dirs.push(root);
+    const cacheDir = channelAttachmentCacheDir(root, "node-stream-cap");
+
+    let chunksPulled = 0;
+    let cancelled = false;
+    const totalChunks = 10;
+    const chunkSize = 400; // maxBytes = 1000 -> chunk 1 (400), chunk 2 (800), chunk 3 (1200 > 1000) must abort immediately
+
+    const res = await downloadChannelAttachments({
+      meta: { attachments: [{ type: "file", file_id: "stream_cap_001", name: "huge.pdf", mime: "application/pdf" }] },
+    }, {
+      hubUrl: "https://hub.example",
+      authToken: "ntok_stream_test",
+      cacheDir,
+      maxBytes: 1000,
+      fetch: (async (input) => {
+        const u = String(input);
+        if (u.endsWith("/direct")) {
+          return Response.json({
+            ok: true,
+            mode: "direct",
+            provider: "s3",
+            url: "https://b.s3.us-west-2.amazonaws.com/huge.pdf",
+            headers: {},
+          });
+        }
+        const stream = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (chunksPulled >= totalChunks) {
+              controller.close();
+              return;
+            }
+            chunksPulled++;
+            controller.enqueue(new Uint8Array(chunkSize).fill(0x41));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        });
+        // Deliberately omit Content-Length so pre-check cannot trigger.
+        return new Response(stream, { status: 200, headers: { "content-type": "application/pdf" } });
+      }) as typeof fetch,
+    });
+
+    expect(res.paths).toEqual([]);
+    expect(res.failures).toHaveLength(1);
+    expect(res.failures[0]?.code).toBe("size_exceeded");
+    expect(cancelled).toBe(true);
+    // Must stop at or right after the overflowing 3rd chunk (allowing at most 1 queued pull in ReadableStream HWM=1), NEVER draining all 10 chunks.
+    expect(chunksPulled).toBeLessThanOrEqual(4);
+    expect(chunksPulled).toBeLessThan(totalChunks);
+    expect(readdirSync(cacheDir)).toEqual([]);
   });
 });

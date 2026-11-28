@@ -1,11 +1,13 @@
 import {
-  chmodSync,
+  closeSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  openSync,
   renameSync,
   rmSync,
   statSync,
-  writeFileSync,
+  writeSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { extname, join } from "node:path";
@@ -204,36 +206,80 @@ async function fetchOne(
   const maxBytes = deps.maxBytes && deps.maxBytes > 0 ? deps.maxBytes : DEFAULT_MAX_BYTES;
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
+    try { await response.body?.cancel?.(); } catch {}
     return { ok: false, code: "size_exceeded", message: `attachment Content-Length exceeds ${maxBytes} bytes` };
   }
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(await response.arrayBuffer());
-  } catch (error) {
-    return {
-      ok: false,
-      code: "fetch_failed",
-      message: `attachment body read failed: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-  if (bytes.byteLength > maxBytes) {
-    return { ok: false, code: "size_exceeded", message: `attachment body exceeds ${maxBytes} bytes` };
+  if (!response.body) {
+    return { ok: false, code: "fetch_failed", message: "attachment response had no body" };
   }
 
   mkdirSync(deps.cacheDir, { recursive: true, mode: 0o700 });
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  let fd: number | null = null;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const cleanupTmp = () => {
+    if (fd !== null) {
+      try { closeSync(fd); } catch {}
+      fd = null;
+    }
+    try { rmSync(tmp, { force: true }); } catch {}
+  };
+
   try {
-    writeFileSync(tmp, bytes, { flag: "wx", mode: 0o600 });
+    fd = openSync(tmp, "wx", 0o600);
+    reader = response.body.getReader();
+    let written = 0;
+    while (true) {
+      let chunkResult: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunkResult = await reader.read();
+      } catch (error) {
+        try { await reader.cancel(); } catch {}
+        cleanupTmp();
+        return {
+          ok: false,
+          code: "fetch_failed",
+          message: `attachment body read failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      if (chunkResult.done) break;
+      const chunk = chunkResult.value;
+      if (!chunk || chunk.byteLength === 0) continue;
+      if (written + chunk.byteLength > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        cleanupTmp();
+        return {
+          ok: false,
+          code: "size_exceeded",
+          message: `attachment body exceeds ${maxBytes} bytes`,
+        };
+      }
+      let offset = 0;
+      while (offset < chunk.byteLength) {
+        offset += writeSync(fd, chunk, offset, chunk.byteLength - offset);
+      }
+      written += chunk.byteLength;
+    }
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
     chmodIfPosix(tmp, 0o600);
     renameSync(tmp, path);
     chmodIfPosix(path, 0o600);
   } catch (error) {
-    try { rmSync(tmp, { force: true }); } catch {}
+    if (reader) {
+      try { await reader.cancel(); } catch {}
+    }
+    cleanupTmp();
     return {
       ok: false,
       code: "write_failed",
       message: `attachment cache write failed: ${error instanceof Error ? error.message : String(error)}`,
     };
+  } finally {
+    if (reader) {
+      try { reader.releaseLock(); } catch {}
+    }
   }
   return { ok: true, path };
 }

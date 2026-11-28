@@ -341,7 +341,7 @@ export async function uploadBufferViaStorageRelay(opts: {
 
   // Fallback: legacy multipart POST /api/upload through Hub.
   const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(opts.bytes)], { type: opts.mime }), opts.name);
+  form.append("file", new Blob([opts.bytes as BlobPart], { type: opts.mime }), opts.name);
 
   let res: Response;
   try {

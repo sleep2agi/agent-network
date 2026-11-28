@@ -381,7 +381,7 @@ export async function uploadControlledLocalFile(
   const uploaded = await uploadBufferViaStorageRelay({
     hubUrl: deps.hubUrl,
     authToken: deps.authToken,
-    bytes: new Uint8Array(file.bytes),
+    bytes: file.bytes,
     name,
     mime,
     fetch: deps.fetch,

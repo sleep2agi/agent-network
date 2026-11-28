@@ -842,6 +842,7 @@
   "agent-network/src/demo-list-alignment.test.ts::anet demo 清单的名字列::取集正控:确实解析出了多行(0 行会让下面那条空过)": 1,
   "agent-network/src/demo-list-alignment.test.ts::anet demo 清单的名字列::🔴 每一行的名字列占同样多的显示列 —— 否则说明文字会错位": 1,
   "agent-network/src/demo-list-alignment.test.ts::anet demo 清单的名字列::🔴 清单里不留缺了 ESC 前缀的颜色码 —— 那是用户眼里的乱码": 1,
+  "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::aborts streaming download on the overflowing chunk when Content-Length is absent and cleans up temp file": 1,
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::detectCallerCloud honors ANET_CALLER_CLOUD=aws override": 1,
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::downloadChannelAttachments downloads directly from S3 with regional fallback and Hub ?proxy=1 cascade": 1,
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::probeHubStorageUploadLimit returns configured max_file_bytes when Hub external storage is enabled": 1,
@@ -10381,6 +10382,7 @@
   "agent-network/src/demo-list-alignment.test.ts::anet demo 清单的名字列::取集正控:确实解析出了多行(0 行会让下面那条空过)",
   "agent-network/src/demo-list-alignment.test.ts::anet demo 清单的名字列::🔴 每一行的名字列占同样多的显示列 —— 否则说明文字会错位",
   "agent-network/src/demo-list-alignment.test.ts::anet demo 清单的名字列::🔴 清单里不留缺了 ESC 前缀的颜色码 —— 那是用户眼里的乱码",
+  "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::aborts streaming download on the overflowing chunk when Content-Length is absent and cleans up temp file",
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::detectCallerCloud honors ANET_CALLER_CLOUD=aws override",
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::downloadChannelAttachments downloads directly from S3 with regional fallback and Hub ?proxy=1 cascade",
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::probeHubStorageUploadLimit returns configured max_file_bytes when Hub external storage is enabled",
@@ -19078,7 +19080,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "8d8f3363a182360a907bdcc2b2cfb0ea3ff4f124",
+  "commit": "a9d0c497cb5eb1b0970b229ff4be4786c44a57e6",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }
