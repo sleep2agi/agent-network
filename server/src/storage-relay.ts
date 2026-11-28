@@ -812,9 +812,14 @@ export interface HubManagedStorageRuntime {
 
 /**
  * Read optional Hub-level managed default external storage from environment variables
- * (`COMMHUB_STORAGE_PROVIDER`, `COMMHUB_STORAGE_BUCKET`, `COMMHUB_STORAGE_REGION`,
+ * (`COMMHUB_STORAGE_PROVIDER` — `s3` or `oss` only; `COMMHUB_STORAGE_BUCKET`, `COMMHUB_STORAGE_REGION`,
  * `COMMHUB_STORAGE_ENDPOINT`, `COMMHUB_STORAGE_ACCESS_KEY_ID`, `COMMHUB_STORAGE_ACCESS_KEY_SECRET`,
- * `COMMHUB_STORAGE_SESSION_TOKEN`, or ModelScope `COMMHUB_STORAGE_REPO_ID` / `COMMHUB_STORAGE_TOKEN`).
+ * `COMMHUB_STORAGE_SESSION_TOKEN`).
+ *
+ * ModelScope is intentionally refused for Hub-managed multi-network default storage as defense-in-depth:
+ * Hub-managed storage shares one backing store across networks and must use per-object presigned object
+ * storage (`s3` / `oss`) so master credentials cannot span networks and downloads never fall back to Hub bandwidth.
+ * Per-network admin self-configured ModelScope (`PUT /api/storage/config`) remains supported.
  *
  * Strictly private-only and SSRF-validated; returns null if unset, disabled (`COMMHUB_STORAGE_ENABLED=0/false`),
  * or invalid (fail-closed, never throws). Any network without a per-network override inherits this seamlessly.
@@ -828,7 +833,9 @@ export function readHubManagedStorageConfig(
   const rawProvider = (env.COMMHUB_STORAGE_PROVIDER ?? "").trim().toLowerCase();
   if (!rawProvider) return null;
   const provider = normalizeProvider(rawProvider, "s3");
-  if (!provider) return null;
+  // Defense-in-depth: Hub-managed multi-network default storage only permits per-object presigned
+  // object storage (s3 / oss), never modelscope.
+  if (!provider || provider === "modelscope") return null;
 
   const allowLoopback = isStorageLoopbackAllowed(env);
   const epCheck = validateStorageUrl(env.COMMHUB_STORAGE_ENDPOINT ?? "", "invalid_endpoint", { allowLoopback });
@@ -846,31 +853,6 @@ export function readHubManagedStorageConfig(
       return null;
     }
     maxFileBytes = n;
-  }
-
-  if (provider === "modelscope") {
-    const repoId = validateModelScopeRepoId(env.COMMHUB_STORAGE_REPO_ID ?? "");
-    const repoType = normalizeRepoType(env.COMMHUB_STORAGE_REPO_TYPE, "dataset");
-    const revision = validateModelScopeRevision(env.COMMHUB_STORAGE_REVISION ?? DEFAULT_MODELSCOPE_REVISION);
-    const token = (env.COMMHUB_STORAGE_TOKEN ?? env.COMMHUB_STORAGE_API_TOKEN ?? "").trim();
-    if (!repoId || !repoType || !revision || !isValidSecretString(token)) return null;
-    return {
-      config: {
-        enabled: true,
-        provider,
-        endpoint: epCheck.url,
-        region: "",
-        bucket: "",
-        repo_id: repoId,
-        repo_type: repoType,
-        revision,
-        prefix,
-        public_base_url: "",
-        max_file_bytes: maxFileBytes,
-        secrets: { token },
-      },
-      keyHint: maskStorageSecretTail(token),
-    };
   }
 
   const bucket = validateBucketName(env.COMMHUB_STORAGE_BUCKET ?? "");
@@ -936,12 +918,7 @@ function draftMatchesHubManagedWithoutSecrets(
   const epCheck = validateStorageUrl(epRaw, "invalid_endpoint", { allowLoopback });
   if (!epCheck.ok || epCheck.url !== target.endpoint) return false;
 
-  if (target.provider === "modelscope") {
-    const repoId = typeof draft.repo_id === "string" ? validateModelScopeRepoId(draft.repo_id) : target.repo_id;
-    const repoType = draft.repo_type !== undefined ? normalizeRepoType(draft.repo_type, target.repo_type) : target.repo_type;
-    const revision = typeof draft.revision === "string" ? validateModelScopeRevision(draft.revision) : target.revision;
-    return repoId === target.repo_id && repoType === target.repo_type && revision === target.revision;
-  }
+  if (target.provider === "modelscope") return false;
 
   const bucket = typeof draft.bucket === "string" ? validateBucketName(draft.bucket) : target.bucket;
   const region = typeof draft.region === "string" ? validateRegion(draft.region) : target.region;
