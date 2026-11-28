@@ -17,6 +17,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const FILE_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const HUB_LOCAL_UPLOAD_CAP = 12 * 1024 * 1024;
@@ -24,9 +25,47 @@ const REMOTE_MAX_UPLOAD_CEILING = 500 * 1024 * 1024;
 const LIMIT_CACHE_TTL_MS = 60_000;
 
 const uploadLimitCache = new Map<string, { maxBytes: number; expiresAt: number }>();
+let cachedCallerCloud: "aws" | "" | undefined;
 
 export function _clearDirectStorageCacheForTest(): void {
   uploadLimitCache.clear();
+  cachedCallerCloud = undefined;
+}
+
+/**
+ * Detect whether this agent-node runs on AWS EC2/Lambda (sync, 0ms, zero network calls).
+ * Used as a routing hint so AWS nodes hit regional S3 directly (~3ms, $0 Transfer Acceleration surcharge)
+ * while domestic China App clients continue using S3 Transfer Acceleration.
+ */
+export function detectCallerCloud(): "aws" | undefined {
+  const override = (process.env.ANET_CALLER_CLOUD || "").trim().toLowerCase();
+  if (override === "aws" || override === "ec2") return "aws";
+  if (override) return undefined;
+  if (cachedCallerCloud !== undefined) return cachedCallerCloud || undefined;
+
+  let detected: "aws" | "" = "";
+  if (process.env.AWS_EXECUTION_ENV) {
+    detected = "aws";
+  } else if (process.platform === "linux") {
+    for (const p of ["/sys/devices/virtual/dmi/id/sys_vendor", "/sys/devices/virtual/dmi/id/board_vendor"]) {
+      try {
+        const text = readFileSync(p, "utf-8");
+        if (/amazon\s+ec2/i.test(text)) {
+          detected = "aws";
+          break;
+        }
+      } catch {
+        /* non-EC2 or unreadable sysfs */
+      }
+    }
+  }
+  cachedCallerCloud = detected;
+  return detected || undefined;
+}
+
+function callerCloudHeaders(): Record<string, string> {
+  const cloud = detectCallerCloud();
+  return cloud ? { "X-ANet-Caller-Cloud": cloud } : {};
 }
 
 export interface DirectUploadRelayResultOk {
@@ -74,7 +113,10 @@ export async function probeHubStorageUploadLimit(opts: {
   try {
     const res = await fetchFn(`${hubBase}/api/storage/config`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${opts.authToken}` },
+      headers: {
+        Authorization: `Bearer ${opts.authToken}`,
+        ...callerCloudHeaders(),
+      },
       signal: AbortSignal.timeout(5_000),
     });
     if (res.ok) {
@@ -122,6 +164,7 @@ export async function uploadBufferViaStorageRelay(opts: {
       headers: {
         Authorization: `Bearer ${opts.authToken}`,
         "Content-Type": "application/json",
+        ...callerCloudHeaders(),
       },
       body: JSON.stringify({
         name: opts.name,
@@ -304,7 +347,10 @@ export async function uploadBufferViaStorageRelay(opts: {
   try {
     res = await fetchFn(`${hubBase}/api/upload`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${opts.authToken}` },
+      headers: {
+        Authorization: `Bearer ${opts.authToken}`,
+        ...callerCloudHeaders(),
+      },
       body: form,
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -360,7 +406,10 @@ export async function probeDirectDownloadTarget(opts: {
   try {
     const res = await fetchFn(`${hubBase}/api/files/${encodeURIComponent(opts.fileId)}/direct`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${opts.authToken}` },
+      headers: {
+        Authorization: `Bearer ${opts.authToken}`,
+        ...callerCloudHeaders(),
+      },
       signal: AbortSignal.timeout(15_000),
     });
     if (res.status === 401 || res.status === 403) {

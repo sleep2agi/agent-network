@@ -1073,9 +1073,137 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
       expect(dlAcc.ok).toBe(true);
       if (dlAcc.ok) {
         expect(new URL(dlAcc.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+        expect(dlAcc.route).toBe("accelerate");
         expect(dlAcc.fallback_url).toBeTruthy();
         expect(new URL(dlAcc.fallback_url!).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
       }
+
+      // 3. Caller-aware smart routing: AWS EC2 callers use regional S3 direct (3ms, $0 accel fee) with accelerate fallback,
+      // while China/App callers stay on s3-accelerate with regional fallback; OSS accelerate is unaffected for AWS callers.
+      const {
+        isAwsEc2Hostname,
+        shouldPreferRegionalOverAccelerate,
+      } = await import("./storage-relay.js");
+      expect(isAwsEc2Hostname("ip-172-31-42-211")).toBe(true);
+      expect(isAwsEc2Hostname("ip-10-0-1-5.us-west-2.compute.internal")).toBe(true);
+      expect(isAwsEc2Hostname("ec2-54-1-2-3.us-west-1.compute.amazonaws.com")).toBe(true);
+      expect(isAwsEc2Hostname("vansins-Mac-mini.local")).toBe(false);
+      expect(isAwsEc2Hostname("iZrj93pr2rcf5r2y9uo1oyZ")).toBe(false);
+      expect(isAwsEc2Hostname("ip-8-8-8-8")).toBe(false);
+      expect(shouldPreferRegionalOverAccelerate("s3", "https://s3-accelerate.amazonaws.com", { callerCloud: "aws" })).toBe(true);
+      expect(shouldPreferRegionalOverAccelerate("s3", "https://s3-accelerate.amazonaws.com", { callerCloud: "other" })).toBe(false);
+      expect(shouldPreferRegionalOverAccelerate("s3", "https://s3-accelerate.amazonaws.com", { callerCloud: "aws", routePreference: "accelerate" })).toBe(false);
+      expect(shouldPreferRegionalOverAccelerate("s3", "https://s3-accelerate.amazonaws.com", { routePreference: "regional" })).toBe(true);
+      expect(shouldPreferRegionalOverAccelerate("oss", "https://oss-accelerate.aliyuncs.com", { callerCloud: "aws" })).toBe(false);
+
+      const pAws = await presignStorageUpload(accelCfg, {
+        networkId: ownerNetworkId,
+        dateBucket: "2026-11-28",
+        fileId: "f_accel_aws_1",
+        ext: ".png",
+        size: 2048,
+        sha256: "d".repeat(64),
+        mime: "image/png",
+        route: { callerCloud: "aws", routePreference: "auto" },
+      });
+      expect(pAws.ok).toBe(true);
+      if (pAws.ok) {
+        expect(pAws.route).toBe("regional");
+        expect(new URL(pAws.upload!.url).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+        expect(new URL(pAws.fallback_upload!.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+        // Stored metadata retains the configured accelerate endpoint so CN App clients still get accelerated downloads!
+        expect(pAws.storage_meta.endpoint).toBe("https://s3-accelerate.amazonaws.com");
+        const dlForCnApp = resolveStorageDownload(ownerNetworkId, pAws.storage_meta);
+        expect(dlForCnApp.ok).toBe(true);
+        if (dlForCnApp.ok) {
+          expect(dlForCnApp.route).toBe("accelerate");
+          expect(new URL(dlForCnApp.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+          expect(new URL(dlForCnApp.fallback_url!).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+        }
+        const dlForAws = resolveStorageDownload(ownerNetworkId, pAws.storage_meta, { callerCloud: "aws" });
+        expect(dlForAws.ok).toBe(true);
+        if (dlForAws.ok) {
+          expect(dlForAws.route).toBe("regional");
+          expect(new URL(dlForAws.url).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+          expect(new URL(dlForAws.fallback_url!).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+        }
+      }
+
+      // 4. Live HTTP /api/uploads/presign honors X-ANet-Caller-Cloud, X-ANet-Storage-Route, and EC2 node hostname inference
+      saveNetworkStorageConfig(ownerNetworkId, null, "test", {
+        enabled: true,
+        provider: "s3",
+        bucket: "anet-private-usw1",
+        region: "us-west-1",
+        endpoint: "https://s3-accelerate.amazonaws.com",
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        access_key_secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      });
+      const httpDefault: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: "cn-app.png", mime: "image/png", size: 1024, sha256: "e".repeat(64) }),
+      }).then((r) => r.json());
+      expect(httpDefault.ok).toBe(true);
+      expect(httpDefault.route).toBe("accelerate");
+      expect(new URL(httpDefault.upload.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+      expect(new URL(httpDefault.fallback_upload.url).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+
+      const httpAwsHeader: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ownerToken}`,
+          "Content-Type": "application/json",
+          "X-ANet-Caller-Cloud": "aws",
+        },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: "aws-node.png", mime: "image/png", size: 1024, sha256: "e".repeat(64) }),
+      }).then((r) => r.json());
+      expect(httpAwsHeader.ok).toBe(true);
+      expect(httpAwsHeader.route).toBe("regional");
+      expect(new URL(httpAwsHeader.upload.url).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+      expect(new URL(httpAwsHeader.fallback_upload.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+
+      const httpAwsForceAccel: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ownerToken}`,
+          "Content-Type": "application/json",
+          "X-ANet-Caller-Cloud": "aws",
+          "X-ANet-Storage-Route": "accelerate",
+        },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: "aws-force.png", mime: "image/png", size: 1024, sha256: "e".repeat(64) }),
+      }).then((r) => r.json());
+      expect(httpAwsForceAccel.ok).toBe(true);
+      expect(httpAwsForceAccel.route).toBe("accelerate");
+      expect(new URL(httpAwsForceAccel.upload.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+
+      // Legacy AWS EC2 node without X-ANet-Caller-Cloud header gets automatic regional routing from its registered EC2 hostname
+      const { db } = await import("./db.js");
+      const { resolveToken } = await import("./auth.js");
+      const resolvedNodeTok = resolveToken(nodeToken);
+      const ec2NodeId = "n_ec2_route_test";
+      if (resolvedNodeTok?.tokenId) {
+        db.run("UPDATE api_tokens SET bound_node_id = ?1 WHERE token_id = ?2", [ec2NodeId, resolvedNodeTok.tokenId]);
+      }
+      db.run(
+        `INSERT OR REPLACE INTO sessions (resume_id, alias, hostname, status, network_id, node_id, last_seen_at)
+         VALUES (?1, ?2, ?3, 'idle', ?4, ?5, datetime('now'))`,
+        [`sdk-${ec2NodeId}`, "ec2-probe", "ip-172-31-42-211", ownerNetworkId, ec2NodeId],
+      );
+      const httpEc2Inferred: any = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${nodeToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "ec2-legacy.png", mime: "image/png", size: 1024, sha256: "f".repeat(64) }),
+      }).then((r) => r.json());
+      expect(httpEc2Inferred.ok).toBe(true);
+      expect(httpEc2Inferred.route).toBe("regional");
+      expect(new URL(httpEc2Inferred.upload.url).hostname).toBe("anet-private-usw1.s3.us-west-1.amazonaws.com");
+      expect(new URL(httpEc2Inferred.fallback_upload.url).hostname).toBe("anet-private-usw1.s3-accelerate.amazonaws.com");
+      db.run("DELETE FROM sessions WHERE resume_id = ?1", [`sdk-${ec2NodeId}`]);
+      if (resolvedNodeTok?.tokenId) {
+        db.run("UPDATE api_tokens SET bound_node_id = NULL WHERE token_id = ?1", [resolvedNodeTok.tokenId]);
+      }
+
       await fetch(`${hubBase}/api/storage/config?network_id=${ownerNetworkId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${ownerToken}` },
