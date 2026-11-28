@@ -845,6 +845,7 @@
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::aborts streaming download on the overflowing chunk when Content-Length is absent and cleans up temp file": 1,
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::detectCallerCloud honors ANET_CALLER_CLOUD=aws override": 1,
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::downloadChannelAttachments downloads directly from S3 with regional fallback and Hub ?proxy=1 cascade": 1,
+  "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::gives regional retry and Hub ?proxy=1 fallback fresh AbortSignals after direct timeout": 1,
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::probeHubStorageUploadLimit returns configured max_file_bytes when Hub external storage is enabled": 1,
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::uploadControlledLocalFile uploads directly to S3 via presign -> PUT (with regional fallback) -> complete": 1,
   "agent-network/src/display-width.test.ts::displayWidth::真实军团别名的宽度": 1,
@@ -10385,6 +10386,7 @@
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::aborts streaming download on the overflowing chunk when Content-Length is absent and cleans up temp file",
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::detectCallerCloud honors ANET_CALLER_CLOUD=aws override",
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::downloadChannelAttachments downloads directly from S3 with regional fallback and Hub ?proxy=1 cascade",
+  "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::gives regional retry and Hub ?proxy=1 fallback fresh AbortSignals after direct timeout",
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::probeHubStorageUploadLimit returns configured max_file_bytes when Hub external storage is enabled",
   "agent-network/src/direct-storage.test.ts::agent-network direct external storage relay (Claude Code channel)::uploadControlledLocalFile uploads directly to S3 via presign -> PUT (with regional fallback) -> complete",
   "agent-network/src/display-width.test.ts::displayWidth::真实军团别名的宽度",
@@ -19080,7 +19082,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "a9d0c497cb5eb1b0970b229ff4be4786c44a57e6",
+  "commit": "ac56d233e063bb6ece6363df940317c889dfdd43",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

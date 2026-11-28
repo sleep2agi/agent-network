@@ -16,6 +16,7 @@ import { probeDirectDownloadTarget } from "./direct-storage";
 
 const FILE_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const DEFAULT_MAX_BYTES = 500 * 1024 * 1024;
+const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const READABLE_EXTENSION_SET = new Set([
   ".bmp", ".csv", ".docx", ".gif", ".jpeg", ".jpg", ".json",
   ".md", ".pdf", ".png", ".txt", ".webp",
@@ -49,6 +50,7 @@ export interface ChannelAttachmentDeps {
   cacheDir: string;
   fetch?: typeof fetch;
   maxBytes?: number;
+  fetchTimeoutMs?: number;
 }
 
 export interface ChannelAttachmentResult {
@@ -144,18 +146,28 @@ async function fetchOne(
     return { ok: false, code: "forbidden", message: "Hub refused attachment download (HTTP 403): this identity may not read this attachment — signing in again will not help" };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const fetchTimeoutMs = deps.fetchTimeoutMs && deps.fetchTimeoutMs > 0
+    ? deps.fetchTimeoutMs
+    : DEFAULT_FETCH_TIMEOUT_MS;
+  const fetchWithFreshTimeout = async (url: string, init: RequestInit): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), fetchTimeoutMs);
+    try {
+      return await fetchFn(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   let response: Response | null = null;
   try {
     if (probe.kind === "direct") {
       const candidates = probe.fallbackUrl ? [probe.url, probe.fallbackUrl] : [probe.url];
       for (const targetUrl of candidates) {
         try {
-          const directRes = await fetchFn(targetUrl, {
+          const directRes = await fetchWithFreshTimeout(targetUrl, {
             method: "GET",
             headers: probe.headers,
-            signal: controller.signal,
           });
           if (directRes.ok) {
             response = directRes;
@@ -163,20 +175,16 @@ async function fetchOne(
           }
           try { await directRes.body?.cancel?.(); } catch { /* ignore */ }
         } catch {
-          // Try regional fallback or Hub proxy below.
+          // Try regional fallback or Hub proxy below with a fresh AbortController.
         }
       }
     }
 
     if (!response) {
       const fallbackUrl = probe.kind === "direct" ? `${hubFileUrl}?proxy=1` : hubFileUrl;
-      response = await fetchFn(
-        fallbackUrl,
-        {
-          headers: { Authorization: `Bearer ${deps.authToken}` },
-          signal: controller.signal,
-        },
-      );
+      response = await fetchWithFreshTimeout(fallbackUrl, {
+        headers: { Authorization: `Bearer ${deps.authToken}` },
+      });
     }
   } catch (error) {
     return {
@@ -184,8 +192,6 @@ async function fetchOne(
       code: "fetch_failed",
       message: `attachment fetch failed: ${error instanceof Error ? error.message : String(error)}`,
     };
-  } finally {
-    clearTimeout(timeout);
   }
   // 2026-10-31 —— **401 与 403 不能合并成同一个 code**（外部复核 (a)：「这里的 403 不是鉴权；
   // 接入方若把 403 统一映射成登录跳转，改 412」）。
