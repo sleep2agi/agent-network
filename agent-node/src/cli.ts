@@ -313,6 +313,11 @@ import {
   resolveCompensationPollMs,
   type CompensationPoller,
 } from "./runtime/commhub-poll-compensator";
+import {
+  createInboxFallbackPoller,
+  resolveInboxFallbackPollMs,
+  type InboxFallbackPoller,
+} from "./runtime/inbox-fallback-poller";
 
 
 // ── #1353 —— daemon 当下能不能创建节点,上报给 hub ──────────────────
@@ -2748,9 +2753,13 @@ async function runOneGoalWake(goal: AgentGoal): Promise<void> {
     codexThreadRebuilt = result.threadRebuilt;
     codexRebuildReason = result.rebuildReason;
   } else {
-    const r = await processTask(prompt, `goal:${idShort}`, goal.parent_task_id || null);
-    text = r.text;
-    failed = r.failed;
+    try {
+      const r = await processTask(prompt, `goal:${idShort}`, goal.parent_task_id || null);
+      text = r.text;
+      failed = r.failed;
+    } finally {
+      if (!commhubCompensation) scheduleWorkInboxDrain();
+    }
   }
   const summary = text.replace(/\s+/g, " ").slice(0, 500);
   const completed = isGoalCompleteSentinel(text);
@@ -7196,12 +7205,14 @@ const hubToolCall: HubToolCall = async (tool, args) => parseToolJson(await callC
 //         failure, leave queued for the next drain. On app-level
 //         rejection (e.g. target offline, task closed), drop with a
 //         loud warn — retrying would not help.
-async function ackAndRecordConsumed(msg: any, label: string): Promise<void> {
+async function ackAndRecordConsumed(msg: any, label: string): Promise<boolean> {
   try {
     await ackMessage(msg.id);
     commhubCompensation?.recordConsumed(msg);
+    return true;
   } catch (e: any) {
     warn(`ack failed for ${label} ${String(msg.id).slice(0, 8)}: ${e.message}`);
+    return false;
   }
 }
 
@@ -7308,7 +7319,10 @@ async function processInbox() {
     return;
   }
   const messages = await getInbox();
-  if (!messages.length) return;
+  if (!messages.length) {
+    debug("inbox poll: 0 messages");
+    return;
+  }
   const processInboxMessage = async (msg: any) => {
     // #cancel —— 控制消息是一条**指令**，不是任务：绝不能让它进模型回合。
     // 目前只有一种 op：interrupt（停掉当前在跑的那一轮）。
@@ -7360,6 +7374,7 @@ async function processInbox() {
       return;
     }
     inflightMessageIds.add(msg.id);
+    let turnSettledAndAcked = false;
     try {
       if (commhubCompensation?.wasConsumed(msg)) {
         log(`[commhub-compensation] suppress replay task=${logicalTaskIdFromInbox(msg).slice(0, 8)}`);
@@ -7440,7 +7455,7 @@ async function processInbox() {
         const replyText = daemonProgramReply(ALIAS);
         log(`← [${from}] (host_supervisor: free-text task answered by program, no LLM turn) ${content.slice(0, 80)}`);
         await deliverReplyReliably(from, replyText, logicalTaskId, false);
-        await ackAndRecordConsumed(msg, "daemon-program");
+        if (await ackAndRecordConsumed(msg, "daemon-program")) turnSettledAndAcked = true;
         return;
       }
 
@@ -7470,7 +7485,7 @@ async function processInbox() {
           interactiveDashboardTask,
         );
         await deliverReplyReliably(from, replyText, logicalTaskId, goalFailed);
-        await ackAndRecordConsumed(msg, "goal");
+        if (await ackAndRecordConsumed(msg, "goal")) turnSettledAndAcked = true;
         return;
       }
 
@@ -7482,6 +7497,7 @@ async function processInbox() {
       // reaches the front of the queue (see queuedRowStillPendingOnHub).
       queuedInboxRowByTask.set(logicalTaskId, msg.id);
       let skippedOnHub = false;
+      let peerReplyAcked = false;
       const inboxTurn = await runInboxTurnByReplyPolicy(
         { id: msg.id, from, content: runtimeContent, taskId: logicalTaskId },
         deliveryPolicy.replyExpected,
@@ -7508,11 +7524,15 @@ async function processInbox() {
               if (!skippedOnHub) throw e;
               debug(`ack after hub-side skip: ${e.message}`);
             }
+            peerReplyAcked = true;
             commhubCompensation?.recordConsumed(msg);
           },
         },
       );
-      if (inboxTurn.kind === "terminal_peer_reply") return;
+      if (inboxTurn.kind === "terminal_peer_reply") {
+        if (peerReplyAcked) turnSettledAndAcked = true;
+        return;
+      }
       const taskOutcome = inboxTurn.result;
       if (taskOutcome.skipped) {
         log(`skip reply: queued row ${logicalTaskId.slice(0, 8)} was no longer pending on hub; no turn ran`);
@@ -7522,6 +7542,7 @@ async function processInbox() {
           debug(`ack after hub-side skip: ${e.message}`);
         }
         commhubCompensation?.recordConsumed(msg);
+        turnSettledAndAcked = true;
         return;
       }
       const failed = taskOutcome.failed;
@@ -7547,7 +7568,7 @@ async function processInbox() {
         log(GROK_EXECUTION_MODE === "cli"
           ? `skip reply: low-value (${result.length} chars; content withheld)`
           : `skip reply: low-value (${result.slice(0, 30)})`);
-        await ackAndRecordConsumed(msg, "low-value");
+        if (await ackAndRecordConsumed(msg, "low-value")) turnSettledAndAcked = true;
         // #519 — the turn ran; record its result and close the task without an
         // inbox reply, so the sender is not woken by an acknowledgement.
         const closed = await closeLowValueTask(hubToolCall, { alias: ALIAS, taskId: logicalTaskId, msgType, result });
@@ -7568,6 +7589,7 @@ async function processInbox() {
         // cursor advances only after this transport acknowledgement succeeds.
         await ackMessage(msg.id);
         commhubCompensation?.recordConsumed(msg);
+        turnSettledAndAcked = true;
       } catch (e: any) {
         warn(`ack failed for message ${String(msg.id).slice(0, 8)}: ${e.message}`);
       }
@@ -7578,6 +7600,15 @@ async function processInbox() {
       // for the compensation layer. It still only wakes the existing bridge
       // lane; an active human turn will be steered by that bridge, never forked.
       commhubCompensation?.trigger("idle");
+      // #3902 — For runtimes without commhubCompensation, schedule one immediate
+      // follow-up drain after a settled & acked turn so tasks that arrived while
+      // working (even if SSE new_task was dropped) are consumed without waiting
+      // for the periodic fallback poll. Only triggers when transport ACK succeeded
+      // so unacked rows (self-replies, informational messages, failed ACKs) can
+      // never spin in a hot loop.
+      if (!commhubCompensation && turnSettledAndAcked) {
+        scheduleWorkInboxDrain();
+      }
     }
   };
 
@@ -7649,6 +7680,32 @@ function scheduleWorkInboxDrain() {
 function scheduleInformationalInboxDrain() {
   informationalInboxDrain.schedule(processOpencodeCopresenceMessages);
 }
+
+// #3902 — Low-frequency fallback inbox poller for runtimes without
+// commhubCompensation (every runtime except codex-app-server). SSE remains
+// primary; this catches dropped SSE frames or silent half-open streams without
+// overlapping codex-app-server's existing compensation loop.
+const inboxFallbackPoller: InboxFallbackPoller | null = !commhubCompensation
+  ? createInboxFallbackPoller({
+      intervalMs: resolveInboxFallbackPollMs(
+        fileConfig.flags?.inboxFallbackPollMs
+          ?? process.env.ANET_INBOX_FALLBACK_POLL_MS,
+      ),
+      adapters: {
+        getInbox,
+        scheduleWorkDrain: scheduleWorkInboxDrain,
+        scheduleInformationalDrain: scheduleInformationalInboxDrain,
+        isSuspended: () => sseSupersede.inboxSuspended,
+        isInflight: (id) => inflightMessageIds.has(id),
+        selfAlias: () => ALIAS,
+        splitOpencodeInformational: RUNTIME === "opencode" && opencodeMode === "copresence",
+        isSteer: wantsSteer,
+        log,
+        debug,
+        warn,
+      },
+    })
+  : null;
 
 // Helper used by both the goal-command path and the LLM-driven task path.
 // Wraps the "persist → try send → clear-or-leave-queued" sequence into a
@@ -7812,6 +7869,8 @@ async function handleTelegramMessage(tg: TelegramApi, msg: any) {
       : (e?.message ?? String(e));
     error(`telegram task failed: ${safeError}`);
     await telegramSend(tg, chatId, `处理出错: ${safeError}`, messageId).catch(() => {});
+  } finally {
+    if (!commhubCompensation) scheduleWorkInboxDrain();
   }
 }
 
@@ -8188,6 +8247,8 @@ function wireFeishuChildHandlers(
           } catch (e: any) {
             warn(`[feishu] think() threw: ${e?.message ?? e}`);
             replyText = `[agent-node 异常] ${e?.message ?? String(e)}`;
+          } finally {
+            if (!commhubCompensation) scheduleWorkInboxDrain();
           }
         }
 
@@ -8776,6 +8837,7 @@ async function connectSSE() {
               scheduleWorkInboxDrain();
               scheduleInformationalInboxDrain();
               commhubCompensation?.trigger("sse-reconnect");
+              inboxFallbackPoller?.noteConnected();
               // app#225 —— 断线/未连上期间桌面端可能已发起规则文件请求(hub 侧 60s 内
               // 仍 pending,门铃却没人听);连上后补拉一次,没有就是一次空拉。
               processRulesFileRequests(rulesFileDeps())
@@ -9581,6 +9643,7 @@ try {
 scheduleWorkInboxDrain();
 scheduleInformationalInboxDrain();
 commhubCompensation?.trigger("startup");
+inboxFallbackPoller?.start();
 // RFC-024 — fire a reportStatus immediately on startup so the
 // config_snapshot reaches the hub right after register(), instead of
 // waiting up to 3 minutes for the periodic timer below to fire. Hub
@@ -9891,6 +9954,7 @@ const shutdown = async () => {
   // Synchronous; fast.
   try { await loopsHttpServerHandle?.close(); } catch { /* already closed */ }
   commhubCompensation?.stop();
+  inboxFallbackPoller?.stop();
   await reportStatus("offline").catch(() => {});
   instanceLock?.release();
   process.exit(0);
