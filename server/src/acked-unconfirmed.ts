@@ -14,12 +14,50 @@ export type AckRecord = {
   networkId: string | null;
   ackedAtMs: number;
   hasReply: boolean;
+  /**
+   * 这条消息是否期待一个回复。
+   *
+   * 口径 ①（「该 alias 在窗口内是否产生过任何回复」作投递证据）只对**期待回复**的行成立：
+   * 通知 / 节点间回执这类 `requires_response = 'none'` 的行，ack 本身就是终点，
+   * 没有回复可等。把它们也拉进回退窗口 ⇒ ack 10 分钟后被回退成未读 ⇒ hub 重新投递 ⇒
+   * 节点再 ack ⇒ 再回退……全网都在原地打转（生产实测：orphan 通知 50 条 / idem 262 条
+   * 被反复回退，29,856 条 reply 型 inbox 行处于未读状态）。
+   */
+  expectsResponse: boolean;
+  /** 这条 ack 对应的逻辑任务 id（task 行的 tasks.task_id；非任务行可能是 inbox 行 id）。 */
+  taskId: string | null;
 };
 
 export type SweepVerdict =
   | { kind: "pending"; msLeft: number }
   | { kind: "delivered" }
   | { kind: "unconfirmed"; waitedMs: number };
+
+/**
+ * 这一行到底期不期待一个回复？（决定它要不要进 B 止血的回退窗口）
+ *
+ * 口径：
+ *   - `requires_response = 'none'` ⇒ 不期待（通知 / 节点间回执的显式声明）；
+ *   - `type = 'message'` ⇒ 不期待。普通聊天消息**不会被交给模型**（agent-node 的
+ *     `inboxDeliveryPolicy`：message ⇒ deliverToRuntime=false），收件方只会 ack 一条，
+ *     永远不会产出回复 ⇒ 等回复等于等一个永远不会来的东西 ⇒ 10 分钟后必被回退 ⇒
+ *     重投 ⇒ 再 ack ⇒ 再回退（生产实测：497 条 message 行 / 24h，ANet负责人 一台就回退 920 次）；
+ *   - `type = 'reply'` ⇒ 不期待。别人的任务结果行，回它就变成乒乓（agent-node 的
+ *     `replyExpected=false`：结果要立刻进模型，但绝不能再回一条）。
+ *
+ * 注意 `send_message` 早期没显式写 `requires_response`，吃的是列默认值 `'reply'`，
+ * 所以库里存着大量「message 行却标着 reply」的旧行 —— 这里按 type 兜底，新写入的行
+ * 则由 `send_message` 直接写 `'none'`（见 tools.ts）。
+ */
+export function rowExpectsResponse(row: { type?: string | null; requiresResponse?: string | null }): boolean {
+  if (row.requiresResponse === "none") return false;
+  const type = String(row.type ?? "task").toLowerCase();
+  // broadcast：一对多的通知，Hub 写入时 requires_response 仍是 'reply'，但没有人在等某个节点回它。
+  // 2026-11-28 生产：一条存储提醒广播给 363 个会话，被这里当成「待回复」回退未读后重投，
+  // 几百个节点每 10 分钟被唤醒一次，Hub 因此反复停顿 2–20 秒。control（停止等控制指令）同理，回执另有通道。
+  if (type === "message" || type === "reply" || type === "broadcast" || type === "control") return false;
+  return true;
+}
 
 /** 单条消息的判定：窗口内有回复 ⇒ delivered；窗口到期仍无回复 ⇒ unconfirmed。 */
 export function verdictFor(r: AckRecord, nowMs: number, windowMs: number): SweepVerdict {
@@ -47,10 +85,37 @@ const rememberReverted = (k: string) => {
   if (revertedOnce.size > REVERTED_ONCE_MAX) revertedOnce.delete(revertedOnce.values().next().value as string);
 };
 
-export function markAcked(input: { messageId: string; alias: string; networkId: string | null; nowMs?: number }): void {
+/**
+ * 「这个 alias 已经回复过某个任务」的证据（任务粒度）。
+ *
+ * 为什么需要它：节点的正常顺序是「先回执、后 ack 收件箱」（实测日志里两者只差 2 秒）。
+ * 只看「窗口内有没有回复」的话，**回复早于 ack 登记**的那条就永远等不到证据 ⇒
+ * 10 分钟后被回退成未读 ⇒ Hub 重投 ⇒ 节点再处理一遍（同一笔任务重复劳动，
+ * 生产日志里同一条 idem_797 被回退两次）。
+ * 这里把「已回复过某个任务」记下来（带 TTL），ack 登记时回查一次，顺序就无所谓了。
+ */
+const repliedTasks = new Map<string, number>();
+const taskKeyOf = (alias: string, networkId: string | null, taskId: string) => `${networkId ?? "global"}:${alias}:${taskId}`;
+const REPLIED_TASK_TTL_MS = 60 * 60 * 1000;
+
+export function markAcked(input: { messageId: string; alias: string; networkId: string | null; nowMs?: number; expectsResponse?: boolean; taskId?: string | null }): void {
   const k = keyOf(input.alias, input.networkId, input.messageId);
   if (acks.has(k) || revertedOnce.has(k)) return;
-  acks.set(k, { messageId: input.messageId, alias: input.alias, networkId: input.networkId, ackedAtMs: input.nowMs ?? Date.now(), hasReply: false });
+  const nowMs = input.nowMs ?? Date.now();
+  const taskId = input.taskId ?? null;
+  // 回执早于 ack 登记 ⇒ 用「这个 alias 已经回复过这个任务」作投递证据（见 repliedTasks）。
+  const repliedAt = taskId ? repliedTasks.get(taskKeyOf(input.alias, input.networkId, taskId)) : undefined;
+  const hasReply = repliedAt !== undefined && nowMs - repliedAt <= REPLIED_TASK_TTL_MS;
+  acks.set(k, {
+    messageId: input.messageId,
+    alias: input.alias,
+    networkId: input.networkId,
+    ackedAtMs: nowMs,
+    hasReply,
+    // 默认 true：拿不准时按旧口径（等回复）处理，不改变既有行为。
+    expectsResponse: input.expectsResponse ?? true,
+    taskId,
+  });
 }
 
 /**
@@ -58,14 +123,29 @@ export function markAcked(input: { messageId: string; alias: string; networkId: 
  * 「出站内容」包括回复（send_reply / send_peer_reply）和发给别的节点的任务（send_task）——
  * 节点之间就是用 send_task 往来的，只认回复会把正常工作的节点判成「没投递」。
  */
-export function markReply(alias: string, networkId: string | null): void {
+export function markReply(alias: string, networkId: string | null, opts?: { inReplyTo?: string | null; nowMs?: number }): void {
   for (const r of acks.values()) if (r.alias === alias && r.networkId === networkId) r.hasReply = true;
+  const taskId = opts?.inReplyTo ?? null;
+  if (!taskId) return;
+  // 任务粒度证据：记住「这个 alias 回复过这个任务」，让随后才登记的 ack 也能算已投递。
+  repliedTasks.set(taskKeyOf(alias, networkId, taskId), opts?.nowMs ?? Date.now());
+  // 精确匹配：回复的就是这条消息 / 这个任务 ⇒ 它自己的 ack 记录直接算已投递。
+  for (const r of acks.values()) {
+    if (r.alias !== alias || r.networkId !== networkId) continue;
+    if (r.taskId === taskId || r.messageId === taskId) r.hasReply = true;
+  }
+  if (repliedTasks.size > 10_000) {
+    const cutoff = Date.now() - REPLIED_TASK_TTL_MS;
+    for (const [k, at] of repliedTasks) if (at < cutoff) repliedTasks.delete(k);
+  }
 }
 
 /** 扫描：返回需要回退未读的条目，并把它们从登记里移除（避免重复告警）。 */
 export function sweepUnconfirmed(nowMs: number, windowMs: number): AckRecord[] {
   const out: AckRecord[] = [];
   for (const [k, r] of acks) {
+    // 不期待回复的行：ack 即终点，直接清掉，不进回退窗口（见 AckRecord.expectsResponse）。
+    if (!r.expectsResponse) { acks.delete(k); continue; }
     const v = verdictFor(r, nowMs, windowMs);
     if (v.kind === "unconfirmed") { out.push(r); acks.delete(k); rememberReverted(k); }
     else if (v.kind === "delivered") acks.delete(k);
@@ -73,5 +153,5 @@ export function sweepUnconfirmed(nowMs: number, windowMs: number): AckRecord[] {
   return out;
 }
 
-export function _resetForTest(): void { acks.clear(); revertedOnce.clear(); }
+export function _resetForTest(): void { acks.clear(); revertedOnce.clear(); repliedTasks.clear(); }
 export function _sizeForTest(): number { return acks.size; }

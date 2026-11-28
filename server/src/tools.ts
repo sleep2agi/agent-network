@@ -11,7 +11,7 @@ import { requestProviderSnapshot, requestProviderWrite, requestProviderCollectio
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestSecretUi } from "./secret-request-ui.js";
 import { validScopedSecretKey } from "./shared/scoped-secret-contract";
-import { markAcked, markReply } from "./acked-unconfirmed.js";
+import { markAcked, markReply, rowExpectsResponse } from "./acked-unconfirmed.js";
 import { getSessionRequest, takePendingForDaemon, ackSessionRequest } from "./opencode-session-requests.js";
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
 import { adoptedCloneSourceRow, requestAdopt, getAdopt, ackAdopt, unadopt, resolveManagedDaemon, activeBinding, createdDaemon } from "./node-daemon-bindings.js";
@@ -263,10 +263,13 @@ function guardRestrictedMemberTools(server: McpServer, restrictedNetsNow: () => 
     // 2026-11-23 —— 现查而不是注册时快照：实例被复用后，管理员把成员改成受限/解除受限
     // 必须在下一次调用就生效，不能等到 Hub 重启。
     if (!RESTRICTED_MEMBER_TOOLS.has(name)) {
-      const args = callArgs[0];
-      const raw = args && typeof args === "object" ? (args as Record<string, unknown>).network_id : undefined;
-      const net = typeof raw === "string" && raw.trim() ? raw.trim() : null;
-      if (!net || restrictedNetsNow().includes(net)) return denied(name);
+      const nets = restrictedNetsNow();
+      if (nets.length) {
+        const args = callArgs[0];
+        const raw = args && typeof args === "object" ? (args as Record<string, unknown>).network_id : undefined;
+        const net = typeof raw === "string" && raw.trim() ? raw.trim() : null;
+        if (!net || nets.includes(net)) return denied(name);
+      }
     }
     return handler(...callArgs);
   };
@@ -370,7 +373,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   // 请求内算一次（memoRequest），跨请求清空（/mcp 入口 resetRequestMemo）。
   const restrictedNetsNow = (): string[] => memoRequest(server, "restrictedNets", () =>
     enforceUserId && !callerTokenIsNetwork && !enforceNetworkId ? restrictedNetworkIds(enforceUserId) : []);
-  if (restrictedNetsNow().length) guardRestrictedMemberTools(server, restrictedNetsNow, enforceUserId!);
+  // 必须对所有用户令牌挂闸（闸内按 restrictedNetsNow() 现查）：
+  // 否则「先非受限进池 → 改为受限」会绕过闸，「先受限进池 → 解除受限」在省略 network_id 时也会持续被拒。
+  if (enforceUserId && !callerTokenIsNetwork && !enforceNetworkId) {
+    guardRestrictedMemberTools(server, restrictedNetsNow, enforceUserId);
+  }
   if (callerTokenIsNetwork && callerTokenId && enforceNetworkId) guardNodePermissionTools(server, callerTokenId, enforceNetworkId);
   // Default from_session for outbound tools — extracted from the calling
   // token's binding (ntok_ → node alias, utok_ → username). Without this,
@@ -1827,13 +1834,13 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // the original row can have id == task_id but is already ACKed, while
       // the current row has a fresh transport id and the same logical task_id.
       const inboxTaskParams: any[] = [message_id, alias];
-      let inboxTaskSql = `SELECT id, type, COALESCE(task_id, id) AS task_id
+      let inboxTaskSql = `SELECT id, type, requires_response, COALESCE(task_id, id) AS task_id
          FROM inbox
          WHERE session_name = ?2 AND acked = 0
            AND (id = ?1 OR (type = 'task' AND task_id = ?1))`;
       inboxTaskSql = addScope(inboxTaskSql, inboxTaskParams, effectiveNetId);
       inboxTaskSql += " ORDER BY created_at DESC LIMIT 1";
-      const inboxTask = db.get<{ id: string; type: string; task_id: string }>(inboxTaskSql, ...inboxTaskParams);
+      const inboxTask = db.get<{ id: string; type: string; requires_response: string | null; task_id: string }>(inboxTaskSql, ...inboxTaskParams);
       if (!inboxTask) {
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "message not found or already acknowledged" }) }],
@@ -1846,7 +1853,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       if (result.changes > 0) {
         // B 止血：记下「这条被签收了」。若窗口内该节点没有任何回复，会被扫描回退未读并告警
         // （口径 ①，负责⼈ 2026-11-20）。登记失败绝不能影响 ack 本身。
-        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null }); } catch {}
+        // 只有「期待回复」的行才进 B 止血的回退窗口：通知 / 节点间回执（requires_response='none'）
+        // 的 ack 本身就是终点，等不到回复也不该被回退成未读再重投（否则全网原地打转）。
+        // 普通聊天消息（type='message'）也不会进窗口：它根本不进模型，收件方只 ack 不回复，
+        // 等回复＝等一个永远不会来的东西（见 acked-unconfirmed.ts 的 rowExpectsResponse）。
+        try { markAcked({ messageId: inboxTask.id, alias, networkId: effectiveNetId ?? null, expectsResponse: rowExpectsResponse({ type: inboxTask.type, requiresResponse: inboxTask.requires_response }), taskId: inboxTask.task_id }); } catch {}
       }
       if (result.changes === 0) {
         return {
@@ -2582,11 +2593,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const meta = isSteer ? JSON.stringify({ delivery: "steer" }) : null;
       const id = uuidv4();
       db.run(
-        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, network_id, meta_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+        `INSERT INTO inbox (id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
         [id, targetAlias, target.session?.node_id ?? null, isControl ? "control" : "message",
          isControl ? "high" : "normal", isControl ? JSON.stringify({ op: "interrupt" }) : message,
-         from_session, effectiveNetId ?? null, meta]
+         from_session, isControl ? "reply" : "none", effectiveNetId ?? null, meta]
       );
 
       // 同 send_task：可达性用订阅者注册表判，不用心跳时间戳猜。
@@ -3161,7 +3172,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             ...("workOutcome" in replyOutcome ? { scheduled_work_outcome: replyOutcome.workOutcome } : {}),
             session_status: session?.status ?? "unknown",
             // B 止血（口径 ①）：这条回复就是「该 alias 有产出」的证据，窗口内的 acked 记录标成已投递。
-            ...(markReplySafe(args), {}),
+            ...(markReplySafe(args, in_reply_to), {}),
             ...(warning ? { warning } : {}),
             ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
           }),
@@ -3171,12 +3182,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
 
   // B 止血 —— 把「谁回复了」记成投递证据；失败绝不影响回复本身。
-  const markReplySafe = (args: any) => {
+  // in_reply_to 传进来（handleReply 里可能被推断出来）：任务粒度的证据能治
+  // 「先回执、后 ack」这个顺序问题（见 acked-unconfirmed.ts 的 repliedTasks）。
+  const markReplySafe = (args: any, inReplyTo?: string | null) => {
     try {
       const raw = typeof args?.from_session === "string" && args.from_session ? args.from_session : null;
       const alias = raw ?? (callerAlias ?? null);
       const net = (() => { try { return getNetworkId(args?.network_id) ?? null; } catch { return null; } })();
-      if (alias) markReply(alias, net);
+      if (alias) markReply(alias, net, { inReplyTo: inReplyTo ?? args?.in_reply_to ?? null });
     } catch {}
     return {};
   };
