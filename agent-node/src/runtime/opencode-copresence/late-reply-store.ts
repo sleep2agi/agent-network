@@ -135,3 +135,16 @@ export function listLateReplyRecords(nodeDir: string): { records: LateReplyRecor
  * 其余错误（网络、5xx、超时）都是可重试的，不能删。
  */
 export const isTerminalLateReplyError = (error: unknown): boolean => error === "reply_target_unresolved";
+
+/**
+ * 2026-11-28 —— 启动补发只补「最近」的迟到结果。
+ * 现场：一个节点升级重启后，把 11-16、11-17、11-23 留下的待补记录一次性全发了出去，
+ * 原发送方隔了一两周收到一串「[迟到结果] …请到该节点查看」—— 对谁都没用，只会把人叫醒。
+ * 超过 maxAgeMs（默认 24 小时）的记录、以及没有可解析时间的旧记录，一律视为过期：删掉、记一行日志，不再发送。
+ */
+export const LATE_REPLY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export function isStaleLateReplyRecord(rec: { armedAt: string }, nowMs: number = Date.now(), maxAgeMs: number = LATE_REPLY_MAX_AGE_MS): boolean {
+  const t = Date.parse(rec.armedAt || "");
+  if (!Number.isFinite(t)) return true;
+  return nowMs - t > maxAgeMs;
+}
