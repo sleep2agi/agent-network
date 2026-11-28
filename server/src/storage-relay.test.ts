@@ -29,6 +29,10 @@ let mockModelScopeEmptyObjectsDedup = false;
 let mockModelScopeBatchStatus = 200;
 let mockCommitBusyFailuresRemaining = 0;
 let mockExternalUploadHost = false;
+// "alias": LFS upload href on a different loopback hostname (no Hub token attached) — models
+// ModelScope LFS handing out a third-party/pre-authorised upload URL.
+// "self": href on the configured ModelScope host itself, which would need the network token.
+let mockUploadHostMode: "alias" | "self" = "alias";
 let capturedPutAuthHeader: string | null = null;
 let mockBucketPublicList = false;
 let mockBucketPublicObjectRead = false;
@@ -105,7 +109,9 @@ beforeAll(async () => {
         }
         const uploadHref = mockExternalUploadHost
           ? `https://third-party-oss.example.invalid/lfs/${obj.oid}`
-          : `${mockProviderBase}/lfs-upload/${obj.oid}`;
+          : mockUploadHostMode === "self"
+            ? `${mockProviderBase}/lfs-upload/${obj.oid}`
+            : `${mockProviderBase.replace("127.0.0.1", "localhost")}/lfs-upload/${obj.oid}`;
         return Response.json({
           transfer: "basic",
           objects: [{
@@ -744,16 +750,18 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
     });
     expect(nodeDirectRes.status).toBe(200);
     expect(nodeDirectRes.headers.get("Cache-Control")).toContain("no-store");
-    const nodeDirect: any = await nodeDirectRes.json();
-    expect(nodeDirect.mode).toBe("direct");
-    expect(nodeDirect.provider).toBe("modelscope");
-    expect(nodeDirect.url).toContain("/api/v1/datasets/owner/relay-repo/repo?");
+    const nodeDirectText = await nodeDirectRes.text();
+    // The network's ModelScope token must never reach a downloader (it would unlock the whole repo/account).
+    expect(nodeDirectText).not.toContain(mockExpectedToken);
+    const nodeDirect: any = JSON.parse(nodeDirectText);
+    expect(nodeDirect.mode).toBe("hub");
+    expect(nodeDirect.url).toBe(`/api/files/${presign.file_id}`);
+    expect(nodeDirect.headers).toBeUndefined();
 
-    // Direct GET from ModelScope succeeds with exact bytes
-    const directBytes = new Uint8Array(
-      await fetch(nodeDirect.url, { headers: nodeDirect.headers }).then((r) => r.arrayBuffer()),
-    );
-    expect(Buffer.from(directBytes)).toEqual(payload);
+    // The Hub streams it instead, with the token kept server-side.
+    const viaHub = await fetch(`${hubBase}${nodeDirect.url}`, { headers: { Authorization: `Bearer ${nodeToken}` } });
+    expect(viaHub.status).toBe(200);
+    expect(Buffer.from(await viaHub.arrayBuffer())).toEqual(payload);
 
     // 6. Legacy GET /api/files/:id transparently proxies for older clients (and respects restricted-member ACL!)
     const restrictedLegacy = await fetch(`${hubBase}/api/files/${presign.file_id}`, {
@@ -805,6 +813,39 @@ describe("Hub /api/storage/* & ModelScope/OSS/S3 direct relay HTTP E2E", () => {
       expect(extPresign.upload.headers.Cookie).toBeUndefined();
     } finally {
       mockExternalUploadHost = false;
+    }
+  });
+
+  test("ModelScope upload href that needs the network token falls back to Hub upload and never returns the token", async () => {
+    const bytes = Buffer.from("same-host-lfs-blob-needs-token");
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    mockUploadHostMode = "self";
+    try {
+      const res = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: "a.bin", mime: "application/octet-stream", size: bytes.length, sha256: sha }),
+      });
+      const text = await res.text();
+      expect(text).not.toContain(mockExpectedToken);
+      const body: any = JSON.parse(text);
+      expect(res.status).toBe(200);
+      expect(body.mode).toBe("hub");
+      expect(body.upload_url).toBe("/api/upload");
+      expect(body.fallback_reason).toBe("storage_credential_not_shareable");
+
+      // Above the Hub cap it fails loudly with a plain next step instead of leaking.
+      const big = await fetch(`${hubBase}/api/uploads/presign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ownerToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ network_id: ownerNetworkId, name: "big.mp4", mime: "video/mp4", size: 50 * 1024 * 1024, sha256: createHash("sha256").update("big").digest("hex") }),
+      });
+      const bigText = await big.text();
+      expect(bigText).not.toContain(mockExpectedToken);
+      expect(big.status).toBe(413);
+      expect(JSON.parse(bigText).error).toBe("storage_credential_not_shareable");
+    } finally {
+      mockUploadHostMode = "alias";
     }
   });
 
