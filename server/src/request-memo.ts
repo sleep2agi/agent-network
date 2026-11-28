@@ -29,3 +29,13 @@ export function memoRequest<T>(owner: object, key: string, compute: () => T): T 
 export function requestMemoKeysForTests(owner: object): string[] {
   return [...(memos.get(owner)?.keys() ?? [])];
 }
+
+/**
+ * 本次请求的调用方 IP（2026-11-28）。
+ * 以前 clientIP 是复用池键的一部分：同一个身份只要换了 IP（Web App、NAT 后的节点）就会多建一台实例，
+ * 160 个节点时池子 256 个位置被挤满、每分钟淘汰 100+ 台，命中率掉到 87%。工具层只在 report_status
+ * 兜底记录主机 IP 时用到它，所以改成每个请求单独设置，不进键。池子保证一台实例同一时刻只服务一个请求。
+ */
+const requestIPs = new WeakMap<object, string | undefined>();
+export function setRequestClientIP(owner: object, ip: string | undefined): void { requestIPs.set(owner, ip); }
+export function requestClientIP(owner: object): string | undefined { return requestIPs.get(owner); }

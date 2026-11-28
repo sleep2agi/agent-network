@@ -164,7 +164,7 @@ import { requestNodeSecrets, getScopedSecrets } from "./scoped-secrets.js";
 import { readEnvTransportLog } from "./env-transport-gate.js";
 import { enforceImpactOf, normalizePeerAllowlist, normalizeToolAllowlist, restAllowlistVerdict, restRouteLabel } from "./node-permissions.js";
 import { labelRoute, mcpRouteLabel, recordRouteTiming, routeStats, setRouteCallerMasterToken, setRouteCallerTokenReader, takeTickRouteCosts, timedJob } from "./route-timing.js";
-import { resetRequestMemo } from "./request-memo.js";
+import { resetRequestMemo, setRequestClientIP } from "./request-memo.js";
 import { handleExternalScheduleEditRequest } from "./external-schedule-edits.js";
 import { createNodeSessionControlRelay } from "./node-session-control.js";
 import { createSessionSourceTransport } from "./session-source-transport.js";
@@ -339,8 +339,6 @@ function sweepStaleRateLimits(): void {
 //   拿不到就现建，所以行为与「每次新建」一致，只是跳过重复注册。
 //   `COMMHUB_MCP_SERVER_POOL=0` 一键退回旧行为（每次新建，不复用），线上出问题不必回滚版本。
 export type CreateServerOptions = {
-  /** 调用方 IP：工具层用它做限流，所以进键。 */
-  clientIP: string | undefined;
   /** 令牌绑定的网络（节点令牌/网络令牌），工具层据此收窄读范围。 */
   enforceNetworkId: string | null | undefined;
   /** 令牌代表的用户（人类令牌）。 */
@@ -363,7 +361,7 @@ export type CreateServerOptions = {
  * 并有一条断言把「对象字段数/字段名」和这份清单钉在一起（见 mcp-server-pool-http.test.ts）。
  */
 export const CREATE_SERVER_FIELDS = [
-  "clientIP", "enforceNetworkId", "enforceUserId", "callerAlias",
+  "enforceNetworkId", "enforceUserId", "callerAlias",
   "callerTokenIsNetwork", "callerTokenId", "includeProtocolTools", "callerIdentityRejected",
 ] as const;
 
@@ -469,7 +467,7 @@ export function createServer(o: CreateServerOptions): McpServer {
     name: "commhub",
     version: "0.5.0",
   });
-  registerTools(server, o.clientIP, o.enforceNetworkId, o.enforceUserId, o.callerAlias, o.callerTokenIsNetwork, o.callerTokenId, { includeProtocol: o.includeProtocolTools }, o.callerIdentityRejected);
+  registerTools(server, undefined, o.enforceNetworkId, o.enforceUserId, o.callerAlias, o.callerTokenIsNetwork, o.callerTokenId, { includeProtocol: o.includeProtocolTools }, o.callerIdentityRejected);
   return server;
 }
 
@@ -2424,8 +2422,8 @@ return Bun.serve({
       }
       // #478:tools/list 按调用者过滤;X-Anet-Tools: all / ?tools=all 时节点令牌也列出协议工具。
       // 复用池的键由这同一个对象生成（CREATE_SERVER_FIELDS = 全部字段，见 createServer 上方注释）。
+      // 调用方 IP 不进池子的键（见 request-memo.ts setRequestClientIP），每个请求单独设置。
       const { server: mcpServer, key: mcpServerKey } = acquireServer({
-        clientIP,
         enforceNetworkId: enforceNetId,
         enforceUserId: authCtx?.userId || null,
         callerAlias,
@@ -2439,6 +2437,7 @@ return Bun.serve({
       try {
         // 池子复用同一实例 ⇒ 上一请求的权限/身份缓存必须清零（见 request-memo.ts）。
         resetRequestMemo(mcpServer);
+        setRequestClientIP(mcpServer, clientIP);
         await mcpServer.connect(transport);
         response = await transport.handleRequest(req, mcpParsedBody === undefined ? undefined : { parsedBody: mcpParsedBody });
         // 服务端错误（5xx）说明这台实例状态不明 ⇒ 不回池，交给 GC。

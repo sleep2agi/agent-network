@@ -1,5 +1,5 @@
 import { allStatusCacheKey, cachedAllStatus, invalidateAllStatusCache, rosterChanged } from "./all-status-cache.js";
-import { memoRequest } from "./request-memo.js";
+import { memoRequest, requestClientIP } from "./request-memo.js";
 import { descriptionSummary } from "./node-attrs-validate.js";
 import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { enqueueBroadcast } from "./broadcast-fanout.js";
@@ -1321,7 +1321,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       const storedStatus = offlineDeferred ? (priorStatus && priorStatus !== "offline" ? priorStatus : "idle") : status;
       const trimmedOutput = output?.slice(0, 4000);
       const hostHostname = host?.hostname || hn || null;
-      const hostIp = host?.ip || clientIP || null;
+      const hostIp = host?.ip || requestClientIP(server) || clientIP || null;
       const cpuLoad1m = typeof host?.cpu_load_1min === "number" ? host.cpu_load_1min : null;
       const cpuCores = typeof host?.cpu_cores === "number" ? host.cpu_cores : null;
       const memTotalGb = typeof host?.mem_total_gb === "number" ? host.mem_total_gb : null;

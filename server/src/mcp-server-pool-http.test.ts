@@ -131,7 +131,7 @@ describe("McpServer 复用池：键完整性 / 开关 / 失效路径", () => {
     const { CREATE_SERVER_FIELDS, poolKeyOf } = await import("./server.js");
     // 每个字段给一个互不相同的标记值，便于逐字段比对键
     const base = {
-      clientIP: "10.1.1.1", enforceNetworkId: "net_a", enforceUserId: "u_a", callerAlias: "node-a",
+      enforceNetworkId: "net_a", enforceUserId: "u_a", callerAlias: "node-a",
       callerTokenIsNetwork: true, callerTokenId: "tok_a", includeProtocolTools: false, callerIdentityRejected: false,
     } as Record<string, unknown>;
     // ① 字段清单必须覆盖对象的全部字段（多一个字段就说明 createServer 加了参数却没进清单）
