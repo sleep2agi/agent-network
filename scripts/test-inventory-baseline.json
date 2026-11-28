@@ -3995,6 +3995,7 @@
   "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::3-tier download cascade: primary direct fails -> regional fallback_url fails -> Hub ?proxy=1 delivers exact bytes": 1,
   "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::downloads bytes directly from ModelScope URL returned by /api/files/:id/direct (0 Hub bytes)": 1,
   "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::probeHubStorageUploadLimit reads Hub remote limit and falls back to 12 MiB when disabled": 1,
+  "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::sends X-ANet-Caller-Cloud: aws on presign & direct download when running on AWS": 1,
   "agent-node/src/runtime/direct-storage.test.ts::uploadBufferViaStorageRelay::LFS dedup (skip_upload=true) skips PUT and commits directly": 1,
   "agent-node/src/runtime/direct-storage.test.ts::uploadBufferViaStorageRelay::degradation: retries fallback_upload on accelerate PUT failure, and degrades <=12MiB to Hub /api/upload when all direct PUTs fail": 1,
   "agent-node/src/runtime/direct-storage.test.ts::uploadBufferViaStorageRelay::direct ModelScope/OSS/S3 path: presign -> direct PUT (no Hub token leaked) -> complete": 1,
@@ -13490,6 +13491,7 @@
   "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::3-tier download cascade: primary direct fails -> regional fallback_url fails -> Hub ?proxy=1 delivers exact bytes",
   "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::downloads bytes directly from ModelScope URL returned by /api/files/:id/direct (0 Hub bytes)",
   "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::probeHubStorageUploadLimit reads Hub remote limit and falls back to 12 MiB when disabled",
+  "agent-node/src/runtime/direct-storage.test.ts::resolveAttachmentToLocalPath — direct external download::sends X-ANet-Caller-Cloud: aws on presign & direct download when running on AWS",
   "agent-node/src/runtime/direct-storage.test.ts::uploadBufferViaStorageRelay::LFS dedup (skip_upload=true) skips PUT and commits directly",
   "agent-node/src/runtime/direct-storage.test.ts::uploadBufferViaStorageRelay::degradation: retries fallback_upload on accelerate PUT failure, and degrades <=12MiB to Hub /api/upload when all direct PUTs fail",
   "agent-node/src/runtime/direct-storage.test.ts::uploadBufferViaStorageRelay::direct ModelScope/OSS/S3 path: presign -> direct PUT (no Hub token leaked) -> complete",
@@ -18990,7 +18992,7 @@
  ],
  "source": {
   "command": "python3 scripts/check-test-inventory.py --update",
-  "commit": "029b74c51224a805f2dceedeed94056c92f97d9d",
+  "commit": "9e8436eeca4303614a9d48e8adbed8e826d3f635",
   "definition_sha256": "fba92c28f0e169b361a6d87e0988b95e2fea2e395e4759d3b5a3760b9dccc753",
   "predicate": "server/**/*.test.ts 里 test/it 的字面量名字（多重集）+ describe 内 dynamic 上限"
  }

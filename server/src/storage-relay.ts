@@ -192,6 +192,57 @@ export interface DirectUploadInstruction {
   headers: Record<string, string>;
 }
 
+export type StorageRoutePreference = "auto" | "accelerate" | "regional";
+export type StorageCallerCloud = "aws" | "other";
+export type StorageEffectiveRoute = "accelerate" | "regional";
+
+export interface StorageRouteOptions {
+  callerCloud?: StorageCallerCloud;
+  routePreference?: StorageRoutePreference;
+}
+
+export function parseStorageRoutePreference(raw: unknown): StorageRoutePreference {
+  if (typeof raw !== "string") return "auto";
+  const v = raw.trim().toLowerCase();
+  if (v === "regional" || v === "direct") return "regional";
+  if (v === "accelerate" || v === "accel") return "accelerate";
+  return "auto";
+}
+
+export function parseStorageCallerCloud(raw: unknown): StorageCallerCloud | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().toLowerCase();
+  if (v === "aws" || v === "ec2") return "aws";
+  if (v) return "other";
+  return undefined;
+}
+
+/** Detect default AWS EC2 hostnames (e.g. ip-172-31-42-211, ip-10-0-1-5.us-west-2.compute.internal, ec2-1-2-3-4...). */
+export function isAwsEc2Hostname(hostname: string | null | undefined): boolean {
+  if (!hostname || typeof hostname !== "string") return false;
+  const h = hostname.trim().toLowerCase();
+  return /^ip-(?:10-\d{1,3}|172-(?:1[6-9]|2\d|3[01])|192-168)-\d{1,3}-\d{1,3}(?:\.[\w.-]+\.compute\.internal)?$/.test(h)
+    || /^ec2-\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\.[\w.-]+\.amazonaws\.com$/.test(h);
+}
+
+/**
+ * When Transfer Acceleration is configured for AWS S3, AWS EC2 callers ride the AWS
+ * private global backbone directly to regional S3 (~3ms, $0 acceleration surcharge)
+ * instead of detouring through CloudFront edge PoPs ($0.04-$0.08/GB).
+ * Non-AWS callers (e.g. domestic China App clients) keep Transfer Acceleration primary with regional fallback.
+ */
+export function shouldPreferRegionalOverAccelerate(
+  provider: "oss" | "s3",
+  endpoint: string,
+  routeOpts: StorageRouteOptions = {},
+): boolean {
+  if (!isObjectStorageAccelerateEndpoint(provider, endpoint)) return false;
+  const pref = routeOpts.routePreference ?? "auto";
+  if (pref === "regional") return true;
+  if (pref === "accelerate") return false;
+  return provider === "s3" && routeOpts.callerCloud === "aws";
+}
+
 export type PresignStorageResult =
   | {
       ok: true;
@@ -199,8 +250,10 @@ export type PresignStorageResult =
       object_key: string;
       skip_upload: boolean;
       upload: DirectUploadInstruction | null;
-      /** Optional regional fallback PUT target when primary upload uses a Transfer Acceleration endpoint. */
+      /** Optional fallback PUT target when Transfer Acceleration is enabled (regional <-> accelerate). */
       fallback_upload?: DirectUploadInstruction | null;
+      /** Selected object storage route when Transfer Acceleration is enabled. */
+      route?: StorageEffectiveRoute;
       storage_meta: RemoteStorageIndexMeta;
     }
   | { ok: false; status: number; error: string; message: string };
@@ -214,8 +267,10 @@ export type ResolveDownloadResult =
       ok: true;
       provider: StorageProvider;
       url: string;
-      /** Optional regional fallback GET target when primary download uses a Transfer Acceleration endpoint. */
+      /** Optional fallback GET target when Transfer Acceleration is enabled (regional <-> accelerate). */
       fallback_url?: string;
+      /** Selected object storage route when Transfer Acceleration is enabled. */
+      route?: StorageEffectiveRoute;
       headers: Record<string, string>;
       expires_in: number;
     }
@@ -2004,6 +2059,7 @@ export async function presignStorageUpload(
     size: number;
     sha256: string;
     mime: string;
+    route?: StorageRouteOptions;
   },
   fetchFn: typeof fetch = fetch,
   ssrfOpts: SafeStorageUrlOptions = {},
@@ -2145,12 +2201,20 @@ export async function presignStorageUpload(
       return { ok: false, status: 400, error: "storage_ssrf_blocked", message: epCheck.message };
     }
   }
+  const accelConfigured = isObjectStorageAccelerateEndpoint(cfg.provider, cfg.endpoint);
+  const preferRegional = accelConfigured && shouldPreferRegionalOverAccelerate(cfg.provider, cfg.endpoint, params.route);
+  const primaryEndpoint = preferRegional ? "" : cfg.endpoint;
+  const fallbackEndpoint = preferRegional ? cfg.endpoint : "";
+  const effectiveRoute: StorageEffectiveRoute | undefined = accelConfigured
+    ? (preferRegional ? "regional" : "accelerate")
+    : undefined;
+
   const signedPutUrl = signObjectStoragePresignedUrl({
     provider: cfg.provider,
     method: "PUT",
     bucket: cfg.bucket,
     region: cfg.region,
-    endpoint: cfg.endpoint,
+    endpoint: primaryEndpoint,
     objectKey,
     accessKeyId: ak,
     accessKeySecret: sk,
@@ -2158,9 +2222,9 @@ export async function presignStorageUpload(
     expiresSeconds: PRESIGN_TTL_SECONDS,
   });
 
-  // When primary upload uses Transfer Acceleration, also provide a regional presigned PUT URL
-  // so clients can transparently fall back to regional direct upload if an edge PoP hiccups.
-  const fallbackUpload: DirectUploadInstruction | null = isObjectStorageAccelerateEndpoint(cfg.provider, cfg.endpoint)
+  // When Transfer Acceleration is configured, always emit the complementary fallback PUT target
+  // (regional for external/CN accelerate callers; accelerate for AWS regional-direct callers).
+  const fallbackUpload: DirectUploadInstruction | null = accelConfigured
     ? {
         method: "PUT",
         url: signObjectStoragePresignedUrl({
@@ -2168,7 +2232,7 @@ export async function presignStorageUpload(
           method: "PUT",
           bucket: cfg.bucket,
           region: cfg.region,
-          endpoint: "",
+          endpoint: fallbackEndpoint,
           objectKey,
           accessKeyId: ak,
           accessKeySecret: sk,
@@ -2199,6 +2263,7 @@ export async function presignStorageUpload(
       headers: {},
     },
     ...(fallbackUpload ? { fallback_upload: fallbackUpload } : {}),
+    ...(effectiveRoute ? { route: effectiveRoute } : {}),
     storage_meta: storageMeta,
   };
 }
@@ -2450,6 +2515,7 @@ export async function completeStorageUpload(
 export function resolveStorageDownload(
   networkId: string | undefined,
   storage: RemoteStorageIndexMeta,
+  routeOpts: StorageRouteOptions = {},
 ): ResolveDownloadResult {
   if (!networkId) {
     return { ok: false, status: 503, error: "storage_network_missing", message: "远程文件缺少网络归属" };
@@ -2501,25 +2567,33 @@ export function resolveStorageDownload(
       return { ok: false, status: 400, error: "storage_ssrf_blocked", message: epCheck.message };
     }
   }
+  const accelConfigured = isObjectStorageAccelerateEndpoint(storage.provider, ep);
+  const preferRegional = accelConfigured && shouldPreferRegionalOverAccelerate(storage.provider, ep, routeOpts);
+  const primaryEndpoint = preferRegional ? "" : ep;
+  const fallbackEndpoint = preferRegional ? ep : "";
+  const effectiveRoute: StorageEffectiveRoute | undefined = accelConfigured
+    ? (preferRegional ? "regional" : "accelerate")
+    : undefined;
+
   const signedGetUrl = signObjectStoragePresignedUrl({
     provider: storage.provider,
     method: "GET",
     bucket: storage.bucket || cfg.bucket,
     region: storage.region || cfg.region,
-    endpoint: ep,
+    endpoint: primaryEndpoint,
     objectKey: storage.object_key,
     accessKeyId: ak,
     accessKeySecret: sk,
     sessionToken: cfg.secrets.session_token,
     expiresSeconds: PRESIGN_TTL_SECONDS,
   });
-  const fallbackUrl = isObjectStorageAccelerateEndpoint(storage.provider, ep)
+  const fallbackUrl = accelConfigured
     ? signObjectStoragePresignedUrl({
         provider: storage.provider,
         method: "GET",
         bucket: storage.bucket || cfg.bucket,
         region: storage.region || cfg.region,
-        endpoint: "",
+        endpoint: fallbackEndpoint,
         objectKey: storage.object_key,
         accessKeyId: ak,
         accessKeySecret: sk,
@@ -2532,6 +2606,7 @@ export function resolveStorageDownload(
     provider: storage.provider,
     url: signedGetUrl,
     ...(fallbackUrl ? { fallback_url: fallbackUrl } : {}),
+    ...(effectiveRoute ? { route: effectiveRoute } : {}),
     headers: {},
     expires_in: PRESIGN_TTL_SECONDS,
   };

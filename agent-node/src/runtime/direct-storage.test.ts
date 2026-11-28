@@ -391,4 +391,67 @@ describe("resolveAttachmentToLocalPath — direct external download", () => {
     });
     expect(disabledLimit).toBe(12 * 1024 * 1024);
   });
+
+  test("sends X-ANet-Caller-Cloud: aws on presign & direct download when running on AWS", async () => {
+    const prev = process.env.ANET_CALLER_CLOUD;
+    process.env.ANET_CALLER_CLOUD = "aws";
+    _clearDirectStorageCacheForTest();
+    try {
+      const seenHeaders: Array<{ url: string; cloud?: string }> = [];
+      const payload = Buffer.from("aws-direct-route-bytes");
+      const fakeFetch: typeof fetch = async (input: any, init: any) => {
+        const url = String(input);
+        const h = (init?.headers || {}) as Record<string, string>;
+        seenHeaders.push({ url, cloud: h["X-ANet-Caller-Cloud"] });
+        if (url.endsWith("/api/uploads/presign")) {
+          return Response.json({
+            ok: true,
+            mode: "direct",
+            provider: "s3",
+            route: "regional",
+            file_id: "awsroute12345678",
+            skip_upload: true,
+            upload: null,
+          });
+        }
+        if (url.endsWith("/api/uploads/complete")) {
+          return Response.json({ ok: true, file_id: "awsroute12345678", url: "/api/files/awsroute12345678" });
+        }
+        if (url.endsWith("/api/files/awsroute12345678/direct")) {
+          return Response.json({
+            ok: true,
+            mode: "direct",
+            provider: "s3",
+            route: "regional",
+            url: "https://bucket.s3.us-west-1.amazonaws.com/k",
+            headers: {},
+          });
+        }
+        return new Response(payload, { status: 200, headers: { "Content-Length": String(payload.length) } });
+      };
+
+      const up = await uploadBufferViaStorageRelay({
+        hubUrl: "http://hub.test:9200",
+        authToken: "ntok_aws_1",
+        bytes: payload,
+        name: "a.bin",
+        mime: "application/octet-stream",
+        fetch: fakeFetch,
+      });
+      expect(up.ok).toBe(true);
+      const dl = await resolveAttachmentToLocalPath(
+        { file_id: "awsroute12345678", name: "a.bin", mime: "application/octet-stream", size: payload.length },
+        { hubUrl: "http://hub.test:9200", authToken: "ntok_aws_1", cacheDir: TEST_DIR, fetch: fakeFetch },
+      );
+      expect(dl.ok).toBe(true);
+      expect(seenHeaders.find((s) => s.url.endsWith("/api/uploads/presign"))?.cloud).toBe("aws");
+      expect(seenHeaders.find((s) => s.url.endsWith("/api/files/awsroute12345678/direct"))?.cloud).toBe("aws");
+      // External S3 URL must never receive our internal Hub routing header
+      expect(seenHeaders.find((s) => s.url.includes("s3.us-west-1"))?.cloud).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.ANET_CALLER_CLOUD;
+      else process.env.ANET_CALLER_CLOUD = prev;
+      _clearDirectStorageCacheForTest();
+    }
+  });
 });

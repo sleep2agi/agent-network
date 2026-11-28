@@ -135,6 +135,9 @@ import {
   StorageSsrfError,
   completeStorageUpload,
   deleteNetworkStorageConfig,
+  isAwsEc2Hostname,
+  parseStorageCallerCloud,
+  parseStorageRoutePreference,
   presignStorageUpload,
   readActiveNetworkStorageConfig,
   readNetworkStorageConfig,
@@ -145,6 +148,7 @@ import {
   testNetworkStorageConfig,
   validateStorageConfigUrlsAsync,
   verifyStorageConfigPrivateAsync,
+  type StorageRouteOptions,
 } from "./storage-relay.js";
 import { readLastConfigUpdate } from "./node-config-last-update.js";
 // #4495 —— 源目录 / 新建节点 / 复用已有 Session 的能力值。Hub 只认这几个**精确**字符串,
@@ -666,6 +670,41 @@ export function resolvePrincipal(req: Request, options: RequestTokenOptions = {}
 // the shape the authz helper reasons about. Every `typeof` narrowing for
 // these two fields lives here and nowhere else, so the authz rules can be
 // read as rules rather than as string-checks.
+function resolveCallerStorageRoute(
+  req: Request,
+  url: URL,
+  authCtx: { tokenId?: string; networkId?: string | null } | null,
+): StorageRouteOptions {
+  const routePreference = parseStorageRoutePreference(
+    req.headers.get("x-anet-storage-route") ?? url.searchParams.get("storage_route"),
+  );
+  let callerCloud = parseStorageCallerCloud(req.headers.get("x-anet-caller-cloud"));
+  if (!callerCloud && authCtx?.networkId && authCtx.tokenId) {
+    try {
+      const tok = db.get<{ bound_node_id: string | null }>(
+        "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1",
+        authCtx.tokenId,
+      );
+      if (tok?.bound_node_id) {
+        const sess = db.get<{ hostname: string | null }>(
+          "SELECT hostname FROM sessions WHERE node_id = ?1 AND network_id = ?2 ORDER BY last_seen_at DESC LIMIT 1",
+          tok.bound_node_id,
+          authCtx.networkId,
+        );
+        if (isAwsEc2Hostname(sess?.hostname)) {
+          callerCloud = "aws";
+        }
+      }
+    } catch {
+      /* best-effort routing hint; never break upload/download */
+    }
+  }
+  return {
+    ...(callerCloud ? { callerCloud } : {}),
+    routePreference,
+  };
+}
+
 export function normalizeEntry(
   entry: { owner_id?: unknown; network_id?: unknown; scope?: unknown },
 ): { ownerId: string | null; networkId: string | null; dmScoped?: true } {
@@ -1133,7 +1172,7 @@ function corsHeaders(req: Request): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-ANet-Caller-Cloud, X-ANet-Storage-Route",
     "Access-Control-Max-Age": "86400",
   };
 }
@@ -5890,6 +5929,7 @@ return Bun.serve({
       const ext = sanitizeExt(name);
       const dateBucket = getDateBucket();
 
+      const routeOpts = resolveCallerStorageRoute(req, url, authCtx);
       const presigned = await presignStorageUpload(cfg, {
         networkId: uploadNetId,
         dateBucket,
@@ -5898,6 +5938,7 @@ return Bun.serve({
         size,
         sha256: rawSha,
         mime,
+        route: routeOpts,
       });
       if (!presigned.ok) {
         // Degrade cleanly to Hub local /api/upload for transient upstream/storage outages when file fits Hub cap.
@@ -5950,6 +5991,7 @@ return Bun.serve({
         skip_upload: presigned.skip_upload,
         upload: presigned.upload,
         ...(presigned.fallback_upload ? { fallback_upload: presigned.fallback_upload } : {}),
+        ...(presigned.route ? { route: presigned.route } : {}),
         complete_url: "/api/uploads/complete",
       });
       res.headers.set("Cache-Control", "no-store");
@@ -6367,7 +6409,8 @@ return Bun.serve({
         res.headers.set("Cache-Control", "private, no-store");
         return withCors(req, res);
       }
-      const resolved = resolveStorageDownload(entry.network_id, entry.storage);
+      const directAuthCtx = resolveRequestAuth(req, { allowQueryToken: false });
+      const resolved = resolveStorageDownload(entry.network_id, entry.storage, resolveCallerStorageRoute(req, url, directAuthCtx));
       if (!resolved.ok) {
         return withCors(req, Response.json({ ok: false, error: resolved.error, message: resolved.message }, { status: resolved.status }));
       }
@@ -6378,6 +6421,7 @@ return Bun.serve({
         file_id: fileId,
         url: resolved.url,
         ...(resolved.fallback_url ? { fallback_url: resolved.fallback_url } : {}),
+        ...(resolved.route ? { route: resolved.route } : {}),
         proxy_url: `/api/files/${fileId}?proxy=1`,
         headers: resolved.headers,
         expires_in: resolved.expires_in,
@@ -6437,7 +6481,8 @@ return Bun.serve({
       // - Explicit `?proxy=1` (client/node direct download failed!) OR private ModelScope:
       //   transparent authenticated stream proxy through Hub with automatic accelerate -> regional retry.
       if (entry.storage) {
-        const resolved = resolveStorageDownload(entry.network_id, entry.storage);
+        const fileAuthCtx = resolveRequestAuth(req, { allowQueryToken: false });
+        const resolved = resolveStorageDownload(entry.network_id, entry.storage, resolveCallerStorageRoute(req, url, fileAuthCtx));
         if (!resolved.ok) {
           return withCors(req, Response.json({ ok: false, error: resolved.error, message: resolved.message }, { status: resolved.status }));
         }
