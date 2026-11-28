@@ -460,7 +460,7 @@ export function shouldPoolServer(res: { status: number } | null | undefined): bo
 }
 
 /** 只读：池子/复用计数（只观测，不参与任何决策）。 */
-export function mcpServerPoolStats(): { pooled: number; created: number; reused: number; max: number; enabled: boolean } {
+export function mcpServerPoolStats(): { pooled: number; created: number; reused: number; evicted: number; max: number; enabled: boolean } {
   return { pooled: serverPoolSize, created: serverCreated, reused: serverReused, evicted: serverEvicted, max: serverPoolMax(), enabled: serverPoolEnabled() };
 }
 
