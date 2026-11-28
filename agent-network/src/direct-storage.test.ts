@@ -243,4 +243,77 @@ describe("agent-network direct external storage relay (Claude Code channel)", ()
     expect(chunksPulled).toBeLessThan(totalChunks);
     expect(readdirSync(cacheDir)).toEqual([]);
   });
+
+  test("gives regional retry and Hub ?proxy=1 fallback fresh AbortSignals after direct timeout", async () => {
+    const root = mkdtempSync(join(tmpdir(), "anet-timeout-fallback-"));
+    dirs.push(root);
+    const cacheDir = channelAttachmentCacheDir(root, "node-timeout-fallback");
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    const seen: Array<{ url: string; signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
+    const waitForAbort = (signal: AbortSignal | null | undefined) =>
+      new Promise<Response>((_, reject) => {
+        if (!signal) return reject(new Error("expected AbortSignal"));
+        if (signal.aborted) return reject(new DOMException("already aborted", "AbortError"));
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("timed out", "AbortError"));
+        }, { once: true });
+      });
+
+    const res = await downloadChannelAttachments({
+      meta: { attachments: [{ type: "file", file_id: "s3_timeout_fb_001", name: "timeout.png", mime: "image/png", size: png.length }] },
+    }, {
+      hubUrl: "https://hub.example",
+      authToken: "ntok_timeout_test",
+      cacheDir,
+      fetchTimeoutMs: 40,
+      fetch: (async (input, init) => {
+        const u = String(input);
+        const signal = init?.signal;
+        if (u.endsWith("/direct")) {
+          return Response.json({
+            ok: true,
+            mode: "direct",
+            provider: "s3",
+            url: "https://b.s3-accelerate.amazonaws.com/timeout.png",
+            fallback_url: "https://b.s3.us-west-2.amazonaws.com/timeout.png",
+            headers: {},
+          });
+        }
+        seen.push({ url: u, signal, abortedAtEntry: Boolean(signal?.aborted) });
+        if (u.includes("s3-accelerate") || u.includes("s3.us-west-2")) {
+          // Stall until this attempt's own AbortController times out.
+          return await waitForAbort(signal);
+        }
+        if (u.endsWith("?proxy=1")) {
+          if (signal?.aborted) {
+            throw new DOMException("fallback received pre-aborted signal", "AbortError");
+          }
+          return new Response(png, { status: 200, headers: { "content-type": "image/png" } });
+        }
+        return new Response("unexpected", { status: 500 });
+      }) as typeof fetch,
+    });
+
+    expect(res.failures).toEqual([]);
+    expect(res.paths).toHaveLength(1);
+    expect([...readFileSync(res.paths[0]!)]).toEqual([...png]);
+    expect(seen.map(s => s.url)).toEqual([
+      "https://b.s3-accelerate.amazonaws.com/timeout.png",
+      "https://b.s3.us-west-2.amazonaws.com/timeout.png",
+      "https://hub.example/api/files/s3_timeout_fb_001?proxy=1",
+    ]);
+    // Every attempt must start with a fresh, non-aborted AbortSignal.
+    expect(seen.map(s => s.abortedAtEntry)).toEqual([false, false, false]);
+    expect(seen[0]?.signal).toBeDefined();
+    expect(seen[1]?.signal).toBeDefined();
+    expect(seen[2]?.signal).toBeDefined();
+    expect(seen[0]?.signal).not.toBe(seen[1]?.signal);
+    expect(seen[1]?.signal).not.toBe(seen[2]?.signal);
+    expect(seen[0]?.signal).not.toBe(seen[2]?.signal);
+    // The timed-out direct signals are aborted, while the Hub fallback signal remains un-aborted.
+    expect(seen[0]?.signal?.aborted).toBe(true);
+    expect(seen[1]?.signal?.aborted).toBe(true);
+    expect(seen[2]?.signal?.aborted).toBe(false);
+  });
 });
