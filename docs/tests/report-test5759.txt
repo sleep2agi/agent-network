@@ -1,0 +1,12 @@
+#5759 Claude stop regression — main 6d810242
+
+Docker anet-test5338, --init --network none --cpus 1 --cpu-shares 64:
+  bun test src/runtime/claude-stop-regression.test.ts \
+    src/runtime/user-stopped-turn.test.ts src/runtime/control-interrupt.test.ts
+18 passed, 0 failed. Tests execute the existing production attempt loop,
+interrupt branch and stop reply with a fake SDK stream.
+
+Mutation checks (container copy only): disabling the stop throw made the
+first test fail with three SDK attempts; deleting the controller cleanup
+made the second fail with interrupted:true after a finished turn.
+No production code, package version or release changes.
